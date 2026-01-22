@@ -482,6 +482,22 @@ export interface FrameSceneIndexed {
   edges: Record<string, DiagramEdge[]>
 }
 
+export interface ChatSummary {
+  id: string
+  frameId: number
+  sceneId?: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ChatMessageRecord {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  tool?: string | null
+  createdAt: string
+}
+
 /** config.json schema */
 export interface FrameEvent {
   /** Name for this app */

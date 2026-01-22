@@ -14,6 +14,7 @@ from arq import ArqRedis as Redis
 from app.database import get_db
 from app.models.ai_embeddings import AiEmbedding
 from app.models.apps import get_app_configs
+from app.models.chat import Chat, ChatMessage
 from app.models.settings import get_settings_dict
 from app.redis import get_redis
 from app.schemas.ai_scenes import (
@@ -749,6 +750,36 @@ async def chat_scene(
         )
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Prompt is required")
 
+    chat = None
+    if data.frame_id is not None:
+        if data.chat_id:
+            chat = db.query(Chat).filter(Chat.id == data.chat_id).first()
+            if chat and chat.frame_id != data.frame_id:
+                raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Chat does not belong to frame")
+        if not chat:
+            if data.chat_id:
+                chat = Chat(id=data.chat_id, frame_id=data.frame_id, scene_id=data.scene_id)
+            else:
+                chat = Chat(frame_id=data.frame_id, scene_id=data.scene_id)
+            db.add(chat)
+            db.commit()
+            db.refresh(chat)
+        if data.scene_id and chat.scene_id != data.scene_id:
+            chat.scene_id = data.scene_id
+        if chat:
+            chat.updated_at = datetime.utcnow()
+            db.add(chat)
+            db.add(ChatMessage(chat_id=chat.id, role="user", content=prompt))
+            db.commit()
+
+    def _record_assistant_message(reply: str, tool: str) -> None:
+        if not chat:
+            return
+        chat.updated_at = datetime.utcnow()
+        db.add(chat)
+        db.add(ChatMessage(chat_id=chat.id, role="assistant", content=reply, tool=tool))
+        db.commit()
+
     frame_context = None
     frame_scene_summary = None
     if data.frame_id is not None:
@@ -852,7 +883,8 @@ async def chat_scene(
                 ai_parent_id=posthog_root_span_id,
             )
             await _publish_ai_scene_log(redis, "Answer complete.", request_id, status="success", stage="done")
-            return AiSceneChatResponse(reply=answer, tool=tool)
+            _record_assistant_message(answer, tool)
+            return AiSceneChatResponse(reply=answer, tool=tool, chatId=chat.id if chat else None)
 
         if tool in {"answer_frame_question", "reply"}:
             await _publish_ai_scene_log(redis, "Answering frame question.", request_id, stage="answer")
@@ -869,7 +901,8 @@ async def chat_scene(
                 ai_parent_id=posthog_root_span_id,
             )
             await _publish_ai_scene_log(redis, "Answer complete.", request_id, status="success", stage="done")
-            return AiSceneChatResponse(reply=answer, tool=tool)
+            _record_assistant_message(answer, tool)
+            return AiSceneChatResponse(reply=answer, tool=tool, chatId=chat.id if chat else None)
 
         if tool == "build_scene":
             response_payload: dict[str, Any] | None = None
@@ -1000,7 +1033,8 @@ async def chat_scene(
                 stage="done",
             )
             reply = f"Generated a new scene: {title}."
-            return AiSceneChatResponse(reply=reply, tool=tool, title=title, scenes=scenes)
+            _record_assistant_message(reply, tool)
+            return AiSceneChatResponse(reply=reply, tool=tool, title=title, scenes=scenes, chatId=chat.id if chat else None)
 
         if tool == "modify_scene":
             scene_model = openai_settings.get("sceneModel") or SCENE_MODEL
@@ -1082,7 +1116,8 @@ async def chat_scene(
             reply = "Updated the current scene."
             if validation_issues:
                 reply += " Note: the update may need review for validation issues."
-            return AiSceneChatResponse(reply=reply, tool=tool, scenes=scenes)
+            _record_assistant_message(reply, tool)
+            return AiSceneChatResponse(reply=reply, tool=tool, scenes=scenes, chatId=chat.id if chat else None)
 
         await _publish_ai_scene_log(redis, "Answering frame question.", request_id, stage="answer")
         answer = await answer_frame_question(
@@ -1098,7 +1133,8 @@ async def chat_scene(
             ai_parent_id=posthog_root_span_id,
         )
         await _publish_ai_scene_log(redis, "Answer complete.", request_id, status="success", stage="done")
-        return AiSceneChatResponse(reply=answer, tool="reply")
+        _record_assistant_message(answer, "reply")
+        return AiSceneChatResponse(reply=answer, tool="reply", chatId=chat.id if chat else None)
     except HTTPException as exc:
         await _publish_ai_scene_log(
             redis,

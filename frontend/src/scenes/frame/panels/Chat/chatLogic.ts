@@ -1,16 +1,18 @@
-import { actions, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
+import { actions, afterMount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
+import { subscriptions } from 'kea-subscriptions'
 import { v4 as uuidv4 } from 'uuid'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { frameLogic, sanitizeScene } from '../../frameLogic'
 import { panelsLogic } from '../panelsLogic'
 import { diagramLogic } from '../Diagram/diagramLogic'
-import type { DiagramEdge, DiagramNode, FrameScene } from '../../../../types'
+import type { ChatMessageRecord, ChatSummary, DiagramEdge, DiagramNode, FrameScene, PanelWithMetadata } from '../../../../types'
 import { Area, Panel } from '../../../../types'
 import { socketLogic } from '../../../socketLogic'
 
 import type { chatLogicType } from './chatLogicType'
 
 const MAX_HISTORY = 8
+const CHAT_PAGE_SIZE = 20
 
 export interface ChatLogicProps {
   frameId: number
@@ -24,6 +26,22 @@ export type ChatMessage = {
   tool?: string
   isPlaceholder?: boolean
   isStreaming?: boolean
+  createdAt?: string
+}
+
+export type ChatView = 'list' | 'chat'
+
+const requestNewChat = async (frameId: number, sceneId?: string | null): Promise<ChatSummary> => {
+  const response = await apiFetch('/api/ai/chats', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ frameId, sceneId: sceneId ?? null }),
+  })
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}))
+    throw new Error(payload?.detail || 'Failed to create chat')
+  }
+  return response.json()
 }
 
 export const chatLogic = kea<chatLogicType>([
@@ -47,13 +65,35 @@ export const chatLogic = kea<chatLogicType>([
     submitMessage: (content: string) => ({ content }),
     setSubmitting: (isSubmitting: boolean) => ({ isSubmitting }),
     setError: (error: string | null) => ({ error }),
-    appendMessage: (message: ChatMessage) => ({ message }),
-    updateMessage: (id: string, updates: Partial<ChatMessage>) => ({ id, updates }),
-    clearChat: true,
+    appendMessage: (chatId: string, message: ChatMessage) => ({ chatId, message }),
+    updateMessage: (chatId: string, id: string, updates: Partial<ChatMessage>) => ({ chatId, id, updates }),
+    clearChat: (chatId: string) => ({ chatId }),
     setActiveRequestId: (requestId: string | null) => ({ requestId }),
     setActiveLogMessageId: (messageId: string | null) => ({ messageId }),
     setActiveLogStartTime: (timestamp: string | null) => ({ timestamp }),
-    toggleContextItemsExpanded: (key: string) => ({ key }),
+    toggleContextItemsExpanded: (chatId: string, key: string) => ({ chatId, key }),
+    loadChats: () => ({}),
+    loadChatsSuccess: (chats: ChatSummary[], hasMore: boolean, nextOffset: number) => ({
+      chats,
+      hasMore,
+      nextOffset,
+    }),
+    loadChatsFailure: (error: string) => ({ error }),
+    loadMoreChats: () => ({}),
+    loadMoreChatsSuccess: (chats: ChatSummary[], hasMore: boolean, nextOffset: number) => ({
+      chats,
+      hasMore,
+      nextOffset,
+    }),
+    createChat: (sceneId?: string | null) => ({ sceneId }),
+    createChatSuccess: (chat: ChatSummary) => ({ chat }),
+    createChatFailure: (error: string) => ({ error }),
+    selectChat: (chatId: string) => ({ chatId }),
+    setActiveChatId: (chatId: string | null) => ({ chatId }),
+    backToList: () => ({}),
+    loadChatMessages: (chatId: string) => ({ chatId }),
+    loadChatMessagesSuccess: (chatId: string, messages: ChatMessageRecord[]) => ({ chatId, messages }),
+    loadChatMessagesFailure: (chatId: string, error: string) => ({ chatId, error }),
   }),
   reducers({
     input: [
@@ -61,7 +101,6 @@ export const chatLogic = kea<chatLogicType>([
       {
         setInput: (_, { input }) => input,
         submitMessage: () => '',
-        clearChat: () => '',
       },
     ],
     isSubmitting: [
@@ -76,15 +115,137 @@ export const chatLogic = kea<chatLogicType>([
       {
         setError: (_, { error }) => error,
         submitMessage: () => null,
+        loadChatsFailure: (_, { error }) => error,
+        loadChatMessagesFailure: (_, { error }) => error,
+        createChatFailure: (_, { error }) => error,
       },
     ],
-    messages: [
-      [] as ChatMessage[],
+    chats: [
+      [] as ChatSummary[],
       {
-        appendMessage: (state, { message }) => [...state, message],
-        updateMessage: (state, { id, updates }) =>
-          state.map((message) => (message.id === id ? { ...message, ...updates } : message)),
-        clearChat: () => [],
+        loadChatsSuccess: (_, { chats }) => chats,
+        loadMoreChatsSuccess: (state, { chats }) => [...state, ...chats],
+        createChatSuccess: (state, { chat }) => {
+          const next = [chat, ...state.filter((item: ChatSummary) => item.id !== chat.id)]
+          return next
+        },
+      },
+    ],
+    hasMoreChats: [
+      true,
+      {
+        loadChatsSuccess: (_, { hasMore }) => hasMore,
+        loadMoreChatsSuccess: (_, { hasMore }) => hasMore,
+      },
+    ],
+    chatsOffset: [
+      0,
+      {
+        loadChatsSuccess: (_, { nextOffset }) => nextOffset,
+        loadMoreChatsSuccess: (_, { nextOffset }) => nextOffset,
+      },
+    ],
+    isLoadingChats: [
+      false,
+      {
+        loadChats: () => true,
+        loadChatsSuccess: () => false,
+        loadChatsFailure: () => false,
+      },
+    ],
+    isLoadingMoreChats: [
+      false,
+      {
+        loadMoreChats: () => true,
+        loadMoreChatsSuccess: () => false,
+        loadChatsFailure: () => false,
+      },
+    ],
+    isCreatingChat: [
+      false,
+      {
+        createChat: () => true,
+        createChatSuccess: () => false,
+        createChatFailure: () => false,
+      },
+    ],
+    activeChatId: [
+      null as string | null,
+      {
+        selectChat: (_, { chatId }) => chatId,
+        setActiveChatId: (_, { chatId }) => chatId,
+      },
+    ],
+    chatView: [
+      'list' as ChatView,
+      {
+        selectChat: () => 'chat',
+        backToList: () => 'list',
+      },
+    ],
+    messagesByChatId: [
+      {} as Record<string, ChatMessage[]>,
+      {
+        appendMessage: (state, { chatId, message }) => {
+          if (!chatId) {
+            return state
+          }
+          return {
+            ...state,
+            [chatId]: [...(state[chatId] ?? []), message],
+          }
+        },
+        updateMessage: (state, { chatId, id, updates }) => {
+          if (!chatId) {
+            return state
+          }
+          return {
+            ...state,
+            [chatId]: (state[chatId] ?? []).map((message: ChatMessage) =>
+              message.id === id ? { ...message, ...updates } : message
+            ),
+          }
+        },
+        clearChat: (state, { chatId }) => ({
+          ...state,
+          [chatId]: [],
+        }),
+        loadChatMessagesSuccess: (state, { chatId, messages }) => ({
+          ...state,
+          [chatId]: messages.map((message) => ({
+            id: message.id,
+            role: message.role,
+            content: message.content,
+            tool: message.tool ?? undefined,
+            createdAt: message.createdAt,
+          })),
+        }),
+      },
+    ],
+    chatMessagesLoading: [
+      {} as Record<string, boolean>,
+      {
+        loadChatMessages: (state, { chatId }) => ({
+          ...state,
+          [chatId]: true,
+        }),
+        loadChatMessagesSuccess: (state, { chatId }) => ({
+          ...state,
+          [chatId]: false,
+        }),
+        loadChatMessagesFailure: (state, { chatId }) => ({
+          ...state,
+          [chatId]: false,
+        }),
+      },
+    ],
+    chatMessagesLoaded: [
+      {} as Record<string, boolean>,
+      {
+        loadChatMessagesSuccess: (state, { chatId }) => ({
+          ...state,
+          [chatId]: true,
+        }),
       },
     ],
     activeRequestId: [
@@ -108,21 +269,27 @@ export const chatLogic = kea<chatLogicType>([
         clearChat: () => null,
       },
     ],
-    contextItemsExpanded: [
-      {} as Record<string, boolean>,
+    contextItemsExpandedByChat: [
+      {} as Record<string, Record<string, boolean>>,
       {
-        toggleContextItemsExpanded: (state, { key }) => ({
+        toggleContextItemsExpanded: (state, { chatId, key }) => ({
           ...state,
-          [key]: !state[key],
+          [chatId]: {
+            ...(state[chatId] ?? {}),
+            [key]: !(state[chatId] ?? {})[key],
+          },
         }),
-        clearChat: () => ({}),
+        clearChat: (state, { chatId }) => ({
+          ...state,
+          [chatId]: {},
+        }),
       },
     ],
   }),
   selectors({
     selectedScene: [
-      (s) => [s.scenes, s.selectedSceneId, s.panels],
-      (scenes, selectedSceneId, panels) => {
+      (s: any) => [s.scenes, s.selectedSceneId, s.panels],
+      (scenes: FrameScene[], selectedSceneId: string | null, panels: Record<Area, PanelWithMetadata[]>) => {
         const activeTopLeftPanel = panels?.[Area.TopLeft]?.find((panel) => panel.active)?.panel
         if (activeTopLeftPanel === Panel.Scenes) {
           return null
@@ -130,7 +297,30 @@ export const chatLogic = kea<chatLogicType>([
         return scenes?.find((scene: FrameScene) => scene.id === selectedSceneId) ?? null
       },
     ],
-    chatSceneName: [(s) => [s.selectedScene], (selectedScene) => selectedScene?.name ?? null],
+    activeChat: [
+      (s: any) => [s.chats, s.activeChatId],
+      (chats: ChatSummary[], activeChatId: string | null) => chats.find((chat) => chat.id === activeChatId) ?? null,
+    ],
+    chatSceneId: [
+      (s: any) => [s.activeChat, s.selectedSceneId],
+      (activeChat: ChatSummary | null, selectedSceneId: string | null): string | null =>
+        activeChat?.sceneId ?? selectedSceneId ?? null,
+    ],
+    chatSceneName: [
+      (s: any) => [s.chatSceneId, s.scenes],
+      (chatSceneId: string | null, scenes: FrameScene[]): string | null =>
+        chatSceneId ? scenes?.find((scene: FrameScene) => scene.id === chatSceneId)?.name ?? null : null,
+    ],
+    messages: [
+      (s: any) => [s.messagesByChatId, s.activeChatId],
+      (messagesByChatId: Record<string, ChatMessage[]>, activeChatId: string | null) =>
+        activeChatId ? messagesByChatId[activeChatId] ?? [] : [],
+    ],
+    contextItemsExpanded: [
+      (s: any) => [s.contextItemsExpandedByChat, s.activeChatId],
+      (contextItemsExpandedByChat: Record<string, Record<string, boolean>>, activeChatId: string | null) =>
+        activeChatId ? contextItemsExpandedByChat[activeChatId] ?? {} : {},
+    ],
     historyForRequest: [
       (s) => [s.messages],
       (messages: ChatMessage[]) =>
@@ -141,6 +331,73 @@ export const chatLogic = kea<chatLogicType>([
     ],
   }),
   listeners(({ actions, values, props }) => ({
+    loadChats: async () => {
+      try {
+        const response = await apiFetch(
+          `/api/ai/chats?frameId=${props.frameId}&limit=${CHAT_PAGE_SIZE}&offset=0`
+        )
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({}))
+          throw new Error(payload?.detail || 'Failed to load chats')
+        }
+        const payload = await response.json()
+        const chats = Array.isArray(payload?.chats) ? payload.chats : []
+        const hasMore = Boolean(payload?.hasMore)
+        const nextOffset = typeof payload?.nextOffset === 'number' ? payload.nextOffset : chats.length
+        actions.loadChatsSuccess(chats, hasMore, nextOffset)
+      } catch (error) {
+        actions.loadChatsFailure(error instanceof Error ? error.message : 'Failed to load chats')
+      }
+    },
+    loadMoreChats: async () => {
+      if (!values.hasMoreChats || values.isLoadingMoreChats) {
+        return
+      }
+      try {
+        const response = await apiFetch(
+          `/api/ai/chats?frameId=${props.frameId}&limit=${CHAT_PAGE_SIZE}&offset=${values.chatsOffset}`
+        )
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({}))
+          throw new Error(payload?.detail || 'Failed to load more chats')
+        }
+        const payload = await response.json()
+        const chats = Array.isArray(payload?.chats) ? payload.chats : []
+        const hasMore = Boolean(payload?.hasMore)
+        const nextOffset = typeof payload?.nextOffset === 'number' ? payload.nextOffset : values.chatsOffset + chats.length
+        actions.loadMoreChatsSuccess(chats, hasMore, nextOffset)
+      } catch (error) {
+        actions.loadChatsFailure(error instanceof Error ? error.message : 'Failed to load more chats')
+      }
+    },
+    createChat: async ({ sceneId }) => {
+      try {
+        const chat = await requestNewChat(props.frameId, sceneId ?? values.selectedSceneId)
+        actions.createChatSuccess(chat)
+        actions.selectChat(chat.id)
+      } catch (error) {
+        actions.createChatFailure(error instanceof Error ? error.message : 'Failed to create chat')
+      }
+    },
+    selectChat: ({ chatId }) => {
+      if (!values.chatMessagesLoaded[chatId] && !values.chatMessagesLoading[chatId]) {
+        actions.loadChatMessages(chatId)
+      }
+    },
+    loadChatMessages: async ({ chatId }) => {
+      try {
+        const response = await apiFetch(`/api/ai/chats/${chatId}`)
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({}))
+          throw new Error(payload?.detail || 'Failed to load chat history')
+        }
+        const payload = await response.json()
+        const messages = Array.isArray(payload?.messages) ? payload.messages : []
+        actions.loadChatMessagesSuccess(chatId, messages)
+      } catch (error) {
+        actions.loadChatMessagesFailure(chatId, error instanceof Error ? error.message : 'Failed to load chat history')
+      }
+    },
     submitMessage: async ({ content }) => {
       const prompt = content.trim()
       if (!prompt) {
@@ -148,13 +405,30 @@ export const chatLogic = kea<chatLogicType>([
         actions.setError('Add a message to send.')
         return
       }
+      let chatId = values.activeChatId
+      if (!chatId) {
+        try {
+          const chat = await requestNewChat(props.frameId, values.selectedSceneId)
+          actions.createChatSuccess(chat)
+          actions.selectChat(chat.id)
+          chatId = chat.id
+        } catch (error) {
+          actions.setSubmitting(false)
+          actions.setError(error instanceof Error ? error.message : 'Failed to create chat')
+          return
+        }
+      }
+      if (!chatId) {
+        actions.setSubmitting(false)
+        return
+      }
       const requestId = uuidv4()
       const logMessageId = uuidv4()
       actions.setActiveRequestId(requestId)
       actions.setActiveLogMessageId(logMessageId)
       actions.setActiveLogStartTime(null)
-      actions.appendMessage({ id: uuidv4(), role: 'user', content: prompt })
-      actions.appendMessage({
+      actions.appendMessage(chatId, { id: uuidv4(), role: 'user', content: prompt })
+      actions.appendMessage(chatId, {
         id: logMessageId,
         role: 'assistant',
         content: '',
@@ -163,7 +437,7 @@ export const chatLogic = kea<chatLogicType>([
         isStreaming: true,
       })
       const assistantMessageId = uuidv4()
-      actions.appendMessage({
+      actions.appendMessage(chatId, {
         id: assistantMessageId,
         role: 'assistant',
         content: '',
@@ -197,6 +471,7 @@ export const chatLogic = kea<chatLogicType>([
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             prompt,
+            chatId,
             frameId: props.frameId,
             sceneId: selectedScene?.id ?? null,
             scene: selectedScene ?? null,
@@ -218,7 +493,7 @@ export const chatLogic = kea<chatLogicType>([
         let current = ''
         for (const chunk of chunks) {
           current += chunk
-          actions.updateMessage(assistantMessageId, {
+          actions.updateMessage(chatId, assistantMessageId, {
             content: current,
             tool,
             isPlaceholder: false,
@@ -226,7 +501,12 @@ export const chatLogic = kea<chatLogicType>([
           })
           await new Promise((resolve) => setTimeout(resolve, 12))
         }
-        actions.updateMessage(assistantMessageId, { content: current, tool, isStreaming: false, isPlaceholder: false })
+        actions.updateMessage(chatId, assistantMessageId, {
+          content: current,
+          tool,
+          isStreaming: false,
+          isPlaceholder: false,
+        })
 
         if (tool === 'build_scene') {
           const scenes = Array.isArray(payload?.scenes) ? payload.scenes : []
@@ -258,7 +538,7 @@ export const chatLogic = kea<chatLogicType>([
       } catch (error) {
         console.error(error)
         actions.setError(error instanceof Error ? error.message : 'Failed to send chat message')
-        actions.updateMessage(assistantMessageId, {
+        actions.updateMessage(chatId, assistantMessageId, {
           content: error instanceof Error ? error.message : 'Failed to send chat message',
           tool: 'error',
           isPlaceholder: false,
@@ -272,7 +552,8 @@ export const chatLogic = kea<chatLogicType>([
         return
       }
       const logMessageId = values.activeLogMessageId
-      if (!logMessageId) {
+      const chatId = values.activeChatId
+      if (!logMessageId || !chatId) {
         return
       }
       const existing = values.messages.find((message) => message.id === logMessageId)?.content || ''
@@ -289,12 +570,35 @@ export const chatLogic = kea<chatLogicType>([
       const line = `${elapsedLabel}${stageLabel}${statusLabel}${log.message}`
       const nextContent = existing ? `${existing}\n${line}` : line
       const isTerminalStatus = log.status === 'success' || log.status === 'error'
-      actions.updateMessage(logMessageId, {
+      actions.updateMessage(chatId, logMessageId, {
         content: nextContent,
         tool: 'log',
         isPlaceholder: false,
         isStreaming: !isTerminalStatus,
       })
+    },
+  })),
+  afterMount(({ actions }) => {
+    actions.loadChats()
+  }),
+  subscriptions(({ actions, values }) => ({
+    selectedSceneId: (sceneId: string | null) => {
+      if (!sceneId) {
+        return
+      }
+      const matchingChat = values.chats.find((chat) => chat.sceneId === sceneId)
+      if (matchingChat && matchingChat.id !== values.activeChatId) {
+        actions.selectChat(matchingChat.id)
+      }
+    },
+    chats: (chats: ChatSummary[]) => {
+      if (!values.selectedSceneId) {
+        return
+      }
+      const matchingChat = chats.find((chat) => chat.sceneId === values.selectedSceneId)
+      if (matchingChat && matchingChat.id !== values.activeChatId) {
+        actions.selectChat(matchingChat.id)
+      }
     },
   })),
 ])

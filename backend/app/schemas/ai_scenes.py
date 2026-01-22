@@ -36,6 +36,7 @@ class AiSceneChatRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     prompt: str
+    chat_id: Optional[str] = Field(default=None, alias="chatId")
     frame_id: Optional[int] = Field(default=None, alias="frameId")
     scene_id: Optional[str] = Field(default=None, alias="sceneId")
     scene: Optional[dict[str, Any]] = None
@@ -48,5 +49,6 @@ class AiSceneChatRequest(BaseModel):
 class AiSceneChatResponse(BaseModel):
     reply: str
     tool: str
+    chat_id: Optional[str] = Field(default=None, alias="chatId")
     title: Optional[str] = None
     scenes: Optional[list[dict[str, Any]]] = None
