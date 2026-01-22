@@ -42,6 +42,7 @@ export function Chat() {
   const [atBottom, setAtBottom] = useState(true)
   const virtuosoRef = useRef<VirtuosoHandle>(null)
   const shouldStickToBottomRef = useRef(true)
+  const lastMessage = messages[messages.length - 1]
   const pendingAssistantPlaceholder =
     messages.length > 0 &&
     messages[messages.length - 1].isPlaceholder &&
@@ -62,7 +63,7 @@ export function Chat() {
         })
       })
     })
-  }, [messages.length])
+  }, [messages.length, lastMessage?.content, lastMessage?.isStreaming, lastMessage?.tool, lastMessage?.id])
 
   const handleSubmit = () => {
     submitMessage(input)
@@ -307,7 +308,12 @@ export function Chat() {
             />
             <div className="flex items-center justify-between text-xs text-slate-500">
               <span>Press Ctrl/Cmd + Enter to send</span>
-              <Button color={sendButtonColor} size="tiny" onClick={handleSubmit} disabled={isSubmitting || !input.trim()}>
+              <Button
+                color={sendButtonColor}
+                size="tiny"
+                onClick={handleSubmit}
+                disabled={isSubmitting || !input.trim()}
+              >
                 {isSubmitting ? 'Sending…' : 'Send'}
               </Button>
             </div>
