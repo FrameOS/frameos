@@ -231,7 +231,7 @@ export function Chat() {
         ) : null}
       </div>
       {error ? <div className="text-xs text-red-400 pt-2">{error}</div> : null}
-      <div className="rounded-2xl border border-slate-800/80 bg-slate-950/70 p-3 space-y-2 shadow-inner">
+      <div className="rounded-2xl border border-slate-800/80 bg-slate-950/70 p-2 space-y-2 shadow-inner">
         <TextArea
           value={input}
           placeholder="Describe a new scene, request a change, or ask a question..."
