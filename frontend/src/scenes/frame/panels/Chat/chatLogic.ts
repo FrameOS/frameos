@@ -67,7 +67,7 @@ export const chatLogic = kea<chatLogicType>([
       frameLogic(props),
       ['frameForm', 'scenes'],
       panelsLogic(props),
-      ['selectedScenePanelId', 'panels'],
+      ['selectedScenePanelId', 'panels', 'scenesOpen'],
       diagramLogic({ frameId: props.frameId, sceneId: props.sceneId ?? '' }),
       ['selectedNodes', 'selectedEdges'],
     ],
@@ -400,13 +400,6 @@ export const chatLogic = kea<chatLogicType>([
         return `${parts.join(' and ')} added to context`
       },
     ],
-    isScenesPanelActive: [
-      (s: any) => [s.panels],
-      (panels: Record<Area, PanelWithMetadata[]>): boolean => {
-        const activeTopLeftPanel = panels?.[Area.TopLeft]?.find((panel) => panel.active)?.panel
-        return activeTopLeftPanel === Panel.Scenes
-      },
-    ],
   }),
   listeners(({ actions, values, props }) => ({
     loadChats: async () => {
@@ -691,13 +684,16 @@ export const chatLogic = kea<chatLogicType>([
   })),
   afterMount(({ actions, values }) => {
     actions.loadChats()
+    if (values.scenesOpen) {
+      actions.ensureFrameChat()
+    }
   }),
   subscriptions(({ actions, values }) => ({
     selectedScenePanelId: (sceneId: string | null) => {
       if (!sceneId) {
         return
       }
-      if (values.isScenesPanelActive) {
+      if (values.scenesOpen) {
         return
       }
       actions.ensureChatForScene(sceneId)
@@ -706,7 +702,7 @@ export const chatLogic = kea<chatLogicType>([
       if (!values.selectedScenePanelId) {
         return
       }
-      if (values.isScenesPanelActive) {
+      if (values.scenesOpen) {
         return
       }
       const matchingChat = chats.find((chat) => chat.sceneId === values.selectedScenePanelId)
@@ -714,8 +710,8 @@ export const chatLogic = kea<chatLogicType>([
         actions.selectChat(matchingChat.id)
       }
     },
-    isScenesPanelActive: (isScenesPanelActive: boolean) => {
-      if (isScenesPanelActive) {
+    scenesOpen: (scenesOpen: boolean) => {
+      if (scenesOpen) {
         actions.ensureFrameChat()
       }
     },

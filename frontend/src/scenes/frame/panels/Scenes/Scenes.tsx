@@ -286,37 +286,6 @@ export function Scenes() {
           ))}
         </div>
       </div>
-      <div className="space-y-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="uppercase text-gray-500 text-xs">services:</span>
-          {orderedServiceKeys.map((settingKey) => {
-            const details = settingsDetails[settingKey]
-            const missing = missingServiceSettings.has(settingKey)
-            const isFreeLimitedUsage = Boolean(details?.freeLimitedUsage)
-            return (
-              <button
-                key={settingKey}
-                type="button"
-                className="focus:outline-none"
-                onClick={() => setActiveSettingsKey(settingKey)}
-              >
-                <Tag color={missing ? 'orange' : 'blue'} className="cursor-pointer flex gap-1 items-center">
-                  {missing ? (
-                    isFreeLimitedUsage ? (
-                      <span className="text-yellow-300 font-semibold" title="Free limited usage">
-                        *
-                      </span>
-                    ) : (
-                      <ExclamationTriangleIcon className="h-3 w-3 text-yellow-300" />
-                    )
-                  ) : null}
-                  {details?.title ?? settingKey}
-                </Tag>
-              </button>
-            )
-          })}
-        </div>
-      </div>
       {!hasEmbeddings ? (
         <div className="text-xs text-gray-400">
           No embeddings generated.{' '}
