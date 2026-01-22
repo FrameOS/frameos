@@ -3,6 +3,7 @@ import { chatLogic } from './chatLogic'
 import { frameLogic } from '../../frameLogic'
 import { panelsLogic } from '../panelsLogic'
 import { scenesLogic } from '../Scenes/scenesLogic'
+import { settingsLogic } from '../../../settings/settingsLogic'
 import { Button } from '../../../../components/Button'
 import { TextArea } from '../../../../components/TextArea'
 import { Spinner } from '../../../../components/Spinner'
@@ -16,6 +17,7 @@ import { ArrowLeftIcon, ChevronLeftIcon } from '@heroicons/react/24/solid'
 export function Chat() {
   const { frameId, scenes } = useValues(frameLogic)
   const { selectedSceneId, panels } = useValues(panelsLogic({ frameId }))
+  const { savedSettings } = useValues(settingsLogic)
   const {
     messages,
     input,
@@ -58,6 +60,8 @@ export function Chat() {
     !messages[messages.length - 1].tool
   const pendingThinkingIndex = pendingAssistantPlaceholder ? messages.length - 2 : null
   const isChatView = chatView === 'chat' && activeChatId
+  const hasBackendApiKey = Boolean(savedSettings?.openAI?.backendApiKey?.trim())
+  const missingBackendApiKey = !hasBackendApiKey
 
   const focusSceneById = (sceneId: string) => {
     const scenesPanel = panels?.[Area.TopLeft]?.find((panel) => panel.panel === Panel.Scenes)
@@ -287,6 +291,12 @@ export function Chat() {
 
   return (
     <div className="flex flex-col h-full gap-3">
+      {missingBackendApiKey ? (
+        <div className="rounded-2xl border border-amber-500/40 bg-amber-950/40 px-4 py-3 text-xs text-amber-200">
+          <div className="font-semibold text-amber-200">OpenAI backend API key not configured.</div>
+          <div className="mt-1 text-amber-200/80">Add the backend API key in Settings to enable chat responses.</div>
+        </div>
+      ) : null}
       <div className="flex items-center justify-between">
         <div className="text-sm text-slate-300 flex items-center gap-2">
           {isChatView ? (
@@ -427,7 +437,7 @@ export function Chat() {
                 color={sendButtonColor}
                 size="tiny"
                 onClick={handleSubmit}
-                disabled={isSubmitting || !input.trim()}
+                disabled={isSubmitting || !input.trim() || missingBackendApiKey}
               >
                 {isSubmitting ? 'Sending…' : 'Send'}
               </Button>
