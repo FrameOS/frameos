@@ -59,6 +59,14 @@ export function Chat() {
   const pendingThinkingIndex = pendingAssistantPlaceholder ? messages.length - 2 : null
   const isChatView = chatView === 'chat' && activeChatId
 
+  const focusSceneById = (sceneId: string) => {
+    const scenesPanel = panels?.[Area.TopLeft]?.find((panel) => panel.panel === Panel.Scenes)
+    if (scenesPanel) {
+      setPanel(Area.TopLeft, scenesPanel)
+    }
+    focusScene(sceneId)
+  }
+
   useEffect(() => {
     if (!shouldStickToBottomRef.current) {
       return
@@ -127,11 +135,7 @@ export function Chat() {
     if (!chatSceneId) {
       return
     }
-    const scenesPanel = panels?.[Area.TopLeft]?.find((panel) => panel.panel === Panel.Scenes)
-    if (scenesPanel) {
-      setPanel(Area.TopLeft, scenesPanel)
-    }
-    focusScene(chatSceneId)
+    focusSceneById(chatSceneId)
   }
 
   const formatTimestamp = (timestamp?: string | null) => {
@@ -151,6 +155,37 @@ export function Chat() {
     }
     const scene = scenes?.find((item) => item.id === sceneId)
     return scene?.name ?? 'Frame chat'
+  }
+
+  const normalizeGeneratedSceneName = (sceneName: string) => sceneName.replace(/^["']|["']$/g, '').trim()
+
+  const extractGeneratedSceneName = (message: string) => {
+    const match = message.match(/Scene generated:\s*(.+)$/)
+    if (!match) {
+      return null
+    }
+    return normalizeGeneratedSceneName(match[1])
+  }
+
+  const renderGeneratedSceneMessage = (sceneName: string) => {
+    const targetScene = scenes?.find((scene) => scene.name === sceneName)
+    const label = sceneName || 'Untitled scene'
+    return (
+      <>
+        <span>Scene generated: </span>
+        {targetScene ? (
+          <button
+            type="button"
+            onClick={() => focusSceneById(targetScene.id)}
+            className="text-sky-300 hover:text-sky-200 underline underline-offset-2 decoration-sky-300/70"
+          >
+            {label}
+          </button>
+        ) : (
+          <span>{label}</span>
+        )}
+      </>
+    )
   }
 
   const renderLogLine = (line: string) => {
@@ -199,22 +234,31 @@ export function Chat() {
     if (structuredMatch) {
       const [, time, stage, message] = structuredMatch
       const statusMatch = message.match(/^(SUCCESS|ERROR):\s+(.*)$/)
+      const statusMessage = statusMatch ? statusMatch[2] : message
+      const generatedSceneName = extractGeneratedSceneName(statusMessage)
       return (
         <div className="flex flex-wrap gap-x-2 gap-y-1">
           <span className="text-slate-500">{time}</span>
           <span className="text-sky-300">{stage}</span>
           {statusMatch ? (
-            <>
-              <span className={clsx('font-semibold', statusMatch[1] === 'ERROR' ? 'text-red-400' : 'text-emerald-300')}>
-                {statusMatch[1]}:
-              </span>
-              <span className="text-slate-100">{statusMatch[2]}</span>
-            </>
+            <span className={clsx('font-semibold', statusMatch[1] === 'ERROR' ? 'text-red-400' : 'text-emerald-300')}>
+              {statusMatch[1]}:
+            </span>
+          ) : null}
+          {generatedSceneName ? (
+            <span className="text-slate-100">{renderGeneratedSceneMessage(generatedSceneName)}</span>
+          ) : statusMatch ? (
+            <span className="text-slate-100">{statusMatch[2]}</span>
           ) : (
             <span className="text-slate-100">{message}</span>
           )}
         </div>
       )
+    }
+
+    const generatedSceneName = extractGeneratedSceneName(line)
+    if (generatedSceneName) {
+      return <span className="text-slate-100">{renderGeneratedSceneMessage(generatedSceneName)}</span>
     }
 
     return <span className="text-slate-100">{line}</span>

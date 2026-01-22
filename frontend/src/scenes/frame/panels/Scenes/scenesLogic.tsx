@@ -529,6 +529,7 @@ export const scenesLogic = kea<scenesLogicType>([
         if (!scenes.length) {
           throw new Error('No scenes returned from AI')
         }
+        const existingSceneIds = new Set(values.scenes.map((scene) => scene.id))
         const sanitizedScenes = scenes.map((scene: Partial<FrameScene>) => {
           const sanitizedScene = sanitizeScene(scene, values.frameForm)
           return {
@@ -541,6 +542,12 @@ export const scenesLogic = kea<scenesLogicType>([
         })
         actions.applyTemplate({ scenes: sanitizedScenes, name: title || 'AI Generated Scene' })
         actions.generateAiSceneSuccess()
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        const updatedScenes = values.frameForm?.scenes ?? values.scenes
+        const newlyAddedScene = updatedScenes.find((scene) => !existingSceneIds.has(scene.id))
+        if (newlyAddedScene) {
+          actions.focusScene(newlyAddedScene.id)
+        }
         actions.setAiSceneLogMessage({
           requestId,
           message: 'Scene generated: ' + (title || 'AI Generated Scene'),

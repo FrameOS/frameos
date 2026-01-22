@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from 'uuid'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { frameLogic, sanitizeScene } from '../../frameLogic'
 import { panelsLogic } from '../panelsLogic'
+import { scenesLogic } from '../Scenes/scenesLogic'
 import { diagramLogic } from '../Diagram/diagramLogic'
 import type {
   ChatMessageRecord,
@@ -540,6 +541,7 @@ export const chatLogic = kea<chatLogicType>([
           if (!scenes.length) {
             throw new Error('No scenes returned from AI')
           }
+          const existingSceneIds = new Set(values.scenes.map((scene) => scene.id))
           const sanitizedScenes = scenes.map((scene: Partial<FrameScene>) => {
             const sanitizedScene = sanitizeScene(scene, values.frameForm)
             return {
@@ -551,6 +553,12 @@ export const chatLogic = kea<chatLogicType>([
             }
           })
           actions.applyTemplate({ scenes: sanitizedScenes, name: payload?.title || 'AI Generated Scene' })
+          await new Promise((resolve) => setTimeout(resolve, 0))
+          const updatedScenes = values.frameForm?.scenes ?? values.scenes
+          const newlyAddedScene = updatedScenes.find((scene) => !existingSceneIds.has(scene.id))
+          if (newlyAddedScene) {
+            scenesLogic({ frameId: props.frameId }).actions.focusScene(newlyAddedScene.id)
+          }
         }
 
         if (tool === 'modify_scene') {
