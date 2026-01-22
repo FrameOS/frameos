@@ -11,6 +11,7 @@ import type { KeyboardEvent } from 'react'
 import clsx from 'clsx'
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso'
 import { Area, Panel } from '../../../../types'
+import { ArrowLeftIcon, ChevronLeftIcon } from '@heroicons/react/24/solid'
 
 export function Chat() {
   const { frameId, scenes } = useValues(frameLogic)
@@ -246,10 +247,9 @@ export function Chat() {
         <div className="text-sm text-slate-300 flex items-center gap-2">
           {isChatView ? (
             <Button color="secondary" size="small" onClick={() => backToList()}>
-              Back
+              <ChevronLeftIcon className="h-4 w-4" />
             </Button>
           ) : null}
-          <span className="inline-flex h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.9)]" />
           {isChatView ? (
             chatSceneName ? (
               <span>
