@@ -42,6 +42,7 @@ export function Chat() {
   } = useActions(chatLogic({ frameId, sceneId: selectedSceneId }))
   const [atBottom, setAtBottom] = useState(true)
   const virtuosoRef = useRef<VirtuosoHandle>(null)
+  const scrollerElementRef = useRef<HTMLElement | null>(null)
   const shouldStickToBottomRef = useRef(true)
   const lastMessage = messages[messages.length - 1]
   const pendingAssistantPlaceholder =
@@ -50,6 +51,7 @@ export function Chat() {
     !messages[messages.length - 1].content &&
     !messages[messages.length - 1].tool
   const pendingThinkingIndex = pendingAssistantPlaceholder ? messages.length - 2 : null
+  const isChatView = chatView === 'chat' && activeChatId
 
   useEffect(() => {
     if (!shouldStickToBottomRef.current) {
@@ -66,6 +68,39 @@ export function Chat() {
     })
   }, [messages.length, lastMessage?.content, lastMessage?.isStreaming, lastMessage?.tool, lastMessage?.id])
 
+  useEffect(() => {
+    const scroller = scrollerElementRef.current
+    if (!scroller) {
+      return
+    }
+
+    const disableFollowIfNeeded = () => {
+      if (!shouldStickToBottomRef.current) {
+        return
+      }
+      shouldStickToBottomRef.current = false
+      setAtBottom(false)
+    }
+
+    const handleWheel = (event: WheelEvent) => {
+      if (event.deltaY < 0) {
+        disableFollowIfNeeded()
+      }
+    }
+
+    const handleTouchMove = () => {
+      disableFollowIfNeeded()
+    }
+
+    scroller.addEventListener('wheel', handleWheel, { passive: true })
+    scroller.addEventListener('touchmove', handleTouchMove, { passive: true })
+
+    return () => {
+      scroller.removeEventListener('wheel', handleWheel)
+      scroller.removeEventListener('touchmove', handleTouchMove)
+    }
+  }, [isChatView])
+
   const handleSubmit = () => {
     submitMessage(input)
   }
@@ -80,7 +115,6 @@ export function Chat() {
   }
 
   const sendButtonColor = input.trim() ? 'primary' : 'secondary'
-  const isChatView = chatView === 'chat' && activeChatId
   const activeChatLoading = activeChatId ? chatMessagesLoading[activeChatId] : false
 
   const formatTimestamp = (timestamp?: string | null) => {
@@ -240,6 +274,9 @@ export function Chat() {
               <Virtuoso
                 className="h-full overflow-y-auto"
                 ref={virtuosoRef}
+                scrollerRef={(node) => {
+                  scrollerElementRef.current = node
+                }}
                 data={messages}
                 followOutput={(isBottom) => (isBottom ? 'auto' : false)}
                 atBottomStateChange={(bottom) => {
