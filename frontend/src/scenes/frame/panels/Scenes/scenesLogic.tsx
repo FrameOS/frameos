@@ -107,6 +107,8 @@ export const scenesLogic = kea<scenesLogicType>([
     installMissingActiveScene: true,
     installMissingActiveSceneSuccess: true,
     installMissingActiveSceneFailure: true,
+    focusScene: (sceneId: string) => ({ sceneId }),
+    clearFocusedScene: true,
   }),
   forms(({ actions, values, props }) => ({
     newScene: {
@@ -215,6 +217,13 @@ export const scenesLogic = kea<scenesLogicType>([
         previewScene: (_, { sceneId }) => sceneId,
         previewSceneSuccess: () => null,
         previewSceneFailure: () => null,
+      },
+    ],
+    focusedSceneId: [
+      null as string | null,
+      {
+        focusScene: (_, { sceneId }) => sceneId,
+        clearFocusedScene: () => null,
       },
     ],
     aiPrompt: [
@@ -482,7 +491,19 @@ export const scenesLogic = kea<scenesLogicType>([
           : [],
     ],
   }),
-  listeners(({ actions, props, values }) => ({
+  listeners(({ actions, cache, props }) => ({
+    focusScene: ({ sceneId }) => {
+      if (!sceneId) {
+        return
+      }
+      if (cache.focusedSceneTimeout) {
+        clearTimeout(cache.focusedSceneTimeout)
+      }
+      cache.focusedSceneTimeout = window.setTimeout(() => {
+        actions.clearFocusedScene()
+        cache.focusedSceneTimeout = null
+      }, 2500)
+    },
     generateAiScene: async () => {
       const prompt = values.aiPrompt.trim()
       if (!prompt) {

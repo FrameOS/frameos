@@ -2,6 +2,7 @@ import { useActions, useValues } from 'kea'
 import { chatLogic } from './chatLogic'
 import { frameLogic } from '../../frameLogic'
 import { panelsLogic } from '../panelsLogic'
+import { scenesLogic } from '../Scenes/scenesLogic'
 import { Button } from '../../../../components/Button'
 import { TextArea } from '../../../../components/TextArea'
 import { Spinner } from '../../../../components/Spinner'
@@ -9,16 +10,18 @@ import { useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
 import clsx from 'clsx'
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso'
+import { Area, Panel } from '../../../../types'
 
 export function Chat() {
   const { frameId, scenes } = useValues(frameLogic)
-  const { selectedSceneId } = useValues(panelsLogic({ frameId }))
+  const { selectedSceneId, panels } = useValues(panelsLogic({ frameId }))
   const {
     messages,
     input,
     isSubmitting,
     error,
     chatSceneName,
+    chatSceneId,
     contextItemsExpanded,
     chatView,
     chats,
@@ -40,6 +43,8 @@ export function Chat() {
     createChat,
     loadMoreChats,
   } = useActions(chatLogic({ frameId, sceneId: selectedSceneId }))
+  const { setPanel } = useActions(panelsLogic({ frameId }))
+  const { focusScene } = useActions(scenesLogic({ frameId }))
   const [atBottom, setAtBottom] = useState(true)
   const virtuosoRef = useRef<VirtuosoHandle>(null)
   const scrollerElementRef = useRef<HTMLElement | null>(null)
@@ -116,6 +121,17 @@ export function Chat() {
 
   const sendButtonColor = input.trim() ? 'primary' : 'secondary'
   const activeChatLoading = activeChatId ? chatMessagesLoading[activeChatId] : false
+
+  const handleOpenScene = () => {
+    if (!chatSceneId) {
+      return
+    }
+    const scenesPanel = panels?.[Area.TopLeft]?.find((panel) => panel.panel === Panel.Scenes)
+    if (scenesPanel) {
+      setPanel(Area.TopLeft, scenesPanel)
+    }
+    focusScene(chatSceneId)
+  }
 
   const formatTimestamp = (timestamp?: string | null) => {
     if (!timestamp) {
@@ -234,7 +250,24 @@ export function Chat() {
             </Button>
           ) : null}
           <span className="inline-flex h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.9)]" />
-          {isChatView ? (chatSceneName ? `Chat about "${chatSceneName}"` : 'Chat about this frame') : 'Chats'}
+          {isChatView ? (
+            chatSceneName ? (
+              <span>
+                Chat about{' '}
+                <button
+                  type="button"
+                  onClick={handleOpenScene}
+                  className="text-sky-300 hover:text-sky-200 underline underline-offset-2 decoration-sky-300/70"
+                >
+                  &quot;{chatSceneName}&quot;
+                </button>
+              </span>
+            ) : (
+              'Chat about this frame'
+            )
+          ) : (
+            'Chats'
+          )}
         </div>
         <div className="flex items-center gap-2">
           <Button color="secondary" size="small" onClick={() => createChat()} disabled={isCreatingChat}>

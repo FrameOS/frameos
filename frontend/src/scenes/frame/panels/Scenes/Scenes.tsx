@@ -26,7 +26,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { templatesLogic } from '../Templates/templatesLogic'
 import { SceneSettings } from './SceneSettings'
-import React, { useRef } from 'react'
+import React, { useEffect, useRef } from 'react'
 import { SceneDropDown } from './SceneDropDown'
 import { showAsFps } from '../../../../decorators/refreshInterval'
 import clsx from 'clsx'
@@ -78,6 +78,7 @@ export function Scenes() {
     aiError,
     isInstallingMissingActiveScene,
     previewingSceneId,
+    focusedSceneId,
   } = useValues(scenesLogic({ frameId }))
   const {
     setSearch,
@@ -110,6 +111,18 @@ export function Scenes() {
   const { settings, savedSettings, settingsChanged, aiEmbeddingsStatus } = useValues(settingsLogic)
   const { setSettingsValue, submitSettings } = useActions(settingsLogic)
   const uploadInputRef = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    if (!focusedSceneId) {
+      return
+    }
+    const handle = requestAnimationFrame(() => {
+      const element = document.querySelector(`[data-scene-id="${focusedSceneId}"]`)
+      if (element instanceof HTMLElement) {
+        element.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }
+    })
+    return () => cancelAnimationFrame(handle)
+  }, [focusedSceneId])
   const selectableSceneIds = filteredScenes.map((scene) => scene.id)
   const allSelectableScenesSelected =
     selectableSceneIds.length > 0 && selectableSceneIds.every((sceneId) => selectedSceneIds.has(sceneId))
@@ -618,12 +631,16 @@ export function Scenes() {
           return (
             <React.Fragment key={scene.id}>
               <div
+                data-scene-id={scene.id}
                 className={clsx(
-                  'border rounded-lg shadow bg-gray-900 break-inside-avoid p-2 space-y-1',
+                  'border rounded-lg shadow bg-gray-900 break-inside-avoid p-2 space-y-1 transition',
                   linkedActiveSceneId === scene.id
                     ? 'border border-[#4a4b8c] shadow-[0_0_3px_3px_rgba(128,0,255,0.5)]'
                     : 'border-gray-700',
-                  multiSelectEnabled && isSelected ? 'border-blue-400 shadow-[0_0_4px_2px_rgba(96,165,250,0.4)]' : null
+                  multiSelectEnabled && isSelected ? 'border-blue-400 shadow-[0_0_4px_2px_rgba(96,165,250,0.4)]' : null,
+                  focusedSceneId === scene.id
+                    ? 'border-sky-300 shadow-[0_0_6px_2px_rgba(56,189,248,0.45)] ring-1 ring-sky-300/70'
+                    : null
                 )}
               >
                 <div className="flex items-start justify-between gap-1">
