@@ -491,7 +491,7 @@ export const scenesLogic = kea<scenesLogicType>([
           : [],
     ],
   }),
-  listeners(({ actions, cache, props }) => ({
+  listeners(({ actions, values, cache, props }) => ({
     focusScene: ({ sceneId }) => {
       if (!sceneId) {
         return

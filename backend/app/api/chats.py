@@ -25,7 +25,7 @@ async def list_chats(
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
 ):
-    base_query = db.query(Chat).filter(Chat.frame_id == frame_id)
+    base_query = db.query(Chat).filter(Chat.frame_id == frame_id, Chat.messages.any())
     total = base_query.count()
     chats = (
         base_query.order_by(Chat.updated_at.desc(), Chat.created_at.desc())

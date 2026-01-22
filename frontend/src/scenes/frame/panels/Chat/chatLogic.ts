@@ -39,18 +39,23 @@ export type ChatMessage = {
 
 export type ChatView = 'list' | 'chat'
 
-const requestNewChat = async (frameId: number, sceneId?: string | null): Promise<ChatSummary> => {
-  const response = await apiFetch('/api/ai/chats', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ frameId, sceneId: sceneId ?? null }),
-  })
-  if (!response.ok) {
-    const payload = await response.json().catch(() => ({}))
-    throw new Error(payload?.detail || 'Failed to create chat')
+const buildLocalChat = (frameId: number, sceneId?: string | null): ChatSummary => {
+  const timestamp = new Date().toISOString()
+  return {
+    id: uuidv4(),
+    frameId,
+    sceneId: sceneId ?? null,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    messageCount: 0,
+    isLocal: true,
   }
-  return response.json()
 }
+
+const normalizeRemoteChat = (chat: ChatSummary): ChatSummary => ({
+  ...chat,
+  isLocal: false,
+})
 
 export const chatLogic = kea<chatLogicType>([
   path(['src', 'scenes', 'frame', 'chatLogic']),
@@ -96,6 +101,7 @@ export const chatLogic = kea<chatLogicType>([
     createChat: (sceneId?: string | null) => ({ sceneId }),
     createChatSuccess: (chat: ChatSummary) => ({ chat }),
     createChatFailure: (error: string) => ({ error }),
+    ensureChatForScene: (sceneId: string) => ({ sceneId }),
     selectChat: (chatId: string) => ({ chatId }),
     setActiveChatId: (chatId: string | null) => ({ chatId }),
     backToList: () => ({}),
@@ -131,11 +137,42 @@ export const chatLogic = kea<chatLogicType>([
     chats: [
       [] as ChatSummary[],
       {
-        loadChatsSuccess: (_, { chats }) => chats,
-        loadMoreChatsSuccess: (state, { chats }) => [...state, ...chats],
+        loadChatsSuccess: (state, { chats }) => {
+          const remoteChats = chats.map(normalizeRemoteChat)
+          const remoteIds = new Set(remoteChats.map((chat) => chat.id))
+          const remoteSceneIds = new Set(remoteChats.map((chat) => chat.sceneId ?? null))
+          const localChats = state.filter(
+            (chat: ChatSummary) =>
+              chat.isLocal && !remoteIds.has(chat.id) && !remoteSceneIds.has(chat.sceneId ?? null)
+          )
+          return [...remoteChats, ...localChats]
+        },
+        loadMoreChatsSuccess: (state, { chats }) => {
+          const merged = new Map<string, ChatSummary>(state.map((chat) => [chat.id, chat]))
+          for (const chat of chats.map(normalizeRemoteChat)) {
+            merged.set(chat.id, chat)
+          }
+          return Array.from(merged.values())
+        },
         createChatSuccess: (state, { chat }) => {
           const next = [chat, ...state.filter((item: ChatSummary) => item.id !== chat.id)]
           return next
+        },
+        appendMessage: (state, { chatId, message }) => {
+          const now = new Date().toISOString()
+          return state.map((chat) => {
+            if (chat.id !== chatId) {
+              return chat
+            }
+            const messageCount = (chat.messageCount ?? 0) + 1
+            return {
+              ...chat,
+              updatedAt: now,
+              messageCount,
+              isLocal: false,
+              sceneId: chat.sceneId ?? null,
+            }
+          })
         },
       },
     ],
@@ -319,6 +356,10 @@ export const chatLogic = kea<chatLogicType>([
       (chatSceneId: string | null, scenes: FrameScene[]): string | null =>
         chatSceneId ? scenes?.find((scene: FrameScene) => scene.id === chatSceneId)?.name ?? null : null,
     ],
+    visibleChats: [
+      (s: any) => [s.chats],
+      (chats: ChatSummary[]) => chats.filter((chat) => chat.messageCount === undefined || chat.messageCount > 0),
+    ],
     messages: [
       (s: any) => [s.messagesByChatId, s.activeChatId],
       (messagesByChatId: Record<string, ChatMessage[]>, activeChatId: string | null) =>
@@ -399,15 +440,27 @@ export const chatLogic = kea<chatLogicType>([
       }
     },
     createChat: async ({ sceneId }) => {
-      try {
-        const chat = await requestNewChat(props.frameId, sceneId ?? values.selectedSceneId)
-        actions.createChatSuccess(chat)
-        actions.selectChat(chat.id)
-      } catch (error) {
-        actions.createChatFailure(error instanceof Error ? error.message : 'Failed to create chat')
+      const chat = buildLocalChat(props.frameId, sceneId ?? values.selectedSceneId)
+      actions.createChatSuccess(chat)
+      actions.selectChat(chat.id)
+    },
+    ensureChatForScene: ({ sceneId }) => {
+      const matchingChat = values.chats.find((chat) => chat.sceneId === sceneId)
+      if (matchingChat) {
+        if (matchingChat.id !== values.activeChatId) {
+          actions.selectChat(matchingChat.id)
+        }
+        return
       }
+      const chat = buildLocalChat(props.frameId, sceneId)
+      actions.createChatSuccess(chat)
+      actions.selectChat(chat.id)
     },
     selectChat: ({ chatId }) => {
+      const chat = values.chats.find((item) => item.id === chatId)
+      if (chat?.isLocal && (chat.messageCount ?? 0) === 0) {
+        return
+      }
       if (!values.chatMessagesLoaded[chatId] && !values.chatMessagesLoading[chatId]) {
         actions.loadChatMessages(chatId)
       }
@@ -435,16 +488,10 @@ export const chatLogic = kea<chatLogicType>([
       }
       let chatId = values.activeChatId
       if (!chatId) {
-        try {
-          const chat = await requestNewChat(props.frameId, values.selectedSceneId)
-          actions.createChatSuccess(chat)
-          actions.selectChat(chat.id)
-          chatId = chat.id
-        } catch (error) {
-          actions.setSubmitting(false)
-          actions.setError(error instanceof Error ? error.message : 'Failed to create chat')
-          return
-        }
+        const chat = buildLocalChat(props.frameId, values.selectedSceneId)
+        actions.createChatSuccess(chat)
+        actions.selectChat(chat.id)
+        chatId = chat.id
       }
       if (!chatId) {
         actions.setSubmitting(false)
@@ -621,10 +668,7 @@ export const chatLogic = kea<chatLogicType>([
       if (!sceneId) {
         return
       }
-      const matchingChat = values.chats.find((chat) => chat.sceneId === sceneId)
-      if (matchingChat && matchingChat.id !== values.activeChatId) {
-        actions.selectChat(matchingChat.id)
-      }
+      actions.ensureChatForScene(sceneId)
     },
     chats: (chats: ChatSummary[]) => {
       if (!values.selectedSceneId) {

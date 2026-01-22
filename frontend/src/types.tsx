@@ -488,6 +488,8 @@ export interface ChatSummary {
   sceneId?: string | null
   createdAt: string
   updatedAt: string
+  messageCount?: number
+  isLocal?: boolean
 }
 
 export interface ChatMessageRecord {

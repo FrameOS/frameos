@@ -27,7 +27,7 @@ export function Chat() {
     chatSceneId,
     contextItemsExpanded,
     chatView,
-    chats,
+    visibleChats,
     activeChatId,
     hasMoreChats,
     isLoadingChats,
@@ -135,7 +135,8 @@ export function Chat() {
   const sendButtonColor = input.trim() ? 'primary' : 'secondary'
   const activeChatLoading = activeChatId ? chatMessagesLoading[activeChatId] : false
 
-  const handleOpenScene = () => {
+  const handleOpenScene = (e: React.MouseEvent<HTMLAnchorElement>) => {
+    e.preventDefault()
     if (!chatSceneId) {
       return
     }
@@ -308,13 +309,13 @@ export function Chat() {
             chatSceneName ? (
               <span>
                 Chat about{' '}
-                <button
-                  type="button"
+                <a
+                  href="#"
                   onClick={handleOpenScene}
-                  className="text-sky-300 hover:text-sky-200 underline underline-offset-2 decoration-sky-300/70"
+                  className="text-sky-300 hover:text-sky-200 underline underline-offset-2 decoration-sky-300/70 inline"
                 >
                   &quot;{chatSceneName}&quot;
-                </button>
+                </a>
               </span>
             ) : (
               'Chat about this frame'
@@ -362,7 +363,9 @@ export function Chat() {
                 className="h-full overflow-y-auto"
                 ref={virtuosoRef}
                 scrollerRef={(node) => {
-                  scrollerElementRef.current = node
+                  if (node && node instanceof HTMLElement) {
+                    scrollerElementRef.current = node
+                  }
                 }}
                 data={messages}
                 followOutput={(isBottom) => (isBottom ? 'auto' : false)}
@@ -450,11 +453,11 @@ export function Chat() {
             <div className="flex h-full items-center justify-center text-slate-400">
               <Spinner className="text-slate-400" />
             </div>
-          ) : chats.length === 0 ? (
+          ) : visibleChats.length === 0 ? (
             <div className="text-sm text-slate-400">No chats yet. Start a new conversation.</div>
           ) : (
             <div className="space-y-2">
-              {chats.map((chat) => {
+              {visibleChats.map((chat) => {
                 const isActive = chat.id === activeChatId
                 return (
                   <button
