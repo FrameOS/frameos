@@ -128,6 +128,18 @@ def _format_selected_elements(
         parts.append(f"Selected edges: {json.dumps(selected_edges, ensure_ascii=False)}")
     return "\n".join(parts) if parts else None
 
+
+def _format_app_sources(sources: dict[str, str] | None) -> str | None:
+    if not sources:
+        return None
+    entries = []
+    for filename in sorted(sources.keys()):
+        content = sources.get(filename)
+        if not isinstance(content, str):
+            continue
+        entries.append(f"# {filename}\n```\n{content}\n```")
+    return "\n\n\n-------\n\n".join(entries) if entries else None
+
 SUMMARY_SYSTEM_PROMPT = """
 You are summarizing FrameOS scene templates and app modules so they can be retrieved for prompt grounding.
 Return JSON with keys:
@@ -305,6 +317,19 @@ Rules:
 - Use "answer_frame_question" for frame-level questions (device settings, installed scenes, how FrameOS works).
 """.strip()
 
+APP_CHAT_ROUTER_SYSTEM_PROMPT = """
+You are a router that decides how to handle a FrameOS app chat request.
+Choose exactly one tool:
+- edit_app: The user wants to modify app files or behavior.
+- answer_app_question: The user is asking about how the app works or how to use/edit it.
+Return JSON only with:
+- tool: one of "edit_app", "answer_app_question"
+- tool_prompt: a concise prompt for the chosen tool (or the original user request if no rewrite is needed)
+Rules:
+- Use "edit_app" when the user asks to change code, fix bugs, add features, or refactor the app.
+- Use "answer_app_question" for explanations, diagnostics, or how-to questions about the app or FrameOS usage.
+""".strip()
+
 SCENE_MODIFY_SYSTEM_PROMPT = (
     SCENE_JSON_SYSTEM_PROMPT
     + "\n\n"
@@ -316,6 +341,16 @@ Only adjust what the user requested; preserve existing structure when possible.
 You will be given an authoritative list of available app keywords. Use only those app keywords; do not invent new apps.
 """.strip()
 )
+
+APP_EDIT_SYSTEM_PROMPT = """
+You are editing a FrameOS app written in Nim. You have access to the Nim version 2.2 STL and the following nimble packages:
+pixie v5, chrono 0.3.1, checksums 0.2.1, ws 0.5.0, psutil 0.6.0, QRGen 3.1.0, zippy 0.10, chroma 0.2.7, bumpy 1.1.2
+
+Return the modified files in full with the changes inlined. Only modify what is necessary.
+Respond with JSON only and include:
+- files: object mapping filenames to full updated contents.
+- summary: short description of what changed.
+""".strip()
 
 FRAME_CHAT_ANSWER_SYSTEM_PROMPT = """
 You are a friendly assistant for FrameOS frames.
@@ -347,6 +382,16 @@ SCENE_CHAT_ANSWER_SYSTEM_PROMPT = """
 You are a friendly assistant for FrameOS scenes.
 Answer questions about the current scene or how to edit it.
 Use the provided context (scene JSON, selected nodes/edges, frame details, and reference context).
+Provide helpful context without overwhelming the user; keep replies short unless they ask for specifics.
+Limit answers to a few short paragraphs (2-3 max) and avoid long lists unless the user asks.
+If the answer is uncertain, say what is missing and how to proceed.
+Return JSON only with the key "answer".
+""".strip()
+
+APP_CHAT_ANSWER_SYSTEM_PROMPT = """
+You are a friendly assistant for FrameOS apps.
+Answer questions about the current app or how to edit it.
+Use the provided context (app metadata, app config, app sources, and reference context).
 Provide helpful context without overwhelming the user; keep replies short unless they ask for specifics.
 Limit answers to a few short paragraphs (2-3 max) and avoid long lists unless the user asks.
 If the answer is uncertain, say what is missing and how to proceed.
@@ -831,6 +876,65 @@ async def route_scene_chat(
     return json.loads(content)
 
 
+async def route_app_chat(
+    *,
+    prompt: str,
+    api_key: str,
+    app: dict[str, Any] | None = None,
+    history: list[dict[str, str]] | None = None,
+    model: str = CHAT_MODEL,
+    ai_trace_id: str | None = None,
+    ai_session_id: str | None = None,
+    ai_parent_id: str | None = None,
+) -> dict[str, Any]:
+    prompt_parts = [f"User request: {prompt}"]
+    if app:
+        app_summary = {
+            "name": app.get("name"),
+            "keyword": app.get("keyword"),
+            "nodeId": app.get("nodeId") or app.get("node_id"),
+            "sceneId": app.get("sceneId") or app.get("scene_id"),
+        }
+        sources = app.get("sources")
+        if isinstance(sources, dict) and sources:
+            app_summary["files"] = sorted(sources.keys())
+        prompt_parts.append(f"App context: {json.dumps(app_summary, ensure_ascii=False)}")
+    if history:
+        history_lines = [
+            f"{item.get('role')}: {item.get('content')}"
+            for item in history
+            if isinstance(item, dict) and item.get("role") and item.get("content")
+        ]
+        if history_lines:
+            prompt_parts.extend(["Recent chat history:", "\n".join(history_lines)])
+    routing_prompt = "\n\n".join(prompt_parts)
+    client = _openai_client(api_key)
+    span_id = _new_ai_span_id()
+    response = await client.chat.completions.create(
+        model=model or CHAT_MODEL,
+        messages=[
+            {"role": "system", "content": APP_CHAT_ROUTER_SYSTEM_PROMPT},
+            {"role": "user", "content": routing_prompt},
+        ],
+        response_format={"type": "json_object"},
+        posthog_distinct_id=config.INSTANCE_ID,
+        posthog_properties=_build_ai_posthog_properties(
+            model=model or CHAT_MODEL,
+            ai_trace_id=ai_trace_id,
+            ai_session_id=ai_session_id,
+            ai_span_id=span_id,
+            ai_parent_id=ai_parent_id,
+            extra={
+                "operation": "route_app_chat",
+                "model": model or CHAT_MODEL,
+            },
+        ),
+    )
+    message = response.choices[0].message if response.choices else None
+    content = message.content if message else "{}"
+    return json.loads(content)
+
+
 async def modify_scene_json(
     *,
     prompt: str,
@@ -942,6 +1046,123 @@ async def answer_scene_question(
     if isinstance(answer, str) and answer.strip():
         return answer.strip()
     return content.strip()
+
+
+async def answer_app_question(
+    *,
+    prompt: str,
+    api_key: str,
+    context_items: list[AiEmbedding],
+    app: dict[str, Any] | None = None,
+    history: list[dict[str, str]] | None = None,
+    model: str = CHAT_MODEL,
+    ai_trace_id: str | None = None,
+    ai_session_id: str | None = None,
+    ai_parent_id: str | None = None,
+) -> str:
+    context_block = _format_context_items(context_items)
+    context_parts = []
+    if app:
+        app_details = {
+            "name": app.get("name"),
+            "keyword": app.get("keyword"),
+            "sceneId": app.get("sceneId") or app.get("scene_id"),
+            "nodeId": app.get("nodeId") or app.get("node_id"),
+            "config": app.get("config"),
+        }
+        context_parts.append(f"App details: {json.dumps(app_details, ensure_ascii=False)}")
+        sources_block = _format_app_sources(app.get("sources") if isinstance(app, dict) else None)
+        if sources_block:
+            context_parts.extend(["App sources:", sources_block])
+    if context_block:
+        context_parts.extend(["Relevant reference context:", context_block])
+    context_message = "\n\n".join(context_parts) if context_parts else "No additional context."
+    messages = [{"role": "system", "content": APP_CHAT_ANSWER_SYSTEM_PROMPT}, {"role": "user", "content": context_message}]
+    if history:
+        for item in history:
+            role = item.get("role") if isinstance(item, dict) else None
+            content = item.get("content") if isinstance(item, dict) else None
+            if role in {"user", "assistant"} and isinstance(content, str) and content.strip():
+                messages.append({"role": role, "content": content.strip()})
+    messages.append({"role": "user", "content": prompt})
+    client = _openai_client(api_key)
+    span_id = _new_ai_span_id()
+    response = await client.chat.completions.create(
+        model=model or CHAT_MODEL,
+        messages=messages,
+        response_format={"type": "json_object"},
+        posthog_distinct_id=config.INSTANCE_ID,
+        posthog_properties=_build_ai_posthog_properties(
+            model=model or CHAT_MODEL,
+            ai_trace_id=ai_trace_id,
+            ai_session_id=ai_session_id,
+            ai_span_id=span_id,
+            ai_parent_id=ai_parent_id,
+            extra={
+                "operation": "answer_app_question",
+                "model": model or CHAT_MODEL,
+            },
+        ),
+    )
+    message = response.choices[0].message if response.choices else None
+    content = message.content if message else "{}"
+    payload = json.loads(content)
+    answer = payload.get("answer")
+    if isinstance(answer, str) and answer.strip():
+        return answer.strip()
+    return content.strip()
+
+
+async def edit_app_sources(
+    *,
+    prompt: str,
+    api_key: str,
+    context_items: list[AiEmbedding],
+    app: dict[str, Any],
+    history: list[dict[str, str]] | None = None,
+    model: str = CHAT_MODEL,
+    ai_trace_id: str | None = None,
+    ai_session_id: str | None = None,
+    ai_parent_id: str | None = None,
+) -> dict[str, Any]:
+    sources_block = _format_app_sources(app.get("sources"))
+    context_block = _format_context_items(context_items)
+    prompt_parts = [f"Make these changes: {prompt}", "-------------", "Here are the relevant files of the app:"]
+    if sources_block:
+        prompt_parts.append(sources_block)
+    if context_block:
+        prompt_parts.extend(["Relevant reference context:", context_block])
+    app_prompt = "\n\n".join(prompt_parts)
+    messages = [{"role": "system", "content": APP_EDIT_SYSTEM_PROMPT}]
+    if history:
+        for item in history:
+            role = item.get("role") if isinstance(item, dict) else None
+            content = item.get("content") if isinstance(item, dict) else None
+            if role in {"user", "assistant"} and isinstance(content, str) and content.strip():
+                messages.append({"role": role, "content": content.strip()})
+    messages.append({"role": "user", "content": app_prompt})
+    client = _openai_client(api_key)
+    span_id = _new_ai_span_id()
+    response = await client.chat.completions.create(
+        model=model or CHAT_MODEL,
+        messages=messages,
+        response_format={"type": "json_object"},
+        posthog_distinct_id=config.INSTANCE_ID,
+        posthog_properties=_build_ai_posthog_properties(
+            model=model or CHAT_MODEL,
+            ai_trace_id=ai_trace_id,
+            ai_session_id=ai_session_id,
+            ai_span_id=span_id,
+            ai_parent_id=ai_parent_id,
+            extra={
+                "operation": "edit_app_sources",
+                "model": model or CHAT_MODEL,
+            },
+        ),
+    )
+    message = response.choices[0].message if response.choices else None
+    content = message.content if message else "{}"
+    return json.loads(content)
 
 
 async def answer_frame_question(

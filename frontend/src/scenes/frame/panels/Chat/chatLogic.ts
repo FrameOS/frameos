@@ -16,6 +16,7 @@ import type {
 } from '../../../../types'
 import { Area, Panel } from '../../../../types'
 import { socketLogic } from '../../../socketLogic'
+import { editAppLogic } from '../EditApp/editAppLogic'
 
 import type { chatLogicType } from './chatLogicType'
 
@@ -38,6 +39,15 @@ export type ChatMessage = {
 }
 
 export type ChatView = 'list' | 'chat'
+
+export type AppChatContext = {
+  sceneId: string
+  nodeId: string
+  name?: string | null
+  keyword?: string | null
+  config?: Record<string, any> | null
+  sources?: Record<string, string>
+}
 
 const buildLocalChat = (frameId: number, sceneId?: string | null): ChatSummary => {
   const timestamp = new Date().toISOString()
@@ -75,7 +85,11 @@ export const chatLogic = kea<chatLogicType>([
   })),
   actions({
     setInput: (input: string) => ({ input }),
-    submitMessage: (content: string, chatId?: string | null) => ({ content, chatId }),
+    submitMessage: (content: string, chatId?: string | null, appContext?: AppChatContext | null) => ({
+      content,
+      chatId,
+      appContext,
+    }),
     setSubmitting: (isSubmitting: boolean) => ({ isSubmitting }),
     setError: (error: string | null) => ({ error }),
     appendMessage: (chatId: string, message: ChatMessage) => ({ chatId, message }),
@@ -507,7 +521,7 @@ export const chatLogic = kea<chatLogicType>([
         actions.loadChatMessagesFailure(chatId, error instanceof Error ? error.message : 'Failed to load chat history')
       }
     },
-    submitMessage: async ({ content, chatId: chatIdOverride }) => {
+    submitMessage: async ({ content, chatId: chatIdOverride, appContext }) => {
       const prompt = content.trim()
       if (!prompt) {
         actions.setSubmitting(false)
@@ -549,6 +563,17 @@ export const chatLogic = kea<chatLogicType>([
         isStreaming: true,
       })
       const selectedScene = values.selectedScene
+      const appPayload =
+        appContext && appContext.sceneId && appContext.nodeId
+          ? {
+              sceneId: appContext.sceneId,
+              nodeId: appContext.nodeId,
+              name: appContext.name ?? undefined,
+              keyword: appContext.keyword ?? undefined,
+              config: appContext.config ?? undefined,
+              sources: appContext.sources ?? undefined,
+            }
+          : undefined
       try {
         const selectedNodesPayload =
           selectedScene && values.selectedNodes.length > 0
@@ -581,6 +606,7 @@ export const chatLogic = kea<chatLogicType>([
             scene: selectedScene ?? null,
             selectedNodes: selectedNodesPayload.length ? selectedNodesPayload : undefined,
             selectedEdges: selectedEdgesPayload.length ? selectedEdgesPayload : undefined,
+            app: appPayload,
             history: values.historyForRequest,
             requestId,
           }),
@@ -611,6 +637,21 @@ export const chatLogic = kea<chatLogicType>([
           isStreaming: false,
           isPlaceholder: false,
         })
+
+        if (tool === 'edit_app') {
+          const incomingSources = payload?.appSources
+          const sources =
+            appContext?.sources && incomingSources && typeof incomingSources === 'object'
+              ? { ...appContext.sources, ...incomingSources }
+              : incomingSources
+          if (sources && appContext?.sceneId && appContext?.nodeId) {
+            editAppLogic({
+              frameId: props.frameId,
+              sceneId: appContext.sceneId,
+              nodeId: appContext.nodeId,
+            }).actions.applySources(sources)
+          }
+        }
 
         if (tool === 'build_scene') {
           const scenes = Array.isArray(payload?.scenes) ? payload.scenes : []

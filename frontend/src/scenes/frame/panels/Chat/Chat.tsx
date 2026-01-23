@@ -7,12 +7,13 @@ import { settingsLogic } from '../../../settings/settingsLogic'
 import { Button } from '../../../../components/Button'
 import { TextArea } from '../../../../components/TextArea'
 import { Spinner } from '../../../../components/Spinner'
+import { editAppLogic } from '../EditApp/editAppLogic'
 import { useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
 import clsx from 'clsx'
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso'
-import { Area, Panel } from '../../../../types'
-import { ArrowLeftIcon, ChevronLeftIcon } from '@heroicons/react/24/solid'
+import { AppNodeData, Area, Panel } from '../../../../types'
+import { ChevronLeftIcon } from '@heroicons/react/24/solid'
 
 export function Chat() {
   const { frameId, scenes } = useValues(frameLogic)
@@ -62,6 +63,30 @@ export function Chat() {
   const isChatView = chatView === 'chat' && activeChatId
   const hasBackendApiKey = Boolean(savedSettings?.openAI?.backendApiKey?.trim())
   const missingBackendApiKey = !hasBackendApiKey
+  const activeEditAppPanel = panels?.[Area.TopLeft]?.find((panel) => panel.active && panel.panel === Panel.EditApp)
+  const activeEditAppMetadata = activeEditAppPanel?.metadata as
+    | { sceneId: string; nodeId: string; nodeData?: AppNodeData }
+    | undefined
+  const hasActiveApp = Boolean(activeEditAppMetadata?.sceneId && activeEditAppMetadata?.nodeId)
+  const activeEditAppProps = {
+    frameId,
+    sceneId: activeEditAppMetadata?.sceneId ?? selectedSceneId ?? '',
+    nodeId: activeEditAppMetadata?.nodeId ?? 'unknown',
+  }
+  const { sources: appSources, sourcesLoading: appSourcesLoading, title: appTitle } = useValues(
+    editAppLogic(activeEditAppProps)
+  )
+  const appContext = hasActiveApp
+    ? {
+        sceneId: activeEditAppMetadata?.sceneId ?? '',
+        nodeId: activeEditAppMetadata?.nodeId ?? '',
+        name: appTitle,
+        keyword: activeEditAppMetadata?.nodeData?.keyword ?? null,
+        config: activeEditAppMetadata?.nodeData?.config ?? null,
+        sources: appSourcesLoading ? undefined : appSources,
+      }
+    : null
+  const isAppContextLoading = hasActiveApp && appSourcesLoading
 
   const focusSceneById = (sceneId: string) => {
     const scenesPanel = panels?.[Area.TopLeft]?.find((panel) => panel.panel === Panel.Scenes)
@@ -120,7 +145,7 @@ export function Chat() {
   }, [isChatView])
 
   const handleSubmit = () => {
-    submitMessage(input)
+    submitMessage(input, undefined, appContext ?? undefined)
   }
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -134,6 +159,10 @@ export function Chat() {
 
   const sendButtonColor = input.trim() ? 'primary' : 'secondary'
   const activeChatLoading = activeChatId ? chatMessagesLoading[activeChatId] : false
+  const sendDisabled = isSubmitting || !input.trim() || missingBackendApiKey || isAppContextLoading
+  const helperText = isAppContextLoading
+    ? 'Loading app sources…'
+    : contextSelectionSummary ?? 'Press Ctrl/Cmd + Enter to send'
 
   const handleOpenScene = (e: React.MouseEvent<HTMLAnchorElement>) => {
     e.preventDefault()
@@ -306,7 +335,24 @@ export function Chat() {
             </Button>
           ) : null}
           {isChatView ? (
-            chatSceneName ? (
+            hasActiveApp ? (
+              <span>
+                Chat about app <span className="text-slate-100">&quot;{appTitle || 'Untitled app'}&quot;</span>
+                {chatSceneName ? (
+                  <>
+                    {' '}
+                    in{' '}
+                    <a
+                      href="#"
+                      onClick={handleOpenScene}
+                      className="text-sky-300 hover:text-sky-200 underline underline-offset-2 decoration-sky-300/70 inline"
+                    >
+                      &quot;{chatSceneName}&quot;
+                    </a>
+                  </>
+                ) : null}
+              </span>
+            ) : chatSceneName ? (
               <span>
                 Chat about{' '}
                 <a
@@ -352,7 +398,9 @@ export function Chat() {
                 <div className="space-y-2">
                   <div className="text-slate-200 font-medium">Start the conversation</div>
                   <div>
-                    {chatSceneName
+                    {hasActiveApp
+                      ? 'Ask for app edits, request refactors, or ask questions about how this app works.'
+                      : chatSceneName
                       ? 'Ask for a new scene, request edits to the current scene, or ask questions about FrameOS.'
                       : 'Ask for a new scene, or ask questions about this frame or FrameOS.'}
                   </div>
@@ -428,19 +476,23 @@ export function Chat() {
           <div className="rounded-2xl border border-slate-800/80 bg-slate-950/70 p-2 space-y-2 shadow-inner">
             <TextArea
               value={input}
-              placeholder="Describe a new scene, request a change, or ask a question..."
+              placeholder={
+                hasActiveApp
+                  ? 'Describe the app change you want, or ask a question about this app...'
+                  : 'Describe a new scene, request a change, or ask a question...'
+              }
               onChange={(value) => setInput(value)}
               onKeyDown={handleKeyDown}
               rows={3}
               className="bg-slate-900/80 border-slate-700/80 text-slate-100 placeholder-slate-500 focus:border-blue-500 focus:ring-blue-500"
             />
             <div className="flex items-center justify-between text-xs text-slate-500">
-              <span>{contextSelectionSummary ?? 'Press Ctrl/Cmd + Enter to send'}</span>
+              <span>{helperText}</span>
               <Button
                 color={sendButtonColor}
                 size="tiny"
                 onClick={handleSubmit}
-                disabled={isSubmitting || !input.trim() || missingBackendApiKey}
+                disabled={sendDisabled}
               >
                 {isSubmitting ? 'Sending…' : 'Send'}
               </Button>

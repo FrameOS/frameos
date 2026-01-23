@@ -1,4 +1,4 @@
-import { actions, afterMount, connect, kea, key, listeners, path, props, propsChanged, reducers, selectors } from 'kea'
+import { actions, afterMount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 
 import type { editAppLogicType } from './editAppLogicType'
 import { loaders } from 'kea-loaders'
@@ -24,23 +24,6 @@ export interface SourceError {
   error: string
 }
 
-const DEFAULT_PROMPT = 'Make this app better.'
-const SYSTEM_PROMPT = `
-You are editing a FrameOS app written in Nim. You have access to the Nim version 2.2 STL and the following nimble packages: 
-pixie v5, chrono 0.3.1, checksums 0.2.1, ws 0.5.0, psutil 0.6.0, QRGen 3.1.0, zippy 0.10, chroma 0.2.7, bumpy 1.1.2
-
-Return the modified files in full with the changes inlined. Only modify what is necessary.
-
-Make these changes: `
-
-const SYSTEM_PROMPT_2 = `
-
--------------
-Here are the relevant files of the app:
-
-
-`
-
 export const editAppLogic = kea<editAppLogicType>([
   path(['src', 'scenes', 'frame', 'panels', 'EditApp', 'editAppLogic']),
   props({} as EditAppLogicProps),
@@ -59,16 +42,14 @@ export const editAppLogic = kea<editAppLogicType>([
   actions({
     setActiveFile: (file: string) => ({ file }),
     updateFile: (file: string, source: string) => ({ file, source }),
+    applySources: (sources: Record<string, string>) => ({ sources }),
     saveChanges: true,
     setInitialSources: (sources: Record<string, string>) => ({ sources }),
     validateSource: (file: string, source: string, initial: boolean = false) => ({ file, source, initial }),
     setSourceErrors: (file: string, errors: SourceError[]) => ({ file, errors }),
-    setPrompt: (prompt: string) => ({ prompt }),
     resetEnhanceSuggestion: true,
     addFile: true,
     deleteFile: (file: string) => ({ file }),
-    copyFullPrompt: true,
-    resetFullPromptCopied: true,
   }),
   selectors({
     app: [
@@ -119,17 +100,18 @@ export const editAppLogic = kea<editAppLogicType>([
         setActiveFile: (_, { file }) => file,
         resetEnhanceSuggestion: (state) => (state === 'app.nim/suggestion' ? 'app.nim' : state),
         deleteFile: (state, { file }) => (state === file ? 'app.nim' : state),
-      },
-    ],
-    prompt: [
-      DEFAULT_PROMPT as string,
-      { persist: true },
-      {
-        setPrompt: (_, { prompt }) => prompt,
+        applySources: (state, { sources }) => {
+          if (state && sources[state]) {
+            return state
+          }
+          const next = Object.keys(sources)[0]
+          return next ?? state
+        },
       },
     ],
     sources: {
       updateFile: (state, { file, source }) => ({ ...state, [file]: source }),
+      applySources: (_, { sources }) => sources,
       deleteFile: (state, { file }) => {
         const newState = { ...state }
         delete newState[file]
@@ -147,9 +129,12 @@ export const editAppLogic = kea<editAppLogicType>([
       {} as Record<string, SourceError[]>,
       {
         setSourceErrors: (state, { file, errors }) => ({ ...state, [file]: errors }),
+        applySources: (state, { sources }) =>
+          Object.fromEntries(
+            Object.entries(state).filter(([file]) => Object.prototype.hasOwnProperty.call(sources, file))
+          ),
       },
     ],
-    fullPromptCopied: [false, { copyFullPrompt: () => true, resetFullPromptCopied: () => false }],
   })),
   selectors({
     hasChanges: [
@@ -210,17 +195,6 @@ export const editAppLogic = kea<editAppLogicType>([
         return [...first, ...rest]
       },
     ],
-    fullPrompt: [
-      (s) => [s.prompt, s.sources],
-      (prompt, sources) => {
-        const sourceEntries = Object.entries(sources)
-        return (
-          `${SYSTEM_PROMPT}${prompt}${SYSTEM_PROMPT_2}\n\n${sourceEntries
-            .map(([file, content]) => `# ${file}\n\`\`\`\n${content}\n\`\`\``)
-            .join('\n\n\n-------\n\n')}`.trim() + '\n'
-        )
-      },
-    ],
   }),
   listeners(({ actions, props, values }) => ({
     saveChanges: () => {
@@ -237,6 +211,11 @@ export const editAppLogic = kea<editAppLogicType>([
     },
     updateFile: ({ file, source }) => {
       actions.validateSource(file, source)
+    },
+    applySources: ({ sources }) => {
+      for (const [file, source] of Object.entries(sources)) {
+        actions.validateSource(file, source)
+      }
     },
     validateSource: async ({ initial, file, source }, breakpoint) => {
       if (!initial) {
@@ -259,12 +238,6 @@ export const editAppLogic = kea<editAppLogicType>([
         actions.updateFile(fileName, '')
         actions.setActiveFile(fileName)
       }
-    },
-    copyFullPrompt: async (_, breakpoint) => {
-      const fullPrompt = values.fullPrompt
-      navigator.clipboard.writeText(fullPrompt)
-      await breakpoint(3000)
-      actions.resetFullPromptCopied()
     },
   })),
   afterMount(({ actions, values }) => {

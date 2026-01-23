@@ -34,14 +34,17 @@ from app.utils.ai_scene import (
     DEFAULT_APP_CONTEXT_K,
     DEFAULT_SCENE_CONTEXT_K,
     create_embeddings,
+    edit_app_sources,
     expand_scene_prompt,
     format_frame_context,
     format_frame_scene_summary,
     generate_scene_json,
     generate_scene_plan,
     repair_scene_json,
+    route_app_chat,
     modify_scene_json,
     route_scene_chat,
+    answer_app_question,
     answer_frame_question,
     answer_scene_question,
     rank_embeddings,
@@ -817,30 +820,48 @@ async def chat_scene(
     try:
         history = [item.model_dump() for item in (data.history or [])]
         scene_payload = data.scene if isinstance(data.scene, dict) else None
+        app_payload = data.app.model_dump(by_alias=True) if data.app else None
         await _publish_ai_scene_log(redis, "Routing prompt for tool selection.", request_id, stage="route")
-        tool_payload = await route_scene_chat(
-            prompt=prompt,
-            scene=scene_payload,
-            frame_context=frame_context,
-            history=history,
-            api_key=api_key,
-            model=openai_settings.get("chatModel") or CHAT_MODEL,
-            ai_trace_id=posthog_trace_id,
-            ai_session_id=posthog_session_id,
-            ai_parent_id=posthog_root_span_id,
-        )
+        if app_payload:
+            tool_payload = await route_app_chat(
+                prompt=prompt,
+                app=app_payload,
+                history=history,
+                api_key=api_key,
+                model=openai_settings.get("chatModel") or CHAT_MODEL,
+                ai_trace_id=posthog_trace_id,
+                ai_session_id=posthog_session_id,
+                ai_parent_id=posthog_root_span_id,
+            )
+            tool = tool_payload.get("tool") if isinstance(tool_payload, dict) else None
+            tool_prompt = tool_payload.get("tool_prompt") if isinstance(tool_payload, dict) else None
+            if not isinstance(tool_prompt, str) or not tool_prompt.strip():
+                tool_prompt = prompt
+            tool = tool if tool in {"edit_app", "answer_app_question"} else "answer_app_question"
+        else:
+            tool_payload = await route_scene_chat(
+                prompt=prompt,
+                scene=scene_payload,
+                frame_context=frame_context,
+                history=history,
+                api_key=api_key,
+                model=openai_settings.get("chatModel") or CHAT_MODEL,
+                ai_trace_id=posthog_trace_id,
+                ai_session_id=posthog_session_id,
+                ai_parent_id=posthog_root_span_id,
+            )
+            tool = tool_payload.get("tool") if isinstance(tool_payload, dict) else None
+            tool_prompt = tool_payload.get("tool_prompt") if isinstance(tool_payload, dict) else None
+            if not isinstance(tool_prompt, str) or not tool_prompt.strip():
+                tool_prompt = prompt
+            tool = tool if tool in {"build_scene", "modify_scene", "answer_frame_question", "answer_scene_question", "reply"} else "answer_frame_question"
+            if tool == "modify_scene" and not scene_payload:
+                tool = "answer_frame_question"
+            if tool == "answer_scene_question" and not scene_payload:
+                tool = "answer_frame_question"
+            if tool in {"answer_frame_question", "answer_scene_question"}:
+                tool_prompt = prompt
 
-        tool = tool_payload.get("tool") if isinstance(tool_payload, dict) else None
-        tool_prompt = tool_payload.get("tool_prompt") if isinstance(tool_payload, dict) else None
-        if not isinstance(tool_prompt, str) or not tool_prompt.strip():
-            tool_prompt = prompt
-        tool = tool if tool in {"build_scene", "modify_scene", "answer_frame_question", "answer_scene_question", "reply"} else "answer_frame_question"
-        if tool == "modify_scene" and not scene_payload:
-            tool = "answer_frame_question"
-        if tool == "answer_scene_question" and not scene_payload:
-            tool = "answer_frame_question"
-        if tool in {"answer_frame_question", "answer_scene_question"}:
-            tool_prompt = prompt
         await _publish_ai_scene_log(redis, f"Tool selected: {tool}.", request_id, stage="route")
 
         if tool_prompt != prompt:
@@ -865,6 +886,57 @@ async def chat_scene(
 
         selected_nodes = data.selected_nodes if isinstance(data.selected_nodes, list) else None
         selected_edges = data.selected_edges if isinstance(data.selected_edges, list) else None
+
+        if tool == "answer_app_question":
+            await _publish_ai_scene_log(redis, "Answering app question.", request_id, stage="answer")
+            answer = await answer_app_question(
+                prompt=tool_prompt,
+                api_key=api_key,
+                context_items=context_items,
+                app=app_payload,
+                history=history,
+                model=openai_settings.get("chatModel") or CHAT_MODEL,
+                ai_trace_id=posthog_trace_id,
+                ai_session_id=posthog_session_id,
+                ai_parent_id=posthog_root_span_id,
+            )
+            await _publish_ai_scene_log(redis, "Answer complete.", request_id, status="success", stage="done")
+            _record_assistant_message(answer, tool)
+            return AiSceneChatResponse(reply=answer, tool=tool, chatId=chat.id if chat else None)
+
+        if tool == "edit_app":
+            if not app_payload or not isinstance(app_payload.get("sources"), dict):
+                raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="App sources are required for edits.")
+            await _publish_ai_scene_log(redis, "Editing app sources.", request_id, stage="edit")
+            result = await edit_app_sources(
+                prompt=tool_prompt,
+                api_key=api_key,
+                context_items=context_items,
+                app=app_payload,
+                history=history,
+                model=openai_settings.get("appEnhanceModel") or openai_settings.get("chatModel") or CHAT_MODEL,
+                ai_trace_id=posthog_trace_id,
+                ai_session_id=posthog_session_id,
+                ai_parent_id=posthog_root_span_id,
+            )
+            files = result.get("files") if isinstance(result, dict) else None
+            summary = result.get("summary") if isinstance(result, dict) else None
+            if not isinstance(files, dict) or not files:
+                raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="No app files returned from AI.")
+            safe_files = {
+                name: content
+                for name, content in files.items()
+                if isinstance(name, str) and isinstance(content, str)
+            }
+            reply = summary if isinstance(summary, str) and summary.strip() else "Updated app files. Review changes in the editor."
+            await _publish_ai_scene_log(redis, "App edit complete.", request_id, status="success", stage="done")
+            _record_assistant_message(reply, tool)
+            return AiSceneChatResponse(
+                reply=reply,
+                tool=tool,
+                chatId=chat.id if chat else None,
+                appSources=safe_files,
+            )
 
         if tool in {"answer_scene_question", "reply"} and scene_payload:
             await _publish_ai_scene_log(redis, "Answering scene question.", request_id, stage="answer")

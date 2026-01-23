@@ -32,6 +32,17 @@ class AiSceneChatMessage(BaseModel):
     content: str
 
 
+class AiSceneAppContext(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    scene_id: Optional[str] = Field(default=None, alias="sceneId")
+    node_id: Optional[str] = Field(default=None, alias="nodeId")
+    name: Optional[str] = None
+    keyword: Optional[str] = None
+    config: Optional[dict[str, Any]] = None
+    sources: Optional[dict[str, str]] = None
+
+
 class AiSceneChatRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -42,6 +53,7 @@ class AiSceneChatRequest(BaseModel):
     scene: Optional[dict[str, Any]] = None
     selected_nodes: Optional[list[dict[str, Any]]] = Field(default=None, alias="selectedNodes")
     selected_edges: Optional[list[dict[str, Any]]] = Field(default=None, alias="selectedEdges")
+    app: Optional[AiSceneAppContext] = None
     history: Optional[list[AiSceneChatMessage]] = None
     request_id: Optional[str] = Field(default=None, alias="requestId")
 
@@ -52,3 +64,4 @@ class AiSceneChatResponse(BaseModel):
     chat_id: Optional[str] = Field(default=None, alias="chatId")
     title: Optional[str] = None
     scenes: Optional[list[dict[str, Any]]] = None
+    app_sources: Optional[dict[str, str]] = Field(default=None, alias="appSources")
