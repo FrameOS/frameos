@@ -344,6 +344,7 @@ export const diagramLogic = kea<diagramLogicType>([
       (s) => [s.nodes],
       (nodes): string[] => nodes.filter((node) => node.selected).map((node) => node.id),
     ],
+    selectedNodes: [(s) => [s.nodes], (nodes: DiagramNode[]): DiagramNode[] => nodes.filter((node) => node.selected)],
     edges: [
       (s) => [s.rawEdges],
       (rawEdges): Edge[] =>
@@ -361,6 +362,7 @@ export const diagramLogic = kea<diagramLogicType>([
     ],
     selectedEdge: [(s) => [s.edges], (edges): Edge | null => edges.find((edge) => edge.selected) ?? null],
     selectedEdgeId: [(s) => [s.selectedEdge], (edge) => edge?.id ?? null],
+    selectedEdges: [(s) => [s.edges], (edges: Edge[]): Edge[] => edges.filter((edge) => edge.selected)],
     edgesForNode: [
       (s) => [s.edges],
       (edges: Edge[]): Record<string, Edge[]> => {
@@ -418,24 +420,27 @@ export const diagramLogic = kea<diagramLogicType>([
     canUndo: [(s) => [s.history], (history) => history.past.length > 1],
     canRedo: [(s) => [s.history], (history) => history.future.length > 0],
   }),
-  sharedListeners(({ selectors, actions, values, props }) => ({
+  sharedListeners(({ selectors, actions, values, props, cache }) => ({
     nodesChanged: (_, __, ___, previousState) => {
       const nodes = values.nodes
       const oldNodes = selectors.nodes(previousState)
+      const isDragging = nodes.some((node) => node.dragging)
 
       const hasDimensions = nodes.length > 0 && nodes.every((node) => node.width && node.height)
       const shouldRearrangeForMissingPosition =
         hasDimensions && nodes.every((node) => node.position.x === -9999 && node.position.y === -9999)
       const shouldRearrangeForMarker = hasDimensions && Boolean(values.scene?.settings?.autoArrangeOnLoad)
+      const shouldRearrange = shouldRearrangeForMissingPosition || shouldRearrangeForMarker
 
       // Upon first render of a new scene, the nodes will have x = -9999, y = -9999, width = undefined, height = undefined
       // Upon second render, the width and height will have been set, but x and y will still be -9999 for all nodes
       // If we detect that case, automatically rearrange the scene.
-      if (shouldRearrangeForMissingPosition || shouldRearrangeForMarker) {
+      if (shouldRearrange && !isDragging && !cache.hasAutoArranged) {
+        cache.hasAutoArranged = true
         actions.rearrangeCurrentScene()
       }
 
-      if (shouldRearrangeForMarker) {
+      if (shouldRearrangeForMarker && cache.hasAutoArranged) {
         actions.setFrameFormValues({
           scenes: values.editingFrame.scenes?.map((scene) =>
             scene.id === props.sceneId
@@ -446,6 +451,11 @@ export const diagramLogic = kea<diagramLogicType>([
               : scene
           ),
         })
+      }
+
+      // Avoid syncing frame form values on every drag tick. We'll persist once dragging stops.
+      if (isDragging) {
+        return
       }
 
       // Do not update on first render
@@ -815,6 +825,7 @@ export const diagramLogic = kea<diagramLogicType>([
     window.setTimeout(actions.fitDiagramView, 100)
     cache.ignoreHistory = false
     cache.historyTimer = null
+    cache.hasAutoArranged = false
     actions.resetHistory(makeHistorySnapshot(values.nodes, values.rawEdges))
 
     cache.keydownHandler = (event: KeyboardEvent) => {

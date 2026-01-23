@@ -13,11 +13,20 @@ from arq import ArqRedis as Redis
 
 from app.database import get_db
 from app.models.ai_embeddings import AiEmbedding
+from app.models.apps import get_app_configs
+from app.models.chat import Chat, ChatMessage
 from app.models.settings import get_settings_dict
 from app.redis import get_redis
-from app.schemas.ai_scenes import AiSceneGenerateRequest, AiSceneGenerateResponse, AiSceneContextItem
+from app.schemas.ai_scenes import (
+    AiSceneGenerateRequest,
+    AiSceneGenerateResponse,
+    AiSceneContextItem,
+    AiSceneChatRequest,
+    AiSceneChatResponse,
+)
 from app.config import config
 from app.utils.ai_scene import (
+    CHAT_MODEL,
     EMBEDDING_MODEL,
     SCENE_MODEL,
     SCENE_REVIEW_MODEL,
@@ -27,9 +36,14 @@ from app.utils.ai_scene import (
     create_embeddings,
     expand_scene_prompt,
     format_frame_context,
+    format_frame_scene_summary,
     generate_scene_json,
     generate_scene_plan,
     repair_scene_json,
+    modify_scene_json,
+    route_scene_chat,
+    answer_frame_question,
+    answer_scene_question,
     rank_embeddings,
     review_scene_solution,
     validate_scene_payload,
@@ -275,6 +289,96 @@ async def _publish_ai_scene_log(
             "timestamp": datetime.utcnow().isoformat(),
         },
     )
+
+
+async def _load_context_items(
+    *,
+    db: Session,
+    settings: dict[str, Any],
+    api_key: str,
+    prompt: str,
+    ai_trace_id: str | None,
+    ai_session_id: str | None,
+    ai_parent_id: str | None,
+    redis: Redis | None = None,
+    request_id: str | None = None,
+) -> list[AiEmbedding]:
+    async def log_message(
+        message: str,
+        status: str = "info",
+        stage: str | None = None,
+    ) -> None:
+        if not redis or not request_id:
+            return
+        await _publish_ai_scene_log(
+            redis,
+            message,
+            request_id,
+            status=status,
+            stage=stage,
+        )
+
+    await log_message("Loading embeddings.", stage="context:load")
+    embeddings = db.query(AiEmbedding).all()
+    if not embeddings:
+        await log_message(
+            "No embeddings found; proceeding without retrieval context.",
+            stage="context:skip",
+        )
+        return []
+    missing_service_keys = _get_missing_service_keys(settings)
+    available_embeddings = _filter_embeddings_for_services(embeddings, missing_service_keys)
+    if not available_embeddings:
+        await log_message(
+            "No embeddings available after filtering unavailable services; proceeding without retrieval context.",
+            stage="context:skip",
+        )
+        return []
+    openai_settings = settings.get("openAI", {})
+    await log_message("Creating retrieval embedding.", stage="context:embed")
+    query_embedding = (
+        await create_embeddings(
+            [prompt],
+            api_key,
+            model=openai_settings.get("embeddingModel") or EMBEDDING_MODEL,
+            ai_trace_id=ai_trace_id,
+            ai_session_id=ai_session_id,
+            ai_parent_id=ai_parent_id,
+        )
+    )[0]
+    app_embeddings = [item for item in available_embeddings if item.source_type == "app"]
+    scene_embeddings = [item for item in available_embeddings if item.source_type == "scene"]
+    await log_message("Ranking relevant context.", stage="context:rank")
+    ranked_items = [
+        *rank_embeddings(
+            query_embedding,
+            app_embeddings,
+            prompt=prompt,
+            top_k=DEFAULT_APP_CONTEXT_K,
+        ),
+        *rank_embeddings(
+            query_embedding,
+            scene_embeddings,
+            prompt=prompt,
+            top_k=DEFAULT_SCENE_CONTEXT_K,
+        ),
+    ]
+    ranked_items = _ensure_required_embeddings(ranked_items, available_embeddings)
+    seen: set[tuple[str, str]] = set()
+    context_items: list[AiEmbedding] = []
+    context_items_strings: list[str] = []
+    for item in ranked_items:
+        key = (item.source_type, item.source_path)
+        if key in seen:
+            continue
+        seen.add(key)
+        context_items.append(item)
+        context_items_strings.append(f"[{item.source_type}] {item.source_path}")
+    await log_message(
+        f"Selected {len(context_items)} context items: {', '.join(context_items_strings)}",
+        stage="context:ready",
+    )
+    return context_items
 
 
 @api_with_auth.post("/ai/scenes/generate", response_model=AiSceneGenerateResponse)
@@ -622,3 +726,447 @@ async def generate_scene(
     )
 
     return AiSceneGenerateResponse(title=title, scenes=scenes, context=context_response)
+
+
+@api_with_auth.post("/ai/scenes/chat", response_model=AiSceneChatResponse)
+async def chat_scene(
+    data: AiSceneChatRequest,
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    request_id = data.request_id or str(uuid4())
+    posthog_trace_id = _sanitize_ai_id(request_id) or str(uuid4())
+    posthog_session_id = None
+    posthog_root_span_id = str(uuid4())
+    await _publish_ai_scene_log(redis, "Starting AI scene chat.", request_id, stage="start")
+    prompt = data.prompt.strip()
+    if not prompt:
+        await _publish_ai_scene_log(
+            redis,
+            "Prompt is required to start chat.",
+            request_id,
+            status="error",
+            stage="validate",
+        )
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Prompt is required")
+
+    chat = None
+    if data.frame_id is not None:
+        if data.chat_id:
+            chat = db.query(Chat).filter(Chat.id == data.chat_id).first()
+            if chat and chat.frame_id != data.frame_id:
+                raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Chat does not belong to frame")
+        if not chat:
+            if data.chat_id:
+                chat = Chat(id=data.chat_id, frame_id=data.frame_id, scene_id=data.scene_id)
+            else:
+                chat = Chat(frame_id=data.frame_id, scene_id=data.scene_id)
+            db.add(chat)
+            db.commit()
+            db.refresh(chat)
+        if data.scene_id and chat.scene_id != data.scene_id:
+            chat.scene_id = data.scene_id
+        if chat:
+            chat.updated_at = datetime.utcnow()
+            db.add(chat)
+            db.add(ChatMessage(chat_id=chat.id, role="user", content=prompt))
+            db.commit()
+
+    def _record_assistant_message(reply: str, tool: str) -> None:
+        if not chat:
+            return
+        chat.updated_at = datetime.utcnow()
+        db.add(chat)
+        db.add(ChatMessage(chat_id=chat.id, role="assistant", content=reply, tool=tool))
+        db.commit()
+
+    frame_context = None
+    frame_scene_summary = None
+    if data.frame_id is not None:
+        frame = db.query(Frame).filter(Frame.id == data.frame_id).first()
+        if frame:
+            frame_context = format_frame_context(
+                {
+                    "name": frame.name,
+                    "width": frame.width,
+                    "height": frame.height,
+                    "device": frame.device,
+                    "color": frame.color,
+                    "background_color": frame.background_color,
+                    "scaling_mode": frame.scaling_mode,
+                    "rotate": frame.rotate,
+                    "flip": frame.flip,
+                    "gpio_buttons": frame.gpio_buttons,
+                }
+            )
+            frame_scene_summary = format_frame_scene_summary(frame.scenes)
+
+    settings = get_settings_dict(db)
+    openai_settings = settings.get("openAI", {})
+    api_key = openai_settings.get("backendApiKey")
+    if not api_key:
+        await _publish_ai_scene_log(
+            redis,
+            "OpenAI backend API key not set.",
+            request_id,
+            status="error",
+            stage="validate",
+        )
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="OpenAI backend API key not set")
+
+    try:
+        history = [item.model_dump() for item in (data.history or [])]
+        scene_payload = data.scene if isinstance(data.scene, dict) else None
+        scene_prefix = "Build a new scene:"
+        tool_payload = None
+        tool = None
+        tool_prompt = None
+        if prompt.startswith(scene_prefix):
+            await _publish_ai_scene_log(
+                redis,
+                "Skipping tool routing for scene build prompt.",
+                request_id,
+                stage="route",
+            )
+            tool = "build_scene"
+            tool_prompt = prompt[len(scene_prefix) :].strip() or prompt
+        else:
+            await _publish_ai_scene_log(redis, "Routing prompt for tool selection.", request_id, stage="route")
+            tool_payload = await route_scene_chat(
+                prompt=prompt,
+                scene=scene_payload,
+                frame_context=frame_context,
+                history=history,
+                api_key=api_key,
+                model=openai_settings.get("chatModel") or CHAT_MODEL,
+                ai_trace_id=posthog_trace_id,
+                ai_session_id=posthog_session_id,
+                ai_parent_id=posthog_root_span_id,
+            )
+
+            tool = tool_payload.get("tool") if isinstance(tool_payload, dict) else None
+            tool_prompt = tool_payload.get("tool_prompt") if isinstance(tool_payload, dict) else None
+        if not isinstance(tool_prompt, str) or not tool_prompt.strip():
+            tool_prompt = prompt
+        tool = tool if tool in {"build_scene", "modify_scene", "answer_frame_question", "answer_scene_question", "reply"} else "answer_frame_question"
+        if tool == "modify_scene" and not scene_payload:
+            tool = "answer_frame_question"
+        if tool == "answer_scene_question" and not scene_payload:
+            tool = "answer_frame_question"
+        if tool in {"answer_frame_question", "answer_scene_question"}:
+            tool_prompt = prompt
+        await _publish_ai_scene_log(redis, f"Tool selected: {tool}.", request_id, stage="route")
+
+        if tool_prompt != prompt:
+            await _publish_ai_scene_log(
+                redis,
+                "Prompt refined for tool execution.",
+                request_id,
+                stage="prompt:tool",
+            )
+
+        context_items = await _load_context_items(
+            db=db,
+            settings=settings,
+            api_key=api_key,
+            prompt=tool_prompt,
+            ai_trace_id=posthog_trace_id,
+            ai_session_id=posthog_session_id,
+            ai_parent_id=posthog_root_span_id,
+            redis=redis,
+            request_id=request_id,
+        )
+
+        selected_nodes = data.selected_nodes if isinstance(data.selected_nodes, list) else None
+        selected_edges = data.selected_edges if isinstance(data.selected_edges, list) else None
+
+        if tool in {"answer_scene_question", "reply"} and scene_payload:
+            await _publish_ai_scene_log(redis, "Answering scene question.", request_id, stage="answer")
+            answer = await answer_scene_question(
+                prompt=tool_prompt,
+                api_key=api_key,
+                context_items=context_items,
+                frame_context=frame_context,
+                scene=scene_payload,
+                selected_nodes=selected_nodes,
+                selected_edges=selected_edges,
+                history=history,
+                model=openai_settings.get("chatModel") or CHAT_MODEL,
+                ai_trace_id=posthog_trace_id,
+                ai_session_id=posthog_session_id,
+                ai_parent_id=posthog_root_span_id,
+            )
+            await _publish_ai_scene_log(redis, "Answer complete.", request_id, status="success", stage="done")
+            _record_assistant_message(answer, tool)
+            return AiSceneChatResponse(reply=answer, tool=tool, chatId=chat.id if chat else None)
+
+        if tool in {"answer_frame_question", "reply"}:
+            await _publish_ai_scene_log(redis, "Answering frame question.", request_id, stage="answer")
+            answer = await answer_frame_question(
+                prompt=tool_prompt,
+                api_key=api_key,
+                context_items=context_items,
+                frame_context=frame_context,
+                frame_scene_summary=frame_scene_summary,
+                history=history,
+                model=openai_settings.get("chatModel") or CHAT_MODEL,
+                ai_trace_id=posthog_trace_id,
+                ai_session_id=posthog_session_id,
+                ai_parent_id=posthog_root_span_id,
+            )
+            await _publish_ai_scene_log(redis, "Answer complete.", request_id, status="success", stage="done")
+            _record_assistant_message(answer, tool)
+            return AiSceneChatResponse(reply=answer, tool=tool, chatId=chat.id if chat else None)
+
+        if tool == "build_scene":
+            response_payload: dict[str, Any] | None = None
+            scene_plan: dict[str, Any] | None = None
+            validation_issues: list[str] = []
+            review_issues: list[str] = []
+            max_attempts = 3
+            scene_model = openai_settings.get("sceneModel") or SCENE_MODEL
+            review_model = openai_settings.get("reviewModel") or SCENE_REVIEW_MODEL
+            await _publish_ai_scene_log(redis, "Generating scene plan.", request_id, stage="plan")
+            scene_plan = await generate_scene_plan(
+                prompt=tool_prompt,
+                context_items=context_items,
+                api_key=api_key,
+                model=scene_model,
+                frame_context=frame_context,
+                ai_trace_id=posthog_trace_id,
+                ai_session_id=posthog_session_id,
+                ai_parent_id=posthog_root_span_id,
+            )
+            for attempt in range(1, max_attempts + 1):
+                if attempt == 1:
+                    await _publish_ai_scene_log(
+                        redis,
+                        "Generating scene JSON.",
+                        request_id,
+                        stage="generate",
+                    )
+                    response_payload = await generate_scene_json(
+                        prompt=tool_prompt,
+                        context_items=context_items,
+                        api_key=api_key,
+                        model=scene_model,
+                        plan=scene_plan,
+                        frame_context=frame_context,
+                        ai_trace_id=posthog_trace_id,
+                        ai_session_id=posthog_session_id,
+                        ai_parent_id=posthog_root_span_id,
+                    )
+                else:
+                    await _publish_ai_scene_log(
+                        redis,
+                        "Fixing scene JSON.",
+                        request_id,
+                        stage="generate",
+                    )
+                    response_payload = await repair_scene_json(
+                        prompt=tool_prompt,
+                        context_items=context_items,
+                        api_key=api_key,
+                        model=scene_model,
+                        payload=response_payload or {},
+                        issues=validation_issues + review_issues,
+                        plan=scene_plan,
+                        frame_context=frame_context,
+                        ai_trace_id=posthog_trace_id,
+                        ai_session_id=posthog_session_id,
+                        ai_parent_id=posthog_root_span_id,
+                    )
+                validation_issues = validate_scene_payload(response_payload or {})
+                if validation_issues:
+                    await _publish_ai_scene_log(
+                        redis,
+                        f"Scene validation issues: {validation_issues}",
+                        request_id,
+                        status="warning",
+                        stage="validate",
+                    )
+                    continue
+                review_issues = await review_scene_solution(
+                    prompt=tool_prompt,
+                    payload=response_payload or {},
+                    api_key=api_key,
+                    model=review_model,
+                    frame_context=frame_context,
+                    ai_trace_id=posthog_trace_id,
+                    ai_session_id=posthog_session_id,
+                    ai_parent_id=posthog_root_span_id,
+                )
+                if review_issues:
+                    await _publish_ai_scene_log(
+                        redis,
+                        f"Scene review issues: {review_issues}",
+                        request_id,
+                        status="warning",
+                        stage="validate",
+                    )
+                    continue
+                break
+
+            title = response_payload.get("title") if response_payload else "Untitled Scene"
+            scenes = response_payload.get("scenes") if response_payload else None
+            if not isinstance(scenes, list):
+                await _publish_ai_scene_log(
+                    redis,
+                    "AI response did not include scenes.",
+                    request_id,
+                    status="error",
+                    stage="validate",
+                )
+                raise HTTPException(
+                    status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                    detail="AI response did not include scenes.",
+                )
+            if response_payload:
+                _split_state_nodes_by_app(response_payload)
+            for scene in scenes:
+                if not isinstance(scene, dict):
+                    continue
+                settings_payload: dict[str, Any] | None = scene.get("settings") or {}
+                if not isinstance(settings_payload, dict):
+                    settings_payload = {}
+                    scene["settings"] = settings_payload
+                settings_payload["prompt"] = tool_prompt
+
+            await _publish_ai_scene_log(
+                redis,
+                "Scene generation complete.",
+                request_id,
+                status="success",
+                stage="done",
+            )
+            await _publish_ai_scene_log(
+                redis,
+                f"Scene generated: {title}",
+                request_id,
+                status="success",
+                stage="done",
+            )
+            reply = f"Generated a new scene: {title}."
+            _record_assistant_message(reply, tool)
+            return AiSceneChatResponse(reply=reply, tool=tool, title=title, scenes=scenes, chatId=chat.id if chat else None)
+
+        if tool == "modify_scene":
+            scene_model = openai_settings.get("sceneModel") or SCENE_MODEL
+            response_payload: dict[str, Any] | None = None
+            validation_issues: list[str] = []
+            available_apps = sorted(get_app_configs().keys())
+            max_attempts = 2
+            for attempt in range(1, max_attempts + 1):
+                await _publish_ai_scene_log(
+                    redis,
+                    "Generating scene update." if attempt == 1 else "Fixing scene update.",
+                    request_id,
+                    stage="modify",
+                )
+                response_payload = await modify_scene_json(
+                    prompt=tool_prompt,
+                    scene=scene_payload or {},
+                    context_items=context_items,
+                    available_apps=available_apps,
+                    api_key=api_key,
+                    model=scene_model,
+                    issues=validation_issues or None,
+                    frame_context=frame_context,
+                    selected_nodes=selected_nodes,
+                    selected_edges=selected_edges,
+                    ai_trace_id=posthog_trace_id,
+                    ai_session_id=posthog_session_id,
+                    ai_parent_id=posthog_root_span_id,
+                )
+                validation_issues = validate_scene_payload(response_payload or {})
+                if validation_issues:
+                    await _publish_ai_scene_log(
+                        redis,
+                        f"Scene validation issues: {validation_issues}",
+                        request_id,
+                        status="warning",
+                        stage="validate",
+                    )
+                if not validation_issues:
+                    break
+
+            scenes = response_payload.get("scenes") if response_payload else None
+            if not isinstance(scenes, list) or not scenes:
+                await _publish_ai_scene_log(
+                    redis,
+                    "AI response did not include scenes.",
+                    request_id,
+                    status="error",
+                    stage="validate",
+                )
+                raise HTTPException(
+                    status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                    detail="AI response did not include scenes.",
+                )
+            if data.scene_id and isinstance(scenes[0], dict):
+                scenes[0]["id"] = data.scene_id
+                if data.scene and isinstance(data.scene, dict):
+                    existing_name = data.scene.get("name")
+                    if existing_name and not scenes[0].get("name"):
+                        scenes[0]["name"] = existing_name
+            if response_payload:
+                _split_state_nodes_by_app(response_payload)
+            for scene in scenes:
+                if not isinstance(scene, dict):
+                    continue
+                settings_payload: dict[str, Any] | None = scene.get("settings") or {}
+                if not isinstance(settings_payload, dict):
+                    settings_payload = {}
+                    scene["settings"] = settings_payload
+                settings_payload["prompt"] = tool_prompt
+
+            await _publish_ai_scene_log(
+                redis,
+                "Scene update complete.",
+                request_id,
+                status="success",
+                stage="done",
+            )
+            reply = "Updated the current scene."
+            if validation_issues:
+                reply += " Note: the update may need review for validation issues."
+            _record_assistant_message(reply, tool)
+            return AiSceneChatResponse(reply=reply, tool=tool, scenes=scenes, chatId=chat.id if chat else None)
+
+        await _publish_ai_scene_log(redis, "Answering frame question.", request_id, stage="answer")
+        answer = await answer_frame_question(
+            prompt=tool_prompt,
+            api_key=api_key,
+            context_items=context_items,
+            frame_context=frame_context,
+            frame_scene_summary=frame_scene_summary,
+            history=history,
+            model=openai_settings.get("chatModel") or CHAT_MODEL,
+            ai_trace_id=posthog_trace_id,
+            ai_session_id=posthog_session_id,
+            ai_parent_id=posthog_root_span_id,
+        )
+        await _publish_ai_scene_log(redis, "Answer complete.", request_id, status="success", stage="done")
+        _record_assistant_message(answer, "reply")
+        return AiSceneChatResponse(reply=answer, tool="reply", chatId=chat.id if chat else None)
+    except HTTPException as exc:
+        await _publish_ai_scene_log(
+            redis,
+            f"AI chat failed: {exc.detail}",
+            request_id,
+            status="error",
+            stage="error",
+        )
+        raise
+    except Exception as exc:
+        await _publish_ai_scene_log(
+            redis,
+            f"AI chat failed: {exc}",
+            request_id,
+            status="error",
+            stage="error",
+        )
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail=f"AI chat failed: {exc}",
+        ) from exc

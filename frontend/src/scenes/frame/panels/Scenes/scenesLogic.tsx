@@ -107,6 +107,8 @@ export const scenesLogic = kea<scenesLogicType>([
     installMissingActiveScene: true,
     installMissingActiveSceneSuccess: true,
     installMissingActiveSceneFailure: true,
+    focusScene: (sceneId: string) => ({ sceneId }),
+    clearFocusedScene: true,
   }),
   forms(({ actions, values, props }) => ({
     newScene: {
@@ -215,6 +217,13 @@ export const scenesLogic = kea<scenesLogicType>([
         previewScene: (_, { sceneId }) => sceneId,
         previewSceneSuccess: () => null,
         previewSceneFailure: () => null,
+      },
+    ],
+    focusedSceneId: [
+      null as string | null,
+      {
+        focusScene: (_, { sceneId }) => sceneId,
+        clearFocusedScene: () => null,
       },
     ],
     aiPrompt: [
@@ -482,7 +491,19 @@ export const scenesLogic = kea<scenesLogicType>([
           : [],
     ],
   }),
-  listeners(({ actions, props, values }) => ({
+  listeners(({ actions, values, cache, props }) => ({
+    focusScene: ({ sceneId }) => {
+      if (!sceneId) {
+        return
+      }
+      if (cache.focusedSceneTimeout) {
+        clearTimeout(cache.focusedSceneTimeout)
+      }
+      cache.focusedSceneTimeout = window.setTimeout(() => {
+        actions.clearFocusedScene()
+        cache.focusedSceneTimeout = null
+      }, 2500)
+    },
     generateAiScene: async () => {
       const prompt = values.aiPrompt.trim()
       if (!prompt) {
@@ -508,6 +529,7 @@ export const scenesLogic = kea<scenesLogicType>([
         if (!scenes.length) {
           throw new Error('No scenes returned from AI')
         }
+        const existingSceneIds = new Set(values.scenes.map((scene) => scene.id))
         const sanitizedScenes = scenes.map((scene: Partial<FrameScene>) => {
           const sanitizedScene = sanitizeScene(scene, values.frameForm)
           return {
@@ -520,6 +542,12 @@ export const scenesLogic = kea<scenesLogicType>([
         })
         actions.applyTemplate({ scenes: sanitizedScenes, name: title || 'AI Generated Scene' })
         actions.generateAiSceneSuccess()
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        const updatedScenes = values.frameForm?.scenes ?? values.scenes
+        const newlyAddedScene = updatedScenes.find((scene) => !existingSceneIds.has(scene.id))
+        if (newlyAddedScene) {
+          actions.focusScene(newlyAddedScene.id)
+        }
         actions.setAiSceneLogMessage({
           requestId,
           message: 'Scene generated: ' + (title || 'AI Generated Scene'),

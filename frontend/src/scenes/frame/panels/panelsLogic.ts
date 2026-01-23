@@ -21,6 +21,7 @@ const DEFAULT_LAYOUT: Record<Area, PanelWithMetadata[]> = {
     { panel: Panel.SceneState, active: true, hidden: false },
     { panel: Panel.Apps, active: false, hidden: false },
     { panel: Panel.Events, active: false, hidden: false },
+    { panel: Panel.Chat, active: false, hidden: false },
   ],
   [Area.BottomLeft]: [
     { panel: Panel.Logs, active: true, hidden: false },
@@ -58,6 +59,7 @@ export const panelsLogic = kea<panelsLogicType>([
     closePanel: (panel: PanelWithMetadata) => ({ panel }),
     toggleFullScreenPanel: (panel: PanelWithMetadata) => ({ panel }),
     disableFullscreenPanel: true,
+    openChat: true,
     openTemplates: true,
     openLogs: true,
     editApp: (sceneId: string, nodeId: string, nodeData: AppNodeData) => ({ sceneId, nodeId, nodeData }),
@@ -152,6 +154,29 @@ export const panelsLogic = kea<panelsLogicType>([
             a.panel === Panel.Templates ? { ...a, active: true } : a.active ? { ...a, active: false } : a
           ),
         }),
+        openChat: (state) => {
+          const existingChat = state[Area.TopRight].find((panel) => panel.panel === Panel.Chat)
+          const updatedPanels = state[Area.TopRight].map((panel) =>
+            panel.panel === Panel.Chat
+              ? { ...panel, active: true, hidden: false }
+              : panel.active
+              ? { ...panel, active: false }
+              : panel
+          )
+          if (existingChat) {
+            return {
+              ...state,
+              [Area.TopRight]: updatedPanels,
+            }
+          }
+          return {
+            ...state,
+            [Area.TopRight]: [
+              ...updatedPanels.map((panel) => (panel.active ? { ...panel, active: false } : panel)),
+              { panel: Panel.Chat, active: true, hidden: false },
+            ],
+          }
+        },
         openLogs: (state, _) => ({
           ...state,
           [Area.BottomLeft]: state[Area.BottomLeft].map((a) =>
@@ -187,6 +212,7 @@ export const panelsLogic = kea<panelsLogicType>([
       {
         toggleFullScreenPanel: (state, { panel }) => (state && panelsEqual(state, panel) ? null : panel),
         disableFullscreenPanel: () => null,
+        openChat: () => null,
         openTemplates: () => null,
         openAsset: () => null,
         editApp: () => null,
@@ -234,8 +260,8 @@ export const panelsLogic = kea<panelsLogicType>([
             ...panels,
             [Area.TopRight]: panels[Area.TopRight].filter((p) =>
               scenesOpen
-                ? [Panel.Apps, Panel.Events, Panel.Templates, Panel.Schedule].includes(p.panel)
-                : [Panel.Apps, Panel.Events, Panel.SceneState].includes(p.panel)
+                ? [Panel.Templates, Panel.Schedule, Panel.Chat].includes(p.panel)
+                : [Panel.SceneState, Panel.Apps, Panel.Events, Panel.Chat].includes(p.panel)
             ),
             [Area.BottomLeft]: panels[Area.BottomLeft].filter((p) =>
               !scenesOpen ? true : p.panel !== Panel.SceneSource
@@ -263,11 +289,17 @@ export const panelsLogic = kea<panelsLogicType>([
         }
       },
     ],
-    selectedSceneId: [
-      (s) => [s.frameForm, s.lastSelectedScene, s.panels],
-      (frameForm, lastSelectedScene, panels): string | null =>
-        lastSelectedScene ??
+    selectedScenePanelId: [
+      (s) => [s.panels],
+      (panels): string | null =>
         panels[Area.TopLeft].find((p) => p.active && (p.panel === Panel.Diagram || p.panel === Panel.SceneJSON))?.key ??
+        null,
+    ],
+    selectedSceneId: [
+      (s) => [s.frameForm, s.lastSelectedScene, s.selectedScenePanelId],
+      (frameForm, lastSelectedScene, selectedScenePanelId): string | null =>
+        lastSelectedScene ??
+        selectedScenePanelId ??
         frameForm?.scenes?.find((s) => s.default)?.id ??
         frameForm?.scenes?.[0]?.id ??
         null,

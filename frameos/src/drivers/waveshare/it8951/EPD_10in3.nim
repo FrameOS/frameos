@@ -43,3 +43,4 @@ proc EPD_10IN3_16Gray_Display*(Image: ptr UBYTE) =
 proc EPD_10IN3_Sleep*() =
   if initDone:
     EPD_IT8951_Sleep()
+    initDone = false

@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any, Optional, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -25,3 +25,30 @@ class AiSceneGenerateResponse(BaseModel):
     title: Optional[str] = None
     scenes: list[dict[str, Any]]
     context: list[AiSceneContextItem]
+
+
+class AiSceneChatMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str
+
+
+class AiSceneChatRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    prompt: str
+    chat_id: Optional[str] = Field(default=None, alias="chatId")
+    frame_id: Optional[int] = Field(default=None, alias="frameId")
+    scene_id: Optional[str] = Field(default=None, alias="sceneId")
+    scene: Optional[dict[str, Any]] = None
+    selected_nodes: Optional[list[dict[str, Any]]] = Field(default=None, alias="selectedNodes")
+    selected_edges: Optional[list[dict[str, Any]]] = Field(default=None, alias="selectedEdges")
+    history: Optional[list[AiSceneChatMessage]] = None
+    request_id: Optional[str] = Field(default=None, alias="requestId")
+
+
+class AiSceneChatResponse(BaseModel):
+    reply: str
+    tool: str
+    chat_id: Optional[str] = Field(default=None, alias="chatId")
+    title: Optional[str] = None
+    scenes: Optional[list[dict[str, Any]]] = None
