@@ -327,7 +327,7 @@ export function Scenes() {
                   generateAiSceneFailure('Add a prompt to generate a scene.')
                   return
                 }
-                startNewChatWithMessage(`generate scene: ${trimmedPrompt}`, null)
+                startNewChatWithMessage(`Build a new scene: ${trimmedPrompt}`, null)
               }}
               disabled={!canSubmitAiPrompt}
             >

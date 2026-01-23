@@ -817,21 +817,35 @@ async def chat_scene(
     try:
         history = [item.model_dump() for item in (data.history or [])]
         scene_payload = data.scene if isinstance(data.scene, dict) else None
-        await _publish_ai_scene_log(redis, "Routing prompt for tool selection.", request_id, stage="route")
-        tool_payload = await route_scene_chat(
-            prompt=prompt,
-            scene=scene_payload,
-            frame_context=frame_context,
-            history=history,
-            api_key=api_key,
-            model=openai_settings.get("chatModel") or CHAT_MODEL,
-            ai_trace_id=posthog_trace_id,
-            ai_session_id=posthog_session_id,
-            ai_parent_id=posthog_root_span_id,
-        )
+        scene_prefix = "Build a new scene:"
+        tool_payload = None
+        tool = None
+        tool_prompt = None
+        if prompt.startswith(scene_prefix):
+            await _publish_ai_scene_log(
+                redis,
+                "Skipping tool routing for scene build prompt.",
+                request_id,
+                stage="route",
+            )
+            tool = "build_scene"
+            tool_prompt = prompt[len(scene_prefix) :].strip() or prompt
+        else:
+            await _publish_ai_scene_log(redis, "Routing prompt for tool selection.", request_id, stage="route")
+            tool_payload = await route_scene_chat(
+                prompt=prompt,
+                scene=scene_payload,
+                frame_context=frame_context,
+                history=history,
+                api_key=api_key,
+                model=openai_settings.get("chatModel") or CHAT_MODEL,
+                ai_trace_id=posthog_trace_id,
+                ai_session_id=posthog_session_id,
+                ai_parent_id=posthog_root_span_id,
+            )
 
-        tool = tool_payload.get("tool") if isinstance(tool_payload, dict) else None
-        tool_prompt = tool_payload.get("tool_prompt") if isinstance(tool_payload, dict) else None
+            tool = tool_payload.get("tool") if isinstance(tool_payload, dict) else None
+            tool_prompt = tool_payload.get("tool_prompt") if isinstance(tool_payload, dict) else None
         if not isinstance(tool_prompt, str) or not tool_prompt.strip():
             tool_prompt = prompt
         tool = tool if tool in {"build_scene", "modify_scene", "answer_frame_question", "answer_scene_question", "reply"} else "answer_frame_question"
