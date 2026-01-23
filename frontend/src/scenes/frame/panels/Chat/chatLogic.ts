@@ -85,6 +85,7 @@ export const chatLogic = kea<chatLogicType>([
     setActiveLogMessageId: (messageId: string | null) => ({ messageId }),
     setActiveLogStartTime: (timestamp: string | null) => ({ timestamp }),
     toggleContextItemsExpanded: (chatId: string, key: string) => ({ chatId, key }),
+    toggleLogExpanded: (chatId: string, messageId: string) => ({ chatId, messageId }),
     loadChats: () => ({}),
     loadChatsSuccess: (chats: ChatSummary[], hasMore: boolean, nextOffset: number) => ({
       chats,
@@ -331,6 +332,22 @@ export const chatLogic = kea<chatLogicType>([
         }),
       },
     ],
+    logExpandedByChat: [
+      {} as Record<string, Record<string, boolean>>,
+      {
+        toggleLogExpanded: (state, { chatId, messageId }) => ({
+          ...state,
+          [chatId]: {
+            ...(state[chatId] ?? {}),
+            [messageId]: !(state[chatId] ?? {})[messageId],
+          },
+        }),
+        clearChat: (state, { chatId }) => ({
+          ...state,
+          [chatId]: {},
+        }),
+      },
+    ],
   }),
   selectors({
     selectedScene: [
@@ -370,6 +387,11 @@ export const chatLogic = kea<chatLogicType>([
       (s: any) => [s.contextItemsExpandedByChat, s.activeChatId],
       (contextItemsExpandedByChat: Record<string, Record<string, boolean>>, activeChatId: string | null) =>
         activeChatId ? contextItemsExpandedByChat[activeChatId] ?? {} : {},
+    ],
+    logExpanded: [
+      (s: any) => [s.logExpandedByChat, s.activeChatId],
+      (logExpandedByChat: Record<string, Record<string, boolean>>, activeChatId: string | null) =>
+        activeChatId ? logExpandedByChat[activeChatId] ?? {} : {},
     ],
     historyForRequest: [
       (s) => [s.messages],

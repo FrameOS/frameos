@@ -12,7 +12,7 @@ import type { KeyboardEvent } from 'react'
 import clsx from 'clsx'
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso'
 import { Area, Panel } from '../../../../types'
-import { ArrowLeftIcon, ChevronLeftIcon } from '@heroicons/react/24/solid'
+import { ChevronLeftIcon } from '@heroicons/react/24/solid'
 
 export function Chat() {
   const { frameId, scenes } = useValues(frameLogic)
@@ -35,12 +35,14 @@ export function Chat() {
     chatMessagesLoading,
     isCreatingChat,
     contextSelectionSummary,
+    logExpanded,
   } = useValues(chatLogic({ frameId, sceneId: selectedSceneId }))
   const {
     setInput,
     submitMessage,
     clearChat,
     toggleContextItemsExpanded,
+    toggleLogExpanded,
     selectChat,
     backToList,
     createChat,
@@ -53,12 +55,6 @@ export function Chat() {
   const scrollerElementRef = useRef<HTMLElement | null>(null)
   const shouldStickToBottomRef = useRef(true)
   const lastMessage = messages[messages.length - 1]
-  const pendingAssistantPlaceholder =
-    messages.length > 0 &&
-    messages[messages.length - 1].isPlaceholder &&
-    !messages[messages.length - 1].content &&
-    !messages[messages.length - 1].tool
-  const pendingThinkingIndex = pendingAssistantPlaceholder ? messages.length - 2 : null
   const isChatView = chatView === 'chat' && activeChatId
   const hasBackendApiKey = Boolean(savedSettings?.openAI?.backendApiKey?.trim())
   const missingBackendApiKey = !hasBackendApiKey
@@ -193,10 +189,30 @@ export function Chat() {
     )
   }
 
-  const renderLogLine = (line: string) => {
+  const stripBracketSegments = (value: string) =>
+    value
+      .replace(/\s*\[[^\]]+\]\s*/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+
+  const stripReviewIssues = (value: string) => {
+    const match = value.match(/^(WARNING: Scene review issues:)\s*(\[.*\])$/)
+    return match ? match[1] : value
+  }
+
+  const renderLogLine = (
+    line: string,
+    options: { showStage?: boolean; showDetails?: boolean } = { showStage: true, showDetails: true }
+  ) => {
+    const { showStage = true, showDetails = true } = options
+    const lineWithReview = showDetails ? line : stripReviewIssues(line)
+
     const contextMatch = line.match(/^(.*Selected \d+ context items: )(.+)$/)
     if (contextMatch) {
       const [, label, items] = contextMatch
+      if (!showDetails) {
+        return <span className="text-slate-100">{label.trim()}</span>
+      }
       const tokens = items
         .split(',')
         .map((item) => item.trim())
@@ -240,11 +256,12 @@ export function Chat() {
       const [, time, stage, message] = structuredMatch
       const statusMatch = message.match(/^(SUCCESS|ERROR):\s+(.*)$/)
       const statusMessage = statusMatch ? statusMatch[2] : message
+      const filteredStatusMessage = showDetails ? statusMessage : stripReviewIssues(statusMessage)
       const generatedSceneName = extractGeneratedSceneName(statusMessage)
       return (
         <div className="flex flex-wrap gap-x-2 gap-y-1">
           <span className="text-slate-500">{time}</span>
-          <span className="text-sky-300">{stage}</span>
+          {showStage ? <span className="text-sky-300">{stage}</span> : null}
           {statusMatch ? (
             <span className={clsx('font-semibold', statusMatch[1] === 'ERROR' ? 'text-red-400' : 'text-emerald-300')}>
               {statusMatch[1]}:
@@ -253,38 +270,80 @@ export function Chat() {
           {generatedSceneName ? (
             <span className="text-slate-100">{renderGeneratedSceneMessage(generatedSceneName)}</span>
           ) : statusMatch ? (
-            <span className="text-slate-100">{statusMatch[2]}</span>
+            <span className="text-slate-100">{filteredStatusMessage}</span>
           ) : (
-            <span className="text-slate-100">{message}</span>
+            <span className="text-slate-100">
+              {showStage
+                ? filteredStatusMessage
+                : stripBracketSegments(showDetails ? message : stripReviewIssues(message))}
+            </span>
           )}
         </div>
       )
     }
 
-    const generatedSceneName = extractGeneratedSceneName(line)
+    const sanitizedLine = showStage ? lineWithReview : stripBracketSegments(lineWithReview)
+    const generatedSceneName = extractGeneratedSceneName(lineWithReview)
     if (generatedSceneName) {
       return <span className="text-slate-100">{renderGeneratedSceneMessage(generatedSceneName)}</span>
     }
 
-    return <span className="text-slate-100">{line}</span>
+    return <span className="text-slate-100">{sanitizedLine}</span>
   }
 
-  const renderMessageBody = (messageContent: string, isLog: boolean) => {
-    if (!messageContent) {
-      return null
+  const renderLogMessage = (messageContent: string, messageId: string, isStreaming?: boolean) => {
+    const lines = messageContent ? messageContent.split('\n') : []
+    const displayLines = lines.length > 0 ? lines : ['Thinking…']
+    const lastLine = displayLines[displayLines.length - 1] ?? ''
+    const isExpanded = logExpanded[messageId] ?? false
+    const canExpand = displayLines.length > 1
+
+    if (!isExpanded) {
+      return (
+        <button
+          type="button"
+          className={clsx('flex w-full items-start text-left', canExpand ? 'cursor-pointer' : 'cursor-default')}
+          onClick={() => activeChatId && canExpand && toggleLogExpanded(activeChatId, messageId)}
+          disabled={!canExpand}
+        >
+          {isStreaming ? <Spinner className="h-4 w-4 mr-2 text-slate-400" /> : <span className="h-4 w-4" />}
+          <span className={clsx('flex-1 text-sm', isStreaming ? 'opacity-70' : '')}>
+            {renderLogLine(lastLine, { showStage: false, showDetails: false })}
+          </span>
+          {isStreaming ? (
+            <div className="w-2">
+              <span className="ai-scene-ellipsis text-slate-400" />
+            </div>
+          ) : null}
+        </button>
+      )
     }
 
+    return (
+      <div className="space-y-2 text-sm">
+        {displayLines.map((line, index) => (
+          <div key={`${line}-${index}`} className="whitespace-pre-wrap break-words">
+            {renderLogLine(line)}
+          </div>
+        ))}
+        <button
+          type="button"
+          className="text-xs text-slate-500 hover:text-slate-300 transition"
+          onClick={() => activeChatId && toggleLogExpanded(activeChatId, messageId)}
+        >
+          Hide log steps
+        </button>
+      </div>
+    )
+  }
+
+  const renderMessageBody = (messageContent: string, isLog: boolean, messageId: string, isStreaming?: boolean) => {
     if (isLog) {
-      const lines = messageContent.split('\n')
-      return (
-        <div className="space-y-2 font-mono text-xs">
-          {lines.map((line, index) => (
-            <div key={`${line}-${index}`} className="whitespace-pre-wrap break-words">
-              {renderLogLine(line)}
-            </div>
-          ))}
-        </div>
-      )
+      return renderLogMessage(messageContent, messageId, isStreaming)
+    }
+
+    if (!messageContent) {
+      return null
     }
 
     return <div className="whitespace-pre-wrap break-words">{messageContent}</div>
@@ -398,15 +457,7 @@ export function Chat() {
                           <span className="uppercase tracking-wide">{message.role}</span>
                           {message.tool ? <span className="text-slate-500">tool: {message.tool}</span> : null}
                         </div>
-                        <div>
-                          {renderMessageBody(message.content, isLog)}
-                          {pendingThinkingIndex === index && isLog && message.isStreaming ? (
-                            <div className="inline-flex items-center gap-2 text-slate-300 pt-2">
-                              <span>Thinking…</span>
-                            </div>
-                          ) : null}
-                          {message.isStreaming ? <span className="ml-1 animate-pulse">▍</span> : null}
-                        </div>
+                        <div>{renderMessageBody(message.content, isLog, message.id, message.isStreaming)}</div>
                       </div>
                     </div>
                   )
