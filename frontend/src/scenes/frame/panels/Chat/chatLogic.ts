@@ -71,7 +71,7 @@ export const chatLogic = kea<chatLogicType>([
       diagramLogic({ frameId: props.frameId, sceneId: props.sceneId ?? '' }),
       ['selectedNodes', 'selectedEdges'],
     ],
-    actions: [frameLogic(props), ['applyTemplate', 'updateScene']],
+    actions: [frameLogic(props), ['applyTemplate', 'updateScene'], panelsLogic(props), ['openChat']],
   })),
   actions({
     setInput: (input: string) => ({ input }),
@@ -447,6 +447,7 @@ export const chatLogic = kea<chatLogicType>([
       actions.selectChat(chat.id)
     },
     startNewChatWithMessage: async ({ content, sceneId }) => {
+      actions.openChat()
       const targetSceneId = sceneId !== undefined ? sceneId : values.selectedScene?.id ?? null
       const chat = buildLocalChat(props.frameId, targetSceneId)
       actions.createChatSuccess(chat)

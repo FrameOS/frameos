@@ -59,6 +59,7 @@ export const panelsLogic = kea<panelsLogicType>([
     closePanel: (panel: PanelWithMetadata) => ({ panel }),
     toggleFullScreenPanel: (panel: PanelWithMetadata) => ({ panel }),
     disableFullscreenPanel: true,
+    openChat: true,
     openTemplates: true,
     openLogs: true,
     editApp: (sceneId: string, nodeId: string, nodeData: AppNodeData) => ({ sceneId, nodeId, nodeData }),
@@ -153,6 +154,29 @@ export const panelsLogic = kea<panelsLogicType>([
             a.panel === Panel.Templates ? { ...a, active: true } : a.active ? { ...a, active: false } : a
           ),
         }),
+        openChat: (state) => {
+          const existingChat = state[Area.TopRight].find((panel) => panel.panel === Panel.Chat)
+          const updatedPanels = state[Area.TopRight].map((panel) =>
+            panel.panel === Panel.Chat
+              ? { ...panel, active: true, hidden: false }
+              : panel.active
+              ? { ...panel, active: false }
+              : panel
+          )
+          if (existingChat) {
+            return {
+              ...state,
+              [Area.TopRight]: updatedPanels,
+            }
+          }
+          return {
+            ...state,
+            [Area.TopRight]: [
+              ...updatedPanels.map((panel) => (panel.active ? { ...panel, active: false } : panel)),
+              { panel: Panel.Chat, active: true, hidden: false },
+            ],
+          }
+        },
         openLogs: (state, _) => ({
           ...state,
           [Area.BottomLeft]: state[Area.BottomLeft].map((a) =>
@@ -188,6 +212,7 @@ export const panelsLogic = kea<panelsLogicType>([
       {
         toggleFullScreenPanel: (state, { panel }) => (state && panelsEqual(state, panel) ? null : panel),
         disableFullscreenPanel: () => null,
+        openChat: () => null,
         openTemplates: () => null,
         openAsset: () => null,
         editApp: () => null,
