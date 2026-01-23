@@ -127,7 +127,7 @@ export function Scenes() {
   const allSelectableScenesSelected =
     selectableSceneIds.length > 0 && selectableSceneIds.every((sceneId) => selectedSceneIds.has(sceneId))
   const promptSuggestions = [
-    { label: 'Banana', prompt: 'Display an image of a banana on a white background.' },
+    { label: 'Banana', prompt: 'Display an image of a banana on a white background. Do not use AI!' },
     { label: 'Unsplash split', prompt: 'split the scene in 4 and show a different unsplash image in each of them' },
     {
       label: 'Health message',
