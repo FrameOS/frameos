@@ -756,16 +756,35 @@ async def chat_scene(
             chat = db.query(Chat).filter(Chat.id == data.chat_id).first()
             if chat and chat.frame_id != data.frame_id:
                 raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Chat does not belong to frame")
+            if chat and chat.context_type not in (None, "scene", "frame"):
+                raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Chat context does not match scene chat")
         if not chat:
             if data.chat_id:
-                chat = Chat(id=data.chat_id, frame_id=data.frame_id, scene_id=data.scene_id)
+                chat = Chat(
+                    id=data.chat_id,
+                    frame_id=data.frame_id,
+                    scene_id=data.scene_id,
+                    context_type="scene" if data.scene_id else "frame",
+                    context_id=data.scene_id,
+                )
             else:
-                chat = Chat(frame_id=data.frame_id, scene_id=data.scene_id)
+                chat = Chat(
+                    frame_id=data.frame_id,
+                    scene_id=data.scene_id,
+                    context_type="scene" if data.scene_id else "frame",
+                    context_id=data.scene_id,
+                )
             db.add(chat)
             db.commit()
             db.refresh(chat)
         if data.scene_id and chat.scene_id != data.scene_id:
             chat.scene_id = data.scene_id
+        if data.scene_id:
+            chat.context_type = "scene"
+            chat.context_id = data.scene_id
+        elif not chat.context_type:
+            chat.context_type = "frame"
+            chat.context_id = None
         if chat:
             chat.updated_at = datetime.utcnow()
             db.add(chat)

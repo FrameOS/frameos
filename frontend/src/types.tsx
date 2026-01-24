@@ -482,10 +482,14 @@ export interface FrameSceneIndexed {
   edges: Record<string, DiagramEdge[]>
 }
 
+export type ChatContextType = 'scene' | 'frame' | 'app'
+
 export interface ChatSummary {
   id: string
   frameId: number
   sceneId?: string | null
+  contextType?: ChatContextType | null
+  contextId?: string | null
   createdAt: string
   updatedAt: string
   messageCount?: number

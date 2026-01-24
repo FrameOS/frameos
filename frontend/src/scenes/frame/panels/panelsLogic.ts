@@ -295,6 +295,15 @@ export const panelsLogic = kea<panelsLogicType>([
         panels[Area.TopLeft].find((p) => p.active && (p.panel === Panel.Diagram || p.panel === Panel.SceneJSON))?.key ??
         null,
     ],
+    activeEditAppPanel: [
+      (s) => [s.panels, s.fullScreenPanel],
+      (panels, fullScreenPanel): PanelWithMetadata | null => {
+        if (fullScreenPanel?.panel === Panel.EditApp) {
+          return fullScreenPanel
+        }
+        return panels[Area.TopLeft].find((p) => p.panel === Panel.EditApp && p.active) ?? null
+      },
+    ],
     selectedSceneId: [
       (s) => [s.frameForm, s.lastSelectedScene, s.selectedScenePanelId],
       (frameForm, lastSelectedScene, selectedScenePanelId): string | null =>

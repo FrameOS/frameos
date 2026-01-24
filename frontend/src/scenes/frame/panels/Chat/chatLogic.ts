@@ -7,6 +7,8 @@ import { panelsLogic } from '../panelsLogic'
 import { scenesLogic } from '../Scenes/scenesLogic'
 import { diagramLogic } from '../Diagram/diagramLogic'
 import type {
+  AppNodeData,
+  ChatContextType,
   ChatMessageRecord,
   ChatSummary,
   DiagramEdge,
@@ -16,11 +18,13 @@ import type {
 } from '../../../../types'
 import { Area, Panel } from '../../../../types'
 import { socketLogic } from '../../../socketLogic'
+import { editAppLogic } from '../EditApp/editAppLogic'
 
 import type { chatLogicType } from './chatLogicType'
 
 const MAX_HISTORY = 8
 const CHAT_PAGE_SIZE = 20
+const APP_CONTEXT_SEPARATOR = '::'
 
 export interface ChatLogicProps {
   frameId: number
@@ -39,12 +43,55 @@ export type ChatMessage = {
 
 export type ChatView = 'list' | 'chat'
 
-const buildLocalChat = (frameId: number, sceneId?: string | null): ChatSummary => {
+const buildAppContextId = (sceneId: string, nodeId: string) => `${sceneId}${APP_CONTEXT_SEPARATOR}${nodeId}`
+
+const parseAppContextId = (contextId?: string | null) => {
+  if (!contextId) {
+    return null
+  }
+  const parts = contextId.split(APP_CONTEXT_SEPARATOR)
+  if (parts.length < 2) {
+    return null
+  }
+  const [sceneId, ...rest] = parts
+  const nodeId = rest.join(APP_CONTEXT_SEPARATOR)
+  if (!sceneId || !nodeId) {
+    return null
+  }
+  return { sceneId, nodeId }
+}
+
+const getChatContextType = (chat: ChatSummary | null): ChatContextType =>
+  (chat?.contextType as ChatContextType | undefined) ?? (chat?.sceneId ? 'scene' : 'frame')
+
+const getChatContextId = (chat: ChatSummary | null): string | null => {
+  if (!chat) {
+    return null
+  }
+  if (chat.contextId) {
+    return chat.contextId
+  }
+  const contextType = getChatContextType(chat)
+  if (contextType === 'scene') {
+    return chat.sceneId ?? null
+  }
+  return null
+}
+
+const getChatContextKey = (chat: ChatSummary) => `${getChatContextType(chat)}:${getChatContextId(chat) ?? ''}`
+
+const buildLocalChat = (
+  frameId: number,
+  contextType: ChatContextType,
+  contextId?: string | null
+): ChatSummary => {
   const timestamp = new Date().toISOString()
   return {
     id: uuidv4(),
     frameId,
-    sceneId: sceneId ?? null,
+    sceneId: contextType === 'scene' ? contextId ?? null : null,
+    contextType,
+    contextId: contextId ?? null,
     createdAt: timestamp,
     updatedAt: timestamp,
     messageCount: 0,
@@ -52,10 +99,16 @@ const buildLocalChat = (frameId: number, sceneId?: string | null): ChatSummary =
   }
 }
 
-const normalizeRemoteChat = (chat: ChatSummary): ChatSummary => ({
-  ...chat,
-  isLocal: false,
-})
+const normalizeRemoteChat = (chat: ChatSummary): ChatSummary => {
+  const contextType = (chat.contextType as ChatContextType | undefined) ?? (chat.sceneId ? 'scene' : 'frame')
+  const contextId = chat.contextId ?? (contextType === 'scene' ? chat.sceneId ?? null : null)
+  return {
+    ...chat,
+    contextType,
+    contextId,
+    isLocal: false,
+  }
+}
 
 export const chatLogic = kea<chatLogicType>([
   path(['src', 'scenes', 'frame', 'chatLogic']),
@@ -67,7 +120,7 @@ export const chatLogic = kea<chatLogicType>([
       frameLogic(props),
       ['frameForm', 'scenes'],
       panelsLogic(props),
-      ['selectedScenePanelId', 'panels', 'scenesOpen'],
+      ['selectedScenePanelId', 'panels', 'scenesOpen', 'activeEditAppPanel'],
       diagramLogic({ frameId: props.frameId, sceneId: props.sceneId ?? '' }),
       ['selectedNodes', 'selectedEdges'],
     ],
@@ -104,6 +157,7 @@ export const chatLogic = kea<chatLogicType>([
     createChatSuccess: (chat: ChatSummary) => ({ chat }),
     createChatFailure: (error: string) => ({ error }),
     ensureChatForScene: (sceneId: string) => ({ sceneId }),
+    ensureChatForApp: (sceneId: string, nodeId: string) => ({ sceneId, nodeId }),
     ensureFrameChat: () => ({}),
     selectChat: (chatId: string) => ({ chatId }),
     setActiveChatId: (chatId: string | null) => ({ chatId }),
@@ -143,9 +197,10 @@ export const chatLogic = kea<chatLogicType>([
         loadChatsSuccess: (state, { chats }) => {
           const remoteChats = chats.map(normalizeRemoteChat)
           const remoteIds = new Set(remoteChats.map((chat) => chat.id))
-          const remoteSceneIds = new Set(remoteChats.map((chat) => chat.sceneId ?? null))
+          const remoteContextKeys = new Set(remoteChats.map((chat) => getChatContextKey(chat)))
           const localChats = state.filter(
-            (chat: ChatSummary) => chat.isLocal && !remoteIds.has(chat.id) && !remoteSceneIds.has(chat.sceneId ?? null)
+            (chat: ChatSummary) =>
+              chat.isLocal && !remoteIds.has(chat.id) && !remoteContextKeys.has(getChatContextKey(chat))
           )
           return [...remoteChats, ...localChats]
         },
@@ -360,19 +415,132 @@ export const chatLogic = kea<chatLogicType>([
         return scenes?.find((scene: FrameScene) => scene.id === selectedScenePanelId) ?? null
       },
     ],
+    activeEditAppContext: [
+      (s: any) => [s.activeEditAppPanel],
+      (activeEditAppPanel: PanelWithMetadata | null) => {
+        if (!activeEditAppPanel?.metadata) {
+          return null
+        }
+        const metadata = activeEditAppPanel.metadata as { sceneId?: string; nodeId?: string; nodeData?: AppNodeData }
+        if (!metadata.sceneId || !metadata.nodeId) {
+          return null
+        }
+        return {
+          sceneId: metadata.sceneId,
+          nodeId: metadata.nodeId,
+          nodeData: metadata.nodeData ?? null,
+        }
+      },
+    ],
     activeChat: [
       (s: any) => [s.chats, s.activeChatId],
       (chats: ChatSummary[], activeChatId: string | null) => chats.find((chat) => chat.id === activeChatId) ?? null,
     ],
     chatSceneId: [
       (s: any) => [s.activeChat, s.selectedScenePanelId],
-      (activeChat: ChatSummary | null, selectedScenePanelId: string | null): string | null =>
-        activeChat ? activeChat.sceneId ?? null : selectedScenePanelId ?? null,
+      (activeChat: ChatSummary | null, selectedScenePanelId: string | null): string | null => {
+        if (activeChat) {
+          const contextType = getChatContextType(activeChat)
+          if (contextType === 'scene') {
+            return getChatContextId(activeChat) ?? null
+          }
+          return null
+        }
+        return selectedScenePanelId ?? null
+      },
+    ],
+    chatContextType: [
+      (s: any) => [s.activeChat, s.activeEditAppContext, s.scenesOpen, s.selectedScene],
+      (
+        activeChat: ChatSummary | null,
+        activeEditAppContext: { sceneId: string; nodeId: string } | null,
+        scenesOpen: boolean,
+        selectedScene: FrameScene | null
+      ): ChatContextType => {
+        if (activeChat) {
+          return getChatContextType(activeChat)
+        }
+        if (activeEditAppContext) {
+          return 'app'
+        }
+        if (scenesOpen) {
+          return 'frame'
+        }
+        if (selectedScene) {
+          return 'scene'
+        }
+        return 'frame'
+      },
+    ],
+    chatContextId: [
+      (s: any) => [s.chatContextType, s.activeChat, s.activeEditAppContext, s.selectedScene],
+      (
+        chatContextType: ChatContextType,
+        activeChat: ChatSummary | null,
+        activeEditAppContext: { sceneId: string; nodeId: string } | null,
+        selectedScene: FrameScene | null
+      ): string | null => {
+        if (activeChat) {
+          return getChatContextId(activeChat)
+        }
+        if (chatContextType === 'app' && activeEditAppContext) {
+          return buildAppContextId(activeEditAppContext.sceneId, activeEditAppContext.nodeId)
+        }
+        if (chatContextType === 'scene') {
+          return selectedScene?.id ?? null
+        }
+        return null
+      },
     ],
     chatSceneName: [
       (s: any) => [s.chatSceneId, s.scenes],
       (chatSceneId: string | null, scenes: FrameScene[]): string | null =>
         chatSceneId ? scenes?.find((scene: FrameScene) => scene.id === chatSceneId)?.name ?? null : null,
+    ],
+    chatAppContext: [
+      (s: any) => [s.chatContextType, s.chatContextId, s.frameForm],
+      (chatContextType: ChatContextType, chatContextId: string | null, frameForm) => {
+        if (chatContextType !== 'app' || !chatContextId) {
+          return null
+        }
+        const parsed = parseAppContextId(chatContextId)
+        if (!parsed) {
+          return null
+        }
+        const scene = frameForm?.scenes?.find((item: FrameScene) => item.id === parsed.sceneId)
+        const node = scene?.nodes?.find((item: any) => item.id === parsed.nodeId)
+        return {
+          sceneId: parsed.sceneId,
+          nodeId: parsed.nodeId,
+          sceneName: scene?.name ?? parsed.sceneId,
+          nodeData: node?.data as AppNodeData | undefined,
+        }
+      },
+    ],
+    chatLabelForChat: [
+      (s: any) => [s.scenes, s.frameForm],
+      (scenes: FrameScene[], frameForm) => {
+        return (chat: ChatSummary) => {
+          const contextType = getChatContextType(chat)
+          if (contextType === 'frame') {
+            return 'Frame chat'
+          }
+          if (contextType === 'scene') {
+            return scenes?.find((scene: FrameScene) => scene.id === chat.sceneId)?.name ?? 'Frame chat'
+          }
+          const contextId = getChatContextId(chat)
+          const parsed = parseAppContextId(contextId)
+          if (!parsed) {
+            return 'App chat'
+          }
+          const scene = frameForm?.scenes?.find((item: FrameScene) => item.id === parsed.sceneId)
+          const node = scene?.nodes?.find((item: any) => item.id === parsed.nodeId)
+          const nodeData = node?.data as AppNodeData | undefined
+          const appLabel = nodeData?.name || nodeData?.keyword || parsed.nodeId
+          const sceneLabel = scene?.name ?? parsed.sceneId
+          return `${sceneLabel} / ${appLabel}`
+        }
+      },
     ],
     visibleChats: [
       (s: any) => [s.chats],
@@ -402,8 +570,18 @@ export const chatLogic = kea<chatLogicType>([
           .map((message) => ({ role: message.role, content: message.content })),
     ],
     contextSelectionSummary: [
-      (s) => [s.selectedScene, s.selectedNodes, s.selectedEdges],
-      (selectedScene: FrameScene | null, selectedNodes: DiagramNode[], selectedEdges: DiagramEdge[]): string | null => {
+      (s) => [s.chatContextType, s.chatAppContext, s.selectedScene, s.selectedNodes, s.selectedEdges],
+      (
+        chatContextType: ChatContextType,
+        chatAppContext: { nodeData?: AppNodeData } | null,
+        selectedScene: FrameScene | null,
+        selectedNodes: DiagramNode[],
+        selectedEdges: DiagramEdge[]
+      ): string | null => {
+        if (chatContextType === 'app') {
+          const appLabel = chatAppContext?.nodeData?.name || chatAppContext?.nodeData?.keyword
+          return appLabel ? `Editing app "${appLabel}"` : 'Editing this app'
+        }
         if (!selectedScene) {
           return null
         }
@@ -420,6 +598,25 @@ export const chatLogic = kea<chatLogicType>([
           parts.push(`${edgeCount} edge${edgeCount === 1 ? '' : 's'}`)
         }
         return `${parts.join(' and ')} added to context`
+      },
+    ],
+    defaultChatContext: [
+      (s) => [s.activeEditAppContext, s.scenesOpen, s.selectedScene],
+      (
+        activeEditAppContext: { sceneId: string; nodeId: string } | null,
+        scenesOpen: boolean,
+        selectedScene: FrameScene | null
+      ): { type: ChatContextType; id: string | null } => {
+        if (activeEditAppContext) {
+          return { type: 'app', id: buildAppContextId(activeEditAppContext.sceneId, activeEditAppContext.nodeId) }
+        }
+        if (scenesOpen) {
+          return { type: 'frame', id: null }
+        }
+        if (selectedScene) {
+          return { type: 'scene', id: selectedScene.id }
+        }
+        return { type: 'frame', id: null }
       },
     ],
   }),
@@ -463,40 +660,72 @@ export const chatLogic = kea<chatLogicType>([
       }
     },
     createChat: async ({ sceneId }) => {
-      const targetSceneId = sceneId !== undefined ? sceneId : values.selectedScene?.id ?? null
-      const chat = buildLocalChat(props.frameId, targetSceneId)
+      if (sceneId !== undefined) {
+        const chat = buildLocalChat(props.frameId, 'scene', sceneId ?? null)
+        actions.createChatSuccess(chat)
+        actions.selectChat(chat.id)
+        return
+      }
+      const { type, id } = values.defaultChatContext
+      const chat = buildLocalChat(props.frameId, type, id)
       actions.createChatSuccess(chat)
       actions.selectChat(chat.id)
     },
     startNewChatWithMessage: async ({ content, sceneId }) => {
       actions.openChat()
-      const targetSceneId = sceneId !== undefined ? sceneId : values.selectedScene?.id ?? null
-      const chat = buildLocalChat(props.frameId, targetSceneId)
+      if (sceneId !== undefined) {
+        const chat = buildLocalChat(props.frameId, 'scene', sceneId ?? null)
+        actions.createChatSuccess(chat)
+        actions.selectChat(chat.id)
+        actions.submitMessage(content, chat.id)
+        return
+      }
+      const { type, id } = values.defaultChatContext
+      const chat = buildLocalChat(props.frameId, type, id)
       actions.createChatSuccess(chat)
       actions.selectChat(chat.id)
       actions.submitMessage(content, chat.id)
     },
     ensureChatForScene: ({ sceneId }) => {
-      const matchingChat = values.chats.find((chat) => chat.sceneId === sceneId)
+      const matchingChat = values.chats.find(
+        (chat) => getChatContextType(chat) === 'scene' && getChatContextId(chat) === sceneId
+      )
       if (matchingChat) {
         if (matchingChat.id !== values.activeChatId) {
           actions.selectChat(matchingChat.id)
         }
         return
       }
-      const chat = buildLocalChat(props.frameId, sceneId)
+      const chat = buildLocalChat(props.frameId, 'scene', sceneId)
+      actions.createChatSuccess(chat)
+      actions.selectChat(chat.id)
+    },
+    ensureChatForApp: ({ sceneId, nodeId }) => {
+      const contextId = buildAppContextId(sceneId, nodeId)
+      const matchingChat = values.chats.find(
+        (chat) => getChatContextType(chat) === 'app' && getChatContextId(chat) === contextId
+      )
+      if (matchingChat) {
+        if (matchingChat.id !== values.activeChatId) {
+          actions.selectChat(matchingChat.id)
+        }
+        return
+      }
+      const chat = buildLocalChat(props.frameId, 'app', contextId)
       actions.createChatSuccess(chat)
       actions.selectChat(chat.id)
     },
     ensureFrameChat: () => {
-      const matchingChat = values.chats.find((chat) => chat.sceneId === null)
+      const matchingChat = values.chats.find(
+        (chat) => getChatContextType(chat) === 'frame' && getChatContextId(chat) === null
+      )
       if (matchingChat) {
         if (matchingChat.id !== values.activeChatId) {
           actions.selectChat(matchingChat.id)
         }
         return
       }
-      const chat = buildLocalChat(props.frameId, null)
+      const chat = buildLocalChat(props.frameId, 'frame', null)
       actions.createChatSuccess(chat)
       actions.selectChat(chat.id)
     },
@@ -531,14 +760,120 @@ export const chatLogic = kea<chatLogicType>([
         return
       }
       let chatId = chatIdOverride ?? values.activeChatId
+      let chatContextType = values.chatContextType
+      let chatContextId = values.chatContextId
       if (!chatId) {
-        const targetSceneId = values.selectedScene?.id ?? null
-        const chat = buildLocalChat(props.frameId, targetSceneId)
+        const { type, id } = values.defaultChatContext
+        chatContextType = type
+        chatContextId = id
+        const chat = buildLocalChat(props.frameId, type, id)
         actions.createChatSuccess(chat)
         actions.selectChat(chat.id)
         chatId = chat.id
+      } else if (values.activeChat) {
+        chatContextType = getChatContextType(values.activeChat)
+        chatContextId = getChatContextId(values.activeChat)
       }
       if (!chatId) {
+        actions.setSubmitting(false)
+        return
+      }
+      if (chatContextType === 'app') {
+        const appContext = values.activeEditAppContext
+        if (!appContext) {
+          actions.setSubmitting(false)
+          actions.setError('Open the app editor to chat about this app.')
+          return
+        }
+        const appLogic = editAppLogic({
+          frameId: props.frameId,
+          sceneId: appContext.sceneId,
+          nodeId: appContext.nodeId,
+        })
+        const { sources, sourcesLoading, configJson, savedKeyword, title } = appLogic.values
+        if (sourcesLoading || !sources || Object.keys(sources).length === 0) {
+          actions.setSubmitting(false)
+          actions.setError('Wait for the app sources to load before chatting.')
+          return
+        }
+        const appKeyword = savedKeyword || appContext.nodeData?.keyword || null
+        const appName = configJson?.name || title || appContext.nodeData?.name || appContext.nodeId
+        const requestId = uuidv4()
+        actions.setActiveRequestId(requestId)
+        actions.appendMessage(chatId, { id: uuidv4(), role: 'user', content: prompt })
+        const assistantMessageId = uuidv4()
+        actions.appendMessage(chatId, {
+          id: assistantMessageId,
+          role: 'assistant',
+          content: '',
+          isPlaceholder: true,
+          isStreaming: true,
+        })
+        try {
+          const response = await apiFetch('/api/ai/apps/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              prompt,
+              chatId,
+              frameId: props.frameId,
+              sceneId: appContext.sceneId,
+              nodeId: appContext.nodeId,
+              appName,
+              appKeyword,
+              sources,
+              history: values.historyForRequest,
+              requestId,
+            }),
+          })
+          if (!response.ok) {
+            const payload = await response.json().catch(() => ({}))
+            throw new Error(payload?.detail || 'Failed to send app chat message')
+          }
+          const payload = await response.json()
+          const reply = typeof payload?.reply === 'string' ? payload.reply : 'Done.'
+          const tool = typeof payload?.tool === 'string' ? payload.tool : 'reply'
+          const chunks = reply.match(/\\S+|\\s+/g) ?? []
+          let current = ''
+          for (const chunk of chunks) {
+            current += chunk
+            actions.updateMessage(chatId, assistantMessageId, {
+              content: current,
+              tool,
+              isPlaceholder: false,
+              isStreaming: true,
+            })
+            await new Promise((resolve) => setTimeout(resolve, 12))
+          }
+          actions.updateMessage(chatId, assistantMessageId, {
+            content: current,
+            tool,
+            isStreaming: false,
+            isPlaceholder: false,
+          })
+          if (tool === 'edit_app' && payload?.files && typeof payload.files === 'object') {
+            const files = payload.files as Record<string, string>
+            let firstFile: string | null = null
+            for (const [file, source] of Object.entries(files)) {
+              if (typeof source === 'string') {
+                appLogic.actions.updateFile(file, source)
+                firstFile = firstFile ?? file
+              }
+            }
+            if (firstFile) {
+              appLogic.actions.setActiveFile(firstFile)
+            }
+          }
+        } catch (error) {
+          console.error(error)
+          actions.setError(error instanceof Error ? error.message : 'Failed to send app chat message')
+          actions.updateMessage(chatId, assistantMessageId, {
+            content: error instanceof Error ? error.message : 'Failed to send app chat message',
+            tool: 'error',
+            isPlaceholder: false,
+            isStreaming: false,
+          })
+        }
         actions.setSubmitting(false)
         return
       }
@@ -707,7 +1042,9 @@ export const chatLogic = kea<chatLogicType>([
   })),
   afterMount(({ actions, values }) => {
     actions.loadChats()
-    if (values.scenesOpen) {
+    if (values.activeEditAppContext) {
+      actions.ensureChatForApp(values.activeEditAppContext.sceneId, values.activeEditAppContext.nodeId)
+    } else if (values.scenesOpen) {
       actions.ensureFrameChat()
     }
   }),
@@ -716,19 +1053,32 @@ export const chatLogic = kea<chatLogicType>([
       if (!sceneId) {
         return
       }
-      if (values.scenesOpen) {
+      if (values.scenesOpen || values.activeEditAppContext) {
         return
       }
       actions.ensureChatForScene(sceneId)
+    },
+    activeEditAppPanel: (panel: PanelWithMetadata | null) => {
+      if (!panel?.metadata) {
+        return
+      }
+      const metadata = panel.metadata as { sceneId?: string; nodeId?: string }
+      if (!metadata.sceneId || !metadata.nodeId) {
+        return
+      }
+      actions.ensureChatForApp(metadata.sceneId, metadata.nodeId)
     },
     chats: (chats: ChatSummary[]) => {
       if (!values.selectedScenePanelId) {
         return
       }
-      if (values.scenesOpen) {
+      if (values.scenesOpen || values.activeEditAppContext) {
         return
       }
-      const matchingChat = chats.find((chat) => chat.sceneId === values.selectedScenePanelId)
+      const matchingChat = chats.find(
+        (chat) =>
+          getChatContextType(chat) === 'scene' && getChatContextId(chat) === values.selectedScenePanelId
+      )
       if (matchingChat && matchingChat.id !== values.activeChatId) {
         actions.selectChat(matchingChat.id)
       }

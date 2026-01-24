@@ -25,6 +25,8 @@ export function Chat() {
     error,
     chatSceneName,
     chatSceneId,
+    chatContextType,
+    chatAppContext,
     contextItemsExpanded,
     chatView,
     visibleChats,
@@ -36,6 +38,7 @@ export function Chat() {
     isCreatingChat,
     contextSelectionSummary,
     logExpanded,
+    chatLabelForChat,
   } = useValues(chatLogic({ frameId, sceneId: selectedSceneId }))
   const {
     setInput,
@@ -48,7 +51,7 @@ export function Chat() {
     createChat,
     loadMoreChats,
   } = useActions(chatLogic({ frameId, sceneId: selectedSceneId }))
-  const { setPanel } = useActions(panelsLogic({ frameId }))
+  const { setPanel, editApp } = useActions(panelsLogic({ frameId }))
   const { focusScene } = useActions(scenesLogic({ frameId }))
   const [atBottom, setAtBottom] = useState(true)
   const virtuosoRef = useRef<VirtuosoHandle>(null)
@@ -66,6 +69,9 @@ export function Chat() {
     }
     focusScene(sceneId)
   }
+
+  const appLabel =
+    chatAppContext?.nodeData?.name || chatAppContext?.nodeData?.keyword || chatAppContext?.nodeId || 'this app'
 
   useEffect(() => {
     if (!shouldStickToBottomRef.current) {
@@ -139,6 +145,14 @@ export function Chat() {
     focusSceneById(chatSceneId)
   }
 
+  const handleOpenApp = (e: React.MouseEvent<HTMLAnchorElement>) => {
+    e.preventDefault()
+    if (!chatAppContext?.nodeData) {
+      return
+    }
+    editApp(chatAppContext.sceneId, chatAppContext.nodeId, chatAppContext.nodeData)
+  }
+
   const formatTimestamp = (timestamp?: string | null) => {
     if (!timestamp) {
       return 'Just now'
@@ -148,14 +162,6 @@ export function Chat() {
       return 'Just now'
     }
     return date.toLocaleString()
-  }
-
-  const getSceneName = (sceneId?: string | null) => {
-    if (!sceneId) {
-      return 'Frame chat'
-    }
-    const scene = scenes?.find((item) => item.id === sceneId)
-    return scene?.name ?? 'Frame chat'
   }
 
   const normalizeGeneratedSceneName = (sceneName: string) => sceneName.replace(/^["']|["']$/g, '').trim()
@@ -376,6 +382,21 @@ export function Chat() {
                   &quot;{chatSceneName}&quot;
                 </a>
               </span>
+            ) : chatContextType === 'app' ? (
+              <span>
+                Chat about{' '}
+                {chatAppContext?.nodeData ? (
+                  <a
+                    href="#"
+                    onClick={handleOpenApp}
+                    className="text-sky-300 hover:text-sky-200 underline underline-offset-2 decoration-sky-300/70 inline"
+                  >
+                    &quot;{appLabel}&quot;
+                  </a>
+                ) : (
+                  `"${appLabel}"`
+                )}
+              </span>
             ) : (
               'Chat about this frame'
             )
@@ -411,7 +432,9 @@ export function Chat() {
                 <div className="space-y-2">
                   <div className="text-slate-200 font-medium">Start the conversation</div>
                   <div>
-                    {chatSceneName
+                    {chatContextType === 'app'
+                      ? 'Ask for edits to this app, or ask questions about how it works.'
+                      : chatSceneName
                       ? 'Ask for a new scene, request edits to the current scene, or ask questions about FrameOS.'
                       : 'Ask for a new scene, or ask questions about this frame or FrameOS.'}
                   </div>
@@ -479,7 +502,11 @@ export function Chat() {
           <div className="rounded-2xl border border-slate-800/80 bg-slate-950/70 p-2 space-y-2 shadow-inner">
             <TextArea
               value={input}
-              placeholder="Describe a new scene, request a change, or ask a question..."
+              placeholder={
+                chatContextType === 'app'
+                  ? 'Describe a change to this app, or ask about it...'
+                  : 'Describe a new scene, request a change, or ask a question...'
+              }
               onChange={(value) => setInput(value)}
               onKeyDown={handleKeyDown}
               rows={3}
@@ -523,7 +550,7 @@ export function Chat() {
                     onClick={() => selectChat(chat.id)}
                   >
                     <div className="flex items-center justify-between text-sm">
-                      <span className="font-medium">{getSceneName(chat.sceneId)}</span>
+                      <span className="font-medium">{chatLabelForChat(chat)}</span>
                       <span className="text-xs text-slate-500">{formatTimestamp(chat.updatedAt)}</span>
                     </div>
                     <div className="text-xs text-slate-500 mt-1">Chat ID: {chat.id}</div>

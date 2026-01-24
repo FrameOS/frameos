@@ -5,16 +5,14 @@ import Editor from '@monaco-editor/react'
 import { PanelWithMetadata } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
 import { panelsLogic } from '../panelsLogic'
+import { chatLogic } from '../Chat/chatLogic'
 import { useEffect, useState } from 'react'
 import schema from '../../../../../schema/config_json.json'
 import type { editor as importedEditor } from 'monaco-editor'
 import type { Monaco } from '@monaco-editor/react'
 import clsx from 'clsx'
-import { ClipboardDocumentIcon } from '@heroicons/react/24/outline'
 import { TrashIcon } from '@heroicons/react/24/solid'
-import { TextArea } from '../../../../components/TextArea'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
-import { Label } from '../../../../components/Label'
 
 interface EditAppProps {
   panel: PanelWithMetadata
@@ -24,7 +22,8 @@ interface EditAppProps {
 
 export function EditApp({ panel, sceneId, nodeId }: EditAppProps) {
   const { frameId } = useValues(frameLogic)
-  const { persistUntilClosed } = useActions(panelsLogic)
+  const { persistUntilClosed, openChat } = useActions(panelsLogic)
+  const { ensureChatForApp } = useActions(chatLogic({ frameId, sceneId }))
   const logicProps: EditAppLogicProps = {
     frameId,
     sceneId,
@@ -41,13 +40,10 @@ export function EditApp({ panel, sceneId, nodeId }: EditAppProps) {
     changedFiles,
     configJson,
     modelMarkers,
-    prompt,
-    fullPrompt,
-    fullPromptCopied,
     savedKeyword,
     savedSources,
   } = useValues(logic)
-  const { saveChanges, setActiveFile, updateFile, copyFullPrompt, addFile, deleteFile, setPrompt } = useActions(logic)
+  const { saveChanges, setActiveFile, updateFile, addFile, deleteFile } = useActions(logic)
   const [[monaco, editor], setMonacoAndEditor] = useState<[Monaco | null, importedEditor.IStandaloneCodeEditor | null]>(
     [null, null]
   )
@@ -135,11 +131,14 @@ export function EditApp({ panel, sceneId, nodeId }: EditAppProps) {
 
         <div>
           <Button
-            color={activeFile === '::ask_a_llm' ? 'primary' : 'none'}
+            color="none"
             size="small"
-            onClick={() => setActiveFile('::ask_a_llm')}
+            onClick={() => {
+              openChat()
+              ensureChatForApp(sceneId, nodeId)
+            }}
           >
-            ? Ask a LLM
+            💬 Chat about this app
           </Button>
         </div>
       </div>
@@ -167,33 +166,19 @@ export function EditApp({ panel, sceneId, nodeId }: EditAppProps) {
             )}
           </div>
         ) : null}
-        {activeFile === '::ask_a_llm' ? (
-          <div className="p-4 bg-gray-700 text-md overflow-y-auto overflow-x-auto w-full space-y-4">
-            <p>Enter your querstion/request, and copy a sources-included version to your favourite LLM.</p>
-            <Label>Your question/request regarding this app</Label>
-            <TextArea value={prompt} autoFocus onChange={setPrompt} rows={3} />
-            <Label>Preview of the final prompt we will copy</Label>
-            <TextArea value={fullPrompt} disabled rows={3} />
-            <Button onClick={copyFullPrompt}>
-              <ClipboardDocumentIcon className="w-4 h-4 min-w-4 min-h-4 cursor-pointer inline-block" />{' '}
-              {fullPromptCopied ? 'Copied!' : 'Copy to clipboard'}
-            </Button>
-          </div>
-        ) : (
-          <div className="bg-black font-mono text-sm overflow-y-auto overflow-x-auto w-full flex-1">
-            <Editor
-              height="100%"
-              path={`${nodeId}/${activeFile}`}
-              language={activeFile.endsWith('.json') ? 'json' : 'python'}
-              value={sources[activeFile] ?? sources[Object.keys(sources)[0]] ?? ''}
-              theme="darkframe"
-              beforeMount={beforeMount}
-              onMount={(editor, monaco) => setMonacoAndEditor([monaco, editor])}
-              onChange={(value) => updateFile(activeFile, value ?? '')}
-              options={{ minimap: { enabled: false } }}
-            />
-          </div>
-        )}
+        <div className="bg-black font-mono text-sm overflow-y-auto overflow-x-auto w-full flex-1">
+          <Editor
+            height="100%"
+            path={`${nodeId}/${activeFile}`}
+            language={activeFile.endsWith('.json') ? 'json' : 'python'}
+            value={sources[activeFile] ?? sources[Object.keys(sources)[0]] ?? ''}
+            theme="darkframe"
+            beforeMount={beforeMount}
+            onMount={(editor, monaco) => setMonacoAndEditor([monaco, editor])}
+            onChange={(value) => updateFile(activeFile, value ?? '')}
+            options={{ minimap: { enabled: false } }}
+          />
+        </div>
       </div>
     </div>
   )
