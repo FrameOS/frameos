@@ -80,11 +80,7 @@ const getChatContextId = (chat: ChatSummary | null): string | null => {
 
 const getChatContextKey = (chat: ChatSummary) => `${getChatContextType(chat)}:${getChatContextId(chat) ?? ''}`
 
-const buildLocalChat = (
-  frameId: number,
-  contextType: ChatContextType,
-  contextId?: string | null
-): ChatSummary => {
+const buildLocalChat = (frameId: number, contextType: ChatContextType, contextId?: string | null): ChatSummary => {
   const timestamp = new Date().toISOString()
   return {
     id: uuidv4(),
@@ -833,7 +829,7 @@ export const chatLogic = kea<chatLogicType>([
           const payload = await response.json()
           const reply = typeof payload?.reply === 'string' ? payload.reply : 'Done.'
           const tool = typeof payload?.tool === 'string' ? payload.tool : 'reply'
-          const chunks = reply.match(/\\S+|\\s+/g) ?? []
+          const chunks = reply.match(/\S+|\s+/g) ?? []
           let current = ''
           for (const chunk of chunks) {
             current += chunk
@@ -1076,8 +1072,7 @@ export const chatLogic = kea<chatLogicType>([
         return
       }
       const matchingChat = chats.find(
-        (chat) =>
-          getChatContextType(chat) === 'scene' && getChatContextId(chat) === values.selectedScenePanelId
+        (chat) => getChatContextType(chat) === 'scene' && getChatContextId(chat) === values.selectedScenePanelId
       )
       if (matchingChat && matchingChat.id !== values.activeChatId) {
         actions.selectChat(matchingChat.id)

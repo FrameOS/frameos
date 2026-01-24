@@ -349,6 +349,14 @@ export function Chat() {
     }
 
     if (!messageContent) {
+      if (isStreaming) {
+        return (
+          <div className="flex items-center gap-2 text-slate-300/80">
+            <Spinner className="h-4 w-4" />
+            <span className="text-sm">Thinking…</span>
+          </div>
+        )
+      }
       return null
     }
 
@@ -462,7 +470,29 @@ export function Chat() {
                   const isLog = message.tool === 'log'
                   const isUser = message.role === 'user'
                   if (message.isPlaceholder && !message.content && !message.tool) {
-                    return null
+                    if (!message.isStreaming) {
+                      return null
+                    }
+                    return (
+                      <div key={message.id} className={clsx('flex', isUser ? 'justify-end' : 'justify-start')}>
+                        <div
+                          className={clsx(
+                            'rounded-2xl border px-4 py-3 text-sm shadow-sm mb-3 max-w-[90%] sm:max-w-[75%]',
+                            isUser
+                              ? 'border-blue-900/70 bg-blue-950/70 text-blue-100 shadow-[0_0_12px_rgba(30,64,175,0.25)]'
+                              : 'border-slate-800/80 bg-slate-950/80 text-slate-100'
+                          )}
+                        >
+                          <div className="flex items-center justify-between text-[11px] text-slate-400 mb-2">
+                            <span className="uppercase tracking-wide">{message.role}</span>
+                          </div>
+                          <div className="flex items-center gap-2 text-sm text-slate-400">
+                            <Spinner className="h-4 w-4 text-slate-400" />
+                            <span>Thinking…</span>
+                          </div>
+                        </div>
+                      </div>
+                    )
                   }
                   return (
                     <div key={message.id} className={clsx('flex', isUser ? 'justify-end' : 'justify-start')}>
