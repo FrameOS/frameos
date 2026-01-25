@@ -16,6 +16,7 @@ api_with_auth = APIRouter()
 
 from .auth import *  # noqa: E402, F403
 from .ai_embeddings import *  # noqa: E402, F403
+from .ai_apps import *  # noqa: E402, F403
 from .ai_scenes import *  # noqa: E402, F403
 from .apps import *  # noqa: E402, F403
 from .assets import *  # noqa: E402, F403

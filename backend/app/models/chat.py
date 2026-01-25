@@ -10,6 +10,8 @@ class Chat(Base):
     id = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     frame_id = mapped_column(Integer, ForeignKey('frame.id'), nullable=False)
     scene_id = mapped_column(String(128), nullable=True)
+    context_type = mapped_column(String(32), nullable=True)
+    context_id = mapped_column(String(256), nullable=True)
     created_at = mapped_column(DateTime, nullable=False, default=func.current_timestamp())
     updated_at = mapped_column(
         DateTime,
@@ -25,6 +27,8 @@ class Chat(Base):
             'id': self.id,
             'frame_id': self.frame_id,
             'scene_id': self.scene_id,
+            'context_type': self.context_type,
+            'context_id': self.context_id,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
         }

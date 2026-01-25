@@ -35,8 +35,8 @@ proc get*(self: App, context: ExecutionContext): Image =
   let height = if context.hasImage: context.image.height else: self.frameConfig.renderHeight()
   let search = self.appConfig.search
   let orientation = if self.appConfig.orientation == "auto":
-                      if width > height: "portrait"
-                      elif width < height: "landscape"
+                      if height > width: "portrait"
+                      elif width > height: "landscape"
                       else: "squarish"
                     elif self.appConfig.orientation == "any": ""
                     else: self.appConfig.orientation

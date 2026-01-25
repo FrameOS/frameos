@@ -11,7 +11,18 @@ from app.schemas.chats import ChatCreateRequest, ChatDetailResponse, ChatListRes
 
 @api_with_auth.post("/ai/chats", response_model=ChatSummary)
 async def create_chat(data: ChatCreateRequest, db: Session = Depends(get_db)):
-    chat = Chat(frame_id=data.frame_id, scene_id=data.scene_id)
+    context_type = data.context_type
+    context_id = data.context_id
+    if not context_type:
+        context_type = "scene" if data.scene_id else "frame"
+    if context_type == "scene" and not context_id:
+        context_id = data.scene_id
+    chat = Chat(
+        frame_id=data.frame_id,
+        scene_id=data.scene_id,
+        context_type=context_type,
+        context_id=context_id,
+    )
     db.add(chat)
     db.commit()
     db.refresh(chat)
