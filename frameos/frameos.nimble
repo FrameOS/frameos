@@ -32,6 +32,7 @@ before build:
 task assets, "Create assets":
   exec "mkdir -p src/assets"
   exec "~/.nimble/bin/nimassets -d=assets/compiled/web -o=src/assets/web.nim"
+  exec "~/.nimble/bin/nimassets -d=assets/compiled/frame_web -o=src/assets/frame_web.nim"
   exec "~/.nimble/bin/nimassets -f=assets/compiled/fonts/Ubuntu-Regular.ttf -o=src/assets/fonts.nim"
 
 task build_quickjs, "Build QuickJS":

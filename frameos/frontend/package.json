@@ -1,0 +1,26 @@
+{
+  "name": "@frameos/frame-frontend",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "clean": "rm -rf ../assets/compiled/frame_web",
+    "build": "node build.mjs",
+    "dev": "node build.mjs --dev --watch"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.0.18",
+    "@types/react-dom": "^18.0.6",
+    "autoprefixer": "^10.4.14",
+    "cssnano": "^7.0.1",
+    "esbuild": "^0.21.3",
+    "postcss": "^8.4.27",
+    "postcss-preset-env": "^9.5.13",
+    "tailwindcss": "^3.4.1",
+    "typescript": "^5.7.3"
+  }
+}

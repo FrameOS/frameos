@@ -2,6 +2,7 @@ import json
 import pixie
 import times
 import assets/web as webAssets
+import assets/frame_web as frameWebAssets
 import asyncdispatch
 import httpclient
 import httpcore
@@ -12,6 +13,7 @@ import ws, ws/jester_extra
 import strformat
 import options
 import strutils
+import tables
 import drivers/drivers as drivers
 import frameos/apps
 import frameos/types
@@ -28,6 +30,7 @@ var globalFrameOS: FrameOS
 var globalFrameConfig: FrameConfig
 var globalRunner: RunnerControl
 let indexHtml = webAssets.getAsset("assets/compiled/web/index.html")
+let frameWebIndexHtml = frameWebAssets.getAsset("assets/compiled/frame_web/index.html")
 
 var connectionsLock: Lock
 var connections {.guard: connectionsLock.} = newSeq[WebSocket]()
@@ -43,6 +46,22 @@ proc h(message: string): string =
 
 proc s(message: string): string =
   message.replace("'", "\\'").replace("\n", "\\n")
+
+proc contentTypeForAsset(path: string): string =
+  if path.endsWith(".css"):
+    "text/css"
+  elif path.endsWith(".js"):
+    "application/javascript"
+  elif path.endsWith(".svg"):
+    "image/svg+xml"
+  elif path.endsWith(".png"):
+    "image/png"
+  elif path.endsWith(".woff2"):
+    "font/woff2"
+  elif path.endsWith(".woff"):
+    "font/woff"
+  else:
+    "application/octet-stream"
 
 proc shouldReturnNotModified*(headers: HttpHeaders, lastUpdate: float): bool {.gcsafe.} =
   if lastUpdate <= 0.0:
@@ -91,6 +110,25 @@ router myrouter:
           of "stretch": "100% 100%"
           else: "contain"
         resp Http200, indexHtml.replace("/*$scalingMode*/contain", scalingMode)
+  get "/new":
+    {.gcsafe.}:
+      if netportal.isHotspotActive(globalFrameOS):
+        log(%*{"event": "portal:http", "get": request.pathInfo})
+        resp Http200, netportal.setupHtml(globalFrameOS)
+      elif not hasAccess(request, Read):
+        resp Http401, "Unauthorized"
+      else:
+        resp Http200, frameWebIndexHtml
+  get "/new/static/@asset":
+    if not hasAccess(request, Read):
+      resp Http401, "Unauthorized"
+    {.gcsafe.}:
+      let assetPath = "assets/compiled/frame_web/static/" & @"asset"
+      try:
+        let asset = frameWebAssets.getAsset(assetPath)
+        resp Http200, {"Content-Type": contentTypeForAsset(assetPath)}, asset
+      except KeyError:
+        resp Http404, "Not found!"
   post "/setup":
     {.gcsafe.}:
       if not netportal.isHotspotActive(globalFrameOS):
