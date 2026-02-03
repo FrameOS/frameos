@@ -77,6 +77,7 @@ proc shouldReturnNotModified*(headers: HttpHeaders, lastUpdate: float): bool {.g
 
 const AUTH_HEADER = "authorization"
 const AUTH_TYPE = "Bearer"
+const ACCESS_COOKIE = "frame_access_key"
 
 type
   AccessType = enum
@@ -96,7 +97,14 @@ router myrouter:
         return contains(request.headers.table, AUTH_HEADER) and request.headers[AUTH_HEADER] == AUTH_TYPE & " " & accessKey
       else:
         let paramsTable = request.params()
-        return contains(paramsTable, "k") and paramsTable["k"] == accessKey
+        if contains(paramsTable, "k") and paramsTable["k"] == accessKey:
+          return true
+        let cookieHeader = request.headers.getOrDefault("cookie")
+        for cookie in cookieHeader.split(";"):
+          let parts = cookie.strip().split("=", 1)
+          if parts.len == 2 and parts[0] == ACCESS_COOKIE and parts[1] == accessKey:
+            return true
+        return false
   get "/":
     {.gcsafe.}:
       if netportal.isHotspotActive(globalFrameOS):
@@ -118,7 +126,12 @@ router myrouter:
       elif not hasAccess(request, Read):
         resp Http401, "Unauthorized"
       else:
-        resp Http200, frameWebIndexHtml
+        let accessKey = globalFrameConfig.frameAccessKey
+        let paramsTable = request.params()
+        if accessKey != "" and contains(paramsTable, "k") and paramsTable["k"] == accessKey:
+          resp Http200, {"Set-Cookie": ACCESS_COOKIE & "=" & accessKey & "; Path=/new; SameSite=Lax"}, frameWebIndexHtml
+        else:
+          resp Http200, frameWebIndexHtml
   get "/new/static/@asset":
     if not hasAccess(request, Read):
       resp Http401, "Unauthorized"
