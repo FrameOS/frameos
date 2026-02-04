@@ -1,4 +1,4 @@
-export function App() {
+export default function Root() {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center gap-6 bg-slate-900 px-6 text-center">
       <div className="rounded-full bg-emerald-400/10 px-4 py-2 text-sm font-semibold text-emerald-200">

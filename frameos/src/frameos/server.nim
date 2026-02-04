@@ -127,7 +127,8 @@ router myrouter:
         let accessKey = globalFrameConfig.frameAccessKey
         let paramsTable = request.params()
         if accessKey != "" and contains(paramsTable, "k") and paramsTable["k"] == accessKey:
-          resp Http200, {"Set-Cookie": ACCESS_COOKIE & "=" & accessKey & "; Path=/new; SameSite=Strict"}, frameWebIndexHtml
+          resp Http302, {"Location": "/new",
+            "Set-Cookie": ACCESS_COOKIE & "=" & accessKey & "; Path=/new; SameSite=Strict"}, ""
         else:
           resp Http200, frameWebIndexHtml
   get "/new/static/@asset":

@@ -25,6 +25,8 @@ requires "jsony >= 1.1.5"
 taskRequires "assets", "nimassets >= 0.2.4"
 
 before build:
+  exec "cd frontend && npm install"
+  exec "cd frontend && npm run build"
   exec "nimble assets"
   if not dirExists("quickjs"):
     exec "nimble build_quickjs --silent"
