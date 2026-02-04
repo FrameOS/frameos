@@ -5,7 +5,7 @@ import { framesModel } from '../../../../models/framesModel'
 import { Form, Group } from 'kea-forms'
 import { TextInput } from '../../../../components/TextInput'
 import { Select } from '../../../../components/Select'
-import { frameControlUrl, frameImageUrl, frameUrl } from '../../../../decorators/frame'
+import { frameControlUrl, frameImageUrl, frameNewFrontendUrl, frameUrl } from '../../../../decorators/frame'
 import { frameLogic } from '../../frameLogic'
 import { downloadJson } from '../../../../utils/downloadJson'
 import { Field } from '../../../../components/Field'
@@ -73,6 +73,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
   const url = frameUrl(frame)
   const controlUrl = frameControlUrl(frame)
   const imageUrl = frameImageUrl(frame)
+  const newFrontendUrl = frameNewFrontendUrl(frame)
 
   const palette = withCustomPalette[frame.device || '']
   const sshKeyOptions = normalizeSshKeys(savedSettings?.ssh_keys).keys
@@ -260,6 +261,15 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                       className="text-blue-400 hover:underline"
                     >
                       Image URL
+                    </A>
+                    {', '}
+                    <A
+                      href={newFrontendUrl}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                      className="text-blue-400 hover:underline"
+                    >
+                      New frontend URL
                     </A>
                   </div>
                 </Field>

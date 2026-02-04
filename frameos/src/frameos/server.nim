@@ -123,13 +123,11 @@ router myrouter:
       if netportal.isHotspotActive(globalFrameOS):
         log(%*{"event": "portal:http", "get": request.pathInfo})
         resp Http200, netportal.setupHtml(globalFrameOS)
-      elif not hasAccess(request, Read):
-        resp Http401, "Unauthorized"
       else:
         let accessKey = globalFrameConfig.frameAccessKey
         let paramsTable = request.params()
         if accessKey != "" and contains(paramsTable, "k") and paramsTable["k"] == accessKey:
-          resp Http200, {"Set-Cookie": ACCESS_COOKIE & "=" & accessKey & "; Path=/new; SameSite=Lax"}, frameWebIndexHtml
+          resp Http200, {"Set-Cookie": ACCESS_COOKIE & "=" & accessKey & "; Path=/new; SameSite=Strict"}, frameWebIndexHtml
         else:
           resp Http200, frameWebIndexHtml
   get "/new/static/@asset":

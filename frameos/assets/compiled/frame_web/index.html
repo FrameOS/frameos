@@ -4,10 +4,43 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>FrameOS</title>
-    <link rel="stylesheet" href="/new/static/main.css" />
   </head>
   <body>
     <div id="root"></div>
-    <script type="module" src="/new/static/main.js"></script>
+    <script>
+      ;(() => {
+        const storageKey = 'frameos_access_key'
+        const cookieName = 'frame_access_key'
+        const maxAgeSeconds = 60 * 60 * 24 * 30
+        const hash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : ''
+        const params = new URLSearchParams(hash)
+        const hashKey = params.get('k')
+        const storedKey = hashKey || window.localStorage.getItem(storageKey)
+
+        if (hashKey) {
+          window.localStorage.setItem(storageKey, hashKey)
+          if (window.history?.replaceState) {
+            window.history.replaceState(null, document.title, window.location.pathname + window.location.search)
+          }
+        }
+
+        if (storedKey) {
+          const secureFlag = window.location.protocol === 'https:' ? '; Secure' : ''
+          document.cookie = `${cookieName}=${encodeURIComponent(
+            storedKey
+          )}; Path=/new; SameSite=Strict; Max-Age=${maxAgeSeconds}${secureFlag}`
+        }
+
+        const stylesheet = document.createElement('link')
+        stylesheet.rel = 'stylesheet'
+        stylesheet.href = '/new/static/main.css'
+        document.head.appendChild(stylesheet)
+
+        const script = document.createElement('script')
+        script.type = 'module'
+        script.src = '/new/static/main.js'
+        document.body.appendChild(script)
+      })()
+    </script>
   </body>
 </html>

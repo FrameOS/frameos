@@ -59,6 +59,14 @@ export function frameImageUrl(frame: FrameType): string | null {
   }
 }
 
+export function frameNewFrontendUrl(frame: FrameType): string | null {
+  const url = `http${frame.frame_port % 1000 === 443 ? 's' : ''}://${frame.frame_host}:${frame.frame_port}/new`
+  if (frame.frame_access === 'public') {
+    return url
+  }
+  return `${url}#k=${frame.frame_access_key}`
+}
+
 interface FrameConnectionProps {
   frame: FrameType
 }
