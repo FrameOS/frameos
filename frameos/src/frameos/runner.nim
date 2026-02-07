@@ -1,4 +1,4 @@
-import json, pixie, times, options, asyncdispatch, strformat, strutils, tables, sequtils
+import json, pixie, times, options, asyncdispatch, strformat, strutils, tables
 import std/monotimes
 import apps/render/image/app as render_imageApp
 import apps/data/qr/app as data_qrApp
