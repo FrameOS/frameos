@@ -4,6 +4,7 @@ export const scenes = {
   error404: () => <div>404</div>,
   image: lazy(() => import('./image/Image')),
   root: lazy(() => import('./root/Root')),
+  control: lazy(() => import('./control/Control')),
 }
 
 export const getRoutes = () =>
@@ -13,4 +14,5 @@ export const getRoutes = () =>
     '/new': 'root',
     '/new/': 'root',
     '/new/root': 'root',
-  } as const)
+    '/control': 'control',
+  }) as const

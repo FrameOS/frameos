@@ -124,6 +124,23 @@ router myrouter:
             of "stretch": "100% 100%"
             else: "contain"
           resp Http200, frameWebIndexHtml.replace("/*$scalingMode*/contain", scalingMode)
+  get "/control":
+    {.gcsafe.}:
+      if netportal.isHotspotActive(globalFrameOS):
+        log(%*{"event": "portal:http", "get": request.pathInfo})
+        resp Http200, netportal.setupHtml(globalFrameOS)
+      else:
+        let accessKey = globalFrameConfig.frameAccessKey
+        let paramsTable = request.params()
+        if accessKey != "" and contains(paramsTable, "k") and paramsTable["k"] == accessKey:
+          resp Http302, {"Location": "/control",
+            "Set-Cookie": ACCESS_COOKIE & "=" & accessKey & "; Path=/; SameSite=Lax"}, ""
+        else:
+          let scalingMode = case globalFrameConfig.scalingMode:
+            of "cover", "center": globalFrameConfig.scalingMode
+            of "stretch": "100% 100%"
+            else: "contain"
+          resp Http200, frameWebIndexHtml.replace("/*$scalingMode*/contain", scalingMode)
   get "/new":
     {.gcsafe.}:
       if netportal.isHotspotActive(globalFrameOS):

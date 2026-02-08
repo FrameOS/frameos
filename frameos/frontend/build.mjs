@@ -54,6 +54,7 @@ const buildOptions = {
   assetNames: 'asset-[hash]',
   loader: {
     '.png': 'file',
+    '.ttf': 'file',
     '.svg': 'file',
     '.woff': 'file',
     '.woff2': 'file',
