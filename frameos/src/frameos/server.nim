@@ -110,14 +110,20 @@ router myrouter:
       if netportal.isHotspotActive(globalFrameOS):
         log(%*{"event": "portal:http", "get": request.pathInfo})
         resp Http200, netportal.setupHtml(globalFrameOS)
-      elif not hasAccess(request, Read):
-        resp Http401, "Unauthorized"
       else:
-        let scalingMode = case globalFrameConfig.scalingMode:
-          of "cover", "center": globalFrameConfig.scalingMode
-          of "stretch": "100% 100%"
-          else: "contain"
-        resp Http200, indexHtml.replace("/*$scalingMode*/contain", scalingMode)
+        let accessKey = globalFrameConfig.frameAccessKey
+        let paramsTable = request.params()
+        if accessKey != "" and contains(paramsTable, "k") and paramsTable["k"] == accessKey:
+          resp Http302, {"Location": "/",
+            "Set-Cookie": ACCESS_COOKIE & "=" & accessKey & "; Path=/; SameSite=Strict"}, ""
+        elif not hasAccess(request, Read):
+          resp Http401, "Unauthorized"
+        else:
+          let scalingMode = case globalFrameConfig.scalingMode:
+            of "cover", "center": globalFrameConfig.scalingMode
+            of "stretch": "100% 100%"
+            else: "contain"
+          resp Http200, frameWebIndexHtml.replace("/*$scalingMode*/contain", scalingMode)
   get "/new":
     {.gcsafe.}:
       if netportal.isHotspotActive(globalFrameOS):
@@ -128,10 +134,24 @@ router myrouter:
         let paramsTable = request.params()
         if accessKey != "" and contains(paramsTable, "k") and paramsTable["k"] == accessKey:
           resp Http302, {"Location": "/new",
-            "Set-Cookie": ACCESS_COOKIE & "=" & accessKey & "; Path=/new; SameSite=Strict"}, ""
+            "Set-Cookie": ACCESS_COOKIE & "=" & accessKey & "; Path=/; SameSite=Strict"}, ""
         else:
-          resp Http200, frameWebIndexHtml
+          let scalingMode = case globalFrameConfig.scalingMode:
+            of "cover", "center": globalFrameConfig.scalingMode
+            of "stretch": "100% 100%"
+            else: "contain"
+          resp Http200, frameWebIndexHtml.replace("/*$scalingMode*/contain", scalingMode)
   get "/new/static/@asset":
+    if not hasAccess(request, Read):
+      resp Http401, "Unauthorized"
+    {.gcsafe.}:
+      let assetPath = "assets/compiled/frame_web/static/" & @"asset"
+      try:
+        let asset = frameWebAssets.getAsset(assetPath)
+        resp Http200, {"Content-Type": contentTypeForAsset(assetPath)}, asset
+      except KeyError:
+        resp Http404, "Not found!"
+  get "/static/@asset":
     if not hasAccess(request, Read):
       resp Http401, "Unauthorized"
     {.gcsafe.}:
