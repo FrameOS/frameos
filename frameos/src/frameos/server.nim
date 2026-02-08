@@ -115,7 +115,7 @@ router myrouter:
         let paramsTable = request.params()
         if accessKey != "" and contains(paramsTable, "k") and paramsTable["k"] == accessKey:
           resp Http302, {"Location": "/",
-            "Set-Cookie": ACCESS_COOKIE & "=" & accessKey & "; Path=/; SameSite=Strict"}, ""
+            "Set-Cookie": ACCESS_COOKIE & "=" & accessKey & "; Path=/; SameSite=Lax"}, ""
         elif not hasAccess(request, Read):
           resp Http401, "Unauthorized"
         else:
@@ -134,7 +134,7 @@ router myrouter:
         let paramsTable = request.params()
         if accessKey != "" and contains(paramsTable, "k") and paramsTable["k"] == accessKey:
           resp Http302, {"Location": "/new",
-            "Set-Cookie": ACCESS_COOKIE & "=" & accessKey & "; Path=/; SameSite=Strict"}, ""
+            "Set-Cookie": ACCESS_COOKIE & "=" & accessKey & "; Path=/; SameSite=Lax"}, ""
         else:
           let scalingMode = case globalFrameConfig.scalingMode:
             of "cover", "center": globalFrameConfig.scalingMode
