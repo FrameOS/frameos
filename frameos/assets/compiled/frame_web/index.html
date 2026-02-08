@@ -4,27 +4,6 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>FrameOS</title>
-    <script>
-      ;(() => {
-        const hash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : ''
-        if (!hash) {
-          return
-        }
-        const hashParams = new URLSearchParams(hash)
-        const accessKey = hashParams.get('k')
-        if (!accessKey) {
-          return
-        }
-        const searchParams = new URLSearchParams(window.location.search)
-        if (searchParams.has('k')) {
-          return
-        }
-        searchParams.set('k', accessKey)
-        const search = searchParams.toString()
-        const nextUrl = `${window.location.pathname}${search ? `?${search}` : ''}`
-        window.location.replace(nextUrl)
-      })()
-    </script>
     <link rel="stylesheet" href="static/main.css" />
   </head>
   <body data-scaling-mode="/*$scalingMode*/contain">

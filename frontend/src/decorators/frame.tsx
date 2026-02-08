@@ -64,7 +64,7 @@ export function frameNewFrontendUrl(frame: FrameType): string | null {
   if (frame.frame_access === 'public') {
     return url
   }
-  return `${url}#k=${frame.frame_access_key}`
+  return `${url}?k=${frame.frame_access_key}`
 }
 
 interface FrameConnectionProps {
