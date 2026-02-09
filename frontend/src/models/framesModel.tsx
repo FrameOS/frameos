@@ -150,6 +150,7 @@ export const framesModel = kea<framesModelType>([
           (a, b) => a.frame_host.localeCompare(b.frame_host) || (a.ssh_user || '').localeCompare(b.ssh_user || '')
         ) as FrameType[],
     ],
+    framesLoaded: [(s) => [s.frames], (frames) => Object.keys(frames).length > 0],
   }),
   afterMount(({ actions }) => {
     actions.loadFrames()
