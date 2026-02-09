@@ -13,6 +13,7 @@ proc setConfigDefaults*(config: var FrameConfig) =
   if config.scalingMode == "": config.scalingMode = "cover"
   if config.framePort == 0: config.framePort = 8787
   if config.frameHost == "": config.frameHost = "localhost"
+  if config.tlsPort == 0: config.tlsPort = 8443
   if config.frameAccess == "": config.frameAccess = "private"
   if config.name == "": config.name = config.frameHost
   if config.timeZone == "": config.timeZone = detectSystemTimeZone()
@@ -137,6 +138,9 @@ proc loadConfig*(): FrameConfig =
     serverApiKey: data{"serverApiKey"}.getStr(),
     frameHost: data{"frameHost"}.getStr(),
     framePort: data{"framePort"}.getInt(),
+    enableTls: data{"enableTls"}.getBool(),
+    tlsPort: data{"tlsPort"}.getInt(),
+    exposeOnlyTlsPort: data{"exposeOnlyTlsPort"}.getBool(),
     frameAccess: data{"frameAccess"}.getStr(),
     frameAccessKey: data{"frameAccessKey"}.getStr(),
     width: data{"width"}.getInt(),
@@ -179,6 +183,9 @@ proc updateFrameConfigFrom*(target: FrameConfig, source: FrameConfig) =
   target.serverApiKey = source.serverApiKey
   target.frameHost = source.frameHost
   target.framePort = source.framePort
+  target.enableTls = source.enableTls
+  target.tlsPort = source.tlsPort
+  target.exposeOnlyTlsPort = source.exposeOnlyTlsPort
   target.frameAccessKey = source.frameAccessKey
   target.frameAccess = source.frameAccess
   target.width = source.width

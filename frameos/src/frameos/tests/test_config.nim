@@ -10,6 +10,9 @@ block test_load_config:
     doAssert config.serverApiKey == "test-api-key"
     doAssert config.width == 800
     doAssert config.height == 480
+    doAssert config.enableTls == false
+    doAssert config.tlsPort == 8443
+    doAssert config.exposeOnlyTlsPort == false
     doAssert config.metrics_interval == 60 # 60.0 in frame.json
     doAssert config.rotate == 0
     doAssert config.flip == ""

@@ -11,6 +11,9 @@ type
     serverApiKey*: string
     frameHost*: string
     framePort*: int
+    enableTls*: bool
+    tlsPort*: int
+    exposeOnlyTlsPort*: bool
     frameAccessKey*: string
     frameAccess*: string
     width*: int

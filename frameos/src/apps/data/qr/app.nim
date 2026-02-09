@@ -3,6 +3,7 @@ import QRgen
 import QRgen/renderer
 import frameos/apps
 import frameos/types
+import frameos/urls
 
 type
   AppConfig* = object
@@ -22,13 +23,11 @@ type
 
 proc get*(self: App, context: ExecutionContext): Image =
   let code = if self.appConfig.codeType == "Frame Control URL":
-      (if self.frameConfig.framePort mod 1000 == 443: "https" else: "http") & "://" & self.frameConfig.frameHost &
-        ":" & $self.frameConfig.framePort & "/c" & (if self.frameConfig.frameAccess != "public": "?k=" &
-            self.frameConfig.frameAccessKey else: "")
+      publicBaseUrl(self.frameConfig) & "/c" & (if self.frameConfig.frameAccess != "public": "?k=" &
+          self.frameConfig.frameAccessKey else: "")
     elif self.appConfig.codeType == "Frame Image URL":
-      (if self.frameConfig.framePort mod 1000 == 443: "https" else: "http") & "://" & self.frameConfig.frameHost &
-        ":" & $self.frameConfig.framePort & (if self.frameConfig.frameAccess == "private": "/?k=" &
-            self.frameConfig.frameAccessKey else: "")
+      publicBaseUrl(self.frameConfig) & (if self.frameConfig.frameAccess == "private": "/?k=" &
+          self.frameConfig.frameAccessKey else: "")
     else:
       self.appConfig.code
 

@@ -8,6 +8,7 @@ import frameos/server
 import frameos/scheduler
 import frameos/types
 import frameos/portal as netportal
+import frameos/tls_proxy
 import lib/tz
 
 proc newFrameOS*(): FrameOS =
@@ -66,6 +67,8 @@ proc start*(self: FrameOS) {.async.} =
     self.logger.log(%*{"event": "networkCheck", "status": "skipped"})
 
   self.runner.start(firstSceneId)
+
+  startTlsProxy(self.frameConfig, self.logger)
 
   ## This call never returns
   await self.server.startServer()

@@ -6,6 +6,7 @@ import zippy
 import frameos/values
 import frameos/types
 import frameos/channels
+import frameos/urls
 import frameos/utils/time
 import apps/render/text/app as render_textApp
 import scenes/scenes as compiledScenes
@@ -79,7 +80,8 @@ proc buildSceneListText(self: Scene): string =
   let serverHost = if frameConfig.serverHost.len > 0: frameConfig.serverHost else: "not configured"
   let serverPort = if frameConfig.serverPort > 0: $frameConfig.serverPort else: "?"
   let frameHost = if frameConfig.frameHost.len > 0: frameConfig.frameHost else: "0.0.0.0"
-  let framePort = if frameConfig.framePort > 0: $frameConfig.framePort else: "?"
+  let framePort = if publicPort(frameConfig) > 0: $publicPort(frameConfig) else: "?"
+  let frameScheme = publicScheme(frameConfig)
   let agentAccess = if frameConfig.agent != nil and frameConfig.agent.agentEnabled: "enabled" else: "disabled"
   var lines: seq[string] = @[
     "FrameOS System Info",
@@ -90,7 +92,7 @@ proc buildSceneListText(self: Scene): string =
     &"Rotation: {frameConfig.rotate}°",
     &"Time zone: {frameConfig.timeZone}",
     &"Server: {serverHost}:{serverPort}",
-    &"Frame: {frameHost}:{framePort}",
+    &"Frame: {frameScheme}://{frameHost}:{framePort}",
     &"Agent access: {agentAccess}",
     ""
   ]

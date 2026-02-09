@@ -1,6 +1,9 @@
 {
   "framePort": 8787,
   "frameHost": "localhost",
+  "enableTls": false,
+  "tlsPort": 8443,
+  "exposeOnlyTlsPort": false,
   "serverHost": "localhost",
   "serverPort": 8989,
   "serverApiKey": "test-api-key",
@@ -35,4 +38,3 @@
     "wifiHotspotTimeoutSeconds": 300
   }
 }
-

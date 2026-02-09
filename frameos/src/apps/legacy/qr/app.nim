@@ -1,6 +1,7 @@
 import json, strformat
 import pixie
 import frameos/types
+import frameos/urls
 import QRgen
 import QRgen/renderer
 
@@ -42,13 +43,11 @@ proc error*(self: App, message: string) =
 
 proc run*(self: App, context: ExecutionContext) =
   let code = if self.appConfig.codeType == "Frame Control URL":
-      (if self.frameConfig.framePort mod 1000 == 443: "https" else: "http") & "://" & self.frameConfig.frameHost &
-        ":" & $self.frameConfig.framePort & "/c" & (if self.frameConfig.frameAccess != "public": "?k=" &
-            self.frameConfig.frameAccessKey else: "")
+      publicBaseUrl(self.frameConfig) & "/c" & (if self.frameConfig.frameAccess != "public": "?k=" &
+          self.frameConfig.frameAccessKey else: "")
     elif self.appConfig.codeType == "Frame Image URL":
-      (if self.frameConfig.framePort mod 1000 == 443: "https" else: "http") & "://" & self.frameConfig.frameHost &
-        ":" & $self.frameConfig.framePort & (if self.frameConfig.frameAccess == "private": "/?k=" &
-            self.frameConfig.frameAccessKey else: "")
+      publicBaseUrl(self.frameConfig) & (if self.frameConfig.frameAccess == "private": "/?k=" &
+          self.frameConfig.frameAccessKey else: "")
     else:
       self.appConfig.code
 
