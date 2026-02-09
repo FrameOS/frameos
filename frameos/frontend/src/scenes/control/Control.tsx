@@ -7,14 +7,27 @@ interface ControlProps {
   id?: string
 }
 
+const resolveFrameId = (id?: string) => {
+  if (id && id.trim()) {
+    return id
+  }
+  if (typeof window !== 'undefined') {
+    const configFrameId = (window as any).FRAMEOS_APP_CONFIG?.frameId
+    if (configFrameId !== undefined && configFrameId !== null) {
+      const stringFrameId = String(configFrameId).trim()
+      if (stringFrameId) {
+        return stringFrameId
+      }
+    }
+  }
+  return '1'
+}
+
 export const Control = ({ id }: ControlProps) => {
   useMountedLogic(socketLogic)
 
-  const fallbackId =
-    typeof window !== 'undefined' && (window as any).FRAMEOS_APP_CONFIG?.frameId
-      ? String((window as any).FRAMEOS_APP_CONFIG?.frameId)
-      : '1'
-  return <Frame id={id ?? fallbackId} />
+  const resolvedFrameId = resolveFrameId(id)
+  return <Frame id={resolvedFrameId} />
 }
 
 export default Control

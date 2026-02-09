@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 import autoprefixer from 'autoprefixer'
 import cssnano from 'cssnano'
 import { build, context } from 'esbuild'
+import { createRequire } from 'node:module'
 import postcss from 'postcss'
 import postcssPresetEnv from 'postcss-preset-env'
 import tailwindcss from 'tailwindcss'
@@ -41,6 +42,31 @@ const postcssPlugin = {
   },
 }
 
+const require = createRequire(import.meta.url)
+const sharedPackages = [
+  'react',
+  'react-dom',
+  'react-dom/client',
+  'react/jsx-runtime',
+  'react/jsx-dev-runtime',
+  'kea',
+  'kea-router',
+  'kea-loaders',
+]
+
+const sharedPackagePaths = new Map(sharedPackages.map((packageName) => [packageName, require.resolve(packageName)]))
+const sharedDepsFilter =
+  /^(react|react-dom|react-dom\/client|react\/jsx-runtime|react\/jsx-dev-runtime|kea|kea-router|kea-loaders)$/
+
+const sharedDepsPlugin = {
+  name: 'frameos-shared-deps',
+  setup(build) {
+    build.onResolve({ filter: sharedDepsFilter }, (args) => ({
+      path: sharedPackagePaths.get(args.path) ?? args.path,
+    }))
+  },
+}
+
 const buildOptions = {
   absWorkingDir: __dirname,
   entryPoints: ['src/main.tsx'],
@@ -59,7 +85,7 @@ const buildOptions = {
     '.woff': 'file',
     '.woff2': 'file',
   },
-  plugins: [postcssPlugin],
+  plugins: [sharedDepsPlugin, postcssPlugin],
 }
 
 if (isWatch) {
