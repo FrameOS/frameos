@@ -772,6 +772,27 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
             <TextInput name="frame_port" placeholder="8787" required />
           </Field>
           <Field
+            name="enable_tls"
+            label="Enable TLS (Caddy)"
+            tooltip="Enable Caddy as a local TLS proxy for the FrameOS HTTP API."
+          >
+            <Switch name="enable_tls" fullWidth />
+          </Field>
+          {frameForm.enable_tls ? (
+            <>
+              <Field name="tls_port" label="TLS port" tooltip="The port Caddy listens on for HTTPS connections.">
+                <NumberTextInput name="tls_port" placeholder="8443" />
+              </Field>
+              <Field
+                name="expose_only_tls_port"
+                label="Expose only TLS port"
+                tooltip="Bind the HTTP API to localhost so only the TLS proxy is accessible externally."
+              >
+                <Switch name="expose_only_tls_port" fullWidth />
+              </Field>
+            </>
+          ) : null}
+          <Field
             name="frame_access"
             label="HTTP access level"
             tooltip={

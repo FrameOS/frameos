@@ -26,6 +26,9 @@ class Frame(Base):
     frame_port = mapped_column(Integer, default=8787)
     frame_access_key = mapped_column(String(256), nullable=True)
     frame_access = mapped_column(String(50), nullable=True)
+    enable_tls = mapped_column(Boolean, nullable=True)
+    tls_port = mapped_column(Integer, default=8443)
+    expose_only_tls_port = mapped_column(Boolean, nullable=True)
     ssh_user = mapped_column(String(50), nullable=True)
     ssh_pass = mapped_column(String(50), nullable=True)
     ssh_port = mapped_column(Integer, default=22)
@@ -81,6 +84,9 @@ class Frame(Base):
             'frame_port': self.frame_port,
             'frame_access_key': self.frame_access_key,
             'frame_access': self.frame_access,
+            'enable_tls': self.enable_tls,
+            'tls_port': self.tls_port,
+            'expose_only_tls_port': self.expose_only_tls_port,
             'ssh_user': self.ssh_user,
             'ssh_pass': self.ssh_pass,
             'ssh_port': self.ssh_port,
@@ -156,6 +162,9 @@ async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, serve
         frame_host=frame_host,
         frame_access_key=secure_token(20),
         frame_access="private",
+        enable_tls=False,
+        tls_port=8443,
+        expose_only_tls_port=False,
         server_host=server_host,
         server_port=int(server_port),
         server_api_key=secure_token(32),
@@ -243,6 +252,9 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
         "framePort": frame.frame_port or 8787,
         "frameAccessKey": frame.frame_access_key,
         "frameAccess": frame.frame_access,
+        "enableTls": bool(frame.enable_tls),
+        "tlsPort": frame.tls_port or 8443,
+        "exposeOnlyTlsPort": bool(frame.expose_only_tls_port),
         "serverHost": frame.server_host or "localhost",
         "serverPort": frame.server_port or 8989,
         "serverApiKey": frame.server_api_key,

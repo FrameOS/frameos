@@ -14,6 +14,9 @@ class FrameBase(BaseModel):
     frame_port: int
     frame_access_key: Optional[str]
     frame_access: Optional[str]
+    enable_tls: Optional[bool] = None
+    tls_port: Optional[int] = None
+    expose_only_tls_port: Optional[bool] = None
     ssh_user: Optional[str]
     ssh_pass: Optional[str]
     ssh_port: int
@@ -78,6 +81,9 @@ class FrameUpdateRequest(BaseModel):
     frame_port: Optional[int] = None
     frame_access_key: Optional[str] = None
     frame_access: Optional[str] = None
+    enable_tls: Optional[bool] = None
+    tls_port: Optional[int] = None
+    expose_only_tls_port: Optional[bool] = None
     ssh_user: Optional[str] = None
     ssh_pass: Optional[str] = None
     ssh_port: Optional[int] = None

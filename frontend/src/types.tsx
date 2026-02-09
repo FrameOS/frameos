@@ -8,6 +8,9 @@ export interface FrameType {
   frame_port: number
   frame_access_key: string
   frame_access: string
+  enable_tls?: boolean
+  tls_port?: number
+  expose_only_tls_port?: boolean
   ssh_user?: string
   ssh_pass?: string
   ssh_port: number
