@@ -48,8 +48,8 @@ const buildOptions = {
   format: 'esm',
   splitting: false,
   outdir: staticDir,
-  sourcemap: isDev,
-  minify: !isDev,
+  sourcemap: true,
+  minify: true,
   entryNames: 'main',
   assetNames: 'asset-[hash]',
   loader: {

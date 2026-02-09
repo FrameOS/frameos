@@ -156,7 +156,7 @@ export const scenesLogic = kea<scenesLogicType>([
       },
     },
   })),
-  reducers({
+  reducers(() => ({
     search: [
       '',
       {
@@ -318,7 +318,7 @@ export const scenesLogic = kea<scenesLogicType>([
         },
       },
     ],
-  }),
+  })),
   selectors({
     frameId: [() => [(_, props: ScenesLogicProps) => props.frameId], (frameId) => frameId],
     editingFrame: [(s) => [s.frameForm, s.frame], (frameForm, frame) => frameForm || frame || null],

@@ -1,11 +1,13 @@
 import json
 import pixie
+import chroma
 import times
 import assets/web as webAssets
 import assets/frame_web as frameWebAssets
 import asyncdispatch
 import httpclient
 import httpcore
+import os
 import threadpool
 import jester
 import locks
@@ -14,6 +16,7 @@ import strformat
 import options
 import strutils
 import tables
+import zippy
 import drivers/drivers as drivers
 import frameos/apps
 import frameos/types
@@ -63,6 +66,180 @@ proc contentTypeForAsset(path: string): string =
   else:
     "application/octet-stream"
 
+proc loadConfigJson(): JsonNode =
+  try:
+    return parseFile(getConfigFilename())
+  except CatchableError:
+    return %*{}
+
+proc loadScenePayload(): JsonNode =
+  var data = ""
+  let envPath = getEnv("FRAMEOS_SCENES_JSON")
+  if envPath.len > 0:
+    try:
+      if envPath.endsWith(".gz") and fileExists(envPath):
+        data = uncompress(readFile(envPath))
+      elif fileExists(envPath):
+        data = readFile(envPath)
+    except CatchableError:
+      data = ""
+  if data.len == 0:
+    try:
+      if fileExists("./scenes.json.gz"):
+        data = uncompress(readFile("./scenes.json.gz"))
+      elif fileExists("./scenes.json"):
+        data = readFile("./scenes.json")
+    except CatchableError:
+      data = ""
+  if data.len == 0:
+    return %*[]
+  try:
+    let payload = parseJson(data)
+    if payload.kind == JArray:
+      return payload
+  except JsonParsingError, CatchableError:
+    discard
+  return %*[]
+
+proc frameControlCodeJson(controlCode: ControlCode): JsonNode =
+  if controlCode == nil:
+    return %*{}
+  result = %*{
+    "enabled": controlCode.enabled,
+    "position": controlCode.position,
+    "size": controlCode.size,
+    "padding": controlCode.padding,
+    "offsetX": controlCode.offsetX,
+    "offsetY": controlCode.offsetY,
+    "qrCodeColor": controlCode.qrCodeColor.toHtmlHex(),
+    "backgroundColor": controlCode.backgroundColor.toHtmlHex(),
+  }
+
+proc frameScheduleJson(schedule: FrameSchedule): JsonNode =
+  if schedule == nil:
+    return %*{"events": %*[]}
+  var events: seq[JsonNode] = @[]
+  for event in schedule.events:
+    events.add(%*{
+      "id": event.id,
+      "minute": event.minute,
+      "hour": event.hour,
+      "weekday": event.weekday,
+      "event": event.event,
+      "payload": event.payload,
+    })
+  result = %*{"events": events}
+
+proc frameGpioButtonsJson(buttons: seq[GPIOButton]): JsonNode =
+  var entries: seq[JsonNode] = @[]
+  for button in buttons:
+    entries.add(%*{"pin": button.pin, "label": button.label})
+  result = %*entries
+
+proc frameNetworkJson(network: NetworkConfig): JsonNode =
+  if network == nil:
+    return %*{}
+  result = %*{
+    "networkCheck": network.networkCheck,
+    "networkCheckTimeoutSeconds": network.networkCheckTimeoutSeconds,
+    "networkCheckUrl": network.networkCheckUrl,
+    "wifiHotspot": network.wifiHotspot,
+    "wifiHotspotSsid": network.wifiHotspotSsid,
+    "wifiHotspotPassword": network.wifiHotspotPassword,
+    "wifiHotspotTimeoutSeconds": network.wifiHotspotTimeoutSeconds,
+  }
+
+proc frameAgentJson(agent: AgentConfig): JsonNode =
+  if agent == nil:
+    return %*{}
+  result = %*{
+    "agentEnabled": agent.agentEnabled,
+    "agentRunCommands": agent.agentRunCommands,
+    "agentSharedSecret": agent.agentSharedSecret,
+  }
+
+proc framePaletteJson(palette: PaletteConfig): JsonNode =
+  if palette == nil:
+    return %*{}
+  var colors: seq[JsonNode] = @[]
+  for color in palette.colors:
+    colors.add(%*[color[0], color[1], color[2]])
+  result = %*{"colors": colors}
+
+proc frameDeviceConfigJson(deviceConfig: DeviceConfig): JsonNode =
+  if deviceConfig == nil:
+    return %*{}
+  var headers: seq[JsonNode] = @[]
+  for header in deviceConfig.httpUploadHeaders:
+    headers.add(%*{"name": header.name, "value": header.value})
+  result = %*{
+    "vcom": deviceConfig.vcom,
+    "uploadUrl": deviceConfig.httpUploadUrl,
+    "uploadHeaders": headers,
+  }
+
+proc frameApiId(): int =
+  1
+
+proc parseFrameApiId(rawId: string): int =
+  try:
+    return parseInt(rawId)
+  except CatchableError:
+    return -1
+
+proc frameApiPayload(): JsonNode =
+  let configJson = loadConfigJson()
+  let interval = if configJson.kind == JObject: configJson{"interval"}.getFloat(300) else: 300
+  let backgroundColor =
+    if configJson.kind == JObject: configJson{"backgroundColor"}.getStr("#000000") else: "#000000"
+  let colorValue =
+    if configJson.kind == JObject and configJson.hasKey("color"): configJson["color"] else: newJNull()
+  let scenesPayload = loadScenePayload()
+  var activeConnections = 0
+  withLock connectionsLock:
+    activeConnections = connections.len
+
+  result = %*{
+    "id": frameApiId(),
+    "name": globalFrameConfig.name,
+    "mode": globalFrameConfig.mode,
+    "frame_host": globalFrameConfig.frameHost,
+    "frame_port": globalFrameConfig.framePort,
+    "frame_access_key": globalFrameConfig.frameAccessKey,
+    "frame_access": globalFrameConfig.frameAccess,
+    "ssh_user": "",
+    "ssh_pass": "",
+    "ssh_port": 22,
+    "ssh_keys": %*[],
+    "server_host": globalFrameConfig.serverHost,
+    "server_port": globalFrameConfig.serverPort,
+    "server_api_key": globalFrameConfig.serverApiKey,
+    "status": "ready",
+    "width": globalFrameConfig.width,
+    "height": globalFrameConfig.height,
+    "device": globalFrameConfig.device,
+    "device_config": frameDeviceConfigJson(globalFrameConfig.deviceConfig),
+    "color": colorValue,
+    "interval": interval,
+    "metrics_interval": globalFrameConfig.metricsInterval,
+    "scaling_mode": globalFrameConfig.scalingMode,
+    "rotate": globalFrameConfig.rotate,
+    "flip": globalFrameConfig.flip,
+    "background_color": backgroundColor,
+    "scenes": scenesPayload,
+    "debug": globalFrameConfig.debug,
+    "log_to_file": globalFrameConfig.logToFile,
+    "assets_path": globalFrameConfig.assetsPath,
+    "save_assets": globalFrameConfig.saveAssets,
+    "control_code": frameControlCodeJson(globalFrameConfig.controlCode),
+    "schedule": frameScheduleJson(globalFrameConfig.schedule),
+    "gpio_buttons": frameGpioButtonsJson(globalFrameConfig.gpioButtons),
+    "network": frameNetworkJson(globalFrameConfig.network),
+    "agent": frameAgentJson(globalFrameConfig.agent),
+    "palette": framePaletteJson(globalFrameConfig.palette),
+    "active_connections": activeConnections,
+  }
+
 proc shouldReturnNotModified*(headers: HttpHeaders, lastUpdate: float): bool {.gcsafe.} =
   if lastUpdate <= 0.0:
     return false
@@ -74,6 +251,38 @@ proc shouldReturnNotModified*(headers: HttpHeaders, lastUpdate: float): bool {.g
     return int64(lastUpdate) <= ifModifiedTime.toTime().toUnix()
   except CatchableError:
     return false
+
+proc buildFrameImageResponse(request: Request): tuple[status: HttpCode, headers: seq[(string, string)], body: string] =
+  let (sceneId, _, _, lastUpdate) = getLastPublicState()
+  if shouldReturnNotModified(request.headers, lastUpdate):
+    return (
+      Http304,
+      @[("X-Scene-Id", $sceneId), ("Access-Control-Expose-Headers", "X-Scene-Id")],
+      ""
+    )
+  var headers = @[
+    ("Content-Type", "image/png"),
+    ("Content-Disposition", &"inline; filename=\"{sceneId}.png\""),
+    ("X-Scene-Id", $sceneId),
+    ("Access-Control-Expose-Headers", "X-Scene-Id")
+  ]
+  if lastUpdate > 0.0:
+    let lastModified = format(fromUnix(int64(lastUpdate)), "ddd, dd MMM yyyy HH:mm:ss 'GMT'", utc())
+    headers.add(("Last-Modified", lastModified))
+  try:
+    let image = drivers.toPng(360 - globalFrameConfig.rotate)
+    if image != "":
+      return (Http200, headers, image)
+    else:
+      raise newException(Exception, "No image available")
+  except Exception:
+    try:
+      return (Http200, headers, getLastImagePng())
+    except Exception as e:
+      let payload = renderError(globalFrameConfig.renderWidth(), globalFrameConfig.renderHeight(),
+        &"Error: {$e.msg}\n{$e.getStackTrace()}").encodeImage(PngFormat)
+      return (Http200, headers, payload)
+
 
 const AUTH_HEADER = "authorization"
 const AUTH_TYPE = "Bearer"
@@ -227,31 +436,111 @@ router myrouter:
       resp Http401, "Unauthorized"
     log(%*{"event": "http", "get": request.pathInfo})
     {.gcsafe.}: # We're reading immutable globals and png data via a lock. It's fine.
-      let (sceneId, _, _, lastUpdate) = getLastPublicState()
-      if shouldReturnNotModified(request.headers, lastUpdate):
-        resp Http304, [("X-Scene-Id", $sceneId), ("Access-Control-Expose-Headers", "X-Scene-Id")], ""
-        return
-      var headers = @[
-        ("Content-Type", "image/png"),
-        ("Content-Disposition", &"inline; filename=\"{sceneId}.png\""),
-        ("X-Scene-Id", $sceneId),
-        ("Access-Control-Expose-Headers", "X-Scene-Id")
-      ]
-      if lastUpdate > 0.0:
-        let lastModified = format(fromUnix(int64(lastUpdate)), "ddd, dd MMM yyyy HH:mm:ss 'GMT'", utc())
-        headers.add(("Last-Modified", lastModified))
-      try:
-        let image = drivers.toPng(360 - globalFrameConfig.rotate)
-        if image != "":
-          resp Http200, headers, image
-        else:
-          raise newException(Exception, "No image available")
-      except Exception:
-        try:
-          resp Http200, headers, getLastImagePng()
-        except Exception as e:
-          resp Http200, headers, renderError(globalFrameConfig.renderWidth(),
-            globalFrameConfig.renderHeight(), &"Error: {$e.msg}\n{$e.getStackTrace()}").encodeImage(PngFormat)
+      let (status, headers, body) = buildFrameImageResponse(request)
+      resp status, headers, body
+  get "/api/frames":
+    if not hasAccess(request, Read):
+      resp Http401, "Unauthorized"
+    {.gcsafe.}:
+      let framePayload = frameApiPayload()
+      resp Http200, {"Content-Type": "application/json"}, $(%*{"frames": @[framePayload]})
+  get "/api/frames/@id":
+    if not hasAccess(request, Read):
+      resp Http401, "Unauthorized"
+    {.gcsafe.}:
+      let requestedId = parseFrameApiId(@"id")
+      if requestedId != frameApiId():
+        resp Http404, "Not found!"
+      else:
+        let framePayload = frameApiPayload()
+        resp Http200, {"Content-Type": "application/json"}, $(%*{"frame": framePayload})
+  get "/api/frames/@id/state":
+    if not hasAccess(request, Read):
+      resp Http401, "Unauthorized"
+    {.gcsafe.}:
+      let requestedId = parseFrameApiId(@"id")
+      if requestedId != frameApiId():
+        resp Http404, "Not found!"
+      else:
+        let (sceneId, state, _, _) = getLastPublicState()
+        resp Http200, {"Content-Type": "application/json"}, $(%*{"sceneId": $sceneId, "state": state})
+  get "/api/frames/@id/states":
+    if not hasAccess(request, Read):
+      resp Http401, "Unauthorized"
+    {.gcsafe.}:
+      let requestedId = parseFrameApiId(@"id")
+      if requestedId != frameApiId():
+        resp Http404, "Not found!"
+      else:
+        let (sceneId, states) = getAllPublicStates()
+        resp Http200, {"Content-Type": "application/json"}, $(%*{"sceneId": $sceneId, "states": states})
+  get "/api/frames/@id/uploaded_scenes":
+    if not hasAccess(request, Read):
+      resp Http401, "Unauthorized"
+    {.gcsafe.}:
+      let requestedId = parseFrameApiId(@"id")
+      if requestedId != frameApiId():
+        resp Http404, "Not found!"
+      else:
+        let payload = %*{"scenes": getUploadedScenePayload()}
+        resp Http200, {"Content-Type": "application/json"}, $payload
+  get "/api/frames/@id/logs":
+    if not hasAccess(request, Read):
+      resp Http401, "Unauthorized"
+    {.gcsafe.}:
+      let requestedId = parseFrameApiId(@"id")
+      if requestedId != frameApiId():
+        resp Http404, "Not found!"
+      else:
+        resp Http200, {"Content-Type": "application/json"}, $(%*{"logs": %*[]})
+  get "/api/frames/@id/metrics":
+    if not hasAccess(request, Read):
+      resp Http401, "Unauthorized"
+    {.gcsafe.}:
+      let requestedId = parseFrameApiId(@"id")
+      if requestedId != frameApiId():
+        resp Http404, "Not found!"
+      else:
+        resp Http200, {"Content-Type": "application/json"}, $(%*{"metrics": %*[]})
+  get "/api/frames/@id/assets":
+    if not hasAccess(request, Read):
+      resp Http401, "Unauthorized"
+    {.gcsafe.}:
+      let requestedId = parseFrameApiId(@"id")
+      if requestedId != frameApiId():
+        resp Http404, "Not found!"
+      else:
+        resp Http200, {"Content-Type": "application/json"}, $(%*{"assets": %*[]})
+  get "/api/frames/@id/image_token":
+    if not hasAccess(request, Read):
+      resp Http401, "Unauthorized"
+    {.gcsafe.}:
+      let requestedId = parseFrameApiId(@"id")
+      if requestedId != frameApiId():
+        resp Http404, "Not found!"
+      else:
+        let token = if globalFrameConfig.frameAccessKey.len > 0: globalFrameConfig.frameAccessKey else: "frame"
+        resp Http200, {"Content-Type": "application/json"}, $(%*{"token": token, "expires_in": 3600})
+  get "/api/frames/@id/image":
+    if not hasAccess(request, Read):
+      resp Http401, "Unauthorized"
+    {.gcsafe.}:
+      let requestedId = parseFrameApiId(@"id")
+      if requestedId != frameApiId():
+        resp Http404, "Not found!"
+      else:
+        let (status, headers, body) = buildFrameImageResponse(request)
+        resp status, headers, body
+  get "/api/frames/@id/scene_images/@sceneId":
+    if not hasAccess(request, Read):
+      resp Http401, "Unauthorized"
+    {.gcsafe.}:
+      let requestedId = parseFrameApiId(@"id")
+      if requestedId != frameApiId():
+        resp Http404, "Not found!"
+      else:
+        let (status, headers, body) = buildFrameImageResponse(request)
+        resp status, headers, body
   post "/event/@name":
     if not hasAccess(request, Write):
       resp Http401, "Unauthorized"

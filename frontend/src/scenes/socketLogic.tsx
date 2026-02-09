@@ -4,6 +4,7 @@ import { AiSceneLogType, FrameType, LogType } from '../types'
 import type { socketLogicType } from './socketLogicType'
 import { inHassioIngress } from '../utils/inHassioIngress'
 import { getBasePath } from '../utils/getBasePath'
+import { getFrameControlFrameId, isFrameControlMode } from '../utils/frameControlMode'
 
 export const socketLogic = kea<socketLogicType>([
   path(['src', 'scenes', 'socketLogic']),
@@ -21,21 +22,28 @@ export const socketLogic = kea<socketLogicType>([
     deleteFrame: ({ id }: { id: number }) => ({ id }),
     updateSettings: (settings: Record<string, any>) => ({ settings }),
     newMetrics: (metrics: Record<string, any>) => ({ metrics }),
+    frameRendered: (frameId: number) => ({ frameId }),
   }),
   afterMount(({ actions, cache }) => {
+    const frameControlMode = isFrameControlMode()
     const token = localStorage.getItem('token')
-    if (!token && !inHassioIngress()) {
+    if (!frameControlMode && !token && !inHassioIngress()) {
       console.error('🔴 No token found in localStorage, cannot connect to WebSocket.')
       return
     }
 
     function openConnection() {
-      cache.ws = new WebSocket(`${getBasePath()}/ws` + (token ? `?token=${token}` : ''))
+      const wsToken = frameControlMode ? '' : token ? `?token=${token}` : ''
+      cache.ws = new WebSocket(`${getBasePath()}/ws${wsToken}`)
       cache.ws.onopen = function (event: any) {
         console.log('🔵 Connected to the WebSocket server.')
       }
 
       cache.ws.onmessage = function (event: any) {
+        if (frameControlMode && event.data === 'render') {
+          actions.frameRendered(getFrameControlFrameId())
+          return
+        }
         try {
           const data = JSON.parse(event.data)
           console.info('🟢 WebSocket message received:', data)
@@ -70,7 +78,9 @@ export const socketLogic = kea<socketLogicType>([
               console.log('🟡 Unhandled websocket event:', data)
           }
         } catch (err) {
-          console.error('🔴 Failed to parse message as JSON:', event.data)
+          if (!frameControlMode) {
+            console.error('🔴 Failed to parse message as JSON:', event.data)
+          }
         }
       }
 
