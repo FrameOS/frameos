@@ -176,12 +176,20 @@
 - Ported Nim app behavior for `data/xmlToJson`, including document/element/text/comment/cdata conversion semantics and parse failures surfaced as app field validation errors.
 - Added regression coverage for scene-graph manifest loading, JSON-to-graph adaptation, and xml-to-json success/failure paths in the ported app test suite.
 
+### Iteration 25 (eventsToAgenda app port + prettyJson ident parity)
+- Ported `data/eventsToAgenda` into `rust/frameos/src/apps.rs` with deterministic event sorting, caret-format agenda rendering, start-with-today behavior, timezone resolution, and all-day vs timed/multi-day output branches aligned to Nim behavior.
+- Extended `AppExecutionContext` with optional `time_zone` support so app execution can consume frame-level timezone fallback data when event payloads omit explicit timezone entries.
+- Upgraded `data/prettyJson` to honor the Nim `ident` option during prettified output, including validation for non-negative indent width and serializer-based custom spacing control.
+- Added focused regression coverage in `rust/frameos/tests/ported_apps.rs` for `eventsToAgenda` golden-ish output scenarios (sorted mixed events, multi-day "Until" rendering, startWithToday ongoing events) plus `prettyJson` ident success/failure behavior.
+- Updated Cargo dependencies with `chrono` + `chrono-tz` to support timezone-aware date handling for newly ported agenda formatting logic.
+
+
 ## Next up (small, actionable)
-1. Port additional deterministic data apps (`data/eventsToAgenda`) with fixture-based golden outputs and timezone edge-case coverage.
-2. Extend `data/prettyJson` parity with `ident` formatting controls to match Nim output options exactly.
-3. Add CI-oriented daemon smoke script that boots `frameos run`, probes `/healthz`, then sends SIGINT and validates `runtime:stop` in the event log.
-4. Replace shell-based probe commands with first-class filesystem/device capability discovery adapters under a dedicated `discovery` module.
-5. Emit additional probe diagnostics (duration + probe command fingerprint) in `runtime:parity_failed` while avoiding sensitive command leakage.
+1. Add explicit timezone edge-case tests for `data/eventsToAgenda` (DST boundaries and event-level timezone override precedence over frame fallback timezone).
+2. Add CI-oriented daemon smoke script that boots `frameos run`, probes `/healthz`, then sends SIGINT and validates `runtime:stop` in the event log.
+3. Replace shell-based probe commands with first-class filesystem/device capability discovery adapters under a dedicated `discovery` module.
+4. Emit additional probe diagnostics (duration + probe command fingerprint) in `runtime:parity_failed` while avoiding sensitive command leakage.
+5. Port the next deterministic data app from Nim (for example `data/replace` or `data/csvToJson`) and wire scene-runner coverage around it.
 
 ## Checklist
 
