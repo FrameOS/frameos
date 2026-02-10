@@ -4,6 +4,7 @@ const event_loop_mod = @import("runtime/event_loop.zig");
 const logger_mod = @import("runtime/logger.zig");
 const metrics_mod = @import("runtime/metrics.zig");
 const platform_mod = @import("runtime/platform.zig");
+const runner_mod = @import("runtime/runner.zig");
 const scheduler_mod = @import("runtime/scheduler.zig");
 const server_mod = @import("runtime/server.zig");
 const health_mod = @import("runtime/health.zig");
@@ -26,6 +27,9 @@ pub fn startFrameOS() !void {
     const driver_platform = platform_mod.DriverPlatform.init(logger);
     try driver_platform.initDrivers();
 
+    const runner = runner_mod.RuntimeRunner.init(logger, config.device);
+    try runner.startup();
+
     const scheduler = scheduler_mod.RuntimeScheduler.init(logger);
     try scheduler.startup();
 
@@ -37,6 +41,15 @@ pub fn startFrameOS() !void {
     if (!config.network_check) {
         health.recordNetworkProbe(true);
     }
+
+    const health_snapshot = health.snapshot();
+    var health_route_buffer: [256]u8 = undefined;
+    const health_route_payload = try server.healthRoute(health_snapshot).renderJson(&health_route_buffer);
+    try logger.info(
+        "{\"event\":\"server.route.payload\",\"route\":\"/health\",\"payload\":{s}}",
+        .{health_route_payload},
+    );
+
     try health.startup();
 
     const loop = event_loop_mod.RuntimeEventLoop.init(logger, std.time.ns_per_s);

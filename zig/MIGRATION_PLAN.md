@@ -12,8 +12,8 @@
 1. ✅ Boot sequence scaffolding (config → logger → metrics → platform → scheduler → server).
 2. ✅ No-op render/event loop with structured startup logs.
 3. ✅ Health contract stub after server startup.
-4. ⏳ Runner contract + app registry boundary stubs.
-5. ⏳ Minimal server endpoint parity (`/health`, static status payload).
+4. ✅ Runner contract + app registry boundary stubs.
+5. ✅ Minimal server endpoint parity (`/health`, static status payload).
 6. ⏳ First device driver parity slice (simulator).
 
 ## Subsystem migration checklist
@@ -25,19 +25,19 @@
 - [x] Scheduler boundary
 - [x] Server boundary
 - [x] Health contract
-- [ ] Runner lifecycle
+- [x] Runner lifecycle
 - [ ] Scene registry
 - [ ] Script/interpreter boundary
 
 ### Apps (`zig/src/apps`)
-- [ ] Define app interface traits/types
+- [x] Define app interface traits/types
 - [ ] Port simplest app as reference
 - [ ] Add app loading/selection flow
 
 ### Drivers (`zig/src/drivers`)
 - [ ] Simulator driver
-- [ ] GPIO input boundary
-- [ ] Framebuffer/display output boundary
+- [x] GPIO/display/transport contract placeholders
+- [ ] Framebuffer output boundary implementation
 - [ ] I2C/SPI adapters
 
 ### System services (`zig/src/system`)

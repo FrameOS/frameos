@@ -1,3 +1,4 @@
+const std = @import("std");
 const logger_mod = @import("logger.zig");
 
 pub const HealthSnapshot = struct {
@@ -70,4 +71,68 @@ fn networkLabel(network_ok: ?bool) []const u8 {
         if (is_ok) "true" else "false"
     else
         "unknown";
+}
+
+test "snapshot is degraded before server startup" {
+    const testing = std.testing;
+
+    const logger = logger_mod.RuntimeLogger.init(.{
+        .frame_host = "127.0.0.1",
+        .frame_port = 8787,
+        .debug = false,
+        .metrics_interval_s = 60,
+        .network_check = true,
+        .device = "simulator",
+    });
+
+    const health = RuntimeHealth.init(logger, true);
+    const snapshot = health.snapshot();
+
+    try testing.expectEqual(HealthSnapshot.Status.degraded, snapshot.status);
+    try testing.expect(!snapshot.server_started);
+    try testing.expectEqual(@as(?bool, null), snapshot.network_ok);
+}
+
+test "snapshot becomes ok after server started and network probe passes" {
+    const testing = std.testing;
+
+    const logger = logger_mod.RuntimeLogger.init(.{
+        .frame_host = "127.0.0.1",
+        .frame_port = 8787,
+        .debug = false,
+        .metrics_interval_s = 60,
+        .network_check = true,
+        .device = "simulator",
+    });
+
+    var health = RuntimeHealth.init(logger, true);
+    health.markServerStarted();
+    health.recordNetworkProbe(true);
+
+    const snapshot = health.snapshot();
+
+    try testing.expectEqual(HealthSnapshot.Status.ok, snapshot.status);
+    try testing.expect(snapshot.server_started);
+    try testing.expectEqual(@as(?bool, true), snapshot.network_ok);
+}
+
+test "snapshot can be ok without network requirement" {
+    const testing = std.testing;
+
+    const logger = logger_mod.RuntimeLogger.init(.{
+        .frame_host = "127.0.0.1",
+        .frame_port = 8787,
+        .debug = false,
+        .metrics_interval_s = 60,
+        .network_check = false,
+        .device = "simulator",
+    });
+
+    var health = RuntimeHealth.init(logger, false);
+    health.markServerStarted();
+
+    const snapshot = health.snapshot();
+
+    try testing.expectEqual(HealthSnapshot.Status.ok, snapshot.status);
+    try testing.expectEqual(@as(?bool, null), snapshot.network_ok);
 }

@@ -40,6 +40,11 @@
   - [x] Added `runtime/health.zig` with a minimal health-check contract (`ok`/`degraded`) and startup snapshot logging.
   - [x] Wired `startFrameOS` to initialize health immediately after server startup and capture network-check intent.
   - [x] Added `zig/MIGRATION_PLAN.md` documenting Zig stdlib selection, parity checkpoints, and subsystem migration checklists.
+- **Iteration 8:**
+  - [x] Added `runtime/runner.zig` and wired it between driver init and scheduler startup to match Nim startup order.
+  - [x] Extended `runtime/server.zig` with a stubbed `/health` route payload contract and logged route/payload wiring from boot.
+  - [x] Created `zig/src/apps/mod.zig` and `zig/src/drivers/mod.zig` with placeholder module contracts.
+  - [x] Added Zig unit tests for health snapshot behavior, `/health` payload rendering, and config parsing defaults.
 
 ---
 
@@ -55,14 +60,18 @@
 - [x] Define a minimal runtime health-check contract (`runtime/health.zig`) and wire it after server startup.
 - [x] Select/document Zig library strategy for async/filesystem/networking + driver boundaries (current stdlib-first plan).
 - [x] Decide/document parity checkpoints and subsystem migration checklist.
+- [x] Add `runtime/runner.zig` lifecycle boundary and wire it between drivers and scheduler.
+- [x] Add stubbed `/health` server route contract that emits runtime health snapshots.
+- [x] Create initial `zig/src/apps/` and `zig/src/drivers/` placeholder module contracts from `MIGRATION_PLAN.md`.
+- [x] Add Zig tests for health snapshot logic and config parsing defaults.
 
 ---
 
 ## Next Actions (priority order)
-1. [ ] Add `runtime/runner.zig` boundary and wire it between driver init and scheduler startup to mirror Nim startup order more closely.
-2. [ ] Add a stubbed `/health` server route contract that can emit the runtime health snapshot.
-3. [ ] Create initial `zig/src/apps/` and `zig/src/drivers/` directories with placeholder module contracts from `MIGRATION_PLAN.md`.
-4. [ ] Add Zig test coverage for `runtime/health.zig` snapshot logic and config parsing defaults.
+1. [ ] Add a lightweight scene-registry boundary (`runtime/scenes.zig`) and wire runner startup to consume it.
+2. [ ] Add `zig/src/system/` placeholder contracts for portal/hotspot and device utilities.
+3. [ ] Add a stub simulator driver module under `zig/src/drivers/` and connect it to `runtime/platform.zig`.
+4. [ ] Expand `/health` route payload with scheduler/runner readiness booleans.
 
 ---
 

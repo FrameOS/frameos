@@ -3,7 +3,8 @@
 This directory contains the initial Zig-based runtime scaffolding intended to
 mirror the existing Nim runtime under `frameos/src/`. The current implementation
 now includes basic runtime primitives for configuration, logging, metrics,
-driver boundaries, scheduler startup, server boundary, a runtime health contract, and a no-op event loop.
+driver boundaries, runner startup, scheduler startup, server boundary,
+a runtime health contract, and a no-op event loop.
 
 ## Layout
 - `build.zig`: Zig build definition for the runtime stub.
@@ -13,10 +14,13 @@ driver boundaries, scheduler startup, server boundary, a runtime health contract
 - `src/runtime/logger.zig`: Structured startup + boot logging.
 - `src/runtime/metrics.zig`: Metrics startup boundary (stub).
 - `src/runtime/platform.zig`: Driver boundary interface (stub init).
+- `src/runtime/runner.zig`: Runner startup boundary (stub).
 - `src/runtime/scheduler.zig`: Scheduler startup boundary (stub).
-- `src/runtime/server.zig`: Server startup boundary (stub).
+- `src/runtime/server.zig`: Server startup boundary + `/health` route contract.
 - `src/runtime/health.zig`: Runtime health-check contract and startup snapshot.
 - `src/runtime/event_loop.zig`: No-op render/event loop primitive.
+- `src/apps/mod.zig`: Placeholder app lifecycle and registration contracts.
+- `src/drivers/mod.zig`: Placeholder driver lifecycle and registration contracts.
 
 ## Nim → Zig mapping (initial)
 - `frameos/src/frameos.nim` → `zig/src/main.zig` + `zig/src/frameos.zig`
@@ -29,6 +33,7 @@ driver boundaries, scheduler startup, server boundary, a runtime health contract
 ```bash
 cd zig
 zig build
+zig build test
 zig build run
 zig build run -- check
 ```

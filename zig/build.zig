@@ -13,6 +13,16 @@ pub fn build(b: *std.Build) void {
 
     b.installArtifact(exe);
 
+    const tests = b.addTest(.{
+        .root_source_file = .{ .path = "src/main.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const test_run = b.addRunArtifact(tests);
+    const test_step = b.step("test", "Run runtime unit tests");
+    test_step.dependOn(&test_run.step);
+
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
     if (b.args) |args| {
