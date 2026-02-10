@@ -156,7 +156,7 @@ impl Runtime {
             "event": "runtime:ready",
             "server": self.server.endpoint(),
             "health_endpoint": format!("http://{}/healthz", transport.local_addr()),
-            "event_stream_transport": "websocket_stub",
+            "event_stream_transport": "websocket",
             "metrics_interval_seconds": self.metrics.interval_seconds(),
             "apps_loaded": apps_loaded,
             "scenes_loaded": scenes_loaded,

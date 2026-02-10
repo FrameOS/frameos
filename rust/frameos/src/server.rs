@@ -1,8 +1,11 @@
+use base64::Engine;
 use serde_json::json;
+use sha1::{Digest, Sha1};
 use std::collections::VecDeque;
 use std::io::{self, BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::mpsc::{self, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -10,6 +13,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use crate::config::FrameOSConfig;
 
 const EVENT_HISTORY_LIMIT: usize = 256;
+const WEBSOCKET_MAGIC_GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+const WEBSOCKET_PATH: &str = "/ws/events";
 
 /// Server runtime placeholder.
 #[derive(Debug, Clone)]
@@ -26,8 +31,29 @@ pub struct ServerHealthSnapshot {
 }
 
 #[derive(Debug, Clone)]
-pub struct EventFanoutStub {
+pub struct EventFanout {
     state: Arc<Mutex<EventFanoutState>>,
+    broadcaster: EventBroadcaster,
+}
+
+#[derive(Debug)]
+struct EventBroadcaster {
+    next_client_id: Arc<AtomicU64>,
+    clients: Arc<Mutex<Vec<WebSocketClient>>>,
+}
+
+impl Clone for EventBroadcaster {
+    fn clone(&self) -> Self {
+        Self {
+            next_client_id: Arc::clone(&self.next_client_id),
+            clients: Arc::clone(&self.clients),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct WebSocketClient {
+    sender: SyncSender<String>,
 }
 
 #[derive(Debug, Default)]
@@ -36,14 +62,65 @@ struct EventFanoutState {
     recent_events: VecDeque<String>,
 }
 
-impl EventFanoutStub {
+impl EventBroadcaster {
+    fn new() -> Self {
+        Self {
+            next_client_id: Arc::new(AtomicU64::new(1)),
+            clients: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    fn add_client(&self, stream: TcpStream) {
+        self.next_client_id.fetch_add(1, Ordering::SeqCst);
+        let (sender, receiver) = mpsc::sync_channel::<String>(64);
+
+        self.clients
+            .lock()
+            .expect("websocket clients lock should not be poisoned")
+            .push(WebSocketClient { sender });
+
+        thread::spawn(move || {
+            let mut client_stream = stream;
+            while let Ok(message) = receiver.recv() {
+                if write_ws_text_frame(&mut client_stream, &message).is_err() {
+                    break;
+                }
+            }
+        });
+    }
+
+    fn broadcast(&self, payload: &str) {
+        let mut clients = self
+            .clients
+            .lock()
+            .expect("websocket clients lock should not be poisoned");
+
+        clients.retain(|client| match client.sender.try_send(payload.to_string()) {
+            Ok(()) => true,
+            Err(TrySendError::Full(_)) => true,
+            Err(TrySendError::Disconnected(_)) => false,
+        });
+    }
+
+    fn client_count(&self) -> usize {
+        self.clients
+            .lock()
+            .expect("websocket clients lock should not be poisoned")
+            .len()
+    }
+}
+
+impl EventFanout {
     pub fn new() -> Self {
         Self {
             state: Arc::new(Mutex::new(EventFanoutState::default())),
+            broadcaster: EventBroadcaster::new(),
         }
     }
 
     pub fn publish(&self, event_name: &str) {
+        let payload = json!({ "event": event_name }).to_string();
+
         let mut state = self
             .state
             .lock()
@@ -53,6 +130,9 @@ impl EventFanoutStub {
         if state.recent_events.len() > EVENT_HISTORY_LIMIT {
             state.recent_events.pop_front();
         }
+
+        drop(state);
+        self.broadcaster.broadcast(&payload);
     }
 
     pub fn published_total(&self) -> u64 {
@@ -71,6 +151,14 @@ impl EventFanoutStub {
             .cloned()
             .collect()
     }
+
+    pub fn websocket_client_count(&self) -> usize {
+        self.broadcaster.client_count()
+    }
+
+    fn register_websocket_client(&self, stream: TcpStream) {
+        self.broadcaster.add_client(stream);
+    }
 }
 
 #[derive(Debug)]
@@ -86,7 +174,7 @@ struct HealthState {
 
 #[derive(Debug)]
 pub struct ServerTransport {
-    fanout: EventFanoutStub,
+    fanout: EventFanout,
     shutdown: Arc<AtomicBool>,
     health: Arc<Mutex<HealthState>>,
     handle: Option<JoinHandle<io::Result<()>>>,
@@ -99,7 +187,7 @@ impl ServerTransport {
         listener.set_nonblocking(true)?;
         let local_addr = listener.local_addr()?.to_string();
 
-        let fanout = EventFanoutStub::new();
+        let fanout = EventFanout::new();
         let shutdown = Arc::new(AtomicBool::new(false));
         let health = Arc::new(Mutex::new(HealthState {
             started_at: SystemTime::now(),
@@ -144,7 +232,7 @@ impl ServerTransport {
         &self.local_addr
     }
 
-    pub fn fanout(&self) -> EventFanoutStub {
+    pub fn fanout(&self) -> EventFanout {
         self.fanout.clone()
     }
 
@@ -186,13 +274,32 @@ impl ServerTransport {
 }
 
 fn handle_request(
-    mut stream: TcpStream,
+    stream: TcpStream,
     health: &Arc<Mutex<HealthState>>,
-    fanout: &EventFanoutStub,
+    fanout: &EventFanout,
 ) -> io::Result<()> {
     let mut reader = BufReader::new(stream.try_clone()?);
     let mut request_line = String::new();
     reader.read_line(&mut request_line)?;
+
+    let mut websocket_key: Option<String> = None;
+    let mut headers = Vec::new();
+    loop {
+        let mut line = String::new();
+        let bytes_read = reader.read_line(&mut line)?;
+        if bytes_read == 0 || line == "\r\n" {
+            break;
+        }
+        let trimmed = line.trim();
+        headers.push(trimmed.to_string());
+        if let Some((name, value)) = trimmed.split_once(':') {
+            if name.eq_ignore_ascii_case("Sec-WebSocket-Key") {
+                websocket_key = Some(value.trim().to_string());
+            }
+        }
+    }
+
+    let mut stream = reader.into_inner();
 
     let status_payload = {
         let state = health
@@ -208,7 +315,9 @@ fn handle_request(
             "heartbeats": state.heartbeats,
             "metrics_ticks": state.metrics_ticks,
             "event_stream": {
-                "transport": "websocket_stub",
+                "transport": "websocket",
+                "path": WEBSOCKET_PATH,
+                "connected_clients": fanout.websocket_client_count(),
                 "published_total": fanout.published_total(),
                 "recent_events": fanout.recent_events(),
             },
@@ -218,6 +327,22 @@ fn handle_request(
     if request_line.starts_with("GET /healthz ") || request_line.starts_with("GET /health ") {
         let body = status_payload.to_string();
         write_http_response(&mut stream, "200 OK", "application/json", &body)
+    } else if request_line.starts_with(&format!("GET {WEBSOCKET_PATH} "))
+        && headers
+            .iter()
+            .any(|line| line.to_ascii_lowercase().contains("upgrade: websocket"))
+    {
+        let key = websocket_key.ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidInput, "missing websocket key header")
+        })?;
+
+        let accept_key = websocket_accept_key(&key);
+        let response = format!(
+            "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {accept_key}\r\n\r\n"
+        );
+        stream.write_all(response.as_bytes())?;
+        fanout.register_websocket_client(stream);
+        Ok(())
     } else {
         write_http_response(
             &mut stream,
@@ -226,6 +351,29 @@ fn handle_request(
             &json!({ "error": "not_found" }).to_string(),
         )
     }
+}
+
+fn websocket_accept_key(key: &str) -> String {
+    let mut hasher = Sha1::new();
+    hasher.update(format!("{key}{WEBSOCKET_MAGIC_GUID}").as_bytes());
+    let digest = hasher.finalize();
+    base64::engine::general_purpose::STANDARD.encode(digest)
+}
+
+fn write_ws_text_frame(stream: &mut TcpStream, message: &str) -> io::Result<()> {
+    let bytes = message.as_bytes();
+    if bytes.len() > 125 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "websocket frame too large for simple sender",
+        ));
+    }
+
+    let mut frame = Vec::with_capacity(bytes.len() + 2);
+    frame.push(0x81);
+    frame.push(bytes.len() as u8);
+    frame.extend_from_slice(bytes);
+    stream.write_all(&frame)
 }
 
 fn write_http_response(
@@ -270,7 +418,7 @@ mod tests {
 
     #[test]
     fn event_fanout_tracks_publish_counts() {
-        let fanout = EventFanoutStub::new();
+        let fanout = EventFanout::new();
         fanout.publish("runtime:start");
         fanout.publish("runtime:ready");
 
@@ -331,7 +479,72 @@ mod tests {
         assert_eq!(payload["apps_loaded"], json!(2));
         assert_eq!(payload["scenes_loaded"], json!(3));
         assert_eq!(payload["heartbeats"], json!(1));
+        assert_eq!(payload["event_stream"]["transport"], json!("websocket"));
         assert_eq!(payload["event_stream"]["published_total"], json!(1));
+
+        transport.stop().expect("transport should stop cleanly");
+    }
+
+    #[test]
+    fn websocket_upgrade_receives_broadcast_event() {
+        let server = Server {
+            host: "127.0.0.1".to_string(),
+            port: 0,
+        };
+        let transport = ServerTransport::start(
+            &server,
+            ServerHealthSnapshot {
+                apps_loaded: 0,
+                scenes_loaded: 0,
+                metrics_interval_seconds: 60,
+            },
+        )
+        .expect("server should start");
+
+        let mut stream = TcpStream::connect(transport.local_addr()).expect("connect should work");
+        let handshake = format!(
+            "GET {WEBSOCKET_PATH} HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
+        );
+        stream
+            .write_all(handshake.as_bytes())
+            .expect("handshake write should work");
+
+        let mut reader = BufReader::new(stream.try_clone().expect("clone should work"));
+        let mut status = String::new();
+        reader
+            .read_line(&mut status)
+            .expect("status should be readable");
+        assert!(status.starts_with("HTTP/1.1 101"));
+
+        loop {
+            let mut line = String::new();
+            reader
+                .read_line(&mut line)
+                .expect("header line should be readable");
+            if line == "\r\n" || line.is_empty() {
+                break;
+            }
+        }
+
+        let fanout = transport.fanout();
+        fanout.publish("runtime:ready");
+
+        let mut header = [0u8; 2];
+        stream
+            .read_exact(&mut header)
+            .expect("frame header should be readable");
+        assert_eq!(header[0], 0x81);
+
+        let payload_len = (header[1] & 0x7F) as usize;
+        let mut payload = vec![0u8; payload_len];
+        stream
+            .read_exact(&mut payload)
+            .expect("payload should be readable");
+
+        let payload_text = String::from_utf8(payload).expect("payload should be utf8");
+        let message: serde_json::Value =
+            serde_json::from_str(&payload_text).expect("payload should be json");
+        assert_eq!(message["event"], json!("runtime:ready"));
 
         transport.stop().expect("transport should stop cleanly");
     }

@@ -82,11 +82,17 @@
 - Wired `runtime::run_until_stopped` to boot/stop the server transport, publish lifecycle/tick events into fanout state, and include the discovered health endpoint in the `runtime:ready` payload.
 - Added unit coverage for fanout accounting, loopback bind fallback behavior, and health endpoint responses over a real TCP request.
 
+
+### Iteration 12 (websocket broadcast transport + health contract updates)
+- Replaced the in-memory websocket fanout stub with a lightweight websocket broadcaster in `src/server.rs`, including RFC6455 handshake handling for `/ws/events` and JSON text-frame fanout of lifecycle/tick events.
+- Updated health payload metadata to report websocket transport details (`transport`, `path`, `connected_clients`) while preserving published event counters/history for parity tracking.
+- Added server tests covering websocket upgrade + broadcast delivery and updated runtime/docs contract strings from `websocket_stub` to `websocket`.
+
 ## Next up (small, actionable)
-1. Replace the websocket fanout stub with an actual websocket broadcast transport while preserving the current event contract names.
-2. Define top-level Cargo workspace timing once a second Rust crate is introduced.
+1. Add websocket ping/pong, close-frame handling, and bounded backpressure behavior for long-lived clients.
+2. Expand websocket message payloads beyond event names (e.g., include timestamps and selected event fields) while preserving current compatibility.
 3. Add a JSON-lines log sink abstraction so tests can assert event payloads without stdout substring matching.
-4. Document usage and migration steps for the Rust CLI in `rust/frameos/docs/` now that the health endpoint scaffold exists.
+4. Document usage and migration steps for the Rust CLI in `rust/frameos/docs/` now that health + websocket scaffolding exists.
 
 ## Checklist
 
