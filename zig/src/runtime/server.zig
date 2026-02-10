@@ -237,7 +237,7 @@ test "health route renders degraded payload when network probe fails" {
     );
 }
 
-test "health route renders unknown probe outcome when probe summary absent" {
+test "health route renders unknown probe outcome when network checks are disabled" {
     const testing = std.testing;
 
     const logger = logger_mod.RuntimeLogger.init(.{ .frame_host = "127.0.0.1", .frame_port = 8787, .debug = false, .metrics_interval_s = 60, .network_check = false, .network_probe_mode = .auto, .device = "simulator", .startup_scene = "clock" });
@@ -249,7 +249,10 @@ test "health route renders unknown probe outcome when probe summary absent" {
     var buf: [256]u8 = undefined;
     const payload = try route.renderJson(&buf);
 
-    try testing.expect(std.mem.indexOf(u8, payload, "\"networkProbe\":{\"mode\":\"auto\",\"outcome\":\"unknown\"}") != null);
+    try testing.expectEqualStrings(
+        "{\"status\":\"ok\",\"startupState\":\"ready\",\"serverStarted\":true,\"networkRequired\":false,\"networkOk\":null,\"schedulerReady\":true,\"runnerReady\":true,\"networkProbe\":{\"mode\":\"auto\",\"outcome\":\"unknown\"},\"host\":\"0.0.0.0\",\"port\":7777}",
+        payload,
+    );
 }
 
 test "scenes route renders scene discovery payload" {

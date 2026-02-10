@@ -1,14 +1,10 @@
 const std = @import("std");
+const clock_app = @import("clock.zig");
+const types = @import("types.zig");
 
-pub const AppContext = struct {
-    allocator: std.mem.Allocator,
-};
-
-pub const AppSpec = struct {
-    id: []const u8,
-    name: []const u8,
-    version: []const u8,
-};
+pub const AppContext = types.AppContext;
+pub const AppSpec = types.AppSpec;
+pub const AppStartupSummary = types.AppStartupSummary;
 
 pub const AppRuntime = struct {
     spec: AppSpec,
@@ -28,6 +24,29 @@ pub const SceneManifest = struct {
     app: AppSpec,
     entrypoint: []const u8,
 };
+
+pub const AppBoundary = struct {
+    runtime: AppRuntime,
+
+    pub fn startup(self: AppBoundary, ctx: AppContext) !AppStartupSummary {
+        if (std.mem.eql(u8, self.runtime.spec.id, "app.clock")) {
+            const lifecycle = clock_app.ClockAppLifecycle.init(self.runtime.spec);
+            return lifecycle.startup(ctx);
+        }
+
+        try self.runtime.startup(ctx);
+        return .{
+            .app_id = self.runtime.spec.id,
+            .lifecycle = "stub",
+            .frame_rate_hz = 0,
+        };
+    }
+};
+
+pub fn loadAppBoundaryForScene(scene_id: []const u8) ?AppBoundary {
+    const manifest = findSceneManifest(scene_id) orelse return null;
+    return .{ .runtime = AppRuntime.init(manifest.app) };
+}
 
 pub fn builtinSceneManifests() []const SceneManifest {
     return &[_]SceneManifest{
@@ -65,4 +84,26 @@ test "builtin scene manifests include clock" {
     const manifest = findSceneManifest("clock") orelse return error.TestUnexpectedResult;
     try testing.expectEqualStrings("app.clock", manifest.app.id);
     try testing.expectEqualStrings("apps/clock/main", manifest.entrypoint);
+}
+
+test "clock scene app boundary resolves concrete lifecycle summary" {
+    const testing = std.testing;
+
+    const boundary = loadAppBoundaryForScene("clock") orelse return error.TestUnexpectedResult;
+    const summary = try boundary.startup(.{ .allocator = testing.allocator });
+
+    try testing.expectEqualStrings("app.clock", summary.app_id);
+    try testing.expectEqualStrings("clock", summary.lifecycle);
+    try testing.expectEqual(@as(u8, 1), summary.frame_rate_hz);
+}
+
+test "non-clock scene app boundary keeps stub lifecycle" {
+    const testing = std.testing;
+
+    const boundary = loadAppBoundaryForScene("weather") orelse return error.TestUnexpectedResult;
+    const summary = try boundary.startup(.{ .allocator = testing.allocator });
+
+    try testing.expectEqualStrings("app.weather", summary.app_id);
+    try testing.expectEqualStrings("stub", summary.lifecycle);
+    try testing.expectEqual(@as(u8, 0), summary.frame_rate_hz);
 }

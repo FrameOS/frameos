@@ -104,6 +104,11 @@
   - [x] Threaded network-probe mode/outcome metadata into `/health` payload JSON via a `networkProbe` object and updated boot integration coverage to assert successful and failed probe summaries.
   - [x] Added config-level tests that exercise `loadConfig` parsing behavior for `FRAME_NETWORK_PROBE_MODE` (valid and invalid values).
 
+- **Iteration 19:**
+  - [x] Tightened `/health` disabled-network coverage with an exact JSON assertion that locks `networkProbe.outcome="unknown"` when checks are off.
+  - [x] Added `renderBootNetworkProbePayload` plus an integration-style test that asserts `boot.network_probe` mode/outcome fields stay aligned with `/health` diagnostics.
+  - [x] Ported the first concrete app boundary via `apps/clock.zig` and wired `apps/mod.zig` + `runtime/runner.zig` to use clock lifecycle startup summaries.
+
 ## Completed
 - [x] Create `zig/` directory.
 - [x] Create `zig/TODO.md` with loop structure and initial plan.
@@ -146,12 +151,16 @@
 - [x] Thread network-probe mode and probe outcome summary into `/health` payload metadata for at-a-glance diagnostics.
 - [x] Add config-level tests that exercise `loadConfig` parsing for `FRAME_NETWORK_PROBE_MODE` environment values.
 
+- [x] Add route-level JSON coverage for `/health` when network checks are disabled so `networkProbe.outcome=unknown` is explicitly locked in.
+- [x] Introduce a dedicated boot log payload test that validates `boot.network_probe` mode/outcome fields remain aligned with `/health` diagnostics.
+- [x] Start porting one concrete Zig app boundary implementation (first target: clock app lifecycle stub) behind `apps/mod.zig`.
+
 ---
 
 ## Next Actions (priority order)
-1. [ ] Add route-level JSON coverage for `/health` when network checks are disabled so `networkProbe.outcome=unknown` is explicitly locked in.
-2. [ ] Introduce a dedicated boot log payload test that validates `boot.network_probe` mode/outcome fields remain aligned with `/health` diagnostics.
-3. [ ] Start porting one concrete Zig app boundary implementation (first target: clock app lifecycle stub) behind `apps/mod.zig`.
+1. [ ] Extend `/scenes/:id` payload contract with optional app lifecycle metadata so route diagnostics can reflect boundary startup intent.
+2. [ ] Add runner-level tests that validate fallback behavior when a scene manifest exists but no app boundary is registered.
+3. [ ] Start porting a second concrete app boundary (next target: weather lifecycle stub) behind `apps/mod.zig`.
 
 ## Backlog / Later
 - [ ] Port individual apps incrementally (start with simplest).

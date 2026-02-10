@@ -1,3 +1,4 @@
+const std = @import("std");
 const apps_mod = @import("../apps/mod.zig");
 const logger_mod = @import("logger.zig");
 const scenes_mod = @import("scenes.zig");
@@ -18,13 +19,18 @@ pub const RuntimeRunner = struct {
     pub fn startup(self: RuntimeRunner) !void {
         const startup_scene = self.scene_registry.resolveStartupScene();
         const manifest = self.scene_registry.loadManifest(startup_scene);
+        const app_boundary = apps_mod.loadAppBoundaryForScene(startup_scene);
 
         const app_id = if (manifest) |loaded| loaded.app.id else "unknown";
         const app_entrypoint = if (manifest) |loaded| loaded.entrypoint else "unknown";
+        const app_startup = if (app_boundary) |boundary|
+            try boundary.startup(.{ .allocator = std.heap.page_allocator })
+        else
+            apps_mod.AppStartupSummary{ .app_id = app_id, .lifecycle = "missing", .frame_rate_hz = 0 };
 
         try self.logger.info(
-            "{\"event\":\"runner.start\",\"status\":\"stub\",\"device\":\"{s}\",\"startupScene\":\"{s}\",\"appId\":\"{s}\",\"appEntrypoint\":\"{s}\",\"boundary\":\"runtime->apps\"}",
-            .{ self.device, startup_scene, app_id, app_entrypoint },
+            "{\"event\":\"runner.start\",\"status\":\"stub\",\"device\":\"{s}\",\"startupScene\":\"{s}\",\"appId\":\"{s}\",\"appEntrypoint\":\"{s}\",\"appLifecycle\":\"{s}\",\"frameRateHz\":{},\"boundary\":\"runtime->apps\"}",
+            .{ self.device, startup_scene, app_startup.app_id, app_entrypoint, app_startup.lifecycle, app_startup.frame_rate_hz },
         );
     }
 };
@@ -54,4 +60,14 @@ test "apps module returns no manifest for unknown scene" {
     const testing = @import("std").testing;
 
     try testing.expectEqual(@as(?apps_mod.SceneManifest, null), apps_mod.findSceneManifest("unknown-scene"));
+}
+
+test "runner uses clock app lifecycle boundary" {
+    const testing = @import("std").testing;
+
+    const boundary = apps_mod.loadAppBoundaryForScene("clock") orelse return error.TestUnexpectedResult;
+    const summary = try boundary.startup(.{ .allocator = testing.allocator });
+
+    try testing.expectEqualStrings("clock", summary.lifecycle);
+    try testing.expectEqual(@as(u8, 1), summary.frame_rate_hz);
 }

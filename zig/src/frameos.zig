@@ -43,6 +43,23 @@ pub fn renderBootRoutePayloads(
     };
 }
 
+pub fn renderBootNetworkProbePayload(
+    host: []const u8,
+    port: u16,
+    probe_mode: config_mod.NetworkProbeMode,
+    probe_outcome: network_probe_mod.ProbeOutcome,
+    buffer: []u8,
+) ![]const u8 {
+    var stream = std.io.fixedBufferStream(buffer);
+    const writer = stream.writer();
+    try writer.print(
+        "{\"target\":{\"host\":\"{s}\",\"port\":{}},\"mode\":\"{s}\",\"outcome\":\"{s}\"}",
+        .{ host, port, config_mod.probeModeLabel(probe_mode), network_probe_mod.outcomeLabel(probe_outcome) },
+    );
+
+    return stream.getWritten();
+}
+
 pub fn startFrameOS() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
@@ -92,10 +109,15 @@ pub fn startFrameOS() !void {
 
     health.markServerStarted();
     const probe_outcome = try network_probe.probe(.{ .host = config.frame_host, .port = config.frame_port });
-    try logger.info(
-        "{\"event\":\"boot.network_probe\",\"target\":{\"host\":\"{s}\",\"port\":{}},\"mode\":\"{s}\",\"outcome\":\"{s}\"}",
-        .{ config.frame_host, config.frame_port, config_mod.probeModeLabel(config.network_probe_mode), network_probe_mod.outcomeLabel(probe_outcome) },
+    var network_probe_payload_buf: [160]u8 = undefined;
+    const network_probe_payload = try renderBootNetworkProbePayload(
+        config.frame_host,
+        config.frame_port,
+        config.network_probe_mode,
+        probe_outcome,
+        &network_probe_payload_buf,
     );
+    try logger.info("{\"event\":\"boot.network_probe\",\"payload\":{s}}", .{network_probe_payload});
     health.recordNetworkProbe(probe_outcome != .failed);
 
     const health_snapshot = health.snapshot();
@@ -251,4 +273,29 @@ test "boot payload integration captures successful startup scene payload" {
     try testing.expect(std.mem.indexOf(u8, payloads.device_summary, "\"startupScene\":\"weather\"") != null);
     try testing.expect(std.mem.indexOf(u8, payloads.device_summary, "\"startupState\":\"ready\"") != null);
     try testing.expect(std.mem.indexOf(u8, payloads.device_summary, "\"rotationDeg\":0") != null);
+}
+
+
+test "boot network probe log payload aligns with health diagnostics" {
+    const testing = std.testing;
+
+    const config: config_mod.RuntimeConfig = .{ .frame_host = "0.0.0.0", .frame_port = 7777, .debug = false, .metrics_interval_s = 30, .network_check = true, .network_probe_mode = .force_failed, .device = "simulator", .startup_scene = "clock" };
+    const logger = logger_mod.RuntimeLogger.init(config);
+    const server = server_mod.RuntimeServer.init(logger, config);
+
+    var health = health_mod.RuntimeHealth.init(logger, true, .booting);
+    health.markServerStarted();
+    health.markRunnerReady();
+    health.markSchedulerReady();
+    health.recordNetworkProbe(false);
+
+    var health_buf: [256]u8 = undefined;
+    const health_payload = try server.healthRoute(health.snapshot(), config.network_probe_mode, .failed).renderJson(&health_buf);
+
+    var probe_buf: [160]u8 = undefined;
+    const probe_payload = try renderBootNetworkProbePayload(config.frame_host, config.frame_port, config.network_probe_mode, .failed, &probe_buf);
+
+    try testing.expect(std.mem.indexOf(u8, health_payload, "\"networkProbe\":{\"mode\":\"force-failed\",\"outcome\":\"failed\"}") != null);
+    try testing.expect(std.mem.indexOf(u8, probe_payload, "\"mode\":\"force-failed\"") != null);
+    try testing.expect(std.mem.indexOf(u8, probe_payload, "\"outcome\":\"failed\"") != null);
 }
