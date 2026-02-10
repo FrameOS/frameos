@@ -36,12 +36,16 @@ Event names currently reserved:
 - `runtime:heartbeat`
 - `runtime:metrics_tick`
 
-## Planned server/API contract
+## Server/API contract status
 
-Short-term target:
-- keep the event stream transport-agnostic (stdout now; file/socket later);
-- expose a local status endpoint mirroring runtime health and loaded manifest counts;
-- add websocket broadcast support for lifecycle events once server wiring exists.
+Implemented in the current scaffold:
+- local HTTP health endpoints at `/healthz` (and alias `/health`) served by `src/server.rs` once `frameos run` starts;
+- health payload includes manifest-load counters, heartbeat/metrics tick counters, and event transport metadata;
+- in-memory websocket fanout stub records lifecycle/tick event names for future broadcast transport integration.
+
+Next transport steps:
+- replace the in-memory fanout with a real websocket broadcaster;
+- keep the current event names and payload compatibility guarantees while adding transport details.
 
 ## Compatibility rules
 

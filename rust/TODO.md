@@ -76,11 +76,17 @@
 - Updated interface/parity docs to include the newly implemented lifecycle events and metrics-loop progress.
 
 
+### Iteration 11 (server transport scaffold: health + event fanout stub)
+- Implemented `src/server.rs` transport scaffolding with a lightweight HTTP listener that serves `/healthz` and `/health` JSON snapshots containing runtime counters and manifest load state.
+- Added an in-memory websocket fanout stub (`EventFanoutStub`) that tracks published lifecycle event names and exposes bounded event history for future websocket broadcast wiring.
+- Wired `runtime::run_until_stopped` to boot/stop the server transport, publish lifecycle/tick events into fanout state, and include the discovered health endpoint in the `runtime:ready` payload.
+- Added unit coverage for fanout accounting, loopback bind fallback behavior, and health endpoint responses over a real TCP request.
+
 ## Next up (small, actionable)
-1. Start server transport implementation (HTTP health endpoint + websocket event fanout stub).
+1. Replace the websocket fanout stub with an actual websocket broadcast transport while preserving the current event contract names.
 2. Define top-level Cargo workspace timing once a second Rust crate is introduced.
 3. Add a JSON-lines log sink abstraction so tests can assert event payloads without stdout substring matching.
-4. Document usage and migration steps for the Rust CLI in `rust/frameos/docs/` once server scaffolding lands.
+4. Document usage and migration steps for the Rust CLI in `rust/frameos/docs/` now that the health endpoint scaffold exists.
 
 ## Checklist
 

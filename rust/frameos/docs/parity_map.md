@@ -9,7 +9,7 @@ This map tracks concrete behavior in the existing Nim runtime and where it lands
 | Structured logging/event stream | `frameos/src/frameos/utils/logging.nim` | `src/logging.rs` + event contract in `src/interfaces.rs` | In progress (JSON events established, sinks pending) |
 | Scene catalog and scene manifest validation | app/scene loader modules under `frameos/src/frameos/apps/` | `src/models.rs`, `src/scenes.rs`, `src/manifests.rs` | Implemented for typed manifest adapters |
 | App registry and executable metadata | app modules under `frameos/src/frameos/apps/` | `src/models.rs`, `src/apps.rs`, `src/manifests.rs` | Implemented for typed manifest adapters |
-| HTTP/WebSocket runtime server | `jester` + `ws` usage in runtime modules | `src/server.rs` | Planned (endpoint contract modeled, transport server pending) |
+| HTTP/WebSocket runtime server | `jester` + `ws` usage in runtime modules | `src/server.rs` | In progress (HTTP health endpoint implemented + websocket fanout stub) |
 | Renderer loop and device drivers | `frameos/src/frameos/runner*`, `drivers/` | Planned crate modules (likely `renderer`, `drivers`) | Not started |
 | Metrics and telemetry loop | runtime metrics modules | `src/metrics.rs`, `src/runtime.rs` | In progress (interval config + periodic `runtime:metrics_tick`/`runtime:heartbeat` events) |
 | Embedded/static assets (`nimassets`) | Nimble task + generated modules | Planned Rust asset strategy (include bytes/build-script or filesystem contract) | Not started |

@@ -4,7 +4,7 @@ use crate::logging;
 use crate::manifests::{load_app_registry, load_scene_catalog, ManifestLoadError};
 use crate::metrics::Metrics;
 use crate::scenes::SceneCatalog;
-use crate::server::Server;
+use crate::server::{Server, ServerHealthSnapshot, ServerTransport};
 use std::io;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -130,13 +130,38 @@ impl Runtime {
                 "assets_path": self.config.assets_path,
             }
         }));
+        let apps_loaded = self
+            .apps
+            .as_ref()
+            .map(|apps| apps.apps().len())
+            .unwrap_or(0);
+        let scenes_loaded = self
+            .scenes
+            .as_ref()
+            .map(|scenes| scenes.scenes().len())
+            .unwrap_or(0);
+
+        let transport = ServerTransport::start(
+            &self.server,
+            ServerHealthSnapshot {
+                apps_loaded,
+                scenes_loaded,
+                metrics_interval_seconds: self.metrics.interval_seconds(),
+            },
+        )?;
+        let event_fanout = transport.fanout();
+        event_fanout.publish("runtime:start");
+
         logging::log_event(serde_json::json!({
             "event": "runtime:ready",
             "server": self.server.endpoint(),
+            "health_endpoint": format!("http://{}/healthz", transport.local_addr()),
+            "event_stream_transport": "websocket_stub",
             "metrics_interval_seconds": self.metrics.interval_seconds(),
-            "apps_loaded": self.apps.as_ref().map(|apps| apps.apps().len()).unwrap_or(0),
-            "scenes_loaded": self.scenes.as_ref().map(|scenes| scenes.scenes().len()).unwrap_or(0),
+            "apps_loaded": apps_loaded,
+            "scenes_loaded": scenes_loaded,
         }));
+        event_fanout.publish("runtime:ready");
 
         let mut tick_state = TickState::new(Instant::now());
         let metrics_interval = Duration::from_secs(self.metrics.interval_seconds().max(1));
@@ -150,6 +175,8 @@ impl Runtime {
                     "uptime_seconds": now.duration_since(tick_state.started_at).as_secs_f64(),
                     "server": self.server.endpoint(),
                 }));
+                event_fanout.publish("runtime:heartbeat");
+                transport.record_heartbeat();
             }
 
             if tick_state.should_emit_metrics_tick(now, metrics_interval) {
@@ -158,9 +185,11 @@ impl Runtime {
                     "event": "runtime:metrics_tick",
                     "uptime_seconds": now.duration_since(tick_state.started_at).as_secs_f64(),
                     "metrics_interval_seconds": self.metrics.interval_seconds(),
-                    "apps_loaded": self.apps.as_ref().map(|apps| apps.apps().len()).unwrap_or(0),
-                    "scenes_loaded": self.scenes.as_ref().map(|scenes| scenes.scenes().len()).unwrap_or(0),
+                    "apps_loaded": apps_loaded,
+                    "scenes_loaded": scenes_loaded,
                 }));
+                event_fanout.publish("runtime:metrics_tick");
+                transport.record_metrics_tick();
             }
 
             thread::sleep(LOOP_SLEEP);
@@ -170,9 +199,12 @@ impl Runtime {
             "event": "runtime:stop",
             "server": self.server.endpoint(),
             "metrics_interval_seconds": self.metrics.interval_seconds(),
-            "apps_loaded": self.apps.as_ref().map(|apps| apps.apps().len()).unwrap_or(0),
-            "scenes_loaded": self.scenes.as_ref().map(|scenes| scenes.scenes().len()).unwrap_or(0),
+            "apps_loaded": apps_loaded,
+            "scenes_loaded": scenes_loaded,
         }));
+        event_fanout.publish("runtime:stop");
+        transport.mark_stopped();
+        transport.stop()?;
         Ok(())
     }
 
@@ -186,6 +218,13 @@ impl Runtime {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn test_config() -> FrameOSConfig {
+        let mut config = FrameOSConfig::default();
+        config.server_host = "127.0.0.1".to_string();
+        config.server_port = 0;
+        config
+    }
+
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
     use std::thread;
@@ -193,7 +232,7 @@ mod tests {
 
     #[test]
     fn run_until_stopped_returns_after_shutdown_signal() {
-        let runtime = Runtime::new(FrameOSConfig::default());
+        let runtime = Runtime::new(test_config());
         let shutdown = Arc::new(AtomicBool::new(false));
         let signal = Arc::clone(&shutdown);
 
@@ -211,7 +250,7 @@ mod tests {
 
     #[test]
     fn start_completes_for_scaffolding_mode() {
-        let runtime = Runtime::new(FrameOSConfig::default());
+        let runtime = Runtime::new(test_config());
         runtime.start().expect("start should return for now");
     }
 
