@@ -57,6 +57,11 @@
 
 ---
 
+- **Iteration 11:**
+  - [x] Added `zig/src/drivers/simulator.zig` with a stub simulator startup contract and unit test for default simulator capabilities.
+  - [x] Extended `zig/src/drivers/mod.zig` with device-to-driver config mapping and startup dispatch that routes simulator devices through the simulator module.
+  - [x] Wired `runtime/platform.zig` + `startFrameOS` to initialize drivers via the new mapping, including simulator-specific startup logging fields.
+
 ## Completed
 - [x] Create `zig/` directory.
 - [x] Create `zig/TODO.md` with loop structure and initial plan.
@@ -74,14 +79,14 @@
 - [x] Create initial `zig/src/apps/` and `zig/src/drivers/` placeholder module contracts from `MIGRATION_PLAN.md`.
 - [x] Add Zig tests for health snapshot logic and config parsing defaults.
 - [x] Add `zig/src/system/` placeholder contracts for portal/hotspot and device utilities.
+- [x] Add a stub simulator driver module under `zig/src/drivers/` and connect it to `runtime/platform.zig`.
 
 ---
 
 ## Next Actions (priority order)
-1. [ ] Add a stub simulator driver module under `zig/src/drivers/` and connect it to `runtime/platform.zig`.
-2. [ ] Expand `/health` route payload with scheduler/runner readiness booleans.
-3. [ ] Add scene-registry-to-apps boundary methods for listing and loading scene manifests.
-4. [ ] Add `system` scene-default helpers that map startup-state decisions (index vs wifi hotspot) from boot config.
+1. [ ] Expand `/health` route payload with scheduler/runner readiness booleans.
+2. [ ] Add scene-registry-to-apps boundary methods for listing and loading scene manifests.
+3. [ ] Add `system` scene-default helpers that map startup-state decisions (index vs wifi hotspot) from boot config.
 
 ---
 

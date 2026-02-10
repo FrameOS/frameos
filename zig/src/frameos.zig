@@ -26,7 +26,7 @@ pub fn startFrameOS() !void {
     const metrics = metrics_mod.RuntimeMetrics.init(logger, config.metrics_interval_s);
     try metrics.startup();
 
-    const driver_platform = platform_mod.DriverPlatform.init(logger);
+    const driver_platform = platform_mod.DriverPlatform.init(allocator, logger, config.device);
     try driver_platform.initDrivers();
 
     const scene_registry = scenes_mod.SceneRegistry.init(logger, config.startup_scene);
