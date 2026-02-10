@@ -26,7 +26,7 @@ When `run` starts successfully:
 Current websocket behavior includes:
 
 - RFC6455 upgrade handshake;
-- text-frame broadcast of runtime events (`{"event":"runtime:..."}` shape);
+- text-frame broadcast of runtime events as additive envelopes (`{"event":"runtime:...","timestamp":...,"fields":{...}}`);
 - ping/pong handling (server replies to ping payloads);
 - close-frame acknowledgement and client cleanup;
 - bounded sender queues with drop-on-backpressure semantics for slow clients.

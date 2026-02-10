@@ -166,7 +166,19 @@ impl EventFanout {
     }
 
     pub fn publish(&self, event_name: &str) {
-        let payload = json!({ "event": event_name }).to_string();
+        self.publish_with_fields(
+            event_name,
+            serde_json::Value::Object(serde_json::Map::new()),
+        );
+    }
+
+    pub fn publish_with_fields(&self, event_name: &str, fields: serde_json::Value) {
+        let payload = json!({
+            "event": event_name,
+            "timestamp": unix_timestamp_seconds(),
+            "fields": fields,
+        })
+        .to_string();
 
         let mut state = self
             .state
@@ -206,6 +218,13 @@ impl EventFanout {
     fn register_websocket_client(&self, stream: TcpStream) {
         self.broadcaster.add_client(stream);
     }
+}
+
+fn unix_timestamp_seconds() -> f64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs_f64())
+        .unwrap_or(0.0)
 }
 
 #[derive(Debug)]
@@ -573,7 +592,7 @@ mod tests {
     fn event_fanout_tracks_publish_counts() {
         let fanout = EventFanout::new();
         fanout.publish("runtime:start");
-        fanout.publish("runtime:ready");
+        fanout.publish_with_fields("runtime:ready", json!({"server": "127.0.0.1:8787"}));
 
         assert_eq!(fanout.published_total(), 2);
         assert_eq!(
@@ -680,7 +699,7 @@ mod tests {
         }
 
         let fanout = transport.fanout();
-        fanout.publish("runtime:ready");
+        fanout.publish_with_fields("runtime:ready", json!({"server": "127.0.0.1:8787"}));
 
         let mut header = [0u8; 2];
         stream
@@ -698,6 +717,8 @@ mod tests {
         let message: serde_json::Value =
             serde_json::from_str(&payload_text).expect("payload should be json");
         assert_eq!(message["event"], json!("runtime:ready"));
+        assert!(message["timestamp"].as_f64().is_some());
+        assert_eq!(message["fields"]["server"], json!("127.0.0.1:8787"));
 
         transport.stop().expect("transport should stop cleanly");
     }

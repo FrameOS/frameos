@@ -24,3 +24,25 @@ fn contract_lists_expected_commands() {
     assert!(commands.contains_key("check"));
     assert!(commands.contains_key("contract"));
 }
+
+#[test]
+fn contract_includes_event_stream_envelope_and_fields() {
+    let contract = command_contract_json();
+
+    assert_eq!(
+        contract["event_stream"]["transport"],
+        serde_json::json!("websocket")
+    );
+    assert_eq!(
+        contract["event_stream"]["path"],
+        serde_json::json!("/ws/events")
+    );
+    assert_eq!(
+        contract["event_stream"]["message_envelope"]["timestamp"],
+        serde_json::json!("number")
+    );
+    assert!(contract["events"]["runtime:ready"]["fields"]
+        .as_array()
+        .expect("ready fields should be array")
+        .contains(&serde_json::json!("health_endpoint")));
+}

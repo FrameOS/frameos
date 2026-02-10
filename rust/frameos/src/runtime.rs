@@ -150,7 +150,14 @@ impl Runtime {
             },
         )?;
         let event_fanout = transport.fanout();
-        event_fanout.publish("runtime:start");
+        event_fanout.publish_with_fields(
+            "runtime:start",
+            serde_json::json!({
+                "server": self.server.endpoint(),
+                "apps_loaded": apps_loaded,
+                "scenes_loaded": scenes_loaded,
+            }),
+        );
 
         logging::log_event(serde_json::json!({
             "event": "runtime:ready",
@@ -161,7 +168,16 @@ impl Runtime {
             "apps_loaded": apps_loaded,
             "scenes_loaded": scenes_loaded,
         }));
-        event_fanout.publish("runtime:ready");
+        event_fanout.publish_with_fields(
+            "runtime:ready",
+            serde_json::json!({
+                "server": self.server.endpoint(),
+                "health_endpoint": format!("http://{}/healthz", transport.local_addr()),
+                "metrics_interval_seconds": self.metrics.interval_seconds(),
+                "apps_loaded": apps_loaded,
+                "scenes_loaded": scenes_loaded,
+            }),
+        );
 
         let mut tick_state = TickState::new(Instant::now());
         let metrics_interval = Duration::from_secs(self.metrics.interval_seconds().max(1));
@@ -175,7 +191,13 @@ impl Runtime {
                     "uptime_seconds": now.duration_since(tick_state.started_at).as_secs_f64(),
                     "server": self.server.endpoint(),
                 }));
-                event_fanout.publish("runtime:heartbeat");
+                event_fanout.publish_with_fields(
+                    "runtime:heartbeat",
+                    serde_json::json!({
+                        "uptime_seconds": now.duration_since(tick_state.started_at).as_secs_f64(),
+                        "server": self.server.endpoint(),
+                    }),
+                );
                 transport.record_heartbeat();
             }
 
@@ -188,7 +210,15 @@ impl Runtime {
                     "apps_loaded": apps_loaded,
                     "scenes_loaded": scenes_loaded,
                 }));
-                event_fanout.publish("runtime:metrics_tick");
+                event_fanout.publish_with_fields(
+                    "runtime:metrics_tick",
+                    serde_json::json!({
+                        "uptime_seconds": now.duration_since(tick_state.started_at).as_secs_f64(),
+                        "metrics_interval_seconds": self.metrics.interval_seconds(),
+                        "apps_loaded": apps_loaded,
+                        "scenes_loaded": scenes_loaded,
+                    }),
+                );
                 transport.record_metrics_tick();
             }
 
@@ -202,7 +232,15 @@ impl Runtime {
             "apps_loaded": apps_loaded,
             "scenes_loaded": scenes_loaded,
         }));
-        event_fanout.publish("runtime:stop");
+        event_fanout.publish_with_fields(
+            "runtime:stop",
+            serde_json::json!({
+                "server": self.server.endpoint(),
+                "metrics_interval_seconds": self.metrics.interval_seconds(),
+                "apps_loaded": apps_loaded,
+                "scenes_loaded": scenes_loaded,
+            }),
+        );
         transport.mark_stopped();
         transport.stop()?;
         Ok(())

@@ -113,14 +113,23 @@ pub fn command_contract_json() -> serde_json::Value {
                 "flags": []
             }
         },
+        "event_stream": {
+            "transport": "websocket",
+            "path": "/ws/events",
+            "message_envelope": {
+                "event": "string",
+                "timestamp": "number",
+                "fields": "object"
+            }
+        },
         "events": {
-            "runtime:start": {"level": "info"},
-            "runtime:ready": {"level": "info"},
-            "runtime:stop": {"level": "info"},
+            "runtime:start": {"level": "info", "fields": ["server", "apps_loaded", "scenes_loaded"]},
+            "runtime:ready": {"level": "info", "fields": ["server", "health_endpoint", "metrics_interval_seconds", "apps_loaded", "scenes_loaded"]},
+            "runtime:stop": {"level": "info", "fields": ["server", "metrics_interval_seconds", "apps_loaded", "scenes_loaded"]},
             "runtime:check_ok": {"level": "info"},
             "runtime:check_failed": {"level": "error"},
-            "runtime:heartbeat": {"level": "debug"},
-            "runtime:metrics_tick": {"level": "info"}
+            "runtime:heartbeat": {"level": "debug", "fields": ["uptime_seconds", "server"]},
+            "runtime:metrics_tick": {"level": "info", "fields": ["uptime_seconds", "metrics_interval_seconds", "apps_loaded", "scenes_loaded"]}
         }
     })
 }

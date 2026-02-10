@@ -96,11 +96,18 @@
 - Added `rust/frameos/docs/rust_cli_usage.md` with concrete build/run/check/contract commands and migration guidance for shadow validation and phased adoption.
 - Updated external interface docs to reflect implemented websocket control-frame behavior and narrowed next transport/documentation steps.
 
+
+
+### Iteration 14 (enriched websocket payloads + JSON-lines log sink)
+- Expanded websocket event payloads in `src/server.rs` from name-only messages to additive envelopes: `{ "event": <name>, "timestamp": <epoch_secs>, "fields": { ... } }`.
+- Added `EventFanout::publish_with_fields` and wired `runtime::run_until_stopped` to include selected lifecycle/tick context (server endpoint, uptime, manifest counters, metrics interval) in websocket event fields while keeping the `event` key unchanged for compatibility.
+- Introduced a JSON-lines sink abstraction in `src/logging.rs` (`JsonLineSink`) with `StdoutJsonLineSink` and test-friendly `MemoryJsonLineSink`, plus `emit_event_to_sink` for deterministic event assertions without stdout substring matching.
+- Added/updated tests to validate enriched websocket message shape and memory sink JSON capture behavior.
 ## Next up (small, actionable)
-1. Expand websocket message payloads beyond event names (e.g., include timestamps and selected event fields) while preserving current compatibility.
-2. Add a JSON-lines log sink abstraction so tests can assert event payloads without stdout substring matching.
-3. Add CLI examples for production-like config layouts (non-test fixtures) and wire them into CI smoke checks.
-4. Start scoping renderer/device-driver parity slices so migration cutover gates can move from documentation into executable checks.
+1. Add CLI examples for production-like config layouts (non-test fixtures) and wire them into CI smoke checks.
+2. Start scoping renderer/device-driver parity slices so migration cutover gates can move from documentation into executable checks.
+3. Extend websocket field payload contracts into `command_contract_json()` so downstream consumers can discover expected keys by command.
+4. Route runtime event emission behind sink injection (instead of direct `log_event`) so integration tests can assert full run/check traces without capturing process stdout.
 
 ## Checklist
 
