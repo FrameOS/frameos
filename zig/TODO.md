@@ -23,6 +23,8 @@
   - [x] Created `zig/` directory and initialized this `zig/TODO.md` plan.
 - **Iteration 2:**
   - [x] Inventoried Nim runtime structure and boot flow in `zig/INVENTORY.md`.
+- **Iteration 3:**
+  - [x] Added Zig project scaffolding (`build.zig`, `src/`, `README.md`) and a stubbed boot entrypoint.
 
 ---
 
@@ -30,16 +32,16 @@
 - [x] Create `zig/` directory.
 - [x] Create `zig/TODO.md` with loop structure and initial plan.
 - [x] **Inventory Nim runtime**: list key entrypoints, modules, and subsystems under `frameos/src/` (apps, drivers, system, runtime boot).
+- [x] **Define Zig project layout** inside `zig/` (e.g., `src/`, `build.zig`, `README.md`) and mapping from Nim modules.
+- [x] **Establish build + run scaffolding**: create a minimal Zig `main` that mirrors `frameos/src/frameos.nim` boot flow (stubbed).
 
 ---
 
 ## Next Actions (priority order)
-1. [ ] **Define Zig project layout** inside `zig/` (e.g., `src/`, `build.zig`, `README.md`) and mapping from Nim modules.
-2. [ ] **Establish build + run scaffolding**: create a minimal Zig `main` that mirrors `frameos/src/frameos.nim` boot flow (stubbed).
-3. [ ] **Port config/runtime primitives**: identify async/event loop equivalents and hardware abstraction boundaries.
-4. [ ] **Select and document Zig libs** needed for async I/O, filesystem, networking, and GPIO/display drivers (if any).
-5. [ ] **Decide parity checkpoints**: e.g., boot → logging → config load → no-op render loop.
-6. [ ] **Add a migration checklist** per subsystem (apps, drivers, system services).
+1. [ ] **Port config/runtime primitives**: identify async/event loop equivalents and hardware abstraction boundaries.
+2. [ ] **Select and document Zig libs** needed for async I/O, filesystem, networking, and GPIO/display drivers (if any).
+3. [ ] **Decide parity checkpoints**: e.g., boot → logging → config load → no-op render loop.
+4. [ ] **Add a migration checklist** per subsystem (apps, drivers, system services).
 
 ---
 
