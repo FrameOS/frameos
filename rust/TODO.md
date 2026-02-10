@@ -154,11 +154,20 @@
 - Added coverage in `tests/runtime_parity.rs` and `tests/interfaces_cli.rs` for probe-flag parsing, contract metadata updates, successful probe-mode parity execution, and mixed-source argument rejection.
 - Updated CLI/external-interface/parity-map docs to document probe-driven parity workflows and source metadata semantics.
 
+
+
+### Iteration 22 (initial app behavior ports from Nim)
+- Replaced the Rust-side app placeholder with a concrete app execution layer in `src/apps.rs`, including `AppExecutionContext`, typed outputs/errors, and keyword dispatch via `execute_ported_app`.
+- Ported the first set of executable Nim app behaviors: `data/parseJson`, `data/prettyJson`, `logic/setAsState`, `logic/ifElse`, `logic/nextSleepDuration`, and `logic/breakIfRendering`.
+- Preserved core parity semantics for the above apps (JSON parsing/formatting, state writes with exclusive value sources, branch-node selection, sleep-duration mutation, and abort-on-render guard).
+- Added focused unit + integration coverage for success and failure paths in app execution, including pretty-print output, branch selection, context mutation, and invalid dual-source state updates.
+
 ## Next up (small, actionable)
-1. Add CI-oriented daemon smoke script that boots `frameos run`, probes `/healthz`, then sends SIGINT and validates `runtime:stop` in the event log.
-2. Add deterministic runtime-loop integration test coverage that injects fixed timestamps across start/heartbeat/metrics/stop traces for golden JSON-line snapshots.
-3. Replace shell-based probe commands with first-class filesystem/device capability discovery adapters under a dedicated `discovery` module.
-4. Emit additional probe diagnostics (duration + probe command fingerprint) in `runtime:parity_failed` while avoiding sensitive command leakage.
+1. Wire `execute_ported_app` into a lightweight scene-runner scaffold so manifest-defined app graphs can execute deterministic app chains in Rust.
+2. Port additional deterministic data apps (`data/xmlToJson`, `data/prettyJson` options parity checks, `data/eventsToAgenda`) with fixture-based golden outputs.
+3. Add CI-oriented daemon smoke script that boots `frameos run`, probes `/healthz`, then sends SIGINT and validates `runtime:stop` in the event log.
+4. Replace shell-based probe commands with first-class filesystem/device capability discovery adapters under a dedicated `discovery` module.
+5. Emit additional probe diagnostics (duration + probe command fingerprint) in `runtime:parity_failed` while avoiding sensitive command leakage.
 
 ## Checklist
 
