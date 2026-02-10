@@ -4,8 +4,8 @@
   "supported_color_formats": ["rgb565", "rgb888"],
   "max_fps": 30,
   "scheduling": {
-    "target_fps": 20,
-    "tick_budget_ms": 25,
-    "drop_policy": "drop_oldest"
+    "target_fps": 60,
+    "tick_budget_ms": 20,
+    "drop_policy": "block"
   }
 }

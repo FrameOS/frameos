@@ -10,6 +10,14 @@ pub struct RendererContract {
     pub supports_layers: bool,
     pub supported_color_formats: Vec<String>,
     pub max_fps: u32,
+    pub scheduling: RendererSchedulingContract,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct RendererSchedulingContract {
+    pub target_fps: u32,
+    pub tick_budget_ms: u32,
+    pub drop_policy: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -18,6 +26,13 @@ pub struct DriverContract {
     pub device_kind: String,
     pub required_renderer_formats: Vec<String>,
     pub supports_partial_refresh: bool,
+    pub scheduling: DriverSchedulingContract,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct DriverSchedulingContract {
+    pub backpressure_policy: String,
+    pub max_queue_depth: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,6 +41,11 @@ pub struct ParityReport {
     pub driver_api_version: String,
     pub shared_formats: Vec<String>,
     pub driver_device_kind: String,
+    pub renderer_target_fps: u32,
+    pub renderer_tick_budget_ms: u32,
+    pub renderer_drop_policy: String,
+    pub driver_backpressure_policy: String,
+    pub driver_max_queue_depth: u32,
 }
 
 #[derive(Debug)]
@@ -129,6 +149,72 @@ pub fn validate_renderer_driver_parity(
         errors.push("renderer max_fps must be greater than zero".to_string());
     }
 
+    if renderer.scheduling.target_fps == 0 {
+        errors.push("renderer scheduling.target_fps must be greater than zero".to_string());
+    }
+
+    if renderer.scheduling.tick_budget_ms == 0 {
+        errors.push("renderer scheduling.tick_budget_ms must be greater than zero".to_string());
+    }
+
+    if renderer.scheduling.target_fps > renderer.max_fps {
+        errors.push(format!(
+            "renderer scheduling.target_fps ({}) must be <= max_fps ({})",
+            renderer.scheduling.target_fps, renderer.max_fps
+        ));
+    }
+
+    if renderer.scheduling.target_fps > 0 {
+        let frame_budget_ms = (1000.0 / renderer.scheduling.target_fps as f64).floor() as u32;
+        if renderer.scheduling.tick_budget_ms > frame_budget_ms {
+            errors.push(format!(
+                "renderer scheduling.tick_budget_ms ({}) exceeds frame budget at target_fps={} ({}ms)",
+                renderer.scheduling.tick_budget_ms,
+                renderer.scheduling.target_fps,
+                frame_budget_ms
+            ));
+        }
+    }
+
+    if !matches!(
+        renderer.scheduling.drop_policy.as_str(),
+        "drop_oldest" | "drop_newest" | "block"
+    ) {
+        errors.push(format!(
+            "renderer scheduling.drop_policy must be one of drop_oldest/drop_newest/block (got {})",
+            renderer.scheduling.drop_policy
+        ));
+    }
+
+    if !matches!(
+        driver.scheduling.backpressure_policy.as_str(),
+        "drop" | "queue" | "block"
+    ) {
+        errors.push(format!(
+            "driver scheduling.backpressure_policy must be one of drop/queue/block (got {})",
+            driver.scheduling.backpressure_policy
+        ));
+    }
+
+    if driver.scheduling.backpressure_policy == "queue" && driver.scheduling.max_queue_depth == 0 {
+        errors.push("driver scheduling.max_queue_depth must be greater than zero when backpressure_policy=queue".to_string());
+    }
+
+    if driver.scheduling.backpressure_policy != "queue" && driver.scheduling.max_queue_depth != 0 {
+        errors.push(
+            "driver scheduling.max_queue_depth must be zero unless backpressure_policy=queue"
+                .to_string(),
+        );
+    }
+
+    if driver.scheduling.backpressure_policy == "drop"
+        && !renderer.scheduling.drop_policy.starts_with("drop_")
+    {
+        errors.push(
+            "driver backpressure_policy=drop requires renderer drop_policy to be drop_oldest or drop_newest".to_string(),
+        );
+    }
+
     if !errors.is_empty() {
         return Err(ParityError::ValidationFailed(errors));
     }
@@ -147,6 +233,11 @@ pub fn validate_renderer_driver_parity(
         driver_api_version: driver.api_version.clone(),
         shared_formats,
         driver_device_kind: driver.device_kind.clone(),
+        renderer_target_fps: renderer.scheduling.target_fps,
+        renderer_tick_budget_ms: renderer.scheduling.tick_budget_ms,
+        renderer_drop_policy: renderer.scheduling.drop_policy.clone(),
+        driver_backpressure_policy: driver.scheduling.backpressure_policy.clone(),
+        driver_max_queue_depth: driver.scheduling.max_queue_depth,
     })
 }
 
@@ -170,17 +261,27 @@ mod tests {
             supports_layers: true,
             supported_color_formats: vec!["rgb565".to_string(), "rgb888".to_string()],
             max_fps: 30,
+            scheduling: RendererSchedulingContract {
+                target_fps: 20,
+                tick_budget_ms: 25,
+                drop_policy: "drop_oldest".to_string(),
+            },
         };
         let driver = DriverContract {
             api_version: "v1".to_string(),
             device_kind: "eink".to_string(),
             required_renderer_formats: vec!["rgb565".to_string()],
             supports_partial_refresh: true,
+            scheduling: DriverSchedulingContract {
+                backpressure_policy: "drop".to_string(),
+                max_queue_depth: 0,
+            },
         };
 
         let report =
             validate_renderer_driver_parity(&renderer, &driver).expect("contracts should validate");
         assert_eq!(report.shared_formats, vec!["rgb565".to_string()]);
+        assert_eq!(report.renderer_target_fps, 20);
     }
 
     #[test]
@@ -190,12 +291,21 @@ mod tests {
             supports_layers: true,
             supported_color_formats: vec!["rgb565".to_string()],
             max_fps: 0,
+            scheduling: RendererSchedulingContract {
+                target_fps: 60,
+                tick_budget_ms: 40,
+                drop_policy: "block".to_string(),
+            },
         };
         let driver = DriverContract {
             api_version: "v2".to_string(),
             device_kind: "lcd".to_string(),
             required_renderer_formats: vec!["rgb888".to_string()],
             supports_partial_refresh: true,
+            scheduling: DriverSchedulingContract {
+                backpressure_policy: "drop".to_string(),
+                max_queue_depth: 4,
+            },
         };
 
         let error = validate_renderer_driver_parity(&renderer, &driver)
@@ -216,5 +326,15 @@ mod tests {
         assert!(messages
             .iter()
             .any(|message| message.contains("max_fps must be greater than zero")));
+        assert!(messages
+            .iter()
+            .any(|message| message.contains("target_fps (60) must be <= max_fps (0)")));
+        assert!(messages
+            .iter()
+            .any(|message| message.contains("max_queue_depth must be zero unless")));
+        assert!(messages
+            .iter()
+            .any(|message| message
+                .contains("backpressure_policy=drop requires renderer drop_policy")));
     }
 }

@@ -12,7 +12,7 @@ Current commands are implemented in `src/interfaces.rs` and exercised by `src/ma
 - `frameos check [--config <path>] [--scenes <path>] [--apps <path>] [--event-log <path>]`
   - Validates config/manifest loading and emits `runtime:check_ok` or `runtime:check_failed`.
 - `frameos parity --renderer-contract <path> --driver-contract <path> [--event-log <path>]`
-  - Validates renderer/driver contract stubs against executable parity invariants (API version match, required format coverage, partial-refresh/device-kind guardrails).
+  - Validates renderer/driver contract stubs against executable parity invariants (API version match, required format coverage, partial-refresh/device-kind guardrails, and scheduling/backpressure compatibility checks).
 - `frameos contract`
   - Prints machine-readable JSON describing command and event contracts.
 
@@ -66,8 +66,8 @@ Next transport steps:
 
 The `parity` command introduces an executable gate for migration slices that were previously documentation-only:
 
-- renderer contract JSON fields: `api_version`, `supports_layers`, `supported_color_formats`, `max_fps`;
-- driver contract JSON fields: `api_version`, `device_kind`, `required_renderer_formats`, `supports_partial_refresh`;
-- invariants enforced: matching API versions, non-empty format sets, driver-required formats must be provided by renderer, partial refresh allowed only for `eink`/`epd`, and `max_fps > 0`.
+- renderer contract JSON fields: `api_version`, `supports_layers`, `supported_color_formats`, `max_fps`, `scheduling.target_fps`, `scheduling.tick_budget_ms`, `scheduling.drop_policy`;
+- driver contract JSON fields: `api_version`, `device_kind`, `required_renderer_formats`, `supports_partial_refresh`, `scheduling.backpressure_policy`, `scheduling.max_queue_depth`;
+- invariants enforced: matching API versions, non-empty format sets, driver-required formats must be provided by renderer, partial refresh allowed only for `eink`/`epd`, `max_fps > 0`, `target_fps <= max_fps`, tick budget must fit inside the target frame budget, allowed drop/backpressure policies, queue-depth/backpressure consistency, and drop-policy compatibility when driver backpressure policy is `drop`.
 
 This command is intentionally stub-oriented and designed to evolve into concrete renderer/driver adapter probes without breaking existing event names.

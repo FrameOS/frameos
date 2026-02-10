@@ -236,3 +236,23 @@ fn parity_command_fails_for_invalid_contract_pair() {
     let stdout = String::from_utf8(output.stdout).expect("stdout should be utf8");
     assert!(stdout.contains("runtime:parity_failed"));
 }
+
+#[test]
+fn parity_command_fails_for_renderer_scheduling_failure_mode() {
+    let binary = env!("CARGO_BIN_EXE_frameos");
+
+    let output = Command::new(binary)
+        .arg("parity")
+        .arg("--renderer-contract")
+        .arg(fixtures_path("parity/renderer-invalid-scheduling.json"))
+        .arg("--driver-contract")
+        .arg(fixtures_path("parity/driver-valid.json"))
+        .output()
+        .expect("parity command should execute");
+
+    assert!(!output.status.success(), "parity command should fail");
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf8");
+    assert!(stdout.contains("runtime:parity_failed"));
+    assert!(stdout.contains("target_fps (60) must be <= max_fps (30)"));
+}

@@ -99,6 +99,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             "driver_api_version": report.driver_api_version,
                             "driver_device_kind": report.driver_device_kind,
                             "shared_formats": report.shared_formats,
+                            "renderer_target_fps": report.renderer_target_fps,
+                            "renderer_tick_budget_ms": report.renderer_tick_budget_ms,
+                            "renderer_drop_policy": report.renderer_drop_policy,
+                            "driver_backpressure_policy": report.driver_backpressure_policy,
+                            "driver_max_queue_depth": report.driver_max_queue_depth,
                         }),
                     );
                     println!("FrameOS parity check: passed 🎉");

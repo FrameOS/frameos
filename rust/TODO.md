@@ -138,11 +138,18 @@
 - Extended event emission with `emit_event_to_sink_with_timestamp_provider` so sinks can receive stable timestamps independent of wall-clock jitter when tests need exact parity checks.
 - Updated `src/server.rs` event fanout/transport startup to support timestamp-provider injection (`EventFanout::with_timestamp_provider`, `ServerTransport::start_with_timestamp_provider`) while keeping production defaults unchanged.
 - Added deterministic parity tests covering both logging envelopes and websocket event payload timestamps, confirming transport events can be asserted with exact timestamp equality.
+
+
+### Iteration 20 (parity scheduling invariants + failure-mode fixtures)
+- Extended renderer/driver parity contracts with scheduling/backpressure sections, including checks for target FPS bounds, tick budget vs frame budget, supported drop/backpressure policies, queue-depth consistency, and renderer/driver drop-compatibility constraints.
+- Expanded parity success payloads (`runtime:parity_ok`) to include scheduling fields so downstream tooling can inspect negotiated runtime behavior.
+- Added fixture coverage for scheduling failure modes (`renderer-invalid-scheduling.json`) and updated parity smoke tests to assert failing command output includes invariant diagnostics.
+- Updated CLI/external-interface docs and contract field assertions to reflect the new scheduling parity surface.
 ## Next up (small, actionable)
-1. Extend parity stubs with renderer frame-scheduling invariants (tick budget, target fps, drop/backpressure policy) and add golden fixtures for failure modes.
-2. Start wiring device-driver capability discovery adapters (filesystem or command probes) to replace static JSON fixtures in parity checks.
-3. Add CI-oriented daemon smoke script that boots `frameos run`, probes `/healthz`, then sends SIGINT and validates `runtime:stop` in the event log.
-4. Add deterministic runtime-loop integration test coverage that injects fixed timestamps across start/heartbeat/metrics/stop traces for golden JSON-line snapshots.
+1. Start wiring device-driver capability discovery adapters (filesystem or command probes) to replace static JSON fixtures in parity checks.
+2. Add CI-oriented daemon smoke script that boots `frameos run`, probes `/healthz`, then sends SIGINT and validates `runtime:stop` in the event log.
+3. Add deterministic runtime-loop integration test coverage that injects fixed timestamps across start/heartbeat/metrics/stop traces for golden JSON-line snapshots.
+4. Add parity probe source metadata (fixture vs discovered) to `runtime:parity_ok` so rollout dashboards can track migration progress.
 
 ## Checklist
 

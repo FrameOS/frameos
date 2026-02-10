@@ -164,7 +164,7 @@ pub fn command_contract_json() -> serde_json::Value {
             "runtime:stop": {"level": "info", "fields": ["server", "metrics_interval_seconds", "apps_loaded", "scenes_loaded"]},
             "runtime:check_ok": {"level": "info", "fields": ["server", "metrics_interval_seconds", "apps_loaded", "scenes_loaded"]},
             "runtime:check_failed": {"level": "error", "fields": ["error"]},
-            "runtime:parity_ok": {"level": "info", "fields": ["renderer_api_version", "driver_api_version", "driver_device_kind", "shared_formats"]},
+            "runtime:parity_ok": {"level": "info", "fields": ["renderer_api_version", "driver_api_version", "driver_device_kind", "shared_formats", "renderer_target_fps", "renderer_tick_budget_ms", "renderer_drop_policy", "driver_backpressure_policy", "driver_max_queue_depth"]},
             "runtime:parity_failed": {"level": "error", "fields": ["error"]},
             "runtime:heartbeat": {"level": "debug", "fields": ["uptime_seconds", "server"]},
             "runtime:metrics_tick": {"level": "info", "fields": ["uptime_seconds", "metrics_interval_seconds", "apps_loaded", "scenes_loaded"]}
@@ -182,7 +182,7 @@ pub fn command_contract_json() -> serde_json::Value {
                 "runtime:check_failed": ["error"]
             },
             "parity": {
-                "runtime:parity_ok": ["renderer_api_version", "driver_api_version", "driver_device_kind", "shared_formats"],
+                "runtime:parity_ok": ["renderer_api_version", "driver_api_version", "driver_device_kind", "shared_formats", "renderer_target_fps", "renderer_tick_budget_ms", "renderer_drop_policy", "driver_backpressure_policy", "driver_max_queue_depth"],
                 "runtime:parity_failed": ["error"]
             },
             "contract": {}

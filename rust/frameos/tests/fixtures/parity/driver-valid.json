@@ -2,5 +2,9 @@
   "api_version": "v1",
   "device_kind": "eink",
   "required_renderer_formats": ["rgb565"],
-  "supports_partial_refresh": true
+  "supports_partial_refresh": true,
+  "scheduling": {
+    "backpressure_policy": "drop",
+    "max_queue_depth": 0
+  }
 }

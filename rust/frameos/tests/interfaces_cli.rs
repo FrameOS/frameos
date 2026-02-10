@@ -67,6 +67,9 @@ fn contract_exposes_command_event_field_map() {
         .as_array()
         .expect("parity runtime:parity_ok fields should be an array");
     assert!(parity_ok_fields.contains(&serde_json::json!("shared_formats")));
+    assert!(parity_ok_fields.contains(&serde_json::json!("renderer_target_fps")));
+    assert!(parity_ok_fields.contains(&serde_json::json!("renderer_tick_budget_ms")));
+    assert!(parity_ok_fields.contains(&serde_json::json!("driver_backpressure_policy")));
 }
 
 #[test]

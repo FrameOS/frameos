@@ -19,6 +19,8 @@ From `rust/frameos/`:
   - `cargo run -- contract`
 - Run renderer/driver contract parity stub checks:
   - `cargo run -- parity --renderer-contract ./tests/fixtures/parity/renderer-valid.json --driver-contract ./tests/fixtures/parity/driver-valid.json`
+- Exercise scheduling failure fixtures (should emit `runtime:parity_failed`):
+  - `cargo run -- parity --renderer-contract ./tests/fixtures/parity/renderer-invalid-scheduling.json --driver-contract ./tests/fixtures/parity/driver-valid.json`
 - Start runtime (Ctrl+C to stop):
   - `cargo run -- run --config ./tests/fixtures/frame-valid.json --event-log ./runtime-events.jsonl`
 
