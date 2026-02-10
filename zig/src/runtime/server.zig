@@ -41,6 +41,11 @@ pub const RuntimeServer = struct {
             "{\"event\":\"server.route\",\"route\":\"/system/hotspot\",\"status\":\"stub\",\"method\":\"GET\"}",
             .{},
         );
+
+        try self.logger.info(
+            "{\"event\":\"server.route\",\"route\":\"/system/device\",\"status\":\"stub\",\"method\":\"GET\"}",
+            .{},
+        );
     }
 
     pub fn healthRoute(self: RuntimeServer, snapshot: health_mod.HealthSnapshot) HealthRoute {
@@ -66,6 +71,13 @@ pub const RuntimeServer = struct {
             .hotspot = hotspot,
             .portal = portal,
             .startup_state = startup_state,
+        };
+    }
+
+    pub fn deviceSummaryRoute(self: RuntimeServer, device_utils: system_mod.DeviceUtilities) DeviceSummaryRoute {
+        return .{
+            .server = self,
+            .device_utils = device_utils,
         };
     }
 };
@@ -167,6 +179,35 @@ pub const HotspotPortalStatusRoute = struct {
                 system_mod.startupStateLabel(self.startup_state),
                 self.hotspot.shouldActivateHotspot(),
                 portal_url,
+            },
+        );
+
+        return stream.getWritten();
+    }
+};
+
+
+pub const DeviceSummaryRoute = struct {
+    server: RuntimeServer,
+    device_utils: system_mod.DeviceUtilities,
+
+    pub fn renderJson(self: DeviceSummaryRoute, buffer: []u8) ![]const u8 {
+        var summary_buf: [128]u8 = undefined;
+        const summary = try self.device_utils.summary(&summary_buf);
+
+        var stream = std.io.fixedBufferStream(buffer);
+        const writer = stream.writer();
+        try writer.print(
+            "{\"host\":\"{s}\",\"port\":{},\"device\":{\"name\":\"{s}\",\"kind\":\"{s}\",\"resolution\":{\"width\":{},\"height\":{}},\"rotationDeg\":{},\"summary\":\"{s}\"}}",
+            .{
+                self.server.config.frame_host,
+                self.server.config.frame_port,
+                self.device_utils.info.name,
+                self.device_utils.info.kind,
+                self.device_utils.info.resolution.width,
+                self.device_utils.info.resolution.height,
+                self.device_utils.info.rotation_deg,
+                summary,
             },
         );
 
@@ -375,6 +416,48 @@ test "hotspot status route exposes startup state and captive portal url" {
 
     try testing.expectEqualStrings(
         "{\"host\":\"10.42.0.1\",\"port\":8787,\"startupState\":\"degraded-network\",\"hotspotActive\":true,\"portal\":{\"url\":\"http://10.42.0.1:8787/\"}}",
+        payload,
+    );
+}
+
+
+test "device summary route renders device payload" {
+    const testing = std.testing;
+
+    const logger = logger_mod.RuntimeLogger.init(.{
+        .frame_host = "10.42.0.1",
+        .frame_port = 8787,
+        .debug = false,
+        .metrics_interval_s = 30,
+        .network_check = false,
+        .device = "simulator",
+        .startup_scene = "clock",
+    });
+
+    const config: config_mod.RuntimeConfig = .{
+        .frame_host = "10.42.0.1",
+        .frame_port = 8787,
+        .debug = false,
+        .metrics_interval_s = 30,
+        .network_check = false,
+        .device = "simulator",
+        .startup_scene = "clock",
+    };
+
+    const server = RuntimeServer.init(logger, config);
+    const device_utils = system_mod.DeviceUtilities.init(logger, .{
+        .name = "FrameOS Device",
+        .kind = config.device,
+        .resolution = .{ .width = 800, .height = 480 },
+        .rotation_deg = 0,
+    });
+
+    const route = server.deviceSummaryRoute(device_utils);
+    var buf: [320]u8 = undefined;
+    const payload = try route.renderJson(&buf);
+
+    try testing.expectEqualStrings(
+        "{\"host\":\"10.42.0.1\",\"port\":8787,\"device\":{\"name\":\"FrameOS Device\",\"kind\":\"simulator\",\"resolution\":{\"width\":800,\"height\":480},\"rotationDeg\":0,\"summary\":\"FrameOS Device (simulator) 800x480 @ 0°\"}}",
         payload,
     );
 }

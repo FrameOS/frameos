@@ -82,6 +82,12 @@
   - [x] Threaded runtime health startup-state progression (`booting` -> `ready`) through readiness gates and surfaced `startupState` in `/health` payloads.
   - [x] Added successful `/scenes/:id` payload tests plus extended boot-route integration coverage for `/system/hotspot` and startup-state-ready health snapshots.
 
+- **Iteration 15:**
+  - [x] Added `/system/device` server-route payload contract in `runtime/server.zig` to externalize `system/device_utils` state (name/kind/resolution/rotation/summary).
+  - [x] Wired boot payload rendering/logging to include `/system/device` payload snapshots and added route-level Zig tests for the new contract.
+  - [x] Threaded failed network-probe handling into `runtime/health.zig` startup-state reconciliation so `networkOk=false` forces `degraded-network`.
+  - [x] Extended boot integration tests to assert degraded startup-state behavior under failed probes and `/scenes/:id` success payload selection when the configured startup scene exists.
+
 ## Completed
 - [x] Create `zig/` directory.
 - [x] Create `zig/TODO.md` with loop structure and initial plan.
@@ -112,13 +118,16 @@
 - [x] Add a stub server route contract for hotspot/portal status payloads so transitional startup state is externally visible.
 - [x] Thread startup-state progression (`booting` -> `ready`) into runtime health snapshots once scheduler/runner/server readiness gates are satisfied.
 - [x] Add richer scene route tests for successful `/scenes/:id` payload rendering in addition to unknown-scene error payloads.
+- [x] Add a dedicated route contract for device-summary payloads (resolution/rotation/kind) to externalize `system/device_utils` state.
+- [x] Thread live network probe outcomes (`networkOk=false`) into startup-state transitions so degraded readiness is explicit when probes fail.
+- [x] Add a boot integration assertion for `/scenes/:id` success payload selection when configured startup scene exists.
 
 ---
 
 ## Next Actions (priority order)
-1. [ ] Add a dedicated route contract for device-summary payloads (resolution/rotation/kind) to externalize `system/device_utils` state.
-2. [ ] Thread live network probe outcomes (`networkOk=false`) into startup-state transitions so degraded readiness is explicit when probes fail.
-3. [ ] Add a boot integration assertion for `/scenes/:id` success payload selection when configured startup scene exists.
+1. [ ] Add a small runtime network-probe boundary module (stubbed healthcheck client) so probe outcomes are produced by a dedicated subsystem instead of hardcoded boot wiring.
+2. [ ] Extend `/system/device` payload contract with startup-scene + startup-state context to match future system diagnostics responses.
+3. [ ] Add route-level tests for degraded `/health` payload rendering (`networkOk=false`) to lock JSON contract details beyond integration assertions.
 
 ---
 

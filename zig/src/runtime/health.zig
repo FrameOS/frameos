@@ -98,7 +98,12 @@ pub const RuntimeHealth = struct {
     }
 
     fn reconcileStartupState(self: *RuntimeHealth) void {
-        if (self.startup_state == .booting and self.isReady()) {
+        if (self.network_required and self.network_ok == false) {
+            self.startup_state = .degraded_network;
+            return;
+        }
+
+        if (self.isReady()) {
             self.startup_state = .ready;
         }
     }
@@ -204,4 +209,29 @@ test "snapshot can be ok without network requirement while keeping degraded stat
     try testing.expectEqual(@as(?bool, null), snapshot.network_ok);
     try testing.expect(snapshot.scheduler_ready);
     try testing.expect(snapshot.runner_ready);
+}
+
+test "startup state becomes degraded-network when network probe fails" {
+    const testing = @import("std").testing;
+
+    const logger = logger_mod.RuntimeLogger.init(.{
+        .frame_host = "127.0.0.1",
+        .frame_port = 8787,
+        .debug = false,
+        .metrics_interval_s = 60,
+        .network_check = true,
+        .device = "simulator",
+        .startup_scene = "clock",
+    });
+
+    var health = RuntimeHealth.init(logger, true, .booting);
+    health.markServerStarted();
+    health.markSchedulerReady();
+    health.markRunnerReady();
+    health.recordNetworkProbe(false);
+
+    const snapshot = health.snapshot();
+    try testing.expectEqual(HealthSnapshot.Status.degraded, snapshot.status);
+    try testing.expectEqual(StartupState.degraded_network, snapshot.startup_state);
+    try testing.expectEqual(@as(?bool, false), snapshot.network_ok);
 }
