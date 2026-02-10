@@ -6,6 +6,7 @@ const metrics_mod = @import("runtime/metrics.zig");
 const platform_mod = @import("runtime/platform.zig");
 const scheduler_mod = @import("runtime/scheduler.zig");
 const server_mod = @import("runtime/server.zig");
+const health_mod = @import("runtime/health.zig");
 
 pub fn startFrameOS() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -30,6 +31,13 @@ pub fn startFrameOS() !void {
 
     const server = server_mod.RuntimeServer.init(logger, config);
     try server.startup();
+
+    var health = health_mod.RuntimeHealth.init(logger, config.network_check);
+    health.markServerStarted();
+    if (!config.network_check) {
+        health.recordNetworkProbe(true);
+    }
+    try health.startup();
 
     const loop = event_loop_mod.RuntimeEventLoop.init(logger, std.time.ns_per_s);
     try loop.run();

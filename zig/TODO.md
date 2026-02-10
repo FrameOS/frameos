@@ -36,6 +36,11 @@
   - [x] Added `runtime/server.zig` startup interface stub for host/port/network-check wiring.
   - [x] Wired `startFrameOS` to initialize server boundary after scheduler startup.
 
+- **Iteration 7:**
+  - [x] Added `runtime/health.zig` with a minimal health-check contract (`ok`/`degraded`) and startup snapshot logging.
+  - [x] Wired `startFrameOS` to initialize health immediately after server startup and capture network-check intent.
+  - [x] Added `zig/MIGRATION_PLAN.md` documenting Zig stdlib selection, parity checkpoints, and subsystem migration checklists.
+
 ---
 
 ## Completed
@@ -47,14 +52,17 @@
 - [x] **Port config/runtime primitives**: identify async/event loop equivalents and hardware abstraction boundaries.
 - [x] Add `runtime/metrics.zig` + `runtime/scheduler.zig` stubs to mirror Nim startup sequence more closely.
 - [x] Introduce `runtime/server.zig` interface stub and call it after scheduler wiring.
+- [x] Define a minimal runtime health-check contract (`runtime/health.zig`) and wire it after server startup.
+- [x] Select/document Zig library strategy for async/filesystem/networking + driver boundaries (current stdlib-first plan).
+- [x] Decide/document parity checkpoints and subsystem migration checklist.
 
 ---
 
 ## Next Actions (priority order)
-1. [ ] **Select and document Zig libs** needed for async I/O, filesystem, networking, and GPIO/display drivers (if any).
-2. [ ] **Decide parity checkpoints**: e.g., boot → logging → config load → no-op render loop.
-3. [ ] **Add a migration checklist** per subsystem (apps, drivers, system services).
-4. [ ] Define a minimal runtime health-check contract (`runtime/health.zig`) and wire it after server startup.
+1. [ ] Add `runtime/runner.zig` boundary and wire it between driver init and scheduler startup to mirror Nim startup order more closely.
+2. [ ] Add a stubbed `/health` server route contract that can emit the runtime health snapshot.
+3. [ ] Create initial `zig/src/apps/` and `zig/src/drivers/` directories with placeholder module contracts from `MIGRATION_PLAN.md`.
+4. [ ] Add Zig test coverage for `runtime/health.zig` snapshot logic and config parsing defaults.
 
 ---
 
