@@ -22,6 +22,7 @@ fn contract_lists_expected_commands() {
 
     assert!(commands.contains_key("run"));
     assert!(commands.contains_key("check"));
+    assert!(commands.contains_key("parity"));
     assert!(commands.contains_key("contract"));
 }
 
@@ -61,6 +62,11 @@ fn contract_exposes_command_event_field_map() {
         .as_array()
         .expect("check runtime:check_ok fields should be an array");
     assert!(check_ok_fields.contains(&serde_json::json!("apps_loaded")));
+
+    let parity_ok_fields = contract["command_event_fields"]["parity"]["runtime:parity_ok"]
+        .as_array()
+        .expect("parity runtime:parity_ok fields should be an array");
+    assert!(parity_ok_fields.contains(&serde_json::json!("shared_formats")));
 }
 
 #[test]
@@ -76,5 +82,27 @@ fn parses_event_log_flag() {
     assert_eq!(
         cli.event_log_path,
         Some(std::path::PathBuf::from("./runtime.jsonl"))
+    );
+}
+
+#[test]
+fn parses_parity_contract_flags() {
+    let cli = Cli::parse(vec![
+        "parity".to_string(),
+        "--renderer-contract".to_string(),
+        "./renderer.json".to_string(),
+        "--driver-contract".to_string(),
+        "./driver.json".to_string(),
+    ])
+    .expect("cli should parse");
+
+    assert_eq!(cli.command, Command::Parity);
+    assert_eq!(
+        cli.renderer_contract_path,
+        Some(std::path::PathBuf::from("./renderer.json"))
+    );
+    assert_eq!(
+        cli.driver_contract_path,
+        Some(std::path::PathBuf::from("./driver.json"))
     );
 }

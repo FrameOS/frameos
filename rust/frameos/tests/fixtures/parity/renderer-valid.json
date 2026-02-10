@@ -1,0 +1,6 @@
+{
+  "api_version": "v1",
+  "supports_layers": true,
+  "supported_color_formats": ["rgb565", "rgb888"],
+  "max_fps": 30
+}

@@ -124,12 +124,18 @@
 - Added deterministic runtime transport tests that assert stdout JSON-line payload fields remain exactly aligned with websocket envelope `fields` across the full lifecycle event set (`runtime:start`, `runtime:ready`, `runtime:heartbeat`, `runtime:metrics_tick`, `runtime:stop`).
 - Implemented config-driven sink routing in `src/main.rs`: `config.log_to_file` now enables durable event logging without CLI flags, while `--event-log` cleanly overrides the config default.
 - Extended parity tests with fixture-backed checks for `config.log_to_file` behavior and CLI-over-config precedence, plus contract metadata/docs updates describing event-log routing semantics.
-## Next up (small, actionable)
-1. Add CLI/docs examples for daemonized `run` supervision (systemd/OpenRC templates, health probe retries, shutdown signaling).
-2. Start scoping renderer/device-driver parity slices so migration cutover gates can move from documentation into executable checks.
-3. Add executable parity checks for renderer/driver contract stubs (initial golden fixtures + TODO-gated assertions).
-4. Evaluate introducing deterministic timestamp hooks for transport tests to make websocket/stdout parity checks less wall-clock sensitive.
 
+
+### Iteration 18 (renderer/driver parity command + supervision runbooks)
+- Added a new `parity` CLI command and machine-readable contract metadata to execute renderer/driver stub checks via `--renderer-contract` + `--driver-contract` JSON inputs, emitting `runtime:parity_ok` and `runtime:parity_failed` events.
+- Implemented `src/parity.rs` with typed renderer/driver contract models, disk loaders, and executable invariants (API version alignment, required format coverage, partial-refresh device-kind guards, and positive fps checks).
+- Added fixture-backed parity smoke coverage in `tests/runtime_parity.rs` plus parser/contract assertions in `tests/interfaces_cli.rs` and module-level validation tests in `src/parity.rs`.
+- Updated parity/external-interface/CLI docs with daemonized supervision examples (systemd/OpenRC + health probe retry loop) and promoted renderer/driver parity status from documentation-only to executable in-progress checks.
+## Next up (small, actionable)
+1. Introduce deterministic timestamp providers in `logging`/`server` so transport parity tests can assert exact envelope timestamps without wall-clock jitter.
+2. Extend parity stubs with renderer frame-scheduling invariants (tick budget, target fps, drop/backpressure policy) and add golden fixtures for failure modes.
+3. Start wiring device-driver capability discovery adapters (filesystem or command probes) to replace static JSON fixtures in parity checks.
+4. Add CI-oriented daemon smoke script that boots `frameos run`, probes `/healthz`, then sends SIGINT and validates `runtime:stop` in the event log.
 
 ## Checklist
 

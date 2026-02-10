@@ -17,6 +17,8 @@ From `rust/frameos/`:
 - CLI `--event-log` takes precedence over `config.log_to_file` when both are set.
 - Print machine-readable command/event contract JSON:
   - `cargo run -- contract`
+- Run renderer/driver contract parity stub checks:
+  - `cargo run -- parity --renderer-contract ./tests/fixtures/parity/renderer-valid.json --driver-contract ./tests/fixtures/parity/driver-valid.json`
 - Start runtime (Ctrl+C to stop):
   - `cargo run -- run --config ./tests/fixtures/frame-valid.json --event-log ./runtime-events.jsonl`
 
@@ -59,3 +61,52 @@ Use this phased approach while parity is still in progress:
 3. **Operational probing**: for `run`, monitor `/healthz` and websocket event counters to verify lifecycle progression (`runtime:start`, `runtime:ready`, heartbeat, metrics ticks, stop).
 4. **Incremental consumer adoption**: point internal tools that consume event streams to `/ws/events`; keep compatibility by depending only on currently documented event names.
 5. **Cutover readiness gate**: only promote Rust `run` into primary deployment flow once renderer/device-driver parity items in `parity_map.md` are implemented.
+
+
+## Daemonized run supervision examples
+
+Use these as migration-time templates while `run` parity is still maturing:
+
+### systemd unit (example)
+
+```ini
+[Unit]
+Description=FrameOS Rust runtime
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/frameos/rust/frameos
+ExecStart=/opt/frameos/rust/frameos/target/release/frameos run --config /etc/frameos/frame.json --event-log /var/log/frameos/runtime-events.jsonl
+Restart=on-failure
+RestartSec=2
+KillSignal=SIGINT
+TimeoutStopSec=20
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### OpenRC service command sketch
+
+```sh
+command="/opt/frameos/rust/frameos/target/release/frameos"
+command_args="run --config /etc/frameos/frame.json --event-log /var/log/frameos/runtime-events.jsonl"
+command_background="yes"
+pidfile="/run/frameos-rust.pid"
+retry="SIGINT/20/SIGKILL/5"
+```
+
+### Health probe retry suggestion
+
+After booting the service, retry `/healthz` before declaring startup success:
+
+```sh
+for i in $(seq 1 20); do
+  curl -fsS http://127.0.0.1:8787/healthz && break
+  sleep 1
+done
+```
+
+This mirrors migration cutover checks by waiting for `runtime:ready` and a healthy HTTP endpoint before promoting traffic.

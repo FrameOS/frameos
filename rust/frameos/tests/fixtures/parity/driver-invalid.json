@@ -1,0 +1,6 @@
+{
+  "api_version": "v2",
+  "device_kind": "lcd",
+  "required_renderer_formats": ["rgb888", "argb8888"],
+  "supports_partial_refresh": true
+}

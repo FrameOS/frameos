@@ -4,6 +4,7 @@ use std::path::PathBuf;
 pub enum Command {
     Run,
     Check,
+    Parity,
     PrintContract,
 }
 
@@ -13,6 +14,8 @@ pub struct Cli {
     pub config_path: Option<PathBuf>,
     pub scene_manifest: Option<PathBuf>,
     pub app_manifest: Option<PathBuf>,
+    pub renderer_contract_path: Option<PathBuf>,
+    pub driver_contract_path: Option<PathBuf>,
     pub event_log_path: Option<PathBuf>,
 }
 
@@ -42,6 +45,8 @@ impl Default for Cli {
             config_path: None,
             scene_manifest: None,
             app_manifest: None,
+            renderer_contract_path: None,
+            driver_contract_path: None,
             event_log_path: None,
         }
     }
@@ -60,6 +65,10 @@ impl Cli {
                 }
                 "check" => {
                     cli.command = Command::Check;
+                    iter.next();
+                }
+                "parity" => {
+                    cli.command = Command::Parity;
                     iter.next();
                 }
                 "contract" => {
@@ -91,6 +100,18 @@ impl Cli {
                     };
                     cli.app_manifest = Some(PathBuf::from(value));
                 }
+                "--renderer-contract" => {
+                    let Some(value) = iter.next() else {
+                        return Err(CliParseError::MissingValue("--renderer-contract"));
+                    };
+                    cli.renderer_contract_path = Some(PathBuf::from(value));
+                }
+                "--driver-contract" => {
+                    let Some(value) = iter.next() else {
+                        return Err(CliParseError::MissingValue("--driver-contract"));
+                    };
+                    cli.driver_contract_path = Some(PathBuf::from(value));
+                }
                 "--event-log" => {
                     let Some(value) = iter.next() else {
                         return Err(CliParseError::MissingValue("--event-log"));
@@ -118,6 +139,11 @@ pub fn command_contract_json() -> serde_json::Value {
                 "flags": ["--config <path>", "--scenes <path>", "--apps <path>", "--event-log <path>"],
                 "event_log_routing": "--event-log overrides config.log_to_file when both are set"
             },
+            "parity": {
+                "description": "Validate renderer/driver stub contracts against parity invariants.",
+                "flags": ["--renderer-contract <path>", "--driver-contract <path>", "--event-log <path>"],
+                "notes": "both contract paths are required"
+            },
             "contract": {
                 "description": "Print the runtime CLI/event contract as JSON.",
                 "flags": []
@@ -138,6 +164,8 @@ pub fn command_contract_json() -> serde_json::Value {
             "runtime:stop": {"level": "info", "fields": ["server", "metrics_interval_seconds", "apps_loaded", "scenes_loaded"]},
             "runtime:check_ok": {"level": "info", "fields": ["server", "metrics_interval_seconds", "apps_loaded", "scenes_loaded"]},
             "runtime:check_failed": {"level": "error", "fields": ["error"]},
+            "runtime:parity_ok": {"level": "info", "fields": ["renderer_api_version", "driver_api_version", "driver_device_kind", "shared_formats"]},
+            "runtime:parity_failed": {"level": "error", "fields": ["error"]},
             "runtime:heartbeat": {"level": "debug", "fields": ["uptime_seconds", "server"]},
             "runtime:metrics_tick": {"level": "info", "fields": ["uptime_seconds", "metrics_interval_seconds", "apps_loaded", "scenes_loaded"]}
         },
@@ -152,6 +180,10 @@ pub fn command_contract_json() -> serde_json::Value {
             "check": {
                 "runtime:check_ok": ["server", "metrics_interval_seconds", "apps_loaded", "scenes_loaded"],
                 "runtime:check_failed": ["error"]
+            },
+            "parity": {
+                "runtime:parity_ok": ["renderer_api_version", "driver_api_version", "driver_device_kind", "shared_formats"],
+                "runtime:parity_failed": ["error"]
             },
             "contract": {}
         }
@@ -179,6 +211,28 @@ mod tests {
         assert_eq!(cli.config_path, Some(PathBuf::from("./frame.json")));
         assert_eq!(cli.scene_manifest, Some(PathBuf::from("./scenes.json")));
         assert_eq!(cli.event_log_path, Some(PathBuf::from("./events.log")));
+    }
+
+    #[test]
+    fn parses_parity_command_and_contract_flags() {
+        let cli = Cli::parse(vec![
+            "parity".to_string(),
+            "--renderer-contract".to_string(),
+            "./renderer.json".to_string(),
+            "--driver-contract".to_string(),
+            "./driver.json".to_string(),
+        ])
+        .expect("cli should parse");
+
+        assert_eq!(cli.command, Command::Parity);
+        assert_eq!(
+            cli.renderer_contract_path,
+            Some(PathBuf::from("./renderer.json"))
+        );
+        assert_eq!(
+            cli.driver_contract_path,
+            Some(PathBuf::from("./driver.json"))
+        );
     }
 
     #[test]

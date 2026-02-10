@@ -193,3 +193,46 @@ fn check_command_flag_event_log_overrides_config_log_to_file() {
         "config log should remain empty when CLI flag overrides"
     );
 }
+
+#[test]
+fn parity_command_emits_runtime_parity_ok_event() {
+    let binary = env!("CARGO_BIN_EXE_frameos");
+
+    let output = Command::new(binary)
+        .arg("parity")
+        .arg("--renderer-contract")
+        .arg(fixtures_path("parity/renderer-valid.json"))
+        .arg("--driver-contract")
+        .arg(fixtures_path("parity/driver-valid.json"))
+        .output()
+        .expect("parity command should execute");
+
+    assert!(
+        output.status.success(),
+        "parity command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf8");
+    assert!(stdout.contains("runtime:parity_ok"));
+    assert!(stdout.contains("FrameOS parity check: passed"));
+}
+
+#[test]
+fn parity_command_fails_for_invalid_contract_pair() {
+    let binary = env!("CARGO_BIN_EXE_frameos");
+
+    let output = Command::new(binary)
+        .arg("parity")
+        .arg("--renderer-contract")
+        .arg(fixtures_path("parity/renderer-valid.json"))
+        .arg("--driver-contract")
+        .arg(fixtures_path("parity/driver-invalid.json"))
+        .output()
+        .expect("parity command should execute");
+
+    assert!(!output.status.success(), "parity command should fail");
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf8");
+    assert!(stdout.contains("runtime:parity_failed"));
+}

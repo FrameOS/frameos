@@ -11,6 +11,8 @@ Current commands are implemented in `src/interfaces.rs` and exercised by `src/ma
   - Loads config and optional manifests, then emits `runtime:start` + `runtime:ready` events.
 - `frameos check [--config <path>] [--scenes <path>] [--apps <path>] [--event-log <path>]`
   - Validates config/manifest loading and emits `runtime:check_ok` or `runtime:check_failed`.
+- `frameos parity --renderer-contract <path> --driver-contract <path> [--event-log <path>]`
+  - Validates renderer/driver contract stubs against executable parity invariants (API version match, required format coverage, partial-refresh/device-kind guardrails).
 - `frameos contract`
   - Prints machine-readable JSON describing command and event contracts.
 
@@ -36,6 +38,8 @@ Event names currently reserved:
 - `runtime:stop`
 - `runtime:check_ok`
 - `runtime:check_failed`
+- `runtime:parity_ok`
+- `runtime:parity_failed`
 - `runtime:heartbeat`
 - `runtime:metrics_tick`
 
@@ -56,3 +60,14 @@ Next transport steps:
 - New fields in event payloads should be additive.
 - Existing event names should remain stable once marked "implemented" in the parity map.
 - Any breaking CLI changes require a TODO iteration note and migration strategy update.
+
+
+## Renderer/driver parity stub contract
+
+The `parity` command introduces an executable gate for migration slices that were previously documentation-only:
+
+- renderer contract JSON fields: `api_version`, `supports_layers`, `supported_color_formats`, `max_fps`;
+- driver contract JSON fields: `api_version`, `device_kind`, `required_renderer_formats`, `supports_partial_refresh`;
+- invariants enforced: matching API versions, non-empty format sets, driver-required formats must be provided by renderer, partial refresh allowed only for `eink`/`epd`, and `max_fps > 0`.
+
+This command is intentionally stub-oriented and designed to evolve into concrete renderer/driver adapter probes without breaking existing event names.

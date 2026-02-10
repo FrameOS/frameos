@@ -9,6 +9,7 @@ pub mod logging;
 pub mod manifests;
 pub mod metrics;
 pub mod models;
+pub mod parity;
 pub mod runtime;
 pub mod scenes;
 pub mod server;
