@@ -120,6 +120,12 @@
   - [x] Threaded lifecycle assertions through boot-route integration tests for both registered (`clock`/`weather`) and missing (`news`) boundaries.
   - [x] Ported a third concrete app boundary via `zig/src/apps/calendar.zig` and wired calendar lifecycle startup through `apps/mod.zig`.
 
+- **Iteration 21:**
+  - [x] Added `/scenes/:id/settings` route contract in `runtime/server.zig`, including `scene_not_found` error payloads and nullable `settings` fallback for scenes without app settings contracts.
+  - [x] Added weather app settings stubs (`location`, `units`, `refreshIntervalMin`) in `apps/weather.zig` and wired `apps/mod.zig` scene settings resolution for both weather and calendar scenes.
+  - [x] Extended runner startup diagnostics with app-settings availability (`present`/`missing`) and added unit coverage in `runtime/runner.zig`.
+  - [x] Threaded startup-scene settings payload snapshots into `renderBootRoutePayloads` + boot logging so `/scenes/:id/settings` is emitted during startup diagnostics.
+
 ## Completed
 - [x] Create `zig/` directory.
 - [x] Create `zig/TODO.md` with loop structure and initial plan.
@@ -179,9 +185,9 @@
 ---
 
 ## Next Actions (priority order)
-1. [ ] Thread app-specific settings payloads into runtime route contracts (candidate: `/scenes/:id/settings`) so scene diagnostics can expose configuration stubs.
-2. [ ] Add runner startup payload/unit assertions that include app-settings availability (`present`/`missing`) alongside lifecycle fallback diagnostics.
-3. [ ] Expand app configuration contracts with a second app stub (candidate: weather location/units settings) to validate multi-app settings plumbing behind `apps/mod.zig`.
+1. [ ] Add explicit boot integration assertions for `/scenes/:id/settings` under both success and unknown-scene startup paths (full JSON shape, not substring checks).
+2. [ ] Expose `settingsAvailable` metadata on `/scenes` list payload entries so list diagnostics mirror `/scenes/:id/settings` route availability.
+3. [ ] Add server startup logging assertions that cover registration of the `/scenes/:id/settings` route alongside existing route diagnostics.
 
 ## Backlog / Later
 - [ ] Port individual apps incrementally (start with simplest).

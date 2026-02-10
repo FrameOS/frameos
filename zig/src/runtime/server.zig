@@ -27,6 +27,7 @@ pub const RuntimeServer = struct {
         try self.logger.info("{\"event\":\"server.route\",\"route\":\"/health\",\"status\":\"stub\",\"method\":\"GET\"}", .{});
         try self.logger.info("{\"event\":\"server.route\",\"route\":\"/scenes\",\"status\":\"stub\",\"method\":\"GET\"}", .{});
         try self.logger.info("{\"event\":\"server.route\",\"route\":\"/scenes/:id\",\"status\":\"stub\",\"method\":\"GET\"}", .{});
+        try self.logger.info("{\"event\":\"server.route\",\"route\":\"/scenes/:id/settings\",\"status\":\"stub\",\"method\":\"GET\"}", .{});
         try self.logger.info("{\"event\":\"server.route\",\"route\":\"/system/hotspot\",\"status\":\"stub\",\"method\":\"GET\"}", .{});
         try self.logger.info("{\"event\":\"server.route\",\"route\":\"/system/device\",\"status\":\"stub\",\"method\":\"GET\"}", .{});
     }
@@ -49,6 +50,13 @@ pub const RuntimeServer = struct {
             .server = self,
             .result = registry.loadManifestResult(scene_id),
             .app_lifecycle = try apps_mod.appLifecycleSummaryForScene(scene_id, .{ .allocator = std.heap.page_allocator }),
+        };
+    }
+
+    pub fn sceneSettingsByIdRoute(self: RuntimeServer, registry: scenes_mod.SceneRegistry, scene_id: []const u8) SceneSettingsByIdRoute {
+        return .{
+            .server = self,
+            .result = registry.loadManifestResult(scene_id),
         };
     }
 
@@ -156,6 +164,41 @@ pub const SceneByIdRoute = struct {
                     .{ self.server.config.frame_host, self.server.config.frame_port, self.result.requested_scene_id, manifest.scene_id, manifest.app.id, manifest.entrypoint },
                 );
             }
+        } else {
+            try writer.print(
+                "{\"host\":\"{s}\",\"port\":{},\"requestedId\":\"{s}\",\"found\":false,\"error\":{\"code\":\"scene_not_found\",\"message\":\"Unknown scene id\"}}",
+                .{ self.server.config.frame_host, self.server.config.frame_port, self.result.requested_scene_id },
+            );
+        }
+
+        return stream.getWritten();
+    }
+};
+
+pub const SceneSettingsByIdRoute = struct {
+    server: RuntimeServer,
+    result: scenes_mod.SceneManifestResult,
+
+    pub fn renderJson(self: SceneSettingsByIdRoute, buffer: []u8) ![]const u8 {
+        var stream = std.io.fixedBufferStream(buffer);
+        const writer = stream.writer();
+
+        if (self.result.manifest) |manifest| {
+            var settings_buf: [256]u8 = undefined;
+            const settings = try apps_mod.sceneSettingsPayloadForScene(manifest.scene_id, &settings_buf);
+
+            try writer.print(
+                "{\"host\":\"{s}\",\"port\":{},\"requestedId\":\"{s}\",\"found\":true,\"scene\":{\"id\":\"{s}\",\"appId\":\"{s}\"},",
+                .{ self.server.config.frame_host, self.server.config.frame_port, self.result.requested_scene_id, manifest.scene_id, manifest.app.id },
+            );
+
+            if (settings) |payload| {
+                try writer.print("\"settings\":{s}", .{payload});
+            } else {
+                try writer.writeAll("\"settings\":null");
+            }
+
+            try writer.writeAll("}");
         } else {
             try writer.print(
                 "{\"host\":\"{s}\",\"port\":{},\"requestedId\":\"{s}\",\"found\":false,\"error\":{\"code\":\"scene_not_found\",\"message\":\"Unknown scene id\"}}",
@@ -368,6 +411,82 @@ test "scene by id route renders error payload for unknown scene id" {
 
     const registry = scenes_mod.SceneRegistry.init(logger, "clock");
     const route = try server.sceneByIdRoute(registry, "unknown-scene");
+
+    var buf: [256]u8 = undefined;
+    const payload = try route.renderJson(&buf);
+
+    try testing.expectEqualStrings(
+        "{\"host\":\"0.0.0.0\",\"port\":7777,\"requestedId\":\"unknown-scene\",\"found\":false,\"error\":{\"code\":\"scene_not_found\",\"message\":\"Unknown scene id\"}}",
+        payload,
+    );
+}
+
+test "scene settings by id route renders calendar settings payload" {
+    const testing = std.testing;
+
+    const logger = logger_mod.RuntimeLogger.init(.{ .frame_host = "127.0.0.1", .frame_port = 8787, .debug = false, .metrics_interval_s = 60, .network_check = true, .network_probe_mode = .auto, .device = "simulator", .startup_scene = "clock" });
+
+    const server = RuntimeServer.init(logger, .{ .frame_host = "0.0.0.0", .frame_port = 7777, .debug = false, .metrics_interval_s = 30, .network_check = true, .network_probe_mode = .auto, .device = "simulator", .startup_scene = "clock" });
+
+    const registry = scenes_mod.SceneRegistry.init(logger, "clock");
+    const route = server.sceneSettingsByIdRoute(registry, "calendar");
+
+    var buf: [384]u8 = undefined;
+    const payload = try route.renderJson(&buf);
+
+    try testing.expectEqualStrings(
+        "{\"host\":\"0.0.0.0\",\"port\":7777,\"requestedId\":\"calendar\",\"found\":true,\"scene\":{\"id\":\"calendar\",\"appId\":\"app.calendar\"},\"settings\":{\"timezone\":\"UTC\",\"weekStartsOnMonday\":true,\"maxVisibleEvents\":5}}",
+        payload,
+    );
+}
+
+test "scene settings by id route renders weather settings payload" {
+    const testing = std.testing;
+
+    const logger = logger_mod.RuntimeLogger.init(.{ .frame_host = "127.0.0.1", .frame_port = 8787, .debug = false, .metrics_interval_s = 60, .network_check = true, .network_probe_mode = .auto, .device = "simulator", .startup_scene = "clock" });
+
+    const server = RuntimeServer.init(logger, .{ .frame_host = "0.0.0.0", .frame_port = 7777, .debug = false, .metrics_interval_s = 30, .network_check = true, .network_probe_mode = .auto, .device = "simulator", .startup_scene = "clock" });
+
+    const registry = scenes_mod.SceneRegistry.init(logger, "clock");
+    const route = server.sceneSettingsByIdRoute(registry, "weather");
+
+    var buf: [384]u8 = undefined;
+    const payload = try route.renderJson(&buf);
+
+    try testing.expectEqualStrings(
+        "{\"host\":\"0.0.0.0\",\"port\":7777,\"requestedId\":\"weather\",\"found\":true,\"scene\":{\"id\":\"weather\",\"appId\":\"app.weather\"},\"settings\":{\"location\":\"San Francisco, CA\",\"units\":\"metric\",\"refreshIntervalMin\":15}}",
+        payload,
+    );
+}
+
+test "scene settings by id route renders null when scene has no settings contract" {
+    const testing = std.testing;
+
+    const logger = logger_mod.RuntimeLogger.init(.{ .frame_host = "127.0.0.1", .frame_port = 8787, .debug = false, .metrics_interval_s = 60, .network_check = true, .network_probe_mode = .auto, .device = "simulator", .startup_scene = "clock" });
+
+    const server = RuntimeServer.init(logger, .{ .frame_host = "0.0.0.0", .frame_port = 7777, .debug = false, .metrics_interval_s = 30, .network_check = true, .network_probe_mode = .auto, .device = "simulator", .startup_scene = "clock" });
+
+    const registry = scenes_mod.SceneRegistry.init(logger, "clock");
+    const route = server.sceneSettingsByIdRoute(registry, "news");
+
+    var buf: [256]u8 = undefined;
+    const payload = try route.renderJson(&buf);
+
+    try testing.expectEqualStrings(
+        "{\"host\":\"0.0.0.0\",\"port\":7777,\"requestedId\":\"news\",\"found\":true,\"scene\":{\"id\":\"news\",\"appId\":\"app.news\"},\"settings\":null}",
+        payload,
+    );
+}
+
+test "scene settings by id route renders unknown-scene error payload" {
+    const testing = std.testing;
+
+    const logger = logger_mod.RuntimeLogger.init(.{ .frame_host = "127.0.0.1", .frame_port = 8787, .debug = false, .metrics_interval_s = 60, .network_check = true, .network_probe_mode = .auto, .device = "simulator", .startup_scene = "clock" });
+
+    const server = RuntimeServer.init(logger, .{ .frame_host = "0.0.0.0", .frame_port = 7777, .debug = false, .metrics_interval_s = 30, .network_check = true, .network_probe_mode = .auto, .device = "simulator", .startup_scene = "clock" });
+
+    const registry = scenes_mod.SceneRegistry.init(logger, "clock");
+    const route = server.sceneSettingsByIdRoute(registry, "unknown-scene");
 
     var buf: [256]u8 = undefined;
     const payload = try route.renderJson(&buf);

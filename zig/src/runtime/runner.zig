@@ -26,13 +26,22 @@ pub const RuntimeRunner = struct {
             summary
         else
             apps_mod.AppStartupSummary{ .app_id = app_id, .lifecycle = "missing", .frame_rate_hz = 0 };
+        var settings_buf: [256]u8 = undefined;
+        const app_settings = try apps_mod.sceneSettingsPayloadForScene(startup_scene, &settings_buf);
+        const app_settings_status = if (app_settings != null) "present" else "missing";
 
         try self.logger.info(
-            "{\"event\":\"runner.start\",\"status\":\"stub\",\"device\":\"{s}\",\"startupScene\":\"{s}\",\"appId\":\"{s}\",\"appEntrypoint\":\"{s}\",\"appLifecycle\":\"{s}\",\"frameRateHz\":{},\"boundary\":\"runtime->apps\"}",
-            .{ self.device, startup_scene, app_startup.app_id, app_entrypoint, app_startup.lifecycle, app_startup.frame_rate_hz },
+            "{\"event\":\"runner.start\",\"status\":\"stub\",\"device\":\"{s}\",\"startupScene\":\"{s}\",\"appId\":\"{s}\",\"appEntrypoint\":\"{s}\",\"appLifecycle\":\"{s}\",\"frameRateHz\":{},\"appSettings\":\"{s}\",\"boundary\":\"runtime->apps\"}",
+            .{ self.device, startup_scene, app_startup.app_id, app_entrypoint, app_startup.lifecycle, app_startup.frame_rate_hz, app_settings_status },
         );
     }
 };
+
+pub fn appSettingsAvailabilityForScene(scene_id: []const u8) ![]const u8 {
+    var settings_buf: [256]u8 = undefined;
+    const settings = try apps_mod.sceneSettingsPayloadForScene(scene_id, &settings_buf);
+    return if (settings != null) "present" else "missing";
+}
 
 test "runner resolves startup scene manifest through registry" {
     const testing = @import("std").testing;
@@ -104,4 +113,16 @@ test "runner falls back to missing lifecycle when manifest exists but no app bou
     try testing.expectEqualStrings("app.news", fallback.app_id);
     try testing.expectEqualStrings("missing", fallback.lifecycle);
     try testing.expectEqual(@as(u8, 0), fallback.frame_rate_hz);
+}
+
+test "runner app settings availability reports present for calendar" {
+    const testing = @import("std").testing;
+
+    try testing.expectEqualStrings("present", try appSettingsAvailabilityForScene("calendar"));
+}
+
+test "runner app settings availability reports missing for news" {
+    const testing = @import("std").testing;
+
+    try testing.expectEqualStrings("missing", try appSettingsAvailabilityForScene("news"));
 }

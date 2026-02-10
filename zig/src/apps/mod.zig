@@ -75,6 +75,10 @@ pub fn sceneSettingsPayloadForScene(scene_id: []const u8, buffer: []u8) !?[]cons
         return try calendar_app.renderSceneSettingsJson(calendar_app.default_scene_settings, buffer);
     }
 
+    if (std.mem.eql(u8, scene_id, "weather")) {
+        return try weather_app.renderSceneSettingsJson(weather_app.default_scene_settings, buffer);
+    }
+
     return null;
 }
 
@@ -197,4 +201,17 @@ test "scene settings payload helper returns null for scenes without settings con
 
     var buf: [128]u8 = undefined;
     try testing.expectEqual(@as(?[]const u8, null), try sceneSettingsPayloadForScene("news", &buf));
+}
+
+test "scene settings payload helper renders weather settings" {
+    const testing = std.testing;
+
+    var buf: [160]u8 = undefined;
+    const payload = try sceneSettingsPayloadForScene("weather", &buf);
+
+    try testing.expect(payload != null);
+    try testing.expectEqualStrings(
+        "{\"location\":\"San Francisco, CA\",\"units\":\"metric\",\"refreshIntervalMin\":15}",
+        payload.?,
+    );
 }

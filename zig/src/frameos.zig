@@ -16,6 +16,7 @@ pub const BootRoutePayloads = struct {
     health: []const u8,
     scenes: []const u8,
     startup_scene: []const u8,
+    startup_scene_settings: []const u8,
     hotspot_status: []const u8,
     device_summary: []const u8,
 };
@@ -31,15 +32,18 @@ pub fn renderBootRoutePayloads(
     health_buf: []u8,
     scenes_buf: []u8,
     startup_scene_buf: []u8,
+    startup_scene_settings_buf: []u8,
     hotspot_status_buf: []u8,
     device_summary_buf: []u8,
 ) !BootRoutePayloads {
     const startup_scene_route = try server.sceneByIdRoute(scene_registry, scene_registry.startup_scene);
+    const startup_scene_settings_route = server.sceneSettingsByIdRoute(scene_registry, scene_registry.startup_scene);
 
     return .{
         .health = try server.healthRoute(health_snapshot, probe_mode, probe_outcome).renderJson(health_buf),
         .scenes = try server.scenesRoute(scene_registry).renderJson(scenes_buf),
         .startup_scene = try startup_scene_route.renderJson(startup_scene_buf),
+        .startup_scene_settings = try startup_scene_settings_route.renderJson(startup_scene_settings_buf),
         .hotspot_status = try server.hotspotPortalStatusRoute(system_services.hotspot, system_services.portal, startup_state, system_mod.startupSceneLabel(system_services.hotspot.startup_scene)).renderJson(hotspot_status_buf),
         .device_summary = try server.deviceSummaryRoute(system_services.device_utils, scene_registry.startup_scene, startup_state).renderJson(device_summary_buf),
     };
@@ -128,6 +132,7 @@ pub fn startFrameOS() !void {
     var health_route_buffer: [256]u8 = undefined;
     var scenes_route_buffer: [1024]u8 = undefined;
     var startup_scene_route_buffer: [256]u8 = undefined;
+    var startup_scene_settings_route_buffer: [384]u8 = undefined;
     var hotspot_status_route_buffer: [256]u8 = undefined;
     var device_summary_route_buffer: [320]u8 = undefined;
     const route_payloads = try renderBootRoutePayloads(
@@ -141,6 +146,7 @@ pub fn startFrameOS() !void {
         &health_route_buffer,
         &scenes_route_buffer,
         &startup_scene_route_buffer,
+        &startup_scene_settings_route_buffer,
         &hotspot_status_route_buffer,
         &device_summary_route_buffer,
     );
@@ -148,6 +154,7 @@ pub fn startFrameOS() !void {
     try logger.info("{\"event\":\"server.route.payload\",\"route\":\"/health\",\"payload\":{s}}", .{route_payloads.health});
     try logger.info("{\"event\":\"server.route.payload\",\"route\":\"/scenes\",\"payload\":{s}}", .{route_payloads.scenes});
     try logger.info("{\"event\":\"server.route.payload\",\"route\":\"/scenes/:id\",\"requestedId\":\"{s}\",\"payload\":{s}}", .{ scene_registry.startup_scene, route_payloads.startup_scene });
+    try logger.info("{\"event\":\"server.route.payload\",\"route\":\"/scenes/:id/settings\",\"requestedId\":\"{s}\",\"payload\":{s}}", .{ scene_registry.startup_scene, route_payloads.startup_scene_settings });
     try logger.info("{\"event\":\"server.route.payload\",\"route\":\"/system/hotspot\",\"payload\":{s}}", .{route_payloads.hotspot_status});
     try logger.info("{\"event\":\"server.route.payload\",\"route\":\"/system/device\",\"payload\":{s}}", .{route_payloads.device_summary});
 
@@ -195,6 +202,7 @@ test "boot payload integration captures health and scene snapshots" {
     var health_buf: [256]u8 = undefined;
     var scenes_buf: [1024]u8 = undefined;
     var startup_scene_buf: [256]u8 = undefined;
+    var startup_scene_settings_buf: [384]u8 = undefined;
     var hotspot_status_buf: [256]u8 = undefined;
     var device_summary_buf: [320]u8 = undefined;
 
@@ -209,6 +217,7 @@ test "boot payload integration captures health and scene snapshots" {
         &health_buf,
         &scenes_buf,
         &startup_scene_buf,
+        &startup_scene_settings_buf,
         &hotspot_status_buf,
         &device_summary_buf,
     );
@@ -223,6 +232,8 @@ test "boot payload integration captures health and scene snapshots" {
     try testing.expect(std.mem.indexOf(u8, payloads.scenes, "\"appLifecycle\":null") != null);
     try testing.expect(std.mem.indexOf(u8, payloads.startup_scene, "\"found\":false") != null);
     try testing.expect(std.mem.indexOf(u8, payloads.startup_scene, "\"code\":\"scene_not_found\"") != null);
+    try testing.expect(std.mem.indexOf(u8, payloads.startup_scene_settings, "\"found\":false") != null);
+    try testing.expect(std.mem.indexOf(u8, payloads.startup_scene_settings, "\"code\":\"scene_not_found\"") != null);
     try testing.expect(std.mem.indexOf(u8, payloads.hotspot_status, "\"startupScene\":\"index\"") != null);
     try testing.expect(std.mem.indexOf(u8, payloads.hotspot_status, "\"startupState\":\"degraded-network\"") != null);
     try testing.expect(std.mem.indexOf(u8, payloads.hotspot_status, "\"hotspotActive\":false") != null);
@@ -254,6 +265,7 @@ test "boot payload integration captures successful startup scene payload" {
     var health_buf: [256]u8 = undefined;
     var scenes_buf: [1024]u8 = undefined;
     var startup_scene_buf: [256]u8 = undefined;
+    var startup_scene_settings_buf: [384]u8 = undefined;
     var hotspot_status_buf: [256]u8 = undefined;
     var device_summary_buf: [320]u8 = undefined;
 
@@ -268,6 +280,7 @@ test "boot payload integration captures successful startup scene payload" {
         &health_buf,
         &scenes_buf,
         &startup_scene_buf,
+        &startup_scene_settings_buf,
         &hotspot_status_buf,
         &device_summary_buf,
     );
@@ -276,6 +289,8 @@ test "boot payload integration captures successful startup scene payload" {
     try testing.expect(std.mem.indexOf(u8, payloads.startup_scene, "\"appId\":\"app.weather\"") != null);
     try testing.expect(std.mem.indexOf(u8, payloads.startup_scene, "\"entrypoint\":\"apps/weather/main\"") != null);
     try testing.expect(std.mem.indexOf(u8, payloads.startup_scene, "\"appLifecycle\":{\"appId\":\"app.weather\",\"lifecycle\":\"weather\",\"frameRateHz\":30}") != null);
+    try testing.expect(std.mem.indexOf(u8, payloads.startup_scene_settings, "\"scene\":{\"id\":\"weather\",\"appId\":\"app.weather\"}") != null);
+    try testing.expect(std.mem.indexOf(u8, payloads.startup_scene_settings, "\"settings\":{\"location\":\"San Francisco, CA\",\"units\":\"metric\",\"refreshIntervalMin\":15}") != null);
     try testing.expect(std.mem.indexOf(u8, payloads.health, "\"networkProbe\":{\"mode\":\"auto\",\"outcome\":\"ok\"}") != null);
     try testing.expect(std.mem.indexOf(u8, payloads.scenes, "\"appLifecycle\":{\"appId\":\"app.weather\",\"lifecycle\":\"weather\",\"frameRateHz\":30}") != null);
     try testing.expect(std.mem.indexOf(u8, payloads.scenes, "\"id\":\"news\"") != null);
@@ -332,6 +347,7 @@ test "boot payload integration locks /scenes ordering and lifecycle shape" {
     var health_buf: [256]u8 = undefined;
     var scenes_buf: [1024]u8 = undefined;
     var startup_scene_buf: [256]u8 = undefined;
+    var startup_scene_settings_buf: [384]u8 = undefined;
     var hotspot_status_buf: [256]u8 = undefined;
     var device_summary_buf: [320]u8 = undefined;
 
@@ -346,6 +362,7 @@ test "boot payload integration locks /scenes ordering and lifecycle shape" {
         &health_buf,
         &scenes_buf,
         &startup_scene_buf,
+        &startup_scene_settings_buf,
         &hotspot_status_buf,
         &device_summary_buf,
     );
@@ -377,6 +394,7 @@ test "boot payload integration captures startup scene with missing lifecycle bou
     var health_buf: [256]u8 = undefined;
     var scenes_buf: [1024]u8 = undefined;
     var startup_scene_buf: [256]u8 = undefined;
+    var startup_scene_settings_buf: [384]u8 = undefined;
     var hotspot_status_buf: [256]u8 = undefined;
     var device_summary_buf: [320]u8 = undefined;
 
@@ -391,6 +409,7 @@ test "boot payload integration captures startup scene with missing lifecycle bou
         &health_buf,
         &scenes_buf,
         &startup_scene_buf,
+        &startup_scene_settings_buf,
         &hotspot_status_buf,
         &device_summary_buf,
     );
@@ -400,4 +419,6 @@ test "boot payload integration captures startup scene with missing lifecycle bou
     try testing.expect(std.mem.indexOf(u8, payloads.startup_scene, "\"appId\":\"app.news\"") != null);
     try testing.expect(std.mem.indexOf(u8, payloads.startup_scene, "\"entrypoint\":\"apps/news/main\"") != null);
     try testing.expect(std.mem.indexOf(u8, payloads.startup_scene, "\"appLifecycle\":null") != null);
+    try testing.expect(std.mem.indexOf(u8, payloads.startup_scene_settings, "\"requestedId\":\"news\"") != null);
+    try testing.expect(std.mem.indexOf(u8, payloads.startup_scene_settings, "\"settings\":null") != null);
 }
