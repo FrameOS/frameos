@@ -103,6 +103,13 @@ impl FrameOSConfig {
         Self::load_from_path(&path)
     }
 
+    pub fn load_with_override(path: Option<&Path>) -> Result<Self, ConfigError> {
+        match path {
+            Some(path) => Self::load_from_path(path),
+            None => Self::load(),
+        }
+    }
+
     pub fn load_from_path(path: &Path) -> Result<Self, ConfigError> {
         if !path.exists() {
             return Err(ConfigError::MissingConfig(path.to_path_buf()));

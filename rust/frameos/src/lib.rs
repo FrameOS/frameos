@@ -4,6 +4,7 @@
 
 pub mod apps;
 pub mod config;
+pub mod interfaces;
 pub mod logging;
 pub mod manifests;
 pub mod metrics;

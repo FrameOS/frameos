@@ -54,11 +54,19 @@
 - Added adapter helpers returning `SceneCatalog` and `AppRegistry` directly so runtime boot logic can consume validated manifests without duplicate conversion code.
 - Added filesystem-backed integration tests that cover successful loads plus parse/validation failure paths.
 
+### Iteration 8 (CLI/event contracts + planning docs)
+- Added explicit external runtime interfaces in Rust via `src/interfaces.rs`, including a typed CLI parser (`run`, `check`, `contract`) and a machine-readable command/event contract JSON payload.
+- Wired `main.rs` + `runtime.rs` to support config override paths, manifest preloading during `check/run`, and lifecycle events (`runtime:start`, `runtime:ready`, `runtime:check_ok`, `runtime:check_failed`).
+- Expanded runtime scaffolding by connecting server/metrics placeholders to config-derived state so lifecycle checks report endpoint and interval values.
+- Documented parity mapping, external interface contracts, and phased migration strategy in `rust/frameos/docs/` so architecture/planning checklist items are now concretely tracked.
+- Added CLI/contract tests to lock parser behavior and reserved contract surface for follow-up iterations.
+
+
 ## Next up (small, actionable)
-1. Produce a minimal “parity map” between existing FrameOS features and planned Rust modules.
-2. Define external interfaces for the Rust runtime (CLI/server lifecycle/log stream contract).
-3. Evaluate when to introduce a top-level Cargo workspace once more crates are needed.
-4. Define migration strategy notes (phased rollout, feature flags, shadow mode).
+1. Implement graceful runtime shutdown and emit `runtime:stop` from the real lifecycle path.
+2. Add parity/golden tests that compare Nim vs Rust manifest/event outputs for known fixtures.
+3. Start server transport implementation (HTTP health endpoint + websocket event fanout stub).
+4. Define top-level Cargo workspace timing once a second Rust crate is introduced.
 
 ## Checklist
 
@@ -72,9 +80,9 @@
 ### Architecture & planning
 - [x] Define target Rust crate(s) and module boundaries.
 - [x] Decide data models and serialization format(s).
-- [ ] Define external interfaces (CLI/API/event streams/filesystem).
-- [ ] Create a parity map: legacy behavior → Rust module.
-- [ ] Define migration strategy (phased rollout, feature flags, shadow mode).
+- [x] Define external interfaces (CLI/API/event streams/filesystem).
+- [x] Create a parity map: legacy behavior → Rust module.
+- [x] Define migration strategy (phased rollout, feature flags, shadow mode).
 
 ### Implementation (incremental)
 - [x] Add Cargo workspace entry (if needed) and create crate skeleton.
