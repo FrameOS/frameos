@@ -131,11 +131,18 @@
 - Implemented `src/parity.rs` with typed renderer/driver contract models, disk loaders, and executable invariants (API version alignment, required format coverage, partial-refresh device-kind guards, and positive fps checks).
 - Added fixture-backed parity smoke coverage in `tests/runtime_parity.rs` plus parser/contract assertions in `tests/interfaces_cli.rs` and module-level validation tests in `src/parity.rs`.
 - Updated parity/external-interface/CLI docs with daemonized supervision examples (systemd/OpenRC + health probe retry loop) and promoted renderer/driver parity status from documentation-only to executable in-progress checks.
+
+
+### Iteration 19 (deterministic timestamp providers for logging + server transport)
+- Added a reusable `TimestampProvider` abstraction in `src/logging.rs` with `SystemTimestampProvider` (production default) plus `FixedTimestampProvider` to enable deterministic JSON-line envelope assertions in unit/integration tests.
+- Extended event emission with `emit_event_to_sink_with_timestamp_provider` so sinks can receive stable timestamps independent of wall-clock jitter when tests need exact parity checks.
+- Updated `src/server.rs` event fanout/transport startup to support timestamp-provider injection (`EventFanout::with_timestamp_provider`, `ServerTransport::start_with_timestamp_provider`) while keeping production defaults unchanged.
+- Added deterministic parity tests covering both logging envelopes and websocket event payload timestamps, confirming transport events can be asserted with exact timestamp equality.
 ## Next up (small, actionable)
-1. Introduce deterministic timestamp providers in `logging`/`server` so transport parity tests can assert exact envelope timestamps without wall-clock jitter.
-2. Extend parity stubs with renderer frame-scheduling invariants (tick budget, target fps, drop/backpressure policy) and add golden fixtures for failure modes.
-3. Start wiring device-driver capability discovery adapters (filesystem or command probes) to replace static JSON fixtures in parity checks.
-4. Add CI-oriented daemon smoke script that boots `frameos run`, probes `/healthz`, then sends SIGINT and validates `runtime:stop` in the event log.
+1. Extend parity stubs with renderer frame-scheduling invariants (tick budget, target fps, drop/backpressure policy) and add golden fixtures for failure modes.
+2. Start wiring device-driver capability discovery adapters (filesystem or command probes) to replace static JSON fixtures in parity checks.
+3. Add CI-oriented daemon smoke script that boots `frameos run`, probes `/healthz`, then sends SIGINT and validates `runtime:stop` in the event log.
+4. Add deterministic runtime-loop integration test coverage that injects fixed timestamps across start/heartbeat/metrics/stop traces for golden JSON-line snapshots.
 
 ## Checklist
 

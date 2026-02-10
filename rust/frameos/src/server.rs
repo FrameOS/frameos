@@ -11,6 +11,7 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::config::FrameOSConfig;
+use crate::logging::{SystemTimestampProvider, TimestampProvider};
 
 const EVENT_HISTORY_LIMIT: usize = 256;
 const WEBSOCKET_MAGIC_GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
@@ -30,10 +31,21 @@ pub struct ServerHealthSnapshot {
     pub metrics_interval_seconds: u64,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct EventFanout {
     state: Arc<Mutex<EventFanoutState>>,
     broadcaster: EventBroadcaster,
+    timestamp_provider: Arc<dyn TimestampProvider>,
+}
+
+impl std::fmt::Debug for EventFanout {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EventFanout")
+            .field("published_total", &self.published_total())
+            .field("recent_events", &self.recent_events())
+            .field("websocket_client_count", &self.websocket_client_count())
+            .finish()
+    }
 }
 
 #[derive(Debug)]
@@ -159,9 +171,14 @@ impl EventBroadcaster {
 
 impl EventFanout {
     pub fn new() -> Self {
+        Self::with_timestamp_provider(Arc::new(SystemTimestampProvider))
+    }
+
+    pub fn with_timestamp_provider(timestamp_provider: Arc<dyn TimestampProvider>) -> Self {
         Self {
             state: Arc::new(Mutex::new(EventFanoutState::default())),
             broadcaster: EventBroadcaster::new(),
+            timestamp_provider,
         }
     }
 
@@ -175,7 +192,7 @@ impl EventFanout {
     pub fn publish_with_fields(&self, event_name: &str, fields: serde_json::Value) {
         let payload = json!({
             "event": event_name,
-            "timestamp": unix_timestamp_seconds(),
+            "timestamp": self.timestamp_provider.now_unix_seconds(),
             "fields": fields,
         })
         .to_string();
@@ -220,13 +237,6 @@ impl EventFanout {
     }
 }
 
-fn unix_timestamp_seconds() -> f64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs_f64())
-        .unwrap_or(0.0)
-}
-
 #[derive(Debug)]
 struct HealthState {
     started_at: SystemTime,
@@ -249,11 +259,19 @@ pub struct ServerTransport {
 
 impl ServerTransport {
     pub fn start(server: &Server, snapshot: ServerHealthSnapshot) -> io::Result<Self> {
+        Self::start_with_timestamp_provider(server, snapshot, Arc::new(SystemTimestampProvider))
+    }
+
+    pub fn start_with_timestamp_provider(
+        server: &Server,
+        snapshot: ServerHealthSnapshot,
+        timestamp_provider: Arc<dyn TimestampProvider>,
+    ) -> io::Result<Self> {
         let listener = TcpListener::bind(server.bind_addr())?;
         listener.set_nonblocking(true)?;
         let local_addr = listener.local_addr()?.to_string();
 
-        let fanout = EventFanout::new();
+        let fanout = EventFanout::with_timestamp_provider(timestamp_provider);
         let shutdown = Arc::new(AtomicBool::new(false));
         let health = Arc::new(Mutex::new(HealthState {
             started_at: SystemTime::now(),
@@ -572,6 +590,7 @@ impl Server {
 mod tests {
     use super::*;
     use std::io::Read;
+    use std::sync::Arc;
     use std::time::Duration;
 
     fn write_masked_client_frame(stream: &mut TcpStream, opcode: u8, payload: &[u8]) {
@@ -818,6 +837,65 @@ mod tests {
             assert_eq!(message["event"], json!(event));
             assert_eq!(message["fields"], fields);
         }
+
+        transport.stop().expect("transport should stop cleanly");
+    }
+
+    #[test]
+    fn websocket_payload_uses_injected_timestamp_provider() {
+        let server = Server {
+            host: "127.0.0.1".to_string(),
+            port: 0,
+        };
+        let transport = ServerTransport::start_with_timestamp_provider(
+            &server,
+            ServerHealthSnapshot {
+                apps_loaded: 0,
+                scenes_loaded: 0,
+                metrics_interval_seconds: 60,
+            },
+            Arc::new(crate::logging::FixedTimestampProvider::new(1234.5)),
+        )
+        .expect("server should start");
+
+        let mut stream = TcpStream::connect(transport.local_addr()).expect("connect should work");
+        let handshake = format!(
+            "GET {WEBSOCKET_PATH} HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
+        );
+        stream
+            .write_all(handshake.as_bytes())
+            .expect("handshake write should work");
+
+        let mut reader = BufReader::new(stream.try_clone().expect("clone should work"));
+        let mut status = String::new();
+        reader
+            .read_line(&mut status)
+            .expect("status should be readable");
+        assert!(status.starts_with("HTTP/1.1 101"));
+        loop {
+            let mut line = String::new();
+            reader
+                .read_line(&mut line)
+                .expect("header line should be readable");
+            if line == "\r\n" || line.is_empty() {
+                break;
+            }
+        }
+
+        transport.fanout().publish("runtime:start");
+
+        let mut header = [0u8; 2];
+        stream
+            .read_exact(&mut header)
+            .expect("frame header should be readable");
+        let payload_len = (header[1] & 0x7F) as usize;
+        let mut payload = vec![0u8; payload_len];
+        stream
+            .read_exact(&mut payload)
+            .expect("payload should be readable");
+        let message: serde_json::Value =
+            serde_json::from_slice(&payload).expect("payload should be valid json");
+        assert_eq!(message["timestamp"], json!(1234.5));
 
         transport.stop().expect("transport should stop cleanly");
     }

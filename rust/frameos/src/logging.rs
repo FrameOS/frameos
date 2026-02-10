@@ -6,6 +6,39 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+pub trait TimestampProvider: Send + Sync {
+    fn now_unix_seconds(&self) -> f64;
+}
+
+#[derive(Debug, Default)]
+pub struct SystemTimestampProvider;
+
+impl TimestampProvider for SystemTimestampProvider {
+    fn now_unix_seconds(&self) -> f64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_secs_f64())
+            .unwrap_or(0.0)
+    }
+}
+
+#[derive(Debug)]
+pub struct FixedTimestampProvider {
+    timestamp: f64,
+}
+
+impl FixedTimestampProvider {
+    pub fn new(timestamp: f64) -> Self {
+        Self { timestamp }
+    }
+}
+
+impl TimestampProvider for FixedTimestampProvider {
+    fn now_unix_seconds(&self) -> f64 {
+        self.timestamp
+    }
+}
+
 /// Sink abstraction for JSON-lines logging output.
 pub trait JsonLineSink: Send + Sync {
     fn write_line(&self, line: &str) -> io::Result<()>;
@@ -96,16 +129,26 @@ impl JsonLineSink for MultiJsonLineSink {
     }
 }
 
-fn event_envelope(event: Value) -> Value {
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs_f64())
-        .unwrap_or(0.0);
-
+fn event_envelope_with_timestamp_provider(
+    event: Value,
+    timestamp_provider: &dyn TimestampProvider,
+) -> Value {
     json!({
-        "timestamp": timestamp,
+        "timestamp": timestamp_provider.now_unix_seconds(),
         "event": event,
     })
+}
+
+fn event_envelope(event: Value) -> Value {
+    event_envelope_with_timestamp_provider(event, &SystemTimestampProvider)
+}
+
+pub fn emit_event_to_sink_with_timestamp_provider(
+    sink: &dyn JsonLineSink,
+    event: Value,
+    timestamp_provider: &dyn TimestampProvider,
+) -> io::Result<()> {
+    sink.write_line(&event_envelope_with_timestamp_provider(event, timestamp_provider).to_string())
 }
 
 pub fn emit_event_to_sink(sink: &dyn JsonLineSink, event: Value) -> io::Result<()> {
@@ -179,5 +222,26 @@ mod tests {
 
         assert_eq!(primary.lines().len(), 1);
         assert_eq!(secondary.lines().len(), 1);
+    }
+
+    #[test]
+    fn timestamp_provider_allows_deterministic_event_envelope() {
+        let sink = MemoryJsonLineSink::default();
+        let provider = FixedTimestampProvider::new(1_700_000_123.25);
+
+        emit_event_to_sink_with_timestamp_provider(
+            &sink,
+            json!({"event": "runtime:deterministic"}),
+            &provider,
+        )
+        .expect("write with fixed provider should succeed");
+
+        let line = sink
+            .lines()
+            .into_iter()
+            .next()
+            .expect("line should be present");
+        let payload: Value = serde_json::from_str(&line).expect("line should be valid json");
+        assert_eq!(payload["timestamp"], json!(1_700_000_123.25));
     }
 }
