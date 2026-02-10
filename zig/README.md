@@ -3,7 +3,7 @@
 This directory contains the initial Zig-based runtime scaffolding intended to
 mirror the existing Nim runtime under `frameos/src/`. The current implementation
 now includes basic runtime primitives for configuration, logging, metrics,
-driver boundaries, scheduler startup, and a no-op event loop.
+driver boundaries, scheduler startup, server boundary, and a no-op event loop.
 
 ## Layout
 - `build.zig`: Zig build definition for the runtime stub.
@@ -14,6 +14,7 @@ driver boundaries, scheduler startup, and a no-op event loop.
 - `src/runtime/metrics.zig`: Metrics startup boundary (stub).
 - `src/runtime/platform.zig`: Driver boundary interface (stub init).
 - `src/runtime/scheduler.zig`: Scheduler startup boundary (stub).
+- `src/runtime/server.zig`: Server startup boundary (stub).
 - `src/runtime/event_loop.zig`: No-op render/event loop primitive.
 
 ## Nim → Zig mapping (initial)

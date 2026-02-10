@@ -5,6 +5,7 @@ const logger_mod = @import("runtime/logger.zig");
 const metrics_mod = @import("runtime/metrics.zig");
 const platform_mod = @import("runtime/platform.zig");
 const scheduler_mod = @import("runtime/scheduler.zig");
+const server_mod = @import("runtime/server.zig");
 
 pub fn startFrameOS() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -26,6 +27,9 @@ pub fn startFrameOS() !void {
 
     const scheduler = scheduler_mod.RuntimeScheduler.init(logger);
     try scheduler.startup();
+
+    const server = server_mod.RuntimeServer.init(logger, config);
+    try server.startup();
 
     const loop = event_loop_mod.RuntimeEventLoop.init(logger, std.time.ns_per_s);
     try loop.run();

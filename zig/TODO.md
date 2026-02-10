@@ -32,6 +32,10 @@
   - [x] Added `runtime/metrics.zig` and `runtime/scheduler.zig` stubs to extend boot-sequence parity.
   - [x] Wired `startFrameOS` to initialize metrics and scheduler before entering the event loop.
 
+- **Iteration 6:**
+  - [x] Added `runtime/server.zig` startup interface stub for host/port/network-check wiring.
+  - [x] Wired `startFrameOS` to initialize server boundary after scheduler startup.
+
 ---
 
 ## Completed
@@ -42,6 +46,7 @@
 - [x] **Establish build + run scaffolding**: create a minimal Zig `main` that mirrors `frameos/src/frameos.nim` boot flow (stubbed).
 - [x] **Port config/runtime primitives**: identify async/event loop equivalents and hardware abstraction boundaries.
 - [x] Add `runtime/metrics.zig` + `runtime/scheduler.zig` stubs to mirror Nim startup sequence more closely.
+- [x] Introduce `runtime/server.zig` interface stub and call it after scheduler wiring.
 
 ---
 
@@ -49,7 +54,7 @@
 1. [ ] **Select and document Zig libs** needed for async I/O, filesystem, networking, and GPIO/display drivers (if any).
 2. [ ] **Decide parity checkpoints**: e.g., boot → logging → config load → no-op render loop.
 3. [ ] **Add a migration checklist** per subsystem (apps, drivers, system services).
-4. [ ] Introduce a `runtime/server.zig` interface stub and call it after scheduler wiring.
+4. [ ] Define a minimal runtime health-check contract (`runtime/health.zig`) and wire it after server startup.
 
 ---
 
