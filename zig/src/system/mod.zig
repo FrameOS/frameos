@@ -74,6 +74,7 @@ test "default system startup scene is index when network check enabled" {
         .debug = false,
         .metrics_interval_s = 60,
         .network_check = true,
+        .network_probe_mode = .auto,
         .device = "simulator",
         .startup_scene = "clock",
     });
@@ -91,6 +92,7 @@ test "default system startup scene is hotspot when network check disabled" {
         .debug = false,
         .metrics_interval_s = 60,
         .network_check = false,
+        .network_probe_mode = .auto,
         .device = "simulator",
         .startup_scene = "clock",
     });
@@ -108,6 +110,7 @@ test "startup state is booting when network check enabled" {
         .debug = false,
         .metrics_interval_s = 60,
         .network_check = true,
+        .network_probe_mode = .auto,
         .device = "simulator",
         .startup_scene = "clock",
     });
@@ -125,6 +128,7 @@ test "startup state is degraded network when network check disabled" {
         .debug = false,
         .metrics_interval_s = 60,
         .network_check = false,
+        .network_probe_mode = .auto,
         .device = "simulator",
         .startup_scene = "clock",
     });

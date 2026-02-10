@@ -6,8 +6,15 @@ pub const RuntimeConfig = struct {
     debug: bool,
     metrics_interval_s: u16,
     network_check: bool,
+    network_probe_mode: NetworkProbeMode,
     device: []const u8,
     startup_scene: []const u8,
+};
+
+pub const NetworkProbeMode = enum {
+    auto,
+    force_ok,
+    force_failed,
 };
 
 pub fn loadConfig(allocator: std.mem.Allocator) !RuntimeConfig {
@@ -26,6 +33,7 @@ pub fn loadConfig(allocator: std.mem.Allocator) !RuntimeConfig {
         .debug = parseEnvBool("FRAME_DEBUG", false),
         .metrics_interval_s = parseEnvInt(u16, "FRAME_METRICS_INTERVAL", 60),
         .network_check = parseEnvBool("FRAME_NETWORK_CHECK", true),
+        .network_probe_mode = parseEnvProbeMode("FRAME_NETWORK_PROBE_MODE", .auto),
         .device = device,
         .startup_scene = startup_scene,
     };
@@ -72,6 +80,36 @@ fn parseEnvBool(key: []const u8, default: bool) bool {
     return parseBoolOrDefault(value, default);
 }
 
+fn parseEnvProbeMode(key: []const u8, default: NetworkProbeMode) NetworkProbeMode {
+    var buf: [32]u8 = undefined;
+    const value = std.process.getEnvVar(&buf, key) catch return default;
+    return parseProbeModeOrDefault(value, default);
+}
+
+pub fn parseProbeModeOrDefault(value: ?[]const u8, default: NetworkProbeMode) NetworkProbeMode {
+    const raw = value orelse return default;
+
+    if (std.ascii.eqlIgnoreCase(raw, "auto")) {
+        return .auto;
+    }
+    if (std.ascii.eqlIgnoreCase(raw, "force-ok") or std.ascii.eqlIgnoreCase(raw, "force_ok") or std.ascii.eqlIgnoreCase(raw, "ok")) {
+        return .force_ok;
+    }
+    if (std.ascii.eqlIgnoreCase(raw, "force-failed") or std.ascii.eqlIgnoreCase(raw, "force_failed") or std.ascii.eqlIgnoreCase(raw, "failed")) {
+        return .force_failed;
+    }
+
+    return default;
+}
+
+pub fn probeModeLabel(mode: NetworkProbeMode) []const u8 {
+    return switch (mode) {
+        .auto => "auto",
+        .force_ok => "force-ok",
+        .force_failed => "force-failed",
+    };
+}
+
 test "parse bool defaults and values" {
     const testing = std.testing;
 
@@ -88,4 +126,15 @@ test "parse int defaults and invalid values" {
     try testing.expectEqual(@as(u16, 99), parseIntOrDefault(u16, "99", 10));
     try testing.expectEqual(@as(u16, 10), parseIntOrDefault(u16, "oops", 10));
     try testing.expectEqual(@as(u16, 10), parseIntOrDefault(u16, null, 10));
+}
+
+test "parse network probe mode values and defaults" {
+    const testing = std.testing;
+
+    try testing.expectEqual(NetworkProbeMode.auto, parseProbeModeOrDefault("auto", .force_failed));
+    try testing.expectEqual(NetworkProbeMode.force_ok, parseProbeModeOrDefault("force-ok", .auto));
+    try testing.expectEqual(NetworkProbeMode.force_ok, parseProbeModeOrDefault("OK", .auto));
+    try testing.expectEqual(NetworkProbeMode.force_failed, parseProbeModeOrDefault("force_failed", .auto));
+    try testing.expectEqual(NetworkProbeMode.auto, parseProbeModeOrDefault("invalid", .auto));
+    try testing.expectEqual(NetworkProbeMode.force_failed, parseProbeModeOrDefault(null, .force_failed));
 }

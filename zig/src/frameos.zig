@@ -36,7 +36,7 @@ pub fn renderBootRoutePayloads(
         .health = try server.healthRoute(health_snapshot).renderJson(health_buf),
         .scenes = try server.scenesRoute(scene_registry).renderJson(scenes_buf),
         .startup_scene = try server.sceneByIdRoute(scene_registry, scene_registry.startup_scene).renderJson(startup_scene_buf),
-        .hotspot_status = try server.hotspotPortalStatusRoute(system_services.hotspot, system_services.portal, startup_state).renderJson(hotspot_status_buf),
+        .hotspot_status = try server.hotspotPortalStatusRoute(system_services.hotspot, system_services.portal, startup_state, system_mod.startupSceneLabel(system_services.hotspot.startup_scene)).renderJson(hotspot_status_buf),
         .device_summary = try server.deviceSummaryRoute(system_services.device_utils, scene_registry.startup_scene, startup_state).renderJson(device_summary_buf),
     };
 }
@@ -85,11 +85,20 @@ pub fn startFrameOS() !void {
     const server = server_mod.RuntimeServer.init(logger, config);
     try server.startup();
 
-    const network_probe = network_probe_mod.RuntimeNetworkProbe.init(logger, config.network_check);
+    const network_probe = network_probe_mod.RuntimeNetworkProbe.init(logger, config.network_check, config.network_probe_mode);
     try network_probe.startup();
 
     health.markServerStarted();
     const probe_outcome = try network_probe.probe(.{ .host = config.frame_host, .port = config.frame_port });
+    try logger.info(
+        "{\"event\":\"boot.network_probe\",\"target\":{\"host\":\"{s}\",\"port\":{}},\"mode\":\"{s}\",\"outcome\":\"{s}\"}",
+        .{
+            config.frame_host,
+            config.frame_port,
+            config_mod.probeModeLabel(config.network_probe_mode),
+            network_probe_mod.outcomeLabel(probe_outcome),
+        },
+    );
     health.recordNetworkProbe(probe_outcome != .failed);
 
     const health_snapshot = health.snapshot();
@@ -169,6 +178,7 @@ test "boot payload integration captures health and scene snapshots" {
         .debug = false,
         .metrics_interval_s = 60,
         .network_check = true,
+        .network_probe_mode = .auto,
         .device = "simulator",
         .startup_scene = "unknown-scene",
     });
@@ -179,6 +189,7 @@ test "boot payload integration captures health and scene snapshots" {
         .debug = false,
         .metrics_interval_s = 30,
         .network_check = true,
+        .network_probe_mode = .auto,
         .device = "simulator",
         .startup_scene = "unknown-scene",
     };
@@ -219,6 +230,7 @@ test "boot payload integration captures health and scene snapshots" {
     try testing.expect(std.mem.indexOf(u8, payloads.scenes, "\"id\":\"clock\"") != null);
     try testing.expect(std.mem.indexOf(u8, payloads.startup_scene, "\"found\":false") != null);
     try testing.expect(std.mem.indexOf(u8, payloads.startup_scene, "\"code\":\"scene_not_found\"") != null);
+    try testing.expect(std.mem.indexOf(u8, payloads.hotspot_status, "\"startupScene\":\"index\"") != null);
     try testing.expect(std.mem.indexOf(u8, payloads.hotspot_status, "\"startupState\":\"degraded-network\"") != null);
     try testing.expect(std.mem.indexOf(u8, payloads.hotspot_status, "\"hotspotActive\":false") != null);
     try testing.expect(std.mem.indexOf(u8, payloads.device_summary, "\"startupScene\":\"unknown-scene\"") != null);
@@ -236,6 +248,7 @@ test "boot payload integration captures successful startup scene payload" {
         .debug = false,
         .metrics_interval_s = 60,
         .network_check = true,
+        .network_probe_mode = .auto,
         .device = "simulator",
         .startup_scene = "weather",
     });
@@ -246,6 +259,7 @@ test "boot payload integration captures successful startup scene payload" {
         .debug = false,
         .metrics_interval_s = 30,
         .network_check = true,
+        .network_probe_mode = .auto,
         .device = "simulator",
         .startup_scene = "weather",
     };

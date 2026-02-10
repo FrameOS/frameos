@@ -65,12 +65,14 @@ pub const RuntimeServer = struct {
         hotspot: system_mod.HotspotActivator,
         portal: system_mod.WifiHotspotPortalBoundary,
         startup_state: system_mod.SystemStartupState,
+        startup_scene: []const u8,
     ) HotspotPortalStatusRoute {
         return .{
             .server = self,
             .hotspot = hotspot,
             .portal = portal,
             .startup_state = startup_state,
+            .startup_scene = startup_scene,
         };
     }
 
@@ -171,6 +173,7 @@ pub const HotspotPortalStatusRoute = struct {
     hotspot: system_mod.HotspotActivator,
     portal: system_mod.WifiHotspotPortalBoundary,
     startup_state: system_mod.SystemStartupState,
+    startup_scene: []const u8,
 
     pub fn renderJson(self: HotspotPortalStatusRoute, buffer: []u8) ![]const u8 {
         var portal_url_buf: [128]u8 = undefined;
@@ -179,10 +182,11 @@ pub const HotspotPortalStatusRoute = struct {
         var stream = std.io.fixedBufferStream(buffer);
         const writer = stream.writer();
         try writer.print(
-            "{\"host\":\"{s}\",\"port\":{},\"startupState\":\"{s}\",\"hotspotActive\":{},\"portal\":{\"url\":\"{s}\"}}",
+            "{\"host\":\"{s}\",\"port\":{},\"startupScene\":\"{s}\",\"startupState\":\"{s}\",\"hotspotActive\":{},\"portal\":{\"url\":\"{s}\"}}",
             .{
                 self.server.config.frame_host,
                 self.server.config.frame_port,
+                self.startup_scene,
                 system_mod.startupStateLabel(self.startup_state),
                 self.hotspot.shouldActivateHotspot(),
                 portal_url,
@@ -249,6 +253,7 @@ test "health route renders snapshot JSON payload" {
         .debug = false,
         .metrics_interval_s = 60,
         .network_check = true,
+        .network_probe_mode = .auto,
         .device = "simulator",
         .startup_scene = "clock",
     });
@@ -259,6 +264,7 @@ test "health route renders snapshot JSON payload" {
         .debug = false,
         .metrics_interval_s = 30,
         .network_check = true,
+        .network_probe_mode = .auto,
         .device = "simulator",
         .startup_scene = "clock",
     });
@@ -293,6 +299,7 @@ test "health route renders degraded payload when network probe fails" {
         .debug = false,
         .metrics_interval_s = 60,
         .network_check = true,
+        .network_probe_mode = .auto,
         .device = "simulator",
         .startup_scene = "clock",
     });
@@ -303,6 +310,7 @@ test "health route renders degraded payload when network probe fails" {
         .debug = false,
         .metrics_interval_s = 30,
         .network_check = true,
+        .network_probe_mode = .auto,
         .device = "simulator",
         .startup_scene = "clock",
     });
@@ -335,6 +343,7 @@ test "scenes route renders scene discovery payload" {
         .debug = false,
         .metrics_interval_s = 60,
         .network_check = true,
+        .network_probe_mode = .auto,
         .device = "simulator",
         .startup_scene = "clock",
     });
@@ -345,6 +354,7 @@ test "scenes route renders scene discovery payload" {
         .debug = false,
         .metrics_interval_s = 30,
         .network_check = true,
+        .network_probe_mode = .auto,
         .device = "simulator",
         .startup_scene = "clock",
     };
@@ -371,6 +381,7 @@ test "scene by id route renders successful scene payload" {
         .debug = false,
         .metrics_interval_s = 60,
         .network_check = true,
+        .network_probe_mode = .auto,
         .device = "simulator",
         .startup_scene = "clock",
     });
@@ -381,6 +392,7 @@ test "scene by id route renders successful scene payload" {
         .debug = false,
         .metrics_interval_s = 30,
         .network_check = true,
+        .network_probe_mode = .auto,
         .device = "simulator",
         .startup_scene = "clock",
     });
@@ -406,6 +418,7 @@ test "scene by id route renders error payload for unknown scene id" {
         .debug = false,
         .metrics_interval_s = 60,
         .network_check = true,
+        .network_probe_mode = .auto,
         .device = "simulator",
         .startup_scene = "clock",
     });
@@ -416,6 +429,7 @@ test "scene by id route renders error payload for unknown scene id" {
         .debug = false,
         .metrics_interval_s = 30,
         .network_check = true,
+        .network_probe_mode = .auto,
         .device = "simulator",
         .startup_scene = "clock",
     });
@@ -441,6 +455,7 @@ test "hotspot status route exposes startup state and captive portal url" {
         .debug = false,
         .metrics_interval_s = 30,
         .network_check = false,
+        .network_probe_mode = .auto,
         .device = "simulator",
         .startup_scene = "clock",
     });
@@ -451,6 +466,7 @@ test "hotspot status route exposes startup state and captive portal url" {
         .debug = false,
         .metrics_interval_s = 30,
         .network_check = false,
+        .network_probe_mode = .auto,
         .device = "simulator",
         .startup_scene = "clock",
     };
@@ -465,12 +481,12 @@ test "hotspot status route exposes startup state and captive portal url" {
         .frame_port = config.frame_port,
     });
 
-    const route = server.hotspotPortalStatusRoute(hotspot, portal, .degraded_network);
+    const route = server.hotspotPortalStatusRoute(hotspot, portal, .degraded_network, "wifi-hotspot");
     var buf: [256]u8 = undefined;
     const payload = try route.renderJson(&buf);
 
     try testing.expectEqualStrings(
-        "{\"host\":\"10.42.0.1\",\"port\":8787,\"startupState\":\"degraded-network\",\"hotspotActive\":true,\"portal\":{\"url\":\"http://10.42.0.1:8787/\"}}",
+        "{\"host\":\"10.42.0.1\",\"port\":8787,\"startupScene\":\"wifi-hotspot\",\"startupState\":\"degraded-network\",\"hotspotActive\":true,\"portal\":{\"url\":\"http://10.42.0.1:8787/\"}}",
         payload,
     );
 }
@@ -485,6 +501,7 @@ test "device summary route renders device payload" {
         .debug = false,
         .metrics_interval_s = 30,
         .network_check = false,
+        .network_probe_mode = .auto,
         .device = "simulator",
         .startup_scene = "clock",
     });
@@ -495,6 +512,7 @@ test "device summary route renders device payload" {
         .debug = false,
         .metrics_interval_s = 30,
         .network_check = false,
+        .network_probe_mode = .auto,
         .device = "simulator",
         .startup_scene = "clock",
     };

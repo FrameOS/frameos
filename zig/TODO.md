@@ -94,6 +94,11 @@
   - [x] Extended `/system/device` payload contract with `startupScene` + `startupState` context and threaded these fields through boot payload rendering.
   - [x] Added route-level test coverage for degraded `/health` payload JSON (`networkOk=false`, `startupState=degraded-network`) plus updated device route and boot integration assertions.
 
+- **Iteration 17:**
+  - [x] Added `FRAME_NETWORK_PROBE_MODE` config parsing (`auto` / `force-ok` / `force-failed`) and threaded probe mode labels through boot/startup logging.
+  - [x] Extended `runtime/network_probe.zig` with explicit probe-mode behavior so deterministic success/failure simulation no longer depends on host-name heuristics.
+  - [x] Added boot-level `boot.network_probe` log payload fields (target host/port, mode, outcome) and expanded `/system/hotspot` route payload with `startupScene` context.
+
 ## Completed
 - [x] Create `zig/` directory.
 - [x] Create `zig/TODO.md` with loop structure and initial plan.
@@ -128,12 +133,16 @@
 - [x] Thread live network probe outcomes (`networkOk=false`) into startup-state transitions so degraded readiness is explicit when probes fail.
 - [x] Add a boot integration assertion for `/scenes/:id` success payload selection when configured startup scene exists.
 
+- [x] Add boot-level logging fields for network-probe target/outcome so startup diagnostics can correlate `/health` degradation with probe metadata.
+- [x] Add a probe-mode config toggle (stub strategy) to support deterministic success/failure simulation without encoding host-name heuristics.
+- [x] Extend `/system/hotspot` payload contract with startup-scene context to align diagnostics shape with `/system/device`.
+
 ---
 
 ## Next Actions (priority order)
-1. [ ] Add boot-level logging fields for network-probe target/outcome so startup diagnostics can correlate `/health` degradation with probe metadata.
-2. [ ] Add a probe-mode config toggle (stub strategy) to support deterministic success/failure simulation without encoding host-name heuristics.
-3. [ ] Extend `/system/hotspot` payload contract with startup-scene context to align diagnostics shape with `/system/device`.
+1. [ ] Add route-level JSON coverage for `/system/hotspot` startup-scene context under both index and wifi-hotspot startup-scene variants.
+2. [ ] Thread network-probe mode and probe outcome summary into `/health` payload metadata for at-a-glance diagnostics.
+3. [ ] Add config-level tests that exercise `loadConfig` parsing for `FRAME_NETWORK_PROBE_MODE` environment values.
 
 ## Backlog / Later
 - [ ] Port individual apps incrementally (start with simplest).

@@ -38,6 +38,7 @@ test "runner resolves startup scene manifest through registry" {
         .debug = false,
         .metrics_interval_s = 60,
         .network_check = true,
+        .network_probe_mode = .auto,
         .device = "simulator",
         .startup_scene = "calendar",
     });

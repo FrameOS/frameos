@@ -140,6 +140,7 @@ test "snapshot is degraded before server startup" {
         .debug = false,
         .metrics_interval_s = 60,
         .network_check = true,
+        .network_probe_mode = .auto,
         .device = "simulator",
         .startup_scene = "clock",
     });
@@ -164,6 +165,7 @@ test "snapshot progresses startup state from booting to ready once readiness pas
         .debug = false,
         .metrics_interval_s = 60,
         .network_check = true,
+        .network_probe_mode = .auto,
         .device = "simulator",
         .startup_scene = "clock",
     });
@@ -193,6 +195,7 @@ test "snapshot can be ok without network requirement while keeping degraded stat
         .debug = false,
         .metrics_interval_s = 60,
         .network_check = false,
+        .network_probe_mode = .auto,
         .device = "simulator",
         .startup_scene = "clock",
     });
@@ -220,6 +223,7 @@ test "startup state becomes degraded-network when network probe fails" {
         .debug = false,
         .metrics_interval_s = 60,
         .network_check = true,
+        .network_probe_mode = .auto,
         .device = "simulator",
         .startup_scene = "clock",
     });

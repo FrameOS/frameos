@@ -77,6 +77,7 @@ test "registry keeps configured startup scene when present" {
         .debug = false,
         .metrics_interval_s = 60,
         .network_check = true,
+        .network_probe_mode = .auto,
         .device = "simulator",
         .startup_scene = "weather",
     });
@@ -95,6 +96,7 @@ test "registry falls back to first built-in scene when startup scene missing" {
         .debug = false,
         .metrics_interval_s = 60,
         .network_check = true,
+        .network_probe_mode = .auto,
         .device = "simulator",
         .startup_scene = "custom-scene",
     });
@@ -113,6 +115,7 @@ test "registry lists built-in scene identifiers" {
         .debug = false,
         .metrics_interval_s = 60,
         .network_check = true,
+        .network_probe_mode = .auto,
         .device = "simulator",
         .startup_scene = "clock",
     });
@@ -133,6 +136,7 @@ test "registry loads scene manifest through apps boundary" {
         .debug = false,
         .metrics_interval_s = 60,
         .network_check = true,
+        .network_probe_mode = .auto,
         .device = "simulator",
         .startup_scene = "clock",
     });
@@ -153,6 +157,7 @@ test "registry returns manifest result errors for unknown scenes" {
         .debug = false,
         .metrics_interval_s = 60,
         .network_check = true,
+        .network_probe_mode = .auto,
         .device = "simulator",
         .startup_scene = "clock",
     });
