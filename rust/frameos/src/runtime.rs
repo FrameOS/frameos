@@ -7,6 +7,10 @@ use crate::scenes::SceneCatalog;
 use crate::server::Server;
 use std::io;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
 
 #[derive(Debug)]
 pub enum RuntimeError {
@@ -83,7 +87,7 @@ impl Runtime {
         }));
     }
 
-    pub fn start(&self) -> io::Result<()> {
+    pub fn run_until_stopped(&self, shutdown: Arc<AtomicBool>) -> io::Result<()> {
         logging::log_event(serde_json::json!({
             "event": "runtime:start",
             "config": {
@@ -106,6 +110,57 @@ impl Runtime {
             "apps_loaded": self.apps.as_ref().map(|apps| apps.apps().len()).unwrap_or(0),
             "scenes_loaded": self.scenes.as_ref().map(|scenes| scenes.scenes().len()).unwrap_or(0),
         }));
+
+        while !shutdown.load(Ordering::SeqCst) {
+            thread::sleep(Duration::from_millis(200));
+        }
+
+        logging::log_event(serde_json::json!({
+            "event": "runtime:stop",
+            "server": self.server.endpoint(),
+            "metrics_interval_seconds": self.metrics.interval_seconds(),
+            "apps_loaded": self.apps.as_ref().map(|apps| apps.apps().len()).unwrap_or(0),
+            "scenes_loaded": self.scenes.as_ref().map(|scenes| scenes.scenes().len()).unwrap_or(0),
+        }));
         Ok(())
+    }
+
+    pub fn start(&self) -> io::Result<()> {
+        let shutdown = Arc::new(AtomicBool::new(false));
+        shutdown.store(true, Ordering::SeqCst);
+        self.run_until_stopped(shutdown)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    use std::thread;
+    use std::time::Duration;
+
+    #[test]
+    fn run_until_stopped_returns_after_shutdown_signal() {
+        let runtime = Runtime::new(FrameOSConfig::default());
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let signal = Arc::clone(&shutdown);
+
+        let handle = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(50));
+            signal.store(true, Ordering::SeqCst);
+        });
+
+        runtime
+            .run_until_stopped(shutdown)
+            .expect("runtime loop should exit cleanly");
+
+        handle.join().expect("shutdown thread should join");
+    }
+
+    #[test]
+    fn start_completes_for_scaffolding_mode() {
+        let runtime = Runtime::new(FrameOSConfig::default());
+        runtime.start().expect("start should return for now");
     }
 }

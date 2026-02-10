@@ -1,4 +1,7 @@
 use std::env;
+use std::io;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use frameos::config::FrameOSConfig;
 use frameos::interfaces::{command_contract_json, Cli, Command};
@@ -50,6 +53,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let runtime = build_runtime(&cli)?;
     logging::debug("FrameOS runtime prepared.");
-    runtime.start()?;
+
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let signal_shutdown = Arc::clone(&shutdown);
+    ctrlc::set_handler(move || {
+        signal_shutdown.store(true, Ordering::SeqCst);
+    })
+    .map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::Other,
+            format!("failed to register ctrl-c handler: {error}"),
+        )
+    })?;
+
+    runtime.run_until_stopped(shutdown)?;
     Ok(())
 }

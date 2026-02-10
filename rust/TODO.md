@@ -62,11 +62,18 @@
 - Added CLI/contract tests to lock parser behavior and reserved contract surface for follow-up iterations.
 
 
+### Iteration 9 (graceful shutdown loop wiring)
+- Reworked the runtime lifecycle to run in a shutdown-aware loop (`run_until_stopped`) and emit `runtime:stop` as part of the actual lifecycle path rather than only via static contract docs.
+- Added Ctrl+C signal handling in `main.rs` via `ctrlc` so `frameos run` now transitions through `runtime:start` → `runtime:ready` → `runtime:stop` under a real termination signal.
+- Added runtime tests that exercise both explicit shutdown signaling and the temporary scaffolding `start()` path so lifecycle behavior remains regression-tested as server transport work lands.
+
+
+
 ## Next up (small, actionable)
-1. Implement graceful runtime shutdown and emit `runtime:stop` from the real lifecycle path.
-2. Add parity/golden tests that compare Nim vs Rust manifest/event outputs for known fixtures.
-3. Start server transport implementation (HTTP health endpoint + websocket event fanout stub).
-4. Define top-level Cargo workspace timing once a second Rust crate is introduced.
+1. Add parity/golden tests that compare Nim vs Rust manifest/event outputs for known fixtures.
+2. Start server transport implementation (HTTP health endpoint + websocket event fanout stub).
+3. Define top-level Cargo workspace timing once a second Rust crate is introduced.
+4. Extend runtime loop with periodic metrics ticks + heartbeat events so shutdown-safe long-running behavior can be verified.
 
 ## Checklist
 
@@ -89,7 +96,7 @@
 - [x] Implement config loading and validation.
 - [x] Implement core domain models.
 - [x] Implement I/O adapters (file/network/queue/etc.).
-- [ ] Implement main application loop / services.
+- [x] Implement main application loop / services.
 - [x] Add logging and error handling scaffolding.
 - [x] Add tests for core logic and adapters.
 
