@@ -19,6 +19,8 @@ Current commands are implemented in `src/interfaces.rs` and exercised by `src/ma
 - `--scenes <path>`: preloads and validates a scene manifest.
 - `--apps <path>`: preloads and validates an app manifest.
 - `--event-log <path>`: appends the same JSON-line event envelopes emitted to stdout into a durable file sink for post-mortem analysis.
+- `config.log_to_file`: optional config-level default file sink path used when `--event-log` is omitted.
+- Precedence: `--event-log` overrides `config.log_to_file` when both are supplied.
 
 ## Event stream contract
 

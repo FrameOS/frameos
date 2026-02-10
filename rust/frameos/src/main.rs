@@ -10,9 +10,7 @@ use frameos::logging::{
 };
 use frameos::runtime::{Runtime, RuntimeError};
 
-fn build_runtime(cli: &Cli) -> Result<Runtime, RuntimeError> {
-    let config = FrameOSConfig::load_with_override(cli.config_path.as_deref())
-        .map_err(RuntimeError::Config)?;
+fn build_runtime(cli: &Cli, config: FrameOSConfig) -> Result<Runtime, RuntimeError> {
     let mut runtime = Runtime::new(config);
 
     if let Some(path) = &cli.scene_manifest {
@@ -25,8 +23,9 @@ fn build_runtime(cli: &Cli) -> Result<Runtime, RuntimeError> {
     Ok(runtime)
 }
 
-fn build_sink(cli: &Cli) -> Result<Arc<dyn JsonLineSink>, RuntimeError> {
-    if let Some(path) = &cli.event_log_path {
+fn build_sink(cli: &Cli, config: &FrameOSConfig) -> Result<Arc<dyn JsonLineSink>, RuntimeError> {
+    let event_log_path = cli.event_log_path.as_ref().or(config.log_to_file.as_ref());
+    if let Some(path) = event_log_path {
         let stdout_sink = Arc::new(StdoutJsonLineSink) as Arc<dyn JsonLineSink>;
         let file_sink = Arc::new(FileJsonLineSink::append(path).map_err(RuntimeError::Io)?)
             as Arc<dyn JsonLineSink>;
@@ -48,8 +47,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             return Ok(());
         }
         Command::Check => {
-            let sink = build_sink(&cli)?;
-            match build_runtime(&cli) {
+            let config = FrameOSConfig::load_with_override(cli.config_path.as_deref())
+                .map_err(RuntimeError::Config)?;
+            let sink = build_sink(&cli, &config)?;
+            match build_runtime(&cli, config) {
                 Ok(runtime) => {
                     runtime.check_with_sink(sink.as_ref());
                     println!("FrameOS check: passed 🎉");
@@ -70,8 +71,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Command::Run => {}
     }
 
-    let runtime = build_runtime(&cli)?;
-    let sink = build_sink(&cli)?;
+    let config = FrameOSConfig::load_with_override(cli.config_path.as_deref())
+        .map_err(RuntimeError::Config)?;
+    let sink = build_sink(&cli, &config)?;
+    let runtime = build_runtime(&cli, config)?;
     logging::debug("FrameOS runtime prepared.");
 
     let shutdown = Arc::new(AtomicBool::new(false));

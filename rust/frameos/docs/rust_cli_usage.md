@@ -12,6 +12,9 @@ From `rust/frameos/`:
   - `cargo run -- check --config ./tests/fixtures/frame-valid.json --scenes ./tests/fixtures/scenes-valid.json --apps ./tests/fixtures/apps-valid.json`
 - Persist emitted JSON-line events while checking/running:
   - `cargo run -- check --config ./tests/fixtures/frame-valid.json --event-log ./runtime-events.jsonl`
+- Config-driven event logs (no CLI flag) using `frame.json`:
+  - set `"log_to_file": "/var/log/frameos/runtime-events.jsonl"` and run `cargo run -- check --config ./frame.json`
+- CLI `--event-log` takes precedence over `config.log_to_file` when both are set.
 - Print machine-readable command/event contract JSON:
   - `cargo run -- contract`
 - Start runtime (Ctrl+C to stop):

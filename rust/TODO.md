@@ -118,11 +118,18 @@
 - Extended CLI parsing and contract metadata with a new `--event-log <path>` flag for both `run` and `check`, and wired `main.rs` to build composite sinks so check/run/failure events all flow through the selected sink set.
 - Added parity-oriented tests: contract/CLI coverage for the new flag, runtime parity coverage asserting `check --event-log` writes `runtime:check_ok` JSON lines to disk, and a runtime unit test that verifies emitted event fields match between stdout envelopes and websocket fanout payload fields.
 - Updated external interface and CLI usage docs to include durable event-log workflows for service supervision and post-mortem debugging.
+
+
+### Iteration 17 (full lifecycle transport parity assertions + config-driven sink routing)
+- Added deterministic runtime transport tests that assert stdout JSON-line payload fields remain exactly aligned with websocket envelope `fields` across the full lifecycle event set (`runtime:start`, `runtime:ready`, `runtime:heartbeat`, `runtime:metrics_tick`, `runtime:stop`).
+- Implemented config-driven sink routing in `src/main.rs`: `config.log_to_file` now enables durable event logging without CLI flags, while `--event-log` cleanly overrides the config default.
+- Extended parity tests with fixture-backed checks for `config.log_to_file` behavior and CLI-over-config precedence, plus contract metadata/docs updates describing event-log routing semantics.
 ## Next up (small, actionable)
-1. Expand stdout/websocket compatibility assertions from `runtime:start` to the full lifecycle set (`runtime:ready`, `runtime:heartbeat`, `runtime:metrics_tick`, `runtime:stop`) under deterministic transport tests.
-2. Add CLI/docs examples for daemonized `run` supervision (systemd/OpenRC templates, health probe retries, shutdown signaling).
-3. Start scoping renderer/device-driver parity slices so migration cutover gates can move from documentation into executable checks.
-4. Evaluate config-driven sink routing (`log_to_file` parity with Nim config) to reduce operator CLI flag requirements.
+1. Add CLI/docs examples for daemonized `run` supervision (systemd/OpenRC templates, health probe retries, shutdown signaling).
+2. Start scoping renderer/device-driver parity slices so migration cutover gates can move from documentation into executable checks.
+3. Add executable parity checks for renderer/driver contract stubs (initial golden fixtures + TODO-gated assertions).
+4. Evaluate introducing deterministic timestamp hooks for transport tests to make websocket/stdout parity checks less wall-clock sensitive.
+
 
 ## Checklist
 

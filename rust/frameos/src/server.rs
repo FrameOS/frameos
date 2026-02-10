@@ -724,6 +724,105 @@ mod tests {
     }
 
     #[test]
+    fn websocket_stream_preserves_full_lifecycle_field_shapes() {
+        let server = Server {
+            host: "127.0.0.1".to_string(),
+            port: 0,
+        };
+        let transport = ServerTransport::start(
+            &server,
+            ServerHealthSnapshot {
+                apps_loaded: 0,
+                scenes_loaded: 0,
+                metrics_interval_seconds: 60,
+            },
+        )
+        .expect("server should start");
+
+        let mut stream = TcpStream::connect(transport.local_addr()).expect("connect should work");
+        stream
+            .set_read_timeout(Some(Duration::from_millis(100)))
+            .expect("set read timeout should work");
+        let handshake = format!(
+            "GET {WEBSOCKET_PATH} HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
+        );
+        stream
+            .write_all(handshake.as_bytes())
+            .expect("handshake write should work");
+
+        let mut reader = BufReader::new(stream.try_clone().expect("clone should work"));
+        let mut status = String::new();
+        reader
+            .read_line(&mut status)
+            .expect("status should be readable");
+        assert!(status.starts_with("HTTP/1.1 101"));
+        loop {
+            let mut line = String::new();
+            reader
+                .read_line(&mut line)
+                .expect("header line should be readable");
+            if line == "\r\n" || line.is_empty() {
+                break;
+            }
+        }
+
+        let fanout = transport.fanout();
+        for _ in 0..20 {
+            if fanout.websocket_client_count() == 1 {
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(fanout.websocket_client_count(), 1);
+        let lifecycle_events = vec![
+            ("runtime:start", json!({"s": 1})),
+            ("runtime:ready", json!({"r": 1})),
+            ("runtime:heartbeat", json!({"h": 1})),
+            ("runtime:metrics_tick", json!({"m": 1})),
+            ("runtime:stop", json!({"x": 1})),
+        ];
+
+        for (event, fields) in &lifecycle_events {
+            fanout.publish_with_fields(event, fields.clone());
+        }
+
+        for (event, fields) in lifecycle_events {
+            let mut header = [0u8; 2];
+            let mut header_read = false;
+            for _ in 0..20 {
+                match stream.read_exact(&mut header) {
+                    Ok(()) => {
+                        header_read = true;
+                        break;
+                    }
+                    Err(error)
+                        if error.kind() == io::ErrorKind::WouldBlock
+                            || error.kind() == io::ErrorKind::TimedOut =>
+                    {
+                        thread::sleep(Duration::from_millis(25));
+                    }
+                    Err(error) => panic!("frame header should be readable: {error}"),
+                }
+            }
+            assert!(header_read, "timed out waiting for websocket frame header");
+            assert_eq!(header[0], 0x81);
+
+            let payload_len = (header[1] & 0x7F) as usize;
+            let mut payload = vec![0u8; payload_len];
+            stream
+                .read_exact(&mut payload)
+                .expect("payload should be readable");
+
+            let message: serde_json::Value =
+                serde_json::from_slice(&payload).expect("payload should be valid json");
+            assert_eq!(message["event"], json!(event));
+            assert_eq!(message["fields"], fields);
+        }
+
+        transport.stop().expect("transport should stop cleanly");
+    }
+
+    #[test]
     fn websocket_ping_receives_pong_with_same_payload() {
         let server = Server {
             host: "127.0.0.1".to_string(),
@@ -741,7 +840,7 @@ mod tests {
 
         let mut stream = TcpStream::connect(transport.local_addr()).expect("connect should work");
         stream
-            .set_read_timeout(Some(Duration::from_secs(2)))
+            .set_read_timeout(Some(Duration::from_millis(100)))
             .expect("set read timeout should work");
         let handshake = format!(
             "GET {WEBSOCKET_PATH} HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"

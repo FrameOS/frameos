@@ -110,11 +110,13 @@ pub fn command_contract_json() -> serde_json::Value {
         "commands": {
             "run": {
                 "description": "Boot FrameOS runtime and optionally preload manifests.",
-                "flags": ["--config <path>", "--scenes <path>", "--apps <path>", "--event-log <path>"]
+                "flags": ["--config <path>", "--scenes <path>", "--apps <path>", "--event-log <path>"],
+                "event_log_routing": "--event-log overrides config.log_to_file when both are set"
             },
             "check": {
                 "description": "Validate that config and optional manifests can be loaded.",
-                "flags": ["--config <path>", "--scenes <path>", "--apps <path>", "--event-log <path>"]
+                "flags": ["--config <path>", "--scenes <path>", "--apps <path>", "--event-log <path>"],
+                "event_log_routing": "--event-log overrides config.log_to_file when both are set"
             },
             "contract": {
                 "description": "Print the runtime CLI/event contract as JSON.",
