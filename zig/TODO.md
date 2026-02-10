@@ -88,6 +88,12 @@
   - [x] Threaded failed network-probe handling into `runtime/health.zig` startup-state reconciliation so `networkOk=false` forces `degraded-network`.
   - [x] Extended boot integration tests to assert degraded startup-state behavior under failed probes and `/scenes/:id` success payload selection when the configured startup scene exists.
 
+- **Iteration 16:**
+  - [x] Added `runtime/network_probe.zig` with a dedicated stubbed probe boundary (`startup` + target probe outcomes) and unit tests for skipped/failed probe behavior.
+  - [x] Wired `startFrameOS` to use the new probe boundary so health network state comes from probe results instead of hardcoded boot logic.
+  - [x] Extended `/system/device` payload contract with `startupScene` + `startupState` context and threaded these fields through boot payload rendering.
+  - [x] Added route-level test coverage for degraded `/health` payload JSON (`networkOk=false`, `startupState=degraded-network`) plus updated device route and boot integration assertions.
+
 ## Completed
 - [x] Create `zig/` directory.
 - [x] Create `zig/TODO.md` with loop structure and initial plan.
@@ -125,11 +131,9 @@
 ---
 
 ## Next Actions (priority order)
-1. [ ] Add a small runtime network-probe boundary module (stubbed healthcheck client) so probe outcomes are produced by a dedicated subsystem instead of hardcoded boot wiring.
-2. [ ] Extend `/system/device` payload contract with startup-scene + startup-state context to match future system diagnostics responses.
-3. [ ] Add route-level tests for degraded `/health` payload rendering (`networkOk=false`) to lock JSON contract details beyond integration assertions.
-
----
+1. [ ] Add boot-level logging fields for network-probe target/outcome so startup diagnostics can correlate `/health` degradation with probe metadata.
+2. [ ] Add a probe-mode config toggle (stub strategy) to support deterministic success/failure simulation without encoding host-name heuristics.
+3. [ ] Extend `/system/hotspot` payload contract with startup-scene context to align diagnostics shape with `/system/device`.
 
 ## Backlog / Later
 - [ ] Port individual apps incrementally (start with simplest).

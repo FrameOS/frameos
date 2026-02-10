@@ -74,10 +74,17 @@ pub const RuntimeServer = struct {
         };
     }
 
-    pub fn deviceSummaryRoute(self: RuntimeServer, device_utils: system_mod.DeviceUtilities) DeviceSummaryRoute {
+    pub fn deviceSummaryRoute(
+        self: RuntimeServer,
+        device_utils: system_mod.DeviceUtilities,
+        startup_scene: []const u8,
+        startup_state: system_mod.SystemStartupState,
+    ) DeviceSummaryRoute {
         return .{
             .server = self,
             .device_utils = device_utils,
+            .startup_scene = startup_scene,
+            .startup_state = startup_state,
         };
     }
 };
@@ -190,6 +197,8 @@ pub const HotspotPortalStatusRoute = struct {
 pub const DeviceSummaryRoute = struct {
     server: RuntimeServer,
     device_utils: system_mod.DeviceUtilities,
+    startup_scene: []const u8,
+    startup_state: system_mod.SystemStartupState,
 
     pub fn renderJson(self: DeviceSummaryRoute, buffer: []u8) ![]const u8 {
         var summary_buf: [128]u8 = undefined;
@@ -198,10 +207,12 @@ pub const DeviceSummaryRoute = struct {
         var stream = std.io.fixedBufferStream(buffer);
         const writer = stream.writer();
         try writer.print(
-            "{\"host\":\"{s}\",\"port\":{},\"device\":{\"name\":\"{s}\",\"kind\":\"{s}\",\"resolution\":{\"width\":{},\"height\":{}},\"rotationDeg\":{},\"summary\":\"{s}\"}}",
+            "{\"host\":\"{s}\",\"port\":{},\"startupScene\":\"{s}\",\"startupState\":\"{s}\",\"device\":{\"name\":\"{s}\",\"kind\":\"{s}\",\"resolution\":{\"width\":{},\"height\":{}},\"rotationDeg\":{},\"summary\":\"{s}\"}}",
             .{
                 self.server.config.frame_host,
                 self.server.config.frame_port,
+                self.startup_scene,
+                system_mod.startupStateLabel(self.startup_state),
                 self.device_utils.info.name,
                 self.device_utils.info.kind,
                 self.device_utils.info.resolution.width,
@@ -267,6 +278,50 @@ test "health route renders snapshot JSON payload" {
 
     try testing.expectEqualStrings(
         "{\"status\":\"ok\",\"startupState\":\"ready\",\"serverStarted\":true,\"networkRequired\":true,\"networkOk\":true,\"schedulerReady\":true,\"runnerReady\":true,\"host\":\"0.0.0.0\",\"port\":7777}",
+        payload,
+    );
+}
+
+
+
+test "health route renders degraded payload when network probe fails" {
+    const testing = std.testing;
+
+    const logger = logger_mod.RuntimeLogger.init(.{
+        .frame_host = "127.0.0.1",
+        .frame_port = 8787,
+        .debug = false,
+        .metrics_interval_s = 60,
+        .network_check = true,
+        .device = "simulator",
+        .startup_scene = "clock",
+    });
+
+    const server = RuntimeServer.init(logger, .{
+        .frame_host = "0.0.0.0",
+        .frame_port = 7777,
+        .debug = false,
+        .metrics_interval_s = 30,
+        .network_check = true,
+        .device = "simulator",
+        .startup_scene = "clock",
+    });
+
+    const route = server.healthRoute(.{
+        .status = .degraded,
+        .startup_state = .degraded_network,
+        .server_started = true,
+        .network_required = true,
+        .network_ok = false,
+        .scheduler_ready = true,
+        .runner_ready = true,
+    });
+
+    var buf: [256]u8 = undefined;
+    const payload = try route.renderJson(&buf);
+
+    try testing.expectEqualStrings(
+        "{\"status\":\"degraded\",\"startupState\":\"degraded-network\",\"serverStarted\":true,\"networkRequired\":true,\"networkOk\":false,\"schedulerReady\":true,\"runnerReady\":true,\"host\":\"0.0.0.0\",\"port\":7777}",
         payload,
     );
 }
@@ -452,12 +507,12 @@ test "device summary route renders device payload" {
         .rotation_deg = 0,
     });
 
-    const route = server.deviceSummaryRoute(device_utils);
+    const route = server.deviceSummaryRoute(device_utils, "clock", .ready);
     var buf: [320]u8 = undefined;
     const payload = try route.renderJson(&buf);
 
     try testing.expectEqualStrings(
-        "{\"host\":\"10.42.0.1\",\"port\":8787,\"device\":{\"name\":\"FrameOS Device\",\"kind\":\"simulator\",\"resolution\":{\"width\":800,\"height\":480},\"rotationDeg\":0,\"summary\":\"FrameOS Device (simulator) 800x480 @ 0°\"}}",
+        "{\"host\":\"10.42.0.1\",\"port\":8787,\"startupScene\":\"clock\",\"startupState\":\"ready\",\"device\":{\"name\":\"FrameOS Device\",\"kind\":\"simulator\",\"resolution\":{\"width\":800,\"height\":480},\"rotationDeg\":0,\"summary\":\"FrameOS Device (simulator) 800x480 @ 0°\"}}",
         payload,
     );
 }
