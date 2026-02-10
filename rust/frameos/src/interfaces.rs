@@ -118,7 +118,9 @@ pub fn command_contract_json() -> serde_json::Value {
             "runtime:ready": {"level": "info"},
             "runtime:stop": {"level": "info"},
             "runtime:check_ok": {"level": "info"},
-            "runtime:check_failed": {"level": "error"}
+            "runtime:check_failed": {"level": "error"},
+            "runtime:heartbeat": {"level": "debug"},
+            "runtime:metrics_tick": {"level": "info"}
         }
     })
 }

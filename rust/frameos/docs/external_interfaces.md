@@ -30,9 +30,11 @@ Envelope shape:
 Event names currently reserved:
 - `runtime:start`
 - `runtime:ready`
-- `runtime:stop` (reserved for upcoming lifecycle shutdown wiring)
+- `runtime:stop`
 - `runtime:check_ok`
 - `runtime:check_failed`
+- `runtime:heartbeat`
+- `runtime:metrics_tick`
 
 ## Planned server/API contract
 

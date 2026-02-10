@@ -11,7 +11,7 @@ This map tracks concrete behavior in the existing Nim runtime and where it lands
 | App registry and executable metadata | app modules under `frameos/src/frameos/apps/` | `src/models.rs`, `src/apps.rs`, `src/manifests.rs` | Implemented for typed manifest adapters |
 | HTTP/WebSocket runtime server | `jester` + `ws` usage in runtime modules | `src/server.rs` | Planned (endpoint contract modeled, transport server pending) |
 | Renderer loop and device drivers | `frameos/src/frameos/runner*`, `drivers/` | Planned crate modules (likely `renderer`, `drivers`) | Not started |
-| Metrics and telemetry loop | runtime metrics modules | `src/metrics.rs` | In progress (interval config modeled; collectors pending) |
+| Metrics and telemetry loop | runtime metrics modules | `src/metrics.rs`, `src/runtime.rs` | In progress (interval config + periodic `runtime:metrics_tick`/`runtime:heartbeat` events) |
 | Embedded/static assets (`nimassets`) | Nimble task + generated modules | Planned Rust asset strategy (include bytes/build-script or filesystem contract) | Not started |
 | QuickJS integration for JS scenes/apps | `build_quickjs` and JS modules | Planned optional adapter crate | Not started |
 

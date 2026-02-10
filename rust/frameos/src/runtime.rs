@@ -10,7 +10,9 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+const LOOP_SLEEP: Duration = Duration::from_millis(200);
 
 #[derive(Debug)]
 pub enum RuntimeError {
@@ -52,6 +54,31 @@ pub struct Runtime {
     metrics: Metrics,
     scenes: Option<SceneCatalog>,
     apps: Option<AppRegistry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TickState {
+    started_at: Instant,
+    last_heartbeat_at: Instant,
+    last_metrics_at: Instant,
+}
+
+impl TickState {
+    fn new(now: Instant) -> Self {
+        Self {
+            started_at: now,
+            last_heartbeat_at: now,
+            last_metrics_at: now,
+        }
+    }
+
+    fn should_emit_heartbeat(&self, now: Instant) -> bool {
+        now.duration_since(self.last_heartbeat_at) >= Duration::from_secs(1)
+    }
+
+    fn should_emit_metrics_tick(&self, now: Instant, metrics_interval: Duration) -> bool {
+        now.duration_since(self.last_metrics_at) >= metrics_interval
+    }
 }
 
 impl Runtime {
@@ -111,8 +138,32 @@ impl Runtime {
             "scenes_loaded": self.scenes.as_ref().map(|scenes| scenes.scenes().len()).unwrap_or(0),
         }));
 
+        let mut tick_state = TickState::new(Instant::now());
+        let metrics_interval = Duration::from_secs(self.metrics.interval_seconds().max(1));
+
         while !shutdown.load(Ordering::SeqCst) {
-            thread::sleep(Duration::from_millis(200));
+            let now = Instant::now();
+            if tick_state.should_emit_heartbeat(now) {
+                tick_state.last_heartbeat_at = now;
+                logging::log_event(serde_json::json!({
+                    "event": "runtime:heartbeat",
+                    "uptime_seconds": now.duration_since(tick_state.started_at).as_secs_f64(),
+                    "server": self.server.endpoint(),
+                }));
+            }
+
+            if tick_state.should_emit_metrics_tick(now, metrics_interval) {
+                tick_state.last_metrics_at = now;
+                logging::log_event(serde_json::json!({
+                    "event": "runtime:metrics_tick",
+                    "uptime_seconds": now.duration_since(tick_state.started_at).as_secs_f64(),
+                    "metrics_interval_seconds": self.metrics.interval_seconds(),
+                    "apps_loaded": self.apps.as_ref().map(|apps| apps.apps().len()).unwrap_or(0),
+                    "scenes_loaded": self.scenes.as_ref().map(|scenes| scenes.scenes().len()).unwrap_or(0),
+                }));
+            }
+
+            thread::sleep(LOOP_SLEEP);
         }
 
         logging::log_event(serde_json::json!({
@@ -162,5 +213,24 @@ mod tests {
     fn start_completes_for_scaffolding_mode() {
         let runtime = Runtime::new(FrameOSConfig::default());
         runtime.start().expect("start should return for now");
+    }
+
+    #[test]
+    fn tick_state_reports_heartbeat_at_one_second_boundary() {
+        let now = Instant::now();
+        let tick_state = TickState::new(now);
+
+        assert!(!tick_state.should_emit_heartbeat(now + Duration::from_millis(900)));
+        assert!(tick_state.should_emit_heartbeat(now + Duration::from_secs(1)));
+    }
+
+    #[test]
+    fn tick_state_reports_metrics_on_interval() {
+        let now = Instant::now();
+        let tick_state = TickState::new(now);
+        let interval = Duration::from_secs(5);
+
+        assert!(!tick_state.should_emit_metrics_tick(now + Duration::from_secs(4), interval));
+        assert!(tick_state.should_emit_metrics_tick(now + Duration::from_secs(5), interval));
     }
 }

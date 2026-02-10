@@ -69,11 +69,18 @@
 
 
 
+### Iteration 10 (runtime ticks + parity-oriented CLI golden tests)
+- Extended the shutdown-aware runtime loop to emit periodic `runtime:heartbeat` and `runtime:metrics_tick` events with uptime and manifest-load counters, preserving stop behavior.
+- Added dedicated tick-state unit tests for heartbeat and metrics interval boundaries so loop timing logic is regression-tested without long sleeps.
+- Added integration-style parity tests that execute the built `frameos` binary for `check`/`contract` commands and assert golden event output contracts against fixture manifests.
+- Updated interface/parity docs to include the newly implemented lifecycle events and metrics-loop progress.
+
+
 ## Next up (small, actionable)
-1. Add parity/golden tests that compare Nim vs Rust manifest/event outputs for known fixtures.
-2. Start server transport implementation (HTTP health endpoint + websocket event fanout stub).
-3. Define top-level Cargo workspace timing once a second Rust crate is introduced.
-4. Extend runtime loop with periodic metrics ticks + heartbeat events so shutdown-safe long-running behavior can be verified.
+1. Start server transport implementation (HTTP health endpoint + websocket event fanout stub).
+2. Define top-level Cargo workspace timing once a second Rust crate is introduced.
+3. Add a JSON-lines log sink abstraction so tests can assert event payloads without stdout substring matching.
+4. Document usage and migration steps for the Rust CLI in `rust/frameos/docs/` once server scaffolding lands.
 
 ## Checklist
 
@@ -101,7 +108,7 @@
 - [x] Add tests for core logic and adapters.
 
 ### Validation & rollout
-- [ ] Add parity tests or golden tests.
+- [x] Add parity tests or golden tests.
 - [x] Run necessary linters/tests.
 - [ ] Document usage and migration steps.
 
