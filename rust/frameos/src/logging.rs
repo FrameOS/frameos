@@ -61,9 +61,13 @@ pub fn emit_event_to_sink(sink: &dyn JsonLineSink, event: Value) -> io::Result<(
     sink.write_line(&event_envelope(event).to_string())
 }
 
+pub fn log_event_with_sink(sink: &dyn JsonLineSink, event: Value) -> io::Result<()> {
+    emit_event_to_sink(sink, event)
+}
+
 /// Logging scaffolding that mirrors FrameOS's structured event logs.
 pub fn log_event(event: Value) {
-    let _ = emit_event_to_sink(&StdoutJsonLineSink, event);
+    let _ = log_event_with_sink(&StdoutJsonLineSink, event);
 }
 
 /// Convenience helper for debug messages.

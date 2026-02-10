@@ -1,0 +1,12 @@
+[
+  {
+    "id": "weather",
+    "display_name": "Weather App",
+    "executable": "/opt/frameos/apps/weather/bin/weather",
+    "entry_scene": "weather-now",
+    "enabled": true,
+    "env": {
+      "UNITS": "metric"
+    }
+  }
+]

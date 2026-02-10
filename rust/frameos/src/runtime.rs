@@ -1,6 +1,6 @@
 use crate::apps::AppRegistry;
 use crate::config::{ConfigError, FrameOSConfig};
-use crate::logging;
+use crate::logging::{self, JsonLineSink};
 use crate::manifests::{load_app_registry, load_scene_catalog, ManifestLoadError};
 use crate::metrics::Metrics;
 use crate::scenes::SceneCatalog;
@@ -81,6 +81,27 @@ impl TickState {
     }
 }
 
+fn emit_runtime_event(
+    sink: &dyn JsonLineSink,
+    event_fanout: Option<&crate::server::EventFanout>,
+    event: &'static str,
+    fields: serde_json::Value,
+) {
+    let payload = serde_json::json!({"event": event});
+    if let serde_json::Value::Object(mut object) = payload {
+        if let serde_json::Value::Object(field_map) = fields.clone() {
+            for (key, value) in field_map {
+                object.insert(key, value);
+            }
+        }
+        let _ = logging::log_event_with_sink(sink, serde_json::Value::Object(object));
+    }
+
+    if let Some(fanout) = event_fanout {
+        fanout.publish_with_fields(event, fields);
+    }
+}
+
 impl Runtime {
     pub fn new(config: FrameOSConfig) -> Self {
         let server = Server::from_config(&config);
@@ -105,31 +126,28 @@ impl Runtime {
     }
 
     pub fn check(&self) {
-        logging::log_event(serde_json::json!({
-            "event": "runtime:check_ok",
+        self.check_with_sink(&logging::StdoutJsonLineSink);
+    }
+
+    pub fn check_with_sink(&self, sink: &dyn JsonLineSink) {
+        let fields = serde_json::json!({
             "server": self.server.endpoint(),
             "metrics_interval_seconds": self.metrics.interval_seconds(),
             "apps_loaded": self.apps.as_ref().map(|apps| apps.apps().len()).unwrap_or(0),
             "scenes_loaded": self.scenes.as_ref().map(|scenes| scenes.scenes().len()).unwrap_or(0),
-        }));
+        });
+        emit_runtime_event(sink, None, "runtime:check_ok", fields);
     }
 
     pub fn run_until_stopped(&self, shutdown: Arc<AtomicBool>) -> io::Result<()> {
-        logging::log_event(serde_json::json!({
-            "event": "runtime:start",
-            "config": {
-                "name": self.config.name,
-                "mode": self.config.mode,
-                "server_host": self.config.server_host,
-                "server_port": self.config.server_port,
-                "frame_host": self.config.frame_host,
-                "frame_port": self.config.frame_port,
-                "width": self.config.width,
-                "height": self.config.height,
-                "device": self.config.device,
-                "assets_path": self.config.assets_path,
-            }
-        }));
+        self.run_until_stopped_with_sink(shutdown, &logging::StdoutJsonLineSink)
+    }
+
+    pub fn run_until_stopped_with_sink(
+        &self,
+        shutdown: Arc<AtomicBool>,
+        sink: &dyn JsonLineSink,
+    ) -> io::Result<()> {
         let apps_loaded = self
             .apps
             .as_ref()
@@ -150,29 +168,37 @@ impl Runtime {
             },
         )?;
         let event_fanout = transport.fanout();
-        event_fanout.publish_with_fields(
+        emit_runtime_event(
+            sink,
+            Some(&event_fanout),
             "runtime:start",
             serde_json::json!({
                 "server": self.server.endpoint(),
                 "apps_loaded": apps_loaded,
                 "scenes_loaded": scenes_loaded,
+                "config": {
+                    "name": self.config.name,
+                    "mode": self.config.mode,
+                    "server_host": self.config.server_host,
+                    "server_port": self.config.server_port,
+                    "frame_host": self.config.frame_host,
+                    "frame_port": self.config.frame_port,
+                    "width": self.config.width,
+                    "height": self.config.height,
+                    "device": self.config.device,
+                    "assets_path": self.config.assets_path,
+                }
             }),
         );
 
-        logging::log_event(serde_json::json!({
-            "event": "runtime:ready",
-            "server": self.server.endpoint(),
-            "health_endpoint": format!("http://{}/healthz", transport.local_addr()),
-            "event_stream_transport": "websocket",
-            "metrics_interval_seconds": self.metrics.interval_seconds(),
-            "apps_loaded": apps_loaded,
-            "scenes_loaded": scenes_loaded,
-        }));
-        event_fanout.publish_with_fields(
+        emit_runtime_event(
+            sink,
+            Some(&event_fanout),
             "runtime:ready",
             serde_json::json!({
                 "server": self.server.endpoint(),
                 "health_endpoint": format!("http://{}/healthz", transport.local_addr()),
+                "event_stream_transport": "websocket",
                 "metrics_interval_seconds": self.metrics.interval_seconds(),
                 "apps_loaded": apps_loaded,
                 "scenes_loaded": scenes_loaded,
@@ -186,12 +212,9 @@ impl Runtime {
             let now = Instant::now();
             if tick_state.should_emit_heartbeat(now) {
                 tick_state.last_heartbeat_at = now;
-                logging::log_event(serde_json::json!({
-                    "event": "runtime:heartbeat",
-                    "uptime_seconds": now.duration_since(tick_state.started_at).as_secs_f64(),
-                    "server": self.server.endpoint(),
-                }));
-                event_fanout.publish_with_fields(
+                emit_runtime_event(
+                    sink,
+                    Some(&event_fanout),
                     "runtime:heartbeat",
                     serde_json::json!({
                         "uptime_seconds": now.duration_since(tick_state.started_at).as_secs_f64(),
@@ -203,14 +226,9 @@ impl Runtime {
 
             if tick_state.should_emit_metrics_tick(now, metrics_interval) {
                 tick_state.last_metrics_at = now;
-                logging::log_event(serde_json::json!({
-                    "event": "runtime:metrics_tick",
-                    "uptime_seconds": now.duration_since(tick_state.started_at).as_secs_f64(),
-                    "metrics_interval_seconds": self.metrics.interval_seconds(),
-                    "apps_loaded": apps_loaded,
-                    "scenes_loaded": scenes_loaded,
-                }));
-                event_fanout.publish_with_fields(
+                emit_runtime_event(
+                    sink,
+                    Some(&event_fanout),
                     "runtime:metrics_tick",
                     serde_json::json!({
                         "uptime_seconds": now.duration_since(tick_state.started_at).as_secs_f64(),
@@ -225,14 +243,9 @@ impl Runtime {
             thread::sleep(LOOP_SLEEP);
         }
 
-        logging::log_event(serde_json::json!({
-            "event": "runtime:stop",
-            "server": self.server.endpoint(),
-            "metrics_interval_seconds": self.metrics.interval_seconds(),
-            "apps_loaded": apps_loaded,
-            "scenes_loaded": scenes_loaded,
-        }));
-        event_fanout.publish_with_fields(
+        emit_runtime_event(
+            sink,
+            Some(&event_fanout),
             "runtime:stop",
             serde_json::json!({
                 "server": self.server.endpoint(),
@@ -249,7 +262,7 @@ impl Runtime {
     pub fn start(&self) -> io::Result<()> {
         let shutdown = Arc::new(AtomicBool::new(false));
         shutdown.store(true, Ordering::SeqCst);
-        self.run_until_stopped(shutdown)
+        self.run_until_stopped_with_sink(shutdown, &logging::StdoutJsonLineSink)
     }
 }
 
@@ -309,5 +322,51 @@ mod tests {
 
         assert!(!tick_state.should_emit_metrics_tick(now + Duration::from_secs(4), interval));
         assert!(tick_state.should_emit_metrics_tick(now + Duration::from_secs(5), interval));
+    }
+
+    #[test]
+    fn run_until_stopped_with_sink_emits_lifecycle_events() {
+        let runtime = Runtime::new(test_config());
+        let shutdown = Arc::new(AtomicBool::new(true));
+        let sink = logging::MemoryJsonLineSink::default();
+
+        runtime
+            .run_until_stopped_with_sink(shutdown, &sink)
+            .expect("runtime loop should emit and exit");
+
+        let events: Vec<String> = sink
+            .lines()
+            .iter()
+            .map(|line| {
+                let payload: serde_json::Value =
+                    serde_json::from_str(line).expect("line should be json");
+                payload["event"]["event"]
+                    .as_str()
+                    .expect("event name should be a string")
+                    .to_string()
+            })
+            .collect();
+
+        assert_eq!(
+            events,
+            vec!["runtime:start", "runtime:ready", "runtime:stop"]
+        );
+    }
+
+    #[test]
+    fn check_with_sink_emits_check_ok_event() {
+        let runtime = Runtime::new(test_config());
+        let sink = logging::MemoryJsonLineSink::default();
+
+        runtime.check_with_sink(&sink);
+
+        let lines = sink.lines();
+        assert_eq!(lines.len(), 1);
+        let payload: serde_json::Value =
+            serde_json::from_str(&lines[0]).expect("captured line should be json");
+        assert_eq!(
+            payload["event"]["event"],
+            serde_json::json!("runtime:check_ok")
+        );
     }
 }

@@ -15,6 +15,20 @@ From `rust/frameos/`:
 - Start runtime (Ctrl+C to stop):
   - `cargo run -- run --config ./tests/fixtures/frame-valid.json`
 
+## Production-like config examples and CI smoke checks
+
+A production-style fixture set is available under `tests/fixtures/production/`:
+
+- `frame.json`: host/device dimensions + non-debug runtime options
+- `scenes.json`: absolute-path scene source descriptors
+- `apps.json`: executable descriptors with entry scene + env
+
+Smoke-check command:
+
+- `cargo test --test runtime_parity check_command_supports_production_like_fixture_layout`
+
+This keeps a realistic config layout under test so migration progress does not regress toward test-only fixtures.
+
 ## Runtime endpoints and events
 
 When `run` starts successfully:

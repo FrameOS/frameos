@@ -45,8 +45,8 @@ Implemented in the current scaffold:
 - websocket transport now handles ping/pong frames, replies to close frames, and enforces bounded sender queues by dropping backpressured clients.
 
 Next transport steps:
-- wire documented websocket field-level contracts into `command_contract_json()` so downstream consumers can discover expected keys;
-- route runtime event emission through injectable sinks for end-to-end assertions without stdout parsing.
+- keep `command_event_fields` updated as websocket envelopes gain additive field keys, preserving stable event names.
+- extend contract coverage as future renderer/device-driver events are added for parity gates.
 
 ## Compatibility rules
 

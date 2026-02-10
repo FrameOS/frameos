@@ -1,0 +1,14 @@
+[
+  {
+    "id": "weather-now",
+    "app_id": "weather",
+    "version": "1.0.0",
+    "source": {
+      "type": "asset_path",
+      "path": "/var/lib/frameos/scenes/weather-now.json"
+    },
+    "metadata": {
+      "kind": "weather"
+    }
+  }
+]

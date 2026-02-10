@@ -123,13 +123,27 @@ pub fn command_contract_json() -> serde_json::Value {
             }
         },
         "events": {
-            "runtime:start": {"level": "info", "fields": ["server", "apps_loaded", "scenes_loaded"]},
-            "runtime:ready": {"level": "info", "fields": ["server", "health_endpoint", "metrics_interval_seconds", "apps_loaded", "scenes_loaded"]},
+            "runtime:start": {"level": "info", "fields": ["server", "apps_loaded", "scenes_loaded", "config"]},
+            "runtime:ready": {"level": "info", "fields": ["server", "health_endpoint", "event_stream_transport", "metrics_interval_seconds", "apps_loaded", "scenes_loaded"]},
             "runtime:stop": {"level": "info", "fields": ["server", "metrics_interval_seconds", "apps_loaded", "scenes_loaded"]},
-            "runtime:check_ok": {"level": "info"},
-            "runtime:check_failed": {"level": "error"},
+            "runtime:check_ok": {"level": "info", "fields": ["server", "metrics_interval_seconds", "apps_loaded", "scenes_loaded"]},
+            "runtime:check_failed": {"level": "error", "fields": ["error"]},
             "runtime:heartbeat": {"level": "debug", "fields": ["uptime_seconds", "server"]},
             "runtime:metrics_tick": {"level": "info", "fields": ["uptime_seconds", "metrics_interval_seconds", "apps_loaded", "scenes_loaded"]}
+        },
+        "command_event_fields": {
+            "run": {
+                "runtime:start": ["server", "apps_loaded", "scenes_loaded", "config"],
+                "runtime:ready": ["server", "health_endpoint", "event_stream_transport", "metrics_interval_seconds", "apps_loaded", "scenes_loaded"],
+                "runtime:heartbeat": ["uptime_seconds", "server"],
+                "runtime:metrics_tick": ["uptime_seconds", "metrics_interval_seconds", "apps_loaded", "scenes_loaded"],
+                "runtime:stop": ["server", "metrics_interval_seconds", "apps_loaded", "scenes_loaded"]
+            },
+            "check": {
+                "runtime:check_ok": ["server", "metrics_interval_seconds", "apps_loaded", "scenes_loaded"],
+                "runtime:check_failed": ["error"]
+            },
+            "contract": {}
         }
     })
 }

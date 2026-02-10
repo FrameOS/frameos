@@ -103,11 +103,19 @@
 - Added `EventFanout::publish_with_fields` and wired `runtime::run_until_stopped` to include selected lifecycle/tick context (server endpoint, uptime, manifest counters, metrics interval) in websocket event fields while keeping the `event` key unchanged for compatibility.
 - Introduced a JSON-lines sink abstraction in `src/logging.rs` (`JsonLineSink`) with `StdoutJsonLineSink` and test-friendly `MemoryJsonLineSink`, plus `emit_event_to_sink` for deterministic event assertions without stdout substring matching.
 - Added/updated tests to validate enriched websocket message shape and memory sink JSON capture behavior.
+
+
+### Iteration 15 (contract field map + sink-injected runtime traces + production fixtures)
+- Extended `command_contract_json()` with explicit per-command event field maps under `command_event_fields`, so downstream consumers can discover websocket payload keys by command/event without scraping prose docs.
+- Refactored runtime/check emission paths to support sink injection (`check_with_sink`, `run_until_stopped_with_sink`) and centralized event emission through a shared helper that writes to JSON-line sinks while publishing websocket fanout events.
+- Added runtime unit coverage asserting deterministic lifecycle trace ordering (`runtime:start` → `runtime:ready` → `runtime:stop`) and `runtime:check_ok` sink output without stdout capture.
+- Added production-like fixture manifests/config under `tests/fixtures/production/` plus parity smoke coverage that executes `frameos check` against that layout.
+- Updated CLI/external interface docs to include the production fixture smoke workflow and document the new contract-field discovery surface.
 ## Next up (small, actionable)
-1. Add CLI examples for production-like config layouts (non-test fixtures) and wire them into CI smoke checks.
-2. Start scoping renderer/device-driver parity slices so migration cutover gates can move from documentation into executable checks.
-3. Extend websocket field payload contracts into `command_contract_json()` so downstream consumers can discover expected keys by command.
-4. Route runtime event emission behind sink injection (instead of direct `log_event`) so integration tests can assert full run/check traces without capturing process stdout.
+1. Start scoping renderer/device-driver parity slices so migration cutover gates can move from documentation into executable checks.
+2. Add contract tests that assert event field compatibility between stdout envelopes and websocket fanout messages for each lifecycle event.
+3. Add CLI/docs examples for daemonized `run` supervision (service manager integration, health probe retries, shutdown signaling).
+4. Evaluate whether websocket/event sinks should support optional durable persistence (file sink) for post-mortem debugging in production.
 
 ## Checklist
 

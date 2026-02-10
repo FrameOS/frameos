@@ -46,3 +46,19 @@ fn contract_includes_event_stream_envelope_and_fields() {
         .expect("ready fields should be array")
         .contains(&serde_json::json!("health_endpoint")));
 }
+
+#[test]
+fn contract_exposes_command_event_field_map() {
+    let contract = command_contract_json();
+
+    let run_ready_fields = contract["command_event_fields"]["run"]["runtime:ready"]
+        .as_array()
+        .expect("run runtime:ready fields should be an array");
+    assert!(run_ready_fields.contains(&serde_json::json!("health_endpoint")));
+    assert!(run_ready_fields.contains(&serde_json::json!("event_stream_transport")));
+
+    let check_ok_fields = contract["command_event_fields"]["check"]["runtime:check_ok"]
+        .as_array()
+        .expect("check runtime:check_ok fields should be an array");
+    assert!(check_ok_fields.contains(&serde_json::json!("apps_loaded")));
+}

@@ -57,3 +57,34 @@ fn contract_command_lists_heartbeat_and_metrics_tick_events() {
     assert!(stdout.contains("runtime:heartbeat"));
     assert!(stdout.contains("runtime:metrics_tick"));
 }
+
+#[test]
+fn check_command_supports_production_like_fixture_layout() {
+    let binary = env!("CARGO_BIN_EXE_frameos");
+    let fixture_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("production");
+
+    let output = Command::new(binary)
+        .arg("check")
+        .arg("--config")
+        .arg(fixture_dir.join("frame.json"))
+        .arg("--scenes")
+        .arg(fixture_dir.join("scenes.json"))
+        .arg("--apps")
+        .arg(fixture_dir.join("apps.json"))
+        .output()
+        .expect("check command should execute");
+
+    assert!(
+        output.status.success(),
+        "check command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf8");
+    assert!(stdout.contains("runtime:check_ok"));
+    assert!(stdout.contains("\"apps_loaded\":1"));
+    assert!(stdout.contains("\"scenes_loaded\":1"));
+}

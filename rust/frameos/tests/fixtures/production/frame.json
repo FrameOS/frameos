@@ -1,0 +1,21 @@
+{
+  "name": "hallway-frame",
+  "mode": "production",
+  "server_host": "frameos-controller.internal",
+  "server_port": 8989,
+  "server_api_key": "prod-key",
+  "frame_host": "hallway-display.internal",
+  "frame_port": 8787,
+  "frame_access": "private",
+  "frame_access_key": "device-key",
+  "width": 1600,
+  "height": 1200,
+  "device": "waveshare_epd_13in3k",
+  "metrics_interval": 30,
+  "rotate": 90,
+  "flip": "horizontal",
+  "scaling_mode": "contain",
+  "assets_path": "/var/lib/frameos/assets",
+  "debug": false,
+  "time_zone": "UTC"
+}
