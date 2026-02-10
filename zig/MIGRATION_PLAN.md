@@ -26,7 +26,7 @@
 - [x] Server boundary
 - [x] Health contract
 - [x] Runner lifecycle
-- [ ] Scene registry
+- [x] Scene registry
 - [ ] Script/interpreter boundary
 
 ### Apps (`zig/src/apps`)
@@ -41,6 +41,6 @@
 - [ ] I2C/SPI adapters
 
 ### System services (`zig/src/system`)
-- [ ] Wi-Fi hotspot/network portal boundary
+- [x] Wi-Fi hotspot/network portal boundary
 - [ ] System scene defaults
-- [ ] Device management utilities
+- [x] Device management utilities

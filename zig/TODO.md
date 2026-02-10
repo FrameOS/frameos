@@ -50,6 +50,11 @@
   - [x] Wired `startFrameOS` to initialize the scene registry before runner startup and passed resolved scene intent into runner logging.
   - [x] Extended runtime config/logging with `FRAME_STARTUP_SCENE` / `startupScene` wiring and updated dependent unit-test fixtures.
 
+- **Iteration 10:**
+  - [x] Added `zig/src/system/` placeholder contracts (`portal.zig`, `device_utils.zig`, `mod.zig`) for hotspot/portal and device utilities boundaries.
+  - [x] Wired `startFrameOS` to initialize `SystemServices` between scene registry startup and runner startup to mirror system-scene/device boot intent.
+  - [x] Added Zig unit tests for captive-portal URL rendering and device summary formatting in the new system module.
+
 ---
 
 ## Completed
@@ -68,14 +73,15 @@
 - [x] Add stubbed `/health` server route contract that emits runtime health snapshots.
 - [x] Create initial `zig/src/apps/` and `zig/src/drivers/` placeholder module contracts from `MIGRATION_PLAN.md`.
 - [x] Add Zig tests for health snapshot logic and config parsing defaults.
+- [x] Add `zig/src/system/` placeholder contracts for portal/hotspot and device utilities.
 
 ---
 
 ## Next Actions (priority order)
-1. [ ] Add `zig/src/system/` placeholder contracts for portal/hotspot and device utilities.
-2. [ ] Add a stub simulator driver module under `zig/src/drivers/` and connect it to `runtime/platform.zig`.
-3. [ ] Expand `/health` route payload with scheduler/runner readiness booleans.
-4. [ ] Add scene-registry-to-apps boundary methods for listing and loading scene manifests.
+1. [ ] Add a stub simulator driver module under `zig/src/drivers/` and connect it to `runtime/platform.zig`.
+2. [ ] Expand `/health` route payload with scheduler/runner readiness booleans.
+3. [ ] Add scene-registry-to-apps boundary methods for listing and loading scene manifests.
+4. [ ] Add `system` scene-default helpers that map startup-state decisions (index vs wifi hotspot) from boot config.
 
 ---
 

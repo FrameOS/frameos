@@ -21,6 +21,7 @@ a runtime health contract, and a no-op event loop.
 - `src/runtime/event_loop.zig`: No-op render/event loop primitive.
 - `src/apps/mod.zig`: Placeholder app lifecycle and registration contracts.
 - `src/drivers/mod.zig`: Placeholder driver lifecycle and registration contracts.
+- `src/system/`: Placeholder system-service contracts (Wi-Fi portal/hotspot + device utilities).
 
 ## Nim → Zig mapping (initial)
 - `frameos/src/frameos.nim` → `zig/src/main.zig` + `zig/src/frameos.zig`

@@ -9,6 +9,7 @@ const scheduler_mod = @import("runtime/scheduler.zig");
 const scenes_mod = @import("runtime/scenes.zig");
 const server_mod = @import("runtime/server.zig");
 const health_mod = @import("runtime/health.zig");
+const system_mod = @import("system/mod.zig");
 
 pub fn startFrameOS() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -30,6 +31,9 @@ pub fn startFrameOS() !void {
 
     const scene_registry = scenes_mod.SceneRegistry.init(logger, config.startup_scene);
     try scene_registry.startup();
+
+    const system_services = system_mod.SystemServices.init(logger, config.frame_host, config.frame_port, config.device);
+    try system_services.startup();
 
     const runner = runner_mod.RuntimeRunner.init(logger, config.device, scene_registry);
     try runner.startup();
