@@ -1,13 +1,24 @@
 const std = @import("std");
+const config_mod = @import("runtime/config.zig");
+const event_loop_mod = @import("runtime/event_loop.zig");
+const logger_mod = @import("runtime/logger.zig");
+const platform_mod = @import("runtime/platform.zig");
 
 pub fn startFrameOS() !void {
-    const stdout = std.io.getStdOut().writer();
-    try stdout.print(
-        "FrameOS Zig stub booting (config/logger/driver init TBD)...\n",
-        .{},
-    );
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
 
-    while (true) {
-        std.time.sleep(1 * std.time.ns_per_s);
-    }
+    const config = try config_mod.loadConfig(allocator);
+    defer config_mod.deinitConfig(allocator, config);
+
+    const logger = logger_mod.RuntimeLogger.init(config);
+    try logger.startup();
+    try logger.bootup(config);
+
+    const driver_platform = platform_mod.DriverPlatform.init(logger);
+    try driver_platform.initDrivers();
+
+    const loop = event_loop_mod.RuntimeEventLoop.init(logger, std.time.ns_per_s);
+    try loop.run();
 }
