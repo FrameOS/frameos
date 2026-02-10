@@ -70,6 +70,14 @@ pub fn appLifecycleSummaryForScene(scene_id: []const u8, ctx: AppContext) !?AppS
     return try boundary.startup(ctx);
 }
 
+pub fn sceneSettingsPayloadForScene(scene_id: []const u8, buffer: []u8) !?[]const u8 {
+    if (std.mem.eql(u8, scene_id, "calendar")) {
+        return try calendar_app.renderSceneSettingsJson(calendar_app.default_scene_settings, buffer);
+    }
+
+    return null;
+}
+
 fn isAppLifecycleRegistered(app_id: []const u8) bool {
     return std.mem.eql(u8, app_id, "app.clock") or std.mem.eql(u8, app_id, "app.weather") or std.mem.eql(u8, app_id, "app.calendar");
 }
@@ -168,4 +176,25 @@ test "app boundary returns null for unknown scene" {
     const testing = std.testing;
 
     try testing.expectEqual(@as(?AppBoundary, null), loadAppBoundaryForScene("unknown-scene"));
+}
+
+
+test "scene settings payload helper renders calendar settings" {
+    const testing = std.testing;
+
+    var buf: [128]u8 = undefined;
+    const payload = try sceneSettingsPayloadForScene("calendar", &buf);
+
+    try testing.expect(payload != null);
+    try testing.expectEqualStrings(
+        "{\"timezone\":\"UTC\",\"weekStartsOnMonday\":true,\"maxVisibleEvents\":5}",
+        payload.?,
+    );
+}
+
+test "scene settings payload helper returns null for scenes without settings contracts" {
+    const testing = std.testing;
+
+    var buf: [128]u8 = undefined;
+    try testing.expectEqual(@as(?[]const u8, null), try sceneSettingsPayloadForScene("news", &buf));
 }

@@ -172,13 +172,16 @@
 - [x] Add `/scenes` route payload lifecycle summaries so list diagnostics mirror `/scenes/:id` app-lifecycle metadata.
 - [x] Thread per-scene lifecycle availability into boot-route integration payload assertions (registered + missing boundaries).
 - [x] Port a third concrete app boundary (next target: calendar lifecycle stub) behind `apps/mod.zig`.
+- [x] Extend route coverage with a dedicated `/scenes` assertion that validates ordering + lifecycle shape across all built-ins (including nullable boundaries).
+- [x] Add startup-scene integration coverage for a configured scene that exists but has no registered app lifecycle boundary (`news`) to lock fallback runner diagnostics.
+- [x] Start porting app-specific configuration contracts (next target: calendar scene settings payload stub) behind `apps/mod.zig`.
 
 ---
 
 ## Next Actions (priority order)
-1. [ ] Extend route coverage with a dedicated `/scenes` assertion that validates ordering + lifecycle shape across all built-ins (including nullable boundaries).
-2. [ ] Add startup-scene integration coverage for a configured scene that exists but has no registered app lifecycle boundary (`news`) to lock fallback runner diagnostics.
-3. [ ] Start porting app-specific configuration contracts (next target: calendar scene settings payload stub) behind `apps/mod.zig`.
+1. [ ] Thread app-specific settings payloads into runtime route contracts (candidate: `/scenes/:id/settings`) so scene diagnostics can expose configuration stubs.
+2. [ ] Add runner startup payload/unit assertions that include app-settings availability (`present`/`missing`) alongside lifecycle fallback diagnostics.
+3. [ ] Expand app configuration contracts with a second app stub (candidate: weather location/units settings) to validate multi-app settings plumbing behind `apps/mod.zig`.
 
 ## Backlog / Later
 - [ ] Port individual apps incrementally (start with simplest).

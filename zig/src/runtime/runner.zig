@@ -83,15 +83,15 @@ test "runner falls back to missing lifecycle when manifest exists but no app bou
         .network_check = true,
         .network_probe_mode = .auto,
         .device = "simulator",
-        .startup_scene = "calendar",
+        .startup_scene = "news",
     });
 
-    const registry = scenes_mod.SceneRegistry.init(logger, "calendar");
+    const registry = scenes_mod.SceneRegistry.init(logger, "news");
     const startup_scene = registry.resolveStartupScene();
-    try testing.expectEqualStrings("calendar", startup_scene);
+    try testing.expectEqualStrings("news", startup_scene);
 
     const manifest = registry.loadManifest(startup_scene) orelse return error.TestUnexpectedResult;
-    try testing.expectEqualStrings("app.calendar", manifest.app.id);
+    try testing.expectEqualStrings("app.news", manifest.app.id);
 
     const summary = try apps_mod.appLifecycleSummaryForScene(startup_scene, .{ .allocator = testing.allocator });
     try testing.expectEqual(@as(?apps_mod.AppStartupSummary, null), summary);
@@ -101,7 +101,7 @@ test "runner falls back to missing lifecycle when manifest exists but no app bou
     else
         apps_mod.AppStartupSummary{ .app_id = manifest.app.id, .lifecycle = "missing", .frame_rate_hz = 0 };
 
-    try testing.expectEqualStrings("app.calendar", fallback.app_id);
+    try testing.expectEqualStrings("app.news", fallback.app_id);
     try testing.expectEqualStrings("missing", fallback.lifecycle);
     try testing.expectEqual(@as(u8, 0), fallback.frame_rate_hz);
 }

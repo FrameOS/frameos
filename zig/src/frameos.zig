@@ -309,3 +309,95 @@ test "boot network probe log payload aligns with health diagnostics" {
     try testing.expect(std.mem.indexOf(u8, probe_payload, "\"mode\":\"force-failed\"") != null);
     try testing.expect(std.mem.indexOf(u8, probe_payload, "\"outcome\":\"failed\"") != null);
 }
+
+
+test "boot payload integration locks /scenes ordering and lifecycle shape" {
+    const testing = std.testing;
+
+    const logger = logger_mod.RuntimeLogger.init(.{ .frame_host = "127.0.0.1", .frame_port = 8787, .debug = false, .metrics_interval_s = 60, .network_check = true, .network_probe_mode = .auto, .device = "simulator", .startup_scene = "clock" });
+    const config: config_mod.RuntimeConfig = .{ .frame_host = "0.0.0.0", .frame_port = 7777, .debug = false, .metrics_interval_s = 30, .network_check = true, .network_probe_mode = .auto, .device = "simulator", .startup_scene = "clock" };
+
+    const server = server_mod.RuntimeServer.init(logger, config);
+    const registry = scenes_mod.SceneRegistry.init(logger, config.startup_scene);
+    const startup_scene = system_mod.defaultStartupScene(config);
+    const startup_state = system_mod.startupStateFromConfig(config);
+    const services = system_mod.SystemServices.init(logger, config.frame_host, config.frame_port, config.device, startup_scene, startup_state);
+
+    var health = health_mod.RuntimeHealth.init(logger, true, .booting);
+    health.markServerStarted();
+    health.markRunnerReady();
+    health.markSchedulerReady();
+    health.recordNetworkProbe(true);
+
+    var health_buf: [256]u8 = undefined;
+    var scenes_buf: [1024]u8 = undefined;
+    var startup_scene_buf: [256]u8 = undefined;
+    var hotspot_status_buf: [256]u8 = undefined;
+    var device_summary_buf: [320]u8 = undefined;
+
+    const payloads = try renderBootRoutePayloads(
+        server,
+        registry,
+        health.snapshot(),
+        config.network_probe_mode,
+        .ok,
+        services,
+        mapHealthStartupState(health.snapshot().startup_state),
+        &health_buf,
+        &scenes_buf,
+        &startup_scene_buf,
+        &hotspot_status_buf,
+        &device_summary_buf,
+    );
+
+    try testing.expectEqualStrings(
+        "{\"host\":\"0.0.0.0\",\"port\":7777,\"scenes\":[{\"id\":\"clock\",\"appId\":\"app.clock\",\"entrypoint\":\"apps/clock/main\",\"appLifecycle\":{\"appId\":\"app.clock\",\"lifecycle\":\"clock\",\"frameRateHz\":1}},{\"id\":\"weather\",\"appId\":\"app.weather\",\"entrypoint\":\"apps/weather/main\",\"appLifecycle\":{\"appId\":\"app.weather\",\"lifecycle\":\"weather\",\"frameRateHz\":30}},{\"id\":\"calendar\",\"appId\":\"app.calendar\",\"entrypoint\":\"apps/calendar/main\",\"appLifecycle\":{\"appId\":\"app.calendar\",\"lifecycle\":\"calendar\",\"frameRateHz\":12}},{\"id\":\"news\",\"appId\":\"app.news\",\"entrypoint\":\"apps/news/main\",\"appLifecycle\":null}]}",
+        payloads.scenes,
+    );
+}
+
+test "boot payload integration captures startup scene with missing lifecycle boundary" {
+    const testing = std.testing;
+
+    const logger = logger_mod.RuntimeLogger.init(.{ .frame_host = "127.0.0.1", .frame_port = 8787, .debug = false, .metrics_interval_s = 60, .network_check = true, .network_probe_mode = .auto, .device = "simulator", .startup_scene = "news" });
+    const config: config_mod.RuntimeConfig = .{ .frame_host = "0.0.0.0", .frame_port = 7777, .debug = false, .metrics_interval_s = 30, .network_check = true, .network_probe_mode = .auto, .device = "simulator", .startup_scene = "news" };
+
+    const server = server_mod.RuntimeServer.init(logger, config);
+    const registry = scenes_mod.SceneRegistry.init(logger, config.startup_scene);
+    const startup_scene = system_mod.defaultStartupScene(config);
+    const startup_state = system_mod.startupStateFromConfig(config);
+    const services = system_mod.SystemServices.init(logger, config.frame_host, config.frame_port, config.device, startup_scene, startup_state);
+
+    var health = health_mod.RuntimeHealth.init(logger, true, .booting);
+    health.markServerStarted();
+    health.markRunnerReady();
+    health.markSchedulerReady();
+    health.recordNetworkProbe(true);
+
+    var health_buf: [256]u8 = undefined;
+    var scenes_buf: [1024]u8 = undefined;
+    var startup_scene_buf: [256]u8 = undefined;
+    var hotspot_status_buf: [256]u8 = undefined;
+    var device_summary_buf: [320]u8 = undefined;
+
+    const payloads = try renderBootRoutePayloads(
+        server,
+        registry,
+        health.snapshot(),
+        config.network_probe_mode,
+        .ok,
+        services,
+        mapHealthStartupState(health.snapshot().startup_state),
+        &health_buf,
+        &scenes_buf,
+        &startup_scene_buf,
+        &hotspot_status_buf,
+        &device_summary_buf,
+    );
+
+    try testing.expect(std.mem.indexOf(u8, payloads.startup_scene, "\"requestedId\":\"news\"") != null);
+    try testing.expect(std.mem.indexOf(u8, payloads.startup_scene, "\"found\":true") != null);
+    try testing.expect(std.mem.indexOf(u8, payloads.startup_scene, "\"appId\":\"app.news\"") != null);
+    try testing.expect(std.mem.indexOf(u8, payloads.startup_scene, "\"entrypoint\":\"apps/news/main\"") != null);
+    try testing.expect(std.mem.indexOf(u8, payloads.startup_scene, "\"appLifecycle\":null") != null);
+}
