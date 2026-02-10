@@ -126,6 +126,12 @@
   - [x] Extended runner startup diagnostics with app-settings availability (`present`/`missing`) and added unit coverage in `runtime/runner.zig`.
   - [x] Threaded startup-scene settings payload snapshots into `renderBootRoutePayloads` + boot logging so `/scenes/:id/settings` is emitted during startup diagnostics.
 
+- **Iteration 22:**
+  - [x] Added explicit boot integration assertions for `/scenes/:id/settings` under both success and unknown-scene startup paths using exact JSON equality checks.
+  - [x] Exposed `settingsAvailable` metadata on `/scenes` list payload entries and threaded assertions through route + boot integration coverage.
+  - [x] Added server route registration assertions through a `registeredRoutes()` contract that explicitly includes `/scenes/:id/settings`.
+  - [x] Ported a fourth concrete app boundary via `zig/src/apps/news.zig` (lifecycle + settings stubs) and wired news lifecycle/settings into apps, runner, and route payload diagnostics.
+
 ## Completed
 - [x] Create `zig/` directory.
 - [x] Create `zig/TODO.md` with loop structure and initial plan.
@@ -185,9 +191,9 @@
 ---
 
 ## Next Actions (priority order)
-1. [ ] Add explicit boot integration assertions for `/scenes/:id/settings` under both success and unknown-scene startup paths (full JSON shape, not substring checks).
-2. [ ] Expose `settingsAvailable` metadata on `/scenes` list payload entries so list diagnostics mirror `/scenes/:id/settings` route availability.
-3. [ ] Add server startup logging assertions that cover registration of the `/scenes/:id/settings` route alongside existing route diagnostics.
+1. [ ] Add dedicated runner route-diagnostics coverage that locks `appSettings=present` behavior for the new `news` lifecycle during startup logging snapshots.
+2. [ ] Start porting the next concrete app boundary beyond the current built-ins (candidate: quotes or transit) and add matching scene manifest + lifecycle/settings contracts.
+3. [ ] Add parity-focused app contract tests that compare Zig scene lifecycle/settings JSON shapes with Nim runtime expectations for `clock`/`weather`/`calendar`/`news`.
 
 ## Backlog / Later
 - [ ] Port individual apps incrementally (start with simplest).

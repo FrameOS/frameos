@@ -24,12 +24,20 @@ pub const RuntimeServer = struct {
             .{ self.config.frame_host, self.config.frame_port, self.config.network_check },
         );
 
-        try self.logger.info("{\"event\":\"server.route\",\"route\":\"/health\",\"status\":\"stub\",\"method\":\"GET\"}", .{});
-        try self.logger.info("{\"event\":\"server.route\",\"route\":\"/scenes\",\"status\":\"stub\",\"method\":\"GET\"}", .{});
-        try self.logger.info("{\"event\":\"server.route\",\"route\":\"/scenes/:id\",\"status\":\"stub\",\"method\":\"GET\"}", .{});
-        try self.logger.info("{\"event\":\"server.route\",\"route\":\"/scenes/:id/settings\",\"status\":\"stub\",\"method\":\"GET\"}", .{});
-        try self.logger.info("{\"event\":\"server.route\",\"route\":\"/system/hotspot\",\"status\":\"stub\",\"method\":\"GET\"}", .{});
-        try self.logger.info("{\"event\":\"server.route\",\"route\":\"/system/device\",\"status\":\"stub\",\"method\":\"GET\"}", .{});
+        for (registeredRoutes()) |route| {
+            try self.logger.info("{\"event\":\"server.route\",\"route\":\"{s}\",\"status\":\"stub\",\"method\":\"GET\"}", .{route});
+        }
+    }
+
+    pub fn registeredRoutes() []const []const u8 {
+        return &[_][]const u8{
+            "/health",
+            "/scenes",
+            "/scenes/:id",
+            "/scenes/:id/settings",
+            "/system/hotspot",
+            "/system/device",
+        };
     }
 
     pub fn healthRoute(
@@ -129,11 +137,12 @@ pub const ScenesRoute = struct {
 
             const lifecycle = try apps_mod.appLifecycleSummaryForScene(scene_id, .{ .allocator = std.heap.page_allocator });
             if (lifecycle) |summary| {
-                try writer.print("\"appLifecycle\":{\"appId\":\"{s}\",\"lifecycle\":\"{s}\",\"frameRateHz\":{}}", .{ summary.app_id, summary.lifecycle, summary.frame_rate_hz });
+                try writer.print("\"appLifecycle\":{\"appId\":\"{s}\",\"lifecycle\":\"{s}\",\"frameRateHz\":{}},", .{ summary.app_id, summary.lifecycle, summary.frame_rate_hz });
             } else {
-                try writer.writeAll("\"appLifecycle\":null");
+                try writer.writeAll("\"appLifecycle\":null,");
             }
 
+            try writer.print("\"settingsAvailable\":{}", .{apps_mod.sceneSettingsAvailableForScene(scene_id)});
             try writer.writeAll("}");
             emitted += 1;
         }
@@ -337,7 +346,7 @@ test "scenes route renders scene discovery payload" {
     const payload = try route.renderJson(&buf);
 
     try testing.expectEqualStrings(
-        "{\"host\":\"0.0.0.0\",\"port\":7777,\"scenes\":[{\"id\":\"clock\",\"appId\":\"app.clock\",\"entrypoint\":\"apps/clock/main\",\"appLifecycle\":{\"appId\":\"app.clock\",\"lifecycle\":\"clock\",\"frameRateHz\":1}},{\"id\":\"weather\",\"appId\":\"app.weather\",\"entrypoint\":\"apps/weather/main\",\"appLifecycle\":{\"appId\":\"app.weather\",\"lifecycle\":\"weather\",\"frameRateHz\":30}},{\"id\":\"calendar\",\"appId\":\"app.calendar\",\"entrypoint\":\"apps/calendar/main\",\"appLifecycle\":{\"appId\":\"app.calendar\",\"lifecycle\":\"calendar\",\"frameRateHz\":12}},{\"id\":\"news\",\"appId\":\"app.news\",\"entrypoint\":\"apps/news/main\",\"appLifecycle\":null}]}",
+        "{\"host\":\"0.0.0.0\",\"port\":7777,\"scenes\":[{\"id\":\"clock\",\"appId\":\"app.clock\",\"entrypoint\":\"apps/clock/main\",\"appLifecycle\":{\"appId\":\"app.clock\",\"lifecycle\":\"clock\",\"frameRateHz\":1},\"settingsAvailable\":false},{\"id\":\"weather\",\"appId\":\"app.weather\",\"entrypoint\":\"apps/weather/main\",\"appLifecycle\":{\"appId\":\"app.weather\",\"lifecycle\":\"weather\",\"frameRateHz\":30},\"settingsAvailable\":true},{\"id\":\"calendar\",\"appId\":\"app.calendar\",\"entrypoint\":\"apps/calendar/main\",\"appLifecycle\":{\"appId\":\"app.calendar\",\"lifecycle\":\"calendar\",\"frameRateHz\":12},\"settingsAvailable\":true},{\"id\":\"news\",\"appId\":\"app.news\",\"entrypoint\":\"apps/news/main\",\"appLifecycle\":{\"appId\":\"app.news\",\"lifecycle\":\"news\",\"frameRateHz\":10},\"settingsAvailable\":true}]}",
         payload,
     );
 }
@@ -383,7 +392,7 @@ test "scene by id route renders calendar lifecycle metadata" {
 }
 
 
-test "scene by id route renders null lifecycle metadata when boundary is missing" {
+test "scene by id route renders news lifecycle metadata" {
     const testing = std.testing;
 
     const logger = logger_mod.RuntimeLogger.init(.{ .frame_host = "127.0.0.1", .frame_port = 8787, .debug = false, .metrics_interval_s = 60, .network_check = true, .network_probe_mode = .auto, .device = "simulator", .startup_scene = "clock" });
@@ -397,7 +406,7 @@ test "scene by id route renders null lifecycle metadata when boundary is missing
     const payload = try route.renderJson(&buf);
 
     try testing.expectEqualStrings(
-        "{\"host\":\"0.0.0.0\",\"port\":7777,\"requestedId\":\"news\",\"found\":true,\"scene\":{\"id\":\"news\",\"appId\":\"app.news\",\"entrypoint\":\"apps/news/main\"},\"appLifecycle\":null}",
+        "{\"host\":\"0.0.0.0\",\"port\":7777,\"requestedId\":\"news\",\"found\":true,\"scene\":{\"id\":\"news\",\"appId\":\"app.news\",\"entrypoint\":\"apps/news/main\"},\"appLifecycle\":{\"appId\":\"app.news\",\"lifecycle\":\"news\",\"frameRateHz\":10}}",
         payload,
     );
 }
@@ -459,7 +468,7 @@ test "scene settings by id route renders weather settings payload" {
     );
 }
 
-test "scene settings by id route renders null when scene has no settings contract" {
+test "scene settings by id route renders news settings payload" {
     const testing = std.testing;
 
     const logger = logger_mod.RuntimeLogger.init(.{ .frame_host = "127.0.0.1", .frame_port = 8787, .debug = false, .metrics_interval_s = 60, .network_check = true, .network_probe_mode = .auto, .device = "simulator", .startup_scene = "clock" });
@@ -473,7 +482,7 @@ test "scene settings by id route renders null when scene has no settings contrac
     const payload = try route.renderJson(&buf);
 
     try testing.expectEqualStrings(
-        "{\"host\":\"0.0.0.0\",\"port\":7777,\"requestedId\":\"news\",\"found\":true,\"scene\":{\"id\":\"news\",\"appId\":\"app.news\"},\"settings\":null}",
+        "{\"host\":\"0.0.0.0\",\"port\":7777,\"requestedId\":\"news\",\"found\":true,\"scene\":{\"id\":\"news\",\"appId\":\"app.news\"},\"settings\":{\"feed\":\"frameos\",\"maxHeadlines\":6,\"refreshIntervalMin\":20}}",
         payload,
     );
 }
@@ -495,6 +504,19 @@ test "scene settings by id route renders unknown-scene error payload" {
         "{\"host\":\"0.0.0.0\",\"port\":7777,\"requestedId\":\"unknown-scene\",\"found\":false,\"error\":{\"code\":\"scene_not_found\",\"message\":\"Unknown scene id\"}}",
         payload,
     );
+}
+
+test "server route registration includes scene settings route" {
+    const testing = std.testing;
+
+    const routes = RuntimeServer.registeredRoutes();
+    try testing.expectEqual(@as(usize, 6), routes.len);
+    try testing.expectEqualStrings("/health", routes[0]);
+    try testing.expectEqualStrings("/scenes", routes[1]);
+    try testing.expectEqualStrings("/scenes/:id", routes[2]);
+    try testing.expectEqualStrings("/scenes/:id/settings", routes[3]);
+    try testing.expectEqualStrings("/system/hotspot", routes[4]);
+    try testing.expectEqualStrings("/system/device", routes[5]);
 }
 
 test "hotspot status route exposes wifi-hotspot startup scene context" {

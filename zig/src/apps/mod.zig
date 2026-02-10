@@ -2,6 +2,7 @@ const std = @import("std");
 const clock_app = @import("clock.zig");
 const weather_app = @import("weather.zig");
 const calendar_app = @import("calendar.zig");
+const news_app = @import("news.zig");
 const types = @import("types.zig");
 
 pub const AppContext = types.AppContext;
@@ -46,6 +47,11 @@ pub const AppBoundary = struct {
             return lifecycle.startup(ctx);
         }
 
+        if (std.mem.eql(u8, self.runtime.spec.id, "app.news")) {
+            const lifecycle = news_app.NewsAppLifecycle.init(self.runtime.spec);
+            return lifecycle.startup(ctx);
+        }
+
         try self.runtime.startup(ctx);
         return .{
             .app_id = self.runtime.spec.id,
@@ -79,11 +85,19 @@ pub fn sceneSettingsPayloadForScene(scene_id: []const u8, buffer: []u8) !?[]cons
         return try weather_app.renderSceneSettingsJson(weather_app.default_scene_settings, buffer);
     }
 
+    if (std.mem.eql(u8, scene_id, "news")) {
+        return try news_app.renderSceneSettingsJson(news_app.default_scene_settings, buffer);
+    }
+
     return null;
 }
 
+pub fn sceneSettingsAvailableForScene(scene_id: []const u8) bool {
+    return std.mem.eql(u8, scene_id, "calendar") or std.mem.eql(u8, scene_id, "weather") or std.mem.eql(u8, scene_id, "news");
+}
+
 fn isAppLifecycleRegistered(app_id: []const u8) bool {
-    return std.mem.eql(u8, app_id, "app.clock") or std.mem.eql(u8, app_id, "app.weather") or std.mem.eql(u8, app_id, "app.calendar");
+    return std.mem.eql(u8, app_id, "app.clock") or std.mem.eql(u8, app_id, "app.weather") or std.mem.eql(u8, app_id, "app.calendar") or std.mem.eql(u8, app_id, "app.news");
 }
 
 pub fn builtinSceneManifests() []const SceneManifest {
@@ -164,16 +178,15 @@ test "calendar scene app boundary resolves concrete lifecycle summary" {
     try testing.expectEqual(@as(u8, 12), summary.frame_rate_hz);
 }
 
-test "app boundary returns null for unregistered lifecycle when manifest exists" {
+test "news scene app boundary resolves concrete lifecycle summary" {
     const testing = std.testing;
 
-    try testing.expectEqual(@as(?AppBoundary, null), loadAppBoundaryForScene("news"));
-}
+    const boundary = loadAppBoundaryForScene("news") orelse return error.TestUnexpectedResult;
+    const summary = try boundary.startup(.{ .allocator = testing.allocator });
 
-test "lifecycle summary helper returns null for unregistered lifecycle when manifest exists" {
-    const testing = std.testing;
-
-    try testing.expectEqual(@as(?AppStartupSummary, null), try appLifecycleSummaryForScene("news", .{ .allocator = testing.allocator }));
+    try testing.expectEqualStrings("app.news", summary.app_id);
+    try testing.expectEqualStrings("news", summary.lifecycle);
+    try testing.expectEqual(@as(u8, 10), summary.frame_rate_hz);
 }
 
 test "app boundary returns null for unknown scene" {
@@ -200,7 +213,16 @@ test "scene settings payload helper returns null for scenes without settings con
     const testing = std.testing;
 
     var buf: [128]u8 = undefined;
-    try testing.expectEqual(@as(?[]const u8, null), try sceneSettingsPayloadForScene("news", &buf));
+    try testing.expectEqual(@as(?[]const u8, null), try sceneSettingsPayloadForScene("clock", &buf));
+}
+
+test "scene settings availability helper reports support by scene" {
+    const testing = std.testing;
+
+    try testing.expect(sceneSettingsAvailableForScene("calendar"));
+    try testing.expect(sceneSettingsAvailableForScene("weather"));
+    try testing.expect(!sceneSettingsAvailableForScene("clock"));
+    try testing.expect(sceneSettingsAvailableForScene("news"));
 }
 
 test "scene settings payload helper renders weather settings" {
@@ -212,6 +234,19 @@ test "scene settings payload helper renders weather settings" {
     try testing.expect(payload != null);
     try testing.expectEqualStrings(
         "{\"location\":\"San Francisco, CA\",\"units\":\"metric\",\"refreshIntervalMin\":15}",
+        payload.?,
+    );
+}
+
+test "scene settings payload helper renders news settings" {
+    const testing = std.testing;
+
+    var buf: [128]u8 = undefined;
+    const payload = try sceneSettingsPayloadForScene("news", &buf);
+
+    try testing.expect(payload != null);
+    try testing.expectEqualStrings(
+        "{\"feed\":\"frameos\",\"maxHeadlines\":6,\"refreshIntervalMin\":20}",
         payload.?,
     );
 }

@@ -81,7 +81,7 @@ test "runner uses clock app lifecycle boundary" {
 }
 
 
-test "runner falls back to missing lifecycle when manifest exists but no app boundary is registered" {
+test "runner resolves news lifecycle when manifest exists" {
     const testing = @import("std").testing;
 
     const logger = logger_mod.RuntimeLogger.init(.{
@@ -103,16 +103,12 @@ test "runner falls back to missing lifecycle when manifest exists but no app bou
     try testing.expectEqualStrings("app.news", manifest.app.id);
 
     const summary = try apps_mod.appLifecycleSummaryForScene(startup_scene, .{ .allocator = testing.allocator });
-    try testing.expectEqual(@as(?apps_mod.AppStartupSummary, null), summary);
+    try testing.expect(summary != null);
 
-    const fallback = if (summary) |resolved|
-        resolved
-    else
-        apps_mod.AppStartupSummary{ .app_id = manifest.app.id, .lifecycle = "missing", .frame_rate_hz = 0 };
-
-    try testing.expectEqualStrings("app.news", fallback.app_id);
-    try testing.expectEqualStrings("missing", fallback.lifecycle);
-    try testing.expectEqual(@as(u8, 0), fallback.frame_rate_hz);
+    const resolved = summary orelse return error.TestUnexpectedResult;
+    try testing.expectEqualStrings("app.news", resolved.app_id);
+    try testing.expectEqualStrings("news", resolved.lifecycle);
+    try testing.expectEqual(@as(u8, 10), resolved.frame_rate_hz);
 }
 
 test "runner app settings availability reports present for calendar" {
@@ -121,8 +117,8 @@ test "runner app settings availability reports present for calendar" {
     try testing.expectEqualStrings("present", try appSettingsAvailabilityForScene("calendar"));
 }
 
-test "runner app settings availability reports missing for news" {
+test "runner app settings availability reports present for news" {
     const testing = @import("std").testing;
 
-    try testing.expectEqualStrings("missing", try appSettingsAvailabilityForScene("news"));
+    try testing.expectEqualStrings("present", try appSettingsAvailabilityForScene("news"));
 }
