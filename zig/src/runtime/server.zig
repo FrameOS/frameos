@@ -3,6 +3,7 @@ const config_mod = @import("config.zig");
 const health_mod = @import("health.zig");
 const logger_mod = @import("logger.zig");
 const scenes_mod = @import("scenes.zig");
+const system_mod = @import("../system/mod.zig");
 
 pub const RuntimeServer = struct {
     logger: logger_mod.RuntimeLogger,
@@ -35,6 +36,11 @@ pub const RuntimeServer = struct {
             "{\"event\":\"server.route\",\"route\":\"/scenes/:id\",\"status\":\"stub\",\"method\":\"GET\"}",
             .{},
         );
+
+        try self.logger.info(
+            "{\"event\":\"server.route\",\"route\":\"/system/hotspot\",\"status\":\"stub\",\"method\":\"GET\"}",
+            .{},
+        );
     }
 
     pub fn healthRoute(self: RuntimeServer, snapshot: health_mod.HealthSnapshot) HealthRoute {
@@ -48,6 +54,20 @@ pub const RuntimeServer = struct {
     pub fn sceneByIdRoute(self: RuntimeServer, registry: scenes_mod.SceneRegistry, scene_id: []const u8) SceneByIdRoute {
         return .{ .server = self, .result = registry.loadManifestResult(scene_id) };
     }
+
+    pub fn hotspotPortalStatusRoute(
+        self: RuntimeServer,
+        hotspot: system_mod.HotspotActivator,
+        portal: system_mod.WifiHotspotPortalBoundary,
+        startup_state: system_mod.SystemStartupState,
+    ) HotspotPortalStatusRoute {
+        return .{
+            .server = self,
+            .hotspot = hotspot,
+            .portal = portal,
+            .startup_state = startup_state,
+        };
+    }
 };
 
 pub const HealthRoute = struct {
@@ -58,9 +78,10 @@ pub const HealthRoute = struct {
         var stream = std.io.fixedBufferStream(buffer);
         const writer = stream.writer();
         try writer.print(
-            "{\"status\":\"{s}\",\"serverStarted\":{},\"networkRequired\":{},\"networkOk\":{s},\"schedulerReady\":{},\"runnerReady\":{},\"host\":\"{s}\",\"port\":{}}",
+            "{\"status\":\"{s}\",\"startupState\":\"{s}\",\"serverStarted\":{},\"networkRequired\":{},\"networkOk\":{s},\"schedulerReady\":{},\"runnerReady\":{},\"host\":\"{s}\",\"port\":{}}",
             .{
                 statusLabel(self.snapshot.status),
+                health_mod.startupStateLabel(self.snapshot.startup_state),
                 self.snapshot.server_started,
                 self.snapshot.network_required,
                 networkLabel(self.snapshot.network_ok),
@@ -126,6 +147,33 @@ pub const SceneByIdRoute = struct {
     }
 };
 
+pub const HotspotPortalStatusRoute = struct {
+    server: RuntimeServer,
+    hotspot: system_mod.HotspotActivator,
+    portal: system_mod.WifiHotspotPortalBoundary,
+    startup_state: system_mod.SystemStartupState,
+
+    pub fn renderJson(self: HotspotPortalStatusRoute, buffer: []u8) ![]const u8 {
+        var portal_url_buf: [128]u8 = undefined;
+        const portal_url = try self.portal.captivePortalUrl(&portal_url_buf);
+
+        var stream = std.io.fixedBufferStream(buffer);
+        const writer = stream.writer();
+        try writer.print(
+            "{\"host\":\"{s}\",\"port\":{},\"startupState\":\"{s}\",\"hotspotActive\":{},\"portal\":{\"url\":\"{s}\"}}",
+            .{
+                self.server.config.frame_host,
+                self.server.config.frame_port,
+                system_mod.startupStateLabel(self.startup_state),
+                self.hotspot.shouldActivateHotspot(),
+                portal_url,
+            },
+        );
+
+        return stream.getWritten();
+    }
+};
+
 fn statusLabel(status: health_mod.HealthSnapshot.Status) []const u8 {
     return switch (status) {
         .ok => "ok",
@@ -165,6 +213,7 @@ test "health route renders snapshot JSON payload" {
 
     const route = server.healthRoute(.{
         .status = .ok,
+        .startup_state = .ready,
         .server_started = true,
         .network_required = true,
         .network_ok = true,
@@ -176,7 +225,7 @@ test "health route renders snapshot JSON payload" {
     const payload = try route.renderJson(&buf);
 
     try testing.expectEqualStrings(
-        "{\"status\":\"ok\",\"serverStarted\":true,\"networkRequired\":true,\"networkOk\":true,\"schedulerReady\":true,\"runnerReady\":true,\"host\":\"0.0.0.0\",\"port\":7777}",
+        "{\"status\":\"ok\",\"startupState\":\"ready\",\"serverStarted\":true,\"networkRequired\":true,\"networkOk\":true,\"schedulerReady\":true,\"runnerReady\":true,\"host\":\"0.0.0.0\",\"port\":7777}",
         payload,
     );
 }
@@ -217,6 +266,41 @@ test "scenes route renders scene discovery payload" {
     );
 }
 
+test "scene by id route renders successful scene payload" {
+    const testing = std.testing;
+
+    const logger = logger_mod.RuntimeLogger.init(.{
+        .frame_host = "127.0.0.1",
+        .frame_port = 8787,
+        .debug = false,
+        .metrics_interval_s = 60,
+        .network_check = true,
+        .device = "simulator",
+        .startup_scene = "clock",
+    });
+
+    const server = RuntimeServer.init(logger, .{
+        .frame_host = "0.0.0.0",
+        .frame_port = 7777,
+        .debug = false,
+        .metrics_interval_s = 30,
+        .network_check = true,
+        .device = "simulator",
+        .startup_scene = "clock",
+    });
+
+    const registry = scenes_mod.SceneRegistry.init(logger, "clock");
+    const route = server.sceneByIdRoute(registry, "weather");
+
+    var buf: [256]u8 = undefined;
+    const payload = try route.renderJson(&buf);
+
+    try testing.expectEqualStrings(
+        "{\"host\":\"0.0.0.0\",\"port\":7777,\"requestedId\":\"weather\",\"found\":true,\"scene\":{\"id\":\"weather\",\"appId\":\"app.weather\",\"entrypoint\":\"apps/weather/main\"}}",
+        payload,
+    );
+}
+
 test "scene by id route renders error payload for unknown scene id" {
     const testing = std.testing;
 
@@ -248,6 +332,49 @@ test "scene by id route renders error payload for unknown scene id" {
 
     try testing.expectEqualStrings(
         "{\"host\":\"0.0.0.0\",\"port\":7777,\"requestedId\":\"unknown-scene\",\"found\":false,\"error\":{\"code\":\"scene_not_found\",\"message\":\"Unknown scene id\"}}",
+        payload,
+    );
+}
+
+test "hotspot status route exposes startup state and captive portal url" {
+    const testing = std.testing;
+
+    const logger = logger_mod.RuntimeLogger.init(.{
+        .frame_host = "10.42.0.1",
+        .frame_port = 8787,
+        .debug = false,
+        .metrics_interval_s = 30,
+        .network_check = false,
+        .device = "simulator",
+        .startup_scene = "clock",
+    });
+
+    const config: config_mod.RuntimeConfig = .{
+        .frame_host = "10.42.0.1",
+        .frame_port = 8787,
+        .debug = false,
+        .metrics_interval_s = 30,
+        .network_check = false,
+        .device = "simulator",
+        .startup_scene = "clock",
+    };
+
+    const server = RuntimeServer.init(logger, config);
+    const startup_scene = system_mod.defaultStartupScene(config);
+    const hotspot = system_mod.HotspotActivator.init(logger, startup_scene, .degraded_network);
+    const portal = system_mod.WifiHotspotPortalBoundary.init(logger, .{
+        .ssid = "FrameOS Setup",
+        .password = "frameos",
+        .frame_host = config.frame_host,
+        .frame_port = config.frame_port,
+    });
+
+    const route = server.hotspotPortalStatusRoute(hotspot, portal, .degraded_network);
+    var buf: [256]u8 = undefined;
+    const payload = try route.renderJson(&buf);
+
+    try testing.expectEqualStrings(
+        "{\"host\":\"10.42.0.1\",\"port\":8787,\"startupState\":\"degraded-network\",\"hotspotActive\":true,\"portal\":{\"url\":\"http://10.42.0.1:8787/\"}}",
         payload,
     );
 }

@@ -76,6 +76,12 @@
   - [x] Added `renderBootRoutePayloads` wiring + integration-style Zig test that validates boot snapshot payloads for `/health`, `/scenes`, and startup `/scenes/:id` lookup behavior.
   - [x] Extended `system` startup-state mapping with explicit `booting` and `degraded-network` transitional states and threaded state through hotspot activation + boot logging.
 
+
+- **Iteration 14:**
+  - [x] Added `/system/hotspot` server-route payload contract that reports startup-state, hotspot activation intent, and captive-portal URL.
+  - [x] Threaded runtime health startup-state progression (`booting` -> `ready`) through readiness gates and surfaced `startupState` in `/health` payloads.
+  - [x] Added successful `/scenes/:id` payload tests plus extended boot-route integration coverage for `/system/hotspot` and startup-state-ready health snapshots.
+
 ## Completed
 - [x] Create `zig/` directory.
 - [x] Create `zig/TODO.md` with loop structure and initial plan.
@@ -103,13 +109,16 @@
 - [x] Add scene-manifest error payloads for unknown scene IDs and thread them into server-route contracts.
 - [x] Add a runtime integration test that exercises boot wiring and validates both `/health` and `/scenes` payload snapshots.
 - [x] Extend `system` startup-state mapping to include explicit `booting`/`degraded-network` transitional states.
+- [x] Add a stub server route contract for hotspot/portal status payloads so transitional startup state is externally visible.
+- [x] Thread startup-state progression (`booting` -> `ready`) into runtime health snapshots once scheduler/runner/server readiness gates are satisfied.
+- [x] Add richer scene route tests for successful `/scenes/:id` payload rendering in addition to unknown-scene error payloads.
 
 ---
 
 ## Next Actions (priority order)
-1. [ ] Add a stub server route contract for hotspot/portal status payloads so transitional startup state is externally visible.
-2. [ ] Thread startup-state progression (`booting` -> `ready`) into runtime health snapshots once scheduler/runner/server readiness gates are satisfied.
-3. [ ] Add richer scene route tests for successful `/scenes/:id` payload rendering in addition to unknown-scene error payloads.
+1. [ ] Add a dedicated route contract for device-summary payloads (resolution/rotation/kind) to externalize `system/device_utils` state.
+2. [ ] Thread live network probe outcomes (`networkOk=false`) into startup-state transitions so degraded readiness is explicit when probes fail.
+3. [ ] Add a boot integration assertion for `/scenes/:id` success payload selection when configured startup scene exists.
 
 ---
 
