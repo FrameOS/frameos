@@ -99,6 +99,11 @@
   - [x] Extended `runtime/network_probe.zig` with explicit probe-mode behavior so deterministic success/failure simulation no longer depends on host-name heuristics.
   - [x] Added boot-level `boot.network_probe` log payload fields (target host/port, mode, outcome) and expanded `/system/hotspot` route payload with `startupScene` context.
 
+- **Iteration 18:**
+  - [x] Added `/system/hotspot` route-level JSON coverage for both `startupScene=wifi-hotspot` and `startupScene=index` variants so startup-scene diagnostics are validated across both expected boot paths.
+  - [x] Threaded network-probe mode/outcome metadata into `/health` payload JSON via a `networkProbe` object and updated boot integration coverage to assert successful and failed probe summaries.
+  - [x] Added config-level tests that exercise `loadConfig` parsing behavior for `FRAME_NETWORK_PROBE_MODE` (valid and invalid values).
+
 ## Completed
 - [x] Create `zig/` directory.
 - [x] Create `zig/TODO.md` with loop structure and initial plan.
@@ -137,12 +142,16 @@
 - [x] Add a probe-mode config toggle (stub strategy) to support deterministic success/failure simulation without encoding host-name heuristics.
 - [x] Extend `/system/hotspot` payload contract with startup-scene context to align diagnostics shape with `/system/device`.
 
+- [x] Add route-level JSON coverage for `/system/hotspot` startup-scene context under both index and wifi-hotspot startup-scene variants.
+- [x] Thread network-probe mode and probe outcome summary into `/health` payload metadata for at-a-glance diagnostics.
+- [x] Add config-level tests that exercise `loadConfig` parsing for `FRAME_NETWORK_PROBE_MODE` environment values.
+
 ---
 
 ## Next Actions (priority order)
-1. [ ] Add route-level JSON coverage for `/system/hotspot` startup-scene context under both index and wifi-hotspot startup-scene variants.
-2. [ ] Thread network-probe mode and probe outcome summary into `/health` payload metadata for at-a-glance diagnostics.
-3. [ ] Add config-level tests that exercise `loadConfig` parsing for `FRAME_NETWORK_PROBE_MODE` environment values.
+1. [ ] Add route-level JSON coverage for `/health` when network checks are disabled so `networkProbe.outcome=unknown` is explicitly locked in.
+2. [ ] Introduce a dedicated boot log payload test that validates `boot.network_probe` mode/outcome fields remain aligned with `/health` diagnostics.
+3. [ ] Start porting one concrete Zig app boundary implementation (first target: clock app lifecycle stub) behind `apps/mod.zig`.
 
 ## Backlog / Later
 - [ ] Port individual apps incrementally (start with simplest).

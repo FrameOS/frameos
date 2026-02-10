@@ -138,3 +138,28 @@ test "parse network probe mode values and defaults" {
     try testing.expectEqual(NetworkProbeMode.auto, parseProbeModeOrDefault("invalid", .auto));
     try testing.expectEqual(NetworkProbeMode.force_failed, parseProbeModeOrDefault(null, .force_failed));
 }
+
+
+test "loadConfig parses FRAME_NETWORK_PROBE_MODE force-ok" {
+    const testing = std.testing;
+
+    try std.posix.setenvZ("FRAME_NETWORK_PROBE_MODE", "force-ok", true);
+    defer std.posix.unsetenvZ("FRAME_NETWORK_PROBE_MODE") catch {};
+
+    const config = try loadConfig(testing.allocator);
+    defer deinitConfig(testing.allocator, config);
+
+    try testing.expectEqual(NetworkProbeMode.force_ok, config.network_probe_mode);
+}
+
+test "loadConfig falls back to auto for invalid FRAME_NETWORK_PROBE_MODE" {
+    const testing = std.testing;
+
+    try std.posix.setenvZ("FRAME_NETWORK_PROBE_MODE", "invalid-mode", true);
+    defer std.posix.unsetenvZ("FRAME_NETWORK_PROBE_MODE") catch {};
+
+    const config = try loadConfig(testing.allocator);
+    defer deinitConfig(testing.allocator, config);
+
+    try testing.expectEqual(NetworkProbeMode.auto, config.network_probe_mode);
+}
