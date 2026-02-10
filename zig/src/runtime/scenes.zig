@@ -40,6 +40,14 @@ pub const SceneRegistry = struct {
         return apps_mod.findSceneManifest(scene_id);
     }
 
+    pub fn loadManifestResult(self: SceneRegistry, scene_id: []const u8) SceneManifestResult {
+        if (self.loadManifest(scene_id)) |manifest| {
+            return .{ .requested_scene_id = scene_id, .manifest = manifest };
+        }
+
+        return .{ .requested_scene_id = scene_id, .manifest = null };
+    }
+
     pub fn contains(_: SceneRegistry, scene: []const u8) bool {
         for (built_in_scenes) |registered_scene| {
             if (std.mem.eql(u8, scene, registered_scene)) {
@@ -48,6 +56,15 @@ pub const SceneRegistry = struct {
         }
 
         return false;
+    }
+};
+
+pub const SceneManifestResult = struct {
+    requested_scene_id: []const u8,
+    manifest: ?apps_mod.SceneManifest,
+
+    pub fn found(self: SceneManifestResult) bool {
+        return self.manifest != null;
     }
 };
 
@@ -125,4 +142,25 @@ test "registry loads scene manifest through apps boundary" {
     const manifest = registry.loadManifest("weather") orelse return error.TestUnexpectedResult;
     try testing.expectEqualStrings("weather", manifest.scene_id);
     try testing.expectEqualStrings("app.weather", manifest.app.id);
+}
+
+test "registry returns manifest result errors for unknown scenes" {
+    const testing = std.testing;
+
+    const logger = logger_mod.RuntimeLogger.init(.{
+        .frame_host = "127.0.0.1",
+        .frame_port = 8787,
+        .debug = false,
+        .metrics_interval_s = 60,
+        .network_check = true,
+        .device = "simulator",
+        .startup_scene = "clock",
+    });
+
+    const registry = SceneRegistry.init(logger, "clock");
+    const result = registry.loadManifestResult("unknown-scene");
+
+    try testing.expectEqualStrings("unknown-scene", result.requested_scene_id);
+    try testing.expect(!result.found());
+    try testing.expectEqual(@as(?apps_mod.SceneManifest, null), result.manifest);
 }

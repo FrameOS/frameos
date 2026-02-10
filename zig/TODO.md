@@ -71,6 +71,11 @@
   - [x] Added a stub `/scenes` route payload contract backed by scene registry manifests and logged route payload during boot.
   - [x] Introduced a `system` hotspot activation stub boundary that consumes startup-scene defaults and reports activation intent.
 
+- **Iteration 13:**
+  - [x] Added `SceneManifestResult` and `/scenes/:id` server-route payload contract to surface explicit `scene_not_found` error payloads for unknown scene IDs.
+  - [x] Added `renderBootRoutePayloads` wiring + integration-style Zig test that validates boot snapshot payloads for `/health`, `/scenes`, and startup `/scenes/:id` lookup behavior.
+  - [x] Extended `system` startup-state mapping with explicit `booting` and `degraded-network` transitional states and threaded state through hotspot activation + boot logging.
+
 ## Completed
 - [x] Create `zig/` directory.
 - [x] Create `zig/TODO.md` with loop structure and initial plan.
@@ -95,13 +100,16 @@
 - [x] Add a server stub route for scene-registry discovery payload (`/scenes`) backed by the scene registry boundary.
 - [x] Wire scene manifest selection into `runtime/runner.zig` startup logging so app entrypoint intent is explicit.
 - [x] Introduce a `system` hotspot activation stub boundary that consumes the startup-scene decision helper.
+- [x] Add scene-manifest error payloads for unknown scene IDs and thread them into server-route contracts.
+- [x] Add a runtime integration test that exercises boot wiring and validates both `/health` and `/scenes` payload snapshots.
+- [x] Extend `system` startup-state mapping to include explicit `booting`/`degraded-network` transitional states.
 
 ---
 
 ## Next Actions (priority order)
-1. [ ] Add scene-manifest error payloads for unknown scene IDs and thread them into server-route contracts.
-2. [ ] Add a runtime integration test that exercises boot wiring and validates both `/health` and `/scenes` payload snapshots.
-3. [ ] Extend `system` startup-state mapping to include explicit “booting”/“degraded-network” transitional states.
+1. [ ] Add a stub server route contract for hotspot/portal status payloads so transitional startup state is externally visible.
+2. [ ] Thread startup-state progression (`booting` -> `ready`) into runtime health snapshots once scheduler/runner/server readiness gates are satisfied.
+3. [ ] Add richer scene route tests for successful `/scenes/:id` payload rendering in addition to unknown-scene error payloads.
 
 ---
 

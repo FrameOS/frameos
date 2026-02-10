@@ -30,6 +30,11 @@ pub const RuntimeServer = struct {
             "{\"event\":\"server.route\",\"route\":\"/scenes\",\"status\":\"stub\",\"method\":\"GET\"}",
             .{},
         );
+
+        try self.logger.info(
+            "{\"event\":\"server.route\",\"route\":\"/scenes/:id\",\"status\":\"stub\",\"method\":\"GET\"}",
+            .{},
+        );
     }
 
     pub fn healthRoute(self: RuntimeServer, snapshot: health_mod.HealthSnapshot) HealthRoute {
@@ -38,6 +43,10 @@ pub const RuntimeServer = struct {
 
     pub fn scenesRoute(self: RuntimeServer, registry: scenes_mod.SceneRegistry) ScenesRoute {
         return .{ .server = self, .registry = registry };
+    }
+
+    pub fn sceneByIdRoute(self: RuntimeServer, registry: scenes_mod.SceneRegistry, scene_id: []const u8) SceneByIdRoute {
+        return .{ .server = self, .result = registry.loadManifestResult(scene_id) };
     }
 };
 
@@ -89,6 +98,30 @@ pub const ScenesRoute = struct {
         }
 
         try writer.writeAll("]}");
+        return stream.getWritten();
+    }
+};
+
+pub const SceneByIdRoute = struct {
+    server: RuntimeServer,
+    result: scenes_mod.SceneManifestResult,
+
+    pub fn renderJson(self: SceneByIdRoute, buffer: []u8) ![]const u8 {
+        var stream = std.io.fixedBufferStream(buffer);
+        const writer = stream.writer();
+
+        if (self.result.manifest) |manifest| {
+            try writer.print(
+                "{\"host\":\"{s}\",\"port\":{},\"requestedId\":\"{s}\",\"found\":true,\"scene\":{\"id\":\"{s}\",\"appId\":\"{s}\",\"entrypoint\":\"{s}\"}}",
+                .{ self.server.config.frame_host, self.server.config.frame_port, self.result.requested_scene_id, manifest.scene_id, manifest.app.id, manifest.entrypoint },
+            );
+        } else {
+            try writer.print(
+                "{\"host\":\"{s}\",\"port\":{},\"requestedId\":\"{s}\",\"found\":false,\"error\":{\"code\":\"scene_not_found\",\"message\":\"Unknown scene id\"}}",
+                .{ self.server.config.frame_host, self.server.config.frame_port, self.result.requested_scene_id },
+            );
+        }
+
         return stream.getWritten();
     }
 };
@@ -180,6 +213,41 @@ test "scenes route renders scene discovery payload" {
 
     try testing.expectEqualStrings(
         "{\"host\":\"0.0.0.0\",\"port\":7777,\"scenes\":[{\"id\":\"clock\",\"appId\":\"app.clock\",\"entrypoint\":\"apps/clock/main\"},{\"id\":\"weather\",\"appId\":\"app.weather\",\"entrypoint\":\"apps/weather/main\"},{\"id\":\"calendar\",\"appId\":\"app.calendar\",\"entrypoint\":\"apps/calendar/main\"}]}",
+        payload,
+    );
+}
+
+test "scene by id route renders error payload for unknown scene id" {
+    const testing = std.testing;
+
+    const logger = logger_mod.RuntimeLogger.init(.{
+        .frame_host = "127.0.0.1",
+        .frame_port = 8787,
+        .debug = false,
+        .metrics_interval_s = 60,
+        .network_check = true,
+        .device = "simulator",
+        .startup_scene = "clock",
+    });
+
+    const server = RuntimeServer.init(logger, .{
+        .frame_host = "0.0.0.0",
+        .frame_port = 7777,
+        .debug = false,
+        .metrics_interval_s = 30,
+        .network_check = true,
+        .device = "simulator",
+        .startup_scene = "clock",
+    });
+
+    const registry = scenes_mod.SceneRegistry.init(logger, "clock");
+    const route = server.sceneByIdRoute(registry, "unknown-scene");
+
+    var buf: [256]u8 = undefined;
+    const payload = try route.renderJson(&buf);
+
+    try testing.expectEqualStrings(
+        "{\"host\":\"0.0.0.0\",\"port\":7777,\"requestedId\":\"unknown-scene\",\"found\":false,\"error\":{\"code\":\"scene_not_found\",\"message\":\"Unknown scene id\"}}",
         payload,
     );
 }
