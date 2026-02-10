@@ -130,7 +130,7 @@ pub fn startFrameOS() !void {
     const runtime_startup_state = mapHealthStartupState(health_snapshot.startup_state);
 
     var health_route_buffer: [256]u8 = undefined;
-    var scenes_route_buffer: [1536]u8 = undefined;
+    var scenes_route_buffer: [2048]u8 = undefined;
     var startup_scene_route_buffer: [256]u8 = undefined;
     var startup_scene_settings_route_buffer: [384]u8 = undefined;
     var hotspot_status_route_buffer: [256]u8 = undefined;
@@ -200,7 +200,7 @@ test "boot payload integration captures health and scene snapshots" {
     health.recordNetworkProbe(false);
 
     var health_buf: [256]u8 = undefined;
-    var scenes_buf: [1536]u8 = undefined;
+    var scenes_buf: [2048]u8 = undefined;
     var startup_scene_buf: [256]u8 = undefined;
     var startup_scene_settings_buf: [384]u8 = undefined;
     var hotspot_status_buf: [256]u8 = undefined;
@@ -232,6 +232,8 @@ test "boot payload integration captures health and scene snapshots" {
     try testing.expect(std.mem.indexOf(u8, payloads.scenes, "\"appLifecycle\":{\"appId\":\"app.news\",\"lifecycle\":\"news\",\"frameRateHz\":10},\"settingsAvailable\":true") != null);
     try testing.expect(std.mem.indexOf(u8, payloads.scenes, "\"id\":\"quotes\"") != null);
     try testing.expect(std.mem.indexOf(u8, payloads.scenes, "\"appLifecycle\":{\"appId\":\"app.quotes\",\"lifecycle\":\"quotes\",\"frameRateHz\":8},\"settingsAvailable\":true") != null);
+    try testing.expect(std.mem.indexOf(u8, payloads.scenes, "\"id\":\"transit\"") != null);
+    try testing.expect(std.mem.indexOf(u8, payloads.scenes, "\"appLifecycle\":{\"appId\":\"app.transit\",\"lifecycle\":\"transit\",\"frameRateHz\":2},\"settingsAvailable\":true") != null);
     try testing.expect(std.mem.indexOf(u8, payloads.startup_scene, "\"found\":false") != null);
     try testing.expect(std.mem.indexOf(u8, payloads.startup_scene, "\"code\":\"scene_not_found\"") != null);
     try testing.expectEqualStrings(
@@ -267,7 +269,7 @@ test "boot payload integration captures successful startup scene payload" {
     health.recordNetworkProbe(true);
 
     var health_buf: [256]u8 = undefined;
-    var scenes_buf: [1536]u8 = undefined;
+    var scenes_buf: [2048]u8 = undefined;
     var startup_scene_buf: [256]u8 = undefined;
     var startup_scene_settings_buf: [384]u8 = undefined;
     var hotspot_status_buf: [256]u8 = undefined;
@@ -301,6 +303,8 @@ test "boot payload integration captures successful startup scene payload" {
     try testing.expect(std.mem.indexOf(u8, payloads.scenes, "\"appLifecycle\":{\"appId\":\"app.weather\",\"lifecycle\":\"weather\",\"frameRateHz\":30}") != null);
     try testing.expect(std.mem.indexOf(u8, payloads.scenes, "\"id\":\"news\"") != null);
     try testing.expect(std.mem.indexOf(u8, payloads.scenes, "\"appLifecycle\":{\"appId\":\"app.news\",\"lifecycle\":\"news\",\"frameRateHz\":10},\"settingsAvailable\":true") != null);
+    try testing.expect(std.mem.indexOf(u8, payloads.scenes, "\"id\":\"transit\"") != null);
+    try testing.expect(std.mem.indexOf(u8, payloads.scenes, "\"appLifecycle\":{\"appId\":\"app.transit\",\"lifecycle\":\"transit\",\"frameRateHz\":2},\"settingsAvailable\":true") != null);
     try testing.expect(std.mem.indexOf(u8, payloads.device_summary, "\"startupScene\":\"weather\"") != null);
     try testing.expect(std.mem.indexOf(u8, payloads.device_summary, "\"startupState\":\"ready\"") != null);
     try testing.expect(std.mem.indexOf(u8, payloads.device_summary, "\"rotationDeg\":0") != null);
@@ -351,7 +355,7 @@ test "boot payload integration locks /scenes ordering and lifecycle shape" {
     health.recordNetworkProbe(true);
 
     var health_buf: [256]u8 = undefined;
-    var scenes_buf: [1536]u8 = undefined;
+    var scenes_buf: [2048]u8 = undefined;
     var startup_scene_buf: [256]u8 = undefined;
     var startup_scene_settings_buf: [384]u8 = undefined;
     var hotspot_status_buf: [256]u8 = undefined;
@@ -374,7 +378,7 @@ test "boot payload integration locks /scenes ordering and lifecycle shape" {
     );
 
     try testing.expectEqualStrings(
-        "{\"host\":\"0.0.0.0\",\"port\":7777,\"scenes\":[{\"id\":\"clock\",\"appId\":\"app.clock\",\"entrypoint\":\"apps/clock/main\",\"appLifecycle\":{\"appId\":\"app.clock\",\"lifecycle\":\"clock\",\"frameRateHz\":1},\"settingsAvailable\":false},{\"id\":\"weather\",\"appId\":\"app.weather\",\"entrypoint\":\"apps/weather/main\",\"appLifecycle\":{\"appId\":\"app.weather\",\"lifecycle\":\"weather\",\"frameRateHz\":30},\"settingsAvailable\":true},{\"id\":\"calendar\",\"appId\":\"app.calendar\",\"entrypoint\":\"apps/calendar/main\",\"appLifecycle\":{\"appId\":\"app.calendar\",\"lifecycle\":\"calendar\",\"frameRateHz\":12},\"settingsAvailable\":true},{\"id\":\"news\",\"appId\":\"app.news\",\"entrypoint\":\"apps/news/main\",\"appLifecycle\":{\"appId\":\"app.news\",\"lifecycle\":\"news\",\"frameRateHz\":10},\"settingsAvailable\":true},{\"id\":\"quotes\",\"appId\":\"app.quotes\",\"entrypoint\":\"apps/quotes/main\",\"appLifecycle\":{\"appId\":\"app.quotes\",\"lifecycle\":\"quotes\",\"frameRateHz\":8},\"settingsAvailable\":true}]}",
+        "{\"host\":\"0.0.0.0\",\"port\":7777,\"scenes\":[{\"id\":\"clock\",\"appId\":\"app.clock\",\"entrypoint\":\"apps/clock/main\",\"appLifecycle\":{\"appId\":\"app.clock\",\"lifecycle\":\"clock\",\"frameRateHz\":1},\"settingsAvailable\":false},{\"id\":\"weather\",\"appId\":\"app.weather\",\"entrypoint\":\"apps/weather/main\",\"appLifecycle\":{\"appId\":\"app.weather\",\"lifecycle\":\"weather\",\"frameRateHz\":30},\"settingsAvailable\":true},{\"id\":\"calendar\",\"appId\":\"app.calendar\",\"entrypoint\":\"apps/calendar/main\",\"appLifecycle\":{\"appId\":\"app.calendar\",\"lifecycle\":\"calendar\",\"frameRateHz\":12},\"settingsAvailable\":true},{\"id\":\"news\",\"appId\":\"app.news\",\"entrypoint\":\"apps/news/main\",\"appLifecycle\":{\"appId\":\"app.news\",\"lifecycle\":\"news\",\"frameRateHz\":10},\"settingsAvailable\":true},{\"id\":\"quotes\",\"appId\":\"app.quotes\",\"entrypoint\":\"apps/quotes/main\",\"appLifecycle\":{\"appId\":\"app.quotes\",\"lifecycle\":\"quotes\",\"frameRateHz\":8},\"settingsAvailable\":true},{\"id\":\"transit\",\"appId\":\"app.transit\",\"entrypoint\":\"apps/transit/main\",\"appLifecycle\":{\"appId\":\"app.transit\",\"lifecycle\":\"transit\",\"frameRateHz\":2},\"settingsAvailable\":true}]}",
         payloads.scenes,
     );
 }
@@ -398,7 +402,7 @@ test "boot payload integration captures /scenes settings availability metadata" 
     health.recordNetworkProbe(true);
 
     var health_buf: [256]u8 = undefined;
-    var scenes_buf: [1536]u8 = undefined;
+    var scenes_buf: [2048]u8 = undefined;
     var startup_scene_buf: [256]u8 = undefined;
     var startup_scene_settings_buf: [384]u8 = undefined;
     var hotspot_status_buf: [256]u8 = undefined;
@@ -423,6 +427,7 @@ test "boot payload integration captures /scenes settings availability metadata" 
     try testing.expect(std.mem.indexOf(u8, payloads.scenes, "\"id\":\"weather\"") != null);
     try testing.expect(std.mem.indexOf(u8, payloads.scenes, "\"id\":\"weather\",\"appId\":\"app.weather\",\"entrypoint\":\"apps/weather/main\",\"appLifecycle\":{\"appId\":\"app.weather\",\"lifecycle\":\"weather\",\"frameRateHz\":30},\"settingsAvailable\":true") != null);
     try testing.expect(std.mem.indexOf(u8, payloads.scenes, "\"id\":\"clock\",\"appId\":\"app.clock\",\"entrypoint\":\"apps/clock/main\",\"appLifecycle\":{\"appId\":\"app.clock\",\"lifecycle\":\"clock\",\"frameRateHz\":1},\"settingsAvailable\":false") != null);
+    try testing.expect(std.mem.indexOf(u8, payloads.scenes, "\"id\":\"transit\",\"appId\":\"app.transit\",\"entrypoint\":\"apps/transit/main\",\"appLifecycle\":{\"appId\":\"app.transit\",\"lifecycle\":\"transit\",\"frameRateHz\":2},\"settingsAvailable\":true") != null);
 }
 
 test "boot payload integration captures startup scene with news lifecycle boundary" {
@@ -444,7 +449,7 @@ test "boot payload integration captures startup scene with news lifecycle bounda
     health.recordNetworkProbe(true);
 
     var health_buf: [256]u8 = undefined;
-    var scenes_buf: [1536]u8 = undefined;
+    var scenes_buf: [2048]u8 = undefined;
     var startup_scene_buf: [256]u8 = undefined;
     var startup_scene_settings_buf: [384]u8 = undefined;
     var hotspot_status_buf: [256]u8 = undefined;
@@ -473,4 +478,55 @@ test "boot payload integration captures startup scene with news lifecycle bounda
     try testing.expect(std.mem.indexOf(u8, payloads.startup_scene, "\"appLifecycle\":{\"appId\":\"app.news\",\"lifecycle\":\"news\",\"frameRateHz\":10}") != null);
     try testing.expect(std.mem.indexOf(u8, payloads.startup_scene_settings, "\"requestedId\":\"news\"") != null);
     try testing.expect(std.mem.indexOf(u8, payloads.startup_scene_settings, "\"settings\":{\"feed\":\"frameos\",\"maxHeadlines\":6,\"refreshIntervalMin\":20}") != null);
+}
+
+test "boot payload integration captures startup scene with quotes settings routes" {
+    const testing = std.testing;
+
+    const logger = logger_mod.RuntimeLogger.init(.{ .frame_host = "127.0.0.1", .frame_port = 8787, .debug = false, .metrics_interval_s = 60, .network_check = true, .network_probe_mode = .auto, .device = "simulator", .startup_scene = "quotes" });
+    const config: config_mod.RuntimeConfig = .{ .frame_host = "0.0.0.0", .frame_port = 7777, .debug = false, .metrics_interval_s = 30, .network_check = true, .network_probe_mode = .auto, .device = "simulator", .startup_scene = "quotes" };
+
+    const server = server_mod.RuntimeServer.init(logger, config);
+    const registry = scenes_mod.SceneRegistry.init(logger, config.startup_scene);
+    const startup_scene = system_mod.defaultStartupScene(config);
+    const startup_state = system_mod.startupStateFromConfig(config);
+    const services = system_mod.SystemServices.init(logger, config.frame_host, config.frame_port, config.device, startup_scene, startup_state);
+
+    var health = health_mod.RuntimeHealth.init(logger, true, .booting);
+    health.markServerStarted();
+    health.markRunnerReady();
+    health.markSchedulerReady();
+    health.recordNetworkProbe(true);
+
+    var health_buf: [256]u8 = undefined;
+    var scenes_buf: [2048]u8 = undefined;
+    var startup_scene_buf: [256]u8 = undefined;
+    var startup_scene_settings_buf: [384]u8 = undefined;
+    var hotspot_status_buf: [256]u8 = undefined;
+    var device_summary_buf: [320]u8 = undefined;
+
+    const payloads = try renderBootRoutePayloads(
+        server,
+        registry,
+        health.snapshot(),
+        config.network_probe_mode,
+        .ok,
+        services,
+        mapHealthStartupState(health.snapshot().startup_state),
+        &health_buf,
+        &scenes_buf,
+        &startup_scene_buf,
+        &startup_scene_settings_buf,
+        &hotspot_status_buf,
+        &device_summary_buf,
+    );
+
+    try testing.expectEqualStrings(
+        "{\"host\":\"0.0.0.0\",\"port\":7777,\"requestedId\":\"quotes\",\"found\":true,\"scene\":{\"id\":\"quotes\",\"appId\":\"app.quotes\",\"entrypoint\":\"apps/quotes/main\"},\"appLifecycle\":{\"appId\":\"app.quotes\",\"lifecycle\":\"quotes\",\"frameRateHz\":8}}",
+        payloads.startup_scene,
+    );
+    try testing.expectEqualStrings(
+        "{\"host\":\"0.0.0.0\",\"port\":7777,\"requestedId\":\"quotes\",\"found\":true,\"scene\":{\"id\":\"quotes\",\"appId\":\"app.quotes\"},\"settings\":{\"feed\":\"zen\",\"maxQuotes\":5,\"refreshIntervalMin\":30}}",
+        payloads.startup_scene_settings,
+    );
 }

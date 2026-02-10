@@ -138,6 +138,11 @@
   - [x] Ported the next concrete app boundary (`quotes`) via `zig/src/apps/quotes.zig` and wired scene manifest + lifecycle/settings contracts through apps, scene registry, and route payloads.
   - [x] Added parity-focused app contract coverage in `apps/mod.zig` asserting lifecycle/settings JSON shapes for `clock`/`weather`/`calendar`/`news`.
 
+- **Iteration 24:**
+  - [x] Added runner coverage for startup logging snapshots when startup scene settings are missing (`clock` now locks `appSettings="missing"`).
+  - [x] Ported a fifth concrete app boundary (`transit`) via `zig/src/apps/transit.zig` and wired lifecycle/settings contracts through apps, scene registry, runner, and server routes.
+  - [x] Added boot-integration assertions for startup-scene `/scenes/:id` + `/scenes/:id/settings` JSON payloads when `startupScene=quotes`.
+
 ## Completed
 - [x] Create `zig/` directory.
 - [x] Create `zig/TODO.md` with loop structure and initial plan.
@@ -193,13 +198,16 @@
 - [x] Extend route coverage with a dedicated `/scenes` assertion that validates ordering + lifecycle shape across all built-ins (including nullable boundaries).
 - [x] Add startup-scene integration coverage for a configured scene that exists but has no registered app lifecycle boundary (`news`) to lock fallback runner diagnostics.
 - [x] Start porting app-specific configuration contracts (next target: calendar scene settings payload stub) behind `apps/mod.zig`.
+- [x] Add runner coverage for startup logging snapshots when scene manifest is present but app settings are missing, to lock `appSettings="missing"` diagnostics.
+- [x] Port another concrete app boundary beyond current built-ins (candidate: transit) and add matching scene manifest + lifecycle/settings contracts.
+- [x] Add route-level `/scenes/:id` + `/scenes/:id/settings` JSON assertions for the new `quotes` scene in `frameos.zig` boot integration tests.
 
 ---
 
 ## Next Actions (priority order)
-1. [ ] Add runner coverage for startup logging snapshots when scene manifest is present but app settings are missing, to lock `appSettings="missing"` diagnostics.
-2. [ ] Port another concrete app boundary beyond current built-ins (candidate: transit) and add matching scene manifest + lifecycle/settings contracts.
-3. [ ] Add route-level `/scenes/:id` + `/scenes/:id/settings` JSON assertions for the new `quotes` scene in `frameos.zig` boot integration tests.
+1. [ ] Add boot integration coverage for `startupScene=transit` that locks `/scenes/:id` + `/scenes/:id/settings` payload parity for the new boundary.
+2. [ ] Add runner startup-log coverage for `startupScene=transit` to lock lifecycle (`transit`) + app settings (`present`) diagnostics.
+3. [ ] Port another concrete app boundary beyond current built-ins (candidate: stocks) and add matching scene manifest + lifecycle/settings contracts.
 
 ## Backlog / Later
 - [ ] Port individual apps incrementally (start with simplest).
