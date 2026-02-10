@@ -145,11 +145,20 @@
 - Expanded parity success payloads (`runtime:parity_ok`) to include scheduling fields so downstream tooling can inspect negotiated runtime behavior.
 - Added fixture coverage for scheduling failure modes (`renderer-invalid-scheduling.json`) and updated parity smoke tests to assert failing command output includes invariant diagnostics.
 - Updated CLI/external-interface docs and contract field assertions to reflect the new scheduling parity surface.
+
+
+### Iteration 21 (probe-based parity sources + source metadata events)
+- Added discovery-ready parity source adapters in `src/parity.rs` via `ContractSource` so parity checks can load contracts from fixture files or shell probe commands that emit JSON.
+- Extended parity command plumbing in `src/main.rs` + `src/interfaces.rs` with `--renderer-probe-cmd` and `--driver-probe-cmd`, including strict mutually-exclusive source validation per side.
+- Expanded `runtime:parity_ok` payload fields with `renderer_contract_source` and `driver_contract_source` so telemetry can track fixture vs discovered parity checks during rollout.
+- Added coverage in `tests/runtime_parity.rs` and `tests/interfaces_cli.rs` for probe-flag parsing, contract metadata updates, successful probe-mode parity execution, and mixed-source argument rejection.
+- Updated CLI/external-interface/parity-map docs to document probe-driven parity workflows and source metadata semantics.
+
 ## Next up (small, actionable)
-1. Start wiring device-driver capability discovery adapters (filesystem or command probes) to replace static JSON fixtures in parity checks.
-2. Add CI-oriented daemon smoke script that boots `frameos run`, probes `/healthz`, then sends SIGINT and validates `runtime:stop` in the event log.
-3. Add deterministic runtime-loop integration test coverage that injects fixed timestamps across start/heartbeat/metrics/stop traces for golden JSON-line snapshots.
-4. Add parity probe source metadata (fixture vs discovered) to `runtime:parity_ok` so rollout dashboards can track migration progress.
+1. Add CI-oriented daemon smoke script that boots `frameos run`, probes `/healthz`, then sends SIGINT and validates `runtime:stop` in the event log.
+2. Add deterministic runtime-loop integration test coverage that injects fixed timestamps across start/heartbeat/metrics/stop traces for golden JSON-line snapshots.
+3. Replace shell-based probe commands with first-class filesystem/device capability discovery adapters under a dedicated `discovery` module.
+4. Emit additional probe diagnostics (duration + probe command fingerprint) in `runtime:parity_failed` while avoiding sensitive command leakage.
 
 ## Checklist
 

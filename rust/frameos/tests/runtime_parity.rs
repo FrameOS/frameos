@@ -256,3 +256,52 @@ fn parity_command_fails_for_renderer_scheduling_failure_mode() {
     assert!(stdout.contains("runtime:parity_failed"));
     assert!(stdout.contains("target_fps (60) must be <= max_fps (30)"));
 }
+
+#[test]
+fn parity_command_supports_probe_commands_as_sources() {
+    let binary = env!("CARGO_BIN_EXE_frameos");
+    let renderer_fixture = fixtures_path("parity/renderer-valid.json");
+    let driver_fixture = fixtures_path("parity/driver-valid.json");
+
+    let output = Command::new(binary)
+        .arg("parity")
+        .arg("--renderer-probe-cmd")
+        .arg(format!("cat {}", renderer_fixture.to_string_lossy()))
+        .arg("--driver-probe-cmd")
+        .arg(format!("cat {}", driver_fixture.to_string_lossy()))
+        .output()
+        .expect("parity command should execute");
+
+    assert!(
+        output.status.success(),
+        "parity command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf8");
+    assert!(stdout.contains("runtime:parity_ok"));
+    assert!(stdout.contains("\"renderer_contract_source\":\"discovered\""));
+    assert!(stdout.contains("\"driver_contract_source\":\"discovered\""));
+}
+
+#[test]
+fn parity_command_rejects_mixed_source_flags_for_renderer_side() {
+    let binary = env!("CARGO_BIN_EXE_frameos");
+
+    let output = Command::new(binary)
+        .arg("parity")
+        .arg("--renderer-contract")
+        .arg(fixtures_path("parity/renderer-valid.json"))
+        .arg("--renderer-probe-cmd")
+        .arg("echo '{}' ")
+        .arg("--driver-contract")
+        .arg(fixtures_path("parity/driver-valid.json"))
+        .output()
+        .expect("parity command should execute");
+
+    assert!(!output.status.success(), "parity command should fail");
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("--renderer-contract <path> and --renderer-probe-cmd <shell command> are mutually exclusive")
+    );
+}

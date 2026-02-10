@@ -109,3 +109,29 @@ fn parses_parity_contract_flags() {
         Some(std::path::PathBuf::from("./driver.json"))
     );
 }
+
+#[test]
+fn parses_parity_probe_command_flags() {
+    let cli = Cli::parse(vec![
+        "parity".to_string(),
+        "--renderer-probe-cmd".to_string(),
+        "echo '{}'".to_string(),
+        "--driver-probe-cmd".to_string(),
+        "echo '{}'".to_string(),
+    ])
+    .expect("cli should parse");
+
+    assert_eq!(cli.command, Command::Parity);
+    assert_eq!(cli.renderer_probe_cmd.as_deref(), Some("echo '{}'"));
+    assert_eq!(cli.driver_probe_cmd.as_deref(), Some("echo '{}'"));
+}
+
+#[test]
+fn contract_includes_parity_source_metadata_fields() {
+    let contract = command_contract_json();
+    let parity_ok_fields = contract["events"]["runtime:parity_ok"]["fields"]
+        .as_array()
+        .expect("runtime:parity_ok fields should be array");
+    assert!(parity_ok_fields.contains(&serde_json::json!("renderer_contract_source")));
+    assert!(parity_ok_fields.contains(&serde_json::json!("driver_contract_source")));
+}

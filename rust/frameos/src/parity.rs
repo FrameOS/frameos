@@ -3,6 +3,7 @@ use std::fmt;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct RendererContract {
@@ -36,6 +37,21 @@ pub struct DriverSchedulingContract {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ContractSource {
+    FixtureFile(PathBuf),
+    ProbeCommand(String),
+}
+
+impl ContractSource {
+    pub fn source_kind(&self) -> &'static str {
+        match self {
+            Self::FixtureFile(_) => "fixture",
+            Self::ProbeCommand(_) => "discovered",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParityReport {
     pub renderer_api_version: String,
     pub driver_api_version: String,
@@ -46,12 +62,15 @@ pub struct ParityReport {
     pub renderer_drop_policy: String,
     pub driver_backpressure_policy: String,
     pub driver_max_queue_depth: u32,
+    pub renderer_contract_source: String,
+    pub driver_contract_source: String,
 }
 
 #[derive(Debug)]
 pub enum ParityError {
     ReadFailed(PathBuf, io::Error),
-    ParseFailed(PathBuf, serde_json::Error),
+    ParseFailed(String, serde_json::Error),
+    ProbeFailed(String, String),
     ValidationFailed(Vec<String>),
 }
 
@@ -66,13 +85,11 @@ impl fmt::Display for ParityError {
                     err
                 )
             }
-            Self::ParseFailed(path, err) => {
-                write!(
-                    f,
-                    "failed to parse parity contract {}: {}",
-                    path.display(),
-                    err
-                )
+            Self::ParseFailed(source, err) => {
+                write!(f, "failed to parse parity contract {}: {}", source, err)
+            }
+            Self::ProbeFailed(command, details) => {
+                write!(f, "failed to run parity probe `{}`: {}", command, details)
             }
             Self::ValidationFailed(messages) => {
                 write!(f, "parity validation failed: {}", messages.join("; "))
@@ -88,7 +105,7 @@ pub fn load_renderer_contract(path: impl AsRef<Path>) -> Result<RendererContract
     let contents = fs::read_to_string(path)
         .map_err(|error| ParityError::ReadFailed(path.to_path_buf(), error))?;
     serde_json::from_str::<RendererContract>(&contents)
-        .map_err(|error| ParityError::ParseFailed(path.to_path_buf(), error))
+        .map_err(|error| ParityError::ParseFailed(path.display().to_string(), error))
 }
 
 pub fn load_driver_contract(path: impl AsRef<Path>) -> Result<DriverContract, ParityError> {
@@ -96,12 +113,68 @@ pub fn load_driver_contract(path: impl AsRef<Path>) -> Result<DriverContract, Pa
     let contents = fs::read_to_string(path)
         .map_err(|error| ParityError::ReadFailed(path.to_path_buf(), error))?;
     serde_json::from_str::<DriverContract>(&contents)
-        .map_err(|error| ParityError::ParseFailed(path.to_path_buf(), error))
+        .map_err(|error| ParityError::ParseFailed(path.display().to_string(), error))
+}
+
+fn load_contract_from_probe_command<T>(command: &str, label: &str) -> Result<T, ParityError>
+where
+    T: for<'de> Deserialize<'de>,
+{
+    let output = Command::new("sh")
+        .arg("-c")
+        .arg(command)
+        .output()
+        .map_err(|error| ParityError::ProbeFailed(command.to_string(), error.to_string()))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let details = if stderr.is_empty() {
+            format!("command exited with status {}", output.status)
+        } else {
+            format!("command exited with status {}: {}", output.status, stderr)
+        };
+        return Err(ParityError::ProbeFailed(command.to_string(), details));
+    }
+
+    serde_json::from_slice::<T>(&output.stdout).map_err(|error| {
+        ParityError::ParseFailed(format!("{} probe command `{}`", label, command), error)
+    })
+}
+
+pub fn load_renderer_contract_from_source(
+    source: &ContractSource,
+) -> Result<RendererContract, ParityError> {
+    match source {
+        ContractSource::FixtureFile(path) => load_renderer_contract(path),
+        ContractSource::ProbeCommand(command) => {
+            load_contract_from_probe_command::<RendererContract>(command, "renderer")
+        }
+    }
+}
+
+pub fn load_driver_contract_from_source(
+    source: &ContractSource,
+) -> Result<DriverContract, ParityError> {
+    match source {
+        ContractSource::FixtureFile(path) => load_driver_contract(path),
+        ContractSource::ProbeCommand(command) => {
+            load_contract_from_probe_command::<DriverContract>(command, "driver")
+        }
+    }
 }
 
 pub fn validate_renderer_driver_parity(
     renderer: &RendererContract,
     driver: &DriverContract,
+) -> Result<ParityReport, ParityError> {
+    validate_renderer_driver_parity_with_sources(renderer, driver, "fixture", "fixture")
+}
+
+pub fn validate_renderer_driver_parity_with_sources(
+    renderer: &RendererContract,
+    driver: &DriverContract,
+    renderer_source: &str,
+    driver_source: &str,
 ) -> Result<ParityReport, ParityError> {
     let mut errors = Vec::new();
 
@@ -238,6 +311,8 @@ pub fn validate_renderer_driver_parity(
         renderer_drop_policy: renderer.scheduling.drop_policy.clone(),
         driver_backpressure_policy: driver.scheduling.backpressure_policy.clone(),
         driver_max_queue_depth: driver.scheduling.max_queue_depth,
+        renderer_contract_source: renderer_source.to_string(),
+        driver_contract_source: driver_source.to_string(),
     })
 }
 
@@ -248,6 +323,20 @@ pub fn run_parity_check(
     let renderer = load_renderer_contract(renderer_path)?;
     let driver = load_driver_contract(driver_path)?;
     validate_renderer_driver_parity(&renderer, &driver)
+}
+
+pub fn run_parity_check_with_sources(
+    renderer_source: &ContractSource,
+    driver_source: &ContractSource,
+) -> Result<ParityReport, ParityError> {
+    let renderer = load_renderer_contract_from_source(renderer_source)?;
+    let driver = load_driver_contract_from_source(driver_source)?;
+    validate_renderer_driver_parity_with_sources(
+        &renderer,
+        &driver,
+        renderer_source.source_kind(),
+        driver_source.source_kind(),
+    )
 }
 
 #[cfg(test)]
@@ -282,6 +371,8 @@ mod tests {
             validate_renderer_driver_parity(&renderer, &driver).expect("contracts should validate");
         assert_eq!(report.shared_formats, vec!["rgb565".to_string()]);
         assert_eq!(report.renderer_target_fps, 20);
+        assert_eq!(report.renderer_contract_source, "fixture");
+        assert_eq!(report.driver_contract_source, "fixture");
     }
 
     #[test]
@@ -336,5 +427,14 @@ mod tests {
             .iter()
             .any(|message| message
                 .contains("backpressure_policy=drop requires renderer drop_policy")));
+    }
+
+    #[test]
+    fn reports_probe_command_failure_details() {
+        let source = ContractSource::ProbeCommand("exit 7".to_string());
+        let error = load_renderer_contract_from_source(&source).expect_err("must fail");
+        assert!(error
+            .to_string()
+            .contains("failed to run parity probe `exit 7`"));
     }
 }

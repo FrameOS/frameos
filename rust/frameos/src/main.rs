@@ -9,7 +9,7 @@ use frameos::interfaces::{command_contract_json, Cli, Command};
 use frameos::logging::{
     self, FileJsonLineSink, JsonLineSink, MultiJsonLineSink, StdoutJsonLineSink,
 };
-use frameos::parity::run_parity_check;
+use frameos::parity::{run_parity_check_with_sources, ContractSource};
 use frameos::runtime::{Runtime, RuntimeError};
 
 fn build_runtime(cli: &Cli, config: FrameOSConfig) -> Result<Runtime, RuntimeError> {
@@ -40,8 +40,24 @@ fn build_sink_with_optional_config(
     }
 }
 
-fn required_path<'a>(label: &str, path: Option<&'a Path>) -> Result<&'a Path, io::Error> {
-    path.ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, format!("{label} is required")))
+fn parity_contract_source(
+    path: Option<&Path>,
+    probe_cmd: Option<&str>,
+    path_flag: &str,
+    probe_flag: &str,
+) -> Result<ContractSource, io::Error> {
+    match (path, probe_cmd) {
+        (Some(path), None) => Ok(ContractSource::FixtureFile(path.to_path_buf())),
+        (None, Some(command)) => Ok(ContractSource::ProbeCommand(command.to_string())),
+        (Some(_), Some(_)) => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("{path_flag} and {probe_flag} are mutually exclusive"),
+        )),
+        (None, None) => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("one of {path_flag} or {probe_flag} is required"),
+        )),
+    }
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -80,16 +96,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Command::Parity => {
             let sink = build_sink_with_optional_config(cli.event_log_path.as_deref(), None)?;
-            let renderer_path = required_path(
-                "--renderer-contract <path>",
+            let renderer_source = parity_contract_source(
                 cli.renderer_contract_path.as_deref(),
+                cli.renderer_probe_cmd.as_deref(),
+                "--renderer-contract <path>",
+                "--renderer-probe-cmd <shell command>",
             )?;
-            let driver_path = required_path(
-                "--driver-contract <path>",
+            let driver_source = parity_contract_source(
                 cli.driver_contract_path.as_deref(),
+                cli.driver_probe_cmd.as_deref(),
+                "--driver-contract <path>",
+                "--driver-probe-cmd <shell command>",
             )?;
 
-            match run_parity_check(renderer_path, driver_path) {
+            match run_parity_check_with_sources(&renderer_source, &driver_source) {
                 Ok(report) => {
                     let _ = logging::log_event_with_sink(
                         sink.as_ref(),
@@ -104,6 +124,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             "renderer_drop_policy": report.renderer_drop_policy,
                             "driver_backpressure_policy": report.driver_backpressure_policy,
                             "driver_max_queue_depth": report.driver_max_queue_depth,
+                            "renderer_contract_source": report.renderer_contract_source,
+                            "driver_contract_source": report.driver_contract_source,
                         }),
                     );
                     println!("FrameOS parity check: passed 🎉");

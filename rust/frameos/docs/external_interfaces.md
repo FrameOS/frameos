@@ -11,8 +11,9 @@ Current commands are implemented in `src/interfaces.rs` and exercised by `src/ma
   - Loads config and optional manifests, then emits `runtime:start` + `runtime:ready` events.
 - `frameos check [--config <path>] [--scenes <path>] [--apps <path>] [--event-log <path>]`
   - Validates config/manifest loading and emits `runtime:check_ok` or `runtime:check_failed`.
-- `frameos parity --renderer-contract <path> --driver-contract <path> [--event-log <path>]`
-  - Validates renderer/driver contract stubs against executable parity invariants (API version match, required format coverage, partial-refresh/device-kind guardrails, and scheduling/backpressure compatibility checks).
+- `frameos parity (--renderer-contract <path> | --renderer-probe-cmd <shell command>) (--driver-contract <path> | --driver-probe-cmd <shell command>) [--event-log <path>]`
+  - Validates renderer/driver contracts against executable parity invariants (API version match, required format coverage, partial-refresh/device-kind guardrails, and scheduling/backpressure compatibility checks).
+  - Exactly one source flag per side is required (`--*-contract` and `--*-probe-cmd` are mutually exclusive).
 - `frameos contract`
   - Prints machine-readable JSON describing command and event contracts.
 
@@ -21,6 +22,8 @@ Current commands are implemented in `src/interfaces.rs` and exercised by `src/ma
 - `--scenes <path>`: preloads and validates a scene manifest.
 - `--apps <path>`: preloads and validates an app manifest.
 - `--event-log <path>`: appends the same JSON-line event envelopes emitted to stdout into a durable file sink for post-mortem analysis.
+- `--renderer-probe-cmd <shell command>`: executes a shell command and parses stdout as renderer-contract JSON.
+- `--driver-probe-cmd <shell command>`: executes a shell command and parses stdout as driver-contract JSON.
 - `config.log_to_file`: optional config-level default file sink path used when `--event-log` is omitted.
 - Precedence: `--event-log` overrides `config.log_to_file` when both are supplied.
 
@@ -38,7 +41,7 @@ Event names currently reserved:
 - `runtime:stop`
 - `runtime:check_ok`
 - `runtime:check_failed`
-- `runtime:parity_ok`
+- `runtime:parity_ok` (includes `renderer_contract_source` and `driver_contract_source`)
 - `runtime:parity_failed`
 - `runtime:heartbeat`
 - `runtime:metrics_tick`
@@ -70,4 +73,4 @@ The `parity` command introduces an executable gate for migration slices that wer
 - driver contract JSON fields: `api_version`, `device_kind`, `required_renderer_formats`, `supports_partial_refresh`, `scheduling.backpressure_policy`, `scheduling.max_queue_depth`;
 - invariants enforced: matching API versions, non-empty format sets, driver-required formats must be provided by renderer, partial refresh allowed only for `eink`/`epd`, `max_fps > 0`, `target_fps <= max_fps`, tick budget must fit inside the target frame budget, allowed drop/backpressure policies, queue-depth/backpressure consistency, and drop-policy compatibility when driver backpressure policy is `drop`.
 
-This command is intentionally stub-oriented and designed to evolve into concrete renderer/driver adapter probes without breaking existing event names.
+This command is intentionally stub-oriented and designed to evolve into concrete renderer/driver adapter probes without breaking existing event names. The success payload also carries source metadata (`fixture` vs `discovered`) for migration-progress dashboards.

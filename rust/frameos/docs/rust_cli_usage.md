@@ -17,8 +17,10 @@ From `rust/frameos/`:
 - CLI `--event-log` takes precedence over `config.log_to_file` when both are set.
 - Print machine-readable command/event contract JSON:
   - `cargo run -- contract`
-- Run renderer/driver contract parity stub checks:
+- Run renderer/driver contract parity checks from fixture files:
   - `cargo run -- parity --renderer-contract ./tests/fixtures/parity/renderer-valid.json --driver-contract ./tests/fixtures/parity/driver-valid.json`
+- Run parity checks from discovery probe commands (stdout must be JSON):
+  - `cargo run -- parity --renderer-probe-cmd 'cat ./tests/fixtures/parity/renderer-valid.json' --driver-probe-cmd 'cat ./tests/fixtures/parity/driver-valid.json'`
 - Exercise scheduling failure fixtures (should emit `runtime:parity_failed`):
   - `cargo run -- parity --renderer-contract ./tests/fixtures/parity/renderer-invalid-scheduling.json --driver-contract ./tests/fixtures/parity/driver-valid.json`
 - Start runtime (Ctrl+C to stop):
@@ -112,3 +114,6 @@ done
 ```
 
 This mirrors migration cutover checks by waiting for `runtime:ready` and a healthy HTTP endpoint before promoting traffic.
+
+
+Parity success events (`runtime:parity_ok`) now include `renderer_contract_source` and `driver_contract_source` (`fixture` or `discovered`) so rollout dashboards can distinguish static-fixture vs probe-based checks.

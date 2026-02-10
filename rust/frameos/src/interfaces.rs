@@ -16,6 +16,8 @@ pub struct Cli {
     pub app_manifest: Option<PathBuf>,
     pub renderer_contract_path: Option<PathBuf>,
     pub driver_contract_path: Option<PathBuf>,
+    pub renderer_probe_cmd: Option<String>,
+    pub driver_probe_cmd: Option<String>,
     pub event_log_path: Option<PathBuf>,
 }
 
@@ -47,6 +49,8 @@ impl Default for Cli {
             app_manifest: None,
             renderer_contract_path: None,
             driver_contract_path: None,
+            renderer_probe_cmd: None,
+            driver_probe_cmd: None,
             event_log_path: None,
         }
     }
@@ -112,6 +116,18 @@ impl Cli {
                     };
                     cli.driver_contract_path = Some(PathBuf::from(value));
                 }
+                "--renderer-probe-cmd" => {
+                    let Some(value) = iter.next() else {
+                        return Err(CliParseError::MissingValue("--renderer-probe-cmd"));
+                    };
+                    cli.renderer_probe_cmd = Some(value);
+                }
+                "--driver-probe-cmd" => {
+                    let Some(value) = iter.next() else {
+                        return Err(CliParseError::MissingValue("--driver-probe-cmd"));
+                    };
+                    cli.driver_probe_cmd = Some(value);
+                }
                 "--event-log" => {
                     let Some(value) = iter.next() else {
                         return Err(CliParseError::MissingValue("--event-log"));
@@ -140,9 +156,9 @@ pub fn command_contract_json() -> serde_json::Value {
                 "event_log_routing": "--event-log overrides config.log_to_file when both are set"
             },
             "parity": {
-                "description": "Validate renderer/driver stub contracts against parity invariants.",
-                "flags": ["--renderer-contract <path>", "--driver-contract <path>", "--event-log <path>"],
-                "notes": "both contract paths are required"
+                "description": "Validate renderer/driver contracts against parity invariants (fixture files or discovery probe commands).",
+                "flags": ["--renderer-contract <path>", "--driver-contract <path>", "--renderer-probe-cmd <shell command>", "--driver-probe-cmd <shell command>", "--event-log <path>"],
+                "notes": "provide exactly one source per side: contract path or probe command"
             },
             "contract": {
                 "description": "Print the runtime CLI/event contract as JSON.",
@@ -164,7 +180,7 @@ pub fn command_contract_json() -> serde_json::Value {
             "runtime:stop": {"level": "info", "fields": ["server", "metrics_interval_seconds", "apps_loaded", "scenes_loaded"]},
             "runtime:check_ok": {"level": "info", "fields": ["server", "metrics_interval_seconds", "apps_loaded", "scenes_loaded"]},
             "runtime:check_failed": {"level": "error", "fields": ["error"]},
-            "runtime:parity_ok": {"level": "info", "fields": ["renderer_api_version", "driver_api_version", "driver_device_kind", "shared_formats", "renderer_target_fps", "renderer_tick_budget_ms", "renderer_drop_policy", "driver_backpressure_policy", "driver_max_queue_depth"]},
+            "runtime:parity_ok": {"level": "info", "fields": ["renderer_api_version", "driver_api_version", "driver_device_kind", "shared_formats", "renderer_target_fps", "renderer_tick_budget_ms", "renderer_drop_policy", "driver_backpressure_policy", "driver_max_queue_depth", "renderer_contract_source", "driver_contract_source"]},
             "runtime:parity_failed": {"level": "error", "fields": ["error"]},
             "runtime:heartbeat": {"level": "debug", "fields": ["uptime_seconds", "server"]},
             "runtime:metrics_tick": {"level": "info", "fields": ["uptime_seconds", "metrics_interval_seconds", "apps_loaded", "scenes_loaded"]}
@@ -182,7 +198,7 @@ pub fn command_contract_json() -> serde_json::Value {
                 "runtime:check_failed": ["error"]
             },
             "parity": {
-                "runtime:parity_ok": ["renderer_api_version", "driver_api_version", "driver_device_kind", "shared_formats", "renderer_target_fps", "renderer_tick_budget_ms", "renderer_drop_policy", "driver_backpressure_policy", "driver_max_queue_depth"],
+                "runtime:parity_ok": ["renderer_api_version", "driver_api_version", "driver_device_kind", "shared_formats", "renderer_target_fps", "renderer_tick_budget_ms", "renderer_drop_policy", "driver_backpressure_policy", "driver_max_queue_depth", "renderer_contract_source", "driver_contract_source"],
                 "runtime:parity_failed": ["error"]
             },
             "contract": {}
