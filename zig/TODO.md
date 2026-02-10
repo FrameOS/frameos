@@ -45,6 +45,10 @@
   - [x] Extended `runtime/server.zig` with a stubbed `/health` route payload contract and logged route/payload wiring from boot.
   - [x] Created `zig/src/apps/mod.zig` and `zig/src/drivers/mod.zig` with placeholder module contracts.
   - [x] Added Zig unit tests for health snapshot behavior, `/health` payload rendering, and config parsing defaults.
+- **Iteration 9:**
+  - [x] Added `runtime/scenes.zig` with a lightweight scene-registry boundary, built-in scene list, and startup-scene resolution fallback.
+  - [x] Wired `startFrameOS` to initialize the scene registry before runner startup and passed resolved scene intent into runner logging.
+  - [x] Extended runtime config/logging with `FRAME_STARTUP_SCENE` / `startupScene` wiring and updated dependent unit-test fixtures.
 
 ---
 
@@ -68,10 +72,10 @@
 ---
 
 ## Next Actions (priority order)
-1. [ ] Add a lightweight scene-registry boundary (`runtime/scenes.zig`) and wire runner startup to consume it.
-2. [ ] Add `zig/src/system/` placeholder contracts for portal/hotspot and device utilities.
-3. [ ] Add a stub simulator driver module under `zig/src/drivers/` and connect it to `runtime/platform.zig`.
-4. [ ] Expand `/health` route payload with scheduler/runner readiness booleans.
+1. [ ] Add `zig/src/system/` placeholder contracts for portal/hotspot and device utilities.
+2. [ ] Add a stub simulator driver module under `zig/src/drivers/` and connect it to `runtime/platform.zig`.
+3. [ ] Expand `/health` route payload with scheduler/runner readiness booleans.
+4. [ ] Add scene-registry-to-apps boundary methods for listing and loading scene manifests.
 
 ---
 

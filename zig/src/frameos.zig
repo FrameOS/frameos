@@ -6,6 +6,7 @@ const metrics_mod = @import("runtime/metrics.zig");
 const platform_mod = @import("runtime/platform.zig");
 const runner_mod = @import("runtime/runner.zig");
 const scheduler_mod = @import("runtime/scheduler.zig");
+const scenes_mod = @import("runtime/scenes.zig");
 const server_mod = @import("runtime/server.zig");
 const health_mod = @import("runtime/health.zig");
 
@@ -27,7 +28,10 @@ pub fn startFrameOS() !void {
     const driver_platform = platform_mod.DriverPlatform.init(logger);
     try driver_platform.initDrivers();
 
-    const runner = runner_mod.RuntimeRunner.init(logger, config.device);
+    const scene_registry = scenes_mod.SceneRegistry.init(logger, config.startup_scene);
+    try scene_registry.startup();
+
+    const runner = runner_mod.RuntimeRunner.init(logger, config.device, scene_registry);
     try runner.startup();
 
     const scheduler = scheduler_mod.RuntimeScheduler.init(logger);

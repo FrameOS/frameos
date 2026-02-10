@@ -78,6 +78,7 @@ test "health route renders snapshot JSON payload" {
         .metrics_interval_s = 60,
         .network_check = true,
         .device = "simulator",
+        .startup_scene = "clock",
     });
 
     const server = RuntimeServer.init(logger, .{
@@ -87,6 +88,7 @@ test "health route renders snapshot JSON payload" {
         .metrics_interval_s = 30,
         .network_check = true,
         .device = "simulator",
+        .startup_scene = "clock",
     });
 
     const route = server.healthRoute(.{

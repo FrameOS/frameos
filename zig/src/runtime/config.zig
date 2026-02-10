@@ -7,6 +7,7 @@ pub const RuntimeConfig = struct {
     metrics_interval_s: u16,
     network_check: bool,
     device: []const u8,
+    startup_scene: []const u8,
 };
 
 pub fn loadConfig(allocator: std.mem.Allocator) !RuntimeConfig {
@@ -16,6 +17,9 @@ pub fn loadConfig(allocator: std.mem.Allocator) !RuntimeConfig {
     const device = try envOrDefault(allocator, "FRAME_DEVICE", "simulator");
     errdefer allocator.free(device);
 
+    const startup_scene = try envOrDefault(allocator, "FRAME_STARTUP_SCENE", "clock");
+    errdefer allocator.free(startup_scene);
+
     return .{
         .frame_host = frame_host,
         .frame_port = parseEnvInt(u16, "FRAME_PORT", 8787),
@@ -23,12 +27,14 @@ pub fn loadConfig(allocator: std.mem.Allocator) !RuntimeConfig {
         .metrics_interval_s = parseEnvInt(u16, "FRAME_METRICS_INTERVAL", 60),
         .network_check = parseEnvBool("FRAME_NETWORK_CHECK", true),
         .device = device,
+        .startup_scene = startup_scene,
     };
 }
 
 pub fn deinitConfig(allocator: std.mem.Allocator, config: RuntimeConfig) void {
     allocator.free(config.frame_host);
     allocator.free(config.device);
+    allocator.free(config.startup_scene);
 }
 
 pub fn parseIntOrDefault(comptime T: type, value: ?[]const u8, default: T) T {

@@ -83,6 +83,7 @@ test "snapshot is degraded before server startup" {
         .metrics_interval_s = 60,
         .network_check = true,
         .device = "simulator",
+        .startup_scene = "clock",
     });
 
     const health = RuntimeHealth.init(logger, true);
@@ -103,6 +104,7 @@ test "snapshot becomes ok after server started and network probe passes" {
         .metrics_interval_s = 60,
         .network_check = true,
         .device = "simulator",
+        .startup_scene = "clock",
     });
 
     var health = RuntimeHealth.init(logger, true);
@@ -126,6 +128,7 @@ test "snapshot can be ok without network requirement" {
         .metrics_interval_s = 60,
         .network_check = false,
         .device = "simulator",
+        .startup_scene = "clock",
     });
 
     var health = RuntimeHealth.init(logger, false);

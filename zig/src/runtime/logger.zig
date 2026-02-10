@@ -17,11 +17,12 @@ pub const RuntimeLogger = struct {
     pub fn bootup(self: RuntimeLogger, config: config_mod.RuntimeConfig) !void {
         const stdout = std.io.getStdOut().writer();
         try stdout.print(
-            "{\"event\":\"bootup\",\"frameHost\":\"{s}\",\"framePort\":{},\"device\":\"{s}\",\"networkCheck\":{},\"metricsInterval\":{},\"debug\":{}}\n",
+            "{\"event\":\"bootup\",\"frameHost\":\"{s}\",\"framePort\":{},\"device\":\"{s}\",\"startupScene\":\"{s}\",\"networkCheck\":{},\"metricsInterval\":{},\"debug\":{}}\n",
             .{
                 config.frame_host,
                 config.frame_port,
                 config.device,
+                config.startup_scene,
                 config.network_check,
                 config.metrics_interval_s,
                 self.debug_enabled,
