@@ -62,3 +62,19 @@ fn contract_exposes_command_event_field_map() {
         .expect("check runtime:check_ok fields should be an array");
     assert!(check_ok_fields.contains(&serde_json::json!("apps_loaded")));
 }
+
+#[test]
+fn parses_event_log_flag() {
+    let cli = Cli::parse(vec![
+        "check".to_string(),
+        "--event-log".to_string(),
+        "./runtime.jsonl".to_string(),
+    ])
+    .expect("cli should parse");
+
+    assert_eq!(cli.command, Command::Check);
+    assert_eq!(
+        cli.event_log_path,
+        Some(std::path::PathBuf::from("./runtime.jsonl"))
+    );
+}

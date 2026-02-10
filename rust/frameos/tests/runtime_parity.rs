@@ -88,3 +88,37 @@ fn check_command_supports_production_like_fixture_layout() {
     assert!(stdout.contains("\"apps_loaded\":1"));
     assert!(stdout.contains("\"scenes_loaded\":1"));
 }
+
+#[test]
+fn check_command_writes_json_lines_to_event_log_file() {
+    let binary = env!("CARGO_BIN_EXE_frameos");
+    let temp = tempfile::tempdir().expect("tempdir should be created");
+    let event_log = temp.path().join("events.jsonl");
+
+    let output = Command::new(binary)
+        .arg("check")
+        .arg("--config")
+        .arg(fixtures_path("frame-valid.json"))
+        .arg("--event-log")
+        .arg(&event_log)
+        .output()
+        .expect("check command should execute");
+
+    assert!(
+        output.status.success(),
+        "check command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let file_contents = std::fs::read_to_string(&event_log).expect("event log should be readable");
+    let first_line = file_contents
+        .lines()
+        .next()
+        .expect("event log should contain at least one line");
+    let payload: serde_json::Value =
+        serde_json::from_str(first_line).expect("line should be valid json");
+    assert_eq!(
+        payload["event"]["event"],
+        serde_json::json!("runtime:check_ok")
+    );
+}

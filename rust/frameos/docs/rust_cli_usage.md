@@ -10,10 +10,12 @@ From `rust/frameos/`:
   - `cargo build`
 - Validate config/manifests without starting the server loop:
   - `cargo run -- check --config ./tests/fixtures/frame-valid.json --scenes ./tests/fixtures/scenes-valid.json --apps ./tests/fixtures/apps-valid.json`
+- Persist emitted JSON-line events while checking/running:
+  - `cargo run -- check --config ./tests/fixtures/frame-valid.json --event-log ./runtime-events.jsonl`
 - Print machine-readable command/event contract JSON:
   - `cargo run -- contract`
 - Start runtime (Ctrl+C to stop):
-  - `cargo run -- run --config ./tests/fixtures/frame-valid.json`
+  - `cargo run -- run --config ./tests/fixtures/frame-valid.json --event-log ./runtime-events.jsonl`
 
 ## Production-like config examples and CI smoke checks
 

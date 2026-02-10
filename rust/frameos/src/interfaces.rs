@@ -13,6 +13,7 @@ pub struct Cli {
     pub config_path: Option<PathBuf>,
     pub scene_manifest: Option<PathBuf>,
     pub app_manifest: Option<PathBuf>,
+    pub event_log_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,6 +42,7 @@ impl Default for Cli {
             config_path: None,
             scene_manifest: None,
             app_manifest: None,
+            event_log_path: None,
         }
     }
 }
@@ -89,6 +91,12 @@ impl Cli {
                     };
                     cli.app_manifest = Some(PathBuf::from(value));
                 }
+                "--event-log" => {
+                    let Some(value) = iter.next() else {
+                        return Err(CliParseError::MissingValue("--event-log"));
+                    };
+                    cli.event_log_path = Some(PathBuf::from(value));
+                }
                 _ => return Err(CliParseError::UnknownArgument(argument)),
             }
         }
@@ -102,11 +110,11 @@ pub fn command_contract_json() -> serde_json::Value {
         "commands": {
             "run": {
                 "description": "Boot FrameOS runtime and optionally preload manifests.",
-                "flags": ["--config <path>", "--scenes <path>", "--apps <path>"]
+                "flags": ["--config <path>", "--scenes <path>", "--apps <path>", "--event-log <path>"]
             },
             "check": {
                 "description": "Validate that config and optional manifests can be loaded.",
-                "flags": ["--config <path>", "--scenes <path>", "--apps <path>"]
+                "flags": ["--config <path>", "--scenes <path>", "--apps <path>", "--event-log <path>"]
             },
             "contract": {
                 "description": "Print the runtime CLI/event contract as JSON.",
@@ -160,12 +168,15 @@ mod tests {
             "./frame.json".to_string(),
             "--scenes".to_string(),
             "./scenes.json".to_string(),
+            "--event-log".to_string(),
+            "./events.log".to_string(),
         ])
         .expect("cli should parse");
 
         assert_eq!(cli.command, Command::Check);
         assert_eq!(cli.config_path, Some(PathBuf::from("./frame.json")));
         assert_eq!(cli.scene_manifest, Some(PathBuf::from("./scenes.json")));
+        assert_eq!(cli.event_log_path, Some(PathBuf::from("./events.log")));
     }
 
     #[test]

@@ -16,3 +16,6 @@ path = "src/lib.rs"
 [[bin]]
 name = "frameos"
 path = "src/main.rs"
+
+[dev-dependencies]
+tempfile = "3"

@@ -7,9 +7,9 @@ This document defines the first stable contract for interacting with the Rust ru
 Current commands are implemented in `src/interfaces.rs` and exercised by `src/main.rs`.
 
 ### Commands
-- `frameos run [--config <path>] [--scenes <path>] [--apps <path>]`
+- `frameos run [--config <path>] [--scenes <path>] [--apps <path>] [--event-log <path>]`
   - Loads config and optional manifests, then emits `runtime:start` + `runtime:ready` events.
-- `frameos check [--config <path>] [--scenes <path>] [--apps <path>]`
+- `frameos check [--config <path>] [--scenes <path>] [--apps <path>] [--event-log <path>]`
   - Validates config/manifest loading and emits `runtime:check_ok` or `runtime:check_failed`.
 - `frameos contract`
   - Prints machine-readable JSON describing command and event contracts.
@@ -18,6 +18,7 @@ Current commands are implemented in `src/interfaces.rs` and exercised by `src/ma
 - `--config <path>`: overrides `FRAMEOS_CONFIG` and default `./frame.json` lookup.
 - `--scenes <path>`: preloads and validates a scene manifest.
 - `--apps <path>`: preloads and validates an app manifest.
+- `--event-log <path>`: appends the same JSON-line event envelopes emitted to stdout into a durable file sink for post-mortem analysis.
 
 ## Event stream contract
 

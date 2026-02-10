@@ -273,6 +273,7 @@ mod tests {
         let mut config = FrameOSConfig::default();
         config.server_host = "127.0.0.1".to_string();
         config.server_port = 0;
+        config.metrics_interval_seconds = 1;
         config
     }
 
@@ -368,5 +369,38 @@ mod tests {
             payload["event"]["event"],
             serde_json::json!("runtime:check_ok")
         );
+    }
+
+    #[test]
+    fn emit_runtime_event_writes_sink_payload_and_fanout_record() {
+        let sink = logging::MemoryJsonLineSink::default();
+        let fanout = crate::server::EventFanout::new();
+
+        emit_runtime_event(
+            &sink,
+            Some(&fanout),
+            "runtime:ready",
+            serde_json::json!({
+                "server": "127.0.0.1:8989",
+                "apps_loaded": 2,
+                "scenes_loaded": 3,
+            }),
+        );
+
+        let line = sink.lines().pop().expect("sink line should exist");
+        let payload: serde_json::Value =
+            serde_json::from_str(&line).expect("line should be valid json");
+        assert_eq!(
+            payload["event"]["event"],
+            serde_json::json!("runtime:ready")
+        );
+        assert_eq!(
+            payload["event"]["server"],
+            serde_json::json!("127.0.0.1:8989")
+        );
+        assert_eq!(payload["event"]["apps_loaded"], serde_json::json!(2));
+        assert_eq!(payload["event"]["scenes_loaded"], serde_json::json!(3));
+        assert_eq!(fanout.published_total(), 1);
+        assert_eq!(fanout.recent_events(), vec!["runtime:ready"]);
     }
 }

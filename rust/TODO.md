@@ -111,11 +111,18 @@
 - Added runtime unit coverage asserting deterministic lifecycle trace ordering (`runtime:start` → `runtime:ready` → `runtime:stop`) and `runtime:check_ok` sink output without stdout capture.
 - Added production-like fixture manifests/config under `tests/fixtures/production/` plus parity smoke coverage that executes `frameos check` against that layout.
 - Updated CLI/external interface docs to include the production fixture smoke workflow and document the new contract-field discovery surface.
+
+
+### Iteration 16 (durable event-log sink + stdout/ws compatibility checks)
+- Added durable JSON-lines event logging support in `src/logging.rs` via `FileJsonLineSink` and `MultiJsonLineSink`, enabling runtime events to be written to both stdout and an append-only file without changing envelope shape.
+- Extended CLI parsing and contract metadata with a new `--event-log <path>` flag for both `run` and `check`, and wired `main.rs` to build composite sinks so check/run/failure events all flow through the selected sink set.
+- Added parity-oriented tests: contract/CLI coverage for the new flag, runtime parity coverage asserting `check --event-log` writes `runtime:check_ok` JSON lines to disk, and a runtime unit test that verifies emitted event fields match between stdout envelopes and websocket fanout payload fields.
+- Updated external interface and CLI usage docs to include durable event-log workflows for service supervision and post-mortem debugging.
 ## Next up (small, actionable)
-1. Start scoping renderer/device-driver parity slices so migration cutover gates can move from documentation into executable checks.
-2. Add contract tests that assert event field compatibility between stdout envelopes and websocket fanout messages for each lifecycle event.
-3. Add CLI/docs examples for daemonized `run` supervision (service manager integration, health probe retries, shutdown signaling).
-4. Evaluate whether websocket/event sinks should support optional durable persistence (file sink) for post-mortem debugging in production.
+1. Expand stdout/websocket compatibility assertions from `runtime:start` to the full lifecycle set (`runtime:ready`, `runtime:heartbeat`, `runtime:metrics_tick`, `runtime:stop`) under deterministic transport tests.
+2. Add CLI/docs examples for daemonized `run` supervision (systemd/OpenRC templates, health probe retries, shutdown signaling).
+3. Start scoping renderer/device-driver parity slices so migration cutover gates can move from documentation into executable checks.
+4. Evaluate config-driven sink routing (`log_to_file` parity with Nim config) to reduce operator CLI flag requirements.
 
 ## Checklist
 

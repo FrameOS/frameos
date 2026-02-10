@@ -5,7 +5,9 @@ use std::sync::Arc;
 
 use frameos::config::FrameOSConfig;
 use frameos::interfaces::{command_contract_json, Cli, Command};
-use frameos::logging;
+use frameos::logging::{
+    self, FileJsonLineSink, JsonLineSink, MultiJsonLineSink, StdoutJsonLineSink,
+};
 use frameos::runtime::{Runtime, RuntimeError};
 
 fn build_runtime(cli: &Cli) -> Result<Runtime, RuntimeError> {
@@ -23,6 +25,17 @@ fn build_runtime(cli: &Cli) -> Result<Runtime, RuntimeError> {
     Ok(runtime)
 }
 
+fn build_sink(cli: &Cli) -> Result<Arc<dyn JsonLineSink>, RuntimeError> {
+    if let Some(path) = &cli.event_log_path {
+        let stdout_sink = Arc::new(StdoutJsonLineSink) as Arc<dyn JsonLineSink>;
+        let file_sink = Arc::new(FileJsonLineSink::append(path).map_err(RuntimeError::Io)?)
+            as Arc<dyn JsonLineSink>;
+        Ok(Arc::new(MultiJsonLineSink::new(vec![stdout_sink, file_sink])) as Arc<dyn JsonLineSink>)
+    } else {
+        Ok(Arc::new(StdoutJsonLineSink) as Arc<dyn JsonLineSink>)
+    }
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse(env::args().skip(1).collect::<Vec<_>>())?;
 
@@ -34,24 +47,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
             return Ok(());
         }
-        Command::Check => match build_runtime(&cli) {
-            Ok(runtime) => {
-                runtime.check();
-                println!("FrameOS check: passed 🎉");
-                return Ok(());
+        Command::Check => {
+            let sink = build_sink(&cli)?;
+            match build_runtime(&cli) {
+                Ok(runtime) => {
+                    runtime.check_with_sink(sink.as_ref());
+                    println!("FrameOS check: passed 🎉");
+                    return Ok(());
+                }
+                Err(error) => {
+                    let _ = logging::log_event_with_sink(
+                        sink.as_ref(),
+                        serde_json::json!({
+                            "event": "runtime:check_failed",
+                            "error": error.to_string(),
+                        }),
+                    );
+                    return Err(error.into());
+                }
             }
-            Err(error) => {
-                logging::log_event(serde_json::json!({
-                    "event": "runtime:check_failed",
-                    "error": error.to_string(),
-                }));
-                return Err(error.into());
-            }
-        },
+        }
         Command::Run => {}
     }
 
     let runtime = build_runtime(&cli)?;
+    let sink = build_sink(&cli)?;
     logging::debug("FrameOS runtime prepared.");
 
     let shutdown = Arc::new(AtomicBool::new(false));
@@ -66,6 +86,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
     })?;
 
-    runtime.run_until_stopped(shutdown)?;
+    runtime.run_until_stopped_with_sink(shutdown, sink.as_ref())?;
     Ok(())
 }
