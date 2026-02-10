@@ -6,6 +6,7 @@ pub mod apps;
 pub mod config;
 pub mod logging;
 pub mod metrics;
+pub mod models;
 pub mod runtime;
 pub mod scenes;
 pub mod server;

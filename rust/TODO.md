@@ -37,11 +37,17 @@
 - Added `FrameOSConfig::load_from_path` to make config parsing testable without global environment mutation.
 - Added fixture-backed Rust tests for successful config parsing and validation failure on relative `assets_path`.
 
+### Iteration 5 (core domain models + JSON contracts)
+- Introduced core domain models for frame state, scene descriptors, and app descriptors under `src/models.rs`.
+- Standardized JSON serialization contracts via `serde` for status values and scene source tagging (`type` + `snake_case` values).
+- Wired placeholder scene/app registries to typed descriptors to reduce future refactors when loading manifests and scene catalogs.
+- Added unit tests that exercise serialization of scene descriptors and deserialization of frame state payloads.
+
 ## Next up (small, actionable)
 1. Produce a minimal “parity map” between existing FrameOS features and planned Rust modules.
-2. Decide data models and serialization format(s) for scene payloads and app manifests.
-3. Define external interfaces for the Rust runtime (CLI/server lifecycle/log stream contract).
-4. Sketch initial core domain models (frame state, scene descriptor, app descriptor).
+2. Define external interfaces for the Rust runtime (CLI/server lifecycle/log stream contract).
+3. Implement validation helpers for `SceneDescriptor` and `AppDescriptor` (required fields, version format, source invariants).
+4. Add JSON fixture tests for app/scene manifests to lock contract compatibility.
 5. Evaluate when to introduce a top-level Cargo workspace once more crates are needed.
 
 ## Checklist
@@ -55,7 +61,7 @@
 
 ### Architecture & planning
 - [x] Define target Rust crate(s) and module boundaries.
-- [ ] Decide data models and serialization format(s).
+- [x] Decide data models and serialization format(s).
 - [ ] Define external interfaces (CLI/API/event streams/filesystem).
 - [ ] Create a parity map: legacy behavior → Rust module.
 - [ ] Define migration strategy (phased rollout, feature flags, shadow mode).
@@ -63,7 +69,7 @@
 ### Implementation (incremental)
 - [x] Add Cargo workspace entry (if needed) and create crate skeleton.
 - [x] Implement config loading and validation.
-- [ ] Implement core domain models.
+- [x] Implement core domain models.
 - [ ] Implement I/O adapters (file/network/queue/etc.).
 - [ ] Implement main application loop / services.
 - [x] Add logging and error handling scaffolding.
@@ -71,9 +77,10 @@
 
 ### Validation & rollout
 - [ ] Add parity tests or golden tests.
-- [ ] Run necessary linters/tests.
+- [x] Run necessary linters/tests.
 - [ ] Document usage and migration steps.
 
 ## Notes / decisions
 - Use conventional commits and PR titles.
 - Keep each iteration small and explicitly update this file.
+- Continue using JSON + `serde` as the initial serialization format for manifests/state payloads.
