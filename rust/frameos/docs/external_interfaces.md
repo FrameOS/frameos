@@ -41,11 +41,12 @@ Event names currently reserved:
 Implemented in the current scaffold:
 - local HTTP health endpoints at `/healthz` (and alias `/health`) served by `src/server.rs` once `frameos run` starts;
 - health payload includes manifest-load counters, heartbeat/metrics tick counters, and event transport metadata;
-- websocket event stream available at `/ws/events` using a minimal text-frame broadcaster that emits JSON messages of shape `{ "event": "<name>" }`.
+- websocket event stream available at `/ws/events` using a text-frame broadcaster that emits JSON messages of shape `{ "event": "<name>" }` for compatibility.
+- websocket transport now handles ping/pong frames, replies to close frames, and enforces bounded sender queues by dropping backpressured clients.
 
 Next transport steps:
 - expand websocket payloads beyond event name-only messages while preserving compatibility for current consumers;
-- add ping/pong + close handling and backpressure strategy for long-lived clients.
+- add log sink abstractions so event assertions can avoid stdout parsing.
 
 ## Compatibility rules
 

@@ -88,11 +88,19 @@
 - Updated health payload metadata to report websocket transport details (`transport`, `path`, `connected_clients`) while preserving published event counters/history for parity tracking.
 - Added server tests covering websocket upgrade + broadcast delivery and updated runtime/docs contract strings from `websocket_stub` to `websocket`.
 
+
+### Iteration 13 (websocket control-frame hardening + CLI usage docs)
+- Hardened websocket transport in `src/server.rs` with control-frame support: server now responds to ping frames with pong payload echoes, acknowledges close frames, and tracks client liveness for cleanup.
+- Added bounded backpressure handling for websocket clients by dropping clients whose outbound queue is saturated, preventing slow consumers from stalling broadcaster behavior.
+- Added focused server tests for ping/pong behavior, close-frame cleanup reflected in `/healthz`, and backpressure-based client eviction.
+- Added `rust/frameos/docs/rust_cli_usage.md` with concrete build/run/check/contract commands and migration guidance for shadow validation and phased adoption.
+- Updated external interface docs to reflect implemented websocket control-frame behavior and narrowed next transport/documentation steps.
+
 ## Next up (small, actionable)
-1. Add websocket ping/pong, close-frame handling, and bounded backpressure behavior for long-lived clients.
-2. Expand websocket message payloads beyond event names (e.g., include timestamps and selected event fields) while preserving current compatibility.
-3. Add a JSON-lines log sink abstraction so tests can assert event payloads without stdout substring matching.
-4. Document usage and migration steps for the Rust CLI in `rust/frameos/docs/` now that health + websocket scaffolding exists.
+1. Expand websocket message payloads beyond event names (e.g., include timestamps and selected event fields) while preserving current compatibility.
+2. Add a JSON-lines log sink abstraction so tests can assert event payloads without stdout substring matching.
+3. Add CLI examples for production-like config layouts (non-test fixtures) and wire them into CI smoke checks.
+4. Start scoping renderer/device-driver parity slices so migration cutover gates can move from documentation into executable checks.
 
 ## Checklist
 
@@ -122,7 +130,7 @@
 ### Validation & rollout
 - [x] Add parity tests or golden tests.
 - [x] Run necessary linters/tests.
-- [ ] Document usage and migration steps.
+- [x] Document usage and migration steps.
 
 ## Notes / decisions
 - Use conventional commits and PR titles.

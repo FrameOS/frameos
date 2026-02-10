@@ -2,10 +2,10 @@ use base64::Engine;
 use serde_json::json;
 use sha1::{Digest, Sha1};
 use std::collections::VecDeque;
-use std::io::{self, BufRead, BufReader, Write};
+use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::mpsc::{self, SyncSender, TrySendError};
+use std::sync::mpsc::{self, RecvTimeoutError, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -54,6 +54,7 @@ impl Clone for EventBroadcaster {
 #[derive(Debug)]
 struct WebSocketClient {
     sender: SyncSender<String>,
+    alive: Arc<AtomicBool>,
 }
 
 #[derive(Debug, Default)]
@@ -73,16 +74,50 @@ impl EventBroadcaster {
     fn add_client(&self, stream: TcpStream) {
         self.next_client_id.fetch_add(1, Ordering::SeqCst);
         let (sender, receiver) = mpsc::sync_channel::<String>(64);
+        let alive = Arc::new(AtomicBool::new(true));
 
         self.clients
             .lock()
             .expect("websocket clients lock should not be poisoned")
-            .push(WebSocketClient { sender });
+            .push(WebSocketClient {
+                sender,
+                alive: Arc::clone(&alive),
+            });
+
+        let mut reader_stream = match stream.try_clone() {
+            Ok(stream) => stream,
+            Err(_) => return,
+        };
+
+        let writer_stream = Arc::new(Mutex::new(stream));
+        let writer_stream_for_pong = Arc::clone(&writer_stream);
+        let alive_for_reader = Arc::clone(&alive);
 
         thread::spawn(move || {
-            let mut client_stream = stream;
-            while let Ok(message) = receiver.recv() {
+            let _ = handle_client_control_frames(
+                &mut reader_stream,
+                &writer_stream_for_pong,
+                &alive_for_reader,
+            );
+        });
+
+        let alive_for_writer = Arc::clone(&alive);
+        let writer_stream_for_writer = Arc::clone(&writer_stream);
+
+        thread::spawn(move || {
+            while alive_for_writer.load(Ordering::SeqCst) {
+                let message = match receiver.recv_timeout(Duration::from_millis(100)) {
+                    Ok(message) => message,
+                    Err(RecvTimeoutError::Timeout) => continue,
+                    Err(RecvTimeoutError::Disconnected) => break,
+                };
+
+                let mut client_stream = writer_stream_for_writer
+                    .lock()
+                    .expect("writer stream lock should not be poisoned");
+
                 if write_ws_text_frame(&mut client_stream, &message).is_err() {
+                    alive_for_writer.store(false, Ordering::SeqCst);
                     break;
                 }
             }
@@ -96,13 +131,25 @@ impl EventBroadcaster {
             .expect("websocket clients lock should not be poisoned");
 
         clients.retain(|client| match client.sender.try_send(payload.to_string()) {
-            Ok(()) => true,
-            Err(TrySendError::Full(_)) => true,
+            Ok(()) => client.alive.load(Ordering::SeqCst),
+            Err(TrySendError::Full(_)) => {
+                client.alive.store(false, Ordering::SeqCst);
+                false
+            }
             Err(TrySendError::Disconnected(_)) => false,
         });
     }
 
+    fn prune_dead_clients(&self) {
+        let mut clients = self
+            .clients
+            .lock()
+            .expect("websocket clients lock should not be poisoned");
+        clients.retain(|client| client.alive.load(Ordering::SeqCst));
+    }
+
     fn client_count(&self) -> usize {
+        self.prune_dead_clients();
         self.clients
             .lock()
             .expect("websocket clients lock should not be poisoned")
@@ -360,19 +407,110 @@ fn websocket_accept_key(key: &str) -> String {
     base64::engine::general_purpose::STANDARD.encode(digest)
 }
 
+fn handle_client_control_frames(
+    reader_stream: &mut TcpStream,
+    writer_stream: &Arc<Mutex<TcpStream>>,
+    alive: &Arc<AtomicBool>,
+) -> io::Result<()> {
+    loop {
+        let frame = read_client_frame(reader_stream)?;
+        match frame.opcode {
+            0x8 => {
+                alive.store(false, Ordering::SeqCst);
+                let mut stream = writer_stream
+                    .lock()
+                    .expect("writer stream lock should not be poisoned");
+                let _ = write_ws_control_frame(&mut stream, 0x8, &[]);
+                return Ok(());
+            }
+            0x9 => {
+                let mut stream = writer_stream
+                    .lock()
+                    .expect("writer stream lock should not be poisoned");
+                write_ws_control_frame(&mut stream, 0xA, &frame.payload)?;
+            }
+            _ => {
+                if !frame.fin {
+                    alive.store(false, Ordering::SeqCst);
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "fragmented websocket frames are not supported",
+                    ));
+                }
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+struct ClientFrame {
+    fin: bool,
+    opcode: u8,
+    payload: Vec<u8>,
+}
+
+fn read_client_frame(stream: &mut TcpStream) -> io::Result<ClientFrame> {
+    let mut header = [0u8; 2];
+    stream.read_exact(&mut header)?;
+
+    let fin = header[0] & 0x80 != 0;
+    let opcode = header[0] & 0x0F;
+    let masked = header[1] & 0x80 != 0;
+    if !masked {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "client frames must be masked",
+        ));
+    }
+
+    let payload_len = match header[1] & 0x7F {
+        len @ 0..=125 => len as usize,
+        126 => {
+            let mut extended = [0u8; 2];
+            stream.read_exact(&mut extended)?;
+            u16::from_be_bytes(extended) as usize
+        }
+        _ => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "unsupported websocket frame size",
+            ));
+        }
+    };
+
+    let mut mask = [0u8; 4];
+    stream.read_exact(&mut mask)?;
+
+    let mut payload = vec![0u8; payload_len];
+    stream.read_exact(&mut payload)?;
+
+    for (index, byte) in payload.iter_mut().enumerate() {
+        *byte ^= mask[index % 4];
+    }
+
+    Ok(ClientFrame {
+        fin,
+        opcode,
+        payload,
+    })
+}
+
 fn write_ws_text_frame(stream: &mut TcpStream, message: &str) -> io::Result<()> {
-    let bytes = message.as_bytes();
-    if bytes.len() > 125 {
+    write_ws_control_frame(stream, 0x1, message.as_bytes())
+}
+
+fn write_ws_control_frame(stream: &mut TcpStream, opcode: u8, payload: &[u8]) -> io::Result<()> {
+    if payload.len() > 125 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "websocket frame too large for simple sender",
         ));
     }
 
-    let mut frame = Vec::with_capacity(bytes.len() + 2);
-    frame.push(0x81);
-    frame.push(bytes.len() as u8);
-    frame.extend_from_slice(bytes);
+    let mut frame = Vec::with_capacity(payload.len() + 2);
+    frame.push(0x80 | (opcode & 0x0F));
+    frame.push(payload.len() as u8);
+    frame.extend_from_slice(payload);
     stream.write_all(&frame)
 }
 
@@ -415,6 +553,21 @@ impl Server {
 mod tests {
     use super::*;
     use std::io::Read;
+    use std::time::Duration;
+
+    fn write_masked_client_frame(stream: &mut TcpStream, opcode: u8, payload: &[u8]) {
+        let mask = [0x11, 0x22, 0x33, 0x44];
+        let mut frame = Vec::with_capacity(payload.len() + 6);
+        frame.push(0x80 | (opcode & 0x0F));
+        frame.push(0x80 | (payload.len() as u8));
+        frame.extend_from_slice(&mask);
+        for (index, byte) in payload.iter().enumerate() {
+            frame.push(*byte ^ mask[index % 4]);
+        }
+        stream
+            .write_all(&frame)
+            .expect("masked frame write should work");
+    }
 
     #[test]
     fn event_fanout_tracks_publish_counts() {
@@ -547,5 +700,157 @@ mod tests {
         assert_eq!(message["event"], json!("runtime:ready"));
 
         transport.stop().expect("transport should stop cleanly");
+    }
+
+    #[test]
+    fn websocket_ping_receives_pong_with_same_payload() {
+        let server = Server {
+            host: "127.0.0.1".to_string(),
+            port: 0,
+        };
+        let transport = ServerTransport::start(
+            &server,
+            ServerHealthSnapshot {
+                apps_loaded: 0,
+                scenes_loaded: 0,
+                metrics_interval_seconds: 60,
+            },
+        )
+        .expect("server should start");
+
+        let mut stream = TcpStream::connect(transport.local_addr()).expect("connect should work");
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .expect("set read timeout should work");
+        let handshake = format!(
+            "GET {WEBSOCKET_PATH} HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
+        );
+        stream
+            .write_all(handshake.as_bytes())
+            .expect("handshake write should work");
+
+        let mut reader = BufReader::new(stream.try_clone().expect("clone should work"));
+        let mut status = String::new();
+        reader
+            .read_line(&mut status)
+            .expect("status should be readable");
+        assert!(status.starts_with("HTTP/1.1 101"));
+        loop {
+            let mut line = String::new();
+            reader
+                .read_line(&mut line)
+                .expect("header line should be readable");
+            if line == "\r\n" || line.is_empty() {
+                break;
+            }
+        }
+
+        write_masked_client_frame(&mut stream, 0x9, b"abc");
+
+        let mut header = [0u8; 2];
+        stream
+            .read_exact(&mut header)
+            .expect("pong header should be readable");
+        assert_eq!(header[0], 0x8A);
+        let payload_len = (header[1] & 0x7F) as usize;
+        let mut payload = vec![0u8; payload_len];
+        stream
+            .read_exact(&mut payload)
+            .expect("pong payload should be readable");
+        assert_eq!(&payload, b"abc");
+
+        transport.stop().expect("transport should stop cleanly");
+    }
+
+    #[test]
+    fn websocket_close_frame_removes_client_from_health_state() {
+        let server = Server {
+            host: "127.0.0.1".to_string(),
+            port: 0,
+        };
+        let transport = ServerTransport::start(
+            &server,
+            ServerHealthSnapshot {
+                apps_loaded: 0,
+                scenes_loaded: 0,
+                metrics_interval_seconds: 60,
+            },
+        )
+        .expect("server should start");
+
+        let mut stream = TcpStream::connect(transport.local_addr()).expect("connect should work");
+        let handshake = format!(
+            "GET {WEBSOCKET_PATH} HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
+        );
+        stream
+            .write_all(handshake.as_bytes())
+            .expect("handshake write should work");
+        let mut reader = BufReader::new(stream.try_clone().expect("clone should work"));
+        let mut status = String::new();
+        reader
+            .read_line(&mut status)
+            .expect("status should be readable");
+        assert!(status.starts_with("HTTP/1.1 101"));
+        loop {
+            let mut line = String::new();
+            reader
+                .read_line(&mut line)
+                .expect("header line should be readable");
+            if line == "\r\n" || line.is_empty() {
+                break;
+            }
+        }
+
+        let fanout = transport.fanout();
+        for _ in 0..20 {
+            if fanout.websocket_client_count() == 1 {
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(fanout.websocket_client_count(), 1);
+        write_masked_client_frame(&mut stream, 0x8, &[]);
+        thread::sleep(Duration::from_millis(100));
+
+        let mut health =
+            TcpStream::connect(transport.local_addr()).expect("health connect should work");
+        health
+            .write_all(b"GET /healthz HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            .expect("request write should work");
+        let mut response = String::new();
+        BufReader::new(health)
+            .read_to_string(&mut response)
+            .expect("response read should work");
+        let body = response
+            .split("\r\n\r\n")
+            .nth(1)
+            .expect("http body should be present");
+        let payload: serde_json::Value = serde_json::from_str(body).expect("body should be json");
+        assert_eq!(payload["event_stream"]["connected_clients"], json!(0));
+
+        transport.stop().expect("transport should stop cleanly");
+    }
+
+    #[test]
+    fn broadcast_drops_slow_clients_when_queue_is_full() {
+        let fanout = EventFanout::new();
+        let listener = TcpListener::bind("127.0.0.1:0").expect("listener bind should work");
+        let addr = listener.local_addr().expect("local addr should work");
+
+        let accept_handle = thread::spawn(move || listener.accept().expect("accept should work"));
+        let client = TcpStream::connect(addr).expect("client connect should work");
+        let (server_stream, _) = accept_handle.join().expect("accept thread should join");
+
+        fanout.register_websocket_client(server_stream);
+        drop(client);
+
+        for index in 0..128 {
+            fanout.publish(&format!("runtime:heartbeat:{index}"));
+        }
+
+        thread::sleep(Duration::from_millis(50));
+        fanout.publish("runtime:final");
+
+        assert_eq!(fanout.websocket_client_count(), 0);
     }
 }
