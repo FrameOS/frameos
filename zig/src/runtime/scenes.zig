@@ -6,7 +6,7 @@ pub const SceneRegistry = struct {
     logger: logger_mod.RuntimeLogger,
     startup_scene: []const u8,
 
-    const built_in_scenes = [_][]const u8{ "clock", "weather", "calendar" };
+    const built_in_scenes = [_][]const u8{ "clock", "weather", "calendar", "news" };
 
     pub fn init(logger: logger_mod.RuntimeLogger, startup_scene: []const u8) SceneRegistry {
         return .{
@@ -123,7 +123,7 @@ test "registry lists built-in scene identifiers" {
     const registry = SceneRegistry.init(logger, "clock");
     const scene_ids = registry.listSceneIds();
 
-    try testing.expectEqual(@as(usize, 3), scene_ids.len);
+    try testing.expectEqual(@as(usize, 4), scene_ids.len);
     try testing.expectEqualStrings("clock", scene_ids[0]);
 }
 

@@ -113,10 +113,21 @@ pub const ScenesRoute = struct {
 
         try writer.print("{\"host\":\"{s}\",\"port\":{},\"scenes\":[", .{ self.server.config.frame_host, self.server.config.frame_port });
 
-        for (scene_ids, 0..) |scene_id, idx| {
+        var emitted: usize = 0;
+        for (scene_ids) |scene_id| {
             const manifest = self.registry.loadManifest(scene_id) orelse continue;
-            if (idx > 0) try writer.writeAll(",");
-            try writer.print("{\"id\":\"{s}\",\"appId\":\"{s}\",\"entrypoint\":\"{s}\"}", .{ manifest.scene_id, manifest.app.id, manifest.entrypoint });
+            if (emitted > 0) try writer.writeAll(",");
+            try writer.print("{\"id\":\"{s}\",\"appId\":\"{s}\",\"entrypoint\":\"{s}\",", .{ manifest.scene_id, manifest.app.id, manifest.entrypoint });
+
+            const lifecycle = try apps_mod.appLifecycleSummaryForScene(scene_id, .{ .allocator = std.heap.page_allocator });
+            if (lifecycle) |summary| {
+                try writer.print("\"appLifecycle\":{\"appId\":\"{s}\",\"lifecycle\":\"{s}\",\"frameRateHz\":{}}", .{ summary.app_id, summary.lifecycle, summary.frame_rate_hz });
+            } else {
+                try writer.writeAll("\"appLifecycle\":null");
+            }
+
+            try writer.writeAll("}");
+            emitted += 1;
         }
 
         try writer.writeAll("]}");
@@ -279,11 +290,11 @@ test "scenes route renders scene discovery payload" {
     const registry = scenes_mod.SceneRegistry.init(logger, "clock");
 
     const route = server.scenesRoute(registry);
-    var buf: [512]u8 = undefined;
+    var buf: [1024]u8 = undefined;
     const payload = try route.renderJson(&buf);
 
     try testing.expectEqualStrings(
-        "{\"host\":\"0.0.0.0\",\"port\":7777,\"scenes\":[{\"id\":\"clock\",\"appId\":\"app.clock\",\"entrypoint\":\"apps/clock/main\"},{\"id\":\"weather\",\"appId\":\"app.weather\",\"entrypoint\":\"apps/weather/main\"},{\"id\":\"calendar\",\"appId\":\"app.calendar\",\"entrypoint\":\"apps/calendar/main\"}]}",
+        "{\"host\":\"0.0.0.0\",\"port\":7777,\"scenes\":[{\"id\":\"clock\",\"appId\":\"app.clock\",\"entrypoint\":\"apps/clock/main\",\"appLifecycle\":{\"appId\":\"app.clock\",\"lifecycle\":\"clock\",\"frameRateHz\":1}},{\"id\":\"weather\",\"appId\":\"app.weather\",\"entrypoint\":\"apps/weather/main\",\"appLifecycle\":{\"appId\":\"app.weather\",\"lifecycle\":\"weather\",\"frameRateHz\":30}},{\"id\":\"calendar\",\"appId\":\"app.calendar\",\"entrypoint\":\"apps/calendar/main\",\"appLifecycle\":{\"appId\":\"app.calendar\",\"lifecycle\":\"calendar\",\"frameRateHz\":12}},{\"id\":\"news\",\"appId\":\"app.news\",\"entrypoint\":\"apps/news/main\",\"appLifecycle\":null}]}",
         payload,
     );
 }
@@ -309,7 +320,7 @@ test "scene by id route renders successful scene payload" {
 
 
 
-test "scene by id route renders null lifecycle metadata when app boundary is missing" {
+test "scene by id route renders calendar lifecycle metadata" {
     const testing = std.testing;
 
     const logger = logger_mod.RuntimeLogger.init(.{ .frame_host = "127.0.0.1", .frame_port = 8787, .debug = false, .metrics_interval_s = 60, .network_check = true, .network_probe_mode = .auto, .device = "simulator", .startup_scene = "clock" });
@@ -323,10 +334,31 @@ test "scene by id route renders null lifecycle metadata when app boundary is mis
     const payload = try route.renderJson(&buf);
 
     try testing.expectEqualStrings(
-        "{\"host\":\"0.0.0.0\",\"port\":7777,\"requestedId\":\"calendar\",\"found\":true,\"scene\":{\"id\":\"calendar\",\"appId\":\"app.calendar\",\"entrypoint\":\"apps/calendar/main\"},\"appLifecycle\":null}",
+        "{\"host\":\"0.0.0.0\",\"port\":7777,\"requestedId\":\"calendar\",\"found\":true,\"scene\":{\"id\":\"calendar\",\"appId\":\"app.calendar\",\"entrypoint\":\"apps/calendar/main\"},\"appLifecycle\":{\"appId\":\"app.calendar\",\"lifecycle\":\"calendar\",\"frameRateHz\":12}}",
         payload,
     );
 }
+
+
+test "scene by id route renders null lifecycle metadata when boundary is missing" {
+    const testing = std.testing;
+
+    const logger = logger_mod.RuntimeLogger.init(.{ .frame_host = "127.0.0.1", .frame_port = 8787, .debug = false, .metrics_interval_s = 60, .network_check = true, .network_probe_mode = .auto, .device = "simulator", .startup_scene = "clock" });
+
+    const server = RuntimeServer.init(logger, .{ .frame_host = "0.0.0.0", .frame_port = 7777, .debug = false, .metrics_interval_s = 30, .network_check = true, .network_probe_mode = .auto, .device = "simulator", .startup_scene = "clock" });
+
+    const registry = scenes_mod.SceneRegistry.init(logger, "clock");
+    const route = try server.sceneByIdRoute(registry, "news");
+
+    var buf: [256]u8 = undefined;
+    const payload = try route.renderJson(&buf);
+
+    try testing.expectEqualStrings(
+        "{\"host\":\"0.0.0.0\",\"port\":7777,\"requestedId\":\"news\",\"found\":true,\"scene\":{\"id\":\"news\",\"appId\":\"app.news\",\"entrypoint\":\"apps/news/main\"},\"appLifecycle\":null}",
+        payload,
+    );
+}
+
 test "scene by id route renders error payload for unknown scene id" {
     const testing = std.testing;
 
