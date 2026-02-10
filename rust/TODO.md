@@ -162,8 +162,15 @@
 - Preserved core parity semantics for the above apps (JSON parsing/formatting, state writes with exclusive value sources, branch-node selection, sleep-duration mutation, and abort-on-render guard).
 - Added focused unit + integration coverage for success and failure paths in app execution, including pretty-print output, branch selection, context mutation, and invalid dual-source state updates.
 
+
+### Iteration 23 (scene-runner scaffold + deterministic graph execution)
+- Added a first executable scene-runner scaffold in `rust/frameos/src/scenes.rs` by introducing typed `SceneGraph` and `SceneNode` models plus a deterministic `run` loop that chains `execute_ported_app` calls.
+- Added explicit scene-run diagnostics (`SceneRunError`) for missing/duplicate nodes, loop detection, and per-node app execution failures so manifest graph issues are surfaced with stable error messages.
+- Implemented branch-aware traversal semantics where `AppOutput::BranchNode` overrides static edge flow and normal app outputs fall back to `next_node`, matching intended graph behavior for interpreted app chains.
+- Added unit tests that cover linear state mutation, branch routing, and cycle detection for regression safety as additional app keywords are ported.
+
 ## Next up (small, actionable)
-1. Wire `execute_ported_app` into a lightweight scene-runner scaffold so manifest-defined app graphs can execute deterministic app chains in Rust.
+1. Add manifest-to-`SceneGraph` adapters so `SceneDescriptor` payloads can bootstrap executable scene graphs without bespoke test wiring.
 2. Port additional deterministic data apps (`data/xmlToJson`, `data/prettyJson` options parity checks, `data/eventsToAgenda`) with fixture-based golden outputs.
 3. Add CI-oriented daemon smoke script that boots `frameos run`, probes `/healthz`, then sends SIGINT and validates `runtime:stop` in the event log.
 4. Replace shell-based probe commands with first-class filesystem/device capability discovery adapters under a dedicated `discovery` module.
