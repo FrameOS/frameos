@@ -40,13 +40,20 @@ def _build_frame_path(
     return path
 
 
+def _frame_scheme_port(frame: Frame) -> tuple[str, int]:
+    if frame.enable_tls:
+        tls_port = frame.tls_port or 0
+        return "https", tls_port if tls_port > 0 else frame.frame_port
+    return "http", frame.frame_port
+
+
 def _build_frame_url(frame: Frame, path: str, method: str) -> str:
     """Return full http://host:port/… URL (adds access key when required)."""
     if not is_safe_host(frame.frame_host):
         raise HTTPException(status_code=400, detail="Unsafe frame host")
 
-    scheme = "https" if frame.frame_port % 1000 == 443 else "http"
-    url = f"{scheme}://{frame.frame_host}:{frame.frame_port}{_build_frame_path(frame, path, method)}"
+    scheme, port = _frame_scheme_port(frame)
+    url = f"{scheme}://{frame.frame_host}:{port}{_build_frame_path(frame, path, method)}"
     return url
 
 

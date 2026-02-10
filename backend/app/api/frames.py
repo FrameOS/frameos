@@ -73,6 +73,7 @@ from app.utils.frame_http import (
     _build_frame_url,
     _auth_headers,
     _fetch_frame_http_bytes,
+    _frame_scheme_port,
 )
 from app.tasks.utils import find_nim_v2
 from app.tasks.deploy_frame import FrameDeployer
@@ -577,8 +578,8 @@ async def api_frame_ping(
     if len(ping_path) > 512:
         _bad_request("Ping path is too long")
 
-    scheme = "https" if frame.frame_port % 1000 == 443 else "http"
-    display_target = f"{scheme}://{frame.frame_host}:{frame.frame_port}{ping_path}"
+    scheme, port = _frame_scheme_port(frame)
+    display_target = f"{scheme}://{frame.frame_host}:{port}{ping_path}"
     started = time.perf_counter()
 
     try:
