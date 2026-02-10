@@ -48,7 +48,7 @@ export interface FrameSettingsProps {
 const customModule = `{ lib, ... }:\n{\n  # boot.kernelParams = [ \"quiet\" ];\n}\n`
 export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: FrameSettingsProps) {
   const { mode, frameId, frame, frameForm, frameFormTouches } = useValues(frameLogic)
-  const { touchFrameFormField, setFrameFormValues, updateDeployedSshKeys } = useActions(frameLogic)
+  const { touchFrameFormField, setFrameFormValues, updateDeployedSshKeys, generateTlsCertificates } = useActions(frameLogic)
   const { deleteFrame } = useActions(framesModel)
   const { appsWithSaveAssets } = useValues(appsLogic)
   const {
@@ -789,6 +789,38 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                 tooltip="Bind the HTTP API to localhost so only the TLS proxy is accessible externally."
               >
                 <Switch name="expose_only_tls_port" fullWidth />
+              </Field>
+              <Field
+                name="tls_client_ca_cert"
+                label="TLS root CA certificate"
+                tooltip="Used by the backend to validate HTTPS connections to this frame when TLS is enabled."
+              >
+                <TextArea name="tls_client_ca_cert" rows={4} placeholder="-----BEGIN CERTIFICATE-----" />
+              </Field>
+              <Field
+                name="tls_server_cert"
+                label="TLS server certificate"
+                tooltip="PEM certificate used by Caddy for HTTPS on this frame."
+              >
+                <TextArea name="tls_server_cert" rows={4} placeholder="-----BEGIN CERTIFICATE-----" />
+              </Field>
+              <Field
+                name="tls_server_key"
+                label={<div>TLS server private key</div>}
+                labelRight={
+                  <Button
+                    color="secondary"
+                    size="small"
+                    onClick={() => {
+                      generateTlsCertificates()
+                    }}
+                  >
+                    Regenerate certs
+                  </Button>
+                }
+                tooltip="PEM private key used by Caddy for HTTPS on this frame. Keep this secret."
+              >
+                <TextArea name="tls_server_key" rows={4} placeholder="-----BEGIN RSA PRIVATE KEY-----" />
               </Field>
             </>
           ) : null}

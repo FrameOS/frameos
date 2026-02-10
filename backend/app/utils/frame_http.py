@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from http import HTTPStatus
+import ssl
 from typing import Optional
 
 import httpx
@@ -57,6 +58,18 @@ def _build_frame_url(frame: Frame, path: str, method: str) -> str:
     return url
 
 
+def _httpx_verify(frame: Frame):
+    if not frame.enable_tls:
+        return True
+    ca_cert = (frame.tls_client_ca_cert or "").strip()
+    if not ca_cert:
+        return True
+
+    context = ssl.create_default_context()
+    context.load_verify_locations(cadata=ca_cert)
+    return context
+
+
 def _auth_headers(
     frame: Frame, hdrs: Optional[dict[str, str]] = None
 ) -> dict[str, str]:
@@ -99,7 +112,8 @@ async def _fetch_frame_http_bytes(
 
     url = _build_frame_url(frame, path, method)
     hdrs = _auth_headers(frame)
-    async with httpx.AsyncClient() as client:
+    verify = _httpx_verify(frame)
+    async with httpx.AsyncClient(verify=verify) as client:
         try:
             response = await client.request(method, url, headers=hdrs, timeout=60.0)
         except httpx.ReadTimeout:

@@ -14,6 +14,8 @@ type
     enableTls*: bool
     tlsPort*: int
     exposeOnlyTlsPort*: bool
+    tlsServerCert*: string
+    tlsServerKey*: string
     frameAccessKey*: string
     frameAccess*: string
     width*: int

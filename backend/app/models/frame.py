@@ -29,6 +29,9 @@ class Frame(Base):
     enable_tls = mapped_column(Boolean, nullable=True)
     tls_port = mapped_column(Integer, default=8443)
     expose_only_tls_port = mapped_column(Boolean, nullable=True)
+    tls_server_cert = mapped_column(String, nullable=True)
+    tls_server_key = mapped_column(String, nullable=True)
+    tls_client_ca_cert = mapped_column(String, nullable=True)
     ssh_user = mapped_column(String(50), nullable=True)
     ssh_pass = mapped_column(String(50), nullable=True)
     ssh_port = mapped_column(Integer, default=22)
@@ -87,6 +90,9 @@ class Frame(Base):
             'enable_tls': self.enable_tls,
             'tls_port': self.tls_port,
             'expose_only_tls_port': self.expose_only_tls_port,
+            'tls_server_cert': self.tls_server_cert,
+            'tls_server_key': self.tls_server_key,
+            'tls_client_ca_cert': self.tls_client_ca_cert,
             'ssh_user': self.ssh_user,
             'ssh_pass': self.ssh_pass,
             'ssh_port': self.ssh_port,
@@ -255,6 +261,8 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
         "enableTls": bool(frame.enable_tls),
         "tlsPort": frame.tls_port or 8443,
         "exposeOnlyTlsPort": bool(frame.expose_only_tls_port),
+        "tlsServerCert": frame.tls_server_cert or "",
+        "tlsServerKey": frame.tls_server_key or "",
         "serverHost": frame.server_host or "localhost",
         "serverPort": frame.server_port or 8989,
         "serverApiKey": frame.server_api_key,

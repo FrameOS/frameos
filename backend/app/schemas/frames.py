@@ -17,6 +17,9 @@ class FrameBase(BaseModel):
     enable_tls: Optional[bool] = None
     tls_port: Optional[int] = None
     expose_only_tls_port: Optional[bool] = None
+    tls_server_cert: Optional[str] = None
+    tls_server_key: Optional[str] = None
+    tls_client_ca_cert: Optional[str] = None
     ssh_user: Optional[str]
     ssh_pass: Optional[str]
     ssh_port: int
@@ -84,6 +87,9 @@ class FrameUpdateRequest(BaseModel):
     enable_tls: Optional[bool] = None
     tls_port: Optional[int] = None
     expose_only_tls_port: Optional[bool] = None
+    tls_server_cert: Optional[str] = None
+    tls_server_key: Optional[str] = None
+    tls_client_ca_cert: Optional[str] = None
     ssh_user: Optional[str] = None
     ssh_pass: Optional[str] = None
     ssh_port: Optional[int] = None

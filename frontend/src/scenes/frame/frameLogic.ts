@@ -25,6 +25,9 @@ const FRAME_KEYS: (keyof FrameType)[] = [
   'enable_tls',
   'tls_port',
   'expose_only_tls_port',
+  'tls_server_cert',
+  'tls_server_key',
+  'tls_client_ca_cert',
   'ssh_user',
   'ssh_pass',
   'ssh_port',
@@ -278,6 +281,7 @@ export const frameLogic = kea<frameLogicType>([
     closeScenePanels: (sceneIds: string[]) => ({ sceneIds }),
     sendEvent: (event: string, payload: Record<string, any>) => ({ event, payload }),
     setDeployWithAgent: (deployWithAgent: boolean) => ({ deployWithAgent }),
+    generateTlsCertificates: true,
   }),
   forms(({ values }) => ({
     frameForm: {
@@ -352,6 +356,23 @@ export const frameLogic = kea<frameLogicType>([
       if (!response.ok) {
         throw new Error('Failed to update deployed SSH keys')
       }
+    },
+    generateTlsCertificates: async () => {
+      const response = await apiFetch(`/api/frames/${values.frameId}/tls/generate`, {
+        method: 'POST',
+      })
+      if (!response.ok) {
+        throw new Error('Failed to generate TLS certificates')
+      }
+      const data = await response.json()
+      actions.setFrameFormValues({
+        tls_server_cert: data.tls_server_cert,
+        tls_server_key: data.tls_server_key,
+        tls_client_ca_cert: data.tls_client_ca_cert,
+      })
+      actions.touchFrameFormField('tls_server_cert')
+      actions.touchFrameFormField('tls_server_key')
+      actions.touchFrameFormField('tls_client_ca_cert')
     },
   })),
   selectors(() => ({

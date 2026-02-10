@@ -11,6 +11,9 @@ export interface FrameType {
   enable_tls?: boolean
   tls_port?: number
   expose_only_tls_port?: boolean
+  tls_server_cert?: string
+  tls_server_key?: string
+  tls_client_ca_cert?: string
   ssh_user?: string
   ssh_pass?: string
   ssh_port: number

@@ -74,6 +74,7 @@ from app.utils.frame_http import (
     _auth_headers,
     _fetch_frame_http_bytes,
     _frame_scheme_port,
+    _httpx_verify,
 )
 from app.tasks.utils import find_nim_v2
 from app.tasks.deploy_frame import FrameDeployer
@@ -90,6 +91,7 @@ from app.ws.agent_ws import (
 from app.models.assets import copy_custom_fonts_to_local_source_folder
 from app.models.settings import get_settings_dict
 from app.utils.ssh_key_utils import default_ssh_key_ids
+from app.utils.tls import generate_frame_tls_material
 from app.utils.ssh_authorized_keys import _install_authorized_keys, resolve_authorized_keys_update
 from app.tasks.binary_builder import FrameBinaryBuilder
 from app.utils.local_exec import exec_local_command
@@ -357,7 +359,8 @@ async def _forward_frame_request(
 
     url = _build_frame_url(frame, path, method)
     hdrs = _auth_headers(frame)
-    async with httpx.AsyncClient() as client:
+    verify = _httpx_verify(frame)
+    async with httpx.AsyncClient(verify=verify) as client:
         try:
             if isinstance(json_body, (bytes, bytearray)):
                 # binary/event bodies
@@ -1737,6 +1740,26 @@ async def api_frame_update_endpoint(
         await deploy_frame(id, redis)
 
     return {"message": "Frame updated successfully"}
+
+
+
+
+@api_with_auth.post("/frames/{id:int}/tls/generate")
+async def api_frame_generate_tls_material_endpoint(
+    id: int,
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    frame = db.get(Frame, id)
+    if not frame:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
+
+    material = generate_frame_tls_material(frame.frame_host or "")
+    frame.tls_server_cert = material["tls_server_cert"]
+    frame.tls_server_key = material["tls_server_key"]
+    frame.tls_client_ca_cert = material["tls_client_ca_cert"]
+    await update_frame(db, redis, frame)
+    return material
 
 
 @api_with_auth.post("/frames/new", response_model=FrameResponse)
