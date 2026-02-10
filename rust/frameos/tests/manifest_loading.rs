@@ -1,6 +1,6 @@
 use frameos::manifests::{
-    load_app_manifest, load_app_registry, load_scene_catalog, load_scene_manifest,
-    ManifestLoadError,
+    load_app_manifest, load_app_registry, load_scene_catalog, load_scene_graph_manifest,
+    load_scene_manifest, ManifestLoadError,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -81,5 +81,22 @@ fn reports_parse_error_for_non_json_manifest() {
     let result = load_app_manifest(&app_path);
 
     assert!(matches!(result, Err(ManifestLoadError::Parse { .. })));
+    fs::remove_dir_all(test_dir).expect("test directory should be removable");
+}
+
+#[test]
+fn loads_scene_graph_manifest_from_disk() {
+    let test_dir = unique_test_dir("scene-graph-manifest-ok");
+    let scene_path = write_fixture(
+        &test_dir,
+        "scenes-graph.json",
+        include_str!("fixtures/scenes-graph-valid.json"),
+    );
+
+    let graphs = load_scene_graph_manifest(&scene_path).expect("scene graph manifest should load");
+
+    assert_eq!(graphs.len(), 1);
+    assert_eq!(graphs[0].id, "scene/linear");
+    assert_eq!(graphs[0].entry_node, 1);
     fs::remove_dir_all(test_dir).expect("test directory should be removable");
 }

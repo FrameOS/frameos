@@ -1,4 +1,5 @@
 use serde_json::{Map, Value};
+use xmltree::{Element, XMLNode};
 
 use crate::models::AppDescriptor;
 
@@ -31,10 +32,7 @@ pub enum AppOutput {
 pub enum AppExecutionError {
     UnknownKeyword(String),
     MissingField(&'static str),
-    InvalidField {
-        field: &'static str,
-        reason: &'static str,
-    },
+    InvalidField { field: &'static str, reason: String },
     JsonParse(String),
     Aborted(String),
 }
@@ -79,6 +77,7 @@ pub fn execute_ported_app(
     match keyword {
         "data/parseJson" => execute_data_parse_json(fields),
         "data/prettyJson" => execute_data_pretty_json(fields),
+        "data/xmlToJson" => execute_data_xml_to_json(fields),
         "logic/setAsState" => execute_logic_set_as_state(fields, context),
         "logic/ifElse" => execute_logic_if_else(fields),
         "logic/nextSleepDuration" => execute_logic_next_sleep_duration(fields, context),
@@ -123,13 +122,62 @@ fn execute_data_pretty_json(fields: &Map<String, Value>) -> Result<AppOutput, Ap
     let output = if prettify {
         serde_json::to_string_pretty(json_value).map_err(|_| AppExecutionError::InvalidField {
             field: "json",
-            reason: "value cannot be rendered as json",
+            reason: "value cannot be rendered as json".to_string(),
         })?
     } else {
         json_value.to_string()
     };
 
     Ok(AppOutput::Value(Value::String(output)))
+}
+
+fn execute_data_xml_to_json(fields: &Map<String, Value>) -> Result<AppOutput, AppExecutionError> {
+    let xml = require_string(fields, "xml")?;
+    let document =
+        Element::parse(xml.as_bytes()).map_err(|error| AppExecutionError::InvalidField {
+            field: "xml",
+            reason: format!("failed to parse xml: {error}"),
+        })?;
+
+    let root = xml_node_to_json_element(&document);
+    Ok(AppOutput::Value(serde_json::json!({
+        "type": "document",
+        "root": root,
+    })))
+}
+
+fn xml_node_to_json_element(node: &Element) -> Value {
+    let children = node
+        .children
+        .iter()
+        .filter_map(xml_child_to_json)
+        .collect::<Vec<_>>();
+
+    serde_json::json!({
+        "type": "element",
+        "name": node.name,
+        "attributes": node.attributes,
+        "children": children,
+    })
+}
+
+fn xml_child_to_json(child: &XMLNode) -> Option<Value> {
+    match child {
+        XMLNode::Element(element) => Some(xml_node_to_json_element(element)),
+        XMLNode::Text(text) => {
+            if text.trim().is_empty() {
+                None
+            } else {
+                Some(serde_json::json!({"type":"text", "text": text}))
+            }
+        }
+        XMLNode::CData(text) => Some(serde_json::json!({"type":"cdata", "text": text})),
+        XMLNode::Comment(text) => Some(serde_json::json!({"type":"comment", "text": text})),
+        XMLNode::ProcessingInstruction(name, value) => {
+            let text = value.clone().unwrap_or_default();
+            Some(serde_json::json!({"type":"entity", "text": format!("{name} {text}").trim()}))
+        }
+    }
 }
 
 fn execute_logic_set_as_state(
@@ -143,7 +191,7 @@ fn execute_logic_set_as_state(
     if value_string.is_some() && value_json.is_some() {
         return Err(AppExecutionError::InvalidField {
             field: "valueString/valueJson",
-            reason: "only one of valueString or valueJson can be set",
+            reason: "only one of valueString or valueJson can be set".to_string(),
         });
     }
 
@@ -184,7 +232,7 @@ fn execute_logic_next_sleep_duration(
     if duration < 0.0 {
         return Err(AppExecutionError::InvalidField {
             field: "duration",
-            reason: "must be >= 0",
+            reason: "must be >= 0".to_string(),
         });
     }
 

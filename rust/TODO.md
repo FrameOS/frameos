@@ -169,9 +169,16 @@
 - Implemented branch-aware traversal semantics where `AppOutput::BranchNode` overrides static edge flow and normal app outputs fall back to `next_node`, matching intended graph behavior for interpreted app chains.
 - Added unit tests that cover linear state mutation, branch routing, and cycle detection for regression safety as additional app keywords are ported.
 
+
+### Iteration 24 (scene-graph manifest adapters + xmlToJson app port)
+- Added manifest adapters that load executable `SceneGraph` payloads directly from JSON manifests (`load_scene_graph_manifest`) with typed graph-adapter errors for malformed entries and missing IDs.
+- Implemented `SceneGraph::from_json_value` so scene descriptors/payloads can bootstrap deterministic graph execution using either `entry_node`/`next_node` or camelCase aliases from fixture/manifests.
+- Ported Nim app behavior for `data/xmlToJson`, including document/element/text/comment/cdata conversion semantics and parse failures surfaced as app field validation errors.
+- Added regression coverage for scene-graph manifest loading, JSON-to-graph adaptation, and xml-to-json success/failure paths in the ported app test suite.
+
 ## Next up (small, actionable)
-1. Add manifest-to-`SceneGraph` adapters so `SceneDescriptor` payloads can bootstrap executable scene graphs without bespoke test wiring.
-2. Port additional deterministic data apps (`data/xmlToJson`, `data/prettyJson` options parity checks, `data/eventsToAgenda`) with fixture-based golden outputs.
+1. Port additional deterministic data apps (`data/eventsToAgenda`) with fixture-based golden outputs and timezone edge-case coverage.
+2. Extend `data/prettyJson` parity with `ident` formatting controls to match Nim output options exactly.
 3. Add CI-oriented daemon smoke script that boots `frameos run`, probes `/healthz`, then sends SIGINT and validates `runtime:stop` in the event log.
 4. Replace shell-based probe commands with first-class filesystem/device capability discovery adapters under a dedicated `discovery` module.
 5. Emit additional probe diagnostics (duration + probe command fingerprint) in `runtime:parity_failed` while avoiding sensitive command leakage.

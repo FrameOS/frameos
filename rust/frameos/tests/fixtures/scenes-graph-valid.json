@@ -1,0 +1,21 @@
+[
+  {
+    "id": "scene/linear",
+    "entryNode": 1,
+    "nodes": [
+      {
+        "id": 1,
+        "keyword": "logic/setAsState",
+        "fields": {
+          "stateKey": "mode",
+          "valueString": "demo"
+        },
+        "nextNode": 2
+      },
+      {
+        "id": 2,
+        "keyword": "logic/breakIfRendering"
+      }
+    ]
+  }
+]

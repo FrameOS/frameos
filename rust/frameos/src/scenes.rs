@@ -1,5 +1,6 @@
 use serde_json::{Map, Value};
 use std::collections::{BTreeSet, HashMap};
+use std::fmt;
 
 use crate::apps::{execute_ported_app, AppExecutionContext, AppExecutionError, AppOutput};
 use crate::models::SceneDescriptor;
@@ -36,6 +37,25 @@ pub struct SceneGraph {
     pub entry_node: u64,
     pub nodes: Vec<SceneNode>,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SceneGraphAdapterError {
+    MissingField(&'static str),
+    InvalidField { field: &'static str, reason: String },
+}
+
+impl fmt::Display for SceneGraphAdapterError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::MissingField(field) => write!(f, "missing required scene graph field: {field}"),
+            Self::InvalidField { field, reason } => {
+                write!(f, "invalid scene graph field `{field}`: {reason}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for SceneGraphAdapterError {}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SceneRunReport {
@@ -89,6 +109,94 @@ impl std::error::Error for SceneRunError {
 }
 
 impl SceneGraph {
+    pub fn from_json_value(
+        scene_id: impl Into<String>,
+        value: &Value,
+    ) -> Result<Self, SceneGraphAdapterError> {
+        let scene_id = scene_id.into();
+        let object = value
+            .as_object()
+            .ok_or(SceneGraphAdapterError::InvalidField {
+                field: "root",
+                reason: "expected a JSON object".to_string(),
+            })?;
+
+        let entry_node = object
+            .get("entry_node")
+            .or_else(|| object.get("entryNode"))
+            .and_then(Value::as_u64)
+            .ok_or(SceneGraphAdapterError::MissingField("entry_node"))?;
+
+        let node_values = object
+            .get("nodes")
+            .and_then(Value::as_array)
+            .ok_or(SceneGraphAdapterError::MissingField("nodes"))?;
+
+        let mut nodes = Vec::with_capacity(node_values.len());
+        for (index, node_value) in node_values.iter().enumerate() {
+            let node_object =
+                node_value
+                    .as_object()
+                    .ok_or(SceneGraphAdapterError::InvalidField {
+                        field: "nodes",
+                        reason: format!("node at index {index} must be an object"),
+                    })?;
+
+            let id = node_object.get("id").and_then(Value::as_u64).ok_or(
+                SceneGraphAdapterError::InvalidField {
+                    field: "nodes.id",
+                    reason: format!("node at index {index} is missing numeric id"),
+                },
+            )?;
+
+            let keyword = node_object
+                .get("keyword")
+                .and_then(Value::as_str)
+                .ok_or(SceneGraphAdapterError::InvalidField {
+                    field: "nodes.keyword",
+                    reason: format!("node {id} is missing keyword"),
+                })?
+                .to_string();
+
+            let fields = match node_object.get("fields") {
+                Some(Value::Object(map)) => map.clone(),
+                Some(_) => {
+                    return Err(SceneGraphAdapterError::InvalidField {
+                        field: "nodes.fields",
+                        reason: format!("node {id} fields must be an object"),
+                    })
+                }
+                None => Map::new(),
+            };
+
+            let next_node = match node_object
+                .get("next_node")
+                .or_else(|| node_object.get("nextNode"))
+            {
+                Some(Value::Null) | None => None,
+                Some(value) => {
+                    Some(value.as_u64().ok_or(SceneGraphAdapterError::InvalidField {
+                        field: "nodes.next_node",
+                        reason: format!("node {id} next_node must be numeric"),
+                    })?)
+                }
+            };
+
+            nodes.push(SceneNode {
+                id,
+                keyword,
+                fields,
+                next_node,
+            });
+        }
+
+        Ok(Self {
+            id: scene_id,
+            entry_node,
+            nodes,
+        })
+    }
+
     pub fn run(&self, context: AppExecutionContext) -> Result<SceneRunReport, SceneRunError> {
         if self.nodes.is_empty() {
             return Err(SceneRunError::EmptyNodes);
@@ -267,5 +375,33 @@ mod tests {
             .run(AppExecutionContext::default())
             .expect_err("cycle should be rejected");
         assert_eq!(error, SceneRunError::LoopDetected { node_id: 1 });
+    }
+
+    #[test]
+    fn scene_graph_builds_from_json_value() {
+        let value = serde_json::json!({
+            "entryNode": 1,
+            "nodes": [
+                {
+                    "id": 1,
+                    "keyword": "logic/setAsState",
+                    "fields": {
+                        "stateKey": "ready",
+                        "valueString": "yes"
+                    },
+                    "nextNode": 2
+                },
+                {
+                    "id": 2,
+                    "keyword": "logic/breakIfRendering"
+                }
+            ]
+        });
+
+        let graph = SceneGraph::from_json_value("scene/test", &value)
+            .expect("json payload should convert into a scene graph");
+        assert_eq!(graph.entry_node, 1);
+        assert_eq!(graph.nodes.len(), 2);
+        assert_eq!(graph.nodes[0].next_node, Some(2));
     }
 }

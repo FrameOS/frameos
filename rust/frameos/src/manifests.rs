@@ -1,6 +1,6 @@
 use crate::apps::AppRegistry;
 use crate::models::{AppDescriptor, ModelValidationError, SceneDescriptor};
-use crate::scenes::SceneCatalog;
+use crate::scenes::{SceneCatalog, SceneGraph, SceneGraphAdapterError};
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -20,6 +20,10 @@ pub enum ManifestLoadError {
         index: usize,
         source: ModelValidationError,
     },
+    GraphAdapter {
+        scene_id: String,
+        source: SceneGraphAdapterError,
+    },
 }
 
 impl fmt::Display for ManifestLoadError {
@@ -38,6 +42,9 @@ impl fmt::Display for ManifestLoadError {
             } => {
                 write!(f, "invalid {manifest} entry at index {index}: {source}")
             }
+            Self::GraphAdapter { scene_id, source } => {
+                write!(f, "failed to build scene graph for {scene_id}: {source}")
+            }
         }
     }
 }
@@ -48,6 +55,7 @@ impl std::error::Error for ManifestLoadError {
             Self::Io { source, .. } => Some(source),
             Self::Parse { source, .. } => Some(source),
             Self::Validation { source, .. } => Some(source),
+            Self::GraphAdapter { source, .. } => Some(source),
         }
     }
 }
@@ -112,4 +120,50 @@ pub fn load_scene_catalog(path: impl AsRef<Path>) -> Result<SceneCatalog, Manife
 pub fn load_app_registry(path: impl AsRef<Path>) -> Result<AppRegistry, ManifestLoadError> {
     let apps = load_app_manifest(path)?;
     Ok(AppRegistry::with_apps(apps))
+}
+
+pub fn load_scene_graph_manifest(
+    path: impl AsRef<Path>,
+) -> Result<Vec<SceneGraph>, ManifestLoadError> {
+    let path = path.as_ref();
+    let payload = read_manifest(path)?;
+    let raw_scenes: Vec<serde_json::Value> =
+        serde_json::from_str(&payload).map_err(|source| ManifestLoadError::Parse {
+            path: path.to_path_buf(),
+            source,
+        })?;
+
+    raw_scenes
+        .into_iter()
+        .map(|scene| {
+            let object = scene
+                .as_object()
+                .ok_or_else(|| ManifestLoadError::GraphAdapter {
+                    scene_id: "<unknown>".to_string(),
+                    source: SceneGraphAdapterError::InvalidField {
+                        field: "scene",
+                        reason: "scene entry must be an object".to_string(),
+                    },
+                })?;
+
+            let scene_id = object
+                .get("id")
+                .and_then(serde_json::Value::as_str)
+                .ok_or_else(|| ManifestLoadError::GraphAdapter {
+                    scene_id: "<unknown>".to_string(),
+                    source: SceneGraphAdapterError::MissingField("id"),
+                })?
+                .to_string();
+
+            let graph =
+                SceneGraph::from_json_value(scene_id.clone(), &scene).map_err(|source| {
+                    ManifestLoadError::GraphAdapter {
+                        scene_id: scene_id.clone(),
+                        source,
+                    }
+                })?;
+
+            Ok(graph)
+        })
+        .collect()
 }

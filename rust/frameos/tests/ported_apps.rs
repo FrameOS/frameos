@@ -68,3 +68,48 @@ fn set_as_state_rejects_dual_value_sources() {
         }
     ));
 }
+
+#[test]
+fn xml_to_json_builds_document_tree() {
+    let mut fields = Map::new();
+    fields.insert(
+        "xml".to_string(),
+        json!("<root lang=\"en\"><title>Hello</title><!-- note --></root>"),
+    );
+
+    let output = execute_ported_app(
+        "data/xmlToJson",
+        &fields,
+        &mut AppExecutionContext::default(),
+    )
+    .expect("xml to json app should execute");
+
+    let AppOutput::Value(payload) = output else {
+        panic!("expected object output");
+    };
+
+    assert_eq!(payload["type"], json!("document"));
+    assert_eq!(payload["root"]["type"], json!("element"));
+    assert_eq!(payload["root"]["name"], json!("root"));
+    assert_eq!(payload["root"]["attributes"]["lang"], json!("en"));
+    assert_eq!(payload["root"]["children"][0]["name"], json!("title"));
+    assert_eq!(payload["root"]["children"][1]["type"], json!("comment"));
+}
+
+#[test]
+fn xml_to_json_rejects_invalid_xml() {
+    let mut fields = Map::new();
+    fields.insert("xml".to_string(), json!("<root>"));
+
+    let error = execute_ported_app(
+        "data/xmlToJson",
+        &fields,
+        &mut AppExecutionContext::default(),
+    )
+    .expect_err("invalid xml should fail");
+
+    assert!(matches!(
+        error,
+        AppExecutionError::InvalidField { field: "xml", .. }
+    ));
+}
