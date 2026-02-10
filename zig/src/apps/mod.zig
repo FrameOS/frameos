@@ -1,5 +1,6 @@
 const std = @import("std");
 const clock_app = @import("clock.zig");
+const weather_app = @import("weather.zig");
 const types = @import("types.zig");
 
 pub const AppContext = types.AppContext;
@@ -34,6 +35,11 @@ pub const AppBoundary = struct {
             return lifecycle.startup(ctx);
         }
 
+        if (std.mem.eql(u8, self.runtime.spec.id, "app.weather")) {
+            const lifecycle = weather_app.WeatherAppLifecycle.init(self.runtime.spec);
+            return lifecycle.startup(ctx);
+        }
+
         try self.runtime.startup(ctx);
         return .{
             .app_id = self.runtime.spec.id,
@@ -45,7 +51,21 @@ pub const AppBoundary = struct {
 
 pub fn loadAppBoundaryForScene(scene_id: []const u8) ?AppBoundary {
     const manifest = findSceneManifest(scene_id) orelse return null;
+
+    if (!isAppLifecycleRegistered(manifest.app.id)) {
+        return null;
+    }
+
     return .{ .runtime = AppRuntime.init(manifest.app) };
+}
+
+pub fn appLifecycleSummaryForScene(scene_id: []const u8, ctx: AppContext) !?AppStartupSummary {
+    const boundary = loadAppBoundaryForScene(scene_id) orelse return null;
+    return try boundary.startup(ctx);
+}
+
+fn isAppLifecycleRegistered(app_id: []const u8) bool {
+    return std.mem.eql(u8, app_id, "app.clock") or std.mem.eql(u8, app_id, "app.weather");
 }
 
 pub fn builtinSceneManifests() []const SceneManifest {
@@ -97,13 +117,25 @@ test "clock scene app boundary resolves concrete lifecycle summary" {
     try testing.expectEqual(@as(u8, 1), summary.frame_rate_hz);
 }
 
-test "non-clock scene app boundary keeps stub lifecycle" {
+test "weather scene app boundary resolves concrete lifecycle summary" {
     const testing = std.testing;
 
     const boundary = loadAppBoundaryForScene("weather") orelse return error.TestUnexpectedResult;
     const summary = try boundary.startup(.{ .allocator = testing.allocator });
 
     try testing.expectEqualStrings("app.weather", summary.app_id);
-    try testing.expectEqualStrings("stub", summary.lifecycle);
-    try testing.expectEqual(@as(u8, 0), summary.frame_rate_hz);
+    try testing.expectEqualStrings("weather", summary.lifecycle);
+    try testing.expectEqual(@as(u8, 30), summary.frame_rate_hz);
+}
+
+test "app boundary returns null for unregistered lifecycle even when manifest exists" {
+    const testing = std.testing;
+
+    try testing.expectEqual(@as(?AppBoundary, null), loadAppBoundaryForScene("calendar"));
+}
+
+test "lifecycle summary helper returns null for unregistered lifecycle" {
+    const testing = std.testing;
+
+    try testing.expectEqual(@as(?AppStartupSummary, null), try appLifecycleSummaryForScene("calendar", .{ .allocator = testing.allocator }));
 }

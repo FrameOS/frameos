@@ -5,6 +5,7 @@ const logger_mod = @import("logger.zig");
 const network_probe_mod = @import("network_probe.zig");
 const scenes_mod = @import("scenes.zig");
 const system_mod = @import("../system/mod.zig");
+const apps_mod = @import("../apps/mod.zig");
 
 pub const RuntimeServer = struct {
     logger: logger_mod.RuntimeLogger,
@@ -43,8 +44,12 @@ pub const RuntimeServer = struct {
         return .{ .server = self, .registry = registry };
     }
 
-    pub fn sceneByIdRoute(self: RuntimeServer, registry: scenes_mod.SceneRegistry, scene_id: []const u8) SceneByIdRoute {
-        return .{ .server = self, .result = registry.loadManifestResult(scene_id) };
+    pub fn sceneByIdRoute(self: RuntimeServer, registry: scenes_mod.SceneRegistry, scene_id: []const u8) !SceneByIdRoute {
+        return .{
+            .server = self,
+            .result = registry.loadManifestResult(scene_id),
+            .app_lifecycle = try apps_mod.appLifecycleSummaryForScene(scene_id, .{ .allocator = std.heap.page_allocator }),
+        };
     }
 
     pub fn hotspotPortalStatusRoute(
@@ -122,16 +127,24 @@ pub const ScenesRoute = struct {
 pub const SceneByIdRoute = struct {
     server: RuntimeServer,
     result: scenes_mod.SceneManifestResult,
+    app_lifecycle: ?apps_mod.AppStartupSummary,
 
     pub fn renderJson(self: SceneByIdRoute, buffer: []u8) ![]const u8 {
         var stream = std.io.fixedBufferStream(buffer);
         const writer = stream.writer();
 
         if (self.result.manifest) |manifest| {
-            try writer.print(
-                "{\"host\":\"{s}\",\"port\":{},\"requestedId\":\"{s}\",\"found\":true,\"scene\":{\"id\":\"{s}\",\"appId\":\"{s}\",\"entrypoint\":\"{s}\"}}",
-                .{ self.server.config.frame_host, self.server.config.frame_port, self.result.requested_scene_id, manifest.scene_id, manifest.app.id, manifest.entrypoint },
-            );
+            if (self.app_lifecycle) |summary| {
+                try writer.print(
+                    "{\"host\":\"{s}\",\"port\":{},\"requestedId\":\"{s}\",\"found\":true,\"scene\":{\"id\":\"{s}\",\"appId\":\"{s}\",\"entrypoint\":\"{s}\"},\"appLifecycle\":{\"appId\":\"{s}\",\"lifecycle\":\"{s}\",\"frameRateHz\":{}}}",
+                    .{ self.server.config.frame_host, self.server.config.frame_port, self.result.requested_scene_id, manifest.scene_id, manifest.app.id, manifest.entrypoint, summary.app_id, summary.lifecycle, summary.frame_rate_hz },
+                );
+            } else {
+                try writer.print(
+                    "{\"host\":\"{s}\",\"port\":{},\"requestedId\":\"{s}\",\"found\":true,\"scene\":{\"id\":\"{s}\",\"appId\":\"{s}\",\"entrypoint\":\"{s}\"},\"appLifecycle\":null}",
+                    .{ self.server.config.frame_host, self.server.config.frame_port, self.result.requested_scene_id, manifest.scene_id, manifest.app.id, manifest.entrypoint },
+                );
+            }
         } else {
             try writer.print(
                 "{\"host\":\"{s}\",\"port\":{},\"requestedId\":\"{s}\",\"found\":false,\"error\":{\"code\":\"scene_not_found\",\"message\":\"Unknown scene id\"}}",
@@ -283,17 +296,37 @@ test "scene by id route renders successful scene payload" {
     const server = RuntimeServer.init(logger, .{ .frame_host = "0.0.0.0", .frame_port = 7777, .debug = false, .metrics_interval_s = 30, .network_check = true, .network_probe_mode = .auto, .device = "simulator", .startup_scene = "clock" });
 
     const registry = scenes_mod.SceneRegistry.init(logger, "clock");
-    const route = server.sceneByIdRoute(registry, "weather");
+    const route = try server.sceneByIdRoute(registry, "weather");
 
     var buf: [256]u8 = undefined;
     const payload = try route.renderJson(&buf);
 
     try testing.expectEqualStrings(
-        "{\"host\":\"0.0.0.0\",\"port\":7777,\"requestedId\":\"weather\",\"found\":true,\"scene\":{\"id\":\"weather\",\"appId\":\"app.weather\",\"entrypoint\":\"apps/weather/main\"}}",
+        "{\"host\":\"0.0.0.0\",\"port\":7777,\"requestedId\":\"weather\",\"found\":true,\"scene\":{\"id\":\"weather\",\"appId\":\"app.weather\",\"entrypoint\":\"apps/weather/main\"},\"appLifecycle\":{\"appId\":\"app.weather\",\"lifecycle\":\"weather\",\"frameRateHz\":30}}",
         payload,
     );
 }
 
+
+
+test "scene by id route renders null lifecycle metadata when app boundary is missing" {
+    const testing = std.testing;
+
+    const logger = logger_mod.RuntimeLogger.init(.{ .frame_host = "127.0.0.1", .frame_port = 8787, .debug = false, .metrics_interval_s = 60, .network_check = true, .network_probe_mode = .auto, .device = "simulator", .startup_scene = "clock" });
+
+    const server = RuntimeServer.init(logger, .{ .frame_host = "0.0.0.0", .frame_port = 7777, .debug = false, .metrics_interval_s = 30, .network_check = true, .network_probe_mode = .auto, .device = "simulator", .startup_scene = "clock" });
+
+    const registry = scenes_mod.SceneRegistry.init(logger, "clock");
+    const route = try server.sceneByIdRoute(registry, "calendar");
+
+    var buf: [256]u8 = undefined;
+    const payload = try route.renderJson(&buf);
+
+    try testing.expectEqualStrings(
+        "{\"host\":\"0.0.0.0\",\"port\":7777,\"requestedId\":\"calendar\",\"found\":true,\"scene\":{\"id\":\"calendar\",\"appId\":\"app.calendar\",\"entrypoint\":\"apps/calendar/main\"},\"appLifecycle\":null}",
+        payload,
+    );
+}
 test "scene by id route renders error payload for unknown scene id" {
     const testing = std.testing;
 
@@ -302,7 +335,7 @@ test "scene by id route renders error payload for unknown scene id" {
     const server = RuntimeServer.init(logger, .{ .frame_host = "0.0.0.0", .frame_port = 7777, .debug = false, .metrics_interval_s = 30, .network_check = true, .network_probe_mode = .auto, .device = "simulator", .startup_scene = "clock" });
 
     const registry = scenes_mod.SceneRegistry.init(logger, "clock");
-    const route = server.sceneByIdRoute(registry, "unknown-scene");
+    const route = try server.sceneByIdRoute(registry, "unknown-scene");
 
     var buf: [256]u8 = undefined;
     const payload = try route.renderJson(&buf);

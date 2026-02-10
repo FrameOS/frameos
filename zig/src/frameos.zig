@@ -34,10 +34,12 @@ pub fn renderBootRoutePayloads(
     hotspot_status_buf: []u8,
     device_summary_buf: []u8,
 ) !BootRoutePayloads {
+    const startup_scene_route = try server.sceneByIdRoute(scene_registry, scene_registry.startup_scene);
+
     return .{
         .health = try server.healthRoute(health_snapshot, probe_mode, probe_outcome).renderJson(health_buf),
         .scenes = try server.scenesRoute(scene_registry).renderJson(scenes_buf),
-        .startup_scene = try server.sceneByIdRoute(scene_registry, scene_registry.startup_scene).renderJson(startup_scene_buf),
+        .startup_scene = try startup_scene_route.renderJson(startup_scene_buf),
         .hotspot_status = try server.hotspotPortalStatusRoute(system_services.hotspot, system_services.portal, startup_state, system_mod.startupSceneLabel(system_services.hotspot.startup_scene)).renderJson(hotspot_status_buf),
         .device_summary = try server.deviceSummaryRoute(system_services.device_utils, scene_registry.startup_scene, startup_state).renderJson(device_summary_buf),
     };
@@ -269,6 +271,7 @@ test "boot payload integration captures successful startup scene payload" {
     try testing.expect(std.mem.indexOf(u8, payloads.startup_scene, "\"found\":true") != null);
     try testing.expect(std.mem.indexOf(u8, payloads.startup_scene, "\"appId\":\"app.weather\"") != null);
     try testing.expect(std.mem.indexOf(u8, payloads.startup_scene, "\"entrypoint\":\"apps/weather/main\"") != null);
+    try testing.expect(std.mem.indexOf(u8, payloads.startup_scene, "\"appLifecycle\":{\"appId\":\"app.weather\",\"lifecycle\":\"weather\",\"frameRateHz\":30}") != null);
     try testing.expect(std.mem.indexOf(u8, payloads.health, "\"networkProbe\":{\"mode\":\"auto\",\"outcome\":\"ok\"}") != null);
     try testing.expect(std.mem.indexOf(u8, payloads.device_summary, "\"startupScene\":\"weather\"") != null);
     try testing.expect(std.mem.indexOf(u8, payloads.device_summary, "\"startupState\":\"ready\"") != null);

@@ -19,12 +19,11 @@ pub const RuntimeRunner = struct {
     pub fn startup(self: RuntimeRunner) !void {
         const startup_scene = self.scene_registry.resolveStartupScene();
         const manifest = self.scene_registry.loadManifest(startup_scene);
-        const app_boundary = apps_mod.loadAppBoundaryForScene(startup_scene);
 
         const app_id = if (manifest) |loaded| loaded.app.id else "unknown";
         const app_entrypoint = if (manifest) |loaded| loaded.entrypoint else "unknown";
-        const app_startup = if (app_boundary) |boundary|
-            try boundary.startup(.{ .allocator = std.heap.page_allocator })
+        const app_startup = if (try apps_mod.appLifecycleSummaryForScene(startup_scene, .{ .allocator = std.heap.page_allocator })) |summary|
+            summary
         else
             apps_mod.AppStartupSummary{ .app_id = app_id, .lifecycle = "missing", .frame_rate_hz = 0 };
 
@@ -70,4 +69,39 @@ test "runner uses clock app lifecycle boundary" {
 
     try testing.expectEqualStrings("clock", summary.lifecycle);
     try testing.expectEqual(@as(u8, 1), summary.frame_rate_hz);
+}
+
+
+test "runner falls back to missing lifecycle when manifest exists but no app boundary is registered" {
+    const testing = @import("std").testing;
+
+    const logger = logger_mod.RuntimeLogger.init(.{
+        .frame_host = "127.0.0.1",
+        .frame_port = 8787,
+        .debug = false,
+        .metrics_interval_s = 60,
+        .network_check = true,
+        .network_probe_mode = .auto,
+        .device = "simulator",
+        .startup_scene = "calendar",
+    });
+
+    const registry = scenes_mod.SceneRegistry.init(logger, "calendar");
+    const startup_scene = registry.resolveStartupScene();
+    try testing.expectEqualStrings("calendar", startup_scene);
+
+    const manifest = registry.loadManifest(startup_scene) orelse return error.TestUnexpectedResult;
+    try testing.expectEqualStrings("app.calendar", manifest.app.id);
+
+    const summary = try apps_mod.appLifecycleSummaryForScene(startup_scene, .{ .allocator = testing.allocator });
+    try testing.expectEqual(@as(?apps_mod.AppStartupSummary, null), summary);
+
+    const fallback = if (summary) |resolved|
+        resolved
+    else
+        apps_mod.AppStartupSummary{ .app_id = manifest.app.id, .lifecycle = "missing", .frame_rate_hz = 0 };
+
+    try testing.expectEqualStrings("app.calendar", fallback.app_id);
+    try testing.expectEqualStrings("missing", fallback.lifecycle);
+    try testing.expectEqual(@as(u8, 0), fallback.frame_rate_hz);
 }

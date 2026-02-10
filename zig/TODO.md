@@ -109,6 +109,12 @@
   - [x] Added `renderBootNetworkProbePayload` plus an integration-style test that asserts `boot.network_probe` mode/outcome fields stay aligned with `/health` diagnostics.
   - [x] Ported the first concrete app boundary via `apps/clock.zig` and wired `apps/mod.zig` + `runtime/runner.zig` to use clock lifecycle startup summaries.
 
+
+- **Iteration 20:**
+  - [x] Extended `/scenes/:id` payloads to include optional `appLifecycle` metadata (`appId`, `lifecycle`, `frameRateHz`) when a lifecycle boundary is registered, and explicit `null` when missing.
+  - [x] Added runner-level fallback coverage proving manifest-present scenes without a registered lifecycle boundary resolve to `missing` startup summaries.
+  - [x] Ported a second concrete app boundary via `apps/weather.zig` and wired weather scene startup summaries through `apps/mod.zig`, runner wiring, and route payload assertions.
+
 ## Completed
 - [x] Create `zig/` directory.
 - [x] Create `zig/TODO.md` with loop structure and initial plan.
@@ -155,12 +161,16 @@
 - [x] Introduce a dedicated boot log payload test that validates `boot.network_probe` mode/outcome fields remain aligned with `/health` diagnostics.
 - [x] Start porting one concrete Zig app boundary implementation (first target: clock app lifecycle stub) behind `apps/mod.zig`.
 
+- [x] Extend `/scenes/:id` payload contract with optional app lifecycle metadata so route diagnostics can reflect boundary startup intent.
+- [x] Add runner-level tests that validate fallback behavior when a scene manifest exists but no app boundary is registered.
+- [x] Start porting a second concrete app boundary (next target: weather lifecycle stub) behind `apps/mod.zig`.
+
 ---
 
 ## Next Actions (priority order)
-1. [ ] Extend `/scenes/:id` payload contract with optional app lifecycle metadata so route diagnostics can reflect boundary startup intent.
-2. [ ] Add runner-level tests that validate fallback behavior when a scene manifest exists but no app boundary is registered.
-3. [ ] Start porting a second concrete app boundary (next target: weather lifecycle stub) behind `apps/mod.zig`.
+1. [ ] Add `/scenes` route payload lifecycle summaries so list diagnostics mirror `/scenes/:id` app-lifecycle metadata.
+2. [ ] Thread per-scene lifecycle availability into boot-route integration payload assertions (registered + missing boundaries).
+3. [ ] Port a third concrete app boundary (next target: calendar lifecycle stub) behind `apps/mod.zig`.
 
 ## Backlog / Later
 - [ ] Port individual apps incrementally (start with simplest).
