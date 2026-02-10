@@ -1,0 +1,23 @@
+[
+  {
+    "id": "clock/default",
+    "app_id": "clock",
+    "version": "1.2.0",
+    "source": {
+      "type": "asset_path",
+      "path": "/srv/frameos/assets/scenes/clock/default.json"
+    },
+    "metadata": {
+      "theme": "dark"
+    }
+  },
+  {
+    "id": "weather/summary",
+    "app_id": "weather",
+    "version": "2.0.1",
+    "source": {
+      "type": "remote_url",
+      "url": "https://controller.local/scenes/weather/summary"
+    }
+  }
+]

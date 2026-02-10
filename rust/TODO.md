@@ -43,12 +43,17 @@
 - Wired placeholder scene/app registries to typed descriptors to reduce future refactors when loading manifests and scene catalogs.
 - Added unit tests that exercise serialization of scene descriptors and deserialization of frame state payloads.
 
+### Iteration 6 (descriptor validation + manifest fixtures)
+- Added explicit validation helpers for `SceneDescriptor` and `AppDescriptor`, covering required fields, semver-like version format, and source invariants (`asset_path` absolute paths, `remote_url` scheme checks).
+- Introduced a shared `ModelValidationError` type with friendly error messages for future CLI/API surfacing.
+- Added JSON fixture manifests for valid/invalid app and scene payloads and contract tests that deserialize and validate each fixture entry.
+
 ## Next up (small, actionable)
 1. Produce a minimal “parity map” between existing FrameOS features and planned Rust modules.
 2. Define external interfaces for the Rust runtime (CLI/server lifecycle/log stream contract).
-3. Implement validation helpers for `SceneDescriptor` and `AppDescriptor` (required fields, version format, source invariants).
-4. Add JSON fixture tests for app/scene manifests to lock contract compatibility.
-5. Evaluate when to introduce a top-level Cargo workspace once more crates are needed.
+3. Add manifest loading adapters that read app/scene JSON files from disk and validate entries.
+4. Evaluate when to introduce a top-level Cargo workspace once more crates are needed.
+5. Define migration strategy notes (phased rollout, feature flags, shadow mode).
 
 ## Checklist
 

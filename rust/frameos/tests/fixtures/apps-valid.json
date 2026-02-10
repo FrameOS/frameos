@@ -1,0 +1,19 @@
+[
+  {
+    "id": "clock",
+    "display_name": "Clock",
+    "executable": "/usr/bin/frameos-clock",
+    "entry_scene": "clock/default",
+    "enabled": true,
+    "env": {
+      "TZ": "UTC"
+    }
+  },
+  {
+    "id": "weather",
+    "display_name": "Weather",
+    "executable": "/usr/bin/frameos-weather",
+    "entry_scene": "weather/summary",
+    "enabled": true
+  }
+]

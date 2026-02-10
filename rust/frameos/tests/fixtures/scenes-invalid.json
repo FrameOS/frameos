@@ -1,0 +1,11 @@
+[
+  {
+    "id": "clock/default",
+    "app_id": "clock",
+    "version": "1.0",
+    "source": {
+      "type": "asset_path",
+      "path": "./relative/path.json"
+    }
+  }
+]
