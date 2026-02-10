@@ -11,7 +11,11 @@ proc startTlsProxy*(frameConfig: FrameConfig, logger: Logger) =
   let tlsPort = if frameConfig.tlsPort > 0: frameConfig.tlsPort else: 8443
   let upstreamPort = if frameConfig.framePort > 0: frameConfig.framePort else: 8787
   let caddyfilePath = getTempDir() / "frameos-caddyfile"
-  let caddyfileContents = fmt"""https://:{tlsPort} {{
+  let caddyfileContents = fmt"""{{
+  admin off
+  auto_https disable_redirects
+}}
+https://*:{tlsPort} {{
   reverse_proxy 127.0.0.1:{upstreamPort}
   tls internal
 }}
