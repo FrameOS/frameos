@@ -44,10 +44,20 @@ impl fmt::Display for ConfigError {
                 write!(formatter, "config file not found: {}", path.display())
             }
             Self::ReadFailed(path, err) => {
-                write!(formatter, "failed to read config file {}: {}", path.display(), err)
+                write!(
+                    formatter,
+                    "failed to read config file {}: {}",
+                    path.display(),
+                    err
+                )
             }
             Self::ParseFailed(path, err) => {
-                write!(formatter, "failed to parse config file {}: {}", path.display(), err)
+                write!(
+                    formatter,
+                    "failed to parse config file {}: {}",
+                    path.display(),
+                    err
+                )
             }
             Self::ValidationFailed(message) => write!(formatter, "invalid config: {}", message),
         }
@@ -90,12 +100,17 @@ impl FrameOSConfig {
 
     pub fn load() -> Result<Self, ConfigError> {
         let path = Self::config_path();
+        Self::load_from_path(&path)
+    }
+
+    pub fn load_from_path(path: &Path) -> Result<Self, ConfigError> {
         if !path.exists() {
-            return Err(ConfigError::MissingConfig(path));
+            return Err(ConfigError::MissingConfig(path.to_path_buf()));
         }
-        let contents = fs::read_to_string(&path).map_err(|err| ConfigError::ReadFailed(path.clone(), err))?;
-        let raw: RawFrameOSConfig =
-            serde_json::from_str(&contents).map_err(|err| ConfigError::ParseFailed(path.clone(), err))?;
+        let contents = fs::read_to_string(path)
+            .map_err(|err| ConfigError::ReadFailed(path.to_path_buf(), err))?;
+        let raw: RawFrameOSConfig = serde_json::from_str(&contents)
+            .map_err(|err| ConfigError::ParseFailed(path.to_path_buf(), err))?;
         let mut config = FrameOSConfig::default();
         config.apply_raw(raw);
         config.validate()?;

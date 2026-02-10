@@ -1,0 +1,14 @@
+{
+  "name": "kitchen-frame",
+  "mode": "rpios",
+  "server_host": "controller.local",
+  "server_port": 9000,
+  "frame_host": "kitchen.local",
+  "frame_port": 8788,
+  "width": 1200,
+  "height": 825,
+  "assets_path": "/var/lib/frameos/assets",
+  "metrics_interval": 15,
+  "debug": true,
+  "time_zone": "America/New_York"
+}

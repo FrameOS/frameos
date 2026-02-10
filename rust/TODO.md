@@ -32,12 +32,17 @@
 - Captured a Rust config struct aligned with the Nim defaults for ports, dimensions, and assets path.
 - Added structured logging helpers that emit timestamped JSON events to mirror Nim's log channel.
 
+### Iteration 4 (scope capture + config fixture tests)
+- Documented Nim runtime scope, dependency inventory, and current build/test flow in `rust/frameos/docs/nim_runtime_scope.md`.
+- Added `FrameOSConfig::load_from_path` to make config parsing testable without global environment mutation.
+- Added fixture-backed Rust tests for successful config parsing and validation failure on relative `assets_path`.
+
 ## Next up (small, actionable)
-1. Capture scope: document required behaviors, dependencies, and build steps for the Nim runtime.
-2. Produce a minimal “parity map” between existing FrameOS features and planned Rust modules.
-3. Decide data models and serialization format(s) for configs and scene payloads.
-4. Add a small config fixture + loader test coverage for the Rust crate.
-5. Decide whether to introduce a top-level Cargo workspace once more crates are needed.
+1. Produce a minimal “parity map” between existing FrameOS features and planned Rust modules.
+2. Decide data models and serialization format(s) for scene payloads and app manifests.
+3. Define external interfaces for the Rust runtime (CLI/server lifecycle/log stream contract).
+4. Sketch initial core domain models (frame state, scene descriptor, app descriptor).
+5. Evaluate when to introduce a top-level Cargo workspace once more crates are needed.
 
 ## Checklist
 
@@ -46,7 +51,7 @@
 - [x] Create `rust/TODO.md` with loop format.
 - [x] Locate FrameOS source/docs in repo or external refs.
 - [x] List entrypoints, binaries, services, and configs for FrameOS.
-- [ ] Document current language/runtime, dependencies, and build steps.
+- [x] Document current language/runtime, dependencies, and build steps.
 
 ### Architecture & planning
 - [x] Define target Rust crate(s) and module boundaries.
@@ -62,7 +67,7 @@
 - [ ] Implement I/O adapters (file/network/queue/etc.).
 - [ ] Implement main application loop / services.
 - [x] Add logging and error handling scaffolding.
-- [ ] Add tests for core logic and adapters.
+- [x] Add tests for core logic and adapters.
 
 ### Validation & rollout
 - [ ] Add parity tests or golden tests.
