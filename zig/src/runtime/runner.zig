@@ -17,6 +17,12 @@ pub const RuntimeRunner = struct {
     }
 
     pub fn startup(self: RuntimeRunner) !void {
+        var payload_buf: [320]u8 = undefined;
+        const payload = try self.renderStartupLogPayload(&payload_buf);
+        try self.logger.info("{s}", .{payload});
+    }
+
+    pub fn renderStartupLogPayload(self: RuntimeRunner, buffer: []u8) ![]const u8 {
         const startup_scene = self.scene_registry.resolveStartupScene();
         const manifest = self.scene_registry.loadManifest(startup_scene);
 
@@ -26,14 +32,16 @@ pub const RuntimeRunner = struct {
             summary
         else
             apps_mod.AppStartupSummary{ .app_id = app_id, .lifecycle = "missing", .frame_rate_hz = 0 };
-        var settings_buf: [256]u8 = undefined;
-        const app_settings = try apps_mod.sceneSettingsPayloadForScene(startup_scene, &settings_buf);
-        const app_settings_status = if (app_settings != null) "present" else "missing";
+        const app_settings_status = try appSettingsAvailabilityForScene(startup_scene);
 
-        try self.logger.info(
+        var stream = std.io.fixedBufferStream(buffer);
+        const writer = stream.writer();
+        try writer.print(
             "{\"event\":\"runner.start\",\"status\":\"stub\",\"device\":\"{s}\",\"startupScene\":\"{s}\",\"appId\":\"{s}\",\"appEntrypoint\":\"{s}\",\"appLifecycle\":\"{s}\",\"frameRateHz\":{},\"appSettings\":\"{s}\",\"boundary\":\"runtime->apps\"}",
             .{ self.device, startup_scene, app_startup.app_id, app_entrypoint, app_startup.lifecycle, app_startup.frame_rate_hz, app_settings_status },
         );
+
+        return stream.getWritten();
     }
 };
 
@@ -80,7 +88,6 @@ test "runner uses clock app lifecycle boundary" {
     try testing.expectEqual(@as(u8, 1), summary.frame_rate_hz);
 }
 
-
 test "runner resolves news lifecycle when manifest exists" {
     const testing = @import("std").testing;
 
@@ -121,4 +128,35 @@ test "runner app settings availability reports present for news" {
     const testing = @import("std").testing;
 
     try testing.expectEqualStrings("present", try appSettingsAvailabilityForScene("news"));
+}
+
+test "runner app settings availability reports present for quotes" {
+    const testing = @import("std").testing;
+
+    try testing.expectEqualStrings("present", try appSettingsAvailabilityForScene("quotes"));
+}
+
+test "runner startup log payload includes appSettings present for news" {
+    const testing = @import("std").testing;
+
+    const logger = logger_mod.RuntimeLogger.init(.{
+        .frame_host = "127.0.0.1",
+        .frame_port = 8787,
+        .debug = false,
+        .metrics_interval_s = 60,
+        .network_check = true,
+        .network_probe_mode = .auto,
+        .device = "simulator",
+        .startup_scene = "news",
+    });
+
+    const registry = scenes_mod.SceneRegistry.init(logger, "news");
+    const runner = RuntimeRunner.init(logger, "simulator", registry);
+
+    var payload_buf: [320]u8 = undefined;
+    const payload = try runner.renderStartupLogPayload(&payload_buf);
+
+    try testing.expect(std.mem.indexOf(u8, payload, "\"startupScene\":\"news\"") != null);
+    try testing.expect(std.mem.indexOf(u8, payload, "\"appLifecycle\":\"news\"") != null);
+    try testing.expect(std.mem.indexOf(u8, payload, "\"appSettings\":\"present\"") != null);
 }

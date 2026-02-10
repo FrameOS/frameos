@@ -3,6 +3,7 @@ const clock_app = @import("clock.zig");
 const weather_app = @import("weather.zig");
 const calendar_app = @import("calendar.zig");
 const news_app = @import("news.zig");
+const quotes_app = @import("quotes.zig");
 const types = @import("types.zig");
 
 pub const AppContext = types.AppContext;
@@ -52,6 +53,11 @@ pub const AppBoundary = struct {
             return lifecycle.startup(ctx);
         }
 
+        if (std.mem.eql(u8, self.runtime.spec.id, "app.quotes")) {
+            const lifecycle = quotes_app.QuotesAppLifecycle.init(self.runtime.spec);
+            return lifecycle.startup(ctx);
+        }
+
         try self.runtime.startup(ctx);
         return .{
             .app_id = self.runtime.spec.id,
@@ -89,15 +95,19 @@ pub fn sceneSettingsPayloadForScene(scene_id: []const u8, buffer: []u8) !?[]cons
         return try news_app.renderSceneSettingsJson(news_app.default_scene_settings, buffer);
     }
 
+    if (std.mem.eql(u8, scene_id, "quotes")) {
+        return try quotes_app.renderSceneSettingsJson(quotes_app.default_scene_settings, buffer);
+    }
+
     return null;
 }
 
 pub fn sceneSettingsAvailableForScene(scene_id: []const u8) bool {
-    return std.mem.eql(u8, scene_id, "calendar") or std.mem.eql(u8, scene_id, "weather") or std.mem.eql(u8, scene_id, "news");
+    return std.mem.eql(u8, scene_id, "calendar") or std.mem.eql(u8, scene_id, "weather") or std.mem.eql(u8, scene_id, "news") or std.mem.eql(u8, scene_id, "quotes");
 }
 
 fn isAppLifecycleRegistered(app_id: []const u8) bool {
-    return std.mem.eql(u8, app_id, "app.clock") or std.mem.eql(u8, app_id, "app.weather") or std.mem.eql(u8, app_id, "app.calendar") or std.mem.eql(u8, app_id, "app.news");
+    return std.mem.eql(u8, app_id, "app.clock") or std.mem.eql(u8, app_id, "app.weather") or std.mem.eql(u8, app_id, "app.calendar") or std.mem.eql(u8, app_id, "app.news") or std.mem.eql(u8, app_id, "app.quotes");
 }
 
 pub fn builtinSceneManifests() []const SceneManifest {
@@ -121,6 +131,11 @@ pub fn builtinSceneManifests() []const SceneManifest {
             .scene_id = "news",
             .app = .{ .id = "app.news", .name = "News", .version = "0.1.0" },
             .entrypoint = "apps/news/main",
+        },
+        .{
+            .scene_id = "quotes",
+            .app = .{ .id = "app.quotes", .name = "Quotes", .version = "0.1.0" },
+            .entrypoint = "apps/quotes/main",
         },
     };
 }
@@ -189,6 +204,18 @@ test "news scene app boundary resolves concrete lifecycle summary" {
     try testing.expectEqual(@as(u8, 10), summary.frame_rate_hz);
 }
 
+
+test "quotes scene app boundary resolves concrete lifecycle summary" {
+    const testing = std.testing;
+
+    const boundary = loadAppBoundaryForScene("quotes") orelse return error.TestUnexpectedResult;
+    const summary = try boundary.startup(.{ .allocator = testing.allocator });
+
+    try testing.expectEqualStrings("app.quotes", summary.app_id);
+    try testing.expectEqualStrings("quotes", summary.lifecycle);
+    try testing.expectEqual(@as(u8, 8), summary.frame_rate_hz);
+}
+
 test "app boundary returns null for unknown scene" {
     const testing = std.testing;
 
@@ -223,6 +250,7 @@ test "scene settings availability helper reports support by scene" {
     try testing.expect(sceneSettingsAvailableForScene("weather"));
     try testing.expect(!sceneSettingsAvailableForScene("clock"));
     try testing.expect(sceneSettingsAvailableForScene("news"));
+    try testing.expect(sceneSettingsAvailableForScene("quotes"));
 }
 
 test "scene settings payload helper renders weather settings" {
@@ -248,5 +276,53 @@ test "scene settings payload helper renders news settings" {
     try testing.expectEqualStrings(
         "{\"feed\":\"frameos\",\"maxHeadlines\":6,\"refreshIntervalMin\":20}",
         payload.?,
+    );
+}
+
+
+test "scene settings payload helper renders quotes settings" {
+    const testing = std.testing;
+
+    var buf: [128]u8 = undefined;
+    const payload = try sceneSettingsPayloadForScene("quotes", &buf);
+
+    try testing.expect(payload != null);
+    try testing.expectEqualStrings(
+        "{\"feed\":\"zen\",\"maxQuotes\":5,\"refreshIntervalMin\":30}",
+        payload.?,
+    );
+}
+
+test "app contract parity payloads stay aligned with Nim-shaped expectations" {
+    const testing = std.testing;
+
+    const clock_summary = try appLifecycleSummaryForScene("clock", .{ .allocator = testing.allocator });
+    try testing.expect(clock_summary != null);
+    try testing.expectEqualStrings("clock", clock_summary.?.lifecycle);
+
+    const weather_summary = try appLifecycleSummaryForScene("weather", .{ .allocator = testing.allocator });
+    try testing.expect(weather_summary != null);
+    try testing.expectEqualStrings("weather", weather_summary.?.lifecycle);
+
+    const calendar_summary = try appLifecycleSummaryForScene("calendar", .{ .allocator = testing.allocator });
+    try testing.expect(calendar_summary != null);
+    try testing.expectEqualStrings("calendar", calendar_summary.?.lifecycle);
+
+    const news_summary = try appLifecycleSummaryForScene("news", .{ .allocator = testing.allocator });
+    try testing.expect(news_summary != null);
+    try testing.expectEqualStrings("news", news_summary.?.lifecycle);
+
+    var buf: [256]u8 = undefined;
+    try testing.expectEqualStrings(
+        "{\"location\":\"San Francisco, CA\",\"units\":\"metric\",\"refreshIntervalMin\":15}",
+        (try sceneSettingsPayloadForScene("weather", &buf)).?,
+    );
+    try testing.expectEqualStrings(
+        "{\"timezone\":\"UTC\",\"weekStartsOnMonday\":true,\"maxVisibleEvents\":5}",
+        (try sceneSettingsPayloadForScene("calendar", &buf)).?,
+    );
+    try testing.expectEqualStrings(
+        "{\"feed\":\"frameos\",\"maxHeadlines\":6,\"refreshIntervalMin\":20}",
+        (try sceneSettingsPayloadForScene("news", &buf)).?,
     );
 }

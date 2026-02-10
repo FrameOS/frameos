@@ -132,6 +132,12 @@
   - [x] Added server route registration assertions through a `registeredRoutes()` contract that explicitly includes `/scenes/:id/settings`.
   - [x] Ported a fourth concrete app boundary via `zig/src/apps/news.zig` (lifecycle + settings stubs) and wired news lifecycle/settings into apps, runner, and route payload diagnostics.
 
+
+- **Iteration 23:**
+  - [x] Added dedicated runner startup-log payload coverage that locks `appSettings="present"` for the `news` lifecycle diagnostics snapshot.
+  - [x] Ported the next concrete app boundary (`quotes`) via `zig/src/apps/quotes.zig` and wired scene manifest + lifecycle/settings contracts through apps, scene registry, and route payloads.
+  - [x] Added parity-focused app contract coverage in `apps/mod.zig` asserting lifecycle/settings JSON shapes for `clock`/`weather`/`calendar`/`news`.
+
 ## Completed
 - [x] Create `zig/` directory.
 - [x] Create `zig/TODO.md` with loop structure and initial plan.
@@ -191,9 +197,9 @@
 ---
 
 ## Next Actions (priority order)
-1. [ ] Add dedicated runner route-diagnostics coverage that locks `appSettings=present` behavior for the new `news` lifecycle during startup logging snapshots.
-2. [ ] Start porting the next concrete app boundary beyond the current built-ins (candidate: quotes or transit) and add matching scene manifest + lifecycle/settings contracts.
-3. [ ] Add parity-focused app contract tests that compare Zig scene lifecycle/settings JSON shapes with Nim runtime expectations for `clock`/`weather`/`calendar`/`news`.
+1. [ ] Add runner coverage for startup logging snapshots when scene manifest is present but app settings are missing, to lock `appSettings="missing"` diagnostics.
+2. [ ] Port another concrete app boundary beyond current built-ins (candidate: transit) and add matching scene manifest + lifecycle/settings contracts.
+3. [ ] Add route-level `/scenes/:id` + `/scenes/:id/settings` JSON assertions for the new `quotes` scene in `frameos.zig` boot integration tests.
 
 ## Backlog / Later
 - [ ] Port individual apps incrementally (start with simplest).
