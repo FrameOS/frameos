@@ -1,6 +1,7 @@
 use std::env;
 
 use frameos::config::FrameOSConfig;
+use frameos::logging;
 use frameos::runtime::Runtime;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -10,7 +11,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    let config = FrameOSConfig::default();
+    let config = FrameOSConfig::load()?;
+    logging::debug("FrameOS configuration loaded.");
     let runtime = Runtime::new(config);
     runtime.start()?;
     Ok(())

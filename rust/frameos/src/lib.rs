@@ -4,6 +4,7 @@
 
 pub mod apps;
 pub mod config;
+pub mod logging;
 pub mod metrics;
 pub mod runtime;
 pub mod scenes;

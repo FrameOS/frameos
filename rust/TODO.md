@@ -27,11 +27,16 @@
 - Sketched a standalone Rust crate with module placeholders and a CLI `check` mode to mirror the Nim entrypoint.
 - Decided to keep the Rust crate standalone for now (no workspace at repo root yet).
 
+### Iteration 3 (config + logging scaffolding)
+- Added JSON-backed config loading with defaults, validation, and `FRAMEOS_CONFIG` path handling.
+- Captured a Rust config struct aligned with the Nim defaults for ports, dimensions, and assets path.
+- Added structured logging helpers that emit timestamped JSON events to mirror Nim's log channel.
+
 ## Next up (small, actionable)
 1. Capture scope: document required behaviors, dependencies, and build steps for the Nim runtime.
 2. Produce a minimal “parity map” between existing FrameOS features and planned Rust modules.
-3. Implement initial config loading and validation in Rust (env + config files).
-4. Add logging scaffolding aligned with Nim logger behavior.
+3. Decide data models and serialization format(s) for configs and scene payloads.
+4. Add a small config fixture + loader test coverage for the Rust crate.
 5. Decide whether to introduce a top-level Cargo workspace once more crates are needed.
 
 ## Checklist
@@ -52,11 +57,11 @@
 
 ### Implementation (incremental)
 - [x] Add Cargo workspace entry (if needed) and create crate skeleton.
-- [ ] Implement config loading and validation.
+- [x] Implement config loading and validation.
 - [ ] Implement core domain models.
 - [ ] Implement I/O adapters (file/network/queue/etc.).
 - [ ] Implement main application loop / services.
-- [ ] Add logging, metrics, and error handling.
+- [x] Add logging and error handling scaffolding.
 - [ ] Add tests for core logic and adapters.
 
 ### Validation & rollout
