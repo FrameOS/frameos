@@ -48,12 +48,17 @@
 - Introduced a shared `ModelValidationError` type with friendly error messages for future CLI/API surfacing.
 - Added JSON fixture manifests for valid/invalid app and scene payloads and contract tests that deserialize and validate each fixture entry.
 
+
+### Iteration 7 (manifest loading adapters)
+- Added manifest loading adapters in `rust/frameos/src/manifests.rs` to read app/scene JSON files from disk, deserialize payloads, and run model validation with typed error reporting.
+- Added adapter helpers returning `SceneCatalog` and `AppRegistry` directly so runtime boot logic can consume validated manifests without duplicate conversion code.
+- Added filesystem-backed integration tests that cover successful loads plus parse/validation failure paths.
+
 ## Next up (small, actionable)
 1. Produce a minimal “parity map” between existing FrameOS features and planned Rust modules.
 2. Define external interfaces for the Rust runtime (CLI/server lifecycle/log stream contract).
-3. Add manifest loading adapters that read app/scene JSON files from disk and validate entries.
-4. Evaluate when to introduce a top-level Cargo workspace once more crates are needed.
-5. Define migration strategy notes (phased rollout, feature flags, shadow mode).
+3. Evaluate when to introduce a top-level Cargo workspace once more crates are needed.
+4. Define migration strategy notes (phased rollout, feature flags, shadow mode).
 
 ## Checklist
 
@@ -75,7 +80,7 @@
 - [x] Add Cargo workspace entry (if needed) and create crate skeleton.
 - [x] Implement config loading and validation.
 - [x] Implement core domain models.
-- [ ] Implement I/O adapters (file/network/queue/etc.).
+- [x] Implement I/O adapters (file/network/queue/etc.).
 - [ ] Implement main application loop / services.
 - [x] Add logging and error handling scaffolding.
 - [x] Add tests for core logic and adapters.

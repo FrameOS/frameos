@@ -5,6 +5,7 @@
 pub mod apps;
 pub mod config;
 pub mod logging;
+pub mod manifests;
 pub mod metrics;
 pub mod models;
 pub mod runtime;
