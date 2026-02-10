@@ -32,19 +32,28 @@ pub fn startFrameOS() !void {
     const scene_registry = scenes_mod.SceneRegistry.init(logger, config.startup_scene);
     try scene_registry.startup();
 
-    const system_services = system_mod.SystemServices.init(logger, config.frame_host, config.frame_port, config.device);
+    const system_scene = system_mod.defaultStartupScene(config);
+    try logger.info(
+        "{\"event\":\"system.scene.default\",\"scene\":\"{s}\",\"networkCheck\":{}}",
+        .{ system_mod.startupSceneLabel(system_scene), config.network_check },
+    );
+
+    const system_services = system_mod.SystemServices.init(logger, config.frame_host, config.frame_port, config.device, system_scene);
     try system_services.startup();
+
+    var health = health_mod.RuntimeHealth.init(logger, config.network_check);
 
     const runner = runner_mod.RuntimeRunner.init(logger, config.device, scene_registry);
     try runner.startup();
+    health.markRunnerReady();
 
     const scheduler = scheduler_mod.RuntimeScheduler.init(logger);
     try scheduler.startup();
+    health.markSchedulerReady();
 
     const server = server_mod.RuntimeServer.init(logger, config);
     try server.startup();
 
-    var health = health_mod.RuntimeHealth.init(logger, config.network_check);
     health.markServerStarted();
     if (!config.network_check) {
         health.recordNetworkProbe(true);
@@ -56,6 +65,13 @@ pub fn startFrameOS() !void {
     try logger.info(
         "{\"event\":\"server.route.payload\",\"route\":\"/health\",\"payload\":{s}}",
         .{health_route_payload},
+    );
+
+    var scenes_route_buffer: [512]u8 = undefined;
+    const scenes_route_payload = try server.scenesRoute(scene_registry).renderJson(&scenes_route_buffer);
+    try logger.info(
+        "{\"event\":\"server.route.payload\",\"route\":\"/scenes\",\"payload\":{s}}",
+        .{scenes_route_payload},
     );
 
     try health.startup();

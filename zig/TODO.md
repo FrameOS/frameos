@@ -62,6 +62,15 @@
   - [x] Extended `zig/src/drivers/mod.zig` with device-to-driver config mapping and startup dispatch that routes simulator devices through the simulator module.
   - [x] Wired `runtime/platform.zig` + `startFrameOS` to initialize drivers via the new mapping, including simulator-specific startup logging fields.
 
+
+- **Iteration 12:**
+  - [x] Expanded runtime health snapshot + `/health` payload to include scheduler/runner readiness booleans, and wired readiness state updates during boot.
+  - [x] Added scene-registry-to-apps boundary methods for listing scene IDs and loading built-in scene manifests.
+  - [x] Added `system` startup-scene default helpers (`index` vs `wifi-hotspot`) derived from boot config and logged selected default scene during boot.
+  - [x] Wired runner startup to resolve scene manifests via apps boundary and include app entrypoint intent in runtime startup behavior.
+  - [x] Added a stub `/scenes` route payload contract backed by scene registry manifests and logged route payload during boot.
+  - [x] Introduced a `system` hotspot activation stub boundary that consumes startup-scene defaults and reports activation intent.
+
 ## Completed
 - [x] Create `zig/` directory.
 - [x] Create `zig/TODO.md` with loop structure and initial plan.
@@ -80,13 +89,19 @@
 - [x] Add Zig tests for health snapshot logic and config parsing defaults.
 - [x] Add `zig/src/system/` placeholder contracts for portal/hotspot and device utilities.
 - [x] Add a stub simulator driver module under `zig/src/drivers/` and connect it to `runtime/platform.zig`.
+- [x] Add `system` scene-default helpers that map startup-state decisions (index vs wifi hotspot) from boot config.
+- [x] Add scene-registry-to-apps boundary methods for listing and loading scene manifests.
+- [x] Expand `/health` route payload with scheduler/runner readiness booleans.
+- [x] Add a server stub route for scene-registry discovery payload (`/scenes`) backed by the scene registry boundary.
+- [x] Wire scene manifest selection into `runtime/runner.zig` startup logging so app entrypoint intent is explicit.
+- [x] Introduce a `system` hotspot activation stub boundary that consumes the startup-scene decision helper.
 
 ---
 
 ## Next Actions (priority order)
-1. [ ] Expand `/health` route payload with scheduler/runner readiness booleans.
-2. [ ] Add scene-registry-to-apps boundary methods for listing and loading scene manifests.
-3. [ ] Add `system` scene-default helpers that map startup-state decisions (index vs wifi hotspot) from boot config.
+1. [ ] Add scene-manifest error payloads for unknown scene IDs and thread them into server-route contracts.
+2. [ ] Add a runtime integration test that exercises boot wiring and validates both `/health` and `/scenes` payload snapshots.
+3. [ ] Extend `system` startup-state mapping to include explicit “booting”/“degraded-network” transitional states.
 
 ---
 

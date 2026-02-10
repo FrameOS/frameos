@@ -6,6 +6,8 @@ pub const HealthSnapshot = struct {
     server_started: bool,
     network_required: bool,
     network_ok: ?bool,
+    scheduler_ready: bool,
+    runner_ready: bool,
 
     pub const Status = enum {
         ok,
@@ -18,6 +20,8 @@ pub const RuntimeHealth = struct {
     server_started: bool,
     network_required: bool,
     network_ok: ?bool,
+    scheduler_ready: bool,
+    runner_ready: bool,
 
     pub fn init(logger: logger_mod.RuntimeLogger, network_required: bool) RuntimeHealth {
         return .{
@@ -25,6 +29,8 @@ pub const RuntimeHealth = struct {
             .server_started = false,
             .network_required = network_required,
             .network_ok = null,
+            .scheduler_ready = false,
+            .runner_ready = false,
         };
     }
 
@@ -36,25 +42,37 @@ pub const RuntimeHealth = struct {
         self.network_ok = ok;
     }
 
+    pub fn markSchedulerReady(self: *RuntimeHealth) void {
+        self.scheduler_ready = true;
+    }
+
+    pub fn markRunnerReady(self: *RuntimeHealth) void {
+        self.runner_ready = true;
+    }
+
     pub fn startup(self: RuntimeHealth) !void {
         const snapshot = self.snapshot();
         try self.logger.info(
-            "{\"event\":\"health.start\",\"status\":\"{s}\",\"serverStarted\":{},\"networkRequired\":{},\"networkOk\":{s}}",
+            "{\"event\":\"health.start\",\"status\":\"{s}\",\"serverStarted\":{},\"networkRequired\":{},\"networkOk\":{s},\"schedulerReady\":{},\"runnerReady\":{}}",
             .{
                 statusLabel(snapshot.status),
                 snapshot.server_started,
                 snapshot.network_required,
                 networkLabel(snapshot.network_ok),
+                snapshot.scheduler_ready,
+                snapshot.runner_ready,
             },
         );
     }
 
     pub fn snapshot(self: RuntimeHealth) HealthSnapshot {
         return .{
-            .status = if (self.server_started and (!self.network_required or self.network_ok == true)) .ok else .degraded,
+            .status = if (self.server_started and self.scheduler_ready and self.runner_ready and (!self.network_required or self.network_ok == true)) .ok else .degraded,
             .server_started = self.server_started,
             .network_required = self.network_required,
             .network_ok = self.network_ok,
+            .scheduler_ready = self.scheduler_ready,
+            .runner_ready = self.runner_ready,
         };
     }
 };
@@ -92,9 +110,11 @@ test "snapshot is degraded before server startup" {
     try testing.expectEqual(HealthSnapshot.Status.degraded, snapshot.status);
     try testing.expect(!snapshot.server_started);
     try testing.expectEqual(@as(?bool, null), snapshot.network_ok);
+    try testing.expect(!snapshot.scheduler_ready);
+    try testing.expect(!snapshot.runner_ready);
 }
 
-test "snapshot becomes ok after server started and network probe passes" {
+test "snapshot becomes ok after server started and readiness pass" {
     const testing = std.testing;
 
     const logger = logger_mod.RuntimeLogger.init(.{
@@ -109,12 +129,16 @@ test "snapshot becomes ok after server started and network probe passes" {
 
     var health = RuntimeHealth.init(logger, true);
     health.markServerStarted();
+    health.markSchedulerReady();
+    health.markRunnerReady();
     health.recordNetworkProbe(true);
 
     const snapshot = health.snapshot();
 
     try testing.expectEqual(HealthSnapshot.Status.ok, snapshot.status);
     try testing.expect(snapshot.server_started);
+    try testing.expect(snapshot.scheduler_ready);
+    try testing.expect(snapshot.runner_ready);
     try testing.expectEqual(@as(?bool, true), snapshot.network_ok);
 }
 
@@ -133,9 +157,13 @@ test "snapshot can be ok without network requirement" {
 
     var health = RuntimeHealth.init(logger, false);
     health.markServerStarted();
+    health.markSchedulerReady();
+    health.markRunnerReady();
 
     const snapshot = health.snapshot();
 
     try testing.expectEqual(HealthSnapshot.Status.ok, snapshot.status);
     try testing.expectEqual(@as(?bool, null), snapshot.network_ok);
+    try testing.expect(snapshot.scheduler_ready);
+    try testing.expect(snapshot.runner_ready);
 }

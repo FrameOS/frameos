@@ -1,4 +1,5 @@
 const std = @import("std");
+const apps_mod = @import("../apps/mod.zig");
 const logger_mod = @import("logger.zig");
 
 pub const SceneRegistry = struct {
@@ -28,6 +29,15 @@ pub const SceneRegistry = struct {
         }
 
         return built_in_scenes[0];
+    }
+
+    pub fn listSceneIds(_: SceneRegistry) []const []const u8 {
+        return &built_in_scenes;
+    }
+
+    pub fn loadManifest(self: SceneRegistry, scene_id: []const u8) ?apps_mod.SceneManifest {
+        _ = self;
+        return apps_mod.findSceneManifest(scene_id);
     }
 
     pub fn contains(_: SceneRegistry, scene: []const u8) bool {
@@ -75,4 +85,44 @@ test "registry falls back to first built-in scene when startup scene missing" {
     const registry = SceneRegistry.init(logger, "custom-scene");
 
     try testing.expectEqualStrings("clock", registry.resolveStartupScene());
+}
+
+test "registry lists built-in scene identifiers" {
+    const testing = std.testing;
+
+    const logger = logger_mod.RuntimeLogger.init(.{
+        .frame_host = "127.0.0.1",
+        .frame_port = 8787,
+        .debug = false,
+        .metrics_interval_s = 60,
+        .network_check = true,
+        .device = "simulator",
+        .startup_scene = "clock",
+    });
+
+    const registry = SceneRegistry.init(logger, "clock");
+    const scene_ids = registry.listSceneIds();
+
+    try testing.expectEqual(@as(usize, 3), scene_ids.len);
+    try testing.expectEqualStrings("clock", scene_ids[0]);
+}
+
+test "registry loads scene manifest through apps boundary" {
+    const testing = std.testing;
+
+    const logger = logger_mod.RuntimeLogger.init(.{
+        .frame_host = "127.0.0.1",
+        .frame_port = 8787,
+        .debug = false,
+        .metrics_interval_s = 60,
+        .network_check = true,
+        .device = "simulator",
+        .startup_scene = "clock",
+    });
+
+    const registry = SceneRegistry.init(logger, "clock");
+
+    const manifest = registry.loadManifest("weather") orelse return error.TestUnexpectedResult;
+    try testing.expectEqualStrings("weather", manifest.scene_id);
+    try testing.expectEqualStrings("app.weather", manifest.app.id);
 }
