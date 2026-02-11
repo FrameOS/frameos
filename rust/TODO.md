@@ -225,8 +225,15 @@
 - Added machine-readable `runtime:e2e_ok` / `runtime:e2e_failed` events (with scene counts, max diff, and failing scene diagnostics) so CI/supervision can consume parity status programmatically.
 - Added regression coverage for the new surface in `rust/frameos/tests/interfaces_cli.rs` (CLI parsing + contract exposure) and `rust/frameos/tests/e2e_cli.rs` (end-to-end parity runner pass against current snapshots).
 
+
+### Iteration 32 (loop-index color wiring + code-node execution in e2e renderer)
+- Extended the Rust e2e scene loader to ingest `type: "code"` nodes as executable `__code__` nodes so scene graphs that feed code outputs into render nodes now run end-to-end instead of being silently skipped.
+- Added loop-aware execution context propagation in the e2e renderer (`loop_index` threaded through node execution, split cell dispatch, and edge-input lookup), then keyed node cache entries by `(node_id, loop_index)` so split-grid cells can evaluate code per-cell without stale shared values.
+- Implemented deterministic code-node evaluation for the current e2e parity shader pattern (`context.loopIndex/256*360` HSL-to-hex) and basic hex literal extraction fallback to support color-producing code-node outputs consumed by `render/color`.
+- Added focused regression coverage in `rust/frameos/tests/e2e_code_nodes.rs` proving that split-loop code-node outputs now drive distinct per-cell colors through `fieldInput/color` wiring and preserve expected first-cell HSL baseline output.
+
 ## Next up (small, actionable)
-1. Tighten parity for the current high-diff scenes (`dataDownloadImage`, `dataResize`, `renderSplitLoop`) by porting missing Nim-specific details (error rendering semantics, split loop/context behavior, resize/placement edge cases).
+1. Tighten parity for the current high-diff scenes (`dataDownloadImage`, `dataResize`) by porting missing Nim-specific details (error rendering semantics, resize/placement edge cases).
 2. Extend `render/text` parity toward Nim rich-text behavior (`basic-caret`, overflow modes, font selection) and reduce reliance on fallback font heuristics.
 3. Extend `data/icalJson` recurrence support beyond current common RRULE set (e.g. `BYMONTH`, `BYMONTHDAY`, positional `BYDAY`) using fixture-driven contracts from Nim tests.
 4. Add explicit e2e fixtures/tests for network-unavailable behavior so `data/downloadImage`/`data/downloadUrl` parity remains deterministic in offline CI environments.

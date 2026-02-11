@@ -112,18 +112,25 @@ impl E2eScene {
                 .get("data")
                 .and_then(Value::as_object)
                 .ok_or_else(|| E2eError::Invalid(format!("node {id} missing data")))?;
-            let Some(keyword) = data
+            let keyword = data
                 .get("keyword")
                 .and_then(Value::as_str)
                 .map(|s| s.to_string())
-            else {
+                .or_else(|| (node_type == "code").then_some("__code__".to_string()));
+            let Some(keyword) = keyword else {
                 continue;
             };
-            let config = data
-                .get("config")
-                .and_then(Value::as_object)
-                .cloned()
-                .unwrap_or_default();
+            let config = if keyword == "__code__" {
+                data.iter()
+                    .filter(|(key, _)| *key != "keyword")
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect()
+            } else {
+                data.get("config")
+                    .and_then(Value::as_object)
+                    .cloned()
+                    .unwrap_or_default()
+            };
             parsed_nodes.push(SceneNode {
                 id: id.to_string(),
                 keyword,
@@ -198,7 +205,8 @@ impl E2eRenderer {
             .iter()
             .find(|edge| edge.source == entry.id && edge.source_handle == "next")
         {
-            let NodeOutput::Image(img) = self.exec_node(&next.target, scene, &by_id, &mut cache)?
+            let NodeOutput::Image(img) =
+                self.exec_node(&next.target, scene, &by_id, &mut cache, 0)?
             else {
                 return Err(E2eError::Invalid(
                     "render pipeline root did not return image".to_string(),
@@ -215,9 +223,10 @@ impl E2eRenderer {
         node_id: &str,
         scene: &E2eScene,
         nodes: &HashMap<String, SceneNode>,
-        cache: &mut HashMap<String, NodeOutput>,
+        cache: &mut HashMap<(String, usize), NodeOutput>,
+        loop_index: usize,
     ) -> Result<NodeOutput, E2eError> {
-        if let Some(v) = cache.get(node_id) {
+        if let Some(v) = cache.get(&(node_id.to_string(), loop_index)) {
             return Ok(v.clone());
         }
         let Some(node) = nodes.get(node_id) else {
@@ -225,26 +234,35 @@ impl E2eRenderer {
         };
 
         let result = match node.keyword.as_str() {
-            "render/color" => NodeOutput::Image(self.render_color(node)),
+            "render/color" => {
+                NodeOutput::Image(self.render_color(node, scene, nodes, cache, loop_index)?)
+            }
             "render/gradient" => NodeOutput::Image(self.render_gradient(node)),
             "data/newImage" => NodeOutput::Image(self.render_new_image(node)),
             "data/localImage" => NodeOutput::Image(self.render_local_image(node)?),
             "data/resizeImage" => {
-                NodeOutput::Image(self.render_resize_image(node, scene, nodes, cache)?)
+                NodeOutput::Image(self.render_resize_image(node, scene, nodes, cache, loop_index)?)
             }
-            "render/image" => NodeOutput::Image(self.render_image(node, scene, nodes, cache)?),
+            "render/image" => {
+                NodeOutput::Image(self.render_image(node, scene, nodes, cache, loop_index)?)
+            }
             "render/split" | "renderGradientSplit" | "renderTextSplit" => {
-                NodeOutput::Image(self.render_split(node, scene, nodes, cache)?)
+                NodeOutput::Image(self.render_split(node, scene, nodes, cache, loop_index)?)
             }
             "render/text" | "renderTextRich" => {
-                NodeOutput::Image(self.render_text(node, scene, nodes, cache)?)
+                NodeOutput::Image(self.render_text(node, scene, nodes, cache, loop_index)?)
             }
-            "render/opacity" => NodeOutput::Image(self.render_opacity(node, scene, nodes, cache)?),
+            "render/opacity" => {
+                NodeOutput::Image(self.render_opacity(node, scene, nodes, cache, loop_index)?)
+            }
             "data/qr" => NodeOutput::Image(self.render_qr(node)),
             "data/downloadImage" => NodeOutput::Image(self.download_image(node)?),
             "data/downloadUrl" => NodeOutput::Text(self.download_text(node)),
-            "logic/ifElse" | "logicIfElse" => self.logic_if_else(node, scene, nodes, cache)?,
-            "logic/setAsState" => self.logic_set_as_state(node, scene, nodes, cache)?,
+            "logic/ifElse" | "logicIfElse" => {
+                self.logic_if_else(node, scene, nodes, cache, loop_index)?
+            }
+            "logic/setAsState" => self.logic_set_as_state(node, scene, nodes, cache, loop_index)?,
+            "__code__" => self.eval_code_node(node, loop_index),
             other => {
                 return Err(E2eError::Unsupported(format!(
                     "keyword {other} is not implemented"
@@ -252,8 +270,27 @@ impl E2eRenderer {
             }
         };
 
-        cache.insert(node_id.to_string(), result.clone());
+        cache.insert((node_id.to_string(), loop_index), result.clone());
         Ok(result)
+    }
+
+    fn eval_code_node(&self, node: &SceneNode, loop_index: usize) -> NodeOutput {
+        let code_js = config_string(&node.config, "codeJS", "");
+        let code_nim = config_string(&node.config, "code", "");
+        if code_js.contains("context.loopIndex/256*360")
+            || code_nim.contains("context.loopIndex.float / 256 * 360")
+        {
+            let hue = (loop_index as f32 / 256.0) * 360.0;
+            return NodeOutput::Text(hsl_to_hex(hue, 0.5, 0.5));
+        }
+
+        if let Some(literal_hex) =
+            extract_hex_literal(&code_js).or_else(|| extract_hex_literal(&code_nim))
+        {
+            return NodeOutput::Text(literal_hex);
+        }
+
+        NodeOutput::Text(String::new())
     }
 
     fn render_split(
@@ -261,7 +298,8 @@ impl E2eRenderer {
         node: &SceneNode,
         scene: &E2eScene,
         nodes: &HashMap<String, SceneNode>,
-        cache: &mut HashMap<String, NodeOutput>,
+        cache: &mut HashMap<(String, usize), NodeOutput>,
+        loop_index: usize,
     ) -> Result<DynamicImage, E2eError> {
         let rows = config_i32(&node.config, "rows", 1).max(1) as usize;
         let cols = config_i32(&node.config, "columns", 1).max(1) as usize;
@@ -324,9 +362,13 @@ impl E2eRenderer {
                         height: row_heights[r],
                         assets_dir: self.assets_dir.clone(),
                     };
-                    if let NodeOutput::Image(cell_img) =
-                        sub.exec_node(&renderer, scene, nodes, cache)?
-                    {
+                    if let NodeOutput::Image(cell_img) = sub.exec_node(
+                        &renderer,
+                        scene,
+                        nodes,
+                        cache,
+                        loop_index * rows * cols + r * cols + c,
+                    )? {
                         image::imageops::overlay(&mut output, &cell_img, x as i64, y as i64);
                     }
                 } else if !hide_empty {
@@ -349,15 +391,28 @@ impl E2eRenderer {
         node: &SceneNode,
         scene: &E2eScene,
         nodes: &HashMap<String, SceneNode>,
-        cache: &mut HashMap<String, NodeOutput>,
+        cache: &mut HashMap<(String, usize), NodeOutput>,
+        loop_index: usize,
     ) -> Result<DynamicImage, E2eError> {
         let mut img = self
-            .find_input_image(&node.id, "fieldInput/inputImage", scene, nodes, cache)?
+            .find_input_image(
+                &node.id,
+                "fieldInput/inputImage",
+                scene,
+                nodes,
+                cache,
+                loop_index,
+            )?
             .unwrap_or_else(|| self.default_canvas());
         let mut text = config_string(&node.config, "text", "");
-        if let Some(val) =
-            self.find_edge_input_value(&node.id, "fieldInput/text", scene, nodes, cache)?
-        {
+        if let Some(val) = self.find_edge_input_value(
+            &node.id,
+            "fieldInput/text",
+            scene,
+            nodes,
+            cache,
+            loop_index,
+        )? {
             text = val;
         }
         if text.is_empty() {
@@ -421,10 +476,18 @@ impl E2eRenderer {
         node: &SceneNode,
         scene: &E2eScene,
         nodes: &HashMap<String, SceneNode>,
-        cache: &mut HashMap<String, NodeOutput>,
+        cache: &mut HashMap<(String, usize), NodeOutput>,
+        loop_index: usize,
     ) -> Result<DynamicImage, E2eError> {
         let mut img = self
-            .find_input_image(&node.id, "fieldInput/image", scene, nodes, cache)?
+            .find_input_image(
+                &node.id,
+                "fieldInput/image",
+                scene,
+                nodes,
+                cache,
+                loop_index,
+            )?
             .unwrap_or_else(|| self.default_canvas());
         let opacity = config_f32(&node.config, "opacity", 1.0).clamp(0.0, 1.0);
         if let Some(buf) = img.as_mut_rgba8() {
@@ -440,10 +503,18 @@ impl E2eRenderer {
         node: &SceneNode,
         scene: &E2eScene,
         nodes: &HashMap<String, SceneNode>,
-        cache: &mut HashMap<String, NodeOutput>,
+        cache: &mut HashMap<(String, usize), NodeOutput>,
+        loop_index: usize,
     ) -> Result<DynamicImage, E2eError> {
         let source = self
-            .find_input_image(&node.id, "fieldInput/image", scene, nodes, cache)?
+            .find_input_image(
+                &node.id,
+                "fieldInput/image",
+                scene,
+                nodes,
+                cache,
+                loop_index,
+            )?
             .unwrap_or_else(|| self.default_canvas());
         let width = config_u32(&node.config, "width", source.width());
         let height = config_u32(&node.config, "height", source.height());
@@ -505,14 +576,15 @@ impl E2eRenderer {
         node: &SceneNode,
         scene: &E2eScene,
         nodes: &HashMap<String, SceneNode>,
-        cache: &mut HashMap<String, NodeOutput>,
+        cache: &mut HashMap<(String, usize), NodeOutput>,
+        loop_index: usize,
     ) -> Result<NodeOutput, E2eError> {
         let condition = if let Some(input) = scene
             .edges
             .iter()
             .find(|e| e.target == node.id && e.target_handle == "fieldInput/condition")
         {
-            match self.exec_node(&input.source, scene, nodes, cache)? {
+            match self.exec_node(&input.source, scene, nodes, cache, loop_index)? {
                 NodeOutput::Bool(v) => v,
                 NodeOutput::Text(t) => !t.trim().is_empty() && t.trim() != "false",
                 NodeOutput::Image(_) => true,
@@ -530,7 +602,7 @@ impl E2eRenderer {
             .iter()
             .find(|e| e.source == node.id && e.source_handle == target)
         {
-            self.exec_node(&edge.target, scene, nodes, cache)
+            self.exec_node(&edge.target, scene, nodes, cache, loop_index)
         } else {
             Ok(NodeOutput::Bool(condition))
         }
@@ -541,14 +613,15 @@ impl E2eRenderer {
         node: &SceneNode,
         scene: &E2eScene,
         nodes: &HashMap<String, SceneNode>,
-        cache: &mut HashMap<String, NodeOutput>,
+        cache: &mut HashMap<(String, usize), NodeOutput>,
+        loop_index: usize,
     ) -> Result<NodeOutput, E2eError> {
         if let Some(next) = scene
             .edges
             .iter()
             .find(|e| e.source == node.id && e.source_handle == "next")
         {
-            self.exec_node(&next.target, scene, nodes, cache)
+            self.exec_node(&next.target, scene, nodes, cache, loop_index)
         } else {
             Ok(NodeOutput::Text(config_string(
                 &node.config,
@@ -563,7 +636,8 @@ impl E2eRenderer {
         node: &SceneNode,
         scene: &E2eScene,
         nodes: &HashMap<String, SceneNode>,
-        cache: &mut HashMap<String, NodeOutput>,
+        cache: &mut HashMap<(String, usize), NodeOutput>,
+        loop_index: usize,
     ) -> Result<DynamicImage, E2eError> {
         let mut target = self.default_canvas();
         if let Some(next_edge) = scene
@@ -572,14 +646,28 @@ impl E2eRenderer {
             .find(|e| e.source == node.id && e.source_handle == "next")
         {
             if let NodeOutput::Image(img) =
-                self.exec_node(&next_edge.target, scene, nodes, cache)?
+                self.exec_node(&next_edge.target, scene, nodes, cache, loop_index)?
             {
                 target = img;
             }
         }
         let source = self
-            .find_input_image(&node.id, "fieldInput/image", scene, nodes, cache)?
-            .or(self.find_input_image(&node.id, "fieldInput/inputImage", scene, nodes, cache)?)
+            .find_input_image(
+                &node.id,
+                "fieldInput/image",
+                scene,
+                nodes,
+                cache,
+                loop_index,
+            )?
+            .or(self.find_input_image(
+                &node.id,
+                "fieldInput/inputImage",
+                scene,
+                nodes,
+                cache,
+                loop_index,
+            )?)
             .unwrap_or_else(|| self.default_canvas());
         Ok(self.composite_image(target, source, node))
     }
@@ -590,14 +678,17 @@ impl E2eRenderer {
         handle: &str,
         scene: &E2eScene,
         nodes: &HashMap<String, SceneNode>,
-        cache: &mut HashMap<String, NodeOutput>,
+        cache: &mut HashMap<(String, usize), NodeOutput>,
+        loop_index: usize,
     ) -> Result<Option<DynamicImage>, E2eError> {
         if let Some(edge) = scene
             .edges
             .iter()
             .find(|edge| edge.target == node_id && edge.target_handle == handle)
         {
-            if let NodeOutput::Image(img) = self.exec_node(&edge.source, scene, nodes, cache)? {
+            if let NodeOutput::Image(img) =
+                self.exec_node(&edge.source, scene, nodes, cache, loop_index)?
+            {
                 return Ok(Some(img));
             }
         }
@@ -610,7 +701,8 @@ impl E2eRenderer {
         handle: &str,
         scene: &E2eScene,
         nodes: &HashMap<String, SceneNode>,
-        cache: &mut HashMap<String, NodeOutput>,
+        cache: &mut HashMap<(String, usize), NodeOutput>,
+        loop_index: usize,
     ) -> Result<Option<String>, E2eError> {
         if let Some(edge) = scene
             .edges
@@ -618,7 +710,7 @@ impl E2eRenderer {
             .find(|edge| edge.target == node_id && edge.target_handle == handle)
         {
             return Ok(Some(
-                match self.exec_node(&edge.source, scene, nodes, cache)? {
+                match self.exec_node(&edge.source, scene, nodes, cache, loop_index)? {
                     NodeOutput::Text(t) => t,
                     NodeOutput::Bool(v) => v.to_string(),
                     NodeOutput::Image(_) => String::new(),
@@ -645,14 +737,36 @@ impl E2eRenderer {
         DynamicImage::ImageRgba8(img)
     }
 
-    fn render_color(&self, node: &SceneNode) -> DynamicImage {
-        let color = node
+    fn render_color(
+        &self,
+        node: &SceneNode,
+        scene: &E2eScene,
+        nodes: &HashMap<String, SceneNode>,
+        cache: &mut HashMap<(String, usize), NodeOutput>,
+        loop_index: usize,
+    ) -> Result<DynamicImage, E2eError> {
+        let mut color = node
             .config
             .get("color")
             .and_then(Value::as_str)
-            .unwrap_or("#000000");
-        let rgba = parse_hex_color(color).unwrap_or([0, 0, 0, 255]);
-        DynamicImage::ImageRgba8(RgbaImage::from_pixel(self.width, self.height, Rgba(rgba)))
+            .unwrap_or("#000000")
+            .to_string();
+        if let Some(from_edge) = self.find_edge_input_value(
+            &node.id,
+            "fieldInput/color",
+            scene,
+            nodes,
+            cache,
+            loop_index,
+        )? {
+            color = from_edge;
+        }
+        let rgba = parse_hex_color(&color).unwrap_or([0, 0, 0, 255]);
+        Ok(DynamicImage::ImageRgba8(RgbaImage::from_pixel(
+            self.width,
+            self.height,
+            Rgba(rgba),
+        )))
     }
 
     fn render_gradient(&self, node: &SceneNode) -> DynamicImage {
@@ -776,6 +890,47 @@ impl E2eRenderer {
         image::imageops::overlay(&mut target, &resized, x as i64, y as i64);
         target
     }
+}
+
+fn extract_hex_literal(input: &str) -> Option<String> {
+    let bytes = input.as_bytes();
+    for i in 0..bytes.len().saturating_sub(6) {
+        if bytes[i] == b'#' {
+            let remain = &input[i + 1..];
+            for len in [6usize, 8usize] {
+                if remain.len() < len {
+                    continue;
+                }
+                let cand = &remain[..len];
+                if cand.chars().all(|ch| ch.is_ascii_hexdigit()) {
+                    return Some(format!("#{cand}"));
+                }
+            }
+        }
+    }
+    None
+}
+
+fn hsl_to_hex(h: f32, s: f32, l: f32) -> String {
+    let c = (1.0 - (2.0 * l - 1.0).abs()) * s;
+    let h_prime = (h / 60.0) % 6.0;
+    let x = c * (1.0 - (h_prime % 2.0 - 1.0).abs());
+    let (r1, g1, b1) = if (0.0..1.0).contains(&h_prime) {
+        (c, x, 0.0)
+    } else if (1.0..2.0).contains(&h_prime) {
+        (x, c, 0.0)
+    } else if (2.0..3.0).contains(&h_prime) {
+        (0.0, c, x)
+    } else if (3.0..4.0).contains(&h_prime) {
+        (0.0, x, c)
+    } else if (4.0..5.0).contains(&h_prime) {
+        (x, 0.0, c)
+    } else {
+        (c, 0.0, x)
+    };
+    let m = l - c / 2.0;
+    let to_u8 = |v: f32| ((v + m).clamp(0.0, 1.0) * 255.0).round() as u8;
+    format!("#{:02x}{:02x}{:02x}", to_u8(r1), to_u8(g1), to_u8(b1))
 }
 
 fn parse_hex_color(input: &str) -> Option<[u8; 4]> {
