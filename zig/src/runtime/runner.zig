@@ -142,6 +142,12 @@ test "runner app settings availability reports present for transit" {
     try testing.expectEqualStrings("present", try appSettingsAvailabilityForScene("transit"));
 }
 
+test "runner app settings availability reports present for stocks" {
+    const testing = @import("std").testing;
+
+    try testing.expectEqualStrings("present", try appSettingsAvailabilityForScene("stocks"));
+}
+
 test "runner app settings availability reports missing for clock" {
     const testing = @import("std").testing;
 
@@ -196,6 +202,32 @@ test "runner startup log payload includes appSettings present for transit" {
     try testing.expect(std.mem.indexOf(u8, payload, "\"startupScene\":\"transit\"") != null);
     try testing.expect(std.mem.indexOf(u8, payload, "\"appLifecycle\":\"transit\"") != null);
     try testing.expect(std.mem.indexOf(u8, payload, "\"frameRateHz\":2") != null);
+    try testing.expect(std.mem.indexOf(u8, payload, "\"appSettings\":\"present\"") != null);
+}
+
+test "runner startup log payload includes appSettings present for stocks" {
+    const testing = @import("std").testing;
+
+    const logger = logger_mod.RuntimeLogger.init(.{
+        .frame_host = "127.0.0.1",
+        .frame_port = 8787,
+        .debug = false,
+        .metrics_interval_s = 60,
+        .network_check = true,
+        .network_probe_mode = .auto,
+        .device = "simulator",
+        .startup_scene = "stocks",
+    });
+
+    const registry = scenes_mod.SceneRegistry.init(logger, "stocks");
+    const runner = RuntimeRunner.init(logger, "simulator", registry);
+
+    var payload_buf: [320]u8 = undefined;
+    const payload = try runner.renderStartupLogPayload(&payload_buf);
+
+    try testing.expect(std.mem.indexOf(u8, payload, "\"startupScene\":\"stocks\"") != null);
+    try testing.expect(std.mem.indexOf(u8, payload, "\"appLifecycle\":\"stocks\"") != null);
+    try testing.expect(std.mem.indexOf(u8, payload, "\"frameRateHz\":4") != null);
     try testing.expect(std.mem.indexOf(u8, payload, "\"appSettings\":\"present\"") != null);
 }
 

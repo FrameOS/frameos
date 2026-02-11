@@ -148,6 +148,11 @@
   - [x] Added runner startup-log payload coverage for `startupScene=transit` to lock lifecycle (`transit`) + `appSettings="present"` diagnostics.
   - [x] Ported a sixth concrete app boundary (`stocks`) via `zig/src/apps/stocks.zig` and wired lifecycle/settings contracts through apps, scene registry, runner, and server route payload tests.
 
+- **Iteration 26:**
+  - [x] Added boot-integration coverage for `startupScene=stocks` in `frameos.zig` with exact `/scenes/:id` + `/scenes/:id/settings` payload assertions.
+  - [x] Added runner startup-log coverage for `startupScene=stocks` to lock lifecycle (`stocks`) + `appSettings="present"` diagnostics.
+  - [x] Extended `/scenes` boot snapshot assertions to lock `stocks` ordering and `settingsAvailable=true` invariants across integration payload tests.
+
 ## Completed
 - [x] Create `zig/` directory.
 - [x] Create `zig/TODO.md` with loop structure and initial plan.
@@ -206,13 +211,16 @@
 - [x] Add runner coverage for startup logging snapshots when scene manifest is present but app settings are missing, to lock `appSettings="missing"` diagnostics.
 - [x] Port another concrete app boundary beyond current built-ins (candidate: transit) and add matching scene manifest + lifecycle/settings contracts.
 - [x] Add route-level `/scenes/:id` + `/scenes/:id/settings` JSON assertions for the new `quotes` scene in `frameos.zig` boot integration tests.
+- [x] Add boot integration coverage for `startupScene=stocks` that locks `/scenes/:id` + `/scenes/:id/settings` payload parity for the new boundary.
+- [x] Add runner startup-log coverage for `startupScene=stocks` to lock lifecycle (`stocks`) + app settings (`present`) diagnostics.
+- [x] Thread stocks assertions through remaining `/scenes` payload snapshots to lock ordering and settings-availability invariants after scene-list expansion.
 
 ---
 
 ## Next Actions (priority order)
-1. [ ] Add boot integration coverage for `startupScene=stocks` that locks `/scenes/:id` + `/scenes/:id/settings` payload parity for the new boundary.
-2. [ ] Add runner startup-log coverage for `startupScene=stocks` to lock lifecycle (`stocks`) + app settings (`present`) diagnostics.
-3. [ ] Thread stocks assertions through remaining `/scenes` payload snapshots to lock ordering and settings-availability invariants after scene-list expansion.
+1. [ ] Port another concrete app boundary (candidate: photo) with lifecycle + settings contracts and add corresponding `/scenes/:id` + `/scenes/:id/settings` coverage.
+2. [ ] Add boot integration and runner startup-log coverage for the next app boundary startup scene to lock lifecycle/settings diagnostics.
+3. [ ] Expand `/scenes` ordering + settings-availability snapshot assertions to include the next boundary so list payload invariants remain explicit.
 
 ## Backlog / Later
 - [ ] Port individual apps incrementally (start with simplest).
