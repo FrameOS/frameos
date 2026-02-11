@@ -35,10 +35,22 @@
     let scalingMode = "/*$scalingMode*/contain"
     let requestedScaling = ""
 
+    function getBasePath() {
+        let path = window.location.pathname || '/';
+        if (!path.endsWith('/')) {
+            path += '/';
+        }
+        return path;
+    }
+
+    function buildFrameUrl(path) {
+        return getBasePath() + path;
+    }
+
     function connectWebSocket() {
         var loc = window.location;
         var wsProtocol = loc.protocol === "https:" ? "wss:" : "ws:";
-        var wsURL = wsProtocol + "//" + loc.host + "/ws" + accessKeyPart;
+        var wsURL = wsProtocol + "//" + loc.host + buildFrameUrl('ws') + accessKeyPart;
         ws = new WebSocket(wsURL);
 
         ws.onopen = function() {
@@ -90,7 +102,7 @@
     }
 
     function refreshImage() {
-        const imageUrl = '/image?t=' + new Date().getTime() + (accessKey ? '&k=' + encodeURIComponent(accessKey) : '');
+        const imageUrl = buildFrameUrl('image') + '?t=' + new Date().getTime() + (accessKey ? '&k=' + encodeURIComponent(accessKey) : '');
         const tempImage = new Image();
         tempImage.src = imageUrl;
         tempImage.onload = () => {
