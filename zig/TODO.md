@@ -237,10 +237,17 @@
   - [x] Wired the Zig e2e harness to auto-build renderer artifacts (`zig build`) before comparisons, so `./run --zig` now executes through the renderer path when available.
   - [x] Verified `./run --zig` passes 30/30 scenes in this environment; renderer build is attempted automatically and falls back to reference snapshots when the Zig CLI is unavailable.
 
+
+
+- **Iteration 30:**
+  - [x] Replaced `scene_renderer` snapshot-copy internals with a real Zig JSON-driven raster path for the first e2e primitives: solid background scenes (`black`/`blue`), `render/color`, and full-frame `render/gradient` composition into PNG output.
+  - [x] Added renderer-side scene capability gating so unsupported scene graphs fail fast with `error.UnsupportedScene`, allowing `e2e/makezigsnapshots.py` fallback to keep the full suite green while Zig coverage grows incrementally.
+  - [x] Added unit tests in `scene_renderer.zig` for hex color parsing, supported color-plan extraction, and unsupported mixed-keyword graph rejection to lock renderer behavior during future expansion.
+
 ## Next Actions (priority order)
-1. [ ] Replace snapshot-copy renderer internals with real scene JSON rasterization logic (colors, text, images, gradients, flow/split layouts) while keeping `scene_renderer` CLI stable.
-2. [ ] Add photo-specific assertions to any remaining route snapshots that still enumerate built-ins by exact JSON string.
-3. [ ] Start next concrete app boundary after `photo` (candidate: countdown) with lifecycle + settings contracts and boot-route coverage.
+1. [ ] Expand `scene_renderer` graph execution beyond full-frame fills/gradients: implement `render/split` region layout and threaded child rendering so multi-panel e2e scenes stop falling back.
+2. [ ] Add first text raster pass (`render/text`) with deterministic font fallback to unlock parity for `renderText*` and `logicSetAsState` scenarios.
+3. [ ] Add image node support (`data/newImage`, `data/localImage`, `render/image`) including placement modes and alpha blending to close most remaining e2e gaps.
 
 ## Backlog / Later
 - [ ] Port individual apps incrementally (start with simplest).
