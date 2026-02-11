@@ -1,6 +1,8 @@
 use std::fmt::Write;
 
-use chrono::{DateTime, Local, NaiveDate, NaiveDateTime, Utc};
+use chrono::{
+    DateTime, Datelike, Duration, Local, NaiveDate, NaiveDateTime, TimeZone, Utc, Weekday,
+};
 use chrono_tz::Tz;
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -87,8 +89,9 @@ pub fn execute_ported_app(
         "data/clock" => execute_data_clock(fields, context),
         "data/xmlToJson" => execute_data_xml_to_json(fields),
         "data/eventsToAgenda" => execute_data_events_to_agenda(fields, context),
+        "data/icalJson" => execute_data_ical_json(fields, context),
         "logic/setAsState" => execute_logic_set_as_state(fields, context),
-        "logic/ifElse" => execute_logic_if_else(fields),
+        "logic/ifElse" | "logicIfElse" => execute_logic_if_else(fields),
         "logic/nextSleepDuration" => execute_logic_next_sleep_duration(fields, context),
         "logic/breakIfRendering" => execute_logic_break_if_rendering(context),
         _ => Err(AppExecutionError::UnknownKeyword(keyword.to_string())),
@@ -188,12 +191,13 @@ fn execute_data_clock(
     };
 
     let rendered = if let Some(timezone_name) = context.time_zone.as_deref() {
-        let timezone = timezone_name
-            .parse::<Tz>()
-            .map_err(|_| AppExecutionError::InvalidField {
-                field: "timeZone",
-                reason: format!("unknown timezone `{timezone_name}`"),
-            })?;
+        let timezone =
+            timezone_name
+                .parse::<Tz>()
+                .map_err(|_| AppExecutionError::InvalidField {
+                    field: "timeZone",
+                    reason: format!("unknown timezone `{timezone_name}`"),
+                })?;
         now_utc
             .with_timezone(&timezone)
             .format(&nim_time_format_to_chrono(format))
@@ -380,6 +384,570 @@ fn execute_data_events_to_agenda(
     }
 
     Ok(AppOutput::Value(Value::String(output)))
+}
+
+#[derive(Debug, Clone)]
+struct ParsedIcalEvent {
+    summary: String,
+    description: String,
+    location: String,
+    url: String,
+    time_zone: String,
+    full_day: bool,
+    start_ts: DateTime<Utc>,
+    end_ts: DateTime<Utc>,
+    rrule: Option<String>,
+}
+
+fn execute_data_ical_json(
+    fields: &Map<String, Value>,
+    context: &AppExecutionContext,
+) -> Result<AppOutput, AppExecutionError> {
+    let ical = require_string(fields, "ical")?;
+    if ical.trim().is_empty() {
+        return Err(AppExecutionError::InvalidField {
+            field: "ical",
+            reason: "No iCal data provided.".to_string(),
+        });
+    }
+    if ical.starts_with("http") {
+        return Err(AppExecutionError::InvalidField {
+            field: "ical",
+            reason: "Pass in iCal data as a string, not a URL.".to_string(),
+        });
+    }
+
+    let fallback_tz = context.time_zone.as_deref().unwrap_or("UTC");
+    let calendar_tz = parse_calendar_timezone(ical).unwrap_or(fallback_tz.to_string());
+
+    let export_from = fields
+        .get("exportFrom")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let export_until = fields
+        .get("exportUntil")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let export_count = fields
+        .get("exportCount")
+        .and_then(Value::as_u64)
+        .unwrap_or(100) as usize;
+    let search = fields
+        .get("search")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_lowercase();
+
+    let start_ts = parse_ical_boundary(export_from, &calendar_tz, true)?;
+    let end_ts = parse_ical_boundary(export_until, &calendar_tz, false)?;
+
+    let add_location = fields
+        .get("addLocation")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let add_url = fields
+        .get("addUrl")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let add_description = fields
+        .get("addDescription")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let add_timezone = fields
+        .get("addTimezone")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+
+    let events = parse_ical_events(ical, &calendar_tz)?;
+    let mut occurrences = Vec::new();
+
+    for event in events {
+        if !search.is_empty() && !event.summary.to_lowercase().contains(&search) {
+            continue;
+        }
+
+        let expanded = expand_ical_event_occurrences(&event, start_ts, end_ts, export_count)?;
+        for (occurrence_start, occurrence_end) in expanded {
+            occurrences.push((event.clone(), occurrence_start, occurrence_end));
+            if occurrences.len() >= export_count {
+                break;
+            }
+        }
+
+        if occurrences.len() >= export_count {
+            break;
+        }
+    }
+
+    occurrences.sort_by_key(|(_, start, _)| start.timestamp());
+
+    let calendar_tz_parsed =
+        calendar_tz
+            .parse::<Tz>()
+            .map_err(|_| AppExecutionError::InvalidField {
+                field: "ical",
+                reason: format!("unknown timezone `{calendar_tz}`"),
+            })?;
+
+    let mut rendered = Vec::new();
+    for (event, occurrence_start, occurrence_end) in occurrences.into_iter().take(export_count) {
+        let occurrence_start_local = occurrence_start.with_timezone(&calendar_tz_parsed);
+        let occurrence_end_local = occurrence_end.with_timezone(&calendar_tz_parsed);
+
+        let mut entry = serde_json::json!({
+            "summary": event.summary,
+            "startTime": if event.full_day {
+                occurrence_start_local.format("%Y-%m-%d").to_string()
+            } else {
+                occurrence_start_local.format("%Y-%m-%dT%H:%M:%S").to_string()
+            },
+            "endTime": if event.full_day {
+                let end_effective = if occurrence_end_local <= occurrence_start_local {
+                    occurrence_start_local + Duration::days(1) - Duration::milliseconds(1)
+                } else {
+                    occurrence_end_local - Duration::milliseconds(1)
+                };
+                end_effective.format("%Y-%m-%d").to_string()
+            } else {
+                occurrence_end_local.format("%Y-%m-%dT%H:%M:%S").to_string()
+            }
+        });
+
+        if add_location && !event.location.is_empty() {
+            entry["location"] = Value::String(event.location);
+        }
+        if add_url && !event.url.is_empty() {
+            entry["url"] = Value::String(event.url);
+        }
+        if add_description && !event.description.is_empty() {
+            entry["description"] = Value::String(event.description);
+        }
+        if add_timezone {
+            let tz = if event.time_zone.is_empty() {
+                calendar_tz.clone()
+            } else {
+                event.time_zone
+            };
+            entry["timezone"] = Value::String(tz);
+        }
+        rendered.push(entry);
+    }
+
+    Ok(AppOutput::Value(Value::Array(rendered)))
+}
+
+fn parse_calendar_timezone(ical: &str) -> Option<String> {
+    unfold_ical_lines(ical).into_iter().find_map(|line| {
+        line.strip_prefix("X-WR-TIMEZONE:")
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string)
+    })
+}
+
+fn parse_ical_events(
+    ical: &str,
+    fallback_timezone: &str,
+) -> Result<Vec<ParsedIcalEvent>, AppExecutionError> {
+    let mut events = Vec::new();
+    let mut current: Vec<String> = Vec::new();
+    let mut in_event = false;
+
+    for line in unfold_ical_lines(ical) {
+        if line == "BEGIN:VEVENT" {
+            in_event = true;
+            current.clear();
+            continue;
+        }
+        if line == "END:VEVENT" {
+            in_event = false;
+            events.push(parse_ical_event(&current, fallback_timezone)?);
+            current.clear();
+            continue;
+        }
+        if in_event {
+            current.push(line);
+        }
+    }
+
+    Ok(events)
+}
+
+fn unfold_ical_lines(ical: &str) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    for raw_line in ical.lines() {
+        let line = raw_line.trim_end_matches('\r');
+        if (line.starts_with(' ') || line.starts_with('\t')) && !lines.is_empty() {
+            let continuation = line.trim_start();
+            lines
+                .last_mut()
+                .expect("line exists")
+                .push_str(continuation);
+        } else {
+            lines.push(line.to_string());
+        }
+    }
+    lines
+}
+
+fn parse_ical_event(
+    lines: &[String],
+    fallback_timezone: &str,
+) -> Result<ParsedIcalEvent, AppExecutionError> {
+    let mut summary = String::new();
+    let mut description = String::new();
+    let mut location = String::new();
+    let mut url = String::new();
+    let mut rrule = None;
+    let mut full_day = false;
+    let mut time_zone = String::new();
+    let mut start_ts = None;
+    let mut end_ts = None;
+
+    for line in lines {
+        let (name_with_params, value) =
+            line.split_once(':')
+                .ok_or(AppExecutionError::InvalidField {
+                    field: "ical",
+                    reason: format!("invalid VEVENT property line `{line}`"),
+                })?;
+
+        let mut parts = name_with_params.split(';');
+        let name = parts.next().unwrap_or("");
+        let mut tzid = None;
+        for param in parts {
+            if let Some((key, param_value)) = param.split_once('=') {
+                if key == "TZID" {
+                    tzid = Some(param_value.to_string());
+                }
+            }
+        }
+
+        match name {
+            "SUMMARY" => summary = unescape_ical_text(value),
+            "DESCRIPTION" => description = unescape_ical_text(value),
+            "LOCATION" => location = unescape_ical_text(value),
+            "URL" => url = value.to_string(),
+            "RRULE" => rrule = Some(value.to_string()),
+            "DTSTART" => {
+                let tz = tzid
+                    .clone()
+                    .unwrap_or_else(|| fallback_timezone.to_string());
+                time_zone = tz.clone();
+                full_day = !value.contains('T');
+                start_ts = Some(parse_ical_datetime(value, &tz)?);
+            }
+            "DTEND" => {
+                let tz = tzid.unwrap_or_else(|| fallback_timezone.to_string());
+                end_ts = Some(parse_ical_datetime(value, &tz)?);
+            }
+            _ => {}
+        }
+    }
+
+    let start_ts = start_ts.ok_or(AppExecutionError::InvalidField {
+        field: "ical",
+        reason: "VEVENT missing DTSTART".to_string(),
+    })?;
+    let end_ts = end_ts.unwrap_or(start_ts);
+
+    Ok(ParsedIcalEvent {
+        summary,
+        description,
+        location,
+        url,
+        time_zone,
+        full_day,
+        start_ts,
+        end_ts,
+        rrule,
+    })
+}
+
+fn parse_ical_datetime(value: &str, timezone: &str) -> Result<DateTime<Utc>, AppExecutionError> {
+    if let Some(stripped) = value.strip_suffix('Z') {
+        let naive = NaiveDateTime::parse_from_str(stripped, "%Y%m%dT%H%M%S").map_err(|_| {
+            AppExecutionError::InvalidField {
+                field: "ical",
+                reason: format!("invalid datetime `{value}`"),
+            }
+        })?;
+        return Ok(Utc.from_utc_datetime(&naive));
+    }
+
+    let tz: Tz = timezone
+        .parse()
+        .map_err(|_| AppExecutionError::InvalidField {
+            field: "ical",
+            reason: format!("unknown timezone `{timezone}`"),
+        })?;
+
+    if value.contains('T') {
+        let naive = NaiveDateTime::parse_from_str(value, "%Y%m%dT%H%M%S").map_err(|_| {
+            AppExecutionError::InvalidField {
+                field: "ical",
+                reason: format!("invalid datetime `{value}`"),
+            }
+        })?;
+
+        let localized =
+            tz.from_local_datetime(&naive)
+                .single()
+                .ok_or(AppExecutionError::InvalidField {
+                    field: "ical",
+                    reason: format!("ambiguous datetime `{value}` for timezone `{timezone}`"),
+                })?;
+        Ok(localized.with_timezone(&Utc))
+    } else {
+        let date = NaiveDate::parse_from_str(value, "%Y%m%d").map_err(|_| {
+            AppExecutionError::InvalidField {
+                field: "ical",
+                reason: format!("invalid date `{value}`"),
+            }
+        })?;
+        let naive = date.and_hms_opt(0, 0, 0).expect("midnight should be valid");
+        let localized =
+            tz.from_local_datetime(&naive)
+                .single()
+                .ok_or(AppExecutionError::InvalidField {
+                    field: "ical",
+                    reason: format!("ambiguous date `{value}` for timezone `{timezone}`"),
+                })?;
+        Ok(localized.with_timezone(&Utc))
+    }
+}
+
+fn parse_ical_boundary(
+    value: &str,
+    timezone: &str,
+    is_start: bool,
+) -> Result<DateTime<Utc>, AppExecutionError> {
+    if value.trim().is_empty() {
+        return if is_start {
+            Ok(Utc::now())
+        } else {
+            Ok(Utc::now() + Duration::days(366))
+        };
+    }
+
+    if let Ok(parsed) = DateTime::parse_from_rfc3339(value) {
+        return Ok(parsed.with_timezone(&Utc));
+    }
+    if let Ok(date) = NaiveDate::parse_from_str(value, "%Y-%m-%d") {
+        let naive = if is_start {
+            date.and_hms_opt(0, 0, 0).expect("midnight should be valid")
+        } else {
+            date.and_hms_opt(23, 59, 59).expect("time should be valid")
+        };
+        let tz: Tz = timezone
+            .parse()
+            .map_err(|_| AppExecutionError::InvalidField {
+                field: "exportFrom/exportUntil",
+                reason: format!("unknown timezone `{timezone}`"),
+            })?;
+        return tz
+            .from_local_datetime(&naive)
+            .single()
+            .map(|dt| dt.with_timezone(&Utc))
+            .ok_or(AppExecutionError::InvalidField {
+                field: "exportFrom/exportUntil",
+                reason: format!("ambiguous boundary `{value}` for timezone `{timezone}`"),
+            });
+    }
+
+    parse_ical_datetime(value, timezone)
+}
+
+fn expand_ical_event_occurrences(
+    event: &ParsedIcalEvent,
+    start_range: DateTime<Utc>,
+    end_range: DateTime<Utc>,
+    export_count: usize,
+) -> Result<Vec<(DateTime<Utc>, DateTime<Utc>)>, AppExecutionError> {
+    let mut occurrences = Vec::new();
+    let duration = event.end_ts - event.start_ts;
+
+    if event.rrule.is_none() {
+        if event.start_ts <= end_range && event.end_ts >= start_range {
+            occurrences.push((event.start_ts, event.end_ts));
+        }
+        return Ok(occurrences);
+    }
+
+    let rrule = event.rrule.as_deref().unwrap_or_default();
+    let rule = parse_rrule(rrule, &event.time_zone)?;
+    let mut generated = 0usize;
+    let mut cursor = event.start_ts;
+
+    while generated < export_count {
+        if let Some(until) = rule.until {
+            if cursor > until {
+                break;
+            }
+        }
+
+        if cursor >= start_range && cursor <= end_range {
+            occurrences.push((cursor, cursor + duration));
+            if occurrences.len() >= export_count {
+                break;
+            }
+        }
+
+        generated += 1;
+        if let Some(count) = rule.count {
+            if generated >= count {
+                break;
+            }
+        }
+
+        cursor = next_recurrence(cursor, &rule, event.start_ts)?;
+        if cursor > end_range + Duration::days(370) {
+            break;
+        }
+    }
+
+    Ok(occurrences)
+}
+
+#[derive(Debug)]
+struct RecurrenceRule {
+    frequency: String,
+    interval: i64,
+    count: Option<usize>,
+    until: Option<DateTime<Utc>>,
+    byday: Vec<Weekday>,
+}
+
+fn parse_rrule(rrule: &str, timezone: &str) -> Result<RecurrenceRule, AppExecutionError> {
+    let mut frequency = "".to_string();
+    let mut interval = 1;
+    let mut count = None;
+    let mut until = None;
+    let mut byday = Vec::new();
+
+    for component in rrule.split(';') {
+        let Some((key, value)) = component.split_once('=') else {
+            continue;
+        };
+        match key {
+            "FREQ" => frequency = value.to_string(),
+            "INTERVAL" => {
+                interval = value.parse::<i64>().unwrap_or(1).max(1);
+            }
+            "COUNT" => {
+                count = value.parse::<usize>().ok();
+            }
+            "UNTIL" => {
+                until = Some(parse_ical_datetime(value, timezone)?);
+            }
+            "BYDAY" => {
+                byday = value
+                    .split(',')
+                    .filter_map(parse_byday_token)
+                    .collect::<Vec<_>>();
+            }
+            _ => {}
+        }
+    }
+
+    if frequency.is_empty() {
+        return Err(AppExecutionError::InvalidField {
+            field: "ical",
+            reason: "RRULE missing FREQ".to_string(),
+        });
+    }
+
+    Ok(RecurrenceRule {
+        frequency,
+        interval,
+        count,
+        until,
+        byday,
+    })
+}
+
+fn parse_byday_token(token: &str) -> Option<Weekday> {
+    let suffix = if token.len() > 2 {
+        &token[token.len() - 2..]
+    } else {
+        token
+    };
+    match suffix {
+        "MO" => Some(Weekday::Mon),
+        "TU" => Some(Weekday::Tue),
+        "WE" => Some(Weekday::Wed),
+        "TH" => Some(Weekday::Thu),
+        "FR" => Some(Weekday::Fri),
+        "SA" => Some(Weekday::Sat),
+        "SU" => Some(Weekday::Sun),
+        _ => None,
+    }
+}
+
+fn next_recurrence(
+    current: DateTime<Utc>,
+    rule: &RecurrenceRule,
+    base_start: DateTime<Utc>,
+) -> Result<DateTime<Utc>, AppExecutionError> {
+    match rule.frequency.as_str() {
+        "DAILY" => Ok(current + Duration::days(rule.interval)),
+        "WEEKLY" => {
+            if rule.byday.is_empty() {
+                return Ok(current + Duration::weeks(rule.interval));
+            }
+
+            let base_week_start = week_start(base_start);
+            let current_week_start = week_start(current);
+            let weeks_since = (current_week_start - base_week_start).num_days() / 7;
+            let weekday_positions = ordered_weekday_positions(&rule.byday);
+            let current_pos = current.weekday().num_days_from_monday() as i64;
+
+            if weeks_since % rule.interval == 0 {
+                for pos in &weekday_positions {
+                    if *pos > current_pos {
+                        return Ok(current + Duration::days(*pos - current_pos));
+                    }
+                }
+            }
+
+            let target_week_start = current_week_start + Duration::weeks(rule.interval);
+            let first = *weekday_positions
+                .first()
+                .ok_or(AppExecutionError::InvalidField {
+                    field: "ical",
+                    reason: "RRULE BYDAY has no values".to_string(),
+                })?;
+            Ok(target_week_start + Duration::days(first))
+        }
+        "MONTHLY" => Ok(current + Duration::days(30 * rule.interval)),
+        "YEARLY" => Ok(current + Duration::days(365 * rule.interval)),
+        unsupported => Err(AppExecutionError::InvalidField {
+            field: "ical",
+            reason: format!("unsupported RRULE FREQ `{unsupported}`"),
+        }),
+    }
+}
+
+fn week_start(value: DateTime<Utc>) -> DateTime<Utc> {
+    value - Duration::days(value.weekday().num_days_from_monday() as i64)
+}
+
+fn ordered_weekday_positions(days: &[Weekday]) -> Vec<i64> {
+    let mut values = days
+        .iter()
+        .map(|day| day.num_days_from_monday() as i64)
+        .collect::<Vec<_>>();
+    values.sort_unstable();
+    values
+}
+
+fn unescape_ical_text(value: &str) -> String {
+    value
+        .replace("\\n", "\n")
+        .replace("\\N", "\n")
+        .replace("\\,", ",")
+        .replace("\\;", ";")
+        .replace("\\\\", "\\")
 }
 
 fn get_timezone(events: &[Value], fallback: Option<&str>) -> Result<Tz, AppExecutionError> {

@@ -197,12 +197,20 @@
 - Added focused app regression coverage in `rust/frameos/tests/ported_apps.rs` for standard formatting, custom formatting, timezone conversion, and invalid override input diagnostics.
 
 
+### Iteration 28 (icalJson app port + recurring event normalization)
+- Ported a deterministic subset of Nim `data/icalJson` behavior into `rust/frameos/src/apps.rs`, including inline iCal validation, folded-line parsing, timezone extraction (`X-WR-TIMEZONE`), VEVENT extraction, and field toggles for location/url/description/timezone output.
+- Added recurrence expansion support for common RRULE patterns used by FrameOS data feeds (`FREQ`, `INTERVAL`, `COUNT`, `UNTIL`, `BYDAY`) and exported all-day/timed events in the same output shape consumed by `data/eventsToAgenda`.
+- Added iCal-focused regression tests in `rust/frameos/tests/ported_apps.rs` for URL rejection, recurring + all-day export normalization, and search filtering.
+- Added keyword alias handling for `logicIfElse` in the Rust app dispatcher so e2e scene manifests that still use legacy naming can execute without keyword mismatch failures.
+
+
 ## Next up (small, actionable)
-1. Add CI-oriented daemon smoke script that boots `frameos run`, probes `/healthz`, then sends SIGINT and validates `runtime:stop` in the event log.
-2. Port the next deterministic data app from Nim (`data/icalJson`) and add fixture-driven parity tests for recurring/all-day event normalization.
-3. Add discovery payload schema validation helpers so malformed discovered contracts fail with field-specific diagnostics before parity checks run.
-4. Emit discovery-source metadata in `runtime:parity_ok` beyond source-kind (for example hashed source labels) to improve rollout observability.
-5. Add parity integration tests that exercise inline JSON discovery inputs directly for both renderer and driver sides.
+1. Port foundational render/data apps needed by `e2e/scenes/*` (`render/image`, `render/gradient`, `render/color`, `render/split`, `data/newImage`, `data/localImage`) and add image-focused golden tests in Rust.
+2. Add a Rust-native e2e harness that can load `e2e/scenes/*.json`, execute graphs headlessly, and emit PNG snapshots compatible with `e2e/snapshots` comparison.
+3. Implement a pixel-diff parity test command in Rust similar to `e2e/makesnapshots.py` so snapshot similarity can be measured in CI for the Rust port.
+4. Extend `data/icalJson` recurrence support beyond current common RRULE set (e.g. `BYMONTH`, `BYMONTHDAY`, positional `BYDAY`) using fixture-driven contracts from Nim tests.
+5. Add compatibility fixtures/tests to cover additional legacy keyword aliases observed in e2e scenes (e.g. `renderTextRich`, `renderTextSplit`, `renderGradientSplit`).
+
 
 ## Checklist
 

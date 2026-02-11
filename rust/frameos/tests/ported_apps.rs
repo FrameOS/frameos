@@ -321,16 +321,13 @@ fn events_to_agenda_prefers_event_timezone_over_context_fallback() {
 fn clock_formats_time_with_standard_pattern() {
     let mut fields = Map::new();
     fields.insert("format".to_string(), json!("yyyy-MM-dd HH:mm:ss"));
-    fields.insert(
-        "testOverrideNow".to_string(),
-        json!("2024-06-07T08:09:10Z"),
-    );
+    fields.insert("testOverrideNow".to_string(), json!("2024-06-07T08:09:10Z"));
 
     let mut context = AppExecutionContext::default();
     context.time_zone = Some("UTC".to_string());
 
-    let output = execute_ported_app("data/clock", &fields, &mut context)
-        .expect("clock app should execute");
+    let output =
+        execute_ported_app("data/clock", &fields, &mut context).expect("clock app should execute");
 
     let AppOutput::Value(serde_json::Value::String(rendered)) = output else {
         panic!("expected string output");
@@ -343,16 +340,13 @@ fn clock_supports_custom_format() {
     let mut fields = Map::new();
     fields.insert("format".to_string(), json!("custom"));
     fields.insert("formatCustom".to_string(), json!("HH:mm"));
-    fields.insert(
-        "testOverrideNow".to_string(),
-        json!("2024-06-07T08:09:10Z"),
-    );
+    fields.insert("testOverrideNow".to_string(), json!("2024-06-07T08:09:10Z"));
 
     let mut context = AppExecutionContext::default();
     context.time_zone = Some("UTC".to_string());
 
-    let output = execute_ported_app("data/clock", &fields, &mut context)
-        .expect("clock app should execute");
+    let output =
+        execute_ported_app("data/clock", &fields, &mut context).expect("clock app should execute");
 
     let AppOutput::Value(serde_json::Value::String(rendered)) = output else {
         panic!("expected string output");
@@ -364,16 +358,13 @@ fn clock_supports_custom_format() {
 fn clock_applies_context_timezone() {
     let mut fields = Map::new();
     fields.insert("format".to_string(), json!("HH:mm"));
-    fields.insert(
-        "testOverrideNow".to_string(),
-        json!("2024-01-15T12:00:00Z"),
-    );
+    fields.insert("testOverrideNow".to_string(), json!("2024-01-15T12:00:00Z"));
 
     let mut context = AppExecutionContext::default();
     context.time_zone = Some("America/New_York".to_string());
 
-    let output = execute_ported_app("data/clock", &fields, &mut context)
-        .expect("clock app should execute");
+    let output =
+        execute_ported_app("data/clock", &fields, &mut context).expect("clock app should execute");
 
     let AppOutput::Value(serde_json::Value::String(rendered)) = output else {
         panic!("expected string output");
@@ -387,12 +378,8 @@ fn clock_rejects_invalid_override_datetime() {
     fields.insert("format".to_string(), json!("HH:mm"));
     fields.insert("testOverrideNow".to_string(), json!("not-a-datetime"));
 
-    let error = execute_ported_app(
-        "data/clock",
-        &fields,
-        &mut AppExecutionContext::default(),
-    )
-    .expect_err("invalid override datetime should fail");
+    let error = execute_ported_app("data/clock", &fields, &mut AppExecutionContext::default())
+        .expect_err("invalid override datetime should fail");
 
     assert!(matches!(
         error,
@@ -401,4 +388,106 @@ fn clock_rejects_invalid_override_datetime() {
             ..
         }
     ));
+}
+
+#[test]
+fn ical_json_rejects_url_input() {
+    let mut fields = Map::new();
+    fields.insert(
+        "ical".to_string(),
+        json!("https://example.com/calendar.ics"),
+    );
+
+    let error = execute_ported_app(
+        "data/icalJson",
+        &fields,
+        &mut AppExecutionContext::default(),
+    )
+    .expect_err("url input should be rejected");
+
+    assert!(matches!(
+        error,
+        AppExecutionError::InvalidField { field: "ical", .. }
+    ));
+}
+
+#[test]
+fn ical_json_exports_recurring_and_all_day_events() {
+    let mut fields = Map::new();
+    fields.insert(
+        "ical".to_string(),
+        json!(
+            "BEGIN:VCALENDAR\nX-WR-TIMEZONE:Europe/Brussels\nBEGIN:VEVENT\nDTSTART;TZID=Europe/Brussels:20240103T170000\nDTEND;TZID=Europe/Brussels:20240103T173000\nRRULE:FREQ=WEEKLY;COUNT=3;BYDAY=WE\nSUMMARY:Team Standup\nLOCATION:https://example.com/location-url/\nDESCRIPTION:Recurring sync\nURL:https://example.com/standup\nEND:VEVENT\nBEGIN:VEVENT\nDTSTART;VALUE=DATE:20240110\nDTEND;VALUE=DATE:20240111\nSUMMARY:Company Holiday\nEND:VEVENT\nEND:VCALENDAR"
+        ),
+    );
+    fields.insert("exportFrom".to_string(), json!("2024-01-01"));
+    fields.insert("exportUntil".to_string(), json!("2024-01-31"));
+    fields.insert("exportCount".to_string(), json!(10));
+    fields.insert("addLocation".to_string(), json!(true));
+    fields.insert("addUrl".to_string(), json!(true));
+    fields.insert("addDescription".to_string(), json!(true));
+    fields.insert("addTimezone".to_string(), json!(true));
+
+    let mut context = AppExecutionContext::default();
+    context.time_zone = Some("UTC".to_string());
+
+    let output = execute_ported_app("data/icalJson", &fields, &mut context)
+        .expect("ical json should execute");
+
+    let AppOutput::Value(serde_json::Value::Array(events)) = output else {
+        panic!("expected array output");
+    };
+
+    assert_eq!(events.len(), 4);
+
+    let standups = events
+        .iter()
+        .filter(|event| event["summary"] == json!("Team Standup"))
+        .collect::<Vec<_>>();
+    assert_eq!(standups.len(), 3);
+    assert_eq!(standups[0]["startTime"], json!("2024-01-03T17:00:00"));
+    assert_eq!(standups[1]["startTime"], json!("2024-01-10T17:00:00"));
+    assert_eq!(standups[2]["startTime"], json!("2024-01-17T17:00:00"));
+    assert_eq!(
+        standups[0]["location"],
+        json!("https://example.com/location-url/")
+    );
+    assert_eq!(standups[0]["url"], json!("https://example.com/standup"));
+    assert_eq!(standups[0]["description"], json!("Recurring sync"));
+
+    let holiday = events
+        .iter()
+        .find(|event| event["summary"] == json!("Company Holiday"))
+        .expect("holiday event should exist");
+    assert_eq!(holiday["startTime"], json!("2024-01-10"));
+    assert_eq!(holiday["endTime"], json!("2024-01-10"));
+    assert_eq!(holiday["timezone"], json!("Europe/Brussels"));
+}
+
+#[test]
+fn ical_json_supports_search_filtering() {
+    let mut fields = Map::new();
+    fields.insert(
+        "ical".to_string(),
+        json!(
+            "BEGIN:VCALENDAR\nBEGIN:VEVENT\nDTSTART:20240103T100000Z\nDTEND:20240103T103000Z\nSUMMARY:Standup\nEND:VEVENT\nBEGIN:VEVENT\nDTSTART:20240103T110000Z\nDTEND:20240103T113000Z\nSUMMARY:Design Review\nEND:VEVENT\nEND:VCALENDAR"
+        ),
+    );
+    fields.insert("exportFrom".to_string(), json!("2024-01-01"));
+    fields.insert("exportUntil".to_string(), json!("2024-01-31"));
+    fields.insert("search".to_string(), json!("stand"));
+
+    let output = execute_ported_app(
+        "data/icalJson",
+        &fields,
+        &mut AppExecutionContext::default(),
+    )
+    .expect("ical json should execute");
+
+    let AppOutput::Value(serde_json::Value::Array(events)) = output else {
+        panic!("expected array output");
+    };
+
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0]["summary"], json!("Standup"));
 }
