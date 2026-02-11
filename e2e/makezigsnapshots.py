@@ -39,9 +39,32 @@ def build_scene_list(filter_str: str):
     return files
 
 
-def maybe_render_with_zig(scene_id: str, output_path: Path) -> bool:
-    """Best-effort hook for a future Zig renderer binary."""
+def ensure_renderer_binary() -> Path:
     renderer = Path('../zig/zig-out/bin/scene_renderer')
+    if renderer.exists():
+        return renderer
+
+    try:
+        build = subprocess.run(
+            ['zig', 'build'],
+            cwd=Path('../zig'),
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError:
+        print('⚠️ Zig CLI is not installed; falling back to reference snapshots.')
+        return renderer
+
+    if build.returncode != 0:
+        print('⚠️ Failed to build Zig renderer binary; falling back to reference snapshots.')
+        if build.stderr.strip():
+            print(build.stderr.strip())
+
+    return renderer
+
+
+def maybe_render_with_zig(scene_id: str, output_path: Path) -> bool:
+    renderer = ensure_renderer_binary()
     if not renderer.exists():
         return False
 

@@ -11,7 +11,15 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    const scene_renderer = b.addExecutable(.{
+        .name = "scene_renderer",
+        .root_source_file = .{ .path = "src/scene_renderer.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+
     b.installArtifact(exe);
+    b.installArtifact(scene_renderer);
 
     const tests = b.addTest(.{
         .root_source_file = .{ .path = "src/main.zig" },
