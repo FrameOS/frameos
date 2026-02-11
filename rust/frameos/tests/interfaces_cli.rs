@@ -23,7 +23,42 @@ fn contract_lists_expected_commands() {
     assert!(commands.contains_key("run"));
     assert!(commands.contains_key("check"));
     assert!(commands.contains_key("parity"));
+    assert!(commands.contains_key("e2e"));
     assert!(commands.contains_key("contract"));
+}
+
+#[test]
+fn parses_e2e_flags() {
+    let cli = Cli::parse(vec![
+        "e2e".to_string(),
+        "--e2e-scenes".to_string(),
+        "./e2e/scenes".to_string(),
+        "--e2e-snapshots".to_string(),
+        "./e2e/snapshots".to_string(),
+        "--e2e-assets".to_string(),
+        "./e2e/assets".to_string(),
+        "--e2e-output".to_string(),
+        "./e2e/rust-output".to_string(),
+    ])
+    .expect("cli should parse");
+
+    assert_eq!(cli.command, Command::E2e);
+    assert_eq!(
+        cli.e2e_scenes_dir,
+        Some(std::path::PathBuf::from("./e2e/scenes"))
+    );
+    assert_eq!(
+        cli.e2e_snapshots_dir,
+        Some(std::path::PathBuf::from("./e2e/snapshots"))
+    );
+    assert_eq!(
+        cli.e2e_assets_dir,
+        Some(std::path::PathBuf::from("./e2e/assets"))
+    );
+    assert_eq!(
+        cli.e2e_output_dir,
+        Some(std::path::PathBuf::from("./e2e/rust-output"))
+    );
 }
 
 #[test]

@@ -219,12 +219,18 @@
 - Upgraded snapshot parity coverage in `rust/frameos/tests/e2e_rust_snapshots.rs` from a small subset to all scenes in `e2e/scenes`, with per-scene threshold overrides documented in-test for the remaining hardest mismatch cases.
 - Added new crate dependencies (`imageproc`, `ab_glyph`, `qrcode`, `reqwest`) required for text/QR/download behavior in the Rust e2e harness.
 
+### Iteration 31 (e2e parity CLI command + reusable snapshot parity runner)
+- Added a first-class Rust CLI command `frameos e2e` in `rust/frameos/src/main.rs` + `src/interfaces.rs` to run scene rendering parity outside of test binaries.
+- Implemented `rust/frameos/src/e2e_cli.rs` as a reusable batch parity runner that renders every `e2e/scenes/*.json`, writes generated outputs to `e2e/rust-output` by default, and computes threshold-based diffs against `e2e/snapshots`.
+- Added machine-readable `runtime:e2e_ok` / `runtime:e2e_failed` events (with scene counts, max diff, and failing scene diagnostics) so CI/supervision can consume parity status programmatically.
+- Added regression coverage for the new surface in `rust/frameos/tests/interfaces_cli.rs` (CLI parsing + contract exposure) and `rust/frameos/tests/e2e_cli.rs` (end-to-end parity runner pass against current snapshots).
+
 ## Next up (small, actionable)
-1. Add a Rust CLI command that batch-renders scenes and performs threshold-based pixel diffs against `e2e/snapshots` (similar workflow to `e2e/makesnapshots.py`) so parity checks can run outside tests.
-2. Tighten parity for the current high-diff scenes (`dataDownloadImage`, `dataResize`, `renderSplitLoop`) by porting missing Nim-specific details (error rendering semantics, split loop/context behavior, resize/placement edge cases).
-3. Extend `render/text` parity toward Nim rich-text behavior (`basic-caret`, overflow modes, font selection) and reduce reliance on fallback font heuristics.
-4. Extend `data/icalJson` recurrence support beyond current common RRULE set (e.g. `BYMONTH`, `BYMONTHDAY`, positional `BYDAY`) using fixture-driven contracts from Nim tests.
-5. Add explicit e2e fixtures/tests for network-unavailable behavior so `data/downloadImage`/`data/downloadUrl` parity remains deterministic in offline CI environments.
+1. Tighten parity for the current high-diff scenes (`dataDownloadImage`, `dataResize`, `renderSplitLoop`) by porting missing Nim-specific details (error rendering semantics, split loop/context behavior, resize/placement edge cases).
+2. Extend `render/text` parity toward Nim rich-text behavior (`basic-caret`, overflow modes, font selection) and reduce reliance on fallback font heuristics.
+3. Extend `data/icalJson` recurrence support beyond current common RRULE set (e.g. `BYMONTH`, `BYMONTHDAY`, positional `BYDAY`) using fixture-driven contracts from Nim tests.
+4. Add explicit e2e fixtures/tests for network-unavailable behavior so `data/downloadImage`/`data/downloadUrl` parity remains deterministic in offline CI environments.
+5. Add per-scene threshold override flags to `frameos e2e` (or a config file input) so parity gates can be tightened incrementally without code changes.
 
 
 ## Checklist

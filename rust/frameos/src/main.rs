@@ -7,6 +7,7 @@ use std::time::Instant;
 
 use frameos::config::FrameOSConfig;
 use frameos::discovery::discovery_source_from_cli;
+use frameos::e2e_cli::{default_e2e_options, run_e2e_snapshot_parity};
 use frameos::interfaces::{command_contract_json, Cli, Command};
 use frameos::logging::{
     self, FileJsonLineSink, JsonLineSink, MultiJsonLineSink, StdoutJsonLineSink,
@@ -164,6 +165,83 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }),
                     );
                     return Err(error.into());
+                }
+            }
+        }
+        Command::E2e => {
+            let sink = build_sink_with_optional_config(cli.event_log_path.as_deref(), None)?;
+            let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+            let mut opts = default_e2e_options(&repo_root);
+            if let Some(path) = &cli.e2e_scenes_dir {
+                opts.scenes_dir = path.clone();
+            }
+            if let Some(path) = &cli.e2e_snapshots_dir {
+                opts.snapshots_dir = path.clone();
+            }
+            if let Some(path) = &cli.e2e_assets_dir {
+                opts.assets_dir = path.clone();
+            }
+            if let Some(path) = &cli.e2e_output_dir {
+                opts.output_dir = path.clone();
+            }
+
+            match run_e2e_snapshot_parity(&opts) {
+                Ok(report) if report.passed() => {
+                    let _ = logging::log_event_with_sink(
+                        sink.as_ref(),
+                        serde_json::json!({
+                            "event": "runtime:e2e_ok",
+                            "scenes_checked": report.checked,
+                            "scenes_failed": 0,
+                            "max_diff": report.max_diff,
+                        }),
+                    );
+                    println!(
+                        "FrameOS e2e snapshot parity: passed 🎉 ({} scenes)",
+                        report.checked
+                    );
+                    return Ok(());
+                }
+                Ok(report) => {
+                    let failing_scenes: Vec<String> = report
+                        .failed
+                        .iter()
+                        .map(|item| {
+                            format!("{}:{:.4}>{:.2}", item.scene, item.diff, item.threshold)
+                        })
+                        .collect();
+                    let _ = logging::log_event_with_sink(
+                        sink.as_ref(),
+                        serde_json::json!({
+                            "event": "runtime:e2e_failed",
+                            "scenes_checked": report.checked,
+                            "scenes_failed": report.failed.len(),
+                            "max_diff": report.max_diff,
+                            "failing_scenes": failing_scenes,
+                        }),
+                    );
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        format!(
+                            "e2e snapshot parity failed for {} scenes",
+                            report.failed.len()
+                        ),
+                    )
+                    .into());
+                }
+                Err(error) => {
+                    let _ = logging::log_event_with_sink(
+                        sink.as_ref(),
+                        serde_json::json!({
+                            "event": "runtime:e2e_failed",
+                            "scenes_checked": 0,
+                            "scenes_failed": 0,
+                            "max_diff": 0.0,
+                            "failing_scenes": [],
+                            "error": error,
+                        }),
+                    );
+                    return Err(io::Error::new(io::ErrorKind::Other, error).into());
                 }
             }
         }

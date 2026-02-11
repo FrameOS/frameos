@@ -23,6 +23,10 @@ From `rust/frameos/`:
   - `cargo run -- parity --renderer-probe-cmd 'cat ./tests/fixtures/parity/renderer-valid.json' --driver-probe-cmd 'cat ./tests/fixtures/parity/driver-valid.json'`
 - Exercise scheduling failure fixtures (should emit `runtime:parity_failed`):
   - `cargo run -- parity --renderer-contract ./tests/fixtures/parity/renderer-invalid-scheduling.json --driver-contract ./tests/fixtures/parity/driver-valid.json`
+- Run Rust e2e snapshot parity and emit generated PNGs under `e2e/rust-output`:
+  - `cargo run -- e2e`
+- Override e2e IO directories explicitly (useful for CI temp dirs):
+  - `cargo run -- e2e --e2e-scenes ../../e2e/scenes --e2e-snapshots ../../e2e/snapshots --e2e-assets ../../e2e/assets --e2e-output ../../e2e/rust-output-ci`
 - Start runtime (Ctrl+C to stop):
   - `cargo run -- run --config ./tests/fixtures/frame-valid.json --event-log ./runtime-events.jsonl`
 
@@ -117,3 +121,5 @@ This mirrors migration cutover checks by waiting for `runtime:ready` and a healt
 
 
 Parity success events (`runtime:parity_ok`) now include `renderer_contract_source` and `driver_contract_source` (`fixture` or `discovered`) so rollout dashboards can distinguish static-fixture vs probe-based checks.
+
+E2E parity command emits `runtime:e2e_ok` on success and `runtime:e2e_failed` on threshold mismatch/errors, including scene counts and failure diagnostics suitable for CI gate parsing.

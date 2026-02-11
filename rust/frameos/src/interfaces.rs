@@ -5,6 +5,7 @@ pub enum Command {
     Run,
     Check,
     Parity,
+    E2e,
     PrintContract,
 }
 
@@ -21,6 +22,10 @@ pub struct Cli {
     pub renderer_discovery_json: Option<String>,
     pub driver_discovery_json: Option<String>,
     pub event_log_path: Option<PathBuf>,
+    pub e2e_scenes_dir: Option<PathBuf>,
+    pub e2e_snapshots_dir: Option<PathBuf>,
+    pub e2e_assets_dir: Option<PathBuf>,
+    pub e2e_output_dir: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,6 +61,10 @@ impl Default for Cli {
             renderer_discovery_json: None,
             driver_discovery_json: None,
             event_log_path: None,
+            e2e_scenes_dir: None,
+            e2e_snapshots_dir: None,
+            e2e_assets_dir: None,
+            e2e_output_dir: None,
         }
     }
 }
@@ -77,6 +86,10 @@ impl Cli {
                 }
                 "parity" => {
                     cli.command = Command::Parity;
+                    iter.next();
+                }
+                "e2e" => {
+                    cli.command = Command::E2e;
                     iter.next();
                 }
                 "contract" => {
@@ -150,6 +163,30 @@ impl Cli {
                     };
                     cli.event_log_path = Some(PathBuf::from(value));
                 }
+                "--e2e-scenes" => {
+                    let Some(value) = iter.next() else {
+                        return Err(CliParseError::MissingValue("--e2e-scenes"));
+                    };
+                    cli.e2e_scenes_dir = Some(PathBuf::from(value));
+                }
+                "--e2e-snapshots" => {
+                    let Some(value) = iter.next() else {
+                        return Err(CliParseError::MissingValue("--e2e-snapshots"));
+                    };
+                    cli.e2e_snapshots_dir = Some(PathBuf::from(value));
+                }
+                "--e2e-assets" => {
+                    let Some(value) = iter.next() else {
+                        return Err(CliParseError::MissingValue("--e2e-assets"));
+                    };
+                    cli.e2e_assets_dir = Some(PathBuf::from(value));
+                }
+                "--e2e-output" => {
+                    let Some(value) = iter.next() else {
+                        return Err(CliParseError::MissingValue("--e2e-output"));
+                    };
+                    cli.e2e_output_dir = Some(PathBuf::from(value));
+                }
                 _ => return Err(CliParseError::UnknownArgument(argument)),
             }
         }
@@ -176,6 +213,11 @@ pub fn command_contract_json() -> serde_json::Value {
                 "flags": ["--renderer-contract <path>", "--driver-contract <path>", "--renderer-discovery-file <path>", "--driver-discovery-file <path>", "--renderer-discovery-json <json>", "--driver-discovery-json <json>", "--event-log <path>"],
                 "notes": "provide exactly one source per side: contract path or discovery payload"
             },
+            "e2e": {
+                "description": "Render e2e scenes and compare generated images against snapshot PNGs.",
+                "flags": ["--e2e-scenes <dir>", "--e2e-snapshots <dir>", "--e2e-assets <dir>", "--e2e-output <dir>", "--event-log <path>"],
+                "notes": "defaults resolve against repo root when paths are omitted"
+            },
             "contract": {
                 "description": "Print the runtime CLI/event contract as JSON.",
                 "flags": []
@@ -198,6 +240,8 @@ pub fn command_contract_json() -> serde_json::Value {
             "runtime:check_failed": {"level": "error", "fields": ["error"]},
             "runtime:parity_ok": {"level": "info", "fields": ["renderer_api_version", "driver_api_version", "driver_device_kind", "shared_formats", "renderer_target_fps", "renderer_tick_budget_ms", "renderer_drop_policy", "driver_backpressure_policy", "driver_max_queue_depth", "renderer_contract_source", "driver_contract_source"]},
             "runtime:parity_failed": {"level": "error", "fields": ["error", "duration_ms", "renderer_contract_source", "driver_contract_source", "renderer_source_label", "driver_source_label"]},
+            "runtime:e2e_ok": {"level": "info", "fields": ["scenes_checked", "scenes_failed", "max_diff"]},
+            "runtime:e2e_failed": {"level": "error", "fields": ["scenes_checked", "scenes_failed", "max_diff", "failing_scenes"]},
             "runtime:heartbeat": {"level": "debug", "fields": ["uptime_seconds", "server"]},
             "runtime:metrics_tick": {"level": "info", "fields": ["uptime_seconds", "metrics_interval_seconds", "apps_loaded", "scenes_loaded"]}
         },
@@ -216,6 +260,10 @@ pub fn command_contract_json() -> serde_json::Value {
             "parity": {
                 "runtime:parity_ok": ["renderer_api_version", "driver_api_version", "driver_device_kind", "shared_formats", "renderer_target_fps", "renderer_tick_budget_ms", "renderer_drop_policy", "driver_backpressure_policy", "driver_max_queue_depth", "renderer_contract_source", "driver_contract_source"],
                 "runtime:parity_failed": ["error", "duration_ms", "renderer_contract_source", "driver_contract_source", "renderer_source_label", "driver_source_label"]
+            },
+            "e2e": {
+                "runtime:e2e_ok": ["scenes_checked", "scenes_failed", "max_diff"],
+                "runtime:e2e_failed": ["scenes_checked", "scenes_failed", "max_diff", "failing_scenes"]
             },
             "contract": {}
         }
