@@ -54,7 +54,6 @@ function TreeNode({
   deleteAsset,
   renameAsset,
   createFolder,
-  imageToken,
   createImageScene,
   createImageFolderScene,
 }: {
@@ -65,7 +64,6 @@ function TreeNode({
   deleteAsset: (path: string) => void
   renameAsset: (oldPath: string, newPath: string) => void
   createFolder: (path: string) => void
-  imageToken: string | null
   createImageScene: (path: string) => void
   createImageFolderScene: (path: string) => void
 }): JSX.Element {
@@ -146,7 +144,6 @@ function TreeNode({
                 deleteAsset={deleteAsset}
                 renameAsset={renameAsset}
                 createFolder={createFolder}
-                imageToken={imageToken}
                 createImageScene={createImageScene}
                 createImageFolderScene={createImageFolderScene}
               />
@@ -162,11 +159,10 @@ function TreeNode({
       hasImageExtension(node.name) && !node.path.startsWith('.thumbs/') && !node.path.includes('/.thumbs/')
     return (
       <div className="ml-1 flex items-center space-x-2">
-        {isImage && imageToken && !node.path.startsWith('.thumbs/') && !node.path.includes('/.thumbs/') && (
+        {isImage && !node.path.startsWith('.thumbs/') && !node.path.includes('/.thumbs/') && (
           <div className="w-8 h-8">
             <DeferredImage
               url={`/api/frames/${frameId}/asset?path=${encodeURIComponent(node.path)}&thumb=1`}
-              token={imageToken}
               className="w-8 h-8 object-cover border border-gray-600 rounded"
               spinnerClassName="w-4 h-4"
             />
@@ -257,7 +253,6 @@ export function Assets(): JSX.Element {
     assetsLogic({ frameId: frame.id })
   )
   const { openAsset } = useActions(panelsLogic({ frameId: frame.id }))
-  const [imageToken, setImageToken] = useState<string | null>(null)
 
   const createImageScene = async (path: string): Promise<void> => {
     const assetsPath = frameForm.assets_path || frame.assets_path || '/srv/assets'
@@ -295,21 +290,6 @@ export function Assets(): JSX.Element {
   useEffect(() => {
     loadAssets()
   }, [])
-
-  useEffect(() => {
-    async function fetchToken(): Promise<void> {
-      try {
-        const resp = await apiFetch(`/api/frames/${frame.id}/image_token`)
-        if (resp.ok) {
-          const data = await resp.json()
-          setImageToken(data.token)
-        }
-      } catch (error) {
-        console.error(error)
-      }
-    }
-    fetchToken()
-  }, [frame.id])
 
   return (
     <div className="space-y-2">
@@ -351,7 +331,6 @@ export function Assets(): JSX.Element {
             deleteAsset={deleteAsset}
             renameAsset={renameAsset}
             createFolder={createFolder}
-            imageToken={imageToken}
             createImageScene={createImageScene}
             createImageFolderScene={createImageFolderScene}
           />

@@ -96,21 +96,13 @@ const FRAME_KEYS_REQUIRE_RECOMPILE_BUILDROOT: (keyof FrameType)[] = [
 
 async function resolveTemplateImageUrl(template: Partial<TemplateType>): Promise<string | null> {
   if (template.id) {
-    const response = await apiFetch(`/api/templates/${template.id}/image_token`)
-    if (response.ok) {
-      const data = await response.json()
-      return `/api/templates/${template.id}/image?token=${encodeURIComponent(data.token)}`
-    }
+    return `/api/templates/${template.id}/image`
   }
 
   if (typeof template.image === 'string') {
     const match = template.image.match(/^\/api\/(repositories\/system\/[^/]+\/templates\/[^/]+)\/image$/)
     if (match) {
-      const response = await apiFetch(`/api/${match[1]}/image_token`)
-      if (response.ok) {
-        const data = await response.json()
-        return `/api/${match[1]}/image?token=${encodeURIComponent(data.token)}`
-      }
+      return `/api/${match[1]}/image`
     }
     return template.image
   }

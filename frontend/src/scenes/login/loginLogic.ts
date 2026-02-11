@@ -40,8 +40,6 @@ export const loginLogic = kea<loginLogicType>([
             body: formData.toString(),
           })
           if (response.ok) {
-            const json = await response.json()
-            localStorage.setItem('token', json.access_token)
             window.location.href = urls.frames()
           } else {
             let error

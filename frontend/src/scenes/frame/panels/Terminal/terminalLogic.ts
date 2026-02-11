@@ -94,14 +94,13 @@ export const terminalLogic = kea<terminalLogicType>([
         return
       }
       const { frame } = values
-      const token = localStorage.getItem('token')
       if (frame.agent?.agentEnabled) {
         actions.appendText(
           '*** Terminal access is only available over SSH; agent connections do not provide a shell. ***\n'
         )
       }
       actions.appendText(`***connecting to ${frame.ssh_user}@${frame.frame_host} via SSH***\n`)
-      const ws = new WebSocket(`${getBasePath()}/ws/terminal/${frame.id}` + (token ? `?token=${token}` : ''))
+      const ws = new WebSocket(`${getBasePath()}/ws/terminal/${frame.id}`)
       ws.onmessage = (event) => actions.appendText(event.data)
       ws.onclose = () => actions.appendText('\n*** connection closed ***\n')
       cache.ws = ws

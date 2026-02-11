@@ -44,7 +44,6 @@ export const sceneLogic = kea<sceneLogicType>([
       } catch (error) {
         console.error('Logout failed', error)
       }
-      localStorage.removeItem('token')
       location.href = urls.frames()
     },
   })),
