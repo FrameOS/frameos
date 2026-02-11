@@ -217,10 +217,17 @@
 
 ---
 
+
+- **Iteration 27:**
+  - [x] Ported a new concrete `photo` app boundary in Zig (`apps/photo.zig`) with deterministic lifecycle + scene-settings payload contracts.
+  - [x] Wired `photo` through app registration, scene manifests, runner diagnostics, and server route payloads (`/scenes`, `/scenes/:id`, `/scenes/:id/settings`).
+  - [x] Added boot integration assertions for `startupScene=photo`, including exact JSON snapshots for startup scene + settings payloads and list ordering invariants.
+  - [ ] Attempted to run `e2e` pipeline (`./run blue`) to validate rendering parity, but the Nim build step failed due blocked QuickJS download (`curl ... quickjs-2025-04-26.tar.xz` returned `CONNECT tunnel failed, response 403`).
+
 ## Next Actions (priority order)
-1. [ ] Port another concrete app boundary (candidate: photo) with lifecycle + settings contracts and add corresponding `/scenes/:id` + `/scenes/:id/settings` coverage.
-2. [ ] Add boot integration and runner startup-log coverage for the next app boundary startup scene to lock lifecycle/settings diagnostics.
-3. [ ] Expand `/scenes` ordering + settings-availability snapshot assertions to include the next boundary so list payload invariants remain explicit.
+1. [ ] Keep pushing e2e parity by adding a Zig-native scene render harness that can run without Nim/QuickJS network downloads in CI.
+2. [ ] Add photo-specific assertions to any remaining route snapshots that still enumerate built-ins by exact JSON string.
+3. [ ] Start next concrete app boundary after `photo` (candidate: countdown) with lifecycle + settings contracts and boot-route coverage.
 
 ## Backlog / Later
 - [ ] Port individual apps incrementally (start with simplest).
@@ -233,3 +240,4 @@
 
 ## Notes / Discoveries
 - No external Zig package dependency is required yet for the initial runtime primitives; current implementation relies on Zig stdlib only.
+- E2E validation is currently blocked in this environment when Nim build hooks attempt to download QuickJS (`quickjs-2025-04-26.tar.xz`) and receive `CONNECT tunnel failed, response 403`; Zig-side route/lifecycle parity work can still proceed independently.

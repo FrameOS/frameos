@@ -6,6 +6,7 @@ const news_app = @import("news.zig");
 const quotes_app = @import("quotes.zig");
 const transit_app = @import("transit.zig");
 const stocks_app = @import("stocks.zig");
+const photo_app = @import("photo.zig");
 const types = @import("types.zig");
 
 pub const AppContext = types.AppContext;
@@ -70,6 +71,11 @@ pub const AppBoundary = struct {
             return lifecycle.startup(ctx);
         }
 
+        if (std.mem.eql(u8, self.runtime.spec.id, "app.photo")) {
+            const lifecycle = photo_app.PhotoAppLifecycle.init(self.runtime.spec);
+            return lifecycle.startup(ctx);
+        }
+
         try self.runtime.startup(ctx);
         return .{
             .app_id = self.runtime.spec.id,
@@ -119,15 +125,19 @@ pub fn sceneSettingsPayloadForScene(scene_id: []const u8, buffer: []u8) !?[]cons
         return try stocks_app.renderSceneSettingsJson(stocks_app.default_scene_settings, buffer);
     }
 
+    if (std.mem.eql(u8, scene_id, "photo")) {
+        return try photo_app.renderSceneSettingsJson(photo_app.default_scene_settings, buffer);
+    }
+
     return null;
 }
 
 pub fn sceneSettingsAvailableForScene(scene_id: []const u8) bool {
-    return std.mem.eql(u8, scene_id, "calendar") or std.mem.eql(u8, scene_id, "weather") or std.mem.eql(u8, scene_id, "news") or std.mem.eql(u8, scene_id, "quotes") or std.mem.eql(u8, scene_id, "transit") or std.mem.eql(u8, scene_id, "stocks");
+    return std.mem.eql(u8, scene_id, "calendar") or std.mem.eql(u8, scene_id, "weather") or std.mem.eql(u8, scene_id, "news") or std.mem.eql(u8, scene_id, "quotes") or std.mem.eql(u8, scene_id, "transit") or std.mem.eql(u8, scene_id, "stocks") or std.mem.eql(u8, scene_id, "photo");
 }
 
 fn isAppLifecycleRegistered(app_id: []const u8) bool {
-    return std.mem.eql(u8, app_id, "app.clock") or std.mem.eql(u8, app_id, "app.weather") or std.mem.eql(u8, app_id, "app.calendar") or std.mem.eql(u8, app_id, "app.news") or std.mem.eql(u8, app_id, "app.quotes") or std.mem.eql(u8, app_id, "app.transit") or std.mem.eql(u8, app_id, "app.stocks");
+    return std.mem.eql(u8, app_id, "app.clock") or std.mem.eql(u8, app_id, "app.weather") or std.mem.eql(u8, app_id, "app.calendar") or std.mem.eql(u8, app_id, "app.news") or std.mem.eql(u8, app_id, "app.quotes") or std.mem.eql(u8, app_id, "app.transit") or std.mem.eql(u8, app_id, "app.stocks") or std.mem.eql(u8, app_id, "app.photo");
 }
 
 pub fn builtinSceneManifests() []const SceneManifest {
@@ -166,6 +176,11 @@ pub fn builtinSceneManifests() []const SceneManifest {
             .scene_id = "stocks",
             .app = .{ .id = "app.stocks", .name = "Stocks", .version = "0.1.0" },
             .entrypoint = "apps/stocks/main",
+        },
+        .{
+            .scene_id = "photo",
+            .app = .{ .id = "app.photo", .name = "Photo", .version = "0.1.0" },
+            .entrypoint = "apps/photo/main",
         },
     };
 }
@@ -305,6 +320,7 @@ test "scene settings availability helper reports support by scene" {
     try testing.expect(sceneSettingsAvailableForScene("quotes"));
     try testing.expect(sceneSettingsAvailableForScene("transit"));
     try testing.expect(sceneSettingsAvailableForScene("stocks"));
+    try testing.expect(sceneSettingsAvailableForScene("photo"));
 }
 
 test "scene settings payload helper renders weather settings" {
@@ -400,6 +416,10 @@ test "app contract parity payloads stay aligned with Nim-shaped expectations" {
     try testing.expect(stocks_summary != null);
     try testing.expectEqualStrings("stocks", stocks_summary.?.lifecycle);
 
+    const photo_summary = try appLifecycleSummaryForScene("photo", .{ .allocator = testing.allocator });
+    try testing.expect(photo_summary != null);
+    try testing.expectEqualStrings("photo", photo_summary.?.lifecycle);
+
     var buf: [256]u8 = undefined;
     try testing.expectEqualStrings(
         "{\"location\":\"San Francisco, CA\",\"units\":\"metric\",\"refreshIntervalMin\":15}",
@@ -420,5 +440,34 @@ test "app contract parity payloads stay aligned with Nim-shaped expectations" {
     try testing.expectEqualStrings(
         "{\"symbol\":\"NVDA\",\"exchange\":\"NASDAQ\",\"range\":\"1D\",\"refreshIntervalS\":30}",
         (try sceneSettingsPayloadForScene("stocks", &buf)).?,
+    );
+    try testing.expectEqualStrings(
+        "{\"album\":\"favorites\",\"transition\":\"fade\",\"refreshIntervalS\":20}",
+        (try sceneSettingsPayloadForScene("photo", &buf)).?,
+    );
+}
+
+
+test "photo scene app boundary resolves concrete lifecycle summary" {
+    const testing = std.testing;
+
+    const boundary = loadAppBoundaryForScene("photo") orelse return error.TestUnexpectedResult;
+    const summary = try boundary.startup(.{ .allocator = testing.allocator });
+
+    try testing.expectEqualStrings("app.photo", summary.app_id);
+    try testing.expectEqualStrings("photo", summary.lifecycle);
+    try testing.expectEqual(@as(u8, 12), summary.frame_rate_hz);
+}
+
+test "scene settings payload helper renders photo settings" {
+    const testing = std.testing;
+
+    var buf: [160]u8 = undefined;
+    const payload = try sceneSettingsPayloadForScene("photo", &buf);
+
+    try testing.expect(payload != null);
+    try testing.expectEqualStrings(
+        "{\"album\":\"favorites\",\"transition\":\"fade\",\"refreshIntervalS\":20}",
+        payload.?,
     );
 }

@@ -148,6 +148,14 @@ test "runner app settings availability reports present for stocks" {
     try testing.expectEqualStrings("present", try appSettingsAvailabilityForScene("stocks"));
 }
 
+
+
+test "runner app settings availability reports present for photo" {
+    const testing = @import("std").testing;
+
+    try testing.expectEqualStrings("present", try appSettingsAvailabilityForScene("photo"));
+}
+
 test "runner app settings availability reports missing for clock" {
     const testing = @import("std").testing;
 
@@ -254,4 +262,31 @@ test "runner startup log payload includes appSettings missing when startup scene
     try testing.expect(std.mem.indexOf(u8, payload, "\"startupScene\":\"clock\"") != null);
     try testing.expect(std.mem.indexOf(u8, payload, "\"appLifecycle\":\"clock\"") != null);
     try testing.expect(std.mem.indexOf(u8, payload, "\"appSettings\":\"missing\"") != null);
+}
+
+
+test "runner startup log payload includes appSettings present for photo" {
+    const testing = @import("std").testing;
+
+    const logger = logger_mod.RuntimeLogger.init(.{
+        .frame_host = "127.0.0.1",
+        .frame_port = 8787,
+        .debug = false,
+        .metrics_interval_s = 60,
+        .network_check = true,
+        .network_probe_mode = .auto,
+        .device = "simulator",
+        .startup_scene = "photo",
+    });
+
+    const registry = scenes_mod.SceneRegistry.init(logger, "photo");
+    const runner = RuntimeRunner.init(logger, "simulator", registry);
+
+    var payload_buf: [320]u8 = undefined;
+    const payload = try runner.renderStartupLogPayload(&payload_buf);
+
+    try testing.expect(std.mem.indexOf(u8, payload, "\"startupScene\":\"photo\"") != null);
+    try testing.expect(std.mem.indexOf(u8, payload, "\"appLifecycle\":\"photo\"") != null);
+    try testing.expect(std.mem.indexOf(u8, payload, "\"frameRateHz\":12") != null);
+    try testing.expect(std.mem.indexOf(u8, payload, "\"appSettings\":\"present\"") != null);
 }

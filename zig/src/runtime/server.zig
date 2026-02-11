@@ -346,7 +346,7 @@ test "scenes route renders scene discovery payload" {
     const payload = try route.renderJson(&buf);
 
     try testing.expectEqualStrings(
-        "{\"host\":\"0.0.0.0\",\"port\":7777,\"scenes\":[{\"id\":\"clock\",\"appId\":\"app.clock\",\"entrypoint\":\"apps/clock/main\",\"appLifecycle\":{\"appId\":\"app.clock\",\"lifecycle\":\"clock\",\"frameRateHz\":1},\"settingsAvailable\":false},{\"id\":\"weather\",\"appId\":\"app.weather\",\"entrypoint\":\"apps/weather/main\",\"appLifecycle\":{\"appId\":\"app.weather\",\"lifecycle\":\"weather\",\"frameRateHz\":30},\"settingsAvailable\":true},{\"id\":\"calendar\",\"appId\":\"app.calendar\",\"entrypoint\":\"apps/calendar/main\",\"appLifecycle\":{\"appId\":\"app.calendar\",\"lifecycle\":\"calendar\",\"frameRateHz\":12},\"settingsAvailable\":true},{\"id\":\"news\",\"appId\":\"app.news\",\"entrypoint\":\"apps/news/main\",\"appLifecycle\":{\"appId\":\"app.news\",\"lifecycle\":\"news\",\"frameRateHz\":10},\"settingsAvailable\":true},{\"id\":\"quotes\",\"appId\":\"app.quotes\",\"entrypoint\":\"apps/quotes/main\",\"appLifecycle\":{\"appId\":\"app.quotes\",\"lifecycle\":\"quotes\",\"frameRateHz\":8},\"settingsAvailable\":true},{\"id\":\"transit\",\"appId\":\"app.transit\",\"entrypoint\":\"apps/transit/main\",\"appLifecycle\":{\"appId\":\"app.transit\",\"lifecycle\":\"transit\",\"frameRateHz\":2},\"settingsAvailable\":true},{\"id\":\"stocks\",\"appId\":\"app.stocks\",\"entrypoint\":\"apps/stocks/main\",\"appLifecycle\":{\"appId\":\"app.stocks\",\"lifecycle\":\"stocks\",\"frameRateHz\":4},\"settingsAvailable\":true}]}",
+        "{\"host\":\"0.0.0.0\",\"port\":7777,\"scenes\":[{\"id\":\"clock\",\"appId\":\"app.clock\",\"entrypoint\":\"apps/clock/main\",\"appLifecycle\":{\"appId\":\"app.clock\",\"lifecycle\":\"clock\",\"frameRateHz\":1},\"settingsAvailable\":false},{\"id\":\"weather\",\"appId\":\"app.weather\",\"entrypoint\":\"apps/weather/main\",\"appLifecycle\":{\"appId\":\"app.weather\",\"lifecycle\":\"weather\",\"frameRateHz\":30},\"settingsAvailable\":true},{\"id\":\"calendar\",\"appId\":\"app.calendar\",\"entrypoint\":\"apps/calendar/main\",\"appLifecycle\":{\"appId\":\"app.calendar\",\"lifecycle\":\"calendar\",\"frameRateHz\":12},\"settingsAvailable\":true},{\"id\":\"news\",\"appId\":\"app.news\",\"entrypoint\":\"apps/news/main\",\"appLifecycle\":{\"appId\":\"app.news\",\"lifecycle\":\"news\",\"frameRateHz\":10},\"settingsAvailable\":true},{\"id\":\"quotes\",\"appId\":\"app.quotes\",\"entrypoint\":\"apps/quotes/main\",\"appLifecycle\":{\"appId\":\"app.quotes\",\"lifecycle\":\"quotes\",\"frameRateHz\":8},\"settingsAvailable\":true},{\"id\":\"transit\",\"appId\":\"app.transit\",\"entrypoint\":\"apps/transit/main\",\"appLifecycle\":{\"appId\":\"app.transit\",\"lifecycle\":\"transit\",\"frameRateHz\":2},\"settingsAvailable\":true},{\"id\":\"stocks\",\"appId\":\"app.stocks\",\"entrypoint\":\"apps/stocks/main\",\"appLifecycle\":{\"appId\":\"app.stocks\",\"lifecycle\":\"stocks\",\"frameRateHz\":4},\"settingsAvailable\":true},{\"id\":\"photo\",\"appId\":\"app.photo\",\"entrypoint\":\"apps/photo/main\",\"appLifecycle\":{\"appId\":\"app.photo\",\"lifecycle\":\"photo\",\"frameRateHz\":12},\"settingsAvailable\":true}]}",
         payload,
     );
 }
@@ -695,6 +695,45 @@ test "device summary route renders device payload" {
 
     try testing.expectEqualStrings(
         "{\"host\":\"10.42.0.1\",\"port\":8787,\"startupScene\":\"clock\",\"startupState\":\"ready\",\"device\":{\"name\":\"FrameOS Device\",\"kind\":\"simulator\",\"resolution\":{\"width\":800,\"height\":480},\"rotationDeg\":0,\"summary\":\"FrameOS Device (simulator) 800x480 @ 0°\"}}",
+        payload,
+    );
+}
+
+
+test "scene by id route renders photo lifecycle metadata" {
+    const testing = std.testing;
+
+    const logger = logger_mod.RuntimeLogger.init(.{ .frame_host = "127.0.0.1", .frame_port = 8787, .debug = false, .metrics_interval_s = 60, .network_check = true, .network_probe_mode = .auto, .device = "simulator", .startup_scene = "photo" });
+    const config: config_mod.RuntimeConfig = .{ .frame_host = "0.0.0.0", .frame_port = 7777, .debug = false, .metrics_interval_s = 30, .network_check = true, .network_probe_mode = .auto, .device = "simulator", .startup_scene = "photo" };
+    const server = RuntimeServer.init(logger, config);
+    const registry = scenes_mod.SceneRegistry.init(logger, "photo");
+
+    const route = try server.sceneByIdRoute(registry, "photo");
+
+    var buf: [256]u8 = undefined;
+    const payload = try route.renderJson(&buf);
+
+    try testing.expectEqualStrings(
+        "{\"host\":\"0.0.0.0\",\"port\":7777,\"requestedId\":\"photo\",\"found\":true,\"scene\":{\"id\":\"photo\",\"appId\":\"app.photo\",\"entrypoint\":\"apps/photo/main\"},\"appLifecycle\":{\"appId\":\"app.photo\",\"lifecycle\":\"photo\",\"frameRateHz\":12}}",
+        payload,
+    );
+}
+
+test "scene settings by id route renders photo settings payload" {
+    const testing = std.testing;
+
+    const logger = logger_mod.RuntimeLogger.init(.{ .frame_host = "127.0.0.1", .frame_port = 8787, .debug = false, .metrics_interval_s = 60, .network_check = true, .network_probe_mode = .auto, .device = "simulator", .startup_scene = "photo" });
+    const config: config_mod.RuntimeConfig = .{ .frame_host = "0.0.0.0", .frame_port = 7777, .debug = false, .metrics_interval_s = 30, .network_check = true, .network_probe_mode = .auto, .device = "simulator", .startup_scene = "photo" };
+    const server = RuntimeServer.init(logger, config);
+    const registry = scenes_mod.SceneRegistry.init(logger, "photo");
+
+    const route = server.sceneSettingsByIdRoute(registry, "photo");
+
+    var buf: [256]u8 = undefined;
+    const payload = try route.renderJson(&buf);
+
+    try testing.expectEqualStrings(
+        "{\"host\":\"0.0.0.0\",\"port\":7777,\"requestedId\":\"photo\",\"found\":true,\"scene\":{\"id\":\"photo\",\"appId\":\"app.photo\"},\"settings\":{\"album\":\"favorites\",\"transition\":\"fade\",\"refreshIntervalS\":20}}",
         payload,
     );
 }

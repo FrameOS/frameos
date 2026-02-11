@@ -6,7 +6,7 @@ pub const SceneRegistry = struct {
     logger: logger_mod.RuntimeLogger,
     startup_scene: []const u8,
 
-    const built_in_scenes = [_][]const u8{ "clock", "weather", "calendar", "news", "quotes", "transit", "stocks" };
+    const built_in_scenes = [_][]const u8{ "clock", "weather", "calendar", "news", "quotes", "transit", "stocks", "photo" };
 
     pub fn init(logger: logger_mod.RuntimeLogger, startup_scene: []const u8) SceneRegistry {
         return .{
@@ -123,10 +123,11 @@ test "registry lists built-in scene identifiers" {
     const registry = SceneRegistry.init(logger, "clock");
     const scene_ids = registry.listSceneIds();
 
-    try testing.expectEqual(@as(usize, 7), scene_ids.len);
+    try testing.expectEqual(@as(usize, 8), scene_ids.len);
     try testing.expectEqualStrings("clock", scene_ids[0]);
     try testing.expectEqualStrings("transit", scene_ids[5]);
     try testing.expectEqualStrings("stocks", scene_ids[6]);
+    try testing.expectEqualStrings("photo", scene_ids[7]);
 }
 
 test "registry loads scene manifest through apps boundary" {
