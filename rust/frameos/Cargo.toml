@@ -13,6 +13,10 @@ xmltree = "0.11"
 chrono = { version = "0.4", features = ["clock"] }
 chrono-tz = "0.10"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "bmp"] }
+imageproc = "0.25"
+ab_glyph = "0.2"
+qrcode = "0.14"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
 
 [lib]
 path = "src/lib.rs"
