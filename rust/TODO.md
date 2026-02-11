@@ -204,10 +204,17 @@
 - Added keyword alias handling for `logicIfElse` in the Rust app dispatcher so e2e scene manifests that still use legacy naming can execute without keyword mismatch failures.
 
 
+
+### Iteration 29 (Rust e2e image harness bootstrap + foundational render/data ports)
+- Added a Rust-native e2e renderer module (`rust/frameos/src/e2e.rs`) that parses `e2e/scenes/*.json`, resolves node/edge dependencies, and executes a deterministic subset of the graph model needed for initial image parity checks.
+- Ported foundational image-oriented app behavior for the e2e harness (`render/color`, `render/gradient`, `render/image`, `data/newImage`, `data/localImage`) including placement/scaling modes (`cover`, `contain`, `stretch`, `center`) and frame-sized canvas composition.
+- Added snapshot-comparison integration coverage in `rust/frameos/tests/e2e_rust_snapshots.rs` to validate Rust-rendered outputs against existing Nim-generated references for a first subset of scenes (`black`, `blue`, `dataGradient`, `renderColorFlow`, `renderColorImage`).
+- Added the Rust `image` crate dependency to support pixel pipelines and PNG/JPEG/GIF/BMP decoding for upcoming broader e2e compatibility work.
+
 ## Next up (small, actionable)
-1. Port foundational render/data apps needed by `e2e/scenes/*` (`render/image`, `render/gradient`, `render/color`, `render/split`, `data/newImage`, `data/localImage`) and add image-focused golden tests in Rust.
-2. Add a Rust-native e2e harness that can load `e2e/scenes/*.json`, execute graphs headlessly, and emit PNG snapshots compatible with `e2e/snapshots` comparison.
-3. Implement a pixel-diff parity test command in Rust similar to `e2e/makesnapshots.py` so snapshot similarity can be measured in CI for the Rust port.
+1. Implement `render/split` execution in the Rust e2e harness (including `render_functions` matrix wiring, `render_function` fallback, `gap`/`margin`, and ratio parsing) so split-heavy scenes can run.
+2. Expand the Rust e2e harness app coverage to unblock the full `e2e/scenes` set (`render/text`, `render/opacity`, `data/resizeImage`, `data/qr`, `data/downloadImage`, `data/downloadUrl`).
+3. Add a Rust CLI command that batch-renders scenes and performs threshold-based pixel diffs against `e2e/snapshots` (similar workflow to `e2e/makesnapshots.py`).
 4. Extend `data/icalJson` recurrence support beyond current common RRULE set (e.g. `BYMONTH`, `BYMONTHDAY`, positional `BYDAY`) using fixture-driven contracts from Nim tests.
 5. Add compatibility fixtures/tests to cover additional legacy keyword aliases observed in e2e scenes (e.g. `renderTextRich`, `renderTextSplit`, `renderGradientSplit`).
 
