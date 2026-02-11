@@ -346,7 +346,7 @@ test "scenes route renders scene discovery payload" {
     const payload = try route.renderJson(&buf);
 
     try testing.expectEqualStrings(
-        "{\"host\":\"0.0.0.0\",\"port\":7777,\"scenes\":[{\"id\":\"clock\",\"appId\":\"app.clock\",\"entrypoint\":\"apps/clock/main\",\"appLifecycle\":{\"appId\":\"app.clock\",\"lifecycle\":\"clock\",\"frameRateHz\":1},\"settingsAvailable\":false},{\"id\":\"weather\",\"appId\":\"app.weather\",\"entrypoint\":\"apps/weather/main\",\"appLifecycle\":{\"appId\":\"app.weather\",\"lifecycle\":\"weather\",\"frameRateHz\":30},\"settingsAvailable\":true},{\"id\":\"calendar\",\"appId\":\"app.calendar\",\"entrypoint\":\"apps/calendar/main\",\"appLifecycle\":{\"appId\":\"app.calendar\",\"lifecycle\":\"calendar\",\"frameRateHz\":12},\"settingsAvailable\":true},{\"id\":\"news\",\"appId\":\"app.news\",\"entrypoint\":\"apps/news/main\",\"appLifecycle\":{\"appId\":\"app.news\",\"lifecycle\":\"news\",\"frameRateHz\":10},\"settingsAvailable\":true},{\"id\":\"quotes\",\"appId\":\"app.quotes\",\"entrypoint\":\"apps/quotes/main\",\"appLifecycle\":{\"appId\":\"app.quotes\",\"lifecycle\":\"quotes\",\"frameRateHz\":8},\"settingsAvailable\":true},{\"id\":\"transit\",\"appId\":\"app.transit\",\"entrypoint\":\"apps/transit/main\",\"appLifecycle\":{\"appId\":\"app.transit\",\"lifecycle\":\"transit\",\"frameRateHz\":2},\"settingsAvailable\":true}]}",
+        "{\"host\":\"0.0.0.0\",\"port\":7777,\"scenes\":[{\"id\":\"clock\",\"appId\":\"app.clock\",\"entrypoint\":\"apps/clock/main\",\"appLifecycle\":{\"appId\":\"app.clock\",\"lifecycle\":\"clock\",\"frameRateHz\":1},\"settingsAvailable\":false},{\"id\":\"weather\",\"appId\":\"app.weather\",\"entrypoint\":\"apps/weather/main\",\"appLifecycle\":{\"appId\":\"app.weather\",\"lifecycle\":\"weather\",\"frameRateHz\":30},\"settingsAvailable\":true},{\"id\":\"calendar\",\"appId\":\"app.calendar\",\"entrypoint\":\"apps/calendar/main\",\"appLifecycle\":{\"appId\":\"app.calendar\",\"lifecycle\":\"calendar\",\"frameRateHz\":12},\"settingsAvailable\":true},{\"id\":\"news\",\"appId\":\"app.news\",\"entrypoint\":\"apps/news/main\",\"appLifecycle\":{\"appId\":\"app.news\",\"lifecycle\":\"news\",\"frameRateHz\":10},\"settingsAvailable\":true},{\"id\":\"quotes\",\"appId\":\"app.quotes\",\"entrypoint\":\"apps/quotes/main\",\"appLifecycle\":{\"appId\":\"app.quotes\",\"lifecycle\":\"quotes\",\"frameRateHz\":8},\"settingsAvailable\":true},{\"id\":\"transit\",\"appId\":\"app.transit\",\"entrypoint\":\"apps/transit/main\",\"appLifecycle\":{\"appId\":\"app.transit\",\"lifecycle\":\"transit\",\"frameRateHz\":2},\"settingsAvailable\":true},{\"id\":\"stocks\",\"appId\":\"app.stocks\",\"entrypoint\":\"apps/stocks/main\",\"appLifecycle\":{\"appId\":\"app.stocks\",\"lifecycle\":\"stocks\",\"frameRateHz\":4},\"settingsAvailable\":true}]}",
         payload,
     );
 }
@@ -561,6 +561,44 @@ test "scene settings by id route renders transit settings payload" {
 
     try testing.expectEqualStrings(
         "{\"host\":\"0.0.0.0\",\"port\":7777,\"requestedId\":\"transit\",\"found\":true,\"scene\":{\"id\":\"transit\",\"appId\":\"app.transit\"},\"settings\":{\"stopId\":\"sf-muni-judah-outbound\",\"direction\":\"outbound\",\"refreshIntervalS\":45}}",
+        payload,
+    );
+}
+
+test "scene by id route renders stocks lifecycle metadata" {
+    const testing = std.testing;
+
+    const logger = logger_mod.RuntimeLogger.init(.{ .frame_host = "127.0.0.1", .frame_port = 8787, .debug = false, .metrics_interval_s = 60, .network_check = true, .network_probe_mode = .auto, .device = "simulator", .startup_scene = "clock" });
+
+    const server = RuntimeServer.init(logger, .{ .frame_host = "0.0.0.0", .frame_port = 7777, .debug = false, .metrics_interval_s = 30, .network_check = true, .network_probe_mode = .auto, .device = "simulator", .startup_scene = "clock" });
+
+    const registry = scenes_mod.SceneRegistry.init(logger, "clock");
+    const route = try server.sceneByIdRoute(registry, "stocks");
+
+    var buf: [256]u8 = undefined;
+    const payload = try route.renderJson(&buf);
+
+    try testing.expectEqualStrings(
+        "{\"host\":\"0.0.0.0\",\"port\":7777,\"requestedId\":\"stocks\",\"found\":true,\"scene\":{\"id\":\"stocks\",\"appId\":\"app.stocks\",\"entrypoint\":\"apps/stocks/main\"},\"appLifecycle\":{\"appId\":\"app.stocks\",\"lifecycle\":\"stocks\",\"frameRateHz\":4}}",
+        payload,
+    );
+}
+
+test "scene settings by id route renders stocks settings payload" {
+    const testing = std.testing;
+
+    const logger = logger_mod.RuntimeLogger.init(.{ .frame_host = "127.0.0.1", .frame_port = 8787, .debug = false, .metrics_interval_s = 60, .network_check = true, .network_probe_mode = .auto, .device = "simulator", .startup_scene = "clock" });
+
+    const server = RuntimeServer.init(logger, .{ .frame_host = "0.0.0.0", .frame_port = 7777, .debug = false, .metrics_interval_s = 30, .network_check = true, .network_probe_mode = .auto, .device = "simulator", .startup_scene = "clock" });
+
+    const registry = scenes_mod.SceneRegistry.init(logger, "clock");
+    const route = server.sceneSettingsByIdRoute(registry, "stocks");
+
+    var buf: [384]u8 = undefined;
+    const payload = try route.renderJson(&buf);
+
+    try testing.expectEqualStrings(
+        "{\"host\":\"0.0.0.0\",\"port\":7777,\"requestedId\":\"stocks\",\"found\":true,\"scene\":{\"id\":\"stocks\",\"appId\":\"app.stocks\"},\"settings\":{\"symbol\":\"NVDA\",\"exchange\":\"NASDAQ\",\"range\":\"1D\",\"refreshIntervalS\":30}}",
         payload,
     );
 }

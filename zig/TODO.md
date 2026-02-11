@@ -143,6 +143,11 @@
   - [x] Ported a fifth concrete app boundary (`transit`) via `zig/src/apps/transit.zig` and wired lifecycle/settings contracts through apps, scene registry, runner, and server routes.
   - [x] Added boot-integration assertions for startup-scene `/scenes/:id` + `/scenes/:id/settings` JSON payloads when `startupScene=quotes`.
 
+- **Iteration 25:**
+  - [x] Added boot-integration coverage for `startupScene=transit` in `frameos.zig` with exact `/scenes/:id` + `/scenes/:id/settings` payload assertions.
+  - [x] Added runner startup-log payload coverage for `startupScene=transit` to lock lifecycle (`transit`) + `appSettings="present"` diagnostics.
+  - [x] Ported a sixth concrete app boundary (`stocks`) via `zig/src/apps/stocks.zig` and wired lifecycle/settings contracts through apps, scene registry, runner, and server route payload tests.
+
 ## Completed
 - [x] Create `zig/` directory.
 - [x] Create `zig/TODO.md` with loop structure and initial plan.
@@ -205,9 +210,9 @@
 ---
 
 ## Next Actions (priority order)
-1. [ ] Add boot integration coverage for `startupScene=transit` that locks `/scenes/:id` + `/scenes/:id/settings` payload parity for the new boundary.
-2. [ ] Add runner startup-log coverage for `startupScene=transit` to lock lifecycle (`transit`) + app settings (`present`) diagnostics.
-3. [ ] Port another concrete app boundary beyond current built-ins (candidate: stocks) and add matching scene manifest + lifecycle/settings contracts.
+1. [ ] Add boot integration coverage for `startupScene=stocks` that locks `/scenes/:id` + `/scenes/:id/settings` payload parity for the new boundary.
+2. [ ] Add runner startup-log coverage for `startupScene=stocks` to lock lifecycle (`stocks`) + app settings (`present`) diagnostics.
+3. [ ] Thread stocks assertions through remaining `/scenes` payload snapshots to lock ordering and settings-availability invariants after scene-list expansion.
 
 ## Backlog / Later
 - [ ] Port individual apps incrementally (start with simplest).

@@ -173,6 +173,32 @@ test "runner startup log payload includes appSettings present for news" {
     try testing.expect(std.mem.indexOf(u8, payload, "\"appSettings\":\"present\"") != null);
 }
 
+test "runner startup log payload includes appSettings present for transit" {
+    const testing = @import("std").testing;
+
+    const logger = logger_mod.RuntimeLogger.init(.{
+        .frame_host = "127.0.0.1",
+        .frame_port = 8787,
+        .debug = false,
+        .metrics_interval_s = 60,
+        .network_check = true,
+        .network_probe_mode = .auto,
+        .device = "simulator",
+        .startup_scene = "transit",
+    });
+
+    const registry = scenes_mod.SceneRegistry.init(logger, "transit");
+    const runner = RuntimeRunner.init(logger, "simulator", registry);
+
+    var payload_buf: [320]u8 = undefined;
+    const payload = try runner.renderStartupLogPayload(&payload_buf);
+
+    try testing.expect(std.mem.indexOf(u8, payload, "\"startupScene\":\"transit\"") != null);
+    try testing.expect(std.mem.indexOf(u8, payload, "\"appLifecycle\":\"transit\"") != null);
+    try testing.expect(std.mem.indexOf(u8, payload, "\"frameRateHz\":2") != null);
+    try testing.expect(std.mem.indexOf(u8, payload, "\"appSettings\":\"present\"") != null);
+}
+
 test "runner startup log payload includes appSettings missing when startup scene has no settings" {
     const testing = @import("std").testing;
 
