@@ -251,8 +251,15 @@
   - [x] Added scene-graph rendering support for `render/image` passthrough, `render/color`, and `render/gradient` over arbitrary split sub-rectangles so multi-panel color/gradient scenes can be rendered by Zig.
   - [x] Updated renderer tests to cover graph-path rendering and split geometry math; test execution is currently blocked in this environment because `zig` CLI is unavailable.
 
+
+- **Iteration 32:**
+  - [x] Added concrete image-data execution for `data/newImage` and `data/resizeImage` into the Zig renderer, including recursive data-node resolution for image specs.
+  - [x] Implemented first true `render/image` composition behavior for generated image data with placement handling (`center`, corner placements, `stretch`) plus `offsetX/offsetY` support.
+  - [x] Added `render/opacity` pass-through node handling so opacity-wrapped render flows execute instead of falling back.
+  - [x] Added unit tests that lock image-spec resizing and center-placement rendering behavior for `render/image` + `data/newImage` paths.
+
 ## Next Actions (priority order)
-1. [ ] Add concrete image-data execution (`data/newImage`, `data/localImage`) and true `render/image` composition (resize/fit/alpha) instead of current passthrough wiring.
+1. [ ] Extend image-data execution to cover `data/localImage` decoding and `render/image` blend/alpha modes so image-heavy scenes (`dataLocalImage`, `renderImageBlend`, `renderImageMask`) no longer fallback.
 2. [ ] Add first text raster pass (`render/text`) with deterministic font fallback to unlock parity for `renderText*` and `logicSetAsState` scenarios.
 3. [ ] Add core logic-node execution (`logic/setAsState`, `logic/ifElse`) and state threading so mixed render/logic e2e scenes can execute without fallback.
 

@@ -22,6 +22,12 @@ const Rect = struct {
     h: usize,
 };
 
+const ImageSpec = struct {
+    width: usize,
+    height: usize,
+    color: Color,
+};
+
 const Image = struct {
     pixels: []u8,
 
@@ -306,6 +312,22 @@ fn renderNode(image: *Image, graph: SceneGraph, node_id: []const u8, rect: Rect)
 
     if (std.mem.eql(u8, node.keyword, "render/image")) {
         const input = graph.incomingByTargetHandle(node.id, "image") orelse graph.incomingByTargetHandle(node.id, "inputImage") orelse return error.UnsupportedScene;
+        const placement = parsePlacement(node.config);
+        const offset_x = parseSignedIntFromConfig(node.config, "offsetX") catch 0;
+        const offset_y = parseSignedIntFromConfig(node.config, "offsetY") catch 0;
+
+        if (resolveImageSpec(graph, input.source)) |spec| {
+            const target = placeImageRect(rect, spec, placement, offset_x, offset_y);
+            image.fillRect(target, spec.color);
+            return;
+        } else |_| {}
+
+        try renderNode(image, graph, input.source, rect);
+        return;
+    }
+
+    if (std.mem.eql(u8, node.keyword, "render/opacity")) {
+        const input = graph.incomingByTargetHandle(node.id, "render_function") orelse return error.UnsupportedScene;
         try renderNode(image, graph, input.source, rect);
         return;
     }
@@ -357,6 +379,100 @@ fn renderNode(image: *Image, graph: SceneGraph, node_id: []const u8, rect: Rect)
     }
 
     return error.UnsupportedScene;
+}
+
+fn resolveImageSpec(graph: SceneGraph, node_id: []const u8) !ImageSpec {
+    const node = graph.findNode(node_id) orelse return error.UnsupportedScene;
+
+    if (std.mem.eql(u8, node.keyword, "data/newImage")) {
+        const config = node.config orelse return error.UnsupportedScene;
+        if (config != .object) return error.UnsupportedScene;
+
+        const width = parsePositiveInt(getStringField(config.object, "width") orelse "100");
+        const height = parsePositiveInt(getStringField(config.object, "height") orelse "100");
+        const color_text = getStringField(config.object, "color") orelse "#000000";
+
+        return .{
+            .width = width catch 100,
+            .height = height catch 100,
+            .color = parseHexColor(color_text) catch Color{ .r = 0, .g = 0, .b = 0 },
+        };
+    }
+
+    if (std.mem.eql(u8, node.keyword, "data/resizeImage")) {
+        const input = graph.incomingByTargetHandle(node.id, "image") orelse graph.incomingByTargetHandle(node.id, "inputImage") orelse return error.UnsupportedScene;
+        const upstream = try resolveImageSpec(graph, input.source);
+
+        const config = node.config orelse return upstream;
+        if (config != .object) return upstream;
+
+        const width = parsePositiveInt(getStringField(config.object, "width") orelse "0") catch upstream.width;
+        const height = parsePositiveInt(getStringField(config.object, "height") orelse "0") catch upstream.height;
+        return .{ .width = width, .height = height, .color = upstream.color };
+    }
+
+    return error.UnsupportedScene;
+}
+
+const Placement = enum {
+    center,
+    top_right,
+    bottom_left,
+    bottom_right,
+    stretch,
+};
+
+fn parsePlacement(config: ?std.json.Value) Placement {
+    if (config == null or config.? != .object) return .center;
+    const value = getStringField(config.?.object, "placement") orelse return .center;
+    if (std.mem.eql(u8, value, "top-right")) return .top_right;
+    if (std.mem.eql(u8, value, "bottom-left")) return .bottom_left;
+    if (std.mem.eql(u8, value, "bottom-right")) return .bottom_right;
+    if (std.mem.eql(u8, value, "stretch")) return .stretch;
+    return .center;
+}
+
+fn parseSignedIntFromConfig(config: ?std.json.Value, field: []const u8) !isize {
+    if (config == null or config.? != .object) return 0;
+    const text = getStringField(config.?.object, field) orelse return 0;
+    return std.fmt.parseInt(isize, text, 10);
+}
+
+fn placeImageRect(parent: Rect, spec: ImageSpec, placement: Placement, offset_x: isize, offset_y: isize) Rect {
+    if (placement == .stretch) return parent;
+
+    const w = @min(parent.w, spec.width);
+    const h = @min(parent.h, spec.height);
+
+    const base_x: usize = switch (placement) {
+        .center => parent.x + (parent.w - w) / 2,
+        .top_right, .bottom_right => parent.x + (parent.w - w),
+        .bottom_left => parent.x,
+        .stretch => parent.x,
+    };
+    const base_y: usize = switch (placement) {
+        .center => parent.y + (parent.h - h) / 2,
+        .top_right => parent.y,
+        .bottom_left, .bottom_right => parent.y + (parent.h - h),
+        .stretch => parent.y,
+    };
+
+    const max_x = parent.x + parent.w - w;
+    const max_y = parent.y + parent.h - h;
+    const shifted_x_signed = @as(isize, @intCast(base_x)) + offset_x;
+    const shifted_y_signed = @as(isize, @intCast(base_y)) + offset_y;
+
+    const shifted_x = clampSignedToRect(shifted_x_signed, parent.x, max_x);
+    const shifted_y = clampSignedToRect(shifted_y_signed, parent.y, max_y);
+
+    return .{ .x = shifted_x, .y = shifted_y, .w = w, .h = h };
+}
+
+fn clampSignedToRect(value: isize, min: usize, max: usize) usize {
+    const min_i: isize = @intCast(min);
+    const max_i: isize = @intCast(max);
+    const clamped = @max(min_i, @min(max_i, value));
+    return @intCast(clamped);
 }
 
 fn getStringField(object: std.json.ObjectMap, key: []const u8) ?[]const u8 {
@@ -543,4 +659,69 @@ test "split ratios compute expected geometry" {
     try std.testing.expectEqual(@as(usize, 128), splitStart(300, &ratios, 1));
     try std.testing.expectEqual(@as(usize, 171), splitStart(300, &ratios, 2));
     try std.testing.expectEqual(@as(usize, 128), splitSize(300, &ratios, 0));
+}
+
+test "render image places data/newImage at center" {
+    const scene =
+        \\{
+        \\  "settings": {"backgroundColor": "#101010"},
+        \\  "nodes": [
+        \\    {"id": "root", "data": {"keyword": "render"}},
+        \\    {"id": "img", "data": {"keyword": "render/image", "config": {"placement": "center"}}},
+        \\    {"id": "new", "data": {"keyword": "data/newImage", "config": {"width": "100", "height": "100", "color": "#336699"}}}
+        \\  ],
+        \\  "edges": [
+        \\    {"source": "root", "sourceHandle": "next", "target": "img", "targetHandle": "prev"},
+        \\    {"source": "new", "sourceHandle": "fieldOutput", "target": "img", "targetHandle": "fieldInput/image"}
+        \\  ]
+        \\}
+    ;
+
+    var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, scene, .{});
+    defer parsed.deinit();
+    const graph = try parseSceneGraph(std.testing.allocator, parsed.value, "renderImageCenter");
+    defer graph.deinit(std.testing.allocator);
+    var image = try Image.init(std.testing.allocator, graph.background);
+    defer image.deinit(std.testing.allocator);
+    const root = graph.findRootRender().?;
+    const next = graph.edgeFrom(root.id, "next").?;
+    try renderNode(&image, graph, next.target, .{ .x = 0, .y = 0, .w = image_width, .h = image_height });
+
+    const center_x: usize = 160;
+    const center_y: usize = 240;
+    const idx = (center_y * image_width + center_x) * 4;
+    try std.testing.expectEqual(@as(u8, 0x33), image.pixels[idx]);
+    try std.testing.expectEqual(@as(u8, 0x66), image.pixels[idx + 1]);
+    try std.testing.expectEqual(@as(u8, 0x99), image.pixels[idx + 2]);
+
+    // top-left corner should remain background due to centering
+    try std.testing.expectEqual(@as(u8, 0x10), image.pixels[0]);
+    try std.testing.expectEqual(@as(u8, 0x10), image.pixels[1]);
+    try std.testing.expectEqual(@as(u8, 0x10), image.pixels[2]);
+}
+
+test "resolveImageSpec follows resize dimensions" {
+    const scene =
+        \\{
+        \\  "nodes": [
+        \\    {"id": "new", "data": {"keyword": "data/newImage", "config": {"width": "40", "height": "80", "color": "#abcdef"}}},
+        \\    {"id": "resize", "data": {"keyword": "data/resizeImage", "config": {"width": "20", "height": "30"}}}
+        \\  ],
+        \\  "edges": [
+        \\    {"source": "new", "sourceHandle": "fieldOutput", "target": "resize", "targetHandle": "fieldInput/image"}
+        \\  ]
+        \\}
+    ;
+
+    var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, scene, .{});
+    defer parsed.deinit();
+    const graph = try parseSceneGraph(std.testing.allocator, parsed.value, "resizeSpec");
+    defer graph.deinit(std.testing.allocator);
+
+    const spec = try resolveImageSpec(graph, "resize");
+    try std.testing.expectEqual(@as(usize, 20), spec.width);
+    try std.testing.expectEqual(@as(usize, 30), spec.height);
+    try std.testing.expectEqual(@as(u8, 0xab), spec.color.r);
+    try std.testing.expectEqual(@as(u8, 0xcd), spec.color.g);
+    try std.testing.expectEqual(@as(u8, 0xef), spec.color.b);
 }
