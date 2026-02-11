@@ -4,7 +4,7 @@ import json
 from datetime import datetime, timedelta
 from http import HTTPStatus
 from pathlib import Path
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -23,6 +23,7 @@ from app.schemas.repositories import (
 )
 from app.config import config
 from app.utils.jwt_tokens import create_scoped_token_response, validate_scoped_token
+from app.api.auth import get_current_user_from_request
 from . import api_with_auth, api_no_auth
 
 FRAMEOS_SAMPLES_URL = "https://repo.frameos.net/samples/repository.json"
@@ -153,12 +154,21 @@ async def get_system_repository_image_token(repository_slug: str, template_slug:
 
 
 @api_no_auth.get("/repositories/system/{repository_slug}/templates/{template_slug}/image")
-async def get_system_repository_image(repository_slug: str, template_slug: str, token: str):
+async def get_system_repository_image(
+    repository_slug: str,
+    template_slug: str,
+    request: Request,
+    token: str | None = None,
+    db: Session = Depends(get_db),
+):
     if config.HASSIO_RUN_MODE != 'ingress':
-        validate_scoped_token(
-            token,
-            expected_subject=_system_template_subject(repository_slug, template_slug),
-        )
+        if await get_current_user_from_request(request, db):
+            pass
+        else:
+            validate_scoped_token(
+                token,
+                expected_subject=_system_template_subject(repository_slug, template_slug),
+            )
 
     repository_path = SYSTEM_REPOSITORIES_PATH / repository_slug
     if not repository_path.is_dir():
