@@ -71,7 +71,7 @@ from app.schemas.frames import (
     FrameSSHKeysUpdateRequest,
     FrameSetNextSceneRequest,
 )
-from app.api.auth import get_current_user
+from app.api.auth import get_current_user_from_request
 from app.config import config
 from app.utils.network import is_safe_host
 from app.utils.remote_exec import (
@@ -1070,11 +1070,8 @@ async def api_frame_get_asset(
     redis: Redis = Depends(get_redis),
 ):
     if config.HASSIO_RUN_MODE != "ingress":
-        if authorization and authorization.startswith("Bearer "):
-            try:
-                await get_current_user(authorization.split(" ")[1], db)
-            except HTTPException:
-                raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Unauthorized")
+        if await get_current_user_from_request(request, db, authorization):
+            pass
         elif token:
             validate_scoped_token(token, expected_subject=f"frame={id}")
         else:
@@ -1213,13 +1210,16 @@ async def get_image_token(id: int):
 @api_no_auth.get("/frames/{id:int}/image")
 async def api_frame_get_image(
     id: int,
-    token: str,
     request: Request,
+    token: str | None = None,
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
     if config.HASSIO_RUN_MODE != "ingress":
-        validate_scoped_token(token, expected_subject=f"frame={id}")
+        if await get_current_user_from_request(request, db):
+            pass
+        else:
+            validate_scoped_token(token, expected_subject=f"frame={id}")
 
     frame = db.get(Frame, id)
     if frame is None:

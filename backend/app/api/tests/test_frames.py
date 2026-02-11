@@ -5,6 +5,7 @@ import httpx
 
 from app.models import new_frame
 from app.models.frame import Frame
+from app.models.user import User
 
 @pytest.mark.asyncio
 async def test_api_frames(async_client, db, redis):
@@ -242,3 +243,21 @@ async def test_api_frame_proxy_post_forwards_body(async_client, db, redis):
     assert request_captured['method'] == 'POST'
     assert request_captured['url'] == f'http://localhost:{frame.frame_port}/upload'
     assert request_captured['content'] == b'binary-body'
+
+@pytest.mark.asyncio
+async def test_api_frame_get_image_with_cookie_no_token(no_auth_client, db, redis):
+    frame = await new_frame(db, redis, 'CookieImageFrame', 'localhost', 'localhost')
+    cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
+    await redis.set(cache_key, b'cookie_cached_image_data')
+
+    user = User(email='cookieframe@example.com')
+    user.set_password('testpassword')
+    db.add(user)
+    db.commit()
+
+    login_resp = await no_auth_client.post('/api/login', data={'username': 'cookieframe@example.com', 'password': 'testpassword'})
+    assert login_resp.status_code == 200
+
+    response = await no_auth_client.get(f'/api/frames/{frame.id}/image?t=-1')
+    assert response.status_code == 200
+    assert response.content == b'cookie_cached_image_data'
