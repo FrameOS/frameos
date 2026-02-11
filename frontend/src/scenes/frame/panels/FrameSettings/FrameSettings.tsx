@@ -38,6 +38,7 @@ import { settingsLogic } from '../../../settings/settingsLogic'
 import { normalizeSshKeys } from '../../../../utils/sshKeys'
 import { Label } from '../../../../components/Label'
 import { logsLogic } from '../Logs/logsLogic'
+import { Tag } from '../../../../components/Tag'
 
 export interface FrameSettingsProps {
   className?: string
@@ -74,6 +75,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
   const url = frameUrl(frame)
   const controlUrl = frameControlUrl(frame)
   const imageUrl = frameImageUrl(frame)
+  const tlsEnabled = !!(frameForm.enable_tls ?? frame.enable_tls)
 
   const palette = withCustomPalette[frame.device || '']
   const sshKeyOptions = normalizeSshKeys(savedSettings?.ssh_keys).keys
@@ -240,11 +242,10 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
             <div className="pl-2 @md:pl-8 space-y-2">
               {frame.frame_host ? (
                 <Field name="_noop" label="Load">
-                  <div className="w-full">
+                  <div className="w-full flex flex-wrap gap-2 items-center">
                     <A href={url} target="_blank" rel="noreferrer noopener" className="text-blue-400 hover:underline">
                       Frame URL
                     </A>
-                    {', '}
                     <A
                       href={controlUrl}
                       target="_blank"
@@ -253,7 +254,6 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                     >
                       Control URL
                     </A>
-                    {', '}
                     <A
                       href={imageUrl}
                       target="_blank"
@@ -262,6 +262,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                     >
                       Image URL
                     </A>
+                    <Tag color={tlsEnabled ? 'teal' : 'gray'}>{tlsEnabled ? 'HTTPS enabled' : 'HTTPS disabled'}</Tag>
                   </div>
                 </Field>
               ) : null}
