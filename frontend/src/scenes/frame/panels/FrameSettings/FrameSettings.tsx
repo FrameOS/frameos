@@ -5,7 +5,14 @@ import { framesModel } from '../../../../models/framesModel'
 import { Form, Group } from 'kea-forms'
 import { TextInput } from '../../../../components/TextInput'
 import { Select } from '../../../../components/Select'
-import { frameControlUrl, frameImageUrl, frameUrl } from '../../../../decorators/frame'
+import {
+  frameControlUrl,
+  frameImageUrl,
+  frameProxyControlUrl,
+  frameProxyImageUrl,
+  frameProxyUrl,
+  frameUrl,
+} from '../../../../decorators/frame'
 import { frameLogic } from '../../frameLogic'
 import { downloadJson } from '../../../../utils/downloadJson'
 import { Field } from '../../../../components/Field'
@@ -75,6 +82,9 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
   const url = frameUrl(frame)
   const controlUrl = frameControlUrl(frame)
   const imageUrl = frameImageUrl(frame)
+  const proxyUrl = frameProxyUrl(frame)
+  const proxyControlUrl = frameProxyControlUrl(frame)
+  const proxyImageUrl = frameProxyImageUrl(frame)
   const tlsEnabled = !!(frameForm.enable_tls ?? frame.enable_tls)
 
   const palette = withCustomPalette[frame.device || '']
@@ -241,30 +251,60 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
             <H6 className="mt-2">Frame info</H6>
             <div className="pl-2 @md:pl-8 space-y-2">
               {frame.frame_host ? (
-                <Field name="_noop" label="Load">
-                  <div className="w-full flex flex-wrap gap-2 items-center">
-                    <A href={url} target="_blank" rel="noreferrer noopener" className="text-blue-400 hover:underline">
-                      Frame URL
-                    </A>
-                    <A
-                      href={controlUrl}
-                      target="_blank"
-                      rel="noreferrer noopener"
-                      className="text-blue-400 hover:underline"
-                    >
-                      Control URL
-                    </A>
-                    <A
-                      href={imageUrl}
-                      target="_blank"
-                      rel="noreferrer noopener"
-                      className="text-blue-400 hover:underline"
-                    >
-                      Image URL
-                    </A>
-                    <Tag color={tlsEnabled ? 'teal' : 'gray'}>{tlsEnabled ? 'HTTPS enabled' : 'HTTPS disabled'}</Tag>
-                  </div>
-                </Field>
+                <>
+                  <Field name="_noop" label="Load directly">
+                    <div className="w-full flex flex-wrap gap-2 items-center">
+                      <A href={url} target="_blank" rel="noreferrer noopener" className="text-blue-400 hover:underline">
+                        Frame URL
+                      </A>
+                      <A
+                        href={controlUrl}
+                        target="_blank"
+                        rel="noreferrer noopener"
+                        className="text-blue-400 hover:underline"
+                      >
+                        Control URL
+                      </A>
+                      <A
+                        href={imageUrl}
+                        target="_blank"
+                        rel="noreferrer noopener"
+                        className="text-blue-400 hover:underline"
+                      >
+                        Image URL
+                      </A>
+                      <Tag color={tlsEnabled ? 'teal' : 'gray'}>{tlsEnabled ? 'HTTPS enabled' : 'HTTPS disabled'}</Tag>
+                    </div>
+                  </Field>
+                  <Field name="_noop" label="Load via backend proxy">
+                    <div className="w-full flex flex-wrap gap-2 items-center">
+                      <A
+                        href={proxyUrl}
+                        target="_blank"
+                        rel="noreferrer noopener"
+                        className="text-blue-400 hover:underline"
+                      >
+                        Frame URL
+                      </A>
+                      <A
+                        href={proxyControlUrl}
+                        target="_blank"
+                        rel="noreferrer noopener"
+                        className="text-blue-400 hover:underline"
+                      >
+                        Control URL
+                      </A>
+                      <A
+                        href={proxyImageUrl}
+                        target="_blank"
+                        rel="noreferrer noopener"
+                        className="text-blue-400 hover:underline"
+                      >
+                        Image URL
+                      </A>
+                    </div>
+                  </Field>
+                </>
               ) : null}
               {logs.length > 0 ? (
                 <Field name="_noop" label="Last seen IPs">
