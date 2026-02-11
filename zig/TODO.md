@@ -244,10 +244,17 @@
   - [x] Added renderer-side scene capability gating so unsupported scene graphs fail fast with `error.UnsupportedScene`, allowing `e2e/makezigsnapshots.py` fallback to keep the full suite green while Zig coverage grows incrementally.
   - [x] Added unit tests in `scene_renderer.zig` for hex color parsing, supported color-plan extraction, and unsupported mixed-keyword graph rejection to lock renderer behavior during future expansion.
 
+
+- **Iteration 31:**
+  - [x] Reworked `scene_renderer.zig` from keyword-list heuristics to a graph-aware parser/executor that loads `nodes` + `edges`, resolves `render -> next` flow, and renders directly into an RGBA framebuffer.
+  - [x] Implemented first layout pass for `render/split` with support for `rows`, `columns`, `margin`, `gap`, and ratio-driven cell sizing, plus recursive rendering of child edges (`field/render_functions[r][c]`).
+  - [x] Added scene-graph rendering support for `render/image` passthrough, `render/color`, and `render/gradient` over arbitrary split sub-rectangles so multi-panel color/gradient scenes can be rendered by Zig.
+  - [x] Updated renderer tests to cover graph-path rendering and split geometry math; test execution is currently blocked in this environment because `zig` CLI is unavailable.
+
 ## Next Actions (priority order)
-1. [ ] Expand `scene_renderer` graph execution beyond full-frame fills/gradients: implement `render/split` region layout and threaded child rendering so multi-panel e2e scenes stop falling back.
+1. [ ] Add concrete image-data execution (`data/newImage`, `data/localImage`) and true `render/image` composition (resize/fit/alpha) instead of current passthrough wiring.
 2. [ ] Add first text raster pass (`render/text`) with deterministic font fallback to unlock parity for `renderText*` and `logicSetAsState` scenarios.
-3. [ ] Add image node support (`data/newImage`, `data/localImage`, `render/image`) including placement modes and alpha blending to close most remaining e2e gaps.
+3. [ ] Add core logic-node execution (`logic/setAsState`, `logic/ifElse`) and state threading so mixed render/logic e2e scenes can execute without fallback.
 
 ## Backlog / Later
 - [ ] Port individual apps incrementally (start with simplest).
