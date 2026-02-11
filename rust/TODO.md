@@ -190,10 +190,16 @@
 - Expanded `runtime:parity_failed` diagnostics to include elapsed check duration plus source metadata (`renderer_contract_source`, `driver_contract_source`, and source labels/fingerprints) without logging raw discovery payload contents.
 - Added events-to-agenda timezone edge-case tests covering DST boundary formatting and precedence of event-level timezone data over invalid frame fallback timezone values.
 
+### Iteration 27 (clock app port + deterministic timezone formatting coverage)
+- Ported `data/clock` behavior into `rust/frameos/src/apps.rs`, including Nim-style `format`/`formatCustom` handling and app keyword wiring through `execute_ported_app`.
+- Added deterministic test-only override support (`testOverrideNow`) so app output can be validated without wall-clock flakiness while keeping runtime behavior based on current time by default.
+- Implemented timezone-aware rendering for clock output using `AppExecutionContext.time_zone` with explicit validation failures for unknown timezone identifiers.
+- Added focused app regression coverage in `rust/frameos/tests/ported_apps.rs` for standard formatting, custom formatting, timezone conversion, and invalid override input diagnostics.
+
 
 ## Next up (small, actionable)
 1. Add CI-oriented daemon smoke script that boots `frameos run`, probes `/healthz`, then sends SIGINT and validates `runtime:stop` in the event log.
-2. Port the next deterministic data app from Nim (for example `data/icalJson` export shaping or `data/clock`) and wire scene-runner coverage around it.
+2. Port the next deterministic data app from Nim (`data/icalJson`) and add fixture-driven parity tests for recurring/all-day event normalization.
 3. Add discovery payload schema validation helpers so malformed discovered contracts fail with field-specific diagnostics before parity checks run.
 4. Emit discovery-source metadata in `runtime:parity_ok` beyond source-kind (for example hashed source labels) to improve rollout observability.
 5. Add parity integration tests that exercise inline JSON discovery inputs directly for both renderer and driver sides.

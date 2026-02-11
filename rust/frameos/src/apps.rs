@@ -1,6 +1,6 @@
 use std::fmt::Write;
 
-use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
+use chrono::{DateTime, Local, NaiveDate, NaiveDateTime, Utc};
 use chrono_tz::Tz;
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -84,6 +84,7 @@ pub fn execute_ported_app(
     match keyword {
         "data/parseJson" => execute_data_parse_json(fields),
         "data/prettyJson" => execute_data_pretty_json(fields),
+        "data/clock" => execute_data_clock(fields, context),
         "data/xmlToJson" => execute_data_xml_to_json(fields),
         "data/eventsToAgenda" => execute_data_events_to_agenda(fields, context),
         "logic/setAsState" => execute_logic_set_as_state(fields, context),
@@ -156,6 +157,66 @@ fn execute_data_pretty_json(fields: &Map<String, Value>) -> Result<AppOutput, Ap
     };
 
     Ok(AppOutput::Value(Value::String(output)))
+}
+
+fn execute_data_clock(
+    fields: &Map<String, Value>,
+    context: &AppExecutionContext,
+) -> Result<AppOutput, AppExecutionError> {
+    let format = require_string(fields, "format")?;
+    let format = if format == "custom" {
+        require_string(fields, "formatCustom")?
+    } else {
+        format
+    };
+
+    if format.trim().is_empty() {
+        return Err(AppExecutionError::InvalidField {
+            field: "format",
+            reason: "must not be empty".to_string(),
+        });
+    }
+
+    let now_utc = match fields.get("testOverrideNow").and_then(Value::as_str) {
+        Some(raw) => DateTime::parse_from_rfc3339(raw)
+            .map(|value| value.with_timezone(&Utc))
+            .map_err(|_| AppExecutionError::InvalidField {
+                field: "testOverrideNow",
+                reason: format!("expected RFC3339 datetime, got `{raw}`"),
+            })?,
+        None => Utc::now(),
+    };
+
+    let rendered = if let Some(timezone_name) = context.time_zone.as_deref() {
+        let timezone = timezone_name
+            .parse::<Tz>()
+            .map_err(|_| AppExecutionError::InvalidField {
+                field: "timeZone",
+                reason: format!("unknown timezone `{timezone_name}`"),
+            })?;
+        now_utc
+            .with_timezone(&timezone)
+            .format(&nim_time_format_to_chrono(format))
+            .to_string()
+    } else {
+        now_utc
+            .with_timezone(&Local)
+            .format(&nim_time_format_to_chrono(format))
+            .to_string()
+    };
+
+    Ok(AppOutput::Value(Value::String(rendered)))
+}
+
+fn nim_time_format_to_chrono(nim_format: &str) -> String {
+    nim_format
+        .replace("yyyy", "%Y")
+        .replace("MM", "%m")
+        .replace("dd", "%d")
+        .replace("HH", "%H")
+        .replace("mm", "%M")
+        .replace("ss", "%S")
+        .replace("fff", "%3f")
 }
 
 fn execute_data_xml_to_json(fields: &Map<String, Value>) -> Result<AppOutput, AppExecutionError> {

@@ -316,3 +316,89 @@ fn events_to_agenda_prefers_event_timezone_over_context_fallback() {
     };
     assert!(rendered.contains("09:00 - 10:00"));
 }
+
+#[test]
+fn clock_formats_time_with_standard_pattern() {
+    let mut fields = Map::new();
+    fields.insert("format".to_string(), json!("yyyy-MM-dd HH:mm:ss"));
+    fields.insert(
+        "testOverrideNow".to_string(),
+        json!("2024-06-07T08:09:10Z"),
+    );
+
+    let mut context = AppExecutionContext::default();
+    context.time_zone = Some("UTC".to_string());
+
+    let output = execute_ported_app("data/clock", &fields, &mut context)
+        .expect("clock app should execute");
+
+    let AppOutput::Value(serde_json::Value::String(rendered)) = output else {
+        panic!("expected string output");
+    };
+    assert_eq!(rendered, "2024-06-07 08:09:10");
+}
+
+#[test]
+fn clock_supports_custom_format() {
+    let mut fields = Map::new();
+    fields.insert("format".to_string(), json!("custom"));
+    fields.insert("formatCustom".to_string(), json!("HH:mm"));
+    fields.insert(
+        "testOverrideNow".to_string(),
+        json!("2024-06-07T08:09:10Z"),
+    );
+
+    let mut context = AppExecutionContext::default();
+    context.time_zone = Some("UTC".to_string());
+
+    let output = execute_ported_app("data/clock", &fields, &mut context)
+        .expect("clock app should execute");
+
+    let AppOutput::Value(serde_json::Value::String(rendered)) = output else {
+        panic!("expected string output");
+    };
+    assert_eq!(rendered, "08:09");
+}
+
+#[test]
+fn clock_applies_context_timezone() {
+    let mut fields = Map::new();
+    fields.insert("format".to_string(), json!("HH:mm"));
+    fields.insert(
+        "testOverrideNow".to_string(),
+        json!("2024-01-15T12:00:00Z"),
+    );
+
+    let mut context = AppExecutionContext::default();
+    context.time_zone = Some("America/New_York".to_string());
+
+    let output = execute_ported_app("data/clock", &fields, &mut context)
+        .expect("clock app should execute");
+
+    let AppOutput::Value(serde_json::Value::String(rendered)) = output else {
+        panic!("expected string output");
+    };
+    assert_eq!(rendered, "07:00");
+}
+
+#[test]
+fn clock_rejects_invalid_override_datetime() {
+    let mut fields = Map::new();
+    fields.insert("format".to_string(), json!("HH:mm"));
+    fields.insert("testOverrideNow".to_string(), json!("not-a-datetime"));
+
+    let error = execute_ported_app(
+        "data/clock",
+        &fields,
+        &mut AppExecutionContext::default(),
+    )
+    .expect_err("invalid override datetime should fail");
+
+    assert!(matches!(
+        error,
+        AppExecutionError::InvalidField {
+            field: "testOverrideNow",
+            ..
+        }
+    ));
+}
