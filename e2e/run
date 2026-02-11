@@ -2,10 +2,19 @@
 set -euo pipefail
 
 # Use "./run blue" to render all scenes with "blue" in the name
+# Use "./run --zig blue" to run Zig parity snapshots without Nim build hooks.
+
+mode="nim"
+if [[ "${1:-}" == "--zig" ]]; then
+  mode="zig"
+  shift
+fi
 
 # Everything you pass to ./run becomes the filter (e.g. "blue", "menu", etc.)
 export SCENE_FILTER="${*:-}"
 
-# Hand off to the Makefile as-is
-make nim_scenes snapshots
-
+if [[ "$mode" == "zig" ]]; then
+  make zig_snapshots
+else
+  make nim_scenes snapshots
+fi

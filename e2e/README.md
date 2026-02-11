@@ -1,6 +1,8 @@
 
 ```bash
-cd e2e             # come to this folder
-./run              # run all tests 
-./run dataGradient # just one test
+cd e2e                 # come to this folder
+./run                  # run all Nim-based snapshot tests
+./run dataGradient     # run one Nim-based scene test
+./run --zig            # run Zig parity snapshot harness (no Nim build/download)
+./run --zig blue       # run one Zig parity snapshot by filter
 ```

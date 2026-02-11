@@ -1,4 +1,4 @@
-.PHONY: nim_scenes snapshots
+.PHONY: nim_scenes snapshots zig_snapshots
 
 all: nim_scenes snapshots
 
@@ -25,3 +25,7 @@ snapshots:
 	ls -l ./tmp/frameos
 	DEBUG=1 python3 ./makeapploaders.py
 	DEBUG=1 SCENE_FILTER="$(SCENE_FILTER)" python3 ./makesnapshots.py
+
+zig_snapshots:
+	mkdir -p ./tmp
+	DEBUG=1 SCENE_FILTER="$(SCENE_FILTER)" python3 ./makezigsnapshots.py
