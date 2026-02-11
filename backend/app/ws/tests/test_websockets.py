@@ -88,6 +88,31 @@ def test_ws_valid_token_echo(client: TestClient) -> None:
     assert data == {"event": "pong", "payload": "ping"}
 
 
+def test_ws_session_cookie_echo(client: TestClient) -> None:
+    create_user(email="cookie@example.com", password="testpassword")
+    login_resp = client.post("/api/login", data={"username": "cookie@example.com", "password": "testpassword"})
+    assert login_resp.status_code == 200
+
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text("ping")
+        data = ws.receive_json()
+    assert data == {"event": "pong", "payload": "ping"}
+
+
+def test_terminal_ws_session_cookie_frame_not_found(client: TestClient) -> None:
+    create_user(email="cookie-terminal@example.com", password="testpassword")
+    login_resp = client.post(
+        "/api/login",
+        data={"username": "cookie-terminal@example.com", "password": "testpassword"},
+    )
+    assert login_resp.status_code == 200
+
+    with client.websocket_connect("/ws/terminal/999") as ws:
+        with pytest.raises(WebSocketDisconnect) as exc:
+            ws.receive_text()
+    assert exc.value.code == 1008
+    assert exc.value.reason == "Frame not found"
+
 def test_terminal_ws_missing_token(client: TestClient) -> None:
     with pytest.raises(WebSocketDisconnect) as exc:
         with client.websocket_connect("/ws/terminal/1"):

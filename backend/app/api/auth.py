@@ -1,7 +1,7 @@
 import datetime
 from typing import Optional
 
-from fastapi import Depends, HTTPException, status, Request, Response
+from fastapi import Depends, HTTPException, status, Request, Response, WebSocket
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import jwt, JWTError
 from sqlalchemy.orm import Session
@@ -80,6 +80,32 @@ async def get_current_user_from_request(
     if email is None:
         return None
     return db.query(User).filter(User.email == email).first()
+
+
+def get_current_user_from_websocket(
+    websocket: WebSocket,
+    db: Session,
+) -> tuple[User | None, str | None]:
+    token = websocket.query_params.get("token")
+    if token:
+        try:
+            email = _decode_jwt_email(token)
+        except JWTError:
+            return None, "Invalid token"
+        user = db.query(User).filter(User.email == email).first()
+        if user is None:
+            return None, "User not found"
+        return user, None
+
+    cookie_value = websocket.cookies.get(SESSION_COOKIE_NAME)
+    email = decode_session_cookie_value(cookie_value)
+    if email is None:
+        return None, "Missing token"
+
+    user = db.query(User).filter(User.email == email).first()
+    if user is None:
+        return None, "User not found"
+    return user, None
 
 
 async def get_current_user(
