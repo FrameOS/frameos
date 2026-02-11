@@ -235,6 +235,9 @@ fn parity_command_fails_for_invalid_contract_pair() {
 
     let stdout = String::from_utf8(output.stdout).expect("stdout should be utf8");
     assert!(stdout.contains("runtime:parity_failed"));
+    assert!(stdout.contains("\"duration_ms\":"));
+    assert!(stdout.contains("\"renderer_source_label\":"));
+    assert!(stdout.contains("\"driver_source_label\":"));
 }
 
 #[test]
@@ -258,17 +261,17 @@ fn parity_command_fails_for_renderer_scheduling_failure_mode() {
 }
 
 #[test]
-fn parity_command_supports_probe_commands_as_sources() {
+fn parity_command_supports_discovery_files_as_sources() {
     let binary = env!("CARGO_BIN_EXE_frameos");
     let renderer_fixture = fixtures_path("parity/renderer-valid.json");
     let driver_fixture = fixtures_path("parity/driver-valid.json");
 
     let output = Command::new(binary)
         .arg("parity")
-        .arg("--renderer-probe-cmd")
-        .arg(format!("cat {}", renderer_fixture.to_string_lossy()))
-        .arg("--driver-probe-cmd")
-        .arg(format!("cat {}", driver_fixture.to_string_lossy()))
+        .arg("--renderer-discovery-file")
+        .arg(renderer_fixture.to_string_lossy().to_string())
+        .arg("--driver-discovery-file")
+        .arg(driver_fixture.to_string_lossy().to_string())
         .output()
         .expect("parity command should execute");
 
@@ -285,23 +288,21 @@ fn parity_command_supports_probe_commands_as_sources() {
 }
 
 #[test]
-fn parity_command_rejects_mixed_source_flags_for_renderer_side() {
+fn parity_command_rejects_mixed_contract_and_discovery_flags_for_renderer_side() {
     let binary = env!("CARGO_BIN_EXE_frameos");
 
     let output = Command::new(binary)
         .arg("parity")
         .arg("--renderer-contract")
         .arg(fixtures_path("parity/renderer-valid.json"))
-        .arg("--renderer-probe-cmd")
-        .arg("echo '{}' ")
+        .arg("--renderer-discovery-file")
+        .arg("{}")
         .arg("--driver-contract")
         .arg(fixtures_path("parity/driver-valid.json"))
         .output()
         .expect("parity command should execute");
 
     assert!(!output.status.success(), "parity command should fail");
-    assert!(
-        String::from_utf8_lossy(&output.stderr)
-            .contains("--renderer-contract <path> and --renderer-probe-cmd <shell command> are mutually exclusive")
-    );
+    assert!(String::from_utf8_lossy(&output.stderr)
+        .contains("--renderer-contract <path> is mutually exclusive with discovery flags"));
 }

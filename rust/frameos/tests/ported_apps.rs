@@ -249,6 +249,70 @@ fn events_to_agenda_includes_today_for_ongoing_event() {
     };
 
     assert!(!rendered.contains("No events today"));
-    assert_eq!(rendered.matches("^(48,#112233)Thursday, December 26").count(), 1);
+    assert_eq!(
+        rendered
+            .matches("^(48,#112233)Thursday, December 26")
+            .count(),
+        1
+    );
     assert!(rendered.contains("^(24,#778899)Until Friday, December 27  ^(24,#445566)Retreat"));
+}
+
+#[test]
+fn events_to_agenda_handles_dst_boundary_times() {
+    let mut fields = Map::new();
+    fields.insert(
+        "events".to_string(),
+        json!([
+            {
+                "summary": "DST Change",
+                "startTime": "2024-03-10T01:30:00-08:00",
+                "endTime": "2024-03-10T03:30:00-07:00",
+                "timezone": "America/Los_Angeles"
+            }
+        ]),
+    );
+    fields.insert("startWithToday".to_string(), json!(false));
+
+    let output = execute_ported_app(
+        "data/eventsToAgenda",
+        &fields,
+        &mut AppExecutionContext::default(),
+    )
+    .expect("eventsToAgenda should execute");
+
+    let AppOutput::Value(serde_json::Value::String(rendered)) = output else {
+        panic!("expected string output");
+    };
+
+    assert!(rendered.contains("Sunday, March 10"));
+    assert!(rendered.contains("01:30 - 03:30"));
+}
+
+#[test]
+fn events_to_agenda_prefers_event_timezone_over_context_fallback() {
+    let mut fields = Map::new();
+    fields.insert(
+        "events".to_string(),
+        json!([
+            {
+                "summary": "Meeting",
+                "startTime": "2024-05-01T09:00:00",
+                "endTime": "2024-05-01T10:00:00",
+                "timezone": "UTC"
+            }
+        ]),
+    );
+    fields.insert("startWithToday".to_string(), json!(false));
+
+    let mut context = AppExecutionContext::default();
+    context.time_zone = Some("Definitely/Invalid".to_string());
+
+    let output = execute_ported_app("data/eventsToAgenda", &fields, &mut context)
+        .expect("event timezone should take precedence over invalid fallback");
+
+    let AppOutput::Value(serde_json::Value::String(rendered)) = output else {
+        panic!("expected string output");
+    };
+    assert!(rendered.contains("09:00 - 10:00"));
 }

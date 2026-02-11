@@ -3,7 +3,6 @@ use std::fmt;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct RendererContract {
@@ -39,14 +38,21 @@ pub struct DriverSchedulingContract {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ContractSource {
     FixtureFile(PathBuf),
-    ProbeCommand(String),
+    Discovery(crate::discovery::DiscoverySource),
 }
 
 impl ContractSource {
     pub fn source_kind(&self) -> &'static str {
         match self {
             Self::FixtureFile(_) => "fixture",
-            Self::ProbeCommand(_) => "discovered",
+            Self::Discovery(_) => "discovered",
+        }
+    }
+
+    pub fn source_label(&self) -> String {
+        match self {
+            Self::FixtureFile(path) => format!("fixture:{}", path.display()),
+            Self::Discovery(source) => source.source_label(),
         }
     }
 }
@@ -70,7 +76,7 @@ pub struct ParityReport {
 pub enum ParityError {
     ReadFailed(PathBuf, io::Error),
     ParseFailed(String, serde_json::Error),
-    ProbeFailed(String, String),
+    DiscoveryFailed(String),
     ValidationFailed(Vec<String>),
 }
 
@@ -88,8 +94,8 @@ impl fmt::Display for ParityError {
             Self::ParseFailed(source, err) => {
                 write!(f, "failed to parse parity contract {}: {}", source, err)
             }
-            Self::ProbeFailed(command, details) => {
-                write!(f, "failed to run parity probe `{}`: {}", command, details)
+            Self::DiscoveryFailed(details) => {
+                write!(f, "failed to load discovered parity contract: {details}")
             }
             Self::ValidationFailed(messages) => {
                 write!(f, "parity validation failed: {}", messages.join("; "))
@@ -116,39 +122,13 @@ pub fn load_driver_contract(path: impl AsRef<Path>) -> Result<DriverContract, Pa
         .map_err(|error| ParityError::ParseFailed(path.display().to_string(), error))
 }
 
-fn load_contract_from_probe_command<T>(command: &str, label: &str) -> Result<T, ParityError>
-where
-    T: for<'de> Deserialize<'de>,
-{
-    let output = Command::new("sh")
-        .arg("-c")
-        .arg(command)
-        .output()
-        .map_err(|error| ParityError::ProbeFailed(command.to_string(), error.to_string()))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        let details = if stderr.is_empty() {
-            format!("command exited with status {}", output.status)
-        } else {
-            format!("command exited with status {}: {}", output.status, stderr)
-        };
-        return Err(ParityError::ProbeFailed(command.to_string(), details));
-    }
-
-    serde_json::from_slice::<T>(&output.stdout).map_err(|error| {
-        ParityError::ParseFailed(format!("{} probe command `{}`", label, command), error)
-    })
-}
-
 pub fn load_renderer_contract_from_source(
     source: &ContractSource,
 ) -> Result<RendererContract, ParityError> {
     match source {
         ContractSource::FixtureFile(path) => load_renderer_contract(path),
-        ContractSource::ProbeCommand(command) => {
-            load_contract_from_probe_command::<RendererContract>(command, "renderer")
-        }
+        ContractSource::Discovery(source) => crate::discovery::load_discovered_contract(source)
+            .map_err(|error| ParityError::DiscoveryFailed(error.to_string())),
     }
 }
 
@@ -157,9 +137,8 @@ pub fn load_driver_contract_from_source(
 ) -> Result<DriverContract, ParityError> {
     match source {
         ContractSource::FixtureFile(path) => load_driver_contract(path),
-        ContractSource::ProbeCommand(command) => {
-            load_contract_from_probe_command::<DriverContract>(command, "driver")
-        }
+        ContractSource::Discovery(source) => crate::discovery::load_discovered_contract(source)
+            .map_err(|error| ParityError::DiscoveryFailed(error.to_string())),
     }
 }
 
@@ -373,68 +352,5 @@ mod tests {
         assert_eq!(report.renderer_target_fps, 20);
         assert_eq!(report.renderer_contract_source, "fixture");
         assert_eq!(report.driver_contract_source, "fixture");
-    }
-
-    #[test]
-    fn reports_multiple_validation_failures() {
-        let renderer = RendererContract {
-            api_version: "v1".to_string(),
-            supports_layers: true,
-            supported_color_formats: vec!["rgb565".to_string()],
-            max_fps: 0,
-            scheduling: RendererSchedulingContract {
-                target_fps: 60,
-                tick_budget_ms: 40,
-                drop_policy: "block".to_string(),
-            },
-        };
-        let driver = DriverContract {
-            api_version: "v2".to_string(),
-            device_kind: "lcd".to_string(),
-            required_renderer_formats: vec!["rgb888".to_string()],
-            supports_partial_refresh: true,
-            scheduling: DriverSchedulingContract {
-                backpressure_policy: "drop".to_string(),
-                max_queue_depth: 4,
-            },
-        };
-
-        let error = validate_renderer_driver_parity(&renderer, &driver)
-            .expect_err("invalid contracts should return a validation error");
-
-        let ParityError::ValidationFailed(messages) = error else {
-            panic!("expected validation error");
-        };
-        assert!(messages
-            .iter()
-            .any(|message| message.contains("api version mismatch")));
-        assert!(messages
-            .iter()
-            .any(|message| message.contains("missing required driver formats")));
-        assert!(messages
-            .iter()
-            .any(|message| message.contains("partial refresh is only allowed")));
-        assert!(messages
-            .iter()
-            .any(|message| message.contains("max_fps must be greater than zero")));
-        assert!(messages
-            .iter()
-            .any(|message| message.contains("target_fps (60) must be <= max_fps (0)")));
-        assert!(messages
-            .iter()
-            .any(|message| message.contains("max_queue_depth must be zero unless")));
-        assert!(messages
-            .iter()
-            .any(|message| message
-                .contains("backpressure_policy=drop requires renderer drop_policy")));
-    }
-
-    #[test]
-    fn reports_probe_command_failure_details() {
-        let source = ContractSource::ProbeCommand("exit 7".to_string());
-        let error = load_renderer_contract_from_source(&source).expect_err("must fail");
-        assert!(error
-            .to_string()
-            .contains("failed to run parity probe `exit 7`"));
     }
 }

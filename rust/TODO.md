@@ -184,12 +184,19 @@
 - Updated Cargo dependencies with `chrono` + `chrono-tz` to support timezone-aware date handling for newly ported agenda formatting logic.
 
 
+### Iteration 26 (discovery adapters + parity diagnostics + timezone edge tests)
+- Replaced shell-based parity probe execution with first-class discovery adapters in a dedicated `src/discovery.rs` module, supporting discovery payload loading from filesystem files or inline JSON while avoiding command execution.
+- Updated parity CLI/source wiring to accept `--*-discovery-file` and `--*-discovery-json` flags, with strict mutual-exclusion validation against `--*-contract` file sources.
+- Expanded `runtime:parity_failed` diagnostics to include elapsed check duration plus source metadata (`renderer_contract_source`, `driver_contract_source`, and source labels/fingerprints) without logging raw discovery payload contents.
+- Added events-to-agenda timezone edge-case tests covering DST boundary formatting and precedence of event-level timezone data over invalid frame fallback timezone values.
+
+
 ## Next up (small, actionable)
-1. Add explicit timezone edge-case tests for `data/eventsToAgenda` (DST boundaries and event-level timezone override precedence over frame fallback timezone).
-2. Add CI-oriented daemon smoke script that boots `frameos run`, probes `/healthz`, then sends SIGINT and validates `runtime:stop` in the event log.
-3. Replace shell-based probe commands with first-class filesystem/device capability discovery adapters under a dedicated `discovery` module.
-4. Emit additional probe diagnostics (duration + probe command fingerprint) in `runtime:parity_failed` while avoiding sensitive command leakage.
-5. Port the next deterministic data app from Nim (for example `data/replace` or `data/csvToJson`) and wire scene-runner coverage around it.
+1. Add CI-oriented daemon smoke script that boots `frameos run`, probes `/healthz`, then sends SIGINT and validates `runtime:stop` in the event log.
+2. Port the next deterministic data app from Nim (for example `data/icalJson` export shaping or `data/clock`) and wire scene-runner coverage around it.
+3. Add discovery payload schema validation helpers so malformed discovered contracts fail with field-specific diagnostics before parity checks run.
+4. Emit discovery-source metadata in `runtime:parity_ok` beyond source-kind (for example hashed source labels) to improve rollout observability.
+5. Add parity integration tests that exercise inline JSON discovery inputs directly for both renderer and driver sides.
 
 ## Checklist
 

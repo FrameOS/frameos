@@ -3,8 +3,10 @@ use std::io;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Instant;
 
 use frameos::config::FrameOSConfig;
+use frameos::discovery::discovery_source_from_cli;
 use frameos::interfaces::{command_contract_json, Cli, Command};
 use frameos::logging::{
     self, FileJsonLineSink, JsonLineSink, MultiJsonLineSink, StdoutJsonLineSink,
@@ -42,22 +44,30 @@ fn build_sink_with_optional_config(
 
 fn parity_contract_source(
     path: Option<&Path>,
-    probe_cmd: Option<&str>,
+    discovery_file: Option<&Path>,
+    discovery_json: Option<&str>,
     path_flag: &str,
-    probe_flag: &str,
+    discovery_file_flag: &str,
+    discovery_json_flag: &str,
 ) -> Result<ContractSource, io::Error> {
-    match (path, probe_cmd) {
-        (Some(path), None) => Ok(ContractSource::FixtureFile(path.to_path_buf())),
-        (None, Some(command)) => Ok(ContractSource::ProbeCommand(command.to_string())),
-        (Some(_), Some(_)) => Err(io::Error::new(
+    if path.is_some() && (discovery_file.is_some() || discovery_json.is_some()) {
+        return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            format!("{path_flag} and {probe_flag} are mutually exclusive"),
-        )),
-        (None, None) => Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!("one of {path_flag} or {probe_flag} is required"),
-        )),
+            format!("{path_flag} is mutually exclusive with discovery flags"),
+        ));
     }
+
+    if let Some(path) = path {
+        return Ok(ContractSource::FixtureFile(path.to_path_buf()));
+    }
+
+    discovery_source_from_cli(
+        discovery_file,
+        discovery_json,
+        discovery_file_flag,
+        discovery_json_flag,
+    )
+    .map(ContractSource::Discovery)
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -98,16 +108,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let sink = build_sink_with_optional_config(cli.event_log_path.as_deref(), None)?;
             let renderer_source = parity_contract_source(
                 cli.renderer_contract_path.as_deref(),
-                cli.renderer_probe_cmd.as_deref(),
+                cli.renderer_discovery_file.as_deref(),
+                cli.renderer_discovery_json.as_deref(),
                 "--renderer-contract <path>",
-                "--renderer-probe-cmd <shell command>",
+                "--renderer-discovery-file <path>",
+                "--renderer-discovery-json <json>",
             )?;
             let driver_source = parity_contract_source(
                 cli.driver_contract_path.as_deref(),
-                cli.driver_probe_cmd.as_deref(),
+                cli.driver_discovery_file.as_deref(),
+                cli.driver_discovery_json.as_deref(),
                 "--driver-contract <path>",
-                "--driver-probe-cmd <shell command>",
+                "--driver-discovery-file <path>",
+                "--driver-discovery-json <json>",
             )?;
+            let parity_started_at = Instant::now();
+            let renderer_source_kind = renderer_source.source_kind();
+            let driver_source_kind = driver_source.source_kind();
+            let renderer_source_label = renderer_source.source_label();
+            let driver_source_label = driver_source.source_label();
 
             match run_parity_check_with_sources(&renderer_source, &driver_source) {
                 Ok(report) => {
@@ -137,6 +156,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         serde_json::json!({
                             "event": "runtime:parity_failed",
                             "error": error.to_string(),
+                            "duration_ms": parity_started_at.elapsed().as_millis(),
+                            "renderer_contract_source": renderer_source_kind,
+                            "driver_contract_source": driver_source_kind,
+                            "renderer_source_label": renderer_source_label,
+                            "driver_source_label": driver_source_label,
                         }),
                     );
                     return Err(error.into());

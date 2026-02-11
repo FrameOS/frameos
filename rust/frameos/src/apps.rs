@@ -145,9 +145,11 @@ fn execute_data_pretty_json(fields: &Map<String, Value>) -> Result<AppOutput, Ap
                 field: "json",
                 reason: "value cannot be rendered as json".to_string(),
             })?;
-        String::from_utf8(serializer.into_inner()).map_err(|error| AppExecutionError::InvalidField {
-            field: "json",
-            reason: format!("encoded json is not utf-8: {error}"),
+        String::from_utf8(serializer.into_inner()).map_err(|error| {
+            AppExecutionError::InvalidField {
+                field: "json",
+                reason: format!("encoded json is not utf-8: {error}"),
+            }
         })?
     } else {
         json_value.to_string()
@@ -259,20 +261,18 @@ fn execute_data_events_to_agenda(
             .get("summary")
             .and_then(Value::as_str)
             .unwrap_or_default();
-        let start_day = event
-            .get("startTime")
-            .and_then(Value::as_str)
-            .ok_or(AppExecutionError::InvalidField {
+        let start_day = event.get("startTime").and_then(Value::as_str).ok_or(
+            AppExecutionError::InvalidField {
                 field: "events.startTime",
                 reason: "missing or non-string startTime".to_string(),
-            })?;
-        let end_day = event
-            .get("endTime")
-            .and_then(Value::as_str)
-            .ok_or(AppExecutionError::InvalidField {
+            },
+        )?;
+        let end_day = event.get("endTime").and_then(Value::as_str).ok_or(
+            AppExecutionError::InvalidField {
                 field: "events.endTime",
                 reason: "missing or non-string endTime".to_string(),
-            })?;
+            },
+        )?;
 
         let with_time = start_day.contains('T');
         let start_date = split_iso_day(start_day)?;
@@ -306,13 +306,11 @@ fn execute_data_events_to_agenda(
         if with_time {
             let start_time = extract_hh_mm(start_day)?;
             let end_time = extract_hh_mm(end_day)?;
-            writeln!(
-                output,
-                "{time}{start_time} - {end_time}  {normal}{summary}"
-            )
-            .expect("write to string cannot fail");
+            writeln!(output, "{time}{start_time} - {end_time}  {normal}{summary}")
+                .expect("write to string cannot fail");
         } else if start_day == current_day && end_day == current_day {
-            writeln!(output, "{time}All day  {normal}{summary}").expect("write to string cannot fail");
+            writeln!(output, "{time}All day  {normal}{summary}")
+                .expect("write to string cannot fail");
         } else {
             let end_title = format_day(parse_date(&end_date, "events.endTime")?);
             writeln!(output, "{time}Until {end_title}  {normal}{summary}")
@@ -327,10 +325,12 @@ fn get_timezone(events: &[Value], fallback: Option<&str>) -> Result<Tz, AppExecu
     for event in events {
         if let Some(timezone_name) = event.get("timezone").and_then(Value::as_str) {
             if !timezone_name.is_empty() {
-                return timezone_name.parse::<Tz>().map_err(|_| AppExecutionError::InvalidField {
-                    field: "events.timezone",
-                    reason: format!("unknown timezone `{timezone_name}`"),
-                });
+                return timezone_name
+                    .parse::<Tz>()
+                    .map_err(|_| AppExecutionError::InvalidField {
+                        field: "events.timezone",
+                        reason: format!("unknown timezone `{timezone_name}`"),
+                    });
             }
         }
     }
@@ -400,10 +400,7 @@ fn format_iso_day(day: NaiveDate) -> String {
     day.format("%Y-%m-%d").to_string()
 }
 
-fn normalize_hex_color(
-    raw: &str,
-    field: &'static str,
-) -> Result<String, AppExecutionError> {
+fn normalize_hex_color(raw: &str, field: &'static str) -> Result<String, AppExecutionError> {
     let Some(hex) = raw.strip_prefix('#') else {
         return Err(AppExecutionError::InvalidField {
             field,
