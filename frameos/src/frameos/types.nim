@@ -187,6 +187,7 @@ type
 
   # Exported data/functions for interpreted scenes, adds some local state that's normally compiled into the scene
   ExportedInterpretedScene* = ref object of ExportedScene
+    name*: string
     backgroundColor*: Color
     refreshInterval*: float
     nodes*: seq[DiagramNode]

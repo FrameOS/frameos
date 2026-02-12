@@ -23,7 +23,7 @@ import frameos/config
 import frameos/portal as netportal
 from net import Port
 from frameos/scenes import getLastImagePng, getLastPublicState, getAllPublicStates, getUploadedScenePayload,
-    interpretedScenes, uploadedScenes
+    getDynamicSceneOptions
 from scenes/scenes import sceneOptions
 
 var globalFrameOS: FrameOS
@@ -271,13 +271,11 @@ router myrouter:
 
     for (sceneId, sceneName) in sceneOptions:
       addSceneOption(sceneId, sceneName)
-    {.gcsafe.}:
-      # TODO: use some kind of lock instead of gcsafe?
-      # TODO: use names
-      for sceneId in interpretedScenes.keys:
-        addSceneOption(sceneId, sceneId.string)
-      for sceneId in uploadedScenes.keys:
-        addSceneOption(sceneId, sceneId.string)
+    var dynamicSceneOptions: seq[tuple[id: SceneId, name: string]]
+    {.gcsafe.}: # getDynamicSceneOptions uses locks around scene tables.
+      dynamicSceneOptions = getDynamicSceneOptions()
+    for (sceneId, sceneName) in dynamicSceneOptions:
+      addSceneOption(sceneId, sceneName)
 
     fieldsHtml.add("<input type='submit' id='setSceneState' value='Set Scene State'>")
     {.gcsafe.}: # We're only reading static assets. It's fine.
