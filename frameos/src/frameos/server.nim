@@ -13,6 +13,7 @@ import strformat
 import options
 import strutils
 import tables
+import algorithm
 import drivers/drivers as drivers
 import frameos/apps
 import frameos/types
@@ -259,6 +260,7 @@ router myrouter:
         fieldsHtml.add(fmt"<input type='text' id='{h($key)}' placeholder='{h(placeholder)}' value='{h(stringValue)}' /><br/><br/>")
 
     var sceneOptionsHtml = ""
+    var allSceneOptions: seq[tuple[id: SceneId, name: string]]
     var seenSceneIds = initTable[string, bool]()
 
     proc addSceneOption(sceneId: SceneId, sceneName: string) =
@@ -266,8 +268,7 @@ router myrouter:
       if seenSceneIds.hasKey(sceneIdString):
         return
       seenSceneIds[sceneIdString] = true
-      let selected = if sceneId == currentSceneId: " selected" else: ""
-      sceneOptionsHtml.add(fmt"<option value='{h(sceneIdString)}'{selected}>{h(sceneName)}</option>")
+      allSceneOptions.add((id: sceneId, name: sceneName))
 
     for (sceneId, sceneName) in sceneOptions:
       addSceneOption(sceneId, sceneName)
@@ -276,6 +277,18 @@ router myrouter:
       dynamicSceneOptions = getDynamicSceneOptions()
     for (sceneId, sceneName) in dynamicSceneOptions:
       addSceneOption(sceneId, sceneName)
+
+    allSceneOptions.sort(proc(a, b: tuple[id: SceneId, name: string]): int =
+      result = cmpIgnoreCase(a.name, b.name)
+      if result == 0:
+        result = cmp(a.id.string, b.id.string)
+    )
+
+    for sceneOption in allSceneOptions:
+      let selected = if sceneOption.id == currentSceneId: " selected" else: ""
+      sceneOptionsHtml.add(
+        fmt"<option value='{h(sceneOption.id.string)}'{selected}>{h(sceneOption.name)}</option>"
+      )
 
     fieldsHtml.add("<input type='submit' id='setSceneState' value='Set Scene State'>")
     {.gcsafe.}: # We're only reading static assets. It's fine.
