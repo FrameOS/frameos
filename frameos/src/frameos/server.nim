@@ -12,6 +12,7 @@ import ws, ws/jester_extra
 import strformat
 import options
 import strutils
+import tables
 import drivers/drivers as drivers
 import frameos/apps
 import frameos/types
@@ -21,7 +22,8 @@ import frameos/utils/font
 import frameos/config
 import frameos/portal as netportal
 from net import Port
-from frameos/scenes import getLastImagePng, getLastPublicState, getAllPublicStates, getUploadedScenePayload
+from frameos/scenes import getLastImagePng, getLastPublicState, getAllPublicStates, getUploadedScenePayload,
+    interpretedScenes, uploadedScenes
 from scenes/scenes import sceneOptions
 
 var globalFrameOS: FrameOS
@@ -257,9 +259,25 @@ router myrouter:
         fieldsHtml.add(fmt"<input type='text' id='{h($key)}' placeholder='{h(placeholder)}' value='{h(stringValue)}' /><br/><br/>")
 
     var sceneOptionsHtml = ""
-    for (sceneId, sceneName) in sceneOptions:
+    var seenSceneIds = initTable[string, bool]()
+
+    proc addSceneOption(sceneId: SceneId, sceneName: string) =
+      let sceneIdString = sceneId.string
+      if seenSceneIds.hasKey(sceneIdString):
+        return
+      seenSceneIds[sceneIdString] = true
       let selected = if sceneId == currentSceneId: " selected" else: ""
-      sceneOptionsHtml.add(fmt"<option value='{h(sceneId.string)}'{selected}>{h(sceneName)}</option>")
+      sceneOptionsHtml.add(fmt"<option value='{h(sceneIdString)}'{selected}>{h(sceneName)}</option>")
+
+    for (sceneId, sceneName) in sceneOptions:
+      addSceneOption(sceneId, sceneName)
+    {.gcsafe.}:
+      # TODO: use some kind of lock instead of gcsafe?
+      # TODO: use names
+      for sceneId in interpretedScenes.keys:
+        addSceneOption(sceneId, sceneId.string)
+      for sceneId in uploadedScenes.keys:
+        addSceneOption(sceneId, sceneId.string)
 
     fieldsHtml.add("<input type='submit' id='setSceneState' value='Set Scene State'>")
     {.gcsafe.}: # We're only reading static assets. It's fine.
