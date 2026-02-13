@@ -12,6 +12,7 @@ from app.database import Base
 from app.models.apps import get_app_configs
 from app.models.settings import get_settings_dict
 from app.utils.token import secure_token
+from app.utils.tls import generate_frame_tls_material
 from app.websockets import publish_message
 
 
@@ -159,6 +160,8 @@ async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, serve
     else:
         server_port = 8989
 
+    tls_material = generate_frame_tls_material(frame_host)
+
     frame = Frame(
         name=name,
         mode="rpios",
@@ -168,9 +171,12 @@ async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, serve
         frame_host=frame_host,
         frame_access_key=secure_token(20),
         frame_access="private",
-        enable_tls=False,
+        enable_tls=True,
         tls_port=8443,
-        expose_only_tls_port=False,
+        expose_only_tls_port=True,
+        tls_server_cert=tls_material["tls_server_cert"],
+        tls_server_key=tls_material["tls_server_key"],
+        tls_client_ca_cert=tls_material["tls_client_ca_cert"],
         server_host=server_host,
         server_port=int(server_port),
         server_api_key=secure_token(32),

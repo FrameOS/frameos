@@ -144,6 +144,11 @@ async def test_api_frame_new(async_client):
     data = response.json()
     assert 'frame' in data
     assert data['frame']['name'] == "NewFrame"
+    assert data['frame']['enable_tls'] is True
+    assert data['frame']['expose_only_tls_port'] is True
+    assert 'BEGIN CERTIFICATE' in data['frame']['tls_server_cert']
+    assert 'BEGIN RSA PRIVATE KEY' in data['frame']['tls_server_key']
+    assert 'BEGIN CERTIFICATE' in data['frame']['tls_client_ca_cert']
 
 
 @pytest.mark.asyncio

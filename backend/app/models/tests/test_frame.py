@@ -21,6 +21,11 @@ async def test_new_frame(mock_publish, db, redis):
     assert frame.ssh_user == "pi"
     assert frame.device == "testDevice"
     assert frame.interval == 123
+    assert frame.enable_tls is True
+    assert frame.expose_only_tls_port is True
+    assert frame.tls_server_cert and "BEGIN CERTIFICATE" in frame.tls_server_cert
+    assert frame.tls_server_key and "BEGIN RSA PRIVATE KEY" in frame.tls_server_key
+    assert frame.tls_client_ca_cert and "BEGIN CERTIFICATE" in frame.tls_client_ca_cert
     mock_publish.assert_awaited_once()
 
 @pytest.mark.asyncio
