@@ -18,6 +18,7 @@ import { Form } from 'kea-forms'
 import { Field } from '../../components/Field'
 import { frameSettingsLogic } from './panels/FrameSettings/frameSettingsLogic'
 import { logsLogic } from './panels/Logs/logsLogic'
+import { Popover, Transition } from '@headlessui/react'
 
 interface FrameSceneProps {
   id: string // taken straight from the URL, thus a string
@@ -26,9 +27,16 @@ interface FrameSceneProps {
 export function Frame(props: FrameSceneProps) {
   const frameId = parseInt(props.id)
   const frameLogicProps = { frameId }
-  const { frame, mode, unsavedChanges, undeployedChanges, requiresRecompilation, deployWithAgent } = useValues(
-    frameLogic(frameLogicProps)
-  )
+  const {
+    frame,
+    mode,
+    unsavedChanges,
+    undeployedChanges,
+    requiresRecompilation,
+    deployWithAgent,
+    unsavedChangeDetails,
+    undeployedChangeDetails,
+  } = useValues(frameLogic(frameLogicProps))
   const {
     saveFrame,
     renderFrame,
@@ -75,11 +83,79 @@ export function Frame(props: FrameSceneProps) {
             buttons={
               <div className="flex divide-x divide-gray-700 space-x-2">
                 {unsavedChanges ? (
-                  <div className="pr-2 text-[#9a9ad0] flex items-center">
-                    Unsaved changes{requiresRecompilation ? ', requires recompilation!' : ''}
-                  </div>
+                  <Popover className="relative pr-2 text-[#9a9ad0] flex items-center">
+                    {({ open }) => (
+                      <>
+                        <Popover.Button className="underline underline-offset-2">
+                          Unsaved changes{requiresRecompilation ? ', requires full deploy!' : ''}
+                        </Popover.Button>
+                        <Transition
+                          show={open}
+                          enter="transition ease-out duration-100"
+                          enterFrom="transform opacity-0 scale-95"
+                          enterTo="transform opacity-100 scale-100"
+                          leave="transition ease-in duration-75"
+                          leaveFrom="transform opacity-100 scale-100"
+                          leaveTo="transform opacity-0 scale-95"
+                        >
+                          <Popover.Panel className="absolute right-0 top-7 z-50 min-w-96 max-w-[38rem] rounded-md border border-gray-700 bg-gray-900 p-3 shadow-lg">
+                            <div className="mb-2 text-xs text-gray-300">Unsaved changes</div>
+                            <ul className="space-y-1 text-sm text-gray-100">
+                              {unsavedChangeDetails.map((change, index) => (
+                                <li
+                                  key={`${change.label}-${index}`}
+                                  className="flex items-center justify-between gap-3"
+                                >
+                                  <span>{change.label}</span>
+                                  {change.requiresFullDeploy ? (
+                                    <span className="rounded bg-purple-700/40 px-2 py-0.5 text-[11px] text-purple-100">
+                                      Full deploy
+                                    </span>
+                                  ) : null}
+                                </li>
+                              ))}
+                            </ul>
+                          </Popover.Panel>
+                        </Transition>
+                      </>
+                    )}
+                  </Popover>
                 ) : undeployedChanges ? (
-                  <div className="pr-2 text-[#9a9ad0] flex items-center">Undeployed changes</div>
+                  <Popover className="relative pr-2 text-[#9a9ad0] flex items-center">
+                    {({ open }) => (
+                      <>
+                        <Popover.Button className="underline underline-offset-2">Undeployed changes</Popover.Button>
+                        <Transition
+                          show={open}
+                          enter="transition ease-out duration-100"
+                          enterFrom="transform opacity-0 scale-95"
+                          enterTo="transform opacity-100 scale-100"
+                          leave="transition ease-in duration-75"
+                          leaveFrom="transform opacity-100 scale-100"
+                          leaveTo="transform opacity-0 scale-95"
+                        >
+                          <Popover.Panel className="absolute right-0 top-7 z-50 min-w-96 max-w-[38rem] rounded-md border border-gray-700 bg-gray-900 p-3 shadow-lg">
+                            <div className="mb-2 text-xs text-gray-300">Not yet deployed</div>
+                            <ul className="space-y-1 text-sm text-gray-100">
+                              {undeployedChangeDetails.map((change, index) => (
+                                <li
+                                  key={`${change.label}-${index}`}
+                                  className="flex items-center justify-between gap-3"
+                                >
+                                  <span>{change.label}</span>
+                                  {change.requiresFullDeploy ? (
+                                    <span className="rounded bg-purple-700/40 px-2 py-0.5 text-[11px] text-purple-100">
+                                      Full deploy
+                                    </span>
+                                  ) : null}
+                                </li>
+                              ))}
+                            </ul>
+                          </Popover.Panel>
+                        </Transition>
+                      </>
+                    )}
+                  </Popover>
                 ) : null}
 
                 <DropdownMenu
@@ -173,7 +249,7 @@ export function Frame(props: FrameSceneProps) {
                     >
                       {requiresRecompilation && !frame.last_successful_deploy_at
                         ? 'First deploy'
-                        : `Save & ${requiresRecompilation ? 'recompile' : 'deploy'}`}
+                        : `Save & ${requiresRecompilation ? 'full deploy' : 'fast deploy'}`}
                     </Button>
                   )}
                 </div>

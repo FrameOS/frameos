@@ -15,6 +15,12 @@ import { arrangeNodes } from '../../utils/arrangeNodes'
 export interface FrameLogicProps {
   frameId: number
 }
+
+export interface ChangeDetail {
+  label: string
+  requiresFullDeploy: boolean
+}
+
 const FRAME_KEYS: (keyof FrameType)[] = [
   'name',
   'mode',
@@ -93,6 +99,127 @@ const FRAME_KEYS_REQUIRE_RECOMPILE_BUILDROOT: (keyof FrameType)[] = [
   'agent',
   'buildroot',
 ]
+
+const FRAME_KEY_LABELS: Partial<Record<keyof FrameType, string>> = {
+  name: 'Frame name',
+  mode: 'Deployment mode',
+  frame_host: 'Frame host',
+  frame_port: 'Frame port',
+  frame_access_key: 'Frame access key',
+  frame_access: 'Frame access',
+  ssh_user: 'SSH user',
+  ssh_pass: 'SSH password',
+  ssh_port: 'SSH port',
+  ssh_keys: 'SSH keys',
+  server_host: 'Server host',
+  server_port: 'Server port',
+  server_api_key: 'Server API key',
+  width: 'Width',
+  height: 'Height',
+  color: 'Color support',
+  device: 'Device',
+  device_config: 'Device config',
+  interval: 'Refresh interval',
+  metrics_interval: 'Metrics interval',
+  scaling_mode: 'Scaling mode',
+  rotate: 'Rotation',
+  flip: 'Flip',
+  background_color: 'Background color',
+  scenes: 'Scenes',
+  debug: 'Debug mode',
+  log_to_file: 'Log to file',
+  assets_path: 'Assets path',
+  save_assets: 'Save assets',
+  upload_fonts: 'Upload fonts',
+  reboot: 'Reboot settings',
+  control_code: 'Control code',
+  schedule: 'Schedule',
+  gpio_buttons: 'GPIO buttons',
+  network: 'Network settings',
+  agent: 'Agent settings',
+  palette: 'Palette',
+  nix: 'NixOS settings',
+  buildroot: 'Buildroot settings',
+  rpios: 'Raspberry Pi OS settings',
+}
+
+function keyLabel(key: keyof FrameType): string {
+  return FRAME_KEY_LABELS[key] ?? key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+function getRecompileFields(mode: FrameType['mode']): (keyof FrameType)[] {
+  return mode === 'nixos'
+    ? FRAME_KEYS_REQUIRE_RECOMPILE_NIXOS
+    : mode === 'buildroot'
+    ? FRAME_KEYS_REQUIRE_RECOMPILE_BUILDROOT
+    : FRAME_KEYS_REQUIRE_RECOMPILE_RPIOS
+}
+
+function sceneChangeDetails(currentScenes: FrameScene[], deployedScenes: FrameScene[]): ChangeDetail[] {
+  const details: ChangeDetail[] = []
+
+  for (const scene of currentScenes) {
+    const deployed = deployedScenes.find((s) => s.id === scene.id)
+    const mode = scene.settings?.execution ?? 'compiled'
+    const deployedMode = deployed?.settings?.execution ?? 'compiled'
+
+    if (!deployed) {
+      details.push({
+        label: `Scene added: ${scene.name || scene.id}`,
+        requiresFullDeploy: mode !== 'interpreted',
+      })
+      continue
+    }
+
+    if (mode !== deployedMode) {
+      details.push({
+        label: `Scene mode changed: ${scene.name || scene.id} (${deployedMode} → ${mode})`,
+        requiresFullDeploy: mode !== 'interpreted' || deployedMode !== 'interpreted',
+      })
+      continue
+    }
+
+    if (!equal(scene, deployed)) {
+      details.push({
+        label: `Scene updated: ${scene.name || scene.id}`,
+        requiresFullDeploy: mode !== 'interpreted',
+      })
+    }
+  }
+
+  for (const scene of deployedScenes) {
+    if (!currentScenes.find((s) => s.id === scene.id)) {
+      const mode = scene.settings?.execution ?? 'compiled'
+      details.push({
+        label: `Scene removed: ${scene.name || scene.id}`,
+        requiresFullDeploy: mode !== 'interpreted',
+      })
+    }
+  }
+
+  return details
+}
+
+function computeChangeDetails(
+  previous: Partial<FrameType> | null | undefined,
+  next: Partial<FrameType> | null | undefined,
+  mode: FrameType['mode']
+): ChangeDetail[] {
+  const recompileFields = new Set(getRecompileFields(mode).filter((key) => key !== 'scenes'))
+  const details: ChangeDetail[] = []
+
+  for (const key of FRAME_KEYS.filter((k) => k !== 'scenes')) {
+    if (!equal(previous?.[key], next?.[key])) {
+      details.push({
+        label: keyLabel(key),
+        requiresFullDeploy: recompileFields.has(key),
+      })
+    }
+  }
+
+  const sceneDetails = sceneChangeDetails(next?.scenes ?? [], previous?.scenes ?? [])
+  return [...details, ...sceneDetails]
+}
 
 async function resolveTemplateImageUrl(template: Partial<TemplateType>): Promise<string | null> {
   if (template.id) {
@@ -390,48 +517,17 @@ export const frameLogic = kea<frameLogicType>([
       (frame, lastDeploy) =>
         FRAME_KEYS.some((key) => !equal(frame?.[key as keyof FrameType], lastDeploy?.[key as keyof FrameType])),
     ],
+    unsavedChangeDetails: [
+      (s) => [s.frame, s.frameForm, s.mode],
+      (frame, frameForm, mode): ChangeDetail[] => computeChangeDetails(frame, frameForm, mode),
+    ],
+    undeployedChangeDetails: [
+      (s) => [s.lastDeploy, s.frame, s.mode],
+      (lastDeploy, frame, mode): ChangeDetail[] => computeChangeDetails(lastDeploy, frame, mode),
+    ],
     requiresRecompilation: [
-      (s) => [s.frame, s.frameForm, s.lastDeploy, s.mode],
-      (frame, frameForm, lastDeploy, mode) => {
-        if (!lastDeploy) {
-          return true
-        }
-        const fields = (
-          mode === 'nixos'
-            ? FRAME_KEYS_REQUIRE_RECOMPILE_NIXOS
-            : mode === 'buildroot'
-            ? FRAME_KEYS_REQUIRE_RECOMPILE_BUILDROOT
-            : FRAME_KEYS_REQUIRE_RECOMPILE_RPIOS
-        ).filter((k) => k !== 'scenes')
-        const resp = fields.some(
-          (key) => !equal(lastDeploy?.[key as keyof FrameType], (frameForm || frame)?.[key as keyof FrameType])
-        )
-        if (resp) {
-          return true
-        }
-        // check scenes separately
-        const currentScenes: FrameScene[] = (frameForm || frame)?.scenes ?? []
-        const deployedScenes: FrameScene[] = lastDeploy?.scenes ?? []
-
-        const needRedeploy = currentScenes.filter((scene) => {
-          const deployed = deployedScenes.find((s) => s.id === scene.id)
-          const mode = scene.settings?.execution ?? 'compiled'
-          const deployedMode = deployed?.settings?.execution ?? 'compiled'
-          if (mode === 'interpreted') {
-            return deployed && deployedMode !== 'interpreted'
-          }
-          return !deployed || !equal(scene, deployed)
-        })
-        const needRemoval = deployedScenes.filter((scene) => {
-          return (
-            !currentScenes.find((s) => s.id === scene.id) && (scene.settings?.execution ?? 'compiled') !== 'interpreted'
-          )
-        })
-        if (needRedeploy.length > 0 || needRemoval.length > 0) {
-          return true
-        }
-        return false
-      },
+      (s) => [s.unsavedChangeDetails],
+      (unsavedChangeDetails) => unsavedChangeDetails.some((change) => change.requiresFullDeploy),
     ],
     defaultScene: [
       (s) => [s.frame, s.frameForm],
