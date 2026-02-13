@@ -323,7 +323,7 @@ proc newServer*(frameOS: FrameOS): Server =
   globalRunner = frameOS.runner
 
   let port = (if frameOS.frameConfig.framePort == 0: 8787 else: frameOS.frameConfig.framePort).Port
-  let bindAddr = if frameOS.frameConfig.exposeOnlyTlsPort: "127.0.0.1" else: ""
+  let bindAddr = if frameOS.frameConfig.enableTls and frameOS.frameConfig.exposeOnlyTlsPort: "127.0.0.1" else: ""
   let settings = newSettings(port = port, bindAddr = bindAddr)
   var jester = initJester(myrouter, settings)
 
