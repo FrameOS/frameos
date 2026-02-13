@@ -141,3 +141,24 @@ select.with-triangle {
   --alpha-pointer-background-color: #6a6a6a !important;
   --alpha-pointer-box-shadow: rgb(0 0 0 / 37%) 0px 1px 4px 0px !important;
 }
+
+.frameos-working-message {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.frameos-working-message__spinner {
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  border-top-color: rgba(255, 255, 255, 0.9);
+  animation: frameosWorkingSpinner 0.8s linear infinite;
+}
+
+@keyframes frameosWorkingSpinner {
+  to {
+    transform: rotate(360deg);
+  }
+}

@@ -7,6 +7,7 @@ import { FrameOSSettings, SSHKeyEntry } from '../../types'
 import { apiFetch } from '../../utils/apiFetch'
 import { normalizeSshKeys } from '../../utils/sshKeys'
 import { v4 as uuidv4 } from 'uuid'
+import { showWorkingMessage } from '../../utils/workingMessage'
 
 const embeddingsGeneratingStorageKey = 'frameos.embeddings.generating'
 
@@ -207,21 +208,32 @@ export const settingsLogic = kea<settingsLogicType>([
     customFontsForm: {
       defaults: { files: [] } as { files: File[] },
       submit: async (formValues) => {
-        for (const file of formValues.files) {
-          const formData = new FormData()
-          formData.append('path', `fonts/${file.name}`)
-          formData.append('file', file)
-
-          const response = await apiFetch(`/api/assets`, {
-            method: 'POST',
-            body: formData,
-          })
-          if (!response.ok) {
-            throw new Error(`Failed to upload file: ${file.name}`)
-          }
+        if (!formValues.files.length) {
+          return
         }
-        actions.loadCustomFonts()
-        actions.resetCustomFontsForm()
+
+        const workingMessage = showWorkingMessage('Uploading assets...')
+        try {
+          for (const file of formValues.files) {
+            const formData = new FormData()
+            formData.append('path', `fonts/${file.name}`)
+            formData.append('file', file)
+
+            const response = await apiFetch(`/api/assets`, {
+              method: 'POST',
+              body: formData,
+            })
+            if (!response.ok) {
+              throw new Error(`Failed to upload file: ${file.name}`)
+            }
+          }
+          workingMessage.success('Assets uploaded successfully')
+          actions.loadCustomFonts()
+          actions.resetCustomFontsForm()
+        } catch (error) {
+          workingMessage.error(error instanceof Error ? error.message : 'Failed to upload assets')
+          throw error
+        }
       },
     },
   })),
