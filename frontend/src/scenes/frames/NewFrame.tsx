@@ -71,13 +71,13 @@ export function NewFrame(): JSX.Element {
             buttonColor="secondary"
             items={[
               {
-                label: 'NixOS (alpha)',
+                label: 'NixOS (discontinued)',
                 onClick: () => {
                   setNewFrameValues({ mode: 'nixos', platform: 'pi-zero2' })
                 },
               },
               {
-                label: 'Buildroot (alpha)',
+                label: 'Buildroot (unfinished)',
                 onClick: () => {
                   setNewFrameValues({ mode: 'buildroot', platform: '' })
                 },
