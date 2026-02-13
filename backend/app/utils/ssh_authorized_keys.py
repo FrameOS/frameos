@@ -77,6 +77,7 @@ async def _install_authorized_keys(
         "set -e; "
         f"home_dir=$(getent passwd {user_quoted} | cut -d: -f6 || true); "
         f"if [ -z \"$home_dir\" ]; then home_dir={fallback_home}; fi; "
+        f"group_name=$(id -gn {user_quoted} 2>/dev/null || true); "
         "install -d -m 700 \"$home_dir/.ssh\"; "
         "authorized_keys=\"$home_dir/.ssh/authorized_keys\"; "
         "touch \"$authorized_keys\"; "
@@ -91,7 +92,8 @@ async def _install_authorized_keys(
         f"{known_quoted} \"$authorized_keys\" > \"$merged_keys\"; "
         f"cat {temp_quoted} >> \"$merged_keys\"; "
         "install -m 600 \"$merged_keys\" \"$authorized_keys\"; "
-        f"chown -R {user_quoted}:{user_quoted} \"$home_dir/.ssh\"; "
+        f"if [ -n \"$group_name\" ]; then chown -R {user_quoted}:\"$group_name\" \"$home_dir/.ssh\"; "
+        f"else chown -R {user_quoted} \"$home_dir/.ssh\"; fi; "
         f"rm -f {temp_quoted} {known_quoted} \"$merged_keys\""
     )
     await run_commands(db, redis, frame, [command], log_output=False)
