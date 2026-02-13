@@ -836,7 +836,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                 name="tls_client_ca_cert"
                 label="TLS root CA certificate"
                 tooltip="Used by the backend to validate HTTPS connections to this frame when TLS is enabled."
-                secret={!!frameFormTouches.tls_client_ca_cert}
+                secret={!frameFormTouches.tls_client_ca_cert && !!frameForm.tls_client_ca_cert}
               >
                 <TextArea name="tls_client_ca_cert" rows={4} placeholder="-----BEGIN CERTIFICATE-----" />
               </Field>
@@ -844,7 +844,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                 name="tls_server_cert"
                 label="TLS server certificate"
                 tooltip="PEM certificate used by Caddy for HTTPS on this frame."
-                secret={!!frameFormTouches.tls_server_cert}
+                secret={!frameFormTouches.tls_server_cert && !!frameForm.tls_server_cert}
               >
                 <TextArea name="tls_server_cert" rows={4} placeholder="-----BEGIN CERTIFICATE-----" />
               </Field>
@@ -863,7 +863,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                   </Button>
                 }
                 tooltip="PEM private key used by Caddy for HTTPS on this frame. Keep this secret."
-                secret={!!frameFormTouches.tls_server_key}
+                secret={!frameFormTouches.tls_server_key && !!frameForm.tls_server_key}
               >
                 <TextArea name="tls_server_key" rows={4} placeholder="-----BEGIN RSA PRIVATE KEY-----" />
               </Field>
