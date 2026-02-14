@@ -401,6 +401,7 @@ export const frameLogic = kea<frameLogicType>([
     sendEvent: (event: string, payload: Record<string, any>) => ({ event, payload }),
     setDeployWithAgent: (deployWithAgent: boolean) => ({ deployWithAgent }),
     generateTlsCertificates: true,
+    verifyTlsCertificates: true,
   }),
   forms(({ values }) => ({
     frameForm: {
@@ -492,6 +493,16 @@ export const frameLogic = kea<frameLogicType>([
       actions.touchFrameFormField('tls_server_cert')
       actions.touchFrameFormField('tls_server_key')
       actions.touchFrameFormField('tls_client_ca_cert')
+    },
+    verifyTlsCertificates: async () => {
+      const frame = values.frameForm || values.frame
+      if (!frame.tls_server_cert || !frame.tls_server_key || !frame.tls_client_ca_cert) {
+        console.warn('TLS enabled but certificates are missing, generating new certificates')
+        actions.generateTlsCertificates()
+      }
+      if (!frame.tls_port) {
+        actions.setFrameFormValues({ tls_port: 8443, expose_only_tls_port: true })
+      }
     },
   })),
   selectors(() => ({

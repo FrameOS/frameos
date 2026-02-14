@@ -49,9 +49,9 @@ proc startTlsProxy*(frameConfig: FrameConfig, logger: Logger) =
 
   let caddyfileContents = fmt"""{{
   admin off
-  auto_https disable_redirects
+  auto_https off
 }}
-https://*:{tlsPort} {{
+:{tlsPort} {{
   reverse_proxy 127.0.0.1:{upstreamPort}
   tls {certPath} {keyPath}
 }}

@@ -56,8 +56,13 @@ export interface FrameSettingsProps {
 const customModule = `{ lib, ... }:\n{\n  # boot.kernelParams = [ \"quiet\" ];\n}\n`
 export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: FrameSettingsProps) {
   const { mode, frameId, frame, frameForm, frameFormTouches } = useValues(frameLogic)
-  const { touchFrameFormField, setFrameFormValues, updateDeployedSshKeys, generateTlsCertificates } =
-    useActions(frameLogic)
+  const {
+    touchFrameFormField,
+    setFrameFormValues,
+    updateDeployedSshKeys,
+    generateTlsCertificates,
+    verifyTlsCertificates,
+  } = useActions(frameLogic)
   const { deleteFrame } = useActions(framesModel)
   const { appsWithSaveAssets } = useValues(appsLogic)
   const {
@@ -818,7 +823,19 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
             label="Enable HTTPS (Caddy)"
             tooltip="Enable Caddy as a local TLS proxy for the FrameOS HTTP API."
           >
-            <Switch name="enable_tls" fullWidth />
+            {({ value, onChange }) => (
+              <Switch
+                name="enable_tls"
+                value={value}
+                onChange={(enableTls) => {
+                  if (enableTls) {
+                    verifyTlsCertificates()
+                  }
+                  onChange(enableTls)
+                }}
+                fullWidth
+              />
+            )}
           </Field>
           {frameForm.enable_tls ? (
             <>
