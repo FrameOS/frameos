@@ -821,7 +821,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
           <Field
             name="enable_tls"
             label="Enable HTTPS (Caddy)"
-            tooltip="Enable Caddy as a local TLS proxy for the FrameOS HTTP API."
+            tooltip="Enable Caddy as a local TLS proxy for the FrameOS HTTP API. You may need to do a full deploy if this is your first time enabling this."
           >
             {({ value, onChange }) => (
               <Switch
