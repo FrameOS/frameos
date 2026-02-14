@@ -78,25 +78,6 @@ async def fast_deploy_frame_task(ctx: dict[str, Any], id: int):
             await log(db, redis, id, "stderr", f"Reload request failed: {str(e)}. Restarting service.")
             await self.restart_service("frameos")
 
-        previously_deployed_tls = bool((frame.last_successful_deploy or {}).get("enable_tls"))
-
-        if not frame.enable_tls and not previously_deployed_tls:
-            caddy_active = (
-                await self.exec_command(
-                    "sudo systemctl is-active --quiet caddy.service",
-                    raise_on_error=False,
-                    log_output=False,
-                    log_command=False,
-                )
-                == 0
-            )
-        else:
-            caddy_active = False
-
-        if not frame.enable_tls and (previously_deployed_tls or caddy_active):
-            await log(db, redis, id, "stdout", "🟢 TLS proxy disabled, stopping Caddy")
-            await self.exec_command("sudo systemctl disable --now caddy.service", raise_on_error=False)
-
         frame.status = 'starting'
         frame.last_successful_deploy = frame_dict
         frame.last_successful_deploy_at = datetime.now(timezone.utc)
