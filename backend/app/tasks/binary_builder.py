@@ -25,6 +25,18 @@ LogFn = Callable[[str, str], Awaitable[None]]
 DEFAULT_BUILD_LOG = "frameos-build.log"
 icon = "🔶"
 
+LINKER_ERROR_HINTS = (
+    "linker",
+    "ld:",
+    "collect2: error",
+    "undefined reference",
+)
+
+
+def should_suggest_clearing_build_cache(error_message: str) -> bool:
+    normalized = error_message.lower()
+    return any(hint in normalized for hint in LINKER_ERROR_HINTS)
+
 
 @dataclass(slots=True)
 class FrameBinaryBuildResult:
@@ -156,6 +168,7 @@ class FrameBinaryBuilder:
                     build_host=build_host,
                 )
             except Exception as exc:
+                error_message = str(exc)
                 failure_msg = f"Cross compilation failed ({exc})"
                 if build_host:
                     failure_msg = f"Cross compilation failed on build host ({exc})"
@@ -177,6 +190,11 @@ class FrameBinaryBuilder:
                     await self._log(
                         "stderr",
                         f"{icon} Ensure you can connect to the build host and run Docker commands (e.g., is in the 'docker' group)",
+                    )
+                if should_suggest_clearing_build_cache(error_message):
+                    await self._log(
+                        "stderr",
+                        f"{icon} If the failure is caused by a stale linker cache, clear the build cache (~/.cache/frameos/cross) and try deploying again.",
                     )
                 if force_cross_compile:
                     raise

@@ -65,7 +65,7 @@ function ansiToHtml(value: string): string {
 
 export function Terminal() {
   const { frameId } = useValues(frameLogic)
-  const { lines, commandInput } = useValues(terminalLogic({ frameId }))
+  const { lines, commandInput, connectionState } = useValues(terminalLogic({ frameId }))
   const { connect, sendCommand, sendKeys, setCommandInput, historyPrev, historyNext } = useActions(terminalLogic({ frameId }))
   const virtuosoRef = useRef<VirtuosoHandle>(null)
   const [atBottom, setAtBottom] = useState(true)
@@ -189,7 +189,7 @@ export function Terminal() {
           Scroll to latest
         </Button>
       )}
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:flex-wrap">
         <input
           value={commandInput}
           onChange={(e) => setCommandInput(e.target.value)}
@@ -207,6 +207,11 @@ export function Terminal() {
         <Button color="secondary" size="small" onClick={() => handleSendKeys(true)}>
           Send CTRL
         </Button>
+        {connectionState === 'closed' && (
+          <Button color="secondary" size="small" onClick={() => connect()}>
+            Reconnect
+          </Button>
+        )}
       </div>
     </div>
   )

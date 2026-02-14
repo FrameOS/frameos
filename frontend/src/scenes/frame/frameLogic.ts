@@ -21,6 +21,22 @@ export interface ChangeDetail {
   requiresFullDeploy: boolean
 }
 
+const DEFAULT_BROWSER_TITLE = 'FrameOS Backend'
+
+function setBrowserTitle(frame?: FrameType | null): void {
+  if (typeof document === 'undefined') {
+    return
+  }
+
+  if (!frame) {
+    document.title = DEFAULT_BROWSER_TITLE
+    return
+  }
+
+  const frameTitle = frame.name || frame.frame_host || `Frame ${frame.id}`
+  document.title = `${frameTitle} · ${DEFAULT_BROWSER_TITLE}`
+}
+
 const FRAME_KEYS: (keyof FrameType)[] = [
   'name',
   'mode',
@@ -566,6 +582,7 @@ export const frameLogic = kea<frameLogicType>([
   })),
   subscriptions(({ actions }) => ({
     frame: (frame?: FrameType, oldFrame?: FrameType) => {
+      setBrowserTitle(frame)
       if (frame && !oldFrame) {
         actions.resetFrameForm({ ...frame, scenes: frame.scenes?.map((scene) => sanitizeScene(scene, frame)) ?? [] })
       }
@@ -683,6 +700,7 @@ export const frameLogic = kea<frameLogicType>([
     window.addEventListener('keydown', cache.keydownHandler)
   }),
   beforeUnmount(({ cache }) => {
+    setBrowserTitle(null)
     if (cache.keydownHandler) {
       window.removeEventListener('keydown', cache.keydownHandler)
       cache.keydownHandler = null

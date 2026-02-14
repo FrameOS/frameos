@@ -9,6 +9,8 @@ export interface TerminalLogicProps {
   frameId: number
 }
 
+export type TerminalConnectionState = 'connecting' | 'connected' | 'closed'
+
 const MAX_HISTORY_SIZE = 200
 
 function nextCommandHistory(history: string[], command: string): string[] {
@@ -45,6 +47,7 @@ export const terminalLogic = kea<terminalLogicType>([
     initializeHistory: (history: string[]) => ({ history }),
     setHistoryIndex: (historyIndex: number | null) => ({ historyIndex }),
     setNavigationDraft: (navigationDraft: string) => ({ navigationDraft }),
+    setConnectionState: (connectionState: TerminalConnectionState) => ({ connectionState }),
   }),
   reducers({
     lines: [
@@ -91,13 +94,21 @@ export const terminalLogic = kea<terminalLogicType>([
         executeCommand: () => '',
       },
     ],
+    connectionState: [
+      'closed' as TerminalConnectionState,
+      {
+        setConnectionState: (_, { connectionState }) => connectionState,
+      },
+    ],
   }),
   listeners(({ actions, values, cache, props }) => ({
     connect: () => {
-      if (cache.ws) {
+      if (cache.ws?.readyState === WebSocket.OPEN || cache.ws?.readyState === WebSocket.CONNECTING) {
         return
       }
+      cache.ws = null
       const { frame } = values
+      actions.setConnectionState('connecting')
       actions.initializeHistory(frame.terminal_history || [])
       if (frame.agent?.agentEnabled) {
         actions.appendText(
@@ -106,8 +117,13 @@ export const terminalLogic = kea<terminalLogicType>([
       }
       actions.appendText(`***connecting to ${frame.ssh_user}@${frame.frame_host} via SSH***\n`)
       const ws = new WebSocket(`${getBasePath()}/ws/terminal/${frame.id}`)
+      ws.onopen = () => actions.setConnectionState('connected')
       ws.onmessage = (event) => actions.appendText(event.data)
-      ws.onclose = () => actions.appendText('\n*** connection closed ***\n')
+      ws.onclose = () => {
+        actions.setConnectionState('closed')
+        actions.appendText('\n*** connection closed ***\n')
+        cache.ws = null
+      }
       cache.ws = ws
     },
     disconnect: () => {
@@ -115,6 +131,7 @@ export const terminalLogic = kea<terminalLogicType>([
         cache.ws.close()
         cache.ws = null
       }
+      actions.setConnectionState('closed')
     },
     sendCommand: async () => {
       const command = values.commandInput.trim()
