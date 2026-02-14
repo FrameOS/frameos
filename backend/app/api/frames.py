@@ -1931,10 +1931,6 @@ async def api_frame_generate_tls_material_endpoint(
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
 
     material = generate_frame_tls_material(frame.frame_host or "")
-    frame.tls_server_cert = material["tls_server_cert"]
-    frame.tls_server_key = material["tls_server_key"]
-    frame.tls_client_ca_cert = material["tls_client_ca_cert"]
-    await update_frame(db, redis, frame)
     return material
 
 

@@ -835,6 +835,11 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
               <Field
                 name="tls_client_ca_cert"
                 label="HTTPS root CA certificate"
+                labelRight={
+                  <Button color="secondary" size="small" onClick={(e) => generateTlsCertificates()}>
+                    Regenerate
+                  </Button>
+                }
                 tooltip="Used by the backend to validate HTTPS connections to this frame when TLS is enabled."
                 secret={!frameFormTouches.tls_client_ca_cert && !!frameForm.tls_client_ca_cert}
               >
@@ -851,17 +856,6 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
               <Field
                 name="tls_server_key"
                 label={<div>HTTPS server private key</div>}
-                labelRight={
-                  <Button
-                    color="secondary"
-                    size="small"
-                    onClick={() => {
-                      generateTlsCertificates()
-                    }}
-                  >
-                    Regenerate certs
-                  </Button>
-                }
                 tooltip="PEM private key used by Caddy for HTTPS on this frame. Keep this secret."
                 secret={!frameFormTouches.tls_server_key && !!frameForm.tls_server_key}
               >
