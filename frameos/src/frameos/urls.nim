@@ -1,4 +1,5 @@
 import strformat
+import strutils
 import frameos/types
 
 proc publicScheme*(config: FrameConfig): string =
@@ -15,3 +16,14 @@ proc publicHost*(config: FrameConfig): string =
 
 proc publicBaseUrl*(config: FrameConfig): string =
   &"{publicScheme(config)}://{publicHost(config)}:{publicPort(config)}"
+
+proc authenticatedFrameUrl*(config: FrameConfig, path: string, requireWriteAccess = true): string =
+  let shouldIncludeAccessKey =
+    if requireWriteAccess:
+      config.frameAccess != "public"
+    else:
+      config.frameAccess == "private"
+
+  result = publicBaseUrl(config) & path
+  if shouldIncludeAccessKey:
+    result &= (if path.contains("?"): "&" else: "?") & "k=" & config.frameAccessKey

@@ -23,11 +23,9 @@ type
 
 proc get*(self: App, context: ExecutionContext): Image =
   let code = if self.appConfig.codeType == "Frame Control URL":
-      publicBaseUrl(self.frameConfig) & "/c" & (if self.frameConfig.frameAccess != "public": "?k=" &
-          self.frameConfig.frameAccessKey else: "")
+      authenticatedFrameUrl(self.frameConfig, "/c")
     elif self.appConfig.codeType == "Frame Image URL":
-      publicBaseUrl(self.frameConfig) & (if self.frameConfig.frameAccess == "private": "/?k=" &
-          self.frameConfig.frameAccessKey else: "")
+      authenticatedFrameUrl(self.frameConfig, "/", requireWriteAccess = false)
     else:
       self.appConfig.code
 
