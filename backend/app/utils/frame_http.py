@@ -40,12 +40,13 @@ def _get_env_float(name: str, default: float) -> float:
 
 FRAME_HTTP_MAX_CONCURRENCY = _get_env_int("FRAME_HTTP_MAX_CONCURRENCY", 20)
 FRAME_HTTP_TIMEOUT = httpx.Timeout(
-    connect=_get_env_float("FRAME_HTTP_CONNECT_TIMEOUT", 2.0),
-    read=_get_env_float("FRAME_HTTP_READ_TIMEOUT", 8.0),
-    write=_get_env_float("FRAME_HTTP_WRITE_TIMEOUT", 8.0),
-    pool=_get_env_float("FRAME_HTTP_POOL_TIMEOUT", 2.0),
+    connect=_get_env_float("FRAME_HTTP_CONNECT_TIMEOUT", 10.0),
+    read=_get_env_float("FRAME_HTTP_READ_TIMEOUT", 20.0),
+    write=_get_env_float("FRAME_HTTP_WRITE_TIMEOUT", 20.0),
+    pool=_get_env_float("FRAME_HTTP_POOL_TIMEOUT", 10.0),
 )
 _frame_http_semaphore = asyncio.Semaphore(FRAME_HTTP_MAX_CONCURRENCY)
+FRAME_HTTP_RETRIES = _get_env_int("FRAME_HTTP_RETRIES", 2)
 
 
 def _build_frame_path(
@@ -147,28 +148,47 @@ async def _fetch_frame_http_bytes(
     url = _build_frame_url(frame, path, method)
     hdrs = _auth_headers(frame)
     verify = _httpx_verify(frame)
+    timeout_errors = (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.WriteTimeout)
+    attempts = max(1, FRAME_HTTP_RETRIES)
     async with _frame_http_semaphore:
         async with httpx.AsyncClient(verify=verify) as client:
-            try:
-                response = await client.request(
-                    method,
-                    url,
-                    headers=hdrs,
-                    timeout=FRAME_HTTP_TIMEOUT,
-                )
-            except (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.WriteTimeout):
-                raise HTTPException(
-                    status_code=HTTPStatus.REQUEST_TIMEOUT,
-                    detail=f"Timeout to {url}",
-                )
-            except httpx.PoolTimeout:
-                raise HTTPException(
-                    status_code=HTTPStatus.SERVICE_UNAVAILABLE,
-                    detail="Frame request queue is saturated",
-                )
-            except Exception as exc:
-                raise HTTPException(
-                    status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(exc)
-                )
+            for attempt in range(1, attempts + 1):
+                try:
+                    response = await client.request(
+                        method,
+                        url,
+                        headers=hdrs,
+                        timeout=FRAME_HTTP_TIMEOUT,
+                    )
+                    break
+                except timeout_errors:
+                    if attempt >= attempts:
+                        raise HTTPException(
+                            status_code=HTTPStatus.REQUEST_TIMEOUT,
+                            detail=f"Timeout to {url}",
+                        )
+                    await asyncio.sleep(0.15 * attempt)
+                except httpx.PoolTimeout:
+                    raise HTTPException(
+                        status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+                        detail="Frame request queue is saturated",
+                    )
+                except httpx.ConnectError as exc:
+                    if "CERTIFICATE_VERIFY_FAILED" in str(exc):
+                        raise HTTPException(
+                            status_code=HTTPStatus.BAD_GATEWAY,
+                            detail=(
+                                "TLS verification failed while connecting to frame. "
+                                "Set frame.tls_client_ca_cert to the issuing CA certificate."
+                            ),
+                        )
+                    raise HTTPException(
+                        status_code=HTTPStatus.BAD_GATEWAY,
+                        detail=str(exc),
+                    )
+                except Exception as exc:
+                    raise HTTPException(
+                        status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(exc)
+                    )
 
     return response.status_code, response.content, dict(response.headers)

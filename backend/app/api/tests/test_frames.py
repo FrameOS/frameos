@@ -1,4 +1,5 @@
 import json
+from urllib.parse import parse_qs, urlsplit
 import pytest
 from unittest.mock import AsyncMock, patch
 import httpx
@@ -220,7 +221,13 @@ async def test_api_frame_proxy_get_forwards_query_and_headers(async_client, db, 
     assert response.content == b'proxy-ok'
     assert response.headers['x-frame-proxy'] == 'yes'
     assert request_captured['method'] == 'GET'
-    assert request_captured['url'] == f'http://localhost:{frame.frame_port}/state?foo=bar'
+    parsed_url = urlsplit(request_captured['url'])
+    query = parse_qs(parsed_url.query)
+    assert parsed_url.scheme == 'https'
+    assert parsed_url.netloc == f'localhost:{frame.tls_port}'
+    assert parsed_url.path == '/state'
+    assert query.get('foo') == ['bar']
+    assert query.get('k') == [frame.frame_access_key]
     assert request_captured['headers'].get('X-Test-Header') == 'value'
 
 
@@ -254,7 +261,7 @@ async def test_api_frame_proxy_post_forwards_body(async_client, db, redis):
     assert response.status_code == 201
     assert response.content == b'{"created":true}'
     assert request_captured['method'] == 'POST'
-    assert request_captured['url'] == f'http://localhost:{frame.frame_port}/upload'
+    assert request_captured['url'] == f'https://localhost:{frame.tls_port}/upload'
     assert request_captured['content'] == b'binary-body'
 
 @pytest.mark.asyncio
