@@ -815,26 +815,26 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
           </Field>
           <Field
             name="enable_tls"
-            label="Enable TLS (Caddy)"
+            label="Enable HTTPS (Caddy)"
             tooltip="Enable Caddy as a local TLS proxy for the FrameOS HTTP API."
           >
             <Switch name="enable_tls" fullWidth />
           </Field>
           {frameForm.enable_tls ? (
             <>
-              <Field name="tls_port" label="TLS port" tooltip="The port Caddy listens on for HTTPS connections.">
+              <Field name="tls_port" label="HTTPS port" tooltip="The port Caddy listens on for HTTPS connections.">
                 <NumberTextInput name="tls_port" placeholder="8443" />
               </Field>
               <Field
                 name="expose_only_tls_port"
-                label="Expose only TLS port"
-                tooltip="Bind the HTTP API to localhost so only the TLS proxy is accessible externally."
+                label="Expose only HTTPS port"
+                tooltip="Bind the HTTP port to 127.0.0.1 so only the HTTPS proxy is accessible externally."
               >
                 <Switch name="expose_only_tls_port" fullWidth />
               </Field>
               <Field
                 name="tls_client_ca_cert"
-                label="TLS root CA certificate"
+                label="HTTPS root CA certificate"
                 tooltip="Used by the backend to validate HTTPS connections to this frame when TLS is enabled."
                 secret={!frameFormTouches.tls_client_ca_cert && !!frameForm.tls_client_ca_cert}
               >
@@ -842,7 +842,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
               </Field>
               <Field
                 name="tls_server_cert"
-                label="TLS server certificate"
+                label="HTTPS server certificate"
                 tooltip="PEM certificate used by Caddy for HTTPS on this frame."
                 secret={!frameFormTouches.tls_server_cert && !!frameForm.tls_server_cert}
               >
@@ -850,7 +850,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
               </Field>
               <Field
                 name="tls_server_key"
-                label={<div>TLS server private key</div>}
+                label={<div>HTTPS server private key</div>}
                 labelRight={
                   <Button
                     color="secondary"
