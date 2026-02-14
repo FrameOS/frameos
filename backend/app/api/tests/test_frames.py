@@ -1,6 +1,6 @@
 import json
 import pytest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 import httpx
 
 from app.models import new_frame
@@ -206,7 +206,11 @@ async def test_api_frame_proxy_get_forwards_query_and_headers(async_client, db, 
             headers={'content-type': 'text/plain', 'x-frame-proxy': 'yes'},
         )
 
-    with patch.object(httpx.AsyncClient, 'request', side_effect=mock_request):
+    with patch('app.api.frames.httpx.AsyncClient') as mock_client_cls:
+        mock_client = AsyncMock()
+        mock_client.request.side_effect = mock_request
+        mock_client_cls.return_value.__aenter__.return_value = mock_client
+        mock_client_cls.return_value.__aexit__.return_value = False
         response = await async_client.get(
             f'/api/frames/{frame.id}/proxy/state?foo=bar',
             headers={'X-Test-Header': 'value'},
@@ -236,7 +240,11 @@ async def test_api_frame_proxy_post_forwards_body(async_client, db, redis):
             headers={'content-type': 'application/json'},
         )
 
-    with patch.object(httpx.AsyncClient, 'request', side_effect=mock_request):
+    with patch('app.api.frames.httpx.AsyncClient') as mock_client_cls:
+        mock_client = AsyncMock()
+        mock_client.request.side_effect = mock_request
+        mock_client_cls.return_value.__aenter__.return_value = mock_client
+        mock_client_cls.return_value.__aexit__.return_value = False
         response = await async_client.post(
             f'/api/frames/{frame.id}/proxy/upload',
             content=b'binary-body',

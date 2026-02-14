@@ -70,8 +70,11 @@ proc start*(self: FrameOS) {.async.} =
 
   startTlsProxy(self.frameConfig, self.logger)
 
-  ## This call never returns
-  await self.server.startServer()
+  try:
+    ## This call never returns
+    await self.server.startServer()
+  finally:
+    stopTlsProxy(self.logger)
 
 proc startFrameOS*() {.async.} =
   var frameOS = newFrameOS()

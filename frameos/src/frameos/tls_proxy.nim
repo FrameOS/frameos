@@ -4,7 +4,34 @@ import osproc
 import strformat
 import frameos/types
 
+var tlsProxyProcess: Process
+
+proc stopTlsProxy*(logger: Logger = nil) =
+  if tlsProxyProcess == nil:
+    return
+
+  try:
+    if running(tlsProxyProcess):
+      terminate(tlsProxyProcess)
+  except CatchableError:
+    discard
+
+  try:
+    close(tlsProxyProcess)
+  except CatchableError:
+    discard
+
+  tlsProxyProcess = nil
+
+  if logger != nil:
+    logger.log(%*{
+      "event": "tls:stop",
+      "message": "Stopped Caddy TLS proxy",
+    })
+
 proc startTlsProxy*(frameConfig: FrameConfig, logger: Logger) =
+  stopTlsProxy(logger)
+
   if not frameConfig.enableTls:
     return
   let hasCustomCert = frameConfig.tlsServerCert.len > 0 and frameConfig.tlsServerKey.len > 0
@@ -76,7 +103,7 @@ proc startTlsProxy*(frameConfig: FrameConfig, logger: Logger) =
   })
 
   try:
-    discard startProcess(
+    tlsProxyProcess = startProcess(
       "caddy",
       args = @["run", "--config", caddyfilePath, "--adapter", "caddyfile"],
       options = {poUsePath, poParentStreams}
