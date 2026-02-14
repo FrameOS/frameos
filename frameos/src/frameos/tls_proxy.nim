@@ -17,9 +17,24 @@ proc startTlsProxy*(frameConfig: FrameConfig, logger: Logger) =
 
   let tlsPort = if frameConfig.tlsPort > 0: frameConfig.tlsPort else: 8443
   let upstreamPort = if frameConfig.framePort > 0: frameConfig.framePort else: 8787
-  let certPath = getTempDir() / "frameos-tls-cert.pem"
-  let keyPath = getTempDir() / "frameos-tls-key.pem"
-  let caddyfilePath = getTempDir() / "frameos-caddyfile"
+  let caddyVendorPath = "/srv/frameos/vendor/caddy"
+  let certPath = caddyVendorPath / "frameos-tls-cert.pem"
+  let keyPath = caddyVendorPath / "frameos-tls-key.pem"
+  let caddyfilePath = caddyVendorPath / "frameos-caddyfile"
+  let readmePath = caddyVendorPath / "README"
+
+  try:
+    if not dirExists(caddyVendorPath):
+      createDir(caddyVendorPath)
+      writeFile(readmePath, "This directory is manged by FrameOS on start if the TLS config changes. Do not modify any files here yourself. ")
+  except CatchableError as error:
+    logger.log(%*{
+      "event": "tls:vendor_dir_error",
+      "message": "Failed to create Caddy vendor directory",
+      "error": error.msg,
+      "path": caddyVendorPath,
+    })
+    return
 
   try:
     writeFile(certPath, frameConfig.tlsServerCert)
