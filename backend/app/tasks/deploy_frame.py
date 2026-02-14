@@ -183,7 +183,23 @@ async def _deploy_with_nixos(
     finally:
         cleanup()
     if status != 0 or not sys_out:
-        raise Exception(f"Local NixOS system build failed:\n{sys_err}")
+        details = sys_err or ""
+        combined_logs = "\n".join(part for part in (sys_out, sys_err) if part)
+        drv_paths = list(dict.fromkeys(re.findall(r"/nix/store/[a-z0-9]{32}-[^\s']+\.drv", combined_logs)))
+        for drv_path in drv_paths[:3]:
+            log_cmd = f"nix-store -l {shlex.quote(drv_path)}"
+            log_status, log_out, log_err = await exec_local_command(
+                deployer.db,
+                deployer.redis,
+                deployer.frame,
+                log_cmd,
+                log_command=False,
+            )
+            if log_status == 0 and log_out:
+                details += f"\n\n--- nix-store log: {drv_path} ---\n{log_out}"
+            elif log_err:
+                details += f"\n\n--- nix-store log retrieval failed: {drv_path} ---\n{log_err}"
+        raise Exception(f"Local NixOS system build failed:\n{details}")
     result_path = sys_out.strip().splitlines()[-1]
 
     updated_count = await deployer.nix_upload_path_and_deps(result_path)

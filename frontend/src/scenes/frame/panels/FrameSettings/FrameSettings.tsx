@@ -942,7 +942,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                 <Field name="wifiSSID" label="Wifi SSID" tooltip="The SSID of the wifi network to connect to on boot.">
                   <TextInput name="wifiSSID" placeholder="MyWifi" />
                 </Field>
-                <Field name="wifiPassword" label="Wifi Password">
+                <Field name="wifiPassword" label="Wifi Password" tooltip="The password of the wifi network.">
                   <TextInput
                     name="wifiPassword"
                     placeholder="MyWifiPassword"

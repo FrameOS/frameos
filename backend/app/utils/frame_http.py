@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 from http import HTTPStatus
+import os
 import ssl
 from typing import Optional
 
@@ -12,6 +14,38 @@ from app.utils.network import is_safe_host
 from app.utils.remote_exec import _use_agent
 from app.ws.agent_ws import http_get_on_frame
 from arq import ArqRedis as Redis
+
+
+def _get_env_int(name: str, default: int) -> int:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    try:
+        parsed = int(value)
+        return parsed if parsed > 0 else default
+    except ValueError:
+        return default
+
+
+def _get_env_float(name: str, default: float) -> float:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    try:
+        parsed = float(value)
+        return parsed if parsed > 0 else default
+    except ValueError:
+        return default
+
+
+FRAME_HTTP_MAX_CONCURRENCY = _get_env_int("FRAME_HTTP_MAX_CONCURRENCY", 20)
+FRAME_HTTP_TIMEOUT = httpx.Timeout(
+    connect=_get_env_float("FRAME_HTTP_CONNECT_TIMEOUT", 2.0),
+    read=_get_env_float("FRAME_HTTP_READ_TIMEOUT", 8.0),
+    write=_get_env_float("FRAME_HTTP_WRITE_TIMEOUT", 8.0),
+    pool=_get_env_float("FRAME_HTTP_POOL_TIMEOUT", 2.0),
+)
+_frame_http_semaphore = asyncio.Semaphore(FRAME_HTTP_MAX_CONCURRENCY)
 
 
 def _build_frame_path(
@@ -113,16 +147,28 @@ async def _fetch_frame_http_bytes(
     url = _build_frame_url(frame, path, method)
     hdrs = _auth_headers(frame)
     verify = _httpx_verify(frame)
-    async with httpx.AsyncClient(verify=verify) as client:
-        try:
-            response = await client.request(method, url, headers=hdrs, timeout=60.0)
-        except httpx.ReadTimeout:
-            raise HTTPException(
-                status_code=HTTPStatus.REQUEST_TIMEOUT, detail=f"Timeout to {url}"
-            )
-        except Exception as exc:
-            raise HTTPException(
-                status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(exc)
-            )
+    async with _frame_http_semaphore:
+        async with httpx.AsyncClient(verify=verify) as client:
+            try:
+                response = await client.request(
+                    method,
+                    url,
+                    headers=hdrs,
+                    timeout=FRAME_HTTP_TIMEOUT,
+                )
+            except (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.WriteTimeout):
+                raise HTTPException(
+                    status_code=HTTPStatus.REQUEST_TIMEOUT,
+                    detail=f"Timeout to {url}",
+                )
+            except httpx.PoolTimeout:
+                raise HTTPException(
+                    status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+                    detail="Frame request queue is saturated",
+                )
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(exc)
+                )
 
     return response.status_code, response.content, dict(response.headers)
