@@ -57,6 +57,7 @@ class FrameBase(BaseModel):
     nix: Optional[Dict[str, Any]] = None
     buildroot: Optional[Dict[str, Any]] = None
     rpios: Optional[Dict[str, Any]] = None
+    terminal_history: Optional[List[str]] = None
     last_successful_deploy: Optional[Dict[str, Any]]
     last_successful_deploy_at: Optional[datetime]
     active_connections: Optional[int] = None
@@ -122,6 +123,7 @@ class FrameUpdateRequest(BaseModel):
     nix: Optional[Dict[str, Any]] = None
     buildroot: Optional[Dict[str, Any]] = None
     rpios: Optional[Dict[str, Any]] = None
+    terminal_history: Optional[List[str]] = None
     next_action: Optional[str] = None
 
 

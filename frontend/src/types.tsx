@@ -85,6 +85,7 @@ export interface FrameType {
   nix?: FrameNixConfig
   buildroot?: FrameBuildrootConfig
   rpios?: FrameRpiOSConfig
+  terminal_history?: string[]
   active_connections?: number
 }
 

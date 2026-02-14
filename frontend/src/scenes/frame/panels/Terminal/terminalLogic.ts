@@ -3,57 +3,24 @@ import { actions, afterMount, beforeUnmount, connect, kea, key, listeners, path,
 import type { terminalLogicType } from './terminalLogicType'
 import { frameLogic } from '../../frameLogic'
 import { getBasePath } from '../../../../utils/getBasePath'
+import { apiFetch } from '../../../../utils/apiFetch'
 
 export interface TerminalLogicProps {
   frameId: number
 }
 
-// Convert a string with ANSI escape codes to HTML with inline styles.
-// Supports basic 16-color foreground and background codes and reset (0).
-function ansiToHtml(value: string): string {
-  // remove unsupported escape sequences like terminal title and bracketed paste mode
-  value = value.replace(/\x1b\]0;.*?\x07/g, '').replace(/\x1b\[[?]2004[hl]/g, '')
+const MAX_HISTORY_SIZE = 200
 
-  const ansiRegex = /\x1b\[([0-9;]*)m/g
-  const colors = ['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white']
-  const escapeHtml = (str: string): string =>
-    str.replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]!))
-  let result = ''
-  let lastIndex = 0
-  const stack: string[] = []
-  let match: RegExpExecArray | null
-  while ((match = ansiRegex.exec(value)) !== null) {
-    result += escapeHtml(value.slice(lastIndex, match.index))
-    lastIndex = ansiRegex.lastIndex
-    const codes = match[1].split(';').filter(Boolean).map(Number)
-    for (const code of codes) {
-      if (code === 0) {
-        while (stack.length) {
-          result += stack.pop()
-        }
-      } else if (code === 1) {
-        result += '<span style="font-weight:bold">'
-        stack.push('</span>')
-      } else if (code >= 30 && code <= 37) {
-        result += `<span style="color:${colors[code - 30]}">`
-        stack.push('</span>')
-      } else if (code >= 90 && code <= 97) {
-        result += `<span style="color:${colors[code - 90]}">`
-        stack.push('</span>')
-      } else if (code >= 40 && code <= 47) {
-        result += `<span style="background-color:${colors[code - 40]}">`
-        stack.push('</span>')
-      } else if (code >= 100 && code <= 107) {
-        result += `<span style="background-color:${colors[code - 100]}">`
-        stack.push('</span>')
-      }
-    }
+function nextCommandHistory(history: string[], command: string): string[] {
+  const trimmed = command.trim()
+  if (!trimmed) {
+    return history
   }
-  result += escapeHtml(value.slice(lastIndex))
-  while (stack.length) {
-    result += stack.pop()
+  if (history[history.length - 1] === trimmed) {
+    return history
   }
-  return result
+  const next = [...history, trimmed]
+  return next.length > MAX_HISTORY_SIZE ? next.slice(next.length - MAX_HISTORY_SIZE) : next
 }
 
 export const terminalLogic = kea<terminalLogicType>([
@@ -68,11 +35,18 @@ export const terminalLogic = kea<terminalLogicType>([
     disconnect: true,
     appendText: (text: string) => ({ text }),
     setLines: (lines: string[]) => ({ lines }),
-    sendCommand: (command: string) => ({ command }),
+    setCommandInput: (commandInput: string) => ({ commandInput }),
+    setCommandFromHistory: (commandInput: string) => ({ commandInput }),
+    sendCommand: true,
+    executeCommand: (command: string) => ({ command }),
     sendKeys: (keys: string) => ({ keys }),
+    historyPrev: true,
+    historyNext: true,
+    initializeHistory: (history: string[]) => ({ history }),
+    setHistoryIndex: (historyIndex: number | null) => ({ historyIndex }),
+    setNavigationDraft: (navigationDraft: string) => ({ navigationDraft }),
   }),
   reducers({
-    // ansi encoded lines
     lines: [
       [],
       {
@@ -86,14 +60,45 @@ export const terminalLogic = kea<terminalLogicType>([
         },
       },
     ],
+    commandInput: [
+      '',
+      {
+        setCommandInput: (_, { commandInput }) => commandInput,
+        setCommandFromHistory: (_, { commandInput }) => commandInput,
+        executeCommand: () => '',
+      },
+    ],
+    commandHistory: [
+      [] as string[],
+      {
+        initializeHistory: (_, { history }) => history,
+        executeCommand: (state, { command }) => nextCommandHistory(state, command),
+      },
+    ],
+    historyIndex: [
+      null as number | null,
+      {
+        setHistoryIndex: (_, { historyIndex }) => historyIndex,
+        setCommandInput: () => null,
+        executeCommand: () => null,
+      },
+    ],
+    navigationDraft: [
+      '',
+      {
+        setNavigationDraft: (_, { navigationDraft }) => navigationDraft,
+        setCommandInput: (_, { commandInput }) => commandInput,
+        executeCommand: () => '',
+      },
+    ],
   }),
-  listeners(({ actions, values, cache }) => ({
+  listeners(({ actions, values, cache, props }) => ({
     connect: () => {
       if (cache.ws) {
-        // already connected
         return
       }
       const { frame } = values
+      actions.initializeHistory(frame.terminal_history || [])
       if (frame.agent?.agentEnabled) {
         actions.appendText(
           '*** Terminal access is only available over SSH; agent connections do not provide a shell. ***\n'
@@ -111,8 +116,48 @@ export const terminalLogic = kea<terminalLogicType>([
         cache.ws = null
       }
     },
-    sendCommand: ({ command }) => {
+    sendCommand: async () => {
+      const command = values.commandInput.trim()
+      if (!command) {
+        return
+      }
+      const updatedHistory = nextCommandHistory(values.commandHistory, command)
+      actions.executeCommand(command)
       cache.ws?.send(command + '\n')
+      await apiFetch(`/api/frames/${props.frameId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ terminal_history: updatedHistory }),
+      })
+    },
+    historyPrev: () => {
+      const history = values.commandHistory
+      if (!history.length) {
+        return
+      }
+      if (values.historyIndex === null) {
+        actions.setNavigationDraft(values.commandInput)
+        actions.setHistoryIndex(history.length - 1)
+        actions.setCommandFromHistory(history[history.length - 1])
+        return
+      }
+      const nextIndex = Math.max(0, values.historyIndex - 1)
+      actions.setHistoryIndex(nextIndex)
+      actions.setCommandFromHistory(history[nextIndex])
+    },
+    historyNext: () => {
+      const history = values.commandHistory
+      if (!history.length || values.historyIndex === null) {
+        return
+      }
+      if (values.historyIndex >= history.length - 1) {
+        actions.setHistoryIndex(null)
+        actions.setCommandFromHistory(values.navigationDraft)
+        return
+      }
+      const nextIndex = values.historyIndex + 1
+      actions.setHistoryIndex(nextIndex)
+      actions.setCommandFromHistory(history[nextIndex])
     },
     sendKeys: ({ keys }) => {
       cache.ws?.send(keys)

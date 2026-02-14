@@ -73,6 +73,7 @@ class Frame(Base):
     nix = mapped_column(JSON, nullable=True)
     buildroot = mapped_column(JSON, nullable=True)
     rpios = mapped_column(JSON, nullable=True)
+    terminal_history = mapped_column(JSON, nullable=True, default=list)
 
     # not used
     apps = mapped_column(JSON, nullable=True)
@@ -131,6 +132,7 @@ class Frame(Base):
             'nix': self.nix,
             'buildroot': self.buildroot,
             'rpios': self.rpios,
+            'terminal_history': self.terminal_history,
             'last_successful_deploy': self.last_successful_deploy,
             'last_successful_deploy_at': self.last_successful_deploy_at.replace(tzinfo=timezone.utc).isoformat() if self.last_successful_deploy_at else None,
         }

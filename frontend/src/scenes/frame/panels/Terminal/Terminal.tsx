@@ -65,9 +65,8 @@ function ansiToHtml(value: string): string {
 
 export function Terminal() {
   const { frameId } = useValues(frameLogic)
-  const { lines } = useValues(terminalLogic({ frameId }))
-  const { connect, sendCommand, sendKeys } = useActions(terminalLogic({ frameId }))
-  const [cmd, setCmd] = useState('')
+  const { lines, commandInput } = useValues(terminalLogic({ frameId }))
+  const { connect, sendCommand, sendKeys, setCommandInput, historyPrev, historyNext } = useActions(terminalLogic({ frameId }))
   const virtuosoRef = useRef<VirtuosoHandle>(null)
   const [atBottom, setAtBottom] = useState(true)
   const shouldStickToBottomRef = useRef(true)
@@ -105,15 +104,20 @@ export function Terminal() {
     URL.revokeObjectURL(url)
   }
 
-  const handleCommand = () => {
-    sendCommand(cmd)
-    setCmd('')
-  }
-
   const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       e.preventDefault()
-      handleCommand()
+      sendCommand()
+      return
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      historyPrev()
+      return
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      historyNext()
     }
   }
 
@@ -134,10 +138,10 @@ export function Terminal() {
       .join('')
 
   const handleSendKeys = (withCtrl: boolean) => {
-    if (!cmd.trim()) {
+    if (!commandInput.trim()) {
       return
     }
-    const payload = withCtrl ? translateCtrlKeys(cmd) : cmd
+    const payload = withCtrl ? translateCtrlKeys(commandInput) : commandInput
     if (payload) {
       sendKeys(payload)
     }
@@ -187,14 +191,14 @@ export function Terminal() {
       )}
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
         <input
-          value={cmd}
-          onChange={(e) => setCmd(e.target.value)}
+          value={commandInput}
+          onChange={(e) => setCommandInput(e.target.value)}
           onKeyDown={handleKeyDown}
           autoFocus
           className="w-full focus:outline-none p-1 rounded bg-black text-white"
           placeholder="enter command"
         />
-        <Button color="secondary" size="small" onClick={() => handleCommand()}>
+        <Button color="secondary" size="small" onClick={() => sendCommand()}>
           Send command
         </Button>
         <Button color="secondary" size="small" onClick={() => handleSendKeys(false)}>
