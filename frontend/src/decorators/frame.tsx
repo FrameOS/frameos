@@ -75,18 +75,6 @@ export function frameImageUrl(frame: FrameType): string | null {
   }
 }
 
-export function frameProxyUrl(frame: FrameType): string {
-  return `/api/frames/${frame.id}/proxy/`
-}
-
-export function frameProxyControlUrl(frame: FrameType): string {
-  return `/api/frames/${frame.id}/proxy/c`
-}
-
-export function frameProxyImageUrl(frame: FrameType): string {
-  return `/api/frames/${frame.id}/proxy/image`
-}
-
 interface FrameConnectionProps {
   frame: FrameType
 }

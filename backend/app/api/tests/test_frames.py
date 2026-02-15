@@ -1,7 +1,6 @@
 import json
-from urllib.parse import parse_qs, urlsplit
 import pytest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 import httpx
 
 from app.models import new_frame
@@ -189,80 +188,6 @@ async def test_api_frame_delete_not_found(async_client):
     resp = await async_client.delete('/api/frames/999999')
     assert resp.status_code == 404
     assert resp.json()['detail'] == 'Frame not found'
-
-@pytest.mark.asyncio
-async def test_api_frame_proxy_get_forwards_query_and_headers(async_client, db, redis):
-    frame = await new_frame(db, redis, 'ProxyFrameGet', 'localhost', 'localhost')
-
-    request_captured = {}
-
-    async def mock_request(method, url, **kwargs):
-        request_captured['method'] = method
-        request_captured['url'] = url
-        request_captured['headers'] = kwargs.get('headers') or {}
-
-        return httpx.Response(
-            200,
-            content=b'proxy-ok',
-            headers={'content-type': 'text/plain', 'x-frame-proxy': 'yes'},
-        )
-
-    with patch('app.api.frames.httpx.AsyncClient') as mock_client_cls:
-        mock_client = AsyncMock()
-        mock_client.request.side_effect = mock_request
-        mock_client_cls.return_value.__aenter__.return_value = mock_client
-        mock_client_cls.return_value.__aexit__.return_value = False
-        response = await async_client.get(
-            f'/api/frames/{frame.id}/proxy/state?foo=bar',
-            headers={'X-Test-Header': 'value'},
-        )
-
-    assert response.status_code == 200
-    assert response.content == b'proxy-ok'
-    assert response.headers['x-frame-proxy'] == 'yes'
-    assert request_captured['method'] == 'GET'
-    parsed_url = urlsplit(request_captured['url'])
-    query = parse_qs(parsed_url.query)
-    assert parsed_url.scheme == 'https'
-    assert parsed_url.netloc == f'localhost:{frame.tls_port}'
-    assert parsed_url.path == '/state'
-    assert query.get('foo') == ['bar']
-    assert query.get('k') == [frame.frame_access_key]
-    assert request_captured['headers'].get('X-Test-Header') == 'value'
-
-
-@pytest.mark.asyncio
-async def test_api_frame_proxy_post_forwards_body(async_client, db, redis):
-    frame = await new_frame(db, redis, 'ProxyFramePost', 'localhost', 'localhost')
-
-    request_captured = {}
-
-    async def mock_request(method, url, **kwargs):
-        request_captured['method'] = method
-        request_captured['url'] = url
-        request_captured['content'] = kwargs.get('content')
-        return httpx.Response(
-            201,
-            content=b'{"created":true}',
-            headers={'content-type': 'application/json'},
-        )
-
-    with patch('app.api.frames.httpx.AsyncClient') as mock_client_cls:
-        mock_client = AsyncMock()
-        mock_client.request.side_effect = mock_request
-        mock_client_cls.return_value.__aenter__.return_value = mock_client
-        mock_client_cls.return_value.__aexit__.return_value = False
-        response = await async_client.post(
-            f'/api/frames/{frame.id}/proxy/upload',
-            content=b'binary-body',
-            headers={'Content-Type': 'application/octet-stream'},
-        )
-
-    assert response.status_code == 201
-    assert response.content == b'{"created":true}'
-    assert request_captured['method'] == 'POST'
-    assert request_captured['url'] == f'https://localhost:{frame.tls_port}/upload'
-    assert request_captured['content'] == b'binary-body'
 
 @pytest.mark.asyncio
 async def test_api_frame_get_image_with_cookie_no_token(no_auth_client, db, redis):

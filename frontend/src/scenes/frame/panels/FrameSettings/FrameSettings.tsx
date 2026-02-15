@@ -5,15 +5,7 @@ import { framesModel } from '../../../../models/framesModel'
 import { Form, Group } from 'kea-forms'
 import { TextInput } from '../../../../components/TextInput'
 import { Select } from '../../../../components/Select'
-import {
-  frameControlUrl,
-  frameImageUrl,
-  frameProxyControlUrl,
-  frameProxyImageUrl,
-  frameProxyUrl,
-  frameRootUrl,
-  frameUrl,
-} from '../../../../decorators/frame'
+import { frameControlUrl, frameImageUrl, frameRootUrl, frameUrl } from '../../../../decorators/frame'
 import { frameLogic } from '../../frameLogic'
 import { downloadJson } from '../../../../utils/downloadJson'
 import { Field } from '../../../../components/Field'
@@ -106,9 +98,6 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
   const url = frameUrl(frame)
   const controlUrl = frameControlUrl(frame)
   const imageUrl = frameImageUrl(frame)
-  const proxyUrl = frameProxyUrl(frame)
-  const proxyControlUrl = frameProxyControlUrl(frame)
-  const proxyImageUrl = frameProxyImageUrl(frame)
   const tlsEnabled = !!(frameForm.enable_tls ?? frame.enable_tls)
 
   const palette = withCustomPalette[frame.device || '']
@@ -311,38 +300,6 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                           {tlsEnabled ? 'HTTPS enabled' : 'HTTPS disabled'}
                         </Tag>
                       </button>
-                    </div>
-                  </Field>
-                  <Field
-                    name="_noop"
-                    label="Load via backend proxy"
-                    tooltip="Load pages on the frame through this backend. Useful if the frame is behind a firewall. With HTTPS enabled (strongly recommended), the proxy also verifies the frame's TLS certificate matches the one set below."
-                  >
-                    <div className="w-full flex flex-wrap gap-2 items-center">
-                      <A
-                        href={proxyUrl}
-                        target="_blank"
-                        rel="noreferrer noopener"
-                        className="text-blue-400 hover:underline"
-                      >
-                        Frame URL
-                      </A>
-                      <A
-                        href={proxyControlUrl}
-                        target="_blank"
-                        rel="noreferrer noopener"
-                        className="text-blue-400 hover:underline"
-                      >
-                        Control URL
-                      </A>
-                      <A
-                        href={proxyImageUrl}
-                        target="_blank"
-                        rel="noreferrer noopener"
-                        className="text-blue-400 hover:underline"
-                      >
-                        Image URL
-                      </A>
                     </div>
                   </Field>
                 </>

@@ -34,13 +34,8 @@ from fastapi import (
     Query,
     Request,
     UploadFile,
-    WebSocket,
-    WebSocketDisconnect,
 )
 from fastapi.responses import Response, StreamingResponse
-from starlette.websockets import WebSocketState
-from websockets.asyncio.client import connect as ws_connect
-from websockets.exceptions import ConnectionClosed
 from sqlalchemy.orm import Session
 
 # local ---------------------------------------------------------------------
@@ -427,56 +422,6 @@ async def _forward_frame_request(
     )
 
 
-_PROXY_REQUEST_BLOCKED_HEADERS = {
-    "host",
-    "content-length",
-    "connection",
-    "upgrade",
-    "proxy-connection",
-    "keep-alive",
-    "transfer-encoding",
-    "te",
-    "trailer",
-}
-_PROXY_RESPONSE_BLOCKED_HEADERS = {
-    "content-length",
-    "connection",
-    "upgrade",
-    "proxy-connection",
-    "keep-alive",
-    "transfer-encoding",
-    "te",
-    "trailer",
-}
-
-
-def _append_request_query(path: str, request: Request) -> str:
-    query = request.url.query
-    if not query:
-        return path
-    separator = "&" if "?" in path else "?"
-    return f"{path}{separator}{query}"
-
-
-def _proxy_request_headers(request: Request, frame: Frame) -> httpx.Headers:
-    headers = httpx.Headers()
-    for key, value in request.headers.items():
-        lower_key = key.lower()
-        if lower_key in _PROXY_REQUEST_BLOCKED_HEADERS:
-            continue
-        headers[key] = value
-    return httpx.Headers(_auth_headers(frame, dict(headers)))
-
-
-def _proxy_response_headers(headers: httpx.Headers) -> dict[str, str]:
-    filtered: dict[str, str] = {}
-    for key, value in headers.items():
-        if key.lower() in _PROXY_RESPONSE_BLOCKED_HEADERS:
-            continue
-        filtered[key] = value
-    return filtered
-
-
 async def _remote_file_md5(
     db: Session,
     redis: Redis,
@@ -684,118 +629,6 @@ async def api_frame_ping(
             status=None,
             message=_truncate_text(str(exc)),
         )
-
-
-@api_with_auth.api_route(
-    "/frames/{id:int}/proxy/{path:path}",
-    methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
-)
-async def api_frame_proxy(
-    id: int,
-    path: str,
-    request: Request,
-    db: Session = Depends(get_db),
-):
-    frame = db.get(Frame, id) or _not_found()
-
-    normalized_path = f"/{(path or '').lstrip('/')}"
-    proxied_path = _append_request_query(normalized_path, request)
-    target_url = _build_frame_url(frame, proxied_path, request.method)
-    body = await request.body()
-    headers = _proxy_request_headers(request, frame)
-    verify = _httpx_verify(frame)
-
-    async with httpx.AsyncClient(verify=verify, timeout=None) as client:
-        try:
-            response = await client.request(
-                request.method,
-                target_url,
-                content=body,
-                headers=headers,
-            )
-        except httpx.ReadTimeout:
-            raise HTTPException(
-                status_code=HTTPStatus.REQUEST_TIMEOUT,
-                detail=f"Timeout to {target_url}",
-            )
-        except Exception as exc:
-            raise HTTPException(
-                status_code=HTTPStatus.BAD_GATEWAY,
-                detail=f"Frame proxy request failed: {exc}",
-            )
-
-    return Response(
-        content=response.content,
-        status_code=response.status_code,
-        headers=_proxy_response_headers(response.headers),
-        media_type=response.headers.get("content-type"),
-    )
-
-
-@api_with_auth.websocket("/frames/{id:int}/proxy/{path:path}")
-async def api_frame_proxy_ws(
-    websocket: WebSocket,
-    id: int,
-    path: str,
-    db: Session = Depends(get_db),
-):
-    frame = db.get(Frame, id) or _not_found()
-    scheme, port = _frame_scheme_port(frame)
-    ws_scheme = "wss" if scheme == "https" else "ws"
-    normalized_path = f"/{(path or '').lstrip('/')}"
-    query = websocket.url.query
-    frame_path = f"{normalized_path}?{query}" if query else normalized_path
-    target_path = _build_frame_path(frame, frame_path, "GET")
-    target_url = f"{ws_scheme}://{frame.frame_host}:{port}{target_path}"
-
-    outbound_headers: dict[str, str] = {}
-    if frame.frame_access != "public" and frame.frame_access_key:
-        outbound_headers["Authorization"] = f"Bearer {frame.frame_access_key}"
-
-    verify = _httpx_verify(frame)
-    await websocket.accept()
-
-    try:
-        async with ws_connect(
-            target_url,
-            additional_headers=outbound_headers,
-            ssl=verify if frame.enable_tls else None,
-        ) as remote_ws:
-            async def client_to_frame() -> None:
-                try:
-                    while True:
-                        message = await websocket.receive()
-                        msg_type = message.get("type")
-                        if msg_type == "websocket.disconnect":
-                            break
-                        if message.get("text") is not None:
-                            await remote_ws.send(message["text"])
-                        elif message.get("bytes") is not None:
-                            await remote_ws.send(message["bytes"])
-                except WebSocketDisconnect:
-                    pass
-                finally:
-                    with contextlib.suppress(Exception):
-                        await remote_ws.close()
-
-            async def frame_to_client() -> None:
-                try:
-                    async for incoming in remote_ws:
-                        if isinstance(incoming, bytes):
-                            await websocket.send_bytes(incoming)
-                        else:
-                            await websocket.send_text(incoming)
-                except ConnectionClosed:
-                    pass
-                finally:
-                    if websocket.application_state == WebSocketState.CONNECTED:
-                        with contextlib.suppress(Exception):
-                            await websocket.close()
-
-            await asyncio.gather(client_to_frame(), frame_to_client())
-    except Exception:
-        if websocket.application_state == WebSocketState.CONNECTED:
-            await websocket.close(code=1011)
 
 
 @api_with_auth.post("/frames/{id:int}/event/{event}")
