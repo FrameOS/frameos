@@ -73,6 +73,9 @@ suite "TLS proxy lifecycle":
     let stoppedPids = readFile(stoppedFile).splitLines().filterIt(it.len > 0)
     check firstPid in stoppedPids
 
+    check waitUntil(proc(): bool =
+      fileExists(pidFile) and readFile(pidFile).splitLines().filterIt(it.len > 0).len >= 2
+    )
     let startedPids = readFile(pidFile).splitLines().filterIt(it.len > 0)
     check startedPids.len >= 2
 
