@@ -95,6 +95,9 @@ function CertificateTriangle({
     tls_server_cert_not_valid_after:
       frameForm?.tls_server_cert_not_valid_after ?? frame?.tls_server_cert_not_valid_after,
   })
+  if (certificateStatus !== 'expired' && certificateStatus !== 'expiring') {
+    return null
+  }
   return (
     <span
       title={
