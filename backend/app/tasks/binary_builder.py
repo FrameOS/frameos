@@ -194,7 +194,7 @@ class FrameBinaryBuilder:
                 if should_suggest_clearing_build_cache(error_message):
                     await self._log(
                         "stderr",
-                        f"{icon} If the failure is caused by a stale linker cache, clear the build cache (~/.cache/frameos/cross) and try deploying again.",
+                        f"{icon} If the failure is caused by a stale linker cache, clear the build cache (press ... in logs or settings) and try deploying again.",
                     )
                 if force_cross_compile:
                     raise
