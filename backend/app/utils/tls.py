@@ -116,4 +116,4 @@ def parse_certificate_not_valid_after(pem_certificate: Optional[str]) -> Optiona
     if hasattr(cert, "not_valid_after_utc"):
         return cert.not_valid_after_utc
 
-    return cert.not_valid_after.replace(tzinfo=timezone.utc)
+    return cert.not_valid_after
