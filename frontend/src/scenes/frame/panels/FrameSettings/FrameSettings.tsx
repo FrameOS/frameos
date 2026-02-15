@@ -25,11 +25,11 @@ import { Spinner } from '../../../../components/Spinner'
 import { H6 } from '../../../../components/H6'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
 import { ArrowDownTrayIcon, ArrowPathIcon, ArrowUpTrayIcon } from '@heroicons/react/24/outline'
-import { PlusIcon, TrashIcon } from '@heroicons/react/24/solid'
+import { ExclamationTriangleIcon, PlusIcon, TrashIcon } from '@heroicons/react/24/solid'
 import { panelsLogic } from '../panelsLogic'
 import { Switch } from '../../../../components/Switch'
 import { NumberTextInput } from '../../../../components/NumberTextInput'
-import { Palette } from '../../../../types'
+import { FrameType, Palette } from '../../../../types'
 import { A } from 'kea-router'
 import { timezoneOptions } from '../../../../decorators/timezones'
 import { TextArea } from '../../../../components/TextArea'
@@ -39,6 +39,7 @@ import { normalizeSshKeys } from '../../../../utils/sshKeys'
 import { Label } from '../../../../components/Label'
 import { logsLogic } from '../Logs/logsLogic'
 import { Tag } from '../../../../components/Tag'
+import { getCertificateValidityInfo, getFrameCertificateStatus } from '../../../../utils/certificates'
 
 export interface FrameSettingsProps {
   className?: string
@@ -48,19 +49,66 @@ export interface FrameSettingsProps {
 
 const customModule = `{ lib, ... }:\n{\n  # boot.kernelParams = [ \"quiet\" ];\n}\n`
 
-function formatValidityDate(value?: string): string | null {
-  if (!value) {
-    return null
+function getCertificateHint(certificateName: string, value?: string): JSX.Element | undefined {
+  const validityInfo = getCertificateValidityInfo(value)
+
+  if (!validityInfo) {
+    return undefined
   }
 
-  const parsed = new Date(value)
-  if (Number.isNaN(parsed.getTime())) {
-    return value
-  }
+  const colorClass =
+    validityInfo.severity === 'expired'
+      ? 'text-red-300'
+      : validityInfo.severity === 'expiring'
+      ? 'text-yellow-300'
+      : 'text-gray-300'
 
-  return parsed.toLocaleString()
+  return (
+    <div className={colorClass} title={validityInfo.exactDateTime}>
+      {(validityInfo.severity === 'expired' || validityInfo.severity === 'expiring') && (
+        <ExclamationTriangleIcon
+          className={
+            validityInfo.severity === 'expired'
+              ? 'inline-block mr-1 h-4 w-4 text-red-300'
+              : 'inline-block mr-1 h-4 w-4 text-yellow-300'
+          }
+        />
+      )}
+      {certificateName} {validityInfo.humanText}
+      {validityInfo.severity === 'expired' || validityInfo.severity === 'expiring'
+        ? ' - Please regenerate and redeploy.'
+        : ''}
+    </div>
+  )
 }
 
+function CertificateTriangle({
+  frame,
+  frameForm,
+}: {
+  frame: FrameType | null
+  frameForm: Partial<FrameType> | null
+}): JSX.Element | null {
+  const certificateStatus = getFrameCertificateStatus({
+    tls_client_ca_cert_not_valid_after:
+      frameForm?.tls_client_ca_cert_not_valid_after ?? frame?.tls_client_ca_cert_not_valid_after,
+    tls_server_cert_not_valid_after:
+      frameForm?.tls_server_cert_not_valid_after ?? frame?.tls_server_cert_not_valid_after,
+  })
+  return (
+    <span
+      title={
+        certificateStatus === 'expired'
+          ? 'HTTPS certificates have expired. Please regenerate and redeploy.'
+          : 'HTTPS certificates are expiring soon. Please regenerate and redeploy.'
+      }
+    >
+      <ExclamationTriangleIcon
+        className={certificateStatus === 'expired' ? 'h-4 w-4 text-red-300' : 'h-4 w-4 text-yellow-300'}
+      />
+    </span>
+  )
+}
 function scrollToFrameHttpApiSection(e: React.MouseEvent): void {
   if (typeof document === 'undefined') {
     return
@@ -309,8 +357,9 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                         className="cursor-pointer"
                         aria-label="Jump to HTTP API on frame settings"
                       >
-                        <Tag color={tlsEnabled ? 'teal' : 'gray'}>
+                        <Tag color={tlsEnabled ? 'teal' : 'gray'} className="flex gap-1">
                           {tlsEnabled ? 'HTTPS enabled' : 'HTTPS disabled'}
+                          <CertificateTriangle frame={frame} frameForm={frameForm} />
                         </Tag>
                       </button>
                     </div>
@@ -878,18 +927,10 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                 }
                 tooltip="Used by the backend to validate HTTPS connections to this frame when TLS is enabled."
                 secret={!frameFormTouches.tls_client_ca_cert && !!frameForm.tls_client_ca_cert}
-                hint={
-                  formatValidityDate(
-                    frameForm.tls_client_ca_cert_not_valid_after ?? frame.tls_client_ca_cert_not_valid_after
-                  ) ? (
-                    <div className="text-gray-300">
-                      Root CA certificate valid until:{' '}
-                      {formatValidityDate(
-                        frameForm.tls_client_ca_cert_not_valid_after ?? frame.tls_client_ca_cert_not_valid_after
-                      )}
-                    </div>
-                  ) : undefined
-                }
+                hint={getCertificateHint(
+                  'Root CA certificate',
+                  frameForm.tls_client_ca_cert_not_valid_after ?? frame.tls_client_ca_cert_not_valid_after
+                )}
               >
                 <TextArea name="tls_client_ca_cert" rows={4} placeholder="-----BEGIN CERTIFICATE-----" />
               </Field>
@@ -898,18 +939,10 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                 label="HTTPS frame certificate"
                 tooltip="PEM certificate used by Caddy for HTTPS on this frame."
                 secret={!frameFormTouches.tls_server_cert && !!frameForm.tls_server_cert}
-                hint={
-                  formatValidityDate(
-                    frameForm.tls_server_cert_not_valid_after ?? frame.tls_server_cert_not_valid_after
-                  ) ? (
-                    <div className="text-gray-300">
-                      Server certificate valid until:{' '}
-                      {formatValidityDate(
-                        frameForm.tls_server_cert_not_valid_after ?? frame.tls_server_cert_not_valid_after
-                      )}
-                    </div>
-                  ) : undefined
-                }
+                hint={getCertificateHint(
+                  'Server certificate',
+                  frameForm.tls_server_cert_not_valid_after ?? frame.tls_server_cert_not_valid_after
+                )}
               >
                 <TextArea name="tls_server_cert" rows={4} placeholder="-----BEGIN CERTIFICATE-----" />
               </Field>
@@ -1486,6 +1519,14 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
     </div>
   )
 }
+
 FrameSettings.PanelTitle = function FrameSettingsPanelTitle(): JSX.Element {
-  return <>Settings</>
+  const { frame, frameForm } = useValues(frameLogic)
+
+  return (
+    <div className="flex items-center gap-1">
+      <span>Settings</span>
+      <CertificateTriangle frame={frame} frameForm={frameForm} />
+    </div>
+  )
 }
