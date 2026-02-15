@@ -44,7 +44,7 @@ proc startTlsProxy*(frameConfig: FrameConfig, logger: Logger) =
 
   let tlsPort = if frameConfig.tlsPort > 0: frameConfig.tlsPort else: 8443
   let upstreamPort = if frameConfig.framePort > 0: frameConfig.framePort else: 8787
-  let caddyVendorPath = "/srv/frameos/vendor/caddy"
+  let caddyVendorPath = getEnv("FRAMEOS_TLS_PROXY_VENDOR_PATH", "/srv/frameos/vendor/caddy")
   let certPath = caddyVendorPath / "frameos-tls-cert.pem"
   let keyPath = caddyVendorPath / "frameos-tls-key.pem"
   let caddyfilePath = caddyVendorPath / "frameos-caddyfile"

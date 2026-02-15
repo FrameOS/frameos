@@ -13,7 +13,7 @@ var loggedEvents: seq[string] = @[]
 proc testLogger(): Logger =
   Logger(
     log: proc(payload: JsonNode) =
-      loggedEvents.add(payload{"event"}.getStr(""))
+    loggedEvents.add(payload{"event"}.getStr(""))
   )
 
 proc tlsConfig(port: int): FrameConfig =
@@ -33,7 +33,7 @@ proc waitUntil(predicate: proc(): bool {.closure.}, timeoutMs = 2000, stepMs = 5
     sleep(stepMs)
   predicate()
 
-proc writeFakeCaddy(tempDir, pidFile, stoppedFile: string) =
+proc writeFakeCaddy(tempDir, pidFile, stoppedFile, vendorDir: string) =
   let fakeCaddyPath = tempDir / "caddy"
   writeFile(fakeCaddyPath, """#!/bin/sh
 set -eu
@@ -44,6 +44,7 @@ while true; do sleep 1; done
   setFilePermissions(fakeCaddyPath, {fpUserRead, fpUserWrite, fpUserExec})
   putEnv("TLS_PROXY_TEST_PID_FILE", pidFile)
   putEnv("TLS_PROXY_TEST_STOPPED_FILE", stoppedFile)
+  putEnv("FRAMEOS_TLS_PROXY_VENDOR_PATH", vendorDir)
 
 suite "TLS proxy lifecycle":
   test "starting when one is already running stops previous process":
@@ -58,7 +59,8 @@ suite "TLS proxy lifecycle":
       removeFile(pidFile)
     if fileExists(stoppedFile):
       removeFile(stoppedFile)
-    writeFakeCaddy(tempDir, pidFile, stoppedFile)
+    let vendorDir = tempDir / "vendor"
+    writeFakeCaddy(tempDir, pidFile, stoppedFile, vendorDir)
     putEnv("PATH", tempDir & ":" & oldPath)
 
     startTlsProxy(tlsConfig(18443), logger)
@@ -76,6 +78,7 @@ suite "TLS proxy lifecycle":
 
     stopTlsProxy(logger)
     putEnv("PATH", oldPath)
+    delEnv("FRAMEOS_TLS_PROXY_VENDOR_PATH")
 
   test "starting with TLS disabled stops existing proxy":
     loggedEvents = @[]
@@ -89,7 +92,8 @@ suite "TLS proxy lifecycle":
       removeFile(pidFile)
     if fileExists(stoppedFile):
       removeFile(stoppedFile)
-    writeFakeCaddy(tempDir, pidFile, stoppedFile)
+    let vendorDir = tempDir / "vendor"
+    writeFakeCaddy(tempDir, pidFile, stoppedFile, vendorDir)
     putEnv("PATH", tempDir & ":" & oldPath)
 
     startTlsProxy(tlsConfig(19443), logger)
@@ -104,3 +108,4 @@ suite "TLS proxy lifecycle":
 
     stopTlsProxy(logger)
     putEnv("PATH", oldPath)
+    delEnv("FRAMEOS_TLS_PROXY_VENDOR_PATH")
