@@ -54,6 +54,23 @@ export interface FrameSettingsProps {
 }
 
 const customModule = `{ lib, ... }:\n{\n  # boot.kernelParams = [ \"quiet\" ];\n}\n`
+
+function scrollToFrameHttpApiSection(e: React.MouseEvent): void {
+  if (typeof document === 'undefined') {
+    return
+  }
+  const frameSettingsDiv =
+    e.target instanceof HTMLElement
+      ? e.target.closest('#panel-settings-div')
+      : document.getElementById('panel-settings-div')
+  const scrollingOuterDiv = frameSettingsDiv?.parentElement
+  const httpApiSection = frameSettingsDiv?.querySelector('#frame-http-api-section')
+  if (scrollingOuterDiv && httpApiSection) {
+    const offset = httpApiSection.getBoundingClientRect().top - scrollingOuterDiv.getBoundingClientRect().top
+    scrollingOuterDiv.scrollTo({ top: offset, behavior: 'smooth' })
+  }
+}
+
 export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: FrameSettingsProps) {
   const { mode, frameId, frame, frameForm, frameFormTouches } = useValues(frameLogic)
   const {
@@ -112,7 +129,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
   }
 
   return (
-    <div className={className}>
+    <div className={className} id="panel-settings-div">
       {!hideDropdown ? (
         <div className="float-right">
           <DropdownMenu
@@ -278,7 +295,16 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                       >
                         Image URL
                       </A>
-                      <Tag color={tlsEnabled ? 'teal' : 'gray'}>{tlsEnabled ? 'HTTPS enabled' : 'HTTPS disabled'}</Tag>
+                      <button
+                        type="button"
+                        onClick={scrollToFrameHttpApiSection}
+                        className="cursor-pointer"
+                        aria-label="Jump to HTTP API on frame settings"
+                      >
+                        <Tag color={tlsEnabled ? 'teal' : 'gray'}>
+                          {tlsEnabled ? 'HTTPS enabled' : 'HTTPS disabled'}
+                        </Tag>
+                      </button>
                     </div>
                   </Field>
                   <Field name="_noop" label="Load via backend proxy">
@@ -803,7 +829,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
           </Field>
         </div>
 
-        <H6>
+        <H6 id="frame-http-api-section">
           HTTP API on frame <span className="text-gray-500">(backend &#8594; frame)</span>
         </H6>
         <div className="pl-2 @md:pl-8 space-y-2">
