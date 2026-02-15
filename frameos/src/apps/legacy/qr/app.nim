@@ -1,7 +1,7 @@
 import json, strformat
 import pixie
 import frameos/types
-import frameos/urls
+import frameos/utils/url
 import QRgen
 import QRgen/renderer
 

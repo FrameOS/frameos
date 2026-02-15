@@ -5,11 +5,10 @@ import pixie, json, times, strformat, strutils, sequtils, options, algorithm
 import std/monotimes
 
 import frameos/values
-import frameos/urls
+import frameos/utils/url
 import frameos/types
 import frameos/channels
 import frameos/utils/image
-import frameos/utils/url
 import frameos/utils/time
 import apps/render/split/app as render_splitApp
 import apps/render/image/app as render_imageApp

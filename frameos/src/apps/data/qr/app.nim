@@ -3,7 +3,7 @@ import QRgen
 import QRgen/renderer
 import frameos/apps
 import frameos/types
-import frameos/urls
+import frameos/utils/url
 
 type
   AppConfig* = object

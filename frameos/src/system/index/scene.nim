@@ -6,7 +6,7 @@ import zippy
 import frameos/values
 import frameos/types
 import frameos/channels
-import frameos/urls
+import frameos/utils/url
 import frameos/utils/time
 import apps/render/text/app as render_textApp
 import scenes/scenes as compiledScenes
