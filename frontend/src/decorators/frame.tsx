@@ -43,9 +43,13 @@ export function frameStatus(frame: FrameType): JSX.Element {
   )
 }
 
-export function frameUrl(frame: FrameType): string | null {
+export function frameRootUrl(frame: FrameType): string {
   const { scheme, port } = frameSchemeAndPort(frame)
-  const url = `${scheme}://${frame.frame_host}:${port}/`
+  return `${scheme}://${frame.frame_host}:${port}`
+}
+
+export function frameUrl(frame: FrameType): string | null {
+  const url = frameRootUrl(frame)
   if (frame.frame_access === 'public' || frame.frame_access === 'protected') {
     return url
   } else {
@@ -54,8 +58,7 @@ export function frameUrl(frame: FrameType): string | null {
 }
 
 export function frameControlUrl(frame: FrameType): string | null {
-  const { scheme, port } = frameSchemeAndPort(frame)
-  const url = `${scheme}://${frame.frame_host}:${port}/c`
+  const url = frameRootUrl(frame) + '/c'
   if (frame.frame_access === 'public') {
     return url
   } else {
@@ -64,15 +67,13 @@ export function frameControlUrl(frame: FrameType): string | null {
 }
 
 export function frameImageUrl(frame: FrameType): string | null {
-  const { scheme, port } = frameSchemeAndPort(frame)
-  const url = `${scheme}://${frame.frame_host}:${port}/image`
+  const url = frameRootUrl(frame) + `/image`
   if (frame.frame_access === 'public' || frame.frame_access === 'protected') {
     return url
   } else {
     return `${url}?k=${frame.frame_access_key}`
   }
 }
-
 
 export function frameProxyUrl(frame: FrameType): string {
   return `/api/frames/${frame.id}/proxy/`

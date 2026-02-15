@@ -11,6 +11,7 @@ import {
   frameProxyControlUrl,
   frameProxyImageUrl,
   frameProxyUrl,
+  frameRootUrl,
   frameUrl,
 } from '../../../../decorators/frame'
 import { frameLogic } from '../../frameLogic'
@@ -275,7 +276,11 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
             <div className="pl-2 @md:pl-8 space-y-2">
               {frame.frame_host ? (
                 <>
-                  <Field name="_noop" label="Load directly">
+                  <Field
+                    name="_noop"
+                    label="Load directly"
+                    tooltip={`Open URLs for this frame directly in the browser. Loads ${frameRootUrl(frame)}`}
+                  >
                     <div className="w-full flex flex-wrap gap-2 items-center">
                       <A href={url} target="_blank" rel="noreferrer noopener" className="text-blue-400 hover:underline">
                         Frame URL
@@ -308,7 +313,11 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                       </button>
                     </div>
                   </Field>
-                  <Field name="_noop" label="Load via backend proxy">
+                  <Field
+                    name="_noop"
+                    label="Load via backend proxy"
+                    tooltip="Load pages on the frame through this backend. Useful if the frame is behind a firewall. With HTTPS enabled (strongly recommended), the proxy also verifies the frame's TLS certificate matches the one set below."
+                  >
                     <div className="w-full flex flex-wrap gap-2 items-center">
                       <A
                         href={proxyUrl}
