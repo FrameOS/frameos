@@ -67,7 +67,8 @@ function scrollToFrameHttpApiSection(e: React.MouseEvent): void {
   const httpApiSection = frameSettingsDiv?.querySelector('#frame-http-api-section')
   if (scrollingOuterDiv && httpApiSection) {
     const offset = httpApiSection.getBoundingClientRect().top - scrollingOuterDiv.getBoundingClientRect().top
-    scrollingOuterDiv.scrollTo({ top: offset, behavior: 'smooth' })
+    scrollingOuterDiv.scrollTo({ top: offset, behavior: 'smooth' }) // works in frame settings panel
+    scrollingOuterDiv?.parentElement?.scrollTo({ top: offset, behavior: 'smooth' }) // works in sd card modal
   }
 }
 
