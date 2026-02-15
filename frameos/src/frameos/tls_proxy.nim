@@ -13,6 +13,10 @@ proc stopTlsProxy*(logger: Logger = nil) =
   try:
     if running(tlsProxyProcess):
       terminate(tlsProxyProcess)
+      discard waitForExit(tlsProxyProcess, 1500)
+      if running(tlsProxyProcess):
+        kill(tlsProxyProcess)
+        discard waitForExit(tlsProxyProcess, 500)
   except CatchableError:
     discard
 

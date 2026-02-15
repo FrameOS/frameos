@@ -822,6 +822,7 @@ import std/monotimes
 
 import frameos/values
 import frameos/types
+import frameos/urls
 import frameos/channels
 import frameos/utils/image
 import frameos/utils/url
