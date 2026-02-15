@@ -505,6 +505,8 @@ export const frameLogic = kea<frameLogicType>([
         tls_server_cert: data.tls_server_cert,
         tls_server_key: data.tls_server_key,
         tls_client_ca_cert: data.tls_client_ca_cert,
+        tls_server_cert_not_valid_after: data.tls_server_cert_not_valid_after,
+        tls_client_ca_cert_not_valid_after: data.tls_client_ca_cert_not_valid_after,
       })
       actions.touchFrameFormField('tls_server_cert')
       actions.touchFrameFormField('tls_server_key')

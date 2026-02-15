@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ipaddress
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -101,3 +102,18 @@ def generate_frame_tls_material(frame_host: str) -> dict[str, str]:
         "tls_server_cert": server_cert.public_bytes(serialization.Encoding.PEM).decode("utf-8"),
         "tls_client_ca_cert": ca_cert.public_bytes(serialization.Encoding.PEM).decode("utf-8"),
     }
+
+
+def parse_certificate_not_valid_after(pem_certificate: Optional[str]) -> Optional[datetime]:
+    if not pem_certificate:
+        return None
+
+    try:
+        cert = x509.load_pem_x509_certificate(pem_certificate.encode("utf-8"))
+    except ValueError:
+        return None
+
+    if hasattr(cert, "not_valid_after_utc"):
+        return cert.not_valid_after_utc
+
+    return cert.not_valid_after.replace(tzinfo=timezone.utc)

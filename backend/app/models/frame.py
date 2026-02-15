@@ -12,7 +12,7 @@ from app.database import Base
 from app.models.apps import get_app_configs
 from app.models.settings import get_settings_dict
 from app.utils.token import secure_token
-from app.utils.tls import generate_frame_tls_material
+from app.utils.tls import generate_frame_tls_material, parse_certificate_not_valid_after
 from app.websockets import publish_message
 
 
@@ -33,6 +33,8 @@ class Frame(Base):
     tls_server_cert = mapped_column(String, nullable=True)
     tls_server_key = mapped_column(String, nullable=True)
     tls_client_ca_cert = mapped_column(String, nullable=True)
+    tls_server_cert_not_valid_after = mapped_column(DateTime, nullable=True)
+    tls_client_ca_cert_not_valid_after = mapped_column(DateTime, nullable=True)
     ssh_user = mapped_column(String(50), nullable=True)
     ssh_pass = mapped_column(String(50), nullable=True)
     ssh_port = mapped_column(Integer, default=22)
@@ -95,6 +97,8 @@ class Frame(Base):
             'tls_server_cert': self.tls_server_cert,
             'tls_server_key': self.tls_server_key,
             'tls_client_ca_cert': self.tls_client_ca_cert,
+            'tls_server_cert_not_valid_after': self.tls_server_cert_not_valid_after.replace(tzinfo=timezone.utc).isoformat() if self.tls_server_cert_not_valid_after else None,
+            'tls_client_ca_cert_not_valid_after': self.tls_client_ca_cert_not_valid_after.replace(tzinfo=timezone.utc).isoformat() if self.tls_client_ca_cert_not_valid_after else None,
             'ssh_user': self.ssh_user,
             'ssh_pass': self.ssh_pass,
             'ssh_port': self.ssh_port,
@@ -179,6 +183,8 @@ async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, serve
         tls_server_cert=tls_material["tls_server_cert"],
         tls_server_key=tls_material["tls_server_key"],
         tls_client_ca_cert=tls_material["tls_client_ca_cert"],
+        tls_server_cert_not_valid_after=parse_certificate_not_valid_after(tls_material["tls_server_cert"]),
+        tls_client_ca_cert_not_valid_after=parse_certificate_not_valid_after(tls_material["tls_client_ca_cert"]),
         server_host=server_host,
         server_port=int(server_port),
         server_api_key=secure_token(32),
@@ -220,6 +226,13 @@ async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, serve
     await new_log(db, redis, int(frame.id), "welcome", f"The frame \"{frame.name}\" has been created!")
 
     return frame
+
+
+
+
+def refresh_tls_certificate_validity_dates(frame: Frame):
+    frame.tls_server_cert_not_valid_after = parse_certificate_not_valid_after(frame.tls_server_cert)
+    frame.tls_client_ca_cert_not_valid_after = parse_certificate_not_valid_after(frame.tls_client_ca_cert)
 
 
 async def update_frame(db: Session, redis: Redis, frame: Frame):

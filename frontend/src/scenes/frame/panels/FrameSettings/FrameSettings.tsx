@@ -48,6 +48,19 @@ export interface FrameSettingsProps {
 
 const customModule = `{ lib, ... }:\n{\n  # boot.kernelParams = [ \"quiet\" ];\n}\n`
 
+function formatValidityDate(value?: string): string | null {
+  if (!value) {
+    return null
+  }
+
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) {
+    return value
+  }
+
+  return parsed.toLocaleString()
+}
+
 function scrollToFrameHttpApiSection(e: React.MouseEvent): void {
   if (typeof document === 'undefined') {
     return
@@ -857,7 +870,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
               </Field>
               <Field
                 name="tls_client_ca_cert"
-                label="HTTPS root CA certificate"
+                label="HTTPS backend CA certificate"
                 labelRight={
                   <Button color="secondary" size="small" onClick={(e) => generateTlsCertificates()}>
                     Regenerate
@@ -865,20 +878,45 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                 }
                 tooltip="Used by the backend to validate HTTPS connections to this frame when TLS is enabled."
                 secret={!frameFormTouches.tls_client_ca_cert && !!frameForm.tls_client_ca_cert}
+                hint={
+                  formatValidityDate(
+                    frameForm.tls_client_ca_cert_not_valid_after ?? frame.tls_client_ca_cert_not_valid_after
+                  ) ? (
+                    <div className="text-gray-300">
+                      Root CA certificate valid until:{' '}
+                      {formatValidityDate(
+                        frameForm.tls_client_ca_cert_not_valid_after ?? frame.tls_client_ca_cert_not_valid_after
+                      )}
+                    </div>
+                  ) : undefined
+                }
               >
                 <TextArea name="tls_client_ca_cert" rows={4} placeholder="-----BEGIN CERTIFICATE-----" />
               </Field>
               <Field
                 name="tls_server_cert"
-                label="HTTPS server certificate"
+                label="HTTPS frame certificate"
                 tooltip="PEM certificate used by Caddy for HTTPS on this frame."
                 secret={!frameFormTouches.tls_server_cert && !!frameForm.tls_server_cert}
+                hint={
+                  formatValidityDate(
+                    frameForm.tls_server_cert_not_valid_after ?? frame.tls_server_cert_not_valid_after
+                  ) ? (
+                    <div className="text-gray-300">
+                      Server certificate valid until:{' '}
+                      {formatValidityDate(
+                        frameForm.tls_server_cert_not_valid_after ?? frame.tls_server_cert_not_valid_after
+                      )}
+                    </div>
+                  ) : undefined
+                }
               >
                 <TextArea name="tls_server_cert" rows={4} placeholder="-----BEGIN CERTIFICATE-----" />
               </Field>
+
               <Field
                 name="tls_server_key"
-                label={<div>HTTPS server private key</div>}
+                label={<div>HTTPS frame private key</div>}
                 tooltip="PEM private key used by Caddy for HTTPS on this frame. Keep this secret."
                 secret={!frameFormTouches.tls_server_key && !!frameForm.tls_server_key}
               >

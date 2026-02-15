@@ -20,6 +20,8 @@ class FrameBase(BaseModel):
     tls_server_cert: Optional[str] = None
     tls_server_key: Optional[str] = None
     tls_client_ca_cert: Optional[str] = None
+    tls_server_cert_not_valid_after: Optional[datetime] = None
+    tls_client_ca_cert_not_valid_after: Optional[datetime] = None
     ssh_user: Optional[str]
     ssh_pass: Optional[str]
     ssh_port: int

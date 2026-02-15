@@ -41,7 +41,7 @@ from sqlalchemy.orm import Session
 # local ---------------------------------------------------------------------
 from app.database import get_db
 from arq import ArqRedis as Redis
-from app.models.frame import Frame, new_frame, delete_frame, update_frame
+from app.models.frame import Frame, new_frame, delete_frame, refresh_tls_certificate_validity_dates, update_frame
 from app.models.log import new_log as log
 from app.models.metrics import Metrics
 from app.codegen.scene_nim import write_scene_nim
@@ -100,7 +100,7 @@ from app.ws.agent_ws import (
 from app.models.assets import copy_custom_fonts_to_local_source_folder
 from app.models.settings import get_settings_dict
 from app.utils.ssh_key_utils import default_ssh_key_ids
-from app.utils.tls import generate_frame_tls_material
+from app.utils.tls import generate_frame_tls_material, parse_certificate_not_valid_after
 from app.utils.ssh_authorized_keys import _install_authorized_keys, resolve_authorized_keys_update
 from app.tasks.binary_builder import FrameBinaryBuilder
 from app.utils.local_exec import exec_local_command
@@ -1719,8 +1719,14 @@ async def api_frame_update_endpoint(
             )
 
     old_mode = data.mode
+    tls_material_updated = False
     for field, value in update_data.items():
         setattr(frame, field, value)
+        if field in {"tls_server_cert", "tls_client_ca_cert"}:
+            tls_material_updated = True
+
+    if tls_material_updated:
+        refresh_tls_certificate_validity_dates(frame)
 
     if data.mode == "nixos" and old_mode == "rpios":
         if frame.ssh_user == "pi":
@@ -1764,7 +1770,11 @@ async def api_frame_generate_tls_material_endpoint(
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
 
     material = generate_frame_tls_material(frame.frame_host or "")
-    return material
+    return {
+        **material,
+        "tls_server_cert_not_valid_after": parse_certificate_not_valid_after(material["tls_server_cert"]),
+        "tls_client_ca_cert_not_valid_after": parse_certificate_not_valid_after(material["tls_client_ca_cert"]),
+    }
 
 
 @api_with_auth.post("/frames/new", response_model=FrameResponse)

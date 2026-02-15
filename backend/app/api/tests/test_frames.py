@@ -149,6 +149,8 @@ async def test_api_frame_new(async_client):
     assert 'BEGIN CERTIFICATE' in data['frame']['tls_server_cert']
     assert 'BEGIN RSA PRIVATE KEY' in data['frame']['tls_server_key']
     assert 'BEGIN CERTIFICATE' in data['frame']['tls_client_ca_cert']
+    assert data['frame']['tls_server_cert_not_valid_after'] is not None
+    assert data['frame']['tls_client_ca_cert_not_valid_after'] is not None
 
 
 @pytest.mark.asyncio
@@ -206,3 +208,15 @@ async def test_api_frame_get_image_with_cookie_no_token(no_auth_client, db, redi
     response = await no_auth_client.get(f'/api/frames/{frame.id}/image?t=-1')
     assert response.status_code == 200
     assert response.content == b'cookie_cached_image_data'
+
+
+@pytest.mark.asyncio
+async def test_api_frame_generate_tls_material_includes_validity_dates(async_client, db, redis):
+    frame = await new_frame(db, redis, 'TlsFrame', 'localhost', 'localhost')
+
+    response = await async_client.post(f'/api/frames/{frame.id}/tls/generate')
+    assert response.status_code == 200
+
+    data = response.json()
+    assert data['tls_server_cert_not_valid_after'] is not None
+    assert data['tls_client_ca_cert_not_valid_after'] is not None

@@ -26,6 +26,8 @@ async def test_new_frame(mock_publish, db, redis):
     assert frame.tls_server_cert and "BEGIN CERTIFICATE" in frame.tls_server_cert
     assert frame.tls_server_key and "BEGIN RSA PRIVATE KEY" in frame.tls_server_key
     assert frame.tls_client_ca_cert and "BEGIN CERTIFICATE" in frame.tls_client_ca_cert
+    assert frame.tls_server_cert_not_valid_after is not None
+    assert frame.tls_client_ca_cert_not_valid_after is not None
     mock_publish.assert_awaited_once()
 
 @pytest.mark.asyncio
@@ -70,5 +72,7 @@ async def test_frame_to_dict(mock_publish, db, redis):
     data = frame.to_dict()
     assert data["frame_host"] == "host"
     assert data["interval"] == 55
+    assert data["tls_server_cert_not_valid_after"] is not None
+    assert data["tls_client_ca_cert_not_valid_after"] is not None
     # 1 call to publish_message (the new frame creation)
     assert mock_publish.await_count == 1

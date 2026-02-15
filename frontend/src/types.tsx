@@ -14,6 +14,8 @@ export interface FrameType {
   tls_server_cert?: string
   tls_server_key?: string
   tls_client_ca_cert?: string
+  tls_server_cert_not_valid_after?: string
+  tls_client_ca_cert_not_valid_after?: string
   ssh_user?: string
   ssh_pass?: string
   ssh_port: number
