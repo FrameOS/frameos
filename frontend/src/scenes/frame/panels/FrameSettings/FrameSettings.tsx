@@ -809,10 +809,14 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
         <div className="pl-2 @md:pl-8 space-y-2">
           <Field
             name="frame_port"
-            label="FrameOS port"
+            label="HTTP port on frame"
             tooltip={
               <div className="space-y-2">
                 <p>The port on which the frame accepts HTTP API requests and serves a simple control interface.</p>
+                <p>
+                  Traffic on this port is UNSECURED! Please also enable the HTTPS proxy service for secure
+                  communication.
+                </p>
               </div>
             }
           >
@@ -820,8 +824,8 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
           </Field>
           <Field
             name="enable_tls"
-            label="Enable HTTPS (Caddy)"
-            tooltip="Enable Caddy as a local TLS proxy for the FrameOS HTTP API. You may need to do a full deploy if this is your first time enabling this."
+            label="HTTPS proxy via Caddy"
+            tooltip="Enable Caddy as a local HTTPS proxy for the FrameOS HTTP API. You may need to do a full deploy if this is your first time enabling this."
           >
             {({ value, onChange }) => (
               <Switch
@@ -839,7 +843,16 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
           </Field>
           {frameForm.enable_tls ? (
             <>
-              <Field name="tls_port" label="HTTPS port" tooltip="The port Caddy listens on for HTTPS connections.">
+              <Field
+                name="tls_port"
+                label="HTTPS port"
+                tooltip={
+                  <div className="space-y-2">
+                    <p>The port Caddy listens on for HTTPS connections.</p>
+                    <p>It's best if this ends with *443.</p>
+                  </div>
+                }
+              >
                 <NumberTextInput name="tls_port" placeholder="8443" />
               </Field>
               <Field
