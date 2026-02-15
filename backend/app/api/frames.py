@@ -458,14 +458,14 @@ def _append_request_query(path: str, request: Request) -> str:
     return f"{path}{separator}{query}"
 
 
-def _proxy_request_headers(request: Request, frame: Frame) -> dict[str, str]:
-    headers: dict[str, str] = {}
+def _proxy_request_headers(request: Request, frame: Frame) -> httpx.Headers:
+    headers = httpx.Headers()
     for key, value in request.headers.items():
         lower_key = key.lower()
         if lower_key in _PROXY_REQUEST_BLOCKED_HEADERS:
             continue
         headers[key] = value
-    return _auth_headers(frame, headers)
+    return httpx.Headers(_auth_headers(frame, dict(headers)))
 
 
 def _proxy_response_headers(headers: httpx.Headers) -> dict[str, str]:
