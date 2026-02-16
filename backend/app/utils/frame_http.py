@@ -47,6 +47,7 @@ FRAME_HTTP_TIMEOUT = httpx.Timeout(
 )
 _frame_http_semaphore = asyncio.Semaphore(FRAME_HTTP_MAX_CONCURRENCY)
 FRAME_HTTP_RETRIES = _get_env_int("FRAME_HTTP_RETRIES", 2)
+DEFAULT_FRAME_HTTPS_PROXY_PORT = 8443
 
 
 def _build_frame_path(
@@ -80,7 +81,7 @@ def _frame_scheme_port(frame: Frame) -> tuple[str, int]:
     https_proxy = frame.https_proxy or {}
     if https_proxy.get("enable"):
         https_port = https_proxy.get("port") or 0
-        return "https", https_port if https_port > 0 else frame.frame_port
+        return "https", https_port if https_port > 0 else DEFAULT_FRAME_HTTPS_PROXY_PORT
     return "http", frame.frame_port
 
 
