@@ -1,7 +1,7 @@
 """add terminal history to frame
 
 Revision ID: 60acbd298511
-Revises: 9d6b9f2a13be
+Revises: 6f45af81d344
 Create Date: 2026-02-14 01:00:59.871085
 
 """
@@ -11,7 +11,7 @@ from sqlalchemy.dialects import sqlite
 
 # revision identifiers, used by Alembic.
 revision = '60acbd298511'
-down_revision = '9d6b9f2a13be'
+down_revision = '6f45af81d344'
 branch_labels = None
 depends_on = None
 
