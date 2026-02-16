@@ -8,14 +8,16 @@ export interface FrameType {
   frame_port: number
   frame_access_key: string
   frame_access: string
-  enable_tls?: boolean
-  tls_port?: number
-  expose_only_tls_port?: boolean
-  tls_server_cert?: string
-  tls_server_key?: string
-  tls_client_ca_cert?: string
-  tls_server_cert_not_valid_after?: string
-  tls_client_ca_cert_not_valid_after?: string
+  https_proxy?: {
+    enable?: boolean
+    port?: number
+    expose_only_port?: boolean
+    server_cert?: string
+    server_key?: string
+    client_ca_cert?: string
+    server_cert_not_valid_after?: string
+    client_ca_cert_not_valid_after?: string
+  }
   ssh_user?: string
   ssh_pass?: string
   ssh_port: number

@@ -90,10 +90,12 @@ function CertificateTriangle({
   frameForm: Partial<FrameType> | null
 }): JSX.Element | null {
   const certificateStatus = getFrameCertificateStatus({
-    tls_client_ca_cert_not_valid_after:
-      frameForm?.tls_client_ca_cert_not_valid_after ?? frame?.tls_client_ca_cert_not_valid_after,
-    tls_server_cert_not_valid_after:
-      frameForm?.tls_server_cert_not_valid_after ?? frame?.tls_server_cert_not_valid_after,
+    https_proxy: {
+      client_ca_cert_not_valid_after:
+        frameForm?.https_proxy?.client_ca_cert_not_valid_after ?? frame?.https_proxy?.client_ca_cert_not_valid_after,
+      server_cert_not_valid_after:
+        frameForm?.https_proxy?.server_cert_not_valid_after ?? frame?.https_proxy?.server_cert_not_valid_after,
+    },
   })
   if (certificateStatus !== 'expired' && certificateStatus !== 'expiring') {
     return null
@@ -121,7 +123,7 @@ function scrollToFrameHttpApiSection(e: React.MouseEvent): void {
       ? e.target.closest('#panel-settings-div')
       : document.getElementById('panel-settings-div')
   const scrollingOuterDiv = frameSettingsDiv?.parentElement
-  const httpApiSection = frameSettingsDiv?.querySelector('#frame-http-api-section')
+  const httpApiSection = frameSettingsDiv?.querySelector('#frame-http-proxy-section')
   if (scrollingOuterDiv && httpApiSection) {
     const offset = httpApiSection.getBoundingClientRect().top - scrollingOuterDiv.getBoundingClientRect().top
     scrollingOuterDiv.scrollTo({ top: offset, behavior: 'smooth' }) // works in frame settings panel
@@ -162,7 +164,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
   const url = frameUrl(frame)
   const controlUrl = frameControlUrl(frame)
   const imageUrl = frameImageUrl(frame)
-  const tlsEnabled = !!(frameForm.enable_tls ?? frame.enable_tls)
+  const tlsEnabled = !!(frameForm.https_proxy?.enable ?? frame.https_proxy?.enable)
 
   const palette = withCustomPalette[frame.device || '']
   const sshKeyOptions = normalizeSshKeys(savedSettings?.ssh_keys).keys
@@ -881,86 +883,6 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
             <TextInput name="frame_port" placeholder="8787" required />
           </Field>
           <Field
-            name="enable_tls"
-            label="HTTPS proxy via Caddy"
-            tooltip="Enable Caddy as a local HTTPS proxy for the FrameOS HTTP API. You may need to do a full deploy if this is your first time enabling this."
-          >
-            {({ value, onChange }) => (
-              <Switch
-                name="enable_tls"
-                value={value}
-                onChange={(enableTls) => {
-                  if (enableTls) {
-                    verifyTlsCertificates()
-                  }
-                  onChange(enableTls)
-                }}
-                fullWidth
-              />
-            )}
-          </Field>
-          {frameForm.enable_tls ? (
-            <>
-              <Field
-                name="tls_port"
-                label="HTTPS port"
-                tooltip={
-                  <div className="space-y-2">
-                    <p>The port Caddy listens on for HTTPS connections.</p>
-                    <p>It's best if this ends with *443.</p>
-                  </div>
-                }
-              >
-                <NumberTextInput name="tls_port" placeholder="8443" />
-              </Field>
-              <Field
-                name="expose_only_tls_port"
-                label="Expose only HTTPS port"
-                tooltip="Bind the HTTP port to 127.0.0.1 so only the HTTPS proxy is accessible externally."
-              >
-                <Switch name="expose_only_tls_port" fullWidth />
-              </Field>
-              <Field
-                name="tls_client_ca_cert"
-                label="HTTPS backend CA certificate"
-                labelRight={
-                  <Button color="secondary" size="small" onClick={(e) => generateTlsCertificates()}>
-                    Regenerate
-                  </Button>
-                }
-                tooltip="Used by the backend to validate HTTPS connections to this frame when TLS is enabled."
-                secret={!frameFormTouches.tls_client_ca_cert && !!frameForm.tls_client_ca_cert}
-                hint={getCertificateHint(
-                  'Root CA certificate',
-                  frameForm.tls_client_ca_cert_not_valid_after ?? frame.tls_client_ca_cert_not_valid_after
-                )}
-              >
-                <TextArea name="tls_client_ca_cert" rows={4} placeholder="-----BEGIN CERTIFICATE-----" />
-              </Field>
-              <Field
-                name="tls_server_cert"
-                label="HTTPS frame certificate"
-                tooltip="PEM certificate used by Caddy for HTTPS on this frame."
-                secret={!frameFormTouches.tls_server_cert && !!frameForm.tls_server_cert}
-                hint={getCertificateHint(
-                  'Server certificate',
-                  frameForm.tls_server_cert_not_valid_after ?? frame.tls_server_cert_not_valid_after
-                )}
-              >
-                <TextArea name="tls_server_cert" rows={4} placeholder="-----BEGIN CERTIFICATE-----" />
-              </Field>
-
-              <Field
-                name="tls_server_key"
-                label={<div>HTTPS frame private key</div>}
-                tooltip="PEM private key used by Caddy for HTTPS on this frame. Keep this secret."
-                secret={!frameFormTouches.tls_server_key && !!frameForm.tls_server_key}
-              >
-                <TextArea name="tls_server_key" rows={4} placeholder="-----BEGIN RSA PRIVATE KEY-----" />
-              </Field>
-            </>
-          ) : null}
-          <Field
             name="frame_access"
             label="HTTP access level"
             tooltip={
@@ -1012,6 +934,92 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
               required
             />
           </Field>
+        </div>
+        <H6 id="frame-http-proxy-section">
+          HTTPS proxy <span className="text-gray-500">(backend &#8594; frame)</span>
+        </H6>
+        <div className="pl-2 @md:pl-8 space-y-2">
+          <Field
+            name="https_proxy.enable"
+            label="HTTPS proxy via Caddy"
+            tooltip="Enable Caddy as a local HTTPS proxy for the FrameOS HTTP API. You may need to do a full deploy if this is your first time enabling this."
+          >
+            {({ value, onChange }) => (
+              <Switch
+                name="https_proxy.enable"
+                value={value}
+                onChange={(enableTls) => {
+                  if (enableTls) {
+                    verifyTlsCertificates()
+                  }
+                  onChange(enableTls)
+                }}
+                fullWidth
+              />
+            )}
+          </Field>
+          {tlsEnabled ? (
+            <>
+              <Field
+                name="https_proxy.port"
+                label="HTTPS port"
+                tooltip={
+                  <div className="space-y-2">
+                    <p>The port Caddy listens on for HTTPS connections.</p>
+                    <p>It's best if this ends with *443.</p>
+                  </div>
+                }
+              >
+                <NumberTextInput name="https_proxy.port" placeholder="8443" />
+              </Field>
+              <Field
+                name="https_proxy.expose_only_port"
+                label="Expose only HTTPS port"
+                tooltip="Bind the HTTP port to 127.0.0.1 so only the HTTPS proxy is accessible externally."
+              >
+                <Switch name="https_proxy.expose_only_port" fullWidth />
+              </Field>
+              <Field
+                name="https_proxy.client_ca_cert"
+                label="HTTPS backend CA certificate"
+                labelRight={
+                  <Button color="secondary" size="small" onClick={(e) => generateTlsCertificates()}>
+                    Regenerate
+                  </Button>
+                }
+                tooltip="Used by the backend to validate HTTPS connections to this frame when TLS is enabled."
+                secret={!frameFormTouches['https_proxy.client_ca_cert'] && !!frameForm.https_proxy?.client_ca_cert}
+                hint={getCertificateHint(
+                  'Root CA certificate',
+                  frameForm.https_proxy?.client_ca_cert_not_valid_after ??
+                    frame.https_proxy?.client_ca_cert_not_valid_after
+                )}
+              >
+                <TextArea name="https_proxy.client_ca_cert" rows={4} placeholder="-----BEGIN CERTIFICATE-----" />
+              </Field>
+              <Field
+                name="https_proxy.server_cert"
+                label="HTTPS frame certificate"
+                tooltip="PEM certificate used by Caddy for HTTPS on this frame."
+                secret={!frameFormTouches['https_proxy.server_cert'] && !!frameForm.https_proxy?.server_cert}
+                hint={getCertificateHint(
+                  'Server certificate',
+                  frameForm.https_proxy?.server_cert_not_valid_after ?? frame.https_proxy?.server_cert_not_valid_after
+                )}
+              >
+                <TextArea name="https_proxy.server_cert" rows={4} placeholder="-----BEGIN CERTIFICATE-----" />
+              </Field>
+
+              <Field
+                name="https_proxy.server_key"
+                label={<div>HTTPS frame private key</div>}
+                tooltip="PEM private key used by Caddy for HTTPS on this frame. Keep this secret."
+                secret={!frameFormTouches['https_proxy.server_key'] && !!frameForm.https_proxy?.server_key}
+              >
+                <TextArea name="https_proxy.server_key" rows={4} placeholder="-----BEGIN RSA PRIVATE KEY-----" />
+              </Field>
+            </>
+          ) : null}
         </div>
 
         <H6>Network</H6>

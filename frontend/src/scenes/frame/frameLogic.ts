@@ -44,12 +44,7 @@ const FRAME_KEYS: (keyof FrameType)[] = [
   'frame_port',
   'frame_access_key',
   'frame_access',
-  'enable_tls',
-  'tls_port',
-  'expose_only_tls_port',
-  'tls_server_cert',
-  'tls_server_key',
-  'tls_client_ca_cert',
+  'https_proxy',
   'ssh_user',
   'ssh_pass',
   'ssh_port',
@@ -502,24 +497,33 @@ export const frameLogic = kea<frameLogicType>([
       }
       const data = await response.json()
       actions.setFrameFormValues({
-        tls_server_cert: data.tls_server_cert,
-        tls_server_key: data.tls_server_key,
-        tls_client_ca_cert: data.tls_client_ca_cert,
-        tls_server_cert_not_valid_after: data.tls_server_cert_not_valid_after,
-        tls_client_ca_cert_not_valid_after: data.tls_client_ca_cert_not_valid_after,
+        https_proxy: {
+          ...(values.frameForm.https_proxy || values.frame?.https_proxy || {}),
+          server_cert: data.server_cert,
+          server_key: data.server_key,
+          client_ca_cert: data.client_ca_cert,
+          server_cert_not_valid_after: data.server_cert_not_valid_after,
+          client_ca_cert_not_valid_after: data.client_ca_cert_not_valid_after,
+        },
       })
-      actions.touchFrameFormField('tls_server_cert')
-      actions.touchFrameFormField('tls_server_key')
-      actions.touchFrameFormField('tls_client_ca_cert')
+      actions.touchFrameFormField('https_proxy.server_cert')
+      actions.touchFrameFormField('https_proxy.server_key')
+      actions.touchFrameFormField('https_proxy.client_ca_cert')
     },
     verifyTlsCertificates: async () => {
       const frame = values.frameForm || values.frame
-      if (!frame.tls_server_cert || !frame.tls_server_key || !frame.tls_client_ca_cert) {
+      if (!frame.https_proxy?.server_cert || !frame.https_proxy?.server_key || !frame.https_proxy?.client_ca_cert) {
         console.warn('TLS enabled but certificates are missing, generating new certificates')
         actions.generateTlsCertificates()
       }
-      if (!frame.tls_port) {
-        actions.setFrameFormValues({ tls_port: 8443, expose_only_tls_port: true })
+      if (!frame.https_proxy?.port) {
+        actions.setFrameFormValues({
+          https_proxy: {
+            ...(frame.https_proxy || {}),
+            port: 8443,
+            expose_only_port: true,
+          },
+        })
       }
     },
   })),

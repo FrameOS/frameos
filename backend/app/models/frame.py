@@ -1,7 +1,7 @@
 import json
 import copy
 import os
-from datetime import timezone
+from datetime import datetime, timezone
 from arq import ArqRedis as Redis
 from typing import Optional
 from sqlalchemy.dialects.sqlite import JSON
@@ -16,6 +16,33 @@ from app.utils.tls import generate_frame_tls_material, parse_certificate_not_val
 from app.websockets import publish_message
 
 
+def _to_isoformat(value: Optional[datetime]) -> Optional[str]:
+    if not value:
+        return None
+    return value.replace(tzinfo=timezone.utc).isoformat()
+
+
+def _serialize_https_proxy(https_proxy: Optional[dict]) -> dict:
+    proxy = https_proxy or {}
+
+    def _as_iso(value):
+        if isinstance(value, datetime):
+            return _to_isoformat(value)
+        return value
+
+    return {
+        'enable': bool(proxy.get('enable', False)),
+        'port': proxy.get('port', 8443),
+        'expose_only_port': bool(proxy.get('expose_only_port', False)),
+        'server_cert': proxy.get('server_cert', ''),
+        'server_key': proxy.get('server_key', ''),
+        'client_ca_cert': proxy.get('client_ca_cert', ''),
+        'server_cert_not_valid_after': _as_iso(proxy.get('server_cert_not_valid_after')),
+        'client_ca_cert_not_valid_after': _as_iso(proxy.get('client_ca_cert_not_valid_after')),
+    }
+
+
+
 # NB! Update frontend/src/types.tsx if you change this
 class Frame(Base):
     __tablename__ = 'frame'
@@ -27,14 +54,7 @@ class Frame(Base):
     frame_port = mapped_column(Integer, default=8787)
     frame_access_key = mapped_column(String(256), nullable=True)
     frame_access = mapped_column(String(50), nullable=True)
-    enable_tls = mapped_column(Boolean, nullable=True)
-    tls_port = mapped_column(Integer, default=8443)
-    expose_only_tls_port = mapped_column(Boolean, nullable=True)
-    tls_server_cert = mapped_column(String, nullable=True)
-    tls_server_key = mapped_column(String, nullable=True)
-    tls_client_ca_cert = mapped_column(String, nullable=True)
-    tls_server_cert_not_valid_after = mapped_column(DateTime, nullable=True)
-    tls_client_ca_cert_not_valid_after = mapped_column(DateTime, nullable=True)
+    https_proxy = mapped_column(JSON, nullable=True)
     ssh_user = mapped_column(String(50), nullable=True)
     ssh_pass = mapped_column(String(50), nullable=True)
     ssh_port = mapped_column(Integer, default=22)
@@ -91,14 +111,7 @@ class Frame(Base):
             'frame_port': self.frame_port,
             'frame_access_key': self.frame_access_key,
             'frame_access': self.frame_access,
-            'enable_tls': self.enable_tls,
-            'tls_port': self.tls_port,
-            'expose_only_tls_port': self.expose_only_tls_port,
-            'tls_server_cert': self.tls_server_cert,
-            'tls_server_key': self.tls_server_key,
-            'tls_client_ca_cert': self.tls_client_ca_cert,
-            'tls_server_cert_not_valid_after': self.tls_server_cert_not_valid_after.replace(tzinfo=timezone.utc).isoformat() if self.tls_server_cert_not_valid_after else None,
-            'tls_client_ca_cert_not_valid_after': self.tls_client_ca_cert_not_valid_after.replace(tzinfo=timezone.utc).isoformat() if self.tls_client_ca_cert_not_valid_after else None,
+            'https_proxy': _serialize_https_proxy(self.https_proxy),
             'ssh_user': self.ssh_user,
             'ssh_pass': self.ssh_pass,
             'ssh_port': self.ssh_port,
@@ -177,14 +190,16 @@ async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, serve
         frame_host=frame_host,
         frame_access_key=secure_token(20),
         frame_access="private",
-        enable_tls=True,
-        tls_port=8443,
-        expose_only_tls_port=True,
-        tls_server_cert=tls_material["tls_server_cert"],
-        tls_server_key=tls_material["tls_server_key"],
-        tls_client_ca_cert=tls_material["tls_client_ca_cert"],
-        tls_server_cert_not_valid_after=parse_certificate_not_valid_after(tls_material["tls_server_cert"]),
-        tls_client_ca_cert_not_valid_after=parse_certificate_not_valid_after(tls_material["tls_client_ca_cert"]),
+        https_proxy={
+            "enable": True,
+            "port": 8443,
+            "expose_only_port": True,
+            "server_cert": tls_material["tls_server_cert"],
+            "server_key": tls_material["tls_server_key"],
+            "client_ca_cert": tls_material["tls_client_ca_cert"],
+            "server_cert_not_valid_after": _to_isoformat(parse_certificate_not_valid_after(tls_material["tls_server_cert"])),
+            "client_ca_cert_not_valid_after": _to_isoformat(parse_certificate_not_valid_after(tls_material["tls_client_ca_cert"])),
+        },
         server_host=server_host,
         server_port=int(server_port),
         server_api_key=secure_token(32),
@@ -231,8 +246,10 @@ async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, serve
 
 
 def refresh_tls_certificate_validity_dates(frame: Frame):
-    frame.tls_server_cert_not_valid_after = parse_certificate_not_valid_after(frame.tls_server_cert)
-    frame.tls_client_ca_cert_not_valid_after = parse_certificate_not_valid_after(frame.tls_client_ca_cert)
+    https_proxy = dict(frame.https_proxy or {})
+    https_proxy['server_cert_not_valid_after'] = _to_isoformat(parse_certificate_not_valid_after(https_proxy.get('server_cert', '')))
+    https_proxy['client_ca_cert_not_valid_after'] = _to_isoformat(parse_certificate_not_valid_after(https_proxy.get('client_ca_cert', '')))
+    frame.https_proxy = https_proxy
 
 
 async def update_frame(db: Session, redis: Redis, frame: Frame):
@@ -279,11 +296,13 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
         "framePort": frame.frame_port or 8787,
         "frameAccessKey": frame.frame_access_key,
         "frameAccess": frame.frame_access,
-        "enableTls": bool(frame.enable_tls),
-        "tlsPort": frame.tls_port or 8443,
-        "exposeOnlyTlsPort": bool(frame.expose_only_tls_port),
-        "tlsServerCert": frame.tls_server_cert or "",
-        "tlsServerKey": frame.tls_server_key or "",
+        "httpsProxy": {
+            "enable": bool((frame.https_proxy or {}).get("enable", False)),
+            "port": (frame.https_proxy or {}).get("port", 8443),
+            "exposeOnlyPort": bool((frame.https_proxy or {}).get("expose_only_port", False)),
+            "serverCert": (frame.https_proxy or {}).get("server_cert", ""),
+            "serverKey": (frame.https_proxy or {}).get("server_key", ""),
+        },
         "serverHost": frame.server_host or "localhost",
         "serverPort": frame.server_port or 8989,
         "serverApiKey": frame.server_api_key,

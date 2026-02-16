@@ -6,7 +6,6 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import jwt, JWTError
 from sqlalchemy.orm import Session
 from arq import ArqRedis as Redis
-
 from app.config import config
 from app.models.user import User
 from app.database import get_db

@@ -11,11 +11,7 @@ type
     serverApiKey*: string
     frameHost*: string
     framePort*: int
-    enableTls*: bool
-    tlsPort*: int
-    exposeOnlyTlsPort*: bool
-    tlsServerCert*: string
-    tlsServerKey*: string
+    httpsProxy*: HttpsProxyConfig
     frameAccessKey*: string
     frameAccess*: string
     width*: int
@@ -38,6 +34,14 @@ type
     network*: NetworkConfig
     agent*: AgentConfig
     palette*: PaletteConfig
+
+  # Part of FrameConfig
+  HttpsProxyConfig* = ref object
+    enable*: bool
+    port*: int
+    exposeOnlyPort*: bool
+    serverCert*: string
+    serverKey*: string
 
   # Part of FrameConfig
   GPIOButton* = ref object

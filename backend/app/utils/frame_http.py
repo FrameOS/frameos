@@ -77,9 +77,10 @@ def _build_frame_path(
 
 
 def _frame_scheme_port(frame: Frame) -> tuple[str, int]:
-    if frame.enable_tls:
-        tls_port = frame.tls_port or 0
-        return "https", tls_port if tls_port > 0 else frame.frame_port
+    https_proxy = frame.https_proxy or {}
+    if https_proxy.get("enable"):
+        https_port = https_proxy.get("port") or 0
+        return "https", https_port if https_port > 0 else frame.frame_port
     return "http", frame.frame_port
 
 
@@ -94,9 +95,10 @@ def _build_frame_url(frame: Frame, path: str, method: str) -> str:
 
 
 def _httpx_verify(frame: Frame):
-    if not frame.enable_tls:
+    https_proxy = frame.https_proxy or {}
+    if not https_proxy.get("enable"):
         return True
-    ca_cert = (frame.tls_client_ca_cert or "").strip()
+    ca_cert = (https_proxy.get("client_ca_cert") or "").strip()
     if not ca_cert:
         return True
 
@@ -179,7 +181,7 @@ async def _fetch_frame_http_bytes(
                             status_code=HTTPStatus.BAD_GATEWAY,
                             detail=(
                                 "TLS verification failed while connecting to frame. "
-                                "Set frame.tls_client_ca_cert to the issuing CA certificate."
+                                "Set frame.https_proxy.client_ca_cert to the issuing CA certificate."
                             ),
                         )
                     raise HTTPException(

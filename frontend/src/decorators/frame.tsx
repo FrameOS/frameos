@@ -11,8 +11,8 @@ export function frameHost(frame: FrameType): string {
 export const frameStatusWithSpinner = ['deploying', 'preparing', 'rendering', 'restarting', 'starting']
 
 function frameSchemeAndPort(frame: FrameType): { scheme: string; port: number } {
-  if (frame.enable_tls) {
-    const tlsPort = frame.tls_port ?? 0
+  if (frame.https_proxy?.enable) {
+    const tlsPort = frame.https_proxy?.port ?? 0
     return {
       scheme: 'https',
       port: tlsPort > 0 ? tlsPort : frame.frame_port,

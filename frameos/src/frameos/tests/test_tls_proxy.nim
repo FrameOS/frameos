@@ -18,11 +18,14 @@ proc testLogger(): Logger =
 
 proc tlsConfig(port: int): FrameConfig =
   FrameConfig(
-    enableTls: true,
-    tlsPort: port,
+    httpsProxy: HttpsProxyConfig(
+      enable: true,
+      port: port,
+      exposeOnlyPort: true,
+      serverCert: "test-cert",
+      serverKey: "test-key",
+    ),
     framePort: 8787,
-    tlsServerCert: "test-cert",
-    tlsServerKey: "test-key",
   )
 
 proc waitUntil(predicate: proc(): bool {.closure.}, timeoutMs = 2000, stepMs = 50): bool =
@@ -103,7 +106,7 @@ suite "TLS proxy lifecycle":
     check waitUntil(proc(): bool = fileExists(pidFile))
     let firstPid = readFile(pidFile).splitLines().filterIt(it.len > 0)[0]
 
-    startTlsProxy(FrameConfig(enableTls: false), logger)
+    startTlsProxy(FrameConfig(httpsProxy: HttpsProxyConfig(enable: false)), logger)
 
     check waitUntil(proc(): bool = fileExists(stoppedFile))
     let stoppedPids = readFile(stoppedFile).splitLines().filterIt(it.len > 0)

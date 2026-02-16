@@ -4,11 +4,11 @@ import strutils
 import frameos/types
 
 proc publicScheme*(config: FrameConfig): string =
-  if config.enableTls: "https" else: "http"
+  if config.httpsProxy.enable: "https" else: "http"
 
 proc publicPort*(config: FrameConfig): int =
-  if config.enableTls and config.tlsPort > 0:
-    config.tlsPort
+  if config.httpsProxy.enable and config.httpsProxy.port > 0:
+    config.httpsProxy.port
   else:
     config.framePort
 

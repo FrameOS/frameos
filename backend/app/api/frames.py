@@ -1719,13 +1719,10 @@ async def api_frame_update_endpoint(
             )
 
     old_mode = data.mode
-    tls_material_updated = False
     for field, value in update_data.items():
         setattr(frame, field, value)
-        if field in {"tls_server_cert", "tls_client_ca_cert"}:
-            tls_material_updated = True
 
-    if tls_material_updated:
+    if "https_proxy" in update_data:
         refresh_tls_certificate_validity_dates(frame)
 
     if data.mode == "nixos" and old_mode == "rpios":
@@ -1771,9 +1768,11 @@ async def api_frame_generate_tls_material_endpoint(
 
     material = generate_frame_tls_material(frame.frame_host or "")
     return {
-        **material,
-        "tls_server_cert_not_valid_after": parse_certificate_not_valid_after(material["tls_server_cert"]),
-        "tls_client_ca_cert_not_valid_after": parse_certificate_not_valid_after(material["tls_client_ca_cert"]),
+        "server_cert": material["tls_server_cert"],
+        "server_key": material["tls_server_key"],
+        "client_ca_cert": material["tls_client_ca_cert"],
+        "server_cert_not_valid_after": parse_certificate_not_valid_after(material["tls_server_cert"]),
+        "client_ca_cert_not_valid_after": parse_certificate_not_valid_after(material["tls_client_ca_cert"]),
     }
 
 
@@ -1905,8 +1904,40 @@ async def api_frame_import(
             data.get("interval"),
         )
 
+        legacy_https_proxy = {
+            "enable": data.get("enable_tls"),
+            "port": data.get("tls_port"),
+            "expose_only_port": data.get("expose_only_tls_port"),
+            "server_cert": data.get("tls_server_cert"),
+            "server_key": data.get("tls_server_key"),
+            "client_ca_cert": data.get("tls_client_ca_cert"),
+            "server_cert_not_valid_after": data.get("tls_server_cert_not_valid_after"),
+            "client_ca_cert_not_valid_after": data.get("tls_client_ca_cert_not_valid_after"),
+        }
+        if any(value is not None for value in legacy_https_proxy.values()):
+            data["https_proxy"] = {
+                **(frame.https_proxy or {}),
+                **{k: v for k, v in legacy_https_proxy.items() if v is not None},
+            }
+
         for key, value in data.items():
-            if key in ["id", "name", "frame_host", "server_host", "device", "interval", "last_success"]:
+            if key in [
+                "id",
+                "name",
+                "frame_host",
+                "server_host",
+                "device",
+                "interval",
+                "last_success",
+                "enable_tls",
+                "tls_port",
+                "expose_only_tls_port",
+                "tls_server_cert",
+                "tls_server_key",
+                "tls_client_ca_cert",
+                "tls_server_cert_not_valid_after",
+                "tls_client_ca_cert_not_valid_after",
+            ]:
                 continue
             if hasattr(frame, key):
                 if key in ["last_successful_deploy_at", "last_log_at"]:

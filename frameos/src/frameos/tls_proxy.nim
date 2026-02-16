@@ -36,9 +36,9 @@ proc stopTlsProxy*(logger: Logger = nil) =
 proc startTlsProxy*(frameConfig: FrameConfig, logger: Logger) =
   stopTlsProxy(logger)
 
-  if not frameConfig.enableTls:
+  if not frameConfig.httpsProxy.enable:
     return
-  let hasCustomCert = frameConfig.tlsServerCert.len > 0 and frameConfig.tlsServerKey.len > 0
+  let hasCustomCert = frameConfig.httpsProxy.serverCert.len > 0 and frameConfig.httpsProxy.serverKey.len > 0
   if not hasCustomCert:
     logger.log(%*{
       "event": "tls:default_cert",
@@ -46,7 +46,7 @@ proc startTlsProxy*(frameConfig: FrameConfig, logger: Logger) =
     })
     return
 
-  let tlsPort = if frameConfig.tlsPort > 0: frameConfig.tlsPort else: 8443
+  let tlsPort = if frameConfig.httpsProxy.port > 0: frameConfig.httpsProxy.port else: 8443
   let upstreamPort = if frameConfig.framePort > 0: frameConfig.framePort else: 8787
   let caddyVendorPath = getEnv("FRAMEOS_TLS_PROXY_VENDOR_PATH", "/srv/frameos/vendor/caddy")
   let certPath = caddyVendorPath / "frameos-tls-cert.pem"
@@ -68,8 +68,8 @@ proc startTlsProxy*(frameConfig: FrameConfig, logger: Logger) =
     return
 
   try:
-    writeFile(certPath, frameConfig.tlsServerCert)
-    writeFile(keyPath, frameConfig.tlsServerKey)
+    writeFile(certPath, frameConfig.httpsProxy.serverCert)
+    writeFile(keyPath, frameConfig.httpsProxy.serverKey)
   except CatchableError as error:
     logger.log(%*{
       "event": "tls:cert_write_error",

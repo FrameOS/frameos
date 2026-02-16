@@ -10,22 +10,12 @@ from app.tasks._frame_deployer import FrameDeployer
 from app.utils.frame_http import _fetch_frame_http_bytes
 
 
-TLS_SETTINGS_KEYS = (
-    "enable_tls",
-    "tls_port",
-    "expose_only_tls_port",
-    "tls_server_cert",
-    "tls_server_key",
-    "tls_client_ca_cert",
-)
-
-
 def tls_settings_changed(frame: Frame) -> bool:
     if not frame.last_successful_deploy:
         return False
 
     previous_deploy = frame.last_successful_deploy or {}
-    return any(previous_deploy.get(key) != getattr(frame, key) for key in TLS_SETTINGS_KEYS)
+    return previous_deploy.get("https_proxy") != frame.https_proxy
 
 
 async def fast_deploy_frame(id: int, redis: Redis):
