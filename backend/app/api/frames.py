@@ -41,7 +41,7 @@ from sqlalchemy.orm import Session
 # local ---------------------------------------------------------------------
 from app.database import get_db
 from arq import ArqRedis as Redis
-from app.models.frame import Frame, new_frame, delete_frame, refresh_tls_certificate_validity_dates, update_frame
+from app.models.frame import Frame, new_frame, delete_frame, normalize_https_proxy, refresh_tls_certificate_validity_dates, update_frame
 from app.models.log import new_log as log
 from app.models.metrics import Metrics
 from app.codegen.scene_nim import write_scene_nim
@@ -1723,6 +1723,7 @@ async def api_frame_update_endpoint(
         setattr(frame, field, value)
 
     if "https_proxy" in update_data:
+        frame.https_proxy = normalize_https_proxy(frame.https_proxy)
         refresh_tls_certificate_validity_dates(frame)
 
     if data.mode == "nixos" and old_mode == "rpios":
@@ -1768,9 +1769,11 @@ async def api_frame_generate_tls_material_endpoint(
 
     material = generate_frame_tls_material(frame.frame_host or "")
     return {
-        "server_cert": material["tls_server_cert"],
-        "server_key": material["tls_server_key"],
-        "client_ca_cert": material["tls_client_ca_cert"],
+        "certs": {
+            "server": material["tls_server_cert"],
+            "server_key": material["tls_server_key"],
+            "client_ca": material["tls_client_ca_cert"],
+        },
         "server_cert_not_valid_after": parse_certificate_not_valid_after(material["tls_server_cert"]),
         "client_ca_cert_not_valid_after": parse_certificate_not_valid_after(material["tls_client_ca_cert"]),
     }
@@ -1908,17 +1911,24 @@ async def api_frame_import(
             "enable": data.get("enable_tls"),
             "port": data.get("tls_port"),
             "expose_only_port": data.get("expose_only_tls_port"),
-            "server_cert": data.get("tls_server_cert"),
-            "server_key": data.get("tls_server_key"),
-            "client_ca_cert": data.get("tls_client_ca_cert"),
+            "certs": {
+                "server": data.get("tls_server_cert"),
+                "server_key": data.get("tls_server_key"),
+                "client_ca": data.get("tls_client_ca_cert"),
+            },
             "server_cert_not_valid_after": data.get("tls_server_cert_not_valid_after"),
             "client_ca_cert_not_valid_after": data.get("tls_client_ca_cert_not_valid_after"),
         }
-        if any(value is not None for value in legacy_https_proxy.values()):
-            data["https_proxy"] = {
+        legacy_values = {
+            k: v
+            for k, v in legacy_https_proxy.items()
+            if v is not None and (k != "certs" or any(cert is not None for cert in v.values()))
+        }
+        if legacy_values:
+            data["https_proxy"] = normalize_https_proxy({
                 **(frame.https_proxy or {}),
-                **{k: v for k, v in legacy_https_proxy.items() if v is not None},
-            }
+                **legacy_values,
+            })
 
         for key, value in data.items():
             if key in [

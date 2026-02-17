@@ -1,19 +1,40 @@
-from pydantic import BaseModel, ConfigDict, RootModel
+from pydantic import BaseModel, ConfigDict, RootModel, model_validator
 from typing import Any, Dict, List, Literal, Optional
 
 from .common import ImageTokenResponse
 from datetime import datetime
 
 
+class FrameHttpsProxyCerts(BaseModel):
+    server: Optional[str] = None
+    server_key: Optional[str] = None
+    client_ca: Optional[str] = None
+
+
 class FrameHttpsProxy(BaseModel):
     enable: Optional[bool] = None
     port: Optional[int] = None
     expose_only_port: Optional[bool] = None
-    server_cert: Optional[str] = None
-    server_key: Optional[str] = None
-    client_ca_cert: Optional[str] = None
+    certs: Optional[FrameHttpsProxyCerts] = None
     server_cert_not_valid_after: Optional[datetime] = None
     client_ca_cert_not_valid_after: Optional[datetime] = None
+
+    @model_validator(mode='before')
+    @classmethod
+    def _migrate_legacy_certs(cls, value):
+        if not isinstance(value, dict):
+            return value
+        certs = value.get('certs') if isinstance(value.get('certs'), dict) else {}
+        if not certs:
+            certs = {
+                'server': value.get('server_cert'),
+                'server_key': value.get('server_key'),
+                'client_ca': value.get('client_ca_cert'),
+            }
+        return {
+            **value,
+            'certs': certs,
+        }
 
 
 class FrameBase(BaseModel):

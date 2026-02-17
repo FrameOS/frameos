@@ -9,7 +9,7 @@ from typing import Optional
 import httpx
 from fastapi import HTTPException
 
-from app.models.frame import Frame
+from app.models.frame import Frame, normalize_https_proxy
 from app.utils.network import is_safe_host
 from app.utils.remote_exec import _use_agent
 from app.ws.agent_ws import http_get_on_frame
@@ -78,7 +78,7 @@ def _build_frame_path(
 
 
 def _frame_scheme_port(frame: Frame) -> tuple[str, int]:
-    https_proxy = frame.https_proxy or {}
+    https_proxy = normalize_https_proxy(frame.https_proxy)
     if https_proxy.get("enable"):
         https_port = https_proxy.get("port") or 0
         return "https", https_port if https_port > 0 else DEFAULT_FRAME_HTTPS_PROXY_PORT
@@ -96,10 +96,10 @@ def _build_frame_url(frame: Frame, path: str, method: str) -> str:
 
 
 def _httpx_verify(frame: Frame):
-    https_proxy = frame.https_proxy or {}
+    https_proxy = normalize_https_proxy(frame.https_proxy)
     if not https_proxy.get("enable"):
         return True
-    ca_cert = (https_proxy.get("client_ca_cert") or "").strip()
+    ca_cert = (https_proxy.get("certs", {}).get("client_ca") or "").strip()
     if not ca_cert:
         return True
 

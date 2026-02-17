@@ -980,7 +980,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                 <Switch name="https_proxy.expose_only_port" fullWidth />
               </Field>
               <Field
-                name="https_proxy.client_ca_cert"
+                name="https_proxy.certs.client_ca"
                 label="HTTPS backend CA certificate"
                 labelRight={
                   <Button color="secondary" size="small" onClick={(e) => generateTlsCertificates()}>
@@ -988,35 +988,35 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                   </Button>
                 }
                 tooltip="Used by the backend to validate HTTPS connections to this frame when TLS is enabled."
-                secret={!frameFormTouches['https_proxy.client_ca_cert'] && !!frameForm.https_proxy?.client_ca_cert}
+                secret={!frameFormTouches['https_proxy.certs.client_ca'] && !!frameForm.https_proxy?.certs?.client_ca}
                 hint={getCertificateHint(
                   'Root CA certificate',
                   frameForm.https_proxy?.client_ca_cert_not_valid_after ??
                     frame.https_proxy?.client_ca_cert_not_valid_after
                 )}
               >
-                <TextArea name="https_proxy.client_ca_cert" rows={4} placeholder="-----BEGIN CERTIFICATE-----" />
+                <TextArea name="https_proxy.certs.client_ca" rows={4} placeholder="-----BEGIN CERTIFICATE-----" />
               </Field>
               <Field
-                name="https_proxy.server_cert"
+                name="https_proxy.certs.server"
                 label="HTTPS frame certificate"
                 tooltip="PEM certificate used by Caddy for HTTPS on this frame."
-                secret={!frameFormTouches['https_proxy.server_cert'] && !!frameForm.https_proxy?.server_cert}
+                secret={!frameFormTouches['https_proxy.certs.server'] && !!frameForm.https_proxy?.certs?.server}
                 hint={getCertificateHint(
                   'Server certificate',
                   frameForm.https_proxy?.server_cert_not_valid_after ?? frame.https_proxy?.server_cert_not_valid_after
                 )}
               >
-                <TextArea name="https_proxy.server_cert" rows={4} placeholder="-----BEGIN CERTIFICATE-----" />
+                <TextArea name="https_proxy.certs.server" rows={4} placeholder="-----BEGIN CERTIFICATE-----" />
               </Field>
 
               <Field
-                name="https_proxy.server_key"
+                name="https_proxy.certs.server_key"
                 label={<div>HTTPS frame private key</div>}
                 tooltip="PEM private key used by Caddy for HTTPS on this frame. Keep this secret."
-                secret={!frameFormTouches['https_proxy.server_key'] && !!frameForm.https_proxy?.server_key}
+                secret={!frameFormTouches['https_proxy.certs.server_key'] && !!frameForm.https_proxy?.certs?.server_key}
               >
-                <TextArea name="https_proxy.server_key" rows={4} placeholder="-----BEGIN RSA PRIVATE KEY-----" />
+                <TextArea name="https_proxy.certs.server_key" rows={4} placeholder="-----BEGIN RSA PRIVATE KEY-----" />
               </Field>
             </>
           ) : null}

@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from arq import ArqRedis as Redis
 
 from app.models.log import new_log as log
-from app.models.frame import Frame, update_frame
+from app.models.frame import Frame, normalize_https_proxy, update_frame
 from app.tasks._frame_deployer import FrameDeployer
 from app.utils.frame_http import _fetch_frame_http_bytes
 
@@ -15,7 +15,9 @@ def tls_settings_changed(frame: Frame) -> bool:
         return False
 
     previous_deploy = frame.last_successful_deploy or {}
-    return previous_deploy.get("https_proxy") != frame.https_proxy
+    previous_proxy = normalize_https_proxy(previous_deploy.get("https_proxy"))
+    current_proxy = normalize_https_proxy(frame.https_proxy)
+    return previous_proxy != current_proxy
 
 
 async def fast_deploy_frame(id: int, redis: Redis):

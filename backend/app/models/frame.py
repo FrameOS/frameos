@@ -22,8 +22,33 @@ def _to_isoformat(value: Optional[datetime]) -> Optional[str]:
     return value.replace(tzinfo=timezone.utc).isoformat()
 
 
+def normalize_https_proxy(https_proxy: Optional[dict]) -> dict:
+    proxy = dict(https_proxy or {})
+    certs = dict(proxy.get('certs') or {})
+
+    if not certs and any(proxy.get(key) for key in ('server_cert', 'server_key', 'client_ca_cert')):
+        certs = {
+            'server': proxy.get('server_cert', ''),
+            'server_key': proxy.get('server_key', ''),
+            'client_ca': proxy.get('client_ca_cert', ''),
+        }
+
+    normalized = {
+        **proxy,
+        'certs': {
+            'server': certs.get('server', ''),
+            'server_key': certs.get('server_key', ''),
+            'client_ca': certs.get('client_ca', ''),
+        },
+    }
+    normalized.pop('server_cert', None)
+    normalized.pop('server_key', None)
+    normalized.pop('client_ca_cert', None)
+    return normalized
+
+
 def _serialize_https_proxy(https_proxy: Optional[dict]) -> dict:
-    proxy = https_proxy or {}
+    proxy = normalize_https_proxy(https_proxy)
 
     def _as_iso(value):
         if isinstance(value, datetime):
@@ -34,9 +59,11 @@ def _serialize_https_proxy(https_proxy: Optional[dict]) -> dict:
         'enable': bool(proxy.get('enable', False)),
         'port': proxy.get('port', 8443),
         'expose_only_port': bool(proxy.get('expose_only_port', False)),
-        'server_cert': proxy.get('server_cert', ''),
-        'server_key': proxy.get('server_key', ''),
-        'client_ca_cert': proxy.get('client_ca_cert', ''),
+        'certs': {
+            'server': proxy.get('certs', {}).get('server', ''),
+            'server_key': proxy.get('certs', {}).get('server_key', ''),
+            'client_ca': proxy.get('certs', {}).get('client_ca', ''),
+        },
         'server_cert_not_valid_after': _as_iso(proxy.get('server_cert_not_valid_after')),
         'client_ca_cert_not_valid_after': _as_iso(proxy.get('client_ca_cert_not_valid_after')),
     }
@@ -194,9 +221,11 @@ async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, serve
             "enable": True,
             "port": 8443,
             "expose_only_port": True,
-            "server_cert": tls_material["tls_server_cert"],
-            "server_key": tls_material["tls_server_key"],
-            "client_ca_cert": tls_material["tls_client_ca_cert"],
+            "certs": {
+                "server": tls_material["tls_server_cert"],
+                "server_key": tls_material["tls_server_key"],
+                "client_ca": tls_material["tls_client_ca_cert"],
+            },
             "server_cert_not_valid_after": _to_isoformat(parse_certificate_not_valid_after(tls_material["tls_server_cert"])),
             "client_ca_cert_not_valid_after": _to_isoformat(parse_certificate_not_valid_after(tls_material["tls_client_ca_cert"])),
         },
@@ -246,9 +275,10 @@ async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, serve
 
 
 def refresh_tls_certificate_validity_dates(frame: Frame):
-    https_proxy = dict(frame.https_proxy or {})
-    https_proxy['server_cert_not_valid_after'] = _to_isoformat(parse_certificate_not_valid_after(https_proxy.get('server_cert', '')))
-    https_proxy['client_ca_cert_not_valid_after'] = _to_isoformat(parse_certificate_not_valid_after(https_proxy.get('client_ca_cert', '')))
+    https_proxy = normalize_https_proxy(frame.https_proxy)
+    certs = https_proxy.get('certs', {})
+    https_proxy['server_cert_not_valid_after'] = _to_isoformat(parse_certificate_not_valid_after(certs.get('server', '')))
+    https_proxy['client_ca_cert_not_valid_after'] = _to_isoformat(parse_certificate_not_valid_after(certs.get('client_ca', '')))
     frame.https_proxy = https_proxy
 
 
@@ -287,6 +317,7 @@ def get_templates_json() -> dict:
         return {}
 
 def get_frame_json(db: Session, frame: Frame) -> dict:
+    https_proxy = normalize_https_proxy(frame.https_proxy)
     network = frame.network or {}
     agent = frame.agent or {}
     frame_json: dict = {
@@ -297,11 +328,11 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
         "frameAccessKey": frame.frame_access_key,
         "frameAccess": frame.frame_access,
         "httpsProxy": {
-            "enable": bool((frame.https_proxy or {}).get("enable", False)),
-            "port": (frame.https_proxy or {}).get("port", 8443),
-            "exposeOnlyPort": bool((frame.https_proxy or {}).get("expose_only_port", False)),
-            "serverCert": (frame.https_proxy or {}).get("server_cert", ""),
-            "serverKey": (frame.https_proxy or {}).get("server_key", ""),
+            "enable": bool(https_proxy.get("enable", False)),
+            "port": https_proxy.get("port", 8443),
+            "exposeOnlyPort": bool(https_proxy.get("expose_only_port", False)),
+            "serverCert": https_proxy.get("certs", {}).get("server", ""),
+            "serverKey": https_proxy.get("certs", {}).get("server_key", ""),
         },
         "serverHost": frame.server_host or "localhost",
         "serverPort": frame.server_port or 8989,

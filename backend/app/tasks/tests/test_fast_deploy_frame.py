@@ -10,9 +10,11 @@ def test_tls_settings_changed_returns_false_without_previous_deploy():
             "enable": False,
             "port": 8443,
             "expose_only_port": False,
-            "server_cert": "cert-a",
-            "server_key": "key-a",
-            "client_ca_cert": "ca-a",
+            "certs": {
+                "server": "cert-a",
+                "server_key": "key-a",
+                "client_ca": "ca-a",
+            },
         },
     )
 
@@ -26,18 +28,22 @@ def test_tls_settings_changed_returns_true_when_tls_field_changes():
                 "enable": True,
                 "port": 8443,
                 "expose_only_port": True,
-                "server_cert": "cert-a",
-                "server_key": "key-a",
-                "client_ca_cert": "ca-a",
+                "certs": {
+                    "server": "cert-a",
+                    "server_key": "key-a",
+                    "client_ca": "ca-a",
+                },
             }
         },
         https_proxy={
             "enable": True,
             "port": 9443,
             "expose_only_port": True,
-            "server_cert": "cert-a",
-            "server_key": "key-a",
-            "client_ca_cert": "ca-a",
+            "certs": {
+                "server": "cert-a",
+                "server_key": "key-a",
+                "client_ca": "ca-a",
+            },
         },
     )
 
@@ -51,18 +57,22 @@ def test_tls_settings_changed_returns_false_when_tls_fields_match_previous_deplo
                 "enable": True,
                 "port": 8443,
                 "expose_only_port": True,
-                "server_cert": "cert-a",
-                "server_key": "key-a",
-                "client_ca_cert": "ca-a",
+                "certs": {
+                    "server": "cert-a",
+                    "server_key": "key-a",
+                    "client_ca": "ca-a",
+                },
             }
         },
         https_proxy={
             "enable": True,
             "port": 8443,
             "expose_only_port": True,
-            "server_cert": "cert-a",
-            "server_key": "key-a",
-            "client_ca_cert": "ca-a",
+            "certs": {
+                "server": "cert-a",
+                "server_key": "key-a",
+                "client_ca": "ca-a",
+            },
         },
     )
 

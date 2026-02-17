@@ -499,20 +499,23 @@ export const frameLogic = kea<frameLogicType>([
       actions.setFrameFormValues({
         https_proxy: {
           ...(values.frameForm.https_proxy || values.frame?.https_proxy || {}),
-          server_cert: data.server_cert,
-          server_key: data.server_key,
-          client_ca_cert: data.client_ca_cert,
+          certs: {
+            ...((values.frameForm.https_proxy || values.frame?.https_proxy || {}).certs || {}),
+            server: data.certs.server,
+            server_key: data.certs.server_key,
+            client_ca: data.certs.client_ca,
+          },
           server_cert_not_valid_after: data.server_cert_not_valid_after,
           client_ca_cert_not_valid_after: data.client_ca_cert_not_valid_after,
         },
       })
-      actions.touchFrameFormField('https_proxy.server_cert')
-      actions.touchFrameFormField('https_proxy.server_key')
-      actions.touchFrameFormField('https_proxy.client_ca_cert')
+      actions.touchFrameFormField('https_proxy.certs.server')
+      actions.touchFrameFormField('https_proxy.certs.server_key')
+      actions.touchFrameFormField('https_proxy.certs.client_ca')
     },
     verifyTlsCertificates: async () => {
       const frame = values.frameForm || values.frame
-      if (!frame.https_proxy?.server_cert || !frame.https_proxy?.server_key || !frame.https_proxy?.client_ca_cert) {
+      if (!frame.https_proxy?.certs?.server || !frame.https_proxy?.certs?.server_key || !frame.https_proxy?.certs?.client_ca) {
         console.warn('TLS enabled but certificates are missing, generating new certificates')
         actions.generateTlsCertificates()
       }

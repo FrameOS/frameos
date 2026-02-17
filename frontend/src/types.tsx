@@ -12,9 +12,11 @@ export interface FrameType {
     enable?: boolean
     port?: number
     expose_only_port?: boolean
-    server_cert?: string
-    server_key?: string
-    client_ca_cert?: string
+    certs?: {
+      server?: string
+      server_key?: string
+      client_ca?: string
+    }
     server_cert_not_valid_after?: string
     client_ca_cert_not_valid_after?: string
   }
