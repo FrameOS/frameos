@@ -108,6 +108,25 @@ def _httpx_verify(frame: Frame):
     return context
 
 
+def _tls_connect_error_detail(frame: Frame, error: str) -> Optional[str]:
+    lower_error = error.lower()
+    if "certificate_verify_failed" not in lower_error and "certificate verify failed" not in lower_error:
+        return None
+
+    if "hostname mismatch" in lower_error:
+        return (
+            "TLS hostname verification failed while connecting to frame. "
+            f"The certificate does not match frame host '{frame.frame_host}'. "
+            "Regenerate frame TLS material (or upload a certificate that includes this host in SAN/CN) "
+            "and redeploy."
+        )
+
+    return (
+        "TLS verification failed while connecting to frame. "
+        "Set frame.https_proxy.client_ca_cert to the issuing CA certificate."
+    )
+
+
 def _auth_headers(
     frame: Frame, hdrs: Optional[dict[str, str]] = None
 ) -> dict[str, str]:
@@ -177,13 +196,10 @@ async def _fetch_frame_http_bytes(
                         detail="Frame request queue is saturated",
                     )
                 except httpx.ConnectError as exc:
-                    if "CERTIFICATE_VERIFY_FAILED" in str(exc):
+                    if detail := _tls_connect_error_detail(frame, str(exc)):
                         raise HTTPException(
                             status_code=HTTPStatus.BAD_GATEWAY,
-                            detail=(
-                                "TLS verification failed while connecting to frame. "
-                                "Set frame.https_proxy.client_ca_cert to the issuing CA certificate."
-                            ),
+                            detail=detail,
                         )
                     raise HTTPException(
                         status_code=HTTPStatus.BAD_GATEWAY,
