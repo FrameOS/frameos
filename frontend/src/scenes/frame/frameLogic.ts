@@ -118,6 +118,7 @@ const FRAME_KEY_LABELS: Partial<Record<keyof FrameType, string>> = {
   frame_port: 'Frame port',
   frame_access_key: 'Frame access key',
   frame_access: 'Frame access',
+  https_proxy: 'HTTPS proxy',
   ssh_user: 'SSH user',
   ssh_pass: 'SSH password',
   ssh_port: 'SSH port',
@@ -589,10 +590,11 @@ export const frameLogic = kea<frameLogicType>([
       },
     ],
   })),
-  subscriptions(({ actions }) => ({
+  subscriptions(({ actions, values }) => ({
     frame: (frame?: FrameType, oldFrame?: FrameType) => {
       setBrowserTitle(frame)
-      if (frame && !oldFrame) {
+      const frameFormMatchesPrevious = equal(oldFrame, values.frameForm)
+      if (frame && (!oldFrame || frameFormMatchesPrevious)) {
         actions.resetFrameForm({ ...frame, scenes: frame.scenes?.map((scene) => sanitizeScene(scene, frame)) ?? [] })
       }
     },
