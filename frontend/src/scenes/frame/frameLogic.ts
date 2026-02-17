@@ -600,7 +600,11 @@ export const frameLogic = kea<frameLogicType>([
     restartFrame: () => framesModel.actions.restartFrame(props.frameId),
     rebootFrame: () => framesModel.actions.rebootFrame(props.frameId),
     stopFrame: () => framesModel.actions.stopFrame(props.frameId),
-    deployFrame: () => framesModel.actions.deployFrame(props.frameId, !values.requiresRecompilation),
+    deployFrame: () =>
+      framesModel.actions.deployFrame(
+        props.frameId,
+        Boolean(values.frame?.last_successful_deploy_at) && !values.requiresRecompilation
+      ),
     fastDeployFrame: () => framesModel.actions.deployFrame(props.frameId, true),
     fullDeployFrame: () => framesModel.actions.deployFrame(props.frameId, false),
     deployAgent: () => framesModel.actions.deployAgent(props.frameId),
