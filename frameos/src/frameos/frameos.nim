@@ -9,6 +9,7 @@ import frameos/scheduler
 import frameos/types
 import frameos/portal as netportal
 import frameos/tls_proxy
+import frameos/setup_proxy
 import lib/tz
 
 proc newFrameOS*(): FrameOS =
@@ -74,6 +75,7 @@ proc start*(self: FrameOS) {.async.} =
     ## This call never returns
     await self.server.startServer()
   finally:
+    stopSetupProxy()
     stopTlsProxy(self.logger)
 
 proc startFrameOS*() {.async.} =
