@@ -1770,12 +1770,12 @@ async def api_frame_generate_tls_material_endpoint(
     material = generate_frame_tls_material(frame.frame_host or "")
     return {
         "certs": {
-            "server": material["tls_server_cert"],
-            "server_key": material["tls_server_key"],
-            "client_ca": material["tls_client_ca_cert"],
+            "server": material["server"],
+            "server_key": material["server_key"],
+            "client_ca": material["client_ca"],
         },
-        "server_cert_not_valid_after": parse_certificate_not_valid_after(material["tls_server_cert"]),
-        "client_ca_cert_not_valid_after": parse_certificate_not_valid_after(material["tls_client_ca_cert"]),
+        "server_cert_not_valid_after": parse_certificate_not_valid_after(material["server"]),
+        "client_ca_cert_not_valid_after": parse_certificate_not_valid_after(material["client_ca"]),
     }
 
 
@@ -1907,29 +1907,6 @@ async def api_frame_import(
             data.get("interval"),
         )
 
-        legacy_https_proxy = {
-            "enable": data.get("enable_tls"),
-            "port": data.get("tls_port"),
-            "expose_only_port": data.get("expose_only_tls_port"),
-            "certs": {
-                "server": data.get("tls_server_cert"),
-                "server_key": data.get("tls_server_key"),
-                "client_ca": data.get("tls_client_ca_cert"),
-            },
-            "server_cert_not_valid_after": data.get("tls_server_cert_not_valid_after"),
-            "client_ca_cert_not_valid_after": data.get("tls_client_ca_cert_not_valid_after"),
-        }
-        legacy_values = {
-            k: v
-            for k, v in legacy_https_proxy.items()
-            if v is not None and (k != "certs" or any(cert is not None for cert in v.values()))
-        }
-        if legacy_values:
-            data["https_proxy"] = normalize_https_proxy({
-                **(frame.https_proxy or {}),
-                **legacy_values,
-            })
-
         for key, value in data.items():
             if key in [
                 "id",
@@ -1939,14 +1916,6 @@ async def api_frame_import(
                 "device",
                 "interval",
                 "last_success",
-                "enable_tls",
-                "tls_port",
-                "expose_only_tls_port",
-                "tls_server_cert",
-                "tls_server_key",
-                "tls_client_ca_cert",
-                "tls_server_cert_not_valid_after",
-                "tls_client_ca_cert_not_valid_after",
             ]:
                 continue
             if hasattr(frame, key):

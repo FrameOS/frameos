@@ -94,13 +94,13 @@ def generate_frame_tls_material(frame_host: str) -> dict[str, str]:
     )
 
     return {
-        "tls_server_key": server_key.private_bytes(
+        "server_key": server_key.private_bytes(
             serialization.Encoding.PEM,
             serialization.PrivateFormat.TraditionalOpenSSL,
             serialization.NoEncryption(),
         ).decode("utf-8"),
-        "tls_server_cert": server_cert.public_bytes(serialization.Encoding.PEM).decode("utf-8"),
-        "tls_client_ca_cert": ca_cert.public_bytes(serialization.Encoding.PEM).decode("utf-8"),
+        "server": server_cert.public_bytes(serialization.Encoding.PEM).decode("utf-8"),
+        "client_ca": ca_cert.public_bytes(serialization.Encoding.PEM).decode("utf-8"),
     }
 
 

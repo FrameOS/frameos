@@ -24,7 +24,7 @@ def test_tls_connect_error_detail_for_ca_issue():
     )
 
     assert detail is not None
-    assert "client_ca_cert" in detail
+    assert "certs.client_ca" in detail
 
 
 def test_tls_connect_error_detail_for_non_tls_error():

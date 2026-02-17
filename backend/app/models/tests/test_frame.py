@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import patch, AsyncMock
-from app.models.frame import Frame, delete_frame, new_frame, normalize_https_proxy, update_frame
+from app.models.frame import Frame, delete_frame, new_frame, update_frame
 
 
 @pytest.mark.asyncio
@@ -79,19 +79,3 @@ async def test_frame_to_dict(mock_publish, db, redis):
     assert data["https_proxy"]["server_cert_not_valid_after"] is not None
     assert data["https_proxy"]["client_ca_cert_not_valid_after"] is not None
     assert mock_publish.await_count == 1
-
-
-def test_normalize_https_proxy_migrates_legacy_fields():
-    normalized = normalize_https_proxy({
-        "enable": True,
-        "server_cert": "legacy-server",
-        "server_key": "legacy-key",
-        "client_ca_cert": "legacy-ca",
-    })
-
-    assert normalized["certs"]["server"] == "legacy-server"
-    assert normalized["certs"]["server_key"] == "legacy-key"
-    assert normalized["certs"]["client_ca"] == "legacy-ca"
-    assert "server_cert" not in normalized
-    assert "server_key" not in normalized
-    assert "client_ca_cert" not in normalized

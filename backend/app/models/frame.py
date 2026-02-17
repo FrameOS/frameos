@@ -26,14 +26,7 @@ def normalize_https_proxy(https_proxy: Optional[dict]) -> dict:
     proxy = dict(https_proxy or {})
     certs = dict(proxy.get('certs') or {})
 
-    if not certs and any(proxy.get(key) for key in ('server_cert', 'server_key', 'client_ca_cert')):
-        certs = {
-            'server': proxy.get('server_cert', ''),
-            'server_key': proxy.get('server_key', ''),
-            'client_ca': proxy.get('client_ca_cert', ''),
-        }
-
-    normalized = {
+    return {
         **proxy,
         'certs': {
             'server': certs.get('server', ''),
@@ -41,10 +34,6 @@ def normalize_https_proxy(https_proxy: Optional[dict]) -> dict:
             'client_ca': certs.get('client_ca', ''),
         },
     }
-    normalized.pop('server_cert', None)
-    normalized.pop('server_key', None)
-    normalized.pop('client_ca_cert', None)
-    return normalized
 
 
 def _serialize_https_proxy(https_proxy: Optional[dict]) -> dict:
@@ -222,12 +211,12 @@ async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, serve
             "port": 8443,
             "expose_only_port": True,
             "certs": {
-                "server": tls_material["tls_server_cert"],
-                "server_key": tls_material["tls_server_key"],
-                "client_ca": tls_material["tls_client_ca_cert"],
+                "server": tls_material["server"],
+                "server_key": tls_material["server_key"],
+                "client_ca": tls_material["client_ca"],
             },
-            "server_cert_not_valid_after": _to_isoformat(parse_certificate_not_valid_after(tls_material["tls_server_cert"])),
-            "client_ca_cert_not_valid_after": _to_isoformat(parse_certificate_not_valid_after(tls_material["tls_client_ca_cert"])),
+            "server_cert_not_valid_after": _to_isoformat(parse_certificate_not_valid_after(tls_material["server"])),
+            "client_ca_cert_not_valid_after": _to_isoformat(parse_certificate_not_valid_after(tls_material["client_ca"])),
         },
         server_host=server_host,
         server_port=int(server_port),

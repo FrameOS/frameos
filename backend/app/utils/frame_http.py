@@ -123,7 +123,7 @@ def _tls_connect_error_detail(frame: Frame, error: str) -> Optional[str]:
 
     return (
         "TLS verification failed while connecting to frame. "
-        "Set frame.https_proxy.client_ca_cert to the issuing CA certificate."
+        "Set frame.https_proxy.certs.client_ca to the issuing CA certificate."
     )
 
 
