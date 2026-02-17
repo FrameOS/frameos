@@ -2,6 +2,7 @@ import net
 import os
 import osproc
 import strformat
+import times
 import frameos/types
 
 var setupProxyPid: int = 0
@@ -15,7 +16,15 @@ proc stopSetupProxy*() =
     setupProxyActivePort = 0
     return
 
-  discard execCmdEx("kill " & $setupProxyPid & " >/dev/null 2>&1 || true")
+  discard execCmdEx("kill -TERM " & $setupProxyPid & " >/dev/null 2>&1 || true")
+
+  let waitUntil = epochTime() + 1.5
+  while epochTime() < waitUntil:
+    if execCmdEx("kill -0 " & $setupProxyPid & " >/dev/null 2>&1")[1] != 0:
+      break
+    sleep(100)
+
+  discard execCmdEx("kill -KILL " & $setupProxyPid & " >/dev/null 2>&1 || true")
   setupProxyPid = 0
   setupProxyActivePort = 0
 
@@ -79,7 +88,7 @@ proc startSetupProxy*(frameConfig: FrameConfig) =
         "--adapter",
         "caddyfile",
       ],
-      options = {poUsePath}
+      options = {poUsePath, poParentStreams}
     )
     setupProxyPid = processHandle.processID.int
     close(processHandle)
