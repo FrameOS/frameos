@@ -516,7 +516,11 @@ export const frameLogic = kea<frameLogicType>([
     },
     verifyTlsCertificates: async () => {
       const frame = values.frameForm || values.frame
-      if (!frame.https_proxy?.certs?.server || !frame.https_proxy?.certs?.server_key || !frame.https_proxy?.certs?.client_ca) {
+      if (
+        !frame.https_proxy?.certs?.server ||
+        !frame.https_proxy?.certs?.server_key ||
+        !frame.https_proxy?.certs?.client_ca
+      ) {
         console.warn('TLS enabled but certificates are missing, generating new certificates')
         actions.generateTlsCertificates()
       }
