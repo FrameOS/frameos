@@ -2,7 +2,7 @@ from __future__ import annotations
 
 # stdlib ---------------------------------------------------------------------
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from http import HTTPStatus
 import contextlib
 import aiofiles
@@ -114,6 +114,12 @@ def _not_found():
 
 def _bad_request(msg: str):
     raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=msg)
+
+
+def _serialize_datetime(value: Optional[datetime]) -> Optional[str]:
+    if not value:
+        return None
+    return value.replace(tzinfo=timezone.utc).isoformat()
 
 
 def _sanitize_scene_state_filename(scene_id: str) -> str:
@@ -1768,14 +1774,17 @@ async def api_frame_generate_tls_material_endpoint(
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
 
     material = generate_frame_tls_material(frame.frame_host or "")
+    server_not_valid_after = parse_certificate_not_valid_after(material["server"])
+    client_ca_not_valid_after = parse_certificate_not_valid_after(material["client_ca"])
+
     return {
         "certs": {
             "server": material["server"],
             "server_key": material["server_key"],
             "client_ca": material["client_ca"],
         },
-        "server_cert_not_valid_after": parse_certificate_not_valid_after(material["server"]),
-        "client_ca_cert_not_valid_after": parse_certificate_not_valid_after(material["client_ca"]),
+        "server_cert_not_valid_after": _serialize_datetime(server_not_valid_after),
+        "client_ca_cert_not_valid_after": _serialize_datetime(client_ca_not_valid_after),
     }
 
 

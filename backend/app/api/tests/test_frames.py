@@ -223,3 +223,5 @@ async def test_api_frame_generate_tls_material_includes_validity_dates(async_cli
     assert 'BEGIN CERTIFICATE' in data['certs']['client_ca']
     assert data['server_cert_not_valid_after'] is not None
     assert data['client_ca_cert_not_valid_after'] is not None
+    assert data['server_cert_not_valid_after'].endswith('+00:00')
+    assert data['client_ca_cert_not_valid_after'].endswith('+00:00')
