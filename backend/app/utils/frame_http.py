@@ -120,7 +120,15 @@ def _tls_connect_error_detail(frame: Frame, error: str) -> Optional[str]:
             "Regenerate frame TLS material (or upload a certificate that includes this host in SAN/CN) "
             "and redeploy."
         )
+    if "ip address mismatch" in lower_error:
+        return (
+            "TLS ip address verification failed while connecting to frame. "
+            f"The certificate does not match frame ip '{frame.frame_host}'. "
+            "Regenerate frame TLS material (or upload a certificate that includes this ip in SAN/CN) "
+            "and redeploy."
+        )
 
+    print(error)
     return (
         "TLS verification failed while connecting to frame. "
         "Set frame.https_proxy.certs.client_ca to the issuing CA certificate."
