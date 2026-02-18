@@ -156,3 +156,20 @@ async def test_signup_password_too_short(no_auth_client, db: Session):
     response = await no_auth_client.post("/api/signup", json=signup_data)
     assert response.status_code == HTTP_400_BAD_REQUEST
     assert response.json()["detail"] == "Password too short."
+
+
+@pytest.mark.asyncio
+async def test_cookie_auth_on_protected_route(no_auth_client, db: Session):
+    user = User(email="cookieuser@example.com")
+    user.set_password("testpassword")
+    db.add(user)
+    db.commit()
+
+    login_data = {"username": "cookieuser@example.com", "password": "testpassword"}
+    login_response = await no_auth_client.post("/api/login", data=login_data)
+    assert login_response.status_code == HTTP_200_OK
+    assert "frameos_session" in login_response.cookies
+
+    no_auth_client.headers.pop("Authorization", None)
+    response = await no_auth_client.get("/api/system/metrics")
+    assert response.status_code == HTTP_200_OK

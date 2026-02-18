@@ -641,14 +641,9 @@ export const scenesLogic = kea<scenesLogicType>([
 
         let imageBlob: Blob | null = null
         try {
-          const tokenResponse = await apiFetch(`/api/frames/${props.frameId}/image_token`)
-          if (tokenResponse.ok) {
-            const tokenPayload = await tokenResponse.json()
-            const token = encodeURIComponent(tokenPayload.token)
-            const imageResponse = await apiFetch(`/api/frames/${props.frameId}/image?token=${token}`)
-            if (imageResponse.ok) {
-              imageBlob = await imageResponse.blob()
-            }
+          const imageResponse = await apiFetch(`/api/frames/${props.frameId}/image`)
+          if (imageResponse.ok) {
+            imageBlob = await imageResponse.blob()
           }
         } catch (error) {
           console.error('Failed to fetch current frame image', error)

@@ -15,6 +15,28 @@ import { arrangeNodes } from '../../utils/arrangeNodes'
 export interface FrameLogicProps {
   frameId: number
 }
+
+export interface ChangeDetail {
+  label: string
+  requiresFullDeploy: boolean
+}
+
+const DEFAULT_BROWSER_TITLE = 'FrameOS Backend'
+
+function setBrowserTitle(frame?: FrameType | null): void {
+  if (typeof document === 'undefined') {
+    return
+  }
+
+  if (!frame) {
+    document.title = DEFAULT_BROWSER_TITLE
+    return
+  }
+
+  const frameTitle = frame.name || frame.frame_host || `Frame ${frame.id}`
+  document.title = `${frameTitle} · ${DEFAULT_BROWSER_TITLE}`
+}
+
 const FRAME_KEYS: (keyof FrameType)[] = [
   'name',
   'mode',
@@ -22,6 +44,7 @@ const FRAME_KEYS: (keyof FrameType)[] = [
   'frame_port',
   'frame_access_key',
   'frame_access',
+  'https_proxy',
   'ssh_user',
   'ssh_pass',
   'ssh_port',
@@ -88,23 +111,137 @@ const FRAME_KEYS_REQUIRE_RECOMPILE_BUILDROOT: (keyof FrameType)[] = [
   'buildroot',
 ]
 
+const FRAME_KEY_LABELS: Partial<Record<keyof FrameType, string>> = {
+  name: 'Frame name',
+  mode: 'Deployment mode',
+  frame_host: 'Frame host',
+  frame_port: 'Frame port',
+  frame_access_key: 'Frame access key',
+  frame_access: 'Frame access',
+  https_proxy: 'HTTPS proxy',
+  ssh_user: 'SSH user',
+  ssh_pass: 'SSH password',
+  ssh_port: 'SSH port',
+  ssh_keys: 'SSH keys',
+  server_host: 'Server host',
+  server_port: 'Server port',
+  server_api_key: 'Server API key',
+  width: 'Width',
+  height: 'Height',
+  color: 'Color support',
+  device: 'Device',
+  device_config: 'Device config',
+  interval: 'Refresh interval',
+  metrics_interval: 'Metrics interval',
+  scaling_mode: 'Scaling mode',
+  rotate: 'Rotation',
+  flip: 'Flip',
+  background_color: 'Background color',
+  scenes: 'Scenes',
+  debug: 'Debug mode',
+  log_to_file: 'Log to file',
+  assets_path: 'Assets path',
+  save_assets: 'Save assets',
+  upload_fonts: 'Upload fonts',
+  reboot: 'Reboot settings',
+  control_code: 'Control code',
+  schedule: 'Schedule',
+  gpio_buttons: 'GPIO buttons',
+  network: 'Network settings',
+  agent: 'Agent settings',
+  palette: 'Palette',
+  nix: 'NixOS settings',
+  buildroot: 'Buildroot settings',
+  rpios: 'Raspberry Pi OS settings',
+}
+
+function keyLabel(key: keyof FrameType): string {
+  return FRAME_KEY_LABELS[key] ?? key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+function getRecompileFields(mode: FrameType['mode']): (keyof FrameType)[] {
+  return mode === 'nixos'
+    ? FRAME_KEYS_REQUIRE_RECOMPILE_NIXOS
+    : mode === 'buildroot'
+    ? FRAME_KEYS_REQUIRE_RECOMPILE_BUILDROOT
+    : FRAME_KEYS_REQUIRE_RECOMPILE_RPIOS
+}
+
+function sceneChangeDetails(currentScenes: FrameScene[], deployedScenes: FrameScene[]): ChangeDetail[] {
+  const details: ChangeDetail[] = []
+
+  for (const scene of currentScenes) {
+    const deployed = deployedScenes.find((s) => s.id === scene.id)
+    const mode = scene.settings?.execution ?? 'compiled'
+    const deployedMode = deployed?.settings?.execution ?? 'compiled'
+
+    if (!deployed) {
+      details.push({
+        label: `Scene added: ${scene.name || scene.id}`,
+        requiresFullDeploy: mode !== 'interpreted',
+      })
+      continue
+    }
+
+    if (mode !== deployedMode) {
+      details.push({
+        label: `Scene mode changed: ${scene.name || scene.id} (${deployedMode} → ${mode})`,
+        requiresFullDeploy: mode !== 'interpreted' || deployedMode !== 'interpreted',
+      })
+      continue
+    }
+
+    if (!equal(scene, deployed)) {
+      details.push({
+        label: `Scene updated: ${scene.name || scene.id}`,
+        requiresFullDeploy: mode !== 'interpreted',
+      })
+    }
+  }
+
+  for (const scene of deployedScenes) {
+    if (!currentScenes.find((s) => s.id === scene.id)) {
+      const mode = scene.settings?.execution ?? 'compiled'
+      details.push({
+        label: `Scene removed: ${scene.name || scene.id}`,
+        requiresFullDeploy: mode !== 'interpreted',
+      })
+    }
+  }
+
+  return details
+}
+
+function computeChangeDetails(
+  previous: Partial<FrameType> | null | undefined,
+  next: Partial<FrameType> | null | undefined,
+  mode: FrameType['mode']
+): ChangeDetail[] {
+  const recompileFields = new Set(getRecompileFields(mode).filter((key) => key !== 'scenes'))
+  const details: ChangeDetail[] = []
+
+  for (const key of FRAME_KEYS.filter((k) => k !== 'scenes')) {
+    if (!equal(previous?.[key], next?.[key])) {
+      details.push({
+        label: keyLabel(key),
+        requiresFullDeploy: recompileFields.has(key),
+      })
+    }
+  }
+
+  const sceneDetails = sceneChangeDetails(next?.scenes ?? [], previous?.scenes ?? [])
+  return [...details, ...sceneDetails]
+}
+
 async function resolveTemplateImageUrl(template: Partial<TemplateType>): Promise<string | null> {
   if (template.id) {
-    const response = await apiFetch(`/api/templates/${template.id}/image_token`)
-    if (response.ok) {
-      const data = await response.json()
-      return `/api/templates/${template.id}/image?token=${encodeURIComponent(data.token)}`
-    }
+    return `/api/templates/${template.id}/image`
   }
 
   if (typeof template.image === 'string') {
     const match = template.image.match(/^\/api\/(repositories\/system\/[^/]+\/templates\/[^/]+)\/image$/)
     if (match) {
-      const response = await apiFetch(`/api/${match[1]}/image_token`)
-      if (response.ok) {
-        const data = await response.json()
-        return `/api/${match[1]}/image?token=${encodeURIComponent(data.token)}`
-      }
+      return `/api/${match[1]}/image`
     }
     return template.image
   }
@@ -215,6 +352,13 @@ function hasValidPosition(node: DiagramNode): boolean {
   return Number.isFinite(node.position?.x) && Number.isFinite(node.position?.y)
 }
 
+function sanitizeFrame(frame: Partial<FrameType>): Partial<FrameType> {
+  return {
+    ...frame,
+    scenes: frame.scenes?.map((scene) => sanitizeScene(scene, frame)) ?? [],
+  }
+}
+
 export function sanitizeScene(scene: Partial<FrameScene>, frame: Partial<FrameType>): FrameScene {
   const settings = scene.settings ?? {}
   const sanitizedNodes = sanitizeNodes(scene.nodes ?? [])
@@ -269,12 +413,16 @@ export const frameLogic = kea<frameLogicType>([
     restartAgent: true,
     updateDeployedSshKeys: true,
     clearNextAction: true,
+    resetUnsavedChanges: true,
+    resetUndeployedChanges: true,
     applyTemplate: (template: Partial<TemplateType>) => ({
       template,
     }),
     closeScenePanels: (sceneIds: string[]) => ({ sceneIds }),
     sendEvent: (event: string, payload: Record<string, any>) => ({ event, payload }),
     setDeployWithAgent: (deployWithAgent: boolean) => ({ deployWithAgent }),
+    generateTlsCertificates: true,
+    verifyTlsCertificates: true,
   }),
   forms(({ values }) => ({
     frameForm: {
@@ -338,6 +486,21 @@ export const frameLogic = kea<frameLogicType>([
     ],
   }),
   listeners(({ actions, values }) => ({
+    resetUnsavedChanges: () => {
+      if (!values.frame) {
+        return
+      }
+
+      actions.resetFrameForm(sanitizeFrame(values.frame) as FrameType)
+    },
+    resetUndeployedChanges: async () => {
+      if (!values.lastDeploy) {
+        return
+      }
+
+      actions.clearNextAction()
+      actions.resetFrameForm(sanitizeFrame(values.lastDeploy) as FrameType)
+    },
     updateDeployedSshKeys: async () => {
       actions.clearNextAction()
       await actions.submitFrameForm()
@@ -348,6 +511,51 @@ export const frameLogic = kea<frameLogicType>([
       })
       if (!response.ok) {
         throw new Error('Failed to update deployed SSH keys')
+      }
+    },
+    generateTlsCertificates: async () => {
+      const response = await apiFetch(`/api/frames/${values.frameId}/tls/generate`, {
+        method: 'POST',
+      })
+      if (!response.ok) {
+        throw new Error('Failed to generate TLS certificates')
+      }
+      const data = await response.json()
+      actions.setFrameFormValues({
+        https_proxy: {
+          ...(values.frameForm.https_proxy || values.frame?.https_proxy || {}),
+          certs: {
+            ...((values.frameForm.https_proxy || values.frame?.https_proxy || {}).certs || {}),
+            server: data.certs.server,
+            server_key: data.certs.server_key,
+            client_ca: data.certs.client_ca,
+          },
+          server_cert_not_valid_after: data.server_cert_not_valid_after,
+          client_ca_cert_not_valid_after: data.client_ca_cert_not_valid_after,
+        },
+      })
+      actions.touchFrameFormField('https_proxy.certs.server')
+      actions.touchFrameFormField('https_proxy.certs.server_key')
+      actions.touchFrameFormField('https_proxy.certs.client_ca')
+    },
+    verifyTlsCertificates: async () => {
+      const frame = values.frameForm || values.frame
+      if (
+        !frame.https_proxy?.certs?.server ||
+        !frame.https_proxy?.certs?.server_key ||
+        !frame.https_proxy?.certs?.client_ca
+      ) {
+        console.warn('TLS enabled but certificates are missing, generating new certificates')
+        actions.generateTlsCertificates()
+      }
+      if (!frame.https_proxy?.port) {
+        actions.setFrameFormValues({
+          https_proxy: {
+            ...(frame.https_proxy || {}),
+            port: 8443,
+            expose_only_port: true,
+          },
+        })
       }
     },
   })),
@@ -374,48 +582,17 @@ export const frameLogic = kea<frameLogicType>([
       (frame, lastDeploy) =>
         FRAME_KEYS.some((key) => !equal(frame?.[key as keyof FrameType], lastDeploy?.[key as keyof FrameType])),
     ],
+    unsavedChangeDetails: [
+      (s) => [s.frame, s.frameForm, s.mode],
+      (frame, frameForm, mode): ChangeDetail[] => computeChangeDetails(frame, frameForm, mode),
+    ],
+    undeployedChangeDetails: [
+      (s) => [s.lastDeploy, s.frame, s.mode],
+      (lastDeploy, frame, mode): ChangeDetail[] => computeChangeDetails(lastDeploy, frame, mode),
+    ],
     requiresRecompilation: [
-      (s) => [s.frame, s.frameForm, s.lastDeploy, s.mode],
-      (frame, frameForm, lastDeploy, mode) => {
-        if (!lastDeploy) {
-          return true
-        }
-        const fields = (
-          mode === 'nixos'
-            ? FRAME_KEYS_REQUIRE_RECOMPILE_NIXOS
-            : mode === 'buildroot'
-            ? FRAME_KEYS_REQUIRE_RECOMPILE_BUILDROOT
-            : FRAME_KEYS_REQUIRE_RECOMPILE_RPIOS
-        ).filter((k) => k !== 'scenes')
-        const resp = fields.some(
-          (key) => !equal(lastDeploy?.[key as keyof FrameType], (frameForm || frame)?.[key as keyof FrameType])
-        )
-        if (resp) {
-          return true
-        }
-        // check scenes separately
-        const currentScenes: FrameScene[] = (frameForm || frame)?.scenes ?? []
-        const deployedScenes: FrameScene[] = lastDeploy?.scenes ?? []
-
-        const needRedeploy = currentScenes.filter((scene) => {
-          const deployed = deployedScenes.find((s) => s.id === scene.id)
-          const mode = scene.settings?.execution ?? 'compiled'
-          const deployedMode = deployed?.settings?.execution ?? 'compiled'
-          if (mode === 'interpreted') {
-            return deployed && deployedMode !== 'interpreted'
-          }
-          return !deployed || !equal(scene, deployed)
-        })
-        const needRemoval = deployedScenes.filter((scene) => {
-          return (
-            !currentScenes.find((s) => s.id === scene.id) && (scene.settings?.execution ?? 'compiled') !== 'interpreted'
-          )
-        })
-        if (needRedeploy.length > 0 || needRemoval.length > 0) {
-          return true
-        }
-        return false
-      },
+      (s) => [s.unsavedChangeDetails],
+      (unsavedChangeDetails) => unsavedChangeDetails.some((change) => change.requiresFullDeploy),
     ],
     defaultScene: [
       (s) => [s.frame, s.frameForm],
@@ -441,10 +618,12 @@ export const frameLogic = kea<frameLogicType>([
       },
     ],
   })),
-  subscriptions(({ actions }) => ({
+  subscriptions(({ actions, values }) => ({
     frame: (frame?: FrameType, oldFrame?: FrameType) => {
-      if (frame && !oldFrame) {
-        actions.resetFrameForm({ ...frame, scenes: frame.scenes?.map((scene) => sanitizeScene(scene, frame)) ?? [] })
+      setBrowserTitle(frame)
+      const frameFormMatchesPrevious = equal(oldFrame, values.frameForm)
+      if (frame && (!oldFrame || frameFormMatchesPrevious)) {
+        actions.resetFrameForm(sanitizeFrame(frame) as FrameType)
       }
     },
   })),
@@ -454,7 +633,11 @@ export const frameLogic = kea<frameLogicType>([
     restartFrame: () => framesModel.actions.restartFrame(props.frameId),
     rebootFrame: () => framesModel.actions.rebootFrame(props.frameId),
     stopFrame: () => framesModel.actions.stopFrame(props.frameId),
-    deployFrame: () => framesModel.actions.deployFrame(props.frameId, !values.requiresRecompilation),
+    deployFrame: () =>
+      framesModel.actions.deployFrame(
+        props.frameId,
+        Boolean(values.frame?.last_successful_deploy_at) && !values.requiresRecompilation
+      ),
     fastDeployFrame: () => framesModel.actions.deployFrame(props.frameId, true),
     fullDeployFrame: () => framesModel.actions.deployFrame(props.frameId, false),
     deployAgent: () => framesModel.actions.deployAgent(props.frameId),
@@ -560,6 +743,7 @@ export const frameLogic = kea<frameLogicType>([
     window.addEventListener('keydown', cache.keydownHandler)
   }),
   beforeUnmount(({ cache }) => {
+    setBrowserTitle(null)
     if (cache.keydownHandler) {
       window.removeEventListener('keydown', cache.keydownHandler)
       cache.keydownHandler = null

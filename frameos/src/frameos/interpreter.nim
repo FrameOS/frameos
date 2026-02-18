@@ -1005,6 +1005,7 @@ proc buildInterpretedSceneExport(scene: FrameSceneInput): ExportedInterpretedSce
   let refreshInterval = if scene.settings != nil: scene.settings.refreshInterval else: 300.0
   let backgroundColor = if scene.settings != nil: scene.settings.backgroundColor else: parseHtmlColor("#000000")
   ExportedInterpretedScene(
+    name: scene.name,
     nodes: scene.nodes,
     edges: scene.edges,
     publicStateFields: scene.fields,

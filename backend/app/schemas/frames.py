@@ -4,6 +4,23 @@ from typing import Any, Dict, List, Literal, Optional
 from .common import ImageTokenResponse
 from datetime import datetime
 
+
+class FrameHttpsProxyCerts(BaseModel):
+    server: Optional[str] = None
+    server_key: Optional[str] = None
+    client_ca: Optional[str] = None
+
+
+class FrameHttpsProxy(BaseModel):
+    enable: Optional[bool] = None
+    port: Optional[int] = None
+    expose_only_port: Optional[bool] = None
+    certs: Optional[FrameHttpsProxyCerts] = None
+    server_cert_not_valid_after: Optional[datetime] = None
+    client_ca_cert_not_valid_after: Optional[datetime] = None
+
+
+
 class FrameBase(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -14,6 +31,7 @@ class FrameBase(BaseModel):
     frame_port: int
     frame_access_key: Optional[str]
     frame_access: Optional[str]
+    https_proxy: Optional[FrameHttpsProxy] = None
     ssh_user: Optional[str]
     ssh_pass: Optional[str]
     ssh_port: int
@@ -51,6 +69,7 @@ class FrameBase(BaseModel):
     nix: Optional[Dict[str, Any]] = None
     buildroot: Optional[Dict[str, Any]] = None
     rpios: Optional[Dict[str, Any]] = None
+    terminal_history: Optional[List[str]] = None
     last_successful_deploy: Optional[Dict[str, Any]]
     last_successful_deploy_at: Optional[datetime]
     active_connections: Optional[int] = None
@@ -78,6 +97,7 @@ class FrameUpdateRequest(BaseModel):
     frame_port: Optional[int] = None
     frame_access_key: Optional[str] = None
     frame_access: Optional[str] = None
+    https_proxy: Optional[FrameHttpsProxy] = None
     ssh_user: Optional[str] = None
     ssh_pass: Optional[str] = None
     ssh_port: Optional[int] = None
@@ -110,6 +130,7 @@ class FrameUpdateRequest(BaseModel):
     nix: Optional[Dict[str, Any]] = None
     buildroot: Optional[Dict[str, Any]] = None
     rpios: Optional[Dict[str, Any]] = None
+    terminal_history: Optional[List[str]] = None
     next_action: Optional[str] = None
 
 

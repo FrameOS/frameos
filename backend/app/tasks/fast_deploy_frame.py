@@ -5,12 +5,24 @@ from sqlalchemy.orm import Session
 from arq import ArqRedis as Redis
 
 from app.models.log import new_log as log
-from app.models.frame import Frame, update_frame
+from app.models.frame import Frame, normalize_https_proxy, update_frame
 from app.tasks._frame_deployer import FrameDeployer
 from app.utils.frame_http import _fetch_frame_http_bytes
 
+
+def tls_settings_changed(frame: Frame) -> bool:
+    if not frame.last_successful_deploy:
+        return False
+
+    previous_deploy = frame.last_successful_deploy or {}
+    previous_proxy = normalize_https_proxy(previous_deploy.get("https_proxy"))
+    current_proxy = normalize_https_proxy(frame.https_proxy)
+    return previous_proxy != current_proxy
+
+
 async def fast_deploy_frame(id: int, redis: Redis):
     await redis.enqueue_job("fast_deploy_frame", id=id)
+
 
 async def fast_deploy_frame_task(ctx: dict[str, Any], id: int):
     db: Session = ctx['db']
@@ -28,7 +40,7 @@ async def fast_deploy_frame_task(ctx: dict[str, Any], id: int):
 
         self = FrameDeployer(db=db, redis=redis, frame=frame, nim_path="", temp_dir="")
 
-        frame_dict = frame.to_dict() # persisted as frame.last_successful_deploy if successful
+        frame_dict = frame.to_dict()  # persisted as frame.last_successful_deploy if successful
         if "last_successful_deploy" in frame_dict:
             del frame_dict["last_successful_deploy"]
         if "last_successful_deploy_at" in frame_dict:
@@ -43,13 +55,17 @@ async def fast_deploy_frame_task(ctx: dict[str, Any], id: int):
             await self._upload_scenes_json("/srv/frameos/current/scenes.json.gz", gzip=True)
 
         try:
-            status, body, _headers = await _fetch_frame_http_bytes(
-                frame, redis, path="/reload", method="POST"
-            )
-            if status >= 300:
-                message = body.decode("utf-8", errors="replace")
-                await log(db, redis, id, "stderr", f"Reload failed with status {status}: {message}. Restarting service.")
+            if tls_settings_changed(frame):
+                await log(db, redis, id, "stdout", "- TLS settings changed, restarting FrameOS service")
                 await self.restart_service("frameos")
+            else:
+                status, body, _headers = await _fetch_frame_http_bytes(
+                    frame, redis, path="/reload", method="POST"
+                )
+                if status >= 300:
+                    message = body.decode("utf-8", errors="replace")
+                    await log(db, redis, id, "stderr", f"Reload failed with status {status}: {message}. Restarting service.")
+                    await self.restart_service("frameos")
         except Exception as e:
             await log(db, redis, id, "stderr", f"Reload request failed: {str(e)}. Restarting service.")
             await self.restart_service("frameos")

@@ -10,6 +10,8 @@ const SCENE_STATE_JSON_FOLDER = "./state"
 const UPLOADED_SCENES_JSON_PATH = &"{SCENE_STATE_JSON_FOLDER}/uploaded.json"
 
 # All scenes that are compiled into the FrameOS binary
+var sceneRegistryLock: Lock
+initLock(sceneRegistryLock)
 var systemScenes*: Table[SceneId, ExportedScene] = getSystemScenes()
 var compiledScenes*: Table[SceneId, ExportedScene] = getExportedScenes()
 var interpretedScenes*: Table[SceneId, ExportedInterpretedScene] = getInterpretedScenes()
@@ -28,33 +30,42 @@ for sceneId, scene in uploadedScenes:
   exportedScenes[sceneId] = scene.ExportedScene
 
 proc reloadInterpretedScenes*() =
-  let oldInterpreted = interpretedScenes
-  resetInterpretedScenes()
-  interpretedScenes = getInterpretedScenes()
-  for sceneId in keys(oldInterpreted):
-    if exportedScenes.hasKey(sceneId):
-      exportedScenes.del(sceneId)
-  for sceneId, scene in interpretedScenes:
-    exportedScenes[sceneId] = scene.ExportedScene
+  withLock sceneRegistryLock:
+    let oldInterpreted = interpretedScenes
+    resetInterpretedScenes()
+    interpretedScenes = getInterpretedScenes()
+    for sceneId in keys(oldInterpreted):
+      if exportedScenes.hasKey(sceneId):
+        exportedScenes.del(sceneId)
+    for sceneId, scene in interpretedScenes:
+      exportedScenes[sceneId] = scene.ExportedScene
 
 proc updateUploadedScenes*(newScenes: Table[SceneId, ExportedInterpretedScene]) =
-  # this is likely overkill as we prefix all uploaded scenes with "uploaded/"
-  let oldUploaded = getUploadedInterpretedScenes()
-  for sceneId in keys(oldUploaded):
-    if newScenes.hasKey(sceneId):
-      continue
-    if compiledScenes.hasKey(sceneId):
-      exportedScenes[sceneId] = compiledScenes[sceneId]
-    elif interpretedScenes.hasKey(sceneId):
-      exportedScenes[sceneId] = interpretedScenes[sceneId].ExportedScene
-    elif systemScenes.hasKey(sceneId):
-      exportedScenes[sceneId] = systemScenes[sceneId]
-    elif exportedScenes.hasKey(sceneId):
-      exportedScenes.del(sceneId)
-  setUploadedInterpretedScenes(newScenes)
-  uploadedScenes = newScenes
-  for sceneId, scene in newScenes:
-    exportedScenes[sceneId] = scene.ExportedScene
+  withLock sceneRegistryLock:
+    # this is likely overkill as we prefix all uploaded scenes with "uploaded/"
+    let oldUploaded = getUploadedInterpretedScenes()
+    for sceneId in keys(oldUploaded):
+      if newScenes.hasKey(sceneId):
+        continue
+      if compiledScenes.hasKey(sceneId):
+        exportedScenes[sceneId] = compiledScenes[sceneId]
+      elif interpretedScenes.hasKey(sceneId):
+        exportedScenes[sceneId] = interpretedScenes[sceneId].ExportedScene
+      elif systemScenes.hasKey(sceneId):
+        exportedScenes[sceneId] = systemScenes[sceneId]
+      elif exportedScenes.hasKey(sceneId):
+        exportedScenes.del(sceneId)
+    setUploadedInterpretedScenes(newScenes)
+    uploadedScenes = newScenes
+    for sceneId, scene in newScenes:
+      exportedScenes[sceneId] = scene.ExportedScene
+
+proc getDynamicSceneOptions*(): seq[tuple[id: SceneId, name: string]] =
+  withLock sceneRegistryLock:
+    for sceneId, scene in interpretedScenes:
+      result.add((sceneId, if scene.name.len > 0: scene.name else: sceneId.string))
+    for sceneId, scene in uploadedScenes:
+      result.add((sceneId, if scene.name.len > 0: scene.name else: sceneId.string))
 
 proc normalizeUploadedScenePayload*(sceneInputs: seq[FrameSceneInput]): seq[FrameSceneInput] =
   # Add "uploaded/" in front of every scene ID to make sure we don't conflict with existing scenes

@@ -67,6 +67,7 @@ export const assetsLogic = kea<assetsLogicType>([
   key((props) => props.frameId),
   actions({
     uploadAssets: (path: string) => ({ path }),
+    uploadDroppedFiles: (path: string, files: File[]) => ({ path, files }),
     assetUploaded: (asset: AssetType) => ({ asset }),
     filesToUpload: (files: string[]) => ({ files }),
     uploadFailure: (path: string) => ({ path }),
@@ -137,29 +138,32 @@ export const assetsLogic = kea<assetsLogicType>([
     ],
   }),
   listeners(({ actions, props, values }) => ({
+    uploadDroppedFiles: async ({ path, files }) => {
+      const uploadedFiles = files.map((file) => `${path ? path + '/' : ''}${file.name}`)
+      actions.filesToUpload(uploadedFiles)
+      for (const file of files) {
+        const formData = new FormData()
+        formData.append('file', file)
+        formData.append('path', path)
+        try {
+          const response = await apiFetch(`/api/frames/${props.frameId}/assets/upload`, {
+            method: 'POST',
+            body: formData,
+          })
+          const asset = await response.json()
+          actions.assetUploaded(asset)
+        } catch (error) {
+          actions.uploadFailure(`${path ? path + '/' : ''}${file.name}`)
+        }
+      }
+    },
     uploadAssets: async ({ path }) => {
       const input = document.createElement('input')
       input.type = 'file'
       input.multiple = true
       input.onchange = async () => {
         const files = Array.from(input.files || [])
-        const uploadedFiles = files.map((file) => path + '/' + file.name)
-        actions.filesToUpload(uploadedFiles)
-        for (const file of files) {
-          const formData = new FormData()
-          formData.append('file', file)
-          formData.append('path', path)
-          try {
-            const response = await apiFetch(`/api/frames/${props.frameId}/assets/upload`, {
-              method: 'POST',
-              body: formData,
-            })
-            const asset = await response.json()
-            actions.assetUploaded(asset)
-          } catch (error) {
-            actions.uploadFailure(path + '/' + file.name)
-          }
-        }
+        actions.uploadDroppedFiles(path, files)
       }
       input.click()
     },

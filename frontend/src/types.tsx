@@ -8,6 +8,18 @@ export interface FrameType {
   frame_port: number
   frame_access_key: string
   frame_access: string
+  https_proxy?: {
+    enable?: boolean
+    port?: number
+    expose_only_port?: boolean
+    certs?: {
+      server?: string
+      server_key?: string
+      client_ca?: string
+    }
+    server_cert_not_valid_after?: string
+    client_ca_cert_not_valid_after?: string
+  }
   ssh_user?: string
   ssh_pass?: string
   ssh_port: number
@@ -79,6 +91,7 @@ export interface FrameType {
   nix?: FrameNixConfig
   buildroot?: FrameBuildrootConfig
   rpios?: FrameRpiOSConfig
+  terminal_history?: string[]
   active_connections?: number
 }
 

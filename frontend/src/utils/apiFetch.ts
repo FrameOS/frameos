@@ -20,30 +20,13 @@ export async function userExists(): Promise<boolean> {
 }
 
 export async function apiFetch(input: RequestInfo | URL, options: ApiFetchOptions = {}): Promise<Response> {
-  let token = localStorage.getItem('token')
-
-  let headers: HeadersInit = options.headers || {}
-  if (token) {
-    headers = {
-      ...headers,
-      Authorization: `Bearer ${token}`,
-    }
-  } else if (!inHassioIngress()) {
-    const exists = await userExists()
-    if (exists) {
-      router.actions.push(urls.login())
-      return new Promise(() => {})
-    } else {
-      router.actions.push(urls.signup())
-      return new Promise(() => {})
-    }
-  }
+  const headers: HeadersInit = options.headers || {}
 
   if (typeof input === 'string' && getBasePath()) {
     input = getBasePath() + input
   }
 
-  const response = await fetch(input, { ...options, headers })
+  const response = await fetch(input, { ...options, headers, credentials: options.credentials || 'include' })
 
   if (!inHassioIngress() && response.status === 401) {
     const exists = await userExists()

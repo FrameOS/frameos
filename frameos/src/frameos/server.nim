@@ -12,6 +12,8 @@ import ws, ws/jester_extra
 import strformat
 import options
 import strutils
+import tables
+import algorithm
 import drivers/drivers as drivers
 import frameos/apps
 import frameos/types
@@ -21,7 +23,8 @@ import frameos/utils/font
 import frameos/config
 import frameos/portal as netportal
 from net import Port
-from frameos/scenes import getLastImagePng, getLastPublicState, getAllPublicStates, getUploadedScenePayload
+from frameos/scenes import getLastImagePng, getLastPublicState, getAllPublicStates, getUploadedScenePayload,
+    getDynamicSceneOptions
 from scenes/scenes import sceneOptions
 
 var globalFrameOS: FrameOS
@@ -257,9 +260,35 @@ router myrouter:
         fieldsHtml.add(fmt"<input type='text' id='{h($key)}' placeholder='{h(placeholder)}' value='{h(stringValue)}' /><br/><br/>")
 
     var sceneOptionsHtml = ""
+    var allSceneOptions: seq[tuple[id: SceneId, name: string]]
+    var seenSceneIds = initTable[string, bool]()
+
+    proc addSceneOption(sceneId: SceneId, sceneName: string) =
+      let sceneIdString = sceneId.string
+      if seenSceneIds.hasKey(sceneIdString):
+        return
+      seenSceneIds[sceneIdString] = true
+      allSceneOptions.add((id: sceneId, name: sceneName))
+
     for (sceneId, sceneName) in sceneOptions:
-      let selected = if sceneId == currentSceneId: " selected" else: ""
-      sceneOptionsHtml.add(fmt"<option value='{h(sceneId.string)}'{selected}>{h(sceneName)}</option>")
+      addSceneOption(sceneId, sceneName)
+    var dynamicSceneOptions: seq[tuple[id: SceneId, name: string]]
+    {.gcsafe.}: # getDynamicSceneOptions uses locks around scene tables.
+      dynamicSceneOptions = getDynamicSceneOptions()
+    for (sceneId, sceneName) in dynamicSceneOptions:
+      addSceneOption(sceneId, sceneName)
+
+    allSceneOptions.sort(proc(a, b: tuple[id: SceneId, name: string]): int =
+      result = cmpIgnoreCase(a.name, b.name)
+      if result == 0:
+        result = cmp(a.id.string, b.id.string)
+    )
+
+    for sceneOption in allSceneOptions:
+      let selected = if sceneOption.id == currentSceneId: " selected" else: ""
+      sceneOptionsHtml.add(
+        fmt"<option value='{h(sceneOption.id.string)}'{selected}>{h(sceneOption.name)}</option>"
+      )
 
     fieldsHtml.add("<input type='submit' id='setSceneState' value='Set Scene State'>")
     {.gcsafe.}: # We're only reading static assets. It's fine.
@@ -294,7 +323,8 @@ proc newServer*(frameOS: FrameOS): Server =
   globalRunner = frameOS.runner
 
   let port = (if frameOS.frameConfig.framePort == 0: 8787 else: frameOS.frameConfig.framePort).Port
-  let settings = newSettings(port = port)
+  let bindAddr = if frameOS.frameConfig.httpsProxy.enable and frameOS.frameConfig.httpsProxy.exposeOnlyPort: "127.0.0.1" else: ""
+  let settings = newSettings(port = port, bindAddr = bindAddr)
   var jester = initJester(myrouter, settings)
 
   result = Server(

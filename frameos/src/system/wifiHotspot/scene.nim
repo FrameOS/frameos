@@ -5,10 +5,10 @@ import pixie, json, times, strformat, strutils, sequtils, options, algorithm
 import std/monotimes
 
 import frameos/values
+import frameos/utils/url
 import frameos/types
 import frameos/channels
 import frameos/utils/image
-import frameos/utils/url
 import frameos/utils/time
 import apps/render/split/app as render_splitApp
 import apps/render/image/app as render_imageApp
@@ -64,7 +64,7 @@ proc runNode*(self: Scene, nodeId: NodeId, context: ExecutionContext) =
       self.node4.run(context)
       nextNode = -1.NodeId
     of 3.NodeId: # render/text
-      self.node3.appConfig.text = fmt("^(48)Welcome to FrameOS!^(28)\n\n1. Scan the first QR code or join the Wifi “{frameConfig.network.wifiHotspotSsid}” (pw “{frameConfig.network.wifiHotspotPassword}”).\n2. Then scan the second QR code or open ^(underline)http://10.42.0.1:{frameConfig.framePort}/^(no-underline) to continue.")
+      self.node3.appConfig.text = fmt("^(48)Welcome to FrameOS!^(28)\n\n1. Scan the first QR code or join the Wifi “{frameConfig.network.wifiHotspotSsid}” (pw “{frameConfig.network.wifiHotspotPassword}”).\n2. Then scan the second QR code or open ^(underline)http://10.42.0.1:{hotspotSetupPort(frameConfig)}/^(no-underline) to continue.")
       self.node3.run(context)
       nextNode = -1.NodeId
     of 2.NodeId: # render/split
@@ -72,7 +72,7 @@ proc runNode*(self: Scene, nodeId: NodeId, context: ExecutionContext) =
       nextNode = -1.NodeId
     of 6.NodeId: # render/image
       self.node6.appConfig.image = block:
-        let code = fmt"http://10.42.0.1:{frameConfig.framePort}/"
+        let code = fmt"http://10.42.0.1:{hotspotSetupPort(frameConfig)}/"
         block:
           if cache1.isNone() or cache1Fields != code:
             cache1 = some(block:
@@ -178,7 +178,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   scene.node3 = render_textApp.App(nodeName: "render/text", nodeId: 3.NodeId, scene: scene.FrameScene,
     frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
     vAlign: "top",
-    text: fmt("^(48)Welcome to FrameOS!^(28)\n\n1. Scan the first QR code or join the Wifi “{frameConfig.network.wifiHotspotSsid}” (pw “{frameConfig.network.wifiHotspotPassword}”).\n2. Then scan the second QR code or open ^(underline)http://10.42.0.1:{frameConfig.framePort}/^(no-underline) to continue."),
+    text: fmt("^(48)Welcome to FrameOS!^(28)\n\n1. Scan the first QR code or join the Wifi “{frameConfig.network.wifiHotspotSsid}” (pw “{frameConfig.network.wifiHotspotPassword}”).\n2. Then scan the second QR code or open ^(underline)http://10.42.0.1:{hotspotSetupPort(frameConfig)}/^(no-underline) to continue."),
     richText: "basic-caret",
     inputImage: none(Image),
     position: "center",
@@ -218,7 +218,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     frameConfig: scene.frameConfig, appConfig: data_qrApp.AppConfig(
     size: 4.0,
     codeType: "Custom",
-    code: fmt"http://10.42.0.1:{frameConfig.framePort}/",
+    code: fmt"http://10.42.0.1:{hotspotSetupPort(frameConfig)}/",
     sizeUnit: "pixels per dot",
     alRad: 30.0,
     moRad: 0.0,

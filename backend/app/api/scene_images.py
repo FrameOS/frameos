@@ -12,6 +12,7 @@ from app.models.scene_image import SceneImage            # created earlier
 from app.models.frame import Frame
 from . import api_no_auth, api_with_auth
 from app.utils.jwt_tokens import validate_scoped_token
+from app.api.auth import get_current_user_from_request
 
 
 def _generate_placeholder(
@@ -84,8 +85,8 @@ def _generate_thumbnail(image_bytes: bytes) -> tuple[bytes, int, int]:
 async def get_scene_image(
     frame_id: int,
     scene_id: str,
-    token: str,
     request: Request,
+    token: str | None = None,
     db: Session = Depends(get_db),
 ):
     """
@@ -95,7 +96,10 @@ async def get_scene_image(
     """
 
     if config.HASSIO_RUN_MODE != 'ingress':
-        validate_scoped_token(token, expected_subject=f"frame={frame_id}")
+        if await get_current_user_from_request(request, db):
+            pass
+        else:
+            validate_scoped_token(token, expected_subject=f"frame={frame_id}")
 
 
     img_row: SceneImage | None = (

@@ -71,13 +71,13 @@ export function NewFrame(): JSX.Element {
             buttonColor="secondary"
             items={[
               {
-                label: 'NixOS (alpha)',
+                label: 'NixOS (discontinued)',
                 onClick: () => {
                   setNewFrameValues({ mode: 'nixos', platform: 'pi-zero2' })
                 },
               },
               {
-                label: 'Buildroot (alpha)',
+                label: 'Buildroot (unfinished)',
                 onClick: () => {
                   setNewFrameValues({ mode: 'buildroot', platform: '' })
                 },
@@ -142,9 +142,9 @@ export function NewFrame(): JSX.Element {
         ) : mode === 'nixos' ? (
           <Form logic={newFrameForm} formKey="newFrame" className="space-y-4" enableFormOnSubmit>
             <p className="text-sm text-yellow-500">
-              NixOS mode is <strong>experimental</strong> and might get deprecated in favor of pure Buildroot. Your
-              frames could break with any new update, so proceed with caution and take backups! Not all devices are
-              supported yet.
+              NixOS mode is <strong>discontinued</strong> and kept around for legacy reasons. It'll be removed one day.
+              We tried using NixOS as the FrameOS base, mostly to speed up deploys. Unfortunately things got slower and
+              heavier, so we're rolling back to ease the maintenance burden.
             </p>
             <p className="text-sm text-gray-500">
               Steps: 1) add your frame, 2) add scenes to it, 3) download a SD card image, 4) flash it, 5) boot

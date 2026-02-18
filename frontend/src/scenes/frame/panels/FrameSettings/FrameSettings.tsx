@@ -5,7 +5,7 @@ import { framesModel } from '../../../../models/framesModel'
 import { Form, Group } from 'kea-forms'
 import { TextInput } from '../../../../components/TextInput'
 import { Select } from '../../../../components/Select'
-import { frameControlUrl, frameImageUrl, frameUrl } from '../../../../decorators/frame'
+import { frameControlUrl, frameImageUrl, frameRootUrl, frameUrl } from '../../../../decorators/frame'
 import { frameLogic } from '../../frameLogic'
 import { downloadJson } from '../../../../utils/downloadJson'
 import { Field } from '../../../../components/Field'
@@ -25,11 +25,11 @@ import { Spinner } from '../../../../components/Spinner'
 import { H6 } from '../../../../components/H6'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
 import { ArrowDownTrayIcon, ArrowPathIcon, ArrowUpTrayIcon } from '@heroicons/react/24/outline'
-import { PlusIcon, TrashIcon } from '@heroicons/react/24/solid'
+import { ExclamationTriangleIcon, PlusIcon, TrashIcon } from '@heroicons/react/24/solid'
 import { panelsLogic } from '../panelsLogic'
 import { Switch } from '../../../../components/Switch'
 import { NumberTextInput } from '../../../../components/NumberTextInput'
-import { Palette } from '../../../../types'
+import { FrameType, Palette } from '../../../../types'
 import { A } from 'kea-router'
 import { timezoneOptions } from '../../../../decorators/timezones'
 import { TextArea } from '../../../../components/TextArea'
@@ -38,6 +38,8 @@ import { settingsLogic } from '../../../settings/settingsLogic'
 import { normalizeSshKeys } from '../../../../utils/sshKeys'
 import { Label } from '../../../../components/Label'
 import { logsLogic } from '../Logs/logsLogic'
+import { Tag } from '../../../../components/Tag'
+import { getCertificateValidityInfo, getFrameCertificateStatus } from '../../../../utils/certificates'
 
 export interface FrameSettingsProps {
   className?: string
@@ -46,9 +48,98 @@ export interface FrameSettingsProps {
 }
 
 const customModule = `{ lib, ... }:\n{\n  # boot.kernelParams = [ \"quiet\" ];\n}\n`
+
+function getCertificateHint(certificateName: string, value?: string): JSX.Element | undefined {
+  const validityInfo = getCertificateValidityInfo(value)
+
+  if (!validityInfo) {
+    return undefined
+  }
+
+  const colorClass =
+    validityInfo.severity === 'expired'
+      ? 'text-red-300'
+      : validityInfo.severity === 'expiring'
+      ? 'text-yellow-300'
+      : 'text-gray-300'
+
+  return (
+    <div className={colorClass} title={validityInfo.exactDateTime}>
+      {(validityInfo.severity === 'expired' || validityInfo.severity === 'expiring') && (
+        <ExclamationTriangleIcon
+          className={
+            validityInfo.severity === 'expired'
+              ? 'inline-block mr-1 h-4 w-4 text-red-300'
+              : 'inline-block mr-1 h-4 w-4 text-yellow-300'
+          }
+        />
+      )}
+      {certificateName} {validityInfo.humanText}
+      {validityInfo.severity === 'expired' || validityInfo.severity === 'expiring'
+        ? ' - Please regenerate and redeploy.'
+        : ''}
+    </div>
+  )
+}
+
+function CertificateTriangle({
+  frame,
+  frameForm,
+}: {
+  frame: FrameType | null
+  frameForm: Partial<FrameType> | null
+}): JSX.Element | null {
+  const certificateStatus = getFrameCertificateStatus({
+    https_proxy: {
+      client_ca_cert_not_valid_after:
+        frameForm?.https_proxy?.client_ca_cert_not_valid_after ?? frame?.https_proxy?.client_ca_cert_not_valid_after,
+      server_cert_not_valid_after:
+        frameForm?.https_proxy?.server_cert_not_valid_after ?? frame?.https_proxy?.server_cert_not_valid_after,
+    },
+  })
+  if (certificateStatus !== 'expired' && certificateStatus !== 'expiring') {
+    return null
+  }
+  return (
+    <span
+      title={
+        certificateStatus === 'expired'
+          ? 'HTTPS certificates have expired. Please regenerate and redeploy.'
+          : 'HTTPS certificates are expiring soon. Please regenerate and redeploy.'
+      }
+    >
+      <ExclamationTriangleIcon
+        className={certificateStatus === 'expired' ? 'h-4 w-4 text-red-300' : 'h-4 w-4 text-yellow-300'}
+      />
+    </span>
+  )
+}
+function scrollToFrameHttpApiSection(e: React.MouseEvent): void {
+  if (typeof document === 'undefined') {
+    return
+  }
+  const frameSettingsDiv =
+    e.target instanceof HTMLElement
+      ? e.target.closest('#panel-settings-div')
+      : document.getElementById('panel-settings-div')
+  const scrollingOuterDiv = frameSettingsDiv?.parentElement
+  const httpApiSection = frameSettingsDiv?.querySelector('#frame-http-proxy-section')
+  if (scrollingOuterDiv && httpApiSection) {
+    const offset = httpApiSection.getBoundingClientRect().top - scrollingOuterDiv.getBoundingClientRect().top
+    scrollingOuterDiv.scrollTo({ top: offset, behavior: 'smooth' }) // works in frame settings panel
+    scrollingOuterDiv?.parentElement?.scrollTo({ top: offset, behavior: 'smooth' }) // works in sd card modal
+  }
+}
+
 export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: FrameSettingsProps) {
   const { mode, frameId, frame, frameForm, frameFormTouches } = useValues(frameLogic)
-  const { touchFrameFormField, setFrameFormValues, updateDeployedSshKeys } = useActions(frameLogic)
+  const {
+    touchFrameFormField,
+    setFrameFormValues,
+    updateDeployedSshKeys,
+    generateTlsCertificates,
+    verifyTlsCertificates,
+  } = useActions(frameLogic)
   const { deleteFrame } = useActions(framesModel)
   const { appsWithSaveAssets } = useValues(appsLogic)
   const {
@@ -73,6 +164,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
   const url = frameUrl(frame)
   const controlUrl = frameControlUrl(frame)
   const imageUrl = frameImageUrl(frame)
+  const tlsEnabled = !!(frameForm.https_proxy?.enable ?? frame.https_proxy?.enable)
 
   const palette = withCustomPalette[frame.device || '']
   const sshKeyOptions = normalizeSshKeys(savedSettings?.ssh_keys).keys
@@ -94,7 +186,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
   }
 
   return (
-    <div className={className}>
+    <div className={className} id="panel-settings-div">
       {!hideDropdown ? (
         <div className="float-right">
           <DropdownMenu
@@ -238,31 +330,46 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
             <H6 className="mt-2">Frame info</H6>
             <div className="pl-2 @md:pl-8 space-y-2">
               {frame.frame_host ? (
-                <Field name="_noop" label="Load">
-                  <div className="w-full">
-                    <A href={url} target="_blank" rel="noreferrer noopener" className="text-blue-400 hover:underline">
-                      Frame URL
-                    </A>
-                    {', '}
-                    <A
-                      href={controlUrl}
-                      target="_blank"
-                      rel="noreferrer noopener"
-                      className="text-blue-400 hover:underline"
-                    >
-                      Control URL
-                    </A>
-                    {', '}
-                    <A
-                      href={imageUrl}
-                      target="_blank"
-                      rel="noreferrer noopener"
-                      className="text-blue-400 hover:underline"
-                    >
-                      Image URL
-                    </A>
-                  </div>
-                </Field>
+                <>
+                  <Field
+                    name="_noop"
+                    label="Load directly"
+                    tooltip={`Open URLs for this frame directly in the browser. Loads ${frameRootUrl(frame)}`}
+                  >
+                    <div className="w-full flex flex-wrap gap-2 items-center">
+                      <A href={url} target="_blank" rel="noreferrer noopener" className="text-blue-400 hover:underline">
+                        Frame URL
+                      </A>
+                      <A
+                        href={controlUrl}
+                        target="_blank"
+                        rel="noreferrer noopener"
+                        className="text-blue-400 hover:underline"
+                      >
+                        Control URL
+                      </A>
+                      <A
+                        href={imageUrl}
+                        target="_blank"
+                        rel="noreferrer noopener"
+                        className="text-blue-400 hover:underline"
+                      >
+                        Image URL
+                      </A>
+                      <button
+                        type="button"
+                        onClick={scrollToFrameHttpApiSection}
+                        className="cursor-pointer"
+                        aria-label="Jump to HTTP API on frame settings"
+                      >
+                        <Tag color={tlsEnabled ? 'teal' : 'gray'} className="flex gap-1">
+                          {tlsEnabled ? 'HTTPS enabled' : 'HTTPS disabled'}
+                          <CertificateTriangle frame={frame} frameForm={frameForm} />
+                        </Tag>
+                      </button>
+                    </div>
+                  </Field>
+                </>
               ) : null}
               {logs.length > 0 ? (
                 <Field name="_noop" label="Last seen IPs">
@@ -756,16 +863,20 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
           </Field>
         </div>
 
-        <H6>
+        <H6 id="frame-http-api-section">
           HTTP API on frame <span className="text-gray-500">(backend &#8594; frame)</span>
         </H6>
         <div className="pl-2 @md:pl-8 space-y-2">
           <Field
             name="frame_port"
-            label="FrameOS port"
+            label="HTTP port on frame"
             tooltip={
               <div className="space-y-2">
                 <p>The port on which the frame accepts HTTP API requests and serves a simple control interface.</p>
+                <p>
+                  Traffic on this port is UNSECURED! Please also enable the HTTPS proxy service for secure
+                  communication.
+                </p>
               </div>
             }
           >
@@ -824,6 +935,92 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
             />
           </Field>
         </div>
+        <H6 id="frame-http-proxy-section">
+          HTTPS proxy <span className="text-gray-500">(backend &#8594; frame)</span>
+        </H6>
+        <div className="pl-2 @md:pl-8 space-y-2">
+          <Field
+            name="https_proxy.enable"
+            label="HTTPS proxy via Caddy"
+            tooltip="Enable Caddy as a local HTTPS proxy for the FrameOS HTTP API. You may need to do a full deploy if this is your first time enabling this."
+          >
+            {({ value, onChange }) => (
+              <Switch
+                name="https_proxy.enable"
+                value={value}
+                onChange={(enableTls) => {
+                  if (enableTls) {
+                    verifyTlsCertificates()
+                  }
+                  onChange(enableTls)
+                }}
+                fullWidth
+              />
+            )}
+          </Field>
+          {tlsEnabled ? (
+            <>
+              <Field
+                name="https_proxy.port"
+                label="HTTPS port"
+                tooltip={
+                  <div className="space-y-2">
+                    <p>The port Caddy listens on for HTTPS connections.</p>
+                    <p>It's best if this ends with *443.</p>
+                  </div>
+                }
+              >
+                <NumberTextInput name="https_proxy.port" placeholder="8443" />
+              </Field>
+              <Field
+                name="https_proxy.expose_only_port"
+                label="Expose only HTTPS port"
+                tooltip="Bind the HTTP port to 127.0.0.1 so only the HTTPS proxy is accessible externally."
+              >
+                <Switch name="https_proxy.expose_only_port" fullWidth />
+              </Field>
+              <Field
+                name="https_proxy.certs.client_ca"
+                label="HTTPS backend CA certificate"
+                labelRight={
+                  <Button color="secondary" size="small" onClick={(e) => generateTlsCertificates()}>
+                    Regenerate
+                  </Button>
+                }
+                tooltip="Used by the backend to validate HTTPS connections to this frame when TLS is enabled."
+                secret={!frameFormTouches['https_proxy.certs.client_ca'] && !!frameForm.https_proxy?.certs?.client_ca}
+                hint={getCertificateHint(
+                  'Root CA certificate',
+                  frameForm.https_proxy?.client_ca_cert_not_valid_after ??
+                    frame.https_proxy?.client_ca_cert_not_valid_after
+                )}
+              >
+                <TextArea name="https_proxy.certs.client_ca" rows={4} placeholder="-----BEGIN CERTIFICATE-----" />
+              </Field>
+              <Field
+                name="https_proxy.certs.server"
+                label="HTTPS frame certificate"
+                tooltip="PEM certificate used by Caddy for HTTPS on this frame."
+                secret={!frameFormTouches['https_proxy.certs.server'] && !!frameForm.https_proxy?.certs?.server}
+                hint={getCertificateHint(
+                  'Server certificate',
+                  frameForm.https_proxy?.server_cert_not_valid_after ?? frame.https_proxy?.server_cert_not_valid_after
+                )}
+              >
+                <TextArea name="https_proxy.certs.server" rows={4} placeholder="-----BEGIN CERTIFICATE-----" />
+              </Field>
+
+              <Field
+                name="https_proxy.certs.server_key"
+                label={<div>HTTPS frame private key</div>}
+                tooltip="PEM private key used by Caddy for HTTPS on this frame. Keep this secret."
+                secret={!frameFormTouches['https_proxy.certs.server_key'] && !!frameForm.https_proxy?.certs?.server_key}
+              >
+                <TextArea name="https_proxy.certs.server_key" rows={4} placeholder="-----BEGIN RSA PRIVATE KEY-----" />
+              </Field>
+            </>
+          ) : null}
+        </div>
 
         <H6>Network</H6>
         <div className="pl-2 @md:pl-8 space-y-2">
@@ -833,7 +1030,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                 <Field name="wifiSSID" label="Wifi SSID" tooltip="The SSID of the wifi network to connect to on boot.">
                   <TextInput name="wifiSSID" placeholder="MyWifi" />
                 </Field>
-                <Field name="wifiPassword" label="Wifi Password">
+                <Field name="wifiPassword" label="Wifi Password" tooltip="The password of the wifi network.">
                   <TextInput
                     name="wifiPassword"
                     placeholder="MyWifiPassword"
@@ -1333,6 +1530,14 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
     </div>
   )
 }
+
 FrameSettings.PanelTitle = function FrameSettingsPanelTitle(): JSX.Element {
-  return <>Settings</>
+  const { frame, frameForm } = useValues(frameLogic)
+
+  return (
+    <div className="flex items-center gap-1">
+      <span>Settings</span>
+      <CertificateTriangle frame={frame} frameForm={frameForm} />
+    </div>
+  )
 }

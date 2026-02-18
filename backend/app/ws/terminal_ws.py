@@ -2,16 +2,14 @@ from __future__ import annotations
 
 import contextlib
 import asyncio
-from jose import jwt, JWTError
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
 from sqlalchemy.orm import Session
 from arq import ArqRedis as Redis
 
 from app.database import get_db
 from app.redis import get_redis
-from app.models.user import User
 from app.models.frame import Frame
-from app.api.auth import SECRET_KEY, ALGORITHM
+from app.api.auth import get_current_user_from_websocket
 from app.utils.ssh_utils import get_ssh_connection, remove_ssh_connection
 
 router = APIRouter()
@@ -23,21 +21,9 @@ async def ssh_terminal(
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
-    # Authenticate user via token query parameter similar to /ws
-    token = websocket.query_params.get("token")
-    try:
-        if not token:
-            await websocket.close(code=1008, reason="Missing token")
-            return
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        user_email = payload.get("sub")
-        if not user_email:
-            raise JWTError
-        user = db.query(User).filter(User.email == user_email).first()
-        if user is None:
-            raise JWTError
-    except JWTError:
-        await websocket.close(code=1008, reason="Invalid token")
+    user, error_reason = get_current_user_from_websocket(websocket, db)
+    if user is None:
+        await websocket.close(code=1008, reason=error_reason or "Could not validate credentials")
         return
 
     await websocket.accept()

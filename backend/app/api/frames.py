@@ -2,7 +2,7 @@ from __future__ import annotations
 
 # stdlib ---------------------------------------------------------------------
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from http import HTTPStatus
 import contextlib
 import aiofiles
@@ -25,14 +25,23 @@ from urllib.parse import quote
 
 # third-party ---------------------------------------------------------------
 import httpx
-from fastapi import Depends, File, Form, HTTPException, Header, Query, Request, UploadFile
+from fastapi import (
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Header,
+    Query,
+    Request,
+    UploadFile,
+)
 from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.orm import Session
 
 # local ---------------------------------------------------------------------
 from app.database import get_db
 from arq import ArqRedis as Redis
-from app.models.frame import Frame, new_frame, delete_frame, update_frame
+from app.models.frame import Frame, new_frame, delete_frame, normalize_https_proxy, refresh_tls_certificate_validity_dates, update_frame
 from app.models.log import new_log as log
 from app.models.metrics import Metrics
 from app.codegen.scene_nim import write_scene_nim
@@ -57,7 +66,7 @@ from app.schemas.frames import (
     FrameSSHKeysUpdateRequest,
     FrameSetNextSceneRequest,
 )
-from app.api.auth import get_current_user
+from app.api.auth import get_current_user_from_request
 from app.config import config
 from app.utils.network import is_safe_host
 from app.utils.remote_exec import (
@@ -73,6 +82,8 @@ from app.utils.frame_http import (
     _build_frame_url,
     _auth_headers,
     _fetch_frame_http_bytes,
+    _frame_scheme_port,
+    _httpx_verify,
 )
 from app.tasks.utils import find_nim_v2
 from app.tasks.deploy_frame import FrameDeployer
@@ -89,6 +100,7 @@ from app.ws.agent_ws import (
 from app.models.assets import copy_custom_fonts_to_local_source_folder
 from app.models.settings import get_settings_dict
 from app.utils.ssh_key_utils import default_ssh_key_ids
+from app.utils.tls import generate_frame_tls_material, parse_certificate_not_valid_after
 from app.utils.ssh_authorized_keys import _install_authorized_keys, resolve_authorized_keys_update
 from app.tasks.binary_builder import FrameBinaryBuilder
 from app.utils.local_exec import exec_local_command
@@ -102,6 +114,12 @@ def _not_found():
 
 def _bad_request(msg: str):
     raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=msg)
+
+
+def _serialize_datetime(value: Optional[datetime]) -> Optional[str]:
+    if not value:
+        return None
+    return value.replace(tzinfo=timezone.utc).isoformat()
 
 
 def _sanitize_scene_state_filename(scene_id: str) -> str:
@@ -356,7 +374,8 @@ async def _forward_frame_request(
 
     url = _build_frame_url(frame, path, method)
     hdrs = _auth_headers(frame)
-    async with httpx.AsyncClient() as client:
+    verify = _httpx_verify(frame)
+    async with httpx.AsyncClient(verify=verify) as client:
         try:
             if isinstance(json_body, (bytes, bytearray)):
                 # binary/event bodies
@@ -577,8 +596,8 @@ async def api_frame_ping(
     if len(ping_path) > 512:
         _bad_request("Ping path is too long")
 
-    scheme = "https" if frame.frame_port % 1000 == 443 else "http"
-    display_target = f"{scheme}://{frame.frame_host}:{frame.frame_port}{ping_path}"
+    scheme, port = _frame_scheme_port(frame)
+    display_target = f"{scheme}://{frame.frame_host}:{port}{ping_path}"
     started = time.perf_counter()
 
     try:
@@ -890,11 +909,8 @@ async def api_frame_get_asset(
     redis: Redis = Depends(get_redis),
 ):
     if config.HASSIO_RUN_MODE != "ingress":
-        if authorization and authorization.startswith("Bearer "):
-            try:
-                await get_current_user(authorization.split(" ")[1], db)
-            except HTTPException:
-                raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Unauthorized")
+        if await get_current_user_from_request(request, db, authorization):
+            pass
         elif token:
             validate_scoped_token(token, expected_subject=f"frame={id}")
         else:
@@ -1033,13 +1049,16 @@ async def get_image_token(id: int):
 @api_no_auth.get("/frames/{id:int}/image")
 async def api_frame_get_image(
     id: int,
-    token: str,
     request: Request,
+    token: str | None = None,
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
     if config.HASSIO_RUN_MODE != "ingress":
-        validate_scoped_token(token, expected_subject=f"frame={id}")
+        if await get_current_user_from_request(request, db):
+            pass
+        else:
+            validate_scoped_token(token, expected_subject=f"frame={id}")
 
     frame = db.get(Frame, id)
     if frame is None:
@@ -1709,6 +1728,10 @@ async def api_frame_update_endpoint(
     for field, value in update_data.items():
         setattr(frame, field, value)
 
+    if "https_proxy" in update_data:
+        frame.https_proxy = normalize_https_proxy(frame.https_proxy)
+        refresh_tls_certificate_validity_dates(frame)
+
     if data.mode == "nixos" and old_mode == "rpios":
         if frame.ssh_user == "pi":
             frame.ssh_user = "frame"
@@ -1736,6 +1759,33 @@ async def api_frame_update_endpoint(
         await deploy_frame(id, redis)
 
     return {"message": "Frame updated successfully"}
+
+
+
+
+@api_with_auth.post("/frames/{id:int}/tls/generate")
+async def api_frame_generate_tls_material_endpoint(
+    id: int,
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    frame = db.get(Frame, id)
+    if not frame:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
+
+    material = generate_frame_tls_material(frame.frame_host or "")
+    server_not_valid_after = parse_certificate_not_valid_after(material["server"])
+    client_ca_not_valid_after = parse_certificate_not_valid_after(material["client_ca"])
+
+    return {
+        "certs": {
+            "server": material["server"],
+            "server_key": material["server_key"],
+            "client_ca": material["client_ca"],
+        },
+        "server_cert_not_valid_after": _serialize_datetime(server_not_valid_after),
+        "client_ca_cert_not_valid_after": _serialize_datetime(client_ca_not_valid_after),
+    }
 
 
 @api_with_auth.post("/frames/new", response_model=FrameResponse)
@@ -1867,7 +1917,15 @@ async def api_frame_import(
         )
 
         for key, value in data.items():
-            if key in ["id", "name", "frame_host", "server_host", "device", "interval", "last_success"]:
+            if key in [
+                "id",
+                "name",
+                "frame_host",
+                "server_host",
+                "device",
+                "interval",
+                "last_success",
+            ]:
                 continue
             if hasattr(frame, key):
                 if key in ["last_successful_deploy_at", "last_log_at"]:
