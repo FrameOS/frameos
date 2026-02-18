@@ -49,6 +49,8 @@ export function Frame(props: FrameSceneProps) {
     deployAgent,
     restartAgent,
     setDeployWithAgent,
+    resetUnsavedChanges,
+    resetUndeployedChanges,
   } = useActions(frameLogic(frameLogicProps))
   const { openSDCardModal } = useActions(sdCardModalLogic(frameLogicProps))
   useMountedLogic(assetsLogic(frameLogicProps)) // Don't lose what we downloaded when navigating away from the tab
@@ -99,7 +101,17 @@ export function Frame(props: FrameSceneProps) {
                           leaveTo="transform opacity-0 scale-95"
                         >
                           <Popover.Panel className="absolute right-0 top-7 z-50 min-w-96 max-w-[38rem] rounded-md border border-gray-700 bg-gray-900 p-3 shadow-lg">
-                            <div className="mb-2 text-xs text-gray-300">Unsaved changes</div>
+                            <div className="mb-2 flex items-center justify-between gap-3">
+                              <div className="text-xs text-gray-300">Unsaved changes</div>
+                              <Button
+                                color="secondary"
+                                size="small"
+                                type="button"
+                                onClick={() => resetUnsavedChanges()}
+                              >
+                                Reset changes
+                              </Button>
+                            </div>
                             <ul className="space-y-1 text-sm text-gray-100">
                               {unsavedChangeDetails.map((change, index) => (
                                 <li
@@ -135,7 +147,17 @@ export function Frame(props: FrameSceneProps) {
                           leaveTo="transform opacity-0 scale-95"
                         >
                           <Popover.Panel className="absolute right-0 top-7 z-50 min-w-96 max-w-[38rem] rounded-md border border-gray-700 bg-gray-900 p-3 shadow-lg">
-                            <div className="mb-2 text-xs text-gray-300">Not yet deployed</div>
+                            <div className="mb-2 flex items-center justify-between gap-3">
+                              <div className="text-xs text-gray-300">Not yet deployed</div>
+                              <Button
+                                color="secondary"
+                                size="small"
+                                type="button"
+                                onClick={() => resetUndeployedChanges()}
+                              >
+                                Reset changes
+                              </Button>
+                            </div>
                             <ul className="space-y-1 text-sm text-gray-100">
                               {undeployedChangeDetails.map((change, index) => (
                                 <li

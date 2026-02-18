@@ -352,6 +352,13 @@ function hasValidPosition(node: DiagramNode): boolean {
   return Number.isFinite(node.position?.x) && Number.isFinite(node.position?.y)
 }
 
+function sanitizeFrame(frame: Partial<FrameType>): Partial<FrameType> {
+  return {
+    ...frame,
+    scenes: frame.scenes?.map((scene) => sanitizeScene(scene, frame)) ?? [],
+  }
+}
+
 export function sanitizeScene(scene: Partial<FrameScene>, frame: Partial<FrameType>): FrameScene {
   const settings = scene.settings ?? {}
   const sanitizedNodes = sanitizeNodes(scene.nodes ?? [])
@@ -406,6 +413,8 @@ export const frameLogic = kea<frameLogicType>([
     restartAgent: true,
     updateDeployedSshKeys: true,
     clearNextAction: true,
+    resetUnsavedChanges: true,
+    resetUndeployedChanges: true,
     applyTemplate: (template: Partial<TemplateType>) => ({
       template,
     }),
@@ -477,6 +486,21 @@ export const frameLogic = kea<frameLogicType>([
     ],
   }),
   listeners(({ actions, values }) => ({
+    resetUnsavedChanges: () => {
+      if (!values.frame) {
+        return
+      }
+
+      actions.resetFrameForm(sanitizeFrame(values.frame) as FrameType)
+    },
+    resetUndeployedChanges: async () => {
+      if (!values.lastDeploy) {
+        return
+      }
+
+      actions.clearNextAction()
+      actions.resetFrameForm(sanitizeFrame(values.lastDeploy) as FrameType)
+    },
     updateDeployedSshKeys: async () => {
       actions.clearNextAction()
       await actions.submitFrameForm()
@@ -599,7 +623,7 @@ export const frameLogic = kea<frameLogicType>([
       setBrowserTitle(frame)
       const frameFormMatchesPrevious = equal(oldFrame, values.frameForm)
       if (frame && (!oldFrame || frameFormMatchesPrevious)) {
-        actions.resetFrameForm({ ...frame, scenes: frame.scenes?.map((scene) => sanitizeScene(scene, frame)) ?? [] })
+        actions.resetFrameForm(sanitizeFrame(frame) as FrameType)
       }
     },
   })),
