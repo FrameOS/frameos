@@ -128,7 +128,6 @@ def _tls_connect_error_detail(frame: Frame, error: str) -> Optional[str]:
             "and redeploy."
         )
 
-    print(error)
     return (
         "TLS verification failed while connecting to frame. "
         "Set frame.https_proxy.certs.client_ca to the issuing CA certificate."
