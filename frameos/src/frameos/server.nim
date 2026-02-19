@@ -5,6 +5,7 @@ import times
 import algorithm
 import assets/web as webAssets
 import assets/frame_web as frameWebAssets
+import assets/apps as appsAsset
 import asyncdispatch
 import httpclient
 import httpcore
@@ -569,6 +570,11 @@ router myrouter:
     {.gcsafe.}: # We're reading immutable globals and png data via a lock. It's fine.
       let (status, headers, body) = buildFrameImageResponse(request)
       resp status, headers, body
+  get "/api/apps":
+    if not hasAccess(request, Read):
+      resp Http401, "Unauthorized"
+    {.gcsafe.}:
+      resp Http200, {"Content-Type": "application/json"}, appsAsset.getAppsJson()
   get "/api/frames":
     if not hasAccess(request, Read):
       resp Http401, "Unauthorized"

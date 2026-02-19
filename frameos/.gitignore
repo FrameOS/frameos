@@ -13,5 +13,6 @@ scene.json
 */*/*/app_loader.nim
 */*/*/*/app_loader.nim
 assets/compiled/frame_web
+src/assets/apps.nim
 src/assets/frame_web.nim
 *.admin_session_salt
