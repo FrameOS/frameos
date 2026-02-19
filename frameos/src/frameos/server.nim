@@ -17,6 +17,8 @@ import strformat
 import options
 import strutils
 import tables
+import random
+import hashes
 import zippy
 import drivers/drivers as drivers
 import frameos/apps
@@ -34,6 +36,7 @@ from scenes/scenes import sceneOptions
 var globalFrameOS: FrameOS
 var globalFrameConfig: FrameConfig
 var globalRunner: RunnerControl
+var globalAdminSessionSalt: string
 let indexHtml = webAssets.getAsset("assets/compiled/web/index.html")
 let frameWebIndexHtml = frameWebAssets.getAsset("assets/compiled/frame_web/index.html")
 
@@ -209,6 +212,7 @@ proc frameApiPayload(): JsonNode =
     "frame_port": globalFrameConfig.framePort,
     "frame_access_key": globalFrameConfig.frameAccessKey,
     "frame_access": globalFrameConfig.frameAccess,
+    "frame_admin_auth": globalFrameConfig.frameAdminAuth,
     "ssh_user": "",
     "ssh_pass": "",
     "ssh_port": 22,
@@ -289,11 +293,67 @@ proc buildFrameImageResponse(request: Request): tuple[status: HttpCode, headers:
 const AUTH_HEADER = "authorization"
 const AUTH_TYPE = "Bearer"
 const ACCESS_COOKIE = "frame_access_key"
+const ADMIN_SESSION_COOKIE = "frame_admin_session"
+const ADMIN_SESSION_TTL_SECONDS = 60 * 60 * 24
 
 type
   AccessType = enum
     Read
     Write
+
+proc getCookieValue(request: Request, name: string): string =
+  let cookieHeader = request.headers.getOrDefault("cookie")
+  for cookie in cookieHeader.split(";"):
+    let parts = cookie.strip().split("=", 1)
+    if parts.len == 2 and parts[0] == name:
+      return parts[1]
+  return ""
+
+template adminAuthUser(): string =
+  {.gcsafe.}:
+    globalFrameConfig.frameAdminAuth{"user"}.getStr("")
+
+template adminAuthPass(): string =
+  {.gcsafe.}:
+    globalFrameConfig.frameAdminAuth{"pass"}.getStr("")
+
+template adminAuthEnabled(): bool =
+  {.gcsafe.}:
+    globalFrameConfig.frameAdminAuth{"enabled"}.getBool(false) and
+      globalFrameConfig.frameAdminAuth{"user"}.getStr("").len > 0 and
+      globalFrameConfig.frameAdminAuth{"pass"}.getStr("").len > 0
+
+proc getOrCreateAdminSessionSalt(configPath: string): string =
+  let envSecret = getEnv("FRAMEOS_ADMIN_SESSION_SALT")
+  if envSecret.len > 0:
+    return envSecret
+
+  let secretPath = configPath & ".admin_session_salt"
+  try:
+    if fileExists(secretPath):
+      let existing = readFile(secretPath).strip()
+      if existing.len > 0:
+        return existing
+  except CatchableError:
+    discard
+
+  randomize()
+  let generated = $(hash($epochTime() & ":" & $rand(1_000_000_000) & ":" & configPath))
+  try:
+    writeFile(secretPath, generated & "\n")
+  except CatchableError:
+    discard
+  return generated
+
+proc hasAdminSession(request: Request): bool =
+  {.gcsafe.}:
+    if not adminAuthEnabled():
+      return true
+    if adminAuthUser().len == 0 or adminAuthPass().len == 0:
+      return false
+    let token = getCookieValue(request, ADMIN_SESSION_COOKIE)
+    let expectedToken = $(hash(globalAdminSessionSalt & ":" & adminAuthUser() & ":" & adminAuthPass()))
+    return token.len > 0 and token == expectedToken
 
 router myrouter:
   proc hasAccess*(request: Request, accessType: AccessType): bool =
@@ -335,16 +395,18 @@ router myrouter:
             of "stretch": "100% 100%"
             else: "contain"
           resp Http200, frameWebIndexHtml.replace("/*$scalingMode*/contain", scalingMode)
-  get "/control":
+  get "/admin":
     {.gcsafe.}:
       if netportal.isHotspotActive(globalFrameOS):
         log(%*{"event": "portal:http", "get": request.pathInfo})
         resp Http200, netportal.setupHtml(globalFrameOS)
+      elif not hasAdminSession(request):
+        resp Http302, {"Location": "/login"}, ""
       else:
         let accessKey = globalFrameConfig.frameAccessKey
         let paramsTable = request.params()
         if accessKey != "" and contains(paramsTable, "k") and paramsTable["k"] == accessKey:
-          resp Http302, {"Location": "/control",
+          resp Http302, {"Location": "/admin",
             "Set-Cookie": ACCESS_COOKIE & "=" & accessKey & "; Path=/; SameSite=Lax"}, ""
         else:
           let scalingMode = case globalFrameConfig.scalingMode:
@@ -352,6 +414,17 @@ router myrouter:
             of "stretch": "100% 100%"
             else: "contain"
           resp Http200, frameWebIndexHtml.replace("/*$scalingMode*/contain", scalingMode)
+  get "/control":
+    redirect "/admin"
+  get "/login":
+    {.gcsafe.}:
+      let scalingMode = case globalFrameConfig.scalingMode:
+        of "cover", "center": globalFrameConfig.scalingMode
+        of "stretch": "100% 100%"
+        else: "contain"
+      resp Http200, frameWebIndexHtml.replace("/*$scalingMode*/contain", scalingMode)
+  get "/logout":
+    resp Http302, {"Location": "/login", "Set-Cookie": ADMIN_SESSION_COOKIE & "=; Path=/; Max-Age=0; SameSite=Lax"}, ""
   get "/new":
     {.gcsafe.}:
       if netportal.isHotspotActive(globalFrameOS):
@@ -543,7 +616,36 @@ router myrouter:
       else:
         let (status, headers, body) = buildFrameImageResponse(request)
         resp status, headers, body
+  get "/api/admin/session":
+    let authenticated = hasAdminSession(request)
+    resp Http200, {"Content-Type": "application/json"}, $(%*{"authenticated": authenticated})
+  post "/api/admin/login":
+    if not adminAuthEnabled():
+      resp Http200, {"Content-Type": "application/json"}, $(%*{"status": "ok"})
+    else:
+      let payload = parseJson(if request.body == "": "{}" else: request.body)
+      let username = payload{"username"}.getStr("")
+      let password = payload{"password"}.getStr("")
+      if username == adminAuthUser() and password == adminAuthPass() and username.len > 0:
+        resp Http200,
+          {
+            "Content-Type": "application/json",
+            "Set-Cookie": ADMIN_SESSION_COOKIE & "=" & $(hash(globalAdminSessionSalt & ":" & adminAuthUser() & ":" &
+                adminAuthPass())) & "; Path=/; HttpOnly; SameSite=Lax; Max-Age=" & $ADMIN_SESSION_TTL_SECONDS,
+          },
+          $(%*{"status": "ok"})
+      else:
+        resp Http401, {"Content-Type": "application/json"}, $(%*{"detail": "Invalid credentials"})
+  post "/api/admin/logout":
+    resp Http200,
+      {
+        "Content-Type": "application/json",
+        "Set-Cookie": ADMIN_SESSION_COOKIE & "=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax",
+      },
+      $(%*{"status": "ok"})
   post "/event/@name":
+    if not hasAdminSession(request):
+      resp Http401, "Unauthorized"
     if not hasAccess(request, Write):
       resp Http401, "Unauthorized"
     log(%*{"event": "http", "post": request.pathInfo})
@@ -551,6 +653,8 @@ router myrouter:
     sendEvent(@"name", payload)
     resp Http200, {"Content-Type": "application/json"}, $(%*{"status": "ok"})
   post "/uploadScenes":
+    if not hasAdminSession(request):
+      resp Http401, "Unauthorized"
     if not hasAccess(request, Write):
       resp Http401, "Unauthorized"
     log(%*{"event": "http", "post": request.pathInfo})
@@ -558,6 +662,8 @@ router myrouter:
     sendEvent("uploadScenes", payload)
     resp Http200, {"Content-Type": "application/json"}, $(%*{"status": "ok"})
   post "/reload":
+    if not hasAdminSession(request):
+      resp Http401, "Unauthorized"
     if not hasAccess(request, Write):
       resp Http401, "Unauthorized"
     try:
@@ -696,6 +802,8 @@ proc newServer*(frameOS: FrameOS): Server =
   globalFrameOS = frameOS
   globalFrameConfig = frameOS.frameConfig
   globalRunner = frameOS.runner
+  globalAdminSessionSalt = getOrCreateAdminSessionSalt(getConfigFilename())
+  initLock(connectionsLock)
 
   let port = (if frameOS.frameConfig.framePort == 0: 8787 else: frameOS.frameConfig.framePort).Port
   let bindAddr = if frameOS.frameConfig.httpsProxy.enable and

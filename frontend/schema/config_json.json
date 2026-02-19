@@ -266,6 +266,10 @@
     "OutputField": {
       "additionalProperties": false,
       "properties": {
+        "example": {
+          "description": "Example output (stringified)",
+          "type": "string"
+        },
         "name": {
           "description": "Name of the output field",
           "type": "string"
@@ -273,10 +277,6 @@
         "type": {
           "$ref": "#/definitions/FieldType",
           "description": "Type of the field"
-        },
-        "example": {
-          "description": "Example output for this field, stored as a stringified value",
-          "type": "string"
         }
       },
       "required": ["name", "type"],

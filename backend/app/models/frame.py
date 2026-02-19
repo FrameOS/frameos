@@ -426,6 +426,18 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
     for key in setting_keys:
         final_settings[key] = all_settings.get(key, None)
 
+    frame_admin_auth = all_settings.get('frameAdminAuth', {})
+    if not isinstance(frame_admin_auth, dict):
+        frame_admin_auth = {}
+
+    frame_admin_auth_user = str(frame_admin_auth.get('user', '')).strip()
+    frame_admin_auth_pass = str(frame_admin_auth.get('pass', '')).strip()
+    frame_admin_auth_enabled = bool(frame_admin_auth.get('enabled', False)) and bool(frame_admin_auth_user) and bool(frame_admin_auth_pass)
+    frame_json['frameAdminAuth'] = {
+        'enabled': frame_admin_auth_enabled,
+        **({'user': frame_admin_auth_user, 'pass': frame_admin_auth_pass} if frame_admin_auth_enabled else {}),
+    }
+
     frame_json['settings'] = final_settings
     return frame_json
 

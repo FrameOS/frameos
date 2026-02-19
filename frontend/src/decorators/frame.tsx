@@ -58,7 +58,7 @@ export function frameUrl(frame: FrameType): string | null {
 }
 
 export function frameControlUrl(frame: FrameType): string | null {
-  const url = frameRootUrl(frame) + '/c'
+  const url = frameRootUrl(frame) + '/admin'
   if (frame.frame_access === 'public') {
     return url
   } else {

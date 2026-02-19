@@ -629,6 +629,11 @@ export interface FrameOSSettings {
     sshKey?: string
     sshPublicKey?: string
   }
+  frameAdminAuth?: {
+    enabled?: boolean
+    user?: string
+    pass?: string
+  }
 }
 
 export interface SSHKeyEntry {
