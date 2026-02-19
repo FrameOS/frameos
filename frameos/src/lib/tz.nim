@@ -11,16 +11,20 @@ proc initTimeZone*() =
 
 proc detectSystemTimeZone*(): string =
   ## Returns e.g. "Europe/Brussels"; never raises.
-  const zoneinfoPrefix1 = "/usr/share/zoneinfo/"
-  const zoneinfoPrefix2 = "/etc/zoneinfo/"
+  const zoneinfoPrefixes = [
+    "/usr/share/zoneinfo/",
+    "/etc/zoneinfo/",
+    "/var/db/timezone/zoneinfo/"
+  ]
   try:
     # Works whenever /etc/localtime is a symlink (systemd-managed distros)
     let tgt = expandSymlink("/etc/localtime")
-    if tgt.startsWith(zoneinfoPrefix1):
-      result = tgt[zoneinfoPrefix1.len .. ^1] # strip the prefix
-    elif tgt.startsWith(zoneinfoPrefix2):
-      result = tgt[zoneinfoPrefix2.len .. ^1] # strip the prefix
-    else:
+    for prefix in zoneinfoPrefixes:
+      if tgt.startsWith(prefix):
+        result = tgt[prefix.len .. ^1] # strip the prefix
+        break
+
+    if result.len == 0:
       echo "Unknown timezone path: " & tgt
   except OSError: discard
 
