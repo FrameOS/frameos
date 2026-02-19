@@ -43,7 +43,7 @@ export const scenesLogic = kea<scenesLogicType>([
     logic: [socketLogic],
     values: [
       frameLogic({ frameId }),
-      ['frame', 'frameForm', 'lastDeploy'],
+      ['frame', 'frameForm', 'lastDeploy', 'isFrameAdminMode'],
       appsModel,
       ['apps'],
       controlLogic({ frameId }),
@@ -324,8 +324,12 @@ export const scenesLogic = kea<scenesLogicType>([
     editingFrame: [(s) => [s.frameForm, s.frame], (frameForm, frame) => frameForm || frame || null],
     rawScenes: [(s) => [s.editingFrame], (frame): FrameScene[] => frame.scenes ?? []],
     undeployedSceneIds: [
-      (s) => [s.rawScenes, s.frame],
-      (scenes, frame): Set<string> => {
+      (s) => [s.rawScenes, s.frame, s.isFrameAdminMode],
+      (scenes, frame, isFrameAdminMode): Set<string> => {
+        if (isFrameAdminMode) {
+          return new Set<string>()
+        }
+
         const deployedScenes: FrameScene[] = frame?.last_successful_deploy?.scenes ?? []
         const undeployed = new Set<string>()
 

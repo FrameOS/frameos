@@ -11,6 +11,7 @@ import { apiFetch } from '../../utils/apiFetch'
 import { getBasePath } from '../../utils/getBasePath'
 import { entityImagesModel } from '../../models/entityImagesModel'
 import { arrangeNodes } from '../../utils/arrangeNodes'
+import { isInFrameAdminMode } from '../../utils/frameAdmin'
 
 export interface FrameLogicProps {
   frameId: number
@@ -587,6 +588,7 @@ export const frameLogic = kea<frameLogicType>([
     frameId: [() => [(_, props) => props.frameId], (frameId) => frameId],
     frame: [(s) => [s.frames, s.frameId], (frames, frameId) => frames[frameId] || null],
     mode: [(s) => [s.frame, s.frameForm], (frame, frameForm) => frameForm?.mode || frame?.mode || 'rpios'],
+    isFrameAdminMode: [() => [], () => isInFrameAdminMode()],
     scenes: [
       (s) => [s.frame, s.frameForm],
       (frame, frameForm): FrameScene[] => frameForm?.scenes ?? frame.scenes ?? [],
@@ -602,8 +604,9 @@ export const frameLogic = kea<frameLogicType>([
     ],
     lastDeploy: [(s) => [s.frame], (frame) => frame?.last_successful_deploy ?? null],
     undeployedChanges: [
-      (s) => [s.frame, s.lastDeploy],
-      (frame, lastDeploy) =>
+      (s) => [s.frame, s.lastDeploy, s.isFrameAdminMode],
+      (frame, lastDeploy, isFrameAdminMode) =>
+        !isFrameAdminMode &&
         FRAME_KEYS.some((key) => !equal(frame?.[key as keyof FrameType], lastDeploy?.[key as keyof FrameType])),
     ],
     unsavedChangeDetails: [
@@ -611,8 +614,9 @@ export const frameLogic = kea<frameLogicType>([
       (frame, frameForm, mode): ChangeDetail[] => computeChangeDetails(frame, frameForm, mode),
     ],
     undeployedChangeDetails: [
-      (s) => [s.lastDeploy, s.frame, s.mode],
-      (lastDeploy, frame, mode): ChangeDetail[] => computeChangeDetails(lastDeploy, frame, mode),
+      (s) => [s.lastDeploy, s.frame, s.mode, s.isFrameAdminMode],
+      (lastDeploy, frame, mode, isFrameAdminMode): ChangeDetail[] =>
+        isFrameAdminMode ? [] : computeChangeDetails(lastDeploy, frame, mode),
     ],
     requiresRecompilation: [
       (s) => [s.unsavedChangeDetails],
