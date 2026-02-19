@@ -2,7 +2,6 @@ import { actions, afterMount, kea, path } from 'kea'
 import { AiSceneLogType, FrameType, LogType } from '../types'
 
 import type { socketLogicType } from './socketLogicType'
-import { inHassioIngress } from '../utils/inHassioIngress'
 import { getBasePath } from '../utils/getBasePath'
 import { getFrameControlFrameId, isFrameControlMode } from '../utils/frameControlMode'
 
@@ -25,16 +24,8 @@ export const socketLogic = kea<socketLogicType>([
     frameRendered: (frameId: number) => ({ frameId }),
   }),
   afterMount(({ actions, cache }) => {
-    const frameControlMode = isFrameControlMode()
-    const token = localStorage.getItem('token')
-    if (!frameControlMode && !token && !inHassioIngress()) {
-      console.error('🔴 No token found in localStorage, cannot connect to WebSocket.')
-      return
-    }
-
     function openConnection() {
-      const wsToken = frameControlMode ? '' : token ? `?token=${token}` : ''
-      cache.ws = new WebSocket(`${getBasePath()}/ws${wsToken}`)
+      cache.ws = new WebSocket(`${getBasePath()}/ws`)
       cache.ws.onopen = function (event: any) {
         console.log('🔵 Connected to the WebSocket server.')
       }

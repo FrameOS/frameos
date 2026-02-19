@@ -11,6 +11,7 @@ type
     serverApiKey*: string
     frameHost*: string
     framePort*: int
+    httpsProxy*: HttpsProxyConfig
     frameAccessKey*: string
     frameAccess*: string
     width*: int
@@ -33,6 +34,14 @@ type
     network*: NetworkConfig
     agent*: AgentConfig
     palette*: PaletteConfig
+
+  # Part of FrameConfig
+  HttpsProxyConfig* = ref object
+    enable*: bool
+    port*: int
+    exposeOnlyPort*: bool
+    serverCert*: string
+    serverKey*: string
 
   # Part of FrameConfig
   GPIOButton* = ref object
@@ -182,6 +191,7 @@ type
 
   # Exported data/functions for interpreted scenes, adds some local state that's normally compiled into the scene
   ExportedInterpretedScene* = ref object of ExportedScene
+    name*: string
     backgroundColor*: Color
     refreshInterval*: float
     nodes*: seq[DiagramNode]

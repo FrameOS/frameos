@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { Spinner } from './Spinner'
 
 // ---- Simple shared semaphore to cap concurrent <img> network loads ---- //
@@ -30,23 +30,8 @@ class LoadLimiter {
 }
 const sharedLimiter = new LoadLimiter(5)
 
-function appendToken(url: string, token?: string | null): string {
-  if (!token) return url
-  try {
-    const u = new URL(url, typeof window !== 'undefined' ? window.location.origin : 'http://local')
-    u.searchParams.set('token', token)
-    return u.pathname + (u.search ? u.search : '') + (u.hash || '')
-  } catch {
-    const hasQuery = url.includes('?')
-    const hasToken = /([?&])token=/.test(url)
-    if (hasToken) return url
-    return url + (hasQuery ? '&' : '?') + 'token=' + encodeURIComponent(token)
-  }
-}
-
 export interface DeferredImageProps extends React.ImgHTMLAttributes<HTMLImageElement> {
   url: string
-  token?: string | null
   startWhenVisible?: boolean
   spinnerClassName?: string
 }
@@ -54,7 +39,6 @@ export interface DeferredImageProps extends React.ImgHTMLAttributes<HTMLImageEle
 /** DeferredImage with visibility gate + 5-at-a-time limiter + spinner */
 export function DeferredImage({
   url,
-  token,
   startWhenVisible = true,
   spinnerClassName,
   className,
@@ -67,8 +51,6 @@ export function DeferredImage({
   const [isLoading, setIsLoading] = useState<boolean>(false) // <- don't show spinner until we actually start
   const containerRef = useRef<HTMLDivElement | null>(null)
   const releaseRef = useRef<null | (() => void)>(null)
-
-  const withToken = useMemo(() => appendToken(url, token), [url, token])
 
   // Visibility gate -> set state so effects re-run
   useEffect(() => {
@@ -104,13 +86,13 @@ export function DeferredImage({
       }
       releaseRef.current = release
       setIsLoading(true)
-      setActualSrc(withToken)
+      setActualSrc(url)
     })()
 
     return () => {
       cancelled = true
     }
-  }, [started, withToken, actualSrc])
+  }, [started, url, actualSrc])
 
   // Clean up limiter slot if unmounted mid-load
   useEffect(() => {

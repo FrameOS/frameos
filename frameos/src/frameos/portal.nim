@@ -4,6 +4,7 @@ import frameos/config
 import frameos/types
 import frameos/scenes
 import frameos/channels
+import frameos/setup_proxy
 
 const
   nmHotspotName = "frameos-hotspot"
@@ -74,6 +75,7 @@ proc stopAp*(frameOS: FrameOS) =
   discard run("sudo nmcli connection down " & shQuote(nmHotspotName) & " || true")
   discard run("sudo nmcli connection delete " & shQuote(nmHotspotName) & " || true")
   frameOS.network.hotspotStatus = HotspotStatus.disabled
+  stopSetupProxy()
   pLog("portal:stopAp:done")
 
 proc startAp*(frameOS: FrameOS) =
@@ -96,8 +98,11 @@ proc startAp*(frameOS: FrameOS) =
     return
 
   discard run("sudo nmcli connection modify " & shQuote(nmHotspotName) & " ipv4.method shared")
+  discard run("sudo nmcli connection modify " & shQuote(nmHotspotName) & " 802-11-wireless.ap-isolation 1 || true")
 
   frameOS.network.hotspotStatus = HotspotStatus.enabled
+  startSetupProxy(frameOS.frameConfig)
+  pLog("portal:startAp:setupProxy", %*{"port": setupProxyPort()})
   let hotspotStarted = getMonoTime()
   frameOS.network.hotspotStartedAt = epochTime()
   pLog("portal:startAp:done")

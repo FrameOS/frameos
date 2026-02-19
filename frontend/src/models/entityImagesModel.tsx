@@ -1,15 +1,8 @@
 import { actions, connect, kea, listeners, reducers, path, selectors, useValues, useActions } from 'kea'
 import { socketLogic } from '../scenes/socketLogic'
 import type { entityImagesModelType } from './entityImagesModelType'
-import { apiFetch } from '../utils/apiFetch'
 import { useEffect, useState } from 'react'
-import { inHassioIngress } from '../utils/inHassioIngress'
 import { getBasePath } from '../utils/getBasePath'
-
-export interface EntityImageInfo {
-  token: string
-  expiresAt: number
-}
 
 export function useEntityImage(
   entity: string | null,
@@ -48,16 +41,9 @@ export const entityImagesModel = kea<entityImagesModelType>([
   path(['src', 'models', 'entityImages']),
   actions({
     updateEntityImage: (entity: string | null, subentity: string, force = true) => ({ entity, subentity, force }),
-    setEntityImageInfo: (entity: string, imageInfo: EntityImageInfo) => ({ entity, imageInfo }),
     updateEntityImageTimestamp: (entity: string, subentity: string) => ({ entity, subentity }),
   }),
   reducers(({ values }) => ({
-    entityImageInfos: [
-      {} as Record<string, EntityImageInfo>,
-      {
-        setEntityImageInfo: (state, { entity, imageInfo }) => ({ ...state, [entity]: imageInfo }),
-      },
-    ],
     entityImageTimestamps: [
       {} as Record<string, number>,
       {
@@ -73,59 +59,27 @@ export const entityImagesModel = kea<entityImagesModelType>([
   })),
   selectors({
     getEntityImage: [
-      (s) => [s.entityImageInfos, s.entityImageTimestamps],
-      (entityImageInfos, entityImageTimestamps) => {
+      (s) => [s.entityImageTimestamps],
+      (entityImageTimestamps) => {
         return (entity: string, subentity: string) => {
           if (!entity) {
             return null
           }
 
-          if (inHassioIngress()) {
-            const timestamp = entityImageTimestamps[entity + '/' + subentity] ?? -1
-            return `${getBasePath()}/api/${entity}/${subentity}?token&t=${timestamp}`
-          }
-
-          const info = entityImageInfos[entity]
-          const now = Math.floor(Date.now() / 1000)
-          if (!info || !info.expiresAt || !info.token || now >= info.expiresAt) {
-            return null
-          }
           const timestamp = entityImageTimestamps[entity + '/' + subentity] ?? -1
-          return `${getBasePath()}/api/${entity}/${subentity}?token=${encodeURIComponent(info.token)}&t=${timestamp}`
+          return `${getBasePath()}/api/${entity}/${subentity}?t=${timestamp}`
         }
       },
     ],
   }),
   listeners(({ actions, values }) => ({
     updateEntityImage: async ({ entity, subentity, force }) => {
-      // Check if we have a valid URL
       if (!entity) {
         return
       }
 
-      const imageUrl = values.getEntityImage(entity, subentity)
-      if (imageUrl) {
-        // The URL is still valid, no need to refetch new signed URL
-        // Just update timestamp to refresh (force reload)
-        if (force) {
-          actions.updateEntityImageTimestamp(entity, subentity)
-        }
-        return
-      }
-
-      // Need a new signed URL
-      const resp = await apiFetch(`/api/${entity}/image_token`)
-      if (resp.ok) {
-        const data = await resp.json()
-        const expiresAt = Math.floor(Date.now() / 1000) + data.expires_in
-        const imageInfo: EntityImageInfo = { token: data.token, expiresAt }
-        actions.setEntityImageInfo(entity, imageInfo)
-        // Update timestamp to ensure a new request even if the URL is same
-        if (force) {
-          actions.updateEntityImageTimestamp(entity, subentity)
-        }
-      } else {
-        console.error('Failed to get image link for', entity, subentity)
+      if (force) {
+        actions.updateEntityImageTimestamp(entity, subentity)
       }
     },
     [socketLogic.actionTypes.newSceneImage]: ({ frameId, sceneId }) => {

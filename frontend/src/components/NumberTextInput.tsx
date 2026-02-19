@@ -8,10 +8,10 @@ export interface NumberTextInputProps extends Omit<TextInputProps, 'onChange' | 
 }
 
 export function NumberTextInput({ value, onChange, onBlur, ...props }: NumberTextInputProps) {
-  const [internalValue, setInternalValue] = React.useState(value?.toString() ?? '')
+  const [internalValue, setInternalValue] = React.useState(value === null ? '' : value?.toString() ?? '')
   useEffect(() => {
-    if (value !== undefined) {
-      setInternalValue(value.toString())
+    if (value !== undefined && value !== null) {
+      setInternalValue(value?.toString() ?? '')
     } else {
       setInternalValue('')
     }

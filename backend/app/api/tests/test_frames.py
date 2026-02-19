@@ -5,6 +5,7 @@ import httpx
 
 from app.models import new_frame
 from app.models.frame import Frame
+from app.models.user import User
 
 @pytest.mark.asyncio
 async def test_api_frames(async_client, db, redis):
@@ -143,6 +144,13 @@ async def test_api_frame_new(async_client):
     data = response.json()
     assert 'frame' in data
     assert data['frame']['name'] == "NewFrame"
+    assert data['frame']['https_proxy']['enable'] is True
+    assert data['frame']['https_proxy']['expose_only_port'] is True
+    assert 'BEGIN CERTIFICATE' in data['frame']['https_proxy']['certs']['server']
+    assert 'BEGIN RSA PRIVATE KEY' in data['frame']['https_proxy']['certs']['server_key']
+    assert 'BEGIN CERTIFICATE' in data['frame']['https_proxy']['certs']['client_ca']
+    assert data['frame']['https_proxy']['server_cert_not_valid_after'] is not None
+    assert data['frame']['https_proxy']['client_ca_cert_not_valid_after'] is not None
 
 
 @pytest.mark.asyncio
@@ -182,3 +190,38 @@ async def test_api_frame_delete_not_found(async_client):
     resp = await async_client.delete('/api/frames/999999')
     assert resp.status_code == 404
     assert resp.json()['detail'] == 'Frame not found'
+
+@pytest.mark.asyncio
+async def test_api_frame_get_image_with_cookie_no_token(no_auth_client, db, redis):
+    frame = await new_frame(db, redis, 'CookieImageFrame', 'localhost', 'localhost')
+    cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
+    await redis.set(cache_key, b'cookie_cached_image_data')
+
+    user = User(email='cookieframe@example.com')
+    user.set_password('testpassword')
+    db.add(user)
+    db.commit()
+
+    login_resp = await no_auth_client.post('/api/login', data={'username': 'cookieframe@example.com', 'password': 'testpassword'})
+    assert login_resp.status_code == 200
+
+    response = await no_auth_client.get(f'/api/frames/{frame.id}/image?t=-1')
+    assert response.status_code == 200
+    assert response.content == b'cookie_cached_image_data'
+
+
+@pytest.mark.asyncio
+async def test_api_frame_generate_tls_material_includes_validity_dates(async_client, db, redis):
+    frame = await new_frame(db, redis, 'TlsFrame', 'localhost', 'localhost')
+
+    response = await async_client.post(f'/api/frames/{frame.id}/tls/generate')
+    assert response.status_code == 200
+
+    data = response.json()
+    assert 'BEGIN CERTIFICATE' in data['certs']['server']
+    assert 'BEGIN RSA PRIVATE KEY' in data['certs']['server_key']
+    assert 'BEGIN CERTIFICATE' in data['certs']['client_ca']
+    assert data['server_cert_not_valid_after'] is not None
+    assert data['client_ca_cert_not_valid_after'] is not None
+    assert data['server_cert_not_valid_after'].endswith('+00:00')
+    assert data['client_ca_cert_not_valid_after'].endswith('+00:00')

@@ -1,16 +1,53 @@
 from __future__ import annotations
 
+import asyncio
 from http import HTTPStatus
+import os
+import ssl
 from typing import Optional
 
 import httpx
 from fastapi import HTTPException
 
-from app.models.frame import Frame
+from app.models.frame import Frame, normalize_https_proxy
 from app.utils.network import is_safe_host
 from app.utils.remote_exec import _use_agent
 from app.ws.agent_ws import http_get_on_frame
 from arq import ArqRedis as Redis
+
+
+def _get_env_int(name: str, default: int) -> int:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    try:
+        parsed = int(value)
+        return parsed if parsed > 0 else default
+    except ValueError:
+        return default
+
+
+def _get_env_float(name: str, default: float) -> float:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    try:
+        parsed = float(value)
+        return parsed if parsed > 0 else default
+    except ValueError:
+        return default
+
+
+FRAME_HTTP_MAX_CONCURRENCY = _get_env_int("FRAME_HTTP_MAX_CONCURRENCY", 20)
+FRAME_HTTP_TIMEOUT = httpx.Timeout(
+    connect=_get_env_float("FRAME_HTTP_CONNECT_TIMEOUT", 10.0),
+    read=_get_env_float("FRAME_HTTP_READ_TIMEOUT", 20.0),
+    write=_get_env_float("FRAME_HTTP_WRITE_TIMEOUT", 20.0),
+    pool=_get_env_float("FRAME_HTTP_POOL_TIMEOUT", 10.0),
+)
+_frame_http_semaphore = asyncio.Semaphore(FRAME_HTTP_MAX_CONCURRENCY)
+FRAME_HTTP_RETRIES = _get_env_int("FRAME_HTTP_RETRIES", 2)
+DEFAULT_FRAME_HTTPS_PROXY_PORT = 8443
 
 
 def _build_frame_path(
@@ -40,14 +77,61 @@ def _build_frame_path(
     return path
 
 
+def _frame_scheme_port(frame: Frame) -> tuple[str, int]:
+    https_proxy = normalize_https_proxy(frame.https_proxy)
+    if https_proxy.get("enable"):
+        https_port = https_proxy.get("port") or 0
+        return "https", https_port if https_port > 0 else DEFAULT_FRAME_HTTPS_PROXY_PORT
+    return "http", frame.frame_port
+
+
 def _build_frame_url(frame: Frame, path: str, method: str) -> str:
     """Return full http://host:port/… URL (adds access key when required)."""
     if not is_safe_host(frame.frame_host):
         raise HTTPException(status_code=400, detail="Unsafe frame host")
 
-    scheme = "https" if frame.frame_port % 1000 == 443 else "http"
-    url = f"{scheme}://{frame.frame_host}:{frame.frame_port}{_build_frame_path(frame, path, method)}"
+    scheme, port = _frame_scheme_port(frame)
+    url = f"{scheme}://{frame.frame_host}:{port}{_build_frame_path(frame, path, method)}"
     return url
+
+
+def _httpx_verify(frame: Frame):
+    https_proxy = normalize_https_proxy(frame.https_proxy)
+    if not https_proxy.get("enable"):
+        return True
+    ca_cert = (https_proxy.get("certs", {}).get("client_ca") or "").strip()
+    if not ca_cert:
+        return True
+
+    context = ssl.create_default_context()
+    context.load_verify_locations(cadata=ca_cert)
+    return context
+
+
+def _tls_connect_error_detail(frame: Frame, error: str) -> Optional[str]:
+    lower_error = error.lower()
+    if "certificate_verify_failed" not in lower_error and "certificate verify failed" not in lower_error:
+        return None
+
+    if "hostname mismatch" in lower_error:
+        return (
+            "TLS hostname verification failed while connecting to frame. "
+            f"The certificate does not match frame host '{frame.frame_host}'. "
+            "Regenerate frame TLS material (or upload a certificate that includes this host in SAN/CN) "
+            "and redeploy."
+        )
+    if "ip address mismatch" in lower_error:
+        return (
+            "TLS ip address verification failed while connecting to frame. "
+            f"The certificate does not match frame ip '{frame.frame_host}'. "
+            "Regenerate frame TLS material (or upload a certificate that includes this ip in SAN/CN) "
+            "and redeploy."
+        )
+
+    return (
+        "TLS verification failed while connecting to frame. "
+        "Set frame.https_proxy.certs.client_ca to the issuing CA certificate."
+    )
 
 
 def _auth_headers(
@@ -92,16 +176,45 @@ async def _fetch_frame_http_bytes(
 
     url = _build_frame_url(frame, path, method)
     hdrs = _auth_headers(frame)
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.request(method, url, headers=hdrs, timeout=60.0)
-        except httpx.ReadTimeout:
-            raise HTTPException(
-                status_code=HTTPStatus.REQUEST_TIMEOUT, detail=f"Timeout to {url}"
-            )
-        except Exception as exc:
-            raise HTTPException(
-                status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(exc)
-            )
+    verify = _httpx_verify(frame)
+    timeout_errors = (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.WriteTimeout)
+    attempts = max(1, FRAME_HTTP_RETRIES)
+    async with _frame_http_semaphore:
+        async with httpx.AsyncClient(verify=verify) as client:
+            for attempt in range(1, attempts + 1):
+                try:
+                    response = await client.request(
+                        method,
+                        url,
+                        headers=hdrs,
+                        timeout=FRAME_HTTP_TIMEOUT,
+                    )
+                    break
+                except timeout_errors:
+                    if attempt >= attempts:
+                        raise HTTPException(
+                            status_code=HTTPStatus.REQUEST_TIMEOUT,
+                            detail=f"Timeout to {url}",
+                        )
+                    await asyncio.sleep(0.15 * attempt)
+                except httpx.PoolTimeout:
+                    raise HTTPException(
+                        status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+                        detail="Frame request queue is saturated",
+                    )
+                except httpx.ConnectError as exc:
+                    if detail := _tls_connect_error_detail(frame, str(exc)):
+                        raise HTTPException(
+                            status_code=HTTPStatus.BAD_GATEWAY,
+                            detail=detail,
+                        )
+                    raise HTTPException(
+                        status_code=HTTPStatus.BAD_GATEWAY,
+                        detail=str(exc),
+                    )
+                except Exception as exc:
+                    raise HTTPException(
+                        status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(exc)
+                    )
 
     return response.status_code, response.content, dict(response.headers)

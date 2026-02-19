@@ -13,6 +13,8 @@ proc setConfigDefaults*(config: var FrameConfig) =
   if config.scalingMode == "": config.scalingMode = "cover"
   if config.framePort == 0: config.framePort = 8787
   if config.frameHost == "": config.frameHost = "localhost"
+  if config.httpsProxy == nil: config.httpsProxy = HttpsProxyConfig()
+  if config.httpsProxy.port == 0: config.httpsProxy.port = 8443
   if config.frameAccess == "": config.frameAccess = "private"
   if config.name == "": config.name = config.frameHost
   if config.timeZone == "": config.timeZone = detectSystemTimeZone()
@@ -137,6 +139,13 @@ proc loadConfig*(): FrameConfig =
     serverApiKey: data{"serverApiKey"}.getStr(),
     frameHost: data{"frameHost"}.getStr(),
     framePort: data{"framePort"}.getInt(),
+    httpsProxy: HttpsProxyConfig(
+      enable: data{"httpsProxy"}{"enable"}.getBool(),
+      port: data{"httpsProxy"}{"port"}.getInt(),
+      exposeOnlyPort: data{"httpsProxy"}{"exposeOnlyPort"}.getBool(),
+      serverCert: data{"httpsProxy"}{"serverCert"}.getStr(""),
+      serverKey: data{"httpsProxy"}{"serverKey"}.getStr(""),
+    ),
     frameAccess: data{"frameAccess"}.getStr(),
     frameAccessKey: data{"frameAccessKey"}.getStr(),
     width: data{"width"}.getInt(),
@@ -179,6 +188,7 @@ proc updateFrameConfigFrom*(target: FrameConfig, source: FrameConfig) =
   target.serverApiKey = source.serverApiKey
   target.frameHost = source.frameHost
   target.framePort = source.framePort
+  target.httpsProxy = source.httpsProxy
   target.frameAccessKey = source.frameAccessKey
   target.frameAccess = source.frameAccess
   target.width = source.width

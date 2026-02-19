@@ -10,6 +10,17 @@ export function frameHost(frame: FrameType): string {
 
 export const frameStatusWithSpinner = ['deploying', 'preparing', 'rendering', 'restarting', 'starting']
 
+function frameSchemeAndPort(frame: FrameType): { scheme: string; port: number } {
+  if (frame.https_proxy?.enable) {
+    const tlsPort = frame.https_proxy?.port ?? 0
+    return {
+      scheme: 'https',
+      port: tlsPort > 0 ? tlsPort : frame.frame_port,
+    }
+  }
+  return { scheme: 'http', port: frame.frame_port }
+}
+
 export function frameStatus(frame: FrameType): JSX.Element {
   let status = frame.status
   if (frame.last_log_at) {
@@ -32,8 +43,13 @@ export function frameStatus(frame: FrameType): JSX.Element {
   )
 }
 
+export function frameRootUrl(frame: FrameType): string {
+  const { scheme, port } = frameSchemeAndPort(frame)
+  return `${scheme}://${frame.frame_host}:${port}`
+}
+
 export function frameUrl(frame: FrameType): string | null {
-  const url = `http${frame.frame_port % 1000 === 443 ? 's' : ''}://${frame.frame_host}:${frame.frame_port}/`
+  const url = frameRootUrl(frame)
   if (frame.frame_access === 'public' || frame.frame_access === 'protected') {
     return url
   } else {
@@ -42,7 +58,7 @@ export function frameUrl(frame: FrameType): string | null {
 }
 
 export function frameControlUrl(frame: FrameType): string | null {
-  const url = `http${frame.frame_port % 1000 === 443 ? 's' : ''}://${frame.frame_host}:${frame.frame_port}/c`
+  const url = frameRootUrl(frame) + '/c'
   if (frame.frame_access === 'public') {
     return url
   } else {
@@ -51,7 +67,7 @@ export function frameControlUrl(frame: FrameType): string | null {
 }
 
 export function frameImageUrl(frame: FrameType): string | null {
-  const url = `http${frame.frame_port % 1000 === 443 ? 's' : ''}://${frame.frame_host}:${frame.frame_port}/image`
+  const url = frameRootUrl(frame) + `/image`
   if (frame.frame_access === 'public' || frame.frame_access === 'protected') {
     return url
   } else {

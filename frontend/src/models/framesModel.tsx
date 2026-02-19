@@ -9,6 +9,7 @@ import { apiFetch } from '../utils/apiFetch'
 import { entityImagesModel } from './entityImagesModel'
 import { urls } from '../urls'
 import streamSaver from 'streamsaver'
+import { showWorkingMessage } from '../utils/workingMessage'
 
 export interface FrameImageInfo {
   url: string
@@ -191,7 +192,14 @@ export const framesModel = kea<framesModelType>([
       })
     },
     buildSDCard: async ({ id }) => {
-      await buildSDCard(id)
+      const workingMessage = showWorkingMessage('Building SD card image...')
+      try {
+        await buildSDCard(id)
+        workingMessage.success('SD card image build completed')
+      } catch (error) {
+        workingMessage.error(error instanceof Error ? error.message : 'Failed to build SD card image')
+        throw error
+      }
     },
     deleteFrame: async ({ id }) => {
       await apiFetch(`/api/frames/${id}`, { method: 'DELETE' })

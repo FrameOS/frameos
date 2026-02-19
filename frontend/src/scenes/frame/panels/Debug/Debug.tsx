@@ -1,8 +1,6 @@
-import { default as ReactJson } from '@microlink/react-json-view'
+import ReactJson from '@microlink/react-json-view'
 import { useActions, useValues } from 'kea'
 import { frameLogic } from '../../frameLogic'
-
-const ReactJSON: typeof ReactJson = (ReactJson as any).default
 
 export function Debug() {
   const { frameForm } = useValues(frameLogic)
@@ -11,7 +9,7 @@ export function Debug() {
     setFrameFormValue('scenes', value)
   }
   return (
-    <ReactJSON
+    <ReactJson
       src={frameForm}
       collapsed={2}
       theme="ocean"

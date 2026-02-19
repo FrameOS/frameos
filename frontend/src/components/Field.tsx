@@ -45,9 +45,11 @@ export function Field({
           ) : (
             labelNode
           )}
-          {secret ? <SecretField>{kids as any}</SecretField> : kids}
-          {error ? <div className="flex items-center gap-1 text-sm text-red-400">{error}</div> : null}
-          {hint ? <div className="flex items-center gap-1 text-xs">{hint}</div> : null}
+          <div className="w-full">
+            {secret ? <SecretField>{kids as any}</SecretField> : (kids as any)}
+            {error ? <div className="flex items-center gap-1 text-sm text-red-400">{error}</div> : null}
+            {hint ? <div className="flex items-center gap-1 text-sm">{hint}</div> : null}
+          </div>
         </>
       </div>
     )

@@ -1,6 +1,11 @@
 {
   "framePort": 8787,
   "frameHost": "localhost",
+  "httpsProxy": {
+    "enable": false,
+    "port": 8443,
+    "exposeOnlyPort": false
+  },
   "serverHost": "localhost",
   "serverPort": 8989,
   "serverApiKey": "test-api-key",
@@ -35,4 +40,3 @@
     "wifiHotspotTimeoutSeconds": 300
   }
 }
-

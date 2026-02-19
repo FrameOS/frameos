@@ -53,7 +53,12 @@ def _sanitize_apt_package_name(pkg: str) -> str:
     return normalized
 
 
-async def _install_if_necessary(deployer: FrameDeployer, pkg: str, raise_on_error: bool = True) -> int:
+async def _install_if_necessary(
+    deployer: FrameDeployer,
+    pkg: str,
+    raise_on_error: bool = True,
+    run_after_install: str | None = None,
+) -> int:
     try:
         sanitized_pkg = _sanitize_apt_package_name(pkg)
     except ValueError as exc:
@@ -61,6 +66,19 @@ async def _install_if_necessary(deployer: FrameDeployer, pkg: str, raise_on_erro
         if raise_on_error:
             raise
         return 1
+
+    quoted_pkg = shlex.quote(sanitized_pkg)
+    package_installed = (
+        await deployer.exec_command(
+            f"dpkg -l | grep -q \"^ii  {quoted_pkg} \"",
+            raise_on_error=False,
+            log_command=False,
+            log_output=False,
+        )
+        == 0
+    )
+    if package_installed:
+        return 0
 
     search_strings = [
         "run apt-get update",
@@ -70,9 +88,8 @@ async def _install_if_necessary(deployer: FrameDeployer, pkg: str, raise_on_erro
         "Unable to fetch some archives",
     ]
     output: list[str] = []
-    quoted_pkg = shlex.quote(sanitized_pkg)
     response = await deployer.exec_command(
-        f"dpkg -l | grep -q \"^ii  {quoted_pkg} \" || sudo apt-get install -y {quoted_pkg}",
+        f"sudo apt-get install -y {quoted_pkg}",
         raise_on_error=False,
         output=output,
     )
@@ -86,6 +103,8 @@ async def _install_if_necessary(deployer: FrameDeployer, pkg: str, raise_on_erro
             )
             if response != 0:  # we probably raised above
                 await deployer.log("stdout", f"{icon} Installing {sanitized_pkg} failed again.")
+    elif run_after_install:
+        response = await deployer.exec_command(run_after_install, raise_on_error=raise_on_error)
     return response
 
 
@@ -576,6 +595,10 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             await install_if_necessary("build-essential")
             await install_if_necessary("hostapd")
             await install_if_necessary("imagemagick")
+            await install_if_necessary(
+                "caddy",
+                run_after_install="sudo systemctl disable --now caddy.service",
+            )
 
             if drivers.get("evdev"):
                 await install_if_necessary("libevdev-dev")
@@ -783,6 +806,9 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
 
             # On first deploy disable the enter "new username" prompt
             await self.exec_command("sudo systemctl disable userconfig || true")
+
+        await self.log("stdout", f"{icon} Disabling system-managed Caddy service (managed by FrameOS tls_proxy)")
+        await self.exec_command("sudo systemctl disable --now caddy.service", raise_on_error=False)
 
         frame.status = 'starting'
         frame.last_successful_deploy = frame_dict
