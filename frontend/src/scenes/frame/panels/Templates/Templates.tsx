@@ -19,6 +19,7 @@ import { panelsLogic } from '../panelsLogic'
 import { TemplateType } from '../../../../types'
 
 export function Templates() {
+  const inFrameAdminMode = typeof window !== 'undefined' && window.location.pathname.startsWith('/admin')
   const { applyTemplate } = useActions(frameLogic)
   const { frameId } = useValues(frameLogic)
   const { removeTemplate, exportTemplate } = useActions(templatesModel)
@@ -112,6 +113,7 @@ export function Templates() {
         </Box>
       ) : null}
 
+      {!inFrameAdminMode && (
       <div className="space-y-2">
         <div className="flex justify-between w-full items-center">
           <H6 className="flex items-center cursor-pointer" onClick={() => toggleExpanded('')}>
@@ -161,6 +163,8 @@ export function Templates() {
           </div>
         ) : null}
       </div>
+
+      )}
 
       {(repositories ?? []).map((repository) => (
         <div className="space-y-2 !mt-8" key={repository.id}>

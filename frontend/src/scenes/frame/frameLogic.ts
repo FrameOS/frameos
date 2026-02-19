@@ -348,6 +348,29 @@ export function sanitizeNodes(nodes: DiagramNode[]): DiagramNode[] {
   return changed ? newNodes : nodes
 }
 
+
+function normalizeNode(node: DiagramNode): DiagramNode {
+  const normalizedType = node.type ?? (node as DiagramNode & { nodeType?: DiagramNode['type'] }).nodeType
+  if (!normalizedType) {
+    return node
+  }
+  return {
+    ...node,
+    type: normalizedType,
+  } as DiagramNode
+}
+
+function normalizeEdge(edge: any): any {
+  const normalizedType = edge.type ?? edge.edgeType
+  if (!normalizedType) {
+    return edge
+  }
+  return {
+    ...edge,
+    type: normalizedType,
+  }
+}
+
 function hasValidPosition(node: DiagramNode): boolean {
   return Number.isFinite(node.position?.x) && Number.isFinite(node.position?.y)
 }
@@ -361,7 +384,8 @@ function sanitizeFrame(frame: Partial<FrameType>): Partial<FrameType> {
 
 export function sanitizeScene(scene: Partial<FrameScene>, frame: Partial<FrameType>): FrameScene {
   const settings = scene.settings ?? {}
-  const sanitizedNodes = sanitizeNodes(scene.nodes ?? [])
+  const normalizedRawNodes = (scene.nodes ?? []).map((node) => normalizeNode(node as DiagramNode))
+  const sanitizedNodes = sanitizeNodes(normalizedRawNodes)
   const normalizedNodes = sanitizedNodes.map((node) =>
     hasValidPosition(node)
       ? node
@@ -376,7 +400,7 @@ export function sanitizeScene(scene: Partial<FrameScene>, frame: Partial<FrameTy
           position: { x: 0, y: 0 },
         }
   )
-  const edges = scene.edges ?? []
+  const edges = (scene.edges ?? []).map((edge) => normalizeEdge(edge))
   const shouldArrange = normalizedNodes.length > 0 && sanitizedNodes.every((node) => !hasValidPosition(node))
   return {
     ...scene,

@@ -191,6 +191,43 @@ proc parseFrameApiId(rawId: string): int =
   except CatchableError:
     return -1
 
+
+proc frameAssetsPayload(): JsonNode =
+  let configuredAssetsPath = if globalFrameConfig.assetsPath.len > 0: globalFrameConfig.assetsPath else: "/srv/assets"
+  let assetsPath = normalizedPath(configuredAssetsPath)
+  var assets: seq[JsonNode] = @[]
+  if not dirExists(assetsPath):
+    return %*[]
+
+  for kind, path in walkDir(assetsPath, relative = false):
+    if kind notin {pcDir, pcFile}:
+      continue
+    try:
+      let info = getFileInfo(path)
+      assets.add(%*{
+        "path": path,
+        "size": if kind == pcFile: info.size else: 0,
+        "mtime": info.lastWriteTime.toUnix(),
+        "is_dir": kind == pcDir,
+      })
+    except CatchableError:
+      discard
+
+  for path in walkDirRec(assetsPath):
+    let fullPath = assetsPath / path
+    try:
+      let info = getFileInfo(fullPath)
+      assets.add(%*{
+        "path": fullPath,
+        "size": info.size,
+        "mtime": info.lastWriteTime.toUnix(),
+        "is_dir": false,
+      })
+    except CatchableError:
+      discard
+
+  return %*assets
+
 proc frameApiPayload(): JsonNode =
   let configJson = loadConfigJson()
   let interval = if configJson.kind == JObject: configJson{"interval"}.getFloat(300) else: 300
@@ -584,7 +621,7 @@ router myrouter:
       if requestedId != frameApiId():
         resp Http404, "Not found!"
       else:
-        resp Http200, {"Content-Type": "application/json"}, $(%*{"assets": %*[]})
+        resp Http200, {"Content-Type": "application/json"}, $(%*{"assets": frameAssetsPayload()})
   get "/api/frames/@id/image_token":
     if not hasAccess(request, Read):
       resp Http401, "Unauthorized"

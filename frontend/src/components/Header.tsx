@@ -12,13 +12,16 @@ interface HeaderProps {
 }
 
 export function Header({ title, version, right, buttons }: HeaderProps) {
+  const inFrameAdminMode = typeof window !== 'undefined' && window.location.pathname.startsWith('/admin')
+  const homeHref = inFrameAdminMode ? '/admin' : urls.frames()
+
   return (
     <span
       className="bg-gray-800 text-white h-full w-full space-x-2 p-2 pt-3 px-4 flex justify-between items-center"
       style={{ height: 60 }}
     >
       <div className="truncate flex items-center justify-center gap-3">
-        <A href={urls.frames()}>
+        <A href={homeHref}>
           <img
             src={getBasePath() + '/img/logo/dark-mark-small.png'}
             className="w-[28px] h-[28px] inline-block align-center"
