@@ -47,7 +47,7 @@ def _serialize_https_proxy(https_proxy: Optional[dict]) -> dict:
     return {
         'enable': bool(proxy.get('enable', False)),
         'port': proxy.get('port', 8443),
-        'expose_only_port': bool(proxy.get('expose_only_port', False)),
+        'expose_only_port': bool(proxy.get('expose_only_port', True)),
         'certs': {
             'server': proxy.get('certs', {}).get('server', ''),
             'server_key': proxy.get('certs', {}).get('server_key', ''),
@@ -319,7 +319,7 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
         "httpsProxy": {
             "enable": bool(https_proxy.get("enable", False)),
             "port": https_proxy.get("port", 8443),
-            "exposeOnlyPort": bool(https_proxy.get("expose_only_port", False)),
+            "exposeOnlyPort": bool(https_proxy.get("expose_only_port", True)),
             "serverCert": https_proxy.get("certs", {}).get("server", ""),
             "serverKey": https_proxy.get("certs", {}).get("server_key", ""),
         },
