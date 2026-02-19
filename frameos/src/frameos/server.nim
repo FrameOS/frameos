@@ -36,8 +36,7 @@ from scenes/scenes import sceneOptions
 var globalFrameOS: FrameOS
 var globalFrameConfig: FrameConfig
 var globalRunner: RunnerControl
-var globalAdminSessionSalt: string
-let indexHtml = webAssets.getAsset("assets/compiled/web/index.html")
+var globalAdminSessionSalt {.threadvar.}: string
 let frameWebIndexHtml = frameWebAssets.getAsset("assets/compiled/frame_web/index.html")
 
 var connectionsLock: Lock
