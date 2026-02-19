@@ -170,6 +170,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
   const controlUrl = frameControlUrl(frame)
   const imageUrl = frameImageUrl(frame)
   const tlsEnabled = !!(frameForm.https_proxy?.enable ?? frame.https_proxy?.enable)
+  const inFrameAdminMode = typeof window !== 'undefined' && window.location.pathname.startsWith('/admin')
 
   const palette = withCustomPalette[frame.device || '']
   const sshKeyOptions = normalizeSshKeys(savedSettings?.ssh_keys).keys
@@ -198,7 +199,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
             className="w-fit"
             buttonColor="secondary"
             items={[
-              ...(mode === 'rpios'
+              ...(mode === 'rpios' && !inFrameAdminMode
                 ? [
                     {
                       label: 'Clear build cache',
@@ -282,43 +283,47 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                 icon: <ArrowUpTrayIcon className="w-5 h-5" />,
                 loading: false,
               },
-              {
-                label: 'Download Nim build .zip',
-                onClick: () => {
-                  downloadBuildZip()
-                  openLogs()
-                },
-                icon: <ArrowUpTrayIcon className="w-5 h-5" />,
-                loading: buildZipLoading,
-              },
-              {
-                label: 'Generate C sources .zip',
-                onClick: () => {
-                  downloadCSourceZip()
-                  openLogs()
-                },
-                icon: <ArrowUpTrayIcon className="w-5 h-5" />,
-                loading: cSourceZipLoading,
-              },
-              {
-                label: 'Download built binary .zip',
-                onClick: () => {
-                  downloadBinaryZip()
-                  openLogs()
-                },
-                icon: <ArrowUpTrayIcon className="w-5 h-5" />,
-                loading: binaryZipLoading,
-              },
-              {
-                label: 'Delete frame',
-                onClick: () => {
-                  if (confirm('Are you sure you want to DELETE this frame?')) {
-                    deleteFrame(frame.id)
-                  }
-                },
-                icon: <TrashIcon className="w-5 h-5" />,
-                loading: false,
-              },
+              ...(!inFrameAdminMode
+                ? [
+                    {
+                      label: 'Download Nim build .zip',
+                      onClick: () => {
+                        downloadBuildZip()
+                        openLogs()
+                      },
+                      icon: <ArrowUpTrayIcon className="w-5 h-5" />,
+                      loading: buildZipLoading,
+                    },
+                    {
+                      label: 'Generate C sources .zip',
+                      onClick: () => {
+                        downloadCSourceZip()
+                        openLogs()
+                      },
+                      icon: <ArrowUpTrayIcon className="w-5 h-5" />,
+                      loading: cSourceZipLoading,
+                    },
+                    {
+                      label: 'Download built binary .zip',
+                      onClick: () => {
+                        downloadBinaryZip()
+                        openLogs()
+                      },
+                      icon: <ArrowUpTrayIcon className="w-5 h-5" />,
+                      loading: binaryZipLoading,
+                    },
+                    {
+                      label: 'Delete frame',
+                      onClick: () => {
+                        if (confirm('Are you sure you want to DELETE this frame?')) {
+                          deleteFrame(frame.id)
+                        }
+                      },
+                      icon: <TrashIcon className="w-5 h-5" />,
+                      loading: false,
+                    },
+                  ]
+                : []),
             ]}
           />
         </div>
