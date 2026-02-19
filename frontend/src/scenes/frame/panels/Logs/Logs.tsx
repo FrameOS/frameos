@@ -67,14 +67,12 @@ export function Logs() {
 
   return logsLoading ? (
     <div>...</div>
-  ) : logs.length === 0 ? (
-    <div>No Logs yet</div>
   ) : (
     <div className="h-full bg-black p-2 relative">
       <DropdownMenu
         horizontal
         buttonColor="tertiary"
-        className="absolute top-0.25 right-8 z-10"
+        className={logs.length > 0 ? 'absolute top-1 right-8 z-10' : 'absolute top-1 right-1 z-10'}
         items={[
           {
             label: 'Download log',
@@ -99,6 +97,11 @@ export function Logs() {
         ref={virtuosoRef}
         initialTopMostItemIndex={logs.length - 1}
         data={logs}
+        components={{
+          EmptyPlaceholder: () => (
+            <div className="text-gray-400 h-full flex items-center justify-center">No logs yet</div>
+          ),
+        }}
         followOutput={(isBottom) => (isBottom ? 'auto' : false)}
         atBottomStateChange={(bottom) => {
           shouldStickToBottomRef.current = bottom
