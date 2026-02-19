@@ -8,7 +8,7 @@ export default function Root() {
         <h1 className="text-3xl font-semibold text-slate-50 sm:text-4xl">Frame control is moving onboard</h1>
         <p className="text-base text-slate-200 sm:text-lg">
           This interface is compiled for the frame runtime and served directly from the device at{' '}
-          <span className="font-semibold text-white">/new</span>.
+          <span className="font-semibold text-white">/admin</span>.
         </p>
       </div>
       <div className="flex flex-col gap-2 text-sm text-slate-300">

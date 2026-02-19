@@ -8,7 +8,6 @@ import { Select } from '../../../../components/Select'
 import {
   frameControlUrl,
   frameImageUrl,
-  frameNewFrontendUrl,
   frameRootUrl,
   frameUrl,
 } from '../../../../decorators/frame'
@@ -170,7 +169,6 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
   const url = frameUrl(frame)
   const controlUrl = frameControlUrl(frame)
   const imageUrl = frameImageUrl(frame)
-  const newFrontendUrl = frameNewFrontendUrl(frame)
   const tlsEnabled = !!(frameForm.https_proxy?.enable ?? frame.https_proxy?.enable)
 
   const palette = withCustomPalette[frame.device || '']
@@ -352,7 +350,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                       rel="noreferrer noopener"
                       className="text-blue-400 hover:underline"
                     >
-                      Control URL
+                      Admin URL
                     </A>
                     <A
                       href={imageUrl}
@@ -361,14 +359,6 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                       className="text-blue-400 hover:underline"
                     >
                       Image URL
-                    </A>
-                    <A
-                      href={newFrontendUrl}
-                      target="_blank"
-                      rel="noreferrer noopener"
-                      className="text-blue-400 hover:underline"
-                    >
-                      New frontend URL
                     </A>
                     <button
                       type="button"
@@ -901,14 +891,14 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
             tooltip={
               <div className="space-y-2">
                 <p>
-                  <strong>Private (default):</strong> You need a key to both view and control the frame.
+                  <strong>Private (default):</strong> You need a key to both view and administer the frame.
                 </p>
                 <p>
-                  <strong>Protected:</strong> Everyone can view the frame's image, but you need the access key to update
+                  <strong>Protected:</strong> Everyone can view the frame's image, but you need the access key to administer
                   content.
                 </p>
                 <p>
-                  <strong>Public:</strong> Everyone can view or control the frame without a key.
+                  <strong>Public:</strong> Everyone can view or administer the frame without a key.
                 </p>
               </div>
             }
@@ -916,9 +906,9 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
             <Select
               name="frame_access"
               options={[
-                { value: 'private', label: 'Private (key needed to view and edit)' },
-                { value: 'protected', label: 'Protected (no key needed to view, key needed to edit)' },
-                { value: 'public', label: 'Public (no key needed to view or edit)' },
+                { value: 'private', label: 'Private (key needed to view and administer)' },
+                { value: 'protected', label: 'Protected (no key needed to view, key needed to administer)' },
+                { value: 'public', label: 'Public (no key needed to view or administer)' },
               ]}
             />
           </Field>

@@ -20,7 +20,8 @@ import { FieldTypeTag } from '../../../../components/FieldTypeTag'
 import { Tooltip } from '../../../../components/Tooltip'
 import { FontSelect } from '../../../../components/FontSelect'
 import { ColorInput } from '../../../../components/ColorInput'
-import ReactJson from '@microlink/react-json-view'
+import * as ReactJsonModule from '@microlink/react-json-view'
+const ReactJson = ((ReactJsonModule as any).default ?? ReactJsonModule) as any
 
 export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchNodeData>): JSX.Element {
   const { frameId, sceneId, sceneOptions } = useValues(diagramLogic)

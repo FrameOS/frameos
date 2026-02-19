@@ -12,9 +12,6 @@ export const getRoutes = () =>
   ({
     '/': 'image',
     '/index.html': 'image',
-    '/new': 'root',
-    '/new/': 'root',
-    '/new/root': 'root',
     '/admin': 'admin',
     '/control': 'admin',
     '/login': 'login',

@@ -38,7 +38,6 @@ export const Control = ({ id }: ControlProps) => {
 
   const { framesLoaded } = useValues(framesModel)
   const { isChecking, isAuthenticated } = useValues(adminLogic)
-  const { logout } = useActions(adminLogic)
 
   if (isChecking) {
     return <div>Loading...</div>
@@ -53,14 +52,7 @@ export const Control = ({ id }: ControlProps) => {
 
   if (framesLoaded) {
     return (
-      <div>
-        <div className="fixed right-4 top-4 z-50">
-          <button className="rounded bg-slate-800 px-3 py-2 text-sm text-white" onClick={logout}>
-            Logout
-          </button>
-        </div>
-        <Frame id={resolvedFrameId} />
-      </div>
+      <Frame id={resolvedFrameId} />
     )
   }
   return <div>Loading...</div>

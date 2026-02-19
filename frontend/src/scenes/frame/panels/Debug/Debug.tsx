@@ -1,6 +1,7 @@
-import ReactJson from '@microlink/react-json-view'
+import * as ReactJsonModule from '@microlink/react-json-view'
 import { useActions, useValues } from 'kea'
 import { frameLogic } from '../../frameLogic'
+const ReactJson = ((ReactJsonModule as any).default ?? ReactJsonModule) as any
 
 export function Debug() {
   const { frameForm } = useValues(frameLogic)
@@ -15,9 +16,9 @@ export function Debug() {
       theme="ocean"
       name="frame"
       style={{ background: 'none' }}
-      onEdit={({ updated_src }) => setValue(updated_src)}
-      onAdd={({ updated_src }) => setValue(updated_src)}
-      onDelete={({ updated_src }) => setValue(updated_src)}
+      onEdit={(edit: any) => setValue(edit.updated_src)}
+      onAdd={(add: any) => setValue(add.updated_src)}
+      onDelete={(del: any) => setValue(del.updated_src)}
     />
   )
 }

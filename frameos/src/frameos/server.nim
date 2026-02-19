@@ -461,33 +461,6 @@ router myrouter:
       resp Http200, frameWebIndexHtml.replace("/*$scalingMode*/contain", scalingMode)
   get "/logout":
     resp Http302, {"Location": "/login", "Set-Cookie": ADMIN_SESSION_COOKIE & "=; Path=/; Max-Age=0; SameSite=Lax"}, ""
-  get "/new":
-    {.gcsafe.}:
-      if netportal.isHotspotActive(globalFrameOS):
-        log(%*{"event": "portal:http", "get": request.pathInfo})
-        resp Http200, netportal.setupHtml(globalFrameOS)
-      else:
-        let accessKey = globalFrameConfig.frameAccessKey
-        let paramsTable = request.params()
-        if accessKey != "" and contains(paramsTable, "k") and paramsTable["k"] == accessKey:
-          resp Http302, {"Location": "/new",
-            "Set-Cookie": ACCESS_COOKIE & "=" & accessKey & "; Path=/; SameSite=Lax"}, ""
-        else:
-          let scalingMode = case globalFrameConfig.scalingMode:
-            of "cover", "center": globalFrameConfig.scalingMode
-            of "stretch": "100% 100%"
-            else: "contain"
-          resp Http200, frameWebIndexHtml.replace("/*$scalingMode*/contain", scalingMode)
-  get "/new/static/@asset":
-    if not hasAccess(request, Read):
-      resp Http401, "Unauthorized"
-    {.gcsafe.}:
-      let assetPath = "assets/compiled/frame_web/static/" & @"asset"
-      try:
-        let asset = frameWebAssets.getAsset(assetPath)
-        resp Http200, {"Content-Type": contentTypeForAsset(assetPath)}, asset
-      except KeyError:
-        resp Http404, "Not found!"
   get "/static/@asset":
     if not hasAccess(request, Read):
       resp Http401, "Unauthorized"
@@ -679,6 +652,20 @@ router myrouter:
         "Set-Cookie": ADMIN_SESSION_COOKIE & "=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax",
       },
       $(%*{"status": "ok"})
+  post "/api/frames/@id/event/@name":
+    if not hasAdminSession(request):
+      resp Http401, "Unauthorized"
+    if not hasAccess(request, Write):
+      resp Http401, "Unauthorized"
+    {.gcsafe.}:
+      let requestedId = parseFrameApiId(@"id")
+      if requestedId != frameApiId():
+        resp Http404, "Not found!"
+      else:
+        log(%*{"event": "http", "post": request.pathInfo})
+        let payload = parseJson(if request.body == "": "{}" else: request.body)
+        sendEvent(@"name", payload)
+        resp Http200, {"Content-Type": "application/json"}, $(%*{"status": "ok"})
   post "/event/@name":
     if not hasAdminSession(request):
       resp Http401, "Unauthorized"

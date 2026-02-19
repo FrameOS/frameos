@@ -24,6 +24,8 @@ export const socketLogic = kea<socketLogicType>([
     frameRendered: (frameId: number) => ({ frameId }),
   }),
   afterMount(({ actions, cache }) => {
+    const frameControlMode = isFrameControlMode()
+
     function openConnection() {
       cache.ws = new WebSocket(`${getBasePath()}/ws`)
       cache.ws.onopen = function (event: any) {
