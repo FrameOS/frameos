@@ -12,3 +12,4 @@ scene.json
 */*/app_loader.nim
 */*/*/app_loader.nim
 */*/*/*/app_loader.nim
+assets/compiled/frame_web
