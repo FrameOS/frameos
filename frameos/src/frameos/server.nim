@@ -538,6 +538,22 @@ router myrouter:
       else:
         let framePayload = frameApiPayload()
         resp Http200, {"Content-Type": "application/json"}, $(%*{"frame": framePayload})
+  get "/api/frames/@id/ping":
+    if not hasAccess(request, Read):
+      resp Http401, "Unauthorized"
+    {.gcsafe.}:
+      let requestedId = parseFrameApiId(@"id")
+      if requestedId != frameApiId():
+        resp Http404, "Not found!"
+      else:
+        resp Http200, {"Content-Type": "application/json"}, $(%*{
+          "ok": true,
+          "mode": "http",
+          "target": "frame",
+          "elapsed_ms": 0,
+          "status": 200,
+          "message": "pong"
+        })
   get "/api/frames/@id/state":
     if not hasAccess(request, Read):
       resp Http401, "Unauthorized"
