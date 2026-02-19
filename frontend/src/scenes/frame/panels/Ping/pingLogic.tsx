@@ -109,6 +109,7 @@ export const pingLogic = kea<pingLogicType>([
     ],
   }),
   selectors({
+    isFrameAdminMode: [() => [], () => typeof window !== 'undefined' && window.location.pathname.startsWith('/admin')],
     intervalMs: [(s) => [s.intervalSeconds], (intervalSeconds) => normalizeIntervalSeconds(intervalSeconds) * 1000],
     normalisedPath: [(s) => [s.httpPath], (httpPath) => normalizePath(httpPath)],
     targetLabel: [
@@ -179,7 +180,7 @@ export const pingLogic = kea<pingLogicType>([
       const id = cache.requestId as number
       let ok = false
       let message = ''
-      let mode: PingMode = values.pingMode
+      let mode: PingMode = values.isFrameAdminMode ? 'http' : values.pingMode
       let target = values.targetLabel
       let status: number | null | undefined = null
       let payload: {
@@ -193,8 +194,9 @@ export const pingLogic = kea<pingLogicType>([
       let responseText: string | null = null
 
       try {
-        const params = new URLSearchParams({ mode: values.pingMode })
-        if (values.pingMode === 'http') {
+        const selectedMode: PingMode = values.isFrameAdminMode ? 'http' : values.pingMode
+        const params = new URLSearchParams({ mode: selectedMode })
+        if (selectedMode === 'http') {
           params.set('path', values.normalisedPath)
         }
         const response = await apiFetch(`/api/frames/${props.frameId}/ping?${params.toString()}`)
@@ -210,7 +212,7 @@ export const pingLogic = kea<pingLogicType>([
         }
 
         ok = payload?.ok ?? response.ok
-        mode = (payload?.mode as PingMode) || values.pingMode
+        mode = (payload?.mode as PingMode) || selectedMode
         target = payload?.target ?? values.targetLabel
         status = mode === 'http' ? (payload ? payload.status ?? null : response.status) : null
         if (payload?.message) {
