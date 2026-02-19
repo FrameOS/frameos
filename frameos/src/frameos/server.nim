@@ -9,6 +9,7 @@ import asyncdispatch
 import httpclient
 import httpcore
 import os
+import osproc
 import threadpool
 import jester
 import locks
@@ -19,6 +20,7 @@ import strutils
 import tables
 import random
 import hashes
+import checksums/md5
 import zippy
 import drivers/drivers as drivers
 import frameos/apps
@@ -199,9 +201,9 @@ proc frameAssetsPayload(): JsonNode =
   if not dirExists(assetsPath):
     return %*[]
 
-  for kind, path in walkDir(assetsPath, relative = false):
+  proc addAsset(path: string, kind: PathComponent) =
     if kind notin {pcDir, pcFile}:
-      continue
+      return
     try:
       let info = getFileInfo(path)
       assets.add(%*{
@@ -213,20 +215,66 @@ proc frameAssetsPayload(): JsonNode =
     except CatchableError:
       discard
 
-  for path in walkDirRec(assetsPath):
-    let fullPath = assetsPath / path
-    try:
-      let info = getFileInfo(fullPath)
-      assets.add(%*{
-        "path": fullPath,
-        "size": info.size,
-        "mtime": info.lastWriteTime.toUnix(),
-        "is_dir": false,
-      })
-    except CatchableError:
-      discard
+  for kind, path in walkDir(assetsPath, relative = false):
+    if kind == pcDir:
+      addAsset(path, kind)
+
+  for filePath in walkDirRec(assetsPath, relative = false):
+    addAsset(filePath, pcFile)
 
   return %*assets
+
+proc withinBasePath(path, basePath: string): bool =
+  let normalizedTargetPath = normalizedPath(path)
+  let normalizedBasePath = normalizedPath(basePath)
+  return normalizedTargetPath == normalizedBasePath or normalizedTargetPath.startsWith(normalizedBasePath & DirSep)
+
+proc contentTypeForFilePath(path: string): string =
+  let lowerPath = path.toLowerAscii()
+  if lowerPath.endsWith(".png"):
+    return "image/png"
+  if lowerPath.endsWith(".jpg") or lowerPath.endsWith(".jpeg"):
+    return "image/jpeg"
+  if lowerPath.endsWith(".webp"):
+    return "image/webp"
+  if lowerPath.endsWith(".gif"):
+    return "image/gif"
+  if lowerPath.endsWith(".svg"):
+    return "image/svg+xml"
+  contentTypeForAsset(lowerPath)
+
+proc getAssetPayload(path: string, thumb: bool): tuple[status: HttpCode, headers: seq[(string, string)], body: string] =
+  let configuredAssetsPath = if globalFrameConfig.assetsPath.len > 0: globalFrameConfig.assetsPath else: "/srv/assets"
+  let assetsPath = normalizedPath(configuredAssetsPath)
+  let relPath = path.strip()
+  if relPath.len == 0:
+    return (Http400, @[("Content-Type", "application/json")], $(%*{"detail": "Path is required"}))
+
+  let fullPath = normalizedPath(assetsPath / relPath)
+  if not withinBasePath(fullPath, assetsPath):
+    return (Http400, @[("Content-Type", "application/json")], $(%*{"detail": "Invalid path"}))
+  if not fileExists(fullPath):
+    return (Http404, @[("Content-Type", "application/json")], $(%*{"detail": "Asset not found"}))
+
+  if not thumb:
+    return (Http200, @[("Content-Type", contentTypeForFilePath(fullPath))], readFile(fullPath))
+
+  let fullMd5 = getMD5(fullPath)
+  let thumbRoot = assetsPath / ".thumbs"
+  let thumbPath = normalizedPath(thumbRoot / (fullMd5 & ".320x320.jpg"))
+  if not withinBasePath(thumbPath, thumbRoot):
+    return (Http400, @[("Content-Type", "application/json")], $(%*{"detail": "Invalid thumbnail path"}))
+
+  try:
+    if not fileExists(thumbPath):
+      createDir(parentDir(thumbPath))
+      let cmd = "convert " & quoteShell(fullPath) & " -thumbnail 320x320 " & quoteShell(thumbPath)
+      let (output, exitCode) = execCmdEx(cmd)
+      if exitCode != 0:
+        return (Http500, @[("Content-Type", "application/json")], $(%*{"detail": "Failed to generate thumbnail", "error": output}))
+    return (Http200, @[("Content-Type", "image/jpeg")], readFile(thumbPath))
+  except CatchableError as e:
+    return (Http500, @[("Content-Type", "application/json")], $(%*{"detail": "Failed to fetch asset", "error": e.msg}))
 
 proc frameApiPayload(): JsonNode =
   let configJson = loadConfigJson()
@@ -611,6 +659,19 @@ router myrouter:
         resp Http404, "Not found!"
       else:
         resp Http200, {"Content-Type": "application/json"}, $(%*{"assets": frameAssetsPayload()})
+  get "/api/frames/@id/asset":
+    if not hasAccess(request, Read):
+      resp Http401, "Unauthorized"
+    {.gcsafe.}:
+      let requestedId = parseFrameApiId(@"id")
+      if requestedId != frameApiId():
+        resp Http404, "Not found!"
+      else:
+        let paramsTable = request.params()
+        let path = paramsTable.getOrDefault("path", "")
+        let thumb = paramsTable.getOrDefault("thumb", "") == "1"
+        let (status, headers, body) = getAssetPayload(path, thumb)
+        resp status, headers, body
   get "/api/frames/@id/image_token":
     if not hasAccess(request, Read):
       resp Http401, "Unauthorized"
@@ -682,6 +743,25 @@ router myrouter:
         let payload = parseJson(if request.body == "": "{}" else: request.body)
         sendEvent(@"name", payload)
         resp Http200, {"Content-Type": "application/json"}, $(%*{"status": "ok"})
+  post "/api/frames/@id/event":
+    if not hasAdminSession(request):
+      resp Http401, "Unauthorized"
+    if not hasAccess(request, Write):
+      resp Http401, "Unauthorized"
+    {.gcsafe.}:
+      let requestedId = parseFrameApiId(@"id")
+      if requestedId != frameApiId():
+        resp Http404, "Not found!"
+      else:
+        let payload = parseJson(if request.body == "": "{}" else: request.body)
+        let eventName = payload{"event"}.getStr("")
+        if eventName.len == 0:
+          resp Http400, {"Content-Type": "application/json"}, $(%*{"detail": "Missing event"})
+        else:
+          let eventPayload = payload{"payload"}
+          log(%*{"event": "http", "post": request.pathInfo, "eventName": eventName})
+          sendEvent(eventName, if eventPayload.kind == JNull: %*{} else: eventPayload)
+          resp Http200, {"Content-Type": "application/json"}, $(%*{"status": "ok"})
   post "/event/@name":
     if not hasAdminSession(request):
       resp Http401, "Unauthorized"
