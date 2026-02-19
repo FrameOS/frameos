@@ -3,6 +3,7 @@ import React from 'react'
 import { H5 } from './H5'
 import { urls } from '../urls'
 import { getBasePath } from '../utils/getBasePath'
+import { frameAdminPath, isInFrameAdminMode } from '../utils/frameAdmin'
 
 interface HeaderProps {
   title: React.ReactNode
@@ -12,8 +13,8 @@ interface HeaderProps {
 }
 
 export function Header({ title, version, right, buttons }: HeaderProps) {
-  const inFrameAdminMode = typeof window !== 'undefined' && window.location.pathname.startsWith('/admin')
-  const homeHref = inFrameAdminMode ? '/admin' : urls.frames()
+  const inFrameAdminMode = isInFrameAdminMode()
+  const homeHref = inFrameAdminMode ? frameAdminPath() : urls.frames()
 
   return (
     <span

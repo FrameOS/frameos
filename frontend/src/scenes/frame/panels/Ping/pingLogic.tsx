@@ -1,5 +1,6 @@
 import { actions, afterMount, beforeUnmount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 import { frameLogic } from '../../frameLogic'
+import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
 import { apiFetch } from '../../../../utils/apiFetch'
 
 import type { pingLogicType } from './pingLogicType'
@@ -109,7 +110,7 @@ export const pingLogic = kea<pingLogicType>([
     ],
   }),
   selectors({
-    isFrameAdminMode: [() => [], () => typeof window !== 'undefined' && window.location.pathname.startsWith('/admin')],
+    isFrameAdminMode: [() => [], () => isInFrameAdminMode()],
     intervalMs: [(s) => [s.intervalSeconds], (intervalSeconds) => normalizeIntervalSeconds(intervalSeconds) * 1000],
     normalisedPath: [(s) => [s.httpPath], (httpPath) => normalizePath(httpPath)],
     targetLabel: [

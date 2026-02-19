@@ -40,6 +40,7 @@ import { timezoneOptions } from '../../../../decorators/timezones'
 import { TextArea } from '../../../../components/TextArea'
 import { ColorInput } from '../../../../components/ColorInput'
 import { settingsLogic } from '../../../settings/settingsLogic'
+import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
 import { normalizeSshKeys } from '../../../../utils/sshKeys'
 import { Label } from '../../../../components/Label'
 import { logsLogic } from '../Logs/logsLogic'
@@ -170,7 +171,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
   const controlUrl = frameControlUrl(frame)
   const imageUrl = frameImageUrl(frame)
   const tlsEnabled = !!(frameForm.https_proxy?.enable ?? frame.https_proxy?.enable)
-  const inFrameAdminMode = typeof window !== 'undefined' && window.location.pathname.startsWith('/admin')
+  const inFrameAdminMode = isInFrameAdminMode()
 
   const palette = withCustomPalette[frame.device || '']
   const sshKeyOptions = normalizeSshKeys(savedSettings?.ssh_keys).keys

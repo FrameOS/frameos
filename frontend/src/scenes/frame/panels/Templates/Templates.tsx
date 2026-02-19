@@ -17,9 +17,10 @@ import copy from 'copy-to-clipboard'
 import { ClipboardDocumentCheckIcon } from '@heroicons/react/24/outline'
 import { panelsLogic } from '../panelsLogic'
 import { TemplateType } from '../../../../types'
+import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
 
 export function Templates() {
-  const inFrameAdminMode = typeof window !== 'undefined' && window.location.pathname.startsWith('/admin')
+  const inFrameAdminMode = isInFrameAdminMode()
   const { applyTemplate } = useActions(frameLogic)
   const { frameId } = useValues(frameLogic)
   const { removeTemplate, exportTemplate } = useActions(templatesModel)

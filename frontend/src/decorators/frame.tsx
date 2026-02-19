@@ -1,5 +1,6 @@
 import { Spinner } from '../components/Spinner'
 import { FrameType } from '../types'
+import { frameAdminPath } from '../utils/frameAdmin'
 
 export function frameHost(frame: FrameType): string {
   if (!frame.ssh_user || frame.ssh_user === 'pi') {
@@ -58,7 +59,7 @@ export function frameUrl(frame: FrameType): string | null {
 }
 
 export function frameControlUrl(frame: FrameType): string | null {
-  const url = frameRootUrl(frame) + '/admin'
+  const url = frameRootUrl(frame) + frameAdminPath()
   if (frame.frame_access === 'public') {
     return url
   } else {
