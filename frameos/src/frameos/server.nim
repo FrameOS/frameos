@@ -448,18 +448,17 @@ router myrouter:
       let accessKey = globalFrameConfig.frameAccessKey
       if accessKey == "":
         return false
+      let paramsTable = request.params()
+      if contains(paramsTable, "k") and paramsTable["k"] == accessKey:
+        return true
+      let cookieHeader = request.headers.getOrDefault("cookie")
+      for cookie in cookieHeader.split(";"):
+        let parts = cookie.strip().split("=", 1)
+        if parts.len == 2 and parts[0] == ACCESS_COOKIE and parts[1] == accessKey:
+          return true
       if request.reqMethod() == HttpPost:
         return contains(request.headers.table, AUTH_HEADER) and request.headers[AUTH_HEADER] == AUTH_TYPE & " " & accessKey
-      else:
-        let paramsTable = request.params()
-        if contains(paramsTable, "k") and paramsTable["k"] == accessKey:
-          return true
-        let cookieHeader = request.headers.getOrDefault("cookie")
-        for cookie in cookieHeader.split(";"):
-          let parts = cookie.strip().split("=", 1)
-          if parts.len == 2 and parts[0] == ACCESS_COOKIE and parts[1] == accessKey:
-            return true
-        return false
+      return false
   get "/":
     {.gcsafe.}:
       if netportal.isHotspotActive(globalFrameOS):
