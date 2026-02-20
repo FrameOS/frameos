@@ -2,9 +2,9 @@ import asyncio
 import json
 from typing import List
 from redis.asyncio import from_url as create_redis, Redis
-from fastapi import WebSocket, WebSocketDisconnect, Depends
-from sqlalchemy.orm import Session
-from app.database import get_db
+from fastapi import WebSocket, WebSocketDisconnect
+
+from app.database import SessionLocal
 
 from app.config import config
 
@@ -69,12 +69,17 @@ async def publish_message(redis: Redis, event: str, data: dict):
 
 def register_ws_routes(app):
     @app.websocket("/ws")
-    async def websocket_endpoint(websocket: WebSocket, db: Session = Depends(get_db)):
+    async def websocket_endpoint(websocket: WebSocket):
         # Full access in the HASSIO ingress mode
         if config.HASSIO_RUN_MODE != "ingress":
             from app.api.auth import get_current_user_from_websocket
 
-            user, error_reason = get_current_user_from_websocket(websocket, db)
+            db = SessionLocal()
+            try:
+                user, error_reason = get_current_user_from_websocket(websocket, db)
+            finally:
+                db.close()
+
             if user is None:
                 await websocket.close(code=1008, reason=error_reason or "Could not validate credentials")
                 return
