@@ -221,7 +221,7 @@ function computeChangeDetails(
   const details: ChangeDetail[] = []
 
   for (const key of FRAME_KEYS.filter((k) => k !== 'scenes')) {
-    if (!equal(previous?.[key], next?.[key])) {
+    if (!frameKeyEqual(key, previous?.[key], next?.[key])) {
       details.push({
         label: keyLabel(key),
         requiresFullDeploy: recompileFields.has(key),
@@ -231,6 +231,25 @@ function computeChangeDetails(
 
   const sceneDetails = sceneChangeDetails(next?.scenes ?? [], previous?.scenes ?? [])
   return [...details, ...sceneDetails]
+}
+
+function normalizeFrameKeyValueForComparison(key: keyof FrameType, value: unknown): unknown {
+  if (key !== 'https_proxy' || !value || typeof value !== 'object') {
+    return value
+  }
+
+  const httpsProxy = value as Record<string, unknown>
+  const {
+    server_cert_not_valid_after: _serverCertNotValidAfter,
+    client_ca_cert_not_valid_after: _clientCaCertNotValidAfter,
+    ...rest
+  } = httpsProxy
+
+  return rest
+}
+
+function frameKeyEqual(key: keyof FrameType, previous: unknown, next: unknown): boolean {
+  return equal(normalizeFrameKeyValueForComparison(key, previous), normalizeFrameKeyValueForComparison(key, next))
 }
 
 async function resolveTemplateImageUrl(template: Partial<TemplateType>): Promise<string | null> {
@@ -574,13 +593,17 @@ export const frameLogic = kea<frameLogicType>([
     unsavedChanges: [
       (s) => [s.frame, s.frameForm],
       (frame, frameForm) =>
-        FRAME_KEYS.some((key) => !equal(frame?.[key as keyof FrameType], frameForm?.[key as keyof FrameType])),
+        FRAME_KEYS.some(
+          (key) => !frameKeyEqual(key, frame?.[key as keyof FrameType], frameForm?.[key as keyof FrameType])
+        ),
     ],
     lastDeploy: [(s) => [s.frame], (frame) => frame?.last_successful_deploy ?? null],
     undeployedChanges: [
       (s) => [s.frame, s.lastDeploy],
       (frame, lastDeploy) =>
-        FRAME_KEYS.some((key) => !equal(frame?.[key as keyof FrameType], lastDeploy?.[key as keyof FrameType])),
+        FRAME_KEYS.some(
+          (key) => !frameKeyEqual(key, frame?.[key as keyof FrameType], lastDeploy?.[key as keyof FrameType])
+        ),
     ],
     unsavedChangeDetails: [
       (s) => [s.frame, s.frameForm, s.mode],
