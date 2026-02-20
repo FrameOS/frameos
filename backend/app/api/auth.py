@@ -26,6 +26,13 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 7 * 24 * 60  # 7 days
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/login", auto_error=False)
 
+
+def _should_use_secure_cookie(request: Request) -> bool:
+    if request.url.scheme == "https":
+        return True
+    forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",", 1)[0].strip().lower()
+    return forwarded_proto == "https"
+
 def create_access_token(data: dict, expires_delta: Optional[datetime.timedelta] = None):
     to_encode = data.copy()
     if expires_delta:
@@ -168,12 +175,12 @@ async def login(
         max_age=max_age,
         httponly=True,
         samesite="lax",
-        secure=not (config.DEBUG or config.TEST),
+        secure=_should_use_secure_cookie(request),
     )
     return {"access_token": access_token, "token_type": "bearer"}
 
 @api_no_auth.post("/signup")
-async def signup(data: UserSignup, response: Response, db: Session = Depends(get_db)):
+async def signup(request: Request, data: UserSignup, response: Response, db: Session = Depends(get_db)):
     if config.HASSIO_RUN_MODE is not None:
         raise HTTPException(status_code=401, detail="Signup not allowed with HASSIO_RUN_MODE")
 
@@ -218,7 +225,7 @@ async def signup(data: UserSignup, response: Response, db: Session = Depends(get
         max_age=max_age,
         httponly=True,
         samesite="lax",
-        secure=not (config.DEBUG or config.TEST),
+        secure=_should_use_secure_cookie(request),
     )
     return {"success": True, "access_token": access_token, "token_type": "bearer"}
 

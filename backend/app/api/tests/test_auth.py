@@ -173,3 +173,25 @@ async def test_cookie_auth_on_protected_route(no_auth_client, db: Session):
     no_auth_client.headers.pop("Authorization", None)
     response = await no_auth_client.get("/api/system/metrics")
     assert response.status_code == HTTP_200_OK
+
+
+@pytest.mark.asyncio
+async def test_login_cookie_secure_flag_depends_on_request_scheme(no_auth_client, db: Session):
+    user = User(email="securecookie@example.com")
+    user.set_password("testpassword")
+    db.add(user)
+    db.commit()
+
+    login_data = {"username": "securecookie@example.com", "password": "testpassword"}
+
+    http_response = await no_auth_client.post("/api/login", data=login_data)
+    assert http_response.status_code == HTTP_200_OK
+    assert "Secure" not in http_response.headers.get("set-cookie", "")
+
+    https_response = await no_auth_client.post(
+        "/api/login",
+        data=login_data,
+        headers={"x-forwarded-proto": "https"},
+    )
+    assert https_response.status_code == HTTP_200_OK
+    assert "Secure" in https_response.headers.get("set-cookie", "")
