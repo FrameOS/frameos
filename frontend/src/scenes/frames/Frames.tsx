@@ -4,7 +4,7 @@ import { NewFrame } from './NewFrame'
 import { Frame } from './Frame'
 import { framesModel } from '../../models/framesModel'
 import { Header } from '../../components/Header'
-import { version } from '../../../../version.json'
+import versions from '../../../../versions.json'
 import { Button } from '../../components/Button'
 import { newFrameForm } from './newFrameForm'
 import { Masonry } from '../../components/Masonry'
@@ -29,7 +29,7 @@ export function Frames() {
         <div className="h-[60px]">
           <Header
             title="FrameOS"
-            version={version}
+            version={(versions.backend || 'dev').split('+')[0]}
             right={
               <Button color="secondary" onClick={() => router.actions.push(urls.settings())}>
                 Settings

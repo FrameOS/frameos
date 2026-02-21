@@ -1,0 +1,41 @@
+name: Update Component Versions
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'versions.json'
+
+permissions:
+  contents: write
+
+jobs:
+  update-versions:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Recompute component versions
+        run: python3 tools/update_versions.py
+
+      - name: Commit updated versions
+        run: |
+          if git diff --quiet -- versions.json; then
+            echo "No version changes detected"
+            exit 0
+          fi
+
+          git config user.name "frameos-bot"
+          git config user.email "git@frameos.net"
+          git add versions.json
+          git commit -m "chore: update component versions"
+          git push
