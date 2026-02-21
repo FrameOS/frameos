@@ -2,7 +2,7 @@ import json, jester, pixie, hashes, locks
 import lib/burrito
 
 type
-  # Parsed config.json
+  # Parsed from config.json
   FrameConfig* = ref object
     name*: string
     mode*: string
