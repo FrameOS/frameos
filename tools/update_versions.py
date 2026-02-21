@@ -103,6 +103,20 @@ def _next_calver(previous: str | None, today: dt.date) -> str:
     return f"{today.year}.{today.month}.0"
 
 
+def _max_base_version(versions: Dict[str, str]) -> str | None:
+    if not versions:
+        return None
+    bases = [value.split("+", 1)[0] for value in versions.values() if value]
+    if not bases:
+        return None
+    return max(bases, key=_parse_version)
+
+
+def _increment_base_version(version: str) -> str:
+    year, month, patch = _parse_version(version)
+    return f"{year}.{month}.{patch + 1}"
+
+
 def main() -> int:
     projects_config = json.loads(PROJECTS_FILE.read_text(encoding="utf-8"))
     tracked_files = _git_tracked_files()
@@ -115,6 +129,9 @@ def main() -> int:
     updated_versions: Dict[str, str] = dict(existing_versions)
     today = dt.datetime.utcnow().date()
 
+    project_hashes: Dict[str, str] = {}
+    changed_projects: List[str] = []
+
     for project_name, config in projects_config["projects"].items():
         includes = config.get("include", [])
         excludes = config.get("exclude", [])
@@ -126,6 +143,7 @@ def main() -> int:
         ]
 
         project_hash = _hash_files(project_files)
+        project_hashes[project_name] = project_hash
         previous = existing_versions.get(project_name)
         previous_hash = previous.split("+", 1)[1] if previous and "+" in previous else None
 
@@ -133,8 +151,17 @@ def main() -> int:
             updated_versions[project_name] = previous
             continue
 
-        next_version = _next_calver(previous, today)
-        updated_versions[project_name] = f"{next_version}+{project_hash}"
+        changed_projects.append(project_name)
+
+    if changed_projects:
+        max_existing_base = _max_base_version(existing_versions)
+        if max_existing_base:
+            next_version = _increment_base_version(max_existing_base)
+        else:
+            next_version = _next_calver(None, today)
+
+        for project_name in changed_projects:
+            updated_versions[project_name] = f"{next_version}+{project_hashes[project_name]}"
 
     ordered_projects = list(projects_config["projects"].keys())
     ordered_versions = {name: updated_versions[name] for name in ordered_projects if name in updated_versions}
