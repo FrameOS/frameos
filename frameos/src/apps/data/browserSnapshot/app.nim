@@ -3,24 +3,29 @@ import frameos/apps
 import frameos/types
 import frameos/utils/image
 
-import os, strformat, strutils, random, json, osproc
+import os, strformat, strutils, random, json, osproc, net
 
 const DEFAULT_PLAYWRIGHT_SCRIPT_START = """
 import time
 from playwright.sync_api import sync_playwright
 
 playwright = sync_playwright().start()
-browser = playwright.chromium.launch()
-page = browser.new_page()
-page.goto(URL_TO_CAPTURE)
+browser = playwright.chromium.connect_over_cdp("http://127.0.0.1:BROWSER_DEBUG_PORT")
+context = browser.contexts[0] if browser.contexts else browser.new_context()
+page = context.new_page()
 page.set_viewport_size({"width": WIDTH, "height": HEIGHT})
+page.goto(URL_TO_CAPTURE)
 """
 
 const DEFAULT_PLAYWRIGHT_SCRIPT_END = """
 page.screenshot(path=SCREENSHOT_PATH, timeout=120000)
-browser.close()
+page.close()
 playwright.stop()
 """
+
+const CHROMIUM_DEBUG_PORT = 9222
+const CHROMIUM_STARTUP_ATTEMPTS = 20
+const CHROMIUM_STARTUP_SLEEP_MS = 250
 
 type
   AppConfig* = object
@@ -30,6 +35,19 @@ type
 
   App* = ref object of AppRoot
     appConfig*: AppConfig
+
+proc ensureVenvExists(self: App): string
+proc ensureBackgroundBrowser(self: App): bool
+
+proc isBrowserDebugPortReady(port: int): bool =
+  var socket = newSocket()
+  try:
+    socket.connect("127.0.0.1", Port(port))
+    result = true
+  except CatchableError:
+    result = false
+  finally:
+    socket.close()
 
 proc ensureSystemDependencies(self: App) =
   let requiredCommands = @["python3", "chromium-browser"]
@@ -50,6 +68,8 @@ proc ensureSystemDependencies(self: App) =
 proc init*(self: App) =
   ## (Initialization if needed)
   self.ensureSystemDependencies()
+  discard self.ensureVenvExists()
+  discard self.ensureBackgroundBrowser()
 
 # Ensure the virtual environment exists and is set up
 proc ensureVenvExists(self: App): string =
@@ -75,6 +95,46 @@ proc ensureVenvExists(self: App): string =
     except OSError as e:
       self.logError &"Error installing playwright browsers: {e.msg}"
       return
+
+proc ensureBackgroundBrowser(self: App): bool =
+  if isBrowserDebugPortReady(CHROMIUM_DEBUG_PORT):
+    return true
+
+  let (chromiumPath, binaryResponse) = execCmdEx("command -v chromium-browser || command -v chromium")
+  if binaryResponse != 0:
+    self.logError "Could not find chromium-browser or chromium in PATH"
+    return false
+
+  let chromiumBinary = chromiumPath.strip()
+
+  self.log "Starting background Chromium process for Browser Snapshot..."
+  try:
+    var browserProcess = startProcess(
+      chromiumBinary,
+      args = @[
+        "--headless",
+        "--disable-gpu",
+        "--no-sandbox",
+        "--disable-dev-shm-usage",
+        "--remote-debugging-address=127.0.0.1",
+        "--remote-debugging-port=" & $CHROMIUM_DEBUG_PORT,
+        "--user-data-dir=/tmp/frameos_browser_snapshot_profile",
+        "about:blank"
+      ],
+      options = {poUsePath, poDaemon}
+    )
+    browserProcess.close()
+  except OSError as e:
+    self.logError &"Error starting background Chromium process: {e.msg}"
+    return false
+
+  for _ in 0 ..< CHROMIUM_STARTUP_ATTEMPTS:
+    if isBrowserDebugPortReady(CHROMIUM_DEBUG_PORT):
+      return true
+    sleep(CHROMIUM_STARTUP_SLEEP_MS)
+
+  self.logError &"Chromium debug port {CHROMIUM_DEBUG_PORT} did not become ready"
+  return false
 
 proc get*(self: App, context: ExecutionContext): Image =
   let width = if self.appConfig.width != 0:
@@ -103,9 +163,15 @@ proc get*(self: App, context: ExecutionContext): Image =
     # Ensure the Python venv for Playwright exists and is set up.
     let venvRoot = self.ensureVenvExists()
     let venvPython = venvRoot & "/bin/python"
+    if not self.ensureBackgroundBrowser():
+      if context.hasImage:
+        return context.image
+      else:
+        return renderError(width, height, "Chromium browser is not available")
 
     # Write the playwright script to a temporary file
     let scripHead = DEFAULT_PLAYWRIGHT_SCRIPT_START.replace("URL_TO_CAPTURE", $(%*(self.appConfig.url)))
+      .replace("BROWSER_DEBUG_PORT", $CHROMIUM_DEBUG_PORT)
       .replace("WIDTH", $width).replace("HEIGHT", $height)
     # TODO: make this configurable... but also compatible with a background browser process
     let scriptBody = "page.wait_for_load_state(\"networkidle\")\n"
