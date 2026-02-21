@@ -597,6 +597,23 @@ export const frameLogic = kea<frameLogicType>([
           (key) => !frameKeyEqual(key, frame?.[key as keyof FrameType], frameForm?.[key as keyof FrameType])
         ),
     ],
+    changedScenes: [
+      (s) => [s.frame, s.frameForm],
+      (frame, frameForm): Set<string> => {
+        const frameScenes = frame?.scenes ?? []
+        const unsavedScenes = frameForm?.scenes ?? frameScenes
+        const changed = new Set<string>()
+
+        unsavedScenes.forEach((scene) => {
+          const original = frameScenes.find((candidate) => candidate.id === scene.id)
+          if (!original || !equal(original, scene)) {
+            changed.add(scene.id)
+          }
+        })
+
+        return changed
+      },
+    ],
     lastDeploy: [(s) => [s.frame], (frame) => frame?.last_successful_deploy ?? null],
     undeployedChanges: [
       (s) => [s.frame, s.lastDeploy],
