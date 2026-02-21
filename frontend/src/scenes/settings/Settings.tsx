@@ -357,10 +357,10 @@ export function Settings() {
                       for more.
                     </p>
                     <p className="text-sm leading-loose">
-                      Alternatively you may configure a remote build host below. The backend will upload generated C
-                      sources and sysroot assets via SSH/SCP, run Docker Buildx on that host, and download the resulting
-                      binary. Ensure Docker and the Docker Buildx plugin are installed on your build host. For best
-                      performance, make sure this is an ARM-based system.
+                      Alternatively you may configure a remote build host below. We'll upload generated C sources and
+                      sysroot assets via SSH/SCP, run Docker Buildx on that host, and download the resulting binary.
+                      Ensure Docker and the Docker Buildx plugin are installed on your build host. For best performance,
+                      make sure this is an ARM-based system when deploying to an ARM-based system like the Raspberry Pi.
                     </p>
                     <Field name="enabled" label="Enable build host">
                       <Switch fullWidth />
