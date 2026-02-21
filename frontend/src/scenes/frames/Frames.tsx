@@ -29,7 +29,7 @@ export function Frames() {
         <div className="h-[60px]">
           <Header
             title="FrameOS"
-            version={(versions.backend || 'dev').split('+')[0]}
+            version={(versions.docker || 'dev').split('+')[0]}
             right={
               <Button color="secondary" onClick={() => router.actions.push(urls.settings())}>
                 Settings

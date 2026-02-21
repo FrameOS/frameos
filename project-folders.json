@@ -1,8 +1,5 @@
 {
   "projects": {
-    "backend": {
-      "include": ["backend", "frontend", "repo"]
-    },
     "frameos": {
       "include": ["frameos"],
       "exclude": ["frameos/agent"]
@@ -11,7 +8,7 @@
       "include": ["frameos/agent"]
     },
     "docker": {
-      "include": ["backend", "frontend", "frameos", "Dockerfile", ".dockerignore"]
+      "include": ["repo", "backend", "frontend", "frameos", "Dockerfile", ".dockerignore"]
     }
   }
 }

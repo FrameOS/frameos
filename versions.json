@@ -1,5 +1,4 @@
 {
-  "backend": "2026.2.1+0bada6c175818ac8824a92c62083b123c3d19bcd",
   "frameos": "2026.2.3+01c0a8f76cb75a89c51fd7c604b4a6be56f012bb",
   "agent": "2026.2.0+37f3efbd23cd389f6aaeabbcbb71d6d7eb8c9260",
   "docker": "2026.2.3+f3f92cb19d529344cef753ea0665001cb072d9f7"

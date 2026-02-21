@@ -211,6 +211,7 @@ jobs:
             frameos/frameos:${{ env.DOCKER_VERSION }}
             frameos/frameos:${{ env.DOCKER_VERSION_MINOR }}
             frameos/frameos:${{ env.DOCKER_VERSION_MAJOR }}
+            frameos/frameos:latest
 
   update-addon-repo:
     name: Update Home Assistant Addon
@@ -218,6 +219,11 @@ jobs:
     needs: [update-versions, push-multiarch]
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout frameos
+        uses: actions/checkout@v4
+        with:
+          path: frameos
+
       - name: Checkout frameos-home-assistant-addon
         uses: actions/checkout@v2
         with:
@@ -237,7 +243,7 @@ jobs:
       - name: Read Docker version
         shell: bash
         run: |
-          DOCKER_VERSION=$(python3 -c "import json; print(json.load(open('versions.json'))['docker'].split('+', 1)[0])")
+          DOCKER_VERSION=$(python3 -c "import json; print(json.load(open('frameos/versions.json'))['docker'].split('+', 1)[0])")
           echo "DOCKER_VERSION=$DOCKER_VERSION" >> $GITHUB_ENV
 
       - name: Update version in config.yaml
