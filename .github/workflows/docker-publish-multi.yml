@@ -130,6 +130,14 @@ jobs:
         shell: bash
         run: echo "SHORT_SHA=${GITHUB_SHA:0:7}" >> $GITHUB_ENV
 
+      - name: Read Docker version tags
+        shell: bash
+        run: |
+          DOCKER_VERSION=$(python3 -c "import json; print(json.load(open('versions.json'))['docker'].split('+', 1)[0])")
+          echo "DOCKER_VERSION=$DOCKER_VERSION" >> $GITHUB_ENV
+          echo "DOCKER_VERSION_MINOR=${DOCKER_VERSION%.*}" >> $GITHUB_ENV
+          echo "DOCKER_VERSION_MAJOR=${DOCKER_VERSION%%.*}" >> $GITHUB_ENV
+
       - name: Set up Depot CLI
         uses: depot/setup-action@v1
 
@@ -178,6 +186,14 @@ jobs:
         shell: bash
         run: echo "SHORT_SHA=${GITHUB_SHA:0:7}" >> $GITHUB_ENV
 
+      - name: Read Docker version tags
+        shell: bash
+        run: |
+          DOCKER_VERSION=$(python3 -c "import json; print(json.load(open('versions.json'))['docker'].split('+', 1)[0])")
+          echo "DOCKER_VERSION=$DOCKER_VERSION" >> $GITHUB_ENV
+          echo "DOCKER_VERSION_MINOR=${DOCKER_VERSION%.*}" >> $GITHUB_ENV
+          echo "DOCKER_VERSION_MAJOR=${DOCKER_VERSION%%.*}" >> $GITHUB_ENV
+
       - name: Set up Depot CLI
         uses: depot/setup-action@v1
 
@@ -192,7 +208,9 @@ jobs:
           platforms: linux/amd64,linux/arm64/v8
           tags: |
             frameos/frameos:${{ env.BRANCH_NAME }}-${{ env.SHORT_SHA }}
-            frameos/frameos:latest
+            frameos/frameos:${{ env.DOCKER_VERSION }}
+            frameos/frameos:${{ env.DOCKER_VERSION_MINOR }}
+            frameos/frameos:${{ env.DOCKER_VERSION_MAJOR }}
 
   update-addon-repo:
     name: Update Home Assistant Addon
@@ -216,19 +234,24 @@ jobs:
         shell: bash
         run: echo "SHORT_SHA=${GITHUB_SHA:0:7}" >> $GITHUB_ENV
 
+      - name: Read Docker version
+        shell: bash
+        run: |
+          DOCKER_VERSION=$(python3 -c "import json; print(json.load(open('versions.json'))['docker'].split('+', 1)[0])")
+          echo "DOCKER_VERSION=$DOCKER_VERSION" >> $GITHUB_ENV
+
       - name: Update version in config.yaml
         run: |
           cd home-assistant-addon/frameos
-          echo "Updating version in config.yaml to ${{ env.BRANCH_NAME }}-${{ env.SHORT_SHA }}"
-          sed -i "s/^version: .*/version: ${{ env.BRANCH_NAME }}-${{ env.SHORT_SHA }}/" config.yaml
+          echo "Updating version in config.yaml to ${{ env.DOCKER_VERSION }}"
+          sed -i "s/^version: .*/version: ${{ env.DOCKER_VERSION }}/" config.yaml
 
       - name: Commit changes
         uses: EndBug/add-and-commit@v9
         with:
-          message: "Update FrameOS version to ${{ env.BRANCH_NAME }}-${{ env.SHORT_SHA }}"
+          message: "Update FrameOS version to ${{ env.DOCKER_VERSION }}"
           add: "."
           cwd: home-assistant-addon
           push: true
           author_name: FrameOS Bot
           author_email: git@frameos.net
-
