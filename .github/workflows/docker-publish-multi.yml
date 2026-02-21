@@ -41,10 +41,11 @@ jobs:
       - name: Commit updated versions
         if: steps.detect.outputs.versions_changed == 'true'
         run: |
+          VERSION=$(python3 -c "import json; print(json.load(open('versions.json'))['docker'].split('+', 1)[0])")
           git config user.name "frameos-bot"
           git config user.email "git@frameos.net"
           git add versions.json
-          git commit -m "chore: update versions"
+          git commit -m "chore: update versions to ${VERSION}"
           git push
 
   test:
