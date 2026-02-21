@@ -20,6 +20,54 @@ function formatTimestamp(isoTimestamp: string): string {
   }${date.getMinutes()}:${date.getSeconds() < 10 ? '0' : ''}${date.getSeconds()}`
 }
 
+function toMb(bytes: number): number {
+  return Math.round(bytes / 1024 / 1024)
+}
+
+function metricNumberColor(value: number, warning: number, critical: number, lowerIsWorse = false): string {
+  if (lowerIsWorse) {
+    if (value <= critical) {
+      return 'text-red-400'
+    }
+    if (value <= warning) {
+      return 'text-yellow-300'
+    }
+    return 'text-white'
+  }
+
+  if (value >= critical) {
+    return 'text-red-400'
+  }
+  if (value >= warning) {
+    return 'text-yellow-300'
+  }
+  return 'text-white'
+}
+
+function renderMetricsLog(rest: Record<string, any>): JSX.Element {
+  const load = Array.isArray(rest.load) ? rest.load : [0, 0, 0]
+  const cpuTemperature = Number(rest.cpuTemperature ?? 0)
+  const memoryUsage = rest.memoryUsage ?? {}
+
+  const ramTotalMb = toMb(Number(memoryUsage.total ?? 0))
+  const ramAvailableMb = toMb(Number(memoryUsage.available ?? memoryUsage.free ?? 0))
+  const ramAvailablePercent = ramTotalMb > 0 ? (ramAvailableMb / ramTotalMb) * 100 : 0
+
+  return (
+    <span className="text-gray-400">
+      <span className="text-yellow-600">metrics</span> load{' '}
+      {load.map((value, index) => (
+        <span key={index} className={clsx(metricNumberColor(Number(value), 1, 2), 'mr-2')}>
+          {value}
+        </span>
+      ))}
+      cpu <span className={metricNumberColor(cpuTemperature, 60, 75)}>{cpuTemperature.toFixed(2)}°C</span> ram used{' '}
+      <span className={metricNumberColor(ramAvailablePercent, 15, 5, true)}>{ramTotalMb - ramAvailableMb} MB</span> /{' '}
+      <span className="text-white">{ramTotalMb} MB</span>
+    </span>
+  )
+}
+
 export function Logs() {
   const { frameId } = useValues(frameLogic)
   const { logs, logsLoading } = useValues(logsLogic({ frameId }))
@@ -111,17 +159,21 @@ export function Logs() {
           if (log.type === 'webhook') {
             try {
               const { event, timestamp, ...rest } = JSON.parse(log.line)
-              logLine = (
-                <>
-                  <span className="text-yellow-600 mr-2">{event}</span>
-                  {Object.entries(rest).map(([key, value]) => (
-                    <span key={key} className="mr-2">
-                      <span className="text-gray-400">{key}=</span>
-                      <span>{insertBreaks(JSON.stringify(value))}</span>
-                    </span>
-                  ))}
-                </>
-              )
+              if (event === 'metrics') {
+                logLine = renderMetricsLog(rest)
+              } else {
+                logLine = (
+                  <>
+                    <span className="text-yellow-600 mr-2">{event}</span>
+                    {Object.entries(rest).map(([key, value]) => (
+                      <span key={key} className="mr-2">
+                        <span className="text-gray-400">{key}=</span>
+                        <span>{insertBreaks(JSON.stringify(value))}</span>
+                      </span>
+                    ))}
+                  </>
+                )
+              }
             } catch (e) {}
           } else if (log.type === 'agent') {
             logLine = (
