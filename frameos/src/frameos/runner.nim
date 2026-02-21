@@ -10,6 +10,7 @@ import frameos/types
 import frameos/utils/image
 import frameos/utils/time
 import frameos/scenes
+import frameos/boot_guard
 
 import drivers/drivers as drivers
 
@@ -142,6 +143,7 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
 
     let interval = currentScene.refreshInterval
     let (lastRotatedImage, nextSleep) = self.renderSceneImage(exportedScene, currentScene)
+    clearBootCrashCount()
     if interval < 1:
       let now = getMonoTime()
       if now >= nextServerRenderAt:
