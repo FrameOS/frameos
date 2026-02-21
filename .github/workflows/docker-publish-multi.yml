@@ -207,11 +207,10 @@ jobs:
           push: true
           platforms: linux/amd64,linux/arm64/v8
           tags: |
-            frameos/frameos:${{ env.BRANCH_NAME }}-${{ env.SHORT_SHA }}
-            frameos/frameos:${{ env.DOCKER_VERSION }}
-            frameos/frameos:${{ env.DOCKER_VERSION_MINOR }}
-            frameos/frameos:${{ env.DOCKER_VERSION_MAJOR }}
             frameos/frameos:latest
+            frameos/frameos:${{ env.DOCKER_VERSION_MAJOR }}
+            frameos/frameos:${{ env.DOCKER_VERSION_MINOR }}
+            frameos/frameos:${{ env.DOCKER_VERSION }}
 
   update-addon-repo:
     name: Update Home Assistant Addon

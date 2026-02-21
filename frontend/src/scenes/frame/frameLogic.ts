@@ -11,6 +11,7 @@ import { apiFetch } from '../../utils/apiFetch'
 import { getBasePath } from '../../utils/getBasePath'
 import { entityImagesModel } from '../../models/entityImagesModel'
 import { arrangeNodes } from '../../utils/arrangeNodes'
+import versions from '../../../../versions.json'
 
 export interface FrameLogicProps {
   frameId: number
@@ -22,6 +23,7 @@ export interface ChangeDetail {
 }
 
 const DEFAULT_BROWSER_TITLE = 'FrameOS Backend'
+const CURRENT_FRAMEOS_VERSION = (versions.frameos || 'dev').split('+')[0]
 
 function setBrowserTitle(frame?: FrameType | null): void {
   if (typeof document === 'undefined') {
@@ -230,6 +232,19 @@ function computeChangeDetails(
   }
 
   const sceneDetails = sceneChangeDetails(next?.scenes ?? [], previous?.scenes ?? [])
+
+  const previousFrameosVersion =
+    typeof (previous as Record<string, unknown> | null | undefined)?.frameos_version === 'string'
+      ? String((previous as Record<string, unknown>).frameos_version).split('+')[0]
+      : null
+
+  if (!previousFrameosVersion || previousFrameosVersion !== CURRENT_FRAMEOS_VERSION) {
+    details.push({
+      label: `FrameOS upgrade ${previousFrameosVersion ?? ''} -> ${CURRENT_FRAMEOS_VERSION}`,
+      requiresFullDeploy: true,
+    })
+  }
+
   return [...details, ...sceneDetails]
 }
 
@@ -616,11 +631,9 @@ export const frameLogic = kea<frameLogicType>([
     ],
     lastDeploy: [(s) => [s.frame], (frame) => frame?.last_successful_deploy ?? null],
     undeployedChanges: [
-      (s) => [s.frame, s.lastDeploy],
-      (frame, lastDeploy) =>
-        FRAME_KEYS.some(
-          (key) => !frameKeyEqual(key, frame?.[key as keyof FrameType], lastDeploy?.[key as keyof FrameType])
-        ),
+      (s) => [s.frame, s.lastDeploy, s.mode],
+      (frame: FrameType, lastDeploy: Partial<FrameType> | null, mode: FrameType['mode']) =>
+        computeChangeDetails(lastDeploy, frame, mode).length > 0,
     ],
     unsavedChangeDetails: [
       (s) => [s.frame, s.frameForm, s.mode],
@@ -631,8 +644,8 @@ export const frameLogic = kea<frameLogicType>([
       (lastDeploy, frame, mode): ChangeDetail[] => computeChangeDetails(lastDeploy, frame, mode),
     ],
     requiresRecompilation: [
-      (s) => [s.unsavedChangeDetails],
-      (unsavedChangeDetails) => unsavedChangeDetails.some((change) => change.requiresFullDeploy),
+      (s) => [s.undeployedChangeDetails],
+      (undeployedChangeDetails) => undeployedChangeDetails.some((change) => change.requiresFullDeploy),
     ],
     defaultScene: [
       (s) => [s.frame, s.frameForm],
@@ -673,11 +686,12 @@ export const frameLogic = kea<frameLogicType>([
     restartFrame: () => framesModel.actions.restartFrame(props.frameId),
     rebootFrame: () => framesModel.actions.rebootFrame(props.frameId),
     stopFrame: () => framesModel.actions.stopFrame(props.frameId),
-    deployFrame: () =>
+    deployFrame: () => {
       framesModel.actions.deployFrame(
         props.frameId,
         Boolean(values.frame?.last_successful_deploy_at) && !values.requiresRecompilation
-      ),
+      )
+    },
     fastDeployFrame: () => framesModel.actions.deployFrame(props.frameId, true),
     fullDeployFrame: () => framesModel.actions.deployFrame(props.frameId, false),
     deployAgent: () => framesModel.actions.deployAgent(props.frameId),
