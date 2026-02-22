@@ -75,6 +75,7 @@ type
 
 proc ensureVenvExists(self: App): string
 proc ensureBackgroundBrowser(self: App): bool
+proc stopBackgroundBrowser(self: App)
 proc shellQuote(value: string): string
 proc pickChromiumBinary(): string
 
@@ -274,6 +275,29 @@ proc ensureBackgroundBrowser(self: App): bool =
   self.logError &"Chromium startup log tail:\n{tailLog(CHROMIUM_LOG_FILE)}"
   return false
 
+proc stopBackgroundBrowser(self: App) =
+  let chromiumPid = readPidFromFile(CHROMIUM_PID_FILE)
+  if chromiumPid <= 0:
+    return
+
+  self.log &"Stopping Chromium PID {chromiumPid} before restart"
+
+  discard execCmdEx("kill " & $chromiumPid)
+  for _ in 0 ..< 10:
+    if not isPidAlive(chromiumPid):
+      break
+    sleep(200)
+
+  if isPidAlive(chromiumPid):
+    self.log &"Chromium PID {chromiumPid} did not exit gracefully, forcing kill"
+    discard execCmdEx("kill -9 " & $chromiumPid)
+
+  try:
+    if fileExists(CHROMIUM_PID_FILE):
+      removeFile(CHROMIUM_PID_FILE)
+  except CatchableError:
+    discard
+
 proc pickChromiumBinary(): string =
   let browserCandidates = ["chromium-headless-shell", "chromium-browser", "chromium"]
   for candidate in browserCandidates:
@@ -336,24 +360,46 @@ page.wait_for_timeout(1500)
 
     writeFile(scriptFile, scripHead & scriptBody & "\n" & scriptTail)
 
-    # Run the script
+    # Run the script. Retry once if Chromium crashed and closed the target.
     var cmd = &"{venvPython} {scriptFile}"
     self.log "Running command: " & cmd
-    try:
-      let (output, response) = execCmdEx(cmd)
-      if response != 0:
+    var completed = false
+    var lastError = ""
+
+    for attempt in 0 .. 1:
+      if attempt > 0:
+        self.log "Retrying Browser Snapshot with a fresh Chromium process"
+        self.stopBackgroundBrowser()
+        if not self.ensureBackgroundBrowser():
+          return renderError(width, height, "Chromium browser is not available")
+        sleep(CHROMIUM_STARTUP_SETTLE_MS)
+
+      try:
+        let (output, response) = execCmdEx(cmd)
+        if response == 0:
+          completed = true
+          break
+
         if output.contains("TimeoutError"):
           self.logError &"Playwright navigation timed out after {PLAYWRIGHT_NAVIGATION_TIMEOUT_MS}ms while loading {self.appConfig.url}. Chromium may still be warming up."
           self.logError &"Playwright timeout details: {output}"
           return renderError(width, height, "Browser snapshot timed out while loading the page")
-        self.logError &"Playwright command failed with response {response}: {output}"
-        return renderError(width, height, "Playwright command failed")
-    except OSError as e:
-      self.logError &"Error running playwright command: {e.msg}"
+
+        if output.contains("TargetClosedError") and attempt == 0:
+          self.logError &"Playwright target closed unexpectedly. Will restart Chromium and retry once. Details: {output}"
+          continue
+
+        lastError = output
+        break
+      except OSError as e:
+        lastError = e.msg
+        break
+
+    if not completed:
+      self.logError &"Playwright command failed: {lastError}"
       if context.hasImage:
         return context.image
-      else:
-        return renderError(width, height, "Error running playwright command")
+      return renderError(width, height, "Playwright command failed")
 
     # Clean up the temporary script file
     try: removeFile(scriptFile)
