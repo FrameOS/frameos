@@ -26,6 +26,8 @@ playwright.stop()
 const CHROMIUM_DEBUG_PORT = 9222
 const CHROMIUM_STARTUP_ATTEMPTS = 240
 const CHROMIUM_STARTUP_SLEEP_MS = 500
+const CHROMIUM_PID_FILE = "/tmp/frameos_browser_snapshot_chromium.pid"
+const CHROMIUM_LOG_FILE = "/tmp/frameos_browser_snapshot_chromium.log"
 
 type
   AppConfig* = object
@@ -39,6 +41,37 @@ type
 
 proc ensureVenvExists(self: App): string
 proc ensureBackgroundBrowser(self: App): bool
+
+proc shellQuote(value: string): string =
+  "'" & value.replace("'", "'\\''") & "'"
+
+proc readPidFromFile(path: string): int =
+  if not fileExists(path):
+    return 0
+  try:
+    let raw = readFile(path).strip()
+    if raw.len == 0:
+      return 0
+    return parseInt(raw)
+  except CatchableError:
+    return 0
+
+proc isPidAlive(pid: int): bool =
+  if pid <= 0:
+    return false
+  let (_, response) = execCmdEx("kill -0 " & $pid)
+  response == 0
+
+proc tailLog(path: string, maxLines: int = 20): string =
+  if not fileExists(path):
+    return "(no chromium log file)"
+
+  try:
+    let lines = readFile(path).splitLines()
+    let start = max(0, lines.len - maxLines)
+    result = lines[start ..< lines.len].join("\n")
+  except CatchableError:
+    result = "(failed to read chromium log file)"
 
 proc isBrowserDebugPortReady(port: int): bool =
   var socket = newSocket()
@@ -107,6 +140,16 @@ proc ensureBackgroundBrowser(self: App): bool =
   if isBrowserDebugPortReady(CHROMIUM_DEBUG_PORT):
     return true
 
+  let existingPid = readPidFromFile(CHROMIUM_PID_FILE)
+  if existingPid > 0 and isPidAlive(existingPid):
+    self.log &"Chromium PID {existingPid} is already running but debug port is not ready yet"
+  elif existingPid > 0:
+    self.log &"Removing stale Chromium PID file {CHROMIUM_PID_FILE} (PID {existingPid} is not alive)"
+    try:
+      removeFile(CHROMIUM_PID_FILE)
+    except CatchableError:
+      discard
+
   let (chromiumPath, binaryResponse) = execCmdEx("command -v chromium-browser || command -v chromium")
   if binaryResponse != 0:
     self.logError "Could not find chromium-browser or chromium in PATH"
@@ -116,22 +159,12 @@ proc ensureBackgroundBrowser(self: App): bool =
 
   self.log "Starting background Chromium process for Browser Snapshot..."
   try:
-    var browserProcess = startProcess(
-      chromiumBinary,
-      args = @[
-        "--headless",
-        "--disable-gpu",
-        "--no-sandbox",
-        "--disable-dev-shm-usage",
-        "--remote-debugging-address=127.0.0.1",
-        "--remote-debugging-port=" & $CHROMIUM_DEBUG_PORT,
-        "--user-data-dir=/tmp/frameos_browser_snapshot_profile",
-        "about:blank"
-      ],
-      options = {poUsePath, poDaemon}
-    )
-    browserProcess.close()
-  except OSError as e:
+    let startCommand = &"nohup {shellQuote(chromiumBinary)} --headless --disable-gpu --no-sandbox --disable-dev-shm-usage --remote-debugging-address=127.0.0.1 --remote-debugging-port={CHROMIUM_DEBUG_PORT} --user-data-dir=/tmp/frameos_browser_snapshot_profile about:blank >> {shellQuote(CHROMIUM_LOG_FILE)} 2>&1 & echo $! > {shellQuote(CHROMIUM_PID_FILE)}"
+    let response = execShellCmd("bash -lc " & shellQuote(startCommand))
+    if response != 0:
+      self.logError &"Error starting background Chromium process (response {response})"
+      return false
+  except CatchableError as e:
     self.logError &"Error starting background Chromium process: {e.msg}"
     return false
 
@@ -140,7 +173,10 @@ proc ensureBackgroundBrowser(self: App): bool =
       return true
     sleep(CHROMIUM_STARTUP_SLEEP_MS)
 
-  self.logError &"Chromium debug port {CHROMIUM_DEBUG_PORT} did not become ready in {CHROMIUM_STARTUP_ATTEMPTS * CHROMIUM_STARTUP_SLEEP_MS / 1000}s"
+  let chromiumPid = readPidFromFile(CHROMIUM_PID_FILE)
+  let chromiumAlive = if chromiumPid > 0: isPidAlive(chromiumPid) else: false
+  self.logError &"Chromium debug port {CHROMIUM_DEBUG_PORT} did not become ready in {CHROMIUM_STARTUP_ATTEMPTS * CHROMIUM_STARTUP_SLEEP_MS / 1000}s (pid={chromiumPid}, alive={chromiumAlive})"
+  self.logError &"Chromium startup log tail:\n{tailLog(CHROMIUM_LOG_FILE)}"
   return false
 
 proc get*(self: App, context: ExecutionContext): Image =
