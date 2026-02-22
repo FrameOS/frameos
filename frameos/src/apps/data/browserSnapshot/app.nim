@@ -14,7 +14,7 @@ browser = playwright.chromium.connect_over_cdp("http://127.0.0.1:BROWSER_DEBUG_P
 context = browser.contexts[0] if browser.contexts else browser.new_context()
 page = context.new_page()
 page.set_viewport_size({"width": WIDTH, "height": HEIGHT})
-page.goto(URL_TO_CAPTURE)
+page.goto(URL_TO_CAPTURE, timeout=NAVIGATION_TIMEOUT_MS, wait_until="domcontentloaded")
 """
 
 const DEFAULT_PLAYWRIGHT_SCRIPT_END = """
@@ -27,6 +27,8 @@ const CHROMIUM_DEBUG_PORT = 9222
 const CHROMIUM_STARTUP_ATTEMPTS = 240
 const CHROMIUM_STARTUP_SLEEP_MS = 500
 const CHROMIUM_MIN_SWAP_KB = 1024 * 512
+const CHROMIUM_STARTUP_SETTLE_MS = 2500
+const PLAYWRIGHT_NAVIGATION_TIMEOUT_MS = 90000
 const CHROMIUM_SWAP_FILE = "/srv/frameos/tmp/swap/chromium.swap"
 const CHROMIUM_SWAP_SIZE_MB = 512
 const CHROMIUM_PID_FILE = "/tmp/frameos_browser_snapshot_chromium.pid"
@@ -316,10 +318,14 @@ proc get*(self: App, context: ExecutionContext): Image =
       else:
         return renderError(width, height, "Chromium browser is not available")
 
+    self.log &"Waiting {CHROMIUM_STARTUP_SETTLE_MS}ms for Chromium to finish warming up"
+    sleep(CHROMIUM_STARTUP_SETTLE_MS)
+
     # Write the playwright script to a temporary file
     let scripHead = DEFAULT_PLAYWRIGHT_SCRIPT_START.replace("URL_TO_CAPTURE", $(%*(self.appConfig.url)))
       .replace("BROWSER_DEBUG_PORT", $CHROMIUM_DEBUG_PORT)
       .replace("WIDTH", $width).replace("HEIGHT", $height)
+      .replace("NAVIGATION_TIMEOUT_MS", $PLAYWRIGHT_NAVIGATION_TIMEOUT_MS)
     # TODO: make this configurable... but also compatible with a background browser process
     let scriptBody = """
 page.emulate_media(reduced_motion="reduce")
@@ -336,6 +342,10 @@ page.wait_for_timeout(1500)
     try:
       let (output, response) = execCmdEx(cmd)
       if response != 0:
+        if output.contains("TimeoutError"):
+          self.logError &"Playwright navigation timed out after {PLAYWRIGHT_NAVIGATION_TIMEOUT_MS}ms while loading {self.appConfig.url}. Chromium may still be warming up."
+          self.logError &"Playwright timeout details: {output}"
+          return renderError(width, height, "Browser snapshot timed out while loading the page")
         self.logError &"Playwright command failed with response {response}: {output}"
         return renderError(width, height, "Playwright command failed")
     except OSError as e:
