@@ -66,6 +66,7 @@ type
     url*: string
     width*: int
     height*: int
+    disableLowMemoryCheck*: bool
 
   App* = ref object of AppRoot
     appConfig*: AppConfig
@@ -94,6 +95,10 @@ proc currentRamKb(): int =
 
 proc hasMinimumRam(self: App): bool =
   self.memoryKb = currentRamKb()
+  if self.appConfig.disableLowMemoryCheck:
+    self.log "Low memory check disabled by config; skipping minimum RAM guard"
+    return true
+
   if self.memoryKb.float < CHROMIUM_MIN_RAM_KB.float * 0.95: # give small 50mb buffer
     self.logError &"Not enough RAM for Browser Snapshot ({self.memoryKb}kB < {CHROMIUM_MIN_RAM_KB}kB)"
     return false

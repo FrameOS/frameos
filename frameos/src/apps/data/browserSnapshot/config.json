@@ -25,6 +25,13 @@
         "value": "",
         "label": "Height (0=full height)",
         "placeholder": "0"
+      },
+      {
+        "name": "disableLowMemoryCheck",
+        "type": "boolean",
+        "value": false,
+        "label": "Disable low memory check",
+        "hint": "Always install and run Chromium, even if we have less than 1GB of RAM. Disable this at your own risk!"
       }
     ],
     "output": [
