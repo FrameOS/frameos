@@ -3,6 +3,7 @@ import json, os, options
 const
   BOOT_GUARD_STATE_PATH* = "./state/boot_guard.json"
   BOOT_GUARD_CRASH_LIMIT* = 3
+  BOOT_GUARD_SUCCESS_PERSIST_LIMIT* = 3
   BOOT_GUARD_FALLBACK_SCENE_ID* = "system/bootGuard"
 
 type BootGuardFailureDetails* = object
@@ -70,6 +71,9 @@ proc shouldUseFallbackScene*(crashCount: int): bool =
 
 proc shouldUseFallbackScene*(): bool =
   shouldUseFallbackScene(loadBootCrashCount())
+
+proc shouldPersistBootGuardContext*(successfulScenes: int): bool =
+  max(0, successfulScenes) < BOOT_GUARD_SUCCESS_PERSIST_LIMIT
 
 proc bootGuardFallbackSceneId*(): string =
   BOOT_GUARD_FALLBACK_SCENE_ID

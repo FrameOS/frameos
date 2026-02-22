@@ -57,6 +57,14 @@ try:
     doAssert detailsNoError.sceneName.isSome and detailsNoError.sceneName.get() == "Family Calendar"
     doAssert detailsNoError.error.isNone
 
+
+  block test_boot_guard_context_persist_limit:
+    doAssert shouldPersistBootGuardContext(0)
+    doAssert shouldPersistBootGuardContext(1)
+    doAssert shouldPersistBootGuardContext(2)
+    doAssert not shouldPersistBootGuardContext(3)
+    doAssert not shouldPersistBootGuardContext(10)
+
   block test_boot_guard_fallback_scene_id:
     doAssert bootGuardFallbackSceneId() == "system/bootGuard"
 finally:

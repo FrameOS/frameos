@@ -114,6 +114,7 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
   var nextServerRenderAt = getMonoTime()
   var lastSceneId = "".SceneId
   var currentScene: FrameScene
+  var successfulSceneRenders = 0
   let serverRenderDelay = initDuration(milliseconds = int(SERVER_RENDER_DELAY_SECONDS * 1000))
 
   while true:
@@ -126,9 +127,10 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
     let exportedScene = exportedScenes[sceneId]
     if lastSceneId != sceneId:
       self.logger.log(%*{"event": "render:sceneChange", "sceneId": sceneId.string})
-      # Persist the active scene context before rendering so boot guard can
-      # still show which scene was running even if the process crashes hard.
-      updateBootGuardFailureDetails(some(sceneId.string), getSceneDisplayName(sceneId), none(string))
+      # Persist the active scene context early in boot, then stop writing it
+      # after a few successful renders to reduce SD card writes.
+      if shouldPersistBootGuardContext(successfulSceneRenders):
+        updateBootGuardFailureDetails(some(sceneId.string), getSceneDisplayName(sceneId), none(string))
       if self.scenes.hasKey(sceneId):
         currentScene = self.scenes[sceneId]
       else:
@@ -149,6 +151,7 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
     let interval = currentScene.refreshInterval
     let (lastRotatedImage, nextSleep) = self.renderSceneImage(exportedScene, currentScene)
     clearBootCrashCount()
+    successfulSceneRenders += 1
     if interval < 1:
       let now = getMonoTime()
       if now >= nextServerRenderAt:
