@@ -50,20 +50,31 @@ proc isBrowserDebugPortReady(port: int): bool =
     socket.close()
 
 proc ensureSystemDependencies(self: App) =
-  let requiredCommands = @["python3", "chromium-browser"]
-  var missingCommands: seq[string] = @[]
-  for command in requiredCommands:
-    let (_, response) = execCmdEx("command -v " & command)
-    if response != 0:
-      missingCommands.add(command)
-  if missingCommands.len == 0:
+  let (_, pythonResponse) = execCmdEx("command -v python3")
+  let (_, chromiumBrowserResponse) = execCmdEx("command -v chromium-browser")
+  let (_, chromiumResponse) = execCmdEx("command -v chromium")
+
+  if pythonResponse == 0 and (chromiumBrowserResponse == 0 or chromiumResponse == 0):
     return
+
   self.log "Installing Browser Snapshot system dependencies..."
-  try:
-    discard execShellCmd("sudo apt-get update")
-    discard execShellCmd("sudo apt-get install -y python3 python3-pip python3-venv chromium-browser")
-  except OSError as e:
-    self.logError &"Error installing system dependencies: {e.msg}"
+  let updateResponse = execShellCmd("sudo apt-get update")
+  if updateResponse != 0:
+    self.logError &"Error running apt-get update (response {updateResponse})"
+    return
+
+  let pythonInstallResponse = execShellCmd("sudo apt-get install -y python3 python3-pip python3-venv")
+  if pythonInstallResponse != 0:
+    self.logError &"Error installing Python dependencies (response {pythonInstallResponse})"
+    return
+
+  var chromiumInstallResponse = execShellCmd("sudo apt-get install -y chromium-browser")
+  if chromiumInstallResponse != 0:
+    self.log "Package chromium-browser unavailable, retrying with chromium..."
+    chromiumInstallResponse = execShellCmd("sudo apt-get install -y chromium")
+
+  if chromiumInstallResponse != 0:
+    self.logError &"Error installing Chromium dependencies (response {chromiumInstallResponse})"
 
 proc init*(self: App) =
   ## (Initialization if needed)
@@ -88,12 +99,6 @@ proc ensureVenvExists(self: App): string =
       discard execShellCmd(venvPython & " -m pip install playwright")
     except OSError as e:
       self.logError &"Error installing playwright: {e.msg}"
-      return
-    self.log "Installing Playwright browsers..."
-    try:
-      discard execShellCmd(venvPython & " -m playwright install")
-    except OSError as e:
-      self.logError &"Error installing playwright browsers: {e.msg}"
       return
 
 proc ensureBackgroundBrowser(self: App): bool =
