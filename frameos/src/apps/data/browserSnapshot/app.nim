@@ -55,7 +55,6 @@ const LIGHTWEIGHT_CHROMIUM_ARGS = @[
   "--no-zygote",
   "--password-store=basic",
   "--renderer-process-limit=1",
-  "--single-process",
   "--remote-debugging-address=127.0.0.1",
   "--remote-debugging-port=" & $CHROMIUM_DEBUG_PORT,
   "--user-data-dir=" & CHROMIUM_USER_DATA_DIR,
