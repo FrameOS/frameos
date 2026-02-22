@@ -24,8 +24,8 @@ playwright.stop()
 """
 
 const CHROMIUM_DEBUG_PORT = 9222
-const CHROMIUM_STARTUP_ATTEMPTS = 20
-const CHROMIUM_STARTUP_SLEEP_MS = 250
+const CHROMIUM_STARTUP_ATTEMPTS = 240
+const CHROMIUM_STARTUP_SLEEP_MS = 500
 
 type
   AppConfig* = object
@@ -140,7 +140,7 @@ proc ensureBackgroundBrowser(self: App): bool =
       return true
     sleep(CHROMIUM_STARTUP_SLEEP_MS)
 
-  self.logError &"Chromium debug port {CHROMIUM_DEBUG_PORT} did not become ready"
+  self.logError &"Chromium debug port {CHROMIUM_DEBUG_PORT} did not become ready in {CHROMIUM_STARTUP_ATTEMPTS * CHROMIUM_STARTUP_SLEEP_MS / 1000}s"
   return false
 
 proc get*(self: App, context: ExecutionContext): Image =
