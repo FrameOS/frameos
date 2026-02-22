@@ -26,6 +26,9 @@ playwright.stop()
 const CHROMIUM_DEBUG_PORT = 9222
 const CHROMIUM_STARTUP_ATTEMPTS = 240
 const CHROMIUM_STARTUP_SLEEP_MS = 500
+const CHROMIUM_MIN_SWAP_KB = 1024 * 1024
+const CHROMIUM_SWAP_FILE = "/srv/frameos/tmp/swap/chromium.swap"
+const CHROMIUM_SWAP_SIZE_MB = 1024
 const CHROMIUM_PID_FILE = "/tmp/frameos_browser_snapshot_chromium.pid"
 const CHROMIUM_LOG_FILE = "/tmp/frameos_browser_snapshot_chromium.log"
 
@@ -41,6 +44,61 @@ type
 
 proc ensureVenvExists(self: App): string
 proc ensureBackgroundBrowser(self: App): bool
+proc shellQuote(value: string): string
+
+proc currentSwapKb(): int64 =
+  try:
+    for line in readFile("/proc/meminfo").splitLines():
+      if line.startsWith("SwapTotal:"):
+        let parts = line.splitWhitespace()
+        if parts.len >= 2:
+          return parseInt(parts[1])
+  except CatchableError:
+    return 0
+  return 0
+
+proc ensureChromiumSwap(self: App): bool =
+  let initialSwapKb = currentSwapKb()
+  if initialSwapKb >= CHROMIUM_MIN_SWAP_KB:
+    return true
+
+  self.log &"Swap is only {initialSwapKb}kB, ensuring at least {CHROMIUM_MIN_SWAP_KB}kB before starting Chromium"
+
+  let swapFolder = splitPath(CHROMIUM_SWAP_FILE).head
+  if execShellCmd("sudo mkdir -p " & shellQuote(swapFolder)) != 0:
+    self.logError &"Unable to create swap directory {swapFolder}"
+    return false
+
+  if not fileExists(CHROMIUM_SWAP_FILE):
+    var createResponse = execShellCmd(&"sudo fallocate -l {CHROMIUM_SWAP_SIZE_MB}M {shellQuote(CHROMIUM_SWAP_FILE)}")
+    if createResponse != 0:
+      self.log "fallocate failed, retrying swapfile creation with dd"
+      createResponse = execShellCmd(&"sudo dd if=/dev/zero of={shellQuote(CHROMIUM_SWAP_FILE)} bs=1M count={CHROMIUM_SWAP_SIZE_MB} status=none")
+    if createResponse != 0:
+      self.logError &"Unable to create Chromium swap file at {CHROMIUM_SWAP_FILE}"
+      return false
+
+    if execShellCmd("sudo chmod 600 " & shellQuote(CHROMIUM_SWAP_FILE)) != 0:
+      self.logError &"Unable to set permissions on {CHROMIUM_SWAP_FILE}"
+      return false
+
+    if execShellCmd("sudo mkswap " & shellQuote(CHROMIUM_SWAP_FILE)) != 0:
+      self.logError &"Unable to initialize swap file {CHROMIUM_SWAP_FILE}"
+      return false
+
+  let (_, isAlreadyActive) = execCmdEx(&"sudo swapon --show=NAME --noheadings | grep -Fx {shellQuote(CHROMIUM_SWAP_FILE)}")
+  if isAlreadyActive != 0:
+    if execShellCmd("sudo swapon " & shellQuote(CHROMIUM_SWAP_FILE)) != 0:
+      self.logError &"Unable to activate swap file {CHROMIUM_SWAP_FILE}"
+      return false
+
+  let updatedSwapKb = currentSwapKb()
+  if updatedSwapKb < CHROMIUM_MIN_SWAP_KB:
+    self.logError &"Swap is still below minimum after setup ({updatedSwapKb}kB < {CHROMIUM_MIN_SWAP_KB}kB)"
+    return false
+
+  self.log &"Swap increased to {updatedSwapKb}kB for Chromium"
+  return true
 
 proc shellQuote(value: string): string =
   "'" & value.replace("'", "'\\''") & "'"
@@ -137,6 +195,10 @@ proc ensureVenvExists(self: App): string =
       return
 
 proc ensureBackgroundBrowser(self: App): bool =
+  if not self.ensureChromiumSwap():
+    self.logError "Could not ensure minimum swap before starting Chromium"
+    return false
+
   if isBrowserDebugPortReady(CHROMIUM_DEBUG_PORT):
     return true
 
