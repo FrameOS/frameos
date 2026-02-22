@@ -96,7 +96,7 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
       discard
     result = (outImage.rotateDegrees(self.frameConfig.rotate), context.nextSleep)
   except Exception as e:
-    updateBootGuardFailureDetails(some(scene.id.string), some($e.msg))
+    updateBootGuardFailureDetails(some(scene.id.string), getSceneDisplayName(scene.id), some($e.msg))
     result = (renderError(requiredWidth, requiredHeight, &"Error: {$e.msg}\n{$e.getStackTrace()}"), context.nextSleep)
     self.logger.log(%*{"event": "render:error", "error": $e.msg, "stacktrace": e.getStackTrace()})
 
@@ -134,7 +134,7 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
           self.scenes[sceneId] = currentScene
           currentScene.updateLastPublicState()
         except Exception as e:
-          updateBootGuardFailureDetails(some(sceneId.string), some($e.msg))
+          updateBootGuardFailureDetails(some(sceneId.string), getSceneDisplayName(sceneId), some($e.msg))
           self.logger.log(%*{"event": "render:error:scene:init", "error": $e.msg, "stacktrace": e.getStackTrace()})
 
       lastSceneId = sceneId

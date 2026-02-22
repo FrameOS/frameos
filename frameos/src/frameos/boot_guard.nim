@@ -7,6 +7,7 @@ const
 
 type BootGuardFailureDetails* = object
   sceneId*: Option[string]
+  sceneName*: Option[string]
   error*: Option[string]
 
 proc ensureBootGuardStateDir() =
@@ -20,13 +21,17 @@ proc loadBootCrashCount*(): int =
     return 0
 
 proc loadBootGuardFailureDetails*(): BootGuardFailureDetails =
-  result = BootGuardFailureDetails(sceneId: none(string), error: none(string))
+  result = BootGuardFailureDetails(sceneId: none(string), sceneName: none(string), error: none(string))
   try:
     let data = parseJson(readFile(BOOT_GUARD_STATE_PATH))
     if data.hasKey("sceneId"):
       let sceneId = data{"sceneId"}.getStr()
       if sceneId.len > 0:
         result.sceneId = some(sceneId)
+    if data.hasKey("sceneName"):
+      let sceneName = data{"sceneName"}.getStr()
+      if sceneName.len > 0:
+        result.sceneName = some(sceneName)
     if data.hasKey("error"):
       let error = data{"error"}.getStr()
       if error.len > 0:
@@ -39,6 +44,8 @@ proc writeBootGuardState(crashCount: int, failureDetails: BootGuardFailureDetail
   var payload = %*{"crashesWithoutRender": max(0, crashCount)}
   if failureDetails.sceneId.isSome:
     payload["sceneId"] = %failureDetails.sceneId.get()
+  if failureDetails.sceneName.isSome:
+    payload["sceneName"] = %failureDetails.sceneName.get()
   if failureDetails.error.isSome:
     payload["error"] = %failureDetails.error.get()
   writeFile(BOOT_GUARD_STATE_PATH, $payload)
@@ -53,10 +60,10 @@ proc registerBootCrash*(): int =
 proc clearBootCrashCount*() =
   if loadBootCrashCount() == 0:
     return
-  writeBootGuardState(0, BootGuardFailureDetails(sceneId: none(string), error: none(string)))
+  writeBootGuardState(0, BootGuardFailureDetails(sceneId: none(string), sceneName: none(string), error: none(string)))
 
-proc updateBootGuardFailureDetails*(sceneId: Option[string], error: Option[string]) =
-  writeBootGuardState(loadBootCrashCount(), BootGuardFailureDetails(sceneId: sceneId, error: error))
+proc updateBootGuardFailureDetails*(sceneId: Option[string], sceneName: Option[string], error: Option[string]) =
+  writeBootGuardState(loadBootCrashCount(), BootGuardFailureDetails(sceneId: sceneId, sceneName: sceneName, error: error))
 
 proc shouldUseFallbackScene*(crashCount: int): bool =
   crashCount >= BOOT_GUARD_CRASH_LIMIT

@@ -41,9 +41,10 @@ try:
 
   block test_boot_guard_failure_details:
     resetBootGuardState()
-    updateBootGuardFailureDetails(some("calendar/main"), some("example crash"))
+    updateBootGuardFailureDetails(some("calendar/main"), some("Family Calendar"), some("example crash"))
     let details = loadBootGuardFailureDetails()
     doAssert details.sceneId.isSome and details.sceneId.get() == "calendar/main"
+    doAssert details.sceneName.isSome and details.sceneName.get() == "Family Calendar"
     doAssert details.error.isSome and details.error.get() == "example crash"
 
   block test_boot_guard_fallback_scene_id:

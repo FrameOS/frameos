@@ -18,12 +18,19 @@ type Scene* = ref object of FrameScene
 
 proc buildFailureText(self: Scene): string =
   let details = loadBootGuardFailureDetails()
-  let sceneName = if details.sceneId.isSome: details.sceneId.get() else: "(unknown scene)"
+  let sceneId = if details.sceneId.isSome: details.sceneId.get() else: "(unknown scene id)"
+  let sceneName =
+    if details.sceneName.isSome:
+      details.sceneName.get()
+    elif details.sceneId.isSome:
+      details.sceneId.get()
+    else:
+      "(unknown scene)"
 
   var lines: seq[string] = @[
     "FrameOS Safe Mode",
     "",
-    &"FrameOS tried to render scene '{sceneName}' {BOOT_GUARD_CRASH_LIMIT} times, but it crashed each time.",
+    &"FrameOS tried to render scene '{sceneName}' (id: {sceneId}) {BOOT_GUARD_CRASH_LIMIT} times, but it crashed each time.",
     "",
     "Use the control interface to select a new scene to render."
   ]
