@@ -3,7 +3,7 @@ import frameos/apps
 import frameos/types
 import frameos/utils/image
 
-import os, strformat, strutils, random, json, osproc, net
+import os, strformat, strutils, random, json, osproc, net, sequtils
 
 const DEFAULT_PLAYWRIGHT_SCRIPT_START = """
 import time
@@ -31,6 +31,36 @@ const CHROMIUM_SWAP_FILE = "/srv/frameos/tmp/swap/chromium.swap"
 const CHROMIUM_SWAP_SIZE_MB = 1024
 const CHROMIUM_PID_FILE = "/tmp/frameos_browser_snapshot_chromium.pid"
 const CHROMIUM_LOG_FILE = "/tmp/frameos_browser_snapshot_chromium.log"
+const CHROMIUM_USER_DATA_DIR = "/tmp/frameos_browser_snapshot_profile"
+const LIGHTWEIGHT_CHROMIUM_ARGS = @[
+  "--headless",
+  "--no-sandbox",
+  "--disable-gpu",
+  "--disable-software-rasterizer",
+  "--disable-extensions",
+  "--disable-background-networking",
+  "--disable-background-timer-throttling",
+  "--disable-breakpad",
+  "--disable-component-update",
+  "--disable-default-apps",
+  "--disable-dev-shm-usage",
+  "--disable-features=Translate,BackForwardCache,AutofillServerCommunication,OptimizationHints,MediaRouter,SubresourceFilter",
+  "--disable-ipc-flooding-protection",
+  "--disable-renderer-backgrounding",
+  "--disable-sync",
+  "--disk-cache-size=1",
+  "--media-cache-size=1",
+  "--metrics-recording-only",
+  "--mute-audio",
+  "--no-first-run",
+  "--password-store=basic",
+  "--process-per-site",
+  "--remote-debugging-address=127.0.0.1",
+  "--remote-debugging-port=" & $CHROMIUM_DEBUG_PORT,
+  "--user-data-dir=" & CHROMIUM_USER_DATA_DIR,
+  "--window-size=800,600",
+  "about:blank"
+]
 
 type
   AppConfig* = object
@@ -45,6 +75,7 @@ type
 proc ensureVenvExists(self: App): string
 proc ensureBackgroundBrowser(self: App): bool
 proc shellQuote(value: string): string
+proc pickChromiumBinary(): string
 
 proc currentSwapKb(): int64 =
   try:
@@ -143,10 +174,11 @@ proc isBrowserDebugPortReady(port: int): bool =
 
 proc ensureSystemDependencies(self: App) =
   let (_, pythonResponse) = execCmdEx("command -v python3")
+  let (_, chromiumHeadlessShellResponse) = execCmdEx("command -v chromium-headless-shell")
   let (_, chromiumBrowserResponse) = execCmdEx("command -v chromium-browser")
   let (_, chromiumResponse) = execCmdEx("command -v chromium")
 
-  if pythonResponse == 0 and (chromiumBrowserResponse == 0 or chromiumResponse == 0):
+  if pythonResponse == 0 and (chromiumHeadlessShellResponse == 0 or chromiumBrowserResponse == 0 or chromiumResponse == 0):
     return
 
   self.log "Installing Browser Snapshot system dependencies..."
@@ -160,7 +192,10 @@ proc ensureSystemDependencies(self: App) =
     self.logError &"Error installing Python dependencies (response {pythonInstallResponse})"
     return
 
-  var chromiumInstallResponse = execShellCmd("sudo apt-get install -y chromium-browser")
+  var chromiumInstallResponse = execShellCmd("sudo apt-get install -y chromium-headless-shell")
+  if chromiumInstallResponse != 0:
+    self.log "Package chromium-headless-shell unavailable, retrying with chromium-browser..."
+    chromiumInstallResponse = execShellCmd("sudo apt-get install -y chromium-browser")
   if chromiumInstallResponse != 0:
     self.log "Package chromium-browser unavailable, retrying with chromium..."
     chromiumInstallResponse = execShellCmd("sudo apt-get install -y chromium")
@@ -212,16 +247,15 @@ proc ensureBackgroundBrowser(self: App): bool =
     except CatchableError:
       discard
 
-  let (chromiumPath, binaryResponse) = execCmdEx("command -v chromium-browser || command -v chromium")
-  if binaryResponse != 0:
-    self.logError "Could not find chromium-browser or chromium in PATH"
+  let chromiumBinary = pickChromiumBinary()
+  if chromiumBinary.len == 0:
+    self.logError "Could not find chromium-headless-shell, chromium-browser, or chromium in PATH"
     return false
-
-  let chromiumBinary = chromiumPath.strip()
 
   self.log "Starting background Chromium process for Browser Snapshot..."
   try:
-    let startCommand = &"nohup {shellQuote(chromiumBinary)} --headless --disable-gpu --no-sandbox --disable-dev-shm-usage --remote-debugging-address=127.0.0.1 --remote-debugging-port={CHROMIUM_DEBUG_PORT} --user-data-dir=/tmp/frameos_browser_snapshot_profile about:blank >> {shellQuote(CHROMIUM_LOG_FILE)} 2>&1 & echo $! > {shellQuote(CHROMIUM_PID_FILE)}"
+    let argString = LIGHTWEIGHT_CHROMIUM_ARGS.mapIt(shellQuote(it)).join(" ")
+    let startCommand = &"nohup {shellQuote(chromiumBinary)} {argString} >> {shellQuote(CHROMIUM_LOG_FILE)} 2>&1 & echo $! > {shellQuote(CHROMIUM_PID_FILE)}"
     let response = execShellCmd("bash -lc " & shellQuote(startCommand))
     if response != 0:
       self.logError &"Error starting background Chromium process (response {response})"
@@ -240,6 +274,14 @@ proc ensureBackgroundBrowser(self: App): bool =
   self.logError &"Chromium debug port {CHROMIUM_DEBUG_PORT} did not become ready in {CHROMIUM_STARTUP_ATTEMPTS * CHROMIUM_STARTUP_SLEEP_MS / 1000}s (pid={chromiumPid}, alive={chromiumAlive})"
   self.logError &"Chromium startup log tail:\n{tailLog(CHROMIUM_LOG_FILE)}"
   return false
+
+proc pickChromiumBinary(): string =
+  let browserCandidates = ["chromium-headless-shell", "chromium-browser", "chromium"]
+  for candidate in browserCandidates:
+    let (path, response) = execCmdEx("command -v " & candidate)
+    if response == 0:
+      return path.strip()
+  return ""
 
 proc get*(self: App, context: ExecutionContext): Image =
   if not self.systemDepsChecked:
