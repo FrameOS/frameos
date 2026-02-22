@@ -35,6 +35,7 @@ type
 
   App* = ref object of AppRoot
     appConfig*: AppConfig
+    systemDepsChecked: bool
 
 proc ensureVenvExists(self: App): string
 proc ensureBackgroundBrowser(self: App): bool
@@ -79,6 +80,7 @@ proc ensureSystemDependencies(self: App) =
 proc init*(self: App) =
   ## (Initialization if needed)
   self.ensureSystemDependencies()
+  self.systemDepsChecked = true
   discard self.ensureVenvExists()
   discard self.ensureBackgroundBrowser()
 
@@ -142,6 +144,9 @@ proc ensureBackgroundBrowser(self: App): bool =
   return false
 
 proc get*(self: App, context: ExecutionContext): Image =
+  if not self.systemDepsChecked:
+    self.init()
+
   let width = if self.appConfig.width != 0:
                 self.appConfig.width
               elif context.hasImage:
