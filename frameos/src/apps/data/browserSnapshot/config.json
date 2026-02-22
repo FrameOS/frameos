@@ -1,6 +1,6 @@
 {
     "name": "Browser snapshot",
-    "description": "Capture a snapshot of a website with playwright and headless chromium. Needs a 64-bit system.",
+    "description": "Capture a snapshot of a website using a lightweight wkhtmltoimage renderer (imgkit-backed), optimized for low-memory devices.",
     "category": "data",
     "version": "1.0.0",
     "fields": [
