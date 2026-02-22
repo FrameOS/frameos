@@ -57,7 +57,6 @@ const LIGHTWEIGHT_CHROMIUM_ARGS = @[
   "--remote-debugging-address=127.0.0.1",
   "--remote-debugging-port=" & $CHROMIUM_DEBUG_PORT,
   "--user-data-dir=" & CHROMIUM_USER_DATA_DIR,
-  "--window-size=800,600",
   "about:blank"
 ]
 
@@ -75,7 +74,7 @@ type
     memoryKb: int
 
 proc ensureVenvExists(self: App): string
-proc ensureBackgroundBrowser(self: App): bool
+proc ensureBackgroundBrowser(self: App, width: int = 800, height: int = 600): bool
 proc stopBackgroundBrowser(self: App)
 proc shellQuote(value: string): string
 proc pickChromiumBinary(): string
@@ -186,7 +185,7 @@ proc init*(self: App) =
   self.ensureSystemDependencies()
   self.systemDepsChecked = true
   discard self.ensureVenvExists()
-  discard self.ensureBackgroundBrowser()
+  discard self.ensureBackgroundBrowser(self.appConfig.width, self.appConfig.height)
 
 # Ensure the virtual environment exists and is set up
 proc ensureVenvExists(self: App): string =
@@ -207,7 +206,7 @@ proc ensureVenvExists(self: App): string =
       self.logError &"Error installing playwright: {e.msg}"
       return
 
-proc ensureBackgroundBrowser(self: App): bool =
+proc ensureBackgroundBrowser(self: App, width: int = 800, height: int = 600): bool =
   if isBrowserDebugPortReady(CHROMIUM_DEBUG_PORT):
     return true
 
@@ -228,7 +227,8 @@ proc ensureBackgroundBrowser(self: App): bool =
 
   self.log "Starting background Chromium process for Browser Snapshot..."
   try:
-    let argString = LIGHTWEIGHT_CHROMIUM_ARGS.mapIt(shellQuote(it)).join(" ")
+    let chromiumArgs = LIGHTWEIGHT_CHROMIUM_ARGS & @["--window-size=" & $width & "," & $height]
+    let argString = chromiumArgs.mapIt(shellQuote(it)).join(" ")
     let startCommand = &"nohup {shellQuote(chromiumBinary)} {argString} >> {shellQuote(CHROMIUM_LOG_FILE)} 2>&1 & echo $! > {shellQuote(CHROMIUM_PID_FILE)}"
     let response = execShellCmd("bash -lc " & shellQuote(startCommand))
     if response != 0:
@@ -313,7 +313,7 @@ proc get*(self: App, context: ExecutionContext): Image =
     # Ensure the Python venv for Playwright exists and is set up.
     let venvRoot = self.ensureVenvExists()
     let venvPython = venvRoot & "/bin/python"
-    if not self.ensureBackgroundBrowser():
+    if not self.ensureBackgroundBrowser(width, height):
       if context.hasImage:
         return context.image
       else:
@@ -347,7 +347,7 @@ page.wait_for_timeout(1500)
       if attempt > 0:
         self.log "Retrying Browser Snapshot with a fresh Chromium process"
         self.stopBackgroundBrowser()
-        if not self.ensureBackgroundBrowser():
+        if not self.ensureBackgroundBrowser(width, height):
           return renderError(width, height, "Chromium browser is not available")
         sleep(CHROMIUM_STARTUP_SETTLE_MS)
 
