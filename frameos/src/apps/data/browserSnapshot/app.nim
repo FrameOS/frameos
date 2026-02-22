@@ -39,22 +39,21 @@ const LIGHTWEIGHT_CHROMIUM_ARGS = @[
   "--disable-software-rasterizer",
   "--disable-extensions",
   "--disable-background-networking",
-  "--disable-background-timer-throttling",
   "--disable-breakpad",
   "--disable-component-update",
   "--disable-default-apps",
   "--disable-dev-shm-usage",
-  "--disable-features=Translate,BackForwardCache,AutofillServerCommunication,OptimizationHints,MediaRouter,SubresourceFilter",
-  "--disable-ipc-flooding-protection",
-  "--disable-renderer-backgrounding",
+  "--disable-features=Translate,BackForwardCache,AutofillServerCommunication,OptimizationHints,MediaRouter,SubresourceFilter,PaintHolding",
   "--disable-sync",
   "--disk-cache-size=1",
   "--media-cache-size=1",
   "--metrics-recording-only",
   "--mute-audio",
   "--no-first-run",
+  "--no-zygote",
   "--password-store=basic",
-  "--process-per-site",
+  "--renderer-process-limit=1",
+  "--single-process",
   "--remote-debugging-address=127.0.0.1",
   "--remote-debugging-port=" & $CHROMIUM_DEBUG_PORT,
   "--user-data-dir=" & CHROMIUM_USER_DATA_DIR,
@@ -324,7 +323,11 @@ proc get*(self: App, context: ExecutionContext): Image =
       .replace("BROWSER_DEBUG_PORT", $CHROMIUM_DEBUG_PORT)
       .replace("WIDTH", $width).replace("HEIGHT", $height)
     # TODO: make this configurable... but also compatible with a background browser process
-    let scriptBody = "page.wait_for_load_state(\"networkidle\")\n"
+    let scriptBody = """
+page.emulate_media(reduced_motion="reduce")
+page.wait_for_load_state("domcontentloaded")
+page.wait_for_timeout(1500)
+"""
     let scriptTail = DEFAULT_PLAYWRIGHT_SCRIPT_END.replace("SCREENSHOT_PATH", $(%*(screenshotFile)))
 
     writeFile(scriptFile, scripHead & scriptBody & "\n" & scriptTail)

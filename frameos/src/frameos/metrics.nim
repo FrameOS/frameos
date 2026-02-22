@@ -28,22 +28,10 @@ proc getMemoryUsage(self: MetricsLoggerThread): JsonNode =
     "total": memoryInfo.total,
     "available": memoryInfo.avail,
     "percentage": memoryInfo.percent,
-    "used": memoryInfo.used,
-    "free": memoryInfo.free,
-    "active": memoryInfo.active,
   }
 
 proc getCPUUsage(self: MetricsLoggerThread): float =
   result = psutil.cpuPercent(interval = 1)
-
-proc getSwapUsage(self: MetricsLoggerThread): JsonNode =
-  let swapInfo = psutil.swapMemory()
-  result = %*{
-    "total": swapInfo.total,
-    "used": swapInfo.used,
-    "free": swapInfo.free,
-    "percentage": swapInfo.percent,
-  }
 
 proc getOpenFileDescriptors(self: MetricsLoggerThread): int =
   var fdCount = 0
@@ -58,7 +46,6 @@ proc logMetrics(self: MetricsLoggerThread) =
     "load": self.getLoadAverage(),
     "cpuTemperature": self.getCPUTemperature(),
     "memoryUsage": self.getMemoryUsage(),
-    "swapUsage": self.getSwapUsage(),
     "cpuUsage": self.getCPUUsage(),
     "openFileDescriptors": self.getOpenFileDescriptors(),
   })
