@@ -26,9 +26,9 @@ playwright.stop()
 const CHROMIUM_DEBUG_PORT = 9222
 const CHROMIUM_STARTUP_ATTEMPTS = 240
 const CHROMIUM_STARTUP_SLEEP_MS = 500
-const CHROMIUM_MIN_SWAP_KB = 1024 * 1024
+const CHROMIUM_MIN_SWAP_KB = 1024 * 512
 const CHROMIUM_SWAP_FILE = "/srv/frameos/tmp/swap/chromium.swap"
-const CHROMIUM_SWAP_SIZE_MB = 1024
+const CHROMIUM_SWAP_SIZE_MB = 512
 const CHROMIUM_PID_FILE = "/tmp/frameos_browser_snapshot_chromium.pid"
 const CHROMIUM_LOG_FILE = "/tmp/frameos_browser_snapshot_chromium.log"
 const CHROMIUM_USER_DATA_DIR = "/tmp/frameos_browser_snapshot_profile"
@@ -229,9 +229,7 @@ proc ensureVenvExists(self: App): string =
       return
 
 proc ensureBackgroundBrowser(self: App): bool =
-  if not self.ensureChromiumSwap():
-    self.logError "Could not ensure minimum swap before starting Chromium"
-    return false
+  discard self.ensureChromiumSwap()
 
   if isBrowserDebugPortReady(CHROMIUM_DEBUG_PORT):
     return true
