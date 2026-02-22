@@ -26,14 +26,13 @@ playwright.stop()
 const CHROMIUM_DEBUG_PORT = 9222
 const CHROMIUM_STARTUP_ATTEMPTS = 240
 const CHROMIUM_STARTUP_SLEEP_MS = 500
-const CHROMIUM_MIN_SWAP_KB = 1024 * 512
+const CHROMIUM_MIN_RAM_KB = 1024 * 1024
 const CHROMIUM_STARTUP_SETTLE_MS = 2500
 const PLAYWRIGHT_NAVIGATION_TIMEOUT_MS = 90000
-const CHROMIUM_SWAP_FILE = "/srv/frameos/tmp/swap/chromium.swap"
-const CHROMIUM_SWAP_SIZE_MB = 512
 const CHROMIUM_PID_FILE = "/tmp/frameos_browser_snapshot_chromium.pid"
 const CHROMIUM_LOG_FILE = "/tmp/frameos_browser_snapshot_chromium.log"
 const CHROMIUM_USER_DATA_DIR = "/tmp/frameos_browser_snapshot_profile"
+const LOW_RAM_ERROR = "Error: Can't take a browser snapshot.\n\nModern browsers need at least 1GB of RAM to run.\n\nThis device has just {memoryMb} MB.\n\nSorry. :("
 const LIGHTWEIGHT_CHROMIUM_ARGS = @[
   "--headless",
   "--no-sandbox",
@@ -71,17 +70,21 @@ type
   App* = ref object of AppRoot
     appConfig*: AppConfig
     systemDepsChecked: bool
+    hasEnoughRam: bool
+    memoryKb: int
 
 proc ensureVenvExists(self: App): string
 proc ensureBackgroundBrowser(self: App): bool
 proc stopBackgroundBrowser(self: App)
 proc shellQuote(value: string): string
 proc pickChromiumBinary(): string
+proc currentRamKb(): int
+proc hasMinimumRam(self: App): bool
 
-proc currentSwapKb(): int64 =
+proc currentRamKb(): int =
   try:
     for line in readFile("/proc/meminfo").splitLines():
-      if line.startsWith("SwapTotal:"):
+      if line.startsWith("MemTotal:"):
         let parts = line.splitWhitespace()
         if parts.len >= 2:
           return parseInt(parts[1])
@@ -89,47 +92,11 @@ proc currentSwapKb(): int64 =
     return 0
   return 0
 
-proc ensureChromiumSwap(self: App): bool =
-  let initialSwapKb = currentSwapKb()
-  if initialSwapKb >= CHROMIUM_MIN_SWAP_KB:
-    return true
-
-  self.log &"Swap is only {initialSwapKb}kB, ensuring at least {CHROMIUM_MIN_SWAP_KB}kB before starting Chromium"
-
-  let swapFolder = splitPath(CHROMIUM_SWAP_FILE).head
-  if execShellCmd("sudo mkdir -p " & shellQuote(swapFolder)) != 0:
-    self.logError &"Unable to create swap directory {swapFolder}"
+proc hasMinimumRam(self: App): bool =
+  self.memoryKb = currentRamKb()
+  if self.memoryKb.float < CHROMIUM_MIN_RAM_KB.float * 0.95: # give small 50mb buffer
+    self.logError &"Not enough RAM for Browser Snapshot ({self.memoryKb}kB < {CHROMIUM_MIN_RAM_KB}kB)"
     return false
-
-  if not fileExists(CHROMIUM_SWAP_FILE):
-    var createResponse = execShellCmd(&"sudo fallocate -l {CHROMIUM_SWAP_SIZE_MB}M {shellQuote(CHROMIUM_SWAP_FILE)}")
-    if createResponse != 0:
-      self.log "fallocate failed, retrying swapfile creation with dd"
-      createResponse = execShellCmd(&"sudo dd if=/dev/zero of={shellQuote(CHROMIUM_SWAP_FILE)} bs=1M count={CHROMIUM_SWAP_SIZE_MB} status=none")
-    if createResponse != 0:
-      self.logError &"Unable to create Chromium swap file at {CHROMIUM_SWAP_FILE}"
-      return false
-
-    if execShellCmd("sudo chmod 600 " & shellQuote(CHROMIUM_SWAP_FILE)) != 0:
-      self.logError &"Unable to set permissions on {CHROMIUM_SWAP_FILE}"
-      return false
-
-    if execShellCmd("sudo mkswap " & shellQuote(CHROMIUM_SWAP_FILE)) != 0:
-      self.logError &"Unable to initialize swap file {CHROMIUM_SWAP_FILE}"
-      return false
-
-  let (_, isAlreadyActive) = execCmdEx(&"sudo swapon --show=NAME --noheadings | grep -Fx {shellQuote(CHROMIUM_SWAP_FILE)}")
-  if isAlreadyActive != 0:
-    if execShellCmd("sudo swapon " & shellQuote(CHROMIUM_SWAP_FILE)) != 0:
-      self.logError &"Unable to activate swap file {CHROMIUM_SWAP_FILE}"
-      return false
-
-  let updatedSwapKb = currentSwapKb()
-  if updatedSwapKb < CHROMIUM_MIN_SWAP_KB:
-    self.logError &"Swap is still below minimum after setup ({updatedSwapKb}kB < {CHROMIUM_MIN_SWAP_KB}kB)"
-    return false
-
-  self.log &"Swap increased to {updatedSwapKb}kB for Chromium"
   return true
 
 proc shellQuote(value: string): string =
@@ -206,6 +173,11 @@ proc ensureSystemDependencies(self: App) =
 
 proc init*(self: App) =
   ## (Initialization if needed)
+  self.hasEnoughRam = self.hasMinimumRam()
+  if not self.hasEnoughRam:
+    self.systemDepsChecked = true
+    return
+
   self.ensureSystemDependencies()
   self.systemDepsChecked = true
   discard self.ensureVenvExists()
@@ -231,8 +203,6 @@ proc ensureVenvExists(self: App): string =
       return
 
 proc ensureBackgroundBrowser(self: App): bool =
-  discard self.ensureChromiumSwap()
-
   if isBrowserDebugPortReady(CHROMIUM_DEBUG_PORT):
     return true
 
@@ -321,6 +291,9 @@ proc get*(self: App, context: ExecutionContext): Image =
                 context.image.height
                 else:
                   self.frameConfig.renderHeight()
+
+  if not self.hasEnoughRam:
+    return renderError(width, height, LOW_RAM_ERROR.replace("{memoryMb}", $(round(self.memoryKb / 1024).int)))
 
   try:
     let screenshotFile = fmt"/tmp/frameos_screenshot_{rand(1000000)}_{rand(1000000)}.png"
