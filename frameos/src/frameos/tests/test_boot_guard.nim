@@ -47,6 +47,16 @@ try:
     doAssert details.sceneName.isSome and details.sceneName.get() == "Family Calendar"
     doAssert details.error.isSome and details.error.get() == "example crash"
 
+
+  block test_boot_guard_failure_details_without_error_keeps_scene:
+    resetBootGuardState()
+    updateBootGuardFailureDetails(some("calendar/main"), some("Family Calendar"), some("example crash"))
+    updateBootGuardFailureDetails(some("calendar/main"), some("Family Calendar"), none(string))
+    let detailsNoError = loadBootGuardFailureDetails()
+    doAssert detailsNoError.sceneId.isSome and detailsNoError.sceneId.get() == "calendar/main"
+    doAssert detailsNoError.sceneName.isSome and detailsNoError.sceneName.get() == "Family Calendar"
+    doAssert detailsNoError.error.isNone
+
   block test_boot_guard_fallback_scene_id:
     doAssert bootGuardFallbackSceneId() == "system/bootGuard"
 finally:

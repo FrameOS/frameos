@@ -126,6 +126,9 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
     let exportedScene = exportedScenes[sceneId]
     if lastSceneId != sceneId:
       self.logger.log(%*{"event": "render:sceneChange", "sceneId": sceneId.string})
+      # Persist the active scene context before rendering so boot guard can
+      # still show which scene was running even if the process crashes hard.
+      updateBootGuardFailureDetails(some(sceneId.string), getSceneDisplayName(sceneId), none(string))
       if self.scenes.hasKey(sceneId):
         currentScene = self.scenes[sceneId]
       else:
