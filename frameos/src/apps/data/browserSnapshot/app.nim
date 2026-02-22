@@ -20,6 +20,8 @@ page.goto(URL_TO_CAPTURE, timeout=NAVIGATION_TIMEOUT_MS, wait_until="domcontentl
 const DEFAULT_PLAYWRIGHT_SCRIPT_END = """
 page.screenshot(path=SCREENSHOT_PATH, timeout=120000)
 page.close()
+if not PERSIST_SESSION:
+    context.close()
 playwright.stop()
 """
 
@@ -66,6 +68,7 @@ type
     width*: int
     height*: int
     disableLowMemoryCheck*: bool
+    persistSession*: bool
 
   App* = ref object of AppRoot
     appConfig*: AppConfig
@@ -323,8 +326,14 @@ proc get*(self: App, context: ExecutionContext): Image =
     sleep(CHROMIUM_STARTUP_SETTLE_MS)
 
     # Write the playwright script to a temporary file
+    let scriptContext = if self.appConfig.persistSession:
+      "context = browser.contexts[0] if browser.contexts else browser.new_context()"
+    else:
+      "context = browser.new_context()"
+
     let scripHead = DEFAULT_PLAYWRIGHT_SCRIPT_START.replace("URL_TO_CAPTURE", $(%*(self.appConfig.url)))
       .replace("BROWSER_DEBUG_PORT", $CHROMIUM_DEBUG_PORT)
+      .replace("context = browser.contexts[0] if browser.contexts else browser.new_context()", scriptContext)
       .replace("WIDTH", $width).replace("HEIGHT", $height)
       .replace("NAVIGATION_TIMEOUT_MS", $PLAYWRIGHT_NAVIGATION_TIMEOUT_MS)
     # TODO: make this configurable... but also compatible with a background browser process
@@ -334,6 +343,7 @@ page.wait_for_load_state("domcontentloaded")
 page.wait_for_timeout(1500)
 """
     let scriptTail = DEFAULT_PLAYWRIGHT_SCRIPT_END.replace("SCREENSHOT_PATH", $(%*(screenshotFile)))
+      .replace("PERSIST_SESSION", if self.appConfig.persistSession: "True" else: "False")
 
     writeFile(scriptFile, scripHead & scriptBody & "\n" & scriptTail)
 
