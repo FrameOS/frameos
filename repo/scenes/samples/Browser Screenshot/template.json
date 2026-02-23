@@ -1,0 +1,9 @@
+{
+  "name": "Browser Screenshot",
+  "description": "Only works with >1GB RAM. No Zero W2! Take a screenshot of a website on device using chromium.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 1280,
+  "imageHeight": 720,
+  "scenes": "./scenes.json"
+}
