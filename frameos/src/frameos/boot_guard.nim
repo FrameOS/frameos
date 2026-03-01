@@ -61,7 +61,9 @@ proc registerBootCrash*(): int =
 proc clearBootCrashCount*() =
   if loadBootCrashCount() == 0:
     return
-  writeBootGuardState(0, BootGuardFailureDetails(sceneId: none(string), sceneName: none(string), error: none(string)))
+  # Preserve the last failure context so safe mode can continue to show
+  # which scene triggered the fallback across subsequent re-renders.
+  writeBootCrashCount(0)
 
 proc updateBootGuardFailureDetails*(sceneId: Option[string], sceneName: Option[string], error: Option[string]) =
   writeBootGuardState(loadBootCrashCount(), BootGuardFailureDetails(sceneId: sceneId, sceneName: sceneName, error: error))
