@@ -32,10 +32,10 @@ proc buildFailureText(self: Scene): string =
     if isSelfFallback:
       &"FrameOS crashed during startup {BOOT_GUARD_CRASH_LIMIT} times, so it switched to safe mode."
     else:
-      &"FrameOS tried to render scene '{sceneName}' (id: {sceneId}) {BOOT_GUARD_CRASH_LIMIT} times, but it crashed each time."
+      &"FrameOS tried to render a scene {BOOT_GUARD_CRASH_LIMIT} times, but it crashed each time.\n\nScene name: {sceneName}\nScene id: {sceneId}"
 
   var lines: seq[string] = @[
-    "FrameOS Safe Mode",
+    "^(32,underline)FrameOS Safe Mode^(24,no-underline)",
     "",
     failureLine,
     "",
@@ -57,6 +57,8 @@ proc runNode*(self: Scene, nodeId: NodeId, context: ExecutionContext) =
   case nodeId:
   of 1.NodeId:
     self.node1.appConfig.text = self.buildFailureText()
+    self.node1.appConfig.richText = "basic-caret"
+    self.node1.appConfig.vAlign = "middle"
     self.node1.run(context)
   else:
     discard
