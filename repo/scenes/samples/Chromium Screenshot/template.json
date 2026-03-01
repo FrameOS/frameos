@@ -1,0 +1,9 @@
+{
+  "name": "Chromium Screenshot",
+  "description": "Chromium only works on devices with over 1GB of RAM. This will NOT work on the Pi Zero W2!",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 1280,
+  "imageHeight": 720,
+  "scenes": "./scenes.json"
+}
