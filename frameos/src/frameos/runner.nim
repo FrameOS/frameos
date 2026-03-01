@@ -10,6 +10,7 @@ import frameos/types
 import frameos/utils/image
 import frameos/utils/time
 import frameos/scenes
+import frameos/boot_guard
 
 import drivers/drivers as drivers
 
@@ -95,6 +96,7 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
       discard
     result = (outImage.rotateDegrees(self.frameConfig.rotate), context.nextSleep)
   except Exception as e:
+    updateBootGuardFailureDetails(some(scene.id.string), getSceneDisplayName(scene.id), some($e.msg))
     result = (renderError(requiredWidth, requiredHeight, &"Error: {$e.msg}\n{$e.getStackTrace()}"), context.nextSleep)
     self.logger.log(%*{"event": "render:error", "error": $e.msg, "stacktrace": e.getStackTrace()})
 
@@ -112,6 +114,7 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
   var nextServerRenderAt = getMonoTime()
   var lastSceneId = "".SceneId
   var currentScene: FrameScene
+  var successfulSceneRenders = 0
   let serverRenderDelay = initDuration(milliseconds = int(SERVER_RENDER_DELAY_SECONDS * 1000))
 
   while true:
@@ -124,6 +127,10 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
     let exportedScene = exportedScenes[sceneId]
     if lastSceneId != sceneId:
       self.logger.log(%*{"event": "render:sceneChange", "sceneId": sceneId.string})
+      # Persist the active scene context early in boot, then stop writing it
+      # after a few successful renders to reduce SD card writes.
+      if shouldPersistBootGuardContext(successfulSceneRenders):
+        updateBootGuardFailureDetails(some(sceneId.string), getSceneDisplayName(sceneId), none(string))
       if self.scenes.hasKey(sceneId):
         currentScene = self.scenes[sceneId]
       else:
@@ -132,6 +139,7 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
           self.scenes[sceneId] = currentScene
           currentScene.updateLastPublicState()
         except Exception as e:
+          updateBootGuardFailureDetails(some(sceneId.string), getSceneDisplayName(sceneId), some($e.msg))
           self.logger.log(%*{"event": "render:error:scene:init", "error": $e.msg, "stacktrace": e.getStackTrace()})
 
       lastSceneId = sceneId
@@ -142,6 +150,8 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
 
     let interval = currentScene.refreshInterval
     let (lastRotatedImage, nextSleep) = self.renderSceneImage(exportedScene, currentScene)
+    clearBootCrashCount()
+    successfulSceneRenders += 1
     if interval < 1:
       let now = getMonoTime()
       if now >= nextServerRenderAt:

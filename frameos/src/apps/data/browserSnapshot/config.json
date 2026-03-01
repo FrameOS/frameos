@@ -25,6 +25,20 @@
         "value": "",
         "label": "Height (0=full height)",
         "placeholder": "0"
+      },
+      {
+        "name": "persistSession",
+        "type": "boolean",
+        "value": true,
+        "label": "Persist browser session between renders",
+        "hint": "When enabled, cookies/session storage persist between captures. Disable to use a fresh incognito-like session for each render."
+      },
+      {
+        "name": "disableLowMemoryCheck",
+        "type": "boolean",
+        "value": false,
+        "label": "Disable low memory check",
+        "hint": "Always install and run Chromium, even if we have less than 1GB of RAM. Disable this at your own risk!"
       }
     ],
     "output": [

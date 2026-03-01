@@ -1,7 +1,7 @@
 import json, jsony, pixie, times, options, strformat, strutils, locks, tables, sequtils, os
 import pixie/fileformats/png
 import scenes/scenes
-import system/scenes
+import system/scenes as systemScenesRegistry
 import frameos/types
 import frameos/interpreter
 
@@ -59,6 +59,25 @@ proc updateUploadedScenes*(newScenes: Table[SceneId, ExportedInterpretedScene]) 
     uploadedScenes = newScenes
     for sceneId, scene in newScenes:
       exportedScenes[sceneId] = scene.ExportedScene
+
+
+proc getSceneDisplayName*(sceneId: SceneId): Option[string] =
+  withLock sceneRegistryLock:
+    for (candidateId, sceneName) in scenes.sceneOptions:
+      if candidateId == sceneId and sceneName.len > 0:
+        return some(sceneName)
+    for (candidateId, sceneName) in systemScenesRegistry.sceneOptions:
+      if candidateId == sceneId and sceneName.len > 0:
+        return some(sceneName)
+    if interpretedScenes.hasKey(sceneId):
+      let interpreted = interpretedScenes[sceneId]
+      if interpreted.name.len > 0:
+        return some(interpreted.name)
+    if uploadedScenes.hasKey(sceneId):
+      let uploaded = uploadedScenes[sceneId]
+      if uploaded.name.len > 0:
+        return some(uploaded.name)
+    return none(string)
 
 proc getDynamicSceneOptions*(): seq[tuple[id: SceneId, name: string]] =
   withLock sceneRegistryLock:

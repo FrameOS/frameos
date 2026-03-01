@@ -1,0 +1,71 @@
+import std/[os, options]
+import ../boot_guard
+
+let bootGuardPath = BOOT_GUARD_STATE_PATH
+let bootGuardDir = parentDir(bootGuardPath)
+let hadExistingState = fileExists(bootGuardPath)
+let existingState = if hadExistingState: readFile(bootGuardPath) else: ""
+
+proc restoreBootGuardState() =
+  if hadExistingState:
+    createDir(bootGuardDir)
+    writeFile(bootGuardPath, existingState)
+  elif fileExists(bootGuardPath):
+    removeFile(bootGuardPath)
+
+proc resetBootGuardState() =
+  if fileExists(bootGuardPath):
+    removeFile(bootGuardPath)
+
+try:
+  block test_boot_guard_counting:
+    resetBootGuardState()
+    doAssert loadBootCrashCount() == 0
+    doAssert not shouldUseFallbackScene()
+
+    doAssert registerBootCrash() == 1
+    doAssert loadBootCrashCount() == 1
+    doAssert not shouldUseFallbackScene()
+
+    doAssert registerBootCrash() == 2
+    doAssert loadBootCrashCount() == 2
+    doAssert not shouldUseFallbackScene()
+
+    doAssert registerBootCrash() == 3
+    doAssert loadBootCrashCount() == 3
+    doAssert shouldUseFallbackScene()
+
+    clearBootCrashCount()
+    doAssert loadBootCrashCount() == 0
+    doAssert not shouldUseFallbackScene()
+
+  block test_boot_guard_failure_details:
+    resetBootGuardState()
+    updateBootGuardFailureDetails(some("calendar/main"), some("Family Calendar"), some("example crash"))
+    let details = loadBootGuardFailureDetails()
+    doAssert details.sceneId.isSome and details.sceneId.get() == "calendar/main"
+    doAssert details.sceneName.isSome and details.sceneName.get() == "Family Calendar"
+    doAssert details.error.isSome and details.error.get() == "example crash"
+
+
+  block test_boot_guard_failure_details_without_error_keeps_scene:
+    resetBootGuardState()
+    updateBootGuardFailureDetails(some("calendar/main"), some("Family Calendar"), some("example crash"))
+    updateBootGuardFailureDetails(some("calendar/main"), some("Family Calendar"), none(string))
+    let detailsNoError = loadBootGuardFailureDetails()
+    doAssert detailsNoError.sceneId.isSome and detailsNoError.sceneId.get() == "calendar/main"
+    doAssert detailsNoError.sceneName.isSome and detailsNoError.sceneName.get() == "Family Calendar"
+    doAssert detailsNoError.error.isNone
+
+
+  block test_boot_guard_context_persist_limit:
+    doAssert shouldPersistBootGuardContext(0)
+    doAssert shouldPersistBootGuardContext(1)
+    doAssert shouldPersistBootGuardContext(2)
+    doAssert not shouldPersistBootGuardContext(3)
+    doAssert not shouldPersistBootGuardContext(10)
+
+  block test_boot_guard_fallback_scene_id:
+    doAssert bootGuardFallbackSceneId() == "system/bootGuard"
+finally:
+  restoreBootGuardState()

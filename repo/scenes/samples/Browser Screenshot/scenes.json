@@ -1,0 +1,320 @@
+[
+  {
+    "id": "9f5a338b-0048-495a-a64f-e3190071ff51",
+    "name": "Browser Screenshot",
+    "settings": {
+      "execution": "interpreted",
+      "refreshInterval": 3600,
+      "backgroundColor": "#000000",
+      "prompt": "scene that renders a browser screenshot. put the url as public state"
+    },
+    "fields": [
+      {
+        "name": "url",
+        "type": "text",
+        "label": "URL",
+        "description": "Webpage URL to screenshot",
+        "required": true,
+        "value": "https://example.com",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "seconds",
+        "type": "integer",
+        "label": "Refresh seconds",
+        "description": "How often to refresh the screenshot (used by logic/nextSleepDuration).",
+        "required": true,
+        "value": "3600",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "persistSession",
+        "label": "Persist session",
+        "type": "boolean",
+        "persist": "disk",
+        "access": "public",
+        "value": "false"
+      }
+    ],
+    "nodes": [
+      {
+        "id": "evt_render",
+        "type": "event",
+        "data": {
+          "keyword": "render",
+          "config": {}
+        },
+        "position": {
+          "x": -7.543865911096077,
+          "y": -105.61412275534505
+        },
+        "width": 237,
+        "height": 134,
+        "selected": false,
+        "positionAbsolute": {
+          "x": -7.543865911096077,
+          "y": -105.61412275534505
+        },
+        "dragging": false
+      },
+      {
+        "id": "st_url",
+        "type": "state",
+        "data": {
+          "keyword": "url",
+          "value": "https://example.com"
+        },
+        "position": {
+          "x": 194.86105182025977,
+          "y": -404.8966428606191
+        },
+        "width": 118,
+        "height": 48,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 194.86105182025977,
+          "y": -404.8966428606191
+        },
+        "dragging": false
+      },
+      {
+        "id": "app_browserSnapshot",
+        "type": "app",
+        "data": {
+          "keyword": "data/browserSnapshot",
+          "config": {
+            "width": "",
+            "height": ""
+          }
+        },
+        "position": {
+          "x": 250.42438632084287,
+          "y": -320.8713706694397
+        },
+        "width": 394,
+        "height": 224,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 250.42438632084287,
+          "y": -320.8713706694397
+        },
+        "dragging": false
+      },
+      {
+        "id": "app_renderImage",
+        "type": "app",
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "cover"
+          }
+        },
+        "position": {
+          "x": 312.22275962115185,
+          "y": -53.076916756577305
+        },
+        "width": 324,
+        "height": 134,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 312.22275962115185,
+          "y": -53.076916756577305
+        },
+        "dragging": false
+      },
+      {
+        "id": "app_nextSleep",
+        "type": "app",
+        "data": {
+          "keyword": "logic/nextSleepDuration",
+          "config": {}
+        },
+        "position": {
+          "x": 835.938620852324,
+          "y": -71.06004913230626
+        },
+        "width": 289,
+        "height": 78,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 835.938620852324,
+          "y": -71.06004913230626
+        },
+        "dragging": false
+      },
+      {
+        "id": "st_seconds",
+        "type": "state",
+        "data": {
+          "keyword": "seconds",
+          "value": "60"
+        },
+        "position": {
+          "x": 782.2858556011107,
+          "y": -158.1549909222935
+        },
+        "width": 249,
+        "height": 48,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 782.2858556011107,
+          "y": -158.1549909222935
+        },
+        "dragging": false
+      },
+      {
+        "id": "evt_buttonA",
+        "type": "event",
+        "data": {
+          "keyword": "button",
+          "label": "A",
+          "config": {}
+        },
+        "position": {
+          "x": 9.794436662968906,
+          "y": 104.19242928390491
+        },
+        "width": 209,
+        "height": 98,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 9.794436662968906,
+          "y": 104.19242928390491
+        },
+        "dragging": false
+      },
+      {
+        "id": "app_breakIfRendering",
+        "type": "app",
+        "data": {
+          "keyword": "logic/breakIfRendering",
+          "config": {}
+        },
+        "position": {
+          "x": 288.1200912103665,
+          "y": 125.31615305079225
+        },
+        "width": 271,
+        "height": 40,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 288.1200912103665,
+          "y": 125.31615305079225
+        },
+        "dragging": false
+      },
+      {
+        "id": "dispatch_render",
+        "type": "dispatch",
+        "data": {
+          "keyword": "render",
+          "config": {}
+        },
+        "position": {
+          "x": 611.3263526338762,
+          "y": 129.47067459680483
+        },
+        "width": 260,
+        "height": 130,
+        "style": {
+          "width": 260,
+          "height": 130
+        },
+        "resizing": false,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 611.3263526338762,
+          "y": 129.47067459680483
+        },
+        "dragging": false
+      },
+      {
+        "id": "2e319e41-e702-49cc-b5da-981e3b1a85b4",
+        "position": {
+          "x": 159.23379459985705,
+          "y": -474.6294781320363
+        },
+        "data": {
+          "keyword": "persistSession"
+        },
+        "type": "state",
+        "width": 240,
+        "height": 48,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 159.23379459985705,
+          "y": -474.6294781320363
+        },
+        "dragging": false
+      }
+    ],
+    "edges": [
+      {
+        "id": "e_render_flow_1",
+        "type": "appNodeEdge",
+        "source": "evt_render",
+        "target": "app_renderImage",
+        "sourceHandle": "next",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "e_render_flow_2",
+        "type": "appNodeEdge",
+        "source": "app_renderImage",
+        "target": "app_nextSleep",
+        "sourceHandle": "next",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "e_button_flow_1",
+        "type": "appNodeEdge",
+        "source": "evt_buttonA",
+        "target": "app_breakIfRendering",
+        "sourceHandle": "next",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "e_button_flow_2",
+        "type": "appNodeEdge",
+        "source": "app_breakIfRendering",
+        "target": "dispatch_render",
+        "sourceHandle": "next",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "e_url_to_snapshot",
+        "type": "codeNodeEdge",
+        "source": "st_url",
+        "target": "app_browserSnapshot",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/url"
+      },
+      {
+        "id": "e_snapshot_to_image",
+        "type": "codeNodeEdge",
+        "source": "app_browserSnapshot",
+        "target": "app_renderImage",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/image"
+      },
+      {
+        "id": "e_seconds_to_sleep",
+        "type": "codeNodeEdge",
+        "source": "st_seconds",
+        "target": "app_nextSleep",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/duration"
+      },
+      {
+        "id": "81f5bdc9-6ae2-4887-874c-53845f8a7768",
+        "source": "2e319e41-e702-49cc-b5da-981e3b1a85b4",
+        "sourceHandle": "fieldOutput",
+        "target": "app_browserSnapshot",
+        "targetHandle": "fieldInput/persistSession",
+        "type": "codeNodeEdge"
+      }
+    ]
+  }
+]
