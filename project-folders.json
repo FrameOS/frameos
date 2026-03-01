@@ -1,0 +1,14 @@
+{
+  "projects": {
+    "frameos": {
+      "include": ["frameos"],
+      "exclude": ["frameos/agent"]
+    },
+    "agent": {
+      "include": ["frameos/agent"]
+    },
+    "docker": {
+      "include": ["repo", "backend", "frontend", "frameos", "Dockerfile", ".dockerignore"]
+    }
+  }
+}

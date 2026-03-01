@@ -115,7 +115,7 @@ RUN npm install
 
 # Copy frontend source files and run build
 COPY frontend/ ./
-COPY version.json ../
+COPY versions.json ../
 RUN npm run build
 
 # Delete all files except the dist and schema folders

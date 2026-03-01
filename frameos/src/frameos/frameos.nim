@@ -10,6 +10,7 @@ import frameos/types
 import frameos/portal as netportal
 import frameos/tls_proxy
 import frameos/setup_proxy
+import frameos/boot_guard
 import lib/tz
 
 proc newFrameOS*(): FrameOS =
@@ -66,6 +67,13 @@ proc start*(self: FrameOS) {.async.} =
         firstSceneId = some("system/wifiHotspot".SceneId)
   else:
     self.logger.log(%*{"event": "networkCheck", "status": "skipped"})
+
+  let bootCrashCount = registerBootCrash()
+  self.logger.log(%*{"event": "boot:guard", "crashesWithoutRender": bootCrashCount})
+  if shouldUseFallbackScene(bootCrashCount):
+    firstSceneId = some(bootGuardFallbackSceneId().SceneId)
+    self.logger.log(%*{"event": "boot:guard:fallback", "sceneId": bootGuardFallbackSceneId(),
+      "crashesWithoutRender": bootCrashCount, "threshold": BOOT_GUARD_CRASH_LIMIT})
 
   self.runner.start(firstSceneId)
 

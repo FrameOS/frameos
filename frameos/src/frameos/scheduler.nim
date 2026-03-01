@@ -8,7 +8,7 @@ import sequtils
 
 var thread: Thread[FrameOS]
 
-# Returns the weekday as 1=Monday .. 7=Sunday
+# Returns the weekday as 1=Monday..7=Sunday
 proc weekdayMonSun(dt: DateTime): int =
   return dt.weekday.ord + 1
 

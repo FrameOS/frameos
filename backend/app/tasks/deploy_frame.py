@@ -24,6 +24,7 @@ from app.utils.ssh_key_utils import normalize_ssh_keys, select_ssh_keys_for_fram
 from app.utils.cross_compile import TargetMetadata
 from app.tasks._frame_deployer import FrameDeployer
 from app.tasks.binary_builder import FrameBinaryBuilder
+from app.utils.versions import current_frameos_version
 
 from .utils import find_nim_v2
 
@@ -220,6 +221,7 @@ async def _deploy_with_nixos(
             "/nix/var/nix/profiles/system/bin/switch-to-configuration switch"
         )
     frame.status = 'starting'
+    frame_dict['frameos_version'] = current_frameos_version()
     frame.last_successful_deploy = frame_dict
     frame.last_successful_deploy_at = datetime.now(timezone.utc)
     await update_frame(db, redis, frame)
@@ -811,6 +813,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
         await self.exec_command("sudo systemctl disable --now caddy.service", raise_on_error=False)
 
         frame.status = 'starting'
+        frame_dict['frameos_version'] = current_frameos_version()
         frame.last_successful_deploy = frame_dict
         frame.last_successful_deploy_at = datetime.now(timezone.utc)
 

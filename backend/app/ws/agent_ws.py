@@ -14,11 +14,10 @@ from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect, status
 from starlette.websockets import WebSocketState
-from sqlalchemy.orm import Session
 from arq import ArqRedis as Redis
 
 # ── project locals ──────────────────────────────────────────────────────────
-from app.database import get_db
+from app.database import SessionLocal
 from app.redis import get_redis, create_redis_connection   # create_… gives a raw conn
 from app.websockets import publish_message
 from app.models.frame import Frame
@@ -34,6 +33,14 @@ CONN_TTL   = 60           # seconds – Redis key self-expiry
 # frame_id → list[websocket] (only for UI statistics)
 active_sockets_by_frame: dict[int, list[WebSocket]] = {}
 active_sockets: set[WebSocket] = set()
+
+
+async def write_log(redis: Redis, frame_id: int, type: str, line: str, ip: str | None = None):
+    db = SessionLocal()
+    try:
+        await log(db, redis, frame_id, type, line, ip=ip)
+    finally:
+        db.close()
 
 # ────────────────────────────────────────────────────────────────────────────
 # tiny helpers
@@ -264,7 +271,6 @@ async def pump_commands(
 @router.websocket("/ws/agent")
 async def ws_agent_endpoint(
     ws: WebSocket,
-    db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
     # ----- rudimentary DoS guard (per-worker) ------------------------------
@@ -286,7 +292,12 @@ async def ws_agent_endpoint(
         return
 
     server_api_key = str(hello_msg.get("serverApiKey", "")) or ""
-    frame = db.query(Frame).filter_by(server_api_key=server_api_key).first()
+    db = SessionLocal()
+    try:
+        frame = db.query(Frame).filter_by(server_api_key=server_api_key).first()
+    finally:
+        db.close()
+
     if frame is None:
         await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="unknown frame")
         return
@@ -340,7 +351,7 @@ async def ws_agent_endpoint(
         {"active_connections": await number_of_connections_for_frame(redis, frame.id),
          "id": frame.id}
     )
-    await log(db, redis, frame.id, "agent", f'☎️ Frame "{frame.name}" connected ☎️', ip=client_ip)
+    await write_log(redis, frame.id, "agent", f'☎️ Frame "{frame.name}" connected ☎️', ip=client_ip)
 
     # =======================================================================
     #                           RECEIVE LOOP
@@ -433,7 +444,7 @@ async def ws_agent_endpoint(
 
                 for line in data.splitlines():
                     if line:
-                        await log(db, redis, frame.id, stream, line, ip=client_ip)
+                        await write_log(redis, frame.id, stream, line, ip=client_ip)
                         await redis.rpush(STREAM_KEY.format(id=pl["id"]),
                                           json.dumps({"stream": stream, "data": line}).encode())
                 await redis.expire(STREAM_KEY.format(id=pl["id"]), 300)
@@ -463,4 +474,4 @@ async def ws_agent_endpoint(
             {"active_connections": await number_of_connections_for_frame(redis, frame.id),
              "id": frame.id}
         )
-        await log(db, redis, frame.id, "agent", f'👋 Frame "{frame.name}" disconnected 👋', ip=client_ip)
+        await write_log(redis, frame.id, "agent", f'👋 Frame "{frame.name}" disconnected 👋', ip=client_ip)

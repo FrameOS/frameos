@@ -30,14 +30,15 @@ export function ExpandedScene({
 }: ExpandedSceneProps) {
   const { stateChanges, hasStateChanges, fields } = useValues(expandedSceneLogic({ frameId, sceneId, scene }))
   const { states, sceneId: currentSceneId } = useValues(controlLogic({ frameId }))
-  const { requiresRecompilation, unsavedChanges } = useValues(frameLogic({ frameId }))
+  const { requiresRecompilation, changedScenes } = useValues(frameLogic({ frameId }))
   const { submitStateChanges, resetStateChanges } = useActions(expandedSceneLogic({ frameId, sceneId, scene }))
   const { previewScene } = useActions(scenesLogic({ frameId }))
   const { editScene } = useActions(panelsLogic)
   const fieldCount = fields.length ?? 0
 
   const currentState = states[sceneId] ?? {}
-  const canPreviewUnsavedChanges = unsavedChanges || isUndeployed
+  const sceneHasChanges = changedScenes.has(sceneId) || Boolean(isUndeployed)
+  const canPreviewUnsavedChanges = sceneHasChanges
   const activateLabel =
     isUndeployed && sceneId !== currentSceneId
       ? 'Save changes & redeploy'
@@ -65,7 +66,7 @@ export function ExpandedScene({
   }
 
   const handleActivate = async () => {
-    if (unsavedChanges || isUndeployed) {
+    if (sceneHasChanges) {
       await frameLogic({ frameId }).asyncActions.saveFrame()
       await apiFetch(`/api/frames/${frameId}/set_next_scene`, {
         method: 'POST',

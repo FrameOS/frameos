@@ -1,7 +1,6 @@
 import { useValues } from 'kea'
 import { metricsLogic } from './metricsLogic'
 import { frameLogic } from '../../frameLogic'
-import React from 'react'
 import { ParentSize } from '@visx/responsive'
 import { BrushChart } from './BrushChart'
 

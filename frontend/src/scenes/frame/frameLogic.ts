@@ -12,6 +12,7 @@ import { getBasePath } from '../../utils/getBasePath'
 import { entityImagesModel } from '../../models/entityImagesModel'
 import { arrangeNodes } from '../../utils/arrangeNodes'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
+import versions from '../../../../versions.json'
 
 export interface FrameLogicProps {
   frameId: number
@@ -23,6 +24,7 @@ export interface ChangeDetail {
 }
 
 const DEFAULT_BROWSER_TITLE = 'FrameOS Backend'
+const CURRENT_FRAMEOS_VERSION = (versions.frameos || 'dev').split('+')[0]
 
 function setBrowserTitle(frame?: FrameType | null): void {
   if (typeof document === 'undefined') {
@@ -222,7 +224,7 @@ function computeChangeDetails(
   const details: ChangeDetail[] = []
 
   for (const key of FRAME_KEYS.filter((k) => k !== 'scenes')) {
-    if (!equal(previous?.[key], next?.[key])) {
+    if (!frameKeyEqual(key, previous?.[key], next?.[key])) {
       details.push({
         label: keyLabel(key),
         requiresFullDeploy: recompileFields.has(key),
@@ -231,7 +233,39 @@ function computeChangeDetails(
   }
 
   const sceneDetails = sceneChangeDetails(next?.scenes ?? [], previous?.scenes ?? [])
+
+  const previousFrameosVersion =
+    typeof (previous as Record<string, unknown> | null | undefined)?.frameos_version === 'string'
+      ? String((previous as Record<string, unknown>).frameos_version).split('+')[0]
+      : null
+
+  if (!previousFrameosVersion || previousFrameosVersion !== CURRENT_FRAMEOS_VERSION) {
+    details.push({
+      label: `FrameOS upgrade ${previousFrameosVersion ?? ''} -> ${CURRENT_FRAMEOS_VERSION}`,
+      requiresFullDeploy: true,
+    })
+  }
+
   return [...details, ...sceneDetails]
+}
+
+function normalizeFrameKeyValueForComparison(key: keyof FrameType, value: unknown): unknown {
+  if (key !== 'https_proxy' || !value || typeof value !== 'object') {
+    return value
+  }
+
+  const httpsProxy = value as Record<string, unknown>
+  const {
+    server_cert_not_valid_after: _serverCertNotValidAfter,
+    client_ca_cert_not_valid_after: _clientCaCertNotValidAfter,
+    ...rest
+  } = httpsProxy
+
+  return rest
+}
+
+function frameKeyEqual(key: keyof FrameType, previous: unknown, next: unknown): boolean {
+  return equal(normalizeFrameKeyValueForComparison(key, previous), normalizeFrameKeyValueForComparison(key, next))
 }
 
 async function resolveTemplateImageUrl(template: Partial<TemplateType>): Promise<string | null> {
@@ -329,6 +363,9 @@ const legacyAppMapping: Record<string, string> = {
   setAsState: 'logic/setAsState',
   breakIfRendering: 'logic/breakIfRendering',
   ifElse: 'logic/ifElse',
+
+  // later renames
+  'data/browserSnapshot': 'data/chromiumScreenshot',
 }
 
 export function sanitizeNodes(nodes: DiagramNode[]): DiagramNode[] {
@@ -348,7 +385,6 @@ export function sanitizeNodes(nodes: DiagramNode[]): DiagramNode[] {
   })
   return changed ? newNodes : nodes
 }
-
 
 function normalizeNode(node: DiagramNode): DiagramNode {
   const normalizedType = node.type ?? (node as DiagramNode & { nodeType?: DiagramNode['type'] }).nodeType
@@ -600,14 +636,32 @@ export const frameLogic = kea<frameLogicType>([
     unsavedChanges: [
       (s) => [s.frame, s.frameForm],
       (frame, frameForm) =>
-        FRAME_KEYS.some((key) => !equal(frame?.[key as keyof FrameType], frameForm?.[key as keyof FrameType])),
+        FRAME_KEYS.some(
+          (key) => !frameKeyEqual(key, frame?.[key as keyof FrameType], frameForm?.[key as keyof FrameType])
+        ),
+    ],
+    changedScenes: [
+      (s) => [s.frame, s.frameForm],
+      (frame, frameForm): Set<string> => {
+        const frameScenes = frame?.scenes ?? []
+        const unsavedScenes = frameForm?.scenes ?? frameScenes
+        const changed = new Set<string>()
+
+        unsavedScenes.forEach((scene) => {
+          const original = frameScenes.find((candidate) => candidate.id === scene.id)
+          if (!original || !equal(original, scene)) {
+            changed.add(scene.id)
+          }
+        })
+
+        return changed
+      },
     ],
     lastDeploy: [(s) => [s.frame], (frame) => frame?.last_successful_deploy ?? null],
     undeployedChanges: [
-      (s) => [s.frame, s.lastDeploy, s.isFrameAdminMode],
-      (frame, lastDeploy, isFrameAdminMode) =>
-        !isFrameAdminMode &&
-        FRAME_KEYS.some((key) => !equal(frame?.[key as keyof FrameType], lastDeploy?.[key as keyof FrameType])),
+      (s) => [s.frame, s.lastDeploy, s.mode, s.isFrameAdminMode],
+      (frame: FrameType, lastDeploy: Partial<FrameType> | null, mode: FrameType['mode'], isFrameAdminMode: boolean) =>
+        !isFrameAdminMode && computeChangeDetails(lastDeploy, frame, mode).length > 0,
     ],
     unsavedChangeDetails: [
       (s) => [s.frame, s.frameForm, s.mode],
@@ -619,8 +673,8 @@ export const frameLogic = kea<frameLogicType>([
         isFrameAdminMode ? [] : computeChangeDetails(lastDeploy, frame, mode),
     ],
     requiresRecompilation: [
-      (s) => [s.unsavedChangeDetails],
-      (unsavedChangeDetails) => unsavedChangeDetails.some((change) => change.requiresFullDeploy),
+      (s) => [s.undeployedChangeDetails],
+      (undeployedChangeDetails) => undeployedChangeDetails.some((change) => change.requiresFullDeploy),
     ],
     defaultScene: [
       (s) => [s.frame, s.frameForm],
@@ -661,11 +715,12 @@ export const frameLogic = kea<frameLogicType>([
     restartFrame: () => framesModel.actions.restartFrame(props.frameId),
     rebootFrame: () => framesModel.actions.rebootFrame(props.frameId),
     stopFrame: () => framesModel.actions.stopFrame(props.frameId),
-    deployFrame: () =>
+    deployFrame: () => {
       framesModel.actions.deployFrame(
         props.frameId,
         Boolean(values.frame?.last_successful_deploy_at) && !values.requiresRecompilation
-      ),
+      )
+    },
     fastDeployFrame: () => framesModel.actions.deployFrame(props.frameId, true),
     fullDeployFrame: () => framesModel.actions.deployFrame(props.frameId, false),
     deployAgent: () => framesModel.actions.deployAgent(props.frameId),

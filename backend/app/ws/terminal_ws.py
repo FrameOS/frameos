@@ -6,7 +6,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
 from sqlalchemy.orm import Session
 from arq import ArqRedis as Redis
 
-from app.database import get_db
+from app.database import SessionLocal
 from app.redis import get_redis
 from app.models.frame import Frame
 from app.api.auth import get_current_user_from_websocket
@@ -18,22 +18,36 @@ router = APIRouter()
 async def ssh_terminal(
     websocket: WebSocket,
     frame_id: int,
-    db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
-    user, error_reason = get_current_user_from_websocket(websocket, db)
+    db: Session = SessionLocal()
+    try:
+        user, error_reason = get_current_user_from_websocket(websocket, db)
+    finally:
+        db.close()
+
     if user is None:
         await websocket.close(code=1008, reason=error_reason or "Could not validate credentials")
         return
 
     await websocket.accept()
 
-    frame = db.query(Frame).filter(Frame.id == frame_id).first()
+    db = SessionLocal()
+    try:
+        frame = db.query(Frame).filter(Frame.id == frame_id).first()
+    finally:
+        db.close()
+
     if frame is None:
         await websocket.close(code=1008, reason="Frame not found")
         return
 
-    ssh = await get_ssh_connection(db, redis, frame)
+    db = SessionLocal()
+    try:
+        ssh = await get_ssh_connection(db, redis, frame)
+    finally:
+        db.close()
+
     proc = await ssh.create_process(term_type="xterm", encoding="utf-8")
 
     async def pipe(reader):
@@ -61,4 +75,9 @@ async def ssh_terminal(
         with contextlib.suppress(Exception):
             proc.stdin.write_eof()
             await proc.wait_closed()
-        await remove_ssh_connection(db, redis, ssh, frame)
+
+        db = SessionLocal()
+        try:
+            await remove_ssh_connection(db, redis, ssh, frame)
+        finally:
+            db.close()

@@ -5,8 +5,52 @@ on:
     branches:
       - main
 
+permissions:
+  contents: write
+
 jobs:
+  update-versions:
+    runs-on: ubuntu-latest
+    outputs:
+      versions_changed: ${{ steps.detect.outputs.versions_changed }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Recompute component versions
+        run: python3 tools/update_versions.py
+
+      - name: Detect version changes
+        id: detect
+        run: |
+          if git diff --quiet -- versions.json; then
+            echo "versions_changed=false" >> "$GITHUB_OUTPUT"
+            echo "No version changes detected"
+          else
+            echo "versions_changed=true" >> "$GITHUB_OUTPUT"
+            echo "Version changes detected"
+          fi
+
+      - name: Commit updated versions
+        if: steps.detect.outputs.versions_changed == 'true'
+        run: |
+          VERSION=$(python3 -c "import json; print(json.load(open('versions.json'))['docker'].split('+', 1)[0])")
+          git config user.name "frameos-bot"
+          git config user.email "git@frameos.net"
+          git add versions.json
+          git commit -m "chore: version ${VERSION}"
+          git push
+
   test:
+    needs: update-versions
+    if: needs.update-versions.outputs.versions_changed == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -45,7 +89,8 @@ jobs:
           TEST=1 pytest
 
   build:
-    needs: test
+    if: needs.update-versions.outputs.versions_changed == 'true'
+    needs: [update-versions, test]
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -86,6 +131,14 @@ jobs:
         shell: bash
         run: echo "SHORT_SHA=${GITHUB_SHA:0:7}" >> $GITHUB_ENV
 
+      - name: Read Docker version tags
+        shell: bash
+        run: |
+          DOCKER_VERSION=$(python3 -c "import json; print(json.load(open('versions.json'))['docker'].split('+', 1)[0])")
+          echo "DOCKER_VERSION=$DOCKER_VERSION" >> $GITHUB_ENV
+          echo "DOCKER_VERSION_MINOR=${DOCKER_VERSION%.*}" >> $GITHUB_ENV
+          echo "DOCKER_VERSION_MAJOR=${DOCKER_VERSION%%.*}" >> $GITHUB_ENV
+
       - name: Set up Depot CLI
         uses: depot/setup-action@v1
 
@@ -104,7 +157,8 @@ jobs:
           cache-to: type=local,dest=/tmp/.buildx-cache
 
   push-multiarch:
-    needs: build
+    if: needs.update-versions.outputs.versions_changed == 'true'
+    needs: [update-versions, build]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -133,6 +187,14 @@ jobs:
         shell: bash
         run: echo "SHORT_SHA=${GITHUB_SHA:0:7}" >> $GITHUB_ENV
 
+      - name: Read Docker version tags
+        shell: bash
+        run: |
+          DOCKER_VERSION=$(python3 -c "import json; print(json.load(open('versions.json'))['docker'].split('+', 1)[0])")
+          echo "DOCKER_VERSION=$DOCKER_VERSION" >> $GITHUB_ENV
+          echo "DOCKER_VERSION_MINOR=${DOCKER_VERSION%.*}" >> $GITHUB_ENV
+          echo "DOCKER_VERSION_MAJOR=${DOCKER_VERSION%%.*}" >> $GITHUB_ENV
+
       - name: Set up Depot CLI
         uses: depot/setup-action@v1
 
@@ -146,14 +208,22 @@ jobs:
           push: true
           platforms: linux/amd64,linux/arm64/v8
           tags: |
-            frameos/frameos:${{ env.BRANCH_NAME }}-${{ env.SHORT_SHA }}
             frameos/frameos:latest
+            frameos/frameos:${{ env.DOCKER_VERSION_MAJOR }}
+            frameos/frameos:${{ env.DOCKER_VERSION_MINOR }}
+            frameos/frameos:${{ env.DOCKER_VERSION }}
 
   update-addon-repo:
     name: Update Home Assistant Addon
-    needs: push-multiarch
+    if: needs.update-versions.outputs.versions_changed == 'true'
+    needs: [update-versions, push-multiarch]
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout frameos
+        uses: actions/checkout@v4
+        with:
+          path: frameos
+
       - name: Checkout frameos-home-assistant-addon
         uses: actions/checkout@v2
         with:
@@ -169,20 +239,25 @@ jobs:
       - name: Short SHA
         shell: bash
         run: echo "SHORT_SHA=${GITHUB_SHA:0:7}" >> $GITHUB_ENV
-  
+
+      - name: Read Docker version
+        shell: bash
+        run: |
+          DOCKER_VERSION=$(python3 -c "import json; print(json.load(open('frameos/versions.json'))['docker'].split('+', 1)[0])")
+          echo "DOCKER_VERSION=$DOCKER_VERSION" >> $GITHUB_ENV
+
       - name: Update version in config.yaml
         run: |
           cd home-assistant-addon/frameos
-          echo "Updating version in config.yaml to ${{ env.BRANCH_NAME }}-${{ env.SHORT_SHA }}"
-          sed -i "s/^version: .*/version: ${{ env.BRANCH_NAME }}-${{ env.SHORT_SHA }}/" config.yaml
+          echo "Updating version in config.yaml to ${{ env.DOCKER_VERSION }}"
+          sed -i "s/^version: .*/version: ${{ env.DOCKER_VERSION }}/" config.yaml
 
       - name: Commit changes
         uses: EndBug/add-and-commit@v9
         with:
-          message: "Update FrameOS version to ${{ env.BRANCH_NAME }}-${{ env.SHORT_SHA }}"
+          message: "Update FrameOS version to ${{ env.DOCKER_VERSION }}"
           add: "."
           cwd: home-assistant-addon
           push: true
           author_name: FrameOS Bot
           author_email: git@frameos.net
-          

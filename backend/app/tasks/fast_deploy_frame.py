@@ -8,6 +8,7 @@ from app.models.log import new_log as log
 from app.models.frame import Frame, normalize_https_proxy, update_frame
 from app.tasks._frame_deployer import FrameDeployer
 from app.utils.frame_http import _fetch_frame_http_bytes
+from app.utils.versions import current_frameos_version
 
 
 def tls_settings_changed(frame: Frame) -> bool:
@@ -45,6 +46,12 @@ async def fast_deploy_frame_task(ctx: dict[str, Any], id: int):
             del frame_dict["last_successful_deploy"]
         if "last_successful_deploy_at" in frame_dict:
             del frame_dict["last_successful_deploy_at"]
+
+        previous_frameos_version = (frame.last_successful_deploy or {}).get("frameos_version")
+        if isinstance(previous_frameos_version, str):
+            frame_dict["frameos_version"] = previous_frameos_version
+        else:
+            frame_dict["frameos_version"] = current_frameos_version()
 
         distro = await self.get_distro()
         if distro == 'nixos':

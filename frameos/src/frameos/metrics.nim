@@ -28,9 +28,6 @@ proc getMemoryUsage(self: MetricsLoggerThread): JsonNode =
     "total": memoryInfo.total,
     "available": memoryInfo.avail,
     "percentage": memoryInfo.percent,
-    "used": memoryInfo.used,
-    "free": memoryInfo.free,
-    "active": memoryInfo.active,
   }
 
 proc getCPUUsage(self: MetricsLoggerThread): float =

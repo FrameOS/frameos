@@ -50,7 +50,7 @@ proc get*(self: App, context: ExecutionContext): Image =
                  if imageWidth > imageHeight: "1792x1024"
                  elif imageWidth < imageHeight: "1024x1792"
                  else: defaultSize
-               of "gpt-image-1":
+               of "gpt-image-1", "gpt-image-1.5":
                  if imageWidth > imageHeight: "1536x1024"
                  elif imageWidth < imageHeight: "1024x1536"
                  else: defaultSize
@@ -62,7 +62,7 @@ proc get*(self: App, context: ExecutionContext): Image =
                  if self.appConfig.size in dalle3Sizes: self.appConfig.size else: defaultSize
                of "dall-e-2":
                  if self.appConfig.size in dalle2Sizes: self.appConfig.size else: defaultSize
-               of "gpt-image-1":
+               of "gpt-image-1", "gpt-image-1.5":
                  if self.appConfig.size in gptImageSizes: self.appConfig.size else: defaultSize
                else:
                  defaultSize

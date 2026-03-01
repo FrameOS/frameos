@@ -17,8 +17,8 @@
     {
       "name": "model",
       "type": "select",
-      "options": ["gpt-image-1", "dall-e-3", "dall-e-2"],
-      "value": "dall-e-3",
+      "options": ["gpt-image-1.5", "gpt-image-1", "dall-e-3", "dall-e-2"],
+      "value": "gpt-image-1.5",
       "required": true,
       "label": "Model"
     },
@@ -38,6 +38,11 @@
           "field": "model",
           "operator": "eq",
           "value": "gpt-image-1"
+        },
+        {
+          "field": "model",
+          "operator": "eq",
+          "value": "gpt-image-1.5"
         }
       ]
     },
