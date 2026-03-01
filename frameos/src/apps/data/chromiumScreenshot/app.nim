@@ -178,9 +178,11 @@ proc ensureSystemDependencies(self: App) =
     self.logError &"Error installing Chromium dependencies (response {chromiumInstallResponse})"
 
 proc init*(self: App) =
+  self.log "Initializing chromium screenshot app"
   ## (Initialization if needed)
   self.hasEnoughRam = self.hasMinimumRam()
   if not self.hasEnoughRam:
+    self.log "Not enough RAM to run Chromium. At least 1GB is needed, got " & $(self.memoryKb / 1024).toInt() & "MB"
     return
 
   self.ensureSystemDependencies()

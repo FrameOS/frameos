@@ -27,10 +27,17 @@ proc buildFailureText(self: Scene): string =
     else:
       "(unknown scene)"
 
+  let isSelfFallback = details.sceneId.isSome and details.sceneId.get() == BOOT_GUARD_FALLBACK_SCENE_ID
+  let failureLine =
+    if isSelfFallback:
+      &"FrameOS crashed during startup {BOOT_GUARD_CRASH_LIMIT} times, so it switched to safe mode."
+    else:
+      &"FrameOS tried to render scene '{sceneName}' (id: {sceneId}) {BOOT_GUARD_CRASH_LIMIT} times, but it crashed each time."
+
   var lines: seq[string] = @[
     "FrameOS Safe Mode",
     "",
-    &"FrameOS tried to render scene '{sceneName}' (id: {sceneId}) {BOOT_GUARD_CRASH_LIMIT} times, but it crashed each time.",
+    failureLine,
     "",
     "Use the control interface to select a new scene to render."
   ]

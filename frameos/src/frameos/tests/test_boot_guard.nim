@@ -65,6 +65,13 @@ try:
     doAssert not shouldPersistBootGuardContext(3)
     doAssert not shouldPersistBootGuardContext(10)
 
+  block test_boot_guard_context_skips_fallback_scene:
+    doAssert shouldPersistBootGuardContextForScene("calendar/main", 0)
+    doAssert shouldPersistBootGuardContextForScene("calendar/main", 2)
+    doAssert not shouldPersistBootGuardContextForScene("calendar/main", 3)
+    doAssert not shouldPersistBootGuardContextForScene("system/bootGuard", 0)
+    doAssert not shouldPersistBootGuardContextForScene("system/bootGuard", 1)
+
   block test_boot_guard_fallback_scene_id:
     doAssert bootGuardFallbackSceneId() == "system/bootGuard"
 finally:

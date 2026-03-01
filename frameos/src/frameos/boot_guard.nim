@@ -75,5 +75,8 @@ proc shouldUseFallbackScene*(): bool =
 proc shouldPersistBootGuardContext*(successfulScenes: int): bool =
   max(0, successfulScenes) < BOOT_GUARD_SUCCESS_PERSIST_LIMIT
 
+proc shouldPersistBootGuardContextForScene*(sceneId: string, successfulScenes: int): bool =
+  shouldPersistBootGuardContext(successfulScenes) and sceneId != BOOT_GUARD_FALLBACK_SCENE_ID
+
 proc bootGuardFallbackSceneId*(): string =
   BOOT_GUARD_FALLBACK_SCENE_ID

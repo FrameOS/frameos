@@ -80,7 +80,7 @@
         "id": "app_browserSnapshot",
         "type": "app",
         "data": {
-          "keyword": "data/browserSnapshot",
+          "keyword": "data/chromiumScreenshot",
           "config": {
             "width": "",
             "height": ""

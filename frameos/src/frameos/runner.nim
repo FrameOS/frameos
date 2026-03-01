@@ -129,7 +129,7 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
       self.logger.log(%*{"event": "render:sceneChange", "sceneId": sceneId.string})
       # Persist the active scene context early in boot, then stop writing it
       # after a few successful renders to reduce SD card writes.
-      if shouldPersistBootGuardContext(successfulSceneRenders):
+      if shouldPersistBootGuardContextForScene(sceneId.string, successfulSceneRenders):
         updateBootGuardFailureDetails(some(sceneId.string), getSceneDisplayName(sceneId), none(string))
       if self.scenes.hasKey(sceneId):
         currentScene = self.scenes[sceneId]
