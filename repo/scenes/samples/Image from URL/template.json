@@ -1,6 +1,6 @@
 {
   "name": "Image from URL",
-  "description": "",
+  "description": "Download and render an image",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 800,
