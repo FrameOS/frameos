@@ -5,15 +5,13 @@
     "settings": {
       "execution": "interpreted",
       "refreshInterval": 3600,
-      "backgroundColor": "#000000",
-      "prompt": "scene that renders a browser screenshot. put the url as public state"
+      "backgroundColor": "#000000"
     },
     "fields": [
       {
         "name": "url",
         "type": "text",
         "label": "URL",
-        "description": "Webpage URL to screenshot",
         "required": true,
         "value": "https://example.com",
         "access": "public",
@@ -23,7 +21,6 @@
         "name": "seconds",
         "type": "integer",
         "label": "Refresh seconds",
-        "description": "How often to refresh the screenshot (used by logic/nextSleepDuration).",
         "required": true,
         "value": "3600",
         "access": "public",
