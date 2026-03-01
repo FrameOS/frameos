@@ -72,7 +72,6 @@ type
 
   App* = ref object of AppRoot
     appConfig*: AppConfig
-    systemDepsChecked: bool
     hasEnoughRam: bool
     memoryKb: int
 
@@ -182,11 +181,9 @@ proc init*(self: App) =
   ## (Initialization if needed)
   self.hasEnoughRam = self.hasMinimumRam()
   if not self.hasEnoughRam:
-    self.systemDepsChecked = true
     return
 
   self.ensureSystemDependencies()
-  self.systemDepsChecked = true
   discard self.ensureVenvExists()
   discard self.ensureBackgroundBrowser(self.appConfig.width, self.appConfig.height)
 
@@ -284,9 +281,6 @@ proc pickChromiumBinary(): string =
   return ""
 
 proc get*(self: App, context: ExecutionContext): Image =
-  if not self.systemDepsChecked:
-    self.init()
-
   let width = if self.appConfig.width != 0:
                 self.appConfig.width
               elif context.hasImage:

@@ -362,6 +362,9 @@ const legacyAppMapping: Record<string, string> = {
   setAsState: 'logic/setAsState',
   breakIfRendering: 'logic/breakIfRendering',
   ifElse: 'logic/ifElse',
+
+  // later renames
+  'data/browserSnapshot': 'data/chromiumScreenshot',
 }
 
 export function sanitizeNodes(nodes: DiagramNode[]): DiagramNode[] {

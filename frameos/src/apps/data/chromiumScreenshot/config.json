@@ -1,6 +1,6 @@
 {
-    "name": "Browser snapshot",
-    "description": "Capture a snapshot of a website with playwright and headless chromium. Needs a 64-bit system.",
+    "name": "Chromium screenshot",
+    "description": "Capture a snapshot of a website with playwright and headless chromium. Needs a 64-bit system and at least 1GB of RAM.",
     "category": "data",
     "version": "1.0.0",
     "fields": [
