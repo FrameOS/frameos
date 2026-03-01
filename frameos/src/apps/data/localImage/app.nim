@@ -111,7 +111,7 @@ proc refreshImages(self: App) =
 
 proc get*(self: App, context: ExecutionContext): Image =
   if self.appConfig.search != self.lastSearch or self.appConfig.path != self.lastPath:
-    self.init()
+    self.init() # re-init if the query changes
 
   self.refreshImages()
 

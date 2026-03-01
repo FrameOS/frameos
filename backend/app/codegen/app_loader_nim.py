@@ -1,6 +1,7 @@
 import json
 from typing import Optional, Dict, Any, List, Union
 import os
+import re
 
 Scalar = Union[str, int, float, bool, None]
 
@@ -535,6 +536,19 @@ def _format_field_block(field_name: str, block_lines: list[str]) -> str:
     body = "\n".join("      " + ln for ln in block_lines[1:])
     return f"    {field_name}: {head}\n{body},"
 
+
+def _app_has_self_init(app_dir: str) -> bool:
+    """Return True when app.nim defines `proc init*(self: App)` (or non-exported equivalent)."""
+    app_file = os.path.join(app_dir, "app.nim")
+    if not os.path.exists(app_file):
+        return False
+
+    with open(app_file, "r") as af:
+        app_source = af.read()
+
+    # Only match the App instance init proc, not legacy constructor-style `init(...) : App`.
+    return re.search(r"proc\s+init\*?\s*\(\s*self\s*:\s*(?:var\s+)?App\b", app_source) is not None
+
 def write_app_loader_nim(app_dir, config: Optional[dict] = None) -> str:
     if not config:
         config_path = os.path.join(app_dir, "config.json")
@@ -545,6 +559,7 @@ def write_app_loader_nim(app_dir, config: Optional[dict] = None) -> str:
             assert config is not None
 
     fields = [f for f in config.get("fields", []) if not f.get("markdown")]
+    app_has_self_init = _app_has_self_init(app_dir)
     # Build quick index for defaults/refs (used by seq bounds)
     fields_by_name: Dict[str, Dict[str, Any]] = {f["name"]: f for f in fields if "name" in f}
 
@@ -608,6 +623,7 @@ def write_app_loader_nim(app_dir, config: Optional[dict] = None) -> str:
                 app_set_lines.append(f'    raise newException(ValueError, "Unsupported field type for set: {field_type}")')
 
     newline = os.linesep
+    init_call = "  app_module.init(app_module.App(result))" if app_has_self_init else ""
     nim_code = f"""{{.warning[UnusedImport]: off.}}
 import json
 import options
@@ -635,6 +651,7 @@ proc init*(
     scene: scene,
     frameConfig: scene.frameConfig,
   )
+{init_call}
 
 proc setField*(self: AppRoot, field: string, value: Value) =
   let app = app_module.App(self)
