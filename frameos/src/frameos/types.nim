@@ -1,4 +1,4 @@
-import json, jester, pixie, hashes, locks
+import json, pixie, hashes, locks, tables, options, asyncdispatch, mummy
 import lib/burrito
 
 type
@@ -292,7 +292,7 @@ type
 
   Server* = ref object
     frameConfig*: FrameConfig
-    jester*: Jester
+    mummy*: mummy.Server
     runner*: RunnerControl
     url*: string
 

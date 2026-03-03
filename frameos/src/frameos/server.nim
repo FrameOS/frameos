@@ -3,19 +3,17 @@ import pixie
 import times
 import assets/web as webAssets
 import asyncdispatch
-import httpclient
 import httpcore
 import threadpool
-import jester
 import locks
-import ws, ws/jester_extra
 import strformat
 import options
 import strutils
 import tables
 import algorithm
+import mummy
+import mummy/routers
 import drivers/drivers as drivers
-import frameos/apps
 import frameos/types
 import frameos/channels
 import frameos/utils/image
@@ -35,11 +33,10 @@ let indexHtml = webAssets.getAsset("assets/compiled/web/index.html")
 var connectionsLock: Lock
 var connections {.guard: connectionsLock.} = newSeq[WebSocket]()
 
-proc sendToAll(message: string) {.async.} =
+proc sendToAll(message: string) =
   withLock connectionsLock:
     for connection in connections:
-      if connection.readyState == Open:
-        asyncCheck connection.send(message)
+      connection.send(message)
 
 proc h(message: string): string =
   message.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;").replace("'", "&#039;")
@@ -59,6 +56,22 @@ proc shouldReturnNotModified*(headers: HttpHeaders, lastUpdate: float): bool {.g
   except CatchableError:
     return false
 
+proc shouldReturnNotModified(headers: mummy.HttpHeaders, lastUpdate: float): bool {.gcsafe.} =
+  if lastUpdate <= 0.0:
+    return false
+  var values: seq[string]
+  for (name, value) in headers:
+    if cmpIgnoreCase(name, "if-modified-since") == 0:
+      values.add(value)
+  let ifModifiedSince = values.join(", ")
+  if ifModifiedSince == "":
+    return false
+  try:
+    let ifModifiedTime = parse(ifModifiedSince, "ddd, dd MMM yyyy HH:mm:ss 'GMT'", utc())
+    return int64(lastUpdate) <= ifModifiedTime.toTime().toUnix()
+  except CatchableError:
+    return false
+
 const AUTH_HEADER = "authorization"
 const AUTH_TYPE = "Bearer"
 
@@ -67,39 +80,71 @@ type
     Read
     Write
 
-router myrouter:
-  proc hasAccess*(request: Request, accessType: AccessType): bool =
-    {.gcsafe.}:
-      let access = globalFrameConfig.frameAccess
-      if access == "public" or (access == "protected" and accessType == Read):
-        return true
-      let accessKey = globalFrameConfig.frameAccessKey
-      if accessKey == "":
-        return false
-      if request.reqMethod() == HttpPost:
-        return contains(request.headers.table, AUTH_HEADER) and request.headers[AUTH_HEADER] == AUTH_TYPE & " " & accessKey
-      else:
-        let paramsTable = request.params()
-        return contains(paramsTable, "k") and paramsTable["k"] == accessKey
-  get "/":
+proc hasAccess(request: Request, accessType: AccessType): bool =
+  {.gcsafe.}:
+    let access = globalFrameConfig.frameAccess
+    if access == "public" or (access == "protected" and accessType == Read):
+      return true
+    let accessKey = globalFrameConfig.frameAccessKey
+    if accessKey == "":
+      return false
+    if request.httpMethod == "POST":
+      return request.headers.contains(AUTH_HEADER) and request.headers[AUTH_HEADER] == AUTH_TYPE & " " & accessKey
+    return request.queryParams.contains("k") and request.queryParams["k"] == accessKey
+
+proc parseUrlEncoded(body: string): Table[string, string] =
+  for pair in body.split('&'):
+    if pair == "":
+      continue
+    let kv = pair.split('=', 1)
+    let key = decodeQueryComponent(kv[0])
+    let value = if kv.len > 1: decodeQueryComponent(kv[1]) else: ""
+    result[key] = value
+
+proc jsonResponse(request: Request, statusCode: int, payload: JsonNode) =
+  var headers: mummy.HttpHeaders
+  headers["Content-Type"] = "application/json"
+  request.respond(statusCode, headers, $payload)
+
+proc websocketHandler(websocket: WebSocket, event: WebSocketEvent, message: Message) {.gcsafe.} =
+  case event:
+  of OpenEvent:
+    log(%*{"event": "websocket:connect"})
+  of MessageEvent:
+    log(%*{"event": "websocket:message", "message": message.data})
+  of ErrorEvent, CloseEvent:
+    log(%*{"event": "websocket:disconnect"})
+    withLock connectionsLock:
+      let index = connections.find(websocket)
+      if index >= 0:
+        connections.delete(index)
+
+proc buildRouter(): Router =
+  result.get("/", proc(request: Request) =
     {.gcsafe.}:
       if netportal.isHotspotActive(globalFrameOS):
-        log(%*{"event": "portal:http", "get": request.pathInfo})
-        resp Http200, netportal.setupHtml(globalFrameOS)
+        log(%*{"event": "portal:http", "get": request.path})
+        request.respond(Http200, body = netportal.setupHtml(globalFrameOS))
       elif not hasAccess(request, Read):
-        resp Http401, "Unauthorized"
+        request.respond(Http401, body = "Unauthorized")
       else:
         let scalingMode = case globalFrameConfig.scalingMode:
           of "cover", "center": globalFrameConfig.scalingMode
           of "stretch": "100% 100%"
           else: "contain"
-        resp Http200, indexHtml.replace("/*$scalingMode*/contain", scalingMode)
-  post "/setup":
+        request.respond(Http200, body = indexHtml.replace("/*$scalingMode*/contain", scalingMode))
+  )
+
+  result.post("/setup", proc(request: Request) =
     {.gcsafe.}:
       if not netportal.isHotspotActive(globalFrameOS):
-        resp Http400, "Not in setup mode"
-      let params = request.params()
-      log(%*{"event": "portal:http", "post": request.pathInfo, "params": params})
+        request.respond(Http400, body = "Not in setup mode")
+        return
+      let params = parseUrlEncoded(request.body)
+      log(%*{"event": "portal:http", "post": request.path, "params": params})
+      if not params.hasKey("ssid"):
+        request.respond(Http400, body = "Missing ssid")
+        return
       spawn netportal.connectToWifi(
         globalFrameOS,
         params["ssid"],
@@ -107,117 +152,146 @@ router myrouter:
         params.getOrDefault("serverHost", globalFrameOS.frameConfig.serverHost),
         params.getOrDefault("serverPort", $globalFrameOS.frameConfig.serverPort),
       )
-    resp Http200, netportal.confirmHtml()
-  get "/ping":
-    resp Http200, "pong"
-  get "/setup":
-    redirect "/"
-  get "/wifi":
+      request.respond(Http200, body = netportal.confirmHtml())
+  )
+
+  result.get("/ping", proc(request: Request) =
+    request.respond(Http200, body = "pong")
+  )
+
+  result.get("/setup", proc(request: Request) =
+    var headers: mummy.HttpHeaders
+    headers["Location"] = "/"
+    request.respond(Http302, headers)
+  )
+
+  result.get("/wifi", proc(request: Request) =
     {.gcsafe.}:
       if not netportal.isHotspotActive(globalFrameOS):
-        resp Http400, "Not in setup mode"
+        request.respond(Http400, body = "Not in setup mode")
       else:
+        var headers: mummy.HttpHeaders
+        headers["Content-Type"] = "application/json"
         let nets = netportal.availableNetworks(globalFrameOS)
-        resp Http200, {"Content-Type": "application/json"}, $(%*{"networks": nets})
-  get "/ws":
+        request.respond(Http200, headers, $(%*{"networks": nets}))
+  )
+
+  result.get("/ws", proc(request: Request) =
     if not hasAccess(request, Read):
-      resp Http401, "Unauthorized"
-    {.gcsafe.}: # We're only modifying globals via locks. It's fine.
-      var ws = await newWebSocket(request)
-      try:
-        log(%*{"event": "websocket:connect", "key": ws.key})
-        withLock connectionsLock:
-          connections.add ws
-        while ws.readyState == Open:
-          let packet = await ws.receiveStrPacket()
-          log(%*{"event": "websocket:message", "message": packet})
-          # TODO: accept events?
-      except WebSocketError:
-        log(%*{"event": "websocket:disconnect", "key": ws.key, "reason": getCurrentExceptionMsg()})
-        withLock connectionsLock:
-          let index = connections.find(ws)
-          if index >= 0:
-            connections.delete(index)
-  get "/image":
+      request.respond(Http401, body = "Unauthorized")
+      return
+    try:
+      let websocket = request.upgradeToWebSocket()
+      withLock connectionsLock:
+        connections.add(websocket)
+    except CatchableError:
+      request.respond(Http500, body = "WebSocket upgrade failed")
+  )
+
+  result.get("/image", proc(request: Request) =
     if not hasAccess(request, Read):
-      resp Http401, "Unauthorized"
-    log(%*{"event": "http", "get": request.pathInfo})
-    {.gcsafe.}: # We're reading immutable globals and png data via a lock. It's fine.
+      request.respond(Http401, body = "Unauthorized")
+      return
+    log(%*{"event": "http", "get": request.path})
+    {.gcsafe.}:
       let (sceneId, _, _, lastUpdate) = getLastPublicState()
       if shouldReturnNotModified(request.headers, lastUpdate):
-        resp Http304, [("X-Scene-Id", $sceneId), ("Access-Control-Expose-Headers", "X-Scene-Id")], ""
+        var headers: mummy.HttpHeaders
+        headers["X-Scene-Id"] = $sceneId
+        headers["Access-Control-Expose-Headers"] = "X-Scene-Id"
+        request.respond(Http304, headers)
         return
-      var headers = @[
-        ("Content-Type", "image/png"),
-        ("Content-Disposition", &"inline; filename=\"{sceneId}.png\""),
-        ("X-Scene-Id", $sceneId),
-        ("Access-Control-Expose-Headers", "X-Scene-Id")
-      ]
+      var headers: mummy.HttpHeaders
+      headers["Content-Type"] = "image/png"
+      headers["Content-Disposition"] = &"inline; filename=\"{sceneId}.png\""
+      headers["X-Scene-Id"] = $sceneId
+      headers["Access-Control-Expose-Headers"] = "X-Scene-Id"
       if lastUpdate > 0.0:
         let lastModified = format(fromUnix(int64(lastUpdate)), "ddd, dd MMM yyyy HH:mm:ss 'GMT'", utc())
-        headers.add(("Last-Modified", lastModified))
+        headers["Last-Modified"] = lastModified
       try:
         let image = drivers.toPng(360 - globalFrameConfig.rotate)
         if image != "":
-          resp Http200, headers, image
+          request.respond(Http200, headers, image)
         else:
           raise newException(Exception, "No image available")
       except Exception:
         try:
-          resp Http200, headers, getLastImagePng()
+          request.respond(Http200, headers, getLastImagePng())
         except Exception as e:
-          resp Http200, headers, renderError(globalFrameConfig.renderWidth(),
-            globalFrameConfig.renderHeight(), &"Error: {$e.msg}\n{$e.getStackTrace()}").encodeImage(PngFormat)
-  post "/event/@name":
+          request.respond(Http200, headers, renderError(globalFrameConfig.renderWidth(),
+            globalFrameConfig.renderHeight(), &"Error: {$e.msg}\n{$e.getStackTrace()}").encodeImage(PngFormat))
+  )
+
+  result.post("/event/@name", proc(request: Request) =
     if not hasAccess(request, Write):
-      resp Http401, "Unauthorized"
-    log(%*{"event": "http", "post": request.pathInfo})
+      request.respond(Http401, body = "Unauthorized")
+      return
+    log(%*{"event": "http", "post": request.path})
     let payload = parseJson(if request.body == "": "{}" else: request.body)
-    sendEvent(@"name", payload)
-    resp Http200, {"Content-Type": "application/json"}, $(%*{"status": "ok"})
-  post "/uploadScenes":
+    sendEvent(request.pathParams["name"], payload)
+    jsonResponse(request, Http200, %*{"status": "ok"})
+  )
+
+  result.post("/uploadScenes", proc(request: Request) =
     if not hasAccess(request, Write):
-      resp Http401, "Unauthorized"
-    log(%*{"event": "http", "post": request.pathInfo})
+      request.respond(Http401, body = "Unauthorized")
+      return
+    log(%*{"event": "http", "post": request.path})
     let payload = parseJson(if request.body == "": "{}" else: request.body)
     sendEvent("uploadScenes", payload)
-    resp Http200, {"Content-Type": "application/json"}, $(%*{"status": "ok"})
-  post "/reload":
+    jsonResponse(request, Http200, %*{"status": "ok"})
+  )
+
+  result.post("/reload", proc(request: Request) =
     if not hasAccess(request, Write):
-      resp Http401, "Unauthorized"
+      request.respond(Http401, body = "Unauthorized")
+      return
     try:
-      {.gcsafe.}: # TODO: implement an actual lock
+      {.gcsafe.}:
         let newConfig = loadConfig()
         updateFrameConfigFrom(globalFrameOS.frameConfig, newConfig)
       sendEvent("reload", %*{})
-      resp Http200, {"Content-Type": "application/json"}, $(%*{"status": "ok"})
+      jsonResponse(request, Http200, %*{"status": "ok"})
     except CatchableError as e:
       log(%*{"event": "reload:error", "error": e.msg})
-      resp Http500, {"Content-Type": "application/json"}, $(%*{"status": "error", "error": e.msg})
-  get "/states":
+      jsonResponse(request, Http500, %*{"status": "error", "error": e.msg})
+  )
+
+  result.get("/states", proc(request: Request) =
     if not hasAccess(request, Write):
-      resp Http401, "Unauthorized"
-    log(%*{"event": "http", "get": request.pathInfo})
-    {.gcsafe.}: # It's a copy of the state, so it's fine.
-      let (sceneId, states) = getAllPublicStates()
-      resp Http200, {"Content-Type": "application/json"}, $(%*{"sceneId": $sceneId, "states": states})
-  get "/getUploadedScenes":
-    if not hasAccess(request, Write):
-      resp Http401, "Unauthorized"
-    log(%*{"event": "http", "get": request.pathInfo})
+      request.respond(Http401, body = "Unauthorized")
+      return
+    log(%*{"event": "http", "get": request.path})
     {.gcsafe.}:
-      var payload = %*{"scenes": getUploadedScenePayload()}
-      resp Http200, {"Content-Type": "application/json"}, $payload
-  get "/state":
+      let (sceneId, states) = getAllPublicStates()
+      jsonResponse(request, Http200, %*{"sceneId": $sceneId, "states": states})
+  )
+
+  result.get("/getUploadedScenes", proc(request: Request) =
     if not hasAccess(request, Write):
-      resp Http401, "Unauthorized"
-    log(%*{"event": "http", "get": request.pathInfo})
-    {.gcsafe.}: # It's a copy of the state, so it's fine.
+      request.respond(Http401, body = "Unauthorized")
+      return
+    log(%*{"event": "http", "get": request.path})
+    {.gcsafe.}:
+      let payload = %*{"scenes": getUploadedScenePayload()}
+      jsonResponse(request, Http200, payload)
+  )
+
+  result.get("/state", proc(request: Request) =
+    if not hasAccess(request, Write):
+      request.respond(Http401, body = "Unauthorized")
+      return
+    log(%*{"event": "http", "get": request.path})
+    {.gcsafe.}:
       let (sceneId, state, _, _) = getLastPublicState()
-      resp Http200, {"Content-Type": "application/json"}, $(%*{"sceneId": $sceneId, "state": state})
-  get "/c":
+      jsonResponse(request, Http200, %*{"sceneId": $sceneId, "state": state})
+  )
+
+  result.get("/c", proc(request: Request) =
     if not hasAccess(request, Write):
-      resp Http401, "Unauthorized"
+      request.respond(Http401, body = "Unauthorized")
+      return
     var fieldsHtml = ""
     var fieldsSubmitHtml = ""
     let (currentSceneId, values, fields, _) = getLastPublicState()
@@ -248,10 +322,13 @@ router myrouter:
         fieldsHtml.add(fmt"<textarea id='{h($key)}' placeholder='{h(placeholder)}' rows=5>{h(stringValue)}</textarea><br/><br/>")
       elif fieldType == "select" or fieldType == "boolean" or fieldType == "font":
         fieldsHtml.add(fmt"<select id='{h($key)}' placeholder='{h(placeholder)}'>")
-        {.gcsafe.}: # We're reading an immutable global (assetsPath) via a lock.
-          let options = if fieldType == "boolean": @["true", "false"]
-                        elif fieldType == "font": getAvailableFonts(globalFrameConfig.assetsPath)
-                        else: field.options
+        {.gcsafe.}:
+          let options = if fieldType == "boolean": @[
+            "true", "false"
+          ] elif fieldType == "font":
+            getAvailableFonts(globalFrameConfig.assetsPath)
+          else:
+            field.options
         for option in options:
           let selected = if option == stringValue: " selected" else: ""
           fieldsHtml.add(fmt"<option value='{h($option)}'{selected}>{h($option)}</option>")
@@ -273,7 +350,7 @@ router myrouter:
     for (sceneId, sceneName) in sceneOptions:
       addSceneOption(sceneId, sceneName)
     var dynamicSceneOptions: seq[tuple[id: SceneId, name: string]]
-    {.gcsafe.}: # getDynamicSceneOptions uses locks around scene tables.
+    {.gcsafe.}:
       dynamicSceneOptions = getDynamicSceneOptions()
     for (sceneId, sceneName) in dynamicSceneOptions:
       addSceneOption(sceneId, sceneName)
@@ -291,17 +368,18 @@ router myrouter:
       )
 
     fieldsHtml.add("<input type='submit' id='setSceneState' value='Set Scene State'>")
-    {.gcsafe.}: # We're only reading static assets. It's fine.
+    {.gcsafe.}:
       let controlHtml = webAssets.getAsset("assets/compiled/web/control.html").
         replace("/*$$fieldsHtml$$*/", fieldsHtml).
         replace("/*$$fieldsSubmitHtml$$*/", fieldsSubmitHtml).
         replace("/*$$sceneOptionsHtml$$*/", sceneOptionsHtml).
         replace("Frame Control", if globalFrameConfig.name != "": h(globalFrameConfig.name) else: "Frame Control")
-      resp Http200, controlHtml
+      request.respond(Http200, body = controlHtml)
+  )
 
-  error Http404:
-    log(%*{"event": "404", "path": request.pathInfo})
-    resp Http404, "Not found!"
+  result.notFoundHandler = proc(request: Request) =
+    log(%*{"event": "404", "path": request.path})
+    request.respond(Http404, body = "Not found!")
 
 proc listenForRender*() {.async.} =
   var hasConnections = false
@@ -311,7 +389,7 @@ proc listenForRender*() {.async.} =
     if hasConnections:
       let (dataAvailable, _) = serverChannel.tryRecv()
       if dataAvailable:
-        asyncCheck sendToAll("render")
+        sendToAll("render")
         log(%*{"event": "websocket:send", "message": "render"})
       await sleepAsync(10)
     else:
@@ -322,18 +400,19 @@ proc newServer*(frameOS: FrameOS): Server =
   globalFrameConfig = frameOS.frameConfig
   globalRunner = frameOS.runner
 
-  let port = (if frameOS.frameConfig.framePort == 0: 8787 else: frameOS.frameConfig.framePort).Port
-  let bindAddr = if frameOS.frameConfig.httpsProxy.enable and frameOS.frameConfig.httpsProxy.exposeOnlyPort: "127.0.0.1" else: ""
-  let settings = newSettings(port = port, bindAddr = bindAddr)
-  var jester = initJester(myrouter, settings)
+  let router = buildRouter()
+  let mummyServer = mummy.newServer(router.toHandler(), websocketHandler)
 
   result = Server(
     frameConfig: frameOS.frameConfig,
     runner: frameOS.runner,
-    jester: jester,
+    mummy: mummyServer,
   )
 
 proc startServer*(self: Server) {.async.} =
   log(%*{"event": "http:start", "message": "Starting web server"})
   asyncCheck listenForRender()
-  self.jester.serve() # blocks forever
+
+  let port = (if self.frameConfig.framePort == 0: 8787 else: self.frameConfig.framePort).Port
+  let bindAddr = if self.frameConfig.httpsProxy.enable and self.frameConfig.httpsProxy.exposeOnlyPort: "127.0.0.1" else: "0.0.0.0"
+  self.mummy.serve(port = port, address = bindAddr)
