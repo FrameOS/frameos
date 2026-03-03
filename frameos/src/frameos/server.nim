@@ -181,14 +181,15 @@ proc buildRouter(): Router =
         request.respond(Http200, headers, $(%*{"networks": nets}))
   )
 
-  result.get("/ws", proc(request: Request) =
+  result.get("/ws", proc(request: Request) {.gcsafe.} =
     if not hasAccess(request, Read):
       request.respond(Http401, body = "Unauthorized")
       return
     try:
       let websocket = request.upgradeToWebSocket()
-      withLock connectionsLock:
-        connections.add(websocket)
+      {.cast(gcsafe).}:
+        withLock connectionsLock:
+          connections.add(websocket)
     except CatchableError:
       request.respond(Http500, body = "WebSocket upgrade failed")
   )
