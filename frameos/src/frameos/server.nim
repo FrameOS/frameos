@@ -44,7 +44,7 @@ proc h(message: string): string =
 proc s(message: string): string =
   message.replace("'", "\\'").replace("\n", "\\n")
 
-proc shouldReturnNotModified*(headers: HttpHeaders, lastUpdate: float): bool {.gcsafe.} =
+proc shouldReturnNotModified*(headers: httpcore.HttpHeaders, lastUpdate: float): bool {.gcsafe.} =
   if lastUpdate <= 0.0:
     return false
   let ifModifiedSince = seq[string](headers.getOrDefault("if-modified-since")).join(", ")
