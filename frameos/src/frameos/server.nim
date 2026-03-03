@@ -410,7 +410,7 @@ proc listenForRender*(connectionsState: ConnectionsState) {.async.} =
     else:
       await sleepAsync(100)
 
-proc newServer*(frameOS: FrameOS): mummy.Server =
+proc newServer*(frameOS: FrameOS): types.Server =
   globalFrameOS = frameOS
   globalFrameConfig = frameOS.frameConfig
   globalRunner = frameOS.runner
@@ -419,7 +419,7 @@ proc newServer*(frameOS: FrameOS): mummy.Server =
   let router = buildRouter(connectionsState)
   let mummyServer = mummy.newServer(router.toHandler(), makeWebsocketHandler(connectionsState))
 
-  result = mummy.Server(
+  result = types.Server(
     frameConfig: frameOS.frameConfig,
     runner: frameOS.runner,
     mummy: mummyServer,
