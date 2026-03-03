@@ -31,13 +31,29 @@ var globalFrameConfig: FrameConfig
 var globalRunner: RunnerControl
 let indexHtml = webAssets.getAsset("assets/compiled/web/index.html")
 
-var connectionsLock: Lock
-var connections {.guard: connectionsLock.} = newSeq[WebSocket]()
+proc initConnectionsState(): ConnectionsState =
+  new(result)
+  initLock(result.lock)
+  result.items = @[]
 
-proc sendToAll(message: string) =
-  withLock connectionsLock:
-    for connection in connections:
+proc sendToAll(state: ConnectionsState, message: string) {.gcsafe.} =
+  withLock state.lock:
+    for connection in state.items:
       connection.send(message)
+
+proc addConnection(state: ConnectionsState, websocket: WebSocket) {.gcsafe.} =
+  withLock state.lock:
+    state.items.add(websocket)
+
+proc removeConnection(state: ConnectionsState, websocket: WebSocket) {.gcsafe.} =
+  withLock state.lock:
+    let index = state.items.find(websocket)
+    if index >= 0:
+      state.items.delete(index)
+
+proc hasConnections(state: ConnectionsState): bool {.gcsafe.} =
+  withLock state.lock:
+    result = state.items.len > 0
 
 proc h(message: string): string =
   message.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;").replace("'", "&#039;")
@@ -111,20 +127,18 @@ proc jsonResponse(request: Request, statusCode: httpcore.HttpCode, payload: Json
   headers["Content-Type"] = "application/json"
   request.respond(int(statusCode), headers, $payload)
 
-proc websocketHandler(websocket: WebSocket, event: WebSocketEvent, message: Message) =
-  case event:
-  of OpenEvent:
-    log(%*{"event": "websocket:connect"})
-  of MessageEvent:
-    log(%*{"event": "websocket:message", "message": message.data})
-  of ErrorEvent, CloseEvent:
-    log(%*{"event": "websocket:disconnect"})
-    withLock connectionsLock:
-      let index = connections.find(websocket)
-      if index >= 0:
-        connections.delete(index)
+proc makeWebsocketHandler(state: ConnectionsState): WebSocketHandler =
+  result = proc(websocket: WebSocket, event: WebSocketEvent, message: Message) {.closure, gcsafe.} =
+    case event:
+    of OpenEvent:
+      log(%*{"event": "websocket:connect"})
+    of MessageEvent:
+      log(%*{"event": "websocket:message", "message": message.data})
+    of ErrorEvent, CloseEvent:
+      log(%*{"event": "websocket:disconnect"})
+      removeConnection(state, websocket)
 
-proc buildRouter(): Router =
+proc buildRouter(connectionsState: ConnectionsState): Router =
   result.get("/", proc(request: Request) =
     {.gcsafe.}:
       if netportal.isHotspotActive(globalFrameOS):
@@ -187,9 +201,7 @@ proc buildRouter(): Router =
       return
     try:
       let websocket = request.upgradeToWebSocket()
-      {.cast(gcsafe).}:
-        withLock connectionsLock:
-          connections.add(websocket)
+      addConnection(connectionsState, websocket)
     except CatchableError:
       request.respond(Http500, body = "WebSocket upgrade failed")
   )
@@ -387,15 +399,12 @@ proc buildRouter(): Router =
     log(%*{"event": "404", "path": request.path})
     request.respond(Http404, body = "Not found!")
 
-proc listenForRender*() {.async.} =
-  var hasConnections = false
+proc listenForRender*(connectionsState: ConnectionsState) {.async.} =
   while true:
-    withLock connectionsLock:
-      hasConnections = connections.len > 0
-    if hasConnections:
+    if hasConnections(connectionsState):
       let (dataAvailable, _) = serverChannel.tryRecv()
       if dataAvailable:
-        sendToAll("render")
+        sendToAll(connectionsState, "render")
         log(%*{"event": "websocket:send", "message": "render"})
       await sleepAsync(10)
     else:
@@ -406,18 +415,20 @@ proc newServer*(frameOS: FrameOS): mummy.Server =
   globalFrameConfig = frameOS.frameConfig
   globalRunner = frameOS.runner
 
-  let router = buildRouter()
-  let mummyServer = mummy.newServer(router.toHandler(), websocketHandler)
+  let connectionsState = initConnectionsState()
+  let router = buildRouter(connectionsState)
+  let mummyServer = mummy.newServer(router.toHandler(), makeWebsocketHandler(connectionsState))
 
   result = mummy.Server(
     frameConfig: frameOS.frameConfig,
     runner: frameOS.runner,
     mummy: mummyServer,
+    connectionsState: connectionsState,
   )
 
 proc startServer*(self: Server) {.async.} =
   log(%*{"event": "http:start", "message": "Starting web server"})
-  asyncCheck listenForRender()
+  asyncCheck listenForRender(self.connectionsState)
 
   let port = (if self.frameConfig.framePort == 0: 8787 else: self.frameConfig.framePort).Port
   let bindAddr = if self.frameConfig.httpsProxy.enable and self.frameConfig.httpsProxy.exposeOnlyPort: "127.0.0.1" else: "0.0.0.0"
