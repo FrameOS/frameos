@@ -426,7 +426,7 @@ proc newServer*(frameOS: FrameOS): mummy.Server =
     connectionsState: connectionsState,
   )
 
-proc startServer*(self: Server) {.async.} =
+proc startServer*(self: types.Server) {.async.} =
   log(%*{"event": "http:start", "message": "Starting web server"})
   asyncCheck listenForRender(self.connectionsState)
 
