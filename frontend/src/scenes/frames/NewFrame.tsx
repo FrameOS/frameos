@@ -11,6 +11,7 @@ import { devices, buildrootPlatforms } from '../../devices'
 import { A } from 'kea-router'
 import { urls } from '../../urls'
 import { Spinner } from '../../components/Spinner'
+import { DropdownMenu } from '../../components/DropdownMenu'
 
 function isLocalServer(host?: string): boolean {
   const localHostRegex = /^(localhost|0\.0\.0\.0|127\.0\.0\.1|\[::1\])(:\d+)?$/
@@ -55,17 +56,17 @@ export function NewFrame(): JSX.Element {
               Buildroot
             </Button>
           ) : null}
-          {mode !== 'buildroot' ? (
-            <Button
-              size="small"
-              color="secondary"
-              onClick={() => {
-                setNewFrameValues({ mode: 'buildroot', platform: '' })
-              }}
-            >
-              Buildroot
-            </Button>
-          ) : null}
+          <DropdownMenu
+            buttonColor="secondary"
+            items={[
+              {
+                label: 'Buildroot (unfinished)',
+                onClick: () => {
+                  setNewFrameValues({ mode: 'buildroot', platform: '' })
+                },
+              },
+            ]}
+          />
         </div>
         {mode === 'rpios' ? (
           <Form logic={newFrameForm} formKey="newFrame" className="space-y-4" enableFormOnSubmit>
