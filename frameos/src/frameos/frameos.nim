@@ -81,7 +81,7 @@ proc start*(self: FrameOS) {.async.} =
 
   try:
     ## This call never returns
-    await self.server.startServer()
+    self.server.startServer()
   finally:
     stopSetupProxy()
     stopTlsProxy(self.logger)

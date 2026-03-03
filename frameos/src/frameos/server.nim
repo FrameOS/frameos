@@ -1,8 +1,8 @@
 import json
 import pixie
 import times
+import std/os
 import assets/web as webAssets
-import asyncdispatch
 import httpcore
 import threadpool
 import locks
@@ -399,16 +399,18 @@ proc buildRouter(connectionsState: ConnectionsState): Router =
     log(%*{"event": "404", "path": request.path})
     request.respond(Http404, body = "Not found!")
 
-proc listenForRender*(connectionsState: ConnectionsState) {.async.} =
+proc listenForRenderThread(connectionsState: ConnectionsState) {.thread.} =
   while true:
     if hasConnections(connectionsState):
       let (dataAvailable, _) = serverChannel.tryRecv()
       if dataAvailable:
         sendToAll(connectionsState, "render")
         log(%*{"event": "websocket:send", "message": "render"})
-      await sleepAsync(10)
+      sleep(10)
     else:
-      await sleepAsync(100)
+      sleep(100)
+
+var renderThread: Thread[ConnectionsState]
 
 proc newServer*(frameOS: FrameOS): types.Server =
   globalFrameOS = frameOS
@@ -426,9 +428,10 @@ proc newServer*(frameOS: FrameOS): types.Server =
     connectionsState: connectionsState,
   )
 
-proc startServer*(self: types.Server) {.async.} =
+proc startServer*(self: types.Server) =
   log(%*{"event": "http:start", "message": "Starting web server"})
-  asyncCheck listenForRender(self.connectionsState)
+  # mummy.serve blocks this thread, so run render notifications in a background thread.
+  createThread(renderThread, listenForRenderThread, self.connectionsState)
 
   let port = (if self.frameConfig.framePort == 0: 8787 else: self.frameConfig.framePort).Port
   let bindAddr = if self.frameConfig.httpsProxy.enable and self.frameConfig.httpsProxy.exposeOnlyPort: "127.0.0.1" else: "0.0.0.0"
