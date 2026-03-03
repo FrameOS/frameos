@@ -1,8 +1,7 @@
 import { createRoot } from 'react-dom/client'
-import { resetContext } from 'kea'
-import { routerPlugin } from 'kea-router'
 import { App } from './scenes/App'
 import './index.css'
+import { initKea } from '../../../frontend/src/initKea'
 
 if (typeof window !== 'undefined') {
   ;(window as any).FRAMEOS_APP_CONFIG = {
@@ -12,9 +11,7 @@ if (typeof window !== 'undefined') {
   }
 }
 
-resetContext({
-  plugins: [routerPlugin()],
-})
+initKea()
 
 const rootElement = document.getElementById('root')
 
