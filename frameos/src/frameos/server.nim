@@ -106,7 +106,7 @@ proc jsonResponse(request: Request, statusCode: int, payload: JsonNode) =
   headers["Content-Type"] = "application/json"
   request.respond(statusCode, headers, $payload)
 
-proc websocketHandler(websocket: WebSocket, event: WebSocketEvent, message: Message) {.gcsafe.} =
+proc websocketHandler(websocket: WebSocket, event: WebSocketEvent, message: Message) =
   case event:
   of OpenEvent:
     log(%*{"event": "websocket:connect"})
