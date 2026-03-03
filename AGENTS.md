@@ -39,7 +39,7 @@
 ## Device runtime (Nim) notes
 - `frameos/frameos` houses the on-device runtime written in Nim with asyncdispatch.
 - Entry point `src/frameos.nim` waits on `startFrameOS()` defined under `src/frameos/frameos`. Drivers, system integrations, and app implementations live in nested directories (`src/apps`, `src/drivers`, `src/system`). 【F:frameos/src/frameos.nim†L1-L6】
-- Project uses Nimble (`frameos.nimble`) and Nix/flake configs for reproducible builds; `Makefile` likely wraps build/deploy steps for device firmware.
+- Project uses Nimble (`frameos.nimble`) for builds; `Makefile` likely wraps build/deploy steps for device firmware.
 
 ## End-to-end tooling
 - `e2e/` directory contains scripts (`run`, `makescenes.py`, `makesnapshots.py`) to render scenes and compare against stored snapshots in `e2e/snapshots`. Run all tests with `./run` from that directory, or specify individual scenes like `./run dataGradient`. 【F:e2e/README.md†L1-L6】

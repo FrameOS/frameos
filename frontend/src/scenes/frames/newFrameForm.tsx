@@ -54,7 +54,7 @@ export const newFrameForm = kea<newFrameFormType>([
         name: !frame.name ? 'Please enter a name' : null,
         frame_host: frame.mode === 'rpios' && !frame.frame_host ? 'Please enter a host' : null,
         platform:
-          frame.mode && ['nixos', 'buildroot'].includes(frame.mode) && !frame.platform
+          frame.mode === 'buildroot' && !frame.platform
             ? 'Please pick a platform'
             : // no errors for RpiOS, support autodetection
               null,
