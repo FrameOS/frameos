@@ -14,6 +14,7 @@ import algorithm
 import mummy
 import mummy/routers
 import drivers/drivers as drivers
+import frameos/apps
 import frameos/types
 import frameos/channels
 import frameos/utils/image
@@ -80,6 +81,10 @@ type
     Read
     Write
 
+proc respond(request: Request; statusCode: httpcore.HttpCode;
+    headers: sink mummy.HttpHeaders = emptyHttpHeaders(); body: sink string = "") =
+  mummy.respond(request, int(statusCode), headers, body)
+
 proc hasAccess(request: Request, accessType: AccessType): bool =
   {.gcsafe.}:
     let access = globalFrameConfig.frameAccess
@@ -101,10 +106,10 @@ proc parseUrlEncoded(body: string): Table[string, string] =
     let value = if kv.len > 1: decodeQueryComponent(kv[1]) else: ""
     result[key] = value
 
-proc jsonResponse(request: Request, statusCode: int, payload: JsonNode) =
+proc jsonResponse(request: Request, statusCode: httpcore.HttpCode, payload: JsonNode) =
   var headers: mummy.HttpHeaders
   headers["Content-Type"] = "application/json"
-  request.respond(statusCode, headers, $payload)
+  request.respond(int(statusCode), headers, $payload)
 
 proc websocketHandler(websocket: WebSocket, event: WebSocketEvent, message: Message) =
   case event:
@@ -395,7 +400,7 @@ proc listenForRender*() {.async.} =
     else:
       await sleepAsync(100)
 
-proc newServer*(frameOS: FrameOS): Server =
+proc newServer*(frameOS: FrameOS): mummy.Server =
   globalFrameOS = frameOS
   globalFrameConfig = frameOS.frameConfig
   globalRunner = frameOS.runner
@@ -403,7 +408,7 @@ proc newServer*(frameOS: FrameOS): Server =
   let router = buildRouter()
   let mummyServer = mummy.newServer(router.toHandler(), websocketHandler)
 
-  result = Server(
+  result = mummy.Server(
     frameConfig: frameOS.frameConfig,
     runner: frameOS.runner,
     mummy: mummyServer,
