@@ -78,6 +78,7 @@ const buildOptions = {
   minify: true,
   entryNames: 'main',
   assetNames: 'asset-[hash]',
+  publicPath: '/static/',
   loader: {
     '.png': 'file',
     '.ttf': 'file',

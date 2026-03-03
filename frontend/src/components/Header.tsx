@@ -2,8 +2,9 @@ import { A } from 'kea-router'
 import React from 'react'
 import { H5 } from './H5'
 import { urls } from '../urls'
-import { getBasePath } from '../utils/getBasePath'
 import { frameAdminPath, isInFrameAdminMode } from '../utils/frameAdmin'
+
+import darkMarkSmall from '../assets/logo/dark-mark-small.png'
 
 interface HeaderProps {
   title: React.ReactNode
@@ -23,11 +24,7 @@ export function Header({ title, version, right, buttons }: HeaderProps) {
     >
       <div className="truncate flex items-center justify-center gap-3">
         <A href={homeHref}>
-          <img
-            src={getBasePath() + '/img/logo/dark-mark-small.png'}
-            className="w-[28px] h-[28px] inline-block align-center"
-            alt="FrameOS"
-          />
+          <img src={darkMarkSmall} className="w-[28px] h-[28px] inline-block align-center" alt="FrameOS" />
         </A>
         {version ? (
           <H5 className="flex items-end gap-1">
