@@ -13,7 +13,7 @@
         "type": "text",
         "label": "URL",
         "required": true,
-        "value": "https://example.com",
+        "value": "https://frameos.net/",
         "access": "public",
         "persist": "disk"
       },
