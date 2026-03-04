@@ -38,7 +38,12 @@ var globalFrameOS: FrameOS
 var globalFrameConfig: FrameConfig
 var globalRunner: RunnerControl
 var globalAdminSessionSalt {.threadvar.}: string
+var globalRecentLogs: seq[JsonNode] = @[]
+var globalRecentLogsLock: Lock
+var globalRecentLogId = 0
 let frameWebIndexHtml = frameWebAssets.getAsset("assets/compiled/frame_web/index.html")
+const MAX_RECENT_LOGS = 5000
+const FRAME_API_ID = 1
 
 proc initConnectionsState(): ConnectionsState =
   new(result)
@@ -63,6 +68,31 @@ proc removeConnection(state: ConnectionsState, websocket: WebSocket) {.gcsafe.} 
 proc hasConnections(state: ConnectionsState): bool {.gcsafe.} =
   withLock state.lock:
     result = state.items.len > 0
+
+proc toUiLog(payload: (float, JsonNode)): JsonNode =
+  let (timestamp, logPayload) = payload
+  globalRecentLogId += 1
+  let isoTimestamp = format(fromUnix(int64(timestamp)), "yyyy-MM-dd'T'HH:mm:ss'Z'", utc())
+  result = %*{
+    "id": globalRecentLogId,
+    "timestamp": isoTimestamp,
+    "ip": "",
+    "type": "webhook",
+    "line": $logPayload,
+    "frame_id": FRAME_API_ID,
+  }
+
+proc storeUiLog(logEntry: JsonNode) =
+  {.gcsafe.}:
+    withLock globalRecentLogsLock:
+      globalRecentLogs.add(logEntry)
+      if globalRecentLogs.len > MAX_RECENT_LOGS:
+        globalRecentLogs = globalRecentLogs[(globalRecentLogs.len - MAX_RECENT_LOGS) .. (globalRecentLogs.len - 1)]
+
+proc getUiLogs(): JsonNode =
+  {.gcsafe.}:
+    withLock globalRecentLogsLock:
+      return %*globalRecentLogs
 
 proc h(message: string): string =
   message.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;").replace("'", "&#039;")
@@ -199,7 +229,7 @@ proc frameDeviceConfigJson(deviceConfig: DeviceConfig): JsonNode =
   }
 
 proc frameApiId(): int =
-  1
+  FRAME_API_ID
 
 proc parseFrameApiId(rawId: string): int =
   try:
@@ -772,7 +802,7 @@ proc buildRouter(connectionsState: ConnectionsState): Router =
       if requestedId != frameApiId():
         request.respond(Http404, body = "Not found!")
       else:
-        jsonResponse(request, Http200, %*{"logs": %*[]})
+        jsonResponse(request, Http200, %*{"logs": getUiLogs()})
   )
 
   result.get("/api/frames/@id/metrics", proc(request: Request) =
@@ -1101,17 +1131,36 @@ proc listenForRenderThread(connectionsState: ConnectionsState) {.thread.} =
     else:
       sleep(100)
 
+proc listenForLogThread(connectionsState: ConnectionsState) {.thread.} =
+  while true:
+    let (success, payload) = logBroadcastChannel.tryRecv()
+    if success:
+      let uiLog = toUiLog(payload)
+      storeUiLog(uiLog)
+      if hasConnections(connectionsState):
+        sendToAll(connectionsState, $(%*{"event": "new_log", "data": uiLog}))
+    else:
+      sleep(10)
+
 var renderThread: Thread[ConnectionsState]
+var logThread: Thread[ConnectionsState]
 
 proc newServer*(frameOS: FrameOS): types.Server =
   globalFrameOS = frameOS
   globalFrameConfig = frameOS.frameConfig
   globalRunner = frameOS.runner
   globalAdminSessionSalt = getOrCreateAdminSessionSalt(getConfigFilename())
+  initLock(globalRecentLogsLock)
+  globalRecentLogs = @[]
+  globalRecentLogId = 0
 
   let connectionsState = initConnectionsState()
   let router = buildRouter(connectionsState)
-  let mummyServer = mummy.newServer(router.toHandler(), makeWebsocketHandler(connectionsState))
+  let routerHandler = router.toHandler()
+  let loggingHandler = proc(request: Request) {.gcsafe.} =
+    log(%*{"event": "http", "method": request.httpMethod, "path": request.path})
+    routerHandler(request)
+  let mummyServer = mummy.newServer(loggingHandler, makeWebsocketHandler(connectionsState))
 
   result = types.Server(
     frameConfig: frameOS.frameConfig,
@@ -1124,6 +1173,7 @@ proc startServer*(self: types.Server) =
   log(%*{"event": "http:start", "message": "Starting web server"})
   # mummy.serve blocks this thread, so run render notifications in a background thread.
   createThread(renderThread, listenForRenderThread, self.connectionsState)
+  createThread(logThread, listenForLogThread, self.connectionsState)
 
   let port = (if self.frameConfig.framePort == 0: 8787 else: self.frameConfig.framePort).Port
   let bindAddr = if self.frameConfig.httpsProxy.enable and self.frameConfig.httpsProxy.exposeOnlyPort: "127.0.0.1" else: "0.0.0.0"

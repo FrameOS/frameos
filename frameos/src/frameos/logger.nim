@@ -114,7 +114,7 @@ proc newLogger*(frameConfig: FrameConfig): Logger =
   )
   logger.log = proc(payload: JsonNode) =
     if logger.enabled:
-      logChannel.send((epochTime(), payload))
+      log(payload)
   logger.enable = proc() =
     logger.enabled = true
   logger.disable = proc() =
