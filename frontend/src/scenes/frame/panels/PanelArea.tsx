@@ -14,6 +14,23 @@ export interface PanelAreaProps {
   areaPanels: PanelWithMetadata[]
 }
 
+function resolvePanelComponent(componentOrModule: unknown): ((props: Record<string, any>) => JSX.Element) | null {
+  if (typeof componentOrModule === 'function') {
+    return componentOrModule as (props: Record<string, any>) => JSX.Element
+  }
+
+  if (
+    componentOrModule &&
+    typeof componentOrModule === 'object' &&
+    'default' in componentOrModule &&
+    typeof (componentOrModule as any).default === 'function'
+  ) {
+    return (componentOrModule as any).default as (props: Record<string, any>) => JSX.Element
+  }
+
+  return null
+}
+
 function pascalCaseToTitleCase(pascalCase: string): string {
   const words = pascalCase.replace(/([a-z])([A-Z])/g, '$1 $2').split(' ')
   return words.map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()).join(' ')
@@ -30,7 +47,7 @@ export function PanelArea({ area, areaPanels }: PanelAreaProps): JSX.Element {
 
   // Don't look at panel.active directly, as many might have it set
   const activePanel = areaPanels.find((panel) => panel.active) ?? areaPanels.find((panel) => !panel.hidden)
-  const Component = activePanel ? allPanels[activePanel.panel] : null
+  const Component = activePanel ? resolvePanelComponent(allPanels[activePanel.panel]) : null
   const activePanelKey = activePanel ? panelScrollKey(activePanel) : null
   const savedScrollTop = activePanelKey ? panelScrollPositions[activePanelKey] ?? 0 : 0
 
@@ -80,7 +97,7 @@ export function PanelArea({ area, areaPanels }: PanelAreaProps): JSX.Element {
           {areaPanels
             .filter((panel) => !panel.hidden || panel.active)
             .map((panel, index) => {
-              const Comp = allPanels[panel.panel]
+              const Comp = resolvePanelComponent(allPanels[panel.panel])
               const PanelTitle: ((props: Record<string, any>) => JSX.Element) | null =
                 Comp && 'PanelTitle' in Comp ? (Comp.PanelTitle as any) : null
 
