@@ -25,9 +25,14 @@ export const socketLogic = kea<socketLogicType>([
   }),
   afterMount(({ actions, cache }) => {
     const frameControlMode = isFrameControlMode()
+    const isFrameOSAdmin =
+      typeof window !== 'undefined' &&
+      !!(window as any).FRAMEOS_APP_CONFIG &&
+      (window.location.pathname.startsWith('/admin') || window.location.pathname.startsWith('/control'))
 
     function openConnection() {
-      cache.ws = new WebSocket(`${getBasePath()}/ws`)
+      const wsPath = isFrameOSAdmin ? '/ws/admin' : '/ws'
+      cache.ws = new WebSocket(`${getBasePath()}${wsPath}`)
       cache.ws.onopen = function (event: any) {
         console.log('🔵 Connected to the WebSocket server.')
       }

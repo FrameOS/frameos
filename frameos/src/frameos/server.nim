@@ -38,6 +38,7 @@ var globalFrameOS: FrameOS
 var globalFrameConfig: FrameConfig
 var globalRunner: RunnerControl
 var globalAdminSessionSalt {.threadvar.}: string
+var globalAdminConnectionsState: ConnectionsState
 var globalRecentLogs: seq[JsonNode] = @[]
 var globalRecentLogsLock: Lock
 var globalRecentLogId = 0
@@ -547,7 +548,7 @@ proc jsonResponse(request: Request, statusCode: httpcore.HttpCode, payload: Json
   headers["Content-Type"] = "application/json"
   request.respond(int(statusCode), headers, $payload)
 
-proc makeWebsocketHandler(state: ConnectionsState): WebSocketHandler =
+proc makeWebsocketHandler(publicState: ConnectionsState, adminState: ConnectionsState): WebSocketHandler =
   result = proc(websocket: WebSocket, event: WebSocketEvent, message: Message) {.closure, gcsafe.} =
     case event:
     of OpenEvent:
@@ -556,9 +557,10 @@ proc makeWebsocketHandler(state: ConnectionsState): WebSocketHandler =
       log(%*{"event": "websocket:message", "message": message.data})
     of ErrorEvent, CloseEvent:
       log(%*{"event": "websocket:disconnect"})
-      removeConnection(state, websocket)
+      removeConnection(publicState, websocket)
+      removeConnection(adminState, websocket)
 
-proc buildRouter(connectionsState: ConnectionsState): Router =
+proc buildRouter(connectionsState: ConnectionsState, adminConnectionsState: ConnectionsState): Router =
   result.get("/", proc(request: Request) =
     {.gcsafe.}:
       if netportal.isHotspotActive(globalFrameOS):
@@ -690,6 +692,17 @@ proc buildRouter(connectionsState: ConnectionsState): Router =
     try:
       let websocket = request.upgradeToWebSocket()
       addConnection(connectionsState, websocket)
+    except CatchableError:
+      request.respond(Http500, body = "WebSocket upgrade failed")
+  )
+
+  result.get("/ws/admin", proc(request: Request) {.gcsafe.} =
+    if not hasAccess(request, Read) or not hasAdminSession(request):
+      request.respond(Http401, body = "Unauthorized")
+      return
+    try:
+      let websocket = request.upgradeToWebSocket()
+      addConnection(adminConnectionsState, websocket)
     except CatchableError:
       request.respond(Http500, body = "WebSocket upgrade failed")
   )
@@ -1120,12 +1133,15 @@ proc buildRouter(connectionsState: ConnectionsState): Router =
     log(%*{"event": "404", "path": request.path})
     request.respond(Http404, body = "Not found!")
 
-proc listenForRenderThread(connectionsState: ConnectionsState) {.thread.} =
+proc listenForRenderThread(args: tuple[publicState: ConnectionsState, adminState: ConnectionsState]) {.thread.} =
   while true:
-    if hasConnections(connectionsState):
+    if hasConnections(args.publicState) or hasConnections(args.adminState):
       let (dataAvailable, _) = serverChannel.tryRecv()
       if dataAvailable:
-        sendToAll(connectionsState, "render")
+        if hasConnections(args.publicState):
+          sendToAll(args.publicState, "render")
+        if hasConnections(args.adminState):
+          sendToAll(args.adminState, "render")
         log(%*{"event": "websocket:send", "message": "render"})
       sleep(10)
     else:
@@ -1142,7 +1158,7 @@ proc listenForLogThread(connectionsState: ConnectionsState) {.thread.} =
     else:
       sleep(10)
 
-var renderThread: Thread[ConnectionsState]
+var renderThread: Thread[tuple[publicState: ConnectionsState, adminState: ConnectionsState]]
 var logThread: Thread[ConnectionsState]
 
 proc newServer*(frameOS: FrameOS): types.Server =
@@ -1155,12 +1171,14 @@ proc newServer*(frameOS: FrameOS): types.Server =
   globalRecentLogId = 0
 
   let connectionsState = initConnectionsState()
-  let router = buildRouter(connectionsState)
+  let adminConnectionsState = initConnectionsState()
+  globalAdminConnectionsState = adminConnectionsState
+  let router = buildRouter(connectionsState, adminConnectionsState)
   let routerHandler = router.toHandler()
   let loggingHandler = proc(request: Request) {.gcsafe.} =
     log(%*{"event": "http", "method": request.httpMethod, "path": request.path})
     routerHandler(request)
-  let mummyServer = mummy.newServer(loggingHandler, makeWebsocketHandler(connectionsState))
+  let mummyServer = mummy.newServer(loggingHandler, makeWebsocketHandler(connectionsState, adminConnectionsState))
 
   result = types.Server(
     frameConfig: frameOS.frameConfig,
@@ -1172,8 +1190,8 @@ proc newServer*(frameOS: FrameOS): types.Server =
 proc startServer*(self: types.Server) =
   log(%*{"event": "http:start", "message": "Starting web server"})
   # mummy.serve blocks this thread, so run render notifications in a background thread.
-  createThread(renderThread, listenForRenderThread, self.connectionsState)
-  createThread(logThread, listenForLogThread, self.connectionsState)
+  createThread(renderThread, listenForRenderThread, (self.connectionsState, globalAdminConnectionsState))
+  createThread(logThread, listenForLogThread, globalAdminConnectionsState)
 
   let port = (if self.frameConfig.framePort == 0: 8787 else: self.frameConfig.framePort).Port
   let bindAddr = if self.frameConfig.httpsProxy.enable and self.frameConfig.httpsProxy.exposeOnlyPort: "127.0.0.1" else: "0.0.0.0"
