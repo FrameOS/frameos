@@ -1,9 +1,12 @@
 import json
 import pixie
+import chroma
 import times
 import std/os
 import assets/web as webAssets
+import assets/apps as appsAsset
 import httpcore
+import osproc
 import threadpool
 import locks
 import strformat
@@ -11,6 +14,10 @@ import options
 import strutils
 import tables
 import algorithm
+import random
+import hashes
+import checksums/md5
+import zippy
 import mummy
 import mummy/routers
 import drivers/drivers as drivers
@@ -29,7 +36,8 @@ from scenes/scenes import sceneOptions
 var globalFrameOS: FrameOS
 var globalFrameConfig: FrameConfig
 var globalRunner: RunnerControl
-let indexHtml = webAssets.getAsset("assets/compiled/web/index.html")
+var globalAdminSessionSalt {.threadvar.}: string
+let frameWebIndexHtml = webAssets.getAsset("assets/compiled/web/index.html")
 
 proc initConnectionsState(): ConnectionsState =
   new(result)
@@ -61,6 +69,192 @@ proc h(message: string): string =
 proc s(message: string): string =
   message.replace("'", "\\'").replace("\n", "\\n")
 
+proc contentTypeForAsset(path: string): string =
+  if path.endsWith(".css"):
+    "text/css"
+  elif path.endsWith(".js"):
+    "application/javascript"
+  elif path.endsWith(".svg"):
+    "image/svg+xml"
+  elif path.endsWith(".png"):
+    "image/png"
+  elif path.endsWith(".woff2"):
+    "font/woff2"
+  elif path.endsWith(".woff"):
+    "font/woff"
+  else:
+    "application/octet-stream"
+
+proc loadConfigJson(): JsonNode =
+  try:
+    return parseFile(getConfigFilename())
+  except CatchableError:
+    return %*{}
+
+proc loadScenePayload(): JsonNode =
+  var data = ""
+  let envPath = getEnv("FRAMEOS_SCENES_JSON")
+  if envPath.len > 0:
+    try:
+      if envPath.endsWith(".gz") and fileExists(envPath):
+        data = uncompress(readFile(envPath))
+      elif fileExists(envPath):
+        data = readFile(envPath)
+    except CatchableError:
+      data = ""
+  if data.len == 0:
+    try:
+      if fileExists("./scenes.json.gz"):
+        data = uncompress(readFile("./scenes.json.gz"))
+      elif fileExists("./scenes.json"):
+        data = readFile("./scenes.json")
+    except CatchableError:
+      data = ""
+  if data.len == 0:
+    return %*[]
+  try:
+    let payload = parseJson(data)
+    if payload.kind == JArray:
+      return payload
+  except JsonParsingError, CatchableError:
+    discard
+  return %*[]
+
+proc frameControlCodeJson(controlCode: ControlCode): JsonNode =
+  if controlCode == nil:
+    return %*{}
+  result = %*{
+    "enabled": controlCode.enabled,
+    "position": controlCode.position,
+    "size": controlCode.size,
+    "padding": controlCode.padding,
+    "offsetX": controlCode.offsetX,
+    "offsetY": controlCode.offsetY,
+    "qrCodeColor": controlCode.qrCodeColor.toHtmlHex(),
+    "backgroundColor": controlCode.backgroundColor.toHtmlHex(),
+  }
+
+proc frameScheduleJson(schedule: FrameSchedule): JsonNode =
+  if schedule == nil:
+    return %*{"events": %*[]}
+  var events: seq[JsonNode] = @[]
+  for event in schedule.events:
+    events.add(%*{
+      "id": event.id,
+      "minute": event.minute,
+      "hour": event.hour,
+      "weekday": event.weekday,
+      "event": event.event,
+      "payload": event.payload,
+    })
+  result = %*{"events": events}
+
+proc frameGpioButtonsJson(buttons: seq[GPIOButton]): JsonNode =
+  var entries: seq[JsonNode] = @[]
+  for button in buttons:
+    entries.add(%*{"pin": button.pin, "label": button.label})
+  result = %*entries
+
+proc frameNetworkJson(network: NetworkConfig): JsonNode =
+  if network == nil:
+    return %*{}
+  result = %*{
+    "networkCheck": network.networkCheck,
+    "networkCheckTimeoutSeconds": network.networkCheckTimeoutSeconds,
+    "networkCheckUrl": network.networkCheckUrl,
+    "wifiHotspot": network.wifiHotspot,
+    "wifiHotspotSsid": network.wifiHotspotSsid,
+    "wifiHotspotPassword": network.wifiHotspotPassword,
+    "wifiHotspotTimeoutSeconds": network.wifiHotspotTimeoutSeconds,
+  }
+
+proc frameAgentJson(agent: AgentConfig): JsonNode =
+  if agent == nil:
+    return %*{}
+  result = %*{
+    "agentEnabled": agent.agentEnabled,
+    "agentRunCommands": agent.agentRunCommands,
+    "agentSharedSecret": agent.agentSharedSecret,
+  }
+
+proc framePaletteJson(palette: PaletteConfig): JsonNode =
+  if palette == nil:
+    return %*{}
+  var colors: seq[JsonNode] = @[]
+  for color in palette.colors:
+    colors.add(%*[color[0], color[1], color[2]])
+  result = %*{"colors": colors}
+
+proc frameDeviceConfigJson(deviceConfig: DeviceConfig): JsonNode =
+  if deviceConfig == nil:
+    return %*{}
+  var headers: seq[JsonNode] = @[]
+  for header in deviceConfig.httpUploadHeaders:
+    headers.add(%*{"name": header.name, "value": header.value})
+  result = %*{
+    "vcom": deviceConfig.vcom,
+    "uploadUrl": deviceConfig.httpUploadUrl,
+    "uploadHeaders": headers,
+  }
+
+proc frameApiId(): int =
+  1
+
+proc parseFrameApiId(rawId: string): int =
+  try:
+    return parseInt(rawId)
+  except CatchableError:
+    return -1
+
+proc frameAssetsPayload(): JsonNode =
+  let configuredAssetsPath = if globalFrameConfig.assetsPath.len > 0: globalFrameConfig.assetsPath else: "/srv/assets"
+  let assetsPath = normalizedPath(configuredAssetsPath)
+  var assets: seq[JsonNode] = @[]
+  if not dirExists(assetsPath):
+    return %*[]
+
+  proc addAsset(path: string, kind: PathComponent) =
+    if kind notin {pcDir, pcFile}:
+      return
+    try:
+      let info = getFileInfo(path)
+      assets.add(%*{
+        "path": path,
+        "size": if kind == pcFile: info.size else: 0,
+        "mtime": info.lastWriteTime.toUnix(),
+        "is_dir": kind == pcDir,
+      })
+    except CatchableError:
+      discard
+
+  for kind, path in walkDir(assetsPath, relative = false):
+    if kind == pcDir:
+      addAsset(path, kind)
+
+  for filePath in walkDirRec(assetsPath, relative = false):
+    addAsset(filePath, pcFile)
+
+  return %*assets
+
+proc withinBasePath(path, basePath: string): bool =
+  let normalizedTargetPath = normalizedPath(path)
+  let normalizedBasePath = normalizedPath(basePath)
+  return normalizedTargetPath == normalizedBasePath or normalizedTargetPath.startsWith(normalizedBasePath & DirSep)
+
+proc contentTypeForFilePath(path: string): string =
+  let lowerPath = path.toLowerAscii()
+  if lowerPath.endsWith(".png"):
+    return "image/png"
+  if lowerPath.endsWith(".jpg") or lowerPath.endsWith(".jpeg"):
+    return "image/jpeg"
+  if lowerPath.endsWith(".webp"):
+    return "image/webp"
+  if lowerPath.endsWith(".gif"):
+    return "image/gif"
+  if lowerPath.endsWith(".svg"):
+    return "image/svg+xml"
+  contentTypeForAsset(lowerPath)
+
 proc shouldReturnNotModified*(headers: httpcore.HttpHeaders, lastUpdate: float): bool {.gcsafe.} =
   if lastUpdate <= 0.0:
     return false
@@ -91,15 +285,206 @@ proc shouldReturnNotModified(headers: mummy.HttpHeaders, lastUpdate: float): boo
 
 const AUTH_HEADER = "authorization"
 const AUTH_TYPE = "Bearer"
+const ACCESS_COOKIE = "frame_access_key"
+const ADMIN_SESSION_COOKIE = "frame_admin_session"
+const ADMIN_SESSION_TTL_SECONDS = 60 * 60 * 24
 
 type
   AccessType = enum
     Read
     Write
 
+proc getAssetPayload(path: string, thumb: bool): tuple[status: httpcore.HttpCode, headers: mummy.HttpHeaders, body: string] =
+  let configuredAssetsPath = if globalFrameConfig.assetsPath.len > 0: globalFrameConfig.assetsPath else: "/srv/assets"
+  let assetsPath = normalizedPath(configuredAssetsPath)
+  let relPath = path.strip()
+  if relPath.len == 0:
+    var headers: mummy.HttpHeaders
+    headers["Content-Type"] = "application/json"
+    return (Http400, headers, $(%*{"detail": "Path is required"}))
+
+  let fullPath = normalizedPath(assetsPath / relPath)
+  if not withinBasePath(fullPath, assetsPath):
+    var headers: mummy.HttpHeaders
+    headers["Content-Type"] = "application/json"
+    return (Http400, headers, $(%*{"detail": "Invalid path"}))
+  if not fileExists(fullPath):
+    var headers: mummy.HttpHeaders
+    headers["Content-Type"] = "application/json"
+    return (Http404, headers, $(%*{"detail": "Asset not found"}))
+
+  if not thumb:
+    var headers: mummy.HttpHeaders
+    headers["Content-Type"] = contentTypeForFilePath(fullPath)
+    return (Http200, headers, readFile(fullPath))
+
+  let fullMd5 = getMD5(fullPath)
+  let thumbRoot = assetsPath / ".thumbs"
+  let thumbPath = normalizedPath(thumbRoot / (fullMd5 & ".320x320.jpg"))
+  if not withinBasePath(thumbPath, thumbRoot):
+    var headers: mummy.HttpHeaders
+    headers["Content-Type"] = "application/json"
+    return (Http400, headers, $(%*{"detail": "Invalid thumbnail path"}))
+
+  try:
+    if not fileExists(thumbPath):
+      createDir(parentDir(thumbPath))
+      let cmd = "convert " & quoteShell(fullPath) & " -thumbnail 320x320 " & quoteShell(thumbPath)
+      let (output, exitCode) = execCmdEx(cmd)
+      if exitCode != 0:
+        var headers: mummy.HttpHeaders
+        headers["Content-Type"] = "application/json"
+        return (Http500, headers, $(%*{"detail": "Failed to generate thumbnail", "error": output}))
+    var headers: mummy.HttpHeaders
+    headers["Content-Type"] = "image/jpeg"
+    return (Http200, headers, readFile(thumbPath))
+  except CatchableError as e:
+    var headers: mummy.HttpHeaders
+    headers["Content-Type"] = "application/json"
+    return (Http500, headers, $(%*{"detail": "Failed to fetch asset", "error": e.msg}))
+
+proc frameApiPayload(connectionsState: ConnectionsState): JsonNode =
+  let configJson = loadConfigJson()
+  let interval = if configJson.kind == JObject: configJson{"interval"}.getFloat(300) else: 300
+  let backgroundColor =
+    if configJson.kind == JObject: configJson{"backgroundColor"}.getStr("#000000") else: "#000000"
+  let colorValue =
+    if configJson.kind == JObject and configJson.hasKey("color"): configJson["color"] else: newJNull()
+  let scenesPayload = loadScenePayload()
+  var activeConnections = 0
+  withLock connectionsState.lock:
+    activeConnections = connectionsState.items.len
+
+  result = %*{
+    "id": frameApiId(),
+    "name": globalFrameConfig.name,
+    "mode": globalFrameConfig.mode,
+    "frame_host": globalFrameConfig.frameHost,
+    "frame_port": globalFrameConfig.framePort,
+    "frame_access_key": globalFrameConfig.frameAccessKey,
+    "frame_access": globalFrameConfig.frameAccess,
+    "frame_admin_auth": globalFrameConfig.frameAdminAuth,
+    "ssh_user": "",
+    "ssh_pass": "",
+    "ssh_port": 22,
+    "ssh_keys": %*[],
+    "server_host": globalFrameConfig.serverHost,
+    "server_port": globalFrameConfig.serverPort,
+    "server_api_key": globalFrameConfig.serverApiKey,
+    "status": "ready",
+    "width": globalFrameConfig.width,
+    "height": globalFrameConfig.height,
+    "device": globalFrameConfig.device,
+    "device_config": frameDeviceConfigJson(globalFrameConfig.deviceConfig),
+    "color": colorValue,
+    "interval": interval,
+    "metrics_interval": globalFrameConfig.metricsInterval,
+    "scaling_mode": globalFrameConfig.scalingMode,
+    "rotate": globalFrameConfig.rotate,
+    "flip": globalFrameConfig.flip,
+    "background_color": backgroundColor,
+    "scenes": scenesPayload,
+    "debug": globalFrameConfig.debug,
+    "log_to_file": globalFrameConfig.logToFile,
+    "assets_path": globalFrameConfig.assetsPath,
+    "save_assets": globalFrameConfig.saveAssets,
+    "control_code": frameControlCodeJson(globalFrameConfig.controlCode),
+    "schedule": frameScheduleJson(globalFrameConfig.schedule),
+    "gpio_buttons": frameGpioButtonsJson(globalFrameConfig.gpioButtons),
+    "network": frameNetworkJson(globalFrameConfig.network),
+    "agent": frameAgentJson(globalFrameConfig.agent),
+    "palette": framePaletteJson(globalFrameConfig.palette),
+    "active_connections": activeConnections,
+  }
+
+proc buildFrameImageResponse(request: Request): tuple[status: httpcore.HttpCode, headers: mummy.HttpHeaders, body: string] =
+  let (sceneId, _, _, lastUpdate) = getLastPublicState()
+  if shouldReturnNotModified(request.headers, lastUpdate):
+    var headers: mummy.HttpHeaders
+    headers["X-Scene-Id"] = $sceneId
+    headers["Access-Control-Expose-Headers"] = "X-Scene-Id"
+    return (Http304, headers, "")
+
+  var headers: mummy.HttpHeaders
+  headers["Content-Type"] = "image/png"
+  headers["Content-Disposition"] = &"inline; filename=\"{sceneId}.png\""
+  headers["X-Scene-Id"] = $sceneId
+  headers["Access-Control-Expose-Headers"] = "X-Scene-Id"
+  if lastUpdate > 0.0:
+    let lastModified = format(fromUnix(int64(lastUpdate)), "ddd, dd MMM yyyy HH:mm:ss 'GMT'", utc())
+    headers["Last-Modified"] = lastModified
+  try:
+    let image = drivers.toPng(360 - globalFrameConfig.rotate)
+    if image != "":
+      return (Http200, headers, image)
+    else:
+      raise newException(Exception, "No image available")
+  except Exception:
+    try:
+      return (Http200, headers, getLastImagePng())
+    except Exception as e:
+      return (Http200, headers, renderError(globalFrameConfig.renderWidth(), globalFrameConfig.renderHeight(),
+        &"Error: {$e.msg}\n{$e.getStackTrace()}").encodeImage(PngFormat))
+
 proc respond(request: Request; statusCode: httpcore.HttpCode;
     headers: sink mummy.HttpHeaders = emptyHttpHeaders(); body: sink string = "") =
   mummy.respond(request, int(statusCode), headers, body)
+
+proc getCookieValue(request: Request, name: string): string =
+  if not request.headers.contains("cookie"):
+    return ""
+  let cookieHeader = request.headers["cookie"]
+  for cookie in cookieHeader.split(";"):
+    let parts = cookie.strip().split("=", 1)
+    if parts.len == 2 and parts[0] == name:
+      return parts[1]
+  return ""
+
+template adminAuthUser(): string =
+  {.gcsafe.}:
+    globalFrameConfig.frameAdminAuth{"user"}.getStr("")
+
+template adminAuthPass(): string =
+  {.gcsafe.}:
+    globalFrameConfig.frameAdminAuth{"pass"}.getStr("")
+
+template adminAuthEnabled(): bool =
+  {.gcsafe.}:
+    globalFrameConfig.frameAdminAuth{"enabled"}.getBool(false) and
+      globalFrameConfig.frameAdminAuth{"user"}.getStr("").len > 0 and
+      globalFrameConfig.frameAdminAuth{"pass"}.getStr("").len > 0
+
+proc getOrCreateAdminSessionSalt(configPath: string): string =
+  let envSecret = getEnv("FRAMEOS_ADMIN_SESSION_SALT")
+  if envSecret.len > 0:
+    return envSecret
+
+  let secretPath = configPath & ".admin_session_salt"
+  try:
+    if fileExists(secretPath):
+      let existing = readFile(secretPath).strip()
+      if existing.len > 0:
+        return existing
+  except CatchableError:
+    discard
+
+  randomize()
+  let generated = $(hash($epochTime() & ":" & $rand(1_000_000_000) & ":" & configPath))
+  try:
+    writeFile(secretPath, generated & "\n")
+  except CatchableError:
+    discard
+  return generated
+
+proc hasAdminSession(request: Request): bool =
+  {.gcsafe.}:
+    if not adminAuthEnabled():
+      return true
+    if adminAuthUser().len == 0 or adminAuthPass().len == 0:
+      return false
+    let token = getCookieValue(request, ADMIN_SESSION_COOKIE)
+    let expectedToken = $(hash(globalAdminSessionSalt & ":" & adminAuthUser() & ":" & adminAuthPass()))
+    return token.len > 0 and token == expectedToken
 
 proc hasAccess(request: Request, accessType: AccessType): bool =
   {.gcsafe.}:
@@ -109,9 +494,13 @@ proc hasAccess(request: Request, accessType: AccessType): bool =
     let accessKey = globalFrameConfig.frameAccessKey
     if accessKey == "":
       return false
+    if request.queryParams.contains("k") and request.queryParams["k"] == accessKey:
+      return true
+    if getCookieValue(request, ACCESS_COOKIE) == accessKey:
+      return true
     if request.httpMethod == "POST":
       return request.headers.contains(AUTH_HEADER) and request.headers[AUTH_HEADER] == AUTH_TYPE & " " & accessKey
-    return request.queryParams.contains("k") and request.queryParams["k"] == accessKey
+    return false
 
 proc parseUrlEncoded(body: string): Table[string, string] =
   for pair in body.split('&'):
@@ -144,14 +533,82 @@ proc buildRouter(connectionsState: ConnectionsState): Router =
       if netportal.isHotspotActive(globalFrameOS):
         log(%*{"event": "portal:http", "get": request.path})
         request.respond(Http200, body = netportal.setupHtml(globalFrameOS))
-      elif not hasAccess(request, Read):
-        request.respond(Http401, body = "Unauthorized")
       else:
-        let scalingMode = case globalFrameConfig.scalingMode:
-          of "cover", "center": globalFrameConfig.scalingMode
-          of "stretch": "100% 100%"
-          else: "contain"
-        request.respond(Http200, body = indexHtml.replace("/*$scalingMode*/contain", scalingMode))
+        let accessKey = globalFrameConfig.frameAccessKey
+        if accessKey != "" and request.queryParams.contains("k") and request.queryParams["k"] == accessKey:
+          var headers: mummy.HttpHeaders
+          headers["Location"] = "/"
+          headers["Set-Cookie"] = ACCESS_COOKIE & "=" & accessKey & "; Path=/; SameSite=Lax"
+          request.respond(Http302, headers)
+        elif not hasAccess(request, Read):
+          request.respond(Http401, body = "Unauthorized")
+        else:
+          let scalingMode = case globalFrameConfig.scalingMode:
+            of "cover", "center": globalFrameConfig.scalingMode
+            of "stretch": "100% 100%"
+            else: "contain"
+          request.respond(Http200, body = frameWebIndexHtml.replace("/*$scalingMode*/contain", scalingMode))
+  )
+
+  result.get("/admin", proc(request: Request) =
+    {.gcsafe.}:
+      if netportal.isHotspotActive(globalFrameOS):
+        log(%*{"event": "portal:http", "get": request.path})
+        request.respond(Http200, body = netportal.setupHtml(globalFrameOS))
+      elif not hasAdminSession(request):
+        var headers: mummy.HttpHeaders
+        headers["Location"] = "/login"
+        request.respond(Http302, headers)
+      else:
+        let accessKey = globalFrameConfig.frameAccessKey
+        if accessKey != "" and request.queryParams.contains("k") and request.queryParams["k"] == accessKey:
+          var headers: mummy.HttpHeaders
+          headers["Location"] = "/admin"
+          headers["Set-Cookie"] = ACCESS_COOKIE & "=" & accessKey & "; Path=/; SameSite=Lax"
+          request.respond(Http302, headers)
+        else:
+          let scalingMode = case globalFrameConfig.scalingMode:
+            of "cover", "center": globalFrameConfig.scalingMode
+            of "stretch": "100% 100%"
+            else: "contain"
+          request.respond(Http200, body = frameWebIndexHtml.replace("/*$scalingMode*/contain", scalingMode))
+  )
+
+  result.get("/control", proc(request: Request) =
+    var headers: mummy.HttpHeaders
+    headers["Location"] = "/admin"
+    request.respond(Http302, headers)
+  )
+
+  result.get("/login", proc(request: Request) =
+    {.gcsafe.}:
+      let scalingMode = case globalFrameConfig.scalingMode:
+        of "cover", "center": globalFrameConfig.scalingMode
+        of "stretch": "100% 100%"
+        else: "contain"
+      request.respond(Http200, body = frameWebIndexHtml.replace("/*$scalingMode*/contain", scalingMode))
+  )
+
+  result.get("/logout", proc(request: Request) =
+    var headers: mummy.HttpHeaders
+    headers["Location"] = "/login"
+    headers["Set-Cookie"] = ADMIN_SESSION_COOKIE & "=; Path=/; Max-Age=0; SameSite=Lax"
+    request.respond(Http302, headers)
+  )
+
+  result.get("/static/@asset", proc(request: Request) =
+    if not hasAccess(request, Read):
+      request.respond(Http401, body = "Unauthorized")
+      return
+    {.gcsafe.}:
+      let assetPath = "assets/compiled/web/static/" & request.pathParams["asset"]
+      try:
+        let asset = webAssets.getAsset(assetPath)
+        var headers: mummy.HttpHeaders
+        headers["Content-Type"] = contentTypeForAsset(assetPath)
+        request.respond(Http200, headers, asset)
+      except KeyError:
+        request.respond(Http404, body = "Not found!")
   )
 
   result.post("/setup", proc(request: Request) =
@@ -212,36 +669,263 @@ proc buildRouter(connectionsState: ConnectionsState): Router =
       return
     log(%*{"event": "http", "get": request.path})
     {.gcsafe.}:
-      let (sceneId, _, _, lastUpdate) = getLastPublicState()
-      if shouldReturnNotModified(request.headers, lastUpdate):
-        var headers: mummy.HttpHeaders
-        headers["X-Scene-Id"] = $sceneId
-        headers["Access-Control-Expose-Headers"] = "X-Scene-Id"
-        request.respond(Http304, headers)
-        return
+      let (status, headers, body) = buildFrameImageResponse(request)
+      request.respond(status, headers, body)
+  )
+
+  result.get("/api/apps", proc(request: Request) =
+    if not hasAccess(request, Read):
+      request.respond(Http401, body = "Unauthorized")
+      return
+    {.gcsafe.}:
       var headers: mummy.HttpHeaders
-      headers["Content-Type"] = "image/png"
-      headers["Content-Disposition"] = &"inline; filename=\"{sceneId}.png\""
-      headers["X-Scene-Id"] = $sceneId
-      headers["Access-Control-Expose-Headers"] = "X-Scene-Id"
-      if lastUpdate > 0.0:
-        let lastModified = format(fromUnix(int64(lastUpdate)), "ddd, dd MMM yyyy HH:mm:ss 'GMT'", utc())
-        headers["Last-Modified"] = lastModified
-      try:
-        let image = drivers.toPng(360 - globalFrameConfig.rotate)
-        if image != "":
-          request.respond(Http200, headers, image)
+      headers["Content-Type"] = "application/json"
+      request.respond(Http200, headers, appsAsset.getAppsJson())
+  )
+
+  result.get("/api/frames", proc(request: Request) =
+    if not hasAccess(request, Read):
+      request.respond(Http401, body = "Unauthorized")
+      return
+    {.gcsafe.}:
+      let framePayload = frameApiPayload(connectionsState)
+      jsonResponse(request, Http200, %*{"frames": @[framePayload]})
+  )
+
+  result.get("/api/frames/@id", proc(request: Request) =
+    if not hasAccess(request, Read):
+      request.respond(Http401, body = "Unauthorized")
+      return
+    {.gcsafe.}:
+      let requestedId = parseFrameApiId(request.pathParams["id"])
+      if requestedId != frameApiId():
+        request.respond(Http404, body = "Not found!")
+      else:
+        let framePayload = frameApiPayload(connectionsState)
+        jsonResponse(request, Http200, %*{"frame": framePayload})
+  )
+
+  result.get("/api/frames/@id/ping", proc(request: Request) =
+    if not hasAccess(request, Read):
+      request.respond(Http401, body = "Unauthorized")
+      return
+    {.gcsafe.}:
+      let requestedId = parseFrameApiId(request.pathParams["id"])
+      if requestedId != frameApiId():
+        request.respond(Http404, body = "Not found!")
+      else:
+        jsonResponse(request, Http200, %*{
+          "ok": true,
+          "mode": "http",
+          "target": "frame",
+          "elapsed_ms": 0,
+          "status": 200,
+          "message": "pong"
+        })
+  )
+
+  result.get("/api/frames/@id/state", proc(request: Request) =
+    if not hasAccess(request, Read):
+      request.respond(Http401, body = "Unauthorized")
+      return
+    {.gcsafe.}:
+      let requestedId = parseFrameApiId(request.pathParams["id"])
+      if requestedId != frameApiId():
+        request.respond(Http404, body = "Not found!")
+      else:
+        let (sceneId, state, _, _) = getLastPublicState()
+        jsonResponse(request, Http200, %*{"sceneId": $sceneId, "state": state})
+  )
+
+  result.get("/api/frames/@id/states", proc(request: Request) =
+    if not hasAccess(request, Read):
+      request.respond(Http401, body = "Unauthorized")
+      return
+    {.gcsafe.}:
+      let requestedId = parseFrameApiId(request.pathParams["id"])
+      if requestedId != frameApiId():
+        request.respond(Http404, body = "Not found!")
+      else:
+        let (sceneId, states) = getAllPublicStates()
+        jsonResponse(request, Http200, %*{"sceneId": $sceneId, "states": states})
+  )
+
+  result.get("/api/frames/@id/uploaded_scenes", proc(request: Request) =
+    if not hasAccess(request, Read):
+      request.respond(Http401, body = "Unauthorized")
+      return
+    {.gcsafe.}:
+      let requestedId = parseFrameApiId(request.pathParams["id"])
+      if requestedId != frameApiId():
+        request.respond(Http404, body = "Not found!")
+      else:
+        jsonResponse(request, Http200, %*{"scenes": getUploadedScenePayload()})
+  )
+
+  result.get("/api/frames/@id/logs", proc(request: Request) =
+    if not hasAccess(request, Read):
+      request.respond(Http401, body = "Unauthorized")
+      return
+    {.gcsafe.}:
+      let requestedId = parseFrameApiId(request.pathParams["id"])
+      if requestedId != frameApiId():
+        request.respond(Http404, body = "Not found!")
+      else:
+        jsonResponse(request, Http200, %*{"logs": %*[]})
+  )
+
+  result.get("/api/frames/@id/metrics", proc(request: Request) =
+    if not hasAccess(request, Read):
+      request.respond(Http401, body = "Unauthorized")
+      return
+    {.gcsafe.}:
+      let requestedId = parseFrameApiId(request.pathParams["id"])
+      if requestedId != frameApiId():
+        request.respond(Http404, body = "Not found!")
+      else:
+        jsonResponse(request, Http200, %*{"metrics": %*[]})
+  )
+
+  result.get("/api/frames/@id/assets", proc(request: Request) =
+    if not hasAccess(request, Read):
+      request.respond(Http401, body = "Unauthorized")
+      return
+    {.gcsafe.}:
+      let requestedId = parseFrameApiId(request.pathParams["id"])
+      if requestedId != frameApiId():
+        request.respond(Http404, body = "Not found!")
+      else:
+        jsonResponse(request, Http200, %*{"assets": frameAssetsPayload()})
+  )
+
+  result.get("/api/frames/@id/asset", proc(request: Request) =
+    if not hasAccess(request, Read):
+      request.respond(Http401, body = "Unauthorized")
+      return
+    {.gcsafe.}:
+      let requestedId = parseFrameApiId(request.pathParams["id"])
+      if requestedId != frameApiId():
+        request.respond(Http404, body = "Not found!")
+      else:
+        let path = request.queryParams.getOrDefault("path", "")
+        let thumb = request.queryParams.getOrDefault("thumb", "") == "1"
+        let (status, headers, body) = getAssetPayload(path, thumb)
+        request.respond(status, headers, body)
+  )
+
+  result.get("/api/frames/@id/image_token", proc(request: Request) =
+    if not hasAccess(request, Read):
+      request.respond(Http401, body = "Unauthorized")
+      return
+    {.gcsafe.}:
+      let requestedId = parseFrameApiId(request.pathParams["id"])
+      if requestedId != frameApiId():
+        request.respond(Http404, body = "Not found!")
+      else:
+        let token = if globalFrameConfig.frameAccessKey.len > 0: globalFrameConfig.frameAccessKey else: "frame"
+        jsonResponse(request, Http200, %*{"token": token, "expires_in": 3600})
+  )
+
+  result.get("/api/frames/@id/image", proc(request: Request) =
+    if not hasAccess(request, Read):
+      request.respond(Http401, body = "Unauthorized")
+      return
+    {.gcsafe.}:
+      let requestedId = parseFrameApiId(request.pathParams["id"])
+      if requestedId != frameApiId():
+        request.respond(Http404, body = "Not found!")
+      else:
+        let (status, headers, body) = buildFrameImageResponse(request)
+        request.respond(status, headers, body)
+  )
+
+  result.get("/api/frames/@id/scene_images/@sceneId", proc(request: Request) =
+    if not hasAccess(request, Read):
+      request.respond(Http401, body = "Unauthorized")
+      return
+    {.gcsafe.}:
+      let requestedId = parseFrameApiId(request.pathParams["id"])
+      if requestedId != frameApiId():
+        request.respond(Http404, body = "Not found!")
+      else:
+        let (status, headers, body) = buildFrameImageResponse(request)
+        request.respond(status, headers, body)
+  )
+
+  result.get("/api/admin/session", proc(request: Request) =
+    let authenticated = hasAdminSession(request)
+    jsonResponse(request, Http200, %*{"authenticated": authenticated})
+  )
+
+  result.post("/api/admin/login", proc(request: Request) =
+    if not adminAuthEnabled():
+      jsonResponse(request, Http200, %*{"status": "ok"})
+      return
+    let payload = parseJson(if request.body == "": "{}" else: request.body)
+    let username = payload{"username"}.getStr("")
+    let password = payload{"password"}.getStr("")
+    if username == adminAuthUser() and password == adminAuthPass() and username.len > 0:
+      var headers: mummy.HttpHeaders
+      headers["Content-Type"] = "application/json"
+      headers["Set-Cookie"] = ADMIN_SESSION_COOKIE & "=" & $(hash(globalAdminSessionSalt & ":" & adminAuthUser() &
+        ":" & adminAuthPass())) & "; Path=/; HttpOnly; SameSite=Lax; Max-Age=" & $ADMIN_SESSION_TTL_SECONDS
+      request.respond(Http200, headers, $(%*{"status": "ok"}))
+    else:
+      jsonResponse(request, Http401, %*{"detail": "Invalid credentials"})
+  )
+
+  result.post("/api/admin/logout", proc(request: Request) =
+    var headers: mummy.HttpHeaders
+    headers["Content-Type"] = "application/json"
+    headers["Set-Cookie"] = ADMIN_SESSION_COOKIE & "=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax"
+    request.respond(Http200, headers, $(%*{"status": "ok"}))
+  )
+
+  result.post("/api/frames/@id/event/@name", proc(request: Request) =
+    if not hasAdminSession(request):
+      request.respond(Http401, body = "Unauthorized")
+      return
+    if not hasAccess(request, Write):
+      request.respond(Http401, body = "Unauthorized")
+      return
+    {.gcsafe.}:
+      let requestedId = parseFrameApiId(request.pathParams["id"])
+      if requestedId != frameApiId():
+        request.respond(Http404, body = "Not found!")
+      else:
+        log(%*{"event": "http", "post": request.path})
+        let payload = parseJson(if request.body == "": "{}" else: request.body)
+        sendEvent(request.pathParams["name"], payload)
+        jsonResponse(request, Http200, %*{"status": "ok"})
+  )
+
+  result.post("/api/frames/@id/event", proc(request: Request) =
+    if not hasAdminSession(request):
+      request.respond(Http401, body = "Unauthorized")
+      return
+    if not hasAccess(request, Write):
+      request.respond(Http401, body = "Unauthorized")
+      return
+    {.gcsafe.}:
+      let requestedId = parseFrameApiId(request.pathParams["id"])
+      if requestedId != frameApiId():
+        request.respond(Http404, body = "Not found!")
+      else:
+        let payload = parseJson(if request.body == "": "{}" else: request.body)
+        let eventName = payload{"event"}.getStr("")
+        if eventName.len == 0:
+          jsonResponse(request, Http400, %*{"detail": "Missing event"})
         else:
-          raise newException(Exception, "No image available")
-      except Exception:
-        try:
-          request.respond(Http200, headers, getLastImagePng())
-        except Exception as e:
-          request.respond(Http200, headers, renderError(globalFrameConfig.renderWidth(),
-            globalFrameConfig.renderHeight(), &"Error: {$e.msg}\n{$e.getStackTrace()}").encodeImage(PngFormat))
+          let eventPayload = payload{"payload"}
+          log(%*{"event": "http", "post": request.path, "eventName": eventName})
+          sendEvent(eventName, if eventPayload.kind == JNull: %*{} else: eventPayload)
+          jsonResponse(request, Http200, %*{"status": "ok"})
   )
 
   result.post("/event/@name", proc(request: Request) =
+    if not hasAdminSession(request):
+      request.respond(Http401, body = "Unauthorized")
+      return
     if not hasAccess(request, Write):
       request.respond(Http401, body = "Unauthorized")
       return
@@ -252,6 +936,9 @@ proc buildRouter(connectionsState: ConnectionsState): Router =
   )
 
   result.post("/uploadScenes", proc(request: Request) =
+    if not hasAdminSession(request):
+      request.respond(Http401, body = "Unauthorized")
+      return
     if not hasAccess(request, Write):
       request.respond(Http401, body = "Unauthorized")
       return
@@ -262,6 +949,9 @@ proc buildRouter(connectionsState: ConnectionsState): Router =
   )
 
   result.post("/reload", proc(request: Request) =
+    if not hasAdminSession(request):
+      request.respond(Http401, body = "Unauthorized")
+      return
     if not hasAccess(request, Write):
       request.respond(Http401, body = "Unauthorized")
       return
@@ -416,6 +1106,7 @@ proc newServer*(frameOS: FrameOS): types.Server =
   globalFrameOS = frameOS
   globalFrameConfig = frameOS.frameConfig
   globalRunner = frameOS.runner
+  globalAdminSessionSalt = getOrCreateAdminSessionSalt(getConfigFilename())
 
   let connectionsState = initConnectionsState()
   let router = buildRouter(connectionsState)
