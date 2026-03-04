@@ -6,6 +6,7 @@ import type { panelsLogicType } from './panelsLogicType'
 import { frameLogic } from '../frameLogic'
 import { actionToUrl, router, urlToAction } from 'kea-router'
 import { subscriptions } from 'kea-subscriptions'
+import { isFrameControlMode } from '../../../utils/frameControlMode'
 
 export interface PanelsLogicProps {
   frameId: number
@@ -42,6 +43,18 @@ function panelsEqual(panel1: PanelWithMetadata, panel2: PanelWithMetadata) {
 
 export function panelScrollKey(panel: PanelWithMetadata): string {
   return `${panel.panel}.${panel.key ?? 'default'}`
+}
+
+function hideOnFramePanels(panels: Record<Area, PanelWithMetadata[]>): Record<Area, PanelWithMetadata[]> {
+  if (!isFrameControlMode()) {
+    return panels
+  }
+
+  return {
+    ...panels,
+    [Area.TopRight]: panels[Area.TopRight].filter((panel) => panel.panel !== Panel.Chat),
+    [Area.BottomLeft]: panels[Area.BottomLeft].filter((panel) => panel.panel !== Panel.Terminal),
+  }
 }
 
 export const panelsLogic = kea<panelsLogicType>([
@@ -256,7 +269,7 @@ export const panelsLogic = kea<panelsLogicType>([
       (s) => [s.panels, s.fullScreenPanel, s.scenesOpen],
       (panels, fullScreenPanel, scenesOpen): Record<Area, PanelWithMetadata[]> => {
         if (!fullScreenPanel) {
-          return {
+          return hideOnFramePanels({
             ...panels,
             [Area.TopRight]: panels[Area.TopRight].filter((p) =>
               scenesOpen
@@ -266,7 +279,7 @@ export const panelsLogic = kea<panelsLogicType>([
             [Area.BottomLeft]: panels[Area.BottomLeft].filter((p) =>
               !scenesOpen ? true : p.panel !== Panel.SceneSource
             ),
-          }
+          })
         }
         // we keep the full screen panel in the same area to not lose any mounted focus
         const topLeft = panels.TopLeft.filter((p) => panelsEqual(p, fullScreenPanel))
@@ -281,12 +294,12 @@ export const panelsLogic = kea<panelsLogicType>([
           closable: false,
           metadata: fullScreenPanel.metadata,
         }
-        return {
+        return hideOnFramePanels({
           [Area.TopLeft]: [...(topLeft.length > 0 ? [goBack] : []), ...topLeft],
           [Area.TopRight]: [...(topRight.length > 0 ? [goBack] : []), ...topRight],
           [Area.BottomLeft]: [...(bottomLeft.length > 0 ? [goBack] : []), ...bottomLeft],
           [Area.BottomRight]: [...(bottomRight.length > 0 ? [goBack] : []), ...bottomRight],
-        }
+        })
       },
     ],
     selectedScenePanelId: [
