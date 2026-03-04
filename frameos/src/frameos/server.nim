@@ -4,6 +4,7 @@ import chroma
 import times
 import std/os
 import assets/web as webAssets
+import assets/frame_web as frameWebAssets
 import assets/apps as appsAsset
 import httpcore
 import osproc
@@ -37,7 +38,7 @@ var globalFrameOS: FrameOS
 var globalFrameConfig: FrameConfig
 var globalRunner: RunnerControl
 var globalAdminSessionSalt {.threadvar.}: string
-let frameWebIndexHtml = webAssets.getAsset("assets/compiled/web/index.html")
+let frameWebIndexHtml = frameWebAssets.getAsset("assets/compiled/frame_web/index.html")
 
 proc initConnectionsState(): ConnectionsState =
   new(result)
@@ -601,9 +602,9 @@ proc buildRouter(connectionsState: ConnectionsState): Router =
       request.respond(Http401, body = "Unauthorized")
       return
     {.gcsafe.}:
-      let assetPath = "assets/compiled/web/static/" & request.pathParams["asset"]
+      let assetPath = "assets/compiled/frame_web/static/" & request.pathParams["asset"]
       try:
-        let asset = webAssets.getAsset(assetPath)
+        let asset = frameWebAssets.getAsset(assetPath)
         var headers: mummy.HttpHeaders
         headers["Content-Type"] = contentTypeForAsset(assetPath)
         request.respond(Http200, headers, asset)
