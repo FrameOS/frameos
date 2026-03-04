@@ -155,10 +155,7 @@ def main() -> int:
 
     if changed_projects:
         max_existing_base = _max_base_version(existing_versions)
-        if max_existing_base:
-            next_version = _increment_base_version(max_existing_base)
-        else:
-            next_version = _next_calver(None, today)
+        next_version = _next_calver(max_existing_base, today)
 
         for project_name in changed_projects:
             updated_versions[project_name] = f"{next_version}+{project_hashes[project_name]}"

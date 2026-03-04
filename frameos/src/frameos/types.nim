@@ -1,4 +1,4 @@
-import json, jester, pixie, hashes, locks
+import json, pixie, hashes, locks, tables, options, asyncdispatch, mummy
 import lib/burrito
 
 type
@@ -290,11 +290,16 @@ type
   RunnerControl* = ref object
     start*: proc(firstSceneId: Option[SceneId])
 
+  ConnectionsState* = ref object
+    lock*: Lock
+    items*: seq[WebSocket]
+
   Server* = ref object
     frameConfig*: FrameConfig
-    jester*: Jester
+    mummy*: mummy.Server
     runner*: RunnerControl
     url*: string
+    connectionsState*: ConnectionsState
 
   FrameOSDriver* = ref object of RootObj
     name*: string
