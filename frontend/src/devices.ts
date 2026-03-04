@@ -206,6 +206,6 @@ export const rpiOSPlatforms: Option[] = [
 
 export const modes: Option[] = [
   { value: 'rpios', label: 'Raspberry Pi OS (default)' },
-  { value: 'nixos', label: 'NixOS (new, experimental)' },
+  { value: 'nixos', label: 'NixOS (deprecated)' },
   { value: 'buildroot', label: 'Buildroot (very early alpha)' },
 ]
