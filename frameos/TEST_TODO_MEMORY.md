@@ -244,7 +244,7 @@ Each agent run should complete at least one small batch of tasks, update this fi
 
 ## P0 Server Route Behavior (Second Audit)
 
-- [ ] `FTEST-031` (`READY`): Add behavioral coverage for web route auth/setup branches.
+- [x] `FTEST-031` (`DONE`): Add behavioral coverage for web route auth/setup branches.
   Target: `src/frameos/server/routes/web_routes.nim`
   New test file: `src/frameos/server/tests/test_web_routes_behavior.nim`
   Acceptance:
@@ -253,7 +253,7 @@ Each agent run should complete at least one small batch of tasks, update this fi
   - Unauthorized gating on `/static/@asset`, `/image`, `/states`, `/state`, `/ws`, `/ws/admin` is asserted.
   - `/wifi` behavior is asserted for hotspot active vs inactive modes.
 
-- [ ] `FTEST-032` (`READY`): Add behavioral coverage for admin API route handlers.
+- [x] `FTEST-032` (`DONE`): Add behavioral coverage for admin API route handlers.
   Target: `src/frameos/server/routes/admin_api_routes.nim`
   New test file: `src/frameos/server/tests/test_admin_api_routes_behavior.nim`
   Acceptance:
@@ -262,7 +262,7 @@ Each agent run should complete at least one small batch of tasks, update this fi
   - `/api/frames/@id/event` empty-event validation is asserted.
   - `/reload` success and load-config failure branches are asserted.
 
-- [ ] `FTEST-033` (`READY`): Add behavioral coverage for frame API route handlers.
+- [x] `FTEST-033` (`DONE`): Add behavioral coverage for frame API route handlers.
   Target: `src/frameos/server/routes/frame_api_routes.nim`
   New test file: `src/frameos/server/tests/test_frame_api_routes_behavior.nim`
   Acceptance:
@@ -273,7 +273,7 @@ Each agent run should complete at least one small batch of tasks, update this fi
 
 ## P1 API/Runtime Internals (Second Audit)
 
-- [ ] `FTEST-034` (`READY`): Expand API helper coverage for assets and payload loaders.
+- [x] `FTEST-034` (`DONE`): Expand API helper coverage for assets and payload loaders.
   Target: `src/frameos/server/api.nim`
   Acceptance:
   - `frameAssetsPayload` returns directories + files with expected shape for temp asset trees.
@@ -289,7 +289,7 @@ Each agent run should complete at least one small batch of tasks, update this fi
   - `pruneUploadedPublicStates` removes orphan uploaded keys and updates fallback current scene.
   - `cleanupOrphanedUploadedStateFiles` keeps referenced files and removes orphaned `scene-uploaded_*.json` files.
 
-- [ ] `FTEST-036` (`READY`): Add dither utility coverage.
+- [x] `FTEST-036` (`DONE`): Add dither utility coverage.
   Target: `src/frameos/utils/dither.nim`
   New test file: `src/frameos/utils/tests/test_dither.nim`
   Acceptance:
@@ -355,9 +355,9 @@ Each agent run should complete at least one small batch of tasks, update this fi
 
 ## NEXT RUN PICK
 
-1. `FTEST-031` web route auth/setup behavior matrix.
-2. `FTEST-032` admin API route behavior matrix.
-3. `FTEST-036` dither utility deterministic coverage.
+1. `FTEST-035` scene registry/state cleanup behavior coverage.
+2. `FTEST-037` image utility scaling/data-url coverage.
+3. `FTEST-038` render baseline app deterministic coverage.
 
 ## DONE LOG
 
@@ -392,6 +392,11 @@ Each agent run should complete at least one small batch of tasks, update this fi
 - 2026-03-05: Completed `FTEST-029` (font helper coverage for listing/sanitization/fallback/clone color in `src/frameos/utils/tests/test_font.nim`). (commit: TBD)
 - 2026-03-05: Completed `FTEST-030` (text layout utility coverage for visible/fit-bounds/measure/draw in `src/frameos/utils/tests/test_text.nim`). (commit: TBD)
 - 2026-03-05: Second-pass audit added `FTEST-031` through `FTEST-043` with READY/BLOCKED split and concrete acceptance criteria. (commit: TBD)
+- 2026-03-05: Completed `FTEST-031` (web route auth/setup behavior matrix in `src/frameos/server/tests/test_web_routes_behavior.nim` with localhost HTTP harness coverage for auth redirects, protected endpoints, and hotspot wifi mode branches). (commit: TBD)
+- 2026-03-05: Completed `FTEST-032` (admin API behavior matrix in `src/frameos/server/tests/test_admin_api_routes_behavior.nim` for session/login/logout, event dispatch 401/404/400/200 branches, and reload success/failure flows). (commit: TBD)
+- 2026-03-05: Completed `FTEST-033` (frame API behavior matrix in `src/frameos/server/tests/test_frame_api_routes_behavior.nim` covering status/shape, frame mismatch 404 branches, image token fallback, and asset delegation semantics). (commit: TBD)
+- 2026-03-05: Completed `FTEST-034` (API helper coverage expansion in `src/frameos/server/tests/test_api.nim` for asset listings, asset payload path/content branches, scene payload fallback, and frame payload config/connection fields). (commit: TBD)
+- 2026-03-05: Completed `FTEST-036` (dither utility coverage in `src/frameos/utils/tests/test_dither.nim` for nearest palette selection, grayscale conversion weights, and 1/2/4/8-bit packed indexed output). (commit: TBD)
 - 2026-03-05: Initialized backlog from audit. (commit: TBD)
 
 ## Commit Message Convention
