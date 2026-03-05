@@ -37,7 +37,7 @@ Each agent run should complete at least one small batch of tasks, update this fi
 
 ## P0 Runtime/Core
 
-- [ ] `FTEST-002` (`READY`): Add interpreter error-path tests.
+- [x] `FTEST-002` (`DONE`): Add interpreter error-path tests.
   Target: `src/frameos/interpreter.nim`
   New test file: `src/frameos/tests/test_interpreter_errors.nim`
   Acceptance:
@@ -113,16 +113,17 @@ Each agent run should complete at least one small batch of tasks, update this fi
 ## NEXT RUN PICK
 
 Pick in this order unless blocked:
-1. `FTEST-002`
-2. `FTEST-003`
-3. `FTEST-007`
+1. `FTEST-003`
+2. `FTEST-007`
+3. `FTEST-004`
 
 ## DONE LOG
 
 - 2026-03-05: Completed `FTEST-001` (interpreter smoke test for data + render node execution in `test_interpreter_smoke.nim`). (commit: TBD)
 - 2026-03-05: Completed `FTEST-005` (route composition assertions in `test_routes.nim`). (commit: TBD)
 - 2026-03-05: Completed `FTEST-012` (logger polling-based checks, removed fixed sleeps). (commit: TBD)
-- 2026-03-05: Completed `FTEST-006` (system index scene list/text assertions in `src/system/index/tests/test_scene.nim`). (commit: TBD)
+- 2026-03-05: Completed `FTEST-006` (system index scene list/text assertions in `src/system/index/tests/test_scene.nim`). (commit: 1dc51c7b)
+- 2026-03-05: Completed `FTEST-002` (interpreter error-path coverage for missing nodes, runtime error logging, and malformed field paths in `src/frameos/tests/test_interpreter_errors.nim`). (commit: TBD)
 - 2026-03-05: Initialized backlog from audit. (commit: TBD)
 
 ## Commit Message Convention
