@@ -7,6 +7,7 @@ import { frameLogic } from '../frameLogic'
 import { actionToUrl, router, urlToAction } from 'kea-router'
 import { subscriptions } from 'kea-subscriptions'
 import { isFrameControlMode } from '../../../utils/frameControlMode'
+import { isInFrameAdminMode } from '../../../utils/frameAdmin'
 
 export interface PanelsLogicProps {
   frameId: number
@@ -266,9 +267,11 @@ export const panelsLogic = kea<panelsLogicType>([
         !!panels[Area.TopLeft].find((p) => p.panel === Panel.Scenes && p.active),
     ],
     panelsWithConditions: [
-      (s) => [s.panels, s.fullScreenPanel, s.scenesOpen],
-      (panels, fullScreenPanel, scenesOpen): Record<Area, PanelWithMetadata[]> => {
-        if (!fullScreenPanel) {
+      (s) => [s.panels, s.fullScreenPanel, s.scenesOpen, s.selectedSceneIsInterpreted],
+      (panels, fullScreenPanel, scenesOpen, selectedSceneIsInterpreted): Record<Area, PanelWithMetadata[]> => {
+        const showSceneSource = !isInFrameAdminMode() && !selectedSceneIsInterpreted
+
+        if (!fullScreenPanel || (fullScreenPanel.panel === Panel.SceneSource && !showSceneSource)) {
           return hideOnFramePanels({
             ...panels,
             [Area.TopRight]: panels[Area.TopRight].filter((p) =>
@@ -276,8 +279,8 @@ export const panelsLogic = kea<panelsLogicType>([
                 ? [Panel.Templates, Panel.Schedule, Panel.Chat].includes(p.panel)
                 : [Panel.SceneState, Panel.Apps, Panel.Events, Panel.Chat].includes(p.panel)
             ),
-            [Area.BottomLeft]: panels[Area.BottomLeft].filter((p) =>
-              !scenesOpen ? true : p.panel !== Panel.SceneSource
+            [Area.BottomLeft]: panels[Area.BottomLeft].filter(
+              (p) => p.panel !== Panel.SceneSource || (showSceneSource && !scenesOpen)
             ),
           })
         }
@@ -330,6 +333,13 @@ export const panelsLogic = kea<panelsLogicType>([
       (s) => [s.frameForm, s.selectedSceneId],
       (frameForm, selectedSceneId): string | null =>
         selectedSceneId ? frameForm?.scenes?.find((s) => s.id === selectedSceneId)?.name ?? null : null,
+    ],
+    selectedSceneIsInterpreted: [
+      (s) => [s.frameForm, s.selectedSceneId],
+      (frameForm, selectedSceneId): boolean =>
+        !!selectedSceneId &&
+        (frameForm?.scenes?.find((scene) => scene.id === selectedSceneId)?.settings?.execution ?? 'compiled') ===
+          'interpreted',
     ],
   })),
   listeners(({ actions, cache, values }) => ({

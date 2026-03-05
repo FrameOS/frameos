@@ -20,6 +20,7 @@ import { frameSettingsLogic } from './panels/FrameSettings/frameSettingsLogic'
 import { logsLogic } from './panels/Logs/logsLogic'
 import { Popover, Transition } from '@headlessui/react'
 import { isFrameControlMode } from '../../utils/frameControlMode'
+import { isInFrameAdminMode } from '../../utils/frameAdmin'
 
 interface FrameSceneProps {
   id: string // taken straight from the URL, thus a string
@@ -68,6 +69,7 @@ export function Frame(props: FrameSceneProps) {
   const firstEverForNixOS = false && frame.mode === 'nixos' && frame.status === 'uninitialized'
   const canBuildSdImage = mode === 'nixos' || mode === 'buildroot'
   const frameControlMode = isFrameControlMode()
+  const inFrameAdminMode = isInFrameAdminMode()
 
   const logoutFromFrame = async () => {
     await fetch('/api/admin/logout', { method: 'POST', credentials: 'include' })
@@ -258,7 +260,13 @@ export function Frame(props: FrameSceneProps) {
                   ]}
                 />
                 <div className="flex pl-2 space-x-2">
-                  <Button color={unsavedChanges ? 'primary' : 'secondary'} type="button" onClick={() => saveFrame()}>
+                  <Button
+                    color={unsavedChanges ? 'primary' : 'secondary'}
+                    type="button"
+                    onClick={() => saveFrame()}
+                    disabled={inFrameAdminMode}
+                    title={inFrameAdminMode ? 'Save is not implemented in frame admin mode yet.' : undefined}
+                  >
                     Save
                   </Button>
                   {firstEverForNixOS ? (
