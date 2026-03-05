@@ -44,36 +44,101 @@ const postcssPlugin = {
 
 const require = createRequire(import.meta.url)
 const sharedPackages = [
+  '@dagrejs/dagre',
+  '@headlessui/react',
+  '@heroicons/react',
+  '@microlink/react-json-view',
+  '@monaco-editor/react',
+  '@popperjs/core',
+  '@reactflow/core',
+  '@tailwindcss/container-queries',
+  '@uiw/color-convert',
+  '@uiw/react-color-alpha',
+  '@uiw/react-color-editable-input-hsla',
+  '@uiw/react-color-hue',
+  '@uiw/react-color-saturation',
+  '@uiw/react-color-sketch',
+  '@uiw/react-color-swatch',
+  '@visx/axis',
+  '@visx/brush',
+  '@visx/curve',
+  '@visx/gradient',
+  '@visx/group',
+  '@visx/mock-data',
+  '@visx/pattern',
+  '@visx/responsive',
+  '@visx/scale',
+  '@visx/shape',
+  '@visx/vendor/d3-array',
   'react',
   'react-dom',
-  'react-dom/client',
-  'react/jsx-runtime',
-  'react/jsx-dev-runtime',
   'clsx',
   'copy-to-clipboard',
   'fast-deep-equal',
+  'fuse.js',
   'kea',
+  'kea-forms',
   'kea-localstorage',
   'kea-router',
   'kea-loaders',
   'kea-subscriptions',
+  'messg',
+  'monaco-editor',
+  'react-popper',
+  'react-resizable-panels',
+  'react-virtuoso',
   'reactflow',
   'react-markdown',
   'react-syntax-highlighter',
   'remark-gfm',
+  'streamsaver',
   'uuid',
 ]
 
-const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-const sharedPackagePaths = new Map(sharedPackages.map((packageName) => [packageName, require.resolve(packageName)]))
-const sharedDepsFilter = new RegExp(`^(${sharedPackages.map(escapeRegex).join('|')})$`)
+const findPackageRoot = (resolvedPath) => {
+  let currentPath = path.dirname(resolvedPath)
+
+  while (currentPath !== path.dirname(currentPath)) {
+    const candidate = path.join(currentPath, 'package.json')
+    try {
+      require.resolve(candidate)
+      return currentPath
+    } catch {
+      currentPath = path.dirname(currentPath)
+    }
+  }
+
+  throw new Error(`Could not determine package root for ${resolvedPath}`)
+}
+
+const sharedPackageRoots = new Map(
+  sharedPackages.map((packageName) => [packageName, findPackageRoot(require.resolve(packageName))])
+)
+
+const resolveSharedPackage = (specifier) => {
+  const packageName = [...sharedPackageRoots.keys()]
+    .sort((a, b) => b.length - a.length)
+    .find((candidate) => specifier === candidate || specifier.startsWith(`${candidate}/`))
+
+  if (!packageName) {
+    return null
+  }
+
+  const packageRoot = sharedPackageRoots.get(packageName)
+  const subPath = specifier === packageName ? '' : specifier.slice(packageName.length + 1)
+  return subPath ? path.join(packageRoot, subPath) : packageRoot
+}
 
 const sharedDepsPlugin = {
   name: 'frameos-shared-deps',
   setup(build) {
-    build.onResolve({ filter: sharedDepsFilter }, (args) => ({
-      path: sharedPackagePaths.get(args.path) ?? args.path,
-    }))
+    build.onResolve({ filter: /^[^./]/ }, (args) => {
+      const resolvedPath = resolveSharedPackage(args.path)
+      if (!resolvedPath) {
+        return undefined
+      }
+      return { path: resolvedPath }
+    })
   },
 }
 
