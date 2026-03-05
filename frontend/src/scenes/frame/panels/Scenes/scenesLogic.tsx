@@ -10,6 +10,9 @@ import { controlLogic } from './controlLogic'
 import equal from 'fast-deep-equal'
 import { collectSecretSettingsFromScenes } from '../secretSettings'
 import { apiFetch } from '../../../../utils/apiFetch'
+import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
+import { blobToDataUrl } from '../../../../utils/fileDataUrl'
+import { frameAssetsApiPath } from '../../../../utils/frameAssetsApi'
 import { buildSdCardImageScene } from './sceneShortcuts'
 import { socketLogic } from '../../../socketLogic'
 
@@ -571,12 +574,24 @@ export const scenesLogic = kea<scenesLogicType>([
     },
     uploadImage: async ({ file }) => {
       try {
-        const formData = new FormData()
-        formData.append('file', file)
-        const response = await apiFetch(`/api/frames/${props.frameId}/assets/upload_image`, {
-          method: 'POST',
-          body: formData,
-        })
+        const uploadPath = frameAssetsApiPath(props.frameId, 'assets/upload_image')
+        const response = isInFrameAdminMode()
+          ? await apiFetch(uploadPath, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                filename: file.name,
+                data_url: await blobToDataUrl(file),
+              }),
+            })
+          : await (() => {
+              const formData = new FormData()
+              formData.append('file', file)
+              return apiFetch(uploadPath, {
+                method: 'POST',
+                body: formData,
+              })
+            })()
         if (!response.ok) {
           throw new Error('Image upload failed')
         }

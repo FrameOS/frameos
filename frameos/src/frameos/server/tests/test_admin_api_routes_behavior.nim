@@ -179,3 +179,111 @@ suite "admin api route behavior":
       body = "{}",
     )
     check failed.status == 500
+
+  test "admin asset endpoints upload rename delete and download within assets root":
+    var config = defaultFrameConfig()
+    config.frameAdminAuth = %*{
+      "enabled": true,
+      "user": "admin",
+      "pass": "secret",
+    }
+    let assetsRoot = getTempDir() / "frameos-admin-assets"
+    createDir(assetsRoot)
+    config.assetsPath = assetsRoot
+    configureServerState(config)
+
+    let login = httpRequest(
+      server.port,
+      "POST",
+      "/api/admin/login",
+      headers = [("Content-Type", "application/json")],
+      body = $(%*{"username": "admin", "password": "secret"}),
+    )
+    let adminCookie = adminCookieFrom(login)
+
+    let upload = httpRequest(
+      server.port,
+      "POST",
+      "/api/admin/frames/1/assets/upload",
+      headers = [("Cookie", adminCookie), ("Content-Type", "application/json")],
+      body = $(%*{
+        "path": "nested",
+        "filename": "hello.txt",
+        "data_url": "data:text/plain;base64,aGVsbG8=",
+      }),
+    )
+    check upload.status == 200
+    check fileExists(assetsRoot / "nested" / "hello.txt")
+
+    let mkdir = httpRequest(
+      server.port,
+      "POST",
+      "/api/admin/frames/1/assets/mkdir",
+      headers = [("Cookie", adminCookie), ("Content-Type", "application/x-www-form-urlencoded")],
+      body = "path=nested%2Finner",
+    )
+    check mkdir.status == 200
+    check dirExists(assetsRoot / "nested" / "inner")
+
+    let rename = httpRequest(
+      server.port,
+      "POST",
+      "/api/admin/frames/1/assets/rename",
+      headers = [("Cookie", adminCookie), ("Content-Type", "application/x-www-form-urlencoded")],
+      body = "src=nested&dst=renamed",
+    )
+    check rename.status == 200
+    check fileExists(assetsRoot / "renamed" / "hello.txt")
+
+    let listAssets = httpRequest(
+      server.port,
+      "GET",
+      "/api/admin/frames/1/assets",
+      headers = [("Cookie", adminCookie)],
+    )
+    check listAssets.status == 200
+    let assetsPayload = parseJson(listAssets.body)
+    check assetsPayload["assets"].kind == JArray
+
+    let download = httpRequest(
+      server.port,
+      "GET",
+      "/api/admin/frames/1/asset?path=renamed%2Fhello.txt",
+      headers = [("Cookie", adminCookie)],
+    )
+    check download.status == 200
+    check download.body == "hello"
+
+    let uploadImage = httpRequest(
+      server.port,
+      "POST",
+      "/api/admin/frames/1/assets/upload_image",
+      headers = [("Cookie", adminCookie), ("Content-Type", "application/json")],
+      body = $(%*{
+        "filename": "frame image.png",
+        "data_url": "data:text/plain;base64,aGVsbG8=",
+      }),
+    )
+    check uploadImage.status == 200
+    let uploadImagePayload = parseJson(uploadImage.body)
+    check uploadImagePayload["path"].getStr().startsWith("uploads/frame_image.")
+    check uploadImagePayload["filename"].getStr().endsWith(".png")
+
+    let invalidDelete = httpRequest(
+      server.port,
+      "POST",
+      "/api/admin/frames/1/assets/delete",
+      headers = [("Cookie", adminCookie), ("Content-Type", "application/x-www-form-urlencoded")],
+      body = "path=..%2Fsecret.txt",
+    )
+    check invalidDelete.status == 400
+
+    let deleteRenamed = httpRequest(
+      server.port,
+      "POST",
+      "/api/admin/frames/1/assets/delete",
+      headers = [("Cookie", adminCookie), ("Content-Type", "application/x-www-form-urlencoded")],
+      body = "path=renamed",
+    )
+    check deleteRenamed.status == 200
+    check not dirExists(assetsRoot / "renamed")

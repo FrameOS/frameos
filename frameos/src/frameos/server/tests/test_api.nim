@@ -109,6 +109,32 @@ suite "Server API helpers":
     check foundFile.headers["Content-Type"] == "application/octet-stream"
     check foundFile.body == "asset-body"
 
+  test "asset mutation helpers stay scoped to the configured assets root":
+    let tempRoot = getTempDir() / "frameos-api-asset-mutations"
+    createDir(tempRoot)
+    globalFrameConfig = baseConfig(tempRoot)
+
+    let uploaded = saveAssetUploadPayload("nested", "hello.txt", "hello")
+    check uploaded{"path"}.getStr() == tempRoot / "nested" / "hello.txt"
+    check fileExists(tempRoot / "nested" / "hello.txt")
+
+    createAssetDirectory("nested/inner")
+    check dirExists(tempRoot / "nested" / "inner")
+
+    renameAssetEntry("nested", "renamed")
+    check dirExists(tempRoot / "renamed")
+    check fileExists(tempRoot / "renamed" / "hello.txt")
+
+    let uploadedImage = saveUploadedImagePayload("sample image.png", "png-bytes")
+    check uploadedImage{"path"}.getStr().startsWith("uploads/sample_image.")
+    check uploadedImage{"filename"}.getStr().endsWith(".png")
+
+    deleteAssetEntry("renamed")
+    check not dirExists(tempRoot / "renamed")
+
+    expect ValueError:
+      discard saveAssetUploadPayload("../escape", "nope.txt", "bad")
+
   test "frameApiPayload reflects config active connections and scene payload fallback":
     let tempRoot = getTempDir() / "frameos-api-frame-payload"
     createDir(tempRoot)

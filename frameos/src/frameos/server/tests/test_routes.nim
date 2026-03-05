@@ -20,7 +20,7 @@ suite "Server routes composition":
     let router = buildRouter(publicState, adminState)
 
     check router.notFoundHandler != nil
-    check router.routes.len == 39
+    check router.routes.len == 46
 
     var getCount = 0
     var postCount = 0
@@ -33,8 +33,8 @@ suite "Server routes composition":
       elif "httpMethod: \"POST\"" in debug:
         inc postCount
 
-    check getCount == 31
-    check postCount == 8
+    check getCount == 33
+    check postCount == 13
 
     # Key paths from public, frame API, and admin surfaces should all be present.
     check routeDump.anyIt("\"ping\"" in it)

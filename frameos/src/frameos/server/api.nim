@@ -1,4 +1,5 @@
 import json
+import base64
 import pixie
 import chroma
 import times
@@ -43,10 +44,61 @@ proc contentTypeForAsset*(path: string): string =
   else:
     "application/octet-stream"
 
+proc configuredAssetsPath*(): string =
+  normalizedPath(if globalFrameConfig.assetsPath.len > 0: globalFrameConfig.assetsPath else: "/srv/assets")
+
 proc withinBasePath*(path, basePath: string): bool =
   let normalizedTargetPath = normalizedPath(path)
   let normalizedBasePath = normalizedPath(basePath)
   return normalizedTargetPath == normalizedBasePath or normalizedTargetPath.startsWith(normalizedBasePath & DirSep)
+
+proc sanitizeAssetComponent(value: string, fallback: string, allowDot = false): string =
+  result = ""
+  for ch in value:
+    if ch.isAlphaNumeric() or ch in {'-', '_'} or (allowDot and ch == '.'):
+      result.add(ch)
+    else:
+      result.add('_')
+  result = result.strip(chars = {'_', '.'})
+  if result.len == 0:
+    result = fallback
+
+proc sanitizeAssetExtension(value: string): string =
+  result = ""
+  for ch in value:
+    if ch == '.' or ch.isAlphaNumeric():
+      result.add(ch)
+  if result.len > 0 and not result.startsWith("."):
+    result = "." & result
+
+proc resolveAssetPath*(path: string, allowRoot = false): string =
+  let assetsPath = configuredAssetsPath()
+  let stripped = path.strip()
+  if stripped.len == 0:
+    if allowRoot:
+      return assetsPath
+    raise newException(ValueError, "Path is required")
+
+  var relPath = stripped
+  while relPath.startsWith("./"):
+    relPath = relPath[2 .. ^1]
+  while relPath.startsWith("/"):
+    relPath = relPath[1 .. ^1]
+
+  let fullPath = normalizedPath(assetsPath / relPath)
+  if not withinBasePath(fullPath, assetsPath):
+    raise newException(ValueError, "Invalid asset path")
+  if not allowRoot and fullPath == assetsPath:
+    raise newException(ValueError, "Path is required")
+  fullPath
+
+proc relativeAssetPath*(path: string): string =
+  let assetsPath = configuredAssetsPath()
+  let fullPath = normalizedPath(path)
+  if fullPath == assetsPath:
+    ""
+  else:
+    fullPath[(assetsPath.len + 1) .. ^1]
 
 proc contentTypeForFilePath*(path: string): string =
   let lowerPath = path.toLowerAscii()
@@ -61,6 +113,78 @@ proc contentTypeForFilePath*(path: string): string =
   if lowerPath.endsWith(".svg"):
     return "image/svg+xml"
   contentTypeForAsset(lowerPath)
+
+proc assetPayloadForPath*(path: string): JsonNode =
+  let fullPath = normalizedPath(path)
+  let isDir = dirExists(fullPath)
+  let info = getFileInfo(fullPath)
+  %*{
+    "path": fullPath,
+    "size": if isDir: 0 else: info.size,
+    "mtime": info.lastWriteTime.toUnix(),
+    "is_dir": isDir,
+  }
+
+proc decodeDataUrlPayload*(value: string): string =
+  let commaIndex = value.find(',')
+  if commaIndex < 0:
+    raise newException(ValueError, "Invalid upload payload")
+  let header = value[0 ..< commaIndex]
+  if ";base64" notin header:
+    raise newException(ValueError, "Invalid upload payload")
+  decode(value[(commaIndex + 1) .. ^1])
+
+proc saveAssetUploadPayload*(subdir: string, filename: string, data: string): JsonNode =
+  let safeFilename = sanitizeAssetComponent(extractFilename(filename), "uploaded_file", allowDot = true)
+  let targetPath =
+    if subdir.strip().len == 0:
+      resolveAssetPath(safeFilename)
+    else:
+      resolveAssetPath(subdir / safeFilename)
+  createDir(parentDir(targetPath))
+  writeFile(targetPath, data)
+  assetPayloadForPath(targetPath)
+
+proc saveUploadedImagePayload*(filename: string, data: string): JsonNode =
+  let originalName = extractFilename(if filename.strip().len > 0: filename else: "image")
+  let (_, name, ext) = splitFile(originalName)
+  let safeBase = sanitizeAssetComponent(name, "image")
+  let safeExt = sanitizeAssetExtension(ext)
+  let hashedFilename = &"{safeBase}.{getMD5(data)}{safeExt}"
+  let targetPath = resolveAssetPath("uploads" / hashedFilename)
+  createDir(parentDir(targetPath))
+  let uploaded = not fileExists(targetPath)
+  if uploaded:
+    writeFile(targetPath, data)
+  %*{
+    "path": relativeAssetPath(targetPath),
+    "filename": hashedFilename,
+    "size": data.len,
+    "uploaded": uploaded,
+  }
+
+proc createAssetDirectory*(path: string) =
+  createDir(resolveAssetPath(path))
+
+proc deleteAssetEntry*(path: string) =
+  let targetPath = resolveAssetPath(path)
+  if fileExists(targetPath):
+    removeFile(targetPath)
+  elif dirExists(targetPath):
+    removeDir(targetPath)
+  else:
+    raise newException(OSError, "Asset not found")
+
+proc renameAssetEntry*(srcPath: string, dstPath: string) =
+  let sourcePath = resolveAssetPath(srcPath)
+  let targetPath = resolveAssetPath(dstPath)
+  if not fileExists(sourcePath) and not dirExists(sourcePath):
+    raise newException(OSError, "Asset not found")
+  createDir(parentDir(targetPath))
+  if dirExists(sourcePath):
+    moveDir(sourcePath, targetPath)
+  else:
+    moveFile(sourcePath, targetPath)
 
 proc shouldReturnNotModified*(headers: httpcore.HttpHeaders, lastUpdate: float): bool {.gcsafe.} =
   if lastUpdate <= 0.0:
@@ -217,8 +341,7 @@ proc frameDeviceConfigJson(deviceConfig: DeviceConfig): JsonNode =
   }
 
 proc frameAssetsPayload*(): JsonNode =
-  let configuredAssetsPath = if globalFrameConfig.assetsPath.len > 0: globalFrameConfig.assetsPath else: "/srv/assets"
-  let assetsPath = normalizedPath(configuredAssetsPath)
+  let assetsPath = configuredAssetsPath()
   var assets: seq[JsonNode] = @[]
   if not dirExists(assetsPath):
     return %*[]
@@ -247,15 +370,20 @@ proc frameAssetsPayload*(): JsonNode =
   return %*assets
 
 proc getAssetPayload*(path: string, thumb: bool): tuple[status: httpcore.HttpCode, headers: mummy.HttpHeaders, body: string] =
-  let configuredAssetsPath = if globalFrameConfig.assetsPath.len > 0: globalFrameConfig.assetsPath else: "/srv/assets"
-  let assetsPath = normalizedPath(configuredAssetsPath)
+  let assetsPath = configuredAssetsPath()
   let relPath = path.strip()
   if relPath.len == 0:
     var headers: mummy.HttpHeaders
     headers["Content-Type"] = "application/json"
     return (Http400, headers, $(%*{"detail": "Path is required"}))
 
-  let fullPath = normalizedPath(assetsPath / relPath)
+  let fullPath =
+    try:
+      resolveAssetPath(relPath)
+    except ValueError:
+      var headers: mummy.HttpHeaders
+      headers["Content-Type"] = "application/json"
+      return (Http400, headers, $(%*{"detail": "Invalid path"}))
   if not withinBasePath(fullPath, assetsPath):
     var headers: mummy.HttpHeaders
     headers["Content-Type"] = "application/json"

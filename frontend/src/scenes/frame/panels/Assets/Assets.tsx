@@ -17,6 +17,8 @@ import { DropdownMenu, DropdownMenuItem } from '../../../../components/DropdownM
 import { DeferredImage } from '../../../../components/DeferredImage'
 import { buildLocalImageFolderScene, buildLocalImageScene } from '../Scenes/sceneShortcuts'
 import { v4 as uuidv4 } from 'uuid'
+import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
+import { frameAssetUrl } from '../../../../utils/frameAssetsApi'
 
 function humaniseSize(size: number) {
   const units = ['B', 'KB', 'MB', 'GB', 'TB']
@@ -220,7 +222,7 @@ function TreeNode({
           !node.path.includes('/.thumbs/') && (
             <div className="w-8 h-8">
               <DeferredImage
-                url={`/api/frames/${frameId}/asset?path=${encodeURIComponent(node.path)}&thumb=1`}
+                url={frameAssetUrl(frameId, node.path, true)}
                 className="w-8 h-8 object-cover border border-gray-600 rounded"
                 spinnerClassName="w-4 h-4"
               />
@@ -266,7 +268,11 @@ function TreeNode({
               ),
               onClick: async () => {
                 setIsDownloading(true)
-                const resource = await apiFetch(`/api/frames/${frameId}/asset?path=${encodeURIComponent(node.path)}`)
+                const resource = await apiFetch(frameAssetUrl(frameId, node.path))
+                if (!resource.ok) {
+                  setIsDownloading(false)
+                  throw new Error('Failed to download asset')
+                }
                 const blob = await resource.blob()
                 const url = URL.createObjectURL(blob)
                 const a = document.createElement('a')
@@ -350,22 +356,24 @@ export function Assets(): JSX.Element {
 
   return (
     <div className="space-y-2">
-      <div className="float-right mt-[-8px]">
-        <DropdownMenu
-          className="w-fit"
-          buttonColor="secondary"
-          items={[
-            {
-              label: 'Sync fonts',
-              onClick: () => {
-                syncAssets()
-                openLogs()
+      {!isInFrameAdminMode() ? (
+        <div className="float-right mt-[-8px]">
+          <DropdownMenu
+            className="w-fit"
+            buttonColor="secondary"
+            items={[
+              {
+                label: 'Sync fonts',
+                onClick: () => {
+                  syncAssets()
+                  openLogs()
+                },
+                icon: <DocumentArrowUpIcon className="w-5 h-5" />,
               },
-              icon: <DocumentArrowUpIcon className="w-5 h-5" />,
-            },
-          ]}
-        />
-      </div>
+            ]}
+          />
+        </div>
+      ) : null}
       {assetsLoading && (!assetTree.children || Object.keys(assetTree.children).length === 0) ? (
         <div>
           <div className="float-right mr-2">

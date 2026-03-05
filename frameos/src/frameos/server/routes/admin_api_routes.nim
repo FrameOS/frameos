@@ -2,6 +2,7 @@ import json
 import mummy
 import mummy/routers
 import httpcore
+import tables
 import frameos/channels
 import frameos/config
 import ../auth
@@ -37,6 +38,138 @@ proc addAdminApiRoutes*(router: var Router) =
     headers["Content-Type"] = "application/json"
     headers["Set-Cookie"] = ADMIN_SESSION_COOKIE & "=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax"
     request.respond(Http200, headers, $(%*{"status": "ok"}))
+  )
+
+  router.get("/api/admin/frames/@id/assets", proc(request: Request) {.gcsafe.} =
+    if not hasAdminSession(request):
+      request.respond(Http401, body = "Unauthorized")
+      return
+    {.gcsafe.}:
+      if not requestedFrameMatches(request):
+        request.respond(Http404, body = "Not found!")
+      else:
+        jsonResponse(request, Http200, %*{"assets": frameAssetsPayload()})
+  )
+
+  router.get("/api/admin/frames/@id/asset", proc(request: Request) {.gcsafe.} =
+    if not hasAdminSession(request):
+      request.respond(Http401, body = "Unauthorized")
+      return
+    {.gcsafe.}:
+      if not requestedFrameMatches(request):
+        request.respond(Http404, body = "Not found!")
+      else:
+        let path = request.queryParams.getOrDefault("path", "")
+        let thumb = request.queryParams.getOrDefault("thumb", "") == "1"
+        let (status, headers, body) = getAssetPayload(path, thumb)
+        request.respond(status, headers, body)
+  )
+
+  router.post("/api/admin/frames/@id/assets/upload", proc(request: Request) {.gcsafe.} =
+    if not hasAdminSession(request):
+      request.respond(Http401, body = "Unauthorized")
+      return
+    {.gcsafe.}:
+      if not requestedFrameMatches(request):
+        request.respond(Http404, body = "Not found!")
+      else:
+        try:
+          let payload = parseJson(if request.body == "": "{}" else: request.body)
+          let path = payload{"path"}.getStr("")
+          let filename = payload{"filename"}.getStr("uploaded_file")
+          let dataUrl = payload{"data_url"}.getStr("")
+          if dataUrl.len == 0:
+            jsonResponse(request, Http400, %*{"detail": "Missing upload payload"})
+            return
+          let asset = saveAssetUploadPayload(path, filename, decodeDataUrlPayload(dataUrl))
+          jsonResponse(request, Http200, asset)
+        except ValueError as e:
+          jsonResponse(request, Http400, %*{"detail": e.msg})
+        except CatchableError as e:
+          jsonResponse(request, Http500, %*{"detail": e.msg})
+  )
+
+  router.post("/api/admin/frames/@id/assets/upload_image", proc(request: Request) {.gcsafe.} =
+    if not hasAdminSession(request):
+      request.respond(Http401, body = "Unauthorized")
+      return
+    {.gcsafe.}:
+      if not requestedFrameMatches(request):
+        request.respond(Http404, body = "Not found!")
+      else:
+        try:
+          let payload = parseJson(if request.body == "": "{}" else: request.body)
+          let filename = payload{"filename"}.getStr("image")
+          let dataUrl = payload{"data_url"}.getStr("")
+          if dataUrl.len == 0:
+            jsonResponse(request, Http400, %*{"detail": "Missing upload payload"})
+            return
+          jsonResponse(request, Http200, saveUploadedImagePayload(filename, decodeDataUrlPayload(dataUrl)))
+        except ValueError as e:
+          jsonResponse(request, Http400, %*{"detail": e.msg})
+        except CatchableError as e:
+          jsonResponse(request, Http500, %*{"detail": e.msg})
+  )
+
+  router.post("/api/admin/frames/@id/assets/mkdir", proc(request: Request) {.gcsafe.} =
+    if not hasAdminSession(request):
+      request.respond(Http401, body = "Unauthorized")
+      return
+    {.gcsafe.}:
+      if not requestedFrameMatches(request):
+        request.respond(Http404, body = "Not found!")
+      else:
+        try:
+          let params = parseUrlEncoded(request.body)
+          createAssetDirectory(if params.hasKey("path"): params["path"] else: "")
+          jsonResponse(request, Http200, %*{"message": "Created"})
+        except ValueError as e:
+          jsonResponse(request, Http400, %*{"detail": e.msg})
+        except CatchableError as e:
+          jsonResponse(request, Http500, %*{"detail": e.msg})
+  )
+
+  router.post("/api/admin/frames/@id/assets/delete", proc(request: Request) {.gcsafe.} =
+    if not hasAdminSession(request):
+      request.respond(Http401, body = "Unauthorized")
+      return
+    {.gcsafe.}:
+      if not requestedFrameMatches(request):
+        request.respond(Http404, body = "Not found!")
+      else:
+        try:
+          let params = parseUrlEncoded(request.body)
+          deleteAssetEntry(if params.hasKey("path"): params["path"] else: "")
+          jsonResponse(request, Http200, %*{"message": "Deleted"})
+        except ValueError as e:
+          jsonResponse(request, Http400, %*{"detail": e.msg})
+        except OSError:
+          jsonResponse(request, Http404, %*{"detail": "Asset not found"})
+        except CatchableError as e:
+          jsonResponse(request, Http500, %*{"detail": e.msg})
+  )
+
+  router.post("/api/admin/frames/@id/assets/rename", proc(request: Request) {.gcsafe.} =
+    if not hasAdminSession(request):
+      request.respond(Http401, body = "Unauthorized")
+      return
+    {.gcsafe.}:
+      if not requestedFrameMatches(request):
+        request.respond(Http404, body = "Not found!")
+      else:
+        try:
+          let params = parseUrlEncoded(request.body)
+          renameAssetEntry(
+            if params.hasKey("src"): params["src"] else: "",
+            if params.hasKey("dst"): params["dst"] else: ""
+          )
+          jsonResponse(request, Http200, %*{"message": "Renamed"})
+        except ValueError as e:
+          jsonResponse(request, Http400, %*{"detail": e.msg})
+        except OSError:
+          jsonResponse(request, Http404, %*{"detail": "Asset not found"})
+        except CatchableError as e:
+          jsonResponse(request, Http500, %*{"detail": e.msg})
   )
 
   router.post("/api/frames/@id/event/@name", proc(request: Request) {.gcsafe.} =
