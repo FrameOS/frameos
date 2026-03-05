@@ -4,6 +4,7 @@ import mummy/routers
 
 import ../../[routes, state]
 import ../../../[channels, scenes, types]
+import ../../../portal
 from scenes/scenes import sceneOptions
 
 type
@@ -60,7 +61,27 @@ proc defaultFrameConfig*(): FrameConfig =
     ),
   )
 
+proc portalRunHookForServerTests(cmd: string): (string, int) {.gcsafe, nimcall.} =
+  if cmd.contains("nmcli --terse --fields SSID device wifi list"):
+    return ("test-network\n", 0)
+  if cmd.contains("nmcli --colors no -t -f NAME connection show --active"):
+    return ("", 0)
+  if cmd.contains("nmcli --colors no -t -f NAME connection show"):
+    return ("frameos-wifi\n", 0)
+  ("", 0)
+
+proc portalSleepHookNoop(ms: int) {.gcsafe, nimcall.} =
+  discard
+
+proc portalAutoTimeoutDisabled(): bool {.gcsafe, nimcall.} =
+  false
+
 proc configureServerState*(config: FrameConfig, hotspotActive = false) =
+  setPortalHooksForTest(
+    runHook = portalRunHookForServerTests,
+    sleepHook = portalSleepHookNoop,
+    autoTimeoutEnabledHook = portalAutoTimeoutDisabled,
+  )
   globalFrameConfig = config
   globalFrameOS = FrameOS(
     frameConfig: config,
