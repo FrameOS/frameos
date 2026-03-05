@@ -37,13 +37,6 @@ Each agent run should complete at least one small batch of tasks, update this fi
 
 ## P0 Runtime/Core
 
-- [ ] `FTEST-001` (`READY`): Add interpreter smoke tests for node execution happy-path.
-  Target: `src/frameos/interpreter.nim`
-  New test file: `src/frameos/tests/test_interpreter_smoke.nim`
-  Acceptance:
-  - Builds minimal scene context and executes representative data + render nodes.
-  - Asserts output types/values and no unexpected exceptions.
-
 - [ ] `FTEST-002` (`READY`): Add interpreter error-path tests.
   Target: `src/frameos/interpreter.nim`
   New test file: `src/frameos/tests/test_interpreter_errors.nim`
@@ -120,12 +113,13 @@ Each agent run should complete at least one small batch of tasks, update this fi
 ## NEXT RUN PICK
 
 Pick in this order unless blocked:
-1. `FTEST-001`
-2. `FTEST-006`
-3. `FTEST-002`
+1. `FTEST-006`
+2. `FTEST-002`
+3. `FTEST-003`
 
 ## DONE LOG
 
+- 2026-03-05: Completed `FTEST-001` (interpreter smoke test for data + render node execution in `test_interpreter_smoke.nim`). (commit: TBD)
 - 2026-03-05: Completed `FTEST-005` (route composition assertions in `test_routes.nim`). (commit: TBD)
 - 2026-03-05: Completed `FTEST-012` (logger polling-based checks, removed fixed sleeps). (commit: TBD)
 - 2026-03-05: Initialized backlog from audit. (commit: TBD)
