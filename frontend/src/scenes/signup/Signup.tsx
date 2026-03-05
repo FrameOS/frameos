@@ -1,7 +1,4 @@
-// src/scenes/signup/Signup.tsx
-
 import { H4 } from '../../components/H4'
-import React from 'react'
 import { Box } from '../../components/Box'
 import { Form } from 'kea-forms'
 import { Field } from '../../components/Field'

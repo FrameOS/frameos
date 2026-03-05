@@ -19,6 +19,7 @@ import type {
 import { Area, Panel } from '../../../../types'
 import { socketLogic } from '../../../socketLogic'
 import { editAppLogic } from '../EditApp/editAppLogic'
+import { isFrameControlMode } from '../../../../utils/frameControlMode'
 
 import type { chatLogicType } from './chatLogicType'
 
@@ -618,6 +619,10 @@ export const chatLogic = kea<chatLogicType>([
   }),
   listeners(({ actions, values, props }) => ({
     loadChats: async () => {
+      if (isFrameControlMode()) {
+        actions.loadChatsSuccess([], false, 0)
+        return
+      }
       try {
         const response = await apiFetch(`/api/ai/chats?frameId=${props.frameId}&limit=${CHAT_PAGE_SIZE}&offset=0`)
         if (!response.ok) {
@@ -634,6 +639,10 @@ export const chatLogic = kea<chatLogicType>([
       }
     },
     loadMoreChats: async () => {
+      if (isFrameControlMode()) {
+        actions.loadMoreChatsSuccess([], false, values.chatsOffset)
+        return
+      }
       if (!values.hasMoreChats || values.isLoadingMoreChats) {
         return
       }
@@ -735,6 +744,10 @@ export const chatLogic = kea<chatLogicType>([
       }
     },
     loadChatMessages: async ({ chatId }) => {
+      if (isFrameControlMode()) {
+        actions.loadChatMessagesSuccess(chatId, [])
+        return
+      }
       try {
         const response = await apiFetch(`/api/ai/chats/${chatId}`)
         if (!response.ok) {
@@ -1037,7 +1050,9 @@ export const chatLogic = kea<chatLogicType>([
     },
   })),
   afterMount(({ actions, values }) => {
-    actions.loadChats()
+    if (!isFrameControlMode()) {
+      actions.loadChats()
+    }
     if (values.activeEditAppContext) {
       actions.ensureChatForApp(values.activeEditAppContext.sceneId, values.activeEditAppContext.nodeId)
     } else if (values.scenesOpen) {
