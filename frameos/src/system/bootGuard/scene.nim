@@ -16,7 +16,7 @@ let PERSISTED_STATE_KEYS*: seq[string] = @[]
 type Scene* = ref object of FrameScene
   node1: render_textApp.App
 
-proc buildFailureText(self: Scene): string =
+proc buildFailureText*(self: Scene): string =
   let details = loadBootGuardFailureDetails()
   let sceneId = if details.sceneId.isSome: details.sceneId.get() else: "(unknown scene id)"
   let sceneName =
