@@ -1,7 +1,7 @@
 # FrameOS Test Generation Memory
 
 Last updated: 2026-03-05
-Source audit: deep manual audit of `src/frameos/*`, `src/system/*`, and `src/apps/*` on 2026-03-05
+Source audit: deep manual audit of `src/frameos/*`, `src/system/*`, and `src/apps/*` on 2026-03-05, plus second-pass gap audit on 2026-03-05
 Scope: `frameos/src/*`
 
 ## Purpose
@@ -242,9 +242,122 @@ Each agent run should complete at least one small batch of tasks, update this fi
   - Border layout creation and scale ratio semantics are asserted.
   - `measureTightImage` and `drawText` are smoke-tested with deterministic inputs.
 
+## P0 Server Route Behavior (Second Audit)
+
+- [ ] `FTEST-031` (`READY`): Add behavioral coverage for web route auth/setup branches.
+  Target: `src/frameos/server/routes/web_routes.nim`
+  New test file: `src/frameos/server/tests/test_web_routes_behavior.nim`
+  Acceptance:
+  - `/`, `/admin`, `/control`, `/logout`, `/setup` status/redirect behavior is asserted.
+  - Access-key query (`k=...`) cookie-issuance redirect behavior is asserted.
+  - Unauthorized gating on `/static/@asset`, `/image`, `/states`, `/state`, `/ws`, `/ws/admin` is asserted.
+  - `/wifi` behavior is asserted for hotspot active vs inactive modes.
+
+- [ ] `FTEST-032` (`READY`): Add behavioral coverage for admin API route handlers.
+  Target: `src/frameos/server/routes/admin_api_routes.nim`
+  New test file: `src/frameos/server/tests/test_admin_api_routes_behavior.nim`
+  Acceptance:
+  - `/api/admin/session`, `/api/admin/login`, `/api/admin/logout` success/failure flows are asserted.
+  - Event dispatch endpoints assert `401`/`404`/`400`/`200` branches.
+  - `/api/frames/@id/event` empty-event validation is asserted.
+  - `/reload` success and load-config failure branches are asserted.
+
+- [ ] `FTEST-033` (`READY`): Add behavioral coverage for frame API route handlers.
+  Target: `src/frameos/server/routes/frame_api_routes.nim`
+  New test file: `src/frameos/server/tests/test_frame_api_routes_behavior.nim`
+  Acceptance:
+  - `/api/apps`, `/api/frames`, `/api/frames/@id`, `/ping`, `/state`, `/states` status/shape is asserted.
+  - Frame ID mismatch branch returns `404` across scoped frame endpoints.
+  - `/api/frames/@id/image_token` key fallback behavior (`frameAccessKey` vs `"frame"`) is asserted.
+  - `/api/frames/@id/asset` delegates status/content-type/error body from `getAssetPayload`.
+
+## P1 API/Runtime Internals (Second Audit)
+
+- [ ] `FTEST-034` (`READY`): Expand API helper coverage for assets and payload loaders.
+  Target: `src/frameos/server/api.nim`
+  Acceptance:
+  - `frameAssetsPayload` returns directories + files with expected shape for temp asset trees.
+  - `getAssetPayload` invalid path, missing file, and raw-file content-type branches are asserted.
+  - `loadScenePayload` fallback behavior is asserted for missing/invalid JSON and `.gz` input.
+  - `frameApiPayload` includes expected config-derived fields and active connection count.
+
+- [ ] `FTEST-035` (`READY`): Expand scene registry/state cleanup behavior coverage.
+  Target: `src/frameos/scenes.nim`
+  Acceptance:
+  - `getSceneDisplayName` priority order (compiled options/system options/interpreted/uploaded) is asserted.
+  - `getDynamicSceneOptions` includes interpreted and uploaded names/fallback IDs.
+  - `pruneUploadedPublicStates` removes orphan uploaded keys and updates fallback current scene.
+  - `cleanupOrphanedUploadedStateFiles` keeps referenced files and removes orphaned `scene-uploaded_*.json` files.
+
+- [ ] `FTEST-036` (`READY`): Add dither utility coverage.
+  Target: `src/frameos/utils/dither.nim`
+  New test file: `src/frameos/utils/tests/test_dither.nim`
+  Acceptance:
+  - `closestPalette` nearest-index selection is asserted.
+  - `toGrayscaleFloat` conversion weights are asserted on deterministic pixels.
+  - `ditherPaletteIndexed` output packing for 1/2/4/8-bit palette modes is asserted by byte layout.
+
+- [ ] `FTEST-037` (`READY`): Add image utility coverage for scaling and data URL decode.
+  Target: `src/frameos/utils/image.nim`
+  New test file: `src/frameos/utils/tests/test_image.nim`
+  Acceptance:
+  - `decodeDataUrl` validates base64/plain decoding and invalid-url exceptions.
+  - `rotateDegrees` preserves expected dimensions and pixel mapping for 90/180/270.
+  - `scaleAndDrawImage` key placements (`contain`, `cover`, `stretch`, `center`, corner anchors) are asserted.
+
+## P1 Apps (Second Audit)
+
+- [ ] `FTEST-038` (`READY`): Add deterministic tests for render baseline apps.
+  Target: `src/apps/render/color/app.nim`, `src/apps/render/opacity/app.nim`, `src/apps/render/gradient/app.nim`
+  Acceptance:
+  - Color fill output for `get`/`run` paths is asserted.
+  - Opacity transformation behavior is asserted for full/partial/zero alpha.
+  - Gradient output differs across direction endpoints and respects configured colors.
+
+- [ ] `FTEST-039` (`READY`): Add local image app filesystem behavior coverage.
+  Target: `src/apps/data/localImage/app.nim`
+  New test file: `src/apps/data/localImage/tests/test_app.nim`
+  Acceptance:
+  - File discovery excludes `.thumbs` paths and non-image files.
+  - Search filtering is case-insensitive and state is reinitialized on query/path change.
+  - Counter state progression and metadata payload (path/index/size) are asserted.
+  - Empty-folder and no-match branches return deterministic error-image output dimensions.
+
+- [ ] `FTEST-040` (`READY`): Add geometry coverage for image transform data apps.
+  Target: `src/apps/data/resizeImage/app.nim`, `src/apps/data/rotateImage/app.nim`
+  Acceptance:
+  - Resize contain->center branch when source already fits is asserted.
+  - Resize dimensions and placement invariants are asserted for standard modes.
+  - Rotate app output dimensions are asserted for canonical angles (0/90/180/270 and non-right-angle).
+
+- [ ] `FTEST-041` (`READY`): Add control/log app behavior coverage.
+  Target: `src/apps/logic/breakIfRendering/app.nim`, `src/apps/data/log/app.nim`
+  Acceptance:
+  - `breakIfRendering` raises only when scene is rendering.
+  - `log` app no-op on null payload and pass-through behavior on object/string payload are asserted.
+  - Logged event payload shape for non-null input is asserted.
+
+## P2 Blocked / Refactor-Gated (Second Audit)
+
+- [ ] `FTEST-042` (`BLOCKED`): Portal network command orchestration tests.
+  Target: `src/frameos/portal.nim`
+  Blocker:
+  - Current code hard-binds to `execCmdEx/startProcess/sudo nmcli` and sleeps/spawns threads directly.
+  Unblock plan:
+  - Add minimal seam hooks for command runner/process launcher/sleeper to allow deterministic fake nmcli flows.
+
+- [ ] `FTEST-043` (`BLOCKED`): JS runtime envelope/coercion unit coverage.
+  Target: `src/frameos/js_runtime.nim`
+  Blocker:
+  - Most conversion helpers are private and require full QuickJS context wiring.
+  Unblock plan:
+  - Expose tiny pure helper seams (or internal test includes) for `toJsIdent/jsQuote/envelopeToValue`.
+
 ## NEXT RUN PICK
 
-1. No open READY tasks from this audit batch; `FTEST-022` through `FTEST-030` are completed.
+1. `FTEST-031` web route auth/setup behavior matrix.
+2. `FTEST-032` admin API route behavior matrix.
+3. `FTEST-036` dither utility deterministic coverage.
 
 ## DONE LOG
 
@@ -278,6 +391,7 @@ Each agent run should complete at least one small batch of tasks, update this fi
 - 2026-03-05: Completed `FTEST-028` (config helper coverage for defaults/parsers/update merge semantics in `src/frameos/tests/test_config_helpers.nim`). (commit: TBD)
 - 2026-03-05: Completed `FTEST-029` (font helper coverage for listing/sanitization/fallback/clone color in `src/frameos/utils/tests/test_font.nim`). (commit: TBD)
 - 2026-03-05: Completed `FTEST-030` (text layout utility coverage for visible/fit-bounds/measure/draw in `src/frameos/utils/tests/test_text.nim`). (commit: TBD)
+- 2026-03-05: Second-pass audit added `FTEST-031` through `FTEST-043` with READY/BLOCKED split and concrete acceptance criteria. (commit: TBD)
 - 2026-03-05: Initialized backlog from audit. (commit: TBD)
 
 ## Commit Message Convention
