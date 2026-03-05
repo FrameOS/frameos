@@ -326,6 +326,10 @@ proc cleanupOrphanedUploadedStateFiles*() =
     except OSError:
       discard
 
+when defined(testing):
+  proc setUploadedStateCleanupRanForTest*(value: bool) =
+    uploadedStateCleanupRan = value
+
 proc updateLastPersistedState*(self: FrameScene) =
   if not exportedScenes.hasKey(self.id):
     return

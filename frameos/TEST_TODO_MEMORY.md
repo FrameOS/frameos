@@ -281,7 +281,7 @@ Each agent run should complete at least one small batch of tasks, update this fi
   - `loadScenePayload` fallback behavior is asserted for missing/invalid JSON and `.gz` input.
   - `frameApiPayload` includes expected config-derived fields and active connection count.
 
-- [ ] `FTEST-035` (`READY`): Expand scene registry/state cleanup behavior coverage.
+- [x] `FTEST-035` (`DONE`): Expand scene registry/state cleanup behavior coverage.
   Target: `src/frameos/scenes.nim`
   Acceptance:
   - `getSceneDisplayName` priority order (compiled options/system options/interpreted/uploaded) is asserted.
@@ -297,7 +297,7 @@ Each agent run should complete at least one small batch of tasks, update this fi
   - `toGrayscaleFloat` conversion weights are asserted on deterministic pixels.
   - `ditherPaletteIndexed` output packing for 1/2/4/8-bit palette modes is asserted by byte layout.
 
-- [ ] `FTEST-037` (`READY`): Add image utility coverage for scaling and data URL decode.
+- [x] `FTEST-037` (`DONE`): Add image utility coverage for scaling and data URL decode.
   Target: `src/frameos/utils/image.nim`
   New test file: `src/frameos/utils/tests/test_image.nim`
   Acceptance:
@@ -307,14 +307,14 @@ Each agent run should complete at least one small batch of tasks, update this fi
 
 ## P1 Apps (Second Audit)
 
-- [ ] `FTEST-038` (`READY`): Add deterministic tests for render baseline apps.
+- [x] `FTEST-038` (`DONE`): Add deterministic tests for render baseline apps.
   Target: `src/apps/render/color/app.nim`, `src/apps/render/opacity/app.nim`, `src/apps/render/gradient/app.nim`
   Acceptance:
   - Color fill output for `get`/`run` paths is asserted.
   - Opacity transformation behavior is asserted for full/partial/zero alpha.
   - Gradient output differs across direction endpoints and respects configured colors.
 
-- [ ] `FTEST-039` (`READY`): Add local image app filesystem behavior coverage.
+- [x] `FTEST-039` (`DONE`): Add local image app filesystem behavior coverage.
   Target: `src/apps/data/localImage/app.nim`
   New test file: `src/apps/data/localImage/tests/test_app.nim`
   Acceptance:
@@ -323,14 +323,14 @@ Each agent run should complete at least one small batch of tasks, update this fi
   - Counter state progression and metadata payload (path/index/size) are asserted.
   - Empty-folder and no-match branches return deterministic error-image output dimensions.
 
-- [ ] `FTEST-040` (`READY`): Add geometry coverage for image transform data apps.
+- [x] `FTEST-040` (`DONE`): Add geometry coverage for image transform data apps.
   Target: `src/apps/data/resizeImage/app.nim`, `src/apps/data/rotateImage/app.nim`
   Acceptance:
   - Resize contain->center branch when source already fits is asserted.
   - Resize dimensions and placement invariants are asserted for standard modes.
   - Rotate app output dimensions are asserted for canonical angles (0/90/180/270 and non-right-angle).
 
-- [ ] `FTEST-041` (`READY`): Add control/log app behavior coverage.
+- [x] `FTEST-041` (`DONE`): Add control/log app behavior coverage.
   Target: `src/apps/logic/breakIfRendering/app.nim`, `src/apps/data/log/app.nim`
   Acceptance:
   - `breakIfRendering` raises only when scene is rendering.
@@ -355,9 +355,8 @@ Each agent run should complete at least one small batch of tasks, update this fi
 
 ## NEXT RUN PICK
 
-1. `FTEST-035` scene registry/state cleanup behavior coverage.
-2. `FTEST-037` image utility scaling/data-url coverage.
-3. `FTEST-038` render baseline app deterministic coverage.
+1. `FTEST-042` portal network command orchestration tests (blocked on seam hooks).
+2. `FTEST-043` JS runtime envelope/coercion tests (blocked on helper seams).
 
 ## DONE LOG
 
@@ -397,6 +396,12 @@ Each agent run should complete at least one small batch of tasks, update this fi
 - 2026-03-05: Completed `FTEST-033` (frame API behavior matrix in `src/frameos/server/tests/test_frame_api_routes_behavior.nim` covering status/shape, frame mismatch 404 branches, image token fallback, and asset delegation semantics). (commit: TBD)
 - 2026-03-05: Completed `FTEST-034` (API helper coverage expansion in `src/frameos/server/tests/test_api.nim` for asset listings, asset payload path/content branches, scene payload fallback, and frame payload config/connection fields). (commit: TBD)
 - 2026-03-05: Completed `FTEST-036` (dither utility coverage in `src/frameos/utils/tests/test_dither.nim` for nearest palette selection, grayscale conversion weights, and 1/2/4/8-bit packed indexed output). (commit: TBD)
+- 2026-03-05: Completed `FTEST-035` (scene registry/state cleanup coverage in `src/frameos/tests/test_scenes_registry_state_cleanup.nim` for display-name resolution, dynamic options fallback names, uploaded state pruning, and orphan uploaded-state file cleanup). (commit: TBD)
+- 2026-03-05: Completed `FTEST-037` (image utility coverage in `src/frameos/utils/tests/test_image.nim` for data-url decoding, rotateDegrees mapping, and contain/cover/stretch/anchor scaling placement). (commit: TBD)
+- 2026-03-05: Completed `FTEST-038` (render baseline app coverage in `src/apps/render/color/tests/test_app.nim`, `src/apps/render/opacity/tests/test_app.nim`, and `src/apps/render/gradient/tests/test_app.nim`). (commit: TBD)
+- 2026-03-05: Completed `FTEST-039` (local image filesystem behavior coverage in `src/apps/data/localImage/tests/test_app.nim` for thumbs exclusion, case-insensitive search re-init, counter/metadata progression, and deterministic empty/no-match dimensions). (commit: TBD)
+- 2026-03-05: Completed `FTEST-040` (image transform geometry coverage in `src/apps/data/resizeImage/tests/test_app.nim` and `src/apps/data/rotateImage/tests/test_app.nim` for contain-center branch, output placement invariants, and canonical/non-right-angle rotation dimensions). (commit: TBD)
+- 2026-03-05: Completed `FTEST-041` (control/log app behavior coverage in `src/apps/logic/breakIfRendering/tests/test_app.nim` and `src/apps/data/log/tests/test_app.nim`). (commit: TBD)
 - 2026-03-05: Initialized backlog from audit. (commit: TBD)
 
 ## Commit Message Convention
