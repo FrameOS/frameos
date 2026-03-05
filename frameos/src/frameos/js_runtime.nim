@@ -495,3 +495,12 @@ proc evalSnippet*(
     outs[targetField] = expectedType
 
   callCompiledFn(scene, context, nodeId, fnName, args, argTypes, outs, targetField)
+
+proc toJsIdentForTest*(name: string): string =
+  toJsIdent(name)
+
+proc jsQuoteForTest*(s: string): string =
+  jsQuote(s)
+
+proc envelopeToValueForTest*(env: JsonNode, expectedType: string = ""): Value =
+  envelopeToValue(env, expectedType)

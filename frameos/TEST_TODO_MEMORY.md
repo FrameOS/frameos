@@ -339,24 +339,25 @@ Each agent run should complete at least one small batch of tasks, update this fi
 
 ## P2 Blocked / Refactor-Gated (Second Audit)
 
-- [ ] `FTEST-042` (`BLOCKED`): Portal network command orchestration tests.
+- [x] `FTEST-042` (`DONE`): Portal network command orchestration tests.
   Target: `src/frameos/portal.nim`
-  Blocker:
-  - Current code hard-binds to `execCmdEx/startProcess/sudo nmcli` and sleeps/spawns threads directly.
-  Unblock plan:
-  - Add minimal seam hooks for command runner/process launcher/sleeper to allow deterministic fake nmcli flows.
+  New test file: `src/frameos/tests/test_portal.nim`
+  Acceptance:
+  - Deterministic fake nmcli command/process orchestration is asserted through seam hooks.
+  - `availableNetworks`, `startAp`, `stopAp`, and `attemptConnect` success/failure branches are covered.
+  - Auto-timeout background spawn can be disabled in tests to avoid nondeterminism.
 
-- [ ] `FTEST-043` (`BLOCKED`): JS runtime envelope/coercion unit coverage.
+- [x] `FTEST-043` (`DONE`): JS runtime envelope/coercion unit coverage.
   Target: `src/frameos/js_runtime.nim`
-  Blocker:
-  - Most conversion helpers are private and require full QuickJS context wiring.
-  Unblock plan:
-  - Expose tiny pure helper seams (or internal test includes) for `toJsIdent/jsQuote/envelopeToValue`.
+  New test file: `src/frameos/tests/test_js_runtime_helpers.nim`
+  Acceptance:
+  - Tiny helper seams for `toJsIdent`, `jsQuote`, and `envelopeToValue` are exported for unit tests.
+  - Envelope coercion behavior is asserted for `undefined`, primitives, bigint in-range/overflow, and expected-type override paths.
 
 ## NEXT RUN PICK
 
-1. `FTEST-042` portal network command orchestration tests (blocked on seam hooks).
-2. `FTEST-043` JS runtime envelope/coercion tests (blocked on helper seams).
+1. Backlog currently cleared for this audit pass.
+2. Add new tasks only when fresh coverage gaps are identified.
 
 ## DONE LOG
 
@@ -402,6 +403,8 @@ Each agent run should complete at least one small batch of tasks, update this fi
 - 2026-03-05: Completed `FTEST-039` (local image filesystem behavior coverage in `src/apps/data/localImage/tests/test_app.nim` for thumbs exclusion, case-insensitive search re-init, counter/metadata progression, and deterministic empty/no-match dimensions). (commit: TBD)
 - 2026-03-05: Completed `FTEST-040` (image transform geometry coverage in `src/apps/data/resizeImage/tests/test_app.nim` and `src/apps/data/rotateImage/tests/test_app.nim` for contain-center branch, output placement invariants, and canonical/non-right-angle rotation dimensions). (commit: TBD)
 - 2026-03-05: Completed `FTEST-041` (control/log app behavior coverage in `src/apps/logic/breakIfRendering/tests/test_app.nim` and `src/apps/data/log/tests/test_app.nim`). (commit: TBD)
+- 2026-03-05: Completed `FTEST-042` (portal command orchestration coverage in `src/frameos/tests/test_portal.nim` with deterministic command/process/sleep seams and test-time auto-timeout disable hook in `src/frameos/portal.nim`). (commit: TBD)
+- 2026-03-05: Completed `FTEST-043` (JS runtime helper/coercion coverage in `src/frameos/tests/test_js_runtime_helpers.nim` using tiny exported seams from `src/frameos/js_runtime.nim`). (commit: TBD)
 - 2026-03-05: Initialized backlog from audit. (commit: TBD)
 
 ## Commit Message Convention
