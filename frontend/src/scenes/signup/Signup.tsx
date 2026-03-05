@@ -6,7 +6,7 @@ import { TextInput } from '../../components/TextInput'
 import { Button } from '../../components/Button'
 import { signupLogic } from './signupLogic'
 import { useValues } from 'kea'
-import darkMarkSmall from '../assets/logo/dark-mark-small.png'
+import darkMarkSmall from '../../assets/logo/dark-mark-small.png'
 
 export function Signup() {
   const { isSignupFormSubmitting } = useValues(signupLogic)
