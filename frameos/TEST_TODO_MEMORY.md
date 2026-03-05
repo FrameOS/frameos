@@ -82,14 +82,14 @@ Each agent run should complete at least one small batch of tasks, update this fi
 
 ## P1 Apps
 
-- [ ] `FTEST-009` (`READY`): Add tests for `apps/apps.nim` app dispatch.
+- [x] `FTEST-009` (`DONE`): Add tests for `apps/apps.nim` app dispatch.
   Target: `src/apps/apps.nim`
   New test file: `src/apps/tests/test_apps_dispatch.nim`
   Acceptance:
   - `initApp`, `setAppField`, `runApp`, `getApp` route correctly for known app types.
   - Unknown keywords fail predictably.
 
-- [ ] `FTEST-010` (`READY`): Add tests for render split math helpers.
+- [x] `FTEST-010` (`DONE`): Add tests for render split math helpers.
   Target: `src/apps/render/split/app.nim`
   New test file: `src/apps/render/split/tests/test_split_math.nim`
   Acceptance:
@@ -113,9 +113,9 @@ Each agent run should complete at least one small batch of tasks, update this fi
 ## NEXT RUN PICK
 
 Pick in this order unless blocked:
-1. `FTEST-009`
-2. `FTEST-010`
-3. `FTEST-011`
+1. `FTEST-011`
+2. `FTEST-013`
+3. backlog refresh from new coverage gaps
 
 ## DONE LOG
 
@@ -128,6 +128,8 @@ Pick in this order unless blocked:
 - 2026-03-05: Completed `FTEST-007` (bootGuard system scene failure-text rendering assertions in `src/system/bootGuard/tests/test_scene.nim`). (commit: 0894b31e)
 - 2026-03-05: Completed `FTEST-008` (wifiHotspot scene render + event-flow assertions in `src/system/wifiHotspot/tests/test_scene.nim`). (commit: TBD)
 - 2026-03-05: Completed `FTEST-004` (startup fallback scene selection helper coverage in `src/frameos/tests/test_frameos_startup.nim`, including threshold and override behavior). (commit: TBD)
+- 2026-03-05: Completed `FTEST-009` (apps dispatch coverage for known app routes and unknown keyword failures in `src/apps/tests/test_apps_dispatch.nim`). (commit: TBD)
+- 2026-03-05: Completed `FTEST-010` (split helper math coverage for margins/gaps/ratios and dimension rounding in `src/apps/render/split/tests/test_split_math.nim`). (commit: TBD)
 - 2026-03-05: Initialized backlog from audit. (commit: TBD)
 
 ## Commit Message Convention
