@@ -215,9 +215,36 @@ Each agent run should complete at least one small batch of tasks, update this fi
   Acceptance:
   - Branch behavior, state updates, and next-sleep calculations are covered with deterministic inputs.
 
+## P1 Runtime/Utilities (Audit Additions)
+
+- [x] `FTEST-028` (`DONE`): Expand config helper coverage.
+  Target: `src/frameos/config.nim`
+  New test file: `src/frameos/tests/test_config_helpers.nim`
+  Acceptance:
+  - `setConfigDefaults` defaulting behavior is asserted for core runtime fields.
+  - `loadSchedule/loadDeviceConfig/loadNetwork/loadPalette` parsing and guard behavior are asserted.
+  - `updateFrameConfigFrom` schedule replacement behavior is asserted.
+
+- [x] `FTEST-029` (`DONE`): Add font utility coverage.
+  Target: `src/frameos/utils/font.nim`
+  New test file: `src/frameos/utils/tests/test_font.nim`
+  Acceptance:
+  - Font listing is sorted and filters to `.ttf`.
+  - Invalid path-like font names are rejected.
+  - Missing custom font falls back safely.
+  - `cloneFontWithColor` applies requested paint color.
+
+- [x] `FTEST-030` (`DONE`): Add text layout utility coverage.
+  Target: `src/frameos/utils/text.nim`
+  New test file: `src/frameos/utils/tests/test_text.nim`
+  Acceptance:
+  - `typesetIntoBounds` visible and fit-bounds modes are asserted.
+  - Border layout creation and scale ratio semantics are asserted.
+  - `measureTightImage` and `drawText` are smoke-tested with deterministic inputs.
+
 ## NEXT RUN PICK
 
-1. No open READY tasks from this audit batch; `FTEST-022` through `FTEST-027` are completed.
+1. No open READY tasks from this audit batch; `FTEST-022` through `FTEST-030` are completed.
 
 ## DONE LOG
 
@@ -248,6 +275,9 @@ Each agent run should complete at least one small batch of tasks, update this fi
 - 2026-03-05: Completed `FTEST-025` (system scene registry/options assertions in `src/system/tests/test_scenes_registry.nim`). (commit: TBD)
 - 2026-03-05: Completed `FTEST-026` (value helper constructor/accessor/serialization/coercion coverage in `src/frameos/tests/test_values.nim`). (commit: TBD)
 - 2026-03-05: Completed `FTEST-027` (disk space helper coverage in `src/frameos/utils/tests/test_system.nim`). (commit: TBD)
+- 2026-03-05: Completed `FTEST-028` (config helper coverage for defaults/parsers/update merge semantics in `src/frameos/tests/test_config_helpers.nim`). (commit: TBD)
+- 2026-03-05: Completed `FTEST-029` (font helper coverage for listing/sanitization/fallback/clone color in `src/frameos/utils/tests/test_font.nim`). (commit: TBD)
+- 2026-03-05: Completed `FTEST-030` (text layout utility coverage for visible/fit-bounds/measure/draw in `src/frameos/utils/tests/test_text.nim`). (commit: TBD)
 - 2026-03-05: Initialized backlog from audit. (commit: TBD)
 
 ## Commit Message Convention
