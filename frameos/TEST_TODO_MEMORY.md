@@ -1,7 +1,7 @@
 # FrameOS Test Generation Memory
 
 Last updated: 2026-03-05
-Source audit: `/test-audit.md`
+Source audit: deep manual audit of `src/frameos/*`, `src/system/*`, and `src/apps/*` on 2026-03-05
 Scope: `frameos/src/*`
 
 ## Purpose
@@ -110,12 +110,96 @@ Each agent run should complete at least one small batch of tasks, update this fi
   - Single canonical test owner for shared cache semantics.
   - Keep coverage, reduce overlap noise.
 
+- [x] `FTEST-014` (`DONE`): Add URL helper tests for auth/public URL behavior.
+  Target: `src/frameos/utils/url.nim`
+  New test file: `src/frameos/utils/tests/test_url.nim`
+  Acceptance:
+  - `publicScheme/publicHost/publicPort/publicBaseUrl` behavior is asserted for proxy and fallback paths.
+  - `authenticatedFrameUrl` query/key rules are asserted for public/private + read/write modes.
+  - `hotspotSetupPort` fallback behavior is covered when no setup proxy port is active.
+
+- [x] `FTEST-015` (`DONE`): Add scene helper tests for upload normalization + path sanitization.
+  Target: `src/frameos/scenes.nim`
+  New test file: `src/frameos/tests/test_scenes_helpers.nim`
+  Acceptance:
+  - `sanitizePathString` normalizes invalid characters, trims, and length-limits output.
+  - `normalizeUploadedScenePayload` prefixes uploaded IDs.
+  - Cross-node scene references are rewritten only for in-payload scene IDs.
+
+- [ ] `FTEST-016` (`READY`): Add app utility tests for filename cleanup and render dimension helpers.
+  Target: `src/frameos/apps.nim`
+  New test file: `src/frameos/tests/test_apps_helpers.nim`
+  Acceptance:
+  - `renderWidth/renderHeight` assertions for rotations 0/90/180/270.
+  - `cleanFilename` behavior for invalid chars and duplicate spaces.
+  - `saveAsset` early-return behavior for disabled `saveAssets` settings.
+
+- [ ] `FTEST-017` (`READY`): Add channels behavior tests.
+  Target: `src/frameos/channels.nim`
+  New test file: `src/frameos/tests/test_channels.nim`
+  Acceptance:
+  - `sendEvent` overloads push expected tuples to `eventChannel`.
+  - `log` writes to main log channel and non-blocking broadcast channel.
+  - `triggerServerRender` uses bounded channel semantics (`trySend`).
+
+- [ ] `FTEST-018` (`READY`): Add setup proxy lifecycle tests with fake caddy process.
+  Target: `src/frameos/setup_proxy.nim`
+  New test file: `src/frameos/tests/test_setup_proxy.nim`
+  Acceptance:
+  - Starting proxy with expose-only mode sets an active port.
+  - Re-starting proxy stops previously spawned process.
+  - Disabled proxy configuration does not keep an active port.
+
+- [ ] `FTEST-019` (`READY`): Expand scene persistence tests.
+  Target: `src/frameos/scenes.nim`
+  New test file: `src/frameos/tests/test_scenes_persistence.nim`
+  Acceptance:
+  - `setPersistedStateFromPayload` writes and merges persisted JSON.
+  - `loadPersistedState/loadLastScene` handle invalid/missing files safely.
+  - `getFirstSceneId` fallback behavior is asserted for persisted uploaded IDs.
+
+## P1 Runtime/Server
+
+- [ ] `FTEST-020` (`READY`): Add lightweight route helper coverage for frame API match logic.
+  Target: `src/frameos/server/routes/common.nim`
+  Acceptance:
+  - `requestedFrameMatches` true/false behavior for valid and invalid IDs.
+  - `frameWebHtml` scaling substitution behavior for known scaling modes.
+
+- [ ] `FTEST-021` (`READY`): Add time utility conversion tests.
+  Target: `src/frameos/utils/time.nim`
+  New test file: `src/frameos/utils/tests/test_time.nim`
+  Acceptance:
+  - `durationToMilliseconds` and `durationToSeconds` convert common durations exactly.
+  - Zero and sub-second durations are asserted.
+
+- [ ] `FTEST-022` (`BLOCKED`): Metrics logger deterministic tests.
+  Target: `src/frameos/metrics.nim`
+  Blocker:
+  - Current implementation hardcodes `/proc` + `sleep` loop without injection hooks.
+  Proposed split:
+  - Add minimal test seam for metric providers/clock.
+  - Then add assertions for disabled/enabled/error branches.
+
+## P1 Apps
+
+- [ ] `FTEST-023` (`READY`): Add tests for pure logic apps with parsing/format transforms.
+  Target: `src/apps/data/parseJson/app.nim`, `src/apps/data/prettyJson/app.nim`, `src/apps/data/xmlToJson/app.nim`
+  Acceptance:
+  - Valid/invalid payload handling is asserted.
+  - Output format invariants are checked (stable key handling, error fields).
+
+- [ ] `FTEST-024` (`READY`): Add tests for logic control apps.
+  Target: `src/apps/logic/ifElse/app.nim`, `src/apps/logic/nextSleepDuration/app.nim`, `src/apps/logic/setAsState/app.nim`
+  Acceptance:
+  - Branch behavior, state updates, and next-sleep calculations are covered with deterministic inputs.
+
 ## NEXT RUN PICK
 
 Pick in this order unless blocked:
-1. backlog refresh from new coverage gaps
-2. add next audit batch
-3. tighten flaky-path assertions as discovered
+1. `FTEST-016` + `FTEST-021` (quick deterministic unit coverage)
+2. `FTEST-017` (channels concurrency semantics)
+3. `FTEST-018` (setup proxy lifecycle with fake process)
 
 ## DONE LOG
 
@@ -132,6 +216,8 @@ Pick in this order unless blocked:
 - 2026-03-05: Completed `FTEST-010` (split helper math coverage for margins/gaps/ratios and dimension rounding in `src/apps/render/split/tests/test_split_math.nim`). (commit: ae1f06e2)
 - 2026-03-05: Completed `FTEST-011` (calendar event grouping/sorting coverage for all-day ordering, multi-day expansion, and malformed inputs in `src/apps/render/calendar/tests/test_grouping.nim`). (commit: 663e1bb3)
 - 2026-03-05: Completed `FTEST-013` (deduplicated If-Modified-Since cache semantics by keeping canonical coverage in `test_server.nim` and compatibility coverage in `test_api.nim`). (commit: 663e1bb3)
+- 2026-03-05: Completed `FTEST-014` (URL helper coverage for public/authenticated URL composition and setup-port fallback in `src/frameos/utils/tests/test_url.nim`). (commit: TBD)
+- 2026-03-05: Completed `FTEST-015` (scene helper coverage for path sanitization and uploaded scene-reference rewriting in `src/frameos/tests/test_scenes_helpers.nim`). (commit: TBD)
 - 2026-03-05: Initialized backlog from audit. (commit: TBD)
 
 ## Commit Message Convention
