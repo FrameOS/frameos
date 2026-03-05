@@ -49,14 +49,24 @@ const sharedPackages = [
   'react-dom/client',
   'react/jsx-runtime',
   'react/jsx-dev-runtime',
+  'clsx',
+  'copy-to-clipboard',
+  'fast-deep-equal',
   'kea',
+  'kea-localstorage',
   'kea-router',
   'kea-loaders',
+  'kea-subscriptions',
+  'reactflow',
+  'react-markdown',
+  'react-syntax-highlighter',
+  'remark-gfm',
+  'uuid',
 ]
 
+const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const sharedPackagePaths = new Map(sharedPackages.map((packageName) => [packageName, require.resolve(packageName)]))
-const sharedDepsFilter =
-  /^(react|react-dom|react-dom\/client|react\/jsx-runtime|react\/jsx-dev-runtime|kea|kea-router|kea-loaders)$/
+const sharedDepsFilter = new RegExp(`^(${sharedPackages.map(escapeRegex).join('|')})$`)
 
 const sharedDepsPlugin = {
   name: 'frameos-shared-deps',
