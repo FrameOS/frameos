@@ -8,8 +8,8 @@ import type { assetsLogicType } from './assetsLogicType'
 import { frameLogic } from '../../frameLogic'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
-import { blobToDataUrl } from '../../../../utils/fileDataUrl'
 import { frameAssetsApiPath } from '../../../../utils/frameAssetsApi'
+import { uploadFileInChunks } from '../../../../utils/uploadFileInChunks'
 
 export interface AssetsLogicProps {
   frameId: number
@@ -102,6 +102,7 @@ export const assetsLogic = kea<assetsLogicType>([
     uploadDroppedFiles: (path: string, files: File[]) => ({ path, files }),
     assetUploaded: (asset: AssetType) => ({ asset }),
     filesToUpload: (files: string[]) => ({ files }),
+    uploadProgress: (path: string, size: number) => ({ path, size }),
     uploadFailure: (path: string) => ({ path }),
     syncAssets: true,
     deleteAsset: (path: string) => ({ path }),
@@ -188,36 +189,36 @@ export const assetsLogic = kea<assetsLogicType>([
       actions.filesToUpload(uploadedFiles)
       for (const file of files) {
         const uploadPath = frameAssetsApiPath(props.frameId, 'assets/upload')
+        const normalizedPath = normalizeAssetPath(`${path ? path + '/' : ''}${file.name}`, assetsPath)
         try {
-          const response = isInFrameAdminMode()
-            ? await apiFetch(uploadPath, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  path,
-                  filename: file.name,
-                  data_url: await blobToDataUrl(file),
-                }),
+          const asset = isInFrameAdminMode()
+            ? await uploadFileInChunks({
+                frameId: props.frameId,
+                suffix: 'assets/upload',
+                file,
+                path,
+                filename: file.name,
+                onProgress: (size) => actions.uploadProgress(normalizedPath, size),
               })
-            : await (() => {
+            : await (async () => {
                 const formData = new FormData()
                 formData.append('file', file)
                 formData.append('path', path)
-                return apiFetch(uploadPath, {
+                const response = await apiFetch(uploadPath, {
                   method: 'POST',
                   body: formData,
                 })
+                if (!response.ok) {
+                  throw new Error('Failed to upload asset')
+                }
+                return await response.json()
               })()
-          if (!response.ok) {
-            throw new Error('Failed to upload asset')
-          }
-          const asset = await response.json()
           actions.assetUploaded({
             ...asset,
             path: normalizeAssetPath(asset.path, assetsPath),
           })
         } catch (error) {
-          actions.uploadFailure(normalizeAssetPath(`${path ? path + '/' : ''}${file.name}`, assetsPath))
+          actions.uploadFailure(normalizedPath)
         }
       }
     },
@@ -298,6 +299,13 @@ export const assetsLogic = kea<assetsLogicType>([
           }
         }
         return updatedFiles
+      },
+      uploadProgress: (state, { path, size }) => {
+        const foundAsset = state.find((asset) => asset.path === path)
+        if (!foundAsset) {
+          return [...state, { path, size, mtime: -1 }]
+        }
+        return state.map((asset) => (asset.path === path ? { ...asset, size, mtime: -1 } : asset))
       },
       uploadFailure: (state, { path }) =>
         state.map((asset) => (asset.path === path ? { ...asset, size: -2, mtime: -2 } : asset)),

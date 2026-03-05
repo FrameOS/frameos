@@ -47,6 +47,9 @@ proc contentTypeForAsset*(path: string): string =
 proc configuredAssetsPath*(): string =
   normalizedPath(if globalFrameConfig.assetsPath.len > 0: globalFrameConfig.assetsPath else: "/srv/assets")
 
+proc uploadChunkTempRoot(): string =
+  normalizedPath(getTempDir() / "frameos-upload-chunks")
+
 proc withinBasePath*(path, basePath: string): bool =
   let normalizedTargetPath = normalizedPath(path)
   let normalizedBasePath = normalizedPath(basePath)
@@ -70,6 +73,15 @@ proc sanitizeAssetExtension(value: string): string =
       result.add(ch)
   if result.len > 0 and not result.startsWith("."):
     result = "." & result
+
+proc sanitizeUploadId(uploadId: string): string =
+  let safeId = sanitizeAssetComponent(uploadId, "")
+  if safeId.len == 0:
+    raise newException(ValueError, "Missing upload id")
+  safeId
+
+proc uploadChunkTempPath(uploadId: string): string =
+  normalizedPath(uploadChunkTempRoot() / (sanitizeUploadId(uploadId) & ".part"))
 
 proc resolveAssetPath*(path: string, allowRoot = false): string =
   let assetsPath = configuredAssetsPath()
@@ -99,6 +111,13 @@ proc relativeAssetPath*(path: string): string =
     ""
   else:
     fullPath[(assetsPath.len + 1) .. ^1]
+
+proc resolveAssetUploadPath(subdir: string, filename: string): string =
+  let safeFilename = sanitizeAssetComponent(extractFilename(filename), "uploaded_file", allowDot = true)
+  if subdir.strip().len == 0:
+    resolveAssetPath(safeFilename)
+  else:
+    resolveAssetPath(subdir / safeFilename)
 
 proc contentTypeForFilePath*(path: string): string =
   let lowerPath = path.toLowerAscii()
@@ -135,12 +154,7 @@ proc decodeDataUrlPayload*(value: string): string =
   decode(value[(commaIndex + 1) .. ^1])
 
 proc saveAssetUploadPayload*(subdir: string, filename: string, data: string): JsonNode =
-  let safeFilename = sanitizeAssetComponent(extractFilename(filename), "uploaded_file", allowDot = true)
-  let targetPath =
-    if subdir.strip().len == 0:
-      resolveAssetPath(safeFilename)
-    else:
-      resolveAssetPath(subdir / safeFilename)
+  let targetPath = resolveAssetUploadPath(subdir, filename)
   createDir(parentDir(targetPath))
   writeFile(targetPath, data)
   assetPayloadForPath(targetPath)
@@ -165,6 +179,42 @@ proc saveUploadedImagePayload*(filename: string, data: string): JsonNode =
 
 proc createAssetDirectory*(path: string) =
   createDir(resolveAssetPath(path))
+
+proc appendUploadChunk*(uploadId: string, chunkIndex: int, data: string) =
+  let tempPath = uploadChunkTempPath(uploadId)
+  createDir(parentDir(tempPath))
+  var fileHandle = open(tempPath, if chunkIndex <= 0: fmWrite else: fmAppend)
+  try:
+    fileHandle.write(data)
+  finally:
+    fileHandle.close()
+
+proc discardUploadChunk*(uploadId: string) =
+  let tempPath = uploadChunkTempPath(uploadId)
+  if fileExists(tempPath):
+    removeFile(tempPath)
+
+proc finishChunkedAssetUpload*(uploadId: string, subdir: string, filename: string): JsonNode =
+  let tempPath = uploadChunkTempPath(uploadId)
+  if not fileExists(tempPath):
+    raise newException(OSError, "Upload not found")
+  let targetPath = resolveAssetUploadPath(subdir, filename)
+  createDir(parentDir(targetPath))
+  if dirExists(targetPath):
+    raise newException(ValueError, "Invalid asset path")
+  if fileExists(targetPath):
+    removeFile(targetPath)
+  moveFile(tempPath, targetPath)
+  assetPayloadForPath(targetPath)
+
+proc finishChunkedImageUpload*(uploadId: string, filename: string): JsonNode =
+  let tempPath = uploadChunkTempPath(uploadId)
+  if not fileExists(tempPath):
+    raise newException(OSError, "Upload not found")
+  try:
+    saveUploadedImagePayload(filename, readFile(tempPath))
+  finally:
+    discardUploadChunk(uploadId)
 
 proc deleteAssetEntry*(path: string) =
   let targetPath = resolveAssetPath(path)

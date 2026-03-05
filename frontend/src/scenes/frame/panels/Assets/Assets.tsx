@@ -202,6 +202,7 @@ function TreeNode({
     const isImage = node.name.match(/\.(png|jpe?g|gif|bmp|webp)$/i)
     const isPlayableImage =
       hasImageExtension(node.name) && !node.path.startsWith('.thumbs/') && !node.path.includes('/.thumbs/')
+    const isUploading = node.mtime === -1
     return (
       <div
         className={
@@ -243,13 +244,15 @@ function TreeNode({
             <PlayIcon className="w-4 h-4" />
           </button>
         ) : null}
-        {node.size && node.size > 0 && <span className="text-xs text-gray-400">{humaniseSize(node.size)}</span>}
+        {typeof node.size === 'number' && node.size >= 0 && (node.size > 0 || isUploading) ? (
+          <span className="text-xs text-gray-400">{humaniseSize(node.size)}</span>
+        ) : null}
         {node.mtime && node.mtime > 0 && (
           <span className="text-xs text-gray-500" title={new Date(node.mtime * 1000).toLocaleString()}>
             {new Date(node.mtime * 1000).toLocaleString()}
           </span>
         )}
-        {(node.size === -1 && node.mtime === -1) || isDownloading ? (
+        {isUploading || isDownloading ? (
           <Spinner className="w-4 h-4" color="white" />
         ) : node.size === -2 && node.mtime === -2 ? (
           <span className="text-red-500">Upload error</span>

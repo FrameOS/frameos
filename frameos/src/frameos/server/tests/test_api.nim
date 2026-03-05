@@ -135,6 +135,22 @@ suite "Server API helpers":
     expect ValueError:
       discard saveAssetUploadPayload("../escape", "nope.txt", "bad")
 
+  test "chunked upload helpers append and finalize within scoped assets root":
+    let tempRoot = getTempDir() / "frameos-api-chunked-assets"
+    createDir(tempRoot)
+    globalFrameConfig = baseConfig(tempRoot)
+
+    appendUploadChunk("upload-a", 0, "he")
+    appendUploadChunk("upload-a", 1, "llo")
+    let finalized = finishChunkedAssetUpload("upload-a", "nested", "hello.txt")
+    check finalized{"path"}.getStr() == tempRoot / "nested" / "hello.txt"
+    check readFile(tempRoot / "nested" / "hello.txt") == "hello"
+
+    appendUploadChunk("upload-image", 0, "png")
+    let uploadedImage = finishChunkedImageUpload("upload-image", "sample.png")
+    check uploadedImage{"path"}.getStr().startsWith("uploads/sample.")
+    check uploadedImage{"filename"}.getStr().endsWith(".png")
+
   test "frameApiPayload reflects config active connections and scene payload fallback":
     let tempRoot = getTempDir() / "frameos-api-frame-payload"
     createDir(tempRoot)

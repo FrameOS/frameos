@@ -11,8 +11,8 @@ import equal from 'fast-deep-equal'
 import { collectSecretSettingsFromScenes } from '../secretSettings'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
-import { blobToDataUrl } from '../../../../utils/fileDataUrl'
 import { frameAssetsApiPath } from '../../../../utils/frameAssetsApi'
+import { uploadFileInChunks } from '../../../../utils/uploadFileInChunks'
 import { buildSdCardImageScene } from './sceneShortcuts'
 import { socketLogic } from '../../../socketLogic'
 
@@ -575,27 +575,25 @@ export const scenesLogic = kea<scenesLogicType>([
     uploadImage: async ({ file }) => {
       try {
         const uploadPath = frameAssetsApiPath(props.frameId, 'assets/upload_image')
-        const response = isInFrameAdminMode()
-          ? await apiFetch(uploadPath, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                filename: file.name,
-                data_url: await blobToDataUrl(file),
-              }),
+        const payload = isInFrameAdminMode()
+          ? await uploadFileInChunks({
+              frameId: props.frameId,
+              suffix: 'assets/upload_image',
+              file,
+              filename: file.name,
             })
-          : await (() => {
+          : await (async () => {
               const formData = new FormData()
               formData.append('file', file)
-              return apiFetch(uploadPath, {
+              const response = await apiFetch(uploadPath, {
                 method: 'POST',
                 body: formData,
               })
+              if (!response.ok) {
+                throw new Error('Image upload failed')
+              }
+              return await response.json()
             })()
-        if (!response.ok) {
-          throw new Error('Image upload failed')
-        }
-        const payload = await response.json()
         const assetsPath = values.frameForm.assets_path || '/srv/assets'
         const relativePath = payload?.path || ''
         const filename = payload?.filename || relativePath.split('/').pop() || file.name

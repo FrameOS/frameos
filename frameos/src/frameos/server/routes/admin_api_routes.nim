@@ -3,6 +3,7 @@ import mummy
 import mummy/routers
 import httpcore
 import tables
+import strutils
 import frameos/channels
 import frameos/config
 import ../auth
@@ -74,17 +75,39 @@ proc addAdminApiRoutes*(router: var Router) =
         request.respond(Http404, body = "Not found!")
       else:
         try:
-          let payload = parseJson(if request.body == "": "{}" else: request.body)
-          let path = payload{"path"}.getStr("")
-          let filename = payload{"filename"}.getStr("uploaded_file")
-          let dataUrl = payload{"data_url"}.getStr("")
-          if dataUrl.len == 0:
-            jsonResponse(request, Http400, %*{"detail": "Missing upload payload"})
-            return
-          let asset = saveAssetUploadPayload(path, filename, decodeDataUrlPayload(dataUrl))
-          jsonResponse(request, Http200, asset)
+          if request.queryParams.contains("upload_id"):
+            let chunkIndex =
+              try:
+                parseInt(request.queryParams.getOrDefault("chunk_index", "0"))
+              except ValueError:
+                0
+            appendUploadChunk(request.queryParams["upload_id"], chunkIndex, request.body)
+            if request.queryParams.getOrDefault("complete", "") == "1":
+              jsonResponse(
+                request,
+                Http200,
+                finishChunkedAssetUpload(
+                  request.queryParams["upload_id"],
+                  request.queryParams.getOrDefault("path", ""),
+                  request.queryParams.getOrDefault("filename", "uploaded_file")
+                )
+              )
+            else:
+              jsonResponse(request, Http200, %*{"status": "partial"})
+          else:
+            let payload = parseJson(if request.body == "": "{}" else: request.body)
+            let path = payload{"path"}.getStr("")
+            let filename = payload{"filename"}.getStr("uploaded_file")
+            let dataUrl = payload{"data_url"}.getStr("")
+            if dataUrl.len == 0:
+              jsonResponse(request, Http400, %*{"detail": "Missing upload payload"})
+              return
+            let asset = saveAssetUploadPayload(path, filename, decodeDataUrlPayload(dataUrl))
+            jsonResponse(request, Http200, asset)
         except ValueError as e:
           jsonResponse(request, Http400, %*{"detail": e.msg})
+        except OSError:
+          jsonResponse(request, Http404, %*{"detail": "Upload not found"})
         except CatchableError as e:
           jsonResponse(request, Http500, %*{"detail": e.msg})
   )
@@ -98,15 +121,36 @@ proc addAdminApiRoutes*(router: var Router) =
         request.respond(Http404, body = "Not found!")
       else:
         try:
-          let payload = parseJson(if request.body == "": "{}" else: request.body)
-          let filename = payload{"filename"}.getStr("image")
-          let dataUrl = payload{"data_url"}.getStr("")
-          if dataUrl.len == 0:
-            jsonResponse(request, Http400, %*{"detail": "Missing upload payload"})
-            return
-          jsonResponse(request, Http200, saveUploadedImagePayload(filename, decodeDataUrlPayload(dataUrl)))
+          if request.queryParams.contains("upload_id"):
+            let chunkIndex =
+              try:
+                parseInt(request.queryParams.getOrDefault("chunk_index", "0"))
+              except ValueError:
+                0
+            appendUploadChunk(request.queryParams["upload_id"], chunkIndex, request.body)
+            if request.queryParams.getOrDefault("complete", "") == "1":
+              jsonResponse(
+                request,
+                Http200,
+                finishChunkedImageUpload(
+                  request.queryParams["upload_id"],
+                  request.queryParams.getOrDefault("filename", "image")
+                )
+              )
+            else:
+              jsonResponse(request, Http200, %*{"status": "partial"})
+          else:
+            let payload = parseJson(if request.body == "": "{}" else: request.body)
+            let filename = payload{"filename"}.getStr("image")
+            let dataUrl = payload{"data_url"}.getStr("")
+            if dataUrl.len == 0:
+              jsonResponse(request, Http400, %*{"detail": "Missing upload payload"})
+              return
+            jsonResponse(request, Http200, saveUploadedImagePayload(filename, decodeDataUrlPayload(dataUrl)))
         except ValueError as e:
           jsonResponse(request, Http400, %*{"detail": e.msg})
+        except OSError:
+          jsonResponse(request, Http404, %*{"detail": "Upload not found"})
         except CatchableError as e:
           jsonResponse(request, Http500, %*{"detail": e.msg})
   )

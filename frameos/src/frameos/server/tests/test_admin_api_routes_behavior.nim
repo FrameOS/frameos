@@ -204,15 +204,20 @@ suite "admin api route behavior":
     let upload = httpRequest(
       server.port,
       "POST",
-      "/api/admin/frames/1/assets/upload",
-      headers = [("Cookie", adminCookie), ("Content-Type", "application/json")],
-      body = $(%*{
-        "path": "nested",
-        "filename": "hello.txt",
-        "data_url": "data:text/plain;base64,aGVsbG8=",
-      }),
+      "/api/admin/frames/1/assets/upload?upload_id=test-upload&path=nested&filename=hello.txt&chunk_index=0&complete=0",
+      headers = [("Cookie", adminCookie), ("Content-Type", "application/octet-stream")],
+      body = "he",
     )
     check upload.status == 200
+
+    let uploadComplete = httpRequest(
+      server.port,
+      "POST",
+      "/api/admin/frames/1/assets/upload?upload_id=test-upload&path=nested&filename=hello.txt&chunk_index=1&complete=1",
+      headers = [("Cookie", adminCookie), ("Content-Type", "application/octet-stream")],
+      body = "llo",
+    )
+    check uploadComplete.status == 200
     check fileExists(assetsRoot / "nested" / "hello.txt")
 
     let mkdir = httpRequest(
@@ -257,12 +262,9 @@ suite "admin api route behavior":
     let uploadImage = httpRequest(
       server.port,
       "POST",
-      "/api/admin/frames/1/assets/upload_image",
-      headers = [("Cookie", adminCookie), ("Content-Type", "application/json")],
-      body = $(%*{
-        "filename": "frame image.png",
-        "data_url": "data:text/plain;base64,aGVsbG8=",
-      }),
+      "/api/admin/frames/1/assets/upload_image?upload_id=image-upload&filename=frame%20image.png&chunk_index=0&complete=1",
+      headers = [("Cookie", adminCookie), ("Content-Type", "application/octet-stream")],
+      body = "hello",
     )
     check uploadImage.status == 200
     let uploadImagePayload = parseJson(uploadImage.body)
