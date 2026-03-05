@@ -1,7 +1,7 @@
 # FrameOS Test Generation Memory
 
 Last updated: 2026-03-05
-Source audit: deep manual audit of `src/frameos/*`, `src/system/*`, and `src/apps/*` on 2026-03-05, plus second-pass gap audit on 2026-03-05, plus render-app third-pass audit on 2026-03-05, plus data-app fourth-pass audit on 2026-03-05, plus seam-unblock app audit/update pass on 2026-03-05, plus fifth-pass app validation/error-path audit on 2026-03-05
+Source audit: deep manual audit of `src/frameos/*`, `src/system/*`, and `src/apps/*` on 2026-03-05, plus second-pass gap audit on 2026-03-05, plus render-app third-pass audit on 2026-03-05, plus data-app fourth-pass audit on 2026-03-05, plus seam-unblock app audit/update pass on 2026-03-05, plus fifth-pass app validation/error-path audit on 2026-03-05, plus sixth-pass chromium seam-unblock audit/implementation on 2026-03-05, plus seventh-pass RTSP seam-unblock audit/implementation and post-pass gap scan on 2026-03-05
 Scope: `frameos/src/*`
 
 ## Purpose
@@ -434,17 +434,51 @@ Each agent run should complete at least one small batch of tasks, update this fi
   - URL-as-input and empty-input validation branches return empty arrays and emit explicit error logs.
   - Valid iCal payload outside requested export range returns deterministic empty response and reply log payload.
 
-- [ ] `FTEST-056` (`BLOCKED`): Add deterministic Chromium screenshot orchestration coverage.
+- [x] `FTEST-056` (`DONE`): Add deterministic Chromium screenshot orchestration coverage.
   Target: `src/apps/data/chromiumScreenshot/app.nim`
-  Blocked because:
-  - Current implementation relies on shell commands/process startup (`apt`, `python`, chromium, playwright, sockets) without injectable seams.
-  - Unit tests would be nondeterministic without extracting small command/socket/process hooks.
+  New test file: `src/apps/data/chromiumScreenshot/tests/test_app.nim`
+  Acceptance:
+  - Injected RAM/dependency/bootstrap/browser hooks make low-RAM and browser-unavailable branches deterministic.
+  - Unit tests assert low-RAM fallback image dimensions/log behavior and browser-unavailable fallback behavior with/without context image.
 
-- [ ] `FTEST-057` (`BLOCKED`): Add deterministic RTSP snapshot error/success-path coverage.
+- [x] `FTEST-057` (`DONE`): Add deterministic RTSP snapshot error/success-path coverage.
   Target: `src/apps/data/rstpSnapshot/app.nim`
-  Blocked because:
-  - Behavior is tied to `ffmpeg` process invocation and binary availability.
-  - Deterministic coverage requires seam hooks for process spawn/output/exit code simulation.
+  New test file: `src/apps/data/rstpSnapshot/tests/test_app.nim`
+  Acceptance:
+  - Injectable ffmpeg runner seam enables deterministic spawn/exit/decode/success branch coverage.
+  - Unit tests assert fallback image behavior for spawn errors, non-zero exits, and decode failures.
+  - Success path decodes seam-provided image bytes.
+
+## P1 Apps (Unblock Batch)
+
+- [x] `FTEST-058` (`DONE`): Extract tiny deterministic seam hooks for Chromium screenshot app.
+  Target: `src/apps/data/chromiumScreenshot/app.nim`
+  Acceptance:
+  - Add minimal injectable hooks for RAM probe and init-time dependency/bootstrap calls.
+  - Add minimal injectable hooks to force browser availability checks in `init/get`.
+  - Default runtime behavior is unchanged when hooks are not set.
+
+- [x] `FTEST-059` (`DONE`): Add deterministic Chromium screenshot low-RAM/startup-failure tests.
+  Target: `src/apps/data/chromiumScreenshot/app.nim`
+  New test file: `src/apps/data/chromiumScreenshot/tests/test_app.nim`
+  Acceptance:
+  - Low-RAM branch returns deterministic fallback image dimensions and logs expected guard message.
+  - Browser-unavailable branch returns context image when present and frame-sized error image otherwise.
+  - Tests avoid real apt/python/chromium/playwright/sockets/process execution by using seam hooks.
+
+- [x] `FTEST-060` (`DONE`): Extract minimal ffmpeg runner seam for RTSP snapshot app.
+  Target: `src/apps/data/rstpSnapshot/app.nim`
+  Acceptance:
+  - Add one injectable ffmpeg runner hook that defaults to existing process behavior.
+  - Default runtime behavior is unchanged when hook is unset.
+
+- [x] `FTEST-061` (`DONE`): Add deterministic RTSP snapshot tests for spawn/exit/decode branches.
+  Target: `src/apps/data/rstpSnapshot/app.nim`
+  New test file: `src/apps/data/rstpSnapshot/tests/test_app.nim`
+  Acceptance:
+  - ffmpeg spawn error (`OSError`) returns deterministic error image dimensions.
+  - non-zero ffmpeg exit code returns deterministic error image dimensions.
+  - decode failure and success branches are asserted with seam-provided output bytes.
 
 ## P2 Blocked / Refactor-Gated (Second Audit)
 
@@ -465,9 +499,8 @@ Each agent run should complete at least one small batch of tasks, update this fi
 
 ## NEXT RUN PICK
 
-1. Unblock `FTEST-056` by extracting tiny command/process/socket seam hooks in `chromiumScreenshot/app.nim`, then add deterministic tests for low-RAM and startup failure branches.
-2. Unblock `FTEST-057` by extracting a minimal process runner seam in `rstpSnapshot/app.nim`, then add deterministic tests for ffmpeg spawn/exit/decode failure branches.
-3. After seam-unblocks, run another gap audit for any remaining non-generated P1 app modules.
+1. No open non-legacy P0/P1 gaps remain after `FTEST-057`.
+2. Optional: decide whether legacy app modules under `src/apps/legacy/*` warrant dedicated tests or explicit out-of-scope status.
 
 ## DONE LOG
 
@@ -529,6 +562,13 @@ Each agent run should complete at least one small batch of tasks, update this fi
 - 2026-03-05: Completed `FTEST-053` (OpenAI + weather validation/error-branch coverage in `src/apps/data/openaiText/tests/test_app.nim`, `src/apps/data/openaiImage/tests/test_app.nim`, and `src/apps/data/weather/tests/test_app.nim`). Proof: `cd frameos && nimble test`. (commit: TBD)
 - 2026-03-05: Completed `FTEST-054` (Unsplash init + missing-api-key deterministic coverage in `src/apps/data/unsplash/tests/test_app.nim`). Proof: `cd frameos && nimble test`. (commit: TBD)
 - 2026-03-05: Completed `FTEST-055` (`icalJson` app validation/reply-wrapper coverage in `src/apps/data/icalJson/tests/test_app.nim`). Proof: `cd frameos && nimble test`. (commit: TBD)
+- 2026-03-05: Completed `FTEST-058` (added injectable RAM/dependency/bootstrap/browser seams in `src/apps/data/chromiumScreenshot/app.nim` with default behavior preserved). Proof: `cd frameos && nimble test`. (commit: TBD)
+- 2026-03-05: Completed `FTEST-059` (added deterministic low-RAM and browser-unavailable fallback tests in `src/apps/data/chromiumScreenshot/tests/test_app.nim`). Proof: `cd frameos && nimble test`. (commit: TBD)
+- 2026-03-05: Completed `FTEST-056` (closed Chromium screenshot orchestration gap by combining seam hooks + deterministic low-RAM/startup-failure coverage in `src/apps/data/chromiumScreenshot/app.nim` and `src/apps/data/chromiumScreenshot/tests/test_app.nim`). Proof: `cd frameos && nimble test`. (commit: TBD)
+- 2026-03-05: Completed `FTEST-060` (added injectable ffmpeg runner seam in `src/apps/data/rstpSnapshot/app.nim` with default process behavior preserved). Proof: `cd frameos && nimble test`. (commit: TBD)
+- 2026-03-05: Completed `FTEST-061` (added deterministic spawn/exit/decode/success tests in `src/apps/data/rstpSnapshot/tests/test_app.nim`). Proof: `cd frameos && nimble test`. (commit: TBD)
+- 2026-03-05: Completed `FTEST-057` (closed RTSP snapshot orchestration gap via seam hook + deterministic coverage in `src/apps/data/rstpSnapshot/app.nim` and `src/apps/data/rstpSnapshot/tests/test_app.nim`). Proof: `cd frameos && nimble test`. (commit: TBD)
+- 2026-03-05: Post-pass gap scan found no remaining non-legacy app modules without tests; current uncovered app paths are under `src/apps/legacy/*`. (commit: TBD)
 - 2026-03-05: Follow-up audit split remaining high-priority app gaps into seam-gated tasks `FTEST-051` and `FTEST-052`. (commit: TBD)
 - 2026-03-05: Audit policy update: do not add tests for autogenerated `app_loader.nim` modules; remove any in-progress loader-test additions and focus on non-generated behavior coverage. (commit: TBD)
 - 2026-03-05: Initialized backlog from audit. (commit: TBD)
