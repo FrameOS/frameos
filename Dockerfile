@@ -34,6 +34,10 @@ ENV PATH="/opt/nim/bin:${PATH}"
 RUN nim --version \
     nimble --version
 
+# frameos/frontend needs files from the backend frontend/
+COPY frontend/src /app/frontend/src
+COPY frontend/schema /app/frontend/schema
+
 # Install frameos nim deps
 WORKDIR /app/frameos
 

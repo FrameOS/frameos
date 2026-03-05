@@ -32,6 +32,9 @@ before build:
 
 task assets, "Create assets":
   exec "mkdir -p src/assets"
+  if not fileExists("assets/compiled/frame_web/index.html"):
+    exec "cd frontend && npm install"
+    exec "cd frontend && npm run build"
   exec "python tools/generate_apps_asset_nim.py --source-dir . --output src/assets/apps.nim"
   exec "~/.nimble/bin/nimassets -d=assets/compiled/web -o=src/assets/web.nim"
   exec "~/.nimble/bin/nimassets -d=assets/compiled/frame_web -o=src/assets/frame_web.nim"
