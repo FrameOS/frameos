@@ -51,7 +51,7 @@ Each agent run should complete at least one small batch of tasks, update this fi
   - Render/message loop can start and process one controlled cycle.
   - Test exits deterministically without hangs.
 
-- [ ] `FTEST-004` (`READY`): Add startup fallback test.
+- [x] `FTEST-004` (`DONE`): Add startup fallback test.
   Target: `src/frameos/frameos.nim`, `src/frameos/boot_guard.nim`
   New test file: `src/frameos/tests/test_frameos_startup.nim`
   Acceptance:
@@ -113,9 +113,9 @@ Each agent run should complete at least one small batch of tasks, update this fi
 ## NEXT RUN PICK
 
 Pick in this order unless blocked:
-1. `FTEST-004`
-2. `FTEST-009`
-3. `FTEST-010`
+1. `FTEST-009`
+2. `FTEST-010`
+3. `FTEST-011`
 
 ## DONE LOG
 
@@ -127,6 +127,7 @@ Pick in this order unless blocked:
 - 2026-03-05: Completed `FTEST-003` (runner render/message loop one-cycle safety test in `src/frameos/tests/test_runner_loop.nim`, with bounded loop test hook). (commit: 8dbc65b1)
 - 2026-03-05: Completed `FTEST-007` (bootGuard system scene failure-text rendering assertions in `src/system/bootGuard/tests/test_scene.nim`). (commit: 0894b31e)
 - 2026-03-05: Completed `FTEST-008` (wifiHotspot scene render + event-flow assertions in `src/system/wifiHotspot/tests/test_scene.nim`). (commit: TBD)
+- 2026-03-05: Completed `FTEST-004` (startup fallback scene selection helper coverage in `src/frameos/tests/test_frameos_startup.nim`, including threshold and override behavior). (commit: TBD)
 - 2026-03-05: Initialized backlog from audit. (commit: TBD)
 
 ## Commit Message Convention
