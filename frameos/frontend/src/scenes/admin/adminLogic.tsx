@@ -1,7 +1,7 @@
 import { actions, afterMount, kea, listeners, path, reducers } from 'kea'
 
 export const adminLogic = kea([
-  path(['frameos', 'frontend', 'adminLogic']),
+  path(['frameos', 'frontend', 'scenes', 'admin', 'adminLogic']),
   actions({
     checkSession: true,
     setSessionState: (isChecking: boolean, isAuthenticated: boolean) => ({ isChecking, isAuthenticated }),

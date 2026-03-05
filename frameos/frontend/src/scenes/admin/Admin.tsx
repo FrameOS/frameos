@@ -1,13 +1,13 @@
-import { useActions, useMountedLogic, useValues } from 'kea'
+import { useMountedLogic, useValues } from 'kea'
 
-import { Frame } from '../../../../../frontend/src/scenes/frame/Frame'
-import { socketLogic } from '../../../../../frontend/src/scenes/socketLogic'
-import { framesModel } from '../../../../../frontend/src/models/framesModel'
 import { appsModel } from '../../../../../frontend/src/models/appsModel'
 import { entityImagesModel } from '../../../../../frontend/src/models/entityImagesModel'
+import { framesModel } from '../../../../../frontend/src/models/framesModel'
+import { Frame } from '../../../../../frontend/src/scenes/frame/Frame'
+import { socketLogic } from '../../../../../frontend/src/scenes/socketLogic'
 import { adminLogic } from './adminLogic'
 
-interface ControlProps {
+interface AdminProps {
   id?: string
 }
 
@@ -27,9 +27,8 @@ const resolveFrameId = (id?: string) => {
   return '1'
 }
 
-export const Control = ({ id }: ControlProps) => {
+export default function Admin({ id }: AdminProps) {
   const resolvedFrameId = resolveFrameId(id)
-  console.log('Resolved frame ID:', resolvedFrameId)
 
   useMountedLogic(adminLogic)
   useMountedLogic(socketLogic)
@@ -51,11 +50,8 @@ export const Control = ({ id }: ControlProps) => {
   }
 
   if (framesLoaded) {
-    return (
-      <Frame id={resolvedFrameId} />
-    )
+    return <Frame id={resolvedFrameId} />
   }
+
   return <div>Loading...</div>
 }
-
-export default Control
