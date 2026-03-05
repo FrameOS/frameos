@@ -5,6 +5,14 @@ import ../config
 import ../channels
 import std/json
 
+proc waitFor(condition: proc(): bool {.closure.}, timeoutMs = 1200, pollMs = 20): bool =
+  let deadline = epochTime() + (float(timeoutMs) / 1000.0)
+  while epochTime() < deadline:
+    if condition():
+      return true
+    sleep(pollMs)
+  condition()
+
 suite "Logger Tests":
   # We load your real config, but you can also stub or mock if you like.
   let testConfig = loadConfig()
@@ -43,9 +51,12 @@ suite "Logger Tests":
     let logger = newLogger(testConfig)
     logger.log(%*{"event": "test1", "message": "Hello world"})
 
-    # Wait for the logger thread to process and flush.
-    sleep(500) # 0.5s; adjust if needed
-
+    let wroteExpectedContent = waitFor(proc(): bool =
+      if not fileExists("test-logger.log"):
+        return false
+      "Hello world" in readFile("test-logger.log")
+    )
+    doAssert wroteExpectedContent, "Expected log file to contain the logged message"
     doAssert fileExists("test-logger.log"), "Expected log file to be created"
 
     let contents = readFile("test-logger.log")
@@ -59,12 +70,18 @@ suite "Logger Tests":
 
     # 1) Write one log message while enabled
     logger.log(%*{"event": "test-enabled", "count": 1})
-    sleep(300)
+    doAssert waitFor(proc(): bool =
+      fileExists("test-logger.log") and ("test-enabled" in readFile("test-logger.log"))
+    ), "Expected enabled log message to be written"
 
     # 2) Disable and write a second log message
     logger.disable()
     logger.log(%*{"event": "test-disabled", "count": 2})
-    sleep(500)
+
+    # Give the logger thread a bounded window; disabled logs should still never appear.
+    discard waitFor(proc(): bool =
+      fileExists("test-logger.log")
+    , timeoutMs = 400, pollMs = 20)
 
     # Check the log file
     doAssert fileExists("test-logger.log")
@@ -82,7 +99,6 @@ suite "Logger Tests":
 
     logger.disable()
     logger.log(%*{"event": "disabledTest", "message": "should not see"})
-    sleep(300)
 
     # Re-enable and drain the channel
     logger.enable()

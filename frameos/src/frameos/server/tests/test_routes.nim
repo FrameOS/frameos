@@ -1,12 +1,14 @@
 import unittest
 import json
+import strutils
+import sequtils
 
 import ../../types
 import ../state
 import ../routes
 
 suite "Server routes composition":
-  test "router builds with split route modules":
+  test "router registers expected route surface":
     globalFrameConfig = FrameConfig(
       frameAdminAuth: %*{},
       frameAccess: "public",
@@ -15,5 +17,27 @@ suite "Server routes composition":
     )
     let publicState = initConnectionsState()
     let adminState = initConnectionsState()
-    discard buildRouter(publicState, adminState)
-    check true
+    let router = buildRouter(publicState, adminState)
+
+    check router.notFoundHandler != nil
+    check router.routes.len == 39
+
+    var getCount = 0
+    var postCount = 0
+    var routeDump: seq[string] = @[]
+    for route in router.routes:
+      let debug = repr(route)
+      routeDump.add(debug)
+      if "httpMethod: \"GET\"" in debug:
+        inc getCount
+      elif "httpMethod: \"POST\"" in debug:
+        inc postCount
+
+    check getCount == 31
+    check postCount == 8
+
+    # Key paths from public, frame API, and admin surfaces should all be present.
+    check routeDump.anyIt("\"ping\"" in it)
+    check routeDump.anyIt("\"states\"" in it)
+    check routeDump.anyIt("\"api\"" in it and "\"admin\"" in it and "\"session\"" in it)
+    check routeDump.anyIt("\"api\"" in it and "\"frames\"" in it and "\"event\"" in it)
