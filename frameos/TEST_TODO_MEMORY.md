@@ -1,7 +1,7 @@
 # FrameOS Test Generation Memory
 
 Last updated: 2026-03-05
-Source audit: deep manual audit of `src/frameos/*`, `src/system/*`, and `src/apps/*` on 2026-03-05, plus second-pass gap audit on 2026-03-05, plus render-app third-pass audit on 2026-03-05
+Source audit: deep manual audit of `src/frameos/*`, `src/system/*`, and `src/apps/*` on 2026-03-05, plus second-pass gap audit on 2026-03-05, plus render-app third-pass audit on 2026-03-05, plus data-app fourth-pass audit on 2026-03-05
 Scope: `frameos/src/*`
 
 ## Purpose
@@ -346,6 +346,68 @@ Each agent run should complete at least one small batch of tasks, update this fi
   - `render/svg` invalid/empty input error handling and context/frame sizing behavior are asserted.
   - `render/text` empty-text no-op, input-image branch, and bounded fallback output behavior are asserted.
 
+## P1 Apps (Fourth Audit)
+
+- [x] `FTEST-045` (`DONE`): Add deterministic clock formatting coverage.
+  Target: `src/apps/data/clock/app.nim`
+  New test file: `src/apps/data/clock/tests/test_app.nim`
+  Acceptance:
+  - `format == "custom"` path uses `formatCustom`.
+  - Non-custom mode uses `format` directly.
+
+- [x] `FTEST-046` (`DONE`): Add `newImage` dimension/opacity/next-node behavior coverage.
+  Target: `src/apps/data/newImage/app.nim`
+  New test file: `src/apps/data/newImage/tests/test_app.nim`
+  Acceptance:
+  - Width/height precedence is asserted (`appConfig` -> context image -> frame render dimensions).
+  - Opacity handling is asserted for partial and zero alpha fills.
+  - `renderNext` dispatch and `nextSleep` propagation are asserted.
+
+- [x] `FTEST-047` (`DONE`): Add `qr` app size-unit and code-type coverage.
+  Target: `src/apps/data/qr/app.nim`
+  New test file: `src/apps/data/qr/tests/test_app.nim`
+  Acceptance:
+  - Percent/pixels-per-dot/absolute size-unit behavior is asserted.
+  - Frame control vs frame image URL code paths produce distinct rendered QR output.
+
+- [x] `FTEST-048` (`DONE`): Add Home Assistant sensor error-path coverage.
+  Target: `src/apps/data/haSensor/app.nim`
+  New test file: `src/apps/data/haSensor/tests/test_app.nim`
+  Acceptance:
+  - Missing Home Assistant URL and missing access token return deterministic `{"error": ...}` payloads.
+  - `error(...)` helper payload shape is asserted.
+  - Debug flag does not alter error payload semantics for missing-config branches.
+
+- [x] `FTEST-049` (`DONE`): Add `downloadImage` fallback/error rendering coverage.
+  Target: `src/apps/data/downloadImage/app.nim`
+  New test file: `src/apps/data/downloadImage/tests/test_app.nim`
+  Acceptance:
+  - Invalid URL branch returns deterministic error image sized to context image when present.
+  - No-context branch falls back to frame render dimensions.
+  - Metadata state key is not written on failure.
+
+- [x] `FTEST-050` (`DONE`): Add `downloadUrl` error-path coverage.
+  Target: `src/apps/data/downloadUrl/app.nim`
+  New test file: `src/apps/data/downloadUrl/tests/test_app.nim`
+  Acceptance:
+  - Invalid URL branch returns deterministic error text.
+  - Error path emits `logError` with expected event prefix for node identity.
+  - Success-path test is deferred unless a no-network seam is introduced.
+
+- [ ] `FTEST-051` (`BLOCKED`): Add `frameOSGallery` URL/category behavior coverage.
+  Target: `src/apps/data/frameOSGallery/app.nim`
+  Proposed test file: `src/apps/data/frameOSGallery/tests/test_app.nim`
+  Blocked because:
+  - `get` directly calls `downloadImage(url)` with a hardcoded HTTPS endpoint and no seam for deterministic URL capture.
+  - Requires tiny seam extraction (URL builder proc or image downloader injection) before meaningful unit tests.
+
+- [ ] `FTEST-052` (`BLOCKED`): Add deterministic `beRecycle` helper coverage without hitting live API.
+  Target: `src/apps/data/beRecycle/app.nim`
+  Proposed test file: `src/apps/data/beRecycle/tests/test_app.nim`
+  Blocked because:
+  - Core deterministic behavior (`collectionsToEvents`) is private and embedded in a module that couples directly to live HTTP auth/address/collection fetch calls.
+  - Requires minimal seam extraction (export/helper split or injection for fetch functions) before meaningful no-network unit tests.
+
 ## P2 Blocked / Refactor-Gated (Second Audit)
 
 - [x] `FTEST-042` (`DONE`): Portal network command orchestration tests.
@@ -365,8 +427,8 @@ Each agent run should complete at least one small batch of tasks, update this fi
 
 ## NEXT RUN PICK
 
-1. Fresh audit needed for remaining non-generated app modules (exclude `app_loader.nim` targets).
-2. Prioritize untested deterministic app behavior in `src/apps/data/*/app.nim` and `src/apps/render/*/app.nim`.
+1. Unblock `FTEST-051` with tiny seam in `frameOSGallery` (URL builder/downloader injection), then add deterministic category/URL tests.
+2. Unblock `FTEST-052` by extracting/injecting deterministic `beRecycle` helpers (collections mapping + fetch seams), then add unit tests.
 
 ## DONE LOG
 
@@ -415,6 +477,14 @@ Each agent run should complete at least one small batch of tasks, update this fi
 - 2026-03-05: Completed `FTEST-042` (portal command orchestration coverage in `src/frameos/tests/test_portal.nim` with deterministic command/process/sleep seams and test-time auto-timeout disable hook in `src/frameos/portal.nim`). (commit: TBD)
 - 2026-03-05: Completed `FTEST-043` (JS runtime helper/coercion coverage in `src/frameos/tests/test_js_runtime_helpers.nim` using tiny exported seams from `src/frameos/js_runtime.nim`). (commit: TBD)
 - 2026-03-05: Completed `FTEST-044` (render image/svg/text behavior coverage in `src/apps/render/image/tests/test_app.nim`, `src/apps/render/svg/tests/test_app.nim`, and `src/apps/render/text/tests/test_app.nim`). Proof: `cd frameos && nimble test`. (commit: TBD)
+- 2026-03-05: Fourth-pass data-app audit added `FTEST-045` through `FTEST-049` with deterministic READY picks for remaining non-generated data apps. (commit: TBD)
+- 2026-03-05: Completed `FTEST-045` (clock format/custom-format behavior coverage in `src/apps/data/clock/tests/test_app.nim`). Proof: `cd frameos && nimble test`. (commit: TBD)
+- 2026-03-05: Completed `FTEST-046` (newImage width/height precedence, opacity, and renderNext/nextSleep behavior coverage in `src/apps/data/newImage/tests/test_app.nim`). Proof: `cd frameos && nimble test`. (commit: TBD)
+- 2026-03-05: Completed `FTEST-047` (qr size-unit and URL code-type behavior coverage in `src/apps/data/qr/tests/test_app.nim`). Proof: `cd frameos && nimble test`. (commit: TBD)
+- 2026-03-05: Completed `FTEST-048` (haSensor missing-config and helper error payload coverage in `src/apps/data/haSensor/tests/test_app.nim`). Proof: `cd frameos && nimble test`. (commit: TBD)
+- 2026-03-05: Completed `FTEST-049` (downloadImage invalid-url fallback coverage with context/frame dimension assertions and metadata no-write guard in `src/apps/data/downloadImage/tests/test_app.nim`). Proof: `cd frameos && nimble test`. (commit: TBD)
+- 2026-03-05: Completed `FTEST-050` (downloadUrl invalid-url error text + logError event-shape coverage in `src/apps/data/downloadUrl/tests/test_app.nim`). Proof: `cd frameos && nimble test`. (commit: TBD)
+- 2026-03-05: Follow-up audit split remaining high-priority app gaps into seam-gated tasks `FTEST-051` and `FTEST-052`. (commit: TBD)
 - 2026-03-05: Audit policy update: do not add tests for autogenerated `app_loader.nim` modules; remove any in-progress loader-test additions and focus on non-generated behavior coverage. (commit: TBD)
 - 2026-03-05: Initialized backlog from audit. (commit: TBD)
 
