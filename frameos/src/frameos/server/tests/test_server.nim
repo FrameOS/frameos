@@ -2,7 +2,7 @@ import unittest
 import times
 import httpcore
 
-import ../server
+import ../../server
 
 proc buildHeaders(values: seq[string]): HttpHeaders =
   result = newHttpHeaders()

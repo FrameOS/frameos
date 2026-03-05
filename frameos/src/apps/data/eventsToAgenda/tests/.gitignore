@@ -1,1 +1,2 @@
-test_events_to_agenda
+test_*
+!*.nim
