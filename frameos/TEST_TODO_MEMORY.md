@@ -173,13 +173,34 @@ Each agent run should complete at least one small batch of tasks, update this fi
   - `durationToMilliseconds` and `durationToSeconds` convert common durations exactly.
   - Zero and sub-second durations are asserted.
 
-- [ ] `FTEST-022` (`BLOCKED`): Metrics logger deterministic tests.
+- [x] `FTEST-022` (`DONE`): Metrics logger deterministic tests.
   Target: `src/frameos/metrics.nim`
-  Blocker:
-  - Current implementation hardcodes `/proc` + `sleep` loop without injection hooks.
-  Proposed split:
-  - Add minimal test seam for metric providers/clock.
-  - Then add assertions for disabled/enabled/error branches.
+  New test file: `src/frameos/tests/test_metrics.nim`
+  Acceptance:
+  - Add minimal seam hooks for file/CPU/memory/fd/sleep dependencies.
+  - Assert disabled/enabled/error branches deterministically without real sleeps.
+
+- [x] `FTEST-025` (`DONE`): Add system scene registry/options coverage.
+  Target: `src/system/scenes.nim`, `src/system/options.nim`
+  New test file: `src/system/tests/test_scenes_registry.nim`
+  Acceptance:
+  - `sceneOptions` ids/names are asserted.
+  - `getSystemScenes` contains all declared system scene ids.
+
+- [x] `FTEST-026` (`DONE`): Add value conversion/coercion coverage.
+  Target: `src/frameos/values.nim`
+  New test file: `src/frameos/tests/test_values.nim`
+  Acceptance:
+  - Typed accessor and `valueToJson` behavior is asserted.
+  - `valueFromJsonByType` coercion paths are validated for integer/float/bool/color/node/scene/json/default.
+  - Value debug string remains compact.
+
+- [x] `FTEST-027` (`DONE`): Add disk-space utility coverage.
+  Target: `src/frameos/utils/system.nim`
+  New test file: `src/frameos/utils/tests/test_system.nim`
+  Acceptance:
+  - Existing path returns positive bytes.
+  - Missing path returns `-1`.
 
 ## P1 Apps
 
@@ -196,10 +217,7 @@ Each agent run should complete at least one small batch of tasks, update this fi
 
 ## NEXT RUN PICK
 
-Pick in this order unless blocked:
-1. `FTEST-022` split step 1: add minimal metrics seams for `/proc` + clock injection.
-2. `FTEST-022` split step 2: add deterministic disabled/enabled/error-path tests.
-3. Audit for any newly added pure helper modules lacking direct unit coverage.
+1. No open READY tasks from this audit batch; `FTEST-022` through `FTEST-027` are completed.
 
 ## DONE LOG
 
@@ -224,8 +242,12 @@ Pick in this order unless blocked:
 - 2026-03-05: Completed `FTEST-019` (scene persistence coverage for merge/write, invalid-file fallback, and uploaded-scene fallback in `src/frameos/tests/test_scenes_persistence.nim`). (commit: TBD)
 - 2026-03-05: Completed `FTEST-020` (route helper coverage for frame ID matching and scaling mode substitution in `src/frameos/server/tests/test_common.nim`). (commit: TBD)
 - 2026-03-05: Completed `FTEST-021` (duration conversion coverage in `src/frameos/utils/tests/test_time.nim`). (commit: TBD)
+- 2026-03-05: Completed `FTEST-022` (metrics deterministic coverage with seam hooks + disabled/enabled/error assertions in `src/frameos/tests/test_metrics.nim`). (commit: TBD)
 - 2026-03-05: Completed `FTEST-023` (parse/pretty/XML transform app coverage in `src/apps/data/parseJson/tests/test_app.nim`, `src/apps/data/prettyJson/tests/test_app.nim`, and `src/apps/data/xmlToJson/tests/test_app.nim`). (commit: TBD)
 - 2026-03-05: Completed `FTEST-024` (logic control app coverage for branching, sleep duration, and state updates in `src/apps/logic/ifElse/tests/test_app.nim`, `src/apps/logic/nextSleepDuration/tests/test_app.nim`, and `src/apps/logic/setAsState/tests/test_app.nim`). (commit: TBD)
+- 2026-03-05: Completed `FTEST-025` (system scene registry/options assertions in `src/system/tests/test_scenes_registry.nim`). (commit: TBD)
+- 2026-03-05: Completed `FTEST-026` (value helper constructor/accessor/serialization/coercion coverage in `src/frameos/tests/test_values.nim`). (commit: TBD)
+- 2026-03-05: Completed `FTEST-027` (disk space helper coverage in `src/frameos/utils/tests/test_system.nim`). (commit: TBD)
 - 2026-03-05: Initialized backlog from audit. (commit: TBD)
 
 ## Commit Message Convention
