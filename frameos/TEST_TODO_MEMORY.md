@@ -73,7 +73,7 @@ Each agent run should complete at least one small batch of tasks, update this fi
   - Failure details mapping to rendered text is verified.
   - Safe behavior when fields are missing.
 
-- [ ] `FTEST-008` (`READY`): Add wifiHotspot system scene state transition tests.
+- [x] `FTEST-008` (`DONE`): Add wifiHotspot system scene state transition tests.
   Target: `src/system/wifiHotspot/scene.nim`
   New test file: `src/system/wifiHotspot/tests/test_scene.nim`
   Acceptance:
@@ -114,8 +114,8 @@ Each agent run should complete at least one small batch of tasks, update this fi
 
 Pick in this order unless blocked:
 1. `FTEST-004`
-2. `FTEST-008`
-3. `FTEST-009`
+2. `FTEST-009`
+3. `FTEST-010`
 
 ## DONE LOG
 
@@ -125,7 +125,8 @@ Pick in this order unless blocked:
 - 2026-03-05: Completed `FTEST-006` (system index scene list/text assertions in `src/system/index/tests/test_scene.nim`). (commit: 1dc51c7b)
 - 2026-03-05: Completed `FTEST-002` (interpreter error-path coverage for missing nodes, runtime error logging, and malformed field paths in `src/frameos/tests/test_interpreter_errors.nim`). (commit: 760e70e9)
 - 2026-03-05: Completed `FTEST-003` (runner render/message loop one-cycle safety test in `src/frameos/tests/test_runner_loop.nim`, with bounded loop test hook). (commit: 8dbc65b1)
-- 2026-03-05: Completed `FTEST-007` (bootGuard system scene failure-text rendering assertions in `src/system/bootGuard/tests/test_scene.nim`). (commit: TBD)
+- 2026-03-05: Completed `FTEST-007` (bootGuard system scene failure-text rendering assertions in `src/system/bootGuard/tests/test_scene.nim`). (commit: 0894b31e)
+- 2026-03-05: Completed `FTEST-008` (wifiHotspot scene render + event-flow assertions in `src/system/wifiHotspot/tests/test_scene.nim`). (commit: TBD)
 - 2026-03-05: Initialized backlog from audit. (commit: TBD)
 
 ## Commit Message Convention
