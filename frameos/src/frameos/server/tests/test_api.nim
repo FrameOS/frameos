@@ -1,15 +1,9 @@
 import unittest
 import times
-import httpcore
 import mummy
 import tables
 
 import ../api
-
-proc buildHeaders(values: seq[string]): httpcore.HttpHeaders =
-  result = httpcore.newHttpHeaders()
-  for value in values:
-    result.add("If-Modified-Since", value)
 
 suite "Server API helpers":
   test "content type for compiled web assets":
@@ -31,13 +25,6 @@ suite "Server API helpers":
     check parsed["name"] == "Frame One"
     check parsed["flag"] == "true"
     check parsed["empty"] == ""
-
-  test "if-modified-since handling for httpcore headers":
-    let referenceTime = parse("Wed, 21 Oct 2015 07:28:00 GMT", "ddd, dd MMM yyyy HH:mm:ss 'GMT'", utc())
-    let referenceUnix = referenceTime.toTime().toUnix().float
-    let headers = buildHeaders(@["Wed, 21 Oct 2015 07:28:00 GMT"])
-    check shouldReturnNotModified(headers, referenceUnix)
-    check not shouldReturnNotModified(headers, referenceUnix + 60.0)
 
   test "if-modified-since handling for mummy headers":
     let referenceTime = parse("Wed, 21 Oct 2015 07:28:00 GMT", "ddd, dd MMM yyyy HH:mm:ss 'GMT'", utc())

@@ -95,7 +95,7 @@ Each agent run should complete at least one small batch of tasks, update this fi
   Acceptance:
   - Ratios/margins/gaps parsing and computed dimensions asserted across edge cases.
 
-- [ ] `FTEST-011` (`READY`): Add tests for calendar grouping/sorting helpers.
+- [x] `FTEST-011` (`DONE`): Add tests for calendar grouping/sorting helpers.
   Target: `src/apps/render/calendar/app.nim`
   New test file: `src/apps/render/calendar/tests/test_grouping.nim`
   Acceptance:
@@ -104,7 +104,7 @@ Each agent run should complete at least one small batch of tasks, update this fi
 
 ## P2 Utilities/Hardening
 
-- [ ] `FTEST-013` (`READY`): De-duplicate server cache-header assertions.
+- [x] `FTEST-013` (`DONE`): De-duplicate server cache-header assertions.
   Target: `src/frameos/server/tests/test_server.nim`, `src/frameos/server/tests/test_api.nim`
   Acceptance:
   - Single canonical test owner for shared cache semantics.
@@ -113,9 +113,9 @@ Each agent run should complete at least one small batch of tasks, update this fi
 ## NEXT RUN PICK
 
 Pick in this order unless blocked:
-1. `FTEST-011`
-2. `FTEST-013`
-3. backlog refresh from new coverage gaps
+1. backlog refresh from new coverage gaps
+2. add next audit batch
+3. tighten flaky-path assertions as discovered
 
 ## DONE LOG
 
@@ -130,6 +130,8 @@ Pick in this order unless blocked:
 - 2026-03-05: Completed `FTEST-004` (startup fallback scene selection helper coverage in `src/frameos/tests/test_frameos_startup.nim`, including threshold and override behavior). (commit: TBD)
 - 2026-03-05: Completed `FTEST-009` (apps dispatch coverage for known app routes and unknown keyword failures in `src/apps/tests/test_apps_dispatch.nim`). (commit: TBD)
 - 2026-03-05: Completed `FTEST-010` (split helper math coverage for margins/gaps/ratios and dimension rounding in `src/apps/render/split/tests/test_split_math.nim`). (commit: TBD)
+- 2026-03-05: Completed `FTEST-011` (calendar event grouping/sorting coverage for all-day ordering, multi-day expansion, and malformed inputs in `src/apps/render/calendar/tests/test_grouping.nim`). (commit: TBD)
+- 2026-03-05: Completed `FTEST-013` (deduplicated If-Modified-Since cache semantics by keeping canonical coverage in `test_server.nim` and compatibility coverage in `test_api.nim`). (commit: TBD)
 - 2026-03-05: Initialized backlog from audit. (commit: TBD)
 
 ## Commit Message Convention
