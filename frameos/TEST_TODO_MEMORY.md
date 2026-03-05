@@ -59,7 +59,7 @@ Each agent run should complete at least one small batch of tasks, update this fi
 
 ## P1 Server/System
 
-- [ ] `FTEST-006` (`READY`): Add system index scene text/list generation tests.
+- [x] `FTEST-006` (`DONE`): Add system index scene text/list generation tests.
   Target: `src/system/index/scene.nim`
   New test file: `src/system/index/tests/test_scene.nim`
   Acceptance:
@@ -113,15 +113,16 @@ Each agent run should complete at least one small batch of tasks, update this fi
 ## NEXT RUN PICK
 
 Pick in this order unless blocked:
-1. `FTEST-006`
-2. `FTEST-002`
-3. `FTEST-003`
+1. `FTEST-002`
+2. `FTEST-003`
+3. `FTEST-007`
 
 ## DONE LOG
 
 - 2026-03-05: Completed `FTEST-001` (interpreter smoke test for data + render node execution in `test_interpreter_smoke.nim`). (commit: TBD)
 - 2026-03-05: Completed `FTEST-005` (route composition assertions in `test_routes.nim`). (commit: TBD)
 - 2026-03-05: Completed `FTEST-012` (logger polling-based checks, removed fixed sleeps). (commit: TBD)
+- 2026-03-05: Completed `FTEST-006` (system index scene list/text assertions in `src/system/index/tests/test_scene.nim`). (commit: TBD)
 - 2026-03-05: Initialized backlog from audit. (commit: TBD)
 
 ## Commit Message Convention
