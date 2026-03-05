@@ -1,7 +1,7 @@
 # FrameOS Test Generation Memory
 
 Last updated: 2026-03-05
-Source audit: deep manual audit of `src/frameos/*`, `src/system/*`, and `src/apps/*` on 2026-03-05, plus second-pass gap audit on 2026-03-05, plus render-app third-pass audit on 2026-03-05, plus data-app fourth-pass audit on 2026-03-05, plus seam-unblock app audit/update pass on 2026-03-05
+Source audit: deep manual audit of `src/frameos/*`, `src/system/*`, and `src/apps/*` on 2026-03-05, plus second-pass gap audit on 2026-03-05, plus render-app third-pass audit on 2026-03-05, plus data-app fourth-pass audit on 2026-03-05, plus seam-unblock app audit/update pass on 2026-03-05, plus fifth-pass app validation/error-path audit on 2026-03-05
 Scope: `frameos/src/*`
 
 ## Purpose
@@ -410,6 +410,42 @@ Each agent run should complete at least one small batch of tasks, update this fi
   - `get` supports auth/collections hooks for no-network unit tests.
   - Date-range forwarding (`exportFrom`/`exportUntil`) and mapped output are asserted.
 
+## P1 Apps (Fifth Audit)
+
+- [x] `FTEST-053` (`DONE`): Add validation/error-branch coverage for OpenAI and weather data apps.
+  Target: `src/apps/data/openaiText/app.nim`, `src/apps/data/openaiImage/app.nim`, `src/apps/data/weather/app.nim`
+  New test files: `src/apps/data/openaiText/tests/test_app.nim`, `src/apps/data/openaiImage/tests/test_app.nim`, `src/apps/data/weather/tests/test_app.nim`
+  Acceptance:
+  - `openaiText` missing-prompt and missing-api-key branches write expected state error payloads and emit error logs.
+  - `openaiImage` missing-prompt and missing-api-key branches return deterministic error image dimensions for context and frame fallback.
+  - `weather` missing-location validation returns deterministic error payload.
+
+- [x] `FTEST-054` (`DONE`): Add deterministic Unsplash app validation coverage without network access.
+  Target: `src/apps/data/unsplash/app.nim`
+  New test file: `src/apps/data/unsplash/tests/test_app.nim`
+  Acceptance:
+  - `init` trims configured search string.
+  - Missing Unsplash API key returns deterministic error image dimensions and does not write metadata state.
+
+- [x] `FTEST-055` (`DONE`): Add `icalJson` app wrapper behavior coverage.
+  Target: `src/apps/data/icalJson/app.nim`
+  New test file: `src/apps/data/icalJson/tests/test_app.nim`
+  Acceptance:
+  - URL-as-input and empty-input validation branches return empty arrays and emit explicit error logs.
+  - Valid iCal payload outside requested export range returns deterministic empty response and reply log payload.
+
+- [ ] `FTEST-056` (`BLOCKED`): Add deterministic Chromium screenshot orchestration coverage.
+  Target: `src/apps/data/chromiumScreenshot/app.nim`
+  Blocked because:
+  - Current implementation relies on shell commands/process startup (`apt`, `python`, chromium, playwright, sockets) without injectable seams.
+  - Unit tests would be nondeterministic without extracting small command/socket/process hooks.
+
+- [ ] `FTEST-057` (`BLOCKED`): Add deterministic RTSP snapshot error/success-path coverage.
+  Target: `src/apps/data/rstpSnapshot/app.nim`
+  Blocked because:
+  - Behavior is tied to `ffmpeg` process invocation and binary availability.
+  - Deterministic coverage requires seam hooks for process spawn/output/exit code simulation.
+
 ## P2 Blocked / Refactor-Gated (Second Audit)
 
 - [x] `FTEST-042` (`DONE`): Portal network command orchestration tests.
@@ -429,8 +465,9 @@ Each agent run should complete at least one small batch of tasks, update this fi
 
 ## NEXT RUN PICK
 
-1. Run a fresh gap audit pass and create new `READY` tasks only if additional high-priority non-generated runtime/app gaps are found.
-2. If no new P0/P1 gaps are found, shift focus to selective P2 hardening tasks with deterministic seams only.
+1. Unblock `FTEST-056` by extracting tiny command/process/socket seam hooks in `chromiumScreenshot/app.nim`, then add deterministic tests for low-RAM and startup failure branches.
+2. Unblock `FTEST-057` by extracting a minimal process runner seam in `rstpSnapshot/app.nim`, then add deterministic tests for ffmpeg spawn/exit/decode failure branches.
+3. After seam-unblocks, run another gap audit for any remaining non-generated P1 app modules.
 
 ## DONE LOG
 
@@ -488,6 +525,10 @@ Each agent run should complete at least one small batch of tasks, update this fi
 - 2026-03-05: Completed `FTEST-050` (downloadUrl invalid-url error text + logError event-shape coverage in `src/apps/data/downloadUrl/tests/test_app.nim`). Proof: `cd frameos && nimble test`. (commit: TBD)
 - 2026-03-05: Completed `FTEST-051` (frameOSGallery seam + URL/category coverage in `src/apps/data/frameOSGallery/app.nim` and `src/apps/data/frameOSGallery/tests/test_app.nim`). Proof: `cd frameos && nimble test`. (commit: TBD)
 - 2026-03-05: Completed `FTEST-052` (beRecycle helper/hook seams + deterministic mapping/get-flow coverage in `src/apps/data/beRecycle/app.nim` and `src/apps/data/beRecycle/tests/test_app.nim`). Proof: `cd frameos && nimble test`. (commit: TBD)
+- 2026-03-05: Fifth-pass app audit added tasks `FTEST-053` through `FTEST-057`, with `FTEST-056` and `FTEST-057` marked BLOCKED on missing process/network seams. (commit: TBD)
+- 2026-03-05: Completed `FTEST-053` (OpenAI + weather validation/error-branch coverage in `src/apps/data/openaiText/tests/test_app.nim`, `src/apps/data/openaiImage/tests/test_app.nim`, and `src/apps/data/weather/tests/test_app.nim`). Proof: `cd frameos && nimble test`. (commit: TBD)
+- 2026-03-05: Completed `FTEST-054` (Unsplash init + missing-api-key deterministic coverage in `src/apps/data/unsplash/tests/test_app.nim`). Proof: `cd frameos && nimble test`. (commit: TBD)
+- 2026-03-05: Completed `FTEST-055` (`icalJson` app validation/reply-wrapper coverage in `src/apps/data/icalJson/tests/test_app.nim`). Proof: `cd frameos && nimble test`. (commit: TBD)
 - 2026-03-05: Follow-up audit split remaining high-priority app gaps into seam-gated tasks `FTEST-051` and `FTEST-052`. (commit: TBD)
 - 2026-03-05: Audit policy update: do not add tests for autogenerated `app_loader.nim` modules; remove any in-progress loader-test additions and focus on non-generated behavior coverage. (commit: TBD)
 - 2026-03-05: Initialized backlog from audit. (commit: TBD)
