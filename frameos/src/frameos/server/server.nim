@@ -50,6 +50,7 @@ proc listenForLogThread(connectionsState: ConnectionsState) {.thread.} =
 
 var renderThread: Thread[tuple[publicState: ConnectionsState, adminState: ConnectionsState]]
 var logThread: Thread[ConnectionsState]
+const MAX_HTTP_BODY_LEN = 50 * 1024 * 1024
 
 proc initServerGlobals(frameOS: FrameOS) =
   globalFrameOS = frameOS
@@ -71,7 +72,11 @@ proc newServer*(frameOS: FrameOS): types.Server =
   let loggingHandler = proc(request: Request) {.gcsafe.} =
     log(%*{"event": "http", "method": request.httpMethod, "path": request.path})
     routerHandler(request)
-  let mummyServer = mummy.newServer(loggingHandler, makeWebsocketHandler(connectionsState, adminConnectionsState))
+  let mummyServer = mummy.newServer(
+    loggingHandler,
+    makeWebsocketHandler(connectionsState, adminConnectionsState),
+    maxBodyLen = MAX_HTTP_BODY_LEN
+  )
 
   result = types.Server(
     frameConfig: frameOS.frameConfig,
