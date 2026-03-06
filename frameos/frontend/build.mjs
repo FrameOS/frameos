@@ -94,39 +94,35 @@ const sharedPackages = [
   'streamsaver',
   'uuid',
 ]
+const sortedSharedPackages = [...sharedPackages].sort((a, b) => b.length - a.length)
 
-const findPackageRoot = (resolvedPath) => {
-  let currentPath = path.dirname(resolvedPath)
+const sharedPackageResolutions = new Map()
 
-  while (currentPath !== path.dirname(currentPath)) {
-    const candidate = path.join(currentPath, 'package.json')
-    try {
-      require.resolve(candidate)
-      return currentPath
-    } catch {
-      currentPath = path.dirname(currentPath)
-    }
+const resolveInstalledSharedPackage = (specifier) => {
+  if (sharedPackageResolutions.has(specifier)) {
+    return sharedPackageResolutions.get(specifier)
   }
 
-  throw new Error(`Could not determine package root for ${resolvedPath}`)
+  try {
+    const resolution = require.resolve(specifier)
+    sharedPackageResolutions.set(specifier, resolution)
+    return resolution
+  } catch {
+    sharedPackageResolutions.set(specifier, null)
+    return null
+  }
 }
 
-const sharedPackageRoots = new Map(
-  sharedPackages.map((packageName) => [packageName, findPackageRoot(require.resolve(packageName))])
-)
-
 const resolveSharedPackage = (specifier) => {
-  const packageName = [...sharedPackageRoots.keys()]
-    .sort((a, b) => b.length - a.length)
-    .find((candidate) => specifier === candidate || specifier.startsWith(`${candidate}/`))
+  const packageName = sortedSharedPackages.find(
+    (candidate) => specifier === candidate || specifier.startsWith(`${candidate}/`)
+  )
 
   if (!packageName) {
     return null
   }
 
-  const packageRoot = sharedPackageRoots.get(packageName)
-  const subPath = specifier === packageName ? '' : specifier.slice(packageName.length + 1)
-  return subPath ? path.join(packageRoot, subPath) : packageRoot
+  return resolveInstalledSharedPackage(specifier)
 }
 
 const sharedDepsPlugin = {
