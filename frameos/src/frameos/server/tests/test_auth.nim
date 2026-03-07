@@ -108,6 +108,29 @@ suite "Server auth helpers":
     )
     check hasAccess(bearerReq, Write)
 
+  test "hasAccess accepts authenticated admin session without exposing auth-disabled installs":
+    globalAdminSessionSalt = "salt"
+    globalFrameConfig = FrameConfig(
+      frameAccess: "private",
+      frameAccessKey: "test-key",
+      frameAdminAuth: %*{
+        "enabled": true,
+        "user": "admin",
+        "pass": "secret",
+      },
+    )
+
+    let adminReq = makeRequest(headers = @[("cookie", ADMIN_SESSION_COOKIE & "=" & adminSessionCookieValue())])
+    check hasAuthenticatedAdminSession(adminReq)
+    check hasAccess(adminReq, Read)
+    check hasAccess(adminReq, Write)
+    check canAccessFrameSecrets(adminReq)
+
+    globalFrameConfig.frameAdminAuth = %*{}
+    check not hasAuthenticatedAdminSession(adminReq)
+    check not hasAccess(adminReq, Read)
+    check not hasAccess(adminReq, Write)
+
   test "hasAccess respects public and protected modes":
     globalFrameConfig = FrameConfig(
       frameAccess: "public",

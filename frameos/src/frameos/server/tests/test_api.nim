@@ -178,6 +178,13 @@ suite "Server API helpers":
     check payload{"active_connections"}.getInt() == 2
     check payload{"scenes"}.kind == JArray
     check payload{"scenes"}.len == 1
+    check payload{"frame_access_key"}.getStr() == ""
+    check payload{"server_api_key"}.getStr() == ""
+    check payload{"frame_admin_auth"}{"enabled"}.getBool() == false
+
+    let privilegedPayload = frameApiPayload(state, exposeSecrets = true)
+    check privilegedPayload{"frame_access_key"}.getStr() == globalFrameConfig.frameAccessKey
+    check privilegedPayload{"server_api_key"}.getStr() == globalFrameConfig.serverApiKey
 
     putEnv("FRAMEOS_SCENES_JSON", tempRoot / "invalid-scenes.json")
     writeFile(tempRoot / "invalid-scenes.json", "{not-json")

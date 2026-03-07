@@ -72,8 +72,14 @@ proc hasAdminSession*(request: Request): bool =
     let expectedToken = $(hash(globalAdminSessionSalt & ":" & adminAuthUser() & ":" & adminAuthPass()))
     return token.len > 0 and token == expectedToken
 
+proc hasAuthenticatedAdminSession*(request: Request): bool =
+  {.gcsafe.}:
+    adminAuthEnabled() and hasAdminSession(request)
+
 proc hasAccess*(request: Request, accessType: AccessType): bool =
   {.gcsafe.}:
+    if hasAuthenticatedAdminSession(request):
+      return true
     let access = globalFrameConfig.frameAccess
     if access == "public" or (access == "protected" and accessType == Read):
       return true
@@ -87,6 +93,10 @@ proc hasAccess*(request: Request, accessType: AccessType): bool =
     if request.httpMethod == "POST":
       return request.headers.contains(AUTH_HEADER) and request.headers[AUTH_HEADER] == AUTH_TYPE & " " & accessKey
     return false
+
+proc canAccessFrameSecrets*(request: Request): bool =
+  {.gcsafe.}:
+    hasAccess(request, Write)
 
 proc adminSessionCookieValue*(): string {.gcsafe.} =
   $(hash(globalAdminSessionSalt & ":" & adminAuthUser() & ":" & adminAuthPass()))

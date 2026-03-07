@@ -15,6 +15,24 @@ suite "admin api route behavior":
   setup:
     drainEventChannel()
 
+  test "disabled admin auth leaves admin session unauthenticated and login rejected":
+    let config = defaultFrameConfig()
+    configureServerState(config)
+
+    let session = httpRequest(server.port, "GET", "/api/admin/session")
+    check session.status == 200
+    check not parseJson(session.body)["authenticated"].getBool()
+
+    let login = httpRequest(
+      server.port,
+      "POST",
+      "/api/admin/login",
+      headers = [("Content-Type", "application/json")],
+      body = $(%*{"username": "admin", "password": "secret"}),
+    )
+    check login.status == 401
+    check login.body.contains("Admin auth disabled")
+
   test "admin session, login, and logout flows":
     var config = defaultFrameConfig()
     config.frameAdminAuth = %*{
@@ -87,14 +105,17 @@ suite "admin api route behavior":
     let noSession = httpRequest(server.port, "POST", "/api/frames/1/event/test?k=test-key")
     check noSession.status == 401
 
-    let noWriteAccess = httpRequest(
+    let adminSessionAccess = httpRequest(
       server.port,
       "POST",
       "/api/frames/1/event/test",
       headers = [("Cookie", adminCookie), ("Content-Type", "application/json")],
       body = "{}",
     )
-    check noWriteAccess.status == 401
+    check adminSessionAccess.status == 200
+    let (pathEventReceived, pathEventPayload) = eventChannel.tryRecv()
+    check pathEventReceived
+    check pathEventPayload[1] == "test"
 
     let wrongFrame = httpRequest(
       server.port,

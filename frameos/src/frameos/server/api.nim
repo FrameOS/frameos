@@ -473,7 +473,7 @@ proc getAssetPayload*(path: string, thumb: bool): tuple[status: httpcore.HttpCod
     headers["Content-Type"] = "application/json"
     return (Http500, headers, $(%*{"detail": "Failed to fetch asset", "error": e.msg}))
 
-proc frameApiPayload*(connectionsState: ConnectionsState): JsonNode =
+proc frameApiPayload*(connectionsState: ConnectionsState, exposeSecrets = false): JsonNode =
   let configJson = loadConfigJson()
   let interval = if configJson.kind == JObject: configJson{"interval"}.getFloat(300) else: 300
   let backgroundColor =
@@ -481,6 +481,13 @@ proc frameApiPayload*(connectionsState: ConnectionsState): JsonNode =
   let colorValue =
     if configJson.kind == JObject and configJson.hasKey("color"): configJson["color"] else: newJNull()
   let scenesPayload = loadScenePayload()
+  let frameAccessKey = if exposeSecrets: globalFrameConfig.frameAccessKey else: ""
+  let frameAdminAuth =
+    if exposeSecrets:
+      globalFrameConfig.frameAdminAuth
+    else:
+      %*{"enabled": globalFrameConfig.frameAdminAuth{"enabled"}.getBool(false)}
+  let serverApiKey = if exposeSecrets: globalFrameConfig.serverApiKey else: ""
   var activeConnections = 0
   withLock connectionsState.lock:
     activeConnections = connectionsState.items.len
@@ -491,16 +498,16 @@ proc frameApiPayload*(connectionsState: ConnectionsState): JsonNode =
     "mode": globalFrameConfig.mode,
     "frame_host": globalFrameConfig.frameHost,
     "frame_port": globalFrameConfig.framePort,
-    "frame_access_key": globalFrameConfig.frameAccessKey,
+    "frame_access_key": frameAccessKey,
     "frame_access": globalFrameConfig.frameAccess,
-    "frame_admin_auth": globalFrameConfig.frameAdminAuth,
+    "frame_admin_auth": frameAdminAuth,
     "ssh_user": "",
     "ssh_pass": "",
     "ssh_port": 22,
     "ssh_keys": %*[],
     "server_host": globalFrameConfig.serverHost,
     "server_port": globalFrameConfig.serverPort,
-    "server_api_key": globalFrameConfig.serverApiKey,
+    "server_api_key": serverApiKey,
     "server_send_logs": globalFrameConfig.serverSendLogs,
     "status": "ready",
     "width": globalFrameConfig.width,

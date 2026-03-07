@@ -33,12 +33,31 @@ suite "web route behavior":
     check adminNoSession.status == 302
     check adminNoSession.header("location") == "/login"
 
+    let adminLogin = httpRequest(
+      server.port,
+      "POST",
+      "/api/admin/login",
+      headers = [("Content-Type", "application/json")],
+      body = $(%*{"username": "admin", "password": "secret"}),
+    )
+    let adminCookie = adminLogin.header("set-cookie").split(";", 1)[0]
+    let adminWithSession = httpRequest(
+      server.port,
+      "GET",
+      "/admin",
+      headers = [("Cookie", adminCookie)],
+    )
+    check adminWithSession.status == 200
+
     config.frameAdminAuth = %*{}
     configureServerState(config)
+    let adminUnauthorized = httpRequest(server.port, "GET", "/admin")
+    check adminUnauthorized.status == 302
+    check adminUnauthorized.header("location") == "/login"
+
     let adminAccessKey = httpRequest(server.port, "GET", "/admin?k=test-key")
     check adminAccessKey.status == 302
-    check adminAccessKey.header("location") == "/admin"
-    check adminAccessKey.header("set-cookie").contains("frame_access_key=test-key")
+    check adminAccessKey.header("location") == "/login"
 
     let controlResponse = httpRequest(server.port, "GET", "/control")
     check controlResponse.status == 302
