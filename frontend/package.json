@@ -5,18 +5,18 @@
   "packageManager": "pnpm@7.2.1",
   "type": "module",
   "scripts": {
-    "dev": "concurrently \"pnpm run dev:kea\" \"pnpm run dev:vite\" -n KEA,VITE -c green,cyan",
+    "dev": "concurrently \"npm run dev:kea\" \"npm run dev:vite\" -n KEA,VITE -c green,cyan",
     "dev:kea": "kea-typegen watch --write-paths --show-ts-errors",
     "dev:vite": "vite --host 0.0.0.0 --port 8616",
     "clean": "rm -rf ./dist && mkdir ./dist",
-    "build": "pnpm run build:kea && pnpm run schema && tsc && pnpm run build:esbuild",
+    "build": "npm run build:kea && npm run schema && tsc && npm run build:esbuild",
     "build:kea": "kea-typegen write --write-paths",
     "build:esbuild": "node build.mjs",
     "prettier": "prettier --write src",
     "preview": "vite preview",
-    "schema": "pnpm run schema:build:config_json",
+    "schema": "npm run schema:build:config_json",
     "schema:build:config_json": "ts-json-schema-generator -f tsconfig.json --path 'src/types.ts' --type 'AppConfig' --no-type-check > schema/config_json.json && prettier --write schema/config_json.json",
-    "bundle:analyze": "pnpm exec vite-bundle-visualizer"
+    "bundle:analyze": "vite-bundle-visualizer"
   },
   "dependencies": {
     "@babel/runtime": "^7.28.4",
@@ -78,6 +78,7 @@
     "@types/uuid": "^9.0.3",
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.14",
+    "chokidar": "^4.0.3",
     "concurrently": "^7.4.0",
     "cors": "^2.8.5",
     "cssnano": "^7.0.1",
