@@ -35,17 +35,17 @@ jobs:
           uv venv
           uv pip install -r requirements.txt
 
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 7.2.1
-          run_install: false
-
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: 'pnpm'
           cache-dependency-path: pnpm-lock.yaml
+
+      - name: Enable Corepack
+        run: |
+          corepack enable
+          corepack pnpm --version
 
       - uses: jiro4989/setup-nim-action@v1
         with:
@@ -127,11 +127,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v2
 
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 7.2.1
-          run_install: false
-
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
@@ -139,7 +134,12 @@ jobs:
           cache: 'pnpm'
           cache-dependency-path: pnpm-lock.yaml
 
+      - name: Enable Corepack
+        run: |
+          corepack enable
+          corepack pnpm --version
+
       - name: Build frontend
         run: |
-          pnpm install --frozen-lockfile
-          pnpm --dir frontend run build
+          corepack pnpm install --frozen-lockfile
+          corepack pnpm --dir frontend run build
