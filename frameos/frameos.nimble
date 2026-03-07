@@ -27,8 +27,9 @@ let installFrontendDepsCmd = "sh -lc 'if command -v pnpm >/dev/null 2>&1; then p
 let buildFrontendCmd = "sh -lc 'if command -v pnpm >/dev/null 2>&1; then pnpm run build; else corepack pnpm run build; fi'"
 
 before build:
-  exec "cd .. && " & installFrontendDepsCmd
-  exec "cd frontend && " & buildFrontendCmd
+  if not fileExists("assets/compiled/frame_web/index.html"):
+    exec "cd .. && " & installFrontendDepsCmd
+    exec "cd frontend && " & buildFrontendCmd
   exec "nimble assets"
   if not dirExists("quickjs"):
     exec "nimble build_quickjs --silent"

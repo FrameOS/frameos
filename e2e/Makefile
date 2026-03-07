@@ -1,9 +1,11 @@
 .PHONY: nim_scenes snapshots
 
+PYTHON ?= $(if $(wildcard ../env/bin/python3),../env/bin/python3,python3)
+
 all: nim_scenes snapshots
 
 nim_scenes:
-	PYTHONPATH="../backend:${PYTHONPATH}" DEBUG=1 SCENE_FILTER="$(SCENE_FILTER)" python3 ./makescenes.py
+	PYTHONPATH="../backend:${PYTHONPATH}" DEBUG=1 SCENE_FILTER="$(SCENE_FILTER)" $(PYTHON) ./makescenes.py
 
 snapshots:
 	mkdir -p ./tmp && \
@@ -32,5 +34,5 @@ snapshots:
 	cp "$$tmpdir/scenes.json" ./tmp/scenes.json
 
 	ls -l ./tmp/frameos-bin
-	DEBUG=1 python3 ./makeapploaders.py
-	DEBUG=1 SCENE_FILTER="$(SCENE_FILTER)" python3 ./makesnapshots.py
+	DEBUG=1 $(PYTHON) ./makeapploaders.py
+	DEBUG=1 SCENE_FILTER="$(SCENE_FILTER)" $(PYTHON) ./makesnapshots.py
