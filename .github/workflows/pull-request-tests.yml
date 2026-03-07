@@ -69,6 +69,8 @@ jobs:
           cd e2e
           source ../backend/.venv/bin/activate
           make
+          git status --short
+          git diff --name-only
 
       - name: Commit updated snapshots
         if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
