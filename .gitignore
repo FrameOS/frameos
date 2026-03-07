@@ -52,6 +52,7 @@ frameos/assets/compiled/frame_web
 frameos/src/assets/apps.nim
 frameos/src/assets/frame_web.nim
 frameos/*.admin_session_salt
+e2e/frame.json.admin_session_salt
 frameos/agent/build/
 frameos/agent/tmp/
 frameos/agent/agent.deps
