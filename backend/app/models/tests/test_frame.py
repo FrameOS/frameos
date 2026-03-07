@@ -22,6 +22,7 @@ async def test_new_frame(mock_publish, db, redis):
     assert frame.ssh_user == "pi"
     assert frame.device == "testDevice"
     assert frame.interval == 123
+    assert frame.server_send_logs is True
     assert frame.https_proxy["enable"] is True
     assert frame.https_proxy["expose_only_port"] is True
     assert frame.https_proxy["certs"]["server"] and "BEGIN CERTIFICATE" in frame.https_proxy["certs"]["server"]
@@ -73,6 +74,7 @@ async def test_frame_to_dict(mock_publish, db, redis):
     data = frame.to_dict()
     assert data["frame_host"] == "host"
     assert data["interval"] == 55
+    assert data["server_send_logs"] is True
     assert data["https_proxy"]["certs"]["server"]
     assert data["https_proxy"]["certs"]["server_key"]
     assert data["https_proxy"]["certs"]["client_ca"]

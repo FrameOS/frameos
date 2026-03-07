@@ -39,6 +39,7 @@ class FrameBase(BaseModel):
     server_host: Optional[str]
     server_port: int
     server_api_key: Optional[str]
+    server_send_logs: Optional[bool]
     status: str
     version: Optional[str]
     width: Optional[int]
@@ -105,6 +106,7 @@ class FrameUpdateRequest(BaseModel):
     server_host: Optional[str] = None
     server_port: Optional[int] = None
     server_api_key: Optional[str] = None
+    server_send_logs: Optional[bool] = None
     width: Optional[int] = None
     height: Optional[int] = None
     rotate: Optional[int] = None

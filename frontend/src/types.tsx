@@ -27,6 +27,7 @@ export interface FrameType {
   server_host?: string
   server_port: number
   server_api_key?: string
+  server_send_logs?: boolean
   status: string
   version?: string
   width?: number

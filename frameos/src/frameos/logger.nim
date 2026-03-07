@@ -44,6 +44,9 @@ proc processQueue(self: LoggerThread): int =
     if newLogs.len == 0:
       return 0
 
+    if not self.frameConfig.serverSendLogs:
+      return newLogs.len
+
     if newLogs.len > 1000:
       newLogs = newLogs[(newLogs.len - 1000) .. (newLogs.len - 1)]
 

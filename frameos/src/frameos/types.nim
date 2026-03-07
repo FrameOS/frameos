@@ -9,6 +9,7 @@ type
     serverHost*: string
     serverPort*: int
     serverApiKey*: string
+    serverSendLogs*: bool
     frameHost*: string
     framePort*: int
     httpsProxy*: HttpsProxyConfig

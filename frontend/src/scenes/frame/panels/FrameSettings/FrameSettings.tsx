@@ -874,6 +874,15 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
               required
             />
           </Field>
+          <Field
+            name="server_send_logs"
+            label="Send logs to backend"
+            tooltip="When disabled, the frame will not upload logs to the backend API."
+          >
+            {({ value, onChange }) => (
+              <Switch name="server_send_logs" value={value ?? true} onChange={onChange} fullWidth />
+            )}
+          </Field>
         </div>
 
         <H6 id="frame-http-api-section">

@@ -8,6 +8,7 @@ block test_load_config:
     doAssert config.serverHost == "localhost"
     doAssert config.serverPort == 8989
     doAssert config.serverApiKey == "test-api-key"
+    doAssert config.serverSendLogs == true
     doAssert config.width == 800
     doAssert config.height == 480
     doAssert config.httpsProxy.enable == false

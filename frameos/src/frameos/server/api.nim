@@ -501,6 +501,7 @@ proc frameApiPayload*(connectionsState: ConnectionsState): JsonNode =
     "server_host": globalFrameConfig.serverHost,
     "server_port": globalFrameConfig.serverPort,
     "server_api_key": globalFrameConfig.serverApiKey,
+    "server_send_logs": globalFrameConfig.serverSendLogs,
     "status": "ready",
     "width": globalFrameConfig.width,
     "height": globalFrameConfig.height,

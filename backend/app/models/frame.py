@@ -79,6 +79,7 @@ class Frame(Base):
     server_host = mapped_column(String(256), nullable=True)
     server_port = mapped_column(Integer, default=8989)
     server_api_key = mapped_column(String(64), nullable=True)
+    server_send_logs = mapped_column(Boolean, default=True)
     # frame metadata
     status = mapped_column(String(15), nullable=False)
     version = mapped_column(String(50), nullable=True)
@@ -135,6 +136,7 @@ class Frame(Base):
             'server_host': self.server_host,
             'server_port': self.server_port,
             'server_api_key': self.server_api_key,
+            'server_send_logs': self.server_send_logs,
             'status': self.status,
             'version': self.version,
             'width': self.width,
@@ -221,6 +223,7 @@ async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, serve
         server_host=server_host,
         server_port=int(server_port),
         server_api_key=secure_token(32),
+        server_send_logs=True,
         interval=interval or 300,
         status="uninitialized",
         scenes=[],
@@ -326,6 +329,7 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
         "serverHost": frame.server_host or "localhost",
         "serverPort": frame.server_port or 8989,
         "serverApiKey": frame.server_api_key,
+        "serverSendLogs": bool(frame.server_send_logs if frame.server_send_logs is not None else True),
         "width": frame.width or 0,
         "height": frame.height or 0,
         "device": frame.device or "web_only",
