@@ -109,22 +109,23 @@ RUN pip3 install --upgrade uv \
     && uv venv \
     && uv pip install --no-cache-dir -r requirements.txt
 
-# Change the working directory for npm install
-WORKDIR /tmp/frontend
+# Change the working directory for pnpm install
+WORKDIR /tmp
 
-# Copy the npm configuration files
-COPY frontend/package.json frontend/package-lock.json /tmp/frontend/
-
-# Install npm packages
-RUN npm install
+# Install pnpm via corepack and seed the workspace manifests for dependency caching
+RUN corepack enable
+COPY pnpm-workspace.yaml pnpm-lock.yaml /tmp/
+COPY frontend/package.json /tmp/frontend/package.json
+COPY frameos/frontend/package.json /tmp/frameos/frontend/package.json
+RUN pnpm install --filter @frameos/frontend --frozen-lockfile
 
 # Copy frontend source files and run build
-COPY frontend/ ./
-COPY versions.json ../
-RUN npm run build
+COPY frontend/ /tmp/frontend/
+COPY versions.json /tmp/versions.json
+RUN pnpm --dir frontend run build
 
 # Delete all files except the dist and schema folders
-RUN find . -maxdepth 1 ! -name 'dist' ! -name 'schema' ! -name '.' ! -name '..' -exec rm -rf {} \;
+RUN cd /tmp/frontend && find . -maxdepth 1 ! -name 'dist' ! -name 'schema' ! -name '.' ! -name '..' -exec rm -rf {} \;
 
 # Change back to the main directory
 WORKDIR /app

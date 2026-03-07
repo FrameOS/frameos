@@ -24,8 +24,8 @@ requires "jsony >= 1.1.5"
 taskRequires "assets", "nimassets >= 0.2.4"
 
 before build:
-  exec "cd frontend && npm install"
-  exec "cd frontend && npm run build"
+  exec "cd .. && pnpm install --frozen-lockfile"
+  exec "cd frontend && pnpm run build"
   exec "nimble assets"
   if not dirExists("quickjs"):
     exec "nimble build_quickjs --silent"
@@ -33,8 +33,8 @@ before build:
 task assets, "Create assets":
   exec "mkdir -p src/assets"
   if not fileExists("assets/compiled/frame_web/index.html"):
-    exec "cd frontend && npm install"
-    exec "cd frontend && npm run build"
+    exec "cd .. && pnpm install --frozen-lockfile"
+    exec "cd frontend && pnpm run build"
   exec "python tools/generate_apps_asset_nim.py --source-dir . --output src/assets/apps.nim"
   exec "~/.nimble/bin/nimassets -d=assets/compiled/web -o=src/assets/web.nim"
   exec "~/.nimble/bin/nimassets -d=assets/compiled/frame_web -o=src/assets/frame_web.nim"

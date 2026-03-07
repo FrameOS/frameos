@@ -2,6 +2,7 @@
   "name": "@frameos/frame-frontend",
   "private": true,
   "version": "0.0.0",
+  "packageManager": "pnpm@7.2.1",
   "type": "module",
   "scripts": {
     "clean": "rm -rf ../assets/compiled/frame_web",
@@ -9,6 +10,7 @@
     "dev": "node build.mjs --dev --watch"
   },
   "dependencies": {
+    "@babel/runtime": "^7.28.4",
     "@dagrejs/dagre": "^1.1.8",
     "@headlessui/react": "^1.7.19",
     "@heroicons/react": "^2.0.18",
