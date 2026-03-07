@@ -604,11 +604,25 @@ class FrameDeployer:
         base = Path(source_root or "../frameos").resolve()
         shutil.copytree(base, source_dir, dirs_exist_ok=True)
         repo_root = base.parent
+        repo_root_package = repo_root / "package.json"
+        if repo_root_package.is_file():
+            shutil.copy2(repo_root_package, Path(temp_dir) / "package.json")
+        repo_pnpm_workspace = repo_root / "pnpm-workspace.yaml"
+        if repo_pnpm_workspace.is_file():
+            shutil.copy2(repo_pnpm_workspace, Path(temp_dir) / "pnpm-workspace.yaml")
+        repo_pnpm_lock = repo_root / "pnpm-lock.yaml"
+        if repo_pnpm_lock.is_file():
+            shutil.copy2(repo_pnpm_lock, Path(temp_dir) / "pnpm-lock.yaml")
         repo_frontend_src = repo_root / "frontend" / "src"
         if repo_frontend_src.is_dir():
             frontend_src_dir = Path(temp_dir) / "frontend" / "src"
             frontend_src_dir.parent.mkdir(parents=True, exist_ok=True)
             shutil.copytree(repo_frontend_src, frontend_src_dir, dirs_exist_ok=True)
+        repo_frontend_package = repo_root / "frontend" / "package.json"
+        if repo_frontend_package.is_file():
+            frontend_dir = Path(temp_dir) / "frontend"
+            frontend_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(repo_frontend_package, frontend_dir / "package.json")
         repo_frontend_schema = repo_root / "frontend" / "schema"
         if repo_frontend_schema.is_dir():
             frontend_schema_dir = Path(temp_dir) / "frontend" / "schema"

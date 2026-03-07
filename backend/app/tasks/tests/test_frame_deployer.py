@@ -16,6 +16,9 @@ def test_create_local_source_folder_copies_shared_frontend_sources(tmp_path: Pat
     (shared_frontend_src / "initKea.ts").write_text("export function initKea() {}\n", encoding="utf-8")
     shared_frontend_schema.mkdir(parents=True)
     (shared_frontend_schema / "events.json").write_text("{}\n", encoding="utf-8")
+    (repo_root / "package.json").write_text("{}\n", encoding="utf-8")
+    (repo_root / "pnpm-workspace.yaml").write_text("packages:\n  - frontend\n  - frameos/frontend\n", encoding="utf-8")
+    (repo_root / "pnpm-lock.yaml").write_text("lockfileVersion: '9.0'\n", encoding="utf-8")
     (repo_root / "frontend" / "package.json").write_text("{}\n", encoding="utf-8")
     (repo_root / "versions.json").write_text("{\"web\":\"1.0.0\"}\n", encoding="utf-8")
 
@@ -30,7 +33,10 @@ def test_create_local_source_folder_copies_shared_frontend_sources(tmp_path: Pat
     copied_source_dir = Path(deployer.create_local_source_folder(str(tmp_path / "build"), str(frameos_root)))
 
     assert (copied_source_dir / "frontend" / "src" / "main.tsx").exists()
+    assert (tmp_path / "build" / "package.json").exists()
+    assert (tmp_path / "build" / "pnpm-workspace.yaml").exists()
+    assert (tmp_path / "build" / "pnpm-lock.yaml").exists()
     assert (tmp_path / "build" / "frontend" / "src" / "initKea.ts").exists()
     assert (tmp_path / "build" / "frontend" / "schema" / "events.json").exists()
+    assert (tmp_path / "build" / "frontend" / "package.json").exists()
     assert (tmp_path / "build" / "versions.json").exists()
-    assert not (tmp_path / "build" / "frontend" / "package.json").exists()
