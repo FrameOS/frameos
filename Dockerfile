@@ -31,7 +31,7 @@ RUN mkdir -p /opt/nim && \
 
 ENV PATH="/opt/nim/bin:${PATH}"
 
-RUN nim --version \
+RUN nim --version && \
     nimble --version
 
 # frameos/frontend needs files from the backend frontend/
