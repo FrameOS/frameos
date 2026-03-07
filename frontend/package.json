@@ -2,7 +2,7 @@
   "name": "@frameos/frontend",
   "private": true,
   "version": "0.0.0",
-  "packageManager": "pnpm@7.2.1",
+  "packageManager": "pnpm@10.27.0",
   "type": "module",
   "scripts": {
     "dev": "concurrently \"npm run dev:kea\" \"npm run dev:vite\" -n KEA,VITE -c green,cyan",

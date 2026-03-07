@@ -2,7 +2,7 @@
   "name": "@frameos/frame-frontend",
   "private": true,
   "version": "0.0.0",
-  "packageManager": "pnpm@7.2.1",
+  "packageManager": "pnpm@10.27.0",
   "type": "module",
   "scripts": {
     "clean": "rm -rf ../assets/compiled/frame_web",

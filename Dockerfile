@@ -112,8 +112,8 @@ RUN pip3 install --upgrade uv \
 # Change the working directory for pnpm install
 WORKDIR /tmp
 
-# Install pnpm via corepack and seed the workspace manifests for dependency caching
-RUN corepack enable
+# Install pnpm and seed the workspace manifests for dependency caching
+RUN npm install -g pnpm@10.27.0
 COPY pnpm-workspace.yaml pnpm-lock.yaml /tmp/
 COPY frontend/package.json /tmp/frontend/package.json
 COPY frameos/frontend/package.json /tmp/frameos/frontend/package.json
