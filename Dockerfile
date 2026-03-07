@@ -37,6 +37,7 @@ RUN nim --version \
 # frameos/frontend needs files from the backend frontend/
 COPY frontend/src /app/frontend/src
 COPY frontend/schema /app/frontend/schema
+COPY versions.json /app/versions.json
 
 # Install frameos nim deps
 WORKDIR /app/frameos
