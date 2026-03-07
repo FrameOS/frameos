@@ -17,8 +17,10 @@ import copy from 'copy-to-clipboard'
 import { ClipboardDocumentCheckIcon } from '@heroicons/react/24/outline'
 import { panelsLogic } from '../panelsLogic'
 import { TemplateType } from '../../../../types'
+import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
 
 export function Templates() {
+  const inFrameAdminMode = isInFrameAdminMode()
   const { applyTemplate } = useActions(frameLogic)
   const { frameId } = useValues(frameLogic)
   const { removeTemplate, exportTemplate } = useActions(templatesModel)
@@ -112,6 +114,7 @@ export function Templates() {
         </Box>
       ) : null}
 
+      {!inFrameAdminMode && (
       <div className="space-y-2">
         <div className="flex justify-between w-full items-center">
           <H6 className="flex items-center cursor-pointer" onClick={() => toggleExpanded('')}>
@@ -161,6 +164,8 @@ export function Templates() {
           </div>
         ) : null}
       </div>
+
+      )}
 
       {(repositories ?? []).map((repository) => (
         <div className="space-y-2 !mt-8" key={repository.id}>

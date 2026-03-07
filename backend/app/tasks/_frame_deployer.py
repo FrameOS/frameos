@@ -603,6 +603,34 @@ class FrameDeployer:
         os.makedirs(source_dir, exist_ok=True)
         base = Path(source_root or "../frameos").resolve()
         shutil.copytree(base, source_dir, dirs_exist_ok=True)
+        repo_root = base.parent
+        repo_root_package = repo_root / "package.json"
+        if repo_root_package.is_file():
+            shutil.copy2(repo_root_package, Path(temp_dir) / "package.json")
+        repo_pnpm_workspace = repo_root / "pnpm-workspace.yaml"
+        if repo_pnpm_workspace.is_file():
+            shutil.copy2(repo_pnpm_workspace, Path(temp_dir) / "pnpm-workspace.yaml")
+        repo_pnpm_lock = repo_root / "pnpm-lock.yaml"
+        if repo_pnpm_lock.is_file():
+            shutil.copy2(repo_pnpm_lock, Path(temp_dir) / "pnpm-lock.yaml")
+        repo_frontend_src = repo_root / "frontend" / "src"
+        if repo_frontend_src.is_dir():
+            frontend_src_dir = Path(temp_dir) / "frontend" / "src"
+            frontend_src_dir.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(repo_frontend_src, frontend_src_dir, dirs_exist_ok=True)
+        repo_frontend_package = repo_root / "frontend" / "package.json"
+        if repo_frontend_package.is_file():
+            frontend_dir = Path(temp_dir) / "frontend"
+            frontend_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(repo_frontend_package, frontend_dir / "package.json")
+        repo_frontend_schema = repo_root / "frontend" / "schema"
+        if repo_frontend_schema.is_dir():
+            frontend_schema_dir = Path(temp_dir) / "frontend" / "schema"
+            frontend_schema_dir.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(repo_frontend_schema, frontend_schema_dir, dirs_exist_ok=True)
+        repo_versions = repo_root / "versions.json"
+        if repo_versions.is_file():
+            shutil.copy2(repo_versions, Path(temp_dir) / "versions.json")
         return source_dir
 
     async def create_local_build_archive(
@@ -657,18 +685,17 @@ class FrameDeployer:
 
         status, out, err = await exec_local_command(db, redis, frame, cmd)
         if status != 0:
-            lines = (out or "").split("\n")
+            lines = ((out or "") + ("\n" + err if err else "")).splitlines()
             filtered = [ln for ln in lines if ln.strip()]
-            if filtered:
-                last_line = filtered[-1]
-                match = re.match(r'^(.*\.nim)\((\d+), (\d+)\),?.*', last_line)
+            for line in reversed(filtered):
+                match = re.match(r'^(.*\.nim)\((\d+), (\d+)\),?.*', line)
                 if match:
                     fn = match.group(1)
                     line_nr = int(match.group(2))
                     column = int(match.group(3))
                     source_abs = os.path.realpath(source_dir)
                     final_path = os.path.realpath(os.path.join(source_dir, fn))
-                    if os.path.commonprefix([final_path, source_abs]) == source_abs:
+                    if os.path.commonprefix([final_path, source_abs]) == source_abs and os.path.exists(final_path):
                         rel_fn = final_path[len(source_abs) + 1:]
                         with open(final_path, "r") as of:
                             all_lines = of.readlines()
@@ -677,6 +704,7 @@ class FrameDeployer:
                         await self.log("stdout", f".......{'.'*(column - 1 + len(str(line_nr)))}^")
                     else:
                         await self.log("stdout", f"Error in {fn}:{line_nr}:{column}")
+                    break
 
             raise Exception("Failed to generate frameos sources")
 

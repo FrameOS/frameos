@@ -55,6 +55,7 @@ export function Settings() {
     deleteEmbeddings,
     loadAiEmbeddingsStatus,
     toggleSshKeyExpanded,
+    regenerateFrameAdminPassword,
   } = useActions(settingsLogic)
   const { isHassioIngress } = useValues(sceneLogic)
   const { logout } = useActions(sceneLogic)
@@ -220,6 +221,30 @@ export function Settings() {
                     >
                       <TextInput />
                     </Field>
+                  </Box>
+                </Group>
+
+                <Group name="frameAdminAuth">
+                  <H6 className="pt-4">Frame admin panel</H6>
+                  <Box className="p-2 space-y-2">
+                    <Field name="enabled" label="Enable admin panel">
+                      <Switch />
+                    </Field>
+                    {settings?.frameAdminAuth?.enabled ? (
+                      <>
+                        <Field name="user" label="Admin username">
+                          <TextInput />
+                        </Field>
+                        <Field name="pass" label="Admin password" secret={!!savedSettings?.frameAdminAuth?.pass}>
+                          <div className="flex gap-2">
+                            <TextInput type="password" />
+                            <Button type="button" color="secondary" onClick={regenerateFrameAdminPassword}>
+                              Regenerate
+                            </Button>
+                          </div>
+                        </Field>
+                      </>
+                    ) : null}
                   </Box>
                 </Group>
                 <Group name="openAI">

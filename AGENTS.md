@@ -30,9 +30,9 @@
 ## Frontend notes
 - Built as an ESM React app with TypeScript; kea manages state and type generation (`kea-typegen`).
 - Build pipeline orchestrated by `build.mjs` using esbuild, with Tailwind/PostCSS for styling and optional bundle analysis via `vite-bundle-visualizer`.
-- Development: `npm install` followed by `npm run dev` (spawns kea typegen watch and esbuild dev build concurrently).
-- Production build: `npm run build` which chains kea codegen, schema generation (`ts-json-schema-generator`), TypeScript type-checking, and final bundling to `dist/`. 【F:frontend/package.json†L6-L66】
-- Output folder is consumed by the backend’s static file mounts; ensure `frontend/dist` exists (e.g., via `npm run build`) before running the Python app outside of test mode. 【F:backend/app/fastapi.py†L38-L86】
+- Development: `pnpm install` followed by `pnpm --dir frontend run dev` (spawns kea typegen watch and esbuild dev build concurrently).
+- Production build: `pnpm --dir frontend run build` which chains kea codegen, schema generation (`ts-json-schema-generator`), TypeScript type-checking, and final bundling to `dist/`. 【F:frontend/package.json†L6-L66】
+- Output folder is consumed by the backend’s static file mounts; ensure `frontend/dist` exists (e.g., via `pnpm --dir frontend run build`) before running the Python app outside of test mode. 【F:backend/app/fastapi.py†L38-L86】
 - ALWAYS prefer writing frontend business logic in kea logic files over using effects like `useState` or `useEffect`.
 - This includes small functions and callbacks inside components. Prefer to keep as much code as possible in logic files, treating React as a templating layer.
 
@@ -50,7 +50,7 @@
 - Environment variables documented in backend config govern integration with Home Assistant (HASSIO), Redis, PostHog analytics, and secret management. 【F:README.md†L24-L71】【F:backend/app/config.py†L1-L86】
 
 ## Getting started quickly
-1. Build the frontend (`cd frontend && npm install && npm run build`).
+1. Install JS deps once from the repo root (`pnpm install`) and build the frontend (`pnpm --dir frontend run build`).
 2. Install backend deps (`cd backend && pip install -r requirements.txt`).
 3. Launch API (`uvicorn app.fastapi:app --reload`) and background worker if needed (`arq app.tasks.worker.WorkerSettings`).
 4. Optionally bring up the stack via Docker (`docker compose up --build`).

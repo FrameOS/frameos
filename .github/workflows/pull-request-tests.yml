@@ -35,6 +35,18 @@ jobs:
           uv venv
           uv pip install -r requirements.txt
 
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.27.0
+          run_install: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+          cache-dependency-path: pnpm-lock.yaml
+
       - uses: jiro4989/setup-nim-action@v1
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
@@ -115,14 +127,19 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v2
 
-      - name: Set up Node
-        uses: actions/setup-node@v2
+      - uses: pnpm/action-setup@v4
         with:
-          node-version: '16.x'
+          version: 10.27.0
+          run_install: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+          cache-dependency-path: pnpm-lock.yaml
 
       - name: Build frontend
         run: |
-          cd frontend
-          npm install
-          npm run build
-        
+          pnpm install --frozen-lockfile
+          pnpm --dir frontend run build

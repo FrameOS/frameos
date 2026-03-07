@@ -8,10 +8,10 @@ import { formatMs, pingLogic, PingMode } from './pingLogic'
 
 export function Ping() {
   const { frameId } = useValues(frameLogic)
-  const { intervalSeconds, pingMode, httpPath, isRunning, isPinging, results, targetLabel } = useValues(
-    pingLogic({ frameId })
-  )
+  const { intervalSeconds, pingMode, httpPath, isFrameAdminMode, isRunning, isPinging, results, targetLabel } =
+    useValues(pingLogic({ frameId }))
   const { setIntervalSeconds, setPingMode, setHttpPath, toggleRunning } = useActions(pingLogic({ frameId }))
+  const activeMode: PingMode = isFrameAdminMode ? 'http' : pingMode
 
   return (
     <div className="flex flex-col h-full space-y-4">
@@ -22,39 +22,43 @@ export function Ping() {
           </Button>
           {isPinging ? (
             <span className="text-sm text-gray-400 break-all">
-              {pingMode === 'http' ? 'Requesting' : 'Pinging'} {targetLabel}...
+              {activeMode === 'http' ? 'Requesting' : 'Pinging'} {targetLabel}...
             </span>
           ) : null}
         </div>
         <div className="flex flex-wrap gap-3 items-center">
-          <div className="flex items-center gap-2">
-            <label className="text-sm font-medium text-gray-300" htmlFor="ping-mode">
-              Mode:
-            </label>
-            <Select
-              id="ping-mode"
-              className="w-44"
-              value={pingMode}
-              onChange={(value) => setPingMode((value as PingMode) || 'icmp')}
-              options={[
-                { value: 'icmp', label: 'Host ping (ICMP)' },
-                { value: 'http', label: 'HTTP ping (/ping)' },
-              ]}
-            />
-          </div>
-          {pingMode === 'http' ? (
-            <div className="flex items-center gap-2">
-              <label className="text-sm font-medium text-gray-300" htmlFor="ping-path">
-                Path:
-              </label>
-              <TextInput
-                id="ping-path"
-                className="!w-36"
-                placeholder="/ping"
-                value={httpPath}
-                onChange={(value) => setHttpPath(value)}
-              />
-            </div>
+          {!isFrameAdminMode ? (
+            <>
+              <div className="flex items-center gap-2">
+                <label className="text-sm font-medium text-gray-300" htmlFor="ping-mode">
+                  Mode:
+                </label>
+                <Select
+                  id="ping-mode"
+                  className="w-44"
+                  value={pingMode}
+                  onChange={(value) => setPingMode((value as PingMode) || 'icmp')}
+                  options={[
+                    { value: 'icmp', label: 'Host ping (ICMP)' },
+                    { value: 'http', label: 'HTTP ping (/ping)' },
+                  ]}
+                />
+              </div>
+              {pingMode === 'http' ? (
+                <div className="flex items-center gap-2">
+                  <label className="text-sm font-medium text-gray-300" htmlFor="ping-path">
+                    Path:
+                  </label>
+                  <TextInput
+                    id="ping-path"
+                    className="!w-36"
+                    placeholder="/ping"
+                    value={httpPath}
+                    onChange={(value) => setHttpPath(value)}
+                  />
+                </div>
+              ) : null}
+            </>
           ) : null}
           <div className="flex flex-row gap-2 items-center">
             <label className="text-sm font-medium text-gray-300" htmlFor="ping-interval">

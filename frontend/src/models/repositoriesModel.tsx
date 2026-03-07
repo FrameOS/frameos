@@ -4,6 +4,7 @@ import type { repositoriesModelType } from './repositoriesModelType'
 import { loaders } from 'kea-loaders'
 import { RepositoryType } from '../types'
 import { apiFetch } from '../utils/apiFetch'
+import { isFrameControlMode } from '../utils/frameControlMode'
 
 export const repositoriesModel = kea<repositoriesModelType>([
   path(['src', 'models', 'repositoriesModel']),
@@ -80,6 +81,9 @@ export const repositoriesModel = kea<repositoriesModelType>([
     },
   }),
   afterMount(({ actions }) => {
+    if (isFrameControlMode()) {
+      return
+    }
     actions.loadRepositories()
   }),
 ])

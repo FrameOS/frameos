@@ -11,6 +11,7 @@ import { apiFetch } from '../../utils/apiFetch'
 import { getBasePath } from '../../utils/getBasePath'
 import { entityImagesModel } from '../../models/entityImagesModel'
 import { arrangeNodes } from '../../utils/arrangeNodes'
+import { isInFrameAdminMode } from '../../utils/frameAdmin'
 import versions from '../../../../versions.json'
 
 export interface FrameLogicProps {
@@ -385,6 +386,28 @@ export function sanitizeNodes(nodes: DiagramNode[]): DiagramNode[] {
   return changed ? newNodes : nodes
 }
 
+function normalizeNode(node: DiagramNode): DiagramNode {
+  const normalizedType = node.type ?? (node as DiagramNode & { nodeType?: DiagramNode['type'] }).nodeType
+  if (!normalizedType) {
+    return node
+  }
+  return {
+    ...node,
+    type: normalizedType,
+  } as DiagramNode
+}
+
+function normalizeEdge(edge: any): any {
+  const normalizedType = edge.type ?? edge.edgeType
+  if (!normalizedType) {
+    return edge
+  }
+  return {
+    ...edge,
+    type: normalizedType,
+  }
+}
+
 function hasValidPosition(node: DiagramNode): boolean {
   return Number.isFinite(node.position?.x) && Number.isFinite(node.position?.y)
 }
@@ -398,7 +421,8 @@ function sanitizeFrame(frame: Partial<FrameType>): Partial<FrameType> {
 
 export function sanitizeScene(scene: Partial<FrameScene>, frame: Partial<FrameType>): FrameScene {
   const settings = scene.settings ?? {}
-  const sanitizedNodes = sanitizeNodes(scene.nodes ?? [])
+  const normalizedRawNodes = (scene.nodes ?? []).map((node) => normalizeNode(node as DiagramNode))
+  const sanitizedNodes = sanitizeNodes(normalizedRawNodes)
   const normalizedNodes = sanitizedNodes.map((node) =>
     hasValidPosition(node)
       ? node
@@ -413,7 +437,7 @@ export function sanitizeScene(scene: Partial<FrameScene>, frame: Partial<FrameTy
           position: { x: 0, y: 0 },
         }
   )
-  const edges = scene.edges ?? []
+  const edges = (scene.edges ?? []).map((edge) => normalizeEdge(edge))
   const shouldArrange = normalizedNodes.length > 0 && sanitizedNodes.every((node) => !hasValidPosition(node))
   return {
     ...scene,
@@ -600,6 +624,7 @@ export const frameLogic = kea<frameLogicType>([
     frameId: [() => [(_, props) => props.frameId], (frameId) => frameId],
     frame: [(s) => [s.frames, s.frameId], (frames, frameId) => frames[frameId] || null],
     mode: [(s) => [s.frame, s.frameForm], (frame, frameForm) => frameForm?.mode || frame?.mode || 'rpios'],
+    isFrameAdminMode: [() => [], () => isInFrameAdminMode()],
     scenes: [
       (s) => [s.frame, s.frameForm],
       (frame, frameForm): FrameScene[] => frameForm?.scenes ?? frame.scenes ?? [],
@@ -634,17 +659,18 @@ export const frameLogic = kea<frameLogicType>([
     ],
     lastDeploy: [(s) => [s.frame], (frame) => frame?.last_successful_deploy ?? null],
     undeployedChanges: [
-      (s) => [s.frame, s.lastDeploy, s.mode],
-      (frame: FrameType, lastDeploy: Partial<FrameType> | null, mode: FrameType['mode']) =>
-        computeChangeDetails(lastDeploy, frame, mode).length > 0,
+      (s) => [s.frame, s.lastDeploy, s.mode, s.isFrameAdminMode],
+      (frame: FrameType, lastDeploy: Partial<FrameType> | null, mode: FrameType['mode'], isFrameAdminMode: boolean) =>
+        !isFrameAdminMode && computeChangeDetails(lastDeploy, frame, mode).length > 0,
     ],
     unsavedChangeDetails: [
       (s) => [s.frame, s.frameForm, s.mode],
       (frame, frameForm, mode): ChangeDetail[] => computeChangeDetails(frame, frameForm, mode),
     ],
     undeployedChangeDetails: [
-      (s) => [s.lastDeploy, s.frame, s.mode],
-      (lastDeploy, frame, mode): ChangeDetail[] => computeChangeDetails(lastDeploy, frame, mode),
+      (s) => [s.lastDeploy, s.frame, s.mode, s.isFrameAdminMode],
+      (lastDeploy, frame, mode, isFrameAdminMode): ChangeDetail[] =>
+        isFrameAdminMode ? [] : computeChangeDetails(lastDeploy, frame, mode),
     ],
     requiresRecompilation: [
       (s) => [s.undeployedChangeDetails],

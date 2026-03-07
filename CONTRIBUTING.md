@@ -5,7 +5,7 @@
 
 You'll need to install:
 Python >= 3.12
-`Node.js` and `npm`
+`Node.js` and `pnpm`
 `redis-server`
 `nim >=2.0.0` (https://nim-lang.org/install.html)
 (Note that Debian distros have only packaged `1.6.x` as of Jan 2024)
@@ -27,8 +27,7 @@ source env/bin/activate
 uv pip install -r requirements.txt
 DEBUG=1 alembic upgrade head
 
-cd ../frontend
-npm install
+pnpm install
 
 cd ../frameos
 nimble install -d
@@ -40,7 +39,7 @@ To run all services at once:
 
 ```bash
 cd frontend
-npm run dev &
+pnpm run dev &
 cd ../backend
 bin/dev
 ```
@@ -50,7 +49,7 @@ To run all of these separately:
 ```bash
 # start the frontend
 cd frontend
-npm run dev
+pnpm run dev
 cd ..
 
 # apply any migrations

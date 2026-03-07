@@ -36,7 +36,7 @@ proc getLastPixels*(): seq[uint8] =
 proc notifyImageAvailable*(self: Driver) =
   self.logger.log(%*{"event": "render:dither", "info": "Dithered image available"})
 
-proc safeLog(logger: Logger, message: string): JsonNode =
+proc safeLog*(logger: Logger, message: string): JsonNode =
   try:
     result = parseJson(message)
     result["event"] = %*("driver:inky")
@@ -58,7 +58,7 @@ proc safeStartProcess*(cmd: string; args: seq[string] = @[];
     discard logger.safeLog(errorMsg)
     result = none(Process)
 
-proc deviceArgs(dev: string): seq[string] =
+proc deviceArgs*(dev: string): seq[string] =
   if dev.len > 0: @["--device", dev] else: @[]
 
 proc init*(frameOS: FrameOS): Driver =

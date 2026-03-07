@@ -14,6 +14,9 @@ const X_CONSUMER = "recycleapp.be"
 const X_SECRET = "Op2tDi2pBmh1wzeC5TaN2U3knZan7ATcfOQgxh4vqC0mDKmnPP2qzoQusmInpglfIkxx8SZrasBqi5zgMSvyHggK9j6xCQNQ8xwPFY2o03GCcQfcXVOyKsvGWLze7iwcfcgk2Ujpl0dmrt3hSJMCDqzAlvTrsvAEiaSzC9hKRwhijQAFHuFIhJssnHtDSB76vnFQeTCCvwVB27DjSVpDmq8fWQKEmjEncdLqIsRnfxLcOjGIVwX5V0LBntVbeiBvcjyKF2nQ08rIxqHHGXNJ6SbnAmTgsPTg7k6Ejqa7dVfTmGtEPdftezDbuEc8DdK66KDecqnxwOOPSJIN0zaJ6k2Ye2tgMSxxf16gxAmaOUqHS0i7dtG5PgPSINti3qlDdw6DTKEPni7X0rxM"
 
 type
+  BeRecycleAuthenticateHook* = proc(self: App)
+  BeRecycleFetchCollectionsHook* = proc(self: App, fromDate: string, toDate: string): JsonNode
+
   AppConfig* = object
     exportFrom*: string
     exportUntil*: string
@@ -33,6 +36,10 @@ type
     zip: string
     street: string
     housenumber: int
+
+var
+  beRecycleAuthenticateHook*: BeRecycleAuthenticateHook = nil
+  beRecycleFetchCollectionsHook*: BeRecycleFetchCollectionsHook = nil
 
 proc authenticate(self: App) =
   self.headers = newHttpHeaders([
@@ -101,7 +108,7 @@ proc fetchCollections(self: App, addressIds: AddressIds, fromDate: string, toDat
   finally:
     client.close()
 
-proc collectionsToEvents(self: App, collections: JsonNode): seq[JsonNode] =
+proc collectionsToEvents*(self: App, collections: JsonNode): seq[JsonNode] =
   let timezone = if self.frameConfig.timeZone != "": self.frameConfig.timeZone else: "UTC"
   var events: seq[JsonNode] = @[]
   for item in collections["items"].items:
@@ -126,11 +133,20 @@ proc get*(self: App, context: ExecutionContext): JsonNode =
   let endDay = endTs.format("{year/4}-{month/2}-{day/2}", timezone)
 
   self.log("Authenticating...")
-  self.authenticate()
-  self.log("Fetching address IDs...")
-  let addressIds = self.fetchAddressIds()
+  if beRecycleAuthenticateHook == nil:
+    self.authenticate()
+  else:
+    beRecycleAuthenticateHook(self)
+
+  var collections: JsonNode
   self.log("Fetching collections...")
-  let collections = self.fetchCollections(addressIds, startDay, endDay)
+  if beRecycleFetchCollectionsHook == nil:
+    self.log("Fetching address IDs...")
+    let addressIds = self.fetchAddressIds()
+    collections = self.fetchCollections(addressIds, startDay, endDay)
+  else:
+    collections = beRecycleFetchCollectionsHook(self, startDay, endDay)
+
   self.log(%*{"event": "reply", "eventsInRange": len(collections)})
   self.log("Converting collections to events...")
   let events = self.collectionsToEvents(collections)

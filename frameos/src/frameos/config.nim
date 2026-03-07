@@ -148,6 +148,7 @@ proc loadConfig*(): FrameConfig =
     ),
     frameAccess: data{"frameAccess"}.getStr(),
     frameAccessKey: data{"frameAccessKey"}.getStr(),
+    frameAdminAuth: if data{"frameAdminAuth"} == nil: %*{} else: data{"frameAdminAuth"},
     width: data{"width"}.getInt(),
     height: data{"height"}.getInt(),
     device: data{"device"}.getStr(),
@@ -191,6 +192,7 @@ proc updateFrameConfigFrom*(target: FrameConfig, source: FrameConfig) =
   target.httpsProxy = source.httpsProxy
   target.frameAccessKey = source.frameAccessKey
   target.frameAccess = source.frameAccess
+  target.frameAdminAuth = source.frameAdminAuth
   target.width = source.width
   target.height = source.height
   target.device = source.device

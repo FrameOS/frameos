@@ -54,7 +54,7 @@ proc loadInterpretedSceneOptions(): seq[(SceneId, string)] =
   except JsonParsingError, CatchableError:
     discard
 
-proc buildSceneList(self: Scene): seq[(string, string)] =
+proc buildSceneList*(self: Scene): seq[(string, string)] =
   var entries = initOrderedTable[string, string]()
   for (sceneId, sceneName) in compiledScenes.sceneOptions:
     entries[sceneId.string] = sceneName
@@ -71,7 +71,7 @@ proc buildSceneList(self: Scene): seq[(string, string)] =
   ordered.sort(proc(a, b: (string, string)): int = cmpIgnoreCase(a[1], b[1]))
   return ordered
 
-proc buildSceneListText(self: Scene): string =
+proc buildSceneListText*(self: Scene): string =
   let entries = self.buildSceneList()
   let frameConfig = self.frameConfig
   let resolution = &"{frameConfig.width}x{frameConfig.height}"

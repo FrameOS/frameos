@@ -75,6 +75,17 @@ type
     hasEnoughRam: bool
     memoryKb: int
 
+  ChromiumRamProbeHook* = proc(): int
+  ChromiumEnsureSystemDependenciesHook* = proc(self: App)
+  ChromiumEnsureVenvExistsHook* = proc(self: App): string
+  ChromiumEnsureBackgroundBrowserHook* = proc(self: App, width: int, height: int): bool
+
+var
+  chromiumRamProbeHook*: ChromiumRamProbeHook = nil
+  chromiumEnsureSystemDependenciesHook*: ChromiumEnsureSystemDependenciesHook = nil
+  chromiumEnsureVenvExistsHook*: ChromiumEnsureVenvExistsHook = nil
+  chromiumEnsureBackgroundBrowserHook*: ChromiumEnsureBackgroundBrowserHook = nil
+
 proc ensureVenvExists(self: App): string
 proc ensureBackgroundBrowser(self: App, width: int = 800, height: int = 600): bool
 proc stopBackgroundBrowser(self: App)
@@ -84,6 +95,9 @@ proc currentRamKb(): int
 proc hasMinimumRam(self: App): bool
 
 proc currentRamKb(): int =
+  if chromiumRamProbeHook != nil:
+    return chromiumRamProbeHook()
+
   try:
     for line in readFile("/proc/meminfo").splitLines():
       if line.startsWith("MemTotal:"):
@@ -185,9 +199,20 @@ proc init*(self: App) =
     self.log "Not enough RAM to run Chromium. At least 1GB is needed, got " & $(self.memoryKb / 1024).toInt() & "MB"
     return
 
-  self.ensureSystemDependencies()
-  discard self.ensureVenvExists()
-  discard self.ensureBackgroundBrowser(self.appConfig.width, self.appConfig.height)
+  if chromiumEnsureSystemDependenciesHook == nil:
+    self.ensureSystemDependencies()
+  else:
+    chromiumEnsureSystemDependenciesHook(self)
+
+  if chromiumEnsureVenvExistsHook == nil:
+    discard self.ensureVenvExists()
+  else:
+    discard chromiumEnsureVenvExistsHook(self)
+
+  if chromiumEnsureBackgroundBrowserHook == nil:
+    discard self.ensureBackgroundBrowser(self.appConfig.width, self.appConfig.height)
+  else:
+    discard chromiumEnsureBackgroundBrowserHook(self, self.appConfig.width, self.appConfig.height)
 
 # Ensure the virtual environment exists and is set up
 proc ensureVenvExists(self: App): string =
@@ -310,9 +335,16 @@ proc get*(self: App, context: ExecutionContext): Image =
       except: discard
 
     # Ensure the Python venv for Playwright exists and is set up.
-    let venvRoot = self.ensureVenvExists()
+    let venvRoot = if chromiumEnsureVenvExistsHook == nil:
+        self.ensureVenvExists()
+      else:
+        chromiumEnsureVenvExistsHook(self)
     let venvPython = venvRoot & "/bin/python"
-    if not self.ensureBackgroundBrowser(width, height):
+    let browserReady = if chromiumEnsureBackgroundBrowserHook == nil:
+        self.ensureBackgroundBrowser(width, height)
+      else:
+        chromiumEnsureBackgroundBrowserHook(self, width, height)
+    if not browserReady:
       if context.hasImage:
         return context.image
       else:
@@ -353,7 +385,11 @@ page.wait_for_timeout(1500)
       if attempt > 0:
         self.log "Retrying Browser Snapshot with a fresh Chromium process"
         self.stopBackgroundBrowser()
-        if not self.ensureBackgroundBrowser(width, height):
+        let browserReady = if chromiumEnsureBackgroundBrowserHook == nil:
+            self.ensureBackgroundBrowser(width, height)
+          else:
+            chromiumEnsureBackgroundBrowserHook(self, width, height)
+        if not browserReady:
           return renderError(width, height, "Chromium browser is not available")
         sleep(CHROMIUM_STARTUP_SETTLE_MS)
 

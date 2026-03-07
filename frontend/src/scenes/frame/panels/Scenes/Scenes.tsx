@@ -44,7 +44,9 @@ import { A, router } from 'kea-router'
 import { urls } from '../../../../urls'
 import { appsModel } from '../../../../models/appsModel'
 import { chatLogic } from '../Chat/chatLogic'
+import { isFrameControlMode } from '../../../../utils/frameControlMode'
 export function Scenes() {
+  const frameControlMode = isFrameControlMode()
   const { frameId, frameForm, frame } = useValues(frameLogic)
   const { applyTemplate } = useActions(frameLogic)
   const { apps } = useValues(appsModel)
@@ -363,15 +365,17 @@ export function Scenes() {
             <PlusIcon className="w-4 h-4" />
             New blank scene
           </Button>
-          <Button
-            size="small"
-            color="secondary"
-            className="flex gap-1 items-center"
-            onClick={() => openAiScene(location)}
-          >
-            <SparklesIcon className="w-4 h-4" />
-            Generate scene
-          </Button>
+          {!frameControlMode ? (
+            <Button
+              size="small"
+              color="secondary"
+              className="flex gap-1 items-center"
+              onClick={() => openAiScene(location)}
+            >
+              <SparklesIcon className="w-4 h-4" />
+              Generate scene
+            </Button>
+          ) : null}
           {!frame.scenes?.length ? (
             <Button size="small" color="secondary" className="flex gap-1 items-center" onClick={openTemplates}>
               <SparklesIcon className="w-4 h-4" />
@@ -395,7 +399,7 @@ export function Scenes() {
         {rightComponent ?? null}
       </div>
       {newSceneFormLocation === location ? renderNewSceneForm() : null}
-      {aiSceneFormLocation === location ? renderAiSceneForm() : null}
+      {!frameControlMode && aiSceneFormLocation === location ? renderAiSceneForm() : null}
     </>
   )
 

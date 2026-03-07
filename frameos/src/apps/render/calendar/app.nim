@@ -319,6 +319,13 @@ proc groupEvents*(self: App): Table[string, seq[EventLine]] =
       if start.len >= 10:
         addEventLine(result, start[0..9], self.makeLine(summary, start, isAllDay))
 
+proc sortEventLines*(eventsByDay: var Table[string, seq[EventLine]]) =
+  for _, daySeq in eventsByDay.mpairs:
+    sort(daySeq, proc (a, b: EventLine): int =
+      let c = system.cmp(a.sortKey, b.sortKey)
+      if c != 0: c else: system.cmp(a.display, b.display)
+    )
+
 proc render*(self: App, context: ExecutionContext, image: Image) =
   self.setTheme()
   # Current date/time (use LOCAL time zone; FrameOS sets TZ to the user's zone, e.g., Europe/Brussels)
@@ -467,11 +474,7 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
   var eventsByDay = self.groupEvents()
 
   # Ensure events within each day are sorted (all-day first, then by start time)
-  for _, daySeq in eventsByDay.mpairs:
-    sort(daySeq, proc (a, b: EventLine): int =
-      let c = system.cmp(a.sortKey, b.sortKey)
-      if c != 0: c else: system.cmp(a.display, b.display)
-    )
+  sortEventLines(eventsByDay)
 
   var day = 1
   for row in 0..<rows:

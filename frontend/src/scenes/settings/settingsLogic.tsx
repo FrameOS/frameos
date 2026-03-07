@@ -1,4 +1,4 @@
-import { actions, afterMount, connect, defaults, events, kea, listeners, path, reducers, selectors } from 'kea'
+import { actions, afterMount, connect, events, kea, listeners, path, reducers, selectors } from 'kea'
 import { loaders } from 'kea-loaders'
 import { socketLogic } from '../socketLogic'
 import type { settingsLogicType } from './settingsLogicType'
@@ -8,6 +8,7 @@ import { apiFetch } from '../../utils/apiFetch'
 import { normalizeSshKeys } from '../../utils/sshKeys'
 import { v4 as uuidv4 } from 'uuid'
 import { showWorkingMessage } from '../../utils/workingMessage'
+import { isFrameControlMode } from '../../utils/frameControlMode'
 
 const embeddingsGeneratingStorageKey = 'frameos.embeddings.generating'
 
@@ -24,6 +25,7 @@ function setDefaultSettings(settings: Partial<FrameOSSettings> | Record<string, 
     unsplash: settings.unsplash ?? {},
     nix: settings.nix ?? {},
     buildHost: settings.buildHost ?? {},
+    frameAdminAuth: settings.frameAdminAuth ?? { enabled: false, user: "", pass: "" },
   }
 }
 
@@ -54,6 +56,7 @@ export const settingsLogic = kea<settingsLogicType>([
     stopEmbeddingsPolling: true,
     generateMissingEmbeddings: true,
     deleteEmbeddings: true,
+    regenerateFrameAdminPassword: true,
   }),
   loaders(({ values }) => ({
     savedSettings: [
@@ -238,6 +241,9 @@ export const settingsLogic = kea<settingsLogicType>([
     },
   })),
   afterMount(({ actions }) => {
+    if (isFrameControlMode()) {
+      return
+    }
     actions.loadSettings()
     actions.loadAiEmbeddingsStatus()
     actions.loadCustomFonts()
@@ -319,6 +325,12 @@ export const settingsLogic = kea<settingsLogicType>([
     [socketLogic.actionTypes.updateSettings]: ({ settings }) => {
       actions.updateSavedSettings(setDefaultSettings(settings))
       actions.resetSettings(setDefaultSettings({ ...values.savedSettings, ...settings }))
+    },
+    regenerateFrameAdminPassword: () => {
+      const bytes = new Uint8Array(18)
+      window.crypto.getRandomValues(bytes)
+      const password = btoa(String.fromCharCode(...bytes)).replace(/[^a-zA-Z0-9]/g, '').slice(0, 24)
+      actions.setSettingsValue(['frameAdminAuth', 'pass'], password)
     },
     addSshKey: async () => {
       const keyId = uuidv4()

@@ -13,6 +13,12 @@ import frameos/setup_proxy
 import frameos/boot_guard
 import lib/tz
 
+proc applyBootGuardStartupFallback*(firstSceneId: var Option[SceneId], bootCrashCount: int): bool =
+  if shouldUseFallbackScene(bootCrashCount):
+    firstSceneId = some(bootGuardFallbackSceneId().SceneId)
+    return true
+  false
+
 proc newFrameOS*(): FrameOS =
   initTimeZone()
   var frameConfig = loadConfig()
@@ -70,8 +76,7 @@ proc start*(self: FrameOS) {.async.} =
 
   let bootCrashCount = registerBootCrash()
   self.logger.log(%*{"event": "boot:guard", "crashesWithoutRender": bootCrashCount})
-  if shouldUseFallbackScene(bootCrashCount):
-    firstSceneId = some(bootGuardFallbackSceneId().SceneId)
+  if applyBootGuardStartupFallback(firstSceneId, bootCrashCount):
     self.logger.log(%*{"event": "boot:guard:fallback", "sceneId": bootGuardFallbackSceneId(),
       "crashesWithoutRender": bootCrashCount, "threshold": BOOT_GUARD_CRASH_LIMIT})
 

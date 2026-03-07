@@ -17,6 +17,10 @@ type
     headers*: seq[HttpHeaderPair]
     lastHash*: string
 
+  HttpUploadRequestFn* = proc(url: string, body: string, headers: HttpHeaders): tuple[status: int, body: string] {.gcsafe.}
+
+var requestHook*: HttpUploadRequestFn
+
 proc init*(frameOS: FrameOS): Driver =
   let config = frameOS.frameConfig.deviceConfig
   result = Driver(
@@ -40,6 +44,14 @@ proc buildHeaders(self: Driver, hashValue: string): HttpHeaders =
     if header.name.len > 0:
       headers.add(header.name, header.value)
   return headers
+
+proc defaultRequest(url: string, body: string, headers: HttpHeaders): tuple[status: int, body: string] =
+  var client = newHttpClient(timeout = DEFAULT_TIMEOUT_MS)
+  try:
+    let response = client.request(url, httpMethod = HttpPost, body = body, headers = headers)
+    result = (response.code.int, response.body)
+  finally:
+    client.close()
 
 proc logSuccess(self: Driver, status: int, hashValue: string) =
   self.logger.log(%*{
@@ -73,17 +85,14 @@ proc render*(self: Driver, image: Image) =
       return
     self.lastHash = hashValue
 
-    var client = newHttpClient(timeout = DEFAULT_TIMEOUT_MS)
-    try:
-      var headers = self.buildHeaders(hashValue)
-      if not headers.hasKey("Content-Type"):
-        headers["Content-Type"] = "image/png"
-      let response = client.request(self.url, httpMethod = HttpPost, body = pngData, headers = headers)
-      if response.code.int >= 200 and response.code.int < 300:
-        self.logSuccess(response.code.int, hashValue)
-      else:
-        self.logError(response.body, response.code.int)
-    finally:
-      client.close()
+    var headers = self.buildHeaders(hashValue)
+    if not headers.hasKey("Content-Type"):
+      headers["Content-Type"] = "image/png"
+    let requestFn = if requestHook != nil: requestHook else: defaultRequest
+    let response = requestFn(self.url, pngData, headers)
+    if response.status >= 200 and response.status < 300:
+      self.logSuccess(response.status, hashValue)
+    else:
+      self.logError(response.body, response.status)
   except CatchableError as e:
     self.logError($e.msg)

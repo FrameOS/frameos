@@ -4,6 +4,7 @@ import type { templatesModelType } from './templatesModelType'
 import { loaders } from 'kea-loaders'
 import { TemplateType } from '../types'
 import { apiFetch } from '../utils/apiFetch'
+import { isFrameControlMode } from '../utils/frameControlMode'
 
 export const templatesModel = kea<templatesModelType>([
   path(['src', 'models', 'templatesModel']),
@@ -88,6 +89,9 @@ export const templatesModel = kea<templatesModelType>([
     },
   })),
   afterMount(({ actions }) => {
+    if (isFrameControlMode()) {
+      return
+    }
     actions.loadTemplates()
   }),
 ])

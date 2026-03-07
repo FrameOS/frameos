@@ -2,10 +2,14 @@ import { router } from 'kea-router'
 import { inHassioIngress } from './inHassioIngress'
 import { getBasePath } from './getBasePath'
 import { urls } from '../urls'
+import { isFrameControlMode } from './frameControlMode'
 
 export interface ApiFetchOptions extends RequestInit {}
 
 export async function userExists(): Promise<boolean> {
+  if (isFrameControlMode()) {
+    return false
+  }
   try {
     const resp = await fetch('/api/has_first_user', { method: 'GET', headers: { Accept: 'application/json' } })
     if (!resp.ok) {
@@ -20,6 +24,7 @@ export async function userExists(): Promise<boolean> {
 }
 
 export async function apiFetch(input: RequestInfo | URL, options: ApiFetchOptions = {}): Promise<Response> {
+  const frameControlMode = isFrameControlMode()
   const headers: HeadersInit = options.headers || {}
 
   if (typeof input === 'string' && getBasePath()) {
@@ -28,7 +33,7 @@ export async function apiFetch(input: RequestInfo | URL, options: ApiFetchOption
 
   const response = await fetch(input, { ...options, headers, credentials: options.credentials || 'include' })
 
-  if (!inHassioIngress() && response.status === 401) {
+  if (!frameControlMode && !inHassioIngress() && response.status === 401) {
     const exists = await userExists()
     if (exists) {
       router.actions.push(urls.login())

@@ -14,6 +14,29 @@ var logger: Logger
 var lastErrorLock: Lock
 var lastError: string
 
+type
+  PortalRunHook = proc(cmd: string): (string, int) {.gcsafe, nimcall.}
+  PortalNmcliConnectHook = proc(args: seq[string]): tuple[rc: int, output: string] {.gcsafe, nimcall.}
+  PortalSleepHook = proc(ms: int) {.gcsafe, nimcall.}
+  PortalAutoTimeoutEnabledHook = proc(): bool {.gcsafe, nimcall.}
+
+proc defaultPortalRunHook(cmd: string): (string, int) {.gcsafe, nimcall.} =
+  execCmdEx(cmd)
+
+proc defaultPortalNmcliConnectHook(args: seq[string]): tuple[rc: int, output: string] {.gcsafe, nimcall.} =
+  let p = startProcess("sudo",
+                       args = args,
+                       options = {poUsePath, poStdErrToStdOut})
+  let rc = waitForExit(p) # we know it will finish in <= 15 s
+  (rc: rc, output: p.outputStream.readAll())
+
+proc hotspotAutoTimeoutLoop(frameOS: FrameOS, startedAt: MonoTime) {.gcsafe, nimcall.}
+
+var portalRunHook: PortalRunHook = defaultPortalRunHook
+var portalNmcliConnectHook: PortalNmcliConnectHook = defaultPortalNmcliConnectHook
+var portalSleepHook: PortalSleepHook = proc(ms: int) {.gcsafe, nimcall.} = sleep(ms)
+var portalAutoTimeoutEnabledHook: PortalAutoTimeoutEnabledHook = proc(): bool {.gcsafe, nimcall.} = true
+
 proc getLastError(): string =
   {.gcsafe.}:
     withLock lastErrorLock:
@@ -39,9 +62,9 @@ proc pLog(ev: string, extra: JsonNode = %*{}) =
 proc shQuote(s: string): string =
   "'" & s.replace("'", "'\"'\"'") & "'"
 
-proc run(cmd: string): (string, int) =
+proc run(cmd: string): (string, int) {.gcsafe.} =
   ## Execute a shell command (through /bin/sh -c) and log the result.
-  let (output, rc) = execCmdEx(cmd) # no extra nested bash
+  let (output, rc) = portalRunHook(cmd)
   pLog("portal:exec", %*{"cmd": cmd, "rc": rc, "output": output.strip()})
   (output, rc)
 
@@ -65,7 +88,7 @@ proc anyWifiConfigured(frameOS: FrameOS): bool =
   let (output, _) = run("sudo nmcli --colors no -t -f NAME connection show | grep -v '^lo$' || true")
   result = output.strip().len > 0
 
-proc stopAp*(frameOS: FrameOS) =
+proc stopAp*(frameOS: FrameOS) {.gcsafe.} =
   ## Tear down the hotspot
   if not hotspotRunning(frameOS):
     pLog("portal:stopAp:notStarted")
@@ -78,7 +101,7 @@ proc stopAp*(frameOS: FrameOS) =
   stopSetupProxy()
   pLog("portal:stopAp:done")
 
-proc startAp*(frameOS: FrameOS) =
+proc startAp*(frameOS: FrameOS) {.gcsafe.} =
   ## Bring up Wi-Fi AP with hard-coded SSID/pw
   if hotspotRunning(frameOS):
     pLog("portal:startAp:alreadyRunning")
@@ -107,23 +130,24 @@ proc startAp*(frameOS: FrameOS) =
   frameOS.network.hotspotStartedAt = epochTime()
   pLog("portal:startAp:done")
   sendEvent("setCurrentScene", %*{"sceneId": "system/wifiHotspot".SceneId})
+  if portalAutoTimeoutEnabledHook():
+    spawn hotspotAutoTimeoutLoop(frameOS, hotspotStarted)
 
-  proc hotspotAutoTimeout(frameOS: FrameOS, startedAt: MonoTime) =
-    while true:
-      sleep(1000)
-      if frameOS.network.hotspotStatus != HotspotStatus.enabled:
-        return
-      let timeoutSec = frameOS.frameConfig.network.wifiHotspotTimeoutSeconds
-      if timeoutSec <= 0:
-        return # disabled or mis-configured – bail out immediately
+proc hotspotAutoTimeoutLoop(frameOS: FrameOS, startedAt: MonoTime) {.gcsafe, nimcall.} =
+  while true:
+    portalSleepHook(1000)
+    if frameOS.network.hotspotStatus != HotspotStatus.enabled:
+      return
+    let timeoutSec = frameOS.frameConfig.network.wifiHotspotTimeoutSeconds
+    if timeoutSec <= 0:
+      return # disabled or mis-configured - bail out immediately
 
-      if (getMonoTime() - startedAt) >= initDuration(milliseconds = int(timeoutSec * 1000)):
-        pLog("portal:stopAp:autoTimeout")
-        stopAp(frameOS)
-        sendEvent("setCurrentScene", %*{"sceneId": getFirstSceneId()})
-  spawn hotspotAutoTimeout(frameOS, hotspotStarted) # pass snapshot
+    if (getMonoTime() - startedAt) >= initDuration(milliseconds = int(timeoutSec * 1000)):
+      pLog("portal:stopAp:autoTimeout")
+      stopAp(frameOS)
+      sendEvent("setCurrentScene", %*{"sceneId": getFirstSceneId()})
 
-proc attemptConnect*(frameOS: FrameOS, ssid, password: string): bool =
+proc attemptConnect*(frameOS: FrameOS, ssid, password: string): bool {.gcsafe.} =
   frameOS.network.status = NetworkStatus.connecting
   discard run(fmt"sudo -n nmcli connection delete '{nmConnectionName}' 2>/dev/null || true")
 
@@ -134,13 +158,9 @@ proc attemptConnect*(frameOS: FrameOS, ssid, password: string): bool =
     "ifname", "wlan0", "name", nmConnectionName
   ]
   let sudoArgs = @["-n", "nmcli"] & nmcliArgs # -n = never prompt for pwd
-
-  let p = startProcess("sudo",
-                       args = sudoArgs,
-                       options = {poUsePath, poStdErrToStdOut})
-
-  let rc = waitForExit(p) # we know it will finish in ≤ 15 s
-  let output = p.outputStream.readAll()
+  let connectResult = portalNmcliConnectHook(sudoArgs)
+  let rc = connectResult.rc
+  let output = connectResult.output
 
   pLog("portal:exec",
        %*{"cmd": "sudo " & $sudoArgs,
@@ -150,7 +170,7 @@ proc attemptConnect*(frameOS: FrameOS, ssid, password: string): bool =
   frameOS.network.status = if result: NetworkStatus.connected else: NetworkStatus.error
 
   if frameOS.network.status == NetworkStatus.connected:
-    sleep(5000) # give DHCP etc a moment
+    portalSleepHook(5000) # give DHCP etc a moment
 
   sendEvent("setCurrentScene", %*{"sceneId": getFirstSceneId()})
 
@@ -271,7 +291,7 @@ proc checkNetwork*(self: FrameOS): bool =
         self.logger.log(%*{"event": "networkCheck", "attempt": attempt, "status": "error", "error": e.msg,
             "action": "syncing clock and trying again"})
         syncClock()
-        sleep(min(max(3, attempt), 60) * 1000)
+        portalSleepHook(min(max(3, attempt), 60) * 1000)
         continue
       else:
         self.logger.log(%*{"event": "networkCheck", "attempt": attempt, "status": "error", "error": e.msg})
@@ -289,9 +309,26 @@ proc checkNetwork*(self: FrameOS): bool =
         self.network.status = NetworkStatus.connecting
         self.logger.log(%*{"event": "networkCheck", "status": "wifi_connecting"})
 
-    sleep(min(attempt, 60) * 1000)
+    portalSleepHook(min(attempt, 60) * 1000)
     attempt += 1
   return false
+
+proc setPortalHooksForTest*(
+  runHook: PortalRunHook = nil,
+  nmcliConnectHook: PortalNmcliConnectHook = nil,
+  sleepHook: PortalSleepHook = nil,
+  autoTimeoutEnabledHook: PortalAutoTimeoutEnabledHook = nil
+) =
+  if runHook != nil: portalRunHook = runHook
+  if nmcliConnectHook != nil: portalNmcliConnectHook = nmcliConnectHook
+  if sleepHook != nil: portalSleepHook = sleepHook
+  if autoTimeoutEnabledHook != nil: portalAutoTimeoutEnabledHook = autoTimeoutEnabledHook
+
+proc resetPortalHooksForTest*() =
+  portalRunHook = defaultPortalRunHook
+  portalNmcliConnectHook = defaultPortalNmcliConnectHook
+  portalSleepHook = proc(ms: int) {.gcsafe, nimcall.} = sleep(ms)
+  portalAutoTimeoutEnabledHook = proc(): bool {.gcsafe, nimcall.} = true
 
 proc htmlEscape(input: string): string =
   result = input.replace("&", "&amp;")

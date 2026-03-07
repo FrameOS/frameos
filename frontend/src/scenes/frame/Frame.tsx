@@ -19,6 +19,8 @@ import { Field } from '../../components/Field'
 import { frameSettingsLogic } from './panels/FrameSettings/frameSettingsLogic'
 import { logsLogic } from './panels/Logs/logsLogic'
 import { Popover, Transition } from '@headlessui/react'
+import { isFrameControlMode } from '../../utils/frameControlMode'
+import { isInFrameAdminMode } from '../../utils/frameAdmin'
 
 interface FrameSceneProps {
   id: string // taken straight from the URL, thus a string
@@ -66,6 +68,13 @@ export function Frame(props: FrameSceneProps) {
   // TODO
   const firstEverForNixOS = false && frame.mode === 'nixos' && frame.status === 'uninitialized'
   const canBuildSdImage = mode === 'nixos' || mode === 'buildroot'
+  const frameControlMode = isFrameControlMode()
+  const inFrameAdminMode = isInFrameAdminMode()
+
+  const logoutFromFrame = async () => {
+    await fetch('/api/admin/logout', { method: 'POST', credentials: 'include' })
+    window.location.href = '/login'
+  }
 
   return (
     <BindLogic logic={frameLogic} props={frameLogicProps}>
@@ -196,13 +205,18 @@ export function Frame(props: FrameSceneProps) {
                         openLogs()
                       },
                     },
-                    {
-                      label: 'Full deploy (recompile)',
-                      onClick: () => {
-                        fullDeployFrame()
-                        openLogs()
-                      },
-                    },
+                    ...(!frameControlMode
+                      ? [
+                          {
+                            label: 'Full deploy (recompile)',
+                            onClick: () => {
+                              fullDeployFrame()
+                              openLogs()
+                            },
+                          },
+                        ]
+                      : []),
+                    ...(frameControlMode ? [{ label: 'Logout', onClick: logoutFromFrame }] : []),
                     ...(canRestartAgent ? [{ label: 'Restart agent', onClick: () => restartAgent() }] : []),
                     ...(canDeployAgent
                       ? [
@@ -246,7 +260,13 @@ export function Frame(props: FrameSceneProps) {
                   ]}
                 />
                 <div className="flex pl-2 space-x-2">
-                  <Button color={unsavedChanges ? 'primary' : 'secondary'} type="button" onClick={() => saveFrame()}>
+                  <Button
+                    color={unsavedChanges ? 'primary' : 'secondary'}
+                    type="button"
+                    onClick={() => saveFrame()}
+                    disabled={inFrameAdminMode}
+                    title={inFrameAdminMode ? 'Save is not implemented in frame admin mode yet.' : undefined}
+                  >
                     Save
                   </Button>
                   {firstEverForNixOS ? (
@@ -259,21 +279,33 @@ export function Frame(props: FrameSceneProps) {
                     >
                       Download SD card .img
                     </Button>
-                  ) : (
-                    <Button
-                      color={unsavedChanges || undeployedChanges ? 'primary' : 'secondary'}
-                      type="button"
-                      onClick={() => {
-                        saveFrame()
-                        deployFrame()
-                        openLogs()
-                      }}
-                    >
-                      {!frame.last_successful_deploy_at
-                        ? 'First deploy'
-                        : `Save & ${requiresRecompilation ? 'full deploy' : 'fast deploy'}`}
-                    </Button>
-                  )}
+                  ) : frameControlMode ? (
+                      <Button
+                        color={unsavedChanges || undeployedChanges ? 'primary' : 'secondary'}
+                        type="button"
+                        onClick={() => {
+                          saveFrame()
+                          fastDeployFrame()
+                          openLogs()
+                        }}
+                      >
+                        Reload
+                      </Button>
+                    ) : (
+                      <Button
+                        color={unsavedChanges || undeployedChanges ? 'primary' : 'secondary'}
+                        type="button"
+                        onClick={() => {
+                          saveFrame()
+                          deployFrame()
+                          openLogs()
+                        }}
+                      >
+                        {!frame.last_successful_deploy_at
+                          ? 'First deploy'
+                          : `Save & ${requiresRecompilation ? 'full deploy' : 'fast deploy'}`}
+                      </Button>
+                    )}
                 </div>
                 <SDCardModal />
               </div>

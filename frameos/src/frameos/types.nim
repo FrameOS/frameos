@@ -14,6 +14,7 @@ type
     httpsProxy*: HttpsProxyConfig
     frameAccessKey*: string
     frameAccess*: string
+    frameAdminAuth*: JsonNode
     width*: int
     height*: int
     device*: string

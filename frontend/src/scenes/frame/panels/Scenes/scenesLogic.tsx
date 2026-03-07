@@ -10,6 +10,9 @@ import { controlLogic } from './controlLogic'
 import equal from 'fast-deep-equal'
 import { collectSecretSettingsFromScenes } from '../secretSettings'
 import { apiFetch } from '../../../../utils/apiFetch'
+import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
+import { frameAssetsApiPath } from '../../../../utils/frameAssetsApi'
+import { uploadFileInChunks } from '../../../../utils/uploadFileInChunks'
 import { buildSdCardImageScene } from './sceneShortcuts'
 import { socketLogic } from '../../../socketLogic'
 
@@ -43,7 +46,7 @@ export const scenesLogic = kea<scenesLogicType>([
     logic: [socketLogic],
     values: [
       frameLogic({ frameId }),
-      ['frame', 'frameForm', 'lastDeploy'],
+      ['frame', 'frameForm', 'lastDeploy', 'isFrameAdminMode'],
       appsModel,
       ['apps'],
       controlLogic({ frameId }),
@@ -156,7 +159,7 @@ export const scenesLogic = kea<scenesLogicType>([
       },
     },
   })),
-  reducers({
+  reducers(() => ({
     search: [
       '',
       {
@@ -318,14 +321,18 @@ export const scenesLogic = kea<scenesLogicType>([
         },
       },
     ],
-  }),
+  })),
   selectors({
     frameId: [() => [(_, props: ScenesLogicProps) => props.frameId], (frameId) => frameId],
     editingFrame: [(s) => [s.frameForm, s.frame], (frameForm, frame) => frameForm || frame || null],
     rawScenes: [(s) => [s.editingFrame], (frame): FrameScene[] => frame.scenes ?? []],
     undeployedSceneIds: [
-      (s) => [s.rawScenes, s.frame],
-      (scenes, frame): Set<string> => {
+      (s) => [s.rawScenes, s.frame, s.isFrameAdminMode],
+      (scenes, frame, isFrameAdminMode): Set<string> => {
+        if (isFrameAdminMode) {
+          return new Set<string>()
+        }
+
         const deployedScenes: FrameScene[] = frame?.last_successful_deploy?.scenes ?? []
         const undeployed = new Set<string>()
 
@@ -567,16 +574,26 @@ export const scenesLogic = kea<scenesLogicType>([
     },
     uploadImage: async ({ file }) => {
       try {
-        const formData = new FormData()
-        formData.append('file', file)
-        const response = await apiFetch(`/api/frames/${props.frameId}/assets/upload_image`, {
-          method: 'POST',
-          body: formData,
-        })
-        if (!response.ok) {
-          throw new Error('Image upload failed')
-        }
-        const payload = await response.json()
+        const uploadPath = frameAssetsApiPath(props.frameId, 'assets/upload_image')
+        const payload = isInFrameAdminMode()
+          ? await uploadFileInChunks({
+              frameId: props.frameId,
+              suffix: 'assets/upload_image',
+              file,
+              filename: file.name,
+            })
+          : await (async () => {
+              const formData = new FormData()
+              formData.append('file', file)
+              const response = await apiFetch(uploadPath, {
+                method: 'POST',
+                body: formData,
+              })
+              if (!response.ok) {
+                throw new Error('Image upload failed')
+              }
+              return await response.json()
+            })()
         const assetsPath = values.frameForm.assets_path || '/srv/assets'
         const relativePath = payload?.path || ''
         const filename = payload?.filename || relativePath.split('/').pop() || file.name
