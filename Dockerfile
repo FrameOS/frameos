@@ -34,6 +34,10 @@ ENV PATH="/opt/nim/bin:${PATH}"
 RUN nim --version && \
     nimble --version
 
+# frameos/frontend asset compilation depends on the pnpm workspace root too.
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml /app/
+COPY frontend/package.json /app/frontend/package.json
+
 # frameos/frontend needs files from the backend frontend/
 COPY frontend/src /app/frontend/src
 COPY frontend/schema /app/frontend/schema
@@ -114,7 +118,7 @@ WORKDIR /tmp
 
 # Install pnpm and seed the workspace manifests for dependency caching
 RUN npm install -g pnpm@10.27.0
-COPY pnpm-workspace.yaml pnpm-lock.yaml /tmp/
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml /tmp/
 COPY frontend/package.json /tmp/frontend/package.json
 COPY frameos/frontend/package.json /tmp/frameos/frontend/package.json
 RUN pnpm install --filter @frameos/frontend --frozen-lockfile
