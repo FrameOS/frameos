@@ -139,7 +139,7 @@ proc assetPayloadForPath*(path: string): JsonNode =
   let info = getFileInfo(fullPath)
   %*{
     "path": fullPath,
-    "size": if isDir: 0 else: info.size,
+    "size": if isDir: BiggestInt(0) else: info.size,
     "mtime": info.lastWriteTime.toUnix(),
     "is_dir": isDir,
   }
@@ -403,7 +403,7 @@ proc frameAssetsPayload*(): JsonNode =
       let info = getFileInfo(path)
       assets.add(%*{
         "path": path,
-        "size": if kind == pcFile: info.size else: 0,
+        "size": if kind == pcFile: info.size else: BiggestInt(0),
         "mtime": info.lastWriteTime.toUnix(),
         "is_dir": kind == pcDir,
       })
