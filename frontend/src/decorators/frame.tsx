@@ -1,5 +1,5 @@
 import { Spinner } from '../components/Spinner'
-import { FrameType } from '../types'
+import { FrameOSSettings, FrameType } from '../types'
 import { frameAdminPath } from '../utils/frameAdmin'
 
 export function frameHost(frame: FrameType): string {
@@ -58,8 +58,18 @@ export function frameUrl(frame: FrameType): string | null {
   }
 }
 
-function frameControlPath(frame: FrameType): string {
-  const adminAuth = frame.frame_admin_auth
+function resolvedFrameAdminAuth(
+  frame: FrameType,
+  settings?: Pick<FrameOSSettings, 'frameAdminAuth'>
+): FrameType['frame_admin_auth'] | undefined {
+  if (frame.frame_admin_auth?.useGlobal ?? true) {
+    return settings?.frameAdminAuth
+  }
+  return frame.frame_admin_auth
+}
+
+function frameControlPath(frame: FrameType, settings?: Pick<FrameOSSettings, 'frameAdminAuth'>): string {
+  const adminAuth = resolvedFrameAdminAuth(frame, settings)
   if (
     adminAuth?.enabled &&
     (adminAuth.provider ?? 'local') === 'local' &&
@@ -71,8 +81,8 @@ function frameControlPath(frame: FrameType): string {
   return '/c'
 }
 
-export function frameControlUrl(frame: FrameType): string | null {
-  const url = frameRootUrl(frame) + frameControlPath(frame)
+export function frameControlUrl(frame: FrameType, settings?: Pick<FrameOSSettings, 'frameAdminAuth'>): string | null {
+  const url = frameRootUrl(frame) + frameControlPath(frame, settings)
   if (frame.frame_access === 'public') {
     return url
   } else {

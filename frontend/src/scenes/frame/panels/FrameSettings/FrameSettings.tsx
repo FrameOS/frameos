@@ -168,7 +168,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
   const { logs, ipAddresses } = useValues(logsLogic({ frameId }))
   const { savedSettings } = useValues(settingsLogic)
   const url = frameUrl(frame)
-  const controlUrl = frameControlUrl(frame)
+  const controlUrl = frameControlUrl(frame, savedSettings)
   const imageUrl = frameImageUrl(frame)
   const tlsEnabled = !!(frameForm.https_proxy?.enable ?? frame.https_proxy?.enable)
   const inFrameAdminMode = isInFrameAdminMode()

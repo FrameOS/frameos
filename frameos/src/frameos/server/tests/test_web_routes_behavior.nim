@@ -76,6 +76,27 @@ suite "web route behavior":
     check setupGet.status == 302
     check setupGet.header("location") == "/"
 
+  test "login assets load on private frames when admin auth is enabled":
+    var config = defaultFrameConfig()
+    config.frameAdminAuth = %*{
+      "enabled": true,
+      "user": "admin",
+      "pass": "secret",
+    }
+    configureServerState(config)
+
+    let loginPage = httpRequest(server.port, "GET", "/login")
+    check loginPage.status == 200
+
+    let loginJs = httpRequest(server.port, "GET", "/static/main.js")
+    check loginJs.status == 200
+
+    let loginCss = httpRequest(server.port, "GET", "/static/main.css")
+    check loginCss.status == 200
+
+    let unrelatedPrivateAsset = httpRequest(server.port, "GET", "/static/asset-4X3RUWXO.png")
+    check unrelatedPrivateAsset.status == 401
+
   test "unauthorized gated routes return 401":
     let config = defaultFrameConfig()
     configureServerState(config)

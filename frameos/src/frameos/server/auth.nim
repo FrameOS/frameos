@@ -42,7 +42,7 @@ template frameAccessMode(): string =
   {.gcsafe.}:
     globalFrameConfig.frameAccess
 
-template frameAccessKeyValue(): string =
+template frameAccessKeyValue*(): string =
   {.gcsafe.}:
     globalFrameConfig.frameAccessKey
 
