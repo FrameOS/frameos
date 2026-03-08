@@ -1,5 +1,6 @@
 import std/[json, os, strutils, unittest]
 
+import ../state
 import ./helpers/http_harness
 
 var server = startRouterServer(19333)
@@ -217,3 +218,56 @@ suite "frame api route behavior":
     check found.status == 200
     check found.header("content-type") == "application/octet-stream"
     check found.body == "hello asset"
+
+  test "metrics endpoint returns stored metrics logs only":
+    var config = defaultFrameConfig()
+    config.frameAdminAuth = %*{
+      "enabled": true,
+      "user": "admin",
+      "pass": "secret",
+    }
+    configureServerState(config)
+
+    storeUiLog(%*{
+      "id": 1,
+      "timestamp": "2026-03-08T10:00:00Z",
+      "ip": "",
+      "type": "webhook",
+      "line": $(%*{"event": "metrics", "cpuUsage": 42.5, "openFileDescriptors": 17}),
+      "frame_id": 1,
+    })
+    storeUiLog(%*{
+      "id": 2,
+      "timestamp": "2026-03-08T10:00:05Z",
+      "ip": "",
+      "type": "webhook",
+      "line": $(%*{"event": "http", "path": "/ping"}),
+      "frame_id": 1,
+    })
+
+    let login = httpRequest(
+      server.port,
+      "POST",
+      "/api/admin/login",
+      headers = [("Content-Type", "application/json")],
+      body = $(%*{"username": "admin", "password": "secret"}),
+    )
+    let adminCookie = adminCookieFrom(login)
+
+    let response = httpRequest(
+      server.port,
+      "GET",
+      "/api/frames/1/metrics?k=test-key",
+      headers = [("Cookie", adminCookie)],
+    )
+    check response.status == 200
+
+    let payload = parseJson(response.body)["metrics"]
+    check payload.kind == JArray
+    check payload.len == 1
+    check payload[0]["id"].getStr() == "1"
+    check payload[0]["timestamp"].getStr() == "2026-03-08T10:00:00Z"
+    check payload[0]["frame_id"].getInt() == 1
+    check payload[0]["metrics"]["cpuUsage"].getFloat() == 42.5
+    check payload[0]["metrics"]["openFileDescriptors"].getInt() == 17
+    check not payload[0]["metrics"].hasKey("event")

@@ -112,7 +112,7 @@ proc addFrameApiRoutes*(router: var Router, connectionsState: ConnectionsState) 
       if not requestedFrameMatches(request):
         request.respond(Http404, body = "Not found!")
       else:
-        jsonResponse(request, Http200, %*{"metrics": %*[]})
+        jsonResponse(request, Http200, %*{"metrics": getUiMetrics()})
   )
 
   router.get("/api/frames/@id/assets", proc(request: Request) {.gcsafe.} =

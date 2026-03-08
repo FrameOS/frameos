@@ -88,3 +88,31 @@ proc getUiLogs*(): JsonNode =
   {.gcsafe.}:
     withLock globalRecentLogsLock:
       return %*globalRecentLogs
+
+proc getUiMetrics*(): JsonNode =
+  result = newJArray()
+  {.gcsafe.}:
+    withLock globalRecentLogsLock:
+      for logEntry in globalRecentLogs:
+        try:
+          if not logEntry.hasKey("line"):
+            continue
+          let payload = parseJson(logEntry["line"].getStr())
+          if payload.kind != JObject:
+            continue
+          if not payload.hasKey("event") or payload["event"].getStr() != "metrics":
+            continue
+
+          var metricsPayload = newJObject()
+          for key, value in payload:
+            if key != "event":
+              metricsPayload[key] = value
+
+          result.add(%*{
+            "id": $logEntry["id"].getInt(),
+            "timestamp": logEntry["timestamp"].getStr(),
+            "frame_id": logEntry["frame_id"].getInt(),
+            "metrics": metricsPayload,
+          })
+        except CatchableError:
+          discard

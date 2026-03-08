@@ -1,4 +1,4 @@
-import std/[json, net, os, strutils, tables]
+import std/[json, locks, net, os, strutils, tables]
 import mummy
 import mummy/routers
 
@@ -12,11 +12,12 @@ type
     server*: mummy.Server
     port*: int
     thread*: Thread[tuple[server: mummy.Server, port: Port]]
-
   TestResponse* = object
     status*: int
     headers*: Table[string, string]
     body*: string
+
+var recentLogsLockInitialized = false
 
 proc serverThread(args: tuple[server: mummy.Server, port: Port]) {.thread.} =
   try:
@@ -82,6 +83,11 @@ proc configureServerState*(config: FrameConfig, hotspotActive = false) =
     sleepHook = portalSleepHookNoop,
     autoTimeoutEnabledHook = portalAutoTimeoutDisabled,
   )
+  if not recentLogsLockInitialized:
+    initLock(globalRecentLogsLock)
+    recentLogsLockInitialized = true
+  globalRecentLogs = @[]
+  globalRecentLogId = 0
   globalFrameConfig = config
   globalFrameOS = FrameOS(
     frameConfig: config,
