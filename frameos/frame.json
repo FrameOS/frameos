@@ -20,6 +20,7 @@
   "metricsInterval": 60.0,
   "scalingMode": "cover",
   "frameAccess": "public",
+  "frameAdminAuth": { "user": "admin", "pass": "adminadmin!!!", "enabled": true },
   "logToFile": "./tmp/frameos.log",
   "assetsPath": "./tmp",
   "saveAssets": false,
