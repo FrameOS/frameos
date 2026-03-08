@@ -4,13 +4,13 @@ import threadpool
 import mummy
 import mummy/routers
 import httpcore
-import assets/frame_web as frameWebAssets
 import frameos/channels
 import frameos/types
 import frameos/portal as netportal
 import ../state
 import ../auth
 import ../api
+import ../embedded_assets
 import ./common
 
 proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, adminConnectionsState: ConnectionsState) =
@@ -90,7 +90,7 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
         return
       let assetPath = "assets/compiled/frame_web/static/" & request.pathParams["asset"]
       try:
-        let asset = frameWebAssets.getAsset(assetPath)
+        let asset = getFrameWebAsset(assetPath)
         var headers: mummy.HttpHeaders
         headers["Content-Type"] = contentTypeForAsset(assetPath)
         request.respond(Http200, headers, asset)

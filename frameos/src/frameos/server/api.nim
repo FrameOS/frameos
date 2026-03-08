@@ -9,7 +9,6 @@ import checksums/md5
 import zippy
 import mummy
 import httpcore
-import assets/web as webAssets
 import assets/apps as appsAsset
 import drivers/drivers as drivers
 import frameos/apps
@@ -20,6 +19,7 @@ import frameos/config
 from frameos/scenes import getLastImagePng, getLastPublicState, getAllPublicStates, getUploadedScenePayload,
     getDynamicSceneOptions
 from scenes/scenes import sceneOptions
+import ./embedded_assets
 import ./state
 
 proc h*(message: string): string =
@@ -642,7 +642,7 @@ proc renderControlPage*(request: Request) =
 
   fieldsHtml.add("<input type='submit' id='setSceneState' value='Set Scene State'>")
   {.gcsafe.}:
-    let controlHtml = webAssets.getAsset("assets/compiled/web/control.html").
+    let controlHtml = getWebAsset("assets/compiled/web/control.html").
       replace("/*$$fieldsHtml$$*/", fieldsHtml).
       replace("/*$$fieldsSubmitHtml$$*/", fieldsSubmitHtml).
       replace("/*$$sceneOptionsHtml$$*/", sceneOptionsHtml).
