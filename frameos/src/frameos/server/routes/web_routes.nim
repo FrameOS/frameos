@@ -37,6 +37,8 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
       if netportal.isHotspotActive(globalFrameOS):
         log(%*{"event": "portal:http", "get": request.path})
         request.respond(Http200, body = netportal.setupHtml(globalFrameOS))
+      elif not adminAuthEnabled():
+        request.respond(Http401, body = "Admin auth disabled")
       else:
         let accessKey = globalFrameConfig.frameAccessKey
         if accessKey != "" and request.queryParams.contains("k") and request.queryParams["k"] == accessKey:
@@ -55,13 +57,19 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
   )
 
   router.get("/control", proc(request: Request) {.gcsafe.} =
-    var headers: mummy.HttpHeaders
-    headers["Location"] = "/admin"
-    request.respond(Http302, headers)
+    if not adminAuthEnabled():
+      request.respond(Http401, body = "Admin auth disabled")
+    else:
+      var headers: mummy.HttpHeaders
+      headers["Location"] = "/admin"
+      request.respond(Http302, headers)
   )
 
   router.get("/login", proc(request: Request) {.gcsafe.} =
-    request.respond(Http200, body = frameWebHtml())
+    if not adminAuthEnabled():
+      request.respond(Http401, body = "Admin auth disabled")
+    else:
+      request.respond(Http200, body = frameWebHtml())
   )
 
   router.get("/logout", proc(request: Request) {.gcsafe.} =

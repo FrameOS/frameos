@@ -52,17 +52,20 @@ suite "web route behavior":
     config.frameAdminAuth = %*{}
     configureServerState(config)
     let adminUnauthorized = httpRequest(server.port, "GET", "/admin")
-    check adminUnauthorized.status == 302
-    check adminUnauthorized.header("location") == "/login"
+    check adminUnauthorized.status == 401
+    check adminUnauthorized.body.contains("Admin auth disabled")
+
+    let loginDisabled = httpRequest(server.port, "GET", "/login")
+    check loginDisabled.status == 401
+    check loginDisabled.body.contains("Admin auth disabled")
 
     let adminAccessKey = httpRequest(server.port, "GET", "/admin?k=test-key")
-    check adminAccessKey.status == 302
-    check adminAccessKey.header("location") == "/login"
-    check adminAccessKey.header("set-cookie").contains("frame_access_key=test-key")
+    check adminAccessKey.status == 401
+    check adminAccessKey.body.contains("Admin auth disabled")
 
     let controlResponse = httpRequest(server.port, "GET", "/control")
-    check controlResponse.status == 302
-    check controlResponse.header("location") == "/admin"
+    check controlResponse.status == 401
+    check controlResponse.body.contains("Admin auth disabled")
 
     let logoutResponse = httpRequest(server.port, "GET", "/logout")
     check logoutResponse.status == 302
