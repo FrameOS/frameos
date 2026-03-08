@@ -47,6 +47,7 @@ const FRAME_KEYS: (keyof FrameType)[] = [
   'frame_port',
   'frame_access_key',
   'frame_access',
+  'frame_admin_auth',
   'https_proxy',
   'ssh_user',
   'ssh_pass',
@@ -121,6 +122,7 @@ const FRAME_KEY_LABELS: Partial<Record<keyof FrameType, string>> = {
   frame_port: 'Frame port',
   frame_access_key: 'Frame access key',
   frame_access: 'Frame access',
+  frame_admin_auth: 'Frame admin auth',
   https_proxy: 'HTTPS proxy',
   ssh_user: 'SSH user',
   ssh_pass: 'SSH password',
@@ -415,6 +417,19 @@ function hasValidPosition(node: DiagramNode): boolean {
 function sanitizeFrame(frame: Partial<FrameType>): Partial<FrameType> {
   return {
     ...frame,
+    frame_admin_auth: {
+      useGlobal: frame.frame_admin_auth?.useGlobal ?? true,
+      provider: frame.frame_admin_auth?.provider ?? 'local',
+      enabled: frame.frame_admin_auth?.enabled ?? false,
+      user: frame.frame_admin_auth?.user ?? '',
+      pass: frame.frame_admin_auth?.pass ?? '',
+      permissions: {
+        writeAccess: frame.frame_admin_auth?.permissions?.writeAccess ?? true,
+        accessAssets: frame.frame_admin_auth?.permissions?.accessAssets ?? true,
+        modifyScenes: frame.frame_admin_auth?.permissions?.modifyScenes ?? true,
+        controlFrame: frame.frame_admin_auth?.permissions?.controlFrame ?? true,
+      },
+    },
     scenes: frame.scenes?.map((scene) => sanitizeScene(scene, frame)) ?? [],
   }
 }

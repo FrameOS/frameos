@@ -310,3 +310,45 @@ suite "admin api route behavior":
     )
     check deleteRenamed.status == 200
     check not dirExists(assetsRoot / "renamed")
+
+
+  test "asset endpoints return 403 when asset access is disabled":
+    var config = defaultFrameConfig()
+    config.frameAdminAuth = %*{
+      "enabled": true,
+      "user": "admin",
+      "pass": "secret",
+      "permissions": %*{
+        "accessAssets": false,
+      },
+    }
+    let assetsRoot = getTempDir() / "frameos-frame-api-assets-disabled"
+    createDir(assetsRoot)
+    writeFile(assetsRoot / "hello.txt", "hello asset")
+    config.assetsPath = assetsRoot
+    configureServerState(config)
+
+    let login = httpRequest(
+      server.port,
+      "POST",
+      "/api/admin/login",
+      headers = [("Content-Type", "application/json")],
+      body = $(%*{"username": "admin", "password": "secret"}),
+    )
+    let adminCookie = adminCookieFrom(login)
+
+    let listAssets = httpRequest(
+      server.port,
+      "GET",
+      "/api/frames/1/assets?k=test-key",
+      headers = [("Cookie", adminCookie)],
+    )
+    check listAssets.status == 403
+
+    let getAsset = httpRequest(
+      server.port,
+      "GET",
+      "/api/frames/1/asset?path=hello.txt&k=test-key",
+      headers = [("Cookie", adminCookie)],
+    )
+    check getAsset.status == 403

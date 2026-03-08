@@ -8,6 +8,19 @@ export interface FrameType {
   frame_port: number
   frame_access_key: string
   frame_access: string
+  frame_admin_auth?: {
+    useGlobal?: boolean
+    provider?: 'local' | 'backend' | 'cloud'
+    enabled?: boolean
+    user?: string
+    pass?: string
+    permissions?: {
+      writeAccess?: boolean
+      accessAssets?: boolean
+      modifyScenes?: boolean
+      controlFrame?: boolean
+    }
+  }
   https_proxy?: {
     enable?: boolean
     port?: number
@@ -631,9 +644,17 @@ export interface FrameOSSettings {
     sshPublicKey?: string
   }
   frameAdminAuth?: {
+    useGlobal?: boolean
+    provider?: 'local' | 'backend' | 'cloud'
     enabled?: boolean
     user?: string
     pass?: string
+    permissions?: {
+      writeAccess?: boolean
+      accessAssets?: boolean
+      modifyScenes?: boolean
+      controlFrame?: boolean
+    }
   }
 }
 

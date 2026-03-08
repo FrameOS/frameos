@@ -11,6 +11,12 @@ import ../api
 import ../state
 import ./common
 
+proc ensureAdminAssetsAccess(request: Request): bool =
+  if not hasAssetsAccessPermission():
+    request.respond(Http403, body = "Assets access disabled")
+    return false
+  true
+
 proc addAdminApiRoutes*(router: var Router) =
   router.get("/api/admin/session", proc(request: Request) {.gcsafe.} =
     let authenticated = hasAuthenticatedAdminSession(request)
@@ -45,6 +51,8 @@ proc addAdminApiRoutes*(router: var Router) =
     if not hasAuthenticatedAdminSession(request):
       request.respond(Http401, body = "Unauthorized")
       return
+    if not ensureAdminAssetsAccess(request):
+      return
     {.gcsafe.}:
       if not requestedFrameMatches(request):
         request.respond(Http404, body = "Not found!")
@@ -55,6 +63,8 @@ proc addAdminApiRoutes*(router: var Router) =
   router.get("/api/admin/frames/@id/asset", proc(request: Request) {.gcsafe.} =
     if not hasAuthenticatedAdminSession(request):
       request.respond(Http401, body = "Unauthorized")
+      return
+    if not ensureAdminAssetsAccess(request):
       return
     {.gcsafe.}:
       if not requestedFrameMatches(request):
@@ -69,6 +79,8 @@ proc addAdminApiRoutes*(router: var Router) =
   router.post("/api/admin/frames/@id/assets/upload", proc(request: Request) {.gcsafe.} =
     if not hasAuthenticatedAdminSession(request):
       request.respond(Http401, body = "Unauthorized")
+      return
+    if not ensureAdminAssetsAccess(request):
       return
     {.gcsafe.}:
       if not requestedFrameMatches(request):
@@ -116,6 +128,8 @@ proc addAdminApiRoutes*(router: var Router) =
     if not hasAuthenticatedAdminSession(request):
       request.respond(Http401, body = "Unauthorized")
       return
+    if not ensureAdminAssetsAccess(request):
+      return
     {.gcsafe.}:
       if not requestedFrameMatches(request):
         request.respond(Http404, body = "Not found!")
@@ -159,6 +173,8 @@ proc addAdminApiRoutes*(router: var Router) =
     if not hasAuthenticatedAdminSession(request):
       request.respond(Http401, body = "Unauthorized")
       return
+    if not ensureAdminAssetsAccess(request):
+      return
     {.gcsafe.}:
       if not requestedFrameMatches(request):
         request.respond(Http404, body = "Not found!")
@@ -176,6 +192,8 @@ proc addAdminApiRoutes*(router: var Router) =
   router.post("/api/admin/frames/@id/assets/delete", proc(request: Request) {.gcsafe.} =
     if not hasAuthenticatedAdminSession(request):
       request.respond(Http401, body = "Unauthorized")
+      return
+    if not ensureAdminAssetsAccess(request):
       return
     {.gcsafe.}:
       if not requestedFrameMatches(request):
@@ -196,6 +214,8 @@ proc addAdminApiRoutes*(router: var Router) =
   router.post("/api/admin/frames/@id/assets/rename", proc(request: Request) {.gcsafe.} =
     if not hasAuthenticatedAdminSession(request):
       request.respond(Http401, body = "Unauthorized")
+      return
+    if not ensureAdminAssetsAccess(request):
       return
     {.gcsafe.}:
       if not requestedFrameMatches(request):

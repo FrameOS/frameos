@@ -957,6 +957,52 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
             />
           </Field>
         </div>
+
+        <H6>Frame admin panel auth (override)</H6>
+        <div className="pl-2 @md:pl-8 space-y-2">
+          <Field name="frame_admin_auth.useGlobal" label="Use global settings">
+            <Switch />
+          </Field>
+          {!frameForm.frame_admin_auth?.useGlobal ? (
+            <>
+              <Field name="frame_admin_auth.provider" label="Auth provider">
+                <Select
+                  options={[
+                    { value: 'local', label: 'Local username/password' },
+                    { value: 'backend', label: 'Backend auth (coming soon)' },
+                    { value: 'cloud', label: 'Cloud auth (coming soon)' },
+                  ]}
+                />
+              </Field>
+              <Field name="frame_admin_auth.enabled" label="Enable admin panel auth">
+                <Switch />
+              </Field>
+              <H6 className="pt-2">Permissions</H6>
+              <Field name="frame_admin_auth.permissions.writeAccess" label="Write access">
+                <Switch />
+              </Field>
+              <Field name="frame_admin_auth.permissions.accessAssets" label="Access assets">
+                <Switch />
+              </Field>
+              <Field name="frame_admin_auth.permissions.modifyScenes" label="Modify scenes">
+                <Switch />
+              </Field>
+              <Field name="frame_admin_auth.permissions.controlFrame" label="Control frame / send events">
+                <Switch />
+              </Field>
+              {frameForm.frame_admin_auth?.provider === 'local' && frameForm.frame_admin_auth?.enabled ? (
+                <>
+                  <Field name="frame_admin_auth.user" label="Admin username">
+                    <TextInput />
+                  </Field>
+                  <Field name="frame_admin_auth.pass" label="Admin password">
+                    <TextInput type="password" />
+                  </Field>
+                </>
+              ) : null}
+            </>
+          ) : null}
+        </div>
         <H6 id="frame-http-proxy-section">
           HTTPS proxy <span className="text-gray-500">(backend &#8594; frame)</span>
         </H6>

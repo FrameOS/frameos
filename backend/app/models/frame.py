@@ -70,6 +70,7 @@ class Frame(Base):
     frame_port = mapped_column(Integer, default=8787)
     frame_access_key = mapped_column(String(256), nullable=True)
     frame_access = mapped_column(String(50), nullable=True)
+    frame_admin_auth = mapped_column(JSON, nullable=True)
     https_proxy = mapped_column(JSON, nullable=True)
     ssh_user = mapped_column(String(50), nullable=True)
     ssh_pass = mapped_column(String(50), nullable=True)
@@ -128,6 +129,7 @@ class Frame(Base):
             'frame_port': self.frame_port,
             'frame_access_key': self.frame_access_key,
             'frame_access': self.frame_access,
+            'frame_admin_auth': self.frame_admin_auth,
             'https_proxy': _serialize_https_proxy(self.https_proxy),
             'ssh_user': self.ssh_user,
             'ssh_pass': self.ssh_pass,
@@ -430,15 +432,40 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
     for key in setting_keys:
         final_settings[key] = all_settings.get(key, None)
 
-    frame_admin_auth = all_settings.get('frameAdminAuth', {})
-    if not isinstance(frame_admin_auth, dict):
-        frame_admin_auth = {}
+    global_frame_admin_auth = all_settings.get('frameAdminAuth', {})
+    if not isinstance(global_frame_admin_auth, dict):
+        global_frame_admin_auth = {}
 
+    frame_level_frame_admin_auth = frame.frame_admin_auth
+    if not isinstance(frame_level_frame_admin_auth, dict):
+        frame_level_frame_admin_auth = {}
+
+    use_global_frame_admin_auth = bool(frame_level_frame_admin_auth.get('useGlobal', True))
+    frame_admin_auth = global_frame_admin_auth if use_global_frame_admin_auth else frame_level_frame_admin_auth
+
+    frame_admin_auth_provider = str(frame_admin_auth.get('provider', 'local')).strip() or 'local'
     frame_admin_auth_user = str(frame_admin_auth.get('user', '')).strip()
     frame_admin_auth_pass = str(frame_admin_auth.get('pass', '')).strip()
-    frame_admin_auth_enabled = bool(frame_admin_auth.get('enabled', False)) and bool(frame_admin_auth_user) and bool(frame_admin_auth_pass)
+    frame_admin_auth_enabled = (
+        bool(frame_admin_auth.get('enabled', False))
+        and frame_admin_auth_provider == 'local'
+        and bool(frame_admin_auth_user)
+        and bool(frame_admin_auth_pass)
+    )
+    frame_admin_auth_permissions = frame_admin_auth.get('permissions', {})
+    if not isinstance(frame_admin_auth_permissions, dict):
+        frame_admin_auth_permissions = {}
+
     frame_json['frameAdminAuth'] = {
+        'useGlobal': use_global_frame_admin_auth,
+        'provider': frame_admin_auth_provider,
         'enabled': frame_admin_auth_enabled,
+        'permissions': {
+            'writeAccess': bool(frame_admin_auth_permissions.get('writeAccess', True)),
+            'accessAssets': bool(frame_admin_auth_permissions.get('accessAssets', True)),
+            'modifyScenes': bool(frame_admin_auth_permissions.get('modifyScenes', True)),
+            'controlFrame': bool(frame_admin_auth_permissions.get('controlFrame', True)),
+        },
         **({'user': frame_admin_auth_user, 'pass': frame_admin_auth_pass} if frame_admin_auth_enabled else {}),
     }
 

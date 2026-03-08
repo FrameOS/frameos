@@ -25,7 +25,19 @@ function setDefaultSettings(settings: Partial<FrameOSSettings> | Record<string, 
     unsplash: settings.unsplash ?? {},
     nix: settings.nix ?? {},
     buildHost: settings.buildHost ?? {},
-    frameAdminAuth: settings.frameAdminAuth ?? { enabled: false, user: "", pass: "" },
+    frameAdminAuth: settings.frameAdminAuth ?? {
+      useGlobal: true,
+      provider: 'local',
+      enabled: false,
+      user: "",
+      pass: "",
+      permissions: {
+        writeAccess: true,
+        accessAssets: true,
+        modifyScenes: true,
+        controlFrame: true,
+      },
+    },
   }
 }
 

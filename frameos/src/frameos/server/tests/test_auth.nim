@@ -160,3 +160,18 @@ suite "Server auth helpers":
     let invalid = makeRequest(headers = @[("cookie", ADMIN_SESSION_COOKIE & "=bad-token")])
     check hasAdminSession(valid)
     check not hasAdminSession(invalid)
+
+
+  test "hasAccess write path can be disabled via frame admin permissions":
+    globalFrameConfig = FrameConfig(
+      frameAccess: "public",
+      frameAccessKey: "",
+      frameAdminAuth: %*{
+        "permissions": %*{
+          "writeAccess": false,
+        },
+      },
+    )
+
+    check hasAccess(makeRequest(), Read)
+    check not hasAccess(makeRequest(), Write)

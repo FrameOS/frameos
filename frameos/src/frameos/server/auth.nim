@@ -34,9 +34,34 @@ template adminAuthPass(): string =
   {.gcsafe.}:
     globalFrameConfig.frameAdminAuth{"pass"}.getStr("")
 
+template adminAuthPermissions(): JsonNode =
+  {.gcsafe.}:
+    globalFrameConfig.frameAdminAuth{"permissions"}
+
+template frameAccessMode(): string =
+  {.gcsafe.}:
+    globalFrameConfig.frameAccess
+
+template frameAccessKeyValue(): string =
+  {.gcsafe.}:
+    globalFrameConfig.frameAccessKey
+
+template adminAuthPermissionEnabled*(permission: string, defaultValue = true): bool =
+  let permissions = adminAuthPermissions()
+  if permissions != nil and permissions.kind == JObject and permissions.hasKey(permission):
+    return permissions{permission}.getBool(defaultValue)
+  defaultValue
+
+proc hasWriteAccessPermission*(): bool {.gcsafe.} =
+  adminAuthPermissionEnabled("writeAccess", true)
+
+proc hasAssetsAccessPermission*(): bool {.gcsafe.} =
+  adminAuthPermissionEnabled("accessAssets", true)
+
 template adminAuthEnabled*(): bool =
   {.gcsafe.}:
     globalFrameConfig.frameAdminAuth{"enabled"}.getBool(false) and
+      globalFrameConfig.frameAdminAuth{"provider"}.getStr("local") == "local" and
       globalFrameConfig.frameAdminAuth{"user"}.getStr("").len > 0 and
       globalFrameConfig.frameAdminAuth{"pass"}.getStr("").len > 0
 
@@ -78,12 +103,15 @@ proc hasAuthenticatedAdminSession*(request: Request): bool =
 
 proc hasAccess*(request: Request, accessType: AccessType): bool =
   {.gcsafe.}:
+    if accessType == Write and not hasWriteAccessPermission():
+      return false
+
     if hasAuthenticatedAdminSession(request):
       return true
-    let access = globalFrameConfig.frameAccess
+    let access = frameAccessMode()
     if access == "public" or (access == "protected" and accessType == Read):
       return true
-    let accessKey = globalFrameConfig.frameAccessKey
+    let accessKey = frameAccessKeyValue()
     if accessKey == "":
       return false
     if request.queryParams.contains("k") and request.queryParams["k"] == accessKey:

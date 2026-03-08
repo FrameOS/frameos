@@ -31,6 +31,7 @@ class FrameBase(BaseModel):
     frame_port: int
     frame_access_key: Optional[str]
     frame_access: Optional[str]
+    frame_admin_auth: Optional[Dict[str, Any]] = None
     https_proxy: Optional[FrameHttpsProxy] = None
     ssh_user: Optional[str]
     ssh_pass: Optional[str]
@@ -98,6 +99,7 @@ class FrameUpdateRequest(BaseModel):
     frame_port: Optional[int] = None
     frame_access_key: Optional[str] = None
     frame_access: Optional[str] = None
+    frame_admin_auth: Optional[Dict[str, Any]] = None
     https_proxy: Optional[FrameHttpsProxy] = None
     ssh_user: Optional[str] = None
     ssh_pass: Optional[str] = None
