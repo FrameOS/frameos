@@ -56,7 +56,7 @@ proc initServerGlobals(frameOS: FrameOS) =
   globalFrameOS = frameOS
   globalFrameConfig = frameOS.frameConfig
   globalRunner = frameOS.runner
-  globalAdminSessionSalt = getOrCreateAdminSessionSalt(getConfigFilename())
+  setGlobalAdminSessionSalt(getOrCreateAdminSessionSalt(getConfigFilename()))
   initLock(globalRecentLogsLock)
   globalRecentLogs = @[]
   globalRecentLogId = 0

@@ -58,6 +58,7 @@ suite "web route behavior":
     let adminAccessKey = httpRequest(server.port, "GET", "/admin?k=test-key")
     check adminAccessKey.status == 302
     check adminAccessKey.header("location") == "/login"
+    check adminAccessKey.header("set-cookie").contains("frame_access_key=test-key")
 
     let controlResponse = httpRequest(server.port, "GET", "/control")
     check controlResponse.status == 302

@@ -76,6 +76,75 @@ export function Frame(props: FrameSceneProps) {
     window.location.href = '/login'
   }
 
+  const dropdownItems = inFrameAdminMode
+    ? [{ label: 'Logout', onClick: logoutFromFrame }]
+    : [
+        ...(canBuildSdImage ? [{ label: 'Build SD card...', onClick: () => openSDCardModal() }] : []),
+        { label: 'Re-Render', onClick: () => renderFrame() },
+        { label: 'Restart FrameOS', onClick: () => restartFrame() },
+        { label: 'Stop FrameOS', onClick: () => stopFrame() },
+        { label: 'Reboot device', onClick: () => rebootFrame() },
+        {
+          label: 'Fast deploy (reload)',
+          onClick: () => {
+            fastDeployFrame()
+            openLogs()
+          },
+        },
+        ...(!frameControlMode
+          ? [
+              {
+                label: 'Full deploy (recompile)',
+                onClick: () => {
+                  fullDeployFrame()
+                  openLogs()
+                },
+              },
+            ]
+          : []),
+        ...(frameControlMode ? [{ label: 'Logout', onClick: logoutFromFrame }] : []),
+        ...(canRestartAgent ? [{ label: 'Restart agent', onClick: () => restartAgent() }] : []),
+        ...(canDeployAgent
+          ? [
+              {
+                label: 'Deploy agent',
+                onClick: () => {
+                  deployAgent()
+                  openLogs()
+                },
+              },
+            ]
+          : []),
+        ...(canAgentRunCommands
+          ? [
+              {
+                label: <div className="border-t border-white w-full" />,
+              },
+              {
+                label: (
+                  <Form formKey="frameForm" logic={frameLogic} props={{ frameId }} enableFormOnSubmit>
+                    <Field name={['agent', 'deployWithAgent']}>
+                      {() => (
+                        <Switch
+                          leftLabel={<>Use: {!deployWithAgent ? <u>SSH</u> : 'SSH'}</>}
+                          label={
+                            <span className={'flex gap-1'}>
+                              {deployWithAgent ? <u>Agent</u> : 'Agent'} <FrameConnection frame={frame} />
+                            </span>
+                          }
+                          alwaysActive
+                          value={deployWithAgent}
+                          onChange={setDeployWithAgent}
+                        />
+                      )}
+                    </Field>
+                  </Form>
+                ),
+              },
+            ]
+          : []),
+      ]
+
   return (
     <BindLogic logic={frameLogic} props={frameLogicProps}>
       {frame ? (
@@ -93,7 +162,7 @@ export function Frame(props: FrameSceneProps) {
             }
             buttons={
               <div className="flex divide-x divide-gray-700 space-x-2">
-                {unsavedChanges ? (
+                {!inFrameAdminMode && unsavedChanges ? (
                   <Popover className="relative pr-2 text-[#9a9ad0] flex items-center">
                     {({ open }) => (
                       <>
@@ -141,7 +210,7 @@ export function Frame(props: FrameSceneProps) {
                       </>
                     )}
                   </Popover>
-                ) : undeployedChanges ? (
+                ) : !inFrameAdminMode && undeployedChanges ? (
                   <Popover className="relative pr-2 text-[#9a9ad0] flex items-center">
                     {({ open }) => (
                       <>
@@ -192,121 +261,58 @@ export function Frame(props: FrameSceneProps) {
                 <DropdownMenu
                   buttonColor="secondary"
                   className="items-center"
-                  items={[
-                    ...(canBuildSdImage ? [{ label: 'Build SD card...', onClick: () => openSDCardModal() }] : []),
-                    { label: 'Re-Render', onClick: () => renderFrame() },
-                    { label: 'Restart FrameOS', onClick: () => restartFrame() },
-                    { label: 'Stop FrameOS', onClick: () => stopFrame() },
-                    { label: 'Reboot device', onClick: () => rebootFrame() },
-                    {
-                      label: 'Fast deploy (reload)',
-                      onClick: () => {
-                        fastDeployFrame()
-                        openLogs()
-                      },
-                    },
-                    ...(!frameControlMode
-                      ? [
-                          {
-                            label: 'Full deploy (recompile)',
-                            onClick: () => {
-                              fullDeployFrame()
-                              openLogs()
-                            },
-                          },
-                        ]
-                      : []),
-                    ...(frameControlMode ? [{ label: 'Logout', onClick: logoutFromFrame }] : []),
-                    ...(canRestartAgent ? [{ label: 'Restart agent', onClick: () => restartAgent() }] : []),
-                    ...(canDeployAgent
-                      ? [
-                          {
-                            label: 'Deploy agent',
-                            onClick: () => {
-                              deployAgent()
-                              openLogs()
-                            },
-                          },
-                        ]
-                      : []),
-                    ...(canAgentRunCommands
-                      ? [
-                          {
-                            label: <div className="border-t border-white w-full" />,
-                          },
-                          {
-                            label: (
-                              <Form formKey="frameForm" logic={frameLogic} props={{ frameId }} enableFormOnSubmit>
-                                <Field name={['agent', 'deployWithAgent']}>
-                                  {() => (
-                                    <Switch
-                                      leftLabel={<>Use: {!deployWithAgent ? <u>SSH</u> : 'SSH'}</>}
-                                      label={
-                                        <span className={'flex gap-1'}>
-                                          {deployWithAgent ? <u>Agent</u> : 'Agent'} <FrameConnection frame={frame} />
-                                        </span>
-                                      }
-                                      alwaysActive
-                                      value={deployWithAgent}
-                                      onChange={setDeployWithAgent}
-                                    />
-                                  )}
-                                </Field>
-                              </Form>
-                            ),
-                          },
-                        ]
-                      : []),
-                  ]}
+                  items={dropdownItems}
                 />
-                <div className="flex pl-2 space-x-2">
-                  <Button
-                    color={unsavedChanges ? 'primary' : 'secondary'}
-                    type="button"
-                    onClick={() => saveFrame()}
-                    disabled={inFrameAdminMode}
-                    title={inFrameAdminMode ? 'Save is not implemented in frame admin mode yet.' : undefined}
-                  >
-                    Save
-                  </Button>
-                  {firstEverForNixOS ? (
-                    <Button
-                      color="primary"
-                      type="button"
-                      onClick={() => {
-                        openSDCardModal()
-                      }}
-                    >
-                      Download SD card .img
+                {inFrameAdminMode ? (
+                  <div className="flex pl-2 space-x-2">
+                    <Button color="secondary" type="button" onClick={() => renderFrame()}>
+                      Rerender
                     </Button>
-                  ) : frameControlMode ? (
+                  </div>
+                ) : (
+                  <div className="flex pl-2 space-x-2">
+                    <Button color={unsavedChanges ? 'primary' : 'secondary'} type="button" onClick={() => saveFrame()}>
+                      Save
+                    </Button>
+                    {firstEverForNixOS ? (
                       <Button
-                        color={unsavedChanges || undeployedChanges ? 'primary' : 'secondary'}
+                        color="primary"
                         type="button"
                         onClick={() => {
-                          saveFrame()
-                          fastDeployFrame()
-                          openLogs()
+                          openSDCardModal()
                         }}
                       >
-                        Reload
+                        Download SD card .img
                       </Button>
-                    ) : (
-                      <Button
-                        color={unsavedChanges || undeployedChanges ? 'primary' : 'secondary'}
-                        type="button"
-                        onClick={() => {
-                          saveFrame()
-                          deployFrame()
-                          openLogs()
-                        }}
-                      >
-                        {!frame.last_successful_deploy_at
-                          ? 'First deploy'
-                          : `Save & ${requiresRecompilation ? 'full deploy' : 'fast deploy'}`}
-                      </Button>
-                    )}
-                </div>
+                    ) : frameControlMode ? (
+                        <Button
+                          color={unsavedChanges || undeployedChanges ? 'primary' : 'secondary'}
+                          type="button"
+                          onClick={() => {
+                            saveFrame()
+                            fastDeployFrame()
+                            openLogs()
+                          }}
+                        >
+                          Reload
+                        </Button>
+                      ) : (
+                        <Button
+                          color={unsavedChanges || undeployedChanges ? 'primary' : 'secondary'}
+                          type="button"
+                          onClick={() => {
+                            saveFrame()
+                            deployFrame()
+                            openLogs()
+                          }}
+                        >
+                          {!frame.last_successful_deploy_at
+                            ? 'First deploy'
+                            : `Save & ${requiresRecompilation ? 'full deploy' : 'fast deploy'}`}
+                        </Button>
+                      )}
+                  </div>
+                )}
                 <SDCardModal />
               </div>
             }

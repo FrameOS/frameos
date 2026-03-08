@@ -50,12 +50,12 @@ suite "Server auth helpers":
 
   test "admin cookie hash is deterministic":
     configureAdmin(true, "admin", "secret")
-    globalAdminSessionSalt = "salt-one"
+    setGlobalAdminSessionSalt("salt-one")
     let first = adminSessionCookieValue()
     let second = adminSessionCookieValue()
     check first == second
 
-    globalAdminSessionSalt = "salt-two"
+    setGlobalAdminSessionSalt("salt-two")
     check first != adminSessionCookieValue()
 
   test "session salt can be persisted to disk":
@@ -109,7 +109,7 @@ suite "Server auth helpers":
     check hasAccess(bearerReq, Write)
 
   test "hasAccess accepts authenticated admin session without exposing auth-disabled installs":
-    globalAdminSessionSalt = "salt"
+    setGlobalAdminSessionSalt("salt")
     globalFrameConfig = FrameConfig(
       frameAccess: "private",
       frameAccessKey: "test-key",
@@ -150,11 +150,11 @@ suite "Server auth helpers":
 
   test "hasAdminSession validates cookie only when admin auth enabled":
     configureAdmin(false, "admin", "secret")
-    globalAdminSessionSalt = "salt"
+    setGlobalAdminSessionSalt("salt")
     check hasAdminSession(makeRequest())
 
     configureAdmin(true, "admin", "secret")
-    globalAdminSessionSalt = "salt"
+    setGlobalAdminSessionSalt("salt")
     let token = adminSessionCookieValue()
     let valid = makeRequest(headers = @[("cookie", ADMIN_SESSION_COOKIE & "=" & token)])
     let invalid = makeRequest(headers = @[("cookie", ADMIN_SESSION_COOKIE & "=bad-token")])

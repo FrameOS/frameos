@@ -37,16 +37,16 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
       if netportal.isHotspotActive(globalFrameOS):
         log(%*{"event": "portal:http", "get": request.path})
         request.respond(Http200, body = netportal.setupHtml(globalFrameOS))
-      elif not hasAuthenticatedAdminSession(request):
-        var headers: mummy.HttpHeaders
-        headers["Location"] = "/login"
-        request.respond(Http302, headers)
       else:
         let accessKey = globalFrameConfig.frameAccessKey
         if accessKey != "" and request.queryParams.contains("k") and request.queryParams["k"] == accessKey:
           var headers: mummy.HttpHeaders
-          headers["Location"] = "/admin"
+          headers["Location"] = if hasAuthenticatedAdminSession(request): "/admin" else: "/login"
           headers["Set-Cookie"] = ACCESS_COOKIE & "=" & accessKey & "; Path=/; SameSite=Lax"
+          request.respond(Http302, headers)
+        elif not hasAuthenticatedAdminSession(request):
+          var headers: mummy.HttpHeaders
+          headers["Location"] = "/login"
           request.respond(Http302, headers)
         elif not hasAccess(request, Read):
           request.respond(Http401, body = "Unauthorized")

@@ -9,7 +9,7 @@ import frameos/types
 var globalFrameOS*: FrameOS
 var globalFrameConfig*: FrameConfig
 var globalRunner*: RunnerControl
-var globalAdminSessionSalt* {.threadvar.}: string
+var globalAdminSessionSalt*: cstring
 var globalAdminConnectionsState*: ConnectionsState
 var globalRecentLogs*: seq[JsonNode] = @[]
 var globalRecentLogsLock*: Lock
@@ -46,6 +46,17 @@ proc hasConnections*(state: ConnectionsState): bool {.gcsafe.} =
 
 proc frameApiId*(): int =
   FRAME_API_ID
+
+proc setGlobalAdminSessionSalt*(salt: string) =
+  let saltBuffer = cast[cstring](allocShared0(salt.len + 1))
+  if salt.len > 0:
+    copyMem(saltBuffer, unsafeAddr salt[0], salt.len)
+  globalAdminSessionSalt = saltBuffer
+
+proc adminSessionSalt*(): string {.gcsafe.} =
+  if globalAdminSessionSalt == nil:
+    return ""
+  $globalAdminSessionSalt
 
 proc parseFrameApiId*(rawId: string): int =
   try:

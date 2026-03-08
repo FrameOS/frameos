@@ -1,3 +1,5 @@
+import std/os
+
 # Package
 
 version       = "0.1.0"
@@ -23,22 +25,18 @@ requires "jsony >= 1.1.5"
 
 taskRequires "assets", "nimassets >= 0.2.4"
 
-let installFrontendDepsCmd = "sh -lc 'if command -v pnpm >/dev/null 2>&1; then pnpm install --frozen-lockfile; else corepack pnpm install --frozen-lockfile; fi'"
-let buildFrontendCmd = "sh -lc 'if command -v pnpm >/dev/null 2>&1; then pnpm run build; else corepack pnpm run build; fi'"
+let installFrontendDepsCmd = "sh -lc 'if command -v corepack >/dev/null 2>&1; then corepack pnpm install --frozen-lockfile; elif command -v pnpm >/dev/null 2>&1; then pnpm install --frozen-lockfile; else echo \"pnpm or corepack is required\" >&2; exit 1; fi'"
+let buildFrontendCmd = "sh -lc 'if command -v corepack >/dev/null 2>&1; then corepack pnpm run build; elif command -v pnpm >/dev/null 2>&1; then pnpm run build; else echo \"pnpm or corepack is required\" >&2; exit 1; fi'"
 
 before build:
-  if not fileExists("assets/compiled/frame_web/index.html"):
-    exec "cd .. && " & installFrontendDepsCmd
-    exec "cd frontend && " & buildFrontendCmd
   exec "nimble assets"
   if not dirExists("quickjs"):
     exec "nimble build_quickjs --silent"
 
 task assets, "Create assets":
   exec "mkdir -p src/assets"
-  if not fileExists("assets/compiled/frame_web/index.html"):
-    exec "cd .. && " & installFrontendDepsCmd
-    exec "cd frontend && " & buildFrontendCmd
+  exec "cd frontend && " & installFrontendDepsCmd
+  exec "cd frontend && " & buildFrontendCmd
   exec "python tools/generate_apps_asset_nim.py --source-dir . --output src/assets/apps.nim"
   exec "~/.nimble/bin/nimassets -d=assets/compiled/web -o=src/assets/web.nim"
   exec "~/.nimble/bin/nimassets -d=assets/compiled/frame_web -o=src/assets/frame_web.nim"

@@ -69,7 +69,7 @@ proc hasAdminSession*(request: Request): bool =
     if adminAuthUser().len == 0 or adminAuthPass().len == 0:
       return false
     let token = getCookieValue(request, ADMIN_SESSION_COOKIE)
-    let expectedToken = $(hash(globalAdminSessionSalt & ":" & adminAuthUser() & ":" & adminAuthPass()))
+    let expectedToken = $(hash(adminSessionSalt() & ":" & adminAuthUser() & ":" & adminAuthPass()))
     return token.len > 0 and token == expectedToken
 
 proc hasAuthenticatedAdminSession*(request: Request): bool =
@@ -99,7 +99,7 @@ proc canAccessFrameSecrets*(request: Request): bool =
     hasAccess(request, Write)
 
 proc adminSessionCookieValue*(): string {.gcsafe.} =
-  $(hash(globalAdminSessionSalt & ":" & adminAuthUser() & ":" & adminAuthPass()))
+  $(hash(adminSessionSalt() & ":" & adminAuthUser() & ":" & adminAuthPass()))
 
 proc validateAdminCredentials*(username: string, password: string): bool {.gcsafe.} =
   username == adminAuthUser() and password == adminAuthPass() and username.len > 0
