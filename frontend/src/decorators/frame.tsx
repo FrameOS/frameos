@@ -58,8 +58,21 @@ export function frameUrl(frame: FrameType): string | null {
   }
 }
 
+function frameControlPath(frame: FrameType): string {
+  const adminAuth = frame.frame_admin_auth
+  if (
+    adminAuth?.enabled &&
+    (adminAuth.provider ?? 'local') === 'local' &&
+    !!adminAuth.user &&
+    !!adminAuth.pass
+  ) {
+    return frameAdminPath()
+  }
+  return '/c'
+}
+
 export function frameControlUrl(frame: FrameType): string | null {
-  const url = frameRootUrl(frame) + frameAdminPath()
+  const url = frameRootUrl(frame) + frameControlPath(frame)
   if (frame.frame_access === 'public') {
     return url
   } else {

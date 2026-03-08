@@ -352,3 +352,68 @@ suite "admin api route behavior":
       headers = [("Cookie", adminCookie)],
     )
     check getAsset.status == 403
+
+  test "control and scene permissions return 403 when disabled":
+    var config = defaultFrameConfig()
+    config.frameAdminAuth = %*{
+      "enabled": true,
+      "user": "admin",
+      "pass": "secret",
+      "permissions": %*{
+        "controlFrame": false,
+        "modifyScenes": false,
+      },
+    }
+    configureServerState(config)
+
+    let login = httpRequest(
+      server.port,
+      "POST",
+      "/api/admin/login",
+      headers = [("Content-Type", "application/json")],
+      body = $(%*{"username": "admin", "password": "secret"}),
+    )
+    let adminCookie = adminCookieFrom(login)
+
+    let scopedEvent = httpRequest(
+      server.port,
+      "POST",
+      "/api/frames/1/event/test",
+      headers = [("Cookie", adminCookie), ("Content-Type", "application/json")],
+      body = "{}",
+    )
+    check scopedEvent.status == 403
+    check scopedEvent.body.contains("Frame control disabled")
+
+    let legacyEvent = httpRequest(
+      server.port,
+      "POST",
+      "/event/test?k=test-key",
+      headers = [("Cookie", adminCookie), ("Content-Type", "application/json")],
+      body = "{}",
+    )
+    check legacyEvent.status == 403
+    check legacyEvent.body.contains("Frame control disabled")
+
+    let uploadScenes = httpRequest(
+      server.port,
+      "POST",
+      "/uploadScenes?k=test-key",
+      headers = [("Cookie", adminCookie), ("Content-Type", "application/json")],
+      body = "{}",
+    )
+    check uploadScenes.status == 403
+    check uploadScenes.body.contains("Scene modification disabled")
+
+    let reload = httpRequest(
+      server.port,
+      "POST",
+      "/reload?k=test-key",
+      headers = [("Cookie", adminCookie), ("Content-Type", "application/json")],
+      body = "{}",
+    )
+    check reload.status == 403
+    check reload.body.contains("Scene modification disabled")
+
+    let (received, _) = eventChannel.tryRecv()
+    check not received

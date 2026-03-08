@@ -58,6 +58,12 @@ proc hasWriteAccessPermission*(): bool {.gcsafe.} =
 proc hasAssetsAccessPermission*(): bool {.gcsafe.} =
   adminAuthPermissionEnabled("accessAssets", true)
 
+proc hasModifyScenesPermission*(): bool {.gcsafe.} =
+  adminAuthPermissionEnabled("modifyScenes", true)
+
+proc hasControlFramePermission*(): bool {.gcsafe.} =
+  adminAuthPermissionEnabled("controlFrame", true)
+
 template adminAuthEnabled*(): bool =
   {.gcsafe.}:
     globalFrameConfig.frameAdminAuth{"enabled"}.getBool(false) and

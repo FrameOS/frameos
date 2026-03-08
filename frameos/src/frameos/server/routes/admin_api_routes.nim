@@ -17,6 +17,18 @@ proc ensureAdminAssetsAccess(request: Request): bool =
     return false
   true
 
+proc ensureAdminFrameControlAccess(request: Request): bool =
+  if not hasControlFramePermission():
+    request.respond(Http403, body = "Frame control disabled")
+    return false
+  true
+
+proc ensureAdminModifyScenesAccess(request: Request): bool =
+  if not hasModifyScenesPermission():
+    request.respond(Http403, body = "Scene modification disabled")
+    return false
+  true
+
 proc addAdminApiRoutes*(router: var Router) =
   router.get("/api/admin/session", proc(request: Request) {.gcsafe.} =
     let authenticated = hasAuthenticatedAdminSession(request)
@@ -243,6 +255,8 @@ proc addAdminApiRoutes*(router: var Router) =
     if not hasAccess(request, Write):
       request.respond(Http401, body = "Unauthorized")
       return
+    if not ensureAdminFrameControlAccess(request):
+      return
     {.gcsafe.}:
       if not requestedFrameMatches(request):
         request.respond(Http404, body = "Not found!")
@@ -259,6 +273,8 @@ proc addAdminApiRoutes*(router: var Router) =
       return
     if not hasAccess(request, Write):
       request.respond(Http401, body = "Unauthorized")
+      return
+    if not ensureAdminFrameControlAccess(request):
       return
     {.gcsafe.}:
       if not requestedFrameMatches(request):
@@ -282,6 +298,8 @@ proc addAdminApiRoutes*(router: var Router) =
     if not hasAccess(request, Write):
       request.respond(Http401, body = "Unauthorized")
       return
+    if not ensureAdminFrameControlAccess(request):
+      return
     log(%*{"event": "http", "post": request.path})
     let payload = parseJson(if request.body == "": "{}" else: request.body)
     sendEvent(request.pathParams["name"], payload)
@@ -295,6 +313,8 @@ proc addAdminApiRoutes*(router: var Router) =
     if not hasAccess(request, Write):
       request.respond(Http401, body = "Unauthorized")
       return
+    if not ensureAdminModifyScenesAccess(request):
+      return
     log(%*{"event": "http", "post": request.path})
     let payload = parseJson(if request.body == "": "{}" else: request.body)
     sendEvent("uploadScenes", payload)
@@ -307,6 +327,8 @@ proc addAdminApiRoutes*(router: var Router) =
       return
     if not hasAccess(request, Write):
       request.respond(Http401, body = "Unauthorized")
+      return
+    if not ensureAdminModifyScenesAccess(request):
       return
     try:
       {.gcsafe.}:
