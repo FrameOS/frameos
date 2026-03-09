@@ -71,6 +71,7 @@ gpt.txt
 .env
 .aider*
 .venv/
+.local/redis/
 .flox/cache/
 .flox/log/
 .flox/redis/

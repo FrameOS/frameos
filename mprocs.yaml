@@ -5,8 +5,8 @@ procs:
     shell: pnpm run dev:worker
   frontend:
     shell: pnpm run dev:frontend
-  frame-frontend:
-    shell: pnpm run dev:frame-frontend
   redis:
     shell: pnpm run dev:redis
+  frameos:
+    shell: cd frameos && make
     autostart: false

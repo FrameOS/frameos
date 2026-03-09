@@ -3,6 +3,12 @@ set -e
 
 export DEBUG=${DEBUG:-1}
 
-python -m alembic upgrade head
-arq app.tasks.worker.WorkerSettings &
-uvicorn app.fastapi:app --host 0.0.0.0 --port 8989 --reload
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+VENV_BIN="$REPO_ROOT/.venv/bin"
+
+cd "$REPO_ROOT/backend"
+
+"$VENV_BIN/python" -m alembic upgrade head
+"$VENV_BIN/arq" app.tasks.worker.WorkerSettings &
+exec "$VENV_BIN/uvicorn" app.fastapi:app --host 0.0.0.0 --port 8989 --reload
