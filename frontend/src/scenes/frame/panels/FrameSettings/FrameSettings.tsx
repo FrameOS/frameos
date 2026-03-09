@@ -978,17 +978,27 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
         <H6>Frame admin panel (BETA)</H6>
         <p className="pl-2 @md:pl-8 text-sm text-gray-500">
           Hosted on the frame at <code>/admin</code>, similar to the interface you&apos;re using now. This is still in
-          beta: you can't save any changes.
+          beta: you can't save any changes.{' '}
         </p>
         <div className="pl-2 @md:pl-8 space-y-2">
-          {adminUrl ? (
-            <div className="text-sm">
-              <A href={adminUrl} target="_blank" rel="noreferrer noopener" className="text-blue-400 hover:underline">
-                Open admin panel
-              </A>
-            </div>
-          ) : null}
-          <Field name="frame_admin_auth.enabled" label="Admin panel enabled">
+          <Field
+            name="frame_admin_auth.enabled"
+            label="Admin panel enabled"
+            labelRight={
+              adminUrl ? (
+                <A
+                  href={adminUrl}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className="text-blue-400 hover:underline text-sm"
+                >
+                  Open
+                </A>
+              ) : (
+                <></>
+              )
+            }
+          >
             <Switch />
           </Field>
           {frameForm.frame_admin_auth?.enabled ? (
