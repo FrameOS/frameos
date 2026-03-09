@@ -169,6 +169,8 @@ suite "admin api route behavior":
     let tempRoot = getTempDir() / "frameos-admin-reload-tests"
     createDir(tempRoot)
     let configPath = tempRoot / "frame.json"
+    let hadConfigEnv = existsEnv("FRAMEOS_CONFIG")
+    let previousConfigEnv = if hadConfigEnv: getEnv("FRAMEOS_CONFIG") else: ""
     writeFile(configPath, """{
       "mode": "web_only",
       "serverHost": "localhost",
@@ -177,29 +179,40 @@ suite "admin api route behavior":
       "framePort": 8787,
       "frameAccess": "private",
       "frameAccessKey": "test-key",
+      "frameAdminAuth": {
+        "enabled": true,
+        "user": "admin",
+        "pass": "secret"
+      },
       "width": 800,
       "height": 480
     }""")
 
-    putEnv("FRAMEOS_CONFIG", configPath)
-    let success = httpRequest(
-      server.port,
-      "POST",
-      "/reload?k=test-key",
-      headers = [("Cookie", adminCookie), ("Content-Type", "application/json")],
-      body = "{}",
-    )
-    check success.status == 200
+    try:
+      putEnv("FRAMEOS_CONFIG", configPath)
+      let success = httpRequest(
+        server.port,
+        "POST",
+        "/reload?k=test-key",
+        headers = [("Cookie", adminCookie), ("Content-Type", "application/json")],
+        body = "{}",
+      )
+      check success.status == 200
 
-    putEnv("FRAMEOS_CONFIG", tempRoot / "missing.json")
-    let failed = httpRequest(
-      server.port,
-      "POST",
-      "/reload?k=test-key",
-      headers = [("Cookie", adminCookie), ("Content-Type", "application/json")],
-      body = "{}",
-    )
-    check failed.status == 500
+      putEnv("FRAMEOS_CONFIG", tempRoot / "missing.json")
+      let failed = httpRequest(
+        server.port,
+        "POST",
+        "/reload?k=test-key",
+        headers = [("Cookie", adminCookie), ("Content-Type", "application/json")],
+        body = "{}",
+      )
+      check failed.status == 500
+    finally:
+      if hadConfigEnv:
+        putEnv("FRAMEOS_CONFIG", previousConfigEnv)
+      else:
+        delEnv("FRAMEOS_CONFIG")
 
   test "admin asset endpoints upload rename delete and download within assets root":
     var config = defaultFrameConfig()
@@ -397,11 +410,43 @@ suite "admin api route behavior":
     )
     check uploadScenes.status == 200
 
-    let reload = httpRequest(
-      server.port,
-      "POST",
-      "/reload",
-      headers = [("Cookie", adminCookie), ("Content-Type", "application/json")],
-      body = "{}",
-    )
-    check reload.status == 200
+    let tempRoot = getTempDir() / "frameos-admin-legacy-control-tests"
+    createDir(tempRoot)
+    let configPath = tempRoot / "frame.json"
+    let hadConfigEnv = existsEnv("FRAMEOS_CONFIG")
+    let previousConfigEnv = if hadConfigEnv: getEnv("FRAMEOS_CONFIG") else: ""
+    writeFile(configPath, """{
+      "mode": "web_only",
+      "serverHost": "localhost",
+      "serverPort": 8989,
+      "frameHost": "localhost",
+      "framePort": 8787,
+      "frameAccess": "private",
+      "frameAccessKey": "test-key",
+      "frameAdminAuth": {
+        "enabled": true,
+        "user": "admin",
+        "pass": "secret",
+        "permissions": {
+          "controlFrame": false
+        }
+      },
+      "width": 800,
+      "height": 480
+    }""")
+
+    try:
+      putEnv("FRAMEOS_CONFIG", configPath)
+      let reload = httpRequest(
+        server.port,
+        "POST",
+        "/reload",
+        headers = [("Cookie", adminCookie), ("Content-Type", "application/json")],
+        body = "{}",
+      )
+      check reload.status == 200
+    finally:
+      if hadConfigEnv:
+        putEnv("FRAMEOS_CONFIG", previousConfigEnv)
+      else:
+        delEnv("FRAMEOS_CONFIG")
