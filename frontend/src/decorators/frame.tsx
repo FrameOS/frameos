@@ -1,6 +1,7 @@
 import { Spinner } from '../components/Spinner'
 import { FrameType } from '../types'
 import { frameAdminPath } from '../utils/frameAdmin'
+import { withFrameAdminLoginParams } from '../utils/frameAdminLoginParams'
 
 export function frameHost(frame: FrameType): string {
   if (!frame.ssh_user || frame.ssh_user === 'pi') {
@@ -59,25 +60,24 @@ export function frameUrl(frame: FrameType): string | null {
 }
 
 function frameControlPath(frame: FrameType): string {
-  if (frame.frame_admin_auth?.enabled) {
-    return frameAdminPath()
-  }
   return '/c'
 }
 
 export function frameControlUrl(frame: FrameType): string | null {
   const url = frameRootUrl(frame) + frameControlPath(frame)
-  if (frame.frame_admin_auth?.enabled) {
-    if (frame.frame_access_key) {
-      return `${url}?k=${frame.frame_access_key}`
-    }
-    return url
-  }
   if (frame.frame_access === 'public' || !frame.frame_access_key) {
     return url
   } else {
     return `${url}?k=${frame.frame_access_key}`
   }
+}
+
+export function frameAdminUrl(frame: FrameType): string | null {
+  if (!frame.frame_admin_auth?.enabled) {
+    return null
+  }
+  const url = frameRootUrl(frame) + frameAdminPath()
+  return withFrameAdminLoginParams(url, frame.frame_admin_auth.user || '', frame.frame_admin_auth.pass || '')
 }
 
 export function frameImageUrl(frame: FrameType): string | null {

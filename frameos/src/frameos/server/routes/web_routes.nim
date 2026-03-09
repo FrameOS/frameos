@@ -70,6 +70,10 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
       var headers: mummy.HttpHeaders
       headers["Location"] = "/admin"
       request.respond(Http302, headers)
+    elif hasAdminSession(request):
+      var headers: mummy.HttpHeaders
+      headers["Location"] = "/admin"
+      request.respond(Http302, headers)
     else:
       request.respond(Http200, body = frameWebHtml())
   )

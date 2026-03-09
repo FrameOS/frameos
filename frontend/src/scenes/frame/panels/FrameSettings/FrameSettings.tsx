@@ -5,7 +5,7 @@ import { framesModel } from '../../../../models/framesModel'
 import { Form, Group } from 'kea-forms'
 import { TextInput } from '../../../../components/TextInput'
 import { Select } from '../../../../components/Select'
-import { frameControlUrl, frameImageUrl, frameRootUrl, frameUrl } from '../../../../decorators/frame'
+import { frameAdminUrl, frameControlUrl, frameImageUrl, frameRootUrl, frameUrl } from '../../../../decorators/frame'
 import { frameLogic } from '../../frameLogic'
 import { downloadJson } from '../../../../utils/downloadJson'
 import { Field } from '../../../../components/Field'
@@ -163,9 +163,6 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
   const { openLogs } = useActions(panelsLogic({ frameId }))
   const { logs, ipAddresses } = useValues(logsLogic({ frameId }))
   const { savedSettings } = useValues(settingsLogic)
-  const url = frameUrl(frame)
-  const controlUrl = frameControlUrl(frame)
-  const imageUrl = frameImageUrl(frame)
   const tlsEnabled = !!(frameForm.https_proxy?.enable ?? frame.https_proxy?.enable)
   const inFrameAdminMode = isInFrameAdminMode()
 
@@ -187,6 +184,20 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
       </div>
     )
   }
+
+  const linkFrame: FrameType = {
+    ...frame,
+    frame_access: frameForm.frame_access ?? frame.frame_access,
+    frame_access_key: frameForm.frame_access_key ?? frame.frame_access_key,
+    frame_admin_auth: {
+      ...(frame.frame_admin_auth ?? {}),
+      ...(frameForm.frame_admin_auth ?? {}),
+    },
+  }
+  const url = frameUrl(linkFrame)
+  const controlUrl = frameControlUrl(linkFrame)
+  const adminUrl = frameAdminUrl(linkFrame)
+  const imageUrl = frameImageUrl(linkFrame)
 
   return (
     <div className={className} id="panel-settings-div">
@@ -352,8 +363,18 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                       rel="noreferrer noopener"
                       className="text-blue-400 hover:underline"
                     >
-                      Admin URL
+                      Control URL
                     </A>
+                    {adminUrl ? (
+                      <A
+                        href={adminUrl}
+                        target="_blank"
+                        rel="noreferrer noopener"
+                        className="text-blue-400 hover:underline"
+                      >
+                        Admin URL
+                      </A>
+                    ) : null}
                     <A
                       href={imageUrl}
                       target="_blank"
@@ -960,6 +981,13 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
           beta: you can't save any changes.
         </p>
         <div className="pl-2 @md:pl-8 space-y-2">
+          {adminUrl ? (
+            <div className="text-sm">
+              <A href={adminUrl} target="_blank" rel="noreferrer noopener" className="text-blue-400 hover:underline">
+                Open admin panel
+              </A>
+            </div>
+          ) : null}
           <Field name="frame_admin_auth.enabled" label="Admin panel enabled">
             <Switch />
           </Field>

@@ -49,6 +49,15 @@ suite "web route behavior":
     )
     check adminWithSession.status == 200
 
+    let loginWithSession = httpRequest(
+      server.port,
+      "GET",
+      "/login?__login_user=admin&__login_pass=secret",
+      headers = [("Cookie", adminCookie)],
+    )
+    check loginWithSession.status == 302
+    check loginWithSession.header("location") == "/admin"
+
     config.frameAdminAuth = %*{}
     configureServerState(config)
     let adminUnauthorized = httpRequest(server.port, "GET", "/admin")
