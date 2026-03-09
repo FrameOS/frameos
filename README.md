@@ -18,6 +18,23 @@ To get started:
 
 ![](https://frameos.net/assets/images/walkthrough-c32e7b67dd9a6f14ebef743755b0fc8e.gif)
 
+## Development with Flox
+
+If you use [Flox](https://flox.dev), this repo now ships a checked-in environment. Running `flox activate` bootstraps the core toolchains and installs the repo-local development dependencies for Python, pnpm, and Nim.
+
+```bash
+flox activate
+pnpm dev
+```
+
+The activation hook creates a local `.venv`, installs `backend/requirements.txt`, runs `pnpm install --frozen-lockfile` for the workspace, and installs the Nim dependencies for `frameos/` and `frameos/agent/`.
+
+If you want Redis managed by Flox as well, start it with:
+
+```bash
+flox services start redis
+```
+
 
 
 ## Supported platforms

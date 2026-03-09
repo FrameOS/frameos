@@ -3,6 +3,9 @@ env
 __pycache__
 *.db
 db/
+!.flox/
+!.flox/env/
+!.flox/env/manifest.toml
 
 # Logs
 *.log
@@ -67,6 +70,12 @@ e2e/generated/scenes.nim
 gpt.txt
 .env
 .aider*
+.venv/
+.flox/cache/
+.flox/log/
+.flox/redis/
+.flox/run/
+.flox/state/
 
 frameos/buildroot/output
 frameos/buildroot/sources
