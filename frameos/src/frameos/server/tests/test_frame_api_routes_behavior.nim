@@ -57,6 +57,23 @@ suite "frame api route behavior":
     let states = httpRequest(server.port, "GET", "/api/frames/1/states?k=test-key", headers = [("Cookie", adminCookie)])
     check states.status == 200
 
+  test "frame api endpoints work without login when panel auth is disabled":
+    var config = defaultFrameConfig()
+    config.frameAdminAuth = %*{
+      "enabled": true,
+      "authEnabled": false,
+    }
+    configureServerState(config)
+
+    let apps = httpRequest(server.port, "GET", "/api/apps?k=test-key")
+    check apps.status == 200
+
+    let frame = httpRequest(server.port, "GET", "/api/frames/1?k=test-key")
+    check frame.status == 200
+
+    let state = httpRequest(server.port, "GET", "/api/frames/1/state?k=test-key")
+    check state.status == 200
+
   test "scoped endpoints return 404 for mismatched frame id":
     var config = defaultFrameConfig()
     config.frameAdminAuth = %*{

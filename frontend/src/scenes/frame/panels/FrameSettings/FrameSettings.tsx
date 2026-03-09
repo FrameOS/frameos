@@ -168,7 +168,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
   const { logs, ipAddresses } = useValues(logsLogic({ frameId }))
   const { savedSettings } = useValues(settingsLogic)
   const url = frameUrl(frame)
-  const controlUrl = frameControlUrl(frame, savedSettings)
+  const controlUrl = frameControlUrl(frame)
   const imageUrl = frameImageUrl(frame)
   const tlsEnabled = !!(frameForm.https_proxy?.enable ?? frame.https_proxy?.enable)
   const inFrameAdminMode = isInFrameAdminMode()
@@ -958,48 +958,42 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
           </Field>
         </div>
 
-        <H6>Frame admin panel auth (override)</H6>
+        <H6>Frame admin panel</H6>
+        <p className="pl-2 @md:pl-8 text-sm text-gray-500">
+          Hosted on the frame at <code>/admin</code>, similar to the interface you&apos;re using now.
+        </p>
         <div className="pl-2 @md:pl-8 space-y-2">
-          <Field name="frame_admin_auth.useGlobal" label="Use global settings">
+          <Field name="frame_admin_auth.enabled" label="Admin panel enabled">
             <Switch />
           </Field>
-          {!frameForm.frame_admin_auth?.useGlobal ? (
+          {frameForm.frame_admin_auth?.enabled ? (
             <>
-              <Field name="frame_admin_auth.provider" label="Auth provider">
-                <Select
-                  options={[
-                    { value: 'local', label: 'Local username/password' },
-                    { value: 'backend', label: 'Backend auth (coming soon)' },
-                    { value: 'cloud', label: 'Cloud auth (coming soon)' },
-                  ]}
-                />
-              </Field>
-              <Field name="frame_admin_auth.enabled" label="Enable admin panel auth">
+              <Field name="frame_admin_auth.authEnabled" label="User/password authentication">
                 <Switch />
               </Field>
-              <H6 className="pt-2">Permissions</H6>
-              <Field name="frame_admin_auth.permissions.writeAccess" label="Write access">
-                <Switch />
-              </Field>
-              <Field name="frame_admin_auth.permissions.accessAssets" label="Access assets">
-                <Switch />
-              </Field>
-              <Field name="frame_admin_auth.permissions.modifyScenes" label="Modify scenes">
-                <Switch />
-              </Field>
-              <Field name="frame_admin_auth.permissions.controlFrame" label="Control frame / send events">
-                <Switch />
-              </Field>
-              {frameForm.frame_admin_auth?.provider === 'local' && frameForm.frame_admin_auth?.enabled ? (
+              {frameForm.frame_admin_auth?.authEnabled ? (
                 <>
-                  <Field name="frame_admin_auth.user" label="Admin username">
+                  <Field name="frame_admin_auth.user" label="Username">
                     <TextInput />
                   </Field>
-                  <Field name="frame_admin_auth.pass" label="Admin password">
+                  <Field name="frame_admin_auth.pass" label="Password">
                     <TextInput type="password" />
                   </Field>
                 </>
               ) : null}
+              <H6 className="pt-2">Permissions</H6>
+              <Field name="frame_admin_auth.permissions.accessAssets" label="Access assets">
+                <Switch />
+              </Field>
+              <Field name="frame_admin_auth.permissions.controlFrame" label="Control frame">
+                <Switch />
+              </Field>
+              <Field name="frame_admin_auth.permissions.modifyScenes" label="Save changes">
+                <Switch />
+              </Field>
+              <Field name="frame_admin_auth.permissions.writeAccess" label="Install updates">
+                <Switch />
+              </Field>
             </>
           ) : null}
         </div>

@@ -53,19 +53,19 @@ suite "web route behavior":
     configureServerState(config)
     let adminUnauthorized = httpRequest(server.port, "GET", "/admin")
     check adminUnauthorized.status == 401
-    check adminUnauthorized.body.contains("Admin auth disabled")
+    check adminUnauthorized.body.contains("Admin panel disabled")
 
     let loginDisabled = httpRequest(server.port, "GET", "/login")
     check loginDisabled.status == 401
-    check loginDisabled.body.contains("Admin auth disabled")
+    check loginDisabled.body.contains("Admin panel disabled")
 
     let adminAccessKey = httpRequest(server.port, "GET", "/admin?k=test-key")
     check adminAccessKey.status == 401
-    check adminAccessKey.body.contains("Admin auth disabled")
+    check adminAccessKey.body.contains("Admin panel disabled")
 
     let controlResponse = httpRequest(server.port, "GET", "/control")
     check controlResponse.status == 401
-    check controlResponse.body.contains("Admin auth disabled")
+    check controlResponse.body.contains("Admin panel disabled")
 
     let logoutResponse = httpRequest(server.port, "GET", "/logout")
     check logoutResponse.status == 302
@@ -75,6 +75,29 @@ suite "web route behavior":
     let setupGet = httpRequest(server.port, "GET", "/setup")
     check setupGet.status == 302
     check setupGet.header("location") == "/"
+
+  test "admin route works without login when panel is enabled without auth":
+    var config = defaultFrameConfig()
+    config.frameAdminAuth = %*{
+      "enabled": true,
+      "authEnabled": false,
+    }
+    configureServerState(config)
+
+    let missingKey = httpRequest(server.port, "GET", "/admin")
+    check missingKey.status == 401
+
+    let adminAccessKey = httpRequest(server.port, "GET", "/admin?k=test-key")
+    check adminAccessKey.status == 302
+    check adminAccessKey.header("location") == "/admin"
+
+    let accessCookie = adminAccessKey.header("set-cookie").split(";", 1)[0]
+    let adminWithAccess = httpRequest(server.port, "GET", "/admin", headers = [("Cookie", accessCookie)])
+    check adminWithAccess.status == 200
+
+    let loginPage = httpRequest(server.port, "GET", "/login")
+    check loginPage.status == 302
+    check loginPage.header("location") == "/admin"
 
   test "login assets load on private frames when admin auth is enabled":
     var config = defaultFrameConfig()

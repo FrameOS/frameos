@@ -21,6 +21,7 @@ from frameos/scenes import getLastImagePng, getLastPublicState, getAllPublicStat
 from scenes/scenes import sceneOptions
 import ./embedded_assets
 import ./state
+import ./auth
 
 proc h*(message: string): string =
   message.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;").replace("'", "&#039;")
@@ -486,7 +487,10 @@ proc frameApiPayload*(connectionsState: ConnectionsState, exposeSecrets = false)
     if exposeSecrets:
       globalFrameConfig.frameAdminAuth
     else:
-      %*{"enabled": globalFrameConfig.frameAdminAuth{"enabled"}.getBool(false)}
+      %*{
+        "enabled": adminPanelEnabled(),
+        "authEnabled": adminAuthEnabled(),
+      }
   let serverApiKey = if exposeSecrets: globalFrameConfig.serverApiKey else: ""
   var activeConnections = 0
   withLock connectionsState.lock:

@@ -35,13 +35,34 @@ proc makeRequest(
 suite "Server auth helpers":
   test "admin auth enabled requires full config":
     configureAdmin(true, "admin", "secret")
+    check adminPanelEnabled()
     check adminAuthEnabled()
 
     configureAdmin(false, "admin", "secret")
+    check not adminPanelEnabled()
     check not adminAuthEnabled()
 
     configureAdmin(true, "", "secret")
+    check not adminPanelEnabled()
     check not adminAuthEnabled()
+
+  test "admin panel can be enabled without user password auth":
+    globalFrameConfig = FrameConfig(
+      frameAccess: "public",
+      frameAccessKey: "",
+      frameAdminAuth: %*{
+        "enabled": true,
+        "authEnabled": false,
+      },
+    )
+
+    let request = makeRequest()
+    check adminPanelEnabled()
+    check not adminAuthEnabled()
+    check hasAdminSession(request)
+    check not hasAuthenticatedAdminSession(request)
+    check hasAdminAccess(request, Read)
+    check hasAdminAccess(request, Write)
 
   test "admin credentials validate":
     configureAdmin(true, "admin", "secret")
@@ -131,6 +152,26 @@ suite "Server auth helpers":
     check not hasAccess(adminReq, Read)
     check not hasAccess(adminReq, Write)
 
+  test "authenticated admin session overrides generic write gate":
+    setGlobalAdminSessionSalt("salt")
+    globalFrameConfig = FrameConfig(
+      frameAccess: "private",
+      frameAccessKey: "test-key",
+      frameAdminAuth: %*{
+        "enabled": true,
+        "user": "admin",
+        "pass": "secret",
+        "permissions": %*{
+          "writeAccess": false,
+        },
+      },
+    )
+
+    let adminReq = makeRequest(headers = @[("cookie", ADMIN_SESSION_COOKIE & "=" & adminSessionCookieValue())])
+    check hasAuthenticatedAdminSession(adminReq)
+    check hasAccess(adminReq, Read)
+    check hasAccess(adminReq, Write)
+
   test "hasAccess respects public and protected modes":
     globalFrameConfig = FrameConfig(
       frameAccess: "public",
@@ -151,7 +192,7 @@ suite "Server auth helpers":
   test "hasAdminSession validates cookie only when admin auth enabled":
     configureAdmin(false, "admin", "secret")
     setGlobalAdminSessionSalt("salt")
-    check hasAdminSession(makeRequest())
+    check not hasAdminSession(makeRequest())
 
     configureAdmin(true, "admin", "secret")
     setGlobalAdminSessionSalt("salt")

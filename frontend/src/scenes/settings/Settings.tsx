@@ -55,7 +55,6 @@ export function Settings() {
     deleteEmbeddings,
     loadAiEmbeddingsStatus,
     toggleSshKeyExpanded,
-    regenerateFrameAdminPassword,
   } = useActions(settingsLogic)
   const { isHassioIngress } = useValues(sceneLogic)
   const { logout } = useActions(sceneLogic)
@@ -221,52 +220,6 @@ export function Settings() {
                     >
                       <TextInput />
                     </Field>
-                  </Box>
-                </Group>
-
-                <Group name="frameAdminAuth">
-                  <H6 className="pt-4">Frame admin panel (global default)</H6>
-                  <Box className="p-2 space-y-2">
-                    <Field name="provider" label="Auth provider">
-                      <Select
-                        options={[
-                          { value: 'local', label: 'Local username/password' },
-                          { value: 'backend', label: 'Backend auth (coming soon)' },
-                          { value: 'cloud', label: 'Cloud auth (coming soon)' },
-                        ]}
-                      />
-                    </Field>
-                    <Field name="enabled" label="Enable admin panel auth">
-                      <Switch />
-                    </Field>
-                    <H6 className="pt-2">Permissions</H6>
-                    <Field name="permissions.writeAccess" label="Write access">
-                      <Switch />
-                    </Field>
-                    <Field name="permissions.accessAssets" label="Access assets">
-                      <Switch />
-                    </Field>
-                    <Field name="permissions.modifyScenes" label="Modify scenes">
-                      <Switch />
-                    </Field>
-                    <Field name="permissions.controlFrame" label="Control frame / send events">
-                      <Switch />
-                    </Field>
-                    {settings?.frameAdminAuth?.provider === 'local' && settings?.frameAdminAuth?.enabled ? (
-                      <>
-                        <Field name="user" label="Admin username">
-                          <TextInput />
-                        </Field>
-                        <Field name="pass" label="Admin password" secret={!!savedSettings?.frameAdminAuth?.pass}>
-                          <div className="flex gap-2">
-                            <TextInput type="password" />
-                            <Button type="button" color="secondary" onClick={regenerateFrameAdminPassword}>
-                              Regenerate
-                            </Button>
-                          </div>
-                        </Field>
-                      </>
-                    ) : null}
                   </Box>
                 </Group>
                 <Group name="openAI">

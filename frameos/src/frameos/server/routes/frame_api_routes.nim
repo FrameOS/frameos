@@ -9,10 +9,7 @@ import ../api
 import ./common
 
 proc ensureFrameApiReadAccess(request: Request): bool =
-  if not hasAuthenticatedAdminSession(request):
-    request.respond(Http401, body = "Unauthorized")
-    return false
-  if not hasAccess(request, Read):
+  if not hasAdminAccess(request, Read):
     request.respond(Http401, body = "Unauthorized")
     return false
   true

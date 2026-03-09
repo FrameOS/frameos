@@ -38,6 +38,10 @@ template adminAuthPermissions(): JsonNode =
   {.gcsafe.}:
     globalFrameConfig.frameAdminAuth{"permissions"}
 
+template adminAuthProvider(): string =
+  {.gcsafe.}:
+    globalFrameConfig.frameAdminAuth{"provider"}.getStr("local")
+
 template frameAccessMode(): string =
   {.gcsafe.}:
     globalFrameConfig.frameAccess
@@ -64,10 +68,21 @@ proc hasModifyScenesPermission*(): bool {.gcsafe.} =
 proc hasControlFramePermission*(): bool {.gcsafe.} =
   adminAuthPermissionEnabled("controlFrame", true)
 
+template adminPanelEnabled*(): bool =
+  {.gcsafe.}:
+    let enabled = globalFrameConfig.frameAdminAuth{"enabled"}.getBool(false)
+    let authEnabled = globalFrameConfig.frameAdminAuth{"authEnabled"}
+    if authEnabled == nil:
+      enabled and adminAuthProvider() == "local" and adminAuthUser().len > 0 and adminAuthPass().len > 0
+    else:
+      enabled
+
 template adminAuthEnabled*(): bool =
   {.gcsafe.}:
-    globalFrameConfig.frameAdminAuth{"enabled"}.getBool(false) and
-      globalFrameConfig.frameAdminAuth{"provider"}.getStr("local") == "local" and
+    let authEnabled = globalFrameConfig.frameAdminAuth{"authEnabled"}
+    adminPanelEnabled() and
+      (if authEnabled == nil: true else: authEnabled.getBool(false)) and
+      adminAuthProvider() == "local" and
       globalFrameConfig.frameAdminAuth{"user"}.getStr("").len > 0 and
       globalFrameConfig.frameAdminAuth{"pass"}.getStr("").len > 0
 
@@ -93,40 +108,51 @@ proc getOrCreateAdminSessionSalt*(configPath: string): string =
     discard
   return generated
 
-proc hasAdminSession*(request: Request): bool =
+template hasAdminSession*(request: Request): bool =
   {.gcsafe.}:
-    if not adminAuthEnabled():
-      return true
-    if adminAuthUser().len == 0 or adminAuthPass().len == 0:
-      return false
-    let token = getCookieValue(request, ADMIN_SESSION_COOKIE)
-    let expectedToken = $(hash(adminSessionSalt() & ":" & adminAuthUser() & ":" & adminAuthPass()))
-    return token.len > 0 and token == expectedToken
+    block:
+      if not adminPanelEnabled():
+        false
+      elif not adminAuthEnabled():
+        true
+      elif adminAuthUser().len == 0 or adminAuthPass().len == 0:
+        false
+      else:
+        let token = getCookieValue(request, ADMIN_SESSION_COOKIE)
+        let expectedToken = $(hash(adminSessionSalt() & ":" & adminAuthUser() & ":" & adminAuthPass()))
+        token.len > 0 and token == expectedToken
 
-proc hasAuthenticatedAdminSession*(request: Request): bool =
+template hasAuthenticatedAdminSession*(request: Request): bool =
   {.gcsafe.}:
     adminAuthEnabled() and hasAdminSession(request)
 
-proc hasAccess*(request: Request, accessType: AccessType): bool =
+template hasAccess*(request: Request, accessType: AccessType): bool =
   {.gcsafe.}:
-    if accessType == Write and not hasWriteAccessPermission():
-      return false
+    block:
+      if hasAuthenticatedAdminSession(request):
+        true
+      elif accessType == Write and not hasWriteAccessPermission():
+        false
+      else:
+        let access = frameAccessMode()
+        if access == "public" or (access == "protected" and accessType == Read):
+          true
+        else:
+          let accessKey = frameAccessKeyValue()
+          if accessKey == "":
+            false
+          elif request.queryParams.contains("k") and request.queryParams["k"] == accessKey:
+            true
+          elif getCookieValue(request, ACCESS_COOKIE) == accessKey:
+            true
+          elif request.httpMethod == "POST":
+            request.headers.contains(AUTH_HEADER) and request.headers[AUTH_HEADER] == AUTH_TYPE & " " & accessKey
+          else:
+            false
 
-    if hasAuthenticatedAdminSession(request):
-      return true
-    let access = frameAccessMode()
-    if access == "public" or (access == "protected" and accessType == Read):
-      return true
-    let accessKey = frameAccessKeyValue()
-    if accessKey == "":
-      return false
-    if request.queryParams.contains("k") and request.queryParams["k"] == accessKey:
-      return true
-    if getCookieValue(request, ACCESS_COOKIE) == accessKey:
-      return true
-    if request.httpMethod == "POST":
-      return request.headers.contains(AUTH_HEADER) and request.headers[AUTH_HEADER] == AUTH_TYPE & " " & accessKey
-    return false
+proc hasAdminAccess*(request: Request, accessType: AccessType): bool =
+  {.gcsafe.}:
+    hasAdminSession(request) and hasAccess(request, accessType)
 
 proc canAccessFrameSecrets*(request: Request): bool =
   {.gcsafe.}:

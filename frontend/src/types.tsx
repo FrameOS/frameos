@@ -9,9 +9,8 @@ export interface FrameType {
   frame_access_key: string
   frame_access: string
   frame_admin_auth?: {
-    useGlobal?: boolean
-    provider?: 'local' | 'backend' | 'cloud'
     enabled?: boolean
+    authEnabled?: boolean
     user?: string
     pass?: string
     permissions?: {

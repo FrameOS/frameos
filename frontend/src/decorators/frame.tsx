@@ -1,5 +1,5 @@
 import { Spinner } from '../components/Spinner'
-import { FrameOSSettings, FrameType } from '../types'
+import { FrameType } from '../types'
 import { frameAdminPath } from '../utils/frameAdmin'
 
 export function frameHost(frame: FrameType): string {
@@ -58,32 +58,22 @@ export function frameUrl(frame: FrameType): string | null {
   }
 }
 
-function resolvedFrameAdminAuth(
-  frame: FrameType,
-  settings?: Pick<FrameOSSettings, 'frameAdminAuth'>
-): FrameType['frame_admin_auth'] | undefined {
-  if (frame.frame_admin_auth?.useGlobal ?? true) {
-    return settings?.frameAdminAuth
-  }
-  return frame.frame_admin_auth
-}
-
-function frameControlPath(frame: FrameType, settings?: Pick<FrameOSSettings, 'frameAdminAuth'>): string {
-  const adminAuth = resolvedFrameAdminAuth(frame, settings)
-  if (
-    adminAuth?.enabled &&
-    (adminAuth.provider ?? 'local') === 'local' &&
-    !!adminAuth.user &&
-    !!adminAuth.pass
-  ) {
+function frameControlPath(frame: FrameType): string {
+  if (frame.frame_admin_auth?.enabled) {
     return frameAdminPath()
   }
   return '/c'
 }
 
-export function frameControlUrl(frame: FrameType, settings?: Pick<FrameOSSettings, 'frameAdminAuth'>): string | null {
-  const url = frameRootUrl(frame) + frameControlPath(frame, settings)
-  if (frame.frame_access === 'public') {
+export function frameControlUrl(frame: FrameType): string | null {
+  const url = frameRootUrl(frame) + frameControlPath(frame)
+  if (frame.frame_admin_auth?.enabled) {
+    if (frame.frame_access_key) {
+      return `${url}?k=${frame.frame_access_key}`
+    }
+    return url
+  }
+  if (frame.frame_access === 'public' || !frame.frame_access_key) {
     return url
   } else {
     return `${url}?k=${frame.frame_access_key}`

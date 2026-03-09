@@ -60,7 +60,7 @@ proc addAdminApiRoutes*(router: var Router) =
   )
 
   router.get("/api/admin/frames/@id/assets", proc(request: Request) {.gcsafe.} =
-    if not hasAuthenticatedAdminSession(request):
+    if not hasAdminAccess(request, Read):
       request.respond(Http401, body = "Unauthorized")
       return
     if not ensureAdminAssetsAccess(request):
@@ -73,7 +73,7 @@ proc addAdminApiRoutes*(router: var Router) =
   )
 
   router.get("/api/admin/frames/@id/asset", proc(request: Request) {.gcsafe.} =
-    if not hasAuthenticatedAdminSession(request):
+    if not hasAdminAccess(request, Read):
       request.respond(Http401, body = "Unauthorized")
       return
     if not ensureAdminAssetsAccess(request):
@@ -89,7 +89,7 @@ proc addAdminApiRoutes*(router: var Router) =
   )
 
   router.post("/api/admin/frames/@id/assets/upload", proc(request: Request) {.gcsafe.} =
-    if not hasAuthenticatedAdminSession(request):
+    if not hasAdminAccess(request, Write):
       request.respond(Http401, body = "Unauthorized")
       return
     if not ensureAdminAssetsAccess(request):
@@ -137,7 +137,7 @@ proc addAdminApiRoutes*(router: var Router) =
   )
 
   router.post("/api/admin/frames/@id/assets/upload_image", proc(request: Request) {.gcsafe.} =
-    if not hasAuthenticatedAdminSession(request):
+    if not hasAdminAccess(request, Write):
       request.respond(Http401, body = "Unauthorized")
       return
     if not ensureAdminAssetsAccess(request):
@@ -182,7 +182,7 @@ proc addAdminApiRoutes*(router: var Router) =
   )
 
   router.post("/api/admin/frames/@id/assets/mkdir", proc(request: Request) {.gcsafe.} =
-    if not hasAuthenticatedAdminSession(request):
+    if not hasAdminAccess(request, Write):
       request.respond(Http401, body = "Unauthorized")
       return
     if not ensureAdminAssetsAccess(request):
@@ -202,7 +202,7 @@ proc addAdminApiRoutes*(router: var Router) =
   )
 
   router.post("/api/admin/frames/@id/assets/delete", proc(request: Request) {.gcsafe.} =
-    if not hasAuthenticatedAdminSession(request):
+    if not hasAdminAccess(request, Write):
       request.respond(Http401, body = "Unauthorized")
       return
     if not ensureAdminAssetsAccess(request):
@@ -224,7 +224,7 @@ proc addAdminApiRoutes*(router: var Router) =
   )
 
   router.post("/api/admin/frames/@id/assets/rename", proc(request: Request) {.gcsafe.} =
-    if not hasAuthenticatedAdminSession(request):
+    if not hasAdminAccess(request, Write):
       request.respond(Http401, body = "Unauthorized")
       return
     if not ensureAdminAssetsAccess(request):
@@ -249,10 +249,7 @@ proc addAdminApiRoutes*(router: var Router) =
   )
 
   router.post("/api/frames/@id/event/@name", proc(request: Request) {.gcsafe.} =
-    if not hasAuthenticatedAdminSession(request):
-      request.respond(Http401, body = "Unauthorized")
-      return
-    if not hasAccess(request, Write):
+    if not hasAdminAccess(request, Write):
       request.respond(Http401, body = "Unauthorized")
       return
     if not ensureAdminFrameControlAccess(request):
@@ -268,10 +265,7 @@ proc addAdminApiRoutes*(router: var Router) =
   )
 
   router.post("/api/frames/@id/event", proc(request: Request) {.gcsafe.} =
-    if not hasAuthenticatedAdminSession(request):
-      request.respond(Http401, body = "Unauthorized")
-      return
-    if not hasAccess(request, Write):
+    if not hasAdminAccess(request, Write):
       request.respond(Http401, body = "Unauthorized")
       return
     if not ensureAdminFrameControlAccess(request):
@@ -292,10 +286,7 @@ proc addAdminApiRoutes*(router: var Router) =
   )
 
   router.post("/event/@name", proc(request: Request) {.gcsafe.} =
-    if not hasAdminSession(request):
-      request.respond(Http401, body = "Unauthorized")
-      return
-    if not hasAccess(request, Write):
+    if not hasAdminAccess(request, Write):
       request.respond(Http401, body = "Unauthorized")
       return
     if not ensureAdminFrameControlAccess(request):
@@ -307,10 +298,7 @@ proc addAdminApiRoutes*(router: var Router) =
   )
 
   router.post("/uploadScenes", proc(request: Request) {.gcsafe.} =
-    if not hasAdminSession(request):
-      request.respond(Http401, body = "Unauthorized")
-      return
-    if not hasAccess(request, Write):
+    if not hasAdminAccess(request, Write):
       request.respond(Http401, body = "Unauthorized")
       return
     if not ensureAdminModifyScenesAccess(request):
@@ -322,10 +310,7 @@ proc addAdminApiRoutes*(router: var Router) =
   )
 
   router.post("/reload", proc(request: Request) {.gcsafe.} =
-    if not hasAdminSession(request):
-      request.respond(Http401, body = "Unauthorized")
-      return
-    if not hasAccess(request, Write):
+    if not hasAdminAccess(request, Write):
       request.respond(Http401, body = "Unauthorized")
       return
     if not ensureAdminModifyScenesAccess(request):

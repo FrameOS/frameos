@@ -415,14 +415,21 @@ function hasValidPosition(node: DiagramNode): boolean {
 }
 
 function sanitizeFrame(frame: Partial<FrameType>): Partial<FrameType> {
+  const frameAdminAuthUser = frame.frame_admin_auth?.user ?? ''
+  const frameAdminAuthPass = frame.frame_admin_auth?.pass ?? ''
+  const legacyFrameAdminAuthEnabled =
+    (frame.frame_admin_auth?.enabled ?? false) && !!frameAdminAuthUser && !!frameAdminAuthPass
+  const hasExplicitFrameAdminAuthToggle = frame.frame_admin_auth?.authEnabled !== undefined
+
   return {
     ...frame,
     frame_admin_auth: {
-      useGlobal: frame.frame_admin_auth?.useGlobal ?? true,
-      provider: frame.frame_admin_auth?.provider ?? 'local',
-      enabled: frame.frame_admin_auth?.enabled ?? false,
-      user: frame.frame_admin_auth?.user ?? '',
-      pass: frame.frame_admin_auth?.pass ?? '',
+      enabled: hasExplicitFrameAdminAuthToggle ? frame.frame_admin_auth?.enabled ?? false : legacyFrameAdminAuthEnabled,
+      authEnabled: hasExplicitFrameAdminAuthToggle
+        ? frame.frame_admin_auth?.authEnabled ?? false
+        : legacyFrameAdminAuthEnabled,
+      user: frameAdminAuthUser,
+      pass: frameAdminAuthPass,
       permissions: {
         writeAccess: frame.frame_admin_auth?.permissions?.writeAccess ?? true,
         accessAssets: frame.frame_admin_auth?.permissions?.accessAssets ?? true,
