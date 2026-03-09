@@ -31,6 +31,7 @@
 - Built as an ESM React app with TypeScript; kea manages state and type generation (`kea-typegen`).
 - Build pipeline orchestrated by `build.mjs` using esbuild, with Tailwind/PostCSS for styling and optional bundle analysis via `vite-bundle-visualizer`.
 - Development: `pnpm install` followed by `pnpm --dir frontend run dev` (spawns kea typegen watch and esbuild dev build concurrently).
+- Repo-level local development runner: `pnpm dev` starts `mprocs` with panes for backend API, ARQ worker, the main frontend dev server, and the frame-local frontend watcher. A `redis` pane is included but does not autostart. `mprocs.yaml` defines the process list.
 - Production build: `pnpm --dir frontend run build` which chains kea codegen, schema generation (`ts-json-schema-generator`), TypeScript type-checking, and final bundling to `dist/`. 【F:frontend/package.json†L6-L66】
 - Output folder is consumed by the backend’s static file mounts; ensure `frontend/dist` exists (e.g., via `pnpm --dir frontend run build`) before running the Python app outside of test mode. 【F:backend/app/fastapi.py†L38-L86】
 - ALWAYS prefer writing frontend business logic in kea logic files over using effects like `useState` or `useEffect`.
@@ -52,7 +53,7 @@
 ## Getting started quickly
 1. Install JS deps once from the repo root (`pnpm install`) and build the frontend (`pnpm --dir frontend run build`).
 2. Install backend deps (`cd backend && pip install -r requirements.txt`).
-3. Launch API (`uvicorn app.fastapi:app --reload`) and background worker if needed (`arq app.tasks.worker.WorkerSettings`).
+3. Launch the local development stack with `pnpm dev`, or run the API (`uvicorn app.fastapi:app --reload`) and background worker (`arq app.tasks.worker.WorkerSettings`) separately if needed.
 4. Optionally bring up the stack via Docker (`docker compose up --build`).
 5. Use the backend UI/API to manage frames, deploy scenes, and monitor logs.
 

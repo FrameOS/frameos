@@ -11,7 +11,11 @@ overrides:
 
 importers:
 
-  .: {}
+  .:
+    devDependencies:
+      mprocs:
+        specifier: ^0.8.3
+        version: 0.8.3
 
   frameos/frontend:
     dependencies:
@@ -3224,6 +3228,11 @@ packages:
 
   monaco-editor@0.43.0:
     resolution: {integrity: sha512-cnoqwQi/9fml2Szamv1XbSJieGJ1Dc8tENVMD26Kcfl7xGQWp7OBKMjlwKVGYFJ3/AXJjSOGvcqK7Ry/j9BM1Q==}
+
+  mprocs@0.8.3:
+    resolution: {integrity: sha512-q3uKG6YLWF9l+fnEgu9CC4qMzEIPSYYMlbTIYdeHYCxGcIm67m4uQmQFmuDr6h69rWPHWJX5N/ih5Ei4h8G9Yg==}
+    engines: {node: '>=0.10.0'}
+    hasBin: true
 
   ms@2.0.0:
     resolution: {integrity: sha512-Tpp60P6IUJDTuOq/5Z8cdskzJujfwqfOTkrwIwj7IRISpnkJnT6SyJ4PCPnGMoFjC9ddhal5KVIYtAt97ix05A==}
@@ -7568,6 +7577,8 @@ snapshots:
       brace-expansion: 2.0.2
 
   monaco-editor@0.43.0: {}
+
+  mprocs@0.8.3: {}
 
   ms@2.0.0: {}
 

@@ -38,11 +38,10 @@ cd ..
 To run all services at once:
 
 ```bash
-cd frontend
-pnpm run dev &
-cd ../backend
-bin/dev
+pnpm dev
 ```
+
+This opens `mprocs` with panes for the backend API, ARQ worker, main frontend, and the frame-local frontend watcher. The `redis` pane is available but does not autostart.
 
 To run all of these separately:
 
@@ -62,7 +61,11 @@ DEBUG=1 python -m app.fastapi
 
 # start the job queue
 cd backend
-DEBUG=1 arq app.tasks.worker
+DEBUG=1 arq app.tasks.worker.WorkerSettings
+
+# start the frame-local frontend asset watcher
+cd ../frameos/frontend
+pnpm run dev
 ```
 
 ## Creating migrations
