@@ -1,4 +1,5 @@
 import std/os
+import std/strutils
 
 # Package
 
@@ -28,6 +29,17 @@ taskRequires "assets", "nimassets >= 0.2.4"
 let installFrontendDepsCmd = "sh -lc 'if command -v corepack >/dev/null 2>&1; then corepack pnpm install --frozen-lockfile; elif command -v pnpm >/dev/null 2>&1; then pnpm install --frozen-lockfile; else echo \"pnpm or corepack is required\" >&2; exit 1; fi'"
 let buildFrontendCmd = "sh -lc 'if command -v corepack >/dev/null 2>&1; then corepack pnpm run build; elif command -v pnpm >/dev/null 2>&1; then pnpm run build; else echo \"pnpm or corepack is required\" >&2; exit 1; fi'"
 
+const reusePrecompiledAssetsEnv = "FRAMEOS_USE_PRECOMPILED_ASSETS"
+
+proc envEnabled(name: string): bool =
+  getEnv(name).strip().toLowerAscii() in ["1", "true", "yes", "on"]
+
+proc hasPrecompiledFrontendAssets(): bool =
+  fileExists("assets/compiled/web/control.html") and
+  fileExists("assets/compiled/frame_web/index.html") and
+  dirExists("assets/compiled/frame_web/static") and
+  fileExists("assets/compiled/fonts/Ubuntu-Regular.ttf")
+
 before build:
   exec "nimble assets"
   if not dirExists("quickjs"):
@@ -35,8 +47,14 @@ before build:
 
 task assets, "Create assets":
   exec "mkdir -p src/assets"
-  exec "cd frontend && " & installFrontendDepsCmd
-  exec "cd frontend && " & buildFrontendCmd
+  if envEnabled(reusePrecompiledAssetsEnv) and hasPrecompiledFrontendAssets():
+    echo "Reusing precompiled frontend assets from assets/compiled"
+  else:
+    if not fileExists("frontend/node_modules/autoprefixer/package.json"):
+      exec "cd frontend && " & installFrontendDepsCmd
+    else:
+      echo "Using existing frontend dependencies in frontend/node_modules"
+    exec "cd frontend && " & buildFrontendCmd
   exec "python tools/generate_apps_asset_nim.py --source-dir . --output src/assets/apps.nim"
   exec "~/.nimble/bin/nimassets -d=assets/compiled/web -o=src/assets/web.nim"
   exec "~/.nimble/bin/nimassets -d=assets/compiled/frame_web -o=src/assets/frame_web.nim"

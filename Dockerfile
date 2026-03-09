@@ -101,6 +101,9 @@ COPY frameos/ ./
 # Precompile Nim assets before copying the rest of the repository
 RUN nimble assets -y
 
+# Reuse the precompiled FrameOS frontend assets for later deploy/cross-builds in this container.
+ENV FRAMEOS_USE_PRECOMPILED_ASSETS=1
+
 # Cache a build so that the nix libraries are already there
 # RUN make nix-bin
 # RUN make nix-update
