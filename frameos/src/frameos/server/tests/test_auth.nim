@@ -46,10 +46,10 @@ suite "Server auth helpers":
     check not adminPanelEnabled()
     check not adminAuthEnabled()
 
-  test "admin panel can be enabled without user password auth":
+  test "legacy auth toggle no longer bypasses admin credentials":
     globalFrameConfig = FrameConfig(
-      frameAccess: "public",
-      frameAccessKey: "",
+      frameAccess: "private",
+      frameAccessKey: "test-key",
       frameAdminAuth: %*{
         "enabled": true,
         "authEnabled": false,
@@ -57,12 +57,13 @@ suite "Server auth helpers":
     )
 
     let request = makeRequest()
-    check adminPanelEnabled()
     check not adminAuthEnabled()
-    check hasAdminSession(request)
+    check not adminPanelEnabled()
+    check not hasAdminSession(request)
     check not hasAuthenticatedAdminSession(request)
-    check hasAdminAccess(request, Read)
-    check hasAdminAccess(request, Write)
+    check not hasAccess(request, Read)
+    check not hasAccess(request, Write)
+    check not hasAdminAccess(request)
 
   test "admin credentials validate":
     configureAdmin(true, "admin", "secret")
@@ -152,25 +153,26 @@ suite "Server auth helpers":
     check not hasAccess(adminReq, Read)
     check not hasAccess(adminReq, Write)
 
-  test "authenticated admin session overrides generic write gate":
+  test "frame secrets require authenticated admin session instead of generic write access":
     setGlobalAdminSessionSalt("salt")
     globalFrameConfig = FrameConfig(
-      frameAccess: "private",
+      frameAccess: "public",
       frameAccessKey: "test-key",
       frameAdminAuth: %*{
         "enabled": true,
         "user": "admin",
         "pass": "secret",
-        "permissions": %*{
-          "writeAccess": false,
-        },
       },
     )
 
+    let publicReq = makeRequest()
+    check hasAccess(publicReq, Read)
+    check hasAccess(publicReq, Write)
+    check not canAccessFrameSecrets(publicReq)
+
     let adminReq = makeRequest(headers = @[("cookie", ADMIN_SESSION_COOKIE & "=" & adminSessionCookieValue())])
     check hasAuthenticatedAdminSession(adminReq)
-    check hasAccess(adminReq, Read)
-    check hasAccess(adminReq, Write)
+    check canAccessFrameSecrets(adminReq)
 
   test "hasAccess respects public and protected modes":
     globalFrameConfig = FrameConfig(
@@ -201,18 +203,3 @@ suite "Server auth helpers":
     let invalid = makeRequest(headers = @[("cookie", ADMIN_SESSION_COOKIE & "=bad-token")])
     check hasAdminSession(valid)
     check not hasAdminSession(invalid)
-
-
-  test "hasAccess write path can be disabled via frame admin permissions":
-    globalFrameConfig = FrameConfig(
-      frameAccess: "public",
-      frameAccessKey: "",
-      frameAdminAuth: %*{
-        "permissions": %*{
-          "writeAccess": false,
-        },
-      },
-    )
-
-    check hasAccess(makeRequest(), Read)
-    check not hasAccess(makeRequest(), Write)

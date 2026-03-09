@@ -50,8 +50,6 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
           var headers: mummy.HttpHeaders
           headers["Location"] = "/login"
           request.respond(Http302, headers)
-        elif not hasAccess(request, Read):
-          request.respond(Http401, body = "Unauthorized")
         else:
           request.respond(Http200, body = frameWebHtml())
   )
@@ -155,7 +153,7 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
   )
 
   router.get("/ws/admin", proc(request: Request) {.gcsafe.} =
-    if not hasAdminAccess(request, Read):
+    if not hasAdminAccess(request):
       request.respond(Http401, body = "Unauthorized")
       return
     try:

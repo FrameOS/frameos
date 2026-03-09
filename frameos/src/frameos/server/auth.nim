@@ -34,10 +34,6 @@ template adminAuthPass(): string =
   {.gcsafe.}:
     globalFrameConfig.frameAdminAuth{"pass"}.getStr("")
 
-template adminAuthPermissions(): JsonNode =
-  {.gcsafe.}:
-    globalFrameConfig.frameAdminAuth{"permissions"}
-
 template adminAuthProvider(): string =
   {.gcsafe.}:
     globalFrameConfig.frameAdminAuth{"provider"}.getStr("local")
@@ -50,41 +46,16 @@ template frameAccessKeyValue*(): string =
   {.gcsafe.}:
     globalFrameConfig.frameAccessKey
 
-template adminAuthPermissionEnabled*(permission: string, defaultValue = true): bool =
-  let permissions = adminAuthPermissions()
-  if permissions != nil and permissions.kind == JObject and permissions.hasKey(permission):
-    return permissions{permission}.getBool(defaultValue)
-  defaultValue
-
-proc hasWriteAccessPermission*(): bool {.gcsafe.} =
-  adminAuthPermissionEnabled("writeAccess", true)
-
-proc hasAssetsAccessPermission*(): bool {.gcsafe.} =
-  adminAuthPermissionEnabled("accessAssets", true)
-
-proc hasModifyScenesPermission*(): bool {.gcsafe.} =
-  adminAuthPermissionEnabled("modifyScenes", true)
-
-proc hasControlFramePermission*(): bool {.gcsafe.} =
-  adminAuthPermissionEnabled("controlFrame", true)
-
 template adminPanelEnabled*(): bool =
   {.gcsafe.}:
-    let enabled = globalFrameConfig.frameAdminAuth{"enabled"}.getBool(false)
-    let authEnabled = globalFrameConfig.frameAdminAuth{"authEnabled"}
-    if authEnabled == nil:
-      enabled and adminAuthProvider() == "local" and adminAuthUser().len > 0 and adminAuthPass().len > 0
-    else:
-      enabled
+    globalFrameConfig.frameAdminAuth{"enabled"}.getBool(false) and
+      adminAuthProvider() == "local" and
+      adminAuthUser().len > 0 and
+      adminAuthPass().len > 0
 
 template adminAuthEnabled*(): bool =
   {.gcsafe.}:
-    let authEnabled = globalFrameConfig.frameAdminAuth{"authEnabled"}
-    adminPanelEnabled() and
-      (if authEnabled == nil: true else: authEnabled.getBool(false)) and
-      adminAuthProvider() == "local" and
-      globalFrameConfig.frameAdminAuth{"user"}.getStr("").len > 0 and
-      globalFrameConfig.frameAdminAuth{"pass"}.getStr("").len > 0
+    adminPanelEnabled()
 
 proc getOrCreateAdminSessionSalt*(configPath: string): string =
   let envSecret = getEnv("FRAMEOS_ADMIN_SESSION_SALT")
@@ -113,10 +84,6 @@ template hasAdminSession*(request: Request): bool =
     block:
       if not adminPanelEnabled():
         false
-      elif not adminAuthEnabled():
-        true
-      elif adminAuthUser().len == 0 or adminAuthPass().len == 0:
-        false
       else:
         let token = getCookieValue(request, ADMIN_SESSION_COOKIE)
         let expectedToken = $(hash(adminSessionSalt() & ":" & adminAuthUser() & ":" & adminAuthPass()))
@@ -124,15 +91,13 @@ template hasAdminSession*(request: Request): bool =
 
 template hasAuthenticatedAdminSession*(request: Request): bool =
   {.gcsafe.}:
-    adminAuthEnabled() and hasAdminSession(request)
+    hasAdminSession(request)
 
 template hasAccess*(request: Request, accessType: AccessType): bool =
   {.gcsafe.}:
     block:
       if hasAuthenticatedAdminSession(request):
         true
-      elif accessType == Write and not hasWriteAccessPermission():
-        false
       else:
         let access = frameAccessMode()
         if access == "public" or (access == "protected" and accessType == Read):
@@ -150,13 +115,13 @@ template hasAccess*(request: Request, accessType: AccessType): bool =
           else:
             false
 
-proc hasAdminAccess*(request: Request, accessType: AccessType): bool =
+proc hasAdminAccess*(request: Request): bool =
   {.gcsafe.}:
-    hasAdminSession(request) and hasAccess(request, accessType)
+    hasAdminSession(request)
 
 proc canAccessFrameSecrets*(request: Request): bool =
   {.gcsafe.}:
-    hasAccess(request, Write)
+    hasAdminSession(request)
 
 proc adminSessionCookieValue*(): string {.gcsafe.} =
   $(hash(adminSessionSalt() & ":" & adminAuthUser() & ":" & adminAuthPass()))

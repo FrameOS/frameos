@@ -12,6 +12,7 @@ import { getBasePath } from '../../utils/getBasePath'
 import { entityImagesModel } from '../../models/entityImagesModel'
 import { arrangeNodes } from '../../utils/arrangeNodes'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
+import { secureToken } from '../../utils/secureToken'
 import versions from '../../../../versions.json'
 
 export interface FrameLogicProps {
@@ -417,25 +418,13 @@ function hasValidPosition(node: DiagramNode): boolean {
 function sanitizeFrame(frame: Partial<FrameType>): Partial<FrameType> {
   const frameAdminAuthUser = frame.frame_admin_auth?.user ?? ''
   const frameAdminAuthPass = frame.frame_admin_auth?.pass ?? ''
-  const legacyFrameAdminAuthEnabled =
-    (frame.frame_admin_auth?.enabled ?? false) && !!frameAdminAuthUser && !!frameAdminAuthPass
-  const hasExplicitFrameAdminAuthToggle = frame.frame_admin_auth?.authEnabled !== undefined
 
   return {
     ...frame,
     frame_admin_auth: {
-      enabled: hasExplicitFrameAdminAuthToggle ? frame.frame_admin_auth?.enabled ?? false : legacyFrameAdminAuthEnabled,
-      authEnabled: hasExplicitFrameAdminAuthToggle
-        ? frame.frame_admin_auth?.authEnabled ?? false
-        : legacyFrameAdminAuthEnabled,
+      enabled: frame.frame_admin_auth?.enabled ?? false,
       user: frameAdminAuthUser,
       pass: frameAdminAuthPass,
-      permissions: {
-        writeAccess: frame.frame_admin_auth?.permissions?.writeAccess ?? true,
-        accessAssets: frame.frame_admin_auth?.permissions?.accessAssets ?? true,
-        modifyScenes: frame.frame_admin_auth?.permissions?.modifyScenes ?? true,
-        controlFrame: frame.frame_admin_auth?.permissions?.controlFrame ?? true,
-      },
     },
     scenes: frame.scenes?.map((scene) => sanitizeScene(scene, frame)) ?? [],
   }
@@ -504,6 +493,7 @@ export const frameLogic = kea<frameLogicType>([
     closeScenePanels: (sceneIds: string[]) => ({ sceneIds }),
     sendEvent: (event: string, payload: Record<string, any>) => ({ event, payload }),
     setDeployWithAgent: (deployWithAgent: boolean) => ({ deployWithAgent }),
+    generateFrameAdminCredentials: true,
     generateTlsCertificates: true,
     verifyTlsCertificates: true,
   }),
@@ -514,6 +504,12 @@ export const frameLogic = kea<frameLogicType>([
       },
       defaults: {} as FrameType,
       errors: (state: Partial<FrameType>) => ({
+        frame_admin_auth: state.frame_admin_auth?.enabled
+          ? {
+              user: state.frame_admin_auth?.user ? undefined : 'Username is required',
+              pass: state.frame_admin_auth?.pass ? undefined : 'Password is required',
+            }
+          : undefined,
         scenes: (state.scenes ?? []).map((scene: Record<string, any>) => ({
           fields: (scene.fields ?? []).map((field: Record<string, any>) => ({
             name: field.name ? '' : 'Name is required',
@@ -595,6 +591,20 @@ export const frameLogic = kea<frameLogicType>([
       if (!response.ok) {
         throw new Error('Failed to update deployed SSH keys')
       }
+    },
+    generateFrameAdminCredentials: () => {
+      const frameAdminAuth = values.frameForm.frame_admin_auth || values.frame?.frame_admin_auth || {}
+      actions.setFrameFormValues({
+        frame_admin_auth: {
+          ...frameAdminAuth,
+          enabled: true,
+          user: 'admin',
+          pass: secureToken(24),
+        },
+      })
+      actions.touchFrameFormField('frame_admin_auth.enabled')
+      actions.touchFrameFormField('frame_admin_auth.user')
+      actions.touchFrameFormField('frame_admin_auth.pass')
     },
     generateTlsCertificates: async () => {
       const response = await apiFetch(`/api/frames/${values.frameId}/tls/generate`, {

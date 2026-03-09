@@ -9,14 +9,8 @@ import ../api
 import ./common
 
 proc ensureFrameApiReadAccess(request: Request): bool =
-  if not hasAdminAccess(request, Read):
+  if not hasAdminAccess(request):
     request.respond(Http401, body = "Unauthorized")
-    return false
-  true
-
-proc ensureAssetsAccess(request: Request): bool =
-  if not hasAssetsAccessPermission():
-    request.respond(Http403, body = "Assets access disabled")
     return false
   true
 
@@ -121,8 +115,6 @@ proc addFrameApiRoutes*(router: var Router, connectionsState: ConnectionsState) 
   router.get("/api/frames/@id/assets", proc(request: Request) {.gcsafe.} =
     if not ensureFrameApiReadAccess(request):
       return
-    if not ensureAssetsAccess(request):
-      return
     {.gcsafe.}:
       if not requestedFrameMatches(request):
         request.respond(Http404, body = "Not found!")
@@ -132,8 +124,6 @@ proc addFrameApiRoutes*(router: var Router, connectionsState: ConnectionsState) 
 
   router.get("/api/frames/@id/asset", proc(request: Request) {.gcsafe.} =
     if not ensureFrameApiReadAccess(request):
-      return
-    if not ensureAssetsAccess(request):
       return
     {.gcsafe.}:
       if not requestedFrameMatches(request):

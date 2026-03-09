@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, RootModel
+from pydantic import BaseModel, ConfigDict, RootModel, field_validator
 from typing import Any, Dict, List, Literal, Optional
 
 from .common import ImageTokenResponse
@@ -136,6 +136,21 @@ class FrameUpdateRequest(BaseModel):
     rpios: Optional[Dict[str, Any]] = None
     terminal_history: Optional[List[str]] = None
     next_action: Optional[str] = None
+
+    @field_validator('frame_admin_auth')
+    @classmethod
+    def validate_frame_admin_auth(cls, value: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        if not value:
+            return value
+
+        auth = dict(value)
+        if auth.get('enabled'):
+            user = str(auth.get('user', '')).strip()
+            password = str(auth.get('pass', '')).strip()
+            if not user or not password:
+                raise ValueError('Username and password are required when frame admin is enabled')
+
+        return value
 
 
 class FrameSSHKeysUpdateRequest(BaseModel):

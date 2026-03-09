@@ -57,7 +57,7 @@ suite "frame api route behavior":
     let states = httpRequest(server.port, "GET", "/api/frames/1/states?k=test-key", headers = [("Cookie", adminCookie)])
     check states.status == 200
 
-  test "frame api endpoints work without login when panel auth is disabled":
+  test "legacy auth-disabled admin configs still require login":
     var config = defaultFrameConfig()
     config.frameAdminAuth = %*{
       "enabled": true,
@@ -65,14 +65,14 @@ suite "frame api route behavior":
     }
     configureServerState(config)
 
-    let apps = httpRequest(server.port, "GET", "/api/apps?k=test-key")
-    check apps.status == 200
+    let apps = httpRequest(server.port, "GET", "/api/apps")
+    check apps.status == 401
 
-    let frame = httpRequest(server.port, "GET", "/api/frames/1?k=test-key")
-    check frame.status == 200
+    let frame = httpRequest(server.port, "GET", "/api/frames/1")
+    check frame.status == 401
 
-    let state = httpRequest(server.port, "GET", "/api/frames/1/state?k=test-key")
-    check state.status == 200
+    let state = httpRequest(server.port, "GET", "/api/frames/1/state")
+    check state.status == 401
 
   test "scoped endpoints return 404 for mismatched frame id":
     var config = defaultFrameConfig()
@@ -237,15 +237,13 @@ suite "frame api route behavior":
     check found.body == "hello asset"
 
 
-  test "asset endpoints return 403 when asset access is disabled":
+  test "legacy asset permission flags are ignored for authenticated admins":
     var config = defaultFrameConfig()
     config.frameAdminAuth = %*{
       "enabled": true,
       "user": "admin",
       "pass": "secret",
-      "permissions": %*{
-        "accessAssets": false,
-      },
+      "permissions": %*{"assetsFolder": false},
     }
     let assetsRoot = getTempDir() / "frameos-frame-api-assets-disabled"
     createDir(assetsRoot)
@@ -268,7 +266,7 @@ suite "frame api route behavior":
       "/api/frames/1/assets?k=test-key",
       headers = [("Cookie", adminCookie)],
     )
-    check listAssets.status == 403
+    check listAssets.status == 200
 
     let getAsset = httpRequest(
       server.port,
@@ -276,7 +274,7 @@ suite "frame api route behavior":
       "/api/frames/1/asset?path=hello.txt&k=test-key",
       headers = [("Cookie", adminCookie)],
     )
-    check getAsset.status == 403
+    check getAsset.status == 200
 
   test "metrics endpoint returns stored metrics logs only":
     var config = defaultFrameConfig()

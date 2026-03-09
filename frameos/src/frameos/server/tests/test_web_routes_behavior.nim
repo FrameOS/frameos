@@ -76,7 +76,7 @@ suite "web route behavior":
     check setupGet.status == 302
     check setupGet.header("location") == "/"
 
-  test "admin route works without login when panel is enabled without auth":
+  test "legacy auth-disabled admin configs do not expose the admin routes":
     var config = defaultFrameConfig()
     config.frameAdminAuth = %*{
       "enabled": true,
@@ -84,20 +84,13 @@ suite "web route behavior":
     }
     configureServerState(config)
 
-    let missingKey = httpRequest(server.port, "GET", "/admin")
-    check missingKey.status == 401
-
-    let adminAccessKey = httpRequest(server.port, "GET", "/admin?k=test-key")
-    check adminAccessKey.status == 302
-    check adminAccessKey.header("location") == "/admin"
-
-    let accessCookie = adminAccessKey.header("set-cookie").split(";", 1)[0]
-    let adminWithAccess = httpRequest(server.port, "GET", "/admin", headers = [("Cookie", accessCookie)])
-    check adminWithAccess.status == 200
+    let adminPage = httpRequest(server.port, "GET", "/admin")
+    check adminPage.status == 401
+    check adminPage.body.contains("Admin panel disabled")
 
     let loginPage = httpRequest(server.port, "GET", "/login")
-    check loginPage.status == 302
-    check loginPage.header("location") == "/admin"
+    check loginPage.status == 401
+    check loginPage.body.contains("Admin panel disabled")
 
   test "login assets load on private frames when admin auth is enabled":
     var config = defaultFrameConfig()

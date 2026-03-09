@@ -312,15 +312,13 @@ suite "admin api route behavior":
     check not dirExists(assetsRoot / "renamed")
 
 
-  test "asset endpoints return 403 when asset access is disabled":
+  test "legacy asset permission flags are ignored for authenticated admins":
     var config = defaultFrameConfig()
     config.frameAdminAuth = %*{
       "enabled": true,
       "user": "admin",
       "pass": "secret",
-      "permissions": %*{
-        "accessAssets": false,
-      },
+      "permissions": %*{"assetsFolder": false},
     }
     let assetsRoot = getTempDir() / "frameos-frame-api-assets-disabled"
     createDir(assetsRoot)
@@ -340,29 +338,26 @@ suite "admin api route behavior":
     let listAssets = httpRequest(
       server.port,
       "GET",
-      "/api/frames/1/assets?k=test-key",
+      "/api/frames/1/assets",
       headers = [("Cookie", adminCookie)],
     )
-    check listAssets.status == 403
+    check listAssets.status == 200
 
     let getAsset = httpRequest(
       server.port,
       "GET",
-      "/api/frames/1/asset?path=hello.txt&k=test-key",
+      "/api/frames/1/asset?path=hello.txt",
       headers = [("Cookie", adminCookie)],
     )
-    check getAsset.status == 403
+    check getAsset.status == 200
 
-  test "control and scene permissions return 403 when disabled":
+  test "legacy control permission flags are ignored for authenticated admins":
     var config = defaultFrameConfig()
     config.frameAdminAuth = %*{
       "enabled": true,
       "user": "admin",
       "pass": "secret",
-      "permissions": %*{
-        "controlFrame": false,
-        "modifyScenes": false,
-      },
+      "permissions": %*{"controlFrame": false},
     }
     configureServerState(config)
 
@@ -382,38 +377,31 @@ suite "admin api route behavior":
       headers = [("Cookie", adminCookie), ("Content-Type", "application/json")],
       body = "{}",
     )
-    check scopedEvent.status == 403
-    check scopedEvent.body.contains("Frame control disabled")
+    check scopedEvent.status == 200
 
     let legacyEvent = httpRequest(
       server.port,
       "POST",
-      "/event/test?k=test-key",
+      "/event/test",
       headers = [("Cookie", adminCookie), ("Content-Type", "application/json")],
       body = "{}",
     )
-    check legacyEvent.status == 403
-    check legacyEvent.body.contains("Frame control disabled")
+    check legacyEvent.status == 200
 
     let uploadScenes = httpRequest(
       server.port,
       "POST",
-      "/uploadScenes?k=test-key",
+      "/uploadScenes",
       headers = [("Cookie", adminCookie), ("Content-Type", "application/json")],
       body = "{}",
     )
-    check uploadScenes.status == 403
-    check uploadScenes.body.contains("Scene modification disabled")
+    check uploadScenes.status == 200
 
     let reload = httpRequest(
       server.port,
       "POST",
-      "/reload?k=test-key",
+      "/reload",
       headers = [("Cookie", adminCookie), ("Content-Type", "application/json")],
       body = "{}",
     )
-    check reload.status == 403
-    check reload.body.contains("Scene modification disabled")
-
-    let (received, _) = eventChannel.tryRecv()
-    check not received
+    check reload.status == 200

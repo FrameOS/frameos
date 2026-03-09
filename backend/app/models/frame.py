@@ -60,31 +60,14 @@ def _serialize_https_proxy(https_proxy: Optional[dict]) -> dict:
 
 def normalize_frame_admin_auth(frame_admin_auth: Optional[dict]) -> dict:
     auth = dict(frame_admin_auth or {})
-    permissions = dict(auth.get('permissions') or {})
     provider = str(auth.get('provider', 'local')).strip() or 'local'
     user = str(auth.get('user', '')).strip()
     password = str(auth.get('pass', '')).strip()
 
-    has_explicit_auth_toggle = 'authEnabled' in auth
-    auth_enabled = (
-        bool(auth.get('authEnabled' if has_explicit_auth_toggle else 'enabled', False))
-        and provider == 'local'
-        and bool(user)
-        and bool(password)
-    )
-    panel_enabled = bool(auth.get('enabled', False)) if has_explicit_auth_toggle else auth_enabled
-
     return {
-        'enabled': panel_enabled,
-        'authEnabled': auth_enabled,
+        'enabled': bool(auth.get('enabled', False)) and provider == 'local',
         'user': user,
         'pass': password,
-        'permissions': {
-            'writeAccess': bool(permissions.get('writeAccess', True)),
-            'accessAssets': bool(permissions.get('accessAssets', True)),
-            'modifyScenes': bool(permissions.get('modifyScenes', True)),
-            'controlFrame': bool(permissions.get('controlFrame', True)),
-        },
     }
 
 
@@ -466,10 +449,8 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
 
     frame_json['frameAdminAuth'] = {
         'enabled': frame_admin_auth['enabled'],
-        'authEnabled': frame_admin_auth['authEnabled'],
-        'provider': 'local',
-        'permissions': frame_admin_auth['permissions'],
-        **({'user': frame_admin_auth['user'], 'pass': frame_admin_auth['pass']} if frame_admin_auth['authEnabled'] else {}),
+        **({'user': frame_admin_auth['user']} if frame_admin_auth['user'] else {}),
+        **({'pass': frame_admin_auth['pass']} if frame_admin_auth['pass'] else {}),
     }
 
     frame_json['settings'] = final_settings

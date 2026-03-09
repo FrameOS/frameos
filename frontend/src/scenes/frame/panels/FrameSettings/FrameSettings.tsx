@@ -5,12 +5,7 @@ import { framesModel } from '../../../../models/framesModel'
 import { Form, Group } from 'kea-forms'
 import { TextInput } from '../../../../components/TextInput'
 import { Select } from '../../../../components/Select'
-import {
-  frameControlUrl,
-  frameImageUrl,
-  frameRootUrl,
-  frameUrl,
-} from '../../../../decorators/frame'
+import { frameControlUrl, frameImageUrl, frameRootUrl, frameUrl } from '../../../../decorators/frame'
 import { frameLogic } from '../../frameLogic'
 import { downloadJson } from '../../../../utils/downloadJson'
 import { Field } from '../../../../components/Field'
@@ -143,6 +138,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
     touchFrameFormField,
     setFrameFormValues,
     updateDeployedSshKeys,
+    generateFrameAdminCredentials,
     generateTlsCertificates,
     verifyTlsCertificates,
   } = useActions(frameLogic)
@@ -748,18 +744,18 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                   tooltip={
                     <div className="space-y-2">
                       <p>
-                        The FrameOS Agent opens a websocket connection from the frame to the backend, which is then used by
-                        the backend to control the frame. This allows you to control the frame even if it's behind a
+                        The FrameOS Agent opens a websocket connection from the frame to the backend, which is then used
+                        by the backend to control the frame. This allows you to control the frame even if it's behind a
                         firewall. The backend must be publicly accessible for this to work.
                       </p>
                       <p>
-                        This is still beta. Enable both toggles, then save. Download the SD card image, and deploy it to the
-                        frame. The agent will then connect to the backend to await further commands.
+                        This is still beta. Enable both toggles, then save. Download the SD card image, and deploy it to
+                        the frame. The agent will then connect to the backend to await further commands.
                       </p>
                       {frameForm.mode !== 'nixos' && (
                         <p>
-                          Note: after enabling the agent, you must manually deploy it from the "..." -&gt; "Deploy Agent"
-                          menu in the top.
+                          Note: after enabling the agent, you must manually deploy it from the "..." -&gt; "Deploy
+                          Agent" menu in the top.
                         </p>
                       )}
                     </div>
@@ -780,8 +776,8 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                             unsecure connection.
                           </p>
                           <p>
-                            Make sure you're either aware of the risks, or that the backend is only accessible over HTTPS
-                            before enabling this.
+                            Make sure you're either aware of the risks, or that the backend is only accessible over
+                            HTTPS before enabling this.
                           </p>
                         </div>
                       }
@@ -913,8 +909,8 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                   <strong>Private (default):</strong> You need a key to both view and administer the frame.
                 </p>
                 <p>
-                  <strong>Protected:</strong> Everyone can view the frame's image, but you need the access key to administer
-                  content.
+                  <strong>Protected:</strong> Everyone can view the frame's image, but you need the access key to
+                  administer content.
                 </p>
                 <p>
                   <strong>Public:</strong> Everyone can view or administer the frame without a key.
@@ -958,9 +954,10 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
           </Field>
         </div>
 
-        <H6>Frame admin panel</H6>
+        <H6>Frame admin panel (BETA)</H6>
         <p className="pl-2 @md:pl-8 text-sm text-gray-500">
-          Hosted on the frame at <code>/admin</code>, similar to the interface you&apos;re using now.
+          Hosted on the frame at <code>/admin</code>, similar to the interface you&apos;re using now. This is still in
+          beta: you can't save any changes.
         </p>
         <div className="pl-2 @md:pl-8 space-y-2">
           <Field name="frame_admin_auth.enabled" label="Admin panel enabled">
@@ -968,31 +965,19 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
           </Field>
           {frameForm.frame_admin_auth?.enabled ? (
             <>
-              <Field name="frame_admin_auth.authEnabled" label="User/password authentication">
-                <Switch />
+              <Field name="frame_admin_auth.user" label="Username">
+                <TextInput />
               </Field>
-              {frameForm.frame_admin_auth?.authEnabled ? (
-                <>
-                  <Field name="frame_admin_auth.user" label="Username">
-                    <TextInput />
-                  </Field>
-                  <Field name="frame_admin_auth.pass" label="Password">
-                    <TextInput type="password" />
-                  </Field>
-                </>
-              ) : null}
-              <H6 className="pt-2">Permissions</H6>
-              <Field name="frame_admin_auth.permissions.accessAssets" label="Access assets">
-                <Switch />
-              </Field>
-              <Field name="frame_admin_auth.permissions.controlFrame" label="Control frame">
-                <Switch />
-              </Field>
-              <Field name="frame_admin_auth.permissions.modifyScenes" label="Save changes">
-                <Switch />
-              </Field>
-              <Field name="frame_admin_auth.permissions.writeAccess" label="Install updates">
-                <Switch />
+              <Field
+                name="frame_admin_auth.pass"
+                label="Password"
+                labelRight={
+                  <Button color="secondary" size="small" onClick={() => generateFrameAdminCredentials()}>
+                    Generate
+                  </Button>
+                }
+              >
+                <TextInput type="password" />
               </Field>
             </>
           ) : null}

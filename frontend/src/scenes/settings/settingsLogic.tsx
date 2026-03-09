@@ -25,19 +25,6 @@ function setDefaultSettings(settings: Partial<FrameOSSettings> | Record<string, 
     unsplash: settings.unsplash ?? {},
     nix: settings.nix ?? {},
     buildHost: settings.buildHost ?? {},
-    frameAdminAuth: settings.frameAdminAuth ?? {
-      useGlobal: true,
-      provider: 'local',
-      enabled: false,
-      user: "",
-      pass: "",
-      permissions: {
-        writeAccess: true,
-        accessAssets: true,
-        modifyScenes: true,
-        controlFrame: true,
-      },
-    },
   }
 }
 
@@ -68,7 +55,6 @@ export const settingsLogic = kea<settingsLogicType>([
     stopEmbeddingsPolling: true,
     generateMissingEmbeddings: true,
     deleteEmbeddings: true,
-    regenerateFrameAdminPassword: true,
   }),
   loaders(({ values }) => ({
     savedSettings: [
@@ -337,12 +323,6 @@ export const settingsLogic = kea<settingsLogicType>([
     [socketLogic.actionTypes.updateSettings]: ({ settings }) => {
       actions.updateSavedSettings(setDefaultSettings(settings))
       actions.resetSettings(setDefaultSettings({ ...values.savedSettings, ...settings }))
-    },
-    regenerateFrameAdminPassword: () => {
-      const bytes = new Uint8Array(18)
-      window.crypto.getRandomValues(bytes)
-      const password = btoa(String.fromCharCode(...bytes)).replace(/[^a-zA-Z0-9]/g, '').slice(0, 24)
-      actions.setSettingsValue(['frameAdminAuth', 'pass'], password)
     },
     addSshKey: async () => {
       const keyId = uuidv4()

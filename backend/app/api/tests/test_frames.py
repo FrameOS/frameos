@@ -111,6 +111,25 @@ async def test_api_frame_update_name(async_client, db, redis):
 
 
 @pytest.mark.asyncio
+async def test_api_frame_update_requires_admin_credentials_when_enabled(async_client, db, redis):
+    frame = await new_frame(db, redis, 'AdminFrame', 'localhost', 'localhost')
+
+    resp = await async_client.post(
+        f'/api/frames/{frame.id}',
+        json={
+            'frame_admin_auth': {
+                'enabled': True,
+                'user': 'admin',
+                'pass': '',
+            }
+        },
+    )
+
+    assert resp.status_code == 422
+    assert 'Username and password are required when frame admin is enabled' in json.dumps(resp.json()['detail'])
+
+
+@pytest.mark.asyncio
 async def test_api_frame_update_scenes_json_format(async_client, db, redis):
     frame = await new_frame(db, redis, 'SceneTest', 'localhost', 'localhost')
     resp = await async_client.post(
