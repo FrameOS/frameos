@@ -83,7 +83,7 @@ async def test_frame_to_dict(mock_publish, db, redis):
     assert mock_publish.await_count == 1
 
 
-def test_normalize_frame_admin_auth_strips_legacy_fields():
+def test_normalize_frame_admin_auth_keeps_password_whitespace():
     assert normalize_frame_admin_auth(
         {
             "enabled": True,
@@ -94,5 +94,5 @@ def test_normalize_frame_admin_auth_strips_legacy_fields():
     ) == {
         "enabled": True,
         "user": "admin",
-        "pass": "secret",
+        "pass": " secret ",
     }
