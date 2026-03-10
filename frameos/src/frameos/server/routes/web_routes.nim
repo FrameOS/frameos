@@ -39,19 +39,12 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
         request.respond(Http200, body = netportal.setupHtml(globalFrameOS))
       elif not adminPanelEnabled():
         request.respond(Http401, body = "Admin panel disabled")
+      elif not hasAdminSession(request):
+        var headers: mummy.HttpHeaders
+        headers["Location"] = "/login"
+        request.respond(Http302, headers)
       else:
-        let accessKey = frameAccessKeyValue()
-        if accessKey != "" and request.queryParams.contains("k") and request.queryParams["k"] == accessKey:
-          var headers: mummy.HttpHeaders
-          headers["Location"] = if hasAdminSession(request): "/admin" else: "/login"
-          headers["Set-Cookie"] = ACCESS_COOKIE & "=" & accessKey & "; Path=/; SameSite=Lax"
-          request.respond(Http302, headers)
-        elif not hasAdminSession(request):
-          var headers: mummy.HttpHeaders
-          headers["Location"] = "/login"
-          request.respond(Http302, headers)
-        else:
-          request.respond(Http200, body = frameWebHtml())
+        request.respond(Http200, body = frameWebHtml())
   )
 
   router.get("/control", proc(request: Request) {.gcsafe.} =
@@ -87,11 +80,7 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
 
   router.get("/static/@asset", proc(request: Request) {.gcsafe.} =
     {.gcsafe.}:
-      let assetName = request.pathParams["asset"]
-      let isLoginAsset =
-        assetName == "main.js" or assetName == "main.css" or assetName == "main.js.map" or assetName == "main.css.map"
-      let allowUnauthedLoginAsset = adminAuthEnabled() and isLoginAsset
-      if not hasAccess(request, Read) and not allowUnauthedLoginAsset:
+      if not allowUnauthenticatedStaticAssets() and not hasAccess(request, Read):
         request.respond(Http401, body = "Unauthorized")
         return
       let assetPath = "assets/compiled/frame_web/static/" & request.pathParams["asset"]

@@ -1,6 +1,7 @@
 import std/[json, strutils, unittest]
 
 import ./helpers/http_harness
+import ../auth
 
 var server = startRouterServer(19331)
 
@@ -48,6 +49,27 @@ suite "web route behavior":
       headers = [("Cookie", adminCookie)],
     )
     check adminWithSession.status == 200
+
+    let frameRootWithAdminSession = httpRequest(
+      server.port,
+      "GET",
+      "/",
+      headers = [("Cookie", adminCookie)],
+    )
+    check frameRootWithAdminSession.status == 401
+
+    let controlWithAdminSession = httpRequest(
+      server.port,
+      "GET",
+      "/c",
+      headers = [("Cookie", adminCookie)],
+    )
+    check controlWithAdminSession.status == 401
+
+    let adminWithFrameKey = httpRequest(server.port, "GET", "/admin?k=test-key")
+    check adminWithFrameKey.status == 302
+    check adminWithFrameKey.header("location") == "/login"
+    check adminWithFrameKey.header("set-cookie") == ""
 
     let loginWithSession = httpRequest(
       server.port,
@@ -101,7 +123,7 @@ suite "web route behavior":
     check loginPage.status == 401
     check loginPage.body.contains("Admin panel disabled")
 
-  test "login assets load on private frames when admin auth is enabled":
+  test "static assets load without frame auth when admin auth is enabled":
     var config = defaultFrameConfig()
     config.frameAdminAuth = %*{
       "enabled": true,
@@ -119,8 +141,37 @@ suite "web route behavior":
     let loginCss = httpRequest(server.port, "GET", "/static/main.css")
     check loginCss.status == 200
 
-    let unrelatedPrivateAsset = httpRequest(server.port, "GET", "/static/asset-4X3RUWXO.png")
-    check unrelatedPrivateAsset.status == 401
+    let emittedAsset = httpRequest(server.port, "GET", "/static/asset-4X3RUWXO.png")
+    check emittedAsset.status == 200
+
+  test "static assets load without auth for public and protected frame access":
+    var config = defaultFrameConfig()
+    config.frameAccess = "public"
+    configureServerState(config)
+
+    let publicAsset = httpRequest(server.port, "GET", "/static/asset-4X3RUWXO.png")
+    check publicAsset.status == 200
+
+    config.frameAccess = "protected"
+    configureServerState(config)
+
+    let protectedAsset = httpRequest(server.port, "GET", "/static/asset-4X3RUWXO.png")
+    check protectedAsset.status == 200
+
+  test "private frames without admin auth require frame authentication for static assets":
+    let config = defaultFrameConfig()
+    configureServerState(config)
+
+    let privateAsset = httpRequest(server.port, "GET", "/static/asset-4X3RUWXO.png")
+    check privateAsset.status == 401
+
+    let authedPrivateAsset = httpRequest(
+      server.port,
+      "GET",
+      "/static/asset-4X3RUWXO.png",
+      headers = [("Cookie", ACCESS_COOKIE & "=test-key")],
+    )
+    check authedPrivateAsset.status == 200
 
   test "unauthorized gated routes return 401":
     let config = defaultFrameConfig()

@@ -130,7 +130,7 @@ suite "Server auth helpers":
     )
     check hasAccess(bearerReq, Write)
 
-  test "hasAccess accepts authenticated admin session without exposing auth-disabled installs":
+  test "authenticated admin session stays separate from frame access":
     setGlobalAdminSessionSalt("salt")
     globalFrameConfig = FrameConfig(
       frameAccess: "private",
@@ -144,8 +144,8 @@ suite "Server auth helpers":
 
     let adminReq = makeRequest(headers = @[("cookie", ADMIN_SESSION_COOKIE & "=" & adminSessionCookieValue())])
     check hasAuthenticatedAdminSession(adminReq)
-    check hasAccess(adminReq, Read)
-    check hasAccess(adminReq, Write)
+    check not hasAccess(adminReq, Read)
+    check not hasAccess(adminReq, Write)
     check canAccessFrameSecrets(adminReq)
 
     globalFrameConfig.frameAdminAuth = %*{}
@@ -190,6 +190,28 @@ suite "Server auth helpers":
     )
     check hasAccess(makeRequest(), Read)
     check not hasAccess(makeRequest(), Write)
+
+  test "static asset auth policy follows admin enablement and frame access mode":
+    globalFrameConfig = FrameConfig(
+      frameAccess: "private",
+      frameAccessKey: "key",
+      frameAdminAuth: %*{},
+    )
+    check not allowUnauthenticatedStaticAssets()
+
+    globalFrameConfig.frameAccess = "protected"
+    check allowUnauthenticatedStaticAssets()
+
+    globalFrameConfig.frameAccess = "public"
+    check allowUnauthenticatedStaticAssets()
+
+    globalFrameConfig.frameAccess = "private"
+    globalFrameConfig.frameAdminAuth = %*{
+      "enabled": true,
+      "user": "admin",
+      "pass": "secret",
+    }
+    check allowUnauthenticatedStaticAssets()
 
   test "hasAdminSession validates cookie only when admin auth enabled":
     configureAdmin(false, "admin", "secret")

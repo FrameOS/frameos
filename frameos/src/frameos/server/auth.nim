@@ -93,27 +93,29 @@ template hasAuthenticatedAdminSession*(request: Request): bool =
   {.gcsafe.}:
     hasAdminSession(request)
 
+proc allowUnauthenticatedStaticAssets*(): bool =
+  {.gcsafe.}:
+    let access = frameAccessMode()
+    adminPanelEnabled() or access == "public" or access == "protected"
+
 template hasAccess*(request: Request, accessType: AccessType): bool =
   {.gcsafe.}:
     block:
-      if hasAuthenticatedAdminSession(request):
+      let access = frameAccessMode()
+      if access == "public" or (access == "protected" and accessType == Read):
         true
       else:
-        let access = frameAccessMode()
-        if access == "public" or (access == "protected" and accessType == Read):
+        let accessKey = frameAccessKeyValue()
+        if accessKey == "":
+          false
+        elif request.queryParams.contains("k") and request.queryParams["k"] == accessKey:
           true
+        elif getCookieValue(request, ACCESS_COOKIE) == accessKey:
+          true
+        elif request.httpMethod == "POST":
+          request.headers.contains(AUTH_HEADER) and request.headers[AUTH_HEADER] == AUTH_TYPE & " " & accessKey
         else:
-          let accessKey = frameAccessKeyValue()
-          if accessKey == "":
-            false
-          elif request.queryParams.contains("k") and request.queryParams["k"] == accessKey:
-            true
-          elif getCookieValue(request, ACCESS_COOKIE) == accessKey:
-            true
-          elif request.httpMethod == "POST":
-            request.headers.contains(AUTH_HEADER) and request.headers[AUTH_HEADER] == AUTH_TYPE & " " & accessKey
-          else:
-            false
+          false
 
 proc hasAdminAccess*(request: Request): bool =
   {.gcsafe.}:
