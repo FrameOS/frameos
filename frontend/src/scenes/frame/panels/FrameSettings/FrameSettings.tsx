@@ -1016,7 +1016,6 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                 }
               >
                 <TextInput
-                  name="password"
                   onClick={() => touchFrameFormField('frame_admin_auth.pass')}
                   type={frameFormTouches['frame_admin_auth.pass'] ? 'text' : 'password'}
                   placeholder=""

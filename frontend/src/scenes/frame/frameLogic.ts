@@ -57,6 +57,7 @@ const FRAME_KEYS: (keyof FrameType)[] = [
   'server_host',
   'server_port',
   'server_api_key',
+  'server_send_logs',
   'width',
   'height',
   'color',
