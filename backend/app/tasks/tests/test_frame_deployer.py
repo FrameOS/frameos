@@ -53,8 +53,7 @@ def test_create_local_source_folder_copies_shared_frontend_sources(tmp_path: Pat
     assert (copied_source_dir / "assets" / "compiled" / "fonts" / "Ubuntu-Regular.ttf").exists()
 
 
-@pytest.mark.asyncio
-async def test_create_local_build_archive_reuses_precompiled_assets(tmp_path: Path, monkeypatch):
+async def _run_create_local_build_archive(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[str, list[str]]:
     source_dir = tmp_path / "frameos"
     temp_dir = tmp_path / "temp"
     source_dir.mkdir()
@@ -98,6 +97,31 @@ async def test_create_local_build_archive_reuses_precompiled_assets(tmp_path: Pa
 
     archive_path = await deployer.create_local_build_archive(str(build_dir), str(source_dir), "arm64")
 
+    return archive_path, commands
+
+
+@pytest.mark.asyncio
+async def test_create_local_build_archive_reuses_precompiled_assets_outside_dev_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.delenv("DEBUG", raising=False)
+
+    archive_path, commands = await _run_create_local_build_archive(tmp_path, monkeypatch)
+
     assert Path(archive_path).exists()
     assert commands
     assert "FRAMEOS_USE_PRECOMPILED_ASSETS=1 nimble assets -y" in commands[0]
+
+
+@pytest.mark.asyncio
+async def test_create_local_build_archive_skips_precompiled_assets_in_dev_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setenv("DEBUG", "1")
+
+    archive_path, commands = await _run_create_local_build_archive(tmp_path, monkeypatch)
+
+    assert Path(archive_path).exists()
+    assert commands
+    assert "nimble assets -y" in commands[0]
+    assert "FRAMEOS_USE_PRECOMPILED_ASSETS=1 nimble assets -y" not in commands[0]
