@@ -135,21 +135,6 @@ proc addFrameApiRoutes*(router: var Router, connectionsState: ConnectionsState) 
         request.respond(status, headers, body)
   )
 
-  router.get("/api/frames/@id/image_token", proc(request: Request) {.gcsafe.} =
-    if not ensureFrameApiReadAccess(request):
-      return
-    {.gcsafe.}:
-      if not requestedFrameMatches(request):
-        request.respond(Http404, body = "Not found!")
-      else:
-        let token =
-          if canAccessFrameSecrets(request) and globalFrameConfig.frameAccessKey.len > 0:
-            globalFrameConfig.frameAccessKey
-          else:
-            "frame"
-        jsonResponse(request, Http200, %*{"token": token, "expires_in": 3600})
-  )
-
   router.get("/api/frames/@id/image", proc(request: Request) {.gcsafe.} =
     if not ensureFrameApiReadAccess(request):
       return

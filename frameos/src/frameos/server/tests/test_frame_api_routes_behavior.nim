@@ -99,44 +99,11 @@ suite "frame api route behavior":
       "/api/frames/2/states",
       "/api/frames/2/assets",
       "/api/frames/2/asset?path=x&k=test-key",
-      "/api/frames/2/image_token",
       "/api/frames/2/image",
     ]:
       let requestPath = if '?' in path: path else: path & "?k=test-key"
       let response = httpRequest(server.port, "GET", requestPath, headers = [("Cookie", adminCookie)])
       check response.status == 404
-
-  test "image token uses frame access key fallback":
-    var config = defaultFrameConfig()
-    config.frameAdminAuth = %*{
-      "enabled": true,
-      "user": "admin",
-      "pass": "secret",
-    }
-    configureServerState(config)
-
-    let noSession = httpRequest(server.port, "GET", "/api/frames/1/image_token?k=test-key")
-    check noSession.status == 401
-
-    let login = httpRequest(
-      server.port,
-      "POST",
-      "/api/admin/login",
-      headers = [("Content-Type", "application/json")],
-      body = $(%*{"username": "admin", "password": "secret"}),
-    )
-    let adminCookie = adminCookieFrom(login)
-
-    let withKey = httpRequest(server.port, "GET", "/api/frames/1/image_token?k=test-key", headers = [("Cookie", adminCookie)])
-    check withKey.status == 200
-    check parseJson(withKey.body)["token"].getStr() == "test-key"
-
-    config.frameAccessKey = ""
-    config.frameAccess = "public"
-    configureServerState(config)
-    let fallback = httpRequest(server.port, "GET", "/api/frames/1/image_token", headers = [("Cookie", adminCookie)])
-    check fallback.status == 200
-    check parseJson(fallback.body)["token"].getStr() == "frame"
 
   test "read access omits secrets while authenticated admins keep them":
     var config = defaultFrameConfig()
@@ -150,9 +117,6 @@ suite "frame api route behavior":
 
     let readOnly = httpRequest(server.port, "GET", "/api/frames")
     check readOnly.status == 401
-
-    let readOnlyToken = httpRequest(server.port, "GET", "/api/frames/1/image_token")
-    check readOnlyToken.status == 401
 
     config.frameAccess = "private"
     configureServerState(config)
@@ -180,11 +144,11 @@ suite "frame api route behavior":
     let privilegedToken = httpRequest(
       server.port,
       "GET",
-      "/api/frames/1/image_token",
+      "/api/frames/1/ping",
       headers = [("Cookie", adminCookie)],
     )
     check privilegedToken.status == 200
-    check parseJson(privilegedToken.body)["token"].getStr() == "test-key"
+    check parseJson(privilegedToken.body)["message"].getStr() == "pong"
 
   test "asset endpoint surfaces helper status content-type and body":
     var config = defaultFrameConfig()
