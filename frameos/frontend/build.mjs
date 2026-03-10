@@ -105,6 +105,11 @@ const buildOptions = {
   entryPoints: ['src/main.tsx'],
   bundle: true,
   format: 'esm',
+  // The frame frontend imports shared TSX files from ../frontend/src. Force the
+  // automatic runtime so those files never fall back to classic JSX on a build host.
+  jsx: 'automatic',
+  jsxImportSource: 'react',
+  tsconfig: path.resolve(__dirname, 'tsconfig.json'),
   splitting: false,
   outdir: staticDir,
   sourcemap: true,

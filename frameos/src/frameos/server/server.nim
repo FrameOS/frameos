@@ -85,12 +85,18 @@ proc newServer*(frameOS: FrameOS): types.Server =
     connectionsState: connectionsState,
   )
 
+proc serverPort*(frameConfig: FrameConfig): int =
+  if frameConfig.framePort == 0: 8787 else: frameConfig.framePort
+
+proc serverBindAddress*(frameConfig: FrameConfig): string =
+  if frameConfig.httpsProxy.enable and frameConfig.httpsProxy.exposeOnlyPort: "127.0.0.1" else: "0.0.0.0"
+
 proc startServer*(self: types.Server) =
   log(%*{"event": "http:start", "message": "Starting web server"})
   # mummy.serve blocks this thread, so run render notifications in a background thread.
   createThread(renderThread, listenForRenderThread, (self.connectionsState, globalAdminConnectionsState))
   createThread(logThread, listenForLogThread, globalAdminConnectionsState)
 
-  let port = (if self.frameConfig.framePort == 0: 8787 else: self.frameConfig.framePort).Port
-  let bindAddr = if self.frameConfig.httpsProxy.enable and self.frameConfig.httpsProxy.exposeOnlyPort: "127.0.0.1" else: "0.0.0.0"
+  let port = serverPort(self.frameConfig).Port
+  let bindAddr = serverBindAddress(self.frameConfig)
   self.mummy.serve(port = port, address = bindAddr)
