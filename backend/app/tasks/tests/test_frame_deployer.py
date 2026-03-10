@@ -99,29 +99,3 @@ async def _run_create_local_build_archive(tmp_path: Path, monkeypatch: pytest.Mo
 
     return archive_path, commands
 
-
-@pytest.mark.asyncio
-async def test_create_local_build_archive_reuses_precompiled_assets_outside_dev_mode(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    monkeypatch.delenv("DEBUG", raising=False)
-
-    archive_path, commands = await _run_create_local_build_archive(tmp_path, monkeypatch)
-
-    assert Path(archive_path).exists()
-    assert commands
-    assert "FRAMEOS_USE_PRECOMPILED_ASSETS=1 nimble assets -y" in commands[0]
-
-
-@pytest.mark.asyncio
-async def test_create_local_build_archive_skips_precompiled_assets_in_dev_mode(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    monkeypatch.setenv("DEBUG", "1")
-
-    archive_path, commands = await _run_create_local_build_archive(tmp_path, monkeypatch)
-
-    assert Path(archive_path).exists()
-    assert commands
-    assert "nimble assets -y" in commands[0]
-    assert "FRAMEOS_USE_PRECOMPILED_ASSETS=1 nimble assets -y" not in commands[0]

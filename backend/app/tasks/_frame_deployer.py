@@ -81,10 +81,6 @@ class FrameDeployer:
         return unique_flags
 
     @staticmethod
-    def _is_dev_mode() -> bool:
-        return os.environ.get("DEBUG", "0").lower() in {"true", "1", "yes"}
-
-    @staticmethod
     def _driver_linker_flags(drivers: dict[str, Driver]) -> list[str]:
         flags: list[str] = []
         for driver in drivers.values():
@@ -681,8 +677,7 @@ class FrameDeployer:
         cpu = await self.arch_to_nim_cpu(arch)
         debug_options = "--lineTrace:on" if frame.debug else ""
         assets_command = "nimble assets -y"
-        if not self._is_dev_mode():
-            assets_command = f"FRAMEOS_USE_PRECOMPILED_ASSETS=1 {assets_command}"
+        assets_command = f"FRAMEOS_USE_PRECOMPILED_ASSETS=1 {assets_command}"
         cmd = (
             f"cd {source_dir} && {assets_command} && nimble setup && "
             f"{nim_path} compile --os:linux --cpu:{cpu} "
