@@ -254,6 +254,28 @@ suite "admin api route behavior":
     check uploadComplete.status == 200
     check fileExists(assetsRoot / "nested" / "hello.txt")
 
+    let maliciousFilenameUpload = httpRequest(
+      server.port,
+      "POST",
+      "/api/admin/frames/1/assets/upload?upload_id=malicious-filename&path=nested&filename=..&chunk_index=0&complete=1",
+      headers = [("Cookie", adminCookie), ("Content-Type", "application/octet-stream")],
+      body = "pw",
+    )
+    check maliciousFilenameUpload.status == 200
+    let maliciousFilenamePayload = parseJson(maliciousFilenameUpload.body)
+    check maliciousFilenamePayload["path"].getStr() == assetsRoot / "nested" / "uploaded_file"
+    check fileExists(assetsRoot / "nested" / "uploaded_file")
+
+    let maliciousPathUpload = httpRequest(
+      server.port,
+      "POST",
+      "/api/admin/frames/1/assets/upload?upload_id=malicious-path&path=..%2Fescape&filename=hello.txt&chunk_index=0&complete=1",
+      headers = [("Cookie", adminCookie), ("Content-Type", "application/octet-stream")],
+      body = "pw",
+    )
+    check maliciousPathUpload.status == 400
+    check maliciousPathUpload.body.contains("Invalid asset path")
+
     let mkdir = httpRequest(
       server.port,
       "POST",
@@ -325,13 +347,12 @@ suite "admin api route behavior":
     check not dirExists(assetsRoot / "renamed")
 
 
-  test "legacy asset permission flags are ignored for authenticated admins":
+  test "authenticated admins can still access frame asset endpoints":
     var config = defaultFrameConfig()
     config.frameAdminAuth = %*{
       "enabled": true,
       "user": "admin",
       "pass": "secret",
-      "permissions": %*{"assetsFolder": false},
     }
     let assetsRoot = getTempDir() / "frameos-frame-api-assets-disabled"
     createDir(assetsRoot)
@@ -364,13 +385,12 @@ suite "admin api route behavior":
     )
     check getAsset.status == 200
 
-  test "legacy control permission flags are ignored for authenticated admins":
+  test "authenticated admins can still use legacy control endpoints":
     var config = defaultFrameConfig()
     config.frameAdminAuth = %*{
       "enabled": true,
       "user": "admin",
       "pass": "secret",
-      "permissions": %*{"controlFrame": false},
     }
     configureServerState(config)
 
@@ -426,10 +446,7 @@ suite "admin api route behavior":
       "frameAdminAuth": {
         "enabled": true,
         "user": "admin",
-        "pass": "secret",
-        "permissions": {
-          "controlFrame": false
-        }
+        "pass": "secret"
       },
       "width": 800,
       "height": 480

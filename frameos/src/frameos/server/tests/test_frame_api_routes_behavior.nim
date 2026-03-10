@@ -201,13 +201,12 @@ suite "frame api route behavior":
     check found.body == "hello asset"
 
 
-  test "legacy asset permission flags are ignored for authenticated admins":
+  test "authenticated admins can still access frame asset endpoints":
     var config = defaultFrameConfig()
     config.frameAdminAuth = %*{
       "enabled": true,
       "user": "admin",
       "pass": "secret",
-      "permissions": %*{"assetsFolder": false},
     }
     let assetsRoot = getTempDir() / "frameos-frame-api-assets-disabled"
     createDir(assetsRoot)

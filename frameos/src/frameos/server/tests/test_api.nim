@@ -118,6 +118,10 @@ suite "Server API helpers":
     check uploaded{"path"}.getStr() == tempRoot / "nested" / "hello.txt"
     check fileExists(tempRoot / "nested" / "hello.txt")
 
+    let sanitizedFilename = saveAssetUploadPayload("nested", "..", "trap")
+    check sanitizedFilename{"path"}.getStr() == tempRoot / "nested" / "uploaded_file"
+    check fileExists(tempRoot / "nested" / "uploaded_file")
+
     createAssetDirectory("nested/inner")
     check dirExists(tempRoot / "nested" / "inner")
 
