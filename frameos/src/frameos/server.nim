@@ -4,4 +4,5 @@ export server.newServer
 export server.startServer
 export server.serverPort
 export server.serverBindAddress
+export server.shouldLogHttpRequest
 export api.shouldReturnNotModified

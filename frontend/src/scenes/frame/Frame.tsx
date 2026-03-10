@@ -258,11 +258,7 @@ export function Frame(props: FrameSceneProps) {
                   </Popover>
                 ) : null}
 
-                <DropdownMenu
-                  buttonColor="secondary"
-                  className="items-center"
-                  items={dropdownItems}
-                />
+                <DropdownMenu buttonColor="secondary" className="items-center" items={dropdownItems} />
                 {inFrameAdminMode ? (
                   <div className="flex pl-2 space-x-2">
                     <Button color="secondary" type="button" onClick={() => renderFrame()}>
@@ -285,32 +281,32 @@ export function Frame(props: FrameSceneProps) {
                         Download SD card .img
                       </Button>
                     ) : frameControlMode ? (
-                        <Button
-                          color={unsavedChanges || undeployedChanges ? 'primary' : 'secondary'}
-                          type="button"
-                          onClick={() => {
-                            saveFrame()
-                            fastDeployFrame()
-                            openLogs()
-                          }}
-                        >
-                          Reload
-                        </Button>
-                      ) : (
-                        <Button
-                          color={unsavedChanges || undeployedChanges ? 'primary' : 'secondary'}
-                          type="button"
-                          onClick={() => {
-                            saveFrame()
-                            deployFrame()
-                            openLogs()
-                          }}
-                        >
-                          {!frame.last_successful_deploy_at
-                            ? 'First deploy'
-                            : `Save & ${requiresRecompilation ? 'full deploy' : 'fast deploy'}`}
-                        </Button>
-                      )}
+                      <Button
+                        color={unsavedChanges || undeployedChanges ? 'primary' : 'secondary'}
+                        type="button"
+                        onClick={() => {
+                          saveFrame()
+                          fastDeployFrame()
+                          openLogs()
+                        }}
+                      >
+                        Reload
+                      </Button>
+                    ) : (
+                      <Button
+                        color={unsavedChanges || undeployedChanges ? 'primary' : 'secondary'}
+                        type="button"
+                        onClick={() => {
+                          saveFrame()
+                          deployFrame()
+                          openLogs()
+                        }}
+                      >
+                        {!frame.last_successful_deploy_at
+                          ? 'First deploy'
+                          : `Save & ${requiresRecompilation ? 'full deploy' : 'fast deploy'}`}
+                      </Button>
+                    )}
                   </div>
                 )}
                 <SDCardModal />

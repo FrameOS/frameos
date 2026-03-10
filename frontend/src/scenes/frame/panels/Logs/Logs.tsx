@@ -128,7 +128,7 @@ export function Logs() {
             icon: <ArrowUpTrayIcon className="w-5 h-5" />,
           },
           {
-            label: 'Clear build cache',
+            label: 'Clear build cache on frame',
             onClick: () => {
               clearBuildCache()
             },

@@ -210,7 +210,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
               ...(mode === 'rpios' && !inFrameAdminMode
                 ? [
                     {
-                      label: 'Clear build cache',
+                      label: 'Clear build cache on frame',
                       onClick: () => {
                         clearBuildCache()
                         openLogs()
@@ -1015,7 +1015,13 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                   </Button>
                 }
               >
-                <TextInput type="password" />
+                <TextInput
+                  name="password"
+                  onClick={() => touchFrameFormField('frame_admin_auth.pass')}
+                  type={frameFormTouches['frame_admin_auth.pass'] ? 'text' : 'password'}
+                  placeholder=""
+                  required
+                />
               </Field>
             </>
           ) : null}

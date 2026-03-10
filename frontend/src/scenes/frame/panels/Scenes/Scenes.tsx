@@ -45,8 +45,10 @@ import { urls } from '../../../../urls'
 import { appsModel } from '../../../../models/appsModel'
 import { chatLogic } from '../Chat/chatLogic'
 import { isFrameControlMode } from '../../../../utils/frameControlMode'
+import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
 export function Scenes() {
   const frameControlMode = isFrameControlMode()
+  const inFrameAdminMode = isInFrameAdminMode()
   const { frameId, frameForm, frame } = useValues(frameLogic)
   const { applyTemplate } = useActions(frameLogic)
   const { apps } = useValues(appsModel)
@@ -595,8 +597,10 @@ export function Scenes() {
           </div>
         ) : null}
         {filteredScenes.map((scene) => {
-          const secretSettings = sceneSecretSettings.get(scene.id) ?? []
-          const missingSecretSettings = getMissingSecretSettingKeys(secretSettings, savedSettings)
+          const secretSettings = inFrameAdminMode ? [] : (sceneSecretSettings.get(scene.id) ?? [])
+          const missingSecretSettings = inFrameAdminMode
+            ? new Set<string>()
+            : getMissingSecretSettingKeys(secretSettings, savedSettings)
           const sceneServiceEntries = secretSettings.map((settingKey) => ({
             key: settingKey,
             label: settingsDetails[settingKey]?.title || settingKey,
@@ -622,17 +626,19 @@ export function Scenes() {
                 )}
               >
                 <div className="flex items-start justify-between gap-1">
-                  <div className="overflow-hidden">
-                    <FrameImage
-                      frameId={frameId}
-                      sceneId={scene.id}
-                      className={clsx('max-w-[120px] max-h-[120px]', multiSelectEnabled ? '' : 'cursor-pointer')}
-                      onClick={() => (multiSelectEnabled ? toggleSceneSelection(scene.id) : expandScene(scene.id))}
-                      refreshable={false}
-                      thumb
-                      objectFit="cover"
-                    />
-                  </div>
+                  {!inFrameAdminMode ? (
+                    <div className="overflow-hidden">
+                      <FrameImage
+                        frameId={frameId}
+                        sceneId={scene.id}
+                        className={clsx('max-w-[120px] max-h-[120px]', multiSelectEnabled ? '' : 'cursor-pointer')}
+                        onClick={() => (multiSelectEnabled ? toggleSceneSelection(scene.id) : expandScene(scene.id))}
+                        refreshable={false}
+                        thumb
+                        objectFit="cover"
+                      />
+                    </div>
+                  ) : null}
                   <div className="break-inside-avoid space-y-1 w-full">
                     <div className="flex items-start justify-between gap-1">
                       {multiSelectEnabled ? (
@@ -770,26 +776,28 @@ export function Scenes() {
                     <div className="flex items-center gap-2 w-full pl-7 justify-between">
                       <div className="text-xs text-gray-400 flex flex-wrap gap-1 items-center">
                         <div>{scene.id}</div>
-                        {secretSettings
-                          .filter((settingKey) => missingSecretSettings.has(settingKey))
-                          .map((settingKey) => (
-                            <button
-                              key={settingKey}
-                              type="button"
-                              className={clsx(
-                                'inline-flex items-center rounded border border-gray-400/80 bg-gray-950 px-2 py-0.5 text-[10px] font-semibold uppercase text-gray-300',
-                                multiSelectEnabled ? 'cursor-default opacity-60' : 'hover:bg-gray-900'
-                              )}
-                              onClick={() => {
-                                if (!multiSelectEnabled) {
-                                  setActiveSettingsKey(settingKey)
-                                }
-                              }}
-                            >
-                              <ExclamationTriangleIcon className="mr-1 h-3 w-3 text-yellow-300" />
-                              {settingsDetails[settingKey].tagLabel}
-                            </button>
-                          ))}
+                        {!inFrameAdminMode
+                          ? secretSettings
+                              .filter((settingKey) => missingSecretSettings.has(settingKey))
+                              .map((settingKey) => (
+                                <button
+                                  key={settingKey}
+                                  type="button"
+                                  className={clsx(
+                                    'inline-flex items-center rounded border border-gray-400/80 bg-gray-950 px-2 py-0.5 text-[10px] font-semibold uppercase text-gray-300',
+                                    multiSelectEnabled ? 'cursor-default opacity-60' : 'hover:bg-gray-900'
+                                  )}
+                                  onClick={() => {
+                                    if (!multiSelectEnabled) {
+                                      setActiveSettingsKey(settingKey)
+                                    }
+                                  }}
+                                >
+                                  <ExclamationTriangleIcon className="mr-1 h-3 w-3 text-yellow-300" />
+                                  {settingsDetails[settingKey].tagLabel}
+                                </button>
+                              ))
+                          : null}
 
                         {linksToOtherScenes[scene.id]?.size ? (
                           <Tooltip
@@ -858,14 +866,16 @@ export function Scenes() {
                         <div className="text-xs ml-2 uppercase">{showAsFps(scene.settings.refreshInterval)}</div>
                       ) : null}
                     </div>
-                    <div className="flex flex-wrap items-center gap-2 pl-7 text-xs text-gray-500">
-                      {sceneServiceEntries?.map(({ key, label, missing }) => (
-                        <Tag key={key} color={missing ? 'orange' : 'teal'}>
-                          {label}
-                          {missing ? ' (missing key)' : ''}
-                        </Tag>
-                      ))}
-                    </div>
+                    {!inFrameAdminMode ? (
+                      <div className="flex flex-wrap items-center gap-2 pl-7 text-xs text-gray-500">
+                        {sceneServiceEntries?.map(({ key, label, missing }) => (
+                          <Tag key={key} color={missing ? 'orange' : 'teal'}>
+                            {label}
+                            {missing ? ' (missing key)' : ''}
+                          </Tag>
+                        ))}
+                      </div>
+                    ) : null}
 
                     {expandedScenes[scene.id] && !multiSelectEnabled ? (
                       <div className="pl-7">

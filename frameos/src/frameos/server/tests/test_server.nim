@@ -40,3 +40,16 @@ suite "Server If-Modified-Since handling":
   test "non-positive last update is ignored":
     let headers = buildHeaders(@["Wed, 21 Oct 2015 07:28:00 GMT"])
     check not shouldReturnNotModified(headers, 0.0)
+
+suite "Server request logging":
+  test "suppresses noisy admin and asset requests":
+    check not shouldLogHttpRequest("/ws")
+    check not shouldLogHttpRequest("/ws/admin")
+    check not shouldLogHttpRequest("/static/asset-4X3RUWXO.png")
+    check not shouldLogHttpRequest("/api/frames/1/logs")
+    check not shouldLogHttpRequest("/api/frames/1/scene_images/example-scene")
+
+  test "keeps meaningful application requests":
+    check shouldLogHttpRequest("/api/frames/1")
+    check shouldLogHttpRequest("/api/frames/1/state")
+    check shouldLogHttpRequest("/api/admin/login")

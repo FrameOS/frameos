@@ -1,6 +1,7 @@
 import json
 import locks
 import os
+import strutils
 import mummy
 import mummy/routers
 from net import Port
@@ -11,15 +12,25 @@ import ./state
 import ./auth
 import ./routes
 
+proc shouldLogHttpRequest*(path: string): bool =
+  if path == "/ws" or path == "/ws/admin":
+    return false
+  if path.startsWith("/static/"):
+    return false
+  if path.startsWith("/api/frames/") and path.endsWith("/logs"):
+    return false
+  if path.startsWith("/api/frames/") and "/scene_images/" in path:
+    return false
+  true
+
 proc makeWebsocketHandler(publicState: ConnectionsState, adminState: ConnectionsState): WebSocketHandler =
   result = proc(websocket: WebSocket, event: WebSocketEvent, message: Message) {.closure, gcsafe.} =
     case event:
     of OpenEvent:
-      log(%*{"event": "websocket:connect"})
+      discard
     of MessageEvent:
-      log(%*{"event": "websocket:message", "message": message.data})
+      discard
     of ErrorEvent, CloseEvent:
-      log(%*{"event": "websocket:disconnect"})
       removeConnection(publicState, websocket)
       removeConnection(adminState, websocket)
 
@@ -32,7 +43,6 @@ proc listenForRenderThread(args: tuple[publicState: ConnectionsState, adminState
           sendToAll(args.publicState, "render")
         if hasConnections(args.adminState):
           sendToAll(args.adminState, "render")
-        log(%*{"event": "websocket:send", "message": "render"})
       sleep(10)
     else:
       sleep(100)
@@ -70,7 +80,8 @@ proc newServer*(frameOS: FrameOS): types.Server =
   let router = buildRouter(connectionsState, adminConnectionsState)
   let routerHandler = router.toHandler()
   let loggingHandler = proc(request: Request) {.gcsafe.} =
-    log(%*{"event": "http", "method": request.httpMethod, "path": request.path})
+    if shouldLogHttpRequest(request.path):
+      log(%*{"event": "http", "method": request.httpMethod, "path": request.path})
     routerHandler(request)
   let mummyServer = mummy.newServer(
     loggingHandler,
