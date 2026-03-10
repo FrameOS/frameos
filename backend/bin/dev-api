@@ -10,5 +10,4 @@ RUN_IN_PYTHON_ENV="$SCRIPT_DIR/run-in-python-env"
 cd "$REPO_ROOT/backend"
 
 "$RUN_IN_PYTHON_ENV" python -m alembic upgrade head
-"$RUN_IN_PYTHON_ENV" arq app.tasks.worker.WorkerSettings &
 exec "$RUN_IN_PYTHON_ENV" uvicorn app.fastapi:app --host 0.0.0.0 --port 8989 --reload

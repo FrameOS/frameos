@@ -4,8 +4,8 @@
   "packageManager": "pnpm@10.27.0",
   "scripts": {
     "dev": "mprocs",
-    "dev:backend": "cd backend && DEBUG=1 ../.venv/bin/python -m alembic upgrade head && exec ../.venv/bin/uvicorn app.fastapi:app --host 0.0.0.0 --port 8989 --reload",
-    "dev:worker": "cd backend && DEBUG=1 exec ../.venv/bin/arq app.tasks.worker.WorkerSettings",
+    "dev:backend": "DEBUG=1 ./backend/bin/dev-api",
+    "dev:worker": "DEBUG=1 ./backend/bin/dev-worker",
     "dev:frontend": "pnpm --dir frontend run dev",
     "dev:frame-frontend": "pnpm --dir frameos/frontend run dev",
     "dev:redis": "sh -c 'mkdir -p .local/redis && exec redis-server --dir .local/redis'"

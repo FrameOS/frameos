@@ -10,6 +10,7 @@ import { DropdownMenu } from '../../../../components/DropdownMenu'
 import { frameSettingsLogic } from '../FrameSettings/frameSettingsLogic'
 import { Spinner } from '../../../../components/Spinner'
 import { ArrowUpTrayIcon, ArrowPathIcon } from '@heroicons/react/24/solid'
+import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
 
 function formatTimestamp(isoTimestamp: string): string {
   const date = new Date(isoTimestamp)
@@ -69,6 +70,7 @@ function renderMetricsLog(rest: Record<string, any>): JSX.Element {
 }
 
 export function Logs() {
+  const inFrameAdminMode = isInFrameAdminMode()
   const { frameId } = useValues(frameLogic)
   const { logs, logsLoading } = useValues(logsLogic({ frameId }))
   const [atBottom, setAtBottom] = useState(true)
@@ -127,17 +129,21 @@ export function Logs() {
             onClick: downloadLogs,
             icon: <ArrowUpTrayIcon className="w-5 h-5" />,
           },
-          {
-            label: 'Clear build cache on frame',
-            onClick: () => {
-              clearBuildCache()
-            },
-            icon: buildCacheLoading ? (
-              <Spinner color="white" className="w-4 h-4" />
-            ) : (
-              <ArrowPathIcon className="w-5 h-5" />
-            ),
-          },
+          ...(!inFrameAdminMode
+            ? [
+                {
+                  label: 'Clear build cache on frame',
+                  onClick: () => {
+                    clearBuildCache()
+                  },
+                  icon: buildCacheLoading ? (
+                    <Spinner color="white" className="w-4 h-4" />
+                  ) : (
+                    <ArrowPathIcon className="w-5 h-5" />
+                  ),
+                },
+              ]
+            : []),
         ]}
       />
       <Virtuoso

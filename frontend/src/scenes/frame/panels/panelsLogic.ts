@@ -269,14 +269,19 @@ export const panelsLogic = kea<panelsLogicType>([
     panelsWithConditions: [
       (s) => [s.panels, s.fullScreenPanel, s.scenesOpen, s.selectedSceneIsInterpreted],
       (panels, fullScreenPanel, scenesOpen, selectedSceneIsInterpreted): Record<Area, PanelWithMetadata[]> => {
+        const showTemplates = !isInFrameAdminMode()
         const showSceneSource = !isInFrameAdminMode() && !selectedSceneIsInterpreted
 
-        if (!fullScreenPanel || (fullScreenPanel.panel === Panel.SceneSource && !showSceneSource)) {
+        if (
+          !fullScreenPanel ||
+          (fullScreenPanel.panel === Panel.Templates && !showTemplates) ||
+          (fullScreenPanel.panel === Panel.SceneSource && !showSceneSource)
+        ) {
           return hideOnFramePanels({
             ...panels,
             [Area.TopRight]: panels[Area.TopRight].filter((p) =>
               scenesOpen
-                ? [Panel.Templates, Panel.Schedule, Panel.Chat].includes(p.panel)
+                ? [Panel.Schedule, Panel.Chat, ...(showTemplates ? [Panel.Templates] : [])].includes(p.panel)
                 : [Panel.SceneState, Panel.Apps, Panel.Events, Panel.Chat].includes(p.panel)
             ),
             [Area.BottomLeft]: panels[Area.BottomLeft].filter(
