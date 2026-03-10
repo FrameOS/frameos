@@ -2,7 +2,7 @@ import { actions, afterMount, kea, listeners, path, reducers } from 'kea'
 import {
   getFrameAdminLoginParams,
   stripFrameAdminLoginParams,
-} from '../../../../../frontend/src/utils/frameAdminLoginParams'
+} from '../../utils/frameAdminLoginParams'
 
 export const loginLogic = kea([
   path(['frameos', 'frontend', 'loginLogic']),
@@ -26,16 +26,15 @@ export const loginLogic = kea([
         return
       }
 
-      const { username, password, hasParams } = getFrameAdminLoginParams(window.location.hash)
+      const { username, password, hasParams } = getFrameAdminLoginParams()
 
       if (hasParams) {
         actions.setUsername(username || '')
         actions.setPassword(password || '')
-        const nextHash = stripFrameAdminLoginParams(window.location.hash)
         window.history.replaceState(
           window.history.state,
           '',
-          `${window.location.pathname}${window.location.search}${nextHash}`
+          stripFrameAdminLoginParams()
         )
       }
 
