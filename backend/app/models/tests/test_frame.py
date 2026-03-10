@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import patch, AsyncMock
-from app.models.frame import Frame, delete_frame, new_frame, update_frame
+from app.models.frame import Frame, delete_frame, new_frame, normalize_frame_admin_auth, update_frame
 
 
 @pytest.mark.asyncio
@@ -81,3 +81,18 @@ async def test_frame_to_dict(mock_publish, db, redis):
     assert data["https_proxy"]["server_cert_not_valid_after"] is not None
     assert data["https_proxy"]["client_ca_cert_not_valid_after"] is not None
     assert mock_publish.await_count == 1
+
+
+def test_normalize_frame_admin_auth_strips_legacy_fields():
+    assert normalize_frame_admin_auth(
+        {
+            "enabled": True,
+            "provider": "oauth",
+            "user": " admin ",
+            "pass": " secret ",
+        }
+    ) == {
+        "enabled": True,
+        "user": "admin",
+        "pass": "secret",
+    }

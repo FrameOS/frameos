@@ -60,12 +60,11 @@ def _serialize_https_proxy(https_proxy: Optional[dict]) -> dict:
 
 def normalize_frame_admin_auth(frame_admin_auth: Optional[dict]) -> dict:
     auth = dict(frame_admin_auth or {})
-    provider = str(auth.get('provider', 'local')).strip() or 'local'
     user = str(auth.get('user', '')).strip()
     password = str(auth.get('pass', '')).strip()
 
     return {
-        'enabled': bool(auth.get('enabled', False)) and provider == 'local',
+        'enabled': bool(auth.get('enabled', False)),
         'user': user,
         'pass': password,
     }

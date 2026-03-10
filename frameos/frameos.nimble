@@ -40,6 +40,12 @@ proc hasPrecompiledFrontendAssets(): bool =
   dirExists("assets/compiled/frame_web/static") and
   fileExists("assets/compiled/fonts/Ubuntu-Regular.ttf")
 
+proc hasGeneratedAssetModules(): bool =
+  fileExists("src/assets/apps.nim") and
+  fileExists("src/assets/web.nim") and
+  fileExists("src/assets/frame_web.nim") and
+  fileExists("src/assets/fonts.nim")
+
 before build:
   exec "nimble assets"
   if not dirExists("quickjs"):
@@ -47,7 +53,11 @@ before build:
 
 task assets, "Create assets":
   exec "mkdir -p src/assets"
-  if envEnabled(reusePrecompiledAssetsEnv) and hasPrecompiledFrontendAssets():
+  let reusePrecompiledAssets = envEnabled(reusePrecompiledAssetsEnv) and hasPrecompiledFrontendAssets()
+  if reusePrecompiledAssets and hasGeneratedAssetModules():
+    echo "Reusing precompiled frontend and generated asset modules"
+    return
+  if reusePrecompiledAssets:
     echo "Reusing precompiled frontend assets from assets/compiled"
   else:
     if not fileExists("frontend/node_modules/autoprefixer/package.json"):
