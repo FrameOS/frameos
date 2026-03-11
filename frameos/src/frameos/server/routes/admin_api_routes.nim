@@ -3,7 +3,6 @@ import mummy
 import mummy/routers
 import httpcore
 import frameos/channels
-import frameos/config
 import ../auth
 import ../api
 import ../state
@@ -73,39 +72,4 @@ proc addAdminApiRoutes*(router: var Router) =
           log(%*{"event": "http", "post": request.path, "eventName": eventName})
           sendEvent(eventName, if eventPayload.kind == JNull: %*{} else: eventPayload)
           jsonResponse(request, Http200, %*{"status": "ok"})
-  )
-
-  router.post("/event/@name", proc(request: Request) {.gcsafe.} =
-    if not hasAdminAccess(request):
-      request.respond(Http401, body = "Unauthorized")
-      return
-    log(%*{"event": "http", "post": request.path})
-    let payload = parseJson(if request.body == "": "{}" else: request.body)
-    sendEvent(request.pathParams["name"], payload)
-    jsonResponse(request, Http200, %*{"status": "ok"})
-  )
-
-  router.post("/uploadScenes", proc(request: Request) {.gcsafe.} =
-    if not hasAdminAccess(request):
-      request.respond(Http401, body = "Unauthorized")
-      return
-    log(%*{"event": "http", "post": request.path})
-    let payload = parseJson(if request.body == "": "{}" else: request.body)
-    sendEvent("uploadScenes", payload)
-    jsonResponse(request, Http200, %*{"status": "ok"})
-  )
-
-  router.post("/reload", proc(request: Request) {.gcsafe.} =
-    if not hasAdminAccess(request):
-      request.respond(Http401, body = "Unauthorized")
-      return
-    try:
-      {.gcsafe.}:
-        let newConfig = loadConfig()
-        updateFrameConfigFrom(globalFrameOS.frameConfig, newConfig)
-      sendEvent("reload", %*{})
-      jsonResponse(request, Http200, %*{"status": "ok"})
-    except CatchableError as e:
-      log(%*{"event": "reload:error", "error": e.msg})
-      jsonResponse(request, Http500, %*{"status": "error", "error": e.msg})
   )

@@ -1,11 +1,15 @@
-import std/[json, strutils, unittest]
+import std/[json, os, strutils, unittest]
 
+import ../../channels
 import ./helpers/http_harness
 import ../auth
 
 var server = startRouterServer(19331)
 
 suite "web route behavior":
+  setup:
+    drainEventChannel()
+
   test "root route handles hotspot and access-key redirects":
     var config = defaultFrameConfig()
     configureServerState(config, hotspotActive = true)
@@ -180,6 +184,134 @@ suite "web route behavior":
     for path in ["/static/foo.js", "/image", "/states", "/state", "/ws", "/ws/admin"]:
       let response = httpRequest(server.port, "GET", path)
       check response.status == 401
+
+    for path in ["/event/test", "/uploadScenes", "/reload"]:
+      let response = httpRequest(
+        server.port,
+        "POST",
+        path,
+        headers = [("Content-Type", "application/json")],
+        body = "{}",
+      )
+      check response.status == 401
+
+  test "legacy control endpoints use frame write access":
+    var config = defaultFrameConfig()
+    config.frameAdminAuth = %*{
+      "enabled": true,
+      "user": "admin",
+      "pass": "secret",
+    }
+    configureServerState(config)
+
+    let adminLogin = httpRequest(
+      server.port,
+      "POST",
+      "/api/admin/login",
+      headers = [("Content-Type", "application/json")],
+      body = $(%*{"username": "admin", "password": "secret"}),
+    )
+    let adminCookie = adminLogin.header("set-cookie").split(";", 1)[0]
+
+    let controlWithFrameKey = httpRequest(server.port, "GET", "/c?k=test-key")
+    check controlWithFrameKey.status == 200
+
+    let eventWithAdminSession = httpRequest(
+      server.port,
+      "POST",
+      "/event/test",
+      headers = [("Cookie", adminCookie), ("Content-Type", "application/json")],
+      body = "{}",
+    )
+    check eventWithAdminSession.status == 401
+
+    let legacyEvent = httpRequest(
+      server.port,
+      "POST",
+      "/event/test",
+      headers = [
+        ("Authorization", "Bearer test-key"),
+        ("Content-Type", "application/json"),
+      ],
+      body = $(%*{"value": 7}),
+    )
+    check legacyEvent.status == 200
+    let (eventReceived, eventPayload) = eventChannel.tryRecv()
+    check eventReceived
+    check eventPayload[1] == "test"
+    check eventPayload[2]["value"].getInt() == 7
+
+    let uploadScenes = httpRequest(
+      server.port,
+      "POST",
+      "/uploadScenes",
+      headers = [
+        ("Authorization", "Bearer test-key"),
+        ("Content-Type", "application/json"),
+      ],
+      body = $(%*{"sceneId": "demo"}),
+    )
+    check uploadScenes.status == 200
+    let (uploadReceived, uploadPayload) = eventChannel.tryRecv()
+    check uploadReceived
+    check uploadPayload[1] == "uploadScenes"
+    check uploadPayload[2]["sceneId"].getStr() == "demo"
+
+  test "reload endpoint returns 200 and 500 with frame write access":
+    let config = defaultFrameConfig()
+    configureServerState(config)
+
+    let tempRoot = getTempDir() / "frameos-web-reload-tests"
+    createDir(tempRoot)
+    let configPath = tempRoot / "frame.json"
+    let hadConfigEnv = existsEnv("FRAMEOS_CONFIG")
+    let previousConfigEnv = if hadConfigEnv: getEnv("FRAMEOS_CONFIG") else: ""
+    writeFile(configPath, """{
+      "mode": "web_only",
+      "serverHost": "localhost",
+      "serverPort": 8989,
+      "frameHost": "localhost",
+      "framePort": 8787,
+      "frameAccess": "private",
+      "frameAccessKey": "test-key",
+      "width": 800,
+      "height": 480
+    }""")
+
+    try:
+      putEnv("FRAMEOS_CONFIG", configPath)
+      let success = httpRequest(
+        server.port,
+        "POST",
+        "/reload",
+        headers = [
+          ("Authorization", "Bearer test-key"),
+          ("Content-Type", "application/json"),
+        ],
+        body = "{}",
+      )
+      check success.status == 200
+      let (reloadReceived, reloadPayload) = eventChannel.tryRecv()
+      check reloadReceived
+      check reloadPayload[1] == "reload"
+
+      putEnv("FRAMEOS_CONFIG", tempRoot / "missing.json")
+      let failed = httpRequest(
+        server.port,
+        "POST",
+        "/reload",
+        headers = [
+          ("Authorization", "Bearer test-key"),
+          ("Content-Type", "application/json"),
+        ],
+        body = "{}",
+      )
+      check failed.status == 500
+    finally:
+      if hadConfigEnv:
+        putEnv("FRAMEOS_CONFIG", previousConfigEnv)
+      else:
+        delEnv("FRAMEOS_CONFIG")
 
   test "wifi route reflects hotspot mode":
     let config = defaultFrameConfig()
