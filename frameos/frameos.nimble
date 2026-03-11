@@ -24,8 +24,6 @@ requires "psutil >= 0.6.0"
 requires "QRgen >= 3.1.0"
 requires "jsony >= 1.1.5"
 
-taskRequires "assets", "nimassets >= 0.2.4"
-
 let installFrontendDepsCmd = "sh -lc 'if command -v corepack >/dev/null 2>&1; then corepack pnpm install --frozen-lockfile; elif command -v pnpm >/dev/null 2>&1; then pnpm install --frozen-lockfile; else echo \"pnpm or corepack is required\" >&2; exit 1; fi'"
 let buildFrontendCmd = "sh -lc 'if command -v corepack >/dev/null 2>&1; then corepack pnpm run build; elif command -v pnpm >/dev/null 2>&1; then pnpm run build; else echo \"pnpm or corepack is required\" >&2; exit 1; fi'"
 
@@ -66,9 +64,9 @@ task assets, "Create assets":
       echo "Using existing frontend dependencies in frontend/node_modules"
     exec "cd frontend && " & buildFrontendCmd
   exec "python tools/generate_apps_asset_nim.py --source-dir . --output src/assets/apps.nim"
-  exec "~/.nimble/bin/nimassets -d=assets/compiled/web -o=src/assets/web.nim"
-  exec "~/.nimble/bin/nimassets -d=assets/compiled/frame_web -o=src/assets/frame_web.nim"
-  exec "~/.nimble/bin/nimassets -f=assets/compiled/fonts/Ubuntu-Regular.ttf -o=src/assets/fonts.nim"
+  exec "python tools/generate_compressed_asset_nim.py --source-dir . --dir assets/compiled/web --output src/assets/web.nim"
+  exec "python tools/generate_compressed_asset_nim.py --source-dir . --dir assets/compiled/frame_web --output src/assets/frame_web.nim"
+  exec "python tools/generate_compressed_asset_nim.py --source-dir . --file assets/compiled/fonts/Ubuntu-Regular.ttf --output src/assets/fonts.nim"
 
 task build_quickjs, "Build QuickJS":
   echo "Downloading and building QuickJS..."

@@ -46,6 +46,21 @@ suite "Server auth helpers":
     check not adminPanelEnabled()
     check not adminAuthEnabled()
 
+  test "legacy provider field does not affect admin auth":
+    globalFrameConfig = FrameConfig(
+      frameAdminAuth: %*{
+        "enabled": true,
+        "provider": "oauth",
+        "user": "admin",
+        "pass": "secret",
+      },
+      frameAccess: "public",
+      frameAccessKey: "",
+    )
+
+    check adminPanelEnabled()
+    check adminAuthEnabled()
+
   test "legacy auth toggle no longer bypasses admin credentials":
     globalFrameConfig = FrameConfig(
       frameAccess: "private",

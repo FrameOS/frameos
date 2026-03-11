@@ -34,10 +34,6 @@ template adminAuthPass(): string =
   {.gcsafe.}:
     globalFrameConfig.frameAdminAuth{"pass"}.getStr("")
 
-template adminAuthProvider(): string =
-  {.gcsafe.}:
-    globalFrameConfig.frameAdminAuth{"provider"}.getStr("local")
-
 template frameAccessMode(): string =
   {.gcsafe.}:
     globalFrameConfig.frameAccess
@@ -49,7 +45,6 @@ template frameAccessKeyValue*(): string =
 template adminPanelEnabled*(): bool =
   {.gcsafe.}:
     globalFrameConfig.frameAdminAuth{"enabled"}.getBool(false) and
-      adminAuthProvider() == "local" and
       adminAuthUser().len > 0 and
       adminAuthPass().len > 0
 

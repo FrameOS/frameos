@@ -87,7 +87,6 @@ def test_normalize_frame_admin_auth_keeps_password_whitespace():
     assert normalize_frame_admin_auth(
         {
             "enabled": True,
-            "provider": "oauth",
             "user": " admin ",
             "pass": " secret ",
         }

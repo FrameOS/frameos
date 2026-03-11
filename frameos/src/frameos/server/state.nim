@@ -15,7 +15,11 @@ var globalRecentLogs*: seq[JsonNode] = @[]
 var globalRecentLogsLock*: Lock
 var globalRecentLogId* = 0
 
-let frameWebIndexHtml* = frameWebAssets.getAsset("assets/compiled/frame_web/index.html")
+let frameWebIndexHtml* =
+  when compiles(frameWebAssets.getAssetToStr("assets/compiled/frame_web/index.html")):
+    frameWebAssets.getAssetToStr("assets/compiled/frame_web/index.html")
+  else:
+    frameWebAssets.getAsset("assets/compiled/frame_web/index.html")
 
 const MAX_RECENT_LOGS* = 5000
 const FRAME_API_ID* = 1

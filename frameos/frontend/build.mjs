@@ -18,6 +18,7 @@ const isWatch = process.argv.includes('--watch')
 const outputDir = path.resolve(__dirname, '../assets/compiled/frame_web')
 const staticDir = path.join(outputDir, 'static')
 
+await fs.rm(outputDir, { recursive: true, force: true })
 await fs.mkdir(staticDir, { recursive: true })
 await fs.copyFile(path.resolve(__dirname, 'src/index.html'), path.join(outputDir, 'index.html'))
 
@@ -112,7 +113,7 @@ const buildOptions = {
   tsconfig: path.resolve(__dirname, 'tsconfig.json'),
   splitting: false,
   outdir: staticDir,
-  sourcemap: true,
+  sourcemap: isDev,
   minify: true,
   entryNames: 'main',
   assetNames: 'asset-[hash]',
