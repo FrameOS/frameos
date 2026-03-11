@@ -23,19 +23,20 @@ proc addAdminApiRoutes*(router: var Router) =
     let username = payload{"username"}.getStr("")
     let password = payload{"password"}.getStr("")
     if validateAdminCredentials(username, password):
+      let sessionToken = createAdminSession()
       var headers: mummy.HttpHeaders
       headers["Content-Type"] = "application/json"
-      headers["Set-Cookie"] = ADMIN_SESSION_COOKIE & "=" & adminSessionCookieValue() &
-        "; Path=/; HttpOnly; SameSite=Lax; Max-Age=" & $ADMIN_SESSION_TTL_SECONDS
+      headers["Set-Cookie"] = adminSessionCookieHeader(request, sessionToken)
       request.respond(Http200, headers, $(%*{"status": "ok"}))
     else:
       jsonResponse(request, Http401, %*{"detail": "Invalid credentials"})
   )
 
   router.post("/api/admin/logout", proc(request: Request) {.gcsafe.} =
+    invalidateAdminSession(request)
     var headers: mummy.HttpHeaders
     headers["Content-Type"] = "application/json"
-    headers["Set-Cookie"] = ADMIN_SESSION_COOKIE & "=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax"
+    headers["Set-Cookie"] = clearAdminSessionCookieHeader(request)
     request.respond(Http200, headers, $(%*{"status": "ok"}))
   )
 

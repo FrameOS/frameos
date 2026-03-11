@@ -24,6 +24,17 @@ suite "web route behavior":
     check authRedirect.status == 302
     check authRedirect.header("location") == "/"
     check authRedirect.header("set-cookie").contains("frame_access_key=test-key")
+    check "Secure" notin authRedirect.header("set-cookie")
+
+    let proxiedAuthRedirect = httpRequest(
+      server.port,
+      "GET",
+      "/?k=test-key",
+      headers = [("X-Forwarded-Proto", "https")],
+    )
+    check proxiedAuthRedirect.status == 302
+    check proxiedAuthRedirect.header("set-cookie").contains("frame_access_key=test-key")
+    check proxiedAuthRedirect.header("set-cookie").contains("Secure")
 
   test "admin and control routes enforce session/redirect expectations":
     var config = defaultFrameConfig()
@@ -121,6 +132,15 @@ suite "web route behavior":
     check logoutResponse.status == 302
     check logoutResponse.header("location") == "/login"
     check logoutResponse.header("set-cookie").contains("frame_admin_session=;")
+
+    let proxiedLogoutResponse = httpRequest(
+      server.port,
+      "GET",
+      "/logout",
+      headers = [("X-Forwarded-Proto", "https")],
+    )
+    check proxiedLogoutResponse.status == 302
+    check proxiedLogoutResponse.header("set-cookie").contains("Secure")
 
     let setupGet = httpRequest(server.port, "GET", "/setup")
     check setupGet.status == 302

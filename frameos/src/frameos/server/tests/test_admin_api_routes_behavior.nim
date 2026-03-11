@@ -84,6 +84,44 @@ suite "admin api route behavior":
     check logout.status == 200
     check logout.header("set-cookie").contains("frame_admin_session=;")
 
+  test "admin session cookies use Secure only for proxied https requests":
+    var config = defaultFrameConfig()
+    config.frameAdminAuth = %*{
+      "enabled": true,
+      "user": "admin",
+      "pass": "secret",
+    }
+    configureServerState(config)
+
+    let httpLogin = httpRequest(
+      server.port,
+      "POST",
+      "/api/admin/login",
+      headers = [("Content-Type", "application/json")],
+      body = $(%*{"username": "admin", "password": "secret"}),
+    )
+    check httpLogin.status == 200
+    check "Secure" notin httpLogin.header("set-cookie")
+
+    let httpsLogin = httpRequest(
+      server.port,
+      "POST",
+      "/api/admin/login",
+      headers = [("Content-Type", "application/json"), ("X-Forwarded-Proto", "https")],
+      body = $(%*{"username": "admin", "password": "secret"}),
+    )
+    check httpsLogin.status == 200
+    check httpsLogin.header("set-cookie").contains("Secure")
+
+    let httpsLogout = httpRequest(
+      server.port,
+      "POST",
+      "/api/admin/logout",
+      headers = [("Cookie", adminCookieFrom(httpsLogin)), ("X-Forwarded-Proto", "https")],
+    )
+    check httpsLogout.status == 200
+    check httpsLogout.header("set-cookie").contains("Secure")
+
   test "event dispatch routes cover 401 404 400 and 200":
     var config = defaultFrameConfig()
     config.frameAdminAuth = %*{

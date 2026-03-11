@@ -26,7 +26,7 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
         if accessKey != "" and request.queryParams.contains("k") and request.queryParams["k"] == accessKey:
           var headers: mummy.HttpHeaders
           headers["Location"] = "/"
-          headers["Set-Cookie"] = ACCESS_COOKIE & "=" & accessKey & "; Path=/; SameSite=Lax"
+          headers["Set-Cookie"] = accessCookieHeader(request, accessKey)
           request.respond(Http302, headers)
         elif not hasAccess(request, Read):
           request.respond(Http401, body = "Unauthorized")
@@ -71,9 +71,10 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
   )
 
   router.get("/logout", proc(request: Request) {.gcsafe.} =
+    invalidateAdminSession(request)
     var headers: mummy.HttpHeaders
     headers["Location"] = "/login"
-    headers["Set-Cookie"] = ADMIN_SESSION_COOKIE & "=; Path=/; Max-Age=0; SameSite=Lax"
+    headers["Set-Cookie"] = clearAdminSessionCookieHeader(request)
     request.respond(Http302, headers)
   )
 
@@ -230,6 +231,7 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
       {.gcsafe.}:
         let newConfig = loadConfig()
         updateFrameConfigFrom(globalFrameOS.frameConfig, newConfig)
+        clearAdminSessions()
       sendEvent("reload", %*{})
       jsonResponse(request, Http200, %*{"status": "ok"})
     except CatchableError as e:

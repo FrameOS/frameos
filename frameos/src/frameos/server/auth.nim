@@ -1,5 +1,5 @@
 import json
-import std/[os, hashes, random, strutils, tables]
+import std/[hashes, locks, os, random, strutils, tables]
 import times
 import mummy
 import frameos/types
@@ -16,10 +16,57 @@ type
     Read
     Write
 
+  AdminSessionKey = array[64, char]
+  AdminSession = object
+    token: AdminSessionKey
+    expiresAt: float
+    credentialFingerprint: Hash
+  AdminSessionNode = ptr object
+    next: AdminSessionNode
+    value: AdminSession
+
+var globalAdminSessions: AdminSessionNode
+var globalAdminSessionsLock: Lock
+var adminSessionStoreInitialized = false
+
+proc ensureAdminSessionStoreInitialized() =
+  if not adminSessionStoreInitialized:
+    initLock(globalAdminSessionsLock)
+    adminSessionStoreInitialized = true
+
+proc secureRandomBytes(byteCount: int): string =
+  result = newString(max(byteCount, 0))
+  if result.len == 0:
+    return
+
+  var source: File
+  if open(source, "/dev/urandom", fmRead):
+    let bytesRead = source.readBuffer(addr result[0], result.len)
+    close(source)
+    if bytesRead == result.len:
+      return
+
+  randomize()
+  for i in 0 ..< result.len:
+    result[i] = char(rand(255))
+
+proc secureRandomToken(byteCount = 32): string =
+  let bytes = secureRandomBytes(byteCount)
+  result = newStringOfCap(bytes.len * 2)
+  for value in bytes:
+    result.add(toHex(ord(value), 2))
+  result = result.toLowerAscii()
+
+proc getHeaderValue(request: Request, name: string): string =
+  for (headerName, value) in request.headers:
+    if cmpIgnoreCase(headerName, name) == 0:
+      return value
+  ""
+
 proc getCookieValue*(request: Request, name: string): string =
-  if not request.headers.contains("cookie"):
+  let cookieHeader = getHeaderValue(request, "cookie")
+  if cookieHeader.len == 0:
     return ""
-  let cookieHeader = request.headers["cookie"]
   for cookie in cookieHeader.split(";"):
     let parts = cookie.strip().split("=", 1)
     if parts.len == 2 and parts[0] == name:
@@ -66,27 +113,127 @@ proc getOrCreateAdminSessionSalt*(configPath: string): string =
   except CatchableError:
     discard
 
-  randomize()
-  let generated = $(hash($epochTime() & ":" & $rand(1_000_000_000) & ":" & configPath))
+  let generated = secureRandomToken()
   try:
     writeFile(secretPath, generated & "\n")
   except CatchableError:
     discard
   return generated
 
-template hasAdminSession*(request: Request): bool =
-  {.gcsafe.}:
-    block:
-      if not adminPanelEnabled():
-        false
-      else:
-        let token = getCookieValue(request, ADMIN_SESSION_COOKIE)
-        let expectedToken = $(hash(adminSessionSalt() & ":" & adminAuthUser() & ":" & adminAuthPass()))
-        token.len > 0 and token == expectedToken
+proc adminSessionFingerprint(): Hash =
+  hash(adminSessionSalt() & ":" & adminAuthUser() & ":" & adminAuthPass())
 
-template hasAuthenticatedAdminSession*(request: Request): bool =
-  {.gcsafe.}:
-    hasAdminSession(request)
+proc tokenToKey(token: string, key: var AdminSessionKey): bool =
+  if token.len != key.len:
+    return false
+  for i in 0 ..< key.len:
+    key[i] = token[i]
+  true
+
+proc freeAdminSessionsLocked() =
+  var current = globalAdminSessions
+  while current != nil:
+    let next = current.next
+    deallocShared(current)
+    current = next
+  globalAdminSessions = nil
+
+proc clearAdminSessions*() =
+  ensureAdminSessionStoreInitialized()
+  withLock globalAdminSessionsLock:
+    freeAdminSessionsLocked()
+
+proc createAdminSession*(ttlSeconds = ADMIN_SESSION_TTL_SECONDS): string {.gcsafe.} =
+  ensureAdminSessionStoreInitialized()
+  let expiresAt = epochTime() + float(ttlSeconds)
+  let credentialFingerprint = adminSessionFingerprint()
+
+  while true:
+    let token = secureRandomToken()
+    var key: AdminSessionKey
+    if not tokenToKey(token, key):
+      continue
+    var inserted = false
+    withLock globalAdminSessionsLock:
+      var current = globalAdminSessions
+      while current != nil:
+        if current.value.token == key:
+          break
+        current = current.next
+
+      if current == nil:
+        let node = cast[AdminSessionNode](allocShared0(sizeof(current[])))
+        node.value = AdminSession(
+          token: key,
+          expiresAt: expiresAt,
+          credentialFingerprint: credentialFingerprint,
+        )
+        node.next = globalAdminSessions
+        globalAdminSessions = node
+        inserted = true
+    if inserted:
+      return token
+
+proc invalidateAdminSessionToken(token: string) =
+  if token.len == 0:
+    return
+  ensureAdminSessionStoreInitialized()
+  var key: AdminSessionKey
+  if tokenToKey(token, key):
+    withLock globalAdminSessionsLock:
+      var previous: AdminSessionNode = nil
+      var current = globalAdminSessions
+      while current != nil:
+        if current.value.token == key:
+          if previous == nil:
+            globalAdminSessions = current.next
+          else:
+            previous.next = current.next
+          deallocShared(current)
+          break
+        previous = current
+        current = current.next
+
+proc invalidateAdminSession*(request: Request) =
+  invalidateAdminSessionToken(getCookieValue(request, ADMIN_SESSION_COOKIE))
+
+proc hasAdminSession*(request: Request): bool {.gcsafe.} =
+  if not adminPanelEnabled():
+    return false
+
+  let token = getCookieValue(request, ADMIN_SESSION_COOKIE)
+  if token.len == 0:
+    return false
+
+  ensureAdminSessionStoreInitialized()
+  var key: AdminSessionKey
+  if not tokenToKey(token, key):
+    return false
+
+  let now = epochTime()
+  let fingerprint = adminSessionFingerprint()
+  withLock globalAdminSessionsLock:
+    var previous: AdminSessionNode = nil
+    var current = globalAdminSessions
+    while current != nil:
+      let next = current.next
+      if current.value.expiresAt <= now or current.value.credentialFingerprint != fingerprint:
+        if previous == nil:
+          globalAdminSessions = next
+        else:
+          previous.next = next
+        deallocShared(current)
+        current = next
+        continue
+
+      if current.value.token == key:
+        return true
+
+      previous = current
+      current = next
+
+proc hasAuthenticatedAdminSession*(request: Request): bool {.gcsafe.} =
+  hasAdminSession(request)
 
 proc allowUnauthenticatedStaticAssets*(): bool =
   {.gcsafe.}:
@@ -108,7 +255,7 @@ template hasAccess*(request: Request, accessType: AccessType): bool =
         elif getCookieValue(request, ACCESS_COOKIE) == accessKey:
           true
         elif request.httpMethod == "POST":
-          request.headers.contains(AUTH_HEADER) and request.headers[AUTH_HEADER] == AUTH_TYPE & " " & accessKey
+          getHeaderValue(request, AUTH_HEADER) == AUTH_TYPE & " " & accessKey
         else:
           false
 
@@ -121,7 +268,28 @@ proc canAccessFrameSecrets*(request: Request): bool =
     hasAdminSession(request)
 
 proc adminSessionCookieValue*(): string {.gcsafe.} =
-  $(hash(adminSessionSalt() & ":" & adminAuthUser() & ":" & adminAuthPass()))
+  createAdminSession()
+
+proc shouldUseSecureCookie*(request: Request): bool {.gcsafe.} =
+  let forwardedProto = getHeaderValue(request, "x-forwarded-proto").split(",", 1)[0].strip().toLowerAscii()
+  if forwardedProto == "https":
+    return true
+
+  let forwarded = getHeaderValue(request, "forwarded").toLowerAscii()
+  "proto=https" in forwarded
+
+proc accessCookieHeader*(request: Request, accessKey: string): string {.gcsafe.} =
+  ACCESS_COOKIE & "=" & accessKey & "; Path=/; SameSite=Lax" &
+    (if shouldUseSecureCookie(request): "; Secure" else: "")
+
+proc adminSessionCookieHeader*(request: Request, token: string, maxAge = ADMIN_SESSION_TTL_SECONDS): string {.gcsafe.} =
+  ADMIN_SESSION_COOKIE & "=" & token &
+    "; Path=/; HttpOnly; SameSite=Lax; Max-Age=" & $maxAge &
+    (if shouldUseSecureCookie(request): "; Secure" else: "")
+
+proc clearAdminSessionCookieHeader*(request: Request): string {.gcsafe.} =
+  ADMIN_SESSION_COOKIE & "=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax" &
+    (if shouldUseSecureCookie(request): "; Secure" else: "")
 
 proc validateAdminCredentials*(username: string, password: string): bool {.gcsafe.} =
   username == adminAuthUser() and password == adminAuthPass() and username.len > 0

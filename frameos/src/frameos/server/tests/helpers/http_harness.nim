@@ -2,7 +2,7 @@ import std/[json, locks, net, os, strutils, tables]
 import mummy
 import mummy/routers
 
-import ../../[routes, state]
+import ../../[auth, routes, state]
 import ../../../[channels, scenes, types]
 import ../../../portal
 from scenes/scenes import sceneOptions
@@ -89,6 +89,7 @@ proc configureServerState*(config: FrameConfig, hotspotActive = false) =
   globalRecentLogs = @[]
   globalRecentLogId = 0
   globalFrameConfig = config
+  clearAdminSessions()
   globalFrameOS = FrameOS(
     frameConfig: config,
     network: Network(

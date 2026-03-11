@@ -33,6 +33,9 @@ proc makeRequest(
   result = request
 
 suite "Server auth helpers":
+  setup:
+    clearAdminSessions()
+
   test "admin auth enabled requires full config":
     configureAdmin(true, "admin", "secret")
     check adminPanelEnabled()
@@ -85,15 +88,34 @@ suite "Server auth helpers":
     check validateAdminCredentials("admin", "secret")
     check not validateAdminCredentials("admin", "nope")
 
-  test "admin cookie hash is deterministic":
+  test "admin sessions use unique opaque tokens":
     configureAdmin(true, "admin", "secret")
     setGlobalAdminSessionSalt("salt-one")
-    let first = adminSessionCookieValue()
-    let second = adminSessionCookieValue()
-    check first == second
+    let first = createAdminSession()
+    let second = createAdminSession()
+    check first.len > 0
+    check second.len > 0
+    check first != second
+    check hasAdminSession(makeRequest(headers = @[("cookie", ADMIN_SESSION_COOKIE & "=" & first)]))
+    check hasAdminSession(makeRequest(headers = @[("cookie", ADMIN_SESSION_COOKIE & "=" & second)]))
 
-    setGlobalAdminSessionSalt("salt-two")
-    check first != adminSessionCookieValue()
+  test "admin sessions expire server-side":
+    configureAdmin(true, "admin", "secret")
+    let expired = createAdminSession(ttlSeconds = -1)
+    check not hasAdminSession(makeRequest(headers = @[("cookie", ADMIN_SESSION_COOKIE & "=" & expired)]))
+
+  test "admin sessions are invalidated when credentials change":
+    configureAdmin(true, "admin", "secret")
+    let token = createAdminSession()
+    let request = makeRequest(headers = @[("cookie", ADMIN_SESSION_COOKIE & "=" & token)])
+    check hasAdminSession(request)
+
+    globalFrameConfig.frameAdminAuth = %*{
+      "enabled": true,
+      "user": "admin",
+      "pass": "new-secret",
+    }
+    check not hasAdminSession(request)
 
   test "session salt can be persisted to disk":
     let tempDir = getTempDir() / "frameos-auth-tests"
@@ -157,7 +179,7 @@ suite "Server auth helpers":
       },
     )
 
-    let adminReq = makeRequest(headers = @[("cookie", ADMIN_SESSION_COOKIE & "=" & adminSessionCookieValue())])
+    let adminReq = makeRequest(headers = @[("cookie", ADMIN_SESSION_COOKIE & "=" & createAdminSession())])
     check hasAuthenticatedAdminSession(adminReq)
     check not hasAccess(adminReq, Read)
     check not hasAccess(adminReq, Write)
@@ -185,7 +207,7 @@ suite "Server auth helpers":
     check hasAccess(publicReq, Write)
     check not canAccessFrameSecrets(publicReq)
 
-    let adminReq = makeRequest(headers = @[("cookie", ADMIN_SESSION_COOKIE & "=" & adminSessionCookieValue())])
+    let adminReq = makeRequest(headers = @[("cookie", ADMIN_SESSION_COOKIE & "=" & createAdminSession())])
     check hasAuthenticatedAdminSession(adminReq)
     check canAccessFrameSecrets(adminReq)
 
@@ -235,7 +257,7 @@ suite "Server auth helpers":
 
     configureAdmin(true, "admin", "secret")
     setGlobalAdminSessionSalt("salt")
-    let token = adminSessionCookieValue()
+    let token = createAdminSession()
     let valid = makeRequest(headers = @[("cookie", ADMIN_SESSION_COOKIE & "=" & token)])
     let invalid = makeRequest(headers = @[("cookie", ADMIN_SESSION_COOKIE & "=bad-token")])
     check hasAdminSession(valid)
