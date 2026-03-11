@@ -6,6 +6,7 @@ import frameos/types
 import ../state
 import ../auth
 import ../api
+import ./admin_api_assets_routes
 import ./common
 
 proc ensureFrameApiReadAccess(request: Request): bool =

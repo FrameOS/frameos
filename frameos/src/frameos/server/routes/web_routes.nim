@@ -11,6 +11,7 @@ import ../state
 import ../auth
 import ../api
 import ../embedded_assets
+import ./admin_api_assets_routes
 import ./common
 
 proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, adminConnectionsState: ConnectionsState) =
