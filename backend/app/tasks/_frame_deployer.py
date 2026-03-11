@@ -676,15 +676,8 @@ class FrameDeployer:
 
         cpu = await self.arch_to_nim_cpu(arch)
         debug_options = "--lineTrace:on" if frame.debug else ""
-        assets_command = "nimble assets -y"
-        precompiled_assets = os.getenv("FRAMEOS_USE_PRECOMPILED_ASSETS", "").strip()
-        if precompiled_assets.lower() in {"1", "true", "yes", "on"}:
-            assets_command = (
-                f"FRAMEOS_USE_PRECOMPILED_ASSETS={shlex.quote(precompiled_assets)} "
-                f"{assets_command}"
-            )
         cmd = (
-            f"cd {source_dir} && {assets_command} && nimble setup && "
+            f"cd {source_dir} && nimble assets -y && nimble setup && "
             f"{nim_path} compile --os:linux --cpu:{cpu} "
             f"--compileOnly --genScript --nimcache:{build_dir} "
             f"{debug_options} src/frameos.nim 2>&1"

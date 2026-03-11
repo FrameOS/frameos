@@ -1,5 +1,4 @@
 import std/os
-import std/strutils
 
 # Package
 
@@ -24,49 +23,13 @@ requires "psutil >= 0.6.0"
 requires "QRgen >= 3.1.0"
 requires "jsony >= 1.1.5"
 
-let installFrontendDepsCmd = "sh -lc 'if command -v corepack >/dev/null 2>&1; then corepack pnpm install --frozen-lockfile; elif command -v pnpm >/dev/null 2>&1; then pnpm install --frozen-lockfile; else echo \"pnpm or corepack is required\" >&2; exit 1; fi'"
-let buildFrontendCmd = "sh -lc 'if command -v corepack >/dev/null 2>&1; then corepack pnpm run build; elif command -v pnpm >/dev/null 2>&1; then pnpm run build; else echo \"pnpm or corepack is required\" >&2; exit 1; fi'"
-
-const reusePrecompiledAssetsEnv = "FRAMEOS_USE_PRECOMPILED_ASSETS"
-
-proc envEnabled(name: string): bool =
-  getEnv(name).strip().toLowerAscii() in ["1", "true", "yes", "on"]
-
-proc hasPrecompiledFrontendAssets(): bool =
-  fileExists("assets/compiled/web/control.html") and
-  fileExists("assets/compiled/frame_web/index.html") and
-  dirExists("assets/compiled/frame_web/static") and
-  fileExists("assets/compiled/fonts/Ubuntu-Regular.ttf")
-
-proc hasGeneratedAssetModules(): bool =
-  fileExists("src/assets/apps.nim") and
-  fileExists("src/assets/web.nim") and
-  fileExists("src/assets/frame_web.nim") and
-  fileExists("src/assets/fonts.nim")
-
 before build:
   exec "nimble assets"
   if not dirExists("quickjs"):
     exec "nimble build_quickjs --silent"
 
 task assets, "Create assets":
-  exec "mkdir -p src/assets"
-  let reusePrecompiledAssets = envEnabled(reusePrecompiledAssetsEnv) and hasPrecompiledFrontendAssets()
-  if reusePrecompiledAssets and hasGeneratedAssetModules():
-    echo "Reusing precompiled frontend and generated asset modules"
-    return
-  if reusePrecompiledAssets:
-    echo "Reusing precompiled frontend assets from assets/compiled"
-  else:
-    if not fileExists("frontend/node_modules/autoprefixer/package.json"):
-      exec "cd frontend && " & installFrontendDepsCmd
-    else:
-      echo "Using existing frontend dependencies in frontend/node_modules"
-    exec "cd frontend && " & buildFrontendCmd
-  exec "python tools/generate_apps_asset_nim.py --source-dir . --output src/assets/apps.nim"
-  exec "python tools/generate_compressed_asset_nim.py --source-dir . --dir assets/compiled/web --output src/assets/web.nim"
-  exec "python tools/generate_compressed_asset_nim.py --source-dir . --dir assets/compiled/frame_web --output src/assets/frame_web.nim"
-  exec "python tools/generate_compressed_asset_nim.py --source-dir . --file assets/compiled/fonts/Ubuntu-Regular.ttf --output src/assets/fonts.nim"
+  exec "python tools/prepare_assets.py"
 
 task build_quickjs, "Build QuickJS":
   echo "Downloading and building QuickJS..."
