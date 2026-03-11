@@ -36,10 +36,7 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
 
   router.get("/admin", proc(request: Request) {.gcsafe.} =
     {.gcsafe.}:
-      if netportal.isHotspotActive(globalFrameOS):
-        log(%*{"event": "portal:http", "get": request.path})
-        request.respond(Http200, body = netportal.setupHtml(globalFrameOS))
-      elif not adminPanelEnabled():
+      if not adminPanelEnabled():
         request.respond(Http401, body = "Admin panel disabled")
       elif not hasAdminSession(request):
         var headers: mummy.HttpHeaders

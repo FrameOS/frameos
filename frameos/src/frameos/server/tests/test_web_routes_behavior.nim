@@ -54,6 +54,21 @@ suite "web route behavior":
     )
     check adminWithSession.status == 200
 
+    configureServerState(config, hotspotActive = true)
+    let hotspotAdminNoSession = httpRequest(server.port, "GET", "/admin")
+    check hotspotAdminNoSession.status == 302
+    check hotspotAdminNoSession.header("location") == "/login"
+
+    let hotspotAdminWithSession = httpRequest(
+      server.port,
+      "GET",
+      "/admin",
+      headers = [("Cookie", adminCookie)],
+    )
+    check hotspotAdminWithSession.status == 200
+
+    configureServerState(config, hotspotActive = false)
+
     let frameRootWithAdminSession = httpRequest(
       server.port,
       "GET",
