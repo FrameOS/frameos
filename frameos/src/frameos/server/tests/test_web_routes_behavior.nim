@@ -1,8 +1,8 @@
 import std/[json, os, strutils, unittest]
 
-import ../../channels
+import ../../[channels, types]
 import ./helpers/http_harness
-import ../auth
+import ../[auth, state]
 
 var server = startRouterServer(19331)
 
@@ -65,7 +65,7 @@ suite "web route behavior":
     )
     check adminWithSession.status == 200
 
-    configureServerState(config, hotspotActive = true)
+    globalFrameOS.network.hotspotStatus = HotspotStatus.enabled
     let hotspotAdminNoSession = httpRequest(server.port, "GET", "/admin")
     check hotspotAdminNoSession.status == 302
     check hotspotAdminNoSession.header("location") == "/login"
@@ -78,7 +78,7 @@ suite "web route behavior":
     )
     check hotspotAdminWithSession.status == 200
 
-    configureServerState(config, hotspotActive = false)
+    globalFrameOS.network.hotspotStatus = HotspotStatus.disabled
 
     let frameRootWithAdminSession = httpRequest(
       server.port,
