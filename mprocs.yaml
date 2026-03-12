@@ -3,8 +3,10 @@ procs:
     shell: pnpm run dev:backend
   worker:
     shell: pnpm run dev:worker
-  frontend:
-    shell: pnpm run dev:frontend
+  vite:
+    shell: pnpm --dir frontend run dev:vite
+  kea:
+    shell: pnpm --dir frontend run dev:kea
   redis:
     shell: pnpm run dev:redis
   frameos:
@@ -12,4 +14,7 @@ procs:
     autostart: false
   backend-docker:
     shell: bash scripts/backend-docker.sh
+    autostart: false
+  migrate:
+    shell: pnpm run dev:migrate
     autostart: false
