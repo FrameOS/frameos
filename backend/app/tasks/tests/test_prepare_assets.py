@@ -98,3 +98,23 @@ def test_prepare_assets_uses_manifest_to_skip_or_regenerate_work(tmp_path, monke
     assert fourth.regenerated_modules is True
     assert len(build_calls) == 2
     assert len(generate_calls) == 3
+
+
+def test_ensure_frontend_dependencies_reinstalls_incomplete_existing_modules(tmp_path, monkeypatch):
+    frameos_root = create_project_layout(tmp_path)
+    frontend_root = frameos_root / "frontend"
+    write(frontend_root / "node_modules" / "autoprefixer" / "package.json", "{}\n")
+
+    commands: list[tuple[list[str], Path]] = []
+
+    def fake_run_command(command: list[str], *, cwd: Path) -> None:
+        commands.append((command, cwd))
+
+    monkeypatch.setattr(prepare_assets, "frontend_dependencies_are_usable", lambda _frontend_root: False)
+    monkeypatch.setattr(prepare_assets, "resolve_pnpm_command", lambda: ["pnpm"])
+    monkeypatch.setattr(prepare_assets, "run_command", fake_run_command)
+
+    prepare_assets.ensure_frontend_dependencies(frameos_root)
+
+    assert commands == [(["pnpm", "install", "--frozen-lockfile"], frontend_root)]
+    assert not (frontend_root / "node_modules").exists()

@@ -189,13 +189,43 @@ def resolve_pnpm_command() -> list[str]:
     raise RuntimeError("pnpm or corepack is required")
 
 
+def frontend_dependencies_are_usable(frontend_root: Path) -> bool:
+    if not (frontend_root / "node_modules").is_dir():
+        return False
+
+    check = subprocess.run(
+        [
+            "node",
+            "--input-type=module",
+            "-e",
+            (
+                "await import('autoprefixer');"
+                "await import('cssnano');"
+                "await import('postcss');"
+                "await import('postcss-preset-env');"
+                "await import('tailwindcss');"
+            ),
+        ],
+        cwd=frontend_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return check.returncode == 0
+
+
 def ensure_frontend_dependencies(project_root: Path) -> None:
     frontend_root = project_root / "frontend"
-    if (frontend_root / "node_modules/autoprefixer/package.json").is_file():
+    if frontend_dependencies_are_usable(frontend_root):
         print("Using existing frontend dependencies in frontend/node_modules")
         return
 
-    print("Installing frontend dependencies")
+    if (frontend_root / "node_modules").exists():
+        print("Refreshing incomplete frontend dependencies in frontend/node_modules")
+        shutil.rmtree(frontend_root / "node_modules")
+    else:
+        print("Installing frontend dependencies")
+
     run_command([*resolve_pnpm_command(), "install", "--frozen-lockfile"], cwd=frontend_root)
 
 

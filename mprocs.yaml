@@ -10,3 +10,6 @@ procs:
   frameos:
     shell: cd frameos && make
     autostart: false
+  backend-docker:
+    shell: bash scripts/backend-docker.sh
+    autostart: false

@@ -31,7 +31,7 @@
 - Built as an ESM React app with TypeScript; kea manages state and type generation (`kea-typegen`).
 - Build pipeline orchestrated by `build.mjs` using esbuild, with Tailwind/PostCSS for styling and optional bundle analysis via `vite-bundle-visualizer`.
 - Development: `pnpm install` followed by `pnpm --dir frontend run dev` (spawns kea typegen watch and esbuild dev build concurrently).
-- Repo-level local development runner: `pnpm dev` starts `mprocs` with panes for backend API, ARQ worker, the main frontend dev server, and the frame-local frontend watcher. A `redis` pane is included but does not autostart. `mprocs.yaml` defines the process list.
+- Repo-level local development runner: `pnpm dev` starts `mprocs` with panes for backend API, ARQ worker, the main frontend dev server, and the frame-local frontend watcher. `redis`, `frameos`, and `backend-docker` panes are available but do not autostart. The `backend-docker` pane runs `scripts/backend-docker.sh`, which persists a generated Docker `SECRET_KEY` in the gitignored `.env.docker.local`. `mprocs.yaml` defines the process list.
 - Production build: `pnpm --dir frontend run build` which chains kea codegen, schema generation (`ts-json-schema-generator`), TypeScript type-checking, and final bundling to `dist/`. 【F:frontend/package.json†L6-L66】
 - Output folder is consumed by the backend’s static file mounts; ensure `frontend/dist` exists (e.g., via `pnpm --dir frontend run build`) before running the Python app outside of test mode. 【F:backend/app/fastapi.py†L38-L86】
 - ALWAYS prefer writing frontend business logic in kea logic files over using effects like `useState` or `useEffect`.

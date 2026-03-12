@@ -69,6 +69,7 @@ e2e/generated/scenes.nim
 
 gpt.txt
 .env
+.env.docker.local
 .aider*
 .venv/
 .local/redis/

@@ -14,6 +14,8 @@ def test_create_local_source_folder_copies_shared_frontend_sources(tmp_path: Pat
 
     (frameos_root / "frontend" / "src").mkdir(parents=True)
     (frameos_root / "frontend" / "src" / "main.tsx").write_text("local frame frontend\n", encoding="utf-8")
+    (frameos_root / "frontend" / "node_modules" / "autoprefixer").mkdir(parents=True)
+    (frameos_root / "frontend" / "node_modules" / "autoprefixer" / "package.json").write_text("{}", encoding="utf-8")
     shared_frontend_src.mkdir(parents=True)
     (shared_frontend_src / "initKea.ts").write_text("export function initKea() {}\n", encoding="utf-8")
     shared_frontend_schema.mkdir(parents=True)
@@ -48,6 +50,7 @@ def test_create_local_source_folder_copies_shared_frontend_sources(tmp_path: Pat
     assert (tmp_path / "build" / "frontend" / "schema" / "events.json").exists()
     assert (tmp_path / "build" / "frontend" / "package.json").exists()
     assert (tmp_path / "build" / "versions.json").exists()
+    assert not (copied_source_dir / "frontend" / "node_modules").exists()
     assert (copied_source_dir / "assets" / "compiled" / "web" / "control.html").exists()
     assert (copied_source_dir / "assets" / "compiled" / "frame_web" / "index.html").exists()
     assert (copied_source_dir / "assets" / "compiled" / "fonts" / "Ubuntu-Regular.ttf").exists()

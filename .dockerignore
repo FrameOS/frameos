@@ -26,6 +26,7 @@ coverage.xml
 **/env
 npm-debug.log
 .env
+.env.docker.local
 .aws
 .vscode
 .idea

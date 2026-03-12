@@ -602,7 +602,12 @@ class FrameDeployer:
         source_dir = os.path.join(temp_dir, "frameos")
         os.makedirs(source_dir, exist_ok=True)
         base = Path(source_root or "../frameos").resolve()
-        shutil.copytree(base, source_dir, dirs_exist_ok=True)
+        shutil.copytree(
+            base,
+            source_dir,
+            dirs_exist_ok=True,
+            ignore=shutil.ignore_patterns("node_modules"),
+        )
         repo_root = base.parent
         repo_root_package = repo_root / "package.json"
         if repo_root_package.is_file():
