@@ -1,37 +1,49 @@
 {
   "lockfile-version": 1,
   "manifest": {
-    "version": 1,
+    "schema-version": "1.10.0",
     "install": {
       "cacert": {
-        "pkg-path": "cacert"
+        "pkg-path": "cacert",
+        "outputs": "all"
       },
       "coreutils": {
-        "pkg-path": "coreutils"
+        "pkg-path": "coreutils",
+        "outputs": "all"
       },
       "curl": {
-        "pkg-path": "curl"
+        "pkg-path": "curl",
+        "outputs": "all"
       },
       "gcc": {
-        "pkg-path": "gcc"
+        "pkg-path": "gcc",
+        "outputs": "all"
       },
       "git": {
-        "pkg-path": "git"
+        "pkg-path": "git",
+        "outputs": "all"
       },
       "gnumake": {
-        "pkg-path": "gnumake"
+        "pkg-path": "gnumake",
+        "outputs": "all"
       },
       "nim": {
         "pkg-path": "nim"
       },
+      "nimble": {
+        "pkg-path": "nimble"
+      },
       "nodejs": {
-        "pkg-path": "nodejs_22"
+        "pkg-path": "nodejs_22",
+        "outputs": "all"
       },
       "openssl": {
-        "pkg-path": "openssl"
+        "pkg-path": "openssl",
+        "outputs": "all"
       },
       "pkg-config": {
-        "pkg-path": "pkg-config"
+        "pkg-path": "pkg-config",
+        "outputs": "all"
       },
       "pnpm": {
         "pkg-path": "pnpm"
@@ -43,7 +55,8 @@
         "pkg-path": "redis"
       },
       "xz": {
-        "pkg-path": "xz"
+        "pkg-path": "xz",
+        "outputs": "all"
       }
     },
     "vars": {
@@ -52,7 +65,7 @@
       "PYTHONDONTWRITEBYTECODE": "1"
     },
     "hook": {
-      "on-activate": "  set -euo pipefail\n\n  cd \"$FLOX_ENV_PROJECT\"\n\n  export VIRTUAL_ENV=\"$FLOX_ENV_PROJECT/.venv\"\n  export FRAMEOS_FLOX_CACHE_DIR=\"$FLOX_ENV_PROJECT/.flox/cache\"\n  export FRAMEOS_FLOX_REDIS_DIR=\"$FLOX_ENV_PROJECT/.flox/redis\"\n\n  nvm_dir=\"${NVM_DIR:-$HOME/.nvm}\"\n  cleaned_path=\"\"\n  old_ifs=$IFS\n  IFS=:\n  for path_entry in $PATH; do\n    case \"$path_entry\" in\n      \"$FLOX_ENV/bin\"|\"$VIRTUAL_ENV/bin\"|\"$nvm_dir\"/*/bin|\"${NVM_BIN:-__frameos_no_nvm_bin__}\")\n        continue\n        ;;\n      *)\n        cleaned_path=\"${cleaned_path:+$cleaned_path:}$path_entry\"\n        ;;\n    esac\n  done\n  IFS=\"$old_ifs\"\n\n  unset NVM_BIN NVM_INC\n  export PATH=\"$FLOX_ENV/bin:$VIRTUAL_ENV/bin${cleaned_path:+:$cleaned_path}\"\n\n  mkdir -p \"$FRAMEOS_FLOX_CACHE_DIR\" \"$FRAMEOS_FLOX_REDIS_DIR\"\n\n  new_venv=0\n  if [ ! -d \"$VIRTUAL_ENV\" ]; then\n    python -m venv \"$VIRTUAL_ENV\"\n    new_venv=1\n  fi\n\n  if ! \"$VIRTUAL_ENV/bin/python\" -m pip --version >/dev/null 2>&1; then\n    \"$VIRTUAL_ENV/bin/python\" -m ensurepip --upgrade\n  fi\n\n  if [ \"$new_venv\" -eq 1 ]; then\n    rm -f \"$FRAMEOS_FLOX_CACHE_DIR/python-requirements.sha256\"\n  fi\n\n  python_requirements_hash=\"$(sha256sum backend/requirements.txt | awk '{print $1}')\"\n  python_stamp=\"$FRAMEOS_FLOX_CACHE_DIR/python-requirements.sha256\"\n  if [ ! -f \"$python_stamp\" ] || [ \"$(cat \"$python_stamp\")\" != \"$python_requirements_hash\" ]; then\n    echo \"Syncing backend Python dependencies...\"\n    python -m pip install --upgrade pip setuptools wheel\n    python -m pip install -r backend/requirements.txt\n    printf '%s' \"$python_requirements_hash\" > \"$python_stamp\"\n  fi\n\n  js_workspace_hash=\"$(\n    sha256sum \\\n      package.json \\\n      pnpm-lock.yaml \\\n      pnpm-workspace.yaml \\\n      frontend/package.json \\\n      frameos/frontend/package.json \\\n    | sha256sum | awk '{print $1}'\n  )\"\n  js_stamp=\"$FRAMEOS_FLOX_CACHE_DIR/pnpm-workspace.sha256\"\n  if [ ! -f node_modules/.modules.yaml ] || [ ! -f \"$js_stamp\" ] || [ \"$(cat \"$js_stamp\")\" != \"$js_workspace_hash\" ]; then\n    echo \"Syncing pnpm workspace dependencies...\"\n    pnpm install --frozen-lockfile\n    printf '%s' \"$js_workspace_hash\" > \"$js_stamp\"\n  fi\n\n  frameos_nim_hash=\"$(sha256sum frameos/frameos.nimble | awk '{print $1}')\"\n  frameos_nim_stamp=\"$FRAMEOS_FLOX_CACHE_DIR/frameos-nim.sha256\"\n  if [ ! -f frameos/nimble.paths ] || [ ! -f \"$frameos_nim_stamp\" ] || [ \"$(cat \"$frameos_nim_stamp\")\" != \"$frameos_nim_hash\" ]; then\n    echo \"Syncing FrameOS Nim dependencies...\"\n    (\n      cd frameos\n      nimble install -dy\n    )\n    printf '%s' \"$frameos_nim_hash\" > \"$frameos_nim_stamp\"\n  fi\n\n  agent_nim_hash=\"$(sha256sum frameos/agent/frameos_agent.nimble | awk '{print $1}')\"\n  agent_nim_stamp=\"$FRAMEOS_FLOX_CACHE_DIR/frameos-agent-nim.sha256\"\n  if [ ! -f frameos/agent/nimble.paths ] || [ ! -f \"$agent_nim_stamp\" ] || [ \"$(cat \"$agent_nim_stamp\")\" != \"$agent_nim_hash\" ]; then\n    echo \"Syncing FrameOS agent Nim dependencies...\"\n    (\n      cd frameos/agent\n      nimble install -dy\n    )\n    printf '%s' \"$agent_nim_hash\" > \"$agent_nim_stamp\"\n  fi\n"
+      "on-activate": "  set -euo pipefail\n\n  cd \"$FLOX_ENV_PROJECT\"\n\n  export VIRTUAL_ENV=\"$FLOX_ENV_PROJECT/.venv\"\n  export FRAMEOS_FLOX_CACHE_DIR=\"$FLOX_ENV_PROJECT/.flox/cache\"\n  export FRAMEOS_FLOX_REDIS_DIR=\"$FLOX_ENV_PROJECT/.flox/redis\"\n\n  nvm_dir=\"${NVM_DIR:-$HOME/.nvm}\"\n  cleaned_path=\"\"\n  old_ifs=$IFS\n  IFS=:\n  for path_entry in $PATH; do\n    case \"$path_entry\" in\n      \"$FLOX_ENV/bin\"|\"$VIRTUAL_ENV/bin\"|\"$nvm_dir\"/*/bin|\"${NVM_BIN:-__frameos_no_nvm_bin__}\")\n        continue\n        ;;\n      *)\n        cleaned_path=\"${cleaned_path:+$cleaned_path:}$path_entry\"\n        ;;\n    esac\n  done\n  IFS=\"$old_ifs\"\n\n  unset NVM_BIN NVM_INC\n  export PATH=\"$FLOX_ENV/bin:$VIRTUAL_ENV/bin${cleaned_path:+:$cleaned_path}\"\n\n  mkdir -p \"$FRAMEOS_FLOX_CACHE_DIR\" \"$FRAMEOS_FLOX_REDIS_DIR\"\n\n  new_venv=0\n  if [ ! -d \"$VIRTUAL_ENV\" ]; then\n    python -m venv \"$VIRTUAL_ENV\"\n    new_venv=1\n  fi\n\n  if ! \"$VIRTUAL_ENV/bin/python\" -m pip --version >/dev/null 2>&1; then\n    \"$VIRTUAL_ENV/bin/python\" -m ensurepip --upgrade\n  fi\n\n  if [ \"$new_venv\" -eq 1 ]; then\n    rm -f \"$FRAMEOS_FLOX_CACHE_DIR/python-requirements.sha256\"\n  fi\n\n  python_requirements_hash=\"$(sha256sum backend/requirements.txt | awk '{print $1}')\"\n  python_stamp=\"$FRAMEOS_FLOX_CACHE_DIR/python-requirements.sha256\"\n  if [ ! -f \"$python_stamp\" ] || [ \"$(cat \"$python_stamp\")\" != \"$python_requirements_hash\" ]; then\n    echo \"Syncing backend Python dependencies...\"\n    \"$VIRTUAL_ENV/bin/python\" -m pip install --upgrade pip setuptools wheel\n    \"$VIRTUAL_ENV/bin/python\" -m pip install -r backend/requirements.txt\n    printf '%s' \"$python_requirements_hash\" > \"$python_stamp\"\n  fi\n\n  js_workspace_hash=\"$(\n    sha256sum \\\n      package.json \\\n      pnpm-lock.yaml \\\n      pnpm-workspace.yaml \\\n      frontend/package.json \\\n      frameos/frontend/package.json \\\n    | sha256sum | awk '{print $1}'\n  )\"\n  js_stamp=\"$FRAMEOS_FLOX_CACHE_DIR/pnpm-workspace.sha256\"\n  if [ ! -f node_modules/.modules.yaml ] || [ ! -f \"$js_stamp\" ] || [ \"$(cat \"$js_stamp\")\" != \"$js_workspace_hash\" ]; then\n    echo \"Syncing pnpm workspace dependencies...\"\n    pnpm install --frozen-lockfile\n    printf '%s' \"$js_workspace_hash\" > \"$js_stamp\"\n  fi\n\n  frameos_nim_hash=\"$(sha256sum frameos/frameos.nimble | awk '{print $1}')\"\n  frameos_nim_stamp=\"$FRAMEOS_FLOX_CACHE_DIR/frameos-nim.sha256\"\n  if [ ! -f frameos/nimble.paths ] || [ ! -f \"$frameos_nim_stamp\" ] || [ \"$(cat \"$frameos_nim_stamp\")\" != \"$frameos_nim_hash\" ]; then\n    echo \"Syncing FrameOS Nim dependencies...\"\n    (\n      cd frameos\n      nimble install -dy\n    )\n    printf '%s' \"$frameos_nim_hash\" > \"$frameos_nim_stamp\"\n  fi\n\n  agent_nim_hash=\"$(sha256sum frameos/agent/frameos_agent.nimble | awk '{print $1}')\"\n  agent_nim_stamp=\"$FRAMEOS_FLOX_CACHE_DIR/frameos-agent-nim.sha256\"\n  if [ ! -f frameos/agent/nimble.paths ] || [ ! -f \"$agent_nim_stamp\" ] || [ \"$(cat \"$agent_nim_stamp\")\" != \"$agent_nim_hash\" ]; then\n    echo \"Syncing FrameOS agent Nim dependencies...\"\n    (\n      cd frameos/agent\n      nimble install -dy\n    )\n    printf '%s' \"$agent_nim_hash\" > \"$agent_nim_stamp\"\n  fi\n"
     },
     "profile": {
       "fish": "  set -e NVM_BIN NVM_INC NVM_HAS_RUN\n\n  for fn in node npm npx yarn\n    if functions -q $fn\n      functions -e $fn\n    end\n  end\n\n  set -l cleaned_path\n  for path_entry in $PATH\n    if test \"$path_entry\" = \"$FLOX_ENV/bin\"\n      continue\n    end\n\n    if test \"$path_entry\" = \"$FLOX_ENV/sbin\"\n      continue\n    end\n\n    if test \"$path_entry\" = \"$VIRTUAL_ENV/bin\"\n      continue\n    end\n\n    if string match -q \"$HOME/.nvm/*/bin\" -- $path_entry\n      continue\n    end\n\n    set cleaned_path $cleaned_path $path_entry\n  end\n\n  set -gx PATH \"$FLOX_ENV/bin\" \"$VIRTUAL_ENV/bin\" \"$FLOX_ENV/sbin\" $cleaned_path\n"
@@ -994,6 +1007,126 @@
       ],
       "outputs": {
         "out": "/nix/store/xivww5xkgs8g9f6yaqa4738apzxq7idp-x86_64-unknown-linux-gnu-nim-wrapper-2.2.4"
+      },
+      "system": "x86_64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "nimble",
+      "broken": false,
+      "derivation": "/nix/store/i0lbnki0kg3k6qipb7a2jaqdk8g67vfs-nimble-0.20.1.drv",
+      "description": "Package manager for the Nim programming language",
+      "install_id": "nimble",
+      "license": "BSD-3-Clause",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=88d3861acdd3d2f0e361767018218e51810df8a1",
+      "name": "nimble-0.20.1",
+      "pname": "nimble",
+      "rev": "88d3861acdd3d2f0e361767018218e51810df8a1",
+      "rev_count": 931542,
+      "rev_date": "2026-01-21T18:02:10Z",
+      "scrape_date": "2026-01-23T04:32:51.937912Z",
+      "stabilities": [
+        "unstable",
+        "staging"
+      ],
+      "unfree": false,
+      "version": "0.20.1",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/njwnmxq7s7sh6nbkcy5kkaqqkw3whl06-nimble-0.20.1"
+      },
+      "system": "aarch64-darwin",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "nimble",
+      "broken": false,
+      "derivation": "/nix/store/d11r8q3s72bkk9p7kxzmfldsyic7mzcq-nimble-0.20.1.drv",
+      "description": "Package manager for the Nim programming language",
+      "install_id": "nimble",
+      "license": "BSD-3-Clause",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=88d3861acdd3d2f0e361767018218e51810df8a1",
+      "name": "nimble-0.20.1",
+      "pname": "nimble",
+      "rev": "88d3861acdd3d2f0e361767018218e51810df8a1",
+      "rev_count": 931542,
+      "rev_date": "2026-01-21T18:02:10Z",
+      "scrape_date": "2026-01-23T05:13:08.427847Z",
+      "stabilities": [
+        "unstable",
+        "staging"
+      ],
+      "unfree": false,
+      "version": "0.20.1",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/3zaf4i0vg2ah06naw1s65x4ws61986rc-nimble-0.20.1"
+      },
+      "system": "aarch64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "nimble",
+      "broken": false,
+      "derivation": "/nix/store/s9yy47gh6h9w4kw63nv7hhayx2d2ng00-nimble-0.20.1.drv",
+      "description": "Package manager for the Nim programming language",
+      "install_id": "nimble",
+      "license": "BSD-3-Clause",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=88d3861acdd3d2f0e361767018218e51810df8a1",
+      "name": "nimble-0.20.1",
+      "pname": "nimble",
+      "rev": "88d3861acdd3d2f0e361767018218e51810df8a1",
+      "rev_count": 931542,
+      "rev_date": "2026-01-21T18:02:10Z",
+      "scrape_date": "2026-01-23T05:49:58.524043Z",
+      "stabilities": [
+        "unstable",
+        "staging"
+      ],
+      "unfree": false,
+      "version": "0.20.1",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/zvix7b9wpyg855isd1b82g2v5i0y7vr7-nimble-0.20.1"
+      },
+      "system": "x86_64-darwin",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "nimble",
+      "broken": false,
+      "derivation": "/nix/store/7q4hi62v92qd421bl2xnbqsw200qcm1p-nimble-0.20.1.drv",
+      "description": "Package manager for the Nim programming language",
+      "install_id": "nimble",
+      "license": "BSD-3-Clause",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=88d3861acdd3d2f0e361767018218e51810df8a1",
+      "name": "nimble-0.20.1",
+      "pname": "nimble",
+      "rev": "88d3861acdd3d2f0e361767018218e51810df8a1",
+      "rev_count": 931542,
+      "rev_date": "2026-01-21T18:02:10Z",
+      "scrape_date": "2026-01-23T06:36:32.178637Z",
+      "stabilities": [
+        "unstable",
+        "staging"
+      ],
+      "unfree": false,
+      "version": "0.20.1",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/4pg5ckzj3zj8h2061rzzswab37d311pl-nimble-0.20.1"
       },
       "system": "x86_64-linux",
       "group": "toplevel",
