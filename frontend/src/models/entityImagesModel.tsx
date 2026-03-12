@@ -85,5 +85,8 @@ export const entityImagesModel = kea<entityImagesModelType>([
     [socketLogic.actionTypes.newSceneImage]: ({ frameId, sceneId }) => {
       actions.updateEntityImage(`frames/${frameId}`, `scene_images/${sceneId}`)
     },
+    [socketLogic.actionTypes.frameRendered]: ({ frameId }) => {
+      actions.updateEntityImage(`frames/${frameId}`, 'image')
+    },
   })),
 ])

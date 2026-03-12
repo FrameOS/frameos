@@ -1,4 +1,5 @@
 import json, asyncdispatch, pixie, strutils, options
+import std/oserrors
 import drivers/drivers as drivers
 import frameos/config
 import frameos/logger
@@ -12,6 +13,49 @@ import frameos/tls_proxy
 import frameos/setup_proxy
 import frameos/boot_guard
 import lib/tz
+when not defined(windows):
+  import posix
+
+type
+  FatalStartupError* = object
+    message*: string
+    showStackTrace*: bool
+
+proc addressInUseErrorCode(): OSErrorCode =
+  when defined(windows):
+    OSErrorCode(10048)
+  else:
+    OSErrorCode(EADDRINUSE)
+
+proc applyBootGuardStartupFallback*(firstSceneId: var Option[SceneId], bootCrashCount: int): bool =
+  if shouldUseFallbackScene(bootCrashCount):
+    firstSceneId = some(bootGuardFallbackSceneId().SceneId)
+    return true
+  false
+
+proc describeFatalStartupError*(err: ref CatchableError): FatalStartupError =
+  result = FatalStartupError(
+    message: "FrameOS fatal: " & err.msg,
+    showStackTrace: true,
+  )
+
+  if err of OSError:
+    let osErr = (ref OSError)(err)
+    if osErr.errorCode.OSErrorCode == addressInUseErrorCode():
+      try:
+        let config = loadConfig()
+        result = FatalStartupError(
+          message: "FrameOS fatal: Web server could not start because " &
+            serverBindAddress(config) & ":" & $serverPort(config) &
+            " is already in use. Stop the existing process or change `framePort` in " &
+            getConfigFilename() & ".",
+          showStackTrace: false,
+        )
+      except CatchableError:
+        result = FatalStartupError(
+          message: "FrameOS fatal: Web server could not start because the configured port is already in use.",
+          showStackTrace: false,
+        )
 
 proc newFrameOS*(): FrameOS =
   initTimeZone()
@@ -70,8 +114,7 @@ proc start*(self: FrameOS) {.async.} =
 
   let bootCrashCount = registerBootCrash()
   self.logger.log(%*{"event": "boot:guard", "crashesWithoutRender": bootCrashCount})
-  if shouldUseFallbackScene(bootCrashCount):
-    firstSceneId = some(bootGuardFallbackSceneId().SceneId)
+  if applyBootGuardStartupFallback(firstSceneId, bootCrashCount):
     self.logger.log(%*{"event": "boot:guard:fallback", "sceneId": bootGuardFallbackSceneId(),
       "crashesWithoutRender": bootCrashCount, "threshold": BOOT_GUARD_CRASH_LIMIT})
 

@@ -8,6 +8,11 @@ export interface FrameType {
   frame_port: number
   frame_access_key: string
   frame_access: string
+  frame_admin_auth?: {
+    enabled?: boolean
+    user?: string
+    pass?: string
+  }
   https_proxy?: {
     enable?: boolean
     port?: number
@@ -27,6 +32,7 @@ export interface FrameType {
   server_host?: string
   server_port: number
   server_api_key?: string
+  server_send_logs?: boolean
   status: string
   version?: string
   width?: number

@@ -1,8 +1,14 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 export DEBUG=${DEBUG:-1}
 
-python -m alembic upgrade head
-arq app.tasks.worker.WorkerSettings &
-uvicorn app.fastapi:app --host 0.0.0.0 --port 8989 --reload
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+RUN_IN_PYTHON_ENV="$SCRIPT_DIR/run-in-python-env"
+
+cd "$REPO_ROOT/backend"
+
+"$RUN_IN_PYTHON_ENV" python -m alembic upgrade head
+"$RUN_IN_PYTHON_ENV" arq app.tasks.worker.WorkerSettings &
+exec "$RUN_IN_PYTHON_ENV" uvicorn app.fastapi:app --host 0.0.0.0 --port 8989 --reload

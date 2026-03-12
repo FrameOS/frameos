@@ -30,10 +30,10 @@ async def exec_local_command(
     async def pump(stream, tag, buf):
         pending = ""
 
-        async def _flush(segment: str):
+        async def _flush(segment: str, *, terminated: bool):
             if not segment:
                 return
-            buf.append(segment)
+            buf.append(f"{segment}\n" if terminated else segment)
             if log_output:
                 if db and redis:
                     await log(db, redis, int(frame.id), tag, segment)
@@ -65,11 +65,11 @@ async def exec_local_command(
 
                 segment = pending[:split_index].strip("\r")
                 pending = pending[split_index + 1 :]
-                await _flush(segment)
+                await _flush(segment, terminated=True)
 
         pending = pending.strip("\r")
         if pending:
-            await _flush(pending)
+            await _flush(pending, terminated=False)
 
     out_buf: list[str] = []
     err_buf: list[str] = []

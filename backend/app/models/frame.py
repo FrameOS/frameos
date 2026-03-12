@@ -58,6 +58,23 @@ def _serialize_https_proxy(https_proxy: Optional[dict]) -> dict:
     }
 
 
+def normalize_frame_admin_auth(frame_admin_auth: Optional[dict]) -> dict:
+    auth = dict(frame_admin_auth or {})
+    user = auth.get('user') or ''
+    password = auth.get('pass') or ''
+
+    if not isinstance(user, str):
+        user = ''
+    if not isinstance(password, str):
+        password = ''
+
+    return {
+        'enabled': bool(auth.get('enabled', False)),
+        'user': user.strip(),
+        'pass': password,
+    }
+
+
 
 # NB! Update frontend/src/types.tsx if you change this
 class Frame(Base):
@@ -70,6 +87,7 @@ class Frame(Base):
     frame_port = mapped_column(Integer, default=8787)
     frame_access_key = mapped_column(String(256), nullable=True)
     frame_access = mapped_column(String(50), nullable=True)
+    frame_admin_auth = mapped_column(JSON, nullable=True)
     https_proxy = mapped_column(JSON, nullable=True)
     ssh_user = mapped_column(String(50), nullable=True)
     ssh_pass = mapped_column(String(50), nullable=True)
@@ -79,6 +97,7 @@ class Frame(Base):
     server_host = mapped_column(String(256), nullable=True)
     server_port = mapped_column(Integer, default=8989)
     server_api_key = mapped_column(String(64), nullable=True)
+    server_send_logs = mapped_column(Boolean, default=True)
     # frame metadata
     status = mapped_column(String(15), nullable=False)
     version = mapped_column(String(50), nullable=True)
@@ -127,6 +146,7 @@ class Frame(Base):
             'frame_port': self.frame_port,
             'frame_access_key': self.frame_access_key,
             'frame_access': self.frame_access,
+            'frame_admin_auth': normalize_frame_admin_auth(self.frame_admin_auth),
             'https_proxy': _serialize_https_proxy(self.https_proxy),
             'ssh_user': self.ssh_user,
             'ssh_pass': self.ssh_pass,
@@ -135,6 +155,7 @@ class Frame(Base):
             'server_host': self.server_host,
             'server_port': self.server_port,
             'server_api_key': self.server_api_key,
+            'server_send_logs': self.server_send_logs,
             'status': self.status,
             'version': self.version,
             'width': self.width,
@@ -221,6 +242,7 @@ async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, serve
         server_host=server_host,
         server_port=int(server_port),
         server_api_key=secure_token(32),
+        server_send_logs=True,
         interval=interval or 300,
         status="uninitialized",
         scenes=[],
@@ -326,6 +348,7 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
         "serverHost": frame.server_host or "localhost",
         "serverPort": frame.server_port or 8989,
         "serverApiKey": frame.server_api_key,
+        "serverSendLogs": bool(frame.server_send_logs if frame.server_send_logs is not None else True),
         "width": frame.width or 0,
         "height": frame.height or 0,
         "device": frame.device or "web_only",
@@ -425,6 +448,14 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
     final_settings = {}
     for key in setting_keys:
         final_settings[key] = all_settings.get(key, None)
+
+    frame_admin_auth = normalize_frame_admin_auth(frame.frame_admin_auth)
+
+    frame_json['frameAdminAuth'] = {
+        'enabled': frame_admin_auth['enabled'],
+        **({'user': frame_admin_auth['user']} if frame_admin_auth['user'] else {}),
+        **({'pass': frame_admin_auth['pass']} if frame_admin_auth['pass'] else {}),
+    }
 
     frame_json['settings'] = final_settings
     return frame_json

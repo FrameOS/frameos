@@ -1,4 +1,4 @@
-import { actions, afterMount, connect, defaults, events, kea, listeners, path, reducers, selectors } from 'kea'
+import { actions, afterMount, connect, events, kea, listeners, path, reducers, selectors } from 'kea'
 import { loaders } from 'kea-loaders'
 import { socketLogic } from '../socketLogic'
 import type { settingsLogicType } from './settingsLogicType'
@@ -8,6 +8,7 @@ import { apiFetch } from '../../utils/apiFetch'
 import { normalizeSshKeys } from '../../utils/sshKeys'
 import { v4 as uuidv4 } from 'uuid'
 import { showWorkingMessage } from '../../utils/workingMessage'
+import { isFrameControlMode } from '../../utils/frameControlMode'
 
 const embeddingsGeneratingStorageKey = 'frameos.embeddings.generating'
 
@@ -238,6 +239,9 @@ export const settingsLogic = kea<settingsLogicType>([
     },
   })),
   afterMount(({ actions }) => {
+    if (isFrameControlMode()) {
+      return
+    }
     actions.loadSettings()
     actions.loadAiEmbeddingsStatus()
     actions.loadCustomFonts()

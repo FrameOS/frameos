@@ -5,7 +5,7 @@
 
 You'll need to install:
 Python >= 3.12
-`Node.js` and `npm`
+`Node.js` and `pnpm`
 `redis-server`
 `nim >=2.0.0` (https://nim-lang.org/install.html)
 (Note that Debian distros have only packaged `1.6.x` as of Jan 2024)
@@ -27,8 +27,7 @@ source env/bin/activate
 uv pip install -r requirements.txt
 DEBUG=1 alembic upgrade head
 
-cd ../frontend
-npm install
+pnpm install
 
 cd ../frameos
 nimble install -d
@@ -39,18 +38,17 @@ cd ..
 To run all services at once:
 
 ```bash
-cd frontend
-npm run dev &
-cd ../backend
-bin/dev
+pnpm dev
 ```
+
+This opens `mprocs` with panes for the backend API, ARQ worker, main frontend, and the frame-local frontend watcher. The `redis` pane is available but does not autostart.
 
 To run all of these separately:
 
 ```bash
 # start the frontend
 cd frontend
-npm run dev
+pnpm run dev
 cd ..
 
 # apply any migrations
@@ -63,7 +61,11 @@ DEBUG=1 python -m app.fastapi
 
 # start the job queue
 cd backend
-DEBUG=1 arq app.tasks.worker
+DEBUG=1 arq app.tasks.worker.WorkerSettings
+
+# start the frame-local frontend asset watcher
+cd ../frameos/frontend
+pnpm run dev
 ```
 
 ## Creating migrations

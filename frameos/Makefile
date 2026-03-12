@@ -1,4 +1,4 @@
-.PHONY: run build test debug cross-list
+.PHONY: run build test test-shard debug cross-list
 
 CROSS_OUT ?= build/cross
 
@@ -23,6 +23,10 @@ cross-%: apploaders
 
 test:
 	nimble test
+
+test-shard:
+	@test -n "$(SHARD)" || (echo "SHARD is required, e.g. make test-shard SHARD=1" >&2; exit 1)
+	bash ./tools/run_test_shard.sh "$(SHARD)"
 
 nix-sdcard:
 	nix --extra-experimental-features 'nix-command flakes' \

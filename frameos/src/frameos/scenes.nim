@@ -1,4 +1,4 @@
-import json, jsony, pixie, times, options, strformat, strutils, locks, tables, sequtils, os
+import json, pixie, times, options, strformat, strutils, locks, tables, sequtils, os
 import pixie/fileformats/png
 import scenes/scenes
 import system/scenes as systemScenesRegistry
@@ -325,6 +325,10 @@ proc cleanupOrphanedUploadedStateFiles*() =
         removeFile(filePath)
     except OSError:
       discard
+
+when defined(testing):
+  proc setUploadedStateCleanupRanForTest*(value: bool) =
+    uploadedStateCleanupRan = value
 
 proc updateLastPersistedState*(self: FrameScene) =
   if not exportedScenes.hasKey(self.id):

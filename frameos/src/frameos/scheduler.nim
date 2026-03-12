@@ -40,7 +40,7 @@ proc handleSchedule*(self: Scheduler, dt: DateTime) =
     ev.minute == dt.minute and ev.hour == dt.hour and weekdayMatches(ev.weekday, dt)
   )
 
-  if self.frameConfig.debug:
+  if self.frameConfig.debug and len(matched) > 0:
     log(%*{
       "event": "scheduler:debug",
       "hour": dt.hour,

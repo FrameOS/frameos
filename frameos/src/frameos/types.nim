@@ -9,11 +9,13 @@ type
     serverHost*: string
     serverPort*: int
     serverApiKey*: string
+    serverSendLogs*: bool
     frameHost*: string
     framePort*: int
     httpsProxy*: HttpsProxyConfig
     frameAccessKey*: string
     frameAccess*: string
+    frameAdminAuth*: JsonNode
     width*: int
     height*: int
     device*: string

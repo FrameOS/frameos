@@ -1,0 +1,12 @@
+#!/bin/bash
+set -euo pipefail
+
+export DEBUG=${DEBUG:-1}
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+RUN_IN_PYTHON_ENV="$SCRIPT_DIR/run-in-python-env"
+
+cd "$REPO_ROOT/backend"
+
+exec "$RUN_IN_PYTHON_ENV" arq app.tasks.worker.WorkerSettings

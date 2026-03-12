@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import patch, AsyncMock
-from app.models.frame import Frame, delete_frame, new_frame, update_frame
+from app.models.frame import Frame, delete_frame, new_frame, normalize_frame_admin_auth, update_frame
 
 
 @pytest.mark.asyncio
@@ -22,6 +22,7 @@ async def test_new_frame(mock_publish, db, redis):
     assert frame.ssh_user == "pi"
     assert frame.device == "testDevice"
     assert frame.interval == 123
+    assert frame.server_send_logs is True
     assert frame.https_proxy["enable"] is True
     assert frame.https_proxy["expose_only_port"] is True
     assert frame.https_proxy["certs"]["server"] and "BEGIN CERTIFICATE" in frame.https_proxy["certs"]["server"]
@@ -73,9 +74,24 @@ async def test_frame_to_dict(mock_publish, db, redis):
     data = frame.to_dict()
     assert data["frame_host"] == "host"
     assert data["interval"] == 55
+    assert data["server_send_logs"] is True
     assert data["https_proxy"]["certs"]["server"]
     assert data["https_proxy"]["certs"]["server_key"]
     assert data["https_proxy"]["certs"]["client_ca"]
     assert data["https_proxy"]["server_cert_not_valid_after"] is not None
     assert data["https_proxy"]["client_ca_cert_not_valid_after"] is not None
     assert mock_publish.await_count == 1
+
+
+def test_normalize_frame_admin_auth_keeps_password_whitespace():
+    assert normalize_frame_admin_auth(
+        {
+            "enabled": True,
+            "user": " admin ",
+            "pass": " secret ",
+        }
+    ) == {
+        "enabled": True,
+        "user": "admin",
+        "pass": " secret ",
+    }

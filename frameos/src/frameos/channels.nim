@@ -21,11 +21,16 @@ proc sendEvent*(scene: Option[SceneId], event: string, payload: JsonNode) =
 var logChannel*: Channel[(float, JsonNode)]
 logChannel.open()
 
+var logBroadcastChannel*: Channel[(float, JsonNode)]
+logBroadcastChannel.open(5000)
+
 proc log*(event: JsonNode) =
-  logChannel.send((epochTime(), event))
+  let payload = (epochTime(), event)
+  logChannel.send(payload)
+  discard logBroadcastChannel.trySend(payload)
 
 proc debug*(message: string) =
-  logChannel.send((epochTime(), %*{"event": "debug", "message": message}))
+  log(%*{"event": "debug", "message": message})
 
 # Server
 

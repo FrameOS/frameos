@@ -2,7 +2,9 @@ import { A } from 'kea-router'
 import React from 'react'
 import { H5 } from './H5'
 import { urls } from '../urls'
-import { getBasePath } from '../utils/getBasePath'
+import { frameAdminPath, isInFrameAdminMode } from '../utils/frameAdmin'
+
+import darkMarkSmall from '../assets/logo/dark-mark-small.png'
 
 interface HeaderProps {
   title: React.ReactNode
@@ -12,18 +14,17 @@ interface HeaderProps {
 }
 
 export function Header({ title, version, right, buttons }: HeaderProps) {
+  const inFrameAdminMode = isInFrameAdminMode()
+  const homeHref = inFrameAdminMode ? frameAdminPath() : urls.frames()
+
   return (
     <span
       className="bg-gray-800 text-white h-full w-full space-x-2 p-2 pt-3 px-4 flex justify-between items-center"
       style={{ height: 60 }}
     >
       <div className="truncate flex items-center justify-center gap-3">
-        <A href={urls.frames()}>
-          <img
-            src={getBasePath() + '/img/logo/dark-mark-small.png'}
-            className="w-[28px] h-[28px] inline-block align-center"
-            alt="FrameOS"
-          />
+        <A href={homeHref}>
+          <img src={darkMarkSmall} className="w-[28px] h-[28px] inline-block align-center" alt="FrameOS" />
         </A>
         {version ? (
           <H5 className="flex items-end gap-1">

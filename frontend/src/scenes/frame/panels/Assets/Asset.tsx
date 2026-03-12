@@ -3,6 +3,7 @@ import { frameLogic } from '../../frameLogic'
 import { useEffect, useState } from 'react'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { Button } from '../../../../components/Button'
+import { frameAssetUrl } from '../../../../utils/frameAssetsApi'
 
 interface AssetProps {
   path: string
@@ -23,7 +24,11 @@ export function Asset({ path }: AssetProps) {
     async function fetchAsset() {
       setIsLoading(true)
       setAsset(null)
-      const resource = await apiFetch(`/api/frames/${frame.id}/asset?path=${encodeURIComponent(path)}`)
+      const resource = await apiFetch(frameAssetUrl(frame.id, path))
+      if (!resource.ok) {
+        setIsLoading(false)
+        return
+      }
       const blob = await resource.blob()
       setAsset(URL.createObjectURL(blob))
       setIsLoading(false)

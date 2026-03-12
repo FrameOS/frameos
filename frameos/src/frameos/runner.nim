@@ -1,4 +1,4 @@
-import json, pixie, times, options, asyncdispatch, strformat, strutils, tables, sequtils
+import json, pixie, times, options, asyncdispatch, strformat, strutils, tables
 import std/monotimes
 import apps/render/image/app as render_imageApp
 import apps/data/qr/app as data_qrApp
@@ -104,7 +104,7 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
   let elapsedMs = durationToMilliseconds(getMonoTime() - sceneTimer)
   self.logger.log(%*{"event": "render:done", "sceneId": scene.id.string, "ms": round(elapsedMs, 3)})
 
-proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
+proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.} =
   self.logger.log(%*{"event": "render:startLoop"})
   var timer = getMonoTime()
   var driverTimer = getMonoTime()
@@ -115,6 +115,7 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
   var lastSceneId = "".SceneId
   var currentScene: FrameScene
   var successfulSceneRenders = 0
+  var cycles = 0
   let serverRenderDelay = initDuration(milliseconds = int(SERVER_RENDER_DELAY_SECONDS * 1000))
 
   while true:
@@ -213,6 +214,10 @@ proc startRenderLoop*(self: RunnerThread): Future[void] {.async.} =
       self.triggerRenderNext = false
       continue
 
+    inc cycles
+    if maxCycles > 0 and cycles >= maxCycles:
+      break
+
     # If no sleep duration provided by the scene, calculate based on the interval
     sleepDuration = if nextSleep >= 0: nextSleep * 1000
                     else: max((interval - durationToSeconds(getMonoTime() - timer)) * 1000, 0.1)
@@ -251,10 +256,14 @@ proc dispatchSceneEvent*(self: RunnerThread, sceneId: Option[SceneId], event: st
     scene.updateLastPublicState()
     scene.updateLastPersistedState()
 
-proc startMessageLoop*(self: RunnerThread): Future[void] {.async.} =
+proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.async.} =
   var waitTime = 10
+  var iterations = 0
 
   while true:
+    inc iterations
+    if maxIterations > 0 and iterations > maxIterations:
+      break
     let (success, (sceneId, event, payload)) = eventChannel.tryRecv()
     if success:
       waitTime = 1

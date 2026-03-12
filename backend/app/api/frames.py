@@ -56,7 +56,6 @@ from app.schemas.frames import (
     FrameResponse,
     FrameLogsResponse,
     FrameMetricsResponse,
-    FrameImageLinkResponse,
     FrameStateResponse,
     FrameUploadedScenesResponse,
     FrameAssetsResponse,
@@ -104,7 +103,7 @@ from app.utils.tls import generate_frame_tls_material, parse_certificate_not_val
 from app.utils.ssh_authorized_keys import _install_authorized_keys, resolve_authorized_keys_update
 from app.tasks.binary_builder import FrameBinaryBuilder
 from app.utils.local_exec import exec_local_command
-from app.utils.jwt_tokens import create_scoped_token_response, validate_scoped_token
+from app.utils.jwt_tokens import validate_scoped_token
 from . import api_with_auth, api_no_auth
 
 
@@ -1037,13 +1036,6 @@ async def api_frame_get_logs(id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
     logs = [ll.to_dict() for ll in frame.logs][-1000:]
     return {"logs": logs}
-
-
-@api_with_auth.get(
-    "/frames/{id:int}/image_token", response_model=FrameImageLinkResponse
-)
-async def get_image_token(id: int):
-    return create_scoped_token_response(f"frame={id}")
 
 
 @api_no_auth.get("/frames/{id:int}/image")

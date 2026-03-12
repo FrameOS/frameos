@@ -1,3 +1,5 @@
+import std/os
+
 # Package
 
 version       = "0.1.0"
@@ -21,17 +23,13 @@ requires "psutil >= 0.6.0"
 requires "QRgen >= 3.1.0"
 requires "jsony >= 1.1.5"
 
-taskRequires "assets", "nimassets >= 0.2.4"
-
 before build:
   exec "nimble assets"
   if not dirExists("quickjs"):
     exec "nimble build_quickjs --silent"
 
 task assets, "Create assets":
-  exec "mkdir -p src/assets"
-  exec "~/.nimble/bin/nimassets -d=assets/compiled/web -o=src/assets/web.nim"
-  exec "~/.nimble/bin/nimassets -f=assets/compiled/fonts/Ubuntu-Regular.ttf -o=src/assets/fonts.nim"
+  exec "python tools/prepare_assets.py"
 
 task build_quickjs, "Build QuickJS":
   echo "Downloading and building QuickJS..."

@@ -8,7 +8,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y curl build-essential libffi-dev redis-server ca-certificates gnupg openssh-client \
     && mkdir -p /etc/apt/keyrings \
     && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
-    && NODE_MAJOR=18 \
+    && NODE_MAJOR=22 \
     && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_$NODE_MAJOR.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list \
     && install -m 0755 -d /etc/apt/keyrings \
     && curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg \
@@ -31,8 +31,17 @@ RUN mkdir -p /opt/nim && \
 
 ENV PATH="/opt/nim/bin:${PATH}"
 
-RUN nim --version \
+RUN nim --version && \
     nimble --version
+
+# frameos/frontend asset compilation depends on the pnpm workspace root too.
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml /app/
+COPY frontend/package.json /app/frontend/package.json
+
+# frameos/frontend needs files from the backend frontend/
+COPY frontend/src /app/frontend/src
+COPY frontend/schema /app/frontend/schema
+COPY versions.json /app/versions.json
 
 # Install frameos nim deps
 WORKDIR /app/frameos
@@ -89,7 +98,7 @@ ENV USER=root
 WORKDIR /app/frameos
 COPY frameos/ ./
 
-# Precompile Nim assets before copying the rest of the repository
+# Seed compiled assets and the freshness manifest before copying the rest of the repository
 RUN nimble assets -y
 
 # Cache a build so that the nix libraries are already there
@@ -104,22 +113,23 @@ RUN pip3 install --upgrade uv \
     && uv venv \
     && uv pip install --no-cache-dir -r requirements.txt
 
-# Change the working directory for npm install
-WORKDIR /tmp/frontend
+# Change the working directory for pnpm install
+WORKDIR /tmp
 
-# Copy the npm configuration files
-COPY frontend/package.json frontend/package-lock.json /tmp/frontend/
-
-# Install npm packages
-RUN npm install
+# Install pnpm and seed the workspace manifests for dependency caching
+RUN npm install -g pnpm@10.27.0
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml /tmp/
+COPY frontend/package.json /tmp/frontend/package.json
+COPY frameos/frontend/package.json /tmp/frameos/frontend/package.json
+RUN pnpm install --filter @frameos/frontend --frozen-lockfile
 
 # Copy frontend source files and run build
-COPY frontend/ ./
-COPY versions.json ../
-RUN npm run build
+COPY frontend/ /tmp/frontend/
+COPY versions.json /tmp/versions.json
+RUN pnpm --dir frontend run build
 
 # Delete all files except the dist and schema folders
-RUN find . -maxdepth 1 ! -name 'dist' ! -name 'schema' ! -name '.' ! -name '..' -exec rm -rf {} \;
+RUN cd /tmp/frontend && find . -maxdepth 1 ! -name 'dist' ! -name 'schema' ! -name '.' ! -name '..' -exec rm -rf {} \;
 
 # Change back to the main directory
 WORKDIR /app

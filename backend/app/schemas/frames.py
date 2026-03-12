@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, RootModel
+from pydantic import BaseModel, ConfigDict, RootModel, field_validator
 from typing import Any, Dict, List, Literal, Optional
 
 from .common import ImageTokenResponse
@@ -31,6 +31,7 @@ class FrameBase(BaseModel):
     frame_port: int
     frame_access_key: Optional[str]
     frame_access: Optional[str]
+    frame_admin_auth: Optional[Dict[str, Any]] = None
     https_proxy: Optional[FrameHttpsProxy] = None
     ssh_user: Optional[str]
     ssh_pass: Optional[str]
@@ -39,6 +40,7 @@ class FrameBase(BaseModel):
     server_host: Optional[str]
     server_port: int
     server_api_key: Optional[str]
+    server_send_logs: Optional[bool]
     status: str
     version: Optional[str]
     width: Optional[int]
@@ -97,6 +99,7 @@ class FrameUpdateRequest(BaseModel):
     frame_port: Optional[int] = None
     frame_access_key: Optional[str] = None
     frame_access: Optional[str] = None
+    frame_admin_auth: Optional[Dict[str, Any]] = None
     https_proxy: Optional[FrameHttpsProxy] = None
     ssh_user: Optional[str] = None
     ssh_pass: Optional[str] = None
@@ -105,6 +108,7 @@ class FrameUpdateRequest(BaseModel):
     server_host: Optional[str] = None
     server_port: Optional[int] = None
     server_api_key: Optional[str] = None
+    server_send_logs: Optional[bool] = None
     width: Optional[int] = None
     height: Optional[int] = None
     rotate: Optional[int] = None
@@ -132,6 +136,21 @@ class FrameUpdateRequest(BaseModel):
     rpios: Optional[Dict[str, Any]] = None
     terminal_history: Optional[List[str]] = None
     next_action: Optional[str] = None
+
+    @field_validator('frame_admin_auth')
+    @classmethod
+    def validate_frame_admin_auth(cls, value: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        if not value:
+            return value
+
+        auth = dict(value)
+        if auth.get('enabled'):
+            user = str(auth.get('user', '')).strip()
+            password = str(auth.get('pass', '')).strip()
+            if not user or not password:
+                raise ValueError('Username and password are required when frame admin is enabled')
+
+        return value
 
 
 class FrameSSHKeysUpdateRequest(BaseModel):

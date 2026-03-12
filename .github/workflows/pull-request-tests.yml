@@ -7,6 +7,77 @@ on:
 
 jobs:
   nim:
+    name: FrameOS Nim Tests (${{ matrix.shard_name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard: 1
+            shard_name: shard 1
+          - shard: 2
+            shard_name: shard 2
+          - shard: 3
+            shard_name: shard 3
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.ref }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.12'
+
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install python dependencies
+        run: |
+          cd backend
+          python -m pip install --upgrade uv
+          uv venv
+          uv pip install -r requirements.txt
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.27.0
+          run_install: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+          cache-dependency-path: pnpm-lock.yaml
+
+      - uses: jiro4989/setup-nim-action@v1
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: FrameOS nim setup
+        run: |
+          cd frameos
+          nimble install -d
+          nimble assets
+          nimble build_quickjs --silent
+          nimble setup
+          FRAMEOS_ROOT_DIR="." python3 ../e2e/makeapploaders.py
+
+      - name: FrameOS nim tests
+        run: |
+          cd frameos
+          bash ./tools/run_test_shard.sh ${{ matrix.shard }}
+
+  visual-regression:
+    name: Visual Regression Tests
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -35,6 +106,18 @@ jobs:
           uv venv
           uv pip install -r requirements.txt
 
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.27.0
+          run_install: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+          cache-dependency-path: pnpm-lock.yaml
+
       - uses: jiro4989/setup-nim-action@v1
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
@@ -47,16 +130,13 @@ jobs:
           FRAMEOS_ROOT_DIR="." python3 ../e2e/makeapploaders.py
           nimble build
 
-      - name: FrameOS nim tests
-        run: |
-          cd frameos
-          nimble test
-  
       - name: Visual regression tests
         run: |
           cd e2e
           source ../backend/.venv/bin/activate
           make
+          git status --short
+          git diff --name-only
 
       - name: Commit updated snapshots
         if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
@@ -115,14 +195,19 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v2
 
-      - name: Set up Node
-        uses: actions/setup-node@v2
+      - uses: pnpm/action-setup@v4
         with:
-          node-version: '16.x'
+          version: 10.27.0
+          run_install: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+          cache-dependency-path: pnpm-lock.yaml
 
       - name: Build frontend
         run: |
-          cd frontend
-          npm install
-          npm run build
-        
+          pnpm install --frozen-lockfile
+          pnpm --dir frontend run build

@@ -11,9 +11,15 @@ var typefaces: Table[string, Typeface] = initTable[string, Typeface]()
 
 var typefaceLock: Lock
 
+proc readEmbeddedFont(path: string): string =
+  when compiles(fontAssets.getAssetToStr(path)):
+    fontAssets.getAssetToStr(path)
+  else:
+    fontAssets.getAsset(path)
+
 proc getDefaultTypeface*(): Typeface =
   if not typefaces.hasKey(defaultFont):
-    typefaces[defaultFont] = parseTtf(fontAssets.getAsset("assets/compiled/fonts/" & defaultFont))
+    typefaces[defaultFont] = parseTtf(readEmbeddedFont("assets/compiled/fonts/" & defaultFont))
   return typefaces[defaultFont]
 
 proc getTypeface*(font: string, assetsPath: string): Typeface =
@@ -23,11 +29,11 @@ proc getTypeface*(font: string, assetsPath: string): Typeface =
       raise newException(ValueError, "Invalid font name")
     withLock typefaceLock:
       let ttf = if font == defaultFont:
-        fontAssets.getAsset("assets/compiled/fonts/" & font)
+        readEmbeddedFont("assets/compiled/fonts/" & font)
       elif fileExists(assetsPath & "/fonts/" & font):
         readFile(assetsPath & "/fonts/" & font)
       else:
-        fontAssets.getAsset("assets/compiled/fonts/" & defaultFont)
+        readEmbeddedFont("assets/compiled/fonts/" & defaultFont)
       typefaces[font] = parseTtf(ttf)
   return typefaces[font]
 

@@ -7,6 +7,9 @@ import { socketLogic } from '../../../socketLogic'
 import type { assetsLogicType } from './assetsLogicType'
 import { frameLogic } from '../../frameLogic'
 import { apiFetch } from '../../../../utils/apiFetch'
+import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
+import { frameAssetsApiPath } from '../../../../utils/frameAssetsApi'
+import { uploadFileInChunks } from '../../../../utils/uploadFileInChunks'
 
 export interface AssetsLogicProps {
   frameId: number
@@ -21,9 +24,9 @@ export interface AssetNode {
   children: Record<string, AssetNode>
 }
 
-function buildAssetTree(assets: AssetType[]): AssetNode {
+function buildAssetTree(assets: AssetType[], rootName: string): AssetNode {
   const root: AssetNode = {
-    name: '/srv/assets',
+    name: rootName,
     path: '',
     isFolder: true,
     children: {},
@@ -60,6 +63,35 @@ function buildAssetTree(assets: AssetType[]): AssetNode {
   return root
 }
 
+function normalizeAssetsPath(assetsPath?: string): string {
+  let normalizedPath = (assetsPath || '/srv/assets').replace(/\/+$/, '') || '/srv/assets'
+  while (normalizedPath.startsWith('./')) {
+    normalizedPath = normalizedPath.slice(2)
+  }
+  return normalizedPath || '.'
+}
+
+function normalizeAssetPath(path: string, assetsPath?: string): string {
+  const rawAssetsPath = (assetsPath || '/srv/assets').replace(/\/+$/, '') || '/srv/assets'
+  const normalizedAssetsPath = normalizeAssetsPath(assetsPath)
+  if (!path) {
+    return normalizedAssetsPath
+  }
+  if (
+    path === rawAssetsPath ||
+    path.startsWith(`${rawAssetsPath}/`) ||
+    path === normalizedAssetsPath ||
+    path.startsWith(`${normalizedAssetsPath}/`)
+  ) {
+    return path
+  }
+  if (path.startsWith('/')) {
+    return path
+  }
+  const normalizedPath = path.replace(/^\.\/+/, '').replace(/^\/+/, '')
+  return normalizedPath ? `${normalizedAssetsPath}/${normalizedPath}` : normalizedAssetsPath
+}
+
 export const assetsLogic = kea<assetsLogicType>([
   path(['src', 'scenes', 'frame', 'assetsLogic']),
   props({} as AssetsLogicProps),
@@ -70,6 +102,7 @@ export const assetsLogic = kea<assetsLogicType>([
     uploadDroppedFiles: (path: string, files: File[]) => ({ path, files }),
     assetUploaded: (asset: AssetType) => ({ asset }),
     filesToUpload: (files: string[]) => ({ files }),
+    uploadProgress: (path: string, size: number) => ({ path, size }),
     uploadFailure: (path: string) => ({ path }),
     syncAssets: true,
     deleteAsset: (path: string) => ({ path }),
@@ -84,7 +117,7 @@ export const assetsLogic = kea<assetsLogicType>([
       {
         loadAssets: async () => {
           try {
-            const response = await apiFetch(`/api/frames/${props.frameId}/assets`)
+            const response = await apiFetch(frameAssetsApiPath(props.frameId))
             if (!response.ok) {
               throw new Error('Failed to fetch assets')
             }
@@ -101,8 +134,11 @@ export const assetsLogic = kea<assetsLogicType>([
       false,
       {
         syncAssets: async () => {
+          if (isInFrameAdminMode()) {
+            return true
+          }
           try {
-            const response = await apiFetch(`/api/frames/${props.frameId}/assets/sync`, {
+            const response = await apiFetch(frameAssetsApiPath(props.frameId, 'assets/sync'), {
               method: 'POST',
             })
             if (!response.ok) {
@@ -122,38 +158,67 @@ export const assetsLogic = kea<assetsLogicType>([
       (s) => [s.assets, s.frame],
       (assets, frame) => {
         const assetsPath = frame.assets_path ?? '/srv/assets'
+        const normalizedAssetsPath = normalizeAssetsPath(assetsPath)
         const cleanedAssets = assets.map((asset) => ({
           ...asset,
-          path: asset.path.startsWith(assetsPath + '/') ? '.' + asset.path.substring(assetsPath.length) : asset.path,
+          path: asset.path.startsWith(`${assetsPath}/`)
+            ? '.' + asset.path.substring(assetsPath.length)
+            : asset.path.startsWith(`${normalizedAssetsPath}/`)
+            ? '.' + asset.path.substring(normalizedAssetsPath.length)
+            : asset.path === assetsPath || asset.path === normalizedAssetsPath
+            ? '.'
+            : asset.path,
         }))
         cleanedAssets.sort((a, b) => a.path.localeCompare(b.path))
         return cleanedAssets
       },
     ],
     assetTree: [
-      (s) => [s.cleanedAssets],
-      (cleanedAssets) => {
-        return buildAssetTree(cleanedAssets)
+      (s) => [s.cleanedAssets, s.frame],
+      (cleanedAssets, frame) => {
+        return buildAssetTree(cleanedAssets, frame.assets_path ?? '/srv/assets')
       },
     ],
   }),
   listeners(({ actions, props, values }) => ({
     uploadDroppedFiles: async ({ path, files }) => {
-      const uploadedFiles = files.map((file) => `${path ? path + '/' : ''}${file.name}`)
+      const assetsPath = values.frame.assets_path ?? '/srv/assets'
+      const uploadedFiles = files.map((file) =>
+        normalizeAssetPath(`${path ? path + '/' : ''}${file.name}`, assetsPath)
+      )
       actions.filesToUpload(uploadedFiles)
       for (const file of files) {
-        const formData = new FormData()
-        formData.append('file', file)
-        formData.append('path', path)
+        const uploadPath = frameAssetsApiPath(props.frameId, 'assets/upload')
+        const normalizedPath = normalizeAssetPath(`${path ? path + '/' : ''}${file.name}`, assetsPath)
         try {
-          const response = await apiFetch(`/api/frames/${props.frameId}/assets/upload`, {
-            method: 'POST',
-            body: formData,
+          const asset = isInFrameAdminMode()
+            ? await uploadFileInChunks({
+                frameId: props.frameId,
+                suffix: 'assets/upload',
+                file,
+                path,
+                filename: file.name,
+                onProgress: (size) => actions.uploadProgress(normalizedPath, size),
+              })
+            : await (async () => {
+                const formData = new FormData()
+                formData.append('file', file)
+                formData.append('path', path)
+                const response = await apiFetch(uploadPath, {
+                  method: 'POST',
+                  body: formData,
+                })
+                if (!response.ok) {
+                  throw new Error('Failed to upload asset')
+                }
+                return await response.json()
+              })()
+          actions.assetUploaded({
+            ...asset,
+            path: normalizeAssetPath(asset.path, assetsPath),
           })
-          const asset = await response.json()
-          actions.assetUploaded(asset)
         } catch (error) {
-          actions.uploadFailure(`${path ? path + '/' : ''}${file.name}`)
+          actions.uploadFailure(normalizedPath)
         }
       }
     },
@@ -169,34 +234,44 @@ export const assetsLogic = kea<assetsLogicType>([
     },
     deleteAsset: async ({ path }) => {
       try {
-        await apiFetch(`/api/frames/${props.frameId}/assets/delete`, {
+        const response = await apiFetch(frameAssetsApiPath(props.frameId, 'assets/delete'), {
           method: 'POST',
           body: new URLSearchParams({ path }),
         })
-        const assetsPath = values.frame.assets_path ?? '/srv/assets'
-        actions.assetDeleted(assetsPath + '/' + path)
+        if (!response.ok) {
+          throw new Error('Failed to delete asset')
+        }
+        actions.assetDeleted(normalizeAssetPath(path, values.frame.assets_path))
       } catch (error) {
         console.error(error)
       }
     },
     renameAsset: async ({ oldPath, newPath }) => {
       try {
-        await apiFetch(`/api/frames/${props.frameId}/assets/rename`, {
+        const response = await apiFetch(frameAssetsApiPath(props.frameId, 'assets/rename'), {
           method: 'POST',
           body: new URLSearchParams({ src: oldPath, dst: newPath }),
         })
-        const assetsPath = values.frame.assets_path ?? '/srv/assets'
-        actions.assetRenamed(assetsPath + '/' + oldPath, assetsPath + '/' + newPath)
+        if (!response.ok) {
+          throw new Error('Failed to rename asset')
+        }
+        actions.assetRenamed(
+          normalizeAssetPath(oldPath, values.frame.assets_path),
+          normalizeAssetPath(newPath, values.frame.assets_path)
+        )
       } catch (error) {
         console.error(error)
       }
     },
     createFolder: async ({ path }) => {
       try {
-        await apiFetch(`/api/frames/${props.frameId}/assets/mkdir`, {
+        const response = await apiFetch(frameAssetsApiPath(props.frameId, 'assets/mkdir'), {
           method: 'POST',
           body: new URLSearchParams({ path }),
         })
+        if (!response.ok) {
+          throw new Error('Failed to create folder')
+        }
         actions.loadAssets()
       } catch (error) {
         console.error(error)
@@ -225,11 +300,24 @@ export const assetsLogic = kea<assetsLogicType>([
         }
         return updatedFiles
       },
+      uploadProgress: (state, { path, size }) => {
+        const foundAsset = state.find((asset) => asset.path === path)
+        if (!foundAsset) {
+          return [...state, { path, size, mtime: -1 }]
+        }
+        return state.map((asset) => (asset.path === path ? { ...asset, size, mtime: -1 } : asset))
+      },
       uploadFailure: (state, { path }) =>
         state.map((asset) => (asset.path === path ? { ...asset, size: -2, mtime: -2 } : asset)),
-      assetDeleted: (state, { path }) => state.filter((a) => a.path !== path),
+      assetDeleted: (state, { path }) => state.filter((a) => a.path !== path && !a.path.startsWith(`${path}/`)),
       assetRenamed: (state, { oldPath, newPath }) => {
-        return state.map((a) => (a.path === oldPath ? { ...a, path: newPath } : a))
+        return state.map((a) =>
+          a.path === oldPath
+            ? { ...a, path: newPath }
+            : a.path.startsWith(`${oldPath}/`)
+            ? { ...a, path: `${newPath}${a.path.slice(oldPath.length)}` }
+            : a
+        )
       },
     },
   }),

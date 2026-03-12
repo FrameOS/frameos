@@ -19,10 +19,9 @@ from app.schemas.repositories import (
     RepositoryUpdateRequest,
     RepositoryResponse,
     RepositoriesListResponse,
-    RepositoryImageTokenResponse,
 )
 from app.config import config
-from app.utils.jwt_tokens import create_scoped_token_response, validate_scoped_token
+from app.utils.jwt_tokens import validate_scoped_token
 from app.api.auth import get_current_user_from_request
 from . import api_with_auth, api_no_auth
 
@@ -141,16 +140,6 @@ async def get_system_repositories(db: Session = Depends(get_db)):
     repositories.sort(key=sort_key)
 
     return repositories
-
-
-@api_with_auth.get(
-    "/repositories/system/{repository_slug}/templates/{template_slug}/image_token",
-    response_model=RepositoryImageTokenResponse,
-)
-async def get_system_repository_image_token(repository_slug: str, template_slug: str):
-    return create_scoped_token_response(
-        _system_template_subject(repository_slug, template_slug)
-    )
 
 
 @api_no_auth.get("/repositories/system/{repository_slug}/templates/{template_slug}/image")

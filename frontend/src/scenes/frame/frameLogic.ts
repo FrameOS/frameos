@@ -11,6 +11,8 @@ import { apiFetch } from '../../utils/apiFetch'
 import { getBasePath } from '../../utils/getBasePath'
 import { entityImagesModel } from '../../models/entityImagesModel'
 import { arrangeNodes } from '../../utils/arrangeNodes'
+import { isInFrameAdminMode } from '../../utils/frameAdmin'
+import { secureToken } from '../../utils/secureToken'
 import versions from '../../../../versions.json'
 
 export interface FrameLogicProps {
@@ -46,6 +48,7 @@ const FRAME_KEYS: (keyof FrameType)[] = [
   'frame_port',
   'frame_access_key',
   'frame_access',
+  'frame_admin_auth',
   'https_proxy',
   'ssh_user',
   'ssh_pass',
@@ -54,6 +57,7 @@ const FRAME_KEYS: (keyof FrameType)[] = [
   'server_host',
   'server_port',
   'server_api_key',
+  'server_send_logs',
   'width',
   'height',
   'color',
@@ -120,6 +124,7 @@ const FRAME_KEY_LABELS: Partial<Record<keyof FrameType, string>> = {
   frame_port: 'Frame port',
   frame_access_key: 'Frame access key',
   frame_access: 'Frame access',
+  frame_admin_auth: 'Frame admin auth',
   https_proxy: 'HTTPS proxy',
   ssh_user: 'SSH user',
   ssh_pass: 'SSH password',
@@ -385,20 +390,51 @@ export function sanitizeNodes(nodes: DiagramNode[]): DiagramNode[] {
   return changed ? newNodes : nodes
 }
 
+function normalizeNode(node: DiagramNode): DiagramNode {
+  const normalizedType = node.type ?? (node as DiagramNode & { nodeType?: DiagramNode['type'] }).nodeType
+  if (!normalizedType) {
+    return node
+  }
+  return {
+    ...node,
+    type: normalizedType,
+  } as DiagramNode
+}
+
+function normalizeEdge(edge: any): any {
+  const normalizedType = edge.type ?? edge.edgeType
+  if (!normalizedType) {
+    return edge
+  }
+  return {
+    ...edge,
+    type: normalizedType,
+  }
+}
+
 function hasValidPosition(node: DiagramNode): boolean {
   return Number.isFinite(node.position?.x) && Number.isFinite(node.position?.y)
 }
 
 function sanitizeFrame(frame: Partial<FrameType>): Partial<FrameType> {
+  const frameAdminAuthUser = frame.frame_admin_auth?.user ?? ''
+  const frameAdminAuthPass = frame.frame_admin_auth?.pass ?? ''
+
   return {
     ...frame,
+    frame_admin_auth: {
+      enabled: frame.frame_admin_auth?.enabled ?? false,
+      user: frameAdminAuthUser,
+      pass: frameAdminAuthPass,
+    },
     scenes: frame.scenes?.map((scene) => sanitizeScene(scene, frame)) ?? [],
   }
 }
 
 export function sanitizeScene(scene: Partial<FrameScene>, frame: Partial<FrameType>): FrameScene {
   const settings = scene.settings ?? {}
-  const sanitizedNodes = sanitizeNodes(scene.nodes ?? [])
+  const normalizedRawNodes = (scene.nodes ?? []).map((node) => normalizeNode(node as DiagramNode))
+  const sanitizedNodes = sanitizeNodes(normalizedRawNodes)
   const normalizedNodes = sanitizedNodes.map((node) =>
     hasValidPosition(node)
       ? node
@@ -413,7 +449,7 @@ export function sanitizeScene(scene: Partial<FrameScene>, frame: Partial<FrameTy
           position: { x: 0, y: 0 },
         }
   )
-  const edges = scene.edges ?? []
+  const edges = (scene.edges ?? []).map((edge) => normalizeEdge(edge))
   const shouldArrange = normalizedNodes.length > 0 && sanitizedNodes.every((node) => !hasValidPosition(node))
   return {
     ...scene,
@@ -458,6 +494,7 @@ export const frameLogic = kea<frameLogicType>([
     closeScenePanels: (sceneIds: string[]) => ({ sceneIds }),
     sendEvent: (event: string, payload: Record<string, any>) => ({ event, payload }),
     setDeployWithAgent: (deployWithAgent: boolean) => ({ deployWithAgent }),
+    generateFrameAdminCredentials: true,
     generateTlsCertificates: true,
     verifyTlsCertificates: true,
   }),
@@ -468,6 +505,12 @@ export const frameLogic = kea<frameLogicType>([
       },
       defaults: {} as FrameType,
       errors: (state: Partial<FrameType>) => ({
+        frame_admin_auth: state.frame_admin_auth?.enabled
+          ? {
+              user: state.frame_admin_auth?.user ? undefined : 'Username is required',
+              pass: state.frame_admin_auth?.pass ? undefined : 'Password is required',
+            }
+          : undefined,
         scenes: (state.scenes ?? []).map((scene: Record<string, any>) => ({
           fields: (scene.fields ?? []).map((field: Record<string, any>) => ({
             name: field.name ? '' : 'Name is required',
@@ -550,6 +593,20 @@ export const frameLogic = kea<frameLogicType>([
         throw new Error('Failed to update deployed SSH keys')
       }
     },
+    generateFrameAdminCredentials: () => {
+      const frameAdminAuth = values.frameForm.frame_admin_auth || values.frame?.frame_admin_auth || {}
+      actions.setFrameFormValues({
+        frame_admin_auth: {
+          ...frameAdminAuth,
+          enabled: true,
+          user: 'admin',
+          pass: secureToken(24),
+        },
+      })
+      actions.touchFrameFormField('frame_admin_auth.enabled')
+      actions.touchFrameFormField('frame_admin_auth.user')
+      actions.touchFrameFormField('frame_admin_auth.pass')
+    },
     generateTlsCertificates: async () => {
       const response = await apiFetch(`/api/frames/${values.frameId}/tls/generate`, {
         method: 'POST',
@@ -600,6 +657,7 @@ export const frameLogic = kea<frameLogicType>([
     frameId: [() => [(_, props) => props.frameId], (frameId) => frameId],
     frame: [(s) => [s.frames, s.frameId], (frames, frameId) => frames[frameId] || null],
     mode: [(s) => [s.frame, s.frameForm], (frame, frameForm) => frameForm?.mode || frame?.mode || 'rpios'],
+    isFrameAdminMode: [() => [], () => isInFrameAdminMode()],
     scenes: [
       (s) => [s.frame, s.frameForm],
       (frame, frameForm): FrameScene[] => frameForm?.scenes ?? frame.scenes ?? [],
@@ -634,17 +692,18 @@ export const frameLogic = kea<frameLogicType>([
     ],
     lastDeploy: [(s) => [s.frame], (frame) => frame?.last_successful_deploy ?? null],
     undeployedChanges: [
-      (s) => [s.frame, s.lastDeploy, s.mode],
-      (frame: FrameType, lastDeploy: Partial<FrameType> | null, mode: FrameType['mode']) =>
-        computeChangeDetails(lastDeploy, frame, mode).length > 0,
+      (s) => [s.frame, s.lastDeploy, s.mode, s.isFrameAdminMode],
+      (frame: FrameType, lastDeploy: Partial<FrameType> | null, mode: FrameType['mode'], isFrameAdminMode: boolean) =>
+        !isFrameAdminMode && computeChangeDetails(lastDeploy, frame, mode).length > 0,
     ],
     unsavedChangeDetails: [
       (s) => [s.frame, s.frameForm, s.mode],
       (frame, frameForm, mode): ChangeDetail[] => computeChangeDetails(frame, frameForm, mode),
     ],
     undeployedChangeDetails: [
-      (s) => [s.lastDeploy, s.frame, s.mode],
-      (lastDeploy, frame, mode): ChangeDetail[] => computeChangeDetails(lastDeploy, frame, mode),
+      (s) => [s.lastDeploy, s.frame, s.mode, s.isFrameAdminMode],
+      (lastDeploy, frame, mode, isFrameAdminMode): ChangeDetail[] =>
+        isFrameAdminMode ? [] : computeChangeDetails(lastDeploy, frame, mode),
     ],
     requiresRecompilation: [
       (s) => [s.undeployedChangeDetails],

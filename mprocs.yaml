@@ -1,0 +1,15 @@
+procs:
+  backend:
+    shell: pnpm run dev:backend
+  worker:
+    shell: pnpm run dev:worker
+  frontend:
+    shell: pnpm run dev:frontend
+  redis:
+    shell: pnpm run dev:redis
+  frameos:
+    shell: cd frameos && make
+    autostart: false
+  backend-docker:
+    shell: bash scripts/backend-docker.sh
+    autostart: false

@@ -17,8 +17,10 @@ import copy from 'copy-to-clipboard'
 import { ClipboardDocumentCheckIcon } from '@heroicons/react/24/outline'
 import { panelsLogic } from '../panelsLogic'
 import { TemplateType } from '../../../../types'
+import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
 
 export function Templates() {
+  const inFrameAdminMode = isInFrameAdminMode()
   const { applyTemplate } = useActions(frameLogic)
   const { frameId } = useValues(frameLogic)
   const { removeTemplate, exportTemplate } = useActions(templatesModel)
@@ -112,166 +114,172 @@ export function Templates() {
         </Box>
       ) : null}
 
-      <div className="space-y-2">
-        <div className="flex justify-between w-full items-center">
-          <H6 className="flex items-center cursor-pointer" onClick={() => toggleExpanded('')}>
-            {isExpanded('') ? <ChevronDownIcon className="w-6 h-6" /> : <ChevronRightIcon className="w-6 h-6" />}
-            My scenes
-            {templates.length ? ` (${templates.length})` : ''}
-          </H6>
-          <DropdownMenu
-            buttonColor="secondary"
-            className="mr-3"
-            items={[
-              {
-                label: 'Add template from URL',
-                onClick: showRemoteTemplate,
-                icon: <PlusIcon className="w-5 h-5" />,
-              },
-              {
-                label: 'Upload template .zip',
-                onClick: showUploadTemplate,
-                icon: <ArrowPathIcon className="w-5 h-5" />,
-              },
-            ]}
-          />
-        </div>
-        {isExpanded('') && (
-          <div className="space-y-2">
-            {templates.map((template, index) => (
-              <TemplateRow
-                key={template.id ?? -index}
-                template={template}
-                frameId={frameId}
-                exportTemplate={exportTemplate}
-                removeTemplate={removeTemplate}
-                applyTemplate={(template: TemplateType) => {
-                  applyTemplate(template)
-                  disableFullscreenPanel()
-                }}
-                editTemplate={editLocalTemplate}
-                installedTemplatesByName={installedTemplatesByName}
-              />
-            ))}
-          </div>
-        )}
-        {isExpanded('') && templates.length === 0 ? (
-          <div className="text-muted">
-            {search === '' ? 'You have no saved scenes.' : `No saved scenes match "${search}"`}
-          </div>
-        ) : null}
-      </div>
-
-      {(repositories ?? []).map((repository) => (
-        <div className="space-y-2 !mt-8" key={repository.id}>
-          <div className="flex gap-2 items-start justify-between">
-            <H6 className="flex items-center cursor-pointer" onClick={() => toggleExpanded(repository.url)}>
-              {isExpanded(repository.url) ? (
-                <ChevronDownIcon className="w-6 h-6" />
-              ) : (
-                <ChevronRightIcon className="w-6 h-6" />
-              )}
-              {repository.name || repository.url}
-              {repository.templates?.length ? ` (${repository.templates.length})` : ''}
+      {!inFrameAdminMode && (
+        <div className="space-y-2">
+          <div className="flex justify-between w-full items-center">
+            <H6 className="flex items-center cursor-pointer" onClick={() => toggleExpanded('')}>
+              {isExpanded('') ? <ChevronDownIcon className="w-6 h-6" /> : <ChevronRightIcon className="w-6 h-6" />}
+              My scenes
+              {templates.length ? ` (${templates.length})` : ''}
             </H6>
             <DropdownMenu
               buttonColor="secondary"
               className="mr-3"
               items={[
                 {
-                  label: 'Refresh',
-                  onClick: () => repository.id && refreshRepository(repository.id),
+                  label: 'Add template from URL',
+                  onClick: showRemoteTemplate,
+                  icon: <PlusIcon className="w-5 h-5" />,
+                },
+                {
+                  label: 'Upload template .zip',
+                  onClick: showUploadTemplate,
                   icon: <ArrowPathIcon className="w-5 h-5" />,
-                  title: `Last refresh: ${repository.last_updated_at}`,
-                },
-                {
-                  label: 'Copy repository URL',
-                  title: repository.url,
-                  onClick: async () => repository.url && copy(repository.url),
-                  icon: <ClipboardDocumentCheckIcon className="w-5 h-5" />,
-                },
-                {
-                  label: 'Remove',
-                  onClick: () => repository.id && removeRepository(repository.id),
-                  icon: <TrashIcon className="w-5 h-5" />,
                 },
               ]}
             />
           </div>
-          {isExpanded(repository.url) && repository.description ? (
-            <div className="text-gray-400">{repository.description}</div>
-          ) : null}
-          {isExpanded(repository.url) && repository.templates ? (
+          {isExpanded('') && (
             <div className="space-y-2">
-              {repository.templates.map((template, index) => (
+              {templates.map((template, index) => (
                 <TemplateRow
                   key={template.id ?? -index}
                   template={template}
                   frameId={frameId}
-                  saveRemoteAsLocal={(template) => saveRemoteAsLocal(repository, template)}
-                  applyTemplate={(template) => {
-                    applyRemoteToFrame(repository, template)
+                  exportTemplate={exportTemplate}
+                  removeTemplate={removeTemplate}
+                  applyTemplate={(template: TemplateType) => {
+                    applyTemplate(template)
                     disableFullscreenPanel()
                   }}
+                  editTemplate={editLocalTemplate}
                   installedTemplatesByName={installedTemplatesByName}
                 />
               ))}
             </div>
-          ) : null}
-          {isExpanded(repository.url) && repository.templates?.length === 0 ? (
-            <div className="text-gray-400">This repository has no scenes.</div>
+          )}
+          {isExpanded('') && templates.length === 0 ? (
+            <div className="text-muted">
+              {search === '' ? 'You have no saved scenes.' : `No saved scenes match "${search}"`}
+            </div>
           ) : null}
         </div>
-      ))}
-      {repositories.length === 0 || hiddenRepositories > 0 ? (
-        <div className="space-y-2">
-          {repositories.length === 0 ? <H6>Remote repositories</H6> : null}
-          <div>
-            {hiddenRepositories > 0 ? (
-              <>
-                {hiddenRepositories} {hiddenRepositories === 1 ? 'repository' : 'repositories'} had no match for "
-                {search}".
-              </>
-            ) : (
-              <>You have no repositories installed.</>
-            )}
-          </div>
-        </div>
-      ) : null}
-      {showingAddRepository ? (
-        <Box className="p-4 bg-gray-900">
-          <Form
-            logic={templatesLogic}
-            props={{ frameId }}
-            formKey="addRepositoryForm"
-            enableFormOnSubmit
-            className="space-y-2"
-          >
-            <H6>Add scenes repository</H6>
-            <div>
-              Read more about creating repositories{' '}
-              <a href="https://github.com/FrameOS/repo" target="_blank" rel="noreferrer" className="underline">
-                here.
-              </a>
+      )}
+
+      {!inFrameAdminMode && (
+        <>
+          {(repositories ?? []).map((repository) => (
+            <div className="space-y-2 !mt-8" key={repository.id}>
+              <div className="flex gap-2 items-start justify-between">
+                <H6 className="flex items-center cursor-pointer" onClick={() => toggleExpanded(repository.url)}>
+                  {isExpanded(repository.url) ? (
+                    <ChevronDownIcon className="w-6 h-6" />
+                  ) : (
+                    <ChevronRightIcon className="w-6 h-6" />
+                  )}
+                  {repository.name || repository.url}
+                  {repository.templates?.length ? ` (${repository.templates.length})` : ''}
+                </H6>
+                <DropdownMenu
+                  buttonColor="secondary"
+                  className="mr-3"
+                  items={[
+                    {
+                      label: 'Refresh',
+                      onClick: () => repository.id && refreshRepository(repository.id),
+                      icon: <ArrowPathIcon className="w-5 h-5" />,
+                      title: `Last refresh: ${repository.last_updated_at}`,
+                    },
+                    {
+                      label: 'Copy repository URL',
+                      title: repository.url,
+                      onClick: async () => repository.url && copy(repository.url),
+                      icon: <ClipboardDocumentCheckIcon className="w-5 h-5" />,
+                    },
+                    {
+                      label: 'Remove',
+                      onClick: () => repository.id && removeRepository(repository.id),
+                      icon: <TrashIcon className="w-5 h-5" />,
+                    },
+                  ]}
+                />
+              </div>
+              {isExpanded(repository.url) && repository.description ? (
+                <div className="text-gray-400">{repository.description}</div>
+              ) : null}
+              {isExpanded(repository.url) && repository.templates ? (
+                <div className="space-y-2">
+                  {repository.templates.map((template, index) => (
+                    <TemplateRow
+                      key={template.id ?? -index}
+                      template={template}
+                      frameId={frameId}
+                      saveRemoteAsLocal={(template) => saveRemoteAsLocal(repository, template)}
+                      applyTemplate={(template) => {
+                        applyRemoteToFrame(repository, template)
+                        disableFullscreenPanel()
+                      }}
+                      installedTemplatesByName={installedTemplatesByName}
+                    />
+                  ))}
+                </div>
+              ) : null}
+              {isExpanded(repository.url) && repository.templates?.length === 0 ? (
+                <div className="text-gray-400">This repository has no scenes.</div>
+              ) : null}
             </div>
-            <Field label="" name="url">
-              <TextInput placeholder="https://repo.frameos.net/samples/repository.json" />
-            </Field>
-            <div className="flex gap-2">
-              <Button type="submit" size="small" color="primary">
-                Add repository
-              </Button>
-              <Button size="small" color="secondary" onClick={hideAddRepository}>
-                Close
-              </Button>
+          ))}
+          {repositories.length === 0 || hiddenRepositories > 0 ? (
+            <div className="space-y-2">
+              {repositories.length === 0 ? <H6>Remote repositories</H6> : null}
+              <div>
+                {hiddenRepositories > 0 ? (
+                  <>
+                    {hiddenRepositories} {hiddenRepositories === 1 ? 'repository' : 'repositories'} had no match for "
+                    {search}".
+                  </>
+                ) : (
+                  <>You have no repositories installed.</>
+                )}
+              </div>
             </div>
-          </Form>
-        </Box>
-      ) : (
-        <Button size="small" color="secondary" className="flex gap-1 items-center" onClick={showAddRepository}>
-          <PlusIcon className="w-4 h-4" />
-          Add repository
-        </Button>
+          ) : null}
+          {showingAddRepository ? (
+            <Box className="p-4 bg-gray-900">
+              <Form
+                logic={templatesLogic}
+                props={{ frameId }}
+                formKey="addRepositoryForm"
+                enableFormOnSubmit
+                className="space-y-2"
+              >
+                <H6>Add scenes repository</H6>
+                <div>
+                  Read more about creating repositories{' '}
+                  <a href="https://github.com/FrameOS/repo" target="_blank" rel="noreferrer" className="underline">
+                    here.
+                  </a>
+                </div>
+                <Field label="" name="url">
+                  <TextInput placeholder="https://repo.frameos.net/samples/repository.json" />
+                </Field>
+                <div className="flex gap-2">
+                  <Button type="submit" size="small" color="primary">
+                    Add repository
+                  </Button>
+                  <Button size="small" color="secondary" onClick={hideAddRepository}>
+                    Close
+                  </Button>
+                </div>
+              </Form>
+            </Box>
+          ) : (
+            <Button size="small" color="secondary" className="flex gap-1 items-center" onClick={showAddRepository}>
+              <PlusIcon className="w-4 h-4" />
+              Add repository
+            </Button>
+          )}
+        </>
       )}
     </div>
   )

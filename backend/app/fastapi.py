@@ -6,6 +6,7 @@ from httpx import AsyncClient, Limits
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.exceptions import RequestValidationError
+from fastapi.exception_handlers import request_validation_exception_handler
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi import FastAPI, Request, Depends
 from app.api.auth import get_current_user
@@ -104,11 +105,8 @@ if serve_html:
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(request: Request, exc: RequestValidationError):
-        if os.environ.get("TEST") == "1":
-            return JSONResponse(
-                status_code=422,
-                content={"detail": exc.errors()}
-            )
+        if os.environ.get("TEST") == "1" or request.url.path.startswith("/api"):
+            return await request_validation_exception_handler(request, exc)
         return HTMLResponse(index_html)
 
     @app.exception_handler(Exception)

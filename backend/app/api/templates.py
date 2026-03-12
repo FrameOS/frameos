@@ -16,7 +16,6 @@ from arq import ArqRedis as Redis
 from app.models.template import Template
 from app.models.frame import Frame
 from app.schemas.templates import (
-    TemplateImageTokenResponse,
     TemplateResponse,
     TemplatesListResponse,
     CreateTemplateRequest,
@@ -24,7 +23,7 @@ from app.schemas.templates import (
 )
 from app.api import api_with_auth, api_no_auth
 from app.redis import get_redis
-from app.utils.jwt_tokens import create_scoped_token_response, validate_scoped_token
+from app.utils.jwt_tokens import validate_scoped_token
 from app.api.auth import get_current_user_from_request
 
 
@@ -237,10 +236,6 @@ async def get_template(template_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Template not found")
     d = template.to_dict()
     return d
-
-@api_with_auth.get("/templates/{template_id}/image_token", response_model=TemplateImageTokenResponse)
-async def get_image_token(template_id: str):
-    return create_scoped_token_response(f"template={template_id}")
 
 @api_no_auth.get("/templates/{template_id}/image")
 async def get_template_image(template_id: str, request: Request, token: str | None = None, db: Session = Depends(get_db)):

@@ -7,11 +7,15 @@ import frameos/types
 import frameos/utils/image
 
 type
+  RtspSnapshotFfmpegRunHook* = proc(command: string): tuple[data: string, exitCode: int]
+
   AppConfig* = object
     url*: string
 
   App* = ref object of AppRoot
     appConfig*: AppConfig
+
+var rtspSnapshotFfmpegRunHook*: RtspSnapshotFfmpegRunHook = nil
 
 proc renderError(self: App, context: ExecutionContext, message: string): Image =
   return renderError(
@@ -19,6 +23,18 @@ proc renderError(self: App, context: ExecutionContext, message: string): Image =
     if context.hasImage: context.image.height else: self.frameConfig.renderHeight(),
     message
   )
+
+proc runFfmpeg(command: string): tuple[data: string, exitCode: int] =
+  if rtspSnapshotFfmpegRunHook != nil:
+    return rtspSnapshotFfmpegRunHook(command)
+
+  var p = startProcess(command, options = {poUsePath, poEvalCommand, poDaemon})
+  defer:
+    p.close()
+
+  let outputStream = p.outputStream()
+  result.data = outputStream.readAll()
+  result.exitCode = p.waitForExit()
 
 proc get*(self: App, context: ExecutionContext): Image =
   try:
@@ -29,13 +45,7 @@ proc get*(self: App, context: ExecutionContext): Image =
       self.log "Running: " & command
 
     # Run ffmpeg
-    var p = startProcess(command, options = {poUsePath, poEvalCommand, poDaemon})
-    defer:
-      p.close()
-
-    let outputStream = p.outputStream()
-    let data = outputStream.readAll()
-    let exitCode = p.waitForExit()
+    let (data, exitCode) = runFfmpeg(command)
 
     if exitCode != 0:
       self.logError "ffmpeg exited with code " & $exitCode
