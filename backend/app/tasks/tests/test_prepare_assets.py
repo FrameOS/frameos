@@ -1,4 +1,5 @@
 import importlib.util
+import shutil
 import sys
 from pathlib import Path
 
@@ -40,8 +41,12 @@ def create_project_layout(tmp_path: Path) -> Path:
 
     write(frameos_root / "frontend" / "package.json", "{}\n")
     write(frameos_root / "frontend" / "build.mjs", "console.log('build')\n")
+    write(frameos_root / "frontend" / "postcss.config.js", "export default {}\n")
     write(frameos_root / "frontend" / "src" / "main.tsx", "export const main = 1\n")
     write(frameos_root / "frontend" / "src" / "index.html", "<html></html>\n")
+    write(frameos_root / "frontend" / "tailwind.config.js", "export default {}\n")
+    write(frameos_root / "frontend" / "tsconfig.dev.json", "{}\n")
+    write(frameos_root / "frontend" / "tsconfig.json", "{}\n")
     write(frameos_root / "src" / "apps" / "data" / "sample" / "config.json", "{\"name\":\"Sample\"}\n")
     write(frameos_root / "assets" / "compiled" / "web" / "control.html", "<html>control</html>\n")
     write(frameos_root / "assets" / "compiled" / "fonts" / "Ubuntu-Regular.ttf", b"font")
@@ -118,3 +123,56 @@ def test_ensure_frontend_dependencies_reinstalls_incomplete_existing_modules(tmp
 
     assert commands == [(["pnpm", "install", "--frozen-lockfile"], frontend_root)]
     assert not (frontend_root / "node_modules").exists()
+
+
+def test_hash_frontend_inputs_ignores_node_modules(tmp_path):
+    frameos_root = create_project_layout(tmp_path)
+    frontend_root = frameos_root / "frontend"
+
+    before = prepare_assets.hash_frontend_inputs(frameos_root)
+    write(frontend_root / "node_modules" / "autoprefixer" / "package.json", "{}\n")
+    after = prepare_assets.hash_frontend_inputs(frameos_root)
+
+    assert after == before
+
+
+def test_prepare_assets_uses_packaged_frontend_when_shared_sources_are_missing(tmp_path, monkeypatch):
+    frameos_root = create_project_layout(tmp_path)
+    frontend_hash = "frontend-hash"
+    modules_hash = "modules-hash"
+    write(
+        frameos_root / "assets" / "compiled" / ".manifest.json",
+        (
+            "{\n"
+            '  "frontend_hash": "frontend-hash",\n'
+            '  "modules_hash": "modules-hash",\n'
+            '  "version": 1\n'
+            "}\n"
+        ),
+    )
+    write(frameos_root / "assets" / "compiled" / "frame_web" / "index.html", "<html></html>\n")
+    write(frameos_root / "assets" / "compiled" / "frame_web" / "static" / "main.js", "console.log(1)\n")
+    write(frameos_root / "assets" / "compiled" / "frame_web" / "static" / "main.css", "body{}\n")
+    write(frameos_root / "src" / "assets" / "apps.nim", "# apps\n")
+    write(frameos_root / "src" / "assets" / "web.nim", "# web\n")
+    write(frameos_root / "src" / "assets" / "frame_web.nim", "# frame web\n")
+    write(frameos_root / "src" / "assets" / "fonts.nim", "# fonts\n")
+    shutil.rmtree(frameos_root.parent / "frontend" / "src")
+
+    build_calls: list[int] = []
+
+    def fake_build_frontend(_project_root: Path) -> None:
+        build_calls.append(1)
+
+    monkeypatch.setattr(prepare_assets, "build_frontend", fake_build_frontend)
+    monkeypatch.setattr(prepare_assets, "hash_module_inputs", lambda _project_root: modules_hash)
+
+    result = prepare_assets.prepare_assets(frameos_root)
+
+    assert result.rebuilt_frontend is False
+    assert result.regenerated_modules is False
+    assert build_calls == []
+    manifest = prepare_assets.load_manifest(frameos_root)
+    assert manifest is not None
+    assert manifest.frontend_hash == frontend_hash
+    assert manifest.modules_hash == modules_hash

@@ -42,6 +42,20 @@ REPO_ROOT_FILES = (
     Path("versions.json"),
 )
 
+FRONTEND_SOURCE_FILES = (
+    Path("frontend/build.mjs"),
+    Path("frontend/package.json"),
+    Path("frontend/postcss.config.js"),
+    Path("frontend/src"),
+    Path("frontend/tailwind.config.js"),
+    Path("frontend/tsconfig.dev.json"),
+    Path("frontend/tsconfig.json"),
+    Path("../frontend/package.json"),
+    Path("../frontend/schema"),
+    Path("../frontend/src"),
+    *[Path("..") / entry for entry in REPO_ROOT_FILES],
+)
+
 
 @dataclass(frozen=True)
 class AssetsManifest:
@@ -108,13 +122,11 @@ def hash_inputs(root: Path, entries: list[Path]) -> str:
 
 
 def hash_frontend_inputs(project_root: Path) -> str:
-    entries = [
-        Path("frontend"),
-        Path("../frontend/src"),
-        Path("../frontend/schema"),
-        *[Path("..") / entry for entry in REPO_ROOT_FILES],
-    ]
-    return hash_inputs(project_root, entries)
+    return hash_inputs(project_root, list(FRONTEND_SOURCE_FILES))
+
+
+def missing_frontend_inputs(project_root: Path) -> list[Path]:
+    return [entry for entry in FRONTEND_SOURCE_FILES if not (project_root / entry).exists()]
 
 
 def iter_app_config_entries(project_root: Path) -> list[Path]:
@@ -293,13 +305,29 @@ def prepare_assets(project_root: Path) -> AssetPreparationResult:
     (project_root / "src/assets").mkdir(parents=True, exist_ok=True)
 
     manifest = load_manifest(project_root)
-    frontend_hash = hash_frontend_inputs(project_root)
-    rebuilt_frontend = not frontend_outputs_exist(project_root) or manifest is None or manifest.frontend_hash != frontend_hash
-
-    if rebuilt_frontend:
-        build_frontend(project_root)
+    missing_inputs = missing_frontend_inputs(project_root)
+    if missing_inputs:
+        if not frontend_outputs_exist(project_root) or manifest is None:
+            missing = ", ".join(entry.as_posix() for entry in missing_inputs)
+            raise RuntimeError(
+                "Frame frontend source inputs are missing and packaged assets are unavailable: "
+                f"{missing}"
+            )
+        frontend_hash = manifest.frontend_hash
+        rebuilt_frontend = False
+        print("Using packaged frame frontend assets")
     else:
-        print("Frame frontend assets are up to date")
+        frontend_hash = hash_frontend_inputs(project_root)
+        rebuilt_frontend = (
+            not frontend_outputs_exist(project_root)
+            or manifest is None
+            or manifest.frontend_hash != frontend_hash
+        )
+
+        if rebuilt_frontend:
+            build_frontend(project_root)
+        else:
+            print("Frame frontend assets are up to date")
 
     modules_hash = hash_module_inputs(project_root)
     regenerated_modules = not module_outputs_exist(project_root) or manifest is None or manifest.modules_hash != modules_hash
