@@ -7,7 +7,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 RUN_IN_PYTHON_ENV="$SCRIPT_DIR/run-in-python-env"
 
+"$SCRIPT_DIR/dev-migrate"
 cd "$REPO_ROOT/backend"
-
-"$RUN_IN_PYTHON_ENV" python -m alembic upgrade head
 exec "$RUN_IN_PYTHON_ENV" uvicorn app.fastapi:app --host 0.0.0.0 --port 8989 --reload

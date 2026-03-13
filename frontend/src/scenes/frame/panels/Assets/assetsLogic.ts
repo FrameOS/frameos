@@ -183,9 +183,7 @@ export const assetsLogic = kea<assetsLogicType>([
   listeners(({ actions, props, values }) => ({
     uploadDroppedFiles: async ({ path, files }) => {
       const assetsPath = values.frame.assets_path ?? '/srv/assets'
-      const uploadedFiles = files.map((file) =>
-        normalizeAssetPath(`${path ? path + '/' : ''}${file.name}`, assetsPath)
-      )
+      const uploadedFiles = files.map((file) => normalizeAssetPath(`${path ? path + '/' : ''}${file.name}`, assetsPath))
       actions.filesToUpload(uploadedFiles)
       for (const file of files) {
         const uploadPath = frameAssetsApiPath(props.frameId, 'assets/upload')

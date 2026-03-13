@@ -1,20 +1,31 @@
-version = 1
+schema-version = "1.10.0"
 
 [install]
 cacert.pkg-path = "cacert"
+cacert.outputs = "all"
 coreutils.pkg-path = "coreutils"
+coreutils.outputs = "all"
 curl.pkg-path = "curl"
+curl.outputs = "all"
 gcc.pkg-path = "gcc"
+gcc.outputs = "all"
 git.pkg-path = "git"
+git.outputs = "all"
 gnumake.pkg-path = "gnumake"
+gnumake.outputs = "all"
 nodejs.pkg-path = "nodejs_22"
+nodejs.outputs = "all"
 nim.pkg-path = "nim"
 openssl.pkg-path = "openssl"
+openssl.outputs = "all"
 pkg-config.pkg-path = "pkg-config"
+pkg-config.outputs = "all"
 pnpm.pkg-path = "pnpm"
 python.pkg-path = "python312"
 redis.pkg-path = "redis"
 xz.pkg-path = "xz"
+xz.outputs = "all"
+nimble.pkg-path = "nimble"
 
 [vars]
 PIP_DISABLE_PIP_VERSION_CHECK = "1"
@@ -70,8 +81,8 @@ on-activate = '''
   python_stamp="$FRAMEOS_FLOX_CACHE_DIR/python-requirements.sha256"
   if [ ! -f "$python_stamp" ] || [ "$(cat "$python_stamp")" != "$python_requirements_hash" ]; then
     echo "Syncing backend Python dependencies..."
-    python -m pip install --upgrade pip setuptools wheel
-    python -m pip install -r backend/requirements.txt
+    "$VIRTUAL_ENV/bin/python" -m pip install --upgrade pip setuptools wheel
+    "$VIRTUAL_ENV/bin/python" -m pip install -r backend/requirements.txt
     printf '%s' "$python_requirements_hash" > "$python_stamp"
   fi
 

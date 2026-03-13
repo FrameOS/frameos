@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "mprocs",
     "dev:backend": "DEBUG=1 ./backend/bin/dev-api",
+    "dev:migrate": "DEBUG=1 ./backend/bin/dev-migrate",
     "dev:worker": "DEBUG=1 ./backend/bin/dev-worker",
     "dev:frontend": "pnpm --dir frontend run dev",
     "dev:frame-frontend": "pnpm --dir frameos/frontend run dev",

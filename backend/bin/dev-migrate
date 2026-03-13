@@ -7,7 +7,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 RUN_IN_PYTHON_ENV="$SCRIPT_DIR/run-in-python-env"
 
-sleep 3 # give time for migrations in dev-api to complete
+mkdir -p "$REPO_ROOT/db"
+
 cd "$REPO_ROOT/backend"
 
-exec "$RUN_IN_PYTHON_ENV" arq app.tasks.worker.WorkerSettings
+exec "$RUN_IN_PYTHON_ENV" python -m alembic upgrade head
