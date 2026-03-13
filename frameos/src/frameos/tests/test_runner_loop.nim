@@ -75,3 +75,61 @@ suite "runner loop safety":
     check messageLoop.finished
     check runnerThread.lastRenderAt > 0.0
     check sawRenderEvent
+
+  test "scene init failure does not crash the render loop":
+    let failingSceneId = "test/failing-init".SceneId
+    let previousScene = if exportedScenes.hasKey(failingSceneId): some(exportedScenes[failingSceneId]) else: none(ExportedScene)
+
+    exportedScenes[failingSceneId] = ExportedScene(
+      publicStateFields: @[],
+      persistedStateKeys: @[],
+      init: proc(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persistedState: JsonNode): FrameScene =
+        raise newException(ValueError, "boom"),
+      render: proc(self: FrameScene, context: ExecutionContext): Image =
+        newImage(1, 1),
+      runEvent: proc(self: FrameScene, context: ExecutionContext) =
+        discard
+    )
+
+    defer:
+      if previousScene.isSome:
+        exportedScenes[failingSceneId] = previousScene.get()
+      else:
+        exportedScenes.del(failingSceneId)
+
+    var config = loadConfig()
+    config.controlCode = ControlCode(
+      enabled: false,
+      position: "center",
+      size: 0,
+      padding: 0,
+      offsetY: 0,
+      offsetX: 0,
+      qrCodeColor: parseHtmlColor("#000000"),
+      backgroundColor: parseHtmlColor("#ffffff")
+    )
+
+    let store = LogStore(entries: @[])
+    var runnerThread = RunnerThread(
+      frameConfig: config,
+      scenes: initTable[SceneId, FrameScene](),
+      currentSceneId: failingSceneId,
+      lastRenderAt: 0.0,
+      sleepFuture: none(Future[void]),
+      isRendering: false,
+      triggerRenderNext: false,
+      logger: testLogger(config, store)
+    )
+
+    waitFor runnerThread.startRenderLoop(maxCycles = 1)
+
+    check store.entries.anyIt(
+      it.kind == JObject and
+      it.hasKey("event") and
+      it["event"].getStr() == "render:error:scene:init"
+    )
+    check store.entries.anyIt(
+      it.kind == JObject and
+      it.hasKey("event") and
+      it["event"].getStr() == "render:error:scene:init:nil"
+    )

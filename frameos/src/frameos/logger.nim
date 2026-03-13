@@ -24,6 +24,9 @@ proc logToFile(filename: string, logJson: JsonNode) =
         filename.replace("{date}", now().format("yyyyMMdd"))
       else:
         filename
+      let logDir = parentDir(file)
+      if logDir.len > 0 and logDir != "." and not dirExists(logDir):
+        createDir(logDir)
       logFile = open(file, fmAppend)
       logFile.write(now().format("[yyyy-MM-dd'T'HH:mm:ss]") & " " & $logJson & "\n")
       logFile.close()

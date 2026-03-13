@@ -2,43 +2,107 @@
 # To add a new driver, make an entry in backend/app/models/drivers.py
 
 import pixie
+import std/[os, dynlib, algorithm, strutils]
+import frameos/types
+
 # import inkyPython/inkyPython as inkyDriver
 # import frameBuffer/frameBuffer as frameBufferDriver
 # import waveshare/waveshare as waveshareDriver
 
-import frameos/types
-
 # var inkyDriverInstance: inkyDriver.Driver
 # var frameBufferDriverInstance: frameBufferDriver.Driver
 # var waveshareDriverInstance: waveshareDriver.Driver
+
+var loadedDriverLibraries: seq[LibHandle] = @[]
+
+type
+  DriverInitProc = proc(frameOS: pointer) {.cdecl.}
+  DriverRenderProc = proc(image: pointer) {.cdecl.}
+  DriverToPngProc = proc(rotate: cint): cstring {.cdecl.}
+  DriverSimpleProc = proc() {.cdecl.}
+
+  LoadedDriver = object
+    initProc: DriverInitProc
+    renderProc: DriverRenderProc
+    toPngProc: DriverToPngProc
+    turnOnProc: DriverSimpleProc
+    turnOffProc: DriverSimpleProc
+
+var loadedDrivers: seq[LoadedDriver] = @[]
+
+proc loadDriverModules*() =
+  let modulesDir = getEnv("FRAMEOS_DRIVER_MODULES_DIR", "")
+  if modulesDir.len == 0 or not dirExists(modulesDir):
+    return
+
+  var modulePaths: seq[string] = @[]
+  for kind, path in walkDir(modulesDir):
+    if kind == pcFile and (path.endsWith(".so") or path.endsWith(".dylib") or path.endsWith(".dll")):
+      modulePaths.add(path)
+  modulePaths.sort(system.cmp[string])
+
+  for modulePath in modulePaths:
+    let lib = loadLib(modulePath)
+    if lib.isNil:
+      continue
+
+    let initProc = cast[DriverInitProc](symAddr(lib, "frameosDriverInit"))
+    let renderProc = cast[DriverRenderProc](symAddr(lib, "frameosDriverRender"))
+    let toPngProc = cast[DriverToPngProc](symAddr(lib, "frameosDriverToPng"))
+    let turnOnProc = cast[DriverSimpleProc](symAddr(lib, "frameosDriverTurnOn"))
+    let turnOffProc = cast[DriverSimpleProc](symAddr(lib, "frameosDriverTurnOff"))
+
+    if initProc.isNil and renderProc.isNil and toPngProc.isNil and turnOnProc.isNil and turnOffProc.isNil:
+      unloadLib(lib)
+      continue
+
+    loadedDrivers.add(LoadedDriver(
+      initProc: initProc,
+      renderProc: renderProc,
+      toPngProc: toPngProc,
+      turnOnProc: turnOnProc,
+      turnOffProc: turnOffProc,
+    ))
+    loadedDriverLibraries.add(lib)
 
 # Called before the runner is created
 proc init*(frameOS: FrameOS) =
   # inkyDriverInstance = inkyDriver.init(frameOS)
   # frameBufferDriverInstance = frameBufferDriver.init(frameOS)
   # waveshareDriverInstance = waveshareDriver.init(frameOS)
-  discard
+  for driver in loadedDrivers:
+    if not driver.initProc.isNil:
+      driver.initProc(cast[pointer](frameOS))
 
 # Called after the frame's image is rendered
 proc render*(image: Image) =
   # inkyDriverInstance.render(image)
   # frameBufferDriverInstance.render(image)
   # waveshareDriverInstance.render(image)
-  discard
+  for driver in loadedDrivers:
+    if not driver.renderProc.isNil:
+      driver.renderProc(cast[pointer](image))
 
 # Convert the rendered pixels to a PNG image. For accurate colors on the web.
 proc toPng*(rotate: int): string =
   # return inkyDriverInstance.toPng(rotate)
   # return frameBufferDriverInstance.toPng(rotate)
   # return waveshareDriverInstance.toPng(rotate)
-  discard
+  for driver in loadedDrivers:
+    if not driver.toPngProc.isNil:
+      return $driver.toPngProc(cint(rotate))
+  result = ""
 
 # Turn on the device, if supported
 proc turnOn*() =
   # frameBufferDriverInstance.turnOn()
-  discard
+  for driver in loadedDrivers:
+    if not driver.turnOnProc.isNil:
+      driver.turnOnProc()
 
 # Turn off the device, if supported
 proc turnOff*() =
   # frameBufferDriverInstance.turnOff()
-  discard
+  for driver in loadedDrivers:
+    if not driver.turnOffProc.isNil:
+      driver.turnOffProc()

@@ -3,6 +3,7 @@
 CROSS_OUT ?= build/cross
 
 run: build
+	mkdir -p tmp
 	./build/frameos --verbose
 
 build: apploaders

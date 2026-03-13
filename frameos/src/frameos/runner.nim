@@ -146,6 +146,18 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
       lastSceneId = sceneId
       setLastPublicSceneId(sceneId)
 
+    if currentScene.isNil:
+      let message = "Scene initialization failed."
+      self.logger.log(%*{"event": "render:error:scene:init:nil", "sceneId": sceneId.string, "error": message})
+      setLastImage(renderError(self.frameConfig.renderWidth(), self.frameConfig.renderHeight(), message))
+      triggerServerRender()
+      self.isRendering = false
+      inc cycles
+      if maxCycles > 0 and cycles >= maxCycles:
+        break
+      await sleepAsync(100)
+      continue
+
     currentScene.isRendering = true
     self.triggerRenderNext = false # used to debounce render events received while rendering
 

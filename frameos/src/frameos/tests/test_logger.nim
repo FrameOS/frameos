@@ -28,6 +28,9 @@ suite "Logger Tests":
     if fileExists("test-logger.log"):
       try: removeFile("test-logger.log")
       except: discard
+    if fileExists("tmp/test-logger.log"):
+      try: removeFile("tmp/test-logger.log")
+      except: discard
 
   test "logger is enabled by default":
     let logger = newLogger(testConfig)
@@ -110,3 +113,16 @@ suite "Logger Tests":
       if item[1].hasKey("event") and item[1]["event"].getStr() == "disabledTest":
         anyFromDisabled = true
     doAssert not anyFromDisabled, "We found a log from the disabled period, which should not happen"
+
+  test "logger creates parent directory for file target":
+    testConfig.logToFile = "tmp/test-logger.log"
+
+    let logger = newLogger(testConfig)
+    logger.log(%*{"event": "test-nested", "message": "nested dir write"})
+
+    let wroteExpectedContent = waitFor(proc(): bool =
+      if not fileExists("tmp/test-logger.log"):
+        return false
+      "nested dir write" in readFile("tmp/test-logger.log")
+    )
+    doAssert wroteExpectedContent, "Expected logger to create the parent directory and write the message"

@@ -5,6 +5,7 @@ import frameos/config
 import frameos/logger
 import frameos/metrics
 import frameos/runner
+import frameos/scenes
 import frameos/server
 import frameos/scheduler
 import frameos/types
@@ -72,6 +73,8 @@ proc newFrameOS*(): FrameOS =
       hotspotStatus: HotspotStatus.disabled,
     ),
   )
+  loadSceneModules()
+  drivers.loadDriverModules()
   drivers.init(result)
   result.runner = newRunner(frameConfig)
   result.server = newServer(result)

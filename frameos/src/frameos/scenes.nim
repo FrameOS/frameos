@@ -1,4 +1,5 @@
 import json, pixie, times, options, strformat, strutils, locks, tables, sequtils, os
+import std/[dynlib, algorithm]
 import pixie/fileformats/png
 import scenes/scenes
 import system/scenes as systemScenesRegistry
@@ -12,6 +13,8 @@ const UPLOADED_SCENES_JSON_PATH = &"{SCENE_STATE_JSON_FOLDER}/uploaded.json"
 # All scenes that are compiled into the FrameOS binary
 var sceneRegistryLock: Lock
 initLock(sceneRegistryLock)
+var loadedSceneLibraries: seq[LibHandle] = @[]
+var dynamicSceneNames = initTable[SceneId, string]()
 var systemScenes*: Table[SceneId, ExportedScene] = getSystemScenes()
 var compiledScenes*: Table[SceneId, ExportedScene] = getExportedScenes()
 var interpretedScenes*: Table[SceneId, ExportedInterpretedScene] = getInterpretedScenes()
@@ -28,6 +31,51 @@ for sceneId, scene in compiledScenes:
   registerCompiledScene(sceneId, scene)
 for sceneId, scene in uploadedScenes:
   exportedScenes[sceneId] = scene.ExportedScene
+
+type
+  SceneIdProc = proc(): cstring {.cdecl.}
+  SceneNameProc = proc(): cstring {.cdecl.}
+  SceneExportProc = proc(): pointer {.cdecl.}
+
+proc loadSceneModules*() =
+  withLock sceneRegistryLock:
+    let modulesDir = getEnv("FRAMEOS_SCENE_MODULES_DIR", "")
+    if modulesDir.len == 0 or not dirExists(modulesDir):
+      return
+
+    var modulePaths: seq[string] = @[]
+    for kind, path in walkDir(modulesDir):
+      if kind == pcFile and (path.endsWith(".so") or path.endsWith(".dylib") or path.endsWith(".dll")):
+        modulePaths.add(path)
+    modulePaths.sort(system.cmp[string])
+
+    for modulePath in modulePaths:
+      let lib = loadLib(modulePath)
+      if lib.isNil:
+        continue
+
+      let getSceneId = cast[SceneIdProc](symAddr(lib, "frameosSceneId"))
+      let getSceneName = cast[SceneNameProc](symAddr(lib, "frameosSceneName"))
+      let getSceneExport = cast[SceneExportProc](symAddr(lib, "frameosGetExportedScene"))
+
+      if getSceneId.isNil or getSceneExport.isNil:
+        unloadLib(lib)
+        continue
+
+      let sceneId = SceneId($getSceneId())
+      let scenePtr = getSceneExport()
+      if scenePtr.isNil:
+        unloadLib(lib)
+        continue
+
+      let sceneName = if getSceneName.isNil: "" else: $getSceneName()
+      let exported = cast[ExportedScene](scenePtr)
+      compiledScenes[sceneId] = exported
+      exportedScenes[sceneId] = exported
+      registerCompiledScene(sceneId, exported)
+      if sceneName.len > 0:
+        dynamicSceneNames[sceneId] = sceneName
+      loadedSceneLibraries.add(lib)
 
 proc reloadInterpretedScenes*() =
   withLock sceneRegistryLock:
@@ -63,6 +111,8 @@ proc updateUploadedScenes*(newScenes: Table[SceneId, ExportedInterpretedScene]) 
 
 proc getSceneDisplayName*(sceneId: SceneId): Option[string] =
   withLock sceneRegistryLock:
+    if dynamicSceneNames.hasKey(sceneId):
+      return some(dynamicSceneNames[sceneId])
     for (candidateId, sceneName) in scenes.sceneOptions:
       if candidateId == sceneId and sceneName.len > 0:
         return some(sceneName)
