@@ -12,6 +12,7 @@ jobs:
   update-versions:
     runs-on: ubuntu-latest
     outputs:
+      skip_release: ${{ steps.release-control.outputs.skip_release }}
       versions_changed: ${{ steps.detect.outputs.versions_changed }}
     steps:
       - name: Checkout code
@@ -24,13 +25,30 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Check release skip markers
+        id: release-control
+        env:
+          HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          if printf '%s\n' "$HEAD_COMMIT_MESSAGE" | grep -Eiq '(^|[[:space:]])#norelease([[:space:]]|$)|\[skip release\]'; then
+            echo "skip_release=true" >> "$GITHUB_OUTPUT"
+            echo "Release skipped by commit message marker"
+          else
+            echo "skip_release=false" >> "$GITHUB_OUTPUT"
+            echo "No release skip marker found"
+          fi
+
       - name: Recompute component versions
+        if: steps.release-control.outputs.skip_release != 'true'
         run: python3 tools/update_versions.py
 
       - name: Detect version changes
         id: detect
         run: |
-          if git diff --quiet -- versions.json; then
+          if [ "${{ steps.release-control.outputs.skip_release }}" = "true" ]; then
+            echo "versions_changed=false" >> "$GITHUB_OUTPUT"
+            echo "Release skipped by commit message marker"
+          elif git diff --quiet -- versions.json; then
             echo "versions_changed=false" >> "$GITHUB_OUTPUT"
             echo "No version changes detected"
           else
