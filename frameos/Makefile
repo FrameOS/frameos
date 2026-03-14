@@ -27,33 +27,3 @@ test:
 test-shard:
 	@test -n "$(SHARD)" || (echo "SHARD is required, e.g. make test-shard SHARD=1" >&2; exit 1)
 	bash ./tools/run_test_shard.sh "$(SHARD)"
-
-nix-sdcard:
-	nix --extra-experimental-features 'nix-command flakes' \
-		build .#packages.aarch64-linux.sdImage \
-		--system aarch64-linux \
-		--show-trace
-
-nix-update:
-	nix --extra-experimental-features 'nix-command flakes' \
-		build .#nixosConfigurations."frame-nixtest".config.system.build.toplevel \
-		--system aarch64-linux \
-		--print-out-paths \
-		--show-trace
-
-nix-bin:
-	nix --extra-experimental-features 'nix-command flakes' \
-		build .#packages.aarch64-linux.frameos \
-		--system aarch64-linux \
-		--show-trace \
-		-o tmp/result-frameos
-	install -Dm755 tmp/result-frameos/bin/frameos bin/frameos
-	@echo "✅  Built binary is now at bin/frameos (aarch64, ready for Pi Zero 2 W)"
-
-nix-shell:
-	nix --extra-experimental-features 'nix-command flakes' \
-		develop .#frameos
-
-nix-lock:
-	nix --extra-experimental-features 'nix-command flakes' \
-		run .#nim_lk -- . > lock.json

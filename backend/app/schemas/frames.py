@@ -68,7 +68,6 @@ class FrameBase(BaseModel):
     network: Optional[Dict[str, Any]]
     agent: Optional[Dict[str, Any]]
     palette: Optional[Dict[str, Any]]
-    nix: Optional[Dict[str, Any]] = None
     buildroot: Optional[Dict[str, Any]] = None
     rpios: Optional[Dict[str, Any]] = None
     terminal_history: Optional[List[str]] = None
@@ -83,7 +82,7 @@ class FramesListResponse(BaseModel):
     frames: List[FrameBase]
 
 class FrameCreateRequest(BaseModel):
-    mode: Optional[str] = None
+    mode: Optional[Literal["rpios", "buildroot"]] = None
     name: str
     frame_host: str
     server_host: str
@@ -93,7 +92,7 @@ class FrameCreateRequest(BaseModel):
 
 class FrameUpdateRequest(BaseModel):
     scenes: Optional[List[Any]] = None
-    mode: Optional[str] = None
+    mode: Optional[Literal["rpios", "buildroot"]] = None
     name: Optional[str] = None
     frame_host: Optional[str] = None
     frame_port: Optional[int] = None
@@ -131,7 +130,6 @@ class FrameUpdateRequest(BaseModel):
     network: Optional[Dict[str, Any]] = None
     agent: Optional[Dict[str, Any]] = None
     palette: Optional[Dict[str, Any]] = None
-    nix: Optional[Dict[str, Any]] = None
     buildroot: Optional[Dict[str, Any]] = None
     rpios: Optional[Dict[str, Any]] = None
     terminal_history: Optional[List[str]] = None

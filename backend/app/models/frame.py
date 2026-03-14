@@ -81,7 +81,7 @@ class Frame(Base):
     __tablename__ = 'frame'
     id = mapped_column(Integer, primary_key=True)
     name = mapped_column(String(256), nullable=False)
-    mode = mapped_column(String(32), nullable=True) # rpios, nixos, buildroot
+    mode = mapped_column(String(32), nullable=True) # rpios, buildroot
     # sending commands to frame
     frame_host = mapped_column(String(256), nullable=False)
     frame_port = mapped_column(Integer, default=8787)
@@ -127,7 +127,6 @@ class Frame(Base):
     network = mapped_column(JSON, nullable=True)
     agent = mapped_column(JSON, nullable=True)
     palette = mapped_column(JSON, nullable=True)
-    nix = mapped_column(JSON, nullable=True)
     buildroot = mapped_column(JSON, nullable=True)
     rpios = mapped_column(JSON, nullable=True)
     terminal_history = mapped_column(JSON, nullable=True, default=list)
@@ -183,7 +182,6 @@ class Frame(Base):
             'network': self.network,
             'agent': self.agent,
             'palette': self.palette,
-            'nix': self.nix,
             'buildroot': self.buildroot,
             'rpios': self.rpios,
             'terminal_history': self.terminal_history,
@@ -270,8 +268,7 @@ async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, serve
         },
         control_code={"enabled": "false", "position": "top-right"},
         schedule={"events": []},
-        reboot={"enabled": "true", "crontab": "4 0 * * *"},
-        nix={}
+        reboot={"enabled": "true", "crontab": "4 0 * * *"}
     )
     db.add(frame)
     db.commit()

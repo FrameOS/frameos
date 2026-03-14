@@ -84,3 +84,5 @@ frameos/buildroot/sources
 frameos/buildroot/dl
 build/prebuilt-deps/
 frameos/.nimcache*
+.tmp-cache/
+frameos/.tmp-home/

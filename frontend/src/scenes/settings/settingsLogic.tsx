@@ -23,7 +23,6 @@ function setDefaultSettings(settings: Partial<FrameOSSettings> | Record<string, 
     repositories: settings.repositories ?? [],
     ssh_keys: normalizeSshKeys(settings.ssh_keys),
     unsplash: settings.unsplash ?? {},
-    nix: settings.nix ?? {},
     buildHost: settings.buildHost ?? {},
   }
 }
@@ -45,7 +44,6 @@ export const settingsLogic = kea<settingsLogicType>([
     setSshKeyExpandedIds: (ids: string[]) => ({ ids }),
     setSshKeyExpanded: (id: string, expanded: boolean) => ({ id, expanded }),
     toggleSshKeyExpanded: (id: string) => ({ id }),
-    newNixKey: true,
     newBuildHostKey: true,
     setGeneratingSshKeyId: (id: string | null) => ({ id }),
     setIsGeneratingEmbeddings: (isGenerating: boolean) => ({ isGenerating }),
@@ -376,27 +374,6 @@ export const settingsLogic = kea<settingsLogicType>([
         keys.filter((key) => key.id !== id)
       )
       actions.setSshKeyExpanded(id, false)
-    },
-    newNixKey: async () => {
-      if (values.savedSettings.nix?.buildServerPrivateKey) {
-        if (
-          !confirm('Are you sure you want to generate a new key? You might lose access to the existing build server.')
-        ) {
-          return
-        }
-      }
-      const response = await apiFetch(`/api/generate_ssh_keys`, {
-        method: 'POST',
-      })
-      if (!response.ok) {
-        throw new Error('Failed to generate new key')
-      }
-      const data = await response.json()
-      actions.setSettingsValue(['nix', 'buildServerPrivateKey'], data.private)
-      actions.setSettingsValue(
-        ['nix', 'buildServerPublicKey'],
-        `${data.public} frameos-build@${window.location.hostname}`
-      )
     },
     newBuildHostKey: async () => {
       if (values.savedSettings.buildHost?.sshKey) {

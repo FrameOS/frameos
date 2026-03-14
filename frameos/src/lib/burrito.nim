@@ -1,6 +1,6 @@
 # FrameOS notice!
 # This file is copied from https://github.com/tapsterbot/burrito/blob/main/src/burrito/qjs.nim
-# Burrito is not a nimble package, and I couldn't get the NixOS build to work with all the workarounds.
+# Burrito is not a nimble package, and the packaged build path was more trouble than it was worth here.
 # I'm happy to work with upstream and change it to a dependency in the future, but I inlined it now to move fast.
 # Thanks for all the hard work!
 #

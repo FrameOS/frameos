@@ -149,13 +149,11 @@ def _cache_paths() -> Iterable[tuple[str, Path]]:
     cross_cache = Path(os.environ.get(CROSS_CACHE_ENV, DEFAULT_CROSS_CACHE)).expanduser()
     docker_root = Path(os.environ.get("DOCKER_DATA_ROOT", "/var/lib/docker")).expanduser()
     frameos_cache = (Path.home() / ".cache" / "frameos").expanduser()
-    nix_store = Path("/nix/store")
 
     return (
         ("Cross-compilation", cross_cache),
         ("Docker", docker_root),
         ("FrameOS cache", frameos_cache),
-        ("Nix store", nix_store),
     )
 
 

@@ -145,8 +145,6 @@ def _sanitize_scene_state_filename(scene_id: str) -> str:
 
 
 def _frame_state_dir(frame: Frame) -> str:
-    if frame.mode == "nixos":
-        return "/var/lib/frameos/state"
     return "/srv/frameos/state"
 
 
@@ -1459,46 +1457,6 @@ async def api_frame_clear_build_cache(
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@api_with_auth.post("/frames/{id:int}/nix_collect_garbage_frame")
-async def api_frame_nix_collect_garbage_frame(
-    id: int, redis: Redis = Depends(get_redis), db: Session = Depends(get_db)
-):
-    frame = db.get(Frame, id)
-    if frame is None:
-        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
-
-    if await _use_agent(frame, redis):
-        try:
-            await log( db, redis, id, "stdout", "> nix-collect-garbage")
-            await exec_shell_on_frame(frame.id, "nix-collect-garbage")
-            return {"message": "Garbage collected"}
-        except Exception as e:
-            raise HTTPException(
-                status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e)
-            )
-    try:
-        ssh = await get_ssh_connection(db, redis, frame)
-        try:
-            await exec_command(db, redis, frame, ssh, "nix-collect-garbage")
-        finally:
-            await remove_ssh_connection(db, redis, ssh, frame)
-        return {"message": "Garbage collected"}
-    except Exception as e:
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
-
-@api_with_auth.post("/frames/{id:int}/nix_collect_garbage_backend")
-async def api_frame_nix_collect_garbage_backend(
-    id: int, redis: Redis = Depends(get_redis), db: Session = Depends(get_db)
-):
-    cmd = 'nix-collect-garbage'
-    frame = db.get(Frame, id)
-    if frame is None:
-        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
-
-    await exec_local_command(db, redis, frame, cmd)
-    return {"message": "Garbage collected"}
-
-
 @api_with_auth.post("/frames/{id:int}/reset")
 async def api_frame_reset_event(id: int, redis: Redis = Depends(get_redis)):
     try:
@@ -1561,59 +1519,6 @@ async def api_frame_stop_event(id: int, redis: Redis = Depends(get_redis)):
 
         await stop_frame(id, redis)
         return "Success"
-    except Exception as e:
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
-
-@api_with_auth.post("/frames/{id:int}/build_sd_image")
-async def api_frame_build_sd_image_event(id: int, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)):
-    try:
-        from app.tasks.build_sd_card_image import build_sd_card_image_task
-
-        try:
-            img_path = await build_sd_card_image_task({"db": db, "redis": redis}, id=id)
-        except Exception as exc:
-            raise HTTPException(
-                status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(exc)
-            )
-
-        if not img_path.exists():
-            raise HTTPException(status_code=500, detail="Image build failed")
-
-        async def sender():
-            try:
-                async with aiofiles.open(img_path, "rb") as fh:
-                    while chunk := await fh.read(64 << 14):   # 1 MiB chunks
-                        yield chunk
-            finally:
-                # do not remove the file, as it won't rebuild next time
-                pass
-
-        frame = db.get(Frame, id)
-        if not frame:
-            raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
-        base_name = frame.name or f"frame{frame.id}"
-        sanitized = "".join(c if c.isalnum() or c in "-._" else "_" for c in base_name).strip("._-") or f"frame{frame.id}"
-        suffix = "".join(img_path.suffixes) or img_path.suffix or ".img"
-        filename = f"{sanitized}{suffix}"
-        quoted_filename = quote(filename)
-
-        mime, _ = mimetypes.guess_type(str(img_path))
-        if not mime and img_path.suffixes:
-            last_suffix = img_path.suffixes[-1]
-            if last_suffix == ".zst":
-                mime = "application/zstd"
-            elif last_suffix == ".gz":
-                mime = "application/gzip"
-            elif last_suffix == ".xz":
-                mime = "application/x-xz"
-            elif last_suffix == ".zip":
-                mime = "application/zip"
-
-        headers = {
-            "Content-Disposition": f"attachment; filename=\"{filename}\"; filename*=UTF-8''{quoted_filename}",
-            "Content-Length": str(img_path.stat().st_size),
-        }
-        return StreamingResponse(sender(), headers=headers, media_type=mime or "application/octet-stream")
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
@@ -1716,7 +1621,7 @@ async def api_frame_update_endpoint(
                 status_code=400, detail="Invalid input for scenes (must be JSON)"
             )
 
-    old_mode = data.mode
+    old_mode = frame.mode
     for field, value in update_data.items():
         setattr(frame, field, value)
 
@@ -1724,12 +1629,10 @@ async def api_frame_update_endpoint(
         frame.https_proxy = normalize_https_proxy(frame.https_proxy)
         refresh_tls_certificate_validity_dates(frame)
 
-    if data.mode == "nixos" and old_mode == "rpios":
-        if frame.ssh_user == "pi":
-            frame.ssh_user = "frame"
-    elif data.mode == "rpios" and old_mode == "nixos":
-        if frame.ssh_user == "frame":
-            frame.ssh_user = "pi"
+    if data.mode == "buildroot" and old_mode != "buildroot" and frame.ssh_user == "pi":
+        frame.ssh_user = "root"
+    elif data.mode == "rpios" and old_mode == "buildroot" and frame.ssh_user == "root":
+        frame.ssh_user = "pi"
 
     await update_frame(db, redis, frame)
 
@@ -1800,33 +1703,8 @@ async def api_frame_new(
 
         frame.ssh_keys = default_ssh_key_ids(settings) or None
 
-        frame.mode = data.mode
-        if frame.mode == "nixos":
-            frame.ssh_user = 'frame'
-            frame.network = {} # mark as changed for the orm
-            frame.network['wifiHotspot'] = 'bootOnly'
-            frame.agent = {} # mark as changed for the orm
-            frame.agent['agentEnabled'] = False
-            frame.agent['agentRunCommands'] = True
-            platform = data.platform or (frame.nix or {}).get('platform') or 'pi-zero2'
-            if timezone := settings.get('defaults', {}).get('timezone'):
-                frame.nix = {} # mark as changed for the orm
-                frame.nix['timezone'] = timezone
-            else:
-                frame.nix = frame.nix or {}
-            if wifi_ssid := settings.get('defaults', {}).get('wifiSSID'):
-                frame.network['wifiSSID'] = wifi_ssid
-            if wifi_password := settings.get('defaults', {}).get('wifiPassword'):
-                frame.network['wifiPassword'] = wifi_password
-            db.add(frame)
-            db.commit()
-            db.refresh(frame)
-            frame.nix = { **frame.nix, 'hostname': f'frame{frame.id}', 'platform': platform }
-            frame.frame_host = f'frame{frame.id}.local'
-            db.add(frame)
-            db.commit()
-            db.refresh(frame)
-        elif frame.mode == "buildroot":
+        frame.mode = data.mode or "rpios"
+        if frame.mode == "buildroot":
             frame.ssh_user = 'root'
             selected_platform = (data.platform or (frame.buildroot or {}).get('platform') or '').strip()
             buildroot_settings = {**(frame.buildroot or {})}
@@ -1840,7 +1718,7 @@ async def api_frame_new(
             db.add(frame)
             db.commit()
             db.refresh(frame)
-        elif frame.mode == "rpios":
+        else:
             rpios_settings = {**(frame.rpios or {})}
             rpios_settings["platform"] = data.platform or (frame.rpios or {}).get('platform') or ''
             frame.rpios = rpios_settings

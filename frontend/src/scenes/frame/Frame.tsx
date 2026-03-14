@@ -7,11 +7,8 @@ import { Header } from '../../components/Header'
 import { Panels } from './panels/Panels'
 import { DropdownMenu } from '../../components/DropdownMenu'
 import { panelsLogic } from './panels/panelsLogic'
-import { luckfoxBuildrootPlatformValues } from '../../devices'
 import { assetsLogic } from './panels/Assets/assetsLogic'
 import { FrameConnection } from '../frames/Frame'
-import { sdCardModalLogic } from './sdcard/sdCardModalLogic'
-import { SDCardModal } from './sdcard/SDCardModal'
 import { terminalLogic } from './panels/Terminal/terminalLogic'
 import { Switch } from '../../components/Switch'
 import { Form } from 'kea-forms'
@@ -54,7 +51,6 @@ export function Frame(props: FrameSceneProps) {
     resetUnsavedChanges,
     resetUndeployedChanges,
   } = useActions(frameLogic(frameLogicProps))
-  const { openSDCardModal } = useActions(sdCardModalLogic(frameLogicProps))
   useMountedLogic(assetsLogic(frameLogicProps)) // Don't lose what we downloaded when navigating away from the tab
   useMountedLogic(terminalLogic(frameLogicProps))
   useMountedLogic(frameSettingsLogic(frameLogicProps))
@@ -65,9 +61,6 @@ export function Frame(props: FrameSceneProps) {
   const canRestartAgent = frame?.agent && frame.agent.agentEnabled && frame.agent.agentSharedSecret
   const canAgentRunCommands =
     frame?.agent && frame.agent.agentEnabled && frame.agent.agentSharedSecret && frame.agent.agentRunCommands
-  // TODO
-  const firstEverForNixOS = false && frame.mode === 'nixos' && frame.status === 'uninitialized'
-  const canBuildSdImage = mode === 'nixos' || mode === 'buildroot'
   const frameControlMode = isFrameControlMode()
   const inFrameAdminMode = isInFrameAdminMode()
 
@@ -79,7 +72,6 @@ export function Frame(props: FrameSceneProps) {
   const dropdownItems = inFrameAdminMode
     ? [{ label: 'Logout', onClick: logoutFromFrame }]
     : [
-        ...(canBuildSdImage ? [{ label: 'Build SD card...', onClick: () => openSDCardModal() }] : []),
         { label: 'Re-Render', onClick: () => renderFrame() },
         { label: 'Restart FrameOS', onClick: () => restartFrame() },
         { label: 'Stop FrameOS', onClick: () => stopFrame() },
@@ -270,17 +262,7 @@ export function Frame(props: FrameSceneProps) {
                     <Button color={unsavedChanges ? 'primary' : 'secondary'} type="button" onClick={() => saveFrame()}>
                       Save
                     </Button>
-                    {firstEverForNixOS ? (
-                      <Button
-                        color="primary"
-                        type="button"
-                        onClick={() => {
-                          openSDCardModal()
-                        }}
-                      >
-                        Download SD card .img
-                      </Button>
-                    ) : frameControlMode ? (
+                    {frameControlMode ? (
                       <Button
                         color={unsavedChanges || undeployedChanges ? 'primary' : 'secondary'}
                         type="button"
@@ -309,7 +291,6 @@ export function Frame(props: FrameSceneProps) {
                     )}
                   </div>
                 )}
-                <SDCardModal />
               </div>
             }
           />

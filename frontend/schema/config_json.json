@@ -43,13 +43,6 @@
           "description": "Name for this app",
           "type": "string"
         },
-        "nixpkgs": {
-          "description": "List of nix packages to install (mode=nixos)",
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
         "output": {
           "description": "Returned fields",
           "items": {

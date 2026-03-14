@@ -181,7 +181,7 @@ proc masked*(s: string; keep: int = 2): string =
 proc syncClock*() =
   ## Tries the best available tool on the current distro.
   try:
-    # NixOS & any systemd host: systemd‑timesyncd one‑shot
+    # Any systemd host: systemd-timesyncd one-shot
     if fileExists("/run/systemd/system"):
       discard execShellCmd("sudo systemctl restart systemd-timesyncd.service")
     # Classic Debian / Raspberry Pi OS: one‑shot ntpd
