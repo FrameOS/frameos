@@ -5,6 +5,7 @@ import re
 import shlex
 import tarfile
 import tempfile
+from typing import Any
 
 
 from arq import ArqRedis as Redis

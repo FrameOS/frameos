@@ -59,7 +59,7 @@ on-activate = '''
   IFS="$old_ifs"
 
   unset NVM_BIN NVM_INC
-  export PATH="$FLOX_ENV/bin:$VIRTUAL_ENV/bin${cleaned_path:+:$cleaned_path}"
+  export PATH="$VIRTUAL_ENV/bin:$FLOX_ENV/bin${cleaned_path:+:$cleaned_path}"
 
   mkdir -p "$FRAMEOS_FLOX_CACHE_DIR" "$FRAMEOS_FLOX_REDIS_DIR"
 
@@ -126,6 +126,52 @@ on-activate = '''
 '''
 
 [profile]
+bash = '''
+  # Rebuild PATH so the repo venv wins over Flox's base Python.
+  nvm_dir="${NVM_DIR:-$HOME/.nvm}"
+  cleaned_path=""
+  old_ifs=$IFS
+  IFS=:
+  for path_entry in $PATH; do
+    case "$path_entry" in
+      "$FLOX_ENV/bin"|"$FLOX_ENV/sbin"|"$VIRTUAL_ENV/bin"|"$nvm_dir"/*/bin|"${NVM_BIN:-__frameos_no_nvm_bin__}")
+        continue
+        ;;
+      *)
+        cleaned_path="${cleaned_path:+$cleaned_path:}$path_entry"
+        ;;
+    esac
+  done
+  IFS="$old_ifs"
+
+  unset NVM_BIN NVM_INC
+  export PATH="$VIRTUAL_ENV/bin:$FLOX_ENV/bin:$FLOX_ENV/sbin${cleaned_path:+:$cleaned_path}"
+  hash -r 2>/dev/null || true
+'''
+
+zsh = '''
+  # Rebuild PATH so the repo venv wins over Flox's base Python.
+  nvm_dir="${NVM_DIR:-$HOME/.nvm}"
+  cleaned_path=""
+  old_ifs=$IFS
+  IFS=:
+  for path_entry in $PATH; do
+    case "$path_entry" in
+      "$FLOX_ENV/bin"|"$FLOX_ENV/sbin"|"$VIRTUAL_ENV/bin"|"$nvm_dir"/*/bin|"${NVM_BIN:-__frameos_no_nvm_bin__}")
+        continue
+        ;;
+      *)
+        cleaned_path="${cleaned_path:+$cleaned_path:}$path_entry"
+        ;;
+    esac
+  done
+  IFS="$old_ifs"
+
+  unset NVM_BIN NVM_INC
+  export PATH="$VIRTUAL_ENV/bin:$FLOX_ENV/bin:$FLOX_ENV/sbin${cleaned_path:+:$cleaned_path}"
+  hash -r 2>/dev/null || true
+'''
+
 fish = '''
   set -e NVM_BIN NVM_INC NVM_HAS_RUN
 
@@ -156,7 +202,7 @@ fish = '''
     set cleaned_path $cleaned_path $path_entry
   end
 
-  set -gx PATH "$FLOX_ENV/bin" "$VIRTUAL_ENV/bin" "$FLOX_ENV/sbin" $cleaned_path
+  set -gx PATH "$VIRTUAL_ENV/bin" "$FLOX_ENV/bin" "$FLOX_ENV/sbin" $cleaned_path
 '''
 
 [services.redis]
