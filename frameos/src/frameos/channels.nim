@@ -26,6 +26,7 @@ logBroadcastChannel.open(5000)
 
 proc log*(event: JsonNode) =
   let payload = (epochTime(), event)
+  echo payload
   logChannel.send(payload)
   discard logBroadcastChannel.trySend(payload)
 
