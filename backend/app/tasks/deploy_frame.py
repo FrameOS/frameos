@@ -22,7 +22,13 @@ from app.utils.ssh_key_utils import normalize_ssh_keys, select_ssh_keys_for_fram
 from app.utils.cross_compile import TargetMetadata
 from app.utils.versions import current_frameos_version
 from app.tasks._frame_deployer import FrameDeployer
-from app.tasks.binary_builder import FrameBinaryBuilder
+from app.tasks.binary_builder import FrameBinaryBuilder, resolve_prebuilt_entry
+from app.tasks.compile_manifest import (
+    SMART_DEPLOY,
+    build_compile_manifest,
+    compile_manifest_from_dict,
+    plan_compile_actions,
+)
 
 from .utils import find_nim_v2
 
@@ -471,54 +477,82 @@ async def _upload_local_compiled_scenes(
     )
 
 
-async def _link_remote_quickjs(
-    deployer: FrameDeployer,
-    remote_build_root: str,
-    quickjs_dirname: str | None = None,
-) -> None:
-    quoted_remote_quickjs = shlex.quote(f"{remote_build_root}/quickjs")
-    if quickjs_dirname:
-        quoted_vendor_quickjs = shlex.quote(f"/srv/frameos/vendor/quickjs/{quickjs_dirname}")
-        await deployer.exec_command(
-            f"rm -rf {quoted_remote_quickjs} && ln -s {quoted_vendor_quickjs} {quoted_remote_quickjs}"
-        )
-        return
-
-    await deployer.exec_command(
-        "QUICKJS_DIR=$(ls -dt /srv/frameos/vendor/quickjs/quickjs-* 2>/dev/null | head -n1) && "
-        'if [ -z "$QUICKJS_DIR" ]; then '
-        'echo "QuickJS vendor directory missing; run a full deploy first." >&2; '
-        "exit 1; "
-        "fi && "
-        f"rm -rf {quoted_remote_quickjs} && "
-        f'ln -s "$QUICKJS_DIR" {quoted_remote_quickjs}'
-    )
-
-
 async def _build_remote_compiled_scenes(
     deployer: FrameDeployer,
     remote_build_root: str,
-    quickjs_dirname: str | None = None,
+    scene_build_dirs: list[str] | None = None,
 ) -> None:
     await deployer.log("stdout", f"{icon} Building compiled scene plugins on remote")
-    await _link_remote_quickjs(deployer, remote_build_root, quickjs_dirname)
-    await deployer.exec_command(
-        f"cd {shlex.quote(remote_build_root)} && make compiled-scenes",
-        timeout=3600,
-    )
+    if scene_build_dirs:
+        quoted_dirs = " ".join(shlex.quote(scene_dir) for scene_dir in scene_build_dirs)
+        await deployer.exec_command(
+            "bash -lc "
+            + shlex.quote(
+                f"cd {remote_build_root} && mkdir -p scenes && "
+                f"for dir in {quoted_dirs}; do make --no-print-directory -C \"$dir\" || exit $?; done"
+            ),
+            timeout=3600,
+        )
+        return
+    await deployer.exec_command(f"cd {shlex.quote(remote_build_root)} && make compiled-scenes", timeout=3600)
 
 
 async def _publish_remote_compiled_scenes(
     deployer: FrameDeployer,
     remote_build_root: str,
     remote_scenes_dir: str,
+    replace: bool = True,
 ) -> None:
     quoted_build_scenes_dir = shlex.quote(f"{remote_build_root}/scenes")
     quoted_scenes_dir = shlex.quote(remote_scenes_dir)
-    await deployer.exec_command(f"rm -rf {quoted_scenes_dir} && mkdir -p {quoted_scenes_dir}")
+    if replace:
+        await deployer.exec_command(f"rm -rf {quoted_scenes_dir} && mkdir -p {quoted_scenes_dir}")
+    else:
+        await deployer.exec_command(f"mkdir -p {quoted_scenes_dir}")
     await deployer.exec_command(
         f"if [ -d {quoted_build_scenes_dir} ]; then cp -R {quoted_build_scenes_dir}/. {quoted_scenes_dir}/; fi"
     )
+
+
+async def _build_remote_frameos_binary(
+    deployer: FrameDeployer,
+    remote_build_root: str,
+    quickjs_dirname: str | None = None,
+) -> None:
+    if quickjs_dirname:
+        await deployer.exec_command(
+            f"ln -s /srv/frameos/vendor/quickjs/{quickjs_dirname} {shlex.quote(remote_build_root)}/quickjs"
+        )
+    await deployer.exec_command(
+        f"cd {shlex.quote(remote_build_root)} && "
+        "PARALLEL_MEM=$(awk '/MemTotal/{printf \"%.0f\\n\", $2/1024/250}' /proc/meminfo) && "
+        "PARALLEL=$(($PARALLEL_MEM < $(nproc) ? $PARALLEL_MEM : $(nproc))) && "
+        "make -j$PARALLEL frameos",
+        timeout=3600,
+    )
+
+
+async def _copy_current_binary_to_release(
+    deployer: FrameDeployer,
+    release_frameos_path: str,
+) -> None:
+    await deployer.exec_command(
+        f"cp /srv/frameos/current/frameos {shlex.quote(release_frameos_path)}"
+    )
+
+
+async def _copy_current_compiled_scenes_to_release(
+    deployer: FrameDeployer,
+    release_scenes_path: str,
+    libraries: list[str],
+) -> None:
+    await deployer.exec_command(f"mkdir -p {shlex.quote(release_scenes_path)}")
+    for library in libraries:
+        source_path = shlex.quote(f"/srv/frameos/current/scenes/{library}")
+        target_path = shlex.quote(f"{release_scenes_path}/{library}")
+        await deployer.exec_command(
+            f"cp {source_path} {target_path}"
+        )
 
 async def deploy_frame(id: int, redis: Redis):
     await redis.enqueue_job("deploy_frame", id=id)
@@ -610,24 +644,76 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                 deployer=self,
                 temp_dir=temp_dir,
             )
-            build_result = await builder.build(
-                allow_cross_compile=allow_cross_compile,
-                force_cross_compile=force_cross_compile,
-                target_override=TargetMetadata(arch=arch, distro=distro, version=distro_version),
+            target = await builder.detect_target(
+                TargetMetadata(arch=arch, distro=distro, version=distro_version)
+            )
+            prebuilt_entry, prebuilt_target = await resolve_prebuilt_entry(
+                distro=target.distro,
+                distro_version=target.version,
+                arch=target.arch,
+                logger=builder._log,
+            )
+            source_dir = await builder.prepare_source_dir()
+            compile_manifest = build_compile_manifest(
+                source_dir=source_dir,
+                scenes=frame.scenes,
+                frameos_version=current_frameos_version(),
+            )
+            previous_manifest = compile_manifest_from_dict(
+                (frame.last_successful_deploy or {}).get("compile_manifest")
+            )
+            compile_plan = plan_compile_actions(
+                mode=SMART_DEPLOY,
+                previous=previous_manifest,
+                current=compile_manifest,
             )
 
-            prebuilt_entry = build_result.prebuilt_entry
-            archive_path = build_result.archive_path
-            build_dir = build_result.build_dir
-            cross_compiled = build_result.cross_compiled
-            cross_compiled_binary = build_result.binary_path
-            compiled_scenes_present = _local_build_has_compiled_scenes(build_dir)
-            local_compiled_scenes_dir = _local_compiled_scene_artifact_dir(build_dir)
-            remote_scene_build_required = compiled_scenes_present and local_compiled_scenes_dir is None
+            await self.log("stdout", f"{icon} Smart deploy plan: {compile_plan.reason}")
+            if compile_plan.rebuild_app:
+                await self.log("stdout", f"{icon} Rebuilding FrameOS binary")
+            else:
+                await self.log("stdout", f"{icon} Reusing current FrameOS binary")
 
-            if low_memory and not cross_compiled:
-                await self.log("stdout", f"{icon} Low memory device, stopping FrameOS for compilation")
-                await self.exec_command("sudo service frameos stop", raise_on_error=False)
+            if compile_plan.rebuild_scene_ids:
+                await self.log(
+                    "stdout",
+                    f"{icon} Rebuilding compiled scenes: {', '.join(compile_plan.rebuild_scene_ids)}",
+                )
+            elif compile_plan.reuse_scene_ids:
+                await self.log("stdout", f"{icon} Reusing all compiled scene plugins")
+
+            build_dir: str | None = None
+            archive_path: str | None = None
+            cross_compiled = False
+            cross_compiled_binary: str | None = None
+            local_compiled_scenes_dir: str | None = None
+            remote_scene_build_required = False
+
+            if compile_plan.needs_compilation:
+                build_dir, archive_path = await builder.prepare_build_archive(
+                    source_dir=source_dir,
+                    arch=target.arch,
+                )
+                requested = await builder.build_requested_artifacts(
+                    source_dir=source_dir,
+                    build_dir=build_dir,
+                    target=target,
+                    prebuilt_entry=prebuilt_entry,
+                    prebuilt_target=prebuilt_target,
+                    allow_cross_compile=allow_cross_compile,
+                    force_cross_compile=force_cross_compile,
+                    build_binary=compile_plan.rebuild_app,
+                    build_scene_dirs=compile_plan.scene_build_dirs or None,
+                    build_all_scenes=bool(compile_plan.rebuild_scene_ids) and compile_plan.rebuild_all_scenes,
+                )
+                cross_compiled = requested.cross_compiled
+                cross_compiled_binary = requested.artifacts.binary_path
+                local_compiled_scenes_dir = requested.artifacts.scenes_dir
+                remote_scene_build_required = bool(compile_plan.rebuild_scene_ids) and local_compiled_scenes_dir is None
+
+                if low_memory and not cross_compiled:
+                    await self.log("stdout", f"{icon} Low memory device, stopping FrameOS for compilation")
+                    await self.exec_command("sudo service frameos stop", raise_on_error=False)
 
             # 2. Remote steps
             await self.log("stdout", f"{icon} Installing dependencies on remote")
@@ -663,49 +749,58 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             release_scenes_path = f"/srv/frameos/releases/release_{build_id}/scenes"
             remote_build_root: str | None = None
 
-            if not cross_compiled or remote_scene_build_required:
+            if archive_path and (not cross_compiled or remote_scene_build_required):
                 remote_build_root = await _upload_remote_build_archive(self, archive_path, build_id)
 
-            if cross_compiled:
+            if compile_plan.rebuild_app and cross_compiled:
                 await self.log("stdout", f"{icon} Using cross-compiled binary")
                 if not cross_compiled_binary:
                     raise RuntimeError("Cross compilation succeeded but binary path is unknown")
                 await _upload_binary(self, cross_compiled_binary, release_frameos_path)
-                if remote_scene_build_required and remote_build_root:
-                    await _build_remote_compiled_scenes(self, remote_build_root, quickjs_dirname)
-            else:
+            elif compile_plan.rebuild_app:
                 await self.log("stdout", f"{icon} Building FrameOS on remote, no cross-compilation")
                 if not remote_build_root:
                     raise RuntimeError("Remote build root missing for on-device build")
-                if quickjs_dirname:
-                    await self.exec_command(
-                        f"ln -s /srv/frameos/vendor/quickjs/{quickjs_dirname} /srv/frameos/build/build_{build_id}/quickjs",
-                    )
-                    await self.exec_command(
-                        f"cd /srv/frameos/build/build_{build_id} && "
-                        "PARALLEL_MEM=$(awk '/MemTotal/{printf \"%.0f\\n\", $2/1024/250}' /proc/meminfo) && "
-                        "PARALLEL=$(($PARALLEL_MEM < $(nproc) ? $PARALLEL_MEM : $(nproc))) && "
-                        "make -j$PARALLEL",
-                        timeout=3600, # 30 minute timeout for compilation
-                    )
+                await _build_remote_frameos_binary(self, remote_build_root, quickjs_dirname)
                 await self.exec_command(
-                    f"cp /srv/frameos/build/build_{build_id}/frameos "
-                    f"{release_frameos_path}"
+                    f"cp {shlex.quote(remote_build_root)}/frameos {shlex.quote(release_frameos_path)}"
                 )
+            else:
+                await _copy_current_binary_to_release(self, release_frameos_path)
 
             # 4. Upload scenes.json.gz and frame.json
             await self._upload_scenes_json(f"/srv/frameos/releases/release_{build_id}/scenes.json.gz", gzip=True)
             await self._upload_frame_json(f"/srv/frameos/releases/release_{build_id}/frame.json")
             await self.exec_command(f"mkdir -p {shlex.quote(release_scenes_path)}")
-            if local_compiled_scenes_dir:
+            reused_scene_libraries = [
+                compile_manifest.scene_hashes[scene_id].library for scene_id in compile_plan.reuse_scene_ids
+            ]
+            if reused_scene_libraries:
+                await _copy_current_compiled_scenes_to_release(
+                    self,
+                    release_scenes_path,
+                    reused_scene_libraries,
+                )
+
+            if compile_plan.rebuild_scene_ids and local_compiled_scenes_dir:
                 await _upload_local_compiled_scenes(
                     self,
                     local_compiled_scenes_dir,
                     release_scenes_path,
                     build_id,
                 )
-            elif remote_scene_build_required and remote_build_root:
-                await _publish_remote_compiled_scenes(self, remote_build_root, release_scenes_path)
+            elif compile_plan.rebuild_scene_ids and remote_scene_build_required and remote_build_root:
+                await _build_remote_compiled_scenes(
+                    self,
+                    remote_build_root,
+                    scene_build_dirs=compile_plan.scene_build_dirs,
+                )
+                await _publish_remote_compiled_scenes(
+                    self,
+                    remote_build_root,
+                    release_scenes_path,
+                    replace=False,
+                )
 
             # Driver-specific vendor steps
             if inkyPython := drivers.get("inkyPython"):
@@ -859,6 +954,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
 
         frame.status = 'starting'
         frame_dict['frameos_version'] = current_frameos_version()
+        frame_dict["compile_manifest"] = compile_manifest.to_dict()
         frame.last_successful_deploy = frame_dict
         frame.last_successful_deploy_at = datetime.now(timezone.utc)
 

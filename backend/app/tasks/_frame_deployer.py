@@ -89,6 +89,15 @@ class FrameDeployer:
                     flags.append(flag)
         return flags
 
+    @staticmethod
+    def _compiled_scene_linker_flags(flags: Iterable[str]) -> list[str]:
+        # Compiled scene plugins do not embed the QuickJS runtime.
+        return FrameDeployer._dedupe_preserve_order(
+            flag.strip()
+            for flag in flags
+            if flag.strip() and "quickjs" not in flag
+        )
+
     async def _upload_frame_json(self, path: str) -> None:
         """Upload the release-specific `frame.json`."""
         json_data = json.dumps(get_frame_json(self.db, self.frame), indent=4).encode() + b"\n"
@@ -226,17 +235,41 @@ class FrameDeployer:
             lines_sc = sc.readlines()
 
         for line in lines_sc:
-            if f" -o {output_name} " in line:
-                linker_flags = [
-                    fl.strip() for fl in line.split(" ")
-                    if fl.startswith("-") and fl != "-o"
-                ]
-            elif " -c " in line and not compiler_flags:
+            tokens = shlex.split(line.strip())
+            if not tokens:
+                continue
+
+            if "-o" in tokens:
+                out_index = tokens.index("-o")
+                if out_index + 1 < len(tokens) and os.path.basename(tokens[out_index + 1]) == output_name:
+                    parsed_linker_flags: list[str] = []
+                    skip_next = False
+                    for token in tokens[1:]:
+                        if skip_next:
+                            skip_next = False
+                            continue
+                        if token == "-o":
+                            skip_next = True
+                            continue
+                        if token.startswith("@") or token.endswith((".o", ".obj", ".c", ".cc", ".cpp", ".cxx")):
+                            continue
+                        if (
+                            token.startswith("-")
+                            or token.endswith(".a")
+                            or token.endswith(".so")
+                            or ".so." in token
+                        ):
+                            parsed_linker_flags.append(token)
+                    if parsed_linker_flags:
+                        linker_flags = parsed_linker_flags
+                    continue
+
+            if "-c" in tokens and not compiler_flags:
                 compiler_flags = [
-                    fl for fl in line.split(" ")
-                    if fl.startswith("-")
-                    and not fl.startswith("-I")
-                    and fl not in ["-o", "-c", "-D"]
+                    token for token in tokens
+                    if token.startswith("-")
+                    and not token.startswith("-I")
+                    and token not in ["-o", "-c", "-D"]
                 ]
         return compiler_flags, linker_flags
 
@@ -255,11 +288,11 @@ class FrameDeployer:
 
         with open(target_path, "w") as mk:
             for ln in lines_make:
-                if ln.startswith("EXECUTABLE = "):
+                if ln.startswith("EXECUTABLE ="):
                     ln = f"EXECUTABLE = {executable}\n"
-                elif ln.startswith("LIBS = "):
+                elif ln.startswith("LIBS ="):
                     ln = "LIBS = -L. " + " ".join(linker_flags) + " $(EXTRA_LIBS)\n"
-                elif ln.startswith("CFLAGS = "):
+                elif ln.startswith("CFLAGS ="):
                     ln = (
                         "CFLAGS = "
                         + " ".join([f for f in compiler_flags if f != "-c"])
@@ -334,6 +367,7 @@ class FrameDeployer:
                 script_candidates[0],
                 output_name=library_name,
             )
+            linker_flags = self._compiled_scene_linker_flags(linker_flags)
             self._write_c_build_makefile(
                 source_dir=source_dir,
                 target_path=os.path.join(plugin_build_dir, "Makefile"),

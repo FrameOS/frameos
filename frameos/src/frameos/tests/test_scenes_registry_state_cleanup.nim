@@ -139,3 +139,16 @@ suite "scene registry and cleanup helpers":
 
     check fileExists(uploadedKeepPath)
     check not fileExists(uploadedOrphanPath)
+
+  test "compiled scene reload removes copied temp libraries after failed load":
+    let sourcePath = getTempDir() / "frameos-invalid-plugin.so"
+    let copiedCounter = getCompiledSceneLoadCounterForTest() + 1
+    let copiedPath = getTempDir() / ("frameos-scene-" & $copiedCounter & "-" & extractFilename(sourcePath))
+    writeFile(sourcePath, "not a shared library")
+
+    try:
+      check tryLoadCompiledScenePluginForTest(sourcePath) == false
+      check not fileExists(copiedPath)
+    finally:
+      if fileExists(sourcePath):
+        removeFile(sourcePath)

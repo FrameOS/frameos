@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.tasks.prebuilt_deps import PrebuiltEntry
-from app.utils.cross_compile import CrossCompiler, TargetMetadata
+from app.utils.cross_compile import CrossCompileArtifacts, CrossCompiler, TargetMetadata
 
 
 async def _noop_logger(_level: str, _message: str) -> None:
@@ -149,13 +149,14 @@ async def test_run_remote_docker_build_downloads_compiled_scene_artifacts(
     compiler._build_host_session = fake_host  # type: ignore[assignment]
     compiler._remote_root = tmp_path / "remote-root"
 
-    binary_path = await compiler._run_remote_docker_build(
+    artifacts = await compiler._run_remote_docker_build(
         str(build_dir),
         "#!/usr/bin/env bash\nexit 0\n",
         "frameos-cross-test-image",
     )
 
-    assert binary_path == str(build_dir / "frameos")
+    assert artifacts.binary_path == str(build_dir / "frameos")
+    assert artifacts.scenes_dir == str(build_dir / "scenes")
     assert (build_dir / "frameos").read_bytes() == b"frameos"
     assert (build_dir / "scenes" / "demo.so").read_bytes() == b"plugin"
     assert fake_host.downloaded_binary == (
@@ -166,3 +167,64 @@ async def test_run_remote_docker_build_downloads_compiled_scene_artifacts(
         f"{compiler._remote_root}/src/scenes",
         str(build_dir / "scenes"),
     )
+
+
+@pytest.mark.asyncio
+async def test_build_with_context_skips_quickjs_for_scene_only_cross_compile(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    compiler = _make_compiler(tmp_path, monkeypatch, prebuilt_entry=None)
+    source_dir = tmp_path / "source"
+    source_dir.mkdir(parents=True, exist_ok=True)
+    build_dir = tmp_path / "build"
+    build_dir.mkdir(parents=True, exist_ok=True)
+    (build_dir / "compile_frameos.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    compiler.build_dir_override = build_dir
+
+    quickjs_calls: list[str] = []
+
+    async def fake_prepare_prebuilt_components() -> None:
+        return None
+
+    async def fake_ensure_quickjs_sources(_source_dir: str) -> None:
+        quickjs_calls.append("source")
+
+    async def fake_prepare_sysroot() -> None:
+        return None
+
+    async def fake_ensure_lgpio_in_sysroot() -> None:
+        return None
+
+    async def fake_ensure_quickjs_in_build_dir(_source_dir: str, _build_dir: Path) -> None:
+        quickjs_calls.append("build")
+
+    async def fake_run_docker_build(
+        build_dir_path: str,
+        *,
+        build_binary: bool = True,
+        build_scene_dirs: list[str] | None = None,
+        build_all_scenes: bool = True,
+    ) -> CrossCompileArtifacts:
+        assert build_dir_path == str(build_dir)
+        assert build_binary is False
+        assert build_scene_dirs == ["scene_builds/demo"]
+        assert build_all_scenes is False
+        return CrossCompileArtifacts(binary_path=None, scenes_dir=str(build_dir / "scenes"))
+
+    monkeypatch.setattr(compiler, "_prepare_prebuilt_components", fake_prepare_prebuilt_components)
+    monkeypatch.setattr(compiler, "_ensure_quickjs_sources", fake_ensure_quickjs_sources)
+    monkeypatch.setattr(compiler, "_prepare_sysroot", fake_prepare_sysroot)
+    monkeypatch.setattr(compiler, "_ensure_lgpio_in_sysroot", fake_ensure_lgpio_in_sysroot)
+    monkeypatch.setattr(compiler, "_ensure_quickjs_in_build_dir", fake_ensure_quickjs_in_build_dir)
+    monkeypatch.setattr(compiler, "_run_docker_build", fake_run_docker_build)
+
+    artifacts = await compiler._build_with_context(
+        str(source_dir),
+        build_binary=False,
+        build_scene_dirs=["scene_builds/demo"],
+        build_all_scenes=False,
+    )
+
+    assert artifacts == CrossCompileArtifacts(binary_path=None, scenes_dir=str(build_dir / "scenes"))
+    assert quickjs_calls == []

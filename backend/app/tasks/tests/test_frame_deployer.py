@@ -6,6 +6,25 @@ import pytest
 from app.tasks._frame_deployer import FrameDeployer
 
 
+def test_parse_compile_script_preserves_shared_flag_for_full_output_path(tmp_path: Path):
+    script_path = tmp_path / "compile_plugin_demo.sh"
+    script_path.write_text(
+        "cc -c foo.c -o foo.o -fPIC -Wall\n"
+        "cc foo.o -shared -o /tmp/build/demo.so quickjs/libquickjs.a -ldl\n",
+        encoding="utf-8",
+    )
+
+    compiler_flags, linker_flags = FrameDeployer._parse_compile_script(
+        str(script_path),
+        output_name="demo.so",
+    )
+
+    assert "-fPIC" in compiler_flags
+    assert "-shared" in linker_flags
+    assert "quickjs/libquickjs.a" in linker_flags
+    assert "-ldl" in linker_flags
+
+
 def test_create_local_source_folder_copies_shared_frontend_sources(tmp_path: Path):
     repo_root = tmp_path / "repo"
     frameos_root = repo_root / "frameos"
@@ -190,7 +209,7 @@ async def test_create_local_build_archive_emits_compiled_scene_targets(
             out_arg = cmd.split("--out:", 1)[1].split(" ", 1)[0]
             Path(build_dir_arg, "compile_plugin_demo.sh").write_text(
                 "cc -c foo.c -o foo.o -fPIC -Wall\n"
-                f"cc foo.o -shared -o {Path(out_arg).name} -ldl\n",
+                f"cc foo.o -shared -o {out_arg} quickjs/libquickjs.a -ldl\n",
                 encoding="utf-8",
             )
         return 0, "", ""
@@ -223,3 +242,5 @@ async def test_create_local_build_archive_emits_compiled_scene_targets(
     assert "all: $(EXECUTABLE)\n\t@$(MAKE) --no-print-directory compiled-scenes\n" in root_makefile
     assert "$(MAKE) --no-print-directory -C $$dir" in root_makefile
     assert "EXECUTABLE = ../../scenes/demo.so" in scene_makefile
+    assert "-shared" in scene_makefile
+    assert "quickjs/libquickjs.a" not in scene_makefile

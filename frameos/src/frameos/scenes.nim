@@ -31,9 +31,19 @@ proc copyCompiledSceneLibrary(sourcePath: string): string =
   copyFile(sourcePath, targetPath)
   targetPath
 
-proc loadCompiledScenePlugin(path: string): Option[CompiledScenePlugin] =
+proc removeCopiedCompiledSceneLibrary(path: string) =
+  if path.len == 0:
+    return
   try:
-    let copiedPath = copyCompiledSceneLibrary(path)
+    if fileExists(path):
+      removeFile(path)
+  except OSError:
+    discard
+
+proc loadCompiledScenePlugin(path: string): Option[CompiledScenePlugin] =
+  var copiedPath = ""
+  try:
+    copiedPath = copyCompiledSceneLibrary(path)
     let handle = loadLib(copiedPath)
     if handle.isNil:
       echo "Warning: failed to load compiled scene plugin: ", path
@@ -50,6 +60,10 @@ proc loadCompiledScenePlugin(path: string): Option[CompiledScenePlugin] =
   except CatchableError as e:
     echo "Warning: failed to initialize compiled scene plugin ", path, ": ", e.msg
     return none(CompiledScenePlugin)
+  finally:
+    # Once dlopen has mapped the library we can unlink the temp copy and avoid
+    # leaking one extra .so per reload cycle.
+    removeCopiedCompiledSceneLibrary(copiedPath)
 
 proc cloneStateField(field: StateField): StateField =
   if field.isNil:
@@ -542,6 +556,12 @@ proc cleanupOrphanedUploadedStateFiles*() =
       discard
 
 when defined(testing):
+  proc getCompiledSceneLoadCounterForTest*(): int =
+    compiledSceneLoadCounter
+
+  proc tryLoadCompiledScenePluginForTest*(path: string): bool =
+    loadCompiledScenePlugin(path).isSome
+
   proc setUploadedStateCleanupRanForTest*(value: bool) =
     uploadedStateCleanupRan = value
 

@@ -1,4 +1,3 @@
-import os
 import tempfile
 from datetime import datetime, timezone
 from typing import Any
@@ -9,11 +8,6 @@ from arq import ArqRedis as Redis
 from app.models.log import new_log as log
 from app.models.frame import Frame, normalize_https_proxy, update_frame
 from app.tasks._frame_deployer import FrameDeployer
-from app.tasks.deploy_frame import (
-    _build_remote_compiled_scenes,
-    _publish_remote_compiled_scenes,
-    _upload_remote_build_archive,
-)
 from app.utils.frame_http import _fetch_frame_http_bytes
 from app.utils.versions import current_frameos_version
 
@@ -66,6 +60,9 @@ async def fast_deploy_frame_task(ctx: dict[str, Any], id: int):
             frame_dict["frameos_version"] = previous_frameos_version
         else:
             frame_dict["frameos_version"] = current_frameos_version()
+        previous_compile_manifest = (frame.last_successful_deploy or {}).get("compile_manifest")
+        if isinstance(previous_compile_manifest, dict):
+            frame_dict["compile_manifest"] = previous_compile_manifest
 
         with tempfile.TemporaryDirectory() as temp_dir:
             nim_path = find_nim_v2()
@@ -80,27 +77,6 @@ async def fast_deploy_frame_task(ctx: dict[str, Any], id: int):
             distro = await self.get_distro()
             if distro not in {"raspios", "debian", "ubuntu", "buildroot"}:
                 raise Exception(f"Unsupported target distro '{distro}'")
-
-            if frame_has_compiled_scenes(frame):
-                await log(db, redis, id, "stdout", "- Building compiled scene plugins for reload")
-                source_dir = self.create_local_source_folder(temp_dir)
-                await self.make_local_modifications(source_dir)
-                build_dir = os.path.join(temp_dir, f"build_{self.build_id}")
-                os.makedirs(build_dir, exist_ok=True)
-                archive_path = await self.create_local_build_archive(
-                    build_dir,
-                    source_dir,
-                    await self.get_cpu_architecture(),
-                )
-                remote_build_root = await _upload_remote_build_archive(self, archive_path, self.build_id)
-                await _build_remote_compiled_scenes(self, remote_build_root)
-                await _publish_remote_compiled_scenes(
-                    self,
-                    remote_build_root,
-                    "/srv/frameos/current/scenes",
-                )
-            else:
-                await self.exec_command("rm -rf /srv/frameos/current/scenes && mkdir -p /srv/frameos/current/scenes")
 
             await self._upload_frame_json("/srv/frameos/current/frame.json")
             await self._upload_scenes_json("/srv/frameos/current/scenes.json.gz", gzip=True)

@@ -18,7 +18,7 @@ def scene_module_name(scene_id: str) -> str:
 
 
 def scene_library_filename(scene_id: str) -> str:
-    return f"{scene_file_stem(scene_id)}.so"
+    return f"{scene_module_name(scene_id)}.so"
 
 def get_events_schema() -> list[dict]:
     events_schema_path = os.path.join("..", "frontend", "schema", "events.json")

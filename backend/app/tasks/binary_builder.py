@@ -16,7 +16,8 @@ from app.tasks.prebuilt_deps import PrebuiltEntry, fetch_prebuilt_manifest, reso
 from app.utils.build_host import get_build_host_config
 from app.utils.cross_compile import (
     TargetMetadata,
-    build_binary_with_cross_toolchain,
+    CrossCompileArtifacts,
+    build_artifacts_with_cross_toolchain,
     can_cross_compile_target,
 )
 
@@ -50,6 +51,12 @@ class FrameBinaryBuildResult:
     prebuilt_entry: PrebuiltEntry | None
     prebuilt_target: str | None
     log_path: str | None
+
+
+@dataclass(slots=True)
+class RequestedArtifactBuildResult:
+    cross_compiled: bool
+    artifacts: CrossCompileArtifacts
 
 
 def create_build_folder(temp_dir: str, build_id: str) -> str:
@@ -126,88 +133,29 @@ class FrameBinaryBuilder:
             arch=target.arch,
             logger=self._log,
         )
-        build_host = get_build_host_config(self.db)
 
-        source_dir = self.deployer.create_local_source_folder(
-            self.temp_dir, source_root=self.source_root
-        )
-        await self._log("stdout", f"{icon} Applying local modifications")
-        await self.deployer.make_local_modifications(source_dir)
-        if self.db:
-            await copy_custom_fonts_to_local_source_folder(self.db, source_dir)
+        source_dir = await self.prepare_source_dir()
 
-        build_dir = create_build_folder(self.temp_dir, self.deployer.build_id)
-        await self._log("stdout", f"{icon} Creating build archive")
-        archive_path = await self.deployer.create_local_build_archive(
-            build_dir, source_dir, target.arch
+        build_dir, archive_path = await self.prepare_build_archive(
+            source_dir=source_dir,
+            arch=target.arch,
         )
 
-        cross_compiled = False
-        binary_path: str | None = None
-        if allow_cross_compile and can_cross_compile_target(target.arch):
-            if build_host:
-                await self._log(
-                    "stdout",
-                    f"{icon} Target supports cross compilation; building binary via build host",
-                )
-            else:
-                await self._log("stdout", f"{icon} Target supports cross compilation; building binary locally")
-            try:
-                binary_path = await build_binary_with_cross_toolchain(
-                    db=self.db,
-                    redis=self.redis,
-                    frame=self.frame,
-                    deployer=self.deployer,
-                    source_dir=source_dir,
-                    temp_dir=self.temp_dir,
-                    build_dir=build_dir,
-                    prebuilt_entry=prebuilt_entry,
-                    prebuilt_target=prebuilt_target,
-                    target_override=target,
-                    logger=self._log,
-                    build_host=build_host,
-                )
-            except Exception as exc:
-                error_message = str(exc)
-                failure_msg = f"Cross compilation failed ({exc})"
-                if build_host:
-                    failure_msg = f"Cross compilation failed on build host ({exc})"
-                await self._log(
-                    "stderr",
-                    f"{icon} {failure_msg}",
-                )
-                if "unix:///var/run/docker.sock" in str(exc).lower():
-                    await self._log(
-                        "stderr",
-                        f"{icon} Read the README at https://github.com/FrameOS/frameos to learn how to enable docker-in-docker, or configure a build server from global settings.",
-                    )
-                elif "command not found" in str(exc).lower() or "buildx" in str(exc).lower():
-                    await self._log(
-                        "stderr",
-                        f"{icon} Ensure Docker and the Docker Buildx plugin are installed on the build host",
-                    )
-                elif "permission denied" in str(exc).lower():
-                    await self._log(
-                        "stderr",
-                        f"{icon} Ensure you can connect to the build host and run Docker commands (e.g., is in the 'docker' group)",
-                    )
-                if should_suggest_clearing_build_cache(error_message):
-                    await self._log(
-                        "stderr",
-                        f"{icon} If the failure is caused by a stale linker cache, clear the build cache (press ... in logs or settings) and try deploying again.",
-                    )
-                if force_cross_compile:
-                    raise
-                else:
-                    await self._log(
-                        "stderr",
-                        f"{icon} Falling back to on-device build!",
-                    )
-            else:
-                cross_compiled = True
-                await self._log("stdout", f"{icon} Cross compilation succeeded; skipping remote build")
-        elif force_cross_compile:
-            raise RuntimeError("Cross compilation required but not supported for this target")
+        requested = await self.build_requested_artifacts(
+            source_dir=source_dir,
+            build_dir=build_dir,
+            target=target,
+            prebuilt_entry=prebuilt_entry,
+            prebuilt_target=prebuilt_target,
+            allow_cross_compile=allow_cross_compile,
+            force_cross_compile=force_cross_compile,
+            build_binary=True,
+            build_all_scenes=True,
+        )
+        cross_compiled = requested.cross_compiled
+        binary_path = requested.artifacts.binary_path
+        if cross_compiled:
+            await self._log("stdout", f"{icon} Cross compilation succeeded; skipping remote build")
 
         return FrameBinaryBuildResult(
             build_id=self.deployer.build_id,
@@ -221,6 +169,112 @@ class FrameBinaryBuilder:
             prebuilt_target=prebuilt_target,
             log_path=str(self.log_path) if self.log_path.exists() else None,
         )
+
+    async def prepare_source_dir(self) -> str:
+        source_dir = self.deployer.create_local_source_folder(
+            self.temp_dir, source_root=self.source_root
+        )
+        await self._log("stdout", f"{icon} Applying local modifications")
+        await self.deployer.make_local_modifications(source_dir)
+        if self.db:
+            await copy_custom_fonts_to_local_source_folder(self.db, source_dir)
+        return source_dir
+
+    async def prepare_build_archive(self, *, source_dir: str, arch: str) -> tuple[str, str]:
+        build_dir = create_build_folder(self.temp_dir, self.deployer.build_id)
+        await self._log("stdout", f"{icon} Creating build archive")
+        archive_path = await self.deployer.create_local_build_archive(
+            build_dir,
+            source_dir,
+            arch,
+        )
+        return build_dir, archive_path
+
+    async def detect_target(self, target_override: TargetMetadata | None = None) -> TargetMetadata:
+        return target_override or await self._detect_target()
+
+    async def build_requested_artifacts(
+        self,
+        *,
+        source_dir: str,
+        build_dir: str,
+        target: TargetMetadata,
+        prebuilt_entry: PrebuiltEntry | None,
+        prebuilt_target: str | None,
+        allow_cross_compile: bool = True,
+        force_cross_compile: bool = False,
+        build_binary: bool = True,
+        build_scene_dirs: list[str] | None = None,
+        build_all_scenes: bool = True,
+    ) -> RequestedArtifactBuildResult:
+        empty = CrossCompileArtifacts(binary_path=None, scenes_dir=None)
+        if not allow_cross_compile or not can_cross_compile_target(target.arch):
+            if force_cross_compile:
+                raise RuntimeError("Cross compilation required but not supported for this target")
+            return RequestedArtifactBuildResult(cross_compiled=False, artifacts=empty)
+
+        build_host = get_build_host_config(self.db)
+        if build_host:
+            await self._log(
+                "stdout",
+                f"{icon} Target supports cross compilation; building requested artifacts via build host",
+            )
+        else:
+            await self._log(
+                "stdout",
+                f"{icon} Target supports cross compilation; building requested artifacts locally",
+            )
+
+        try:
+            artifacts = await build_artifacts_with_cross_toolchain(
+                db=self.db,
+                redis=self.redis,
+                frame=self.frame,
+                deployer=self.deployer,
+                source_dir=source_dir,
+                temp_dir=self.temp_dir,
+                build_dir=build_dir,
+                prebuilt_entry=prebuilt_entry,
+                prebuilt_target=prebuilt_target,
+                target_override=target,
+                logger=self._log,
+                build_host=build_host,
+                build_binary=build_binary,
+                build_scene_dirs=build_scene_dirs,
+                build_all_scenes=build_all_scenes,
+            )
+        except Exception as exc:
+            error_message = str(exc)
+            failure_msg = f"Cross compilation failed ({exc})"
+            if build_host:
+                failure_msg = f"Cross compilation failed on build host ({exc})"
+            await self._log("stderr", f"{icon} {failure_msg}")
+            if "unix:///var/run/docker.sock" in error_message.lower():
+                await self._log(
+                    "stderr",
+                    f"{icon} Read the README at https://github.com/FrameOS/frameos to learn how to enable docker-in-docker, or configure a build server from global settings.",
+                )
+            elif "command not found" in error_message.lower() or "buildx" in error_message.lower():
+                await self._log(
+                    "stderr",
+                    f"{icon} Ensure Docker and the Docker Buildx plugin are installed on the build host",
+                )
+            elif "permission denied" in error_message.lower():
+                await self._log(
+                    "stderr",
+                    f"{icon} Ensure you can connect to the build host and run Docker commands (e.g., is in the 'docker' group)",
+                )
+            if should_suggest_clearing_build_cache(error_message):
+                await self._log(
+                    "stderr",
+                    f"{icon} If the failure is caused by a stale linker cache, clear the build cache (press ... in logs or settings) and try deploying again.",
+                )
+            if force_cross_compile:
+                raise
+            await self._log("stderr", f"{icon} Falling back to on-device build!")
+            return RequestedArtifactBuildResult(cross_compiled=False, artifacts=empty)
+
+        return RequestedArtifactBuildResult(cross_compiled=True, artifacts=artifacts)
 
     async def _detect_target(self) -> TargetMetadata:
         arch = await self.deployer.get_cpu_architecture()
