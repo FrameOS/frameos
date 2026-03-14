@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from functools import partial
 import os
+from pathlib import Path
 import re
 import shlex
 import tarfile
@@ -34,6 +35,8 @@ from app.tasks.compile_manifest import (
 from .utils import find_nim_v2
 
 icon = "🔷"
+
+LOCAL_FRAMEOS_VENDOR_ROOT = Path(__file__).resolve().parents[3] / "frameos" / "vendor"
 
 # Mirror of: https://bellard.org/quickjs/quickjs-${version}.tar.xz
 QUICKJS_ARCHIVE_URL = "https://archive.frameos.net/source/vendor/quickjs-{version}.tar.xz"
@@ -132,6 +135,18 @@ async def _remote_file_exists(deployer: FrameDeployer, path: str) -> bool:
     return (
         await deployer.exec_command(
             f"test -f {shlex.quote(path)}",
+            raise_on_error=False,
+            log_command=False,
+            log_output=False,
+        )
+        == 0
+    )
+
+
+async def _remote_dir_exists(deployer: FrameDeployer, path: str) -> bool:
+    return (
+        await deployer.exec_command(
+            f"test -d {shlex.quote(path)}",
             raise_on_error=False,
             log_command=False,
             log_output=False,
@@ -294,20 +309,27 @@ async def _upload_binary(deployer: FrameDeployer, local_path: str, remote_path: 
 
 async def _sync_vendor_dir(
     deployer: FrameDeployer,
-    local_dir: str,
+    local_dir: str | None,
     vendor_folder: str,
     label: str,
-    cross_compiled: bool,
     build_id: str,
+    *,
+    reuse_existing_remote: bool = False,
 ) -> None:
     remote_dir = f"/srv/frameos/vendor/{vendor_folder}"
-    if cross_compiled:
+    if reuse_existing_remote and await _remote_dir_exists(deployer, remote_dir):
+        await deployer.log("stdout", f"{icon} Reusing existing {label}")
+        return
+
+    if local_dir:
         await _upload_directory_tree(deployer, local_dir, remote_dir, label, build_id)
-    else:
-        await deployer.exec_command(
-            f"mkdir -p /srv/frameos/vendor && "
-            f"cp -r /srv/frameos/build/build_{build_id}/vendor/{vendor_folder} /srv/frameos/vendor/"
-        )
+        return
+
+    if await _remote_dir_exists(deployer, remote_dir):
+        await deployer.log("stdout", f"{icon} Reusing existing {label}")
+        return
+
+    raise FileNotFoundError(f"{label} missing locally and on device")
 
 
 async def _ensure_ntp_installed(deployer: FrameDeployer) -> None:
@@ -551,6 +573,36 @@ async def _ensure_quickjs(
     return quickjs_dirname
 
 
+async def _ensure_quickjs_for_remote_frameos_build(
+    deployer: FrameDeployer,
+    *,
+    prebuilt_entry: Any,
+    build_id: str,
+    rebuild_app: bool,
+    cross_compiled: bool,
+) -> str | None:
+    if not rebuild_app or cross_compiled:
+        return None
+    return await _ensure_quickjs(
+        deployer,
+        prebuilt_entry=prebuilt_entry,
+        build_id=build_id,
+        cross_compiled=False,
+    )
+
+
+def _local_vendor_source_dir(build_dir: str | None, vendor_folder: str) -> str | None:
+    candidate_dirs: list[Path] = []
+    if build_dir:
+        candidate_dirs.append(Path(build_dir) / "vendor" / vendor_folder)
+    candidate_dirs.append(LOCAL_FRAMEOS_VENDOR_ROOT / vendor_folder)
+
+    for candidate in candidate_dirs:
+        if candidate.is_dir():
+            return str(candidate)
+    return None
+
+
 def _local_build_has_compiled_scenes(build_dir: str) -> bool:
     scene_build_root = os.path.join(build_dir, "scene_builds")
     if not os.path.isdir(scene_build_root):
@@ -737,11 +789,10 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
         frame.status = 'deploying'
         await update_frame(db, redis, frame)
 
-        nim_path = find_nim_v2()
         settings = get_settings_dict(db)
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            self = FrameDeployer(db=db, redis=redis, frame=frame, nim_path=nim_path, temp_dir=temp_dir)
+            self = FrameDeployer(db=db, redis=redis, frame=frame, nim_path="", temp_dir=temp_dir)
             build_id = self.build_id
             install_if_necessary = partial(_install_if_necessary, self)
             await self.log("stdout", f"{icon} Deploying frame {frame.name} with build id {self.build_id}")
@@ -840,6 +891,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             remote_scene_build_required = False
 
             if compile_plan.needs_compilation:
+                self.nim_path = find_nim_v2()
                 build_dir, archive_path = await builder.prepare_build_archive(
                     source_dir=source_dir,
                     arch=target.arch,
@@ -901,11 +953,12 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             for dep in self.get_apt_packages():
                 await install_if_necessary(dep)
 
-            quickjs_dirname = await _ensure_quickjs(
+            quickjs_dirname = await _ensure_quickjs_for_remote_frameos_build(
                 self,
                 prebuilt_entry=prebuilt_entry,
                 build_id=build_id,
-                cross_compiled=(cross_compiled and not remote_scene_build_required),
+                rebuild_app=compile_plan.rebuild_app,
+                cross_compiled=cross_compiled,
             )
 
             await self.exec_command("sudo mkdir -p /srv/frameos && sudo chown $(whoami):$(whoami) /srv/frameos")
@@ -973,14 +1026,14 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             if inkyPython := drivers.get("inkyPython"):
                 await self.log("stdout", f"{icon} Installing inkyPython driver")
                 vendor_folder = inkyPython.vendor_folder or ""
-                local_vendor_path = os.path.join(build_dir, "vendor", vendor_folder)
+                local_vendor_path = _local_vendor_source_dir(build_dir, vendor_folder)
                 await _sync_vendor_dir(
                     self,
                     local_vendor_path,
                     vendor_folder,
                     "inkyPython vendor files",
-                    cross_compiled,
                     build_id,
+                    reuse_existing_remote=build_dir is None,
                 )
                 await install_if_necessary("python3-pip")
                 await install_if_necessary("python3-venv")
@@ -996,14 +1049,14 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             if inkyHyperPixel2r := drivers.get("inkyHyperPixel2r"):
                 await self.log("stdout", f"{icon} Installing inkyHyperPixel2r driver")
                 vendor_folder = inkyHyperPixel2r.vendor_folder or ""
-                local_vendor_path = os.path.join(build_dir, "vendor", vendor_folder)
+                local_vendor_path = _local_vendor_source_dir(build_dir, vendor_folder)
                 await _sync_vendor_dir(
                     self,
                     local_vendor_path,
                     vendor_folder,
                     "inkyHyperPixel2r vendor files",
-                    cross_compiled,
                     build_id,
+                    reuse_existing_remote=build_dir is None,
                 )
                 await install_if_necessary("python3-dev")
                 await install_if_necessary("python3-pip")

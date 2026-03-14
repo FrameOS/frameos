@@ -11,8 +11,6 @@ from app.tasks._frame_deployer import FrameDeployer
 from app.utils.frame_http import _fetch_frame_http_bytes
 from app.utils.versions import current_frameos_version
 
-from .utils import find_nim_v2
-
 
 def tls_settings_changed(frame: Frame) -> bool:
     if not frame.last_successful_deploy:
@@ -65,12 +63,11 @@ async def fast_deploy_frame_task(ctx: dict[str, Any], id: int):
             frame_dict["compile_manifest"] = previous_compile_manifest
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            nim_path = find_nim_v2()
             self = FrameDeployer(
                 db=db,
                 redis=redis,
                 frame=frame,
-                nim_path=nim_path,
+                nim_path="",
                 temp_dir=temp_dir,
             )
 

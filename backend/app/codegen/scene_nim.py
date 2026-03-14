@@ -580,7 +580,7 @@ class SceneWriter:
                 # only if a target node (plus legacy support for using 'event' as a target node)
                 if node_id not in self.prev_nodes:
                     continue
-                scene_app_id = "scene_" +  re.sub(r'\W+', '', scene_id)
+                scene_app_id = f"scene_{scene_module_name(scene_id)}"
                 app_import = f"import scenes/{scene_app_id} as {scene_app_id}"
                 node_integer = self.node_id_to_integer(node_id)
                 app_id = f"node{node_integer}"

@@ -1,6 +1,7 @@
 import importlib
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -9,8 +10,11 @@ from app.tasks.deploy_frame import (
     _adjust_compile_plan_for_missing_remote_artifacts,
     _build_remote_compiled_scenes,
     _compile_plan_log_lines,
+    _ensure_quickjs_for_remote_frameos_build,
     _local_compiled_scene_artifact_dir,
+    _local_vendor_source_dir,
     _scene_compile_start_lines,
+    _sync_vendor_dir,
     _upload_local_compiled_scenes,
 )
 
@@ -33,6 +37,18 @@ def test_local_compiled_scene_artifact_dir_returns_scenes_dir_when_plugins_exist
     (scenes_dir / "demo.so").write_bytes(b"plugin")
 
     assert _local_compiled_scene_artifact_dir(str(build_dir)) == str(scenes_dir)
+
+
+def test_local_vendor_source_dir_falls_back_to_repo_vendor_when_build_dir_missing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    vendor_root = tmp_path / "vendor"
+    vendor_dir = vendor_root / "inky"
+    vendor_dir.mkdir(parents=True)
+    monkeypatch.setattr(deploy_frame_module, "LOCAL_FRAMEOS_VENDOR_ROOT", vendor_root)
+
+    assert _local_vendor_source_dir(None, "inky") == str(vendor_dir)
 
 
 def test_deploy_frame_imports_current_frameos_version():
@@ -99,6 +115,124 @@ async def test_upload_local_compiled_scenes_merges_into_existing_release(monkeyp
         "build123",
     )
     assert calls[0][1] == {"replace": False}
+
+
+@pytest.mark.asyncio
+async def test_sync_vendor_dir_reuses_existing_remote_vendor_when_build_was_skipped(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    upload_directory_tree = AsyncMock()
+    monkeypatch.setattr(deploy_frame_module, "_upload_directory_tree", upload_directory_tree)
+    monkeypatch.setattr(deploy_frame_module, "_remote_dir_exists", AsyncMock(return_value=True))
+
+    logs: list[tuple[str, str]] = []
+
+    async def fake_log(level: str, message: str) -> None:
+        logs.append((level, message))
+
+    deployer = SimpleNamespace(log=fake_log)
+
+    await _sync_vendor_dir(
+        deployer,
+        None,
+        "inky",
+        "inkyPython vendor files",
+        "build123",
+        reuse_existing_remote=True,
+    )
+
+    upload_directory_tree.assert_not_awaited()
+    assert logs == [("stdout", "🔷 Reusing existing inkyPython vendor files")]
+
+
+@pytest.mark.asyncio
+async def test_sync_vendor_dir_uploads_local_vendor_when_remote_copy_is_unavailable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    local_vendor = tmp_path / "inky"
+    local_vendor.mkdir()
+
+    upload_directory_tree = AsyncMock()
+    monkeypatch.setattr(deploy_frame_module, "_upload_directory_tree", upload_directory_tree)
+    monkeypatch.setattr(deploy_frame_module, "_remote_dir_exists", AsyncMock(return_value=False))
+
+    deployer = SimpleNamespace(log=AsyncMock())
+
+    await _sync_vendor_dir(
+        deployer,
+        str(local_vendor),
+        "inky",
+        "inkyPython vendor files",
+        "build123",
+        reuse_existing_remote=True,
+    )
+
+    upload_directory_tree.assert_awaited_once_with(
+        deployer,
+        str(local_vendor),
+        "/srv/frameos/vendor/inky",
+        "inkyPython vendor files",
+        "build123",
+    )
+
+
+@pytest.mark.asyncio
+async def test_ensure_quickjs_for_remote_frameos_build_skips_scene_only_and_cross_compiled_paths(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    ensure_quickjs = AsyncMock(return_value="quickjs-dir")
+    monkeypatch.setattr(deploy_frame_module, "_ensure_quickjs", ensure_quickjs)
+
+    deployer = SimpleNamespace()
+
+    assert (
+        await _ensure_quickjs_for_remote_frameos_build(
+            deployer,
+            prebuilt_entry=None,
+            build_id="build123",
+            rebuild_app=False,
+            cross_compiled=False,
+        )
+        is None
+    )
+    assert (
+        await _ensure_quickjs_for_remote_frameos_build(
+            deployer,
+            prebuilt_entry=None,
+            build_id="build123",
+            rebuild_app=True,
+            cross_compiled=True,
+        )
+        is None
+    )
+    ensure_quickjs.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_ensure_quickjs_for_remote_frameos_build_runs_for_on_device_binary_build(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    ensure_quickjs = AsyncMock(return_value="quickjs-dir")
+    monkeypatch.setattr(deploy_frame_module, "_ensure_quickjs", ensure_quickjs)
+
+    deployer = SimpleNamespace()
+
+    result = await _ensure_quickjs_for_remote_frameos_build(
+        deployer,
+        prebuilt_entry=None,
+        build_id="build123",
+        rebuild_app=True,
+        cross_compiled=False,
+    )
+
+    assert result == "quickjs-dir"
+    ensure_quickjs.assert_awaited_once_with(
+        deployer,
+        prebuilt_entry=None,
+        build_id="build123",
+        cross_compiled=False,
+    )
 
 
 def test_compile_plan_log_lines_for_scene_only_rebuild_include_skip_reason_and_scene_name():
