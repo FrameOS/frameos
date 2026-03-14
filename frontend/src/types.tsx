@@ -3,7 +3,7 @@ import { Edge, Node } from 'reactflow'
 export interface FrameType {
   id: number
   name: string
-  mode?: 'rpios' | 'nixos' | 'buildroot'
+  mode?: 'rpios' | 'buildroot'
   frame_host: string
   frame_port: number
   frame_access_key: string
@@ -94,14 +94,13 @@ export interface FrameType {
     deployWithAgent?: boolean
   }
   palette?: Palette
-  nix?: FrameNixConfig
   buildroot?: FrameBuildrootConfig
   rpios?: FrameRpiOSConfig
   terminal_history?: string[]
   active_connections?: number
 }
 
-export type FrameMode = 'rpios' | 'nixos' | 'buildroot' | 'import'
+export type FrameMode = 'rpios' | 'buildroot' | 'import'
 export interface NewFrameFormType {
   mode: FrameMode
   name?: string | null
@@ -293,8 +292,6 @@ export interface AppConfig {
   settings?: string[]
   /** List of apt packages to install (mode=rpios) */
   apt?: string[]
-  /** List of nix packages to install (mode=nixos) */
-  nixpkgs?: string[]
   /** Fields for app in diagram editor */
   fields?: (AppConfigField | MarkdownField)[]
   /** Returned fields */
@@ -617,16 +614,6 @@ export interface FrameOSSettings {
   unsplash?: {
     accessKey?: string
   }
-  nix?: {
-    buildExtraArgs?: string
-    buildServerEnabled?: boolean
-    buildServer?: string
-    buildServerPort?: number
-    buildServerUser?: string
-    buildServerPrivateKey?: string
-    buildServerPublicKey?: string
-    buildServerMaxParallelJobs?: number
-  }
   buildHost?: {
     enabled?: boolean
     host?: string
@@ -658,13 +645,6 @@ export interface Palette {
   name?: string
   colors: string[]
   colorNames?: string[]
-}
-
-export interface FrameNixConfig {
-  hostname?: string
-  platform?: string
-  timezone?: string
-  customModule?: string
 }
 
 export interface FrameBuildrootConfig {

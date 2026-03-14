@@ -82,27 +82,11 @@ const FRAME_KEYS: (keyof FrameType)[] = [
   'network',
   'agent',
   'palette',
-  'nix',
   'buildroot',
   'rpios',
 ]
 
 const FRAME_KEYS_REQUIRE_RECOMPILE_RPIOS: (keyof FrameType)[] = ['device', 'scenes', 'reboot', 'rpios']
-const FRAME_KEYS_REQUIRE_RECOMPILE_NIXOS: (keyof FrameType)[] = [
-  'device',
-  'scenes',
-  'reboot',
-  'ssh_user',
-  'ssh_port',
-  'ssh_pass',
-  'ssh_keys',
-  'log_to_file',
-  'assets_path',
-  'network',
-  'agent',
-  'nix',
-]
-
 const FRAME_KEYS_REQUIRE_RECOMPILE_BUILDROOT: (keyof FrameType)[] = [
   'device',
   'scenes',
@@ -157,7 +141,6 @@ const FRAME_KEY_LABELS: Partial<Record<keyof FrameType, string>> = {
   network: 'Network settings',
   agent: 'Agent settings',
   palette: 'Palette',
-  nix: 'NixOS settings',
   buildroot: 'Buildroot settings',
   rpios: 'Raspberry Pi OS settings',
 }
@@ -167,9 +150,7 @@ function keyLabel(key: keyof FrameType): string {
 }
 
 function getRecompileFields(mode: FrameType['mode']): (keyof FrameType)[] {
-  return mode === 'nixos'
-    ? FRAME_KEYS_REQUIRE_RECOMPILE_NIXOS
-    : mode === 'buildroot'
+  return mode === 'buildroot'
     ? FRAME_KEYS_REQUIRE_RECOMPILE_BUILDROOT
     : FRAME_KEYS_REQUIRE_RECOMPILE_RPIOS
 }

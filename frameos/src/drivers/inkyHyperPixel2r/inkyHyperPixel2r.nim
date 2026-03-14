@@ -27,13 +27,7 @@ proc render*(self: Driver, image: Image) =
   frameBuffer.render(self, image)
 
 proc turnOn*(self: Driver) =
-  if self.mode == "nixos":
-    discard runCommand("inkyHyperPixel2r-turnOn")
-  else:
-    discard runCommand("cd /srv/frameos/vendor/inkyHyperPixel2r && ./env/bin/python3 turnOn.py")
+  discard runCommand("cd /srv/frameos/vendor/inkyHyperPixel2r && ./env/bin/python3 turnOn.py")
 
 proc turnOff*(self: Driver) =
-  if self.mode == "nixos":
-    discard runCommand("inkyHyperPixel2r-turnOff")
-  else:
-    discard runCommand("cd /srv/frameos/vendor/inkyHyperPixel2r && ./env/bin/python3 turnOff.py")
+  discard runCommand("cd /srv/frameos/vendor/inkyHyperPixel2r && ./env/bin/python3 turnOff.py")

@@ -70,41 +70,31 @@ class AgentDeployer(FrameDeployer):
                 if self._can_deploy_agent():
                     await self.log("stdout", "- Deploying agent")
 
-                    distro_out: list[str] = []
+                    distro = await self.get_distro()
+                    if distro not in {"raspios", "debian", "ubuntu", "buildroot"}:
+                        raise Exception(f"Unsupported target distro '{distro}'")
+
+                    await self._deploy_agent(arch)
+                    await self._setup_agent_service()
+
+                    # 3. Upload *frame.json* for this release
+                    await self._upload_frame_json(f"/srv/frameos/agent/releases/release_{self.build_id}/frame.json")
+
+                    # 4. Atomically switch *current* → new release + housekeeping
                     await self.exec_command(
-                        "bash -c '"
-                        "if [ -e /etc/nixos/version ]; then echo nixos ; "
-                        "elif [ -f /etc/rpi-issue ] || grep -q \"^ID=raspbian\" /etc/os-release ; then echo raspios ; "
-                        "else . /etc/os-release ; echo ${ID:-unknown} ; "
-                        "fi'",
-                        distro_out
+                        "rm -rf /srv/frameos/agent/current && "
+                        f"ln -s /srv/frameos/agent/releases/release_{self.build_id} "
+                        "/srv/frameos/agent/current"
                     )
-                    distro = distro_out[0].strip().lower()
 
-                    if distro == "nixos":
-                        await self.log("stderr", "NixOS is not supported for agent deployment")
-                    else:
-                        await self._deploy_agent(arch)
-                        await self._setup_agent_service()
+                    # Enable + start service
+                    await self.restart_service("frameos_agent")
 
-                        # 3. Upload *frame.json* for this release
-                        await self._upload_frame_json(f"/srv/frameos/agent/releases/release_{self.build_id}/frame.json")
-
-                        # 4. Atomically switch *current* → new release + housekeeping
-                        await self.exec_command(
-                            "rm -rf /srv/frameos/agent/current && "
-                            f"ln -s /srv/frameos/agent/releases/release_{self.build_id} "
-                            "/srv/frameos/agent/current"
-                        )
-
-                        # Enable + start service
-                        await self.restart_service("frameos_agent")
-
-                        await self._cleanup_old_builds()
-                        await self.log(
-                            "stdout",
-                            f"Agent deployment completed for {self.frame.name} (build id: {self.build_id})",
-                        )
+                    await self._cleanup_old_builds()
+                    await self.log(
+                        "stdout",
+                        f"Agent deployment completed for {self.frame.name} (build id: {self.build_id})",
+                    )
                 else:
                     await self.log(
                         "stdout",

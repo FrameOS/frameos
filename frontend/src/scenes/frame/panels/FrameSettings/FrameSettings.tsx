@@ -15,8 +15,6 @@ import {
   withCustomPalette,
   buildrootPlatforms,
   modes,
-  devicesNixOS,
-  nixosPlatforms,
 } from '../../../../devices'
 import { secureToken } from '../../../../utils/secureToken'
 import { appsLogic } from '../Apps/appsLogic'
@@ -31,7 +29,6 @@ import { Switch } from '../../../../components/Switch'
 import { NumberTextInput } from '../../../../components/NumberTextInput'
 import { FrameType, Palette } from '../../../../types'
 import { A } from 'kea-router'
-import { timezoneOptions } from '../../../../decorators/timezones'
 import { TextArea } from '../../../../components/TextArea'
 import { ColorInput } from '../../../../components/ColorInput'
 import { settingsLogic } from '../../../settings/settingsLogic'
@@ -47,8 +44,6 @@ export interface FrameSettingsProps {
   hideDropdown?: boolean
   hideDeploymentMode?: boolean
 }
-
-const customModule = `{ lib, ... }:\n{\n  # boot.kernelParams = [ \"quiet\" ];\n}\n`
 
 function getCertificateHint(certificateName: string, value?: string): JSX.Element | undefined {
   const validityInfo = getCertificateValidityInfo(value)
@@ -145,8 +140,6 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
   const { deleteFrame } = useActions(framesModel)
   const { appsWithSaveAssets } = useValues(appsLogic)
   const {
-    nixCollectGarbageFrame,
-    nixCollectGarbageBackend,
     clearBuildCache,
     downloadBuildZip,
     downloadCSourceZip,
@@ -157,8 +150,6 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
     buildZipLoading,
     cSourceZipLoading,
     binaryZipLoading,
-    collectGarbageFrameLoading,
-    collectGarbageBackendLoading,
   } = useValues(frameSettingsLogic({ frameId }))
   const { openLogs } = useActions(panelsLogic({ frameId }))
   const { logs, ipAddresses } = useValues(logsLogic({ frameId }))
@@ -217,27 +208,6 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                       },
                       icon: <ArrowPathIcon className="w-5 h-5" />,
                       loading: buildCacheLoading,
-                    },
-                  ]
-                : mode === 'nixos'
-                ? [
-                    {
-                      label: 'Collect NixOS garbage (on frame)',
-                      onClick: () => {
-                        nixCollectGarbageFrame()
-                        openLogs()
-                      },
-                      icon: <ArrowPathIcon className="w-5 h-5" />,
-                      loading: collectGarbageFrameLoading,
-                    },
-                    {
-                      label: 'Collect NixOS garbage (on backend)',
-                      onClick: () => {
-                        nixCollectGarbageBackend()
-                        openLogs()
-                      },
-                      icon: <ArrowPathIcon className="w-5 h-5" />,
-                      loading: collectGarbageBackendLoading,
                     },
                   ]
                 : []),
@@ -420,13 +390,8 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
           <Field
             name="device"
             label="Display driver"
-            tooltip={
-              frameForm.mode === 'nixos'
-                ? 'Not all drivers work under NixOS. Check the "Raspberry Pi OS" deployment mode for more.'
-                : undefined
-            }
           >
-            <Select name="device" options={mode === 'nixos' ? devicesNixOS : devices} />
+            <Select name="device" options={devices} />
           </Field>
           {frameForm.device === 'waveshare.EPD_10in3' ? (
             <Group name="device_config">
@@ -499,15 +464,6 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                 </Field>
               </Group>
             </div>
-          ) : null}
-          {frameForm.mode === 'nixos' ? (
-            <Field
-              name="nix.platform"
-              label="Platform"
-              tooltip='There are more options under the "Raspberry Pi OS" deployment mode.'
-            >
-              <Select name="nix.platform" options={nixosPlatforms} />
-            </Field>
           ) : null}
           {frameForm.mode === 'buildroot' ? (
             <Group name="buildroot">
@@ -594,65 +550,6 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
           </Field>
         </div>
 
-        {frameForm.mode == 'nixos' ? (
-          <>
-            <H6 className="mt-2">System settings</H6>
-            <div className="pl-2 @md:pl-8 space-y-2">
-              <Field
-                name="nix.hostname"
-                label="Hostname"
-                tooltip="You can use the hostname specificied here followed by .local to access the frame over mDNS."
-              >
-                <TextInput name="nix.hostname" placeholder={`frame${frame.id}`} />
-              </Field>
-              <Field name="ssh_user" label="Username" tooltip='The username is always "frame" in the NixOS mode.'>
-                <TextInput name="ssh_user" value="frame" disabled required />
-              </Field>
-              <Field
-                name="ssh_pass"
-                label="Password"
-                tooltip={
-                  <div>
-                    <p>
-                      Whatever you specify here is used for both SSH and terminal access. You can leave it blank to
-                      disable password access.
-                    </p>
-                    <p>
-                      You can also access the frame with the SSH key configured under{' '}
-                      <A href="/settings" className="text-blue-400 hover:underline">
-                        global settings.
-                      </A>
-                    </p>
-                  </div>
-                }
-              >
-                <TextInput
-                  name="ssh_pass"
-                  onClick={() => touchFrameFormField('ssh_pass')}
-                  type={frameFormTouches.ssh_pass ? 'text' : 'password'}
-                  placeholder="no password, using SSH key"
-                />
-              </Field>
-              <Field name="nix.timezone" label="Timezone">
-                <Select name="nix.timezone" options={timezoneOptions} />
-              </Field>
-              <Field name="nix.customModule" label="Custom NixOS module">
-                <TextArea
-                  rows={4}
-                  placeholder={customModule}
-                  onClick={() => {
-                    if (!frameFormTouches['nix.customModule'] && !frameForm.nix?.customModule) {
-                      setFrameFormValues({
-                        nix: { ...(frameForm.nix ?? {}), customModule },
-                      })
-                    }
-                  }}
-                />
-              </Field>
-            </div>
-          </>
-        ) : null}
-
         {!inFrameAdminMode ? (
           <>
             <H6 className="mt-2">
@@ -671,32 +568,28 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
               >
                 <TextInput name="frame_host" placeholder={`frame${frame.id}.local`} required />
               </Field>
-              {frameForm.mode !== 'nixos' ? (
-                <>
-                  <Field name="ssh_user" label="SSH user">
-                    <TextInput name="ssh_user" placeholder="pi" required />
-                  </Field>
-                  <Field
-                    name="ssh_pass"
-                    label="SSH pass"
-                    tooltip={
-                      <p>
-                        Leave empty to use a SSH key. Configure it under{' '}
-                        <A href="/settings" className="text-blue-400 hover:underline">
-                          global settings.
-                        </A>
-                      </p>
-                    }
-                  >
-                    <TextInput
-                      name="ssh_pass"
-                      onClick={() => touchFrameFormField('ssh_pass')}
-                      type={frameFormTouches.ssh_pass ? 'text' : 'password'}
-                      placeholder="no password, using SSH key"
-                    />
-                  </Field>
-                </>
-              ) : null}
+              <Field name="ssh_user" label="SSH user">
+                <TextInput name="ssh_user" placeholder="pi" required />
+              </Field>
+              <Field
+                name="ssh_pass"
+                label="SSH pass"
+                tooltip={
+                  <p>
+                    Leave empty to use a SSH key. Configure it under{' '}
+                    <A href="/settings" className="text-blue-400 hover:underline">
+                      global settings.
+                    </A>
+                  </p>
+                }
+              >
+                <TextInput
+                  name="ssh_pass"
+                  onClick={() => touchFrameFormField('ssh_pass')}
+                  type={frameFormTouches.ssh_pass ? 'text' : 'password'}
+                  placeholder="no password, using SSH key"
+                />
+              </Field>
               <Field name="ssh_port" label="SSH port">
                 <TextInput name="ssh_port" placeholder="22" required />
               </Field>
@@ -770,15 +663,13 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                         firewall. The backend must be publicly accessible for this to work.
                       </p>
                       <p>
-                        This is still beta. Enable both toggles, then save. Download the SD card image, and deploy it to
-                        the frame. The agent will then connect to the backend to await further commands.
+                        This is still beta. Enable both toggles, then save and deploy the frame. The agent will then
+                        connect to the backend to await further commands.
                       </p>
-                      {frameForm.mode !== 'nixos' && (
-                        <p>
-                          Note: after enabling the agent, you must manually deploy it from the "..." -&gt; "Deploy
-                          Agent" menu in the top.
-                        </p>
-                      )}
+                      <p>
+                        Note: after enabling the agent, you must manually deploy it from the "..." -&gt; "Deploy
+                        Agent" menu in the top.
+                      </p>
                     </div>
                   }
                 >
@@ -1115,22 +1006,6 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
         <H6>Network</H6>
         <div className="pl-2 @md:pl-8 space-y-2">
           <Group name="network">
-            {frameForm.mode === 'nixos' ? (
-              <>
-                <Field name="wifiSSID" label="Wifi SSID" tooltip="The SSID of the wifi network to connect to on boot.">
-                  <TextInput name="wifiSSID" placeholder="MyWifi" />
-                </Field>
-                <Field name="wifiPassword" label="Wifi Password" tooltip="The password of the wifi network.">
-                  <TextInput
-                    name="wifiPassword"
-                    placeholder="MyWifiPassword"
-                    onClick={() => touchFrameFormField('network.wifiPassword')}
-                    type={frameFormTouches['network.wifiPassword'] ? 'text' : 'password'}
-                  />
-                </Field>
-              </>
-            ) : null}
-
             <Field name="networkCheck" label="Wait for network before rendering">
               <Switch name="networkCheck" fullWidth />
             </Field>
@@ -1538,11 +1413,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                 color="secondary"
                 size="small"
                 onClick={() => {
-                  if (frameForm.mode === 'nixos') {
-                    setFrameFormValues({ log_to_file: '/var/log/frameos/frame-{date}.log' })
-                  } else {
-                    setFrameFormValues({ log_to_file: '/srv/frameos/logs/frame-{date}.log' })
-                  }
+                  setFrameFormValues({ log_to_file: '/srv/frameos/logs/frame-{date}.log' })
                   touchFrameFormField('log_to_file')
                 }}
               >

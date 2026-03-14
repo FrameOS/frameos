@@ -79,14 +79,9 @@ proc init*(frameOS: FrameOS): Driver =
   )
 
   let pOpt =
-    if result.mode == "nixos":
-      safeStartProcess("/nix/var/nix/profiles/system/sw/bin/inkyPython-check",
-                       deviceArgs(result.device),
-                       "/srv/frameos/vendor/inkyPython", result.logger)
-    else:
-      safeStartProcess("./env/bin/python3",
-                       @["check.py"] & deviceArgs(result.device),
-                       "/srv/frameos/vendor/inkyPython", result.logger)
+    safeStartProcess("./env/bin/python3",
+                     @["check.py"] & deviceArgs(result.device),
+                     "/srv/frameos/vendor/inkyPython", result.logger)
 
   if pOpt.isNone:
     discard result.logger.safeLog("Inky command not found - driver disabled.")
@@ -156,14 +151,9 @@ proc render*(self: Driver, image: Image) =
     imageData = cast[seq[uint8]](image.encodeImage(BmpFormat))
 
   let pOpt =
-    if self.mode == "nixos":
-      safeStartProcess("/nix/var/nix/profiles/system/sw/bin/inkyPython-run",
-                       deviceArgs(self.device) & extraArgs,
-                       "/srv/frameos/vendor/inkyPython", self.logger)
-    else:
-      safeStartProcess("./env/bin/python3",
-                       @["run.py"] & deviceArgs(self.device) & extraArgs,
-                       "/srv/frameos/vendor/inkyPython", self.logger)
+    safeStartProcess("./env/bin/python3",
+                     @["run.py"] & deviceArgs(self.device) & extraArgs,
+                     "/srv/frameos/vendor/inkyPython", self.logger)
 
   if pOpt.isNone:
     discard self.logger.safeLog("Render skipped - command missing.")

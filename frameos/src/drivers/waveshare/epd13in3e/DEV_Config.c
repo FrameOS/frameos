@@ -99,9 +99,9 @@ static int DEV_Equipment_Testing(void)
 	fclose(fp);
 
 	printf("Current environment: ");
-	char systems[][9] = {"Raspbian", "Debian", "NixOS"};
+	char systems[][9] = {"Raspbian", "Debian"};
 	int detected = 0;
-	for(int i=0; i<3; i++) {
+	for(int i=0; i<2; i++) {
 		if (strstr(issue_str, systems[i]) != NULL) {
 			printf("%s\n", systems[i]);
 			detected = 1;

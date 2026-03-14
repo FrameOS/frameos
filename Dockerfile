@@ -61,50 +61,12 @@ COPY frameos/agent/nimble.lock ./
 # Cache nimble deps for when deploying on frame
 RUN nimble install -d -y && nimble setup
 
-# ─── Install Nix (single-user, root, flakes on) ──────────────────────
-ARG NIX_VERSION=2.30.2
-RUN set -eux; \
-    # helper tools + user/group utilities
-    apt-get update && apt-get install -y --no-install-recommends \
-        curl xz-utils gnupg procps sudo ; \
-    \
-    # 1. builder group *and* members that really appear in /etc/group
-    groupadd -r nixbld ; \
-    for i in $(seq 1 10); do \
-        useradd -r -m -s /usr/sbin/nologin \
-                -g nixbld        \
-                -G nixbld        \
-                nixbld$i ; \
-    done ; \
-    \
-    # 2. run the no-daemon installer
-    curl -L "https://releases.nixos.org/nix/nix-${NIX_VERSION}/install" \
-      | sh -s -- --no-daemon --yes ; \
-    \
-    # 3. make nix usable in this layer
-    export USER=root ; \
-    . /root/.nix-profile/etc/profile.d/nix.sh ; \
-    nix-store --optimise ; \
-    nix --version
-# keep nix visible for later layers and at runtime
-ENV PATH="/root/.nix-profile/bin:/nix/var/nix/profiles/default/bin:${PATH}"
-RUN mkdir /etc/nix && printf '%s\n' \
-      "experimental-features = nix-command flakes" \
-      "build-users-group = nixbld" \
-    > /etc/nix/nix.conf
-ENV USER=root
-
 # Copy the requirements file and install using pip
 WORKDIR /app/frameos
 COPY frameos/ ./
 
 # Seed compiled assets and the freshness manifest before copying the rest of the repository
 RUN nimble assets -y
-
-# Cache a build so that the nix libraries are already there
-# RUN make nix-bin
-# RUN make nix-update
-# RUN rm -rf /app/frameos/result
 
 # Copy the requirements file and install using pip
 WORKDIR /app/backend

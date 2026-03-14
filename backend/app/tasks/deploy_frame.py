@@ -5,26 +5,22 @@ import re
 import shlex
 import tarfile
 import tempfile
-from typing import Any
 
 
 from arq import ArqRedis as Redis
 from sqlalchemy.orm import Session
 
 from app.drivers.devices import drivers_for_frame
-from app.models.assets import copy_custom_fonts_to_local_source_folder, sync_assets
+from app.models.assets import sync_assets
 from app.models.log import new_log as log
 from app.models.frame import Frame, update_frame
 from app.utils.remote_exec import upload_file
-from app.utils.local_exec import exec_local_command
 from app.models.settings import get_settings_dict
-from app.utils.nix_utils import nix_cmd
 from app.utils.ssh_authorized_keys import _install_authorized_keys
 from app.utils.ssh_key_utils import normalize_ssh_keys, select_ssh_keys_for_frame
 from app.utils.cross_compile import TargetMetadata
 from app.tasks._frame_deployer import FrameDeployer
 from app.tasks.binary_builder import FrameBinaryBuilder
-from app.utils.versions import current_frameos_version
 
 from .utils import find_nim_v2
 
@@ -171,61 +167,6 @@ async def _sync_vendor_dir(
             f"mkdir -p /srv/frameos/vendor && "
             f"cp -r /srv/frameos/build/build_{build_id}/vendor/{vendor_folder} /srv/frameos/vendor/"
         )
-
-
-async def _deploy_with_nixos(
-    deployer: FrameDeployer,
-    settings: dict[str, Any],
-    temp_dir: str,
-    frame_dict: dict[str, Any],
-    db: Session,
-    redis: Redis,
-    frame: Frame,
-):
-    await deployer.log("stdout", f"{icon} NixOS detected – using flake-based deploy")
-    await deployer.log("stdout", f"{icon} Preparing sources with local modifications under {temp_dir}")
-    source_dir_local = deployer.create_local_source_folder(temp_dir)
-    await deployer.make_local_modifications(source_dir_local)
-    await copy_custom_fonts_to_local_source_folder(db, source_dir_local)
-
-    sys_build_cmd, masked_build_cmd, cleanup = nix_cmd(
-        "nix --extra-experimental-features 'nix-command flakes' "
-        f"build \"$(realpath {source_dir_local})\"#nixosConfigurations.\"frame-host\".config.system.build.toplevel "
-        "--system aarch64-linux --print-out-paths "
-        "--log-format raw -L",
-        settings,
-    )
-    try:
-        await deployer.log("stdout", f"$ {masked_build_cmd}")
-        status, sys_out, sys_err = await exec_local_command(
-            deployer.db, deployer.redis, deployer.frame, sys_build_cmd, log_command=False
-        )
-    finally:
-        cleanup()
-    if status != 0 or not sys_out:
-        raise Exception(f"Local NixOS system build failed:\n{sys_err}")
-    result_path = sys_out.strip().splitlines()[-1]
-
-    updated_count = await deployer.nix_upload_path_and_deps(result_path)
-
-    await deployer._upload_scenes_json("/var/lib/frameos/scenes.json.gz", gzip=True)
-    await deployer._upload_frame_json("/var/lib/frameos/frame.json")
-    await sync_assets(db, redis, frame)
-
-    if updated_count == 0:
-        await deployer.restart_service("frameos")
-    else:
-        await deployer.exec_command(f"sudo nix-env --profile /nix/var/nix/profiles/system --set {result_path}")
-        await deployer.exec_command(
-            "sudo systemd-run --unit=nixos-switch --no-ask-password "
-            "/nix/var/nix/profiles/system/bin/switch-to-configuration switch"
-        )
-    frame.status = 'starting'
-    frame_dict['frameos_version'] = current_frameos_version()
-    frame.last_successful_deploy = frame_dict
-    frame.last_successful_deploy_at = datetime.now(timezone.utc)
-    await update_frame(db, redis, frame)
-    await deployer.log("stdinfo", f"{icon} Deploy finished in {datetime.now() - deployer.deploy_start} 🎉")
 
 
 async def _ensure_ntp_installed(deployer: FrameDeployer) -> None:
@@ -521,22 +462,6 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                 f"{icon} Detected distro: {distro} ({distro_version}), architecture: {arch}, total memory: {total_memory} MiB",
             )
 
-            # Fast-path for NixOS targets
-            if distro == "nixos":
-                await _deploy_with_nixos(
-                    deployer=self,
-                    settings=settings,
-                    temp_dir=temp_dir,
-                    frame_dict=frame_dict,
-                    db=db,
-                    redis=redis,
-                    frame=frame,
-                )
-                return   # ← all done, skip the legacy RPiOS flow
-
-            ## /END NIXOS
-
-
             ## Deploy onto Raspberry Pi OS or Debian/Ubuntu:
 
             if distro == "raspios":
@@ -544,8 +469,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             elif distro in ("debian", "ubuntu"):
                 await self.log("stdout", f"{icon} Debian/Ubuntu detected")
             else:
-                await self.log("stdout", f"{icon} Unknown distro '{distro}', trying apt and hoping for the best")
-                distro = "debian"
+                raise Exception(f"Unsupported target distro '{distro}'")
 
             drivers = drivers_for_frame(frame)
 
