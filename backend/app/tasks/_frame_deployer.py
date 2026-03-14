@@ -331,8 +331,16 @@ class FrameDeployer:
         cpu: str,
         debug_options: str,
         nimbase_path: str,
+        scene_ids: Iterable[str] | None = None,
     ) -> list[str]:
         plugin_sources = sorted(glob(os.path.join(source_dir, "src", "scenes", "plugin_*.nim")))
+        if scene_ids is not None:
+            selected_modules = {scene_module_name(scene_id) for scene_id in scene_ids}
+            plugin_sources = [
+                plugin_path
+                for plugin_path in plugin_sources
+                if os.path.splitext(os.path.basename(plugin_path))[0].removeprefix("plugin_") in selected_modules
+            ]
         if not plugin_sources:
             return []
 
@@ -354,7 +362,14 @@ class FrameDeployer:
                 f"--out:{os.path.join(plugin_build_dir, library_name)} "
                 f"{debug_options} {rel_plugin_path} 2>&1"
             )
-            status, out, err = await exec_local_command(self.db, self.redis, self.frame, cmd)
+            status, out, err = await exec_local_command(
+                self.db,
+                self.redis,
+                self.frame,
+                cmd,
+                log_command=False,
+                log_output=False,
+            )
             if status != 0:
                 await self._log_nim_compile_failure(source_dir, out or "", err or "")
                 raise Exception(f"Failed to generate compiled scene sources for {library_name}")
@@ -490,7 +505,11 @@ class FrameDeployer:
         self,
         build_dir: str,
         source_dir: str,
-        arch: str
+        arch: str,
+        *,
+        build_binary: bool = True,
+        build_scene_ids: Iterable[str] | None = None,
+        build_all_scenes: bool = True,
     ) -> str:
         db = self.db
         redis = self.redis
@@ -522,37 +541,63 @@ class FrameDeployer:
             shutil.rmtree(os.path.join(build_dir, "vendor", vendor_folder, "env"), ignore_errors=True)
             shutil.rmtree(os.path.join(build_dir, "vendor", vendor_folder, "__pycache__"), ignore_errors=True)
 
-        await self.log(
-            "stdout",
-            "🔥 Generating C sources from Nim sources.",
-        )
-
         cpu = await self.arch_to_nim_cpu(arch)
         debug_options = "--lineTrace:on" if frame.debug else ""
-        cmd = (
-            f"cd {source_dir} && nimble assets -y && nimble setup && "
-            f"{nim_path} compile --os:linux --cpu:{cpu} "
-            f"--compileOnly --genScript --nimcache:{build_dir} "
-            f"{debug_options} src/frameos.nim 2>&1"
-        )
+        selected_scene_ids = tuple(build_scene_ids or ())
+        build_scenes = build_all_scenes or bool(selected_scene_ids)
 
-        status, out, err = await exec_local_command(db, redis, frame, cmd)
-        if status != 0:
-            await self._log_nim_compile_failure(source_dir, out or "", err or "")
-            raise Exception("Failed to generate frameos sources")
+        if build_binary or build_scenes:
+            setup_command = f"cd {source_dir} && nimble assets -y && nimble setup"
+            status, out, err = await exec_local_command(
+                db,
+                redis,
+                frame,
+                setup_command,
+                log_command=False,
+                log_output=False,
+            )
+            if status != 0:
+                raise Exception(
+                    "Failed to prepare Nim build sources\n"
+                    f"stderr: {err or ''}\nstdout: {out or ''}"
+                )
 
         nimbase_path = find_nimbase_file(nim_path)
         if not nimbase_path:
             raise Exception("nimbase.h not found")
 
-        shutil.copy(nimbase_path, os.path.join(build_dir, "nimbase.h"))
-        scene_build_dirs = await self._generate_compiled_scene_build_dirs(
-            source_dir=source_dir,
-            build_dir=build_dir,
-            cpu=cpu,
-            debug_options=debug_options,
-            nimbase_path=nimbase_path,
-        )
+        scene_build_dirs: list[str] = []
+        if build_binary:
+            cmd = (
+                f"cd {source_dir} && "
+                f"{nim_path} compile --os:linux --cpu:{cpu} "
+                f"--compileOnly --genScript --nimcache:{build_dir} "
+                f"{debug_options} src/frameos.nim 2>&1"
+            )
+
+            status, out, err = await exec_local_command(
+                db,
+                redis,
+                frame,
+                cmd,
+                log_command=False,
+                log_output=False,
+            )
+            if status != 0:
+                await self._log_nim_compile_failure(source_dir, out or "", err or "")
+                raise Exception("Failed to generate frameos sources")
+
+            shutil.copy(nimbase_path, os.path.join(build_dir, "nimbase.h"))
+
+        if build_scenes:
+            scene_build_dirs = await self._generate_compiled_scene_build_dirs(
+                source_dir=source_dir,
+                build_dir=build_dir,
+                cpu=cpu,
+                debug_options=debug_options,
+                nimbase_path=nimbase_path,
+                scene_ids=None if build_all_scenes else selected_scene_ids,
+            )
 
         if waveshare := drivers.get('waveshare'):
             if waveshare.variant:
@@ -585,24 +630,25 @@ class FrameDeployer:
                         os.path.join(build_dir, wf)
                     )
 
-        script_path = os.path.join(build_dir, "compile_frameos.sh")
-        compiler_flags, linker_flags = self._parse_compile_script(
-            script_path,
-            output_name="frameos",
-        )
-        linker_flags = self._dedupe_preserve_order(
-            linker_flags
-            + ["quickjs/libquickjs.a"]
-            + self._driver_linker_flags(drivers)
-        )
-        self._write_c_build_makefile(
-            source_dir=source_dir,
-            target_path=os.path.join(build_dir, "Makefile"),
-            executable="frameos",
-            compiler_flags=compiler_flags,
-            linker_flags=linker_flags,
-            compiled_scene_dirs=scene_build_dirs,
-        )
+        if build_binary:
+            script_path = os.path.join(build_dir, "compile_frameos.sh")
+            compiler_flags, linker_flags = self._parse_compile_script(
+                script_path,
+                output_name="frameos",
+            )
+            linker_flags = self._dedupe_preserve_order(
+                linker_flags
+                + ["quickjs/libquickjs.a"]
+                + self._driver_linker_flags(drivers)
+            )
+            self._write_c_build_makefile(
+                source_dir=source_dir,
+                target_path=os.path.join(build_dir, "Makefile"),
+                executable="frameos",
+                compiler_flags=compiler_flags,
+                linker_flags=linker_flags,
+                compiled_scene_dirs=scene_build_dirs if build_all_scenes else None,
+            )
 
         archive_path = os.path.join(temp_dir, f"build_{build_id}.tar.gz")
         zip_base = os.path.join(temp_dir, f"build_{build_id}")

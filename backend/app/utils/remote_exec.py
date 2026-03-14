@@ -153,6 +153,8 @@ async def run_commands(
     *,
     timeout: int = 120,
     log_output: bool = True,
+    log_command: bool = True,
+    log_connection: bool = True,
 ) -> None:
     """
     Execute *commands* (in order) on the frame. Either via the WebSocket agent or via SSH.
@@ -160,7 +162,8 @@ async def run_commands(
 
     if await _use_agent(frame, redis):
         for cmd in commands:
-            await log(db, redis, frame.id, "stdout", f"> {cmd}")
+            if log_command:
+                await log(db, redis, frame.id, "stdout", f"> {cmd}")
             try:
                 await _exec_via_agent(redis, frame, cmd, timeout)
             except Exception as e:
@@ -175,10 +178,18 @@ async def run_commands(
 
         return
 
-    ssh = await get_ssh_connection(db, redis, frame)
+    ssh = await get_ssh_connection(db, redis, frame, log_connection=log_connection)
     try:
         for cmd in commands:
-            await exec_command(db, redis, frame, ssh, cmd, log_output=log_output)
+            await exec_command(
+                db,
+                redis,
+                frame,
+                ssh,
+                cmd,
+                log_output=log_output,
+                log_command=log_command,
+            )
     finally:
         await remove_ssh_connection(db, redis, ssh, frame)
 
@@ -206,6 +217,8 @@ async def upload_file(
     data: bytes,
     *,
     timeout: int = 120,
+    log_transfer: bool = True,
+    log_connection: bool = True,
 ) -> None:
     """
     Write *data* to *remote_path* on the device:
@@ -214,7 +227,8 @@ async def upload_file(
 
     if await _use_agent(frame, redis):
         try:
-            await log(db, redis, frame.id, "stdout", f"> uploading {remote_path} ({print_size(size)} via agent)")
+            if log_transfer:
+                await log(db, redis, frame.id, "stdout", f"> uploading {remote_path} ({print_size(size)} via agent)")
             await _stream_file_via_agent(db, redis, frame, remote_path, data)
             # TODO: restore faster path for smaller files?
             # if len(data) > 2 * 1024 * 1024:           # >2 MiB → streamed
@@ -231,13 +245,14 @@ async def upload_file(
             )
             raise
 
-    ssh = await get_ssh_connection(db, redis, frame)
+    ssh = await get_ssh_connection(db, redis, frame, log_connection=log_connection)
     try:
         with tempfile.NamedTemporaryFile(delete=False) as tmp:
             tmp.write(data)
             tmp_path = tmp.name
 
-        await log(db, redis, frame.id, "stdout", f"> scp → {remote_path} ({print_size(size)})")
+        if log_transfer:
+            await log(db, redis, frame.id, "stdout", f"> scp → {remote_path} ({print_size(size)})")
         await asyncssh.scp(
             tmp_path,
             (ssh, shlex.quote(remote_path)),
@@ -423,13 +438,14 @@ async def _run_command_ssh(
     timeout: int,
     *,
     log_output: bool = True,
-    log_command: str | bool = True
+    log_command: str | bool = True,
+    log_connection: bool = True,
 ) -> Tuple[int, str, str]:
     """
     Execute *cmd* over SSH, capturing stdout & stderr separately.
     Works whether the channel is opened in text (default) or binary mode.
     """
-    ssh = await get_ssh_connection(db, redis, frame)
+    ssh = await get_ssh_connection(db, redis, frame, log_connection=log_connection)
     try:
         if log_command:
             await log(db, redis, frame.id, "stdout", f"> {log_command if isinstance(log_command, str) else cmd}")
@@ -493,6 +509,7 @@ async def run_command(
     timeout: int = 120,
     log_output: bool = True,
     log_command: str | bool = True,
+    log_connection: bool = True,
 ) -> Tuple[int, str, str]:
     """
     Run a single *command* on *frame* and capture its textual output.
@@ -504,4 +521,13 @@ async def run_command(
     """
     if await _use_agent(frame, redis):
         return await _run_command_agent(db, redis, frame, command, timeout, log_output=log_output, log_command=log_command)
-    return await _run_command_ssh(db, redis, frame, command, timeout, log_output=log_output, log_command=log_command)
+    return await _run_command_ssh(
+        db,
+        redis,
+        frame,
+        command,
+        timeout,
+        log_output=log_output,
+        log_command=log_command,
+        log_connection=log_connection,
+    )

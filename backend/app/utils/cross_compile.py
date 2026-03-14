@@ -76,6 +76,32 @@ PLATFORM_MAP = {
     "armv6l": "linux/arm/v6",
 }
 
+
+def _pluralize(count: int, singular: str, plural: str | None = None) -> str:
+    if count == 1:
+        return singular
+    return plural or f"{singular}s"
+
+
+def _short_scene_id(scene_id: str) -> str:
+    normalized = str(scene_id or "default")
+    if len(normalized) <= 12:
+        return normalized
+    return f"{normalized[:8]}..."
+
+
+def _format_scene_label(frame: Frame, scene_id: str) -> str:
+    for scene in (getattr(frame, "scenes", None) or []):
+        current_id = str(scene.get("id") or "default")
+        if current_id != scene_id:
+            continue
+        scene_name = str(scene.get("name") or "").strip()
+        short_id = _short_scene_id(scene_id)
+        if scene_name and scene_name != scene_id:
+            return f"{scene_name} ({short_id})"
+        return short_id
+    return _short_scene_id(scene_id)
+
 def can_cross_compile_target(arch: str | None) -> bool:
     """Return ``True`` when *arch* has a known Docker platform mapping."""
 
@@ -149,6 +175,7 @@ class CrossCompiler:
         source_dir: str,
         *,
         build_binary: bool = True,
+        build_scene_ids: list[str] | tuple[str, ...] | None = None,
         build_scene_dirs: list[str] | None = None,
         build_all_scenes: bool = True,
     ) -> CrossCompileArtifacts:
@@ -166,17 +193,19 @@ class CrossCompiler:
                 )
                 try:
                     return await self._build_with_context(
-                        source_dir,
-                        build_binary=build_binary,
-                        build_scene_dirs=build_scene_dirs,
-                        build_all_scenes=build_all_scenes,
-                    )
+                    source_dir,
+                    build_binary=build_binary,
+                    build_scene_ids=build_scene_ids,
+                    build_scene_dirs=build_scene_dirs,
+                    build_all_scenes=build_all_scenes,
+                )
                 finally:
                     self._build_host_session = None
                     self._remote_root = None
         return await self._build_with_context(
             source_dir,
             build_binary=build_binary,
+            build_scene_ids=build_scene_ids,
             build_scene_dirs=build_scene_dirs,
             build_all_scenes=build_all_scenes,
         )
@@ -186,6 +215,7 @@ class CrossCompiler:
         source_dir: str,
         *,
         build_binary: bool,
+        build_scene_ids: list[str] | tuple[str, ...] | None,
         build_scene_dirs: list[str] | None,
         build_all_scenes: bool,
     ) -> CrossCompileArtifacts:
@@ -199,14 +229,31 @@ class CrossCompiler:
         build_dir = self.build_dir_override
         if build_dir:
             build_dir = Path(build_dir)
-            if not (build_dir / "compile_frameos.sh").exists():
+            if not self._build_dir_has_requested_sources(
+                build_dir,
+                build_binary=build_binary,
+                build_scene_dirs=build_scene_dirs,
+                build_all_scenes=build_all_scenes,
+            ):
                 await self._log(
                     "stderr",
                     f"{icon} Provided build directory {build_dir} is missing generated sources; regenerating",
                 )
-                build_dir = await self._generate_c_sources(source_dir)
+                build_dir = await self._generate_c_sources(
+                    source_dir,
+                    build_binary=build_binary,
+                    build_scene_ids=build_scene_ids,
+                    build_scene_dirs=build_scene_dirs,
+                    build_all_scenes=build_all_scenes,
+                )
         else:
-            build_dir = await self._generate_c_sources(source_dir)
+            build_dir = await self._generate_c_sources(
+                source_dir,
+                build_binary=build_binary,
+                build_scene_ids=build_scene_ids,
+                build_scene_dirs=build_scene_dirs,
+                build_all_scenes=build_all_scenes,
+            )
         await self._prepare_sysroot()
         await self._ensure_lgpio_in_sysroot()
         if build_binary:
@@ -214,9 +261,30 @@ class CrossCompiler:
         return await self._run_docker_build(
             str(build_dir),
             build_binary=build_binary,
+            build_scene_ids=build_scene_ids,
             build_scene_dirs=build_scene_dirs,
             build_all_scenes=build_all_scenes,
         )
+
+    @staticmethod
+    def _build_dir_has_requested_sources(
+        build_dir: Path,
+        *,
+        build_binary: bool,
+        build_scene_dirs: list[str] | None,
+        build_all_scenes: bool,
+    ) -> bool:
+        if build_binary and not (build_dir / "compile_frameos.sh").exists():
+            return False
+
+        if build_all_scenes or build_scene_dirs:
+            scene_root = build_dir / "scene_builds"
+            if not scene_root.is_dir():
+                return False
+            if build_scene_dirs:
+                return all((build_dir / scene_dir).is_dir() for scene_dir in build_scene_dirs)
+
+        return True
 
     async def _prepare_sysroot(self) -> None:
         if self.prebuilt_components:
@@ -237,11 +305,23 @@ class CrossCompiler:
         build_dir: str,
         *,
         build_binary: bool = True,
+        build_scene_ids: list[str] | tuple[str, ...] | None = None,
         build_scene_dirs: list[str] | None = None,
         build_all_scenes: bool = True,
     ) -> CrossCompileArtifacts:
         build_dir = os.path.abspath(build_dir)
         script_path = self.temp_dir / "frameos-cross-build.sh"
+        if build_binary:
+            await self._log("stdout", f"{icon} FrameOS compile: cross-compiling")
+        if build_all_scenes:
+            await self._log("stdout", f"{icon} Scene compile: cross-compiling all requested scenes")
+        elif build_scene_dirs:
+            await self._log(
+                "stdout",
+                f"{icon} Scene compile: cross-compiling {len(build_scene_dirs)} {_pluralize(len(build_scene_dirs), 'scene')}",
+            )
+        for scene_id in build_scene_ids or ():
+            await self._log("stdout", f"{icon} Compiling scene: {_format_scene_label(self.frame, scene_id)}")
         include_candidates = (
             [f"/sysroot{path}" for path in sorted(self._sysroot_include_dirs)]
             if self._sysroot_include_dirs
@@ -333,6 +413,7 @@ class CrossCompiler:
                 image,
                 build_binary=build_binary,
                 build_scene_dirs=build_scene_dirs,
+                build_all_scenes=build_all_scenes,
             )
 
         script_path.write_text(script_content)
@@ -356,7 +437,8 @@ class CrossCompiler:
             self.redis,
             self.frame,
             docker_cmd,
-            log_command="docker run (cross compile)",
+            log_command=False,
+            log_output=False,
         )
         if status != 0:
             raise RuntimeError(f"Cross compilation failed: {err or 'see logs'}")
@@ -376,6 +458,7 @@ class CrossCompiler:
         *,
         build_binary: bool = True,
         build_scene_dirs: list[str] | None = None,
+        build_all_scenes: bool = True,
     ) -> CrossCompileArtifacts:
         if not self._build_host_session or not self._remote_root:
             raise RuntimeError("Build host session unavailable during cross compilation")
@@ -414,7 +497,8 @@ class CrossCompiler:
 
         status, _, err = await host.run(
             docker_cmd,
-            log_command="docker run (build host cross compile)",
+            log_command=False,
+            log_output=False,
         )
         if status != 0:
             raise RuntimeError(f"Cross compilation failed: {err or 'see logs'}")
@@ -435,7 +519,7 @@ class CrossCompiler:
                 f"{icon} Downloading compiled scene artifacts from build host",
             )
             await host.download_dir_tarball(remote_scenes_dir, local_scenes_dir)
-        elif build_scene_dirs:
+        elif build_scene_dirs or build_all_scenes:
             local_scenes_dir = None
         return CrossCompileArtifacts(binary_path=local_binary, scenes_dir=local_scenes_dir)
 
@@ -483,13 +567,24 @@ class CrossCompiler:
             ),
         )
 
-    async def _generate_c_sources(self, source_dir: str) -> Path:
+    async def _generate_c_sources(
+        self,
+        source_dir: str,
+        *,
+        build_binary: bool,
+        build_scene_ids: list[str] | tuple[str, ...] | None,
+        build_scene_dirs: list[str] | None,
+        build_all_scenes: bool,
+    ) -> Path:
         build_dir = self.temp_dir / f"build_{self.deployer.build_id}"
         build_dir.mkdir(parents=True, exist_ok=True)
         await self.deployer.create_local_build_archive(
             str(build_dir),
             source_dir,
             self.target.arch,
+            build_binary=build_binary,
+            build_scene_ids=build_scene_ids,
+            build_all_scenes=build_all_scenes,
         )
         return build_dir
 
@@ -1032,6 +1127,7 @@ async def build_artifacts_with_cross_toolchain(
     logger: LogFunc | None = None,
     build_host: BuildHostConfig | None = None,
     build_binary: bool = True,
+    build_scene_ids: list[str] | tuple[str, ...] | None = None,
     build_scene_dirs: list[str] | None = None,
     build_all_scenes: bool = True,
 ) -> CrossCompileArtifacts:
@@ -1105,6 +1201,7 @@ async def build_artifacts_with_cross_toolchain(
     return await compiler.build_artifacts(
         source_dir,
         build_binary=build_binary,
+        build_scene_ids=build_scene_ids,
         build_scene_dirs=build_scene_dirs,
         build_all_scenes=build_all_scenes,
     )

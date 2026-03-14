@@ -79,7 +79,13 @@ class PooledConnection:
 # PUBLIC SSH UTILS
 # ---------------------------------------
 
-async def get_ssh_connection(db: Session, redis: ArqRedis, frame: Frame) -> asyncssh.SSHClientConnection:
+async def get_ssh_connection(
+    db: Session,
+    redis: ArqRedis,
+    frame: Frame,
+    *,
+    log_connection: bool = True,
+) -> asyncssh.SSHClientConnection:
     """
     Retrieve an SSH connection from the pool if available. Otherwise, open a new one.
     If all existing connections for this frame's credentials are in use, create another one.
@@ -116,7 +122,7 @@ async def get_ssh_connection(db: Session, redis: ArqRedis, frame: Frame) -> asyn
                     return pc.ssh
 
         # No idle connections or no list at all -> create new one
-        new_ssh = await _create_new_connection(db, redis, frame)
+        new_ssh = await _create_new_connection(db, redis, frame, log_connection=log_connection)
         pc = PooledConnection(new_ssh)
         pc.mark_in_use()
 
@@ -169,7 +175,13 @@ async def schedule_close(pc: PooledConnection, pool_key, db, redis, frame_id):
 # LOW-LEVEL / INTERNAL
 # ---------------------------------------
 
-async def _create_new_connection(db, redis, frame) -> asyncssh.SSHClientConnection:
+async def _create_new_connection(
+    db,
+    redis,
+    frame,
+    *,
+    log_connection: bool = True,
+) -> asyncssh.SSHClientConnection:
     """Actually create a brand-new SSH connection."""
     host = frame.frame_host
     port = frame.ssh_port or 22
@@ -197,11 +209,12 @@ async def _create_new_connection(db, redis, frame) -> asyncssh.SSHClientConnecti
                 raise Exception("Could not parse the private key from DB. Check if it's valid PEM.")
             client_keys.append(private_key_obj)
 
-    await log(
-        db, redis, frame.id, "stdinfo",
-        f"Connecting via SSH to {username}@{host} "
-        f"({'password' if password else f'keypair: {keypair_label}'})"
-    )
+    if log_connection:
+        await log(
+            db, redis, frame.id, "stdinfo",
+            f"Connecting via SSH to {username}@{host} "
+            f"({'password' if password else f'keypair: {keypair_label}'})"
+        )
 
     try:
         ssh = await asyncssh.connect(
@@ -212,7 +225,8 @@ async def _create_new_connection(db, redis, frame) -> asyncssh.SSHClientConnecti
             client_keys=client_keys if not password else None,
             known_hosts=None
         )
-        await log(db, redis, frame.id, "stdinfo", f"SSH connection established to {username}@{host}")
+        if log_connection:
+            await log(db, redis, frame.id, "stdinfo", f"SSH connection established to {username}@{host}")
         return ssh
     except (OSError, asyncssh.Error) as exc:
         raise Exception(f"Unable to connect to {host}:{port} via SSH: {exc}")

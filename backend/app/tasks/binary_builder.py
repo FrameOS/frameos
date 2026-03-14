@@ -180,13 +180,24 @@ class FrameBinaryBuilder:
             await copy_custom_fonts_to_local_source_folder(self.db, source_dir)
         return source_dir
 
-    async def prepare_build_archive(self, *, source_dir: str, arch: str) -> tuple[str, str]:
+    async def prepare_build_archive(
+        self,
+        *,
+        source_dir: str,
+        arch: str,
+        build_binary: bool = True,
+        build_scene_ids: list[str] | tuple[str, ...] | None = None,
+        build_all_scenes: bool = True,
+    ) -> tuple[str, str]:
         build_dir = create_build_folder(self.temp_dir, self.deployer.build_id)
-        await self._log("stdout", f"{icon} Creating build archive")
+        await self._log("stdout", f"{icon} Preparing build sources")
         archive_path = await self.deployer.create_local_build_archive(
             build_dir,
             source_dir,
             arch,
+            build_binary=build_binary,
+            build_scene_ids=build_scene_ids,
+            build_all_scenes=build_all_scenes,
         )
         return build_dir, archive_path
 
@@ -204,6 +215,7 @@ class FrameBinaryBuilder:
         allow_cross_compile: bool = True,
         force_cross_compile: bool = False,
         build_binary: bool = True,
+        build_scene_ids: list[str] | tuple[str, ...] | None = None,
         build_scene_dirs: list[str] | None = None,
         build_all_scenes: bool = True,
     ) -> RequestedArtifactBuildResult:
@@ -217,12 +229,12 @@ class FrameBinaryBuilder:
         if build_host:
             await self._log(
                 "stdout",
-                f"{icon} Target supports cross compilation; building requested artifacts via build host",
+                f"{icon} Build strategy: build host cross-compilation",
             )
         else:
             await self._log(
                 "stdout",
-                f"{icon} Target supports cross compilation; building requested artifacts locally",
+                f"{icon} Build strategy: local cross-compilation",
             )
 
         try:
@@ -240,6 +252,7 @@ class FrameBinaryBuilder:
                 logger=self._log,
                 build_host=build_host,
                 build_binary=build_binary,
+                build_scene_ids=build_scene_ids,
                 build_scene_dirs=build_scene_dirs,
                 build_all_scenes=build_all_scenes,
             )

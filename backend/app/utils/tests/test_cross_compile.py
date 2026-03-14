@@ -179,7 +179,7 @@ async def test_build_with_context_skips_quickjs_for_scene_only_cross_compile(
     source_dir.mkdir(parents=True, exist_ok=True)
     build_dir = tmp_path / "build"
     build_dir.mkdir(parents=True, exist_ok=True)
-    (build_dir / "compile_frameos.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    (build_dir / "scene_builds" / "demo").mkdir(parents=True, exist_ok=True)
     compiler.build_dir_override = build_dir
 
     quickjs_calls: list[str] = []
@@ -203,11 +203,13 @@ async def test_build_with_context_skips_quickjs_for_scene_only_cross_compile(
         build_dir_path: str,
         *,
         build_binary: bool = True,
+        build_scene_ids: list[str] | None = None,
         build_scene_dirs: list[str] | None = None,
         build_all_scenes: bool = True,
     ) -> CrossCompileArtifacts:
         assert build_dir_path == str(build_dir)
         assert build_binary is False
+        assert build_scene_ids == ["demo"]
         assert build_scene_dirs == ["scene_builds/demo"]
         assert build_all_scenes is False
         return CrossCompileArtifacts(binary_path=None, scenes_dir=str(build_dir / "scenes"))
@@ -222,6 +224,7 @@ async def test_build_with_context_skips_quickjs_for_scene_only_cross_compile(
     artifacts = await compiler._build_with_context(
         str(source_dir),
         build_binary=False,
+        build_scene_ids=["demo"],
         build_scene_dirs=["scene_builds/demo"],
         build_all_scenes=False,
     )

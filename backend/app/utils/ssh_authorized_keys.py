@@ -64,8 +64,24 @@ async def _install_authorized_keys(
 
     temp_path = f"/tmp/frameos_authorized_keys_{uuid.uuid4().hex}"
     known_path = f"/tmp/frameos_known_authorized_keys_{uuid.uuid4().hex}"
-    await upload_file(db, redis, frame, temp_path, f"{key_blob}\n".encode())
-    await upload_file(db, redis, frame, known_path, "\n".join(unique_known_keys).encode())
+    await upload_file(
+        db,
+        redis,
+        frame,
+        temp_path,
+        f"{key_blob}\n".encode(),
+        log_transfer=False,
+        log_connection=False,
+    )
+    await upload_file(
+        db,
+        redis,
+        frame,
+        known_path,
+        "\n".join(unique_known_keys).encode(),
+        log_transfer=False,
+        log_connection=False,
+    )
 
     user = frame.ssh_user or "frame"
     user_quoted = shlex.quote(user)
@@ -96,4 +112,12 @@ async def _install_authorized_keys(
         f"else chown -R {user_quoted} \"$home_dir/.ssh\"; fi; "
         f"rm -f {temp_quoted} {known_quoted} \"$merged_keys\""
     )
-    await run_commands(db, redis, frame, [command], log_output=False)
+    await run_commands(
+        db,
+        redis,
+        frame,
+        [command],
+        log_output=False,
+        log_command=False,
+        log_connection=False,
+    )

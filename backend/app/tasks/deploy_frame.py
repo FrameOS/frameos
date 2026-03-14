@@ -24,6 +24,7 @@ from app.utils.versions import current_frameos_version
 from app.tasks._frame_deployer import FrameDeployer
 from app.tasks.binary_builder import FrameBinaryBuilder, resolve_prebuilt_entry
 from app.tasks.compile_manifest import (
+    CompilePlan,
     SMART_DEPLOY,
     build_compile_manifest,
     compile_manifest_from_dict,
@@ -56,6 +57,131 @@ def _sanitize_apt_package_name(pkg: str) -> str:
     if not APT_PACKAGE_NAME_PATTERN.fullmatch(normalized):
         raise ValueError(f"Invalid apt package name: {pkg!r}")
     return normalized
+
+
+def _short_scene_id(scene_id: str) -> str:
+    normalized = str(scene_id or "default")
+    if len(normalized) <= 12:
+        return normalized
+    return f"{normalized[:8]}..."
+
+
+def _scene_label_lookup(frame: Frame) -> dict[str, str]:
+    labels: dict[str, str] = {}
+    for scene in frame.scenes or []:
+        scene_id = str(scene.get("id") or "default")
+        scene_name = str(scene.get("name") or "").strip()
+        short_id = _short_scene_id(scene_id)
+        if scene_name and scene_name != scene_id:
+            labels[scene_id] = f"{scene_name} ({short_id})"
+        else:
+            labels[scene_id] = short_id
+    return labels
+
+
+def _format_scene_list(frame: Frame, scene_ids: tuple[str, ...], *, limit: int = 3) -> str:
+    labels = _scene_label_lookup(frame)
+    formatted = [labels.get(scene_id, _short_scene_id(scene_id)) for scene_id in scene_ids]
+    if len(formatted) <= limit:
+        return ", ".join(formatted)
+    return f"{', '.join(formatted[:limit])}, +{len(formatted) - limit} more"
+
+
+def _format_scene_label(frame: Frame, scene_id: str) -> str:
+    return _scene_label_lookup(frame).get(scene_id, _short_scene_id(scene_id))
+
+
+def _scene_compile_start_lines(frame: Frame, scene_ids: tuple[str, ...]) -> list[str]:
+    return [f"{icon} Compiling scene: {_format_scene_label(frame, scene_id)}" for scene_id in scene_ids]
+
+
+def _compile_plan_log_lines(frame: Frame, compile_plan: Any, compile_manifest: Any) -> list[str]:
+    lines = [f"{icon} Compile plan: {compile_plan.reason}"]
+
+    if compile_plan.rebuild_app:
+        lines.append(f"{icon} FrameOS compile: requested")
+    else:
+        app_reason = "app inputs unchanged" if compile_plan.rebuild_scene_ids else "inputs unchanged"
+        lines.append(f"{icon} FrameOS compile: skipped ({app_reason})")
+
+    total_compiled_scenes = len(compile_manifest.scene_hashes)
+    if total_compiled_scenes == 0:
+        lines.append(f"{icon} Scene compile: skipped (no compiled scenes configured)")
+    elif compile_plan.rebuild_scene_ids:
+        reused = len(compile_plan.reuse_scene_ids)
+        reuse_suffix = f", reusing {reused}" if reused else ""
+        lines.append(
+            f"{icon} Scene compile: requested ({len(compile_plan.rebuild_scene_ids)} changed{reuse_suffix})"
+        )
+        lines.append(f"{icon} Scenes to compile: {_format_scene_list(frame, compile_plan.rebuild_scene_ids)}")
+    else:
+        reused = len(compile_plan.reuse_scene_ids)
+        reuse_suffix = f"; reusing {reused}" if reused else ""
+        lines.append(f"{icon} Scene compile: skipped (compiled scene inputs unchanged{reuse_suffix})")
+
+    return lines
+
+
+def _pluralize(count: int, singular: str, plural: str | None = None) -> str:
+    if count == 1:
+        return singular
+    return plural or f"{singular}s"
+
+
+async def _remote_file_exists(deployer: FrameDeployer, path: str) -> bool:
+    return (
+        await deployer.exec_command(
+            f"test -f {shlex.quote(path)}",
+            raise_on_error=False,
+            log_command=False,
+            log_output=False,
+        )
+        == 0
+    )
+
+
+async def _adjust_compile_plan_for_missing_remote_artifacts(
+    deployer: FrameDeployer,
+    compile_plan: CompilePlan,
+    compile_manifest: Any,
+) -> CompilePlan:
+    rebuild_app = compile_plan.rebuild_app
+    rebuild_scene_ids = list(compile_plan.rebuild_scene_ids)
+    reuse_scene_ids = list(compile_plan.reuse_scene_ids)
+    extra_reasons: list[str] = []
+
+    if not rebuild_app and not await _remote_file_exists(deployer, "/srv/frameos/current/frameos"):
+        rebuild_app = True
+        extra_reasons.append("current FrameOS binary missing on device")
+
+    missing_scene_ids: list[str] = []
+    for scene_id in compile_plan.reuse_scene_ids:
+        scene_state = compile_manifest.scene_hashes.get(scene_id)
+        if scene_state is None:
+            continue
+        if not await _remote_file_exists(
+            deployer,
+            f"/srv/frameos/current/scenes/{scene_state.library}",
+        ):
+            missing_scene_ids.append(scene_id)
+
+    if missing_scene_ids:
+        rebuild_scene_ids.extend(missing_scene_ids)
+        reuse_scene_ids = [scene_id for scene_id in reuse_scene_ids if scene_id not in missing_scene_ids]
+        extra_reasons.append(
+            f"{len(missing_scene_ids)} cached {_pluralize(len(missing_scene_ids), 'scene')} missing on device"
+        )
+
+    if not extra_reasons:
+        return compile_plan
+
+    return CompilePlan(
+        mode=compile_plan.mode,
+        rebuild_app=rebuild_app,
+        rebuild_scene_ids=tuple(rebuild_scene_ids),
+        reuse_scene_ids=tuple(reuse_scene_ids),
+        reason=f"{compile_plan.reason}; {'; '.join(extra_reasons)}",
+    )
 
 
 async def _install_if_necessary(
@@ -114,7 +240,13 @@ async def _install_if_necessary(
 
 
 async def _upload_directory_tree(
-    deployer: FrameDeployer, local_dir: str, remote_dir: str, label: str, build_id: str
+    deployer: FrameDeployer,
+    local_dir: str,
+    remote_dir: str,
+    label: str,
+    build_id: str,
+    *,
+    replace: bool = True,
 ) -> None:
     normalized_local = os.path.abspath(local_dir)
     if not os.path.isdir(normalized_local):
@@ -143,7 +275,8 @@ async def _upload_directory_tree(
     quoted_remote = shlex.quote(remote_dir)
     quoted_archive = shlex.quote(remote_archive)
     await deployer.exec_command(f"mkdir -p {quoted_parent}")
-    await deployer.exec_command(f"rm -rf {quoted_remote}", raise_on_error=False)
+    if replace:
+        await deployer.exec_command(f"rm -rf {quoted_remote}", raise_on_error=False)
     await deployer.exec_command(
         f"tar -xzf {quoted_archive} -C {quoted_parent} && rm {quoted_archive}"
     )
@@ -444,7 +577,7 @@ async def _upload_remote_build_archive(
 ) -> str:
     remote_archive = f"/srv/frameos/build/build_{build_id}.tar.gz"
     remote_build_root = f"/srv/frameos/build/build_{build_id}"
-    await deployer.log("stdout", f"> add {remote_archive}")
+    await deployer.log("stdout", f"{icon} Uploading build sources to remote")
 
     with open(archive_path, "rb") as fh:
         data = fh.read()
@@ -467,13 +600,14 @@ async def _upload_local_compiled_scenes(
     remote_scenes_dir: str,
     build_id: str,
 ) -> None:
-    await deployer.log("stdout", f"{icon} Uploading compiled scene plugins")
+    await deployer.log("stdout", f"{icon} Uploading compiled scenes")
     await _upload_directory_tree(
         deployer,
         local_scenes_dir,
         remote_scenes_dir,
-        "compiled scene plugins",
+        "compiled scenes",
         build_id,
+        replace=False,
     )
 
 
@@ -481,8 +615,19 @@ async def _build_remote_compiled_scenes(
     deployer: FrameDeployer,
     remote_build_root: str,
     scene_build_dirs: list[str] | None = None,
+    scene_ids: tuple[str, ...] | None = None,
 ) -> None:
-    await deployer.log("stdout", f"{icon} Building compiled scene plugins on remote")
+    scene_count = len(scene_build_dirs or [])
+    if scene_count:
+        await deployer.log(
+            "stdout",
+            f"{icon} Scene compile: building {scene_count} {_pluralize(scene_count, 'scene')} on device",
+        )
+    else:
+        await deployer.log("stdout", f"{icon} Scene compile: building scenes on device")
+    if scene_ids and hasattr(deployer, "frame"):
+        for line in _scene_compile_start_lines(deployer.frame, tuple(scene_ids)):
+            await deployer.log("stdout", line)
     if scene_build_dirs:
         quoted_dirs = " ".join(shlex.quote(scene_dir) for scene_dir in scene_build_dirs)
         await deployer.exec_command(
@@ -492,9 +637,18 @@ async def _build_remote_compiled_scenes(
                 f"for dir in {quoted_dirs}; do make --no-print-directory -C \"$dir\" || exit $?; done"
             ),
             timeout=3600,
+            log_command=False,
+            log_output=False,
         )
+        await deployer.log("stdout", f"{icon} Scene compile: completed on device")
         return
-    await deployer.exec_command(f"cd {shlex.quote(remote_build_root)} && make compiled-scenes", timeout=3600)
+    await deployer.exec_command(
+        f"cd {shlex.quote(remote_build_root)} && make compiled-scenes",
+        timeout=3600,
+        log_command=False,
+        log_output=False,
+    )
+    await deployer.log("stdout", f"{icon} Scene compile: completed on device")
 
 
 async def _publish_remote_compiled_scenes(
@@ -519,9 +673,11 @@ async def _build_remote_frameos_binary(
     remote_build_root: str,
     quickjs_dirname: str | None = None,
 ) -> None:
+    await deployer.log("stdout", f"{icon} FrameOS compile: building on device")
     if quickjs_dirname:
         await deployer.exec_command(
-            f"ln -s /srv/frameos/vendor/quickjs/{quickjs_dirname} {shlex.quote(remote_build_root)}/quickjs"
+            f"ln -s /srv/frameos/vendor/quickjs/{quickjs_dirname} {shlex.quote(remote_build_root)}/quickjs",
+            log_command=False,
         )
     await deployer.exec_command(
         f"cd {shlex.quote(remote_build_root)} && "
@@ -529,7 +685,10 @@ async def _build_remote_frameos_binary(
         "PARALLEL=$(($PARALLEL_MEM < $(nproc) ? $PARALLEL_MEM : $(nproc))) && "
         "make -j$PARALLEL frameos",
         timeout=3600,
+        log_command=False,
+        log_output=False,
     )
+    await deployer.log("stdout", f"{icon} FrameOS compile: completed on device")
 
 
 async def _copy_current_binary_to_release(
@@ -591,10 +750,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             public_keys = [key.get("public") for key in selected_keys if key.get("public")]
             known_public_keys = [key.get("public") for key in normalize_ssh_keys(settings) if key.get("public")]
             if public_keys:
-                await self.log("stdout", f"{icon} Checking SSH keys on device")
                 await _install_authorized_keys(db, redis, frame, public_keys, known_public_keys)
-            else:
-                await self.log("stdout", f"{icon} No SSH public keys configured; skipping authorized_keys install")
 
             arch = await self.get_cpu_architecture()
             distro = await self.get_distro()
@@ -667,20 +823,14 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                 previous=previous_manifest,
                 current=compile_manifest,
             )
+            compile_plan = await _adjust_compile_plan_for_missing_remote_artifacts(
+                self,
+                compile_plan,
+                compile_manifest,
+            )
 
-            await self.log("stdout", f"{icon} Smart deploy plan: {compile_plan.reason}")
-            if compile_plan.rebuild_app:
-                await self.log("stdout", f"{icon} Rebuilding FrameOS binary")
-            else:
-                await self.log("stdout", f"{icon} Reusing current FrameOS binary")
-
-            if compile_plan.rebuild_scene_ids:
-                await self.log(
-                    "stdout",
-                    f"{icon} Rebuilding compiled scenes: {', '.join(compile_plan.rebuild_scene_ids)}",
-                )
-            elif compile_plan.reuse_scene_ids:
-                await self.log("stdout", f"{icon} Reusing all compiled scene plugins")
+            for line in _compile_plan_log_lines(frame, compile_plan, compile_manifest):
+                await self.log("stdout", line)
 
             build_dir: str | None = None
             archive_path: str | None = None
@@ -693,6 +843,9 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                 build_dir, archive_path = await builder.prepare_build_archive(
                     source_dir=source_dir,
                     arch=target.arch,
+                    build_binary=compile_plan.rebuild_app,
+                    build_scene_ids=compile_plan.rebuild_scene_ids,
+                    build_all_scenes=compile_plan.rebuild_all_scenes,
                 )
                 requested = await builder.build_requested_artifacts(
                     source_dir=source_dir,
@@ -703,6 +856,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                     allow_cross_compile=allow_cross_compile,
                     force_cross_compile=force_cross_compile,
                     build_binary=compile_plan.rebuild_app,
+                    build_scene_ids=compile_plan.rebuild_scene_ids,
                     build_scene_dirs=compile_plan.scene_build_dirs or None,
                     build_all_scenes=bool(compile_plan.rebuild_scene_ids) and compile_plan.rebuild_all_scenes,
                 )
@@ -710,6 +864,18 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                 cross_compiled_binary = requested.artifacts.binary_path
                 local_compiled_scenes_dir = requested.artifacts.scenes_dir
                 remote_scene_build_required = bool(compile_plan.rebuild_scene_ids) and local_compiled_scenes_dir is None
+
+                if compile_plan.rebuild_app:
+                    if cross_compiled:
+                        await self.log("stdout", f"{icon} FrameOS compile: completed locally")
+                    else:
+                        await self.log("stdout", f"{icon} FrameOS compile: queued for on-device build")
+
+                if compile_plan.rebuild_scene_ids:
+                    if local_compiled_scenes_dir:
+                        await self.log("stdout", f"{icon} Scene compile: completed locally")
+                    elif remote_scene_build_required:
+                        await self.log("stdout", f"{icon} Scene compile: queued for on-device build")
 
                 if low_memory and not cross_compiled:
                     await self.log("stdout", f"{icon} Low memory device, stopping FrameOS for compilation")
@@ -794,6 +960,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                     self,
                     remote_build_root,
                     scene_build_dirs=compile_plan.scene_build_dirs,
+                    scene_ids=compile_plan.rebuild_scene_ids,
                 )
                 await _publish_remote_compiled_scenes(
                     self,
