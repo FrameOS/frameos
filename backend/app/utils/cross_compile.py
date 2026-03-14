@@ -336,6 +336,19 @@ class CrossCompiler:
 
         local_binary = os.path.join(build_dir, "frameos")
         await host.download_file(f"{remote_build_dir}/frameos", local_binary)
+        remote_scenes_dir = f"{remote_build_dir}/scenes"
+        local_scenes_dir = os.path.join(build_dir, "scenes")
+        scenes_status, _stdout, _stderr = await host.run(
+            f"test -d {shlex.quote(remote_scenes_dir)}",
+            log_command=False,
+            log_output=False,
+        )
+        if scenes_status == 0:
+            await self._log(
+                "stdout",
+                f"{icon} Downloading compiled scene artifacts from build host",
+            )
+            await host.download_dir_tarball(remote_scenes_dir, local_scenes_dir)
         return local_binary
 
     async def _run_command(
@@ -417,7 +430,10 @@ class CrossCompiler:
         fallback_src: Path | None,
         error_message: str,
     ) -> None:
-        libquickjs = dest / "libquickjs.a"
+        if self._quickjs_tree_is_usable(dest):
+            await self._log("stdout", f"{icon} Found QuickJS assets at {dest}")
+            return
+
         prebuilt_quickjs = self.prebuilt_components.get("quickjs")
         if prebuilt_quickjs:
             await self._log(
@@ -425,8 +441,11 @@ class CrossCompiler:
                 f"{icon} Staging prebuilt QuickJS component from {prebuilt_quickjs} into {dest}",
             )
             self._stage_prebuilt_quickjs(dest)
+            if self._quickjs_tree_is_usable(dest):
+                await self._log("stdout", f"{icon} Found QuickJS assets at {dest}")
+                return
 
-        if not libquickjs.exists() and fallback_src:
+        if fallback_src and fallback_src != dest and self._quickjs_tree_is_usable(fallback_src):
             if dest.exists():
                 shutil.rmtree(dest)
             await self._log(
@@ -434,10 +453,9 @@ class CrossCompiler:
                 f"{icon} Copying QuickJS tree from {fallback_src} into {dest}",
             )
             shutil.copytree(fallback_src, dest, dirs_exist_ok=True)
-
-        if libquickjs.exists():
-            await self._log("stdout", f"{icon} Found QuickJS archive at {libquickjs}")
-            return
+            if self._quickjs_tree_is_usable(dest):
+                await self._log("stdout", f"{icon} Found QuickJS assets at {dest}")
+                return
 
         await self._log_quickjs_probe(dest.parent, context)
         raise RuntimeError(error_message)
@@ -495,7 +513,14 @@ class CrossCompiler:
         marker = dest_dir / ".build-info"
         expected_marker = f"{component}|{version}|{url}|{self.prebuilt_entry.md5_for(component) or ''}"
         if marker.exists() and marker.read_text() == expected_marker:
-            return dest_dir
+            if self._prebuilt_component_is_usable(component, dest_dir):
+                return dest_dir
+            await self._log(
+                "stdout",
+                f"{icon} Cached prebuilt {component} at {dest_dir} is incomplete; refreshing",
+            )
+            shutil.rmtree(dest_dir, ignore_errors=True)
+            dest_dir.mkdir(parents=True, exist_ok=True)
 
         await self._log("stdout", f"{icon} Downloading prebuilt {component} ({version})")
         if dest_dir.exists():
@@ -504,6 +529,10 @@ class CrossCompiler:
         try:
             await self._download_and_extract(url, dest_dir, self.prebuilt_entry.md5_for(component))
             self._normalize_component_dir(dest_dir)
+            if not self._prebuilt_component_is_usable(component, dest_dir):
+                raise RuntimeError(
+                    f"prebuilt {component} archive did not contain the expected files"
+                )
         except Exception as exc:
             await self._log(
                 "stderr",
@@ -514,6 +543,29 @@ class CrossCompiler:
 
         marker.write_text(expected_marker)
         return dest_dir
+
+    def _prebuilt_component_is_usable(self, component: str, root: Path) -> bool:
+        if component == "quickjs":
+            return self._quickjs_tree_is_usable(root)
+        if component == "lgpio":
+            return self._lgpio_tree_is_usable(root)
+        return root.exists()
+
+    def _quickjs_tree_is_usable(self, root: Path) -> bool:
+        return (
+            self._first_file_match(root, "quickjs.h") is not None
+            and self._first_file_match(root, "quickjs-libc.h") is not None
+            and self._first_file_match(root, "libquickjs.a") is not None
+        )
+
+    def _lgpio_tree_is_usable(self, root: Path) -> bool:
+        return (
+            self._first_file_match(root, "lgpio.h") is not None
+            and (
+                self._first_file_match(root, "liblgpio.a") is not None
+                or self._first_file_match(root, "liblgpio.so*") is not None
+            )
+        )
 
     async def _download_and_extract(self, url: str, dest_dir: Path, expected_md5: str | None) -> None:
         tmp_fd, tmp_path = tempfile.mkstemp(suffix=".tar.gz")
@@ -594,18 +646,24 @@ class CrossCompiler:
     @staticmethod
     def _find_quickjs_include_dir(root: Path) -> Path | None:
         direct = root / "include" / "quickjs"
-        if direct.exists():
+        if (
+            direct.is_dir()
+            and (direct / "quickjs.h").is_file()
+            and (direct / "quickjs-libc.h").is_file()
+        ):
             return direct
         candidates = sorted(
             path
             for path in root.rglob("quickjs")
-            if path.is_dir() and (path / "quickjs.h").exists()
+            if path.is_dir()
+            and (path / "quickjs.h").is_file()
+            and (path / "quickjs-libc.h").is_file()
         )
         return candidates[0] if candidates else None
 
     @staticmethod
     def _first_file_match(root: Path, pattern: str) -> Path | None:
-        matches = sorted(root.rglob(pattern))
+        matches = sorted(path for path in root.rglob(pattern) if path.is_file())
         return matches[0] if matches else None
 
     def _inject_prebuilt_component(self, component: str) -> None:
@@ -934,4 +992,3 @@ async def _log_line(
         await log(db, redis, int(frame.id), level, message)
     else:
         print(f"[{level}] {message}")
-

@@ -112,7 +112,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   ))
   scene.node2 = data_localImageApp.App(nodeName: "data/localImage", nodeId: 2.NodeId, scene: scene.FrameScene,
     frameConfig: scene.frameConfig, appConfig: data_localImageApp.AppConfig(
-    path: "./assets/bird.png",
+    path: "./assets/default.svg",
     order: "random",
     counterStateKey: "",
   ))

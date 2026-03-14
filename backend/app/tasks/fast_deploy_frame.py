@@ -1,3 +1,5 @@
+import os
+import tempfile
 from datetime import datetime, timezone
 from typing import Any
 
@@ -7,8 +9,15 @@ from arq import ArqRedis as Redis
 from app.models.log import new_log as log
 from app.models.frame import Frame, normalize_https_proxy, update_frame
 from app.tasks._frame_deployer import FrameDeployer
+from app.tasks.deploy_frame import (
+    _build_remote_compiled_scenes,
+    _publish_remote_compiled_scenes,
+    _upload_remote_build_archive,
+)
 from app.utils.frame_http import _fetch_frame_http_bytes
 from app.utils.versions import current_frameos_version
+
+from .utils import find_nim_v2
 
 
 def tls_settings_changed(frame: Frame) -> bool:
@@ -25,6 +34,13 @@ async def fast_deploy_frame(id: int, redis: Redis):
     await redis.enqueue_job("fast_deploy_frame", id=id)
 
 
+def frame_has_compiled_scenes(frame: Frame) -> bool:
+    return any(
+        scene.get("settings", {}).get("execution", "compiled") != "interpreted"
+        for scene in (frame.scenes or [])
+    )
+
+
 async def fast_deploy_frame_task(ctx: dict[str, Any], id: int):
     db: Session = ctx['db']
     redis: Redis = ctx['redis']
@@ -39,8 +55,6 @@ async def fast_deploy_frame_task(ctx: dict[str, Any], id: int):
         frame.status = "deploying"
         await update_frame(db, redis, frame)
 
-        self = FrameDeployer(db=db, redis=redis, frame=frame, nim_path="", temp_dir="")
-
         frame_dict = frame.to_dict()  # persisted as frame.last_successful_deploy if successful
         if "last_successful_deploy" in frame_dict:
             del frame_dict["last_successful_deploy"]
@@ -53,28 +67,59 @@ async def fast_deploy_frame_task(ctx: dict[str, Any], id: int):
         else:
             frame_dict["frameos_version"] = current_frameos_version()
 
-        distro = await self.get_distro()
-        if distro not in {"raspios", "debian", "ubuntu", "buildroot"}:
-            raise Exception(f"Unsupported target distro '{distro}'")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            nim_path = find_nim_v2()
+            self = FrameDeployer(
+                db=db,
+                redis=redis,
+                frame=frame,
+                nim_path=nim_path,
+                temp_dir=temp_dir,
+            )
 
-        await self._upload_frame_json("/srv/frameos/current/frame.json")
-        await self._upload_scenes_json("/srv/frameos/current/scenes.json.gz", gzip=True)
+            distro = await self.get_distro()
+            if distro not in {"raspios", "debian", "ubuntu", "buildroot"}:
+                raise Exception(f"Unsupported target distro '{distro}'")
 
-        try:
-            if tls_settings_changed(frame):
-                await log(db, redis, id, "stdout", "- TLS settings changed, restarting FrameOS service")
-                await self.restart_service("frameos")
-            else:
-                status, body, _headers = await _fetch_frame_http_bytes(
-                    frame, redis, path="/reload", method="POST"
+            if frame_has_compiled_scenes(frame):
+                await log(db, redis, id, "stdout", "- Building compiled scene plugins for reload")
+                source_dir = self.create_local_source_folder(temp_dir)
+                await self.make_local_modifications(source_dir)
+                build_dir = os.path.join(temp_dir, f"build_{self.build_id}")
+                os.makedirs(build_dir, exist_ok=True)
+                archive_path = await self.create_local_build_archive(
+                    build_dir,
+                    source_dir,
+                    await self.get_cpu_architecture(),
                 )
-                if status >= 300:
-                    message = body.decode("utf-8", errors="replace")
-                    await log(db, redis, id, "stderr", f"Reload failed with status {status}: {message}. Restarting service.")
+                remote_build_root = await _upload_remote_build_archive(self, archive_path, self.build_id)
+                await _build_remote_compiled_scenes(self, remote_build_root)
+                await _publish_remote_compiled_scenes(
+                    self,
+                    remote_build_root,
+                    "/srv/frameos/current/scenes",
+                )
+            else:
+                await self.exec_command("rm -rf /srv/frameos/current/scenes && mkdir -p /srv/frameos/current/scenes")
+
+            await self._upload_frame_json("/srv/frameos/current/frame.json")
+            await self._upload_scenes_json("/srv/frameos/current/scenes.json.gz", gzip=True)
+
+            try:
+                if tls_settings_changed(frame):
+                    await log(db, redis, id, "stdout", "- TLS settings changed, restarting FrameOS service")
                     await self.restart_service("frameos")
-        except Exception as e:
-            await log(db, redis, id, "stderr", f"Reload request failed: {str(e)}. Restarting service.")
-            await self.restart_service("frameos")
+                else:
+                    status, body, _headers = await _fetch_frame_http_bytes(
+                        frame, redis, path="/reload", method="POST"
+                    )
+                    if status >= 300:
+                        message = body.decode("utf-8", errors="replace")
+                        await log(db, redis, id, "stderr", f"Reload failed with status {status}: {message}. Restarting service.")
+                        await self.restart_service("frameos")
+            except Exception as e:
+                await log(db, redis, id, "stderr", f"Reload request failed: {str(e)}. Restarting service.")
+                await self.restart_service("frameos")
 
         frame.status = 'starting'
         frame.last_successful_deploy = frame_dict

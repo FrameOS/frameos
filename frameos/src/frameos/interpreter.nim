@@ -159,6 +159,9 @@ var compiledSceneExports = initTable[SceneId, ExportedScene]()
 proc registerCompiledScene*(sceneId: SceneId, exported: ExportedScene) =
   compiledSceneExports[sceneId] = exported
 
+proc replaceCompiledSceneExports*(scenes: Table[SceneId, ExportedScene]) =
+  compiledSceneExports = scenes
+
 proc setUploadedInterpretedScenes*(scenes: Table[SceneId, ExportedInterpretedScene]) =
   uploadedScenes = scenes
 

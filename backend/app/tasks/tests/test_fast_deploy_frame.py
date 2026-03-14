@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from app.tasks.fast_deploy_frame import tls_settings_changed
+from app.tasks.fast_deploy_frame import frame_has_compiled_scenes, tls_settings_changed
 
 
 def test_tls_settings_changed_returns_false_without_previous_deploy():
@@ -77,3 +77,16 @@ def test_tls_settings_changed_returns_false_when_tls_fields_match_previous_deplo
     )
 
     assert tls_settings_changed(frame) is False
+
+
+def test_frame_has_compiled_scenes_detects_compiled_and_interpreted_modes():
+    frame = SimpleNamespace(
+        scenes=[
+            {"id": "compiled", "settings": {"execution": "compiled"}},
+            {"id": "interpreted", "settings": {"execution": "interpreted"}},
+        ]
+    )
+    assert frame_has_compiled_scenes(frame) is True
+
+    interpreted_only = SimpleNamespace(scenes=[{"id": "only", "settings": {"execution": "interpreted"}}])
+    assert frame_has_compiled_scenes(interpreted_only) is False

@@ -56,6 +56,48 @@ def test_create_local_source_folder_copies_shared_frontend_sources(tmp_path: Pat
     assert (copied_source_dir / "assets" / "compiled" / "fonts" / "Ubuntu-Regular.ttf").exists()
 
 
+@pytest.mark.asyncio
+async def test_make_local_modifications_writes_scene_plugin_wrappers(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    source_dir = tmp_path / "frameos"
+    (source_dir / "src" / "apps").mkdir(parents=True)
+    (source_dir / "src" / "drivers").mkdir(parents=True)
+    (source_dir / "src" / "scenes").mkdir(parents=True)
+
+    monkeypatch.setattr("app.tasks._frame_deployer.get_apps_from_scenes", lambda _scenes: {})
+    monkeypatch.setattr("app.tasks._frame_deployer.write_apps_nim", lambda _root: "apps\n")
+    monkeypatch.setattr("app.tasks._frame_deployer.write_scene_nim", lambda _frame, _scene: "scene\n")
+    monkeypatch.setattr("app.tasks._frame_deployer.write_scene_plugin_nim", lambda _scene, is_default=False: f"plugin default={is_default}\n")
+    monkeypatch.setattr("app.tasks._frame_deployer.write_scenes_nim", lambda _frame: "registry\n")
+    monkeypatch.setattr("app.tasks._frame_deployer.write_drivers_nim", lambda _drivers: "drivers\n")
+    monkeypatch.setattr("app.tasks._frame_deployer.drivers_for_frame", lambda _frame: {})
+
+    frame = SimpleNamespace(
+        id=1,
+        scenes=[
+            {"id": "hello/world", "name": "Hello", "default": True, "settings": {"execution": "compiled"}},
+            {"id": "interpreted", "settings": {"execution": "interpreted"}},
+        ],
+    )
+    deployer = FrameDeployer(
+        db=None,
+        redis=None,
+        frame=frame,
+        nim_path="/usr/bin/nim",
+        temp_dir=str(tmp_path / "work"),
+    )
+    deployer.log = lambda *_args, **_kwargs: None  # type: ignore[method-assign]
+
+    await deployer.make_local_modifications(str(source_dir))
+
+    assert (source_dir / "src" / "scenes" / "scene_hello_world.nim").read_text(encoding="utf-8") == "scene\n"
+    assert (source_dir / "src" / "scenes" / "plugin_hello_world.nim").read_text(encoding="utf-8") == "plugin default=True\n"
+    assert not (source_dir / "src" / "scenes" / "scene_interpreted.nim").exists()
+    assert (source_dir / "src" / "scenes" / "scenes.nim").read_text(encoding="utf-8") == "registry\n"
+
+
 async def _run_create_local_build_archive(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[str, list[str]]:
     source_dir = tmp_path / "frameos"
     temp_dir = tmp_path / "temp"
@@ -113,3 +155,71 @@ async def test_create_local_build_archive_runs_assets_task_without_env_switch(
     assert commands
     assert "cd " in commands[0]
     assert "nimble assets -y && nimble setup &&" in commands[0]
+
+
+@pytest.mark.asyncio
+async def test_create_local_build_archive_emits_compiled_scene_targets(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    source_dir = tmp_path / "frameos"
+    temp_dir = tmp_path / "temp"
+    source_dir.mkdir()
+    temp_dir.mkdir()
+    (source_dir / "tools").mkdir()
+    (source_dir / "src" / "scenes").mkdir(parents=True)
+    (source_dir / "src" / "scenes" / "plugin_demo.nim").write_text("discard\n", encoding="utf-8")
+    (source_dir / "tools" / "nimc.Makefile").write_text(
+        "EXECUTABLE = frameos\nall: $(EXECUTABLE)\nLIBS =\nCFLAGS =\nclean:\n\trm -f *.o $(EXECUTABLE)\n",
+        encoding="utf-8",
+    )
+
+    nimbase = tmp_path / "nimbase.h"
+    nimbase.write_text("/* nimbase */\n", encoding="utf-8")
+
+    async def fake_exec_local_command(_db, _redis, _frame, cmd, **_kwargs):
+        if "src/frameos.nim" in cmd:
+            build_dir_arg = cmd.split("--nimcache:", 1)[1].split(" ", 1)[0]
+            Path(build_dir_arg, "compile_frameos.sh").write_text(
+                "cc -c foo.c -o foo.o -Wall\n"
+                "cc foo.o -o frameos -pthread -lm -ldl\n",
+                encoding="utf-8",
+            )
+        else:
+            build_dir_arg = cmd.split("--nimcache:", 1)[1].split(" ", 1)[0]
+            out_arg = cmd.split("--out:", 1)[1].split(" ", 1)[0]
+            Path(build_dir_arg, "compile_plugin_demo.sh").write_text(
+                "cc -c foo.c -o foo.o -fPIC -Wall\n"
+                f"cc foo.o -shared -o {Path(out_arg).name} -ldl\n",
+                encoding="utf-8",
+            )
+        return 0, "", ""
+
+    async def fake_log(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr("app.tasks._frame_deployer.exec_local_command", fake_exec_local_command)
+    monkeypatch.setattr("app.tasks._frame_deployer.find_nimbase_file", lambda _nim_path: str(nimbase))
+    monkeypatch.setattr("app.tasks._frame_deployer.drivers_for_frame", lambda _frame: {})
+
+    deployer = FrameDeployer(
+        db=None,
+        redis=None,
+        frame=SimpleNamespace(id=1, debug=False),
+        nim_path="/usr/bin/nim",
+        temp_dir=str(temp_dir),
+    )
+    deployer.log = fake_log  # type: ignore[method-assign]
+    build_dir = temp_dir / f"build_{deployer.build_id}"
+    build_dir.mkdir()
+
+    await deployer.create_local_build_archive(str(build_dir), str(source_dir), "arm64")
+
+    root_makefile = (build_dir / "Makefile").read_text(encoding="utf-8")
+    scene_makefile = (build_dir / "scene_builds" / "demo" / "Makefile").read_text(encoding="utf-8")
+
+    assert "compiled-scenes" in root_makefile
+    assert "SCENE_BUILD_DIRS = scene_builds/demo" in root_makefile
+    assert "all: $(EXECUTABLE)\n\t@$(MAKE) --no-print-directory compiled-scenes\n" in root_makefile
+    assert "$(MAKE) --no-print-directory -C $$dir" in root_makefile
+    assert "EXECUTABLE = ../../scenes/demo.so" in scene_makefile

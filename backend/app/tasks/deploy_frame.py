@@ -20,6 +20,7 @@ from app.models.settings import get_settings_dict
 from app.utils.ssh_authorized_keys import _install_authorized_keys
 from app.utils.ssh_key_utils import normalize_ssh_keys, select_ssh_keys_for_frame
 from app.utils.cross_compile import TargetMetadata
+from app.utils.versions import current_frameos_version
 from app.tasks._frame_deployer import FrameDeployer
 from app.tasks.binary_builder import FrameBinaryBuilder
 
@@ -410,6 +411,115 @@ async def _ensure_quickjs(
         )
     return quickjs_dirname
 
+
+def _local_build_has_compiled_scenes(build_dir: str) -> bool:
+    scene_build_root = os.path.join(build_dir, "scene_builds")
+    if not os.path.isdir(scene_build_root):
+        return False
+    with os.scandir(scene_build_root) as entries:
+        return any(entries)
+
+
+def _local_compiled_scene_artifact_dir(build_dir: str) -> str | None:
+    scenes_dir = os.path.join(build_dir, "scenes")
+    if not os.path.isdir(scenes_dir):
+        return None
+    with os.scandir(scenes_dir) as entries:
+        for entry in entries:
+            if entry.is_file() and entry.name.endswith(".so"):
+                return scenes_dir
+    return None
+
+
+async def _upload_remote_build_archive(
+    deployer: FrameDeployer,
+    archive_path: str,
+    build_id: str,
+) -> str:
+    remote_archive = f"/srv/frameos/build/build_{build_id}.tar.gz"
+    remote_build_root = f"/srv/frameos/build/build_{build_id}"
+    await deployer.log("stdout", f"> add {remote_archive}")
+
+    with open(archive_path, "rb") as fh:
+        data = fh.read()
+    await upload_file(
+        deployer.db,
+        deployer.redis,
+        deployer.frame,
+        remote_archive,
+        data,
+    )
+    await deployer.exec_command(
+        f"cd /srv/frameos/build && tar -xzf build_{build_id}.tar.gz && rm build_{build_id}.tar.gz"
+    )
+    return remote_build_root
+
+
+async def _upload_local_compiled_scenes(
+    deployer: FrameDeployer,
+    local_scenes_dir: str,
+    remote_scenes_dir: str,
+    build_id: str,
+) -> None:
+    await deployer.log("stdout", f"{icon} Uploading compiled scene plugins")
+    await _upload_directory_tree(
+        deployer,
+        local_scenes_dir,
+        remote_scenes_dir,
+        "compiled scene plugins",
+        build_id,
+    )
+
+
+async def _link_remote_quickjs(
+    deployer: FrameDeployer,
+    remote_build_root: str,
+    quickjs_dirname: str | None = None,
+) -> None:
+    quoted_remote_quickjs = shlex.quote(f"{remote_build_root}/quickjs")
+    if quickjs_dirname:
+        quoted_vendor_quickjs = shlex.quote(f"/srv/frameos/vendor/quickjs/{quickjs_dirname}")
+        await deployer.exec_command(
+            f"rm -rf {quoted_remote_quickjs} && ln -s {quoted_vendor_quickjs} {quoted_remote_quickjs}"
+        )
+        return
+
+    await deployer.exec_command(
+        "QUICKJS_DIR=$(ls -dt /srv/frameos/vendor/quickjs/quickjs-* 2>/dev/null | head -n1) && "
+        'if [ -z "$QUICKJS_DIR" ]; then '
+        'echo "QuickJS vendor directory missing; run a full deploy first." >&2; '
+        "exit 1; "
+        "fi && "
+        f"rm -rf {quoted_remote_quickjs} && "
+        f'ln -s "$QUICKJS_DIR" {quoted_remote_quickjs}'
+    )
+
+
+async def _build_remote_compiled_scenes(
+    deployer: FrameDeployer,
+    remote_build_root: str,
+    quickjs_dirname: str | None = None,
+) -> None:
+    await deployer.log("stdout", f"{icon} Building compiled scene plugins on remote")
+    await _link_remote_quickjs(deployer, remote_build_root, quickjs_dirname)
+    await deployer.exec_command(
+        f"cd {shlex.quote(remote_build_root)} && make compiled-scenes",
+        timeout=3600,
+    )
+
+
+async def _publish_remote_compiled_scenes(
+    deployer: FrameDeployer,
+    remote_build_root: str,
+    remote_scenes_dir: str,
+) -> None:
+    quoted_build_scenes_dir = shlex.quote(f"{remote_build_root}/scenes")
+    quoted_scenes_dir = shlex.quote(remote_scenes_dir)
+    await deployer.exec_command(f"rm -rf {quoted_scenes_dir} && mkdir -p {quoted_scenes_dir}")
+    await deployer.exec_command(
+        f"if [ -d {quoted_build_scenes_dir} ]; then cp -R {quoted_build_scenes_dir}/. {quoted_scenes_dir}/; fi"
+    )
+
 async def deploy_frame(id: int, redis: Redis):
     await redis.enqueue_job("deploy_frame", id=id)
 
@@ -511,6 +621,9 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             build_dir = build_result.build_dir
             cross_compiled = build_result.cross_compiled
             cross_compiled_binary = build_result.binary_path
+            compiled_scenes_present = _local_build_has_compiled_scenes(build_dir)
+            local_compiled_scenes_dir = _local_compiled_scene_artifact_dir(build_dir)
+            remote_scene_build_required = compiled_scenes_present and local_compiled_scenes_dir is None
 
             if low_memory and not cross_compiled:
                 await self.log("stdout", f"{icon} Low memory device, stopping FrameOS for compilation")
@@ -537,36 +650,33 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                 await install_if_necessary(dep)
 
             quickjs_dirname = await _ensure_quickjs(
-                self, prebuilt_entry=prebuilt_entry, build_id=build_id, cross_compiled=cross_compiled
+                self,
+                prebuilt_entry=prebuilt_entry,
+                build_id=build_id,
+                cross_compiled=(cross_compiled and not remote_scene_build_required),
             )
 
             await self.exec_command("sudo mkdir -p /srv/frameos && sudo chown $(whoami):$(whoami) /srv/frameos")
             await self.exec_command("mkdir -p /srv/frameos/build/ /srv/frameos/logs/")
             await self.exec_command(f"mkdir -p /srv/frameos/releases/release_{build_id}")
             release_frameos_path = f"/srv/frameos/releases/release_{build_id}/frameos"
+            release_scenes_path = f"/srv/frameos/releases/release_{build_id}/scenes"
+            remote_build_root: str | None = None
+
+            if not cross_compiled or remote_scene_build_required:
+                remote_build_root = await _upload_remote_build_archive(self, archive_path, build_id)
 
             if cross_compiled:
                 await self.log("stdout", f"{icon} Using cross-compiled binary")
                 if not cross_compiled_binary:
                     raise RuntimeError("Cross compilation succeeded but binary path is unknown")
                 await _upload_binary(self, cross_compiled_binary, release_frameos_path)
+                if remote_scene_build_required and remote_build_root:
+                    await _build_remote_compiled_scenes(self, remote_build_root, quickjs_dirname)
             else:
                 await self.log("stdout", f"{icon} Building FrameOS on remote, no cross-compilation")
-                await self.log("stdout", f"> add /srv/frameos/build/build_{build_id}.tar.gz")
-
-                with open(archive_path, "rb") as fh:
-                    data = fh.read()
-                await upload_file(
-                    self.db,
-                    self.redis,
-                    self.frame,
-                    f"/srv/frameos/build/build_{build_id}.tar.gz",
-                    data,
-                )
-
-                await self.exec_command(
-                    f"cd /srv/frameos/build && tar -xzf build_{build_id}.tar.gz && rm build_{build_id}.tar.gz"
-                )
+                if not remote_build_root:
+                    raise RuntimeError("Remote build root missing for on-device build")
                 if quickjs_dirname:
                     await self.exec_command(
                         f"ln -s /srv/frameos/vendor/quickjs/{quickjs_dirname} /srv/frameos/build/build_{build_id}/quickjs",
@@ -586,6 +696,16 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             # 4. Upload scenes.json.gz and frame.json
             await self._upload_scenes_json(f"/srv/frameos/releases/release_{build_id}/scenes.json.gz", gzip=True)
             await self._upload_frame_json(f"/srv/frameos/releases/release_{build_id}/frame.json")
+            await self.exec_command(f"mkdir -p {shlex.quote(release_scenes_path)}")
+            if local_compiled_scenes_dir:
+                await _upload_local_compiled_scenes(
+                    self,
+                    local_compiled_scenes_dir,
+                    release_scenes_path,
+                    build_id,
+                )
+            elif remote_scene_build_required and remote_build_root:
+                await _publish_remote_compiled_scenes(self, remote_build_root, release_scenes_path)
 
             # Driver-specific vendor steps
             if inkyPython := drivers.get("inkyPython"):

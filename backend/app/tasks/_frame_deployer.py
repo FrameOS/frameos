@@ -26,7 +26,12 @@ from app.drivers.waveshare import write_waveshare_driver_nim, get_variant_folder
 from app.drivers.devices import drivers_for_frame
 from app.models import get_apps_from_scenes
 from app.codegen.drivers_nim import write_drivers_nim
-from app.codegen.scene_nim import write_scene_nim, write_scenes_nim
+from app.codegen.scene_nim import (
+    scene_module_name,
+    write_scene_nim,
+    write_scene_plugin_nim,
+    write_scenes_nim,
+)
 from app.tasks.utils import find_nimbase_file
 from app.codegen.apps_nim import write_apps_nim
 from app.codegen.app_loader_nim import write_app_loader_nim
@@ -181,6 +186,165 @@ class FrameDeployer:
     async def disable_service(self, service_name: str) -> None:
         await self.exec_command(f"sudo systemctl disable {service_name}.service", raise_on_error=False)
 
+    async def _log_nim_compile_failure(
+        self,
+        source_dir: str,
+        stdout: str,
+        stderr: str,
+    ) -> None:
+        lines = ((stdout or "") + ("\n" + stderr if stderr else "")).splitlines()
+        filtered = [ln for ln in lines if ln.strip()]
+        for line in reversed(filtered):
+            match = re.match(r'^(.*\.nim)\((\d+), (\d+)\),?.*', line)
+            if not match:
+                continue
+            fn = match.group(1)
+            line_nr = int(match.group(2))
+            column = int(match.group(3))
+            source_abs = os.path.realpath(source_dir)
+            final_path = os.path.realpath(os.path.join(source_dir, fn))
+            if os.path.commonprefix([final_path, source_abs]) == source_abs and os.path.exists(final_path):
+                rel_fn = final_path[len(source_abs) + 1:]
+                with open(final_path, "r") as of:
+                    all_lines = of.readlines()
+                await self.log("stdout", f"Error in {rel_fn}:{line_nr}:{column}")
+                await self.log("stdout", f"Line {line_nr}: {all_lines[line_nr - 1]}")
+                await self.log("stdout", f".......{'.'*(column - 1 + len(str(line_nr)))}^")
+            else:
+                await self.log("stdout", f"Error in {fn}:{line_nr}:{column}")
+            return
+
+    @staticmethod
+    def _parse_compile_script(
+        script_path: str,
+        *,
+        output_name: str,
+    ) -> tuple[list[str], list[str]]:
+        linker_flags = ["-pthread", "-lm", "-lrt", "-ldl"]
+        compiler_flags: list[str] = []
+        with open(script_path, "r") as sc:
+            lines_sc = sc.readlines()
+
+        for line in lines_sc:
+            if f" -o {output_name} " in line:
+                linker_flags = [
+                    fl.strip() for fl in line.split(" ")
+                    if fl.startswith("-") and fl != "-o"
+                ]
+            elif " -c " in line and not compiler_flags:
+                compiler_flags = [
+                    fl for fl in line.split(" ")
+                    if fl.startswith("-")
+                    and not fl.startswith("-I")
+                    and fl not in ["-o", "-c", "-D"]
+                ]
+        return compiler_flags, linker_flags
+
+    def _write_c_build_makefile(
+        self,
+        *,
+        source_dir: str,
+        target_path: str,
+        executable: str,
+        compiler_flags: list[str],
+        linker_flags: list[str],
+        compiled_scene_dirs: list[str] | None = None,
+    ) -> None:
+        with open(os.path.join(source_dir, "tools", "nimc.Makefile"), "r") as mf_in:
+            lines_make = mf_in.readlines()
+
+        with open(target_path, "w") as mk:
+            for ln in lines_make:
+                if ln.startswith("EXECUTABLE = "):
+                    ln = f"EXECUTABLE = {executable}\n"
+                elif ln.startswith("LIBS = "):
+                    ln = "LIBS = -L. " + " ".join(linker_flags) + " $(EXTRA_LIBS)\n"
+                elif ln.startswith("CFLAGS = "):
+                    ln = (
+                        "CFLAGS = "
+                        + " ".join([f for f in compiler_flags if f != "-c"])
+                        + " $(EXTRA_CFLAGS)\n"
+                    )
+                elif compiled_scene_dirs is not None and ln.startswith("all: "):
+                    ln = "all: $(EXECUTABLE)\n\t@$(MAKE) --no-print-directory compiled-scenes\n"
+                elif compiled_scene_dirs is not None and ln.startswith("clean:"):
+                    ln = "clean: clean-scenes\n"
+                mk.write(ln)
+
+            if compiled_scene_dirs is None:
+                return
+
+            scene_dirs = " ".join(compiled_scene_dirs)
+            mk.write("\n")
+            mk.write(f"SCENE_BUILD_DIRS = {scene_dirs}\n")
+            mk.write("\ncompiled-scenes:\n")
+            mk.write("\t@mkdir -p scenes\n")
+            mk.write('\t@if [ -n "$(strip $(SCENE_BUILD_DIRS))" ]; then \\\n')
+            mk.write("\t\tfor dir in $(SCENE_BUILD_DIRS); do $(MAKE) --no-print-directory -C $$dir || exit $$?; done; \\\n")
+            mk.write("\telse \\\n")
+            mk.write('\t\techo "No compiled scenes to build"; \\\n')
+            mk.write("\tfi\n")
+            mk.write("\nclean-scenes:\n")
+            mk.write('\t@if [ -n "$(strip $(SCENE_BUILD_DIRS))" ]; then \\\n')
+            mk.write("\t\tfor dir in $(SCENE_BUILD_DIRS); do $(MAKE) --no-print-directory -C $$dir clean || exit $$?; done; \\\n")
+            mk.write("\tfi\n")
+            mk.write("\t@rm -rf scenes\n")
+
+    async def _generate_compiled_scene_build_dirs(
+        self,
+        *,
+        source_dir: str,
+        build_dir: str,
+        cpu: str,
+        debug_options: str,
+        nimbase_path: str,
+    ) -> list[str]:
+        plugin_sources = sorted(glob(os.path.join(source_dir, "src", "scenes", "plugin_*.nim")))
+        if not plugin_sources:
+            return []
+
+        os.makedirs(os.path.join(build_dir, "scenes"), exist_ok=True)
+        scene_build_dirs: list[str] = []
+        scene_build_root = os.path.join(build_dir, "scene_builds")
+
+        for plugin_path in plugin_sources:
+            plugin_name = os.path.splitext(os.path.basename(plugin_path))[0]
+            library_name = plugin_name.removeprefix("plugin_") + ".so"
+            plugin_build_dir = os.path.join(scene_build_root, os.path.splitext(library_name)[0])
+            os.makedirs(plugin_build_dir, exist_ok=True)
+            rel_plugin_path = os.path.relpath(plugin_path, source_dir)
+
+            cmd = (
+                f"cd {source_dir} && "
+                f"{self.nim_path} compile --os:linux --cpu:{cpu} --app:lib "
+                f"--compileOnly --genScript --nimcache:{plugin_build_dir} "
+                f"--out:{os.path.join(plugin_build_dir, library_name)} "
+                f"{debug_options} {rel_plugin_path} 2>&1"
+            )
+            status, out, err = await exec_local_command(self.db, self.redis, self.frame, cmd)
+            if status != 0:
+                await self._log_nim_compile_failure(source_dir, out or "", err or "")
+                raise Exception(f"Failed to generate compiled scene sources for {library_name}")
+
+            shutil.copy(nimbase_path, os.path.join(plugin_build_dir, "nimbase.h"))
+            script_candidates = glob(os.path.join(plugin_build_dir, "compile_*.sh"))
+            if not script_candidates:
+                raise Exception(f"Compile script missing for {library_name}")
+            compiler_flags, linker_flags = self._parse_compile_script(
+                script_candidates[0],
+                output_name=library_name,
+            )
+            self._write_c_build_makefile(
+                source_dir=source_dir,
+                target_path=os.path.join(plugin_build_dir, "Makefile"),
+                executable=os.path.join("..", "..", "scenes", library_name),
+                compiler_flags=compiler_flags,
+                linker_flags=linker_flags,
+            )
+            scene_build_dirs.append(os.path.relpath(plugin_build_dir, build_dir))
+
+        return scene_build_dirs
+
     async def make_local_modifications(self, source_dir: str):
         frame = self.frame
         shutil.rmtree(os.path.join(source_dir, "src", "scenes"), ignore_errors=True)
@@ -217,14 +381,17 @@ class FrameDeployer:
 
         for scene in frame.scenes:
             execution = scene.get("settings", {}).get("execution", "compiled")
-            safe_id = re.sub(r'\W+', '', scene.get('id', 'default'))
             if execution == "interpreted":
                 # We're writing them to scenes.json post build
                 continue
             try:
+                module_name = scene_module_name(scene.get("id", "default"))
                 scene_source = write_scene_nim(frame, scene)
-                with open(os.path.join(source_dir, "src", "scenes", f"scene_{safe_id}.nim"), "w") as f:
+                with open(os.path.join(source_dir, "src", "scenes", f"scene_{module_name}.nim"), "w") as f:
                     f.write(scene_source)
+                plugin_source = write_scene_plugin_nim(scene, is_default=bool(scene.get("default", False)))
+                with open(os.path.join(source_dir, "src", "scenes", f"plugin_{module_name}.nim"), "w") as pf:
+                    pf.write(plugin_source)
             except Exception as e:
                 await self.log("stderr",
                         f"Error writing scene \"{scene.get('name','')}\" "
@@ -337,27 +504,7 @@ class FrameDeployer:
 
         status, out, err = await exec_local_command(db, redis, frame, cmd)
         if status != 0:
-            lines = ((out or "") + ("\n" + err if err else "")).splitlines()
-            filtered = [ln for ln in lines if ln.strip()]
-            for line in reversed(filtered):
-                match = re.match(r'^(.*\.nim)\((\d+), (\d+)\),?.*', line)
-                if match:
-                    fn = match.group(1)
-                    line_nr = int(match.group(2))
-                    column = int(match.group(3))
-                    source_abs = os.path.realpath(source_dir)
-                    final_path = os.path.realpath(os.path.join(source_dir, fn))
-                    if os.path.commonprefix([final_path, source_abs]) == source_abs and os.path.exists(final_path):
-                        rel_fn = final_path[len(source_abs) + 1:]
-                        with open(final_path, "r") as of:
-                            all_lines = of.readlines()
-                        await self.log("stdout", f"Error in {rel_fn}:{line_nr}:{column}")
-                        await self.log("stdout", f"Line {line_nr}: {all_lines[line_nr - 1]}")
-                        await self.log("stdout", f".......{'.'*(column - 1 + len(str(line_nr)))}^")
-                    else:
-                        await self.log("stdout", f"Error in {fn}:{line_nr}:{column}")
-                    break
-
+            await self._log_nim_compile_failure(source_dir, out or "", err or "")
             raise Exception("Failed to generate frameos sources")
 
         nimbase_path = find_nimbase_file(nim_path)
@@ -365,6 +512,13 @@ class FrameDeployer:
             raise Exception("nimbase.h not found")
 
         shutil.copy(nimbase_path, os.path.join(build_dir, "nimbase.h"))
+        scene_build_dirs = await self._generate_compiled_scene_build_dirs(
+            source_dir=source_dir,
+            build_dir=build_dir,
+            cpu=cpu,
+            debug_options=debug_options,
+            nimbase_path=nimbase_path,
+        )
 
         if waveshare := drivers.get('waveshare'):
             if waveshare.variant:
@@ -397,47 +551,24 @@ class FrameDeployer:
                         os.path.join(build_dir, wf)
                     )
 
-        with open(os.path.join(build_dir, "Makefile"), "w") as mk:
-            script_path = os.path.join(build_dir, "compile_frameos.sh")
-            linker_flags = ["-pthread", "-lm", "-lrt", "-ldl"] # Defaults just in case, Will be overridden before
-            compiler_flags: list[str] = []
-            with open(script_path, "r") as sc:
-                lines_sc = sc.readlines()
-            for line in lines_sc:
-                if " -o frameos " in line and " -l" in line:
-                    linker_flags = [
-                        fl.strip() for fl in line.split(' ')
-                        if fl.startswith('-') and fl != '-o'
-                    ]
-                elif " -c " in line and not compiler_flags:
-                    compiler_flags = [
-                        fl for fl in line.split(' ')
-                        if fl.startswith('-') and not fl.startswith('-I')
-                        and fl not in ['-o', '-c', '-D']
-                    ]
-
-            linker_flags = self._dedupe_preserve_order(
-                linker_flags
-                + ["quickjs/libquickjs.a"]
-                + self._driver_linker_flags(drivers)
-            )
-
-            with open(os.path.join(source_dir, "tools", "nimc.Makefile"), "r") as mf_in:
-                lines_make = mf_in.readlines()
-            for ln in lines_make:
-                if ln.startswith("LIBS = "):
-                    ln = (
-                        "LIBS = -L. "
-                        + " ".join(linker_flags)
-                        + " $(EXTRA_LIBS)\n"
-                    )
-                if ln.startswith("CFLAGS = "):
-                    ln = (
-                        "CFLAGS = "
-                        + " ".join([f for f in compiler_flags if f != '-c'])
-                        + " $(EXTRA_CFLAGS)\n"
-                    )
-                mk.write(ln)
+        script_path = os.path.join(build_dir, "compile_frameos.sh")
+        compiler_flags, linker_flags = self._parse_compile_script(
+            script_path,
+            output_name="frameos",
+        )
+        linker_flags = self._dedupe_preserve_order(
+            linker_flags
+            + ["quickjs/libquickjs.a"]
+            + self._driver_linker_flags(drivers)
+        )
+        self._write_c_build_makefile(
+            source_dir=source_dir,
+            target_path=os.path.join(build_dir, "Makefile"),
+            executable="frameos",
+            compiler_flags=compiler_flags,
+            linker_flags=linker_flags,
+            compiled_scene_dirs=scene_build_dirs,
+        )
 
         archive_path = os.path.join(temp_dir, f"build_{build_id}.tar.gz")
         zip_base = os.path.join(temp_dir, f"build_{build_id}")

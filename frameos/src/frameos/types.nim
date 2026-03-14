@@ -191,6 +191,12 @@ type
     render*: proc (self: FrameScene, context: ExecutionContext): Image
     init*: proc (sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persistedState: JsonNode): FrameScene
 
+  CompiledScenePlugin* = ref object of RootObj
+    id*: SceneId
+    name*: string
+    isDefault*: bool
+    scene*: ExportedScene
+
   # Exported data/functions for interpreted scenes, adds some local state that's normally compiled into the scene
   ExportedInterpretedScene* = ref object of ExportedScene
     name*: string

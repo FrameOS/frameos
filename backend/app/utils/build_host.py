@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 import shlex
+import shutil
 import tarfile
 import tempfile
 from dataclasses import dataclass
@@ -224,3 +225,46 @@ class BuildHostSession:
             raise RuntimeError("Build host session is not connected")
         Path(local_path).parent.mkdir(parents=True, exist_ok=True)
         await asyncssh.scp((self._conn, remote_path), local_path)
+
+    async def download_dir_tarball(self, remote_path: str, local_path: str) -> None:
+        if not self._conn:
+            raise RuntimeError("Build host session is not connected")
+
+        remote_dir = Path(remote_path)
+        remote_parent = str(remote_dir.parent)
+        remote_name = remote_dir.name
+        remote_archive = f"{remote_path.rstrip('/')}.tar.gz"
+
+        fd, tmp_path = tempfile.mkstemp(suffix=".tar.gz")
+        os.close(fd)
+        archive_path = Path(tmp_path)
+        try:
+            await self.run(
+                " ".join(
+                    [
+                        "tar -czf",
+                        shlex.quote(remote_archive),
+                        "-C",
+                        shlex.quote(remote_parent),
+                        shlex.quote(remote_name),
+                    ]
+                ),
+                log_command=False,
+                log_output=False,
+            )
+            Path(local_path).parent.mkdir(parents=True, exist_ok=True)
+            if Path(local_path).exists():
+                if Path(local_path).is_dir():
+                    shutil.rmtree(local_path)
+                else:
+                    Path(local_path).unlink()
+            await asyncssh.scp((self._conn, remote_archive), str(archive_path))
+            with tarfile.open(archive_path, "r:gz") as tar:
+                tar.extractall(path=Path(local_path).parent)
+        finally:
+            archive_path.unlink(missing_ok=True)
+            await self.run(
+                f"rm -f {shlex.quote(remote_archive)}",
+                log_command=False,
+                log_output=False,
+            )

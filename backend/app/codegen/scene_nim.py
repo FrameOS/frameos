@@ -7,6 +7,19 @@ from app.models.frame import Frame
 from app.models.apps import get_local_frame_apps, local_apps_path
 from app.codegen.utils import sanitize_nim_string, natural_keys
 
+
+def scene_file_stem(scene_id: str) -> str:
+    stem = re.sub(r"[^a-zA-Z0-9_-]+", "_", scene_id or "default").strip("_")
+    return stem or "default"
+
+
+def scene_module_name(scene_id: str) -> str:
+    return re.sub(r"[^a-zA-Z0-9_]+", "_", scene_file_stem(scene_id))
+
+
+def scene_library_filename(scene_id: str) -> str:
+    return f"{scene_file_stem(scene_id)}.so"
+
 def get_events_schema() -> list[dict]:
     events_schema_path = os.path.join("..", "frontend", "schema", "events.json")
     if os.path.exists(events_schema_path):
@@ -26,6 +39,24 @@ def wrap_color(value: str) -> str:
 
 def write_scene_nim(frame: Frame, scene: dict) -> str:
     return SceneWriter(frame, scene).write_scene_nim()
+
+
+def write_scene_plugin_nim(scene: dict, is_default: bool = False) -> str:
+    scene_id = scene.get("id", "default")
+    scene_name = scene.get("name", scene_id or "Default")
+    module_name = scene_module_name(scene_id)
+    return f"""
+import frameos/types
+import scenes/scene_{module_name} as scene_{module_name}
+
+proc getCompiledScenePlugin*(): CompiledScenePlugin {{.exportc, dynlib, cdecl.}} =
+  CompiledScenePlugin(
+    id: "{sanitize_nim_string(scene_id)}".SceneId,
+    name: "{sanitize_nim_string(scene_name)}",
+    isDefault: {"true" if is_default else "false"},
+    scene: scene_{module_name}.exportedScene,
+  )
+"""
 
 
 def field_type_to_nim_type(field_type: str, required: bool = True) -> str:
@@ -1268,16 +1299,15 @@ def write_scenes_nim(frame: Frame) -> str:
             default_scene = scene
 
         scene_id = scene.get("id", "default")
-        scene_id = re.sub(r"[^a-zA-Z0-9\-\_]", "_", scene_id)
-        scene_id_import = re.sub(r"\W+", "", scene_id)
+        scene_id_import = scene_module_name(scene_id)
         imports.append(
             f"import scenes/scene_{scene_id_import} as scene_{scene_id_import}"
         )
         rows.append(
-            f'  result["{scene_id}".SceneId] = scene_{scene_id_import}.exportedScene'
+            f'  result["{sanitize_nim_string(scene_id)}".SceneId] = scene_{scene_id_import}.exportedScene'
         )
         sceneOptionTuples.append(
-            f"  (\"{scene_id}\".SceneId, \"{scene.get('name', 'Default')}\"),"
+            f"  (\"{sanitize_nim_string(scene_id)}\".SceneId, \"{sanitize_nim_string(scene.get('name', 'Default'))}\"),"
         )
 
     default_scene_id = (
@@ -1286,8 +1316,9 @@ def write_scenes_nim(frame: Frame) -> str:
     if default_scene_id is None:
         default_scene_line = "let defaultSceneId* = none(SceneId)"
     else:
-        default_scene_id = re.sub(r"[^a-zA-Z0-9\-\_]", "_", default_scene_id)
-        default_scene_line = f'let defaultSceneId* = some("{default_scene_id}".SceneId)'
+        default_scene_line = (
+            f'let defaultSceneId* = some("{sanitize_nim_string(default_scene_id)}".SceneId)'
+        )
 
     newline = "\n"
     scenes_source = f"""

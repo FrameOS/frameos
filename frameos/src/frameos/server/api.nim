@@ -15,8 +15,7 @@ import frameos/utils/image
 import frameos/utils/font
 import frameos/config
 from frameos/scenes import getLastImagePng, getLastPublicState, getAllPublicStates, getUploadedScenePayload,
-    getDynamicSceneOptions
-from scenes/scenes import sceneOptions
+    getDynamicSceneOptions, getCompiledSceneOptions
 import ./embedded_assets
 import ./state
 
@@ -328,7 +327,10 @@ proc renderControlPage*(request: Request) =
     seenSceneIds[sceneIdString] = true
     allSceneOptions.add((id: sceneId, name: sceneName))
 
-  for (sceneId, sceneName) in sceneOptions:
+  var compiledSceneOptions: seq[tuple[id: SceneId, name: string]]
+  {.gcsafe.}:
+    compiledSceneOptions = getCompiledSceneOptions()
+  for (sceneId, sceneName) in compiledSceneOptions:
     addSceneOption(sceneId, sceneName)
   var dynamicSceneOptions: seq[tuple[id: SceneId, name: string]]
   {.gcsafe.}:

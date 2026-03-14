@@ -43,6 +43,7 @@ frameos/**/tests/test_*
 !frameos/**/tests/*.nim
 frameos/src/codegen/
 frameos/build/
+frameos/scenes/
 frameos/quickjs/
 frameos/frameos.deps
 frameos/nimcache
