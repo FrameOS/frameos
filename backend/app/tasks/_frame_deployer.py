@@ -569,7 +569,7 @@ class FrameDeployer:
 
         # write apps.nim
         with open(os.path.join(source_dir, "src", "apps", "apps.nim"), "w") as f:
-            f.write(write_apps_nim("../frameos"))
+            f.write(write_apps_nim(source_dir))
 
         for scene in frame.scenes:
             execution = scene.get("settings", {}).get("execution", "compiled")

@@ -200,6 +200,10 @@ def _frame_has_compiled_scenes(frame: Frame) -> bool:
     )
 
 
+def _frame_has_interpreted_scenes(frame: Frame) -> bool:
+    return bool(get_interpreted_scenes_json(frame))
+
+
 def _compiled_scene_build_dirs(frame: Frame) -> list[str]:
     return [
         f"scene_builds/{scene_module_name(str(scene.get('id') or 'default'))}"
@@ -319,6 +323,30 @@ def _local_prebuilt_entry(
     )
 
 
+def _required_local_prebuilt_entry(
+    *,
+    target_slug: str,
+    target_dir: Path,
+    components: dict[str, dict[str, Any]],
+    required_components: tuple[str, ...],
+) -> PrebuiltEntry:
+    prebuilt_entry = _local_prebuilt_entry(target_slug, target_dir, components)
+    missing_components = [
+        component_name
+        for component_name in required_components
+        if not prebuilt_entry.path_for(component_name)
+    ]
+    if missing_components:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail=(
+                "Missing local prebuilt components required to build the package: "
+                + ", ".join(missing_components)
+            ),
+        )
+    return prebuilt_entry
+
+
 def _copy_prebuilt_drivers(
     *,
     frame: Frame,
@@ -374,20 +402,12 @@ async def _build_packaged_compiled_scenes(
     if not _frame_has_compiled_scenes(frame):
         return None
 
-    prebuilt_entry = _local_prebuilt_entry(target_slug, target_dir, components)
-    missing_components = [
-        component_name
-        for component_name in ("quickjs", "lgpio")
-        if not prebuilt_entry.path_for(component_name)
-    ]
-    if missing_components:
-        raise HTTPException(
-            status_code=HTTPStatus.NOT_FOUND,
-            detail=(
-                "Missing local prebuilt components required to compile packaged scenes: "
-                + ", ".join(missing_components)
-            ),
-        )
+    prebuilt_entry = _required_local_prebuilt_entry(
+        target_slug=target_slug,
+        target_dir=target_dir,
+        components=components,
+        required_components=("quickjs", "lgpio"),
+    )
 
     try:
         deployer.nim_path = find_nim_v2()
@@ -434,6 +454,70 @@ async def _build_packaged_compiled_scenes(
             detail="Compiled scenes were requested, but no packaged scene artifacts were produced",
         )
     return Path(requested.artifacts.scenes_dir)
+
+
+async def _build_packaged_runtime_binary(
+    *,
+    db: Session,
+    redis: Redis,
+    frame: Frame,
+    temp_dir: str,
+    deployer: FrameDeployer,
+    target: TargetMetadata,
+    target_slug: str,
+    target_dir: Path,
+    components: dict[str, dict[str, Any]],
+) -> Path:
+    prebuilt_entry = _required_local_prebuilt_entry(
+        target_slug=target_slug,
+        target_dir=target_dir,
+        components=components,
+        required_components=("quickjs", "lgpio"),
+    )
+
+    try:
+        deployer.nim_path = find_nim_v2()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail=f"Unable to locate Nim installation: {exc}",
+        )
+
+    builder = FrameBinaryBuilder(db=db, redis=redis, frame=frame, deployer=deployer, temp_dir=temp_dir)
+
+    try:
+        source_dir = await builder.prepare_source_dir()
+        build_dir, _archive_path = await builder.prepare_build_archive(
+            source_dir=source_dir,
+            arch=target.arch,
+            build_binary=True,
+            build_all_scenes=False,
+        )
+        requested = await builder.build_requested_artifacts(
+            source_dir=source_dir,
+            build_dir=build_dir,
+            target=target,
+            prebuilt_entry=prebuilt_entry,
+            prebuilt_target=target_slug,
+            allow_cross_compile=True,
+            force_cross_compile=True,
+            build_binary=True,
+            build_all_scenes=False,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail=f"Failed to build packaged runtime binary: {exc}",
+        ) from exc
+
+    if not requested.artifacts.binary_path:
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Packaged runtime build completed without producing a frameos binary",
+        )
+    return Path(requested.artifacts.binary_path)
 
 
 def _validate_upload_scenes_payload(
@@ -1194,12 +1278,25 @@ async def api_frame_local_prebuilt_package_zip(
         for dirname in ("drivers", "scenes", "state", "tmp"):
             (package_dir / dirname).mkdir(parents=True, exist_ok=True)
 
-        runtime_binary = _prebuilt_component_file(
-            target_dir,
-            components,
-            "frameos",
-            default_name="frameos",
-        )
+        if _frame_has_interpreted_scenes(frame):
+            runtime_binary = await _build_packaged_runtime_binary(
+                db=db,
+                redis=redis,
+                frame=frame,
+                temp_dir=tmp,
+                deployer=deployer,
+                target=target,
+                target_slug=target_slug,
+                target_dir=target_dir,
+                components=components,
+            )
+        else:
+            runtime_binary = _prebuilt_component_file(
+                target_dir,
+                components,
+                "frameos",
+                default_name="frameos",
+            )
         packaged_binary = package_dir / "frameos"
         shutil.copy2(runtime_binary, packaged_binary)
         os.chmod(packaged_binary, 0o755)

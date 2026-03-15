@@ -123,6 +123,7 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
   var successfulSceneRenders = 0
   var cycles = 0
   let serverRenderDelay = initDuration(milliseconds = int(SERVER_RENDER_DELAY_SECONDS * 1000))
+  var currentSceneInitError = ""
 
   while true:
     timer = getMonoTime()
@@ -140,17 +141,54 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
         updateBootGuardFailureDetails(some(sceneId.string), getSceneDisplayName(sceneId), none(string))
       if self.scenes.hasKey(sceneId):
         currentScene = self.scenes[sceneId]
+        currentSceneInitError = ""
       else:
         try:
           currentScene = getExportedScene(sceneId).init(sceneId, self.frameConfig, self.logger, loadPersistedState(sceneId))
           self.scenes[sceneId] = currentScene
           currentScene.updateLastPublicState()
+          currentSceneInitError = ""
         except Exception as e:
           updateBootGuardFailureDetails(some(sceneId.string), getSceneDisplayName(sceneId), some($e.msg))
+          currentScene = nil
+          currentSceneInitError = $e.msg
           self.logger.log(%*{"event": "render:error:scene:init", "error": $e.msg, "stacktrace": e.getStackTrace()})
 
       lastSceneId = sceneId
       setLastPublicSceneId(sceneId)
+
+    if currentScene.isNil:
+      let requiredWidth = self.frameConfig.renderWidth()
+      let requiredHeight = self.frameConfig.renderHeight()
+      var renderedImage = newImage(requiredWidth, requiredHeight)
+      renderedImage.fill(parseHtmlColor("#fff4f4"))
+      setLastImage(renderedImage)
+      self.lastRenderAt = epochTime()
+      triggerServerRender()
+
+      driverTimer = getMonoTime()
+      try:
+        drivers.render(renderedImage)
+        let driverElapsedMs = round(durationToMilliseconds(getMonoTime() - driverTimer), 3)
+        self.logger.log(%*{"event": "render:driver",
+          "device": self.frameConfig.device, "ms": driverElapsedMs})
+      except Exception as e:
+        self.logger.log(%*{"event": "render:driver:error", "error": $e.msg, "stacktrace": e.getStackTrace()})
+
+      await sleepAsync(0.001)
+      self.isRendering = false
+
+      inc cycles
+      if maxCycles > 0 and cycles >= maxCycles:
+        break
+
+      let retrySleepMs = 1000.0
+      self.logger.log(%*{"event": "render:sleep", "ms": retrySleepMs})
+      let retryFuture = sleepAsync(retrySleepMs)
+      self.sleepFuture = some(retryFuture)
+      await retryFuture
+      self.sleepFuture = none(Future[void])
+      continue
 
     currentScene.isRendering = true
     self.triggerRenderNext = false # used to debounce render events received while rendering
