@@ -323,13 +323,24 @@ type
     logEvent*: LogEventHook
     triggerServerRender*: TriggerServerRenderHook
 
+  DriverPreviewPixelFormat* = enum
+    dpfRgba8, dpfGray8, dpfIndexed2, dpfIndexed4, dpfIndexed8, dpfMono1
+
+  DriverPreviewArtifact* = ref object of RootObj
+    width*: int
+    height*: int
+    rotate*: int
+    pixelFormat*: DriverPreviewPixelFormat
+    data*: seq[uint8]
+    palette*: seq[(uint8, uint8, uint8)]
+
   ExportedDriver* = ref object of RootObj
     canRender*: bool
-    canPng*: bool
+    canPreview*: bool
     canTurnOnOff*: bool
     init*: proc (frameOS: FrameOS): FrameOSDriver
     render*: proc (self: FrameOSDriver, image: Image): void
-    toPng*: proc (self: FrameOSDriver, rotate: int): string
+    preview*: proc (self: FrameOSDriver): DriverPreviewArtifact
     turnOn*: proc (self: FrameOSDriver): void
     turnOff*: proc (self: FrameOSDriver): void
 

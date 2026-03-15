@@ -52,13 +52,13 @@ proc renderDriver(self: FrameOSDriver, image: Image) =
   {alias}.render(cast[{alias}.Driver](self), image)
 """.strip()
 
-    png_proc = "nil"
-    if driver.can_png:
-        png_proc = f"""
-proc toPngDriver(self: FrameOSDriver, rotate: int): string =
+    preview_proc = "nil"
+    if driver.can_preview:
+        preview_proc = f"""
+proc previewDriver(self: FrameOSDriver): DriverPreviewArtifact =
   if self.isNil:
-    return ""
-  return {alias}.toPng(rotate)
+    return nil
+  return {alias}.getPreview(cast[{alias}.Driver](self))
 """.strip()
 
     power_procs = ""
@@ -93,8 +93,8 @@ proc turnOffDriver(self: FrameOSDriver) =
     ]
     if driver.can_render:
         blocks.extend(["", render_proc])
-    if driver.can_png:
-        blocks.extend(["", png_proc])
+    if driver.can_preview:
+        blocks.extend(["", preview_proc])
     if power_procs:
         blocks.extend(["", power_procs])
     blocks.extend(
@@ -106,11 +106,11 @@ proc turnOffDriver(self: FrameOSDriver) =
             f'    variant: "{sanitize_nim_string(variant)}",',
             "    driver: ExportedDriver(",
             f'      canRender: {"true" if driver.can_render else "false"},',
-            f'      canPng: {"true" if driver.can_png else "false"},',
+            f'      canPreview: {"true" if driver.can_preview else "false"},',
             f'      canTurnOnOff: {"true" if driver.can_turn_on_off else "false"},',
             "      init: initDriver,",
             f'      render: {"renderDriver" if driver.can_render else "nil"},',
-            f'      toPng: {"toPngDriver" if driver.can_png else "nil"},',
+            f'      preview: {"previewDriver" if driver.can_preview else "nil"},',
             f"      turnOn: {turn_on_ref},",
             f"      turnOff: {turn_off_ref},",
             "    ),",
@@ -132,8 +132,8 @@ proc init*(frameOS: FrameOS) =
 proc render*(image: Image) =
   renderCompiledDrivers(image)
 
-proc toPng*(rotate: int): string =
-  result = compiledDriversToPng(rotate)
+proc getPreview*(): Image =
+  result = compiledDriversPreviewImage()
 
 proc turnOn*() =
   turnOnCompiledDrivers()

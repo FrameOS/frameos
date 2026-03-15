@@ -8,7 +8,7 @@ class Driver:
     import_path: Optional[str] = None # nim local import path for driver
     vendor_folder: Optional[str] = None # vendor/folder to be copied to the release folder
     can_render: bool = False # add render(image)
-    can_png: bool = False # add toPng(rotate)
+    can_preview: bool = False # add getPreview()
     can_turn_on_off: bool = False # add turnOn() and turnOff()
     lines: Optional[list[str]] = None # extra config lines for drivers
     link_flags: tuple[str, ...] = () # additional linker flags required when this driver is present
@@ -18,7 +18,7 @@ DRIVERS = {
         name="inkyPython",
         import_path="inkyPython/inkyPython",
         vendor_folder="inkyPython",
-        can_png=False, # will be set to true for the frames that support this
+        can_preview=False, # will be set to true for the frames that support this
         can_render=True,
     ),
     "gpioButton": Driver(
@@ -36,7 +36,7 @@ DRIVERS = {
         name="waveshare",
         import_path="waveshare/waveshare",
         can_render=True,
-        can_png=True,
+        can_preview=True,
         link_flags=("-llgpio",),
     ),
     "inkyHyperPixel2r": Driver(

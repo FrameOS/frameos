@@ -10,9 +10,9 @@ proc init*(frameOS: FrameOS) =
 proc render*(image: Image) =
   renderCompiledDrivers(image)
 
-# Convert the rendered pixels to a PNG image. For accurate colors on the web.
-proc toPng*(rotate: int): string =
-  result = compiledDriversToPng(rotate)
+# Reconstruct the driver-provided preview image in host code.
+proc getPreview*(): Image =
+  result = compiledDriversPreviewImage()
 
 # Turn on the device, if supported
 proc turnOn*() =

@@ -1,33 +1,27 @@
 import pixie, json, times, locks, options
 
 import frameos/types
-import frameos/utils/image
 import frameos/utils/dither
 import drivers/waveshare/driver as waveshareDriver
 from drivers/waveshare/types import Driver, ColorOption, setDriverDebugLogger
 export Driver
 
-var
-  lastFloatImageLock: Lock
-  lastFloatImage: seq[float] = @[]
-  lastPixelsLock: Lock
-  lastPixels: seq[uint8] = @[]
+proc previewPalette(colors: seq[(int, int, int)]): seq[(uint8, uint8, uint8)] =
+  result = newSeq[(uint8, uint8, uint8)](colors.len)
+  for i, color in colors:
+    result[i] = (
+      max(0, min(255, color[0])).uint8,
+      max(0, min(255, color[1])).uint8,
+      max(0, min(255, color[2])).uint8
+    )
 
-proc setLastFloatImage*(image: seq[float]) =
-  withLock lastFloatImageLock:
-    lastFloatImage = image
+proc setPreview(self: Driver, preview: DriverPreviewArtifact) =
+  withLock self.previewLock:
+    self.lastPreview = preview
 
-proc getLastFloatImage*(): seq[float] =
-  withLock lastFloatImageLock:
-    result = lastFloatImage
-
-proc setLastPixels*(image: seq[uint8]) =
-  withLock lastPixelsLock:
-    lastPixels = image
-
-proc getLastPixels*(): seq[uint8] =
-  withLock lastPixelsLock:
-    result = lastPixels
+proc getPreview*(self: Driver): DriverPreviewArtifact =
+  withLock self.previewLock:
+    result = self.lastPreview
 
 proc init*(frameOS: FrameOS): Driver =
   let logger = frameOS.logger
@@ -51,6 +45,7 @@ proc init*(frameOS: FrameOS): Driver =
       palette: none(seq[(int, int, int)]),
       vcom: frameOS.frameConfig.deviceConfig.vcom
     )
+    initLock(result.previewLock)
 
     if waveshareDriver.colorOption == ColorOption.SpectraSixColor and len(frameOS.frameConfig.palette.colors) == 6:
       let c = frameOS.frameConfig.palette.colors
@@ -78,8 +73,16 @@ proc renderBlack*(self: Driver, image: Image) =
   var gray = newSeq[float](image.width * image.height)
   image.toGrayscaleFloat(gray)
   gray.floydSteinberg(image.width, image.height)
-
-  setLastFloatImage(gray)
+  var preview = newSeq[uint8](gray.len)
+  for i, value in gray:
+    preview[i] = (value * 255).uint8
+  self.setPreview(DriverPreviewArtifact(
+    width: image.width,
+    height: image.height,
+    rotate: 0,
+    pixelFormat: dpfGray8,
+    data: preview,
+  ))
   self.notifyImageAvailable()
 
   let rowWidth = ceil(image.width.float / 8).int
@@ -96,7 +99,16 @@ proc renderFourGray*(self: Driver, image: Image) =
   var gray = newSeq[float](image.width * image.height)
   image.toGrayscaleFloat(gray, 3)
   gray.floydSteinberg(image.width, image.height)
-  setLastFloatImage(gray)
+  var preview = newSeq[uint8](gray.len)
+  for i, value in gray:
+    preview[i] = (value * 85).uint8
+  self.setPreview(DriverPreviewArtifact(
+    width: image.width,
+    height: image.height,
+    rotate: 0,
+    pixelFormat: dpfGray8,
+    data: preview,
+  ))
   self.notifyImageAvailable()
 
   let rowWidth = ceil(image.width.float / 4).int
@@ -113,7 +125,16 @@ proc renderSixteenGray*(self: Driver, image: Image) =
   var gray = newSeq[float](image.width * image.height)
   image.toGrayscaleFloat(gray, 15)
   gray.floydSteinberg(image.width, image.height)
-  setLastFloatImage(gray)
+  var preview = newSeq[uint8](gray.len)
+  for i, value in gray:
+    preview[i] = (value * 17).uint8
+  self.setPreview(DriverPreviewArtifact(
+    width: image.width,
+    height: image.height,
+    rotate: 0,
+    pixelFormat: dpfGray8,
+    data: preview,
+  ))
   self.notifyImageAvailable()
 
   let rowWidth = ceil(image.width.float / 2).int
@@ -135,7 +156,14 @@ proc renderBlackWhiteRed*(self: Driver, image: Image, isRed = true) =
   var blackImage = newSeq[uint8](packedRowWidth * image.height)
   var redImage = newSeq[uint8](packedRowWidth * image.height)
 
-  setLastPixels(pixels)
+  self.setPreview(DriverPreviewArtifact(
+    width: image.width,
+    height: image.height,
+    rotate: 0,
+    pixelFormat: dpfIndexed2,
+    data: pixels,
+    palette: previewPalette(@[(0, 0, 0), (255, if isRed: 0 else: 255, 0), (255, 255, 255)]),
+  ))
   self.notifyImageAvailable()
 
   for y in 0..<image.height:
@@ -156,19 +184,41 @@ proc renderBlackWhiteRed*(self: Driver, image: Image, isRed = true) =
 
 proc renderBlackWhiteYellowRed*(self: Driver, image: Image) =
   let pixels = ditherPaletteIndexed(image, saturated4ColorPalette)
-  setLastPixels(pixels)
+  self.setPreview(DriverPreviewArtifact(
+    width: image.width,
+    height: image.height,
+    rotate: 0,
+    pixelFormat: dpfIndexed2,
+    data: pixels,
+    palette: previewPalette(saturated4ColorPalette),
+  ))
   self.notifyImageAvailable()
   waveshareDriver.renderImage(pixels)
 
 proc renderSevenColor*(self: Driver, image: Image) =
   let pixels = ditherPaletteIndexed(image, saturated7ColorPalette)
-  setLastPixels(pixels)
+  self.setPreview(DriverPreviewArtifact(
+    width: image.width,
+    height: image.height,
+    rotate: 0,
+    pixelFormat: dpfIndexed4,
+    data: pixels,
+    palette: previewPalette(saturated7ColorPalette),
+  ))
   self.notifyImageAvailable()
   waveshareDriver.renderImage(pixels)
 
 proc renderSpectraSixColor*(self: Driver, image: Image) =
-  let pixels = ditherPaletteIndexed(image, if self.palette.isSome(): self.palette.get() else: spectra6ColorPalette)
-  setLastPixels(pixels)
+  let palette = if self.palette.isSome(): self.palette.get() else: spectra6ColorPalette
+  let pixels = ditherPaletteIndexed(image, palette)
+  self.setPreview(DriverPreviewArtifact(
+    width: image.width,
+    height: image.height,
+    rotate: 0,
+    pixelFormat: dpfIndexed4,
+    data: pixels,
+    palette: previewPalette(palette),
+  ))
   self.notifyImageAvailable()
   waveshareDriver.renderImage(pixels)
 
@@ -204,112 +254,3 @@ proc render*(self: Driver, image: Image) =
     self.renderBlackWhiteYellowRed(image)
 
   waveshareDriver.sleep()
-
-# Convert the rendered pixels to a PNG image. For accurate colors on the web.
-proc toPng*(rotate: int = 0): string =
-  var outputImage = newImage(width, height)
-  case waveshareDriver.colorOption:
-  of ColorOption.Black:
-    let pixels = getLastFloatImage()
-    if pixels.len == 0:
-      raise newException(Exception, "No render yet")
-    for y in 0 ..< height:
-      for x in 0 ..< width:
-        let index = y * width + x
-        let pixel = (pixels[index] * 255).uint8
-        outputImage.data[index].r = pixel
-        outputImage.data[index].g = pixel
-        outputImage.data[index].b = pixel
-        outputImage.data[index].a = 255
-  of ColorOption.FourGray:
-    let pixels = getLastFloatImage()
-    if pixels.len == 0:
-      raise newException(Exception, "No render yet")
-    for y in 0 ..< height:
-      for x in 0 ..< width:
-        let index = y * width + x
-        let pixel = (pixels[index] * 85).uint8
-        outputImage.data[index].r = pixel
-        outputImage.data[index].g = pixel
-        outputImage.data[index].b = pixel
-        outputImage.data[index].a = 255
-  of ColorOption.SixteenGray:
-    let pixels = getLastFloatImage()
-    if pixels.len == 0:
-      raise newException(Exception, "No render yet")
-    for y in 0 ..< height:
-      for x in 0 ..< width:
-        let index = y * width + x
-        let pixel = (pixels[index] * 17).uint8
-        outputImage.data[index].r = pixel
-        outputImage.data[index].g = pixel
-        outputImage.data[index].b = pixel
-        outputImage.data[index].a = 255
-  of ColorOption.BlackWhiteRed, ColorOption.BlackWhiteYellow:
-    let pixels = getLastPixels()
-    if pixels.len == 0:
-      raise newException(Exception, "No render yet")
-    let inputRowWidth = int(ceil(width.float / 4))
-    for y in 0 ..< height:
-      for x in 0 ..< width:
-        let inputIndex = y * inputRowWidth + x div 4
-        let pixelByte = pixels[inputIndex]
-        let pixelShift = (3 - (x mod 4)) * 2
-        let pixel = (pixelByte shr pixelShift) and 0x03
-        let index = y * width + x
-        outputImage.data[index].r = if pixel == 0: 0 else: 255
-        outputImage.data[index].g = if pixel == 2: 255
-                                    elif pixel == 1 and waveshareDriver.colorOption == ColorOption.BlackWhiteYellow: 255
-                                    else: 0
-        outputImage.data[index].b = if pixel == 2: 255 else: 0
-        outputImage.data[index].a = 255
-  of ColorOption.BlackWhiteYellowRed:
-    let pixels = getLastPixels()
-    if pixels.len == 0:
-      raise newException(Exception, "No render yet")
-    let inputRowWidth = int(ceil(width.float / 4))
-    for y in 0 ..< height:
-      for x in 0 ..< width:
-        let inputIndex = y * inputRowWidth + x div 4
-        let pixelByte = pixels[inputIndex]
-        let pixelShift = (3 - (x mod 4)) * 2
-        let pixel = (pixelByte shr pixelShift) and 0x03
-        let index = y * width + x
-
-        outputImage.data[index].r = saturated4ColorPalette[pixel][0].uint8
-        outputImage.data[index].g = saturated4ColorPalette[pixel][1].uint8
-        outputImage.data[index].b = saturated4ColorPalette[pixel][2].uint8
-        outputImage.data[index].a = 255
-  of ColorOption.SevenColor:
-    let pixels = getLastPixels()
-    if pixels.len == 0:
-      raise newException(Exception, "No render yet")
-    for y in 0 ..< height:
-      for x in 0 ..< width:
-        let index = y * width + x
-        let pixelIndex = index div 2
-        let pixelShift = (1 - (index mod 2)) * 4
-        let pixel = (pixels[pixelIndex] shr pixelShift) and 0x07
-        outputImage.data[index].r = saturated7ColorPalette[pixel][0].uint8
-        outputImage.data[index].g = saturated7ColorPalette[pixel][1].uint8
-        outputImage.data[index].b = saturated7ColorPalette[pixel][2].uint8
-        outputImage.data[index].a = 255
-  of ColorOption.SpectraSixColor:
-    let pixels = getLastPixels()
-    if pixels.len == 0:
-      raise newException(Exception, "No render yet")
-    for y in 0 ..< height:
-      for x in 0 ..< width:
-        let index = y * width + x
-        let pixelIndex = index div 2
-        let pixelShift = (1 - (index mod 2)) * 4
-        let pixel = (pixels[pixelIndex] shr pixelShift) and 0x07
-        outputImage.data[index].r = spectra6ColorPalette[pixel][0].uint8
-        outputImage.data[index].g = spectra6ColorPalette[pixel][1].uint8
-        outputImage.data[index].b = spectra6ColorPalette[pixel][2].uint8
-        outputImage.data[index].a = 255
-
-  if rotate != 0:
-    return outputImage.rotateDegrees(rotate).encodeImage(PngFormat)
-
-  return outputImage.encodeImage(PngFormat)

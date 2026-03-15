@@ -1,7 +1,6 @@
 import osproc, os, streams, pixie, json, options, strutils, strformat, locks
 import frameos/types
 import frameos/utils/dither
-import frameos/utils/image
 
 type ScreenInfo* = object
   width*: int
@@ -16,22 +15,25 @@ type Driver* = ref object of FrameOSDriver
   logger: Logger
   lastImageData: seq[ColorRGBX]
   debug: bool
+  previewLock: Lock
+  lastPreview: DriverPreviewArtifact
 
-var
-  lastPixelsLock: Lock
-  lastPixels: seq[uint8] = @[]
-  lastWidth: int
-  lastHeight: int
+proc previewPalette(colors: seq[(int, int, int)]): seq[(uint8, uint8, uint8)] =
+  result = newSeq[(uint8, uint8, uint8)](colors.len)
+  for i, color in colors:
+    result[i] = (
+      max(0, min(255, color[0])).uint8,
+      max(0, min(255, color[1])).uint8,
+      max(0, min(255, color[2])).uint8
+    )
 
-proc setLastPixels*(image: seq[uint8], width: int, height: int) =
-  withLock lastPixelsLock:
-    lastPixels = image
-    lastWidth = width
-    lastHeight = height
+proc setPreview(self: Driver, preview: DriverPreviewArtifact) =
+  withLock self.previewLock:
+    self.lastPreview = preview
 
-proc getLastPixels*(): seq[uint8] =
-  withLock lastPixelsLock:
-    result = lastPixels
+proc getPreview*(self: Driver): DriverPreviewArtifact =
+  withLock self.previewLock:
+    result = self.lastPreview
 
 proc notifyImageAvailable*(self: Driver) =
   self.logger.log(%*{"event": "render:dither", "info": "Dithered image available"})
@@ -77,6 +79,7 @@ proc init*(frameOS: FrameOS): Driver =
     debug: frameOS.frameConfig.debug,
     palette: frameOS.frameConfig.palette,
   )
+  initLock(result.previewLock)
 
   let pOpt =
     safeStartProcess("./env/bin/python3",
@@ -144,7 +147,14 @@ proc render*(self: Driver, image: Image) =
     else:
       palette = spectra6ColorPalette
     imageData = ditherPaletteIndexed(image, palette)
-    setLastPixels(imageData, image.width, image.height)
+    self.setPreview(DriverPreviewArtifact(
+      width: image.width,
+      height: image.height,
+      rotate: 0,
+      pixelFormat: dpfIndexed4,
+      data: imageData,
+      palette: previewPalette(palette),
+    ))
     self.notifyImageAvailable()
     extraArgs.add "--raw"
   else:
@@ -220,28 +230,3 @@ proc render*(self: Driver, image: Image) =
 
   logProcessExit(self.logger, process, "inkyPython-run")
   process.close()
-
-# Convert the rendered pixels to a PNG image. For accurate colors on the web.
-proc toPng*(rotate: int = 0): string =
-  let width = lastWidth
-  let height = lastHeight
-  var outputImage = newImage(width, height)
-
-  let pixels = getLastPixels()
-  if pixels.len == 0:
-    raise newException(Exception, "No render yet")
-  for y in 0 ..< height:
-    for x in 0 ..< width:
-      let index = y * width + x
-      let pixelIndex = index div 2
-      let pixelShift = (1 - (index mod 2)) * 4
-      let pixel = (pixels[pixelIndex] shr pixelShift) and 0x07
-      outputImage.data[index].r = spectra6ColorPalette[pixel][0].uint8
-      outputImage.data[index].g = spectra6ColorPalette[pixel][1].uint8
-      outputImage.data[index].b = spectra6ColorPalette[pixel][2].uint8
-      outputImage.data[index].a = 255
-
-  if rotate != 0:
-    return outputImage.rotateDegrees(rotate).encodeImage(PngFormat)
-
-  return outputImage.encodeImage(PngFormat)

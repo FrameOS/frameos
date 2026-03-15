@@ -6,10 +6,12 @@ import tables
 import json
 import zippy
 import locks
+import pixie
 
 import ../api
 import ../state
 import ../../types
+import ../../../drivers/plugin_runtime
 
 proc baseConfig(assetsPath = ""): FrameConfig =
   FrameConfig(
@@ -36,6 +38,59 @@ proc baseConfig(assetsPath = ""): FrameConfig =
   )
 
 suite "Server API helpers":
+  test "preview artifact decoder handles indexed2 row padding":
+    let preview = DriverPreviewArtifact(
+      width: 5,
+      height: 2,
+      rotate: 0,
+      pixelFormat: dpfIndexed2,
+      data: @[25'u8, 0'u8, 134'u8, 64'u8],
+      palette: @[
+        (0'u8, 0'u8, 0'u8),
+        (255'u8, 0'u8, 0'u8),
+        (255'u8, 255'u8, 255'u8),
+      ],
+    )
+
+    let image = previewArtifactToImage(preview)
+    check image != nil
+    check image.width == 5
+    check image.height == 2
+    check image.data[0].r == 0
+    check image.data[1].r == 255
+    check image.data[1].g == 0
+    check image.data[2].r == 255
+    check image.data[2].g == 255
+    check image.data[8].r == 255
+    check image.data[8].g == 255
+    check image.data[9].r == 255
+    check image.data[9].g == 0
+
+  test "preview artifact decoder handles indexed4 row padding":
+    let preview = DriverPreviewArtifact(
+      width: 3,
+      height: 1,
+      rotate: 0,
+      pixelFormat: dpfIndexed4,
+      data: @[0x05'u8, 0x60'u8],
+      palette: @[
+        (0'u8, 0'u8, 0'u8),
+        (10'u8, 10'u8, 10'u8),
+        (20'u8, 20'u8, 20'u8),
+        (30'u8, 30'u8, 30'u8),
+        (40'u8, 40'u8, 40'u8),
+        (50'u8, 50'u8, 50'u8),
+        (60'u8, 60'u8, 60'u8),
+      ],
+    )
+
+    let image = previewArtifactToImage(preview)
+    check image != nil
+    check image.width == 3
+    check image.data[0].r == 0
+    check image.data[1].r == 50
+    check image.data[2].r == 60
+
   test "url encoded parser decodes values":
     let parsed = parseUrlEncoded("name=Frame%20One&flag=true&empty=")
     check parsed["name"] == "Frame One"
