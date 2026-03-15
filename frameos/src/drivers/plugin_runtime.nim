@@ -17,6 +17,7 @@ type
 
 var loadedCompiledDrivers: seq[LoadedCompiledDriver] = @[]
 var compiledDriverLoadCounter = 0
+var testPreviewArtifact: DriverPreviewArtifact
 
 proc copyCompiledDriverLibrary(sourcePath: string): string =
   inc compiledDriverLoadCounter
@@ -227,6 +228,34 @@ proc compiledDriversPreviewImage*(): Image =
       except CatchableError:
         discard
   nil
+
+# Test seam for API preview coverage without building a shared-library driver plugin.
+proc clearCompiledDriversForTests*() =
+  testPreviewArtifact = nil
+  loadedCompiledDrivers = @[]
+
+proc previewFromTestDriver(self: FrameOSDriver): DriverPreviewArtifact =
+  testPreviewArtifact
+
+proc setCompiledDriverPreviewForTests*(preview: DriverPreviewArtifact) =
+  testPreviewArtifact = preview
+  if preview.isNil:
+    loadedCompiledDrivers = @[]
+    return
+
+  loadedCompiledDrivers = @[
+    LoadedCompiledDriver(
+      path: "__test__/preview-driver.so",
+      plugin: CompiledDriverPlugin(
+        id: "__test__/preview-driver",
+        driver: ExportedDriver(
+          canPreview: true,
+          preview: previewFromTestDriver,
+        ),
+      ),
+      instance: FrameOSDriver(name: "__test__/preview-driver"),
+    )
+  ]
 
 proc turnOnCompiledDrivers*() =
   for loaded in loadedCompiledDrivers:

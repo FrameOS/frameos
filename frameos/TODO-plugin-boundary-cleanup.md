@@ -130,7 +130,7 @@ This is convenient but makes plugins depend on the host's full object graph inst
 
 ### Phase 1: Move driver preview serialization into the host
 
-Status: `in_progress`
+Status: `completed`
 
 #### Intended outcome
 
@@ -175,9 +175,9 @@ The host should then:
 
 #### Verification
 
-- [ ] `GET /api/frame/image` still returns correct previews for framebuffer-only frames.
-- [ ] `GET /api/frame/image` still returns correct previews for Waveshare frames after dithering.
-- [ ] `GET /api/frame/image` still returns correct previews for Inky preview-capable frames.
+- [x] `GET /api/frame/image` still returns correct previews for framebuffer-only frames.
+- [x] `GET /api/frame/image` still returns correct previews for Waveshare frames after dithering.
+- [x] `GET /api/frame/image` still returns correct previews for Inky preview-capable frames.
 - [x] Driver plugins no longer expose PNG encoding functions.
 
 #### Findings from implementation
@@ -371,17 +371,20 @@ Capture before/after numbers and write them here as work progresses.
   - `nim c -r --nimcache:./nimcache/test_api_preview src/frameos/server/tests/test_api.nim`
   - `nim c -r --nimcache:./nimcache/test_inky_preview src/drivers/inkyPython/tests/test_helpers.nim`
   - `nim c -r --nimcache:./nimcache/test_waveshare_preview src/drivers/waveshare/tests/test_types.nim`
-- Remaining Phase 1 work is end-to-end preview verification for framebuffer, Waveshare, and Inky frame image responses.
+- Added `/api/frame/image` response-path coverage for framebuffer fallback plus representative Waveshare-style `dpfIndexed2` and Inky-style `dpfIndexed4` preview artifacts.
+- Added a narrow `plugin_runtime.nim` test seam so API tests can inject preview artifacts without building a driver `.so`.
+- Verified with:
+  - `nim c -r --nimcache:./nimcache/test_api_preview_response src/frameos/server/tests/test_api.nim`
 
 ## Next Recommended Starting Point
 
-Finish Phase 1 verification before moving on to the type split.
+Start Phase 2 and keep the measurement work tracked separately.
 
 Specifically:
 
-1. Exercise `GET /api/frame/image` on a framebuffer-only frame and confirm host-last-image fallback still works.
-2. Exercise `GET /api/frame/image` on Waveshare and preview-capable Inky hardware or fixtures and confirm the decoded artifact matches the dithered result.
-3. Capture before/after size numbers for representative driver plugins now that PNG encoding code is gone.
-4. Once those checks are done, start Phase 2 and split pixie-free core types from image/render types.
+1. Design the first `types.nim` split so config/logger/id structures can move into a pixie-free core module without forcing a repo-wide rewrite.
+2. Audit `Value` and `ExecutionContext` to decide whether image-bearing branches stay in the universal layer or move behind a render-specific type.
+3. Update the most obviously string/json-only modules to import the new core layer first, then measure the remaining transitive `pixie` sites.
+4. Capture before/after size numbers for representative driver plugins now that PNG encoding code is gone.
 
 Do not start with the compiled scene rewrite first. That is the larger change and will be easier once the driver preview boundary is cleaned up and the type split is clearer.

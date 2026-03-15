@@ -88,3 +88,4 @@ build/prebuilt-cross/
 frameos/.nimcache*
 .tmp-cache/
 frameos/.tmp-home/
+nimcache
