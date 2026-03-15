@@ -600,18 +600,21 @@ async def test_build_packaged_runtime_binary_uses_prebuilt_deps_and_skips_compil
         id=1,
         scenes=[{"id": "interpreted", "settings": {"execution": "interpreted"}}],
     )
+    source_prepare_kwargs: dict[str, object] = {}
     requested_kwargs: dict[str, object] = {}
 
     class FakeBuilder:
         def __init__(self, **_kwargs):
             return None
 
-        async def prepare_source_dir(self) -> str:
+        async def prepare_source_dir(self, **kwargs) -> str:
+            source_prepare_kwargs.update(kwargs)
             return str(tmp_path / "source")
 
         async def prepare_build_archive(self, **kwargs) -> tuple[str, str]:
             assert kwargs["build_binary"] is True
             assert kwargs["build_all_scenes"] is False
+            assert kwargs["drivers_override"] == {}
             return str(tmp_path / "build"), str(tmp_path / "build.tar.gz")
 
         async def build_requested_artifacts(self, **kwargs):
@@ -639,5 +642,7 @@ async def test_build_packaged_runtime_binary_uses_prebuilt_deps_and_skips_compil
     )
 
     assert result == built_binary
+    assert source_prepare_kwargs["drivers_override"] == {}
+    assert requested_kwargs["prebuilt_target"] == "debian-bookworm-arm64"
     assert requested_kwargs["build_binary"] is True
     assert requested_kwargs["build_all_scenes"] is False

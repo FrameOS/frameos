@@ -594,7 +594,7 @@ class FrameDeployer:
             source = write_scenes_nim(frame)
             f.write(source)
 
-        drivers = drivers_override or drivers_for_frame(frame)
+        drivers = drivers_for_frame(frame) if drivers_override is None else drivers_override
         with open(os.path.join(source_dir, "src", "drivers", "drivers.nim"), "w") as f:
             source = write_drivers_nim(drivers)
             f.write(source)
@@ -669,7 +669,7 @@ class FrameDeployer:
         nim_path = self.nim_path
         temp_dir = self.temp_dir
 
-        drivers = drivers_override or drivers_for_frame(frame)
+        drivers = drivers_for_frame(frame) if drivers_override is None else drivers_override
         if inkyPython := drivers.get('inkyPython'):
             vendor_folder = inkyPython.vendor_folder or ""
             self._copy_vendor_tree(source_dir, build_dir, vendor_folder)
@@ -750,9 +750,6 @@ class FrameDeployer:
                 driver_ids=selected_driver_ids,
                 waveshare_variant=waveshare_driver.variant if waveshare_driver else None,
             )
-
-        if build_binary and (waveshare := drivers.get("waveshare")) and waveshare.variant:
-            self._copy_waveshare_build_support_files(source_dir, build_dir, waveshare.variant)
 
         if build_binary:
             script_path = os.path.join(build_dir, "compile_frameos.sh")

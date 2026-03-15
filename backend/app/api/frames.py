@@ -486,12 +486,13 @@ async def _build_packaged_runtime_binary(
     builder = FrameBinaryBuilder(db=db, redis=redis, frame=frame, deployer=deployer, temp_dir=temp_dir)
 
     try:
-        source_dir = await builder.prepare_source_dir()
+        source_dir = await builder.prepare_source_dir(drivers_override={})
         build_dir, _archive_path = await builder.prepare_build_archive(
             source_dir=source_dir,
             arch=target.arch,
             build_binary=True,
             build_all_scenes=False,
+            drivers_override={},
         )
         requested = await builder.build_requested_artifacts(
             source_dir=source_dir,

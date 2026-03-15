@@ -8,6 +8,7 @@ from typing import Awaitable, Callable
 from arq import ArqRedis as Redis
 from sqlalchemy.orm import Session
 
+from app.drivers.drivers import Driver
 from app.models.assets import copy_custom_fonts_to_local_source_folder
 from app.models.frame import Frame
 from app.models.log import new_log as log
@@ -173,12 +174,19 @@ class FrameBinaryBuilder:
             log_path=str(self.log_path) if self.log_path.exists() else None,
         )
 
-    async def prepare_source_dir(self) -> str:
+    async def prepare_source_dir(
+        self,
+        *,
+        drivers_override: dict[str, Driver] | None = None,
+    ) -> str:
         source_dir = self.deployer.create_local_source_folder(
             self.temp_dir, source_root=self.source_root
         )
         await self._log("stdout", f"{icon} Applying local modifications")
-        await self.deployer.make_local_modifications(source_dir)
+        await self.deployer.make_local_modifications(
+            source_dir,
+            drivers_override=drivers_override,
+        )
         if self.db:
             await copy_custom_fonts_to_local_source_folder(self.db, source_dir)
         return source_dir
@@ -192,6 +200,7 @@ class FrameBinaryBuilder:
         build_scene_ids: list[str] | tuple[str, ...] | None = None,
         build_driver_ids: list[str] | tuple[str, ...] | None = None,
         build_all_scenes: bool = True,
+        drivers_override: dict[str, Driver] | None = None,
     ) -> tuple[str, str]:
         build_dir = create_build_folder(self.temp_dir, self.deployer.build_id)
         await self._log("stdout", f"{icon} Preparing build sources")
@@ -203,6 +212,7 @@ class FrameBinaryBuilder:
             build_scene_ids=build_scene_ids,
             build_driver_ids=build_driver_ids,
             build_all_scenes=build_all_scenes,
+            drivers_override=drivers_override,
         )
         return build_dir, archive_path
 
