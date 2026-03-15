@@ -160,7 +160,6 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
     if not hasAccess(request, Read):
       request.respond(Http401, body = "Unauthorized")
       return
-    log(%*{"event": "http", "get": request.path})
     {.gcsafe.}:
       let (status, headers, body) = buildFrameImageResponse(request)
       request.respond(status, headers, body)
@@ -170,7 +169,6 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
     if not hasAccess(request, Write):
       request.respond(Http401, body = "Unauthorized")
       return
-    log(%*{"event": "http", "get": request.path})
     {.gcsafe.}:
       let payload = frameStatesPayload()
       jsonResponse(request, Http200, %*{"sceneId": $payload.sceneId, "states": payload.states})
@@ -180,7 +178,6 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
     if not hasAccess(request, Write):
       request.respond(Http401, body = "Unauthorized")
       return
-    log(%*{"event": "http", "get": request.path})
     {.gcsafe.}:
       let payload = %*{"scenes": uploadedScenesPayload()}
       jsonResponse(request, Http200, payload)
@@ -190,7 +187,6 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
     if not hasAccess(request, Write):
       request.respond(Http401, body = "Unauthorized")
       return
-    log(%*{"event": "http", "get": request.path})
     {.gcsafe.}:
       let payload = frameStatePayload()
       jsonResponse(request, Http200, %*{"sceneId": $payload.sceneId, "state": payload.state})
@@ -207,7 +203,6 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
     if not hasAccess(request, Write):
       request.respond(Http401, body = "Unauthorized")
       return
-    log(%*{"event": "http", "post": request.path})
     let payload = parseJson(if request.body == "": "{}" else: request.body)
     sendEvent(request.pathParams["name"], payload)
     jsonResponse(request, Http200, %*{"status": "ok"})
@@ -217,7 +212,6 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
     if not hasAccess(request, Write):
       request.respond(Http401, body = "Unauthorized")
       return
-    log(%*{"event": "http", "post": request.path})
     let payload = parseJson(if request.body == "": "{}" else: request.body)
     sendEvent("uploadScenes", payload)
     jsonResponse(request, Http200, %*{"status": "ok"})

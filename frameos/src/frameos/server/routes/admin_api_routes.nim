@@ -50,7 +50,6 @@ proc addAdminApiRoutes*(router: var Router) =
       if not requestedFrameMatches(request):
         request.respond(Http404, body = "Not found!")
       else:
-        log(%*{"event": "http", "post": request.path})
         let payload = parseJson(if request.body == "": "{}" else: request.body)
         sendEvent(request.pathParams["name"], payload)
         jsonResponse(request, Http200, %*{"status": "ok"})
@@ -70,7 +69,6 @@ proc addAdminApiRoutes*(router: var Router) =
           jsonResponse(request, Http400, %*{"detail": "Missing event"})
         else:
           let eventPayload = payload{"payload"}
-          log(%*{"event": "http", "post": request.path, "eventName": eventName})
           sendEvent(eventName, if eventPayload.kind == JNull: %*{} else: eventPayload)
           jsonResponse(request, Http200, %*{"status": "ok"})
   )
