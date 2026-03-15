@@ -144,12 +144,14 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
     downloadBuildZip,
     downloadCSourceZip,
     downloadBinaryZip,
+    downloadPrebuiltPackageZip,
   } = useActions(frameSettingsLogic({ frameId }))
   const {
     buildCacheLoading,
     buildZipLoading,
     cSourceZipLoading,
     binaryZipLoading,
+    prebuiltPackageZipLoading,
   } = useValues(frameSettingsLogic({ frameId }))
   const { openLogs } = useActions(panelsLogic({ frameId }))
   const { logs, ipAddresses } = useValues(logsLogic({ frameId }))
@@ -289,6 +291,15 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                       },
                       icon: <ArrowUpTrayIcon className="w-5 h-5" />,
                       loading: binaryZipLoading,
+                    },
+                    {
+                      label: 'Download prebuilt package .zip',
+                      onClick: () => {
+                        downloadPrebuiltPackageZip()
+                        openLogs()
+                      },
+                      icon: <ArrowUpTrayIcon className="w-5 h-5" />,
+                      loading: prebuiltPackageZipLoading,
                     },
                     {
                       label: 'Delete frame',

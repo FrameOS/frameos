@@ -1,4 +1,5 @@
 .PHONY: run build build-app build-scenes test test-shard debug cross-list clean-scenes
+.PHONY: cross-frameos-% cross-drivers-%
 
 CROSS_OUT ?= build/cross
 
@@ -27,6 +28,12 @@ cross-list:
 
 cross-%: apploaders
 	python3 ../backend/bin/cross build --target $* --frameos-root $(CURDIR) --artifacts-dir $(CROSS_OUT)
+
+cross-frameos-%: apploaders
+	python3 ../backend/bin/cross build-frameos --target $* --frameos-root $(CURDIR) --artifacts-dir $(CROSS_OUT)
+
+cross-drivers-%: apploaders
+	python3 ../backend/bin/cross build-drivers --target $* --frameos-root $(CURDIR) --artifacts-dir $(CROSS_OUT)
 
 test:
 	nimble test

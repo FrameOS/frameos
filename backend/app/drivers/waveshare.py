@@ -1,9 +1,14 @@
 import os
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional, Literal
 
 from app.drivers.drivers import Driver
+
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+WAVESHARE_ROOT = REPO_ROOT / "frameos" / "src" / "drivers" / "waveshare"
 
 @dataclass
 class WaveshareVariant:
@@ -72,7 +77,7 @@ VARIANT_COLORS = {
 }
 
 def get_variant_keys_for(folder: str) -> list[str]:
-    directory = os.path.join("..", "frameos", "src", "drivers", "waveshare", folder)
+    directory = WAVESHARE_ROOT / folder
     return [
         filename[0:-4]
         for filename in os.listdir(directory)
@@ -134,7 +139,7 @@ def convert_waveshare_source(variant_key: Optional[str]) -> WaveshareVariant:
     if size is None or code is None:
         raise Exception(f"Invalid waveshare driver variant {variant_key}")
 
-    with open(os.path.join("..", "frameos", "src", "drivers", "waveshare", get_variant_folder(variant_key), f"{variant_key}.nim"), "r") as f:
+    with open(WAVESHARE_ROOT / get_variant_folder(variant_key) / f"{variant_key}.nim", "r") as f:
         variant = WaveshareVariant(key=variant_key, prefix='', size=size, code=code)
         lines = []
         in_proc = False
@@ -171,12 +176,18 @@ def convert_waveshare_source(variant_key: Optional[str]) -> WaveshareVariant:
                 if proc_name.lower() == f"{variant.prefix}_Init".lower() and variant.init_function is None:
                     variant.init_function = proc_name
                     variant.init_returns_zero = "): UBYTE" in line
+                    if "Mode: UBYTE" in line:
+                        variant.init_args = f"{variant.prefix}_FULL"
                 if proc_name.lower() == f"{variant.prefix}_Init_4Gray".lower():
                     variant.init_function = proc_name
                     variant.init_returns_zero = "): UBYTE" in line
+                    if "Mode: UBYTE" in line:
+                        variant.init_args = f"{variant.prefix}_FULL"
                 if proc_name.lower() == f"{variant.prefix}_4Gray_Init".lower():
                     variant.init_function = proc_name
                     variant.init_returns_zero = "): UBYTE" in line
+                    if "Mode: UBYTE" in line:
+                        variant.init_args = f"{variant.prefix}_FULL"
                 if proc_name.lower() == f"{variant.prefix}_Clear".lower() and variant.clear_function is None:
                     variant.clear_function = proc_name
                     if "color: UBYTE" in line:

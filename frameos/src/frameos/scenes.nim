@@ -1,6 +1,7 @@
 import json, pixie, times, options, strformat, strutils, locks, tables, sequtils, os, dynlib
 import pixie/fileformats/png
 import system/scenes as systemScenesRegistry
+import frameos/channels
 import frameos/types
 import frameos/interpreter
 when defined(testing):
@@ -11,9 +12,11 @@ const SCENE_STATE_JSON_FOLDER = "./state"
 const UPLOADED_SCENES_JSON_PATH = &"{SCENE_STATE_JSON_FOLDER}/uploaded.json"
 const COMPILED_SCENES_FOLDER = "./scenes"
 const COMPILED_SCENE_PLUGIN_SYMBOL = "getCompiledScenePlugin"
+const COMPILED_PLUGIN_RUNTIME_CHANNELS_SYMBOL = "bindCompiledPluginRuntimeChannels"
 
 type
   CompiledScenePluginFactory = proc(): CompiledScenePlugin {.cdecl.}
+  CompiledPluginRuntimeChannelsBinder = proc(hooks: ptr CompiledRuntimeHooks) {.cdecl.}
   LoadedCompiledScenes = tuple[
     defaultSceneId: Option[SceneId],
     sceneIds: seq[SceneId],
@@ -40,6 +43,15 @@ proc removeCopiedCompiledSceneLibrary(path: string) =
   except OSError:
     discard
 
+proc bindPluginChannels(handle: LibHandle) =
+  let binder = cast[CompiledPluginRuntimeChannelsBinder](
+    symAddr(handle, COMPILED_PLUGIN_RUNTIME_CHANNELS_SYMBOL)
+  )
+  if binder.isNil:
+    return
+  var runtimeHooks = getCompiledRuntimeHooks()
+  binder(addr runtimeHooks)
+
 proc loadCompiledScenePlugin(path: string): Option[CompiledScenePlugin] =
   var copiedPath = ""
   try:
@@ -48,6 +60,7 @@ proc loadCompiledScenePlugin(path: string): Option[CompiledScenePlugin] =
     if handle.isNil:
       echo "Warning: failed to load compiled scene plugin: ", path
       return none(CompiledScenePlugin)
+    bindPluginChannels(handle)
     let factory = cast[CompiledScenePluginFactory](symAddr(handle, COMPILED_SCENE_PLUGIN_SYMBOL))
     if factory.isNil:
       echo "Warning: missing compiled scene plugin symbol in: ", path

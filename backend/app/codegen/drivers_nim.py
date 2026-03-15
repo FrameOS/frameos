@@ -1,50 +1,143 @@
+import re
+
+from app.codegen.utils import sanitize_nim_string
 from app.drivers.drivers import Driver
 
 
+def driver_compile_id(driver: Driver) -> str:
+    if driver.variant:
+        return f"{driver.name}/{driver.variant}"
+    return driver.name
+
+
+def driver_file_stem(driver_id: str) -> str:
+    stem = re.sub(r"[^a-zA-Z0-9_-]+", "_", driver_id or "driver").strip("_")
+    return stem or "driver"
+
+
+def driver_module_name_from_id(driver_id: str) -> str:
+    return re.sub(r"[^a-zA-Z0-9_]+", "_", driver_file_stem(driver_id))
+
+
+def driver_module_name(driver: Driver) -> str:
+    return driver_module_name_from_id(driver_compile_id(driver))
+
+
+def driver_library_filename_from_id(driver_id: str) -> str:
+    return f"{driver_module_name_from_id(driver_id)}.so"
+
+
+def driver_library_filename(driver: Driver) -> str:
+    return driver_library_filename_from_id(driver_compile_id(driver))
+
+
+def loadable_drivers(drivers: dict[str, Driver]) -> list[Driver]:
+    return [driver for driver in drivers.values() if driver.import_path]
+
+
+def write_driver_plugin_nim(driver: Driver) -> str:
+    if not driver.import_path:
+        raise ValueError(f"Driver {driver.name} does not have a runtime import path")
+
+    plugin_id = driver_compile_id(driver)
+    variant = driver.variant or ""
+    alias = f"compiled_{driver_module_name(driver)}_driver"
+
+    render_proc = "nil"
+    if driver.can_render:
+        render_proc = f"""
+proc renderDriver(self: FrameOSDriver, image: Image) =
+  if self.isNil:
+    return
+  {alias}.render(cast[{alias}.Driver](self), image)
+""".strip()
+
+    png_proc = "nil"
+    if driver.can_png:
+        png_proc = f"""
+proc toPngDriver(self: FrameOSDriver, rotate: int): string =
+  if self.isNil:
+    return ""
+  return {alias}.toPng(rotate)
+""".strip()
+
+    power_procs = ""
+    turn_on_ref = "nil"
+    turn_off_ref = "nil"
+    if driver.can_turn_on_off:
+        power_procs = f"""
+proc turnOnDriver(self: FrameOSDriver) =
+  if self.isNil:
+    return
+  {alias}.turnOn(cast[{alias}.Driver](self))
+
+proc turnOffDriver(self: FrameOSDriver) =
+  if self.isNil:
+    return
+  {alias}.turnOff(cast[{alias}.Driver](self))
+""".strip()
+        turn_on_ref = "turnOnDriver"
+        turn_off_ref = "turnOffDriver"
+
+    blocks = [
+        "import pixie",
+        "import frameos/channels",
+        "import frameos/types",
+        f"import drivers/{driver.import_path} as {alias}",
+        "",
+        "proc bindCompiledPluginRuntimeChannels*(hooks: ptr CompiledRuntimeHooks) {.exportc, dynlib, cdecl.} =",
+        "  bindCompiledRuntimeHooks(hooks)",
+        "",
+        "proc initDriver(frameOS: FrameOS): FrameOSDriver =",
+        f"  {alias}.init(frameOS)",
+    ]
+    if driver.can_render:
+        blocks.extend(["", render_proc])
+    if driver.can_png:
+        blocks.extend(["", png_proc])
+    if power_procs:
+        blocks.extend(["", power_procs])
+    blocks.extend(
+        [
+            "",
+            "proc getCompiledDriverPlugin*(): CompiledDriverPlugin {.exportc, dynlib, cdecl.} =",
+            "  CompiledDriverPlugin(",
+            f'    id: "{sanitize_nim_string(plugin_id)}",',
+            f'    variant: "{sanitize_nim_string(variant)}",',
+            "    driver: ExportedDriver(",
+            f'      canRender: {"true" if driver.can_render else "false"},',
+            f'      canPng: {"true" if driver.can_png else "false"},',
+            f'      canTurnOnOff: {"true" if driver.can_turn_on_off else "false"},',
+            "      init: initDriver,",
+            f'      render: {"renderDriver" if driver.can_render else "nil"},',
+            f'      toPng: {"toPngDriver" if driver.can_png else "nil"},',
+            f"      turnOn: {turn_on_ref},",
+            f"      turnOff: {turn_off_ref},",
+            "    ),",
+            "  )",
+        ]
+    )
+    return "\n".join(blocks) + "\n"
+
+
 def write_drivers_nim(drivers: dict[str, Driver]) -> str:
-    imports = []
-    vars = []
-    init_drivers = []
-    render_drivers = []
-    png_drivers: list[str] = []
-    on_drivers = []
-    off_drivers = []
-
-    for driver in drivers.values():
-        if driver.import_path:
-            imports.append(f"import {driver.import_path} as {driver.name}Driver")
-            vars.append(f"var {driver.name}DriverInstance: {driver.name}Driver.Driver")
-            init_drivers.append(f"{driver.name}DriverInstance = {driver.name}Driver.init(frameOS)")
-            if driver.can_render:
-                render_drivers.append(f"{driver.name}DriverInstance.render(image)")
-            if driver.can_png and len(png_drivers) == 0:
-                png_drivers.append(f"return {driver.name}Driver.toPng(rotate)")
-            if driver.can_turn_on_off:
-                on_drivers.append(f"{driver.name}DriverInstance.turnOn()")
-                off_drivers.append(f"{driver.name}DriverInstance.turnOff()")
-
-    newline = "\n"
-
-    code = f"""
+    return """
 import pixie
 import frameos/types
-{newline.join(imports)}
-{newline.join(vars)}
+import drivers/plugin_runtime
 
 proc init*(frameOS: FrameOS) =
-  {(newline + '  ').join(init_drivers or ["discard"])}
+  initCompiledDrivers(frameOS)
 
 proc render*(image: Image) =
-  {(newline + '  ').join(render_drivers or ["discard"])}
+  renderCompiledDrivers(image)
 
 proc toPng*(rotate: int): string =
-  {(newline + '  ').join(png_drivers or ['result = ""'])}
+  result = compiledDriversToPng(rotate)
 
 proc turnOn*() =
-  {(newline + '  ').join(on_drivers or ["discard"])}
+  turnOnCompiledDrivers()
 
 proc turnOff*() =
-  {(newline + '  ').join(off_drivers or ["discard"])}
-    """
-
-    return code
+  turnOffCompiledDrivers()
+"""

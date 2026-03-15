@@ -1,11 +1,43 @@
 import json
+import io
+import zipfile
+from types import SimpleNamespace
 import pytest
 from unittest.mock import patch
 import httpx
 
+from app.api import frames as frames_api
+from app.api.auth import get_current_user, get_current_user_from_request
+from app.fastapi import app
 from app.models import new_frame
 from app.models.frame import Frame
 from app.models.user import User
+from app.redis import get_redis
+from app.utils.cross_compile import TargetMetadata
+
+
+def _write_prebuilt_target(target_root, target_slug: str, components: dict[str, dict[str, str]]) -> None:
+    target_dir = target_root / target_slug
+    target_dir.mkdir(parents=True, exist_ok=True)
+    metadata = {
+        "target": target_slug,
+        "components": components,
+    }
+    (target_dir / "metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
+    for spec in components.values():
+        component_dir = target_dir / spec["directory"]
+        component_dir.mkdir(parents=True, exist_ok=True)
+        artifact = spec.get("artifact")
+        if artifact:
+            (component_dir / artifact).write_bytes(spec.get("contents", "").encode("utf-8"))
+
+
+class _FakeRedis:
+    async def publish(self, *_args, **_kwargs):
+        return 1
+
+    async def delete(self, *_args, **_kwargs):
+        return 1
 
 @pytest.mark.asyncio
 async def test_api_frames(async_client, db, redis):
@@ -236,3 +268,229 @@ async def test_api_frame_generate_tls_material_includes_validity_dates(async_cli
     assert data['client_ca_cert_not_valid_after'] is not None
     assert data['server_cert_not_valid_after'].endswith('+00:00')
     assert data['client_ca_cert_not_valid_after'].endswith('+00:00')
+
+
+@pytest.mark.asyncio
+async def test_api_frame_download_prebuilt_package_zip_packages_runtime_and_drivers(
+    no_auth_client,
+    db,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+):
+    fake_redis = _FakeRedis()
+    app.dependency_overrides[get_current_user] = lambda: object()
+    app.dependency_overrides[get_current_user_from_request] = lambda: object()
+    app.dependency_overrides[get_redis] = lambda: fake_redis
+    try:
+        frame = await new_frame(db, fake_redis, 'PrebuiltFrame', 'localhost', 'localhost')
+        frame.device = 'http.upload'
+        frame.scenes = [{'id': 'interpreted', 'settings': {'execution': 'interpreted'}}]
+        db.add(frame)
+        db.commit()
+
+        target_slug = 'debian-bookworm-arm64'
+        prebuilt_root = tmp_path / 'prebuilt-deps'
+        _write_prebuilt_target(
+            prebuilt_root,
+            target_slug,
+            {
+                'frameos': {
+                    'version': 'test-build',
+                    'directory': 'frameos-test-build',
+                    'artifact': 'frameos',
+                    'contents': 'frameos-binary',
+                },
+                'driver_httpUpload': {
+                    'version': 'test-build',
+                    'directory': 'driver_httpUpload-test-build',
+                    'artifact': 'httpUpload.so',
+                    'driver_id': 'httpUpload',
+                    'contents': 'http-upload-driver',
+                },
+            },
+        )
+
+        monkeypatch.setattr('app.api.frames.LOCAL_PREBUILT_DEPS_ROOT', prebuilt_root)
+
+        async def fake_get_cpu_architecture(self):
+            return 'aarch64'
+
+        async def fake_get_distro(self):
+            return 'debian'
+
+        async def fake_get_distro_version(self):
+            return 'bookworm'
+
+        monkeypatch.setattr('app.api.frames.FrameDeployer.get_cpu_architecture', fake_get_cpu_architecture)
+        monkeypatch.setattr('app.api.frames.FrameDeployer.get_distro', fake_get_distro)
+        monkeypatch.setattr('app.api.frames.FrameDeployer.get_distro_version', fake_get_distro_version)
+
+        async def fake_build_packaged_compiled_scenes(**_kwargs):
+            return None
+
+        monkeypatch.setattr(
+            'app.api.frames._build_packaged_compiled_scenes',
+            fake_build_packaged_compiled_scenes,
+        )
+
+        response = await no_auth_client.post(f'/api/frames/{frame.id}/download_prebuilt_package_zip')
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        app.dependency_overrides.pop(get_current_user_from_request, None)
+        app.dependency_overrides.pop(get_redis, None)
+
+    assert response.status_code == 200
+
+    with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+        names = set(archive.namelist())
+        assert 'frameos' in names
+        assert 'frame.json' in names
+        assert 'scenes.json' in names
+        assert 'drivers/' in names
+        assert 'drivers/httpUpload.so' in names
+        assert 'scenes/' in names
+        assert archive.read('frameos') == b'frameos-binary'
+        assert archive.read('drivers/httpUpload.so') == b'http-upload-driver'
+        frame_json = json.loads(archive.read('frame.json'))
+        assert frame_json['name'] == 'PrebuiltFrame'
+        assert json.loads(archive.read('scenes.json')) == [{'id': 'interpreted', 'settings': {'execution': 'interpreted'}}]
+
+
+@pytest.mark.asyncio
+async def test_api_frame_download_prebuilt_package_zip_includes_compiled_scenes(
+    no_auth_client,
+    db,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+):
+    fake_redis = _FakeRedis()
+    app.dependency_overrides[get_current_user] = lambda: object()
+    app.dependency_overrides[get_current_user_from_request] = lambda: object()
+    app.dependency_overrides[get_redis] = lambda: fake_redis
+    try:
+        frame = await new_frame(db, fake_redis, 'PackagedScenes', 'localhost', 'localhost')
+        frame.device = 'http.upload'
+        frame.scenes = [{'id': 'compiled-demo', 'name': 'Compiled Demo', 'settings': {'execution': 'compiled'}}]
+        db.add(frame)
+        db.commit()
+
+        target_slug = 'debian-bookworm-arm64'
+        prebuilt_root = tmp_path / 'prebuilt-deps'
+        _write_prebuilt_target(
+            prebuilt_root,
+            target_slug,
+            {
+                'frameos': {
+                    'version': 'test-build',
+                    'directory': 'frameos-test-build',
+                    'artifact': 'frameos',
+                    'contents': 'frameos-binary',
+                },
+                'driver_httpUpload': {
+                    'version': 'test-build',
+                    'directory': 'driver_httpUpload-test-build',
+                    'artifact': 'httpUpload.so',
+                    'driver_id': 'httpUpload',
+                    'contents': 'http-upload-driver',
+                },
+            },
+        )
+
+        compiled_scenes_dir = tmp_path / 'compiled-scenes'
+        compiled_scenes_dir.mkdir(parents=True, exist_ok=True)
+        (compiled_scenes_dir / 'demo.so').write_bytes(b'compiled-scene')
+
+        monkeypatch.setattr('app.api.frames.LOCAL_PREBUILT_DEPS_ROOT', prebuilt_root)
+
+        async def fake_get_cpu_architecture(self):
+            return 'aarch64'
+
+        async def fake_get_distro(self):
+            return 'debian'
+
+        async def fake_get_distro_version(self):
+            return 'bookworm'
+
+        monkeypatch.setattr('app.api.frames.FrameDeployer.get_cpu_architecture', fake_get_cpu_architecture)
+        monkeypatch.setattr('app.api.frames.FrameDeployer.get_distro', fake_get_distro)
+        monkeypatch.setattr('app.api.frames.FrameDeployer.get_distro_version', fake_get_distro_version)
+
+        async def fake_build_packaged_scenes(**_kwargs):
+            return compiled_scenes_dir
+
+        monkeypatch.setattr('app.api.frames._build_packaged_compiled_scenes', fake_build_packaged_scenes)
+
+        response = await no_auth_client.post(f'/api/frames/{frame.id}/download_prebuilt_package_zip')
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        app.dependency_overrides.pop(get_current_user_from_request, None)
+        app.dependency_overrides.pop(get_redis, None)
+
+    assert response.status_code == 200
+
+    with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+        assert archive.read('scenes/demo.so') == b'compiled-scene'
+
+
+@pytest.mark.asyncio
+async def test_build_packaged_compiled_scenes_passes_explicit_scene_build_dirs(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+):
+    target_dir = tmp_path / "prebuilt"
+    (target_dir / "quickjs-1").mkdir(parents=True, exist_ok=True)
+    (target_dir / "lgpio-1").mkdir(parents=True, exist_ok=True)
+    compiled_scenes_dir = tmp_path / "compiled-scenes"
+    compiled_scenes_dir.mkdir(parents=True, exist_ok=True)
+
+    frame = SimpleNamespace(
+        id=1,
+        scenes=[
+            {"id": "compiled-demo", "settings": {"execution": "compiled"}},
+            {"id": "ignored", "settings": {"execution": "interpreted"}},
+            {"id": "other/demo", "settings": {}},
+        ],
+    )
+    requested_kwargs: dict[str, object] = {}
+
+    class FakeBuilder:
+        def __init__(self, **_kwargs):
+            return None
+
+        async def prepare_source_dir(self) -> str:
+            return str(tmp_path / "source")
+
+        async def prepare_build_archive(self, **_kwargs) -> tuple[str, str]:
+            return str(tmp_path / "build"), str(tmp_path / "build.tar.gz")
+
+        async def build_requested_artifacts(self, **kwargs):
+            requested_kwargs.update(kwargs)
+            return SimpleNamespace(
+                artifacts=SimpleNamespace(scenes_dir=str(compiled_scenes_dir))
+            )
+
+    monkeypatch.setattr(frames_api, "find_nim_v2", lambda: "/usr/bin/nim")
+    monkeypatch.setattr(frames_api, "FrameBinaryBuilder", FakeBuilder)
+
+    result = await frames_api._build_packaged_compiled_scenes(
+        db=None,
+        redis=None,
+        frame=frame,
+        temp_dir=str(tmp_path),
+        deployer=SimpleNamespace(build_id="build123"),
+        target=TargetMetadata(arch="aarch64", distro="debian", version="bookworm"),
+        target_slug="debian-bookworm-arm64",
+        target_dir=target_dir,
+        components={
+            "quickjs": {"directory": "quickjs-1", "version": "1"},
+            "lgpio": {"directory": "lgpio-1", "version": "1"},
+        },
+    )
+
+    assert result == compiled_scenes_dir
+    assert requested_kwargs["build_binary"] is False
+    assert requested_kwargs["build_all_scenes"] is True
+    assert requested_kwargs["build_scene_dirs"] == [
+        "scene_builds/compiled_demo",
+        "scene_builds/other_demo",
+    ]

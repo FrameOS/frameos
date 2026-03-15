@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from app.drivers.waveshare import get_variant_keys, convert_waveshare_source
 import pytest
 
@@ -19,3 +21,34 @@ async def test_waveshare_variants():
         assert variant.sleep_function is not None
         assert variant.display_function is not None
         assert variant.color_option != "Unknown"
+
+
+def test_epd_12in48_wrapper_uses_defined_max_constants():
+    wrapper_path = (
+        Path(__file__).resolve().parents[4]
+        / "frameos"
+        / "src"
+        / "drivers"
+        / "waveshare"
+        / "epd12in48"
+        / "EPD_12in48.nim"
+    )
+    wrapper_source = wrapper_path.read_text(encoding="utf-8")
+
+    assert "EPD_MAX_WIDTH" not in wrapper_source
+    assert "EPD_MAX_HEIGHT" not in wrapper_source
+
+
+@pytest.mark.parametrize(
+    ("variant_key", "expected_init_args"),
+    [
+        ("EPD_1in54", "EPD_1IN54_FULL"),
+        ("EPD_2in13", "EPD_2IN13_FULL"),
+        ("EPD_2in13_V2", "EPD_2IN13_V2_FULL"),
+        ("EPD_2in9", "EPD_2IN9_FULL"),
+    ],
+)
+def test_waveshare_variants_with_mode_init_use_full_mode(variant_key: str, expected_init_args: str):
+    variant = convert_waveshare_source(variant_key)
+
+    assert variant.init_args == expected_init_args

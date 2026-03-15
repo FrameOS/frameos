@@ -46,8 +46,12 @@ def write_scene_plugin_nim(scene: dict, is_default: bool = False) -> str:
     scene_name = scene.get("name", scene_id or "Default")
     module_name = scene_module_name(scene_id)
     return f"""
+import frameos/channels
 import frameos/types
 import scenes/scene_{module_name} as scene_{module_name}
+
+proc bindCompiledPluginRuntimeChannels*(hooks: ptr CompiledRuntimeHooks) {{.exportc, dynlib, cdecl.}} =
+  bindCompiledRuntimeHooks(hooks)
 
 proc getCompiledScenePlugin*(): CompiledScenePlugin {{.exportc, dynlib, cdecl.}} =
   CompiledScenePlugin(

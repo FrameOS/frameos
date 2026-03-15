@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import copy
 import json
 import os
 import shutil
@@ -11,10 +12,11 @@ import sys
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Sequence
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BACKEND_ROOT = REPO_ROOT / "backend"
+FRAMEOS_ROOT = REPO_ROOT / "frameos"
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 if str(BACKEND_ROOT) not in sys.path:
@@ -57,7 +59,6 @@ TARGETS: tuple[TargetDefinition, ...] = (
     TargetDefinition("ubuntu", "22.04", "amd64", "linux/amd64", "ubuntu:22.04"),
     TargetDefinition("ubuntu", "24.04", "arm64", "linux/arm64", "ubuntu:24.04", runner="ubuntu-24.04-arm"),
     TargetDefinition("ubuntu", "24.04", "amd64", "linux/amd64", "ubuntu:24.04"),
-    # TargetDefinition("buildroot", "luckfox-pico-plus", "armv7l", "linux/amd64", "ubuntu:22.04"),
 )
 
 TARGET_MAP = {target.slug: target for target in TARGETS}
@@ -66,6 +67,7 @@ TARGET_MAP = {target.slug: target for target in TARGETS}
 @dataclass
 class FrameStub:
     id: int = 0
+    mode: str = "rpios"
     device: str = "framebuffer"
     device_config: dict[str, Any] = field(default_factory=dict)
     network: dict[str, Any] | None = None
@@ -90,16 +92,33 @@ def load_frame_stub(frameos_root: Path) -> FrameStub:
             except json.JSONDecodeError:
                 data = {}
     return FrameStub(
+        mode=str(data.get("mode") or "rpios"),
         device=str(data.get("device", "framebuffer")),
         device_config=dict(data.get("deviceConfig") or {}),
         network=dict(data.get("network") or {}),
-        agent=dict(data.get("network") or {}),
-        assets_path=data.get("assetsPath") or '',
+        agent=dict(data.get("agent") or {}),
+        assets_path=data.get("assetsPath") or "",
         scenes=list(data.get("scenes") or []),
         gpio_buttons=list(data.get("gpioButtons") or []),
         debug=bool(data.get("debug", False)),
         rpios=dict(data.get("rpios") or {}),
         reboot=dict(data.get("reboot") or {}),
+    )
+
+
+def generic_frame_stub() -> FrameStub:
+    return FrameStub(
+        mode="rpios",
+        device="framebuffer",
+        device_config={},
+        network={},
+        agent={},
+        assets_path="",
+        scenes=[],
+        gpio_buttons=[],
+        debug=False,
+        rpios={},
+        reboot={},
     )
 
 
@@ -112,21 +131,185 @@ def list_targets() -> str:
     return "\n".join(target.slug for target in TARGETS)
 
 
-async def build_target(slug: str, frameos_root: Path, artifacts_dir: Path) -> Path:
-    if slug not in TARGET_MAP:
-        raise SystemExit(f"Unknown target '{slug}'. Run --list-targets to see available options.")
+def target_info(slug: str) -> TargetDefinition:
+    target = TARGET_MAP.get(slug)
+    if not target:
+        raise SystemExit(f"Unknown target '{slug}'. Run `backend/bin/cross list` to see available options.")
+    return target
 
-    target = TARGET_MAP[slug]
-    frameos_root = frameos_root.resolve()
-    artifacts_dir = artifacts_dir.resolve()
-    artifacts_dir.mkdir(parents=True, exist_ok=True)
 
+def show_target(slug: str, *, output_format: str) -> str:
+    target = target_info(slug)
+    if output_format == "json":
+        return json.dumps(target.to_matrix_entry(), indent=2)
+    if output_format == "tsv":
+        return "|".join(
+            [
+                target.slug,
+                target.distro,
+                target.version,
+                target.arch,
+                target.platform,
+                target.image,
+                target.runner,
+            ]
+        )
+    raise SystemExit(f"Unsupported target output format: {output_format}")
+
+
+def _buildable_drivers() -> list[Any]:
+    from app.codegen.drivers_nim import driver_compile_id
+    from app.drivers.drivers import DRIVERS
+    from app.drivers.waveshare import get_variant_keys
+
+    drivers: list[Any] = []
+    for key in sorted(DRIVERS):
+        driver = DRIVERS[key]
+        if not driver.import_path:
+            continue
+        if driver.name == "waveshare":
+            for variant in get_variant_keys():
+                expanded = copy.deepcopy(driver)
+                expanded.variant = variant
+                drivers.append(expanded)
+            continue
+        drivers.append(copy.deepcopy(driver))
+    drivers.sort(key=lambda driver: driver_compile_id(driver))
+    return drivers
+
+
+def buildable_driver_rows() -> list[tuple[str, str, str]]:
+    from app.codegen.drivers_nim import (
+        driver_compile_id,
+        driver_library_filename,
+        driver_module_name_from_id,
+    )
+
+    return [
+        (
+            driver_compile_id(driver),
+            f"driver_{driver_module_name_from_id(driver_compile_id(driver))}",
+            driver_library_filename(driver),
+        )
+        for driver in _buildable_drivers()
+    ]
+
+
+def show_drivers(*, output_format: str) -> str:
+    rows = buildable_driver_rows()
+    if output_format == "id":
+        return "\n".join(driver_id for driver_id, _component, _library in rows)
+    if output_format == "tsv":
+        return "\n".join("|".join(row) for row in rows)
+    if output_format == "json":
+        return json.dumps(
+            [
+                {"id": driver_id, "component": component, "library": library}
+                for driver_id, component, library in rows
+            ],
+            indent=2,
+        )
+    raise SystemExit(f"Unsupported driver output format: {output_format}")
+
+
+def parse_prebuilt_components(values: Sequence[str]) -> dict[str, str]:
+    components: dict[str, str] = {}
+    for raw in values:
+        name, separator, path = raw.partition("=")
+        if not separator or not name or not path:
+            raise SystemExit(
+                f"Invalid --prebuilt-component value '{raw}'. Use component=/absolute/or/relative/path."
+            )
+        components[name] = str(Path(path).resolve())
+    return components
+
+
+def _version_from_component_path(component: str, path: str) -> str:
+    name = Path(path).name
+    prefix = f"{component}-"
+    if name.startswith(prefix) and len(name) > len(prefix):
+        return name[len(prefix) :]
+    return "local"
+
+
+def local_prebuilt_entry(target_slug: str, components: dict[str, str]) -> Any | None:
+    if not components:
+        return None
+
+    from app.tasks.prebuilt_deps import PrebuiltEntry
+
+    return PrebuiltEntry(
+        target=target_slug,
+        versions={
+            component: _version_from_component_path(component, path)
+            for component, path in components.items()
+        },
+        component_urls={},
+        component_md5s={},
+        component_paths={component: str(Path(path).resolve()) for component, path in components.items()},
+    )
+
+
+def write_target_metadata(target_dir: Path, target: TargetDefinition) -> None:
+    metadata = {
+        "slug": target.slug,
+        "target": target.slug,
+        "arch": target.arch,
+        "distribution": target.distro,
+        "distro": target.distro,
+        "release": target.version,
+        "version": target.version,
+        "platform": target.platform,
+        "image": target.image,
+    }
+    with (target_dir / "metadata.json").open("w", encoding="utf-8") as fh:
+        json.dump(metadata, fh, indent=2)
+        fh.write("\n")
+
+
+def _console_logger(slug: str):
+    async def console_log(level: str, message: str) -> None:
+        print(f"[{slug}][{level}] {message}")
+
+    return console_log
+
+
+def _build_target_metadata(target: TargetDefinition) -> Any:
+    from app.utils.cross_compile import TargetMetadata
+
+    return TargetMetadata(
+        arch=target.arch,
+        distro=target.distro,
+        version=target.version,
+        platform=target.platform,
+        image=target.image,
+    )
+
+
+def _configure_local_exec_logging(slug: str) -> Any:
+    from backend.app.utils import local_exec  # type: ignore  # noqa: E402
+    from app.utils import local_exec as app_local_exec  # type: ignore  # noqa: E402
+
+    console_log = _console_logger(slug)
+
+    async def exec_log(_db, _redis, _frame_id, level: str, message: str, timestamp=None):
+        await console_log(level, message)
+
+    local_exec.log = exec_log  # type: ignore[assignment]
+    app_local_exec.log = exec_log  # type: ignore[assignment]
+    return console_log
+
+
+def _create_builder(
+    *,
+    slug: str,
+    frameos_root: Path,
+    frame: FrameStub,
+    temp_dir: str,
+) -> tuple[Any, Any, Any]:
     from backend.app.tasks._frame_deployer import FrameDeployer  # type: ignore  # noqa: E402
     from backend.app.tasks.binary_builder import FrameBinaryBuilder  # type: ignore  # noqa: E402
     from backend.app.tasks.utils import find_nim_v2  # type: ignore  # noqa: E402
-    from backend.app.utils import local_exec  # type: ignore  # noqa: E402
-    from backend.app.utils.cross_compile import TargetMetadata  # type: ignore  # noqa: E402
-    from app.utils import local_exec as app_local_exec  # type: ignore  # noqa: E402
 
     class StandaloneFrameDeployer(FrameDeployer):
         def __init__(self, frame: FrameStub, nim_path: str, temp_dir: str, logger):
@@ -136,35 +319,34 @@ async def build_target(slug: str, frameos_root: Path, artifacts_dir: Path) -> Pa
         async def log(self, type: str, line: str, timestamp=None):  # type: ignore[override]
             await self._logger(type, line)
 
+    console_log = _configure_local_exec_logging(slug)
     nim_path = find_nim_v2()
+    deployer = StandaloneFrameDeployer(frame=frame, nim_path=nim_path, temp_dir=temp_dir, logger=console_log)
+    builder = FrameBinaryBuilder(
+        db=None,
+        redis=None,
+        frame=frame,
+        deployer=deployer,
+        temp_dir=temp_dir,
+        source_root=str(frameos_root),
+        logger=console_log,
+    )
+    return deployer, builder, _build_target_metadata(target_info(slug))
+
+
+async def build_target(slug: str, frameos_root: Path, artifacts_dir: Path) -> Path:
+    target = target_info(slug)
+    frameos_root = frameos_root.resolve()
+    artifacts_dir = artifacts_dir.resolve()
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
     frame = load_frame_stub(frameos_root)
-
-    async def console_log(level: str, message: str) -> None:
-        print(f"[{slug}][{level}] {message}")
-
-    async def exec_log(_db, _redis, _frame_id, level: str, message: str, timestamp=None):
-        await console_log(level, message)
-
-    local_exec.log = exec_log  # type: ignore[assignment]
-    app_local_exec.log = exec_log  # type: ignore[assignment]
-
     with tempfile.TemporaryDirectory(prefix=f"frameos-cross-{slug}-") as tmp:
-        deployer = StandaloneFrameDeployer(frame=frame, nim_path=nim_path, temp_dir=tmp, logger=console_log)
-        builder = FrameBinaryBuilder(
-            db=None,
-            redis=None,
+        _deployer, builder, target_override = _create_builder(
+            slug=slug,
+            frameos_root=frameos_root,
             frame=frame,
-            deployer=deployer,
             temp_dir=tmp,
-            source_root=str(frameos_root),
-            logger=console_log,
-        )
-        target_override = TargetMetadata(
-            arch=target.arch,
-            distro=target.distro,
-            version=target.version,
-            platform=target.platform,
-            image=target.image,
         )
         build_result = await builder.build(
             allow_cross_compile=True,
@@ -180,18 +362,244 @@ async def build_target(slug: str, frameos_root: Path, artifacts_dir: Path) -> Pa
         destination = target_dir / "frameos"
         shutil.copy2(binary_path, destination)
         os.chmod(destination, 0o755)
-        metadata = {
-            "slug": slug,
-            "arch": target.arch,
-            "distro": target.distro,
-            "version": target.version,
-            "platform": target.platform,
-            "image": target.image,
-        }
-        with (target_dir / "metadata.json").open("w", encoding="utf-8") as fh:
-            json.dump(metadata, fh, indent=2)
-        print(f"Built {slug} → {destination}")
+        write_target_metadata(target_dir, target)
+        print(f"Built {slug} -> {destination}")
         return destination
+
+
+async def build_frameos_runtime(
+    slug: str,
+    frameos_root: Path,
+    artifacts_dir: Path,
+    *,
+    local_prebuilt_components: dict[str, str],
+) -> Path:
+    from backend.app.tasks.binary_builder import create_build_folder  # type: ignore  # noqa: E402
+
+    target = target_info(slug)
+    frameos_root = frameos_root.resolve()
+    artifacts_dir = artifacts_dir.resolve()
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    prebuilt_entry = local_prebuilt_entry(slug, local_prebuilt_components)
+
+    with tempfile.TemporaryDirectory(prefix=f"frameos-runtime-{slug}-") as tmp:
+        frame = generic_frame_stub()
+        deployer, builder, target_override = _create_builder(
+            slug=slug,
+            frameos_root=frameos_root,
+            frame=frame,
+            temp_dir=tmp,
+        )
+        source_dir = deployer.create_local_source_folder(tmp, source_root=str(frameos_root))
+        await deployer.make_local_modifications(source_dir, drivers_override={})
+        build_dir = create_build_folder(tmp, deployer.build_id)
+        await deployer.create_local_build_archive(
+            build_dir,
+            source_dir,
+            target.arch,
+            build_binary=True,
+            build_all_scenes=False,
+            drivers_override={},
+        )
+        requested = await builder.build_requested_artifacts(
+            source_dir=source_dir,
+            build_dir=build_dir,
+            target=target_override,
+            prebuilt_entry=prebuilt_entry,
+            prebuilt_target=slug if prebuilt_entry else None,
+            allow_cross_compile=True,
+            force_cross_compile=True,
+            build_binary=True,
+            build_all_scenes=False,
+        )
+        if not requested.artifacts.binary_path:
+            raise RuntimeError("Cross compilation completed without producing a frameos runtime binary")
+
+        target_dir = artifacts_dir / slug
+        target_dir.mkdir(parents=True, exist_ok=True)
+        destination = target_dir / "frameos"
+        shutil.copy2(requested.artifacts.binary_path, destination)
+        os.chmod(destination, 0o755)
+        write_target_metadata(target_dir, target)
+        print(f"Built generic runtime {slug} -> {destination}")
+        return destination
+
+
+def _driver_objects_by_id() -> dict[str, Any]:
+    from app.codegen.drivers_nim import driver_compile_id
+
+    return {driver_compile_id(driver): driver for driver in _buildable_drivers()}
+
+
+def _driver_batches(driver_ids: Sequence[str]) -> list[tuple[tuple[str, ...], dict[str, Any]]]:
+    drivers_by_id = _driver_objects_by_id()
+    non_waveshare_ids: list[str] = []
+    non_waveshare: dict[str, Any] = {}
+    waveshare_batches: list[tuple[tuple[str, ...], dict[str, Any]]] = []
+
+    for driver_id in driver_ids:
+        driver = copy.deepcopy(drivers_by_id[driver_id])
+        if driver.name == "waveshare":
+            waveshare_batches.append(((driver_id,), {"waveshare": driver}))
+            continue
+        non_waveshare_ids.append(driver_id)
+        non_waveshare[driver.name] = driver
+
+    batches: list[tuple[tuple[str, ...], dict[str, Any]]] = []
+    if non_waveshare_ids:
+        batches.append((tuple(non_waveshare_ids), non_waveshare))
+    batches.extend(waveshare_batches)
+    return batches
+
+
+def _validated_driver_ids(requested_driver_ids: Sequence[str] | None) -> tuple[str, ...]:
+    available = _driver_objects_by_id()
+    if not requested_driver_ids:
+        return tuple(sorted(available))
+
+    invalid = [driver_id for driver_id in requested_driver_ids if driver_id not in available]
+    if invalid:
+        valid = ", ".join(sorted(available))
+        raise SystemExit(
+            "Unknown driver id(s): "
+            + ", ".join(invalid)
+            + f". Valid ids: {valid}"
+        )
+    return tuple(requested_driver_ids)
+
+
+def _resolved_driver_jobs(batch_count: int, requested_jobs: int | None = None) -> int:
+    if batch_count <= 1:
+        return 1
+
+    raw_jobs = requested_jobs
+    if raw_jobs is None:
+        env_jobs = os.environ.get("FRAMEOS_DRIVER_JOBS")
+        if env_jobs:
+            try:
+                raw_jobs = int(env_jobs)
+            except ValueError as exc:
+                raise SystemExit(f"Invalid FRAMEOS_DRIVER_JOBS value: {env_jobs!r}") from exc
+    if raw_jobs is None:
+        raw_jobs = os.cpu_count() or 1
+    if raw_jobs < 1:
+        raise SystemExit("Driver job count must be at least 1")
+    return min(batch_count, raw_jobs)
+
+
+async def _build_driver_batch(
+    *,
+    slug: str,
+    target: Any,
+    frameos_root: Path,
+    artifacts_dir: Path,
+    prebuilt_entry: Any | None,
+    batch_driver_ids: tuple[str, ...],
+    batch_drivers: dict[str, Any],
+) -> tuple[str, ...]:
+    from app.codegen.drivers_nim import (
+        driver_library_filename_from_id,
+        driver_module_name_from_id,
+    )
+    from backend.app.tasks.binary_builder import create_build_folder  # type: ignore  # noqa: E402
+
+    target_dir = artifacts_dir / slug
+    drivers_output_dir = target_dir / "drivers"
+    drivers_output_dir.mkdir(parents=True, exist_ok=True)
+
+    with tempfile.TemporaryDirectory(prefix=f"frameos-drivers-{slug}-") as tmp:
+        frame = generic_frame_stub()
+        deployer, builder, target_override = _create_builder(
+            slug=slug,
+            frameos_root=frameos_root,
+            frame=frame,
+            temp_dir=tmp,
+        )
+        source_dir = deployer.create_local_source_folder(tmp, source_root=str(frameos_root))
+        await deployer.make_local_modifications(source_dir, drivers_override=batch_drivers)
+        build_dir = create_build_folder(tmp, deployer.build_id)
+        build_driver_dirs = [
+            f"driver_builds/{driver_module_name_from_id(driver_id)}"
+            for driver_id in batch_driver_ids
+        ]
+        await deployer.create_local_build_archive(
+            build_dir,
+            source_dir,
+            target.arch,
+            build_binary=False,
+            build_driver_ids=batch_driver_ids,
+            build_all_scenes=False,
+            drivers_override=batch_drivers,
+        )
+        requested = await builder.build_requested_artifacts(
+            source_dir=source_dir,
+            build_dir=build_dir,
+            target=target_override,
+            prebuilt_entry=prebuilt_entry,
+            prebuilt_target=slug if prebuilt_entry else None,
+            allow_cross_compile=True,
+            force_cross_compile=True,
+            build_binary=False,
+            build_driver_ids=batch_driver_ids,
+            build_driver_dirs=build_driver_dirs,
+            build_all_scenes=False,
+        )
+        if not requested.artifacts.drivers_dir:
+            raise RuntimeError("Cross compilation completed without producing compiled driver plugins")
+
+        for driver_id in batch_driver_ids:
+            library = driver_library_filename_from_id(driver_id)
+            built_library = Path(requested.artifacts.drivers_dir) / library
+            if not built_library.is_file():
+                raise RuntimeError(f"Expected compiled driver library is missing: {built_library}")
+            shutil.copy2(built_library, drivers_output_dir / library)
+
+    return batch_driver_ids
+
+
+async def build_driver_plugins(
+    slug: str,
+    frameos_root: Path,
+    artifacts_dir: Path,
+    *,
+    driver_ids: Sequence[str] | None,
+    local_prebuilt_components: dict[str, str],
+    jobs: int | None = None,
+) -> Path:
+    target = target_info(slug)
+    frameos_root = frameos_root.resolve()
+    artifacts_dir = artifacts_dir.resolve()
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    requested_driver_ids = _validated_driver_ids(driver_ids)
+    prebuilt_entry = local_prebuilt_entry(slug, local_prebuilt_components)
+    batches = _driver_batches(requested_driver_ids)
+    jobs = _resolved_driver_jobs(len(batches), jobs)
+
+    target_dir = artifacts_dir / slug
+    drivers_output_dir = target_dir / "drivers"
+    drivers_output_dir.mkdir(parents=True, exist_ok=True)
+
+    semaphore = asyncio.Semaphore(jobs)
+
+    async def run_batch(batch_driver_ids: tuple[str, ...], batch_drivers: dict[str, Any]) -> tuple[str, ...]:
+        async with semaphore:
+            return await _build_driver_batch(
+                slug=slug,
+                target=target,
+                frameos_root=frameos_root,
+                artifacts_dir=artifacts_dir,
+                prebuilt_entry=prebuilt_entry,
+                batch_driver_ids=batch_driver_ids,
+                batch_drivers=batch_drivers,
+            )
+
+    await asyncio.gather(
+        *(run_batch(batch_driver_ids, batch_drivers) for batch_driver_ids, batch_drivers in batches)
+    )
+
+    write_target_metadata(target_dir, target)
+    print(f"Built {len(requested_driver_ids)} driver plugins for {slug} -> {drivers_output_dir} (jobs={jobs})")
+    return drivers_output_dir
 
 
 def parse_args(argv: Iterable[str]) -> argparse.Namespace:
@@ -201,10 +609,57 @@ def parse_args(argv: Iterable[str]) -> argparse.Namespace:
     subparsers.add_parser("list", help="List available cross compilation targets")
     subparsers.add_parser("matrix", help="Emit the GitHub Actions matrix JSON")
 
+    show = subparsers.add_parser("show-target", help="Describe a specific target")
+    show.add_argument("--target", required=True, help="Target slug (distro-version-arch)")
+    show.add_argument("--format", choices=("json", "tsv"), default="json")
+
+    drivers = subparsers.add_parser("list-drivers", help="List buildable driver plugins")
+    drivers.add_argument("--format", choices=("id", "json", "tsv"), default="id")
+
     build = subparsers.add_parser("build", help="Build a specific cross compilation target")
     build.add_argument("--target", required=True, help="Target slug (distro-version-arch)")
     build.add_argument("--frameos-root", default=str(Path.cwd()), help="Path to the frameos source tree")
     build.add_argument("--artifacts-dir", default="build/cross", help="Directory for compiled binaries")
+
+    build_frameos = subparsers.add_parser(
+        "build-frameos",
+        help="Build the generic FrameOS runtime binary for a specific target",
+    )
+    build_frameos.add_argument("--target", required=True, help="Target slug (distro-version-arch)")
+    build_frameos.add_argument("--frameos-root", default=str(FRAMEOS_ROOT), help="Path to the frameos source tree")
+    build_frameos.add_argument("--artifacts-dir", default="build/cross", help="Directory for compiled artifacts")
+    build_frameos.add_argument(
+        "--prebuilt-component",
+        action="append",
+        default=[],
+        help="Local prebuilt component override in the form component=/path/to/component-dir",
+    )
+
+    build_drivers = subparsers.add_parser(
+        "build-drivers",
+        help="Build compiled driver plugins for a specific target",
+    )
+    build_drivers.add_argument("--target", required=True, help="Target slug (distro-version-arch)")
+    build_drivers.add_argument("--frameos-root", default=str(FRAMEOS_ROOT), help="Path to the frameos source tree")
+    build_drivers.add_argument("--artifacts-dir", default="build/cross", help="Directory for compiled artifacts")
+    build_drivers.add_argument(
+        "--driver",
+        action="append",
+        default=[],
+        help="Compile only the specified driver id. Repeat to compile multiple drivers.",
+    )
+    build_drivers.add_argument(
+        "--jobs",
+        type=int,
+        default=None,
+        help="Maximum number of driver batches to build concurrently. Defaults to FRAMEOS_DRIVER_JOBS or CPU count.",
+    )
+    build_drivers.add_argument(
+        "--prebuilt-component",
+        action="append",
+        default=[],
+        help="Local prebuilt component override in the form component=/path/to/component-dir",
+    )
 
     return parser.parse_args(argv)
 
@@ -217,17 +672,56 @@ def main(argv: list[str]) -> int:
     if args.command == "matrix":
         print(targets_matrix_json())
         return 0
-    if args.command == "build":
-        frameos_root = Path(args.frameos_root)
-        artifacts_dir = Path(args.artifacts_dir)
-        if not artifacts_dir.is_absolute():
-            artifacts_dir = frameos_root / artifacts_dir
+    if args.command == "show-target":
+        print(show_target(args.target, output_format=args.format))
+        return 0
+    if args.command == "list-drivers":
+        print(show_drivers(output_format=args.format))
+        return 0
 
+    frameos_root = Path(args.frameos_root)
+    artifacts_dir = Path(args.artifacts_dir)
+    if not artifacts_dir.is_absolute():
+        artifacts_dir = frameos_root / artifacts_dir
+
+    if args.command == "build":
         async def _build() -> Path:
             return await build_target(args.target, frameos_root, artifacts_dir)
 
         asyncio.run(_build())
         return 0
+
+    if args.command == "build-frameos":
+        local_prebuilt_components = parse_prebuilt_components(args.prebuilt_component)
+
+        async def _build_runtime() -> Path:
+            return await build_frameos_runtime(
+                args.target,
+                frameos_root,
+                artifacts_dir,
+                local_prebuilt_components=local_prebuilt_components,
+            )
+
+        asyncio.run(_build_runtime())
+        return 0
+
+    if args.command == "build-drivers":
+        local_prebuilt_components = parse_prebuilt_components(args.prebuilt_component)
+        requested_driver_ids = tuple(args.driver or ())
+
+        async def _build_drivers() -> Path:
+            return await build_driver_plugins(
+                args.target,
+                frameos_root,
+                artifacts_dir,
+                driver_ids=requested_driver_ids,
+                local_prebuilt_components=local_prebuilt_components,
+                jobs=args.jobs,
+            )
+
+        asyncio.run(_build_drivers())
+        return 0
+
     return 1
 
 

@@ -44,6 +44,7 @@ class TargetMetadata:
 class CrossCompileArtifacts:
     binary_path: str | None
     scenes_dir: str | None
+    drivers_dir: str | None
 
 
 SAFE_SEGMENT = re.compile(r"[^A-Za-z0-9_.-]+")
@@ -146,7 +147,7 @@ class CrossCompiler:
         key = "-".join(self._sanitize(part) for part in (target.distro, target.version, target.arch))
         self.toolchain_dir = cache_root / key
         self.toolchain_dir.mkdir(parents=True, exist_ok=True)
-        self.sysroot_dir = self.toolchain_dir / "sysroot"
+        self.sysroot_dir = self.temp_dir / f"sysroot-{key}-{self._sanitize(getattr(deployer, 'build_id', 'build'))}"
         self.sysroot_dir.mkdir(parents=True, exist_ok=True)
         self.prebuilt_entry = prebuilt_entry
         self.prebuilt_target = prebuilt_target
@@ -177,6 +178,8 @@ class CrossCompiler:
         build_binary: bool = True,
         build_scene_ids: list[str] | tuple[str, ...] | None = None,
         build_scene_dirs: list[str] | None = None,
+        build_driver_ids: list[str] | tuple[str, ...] | None = None,
+        build_driver_dirs: list[str] | None = None,
         build_all_scenes: bool = True,
     ) -> CrossCompileArtifacts:
         if self.build_host:
@@ -193,12 +196,14 @@ class CrossCompiler:
                 )
                 try:
                     return await self._build_with_context(
-                    source_dir,
-                    build_binary=build_binary,
-                    build_scene_ids=build_scene_ids,
-                    build_scene_dirs=build_scene_dirs,
-                    build_all_scenes=build_all_scenes,
-                )
+                        source_dir,
+                        build_binary=build_binary,
+                        build_scene_ids=build_scene_ids,
+                        build_scene_dirs=build_scene_dirs,
+                        build_driver_ids=build_driver_ids,
+                        build_driver_dirs=build_driver_dirs,
+                        build_all_scenes=build_all_scenes,
+                    )
                 finally:
                     self._build_host_session = None
                     self._remote_root = None
@@ -207,6 +212,8 @@ class CrossCompiler:
             build_binary=build_binary,
             build_scene_ids=build_scene_ids,
             build_scene_dirs=build_scene_dirs,
+            build_driver_ids=build_driver_ids,
+            build_driver_dirs=build_driver_dirs,
             build_all_scenes=build_all_scenes,
         )
 
@@ -217,6 +224,8 @@ class CrossCompiler:
         build_binary: bool,
         build_scene_ids: list[str] | tuple[str, ...] | None,
         build_scene_dirs: list[str] | None,
+        build_driver_ids: list[str] | tuple[str, ...] | None,
+        build_driver_dirs: list[str] | None,
         build_all_scenes: bool,
     ) -> CrossCompileArtifacts:
         await self._log(
@@ -233,6 +242,7 @@ class CrossCompiler:
                 build_dir,
                 build_binary=build_binary,
                 build_scene_dirs=build_scene_dirs,
+                build_driver_dirs=build_driver_dirs,
                 build_all_scenes=build_all_scenes,
             ):
                 await self._log(
@@ -244,6 +254,8 @@ class CrossCompiler:
                     build_binary=build_binary,
                     build_scene_ids=build_scene_ids,
                     build_scene_dirs=build_scene_dirs,
+                    build_driver_ids=build_driver_ids,
+                    build_driver_dirs=build_driver_dirs,
                     build_all_scenes=build_all_scenes,
                 )
         else:
@@ -252,6 +264,8 @@ class CrossCompiler:
                 build_binary=build_binary,
                 build_scene_ids=build_scene_ids,
                 build_scene_dirs=build_scene_dirs,
+                build_driver_ids=build_driver_ids,
+                build_driver_dirs=build_driver_dirs,
                 build_all_scenes=build_all_scenes,
             )
         await self._prepare_sysroot()
@@ -263,6 +277,8 @@ class CrossCompiler:
             build_binary=build_binary,
             build_scene_ids=build_scene_ids,
             build_scene_dirs=build_scene_dirs,
+            build_driver_ids=build_driver_ids,
+            build_driver_dirs=build_driver_dirs,
             build_all_scenes=build_all_scenes,
         )
 
@@ -272,6 +288,7 @@ class CrossCompiler:
         *,
         build_binary: bool,
         build_scene_dirs: list[str] | None,
+        build_driver_dirs: list[str] | None,
         build_all_scenes: bool,
     ) -> bool:
         if build_binary and not (build_dir / "compile_frameos.sh").exists():
@@ -282,7 +299,15 @@ class CrossCompiler:
             if not scene_root.is_dir():
                 return False
             if build_scene_dirs:
-                return all((build_dir / scene_dir).is_dir() for scene_dir in build_scene_dirs)
+                if not all((build_dir / scene_dir).is_dir() for scene_dir in build_scene_dirs):
+                    return False
+
+        if build_driver_dirs:
+            driver_root = build_dir / "driver_builds"
+            if not driver_root.is_dir():
+                return False
+            if not all((build_dir / driver_dir).is_dir() for driver_dir in build_driver_dirs):
+                return False
 
         return True
 
@@ -307,6 +332,8 @@ class CrossCompiler:
         build_binary: bool = True,
         build_scene_ids: list[str] | tuple[str, ...] | None = None,
         build_scene_dirs: list[str] | None = None,
+        build_driver_ids: list[str] | tuple[str, ...] | None = None,
+        build_driver_dirs: list[str] | None = None,
         build_all_scenes: bool = True,
     ) -> CrossCompileArtifacts:
         build_dir = os.path.abspath(build_dir)
@@ -322,6 +349,13 @@ class CrossCompiler:
             )
         for scene_id in build_scene_ids or ():
             await self._log("stdout", f"{icon} Compiling scene: {_format_scene_label(self.frame, scene_id)}")
+        if build_driver_dirs:
+            await self._log(
+                "stdout",
+                f"{icon} Driver compile: cross-compiling {len(build_driver_dirs)} {_pluralize(len(build_driver_dirs), 'driver')}",
+            )
+        for driver_id in build_driver_ids or ():
+            await self._log("stdout", f"{icon} Compiling driver: {driver_id}")
         include_candidates = (
             [f"/sysroot{path}" for path in sorted(self._sysroot_include_dirs)]
             if self._sysroot_include_dirs
@@ -357,18 +391,24 @@ class CrossCompiler:
         else:
             if build_binary:
                 build_commands.append('make -j"$(nproc)" frameos')
-            if build_all_scenes:
-                build_commands.append("make compiled-scenes")
-            elif build_scene_dirs:
+            if build_scene_dirs:
                 quoted_dirs = " ".join(shlex.quote(scene_dir) for scene_dir in build_scene_dirs)
                 build_commands.append(
                     "mkdir -p scenes && "
                     f"for dir in {quoted_dirs}; do make --no-print-directory -C \"$dir\" || exit $?; done"
                 )
+            elif build_all_scenes:
+                build_commands.append("make compiled-scenes")
+        if build_driver_dirs:
+            quoted_dirs = " ".join(shlex.quote(driver_dir) for driver_dir in build_driver_dirs)
+            build_commands.append(
+                "mkdir -p drivers && "
+                f"for dir in {quoted_dirs}; do make --no-print-directory -C \"$dir\" || exit $?; done"
+            )
         if not build_commands:
             await self._log(
                 "stdout",
-                f"{icon} Cross compilation skipped; no binary or compiled scenes requested",
+                f"{icon} Cross compilation skipped; no binary, scene, or driver artifacts requested",
             )
 
         script_content = (
@@ -413,6 +453,7 @@ class CrossCompiler:
                 image,
                 build_binary=build_binary,
                 build_scene_dirs=build_scene_dirs,
+                build_driver_dirs=build_driver_dirs,
                 build_all_scenes=build_all_scenes,
             )
 
@@ -448,7 +489,10 @@ class CrossCompiler:
         scenes_dir = os.path.join(build_dir, "scenes") if build_scene_dirs or build_all_scenes else None
         if scenes_dir and not os.path.isdir(scenes_dir):
             scenes_dir = None
-        return CrossCompileArtifacts(binary_path=binary_path, scenes_dir=scenes_dir)
+        drivers_dir = os.path.join(build_dir, "drivers") if build_driver_dirs else None
+        if drivers_dir and not os.path.isdir(drivers_dir):
+            drivers_dir = None
+        return CrossCompileArtifacts(binary_path=binary_path, scenes_dir=scenes_dir, drivers_dir=drivers_dir)
 
     async def _run_remote_docker_build(
         self,
@@ -458,6 +502,7 @@ class CrossCompiler:
         *,
         build_binary: bool = True,
         build_scene_dirs: list[str] | None = None,
+        build_driver_dirs: list[str] | None = None,
         build_all_scenes: bool = True,
     ) -> CrossCompileArtifacts:
         if not self._build_host_session or not self._remote_root:
@@ -521,7 +566,28 @@ class CrossCompiler:
             await host.download_dir_tarball(remote_scenes_dir, local_scenes_dir)
         elif build_scene_dirs or build_all_scenes:
             local_scenes_dir = None
-        return CrossCompileArtifacts(binary_path=local_binary, scenes_dir=local_scenes_dir)
+        local_drivers_dir: str | None = None
+        if build_driver_dirs:
+            remote_drivers_dir = f"{remote_build_dir}/drivers"
+            local_drivers_dir = os.path.join(build_dir, "drivers")
+            drivers_status, _stdout, _stderr = await host.run(
+                f"test -d {shlex.quote(remote_drivers_dir)}",
+                log_command=False,
+                log_output=False,
+            )
+            if drivers_status == 0:
+                await self._log(
+                    "stdout",
+                    f"{icon} Downloading compiled driver artifacts from build host",
+                )
+                await host.download_dir_tarball(remote_drivers_dir, local_drivers_dir)
+            else:
+                local_drivers_dir = None
+        return CrossCompileArtifacts(
+            binary_path=local_binary,
+            scenes_dir=local_scenes_dir,
+            drivers_dir=local_drivers_dir,
+        )
 
     async def _run_command(
         self,
@@ -574,6 +640,8 @@ class CrossCompiler:
         build_binary: bool,
         build_scene_ids: list[str] | tuple[str, ...] | None,
         build_scene_dirs: list[str] | None,
+        build_driver_ids: list[str] | tuple[str, ...] | None,
+        build_driver_dirs: list[str] | None,
         build_all_scenes: bool,
     ) -> Path:
         build_dir = self.temp_dir / f"build_{self.deployer.build_id}"
@@ -584,6 +652,7 @@ class CrossCompiler:
             self.target.arch,
             build_binary=build_binary,
             build_scene_ids=build_scene_ids,
+            build_driver_ids=build_driver_ids,
             build_all_scenes=build_all_scenes,
         )
         return build_dir
@@ -687,14 +756,16 @@ class CrossCompiler:
     async def _ensure_prebuilt_component(self, component: str) -> Path | None:
         if not self.prebuilt_entry:
             return None
+        local_path = self.prebuilt_entry.path_for(component)
         url = self.prebuilt_entry.url_for(component)
-        if not url:
+        if not local_path and not url:
             return None
         version = self.prebuilt_entry.version_for(component, "unknown") or "unknown"
         safe_version = self._sanitize(version)
         dest_dir = self.prebuilt_dir / f"{component}-{safe_version}"
         marker = dest_dir / ".build-info"
-        expected_marker = f"{component}|{version}|{url}|{self.prebuilt_entry.md5_for(component) or ''}"
+        source_ref = local_path or url or ""
+        expected_marker = f"{component}|{version}|{source_ref}|{self.prebuilt_entry.md5_for(component) or ''}"
         if marker.exists() and marker.read_text() == expected_marker:
             if self._prebuilt_component_is_usable(component, dest_dir):
                 return dest_dir
@@ -704,6 +775,24 @@ class CrossCompiler:
             )
             shutil.rmtree(dest_dir, ignore_errors=True)
             dest_dir.mkdir(parents=True, exist_ok=True)
+
+        if local_path:
+            source_dir = Path(local_path)
+            if not source_dir.exists():
+                await self._log(
+                    "stderr",
+                    f"{icon} Local prebuilt {component} path does not exist: {source_dir}",
+                )
+                return None
+
+            await self._log("stdout", f"{icon} Staging local prebuilt {component} from {source_dir}")
+            if not self._prebuilt_component_is_usable(component, source_dir):
+                await self._log(
+                    "stderr",
+                    f"{icon} Local prebuilt {component} at {source_dir} is incomplete; falling back",
+                )
+                return None
+            return source_dir
 
         await self._log("stdout", f"{icon} Downloading prebuilt {component} ({version})")
         if dest_dir.exists():
@@ -1129,6 +1218,8 @@ async def build_artifacts_with_cross_toolchain(
     build_binary: bool = True,
     build_scene_ids: list[str] | tuple[str, ...] | None = None,
     build_scene_dirs: list[str] | None = None,
+    build_driver_ids: list[str] | tuple[str, ...] | None = None,
+    build_driver_dirs: list[str] | None = None,
     build_all_scenes: bool = True,
 ) -> CrossCompileArtifacts:
     arch: str | None
@@ -1203,6 +1294,8 @@ async def build_artifacts_with_cross_toolchain(
         build_binary=build_binary,
         build_scene_ids=build_scene_ids,
         build_scene_dirs=build_scene_dirs,
+        build_driver_ids=build_driver_ids,
+        build_driver_dirs=build_driver_dirs,
         build_all_scenes=build_all_scenes,
     )
 

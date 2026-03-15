@@ -1,0 +1,20 @@
+{
+  "name": "Log",
+  "description": "Log a string or JSON payload",
+  "category": "logic",
+  "version": "1.0.0",
+  "fields": [
+    {
+      "name": "inputString",
+      "type": "text",
+      "required": false,
+      "label": "Input string"
+    },
+    {
+      "name": "inputJson",
+      "type": "json",
+      "required": false,
+      "label": "Input JSON"
+    }
+  ]
+}

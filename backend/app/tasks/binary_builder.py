@@ -47,6 +47,7 @@ class FrameBinaryBuildResult:
     build_dir: str
     archive_path: str
     binary_path: str | None
+    drivers_dir: str | None
     cross_compiled: bool
     prebuilt_entry: PrebuiltEntry | None
     prebuilt_target: str | None
@@ -154,6 +155,7 @@ class FrameBinaryBuilder:
         )
         cross_compiled = requested.cross_compiled
         binary_path = requested.artifacts.binary_path
+        drivers_dir = requested.artifacts.drivers_dir
         if cross_compiled:
             await self._log("stdout", f"{icon} Cross compilation succeeded; skipping remote build")
 
@@ -164,6 +166,7 @@ class FrameBinaryBuilder:
             build_dir=build_dir,
             archive_path=archive_path,
             binary_path=binary_path,
+            drivers_dir=drivers_dir,
             cross_compiled=cross_compiled,
             prebuilt_entry=prebuilt_entry,
             prebuilt_target=prebuilt_target,
@@ -187,6 +190,7 @@ class FrameBinaryBuilder:
         arch: str,
         build_binary: bool = True,
         build_scene_ids: list[str] | tuple[str, ...] | None = None,
+        build_driver_ids: list[str] | tuple[str, ...] | None = None,
         build_all_scenes: bool = True,
     ) -> tuple[str, str]:
         build_dir = create_build_folder(self.temp_dir, self.deployer.build_id)
@@ -197,6 +201,7 @@ class FrameBinaryBuilder:
             arch,
             build_binary=build_binary,
             build_scene_ids=build_scene_ids,
+            build_driver_ids=build_driver_ids,
             build_all_scenes=build_all_scenes,
         )
         return build_dir, archive_path
@@ -217,9 +222,11 @@ class FrameBinaryBuilder:
         build_binary: bool = True,
         build_scene_ids: list[str] | tuple[str, ...] | None = None,
         build_scene_dirs: list[str] | None = None,
+        build_driver_ids: list[str] | tuple[str, ...] | None = None,
+        build_driver_dirs: list[str] | None = None,
         build_all_scenes: bool = True,
     ) -> RequestedArtifactBuildResult:
-        empty = CrossCompileArtifacts(binary_path=None, scenes_dir=None)
+        empty = CrossCompileArtifacts(binary_path=None, scenes_dir=None, drivers_dir=None)
         if not allow_cross_compile or not can_cross_compile_target(target.arch):
             if force_cross_compile:
                 raise RuntimeError("Cross compilation required but not supported for this target")
@@ -254,6 +261,8 @@ class FrameBinaryBuilder:
                 build_binary=build_binary,
                 build_scene_ids=build_scene_ids,
                 build_scene_dirs=build_scene_dirs,
+                build_driver_ids=build_driver_ids,
+                build_driver_dirs=build_driver_dirs,
                 build_all_scenes=build_all_scenes,
             )
         except Exception as exc:

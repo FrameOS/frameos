@@ -5,14 +5,17 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from app.tasks.compile_manifest import CompileManifest, CompilePlan, SceneCompileState
+from app.tasks.compile_manifest import CompileManifest, CompilePlan, DriverCompileState, SceneCompileState
 from app.tasks.deploy_frame import (
     _adjust_compile_plan_for_missing_remote_artifacts,
     _build_remote_compiled_scenes,
+    _build_remote_compiled_drivers,
     _compile_plan_log_lines,
     _ensure_quickjs_for_remote_frameos_build,
+    _local_compiled_driver_artifact_dir,
     _local_compiled_scene_artifact_dir,
     _local_vendor_source_dir,
+    _upload_local_compiled_drivers,
     _scene_compile_start_lines,
     _sync_vendor_dir,
     _upload_local_compiled_scenes,
@@ -37,6 +40,15 @@ def test_local_compiled_scene_artifact_dir_returns_scenes_dir_when_plugins_exist
     (scenes_dir / "demo.so").write_bytes(b"plugin")
 
     assert _local_compiled_scene_artifact_dir(str(build_dir)) == str(scenes_dir)
+
+
+def test_local_compiled_driver_artifact_dir_returns_drivers_dir_when_plugins_exist(tmp_path: Path):
+    build_dir = tmp_path / "build"
+    drivers_dir = build_dir / "drivers"
+    drivers_dir.mkdir(parents=True)
+    (drivers_dir / "frameBuffer.so").write_bytes(b"plugin")
+
+    assert _local_compiled_driver_artifact_dir(str(build_dir)) == str(drivers_dir)
 
 
 def test_local_vendor_source_dir_falls_back_to_repo_vendor_when_build_dir_missing(
@@ -89,6 +101,39 @@ async def test_build_remote_compiled_scenes_does_not_stage_quickjs():
 
 
 @pytest.mark.asyncio
+async def test_build_remote_compiled_drivers_builds_requested_driver_dirs():
+    commands: list[str] = []
+    logs: list[tuple[str, str]] = []
+
+    async def fake_log(level: str, message: str) -> None:
+        logs.append((level, message))
+
+    async def fake_exec(command: str, **_kwargs) -> None:
+        commands.append(command)
+
+    deployer = SimpleNamespace(
+        log=fake_log,
+        exec_command=fake_exec,
+    )
+
+    await _build_remote_compiled_drivers(
+        deployer,
+        "/srv/frameos/build/build_abc",
+        driver_build_dirs=["driver_builds/frameBuffer"],
+        driver_ids=("frameBuffer",),
+    )
+
+    assert logs == [
+        ("stdout", "🔷 Driver compile: building 1 driver on device"),
+        ("stdout", "🔷 Compiling driver: frameBuffer"),
+        ("stdout", "🔷 Driver compile: completed on device"),
+    ]
+    assert len(commands) == 1
+    assert "mkdir -p drivers" in commands[0]
+    assert "make --no-print-directory -C \"$dir\"" in commands[0]
+
+
+@pytest.mark.asyncio
 async def test_upload_local_compiled_scenes_merges_into_existing_release(monkeypatch: pytest.MonkeyPatch):
     calls: list[tuple[tuple, dict]] = []
 
@@ -112,6 +157,35 @@ async def test_upload_local_compiled_scenes_merges_into_existing_release(monkeyp
         "/tmp/local-scenes",
         "/srv/frameos/releases/release_x/scenes",
         "compiled scenes",
+        "build123",
+    )
+    assert calls[0][1] == {"replace": False}
+
+
+@pytest.mark.asyncio
+async def test_upload_local_compiled_drivers_merges_into_existing_release(monkeypatch: pytest.MonkeyPatch):
+    calls: list[tuple[tuple, dict]] = []
+
+    async def fake_upload_directory_tree(*args, **kwargs):
+        calls.append((args, kwargs))
+
+    async def fake_log(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(deploy_frame_module, "_upload_directory_tree", fake_upload_directory_tree)
+
+    await _upload_local_compiled_drivers(
+        SimpleNamespace(log=fake_log),
+        "/tmp/local-drivers",
+        "/srv/frameos/releases/release_x/drivers",
+        "build123",
+    )
+
+    assert len(calls) == 1
+    assert calls[0][0][1:] == (
+        "/tmp/local-drivers",
+        "/srv/frameos/releases/release_x/drivers",
+        "compiled drivers",
         "build123",
     )
     assert calls[0][1] == {"replace": False}
@@ -247,6 +321,8 @@ def test_compile_plan_log_lines_for_scene_only_rebuild_include_skip_reason_and_s
         rebuild_app=False,
         rebuild_scene_ids=("demo-scene-id",),
         reuse_scene_ids=("kept-scene-id",),
+        rebuild_driver_ids=("frameBuffer",),
+        reuse_driver_ids=("gpioButton",),
         reason="Compiled scene inputs changed",
     )
     manifest = CompileManifest(
@@ -258,6 +334,10 @@ def test_compile_plan_log_lines_for_scene_only_rebuild_include_skip_reason_and_s
             "demo-scene-id": SceneCompileState(hash="a", library="demo.so"),
             "kept-scene-id": SceneCompileState(hash="b", library="kept.so"),
         },
+        driver_hashes={
+            "frameBuffer": DriverCompileState(hash="c", library="frameBuffer.so"),
+            "gpioButton": DriverCompileState(hash="d", library="gpioButton.so"),
+        },
     )
 
     lines = _compile_plan_log_lines(frame, compile_plan, manifest)
@@ -267,6 +347,8 @@ def test_compile_plan_log_lines_for_scene_only_rebuild_include_skip_reason_and_s
         "🔷 FrameOS compile: skipped (app inputs unchanged)",
         "🔷 Scene compile: requested (1 changed, reusing 1)",
         "🔷 Scenes to compile: Calendar (demo-sce...)",
+        "🔷 Driver compile: requested (1 changed, reusing 1)",
+        "🔷 Drivers to compile: frameBuffer",
     ]
 
 
@@ -277,6 +359,8 @@ def test_compile_plan_log_lines_report_absence_of_compiled_scenes():
         rebuild_app=False,
         rebuild_scene_ids=(),
         reuse_scene_ids=(),
+        rebuild_driver_ids=(),
+        reuse_driver_ids=(),
         reason="Compile inputs unchanged",
     )
     manifest = CompileManifest(
@@ -285,6 +369,7 @@ def test_compile_plan_log_lines_report_absence_of_compiled_scenes():
         runtime_contract_hash="runtime",
         app_hash="app",
         scene_hashes={},
+        driver_hashes={},
     )
 
     lines = _compile_plan_log_lines(frame, compile_plan, manifest)
@@ -293,6 +378,7 @@ def test_compile_plan_log_lines_report_absence_of_compiled_scenes():
         "🔷 Compile plan: Compile inputs unchanged",
         "🔷 FrameOS compile: skipped (inputs unchanged)",
         "🔷 Scene compile: skipped (no compiled scenes configured)",
+        "🔷 Driver compile: skipped (no compiled drivers configured)",
     ]
 
 
@@ -318,7 +404,7 @@ async def test_adjust_compile_plan_for_missing_remote_scene_plugin_marks_scene_f
 
     async def fake_exec(command: str, **_kwargs):
         commands.append(command)
-        if "demo.so" in command:
+        if "demo.so" in command or "frameBuffer.so" in command:
             return 1
         return 0
 
@@ -328,6 +414,8 @@ async def test_adjust_compile_plan_for_missing_remote_scene_plugin_marks_scene_f
         rebuild_app=False,
         rebuild_scene_ids=(),
         reuse_scene_ids=("demo", "kept"),
+        rebuild_driver_ids=(),
+        reuse_driver_ids=("frameBuffer",),
         reason="Compile inputs unchanged",
     )
     manifest = CompileManifest(
@@ -338,6 +426,9 @@ async def test_adjust_compile_plan_for_missing_remote_scene_plugin_marks_scene_f
         scene_hashes={
             "demo": SceneCompileState(hash="a", library="demo.so"),
             "kept": SceneCompileState(hash="b", library="kept.so"),
+        },
+        driver_hashes={
+            "frameBuffer": DriverCompileState(hash="c", library="frameBuffer.so"),
         },
     )
 
@@ -350,11 +441,14 @@ async def test_adjust_compile_plan_for_missing_remote_scene_plugin_marks_scene_f
     assert adjusted.rebuild_app is False
     assert adjusted.rebuild_scene_ids == ("demo",)
     assert adjusted.reuse_scene_ids == ("kept",)
-    assert adjusted.reason == "Compile inputs unchanged; 1 cached scene missing on device"
+    assert adjusted.rebuild_driver_ids == ("frameBuffer",)
+    assert adjusted.reuse_driver_ids == ()
+    assert adjusted.reason == "Compile inputs unchanged; 1 cached scene missing on device; 1 cached driver missing on device"
     assert commands == [
         "test -f /srv/frameos/current/frameos",
         "test -f /srv/frameos/current/scenes/demo.so",
         "test -f /srv/frameos/current/scenes/kept.so",
+        "test -f /srv/frameos/current/drivers/frameBuffer.so",
     ]
 
 
@@ -371,6 +465,8 @@ async def test_adjust_compile_plan_for_missing_remote_binary_marks_app_for_rebui
         rebuild_app=False,
         rebuild_scene_ids=(),
         reuse_scene_ids=(),
+        rebuild_driver_ids=(),
+        reuse_driver_ids=(),
         reason="Compile inputs unchanged",
     )
     manifest = CompileManifest(
@@ -379,6 +475,7 @@ async def test_adjust_compile_plan_for_missing_remote_binary_marks_app_for_rebui
         runtime_contract_hash="runtime",
         app_hash="app",
         scene_hashes={},
+        driver_hashes={},
     )
 
     adjusted = await _adjust_compile_plan_for_missing_remote_artifacts(
@@ -390,4 +487,6 @@ async def test_adjust_compile_plan_for_missing_remote_binary_marks_app_for_rebui
     assert adjusted.rebuild_app is True
     assert adjusted.rebuild_scene_ids == ()
     assert adjusted.reuse_scene_ids == ()
+    assert adjusted.rebuild_driver_ids == ()
+    assert adjusted.reuse_driver_ids == ()
     assert adjusted.reason == "Compile inputs unchanged; current FrameOS binary missing on device"

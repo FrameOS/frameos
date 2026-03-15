@@ -84,6 +84,7 @@ frameos/buildroot/output
 frameos/buildroot/sources
 frameos/buildroot/dl
 build/prebuilt-deps/
+build/prebuilt-cross/
 frameos/.nimcache*
 .tmp-cache/
 frameos/.tmp-home/

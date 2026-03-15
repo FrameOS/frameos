@@ -12,6 +12,7 @@ import io
 import json
 import mimetypes
 import os
+from pathlib import Path
 import re
 import shlex
 import shutil
@@ -41,10 +42,22 @@ from sqlalchemy.orm import Session
 # local ---------------------------------------------------------------------
 from app.database import get_db
 from arq import ArqRedis as Redis
-from app.models.frame import Frame, new_frame, delete_frame, normalize_https_proxy, refresh_tls_certificate_validity_dates, update_frame
+from app.models.frame import (
+    Frame,
+    delete_frame,
+    get_frame_json,
+    get_interpreted_scenes_json,
+    new_frame,
+    normalize_https_proxy,
+    refresh_tls_certificate_validity_dates,
+    update_frame,
+)
 from app.models.log import new_log as log
 from app.models.metrics import Metrics
-from app.codegen.scene_nim import write_scene_nim
+from app.codegen.drivers_nim import driver_compile_id
+from app.codegen.drivers_nim import loadable_drivers
+from app.codegen.scene_nim import scene_module_name, write_scene_nim
+from app.drivers.devices import drivers_for_frame
 from app.utils.ssh_utils import (
     get_ssh_connection,
     exec_command,
@@ -102,7 +115,9 @@ from app.utils.ssh_key_utils import default_ssh_key_ids
 from app.utils.tls import generate_frame_tls_material, parse_certificate_not_valid_after
 from app.utils.ssh_authorized_keys import _install_authorized_keys, resolve_authorized_keys_update
 from app.tasks.binary_builder import FrameBinaryBuilder
+from app.tasks.prebuilt_deps import PrebuiltEntry, resolve_prebuilt_target
 from app.utils.local_exec import exec_local_command
+from app.utils.cross_compile import TargetMetadata
 from app.utils.jwt_tokens import validate_scoped_token
 from . import api_with_auth, api_no_auth
 
@@ -150,6 +165,7 @@ def _frame_state_dir(frame: Frame) -> str:
 
 _ascii_re = re.compile(r"[^A-Za-z0-9._-]")
 _frame_image_locks: dict[int, asyncio.Lock] = {}
+LOCAL_PREBUILT_DEPS_ROOT = Path(__file__).resolve().parents[3] / "build" / "prebuilt-deps"
 
 
 def _get_frame_image_lock(frame_id: int) -> asyncio.Lock:
@@ -175,6 +191,249 @@ def _normalize_upload_scenes_payload(body: Any) -> tuple[list[dict[str, Any]], d
         _bad_request("uploadScenes payload must include scenes as an array")
     return scenes_payload, body
     return [], body  # for mypy
+
+
+def _frame_has_compiled_scenes(frame: Frame) -> bool:
+    return any(
+        scene.get("settings", {}).get("execution", "compiled") != "interpreted"
+        for scene in (frame.scenes or [])
+    )
+
+
+def _compiled_scene_build_dirs(frame: Frame) -> list[str]:
+    return [
+        f"scene_builds/{scene_module_name(str(scene.get('id') or 'default'))}"
+        for scene in (frame.scenes or [])
+        if scene.get("settings", {}).get("execution", "compiled") != "interpreted"
+    ]
+
+
+def _load_local_prebuilt_target(target_slug: str) -> tuple[Path, dict[str, dict[str, Any]]]:
+    target_dir = LOCAL_PREBUILT_DEPS_ROOT / target_slug
+    metadata_path = target_dir / "metadata.json"
+    if not metadata_path.is_file():
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail=(
+                f"No local prebuilt package was found for target '{target_slug}'. "
+                f"Expected {metadata_path}"
+            ),
+        )
+
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    components = metadata.get("components") or {}
+    if not isinstance(components, dict):
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail=f"Invalid prebuilt metadata at {metadata_path}",
+        )
+    return target_dir, components
+
+
+def _prebuilt_component_spec(
+    components: dict[str, dict[str, Any]],
+    component_name: str,
+) -> dict[str, Any]:
+    spec = components.get(component_name)
+    if not isinstance(spec, dict):
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail=f"Missing local prebuilt component '{component_name}'",
+        )
+    return spec
+
+
+def _prebuilt_component_dir(
+    target_dir: Path,
+    components: dict[str, dict[str, Any]],
+    component_name: str,
+) -> Path:
+    spec = _prebuilt_component_spec(components, component_name)
+    directory = spec.get("directory")
+    if not isinstance(directory, str) or not directory:
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail=f"Invalid directory metadata for prebuilt component '{component_name}'",
+        )
+
+    component_dir = target_dir / directory
+    if not component_dir.is_dir():
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail=f"Local prebuilt component '{component_name}' is missing at {component_dir}",
+        )
+    return component_dir
+
+
+def _prebuilt_component_file(
+    target_dir: Path,
+    components: dict[str, dict[str, Any]],
+    component_name: str,
+    *,
+    default_name: str | None = None,
+) -> Path:
+    spec = _prebuilt_component_spec(components, component_name)
+    artifact_name = spec.get("artifact") or default_name or component_name
+    if not isinstance(artifact_name, str) or not artifact_name:
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail=f"Invalid artifact metadata for prebuilt component '{component_name}'",
+        )
+
+    artifact_path = _prebuilt_component_dir(target_dir, components, component_name) / artifact_name
+    if not artifact_path.is_file():
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail=f"Local prebuilt artifact '{artifact_name}' is missing at {artifact_path}",
+        )
+    return artifact_path
+
+
+def _local_prebuilt_entry(
+    target_slug: str,
+    target_dir: Path,
+    components: dict[str, dict[str, Any]],
+) -> PrebuiltEntry:
+    versions: dict[str, str] = {}
+    component_paths: dict[str, str] = {}
+    for component_name, spec in components.items():
+        if not isinstance(spec, dict):
+            continue
+        directory = spec.get("directory")
+        version = spec.get("version")
+        if not isinstance(directory, str) or not directory:
+            continue
+        component_dir = target_dir / directory
+        if not component_dir.is_dir():
+            continue
+        component_paths[component_name] = str(component_dir)
+        if isinstance(version, str) and version:
+            versions[component_name] = version
+
+    return PrebuiltEntry(
+        target=target_slug,
+        versions=versions,
+        component_urls={},
+        component_md5s={},
+        component_paths=component_paths,
+    )
+
+
+def _copy_prebuilt_drivers(
+    *,
+    frame: Frame,
+    target_slug: str,
+    target_dir: Path,
+    components: dict[str, dict[str, Any]],
+    destination_dir: Path,
+) -> None:
+    driver_components: dict[str, str] = {}
+    for component_name, spec in components.items():
+        if not isinstance(spec, dict):
+            continue
+        driver_id = spec.get("driver_id")
+        if isinstance(driver_id, str) and driver_id:
+            driver_components[driver_id] = component_name
+
+    missing_driver_ids: list[str] = []
+    for driver in loadable_drivers(drivers_for_frame(frame)):
+        driver_id = driver_compile_id(driver)
+        component_name = driver_components.get(driver_id)
+        if not component_name:
+            missing_driver_ids.append(driver_id)
+            continue
+        library_path = _prebuilt_component_file(
+            target_dir,
+            components,
+            component_name,
+        )
+        shutil.copy2(library_path, destination_dir / library_path.name)
+
+    if missing_driver_ids:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail=(
+                f"Missing local prebuilt drivers for target '{target_slug}': "
+                + ", ".join(sorted(missing_driver_ids))
+            ),
+        )
+
+
+async def _build_packaged_compiled_scenes(
+    *,
+    db: Session,
+    redis: Redis,
+    frame: Frame,
+    temp_dir: str,
+    deployer: FrameDeployer,
+    target: TargetMetadata,
+    target_slug: str,
+    target_dir: Path,
+    components: dict[str, dict[str, Any]],
+) -> Path | None:
+    if not _frame_has_compiled_scenes(frame):
+        return None
+
+    prebuilt_entry = _local_prebuilt_entry(target_slug, target_dir, components)
+    missing_components = [
+        component_name
+        for component_name in ("quickjs", "lgpio")
+        if not prebuilt_entry.path_for(component_name)
+    ]
+    if missing_components:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail=(
+                "Missing local prebuilt components required to compile packaged scenes: "
+                + ", ".join(missing_components)
+            ),
+        )
+
+    try:
+        deployer.nim_path = find_nim_v2()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail=f"Unable to locate Nim installation: {exc}",
+        )
+
+    builder = FrameBinaryBuilder(db=db, redis=redis, frame=frame, deployer=deployer, temp_dir=temp_dir)
+    scene_build_dirs = _compiled_scene_build_dirs(frame)
+
+    try:
+        source_dir = await builder.prepare_source_dir()
+        build_dir, _archive_path = await builder.prepare_build_archive(
+            source_dir=source_dir,
+            arch=target.arch,
+            build_binary=False,
+            build_all_scenes=True,
+        )
+        requested = await builder.build_requested_artifacts(
+            source_dir=source_dir,
+            build_dir=build_dir,
+            target=target,
+            prebuilt_entry=prebuilt_entry,
+            prebuilt_target=target_slug,
+            allow_cross_compile=True,
+            force_cross_compile=True,
+            build_binary=False,
+            build_scene_dirs=scene_build_dirs or None,
+            build_all_scenes=True,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail=f"Failed to compile packaged scenes: {exc}",
+        ) from exc
+
+    if not requested.artifacts.scenes_dir:
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Compiled scenes were requested, but no packaged scene artifacts were produced",
+        )
+    return Path(requested.artifacts.scenes_dir)
 
 
 def _validate_upload_scenes_payload(
@@ -888,6 +1147,122 @@ async def api_frame_local_binary_zip(
 
     safe_name = (frame.name or "frame").replace(" ", "_").replace("/", "_")
     filename = f"{safe_name}_{deployer.build_id}_binary.zip"
+    headers = {
+        "Content-Disposition": (
+            f'attachment; filename="{_ascii_safe(filename)}"'
+        )
+    }
+    return StreamingResponse(sender(), headers=headers, media_type="application/zip")
+
+
+@api_with_auth.post("/frames/{id:int}/download_prebuilt_package_zip")
+async def api_frame_local_prebuilt_package_zip(
+    id: int,
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    frame = db.get(Frame, id) or _not_found()
+
+    with tempfile.TemporaryDirectory() as tmp:
+        deployer = FrameDeployer(db, redis, frame, "", tmp)
+
+        try:
+            arch = await deployer.get_cpu_architecture()
+            distro = await deployer.get_distro()
+            distro_version = await deployer.get_distro_version()
+        except Exception as exc:
+            raise HTTPException(
+                status_code=HTTPStatus.BAD_GATEWAY,
+                detail=f"Unable to detect frame target for prebuilt package download: {exc}",
+            ) from exc
+
+        target_slug = resolve_prebuilt_target(distro, distro_version, arch)
+        if not target_slug:
+            raise HTTPException(
+                status_code=HTTPStatus.NOT_FOUND,
+                detail=(
+                    "No local prebuilt package matches this frame target "
+                    f"({distro} {distro_version} {arch})"
+                ),
+            )
+
+        target_dir, components = _load_local_prebuilt_target(target_slug)
+        target = TargetMetadata(arch=arch, distro=distro, version=distro_version)
+
+        package_dir = Path(tmp) / "package"
+        package_dir.mkdir(parents=True, exist_ok=True)
+        for dirname in ("drivers", "scenes", "state", "tmp"):
+            (package_dir / dirname).mkdir(parents=True, exist_ok=True)
+
+        runtime_binary = _prebuilt_component_file(
+            target_dir,
+            components,
+            "frameos",
+            default_name="frameos",
+        )
+        packaged_binary = package_dir / "frameos"
+        shutil.copy2(runtime_binary, packaged_binary)
+        os.chmod(packaged_binary, 0o755)
+
+        _copy_prebuilt_drivers(
+            frame=frame,
+            target_slug=target_slug,
+            target_dir=target_dir,
+            components=components,
+            destination_dir=package_dir / "drivers",
+        )
+
+        compiled_scenes_dir = await _build_packaged_compiled_scenes(
+            db=db,
+            redis=redis,
+            frame=frame,
+            temp_dir=tmp,
+            deployer=deployer,
+            target=target,
+            target_slug=target_slug,
+            target_dir=target_dir,
+            components=components,
+        )
+        if compiled_scenes_dir:
+            compiled_scene_libraries = sorted(compiled_scenes_dir.glob("*.so"))
+            if not compiled_scene_libraries:
+                raise HTTPException(
+                    status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                    detail="Compiled scenes were requested, but the package scenes directory was empty",
+                )
+            for library_path in compiled_scene_libraries:
+                shutil.copy2(library_path, package_dir / "scenes" / library_path.name)
+
+        frame_json = json.dumps(get_frame_json(db, frame), indent=4).encode() + b"\n"
+        scenes_json = json.dumps(get_interpreted_scenes_json(frame), indent=4).encode() + b"\n"
+        (package_dir / "frame.json").write_bytes(frame_json)
+        (package_dir / "scenes.json").write_bytes(scenes_json)
+
+        zip_path = Path(tmp) / f"frameos_{deployer.build_id}_prebuilt_package.zip"
+        with zipfile.ZipFile(
+            zip_path,
+            "w",
+            compression=zipfile.ZIP_DEFLATED,
+            strict_timestamps=False,
+        ) as zf:
+            for dirname in ("drivers", "scenes", "state", "tmp"):
+                info = zipfile.ZipInfo(f"{dirname}/")
+                info.external_attr = (0o755 << 16) | 0x10
+                zf.writestr(info, b"")
+            for root, _dirs, files in os.walk(package_dir):
+                for file in files:
+                    full = os.path.join(root, file)
+                    arc = os.path.relpath(full, package_dir)
+                    zf.write(full, arc)
+
+        async with aiofiles.open(zip_path, "rb") as fh:
+            zip_bytes = await fh.read()
+
+    async def sender():
+        yield zip_bytes
+
+    safe_name = (frame.name or "frame").replace(" ", "_").replace("/", "_")
+    filename = f"{safe_name}_{target_slug}_prebuilt_package.zip"
     headers = {
         "Content-Disposition": (
             f'attachment; filename="{_ascii_safe(filename)}"'

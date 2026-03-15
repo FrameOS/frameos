@@ -5,7 +5,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
+from app.codegen.drivers_nim import (
+    driver_compile_id,
+    driver_library_filename,
+    driver_module_name,
+    driver_module_name_from_id,
+    loadable_drivers,
+)
 from app.codegen.scene_nim import scene_library_filename, scene_module_name
+from app.drivers.drivers import Driver
 
 
 MANIFEST_VERSION = 1
@@ -40,7 +48,8 @@ APP_CORE_PATHS = (
     "frameos.nimble",
     "nim.cfg",
     "quickjs",
-    "src/drivers",
+    "src/drivers/drivers.nim",
+    "src/drivers/plugin_runtime.nim",
     "src/frameos",
     "src/frameos.nim",
     "src/system",
@@ -67,12 +76,19 @@ class SceneCompileState:
 
 
 @dataclass(frozen=True, slots=True)
+class DriverCompileState:
+    hash: str
+    library: str
+
+
+@dataclass(frozen=True, slots=True)
 class CompileManifest:
     version: int
     frameos_version: str | None
     runtime_contract_hash: str
     app_hash: str
     scene_hashes: dict[str, SceneCompileState]
+    driver_hashes: dict[str, DriverCompileState]
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -87,6 +103,13 @@ class CompileManifest:
                 }
                 for scene_id, state in self.scene_hashes.items()
             },
+            "driver_hashes": {
+                driver_id: {
+                    "hash": state.hash,
+                    "library": state.library,
+                }
+                for driver_id, state in self.driver_hashes.items()
+            },
         }
 
 
@@ -96,11 +119,13 @@ class CompilePlan:
     rebuild_app: bool
     rebuild_scene_ids: tuple[str, ...]
     reuse_scene_ids: tuple[str, ...]
+    rebuild_driver_ids: tuple[str, ...]
+    reuse_driver_ids: tuple[str, ...]
     reason: str
 
     @property
     def needs_compilation(self) -> bool:
-        return self.rebuild_app or bool(self.rebuild_scene_ids)
+        return self.rebuild_app or bool(self.rebuild_scene_ids) or bool(self.rebuild_driver_ids)
 
     @property
     def rebuild_all_scenes(self) -> bool:
@@ -109,6 +134,10 @@ class CompilePlan:
     @property
     def scene_build_dirs(self) -> list[str]:
         return [f"scene_builds/{scene_module_name(scene_id)}" for scene_id in self.rebuild_scene_ids]
+
+    @property
+    def driver_build_dirs(self) -> list[str]:
+        return [f"driver_builds/{driver_module_name_from_id(driver_id)}" for driver_id in self.rebuild_driver_ids]
 
 
 def compile_manifest_from_dict(value: Any) -> CompileManifest | None:
@@ -119,6 +148,7 @@ def compile_manifest_from_dict(value: Any) -> CompileManifest | None:
     runtime_contract_hash = value.get("runtime_contract_hash")
     app_hash = value.get("app_hash")
     scene_hashes_raw = value.get("scene_hashes")
+    driver_hashes_raw = value.get("driver_hashes") or {}
     frameos_version = value.get("frameos_version")
 
     if version != MANIFEST_VERSION:
@@ -127,7 +157,7 @@ def compile_manifest_from_dict(value: Any) -> CompileManifest | None:
         return None
     if frameos_version is not None and not isinstance(frameos_version, str):
         return None
-    if not isinstance(scene_hashes_raw, dict):
+    if not isinstance(scene_hashes_raw, dict) or not isinstance(driver_hashes_raw, dict):
         return None
 
     scene_hashes: dict[str, SceneCompileState] = {}
@@ -140,12 +170,23 @@ def compile_manifest_from_dict(value: Any) -> CompileManifest | None:
             return None
         scene_hashes[scene_id] = SceneCompileState(hash=scene_hash, library=scene_library)
 
+    driver_hashes: dict[str, DriverCompileState] = {}
+    for driver_id, driver_state in driver_hashes_raw.items():
+        if not isinstance(driver_id, str) or not isinstance(driver_state, dict):
+            return None
+        driver_hash = driver_state.get("hash")
+        driver_library = driver_state.get("library")
+        if not isinstance(driver_hash, str) or not isinstance(driver_library, str):
+            return None
+        driver_hashes[driver_id] = DriverCompileState(hash=driver_hash, library=driver_library)
+
     return CompileManifest(
         version=version,
         frameos_version=frameos_version,
         runtime_contract_hash=runtime_contract_hash,
         app_hash=app_hash,
         scene_hashes=scene_hashes,
+        driver_hashes=driver_hashes,
     )
 
 
@@ -153,6 +194,7 @@ def build_compile_manifest(
     *,
     source_dir: str,
     scenes: list[dict] | None,
+    drivers: dict[str, Driver] | None = None,
     frameos_version: str | None,
 ) -> CompileManifest:
     source_root = Path(source_dir).resolve()
@@ -195,12 +237,30 @@ def build_compile_manifest(
         )
         scene_hashes[scene_id] = SceneCompileState(hash=scene_hash, library=library)
 
+    driver_hashes: dict[str, DriverCompileState] = {}
+    for driver in loadable_drivers(drivers or {}):
+        driver_id = driver_compile_id(driver)
+        module_name = driver_module_name(driver)
+        library = driver_library_filename(driver)
+        driver_hash = _hash_entries(
+            [
+                ("runtime_contract", runtime_contract_hash.encode("utf-8")),
+                (
+                    f"driver_plugin/{module_name}.nim",
+                    source_root / "src" / "driver_plugins" / f"plugin_{module_name}.nim",
+                ),
+                *_driver_source_entries(source_root, driver),
+            ],
+        )
+        driver_hashes[driver_id] = DriverCompileState(hash=driver_hash, library=library)
+
     return CompileManifest(
         version=MANIFEST_VERSION,
         frameos_version=frameos_version,
         runtime_contract_hash=runtime_contract_hash,
         app_hash=app_hash,
         scene_hashes=scene_hashes,
+        driver_hashes=driver_hashes,
     )
 
 
@@ -211,12 +271,15 @@ def plan_compile_actions(
     current: CompileManifest,
 ) -> CompilePlan:
     current_scene_ids = tuple(sorted(current.scene_hashes))
+    current_driver_ids = tuple(sorted(current.driver_hashes))
     if mode == FULL_DEPLOY:
         return CompilePlan(
             mode=mode,
             rebuild_app=True,
             rebuild_scene_ids=current_scene_ids,
             reuse_scene_ids=(),
+            rebuild_driver_ids=current_driver_ids,
+            reuse_driver_ids=(),
             reason="Full deploy requested",
         )
 
@@ -226,6 +289,8 @@ def plan_compile_actions(
             rebuild_app=True,
             rebuild_scene_ids=current_scene_ids,
             reuse_scene_ids=(),
+            rebuild_driver_ids=current_driver_ids,
+            reuse_driver_ids=(),
             reason="No previous compile manifest available",
         )
 
@@ -235,6 +300,8 @@ def plan_compile_actions(
             rebuild_app=True,
             rebuild_scene_ids=current_scene_ids,
             reuse_scene_ids=(),
+            rebuild_driver_ids=current_driver_ids,
+            reuse_driver_ids=(),
             reason="FrameOS version changed",
         )
 
@@ -244,6 +311,8 @@ def plan_compile_actions(
             rebuild_app=True,
             rebuild_scene_ids=current_scene_ids,
             reuse_scene_ids=(),
+            rebuild_driver_ids=current_driver_ids,
+            reuse_driver_ids=(),
             reason="Compiled scene runtime contract changed",
         )
 
@@ -256,13 +325,30 @@ def plan_compile_actions(
     reuse_scene_ids = tuple(
         scene_id for scene_id in current_scene_ids if scene_id not in rebuild_scene_ids
     )
+    rebuild_driver_ids = tuple(
+        driver_id
+        for driver_id in current_driver_ids
+        if previous.driver_hashes.get(driver_id) != current.driver_hashes[driver_id]
+    )
+    reuse_driver_ids = tuple(
+        driver_id for driver_id in current_driver_ids if driver_id not in rebuild_driver_ids
+    )
 
-    if rebuild_app and rebuild_scene_ids:
-        reason = "App inputs and compiled scene inputs changed"
+    if rebuild_app and (rebuild_scene_ids or rebuild_driver_ids):
+        changed_components: list[str] = []
+        if rebuild_scene_ids:
+            changed_components.append("compiled scene inputs")
+        if rebuild_driver_ids:
+            changed_components.append("driver inputs")
+        reason = "App inputs and " + " and ".join(changed_components) + " changed"
     elif rebuild_app:
         reason = "App inputs changed"
+    elif rebuild_scene_ids and rebuild_driver_ids:
+        reason = "Compiled scene inputs and driver inputs changed"
     elif rebuild_scene_ids:
         reason = "Compiled scene inputs changed"
+    elif rebuild_driver_ids:
+        reason = "Driver inputs changed"
     else:
         reason = "Compile inputs unchanged"
 
@@ -271,6 +357,8 @@ def plan_compile_actions(
         rebuild_app=rebuild_app,
         rebuild_scene_ids=rebuild_scene_ids,
         reuse_scene_ids=reuse_scene_ids,
+        rebuild_driver_ids=rebuild_driver_ids,
+        reuse_driver_ids=reuse_driver_ids,
         reason=reason,
     )
 
@@ -351,6 +439,25 @@ def _scene_app_entries(source_root: Path, scene: dict) -> list[tuple[str, Path]]
     for app_id in sorted(_scene_app_ids(scene)):
         app_path = source_root / "src" / "apps" / Path(app_id)
         entries.append((f"scene_app/{app_id}", app_path))
+    return entries
+
+
+def _driver_source_entries(source_root: Path, driver: Driver) -> list[tuple[str, Path]]:
+    if not driver.import_path:
+        return []
+
+    entries: list[tuple[str, Path]] = []
+    driver_id = driver_compile_id(driver)
+    driver_root_name = Path(driver.import_path).parts[0]
+    entries.append((f"driver_source/{driver_id}", source_root / "src" / "drivers" / driver_root_name))
+
+    if driver.name == "inkyHyperPixel2r":
+        entries.append((f"driver_support/{driver_id}/frameBuffer", source_root / "src" / "drivers" / "frameBuffer"))
+    if driver.name in {"gpioButton", "waveshare"}:
+        entries.append((f"driver_support/{driver_id}/lib", source_root / "src" / "lib"))
+    if driver.name == "waveshare":
+        entries.append((f"driver_support/{driver_id}/generated", source_root / "src" / "drivers" / "waveshare" / "driver.nim"))
+
     return entries
 
 

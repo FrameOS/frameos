@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from app.codegen.scene_nim import write_scene_nim
+from app.codegen.scene_nim import write_scene_nim, write_scene_plugin_nim
 
 
 def test_write_scene_nim_uses_module_name_for_compiled_child_scene_imports(
@@ -39,3 +39,12 @@ def test_write_scene_nim_uses_module_name_for_compiled_child_scene_imports(
         "import scenes/scene_03fe741a_75cf_4653_b77b_d2b42b7e0a94 "
         "as scene_03fe741a_75cf_4653_b77b_d2b42b7e0a94"
     ) in source
+
+
+def test_write_scene_plugin_nim_exports_runtime_channel_binder():
+    source = write_scene_plugin_nim({"id": "demo-scene", "name": "Demo"})
+
+    assert "import frameos/channels" in source
+    assert "proc bindCompiledPluginRuntimeChannels*(hooks: ptr CompiledRuntimeHooks)" in source
+    assert "bindCompiledRuntimeHooks(hooks)" in source
+    assert 'id: "demo-scene".SceneId' in source

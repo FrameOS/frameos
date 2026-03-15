@@ -98,13 +98,31 @@ def _scene_compile_start_lines(frame: Frame, scene_ids: tuple[str, ...]) -> list
     return [f"{icon} Compiling scene: {_format_scene_label(frame, scene_id)}" for scene_id in scene_ids]
 
 
+def _short_driver_id(driver_id: str) -> str:
+    normalized = str(driver_id or "driver")
+    if len(normalized) <= 20:
+        return normalized
+    return f"{normalized[:16]}..."
+
+
+def _format_driver_list(driver_ids: tuple[str, ...], *, limit: int = 3) -> str:
+    formatted = [_short_driver_id(driver_id) for driver_id in driver_ids]
+    if len(formatted) <= limit:
+        return ", ".join(formatted)
+    return f"{', '.join(formatted[:limit])}, +{len(formatted) - limit} more"
+
+
+def _driver_compile_start_lines(driver_ids: tuple[str, ...]) -> list[str]:
+    return [f"{icon} Compiling driver: {_short_driver_id(driver_id)}" for driver_id in driver_ids]
+
+
 def _compile_plan_log_lines(frame: Frame, compile_plan: Any, compile_manifest: Any) -> list[str]:
     lines = [f"{icon} Compile plan: {compile_plan.reason}"]
 
     if compile_plan.rebuild_app:
         lines.append(f"{icon} FrameOS compile: requested")
     else:
-        app_reason = "app inputs unchanged" if compile_plan.rebuild_scene_ids else "inputs unchanged"
+        app_reason = "app inputs unchanged" if (compile_plan.rebuild_scene_ids or compile_plan.rebuild_driver_ids) else "inputs unchanged"
         lines.append(f"{icon} FrameOS compile: skipped ({app_reason})")
 
     total_compiled_scenes = len(compile_manifest.scene_hashes)
@@ -121,6 +139,21 @@ def _compile_plan_log_lines(frame: Frame, compile_plan: Any, compile_manifest: A
         reused = len(compile_plan.reuse_scene_ids)
         reuse_suffix = f"; reusing {reused}" if reused else ""
         lines.append(f"{icon} Scene compile: skipped (compiled scene inputs unchanged{reuse_suffix})")
+
+    total_compiled_drivers = len(compile_manifest.driver_hashes)
+    if total_compiled_drivers == 0:
+        lines.append(f"{icon} Driver compile: skipped (no compiled drivers configured)")
+    elif compile_plan.rebuild_driver_ids:
+        reused = len(compile_plan.reuse_driver_ids)
+        reuse_suffix = f", reusing {reused}" if reused else ""
+        lines.append(
+            f"{icon} Driver compile: requested ({len(compile_plan.rebuild_driver_ids)} changed{reuse_suffix})"
+        )
+        lines.append(f"{icon} Drivers to compile: {_format_driver_list(compile_plan.rebuild_driver_ids)}")
+    else:
+        reused = len(compile_plan.reuse_driver_ids)
+        reuse_suffix = f"; reusing {reused}" if reused else ""
+        lines.append(f"{icon} Driver compile: skipped (driver inputs unchanged{reuse_suffix})")
 
     return lines
 
@@ -163,6 +196,8 @@ async def _adjust_compile_plan_for_missing_remote_artifacts(
     rebuild_app = compile_plan.rebuild_app
     rebuild_scene_ids = list(compile_plan.rebuild_scene_ids)
     reuse_scene_ids = list(compile_plan.reuse_scene_ids)
+    rebuild_driver_ids = list(compile_plan.rebuild_driver_ids)
+    reuse_driver_ids = list(compile_plan.reuse_driver_ids)
     extra_reasons: list[str] = []
 
     if not rebuild_app and not await _remote_file_exists(deployer, "/srv/frameos/current/frameos"):
@@ -187,6 +222,24 @@ async def _adjust_compile_plan_for_missing_remote_artifacts(
             f"{len(missing_scene_ids)} cached {_pluralize(len(missing_scene_ids), 'scene')} missing on device"
         )
 
+    missing_driver_ids: list[str] = []
+    for driver_id in compile_plan.reuse_driver_ids:
+        driver_state = compile_manifest.driver_hashes.get(driver_id)
+        if driver_state is None:
+            continue
+        if not await _remote_file_exists(
+            deployer,
+            f"/srv/frameos/current/drivers/{driver_state.library}",
+        ):
+            missing_driver_ids.append(driver_id)
+
+    if missing_driver_ids:
+        rebuild_driver_ids.extend(missing_driver_ids)
+        reuse_driver_ids = [driver_id for driver_id in reuse_driver_ids if driver_id not in missing_driver_ids]
+        extra_reasons.append(
+            f"{len(missing_driver_ids)} cached {_pluralize(len(missing_driver_ids), 'driver')} missing on device"
+        )
+
     if not extra_reasons:
         return compile_plan
 
@@ -195,6 +248,8 @@ async def _adjust_compile_plan_for_missing_remote_artifacts(
         rebuild_app=rebuild_app,
         rebuild_scene_ids=tuple(rebuild_scene_ids),
         reuse_scene_ids=tuple(reuse_scene_ids),
+        rebuild_driver_ids=tuple(rebuild_driver_ids),
+        reuse_driver_ids=tuple(reuse_driver_ids),
         reason=f"{compile_plan.reason}; {'; '.join(extra_reasons)}",
     )
 
@@ -622,6 +677,17 @@ def _local_compiled_scene_artifact_dir(build_dir: str) -> str | None:
     return None
 
 
+def _local_compiled_driver_artifact_dir(build_dir: str) -> str | None:
+    drivers_dir = os.path.join(build_dir, "drivers")
+    if not os.path.isdir(drivers_dir):
+        return None
+    with os.scandir(drivers_dir) as entries:
+        for entry in entries:
+            if entry.is_file() and entry.name.endswith(".so"):
+                return drivers_dir
+    return None
+
+
 async def _upload_remote_build_archive(
     deployer: FrameDeployer,
     archive_path: str,
@@ -658,6 +724,23 @@ async def _upload_local_compiled_scenes(
         local_scenes_dir,
         remote_scenes_dir,
         "compiled scenes",
+        build_id,
+        replace=False,
+    )
+
+
+async def _upload_local_compiled_drivers(
+    deployer: FrameDeployer,
+    local_drivers_dir: str,
+    remote_drivers_dir: str,
+    build_id: str,
+) -> None:
+    await deployer.log("stdout", f"{icon} Uploading compiled drivers")
+    await _upload_directory_tree(
+        deployer,
+        local_drivers_dir,
+        remote_drivers_dir,
+        "compiled drivers",
         build_id,
         replace=False,
     )
@@ -703,6 +786,40 @@ async def _build_remote_compiled_scenes(
     await deployer.log("stdout", f"{icon} Scene compile: completed on device")
 
 
+async def _build_remote_compiled_drivers(
+    deployer: FrameDeployer,
+    remote_build_root: str,
+    driver_build_dirs: list[str] | None = None,
+    driver_ids: tuple[str, ...] | None = None,
+) -> None:
+    driver_count = len(driver_build_dirs or [])
+    if driver_count:
+        await deployer.log(
+            "stdout",
+            f"{icon} Driver compile: building {driver_count} {_pluralize(driver_count, 'driver')} on device",
+        )
+    else:
+        await deployer.log("stdout", f"{icon} Driver compile: building drivers on device")
+    if driver_ids:
+        for line in _driver_compile_start_lines(tuple(driver_ids)):
+            await deployer.log("stdout", line)
+    if not driver_build_dirs:
+        await deployer.log("stdout", f"{icon} Driver compile: completed on device")
+        return
+    quoted_dirs = " ".join(shlex.quote(driver_dir) for driver_dir in driver_build_dirs)
+    await deployer.exec_command(
+        "bash -lc "
+        + shlex.quote(
+            f"cd {remote_build_root} && mkdir -p drivers && "
+            f"for dir in {quoted_dirs}; do make --no-print-directory -C \"$dir\" || exit $?; done"
+        ),
+        timeout=3600,
+        log_command=False,
+        log_output=False,
+    )
+    await deployer.log("stdout", f"{icon} Driver compile: completed on device")
+
+
 async def _publish_remote_compiled_scenes(
     deployer: FrameDeployer,
     remote_build_root: str,
@@ -717,6 +834,23 @@ async def _publish_remote_compiled_scenes(
         await deployer.exec_command(f"mkdir -p {quoted_scenes_dir}")
     await deployer.exec_command(
         f"if [ -d {quoted_build_scenes_dir} ]; then cp -R {quoted_build_scenes_dir}/. {quoted_scenes_dir}/; fi"
+    )
+
+
+async def _publish_remote_compiled_drivers(
+    deployer: FrameDeployer,
+    remote_build_root: str,
+    remote_drivers_dir: str,
+    replace: bool = True,
+) -> None:
+    quoted_build_drivers_dir = shlex.quote(f"{remote_build_root}/drivers")
+    quoted_drivers_dir = shlex.quote(remote_drivers_dir)
+    if replace:
+        await deployer.exec_command(f"rm -rf {quoted_drivers_dir} && mkdir -p {quoted_drivers_dir}")
+    else:
+        await deployer.exec_command(f"mkdir -p {quoted_drivers_dir}")
+    await deployer.exec_command(
+        f"if [ -d {quoted_build_drivers_dir} ]; then cp -R {quoted_build_drivers_dir}/. {quoted_drivers_dir}/; fi"
     )
 
 
@@ -764,6 +898,18 @@ async def _copy_current_compiled_scenes_to_release(
         await deployer.exec_command(
             f"cp {source_path} {target_path}"
         )
+
+
+async def _copy_current_compiled_drivers_to_release(
+    deployer: FrameDeployer,
+    release_drivers_path: str,
+    libraries: list[str],
+) -> None:
+    await deployer.exec_command(f"mkdir -p {shlex.quote(release_drivers_path)}")
+    for library in libraries:
+        source_path = shlex.quote(f"/srv/frameos/current/drivers/{library}")
+        target_path = shlex.quote(f"{release_drivers_path}/{library}")
+        await deployer.exec_command(f"cp {source_path} {target_path}")
 
 async def deploy_frame(id: int, redis: Redis):
     await redis.enqueue_job("deploy_frame", id=id)
@@ -864,6 +1010,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             compile_manifest = build_compile_manifest(
                 source_dir=source_dir,
                 scenes=frame.scenes,
+                drivers=drivers,
                 frameos_version=current_frameos_version(),
             )
             previous_manifest = compile_manifest_from_dict(
@@ -888,7 +1035,9 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             cross_compiled = False
             cross_compiled_binary: str | None = None
             local_compiled_scenes_dir: str | None = None
+            local_compiled_drivers_dir: str | None = None
             remote_scene_build_required = False
+            remote_driver_build_required = False
 
             if compile_plan.needs_compilation:
                 self.nim_path = find_nim_v2()
@@ -897,6 +1046,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                     arch=target.arch,
                     build_binary=compile_plan.rebuild_app,
                     build_scene_ids=compile_plan.rebuild_scene_ids,
+                    build_driver_ids=compile_plan.rebuild_driver_ids,
                     build_all_scenes=compile_plan.rebuild_all_scenes,
                 )
                 requested = await builder.build_requested_artifacts(
@@ -910,12 +1060,16 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                     build_binary=compile_plan.rebuild_app,
                     build_scene_ids=compile_plan.rebuild_scene_ids,
                     build_scene_dirs=compile_plan.scene_build_dirs or None,
+                    build_driver_ids=compile_plan.rebuild_driver_ids,
+                    build_driver_dirs=compile_plan.driver_build_dirs or None,
                     build_all_scenes=bool(compile_plan.rebuild_scene_ids) and compile_plan.rebuild_all_scenes,
                 )
                 cross_compiled = requested.cross_compiled
                 cross_compiled_binary = requested.artifacts.binary_path
                 local_compiled_scenes_dir = requested.artifacts.scenes_dir
+                local_compiled_drivers_dir = requested.artifacts.drivers_dir
                 remote_scene_build_required = bool(compile_plan.rebuild_scene_ids) and local_compiled_scenes_dir is None
+                remote_driver_build_required = bool(compile_plan.rebuild_driver_ids) and local_compiled_drivers_dir is None
 
                 if compile_plan.rebuild_app:
                     if cross_compiled:
@@ -928,6 +1082,12 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                         await self.log("stdout", f"{icon} Scene compile: completed locally")
                     elif remote_scene_build_required:
                         await self.log("stdout", f"{icon} Scene compile: queued for on-device build")
+
+                if compile_plan.rebuild_driver_ids:
+                    if local_compiled_drivers_dir:
+                        await self.log("stdout", f"{icon} Driver compile: completed locally")
+                    elif remote_driver_build_required:
+                        await self.log("stdout", f"{icon} Driver compile: queued for on-device build")
 
                 if low_memory and not cross_compiled:
                     await self.log("stdout", f"{icon} Low memory device, stopping FrameOS for compilation")
@@ -966,9 +1126,10 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             await self.exec_command(f"mkdir -p /srv/frameos/releases/release_{build_id}")
             release_frameos_path = f"/srv/frameos/releases/release_{build_id}/frameos"
             release_scenes_path = f"/srv/frameos/releases/release_{build_id}/scenes"
+            release_drivers_path = f"/srv/frameos/releases/release_{build_id}/drivers"
             remote_build_root: str | None = None
 
-            if archive_path and (not cross_compiled or remote_scene_build_required):
+            if archive_path and (not cross_compiled or remote_scene_build_required or remote_driver_build_required):
                 remote_build_root = await _upload_remote_build_archive(self, archive_path, build_id)
 
             if compile_plan.rebuild_app and cross_compiled:
@@ -991,6 +1152,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             await self._upload_scenes_json(f"/srv/frameos/releases/release_{build_id}/scenes.json.gz", gzip=True)
             await self._upload_frame_json(f"/srv/frameos/releases/release_{build_id}/frame.json")
             await self.exec_command(f"mkdir -p {shlex.quote(release_scenes_path)}")
+            await self.exec_command(f"mkdir -p {shlex.quote(release_drivers_path)}")
             reused_scene_libraries = [
                 compile_manifest.scene_hashes[scene_id].library for scene_id in compile_plan.reuse_scene_ids
             ]
@@ -1019,6 +1181,37 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                     self,
                     remote_build_root,
                     release_scenes_path,
+                    replace=False,
+                )
+
+            reused_driver_libraries = [
+                compile_manifest.driver_hashes[driver_id].library for driver_id in compile_plan.reuse_driver_ids
+            ]
+            if reused_driver_libraries:
+                await _copy_current_compiled_drivers_to_release(
+                    self,
+                    release_drivers_path,
+                    reused_driver_libraries,
+                )
+
+            if compile_plan.rebuild_driver_ids and local_compiled_drivers_dir:
+                await _upload_local_compiled_drivers(
+                    self,
+                    local_compiled_drivers_dir,
+                    release_drivers_path,
+                    build_id,
+                )
+            elif compile_plan.rebuild_driver_ids and remote_driver_build_required and remote_build_root:
+                await _build_remote_compiled_drivers(
+                    self,
+                    remote_build_root,
+                    driver_build_dirs=compile_plan.driver_build_dirs,
+                    driver_ids=compile_plan.rebuild_driver_ids,
+                )
+                await _publish_remote_compiled_drivers(
+                    self,
+                    remote_build_root,
+                    release_drivers_path,
                     replace=False,
                 )
 

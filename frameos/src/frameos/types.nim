@@ -312,6 +312,32 @@ type
   FrameOSDriver* = ref object of RootObj
     name*: string
 
+  SendCurrentEventHook* = proc(event: string, payload: JsonNode) {.cdecl, gcsafe.}
+  SendSceneEventHook* = proc(scene: Option[SceneId], event: string, payload: JsonNode) {.cdecl, gcsafe.}
+  LogEventHook* = proc(event: JsonNode) {.cdecl, gcsafe.}
+  TriggerServerRenderHook* = proc() {.cdecl, gcsafe.}
+
+  CompiledRuntimeHooks* = object
+    sendCurrentEvent*: SendCurrentEventHook
+    sendSceneEvent*: SendSceneEventHook
+    logEvent*: LogEventHook
+    triggerServerRender*: TriggerServerRenderHook
+
+  ExportedDriver* = ref object of RootObj
+    canRender*: bool
+    canPng*: bool
+    canTurnOnOff*: bool
+    init*: proc (frameOS: FrameOS): FrameOSDriver
+    render*: proc (self: FrameOSDriver, image: Image): void
+    toPng*: proc (self: FrameOSDriver, rotate: int): string
+    turnOn*: proc (self: FrameOSDriver): void
+    turnOff*: proc (self: FrameOSDriver): void
+
+  CompiledDriverPlugin* = ref object of RootObj
+    id*: string
+    variant*: string
+    driver*: ExportedDriver
+
   Scheduler* = ref object
     frameConfig*: FrameConfig
     logger*: Logger

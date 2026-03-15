@@ -73,5 +73,21 @@ export const frameSettingsLogic = kea<frameSettingsLogicType>([
         },
       },
     ],
+    prebuiltPackageZip: [
+      false,
+      {
+        downloadPrebuiltPackageZip: async () => {
+          const response = await apiFetch(`/api/frames/${props.frameId}/download_prebuilt_package_zip`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/zip' },
+          })
+          if (!response.ok) {
+            throw new Error('Failed to download prebuilt package .zip')
+          }
+          downloadZip(await response.blob(), `frame_${props.frameId}_prebuilt_package.zip`)
+          return false
+        },
+      },
+    ],
   })),
 ])

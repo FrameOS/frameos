@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from app.drivers.drivers import Driver
 from app.tasks.compile_manifest import (
     FULL_DEPLOY,
     SMART_DEPLOY,
@@ -41,6 +42,9 @@ def create_source_tree(tmp_path: Path) -> Path:
     write(source_dir / "src" / "frameos" / "utils" / "time.nim", "discard\n")
     write(source_dir / "src" / "system" / "scenes.nim", "discard\n")
     write(source_dir / "src" / "drivers" / "drivers.nim", "discard\n")
+    write(source_dir / "src" / "drivers" / "plugin_runtime.nim", "discard\n")
+    write(source_dir / "src" / "drivers" / "frameBuffer" / "frameBuffer.nim", "discard\n")
+    write(source_dir / "src" / "driver_plugins" / "plugin_frameBuffer.nim", "discard\n")
     write(source_dir / "tools" / "prepare_assets.py", "print('assets')\n")
     write(source_dir / "assets" / "compiled" / "web" / "control.html", "<html></html>\n")
     write(source_dir / "frontend" / "package.json", "{}\n")
@@ -62,6 +66,17 @@ def create_source_tree(tmp_path: Path) -> Path:
     return source_dir
 
 
+def runtime_drivers() -> dict[str, Driver]:
+    return {
+        "frameBuffer": Driver(
+            name="frameBuffer",
+            import_path="frameBuffer/frameBuffer",
+            can_render=True,
+            can_turn_on_off=True,
+        )
+    }
+
+
 def test_build_compile_manifest_hashes_app_and_compiled_scenes_independently(tmp_path: Path):
     source_dir = create_source_tree(tmp_path)
     scenes = [
@@ -77,10 +92,18 @@ def test_build_compile_manifest_hashes_app_and_compiled_scenes_independently(tmp
         },
     ]
 
-    before = build_compile_manifest(source_dir=str(source_dir), scenes=scenes, frameos_version="1.0.0")
+    before = build_compile_manifest(
+        source_dir=str(source_dir),
+        scenes=scenes,
+        frameos_version="1.0.0",
+    )
 
     write(source_dir / "src" / "apps" / "nodeapp_demo_node" / "app.nim", "proc get*(): int = 3\n")
-    after = build_compile_manifest(source_dir=str(source_dir), scenes=scenes, frameos_version="1.0.0")
+    after = build_compile_manifest(
+        source_dir=str(source_dir),
+        scenes=scenes,
+        frameos_version="1.0.0",
+    )
 
     assert before.app_hash == after.app_hash
     assert before.scene_hashes["demo"] == after.scene_hashes["demo"]
@@ -98,6 +121,8 @@ def test_plan_compile_actions_rebuilds_everything_when_version_changes(tmp_path:
     assert plan.rebuild_app is True
     assert plan.rebuild_scene_ids == ("demo",)
     assert plan.reuse_scene_ids == ()
+    assert plan.rebuild_driver_ids == ()
+    assert plan.reuse_driver_ids == ()
     assert plan.reason == "FrameOS version changed"
 
 
@@ -113,6 +138,7 @@ def test_plan_compile_actions_rebuilds_everything_when_runtime_contract_changes(
 
     assert plan.rebuild_app is True
     assert plan.rebuild_scene_ids == ("demo",)
+    assert plan.rebuild_driver_ids == ()
     assert plan.reason == "Compiled scene runtime contract changed"
 
 
@@ -140,6 +166,8 @@ def test_plan_compile_actions_rebuilds_only_changed_scene_when_possible(tmp_path
     assert plan.rebuild_app is False
     assert plan.rebuild_scene_ids == ("demo",)
     assert plan.reuse_scene_ids == ("custom",)
+    assert plan.rebuild_driver_ids == ()
+    assert plan.reuse_driver_ids == ()
     assert plan.scene_build_dirs == ["scene_builds/demo"]
 
 
@@ -152,6 +180,7 @@ def test_plan_compile_actions_supports_forced_full_deploy(tmp_path: Path):
 
     assert plan.rebuild_app is True
     assert plan.rebuild_scene_ids == ("demo",)
+    assert plan.rebuild_driver_ids == ()
     assert plan.reason == "Full deploy requested"
 
 
@@ -183,3 +212,32 @@ def test_compile_manifest_uses_module_name_for_library_and_build_dir(tmp_path: P
 
     assert manifest.scene_hashes[scene_id].library == "03fe741a_75cf_4653_b77b_d2b42b7e0a94.so"
     assert plan.scene_build_dirs == ["scene_builds/03fe741a_75cf_4653_b77b_d2b42b7e0a94"]
+
+
+def test_plan_compile_actions_tracks_driver_changes_independently(tmp_path: Path):
+    source_dir = create_source_tree(tmp_path)
+    drivers = runtime_drivers()
+
+    previous = build_compile_manifest(
+        source_dir=str(source_dir),
+        scenes=[],
+        drivers=drivers,
+        frameos_version="1.0.0",
+    )
+
+    write(source_dir / "src" / "driver_plugins" / "plugin_frameBuffer.nim", "let changed = true\n")
+    current = build_compile_manifest(
+        source_dir=str(source_dir),
+        scenes=[],
+        drivers=drivers,
+        frameos_version="1.0.0",
+    )
+
+    plan = plan_compile_actions(mode=SMART_DEPLOY, previous=previous, current=current)
+
+    assert plan.rebuild_app is False
+    assert plan.rebuild_scene_ids == ()
+    assert plan.reuse_scene_ids == ()
+    assert plan.rebuild_driver_ids == ("frameBuffer",)
+    assert plan.reuse_driver_ids == ()
+    assert plan.driver_build_dirs == ["driver_builds/frameBuffer"]

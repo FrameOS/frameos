@@ -26,13 +26,20 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
-import boto3
-from botocore.exceptions import ClientError
+try:
+    import boto3
+    from botocore.exceptions import ClientError
+except ImportError:  # pragma: no cover - optional dependency for upload/download flows
+    boto3 = None
+
+    class ClientError(Exception):
+        pass
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BUILD_DIR = REPO_ROOT / "build" / "prebuilt-deps"
 LOCAL_MANIFEST_PATH = REPO_ROOT / "tools" / "prebuilt-deps" / "manifest.json"
+CROSS_SCRIPT = REPO_ROOT / "backend" / "bin" / "cross"
 
 
 def load_env_file() -> Optional[Path]:
@@ -77,11 +84,7 @@ load_env_file()
 DEFAULT_BUCKET = os.environ.get("R2_BUCKET", "frameos-archive")
 DEFAULT_PREFIX = os.environ.get("R2_PREFIX", "prebuilt-deps")
 
-# Keep the target matrix in sync with tools/prebuilt-deps/build.sh
-DEFAULT_TARGETS = [
-    "debian-bullseye-armhf",
-    "debian-bullseye-arm64",
-    "debian-bullseye-amd64",
+FALLBACK_TARGETS = [
     "debian-bookworm-armhf",
     "debian-bookworm-arm64",
     "debian-bookworm-amd64",
@@ -93,12 +96,31 @@ DEFAULT_TARGETS = [
     "ubuntu-24.04-arm64",
     "ubuntu-24.04-amd64",
 ]
-COMPONENTS = ["nim", "quickjs", "lgpio"]
+LEGACY_COMPONENTS = ("nim", "quickjs", "lgpio")
 TARGET_PLATFORMS = {
     "armhf": "linux/arm/v7",
     "arm64": "linux/arm64",
     "amd64": "linux/amd64",
 }
+
+
+def load_default_targets() -> List[str]:
+    if not CROSS_SCRIPT.is_file():
+        return list(FALLBACK_TARGETS)
+    try:
+        result = subprocess.run(
+            ["python3", str(CROSS_SCRIPT), "list"],
+            cwd=REPO_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return list(FALLBACK_TARGETS)
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()] or list(FALLBACK_TARGETS)
+
+
+DEFAULT_TARGETS = load_default_targets()
 
 
 @dataclass
@@ -232,6 +254,10 @@ def target_distro_release_arch(target: str) -> Tuple[str, str, str]:
 
 
 def s3_client():
+    if boto3 is None:
+        print("boto3 must be installed to use the R2 sync helper", file=sys.stderr)
+        sys.exit(1)
+
     access_key = os.environ.get("R2_ACCESS_KEY_ID")
     secret_key = os.environ.get("R2_SECRET_ACCESS_KEY")
     if not access_key or not secret_key:
@@ -257,37 +283,75 @@ def s3_client():
 
 
 def package_identifier(metadata: Dict[str, str]) -> str:
-    return (
-        f"{metadata['target']}/"
-        f"nim-{metadata['nim_version']}_"
-        f"quickjs-{metadata['quickjs_version']}_"
-        f"lgpio-{metadata['lgpio_version']}"
+    versions = versions_from_metadata(metadata)
+    if not versions:
+        return metadata["target"]
+    suffix = "_".join(
+        f"{component}-{version}"
+        for component, version in sorted(versions.items())
     )
+    return f"{metadata['target']}/{suffix}"
 
 
 def versions_from_metadata(metadata: Dict[str, str]) -> Dict[str, str]:
     return {
-        "nim": metadata.get("nim_version", ""),
-        "quickjs": metadata.get("quickjs_version", ""),
-        "lgpio": metadata.get("lgpio_version", ""),
+        component: spec["version"]
+        for component, spec in component_specs_from_metadata(metadata).items()
+        if spec.get("version")
+    }
+
+
+def component_specs_from_metadata(metadata: Dict[str, str]) -> Dict[str, Dict[str, str]]:
+    raw_components = metadata.get("components")
+    if isinstance(raw_components, dict):
+        specs: Dict[str, Dict[str, str]] = {}
+        for component, raw_spec in raw_components.items():
+            if isinstance(raw_spec, dict):
+                version = str(raw_spec.get("version") or "")
+                if not version:
+                    continue
+                directory = str(raw_spec.get("directory") or f"{component}-{version}")
+                artifact = str(raw_spec.get("artifact") or "")
+                driver_id = str(raw_spec.get("driver_id") or "")
+            elif isinstance(raw_spec, str):
+                version = raw_spec
+                directory = f"{component}-{version}"
+                artifact = ""
+                driver_id = ""
+            else:
+                continue
+            specs[component] = {
+                "version": version,
+                "directory": directory,
+                "artifact": artifact,
+                "driver_id": driver_id,
+            }
+        if specs:
+            return specs
+
+    return {
+        component: {
+            "version": str(metadata.get(f"{component}_version") or ""),
+            "directory": f"{component}-{metadata.get(f'{component}_version')}",
+            "artifact": "",
+            "driver_id": "",
+        }
+        for component in LEGACY_COMPONENTS
+        if metadata.get(f"{component}_version")
     }
 
 
 def metadata_matches_entry(metadata: Dict[str, str], entry: ManifestEntry) -> bool:
     if metadata.get("target") != entry.target:
         return False
-    for key, version in entry.versions.items():
-        if metadata.get(f"{key}_version") != version:
-            return False
-    return True
+    return versions_from_metadata(metadata) == entry.versions
 
 
-def component_version(metadata: Dict[str, str], component: str) -> Optional[str]:
-    return metadata.get(f"{component}_version")
-
-
-def component_dir(target_dir: Path, component: str, version: str) -> Path:
-    return target_dir / f"{component}-{version}"
+def component_dir(target_dir: Path, component: str, metadata: Dict[str, str]) -> Optional[Path]:
+    component_spec = component_specs_from_metadata(metadata).get(component)
+    if not component_spec:
+        return None
+    return target_dir / component_spec["directory"]
 
 
 def component_object_key(prefix: str, target: str, component: str, version: str) -> str:
@@ -297,16 +361,27 @@ def component_object_key(prefix: str, target: str, component: str, version: str)
 def write_local_metadata(entry: ManifestEntry, target_dir: Path) -> None:
     distro, release, arch = target_distro_release_arch(entry.target)
     platform = TARGET_PLATFORMS.get(arch, "")
+    components = {
+        component: {
+            "version": version,
+            "directory": f"{component}-{version}",
+        }
+        for component, version in sorted(entry.versions.items())
+        if version
+    }
     payload = {
         "target": entry.target,
         "distribution": distro,
         "release": release,
         "arch": arch,
         "platform": platform,
-        "nim_version": entry.versions.get("nim", ""),
-        "quickjs_version": entry.versions.get("quickjs", ""),
-        "lgpio_version": entry.versions.get("lgpio", ""),
+        "components": components,
     }
+    for component in LEGACY_COMPONENTS:
+        if component in entry.versions:
+            payload[f"{component}_version"] = entry.versions.get(component, "")
+    if "frameos" in entry.versions:
+        payload["frameos_version"] = entry.versions.get("frameos", "")
     target_dir.mkdir(parents=True, exist_ok=True)
     target_file = target_dir / "metadata.json"
     target_file.write_text(json.dumps(payload, indent=2) + "\n")
@@ -433,21 +508,20 @@ def prepare_upload_target(
         print(f"Skipping {target_dir.name}: metadata.json missing", file=sys.stderr)
         return None
 
+    component_specs = component_specs_from_metadata(metadata)
+    if not component_specs:
+        print(f"Skipping {target_dir.name}: no components found in metadata", file=sys.stderr)
+        return None
+
     component_keys: Dict[str, str] = {}
     component_md5sums: Dict[str, str] = {}
     components_to_upload = []
-    for component in COMPONENTS:
-        version = component_version(metadata, component)
-        if not version:
+    for component, spec in sorted(component_specs.items()):
+        version = spec["version"]
+        comp_dir = component_dir(target_dir, component, metadata)
+        if not comp_dir or not comp_dir.exists():
             print(
-                f"Skipping {target_dir.name}: {component}_version missing in metadata",
-                file=sys.stderr,
-            )
-            return None
-        comp_dir = component_dir(target_dir, component, version)
-        if not comp_dir.exists():
-            print(
-                f"Skipping {target_dir.name}: directory {comp_dir.name} not found",
+                f"Skipping {target_dir.name}: directory for component {component} not found",
                 file=sys.stderr,
             )
             return None

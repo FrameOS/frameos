@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.drivers.drivers import Driver
 from app.tasks._frame_deployer import FrameDeployer
 
 
@@ -117,6 +118,51 @@ async def test_make_local_modifications_writes_scene_plugin_wrappers(
     assert (source_dir / "src" / "scenes" / "scenes.nim").read_text(encoding="utf-8") == "registry\n"
 
 
+@pytest.mark.asyncio
+async def test_make_local_modifications_writes_driver_plugin_wrappers(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    source_dir = tmp_path / "frameos"
+    (source_dir / "src" / "apps").mkdir(parents=True)
+    (source_dir / "src" / "drivers").mkdir(parents=True)
+    (source_dir / "src" / "scenes").mkdir(parents=True)
+
+    monkeypatch.setattr("app.tasks._frame_deployer.get_apps_from_scenes", lambda _scenes: {})
+    monkeypatch.setattr("app.tasks._frame_deployer.write_apps_nim", lambda _root: "apps\n")
+    monkeypatch.setattr("app.tasks._frame_deployer.write_scene_nim", lambda _frame, _scene: "scene\n")
+    monkeypatch.setattr("app.tasks._frame_deployer.write_scene_plugin_nim", lambda _scene, is_default=False: "plugin\n")
+    monkeypatch.setattr("app.tasks._frame_deployer.write_scenes_nim", lambda _frame: "registry\n")
+    monkeypatch.setattr("app.tasks._frame_deployer.write_drivers_nim", lambda _drivers: "drivers\n")
+    monkeypatch.setattr("app.tasks._frame_deployer.write_driver_plugin_nim", lambda _driver: "driver plugin\n")
+    monkeypatch.setattr(
+        "app.tasks._frame_deployer.drivers_for_frame",
+        lambda _frame: {
+            "frameBuffer": Driver(
+                name="frameBuffer",
+                import_path="frameBuffer/frameBuffer",
+                can_render=True,
+                can_turn_on_off=True,
+            )
+        },
+    )
+
+    frame = SimpleNamespace(id=1, scenes=[])
+    deployer = FrameDeployer(
+        db=None,
+        redis=None,
+        frame=frame,
+        nim_path="/usr/bin/nim",
+        temp_dir=str(tmp_path / "work"),
+    )
+    deployer.log = lambda *_args, **_kwargs: None  # type: ignore[method-assign]
+
+    await deployer.make_local_modifications(str(source_dir))
+
+    assert (source_dir / "src" / "drivers" / "drivers.nim").read_text(encoding="utf-8") == "drivers\n"
+    assert (source_dir / "src" / "driver_plugins" / "plugin_frameBuffer.nim").read_text(encoding="utf-8") == "driver plugin\n"
+
+
 async def _run_create_local_build_archive(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[str, list[str]]:
     source_dir = tmp_path / "frameos"
     temp_dir = tmp_path / "temp"
@@ -176,6 +222,58 @@ async def test_create_local_build_archive_runs_assets_task_without_env_switch(
     assert "cd " in commands[0]
     assert commands[0].endswith("nimble assets -y && nimble setup")
     assert "src/frameos.nim" in commands[1]
+
+
+@pytest.mark.asyncio
+async def test_create_local_build_archive_copies_vendor_from_source_tree(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    source_dir = tmp_path / "frameos"
+    temp_dir = tmp_path / "temp"
+    source_dir.mkdir()
+    temp_dir.mkdir()
+    (source_dir / "vendor" / "inkyPython" / "devices").mkdir(parents=True)
+    (source_dir / "vendor" / "inkyPython" / "devices" / "demo.py").write_text("print('demo')\n", encoding="utf-8")
+    (source_dir / "vendor" / "inkyPython" / "env").mkdir(parents=True)
+    (source_dir / "vendor" / "inkyPython" / "__pycache__").mkdir(parents=True)
+
+    nimbase = tmp_path / "nimbase.h"
+    nimbase.write_text("/* nimbase */\n", encoding="utf-8")
+
+    monkeypatch.setattr("app.tasks._frame_deployer.find_nimbase_file", lambda _nim_path: str(nimbase))
+
+    deployer = FrameDeployer(
+        db=None,
+        redis=None,
+        frame=SimpleNamespace(id=1, debug=False),
+        nim_path="/usr/bin/nim",
+        temp_dir=str(temp_dir),
+    )
+    deployer.log = lambda *_args, **_kwargs: None  # type: ignore[method-assign]
+
+    build_dir = temp_dir / f"build_{deployer.build_id}"
+    build_dir.mkdir()
+
+    await deployer.create_local_build_archive(
+        str(build_dir),
+        str(source_dir),
+        "arm64",
+        build_binary=False,
+        build_all_scenes=False,
+        drivers_override={
+            "inkyPython": Driver(
+                name="inkyPython",
+                import_path="inkyPython/inkyPython",
+                vendor_folder="inkyPython",
+                can_render=True,
+            )
+        },
+    )
+
+    assert (build_dir / "vendor" / "inkyPython" / "devices" / "demo.py").exists()
+    assert not (build_dir / "vendor" / "inkyPython" / "env").exists()
+    assert not (build_dir / "vendor" / "inkyPython" / "__pycache__").exists()
 
 
 @pytest.mark.asyncio
@@ -248,6 +346,70 @@ async def test_create_local_build_archive_emits_compiled_scene_targets(
     assert "EXECUTABLE = ../../scenes/demo.so" in scene_makefile
     assert "-shared" in scene_makefile
     assert "quickjs/libquickjs.a" not in scene_makefile
+
+
+@pytest.mark.asyncio
+async def test_create_local_build_archive_emits_compiled_driver_targets(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    source_dir = tmp_path / "frameos"
+    temp_dir = tmp_path / "temp"
+    source_dir.mkdir()
+    temp_dir.mkdir()
+    (source_dir / "tools").mkdir()
+    (source_dir / "src" / "driver_plugins").mkdir(parents=True)
+    (source_dir / "src" / "driver_plugins" / "plugin_frameBuffer.nim").write_text("discard\n", encoding="utf-8")
+    (source_dir / "tools" / "nimc.Makefile").write_text(
+        "EXECUTABLE = frameos\nall: $(EXECUTABLE)\nLIBS =\nCFLAGS =\nclean:\n\trm -f *.o $(EXECUTABLE)\n",
+        encoding="utf-8",
+    )
+
+    nimbase = tmp_path / "nimbase.h"
+    nimbase.write_text("/* nimbase */\n", encoding="utf-8")
+
+    async def fake_exec_local_command(_db, _redis, _frame, cmd, **_kwargs):
+        build_dir_arg = cmd.split("--nimcache:", 1)[1].split(" ", 1)[0]
+        out_arg = cmd.split("--out:", 1)[1].split(" ", 1)[0]
+        Path(build_dir_arg, "compile_plugin_frameBuffer.sh").write_text(
+            "cc -c foo.c -o foo.o -fPIC -Wall\n"
+            f"cc foo.o -shared -o {out_arg} -ldl\n",
+            encoding="utf-8",
+        )
+        return 0, "", ""
+
+    async def fake_log(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr("app.tasks._frame_deployer.exec_local_command", fake_exec_local_command)
+    monkeypatch.setattr("app.tasks._frame_deployer.find_nimbase_file", lambda _nim_path: str(nimbase))
+    monkeypatch.setattr("app.tasks._frame_deployer.drivers_for_frame", lambda _frame: {})
+
+    deployer = FrameDeployer(
+        db=None,
+        redis=None,
+        frame=SimpleNamespace(id=1, debug=False),
+        nim_path="/usr/bin/nim",
+        temp_dir=str(temp_dir),
+    )
+    deployer.log = fake_log  # type: ignore[method-assign]
+    build_dir = temp_dir / f"build_{deployer.build_id}"
+    build_dir.mkdir()
+
+    await deployer.create_local_build_archive(
+        str(build_dir),
+        str(source_dir),
+        "arm64",
+        build_binary=False,
+        build_driver_ids=("frameBuffer",),
+        build_all_scenes=False,
+    )
+
+    driver_makefile = (build_dir / "driver_builds" / "frameBuffer" / "Makefile").read_text(encoding="utf-8")
+
+    assert "EXECUTABLE = ../../drivers/frameBuffer.so" in driver_makefile
+    assert "-shared" in driver_makefile
+    assert "quickjs/libquickjs.a" not in driver_makefile
 
 
 @pytest.mark.asyncio
