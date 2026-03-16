@@ -17,7 +17,9 @@ proc setConfigDefaults*(config: var FrameConfig) =
   if config.httpsProxy.port == 0: config.httpsProxy.port = 8443
   if config.frameAccess == "": config.frameAccess = "private"
   if config.name == "": config.name = config.frameHost
-  if config.timeZone == "": config.timeZone = detectSystemTimeZone()
+  if config.timeZone == "":
+    initTimeZone()
+    config.timeZone = detectSystemTimeZone()
 
 proc loadSchedule*(data: JsonNode): FrameSchedule =
   result = FrameSchedule(events: @[])
