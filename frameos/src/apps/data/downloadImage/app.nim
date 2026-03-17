@@ -13,22 +13,30 @@ type
   App* = ref object of AppRoot
     appConfig*: AppConfig
 
+proc error*(self: App, context: ExecutionContext, message: string): Image =
+  self.logError(message)
+  result = renderError(
+    if context.hasImage: context.image.width else: self.frameConfig.renderWidth(),
+    if context.hasImage: context.image.height else: self.frameConfig.renderHeight(),
+    message,
+  )
+
 proc get*(self: App, context: ExecutionContext): Image =
   try:
     let url = self.appConfig.url
+    if self.appConfig.metadataStateKey == "":
+      return downloadImage(url)
+
     let (image, imageData) = downloadImageWithData(url)
-    if self.appConfig.metadataStateKey != "":
-      var metadata = %*{
-        "url": url,
-        "width": image.width,
-        "height": image.height
-      }
-      let exifMetadata = getExifMetadataFromData(imageData)
-      if exifMetadata.isSome():
-        metadata["exif"] = exifMetadata.get()
-      self.scene.state[self.appConfig.metadataStateKey] = metadata
+    var metadata = %*{
+      "url": url,
+      "width": image.width,
+      "height": image.height
+    }
+    let exifMetadata = getExifMetadataFromData(imageData)
+    if exifMetadata.isSome():
+      metadata["exif"] = exifMetadata.get()
+    self.scene.state[self.appConfig.metadataStateKey] = metadata
     return image
-  except:
-    self.logError "An error occurred while downloading the image."
-    return renderError(if context.hasImage: context.image.width else: self.frameConfig.renderWidth(),
-        if context.hasImage: context.image.height else: self.frameConfig.renderHeight(), "An error occurred while downloading the image.")
+  except CatchableError as e:
+    return self.error(context, "An error occurred while downloading the image: " & e.msg)

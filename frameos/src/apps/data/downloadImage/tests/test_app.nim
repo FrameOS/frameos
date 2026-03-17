@@ -1,4 +1,4 @@
-import std/[json, unittest]
+import std/[base64, json, strformat, unittest]
 import pixie
 
 import ../app
@@ -23,6 +23,11 @@ proc makeApp(scene: FrameScene, frameConfig: FrameConfig, metadataStateKey = "me
     appConfig: AppConfig(url: "not-a-valid-url", metadataStateKey: metadataStateKey)
   )
 
+proc pngDataUrl(width = 2, height = 3): string =
+  let image = newImage(width, height)
+  let png = image.encodeImage(PngFormat)
+  result = &"data:image/png;base64,{png.encode}"
+
 suite "data/downloadImage app":
   test "invalid URL returns error image with context dimensions and does not write metadata":
     let logs = LogStore(items: @[])
@@ -45,3 +50,39 @@ suite "data/downloadImage app":
 
     check outputImage.width == 4
     check outputImage.height == 7
+
+  test "data URL without metadata keeps old success path":
+    let logs = LogStore(items: @[])
+    let scene = FrameScene(state: %*{}, logger: newLogger(logs))
+    let app = App(
+      scene: scene,
+      frameConfig: makeFrameConfig(),
+      appConfig: AppConfig(url: pngDataUrl(), metadataStateKey: "")
+    )
+
+    let outputImage = app.get(ExecutionContext(hasImage: false))
+
+    check outputImage.width == 2
+    check outputImage.height == 3
+    check scene.state.kind == JObject
+    check scene.state.len == 0
+    check logs.items.len == 0
+
+  test "data URL with metadata stores dimensions":
+    let logs = LogStore(items: @[])
+    let scene = FrameScene(state: %*{}, logger: newLogger(logs))
+    let url = pngDataUrl()
+    let app = App(
+      scene: scene,
+      frameConfig: makeFrameConfig(),
+      appConfig: AppConfig(url: url, metadataStateKey: "meta")
+    )
+
+    let outputImage = app.get(ExecutionContext(hasImage: false))
+
+    check outputImage.width == 2
+    check outputImage.height == 3
+    check scene.state["meta"]["url"].getStr() == url
+    check scene.state["meta"]["width"].getInt() == 2
+    check scene.state["meta"]["height"].getInt() == 3
+    check logs.items.len == 0

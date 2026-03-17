@@ -107,7 +107,7 @@ proc readImageWithFallback*(path: string): Image =
       return converted.get()
   return readImage(path)
 
-proc decodeDataUrl*(dataUrl: string): Image =
+proc decodeDataUrlData*(dataUrl: string): string =
   if not dataUrl.startsWith("data:"):
     raise newException(ValueError, "Invalid data URL.")
   let commaIndex = dataUrl.find(',')
@@ -122,22 +122,33 @@ proc decodeDataUrl*(dataUrl: string): Image =
       dataBody.decode
     else:
       decodeUrl(dataBody)
-  return decodeImageWithFallback(decodedData)
+  return decodedData
+
+proc decodeDataUrl*(dataUrl: string): Image =
+  return decodeImageWithFallback(decodeDataUrlData(dataUrl))
 
 proc downloadImage*(url: string): Image =
   if url.startsWith("data:"):
     return decodeDataUrl(url)
-  let client = newHttpClient(timeout = 30000)
+  var client = newHttpClient(timeout = 30000)
   try:
-    let content = client.getContent(url)
-    result = decodeImageWithFallback(content)
+    let response = client.request(url, httpMethod = HttpGet)
+    if response.code != Http200:
+      raise newException(Exception, "Error downloading image: " & $response.status)
+    result = decodeImageWithFallback(response.body)
   finally:
     client.close()
 
 proc downloadImageWithData*(url: string): tuple[image: Image, data: string] =
-  let client = newHttpClient(timeout = 30000)
+  if url.startsWith("data:"):
+    let content = decodeDataUrlData(url)
+    return (decodeImageWithFallback(content), content)
+  var client = newHttpClient(timeout = 30000)
   try:
-    let content = client.getContent(url)
+    let response = client.request(url, httpMethod = HttpGet)
+    if response.code != Http200:
+      raise newException(Exception, "Error downloading image: " & $response.status)
+    let content = response.body
     result = (decodeImageWithFallback(content), content)
   finally:
     client.close()
