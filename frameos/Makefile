@@ -1,7 +1,7 @@
 .PHONY: run build build-app build-scenes test test-shard debug cross-list clean-scenes
 .PHONY: cross-frameos-% cross-drivers-%
 
-CROSS_OUT ?= build/cross
+CROSS_OUT ?= build/frameos
 COMPILED_SCENES_OUTPUT_DIR ?= scenes
 COMPILED_SCENES_JOBS ?=
 

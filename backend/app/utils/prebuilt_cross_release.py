@@ -5,7 +5,6 @@ import asyncio
 import json
 import os
 import signal
-import shutil
 import subprocess
 import sys
 import time
@@ -13,7 +12,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
-from app.utils.prebuilt_cross import split_version_base, write_artifact_manifest
+from app.utils.frameos_artifacts import resolve_versioned_artifact
+from app.utils.prebuilt_cross import file_md5sum, split_version_base, write_artifact_manifest
 
 
 DEFAULT_REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -195,27 +195,6 @@ async def _run_prefixed_command(
         raise RuntimeError(f"{prefix} failed with exit code {return_code}: {command}")
 
 
-def _dir_size_bytes(root: Path, *, exclude_names: Sequence[str] = ()) -> int:
-    if not root.exists():
-        return 0
-    excluded = set(exclude_names)
-    total = 0
-    for path in root.rglob("*"):
-        if not path.is_file():
-            continue
-        if path.name in excluded:
-            continue
-        total += path.stat().st_size
-    return total
-
-
-def _file_count(root: Path, *, exclude_names: Sequence[str] = ()) -> int:
-    if not root.exists():
-        return 0
-    excluded = set(exclude_names)
-    return sum(1 for path in root.rglob("*") if path.is_file() and path.name not in excluded)
-
-
 def _format_size(size: int) -> str:
     units = ["B", "KiB", "MiB", "GiB", "TiB"]
     value = float(size)
@@ -228,17 +207,99 @@ def _format_size(size: int) -> str:
     return f"{value:.1f} TiB"
 
 
-def _collect_target_metrics(target: str, target_dir: Path, duration_seconds: float) -> TargetBuildMetrics:
-    frameos_binary = target_dir / "frameos"
+def _selected_target_artifacts(
+    target_dir: Path,
+    *,
+    release_version: str,
+) -> tuple[Path, ...]:
+    artifacts: list[Path] = []
+
+    metadata_path = target_dir / "metadata.json"
+    if metadata_path.is_file():
+        artifacts.append(metadata_path)
+
+    runtime_path = resolve_versioned_artifact(
+        target_dir / "runtime",
+        stem="frameos",
+        suffix="",
+        requested_version=release_version,
+        exact=True,
+    )
+    if runtime_path is None:
+        legacy_runtime_path = target_dir / "frameos"
+        if legacy_runtime_path.is_file():
+            runtime_path = legacy_runtime_path
+    if runtime_path is not None:
+        artifacts.append(runtime_path)
+
     drivers_dir = target_dir / "drivers"
+    if drivers_dir.is_dir():
+        for component_dir in sorted(child for child in drivers_dir.iterdir() if child.is_dir()):
+            selected_driver = resolve_versioned_artifact(
+                component_dir,
+                stem=component_dir.name,
+                suffix=".so",
+                requested_version=release_version,
+            )
+            if selected_driver is not None:
+                artifacts.append(selected_driver)
+
+    return tuple(artifacts)
+
+
+def _write_selected_target_manifest(
+    target_dir: Path,
+    *,
+    output: Path,
+    release_version: str,
+    source_version: str,
+    target: str,
+) -> tuple[Path, ...]:
+    selected_artifacts = _selected_target_artifacts(target_dir, release_version=release_version)
+    payload = {
+        "frameos_version": release_version,
+        "source_version": source_version,
+        "target": target,
+        "artifacts": [
+            {
+                "path": path.relative_to(target_dir).as_posix(),
+                "md5": file_md5sum(path),
+            }
+            for path in selected_artifacts
+        ],
+    }
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    return selected_artifacts
+
+
+def _collect_target_metrics(
+    target: str,
+    duration_seconds: float,
+    *,
+    selected_artifacts: Sequence[Path],
+    target_manifest: Path,
+) -> TargetBuildMetrics:
+    frameos_size = 0
+    drivers_size = 0
+    driver_count = 0
+    for path in selected_artifacts:
+        if path.suffix == ".so":
+            drivers_size += path.stat().st_size
+            driver_count += 1
+            continue
+        if path.name.startswith("frameos"):
+            frameos_size = path.stat().st_size
+
+    selected_size = sum(path.stat().st_size for path in selected_artifacts)
     return TargetBuildMetrics(
         target=target,
         duration_seconds=duration_seconds,
-        total_size_bytes=_dir_size_bytes(target_dir),
-        frameos_size_bytes=frameos_binary.stat().st_size if frameos_binary.is_file() else 0,
-        drivers_size_bytes=_dir_size_bytes(drivers_dir),
-        driver_count=len(sorted(drivers_dir.glob("*.so"))) if drivers_dir.is_dir() else 0,
-        artifact_count=_file_count(target_dir),
+        total_size_bytes=selected_size + target_manifest.stat().st_size,
+        frameos_size_bytes=frameos_size,
+        drivers_size_bytes=drivers_size,
+        driver_count=driver_count,
+        artifact_count=len(selected_artifacts) + 1,
     )
 
 
@@ -249,7 +310,7 @@ def _write_release_metrics(
     target_metrics: Sequence[TargetBuildMetrics],
     total_duration_seconds: float,
 ) -> Path:
-    metrics_path = release_dir / "build-metrics.json"
+    metrics_path = release_dir / f"build-metrics.{plan.frameos_release_version}.json"
     payload = {
         "frameos_version": plan.frameos_release_version,
         "source_version": plan.frameos_version,
@@ -258,7 +319,7 @@ def _write_release_metrics(
         "driver_jobs": plan.driver_jobs,
         "target_count": len(target_metrics),
         "total_duration_seconds": total_duration_seconds,
-        "total_size_bytes": _dir_size_bytes(release_dir, exclude_names=(metrics_path.name,)),
+        "total_size_bytes": sum(metrics.total_size_bytes for metrics in target_metrics),
         "targets": [
             {
                 "target": metrics.target,
@@ -302,9 +363,12 @@ def _target_build_commands(
         common[1],
         "build-drivers",
         *common[2:],
+        "--release-version",
+        plan.frameos_release_version,
         "--jobs",
         str(plan.driver_jobs),
     )
+    build_frameos = (*build_frameos, "--release-version", plan.frameos_release_version)
     return build_frameos, build_drivers
 
 
@@ -320,10 +384,7 @@ async def _run_target_build(
     env = os.environ.copy()
     env.setdefault("PYTHONUNBUFFERED", "1")
     target_dir = release_dir / target
-    frameos_binary = target_dir / "frameos"
-    target_manifest = target_dir / "manifest.json"
-    shutil.rmtree(target_dir / "drivers", ignore_errors=True)
-    frameos_binary.unlink(missing_ok=True)
+    target_manifest = target_dir / f"manifest.{plan.frameos_release_version}.json"
     target_manifest.unlink(missing_ok=True)
 
     frameos_command, drivers_command = _target_build_commands(
@@ -349,13 +410,19 @@ async def _run_target_build(
         cwd=repo_root,
         env=env,
     )
-    write_artifact_manifest(
+    selected_artifacts = _write_selected_target_manifest(
         target_dir,
-        frameos_version=plan.frameos_release_version,
+        output=target_manifest,
+        release_version=plan.frameos_release_version,
         source_version=plan.frameos_version,
         target=target,
     )
-    metrics = _collect_target_metrics(target, target_dir, time.perf_counter() - started)
+    metrics = _collect_target_metrics(
+        target,
+        time.perf_counter() - started,
+        selected_artifacts=selected_artifacts,
+        target_manifest=target_manifest,
+    )
 
     print(
         f"[{target}] metrics: duration={metrics.duration_seconds:.1f}s "
@@ -380,7 +447,7 @@ async def run_release_build(
     if not cross_script.is_file():
         raise RuntimeError(f"Expected cross script at {cross_script}")
 
-    release_dir = repo_root / "build" / "prebuilt-cross" / plan.frameos_release_version
+    release_dir = repo_root / "build" / "frameos"
     release_dir.mkdir(parents=True, exist_ok=True)
     started = time.perf_counter()
 
@@ -408,6 +475,7 @@ async def run_release_build(
 
     write_artifact_manifest(
         release_dir,
+        output=release_dir / f"manifest.{plan.frameos_release_version}.json",
         frameos_version=plan.frameos_release_version,
         source_version=plan.frameos_version,
     )
@@ -424,12 +492,12 @@ async def run_release_build(
         metrics_path=metrics_path,
         target_metrics=ordered_target_metrics,
         total_duration_seconds=total_duration_seconds,
-        total_size_bytes=_dir_size_bytes(release_dir, exclude_names=(metrics_path.name,)),
+        total_size_bytes=sum(metrics.total_size_bytes for metrics in ordered_target_metrics),
     )
 
 
 def parse_args(argv: Sequence[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Parallel prebuilt-cross release builder")
+    parser = argparse.ArgumentParser(description="Parallel FrameOS binary release builder")
     parser.add_argument("frameos_version", help="FrameOS version or release to stamp into the build")
     parser.add_argument("targets", nargs="*", help="Optional target slugs to build; defaults to all known targets")
     parser.add_argument(
@@ -475,7 +543,7 @@ def main(argv: Sequence[str], *, repo_root: Path = DEFAULT_REPO_ROOT) -> int:
         raise SystemExit(str(exc)) from exc
 
     print(
-        "Building prebuilt-cross release "
+        "Building FrameOS binary release "
         f"{plan.frameos_release_version} from {plan.frameos_version} "
         f"for {len(plan.targets)} target(s) "
         f"(target-jobs={plan.target_jobs}, driver-jobs={plan.driver_jobs}, jobs={plan.jobs})",

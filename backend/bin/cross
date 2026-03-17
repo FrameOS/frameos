@@ -22,6 +22,14 @@ if str(REPO_ROOT) not in sys.path:
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
+from app.utils.compiled_plugin_contract import COMPILED_PLUGIN_ABI_VERSION
+from app.utils.frameos_artifacts import (
+    normalize_release_version,
+    resolve_versioned_artifact,
+    versioned_artifact_name,
+)
+from app.utils.prebuilt_cross import read_frameos_version
+
 
 @dataclass(frozen=True)
 class TargetDefinition:
@@ -62,6 +70,7 @@ TARGETS: tuple[TargetDefinition, ...] = (
 )
 
 TARGET_MAP = {target.slug: target for target in TARGETS}
+ARTIFACT_INDEX_VERSION = 1
 
 
 @dataclass
@@ -195,6 +204,171 @@ def buildable_driver_rows() -> list[tuple[str, str, str]]:
     ]
 
 
+def _resolve_release_version(frameos_root: Path, requested_version: str | None = None) -> str:
+    if requested_version:
+        return normalize_release_version(requested_version)
+
+    repo_root = frameos_root.resolve().parent
+    detected = read_frameos_version(repo_root, field="base")
+    if detected:
+        return normalize_release_version(detected)
+    raise SystemExit(
+        "Unable to determine the FrameOS release version. Pass --release-version explicitly or provide versions.json."
+    )
+
+
+def _runtime_component_dir(target_dir: Path) -> Path:
+    return target_dir / "runtime"
+
+
+def _runtime_manifest_path(target_dir: Path) -> Path:
+    return _runtime_component_dir(target_dir) / "manifest.json"
+
+
+def _driver_component_dir(target_dir: Path, driver_id: str) -> Path:
+    from app.codegen.drivers_nim import driver_module_name_from_id
+
+    return target_dir / "drivers" / driver_module_name_from_id(driver_id)
+
+
+def _driver_manifest_path(target_dir: Path, driver_id: str) -> Path:
+    return _driver_component_dir(target_dir, driver_id) / "manifest.json"
+
+
+def _json_file(path: Path, default: dict[str, Any] | None = None) -> dict[str, Any]:
+    if not path.is_file():
+        return dict(default or {})
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return dict(default or {})
+    if isinstance(payload, dict):
+        return payload
+    return dict(default or {})
+
+
+def _write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
+def _driver_component_name(driver_id: str) -> str:
+    from app.codegen.drivers_nim import driver_module_name_from_id
+
+    return f"driver_{driver_module_name_from_id(driver_id)}"
+
+
+def _driver_basename(driver_id: str) -> str:
+    from app.codegen.drivers_nim import driver_module_name_from_id
+
+    return driver_module_name_from_id(driver_id)
+
+
+def _target_components_metadata(target_dir: Path) -> dict[str, Any]:
+    metadata = _json_file(target_dir / "metadata.json")
+    components = metadata.get("components")
+    if isinstance(components, dict):
+        return dict(components)
+    return {}
+
+
+def _write_runtime_manifest(target_dir: Path, *, release_version: str, artifact_name: str) -> None:
+    manifest_path = _runtime_manifest_path(target_dir)
+    payload = _json_file(
+        manifest_path,
+        default={
+            "schema_version": ARTIFACT_INDEX_VERSION,
+            "kind": "runtime",
+            "basename": "frameos",
+            "entries": [],
+        },
+    )
+    entries = [
+        entry
+        for entry in payload.get("entries", [])
+        if not (
+            isinstance(entry, dict)
+            and entry.get("version") == release_version
+        )
+    ]
+    entries.append(
+        {
+            "version": release_version,
+            "artifact": artifact_name,
+            "abi_version": COMPILED_PLUGIN_ABI_VERSION,
+        }
+    )
+    entries.sort(key=lambda entry: tuple(int(part) for part in str(entry["version"]).split(".")))
+    payload["entries"] = entries
+    _write_json(manifest_path, payload)
+
+
+def _read_driver_manifest(target_dir: Path, driver_id: str) -> dict[str, Any]:
+    return _json_file(
+        _driver_manifest_path(target_dir, driver_id),
+        default={
+            "schema_version": ARTIFACT_INDEX_VERSION,
+            "kind": "driver",
+            "driver_id": driver_id,
+            "basename": _driver_basename(driver_id),
+            "abi_version": COMPILED_PLUGIN_ABI_VERSION,
+            "entries": [],
+        },
+    )
+
+
+def _write_driver_manifest(target_dir: Path, driver_id: str, payload: dict[str, Any]) -> None:
+    _write_json(_driver_manifest_path(target_dir, driver_id), payload)
+
+
+def _reusable_driver_entry(
+    manifest: dict[str, Any],
+    *,
+    source_hash: str,
+    abi_version: int,
+) -> dict[str, Any] | None:
+    for entry in manifest.get("entries", []):
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("source_hash") != source_hash:
+            continue
+        if int(entry.get("abi_version") or 0) != abi_version:
+            continue
+        return entry
+    return None
+
+
+def _upsert_driver_manifest_entry(
+    target_dir: Path,
+    *,
+    driver_id: str,
+    release_version: str,
+    artifact_name: str,
+    source_hash: str,
+) -> None:
+    payload = _read_driver_manifest(target_dir, driver_id)
+    entries = [
+        entry
+        for entry in payload.get("entries", [])
+        if not (
+            isinstance(entry, dict)
+            and entry.get("version") == release_version
+        )
+    ]
+    entries.append(
+        {
+            "version": release_version,
+            "artifact": artifact_name,
+            "abi_version": COMPILED_PLUGIN_ABI_VERSION,
+            "source_hash": source_hash,
+        }
+    )
+    entries.sort(key=lambda entry: tuple(int(part) for part in str(entry["version"]).split(".")))
+    payload["entries"] = entries
+    payload["abi_version"] = COMPILED_PLUGIN_ABI_VERSION
+    _write_driver_manifest(target_dir, driver_id, payload)
+
+
 def show_drivers(*, output_format: str) -> str:
     rows = buildable_driver_rows()
     if output_format == "id":
@@ -250,7 +424,17 @@ def local_prebuilt_entry(target_slug: str, components: dict[str, str]) -> Any | 
     )
 
 
-def write_target_metadata(target_dir: Path, target: TargetDefinition) -> None:
+def write_target_metadata(
+    target_dir: Path,
+    target: TargetDefinition,
+    *,
+    components: dict[str, Any] | None = None,
+) -> None:
+    existing = _json_file(target_dir / "metadata.json")
+    merged_components = _target_components_metadata(target_dir)
+    if components:
+        merged_components.update(components)
+
     metadata = {
         "slug": target.slug,
         "target": target.slug,
@@ -261,10 +445,12 @@ def write_target_metadata(target_dir: Path, target: TargetDefinition) -> None:
         "version": target.version,
         "platform": target.platform,
         "image": target.image,
+        "components": merged_components,
     }
-    with (target_dir / "metadata.json").open("w", encoding="utf-8") as fh:
-        json.dump(metadata, fh, indent=2)
-        fh.write("\n")
+    for key, value in existing.items():
+        if key not in metadata and key != "components":
+            metadata[key] = value
+    _write_json(target_dir / "metadata.json", metadata)
 
 
 def _console_logger(slug: str):
@@ -372,6 +558,7 @@ async def build_frameos_runtime(
     frameos_root: Path,
     artifacts_dir: Path,
     *,
+    release_version: str,
     local_prebuilt_components: dict[str, str],
 ) -> Path:
     from backend.app.tasks.binary_builder import create_build_folder  # type: ignore  # noqa: E402
@@ -417,10 +604,24 @@ async def build_frameos_runtime(
 
         target_dir = artifacts_dir / slug
         target_dir.mkdir(parents=True, exist_ok=True)
-        destination = target_dir / "frameos"
+        runtime_dir = _runtime_component_dir(target_dir)
+        runtime_dir.mkdir(parents=True, exist_ok=True)
+        artifact_name = versioned_artifact_name("frameos", release_version, "")
+        destination = runtime_dir / artifact_name
         shutil.copy2(requested.artifacts.binary_path, destination)
         os.chmod(destination, 0o755)
-        write_target_metadata(target_dir, target)
+        _write_runtime_manifest(target_dir, release_version=release_version, artifact_name=artifact_name)
+        write_target_metadata(
+            target_dir,
+            target,
+            components={
+                "frameos": {
+                    "kind": "versioned_runtime",
+                    "directory": "runtime",
+                    "basename": "frameos",
+                }
+            },
+        )
         print(f"Built generic runtime {slug} -> {destination}")
         return destination
 
@@ -494,6 +695,7 @@ async def _build_driver_batch(
     frameos_root: Path,
     artifacts_dir: Path,
     prebuilt_entry: Any | None,
+    release_version: str,
     batch_driver_ids: tuple[str, ...],
     batch_drivers: dict[str, Any],
 ) -> tuple[str, ...]:
@@ -501,11 +703,10 @@ async def _build_driver_batch(
         driver_library_filename_from_id,
         driver_module_name_from_id,
     )
+    from app.tasks.compile_manifest import build_compile_manifest
     from backend.app.tasks.binary_builder import create_build_folder  # type: ignore  # noqa: E402
 
     target_dir = artifacts_dir / slug
-    drivers_output_dir = target_dir / "drivers"
-    drivers_output_dir.mkdir(parents=True, exist_ok=True)
 
     with tempfile.TemporaryDirectory(prefix=f"frameos-drivers-{slug}-") as tmp:
         frame = generic_frame_stub()
@@ -517,17 +718,46 @@ async def _build_driver_batch(
         )
         source_dir = deployer.create_local_source_folder(tmp, source_root=str(frameos_root))
         await deployer.make_local_modifications(source_dir, drivers_override=batch_drivers)
+
+        compile_manifest = build_compile_manifest(
+            source_dir=source_dir,
+            scenes=[],
+            drivers=batch_drivers,
+            frameos_version=release_version,
+        )
+
+        reusable_driver_ids: set[str] = set()
+        driver_source_hashes: dict[str, str] = {}
+        for driver_id in batch_driver_ids:
+            driver_state = compile_manifest.driver_hashes.get(driver_id)
+            if driver_state is None:
+                continue
+            driver_source_hashes[driver_id] = driver_state.hash
+            existing_entry = _reusable_driver_entry(
+                _read_driver_manifest(target_dir, driver_id),
+                source_hash=driver_state.hash,
+                abi_version=COMPILED_PLUGIN_ABI_VERSION,
+            )
+            if existing_entry is not None:
+                reusable_driver_ids.add(driver_id)
+
+        requested_build_driver_ids = tuple(
+            driver_id for driver_id in batch_driver_ids if driver_id not in reusable_driver_ids
+        )
+        if not requested_build_driver_ids:
+            return ()
+
         build_dir = create_build_folder(tmp, deployer.build_id)
         build_driver_dirs = [
             f"driver_builds/{driver_module_name_from_id(driver_id)}"
-            for driver_id in batch_driver_ids
+            for driver_id in requested_build_driver_ids
         ]
         await deployer.create_local_build_archive(
             build_dir,
             source_dir,
             target.arch,
             build_binary=False,
-            build_driver_ids=batch_driver_ids,
+            build_driver_ids=requested_build_driver_ids,
             build_all_scenes=False,
             drivers_override=batch_drivers,
         )
@@ -540,21 +770,31 @@ async def _build_driver_batch(
             allow_cross_compile=True,
             force_cross_compile=True,
             build_binary=False,
-            build_driver_ids=batch_driver_ids,
+            build_driver_ids=requested_build_driver_ids,
             build_driver_dirs=build_driver_dirs,
             build_all_scenes=False,
         )
         if not requested.artifacts.drivers_dir:
             raise RuntimeError("Cross compilation completed without producing compiled driver plugins")
 
-        for driver_id in batch_driver_ids:
+        for driver_id in requested_build_driver_ids:
             library = driver_library_filename_from_id(driver_id)
             built_library = Path(requested.artifacts.drivers_dir) / library
             if not built_library.is_file():
                 raise RuntimeError(f"Expected compiled driver library is missing: {built_library}")
-            shutil.copy2(built_library, drivers_output_dir / library)
+            component_dir = _driver_component_dir(target_dir, driver_id)
+            component_dir.mkdir(parents=True, exist_ok=True)
+            artifact_name = versioned_artifact_name(_driver_basename(driver_id), release_version, ".so")
+            shutil.copy2(built_library, component_dir / artifact_name)
+            _upsert_driver_manifest_entry(
+                target_dir,
+                driver_id=driver_id,
+                release_version=release_version,
+                artifact_name=artifact_name,
+                source_hash=driver_source_hashes[driver_id],
+            )
 
-    return batch_driver_ids
+    return requested_build_driver_ids
 
 
 async def build_driver_plugins(
@@ -562,6 +802,7 @@ async def build_driver_plugins(
     frameos_root: Path,
     artifacts_dir: Path,
     *,
+    release_version: str,
     driver_ids: Sequence[str] | None,
     local_prebuilt_components: dict[str, str],
     jobs: int | None = None,
@@ -589,16 +830,35 @@ async def build_driver_plugins(
                 frameos_root=frameos_root,
                 artifacts_dir=artifacts_dir,
                 prebuilt_entry=prebuilt_entry,
+                release_version=release_version,
                 batch_driver_ids=batch_driver_ids,
                 batch_drivers=batch_drivers,
             )
 
-    await asyncio.gather(
+    built_batches = await asyncio.gather(
         *(run_batch(batch_driver_ids, batch_drivers) for batch_driver_ids, batch_drivers in batches)
     )
 
-    write_target_metadata(target_dir, target)
-    print(f"Built {len(requested_driver_ids)} driver plugins for {slug} -> {drivers_output_dir} (jobs={jobs})")
+    built_driver_ids = {driver_id for batch in built_batches for driver_id in batch}
+    write_target_metadata(
+        target_dir,
+        target,
+        components={
+            _driver_component_name(driver_id): {
+                "kind": "versioned_shared_library",
+                "directory": str(_driver_component_dir(target_dir, driver_id).relative_to(target_dir)).replace("\\", "/"),
+                "basename": _driver_basename(driver_id),
+                "driver_id": driver_id,
+            }
+            for driver_id in requested_driver_ids
+        },
+    )
+    print(
+        "Published "
+        f"{len(built_driver_ids)} new driver plugin(s) and reused "
+        f"{len(requested_driver_ids) - len(built_driver_ids)} existing plugin(s) "
+        f"for {slug} -> {drivers_output_dir} (jobs={jobs})"
+    )
     return drivers_output_dir
 
 
@@ -627,7 +887,12 @@ def parse_args(argv: Iterable[str]) -> argparse.Namespace:
     )
     build_frameos.add_argument("--target", required=True, help="Target slug (distro-version-arch)")
     build_frameos.add_argument("--frameos-root", default=str(FRAMEOS_ROOT), help="Path to the frameos source tree")
-    build_frameos.add_argument("--artifacts-dir", default="build/cross", help="Directory for compiled artifacts")
+    build_frameos.add_argument("--artifacts-dir", default="build/frameos", help="Directory for compiled artifacts")
+    build_frameos.add_argument(
+        "--release-version",
+        default=None,
+        help="FrameOS release version to publish, for example 2026.3.3. Defaults to versions.json.",
+    )
     build_frameos.add_argument(
         "--prebuilt-component",
         action="append",
@@ -641,7 +906,12 @@ def parse_args(argv: Iterable[str]) -> argparse.Namespace:
     )
     build_drivers.add_argument("--target", required=True, help="Target slug (distro-version-arch)")
     build_drivers.add_argument("--frameos-root", default=str(FRAMEOS_ROOT), help="Path to the frameos source tree")
-    build_drivers.add_argument("--artifacts-dir", default="build/cross", help="Directory for compiled artifacts")
+    build_drivers.add_argument("--artifacts-dir", default="build/frameos", help="Directory for compiled artifacts")
+    build_drivers.add_argument(
+        "--release-version",
+        default=None,
+        help="FrameOS release version to publish, for example 2026.3.3. Defaults to versions.json.",
+    )
     build_drivers.add_argument(
         "--driver",
         action="append",
@@ -693,12 +963,14 @@ def main(argv: list[str]) -> int:
 
     if args.command == "build-frameos":
         local_prebuilt_components = parse_prebuilt_components(args.prebuilt_component)
+        release_version = _resolve_release_version(frameos_root, args.release_version)
 
         async def _build_runtime() -> Path:
             return await build_frameos_runtime(
                 args.target,
                 frameos_root,
                 artifacts_dir,
+                release_version=release_version,
                 local_prebuilt_components=local_prebuilt_components,
             )
 
@@ -708,12 +980,14 @@ def main(argv: list[str]) -> int:
     if args.command == "build-drivers":
         local_prebuilt_components = parse_prebuilt_components(args.prebuilt_component)
         requested_driver_ids = tuple(args.driver or ())
+        release_version = _resolve_release_version(frameos_root, args.release_version)
 
         async def _build_drivers() -> Path:
             return await build_driver_plugins(
                 args.target,
                 frameos_root,
                 artifacts_dir,
+                release_version=release_version,
                 driver_ids=requested_driver_ids,
                 local_prebuilt_components=local_prebuilt_components,
                 jobs=args.jobs,

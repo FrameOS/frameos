@@ -1,0 +1,13 @@
+{
+  "abi_version": 1,
+  "boundary_hash": "ec02c1f440206db562ac26069ef4d682da2e26a23df5a263af078aee58c79afa",
+  "files": [
+    "backend/app/codegen/drivers_nim.py",
+    "backend/app/codegen/scene_nim.py",
+    "frameos/src/drivers/plugin_runtime.nim",
+    "frameos/src/frameos/channels.nim",
+    "frameos/src/frameos/device_setup.nim",
+    "frameos/src/frameos/scenes.nim",
+    "frameos/src/frameos/types.nim"
+  ]
+}

@@ -14,6 +14,10 @@ from app.codegen.drivers_nim import (
 )
 from app.codegen.scene_nim import scene_library_filename, scene_module_name
 from app.drivers.drivers import Driver
+from app.utils.compiled_plugin_contract import (
+    COMPILED_MODULE_BUILD_EPOCH,
+    COMPILED_PLUGIN_ABI_VERSION,
+)
 
 
 MANIFEST_VERSION = 1
@@ -201,7 +205,10 @@ def build_compile_manifest(
     temp_root = source_root.parent
 
     runtime_contract_hash = _hash_entries(
-        _entries_for_relative_paths(source_root, SCENE_RUNTIME_PATHS),
+        [
+            ("compiled_plugin_abi_version", str(COMPILED_PLUGIN_ABI_VERSION).encode("utf-8")),
+            *_entries_for_relative_paths(source_root, SCENE_RUNTIME_PATHS),
+        ],
     )
 
     app_hash = _hash_entries(
@@ -232,6 +239,7 @@ def build_compile_manifest(
                     f"scene_plugin/{module_name}.nim",
                     source_root / "src" / "scenes" / f"plugin_{module_name}.nim",
                 ),
+                ("module_build_epoch", str(COMPILED_MODULE_BUILD_EPOCH).encode("utf-8")),
                 *_scene_app_entries(source_root, scene),
             ],
         )
@@ -249,6 +257,7 @@ def build_compile_manifest(
                     f"driver_plugin/{module_name}.nim",
                     source_root / "src" / "driver_plugins" / f"plugin_{module_name}.nim",
                 ),
+                ("module_build_epoch", str(COMPILED_MODULE_BUILD_EPOCH).encode("utf-8")),
                 *_driver_source_entries(source_root, driver),
             ],
         )
@@ -294,17 +303,6 @@ def plan_compile_actions(
             reason="No previous compile manifest available",
         )
 
-    if previous.frameos_version != current.frameos_version:
-        return CompilePlan(
-            mode=mode,
-            rebuild_app=True,
-            rebuild_scene_ids=current_scene_ids,
-            reuse_scene_ids=(),
-            rebuild_driver_ids=current_driver_ids,
-            reuse_driver_ids=(),
-            reason="FrameOS version changed",
-        )
-
     if previous.runtime_contract_hash != current.runtime_contract_hash:
         return CompilePlan(
             mode=mode,
@@ -316,7 +314,8 @@ def plan_compile_actions(
             reason="Compiled scene runtime contract changed",
         )
 
-    rebuild_app = previous.app_hash != current.app_hash
+    version_changed = previous.frameos_version != current.frameos_version
+    rebuild_app = version_changed or previous.app_hash != current.app_hash
     rebuild_scene_ids = tuple(
         scene_id
         for scene_id in current_scene_ids
@@ -334,13 +333,20 @@ def plan_compile_actions(
         driver_id for driver_id in current_driver_ids if driver_id not in rebuild_driver_ids
     )
 
-    if rebuild_app and (rebuild_scene_ids or rebuild_driver_ids):
-        changed_components: list[str] = []
-        if rebuild_scene_ids:
-            changed_components.append("compiled scene inputs")
-        if rebuild_driver_ids:
-            changed_components.append("driver inputs")
-        reason = "App inputs and " + " and ".join(changed_components) + " changed"
+    if version_changed and rebuild_scene_ids and rebuild_driver_ids:
+        reason = "FrameOS version changed; compiled scene inputs and driver inputs changed"
+    elif version_changed and rebuild_scene_ids:
+        reason = "FrameOS version changed; compiled scene inputs changed"
+    elif version_changed and rebuild_driver_ids:
+        reason = "FrameOS version changed; driver inputs changed"
+    elif version_changed:
+        reason = "FrameOS version changed"
+    elif rebuild_app and rebuild_scene_ids and rebuild_driver_ids:
+        reason = "App inputs and compiled scene inputs and driver inputs changed"
+    elif rebuild_app and rebuild_scene_ids:
+        reason = "App inputs and compiled scene inputs changed"
+    elif rebuild_app and rebuild_driver_ids:
+        reason = "App inputs and driver inputs changed"
     elif rebuild_app:
         reason = "App inputs changed"
     elif rebuild_scene_ids and rebuild_driver_ids:

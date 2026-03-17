@@ -110,7 +110,7 @@ def test_build_compile_manifest_hashes_app_and_compiled_scenes_independently(tmp
     assert before.scene_hashes["custom"] != after.scene_hashes["custom"]
 
 
-def test_plan_compile_actions_rebuilds_everything_when_version_changes(tmp_path: Path):
+def test_plan_compile_actions_only_rebuilds_runtime_when_version_changes(tmp_path: Path):
     source_dir = create_source_tree(tmp_path)
     scenes = [{"id": "demo", "nodes": [], "settings": {"execution": "compiled"}}]
     current = build_compile_manifest(source_dir=str(source_dir), scenes=scenes, frameos_version="2.0.0")
@@ -119,8 +119,8 @@ def test_plan_compile_actions_rebuilds_everything_when_version_changes(tmp_path:
     plan = plan_compile_actions(mode=SMART_DEPLOY, previous=previous, current=current)
 
     assert plan.rebuild_app is True
-    assert plan.rebuild_scene_ids == ("demo",)
-    assert plan.reuse_scene_ids == ()
+    assert plan.rebuild_scene_ids == ()
+    assert plan.reuse_scene_ids == ("demo",)
     assert plan.rebuild_driver_ids == ()
     assert plan.reuse_driver_ids == ()
     assert plan.reason == "FrameOS version changed"

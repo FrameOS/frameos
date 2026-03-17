@@ -85,7 +85,7 @@ def test_target_build_commands_only_build_frameos_and_drivers(tmp_path: Path):
         driver_jobs=3,
     )
     cross_script = tmp_path / "backend" / "bin" / "cross"
-    release_dir = tmp_path / "build" / "prebuilt-cross" / plan.frameos_release_version
+    release_dir = tmp_path / "build" / "frameos"
 
     frameos_command, drivers_command = prebuilt_cross_release._target_build_commands(
         target="debian-bookworm-arm64",
@@ -106,6 +106,8 @@ def test_target_build_commands_only_build_frameos_and_drivers(tmp_path: Path):
         str(tmp_path / "frameos"),
         "--artifacts-dir",
         str(release_dir),
+        "--release-version",
+        "2026.3.3",
     )
     assert drivers_command == (
         "python3",
@@ -117,6 +119,8 @@ def test_target_build_commands_only_build_frameos_and_drivers(tmp_path: Path):
         str(tmp_path / "frameos"),
         "--artifacts-dir",
         str(release_dir),
+        "--release-version",
+        "2026.3.3",
         "--jobs",
         "3",
     )
@@ -136,11 +140,9 @@ async def test_run_target_build_writes_target_manifest_without_touching_prebuilt
         driver_jobs=3,
     )
     repo_root = tmp_path
-    release_dir = repo_root / "build" / "prebuilt-cross" / plan.frameos_release_version
+    release_dir = repo_root / "build" / "frameos"
     target_dir = release_dir / "debian-bookworm-arm64"
     target_dir.mkdir(parents=True, exist_ok=True)
-    (target_dir / "drivers").mkdir(parents=True, exist_ok=True)
-    (target_dir / "drivers" / "stale.so").write_bytes(b"old")
     cross_script = repo_root / "backend" / "bin" / "cross"
     calls: list[tuple[str, ...]] = []
 
@@ -150,13 +152,14 @@ async def test_run_target_build_writes_target_manifest_without_touching_prebuilt
         assert env["PYTHONUNBUFFERED"] == "1"
         calls.append(tuple(argv))
         if "build-frameos" in argv:
-            target_dir.mkdir(parents=True, exist_ok=True)
-            (target_dir / "frameos").write_bytes(b"frameos")
+            runtime_dir = target_dir / "runtime"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            (runtime_dir / "frameos.2026.3.3").write_bytes(b"frameos")
             (target_dir / "metadata.json").write_text("{}", encoding="utf-8")
             return
-        assert not (target_dir / "drivers" / "stale.so").exists()
-        (target_dir / "drivers").mkdir(parents=True, exist_ok=True)
-        (target_dir / "drivers" / "driver.so").write_bytes(b"driver")
+        driver_dir = target_dir / "drivers" / "driver"
+        driver_dir.mkdir(parents=True, exist_ok=True)
+        (driver_dir / "driver.2026.3.3.so").write_bytes(b"driver")
 
     monkeypatch.setattr(prebuilt_cross_release, "_run_prefixed_command", fake_run_prefixed_command)
 
@@ -169,7 +172,7 @@ async def test_run_target_build_writes_target_manifest_without_touching_prebuilt
         python_executable="python3",
     )
 
-    manifest = json.loads((target_dir / "manifest.json").read_text(encoding="utf-8"))
+    manifest = json.loads((target_dir / "manifest.2026.3.3.json").read_text(encoding="utf-8"))
     assert calls == [
         (
             "python3",
@@ -181,6 +184,8 @@ async def test_run_target_build_writes_target_manifest_without_touching_prebuilt
             str(repo_root / "frameos"),
             "--artifacts-dir",
             str(release_dir),
+            "--release-version",
+            "2026.3.3",
         ),
         (
             "python3",
@@ -192,6 +197,8 @@ async def test_run_target_build_writes_target_manifest_without_touching_prebuilt
             str(repo_root / "frameos"),
             "--artifacts-dir",
             str(release_dir),
+            "--release-version",
+            "2026.3.3",
             "--jobs",
             "3",
         ),
@@ -200,8 +207,8 @@ async def test_run_target_build_writes_target_manifest_without_touching_prebuilt
     assert manifest["source_version"] == "2026.3.3+abc123"
     assert manifest["target"] == "debian-bookworm-arm64"
     assert {artifact["path"] for artifact in manifest["artifacts"]} == {
-        "drivers/driver.so",
-        "frameos",
+        "drivers/driver/driver.2026.3.3.so",
+        "runtime/frameos.2026.3.3",
         "metadata.json",
     }
     assert metrics.target == "debian-bookworm-arm64"
@@ -209,7 +216,7 @@ async def test_run_target_build_writes_target_manifest_without_touching_prebuilt
     assert metrics.drivers_size_bytes == len(b"driver")
     assert metrics.driver_count == 1
     assert metrics.artifact_count == 4
-    assert metrics.total_size_bytes == len(b"frameos") + len(b"driver") + len("{}") + len((target_dir / "manifest.json").read_bytes())
+    assert metrics.total_size_bytes == len(b"frameos") + len(b"driver") + len("{}") + len((target_dir / "manifest.2026.3.3.json").read_bytes())
 
 
 @pytest.mark.asyncio
@@ -226,7 +233,7 @@ async def test_run_release_build_writes_metrics_file(tmp_path: Path, monkeypatch
     cross_script = repo_root / "backend" / "bin" / "cross"
     cross_script.parent.mkdir(parents=True, exist_ok=True)
     cross_script.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
-    release_dir = repo_root / "build" / "prebuilt-cross" / plan.frameos_release_version
+    release_dir = repo_root / "build" / "frameos"
 
     async def fake_run_target_build(
         *,
@@ -239,11 +246,12 @@ async def test_run_release_build_writes_metrics_file(tmp_path: Path, monkeypatch
     ) -> prebuilt_cross_release.TargetBuildMetrics:
         target_dir = release_dir / target
         target_dir.mkdir(parents=True, exist_ok=True)
-        (target_dir / "frameos").write_bytes(target.encode("utf-8"))
-        (target_dir / "drivers").mkdir(parents=True, exist_ok=True)
-        (target_dir / "drivers" / "driver.so").write_bytes(b"driver")
+        (target_dir / "runtime").mkdir(parents=True, exist_ok=True)
+        (target_dir / "runtime" / f"frameos.{plan.frameos_release_version}").write_bytes(target.encode("utf-8"))
+        (target_dir / "drivers" / "driver").mkdir(parents=True, exist_ok=True)
+        (target_dir / "drivers" / "driver" / f"driver.{plan.frameos_release_version}.so").write_bytes(b"driver")
         (target_dir / "metadata.json").write_text("{}", encoding="utf-8")
-        (target_dir / "manifest.json").write_text("{}", encoding="utf-8")
+        (target_dir / f"manifest.{plan.frameos_release_version}.json").write_text("{}", encoding="utf-8")
         return prebuilt_cross_release.TargetBuildMetrics(
             target=target,
             duration_seconds=1.25,

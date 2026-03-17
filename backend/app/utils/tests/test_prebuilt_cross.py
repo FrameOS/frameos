@@ -16,7 +16,7 @@ def test_read_frameos_version_returns_raw_and_base(tmp_path: Path):
 
 
 def test_write_artifact_manifest_lists_relative_paths_and_md5s(tmp_path: Path):
-    root = tmp_path / "prebuilt-cross" / "2026.3.3" / "debian-bookworm-arm64"
+    root = tmp_path / "build" / "frameos" / "debian-bookworm-arm64"
     drivers_dir = root / "drivers"
     drivers_dir.mkdir(parents=True, exist_ok=True)
     frameos_path = root / "frameos"

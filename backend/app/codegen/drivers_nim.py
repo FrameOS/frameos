@@ -2,6 +2,7 @@ import re
 
 from app.codegen.utils import sanitize_nim_string
 from app.drivers.drivers import Driver
+from app.utils.compiled_plugin_contract import COMPILED_PLUGIN_ABI_VERSION
 
 
 def driver_compile_id(driver: Driver) -> str:
@@ -114,6 +115,7 @@ proc setupDriver(frameConfig: FrameConfig): DriverSetupSpec =
             "  CompiledDriverPlugin(",
             f'    id: "{sanitize_nim_string(plugin_id)}",',
             f'    variant: "{sanitize_nim_string(variant)}",',
+            f"    abiVersion: {COMPILED_PLUGIN_ABI_VERSION},",
             "    driver: ExportedDriver(",
             f'      canRender: {"true" if driver.can_render else "false"},',
             f'      canPreview: {"true" if driver.can_preview else "false"},',

@@ -6,6 +6,7 @@ import re
 from app.models.frame import Frame
 from app.models.apps import get_local_frame_apps, local_apps_path
 from app.codegen.utils import sanitize_nim_string, natural_keys
+from app.utils.compiled_plugin_contract import COMPILED_PLUGIN_ABI_VERSION
 
 
 def scene_file_stem(scene_id: str) -> str:
@@ -58,6 +59,7 @@ proc getCompiledScenePlugin*(): CompiledScenePlugin {{.exportc, dynlib, cdecl.}}
     id: "{sanitize_nim_string(scene_id)}".SceneId,
     name: "{sanitize_nim_string(scene_name)}",
     isDefault: {"true" if is_default else "false"},
+    abiVersion: {COMPILED_PLUGIN_ABI_VERSION},
     scene: scene_{module_name}.exportedScene,
   )
 """

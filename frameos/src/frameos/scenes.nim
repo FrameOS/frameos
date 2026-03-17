@@ -69,6 +69,9 @@ proc loadCompiledScenePlugin(path: string): Option[CompiledScenePlugin] =
     if plugin.isNil or plugin.scene.isNil:
       echo "Warning: compiled scene plugin returned no scene: ", path
       return none(CompiledScenePlugin)
+    if plugin.abiVersion != COMPILED_PLUGIN_ABI_VERSION:
+      echo "Warning: compiled scene plugin ABI mismatch in ", path, ": expected ", COMPILED_PLUGIN_ABI_VERSION, ", got ", plugin.abiVersion
+      return none(CompiledScenePlugin)
     return some(plugin)
   except CatchableError as e:
     echo "Warning: failed to initialize compiled scene plugin ", path, ": ", e.msg

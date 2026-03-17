@@ -74,6 +74,8 @@ proc loadCompiledDriverPlugin(path: string): Option[CompiledDriverPlugin] =
     let plugin = factory()
     if plugin.isNil or plugin.driver.isNil or plugin.driver.init.isNil:
       return none(CompiledDriverPlugin)
+    if plugin.abiVersion != COMPILED_PLUGIN_ABI_VERSION:
+      return none(CompiledDriverPlugin)
     return some(plugin)
   except CatchableError:
     return none(CompiledDriverPlugin)
@@ -248,6 +250,7 @@ proc setCompiledDriverPreviewForTests*(preview: DriverPreviewArtifact) =
       path: "__test__/preview-driver.so",
       plugin: CompiledDriverPlugin(
         id: "__test__/preview-driver",
+        abiVersion: COMPILED_PLUGIN_ABI_VERSION,
         driver: ExportedDriver(
           canPreview: true,
           preview: previewFromTestDriver,

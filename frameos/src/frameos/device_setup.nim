@@ -90,6 +90,13 @@ proc loadDriverSetupSpec(
     let plugin = factory()
     if plugin.isNil or plugin.driver.isNil:
       raise newException(IOError, "Compiled driver plugin returned no driver: " & path)
+    if plugin.abiVersion != COMPILED_PLUGIN_ABI_VERSION:
+      raise newException(
+        IOError,
+        "Compiled driver plugin ABI mismatch in " & path
+          & ": expected " & $COMPILED_PLUGIN_ABI_VERSION
+          & ", got " & $plugin.abiVersion,
+      )
 
     result.id =
       if plugin.id.len > 0:

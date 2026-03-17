@@ -1,6 +1,18 @@
 import json, pixie, hashes, locks, tables, options, asyncdispatch, mummy
 import lib/burrito
 
+# Keep in sync with backend/app/utils/compiled_plugin_contract.py
+#
+# Bump COMPILED_PLUGIN_ABI_VERSION when an old compiled scene/driver .so may no
+# longer be safely loadable by a newer FrameOS binary. That means changes to the
+# plugin boundary itself: shared struct fields/layout, exported symbol names, or
+# proc signatures used across the boundary.
+#
+# Do not bump this for normal scene/driver source changes. Those are covered by
+# per-module source hashes. Use COMPILED_MODULE_BUILD_EPOCH on the Python side
+# when the ABI is still compatible but you want to force republishing modules.
+const COMPILED_PLUGIN_ABI_VERSION* = 1
+
 type
   # Parsed from config.json
   FrameConfig* = ref object
@@ -195,6 +207,7 @@ type
     id*: SceneId
     name*: string
     isDefault*: bool
+    abiVersion*: int
     scene*: ExportedScene
 
   # Exported data/functions for interpreted scenes, adds some local state that's normally compiled into the scene
@@ -359,6 +372,7 @@ type
   CompiledDriverPlugin* = ref object of RootObj
     id*: string
     variant*: string
+    abiVersion*: int
     driver*: ExportedDriver
 
   Scheduler* = ref object
