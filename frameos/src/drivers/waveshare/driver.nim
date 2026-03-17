@@ -2,6 +2,7 @@
 
 import ePaper/DEV_Config as waveshareConfig
 import ePaper/EPD_2in13_V3 as waveshareDisplay
+import frameos/driver_setup
 import frameos/types
 import drivers/waveshare/types
 
@@ -11,12 +12,9 @@ let height* = waveshareDisplay.EPD_2in13_V3_HEIGHT
 
 let colorOption* = ColorOption.Black
 
-proc deviceInit*(_: FrameConfig): DriverInitSpec =
-  DriverInitSpec(
-    ensureBootConfigLines: @[],
-    removeBootConfigLines: @[],
-    spiMode: dismEnable,
-  )
+proc setup*(_: FrameConfig): DriverSetupSpec =
+  driverSetupSpec:
+    enableSpi()
 
 proc init*() =
   let resp = waveshareConfig.DEV_Module_Init()

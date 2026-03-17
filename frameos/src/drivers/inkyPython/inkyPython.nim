@@ -1,4 +1,5 @@
 import osproc, os, streams, pixie, json, options, strutils, strformat, locks
+import frameos/driver_setup
 import frameos/types
 import frameos/utils/dither
 
@@ -76,19 +77,17 @@ proc safeStartProcess*(cmd: string; args: seq[string] = @[];
 proc deviceArgs*(dev: string): seq[string] =
   if dev.len > 0: @["--device", dev] else: @[]
 
-proc deviceInit*(frameConfig: FrameConfig): DriverInitSpec =
+proc setup*(frameConfig: FrameConfig): DriverSetupSpec =
   if frameConfig.isNil or frameConfig.device notin inkyDevices:
     return nil
 
-  result = DriverInitSpec(
-    ensureAptPackages: @["python3-pip", "python3-venv"],
-    pythonVendorFolders: @["inkyPython"],
-    spiMode: dismEnable,
-    enableI2c: true,
-  )
-
-  if frameConfig.device in impressionDevices:
-    result.ensureBootConfigLines = @["dtoverlay=spi0-0cs"]
+  result = driverSetupSpec:
+    assureAptPackages @["python3-pip", "python3-venv"]
+    initPythonVendorFolder "inkyPython"
+    enableSpi()
+    enableI2c()
+    if frameConfig.device in impressionDevices:
+      ensureBootConfigLines @["dtoverlay=spi0-0cs"]
 
 proc init*(frameOS: FrameOS): Driver =
   discard frameOS.logger.safeLog("Initializing Inky driver")

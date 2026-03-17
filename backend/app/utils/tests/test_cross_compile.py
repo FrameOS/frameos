@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.tasks.prebuilt_deps import PrebuiltEntry
+from app.utils import cross_compile
 from app.utils.cross_compile import CrossCompileArtifacts, CrossCompiler, TargetMetadata
 
 
@@ -233,6 +234,57 @@ async def test_run_docker_build_uses_explicit_scene_dirs_for_scene_only_full_reb
     assert artifacts.scenes_dir == str(build_dir / "scenes")
     assert 'for dir in scene_builds/demo; do make --no-print-directory -C "$dir" || exit $?; done' in captured_script["content"]
     assert "make compiled-scenes" not in captured_script["content"]
+
+
+@pytest.mark.asyncio
+async def test_run_docker_build_uses_buildx_export_for_local_darwin_arm64_amd64(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    compiler = _make_compiler(tmp_path, monkeypatch, prebuilt_entry=None)
+    compiler.target = TargetMetadata(arch="amd64", distro="debian", version="bookworm", platform="linux/amd64")
+    build_dir = tmp_path / "build"
+    build_dir.mkdir(parents=True, exist_ok=True)
+    captured: dict[str, Path | str] = {}
+
+    async def fake_ensure_toolchain_image() -> str:
+        return "frameos-cross-test-image"
+
+    async def fake_run_local_buildx_build(
+        build_dir_path: str,
+        script_path: Path,
+        image: str,
+        *,
+        build_binary: bool = True,
+        build_scene_dirs: list[str] | None = None,
+        build_driver_dirs: list[str] | None = None,
+        build_all_scenes: bool = True,
+    ) -> CrossCompileArtifacts:
+        captured["build_dir"] = build_dir_path
+        captured["script_path"] = script_path
+        captured["image"] = image
+        captured["build_binary"] = str(build_binary)
+        assert script_path.read_text(encoding="utf-8")
+        return CrossCompileArtifacts(binary_path=str(Path(build_dir_path) / "frameos"), scenes_dir=None, drivers_dir=None)
+
+    async def fail_exec_local_command(_db, _redis, _frame, _command, **_kwargs):
+        raise AssertionError("docker run path should not be used for local darwin arm64 -> amd64 builds")
+
+    monkeypatch.setattr(compiler, "_ensure_toolchain_image", fake_ensure_toolchain_image)
+    monkeypatch.setattr(compiler, "_run_local_buildx_build", fake_run_local_buildx_build)
+    monkeypatch.setattr(cross_compile.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(cross_compile.platform, "machine", lambda: "arm64")
+    monkeypatch.setattr("app.utils.cross_compile.exec_local_command", fail_exec_local_command)
+
+    artifacts = await compiler._run_docker_build(str(build_dir))
+
+    assert artifacts.binary_path == str(build_dir / "frameos")
+    assert captured == {
+        "build_dir": str(build_dir),
+        "script_path": Path(compiler.temp_dir) / "frameos-cross-build.sh",
+        "image": "frameos-cross-test-image",
+        "build_binary": "True",
+    }
 
 
 @pytest.mark.asyncio

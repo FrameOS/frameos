@@ -15,7 +15,7 @@ from app.tasks.deploy_frame import (
     _local_compiled_driver_artifact_dir,
     _local_compiled_scene_artifact_dir,
     _local_vendor_source_dir,
-    _run_frameos_init,
+    _run_frameos_setup,
     _upload_local_compiled_drivers,
     _scene_compile_start_lines,
     _sync_vendor_dir,
@@ -193,7 +193,7 @@ async def test_upload_local_compiled_drivers_merges_into_existing_release(monkey
 
 
 @pytest.mark.asyncio
-async def test_run_frameos_init_invokes_release_binary_and_parses_json():
+async def test_run_frameos_setup_invokes_release_binary_and_parses_json():
     commands: list[tuple[str, dict]] = []
     logs: list[tuple[str, str]] = []
 
@@ -216,7 +216,7 @@ async def test_run_frameos_init_invokes_release_binary_and_parses_json():
 
     deployer = SimpleNamespace(log=fake_log, exec_command=fake_exec)
 
-    summary = await _run_frameos_init(
+    summary = await _run_frameos_setup(
         deployer,
         frameos_path="/srv/frameos/releases/release_abc/frameos",
         frame_json_path="/srv/frameos/releases/release_abc/frame.json",
@@ -227,21 +227,21 @@ async def test_run_frameos_init_invokes_release_binary_and_parses_json():
         "rebootRequired": True,
     }
     assert logs == [
-        ("stdout", "🔷 Running FrameOS init"),
-        ("stdout", "🔷 Init: Added boot config line: dtoverlay=spi0-0cs"),
+        ("stdout", "🔷 Running FrameOS setup"),
+        ("stdout", "🔷 Setup: Added boot config line: dtoverlay=spi0-0cs"),
     ]
     assert len(commands) == 1
     command, kwargs = commands[0]
     assert command == (
         "sudo env FRAMEOS_CONFIG=/srv/frameos/releases/release_abc/frame.json "
-        "/srv/frameos/releases/release_abc/frameos init --json"
+        "/srv/frameos/releases/release_abc/frameos setup --json"
     )
     assert kwargs["log_output"] is False
     assert isinstance(kwargs["output"], list)
 
 
 @pytest.mark.asyncio
-async def test_run_frameos_init_raises_when_output_is_not_json():
+async def test_run_frameos_setup_raises_when_output_is_not_json():
     async def fake_log(*_args, **_kwargs):
         return None
 
@@ -253,8 +253,8 @@ async def test_run_frameos_init_raises_when_output_is_not_json():
 
     deployer = SimpleNamespace(log=fake_log, exec_command=fake_exec)
 
-    with pytest.raises(RuntimeError, match="Failed to parse FrameOS init output"):
-        await _run_frameos_init(
+    with pytest.raises(RuntimeError, match="Failed to parse FrameOS setup output"):
+        await _run_frameos_setup(
             deployer,
             frameos_path="/srv/frameos/current/frameos",
             frame_json_path="/srv/frameos/current/frame.json",
@@ -262,7 +262,7 @@ async def test_run_frameos_init_raises_when_output_is_not_json():
 
 
 @pytest.mark.asyncio
-async def test_run_frameos_init_parses_json_after_warning_lines():
+async def test_run_frameos_setup_parses_json_after_warning_lines():
     async def fake_log(*_args, **_kwargs):
         return None
 
@@ -282,7 +282,7 @@ async def test_run_frameos_init_parses_json_after_warning_lines():
 
     deployer = SimpleNamespace(log=fake_log, exec_command=fake_exec)
 
-    summary = await _run_frameos_init(
+    summary = await _run_frameos_setup(
         deployer,
         frameos_path="/srv/frameos/current/frameos",
         frame_json_path="/srv/frameos/current/frame.json",

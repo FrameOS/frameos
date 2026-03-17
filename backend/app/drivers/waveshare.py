@@ -238,7 +238,7 @@ def write_waveshare_driver_nim(drivers: dict[str, Driver]) -> str:
     variant = convert_waveshare_source(driver.variant)
     variant_folder = get_variant_folder(variant.key)
     no_spi_variants = {"EPD_12in48", "EPD_12in48b", "EPD_12in48b_V2", "EPD_13in3e"}
-    spi_mode = "dismDisable" if variant.key in no_spi_variants else "dismEnable"
+    spi_mode = "dsmDisable" if variant.key in no_spi_variants else "dsmEnable"
     ensure_lines: list[str] = []
     remove_lines: list[str] = []
     if variant.key == "EPD_10in3":
@@ -249,6 +249,17 @@ def write_waveshare_driver_nim(drivers: dict[str, Driver]) -> str:
     ensure_lines_nim = "[" + ", ".join(f'"{line}"' for line in ensure_lines) + "]"
     remove_lines_nim = "[" + ", ".join(f'"{line}"' for line in remove_lines) + "]"
 
+    setup_lines = ["  driverSetupSpec:"]
+    if spi_mode == "dsmDisable":
+        setup_lines.append("    disableSpi()")
+    else:
+        setup_lines.append("    enableSpi()")
+    if ensure_lines:
+        setup_lines.append(f"    ensureBootConfigLines @{ensure_lines_nim}")
+    if remove_lines:
+        setup_lines.append(f"    removeBootConfigLines @{remove_lines_nim}")
+    setup_body = "\n".join(setup_lines)
+
     color_warning = ""
     if variant.color_option == "Unknown":
         color_warning = "\n\n# NOTE! We could not detect the correct color options. Assuming 1-bit Black.\n\n"
@@ -257,6 +268,7 @@ def write_waveshare_driver_nim(drivers: dict[str, Driver]) -> str:
 
 import {variant_folder}/DEV_Config as waveshareConfig
 import {variant_folder}/{variant.key} as waveshareDisplay
+import frameos/driver_setup
 import frameos/types
 import drivers/waveshare/types
 
@@ -266,12 +278,8 @@ let height* = waveshareDisplay.{variant.prefix}_HEIGHT
 let color_option* = ColorOption.{variant.color_option}
 {color_warning}
 
-proc deviceInit*(_: FrameConfig): DriverInitSpec =
-  DriverInitSpec(
-    ensureBootConfigLines: @{ensure_lines_nim},
-    removeBootConfigLines: @{remove_lines_nim},
-    spiMode: {spi_mode},
-  )
+proc setup*(_: FrameConfig): DriverSetupSpec =
+{setup_body}
 
 proc init*() =
   let resp = waveshareConfig.DEV_Module_Init()

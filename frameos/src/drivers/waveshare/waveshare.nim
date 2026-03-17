@@ -23,8 +23,8 @@ proc getPreview*(self: Driver): DriverPreviewArtifact =
   withLock self.previewLock:
     result = self.lastPreview
 
-proc deviceInit*(frameConfig: FrameConfig): DriverInitSpec =
-  waveshareDriver.deviceInit(frameConfig)
+proc setup*(frameConfig: FrameConfig): DriverSetupSpec =
+  waveshareDriver.setup(frameConfig)
 
 proc init*(frameOS: FrameOS): Driver =
   let logger = frameOS.logger

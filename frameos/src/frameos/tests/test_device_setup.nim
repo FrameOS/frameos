@@ -1,6 +1,6 @@
 import std/[os, strutils, times, unittest]
 
-import ../device_init
+import ../device_setup
 import ../types
 
 proc tempPath(prefix: string): string =
@@ -12,39 +12,39 @@ proc nonEmptyLines(path: string): seq[string] =
       continue
     result.add(line)
 
-suite "device init":
+suite "device setup":
   teardown:
-    initExecHook = nil
-    driverInitSpecLoaderHook = nil
+    setupExecHook = nil
+    driverSetupSpecLoaderHook = nil
 
-  test "buildInitPlan merges driver-provided init specs":
-    driverInitSpecLoaderHook = proc(
+  test "buildSetupPlan merges driver-provided setup specs":
+    driverSetupSpecLoaderHook = proc(
       frameConfig: FrameConfig,
       driversDir: string,
-    ): seq[tuple[id: string, spec: DriverInitSpec]] {.nimcall.} =
+    ): seq[tuple[id: string, spec: DriverSetupSpec]] {.nimcall.} =
       check frameConfig.device == "pimoroni.inky_impression_13"
       check driversDir == "/tmp/frameos-drivers"
       @[
         (
           "inkyPython",
-          DriverInitSpec(
+          DriverSetupSpec(
             ensureBootConfigLines: @["dtoverlay=spi0-0cs"],
             ensureAptPackages: @["python3-pip", "python3-venv"],
             pythonVendorFolders: @["inkyPython"],
-            spiMode: dismEnable,
+            spiMode: dsmEnable,
             enableI2c: true,
           ),
         ),
         (
           "gpioButton",
-          DriverInitSpec(
+          DriverSetupSpec(
             ensureBootConfigLines: @["dtoverlay=spi0-0cs"],
-            spiMode: dismUnchanged,
+            spiMode: dsmUnchanged,
           ),
         ),
       ]
 
-    let plan = buildInitPlan(
+    let plan = buildSetupPlan(
       FrameConfig(
         device: "pimoroni.inky_impression_13",
         gpioButtons: @[],
@@ -53,27 +53,27 @@ suite "device init":
     )
 
     check plan.drivers == @["inkyPython", "gpioButton"]
-    check plan.spiMode == dismEnable
+    check plan.spiMode == dsmEnable
     check plan.enableI2c
     check plan.ensureBootConfigLines == @["dtoverlay=spi0-0cs"]
     check plan.ensureAptPackages == @["python3-pip", "python3-venv"]
     check plan.pythonVendorFolders == @["inkyPython"]
 
-  test "buildInitPlan rejects conflicting driver SPI requirements":
-    driverInitSpecLoaderHook = proc(
+  test "buildSetupPlan rejects conflicting driver SPI requirements":
+    driverSetupSpecLoaderHook = proc(
       frameConfig: FrameConfig,
       driversDir: string,
-    ): seq[tuple[id: string, spec: DriverInitSpec]] {.nimcall.} =
+    ): seq[tuple[id: string, spec: DriverSetupSpec]] {.nimcall.} =
       @[
-        ("driverA", DriverInitSpec(spiMode: dismEnable)),
-        ("driverB", DriverInitSpec(spiMode: dismDisable)),
+        ("driverA", DriverSetupSpec(spiMode: dsmEnable)),
+        ("driverB", DriverSetupSpec(spiMode: dsmDisable)),
       ]
 
     expect ValueError:
-      discard buildInitPlan(FrameConfig(device: "test-device"))
+      discard buildSetupPlan(FrameConfig(device: "test-device"))
 
-  test "applyInitPlan updates boot config and raspi-config state":
-    let bootConfigPath = tempPath("frameos-init-config")
+  test "applySetupPlan updates boot config and raspi-config state":
+    let bootConfigPath = tempPath("frameos-setup-config")
     defer:
       if fileExists(bootConfigPath):
         removeFile(bootConfigPath)
@@ -81,7 +81,7 @@ suite "device init":
     writeFile(bootConfigPath, "# boot\n")
 
     var commands: seq[string] = @[]
-    initExecHook = proc(command: string): tuple[output: string, exitCode: int] {.nimcall.} =
+    setupExecHook = proc(command: string): tuple[output: string, exitCode: int] {.nimcall.} =
       commands.add(command)
       case command
       of "command -v raspi-config >/dev/null 2>&1":
@@ -97,12 +97,12 @@ suite "device init":
       else:
         ("", 0)
 
-    let result = applyInitPlan(
-      InitPlan(
+    let result = applySetupPlan(
+      SetupPlan(
         device: "test-device",
         drivers: @["inkyPython"],
         ensureBootConfigLines: @["dtoverlay=spi0-0cs"],
-        spiMode: dismEnable,
+        spiMode: dsmEnable,
         enableI2c: true,
       ),
       bootConfigPath = bootConfigPath,
@@ -125,8 +125,8 @@ suite "device init":
       "raspi-config nonint do_spi 0",
     ]
 
-  test "applyInitPlan prepares python vendor runtime when required":
-    let vendorRoot = tempPath("frameos-init-vendor")
+  test "applySetupPlan prepares python vendor runtime when required":
+    let vendorRoot = tempPath("frameos-setup-vendor")
     let vendorPath = vendorRoot / "inkyHyperPixel2r"
     createDir(vendorRoot)
     createDir(vendorPath)
@@ -137,7 +137,7 @@ suite "device init":
     writeFile(vendorPath / "requirements.txt", "rpi-gpio==0.7.1\n")
 
     var commands: seq[string] = @[]
-    initExecHook = proc(command: string): tuple[output: string, exitCode: int] {.nimcall.} =
+    setupExecHook = proc(command: string): tuple[output: string, exitCode: int] {.nimcall.} =
       commands.add(command)
       case command
       of "dpkg -s 'python3-dev' >/dev/null 2>&1":
@@ -149,8 +149,8 @@ suite "device init":
       else:
         ("", 0)
 
-    let result = applyInitPlan(
-      InitPlan(
+    let result = applySetupPlan(
+      SetupPlan(
         device: "pimoroni.hyperpixel2r",
         drivers: @["inkyHyperPixel2r"],
         ensureAptPackages: @["python3-dev", "python3-pip", "python3-venv"],

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import platform
 import re
 import shlex
 import shutil
@@ -460,6 +461,21 @@ class CrossCompiler:
         script_path.write_text(script_content)
         os.chmod(script_path, 0o755)
 
+        if self._should_use_local_buildx_export():
+            await self._log(
+                "stdout",
+                f"{icon} Using buildx local exporter for {self._platform()} on {platform.system()} {platform.machine()}",
+            )
+            return await self._run_local_buildx_build(
+                build_dir,
+                script_path,
+                image,
+                build_binary=build_binary,
+                build_scene_dirs=build_scene_dirs,
+                build_driver_dirs=build_driver_dirs,
+                build_all_scenes=build_all_scenes,
+            )
+
         docker_cmd = " ".join(
             [
                 "docker run --rm",
@@ -493,6 +509,93 @@ class CrossCompiler:
         if drivers_dir and not os.path.isdir(drivers_dir):
             drivers_dir = None
         return CrossCompileArtifacts(binary_path=binary_path, scenes_dir=scenes_dir, drivers_dir=drivers_dir)
+
+    async def _run_local_buildx_build(
+        self,
+        build_dir: str,
+        script_path: Path,
+        image: str,
+        *,
+        build_binary: bool = True,
+        build_scene_dirs: list[str] | None = None,
+        build_driver_dirs: list[str] | None = None,
+        build_all_scenes: bool = True,
+    ) -> CrossCompileArtifacts:
+        build_dir_path = Path(build_dir)
+        buildx_context_dir = self.temp_dir / "buildx-context"
+        buildx_context_dir.mkdir(parents=True, exist_ok=True)
+        buildx_script = buildx_context_dir / "build.sh"
+        buildx_dockerfile = buildx_context_dir / "Dockerfile"
+        shutil.copy2(script_path, buildx_script)
+        buildx_dockerfile.write_text(
+            dedent(
+                f"""
+                # syntax=docker/dockerfile:1.4
+                ARG TOOLCHAIN_IMAGE
+                FROM ${{TOOLCHAIN_IMAGE}} AS builder
+                WORKDIR /src
+                COPY --from=frameos_build . /src
+                COPY --from=frameos_sysroot . /sysroot
+                COPY build.sh /tmp/frameos-cross/build.sh
+                RUN chmod +x /tmp/frameos-cross/build.sh && bash /tmp/frameos-cross/build.sh
+                RUN mkdir -p /out \\
+                    && if [ -f /src/frameos ]; then cp /src/frameos /out/frameos; fi \\
+                    && if [ -d /src/scenes ]; then cp -R /src/scenes /out/scenes; fi \\
+                    && if [ -d /src/drivers ]; then cp -R /src/drivers /out/drivers; fi
+
+                FROM scratch
+                COPY --from=builder /out/ /
+                """
+            ).strip()
+            + "\n",
+            encoding="utf-8",
+        )
+
+        output_dir = Path(tempfile.mkdtemp(prefix="frameos-cross-buildx-", dir=self.temp_dir))
+        try:
+            build_cmd = " ".join(
+                [
+                    "docker buildx build",
+                    "--progress=plain",
+                    f"--platform {self._platform()}",
+                    f"--build-arg TOOLCHAIN_IMAGE={shlex.quote(image)}",
+                    f"--build-context frameos_build={shlex.quote(str(build_dir_path))}",
+                    f"--build-context frameos_sysroot={shlex.quote(str(self.sysroot_dir))}",
+                    f"--output type=local,dest={shlex.quote(str(output_dir))}",
+                    f"-f {shlex.quote(str(buildx_dockerfile))}",
+                    shlex.quote(str(buildx_context_dir)),
+                ]
+            )
+
+            status, _stdout, err = await exec_local_command(
+                self.db,
+                self.redis,
+                self.frame,
+                build_cmd,
+                log_command=False,
+                log_output=False,
+            )
+            if status != 0:
+                raise RuntimeError(f"Cross compilation failed: {err or 'see logs'}")
+
+            binary_path = self._sync_buildx_output_file(output_dir / "frameos", build_dir_path / "frameos")
+            scenes_dir = self._sync_buildx_output_dir(output_dir / "scenes", build_dir_path / "scenes")
+            drivers_dir = self._sync_buildx_output_dir(output_dir / "drivers", build_dir_path / "drivers")
+
+            if build_binary and not binary_path:
+                raise RuntimeError("Cross compilation completed but frameos binary is missing")
+            if (build_scene_dirs or build_all_scenes) and not scenes_dir:
+                scenes_dir = None
+            if build_driver_dirs and not drivers_dir:
+                drivers_dir = None
+
+            return CrossCompileArtifacts(
+                binary_path=str(binary_path) if binary_path else None,
+                scenes_dir=str(scenes_dir) if scenes_dir else None,
+                drivers_dir=str(drivers_dir) if drivers_dir else None,
+            )
+        finally:
+            shutil.rmtree(output_dir, ignore_errors=True)
 
     async def _run_remote_docker_build(
         self,
@@ -1034,6 +1137,33 @@ class CrossCompiler:
             value /= 1024
 
         return f"{value:.1f} TiB"
+
+    def _should_use_local_buildx_export(self) -> bool:
+        if self._build_host_session:
+            return False
+        host_system = platform.system().lower()
+        host_machine = platform.machine().lower()
+        return (
+            host_system == "darwin"
+            and host_machine in {"arm64", "aarch64"}
+            and self._platform() == "linux/amd64"
+        )
+
+    @staticmethod
+    def _sync_buildx_output_file(source: Path, dest: Path) -> Path | None:
+        if not source.is_file():
+            return None
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, dest)
+        return dest
+
+    @staticmethod
+    def _sync_buildx_output_dir(source: Path, dest: Path) -> Path | None:
+        if not source.is_dir():
+            return None
+        shutil.rmtree(dest, ignore_errors=True)
+        shutil.copytree(source, dest)
+        return dest
 
     async def _log_quickjs_probe(self, root: Path, context: str) -> None:
         await self._log(

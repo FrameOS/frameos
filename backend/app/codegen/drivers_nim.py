@@ -79,10 +79,10 @@ proc turnOffDriver(self: FrameOSDriver) =
         turn_on_ref = "turnOnDriver"
         turn_off_ref = "turnOffDriver"
 
-    device_init_proc = """
-proc deviceInitDriver(frameConfig: FrameConfig): DriverInitSpec =
-  when compiles({alias}.deviceInit(frameConfig)):
-    return {alias}.deviceInit(frameConfig)
+    setup_proc = """
+proc setupDriver(frameConfig: FrameConfig): DriverSetupSpec =
+  when compiles({alias}.setup(frameConfig)):
+    return {alias}.setup(frameConfig)
   else:
     return nil
 """.strip().format(alias=alias)
@@ -99,7 +99,7 @@ proc deviceInitDriver(frameConfig: FrameConfig): DriverInitSpec =
         "proc initDriver(frameOS: FrameOS): FrameOSDriver =",
         f"  {alias}.init(frameOS)",
         "",
-        device_init_proc,
+        setup_proc,
     ]
     if driver.can_render:
         blocks.extend(["", render_proc])
@@ -119,7 +119,7 @@ proc deviceInitDriver(frameConfig: FrameConfig): DriverInitSpec =
             f'      canPreview: {"true" if driver.can_preview else "false"},',
             f'      canTurnOnOff: {"true" if driver.can_turn_on_off else "false"},',
             "      init: initDriver,",
-            "      deviceInit: deviceInitDriver,",
+            "      setup: setupDriver,",
             f'      render: {"renderDriver" if driver.can_render else "nil"},',
             f'      preview: {"previewDriver" if driver.can_preview else "nil"},',
             f"      turnOn: {turn_on_ref},",

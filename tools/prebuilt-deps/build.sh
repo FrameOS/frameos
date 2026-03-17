@@ -10,8 +10,9 @@ CROSS_OUTPUT_BASE="${ROOT_DIR}/build/prebuilt-cross"
 NIM_VERSION="${NIM_VERSION:-2.2.4}"
 QUICKJS_VERSION="${QUICKJS_VERSION:-2025-04-26}"
 QUICKJS_SHA256="${QUICKJS_SHA256:-2f20074c25166ef6f781f381c50d57b502cb85d470d639abccebbef7954c83bf}"
+DEFAULT_LGPIO_REPO="https://github.com/joan2937/lg.git"
 LGPIO_VERSION="${LGPIO_VERSION:-v0.2.2}"
-LGPIO_REPO="${LGPIO_REPO:-https://github.com/joan2937/lg.git}"
+LGPIO_REPO="${LGPIO_REPO:-${DEFAULT_LGPIO_REPO}}"
 
 compute_frameos_version() {
   if ! git -C "${ROOT_DIR}" rev-parse --verify HEAD >/dev/null 2>&1; then
@@ -212,20 +213,49 @@ for component in ("nim", "quickjs", "lgpio", "frameos"):
 PY
 }
 
+try_stage_published_component() {
+  local component="$1" target="$2" version="$3" component_dir="$4" expected_marker="$5"
+
+  case "${component}" in
+    lgpio)
+      if [[ "${LGPIO_REPO}" != "${DEFAULT_LGPIO_REPO}" ]]; then
+        return 1
+      fi
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  if run_backend_python -m app.utils.prebuilt_component \
+    --target "${target}" \
+    --component "${component}" \
+    --version "${version}" \
+    --dest "${component_dir}" \
+    --expected-marker "${expected_marker}"; then
+    echo " - ${component}: using published prebuilt" >&2
+    return 0
+  fi
+
+  return 1
+}
+
 build_static_component() {
   local component="$1" target="$2" distro="$3" release="$4" platform="$5" base_image="$6" target_dir="$7"
 
-  local subdir component_dockerfile expected_marker
+  local subdir component_dockerfile expected_marker component_version
   local -a component_args=()
   case "${component}" in
     nim)
       subdir="nim-${NIM_VERSION}"
+      component_version="${NIM_VERSION}"
       component_dockerfile="${ROOT_DIR}/tools/prebuilt-deps/Dockerfile.nim"
       component_args=("--build-arg" "NIM_VERSION=${NIM_VERSION}")
       expected_marker="$(component_marker "${target}" "${component}" "${release}" "${platform}" "${NIM_VERSION}")"
       ;;
     quickjs)
       subdir="quickjs-${QUICKJS_VERSION}"
+      component_version="${QUICKJS_VERSION}"
       component_dockerfile="${ROOT_DIR}/tools/prebuilt-deps/Dockerfile.quickjs"
       component_args=(
         "--build-arg" "QUICKJS_VERSION=${QUICKJS_VERSION}"
@@ -235,6 +265,7 @@ build_static_component() {
       ;;
     lgpio)
       subdir="lgpio-${LGPIO_VERSION}"
+      component_version="${LGPIO_VERSION}"
       component_dockerfile="${ROOT_DIR}/tools/prebuilt-deps/Dockerfile.lgpio"
       component_args=(
         "--build-arg" "LGPIO_VERSION=${LGPIO_VERSION}"
@@ -251,6 +282,10 @@ build_static_component() {
   local comp_dest="${target_dir}/${subdir}"
   if component_is_current "${comp_dest}" "${expected_marker}"; then
     echo " - ${component}: already built, skipping" >&2
+    return
+  fi
+
+  if try_stage_published_component "${component}" "${target}" "${component_version}" "${comp_dest}" "${expected_marker}"; then
     return
   fi
 

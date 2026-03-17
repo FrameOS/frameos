@@ -747,25 +747,25 @@ async def _upload_local_compiled_drivers(
     )
 
 
-async def _run_frameos_init(
+async def _run_frameos_setup(
     deployer: FrameDeployer,
     *,
     frameos_path: str,
     frame_json_path: str,
 ) -> dict[str, Any]:
     output: list[str] = []
-    await deployer.log("stdout", f"{icon} Running FrameOS init")
+    await deployer.log("stdout", f"{icon} Running FrameOS setup")
     await deployer.exec_command(
         "sudo env "
         f"FRAMEOS_CONFIG={shlex.quote(frame_json_path)} "
-        f"{shlex.quote(frameos_path)} init --json",
+        f"{shlex.quote(frameos_path)} setup --json",
         output=output,
         log_output=False,
     )
 
     raw_output = "\n".join(line for line in output if line.strip())
     if not raw_output:
-        raise RuntimeError("FrameOS init returned no output")
+        raise RuntimeError("FrameOS setup returned no output")
 
     lines = [line for line in raw_output.splitlines() if line.strip()]
     summary: dict[str, Any] | None = None
@@ -782,13 +782,13 @@ async def _run_frameos_init(
             break
 
     if summary is None:
-        raise RuntimeError(f"Failed to parse FrameOS init output: {raw_output}")
+        raise RuntimeError(f"Failed to parse FrameOS setup output: {raw_output}")
 
     actions = summary.get("actions")
     if isinstance(actions, list):
         for action in actions:
             if isinstance(action, str) and action.strip():
-                await deployer.log("stdout", f"{icon} Init: {action}")
+                await deployer.log("stdout", f"{icon} Setup: {action}")
 
     return summary
 
@@ -1290,12 +1290,12 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                     reuse_existing_remote=build_dir is None,
                 )
 
-            init_summary = await _run_frameos_init(
+            setup_summary = await _run_frameos_setup(
                 self,
                 frameos_path=release_frameos_path,
                 frame_json_path=f"/srv/frameos/releases/release_{build_id}/frame.json",
             )
-            must_reboot = bool(init_summary.get("rebootRequired"))
+            must_reboot = bool(setup_summary.get("rebootRequired"))
 
             # 5. Upload frameos.service
             await self.log("stdout", f"{icon} Swapping out the release")

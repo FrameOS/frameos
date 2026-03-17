@@ -1,51 +1,47 @@
 import std/[algorithm, dynlib, json, os, osproc, strutils]
 import frameos/config
+import frameos/driver_setup
 import frameos/types
 when not defined(windows):
   import posix
 
 type
-  InitPlan* = object
+  SetupPlan* = object
     device*: string
     drivers*: seq[string]
     ensureBootConfigLines*: seq[string]
     removeBootConfigLines*: seq[string]
     ensureAptPackages*: seq[string]
     pythonVendorFolders*: seq[string]
-    spiMode*: DriverInitSpiMode
+    spiMode*: DriverSetupSpiMode
     enableI2c*: bool
 
-  InitResult* = object
+  SetupResult* = object
     device*: string
     drivers*: seq[string]
     bootConfigPath*: string
     actions*: seq[string]
     rebootRequired*: bool
 
-  InitExecHook* = proc(command: string): tuple[output: string, exitCode: int] {.nimcall.}
-  DriverInitSpecLoaderHook* = proc(
+  SetupExecHook* = proc(command: string): tuple[output: string, exitCode: int] {.nimcall.}
+  DriverSetupSpecLoaderHook* = proc(
     frameConfig: FrameConfig,
     driversDir: string,
-  ): seq[tuple[id: string, spec: DriverInitSpec]] {.nimcall.}
+  ): seq[tuple[id: string, spec: DriverSetupSpec]] {.nimcall.}
   CompiledDriverPluginFactory = proc(): CompiledDriverPlugin {.cdecl.}
 
-var initExecHook*: InitExecHook
-var driverInitSpecLoaderHook*: DriverInitSpecLoaderHook
-var compiledDriverInitLoadCounter = 0
+var setupExecHook*: SetupExecHook
+var driverSetupSpecLoaderHook*: DriverSetupSpecLoaderHook
+var compiledDriverSetupLoadCounter = 0
 
 const COMPILED_DRIVER_PLUGIN_SYMBOL = "getCompiledDriverPlugin"
 
 proc shQuote(value: string): string =
   "'" & value.replace("'", "'\"'\"'") & "'"
 
-proc addUnique(values: var seq[string], value: string) =
-  if value.len == 0 or value in values:
-    return
-  values.add(value)
-
 proc runCommand(command: string): tuple[output: string, exitCode: int] =
-  if not initExecHook.isNil:
-    return initExecHook(command)
+  if not setupExecHook.isNil:
+    return setupExecHook(command)
   execCmdEx(command)
 
 proc runChecked(command: string): string =
@@ -60,9 +56,9 @@ proc runChecked(command: string): string =
   output
 
 proc copyCompiledDriverLibrary(sourcePath: string): string =
-  inc compiledDriverInitLoadCounter
+  inc compiledDriverSetupLoadCounter
   let targetPath = getTempDir() / (
-    "frameos-init-" & $compiledDriverInitLoadCounter & "-" & extractFilename(sourcePath)
+    "frameos-setup-" & $compiledDriverSetupLoadCounter & "-" & extractFilename(sourcePath)
   )
   copyFile(sourcePath, targetPath)
   targetPath
@@ -76,10 +72,10 @@ proc removeCopiedCompiledDriverLibrary(path: string) =
   except OSError:
     discard
 
-proc loadDriverInitSpec(
+proc loadDriverSetupSpec(
   path: string,
   frameConfig: FrameConfig,
-): tuple[id: string, spec: DriverInitSpec] =
+): tuple[id: string, spec: DriverSetupSpec] =
   var copiedPath = ""
   try:
     copiedPath = copyCompiledDriverLibrary(path)
@@ -100,23 +96,23 @@ proc loadDriverInitSpec(
         plugin.id
       else:
         extractFilename(path)
-    if plugin.driver.deviceInit.isNil:
+    if plugin.driver.setup.isNil:
       return
-    result.spec = plugin.driver.deviceInit(frameConfig)
+    result.spec = plugin.driver.setup(frameConfig)
   except CatchableError as e:
-    raise newException(IOError, "Failed to load init spec from " & path & ": " & e.msg)
+    raise newException(IOError, "Failed to load setup spec from " & path & ": " & e.msg)
   finally:
     removeCopiedCompiledDriverLibrary(copiedPath)
 
 proc defaultCompiledDriversDir*(): string =
   parentDir(getAppFilename()) / "drivers"
 
-proc loadDriverInitSpecs(
+proc loadDriverSetupSpecs(
   frameConfig: FrameConfig,
   driversDir: string,
-): seq[tuple[id: string, spec: DriverInitSpec]] =
-  if not driverInitSpecLoaderHook.isNil:
-    return driverInitSpecLoaderHook(frameConfig, driversDir)
+): seq[tuple[id: string, spec: DriverSetupSpec]] =
+  if not driverSetupSpecLoaderHook.isNil:
+    return driverSetupSpecLoaderHook(frameConfig, driversDir)
 
   if not dirExists(driversDir):
     return @[]
@@ -127,25 +123,25 @@ proc loadDriverInitSpecs(
   driverPaths.sort(system.cmp[string])
 
   for path in driverPaths:
-    let loaded = loadDriverInitSpec(path, frameConfig)
+    let loaded = loadDriverSetupSpec(path, frameConfig)
     if loaded.spec.isNil:
       continue
     result.add(loaded)
 
-proc mergeSpiMode(plan: var InitPlan, nextMode: DriverInitSpiMode, driverId: string) =
+proc mergeSpiMode(plan: var SetupPlan, nextMode: DriverSetupSpiMode, driverId: string) =
   case nextMode
-  of dismUnchanged:
+  of dsmUnchanged:
     discard
-  of dismEnable:
-    if plan.spiMode == dismDisable:
-      raise newException(ValueError, "Conflicting SPI init requirements for driver: " & driverId)
-    plan.spiMode = dismEnable
-  of dismDisable:
-    if plan.spiMode == dismEnable:
-      raise newException(ValueError, "Conflicting SPI init requirements for driver: " & driverId)
-    plan.spiMode = dismDisable
+  of dsmEnable:
+    if plan.spiMode == dsmDisable:
+      raise newException(ValueError, "Conflicting SPI setup requirements for driver: " & driverId)
+    plan.spiMode = dsmEnable
+  of dsmDisable:
+    if plan.spiMode == dsmEnable:
+      raise newException(ValueError, "Conflicting SPI setup requirements for driver: " & driverId)
+    plan.spiMode = dsmDisable
 
-proc mergeDriverInitSpec(plan: var InitPlan, driverId: string, spec: DriverInitSpec) =
+proc mergeDriverSetupSpec(plan: var SetupPlan, driverId: string, spec: DriverSetupSpec) =
   if spec.isNil:
     return
 
@@ -163,16 +159,16 @@ proc mergeDriverInitSpec(plan: var InitPlan, driverId: string, spec: DriverInitS
   for vendorFolder in spec.pythonVendorFolders:
     plan.pythonVendorFolders.addUnique(vendorFolder)
 
-proc buildInitPlan*(
+proc buildSetupPlan*(
   frameConfig: FrameConfig,
   driversDir = "",
-): InitPlan =
+): SetupPlan =
   result.device =
     if frameConfig.isNil:
       ""
     else:
       frameConfig.device
-  result.spiMode = dismUnchanged
+  result.spiMode = dsmUnchanged
 
   let resolvedDriversDir =
     if driversDir.len > 0:
@@ -180,12 +176,12 @@ proc buildInitPlan*(
     else:
       defaultCompiledDriversDir()
 
-  for loaded in loadDriverInitSpecs(frameConfig, resolvedDriversDir):
-    result.mergeDriverInitSpec(loaded.id, loaded.spec)
+  for loaded in loadDriverSetupSpecs(frameConfig, resolvedDriversDir):
+    result.mergeDriverSetupSpec(loaded.id, loaded.spec)
 
-proc bootConfigRequired(plan: InitPlan): bool =
+proc bootConfigRequired(plan: SetupPlan): bool =
   plan.enableI2c or
-    plan.spiMode != dismUnchanged or
+    plan.spiMode != dsmUnchanged or
     plan.ensureBootConfigLines.len > 0 or
     plan.removeBootConfigLines.len > 0
 
@@ -210,7 +206,7 @@ proc writeBootConfigLines(path: string, lines: seq[string]) =
       lines.join("\n") & "\n"
   writeFile(path, contents)
 
-proc ensureBootConfigLine(path: string, line: string, result: var InitResult) =
+proc ensureBootConfigLine(path: string, line: string, result: var SetupResult) =
   var lines = readBootConfigLines(path)
   for existing in lines:
     if existing.strip() == line:
@@ -221,7 +217,7 @@ proc ensureBootConfigLine(path: string, line: string, result: var InitResult) =
   result.actions.add("Added boot config line: " & line)
   result.rebootRequired = true
 
-proc removeBootConfigLine(path: string, line: string, result: var InitResult) =
+proc removeBootConfigLine(path: string, line: string, result: var SetupResult) =
   let lines = readBootConfigLines(path)
   var filtered: seq[string] = @[]
   var removed = false
@@ -251,7 +247,7 @@ proc getRaspiConfigState(feature: string): int =
   except ValueError:
     -1
 
-proc ensureRaspiConfigState(feature: string, enable: bool, result: var InitResult) =
+proc ensureRaspiConfigState(feature: string, enable: bool, result: var SetupResult) =
   if not commandExists("raspi-config"):
     return
 
@@ -269,7 +265,7 @@ proc ensureRaspiConfigState(feature: string, enable: bool, result: var InitResul
   )
   result.rebootRequired = true
 
-proc ensureAptPackageInstalled(packageName: string, result: var InitResult) =
+proc ensureAptPackageInstalled(packageName: string, result: var SetupResult) =
   if runCommand("dpkg -s " & shQuote(packageName) & " >/dev/null 2>&1").exitCode == 0:
     return
 
@@ -281,7 +277,7 @@ proc ensureAptPackageInstalled(packageName: string, result: var InitResult) =
 proc ensurePythonVendorRuntime(
   vendorRoot: string,
   vendorFolder: string,
-  result: var InitResult,
+  result: var SetupResult,
 ) =
   let vendorPath = vendorRoot / vendorFolder
   if not dirExists(vendorPath):
@@ -297,12 +293,12 @@ proc ensurePythonVendorRuntime(
   )
   result.actions.add("Verified Python runtime for driver: " & vendorFolder)
 
-proc applyInitPlan*(
-  plan: InitPlan,
+proc applySetupPlan*(
+  plan: SetupPlan,
   bootConfigPath = "",
   vendorRoot = "/srv/frameos/vendor",
-): InitResult =
-  result = InitResult(
+): SetupResult =
+  result = SetupResult(
     device: plan.device,
     drivers: plan.drivers,
     actions: @[],
@@ -327,13 +323,13 @@ proc applyInitPlan*(
       ensureRaspiConfigState("i2c", true, result)
 
     let shouldEnsureSpiBootLine =
-      plan.spiMode == dismEnable and "dtparam=spi=on" notin plan.removeBootConfigLines
+      plan.spiMode == dsmEnable and "dtparam=spi=on" notin plan.removeBootConfigLines
     if shouldEnsureSpiBootLine:
       ensureBootConfigLine(result.bootConfigPath, "dtparam=spi=on", result)
 
-    if plan.spiMode == dismEnable:
+    if plan.spiMode == dsmEnable:
       ensureRaspiConfigState("spi", true, result)
-    elif plan.spiMode == dismDisable:
+    elif plan.spiMode == dsmDisable:
       removeBootConfigLine(result.bootConfigPath, "dtparam=spi=on", result)
       ensureRaspiConfigState("spi", false, result)
 
@@ -343,21 +339,21 @@ proc applyInitPlan*(
     for line in plan.removeBootConfigLines:
       removeBootConfigLine(result.bootConfigPath, line, result)
 
-proc initResultJson*(initResult: InitResult): JsonNode =
+proc setupResultJson*(setupResult: SetupResult): JsonNode =
   %*{
-    "device": initResult.device,
-    "drivers": initResult.drivers,
-    "bootConfigPath": initResult.bootConfigPath,
-    "actions": initResult.actions,
-    "rebootRequired": initResult.rebootRequired,
+    "device": setupResult.device,
+    "drivers": setupResult.drivers,
+    "bootConfigPath": setupResult.bootConfigPath,
+    "actions": setupResult.actions,
+    "rebootRequired": setupResult.rebootRequired,
   }
 
-proc initializeCurrentFrameOS*(
+proc setupCurrentFrameOS*(
   configPath = "",
   bootConfigPath = "",
   vendorRoot = "/srv/frameos/vendor",
   driversDir = "",
-): InitResult =
+): SetupResult =
   let hadConfigEnv = existsEnv("FRAMEOS_CONFIG")
   let previousConfig = if hadConfigEnv: getEnv("FRAMEOS_CONFIG") else: ""
 
@@ -366,8 +362,8 @@ proc initializeCurrentFrameOS*(
 
   try:
     let frameConfig = loadConfig()
-    let plan = buildInitPlan(frameConfig, driversDir = driversDir)
-    applyInitPlan(plan, bootConfigPath = bootConfigPath, vendorRoot = vendorRoot)
+    let plan = buildSetupPlan(frameConfig, driversDir = driversDir)
+    applySetupPlan(plan, bootConfigPath = bootConfigPath, vendorRoot = vendorRoot)
   finally:
     if configPath.len > 0:
       if hadConfigEnv:
@@ -375,10 +371,10 @@ proc initializeCurrentFrameOS*(
       else:
         delEnv("FRAMEOS_CONFIG")
 
-proc initUsage*(): string =
-  "Usage: frameos init [--config PATH] [--json]"
+proc setupUsage*(): string =
+  "Usage: frameos setup [--config PATH] [--json]"
 
-proc runInitCommand*(args: seq[string]) =
+proc runSetupCommand*(args: seq[string]) =
   var jsonOutput = false
   var configPath = ""
 
@@ -393,26 +389,26 @@ proc runInitCommand*(args: seq[string]) =
         raise newException(ValueError, "--config requires a file path")
       configPath = args[index]
     of "--help", "-h":
-      echo initUsage()
+      echo setupUsage()
       return
     else:
-      raise newException(ValueError, "Unknown init option: " & args[index])
+      raise newException(ValueError, "Unknown setup option: " & args[index])
     inc index
 
   when not defined(windows):
     if geteuid() != 0:
-      raise newException(IOError, "frameos init must be run as root")
+      raise newException(IOError, "frameos setup must be run as root")
 
-  let result = initializeCurrentFrameOS(configPath = configPath)
+  let result = setupCurrentFrameOS(configPath = configPath)
   if jsonOutput:
-    echo initResultJson(result).pretty()
+    echo setupResultJson(result).pretty()
     return
 
-  echo "FrameOS init: " & (if result.device.len > 0: result.device else: "no device configured")
+  echo "FrameOS setup: " & (if result.device.len > 0: result.device else: "no device configured")
   if result.drivers.len > 0:
     echo "Drivers: " & result.drivers.join(", ")
   if result.actions.len == 0:
-    echo "No init changes required."
+    echo "No setup changes required."
   else:
     for action in result.actions:
       echo "- " & action

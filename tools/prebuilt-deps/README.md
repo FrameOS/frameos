@@ -31,7 +31,42 @@ The target list comes from `backend/bin/cross`, which currently covers:
 ./tools/prebuilt-deps/build.sh ubuntu-24.04-amd64   # Ubuntu example
 ```
 
-The script drops results under `build/prebuilt-deps/<target>/` where `<target>`
+## Fast Release Build
+
+If you want to fill an entire release folder such as
+`build/prebuilt-cross/2026.3.3/` as quickly as possible, use the parallel
+release orchestrator:
+
+```bash
+./tools/prebuilt-deps/build_release.py 2026.3.3
+./tools/prebuilt-deps/build_release.py 2026.3.3 --target debian-bookworm-amd64
+```
+
+By default it:
+
+- builds every target from `backend/bin/cross`
+- only writes `frameos`, compiled driver plugins, and manifests under
+  `build/prebuilt-cross/<release>/`
+- treats `build/prebuilt-deps/` as a separate shared dependency store and does
+  not rebuild or rewrite `nim`, `quickjs`, or `lgpio` there
+- runs one target at a time by default so the full worker budget stays inside
+  the active target
+- lets `FRAMEOS_DRIVER_JOBS` fan out as far as possible inside that target, so
+  driver plugins, including all Waveshare variants, can build concurrently
+- rewrites the aggregate `build/prebuilt-cross/<release>/manifest.json` after
+  all targets finish
+- writes `build/prebuilt-cross/<release>/build-metrics.json` with per-target
+  duration and size metrics, and prints a brief metrics summary to stdout
+
+You can restrict the target set or override the concurrency split when needed:
+
+```bash
+./tools/prebuilt-deps/build_release.py 2026.3.3 debian-bookworm-arm64 ubuntu-24.04-amd64
+./tools/prebuilt-deps/build_release.py 2026.3.3 --target debian-bookworm-arm64
+./tools/prebuilt-deps/build_release.py 2026.3.3 --target-jobs 3 --driver-jobs 4
+```
+
+The `build.sh` helper drops results under `build/prebuilt-deps/<target>/` where `<target>`
 looks like `debian-bookworm-armhf` or `ubuntu-24.04-amd64`. Each folder contains
 versioned component directories so you can keep several revisions side-by-side,
 for example:
@@ -57,10 +92,12 @@ driver_frameBuffer-f04c53a0e275/.build-info
 
 You can upload the entire folder as a tarball to your cache server.
 
-`nim`, `quickjs`, and `lgpio` are built by their own Dockerfiles. The generic
-`frameos` runtime and compiled driver plugins are then cross-compiled with
-`backend/bin/cross`, reusing the freshly built `quickjs` and `lgpio`
-components from the same target folder.
+`nim`, `quickjs`, and `lgpio` are built by their own Dockerfiles. Before
+falling back to Docker, `build.sh` now attempts to stage the published `lgpio`
+archive from `tools/prebuilt-deps/manifest.json` when the requested target,
+version, and upstream repo match. The generic `frameos` runtime and compiled
+driver plugins are then cross-compiled with `backend/bin/cross`, reusing the
+locally staged `quickjs` and `lgpio` components from the same target folder.
 
 The cross-compiled staging outputs now live under
 `build/prebuilt-cross/<frameos-release>/<target>/`, where `<frameos-release>`
