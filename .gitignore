@@ -64,9 +64,9 @@ frameos/agent/nimble.paths
 frameos/state/*.json
 e2e/state/scene.json
 e2e/state/*.json
-e2e/generated/interpreted.nim
-e2e/generated/scenes.json
-e2e/generated/scenes.nim
+e2e/code/scenes.json
+e2e/scenes
+e2e/scenes/*.so
 
 gpt.txt
 .env

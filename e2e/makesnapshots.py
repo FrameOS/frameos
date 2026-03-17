@@ -57,7 +57,7 @@ def main():
     contents = json.loads(frame_json.read_text())
     port = contents.get('framePort', 8787)
 
-    scenes_dir = Path('./scenes')
+    scenes_dir = Path('./json')
     snapshots_dir = Path('./snapshots')
     snapshots_dir.mkdir(exist_ok=True)
 

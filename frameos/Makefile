@@ -2,6 +2,8 @@
 .PHONY: cross-frameos-% cross-drivers-%
 
 CROSS_OUT ?= build/cross
+COMPILED_SCENES_OUTPUT_DIR ?= scenes
+COMPILED_SCENES_JOBS ?=
 
 run: build
 	./build/frameos --verbose
@@ -14,7 +16,7 @@ build-app: apploaders
 build-scenes: apploaders
 	nimble assets -y
 	nimble setup
-	python3 tools/build_compiled_scenes.py --frameos-root .
+	python3 tools/build_compiled_scenes.py --frameos-root . --output-dir "$(COMPILED_SCENES_OUTPUT_DIR)" $(if $(COMPILED_SCENES_JOBS),--jobs "$(COMPILED_SCENES_JOBS)")
 
 debug: build-scenes apploaders
 	nimble build -y --verbose --debugger:native --lineTrace:on --stackTrace:on
