@@ -18,6 +18,19 @@ type Driver* = ref object of FrameOSDriver
   previewLock: Lock
   lastPreview: DriverPreviewArtifact
 
+const
+  inkyDevices = [
+    "pimoroni.inky_impression",
+    "pimoroni.inky_impression_7",
+    "pimoroni.inky_impression_13",
+    "pimoroni.inky_python",
+  ]
+  impressionDevices = [
+    "pimoroni.inky_impression",
+    "pimoroni.inky_impression_7",
+    "pimoroni.inky_impression_13",
+  ]
+
 proc previewPalette(colors: seq[(int, int, int)]): seq[(uint8, uint8, uint8)] =
   result = newSeq[(uint8, uint8, uint8)](colors.len)
   for i, color in colors:
@@ -62,6 +75,20 @@ proc safeStartProcess*(cmd: string; args: seq[string] = @[];
 
 proc deviceArgs*(dev: string): seq[string] =
   if dev.len > 0: @["--device", dev] else: @[]
+
+proc deviceInit*(frameConfig: FrameConfig): DriverInitSpec =
+  if frameConfig.isNil or frameConfig.device notin inkyDevices:
+    return nil
+
+  result = DriverInitSpec(
+    ensureAptPackages: @["python3-pip", "python3-venv"],
+    pythonVendorFolders: @["inkyPython"],
+    spiMode: dismEnable,
+    enableI2c: true,
+  )
+
+  if frameConfig.device in impressionDevices:
+    result.ensureBootConfigLines = @["dtoverlay=spi0-0cs"]
 
 proc init*(frameOS: FrameOS): Driver =
   discard frameOS.logger.safeLog("Initializing Inky driver")

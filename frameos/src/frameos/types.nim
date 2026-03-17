@@ -326,6 +326,17 @@ type
   DriverPreviewPixelFormat* = enum
     dpfRgba8, dpfGray8, dpfIndexed2, dpfIndexed4, dpfIndexed8, dpfMono1
 
+  DriverInitSpiMode* = enum
+    dismUnchanged, dismEnable, dismDisable
+
+  DriverInitSpec* = ref object of RootObj
+    ensureBootConfigLines*: seq[string]
+    removeBootConfigLines*: seq[string]
+    ensureAptPackages*: seq[string]
+    pythonVendorFolders*: seq[string]
+    spiMode*: DriverInitSpiMode
+    enableI2c*: bool
+
   DriverPreviewArtifact* = ref object of RootObj
     width*: int
     height*: int
@@ -339,6 +350,7 @@ type
     canPreview*: bool
     canTurnOnOff*: bool
     init*: proc (frameOS: FrameOS): FrameOSDriver
+    deviceInit*: proc (frameConfig: FrameConfig): DriverInitSpec
     render*: proc (self: FrameOSDriver, image: Image): void
     preview*: proc (self: FrameOSDriver): DriverPreviewArtifact
     turnOn*: proc (self: FrameOSDriver): void

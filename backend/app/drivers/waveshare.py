@@ -237,6 +237,17 @@ def write_waveshare_driver_nim(drivers: dict[str, Driver]) -> str:
 
     variant = convert_waveshare_source(driver.variant)
     variant_folder = get_variant_folder(variant.key)
+    no_spi_variants = {"EPD_12in48", "EPD_12in48b", "EPD_12in48b_V2", "EPD_13in3e"}
+    spi_mode = "dismDisable" if variant.key in no_spi_variants else "dismEnable"
+    ensure_lines: list[str] = []
+    remove_lines: list[str] = []
+    if variant.key == "EPD_10in3":
+        ensure_lines.append("dtoverlay=spi0-0cs")
+        remove_lines.append("dtparam=spi=on")
+    if variant.key == "EPD_13in3e":
+        ensure_lines.extend(["gpio=7=op,dl", "gpio=8=op,dl"])
+    ensure_lines_nim = "[" + ", ".join(f'"{line}"' for line in ensure_lines) + "]"
+    remove_lines_nim = "[" + ", ".join(f'"{line}"' for line in remove_lines) + "]"
 
     color_warning = ""
     if variant.color_option == "Unknown":
@@ -246,6 +257,7 @@ def write_waveshare_driver_nim(drivers: dict[str, Driver]) -> str:
 
 import {variant_folder}/DEV_Config as waveshareConfig
 import {variant_folder}/{variant.key} as waveshareDisplay
+import frameos/types
 import drivers/waveshare/types
 
 let width* = waveshareDisplay.{variant.prefix}_WIDTH
@@ -253,6 +265,13 @@ let height* = waveshareDisplay.{variant.prefix}_HEIGHT
 
 let color_option* = ColorOption.{variant.color_option}
 {color_warning}
+
+proc deviceInit*(_: FrameConfig): DriverInitSpec =
+  DriverInitSpec(
+    ensureBootConfigLines: @{ensure_lines_nim},
+    removeBootConfigLines: @{remove_lines_nim},
+    spiMode: {spi_mode},
+  )
 
 proc init*() =
   let resp = waveshareConfig.DEV_Module_Init()

@@ -15,6 +15,7 @@ from app.tasks.deploy_frame import (
     _local_compiled_driver_artifact_dir,
     _local_compiled_scene_artifact_dir,
     _local_vendor_source_dir,
+    _run_frameos_init,
     _upload_local_compiled_drivers,
     _scene_compile_start_lines,
     _sync_vendor_dir,
@@ -189,6 +190,105 @@ async def test_upload_local_compiled_drivers_merges_into_existing_release(monkey
         "build123",
     )
     assert calls[0][1] == {"replace": False}
+
+
+@pytest.mark.asyncio
+async def test_run_frameos_init_invokes_release_binary_and_parses_json():
+    commands: list[tuple[str, dict]] = []
+    logs: list[tuple[str, str]] = []
+
+    async def fake_log(level: str, message: str) -> None:
+        logs.append((level, message))
+
+    async def fake_exec(command: str, **kwargs):
+        commands.append((command, kwargs))
+        output = kwargs.get("output")
+        if output is not None:
+            output.extend(
+                [
+                    "{",
+                    '  "actions": ["Added boot config line: dtoverlay=spi0-0cs"],',
+                    '  "rebootRequired": true',
+                    "}",
+                ]
+            )
+        return 0
+
+    deployer = SimpleNamespace(log=fake_log, exec_command=fake_exec)
+
+    summary = await _run_frameos_init(
+        deployer,
+        frameos_path="/srv/frameos/releases/release_abc/frameos",
+        frame_json_path="/srv/frameos/releases/release_abc/frame.json",
+    )
+
+    assert summary == {
+        "actions": ["Added boot config line: dtoverlay=spi0-0cs"],
+        "rebootRequired": True,
+    }
+    assert logs == [
+        ("stdout", "🔷 Running FrameOS init"),
+        ("stdout", "🔷 Init: Added boot config line: dtoverlay=spi0-0cs"),
+    ]
+    assert len(commands) == 1
+    command, kwargs = commands[0]
+    assert command == (
+        "sudo env FRAMEOS_CONFIG=/srv/frameos/releases/release_abc/frame.json "
+        "/srv/frameos/releases/release_abc/frameos init --json"
+    )
+    assert kwargs["log_output"] is False
+    assert isinstance(kwargs["output"], list)
+
+
+@pytest.mark.asyncio
+async def test_run_frameos_init_raises_when_output_is_not_json():
+    async def fake_log(*_args, **_kwargs):
+        return None
+
+    async def fake_exec(_command: str, **kwargs):
+        output = kwargs.get("output")
+        if output is not None:
+            output.extend(["not-json"])
+        return 0
+
+    deployer = SimpleNamespace(log=fake_log, exec_command=fake_exec)
+
+    with pytest.raises(RuntimeError, match="Failed to parse FrameOS init output"):
+        await _run_frameos_init(
+            deployer,
+            frameos_path="/srv/frameos/current/frameos",
+            frame_json_path="/srv/frameos/current/frame.json",
+        )
+
+
+@pytest.mark.asyncio
+async def test_run_frameos_init_parses_json_after_warning_lines():
+    async def fake_log(*_args, **_kwargs):
+        return None
+
+    async def fake_exec(_command: str, **kwargs):
+        output = kwargs.get("output")
+        if output is not None:
+            output.extend(
+                [
+                    "Warning: Detected timezone is not valid: Europe/Brussels",
+                    '{',
+                    '  "actions": [],',
+                    '  "rebootRequired": false',
+                    '}',
+                ]
+            )
+        return 0
+
+    deployer = SimpleNamespace(log=fake_log, exec_command=fake_exec)
+
+    summary = await _run_frameos_init(
+        deployer,
+        frameos_path="/srv/frameos/current/frameos",
+        frame_json_path="/srv/frameos/current/frame.json",
+    )
+
+    assert summary == {"actions": [], "rebootRequired": False}
 
 
 @pytest.mark.asyncio

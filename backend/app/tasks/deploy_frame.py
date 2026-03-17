@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from functools import partial
+import json
 import os
 from pathlib import Path
 import re
@@ -746,6 +747,52 @@ async def _upload_local_compiled_drivers(
     )
 
 
+async def _run_frameos_init(
+    deployer: FrameDeployer,
+    *,
+    frameos_path: str,
+    frame_json_path: str,
+) -> dict[str, Any]:
+    output: list[str] = []
+    await deployer.log("stdout", f"{icon} Running FrameOS init")
+    await deployer.exec_command(
+        "sudo env "
+        f"FRAMEOS_CONFIG={shlex.quote(frame_json_path)} "
+        f"{shlex.quote(frameos_path)} init --json",
+        output=output,
+        log_output=False,
+    )
+
+    raw_output = "\n".join(line for line in output if line.strip())
+    if not raw_output:
+        raise RuntimeError("FrameOS init returned no output")
+
+    lines = [line for line in raw_output.splitlines() if line.strip()]
+    summary: dict[str, Any] | None = None
+    for index, line in enumerate(lines):
+        if not line.lstrip().startswith("{"):
+            continue
+        candidate = "\n".join(lines[index:])
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict):
+            summary = parsed
+            break
+
+    if summary is None:
+        raise RuntimeError(f"Failed to parse FrameOS init output: {raw_output}")
+
+    actions = summary.get("actions")
+    if isinstance(actions, list):
+        for action in actions:
+            if isinstance(action, str) and action.strip():
+                await deployer.log("stdout", f"{icon} Init: {action}")
+
+    return summary
+
+
 async def _build_remote_compiled_scenes(
     deployer: FrameDeployer,
     remote_build_root: str,
@@ -936,6 +983,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
         await update_frame(db, redis, frame)
 
         settings = get_settings_dict(db)
+        must_reboot = False
 
         with tempfile.TemporaryDirectory() as temp_dir:
             self = FrameDeployer(db=db, redis=redis, frame=frame, nim_path="", temp_dir=temp_dir)
@@ -1228,16 +1276,6 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                     build_id,
                     reuse_existing_remote=build_dir is None,
                 )
-                await install_if_necessary("python3-pip")
-                await install_if_necessary("python3-venv")
-                await self.exec_command(
-                    f"cd /srv/frameos/vendor/{inkyPython.vendor_folder} && "
-                    "([ ! -d env ] && python3 -m venv env || echo 'env exists') && "
-                    "(sha256sum -c requirements.txt.sha256sum 2>/dev/null || "
-                    "(echo '> env/bin/pip3 install -r requirements.txt' && "
-                    "env/bin/pip3 install -r requirements.txt && "
-                    "sha256sum requirements.txt > requirements.txt.sha256sum))"
-                )
 
             if inkyHyperPixel2r := drivers.get("inkyHyperPixel2r"):
                 await self.log("stdout", f"{icon} Installing inkyHyperPixel2r driver")
@@ -1251,17 +1289,13 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                     build_id,
                     reuse_existing_remote=build_dir is None,
                 )
-                await install_if_necessary("python3-dev")
-                await install_if_necessary("python3-pip")
-                await install_if_necessary("python3-venv")
-                await self.exec_command(
-                    f"cd /srv/frameos/vendor/{inkyHyperPixel2r.vendor_folder} && "
-                    "([ ! -d env ] && python3 -m venv env || echo 'env exists') && "
-                    "(sha256sum -c requirements.txt.sha256sum 2>/dev/null || "
-                    "(echo '> env/bin/pip3 install -r requirements.txt' && "
-                    "env/bin/pip3 install -r requirements.txt && "
-                    "sha256sum requirements.txt > requirements.txt.sha256sum))"
-                )
+
+            init_summary = await _run_frameos_init(
+                self,
+                frameos_path=release_frameos_path,
+                frame_json_path=f"/srv/frameos/releases/release_{build_id}/frame.json",
+            )
+            must_reboot = bool(init_summary.get("rebootRequired"))
 
             # 5. Upload frameos.service
             await self.log("stdout", f"{icon} Swapping out the release")
@@ -1303,27 +1337,6 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             )
 
         await self.log("stdout", f"{icon} Running final cleanup scripts")
-        boot_config = "/boot/config.txt"
-        if await self.exec_command("test -f /boot/firmware/config.txt", raise_on_error=False) == 0:
-            boot_config = "/boot/firmware/config.txt"
-
-        # Additional device config
-        if drivers.get("i2c"):
-            await self.exec_command(
-                'grep -q "^dtparam=i2c_vc=on$" ' + boot_config + ' '
-                '|| echo "dtparam=i2c_vc=on" | sudo tee -a ' + boot_config
-            )
-            await self.exec_command(
-                'command -v raspi-config > /dev/null && '
-                'sudo raspi-config nonint get_i2c | grep -q "1" && { '
-                '  sudo raspi-config nonint do_i2c 0; echo "I2C enabled"; '
-                '} || echo "I2C already enabled"'
-            )
-
-        if drivers.get("spi"):
-            await self.exec_command('sudo raspi-config nonint do_spi 0')
-        elif drivers.get("noSpi"):
-            await self.exec_command('sudo raspi-config nonint do_spi 1')
 
         if low_memory:
             await self.exec_command(
@@ -1341,18 +1354,6 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             await self.exec_command(                               f"echo '{crontab}' | sudo tee /etc/cron.d/frameos-reboot")
         else:
             await self.exec_command("sudo rm -f /etc/cron.d/frameos-reboot")
-
-        must_reboot = False
-
-        if drivers.get("bootconfig"):
-            for line in (drivers["bootconfig"].lines or []):
-                if line.startswith("#"):
-                    to_remove = line[1:]
-                    await self.exec_command(f'grep -q "^{to_remove}" {boot_config} && sudo sed -i "/^{to_remove}/d" {boot_config}', raise_on_error=False)
-                else:
-                    if (await self.exec_command(f'grep -q "^{line}" ' + boot_config, raise_on_error=False)) != 0:
-                        await self.exec_command(command=f'echo "{line}" | sudo tee -a ' + boot_config, log_output=False)
-                        must_reboot = True
 
         if frame.last_successful_deploy_at is None:
             # Reboot after the first deploy to make sure any modifications to config.txt are persisted to disk

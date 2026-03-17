@@ -14,6 +14,8 @@ def test_write_driver_plugin_nim_exports_runtime_channel_binder():
     assert "proc bindCompiledPluginRuntimeChannels*(hooks: ptr CompiledRuntimeHooks)" in source
     assert "bindCompiledRuntimeHooks(hooks)" in source
     assert 'import drivers/evdev/evdev as compiled_evdev_driver' in source
+    assert "proc deviceInitDriver(frameConfig: FrameConfig): DriverInitSpec" in source
+    assert "deviceInit: deviceInitDriver" in source
 
 
 def test_write_driver_plugin_nim_exports_preview_boundary():
