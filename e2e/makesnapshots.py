@@ -51,7 +51,7 @@ def main():
     # Start the frameos binary in the background
     process = subprocess.Popen(['./tmp/frameos-bin', '--debug'])
     print(f"Started frameos with PID {process.pid}")
-    time.sleep(2)
+    time.sleep(4)
 
     frame_json = Path('./frame.json')
     contents = json.loads(frame_json.read_text())
