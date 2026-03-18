@@ -13,6 +13,8 @@ git.pkg-path = "git"
 git.outputs = "all"
 gnumake.pkg-path = "gnumake"
 gnumake.outputs = "all"
+libffi.pkg-path = "libffi"
+libffi.outputs = "all"
 nodejs.pkg-path = "nodejs_22"
 nodejs.outputs = "all"
 nim.pkg-path = "nim"
@@ -102,24 +104,36 @@ on-activate = '''
     printf '%s' "$js_workspace_hash" > "$js_stamp"
   fi
 
-  frameos_nim_hash="$(sha256sum frameos/frameos.nimble | awk '{print $1}')"
+  frameos_nim_hash="$(
+    sha256sum \
+      frameos/frameos.nimble \
+      frameos/nimble.lock \
+    | sha256sum | awk '{print $1}'
+  )"
   frameos_nim_stamp="$FRAMEOS_FLOX_CACHE_DIR/frameos-nim.sha256"
   if [ ! -f frameos/nimble.paths ] || [ ! -f "$frameos_nim_stamp" ] || [ "$(cat "$frameos_nim_stamp")" != "$frameos_nim_hash" ]; then
     echo "Syncing FrameOS Nim dependencies..."
     (
       cd frameos
       nimble install -dy
+      nimble setup
     )
     printf '%s' "$frameos_nim_hash" > "$frameos_nim_stamp"
   fi
 
-  agent_nim_hash="$(sha256sum frameos/agent/frameos_agent.nimble | awk '{print $1}')"
+  agent_nim_hash="$(
+    sha256sum \
+      frameos/agent/frameos_agent.nimble \
+      frameos/agent/nimble.lock \
+    | sha256sum | awk '{print $1}'
+  )"
   agent_nim_stamp="$FRAMEOS_FLOX_CACHE_DIR/frameos-agent-nim.sha256"
   if [ ! -f frameos/agent/nimble.paths ] || [ ! -f "$agent_nim_stamp" ] || [ "$(cat "$agent_nim_stamp")" != "$agent_nim_hash" ]; then
     echo "Syncing FrameOS agent Nim dependencies..."
     (
       cd frameos/agent
       nimble install -dy
+      nimble setup
     )
     printf '%s' "$agent_nim_hash" > "$agent_nim_stamp"
   fi
