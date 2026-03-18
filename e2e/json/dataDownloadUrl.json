@@ -39,11 +39,11 @@
         "cache": {
           "duration": "900",
           "durationEnabled": true,
-          "enabled": true,
+          "enabled": false,
           "inputEnabled": true
         },
         "config": {
-          "url": "https://frameos.net/.ci_text_file"
+          "url": "http://127.0.0.1:18791/.ci_text_file"
         },
         "keyword": "data/downloadUrl"
       },
@@ -128,12 +128,12 @@
       "data": {
         "keyword": "data/downloadUrl",
         "config": {
-          "url": "https://frameos.net/.this-is-not-a-file-that-exists"
+          "url": "http://127.0.0.1:18791/.this-is-not-a-file-that-exists"
         },
         "cache": {
           "duration": "900",
           "durationEnabled": true,
-          "enabled": true,
+          "enabled": false,
           "inputEnabled": true
         }
       },

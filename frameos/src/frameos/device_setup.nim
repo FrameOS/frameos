@@ -35,6 +35,10 @@ var driverSetupSpecLoaderHook*: DriverSetupSpecLoaderHook
 var compiledDriverSetupLoadCounter = 0
 
 const COMPILED_DRIVER_PLUGIN_SYMBOL = "getCompiledDriverPlugin"
+const NIM_PLUGIN_MAIN_SYMBOL = "NimMain"
+
+type
+  NimPluginMain = proc() {.cdecl.}
 
 proc shQuote(value: string): string =
   "'" & value.replace("'", "'\"'\"'") & "'"
@@ -72,6 +76,12 @@ proc removeCopiedCompiledDriverLibrary(path: string) =
   except OSError:
     discard
 
+proc initializeNimPluginRuntime(handle: LibHandle) =
+  let nimMain = cast[NimPluginMain](symAddr(handle, NIM_PLUGIN_MAIN_SYMBOL))
+  if nimMain.isNil:
+    return
+  nimMain()
+
 proc loadDriverSetupSpec(
   path: string,
   frameConfig: FrameConfig,
@@ -82,6 +92,7 @@ proc loadDriverSetupSpec(
     let handle = loadLib(copiedPath)
     if handle.isNil:
       raise newException(IOError, "Failed to load compiled driver plugin: " & path)
+    initializeNimPluginRuntime(handle)
 
     let factory = cast[CompiledDriverPluginFactory](symAddr(handle, COMPILED_DRIVER_PLUGIN_SYMBOL))
     if factory.isNil:

@@ -1,6 +1,5 @@
 import pixie
 import base64
-import httpclient
 import json
 import random
 import os
@@ -14,6 +13,7 @@ import times
 import uri
 
 import frameos/utils/font
+import frameos/utils/http_fetch
 
 proc imageMagickCommand(): string =
   let magick = findExe("magick")
@@ -130,28 +130,20 @@ proc decodeDataUrl*(dataUrl: string): Image =
 proc downloadImage*(url: string): Image =
   if url.startsWith("data:"):
     return decodeDataUrl(url)
-  var client = newHttpClient(timeout = 30000)
-  try:
-    let response = client.request(url, httpMethod = HttpGet)
-    if response.code != Http200:
-      raise newException(Exception, "Error downloading image: " & $response.status)
-    result = decodeImageWithFallback(response.body)
-  finally:
-    client.close()
+  let response = fetchUrl(url)
+  if response.status < 200 or response.status >= 300:
+    raise newException(Exception, "Error downloading image: " & errorMessage(response))
+  result = decodeImageWithFallback(response.body)
 
 proc downloadImageWithData*(url: string): tuple[image: Image, data: string] =
   if url.startsWith("data:"):
     let content = decodeDataUrlData(url)
     return (decodeImageWithFallback(content), content)
-  var client = newHttpClient(timeout = 30000)
-  try:
-    let response = client.request(url, httpMethod = HttpGet)
-    if response.code != Http200:
-      raise newException(Exception, "Error downloading image: " & $response.status)
-    let content = response.body
-    result = (decodeImageWithFallback(content), content)
-  finally:
-    client.close()
+  let response = fetchUrl(url)
+  if response.status < 200 or response.status >= 300:
+    raise newException(Exception, "Error downloading image: " & errorMessage(response))
+  let content = response.body
+  result = (decodeImageWithFallback(content), content)
 
 proc parseExifJson(output: string): Option[JsonNode] =
   try:

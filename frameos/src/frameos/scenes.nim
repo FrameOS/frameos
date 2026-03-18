@@ -13,10 +13,12 @@ const UPLOADED_SCENES_JSON_PATH = &"{SCENE_STATE_JSON_FOLDER}/uploaded.json"
 const COMPILED_SCENES_FOLDER = "./scenes"
 const COMPILED_SCENE_PLUGIN_SYMBOL = "getCompiledScenePlugin"
 const COMPILED_PLUGIN_RUNTIME_CHANNELS_SYMBOL = "bindCompiledPluginRuntimeChannels"
+const NIM_PLUGIN_MAIN_SYMBOL = "NimMain"
 
 type
   CompiledScenePluginFactory = proc(): CompiledScenePlugin {.cdecl.}
   CompiledPluginRuntimeChannelsBinder = proc(hooks: ptr CompiledRuntimeHooks) {.cdecl.}
+  NimPluginMain = proc() {.cdecl.}
   LoadedCompiledScenes = tuple[
     defaultSceneId: Option[SceneId],
     sceneIds: seq[SceneId],
@@ -52,6 +54,12 @@ proc bindPluginChannels(handle: LibHandle) =
   var runtimeHooks = getCompiledRuntimeHooks()
   binder(addr runtimeHooks)
 
+proc initializeNimPluginRuntime(handle: LibHandle) =
+  let nimMain = cast[NimPluginMain](symAddr(handle, NIM_PLUGIN_MAIN_SYMBOL))
+  if nimMain.isNil:
+    return
+  nimMain()
+
 proc loadCompiledScenePlugin(path: string): Option[CompiledScenePlugin] =
   var copiedPath = ""
   try:
@@ -60,6 +68,7 @@ proc loadCompiledScenePlugin(path: string): Option[CompiledScenePlugin] =
     if handle.isNil:
       echo "Warning: failed to load compiled scene plugin: ", path
       return none(CompiledScenePlugin)
+    initializeNimPluginRuntime(handle)
     bindPluginChannels(handle)
     let factory = cast[CompiledScenePluginFactory](symAddr(handle, COMPILED_SCENE_PLUGIN_SYMBOL))
     if factory.isNil:

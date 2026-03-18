@@ -125,7 +125,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     blendMode: "normal",
   ))
   scene.node2 = data_downloadImageApp.App(nodeName: "data/downloadImage", nodeId: 2.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_downloadImageApp.AppConfig(
-    url: "https://frameos.net/img/logo_in_ci_tests.png",
+    url: "http://127.0.0.1:18791/logo_in_ci_tests.png",
     metadataStateKey: "",
   ))
   scene.node3 = render_splitApp.App(nodeName: "render/split", nodeId: 3.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_splitApp.AppConfig(

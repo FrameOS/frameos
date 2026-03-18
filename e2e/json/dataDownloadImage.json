@@ -56,7 +56,7 @@
       "data": {
         "keyword": "data/downloadImage",
         "config": {
-          "url": "https://frameos.net/img/logo_in_ci_tests.png"
+          "url": "http://127.0.0.1:18791/logo_in_ci_tests.png"
         },
         "cache": {
           "duration": "900",

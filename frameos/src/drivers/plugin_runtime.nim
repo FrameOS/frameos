@@ -6,10 +6,12 @@ import frameos/utils/image
 const DRIVER_PLUGINS_FOLDER = "./drivers"
 const COMPILED_DRIVER_PLUGIN_SYMBOL = "getCompiledDriverPlugin"
 const COMPILED_PLUGIN_RUNTIME_CHANNELS_SYMBOL = "bindCompiledPluginRuntimeChannels"
+const NIM_PLUGIN_MAIN_SYMBOL = "NimMain"
 
 type
   CompiledDriverPluginFactory = proc(): CompiledDriverPlugin {.cdecl.}
   CompiledPluginRuntimeChannelsBinder = proc(hooks: ptr CompiledRuntimeHooks) {.cdecl.}
+  NimPluginMain = proc() {.cdecl.}
   LoadedCompiledDriver = ref object
     path: string
     plugin: CompiledDriverPlugin
@@ -60,6 +62,12 @@ proc bindPluginChannels(handle: LibHandle) =
   var runtimeHooks = getCompiledRuntimeHooks()
   binder(addr runtimeHooks)
 
+proc initializeNimPluginRuntime(handle: LibHandle) =
+  let nimMain = cast[NimPluginMain](symAddr(handle, NIM_PLUGIN_MAIN_SYMBOL))
+  if nimMain.isNil:
+    return
+  nimMain()
+
 proc loadCompiledDriverPlugin(path: string): Option[CompiledDriverPlugin] =
   var copiedPath = ""
   try:
@@ -67,6 +75,7 @@ proc loadCompiledDriverPlugin(path: string): Option[CompiledDriverPlugin] =
     let handle = loadLib(copiedPath)
     if handle.isNil:
       return none(CompiledDriverPlugin)
+    initializeNimPluginRuntime(handle)
     bindPluginChannels(handle)
     let factory = cast[CompiledDriverPluginFactory](symAddr(handle, COMPILED_DRIVER_PLUGIN_SYMBOL))
     if factory.isNil:

@@ -26,10 +26,7 @@ type Scene* = ref object of FrameScene
   node5: data_downloadUrlApp.App
 
 {.push hint[XDeclaredButNotUsed]: off.}
-var cache0: Option[string] = none(string)
-var cache0Time: float = 0
-var cache1: Option[string] = none(string)
-var cache1Time: float = 0
+
 
 proc runNode*(self: Scene, nodeId: NodeId, context: ExecutionContext, asDataNode = false): Value =
   result = VNone()
@@ -45,11 +42,7 @@ proc runNode*(self: Scene, nodeId: NodeId, context: ExecutionContext, asDataNode
     case nextNode:
     of 2.NodeId: # render/text
       self.node2.appConfig.text = block:
-        if cache0.isNone() or epochTime() > cache0Time + 900.0:
-          cache0 = some(block:
-            self.node1.get(context))
-          cache0Time = epochTime()
-        cache0.get()
+        self.node1.get(context)
       self.node2.run(context)
       nextNode = -1.NodeId
     of 3.NodeId: # render/split
@@ -57,11 +50,7 @@ proc runNode*(self: Scene, nodeId: NodeId, context: ExecutionContext, asDataNode
       nextNode = -1.NodeId
     of 4.NodeId: # render/text
       self.node4.appConfig.text = block:
-        if cache1.isNone() or epochTime() > cache1Time + 900.0:
-          cache1 = some(block:
-            self.node5.get(context))
-          cache1Time = epochTime()
-        cache1.get()
+        self.node5.get(context)
       self.node4.run(context)
       nextNode = -1.NodeId
     else:
@@ -113,16 +102,12 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   scene.execNode = (proc(nodeId: NodeId, context: ExecutionContext) = discard scene.runNode(nodeId, context))
   scene.getDataNode = (proc(nodeId: NodeId, context: ExecutionContext): Value = scene.getDataNode(nodeId, context))
   scene.node1 = data_downloadUrlApp.App(nodeName: "data/downloadUrl", nodeId: 1.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_downloadUrlApp.AppConfig(
-    url: "https://frameos.net/.ci_text_file",
+    url: "http://127.0.0.1:18791/.ci_text_file",
   ))
   scene.node2 = render_textApp.App(nodeName: "render/text", nodeId: 2.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
     inputImage: none(Image),
     text: block:
-      if cache0.isNone() or epochTime() > cache0Time + 900.0:
-        cache0 = some(block:
-          self.node1.get(context))
-        cache0Time = epochTime()
-      cache0.get(),
+      self.node1.get(context),
     richText: "disabled",
     position: "center",
     vAlign: "middle",
@@ -151,16 +136,12 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     render_function: 0.NodeId,
   ))
   scene.node5 = data_downloadUrlApp.App(nodeName: "data/downloadUrl", nodeId: 5.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_downloadUrlApp.AppConfig(
-    url: "https://frameos.net/.this-is-not-a-file-that-exists",
+    url: "http://127.0.0.1:18791/.this-is-not-a-file-that-exists",
   ))
   scene.node4 = render_textApp.App(nodeName: "render/text", nodeId: 4.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
     inputImage: none(Image),
     text: block:
-      if cache1.isNone() or epochTime() > cache1Time + 900.0:
-        cache1 = some(block:
-          self.node5.get(context))
-        cache1Time = epochTime()
-      cache1.get(),
+      self.node5.get(context),
     richText: "disabled",
     position: "center",
     vAlign: "middle",

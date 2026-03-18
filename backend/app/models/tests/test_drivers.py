@@ -73,3 +73,15 @@ def test_waveshare_driver_setup_disables_spi_for_epd_13in3e():
 
     assert 'ensureBootConfigLines @["gpio=7=op,dl", "gpio=8=op,dl"]' in source
     assert "disableSpi()" in source
+
+
+def test_waveshare_driver_template_uses_testing_stubs_and_runtime_color_option_name():
+    source = write_waveshare_driver_nim(
+        {"waveshare": Driver(name="waveshare", variant="EPD_2in13_V3")}
+    )
+
+    assert "when defined(testing):" in source
+    assert "let width* = 122" in source
+    assert "let height* = 250" in source
+    assert "let colorOption* = ColorOption.Black" in source
+    assert "let color_option*" not in source
