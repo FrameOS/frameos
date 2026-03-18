@@ -1,16 +1,16 @@
 
 import frameos/channels
 import frameos/types
-import scenes/scene_black as scene_black
+import scenes/scene_renderTextPosition as scene_renderTextPosition
 
 proc bindCompiledPluginRuntimeChannels*(hooks: ptr CompiledRuntimeHooks) {.exportc, dynlib, cdecl.} =
   bindCompiledRuntimeHooks(hooks)
 
 proc getCompiledScenePlugin*(): CompiledScenePlugin {.exportc, dynlib, cdecl.} =
   CompiledScenePlugin(
-    id: "black".SceneId,
-    name: "Black",
-    isDefault: true,
+    id: "renderTextPosition".SceneId,
+    name: "Text",
+    isDefault: false,
     abiVersion: 1,
-    scene: scene_black.exportedScene,
+    scene: scene_renderTextPosition.exportedScene,
   )

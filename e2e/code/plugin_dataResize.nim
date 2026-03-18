@@ -1,16 +1,16 @@
 
 import frameos/channels
 import frameos/types
-import scenes/scene_black as scene_black
+import scenes/scene_dataResize as scene_dataResize
 
 proc bindCompiledPluginRuntimeChannels*(hooks: ptr CompiledRuntimeHooks) {.exportc, dynlib, cdecl.} =
   bindCompiledRuntimeHooks(hooks)
 
 proc getCompiledScenePlugin*(): CompiledScenePlugin {.exportc, dynlib, cdecl.} =
   CompiledScenePlugin(
-    id: "black".SceneId,
-    name: "Black",
-    isDefault: true,
+    id: "dataResize".SceneId,
+    name: "Resize image",
+    isDefault: false,
     abiVersion: 1,
-    scene: scene_black.exportedScene,
+    scene: scene_dataResize.exportedScene,
   )

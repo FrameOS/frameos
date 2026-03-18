@@ -1,16 +1,16 @@
 
 import frameos/channels
 import frameos/types
-import scenes/scene_black as scene_black
+import scenes/scene_renderTextOverflow as scene_renderTextOverflow
 
 proc bindCompiledPluginRuntimeChannels*(hooks: ptr CompiledRuntimeHooks) {.exportc, dynlib, cdecl.} =
   bindCompiledRuntimeHooks(hooks)
 
 proc getCompiledScenePlugin*(): CompiledScenePlugin {.exportc, dynlib, cdecl.} =
   CompiledScenePlugin(
-    id: "black".SceneId,
-    name: "Black",
-    isDefault: true,
+    id: "renderTextOverflow".SceneId,
+    name: "Text Overflow",
+    isDefault: false,
     abiVersion: 1,
-    scene: scene_black.exportedScene,
+    scene: scene_renderTextOverflow.exportedScene,
   )

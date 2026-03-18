@@ -11,5 +11,6 @@ proc getCompiledScenePlugin*(): CompiledScenePlugin {.exportc, dynlib, cdecl.} =
     id: "dataDownloadImage".SceneId,
     name: "Download Image",
     isDefault: false,
+    abiVersion: 1,
     scene: scene_dataDownloadImage.exportedScene,
   )
