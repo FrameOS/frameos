@@ -135,6 +135,9 @@ jobs:
           cd e2e
           source ../backend/.venv/bin/activate
           make
+      
+      - name: Show changes
+        run: |
           git status --short
           git diff --name-only
 
