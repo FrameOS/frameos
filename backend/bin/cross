@@ -218,7 +218,7 @@ def _resolve_release_version(frameos_root: Path, requested_version: str | None =
 
 
 def _runtime_component_dir(target_dir: Path) -> Path:
-    return target_dir / "runtime"
+    return target_dir / "frameos"
 
 
 def _runtime_manifest_path(target_dir: Path) -> Path:
@@ -617,7 +617,7 @@ async def build_frameos_runtime(
             components={
                 "frameos": {
                     "kind": "versioned_runtime",
-                    "directory": "runtime",
+                    "directory": "frameos",
                     "basename": "frameos",
                 }
             },
@@ -887,7 +887,7 @@ def parse_args(argv: Iterable[str]) -> argparse.Namespace:
     )
     build_frameos.add_argument("--target", required=True, help="Target slug (distro-version-arch)")
     build_frameos.add_argument("--frameos-root", default=str(FRAMEOS_ROOT), help="Path to the frameos source tree")
-    build_frameos.add_argument("--artifacts-dir", default="build/frameos", help="Directory for compiled artifacts")
+    build_frameos.add_argument("--artifacts-dir", default="../files", help="Directory for compiled artifacts")
     build_frameos.add_argument(
         "--release-version",
         default=None,
@@ -906,7 +906,7 @@ def parse_args(argv: Iterable[str]) -> argparse.Namespace:
     )
     build_drivers.add_argument("--target", required=True, help="Target slug (distro-version-arch)")
     build_drivers.add_argument("--frameos-root", default=str(FRAMEOS_ROOT), help="Path to the frameos source tree")
-    build_drivers.add_argument("--artifacts-dir", default="build/frameos", help="Directory for compiled artifacts")
+    build_drivers.add_argument("--artifacts-dir", default="../files", help="Directory for compiled artifacts")
     build_drivers.add_argument(
         "--release-version",
         default=None,

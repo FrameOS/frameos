@@ -48,15 +48,15 @@ CONTRACT_GUARD_FILES: tuple[str, ...] = (
 
 
 def _normalize_source(text: str) -> str:
-    normalized_lines: list[str] = []
+    normalized_segments: list[str] = []
     for raw_line in text.splitlines():
         line = raw_line.strip()
         if not line:
             continue
         if line.startswith("#"):
             continue
-        normalized_lines.append(re.sub(r"\s+", " ", line))
-    return "\n".join(normalized_lines)
+        normalized_segments.append(re.sub(r"\s+", " ", line))
+    return " ".join(normalized_segments)
 
 
 def read_nim_compiled_plugin_abi_version(repo_root: Path | None = None) -> int:

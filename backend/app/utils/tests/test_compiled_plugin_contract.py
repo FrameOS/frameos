@@ -1,6 +1,7 @@
 from app.utils.compiled_plugin_contract import (
     COMPILED_PLUGIN_ABI_VERSION,
     DEFAULT_SNAPSHOT_PATH,
+    _normalize_source,
     build_compiled_plugin_contract_snapshot,
     read_compiled_plugin_contract_snapshot,
     read_nim_compiled_plugin_abi_version,
@@ -30,3 +31,22 @@ def test_compiled_plugin_contract_snapshot_is_current() -> None:
         "Compiled plugin contract snapshot is stale. "
         "Refresh it with `python -m app.utils.compiled_plugin_contract write-snapshot` after confirming the ABI version is correct."
     )
+
+
+def test_compiled_plugin_contract_normalization_ignores_line_wrapping() -> None:
+    wrapped = """
+    raise newException(
+      IOError,
+      "Compiled driver plugin ABI mismatch in " & path
+        & ": expected " & $COMPILED_PLUGIN_ABI_VERSION
+        & ", got " & $plugin.abiVersion,
+    )
+    """
+    single_line = """
+    raise newException(
+      IOError,
+      "Compiled driver plugin ABI mismatch in " & path & ": expected " & $COMPILED_PLUGIN_ABI_VERSION & ", got " & $plugin.abiVersion,
+    )
+    """
+
+    assert _normalize_source(wrapped) == _normalize_source(single_line)

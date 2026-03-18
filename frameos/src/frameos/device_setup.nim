@@ -93,9 +93,7 @@ proc loadDriverSetupSpec(
     if plugin.abiVersion != COMPILED_PLUGIN_ABI_VERSION:
       raise newException(
         IOError,
-        "Compiled driver plugin ABI mismatch in " & path
-          & ": expected " & $COMPILED_PLUGIN_ABI_VERSION
-          & ", got " & $plugin.abiVersion,
+        "Compiled driver plugin ABI mismatch in " & path & ": expected " & $COMPILED_PLUGIN_ABI_VERSION & ", got " & $plugin.abiVersion,
       )
 
     result.id =

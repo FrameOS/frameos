@@ -219,12 +219,20 @@ def _selected_target_artifacts(
         artifacts.append(metadata_path)
 
     runtime_path = resolve_versioned_artifact(
-        target_dir / "runtime",
+        target_dir / "frameos",
         stem="frameos",
         suffix="",
         requested_version=release_version,
         exact=True,
     )
+    if runtime_path is None:
+        runtime_path = resolve_versioned_artifact(
+            target_dir / "runtime",
+            stem="frameos",
+            suffix="",
+            requested_version=release_version,
+            exact=True,
+        )
     if runtime_path is None:
         legacy_runtime_path = target_dir / "frameos"
         if legacy_runtime_path.is_file():
@@ -447,7 +455,7 @@ async def run_release_build(
     if not cross_script.is_file():
         raise RuntimeError(f"Expected cross script at {cross_script}")
 
-    release_dir = repo_root / "build" / "frameos"
+    release_dir = repo_root / "files"
     release_dir.mkdir(parents=True, exist_ok=True)
     started = time.perf_counter()
 

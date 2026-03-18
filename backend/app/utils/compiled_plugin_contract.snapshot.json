@@ -1,6 +1,6 @@
 {
   "abi_version": 1,
-  "boundary_hash": "ec02c1f440206db562ac26069ef4d682da2e26a23df5a263af078aee58c79afa",
+  "boundary_hash": "e8ab0409dec823d5d7225eba2539da7167e4189e86bbd3114d22b821e59c99f9",
   "files": [
     "backend/app/codegen/drivers_nim.py",
     "backend/app/codegen/scene_nim.py",

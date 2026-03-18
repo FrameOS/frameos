@@ -22,19 +22,20 @@ def release_version_key(value: str) -> tuple[int, ...]:
 
 def versioned_artifact_name(stem: str, version: str, suffix: str) -> str:
     normalized_suffix = suffix if suffix.startswith(".") or not suffix else f".{suffix}"
-    return f"{stem}.{normalize_release_version(version)}{normalized_suffix}"
+    return f"{stem}-{normalize_release_version(version)}{normalized_suffix}"
 
 
 def parse_versioned_artifact_name(filename: str, *, stem: str, suffix: str) -> str | None:
     normalized_suffix = suffix if suffix.startswith(".") or not suffix else f".{suffix}"
-    prefix = f"{stem}."
-    if not filename.startswith(prefix) or not filename.endswith(normalized_suffix):
-        return None
-    version = filename[len(prefix) : len(filename) - len(normalized_suffix)]
-    try:
-        return normalize_release_version(version)
-    except ValueError:
-        return None
+    for prefix in (f"{stem}-", f"{stem}."):
+        if not filename.startswith(prefix) or not filename.endswith(normalized_suffix):
+            continue
+        version = filename[len(prefix) : len(filename) - len(normalized_suffix)]
+        try:
+            return normalize_release_version(version)
+        except ValueError:
+            continue
+    return None
 
 
 def iter_versioned_artifacts(directory: Path, *, stem: str, suffix: str) -> list[tuple[str, Path]]:
