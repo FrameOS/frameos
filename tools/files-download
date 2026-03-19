@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+export FILES_R2_DEFAULT_COMMAND=download
+exec python3 "$(dirname "$0")/files_r2_sync.py" "$@"
