@@ -148,16 +148,28 @@ install_apt_package_optional() {
   return 1
 }
 
+ensure_systemd_environment() {
+  if ! command_exists systemctl; then
+    die "This installer requires a systemd-based host. Minimal Docker containers are not supported."
+  fi
+
+  if [ ! -d /run/systemd/system ]; then
+    die "This installer requires a running systemd init system. This environment does not appear to be booted with systemd."
+  fi
+
+  if ! systemctl list-unit-files >/dev/null 2>&1; then
+    die "This installer requires a working systemd environment. Test it on a real host, VM, or a container booted with systemd."
+  fi
+}
+
 ensure_base_tools() {
   if ! command_exists curl; then
     die "curl is required to run the installer."
   fi
+  ensure_systemd_environment
   if ! command_exists python3; then
     log "Installing python3"
     install_apt_package python3
-  fi
-  if ! command_exists systemctl; then
-    die "This installer currently supports systemd-based systems only."
   fi
   install_apt_package ca-certificates
 }
