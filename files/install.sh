@@ -1199,6 +1199,15 @@ install_systemd_service() {
   $SUDO systemctl enable frameos.service
 }
 
+start_frameos_service() {
+  log "Starting FrameOS service"
+  $SUDO systemctl start frameos.service
+  if ! $SUDO systemctl is-active --quiet frameos.service; then
+    $SUDO systemctl --no-pager --full status frameos.service || true
+    die "frameos.service failed to start. Inspect: sudo journalctl -u frameos.service -n 100 --no-pager"
+  fi
+}
+
 run_frameos_setup() {
   local setup_output=""
   local setup_status=0
@@ -1455,8 +1464,13 @@ PY
 
   log "Running frameos setup"
   setup_output_raw="$(run_frameos_setup)"
-  if ! setup_output="$(printf '%s\n' "$setup_output_raw" | extract_setup_json)"; then
-    die "Failed to parse FrameOS setup output."
+  if [ -z "$(printf '%s' "$setup_output_raw" | tr -d '[:space:]')" ]; then
+    log "FrameOS setup returned no output; assuming no setup changes were required."
+    setup_output="{}"
+  else
+    if ! setup_output="$(printf '%s\n' "$setup_output_raw" | extract_setup_json)"; then
+      die "Failed to parse FrameOS setup output."
+    fi
   fi
   reboot_required="$(printf '%s\n' "$setup_output" | extract_reboot_required)"
 
@@ -1475,13 +1489,17 @@ PY
     log "Reboot required before starting FrameOS."
     log "Run: sudo reboot"
   else
-    $SUDO systemctl restart frameos.service
+    start_frameos_service
     $SUDO systemctl --no-pager --full status frameos.service || true
   fi
 
   access_url="http://${FRAME_HOST}:${FRAME_PORT}/"
   if [ "$FRAME_ACCESS" != "public" ] && [ -n "$FRAME_ACCESS_KEY" ]; then
     access_url="${access_url}?k=${FRAME_ACCESS_KEY}"
+  fi
+  local_access_url="http://localhost:${FRAME_PORT}/"
+  if [ "$FRAME_ACCESS" != "public" ] && [ -n "$FRAME_ACCESS_KEY" ]; then
+    local_access_url="${local_access_url}?k=${FRAME_ACCESS_KEY}"
   fi
 
   log
@@ -1497,7 +1515,13 @@ PY
   if [ "${ADMIN_PASSWORD_GENERATED:-false}" = "true" ]; then
     log "Admin password: ${ADMIN_PASSWORD}"
   fi
-  log "Open: ${access_url}"
+  if [ "$reboot_required" != "true" ]; then
+    log "FrameOS is running."
+  fi
+  log "Access URL: ${access_url}"
+  if [ "$FRAME_HOST" != "localhost" ] && [ "$FRAME_HOST" != "127.0.0.1" ]; then
+    log "Access on this machine: ${local_access_url}"
+  fi
   if [ "$FRAME_ACCESS" != "public" ] && [ -n "$FRAME_ACCESS_KEY" ]; then
     log "Frame access key: ${FRAME_ACCESS_KEY}"
   fi
