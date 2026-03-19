@@ -86,7 +86,11 @@ frameos/buildroot/dl
 build/prebuilt-deps/
 build/prebuilt-cross/
 build/frameos/
-files/
+files/debian-*
+files/ubuntu-*
+files/assets
+files/vendor
+files/*.json
 frameos/.nimcache*
 .tmp-cache/
 frameos/.tmp-home/

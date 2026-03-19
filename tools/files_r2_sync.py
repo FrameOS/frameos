@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import mimetypes
 import os
 import sys
@@ -171,6 +172,36 @@ def content_type_for(path: Path) -> Dict[str, str]:
     return extra_args
 
 
+def file_md5sum(path: Path) -> str:
+    digest = hashlib.md5()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def remote_object_md5(remote_object: dict) -> Optional[str]:
+    etag = str(remote_object.get("ETag") or "").strip('"').lower()
+    if len(etag) != 32 or "-" in etag:
+        return None
+    if any(char not in "0123456789abcdef" for char in etag):
+        return None
+    return etag
+
+
+def file_matches_remote_object(path: Path, remote_object: dict) -> bool:
+    remote_size = remote_object.get("Size")
+    local_size = path.stat().st_size
+    if isinstance(remote_size, int) and remote_size != local_size:
+        return False
+
+    remote_md5 = remote_object_md5(remote_object)
+    if remote_md5:
+        return file_md5sum(path) == remote_md5
+
+    return True
+
+
 def delete_remote_keys(client, bucket: str, keys: Iterable[str], dry_run: bool = False) -> int:
     deleted = 0
     batch = []
@@ -202,6 +233,7 @@ def upload_directory(
     files_dir: Path,
     delete: bool = False,
     dry_run: bool = False,
+    force: bool = False,
 ) -> int:
     if not files_dir.exists():
         raise SystemExit(f"Local files directory does not exist: {files_dir}")
@@ -209,11 +241,17 @@ def upload_directory(
         raise SystemExit(f"Local files path is not a directory: {files_dir}")
 
     local_files = collect_local_files(files_dir)
-    remote_files = collect_remote_objects(client, bucket, prefix) if delete else {}
+    remote_files = collect_remote_objects(client, bucket, prefix)
 
     uploaded = 0
+    skipped = 0
     for rel_path, path in local_files.items():
         key = object_key(prefix, Path(rel_path))
+        remote_object = remote_files.get(rel_path)
+        if remote_object and not force and file_matches_remote_object(path, remote_object):
+            print(f"Skipping unchanged remote file s3://{bucket}/{key}")
+            skipped += 1
+            continue
         if dry_run:
             print(f"Would upload {path} -> s3://{bucket}/{key}")
             uploaded += 1
@@ -235,6 +273,7 @@ def upload_directory(
         deleted = delete_remote_keys(client, bucket, remote_only, dry_run=dry_run)
 
     print(f"Uploaded {uploaded} file(s) from {files_dir}")
+    print(f"Skipped {skipped} file(s) already present remotely")
     if delete:
         print(f"Deleted {deleted} remote file(s) not present locally")
     return 0
@@ -272,6 +311,7 @@ def download_directory(
     files_dir: Path,
     delete: bool = False,
     dry_run: bool = False,
+    force: bool = False,
 ) -> int:
     remote_objects = collect_remote_objects(client, bucket, prefix)
     if not remote_objects:
@@ -280,8 +320,16 @@ def download_directory(
 
     files_dir.mkdir(parents=True, exist_ok=True)
     downloaded = 0
+    skipped = 0
     for rel_key in sorted(remote_objects):
         target_path = safe_local_path(files_dir, rel_key)
+        if target_path.exists() and not target_path.is_file():
+            raise SystemExit(f"Local path exists and is not a file: {target_path}")
+        remote_object = remote_objects[rel_key]
+        if target_path.is_file() and not force and file_matches_remote_object(target_path, remote_object):
+            print(f"Skipping unchanged local file {target_path}")
+            skipped += 1
+            continue
         if dry_run:
             print(f"Would download s3://{bucket}/{object_key(prefix, Path(rel_key))} -> {target_path}")
             downloaded += 1
@@ -296,6 +344,7 @@ def download_directory(
         deleted = delete_local_files(files_dir, set(remote_objects), dry_run=dry_run)
 
     print(f"Downloaded {downloaded} file(s) into {files_dir}")
+    print(f"Skipped {skipped} file(s) already present locally")
     if delete:
         print(f"Deleted {deleted} local file(s) not present remotely")
     return 0
@@ -328,6 +377,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Print actions without changing local or remote files",
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite files even when the destination path already exists",
+    )
 
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("upload", help="Upload the local files/ directory to R2")
@@ -358,6 +412,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             files_dir=files_dir,
             delete=args.delete,
             dry_run=args.dry_run,
+            force=args.force,
         )
     if args.command == "download":
         return download_directory(
@@ -367,6 +422,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             files_dir=files_dir,
             delete=args.delete,
             dry_run=args.dry_run,
+            force=args.force,
         )
     raise SystemExit(f"Unknown command: {args.command}")
 
