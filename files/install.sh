@@ -91,6 +91,7 @@ Optional environment overrides:
   FRAMEOS_SERVER_API_KEY
   FRAMEOS_SERVER_SEND_LOGS
   FRAMEOS_FRAME_ACCESS
+  FRAMEOS_TIME_ZONE
   FRAMEOS_ADMIN_USER
   FRAMEOS_ADMIN_PASSWORD
   FRAMEOS_FORCE
@@ -178,6 +179,24 @@ curl_fetch() {
   local url="$1"
   local destination="$2"
   curl -fsSL --retry 3 --connect-timeout 10 "$url" -o "$destination"
+}
+
+validate_json_file() {
+  local path="$1"
+  local label="$2"
+  python3 - "$path" "$label" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+label = sys.argv[2]
+
+try:
+    with open(path, "r", encoding="utf-8") as handle:
+        json.load(handle)
+except Exception as exc:
+    raise SystemExit(f"{label} is not valid JSON: {exc}")
+PY
 }
 
 lookup_env_value() {
@@ -296,6 +315,56 @@ prompt_required_secret() {
   done
 }
 
+generate_password() {
+  python3 - <<'PY'
+import secrets
+print(secrets.token_urlsafe(18))
+PY
+}
+
+prompt_admin_password() {
+  local value=""
+  local confirm_value=""
+  local generated="false"
+
+  if lookup_env_value FRAMEOS_ADMIN_PASSWORD >/tmp/frameos-installer-value.$$ 2>/dev/null; then
+    value="$(cat /tmp/frameos-installer-value.$$)"
+    rm -f /tmp/frameos-installer-value.$$
+    if [ -z "$value" ]; then
+      value="$(generate_password)"
+      generated="true"
+    fi
+    printf '%s\n%s\n' "$generated" "$value"
+    return 0
+  fi
+
+  if ! have_tty; then
+    die "FRAMEOS_ADMIN_PASSWORD must be set when the installer has no TTY."
+  fi
+
+  while :; do
+    tty_printf "Frame admin password [leave blank to auto-generate]: "
+    IFS= read -r -s value < /dev/tty || true
+    tty_printf $'\n'
+    if [ -z "$value" ]; then
+      value="$(generate_password)"
+      generated="true"
+      printf '%s\n%s\n' "$generated" "$value"
+      return 0
+    fi
+
+    tty_printf "Confirm Frame admin password: "
+    IFS= read -r -s confirm_value < /dev/tty || true
+    tty_printf $'\n'
+    if [ "$value" = "$confirm_value" ]; then
+      printf '%s\n%s\n' "$generated" "$value"
+      return 0
+    fi
+
+    tty_printf "Values did not match. Try again.\n"
+  done
+}
+
 validate_positive_int() {
   local field_name="$1"
   local value="$2"
@@ -321,6 +390,66 @@ validate_non_negative_int() {
 
 detect_hostname() {
   hostname -f 2>/dev/null || hostname 2>/dev/null || printf 'localhost'
+}
+
+detect_time_zone() {
+  python3 - <<'PY'
+import os
+
+try:
+    from zoneinfo import ZoneInfo
+except Exception:
+    ZoneInfo = None
+
+
+def is_valid_timezone(value: str) -> bool:
+    if not value:
+        return False
+    if ZoneInfo is None:
+        return True
+    try:
+        ZoneInfo(value)
+        return True
+    except Exception:
+        return False
+
+
+candidates: list[str] = []
+try:
+    resolved = os.path.realpath("/etc/localtime")
+    for prefix in ("/usr/share/zoneinfo/", "/etc/zoneinfo/", "/var/db/timezone/zoneinfo/"):
+        if resolved.startswith(prefix):
+            candidates.append(resolved[len(prefix):])
+            break
+except OSError:
+    pass
+
+for path in ("/etc/timezone",):
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            value = handle.read().strip()
+            if value:
+                candidates.append(value)
+    except OSError:
+        pass
+
+aliases = {
+    "etc/utc": "UTC",
+    "utc": "UTC",
+    "uct": "UTC",
+    "universal": "UTC",
+    "zulu": "UTC",
+    "z": "UTC",
+}
+
+for candidate in candidates:
+    normalized = aliases.get(candidate.strip().lower(), candidate.strip())
+    if is_valid_timezone(normalized):
+        print(normalized)
+        raise SystemExit(0)
+
+print("UTC")
+PY
 }
 
 detect_framebuffer_size() {
@@ -478,7 +607,7 @@ select_device() {
     if ! have_tty; then
       die "FRAMEOS_DEVICE must be set when the installer has no TTY."
     fi
-    tty_printf '\nAvailable displays:\n'
+    tty_printf $'\nAvailable displays:\n'
     python3 - "$devices_path" <<'PY' > /dev/tty
 import json
 import sys
@@ -487,7 +616,7 @@ devices = json.load(open(sys.argv[1], "r", encoding="utf-8"))
 for index, item in enumerate(devices, start=1):
     print(f"{index:3}. {item['label']} [{item['value']}]")
 PY
-    tty_printf '\nEnter a number or exact device id: '
+    tty_printf $'\nEnter a number or exact device id: '
     IFS= read -r selected < /dev/tty || true
   fi
 
@@ -861,6 +990,7 @@ payload = {
     "height": int(os.environ["FRAME_HEIGHT"]),
     "device": device_value,
     "deviceConfig": device_config,
+    "timeZone": os.environ["TIME_ZONE"],
     "metricsInterval": float(os.environ["METRICS_INTERVAL"]),
     "debug": False,
     "scalingMode": os.environ["SCALING_MODE"],
@@ -1071,8 +1201,45 @@ install_systemd_service() {
 
 run_frameos_setup() {
   local setup_output=""
-  setup_output="$($SUDO "${INSTALL_DIR}/current/frameos" setup --config "${INSTALL_DIR}/current/frame.json" --json)"
+  local setup_status=0
+  set +e
+  setup_output="$($SUDO "${INSTALL_DIR}/current/frameos" setup --config "${INSTALL_DIR}/current/frame.json" --json 2>&1)"
+  setup_status=$?
+  set -e
+  if [ "$setup_status" -ne 0 ]; then
+    if [ -n "$setup_output" ]; then
+      printf '%s\n' "$setup_output" >&2
+    fi
+    die "FrameOS setup failed."
+  fi
   printf '%s\n' "$setup_output"
+}
+
+extract_setup_json() {
+  python3 - <<'PY'
+import json
+import sys
+
+raw_output = sys.stdin.read()
+lines = [line for line in raw_output.splitlines() if line.strip()]
+
+if not lines:
+    raise SystemExit("FrameOS setup returned no output.")
+
+for index, line in enumerate(lines):
+    if not line.lstrip().startswith("{"):
+        continue
+    candidate = "\n".join(lines[index:])
+    try:
+        parsed = json.loads(candidate)
+    except json.JSONDecodeError:
+        continue
+    if isinstance(parsed, dict):
+        print(json.dumps(parsed))
+        raise SystemExit(0)
+
+raise SystemExit(f"Failed to parse FrameOS setup output: {raw_output.strip()}")
+PY
 }
 
 extract_reboot_required() {
@@ -1115,15 +1282,19 @@ main() {
   if ! curl -fsSL --retry 3 --connect-timeout 10 "${FRAMEOS_BASE_URL}/${TARGET_SLUG}/metadata.json" -o "$TARGET_METADATA_PATH"; then
     die "This environment is not supported by the published prebuilt bundle: ${TARGET_SLUG}"
   fi
+  validate_json_file "$TARGET_METADATA_PATH" "${FRAMEOS_BASE_URL}/${TARGET_SLUG}/metadata.json"
 
   curl_fetch "${FRAMEOS_BASE_URL}/devices.json" "$DEVICES_PATH"
+  validate_json_file "$DEVICES_PATH" "${FRAMEOS_BASE_URL}/devices.json"
   curl_fetch "${FRAMEOS_BASE_URL}/${TARGET_SLUG}/frameos/manifest.json" "$TARGET_FRAMEOS_MANIFEST_PATH"
+  validate_json_file "$TARGET_FRAMEOS_MANIFEST_PATH" "${FRAMEOS_BASE_URL}/${TARGET_SLUG}/frameos/manifest.json"
 
   REQUESTED_VERSION="${FRAMEOS_VERSION:-latest}"
   FRAMEOS_VERSION_SELECTED="$(pick_frameos_version "$TARGET_FRAMEOS_MANIFEST_PATH" "$REQUESTED_VERSION")"
   export TARGET_SLUG FRAMEOS_VERSION_SELECTED
   TARGET_RELEASE_MANIFEST_PATH="${TEMP_ROOT}/manifest.${FRAMEOS_VERSION_SELECTED}.json"
   curl_fetch "${FRAMEOS_BASE_URL}/${TARGET_SLUG}/manifest.${FRAMEOS_VERSION_SELECTED}.json" "$TARGET_RELEASE_MANIFEST_PATH"
+  validate_json_file "$TARGET_RELEASE_MANIFEST_PATH" "${FRAMEOS_BASE_URL}/${TARGET_SLUG}/manifest.${FRAMEOS_VERSION_SELECTED}.json"
 
   log "Detected target: ${TARGET_SLUG}"
   log "Installing FrameOS version: ${FRAMEOS_VERSION_SELECTED}"
@@ -1178,6 +1349,8 @@ main() {
   FRAME_HOST="${FRAMEOS_FRAME_HOST:-$HOSTNAME_DEFAULT}"
   FRAME_PORT="${FRAMEOS_FRAME_PORT:-$DEFAULT_FRAME_PORT}"
   validate_positive_int "Frame port" "$FRAME_PORT"
+  TIME_ZONE="$(prompt_text FRAMEOS_TIME_ZONE "Time zone" "$(detect_time_zone)")"
+  [ -n "$TIME_ZONE" ] || die "Time zone cannot be empty."
 
   SERVER_HOST="$(prompt_text FRAMEOS_SERVER_HOST "FrameOS server host (leave blank to skip remote logging/control)" "")"
   SERVER_PORT="$DEFAULT_SERVER_PORT"
@@ -1214,7 +1387,10 @@ PY
 
   ADMIN_USER="$(prompt_text FRAMEOS_ADMIN_USER "Frame admin username" "admin")"
   [ -n "$ADMIN_USER" ] || die "Frame admin username cannot be empty."
-  ADMIN_PASSWORD="$(prompt_required_secret FRAMEOS_ADMIN_PASSWORD "Frame admin password")"
+  admin_password_prompt_output="$(prompt_admin_password)"
+  ADMIN_PASSWORD_GENERATED="$(printf '%s\n' "$admin_password_prompt_output" | sed -n '1p')"
+  ADMIN_PASSWORD="$(printf '%s\n' "$admin_password_prompt_output" | sed -n '2p')"
+  [ -n "$ADMIN_PASSWORD" ] || die "Frame admin password cannot be empty."
 
   SCALING_MODE="$DEFAULT_SCALING_MODE"
   METRICS_INTERVAL="$DEFAULT_METRICS_INTERVAL"
@@ -1222,6 +1398,7 @@ PY
 
   mapfile -t COMPILED_DRIVERS < <(required_compiled_drivers)
   export FRAME_NAME INSTALL_DIR ASSETS_DIR FRAME_WIDTH FRAME_HEIGHT FRAME_ROTATE FRAME_HOST FRAME_PORT
+  export TIME_ZONE
   export SERVER_HOST SERVER_PORT SERVER_API_KEY SERVER_SEND_LOGS FRAME_ACCESS FRAME_ACCESS_KEY
   export ADMIN_USER ADMIN_PASSWORD
   export DEVICE_VCOM HTTP_UPLOAD_URL HTTP_UPLOAD_HEADER_NAME HTTP_UPLOAD_HEADER_VALUE
@@ -1277,7 +1454,10 @@ PY
   install_systemd_service
 
   log "Running frameos setup"
-  setup_output="$(run_frameos_setup)"
+  setup_output_raw="$(run_frameos_setup)"
+  if ! setup_output="$(printf '%s\n' "$setup_output_raw" | extract_setup_json)"; then
+    die "Failed to parse FrameOS setup output."
+  fi
   reboot_required="$(printf '%s\n' "$setup_output" | extract_reboot_required)"
 
   if [ "$setup_output" != "{}" ]; then
@@ -1311,8 +1491,12 @@ PY
   log "Release: ${RELEASE_NAME}"
   log "Install dir: ${INSTALL_DIR}"
   log "Assets dir: ${ASSETS_DIR}"
+  log "Time zone: ${TIME_ZONE}"
   log "Device: ${DEVICE_LABEL}"
   log "Admin user: ${ADMIN_USER}"
+  if [ "${ADMIN_PASSWORD_GENERATED:-false}" = "true" ]; then
+    log "Admin password: ${ADMIN_PASSWORD}"
+  fi
   log "Open: ${access_url}"
   if [ "$FRAME_ACCESS" != "public" ] && [ -n "$FRAME_ACCESS_KEY" ]; then
     log "Frame access key: ${FRAME_ACCESS_KEY}"
