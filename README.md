@@ -27,7 +27,7 @@ flox activate
 pnpm dev
 ```
 
-The activation hook creates a local `.venv`, installs `backend/requirements.txt`, runs `pnpm install --frozen-lockfile` for the workspace, and installs the Nim dependencies for `frameos/` and `frameos/agent/`.
+The activation hook creates a local `.venv`, installs `backend/requirements.txt`, runs `pnpm install --frozen-lockfile` for the workspace, and installs plus wires up the Nim dependencies for `frameos/` and `frameos/agent/` by regenerating their `nimble.paths`.
 
 If you want Redis managed by Flox as well, start it with:
 

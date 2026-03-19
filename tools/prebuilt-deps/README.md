@@ -117,12 +117,15 @@ entire target folder to force a rebuild.
 Override the versions with environment variables when invoking the script:
 
 ```bash
-NIM_VERSION=2.2.4 QUICKJS_VERSION=2025-04-26 \
+NIM_VERSION=2.2.4 NIM_BUILD_JOBS=48 QUICKJS_VERSION=2025-04-26 \
 LGPIO_VERSION=v0.2.2 FRAMEOS_VERSION=my-build-id \
 ./tools/prebuilt-deps/build.sh
 ```
 
 `LGPIO_REPO` can also be overridden to point to a fork.
+`NIM_BUILD_JOBS` controls the Nim bootstrap/compiler parallelism inside the
+Docker build; leave it unset or set it to `0` to auto-detect the available
+CPU count inside the builder.
 If `FRAMEOS_VERSION` is not set, the script uses the current git revision
 (with a `-dirty` suffix when the working tree has local changes) for build
 markers and component directories, while `build/prebuilt-cross/` is nested

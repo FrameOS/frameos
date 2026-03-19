@@ -8,11 +8,17 @@ OUTPUT_BASE="${ROOT_DIR}/build/prebuilt-deps"
 CROSS_OUTPUT_BASE="${ROOT_DIR}/build/prebuilt-cross"
 
 NIM_VERSION="${NIM_VERSION:-2.2.4}"
+NIM_BUILD_JOBS="${NIM_BUILD_JOBS:-0}"
 QUICKJS_VERSION="${QUICKJS_VERSION:-2025-04-26}"
 QUICKJS_SHA256="${QUICKJS_SHA256:-2f20074c25166ef6f781f381c50d57b502cb85d470d639abccebbef7954c83bf}"
 DEFAULT_LGPIO_REPO="https://github.com/joan2937/lg.git"
 LGPIO_VERSION="${LGPIO_VERSION:-v0.2.2}"
 LGPIO_REPO="${LGPIO_REPO:-${DEFAULT_LGPIO_REPO}}"
+
+if [[ ! "${NIM_BUILD_JOBS}" =~ ^[0-9]+$ ]]; then
+  echo "Invalid NIM_BUILD_JOBS value: ${NIM_BUILD_JOBS}" >&2
+  exit 1
+fi
 
 compute_frameos_version() {
   if ! git -C "${ROOT_DIR}" rev-parse --verify HEAD >/dev/null 2>&1; then
@@ -124,6 +130,7 @@ Examples:
 
 Environment overrides:
   NIM_VERSION
+  NIM_BUILD_JOBS
   QUICKJS_VERSION
   QUICKJS_SHA256
   LGPIO_VERSION
@@ -250,7 +257,10 @@ build_static_component() {
       subdir="nim-${NIM_VERSION}"
       component_version="${NIM_VERSION}"
       component_dockerfile="${ROOT_DIR}/tools/prebuilt-deps/Dockerfile.nim"
-      component_args=("--build-arg" "NIM_VERSION=${NIM_VERSION}")
+      component_args=(
+        "--build-arg" "NIM_VERSION=${NIM_VERSION}"
+        "--build-arg" "NIM_BUILD_JOBS=${NIM_BUILD_JOBS}"
+      )
       expected_marker="$(component_marker "${target}" "${component}" "${release}" "${platform}" "${NIM_VERSION}")"
       ;;
     quickjs)
