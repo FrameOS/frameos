@@ -32,6 +32,11 @@ RUN mkdir -p /opt/nim && \
     nim_slug="${FRAMEOS_PREBUILT_DISTRO}-${FRAMEOS_PREBUILT_RELEASE}-$(dpkg --print-architecture)" && \
     curl -fsSL --retry 3 --retry-all-errors "${FRAMEOS_ARCHIVE_BASE_URL%/}/prebuilt-deps/${nim_slug}/nim-${NIM_VERSION}.tar.gz" -o /tmp/nim.tar.gz && \
     tar -xzf /tmp/nim.tar.gz -C /opt/nim --strip-components=1 && \
+    if [ -d /opt/nim/nim ]; then \
+      rm -rf /opt/nim/nim/bin && \
+      mv /opt/nim/nim/* /opt/nim/ && \
+      rmdir /opt/nim/nim; \
+    fi && \
     rm -f /tmp/nim.tar.gz
 
 ENV PATH="/opt/nim/bin:${PATH}"
