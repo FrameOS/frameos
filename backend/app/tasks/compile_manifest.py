@@ -460,6 +460,8 @@ def _driver_source_entries(source_root: Path, driver: Driver) -> list[tuple[str,
     driver_id = driver_compile_id(driver)
     driver_root_name = Path(driver.import_path).parts[0]
     entries.append((f"driver_source/{driver_id}", source_root / "src" / "drivers" / driver_root_name))
+    if driver.vendor_folder:
+        entries.append((f"driver_vendor/{driver_id}", source_root / "vendor" / driver.vendor_folder))
 
     if driver.name == "inkyHyperPixel2r":
         entries.append((f"driver_support/{driver_id}/frameBuffer", source_root / "src" / "drivers" / "frameBuffer"))

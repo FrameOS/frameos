@@ -257,6 +257,38 @@ def test_plan_compile_actions_tracks_driver_changes_independently(tmp_path: Path
     assert plan.driver_build_dirs == ["driver_builds/frameBuffer"]
 
 
+def test_build_compile_manifest_hashes_python_driver_vendor_bundle(tmp_path: Path):
+    source_dir = create_source_tree(tmp_path)
+    write(source_dir / "src" / "drivers" / "inkyPython" / "inkyPython.nim", "discard\n")
+    write(source_dir / "src" / "driver_plugins" / "plugin_inkyPython.nim", "discard\n")
+    write(source_dir / "vendor" / "inkyPython" / "requirements.txt", "inky==1.0.0\n")
+
+    drivers = {
+        "inkyPython": Driver(
+            name="inkyPython",
+            import_path="inkyPython/inkyPython",
+            vendor_folder="inkyPython",
+            can_render=True,
+        )
+    }
+    previous = build_compile_manifest(
+        source_dir=str(source_dir),
+        scenes=[],
+        drivers=drivers,
+        frameos_version="1.0.0",
+    )
+
+    write(source_dir / "vendor" / "inkyPython" / "turnOn.py", "print('on')\n")
+    current = build_compile_manifest(
+        source_dir=str(source_dir),
+        scenes=[],
+        drivers=drivers,
+        frameos_version="1.0.0",
+    )
+
+    assert previous.driver_hashes["inkyPython"] != current.driver_hashes["inkyPython"]
+
+
 def test_plan_compile_actions_rebuilds_driver_when_shared_setup_changes(tmp_path: Path):
     source_dir = create_source_tree(tmp_path)
     drivers = runtime_drivers_with_shared_setup()

@@ -357,6 +357,105 @@ async def test_api_frame_download_prebuilt_package_zip_packages_runtime_and_driv
 
 
 @pytest.mark.asyncio
+async def test_api_frame_download_prebuilt_package_zip_includes_python_driver_vendor_bundle(
+    no_auth_client,
+    db,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+):
+    fake_redis = _FakeRedis()
+    app.dependency_overrides[get_current_user] = lambda: object()
+    app.dependency_overrides[get_current_user_from_request] = lambda: object()
+    app.dependency_overrides[get_redis] = lambda: fake_redis
+    try:
+        frame = await new_frame(db, fake_redis, 'VendorPackage', 'localhost', 'localhost')
+        frame.device = 'pimoroni.inky_impression'
+        frame.scenes = []
+        db.add(frame)
+        db.commit()
+
+        target_slug = 'debian-bookworm-arm64'
+        prebuilt_root = tmp_path / 'prebuilt-deps'
+        _write_prebuilt_target(
+            prebuilt_root,
+            target_slug,
+            {
+                'frameos': {
+                    'version': 'test-build',
+                    'directory': 'frameos-test-build',
+                    'artifact': 'frameos',
+                    'contents': 'frameos-binary',
+                },
+                'driver_inkyPython': {
+                    'version': 'test-build',
+                    'directory': 'driver_inkyPython-test-build',
+                    'artifact': 'inkyPython.so',
+                    'driver_id': 'inkyPython',
+                    'contents': 'inky-python-driver',
+                },
+                'driver_gpioButton': {
+                    'version': 'test-build',
+                    'directory': 'driver_gpioButton-test-build',
+                    'artifact': 'gpioButton.so',
+                    'driver_id': 'gpioButton',
+                    'contents': 'gpio-button-driver',
+                },
+            },
+        )
+        vendor_root = tmp_path / 'vendor'
+        (vendor_root / 'inkyPython').mkdir(parents=True, exist_ok=True)
+        (vendor_root / 'inkyPython' / 'requirements.txt').write_text('inky==1.0.0\n', encoding='utf-8')
+        (vendor_root / 'inkyPython' / 'turnOn.py').write_text('print("on")\n', encoding='utf-8')
+        (vendor_root / 'inkyPython' / 'env').mkdir(parents=True, exist_ok=True)
+        (vendor_root / 'inkyPython' / '__pycache__').mkdir(parents=True, exist_ok=True)
+        (vendor_root / 'inkyPython' / 'env' / 'ignore.txt').write_text('ignore\n', encoding='utf-8')
+        (vendor_root / 'inkyPython' / '__pycache__' / 'ignore.pyc').write_bytes(b'cache')
+
+        monkeypatch.setattr('app.api.frames.LOCAL_PREBUILT_DEPS_ROOT', prebuilt_root)
+        monkeypatch.setattr('app.api.frames.LOCAL_FRAMEOS_VENDOR_ROOT', vendor_root)
+
+        async def fake_get_cpu_architecture(self):
+            return 'aarch64'
+
+        async def fake_get_distro(self):
+            return 'debian'
+
+        async def fake_get_distro_version(self):
+            return 'bookworm'
+
+        monkeypatch.setattr('app.api.frames.FrameDeployer.get_cpu_architecture', fake_get_cpu_architecture)
+        monkeypatch.setattr('app.api.frames.FrameDeployer.get_distro', fake_get_distro)
+        monkeypatch.setattr('app.api.frames.FrameDeployer.get_distro_version', fake_get_distro_version)
+
+        async def fake_build_packaged_compiled_scenes(**_kwargs):
+            return None
+
+        monkeypatch.setattr(
+            'app.api.frames._build_packaged_compiled_scenes',
+            fake_build_packaged_compiled_scenes,
+        )
+
+        response = await no_auth_client.post(f'/api/frames/{frame.id}/download_prebuilt_package_zip')
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        app.dependency_overrides.pop(get_current_user_from_request, None)
+        app.dependency_overrides.pop(get_redis, None)
+
+    assert response.status_code == 200
+
+    with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+        names = set(archive.namelist())
+        assert 'drivers/inkyPython.so' in names
+        assert 'drivers/gpioButton.so' in names
+        assert 'vendor/' in names
+        assert 'vendor/inkyPython/requirements.txt' in names
+        assert 'vendor/inkyPython/turnOn.py' in names
+        assert 'vendor/inkyPython/env/ignore.txt' not in names
+        assert 'vendor/inkyPython/__pycache__/ignore.pyc' not in names
+        assert archive.read('vendor/inkyPython/requirements.txt') == b'inky==1.0.0\n'
+
+
+@pytest.mark.asyncio
 async def test_api_frame_download_prebuilt_package_zip_builds_runtime_for_interpreted_scenes(
     no_auth_client,
     db,

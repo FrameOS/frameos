@@ -98,7 +98,7 @@ from app.utils.frame_http import (
     _httpx_verify,
 )
 from app.tasks.utils import find_nim_v2
-from app.tasks.deploy_frame import FrameDeployer
+from app.tasks.deploy_frame import FrameDeployer, LOCAL_FRAMEOS_VENDOR_ROOT
 from app.redis import get_redis
 from app.websockets import publish_message
 from app.ws.agent_ws import (
@@ -391,6 +391,32 @@ def _copy_prebuilt_drivers(
                 + ", ".join(sorted(missing_driver_ids))
             ),
         )
+
+
+def _copy_packaged_vendor_dirs(
+    *,
+    frame: Frame,
+    destination_dir: Path,
+) -> None:
+    copied_vendor_folders: set[str] = set()
+    for driver in loadable_drivers(drivers_for_frame(frame)):
+        vendor_folder = driver.vendor_folder
+        if not vendor_folder or vendor_folder in copied_vendor_folders:
+            continue
+
+        source_dir = LOCAL_FRAMEOS_VENDOR_ROOT / vendor_folder
+        if not source_dir.is_dir():
+            raise HTTPException(
+                status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                detail=f"Missing local vendor bundle '{vendor_folder}'",
+            )
+
+        target_dir = destination_dir / "vendor" / vendor_folder
+        target_dir.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(source_dir, target_dir, dirs_exist_ok=True)
+        shutil.rmtree(target_dir / "env", ignore_errors=True)
+        shutil.rmtree(target_dir / "__pycache__", ignore_errors=True)
+        copied_vendor_folders.add(vendor_folder)
 
 
 async def _build_packaged_compiled_scenes(
@@ -1282,7 +1308,7 @@ async def api_frame_local_prebuilt_package_zip(
 
         package_dir = Path(tmp) / "package"
         package_dir.mkdir(parents=True, exist_ok=True)
-        for dirname in ("drivers", "scenes", "state", "tmp"):
+        for dirname in ("drivers", "scenes", "state", "tmp", "vendor"):
             (package_dir / dirname).mkdir(parents=True, exist_ok=True)
 
         if _frame_requires_packaged_runtime_build(frame):
@@ -1314,6 +1340,10 @@ async def api_frame_local_prebuilt_package_zip(
             target_dir=target_dir,
             components=components,
             destination_dir=package_dir / "drivers",
+        )
+        _copy_packaged_vendor_dirs(
+            frame=frame,
+            destination_dir=package_dir,
         )
 
         compiled_scenes_dir = await _build_packaged_compiled_scenes(
@@ -1349,7 +1379,7 @@ async def api_frame_local_prebuilt_package_zip(
             compression=zipfile.ZIP_DEFLATED,
             strict_timestamps=False,
         ) as zf:
-            for dirname in ("drivers", "scenes", "state", "tmp"):
+            for dirname in ("drivers", "scenes", "state", "tmp", "vendor"):
                 info = zipfile.ZipInfo(f"{dirname}/")
                 info.external_attr = (0o755 << 16) | 0x10
                 zf.writestr(info, b"")

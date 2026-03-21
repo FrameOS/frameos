@@ -1,10 +1,13 @@
 import tempfile
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import Any
 
-from sqlalchemy.orm import Session
 from arq import ArqRedis as Redis
+from sqlalchemy.orm import Session
 
+from app.codegen.drivers_nim import driver_compile_id, loadable_drivers
+from app.drivers.devices import drivers_for_frame
 from app.models.log import new_log as log
 from app.models.frame import Frame, normalize_https_proxy, update_frame
 from app.tasks._frame_deployer import FrameDeployer
@@ -33,6 +36,50 @@ def frame_has_compiled_scenes(frame: Frame) -> bool:
     )
 
 
+def deployed_frame_has_compiled_scenes(previous_deploy: Any) -> bool:
+    if not isinstance(previous_deploy, dict):
+        return False
+
+    return any(
+        scene.get("settings", {}).get("execution", "compiled") != "interpreted"
+        for scene in (previous_deploy.get("scenes") or [])
+        if isinstance(scene, dict)
+    )
+
+
+def _frame_config_value(frame_or_deploy: Any, key: str, default: Any) -> Any:
+    if isinstance(frame_or_deploy, dict):
+        return frame_or_deploy.get(key, default)
+    return getattr(frame_or_deploy, key, default)
+
+
+def _loadable_driver_ids(frame_or_deploy: Any) -> tuple[str, ...]:
+    frame_like = SimpleNamespace(
+        device=_frame_config_value(frame_or_deploy, "device", "") or "",
+        gpio_buttons=list(_frame_config_value(frame_or_deploy, "gpio_buttons", []) or []),
+    )
+    return tuple(
+        sorted(
+            driver_compile_id(driver)
+            for driver in loadable_drivers(drivers_for_frame(frame_like))
+        )
+    )
+
+
+def fast_deploy_blocker_reason(frame: Frame) -> str | None:
+    previous_deploy = frame.last_successful_deploy if isinstance(frame.last_successful_deploy, dict) else None
+    if previous_deploy is None:
+        return "Fast deploy requires a previous successful deploy. Run a full deploy instead."
+
+    if frame_has_compiled_scenes(frame) or deployed_frame_has_compiled_scenes(previous_deploy):
+        return "Fast deploy is not supported for frames with compiled scenes. Run a full deploy instead."
+
+    if _loadable_driver_ids(frame) != _loadable_driver_ids(previous_deploy):
+        return "Fast deploy cannot change compiled drivers. Run a full deploy instead."
+
+    return None
+
+
 async def fast_deploy_frame_task(ctx: dict[str, Any], id: int):
     db: Session = ctx['db']
     redis: Redis = ctx['redis']
@@ -42,6 +89,11 @@ async def fast_deploy_frame_task(ctx: dict[str, Any], id: int):
         frame = db.get(Frame, id)
         if not frame:
             await log(db, redis, id, "stderr", "Frame not found")
+            return
+
+        blocker = fast_deploy_blocker_reason(frame)
+        if blocker:
+            await log(db, redis, id, "stderr", blocker)
             return
 
         frame.status = "deploying"
