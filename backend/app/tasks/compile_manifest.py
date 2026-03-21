@@ -72,6 +72,10 @@ APP_SHARED_REPO_PATHS = (
     "frontend/src",
 )
 
+DRIVER_SHARED_SOURCE_PATHS = (
+    "src/frameos/driver_setup.nim",
+)
+
 
 @dataclass(frozen=True, slots=True)
 class SceneCompileState:
@@ -463,6 +467,8 @@ def _driver_source_entries(source_root: Path, driver: Driver) -> list[tuple[str,
         entries.append((f"driver_support/{driver_id}/lib", source_root / "src" / "lib"))
     if driver.name == "waveshare":
         entries.append((f"driver_support/{driver_id}/generated", source_root / "src" / "drivers" / "waveshare" / "driver.nim"))
+    for relative_path in DRIVER_SHARED_SOURCE_PATHS:
+        entries.append((f"driver_support/{driver_id}/{relative_path}", source_root / relative_path))
 
     return entries
 

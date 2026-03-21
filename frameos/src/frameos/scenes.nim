@@ -16,6 +16,13 @@ const COMPILED_PLUGIN_RUNTIME_CHANNELS_SYMBOL = "bindCompiledPluginRuntimeChanne
 const NIM_PLUGIN_MAIN_SYMBOL = "NimMain"
 
 type
+  LoadedCompiledSceneLibrary = ref object
+    handle: LibHandle
+    copiedPath: string
+  LoadedCompiledScenePlugin = tuple[
+    plugin: CompiledScenePlugin,
+    library: LoadedCompiledSceneLibrary,
+  ]
   CompiledScenePluginFactory = proc(): CompiledScenePlugin {.cdecl.}
   CompiledPluginRuntimeChannelsBinder = proc(hooks: ptr CompiledRuntimeHooks) {.cdecl.}
   NimPluginMain = proc() {.cdecl.}
@@ -26,6 +33,7 @@ type
     scenes: Table[SceneId, ExportedScene],
     publicStateFields: Table[SceneId, seq[StateField]],
     persistedStateKeys: Table[SceneId, seq[string]],
+    libraries: seq[LoadedCompiledSceneLibrary],
   ]
 
 var compiledSceneLoadCounter = 0
@@ -60,35 +68,54 @@ proc initializeNimPluginRuntime(handle: LibHandle) =
     return
   nimMain()
 
-proc loadCompiledScenePlugin(path: string): Option[CompiledScenePlugin] =
+proc unloadCompiledSceneLibrary(library: LoadedCompiledSceneLibrary) =
+  if library.isNil:
+    return
+  try:
+    if not library.handle.isNil:
+      unloadLib(library.handle)
+  except CatchableError as e:
+    echo "Warning: failed to unload compiled scene plugin library: ", e.msg
+  finally:
+    removeCopiedCompiledSceneLibrary(library.copiedPath)
+
+proc unloadCompiledSceneLibraries(libraries: openArray[LoadedCompiledSceneLibrary]) =
+  for library in libraries:
+    unloadCompiledSceneLibrary(library)
+
+proc loadCompiledScenePlugin(path: string): Option[LoadedCompiledScenePlugin] =
   var copiedPath = ""
+  var handle: LibHandle
   try:
     copiedPath = copyCompiledSceneLibrary(path)
-    let handle = loadLib(copiedPath)
+    handle = loadLib(copiedPath)
     if handle.isNil:
       echo "Warning: failed to load compiled scene plugin: ", path
-      return none(CompiledScenePlugin)
+      return none(LoadedCompiledScenePlugin)
     initializeNimPluginRuntime(handle)
     bindPluginChannels(handle)
     let factory = cast[CompiledScenePluginFactory](symAddr(handle, COMPILED_SCENE_PLUGIN_SYMBOL))
     if factory.isNil:
       echo "Warning: missing compiled scene plugin symbol in: ", path
-      return none(CompiledScenePlugin)
+      return none(LoadedCompiledScenePlugin)
     let plugin = factory()
     if plugin.isNil or plugin.scene.isNil:
       echo "Warning: compiled scene plugin returned no scene: ", path
-      return none(CompiledScenePlugin)
+      return none(LoadedCompiledScenePlugin)
     if plugin.abiVersion != COMPILED_PLUGIN_ABI_VERSION:
       echo "Warning: compiled scene plugin ABI mismatch in ", path, ": expected ", COMPILED_PLUGIN_ABI_VERSION, ", got ", plugin.abiVersion
-      return none(CompiledScenePlugin)
-    return some(plugin)
+      return none(LoadedCompiledScenePlugin)
+    let library = LoadedCompiledSceneLibrary(handle: handle, copiedPath: copiedPath)
+    # Once dlopen has mapped the library we can unlink the temp copy and keep
+    # only the handle alive until the next compiled-scene reload.
+    removeCopiedCompiledSceneLibrary(copiedPath)
+    return some((plugin: plugin, library: library))
   except CatchableError as e:
     echo "Warning: failed to initialize compiled scene plugin ", path, ": ", e.msg
-    return none(CompiledScenePlugin)
+    return none(LoadedCompiledScenePlugin)
   finally:
-    # Once dlopen has mapped the library we can unlink the temp copy and avoid
-    # leaking one extra .so per reload cycle.
-    removeCopiedCompiledSceneLibrary(copiedPath)
+    if handle.isNil:
+      removeCopiedCompiledSceneLibrary(copiedPath)
 
 proc cloneStateField(field: StateField): StateField =
   if field.isNil:
@@ -125,6 +152,7 @@ proc loadCompiledScenesFromDisk(): LoadedCompiledScenes =
     scenes: initTable[SceneId, ExportedScene](),
     publicStateFields: initTable[SceneId, seq[StateField]](),
     persistedStateKeys: initTable[SceneId, seq[string]](),
+    libraries: @[],
   )
 
   if dirExists(COMPILED_SCENES_FOLDER):
@@ -132,9 +160,11 @@ proc loadCompiledScenesFromDisk(): LoadedCompiledScenes =
       let pluginOption = loadCompiledScenePlugin(path)
       if pluginOption.isNone:
         continue
-      let plugin = pluginOption.get()
+      let loadedPlugin = pluginOption.get()
+      let plugin = loadedPlugin.plugin
       let sceneId = SceneId(plugin.id.string & "")
       let sceneName = if plugin.name.len > 0: plugin.name & "" else: sceneId.string
+      result.libraries.add(loadedPlugin.library)
       result.sceneIds.add(sceneId)
       result.scenes[sceneId] = plugin.scene
       result.publicStateFields[sceneId] = cloneStateFields(plugin.scene.publicStateFields)
@@ -166,6 +196,7 @@ var compiledSceneIds: seq[SceneId] = @[]
 var compiledSceneOptions: seq[tuple[id: SceneId, name: string]] = @[]
 var compiledScenePublicStateFields = initTable[SceneId, seq[StateField]]()
 var compiledScenePersistedStateKeys = initTable[SceneId, seq[string]]()
+var loadedCompiledSceneLibraries: seq[LoadedCompiledSceneLibrary] = @[]
 var interpretedScenes*: Table[SceneId, ExportedInterpretedScene] = getInterpretedScenes()
 var uploadedScenes*: Table[SceneId, ExportedInterpretedScene] = initTable[SceneId, ExportedInterpretedScene]()
 when defined(testing):
@@ -176,6 +207,7 @@ when defined(testing):
   compiledSceneOptions = loadedCompiledScenes.sceneOptions
   compiledScenePublicStateFields = loadedCompiledScenes.publicStateFields
   compiledScenePersistedStateKeys = loadedCompiledScenes.persistedStateKeys
+  loadedCompiledSceneLibraries = loadedCompiledScenes.libraries
 var compiledScenesThreadInitialized {.threadvar.}: bool
 var compiledScenesThread {.threadvar.}: Table[SceneId, ExportedScene]
 
@@ -263,7 +295,9 @@ proc reloadInterpretedScenes*() =
 
 proc reloadCompiledScenes*() =
   withLock sceneRegistryLock:
+    let previousLibraries = loadedCompiledSceneLibraries
     let loadedCompiled = loadCompiledScenesFromDisk()
+    loadedCompiledSceneLibraries = loadedCompiled.libraries
     defaultSceneId = loadedCompiled.defaultSceneId
     compiledSceneIds = loadedCompiled.sceneIds
     compiledSceneOptions = loadedCompiled.sceneOptions
@@ -278,6 +312,7 @@ proc reloadCompiledScenes*() =
       compiledScenesThread = loadedCompiled.scenes
       compiledScenesThreadInitialized = true
     refreshCompiledSceneExports()
+    unloadCompiledSceneLibraries(previousLibraries)
 
 proc updateUploadedScenes*(newScenes: Table[SceneId, ExportedInterpretedScene]) =
   withLock sceneRegistryLock:

@@ -36,6 +36,7 @@ def create_source_tree(tmp_path: Path) -> Path:
     write(source_dir / "src" / "frameos.nim", "import frameos/frameos\n")
     write(source_dir / "src" / "frameos" / "apps.nim", "proc renderWidth*(): int = 1\n")
     write(source_dir / "src" / "frameos" / "channels.nim", "discard\n")
+    write(source_dir / "src" / "frameos" / "driver_setup.nim", "type DriverSetupSpec* = ref object\n")
     write(source_dir / "src" / "frameos" / "types.nim", "type SceneId* = distinct string\n")
     write(source_dir / "src" / "frameos" / "values.nim", "discard\n")
     write(source_dir / "src" / "frameos" / "utils" / "image.nim", "discard\n")
@@ -44,7 +45,9 @@ def create_source_tree(tmp_path: Path) -> Path:
     write(source_dir / "src" / "drivers" / "drivers.nim", "discard\n")
     write(source_dir / "src" / "drivers" / "plugin_runtime.nim", "discard\n")
     write(source_dir / "src" / "drivers" / "frameBuffer" / "frameBuffer.nim", "discard\n")
+    write(source_dir / "src" / "drivers" / "inkyHyperPixel2r" / "inkyHyperPixel2r.nim", "discard\n")
     write(source_dir / "src" / "driver_plugins" / "plugin_frameBuffer.nim", "discard\n")
+    write(source_dir / "src" / "driver_plugins" / "plugin_inkyHyperPixel2r.nim", "discard\n")
     write(source_dir / "tools" / "prepare_assets.py", "print('assets')\n")
     write(source_dir / "assets" / "compiled" / "web" / "control.html", "<html></html>\n")
     write(source_dir / "frontend" / "package.json", "{}\n")
@@ -71,6 +74,17 @@ def runtime_drivers() -> dict[str, Driver]:
         "frameBuffer": Driver(
             name="frameBuffer",
             import_path="frameBuffer/frameBuffer",
+            can_render=True,
+            can_turn_on_off=True,
+        )
+    }
+
+
+def runtime_drivers_with_shared_setup() -> dict[str, Driver]:
+    return {
+        "inkyHyperPixel2r": Driver(
+            name="inkyHyperPixel2r",
+            import_path="inkyHyperPixel2r/inkyHyperPixel2r",
             can_render=True,
             can_turn_on_off=True,
         )
@@ -241,3 +255,35 @@ def test_plan_compile_actions_tracks_driver_changes_independently(tmp_path: Path
     assert plan.rebuild_driver_ids == ("frameBuffer",)
     assert plan.reuse_driver_ids == ()
     assert plan.driver_build_dirs == ["driver_builds/frameBuffer"]
+
+
+def test_plan_compile_actions_rebuilds_driver_when_shared_setup_changes(tmp_path: Path):
+    source_dir = create_source_tree(tmp_path)
+    drivers = runtime_drivers_with_shared_setup()
+
+    previous = build_compile_manifest(
+        source_dir=str(source_dir),
+        scenes=[],
+        drivers=drivers,
+        frameos_version="1.0.0",
+    )
+
+    write(
+        source_dir / "src" / "frameos" / "driver_setup.nim",
+        "type DriverSetupSpec* = ref object\nlet changed = true\n",
+    )
+    current = build_compile_manifest(
+        source_dir=str(source_dir),
+        scenes=[],
+        drivers=drivers,
+        frameos_version="1.0.0",
+    )
+
+    plan = plan_compile_actions(mode=SMART_DEPLOY, previous=previous, current=current)
+
+    assert plan.rebuild_app is True
+    assert plan.rebuild_scene_ids == ()
+    assert plan.reuse_scene_ids == ()
+    assert plan.rebuild_driver_ids == ("inkyHyperPixel2r",)
+    assert plan.reuse_driver_ids == ()
+    assert plan.reason == "App inputs and driver inputs changed"

@@ -204,6 +204,12 @@ def _frame_has_interpreted_scenes(frame: Frame) -> bool:
     return bool(get_interpreted_scenes_json(frame))
 
 
+def _frame_requires_packaged_runtime_build(frame: Frame) -> bool:
+    # Packaged compiled scene plugins are rebuilt from the current checkout, so
+    # the runtime must come from the same sources to keep the bundle coherent.
+    return _frame_has_interpreted_scenes(frame) or _frame_has_compiled_scenes(frame)
+
+
 def _compiled_scene_build_dirs(frame: Frame) -> list[str]:
     return [
         f"scene_builds/{scene_module_name(str(scene.get('id') or 'default'))}"
@@ -1279,7 +1285,7 @@ async def api_frame_local_prebuilt_package_zip(
         for dirname in ("drivers", "scenes", "state", "tmp"):
             (package_dir / dirname).mkdir(parents=True, exist_ok=True)
 
-        if _frame_has_interpreted_scenes(frame):
+        if _frame_requires_packaged_runtime_build(frame):
             runtime_binary = await _build_packaged_runtime_binary(
                 db=db,
                 redis=redis,

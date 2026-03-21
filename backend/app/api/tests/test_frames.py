@@ -470,10 +470,10 @@ async def test_api_frame_download_prebuilt_package_zip_includes_compiled_scenes(
             target_slug,
             {
                 'frameos': {
-                    'version': 'test-build',
-                    'directory': 'frameos-test-build',
+                    'version': 'stale-build',
+                    'directory': 'frameos-stale-build',
                     'artifact': 'frameos',
-                    'contents': 'frameos-binary',
+                    'contents': 'stale-frameos-binary',
                 },
                 'driver_httpUpload': {
                     'version': 'test-build',
@@ -488,6 +488,9 @@ async def test_api_frame_download_prebuilt_package_zip_includes_compiled_scenes(
         compiled_scenes_dir = tmp_path / 'compiled-scenes'
         compiled_scenes_dir.mkdir(parents=True, exist_ok=True)
         (compiled_scenes_dir / 'demo.so').write_bytes(b'compiled-scene')
+        built_runtime = tmp_path / 'built-frameos'
+        built_runtime.write_bytes(b'built-runtime-binary')
+        runtime_build_calls = 0
 
         monkeypatch.setattr('app.api.frames.LOCAL_PREBUILT_DEPS_ROOT', prebuilt_root)
 
@@ -504,9 +507,15 @@ async def test_api_frame_download_prebuilt_package_zip_includes_compiled_scenes(
         monkeypatch.setattr('app.api.frames.FrameDeployer.get_distro', fake_get_distro)
         monkeypatch.setattr('app.api.frames.FrameDeployer.get_distro_version', fake_get_distro_version)
 
+        async def fake_build_packaged_runtime_binary(**_kwargs):
+            nonlocal runtime_build_calls
+            runtime_build_calls += 1
+            return built_runtime
+
         async def fake_build_packaged_scenes(**_kwargs):
             return compiled_scenes_dir
 
+        monkeypatch.setattr('app.api.frames._build_packaged_runtime_binary', fake_build_packaged_runtime_binary)
         monkeypatch.setattr('app.api.frames._build_packaged_compiled_scenes', fake_build_packaged_scenes)
 
         response = await no_auth_client.post(f'/api/frames/{frame.id}/download_prebuilt_package_zip')
@@ -516,8 +525,10 @@ async def test_api_frame_download_prebuilt_package_zip_includes_compiled_scenes(
         app.dependency_overrides.pop(get_redis, None)
 
     assert response.status_code == 200
+    assert runtime_build_calls == 1
 
     with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+        assert archive.read('frameos') == b'built-runtime-binary'
         assert archive.read('scenes/demo.so') == b'compiled-scene'
 
 

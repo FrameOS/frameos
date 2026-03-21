@@ -107,11 +107,16 @@ async def _download_and_extract(
 
 
 def _safe_extract(tar: tarfile.TarFile, path: Path) -> None:
+    root = path.resolve()
     for member in tar.getmembers():
-        member_path = path / member.name
-        if not str(member_path.resolve()).startswith(str(path.resolve())):
-            raise RuntimeError("Tar file attempted to escape target directory")
-    tar.extractall(path=path)
+        if member.issym() or member.islnk() or member.ischr() or member.isblk() or member.isfifo():
+            raise RuntimeError("Tar file contained unsupported special entry")
+        member_path = (root / member.name).resolve()
+        try:
+            member_path.relative_to(root)
+        except ValueError as exc:
+            raise RuntimeError("Tar file attempted to escape target directory") from exc
+    tar.extractall(path=root)
 
 
 async def stage_prebuilt_component(
