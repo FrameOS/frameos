@@ -39,6 +39,12 @@ DEFAULT_LGPIO_VERSION = "v0.2.2"
 DEFAULT_LGPIO_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 
 APT_PACKAGE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9+.-]*$")
+REMOTE_BUILD_APT_PACKAGES = (
+    "build-essential",
+    "hostapd",
+    "imagemagick",
+    "libssl-dev",
+)
 
 
 def _sanitize_apt_package_name(pkg: str) -> str:
@@ -520,9 +526,8 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             # 2. Remote steps
             await self.log("stdout", f"{icon} Installing dependencies on remote")
             await _ensure_ntp_installed(self)
-            await install_if_necessary("build-essential")
-            await install_if_necessary("hostapd")
-            await install_if_necessary("imagemagick")
+            for dep in REMOTE_BUILD_APT_PACKAGES:
+                await install_if_necessary(dep)
             await install_if_necessary(
                 "caddy",
                 run_after_install="sudo systemctl disable --now caddy.service",
