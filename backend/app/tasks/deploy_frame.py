@@ -16,6 +16,7 @@ from app.models.assets import sync_assets
 from app.models.log import new_log as log
 from app.models.frame import Frame, update_frame
 from app.utils.remote_exec import upload_file
+from app.utils.versions import current_frameos_version
 from app.models.settings import get_settings_dict
 from app.utils.ssh_authorized_keys import _install_authorized_keys
 from app.utils.ssh_key_utils import normalize_ssh_keys, select_ssh_keys_for_frame

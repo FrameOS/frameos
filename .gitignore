@@ -86,3 +86,7 @@ build/prebuilt-deps/
 frameos/.nimcache*
 .tmp-cache/
 frameos/.tmp-home/
+build/
+files/
+nimcache/
+e2e/scenes/*.so
