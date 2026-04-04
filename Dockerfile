@@ -1,5 +1,11 @@
 # Use the official Python 3.12 image as the base
 FROM python:3.12-slim-bookworm
+ARG FRAMEOS_ARCHIVE_BASE_URL=https://archive.frameos.net
+ARG FRAMEOS_PREBUILT_DISTRO=debian
+ARG FRAMEOS_PREBUILT_RELEASE=bookworm
+ARG NIM_VERSION=2.2.4
+ARG QUICKJS_VERSION=2025-04-26
+ARG LGPIO_VERSION=v0.2.2
 
 # Set the working directory
 WORKDIR /app
@@ -18,16 +24,20 @@ RUN apt-get update && apt-get install -y curl build-essential libffi-dev redis-s
     && apt-get install -y nodejs docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
 # Install Nim
-RUN apt-get update && \
-  apt-get install -y curl xz-utils gcc openssl ca-certificates git # &&
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl xz-utils gcc openssl ca-certificates git \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p /opt/nim && \
-    curl -L https://nim-lang.org/download/nim-2.2.4.tar.xz | tar -xJf - -C /opt/nim --strip-components=1 && \
-    cd /opt/nim && \
-    sh build.sh && \
-    bin/nim c koch && \
-    ./koch boot -d:release && \
-    ./koch tools
+    nim_slug="${FRAMEOS_PREBUILT_DISTRO}-${FRAMEOS_PREBUILT_RELEASE}-$(dpkg --print-architecture)" && \
+    curl -fsSL --retry 3 --retry-all-errors "${FRAMEOS_ARCHIVE_BASE_URL%/}/prebuilt-deps/${nim_slug}/nim-${NIM_VERSION}.tar.gz" -o /tmp/nim.tar.gz && \
+    tar -xzf /tmp/nim.tar.gz -C /opt/nim --strip-components=1 && \
+    if [ -d /opt/nim/nim ]; then \
+      rm -rf /opt/nim/nim/bin && \
+      mv /opt/nim/nim/* /opt/nim/ && \
+      rmdir /opt/nim/nim; \
+    fi && \
+    rm -f /tmp/nim.tar.gz
 
 ENV PATH="/opt/nim/bin:${PATH}"
 

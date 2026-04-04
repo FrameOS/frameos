@@ -6,12 +6,18 @@ import frameos/types
 type
   LoggerThread = ref object
     frameConfig: FrameConfig
-    client: HttpClient
     url: string
     logs: seq[(float, JsonNode)]
-    lastSendAt: float
+    nextSendAt: float
+    consecutiveSendFailures: int
+    lastSendError: string
+    lastSendErrorAt: float
 
 const LOG_FLUSH_SECONDS = 1.0
+const MAX_LOG_BATCH_SIZE = 1000
+const MAX_PENDING_LOGS = 5000
+const MAX_LOG_RETRY_SECONDS = 30.0
+const SEND_ERROR_LOG_INTERVAL_SECONDS = 30.0
 
 var threadInitDone = false
 var thread: Thread[FrameConfig]
@@ -34,55 +40,121 @@ proc `%`*(payload: (float, JsonNode)): JsonNode =
   let (timestamp, log) = payload
   result = %*[timestamp, log]
 
-proc processQueue(self: LoggerThread): int =
-  let logCount = self.logs.len
-  if logCount > 1000 or (logCount > 0 and self.lastSendAt + LOG_FLUSH_SECONDS < epochTime()):
-    # make a copy, just in case some thread from somewhere adds new entries
-    var newLogs = self.logs
-    self.logs = @[]
+proc nextRetryDelaySeconds*(consecutiveFailures: int, baseDelay = LOG_FLUSH_SECONDS,
+                            maxDelay = MAX_LOG_RETRY_SECONDS): float =
+  result = baseDelay
+  if consecutiveFailures <= 1:
+    return result
+  for _ in 2 .. consecutiveFailures:
+    result *= 2
+    if result >= maxDelay:
+      return maxDelay
 
-    if newLogs.len == 0:
+proc trimPendingEntries*[T](items: var seq[T], maxItems: int): int =
+  if maxItems <= 0 or items.len <= maxItems:
+    return 0
+
+  result = items.len - maxItems
+  items = items[result .. ^1]
+
+proc shouldReportSendError*(lastError, newError: string, lastErrorAt, nowAt: float,
+                            quietPeriod = SEND_ERROR_LOG_INTERVAL_SECONDS): bool =
+  lastError.len == 0 or newError != lastError or lastErrorAt + quietPeriod <= nowAt
+
+proc handleSendFailure(self: LoggerThread, message: string) =
+  self.consecutiveSendFailures += 1
+  let nowAt = epochTime()
+  let retryDelay = nextRetryDelaySeconds(self.consecutiveSendFailures)
+  if shouldReportSendError(self.lastSendError, message, self.lastSendErrorAt, nowAt):
+    echo "Error sending logs: " & message & "; retrying in " &
+      formatFloat(retryDelay, ffDecimal, 1) & "s"
+    self.lastSendError = message
+    self.lastSendErrorAt = nowAt
+  self.nextSendAt = nowAt + retryDelay
+
+proc scheduleFlush(self: LoggerThread, nowAt: float) =
+  if self.logs.len == 0:
+    self.nextSendAt = 0
+  elif self.logs.len >= MAX_LOG_BATCH_SIZE:
+    self.nextSendAt = nowAt
+  elif self.nextSendAt <= 0 or self.nextSendAt < nowAt:
+    self.nextSendAt = nowAt + LOG_FLUSH_SECONDS
+
+proc queueLog(self: LoggerThread, payload: (float, JsonNode)) =
+  let nowAt = epochTime()
+  self.logs.add(payload)
+  discard trimPendingEntries(self.logs, MAX_PENDING_LOGS)
+  self.scheduleFlush(nowAt)
+
+proc clearSentLogs(self: LoggerThread, sentCount: int) =
+  if sentCount <= 0:
+    return
+  if sentCount >= self.logs.len:
+    self.logs = @[]
+  else:
+    self.logs = self.logs[sentCount .. ^1]
+
+proc processQueue(self: LoggerThread): int =
+  if self.logs.len == 0:
+    self.nextSendAt = 0
+    return 0
+
+  if not self.frameConfig.serverSendLogs:
+    result = self.logs.len
+    self.logs = @[]
+    self.nextSendAt = 0
+    self.consecutiveSendFailures = 0
+    self.lastSendError = ""
+    self.lastSendErrorAt = 0
+    return result
+
+  let nowAt = epochTime()
+  if self.nextSendAt > nowAt:
+    return 0
+
+  let sendCount = min(self.logs.len, MAX_LOG_BATCH_SIZE)
+  let batch = self.logs[0 ..< sendCount]
+
+  var client = newHttpClient(timeout = 1000)
+  try:
+    client.headers = newHttpHeaders([
+        ("Authorization", "Bearer " & self.frameConfig.serverApiKey),
+        ("Content-Type", "application/json"),
+        ("Content-Encoding", "gzip")
+    ])
+    let body = %*{"logs": batch}
+    let response = client.request(self.url, httpMethod = HttpPost, body = compress($body))
+    if response.code != Http200:
+      self.handleSendFailure("HTTP " & $response.status)
       return 0
 
-    if not self.frameConfig.serverSendLogs:
-      return newLogs.len
-
-    if newLogs.len > 1000:
-      newLogs = newLogs[(newLogs.len - 1000) .. (newLogs.len - 1)]
-
-    var client = newHttpClient(timeout = 1000)
-    try:
-      client.headers = newHttpHeaders([
-          ("Authorization", "Bearer " & self.frameConfig.serverApiKey),
-          ("Content-Type", "application/json"),
-          ("Content-Encoding", "gzip")
-      ])
-      let body = %*{"logs": newLogs}
-      let response = client.request(self.url, httpMethod = HttpPost, body = compress($body))
-      self.lastSendAt = epochTime()
-      if response.code != Http200:
-        echo "Error sending logs: HTTP " & $response.status
-    except CatchableError as e:
-      echo "Error sending logs: " & $e.msg
-    finally:
-      client.close()
-
-    return newLogs.len
+    self.clearSentLogs(sendCount)
+    self.consecutiveSendFailures = 0
+    self.lastSendError = ""
+    self.lastSendErrorAt = 0
+    self.scheduleFlush(epochTime())
+    return sendCount
+  except CatchableError as e:
+    self.handleSendFailure(e.msg)
+    return 0
+  finally:
+    client.close()
 
 
 proc run(self: LoggerThread) =
   var run = 2
   while true:
-    let processedLogs = self.processQueue()
-    if processedLogs == 0:
-      sleep(run)
-      if run < 250:
-        run += 2
-    let (success, payload) = logChannel.tryRecv()
-    if success:
-      echo payload # print to stdout / journal
-      self.logs.add(payload)
+    var receivedLog = false
+    while true:
+      let (success, payload) = logChannel.tryRecv()
+      if not success:
+        break
+      self.queueLog(payload)
       logToFile(self.frameConfig.logToFile, payload[1])
+      receivedLog = true
+
+    let processedLogs = self.processQueue()
+    if receivedLog or processedLogs > 0:
       run = 2
     else:
       sleep(run)
@@ -96,7 +168,10 @@ proc createThreadRunner(frameConfig: FrameConfig) {.thread.} =
     frameConfig: frameConfig,
     url: url,
     logs: @[],
-    lastSendAt: 0.0,
+    nextSendAt: 0.0,
+    consecutiveSendFailures: 0,
+    lastSendError: "",
+    lastSendErrorAt: 0.0,
   )
   while true:
     try:

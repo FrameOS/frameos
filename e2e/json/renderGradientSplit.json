@@ -1,0 +1,225 @@
+{
+    "id": "9b264715-eb8b-4e16-b4b5-97bc0fe6e718",
+    "name": "Gradient",
+    "fields": [],
+    "nodes": [
+      {
+        "id": "463556ab-e4fe-40c7-93f3-40bc723f454e",
+        "type": "event",
+        "position": {
+          "x": 121,
+          "y": 113
+        },
+        "data": {
+          "keyword": "render"
+        },
+        "width": 212,
+        "height": 161,
+        "selected": false,
+        "dragging": false
+      },
+      {
+        "id": "999f9725-de11-4331-8fed-b1f8e224953f",
+        "position": {
+          "x": 468.4715831389232,
+          "y": 115.56680924720595
+        },
+        "data": {
+          "keyword": "render/split",
+          "config": {
+            "columns": "3",
+            "gap": "10"
+          }
+        },
+        "type": "app",
+        "width": 306,
+        "height": 330,
+        "selected": false
+      },
+      {
+        "id": "d71f17cf-0852-4e10-b49a-9d2e08d42d51",
+        "position": {
+          "x": 837.9479040637833,
+          "y": 30.571865986091552
+        },
+        "data": {
+          "keyword": "render/gradient",
+          "config": {
+            "startColor": "#05a2d6",
+            "endColor": "#eff312",
+            "angle": "90"
+          }
+        },
+        "type": "app",
+        "width": 354,
+        "height": 140,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 837.9479040637833,
+          "y": 30.571865986091552
+        },
+        "dragging": false
+      },
+      {
+        "id": "92262f61-5c56-4f76-ba41-c581470753ea",
+        "position": {
+          "x": 1248.6154853814246,
+          "y": 217.93228444240594
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "center"
+          }
+        },
+        "type": "app",
+        "width": 314,
+        "height": 162,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 1248.6154853814246,
+          "y": 217.93228444240594
+        },
+        "dragging": false
+      },
+      {
+        "id": "873fb97c-4b96-4538-be6c-3c801476119f",
+        "position": {
+          "x": 1228.6154853814246,
+          "y": -42.067715557594056
+        },
+        "data": {
+          "keyword": "render/gradient",
+          "config": {}
+        },
+        "type": "app",
+        "width": 345,
+        "height": 202
+      },
+      {
+        "id": "6c0ac62e-dfb0-4c98-923f-11292ded9d5e",
+        "position": {
+          "x": 1666.2132709721657,
+          "y": 227.53253337732934
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "center"
+          }
+        },
+        "type": "app",
+        "width": 314,
+        "height": 162,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 1666.2132709721657,
+          "y": 227.53253337732934
+        },
+        "dragging": false
+      },
+      {
+        "id": "b5543d02-48fd-45a2-ad3b-b7f98422cab6",
+        "position": {
+          "x": 1646.2132709721657,
+          "y": -32.467466622670656
+        },
+        "data": {
+          "keyword": "render/gradient",
+          "config": {
+            "startColor": "#2f8d1c",
+            "endColor": "#04390a"
+          }
+        },
+        "type": "app",
+        "width": 354,
+        "height": 202,
+        "selected": false
+      },
+      {
+        "id": "b8fd1089-024c-4609-b0a7-b963ead8dad9",
+        "position": {
+          "x": 1616.5474718119456,
+          "y": -248.59656759187615
+        },
+        "data": {
+          "keyword": "data/newImage",
+          "config": {
+            "width": "40",
+            "height": "40"
+          },
+          "cache": {
+            "enabled": true,
+            "inputEnabled": true
+          }
+        },
+        "type": "app",
+        "width": 293,
+        "height": 171,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 1616.5474718119456,
+          "y": -248.59656759187615
+        },
+        "dragging": false
+      }
+    ],
+    "edges": [
+      {
+        "id": "de478d09-78ac-44f2-a298-c58703758b49",
+        "source": "463556ab-e4fe-40c7-93f3-40bc723f454e",
+        "sourceHandle": "next",
+        "target": "999f9725-de11-4331-8fed-b1f8e224953f",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "269d4079-085e-4dd4-9de0-bd9d13ae6ee3",
+        "source": "999f9725-de11-4331-8fed-b1f8e224953f",
+        "sourceHandle": "field/render_functions[1][1]",
+        "target": "d71f17cf-0852-4e10-b49a-9d2e08d42d51",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "954579c1-d2cc-4903-8c05-c615363f49bc",
+        "source": "999f9725-de11-4331-8fed-b1f8e224953f",
+        "sourceHandle": "field/render_functions[1][2]",
+        "target": "92262f61-5c56-4f76-ba41-c581470753ea",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "3a336f81-3407-4c67-a947-7ffddcd03b9f",
+        "target": "92262f61-5c56-4f76-ba41-c581470753ea",
+        "targetHandle": "fieldInput/image",
+        "source": "873fb97c-4b96-4538-be6c-3c801476119f",
+        "sourceHandle": "fieldOutput",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "fa181acd-5f76-45e5-85ca-bceca20b2f03",
+        "source": "999f9725-de11-4331-8fed-b1f8e224953f",
+        "sourceHandle": "field/render_functions[1][3]",
+        "target": "6c0ac62e-dfb0-4c98-923f-11292ded9d5e",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "fee8b1a4-a25c-4287-b827-8cb33aaeed78",
+        "target": "6c0ac62e-dfb0-4c98-923f-11292ded9d5e",
+        "targetHandle": "fieldInput/image",
+        "source": "b5543d02-48fd-45a2-ad3b-b7f98422cab6",
+        "sourceHandle": "fieldOutput",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "321b57c8-d33b-44ac-8b06-1dc036d8d8ec",
+        "target": "b5543d02-48fd-45a2-ad3b-b7f98422cab6",
+        "targetHandle": "fieldInput/inputImage",
+        "source": "b8fd1089-024c-4609-b0a7-b963ead8dad9",
+        "sourceHandle": "fieldOutput",
+        "type": "codeNodeEdge"
+      }
+    ]
+  }

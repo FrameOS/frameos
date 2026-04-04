@@ -1,11 +1,15 @@
+import tempfile
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import Any
 
-from sqlalchemy.orm import Session
 from arq import ArqRedis as Redis
+from sqlalchemy.orm import Session
 
+from app.codegen.drivers_nim import driver_compile_id, loadable_drivers
+from app.drivers.devices import drivers_for_frame
 from app.models.log import new_log as log
-from app.models.frame import Frame, normalize_https_proxy, update_frame
+from app.models.frame import Frame, compiled_modules_mode, normalize_https_proxy, update_frame
 from app.tasks._frame_deployer import FrameDeployer
 from app.utils.frame_http import _fetch_frame_http_bytes
 from app.utils.versions import current_frameos_version
@@ -25,6 +29,60 @@ async def fast_deploy_frame(id: int, redis: Redis):
     await redis.enqueue_job("fast_deploy_frame", id=id)
 
 
+def frame_has_compiled_scenes(frame: Frame) -> bool:
+    return any(
+        scene.get("settings", {}).get("execution", "compiled") != "interpreted"
+        for scene in (frame.scenes or [])
+    )
+
+
+def deployed_frame_has_compiled_scenes(previous_deploy: Any) -> bool:
+    if not isinstance(previous_deploy, dict):
+        return False
+
+    return any(
+        scene.get("settings", {}).get("execution", "compiled") != "interpreted"
+        for scene in (previous_deploy.get("scenes") or [])
+        if isinstance(scene, dict)
+    )
+
+
+def _frame_config_value(frame_or_deploy: Any, key: str, default: Any) -> Any:
+    if isinstance(frame_or_deploy, dict):
+        return frame_or_deploy.get(key, default)
+    return getattr(frame_or_deploy, key, default)
+
+
+def _loadable_driver_ids(frame_or_deploy: Any) -> tuple[str, ...]:
+    frame_like = SimpleNamespace(
+        device=_frame_config_value(frame_or_deploy, "device", "") or "",
+        gpio_buttons=list(_frame_config_value(frame_or_deploy, "gpio_buttons", []) or []),
+    )
+    return tuple(
+        sorted(
+            driver_compile_id(driver)
+            for driver in loadable_drivers(drivers_for_frame(frame_like))
+        )
+    )
+
+
+def fast_deploy_blocker_reason(frame: Frame) -> str | None:
+    previous_deploy = frame.last_successful_deploy if isinstance(frame.last_successful_deploy, dict) else None
+    if previous_deploy is None:
+        return "Fast deploy requires a previous successful deploy. Run a full deploy instead."
+
+    if frame_has_compiled_scenes(frame) or deployed_frame_has_compiled_scenes(previous_deploy):
+        return "Fast deploy is not supported for frames with compiled scenes. Run a full deploy instead."
+
+    if compiled_modules_mode(frame) != compiled_modules_mode(previous_deploy):
+        return "Fast deploy cannot change compiled module linkage. Run a full deploy instead."
+
+    if _loadable_driver_ids(frame) != _loadable_driver_ids(previous_deploy):
+        return "Fast deploy cannot change compiled drivers. Run a full deploy instead."
+
+    return None
+
+
 async def fast_deploy_frame_task(ctx: dict[str, Any], id: int):
     db: Session = ctx['db']
     redis: Redis = ctx['redis']
@@ -36,10 +94,13 @@ async def fast_deploy_frame_task(ctx: dict[str, Any], id: int):
             await log(db, redis, id, "stderr", "Frame not found")
             return
 
+        blocker = fast_deploy_blocker_reason(frame)
+        if blocker:
+            await log(db, redis, id, "stderr", blocker)
+            return
+
         frame.status = "deploying"
         await update_frame(db, redis, frame)
-
-        self = FrameDeployer(db=db, redis=redis, frame=frame, nim_path="", temp_dir="")
 
         frame_dict = frame.to_dict()  # persisted as frame.last_successful_deploy if successful
         if "last_successful_deploy" in frame_dict:
@@ -52,29 +113,41 @@ async def fast_deploy_frame_task(ctx: dict[str, Any], id: int):
             frame_dict["frameos_version"] = previous_frameos_version
         else:
             frame_dict["frameos_version"] = current_frameos_version()
+        previous_compile_manifest = (frame.last_successful_deploy or {}).get("compile_manifest")
+        if isinstance(previous_compile_manifest, dict):
+            frame_dict["compile_manifest"] = previous_compile_manifest
 
-        distro = await self.get_distro()
-        if distro not in {"raspios", "debian", "ubuntu", "buildroot"}:
-            raise Exception(f"Unsupported target distro '{distro}'")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self = FrameDeployer(
+                db=db,
+                redis=redis,
+                frame=frame,
+                nim_path="",
+                temp_dir=temp_dir,
+            )
 
-        await self._upload_frame_json("/srv/frameos/current/frame.json")
-        await self._upload_scenes_json("/srv/frameos/current/scenes.json.gz", gzip=True)
+            distro = await self.get_distro()
+            if distro not in {"raspios", "debian", "ubuntu", "buildroot"}:
+                raise Exception(f"Unsupported target distro '{distro}'")
 
-        try:
-            if tls_settings_changed(frame):
-                await log(db, redis, id, "stdout", "- TLS settings changed, restarting FrameOS service")
-                await self.restart_service("frameos")
-            else:
-                status, body, _headers = await _fetch_frame_http_bytes(
-                    frame, redis, path="/reload", method="POST"
-                )
-                if status >= 300:
-                    message = body.decode("utf-8", errors="replace")
-                    await log(db, redis, id, "stderr", f"Reload failed with status {status}: {message}. Restarting service.")
+            await self._upload_frame_json("/srv/frameos/current/frame.json")
+            await self._upload_scenes_json("/srv/frameos/current/scenes.json.gz", gzip=True)
+
+            try:
+                if tls_settings_changed(frame):
+                    await log(db, redis, id, "stdout", "- TLS settings changed, restarting FrameOS service")
                     await self.restart_service("frameos")
-        except Exception as e:
-            await log(db, redis, id, "stderr", f"Reload request failed: {str(e)}. Restarting service.")
-            await self.restart_service("frameos")
+                else:
+                    status, body, _headers = await _fetch_frame_http_bytes(
+                        frame, redis, path="/reload", method="POST"
+                    )
+                    if status >= 300:
+                        message = body.decode("utf-8", errors="replace")
+                        await log(db, redis, id, "stderr", f"Reload failed with status {status}: {message}. Restarting service.")
+                        await self.restart_service("frameos")
+            except Exception as e:
+                await log(db, redis, id, "stderr", f"Reload request failed: {str(e)}. Restarting service.")
+                await self.restart_service("frameos")
 
         frame.status = 'starting'
         frame.last_successful_deploy = frame_dict

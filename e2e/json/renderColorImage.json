@@ -1,0 +1,69 @@
+{
+    "id": "688440e7-7a7e-4889-b446-68a61d0a6fe6",
+    "name": "Color",
+    "fields": [],
+    "nodes": [
+      {
+        "id": "463556ab-e4fe-40c7-93f3-40bc723f454e",
+        "type": "event",
+        "position": {
+          "x": 121,
+          "y": 113
+        },
+        "data": {
+          "keyword": "render"
+        },
+        "width": 212,
+        "height": 161
+      },
+      {
+        "id": "d9d43da8-6703-435a-9e85-2706b9d1b44f",
+        "position": {
+          "x": 495.1308443993656,
+          "y": 84.45342004897026
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {}
+        },
+        "type": "app",
+        "width": 311,
+        "height": 106
+      },
+      {
+        "id": "da935286-470f-41a1-b685-01b5dc3c378d",
+        "position": {
+          "x": 475.1308443993656,
+          "y": -115.54657995102974
+        },
+        "data": {
+          "keyword": "render/color",
+          "config": {
+            "color": "#1eff00"
+          }
+        },
+        "type": "app",
+        "width": 306,
+        "height": 143,
+        "selected": false
+      }
+    ],
+    "edges": [
+      {
+        "id": "6675000d-c55d-4b6c-9a0c-28c34df628eb",
+        "source": "463556ab-e4fe-40c7-93f3-40bc723f454e",
+        "sourceHandle": "next",
+        "target": "d9d43da8-6703-435a-9e85-2706b9d1b44f",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "fb6bf0fa-82e7-4372-96fc-cbb886c47157",
+        "target": "d9d43da8-6703-435a-9e85-2706b9d1b44f",
+        "targetHandle": "fieldInput/image",
+        "source": "da935286-470f-41a1-b685-01b5dc3c378d",
+        "sourceHandle": "fieldOutput",
+        "type": "codeNodeEdge"
+      }
+    ]
+  }

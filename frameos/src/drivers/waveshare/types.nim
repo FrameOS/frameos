@@ -1,4 +1,4 @@
-import pixie, options, json
+import pixie, options, json, locks
 import frameos/types
 
 type ColorOption* = enum
@@ -19,6 +19,8 @@ type Driver* = ref object of FrameOSDriver
   lastRenderAt*: float
   palette*: Option[seq[(int, int, int)]]
   vcom*: float # used for the 10.3" display
+  previewLock*: Lock
+  lastPreview*: DriverPreviewArtifact
 
 var driverDebugLogger*: Logger
 var driverDebugEnabled*: bool

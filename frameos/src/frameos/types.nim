@@ -1,6 +1,18 @@
 import json, pixie, hashes, locks, tables, options, asyncdispatch, mummy
 import lib/burrito
 
+# Keep in sync with backend/app/utils/compiled_plugin_contract.py
+#
+# Bump COMPILED_PLUGIN_ABI_VERSION when an old compiled scene/driver .so may no
+# longer be safely loadable by a newer FrameOS binary. That means changes to the
+# plugin boundary itself: shared struct fields/layout, exported symbol names, or
+# proc signatures used across the boundary.
+#
+# Do not bump this for normal scene/driver source changes. Those are covered by
+# per-module source hashes. Use COMPILED_MODULE_BUILD_EPOCH on the Python side
+# when the ABI is still compatible but you want to force republishing modules.
+const COMPILED_PLUGIN_ABI_VERSION* = 1
+
 type
   # Parsed from config.json
   FrameConfig* = ref object
@@ -191,6 +203,13 @@ type
     render*: proc (self: FrameScene, context: ExecutionContext): Image
     init*: proc (sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persistedState: JsonNode): FrameScene
 
+  CompiledScenePlugin* = ref object of RootObj
+    id*: SceneId
+    name*: string
+    isDefault*: bool
+    abiVersion*: int
+    scene*: ExportedScene
+
   # Exported data/functions for interpreted scenes, adds some local state that's normally compiled into the scene
   ExportedInterpretedScene* = ref object of ExportedScene
     name*: string
@@ -305,6 +324,56 @@ type
 
   FrameOSDriver* = ref object of RootObj
     name*: string
+
+  SendCurrentEventHook* = proc(event: string, payload: JsonNode) {.cdecl, gcsafe.}
+  SendSceneEventHook* = proc(scene: Option[SceneId], event: string, payload: JsonNode) {.cdecl, gcsafe.}
+  LogEventHook* = proc(event: JsonNode) {.cdecl, gcsafe.}
+  TriggerServerRenderHook* = proc() {.cdecl, gcsafe.}
+
+  CompiledRuntimeHooks* = object
+    sendCurrentEvent*: SendCurrentEventHook
+    sendSceneEvent*: SendSceneEventHook
+    logEvent*: LogEventHook
+    triggerServerRender*: TriggerServerRenderHook
+
+  DriverPreviewPixelFormat* = enum
+    dpfRgba8, dpfGray8, dpfIndexed2, dpfIndexed4, dpfIndexed8, dpfMono1
+
+  DriverSetupSpiMode* = enum
+    dsmUnchanged, dsmEnable, dsmDisable
+
+  DriverSetupSpec* = ref object of RootObj
+    ensureBootConfigLines*: seq[string]
+    removeBootConfigLines*: seq[string]
+    ensureAptPackages*: seq[string]
+    pythonVendorFolders*: seq[string]
+    spiMode*: DriverSetupSpiMode
+    enableI2c*: bool
+
+  DriverPreviewArtifact* = ref object of RootObj
+    width*: int
+    height*: int
+    rotate*: int
+    pixelFormat*: DriverPreviewPixelFormat
+    data*: seq[uint8]
+    palette*: seq[(uint8, uint8, uint8)]
+
+  ExportedDriver* = ref object of RootObj
+    canRender*: bool
+    canPreview*: bool
+    canTurnOnOff*: bool
+    init*: proc (frameOS: FrameOS): FrameOSDriver
+    setup*: proc (frameConfig: FrameConfig): DriverSetupSpec
+    render*: proc (self: FrameOSDriver, image: Image): void
+    preview*: proc (self: FrameOSDriver): DriverPreviewArtifact
+    turnOn*: proc (self: FrameOSDriver): void
+    turnOff*: proc (self: FrameOSDriver): void
+
+  CompiledDriverPlugin* = ref object of RootObj
+    id*: string
+    variant*: string
+    abiVersion*: int
+    driver*: ExportedDriver
 
   Scheduler* = ref object
     frameConfig*: FrameConfig

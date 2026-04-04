@@ -144,12 +144,14 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
     downloadBuildZip,
     downloadCSourceZip,
     downloadBinaryZip,
+    downloadPrebuiltPackageZip,
   } = useActions(frameSettingsLogic({ frameId }))
   const {
     buildCacheLoading,
     buildZipLoading,
     cSourceZipLoading,
     binaryZipLoading,
+    prebuiltPackageZipLoading,
   } = useValues(frameSettingsLogic({ frameId }))
   const { openLogs } = useActions(panelsLogic({ frameId }))
   const { logs, ipAddresses } = useValues(logsLogic({ frameId }))
@@ -289,6 +291,15 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                       },
                       icon: <ArrowUpTrayIcon className="w-5 h-5" />,
                       loading: binaryZipLoading,
+                    },
+                    {
+                      label: 'Download prebuilt package .zip',
+                      onClick: () => {
+                        downloadPrebuiltPackageZip()
+                        openLogs()
+                      },
+                      icon: <ArrowUpTrayIcon className="w-5 h-5" />,
+                      loading: prebuiltPackageZipLoading,
                     },
                     {
                       label: 'Delete frame',
@@ -511,6 +522,30 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
           </Field>
           {(!inFrameAdminMode && frameForm.mode === 'rpios') || (!inFrameAdminMode && !frameForm.mode) ? (
             <Group name="rpios">
+              <Field
+                name="compiledModulesMode"
+                label="Compiled scenes and drivers"
+                tooltip={
+                  <div className="space-y-2">
+                    <p>
+                      Choose whether compiled scenes and loadable drivers are linked into the main FrameOS binary or
+                      built as separate shared libraries.
+                    </p>
+                    <p>Shared libraries are the new default. Built into binary matches the legacy deploy path.</p>
+                  </div>
+                }
+              >
+                {({ value, onChange }) => (
+                  <Select
+                    value={(value as string) || 'plugins'}
+                    onChange={onChange}
+                    options={[
+                      { value: 'plugins', label: 'Shared libraries (.so)' },
+                      { value: 'builtin', label: 'Compile into frameos binary' },
+                    ]}
+                  />
+                )}
+              </Field>
               <Field
                 name="crossCompilation"
                 label="Cross compilation"

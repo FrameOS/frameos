@@ -1,13 +1,19 @@
 # Prebuilt dependency builder
 
-These scripts produce Nim, QuickJS and lgpio builds for the Raspberry Pi OS and
-Ubuntu LTS variants we care about. They run each build inside a container
-matching one of the following releases and architectures:
+These scripts produce the prebuilt component set for each supported cross target:
 
-- Raspberry Pi OS (Debian **buster**, **bullseye**, **bookworm**, **trixie** preview)
-- Ubuntu **22.04** LTS (Jammy Jellyfish)
-- Ubuntu **24.04** LTS (Noble Numbat)
-- **armhf** (32‑bit ARMv7), **arm64** (AArch64) and **amd64** (x86_64)
+- `nim`
+- `quickjs`
+- `lgpio`
+- the generic `frameos` runtime binary
+- every compiled driver plugin as its own `.so` component
+
+The target list comes from `backend/bin/cross`, which currently covers:
+
+- Debian **bookworm**: `armhf`, `arm64`, `amd64`
+- Debian **trixie**: `armhf`, `arm64`, `amd64`
+- Ubuntu **22.04**: `arm64`, `amd64`
+- Ubuntu **24.04**: `arm64`, `amd64`
 
 ## Requirements
 
@@ -25,9 +31,45 @@ matching one of the following releases and architectures:
 ./tools/prebuilt-deps/build.sh ubuntu-24.04-amd64   # Ubuntu example
 ```
 
-The script drops results under `build/prebuilt-deps/<target>/` where `<target>`
-looks like `debian-bookworm-armhf` or `ubuntu-24.04-amd64`. Each folder contains versioned component
-directories so you can keep several revisions side-by-side, e.g.:
+## Fast Release Build
+
+If you want to fill an entire release folder such as
+`build/prebuilt-cross/2026.3.3/` as quickly as possible, use the parallel
+release orchestrator:
+
+```bash
+./tools/prebuilt-deps/build_release.py 2026.3.3
+./tools/prebuilt-deps/build_release.py 2026.3.3 --target debian-bookworm-amd64
+```
+
+By default it:
+
+- builds every target from `backend/bin/cross`
+- only writes `frameos`, compiled driver plugins, and manifests under
+  `build/prebuilt-cross/<release>/`
+- treats `build/prebuilt-deps/` as a separate shared dependency store and does
+  not rebuild or rewrite `nim`, `quickjs`, or `lgpio` there
+- runs one target at a time by default so the full worker budget stays inside
+  the active target
+- lets `FRAMEOS_DRIVER_JOBS` fan out as far as possible inside that target, so
+  driver plugins, including all Waveshare variants, can build concurrently
+- rewrites the aggregate `build/prebuilt-cross/<release>/manifest.json` after
+  all targets finish
+- writes `build/prebuilt-cross/<release>/build-metrics.json` with per-target
+  duration and size metrics, and prints a brief metrics summary to stdout
+
+You can restrict the target set or override the concurrency split when needed:
+
+```bash
+./tools/prebuilt-deps/build_release.py 2026.3.3 debian-bookworm-arm64 ubuntu-24.04-amd64
+./tools/prebuilt-deps/build_release.py 2026.3.3 --target debian-bookworm-arm64
+./tools/prebuilt-deps/build_release.py 2026.3.3 --target-jobs 3 --driver-jobs 4
+```
+
+The `build.sh` helper drops results under `build/prebuilt-deps/<target>/` where `<target>`
+looks like `debian-bookworm-armhf` or `ubuntu-24.04-amd64`. Each folder contains
+versioned component directories so you can keep several revisions side-by-side,
+for example:
 
 ```
 metadata.json
@@ -37,40 +79,66 @@ quickjs-2025-04-26/include/quickjs/*.h
 quickjs-2025-04-26/lib/libquickjs.a
 lgpio-v0.2.2/include/*.h
 lgpio-v0.2.2/lib/*
+frameos-f04c53a0e275/frameos
+driver_frameBuffer-f04c53a0e275/frameBuffer.so
+driver_evdev-f04c53a0e275/evdev.so
+driver_waveshare_EPD_2in13_V3-f04c53a0e275/waveshare_EPD_2in13_V3.so
 nim-2.2.4/.build-info
 quickjs-2025-04-26/.build-info
 lgpio-v0.2.2/.build-info
+frameos-f04c53a0e275/.build-info
+driver_frameBuffer-f04c53a0e275/.build-info
 ```
 
 You can upload the entire folder as a tarball to your cache server.
 
-Each dependency (Nim, QuickJS, lgpio) is built by its own Dockerfile. When you
-rerun the builder it reuses any dependency whose `.build-info` marker matches
-the requested versions/platform so you only rebuild the missing pieces. Delete a
-component directory (e.g. `rm -rf build/prebuilt-deps/debian-bookworm-arm64/nim`
-or `build/prebuilt-deps/ubuntu-22.04-amd64/nim`) or the entire target folder to
-force a rebuild.
+`nim`, `quickjs`, and `lgpio` are built by their own Dockerfiles. Before
+falling back to Docker, `build.sh` now attempts to stage the published `lgpio`
+archive from `tools/prebuilt-deps/manifest.json` when the requested target,
+version, and upstream repo match. The generic `frameos` runtime and compiled
+driver plugins are then cross-compiled with `backend/bin/cross`, reusing the
+locally staged `quickjs` and `lgpio` components from the same target folder.
+
+The cross-compiled staging outputs now live under
+`build/prebuilt-cross/<frameos-release>/<target>/`, where `<frameos-release>`
+comes from the numeric `frameos` version in `versions.json` (the part before
+the `+hash`). Each target folder contains the compiled runtime, driver
+libraries, a `metadata.json`, and a `manifest.json` with MD5 checksums for the
+files in that target tree. The release folder also gets its own aggregate
+`manifest.json`.
+
+When you rerun the builder it reuses any component whose `.build-info` marker
+matches the requested source/dependency versions and platform, so you only
+rebuild the missing pieces. Delete an individual component directory or the
+entire target folder to force a rebuild.
 
 ### Custom versions
 
 Override the versions with environment variables when invoking the script:
 
 ```bash
-NIM_VERSION=2.2.4 QUICKJS_VERSION=2025-04-26 \
-LGPIO_VERSION=v0.2.2 ./tools/prebuilt-deps/build.sh
+NIM_VERSION=2.2.4 NIM_BUILD_JOBS=48 QUICKJS_VERSION=2025-04-26 \
+LGPIO_VERSION=v0.2.2 FRAMEOS_VERSION=my-build-id \
+./tools/prebuilt-deps/build.sh
 ```
 
 `LGPIO_REPO` can also be overridden to point to a fork.
+`NIM_BUILD_JOBS` controls the Nim bootstrap/compiler parallelism inside the
+Docker build; leave it unset or set it to `0` to auto-detect the available
+CPU count inside the builder.
+If `FRAMEOS_VERSION` is not set, the script uses the current git revision
+(with a `-dirty` suffix when the working tree has local changes) for build
+markers and component directories, while `build/prebuilt-cross/` is nested
+under the base `frameos` release from `versions.json`.
 
 ## Cloudflare R2 sync helper
 
 Use `tools/prebuilt-deps/r2_sync.py` to mirror the build outputs to the
 `frameos-archive` Cloudflare R2 bucket. The helper uses the same target
-matrix as `build.sh`, bundles each target folder as a `tar.gz` archive and
-stores it under `prebuilt-deps/<target>/<versions>/` alongside a
-`metadata.json`. A manifest file (`prebuilt-deps/manifest.json`) keeps
-track of every target so the script can discover and download the latest
-builds automatically.
+matrix as `build.sh`, uploads each component directory as its own `tar.gz`
+archive, and stores the resulting component map in `prebuilt-deps/manifest.json`
+so the latest set for each target can be discovered and downloaded
+automatically.
 
 ### Prerequisites
 
@@ -112,3 +180,32 @@ Each command accepts `--targets debian-bookworm-armhf ...` to restrict the
 set of targets, along with knobs such as `--force` (download/upload even
 when the current metadata already matches) and `--skip-build` (download
 only).
+
+## End-to-end package verification
+
+Once a target has been built locally under `build/prebuilt-deps/<target>/`,
+you can verify that a packaged runtime actually boots, renders, and uploads
+its PNG output over HTTP:
+
+```bash
+python3 tools/prebuilt-deps/verify_package_e2e.py \
+  --target debian-bookworm-arm64 \
+  --scene-mode compiled
+```
+
+The verifier:
+
+- assembles a real package directory containing the prebuilt `frameos`
+  binary and `httpUpload.so`
+- optionally cross-compiles a tiny `render/color` scene plugin for the same
+  target (`--scene-mode compiled`)
+- starts a local HTTP capture server
+- builds a thin Docker runtime image on top of the target base image so the
+  required shared libraries are present
+- runs the package inside a matching Docker container
+- asserts that FrameOS uploads an `image/png` with the expected dimensions
+  and solid-color pixels
+
+Use `--scene-mode interpreted` to skip the compiled-scene step and validate
+just the prebuilt runtime plus driver package. Add `--keep-temp` if you want
+to inspect the assembled package and temporary build tree afterwards.

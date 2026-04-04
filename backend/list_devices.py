@@ -1,11 +1,10 @@
 import json
+import sys
 from app.drivers.waveshare import get_variant_keys, convert_waveshare_source
 
 if __name__ == '__main__':
-    print("[")
-
     # Web, HDMI and Pimoroni
-    list = [
+    devices = [
         {"value": 'web_only', "label": 'Web only'},
         {"value": 'framebuffer', "label": 'HDMI / Framebuffer'},
         {"value": 'http.upload', "label": 'HTTP upload'},
@@ -15,8 +14,6 @@ if __name__ == '__main__':
         {"value": 'pimoroni.inky_python', "label": 'Pimoroni Inky other (Python driver)'},
         {"value": 'pimoroni.hyperpixel2r', "label": 'Pimoroni HyperPixel 2.1" Round'},
     ]
-    for output in list:
-        print(f"    {json.dumps(output)},")
 
     # Waveshare
     variants = [convert_waveshare_source(key) for key in get_variant_keys()]
@@ -38,6 +35,7 @@ if __name__ == '__main__':
             "value": f"waveshare.{v.key}",
             "label": f'Waveshare {v.size}"{code} {dim} {color}',
         }
-        print(f"    {json.dumps(output)},")
+        devices.append(output)
 
-    print("]")
+    json.dump(devices, sys.stdout, indent=4)
+    sys.stdout.write("\n")

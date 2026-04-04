@@ -1,0 +1,166 @@
+{
+    "id": "e9b2a388-bc8d-46ad-a6b0-dcb636978d7f",
+    "name": "Data Image Next",
+    "settings": {
+      "refreshInterval": 3600,
+      "backgroundColor": "#000000"
+    },
+    "fields": [],
+    "nodes": [
+      {
+        "id": "463556ab-e4fe-40c7-93f3-40bc723f454e",
+        "type": "event",
+        "position": {
+          "x": 121,
+          "y": 113
+        },
+        "data": {
+          "keyword": "render"
+        },
+        "width": 212,
+        "height": 161
+      },
+      {
+        "id": "09253f6f-a3b5-4e3f-adf9-7abe8f94e3c0",
+        "position": {
+          "x": 438.5,
+          "y": 113.5
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {}
+        },
+        "type": "app",
+        "width": 324,
+        "height": 134,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 438.5,
+          "y": 113.5
+        },
+        "dragging": false
+      },
+      {
+        "id": "fd1a0657-a077-4d05-86bb-d629eb7554e2",
+        "position": {
+          "x": 392.5,
+          "y": -172.5
+        },
+        "data": {
+          "keyword": "data/newImage",
+          "config": {},
+          "cache": {
+            "enabled": true,
+            "inputEnabled": true
+          }
+        },
+        "type": "app",
+        "width": 321,
+        "height": 227,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 392.5,
+          "y": -172.5
+        },
+        "dragging": false
+      },
+      {
+        "id": "59d997f0-f97a-4e83-bcc3-abe78f50bab4",
+        "position": {
+          "x": 810.2219945557586,
+          "y": -190.53024481953221
+        },
+        "data": {
+          "keyword": "render/split",
+          "config": {
+            "rows": "2"
+          }
+        },
+        "type": "app",
+        "width": 307,
+        "height": 375,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 810.2219945557586,
+          "y": -190.53024481953221
+        },
+        "dragging": false
+      },
+      {
+        "id": "4df31793-5308-4cc7-a3aa-4dc863b5e97f",
+        "position": {
+          "x": 1170.5650559323474,
+          "y": -105.33285433902088
+        },
+        "data": {
+          "keyword": "render/color",
+          "config": {
+            "color": "#4f0896"
+          }
+        },
+        "type": "app",
+        "width": 196,
+        "height": 81,
+        "selected": false
+      },
+      {
+        "id": "09e471ff-7112-43fa-8dc6-2fe87716ff31",
+        "position": {
+          "x": 1206.8786977764998,
+          "y": 13.384820920708023
+        },
+        "data": {
+          "keyword": "render/color",
+          "config": {
+            "color": "#137981"
+          }
+        },
+        "type": "app",
+        "width": 196,
+        "height": 81,
+        "selected": true
+      }
+    ],
+    "edges": [
+      {
+        "id": "87636a96-6951-481d-9989-1c2844d6368d",
+        "source": "463556ab-e4fe-40c7-93f3-40bc723f454e",
+        "sourceHandle": "next",
+        "target": "09253f6f-a3b5-4e3f-adf9-7abe8f94e3c0",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "d7769b95-f0fd-48ec-9bb8-6d37ff32b90f",
+        "target": "09253f6f-a3b5-4e3f-adf9-7abe8f94e3c0",
+        "targetHandle": "fieldInput/image",
+        "source": "fd1a0657-a077-4d05-86bb-d629eb7554e2",
+        "sourceHandle": "fieldOutput",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "427ec8ec-fde7-4929-81ce-6c0d14e6e7cd",
+        "source": "fd1a0657-a077-4d05-86bb-d629eb7554e2",
+        "sourceHandle": "field/renderNext",
+        "target": "59d997f0-f97a-4e83-bcc3-abe78f50bab4",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "ec65d594-a57d-40ee-8245-b8d5ef485bba",
+        "source": "59d997f0-f97a-4e83-bcc3-abe78f50bab4",
+        "sourceHandle": "field/render_functions[1][1]",
+        "target": "4df31793-5308-4cc7-a3aa-4dc863b5e97f",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "7c307b6a-f5df-4ad6-9144-91830b69e3be",
+        "source": "59d997f0-f97a-4e83-bcc3-abe78f50bab4",
+        "sourceHandle": "field/render_functions[2][1]",
+        "target": "09e471ff-7112-43fa-8dc6-2fe87716ff31",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      }
+    ]
+  }

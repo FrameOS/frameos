@@ -1,0 +1,149 @@
+{
+  "id": "d2e1048c-4615-44e9-86ae-cdeb7ca22a33",
+  "name": "Split",
+  "settings": {
+    "backgroundColor": "#000000",
+    "refreshInterval": 3600
+  },
+  "fields": [],
+  "nodes": [
+    {
+      "id": "463556ab-e4fe-40c7-93f3-40bc723f454e",
+      "type": "event",
+      "position": {
+        "x": 121,
+        "y": 113
+      },
+      "data": {
+        "keyword": "render"
+      },
+      "width": 212,
+      "height": 161
+    },
+    {
+      "id": "d77949d3-3ed7-4627-ab32-dce732a9967c",
+      "position": {
+        "x": 479.6806256128831,
+        "y": 131.48149442389874
+      },
+      "data": {
+        "keyword": "render/split",
+        "config": {
+          "rows": "3",
+          "columns": "3",
+          "gap": "10",
+          "margin": "10",
+          "height_ratios": "1 3 1",
+          "width_ratios": "3 1 3"
+        }
+      },
+      "type": "app",
+      "width": 306,
+      "height": 498,
+      "selected": false
+    },
+    {
+      "id": "6a1a2ff3-46a1-420d-b6a3-98f32c1a06d7",
+      "position": {
+        "x": 867.9165536715809,
+        "y": 206.46846186775963
+      },
+      "data": {
+        "keyword": "render/color",
+        "config": {
+          "color": "#ff0000"
+        }
+      },
+      "type": "app",
+      "width": 196,
+      "height": 81,
+      "selected": false,
+      "positionAbsolute": {
+        "x": 867.9165536715809,
+        "y": 206.46846186775963
+      },
+      "dragging": false
+    },
+    {
+      "id": "5f74ea71-146a-4c5b-925a-16c4dc6ef6d9",
+      "position": {
+        "x": 883.6951846641044,
+        "y": 416.97807787798337
+      },
+      "data": {
+        "keyword": "render/color",
+        "config": {
+          "color": "#22b44e"
+        }
+      },
+      "type": "app",
+      "width": 196,
+      "height": 81,
+      "selected": false,
+      "positionAbsolute": {
+        "x": 883.6951846641044,
+        "y": 416.97807787798337
+      },
+      "dragging": false
+    }
+  ],
+  "edges": [
+    {
+      "id": "237ff0b6-8055-408c-8d82-f2e00bc52198",
+      "source": "463556ab-e4fe-40c7-93f3-40bc723f454e",
+      "sourceHandle": "next",
+      "target": "d77949d3-3ed7-4627-ab32-dce732a9967c",
+      "targetHandle": "prev",
+      "type": "appNodeEdge"
+    },
+    {
+      "id": "fec1eb66-119e-4d3a-a485-c6ef0b46b788",
+      "source": "d77949d3-3ed7-4627-ab32-dce732a9967c",
+      "sourceHandle": "field/render_functions[1][1]",
+      "target": "6a1a2ff3-46a1-420d-b6a3-98f32c1a06d7",
+      "targetHandle": "prev",
+      "type": "appNodeEdge",
+      "selected": false
+    },
+    {
+      "id": "e16b76ba-ab88-4645-b57e-f0714d7db698",
+      "source": "d77949d3-3ed7-4627-ab32-dce732a9967c",
+      "sourceHandle": "field/render_functions[3][3]",
+      "target": "5f74ea71-146a-4c5b-925a-16c4dc6ef6d9",
+      "targetHandle": "prev",
+      "type": "appNodeEdge"
+    },
+    {
+      "id": "c4d6e61a-2527-49c4-ae46-1a8044461e76",
+      "source": "d77949d3-3ed7-4627-ab32-dce732a9967c",
+      "sourceHandle": "field/render_functions[3][1]",
+      "target": "5f74ea71-146a-4c5b-925a-16c4dc6ef6d9",
+      "targetHandle": "prev",
+      "type": "appNodeEdge"
+    },
+    {
+      "id": "c11762e7-bb03-4caa-9e2d-00492bf37a78",
+      "source": "d77949d3-3ed7-4627-ab32-dce732a9967c",
+      "sourceHandle": "field/render_functions[2][2]",
+      "target": "5f74ea71-146a-4c5b-925a-16c4dc6ef6d9",
+      "targetHandle": "prev",
+      "type": "appNodeEdge"
+    },
+    {
+      "id": "c82df434-12f4-4c93-ae66-ffca1ba727b7",
+      "source": "d77949d3-3ed7-4627-ab32-dce732a9967c",
+      "sourceHandle": "field/render_functions[1][3]",
+      "target": "5f74ea71-146a-4c5b-925a-16c4dc6ef6d9",
+      "targetHandle": "prev",
+      "type": "appNodeEdge"
+    },
+    {
+      "id": "35a264d7-99e2-4902-89f8-8d9dfae0c705",
+      "source": "d77949d3-3ed7-4627-ab32-dce732a9967c",
+      "sourceHandle": "field/render_functions[3][2]",
+      "target": "6a1a2ff3-46a1-420d-b6a3-98f32c1a06d7",
+      "targetHandle": "prev",
+      "type": "appNodeEdge"
+    }
+  ]
+}

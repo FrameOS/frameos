@@ -1,0 +1,47 @@
+{
+    "id": "688440e7-7a7e-4889-b446-68a61d0a6fe6",
+    "name": "Color",
+    "fields": [],
+    "nodes": [
+      {
+        "id": "463556ab-e4fe-40c7-93f3-40bc723f454e",
+        "type": "event",
+        "position": {
+          "x": 121,
+          "y": 113
+        },
+        "data": {
+          "keyword": "render"
+        },
+        "width": 212,
+        "height": 161
+      },
+      {
+        "id": "6e960e17-51d1-4005-bec8-5b272acbcb16",
+        "position": {
+          "x": 498.12851999501277,
+          "y": 107.35111539329478
+        },
+        "data": {
+          "keyword": "render/color",
+          "config": {
+            "color": "#525dff"
+          }
+        },
+        "type": "app",
+        "width": 196,
+        "height": 81,
+        "selected": false
+      }
+    ],
+    "edges": [
+      {
+        "id": "a762f898-5d9d-46cd-aee2-9936886f2a57",
+        "source": "463556ab-e4fe-40c7-93f3-40bc723f454e",
+        "sourceHandle": "next",
+        "target": "6e960e17-51d1-4005-bec8-5b272acbcb16",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      }
+    ]
+  }

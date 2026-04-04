@@ -15,8 +15,7 @@ import frameos/utils/image
 import frameos/utils/font
 import frameos/config
 from frameos/scenes import getLastImagePng, getLastPublicState, getAllPublicStates, getUploadedScenePayload,
-    getDynamicSceneOptions
-from scenes/scenes import sceneOptions
+    getDynamicSceneOptions, getCompiledSceneOptions
 import ./embedded_assets
 import ./state
 
@@ -260,11 +259,15 @@ proc buildFrameImageResponse*(request: Request): tuple[status: httpcore.HttpCode
     let lastModified = format(fromUnix(int64(lastUpdate)), "ddd, dd MMM yyyy HH:mm:ss 'GMT'", utc())
     headers["Last-Modified"] = lastModified
   try:
-    let image = drivers.toPng(360 - globalFrameConfig.rotate)
-    if image != "":
-      return (Http200, headers, image)
-    else:
-      raise newException(Exception, "No image available")
+    let previewImage = drivers.getPreview()
+    if previewImage != nil:
+      let image =
+        if globalFrameConfig.rotate != 0:
+          previewImage.rotateDegrees(360 - globalFrameConfig.rotate)
+        else:
+          previewImage
+      return (Http200, headers, image.encodeImage(PngFormat))
+    raise newException(Exception, "No image available")
   except Exception:
     try:
       return (Http200, headers, getLastImagePng())
@@ -328,7 +331,10 @@ proc renderControlPage*(request: Request) =
     seenSceneIds[sceneIdString] = true
     allSceneOptions.add((id: sceneId, name: sceneName))
 
-  for (sceneId, sceneName) in sceneOptions:
+  var compiledSceneOptions: seq[tuple[id: SceneId, name: string]]
+  {.gcsafe.}:
+    compiledSceneOptions = getCompiledSceneOptions()
+  for (sceneId, sceneName) in compiledSceneOptions:
     addSceneOption(sceneId, sceneName)
   var dynamicSceneOptions: seq[tuple[id: SceneId, name: string]]
   {.gcsafe.}:

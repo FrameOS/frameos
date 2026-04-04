@@ -1,0 +1,81 @@
+{
+  "id": "dataCodeFloat",
+  "name": "Numeric Code Nodes",
+  "nodes": [
+    {
+      "id": "463556ab-e4fe-40c7-93f3-40bc723f454e",
+      "type": "event",
+      "position": { "x": 121, "y": 113 },
+      "data": { "keyword": "render" },
+      "width": 212,
+      "height": 161
+    },
+    {
+      "id": "2d95f46b-1185-4d49-afdd-bcd9dac99e5b",
+      "position": { "x": 526.5, "y": 128 },
+      "data": {
+        "keyword": "render/text",
+        "config": { "text": "this is a text", "borderColor": "#205510", "borderWidth": "3" }
+      },
+      "type": "app",
+      "width": 418,
+      "height": 462,
+      "selected": false
+    },
+    {
+      "id": "3849fd98-92fd-49f2-9812-50cc1ac25605",
+      "position": { "x": 476.5, "y": -28 },
+      "data": {
+        "code": "arg + 50.0",
+        "codeArgs": [{ "name": "arg", "type": "float" }],
+        "codeOutputs": [{ "name": "fontSize", "type": "float" }]
+      },
+      "type": "code",
+      "style": { "width": 300, "height": 119 },
+      "width": 300,
+      "height": 119,
+      "selected": false,
+      "positionAbsolute": { "x": 476.5, "y": -28 },
+      "dragging": false
+    },
+    {
+      "id": "624b8ce0-9885-4b3f-b900-8a66b33f10c6",
+      "position": { "x": 383.5, "y": -208 },
+      "data": { "code": "50.0", "codeJS": "50.0", "codeArgs": [], "codeOutputs": [{ "name": "arg", "type": "float" }] },
+      "type": "code",
+      "style": { "width": 300, "height": 119 },
+      "width": 300,
+      "height": 119,
+      "selected": false,
+      "dragging": false
+    }
+  ],
+  "edges": [
+    {
+      "id": "5b2cbd80-3d5c-47f2-a817-863e5aede090",
+      "target": "2d95f46b-1185-4d49-afdd-bcd9dac99e5b",
+      "targetHandle": "prev",
+      "source": "463556ab-e4fe-40c7-93f3-40bc723f454e",
+      "sourceHandle": "next",
+      "type": "appNodeEdge"
+    },
+    {
+      "id": "2cb29cc7-12a1-403e-8995-4919cd78f89c",
+      "source": "3849fd98-92fd-49f2-9812-50cc1ac25605",
+      "sourceHandle": "fieldOutput",
+      "target": "2d95f46b-1185-4d49-afdd-bcd9dac99e5b",
+      "targetHandle": "fieldInput/fontSize",
+      "type": "codeNodeEdge"
+    },
+    {
+      "id": "e98e5676-59a6-4f2f-8d37-1b97d720ec91",
+      "target": "3849fd98-92fd-49f2-9812-50cc1ac25605",
+      "targetHandle": "codeField/arg",
+      "source": "624b8ce0-9885-4b3f-b900-8a66b33f10c6",
+      "sourceHandle": "fieldOutput",
+      "type": "codeNodeEdge"
+    }
+  ],
+  "fields": [],
+  "settings": { "refreshInterval": 3600, "backgroundColor": "#000000" }
+}

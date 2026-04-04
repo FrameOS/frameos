@@ -24,6 +24,7 @@ import apps/data/weather/app_loader as data_weather_loader
 import apps/data/xmlToJson/app_loader as data_xmlToJson_loader
 import apps/logic/breakIfRendering/app_loader as logic_breakIfRendering_loader
 import apps/logic/ifElse/app_loader as logic_ifElse_loader
+import apps/logic/log/app_loader as logic_log_loader
 import apps/logic/nextSleepDuration/app_loader as logic_nextSleepDuration_loader
 import apps/logic/setAsState/app_loader as logic_setAsState_loader
 import apps/render/calendar/app_loader as render_calendar_loader
@@ -62,6 +63,7 @@ proc initApp*(keyword: string, node: DiagramNode, scene: FrameScene): AppRoot =
   of "data/xmlToJson": data_xmlToJson_loader.init(node, scene)
   of "logic/breakIfRendering": logic_breakIfRendering_loader.init(node, scene)
   of "logic/ifElse": logic_ifElse_loader.init(node, scene)
+  of "logic/log": logic_log_loader.init(node, scene)
   of "logic/nextSleepDuration": logic_nextSleepDuration_loader.init(node, scene)
   of "logic/setAsState": logic_setAsState_loader.init(node, scene)
   of "render/calendar": render_calendar_loader.init(node, scene)
@@ -101,6 +103,7 @@ proc setAppField*(keyword: string, app: AppRoot, field: string, value: Value) =
   of "data/xmlToJson": data_xmlToJson_loader.setField(app, field, value)
   of "logic/breakIfRendering": logic_breakIfRendering_loader.setField(app, field, value)
   of "logic/ifElse": logic_ifElse_loader.setField(app, field, value)
+  of "logic/log": logic_log_loader.setField(app, field, value)
   of "logic/nextSleepDuration": logic_nextSleepDuration_loader.setField(app, field, value)
   of "logic/setAsState": logic_setAsState_loader.setField(app, field, value)
   of "render/calendar": render_calendar_loader.setField(app, field, value)
@@ -117,6 +120,7 @@ proc runApp*(keyword: string, app: AppRoot, context: ExecutionContext) =
   case keyword:
   of "logic/breakIfRendering": logic_breakIfRendering_loader.run(app, context)
   of "logic/ifElse": logic_ifElse_loader.run(app, context)
+  of "logic/log": logic_log_loader.run(app, context)
   of "logic/nextSleepDuration": logic_nextSleepDuration_loader.run(app, context)
   of "logic/setAsState": logic_setAsState_loader.run(app, context)
   of "render/calendar": render_calendar_loader.run(app, context)

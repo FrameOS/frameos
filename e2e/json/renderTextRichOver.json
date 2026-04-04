@@ -1,0 +1,60 @@
+{
+    "id": "61d75907-f1d7-43da-9bf3-b59027c8262a",
+    "name": "Rich text overflow",
+    "settings": {
+      "backgroundColor": "#000000",
+      "refreshInterval": 3600
+    },
+    "fields": [],
+    "nodes": [
+      {
+        "data": {
+          "keyword": "render"
+        },
+        "height": 161,
+        "id": "463556ab-e4fe-40c7-93f3-40bc723f454e",
+        "position": {
+          "x": 121,
+          "y": 113
+        },
+        "type": "event",
+        "width": 212
+      },
+      {
+        "data": {
+          "config": {
+            "borderColor": "#ffffff",
+            "borderWidth": "0",
+            "fontColor": "#8a0a0a",
+            "richText": "basic-caret",
+            "text": "^(64,#FFFF00)Batman ^(32,#00FF00)is not here ^(64,#FFFF00)Batman ^(32,#00FF00)is not here ^(64,#FFFF00)Batman ^(32,#00FF00)is not here ^(64,#FFFF00)Batman ^(32,#00FF00)is not here ^(64,#FFFF00)Batman ^(32,#00FF00)is not here ^(64,#FFFF00)Batman ^(32,#00FF00)is not here ^(64,#FFFF00)Batman ^(32,#00FF00)is not here ^(64,#FFFF00)Batman ^(32,#00FF00)is not here ^(64,#FFFF00)Batman ^(32,#00FF00)is not here ^(64,#FFFF00)Batman ^(32,#00FF00)is not here ^(64,#FFFF00)Batman ^(32,#00FF00)is not here ^(64,#FFFF00)Batman ^(32,#00FF00)is not here ^(64,#FFFF00)Batman ^(32,#00FF00)is not here ^(64,#FFFF00)Batman ^(32,#00FF00)is not here ^(64,#FFFF00)Batman ^(32,#00FF00)is not here ^(64,#FFFF00)Batman ^(32,#00FF00)is not here ^(64,#FFFF00)Batman ^(32,#00FF00)is not here ^(64,#FFFF00)Batman ^(32,#00FF00)is not here ^(64,#FFFF00)Batman ^(32,#00FF00)is not here ^(64,#FFFF00)Batman ^(32,#00FF00)is not here ^(64,#FFFF00)Batman ^(32,#00FF00)is not here ^(64,#FFFF00)Batman ^(32,#00FF00)is not here ^(64,#FFFF00)Batman ^(32,#00FF00)is not here ^(64,#FFFF00)Batman ^(32,#00FF00)is not here ^(64,#FFFF00)Batman ^(32,#00FF00)is not here ^(64,#FFFF00)Batman ^(32,#00FF00)is not here ^(64,#FFFF00)Batman ^(32,#00FF00)is not here ^(64,#FFFF00)Batman ^(32,#00FF00)is not here ^(64,#FFFF00)Batman ^(32,#00FF00)is not here ^(64,#FFFF00)Batman ^(32,#00FF00)is not here ^(64,#FFFF00)Batman ^(32,#00FF00)is not here ^(64,#FFFF00)Batman ^(32,#00FF00)is not here ^(64,#FFFF00)Batman ^(32,#00FF00)is not here ^(64,#FFFF00)Batman ^(32,#00FF00)is not here ^(64,#FFFF00)Batman ^(32,#00FF00)is not here ^(64,#FFFF00)Batman ^(32,#00FF00)is not here ^(64,#FFFF00)Batman ^(32,#00FF00)is not here ^(64,#FFFF00)Batman ^(32,#00FF00)is not here ^(64,#FFFF00)Batman ^(32,#00FF00)is not here ^(64,#FFFF00)Batman ^(32,#00FF00)is not here ^(64,#FFFF00)Batman ^(32,#00FF00)is not here ^(64,#FFFF00)Batman ^(32,#00FF00)is not here ^(64,#FFFF00)Batman ^(32,#00FF00)is not here ^(64,#FFFF00)Batman ^(32,#00FF00)is not here "
+          },
+          "keyword": "render/text"
+        },
+        "height": 516,
+        "id": "c3bbaf66-f11d-45d2-9bed-5395ac0c01b2",
+        "position": {
+          "x": 457,
+          "y": 108.5
+        },
+        "resizing": false,
+        "selected": true,
+        "style": {
+          "height": 516,
+          "width": 597
+        },
+        "type": "app",
+        "width": 597
+      }
+    ],
+    "edges": [
+      {
+        "id": "aaab3d8f-7943-4df1-96ff-5553710e2ce6",
+        "source": "463556ab-e4fe-40c7-93f3-40bc723f454e",
+        "sourceHandle": "next",
+        "target": "c3bbaf66-f11d-45d2-9bed-5395ac0c01b2",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      }
+    ]
+  }

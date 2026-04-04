@@ -110,3 +110,21 @@ suite "Logger Tests":
       if item[1].hasKey("event") and item[1]["event"].getStr() == "disabledTest":
         anyFromDisabled = true
     doAssert not anyFromDisabled, "We found a log from the disabled period, which should not happen"
+
+  test "retry delay backs off and caps":
+    doAssert nextRetryDelaySeconds(1, baseDelay = 1.0, maxDelay = 30.0) == 1.0
+    doAssert nextRetryDelaySeconds(2, baseDelay = 1.0, maxDelay = 30.0) == 2.0
+    doAssert nextRetryDelaySeconds(3, baseDelay = 1.0, maxDelay = 30.0) == 4.0
+    doAssert nextRetryDelaySeconds(10, baseDelay = 1.0, maxDelay = 30.0) == 30.0
+
+  test "trimPendingEntries keeps the most recent items":
+    var items = @[1, 2, 3, 4]
+    let dropped = trimPendingEntries(items, 2)
+    doAssert dropped == 2
+    doAssert items == @[3, 4]
+
+  test "shouldReportSendError suppresses repeated errors until quiet period passes":
+    doAssert shouldReportSendError("", "No route to host", 0.0, 10.0, quietPeriod = 30.0)
+    doAssert not shouldReportSendError("No route to host", "No route to host", 10.0, 20.0, quietPeriod = 30.0)
+    doAssert shouldReportSendError("No route to host", "Connection refused", 10.0, 20.0, quietPeriod = 30.0)
+    doAssert shouldReportSendError("No route to host", "No route to host", 10.0, 45.0, quietPeriod = 30.0)

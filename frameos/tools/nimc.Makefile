@@ -29,7 +29,11 @@ $(OBJECTS): pre-build
 %.o: %.c
 	@if [ ! -e $@ ]; then \
 		md5sum=$$(md5sum $< | awk '{print $$1}'); \
-		file=$$(echo '$<' | sed 's/@s/\//g' | sed 's/@m//g' | sed 's/.*nimble\/pkgs2\/\(.*\)/\1/' | sed 's/.*\/\(nim\/lib\/.*\)/\1/'); \
+		raw_file='$<'; \
+		if printf '%s' "$$raw_file" | grep -q '^@'; then \
+			raw_file=$$(printf '%s' "$$raw_file" | tr 'A-Za-z' 'N-ZA-Mn-za-m'); \
+		fi; \
+		file=$$(printf '%s' "$$raw_file" | sed 's/@s/\//g' | sed 's/@m//g' | sed 's/.*nimble\/pkgs2\/\(.*\)/\1/' | sed 's/.*\/\(nim\/lib\/.*\)/\1/'); \
 		cache_obj=../cache/$$md5sum.o; \
 		if [ -f "$$cache_obj" ]; then \
 			ln -s "$$cache_obj" $@; \

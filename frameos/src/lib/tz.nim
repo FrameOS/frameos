@@ -25,7 +25,7 @@ proc detectSystemTimeZone*(): string =
         break
 
     if result.len == 0:
-      echo "Unknown timezone path: " & tgt
+      stderr.writeLine("Unknown timezone path: " & tgt)
   except OSError: discard
 
   # Debian/Raspberry-Pi fallback: /etc/timezone is a plain text copy
@@ -42,5 +42,5 @@ proc detectSystemTimeZone*(): string =
 
   # check if result is a valid timezone
   if not valid(findTimeZone(result)):
-    echo "Warning: Detected timezone is not valid: ", result
+    stderr.writeLine("Warning: Detected timezone is not valid: " & result)
     return "UTC"

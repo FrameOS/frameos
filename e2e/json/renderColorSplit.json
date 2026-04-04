@@ -1,0 +1,175 @@
+{
+  "id": "688440e7-7a7e-4889-b446-68a61d0a6fe6",
+  "name": "Color",
+  "fields": [],
+  "nodes": [
+    {
+      "id": "463556ab-e4fe-40c7-93f3-40bc723f454e",
+      "type": "event",
+      "position": {
+        "x": 121,
+        "y": 113
+      },
+      "data": {
+        "keyword": "render"
+      },
+      "width": 212,
+      "height": 161
+    },
+    {
+      "id": "53155ad7-4da4-4aee-8e73-48ed3729e10d",
+      "type": "app",
+      "position": {
+        "x": 426.5237161596965,
+        "y": 86.53070839856693
+      },
+      "data": {
+        "keyword": "render/split",
+        "config": {
+          "columns": "2"
+        },
+        "cache": {}
+      },
+      "width": 306,
+      "height": 302,
+      "selected": false,
+      "positionAbsolute": {
+        "x": 426.5237161596965,
+        "y": 86.53070839856693
+      },
+      "dragging": false
+    },
+    {
+      "id": "da5f5f85-1945-4f3c-84dd-4b94567859dc",
+      "position": {
+        "x": 836.3570332286855,
+        "y": 59.83716218808726
+      },
+      "data": {
+        "keyword": "render/image",
+        "config": {
+          "placement": "center"
+        }
+      },
+      "type": "app",
+      "width": 314,
+      "height": 162,
+      "selected": false,
+      "positionAbsolute": {
+        "x": 836.3570332286855,
+        "y": 59.83716218808726
+      },
+      "dragging": false
+    },
+    {
+      "id": "a17b346b-521b-4180-91b1-da8139d7fce4",
+      "position": {
+        "x": 779.3890328526129,
+        "y": -346.1851054855084
+      },
+      "data": {
+        "keyword": "render/color",
+        "config": {
+          "color": "#d62424"
+        }
+      },
+      "type": "app",
+      "width": 306,
+      "height": 143,
+      "selected": false,
+      "dragging": false,
+      "positionAbsolute": {
+        "x": 779.3890328526129,
+        "y": -346.1851054855084
+      }
+    },
+    {
+      "id": "f0fea57d-78b7-477e-a1b2-e4e0e9637202",
+      "position": {
+        "x": 883.0393621862531,
+        "y": 236.48370411967323
+      },
+      "data": {
+        "keyword": "render/color",
+        "config": {
+          "color": "#e6d40f"
+        }
+      },
+      "type": "app",
+      "width": 196,
+      "height": 81,
+      "selected": false,
+      "positionAbsolute": {
+        "x": 883.0393621862531,
+        "y": 236.48370411967323
+      },
+      "dragging": false
+    },
+    {
+      "id": "43141ef4-3160-41c2-847d-a939c7182792",
+      "position": {
+        "x": 815.4198108610259,
+        "y": -181.04876767357942
+      },
+      "data": {
+        "keyword": "data/resizeImage",
+        "config": {
+          "width": "200",
+          "height": "200",
+          "scalingMode": "center"
+        }
+      },
+      "type": "app",
+      "width": 335,
+      "height": 196,
+      "selected": false,
+      "positionAbsolute": {
+        "x": 815.4198108610259,
+        "y": -181.04876767357942
+      },
+      "dragging": false
+    }
+  ],
+  "edges": [
+    {
+      "id": "2e448f06-5155-4cc0-b463-a84be8edc01f",
+      "source": "463556ab-e4fe-40c7-93f3-40bc723f454e",
+      "sourceHandle": "next",
+      "target": "53155ad7-4da4-4aee-8e73-48ed3729e10d",
+      "targetHandle": "prev",
+      "type": "appNodeEdge"
+    },
+    {
+      "id": "3cbb9ff0-8634-47c0-9e66-8fdae63ded6e",
+      "source": "53155ad7-4da4-4aee-8e73-48ed3729e10d",
+      "sourceHandle": "field/render_functions[1][1]",
+      "target": "da5f5f85-1945-4f3c-84dd-4b94567859dc",
+      "targetHandle": "prev",
+      "type": "appNodeEdge"
+    },
+    {
+      "id": "bc408ed2-bb07-4c63-894d-16c700b86327",
+      "source": "53155ad7-4da4-4aee-8e73-48ed3729e10d",
+      "sourceHandle": "field/render_functions[1][2]",
+      "target": "f0fea57d-78b7-477e-a1b2-e4e0e9637202",
+      "targetHandle": "prev",
+      "type": "appNodeEdge"
+    },
+    {
+      "id": "810b708b-a64d-48fc-9bd1-9df405e49a7b",
+      "target": "da5f5f85-1945-4f3c-84dd-4b94567859dc",
+      "targetHandle": "fieldInput/image",
+      "source": "43141ef4-3160-41c2-847d-a939c7182792",
+      "sourceHandle": "fieldOutput",
+      "type": "codeNodeEdge"
+    },
+    {
+      "id": "c4e98a52-5751-45ca-8e91-8f424ac79114",
+      "source": "a17b346b-521b-4180-91b1-da8139d7fce4",
+      "sourceHandle": "fieldOutput",
+      "target": "43141ef4-3160-41c2-847d-a939c7182792",
+      "targetHandle": "fieldInput/image",
+      "type": "codeNodeEdge"
+    }
+  ]
+}

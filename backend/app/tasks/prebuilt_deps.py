@@ -32,6 +32,7 @@ class PrebuiltEntry:
     versions: dict[str, str]
     component_urls: dict[str, str]
     component_md5s: dict[str, str]
+    component_paths: dict[str, str] | None = None
 
     def url_for(self, component: str) -> str | None:
         return self.component_urls.get(component)
@@ -41,6 +42,9 @@ class PrebuiltEntry:
 
     def md5_for(self, component: str) -> str | None:
         return self.component_md5s.get(component)
+
+    def path_for(self, component: str) -> str | None:
+        return (self.component_paths or {}).get(component)
 
 
 def _manifest_file_override() -> Path | None:
@@ -70,6 +74,7 @@ def _entries_from_payload(payload: dict, base: str) -> dict[str, PrebuiltEntry]:
             versions=entry.get("versions") or {},
             component_urls=component_urls,
             component_md5s=entry.get("component_md5sums") or {},
+            component_paths={},
         )
     return entries
 
@@ -128,6 +133,9 @@ def resolve_prebuilt_target(distro: str, version: str, arch: str) -> str | None:
         if release in allowed:
             release_key = release
     elif distro_key == "ubuntu":
+        release_key = _normalize_ubuntu_release(version)
+    elif distro_key == "buildroot":
+        # Buildroot packages reuse the Ubuntu 22.04 release lineage for prebuilt artifacts.
         release_key = _normalize_ubuntu_release(version)
     if not release_key:
         return None

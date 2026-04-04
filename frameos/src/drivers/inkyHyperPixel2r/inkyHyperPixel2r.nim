@@ -1,4 +1,5 @@
 import pixie, osproc
+import frameos/driver_setup
 import frameos/types
 
 import drivers/frameBuffer/frameBuffer as frameBuffer
@@ -14,6 +15,14 @@ proc runCommand(command: string): int =
   if not execCmdHook.isNil:
     return execCmdHook(command)
   execCmd(command)
+
+proc setup*(frameConfig: FrameConfig): DriverSetupSpec =
+  if frameConfig.isNil or frameConfig.device != "pimoroni.hyperpixel2r":
+    return nil
+
+  driverSetupSpec:
+    assureAptPackages @["python3-dev", "python3-pip", "python3-venv"]
+    initPythonVendorFolder "inkyHyperPixel2r"
 
 proc init*(frameOS: FrameOS): Driver =
   let fbDriver = frameBuffer.init(frameOS)

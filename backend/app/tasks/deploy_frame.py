@@ -1,6 +1,8 @@
 from datetime import datetime, timezone
 from functools import partial
+import json
 import os
+from pathlib import Path
 import re
 import shlex
 import tarfile
@@ -14,18 +16,28 @@ from sqlalchemy.orm import Session
 from app.drivers.devices import drivers_for_frame
 from app.models.assets import sync_assets
 from app.models.log import new_log as log
-from app.models.frame import Frame, update_frame
+from app.models.frame import Frame, update_frame, uses_compiled_module_plugins
 from app.utils.remote_exec import upload_file
 from app.models.settings import get_settings_dict
 from app.utils.ssh_authorized_keys import _install_authorized_keys
 from app.utils.ssh_key_utils import normalize_ssh_keys, select_ssh_keys_for_frame
 from app.utils.cross_compile import TargetMetadata
+from app.utils.versions import current_frameos_version
 from app.tasks._frame_deployer import FrameDeployer
-from app.tasks.binary_builder import FrameBinaryBuilder
+from app.tasks.binary_builder import FrameBinaryBuilder, resolve_prebuilt_entry
+from app.tasks.compile_manifest import (
+    CompilePlan,
+    SMART_DEPLOY,
+    build_compile_manifest,
+    compile_manifest_from_dict,
+    plan_compile_actions,
+)
 
 from .utils import find_nim_v2
 
 icon = "🔷"
+
+LOCAL_FRAMEOS_VENDOR_ROOT = Path(__file__).resolve().parents[3] / "frameos" / "vendor"
 
 # Mirror of: https://bellard.org/quickjs/quickjs-${version}.tar.xz
 QUICKJS_ARCHIVE_URL = "https://archive.frameos.net/source/vendor/quickjs-{version}.tar.xz"
@@ -49,6 +61,219 @@ def _sanitize_apt_package_name(pkg: str) -> str:
     if not APT_PACKAGE_NAME_PATTERN.fullmatch(normalized):
         raise ValueError(f"Invalid apt package name: {pkg!r}")
     return normalized
+
+
+def _short_scene_id(scene_id: str) -> str:
+    normalized = str(scene_id or "default")
+    if len(normalized) <= 12:
+        return normalized
+    return f"{normalized[:8]}..."
+
+
+def _scene_label_lookup(frame: Frame) -> dict[str, str]:
+    labels: dict[str, str] = {}
+    for scene in frame.scenes or []:
+        scene_id = str(scene.get("id") or "default")
+        scene_name = str(scene.get("name") or "").strip()
+        short_id = _short_scene_id(scene_id)
+        if scene_name and scene_name != scene_id:
+            labels[scene_id] = f"{scene_name} ({short_id})"
+        else:
+            labels[scene_id] = short_id
+    return labels
+
+
+def _format_scene_list(frame: Frame, scene_ids: tuple[str, ...], *, limit: int = 3) -> str:
+    labels = _scene_label_lookup(frame)
+    formatted = [labels.get(scene_id, _short_scene_id(scene_id)) for scene_id in scene_ids]
+    if len(formatted) <= limit:
+        return ", ".join(formatted)
+    return f"{', '.join(formatted[:limit])}, +{len(formatted) - limit} more"
+
+
+def _format_scene_label(frame: Frame, scene_id: str) -> str:
+    return _scene_label_lookup(frame).get(scene_id, _short_scene_id(scene_id))
+
+
+def _scene_compile_start_lines(frame: Frame, scene_ids: tuple[str, ...]) -> list[str]:
+    return [f"{icon} Compiling scene: {_format_scene_label(frame, scene_id)}" for scene_id in scene_ids]
+
+
+def _short_driver_id(driver_id: str) -> str:
+    normalized = str(driver_id or "driver")
+    if len(normalized) <= 20:
+        return normalized
+    return f"{normalized[:16]}..."
+
+
+def _format_driver_list(driver_ids: tuple[str, ...], *, limit: int = 3) -> str:
+    formatted = [_short_driver_id(driver_id) for driver_id in driver_ids]
+    if len(formatted) <= limit:
+        return ", ".join(formatted)
+    return f"{', '.join(formatted[:limit])}, +{len(formatted) - limit} more"
+
+
+def _driver_compile_start_lines(driver_ids: tuple[str, ...]) -> list[str]:
+    return [f"{icon} Compiling driver: {_short_driver_id(driver_id)}" for driver_id in driver_ids]
+
+
+def _compile_plan_log_lines(frame: Frame, compile_plan: Any, compile_manifest: Any) -> list[str]:
+    lines = [f"{icon} Compile plan: {compile_plan.reason}"]
+
+    if compile_plan.rebuild_app:
+        lines.append(f"{icon} FrameOS compile: requested")
+    else:
+        app_reason = "app inputs unchanged" if (compile_plan.rebuild_scene_ids or compile_plan.rebuild_driver_ids) else "inputs unchanged"
+        lines.append(f"{icon} FrameOS compile: skipped ({app_reason})")
+
+    use_compiled_plugins = uses_compiled_module_plugins(frame)
+    total_compiled_scenes = len(compile_manifest.scene_hashes)
+    configured_compiled_scenes = sum(
+        1
+        for scene in (frame.scenes or [])
+        if scene.get("settings", {}).get("execution", "compiled") != "interpreted"
+    )
+    if not use_compiled_plugins and configured_compiled_scenes:
+        lines.append(f"{icon} Scene compile: included in FrameOS binary")
+    elif total_compiled_scenes == 0:
+        lines.append(f"{icon} Scene compile: skipped (no compiled scenes configured)")
+    elif compile_plan.rebuild_scene_ids:
+        reused = len(compile_plan.reuse_scene_ids)
+        reuse_suffix = f", reusing {reused}" if reused else ""
+        lines.append(
+            f"{icon} Scene compile: requested ({len(compile_plan.rebuild_scene_ids)} changed{reuse_suffix})"
+        )
+        lines.append(f"{icon} Scenes to compile: {_format_scene_list(frame, compile_plan.rebuild_scene_ids)}")
+    else:
+        reused = len(compile_plan.reuse_scene_ids)
+        reuse_suffix = f"; reusing {reused}" if reused else ""
+        lines.append(f"{icon} Scene compile: skipped (compiled scene inputs unchanged{reuse_suffix})")
+
+    configured_driver_count = 0
+    if not use_compiled_plugins:
+        try:
+            configured_driver_count = len(
+                [driver for driver in drivers_for_frame(frame).values() if driver.import_path]
+            )
+        except Exception:
+            configured_driver_count = 0
+    if total_compiled_scenes == 0:
+        pass
+
+    total_compiled_drivers = len(compile_manifest.driver_hashes)
+    if not use_compiled_plugins and configured_driver_count:
+        lines.append(f"{icon} Driver compile: included in FrameOS binary")
+    elif total_compiled_drivers == 0:
+        lines.append(f"{icon} Driver compile: skipped (no compiled drivers configured)")
+    elif compile_plan.rebuild_driver_ids:
+        reused = len(compile_plan.reuse_driver_ids)
+        reuse_suffix = f", reusing {reused}" if reused else ""
+        lines.append(
+            f"{icon} Driver compile: requested ({len(compile_plan.rebuild_driver_ids)} changed{reuse_suffix})"
+        )
+        lines.append(f"{icon} Drivers to compile: {_format_driver_list(compile_plan.rebuild_driver_ids)}")
+    else:
+        reused = len(compile_plan.reuse_driver_ids)
+        reuse_suffix = f"; reusing {reused}" if reused else ""
+        lines.append(f"{icon} Driver compile: skipped (driver inputs unchanged{reuse_suffix})")
+
+    return lines
+
+
+def _pluralize(count: int, singular: str, plural: str | None = None) -> str:
+    if count == 1:
+        return singular
+    return plural or f"{singular}s"
+
+
+async def _remote_file_exists(deployer: FrameDeployer, path: str) -> bool:
+    return (
+        await deployer.exec_command(
+            f"test -f {shlex.quote(path)}",
+            raise_on_error=False,
+            log_command=False,
+            log_output=False,
+        )
+        == 0
+    )
+
+
+async def _remote_dir_exists(deployer: FrameDeployer, path: str) -> bool:
+    return (
+        await deployer.exec_command(
+            f"test -d {shlex.quote(path)}",
+            raise_on_error=False,
+            log_command=False,
+            log_output=False,
+        )
+        == 0
+    )
+
+
+async def _adjust_compile_plan_for_missing_remote_artifacts(
+    deployer: FrameDeployer,
+    compile_plan: CompilePlan,
+    compile_manifest: Any,
+) -> CompilePlan:
+    rebuild_app = compile_plan.rebuild_app
+    rebuild_scene_ids = list(compile_plan.rebuild_scene_ids)
+    reuse_scene_ids = list(compile_plan.reuse_scene_ids)
+    rebuild_driver_ids = list(compile_plan.rebuild_driver_ids)
+    reuse_driver_ids = list(compile_plan.reuse_driver_ids)
+    extra_reasons: list[str] = []
+
+    if not rebuild_app and not await _remote_file_exists(deployer, "/srv/frameos/current/frameos"):
+        rebuild_app = True
+        extra_reasons.append("current FrameOS binary missing on device")
+
+    missing_scene_ids: list[str] = []
+    for scene_id in compile_plan.reuse_scene_ids:
+        scene_state = compile_manifest.scene_hashes.get(scene_id)
+        if scene_state is None:
+            continue
+        if not await _remote_file_exists(
+            deployer,
+            f"/srv/frameos/current/scenes/{scene_state.library}",
+        ):
+            missing_scene_ids.append(scene_id)
+
+    if missing_scene_ids:
+        rebuild_scene_ids.extend(missing_scene_ids)
+        reuse_scene_ids = [scene_id for scene_id in reuse_scene_ids if scene_id not in missing_scene_ids]
+        extra_reasons.append(
+            f"{len(missing_scene_ids)} cached {_pluralize(len(missing_scene_ids), 'scene')} missing on device"
+        )
+
+    missing_driver_ids: list[str] = []
+    for driver_id in compile_plan.reuse_driver_ids:
+        driver_state = compile_manifest.driver_hashes.get(driver_id)
+        if driver_state is None:
+            continue
+        if not await _remote_file_exists(
+            deployer,
+            f"/srv/frameos/current/drivers/{driver_state.library}",
+        ):
+            missing_driver_ids.append(driver_id)
+
+    if missing_driver_ids:
+        rebuild_driver_ids.extend(missing_driver_ids)
+        reuse_driver_ids = [driver_id for driver_id in reuse_driver_ids if driver_id not in missing_driver_ids]
+        extra_reasons.append(
+            f"{len(missing_driver_ids)} cached {_pluralize(len(missing_driver_ids), 'driver')} missing on device"
+        )
+
+    if not extra_reasons:
+        return compile_plan
+
+    return CompilePlan(
+        mode=compile_plan.mode,
+        rebuild_app=rebuild_app,
+        rebuild_scene_ids=tuple(rebuild_scene_ids),
+        reuse_scene_ids=tuple(reuse_scene_ids),
+        rebuild_driver_ids=tuple(rebuild_driver_ids),
+        reuse_driver_ids=tuple(reuse_driver_ids),
+        reason=f"{compile_plan.reason}; {'; '.join(extra_reasons)}",
+    )
 
 
 async def _install_if_necessary(
@@ -107,7 +332,13 @@ async def _install_if_necessary(
 
 
 async def _upload_directory_tree(
-    deployer: FrameDeployer, local_dir: str, remote_dir: str, label: str, build_id: str
+    deployer: FrameDeployer,
+    local_dir: str,
+    remote_dir: str,
+    label: str,
+    build_id: str,
+    *,
+    replace: bool = True,
 ) -> None:
     normalized_local = os.path.abspath(local_dir)
     if not os.path.isdir(normalized_local):
@@ -136,7 +367,8 @@ async def _upload_directory_tree(
     quoted_remote = shlex.quote(remote_dir)
     quoted_archive = shlex.quote(remote_archive)
     await deployer.exec_command(f"mkdir -p {quoted_parent}")
-    await deployer.exec_command(f"rm -rf {quoted_remote}", raise_on_error=False)
+    if replace:
+        await deployer.exec_command(f"rm -rf {quoted_remote}", raise_on_error=False)
     await deployer.exec_command(
         f"tar -xzf {quoted_archive} -C {quoted_parent} && rm {quoted_archive}"
     )
@@ -154,20 +386,27 @@ async def _upload_binary(deployer: FrameDeployer, local_path: str, remote_path: 
 
 async def _sync_vendor_dir(
     deployer: FrameDeployer,
-    local_dir: str,
+    local_dir: str | None,
     vendor_folder: str,
     label: str,
-    cross_compiled: bool,
     build_id: str,
+    *,
+    reuse_existing_remote: bool = False,
 ) -> None:
     remote_dir = f"/srv/frameos/vendor/{vendor_folder}"
-    if cross_compiled:
+    if reuse_existing_remote and await _remote_dir_exists(deployer, remote_dir):
+        await deployer.log("stdout", f"{icon} Reusing existing {label}")
+        return
+
+    if local_dir:
         await _upload_directory_tree(deployer, local_dir, remote_dir, label, build_id)
-    else:
-        await deployer.exec_command(
-            f"mkdir -p /srv/frameos/vendor && "
-            f"cp -r /srv/frameos/build/build_{build_id}/vendor/{vendor_folder} /srv/frameos/vendor/"
-        )
+        return
+
+    if await _remote_dir_exists(deployer, remote_dir):
+        await deployer.log("stdout", f"{icon} Reusing existing {label}")
+        return
+
+    raise FileNotFoundError(f"{label} missing locally and on device")
 
 
 async def _ensure_ntp_installed(deployer: FrameDeployer) -> None:
@@ -410,6 +649,336 @@ async def _ensure_quickjs(
         )
     return quickjs_dirname
 
+
+async def _ensure_quickjs_for_remote_frameos_build(
+    deployer: FrameDeployer,
+    *,
+    prebuilt_entry: Any,
+    build_id: str,
+    rebuild_app: bool,
+    cross_compiled: bool,
+) -> str | None:
+    if not rebuild_app or cross_compiled:
+        return None
+    return await _ensure_quickjs(
+        deployer,
+        prebuilt_entry=prebuilt_entry,
+        build_id=build_id,
+        cross_compiled=False,
+    )
+
+
+def _local_vendor_source_dir(build_dir: str | None, vendor_folder: str) -> str | None:
+    candidate_dirs: list[Path] = []
+    if build_dir:
+        candidate_dirs.append(Path(build_dir) / "vendor" / vendor_folder)
+    candidate_dirs.append(LOCAL_FRAMEOS_VENDOR_ROOT / vendor_folder)
+
+    for candidate in candidate_dirs:
+        if candidate.is_dir():
+            return str(candidate)
+    return None
+
+
+def _local_build_has_compiled_scenes(build_dir: str) -> bool:
+    scene_build_root = os.path.join(build_dir, "scene_builds")
+    if not os.path.isdir(scene_build_root):
+        return False
+    with os.scandir(scene_build_root) as entries:
+        return any(entries)
+
+
+def _local_compiled_scene_artifact_dir(build_dir: str) -> str | None:
+    scenes_dir = os.path.join(build_dir, "scenes")
+    if not os.path.isdir(scenes_dir):
+        return None
+    with os.scandir(scenes_dir) as entries:
+        for entry in entries:
+            if entry.is_file() and entry.name.endswith(".so"):
+                return scenes_dir
+    return None
+
+
+def _local_compiled_driver_artifact_dir(build_dir: str) -> str | None:
+    drivers_dir = os.path.join(build_dir, "drivers")
+    if not os.path.isdir(drivers_dir):
+        return None
+    with os.scandir(drivers_dir) as entries:
+        for entry in entries:
+            if entry.is_file() and entry.name.endswith(".so"):
+                return drivers_dir
+    return None
+
+
+async def _upload_remote_build_archive(
+    deployer: FrameDeployer,
+    archive_path: str,
+    build_id: str,
+) -> str:
+    remote_archive = f"/srv/frameos/build/build_{build_id}.tar.gz"
+    remote_build_root = f"/srv/frameos/build/build_{build_id}"
+    await deployer.log("stdout", f"{icon} Uploading build sources to remote")
+
+    with open(archive_path, "rb") as fh:
+        data = fh.read()
+    await upload_file(
+        deployer.db,
+        deployer.redis,
+        deployer.frame,
+        remote_archive,
+        data,
+    )
+    await deployer.exec_command(
+        f"cd /srv/frameos/build && tar -xzf build_{build_id}.tar.gz && rm build_{build_id}.tar.gz"
+    )
+    return remote_build_root
+
+
+async def _upload_local_compiled_scenes(
+    deployer: FrameDeployer,
+    local_scenes_dir: str,
+    remote_scenes_dir: str,
+    build_id: str,
+) -> None:
+    await deployer.log("stdout", f"{icon} Uploading compiled scenes")
+    await _upload_directory_tree(
+        deployer,
+        local_scenes_dir,
+        remote_scenes_dir,
+        "compiled scenes",
+        build_id,
+        replace=False,
+    )
+
+
+async def _upload_local_compiled_drivers(
+    deployer: FrameDeployer,
+    local_drivers_dir: str,
+    remote_drivers_dir: str,
+    build_id: str,
+) -> None:
+    await deployer.log("stdout", f"{icon} Uploading compiled drivers")
+    await _upload_directory_tree(
+        deployer,
+        local_drivers_dir,
+        remote_drivers_dir,
+        "compiled drivers",
+        build_id,
+        replace=False,
+    )
+
+
+async def _run_frameos_setup(
+    deployer: FrameDeployer,
+    *,
+    frameos_path: str,
+    frame_json_path: str,
+) -> dict[str, Any]:
+    output: list[str] = []
+    await deployer.log("stdout", f"{icon} Running FrameOS setup")
+    await deployer.exec_command(
+        "sudo env "
+        f"FRAMEOS_CONFIG={shlex.quote(frame_json_path)} "
+        f"{shlex.quote(frameos_path)} setup --json",
+        output=output,
+        log_output=False,
+    )
+
+    raw_output = "\n".join(line for line in output if line.strip())
+    if not raw_output:
+        raise RuntimeError("FrameOS setup returned no output")
+
+    lines = [line for line in raw_output.splitlines() if line.strip()]
+    summary: dict[str, Any] | None = None
+    for index, line in enumerate(lines):
+        if not line.lstrip().startswith("{"):
+            continue
+        candidate = "\n".join(lines[index:])
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict):
+            summary = parsed
+            break
+
+    if summary is None:
+        raise RuntimeError(f"Failed to parse FrameOS setup output: {raw_output}")
+
+    actions = summary.get("actions")
+    if isinstance(actions, list):
+        for action in actions:
+            if isinstance(action, str) and action.strip():
+                await deployer.log("stdout", f"{icon} Setup: {action}")
+
+    return summary
+
+
+async def _build_remote_compiled_scenes(
+    deployer: FrameDeployer,
+    remote_build_root: str,
+    scene_build_dirs: list[str] | None = None,
+    scene_ids: tuple[str, ...] | None = None,
+) -> None:
+    scene_count = len(scene_build_dirs or [])
+    if scene_count:
+        await deployer.log(
+            "stdout",
+            f"{icon} Scene compile: building {scene_count} {_pluralize(scene_count, 'scene')} on device",
+        )
+    else:
+        await deployer.log("stdout", f"{icon} Scene compile: building scenes on device")
+    if scene_ids and hasattr(deployer, "frame"):
+        for line in _scene_compile_start_lines(deployer.frame, tuple(scene_ids)):
+            await deployer.log("stdout", line)
+    if scene_build_dirs:
+        quoted_dirs = " ".join(shlex.quote(scene_dir) for scene_dir in scene_build_dirs)
+        await deployer.exec_command(
+            "bash -lc "
+            + shlex.quote(
+                f"cd {remote_build_root} && mkdir -p scenes && "
+                f"for dir in {quoted_dirs}; do make --no-print-directory -C \"$dir\" || exit $?; done"
+            ),
+            timeout=3600,
+            log_command=False,
+            log_output=False,
+        )
+        await deployer.log("stdout", f"{icon} Scene compile: completed on device")
+        return
+    await deployer.exec_command(
+        f"cd {shlex.quote(remote_build_root)} && make compiled-scenes",
+        timeout=3600,
+        log_command=False,
+        log_output=False,
+    )
+    await deployer.log("stdout", f"{icon} Scene compile: completed on device")
+
+
+async def _build_remote_compiled_drivers(
+    deployer: FrameDeployer,
+    remote_build_root: str,
+    driver_build_dirs: list[str] | None = None,
+    driver_ids: tuple[str, ...] | None = None,
+) -> None:
+    driver_count = len(driver_build_dirs or [])
+    if driver_count:
+        await deployer.log(
+            "stdout",
+            f"{icon} Driver compile: building {driver_count} {_pluralize(driver_count, 'driver')} on device",
+        )
+    else:
+        await deployer.log("stdout", f"{icon} Driver compile: building drivers on device")
+    if driver_ids:
+        for line in _driver_compile_start_lines(tuple(driver_ids)):
+            await deployer.log("stdout", line)
+    if not driver_build_dirs:
+        await deployer.log("stdout", f"{icon} Driver compile: completed on device")
+        return
+    quoted_dirs = " ".join(shlex.quote(driver_dir) for driver_dir in driver_build_dirs)
+    await deployer.exec_command(
+        "bash -lc "
+        + shlex.quote(
+            f"cd {remote_build_root} && mkdir -p drivers && "
+            f"for dir in {quoted_dirs}; do make --no-print-directory -C \"$dir\" || exit $?; done"
+        ),
+        timeout=3600,
+        log_command=False,
+        log_output=False,
+    )
+    await deployer.log("stdout", f"{icon} Driver compile: completed on device")
+
+
+async def _publish_remote_compiled_scenes(
+    deployer: FrameDeployer,
+    remote_build_root: str,
+    remote_scenes_dir: str,
+    replace: bool = True,
+) -> None:
+    quoted_build_scenes_dir = shlex.quote(f"{remote_build_root}/scenes")
+    quoted_scenes_dir = shlex.quote(remote_scenes_dir)
+    if replace:
+        await deployer.exec_command(f"rm -rf {quoted_scenes_dir} && mkdir -p {quoted_scenes_dir}")
+    else:
+        await deployer.exec_command(f"mkdir -p {quoted_scenes_dir}")
+    await deployer.exec_command(
+        f"if [ -d {quoted_build_scenes_dir} ]; then cp -R {quoted_build_scenes_dir}/. {quoted_scenes_dir}/; fi"
+    )
+
+
+async def _publish_remote_compiled_drivers(
+    deployer: FrameDeployer,
+    remote_build_root: str,
+    remote_drivers_dir: str,
+    replace: bool = True,
+) -> None:
+    quoted_build_drivers_dir = shlex.quote(f"{remote_build_root}/drivers")
+    quoted_drivers_dir = shlex.quote(remote_drivers_dir)
+    if replace:
+        await deployer.exec_command(f"rm -rf {quoted_drivers_dir} && mkdir -p {quoted_drivers_dir}")
+    else:
+        await deployer.exec_command(f"mkdir -p {quoted_drivers_dir}")
+    await deployer.exec_command(
+        f"if [ -d {quoted_build_drivers_dir} ]; then cp -R {quoted_build_drivers_dir}/. {quoted_drivers_dir}/; fi"
+    )
+
+
+async def _build_remote_frameos_binary(
+    deployer: FrameDeployer,
+    remote_build_root: str,
+    quickjs_dirname: str | None = None,
+) -> None:
+    await deployer.log("stdout", f"{icon} FrameOS compile: building on device")
+    if quickjs_dirname:
+        await deployer.exec_command(
+            f"ln -s /srv/frameos/vendor/quickjs/{quickjs_dirname} {shlex.quote(remote_build_root)}/quickjs",
+            log_command=False,
+        )
+    await deployer.exec_command(
+        f"cd {shlex.quote(remote_build_root)} && "
+        "PARALLEL_MEM=$(awk '/MemTotal/{printf \"%.0f\\n\", $2/1024/250}' /proc/meminfo) && "
+        "PARALLEL=$(($PARALLEL_MEM < $(nproc) ? $PARALLEL_MEM : $(nproc))) && "
+        "make -j$PARALLEL frameos",
+        timeout=3600,
+        log_command=False,
+        log_output=False,
+    )
+    await deployer.log("stdout", f"{icon} FrameOS compile: completed on device")
+
+
+async def _copy_current_binary_to_release(
+    deployer: FrameDeployer,
+    release_frameos_path: str,
+) -> None:
+    await deployer.exec_command(
+        f"cp /srv/frameos/current/frameos {shlex.quote(release_frameos_path)}"
+    )
+
+
+async def _copy_current_compiled_scenes_to_release(
+    deployer: FrameDeployer,
+    release_scenes_path: str,
+    libraries: list[str],
+) -> None:
+    await deployer.exec_command(f"mkdir -p {shlex.quote(release_scenes_path)}")
+    for library in libraries:
+        source_path = shlex.quote(f"/srv/frameos/current/scenes/{library}")
+        target_path = shlex.quote(f"{release_scenes_path}/{library}")
+        await deployer.exec_command(
+            f"cp {source_path} {target_path}"
+        )
+
+
+async def _copy_current_compiled_drivers_to_release(
+    deployer: FrameDeployer,
+    release_drivers_path: str,
+    libraries: list[str],
+) -> None:
+    await deployer.exec_command(f"mkdir -p {shlex.quote(release_drivers_path)}")
+    for library in libraries:
+        source_path = shlex.quote(f"/srv/frameos/current/drivers/{library}")
+        target_path = shlex.quote(f"{release_drivers_path}/{library}")
+        await deployer.exec_command(f"cp {source_path} {target_path}")
+
 async def deploy_frame(id: int, redis: Redis):
     await redis.enqueue_job("deploy_frame", id=id)
 
@@ -434,11 +1003,11 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
         frame.status = 'deploying'
         await update_frame(db, redis, frame)
 
-        nim_path = find_nim_v2()
         settings = get_settings_dict(db)
+        must_reboot = False
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            self = FrameDeployer(db=db, redis=redis, frame=frame, nim_path=nim_path, temp_dir=temp_dir)
+            self = FrameDeployer(db=db, redis=redis, frame=frame, nim_path="", temp_dir=temp_dir)
             build_id = self.build_id
             install_if_necessary = partial(_install_if_necessary, self)
             await self.log("stdout", f"{icon} Deploying frame {frame.name} with build id {self.build_id}")
@@ -447,10 +1016,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             public_keys = [key.get("public") for key in selected_keys if key.get("public")]
             known_public_keys = [key.get("public") for key in normalize_ssh_keys(settings) if key.get("public")]
             if public_keys:
-                await self.log("stdout", f"{icon} Checking SSH keys on device")
                 await _install_authorized_keys(db, redis, frame, public_keys, known_public_keys)
-            else:
-                await self.log("stdout", f"{icon} No SSH public keys configured; skipping authorized_keys install")
 
             arch = await self.get_cpu_architecture()
             distro = await self.get_distro()
@@ -473,6 +1039,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                 raise Exception(f"Unsupported target distro '{distro}'")
 
             drivers = drivers_for_frame(frame)
+            use_compiled_plugins = uses_compiled_module_plugins(frame)
 
             rpios_settings = frame.rpios or {}
             cross_compilation_setting = (rpios_settings.get("crossCompilation") or "auto").lower()
@@ -500,21 +1067,102 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                 deployer=self,
                 temp_dir=temp_dir,
             )
-            build_result = await builder.build(
-                allow_cross_compile=allow_cross_compile,
-                force_cross_compile=force_cross_compile,
-                target_override=TargetMetadata(arch=arch, distro=distro, version=distro_version),
+            target = await builder.detect_target(
+                TargetMetadata(arch=arch, distro=distro, version=distro_version)
+            )
+            prebuilt_entry, prebuilt_target = await resolve_prebuilt_entry(
+                distro=target.distro,
+                distro_version=target.version,
+                arch=target.arch,
+                logger=builder._log,
+            )
+            source_dir = await builder.prepare_source_dir()
+            compile_manifest = build_compile_manifest(
+                source_dir=source_dir,
+                scenes=frame.scenes,
+                drivers=drivers,
+                frameos_version=current_frameos_version(),
+                use_compiled_plugins=use_compiled_plugins,
+            )
+            previous_manifest = compile_manifest_from_dict(
+                (frame.last_successful_deploy or {}).get("compile_manifest")
+            )
+            compile_plan = plan_compile_actions(
+                mode=SMART_DEPLOY,
+                previous=previous_manifest,
+                current=compile_manifest,
+            )
+            compile_plan = await _adjust_compile_plan_for_missing_remote_artifacts(
+                self,
+                compile_plan,
+                compile_manifest,
             )
 
-            prebuilt_entry = build_result.prebuilt_entry
-            archive_path = build_result.archive_path
-            build_dir = build_result.build_dir
-            cross_compiled = build_result.cross_compiled
-            cross_compiled_binary = build_result.binary_path
+            for line in _compile_plan_log_lines(frame, compile_plan, compile_manifest):
+                await self.log("stdout", line)
 
-            if low_memory and not cross_compiled:
-                await self.log("stdout", f"{icon} Low memory device, stopping FrameOS for compilation")
-                await self.exec_command("sudo service frameos stop", raise_on_error=False)
+            build_dir: str | None = None
+            archive_path: str | None = None
+            cross_compiled = False
+            cross_compiled_binary: str | None = None
+            local_compiled_scenes_dir: str | None = None
+            local_compiled_drivers_dir: str | None = None
+            remote_scene_build_required = False
+            remote_driver_build_required = False
+
+            if compile_plan.needs_compilation:
+                self.nim_path = find_nim_v2()
+                build_dir, archive_path = await builder.prepare_build_archive(
+                    source_dir=source_dir,
+                    arch=target.arch,
+                    build_binary=compile_plan.rebuild_app,
+                    build_scene_ids=compile_plan.rebuild_scene_ids,
+                    build_driver_ids=compile_plan.rebuild_driver_ids,
+                    build_all_scenes=compile_plan.rebuild_all_scenes,
+                )
+                requested = await builder.build_requested_artifacts(
+                    source_dir=source_dir,
+                    build_dir=build_dir,
+                    target=target,
+                    prebuilt_entry=prebuilt_entry,
+                    prebuilt_target=prebuilt_target,
+                    allow_cross_compile=allow_cross_compile,
+                    force_cross_compile=force_cross_compile,
+                    build_binary=compile_plan.rebuild_app,
+                    build_scene_ids=compile_plan.rebuild_scene_ids,
+                    build_scene_dirs=compile_plan.scene_build_dirs or None,
+                    build_driver_ids=compile_plan.rebuild_driver_ids,
+                    build_driver_dirs=compile_plan.driver_build_dirs or None,
+                    build_all_scenes=bool(compile_plan.rebuild_scene_ids) and compile_plan.rebuild_all_scenes,
+                )
+                cross_compiled = requested.cross_compiled
+                cross_compiled_binary = requested.artifacts.binary_path
+                local_compiled_scenes_dir = requested.artifacts.scenes_dir
+                local_compiled_drivers_dir = requested.artifacts.drivers_dir
+                remote_scene_build_required = bool(compile_plan.rebuild_scene_ids) and local_compiled_scenes_dir is None
+                remote_driver_build_required = bool(compile_plan.rebuild_driver_ids) and local_compiled_drivers_dir is None
+
+                if compile_plan.rebuild_app:
+                    if cross_compiled:
+                        await self.log("stdout", f"{icon} FrameOS compile: completed locally")
+                    else:
+                        await self.log("stdout", f"{icon} FrameOS compile: queued for on-device build")
+
+                if compile_plan.rebuild_scene_ids:
+                    if local_compiled_scenes_dir:
+                        await self.log("stdout", f"{icon} Scene compile: completed locally")
+                    elif remote_scene_build_required:
+                        await self.log("stdout", f"{icon} Scene compile: queued for on-device build")
+
+                if compile_plan.rebuild_driver_ids:
+                    if local_compiled_drivers_dir:
+                        await self.log("stdout", f"{icon} Driver compile: completed locally")
+                    elif remote_driver_build_required:
+                        await self.log("stdout", f"{icon} Driver compile: queued for on-device build")
+
+                if low_memory and not cross_compiled:
+                    await self.log("stdout", f"{icon} Low memory device, stopping FrameOS for compilation")
+                    await self.exec_command("sudo service frameos stop", raise_on_error=False)
 
             # 2. Remote steps
             await self.log("stdout", f"{icon} Installing dependencies on remote")
@@ -536,104 +1184,141 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             for dep in self.get_apt_packages():
                 await install_if_necessary(dep)
 
-            quickjs_dirname = await _ensure_quickjs(
-                self, prebuilt_entry=prebuilt_entry, build_id=build_id, cross_compiled=cross_compiled
+            quickjs_dirname = await _ensure_quickjs_for_remote_frameos_build(
+                self,
+                prebuilt_entry=prebuilt_entry,
+                build_id=build_id,
+                rebuild_app=compile_plan.rebuild_app,
+                cross_compiled=cross_compiled,
             )
 
             await self.exec_command("sudo mkdir -p /srv/frameos && sudo chown $(whoami):$(whoami) /srv/frameos")
             await self.exec_command("mkdir -p /srv/frameos/build/ /srv/frameos/logs/")
             await self.exec_command(f"mkdir -p /srv/frameos/releases/release_{build_id}")
             release_frameos_path = f"/srv/frameos/releases/release_{build_id}/frameos"
+            release_scenes_path = f"/srv/frameos/releases/release_{build_id}/scenes"
+            release_drivers_path = f"/srv/frameos/releases/release_{build_id}/drivers"
+            remote_build_root: str | None = None
 
-            if cross_compiled:
+            if archive_path and (not cross_compiled or remote_scene_build_required or remote_driver_build_required):
+                remote_build_root = await _upload_remote_build_archive(self, archive_path, build_id)
+
+            if compile_plan.rebuild_app and cross_compiled:
                 await self.log("stdout", f"{icon} Using cross-compiled binary")
                 if not cross_compiled_binary:
                     raise RuntimeError("Cross compilation succeeded but binary path is unknown")
                 await _upload_binary(self, cross_compiled_binary, release_frameos_path)
-            else:
+            elif compile_plan.rebuild_app:
                 await self.log("stdout", f"{icon} Building FrameOS on remote, no cross-compilation")
-                await self.log("stdout", f"> add /srv/frameos/build/build_{build_id}.tar.gz")
-
-                with open(archive_path, "rb") as fh:
-                    data = fh.read()
-                await upload_file(
-                    self.db,
-                    self.redis,
-                    self.frame,
-                    f"/srv/frameos/build/build_{build_id}.tar.gz",
-                    data,
-                )
-
+                if not remote_build_root:
+                    raise RuntimeError("Remote build root missing for on-device build")
+                await _build_remote_frameos_binary(self, remote_build_root, quickjs_dirname)
                 await self.exec_command(
-                    f"cd /srv/frameos/build && tar -xzf build_{build_id}.tar.gz && rm build_{build_id}.tar.gz"
+                    f"cp {shlex.quote(remote_build_root)}/frameos {shlex.quote(release_frameos_path)}"
                 )
-                if quickjs_dirname:
-                    await self.exec_command(
-                        f"ln -s /srv/frameos/vendor/quickjs/{quickjs_dirname} /srv/frameos/build/build_{build_id}/quickjs",
-                    )
-                    await self.exec_command(
-                        f"cd /srv/frameos/build/build_{build_id} && "
-                        "PARALLEL_MEM=$(awk '/MemTotal/{printf \"%.0f\\n\", $2/1024/250}' /proc/meminfo) && "
-                        "PARALLEL=$(($PARALLEL_MEM < $(nproc) ? $PARALLEL_MEM : $(nproc))) && "
-                        "make -j$PARALLEL",
-                        timeout=3600, # 30 minute timeout for compilation
-                    )
-                await self.exec_command(
-                    f"cp /srv/frameos/build/build_{build_id}/frameos "
-                    f"{release_frameos_path}"
-                )
+            else:
+                await _copy_current_binary_to_release(self, release_frameos_path)
 
             # 4. Upload scenes.json.gz and frame.json
             await self._upload_scenes_json(f"/srv/frameos/releases/release_{build_id}/scenes.json.gz", gzip=True)
             await self._upload_frame_json(f"/srv/frameos/releases/release_{build_id}/frame.json")
+            await self.exec_command(f"mkdir -p {shlex.quote(release_scenes_path)}")
+            await self.exec_command(f"mkdir -p {shlex.quote(release_drivers_path)}")
+            reused_scene_libraries = [
+                compile_manifest.scene_hashes[scene_id].library for scene_id in compile_plan.reuse_scene_ids
+            ]
+            if reused_scene_libraries:
+                await _copy_current_compiled_scenes_to_release(
+                    self,
+                    release_scenes_path,
+                    reused_scene_libraries,
+                )
+
+            if compile_plan.rebuild_scene_ids and local_compiled_scenes_dir:
+                await _upload_local_compiled_scenes(
+                    self,
+                    local_compiled_scenes_dir,
+                    release_scenes_path,
+                    build_id,
+                )
+            elif compile_plan.rebuild_scene_ids and remote_scene_build_required and remote_build_root:
+                await _build_remote_compiled_scenes(
+                    self,
+                    remote_build_root,
+                    scene_build_dirs=compile_plan.scene_build_dirs,
+                    scene_ids=compile_plan.rebuild_scene_ids,
+                )
+                await _publish_remote_compiled_scenes(
+                    self,
+                    remote_build_root,
+                    release_scenes_path,
+                    replace=False,
+                )
+
+            reused_driver_libraries = [
+                compile_manifest.driver_hashes[driver_id].library for driver_id in compile_plan.reuse_driver_ids
+            ]
+            if reused_driver_libraries:
+                await _copy_current_compiled_drivers_to_release(
+                    self,
+                    release_drivers_path,
+                    reused_driver_libraries,
+                )
+
+            if compile_plan.rebuild_driver_ids and local_compiled_drivers_dir:
+                await _upload_local_compiled_drivers(
+                    self,
+                    local_compiled_drivers_dir,
+                    release_drivers_path,
+                    build_id,
+                )
+            elif compile_plan.rebuild_driver_ids and remote_driver_build_required and remote_build_root:
+                await _build_remote_compiled_drivers(
+                    self,
+                    remote_build_root,
+                    driver_build_dirs=compile_plan.driver_build_dirs,
+                    driver_ids=compile_plan.rebuild_driver_ids,
+                )
+                await _publish_remote_compiled_drivers(
+                    self,
+                    remote_build_root,
+                    release_drivers_path,
+                    replace=False,
+                )
 
             # Driver-specific vendor steps
             if inkyPython := drivers.get("inkyPython"):
                 await self.log("stdout", f"{icon} Installing inkyPython driver")
                 vendor_folder = inkyPython.vendor_folder or ""
-                local_vendor_path = os.path.join(build_dir, "vendor", vendor_folder)
+                local_vendor_path = _local_vendor_source_dir(build_dir, vendor_folder)
                 await _sync_vendor_dir(
                     self,
                     local_vendor_path,
                     vendor_folder,
                     "inkyPython vendor files",
-                    cross_compiled,
                     build_id,
-                )
-                await install_if_necessary("python3-pip")
-                await install_if_necessary("python3-venv")
-                await self.exec_command(
-                    f"cd /srv/frameos/vendor/{inkyPython.vendor_folder} && "
-                    "([ ! -d env ] && python3 -m venv env || echo 'env exists') && "
-                    "(sha256sum -c requirements.txt.sha256sum 2>/dev/null || "
-                    "(echo '> env/bin/pip3 install -r requirements.txt' && "
-                    "env/bin/pip3 install -r requirements.txt && "
-                    "sha256sum requirements.txt > requirements.txt.sha256sum))"
+                    reuse_existing_remote=build_dir is None,
                 )
 
             if inkyHyperPixel2r := drivers.get("inkyHyperPixel2r"):
                 await self.log("stdout", f"{icon} Installing inkyHyperPixel2r driver")
                 vendor_folder = inkyHyperPixel2r.vendor_folder or ""
-                local_vendor_path = os.path.join(build_dir, "vendor", vendor_folder)
+                local_vendor_path = _local_vendor_source_dir(build_dir, vendor_folder)
                 await _sync_vendor_dir(
                     self,
                     local_vendor_path,
                     vendor_folder,
                     "inkyHyperPixel2r vendor files",
-                    cross_compiled,
                     build_id,
+                    reuse_existing_remote=build_dir is None,
                 )
-                await install_if_necessary("python3-dev")
-                await install_if_necessary("python3-pip")
-                await install_if_necessary("python3-venv")
-                await self.exec_command(
-                    f"cd /srv/frameos/vendor/{inkyHyperPixel2r.vendor_folder} && "
-                    "([ ! -d env ] && python3 -m venv env || echo 'env exists') && "
-                    "(sha256sum -c requirements.txt.sha256sum 2>/dev/null || "
-                    "(echo '> env/bin/pip3 install -r requirements.txt' && "
-                    "env/bin/pip3 install -r requirements.txt && "
-                    "sha256sum requirements.txt > requirements.txt.sha256sum))"
-                )
+
+            setup_summary = await _run_frameos_setup(
+                self,
+                frameos_path=release_frameos_path,
+                frame_json_path=f"/srv/frameos/releases/release_{build_id}/frame.json",
+            )
+            must_reboot = bool(setup_summary.get("rebootRequired"))
 
             # 5. Upload frameos.service
             await self.log("stdout", f"{icon} Swapping out the release")
@@ -675,27 +1360,6 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
             )
 
         await self.log("stdout", f"{icon} Running final cleanup scripts")
-        boot_config = "/boot/config.txt"
-        if await self.exec_command("test -f /boot/firmware/config.txt", raise_on_error=False) == 0:
-            boot_config = "/boot/firmware/config.txt"
-
-        # Additional device config
-        if drivers.get("i2c"):
-            await self.exec_command(
-                'grep -q "^dtparam=i2c_vc=on$" ' + boot_config + ' '
-                '|| echo "dtparam=i2c_vc=on" | sudo tee -a ' + boot_config
-            )
-            await self.exec_command(
-                'command -v raspi-config > /dev/null && '
-                'sudo raspi-config nonint get_i2c | grep -q "1" && { '
-                '  sudo raspi-config nonint do_i2c 0; echo "I2C enabled"; '
-                '} || echo "I2C already enabled"'
-            )
-
-        if drivers.get("spi"):
-            await self.exec_command('sudo raspi-config nonint do_spi 0')
-        elif drivers.get("noSpi"):
-            await self.exec_command('sudo raspi-config nonint do_spi 1')
 
         if low_memory:
             await self.exec_command(
@@ -714,18 +1378,6 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
         else:
             await self.exec_command("sudo rm -f /etc/cron.d/frameos-reboot")
 
-        must_reboot = False
-
-        if drivers.get("bootconfig"):
-            for line in (drivers["bootconfig"].lines or []):
-                if line.startswith("#"):
-                    to_remove = line[1:]
-                    await self.exec_command(f'grep -q "^{to_remove}" {boot_config} && sudo sed -i "/^{to_remove}/d" {boot_config}', raise_on_error=False)
-                else:
-                    if (await self.exec_command(f'grep -q "^{line}" ' + boot_config, raise_on_error=False)) != 0:
-                        await self.exec_command(command=f'echo "{line}" | sudo tee -a ' + boot_config, log_output=False)
-                        must_reboot = True
-
         if frame.last_successful_deploy_at is None:
             # Reboot after the first deploy to make sure any modifications to config.txt are persisted to disk
             # Otherwise if you pull out the power, you'll end up with a blank config.txt on the next boot.
@@ -739,6 +1391,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
 
         frame.status = 'starting'
         frame_dict['frameos_version'] = current_frameos_version()
+        frame_dict["compile_manifest"] = compile_manifest.to_dict()
         frame.last_successful_deploy = frame_dict
         frame.last_successful_deploy_at = datetime.now(timezone.utc)
 

@@ -2,14 +2,18 @@ import unittest
 import times
 import os
 import mummy
+import httpcore
 import tables
 import json
 import zippy
 import locks
+import pixie
 
 import ../api
 import ../state
 import ../../types
+import ../../scenes
+import ../../../drivers/plugin_runtime
 
 proc baseConfig(assetsPath = ""): FrameConfig =
   FrameConfig(
@@ -35,7 +39,163 @@ proc baseConfig(assetsPath = ""): FrameConfig =
     network: NetworkConfig(networkCheck: false),
   )
 
+proc makeRequest(headers: seq[(string, string)] = @[]): Request =
+  let request = create(RequestObj)
+  request.httpMethod = "GET"
+  request.queryParams = emptyQueryParams()
+  for (key, value) in headers:
+    request.headers[key] = value
+  result = request
+
+proc decodeResponseImage(body: string): Image =
+  decodeImage(body)
+
+proc sampleFallbackImage(): Image =
+  result = newImage(2, 1)
+  result.data[0] = rgbx(12, 34, 56, 255)
+  result.data[1] = rgbx(90, 123, 210, 255)
+
 suite "Server API helpers":
+  teardown:
+    clearCompiledDriversForTests()
+
+  test "preview artifact decoder handles indexed2 row padding":
+    let preview = DriverPreviewArtifact(
+      width: 5,
+      height: 2,
+      rotate: 0,
+      pixelFormat: dpfIndexed2,
+      data: @[25'u8, 0'u8, 134'u8, 64'u8],
+      palette: @[
+        (0'u8, 0'u8, 0'u8),
+        (255'u8, 0'u8, 0'u8),
+        (255'u8, 255'u8, 255'u8),
+      ],
+    )
+
+    let image = previewArtifactToImage(preview)
+    check image != nil
+    check image.width == 5
+    check image.height == 2
+    check image.data[0].r == 0
+    check image.data[1].r == 255
+    check image.data[1].g == 0
+    check image.data[2].r == 255
+    check image.data[2].g == 255
+    check image.data[8].r == 255
+    check image.data[8].g == 255
+    check image.data[9].r == 255
+    check image.data[9].g == 0
+
+  test "preview artifact decoder handles indexed4 row padding":
+    let preview = DriverPreviewArtifact(
+      width: 3,
+      height: 1,
+      rotate: 0,
+      pixelFormat: dpfIndexed4,
+      data: @[0x05'u8, 0x60'u8],
+      palette: @[
+        (0'u8, 0'u8, 0'u8),
+        (10'u8, 10'u8, 10'u8),
+        (20'u8, 20'u8, 20'u8),
+        (30'u8, 30'u8, 30'u8),
+        (40'u8, 40'u8, 40'u8),
+        (50'u8, 50'u8, 50'u8),
+        (60'u8, 60'u8, 60'u8),
+      ],
+    )
+
+    let image = previewArtifactToImage(preview)
+    check image != nil
+    check image.width == 3
+    check image.data[0].r == 0
+    check image.data[1].r == 50
+    check image.data[2].r == 60
+
+  test "frame image response falls back to the last rendered image":
+    clearCompiledDriversForTests()
+    globalFrameConfig = baseConfig()
+    setLastImage(sampleFallbackImage())
+
+    let response = buildFrameImageResponse(makeRequest())
+    let image = decodeResponseImage(response.body)
+
+    check int(response.status) == int(Http200)
+    check response.headers["Content-Type"] == "image/png"
+    check image != nil
+    check image.width == 2
+    check image.height == 1
+    check image.data[0].r == 12
+    check image.data[0].g == 34
+    check image.data[0].b == 56
+    check image.data[1].r == 90
+    check image.data[1].g == 123
+    check image.data[1].b == 210
+
+  test "frame image response prefers a waveshare-style preview artifact":
+    globalFrameConfig = baseConfig()
+    setLastImage(sampleFallbackImage())
+    setCompiledDriverPreviewForTests(DriverPreviewArtifact(
+      width: 5,
+      height: 2,
+      rotate: 0,
+      pixelFormat: dpfIndexed2,
+      data: @[25'u8, 0'u8, 134'u8, 64'u8],
+      palette: @[
+        (0'u8, 0'u8, 0'u8),
+        (255'u8, 0'u8, 0'u8),
+        (255'u8, 255'u8, 255'u8),
+      ],
+    ))
+
+    let response = buildFrameImageResponse(makeRequest())
+    let image = decodeResponseImage(response.body)
+
+    check int(response.status) == int(Http200)
+    check image != nil
+    check image.width == 5
+    check image.height == 2
+    check image.data[0].r == 0
+    check image.data[1].r == 255
+    check image.data[1].g == 0
+    check image.data[2].r == 255
+    check image.data[2].g == 255
+    check image.data[8].r == 255
+    check image.data[8].g == 255
+    check image.data[9].r == 255
+    check image.data[9].g == 0
+
+  test "frame image response prefers an inky-style preview artifact":
+    globalFrameConfig = baseConfig()
+    setLastImage(sampleFallbackImage())
+    setCompiledDriverPreviewForTests(DriverPreviewArtifact(
+      width: 3,
+      height: 1,
+      rotate: 0,
+      pixelFormat: dpfIndexed4,
+      data: @[0x05'u8, 0x60'u8],
+      palette: @[
+        (0'u8, 0'u8, 0'u8),
+        (10'u8, 10'u8, 10'u8),
+        (20'u8, 20'u8, 20'u8),
+        (30'u8, 30'u8, 30'u8),
+        (40'u8, 40'u8, 40'u8),
+        (50'u8, 50'u8, 50'u8),
+        (60'u8, 60'u8, 60'u8),
+      ],
+    ))
+
+    let response = buildFrameImageResponse(makeRequest())
+    let image = decodeResponseImage(response.body)
+
+    check int(response.status) == int(Http200)
+    check image != nil
+    check image.width == 3
+    check image.height == 1
+    check image.data[0].r == 0
+    check image.data[1].r == 50
+    check image.data[2].r == 60
+
   test "url encoded parser decodes values":
     let parsed = parseUrlEncoded("name=Frame%20One&flag=true&empty=")
     check parsed["name"] == "Frame One"

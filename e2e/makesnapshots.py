@@ -7,9 +7,50 @@ from pathlib import Path
 from PIL import Image, ImageChops, ImageStat
 import subprocess
 import signal
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from threading import Thread
 
 DEFAULT_DIFF_THRESHOLD = float(os.environ.get("SNAPSHOT_DIFF_THRESHOLD", "0.01"))
 RESAMPLE_FILTER = getattr(Image, "Resampling", Image).LANCZOS
+SCENE_FIXTURE_HOST = "127.0.0.1"
+SCENE_FIXTURE_PORT = 18791
+
+
+class SceneFixtureHandler(BaseHTTPRequestHandler):
+    logo_bytes = (Path(__file__).resolve().parents[1] / "frontend" / "public" / "img" / "logo" / "dark-mark-small.png").read_bytes()
+    text_bytes = b"bananas are pineapple with a b"
+
+    def do_GET(self):
+        if self.path == "/logo_in_ci_tests.png":
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(self.logo_bytes)))
+            self.end_headers()
+            self.wfile.write(self.logo_bytes)
+            return
+
+        if self.path == "/.ci_text_file":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(self.text_bytes)))
+            self.end_headers()
+            self.wfile.write(self.text_bytes)
+            return
+
+        self.send_response(404)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.end_headers()
+        self.wfile.write(b"404 Not Found")
+
+    def log_message(self, format, *args):
+        return
+
+
+def start_scene_fixture_server():
+    server = ThreadingHTTPServer((SCENE_FIXTURE_HOST, SCENE_FIXTURE_PORT), SceneFixtureHandler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server
 
 def compare_images(img_path1, img_path2, threshold=DEFAULT_DIFF_THRESHOLD):
     """Return similarity information between two images.
@@ -48,16 +89,18 @@ def main():
     filter_str = os.environ.get("SCENE_FILTER") or (sys.argv[1] if len(sys.argv) > 1 else "")
     filter_str = filter_str.strip().lower()
     os.environ["FRAMEOS_SCENES_JSON"] = Path('./tmp/scenes.json').resolve().as_posix()
+    fixture_server = start_scene_fixture_server()
+
     # Start the frameos binary in the background
     process = subprocess.Popen(['./tmp/frameos-bin', '--debug'])
     print(f"Started frameos with PID {process.pid}")
-    time.sleep(2)
+    time.sleep(4)
 
     frame_json = Path('./frame.json')
     contents = json.loads(frame_json.read_text())
     port = contents.get('framePort', 8787)
 
-    scenes_dir = Path('./scenes')
+    scenes_dir = Path('./json')
     snapshots_dir = Path('./snapshots')
     snapshots_dir.mkdir(exist_ok=True)
 
@@ -122,6 +165,8 @@ def main():
     finally:
         time.sleep(2)
         os.kill(process.pid, signal.SIGTERM)
+        fixture_server.shutdown()
+        fixture_server.server_close()
         print(f"frameos process with PID {process.pid} has been terminated")
 
 if __name__ == "__main__":

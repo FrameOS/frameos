@@ -14,6 +14,18 @@ proc makeLogger(sink: LogSink): Logger =
   result.disable = proc() = discard
 
 suite "inkyPython helper procs":
+  test "setup returns inky-specific boot and vendor requirements":
+    let spec = setup(FrameConfig(device: "pimoroni.inky_impression_7"))
+    check not spec.isNil
+    check spec.ensureAptPackages == @["python3-pip", "python3-venv"]
+    check spec.pythonVendorFolders == @["inkyPython"]
+    check spec.ensureBootConfigLines == @["dtoverlay=spi0-0cs"]
+    check spec.spiMode == dsmEnable
+    check spec.enableI2c
+
+  test "setup ignores non-inky devices":
+    check setup(FrameConfig(device: "framebuffer")).isNil
+
   test "deviceArgs includes device only when provided":
     check deviceArgs("") == newSeq[string]()
     check deviceArgs("pimoroni.inky_impression_7") == @["--device", "pimoroni.inky_impression_7"]

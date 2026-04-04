@@ -49,60 +49,66 @@ proc configureControlCode(self: RunnerThread) =
     self.controlCodeRender = nil
     self.controlCodeData = nil
 
-proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: FrameScene): (Image, float) =
+# Keep compiled-scene rendering in a template so ARC cleanup stays in the
+# runner loop and doesn't cross a proc boundary with plugin-owned refs.
+template renderSceneImage(runnerSelf, sceneExport, frameScene, renderedImage, renderNextSleep: untyped) =
   let sceneTimer = getMonoTime()
-  let requiredWidth = self.frameConfig.renderWidth()
-  let requiredHeight = self.frameConfig.renderHeight()
-  self.logger.log(%*{"event": "render:scene", "width": requiredWidth, "height": requiredHeight,
-      "sceneId": scene.id.string})
+  let requiredWidth = runnerSelf.frameConfig.renderWidth()
+  let requiredHeight = runnerSelf.frameConfig.renderHeight()
+  runnerSelf.logger.log(%*{"event": "render:scene", "width": requiredWidth, "height": requiredHeight,
+      "sceneId": frameScene.id.string})
 
   var context = ExecutionContext(
-    scene: scene,
+    scene: frameScene,
     event: "render",
     payload: %*{},
-    image: case self.frameConfig.rotate:
-    of 90, 270: newImage(self.frameConfig.height, self.frameConfig.width)
-    else: newImage(self.frameConfig.width, self.frameConfig.height),
+    image: case runnerSelf.frameConfig.rotate:
+    of 90, 270: newImage(runnerSelf.frameConfig.height, runnerSelf.frameConfig.width)
+    else: newImage(runnerSelf.frameConfig.width, runnerSelf.frameConfig.height),
     hasImage: true,
     loopIndex: 0,
     loopKey: ".",
     nextSleep: -1
   )
+  renderNextSleep = -1
 
   try:
-    discard exportedScene.render(scene, context)
-    if self.frameConfig.controlCode.enabled:
-      render_imageApp.App(self.controlCodeRender).appConfig.image = data_qrApp.App(self.controlCodeData).get(context)
-      render_imageApp.App(self.controlCodeRender).run(context)
+    discard sceneExport.render(frameScene, context)
+    if runnerSelf.frameConfig.controlCode.enabled:
+      render_imageApp.App(runnerSelf.controlCodeRender).appConfig.image = data_qrApp.App(runnerSelf.controlCodeData).get(context)
+      render_imageApp.App(runnerSelf.controlCodeRender).run(context)
     let image = context.image
 
-    var outImage: Image
     if image.width != requiredWidth or image.height != requiredHeight:
-      outImage = newImage(requiredWidth, requiredHeight)
-      outImage.fill(scene.backgroundColor)
-      scaleAndDrawImage(outImage, image, self.frameConfig.scalingMode)
+      renderedImage = newImage(requiredWidth, requiredHeight)
+      renderedImage.fill(frameScene.backgroundColor)
+      scaleAndDrawImage(renderedImage, image, runnerSelf.frameConfig.scalingMode)
     else:
-      outImage = image
-    setLastImage(outImage)
-    case self.frameConfig.flip:
+      renderedImage = image
+    setLastImage(renderedImage)
+    case runnerSelf.frameConfig.flip:
     of "horizontal":
-      outImage.flipHorizontal()
+      renderedImage.flipHorizontal()
     of "vertical":
-      outImage.flipVertical()
+      renderedImage.flipVertical()
     of "both":
-      outImage.flipHorizontal()
-      outImage.flipVertical()
+      renderedImage.flipHorizontal()
+      renderedImage.flipVertical()
     else:
       discard
-    result = (outImage.rotateDegrees(self.frameConfig.rotate), context.nextSleep)
+    renderNextSleep = context.nextSleep
+    renderedImage = renderedImage.rotateDegrees(runnerSelf.frameConfig.rotate)
   except Exception as e:
-    updateBootGuardFailureDetails(some(scene.id.string), getSceneDisplayName(scene.id), some($e.msg))
-    result = (renderError(requiredWidth, requiredHeight, &"Error: {$e.msg}\n{$e.getStackTrace()}"), context.nextSleep)
-    self.logger.log(%*{"event": "render:error", "error": $e.msg, "stacktrace": e.getStackTrace()})
+    updateBootGuardFailureDetails(some(frameScene.id.string), getSceneDisplayName(frameScene.id), some($e.msg))
+    let errMsg = $e.msg
+    let stackTrace = e.getStackTrace()
+    renderNextSleep = context.nextSleep
+    renderedImage = renderError(requiredWidth, requiredHeight, "Error: " & errMsg & "\n" & stackTrace)
+    runnerSelf.logger.log(%*{"event": "render:error", "error": errMsg, "stacktrace": stackTrace})
 
-  self.lastRenderAt = epochTime()
+  runnerSelf.lastRenderAt = epochTime()
   let elapsedMs = durationToMilliseconds(getMonoTime() - sceneTimer)
-  self.logger.log(%*{"event": "render:done", "sceneId": scene.id.string, "ms": round(elapsedMs, 3)})
+  runnerSelf.logger.log(%*{"event": "render:done", "sceneId": frameScene.id.string, "ms": round(elapsedMs, 3)})
 
 proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.} =
   self.logger.log(%*{"event": "render:startLoop"})
@@ -117,6 +123,7 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
   var successfulSceneRenders = 0
   var cycles = 0
   let serverRenderDelay = initDuration(milliseconds = int(SERVER_RENDER_DELAY_SECONDS * 1000))
+  var currentSceneInitError = ""
 
   while true:
     timer = getMonoTime()
@@ -124,8 +131,8 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
     if self.forceSceneReload:
       lastSceneId = "".SceneId
       self.forceSceneReload = false
-    let sceneId = if exportedScenes.hasKey(self.currentSceneId): self.currentSceneId else: getFirstSceneId()
-    let exportedScene = exportedScenes[sceneId]
+    let sceneId = if hasExportedScene(self.currentSceneId): self.currentSceneId else: getFirstSceneId()
+    let exportedScene = getExportedScene(sceneId)
     if lastSceneId != sceneId:
       self.logger.log(%*{"event": "render:sceneChange", "sceneId": sceneId.string})
       # Persist the active scene context early in boot, then stop writing it
@@ -134,23 +141,62 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
         updateBootGuardFailureDetails(some(sceneId.string), getSceneDisplayName(sceneId), none(string))
       if self.scenes.hasKey(sceneId):
         currentScene = self.scenes[sceneId]
+        currentSceneInitError = ""
       else:
         try:
-          currentScene = exportedScenes[sceneId].init(sceneId, self.frameConfig, self.logger, loadPersistedState(sceneId))
+          currentScene = getExportedScene(sceneId).init(sceneId, self.frameConfig, self.logger, loadPersistedState(sceneId))
           self.scenes[sceneId] = currentScene
           currentScene.updateLastPublicState()
+          currentSceneInitError = ""
         except Exception as e:
           updateBootGuardFailureDetails(some(sceneId.string), getSceneDisplayName(sceneId), some($e.msg))
+          currentScene = nil
+          currentSceneInitError = $e.msg
           self.logger.log(%*{"event": "render:error:scene:init", "error": $e.msg, "stacktrace": e.getStackTrace()})
 
       lastSceneId = sceneId
       setLastPublicSceneId(sceneId)
 
+    if currentScene.isNil:
+      let requiredWidth = self.frameConfig.renderWidth()
+      let requiredHeight = self.frameConfig.renderHeight()
+      var renderedImage = newImage(requiredWidth, requiredHeight)
+      renderedImage.fill(parseHtmlColor("#fff4f4"))
+      setLastImage(renderedImage)
+      self.lastRenderAt = epochTime()
+      triggerServerRender()
+
+      driverTimer = getMonoTime()
+      try:
+        drivers.render(renderedImage)
+        let driverElapsedMs = round(durationToMilliseconds(getMonoTime() - driverTimer), 3)
+        self.logger.log(%*{"event": "render:driver",
+          "device": self.frameConfig.device, "ms": driverElapsedMs})
+      except Exception as e:
+        self.logger.log(%*{"event": "render:driver:error", "error": $e.msg, "stacktrace": e.getStackTrace()})
+
+      await sleepAsync(0.001)
+      self.isRendering = false
+
+      inc cycles
+      if maxCycles > 0 and cycles >= maxCycles:
+        break
+
+      let retrySleepMs = 1000.0
+      self.logger.log(%*{"event": "render:sleep", "ms": retrySleepMs})
+      let retryFuture = sleepAsync(retrySleepMs)
+      self.sleepFuture = some(retryFuture)
+      await retryFuture
+      self.sleepFuture = none(Future[void])
+      continue
+
     currentScene.isRendering = true
     self.triggerRenderNext = false # used to debounce render events received while rendering
 
     let interval = currentScene.refreshInterval
-    let (lastRotatedImage, nextSleep) = self.renderSceneImage(exportedScene, currentScene)
+    var nextSleep = -1.0
+    var lastRotatedImage: Image
+    self.renderSceneImage(exportedScene, currentScene, lastRotatedImage, nextSleep)
     clearBootCrashCount()
     successfulSceneRenders += 1
     if interval < 1:
@@ -241,7 +287,7 @@ proc dispatchSceneEvent*(self: RunnerThread, sceneId: Option[SceneId], event: st
         "sceneId": targetSceneId.string, "event": event, "payload": payload})
     return
   let scene = self.scenes[targetSceneId]
-  let exportedScene = exportedScenes[targetSceneId]
+  let exportedScene = getExportedScene(targetSceneId)
   var context = ExecutionContext(
     scene: scene,
     event: event,
@@ -284,17 +330,14 @@ proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.a
               payload["y"] = %*((self.frameConfig.height.float * payload["y"].getInt().float / 32767.0).int)
           of "setCurrentScene":
             let sceneId = SceneId(payload["sceneId"].getStr())
-            if not exportedScenes.hasKey(sceneId) and not systemScenes.hasKey(sceneId):
+            if not hasExportedScene(sceneId):
               self.logger.log(%*{"event": "dispatchEvent:error", "error": "Scene not found", "sceneId": sceneId.string,
                   "event": event, "payload": payload})
               continue
             if sceneId != self.currentSceneId:
               self.dispatchSceneEvent(some(self.currentSceneId), "close", payload)
               if not self.scenes.hasKey(sceneId):
-                let scene = if exportedScenes.hasKey(sceneId):
-                  exportedScenes[sceneId].init(sceneId, self.frameConfig, self.logger, loadPersistedState(sceneId))
-                else:
-                  systemScenes[sceneId].init(sceneId, self.frameConfig, self.logger, loadPersistedState(sceneId))
+                let scene = getExportedScene(sceneId).init(sceneId, self.frameConfig, self.logger, loadPersistedState(sceneId))
                 self.scenes[sceneId] = scene
                 scene.updateLastPublicState()
               self.currentSceneId = sceneId
@@ -305,7 +348,8 @@ proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.a
               self.dispatchSceneEvent(some(sceneId), event, payload)
             continue # don't dispatch this event to the scene
           of "reload":
-            self.logger.log(%*{"event": "reload", "message": "Reloading config and interpreted scenes"})
+            self.logger.log(%*{"event": "reload", "message": "Reloading config, compiled scenes, and interpreted scenes"})
+            reloadCompiledScenes()
             reloadInterpretedScenes()
             self.scenes = initTable[SceneId, FrameScene]()
             self.currentSceneId = getFirstSceneId()
@@ -344,6 +388,7 @@ proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.a
 
 proc createRunnerThread*(args: (FrameConfig, Logger, Option[SceneId])) =
   {.cast(gcsafe).}:
+    reloadCompiledScenes()
     var runnerThread = RunnerThread(
       frameConfig: args[0],
       scenes: initTable[SceneId, FrameScene](),

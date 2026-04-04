@@ -15,6 +15,7 @@ proc newTestScene(config: FrameConfig): FrameScene =
   FrameScene(
     id: "test/main".SceneId,
     frameConfig: config,
+    logger: Logger(log: proc(payload: JsonNode) = discard),
     state: %*{},
     refreshInterval: 60.0,
     backgroundColor: parseHtmlColor("#000000"),
@@ -40,6 +41,15 @@ proc newColorNode(): DiagramNode =
       "config": {
         "color": "#ffffff"
       }
+    },
+  )
+
+proc newLogNode(): DiagramNode =
+  DiagramNode(
+    id: 3.NodeId,
+    data: %*{
+      "name": "logic/log",
+      "config": {}
     },
   )
 
@@ -74,6 +84,11 @@ suite "apps dispatch":
     check imageValue.kind == fkImage
     check imageValue.asImage().width == 3
     check imageValue.asImage().height == 2
+
+    let logApp = initApp("logic/log", newLogNode(), scene)
+    check logApp != nil
+    setAppField("logic/log", logApp, "inputString", VString("dispatch"))
+    runApp("logic/log", logApp, ExecutionContext(scene: scene, hasImage: false, event: "test", payload: %*{}))
 
   test "unknown app keywords fail predictably":
     let config = newTestConfig()
