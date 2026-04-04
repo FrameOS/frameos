@@ -16,6 +16,7 @@ suite "device setup":
   teardown:
     setupExecHook = nil
     driverSetupSpecLoaderHook = nil
+    builtinDriverSetupSpecLoaderHook = nil
 
   test "buildSetupPlan merges driver-provided setup specs":
     driverSetupSpecLoaderHook = proc(
@@ -58,6 +59,32 @@ suite "device setup":
     check plan.ensureBootConfigLines == @["dtoverlay=spi0-0cs"]
     check plan.ensureAptPackages == @["python3-pip", "python3-venv"]
     check plan.pythonVendorFolders == @["inkyPython"]
+
+  test "buildSetupPlan merges built-in driver setup specs":
+    builtinDriverSetupSpecLoaderHook = proc(
+      frameConfig: FrameConfig,
+    ): seq[tuple[id: string, spec: DriverSetupSpec]] {.nimcall.} =
+      check frameConfig.device == "pimoroni.hyperpixel2r"
+      @[
+        (
+          "inkyHyperPixel2r",
+          DriverSetupSpec(
+            ensureAptPackages: @["python3-pip"],
+            pythonVendorFolders: @["inkyHyperPixel2r"],
+          ),
+        ),
+      ]
+
+    let plan = buildSetupPlan(
+      FrameConfig(
+        device: "pimoroni.hyperpixel2r",
+        gpioButtons: @[],
+      ),
+    )
+
+    check plan.drivers == @["inkyHyperPixel2r"]
+    check plan.ensureAptPackages == @["python3-pip"]
+    check plan.pythonVendorFolders == @["inkyHyperPixel2r"]
 
   test "buildSetupPlan rejects conflicting driver SPI requirements":
     driverSetupSpecLoaderHook = proc(

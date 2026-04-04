@@ -133,11 +133,14 @@ proc setupDriver(frameConfig: FrameConfig): DriverSetupSpec =
     return "\n".join(blocks) + "\n"
 
 
-def write_drivers_nim(drivers: dict[str, Driver]) -> str:
+def _write_plugin_drivers_nim() -> str:
     return """
 import pixie
 import frameos/types
 import drivers/plugin_runtime
+
+proc builtinDriverSetupSpecs*(_: FrameConfig): seq[tuple[id: string, spec: DriverSetupSpec]] =
+  result = @[]
 
 proc init*(frameOS: FrameOS) =
   initCompiledDrivers(frameOS)
@@ -154,3 +157,90 @@ proc turnOn*() =
 proc turnOff*() =
   turnOffCompiledDrivers()
 """
+
+
+def _write_builtin_drivers_nim(drivers: dict[str, Driver]) -> str:
+    imports = []
+    vars = []
+    setup_specs = ["result = @[]"]
+    init_drivers = []
+    render_drivers = []
+    preview_drivers = []
+    on_drivers = []
+    off_drivers = []
+
+    for driver in drivers.values():
+        if not driver.import_path:
+            continue
+
+        alias = f"{driver_module_name(driver)}Driver"
+        driver_id = sanitize_nim_string(driver_compile_id(driver))
+        imports.append(f"import drivers/{driver.import_path} as {alias}")
+        vars.append(f"var {alias}Instance: {alias}.Driver")
+        setup_specs.extend(
+            [
+                f"when compiles({alias}.setup(frameConfig)):",
+                f"  let spec = {alias}.setup(frameConfig)",
+                "  if not spec.isNil:",
+                f'    result.add(("{driver_id}", spec))',
+            ]
+        )
+        init_drivers.append(f"{alias}Instance = {alias}.init(frameOS)")
+        if driver.can_render:
+            render_drivers.append(f"{alias}Instance.render(image)")
+        if driver.can_preview:
+            preview_drivers.append(
+                "\n".join(
+                    [
+                        f"if not {alias}Instance.isNil:",
+                        f"  let preview = {alias}.getPreview({alias}Instance)",
+                        "  let image = previewArtifactToImage(preview)",
+                        "  if image != nil:",
+                        "    if preview != nil and preview.rotate != 0:",
+                        "      return image.rotateDegrees(preview.rotate)",
+                        "    return image",
+                    ]
+                )
+            )
+        if driver.can_turn_on_off:
+            on_drivers.append(f"{alias}Instance.turnOn()")
+            off_drivers.append(f"{alias}Instance.turnOff()")
+
+    newline = "\n"
+    preview_import = "import drivers/plugin_runtime\n" if preview_drivers else ""
+    preview_body = (newline + "  ").join(preview_drivers or ["result = nil"])
+
+    return f"""
+import pixie
+import frameos/types
+{preview_import}{newline.join(imports)}
+{newline.join(vars)}
+
+proc builtinDriverSetupSpecs*(frameConfig: FrameConfig): seq[tuple[id: string, spec: DriverSetupSpec]] =
+  {(newline + '  ').join(setup_specs)}
+
+proc init*(frameOS: FrameOS) =
+  {(newline + '  ').join(init_drivers or ["discard"])}
+
+proc render*(image: Image) =
+  {(newline + '  ').join(render_drivers or ["discard"])}
+
+proc getPreview*(): Image =
+  {preview_body}
+
+proc turnOn*() =
+  {(newline + '  ').join(on_drivers or ["discard"])}
+
+proc turnOff*() =
+  {(newline + '  ').join(off_drivers or ["discard"])}
+"""
+
+
+def write_drivers_nim(
+    drivers: dict[str, Driver],
+    *,
+    use_compiled_plugins: bool = True,
+) -> str:
+    if use_compiled_plugins:
+        return _write_plugin_drivers_nim()
+    return _write_builtin_drivers_nim(drivers)

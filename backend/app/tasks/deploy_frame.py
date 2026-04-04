@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from app.drivers.devices import drivers_for_frame
 from app.models.assets import sync_assets
 from app.models.log import new_log as log
-from app.models.frame import Frame, update_frame
+from app.models.frame import Frame, update_frame, uses_compiled_module_plugins
 from app.utils.remote_exec import upload_file
 from app.models.settings import get_settings_dict
 from app.utils.ssh_authorized_keys import _install_authorized_keys
@@ -126,8 +126,16 @@ def _compile_plan_log_lines(frame: Frame, compile_plan: Any, compile_manifest: A
         app_reason = "app inputs unchanged" if (compile_plan.rebuild_scene_ids or compile_plan.rebuild_driver_ids) else "inputs unchanged"
         lines.append(f"{icon} FrameOS compile: skipped ({app_reason})")
 
+    use_compiled_plugins = uses_compiled_module_plugins(frame)
     total_compiled_scenes = len(compile_manifest.scene_hashes)
-    if total_compiled_scenes == 0:
+    configured_compiled_scenes = sum(
+        1
+        for scene in (frame.scenes or [])
+        if scene.get("settings", {}).get("execution", "compiled") != "interpreted"
+    )
+    if not use_compiled_plugins and configured_compiled_scenes:
+        lines.append(f"{icon} Scene compile: included in FrameOS binary")
+    elif total_compiled_scenes == 0:
         lines.append(f"{icon} Scene compile: skipped (no compiled scenes configured)")
     elif compile_plan.rebuild_scene_ids:
         reused = len(compile_plan.reuse_scene_ids)
@@ -141,8 +149,21 @@ def _compile_plan_log_lines(frame: Frame, compile_plan: Any, compile_manifest: A
         reuse_suffix = f"; reusing {reused}" if reused else ""
         lines.append(f"{icon} Scene compile: skipped (compiled scene inputs unchanged{reuse_suffix})")
 
+    configured_driver_count = 0
+    if not use_compiled_plugins:
+        try:
+            configured_driver_count = len(
+                [driver for driver in drivers_for_frame(frame).values() if driver.import_path]
+            )
+        except Exception:
+            configured_driver_count = 0
+    if total_compiled_scenes == 0:
+        pass
+
     total_compiled_drivers = len(compile_manifest.driver_hashes)
-    if total_compiled_drivers == 0:
+    if not use_compiled_plugins and configured_driver_count:
+        lines.append(f"{icon} Driver compile: included in FrameOS binary")
+    elif total_compiled_drivers == 0:
         lines.append(f"{icon} Driver compile: skipped (no compiled drivers configured)")
     elif compile_plan.rebuild_driver_ids:
         reused = len(compile_plan.reuse_driver_ids)
@@ -1018,6 +1039,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                 raise Exception(f"Unsupported target distro '{distro}'")
 
             drivers = drivers_for_frame(frame)
+            use_compiled_plugins = uses_compiled_module_plugins(frame)
 
             rpios_settings = frame.rpios or {}
             cross_compilation_setting = (rpios_settings.get("crossCompilation") or "auto").lower()
@@ -1060,6 +1082,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int):
                 scenes=frame.scenes,
                 drivers=drivers,
                 frameos_version=current_frameos_version(),
+                use_compiled_plugins=use_compiled_plugins,
             )
             previous_manifest = compile_manifest_from_dict(
                 (frame.last_successful_deploy or {}).get("compile_manifest")

@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.codegen.drivers_nim import driver_compile_id, loadable_drivers
 from app.drivers.devices import drivers_for_frame
 from app.models.log import new_log as log
-from app.models.frame import Frame, normalize_https_proxy, update_frame
+from app.models.frame import Frame, compiled_modules_mode, normalize_https_proxy, update_frame
 from app.tasks._frame_deployer import FrameDeployer
 from app.utils.frame_http import _fetch_frame_http_bytes
 from app.utils.versions import current_frameos_version
@@ -73,6 +73,9 @@ def fast_deploy_blocker_reason(frame: Frame) -> str | None:
 
     if frame_has_compiled_scenes(frame) or deployed_frame_has_compiled_scenes(previous_deploy):
         return "Fast deploy is not supported for frames with compiled scenes. Run a full deploy instead."
+
+    if compiled_modules_mode(frame) != compiled_modules_mode(previous_deploy):
+        return "Fast deploy cannot change compiled module linkage. Run a full deploy instead."
 
     if _loadable_driver_ids(frame) != _loadable_driver_ids(previous_deploy):
         return "Fast deploy cannot change compiled drivers. Run a full deploy instead."

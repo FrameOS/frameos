@@ -17,7 +17,12 @@ from arq import ArqRedis as Redis
 from sqlalchemy.orm import Session
 
 from app.models.apps import get_app_configs, get_one_app_sources
-from app.models.frame import Frame, get_frame_json, get_interpreted_scenes_json
+from app.models.frame import (
+    Frame,
+    get_frame_json,
+    get_interpreted_scenes_json,
+    uses_compiled_module_plugins,
+)
 from app.models.log import new_log as log
 from app.utils.local_exec import exec_local_command
 from app.utils.remote_exec import upload_file, run_command
@@ -537,6 +542,7 @@ class FrameDeployer:
         drivers_override: dict[str, Driver] | None = None,
     ):
         frame = self.frame
+        use_compiled_plugins = uses_compiled_module_plugins(frame)
         shutil.rmtree(os.path.join(source_dir, "src", "scenes"), ignore_errors=True)
         os.makedirs(os.path.join(source_dir, "src", "scenes"), exist_ok=True)
         shutil.rmtree(os.path.join(source_dir, "src", "driver_plugins"), ignore_errors=True)
@@ -581,9 +587,10 @@ class FrameDeployer:
                 scene_source = write_scene_nim(frame, scene)
                 with open(os.path.join(source_dir, "src", "scenes", f"scene_{module_name}.nim"), "w") as f:
                     f.write(scene_source)
-                plugin_source = write_scene_plugin_nim(scene, is_default=bool(scene.get("default", False)))
-                with open(os.path.join(source_dir, "src", "scenes", f"plugin_{module_name}.nim"), "w") as pf:
-                    pf.write(plugin_source)
+                if use_compiled_plugins:
+                    plugin_source = write_scene_plugin_nim(scene, is_default=bool(scene.get("default", False)))
+                    with open(os.path.join(source_dir, "src", "scenes", f"plugin_{module_name}.nim"), "w") as pf:
+                        pf.write(plugin_source)
             except Exception as e:
                 await self.log("stderr",
                         f"Error writing scene \"{scene.get('name','')}\" "
@@ -591,19 +598,20 @@ class FrameDeployer:
                 raise
 
         with open(os.path.join(source_dir, "src", "scenes", "scenes.nim"), "w") as f:
-            source = write_scenes_nim(frame)
+            source = write_scenes_nim(frame, compile_into_binary=not use_compiled_plugins)
             f.write(source)
 
         drivers = drivers_for_frame(frame) if drivers_override is None else drivers_override
         with open(os.path.join(source_dir, "src", "drivers", "drivers.nim"), "w") as f:
-            source = write_drivers_nim(drivers)
+            source = write_drivers_nim(drivers, use_compiled_plugins=use_compiled_plugins)
             f.write(source)
 
-        for driver in loadable_drivers(drivers):
-            module_name = driver_module_name_from_id(driver.name if not driver.variant else f"{driver.name}/{driver.variant}")
-            plugin_source = write_driver_plugin_nim(driver)
-            with open(os.path.join(source_dir, "src", "driver_plugins", f"plugin_{module_name}.nim"), "w") as pf:
-                pf.write(plugin_source)
+        if use_compiled_plugins:
+            for driver in loadable_drivers(drivers):
+                module_name = driver_module_name_from_id(driver.name if not driver.variant else f"{driver.name}/{driver.variant}")
+                plugin_source = write_driver_plugin_nim(driver)
+                with open(os.path.join(source_dir, "src", "driver_plugins", f"plugin_{module_name}.nim"), "w") as pf:
+                    pf.write(plugin_source)
 
         if drivers.get("waveshare"):
             with open(os.path.join(source_dir, "src", "drivers", "waveshare", "driver.nim"), "w") as wf:
@@ -670,6 +678,7 @@ class FrameDeployer:
         temp_dir = self.temp_dir
 
         drivers = drivers_for_frame(frame) if drivers_override is None else drivers_override
+        use_compiled_plugins = uses_compiled_module_plugins(frame)
         if inkyPython := drivers.get('inkyPython'):
             vendor_folder = inkyPython.vendor_folder or ""
             self._copy_vendor_tree(source_dir, build_dir, vendor_folder)
@@ -682,8 +691,8 @@ class FrameDeployer:
         debug_options = "--lineTrace:on" if frame.debug else ""
         selected_scene_ids = tuple(build_scene_ids or ())
         selected_driver_ids = tuple(build_driver_ids or ())
-        build_scenes = build_all_scenes or bool(selected_scene_ids)
-        build_drivers = bool(selected_driver_ids)
+        build_scenes = use_compiled_plugins and (build_all_scenes or bool(selected_scene_ids))
+        build_drivers = use_compiled_plugins and bool(selected_driver_ids)
 
         if build_binary or build_scenes:
             setup_command = f"cd {source_dir} && nimble assets -y && nimble setup"
@@ -767,7 +776,7 @@ class FrameDeployer:
                 executable="frameos",
                 compiler_flags=compiler_flags,
                 linker_flags=linker_flags,
-                compiled_scene_dirs=scene_build_dirs if build_all_scenes else None,
+                compiled_scene_dirs=scene_build_dirs if use_compiled_plugins and build_all_scenes else None,
             )
 
         archive_path = os.path.join(temp_dir, f"build_{build_id}.tar.gz")

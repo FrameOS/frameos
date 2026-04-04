@@ -257,6 +257,66 @@ def test_plan_compile_actions_tracks_driver_changes_independently(tmp_path: Path
     assert plan.driver_build_dirs == ["driver_builds/frameBuffer"]
 
 
+def test_build_compile_manifest_folds_compiled_scenes_into_app_hash_in_builtin_mode(tmp_path: Path):
+    source_dir = create_source_tree(tmp_path)
+    scenes = [{"id": "demo", "nodes": [], "settings": {"execution": "compiled"}}]
+
+    previous = build_compile_manifest(
+        source_dir=str(source_dir),
+        scenes=scenes,
+        frameos_version="1.0.0",
+        use_compiled_plugins=False,
+    )
+
+    write(source_dir / "src" / "scenes" / "scene_demo.nim", "let changed = true\n")
+    current = build_compile_manifest(
+        source_dir=str(source_dir),
+        scenes=scenes,
+        frameos_version="1.0.0",
+        use_compiled_plugins=False,
+    )
+
+    plan = plan_compile_actions(mode=SMART_DEPLOY, previous=previous, current=current)
+
+    assert previous.scene_hashes == {}
+    assert current.scene_hashes == {}
+    assert previous.app_hash != current.app_hash
+    assert plan.rebuild_app is True
+    assert plan.rebuild_scene_ids == ()
+    assert plan.rebuild_driver_ids == ()
+
+
+def test_build_compile_manifest_folds_compiled_drivers_into_app_hash_in_builtin_mode(tmp_path: Path):
+    source_dir = create_source_tree(tmp_path)
+    drivers = runtime_drivers()
+
+    previous = build_compile_manifest(
+        source_dir=str(source_dir),
+        scenes=[],
+        drivers=drivers,
+        frameos_version="1.0.0",
+        use_compiled_plugins=False,
+    )
+
+    write(source_dir / "src" / "drivers" / "frameBuffer" / "frameBuffer.nim", "let changed = true\n")
+    current = build_compile_manifest(
+        source_dir=str(source_dir),
+        scenes=[],
+        drivers=drivers,
+        frameos_version="1.0.0",
+        use_compiled_plugins=False,
+    )
+
+    plan = plan_compile_actions(mode=SMART_DEPLOY, previous=previous, current=current)
+
+    assert previous.driver_hashes == {}
+    assert current.driver_hashes == {}
+    assert previous.app_hash != current.app_hash
+    assert plan.rebuild_app is True
+    assert plan.rebuild_scene_ids == ()
+    assert plan.rebuild_driver_ids == ()
+
+
 def test_build_compile_manifest_hashes_python_driver_vendor_bundle(tmp_path: Path):
     source_dir = create_source_tree(tmp_path)
     write(source_dir / "src" / "drivers" / "inkyPython" / "inkyPython.nim", "discard\n")

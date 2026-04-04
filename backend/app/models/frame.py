@@ -75,6 +75,30 @@ def normalize_frame_admin_auth(frame_admin_auth: Optional[dict]) -> dict:
     }
 
 
+COMPILED_MODULES_MODE_BUILTIN = "builtin"
+COMPILED_MODULES_MODE_PLUGINS = "plugins"
+DEFAULT_COMPILED_MODULES_MODE = COMPILED_MODULES_MODE_PLUGINS
+
+
+def compiled_modules_mode(frame_or_deploy: "Frame | dict | None") -> str:
+    if isinstance(frame_or_deploy, dict):
+        rpios = frame_or_deploy.get("rpios") or {}
+    else:
+        rpios = getattr(frame_or_deploy, "rpios", None) or {}
+
+    if not isinstance(rpios, dict):
+        return DEFAULT_COMPILED_MODULES_MODE
+
+    value = str(rpios.get("compiledModulesMode") or DEFAULT_COMPILED_MODULES_MODE).strip().lower()
+    if value == COMPILED_MODULES_MODE_BUILTIN:
+        return COMPILED_MODULES_MODE_BUILTIN
+    return COMPILED_MODULES_MODE_PLUGINS
+
+
+def uses_compiled_module_plugins(frame_or_deploy: "Frame | dict | None") -> bool:
+    return compiled_modules_mode(frame_or_deploy) == COMPILED_MODULES_MODE_PLUGINS
+
+
 
 # NB! Update frontend/src/types.tsx if you change this
 class Frame(Base):
@@ -265,6 +289,10 @@ async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, serve
             "agentEnabled": False,
             "agentRunCommands": False,
             "agentSharedSecret": secure_token(32)
+        },
+        rpios={
+            "crossCompilation": "auto",
+            "compiledModulesMode": DEFAULT_COMPILED_MODULES_MODE,
         },
         control_code={"enabled": "false", "position": "top-right"},
         schedule={"events": []},

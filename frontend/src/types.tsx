@@ -654,4 +654,5 @@ export interface FrameBuildrootConfig {
 export interface FrameRpiOSConfig {
   platform?: string
   crossCompilation?: '' | 'auto' | 'always' | 'never'
+  compiledModulesMode?: '' | 'plugins' | 'builtin'
 }

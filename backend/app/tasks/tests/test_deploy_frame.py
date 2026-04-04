@@ -482,6 +482,42 @@ def test_compile_plan_log_lines_report_absence_of_compiled_scenes():
     ]
 
 
+def test_compile_plan_log_lines_report_builtin_mode_for_compiled_scenes(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(deploy_frame_module, "drivers_for_frame", lambda _frame: {})
+    frame = SimpleNamespace(
+        rpios={"compiledModulesMode": "builtin"},
+        device="web_only",
+        gpio_buttons=[],
+        scenes=[{"id": "compiled-demo", "settings": {"execution": "compiled"}}],
+    )
+    compile_plan = CompilePlan(
+        mode="smart",
+        rebuild_app=True,
+        rebuild_scene_ids=(),
+        reuse_scene_ids=(),
+        rebuild_driver_ids=(),
+        reuse_driver_ids=(),
+        reason="App inputs changed",
+    )
+    manifest = CompileManifest(
+        version=1,
+        frameos_version="1.0.0",
+        runtime_contract_hash="runtime",
+        app_hash="app",
+        scene_hashes={},
+        driver_hashes={},
+    )
+
+    lines = _compile_plan_log_lines(frame, compile_plan, manifest)
+
+    assert lines == [
+        "🔷 Compile plan: App inputs changed",
+        "🔷 FrameOS compile: requested",
+        "🔷 Scene compile: included in FrameOS binary",
+        "🔷 Driver compile: skipped (no compiled drivers configured)",
+    ]
+
+
 def test_scene_compile_start_lines_emit_one_line_per_scene():
     frame = SimpleNamespace(
         scenes=[

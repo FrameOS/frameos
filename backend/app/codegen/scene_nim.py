@@ -1292,7 +1292,11 @@ var exportedScene* = ExportedScene(
         return value_list
 
 
-def write_scenes_nim(frame: Frame) -> str:
+def write_scenes_nim(
+    frame: Frame,
+    *,
+    compile_into_binary: bool = True,
+) -> str:
     rows = []
     imports = []
     sceneOptionTuples = []
@@ -1306,12 +1310,13 @@ def write_scenes_nim(frame: Frame) -> str:
 
         scene_id = scene.get("id", "default")
         scene_id_import = scene_module_name(scene_id)
-        imports.append(
-            f"import scenes/scene_{scene_id_import} as scene_{scene_id_import}"
-        )
-        rows.append(
-            f'  result["{sanitize_nim_string(scene_id)}".SceneId] = scene_{scene_id_import}.exportedScene'
-        )
+        if compile_into_binary:
+            imports.append(
+                f"import scenes/scene_{scene_id_import} as scene_{scene_id_import}"
+            )
+            rows.append(
+                f'  result["{sanitize_nim_string(scene_id)}".SceneId] = scene_{scene_id_import}.exportedScene'
+            )
         sceneOptionTuples.append(
             f"  (\"{sanitize_nim_string(scene_id)}\".SceneId, \"{sanitize_nim_string(scene.get('name', 'Default'))}\"),"
         )

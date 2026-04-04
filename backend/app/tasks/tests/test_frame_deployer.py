@@ -90,8 +90,14 @@ async def test_make_local_modifications_writes_scene_plugin_wrappers(
     monkeypatch.setattr("app.tasks._frame_deployer.write_apps_nim", lambda _root: "apps\n")
     monkeypatch.setattr("app.tasks._frame_deployer.write_scene_nim", lambda _frame, _scene: "scene\n")
     monkeypatch.setattr("app.tasks._frame_deployer.write_scene_plugin_nim", lambda _scene, is_default=False: f"plugin default={is_default}\n")
-    monkeypatch.setattr("app.tasks._frame_deployer.write_scenes_nim", lambda _frame: "registry\n")
-    monkeypatch.setattr("app.tasks._frame_deployer.write_drivers_nim", lambda _drivers: "drivers\n")
+    monkeypatch.setattr(
+        "app.tasks._frame_deployer.write_scenes_nim",
+        lambda _frame, **_kwargs: "registry\n",
+    )
+    monkeypatch.setattr(
+        "app.tasks._frame_deployer.write_drivers_nim",
+        lambda _drivers, **_kwargs: "drivers\n",
+    )
     monkeypatch.setattr("app.tasks._frame_deployer.drivers_for_frame", lambda _frame: {})
 
     frame = SimpleNamespace(
@@ -132,8 +138,14 @@ async def test_make_local_modifications_writes_driver_plugin_wrappers(
     monkeypatch.setattr("app.tasks._frame_deployer.write_apps_nim", lambda _root: "apps\n")
     monkeypatch.setattr("app.tasks._frame_deployer.write_scene_nim", lambda _frame, _scene: "scene\n")
     monkeypatch.setattr("app.tasks._frame_deployer.write_scene_plugin_nim", lambda _scene, is_default=False: "plugin\n")
-    monkeypatch.setattr("app.tasks._frame_deployer.write_scenes_nim", lambda _frame: "registry\n")
-    monkeypatch.setattr("app.tasks._frame_deployer.write_drivers_nim", lambda _drivers: "drivers\n")
+    monkeypatch.setattr(
+        "app.tasks._frame_deployer.write_scenes_nim",
+        lambda _frame, **_kwargs: "registry\n",
+    )
+    monkeypatch.setattr(
+        "app.tasks._frame_deployer.write_drivers_nim",
+        lambda _drivers, **_kwargs: "drivers\n",
+    )
     monkeypatch.setattr("app.tasks._frame_deployer.write_driver_plugin_nim", lambda _driver: "driver plugin\n")
     monkeypatch.setattr(
         "app.tasks._frame_deployer.drivers_for_frame",
@@ -164,6 +176,68 @@ async def test_make_local_modifications_writes_driver_plugin_wrappers(
 
 
 @pytest.mark.asyncio
+async def test_make_local_modifications_skips_plugin_wrappers_in_builtin_mode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    source_dir = tmp_path / "frameos"
+    (source_dir / "src" / "apps").mkdir(parents=True)
+    (source_dir / "src" / "drivers").mkdir(parents=True)
+    (source_dir / "src" / "scenes").mkdir(parents=True)
+
+    captured_scene_kwargs: dict[str, object] = {}
+    captured_driver_kwargs: dict[str, object] = {}
+
+    monkeypatch.setattr("app.tasks._frame_deployer.get_apps_from_scenes", lambda _scenes: {})
+    monkeypatch.setattr("app.tasks._frame_deployer.write_apps_nim", lambda _root: "apps\n")
+    monkeypatch.setattr("app.tasks._frame_deployer.write_scene_nim", lambda _frame, _scene: "scene\n")
+    monkeypatch.setattr("app.tasks._frame_deployer.write_scene_plugin_nim", lambda _scene, is_default=False: "plugin\n")
+
+    def fake_write_scenes_nim(_frame, **kwargs):
+        captured_scene_kwargs.update(kwargs)
+        return "registry\n"
+
+    def fake_write_drivers_nim(_drivers, **kwargs):
+        captured_driver_kwargs.update(kwargs)
+        return "drivers\n"
+
+    monkeypatch.setattr("app.tasks._frame_deployer.write_scenes_nim", fake_write_scenes_nim)
+    monkeypatch.setattr("app.tasks._frame_deployer.write_drivers_nim", fake_write_drivers_nim)
+    monkeypatch.setattr("app.tasks._frame_deployer.write_driver_plugin_nim", lambda _driver: "driver plugin\n")
+    monkeypatch.setattr(
+        "app.tasks._frame_deployer.drivers_for_frame",
+        lambda _frame: {
+            "frameBuffer": Driver(
+                name="frameBuffer",
+                import_path="frameBuffer/frameBuffer",
+                can_render=True,
+            )
+        },
+    )
+
+    frame = SimpleNamespace(
+        id=1,
+        rpios={"compiledModulesMode": "builtin"},
+        scenes=[{"id": "hello/world", "settings": {"execution": "compiled"}}],
+    )
+    deployer = FrameDeployer(
+        db=None,
+        redis=None,
+        frame=frame,
+        nim_path="/usr/bin/nim",
+        temp_dir=str(tmp_path / "work"),
+    )
+    deployer.log = lambda *_args, **_kwargs: None  # type: ignore[method-assign]
+
+    await deployer.make_local_modifications(str(source_dir))
+
+    assert captured_scene_kwargs == {"compile_into_binary": True}
+    assert captured_driver_kwargs == {"use_compiled_plugins": False}
+    assert not any((source_dir / "src" / "scenes").glob("plugin_*.nim"))
+    assert not any((source_dir / "src" / "driver_plugins").glob("plugin_*.nim"))
+
+
+@pytest.mark.asyncio
 async def test_make_local_modifications_honors_empty_driver_override(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -177,9 +251,12 @@ async def test_make_local_modifications_honors_empty_driver_override(
 
     monkeypatch.setattr("app.tasks._frame_deployer.get_apps_from_scenes", lambda _scenes: {})
     monkeypatch.setattr("app.tasks._frame_deployer.write_apps_nim", lambda _root: "apps\n")
-    monkeypatch.setattr("app.tasks._frame_deployer.write_scenes_nim", lambda _frame: "registry\n")
+    monkeypatch.setattr(
+        "app.tasks._frame_deployer.write_scenes_nim",
+        lambda _frame, **_kwargs: "registry\n",
+    )
 
-    def fake_write_drivers_nim(drivers):
+    def fake_write_drivers_nim(drivers, **_kwargs):
         nonlocal captured_drivers
         captured_drivers = dict(drivers)
         return "drivers\n"

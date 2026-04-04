@@ -523,6 +523,30 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
           {(!inFrameAdminMode && frameForm.mode === 'rpios') || (!inFrameAdminMode && !frameForm.mode) ? (
             <Group name="rpios">
               <Field
+                name="compiledModulesMode"
+                label="Compiled scenes and drivers"
+                tooltip={
+                  <div className="space-y-2">
+                    <p>
+                      Choose whether compiled scenes and loadable drivers are linked into the main FrameOS binary or
+                      built as separate shared libraries.
+                    </p>
+                    <p>Shared libraries are the new default. Built into binary matches the legacy deploy path.</p>
+                  </div>
+                }
+              >
+                {({ value, onChange }) => (
+                  <Select
+                    value={(value as string) || 'plugins'}
+                    onChange={onChange}
+                    options={[
+                      { value: 'plugins', label: 'Shared libraries (.so)' },
+                      { value: 'builtin', label: 'Compile into frameos binary' },
+                    ]}
+                  />
+                )}
+              </Field>
+              <Field
                 name="crossCompilation"
                 label="Cross compilation"
                 tooltip={

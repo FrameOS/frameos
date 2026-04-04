@@ -51,6 +51,7 @@ from app.models.frame import (
     normalize_https_proxy,
     refresh_tls_certificate_validity_dates,
     update_frame,
+    uses_compiled_module_plugins,
 )
 from app.models.log import new_log as log
 from app.models.metrics import Metrics
@@ -207,7 +208,11 @@ def _frame_has_interpreted_scenes(frame: Frame) -> bool:
 def _frame_requires_packaged_runtime_build(frame: Frame) -> bool:
     # Packaged compiled scene plugins are rebuilt from the current checkout, so
     # the runtime must come from the same sources to keep the bundle coherent.
-    return _frame_has_interpreted_scenes(frame) or _frame_has_compiled_scenes(frame)
+    if _frame_has_interpreted_scenes(frame) or _frame_has_compiled_scenes(frame):
+        return True
+    if uses_compiled_module_plugins(frame):
+        return False
+    return any(driver.import_path for driver in drivers_for_frame(frame).values())
 
 
 def _compiled_scene_build_dirs(frame: Frame) -> list[str]:
@@ -431,6 +436,8 @@ async def _build_packaged_compiled_scenes(
     target_dir: Path,
     components: dict[str, dict[str, Any]],
 ) -> Path | None:
+    if not uses_compiled_module_plugins(frame):
+        return None
     if not _frame_has_compiled_scenes(frame):
         return None
 
@@ -516,15 +523,16 @@ async def _build_packaged_runtime_binary(
         )
 
     builder = FrameBinaryBuilder(db=db, redis=redis, frame=frame, deployer=deployer, temp_dir=temp_dir)
+    drivers_override = {} if uses_compiled_module_plugins(frame) else None
 
     try:
-        source_dir = await builder.prepare_source_dir(drivers_override={})
+        source_dir = await builder.prepare_source_dir(drivers_override=drivers_override)
         build_dir, _archive_path = await builder.prepare_build_archive(
             source_dir=source_dir,
             arch=target.arch,
             build_binary=True,
             build_all_scenes=False,
-            drivers_override={},
+            drivers_override=drivers_override,
         )
         requested = await builder.build_requested_artifacts(
             source_dir=source_dir,
@@ -1334,13 +1342,14 @@ async def api_frame_local_prebuilt_package_zip(
         shutil.copy2(runtime_binary, packaged_binary)
         os.chmod(packaged_binary, 0o755)
 
-        _copy_prebuilt_drivers(
-            frame=frame,
-            target_slug=target_slug,
-            target_dir=target_dir,
-            components=components,
-            destination_dir=package_dir / "drivers",
-        )
+        if uses_compiled_module_plugins(frame):
+            _copy_prebuilt_drivers(
+                frame=frame,
+                target_slug=target_slug,
+                target_dir=target_dir,
+                components=components,
+                destination_dir=package_dir / "drivers",
+            )
         _copy_packaged_vendor_dirs(
             frame=frame,
             destination_dir=package_dir,

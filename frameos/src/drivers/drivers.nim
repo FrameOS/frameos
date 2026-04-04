@@ -2,6 +2,9 @@ import pixie
 import frameos/types
 import drivers/plugin_runtime
 
+proc builtinDriverSetupSpecs*(_: FrameConfig): seq[tuple[id: string, spec: DriverSetupSpec]] =
+  result = @[]
+
 # Called before the runner is created
 proc init*(frameOS: FrameOS) =
   initCompiledDrivers(frameOS)

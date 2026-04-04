@@ -4,7 +4,11 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from app.tasks.fast_deploy_frame import frame_has_compiled_scenes, tls_settings_changed
+from app.tasks.fast_deploy_frame import (
+    fast_deploy_blocker_reason,
+    frame_has_compiled_scenes,
+    tls_settings_changed,
+)
 
 fast_deploy_frame_module = importlib.import_module("app.tasks.fast_deploy_frame")
 
@@ -96,6 +100,26 @@ def test_frame_has_compiled_scenes_detects_compiled_and_interpreted_modes():
 
     interpreted_only = SimpleNamespace(scenes=[{"id": "only", "settings": {"execution": "interpreted"}}])
     assert frame_has_compiled_scenes(interpreted_only) is False
+
+
+def test_fast_deploy_blocker_reason_rejects_compiled_module_linkage_changes():
+    frame = SimpleNamespace(
+        scenes=[],
+        device="framebuffer",
+        gpio_buttons=[],
+        rpios={"compiledModulesMode": "builtin"},
+        last_successful_deploy={
+            "device": "framebuffer",
+            "gpio_buttons": [],
+            "scenes": [],
+            "rpios": {"compiledModulesMode": "plugins"},
+        },
+    )
+
+    assert (
+        fast_deploy_blocker_reason(frame)
+        == "Fast deploy cannot change compiled module linkage. Run a full deploy instead."
+    )
 
 
 @pytest.mark.asyncio

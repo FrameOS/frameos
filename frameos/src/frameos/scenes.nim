@@ -1,11 +1,10 @@
 import json, pixie, times, options, strformat, strutils, locks, tables, sequtils, os, dynlib
 import pixie/fileformats/png
+import scenes/scenes as compiledScenesRegistry
 import system/scenes as systemScenesRegistry
 import frameos/channels
 import frameos/types
 import frameos/interpreter
-when defined(testing):
-  import scenes/scenes as compiledScenesRegistry
 
 # Where to store the persisted states
 const SCENE_STATE_JSON_FOLDER = "./state"
@@ -173,41 +172,43 @@ proc loadCompiledScenesFromDisk(): LoadedCompiledScenes =
       if plugin.isDefault:
         result.defaultSceneId = some(sceneId)
 
-  when defined(testing):
-    if result.scenes.len == 0:
-      result.defaultSceneId = compiledScenesRegistry.defaultSceneId
-      result.sceneIds = @[]
-      result.sceneOptions = @[]
-      for sceneOption in compiledScenesRegistry.sceneOptions:
-        result.sceneOptions.add(sceneOption)
-      result.scenes = compiledScenesRegistry.getExportedScenes()
-      for sceneOption in result.sceneOptions:
-        result.sceneIds.add(sceneOption.id)
-      for sceneId, scene in result.scenes:
-        result.publicStateFields[sceneId] = cloneStateFields(scene.publicStateFields)
-        result.persistedStateKeys[sceneId] = cloneStringSeq(scene.persistedStateKeys)
+proc loadBuiltinCompiledScenes(): LoadedCompiledScenes =
+  result = (
+    defaultSceneId: none(SceneId),
+    sceneIds: @[],
+    sceneOptions: @[],
+    scenes: initTable[SceneId, ExportedScene](),
+    publicStateFields: initTable[SceneId, seq[StateField]](),
+    persistedStateKeys: initTable[SceneId, seq[string]](),
+    libraries: @[],
+  )
+
+  let builtinScenes = compiledScenesRegistry.getExportedScenes()
+  if builtinScenes.len == 0:
+    return
+
+  result.defaultSceneId = compiledScenesRegistry.defaultSceneId
+  result.scenes = builtinScenes
+  for sceneOption in compiledScenesRegistry.sceneOptions:
+    result.sceneOptions.add(sceneOption)
+    result.sceneIds.add(sceneOption.id)
+  for sceneId, scene in builtinScenes:
+    result.publicStateFields[sceneId] = cloneStateFields(scene.publicStateFields)
+    result.persistedStateKeys[sceneId] = cloneStringSeq(scene.persistedStateKeys)
 
 # All scenes that are compiled into the FrameOS binary
 var sceneRegistryLock: Lock
 initLock(sceneRegistryLock)
 var systemScenes*: Table[SceneId, ExportedScene] = getSystemScenes()
-var defaultSceneId* = none(SceneId)
-var compiledSceneIds: seq[SceneId] = @[]
-var compiledSceneOptions: seq[tuple[id: SceneId, name: string]] = @[]
-var compiledScenePublicStateFields = initTable[SceneId, seq[StateField]]()
-var compiledScenePersistedStateKeys = initTable[SceneId, seq[string]]()
+let builtinCompiledScenes = loadBuiltinCompiledScenes()
+var defaultSceneId* = builtinCompiledScenes.defaultSceneId
+var compiledSceneIds: seq[SceneId] = builtinCompiledScenes.sceneIds
+var compiledSceneOptions: seq[tuple[id: SceneId, name: string]] = builtinCompiledScenes.sceneOptions
+var compiledScenePublicStateFields = builtinCompiledScenes.publicStateFields
+var compiledScenePersistedStateKeys = builtinCompiledScenes.persistedStateKeys
 var loadedCompiledSceneLibraries: seq[LoadedCompiledSceneLibrary] = @[]
 var interpretedScenes*: Table[SceneId, ExportedInterpretedScene] = getInterpretedScenes()
 var uploadedScenes*: Table[SceneId, ExportedInterpretedScene] = initTable[SceneId, ExportedInterpretedScene]()
-when defined(testing):
-  let loadedCompiledScenes = loadCompiledScenesFromDisk()
-  var compiledScenesForTest = loadedCompiledScenes.scenes
-  defaultSceneId = loadedCompiledScenes.defaultSceneId
-  compiledSceneIds = loadedCompiledScenes.sceneIds
-  compiledSceneOptions = loadedCompiledScenes.sceneOptions
-  compiledScenePublicStateFields = loadedCompiledScenes.publicStateFields
-  compiledScenePersistedStateKeys = loadedCompiledScenes.persistedStateKeys
-  loadedCompiledSceneLibraries = loadedCompiledScenes.libraries
 var compiledScenesThreadInitialized {.threadvar.}: bool
 var compiledScenesThread {.threadvar.}: Table[SceneId, ExportedScene]
 
@@ -216,24 +217,21 @@ for sceneId, scene in systemScenes:
   exportedScenes[sceneId] = scene
 for sceneId, scene in interpretedScenes:
   exportedScenes[sceneId] = scene.ExportedScene
-when defined(testing):
-  for sceneId, scene in compiledScenesForTest:
-    exportedScenes[sceneId] = scene
+for sceneId, scene in builtinCompiledScenes.scenes:
+  exportedScenes[sceneId] = scene
 for sceneId, scene in uploadedScenes:
   exportedScenes[sceneId] = scene.ExportedScene
 
 proc hasCompiledSceneExportUnlocked(sceneId: SceneId): bool =
-  when defined(testing):
-    compiledScenesForTest.hasKey(sceneId)
-  else:
-    compiledScenesThreadInitialized and compiledScenesThread.hasKey(sceneId)
+  if builtinCompiledScenes.scenes.hasKey(sceneId):
+    return true
+  compiledScenesThreadInitialized and compiledScenesThread.hasKey(sceneId)
 
 proc getCompiledSceneExportUnlocked(sceneId: SceneId): Option[ExportedScene] =
-  if hasCompiledSceneExportUnlocked(sceneId):
-    when defined(testing):
-      return some(compiledScenesForTest[sceneId])
-    else:
-      return some(compiledScenesThread[sceneId])
+  if compiledScenesThreadInitialized and compiledScenesThread.hasKey(sceneId):
+    return some(compiledScenesThread[sceneId])
+  if builtinCompiledScenes.scenes.hasKey(sceneId):
+    return some(builtinCompiledScenes.scenes[sceneId])
   return none(ExportedScene)
 
 proc hasExportedSceneUnlocked(sceneId: SceneId): bool =
@@ -271,13 +269,11 @@ proc refreshCompiledSceneExports() =
   var mergedCompiledScenes = initTable[SceneId, ExportedScene]()
   for sceneId, scene in systemScenes:
     mergedCompiledScenes[sceneId] = scene
-  when defined(testing):
-    for sceneId, scene in compiledScenesForTest:
+  for sceneId, scene in builtinCompiledScenes.scenes:
+    mergedCompiledScenes[sceneId] = scene
+  if compiledScenesThreadInitialized:
+    for sceneId, scene in compiledScenesThread:
       mergedCompiledScenes[sceneId] = scene
-  else:
-    if compiledScenesThreadInitialized:
-      for sceneId, scene in compiledScenesThread:
-        mergedCompiledScenes[sceneId] = scene
   replaceCompiledSceneExports(mergedCompiledScenes)
 
 refreshCompiledSceneExports()
@@ -298,19 +294,20 @@ proc reloadCompiledScenes*() =
     let previousLibraries = loadedCompiledSceneLibraries
     let loadedCompiled = loadCompiledScenesFromDisk()
     loadedCompiledSceneLibraries = loadedCompiled.libraries
-    defaultSceneId = loadedCompiled.defaultSceneId
-    compiledSceneIds = loadedCompiled.sceneIds
-    compiledSceneOptions = loadedCompiled.sceneOptions
-    compiledScenePublicStateFields = loadedCompiled.publicStateFields
-    compiledScenePersistedStateKeys = loadedCompiled.persistedStateKeys
-    when defined(testing):
-      compiledScenesForTest = loadedCompiled.scenes
-      for sceneId in compiledSceneIds:
-        if compiledScenesForTest.hasKey(sceneId):
-          exportedScenes[sceneId] = compiledScenesForTest[sceneId]
+    if loadedCompiled.scenes.len > 0:
+      defaultSceneId = loadedCompiled.defaultSceneId
+      compiledSceneIds = loadedCompiled.sceneIds
+      compiledSceneOptions = loadedCompiled.sceneOptions
+      compiledScenePublicStateFields = loadedCompiled.publicStateFields
+      compiledScenePersistedStateKeys = loadedCompiled.persistedStateKeys
     else:
-      compiledScenesThread = loadedCompiled.scenes
-      compiledScenesThreadInitialized = true
+      defaultSceneId = builtinCompiledScenes.defaultSceneId
+      compiledSceneIds = builtinCompiledScenes.sceneIds
+      compiledSceneOptions = builtinCompiledScenes.sceneOptions
+      compiledScenePublicStateFields = builtinCompiledScenes.publicStateFields
+      compiledScenePersistedStateKeys = builtinCompiledScenes.persistedStateKeys
+    compiledScenesThread = loadedCompiled.scenes
+    compiledScenesThreadInitialized = loadedCompiled.scenes.len > 0
     refreshCompiledSceneExports()
     unloadCompiledSceneLibraries(previousLibraries)
 
@@ -321,7 +318,10 @@ proc updateUploadedScenes*(newScenes: Table[SceneId, ExportedInterpretedScene]) 
     for sceneId in keys(oldUploaded):
       if newScenes.hasKey(sceneId):
         continue
-      if interpretedScenes.hasKey(sceneId):
+      let compiledScene = getCompiledSceneExportUnlocked(sceneId)
+      if compiledScene.isSome:
+        exportedScenes[sceneId] = compiledScene.get()
+      elif interpretedScenes.hasKey(sceneId):
         exportedScenes[sceneId] = interpretedScenes[sceneId].ExportedScene
       elif systemScenes.hasKey(sceneId):
         exportedScenes[sceneId] = systemScenes[sceneId]

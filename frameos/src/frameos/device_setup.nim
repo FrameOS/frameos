@@ -1,4 +1,5 @@
 import std/[algorithm, dynlib, json, os, osproc, strutils]
+import drivers/drivers as compiledDrivers
 import frameos/config
 import frameos/driver_setup
 import frameos/types
@@ -28,10 +29,14 @@ type
     frameConfig: FrameConfig,
     driversDir: string,
   ): seq[tuple[id: string, spec: DriverSetupSpec]] {.nimcall.}
+  BuiltinDriverSetupSpecLoaderHook* = proc(
+    frameConfig: FrameConfig,
+  ): seq[tuple[id: string, spec: DriverSetupSpec]] {.nimcall.}
   CompiledDriverPluginFactory = proc(): CompiledDriverPlugin {.cdecl.}
 
 var setupExecHook*: SetupExecHook
 var driverSetupSpecLoaderHook*: DriverSetupSpecLoaderHook
+var builtinDriverSetupSpecLoaderHook*: BuiltinDriverSetupSpecLoaderHook
 var compiledDriverSetupLoadCounter = 0
 
 const COMPILED_DRIVER_PLUGIN_SYMBOL = "getCompiledDriverPlugin"
@@ -144,6 +149,17 @@ proc loadDriverSetupSpecs(
       continue
     result.add(loaded)
 
+proc loadBuiltinDriverSetupSpecs(
+  frameConfig: FrameConfig,
+): seq[tuple[id: string, spec: DriverSetupSpec]] =
+  if not builtinDriverSetupSpecLoaderHook.isNil:
+    return builtinDriverSetupSpecLoaderHook(frameConfig)
+
+  try:
+    return compiledDrivers.builtinDriverSetupSpecs(frameConfig)
+  except CatchableError as e:
+    raise newException(IOError, "Failed to load built-in driver setup specs: " & e.msg)
+
 proc mergeSpiMode(plan: var SetupPlan, nextMode: DriverSetupSpiMode, driverId: string) =
   case nextMode
   of dsmUnchanged:
@@ -193,6 +209,8 @@ proc buildSetupPlan*(
       defaultCompiledDriversDir()
 
   for loaded in loadDriverSetupSpecs(frameConfig, resolvedDriversDir):
+    result.mergeDriverSetupSpec(loaded.id, loaded.spec)
+  for loaded in loadBuiltinDriverSetupSpecs(frameConfig):
     result.mergeDriverSetupSpec(loaded.id, loaded.spec)
 
 proc bootConfigRequired(plan: SetupPlan): bool =

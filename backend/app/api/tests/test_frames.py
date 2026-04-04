@@ -696,6 +696,37 @@ async def test_build_packaged_compiled_scenes_passes_explicit_scene_build_dirs(
 
 
 @pytest.mark.asyncio
+async def test_build_packaged_compiled_scenes_skips_builtin_mode(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+):
+    target_dir = tmp_path / "prebuilt"
+    (target_dir / "quickjs-1").mkdir(parents=True, exist_ok=True)
+    (target_dir / "lgpio-1").mkdir(parents=True, exist_ok=True)
+
+    result = await frames_api._build_packaged_compiled_scenes(
+        db=None,
+        redis=None,
+        frame=SimpleNamespace(
+            id=1,
+            rpios={"compiledModulesMode": "builtin"},
+            scenes=[{"id": "compiled-demo", "settings": {"execution": "compiled"}}],
+        ),
+        temp_dir=str(tmp_path),
+        deployer=SimpleNamespace(build_id="build123"),
+        target=TargetMetadata(arch="aarch64", distro="debian", version="bookworm"),
+        target_slug="debian-bookworm-arm64",
+        target_dir=target_dir,
+        components={
+            "quickjs": {"directory": "quickjs-1", "version": "1"},
+            "lgpio": {"directory": "lgpio-1", "version": "1"},
+        },
+    )
+
+    assert result is None
+
+
+@pytest.mark.asyncio
 async def test_build_packaged_runtime_binary_uses_prebuilt_deps_and_skips_compiled_scenes(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
@@ -756,3 +787,62 @@ async def test_build_packaged_runtime_binary_uses_prebuilt_deps_and_skips_compil
     assert requested_kwargs["prebuilt_target"] == "debian-bookworm-arm64"
     assert requested_kwargs["build_binary"] is True
     assert requested_kwargs["build_all_scenes"] is False
+
+
+@pytest.mark.asyncio
+async def test_build_packaged_runtime_binary_keeps_drivers_in_builtin_mode(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+):
+    target_dir = tmp_path / "prebuilt"
+    (target_dir / "quickjs-1").mkdir(parents=True, exist_ok=True)
+    (target_dir / "lgpio-1").mkdir(parents=True, exist_ok=True)
+    built_binary = tmp_path / "frameos"
+    built_binary.write_bytes(b"binary")
+
+    frame = SimpleNamespace(
+        id=1,
+        device="waveshare.EPD_10in3",
+        gpio_buttons=[],
+        rpios={"compiledModulesMode": "builtin"},
+        scenes=[],
+    )
+    source_prepare_kwargs: dict[str, object] = {}
+
+    class FakeBuilder:
+        def __init__(self, **_kwargs):
+            return None
+
+        async def prepare_source_dir(self, **kwargs) -> str:
+            source_prepare_kwargs.update(kwargs)
+            return str(tmp_path / "source")
+
+        async def prepare_build_archive(self, **kwargs) -> tuple[str, str]:
+            assert kwargs["drivers_override"] is None
+            return str(tmp_path / "build"), str(tmp_path / "build.tar.gz")
+
+        async def build_requested_artifacts(self, **_kwargs):
+            return SimpleNamespace(
+                artifacts=SimpleNamespace(binary_path=str(built_binary))
+            )
+
+    monkeypatch.setattr(frames_api, "find_nim_v2", lambda: "/usr/bin/nim")
+    monkeypatch.setattr(frames_api, "FrameBinaryBuilder", FakeBuilder)
+
+    result = await frames_api._build_packaged_runtime_binary(
+        db=None,
+        redis=None,
+        frame=frame,
+        temp_dir=str(tmp_path),
+        deployer=SimpleNamespace(build_id="build123"),
+        target=TargetMetadata(arch="aarch64", distro="debian", version="bookworm"),
+        target_slug="debian-bookworm-arm64",
+        target_dir=target_dir,
+        components={
+            "quickjs": {"directory": "quickjs-1", "version": "1"},
+            "lgpio": {"directory": "lgpio-1", "version": "1"},
+        },
+    )
+
+    assert result == built_binary
+    assert source_prepare_kwargs["drivers_override"] is None

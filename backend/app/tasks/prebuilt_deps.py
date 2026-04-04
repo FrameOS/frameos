@@ -134,6 +134,9 @@ def resolve_prebuilt_target(distro: str, version: str, arch: str) -> str | None:
             release_key = release
     elif distro_key == "ubuntu":
         release_key = _normalize_ubuntu_release(version)
+    elif distro_key == "buildroot":
+        # Buildroot packages reuse the Ubuntu 22.04 release lineage for prebuilt artifacts.
+        release_key = _normalize_ubuntu_release(version)
     if not release_key:
         return None
 

@@ -204,6 +204,7 @@ def build_compile_manifest(
     scenes: list[dict] | None,
     drivers: dict[str, Driver] | None = None,
     frameos_version: str | None,
+    use_compiled_plugins: bool = True,
 ) -> CompileManifest:
     source_root = Path(source_dir).resolve()
     temp_root = source_root.parent
@@ -215,57 +216,80 @@ def build_compile_manifest(
         ],
     )
 
-    app_hash = _hash_entries(
-        [
-            *_entries_for_relative_paths(source_root, APP_CORE_PATHS),
-            *_entries_for_relative_paths(temp_root, APP_SHARED_REPO_PATHS),
-            *_builtin_app_entries(source_root),
-        ],
-    )
-
     compiled_scenes = sorted(
         (scene for scene in (scenes or []) if _scene_execution(scene) != "interpreted"),
         key=lambda scene: str(scene.get("id") or "default"),
     )
-    scene_hashes: dict[str, SceneCompileState] = {}
-    for scene in compiled_scenes:
-        scene_id = str(scene.get("id") or "default")
-        module_name = scene_module_name(scene_id)
-        library = scene_library_filename(scene_id)
-        scene_hash = _hash_entries(
-            [
-                ("runtime_contract", runtime_contract_hash.encode("utf-8")),
+    loadable_runtime_drivers = loadable_drivers(drivers or {})
+
+    app_entries: list[tuple[str, Path | bytes]] = [
+        ("compiled_module_linkage", b"plugins" if use_compiled_plugins else b"builtin"),
+        *_entries_for_relative_paths(source_root, APP_CORE_PATHS),
+        *_entries_for_relative_paths(temp_root, APP_SHARED_REPO_PATHS),
+        *_builtin_app_entries(source_root),
+        ("compiled_scene_registry", source_root / "src" / "scenes" / "scenes.nim"),
+    ]
+
+    if not use_compiled_plugins:
+        scene_app_entries: dict[str, Path] = {}
+        for scene in compiled_scenes:
+            scene_id = str(scene.get("id") or "default")
+            module_name = scene_module_name(scene_id)
+            app_entries.append(
                 (
                     f"scene_source/{module_name}.nim",
                     source_root / "src" / "scenes" / f"scene_{module_name}.nim",
-                ),
-                (
-                    f"scene_plugin/{module_name}.nim",
-                    source_root / "src" / "scenes" / f"plugin_{module_name}.nim",
-                ),
-                ("module_build_epoch", str(COMPILED_MODULE_BUILD_EPOCH).encode("utf-8")),
-                *_scene_app_entries(source_root, scene),
-            ],
-        )
-        scene_hashes[scene_id] = SceneCompileState(hash=scene_hash, library=library)
+                )
+            )
+            for label, path in _scene_app_entries(source_root, scene):
+                scene_app_entries[label] = path
+        app_entries.extend(scene_app_entries.items())
+        for driver in loadable_runtime_drivers:
+            app_entries.extend(_driver_source_entries(source_root, driver))
+
+    app_hash = _hash_entries(app_entries)
+
+    scene_hashes: dict[str, SceneCompileState] = {}
+    if use_compiled_plugins:
+        for scene in compiled_scenes:
+            scene_id = str(scene.get("id") or "default")
+            module_name = scene_module_name(scene_id)
+            library = scene_library_filename(scene_id)
+            scene_hash = _hash_entries(
+                [
+                    ("runtime_contract", runtime_contract_hash.encode("utf-8")),
+                    (
+                        f"scene_source/{module_name}.nim",
+                        source_root / "src" / "scenes" / f"scene_{module_name}.nim",
+                    ),
+                    (
+                        f"scene_plugin/{module_name}.nim",
+                        source_root / "src" / "scenes" / f"plugin_{module_name}.nim",
+                    ),
+                    ("module_build_epoch", str(COMPILED_MODULE_BUILD_EPOCH).encode("utf-8")),
+                    *_scene_app_entries(source_root, scene),
+                ],
+            )
+            scene_hashes[scene_id] = SceneCompileState(hash=scene_hash, library=library)
 
     driver_hashes: dict[str, DriverCompileState] = {}
-    for driver in loadable_drivers(drivers or {}):
-        driver_id = driver_compile_id(driver)
-        module_name = driver_module_name(driver)
-        library = driver_library_filename(driver)
-        driver_hash = _hash_entries(
-            [
-                ("runtime_contract", runtime_contract_hash.encode("utf-8")),
-                (
-                    f"driver_plugin/{module_name}.nim",
-                    source_root / "src" / "driver_plugins" / f"plugin_{module_name}.nim",
-                ),
-                ("module_build_epoch", str(COMPILED_MODULE_BUILD_EPOCH).encode("utf-8")),
-                *_driver_source_entries(source_root, driver),
-            ],
-        )
-        driver_hashes[driver_id] = DriverCompileState(hash=driver_hash, library=library)
+    if use_compiled_plugins:
+        for driver in loadable_runtime_drivers:
+            driver_id = driver_compile_id(driver)
+            module_name = driver_module_name(driver)
+            library = driver_library_filename(driver)
+            driver_hash = _hash_entries(
+                [
+                    ("runtime_contract", runtime_contract_hash.encode("utf-8")),
+                    (
+                        f"driver_plugin/{module_name}.nim",
+                        source_root / "src" / "driver_plugins" / f"plugin_{module_name}.nim",
+                    ),
+                    ("module_build_epoch", str(COMPILED_MODULE_BUILD_EPOCH).encode("utf-8")),
+                    *_driver_source_entries(source_root, driver),
+                ],
+            )
+            driver_hashes[driver_id] = DriverCompileState(hash=driver_hash, library=library)
 
     return CompileManifest(
         version=MANIFEST_VERSION,

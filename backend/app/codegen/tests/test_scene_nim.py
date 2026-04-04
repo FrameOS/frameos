@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from app.codegen.scene_nim import write_scene_nim, write_scene_plugin_nim
+from app.codegen.scene_nim import write_scene_nim, write_scene_plugin_nim, write_scenes_nim
 
 
 def test_write_scene_nim_uses_module_name_for_compiled_child_scene_imports(
@@ -48,3 +48,19 @@ def test_write_scene_plugin_nim_exports_runtime_channel_binder():
     assert "proc bindCompiledPluginRuntimeChannels*(hooks: ptr CompiledRuntimeHooks)" in source
     assert "bindCompiledRuntimeHooks(hooks)" in source
     assert 'id: "demo-scene".SceneId' in source
+
+
+def test_write_scenes_nim_can_emit_metadata_without_linking_scene_modules():
+    frame = SimpleNamespace(
+        scenes=[
+            {"id": "default", "name": "Default Scene", "default": True, "settings": {"execution": "compiled"}},
+            {"id": "interpreted", "name": "Interpreted", "settings": {"execution": "interpreted"}},
+        ]
+    )
+
+    source = write_scenes_nim(frame, compile_into_binary=False)
+
+    assert 'let defaultSceneId* = some("default".SceneId)' in source
+    assert '("default".SceneId, "Default Scene"),' in source
+    assert "import scenes/scene_default" not in source
+    assert 'result["default".SceneId]' not in source
