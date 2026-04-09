@@ -27,6 +27,10 @@
         "pkg-path": "gnumake",
         "outputs": "all"
       },
+      "libffi": {
+        "pkg-path": "libffi",
+        "outputs": "all"
+      },
       "nim": {
         "pkg-path": "nim"
       },
@@ -65,7 +69,7 @@
       "PYTHONDONTWRITEBYTECODE": "1"
     },
     "hook": {
-      "on-activate": "  set -euo pipefail\n\n  cd \"$FLOX_ENV_PROJECT\"\n\n  export VIRTUAL_ENV=\"$FLOX_ENV_PROJECT/.venv\"\n  export FRAMEOS_FLOX_CACHE_DIR=\"$FLOX_ENV_PROJECT/.flox/cache\"\n  export FRAMEOS_FLOX_REDIS_DIR=\"$FLOX_ENV_PROJECT/.flox/redis\"\n\n  nvm_dir=\"${NVM_DIR:-$HOME/.nvm}\"\n  cleaned_path=\"\"\n  old_ifs=$IFS\n  IFS=:\n  for path_entry in $PATH; do\n    case \"$path_entry\" in\n      \"$FLOX_ENV/bin\"|\"$VIRTUAL_ENV/bin\"|\"$nvm_dir\"/*/bin|\"${NVM_BIN:-__frameos_no_nvm_bin__}\")\n        continue\n        ;;\n      *)\n        cleaned_path=\"${cleaned_path:+$cleaned_path:}$path_entry\"\n        ;;\n    esac\n  done\n  IFS=\"$old_ifs\"\n\n  unset NVM_BIN NVM_INC\n  export PATH=\"$VIRTUAL_ENV/bin:$FLOX_ENV/bin${cleaned_path:+:$cleaned_path}\"\n\n  mkdir -p \"$FRAMEOS_FLOX_CACHE_DIR\" \"$FRAMEOS_FLOX_REDIS_DIR\"\n\n  new_venv=0\n  if [ ! -d \"$VIRTUAL_ENV\" ]; then\n    python -m venv \"$VIRTUAL_ENV\"\n    new_venv=1\n  fi\n\n  if ! \"$VIRTUAL_ENV/bin/python\" -m pip --version >/dev/null 2>&1; then\n    \"$VIRTUAL_ENV/bin/python\" -m ensurepip --upgrade\n  fi\n\n  if [ \"$new_venv\" -eq 1 ]; then\n    rm -f \"$FRAMEOS_FLOX_CACHE_DIR/python-requirements.sha256\"\n  fi\n\n  python_requirements_hash=\"$(sha256sum backend/requirements.txt | awk '{print $1}')\"\n  python_stamp=\"$FRAMEOS_FLOX_CACHE_DIR/python-requirements.sha256\"\n  if [ ! -f \"$python_stamp\" ] || [ \"$(cat \"$python_stamp\")\" != \"$python_requirements_hash\" ]; then\n    echo \"Syncing backend Python dependencies...\"\n    \"$VIRTUAL_ENV/bin/python\" -m pip install --upgrade pip setuptools wheel\n    \"$VIRTUAL_ENV/bin/python\" -m pip install -r backend/requirements.txt\n    printf '%s' \"$python_requirements_hash\" > \"$python_stamp\"\n  fi\n\n  js_workspace_hash=\"$(\n    sha256sum \\\n      package.json \\\n      pnpm-lock.yaml \\\n      pnpm-workspace.yaml \\\n      frontend/package.json \\\n      frameos/frontend/package.json \\\n    | sha256sum | awk '{print $1}'\n  )\"\n  js_stamp=\"$FRAMEOS_FLOX_CACHE_DIR/pnpm-workspace.sha256\"\n  if [ ! -f node_modules/.modules.yaml ] || [ ! -f \"$js_stamp\" ] || [ \"$(cat \"$js_stamp\")\" != \"$js_workspace_hash\" ]; then\n    echo \"Syncing pnpm workspace dependencies...\"\n    pnpm install --frozen-lockfile\n    printf '%s' \"$js_workspace_hash\" > \"$js_stamp\"\n  fi\n\n  frameos_nim_hash=\"$(sha256sum frameos/frameos.nimble | awk '{print $1}')\"\n  frameos_nim_stamp=\"$FRAMEOS_FLOX_CACHE_DIR/frameos-nim.sha256\"\n  if [ ! -f frameos/nimble.paths ] || [ ! -f \"$frameos_nim_stamp\" ] || [ \"$(cat \"$frameos_nim_stamp\")\" != \"$frameos_nim_hash\" ]; then\n    echo \"Syncing FrameOS Nim dependencies...\"\n    (\n      cd frameos\n      nimble install -dy\n    )\n    printf '%s' \"$frameos_nim_hash\" > \"$frameos_nim_stamp\"\n  fi\n\n  agent_nim_hash=\"$(sha256sum frameos/agent/frameos_agent.nimble | awk '{print $1}')\"\n  agent_nim_stamp=\"$FRAMEOS_FLOX_CACHE_DIR/frameos-agent-nim.sha256\"\n  if [ ! -f frameos/agent/nimble.paths ] || [ ! -f \"$agent_nim_stamp\" ] || [ \"$(cat \"$agent_nim_stamp\")\" != \"$agent_nim_hash\" ]; then\n    echo \"Syncing FrameOS agent Nim dependencies...\"\n    (\n      cd frameos/agent\n      nimble install -dy\n    )\n    printf '%s' \"$agent_nim_hash\" > \"$agent_nim_stamp\"\n  fi\n"
+      "on-activate": "  set -euo pipefail\n\n  cd \"$FLOX_ENV_PROJECT\"\n\n  export VIRTUAL_ENV=\"$FLOX_ENV_PROJECT/.venv\"\n  export FRAMEOS_FLOX_CACHE_DIR=\"$FLOX_ENV_PROJECT/.flox/cache\"\n  export FRAMEOS_FLOX_REDIS_DIR=\"$FLOX_ENV_PROJECT/.flox/redis\"\n\n  nvm_dir=\"${NVM_DIR:-$HOME/.nvm}\"\n  cleaned_path=\"\"\n  old_ifs=$IFS\n  IFS=:\n  for path_entry in $PATH; do\n    case \"$path_entry\" in\n      \"$FLOX_ENV/bin\"|\"$VIRTUAL_ENV/bin\"|\"$nvm_dir\"/*/bin|\"${NVM_BIN:-__frameos_no_nvm_bin__}\")\n        continue\n        ;;\n      *)\n        cleaned_path=\"${cleaned_path:+$cleaned_path:}$path_entry\"\n        ;;\n    esac\n  done\n  IFS=\"$old_ifs\"\n\n  unset NVM_BIN NVM_INC\n  export PATH=\"$VIRTUAL_ENV/bin:$FLOX_ENV/bin${cleaned_path:+:$cleaned_path}\"\n\n  # Rebuild toolchain flags from this environment. Inherited values from\n  # another Flox/Nix shell can point compilers at the wrong project.\n  export CPATH=\"$FLOX_ENV/include\"\n  export CPPFLAGS=\"-I$FLOX_ENV/include\"\n  export LDFLAGS=\"-L$FLOX_ENV/lib\"\n  export LIBRARY_PATH=\"$FLOX_ENV/lib\"\n  export PKG_CONFIG_PATH=\"$FLOX_ENV/lib/pkgconfig:$FLOX_ENV/share/pkgconfig\"\n\n  mkdir -p \"$FRAMEOS_FLOX_CACHE_DIR\" \"$FRAMEOS_FLOX_REDIS_DIR\"\n\n  new_venv=0\n  if [ ! -d \"$VIRTUAL_ENV\" ]; then\n    python -m venv \"$VIRTUAL_ENV\"\n    new_venv=1\n  fi\n\n  if ! \"$VIRTUAL_ENV/bin/python\" -m pip --version >/dev/null 2>&1; then\n    \"$VIRTUAL_ENV/bin/python\" -m ensurepip --upgrade\n  fi\n\n  if [ \"$new_venv\" -eq 1 ]; then\n    rm -f \"$FRAMEOS_FLOX_CACHE_DIR/python-requirements.sha256\"\n  fi\n\n  python_requirements_hash=\"$(sha256sum backend/requirements.txt | awk '{print $1}')\"\n  python_stamp=\"$FRAMEOS_FLOX_CACHE_DIR/python-requirements.sha256\"\n  if [ ! -f \"$python_stamp\" ] || [ \"$(cat \"$python_stamp\")\" != \"$python_requirements_hash\" ]; then\n    echo \"Syncing backend Python dependencies...\"\n    \"$VIRTUAL_ENV/bin/python\" -m pip install --upgrade pip setuptools wheel\n    \"$VIRTUAL_ENV/bin/python\" -m pip install -r backend/requirements.txt\n    printf '%s' \"$python_requirements_hash\" > \"$python_stamp\"\n  fi\n\n  js_workspace_hash=\"$(\n    sha256sum \\\n      package.json \\\n      pnpm-lock.yaml \\\n      pnpm-workspace.yaml \\\n      frontend/package.json \\\n      frameos/frontend/package.json \\\n    | sha256sum | awk '{print $1}'\n  )\"\n  js_stamp=\"$FRAMEOS_FLOX_CACHE_DIR/pnpm-workspace.sha256\"\n  if [ ! -f node_modules/.modules.yaml ] || [ ! -f \"$js_stamp\" ] || [ \"$(cat \"$js_stamp\")\" != \"$js_workspace_hash\" ]; then\n    echo \"Syncing pnpm workspace dependencies...\"\n    pnpm install --frozen-lockfile\n    printf '%s' \"$js_workspace_hash\" > \"$js_stamp\"\n  fi\n\n  frameos_nim_hash=\"$(sha256sum frameos/frameos.nimble | awk '{print $1}')\"\n  frameos_nim_stamp=\"$FRAMEOS_FLOX_CACHE_DIR/frameos-nim.sha256\"\n  if [ ! -f frameos/nimble.paths ] || [ ! -f \"$frameos_nim_stamp\" ] || [ \"$(cat \"$frameos_nim_stamp\")\" != \"$frameos_nim_hash\" ]; then\n    echo \"Syncing FrameOS Nim dependencies...\"\n    (\n      cd frameos\n      nimble install -dy\n    )\n    printf '%s' \"$frameos_nim_hash\" > \"$frameos_nim_stamp\"\n  fi\n\n  agent_nim_hash=\"$(sha256sum frameos/agent/frameos_agent.nimble | awk '{print $1}')\"\n  agent_nim_stamp=\"$FRAMEOS_FLOX_CACHE_DIR/frameos-agent-nim.sha256\"\n  if [ ! -f frameos/agent/nimble.paths ] || [ ! -f \"$agent_nim_stamp\" ] || [ \"$(cat \"$agent_nim_stamp\")\" != \"$agent_nim_hash\" ]; then\n    echo \"Syncing FrameOS agent Nim dependencies...\"\n    (\n      cd frameos/agent\n      nimble install -dy\n    )\n    printf '%s' \"$agent_nim_hash\" > \"$agent_nim_stamp\"\n  fi\n"
     },
     "profile": {
       "bash": "  # Rebuild PATH so the repo venv wins over Flox's base Python.\n  nvm_dir=\"${NVM_DIR:-$HOME/.nvm}\"\n  cleaned_path=\"\"\n  old_ifs=$IFS\n  IFS=:\n  for path_entry in $PATH; do\n    case \"$path_entry\" in\n      \"$FLOX_ENV/bin\"|\"$FLOX_ENV/sbin\"|\"$VIRTUAL_ENV/bin\"|\"$nvm_dir\"/*/bin|\"${NVM_BIN:-__frameos_no_nvm_bin__}\")\n        continue\n        ;;\n      *)\n        cleaned_path=\"${cleaned_path:+$cleaned_path:}$path_entry\"\n        ;;\n    esac\n  done\n  IFS=\"$old_ifs\"\n\n  unset NVM_BIN NVM_INC\n  export PATH=\"$VIRTUAL_ENV/bin:$FLOX_ENV/bin:$FLOX_ENV/sbin${cleaned_path:+:$cleaned_path}\"\n  hash -r 2>/dev/null || true\n",
@@ -201,6 +205,7 @@
       "unfree": false,
       "version": "3.117",
       "outputs_to_install": [
+        "out",
         "out",
         "out"
       ],
@@ -895,6 +900,147 @@
       "priority": 5
     },
     {
+      "attr_path": "libffi",
+      "broken": false,
+      "derivation": "/nix/store/jqsiryypa4npi7wdckfm0rki2klzfmjc-libffi-40.drv",
+      "description": "Foreign function call interface library",
+      "install_id": "libffi",
+      "license": "MIT",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=88d3861acdd3d2f0e361767018218e51810df8a1",
+      "name": "libffi-40",
+      "pname": "libffi",
+      "rev": "88d3861acdd3d2f0e361767018218e51810df8a1",
+      "rev_count": 931542,
+      "rev_date": "2026-01-21T18:02:10Z",
+      "scrape_date": "2026-01-23T04:32:46.936193Z",
+      "stabilities": [
+        "unstable",
+        "staging"
+      ],
+      "unfree": false,
+      "version": "40",
+      "outputs_to_install": [
+        "man",
+        "out",
+        "out"
+      ],
+      "outputs": {
+        "dev": "/nix/store/cxh0i7j48mqd8xrf9x30flmbwh935pwz-libffi-40-dev",
+        "info": "/nix/store/88qr9mii1y93cwqhrps3zw1rg558zbhc-libffi-40-info",
+        "man": "/nix/store/6p378plkz1m461k3hvm37qj3xy3a9agp-libffi-40-man",
+        "out": "/nix/store/n8ylivq3rz4dai1yfrf71xqc2fyvwrcn-libffi-40"
+      },
+      "system": "aarch64-darwin",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "libffi",
+      "broken": false,
+      "derivation": "/nix/store/3ji1zhbf5izfaiz4qa6zr7b69v94ipbd-libffi-3.5.2.drv",
+      "description": "Foreign function call interface library",
+      "install_id": "libffi",
+      "license": "MIT",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=88d3861acdd3d2f0e361767018218e51810df8a1",
+      "name": "libffi-3.5.2",
+      "pname": "libffi",
+      "rev": "88d3861acdd3d2f0e361767018218e51810df8a1",
+      "rev_count": 931542,
+      "rev_date": "2026-01-21T18:02:10Z",
+      "scrape_date": "2026-01-23T05:12:56.752333Z",
+      "stabilities": [
+        "unstable",
+        "staging"
+      ],
+      "unfree": false,
+      "version": "3.5.2",
+      "outputs_to_install": [
+        "man",
+        "out",
+        "out"
+      ],
+      "outputs": {
+        "dev": "/nix/store/6i335i928ynvs8sggipn8yb10c6q4kr6-libffi-3.5.2-dev",
+        "info": "/nix/store/7n45mri13mdsvwx5amp8lc7p6b3v7j8x-libffi-3.5.2-info",
+        "man": "/nix/store/2n3zq6bqpvy8hl056ssfy23xcyhvl8l8-libffi-3.5.2-man",
+        "out": "/nix/store/x6vk48m697jal2blaqv3d0swlh7nwqdj-libffi-3.5.2"
+      },
+      "system": "aarch64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "libffi",
+      "broken": false,
+      "derivation": "/nix/store/4hkyycfyg96sjv3746ajn2iphc4lmkaj-libffi-40.drv",
+      "description": "Foreign function call interface library",
+      "install_id": "libffi",
+      "license": "MIT",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=88d3861acdd3d2f0e361767018218e51810df8a1",
+      "name": "libffi-40",
+      "pname": "libffi",
+      "rev": "88d3861acdd3d2f0e361767018218e51810df8a1",
+      "rev_count": 931542,
+      "rev_date": "2026-01-21T18:02:10Z",
+      "scrape_date": "2026-01-23T05:49:53.492486Z",
+      "stabilities": [
+        "unstable",
+        "staging"
+      ],
+      "unfree": false,
+      "version": "40",
+      "outputs_to_install": [
+        "man",
+        "out"
+      ],
+      "outputs": {
+        "dev": "/nix/store/a3yqa0mhvwyvs0dj1lvqalmcaflq4myn-libffi-40-dev",
+        "info": "/nix/store/07gk00xr019vzpzpw077hz866apg3qn8-libffi-40-info",
+        "man": "/nix/store/199gqf8lvj02cvqcfsl6nsdzs1qhjrfc-libffi-40-man",
+        "out": "/nix/store/dwvj0hab3zcjky08rl79qjzhqclyx2dw-libffi-40"
+      },
+      "system": "x86_64-darwin",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "libffi",
+      "broken": false,
+      "derivation": "/nix/store/m7hrbyjc35ppzbh35vq792zhppmpzijr-libffi-3.5.2.drv",
+      "description": "Foreign function call interface library",
+      "install_id": "libffi",
+      "license": "MIT",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=88d3861acdd3d2f0e361767018218e51810df8a1",
+      "name": "libffi-3.5.2",
+      "pname": "libffi",
+      "rev": "88d3861acdd3d2f0e361767018218e51810df8a1",
+      "rev_count": 931542,
+      "rev_date": "2026-01-21T18:02:10Z",
+      "scrape_date": "2026-01-23T06:36:18.796207Z",
+      "stabilities": [
+        "unstable",
+        "staging"
+      ],
+      "unfree": false,
+      "version": "3.5.2",
+      "outputs_to_install": [
+        "man",
+        "out",
+        "out",
+        "out",
+        "out"
+      ],
+      "outputs": {
+        "dev": "/nix/store/ad2zpdj63hrnl90r01w9573m56gbkrh9-libffi-3.5.2-dev",
+        "info": "/nix/store/5fj273c9ghrlrx2wgbgfi2afy1kvxyvi-libffi-3.5.2-info",
+        "man": "/nix/store/82gd42pa0x907j2pk42fxa8332z74bys-libffi-3.5.2-man",
+        "out": "/nix/store/1z031fwbsc8jhmm7i39r6z6m1xn7rbza-libffi-3.5.2"
+      },
+      "system": "x86_64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
       "attr_path": "nim",
       "broken": false,
       "derivation": "/nix/store/399dyz6p7vahvjvydk1zabpi8wq2ja0v-arm64-apple-darwin-nim-wrapper-2.2.4.drv",
@@ -1391,6 +1537,7 @@
       "unfree": false,
       "version": "3.6.0",
       "outputs_to_install": [
+        "bin",
         "bin",
         "bin",
         "man"
