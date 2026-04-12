@@ -31,6 +31,9 @@ class FakeDeployer:
         if command.startswith('dpkg -l | grep -q "^ii  '):
             package_name = command.split("^ii  ", 1)[1].split(" ", 1)[0].strip('"')
             return 0 if package_name in self.installed_packages else 1
+        if command.startswith("test -f "):
+            path = command.removeprefix("test -f ").strip("'")
+            return 0 if path in self.existing_paths else 1
         if command.startswith("test -e "):
             path = command.removeprefix("test -e ").strip("'")
             return 0 if path in self.existing_paths else 1
@@ -89,6 +92,7 @@ async def test_full_plan_reports_installed_state_and_remote_build_dependencies(m
         rpios={"crossCompilation": "auto"},
         reboot=None,
         last_successful_deploy={"frameos_version": "9.9.9"},
+        last_successful_deploy_at="2026-01-01T00:00:00+00:00",
         to_dict=lambda: {"id": 7, "name": "Office"},
     )
     deployer = FakeDeployer(
@@ -121,3 +125,68 @@ async def test_full_plan_reports_installed_state_and_remote_build_dependencies(m
     assert package_map["custom-app-pkg"].installed is False
     assert package_map["python3-pip"].installed is True
     assert plan.full_deploy.package_alternatives[0].installed_package == "ntp"
+    assert plan.full_deploy.post_deploy["spi_action"] == "unchanged"
+    assert plan.full_deploy.post_deploy["disable_caddy_service"] is True
+    assert plan.full_deploy.post_deploy["final_action"] == "restart_frameos"
+
+
+@pytest.mark.asyncio
+async def test_full_plan_includes_post_deploy_driver_and_reboot_steps(monkeypatch: pytest.MonkeyPatch):
+    frame = SimpleNamespace(
+        id=8,
+        name="DriverFrame",
+        rpios={"crossCompilation": "auto"},
+        reboot={"enabled": "true", "crontab": "5 4 * * *", "type": "raspberry"},
+        last_successful_deploy_at=None,
+        last_successful_deploy={"frameos_version": "9.9.9"},
+        to_dict=lambda: {"id": 8, "name": "DriverFrame"},
+    )
+    deployer = FakeDeployer(existing_paths={"/boot/firmware/config.txt"})
+
+    monkeypatch.setattr(
+        "app.tasks.frame_deploy_workflow.drivers_for_frame",
+        lambda _frame: {
+            "i2c": SimpleNamespace(),
+            "spi": SimpleNamespace(),
+            "bootconfig": SimpleNamespace(lines=["dtoverlay=vc4-kms-v3d", "#dtoverlay=old-setting"]),
+        },
+    )
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.get_settings_dict", lambda _db: {})
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.select_ssh_keys_for_frame", lambda _frame, _settings: [])
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.normalize_ssh_keys", lambda _settings: [])
+
+    class LowMemoryBinaryBuilder(FakeBinaryBuilder):
+        async def plan_build(self, **_kwargs) -> FrameBinaryPlan:
+            return await super().plan_build(**_kwargs)
+
+    class LowMemoryDeployer(FakeDeployer):
+        async def get_total_memory_mb(self) -> int:
+            return 256
+
+    workflow = FrameDeployWorkflow(
+        db=None,
+        redis=None,
+        frame=frame,
+        deployer=LowMemoryDeployer(existing_paths={"/boot/firmware/config.txt"}),
+        temp_dir="",
+        binary_builder=LowMemoryBinaryBuilder(),
+    )
+
+    plan = await workflow.plan("full")
+
+    assert plan.full_deploy is not None
+    post_deploy = plan.full_deploy.post_deploy
+    assert post_deploy["boot_config_path"] == "/boot/firmware/config.txt"
+    assert post_deploy["enable_i2c"] is True
+    assert post_deploy["spi_action"] == "enable"
+    assert post_deploy["low_memory_masks_apt_daily"] is True
+    assert post_deploy["reboot_schedule"] == {
+        "enabled": True,
+        "crontab": "5 4 * * *",
+        "type": "raspberry",
+        "command": "/sbin/shutdown -r now",
+    }
+    assert post_deploy["bootconfig_lines"] == ["dtoverlay=vc4-kms-v3d", "#dtoverlay=old-setting"]
+    assert post_deploy["disable_userconfig"] is True
+    assert post_deploy["disable_caddy_service"] is True
+    assert post_deploy["final_action"] == "reboot"

@@ -34,7 +34,11 @@ export function Frame(props: FrameSceneProps) {
     requiresRecompilation,
     deployWithAgent,
     unsavedChangeDetails,
-    undeployedChangeDetails,
+    undeployedSummaryItems,
+    fastDeployPlanSummary,
+    fullDeployPlanSummary,
+    deployPlansLoading,
+    deployPlansError,
   } = useValues(frameLogic(frameLogicProps))
   const {
     saveFrame,
@@ -50,6 +54,7 @@ export function Frame(props: FrameSceneProps) {
     setDeployWithAgent,
     resetUnsavedChanges,
     resetUndeployedChanges,
+    loadDeployPlans,
   } = useActions(frameLogic(frameLogicProps))
   useMountedLogic(assetsLogic(frameLogicProps)) // Don't lose what we downloaded when navigating away from the tab
   useMountedLogic(terminalLogic(frameLogicProps))
@@ -206,7 +211,9 @@ export function Frame(props: FrameSceneProps) {
                   <Popover className="relative pr-2 text-[#9a9ad0] flex items-center">
                     {({ open }) => (
                       <>
-                        <Popover.Button className="underline underline-offset-2">Undeployed changes</Popover.Button>
+                        <Popover.Button className="underline underline-offset-2" onClick={() => loadDeployPlans()}>
+                          Undeployed changes
+                        </Popover.Button>
                         <Transition
                           show={open}
                           enter="transition ease-out duration-100"
@@ -218,7 +225,9 @@ export function Frame(props: FrameSceneProps) {
                         >
                           <Popover.Panel className="absolute right-0 top-7 z-50 min-w-96 max-w-[38rem] rounded-md border border-gray-700 bg-gray-900 p-3 shadow-lg">
                             <div className="mb-2 flex items-center justify-between gap-3">
-                              <div className="text-xs text-gray-300">Not yet deployed</div>
+                              <div className="text-xs text-gray-300">
+                                {frame.last_successful_deploy_at ? 'Undeployed changes' : 'Not yet deployed'}
+                              </div>
                               <Button
                                 color="secondary"
                                 size="small"
@@ -228,21 +237,57 @@ export function Frame(props: FrameSceneProps) {
                                 Reset changes
                               </Button>
                             </div>
-                            <ul className="space-y-1 text-sm text-gray-100">
-                              {undeployedChangeDetails.map((change, index) => (
-                                <li
-                                  key={`${change.label}-${index}`}
-                                  className="flex items-center justify-between gap-3"
-                                >
-                                  <span>{change.label}</span>
-                                  {change.requiresFullDeploy ? (
-                                    <span className="rounded bg-purple-700/40 px-2 py-0.5 text-[11px] text-purple-100">
-                                      Full deploy
-                                    </span>
-                                  ) : null}
-                                </li>
-                              ))}
-                            </ul>
+                            <div className="space-y-4 text-sm text-gray-100">
+                              <div>
+                                <div className="mb-2 text-xs text-gray-400">Changes</div>
+                                <ul className="space-y-1">
+                                  {undeployedSummaryItems.map((item, index) => (
+                                    <li key={`${item.label}-${index}`} className="flex items-center justify-between gap-3">
+                                      <span>{item.label}</span>
+                                      <span className="text-right text-gray-300">{item.value}</span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+
+                              <div>
+                                <div className="mb-2 text-xs text-gray-400">Fast deploy plan</div>
+                                {deployPlansLoading ? (
+                                  <div className="text-gray-400">Loading…</div>
+                                ) : fastDeployPlanSummary.length > 0 ? (
+                                  <ul className="space-y-1">
+                                    {fastDeployPlanSummary.map((item, index) => (
+                                      <li key={`fast-${item.label}-${index}`} className="flex items-center justify-between gap-3">
+                                        <span>{item.label}</span>
+                                        <span className="text-right text-gray-300">{item.value}</span>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                ) : (
+                                  <div className="text-gray-400">Unavailable</div>
+                                )}
+                              </div>
+
+                              <div>
+                                <div className="mb-2 text-xs text-gray-400">Full deploy plan</div>
+                                {deployPlansLoading ? (
+                                  <div className="text-gray-400">Loading…</div>
+                                ) : fullDeployPlanSummary.length > 0 ? (
+                                  <ul className="space-y-1">
+                                    {fullDeployPlanSummary.map((item, index) => (
+                                      <li key={`full-${item.label}-${index}`} className="flex items-center justify-between gap-3">
+                                        <span>{item.label}</span>
+                                        <span className="text-right text-gray-300">{item.value}</span>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                ) : (
+                                  <div className="text-gray-400">Unavailable</div>
+                                )}
+                              </div>
+
+                              {deployPlansError ? <div className="text-red-300">{deployPlansError}</div> : null}
+                            </div>
                           </Popover.Panel>
                         </Transition>
                       </>

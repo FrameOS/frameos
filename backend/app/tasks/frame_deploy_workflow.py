@@ -101,6 +101,7 @@ class FullDeployPlan:
     quickjs_installed: bool = False
     selected_public_keys: list[str] = field(default_factory=list)
     known_public_keys: list[str] = field(default_factory=list)
+    post_deploy: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -120,6 +121,7 @@ class FullDeployPlan:
                 "installed": self.quickjs_installed,
             },
             "selected_ssh_key_count": len(self.selected_public_keys),
+            "post_deploy": self.post_deploy,
         }
 
 
@@ -345,6 +347,8 @@ class FrameDeployWorkflow:
         else:
             notes.append("No SSH public keys selected for deployment.")
 
+        post_deploy = await self._plan_post_deploy_cleanup(drivers=drivers, low_memory=low_memory)
+
         return FrameDeployPlan(
             mode="full",
             frame_id=int(self.frame.id),
@@ -371,6 +375,7 @@ class FrameDeployWorkflow:
                 quickjs_installed=quickjs_installed,
                 selected_public_keys=selected_public_keys,
                 known_public_keys=known_public_keys,
+                post_deploy=post_deploy,
             ),
             notes=notes,
         )
@@ -667,6 +672,42 @@ class FrameDeployWorkflow:
             await self.deployer.exec_command("sudo systemctl daemon-reload")
             await self.deployer.log("stdinfo", f"{icon} Deployed! Restarting FrameOS")
             await self.deployer.restart_service("frameos")
+
+    async def _plan_post_deploy_cleanup(self, *, drivers: dict[str, Any], low_memory: bool) -> dict[str, Any]:
+        boot_config = "/boot/config.txt"
+        if await self.deployer.exec_command("test -f /boot/firmware/config.txt", raise_on_error=False) == 0:
+            boot_config = "/boot/firmware/config.txt"
+
+        bootconfig_lines = list((drivers.get("bootconfig").lines or [])) if drivers.get("bootconfig") else []
+        last_successful_deploy_at = getattr(self.frame, "last_successful_deploy_at", None)
+        must_reboot = bool(bootconfig_lines) or last_successful_deploy_at is None
+
+        reboot_schedule = None
+        if self.frame.reboot and self.frame.reboot.get("enabled") == "true":
+            cron_schedule = self.frame.reboot.get("crontab", "0 0 * * *")
+            reboot_type = self.frame.reboot.get("type")
+            reboot_schedule = {
+                "enabled": True,
+                "crontab": cron_schedule,
+                "type": reboot_type,
+                "command": "/sbin/shutdown -r now" if reboot_type == "raspberry" else "systemctl restart frameos.service",
+            }
+        else:
+            reboot_schedule = {
+                "enabled": False,
+            }
+
+        return {
+            "boot_config_path": boot_config,
+            "enable_i2c": bool(drivers.get("i2c")),
+            "spi_action": "enable" if drivers.get("spi") else "disable" if drivers.get("noSpi") else "unchanged",
+            "low_memory_masks_apt_daily": low_memory,
+            "reboot_schedule": reboot_schedule,
+            "bootconfig_lines": bootconfig_lines,
+            "disable_userconfig": last_successful_deploy_at is None,
+            "disable_caddy_service": True,
+            "final_action": "reboot" if must_reboot else "restart_frameos",
+        }
 
     async def _plan_package(self, name: str, reason: str, run_after_install: str | None = None) -> PackagePlan:
         installed = await self._is_package_installed(name)

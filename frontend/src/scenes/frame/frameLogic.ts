@@ -24,6 +24,68 @@ export interface ChangeDetail {
   requiresFullDeploy: boolean
 }
 
+export interface SummaryItem {
+  label: string
+  value: string
+}
+
+export interface FastDeployPlanResponse {
+  reload_supported: boolean
+  tls_settings_changed: boolean
+  action: string
+}
+
+export interface FullDeployPlanResponse {
+  target: {
+    arch: string
+    distro: string
+    version: string
+    total_memory_mb: number
+  }
+  low_memory: boolean
+  drivers: string[]
+  binary: {
+    will_attempt_cross_compile?: boolean
+    cross_compile_supported?: boolean
+    build_host_configured?: boolean
+    prebuilt_target?: string | null
+    has_prebuilt_entry?: boolean
+  }
+  packages: {
+    name: string
+    reason: string
+    installed: boolean
+    needs_install: boolean
+  }[]
+  package_alternatives: {
+    names: string[]
+    reason: string
+    installed_package?: string | null
+    satisfied: boolean
+  }[]
+  lgpio: {
+    required: boolean
+    installed: boolean
+  }
+  quickjs: {
+    required_if_remote_build: boolean
+    dirname?: string | null
+    installed: boolean
+  }
+  selected_ssh_key_count: number
+}
+
+export interface DeployPlanResponse {
+  mode: 'fast' | 'full'
+  frame_id: number
+  frame_name: string
+  build_id: string
+  previous_frameos_version?: string | null
+  notes: string[]
+  fast_deploy?: FastDeployPlanResponse | null
+  full_deploy?: FullDeployPlanResponse | null
+}
+
 const DEFAULT_BROWSER_TITLE = 'FrameOS Backend'
 const CURRENT_FRAMEOS_VERSION = (versions.frameos || 'dev').split('+')[0]
 
@@ -117,6 +179,7 @@ const FRAME_KEY_LABELS: Partial<Record<keyof FrameType, string>> = {
   server_host: 'Server host',
   server_port: 'Server port',
   server_api_key: 'Server API key',
+  server_send_logs: 'Server Send Logs',
   width: 'Width',
   height: 'Height',
   color: 'Color support',
@@ -144,6 +207,40 @@ const FRAME_KEY_LABELS: Partial<Record<keyof FrameType, string>> = {
   buildroot: 'Buildroot settings',
   rpios: 'Raspberry Pi OS settings',
 }
+
+const DEPLOYMENT_SUMMARY_KEYS: (keyof FrameType)[] = [
+  'name',
+  'mode',
+  'frame_host',
+  'frame_port',
+  'frame_access_key',
+  'frame_access',
+  'frame_admin_auth',
+  'https_proxy',
+  'ssh_user',
+  'ssh_pass',
+  'ssh_port',
+  'ssh_keys',
+  'server_host',
+  'server_port',
+  'server_api_key',
+  'server_send_logs',
+  'width',
+  'height',
+  'color',
+  'device',
+  'device_config',
+  'interval',
+  'metrics_interval',
+  'scaling_mode',
+  'rotate',
+  'flip',
+  'background_color',
+  'debug',
+  'log_to_file',
+  'assets_path',
+  'save_assets',
+]
 
 function keyLabel(key: keyof FrameType): string {
   return FRAME_KEY_LABELS[key] ?? key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
@@ -249,6 +346,175 @@ function normalizeFrameKeyValueForComparison(key: keyof FrameType, value: unknow
 
 function frameKeyEqual(key: keyof FrameType, previous: unknown, next: unknown): boolean {
   return equal(normalizeFrameKeyValueForComparison(key, previous), normalizeFrameKeyValueForComparison(key, next))
+}
+
+function summarizeSecret(value: unknown): string {
+  return value ? 'Configured' : 'Not set'
+}
+
+function stringifyList(values: unknown[]): string {
+  if (values.length === 0) {
+    return 'None'
+  }
+  return values.map((value) => String(value)).join(', ')
+}
+
+function summarizeFrameFieldValue(key: keyof FrameType, value: unknown): string {
+  if (value === null || value === undefined || value === '') {
+    return 'Not set'
+  }
+
+  switch (key) {
+    case 'frame_access_key':
+    case 'server_api_key':
+    case 'ssh_pass':
+      return summarizeSecret(value)
+    case 'mode':
+      return value === 'buildroot' ? 'Buildroot' : 'Raspberry Pi OS'
+    case 'frame_admin_auth': {
+      const auth = value as FrameType['frame_admin_auth']
+      if (!auth?.enabled) {
+        return 'Disabled'
+      }
+      return auth.user ? `Enabled (${auth.user})` : 'Enabled'
+    }
+    case 'https_proxy': {
+      const proxy = value as FrameType['https_proxy']
+      if (!proxy?.enable) {
+        return 'Disabled'
+      }
+      const parts = [`Enabled on ${proxy.port || 8443}`]
+      if (proxy.expose_only_port) {
+        parts.push('port-only')
+      }
+      return parts.join(' · ')
+    }
+    case 'ssh_keys': {
+      const keys = Array.isArray(value) ? value : []
+      return keys.length > 0 ? `${keys.length} selected` : 'None'
+    }
+    case 'server_send_logs':
+    case 'debug':
+      return value ? 'Enabled' : 'Disabled'
+    case 'save_assets':
+      if (typeof value === 'boolean') {
+        return value ? 'Enabled' : 'Disabled'
+      }
+      if (value && typeof value === 'object') {
+        const enabledKeys = Object.entries(value as Record<string, boolean>)
+          .filter(([, enabled]) => Boolean(enabled))
+          .map(([app]) => app)
+        return enabledKeys.length > 0 ? stringifyList(enabledKeys) : 'Disabled'
+      }
+      return 'Disabled'
+    case 'device_config':
+      return value && typeof value === 'object' ? 'Configured' : 'Not set'
+    default:
+      return String(value)
+  }
+}
+
+function buildUndeployedSummaryItems(
+  previous: Partial<FrameType> | null | undefined,
+  next: Partial<FrameType> | null | undefined,
+  requiresRecompilation: boolean
+): SummaryItem[] {
+  const firstDeploy = !previous || Object.keys(previous).length === 0
+  const items: SummaryItem[] = [
+    {
+      label: 'Full deploy',
+      value: requiresRecompilation || firstDeploy ? 'Required' : 'Not required',
+    },
+  ]
+
+  for (const key of DEPLOYMENT_SUMMARY_KEYS) {
+    const nextValue = next?.[key]
+    const previousValue = previous?.[key]
+    const include = firstDeploy ? true : !frameKeyEqual(key, previousValue, nextValue)
+
+    if (!include) {
+      continue
+    }
+
+    items.push({
+      label: keyLabel(key),
+      value: summarizeFrameFieldValue(key, nextValue),
+    })
+  }
+
+  return items
+}
+
+function buildFastDeployPlanSummary(plan?: DeployPlanResponse | null): SummaryItem[] {
+  const fastPlan = plan?.fast_deploy
+  if (!fastPlan) {
+    return []
+  }
+
+  return [
+    { label: 'Action', value: fastPlan.action.replace(/_/g, ' ') },
+    { label: 'Reload supported', value: fastPlan.reload_supported ? 'Yes' : 'No' },
+    { label: 'TLS settings changed', value: fastPlan.tls_settings_changed ? 'Yes' : 'No' },
+  ]
+}
+
+function buildFullDeployPlanSummary(plan?: DeployPlanResponse | null): SummaryItem[] {
+  const fullPlan = plan?.full_deploy
+  if (!fullPlan) {
+    return []
+  }
+
+  const packagesToInstall = fullPlan.packages.filter((pkg) => pkg.needs_install).map((pkg) => pkg.name)
+  const alternatives = fullPlan.package_alternatives
+    .map((pkg) => pkg.installed_package || pkg.names.join(' / '))
+    .filter(Boolean)
+
+  return [
+    {
+      label: 'Target',
+      value: `${fullPlan.target.distro} ${fullPlan.target.version} · ${fullPlan.target.arch} · ${fullPlan.target.total_memory_mb} MiB`,
+    },
+    {
+      label: 'Build strategy',
+      value: fullPlan.binary.will_attempt_cross_compile ? 'Cross-compile when possible' : 'Build on device',
+    },
+    {
+      label: 'Drivers',
+      value: fullPlan.drivers.length > 0 ? stringifyList(fullPlan.drivers) : 'None',
+    },
+    {
+      label: 'Packages to install',
+      value: packagesToInstall.length > 0 ? stringifyList(packagesToInstall) : 'None',
+    },
+    {
+      label: 'Package alternatives',
+      value: alternatives.length > 0 ? stringifyList(alternatives) : 'None',
+    },
+    {
+      label: 'QuickJS',
+      value: fullPlan.quickjs.required_if_remote_build
+        ? fullPlan.quickjs.installed
+          ? `${fullPlan.quickjs.dirname || 'Configured'} already present`
+          : `${fullPlan.quickjs.dirname || 'Required'} will be prepared for remote build`
+        : 'Not needed for cross-compile path',
+    },
+    {
+      label: 'lgpio',
+      value: fullPlan.lgpio.required
+        ? fullPlan.lgpio.installed
+          ? 'Already installed'
+          : 'Will be installed'
+        : 'Not required',
+    },
+    {
+      label: 'SSH keys',
+      value: fullPlan.selected_ssh_key_count > 0 ? `${fullPlan.selected_ssh_key_count} selected` : 'None selected',
+    },
+    {
+      label: 'Low memory mode',
+      value: fullPlan.low_memory ? 'Yes' : 'No',
+    },
+  ]
 }
 
 async function resolveTemplateImageUrl(template: Partial<TemplateType>): Promise<string | null> {
@@ -476,6 +742,12 @@ export const frameLogic = kea<frameLogicType>([
     generateFrameAdminCredentials: true,
     generateTlsCertificates: true,
     verifyTlsCertificates: true,
+    loadDeployPlans: true,
+    loadDeployPlansSuccess: (fastPlan: DeployPlanResponse | null, fullPlan: DeployPlanResponse | null) => ({
+      fastPlan,
+      fullPlan,
+    }),
+    loadDeployPlansFailure: (error: string) => ({ error }),
   }),
   forms(({ values }) => ({
     frameForm: {
@@ -541,6 +813,32 @@ export const frameLogic = kea<frameLogicType>([
             agent: { ...frame.agent, deployWithAgent },
           }
         },
+      },
+    ],
+    deployPlans: [
+      {
+        fast: null as DeployPlanResponse | null,
+        full: null as DeployPlanResponse | null,
+      },
+      {
+        loadDeployPlans: () => ({ fast: null, full: null }),
+        loadDeployPlansSuccess: (_, { fastPlan, fullPlan }) => ({ fast: fastPlan, full: fullPlan }),
+      },
+    ],
+    deployPlansLoading: [
+      false,
+      {
+        loadDeployPlans: () => true,
+        loadDeployPlansSuccess: () => false,
+        loadDeployPlansFailure: () => false,
+      },
+    ],
+    deployPlansError: [
+      null as string | null,
+      {
+        loadDeployPlans: () => null,
+        loadDeployPlansSuccess: () => null,
+        loadDeployPlansFailure: (_, { error }) => error,
       },
     ],
   }),
@@ -631,6 +929,23 @@ export const frameLogic = kea<frameLogicType>([
         })
       }
     },
+    loadDeployPlans: async () => {
+      const [fastResponse, fullResponse] = await Promise.all([
+        apiFetch(`/api/frames/${values.frameId}/deploy_plan?mode=fast`),
+        apiFetch(`/api/frames/${values.frameId}/deploy_plan?mode=full`),
+      ])
+
+      if (!fastResponse.ok || !fullResponse.ok) {
+        actions.loadDeployPlansFailure('Failed to load deploy plans')
+        return
+      }
+
+      const [fastPlan, fullPlan] = (await Promise.all([fastResponse.json(), fullResponse.json()])) as [
+        DeployPlanResponse,
+        DeployPlanResponse,
+      ]
+      actions.loadDeployPlansSuccess(fastPlan, fullPlan)
+    },
   })),
   selectors(() => ({
     frameId: [() => [(_, props) => props.frameId], (frameId) => frameId],
@@ -687,6 +1002,21 @@ export const frameLogic = kea<frameLogicType>([
     requiresRecompilation: [
       (s) => [s.undeployedChangeDetails],
       (undeployedChangeDetails) => undeployedChangeDetails.some((change) => change.requiresFullDeploy),
+    ],
+    undeployedSummaryItems: [
+      (s) => [s.lastDeploy, s.frame, s.requiresRecompilation, s.isFrameAdminMode],
+      (lastDeploy, frame, requiresRecompilation, isFrameAdminMode): SummaryItem[] =>
+        isFrameAdminMode ? [] : buildUndeployedSummaryItems(lastDeploy, frame, requiresRecompilation),
+    ],
+    fastDeployPlan: [(s) => [s.deployPlans], (deployPlans) => deployPlans.fast],
+    fullDeployPlan: [(s) => [s.deployPlans], (deployPlans) => deployPlans.full],
+    fastDeployPlanSummary: [
+      (s) => [s.fastDeployPlan],
+      (fastDeployPlan): SummaryItem[] => buildFastDeployPlanSummary(fastDeployPlan),
+    ],
+    fullDeployPlanSummary: [
+      (s) => [s.fullDeployPlan],
+      (fullDeployPlan): SummaryItem[] => buildFullDeployPlanSummary(fullDeployPlan),
     ],
     defaultScene: [
       (s) => [s.frame, s.frameForm],
