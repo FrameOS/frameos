@@ -8,7 +8,8 @@ import { ButtonProps, buttonColor } from './Button'
 import { Spinner } from './Spinner'
 
 export interface DropdownMenuItem {
-  label: React.ReactNode
+  label?: React.ReactNode
+  content?: (close: () => void) => React.ReactNode
   icon?: React.ReactNode
   confirm?: string
   title?: string
@@ -95,36 +96,48 @@ export function DropdownMenu({ items, className, horizontal, buttonColor: _butto
                   {items.map((item, index) => (
                     <Menu.Item key={index}>
                       {({ active }) => (
-                        <a
-                          href="#"
-                          className={clsx(
-                            `${
-                              active && !!item.onClick ? 'bg-[#2a2b50] text-white' : 'text-white'
-                            } px-4 py-2 text-sm flex gap-2`
-                          )}
-                          title={item.title}
-                          onClick={
-                            item.onClick
-                              ? (e) => {
-                                  e.preventDefault()
-                                  e.stopPropagation()
-                                  if (item.confirm) {
-                                    if (confirm(item.confirm)) {
+                        item.content ? (
+                          <div
+                            className={clsx(
+                              active ? 'bg-[#2a2b50] text-white' : 'text-white',
+                              'px-4 py-2 text-sm'
+                            )}
+                            title={item.title}
+                          >
+                            {item.content(close)}
+                          </div>
+                        ) : (
+                          <a
+                            href="#"
+                            className={clsx(
+                              `${
+                                active && !!item.onClick ? 'bg-[#2a2b50] text-white' : 'text-white'
+                              } px-4 py-2 text-sm flex gap-2`
+                            )}
+                            title={item.title}
+                            onClick={
+                              item.onClick
+                                ? (e) => {
+                                    e.preventDefault()
+                                    e.stopPropagation()
+                                    if (item.confirm) {
+                                      if (confirm(item.confirm)) {
+                                        item.onClick?.(e)
+                                      }
+                                    } else {
                                       item.onClick?.(e)
                                     }
-                                  } else {
-                                    item.onClick?.(e)
+                                    if (!item.keepOpen) {
+                                      close()
+                                    }
                                   }
-                                  if (!item.keepOpen) {
-                                    close()
-                                  }
-                                }
-                              : undefined
-                          }
-                        >
-                          {item.loading ? <Spinner color="white" className="w-4 h-4" /> : item.icon}
-                          {item.label}
-                        </a>
+                                : undefined
+                            }
+                          >
+                            {item.loading ? <Spinner color="white" className="w-4 h-4" /> : item.icon}
+                            {item.label}
+                          </a>
+                        )
                       )}
                     </Menu.Item>
                   ))}

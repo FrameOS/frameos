@@ -18,6 +18,7 @@ import { logsLogic } from './panels/Logs/logsLogic'
 import { Popover, Transition } from '@headlessui/react'
 import { isFrameControlMode } from '../../utils/frameControlMode'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
+import { Modal } from '../../components/Modal'
 
 interface FrameSceneProps {
   id: string // taken straight from the URL, thus a string
@@ -39,6 +40,8 @@ export function Frame(props: FrameSceneProps) {
     fullDeployPlanSummary,
     deployPlansLoading,
     deployPlansError,
+    deployPlanModalMode,
+    deployPlanModalOpen,
   } = useValues(frameLogic(frameLogicProps))
   const {
     saveFrame,
@@ -54,7 +57,8 @@ export function Frame(props: FrameSceneProps) {
     setDeployWithAgent,
     resetUnsavedChanges,
     resetUndeployedChanges,
-    loadDeployPlans,
+    showDeployPlanModal,
+    hideDeployPlanModal,
   } = useActions(frameLogic(frameLogicProps))
   useMountedLogic(assetsLogic(frameLogicProps)) // Don't lose what we downloaded when navigating away from the tab
   useMountedLogic(terminalLogic(frameLogicProps))
@@ -68,6 +72,11 @@ export function Frame(props: FrameSceneProps) {
     frame?.agent && frame.agent.agentEnabled && frame.agent.agentSharedSecret && frame.agent.agentRunCommands
   const frameControlMode = isFrameControlMode()
   const inFrameAdminMode = isInFrameAdminMode()
+  const currentDeployPlanMode = frameControlMode
+    ? 'fast'
+    : !frame?.last_successful_deploy_at || requiresRecompilation
+    ? 'full'
+    : 'fast'
 
   const logoutFromFrame = async () => {
     await fetch('/api/admin/logout', { method: 'POST', credentials: 'include' })
@@ -82,20 +91,68 @@ export function Frame(props: FrameSceneProps) {
         { label: 'Stop FrameOS', onClick: () => stopFrame() },
         { label: 'Reboot device', onClick: () => rebootFrame() },
         {
-          label: 'Fast deploy (reload)',
-          onClick: () => {
-            fastDeployFrame()
-            openLogs()
-          },
+          content: (close: () => void) => (
+            <div className="flex items-center justify-between gap-3">
+              <button
+                className="text-left hover:underline"
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  fastDeployFrame()
+                  openLogs()
+                  close()
+                }}
+                type="button"
+              >
+                Fast deploy / reload
+              </button>
+              <button
+                className="text-right text-gray-300 hover:text-white hover:underline"
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  showDeployPlanModal('fast')
+                  close()
+                }}
+                type="button"
+              >
+                Show plan
+              </button>
+            </div>
+          ),
         },
         ...(!frameControlMode
           ? [
               {
-                label: 'Full deploy (recompile)',
-                onClick: () => {
-                  fullDeployFrame()
-                  openLogs()
-                },
+                content: (close: () => void) => (
+                  <div className="flex items-center justify-between gap-3">
+                    <button
+                      className="text-left hover:underline"
+                      onClick={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        fullDeployFrame()
+                        openLogs()
+                        close()
+                      }}
+                      type="button"
+                    >
+                      Full deploy / recompile
+                    </button>
+                    <button
+                      className="text-right text-gray-300 hover:text-white hover:underline"
+                      onClick={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        showDeployPlanModal('full')
+                        close()
+                      }}
+                      type="button"
+                    >
+                      Show plan
+                    </button>
+                  </div>
+                ),
               },
             ]
           : []),
@@ -211,7 +268,7 @@ export function Frame(props: FrameSceneProps) {
                   <Popover className="relative pr-2 text-[#9a9ad0] flex items-center">
                     {({ open }) => (
                       <>
-                        <Popover.Button className="underline underline-offset-2" onClick={() => loadDeployPlans()}>
+                        <Popover.Button className="underline underline-offset-2">
                           Undeployed changes
                         </Popover.Button>
                         <Transition
@@ -238,17 +295,19 @@ export function Frame(props: FrameSceneProps) {
                               </Button>
                             </div>
                             <div className="space-y-4 text-sm text-gray-100">
-                              <div>
-                                <div className="mb-2 text-xs text-gray-400">Changes</div>
-                                <ul className="space-y-1">
-                                  {undeployedSummaryItems.map((item, index) => (
-                                    <li key={`${item.label}-${index}`} className="flex items-center justify-between gap-3">
-                                      <span>{item.label}</span>
-                                      <span className="text-right text-gray-300">{item.value}</span>
-                                    </li>
-                                  ))}
-                                </ul>
-                              </div>
+                              {frame.last_successful_deploy_at ? (
+                                <div>
+                                  <div className="mb-2 text-xs text-gray-400">Changes</div>
+                                  <ul className="space-y-1">
+                                    {undeployedSummaryItems.map((item, index) => (
+                                      <li key={`${item.label}-${index}`} className="flex items-center justify-between gap-3">
+                                        <span>{item.label}</span>
+                                        <span className="text-right text-gray-300">{item.value}</span>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              ) : null}
 
                               <div>
                                 <div className="mb-2 text-xs text-gray-400">Fast deploy plan</div>
@@ -308,31 +367,41 @@ export function Frame(props: FrameSceneProps) {
                       Save
                     </Button>
                     {frameControlMode ? (
-                      <Button
-                        color={unsavedChanges || undeployedChanges ? 'primary' : 'secondary'}
-                        type="button"
-                        onClick={() => {
-                          saveFrame()
-                          fastDeployFrame()
-                          openLogs()
-                        }}
-                      >
-                        Reload
-                      </Button>
+                      <>
+                        <Button
+                          color={unsavedChanges || undeployedChanges ? 'primary' : 'secondary'}
+                          type="button"
+                          onClick={() => {
+                            saveFrame()
+                            fastDeployFrame()
+                            openLogs()
+                          }}
+                        >
+                          Reload
+                        </Button>
+                        <Button color="secondary" type="button" onClick={() => showDeployPlanModal(currentDeployPlanMode)}>
+                          Show plan
+                        </Button>
+                      </>
                     ) : (
-                      <Button
-                        color={unsavedChanges || undeployedChanges ? 'primary' : 'secondary'}
-                        type="button"
-                        onClick={() => {
-                          saveFrame()
-                          deployFrame()
-                          openLogs()
-                        }}
-                      >
-                        {!frame.last_successful_deploy_at
-                          ? 'First deploy'
-                          : `Save & ${requiresRecompilation ? 'full deploy' : 'fast deploy'}`}
-                      </Button>
+                      <>
+                        <Button
+                          color={unsavedChanges || undeployedChanges ? 'primary' : 'secondary'}
+                          type="button"
+                          onClick={() => {
+                            saveFrame()
+                            deployFrame()
+                            openLogs()
+                          }}
+                        >
+                          {!frame.last_successful_deploy_at
+                            ? 'First deploy'
+                            : `Save & ${requiresRecompilation ? 'full deploy' : 'fast deploy'}`}
+                        </Button>
+                        <Button color="secondary" type="button" onClick={() => showDeployPlanModal(currentDeployPlanMode)}>
+                          Show plan
+                        </Button>
+                      </>
                     )}
                   </div>
                 )}
@@ -340,6 +409,44 @@ export function Frame(props: FrameSceneProps) {
             }
           />
           <Panels />
+          <Modal
+            open={deployPlanModalOpen}
+            onClose={hideDeployPlanModal}
+            title={deployPlanModalMode === 'fast' ? 'Fast Deploy Plan' : deployPlanModalMode === 'full' ? 'Full Deploy Plan' : 'Deploy Plan'}
+          >
+            <div className="p-5 space-y-4 text-sm text-gray-100">
+              {deployPlansLoading ? (
+                <div className="text-gray-300">Loading…</div>
+              ) : deployPlanModalMode === 'fast' ? (
+                fastDeployPlanSummary.length > 0 ? (
+                  <ul className="space-y-1">
+                    {fastDeployPlanSummary.map((item, index) => (
+                      <li key={`modal-fast-${item.label}-${index}`} className="flex items-center justify-between gap-3">
+                        <span>{item.label}</span>
+                        <span className="text-right text-gray-300">{item.value}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <div className="text-gray-300">Unavailable</div>
+                )
+              ) : deployPlanModalMode === 'full' ? (
+                fullDeployPlanSummary.length > 0 ? (
+                  <ul className="space-y-1">
+                    {fullDeployPlanSummary.map((item, index) => (
+                      <li key={`modal-full-${item.label}-${index}`} className="flex items-center justify-between gap-3">
+                        <span>{item.label}</span>
+                        <span className="text-right text-gray-300">{item.value}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <div className="text-gray-300">Unavailable</div>
+                )
+              ) : null}
+              {deployPlansError ? <div className="text-red-300">{deployPlansError}</div> : null}
+            </div>
+          </Modal>
         </div>
       ) : (
         <div>

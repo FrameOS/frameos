@@ -595,7 +595,7 @@ class FrameDeployWorkflow:
                 "ls -dt1 release_* | grep -v \"$(basename $(readlink ../current))\" | tail -n +11 | xargs rm -rf"
             )
 
-            await self._run_post_deploy_cleanup(drivers=drivers, low_memory=full_plan.low_memory)
+            await self._run_post_deploy_cleanup(post_deploy=full_plan.post_deploy)
 
             frame.status = "starting"
             plan.frame_dict["frameos_version"] = current_frameos_version()
@@ -607,64 +607,65 @@ class FrameDeployWorkflow:
             await update_frame(self.db, self.redis, frame)
             raise
 
-    async def _run_post_deploy_cleanup(self, *, drivers: dict[str, Any], low_memory: bool) -> None:
+    async def _run_post_deploy_cleanup(self, *, post_deploy: dict[str, Any]) -> None:
         await self.deployer.log("stdout", f"{icon} Running final cleanup scripts")
-        boot_config = "/boot/config.txt"
-        if await self.deployer.exec_command("test -f /boot/firmware/config.txt", raise_on_error=False) == 0:
-            boot_config = "/boot/firmware/config.txt"
+        boot_config = str(post_deploy.get("boot_config_path") or "/boot/config.txt")
 
-        if drivers.get("i2c"):
+        i2c_plan = post_deploy.get("i2c") or {}
+        if i2c_plan.get("needs_boot_config_line"):
             await self.deployer.exec_command(
                 'grep -q "^dtparam=i2c_vc=on$" ' + boot_config + ' || echo "dtparam=i2c_vc=on" | sudo tee -a ' + boot_config
             )
+        if i2c_plan.get("needs_runtime_enable"):
             await self.deployer.exec_command(
                 'command -v raspi-config > /dev/null && '
                 'sudo raspi-config nonint get_i2c | grep -q "1" && { sudo raspi-config nonint do_i2c 0; echo "I2C enabled"; } || echo "I2C already enabled"'
             )
 
-        if drivers.get("spi"):
+        spi_action = post_deploy.get("spi_action")
+        if spi_action == "enable":
             await self.deployer.exec_command("sudo raspi-config nonint do_spi 0")
-        elif drivers.get("noSpi"):
+        elif spi_action == "disable":
             await self.deployer.exec_command("sudo raspi-config nonint do_spi 1")
 
-        if low_memory:
+        if post_deploy.get("low_memory_masks_apt_daily"):
             await self.deployer.exec_command(
                 "sudo systemctl mask apt-daily-upgrade && "
                 "sudo systemctl mask apt-daily && "
                 "sudo systemctl disable apt-daily.service apt-daily.timer apt-daily-upgrade.timer apt-daily-upgrade.service"
             )
 
-        if self.frame.reboot and self.frame.reboot.get("enabled") == "true":
-            cron_schedule = self.frame.reboot.get("crontab", "0 0 * * *")
-            if self.frame.reboot.get("type") == "raspberry":
-                crontab = f"{cron_schedule} root /sbin/shutdown -r now"
-            else:
-                crontab = f"{cron_schedule} root systemctl restart frameos.service"
+        reboot_schedule = post_deploy.get("reboot_schedule") or {}
+        if reboot_schedule.get("needs_update"):
+            cron_schedule = reboot_schedule.get("crontab", "0 0 * * *")
+            reboot_command = reboot_schedule.get("command", "systemctl restart frameos.service")
+            crontab = f"{cron_schedule} root {reboot_command}"
             await self.deployer.exec_command(f"echo '{crontab}' | sudo tee /etc/cron.d/frameos-reboot")
-        else:
+        elif reboot_schedule.get("needs_remove"):
             await self.deployer.exec_command("sudo rm -f /etc/cron.d/frameos-reboot")
 
-        must_reboot = False
-        if drivers.get("bootconfig"):
-            for line in (drivers["bootconfig"].lines or []):
-                if line.startswith("#"):
-                    to_remove = line[1:]
-                    await self.deployer.exec_command(
-                        f'grep -q "^{to_remove}" {boot_config} && sudo sed -i "/^{to_remove}/d" {boot_config}',
-                        raise_on_error=False,
-                    )
-                elif (await self.deployer.exec_command(f'grep -q "^{line}" {boot_config}', raise_on_error=False)) != 0:
+        for change in post_deploy.get("bootconfig_changes") or []:
+            line = change.get("line")
+            if not line:
+                continue
+            if change.get("action") == "remove":
+                to_remove = str(line)
+                await self.deployer.exec_command(
+                    f'grep -q "^{to_remove}" {boot_config} && sudo sed -i "/^{to_remove}/d" {boot_config}',
+                    raise_on_error=False,
+                )
+            elif change.get("action") == "add":
+                if (await self.deployer.exec_command(f'grep -q "^{line}" {boot_config}', raise_on_error=False)) != 0:
                     await self.deployer.exec_command(f'echo "{line}" | sudo tee -a ' + boot_config, log_output=False)
-                    must_reboot = True
 
-        if self.frame.last_successful_deploy_at is None:
-            must_reboot = True
+        if post_deploy.get("disable_userconfig"):
             await self.deployer.exec_command("sudo systemctl disable userconfig || true")
 
-        await self.deployer.log("stdout", f"{icon} Disabling system-managed Caddy service (managed by FrameOS tls_proxy)")
-        await self.deployer.exec_command("sudo systemctl disable --now caddy.service", raise_on_error=False)
+        if post_deploy.get("disable_caddy_service"):
+            await self.deployer.log("stdout", f"{icon} Disabling system-managed Caddy service (managed by FrameOS tls_proxy)")
+            await self.deployer.exec_command("sudo systemctl disable --now caddy.service", raise_on_error=False)
 
-        if must_reboot:
+        if post_deploy.get("final_action") == "reboot":
             await self.deployer.exec_command("sudo systemctl enable frameos.service")
             await self.deployer.log("stdinfo", f"{icon} Deployed! Rebooting device after boot config changes")
             await self.deployer.exec_command("sudo reboot")
@@ -678,34 +679,84 @@ class FrameDeployWorkflow:
         if await self.deployer.exec_command("test -f /boot/firmware/config.txt", raise_on_error=False) == 0:
             boot_config = "/boot/firmware/config.txt"
 
-        bootconfig_lines = list((drivers.get("bootconfig").lines or [])) if drivers.get("bootconfig") else []
-        last_successful_deploy_at = getattr(self.frame, "last_successful_deploy_at", None)
-        must_reboot = bool(bootconfig_lines) or last_successful_deploy_at is None
+        i2c_needs_boot_config_line = False
+        i2c_needs_runtime_enable = False
+        if drivers.get("i2c"):
+            i2c_needs_boot_config_line = not await self._command_succeeds(
+                f'grep -q "^dtparam=i2c_vc=on$" {shlex.quote(boot_config)}'
+            )
+            i2c_needs_runtime_enable = await self._command_succeeds(
+                'command -v raspi-config > /dev/null && sudo raspi-config nonint get_i2c | grep -q "1"'
+            )
 
-        reboot_schedule = None
+        spi_action = "unchanged"
+        if drivers.get("spi") and await self._command_succeeds(
+            'command -v raspi-config > /dev/null && sudo raspi-config nonint get_spi | grep -q "1"'
+        ):
+            spi_action = "enable"
+        elif drivers.get("noSpi") and await self._command_succeeds(
+            'command -v raspi-config > /dev/null && sudo raspi-config nonint get_spi | grep -q "0"'
+        ):
+            spi_action = "disable"
+
+        low_memory_masks_apt_daily = False
+        if low_memory:
+            apt_daily_masked = await self._command_succeeds("systemctl is-enabled apt-daily.service | grep -q masked")
+            apt_daily_upgrade_masked = await self._command_succeeds(
+                "systemctl is-enabled apt-daily-upgrade.service | grep -q masked"
+            )
+            low_memory_masks_apt_daily = not (apt_daily_masked and apt_daily_upgrade_masked)
+
+        reboot_schedule: dict[str, Any] = {"enabled": False, "needs_update": False, "needs_remove": False}
         if self.frame.reboot and self.frame.reboot.get("enabled") == "true":
             cron_schedule = self.frame.reboot.get("crontab", "0 0 * * *")
             reboot_type = self.frame.reboot.get("type")
+            reboot_command = "/sbin/shutdown -r now" if reboot_type == "raspberry" else "systemctl restart frameos.service"
+            desired_crontab = f"{cron_schedule} root {reboot_command}"
             reboot_schedule = {
                 "enabled": True,
                 "crontab": cron_schedule,
                 "type": reboot_type,
-                "command": "/sbin/shutdown -r now" if reboot_type == "raspberry" else "systemctl restart frameos.service",
+                "command": reboot_command,
+                "needs_update": not await self._command_succeeds(
+                    f"test -f /etc/cron.d/frameos-reboot && grep -Fxq {shlex.quote(desired_crontab)} /etc/cron.d/frameos-reboot"
+                ),
+                "needs_remove": False,
             }
         else:
-            reboot_schedule = {
-                "enabled": False,
-            }
+            reboot_schedule["needs_remove"] = await self._path_exists("/etc/cron.d/frameos-reboot")
+
+        bootconfig_changes: list[dict[str, str]] = []
+        for line in list((drivers.get("bootconfig").lines or [])) if drivers.get("bootconfig") else []:
+            if line.startswith("#"):
+                to_remove = line[1:]
+                if await self._command_succeeds(f'grep -q "^{to_remove}" {shlex.quote(boot_config)}'):
+                    bootconfig_changes.append({"action": "remove", "line": to_remove})
+            elif not await self._command_succeeds(f'grep -q "^{line}" {shlex.quote(boot_config)}'):
+                bootconfig_changes.append({"action": "add", "line": line})
+
+        last_successful_deploy_at = getattr(self.frame, "last_successful_deploy_at", None)
+        disable_userconfig = last_successful_deploy_at is None and await self._command_succeeds(
+            "systemctl is-enabled userconfig >/dev/null 2>&1"
+        )
+        disable_caddy_service = await self._command_succeeds(
+            "systemctl is-enabled caddy.service >/dev/null 2>&1 || systemctl is-active caddy.service >/dev/null 2>&1"
+        )
+        must_reboot = bool(bootconfig_changes) or disable_userconfig
 
         return {
             "boot_config_path": boot_config,
-            "enable_i2c": bool(drivers.get("i2c")),
-            "spi_action": "enable" if drivers.get("spi") else "disable" if drivers.get("noSpi") else "unchanged",
-            "low_memory_masks_apt_daily": low_memory,
+            "i2c": {
+                "requested": bool(drivers.get("i2c")),
+                "needs_boot_config_line": i2c_needs_boot_config_line,
+                "needs_runtime_enable": i2c_needs_runtime_enable,
+            },
+            "spi_action": spi_action,
+            "low_memory_masks_apt_daily": low_memory_masks_apt_daily,
             "reboot_schedule": reboot_schedule,
-            "bootconfig_lines": bootconfig_lines,
-            "disable_userconfig": last_successful_deploy_at is None,
-            "disable_caddy_service": True,
+            "bootconfig_changes": bootconfig_changes,
+            "disable_userconfig": disable_userconfig,
+            "disable_caddy_service": disable_caddy_service,
             "final_action": "reboot" if must_reboot else "restart_frameos",
         }
 
@@ -732,6 +783,15 @@ class FrameDeployWorkflow:
     async def _path_exists(self, path: str) -> bool:
         status = await self.deployer.exec_command(
             f"test -e {shlex.quote(path)}",
+            raise_on_error=False,
+            log_command=False,
+            log_output=False,
+        )
+        return status == 0
+
+    async def _command_succeeds(self, command: str) -> bool:
+        status = await self.deployer.exec_command(
+            command,
             raise_on_error=False,
             log_command=False,
             log_output=False,

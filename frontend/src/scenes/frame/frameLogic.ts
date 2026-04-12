@@ -86,6 +86,8 @@ export interface DeployPlanResponse {
   full_deploy?: FullDeployPlanResponse | null
 }
 
+export type DeployPlanModalMode = 'fast' | 'full' | null
+
 const DEFAULT_BROWSER_TITLE = 'FrameOS Backend'
 const CURRENT_FRAMEOS_VERSION = (versions.frameos || 'dev').split('+')[0]
 
@@ -742,6 +744,8 @@ export const frameLogic = kea<frameLogicType>([
     generateFrameAdminCredentials: true,
     generateTlsCertificates: true,
     verifyTlsCertificates: true,
+    showDeployPlanModal: (mode: Exclude<DeployPlanModalMode, null>) => ({ mode }),
+    hideDeployPlanModal: true,
     loadDeployPlans: true,
     loadDeployPlansSuccess: (fastPlan: DeployPlanResponse | null, fullPlan: DeployPlanResponse | null) => ({
       fastPlan,
@@ -839,6 +843,13 @@ export const frameLogic = kea<frameLogicType>([
         loadDeployPlans: () => null,
         loadDeployPlansSuccess: () => null,
         loadDeployPlansFailure: (_, { error }) => error,
+      },
+    ],
+    deployPlanModalMode: [
+      null as DeployPlanModalMode,
+      {
+        showDeployPlanModal: (_, { mode }) => mode,
+        hideDeployPlanModal: () => null,
       },
     ],
   }),
@@ -946,6 +957,11 @@ export const frameLogic = kea<frameLogicType>([
       ]
       actions.loadDeployPlansSuccess(fastPlan, fullPlan)
     },
+    showDeployPlanModal: async () => {
+      if (!values.deployPlans.fast || !values.deployPlans.full) {
+        actions.loadDeployPlans()
+      }
+    },
   })),
   selectors(() => ({
     frameId: [() => [(_, props) => props.frameId], (frameId) => frameId],
@@ -1018,6 +1034,7 @@ export const frameLogic = kea<frameLogicType>([
       (s) => [s.fullDeployPlan],
       (fullDeployPlan): SummaryItem[] => buildFullDeployPlanSummary(fullDeployPlan),
     ],
+    deployPlanModalOpen: [(s) => [s.deployPlanModalMode], (deployPlanModalMode) => deployPlanModalMode !== null],
     defaultScene: [
       (s) => [s.frame, s.frameForm],
       (frame, frameForm) => {

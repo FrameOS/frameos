@@ -14,6 +14,7 @@ class FakeDeployer:
         self.build_id = "build12345678"
         self.installed_packages = installed_packages or set()
         self.existing_paths = existing_paths or set()
+        self.success_commands: set[str] = set()
 
     async def get_distro(self) -> str:
         return "raspios"
@@ -31,6 +32,14 @@ class FakeDeployer:
         if command.startswith('dpkg -l | grep -q "^ii  '):
             package_name = command.split("^ii  ", 1)[1].split(" ", 1)[0].strip('"')
             return 0 if package_name in self.installed_packages else 1
+        if command in self.success_commands:
+            return 0
+        if command.startswith("grep -q ") or command.startswith("test -f /etc/cron.d/frameos-reboot && grep -Fxq "):
+            return 1
+        if command.startswith("command -v raspi-config > /dev/null && sudo raspi-config nonint get_"):
+            return 1
+        if command.startswith("systemctl is-enabled ") or command.startswith("systemctl is-active "):
+            return 1
         if command.startswith("test -f "):
             path = command.removeprefix("test -f ").strip("'")
             return 0 if path in self.existing_paths else 1
@@ -41,6 +50,26 @@ class FakeDeployer:
 
     def get_apt_packages(self) -> list[str]:
         return ["custom-app-pkg"]
+
+
+class RecordingDeployer(FakeDeployer):
+    def __init__(self):
+        super().__init__()
+        self.commands: list[str] = []
+        self.restarted_services: list[str] = []
+        self.logs: list[tuple[str, str]] = []
+
+    async def exec_command(self, command: str, **_kwargs) -> int:
+        self.commands.append(command)
+        if command.startswith('grep -q "^dtoverlay=vc4-kms-v3d" '):
+            return 1
+        return 0
+
+    async def restart_service(self, service: str) -> None:
+        self.restarted_services.append(service)
+
+    async def log(self, log_type: str, message: str) -> None:
+        self.logs.append((log_type, message))
 
 
 class FakeBinaryBuilder:
@@ -99,6 +128,11 @@ async def test_full_plan_reports_installed_state_and_remote_build_dependencies(m
         installed_packages={"build-essential", "ntp", "python3-pip"},
         existing_paths={"/srv/frameos/vendor/quickjs/quickjs-2025-04-26"},
     )
+    deployer.success_commands.update(
+        {
+            "systemctl is-enabled caddy.service >/dev/null 2>&1 || systemctl is-active caddy.service >/dev/null 2>&1",
+        }
+    )
 
     monkeypatch.setattr("app.tasks.frame_deploy_workflow.drivers_for_frame", lambda _frame: {"inkyPython": SimpleNamespace(vendor_folder="inky")})
     monkeypatch.setattr("app.tasks.frame_deploy_workflow.get_settings_dict", lambda _db: {})
@@ -125,8 +159,11 @@ async def test_full_plan_reports_installed_state_and_remote_build_dependencies(m
     assert package_map["custom-app-pkg"].installed is False
     assert package_map["python3-pip"].installed is True
     assert plan.full_deploy.package_alternatives[0].installed_package == "ntp"
+    assert plan.full_deploy.post_deploy["i2c"]["needs_boot_config_line"] is False
+    assert plan.full_deploy.post_deploy["i2c"]["needs_runtime_enable"] is False
     assert plan.full_deploy.post_deploy["spi_action"] == "unchanged"
     assert plan.full_deploy.post_deploy["disable_caddy_service"] is True
+    assert plan.full_deploy.post_deploy["bootconfig_changes"] == []
     assert plan.full_deploy.post_deploy["final_action"] == "restart_frameos"
 
 
@@ -142,6 +179,14 @@ async def test_full_plan_includes_post_deploy_driver_and_reboot_steps(monkeypatc
         to_dict=lambda: {"id": 8, "name": "DriverFrame"},
     )
     deployer = FakeDeployer(existing_paths={"/boot/firmware/config.txt"})
+    deployer.success_commands.update(
+        {
+            'command -v raspi-config > /dev/null && sudo raspi-config nonint get_i2c | grep -q "1"',
+            'command -v raspi-config > /dev/null && sudo raspi-config nonint get_spi | grep -q "1"',
+            "systemctl is-enabled caddy.service >/dev/null 2>&1 || systemctl is-active caddy.service >/dev/null 2>&1",
+            "systemctl is-enabled userconfig >/dev/null 2>&1",
+        }
+    )
 
     monkeypatch.setattr(
         "app.tasks.frame_deploy_workflow.drivers_for_frame",
@@ -171,13 +216,25 @@ async def test_full_plan_includes_post_deploy_driver_and_reboot_steps(monkeypatc
         temp_dir="",
         binary_builder=LowMemoryBinaryBuilder(),
     )
+    workflow.deployer.success_commands.update(
+        {
+            'command -v raspi-config > /dev/null && sudo raspi-config nonint get_i2c | grep -q "1"',
+            'command -v raspi-config > /dev/null && sudo raspi-config nonint get_spi | grep -q "1"',
+            "systemctl is-enabled caddy.service >/dev/null 2>&1 || systemctl is-active caddy.service >/dev/null 2>&1",
+            "systemctl is-enabled userconfig >/dev/null 2>&1",
+        }
+    )
 
     plan = await workflow.plan("full")
 
     assert plan.full_deploy is not None
     post_deploy = plan.full_deploy.post_deploy
     assert post_deploy["boot_config_path"] == "/boot/firmware/config.txt"
-    assert post_deploy["enable_i2c"] is True
+    assert post_deploy["i2c"] == {
+        "requested": True,
+        "needs_boot_config_line": True,
+        "needs_runtime_enable": True,
+    }
     assert post_deploy["spi_action"] == "enable"
     assert post_deploy["low_memory_masks_apt_daily"] is True
     assert post_deploy["reboot_schedule"] == {
@@ -185,8 +242,69 @@ async def test_full_plan_includes_post_deploy_driver_and_reboot_steps(monkeypatc
         "crontab": "5 4 * * *",
         "type": "raspberry",
         "command": "/sbin/shutdown -r now",
+        "needs_update": True,
+        "needs_remove": False,
     }
-    assert post_deploy["bootconfig_lines"] == ["dtoverlay=vc4-kms-v3d", "#dtoverlay=old-setting"]
+    assert post_deploy["bootconfig_changes"] == [
+        {"action": "add", "line": "dtoverlay=vc4-kms-v3d"},
+    ]
     assert post_deploy["disable_userconfig"] is True
     assert post_deploy["disable_caddy_service"] is True
     assert post_deploy["final_action"] == "reboot"
+
+
+@pytest.mark.asyncio
+async def test_run_post_deploy_cleanup_uses_planned_actions_without_recalculating():
+    frame = SimpleNamespace(
+        id=9,
+        name="PlannedFrame",
+        reboot={"enabled": "false"},
+        last_successful_deploy_at=None,
+        last_successful_deploy={"frameos_version": "9.9.9"},
+        to_dict=lambda: {"id": 9, "name": "PlannedFrame"},
+    )
+    deployer = RecordingDeployer()
+    workflow = FrameDeployWorkflow(
+        db=None,
+        redis=None,
+        frame=frame,
+        deployer=deployer,
+        temp_dir="",
+        binary_builder=FakeBinaryBuilder(),
+    )
+
+    await workflow._run_post_deploy_cleanup(
+        post_deploy={
+            "boot_config_path": "/boot/custom.txt",
+            "i2c": {
+                "requested": True,
+                "needs_boot_config_line": True,
+                "needs_runtime_enable": True,
+            },
+            "spi_action": "disable",
+            "low_memory_masks_apt_daily": True,
+            "reboot_schedule": {
+                "enabled": True,
+                "crontab": "5 4 * * *",
+                "type": "raspberry",
+                "command": "/sbin/shutdown -r now",
+                "needs_update": True,
+                "needs_remove": False,
+            },
+            "bootconfig_changes": [
+                {"action": "add", "line": "dtoverlay=vc4-kms-v3d"},
+                {"action": "remove", "line": "dtoverlay=old-setting"},
+            ],
+            "disable_userconfig": False,
+            "disable_caddy_service": True,
+            "final_action": "restart_frameos",
+        }
+    )
+
+    assert any("/boot/custom.txt" in command for command in deployer.commands)
+    assert "sudo raspi-config nonint do_spi 1" in deployer.commands
+    assert any("/etc/cron.d/frameos-reboot" in command for command in deployer.commands)
+    assert "sudo systemctl daemon-reload" in deployer.commands
+    assert deployer.restarted_services == ["frameos"]
+    assert all("userconfig" not in command for command in deployer.commands)
+    assert "sudo reboot" not in deployer.commands
