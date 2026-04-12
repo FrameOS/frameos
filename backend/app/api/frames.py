@@ -85,7 +85,8 @@ from app.utils.frame_http import (
     _httpx_verify,
 )
 from app.tasks.utils import find_nim_v2
-from app.tasks.deploy_frame import FrameDeployer
+from app.tasks._frame_deployer import FrameDeployer
+from app.tasks.frame_deploy_workflow import FrameDeployWorkflow
 from app.redis import get_redis
 from app.websockets import publish_message
 from app.ws.agent_ws import (
@@ -846,7 +847,8 @@ async def api_frame_local_binary_zip(
         builder = FrameBinaryBuilder(db=db, redis=redis, frame=frame, deployer=deployer, temp_dir=tmp)
 
         try:
-            build_result = await builder.build(force_cross_compile=True)
+            build_plan = await builder.plan_build(force_cross_compile=True)
+            build_result = await builder.build(build_plan)
         except Exception as exc:
             raise HTTPException(
                 status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -1529,6 +1531,48 @@ async def api_frame_deploy_event(id: int, redis: Redis = Depends(get_redis)):
 
         await deploy_frame(id, redis)
         return "Success"
+    except Exception as e:
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@api_with_auth.get("/frames/{id:int}/deploy_plan")
+async def api_frame_deploy_plan(
+    id: int,
+    mode: str = Query("full"),
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    frame = db.get(Frame, id)
+    if not frame:
+        _not_found()
+
+    try:
+        if mode == "full":
+            nim_path = find_nim_v2()
+            with tempfile.TemporaryDirectory() as temp_dir:
+                deployer = FrameDeployer(db=db, redis=redis, frame=frame, nim_path=nim_path, temp_dir=temp_dir)
+                workflow = FrameDeployWorkflow(
+                    db=db,
+                    redis=redis,
+                    frame=frame,
+                    deployer=deployer,
+                    temp_dir=temp_dir,
+                )
+                plan = await workflow.plan("full")
+        elif mode == "fast":
+            deployer = FrameDeployer(db=db, redis=redis, frame=frame, nim_path="", temp_dir="")
+            workflow = FrameDeployWorkflow(
+                db=db,
+                redis=redis,
+                frame=frame,
+                deployer=deployer,
+                temp_dir="",
+            )
+            plan = await workflow.plan("fast")
+        else:
+            _bad_request("mode must be 'full' or 'fast'")
+
+        return {"plan": plan.to_dict()}
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 

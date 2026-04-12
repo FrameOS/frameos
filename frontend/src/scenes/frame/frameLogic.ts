@@ -150,9 +150,7 @@ function keyLabel(key: keyof FrameType): string {
 }
 
 function getRecompileFields(mode: FrameType['mode']): (keyof FrameType)[] {
-  return mode === 'buildroot'
-    ? FRAME_KEYS_REQUIRE_RECOMPILE_BUILDROOT
-    : FRAME_KEYS_REQUIRE_RECOMPILE_RPIOS
+  return mode === 'buildroot' ? FRAME_KEYS_REQUIRE_RECOMPILE_BUILDROOT : FRAME_KEYS_REQUIRE_RECOMPILE_RPIOS
 }
 
 function sceneChangeDetails(currentScenes: FrameScene[], deployedScenes: FrameScene[]): ChangeDetail[] {

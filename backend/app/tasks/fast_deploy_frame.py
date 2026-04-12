@@ -1,88 +1,40 @@
-from datetime import datetime, timezone
+from __future__ import annotations
+
 from typing import Any
 
-from sqlalchemy.orm import Session
 from arq import ArqRedis as Redis
+from sqlalchemy.orm import Session
 
+from app.models.frame import Frame
 from app.models.log import new_log as log
-from app.models.frame import Frame, normalize_https_proxy, update_frame
 from app.tasks._frame_deployer import FrameDeployer
-from app.utils.frame_http import _fetch_frame_http_bytes
-from app.utils.versions import current_frameos_version
+from app.tasks.frame_deploy_workflow import FrameDeployWorkflow, tls_settings_changed
 
 
-def tls_settings_changed(frame: Frame) -> bool:
-    if not frame.last_successful_deploy:
-        return False
-
-    previous_deploy = frame.last_successful_deploy or {}
-    previous_proxy = normalize_https_proxy(previous_deploy.get("https_proxy"))
-    current_proxy = normalize_https_proxy(frame.https_proxy)
-    return previous_proxy != current_proxy
-
-
-async def fast_deploy_frame(id: int, redis: Redis):
+async def fast_deploy_frame(id: int, redis: Redis) -> None:
     await redis.enqueue_job("fast_deploy_frame", id=id)
 
 
-async def fast_deploy_frame_task(ctx: dict[str, Any], id: int):
-    db: Session = ctx['db']
-    redis: Redis = ctx['redis']
+async def fast_deploy_frame_task(ctx: dict[str, Any], id: int) -> None:
+    db: Session = ctx["db"]
+    redis: Redis = ctx["redis"]
 
-    frame = None
+    frame = db.get(Frame, id)
+    if not frame:
+        await log(db, redis, id, "stderr", "Frame not found")
+        return
+
+    deployer = FrameDeployer(db=db, redis=redis, frame=frame, nim_path="", temp_dir="")
+    workflow = FrameDeployWorkflow(
+        db=db,
+        redis=redis,
+        frame=frame,
+        deployer=deployer,
+        temp_dir="",
+    )
+
     try:
-        frame = db.get(Frame, id)
-        if not frame:
-            await log(db, redis, id, "stderr", "Frame not found")
-            return
-
-        frame.status = "deploying"
-        await update_frame(db, redis, frame)
-
-        self = FrameDeployer(db=db, redis=redis, frame=frame, nim_path="", temp_dir="")
-
-        frame_dict = frame.to_dict()  # persisted as frame.last_successful_deploy if successful
-        if "last_successful_deploy" in frame_dict:
-            del frame_dict["last_successful_deploy"]
-        if "last_successful_deploy_at" in frame_dict:
-            del frame_dict["last_successful_deploy_at"]
-
-        previous_frameos_version = (frame.last_successful_deploy or {}).get("frameos_version")
-        if isinstance(previous_frameos_version, str):
-            frame_dict["frameos_version"] = previous_frameos_version
-        else:
-            frame_dict["frameos_version"] = current_frameos_version()
-
-        distro = await self.get_distro()
-        if distro not in {"raspios", "debian", "ubuntu", "buildroot"}:
-            raise Exception(f"Unsupported target distro '{distro}'")
-
-        await self._upload_frame_json("/srv/frameos/current/frame.json")
-        await self._upload_scenes_json("/srv/frameos/current/scenes.json.gz", gzip=True)
-
-        try:
-            if tls_settings_changed(frame):
-                await log(db, redis, id, "stdout", "- TLS settings changed, restarting FrameOS service")
-                await self.restart_service("frameos")
-            else:
-                status, body, _headers = await _fetch_frame_http_bytes(
-                    frame, redis, path="/reload", method="POST"
-                )
-                if status >= 300:
-                    message = body.decode("utf-8", errors="replace")
-                    await log(db, redis, id, "stderr", f"Reload failed with status {status}: {message}. Restarting service.")
-                    await self.restart_service("frameos")
-        except Exception as e:
-            await log(db, redis, id, "stderr", f"Reload request failed: {str(e)}. Restarting service.")
-            await self.restart_service("frameos")
-
-        frame.status = 'starting'
-        frame.last_successful_deploy = frame_dict
-        frame.last_successful_deploy_at = datetime.now(timezone.utc)
-        await update_frame(db, redis, frame)
-
-    except Exception as e:
-        await log(db, redis, id, "stderr", str(e))
-        if frame:
-            frame.status = 'uninitialized'
-            await update_frame(db, redis, frame)
+        plan = await workflow.plan("fast")
+        await workflow.execute(plan)
+    except Exception as exc:
+        await log(db, redis, id, "stderr", str(exc))
