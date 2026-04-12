@@ -86,6 +86,10 @@ export interface DeployPlanResponse {
   full_deploy?: FullDeployPlanResponse | null
 }
 
+interface DeployPlanApiResponse {
+  plan: DeployPlanResponse
+}
+
 export type DeployPlanModalMode = 'fast' | 'full' | null
 
 const DEFAULT_BROWSER_TITLE = 'FrameOS Backend'
@@ -951,11 +955,11 @@ export const frameLogic = kea<frameLogicType>([
         return
       }
 
-      const [fastPlan, fullPlan] = (await Promise.all([fastResponse.json(), fullResponse.json()])) as [
-        DeployPlanResponse,
-        DeployPlanResponse,
+      const [fastPayload, fullPayload] = (await Promise.all([fastResponse.json(), fullResponse.json()])) as [
+        DeployPlanApiResponse,
+        DeployPlanApiResponse,
       ]
-      actions.loadDeployPlansSuccess(fastPlan, fullPlan)
+      actions.loadDeployPlansSuccess(fastPayload.plan, fullPayload.plan)
     },
     showDeployPlanModal: async () => {
       if (!values.deployPlans.fast || !values.deployPlans.full) {
