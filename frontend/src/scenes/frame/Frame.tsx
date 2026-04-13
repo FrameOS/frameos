@@ -52,7 +52,7 @@ export function Frame(props: FrameSceneProps) {
     requiresRecompilation,
     deployWithAgent,
     unsavedChangeDetails,
-    undeployedChangeDetails,
+    deployChangeDetails,
     lastDeploy,
     undeployedSummaryItems,
     fastDeployPlanSummary,
@@ -75,7 +75,6 @@ export function Frame(props: FrameSceneProps) {
     deployAgent,
     restartAgent,
     setDeployWithAgent,
-    resetUnsavedChanges,
     resetUndeployedChanges,
     showDeployPlanModal,
     hideDeployPlanModal,
@@ -307,46 +306,22 @@ export function Frame(props: FrameSceneProps) {
                     </div>
                   ) : null}
 
-                  {unsavedChanges ? (
+                  {(unsavedChanges || undeployedChanges) ? (
                     <div>
                       <div className="mb-2 flex items-center justify-between gap-3">
-                        <div className="text-xs text-gray-400">Unsaved changes</div>
-                        <Button color="secondary" size="small" type="button" onClick={() => resetUnsavedChanges()}>
-                          Reset
-                        </Button>
+                        <div className="text-xs text-gray-400">{lastDeploy ? 'Changes to deploy' : 'Not yet deployed'}</div>
+                        {lastDeploy ? (
+                          <Button color="secondary" size="small" type="button" onClick={() => resetUndeployedChanges()}>
+                            Reset to deployed
+                          </Button>
+                        ) : null}
                       </div>
                       <PlanTable
-                        rows={unsavedChangeDetails.map((change) => ({
+                        rows={deployChangeDetails.map((change) => ({
                           label: change.label,
                           value: change.requiresFullDeploy ? 'Needs full deploy' : 'Fast deploy ok',
                         }))}
                       />
-                    </div>
-                  ) : null}
-
-                  {undeployedChanges ? (
-                    <div>
-                      <div className="mb-2 flex items-center justify-between gap-3">
-                        <div className="text-xs text-gray-400">{lastDeploy ? 'Undeployed changes' : 'Not yet deployed'}</div>
-                        {lastDeploy ? (
-                          <Button color="secondary" size="small" type="button" onClick={() => resetUndeployedChanges()}>
-                            Reset
-                          </Button>
-                        ) : null}
-                      </div>
-                      {lastDeploy ? (
-                        <PlanTable
-                          rows={undeployedChangeDetails.map((change) => ({
-                            label: change.label,
-                            value:
-                              change.label.startsWith('FrameOS upgrade') && deployRecommendation?.mode === 'fast'
-                                ? 'Optional full deploy'
-                                : change.requiresFullDeploy
-                                ? 'Needs full deploy'
-                                : 'Fast deploy ok',
-                          }))}
-                        />
-                      ) : null}
                     </div>
                   ) : null}
 
