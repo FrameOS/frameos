@@ -504,7 +504,7 @@ function buildFastDeployPlanSummary(plan?: DeployPlanResponse | null): SummaryIt
   return [{ label: 'Fast deploy behavior', value: 'Restart FrameOS because TLS settings changed' }]
 }
 
-function buildFullDeployPlanSummary(plan?: DeployPlanResponse | null): SummaryItem[] {
+function buildFullDeployPlanSummary(plan?: DeployPlanResponse | null, frame?: Partial<FrameType> | null): SummaryItem[] {
   const fullPlan = plan?.full_deploy
   if (!fullPlan) {
     return []
@@ -512,6 +512,7 @@ function buildFullDeployPlanSummary(plan?: DeployPlanResponse | null): SummaryIt
 
   const packagesToInstall = fullPlan.packages.filter((pkg) => pkg.needs_install).map((pkg) => pkg.name)
   const items: SummaryItem[] = [
+    ...(frame?.device ? [{ label: 'Device', value: String(frame.device) }] : []),
     {
       label: 'Target',
       value: `${fullPlan.target.distro} ${fullPlan.target.version} · ${fullPlan.target.arch} · ${fullPlan.target.total_memory_mb} MiB`,
@@ -1135,8 +1136,9 @@ export const frameLogic = kea<frameLogicType>([
       (fastDeployPlan): SummaryItem[] => buildFastDeployPlanSummary(fastDeployPlan),
     ],
     fullDeployPlanSummary: [
-      (s) => [s.fullDeployPlan],
-      (fullDeployPlan): SummaryItem[] => buildFullDeployPlanSummary(fullDeployPlan),
+      (s) => [s.fullDeployPlan, s.frameForm],
+      (fullDeployPlan: DeployPlanResponse | null, frameForm: Partial<FrameType>): SummaryItem[] =>
+        buildFullDeployPlanSummary(fullDeployPlan, frameForm),
     ],
     deployRecommendation: [
       (s) => [s.deployPlan, s.lastDeploy, s.deployChangeDetails],

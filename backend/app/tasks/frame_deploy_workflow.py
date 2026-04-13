@@ -358,7 +358,7 @@ class FrameDeployWorkflow:
             )
             quickjs_dirname = f"quickjs-{quickjs_version}"
             quickjs_installed = await self._path_exists(f"/srv/frameos/vendor/quickjs/{quickjs_dirname}")
-            if not quickjs_installed:
+            if not quickjs_installed and not binary_plan.will_attempt_cross_compile:
                 for pkg_name in (
                     "libunistring-dev",
                     "libtool",

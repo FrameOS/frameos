@@ -195,6 +195,13 @@ async def test_full_plan_reports_installed_state_and_remote_build_dependencies(m
     package_map = {pkg.name: pkg for pkg in plan.full_deploy.package_plans}
     assert package_map["build-essential"].installed is True
     assert "libssl-dev" not in package_map
+    assert "libunistring-dev" not in package_map
+    assert "libtool" not in package_map
+    assert "cmake" not in package_map
+    assert "pkg-config" not in package_map
+    assert "libatomic-ops-dev" not in package_map
+    assert "libicu-dev" not in package_map
+    assert "zlib1g-dev" not in package_map
     assert package_map["caddy"].installed is False
     assert package_map["custom-app-pkg"].installed is False
     assert package_map["python3-pip"].installed is True
