@@ -72,7 +72,6 @@ export interface FullDeployPlanResponse {
     dirname?: string | null
     installed: boolean
   }
-  selected_ssh_key_count: number
   post_deploy?: {
     final_action?: 'reboot' | 'restart_frameos'
   }
@@ -472,11 +471,11 @@ function buildFastDeployPlanSummary(plan?: DeployPlanResponse | null): SummaryIt
     return []
   }
 
-  return [
-    { label: 'Action', value: fastPlan.action.replace(/_/g, ' ') },
-    { label: 'Reload supported', value: fastPlan.reload_supported ? 'Yes' : 'No' },
-    { label: 'TLS settings changed', value: fastPlan.tls_settings_changed ? 'Yes' : 'No' },
-  ]
+  if (!fastPlan.tls_settings_changed) {
+    return []
+  }
+
+  return [{ label: 'Fast deploy behavior', value: 'Restart FrameOS because TLS settings changed' }]
 }
 
 function buildFullDeployPlanSummary(plan?: DeployPlanResponse | null): SummaryItem[] {
@@ -486,11 +485,7 @@ function buildFullDeployPlanSummary(plan?: DeployPlanResponse | null): SummaryIt
   }
 
   const packagesToInstall = fullPlan.packages.filter((pkg) => pkg.needs_install).map((pkg) => pkg.name)
-  const alternatives = fullPlan.package_alternatives
-    .map((pkg) => pkg.installed_package || pkg.names.join(' / '))
-    .filter(Boolean)
-
-  return [
+  const items: SummaryItem[] = [
     {
       label: 'Target',
       value: `${fullPlan.target.distro} ${fullPlan.target.version} · ${fullPlan.target.arch} · ${fullPlan.target.total_memory_mb} MiB`,
@@ -502,57 +497,40 @@ function buildFullDeployPlanSummary(plan?: DeployPlanResponse | null): SummaryIt
           ? 'Cross-compile on the configured build host'
           : 'Cross-compile locally on this server'
         : fullPlan.binary.cross_compile_supported
-        ? 'Build on device (cross-compilation disabled)'
-        : 'Build on device (cross-compilation unavailable for this target)',
-    },
-    {
-      label: 'Drivers',
-      value: fullPlan.drivers.length > 0 ? stringifyList(fullPlan.drivers) : 'None',
-    },
-    {
-      label: 'Packages to install',
-      value: packagesToInstall.length > 0 ? stringifyList(packagesToInstall) : 'None',
-    },
-    {
-      label: 'Package alternatives',
-      value: alternatives.length > 0 ? stringifyList(alternatives) : 'None',
-    },
-    {
-      label: 'QuickJS',
-      value: fullPlan.quickjs.required_if_remote_build
-        ? fullPlan.quickjs.installed
-          ? `${fullPlan.quickjs.dirname || 'Configured'} already present`
-          : `${fullPlan.quickjs.dirname || 'Required'} will be prepared for remote build`
-        : 'Not needed for cross-compile path',
-    },
-    {
-      label: 'lgpio',
-      value: fullPlan.lgpio.required
-        ? fullPlan.lgpio.installed
-          ? 'Already installed'
-          : 'Will be installed'
-        : 'Not required',
-    },
-    {
-      label: 'SSH keys',
-      value: fullPlan.selected_ssh_key_count > 0 ? `${fullPlan.selected_ssh_key_count} selected` : 'None selected',
-    },
-    {
-      label: 'Low memory mode',
-      value: fullPlan.low_memory ? 'Yes' : 'No',
-    },
-    {
-      label: 'Final action',
-      value: fullPlan.post_deploy?.final_action === 'reboot' ? 'Reboot device' : 'Restart FrameOS',
+        ? 'Build on device because cross-compilation is disabled'
+        : 'Build on device because cross-compilation is unavailable for this target',
     },
   ]
+
+  if (fullPlan.drivers.length > 0) {
+    items.push({ label: 'Drivers', value: stringifyList(fullPlan.drivers) })
+  }
+  if (packagesToInstall.length > 0) {
+    items.push({ label: 'Packages to install', value: stringifyList(packagesToInstall) })
+  }
+  if (!fullPlan.binary.will_attempt_cross_compile && fullPlan.quickjs.required_if_remote_build && !fullPlan.quickjs.installed) {
+    items.push({
+      label: 'QuickJS',
+      value: `${fullPlan.quickjs.dirname || 'Required'} will be prepared for the on-device build`,
+    })
+  }
+  if (fullPlan.lgpio.required && !fullPlan.lgpio.installed) {
+    items.push({ label: 'lgpio', value: 'Will be installed for the selected drivers' })
+  }
+  if (fullPlan.low_memory && !fullPlan.binary.will_attempt_cross_compile) {
+    items.push({ label: 'Low memory', value: 'FrameOS will be stopped before the on-device build' })
+  }
+  if (fullPlan.post_deploy?.final_action === 'reboot') {
+    items.push({ label: 'After deploy', value: 'Device reboot required' })
+  }
+
+  return items
 }
 
 function buildDeployRecommendation(
   plan: DeployPlanResponse | null,
   hasPreviousDeploy: boolean,
-  requiresRecompilation: boolean,
-  undeployedChangeDetails: ChangeDetail[]
+  deployChangeDetails: ChangeDetail[]
 ): DeployRecommendation | null {
   if (!plan) {
     return null
@@ -560,7 +538,7 @@ function buildDeployRecommendation(
 
   const previousVersion = plan.previous_frameos_version ? String(plan.previous_frameos_version).split('+')[0] : null
   const versionChanged = previousVersion !== CURRENT_FRAMEOS_VERSION
-  const fullDeployChanges = undeployedChangeDetails
+  const fullDeployChanges = deployChangeDetails
     .filter((change) => change.requiresFullDeploy && !change.label.startsWith('FrameOS upgrade'))
     .map((change) => change.label)
 
@@ -572,7 +550,7 @@ function buildDeployRecommendation(
     }
   }
 
-  if (requiresRecompilation && fullDeployChanges.length > 0) {
+  if (fullDeployChanges.length > 0) {
     return {
       mode: 'full',
       title: 'Suggested: full deploy',
@@ -1083,6 +1061,11 @@ export const frameLogic = kea<frameLogicType>([
       (s) => [s.undeployedChangeDetails],
       (undeployedChangeDetails) => undeployedChangeDetails.some((change) => change.requiresFullDeploy),
     ],
+    deployChangeDetails: [
+      (s) => [s.lastDeploy, s.frameForm, s.mode, s.isFrameAdminMode],
+      (lastDeploy, frameForm, mode, isFrameAdminMode): ChangeDetail[] =>
+        isFrameAdminMode ? [] : computeChangeDetails(lastDeploy, frameForm, mode),
+    ],
     undeployedSummaryItems: [
       (s) => [s.lastDeploy, s.frame, s.requiresRecompilation, s.isFrameAdminMode],
       (lastDeploy, frame, requiresRecompilation, isFrameAdminMode): SummaryItem[] =>
@@ -1100,14 +1083,9 @@ export const frameLogic = kea<frameLogicType>([
       (fullDeployPlan): SummaryItem[] => buildFullDeployPlanSummary(fullDeployPlan),
     ],
     deployRecommendation: [
-      (s) => [s.deployPlan, s.frame, s.requiresRecompilation, s.undeployedChangeDetails],
-      (deployPlan, frame, requiresRecompilation, undeployedChangeDetails): DeployRecommendation | null =>
-        buildDeployRecommendation(
-          deployPlan,
-          Boolean(frame?.last_successful_deploy_at),
-          requiresRecompilation,
-          undeployedChangeDetails
-        ),
+      (s) => [s.deployPlan, s.lastDeploy, s.deployChangeDetails],
+      (deployPlan, lastDeploy, deployChangeDetails): DeployRecommendation | null =>
+        buildDeployRecommendation(deployPlan, Boolean(lastDeploy), deployChangeDetails),
     ],
     defaultScene: [
       (s) => [s.frame, s.frameForm],

@@ -23,6 +23,24 @@ interface FrameSceneProps {
   id: string // taken straight from the URL, thus a string
 }
 
+function PlanTable({ rows }: { rows: { label: string; value: string }[] }) {
+  return (
+    <div className="overflow-hidden rounded border border-gray-700">
+      {rows.map((row, index) => (
+        <div
+          key={`${row.label}-${index}`}
+          className={`grid grid-cols-[minmax(0,14rem)_1fr] gap-3 px-3 py-2 ${
+            index > 0 ? 'border-t border-gray-700' : ''
+          }`}
+        >
+          <div className="text-gray-400">{row.label}</div>
+          <div className="text-right text-gray-100">{row.value}</div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export function Frame(props: FrameSceneProps) {
   const frameId = parseInt(props.id)
   const frameLogicProps = { frameId }
@@ -40,7 +58,6 @@ export function Frame(props: FrameSceneProps) {
     fastDeployPlanSummary,
     fullDeployPlanSummary,
     deployRecommendation,
-    deployPlan,
     deployPlansLoading,
     deployPlansError,
     deployPlanModalOpen,
@@ -240,20 +257,39 @@ export function Frame(props: FrameSceneProps) {
               ) : (
                 <>
                   {deployRecommendation ? (
-                    <div className="rounded border border-blue-700/60 bg-blue-900/20 p-4">
-                      <div className="font-medium text-blue-100">{deployRecommendation.title}</div>
-                      <div className="mt-1 text-blue-50">{deployRecommendation.description}</div>
-                    </div>
-                  ) : null}
-
-                  {deployPlan?.notes?.length ? (
-                    <div>
-                      <div className="mb-2 text-xs text-gray-400">What happens</div>
-                      <ul className="space-y-1 text-gray-200">
-                        {deployPlan.notes.map((note, index) => (
-                          <li key={`modal-note-${index}`}>{note}</li>
-                        ))}
-                      </ul>
+                    <div className="rounded border border-blue-700/60 bg-blue-900/20 p-4 space-y-3">
+                      <div>
+                        <div className="font-medium text-blue-100">{deployRecommendation.title}</div>
+                        <div className="mt-1 text-blue-50">{deployRecommendation.description}</div>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          color={deployRecommendation.mode === 'fast' ? 'primary' : 'secondary'}
+                          type="button"
+                          onClick={() => {
+                            saveFrame()
+                            fastDeployFrame()
+                            openLogs()
+                            hideDeployPlanModal()
+                          }}
+                        >
+                          Save & fast deploy
+                        </Button>
+                        {!frameControlMode ? (
+                          <Button
+                            color={deployRecommendation.mode === 'full' ? 'primary' : 'secondary'}
+                            type="button"
+                            onClick={() => {
+                              saveFrame()
+                              fullDeployFrame()
+                              openLogs()
+                              hideDeployPlanModal()
+                            }}
+                          >
+                            Save & full deploy
+                          </Button>
+                        ) : null}
+                      </div>
                     </div>
                   ) : null}
 
@@ -262,19 +298,15 @@ export function Frame(props: FrameSceneProps) {
                       <div className="mb-2 flex items-center justify-between gap-3">
                         <div className="text-xs text-gray-400">Unsaved changes</div>
                         <Button color="secondary" size="small" type="button" onClick={() => resetUnsavedChanges()}>
-                          Reset changes
+                          Reset
                         </Button>
                       </div>
-                      <ul className="space-y-1">
-                        {unsavedChangeDetails.map((change, index) => (
-                          <li key={`unsaved-${change.label}-${index}`} className="flex items-center justify-between gap-3">
-                            <span>{change.label}</span>
-                            <span className="text-right text-gray-300">
-                              {change.requiresFullDeploy ? 'Needs full deploy' : 'Fast deploy ok'}
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
+                      <PlanTable
+                        rows={unsavedChangeDetails.map((change) => ({
+                          label: change.label,
+                          value: change.requiresFullDeploy ? 'Needs full deploy' : 'Fast deploy ok',
+                        }))}
+                      />
                     </div>
                   ) : null}
 
@@ -284,107 +316,41 @@ export function Frame(props: FrameSceneProps) {
                         <div className="text-xs text-gray-400">{lastDeploy ? 'Undeployed changes' : 'Not yet deployed'}</div>
                         {lastDeploy ? (
                           <Button color="secondary" size="small" type="button" onClick={() => resetUndeployedChanges()}>
-                            Reset changes
+                            Reset
                           </Button>
                         ) : null}
                       </div>
-                      <ul className="space-y-1">
-                        {lastDeploy
-                          ? undeployedChangeDetails.map((change, index) => (
-                              <li
-                                key={`undeployed-${change.label}-${index}`}
-                                className="flex items-center justify-between gap-3"
-                              >
-                                <span>{change.label}</span>
-                                <span className="text-right text-gray-300">
-                                  {change.requiresFullDeploy ? 'Needs full deploy' : 'Fast deploy ok'}
-                                </span>
-                              </li>
-                            ))
-                          : undeployedSummaryItems.map((item, index) => (
-                              <li key={`not-deployed-${item.label}-${index}`} className="flex items-center justify-between gap-3">
-                                <span>{item.label}</span>
-                                <span className="text-right text-gray-300">{item.value}</span>
-                          </li>
-                        ))}
-                      </ul>
+                      <PlanTable
+                        rows={
+                          lastDeploy
+                            ? undeployedChangeDetails.map((change) => ({
+                                label: change.label,
+                                value:
+                                  change.label.startsWith('FrameOS upgrade') && deployRecommendation?.mode === 'fast'
+                                    ? 'Optional full deploy'
+                                    : change.requiresFullDeploy
+                                    ? 'Needs full deploy'
+                                    : 'Fast deploy ok',
+                              }))
+                            : undeployedSummaryItems
+                        }
+                      />
                     </div>
                   ) : null}
 
-                  {undeployedChanges && undeployedSummaryItems.length > 0 ? (
+                  {fastDeployPlanSummary.length > 0 ? (
                     <div>
-                      <div className="mb-2 text-xs text-gray-400">Deployment summary</div>
-                      <ul className="space-y-1">
-                        {undeployedSummaryItems.map((item, index) => (
-                          <li key={`summary-${item.label}-${index}`} className="flex items-center justify-between gap-3">
-                            <span>{item.label}</span>
-                            <span className="text-right text-gray-300">{item.value}</span>
-                          </li>
-                        ))}
-                      </ul>
+                      <div className="mb-2 text-xs text-gray-400">Fast deploy details</div>
+                      <PlanTable rows={fastDeployPlanSummary} />
                     </div>
                   ) : null}
 
-                  <div>
-                    <div className="mb-2 text-xs text-gray-400">Fast deploy</div>
-                    {fastDeployPlanSummary.length > 0 ? (
-                      <ul className="space-y-1">
-                        {fastDeployPlanSummary.map((item, index) => (
-                          <li key={`modal-fast-${item.label}-${index}`} className="flex items-center justify-between gap-3">
-                            <span>{item.label}</span>
-                            <span className="text-right text-gray-300">{item.value}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <div className="text-gray-300">Unavailable</div>
-                    )}
-                  </div>
-
-                  <div>
-                    <div className="mb-2 text-xs text-gray-400">Full deploy</div>
-                    {fullDeployPlanSummary.length > 0 ? (
-                      <ul className="space-y-1">
-                        {fullDeployPlanSummary.map((item, index) => (
-                          <li key={`modal-full-${item.label}-${index}`} className="flex items-center justify-between gap-3">
-                            <span>{item.label}</span>
-                            <span className="text-right text-gray-300">{item.value}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <div className="text-gray-300">Unavailable</div>
-                    )}
-                  </div>
-
-                  <div className="flex flex-wrap justify-end gap-2 border-t border-gray-700 pt-4">
-                    <Button
-                      color={deployRecommendation?.mode === 'fast' ? 'primary' : 'secondary'}
-                      type="button"
-                      onClick={() => {
-                        saveFrame()
-                        fastDeployFrame()
-                        openLogs()
-                        hideDeployPlanModal()
-                      }}
-                    >
-                      Fast deploy
-                    </Button>
-                    {!frameControlMode ? (
-                      <Button
-                        color={deployRecommendation?.mode === 'full' ? 'primary' : 'secondary'}
-                        type="button"
-                        onClick={() => {
-                          saveFrame()
-                          fullDeployFrame()
-                          openLogs()
-                          hideDeployPlanModal()
-                        }}
-                      >
-                        Full deploy
-                      </Button>
-                    ) : null}
-                  </div>
+                  {fullDeployPlanSummary.length > 0 ? (
+                    <div>
+                      <div className="mb-2 text-xs text-gray-400">Full deploy details</div>
+                      <PlanTable rows={fullDeployPlanSummary} />
+                    </div>
+                  ) : null}
                 </>
               )}
               {deployPlansError ? <div className="text-red-300">{deployPlansError}</div> : null}
