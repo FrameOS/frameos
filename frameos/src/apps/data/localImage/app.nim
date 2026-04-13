@@ -1,6 +1,7 @@
 import json
 import pixie
 import options
+import algorithm
 import os
 import strutils
 import strformat
@@ -37,6 +38,24 @@ proc isImage(file: string): bool =
 proc isInThumbsDir(path: string): bool =
   let normalized = path.replace('\\', '/')
   return normalized.startsWith(".thumbs/") or normalized.contains("/.thumbs/")
+
+proc compareImagePaths(a, b: string): int =
+  result = cmpIgnoreCase(a, b)
+  if result == 0:
+    result = cmp(a, b)
+
+proc sortImagesAlphabetically(images: var seq[string]) =
+  images.sort(compareImagePaths)
+
+proc hasSameImages(a, b: seq[string]): bool =
+  if a.len != b.len:
+    return false
+
+  var left = a
+  var right = b
+  left.sortImagesAlphabetically()
+  right.sortImagesAlphabetically()
+  return left == right
 
 # Function to return all images in a folder
 proc getImagesInFolder(folder: string, search: string): seq[string] =
@@ -76,24 +95,30 @@ proc init*(self: App) =
   if self.appConfig.order == "random":
     randomize()
     self.images.shuffle()
-  elif self.appConfig.counterStateKey != "" and self.images.len > 0:
+  else:
+    self.images.sortImagesAlphabetically()
+  if self.appConfig.order != "random" and self.appConfig.counterStateKey != "" and self.images.len > 0:
     self.counter = self.scene.state{self.appConfig.counterStateKey}.getInt() mod self.images.len
 
 proc refreshImages(self: App) =
   let folder = if self.appConfig.path == "": self.frameConfig.assetsPath else: self.appConfig.path
   let previousImage = self.lastImage
   let newImages = getImagesInFolder(folder, self.appConfig.search)
-  let hasChanged = newImages != self.images
   var nextImages = newImages
+  var hasChanged = false
   self.lastPath = self.appConfig.path
   self.lastSearch = self.appConfig.search
 
   if self.appConfig.order == "random":
-    randomize()
+    hasChanged = not hasSameImages(newImages, self.images)
     if hasChanged:
+      randomize()
       nextImages.shuffle()
     else:
       nextImages = self.images
+  else:
+    nextImages.sortImagesAlphabetically()
+    hasChanged = nextImages != self.images
 
   self.images = nextImages
 

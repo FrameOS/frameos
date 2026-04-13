@@ -25,6 +25,35 @@ proc uniqueTempDir(prefix: string): string =
   createDir(result)
 
 suite "data/localImage app":
+  test "alphabetical mode sorts filenames before iterating":
+    let root = uniqueTempDir("frameos-local-image-sorted")
+    defer: removeDir(root)
+
+    writePpm(root / "zeta.ppm", 255, 0, 0)
+    writePpm(root / "Alpha.ppm", 0, 255, 0)
+    writePpm(root / "middle.ppm", 0, 0, 255)
+
+    let logs = LogStore(items: @[])
+    let scene = FrameScene(state: %*{"counter": 0}, logger: newLogger(logs))
+    let app = App(
+      scene: scene,
+      frameConfig: makeFrameConfig(root),
+      appConfig: AppConfig(
+        path: root,
+        order: "alphabetical",
+        counterStateKey: "counter",
+        metadataStateKey: "meta",
+        search: "",
+      )
+    )
+
+    discard app.get(ExecutionContext(hasImage: false))
+    check scene.state["meta"]["filename"].getStr() == "Alpha.ppm"
+    discard app.get(ExecutionContext(hasImage: false))
+    check scene.state["meta"]["filename"].getStr() == "middle.ppm"
+    discard app.get(ExecutionContext(hasImage: false))
+    check scene.state["meta"]["filename"].getStr() == "zeta.ppm"
+
   test "discovery excludes thumbs and non-images and metadata/counter are updated":
     let root = uniqueTempDir("frameos-local-image")
     defer: removeDir(root)
