@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.tasks.binary_builder import FrameBinaryPlan
-from app.tasks.frame_deploy_workflow import FrameDeployWorkflow
+from app.tasks.frame_deploy_workflow import FrameDeployWorkflow, FullDeployPlan, HelperActionPlan, PackagePlan
 from app.utils.cross_compile import TargetMetadata
 
 
@@ -206,6 +206,8 @@ async def test_full_plan_reports_installed_state_and_remote_build_dependencies(m
     assert package_map["custom-app-pkg"].installed is False
     assert package_map["python3-pip"].installed is True
     assert plan.full_deploy.package_alternatives[0].installed_package == "ntp"
+    assert plan.full_deploy.dependency_helper_plans == []
+    assert [vendor.key for vendor in plan.full_deploy.vendor_sync_plans] == ["inkyPython"]
     assert plan.full_deploy.ssh_keys_need_install is False
     assert plan.full_deploy.post_deploy["i2c"]["needs_boot_config_line"] is False
     assert plan.full_deploy.post_deploy["i2c"]["needs_runtime_enable"] is False
@@ -300,6 +302,91 @@ async def test_full_plan_includes_post_deploy_driver_and_reboot_steps(monkeypatc
     assert post_deploy["disable_userconfig"] is True
     assert post_deploy["disable_caddy_service"] is True
     assert post_deploy["final_action"] == "reboot"
+
+
+@pytest.mark.asyncio
+async def test_full_plan_tracks_helper_actions_and_fallback_packages(monkeypatch: pytest.MonkeyPatch):
+    frame = SimpleNamespace(
+        id=12,
+        name="FallbackFrame",
+        ssh_keys=[],
+        rpios={"crossCompilation": "auto"},
+        reboot=None,
+        last_successful_deploy={"frameos_version": "9.9.9"},
+        last_successful_deploy_at="2026-01-01T00:00:00+00:00",
+        to_dict=lambda: {"id": 12, "name": "FallbackFrame"},
+    )
+    deployer = FakeDeployer()
+
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.drivers_for_frame", lambda _frame: {})
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.get_settings_dict", lambda _db: {})
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.select_ssh_keys_for_frame", lambda _frame, _settings: [])
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.normalize_ssh_keys", lambda _settings: [])
+
+    workflow = FrameDeployWorkflow(
+        db=None,
+        redis=None,
+        frame=frame,
+        deployer=deployer,
+        temp_dir="",
+        binary_builder=FakeBinaryBuilder(),
+    )
+
+    plan = await workflow.plan("full")
+
+    assert plan.full_deploy is not None
+    assert [helper.helper for helper in plan.full_deploy.dependency_helper_plans] == ["ensure_ntp"]
+    assert [pkg.name for pkg in plan.full_deploy.remote_build_fallback_package_plans] == ["libssl-dev"]
+    assert "libssl-dev" not in {pkg.name for pkg in plan.full_deploy.package_plans}
+
+
+@pytest.mark.asyncio
+async def test_install_planned_remote_dependencies_uses_helper_and_fallback_plans(monkeypatch: pytest.MonkeyPatch):
+    frame = SimpleNamespace(
+        id=13,
+        name="DependencyFrame",
+        reboot=None,
+        last_successful_deploy={"frameos_version": "9.9.9"},
+        last_successful_deploy_at="2026-01-01T00:00:00+00:00",
+        to_dict=lambda: {"id": 13, "name": "DependencyFrame"},
+    )
+    deployer = RecordingDeployer()
+    workflow = FrameDeployWorkflow(
+        db=None,
+        redis=None,
+        frame=frame,
+        deployer=deployer,
+        temp_dir="",
+        binary_builder=FakeBinaryBuilder(),
+    )
+
+    helper_calls: list[str] = []
+    package_calls: list[tuple[str, str | None]] = []
+
+    async def fake_ensure_ntp_installed(_deployer):
+        helper_calls.append("ensure_ntp")
+
+    async def fake_install_if_necessary(_deployer, pkg: str, raise_on_error: bool = True, run_after_install: str | None = None):
+        package_calls.append((pkg, run_after_install))
+        return 0
+
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.ensure_ntp_installed", fake_ensure_ntp_installed)
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.install_if_necessary", fake_install_if_necessary)
+
+    full_plan = FullDeployPlan(
+        target={},
+        low_memory=False,
+        drivers=[],
+        binary_plan=await FakeBinaryBuilder().plan_build(),
+        dependency_helper_plans=[HelperActionPlan(helper="ensure_ntp", reason="time synchronization")],
+        package_plans=[PackagePlan(name="caddy", reason="proxy", installed=False)],
+        remote_build_fallback_package_plans=[PackagePlan(name="libssl-dev", reason="fallback", installed=False)],
+    )
+
+    await workflow._install_planned_remote_dependencies(full_plan=full_plan, cross_compiled=False)
+
+    assert helper_calls == ["ensure_ntp"]
+    assert package_calls == [("caddy", None), ("libssl-dev", None)]
 
 
 

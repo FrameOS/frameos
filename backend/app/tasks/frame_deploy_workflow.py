@@ -16,7 +16,7 @@ from app.models.frame import Frame, normalize_https_proxy, update_frame
 from app.models.log import new_log as log
 from app.models.settings import get_settings_dict
 from app.tasks._frame_deployer import FrameDeployer
-from app.tasks.binary_builder import FrameBinaryBuilder, FrameBinaryPlan
+from app.tasks.binary_builder import FrameBinaryBuilder, FrameBinaryBuildResult, FrameBinaryPlan
 from app.tasks.frame_deploy_helpers import (
     DEFAULT_QUICKJS_VERSION,
     ensure_lgpio,
@@ -38,6 +38,8 @@ REMOTE_BUILD_APT_PACKAGES = (
     "hostapd",
     "imagemagick",
 )
+
+HELPER_ENSURE_NTP = "ensure_ntp"
 
 
 @dataclass(slots=True)
@@ -72,6 +74,20 @@ class PackageAlternativePlan:
 
 
 @dataclass(slots=True)
+class HelperActionPlan:
+    helper: str
+    reason: str
+
+
+@dataclass(slots=True)
+class VendorSyncPlan:
+    key: str
+    vendor_folder: str
+    label: str
+    setup_commands: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
 class FastDeployPlan:
     reload_supported: bool
     tls_settings_changed: bool
@@ -93,6 +109,9 @@ class FullDeployPlan:
     binary_plan: FrameBinaryPlan
     package_plans: list[PackagePlan] = field(default_factory=list)
     package_alternatives: list[PackageAlternativePlan] = field(default_factory=list)
+    dependency_helper_plans: list[HelperActionPlan] = field(default_factory=list)
+    remote_build_fallback_package_plans: list[PackagePlan] = field(default_factory=list)
+    vendor_sync_plans: list[VendorSyncPlan] = field(default_factory=list)
     lgpio_required: bool = False
     lgpio_installed: bool = False
     quickjs_required_if_remote_build: bool = False
@@ -305,11 +324,21 @@ class FrameDeployWorkflow:
         package_alternatives = [
             await self._plan_package_alternatives(["ntp", "ntpsec"], "time synchronization"),
         ]
+        dependency_helper_plans = [
+            HelperActionPlan(helper=HELPER_ENSURE_NTP, reason=alternative.reason)
+            for alternative in package_alternatives
+            if alternative.names == ["ntp", "ntpsec"] and not alternative.installed_package
+        ]
+        remote_build_fallback_package_plans: list[PackagePlan] = []
 
         for pkg_name in REMOTE_BUILD_APT_PACKAGES:
             package_plans.append(await self._plan_package(pkg_name, "base remote deploy/build dependency"))
         if not binary_plan.will_attempt_cross_compile:
             package_plans.append(await self._plan_package("libssl-dev", "OpenSSL headers for on-device FrameOS build"))
+        else:
+            remote_build_fallback_package_plans.append(
+                await self._plan_package("libssl-dev", "OpenSSL headers if cross-compilation falls back to an on-device build")
+            )
         package_plans.append(
             await self._plan_package(
                 "caddy",
@@ -345,6 +374,26 @@ class FrameDeployWorkflow:
                     await self._plan_package("python3-pip", "inkyHyperPixel2r vendor setup"),
                     await self._plan_package("python3-venv", "inkyHyperPixel2r vendor setup"),
                 ]
+            )
+
+        vendor_sync_plans: list[VendorSyncPlan] = []
+        if inky_python := drivers.get("inkyPython"):
+            vendor_sync_plans.append(
+                VendorSyncPlan(
+                    key="inkyPython",
+                    vendor_folder=inky_python.vendor_folder or "",
+                    label="inkyPython vendor files",
+                    setup_commands=[self._python_vendor_setup_command(inky_python.vendor_folder or "")],
+                )
+            )
+        if inky_hyperpixel := drivers.get("inkyHyperPixel2r"):
+            vendor_sync_plans.append(
+                VendorSyncPlan(
+                    key="inkyHyperPixel2r",
+                    vendor_folder=inky_hyperpixel.vendor_folder or "",
+                    label="inkyHyperPixel2r vendor files",
+                    setup_commands=[self._python_vendor_setup_command(inky_hyperpixel.vendor_folder or "")],
+                )
             )
 
         quickjs_required_if_remote_build = not force_cross_compile
@@ -402,6 +451,9 @@ class FrameDeployWorkflow:
                 binary_plan=binary_plan,
                 package_plans=package_plans,
                 package_alternatives=package_alternatives,
+                dependency_helper_plans=dependency_helper_plans,
+                remote_build_fallback_package_plans=remote_build_fallback_package_plans,
+                vendor_sync_plans=vendor_sync_plans,
                 lgpio_required=lgpio_required,
                 lgpio_installed=lgpio_installed,
                 quickjs_required_if_remote_build=quickjs_required_if_remote_build,
@@ -460,186 +512,33 @@ class FrameDeployWorkflow:
         frame = self.frame
         frame.status = "deploying"
         await update_frame(self.db, self.redis, frame)
-
-        install_package = partial(install_if_necessary, self.deployer)
         build_id = plan.build_id
 
         await self.deployer.log("stdout", f"{icon} Deploying frame {frame.name} with build id {build_id}")
 
         try:
-            if full_plan.selected_public_keys and full_plan.ssh_keys_need_install:
-                await self.deployer.log("stdout", f"{icon} Checking SSH keys on device")
-                await _install_authorized_keys(
-                    self.db,
-                    self.redis,
-                    frame,
-                    full_plan.selected_public_keys,
-                    full_plan.known_public_keys,
-                )
-            elif not full_plan.selected_public_keys:
-                await self.deployer.log("stdout", f"{icon} No SSH public keys configured; skipping authorized_keys install")
-            else:
-                await self.deployer.log("stdout", f"{icon} SSH public keys already match the last deploy; skipping authorized_keys install")
-
-            build_result = await self.binary_builder.build(full_plan.binary_plan)
-            prebuilt_entry = build_result.prebuilt_entry
-            cross_compiled = build_result.cross_compiled
-
-            if full_plan.low_memory and not cross_compiled:
-                await self.deployer.log("stdout", f"{icon} Low memory device, stopping FrameOS for compilation")
-                await self.deployer.exec_command("sudo service frameos stop", raise_on_error=False)
-
-            if not cross_compiled and full_plan.binary_plan.will_attempt_cross_compile:
-                await install_package("libssl-dev")
-
-            await self.deployer.log("stdout", f"{icon} Installing dependencies on remote")
-            for alternative in full_plan.package_alternatives:
-                if alternative.names == ["ntp", "ntpsec"] and not alternative.installed_package:
-                    await ensure_ntp_installed(self.deployer)
-
-            for package_plan in full_plan.package_plans:
-                if package_plan.installed:
-                    continue
-                await install_package(
-                    package_plan.name,
-                    run_after_install=package_plan.run_after_install,
-                )
-
-            await ensure_lgpio(
-                self.deployer,
-                drivers=drivers_for_frame(frame),
-                prebuilt_entry=prebuilt_entry,
-                already_installed=full_plan.lgpio_installed,
-            )
-
-            quickjs_dirname = await ensure_quickjs(
-                self.deployer,
-                prebuilt_entry=prebuilt_entry,
+            await self._install_authorized_keys_for_full_deploy(full_plan)
+            build_result = await self._build_full_release_binary(full_plan)
+            quickjs_dirname = await self._prepare_remote_for_full_release(
+                full_plan=full_plan,
+                build_result=build_result,
                 build_id=build_id,
-                cross_compiled=cross_compiled,
-                quickjs_installed=full_plan.quickjs_installed,
-                quickjs_dirname=full_plan.quickjs_dirname or f"quickjs-{DEFAULT_QUICKJS_VERSION}",
             )
-
-            await self.deployer.exec_command("sudo mkdir -p /srv/frameos && sudo chown $(whoami):$(whoami) /srv/frameos")
-            await self.deployer.exec_command("mkdir -p /srv/frameos/build/ /srv/frameos/logs/")
-            await self.deployer.exec_command(f"mkdir -p /srv/frameos/releases/release_{build_id}")
-            release_frameos_path = f"/srv/frameos/releases/release_{build_id}/frameos"
-
-            if cross_compiled:
-                await self.deployer.log("stdout", f"{icon} Using cross-compiled binary")
-                if not build_result.binary_path:
-                    raise RuntimeError("Cross compilation succeeded but binary path is unknown")
-                await upload_binary(self.deployer, build_result.binary_path, release_frameos_path)
-            else:
-                await self.deployer.log("stdout", f"{icon} Building FrameOS on remote, no cross-compilation")
-                await self.deployer.log("stdout", f"> add /srv/frameos/build/build_{build_id}.tar.gz")
-
-                with open(build_result.archive_path, "rb") as fh:
-                    data = fh.read()
-                await upload_file(
-                    self.deployer.db,
-                    self.deployer.redis,
-                    self.deployer.frame,
-                    f"/srv/frameos/build/build_{build_id}.tar.gz",
-                    data,
-                )
-
-                await self.deployer.exec_command(
-                    f"cd /srv/frameos/build && tar -xzf build_{build_id}.tar.gz && rm build_{build_id}.tar.gz"
-                )
-                if quickjs_dirname:
-                    await self.deployer.exec_command(
-                        f"ln -s /srv/frameos/vendor/quickjs/{quickjs_dirname} /srv/frameos/build/build_{build_id}/quickjs",
-                    )
-                await self.deployer.exec_command(
-                    f"cd /srv/frameos/build/build_{build_id} && "
-                    "PARALLEL_MEM=$(awk '/MemTotal/{printf \"%.0f\\n\", $2/1024/250}' /proc/meminfo) && "
-                    "PARALLEL=$(($PARALLEL_MEM < $(nproc) ? $PARALLEL_MEM : $(nproc))) && "
-                    "make -j$PARALLEL",
-                    timeout=3600,
-                )
-                await self.deployer.exec_command(
-                    f"cp /srv/frameos/build/build_{build_id}/frameos {release_frameos_path}"
-                )
-
-            await self.deployer._upload_scenes_json(f"/srv/frameos/releases/release_{build_id}/scenes.json.gz", gzip=True)
-            await self.deployer._upload_frame_json(f"/srv/frameos/releases/release_{build_id}/frame.json")
-
-            drivers = drivers_for_frame(frame)
-            if inky_python := drivers.get("inkyPython"):
-                vendor_folder = inky_python.vendor_folder or ""
-                await sync_vendor_dir(
-                    self.deployer,
-                    os.path.join(build_result.build_dir, "vendor", vendor_folder),
-                    vendor_folder,
-                    "inkyPython vendor files",
-                    cross_compiled,
-                    build_id,
-                )
-                await self.deployer.exec_command(
-                    f"cd /srv/frameos/vendor/{inky_python.vendor_folder} && "
-                    "([ ! -d env ] && python3 -m venv env || echo 'env exists') && "
-                    "(sha256sum -c requirements.txt.sha256sum 2>/dev/null || "
-                    "(echo '> env/bin/pip3 install -r requirements.txt' && "
-                    "env/bin/pip3 install -r requirements.txt && "
-                    "sha256sum requirements.txt > requirements.txt.sha256sum))"
-                )
-
-            if inky_hyperpixel := drivers.get("inkyHyperPixel2r"):
-                vendor_folder = inky_hyperpixel.vendor_folder or ""
-                await sync_vendor_dir(
-                    self.deployer,
-                    os.path.join(build_result.build_dir, "vendor", vendor_folder),
-                    vendor_folder,
-                    "inkyHyperPixel2r vendor files",
-                    cross_compiled,
-                    build_id,
-                )
-                await self.deployer.exec_command(
-                    f"cd /srv/frameos/vendor/{inky_hyperpixel.vendor_folder} && "
-                    "([ ! -d env ] && python3 -m venv env || echo 'env exists') && "
-                    "(sha256sum -c requirements.txt.sha256sum 2>/dev/null || "
-                    "(echo '> env/bin/pip3 install -r requirements.txt' && "
-                    "env/bin/pip3 install -r requirements.txt && "
-                    "sha256sum requirements.txt > requirements.txt.sha256sum))"
-                )
-
-            with open("../frameos/frameos.service", "r", encoding="utf-8") as f:
-                service_contents = f.read().replace("%I", frame.ssh_user)
-            await upload_file(
-                self.deployer.db,
-                self.deployer.redis,
-                self.deployer.frame,
-                f"/srv/frameos/releases/release_{build_id}/frameos.service",
-                service_contents.encode("utf-8"),
+            await self._prepare_release_directory(build_id)
+            await self._publish_release_binary(
+                build_result=build_result,
+                build_id=build_id,
+                quickjs_dirname=quickjs_dirname,
             )
-
-            await self.deployer.exec_command(
-                f"mkdir -p /srv/frameos/state && ln -s /srv/frameos/state /srv/frameos/releases/release_{build_id}/state"
+            await self._upload_release_metadata(build_id)
+            await self._sync_vendor_dependencies(
+                full_plan=full_plan,
+                build_result=build_result,
+                build_id=build_id,
             )
-            await self.deployer.exec_command(
-                f"sudo cp /srv/frameos/releases/release_{build_id}/frameos.service /etc/systemd/system/frameos.service"
-            )
-            await self.deployer.exec_command("sudo chown root:root /etc/systemd/system/frameos.service")
-            await self.deployer.exec_command("sudo chmod 644 /etc/systemd/system/frameos.service")
-            await self.deployer.exec_command(
-                f"rm -rf /srv/frameos/current && ln -s /srv/frameos/releases/release_{build_id} /srv/frameos/current"
-            )
-
+            await self._install_and_activate_release(build_id)
             await sync_assets(self.db, self.redis, frame)
-            await self.deployer.exec_command(
-                "if [ -d /srv/frameos/build ] && cd /srv/frameos/build && ls -dt1 build_* >/dev/null 2>&1; then "
-                "ls -dt1 build_* | tail -n +11 | xargs rm -rf; "
-                "fi",
-                raise_on_error=False,
-            )
-            await self.deployer.exec_command("mkdir -p /srv/frameos/build/cache && cd /srv/frameos/build/cache && find . -type f \\( -atime +0 -a -mtime +0 \\) | xargs rm -rf")
-            await self.deployer.exec_command(
-                "cd /srv/frameos/releases && "
-                "ls -dt1 release_* | grep -v \"$(basename $(readlink ../current))\" | tail -n +11 | xargs rm -rf"
-            )
-
+            await self._cleanup_release_artifacts()
             await self._run_post_deploy_cleanup(post_deploy=full_plan.post_deploy)
 
             frame.status = "starting"
@@ -651,6 +550,239 @@ class FrameDeployWorkflow:
             frame.status = "uninitialized"
             await update_frame(self.db, self.redis, frame)
             raise
+
+    async def _install_authorized_keys_for_full_deploy(self, full_plan: FullDeployPlan) -> None:
+        if full_plan.selected_public_keys and full_plan.ssh_keys_need_install:
+            await self.deployer.log("stdout", f"{icon} Checking SSH keys on device")
+            await _install_authorized_keys(
+                self.db,
+                self.redis,
+                self.frame,
+                full_plan.selected_public_keys,
+                full_plan.known_public_keys,
+            )
+        elif not full_plan.selected_public_keys:
+            await self.deployer.log("stdout", f"{icon} No SSH public keys configured; skipping authorized_keys install")
+        else:
+            await self.deployer.log("stdout", f"{icon} SSH public keys already match the last deploy; skipping authorized_keys install")
+
+    async def _build_full_release_binary(self, full_plan: FullDeployPlan) -> FrameBinaryBuildResult:
+        return await self.binary_builder.build(full_plan.binary_plan)
+
+    async def _prepare_remote_for_full_release(
+        self,
+        *,
+        full_plan: FullDeployPlan,
+        build_result: FrameBinaryBuildResult,
+        build_id: str,
+    ) -> str | None:
+        await self._stop_frameos_for_remote_build_if_needed(
+            full_plan=full_plan,
+            cross_compiled=build_result.cross_compiled,
+        )
+        await self._install_planned_remote_dependencies(
+            full_plan=full_plan,
+            cross_compiled=build_result.cross_compiled,
+        )
+        await ensure_lgpio(
+            self.deployer,
+            required=full_plan.lgpio_required,
+            prebuilt_entry=build_result.prebuilt_entry,
+            already_installed=full_plan.lgpio_installed,
+        )
+        return await ensure_quickjs(
+            self.deployer,
+            prebuilt_entry=build_result.prebuilt_entry,
+            build_id=build_id,
+            cross_compiled=build_result.cross_compiled,
+            quickjs_installed=full_plan.quickjs_installed,
+            quickjs_dirname=full_plan.quickjs_dirname or f"quickjs-{DEFAULT_QUICKJS_VERSION}",
+        )
+
+    async def _stop_frameos_for_remote_build_if_needed(self, *, full_plan: FullDeployPlan, cross_compiled: bool) -> None:
+        if full_plan.low_memory and not cross_compiled:
+            await self.deployer.log("stdout", f"{icon} Low memory device, stopping FrameOS for compilation")
+            await self.deployer.exec_command("sudo service frameos stop", raise_on_error=False)
+
+    async def _install_planned_remote_dependencies(self, *, full_plan: FullDeployPlan, cross_compiled: bool) -> None:
+        await self.deployer.log("stdout", f"{icon} Installing dependencies on remote")
+        await self._run_dependency_helper_plans(full_plan.dependency_helper_plans)
+        await self._install_package_plans(full_plan.package_plans)
+        if not cross_compiled:
+            await self._install_package_plans(full_plan.remote_build_fallback_package_plans)
+
+    async def _run_dependency_helper_plans(self, helper_plans: list[HelperActionPlan]) -> None:
+        for helper_plan in helper_plans:
+            if helper_plan.helper == HELPER_ENSURE_NTP:
+                await ensure_ntp_installed(self.deployer)
+                continue
+            raise ValueError(f"Unknown dependency helper plan: {helper_plan.helper}")
+
+    async def _install_package_plans(self, package_plans: list[PackagePlan]) -> None:
+        install_package = partial(install_if_necessary, self.deployer)
+        for package_plan in package_plans:
+            if package_plan.installed:
+                continue
+            await install_package(
+                package_plan.name,
+                run_after_install=package_plan.run_after_install,
+            )
+
+    async def _prepare_release_directory(self, build_id: str) -> None:
+        await self.deployer.exec_command("sudo mkdir -p /srv/frameos && sudo chown $(whoami):$(whoami) /srv/frameos")
+        await self.deployer.exec_command("mkdir -p /srv/frameos/build/ /srv/frameos/logs/")
+        await self.deployer.exec_command(f"mkdir -p {self._release_dir(build_id)}")
+
+    async def _publish_release_binary(
+        self,
+        *,
+        build_result: FrameBinaryBuildResult,
+        build_id: str,
+        quickjs_dirname: str | None,
+    ) -> None:
+        release_frameos_path = self._release_frameos_path(build_id)
+        if build_result.cross_compiled:
+            await self._publish_cross_compiled_binary(build_result, release_frameos_path)
+            return
+        await self._publish_remote_built_binary(build_result, build_id, release_frameos_path, quickjs_dirname)
+
+    async def _publish_cross_compiled_binary(
+        self,
+        build_result: FrameBinaryBuildResult,
+        release_frameos_path: str,
+    ) -> None:
+        await self.deployer.log("stdout", f"{icon} Using cross-compiled binary")
+        if not build_result.binary_path:
+            raise RuntimeError("Cross compilation succeeded but binary path is unknown")
+        await upload_binary(self.deployer, build_result.binary_path, release_frameos_path)
+
+    async def _publish_remote_built_binary(
+        self,
+        build_result: FrameBinaryBuildResult,
+        build_id: str,
+        release_frameos_path: str,
+        quickjs_dirname: str | None,
+    ) -> None:
+        await self.deployer.log("stdout", f"{icon} Building FrameOS on remote, no cross-compilation")
+        remote_archive_path = self._remote_build_archive_path(build_id)
+        remote_build_dir = self._remote_build_dir(build_id)
+        await self.deployer.log("stdout", f"> add {remote_archive_path}")
+
+        with open(build_result.archive_path, "rb") as fh:
+            data = fh.read()
+        await upload_file(
+            self.deployer.db,
+            self.deployer.redis,
+            self.deployer.frame,
+            remote_archive_path,
+            data,
+        )
+
+        await self.deployer.exec_command(
+            f"cd /srv/frameos/build && tar -xzf build_{build_id}.tar.gz && rm build_{build_id}.tar.gz"
+        )
+        if quickjs_dirname:
+            await self.deployer.exec_command(
+                f"ln -s /srv/frameos/vendor/quickjs/{quickjs_dirname} {remote_build_dir}/quickjs",
+            )
+        await self.deployer.exec_command(
+            f"cd {remote_build_dir} && "
+            "PARALLEL_MEM=$(awk '/MemTotal/{printf \"%.0f\\n\", $2/1024/250}' /proc/meminfo) && "
+            "PARALLEL=$(($PARALLEL_MEM < $(nproc) ? $PARALLEL_MEM : $(nproc))) && "
+            "make -j$PARALLEL",
+            timeout=3600,
+        )
+        await self.deployer.exec_command(
+            f"cp {remote_build_dir}/frameos {release_frameos_path}"
+        )
+
+    async def _upload_release_metadata(self, build_id: str) -> None:
+        await self.deployer._upload_scenes_json(f"{self._release_dir(build_id)}/scenes.json.gz", gzip=True)
+        await self.deployer._upload_frame_json(f"{self._release_dir(build_id)}/frame.json")
+
+    async def _sync_vendor_dependencies(
+        self,
+        *,
+        full_plan: FullDeployPlan,
+        build_result: FrameBinaryBuildResult,
+        build_id: str,
+    ) -> None:
+        for vendor_plan in full_plan.vendor_sync_plans:
+            await sync_vendor_dir(
+                self.deployer,
+                os.path.join(build_result.build_dir, "vendor", vendor_plan.vendor_folder),
+                vendor_plan.vendor_folder,
+                vendor_plan.label,
+                build_result.cross_compiled,
+                build_id,
+            )
+            for command in vendor_plan.setup_commands:
+                await self.deployer.exec_command(command)
+
+    async def _install_and_activate_release(self, build_id: str) -> None:
+        with open("../frameos/frameos.service", "r", encoding="utf-8") as f:
+            service_contents = f.read().replace("%I", self.frame.ssh_user)
+        await upload_file(
+            self.deployer.db,
+            self.deployer.redis,
+            self.deployer.frame,
+            f"{self._release_dir(build_id)}/frameos.service",
+            service_contents.encode("utf-8"),
+        )
+
+        await self.deployer.exec_command(
+            f"mkdir -p /srv/frameos/state && ln -s /srv/frameos/state {self._release_dir(build_id)}/state"
+        )
+        await self.deployer.exec_command(
+            f"sudo cp {self._release_dir(build_id)}/frameos.service /etc/systemd/system/frameos.service"
+        )
+        await self.deployer.exec_command("sudo chown root:root /etc/systemd/system/frameos.service")
+        await self.deployer.exec_command("sudo chmod 644 /etc/systemd/system/frameos.service")
+        await self.deployer.exec_command(
+            f"rm -rf /srv/frameos/current && ln -s {self._release_dir(build_id)} /srv/frameos/current"
+        )
+
+    async def _cleanup_release_artifacts(self) -> None:
+        await self.deployer.exec_command(
+            "if [ -d /srv/frameos/build ] && cd /srv/frameos/build && ls -dt1 build_* >/dev/null 2>&1; then "
+            "ls -dt1 build_* | tail -n +11 | xargs rm -rf; "
+            "fi",
+            raise_on_error=False,
+        )
+        await self.deployer.exec_command(
+            "mkdir -p /srv/frameos/build/cache && cd /srv/frameos/build/cache && find . -type f \\( -atime +0 -a -mtime +0 \\) | xargs rm -rf"
+        )
+        await self.deployer.exec_command(
+            "cd /srv/frameos/releases && "
+            "ls -dt1 release_* | grep -v \"$(basename $(readlink ../current))\" | tail -n +11 | xargs rm -rf"
+        )
+
+    @staticmethod
+    def _release_dir(build_id: str) -> str:
+        return f"/srv/frameos/releases/release_{build_id}"
+
+    @classmethod
+    def _release_frameos_path(cls, build_id: str) -> str:
+        return f"{cls._release_dir(build_id)}/frameos"
+
+    @staticmethod
+    def _remote_build_dir(build_id: str) -> str:
+        return f"/srv/frameos/build/build_{build_id}"
+
+    @staticmethod
+    def _remote_build_archive_path(build_id: str) -> str:
+        return f"/srv/frameos/build/build_{build_id}.tar.gz"
+
+    @staticmethod
+    def _python_vendor_setup_command(vendor_folder: str) -> str:
+        return (
+            f"cd /srv/frameos/vendor/{vendor_folder} && "
+            "([ ! -d env ] && python3 -m venv env || echo 'env exists') && "
+            "(sha256sum -c requirements.txt.sha256sum 2>/dev/null || "
+            "(echo '> env/bin/pip3 install -r requirements.txt' && "
+            "env/bin/pip3 install -r requirements.txt && "
+            "sha256sum requirements.txt > requirements.txt.sha256sum))"
+        )
 
     async def _run_post_deploy_cleanup(self, *, post_deploy: dict[str, Any]) -> None:
         await self.deployer.log("stdout", f"{icon} Running final cleanup scripts")
