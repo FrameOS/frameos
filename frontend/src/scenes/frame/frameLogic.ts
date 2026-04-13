@@ -477,6 +477,32 @@ function buildDeployPlanRequestBody(frame: Partial<FrameType>): Record<string, a
   return json
 }
 
+function getResponseDetail(payload: unknown): string | null {
+  if (payload && typeof payload === 'object' && 'detail' in payload && typeof payload.detail === 'string') {
+    return payload.detail
+  }
+  return null
+}
+
+function isFrameConnectionError(detail: string | null | undefined): boolean {
+  if (!detail) {
+    return false
+  }
+
+  const normalizedDetail = detail.toLowerCase()
+  return (
+    normalizedDetail.includes('unable to connect to') ||
+    normalizedDetail.includes('unable to reach frame') ||
+    normalizedDetail.includes('agent disconnected') ||
+    normalizedDetail.includes('connection refused') ||
+    normalizedDetail.includes('no route to host') ||
+    normalizedDetail.includes('name or service not known') ||
+    normalizedDetail.includes('temporary failure in name resolution') ||
+    normalizedDetail.includes('timeout to http') ||
+    normalizedDetail.includes('timed out')
+  )
+}
+
 function buildFrameosVersionSummary(plan?: DeployPlanResponse | null): SummaryItem[] {
   if (!plan) {
     return []
@@ -1053,7 +1079,11 @@ export const frameLogic = kea<frameLogicType>([
         body: JSON.stringify(buildDeployPlanRequestBody(values.frameForm)),
       })
       if (!response.ok) {
-        actions.loadDeployPlansFailure('Failed to load deploy plans')
+        const payload = await response.json().catch(() => ({}))
+        const detail = getResponseDetail(payload)
+        actions.loadDeployPlansFailure(
+          isFrameConnectionError(detail) ? 'Failed to conennect to frame' : detail || 'Failed to load deploy plans'
+        )
         return
       }
 

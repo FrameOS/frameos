@@ -306,7 +306,7 @@ export function Frame(props: FrameSceneProps) {
                     </div>
                   ) : null}
 
-                  {(unsavedChanges || undeployedChanges) ? (
+                  {(unsavedChanges || undeployedChanges) && !isFirstDeploy ? (
                     <div>
                       <div className="mb-2 flex items-center justify-between gap-3">
                         <div className="text-xs text-gray-400">{lastDeploy ? 'Changes to deploy' : 'Not yet deployed'}</div>
