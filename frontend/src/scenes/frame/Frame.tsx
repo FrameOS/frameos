@@ -55,6 +55,7 @@ export function Frame(props: FrameSceneProps) {
     undeployedChangeDetails,
     lastDeploy,
     undeployedSummaryItems,
+    frameosVersionSummary,
     fastDeployPlanSummary,
     fullDeployPlanSummary,
     deployRecommendation,
@@ -91,6 +92,7 @@ export function Frame(props: FrameSceneProps) {
     frame?.agent && frame.agent.agentEnabled && frame.agent.agentSharedSecret && frame.agent.agentRunCommands
   const frameControlMode = isFrameControlMode()
   const inFrameAdminMode = isInFrameAdminMode()
+  const isFirstDeploy = !lastDeploy
 
   const logoutFromFrame = async () => {
     await fetch('/api/admin/logout', { method: 'POST', credentials: 'include' })
@@ -263,21 +265,23 @@ export function Frame(props: FrameSceneProps) {
                         <div className="mt-1 text-blue-50">{deployRecommendation.description}</div>
                       </div>
                       <div className="flex flex-wrap gap-2">
-                        <Button
-                          color={deployRecommendation.mode === 'fast' ? 'primary' : 'secondary'}
-                          type="button"
-                          onClick={() => {
-                            saveFrame()
-                            fastDeployFrame()
-                            openLogs()
-                            hideDeployPlanModal()
-                          }}
-                        >
-                          Save & fast deploy
-                        </Button>
+                        {!isFirstDeploy ? (
+                          <Button
+                            color={deployRecommendation.mode === 'fast' ? 'primary' : 'secondary'}
+                            type="button"
+                            onClick={() => {
+                              saveFrame()
+                              fastDeployFrame()
+                              openLogs()
+                              hideDeployPlanModal()
+                            }}
+                          >
+                            Save & fast deploy
+                          </Button>
+                        ) : null}
                         {!frameControlMode ? (
                           <Button
-                            color={deployRecommendation.mode === 'full' ? 'primary' : 'secondary'}
+                            color={deployRecommendation.mode === 'full' || isFirstDeploy ? 'primary' : 'secondary'}
                             type="button"
                             onClick={() => {
                               saveFrame()
@@ -310,6 +314,13 @@ export function Frame(props: FrameSceneProps) {
                     </div>
                   ) : null}
 
+                  {frameosVersionSummary.length > 0 ? (
+                    <div>
+                      <div className="mb-2 text-xs text-gray-400">FrameOS</div>
+                      <PlanTable rows={frameosVersionSummary} />
+                    </div>
+                  ) : null}
+
                   {undeployedChanges ? (
                     <div>
                       <div className="mb-2 flex items-center justify-between gap-3">
@@ -320,25 +331,23 @@ export function Frame(props: FrameSceneProps) {
                           </Button>
                         ) : null}
                       </div>
-                      <PlanTable
-                        rows={
-                          lastDeploy
-                            ? undeployedChangeDetails.map((change) => ({
-                                label: change.label,
-                                value:
-                                  change.label.startsWith('FrameOS upgrade') && deployRecommendation?.mode === 'fast'
-                                    ? 'Optional full deploy'
-                                    : change.requiresFullDeploy
-                                    ? 'Needs full deploy'
-                                    : 'Fast deploy ok',
-                              }))
-                            : undeployedSummaryItems
-                        }
-                      />
+                      {lastDeploy ? (
+                        <PlanTable
+                          rows={undeployedChangeDetails.map((change) => ({
+                            label: change.label,
+                            value:
+                              change.label.startsWith('FrameOS upgrade') && deployRecommendation?.mode === 'fast'
+                                ? 'Optional full deploy'
+                                : change.requiresFullDeploy
+                                ? 'Needs full deploy'
+                                : 'Fast deploy ok',
+                          }))}
+                        />
+                      ) : null}
                     </div>
                   ) : null}
 
-                  {fastDeployPlanSummary.length > 0 ? (
+                  {!isFirstDeploy && fastDeployPlanSummary.length > 0 ? (
                     <div>
                       <div className="mb-2 text-xs text-gray-400">Fast deploy details</div>
                       <PlanTable rows={fastDeployPlanSummary} />

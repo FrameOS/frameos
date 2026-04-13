@@ -46,10 +46,9 @@ async def install_if_necessary(
             raise
         return 1
 
-    quoted_pkg = shlex.quote(sanitized_pkg)
     package_installed = (
         await deployer.exec_command(
-            f"dpkg -l | grep -q \"^ii  {quoted_pkg} \"",
+            f"dpkg-query -W -f='${{Status}}' {shlex.quote(sanitized_pkg)} 2>/dev/null | grep -q '^install ok installed$'",
             raise_on_error=False,
             log_command=False,
             log_output=False,
@@ -61,7 +60,7 @@ async def install_if_necessary(
 
     output: list[str] = []
     response = await deployer.exec_command(
-        f"sudo apt-get install -y {quoted_pkg}",
+        f"sudo apt-get install -y {shlex.quote(sanitized_pkg)}",
         raise_on_error=False,
         output=output,
     )
@@ -77,7 +76,7 @@ async def install_if_necessary(
         if any(s in combined_output for s in search_strings):
             await deployer.log("stdout", f"{icon} Installing {sanitized_pkg} failed. Trying to update apt.")
             response = await deployer.exec_command(
-                "sudo apt-get update && sudo apt-get install -y " + quoted_pkg,
+                "sudo apt-get update && sudo apt-get install -y " + shlex.quote(sanitized_pkg),
                 raise_on_error=raise_on_error,
             )
             if response != 0:
@@ -151,7 +150,7 @@ async def sync_vendor_dir(
 async def ensure_ntp_installed(deployer: FrameDeployer) -> None:
     for candidate in ("ntp", "ntpsec"):
         status = await deployer.exec_command(
-            f"dpkg -l | grep -q \"^ii  {shlex.quote(candidate)} \"",
+            f"dpkg-query -W -f='${{Status}}' {shlex.quote(candidate)} 2>/dev/null | grep -q '^install ok installed$'",
             raise_on_error=False,
             log_command=False,
             log_output=False,

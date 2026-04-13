@@ -37,7 +37,6 @@ REMOTE_BUILD_APT_PACKAGES = (
     "build-essential",
     "hostapd",
     "imagemagick",
-    "libssl-dev",
 )
 
 
@@ -99,6 +98,7 @@ class FullDeployPlan:
     quickjs_required_if_remote_build: bool = False
     quickjs_dirname: str | None = None
     quickjs_installed: bool = False
+    ssh_keys_need_install: bool = False
     selected_public_keys: list[str] = field(default_factory=list)
     known_public_keys: list[str] = field(default_factory=list)
     post_deploy: dict[str, Any] = field(default_factory=dict)
@@ -120,7 +120,7 @@ class FullDeployPlan:
                 "dirname": self.quickjs_dirname,
                 "installed": self.quickjs_installed,
             },
-            "selected_ssh_key_count": len(self.selected_public_keys),
+            "ssh_keys_need_install": self.ssh_keys_need_install,
             "post_deploy": self.post_deploy,
         }
 
@@ -298,6 +298,8 @@ class FrameDeployWorkflow:
         selected_keys = select_ssh_keys_for_frame(self.frame, settings)
         selected_public_keys = [key.get("public") for key in selected_keys if key.get("public")]
         known_public_keys = [key.get("public") for key in normalize_ssh_keys(settings) if key.get("public")]
+        previous_ssh_keys = self.frame.last_successful_deploy.get("ssh_keys") if isinstance(self.frame.last_successful_deploy, dict) else None
+        ssh_keys_need_install = list(getattr(self.frame, "ssh_keys", None) or []) != list(previous_ssh_keys or [])
 
         package_plans: list[PackagePlan] = []
         package_alternatives = [
@@ -306,6 +308,8 @@ class FrameDeployWorkflow:
 
         for pkg_name in REMOTE_BUILD_APT_PACKAGES:
             package_plans.append(await self._plan_package(pkg_name, "base remote deploy/build dependency"))
+        if not binary_plan.will_attempt_cross_compile:
+            package_plans.append(await self._plan_package("libssl-dev", "OpenSSL headers for on-device FrameOS build"))
         package_plans.append(
             await self._plan_package(
                 "caddy",
@@ -372,10 +376,10 @@ class FrameDeployWorkflow:
         ]
         if low_memory:
             notes.append("Device is low memory; on-device build path will stop FrameOS before compilation.")
-        if selected_public_keys:
-            notes.append(f"Will verify/install {len(selected_public_keys)} selected SSH public key(s).")
-        else:
+        if not selected_public_keys:
             notes.append("No SSH public keys selected for deployment.")
+        elif ssh_keys_need_install:
+            notes.append("SSH public keys changed since the last deploy and will be installed on the frame.")
 
         post_deploy = await self._plan_post_deploy_cleanup(drivers=drivers, low_memory=low_memory)
 
@@ -403,6 +407,7 @@ class FrameDeployWorkflow:
                 quickjs_required_if_remote_build=quickjs_required_if_remote_build,
                 quickjs_dirname=quickjs_dirname,
                 quickjs_installed=quickjs_installed,
+                ssh_keys_need_install=ssh_keys_need_install,
                 selected_public_keys=selected_public_keys,
                 known_public_keys=known_public_keys,
                 post_deploy=post_deploy,
@@ -462,7 +467,7 @@ class FrameDeployWorkflow:
         await self.deployer.log("stdout", f"{icon} Deploying frame {frame.name} with build id {build_id}")
 
         try:
-            if full_plan.selected_public_keys:
+            if full_plan.selected_public_keys and full_plan.ssh_keys_need_install:
                 await self.deployer.log("stdout", f"{icon} Checking SSH keys on device")
                 await _install_authorized_keys(
                     self.db,
@@ -471,8 +476,10 @@ class FrameDeployWorkflow:
                     full_plan.selected_public_keys,
                     full_plan.known_public_keys,
                 )
-            else:
+            elif not full_plan.selected_public_keys:
                 await self.deployer.log("stdout", f"{icon} No SSH public keys configured; skipping authorized_keys install")
+            else:
+                await self.deployer.log("stdout", f"{icon} SSH public keys already match the last deploy; skipping authorized_keys install")
 
             build_result = await self.binary_builder.build(full_plan.binary_plan)
             prebuilt_entry = build_result.prebuilt_entry
@@ -481,6 +488,9 @@ class FrameDeployWorkflow:
             if full_plan.low_memory and not cross_compiled:
                 await self.deployer.log("stdout", f"{icon} Low memory device, stopping FrameOS for compilation")
                 await self.deployer.exec_command("sudo service frameos stop", raise_on_error=False)
+
+            if not cross_compiled and full_plan.binary_plan.will_attempt_cross_compile:
+                await install_package("libssl-dev")
 
             await self.deployer.log("stdout", f"{icon} Installing dependencies on remote")
             for alternative in full_plan.package_alternatives:
@@ -801,9 +811,8 @@ class FrameDeployWorkflow:
         return PackageAlternativePlan(names=names, reason=reason)
 
     async def _is_package_installed(self, name: str) -> bool:
-        quoted_pkg = shlex.quote(name)
         status = await self.deployer.exec_command(
-            f"dpkg -l | grep -q \"^ii  {quoted_pkg} \"",
+            f"dpkg-query -W -f='${{Status}}' {shlex.quote(name)} 2>/dev/null | grep -q '^install ok installed$'",
             raise_on_error=False,
             log_command=False,
             log_output=False,

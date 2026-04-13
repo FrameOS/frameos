@@ -72,7 +72,19 @@ export interface FullDeployPlanResponse {
     dirname?: string | null
     installed: boolean
   }
+  ssh_keys_need_install: boolean
   post_deploy?: {
+    i2c?: {
+      needs_boot_config_line?: boolean
+      needs_runtime_enable?: boolean
+    }
+    spi_action?: 'enable' | 'disable' | 'unchanged'
+    reboot_schedule?: {
+      needs_update?: boolean
+      needs_remove?: boolean
+    }
+    bootconfig_changes?: { action: 'add' | 'remove'; line: string }[]
+    disable_userconfig?: boolean
     final_action?: 'reboot' | 'restart_frameos'
   }
 }
@@ -465,6 +477,20 @@ function buildDeployPlanRequestBody(frame: Partial<FrameType>): Record<string, a
   return json
 }
 
+function buildFrameosVersionSummary(plan?: DeployPlanResponse | null): SummaryItem[] {
+  if (!plan) {
+    return []
+  }
+
+  const previousVersion = plan.previous_frameos_version ? String(plan.previous_frameos_version).split('+')[0] : 'Not deployed'
+  return [
+    {
+      label: 'FrameOS version',
+      value: previousVersion === CURRENT_FRAMEOS_VERSION ? CURRENT_FRAMEOS_VERSION : `${previousVersion} -> ${CURRENT_FRAMEOS_VERSION}`,
+    },
+  ]
+}
+
 function buildFastDeployPlanSummary(plan?: DeployPlanResponse | null): SummaryItem[] {
   const fastPlan = plan?.fast_deploy
   if (!fastPlan) {
@@ -516,6 +542,35 @@ function buildFullDeployPlanSummary(plan?: DeployPlanResponse | null): SummaryIt
   }
   if (fullPlan.lgpio.required && !fullPlan.lgpio.installed) {
     items.push({ label: 'lgpio', value: 'Will be installed for the selected drivers' })
+  }
+  if (fullPlan.ssh_keys_need_install) {
+    items.push({ label: 'SSH keys', value: 'Selected deploy keys will be installed on the frame' })
+  }
+  if (fullPlan.post_deploy?.bootconfig_changes?.length) {
+    items.push({
+      label: 'Boot config',
+      value: fullPlan.post_deploy.bootconfig_changes
+        .map((change) => `${change.action === 'add' ? 'Add' : 'Remove'} ${change.line}`)
+        .join(', '),
+    })
+  }
+  if (fullPlan.post_deploy?.i2c?.needs_boot_config_line || fullPlan.post_deploy?.i2c?.needs_runtime_enable) {
+    items.push({ label: 'I2C', value: 'Will be enabled for the selected drivers' })
+  }
+  if (fullPlan.post_deploy?.spi_action === 'enable') {
+    items.push({ label: 'SPI', value: 'Will be enabled for the selected drivers' })
+  }
+  if (fullPlan.post_deploy?.spi_action === 'disable') {
+    items.push({ label: 'SPI', value: 'Will be disabled for the selected drivers' })
+  }
+  if (fullPlan.post_deploy?.disable_userconfig) {
+    items.push({ label: 'User config', value: 'First-deploy setup will disable the system userconfig service' })
+  }
+  if (fullPlan.post_deploy?.reboot_schedule?.needs_update) {
+    items.push({ label: 'Reboot schedule', value: 'Scheduled reboot config will be installed or updated' })
+  }
+  if (fullPlan.post_deploy?.reboot_schedule?.needs_remove) {
+    items.push({ label: 'Reboot schedule', value: 'Old scheduled reboot config will be removed' })
   }
   if (fullPlan.low_memory && !fullPlan.binary.will_attempt_cross_compile) {
     items.push({ label: 'Low memory', value: 'FrameOS will be stopped before the on-device build' })
@@ -1071,6 +1126,7 @@ export const frameLogic = kea<frameLogicType>([
       (lastDeploy, frame, requiresRecompilation, isFrameAdminMode): SummaryItem[] =>
         isFrameAdminMode ? [] : buildUndeployedSummaryItems(lastDeploy, frame, requiresRecompilation),
     ],
+    frameosVersionSummary: [(s) => [s.deployPlan], (deployPlan): SummaryItem[] => buildFrameosVersionSummary(deployPlan)],
     deployPlan: [(s) => [s.deployPlans], (deployPlans) => deployPlans],
     fastDeployPlan: [(s) => [s.deployPlan], (deployPlan) => deployPlan],
     fullDeployPlan: [(s) => [s.deployPlan], (deployPlan) => deployPlan],
