@@ -628,7 +628,12 @@ class FrameDeployWorkflow:
             )
 
             await sync_assets(self.db, self.redis, frame)
-            await self.deployer.exec_command("cd /srv/frameos/build && ls -dt1 build_* | tail -n +11 | xargs rm -rf")
+            await self.deployer.exec_command(
+                "if [ -d /srv/frameos/build ] && cd /srv/frameos/build && ls -dt1 build_* >/dev/null 2>&1; then "
+                "ls -dt1 build_* | tail -n +11 | xargs rm -rf; "
+                "fi",
+                raise_on_error=False,
+            )
             await self.deployer.exec_command("mkdir -p /srv/frameos/build/cache && cd /srv/frameos/build/cache && find . -type f \\( -atime +0 -a -mtime +0 \\) | xargs rm -rf")
             await self.deployer.exec_command(
                 "cd /srv/frameos/releases && "

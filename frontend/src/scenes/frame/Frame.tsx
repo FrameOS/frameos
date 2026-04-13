@@ -55,10 +55,10 @@ export function Frame(props: FrameSceneProps) {
     undeployedChangeDetails,
     lastDeploy,
     undeployedSummaryItems,
-    frameosVersionSummary,
     fastDeployPlanSummary,
     fullDeployPlanSummary,
     deployRecommendation,
+    hasPendingFrameosUpgrade,
     deployPlansLoading,
     deployPlansError,
     deployPlanModalOpen,
@@ -79,6 +79,7 @@ export function Frame(props: FrameSceneProps) {
     resetUndeployedChanges,
     showDeployPlanModal,
     hideDeployPlanModal,
+    loadDeployPlans,
   } = useActions(frameLogic(frameLogicProps))
   useMountedLogic(assetsLogic(frameLogicProps)) // Don't lose what we downloaded when navigating away from the tab
   useMountedLogic(terminalLogic(frameLogicProps))
@@ -193,6 +194,8 @@ export function Frame(props: FrameSceneProps) {
                   >
                     {unsavedChanges
                       ? `Unsaved changes${requiresRecompilation ? ', requires full deploy!' : ''}`
+                      : hasPendingFrameosUpgrade
+                      ? 'New version'
                       : frame.last_successful_deploy_at
                       ? 'Undeployed changes'
                       : 'Not yet deployed'}
@@ -254,6 +257,11 @@ export function Frame(props: FrameSceneProps) {
             title="Deploy Plan"
           >
             <div className="p-5 space-y-4 text-sm text-gray-100">
+              <div className="flex justify-end">
+                <Button color="secondary" size="small" type="button" onClick={() => loadDeployPlans()}>
+                  Reload plan
+                </Button>
+              </div>
               {deployPlansLoading ? (
                 <div className="text-gray-300">Loading…</div>
               ) : (
@@ -311,13 +319,6 @@ export function Frame(props: FrameSceneProps) {
                           value: change.requiresFullDeploy ? 'Needs full deploy' : 'Fast deploy ok',
                         }))}
                       />
-                    </div>
-                  ) : null}
-
-                  {frameosVersionSummary.length > 0 ? (
-                    <div>
-                      <div className="mb-2 text-xs text-gray-400">FrameOS</div>
-                      <PlanTable rows={frameosVersionSummary} />
                     </div>
                   ) : null}
 

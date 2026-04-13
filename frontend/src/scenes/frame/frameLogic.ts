@@ -511,7 +511,12 @@ function buildFullDeployPlanSummary(plan?: DeployPlanResponse | null, frame?: Pa
   }
 
   const packagesToInstall = fullPlan.packages.filter((pkg) => pkg.needs_install).map((pkg) => pkg.name)
+  const previousVersion = plan.previous_frameos_version ? String(plan.previous_frameos_version).split('+')[0] : 'Not deployed'
   const items: SummaryItem[] = [
+    {
+      label: 'FrameOS version',
+      value: previousVersion === CURRENT_FRAMEOS_VERSION ? CURRENT_FRAMEOS_VERSION : `${previousVersion} -> ${CURRENT_FRAMEOS_VERSION}`,
+    },
     ...(frame?.device ? [{ label: 'Device', value: String(frame.device) }] : []),
     {
       label: 'Target',
@@ -625,7 +630,7 @@ function buildDeployRecommendation(
   return {
     mode: 'fast',
     title: 'Suggested: fast deploy',
-    description: 'No pending changes require rebuilding FrameOS, so a fast deploy will bring the frame up to date with less work on the device.',
+    description: 'No pending changes require rebuilding FrameOS, so a fast deploy (reload) is enough to bring the frame up to date.',
   }
 }
 
@@ -1127,7 +1132,6 @@ export const frameLogic = kea<frameLogicType>([
       (lastDeploy, frame, requiresRecompilation, isFrameAdminMode): SummaryItem[] =>
         isFrameAdminMode ? [] : buildUndeployedSummaryItems(lastDeploy, frame, requiresRecompilation),
     ],
-    frameosVersionSummary: [(s) => [s.deployPlan], (deployPlan): SummaryItem[] => buildFrameosVersionSummary(deployPlan)],
     deployPlan: [(s) => [s.deployPlans], (deployPlans) => deployPlans],
     fastDeployPlan: [(s) => [s.deployPlan], (deployPlan) => deployPlan],
     fullDeployPlan: [(s) => [s.deployPlan], (deployPlan) => deployPlan],
@@ -1144,6 +1148,16 @@ export const frameLogic = kea<frameLogicType>([
       (s) => [s.deployPlan, s.lastDeploy, s.deployChangeDetails],
       (deployPlan, lastDeploy, deployChangeDetails): DeployRecommendation | null =>
         buildDeployRecommendation(deployPlan, Boolean(lastDeploy), deployChangeDetails),
+    ],
+    hasPendingFrameosUpgrade: [
+      (s) => [s.lastDeploy],
+      (lastDeploy: Partial<FrameType> | null): boolean => {
+        const previousVersion =
+          typeof (lastDeploy as Record<string, unknown> | null | undefined)?.frameos_version === 'string'
+            ? String((lastDeploy as Record<string, unknown>).frameos_version).split('+')[0]
+            : null
+        return Boolean(previousVersion && previousVersion !== CURRENT_FRAMEOS_VERSION)
+      },
     ],
     defaultScene: [
       (s) => [s.frame, s.frameForm],
