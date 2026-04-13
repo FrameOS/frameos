@@ -168,11 +168,11 @@ async def ensure_ntp_installed(deployer: FrameDeployer) -> None:
 
 async def ensure_lgpio(
     deployer: FrameDeployer,
-    drivers: dict[str, Any],
+    required: bool,
     prebuilt_entry: Any,
     already_installed: bool,
 ) -> None:
-    if not (drivers.get("waveshare") or drivers.get("gpioButton")) or already_installed:
+    if not required or already_installed:
         return
 
     if await install_if_necessary(deployer, "liblgpio-dev", raise_on_error=False) == 0:

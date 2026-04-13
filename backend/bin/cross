@@ -93,7 +93,7 @@ def load_frame_stub(frameos_root: Path) -> FrameStub:
         device=str(data.get("device", "framebuffer")),
         device_config=dict(data.get("deviceConfig") or {}),
         network=dict(data.get("network") or {}),
-        agent=dict(data.get("network") or {}),
+        agent=dict(data.get("agent") or {}),
         assets_path=data.get("assetsPath") or '',
         scenes=list(data.get("scenes") or []),
         gpio_buttons=list(data.get("gpioButtons") or []),
@@ -166,11 +166,12 @@ async def build_target(slug: str, frameos_root: Path, artifacts_dir: Path) -> Pa
             platform=target.platform,
             image=target.image,
         )
-        build_result = await builder.build(
+        build_plan = await builder.plan_build(
             allow_cross_compile=True,
             force_cross_compile=True,
             target_override=target_override,
         )
+        build_result = await builder.build(build_plan)
         binary_path = build_result.binary_path
         if not binary_path:
             raise RuntimeError("Cross compilation completed without producing a binary")
