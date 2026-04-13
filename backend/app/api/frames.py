@@ -1538,7 +1538,7 @@ async def api_frame_deploy_event(id: int, redis: Redis = Depends(get_redis)):
 @api_with_auth.get("/frames/{id:int}/deploy_plan")
 async def api_frame_deploy_plan(
     id: int,
-    mode: str = Query("full"),
+    mode: str = Query("combined"),
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
@@ -1547,7 +1547,7 @@ async def api_frame_deploy_plan(
         _not_found()
 
     try:
-        if mode == "full":
+        if mode in {"combined", "full"}:
             nim_path = find_nim_v2()
             with tempfile.TemporaryDirectory() as temp_dir:
                 deployer = FrameDeployer(db=db, redis=redis, frame=frame, nim_path=nim_path, temp_dir=temp_dir)
@@ -1558,7 +1558,7 @@ async def api_frame_deploy_plan(
                     deployer=deployer,
                     temp_dir=temp_dir,
                 )
-                plan = await workflow.plan("full")
+                plan = await workflow.plan(mode)
         elif mode == "fast":
             deployer = FrameDeployer(db=db, redis=redis, frame=frame, nim_path="", temp_dir="")
             workflow = FrameDeployWorkflow(
@@ -1570,7 +1570,7 @@ async def api_frame_deploy_plan(
             )
             plan = await workflow.plan("fast")
         else:
-            _bad_request("mode must be 'full' or 'fast'")
+            _bad_request("mode must be 'combined', 'full' or 'fast'")
 
         return {"plan": plan.to_dict()}
     except Exception as e:

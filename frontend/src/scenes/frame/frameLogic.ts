@@ -73,10 +73,13 @@ export interface FullDeployPlanResponse {
     installed: boolean
   }
   selected_ssh_key_count: number
+  post_deploy?: {
+    final_action?: 'reboot' | 'restart_frameos'
+  }
 }
 
 export interface DeployPlanResponse {
-  mode: 'fast' | 'full'
+  mode: 'fast' | 'full' | 'combined'
   frame_id: number
   frame_name: string
   build_id: string
@@ -90,7 +93,11 @@ interface DeployPlanApiResponse {
   plan: DeployPlanResponse
 }
 
-export type DeployPlanModalMode = 'fast' | 'full' | null
+export interface DeployRecommendation {
+  mode: 'fast' | 'full'
+  title: string
+  description: string
+}
 
 const DEFAULT_BROWSER_TITLE = 'FrameOS Backend'
 const CURRENT_FRAMEOS_VERSION = (versions.frameos || 'dev').split('+')[0]
@@ -482,7 +489,13 @@ function buildFullDeployPlanSummary(plan?: DeployPlanResponse | null): SummaryIt
     },
     {
       label: 'Build strategy',
-      value: fullPlan.binary.will_attempt_cross_compile ? 'Cross-compile when possible' : 'Build on device',
+      value: fullPlan.binary.will_attempt_cross_compile
+        ? fullPlan.binary.build_host_configured
+          ? 'Cross-compile on the configured build host'
+          : 'Cross-compile locally on this server'
+        : fullPlan.binary.cross_compile_supported
+        ? 'Build on device (cross-compilation disabled)'
+        : 'Build on device (cross-compilation unavailable for this target)',
     },
     {
       label: 'Drivers',
@@ -520,7 +533,58 @@ function buildFullDeployPlanSummary(plan?: DeployPlanResponse | null): SummaryIt
       label: 'Low memory mode',
       value: fullPlan.low_memory ? 'Yes' : 'No',
     },
+    {
+      label: 'Final action',
+      value: fullPlan.post_deploy?.final_action === 'reboot' ? 'Reboot device' : 'Restart FrameOS',
+    },
   ]
+}
+
+function buildDeployRecommendation(
+  plan: DeployPlanResponse | null,
+  hasPreviousDeploy: boolean,
+  requiresRecompilation: boolean,
+  undeployedChangeDetails: ChangeDetail[]
+): DeployRecommendation | null {
+  if (!plan) {
+    return null
+  }
+
+  const previousVersion = plan.previous_frameos_version ? String(plan.previous_frameos_version).split('+')[0] : null
+  const versionChanged = previousVersion !== CURRENT_FRAMEOS_VERSION
+  const fullDeployChanges = undeployedChangeDetails
+    .filter((change) => change.requiresFullDeploy && !change.label.startsWith('FrameOS upgrade'))
+    .map((change) => change.label)
+
+  if (!hasPreviousDeploy) {
+    return {
+      mode: 'full',
+      title: 'Suggested: full deploy',
+      description: 'This frame has not been deployed yet, so FrameOS, dependencies, and system changes need a full deploy.',
+    }
+  }
+
+  if (requiresRecompilation && fullDeployChanges.length > 0) {
+    return {
+      mode: 'full',
+      title: 'Suggested: full deploy',
+      description: `These changes require rebuilding or reinstalling FrameOS: ${fullDeployChanges.join(', ')}.`,
+    }
+  }
+
+  if (versionChanged) {
+    return {
+      mode: 'fast',
+      title: 'Suggested: fast deploy',
+      description: `Fast deploy is enough to push the latest frame config and interpreted scenes. Use full deploy only if you also want to update the FrameOS runtime from ${previousVersion ?? 'unknown'} to ${CURRENT_FRAMEOS_VERSION}.`,
+    }
+  }
+
+  return {
+    mode: 'fast',
+    title: 'Suggested: fast deploy',
+    description: 'No pending changes require rebuilding FrameOS, so a fast deploy will bring the frame up to date with less work on the device.',
+  }
 }
 
 async function resolveTemplateImageUrl(template: Partial<TemplateType>): Promise<string | null> {
@@ -748,13 +812,10 @@ export const frameLogic = kea<frameLogicType>([
     generateFrameAdminCredentials: true,
     generateTlsCertificates: true,
     verifyTlsCertificates: true,
-    showDeployPlanModal: (mode: Exclude<DeployPlanModalMode, null>) => ({ mode }),
+    showDeployPlanModal: true,
     hideDeployPlanModal: true,
     loadDeployPlans: true,
-    loadDeployPlansSuccess: (fastPlan: DeployPlanResponse | null, fullPlan: DeployPlanResponse | null) => ({
-      fastPlan,
-      fullPlan,
-    }),
+    loadDeployPlansSuccess: (plan: DeployPlanResponse | null) => ({ plan }),
     loadDeployPlansFailure: (error: string) => ({ error }),
   }),
   forms(({ values }) => ({
@@ -824,13 +885,10 @@ export const frameLogic = kea<frameLogicType>([
       },
     ],
     deployPlans: [
+      null as DeployPlanResponse | null,
       {
-        fast: null as DeployPlanResponse | null,
-        full: null as DeployPlanResponse | null,
-      },
-      {
-        loadDeployPlans: () => ({ fast: null, full: null }),
-        loadDeployPlansSuccess: (_, { fastPlan, fullPlan }) => ({ fast: fastPlan, full: fullPlan }),
+        loadDeployPlans: () => null,
+        loadDeployPlansSuccess: (_, { plan }) => plan,
       },
     ],
     deployPlansLoading: [
@@ -849,11 +907,11 @@ export const frameLogic = kea<frameLogicType>([
         loadDeployPlansFailure: (_, { error }) => error,
       },
     ],
-    deployPlanModalMode: [
-      null as DeployPlanModalMode,
+    deployPlanModalOpen: [
+      false,
       {
-        showDeployPlanModal: (_, { mode }) => mode,
-        hideDeployPlanModal: () => null,
+        showDeployPlanModal: () => true,
+        hideDeployPlanModal: () => false,
       },
     ],
   }),
@@ -945,24 +1003,17 @@ export const frameLogic = kea<frameLogicType>([
       }
     },
     loadDeployPlans: async () => {
-      const [fastResponse, fullResponse] = await Promise.all([
-        apiFetch(`/api/frames/${values.frameId}/deploy_plan?mode=fast`),
-        apiFetch(`/api/frames/${values.frameId}/deploy_plan?mode=full`),
-      ])
-
-      if (!fastResponse.ok || !fullResponse.ok) {
+      const response = await apiFetch(`/api/frames/${values.frameId}/deploy_plan`)
+      if (!response.ok) {
         actions.loadDeployPlansFailure('Failed to load deploy plans')
         return
       }
 
-      const [fastPayload, fullPayload] = (await Promise.all([fastResponse.json(), fullResponse.json()])) as [
-        DeployPlanApiResponse,
-        DeployPlanApiResponse,
-      ]
-      actions.loadDeployPlansSuccess(fastPayload.plan, fullPayload.plan)
+      const payload = (await response.json()) as DeployPlanApiResponse
+      actions.loadDeployPlansSuccess(payload.plan)
     },
     showDeployPlanModal: async () => {
-      if (!values.deployPlans.fast || !values.deployPlans.full) {
+      if (!values.deployPlans) {
         actions.loadDeployPlans()
       }
     },
@@ -1028,8 +1079,9 @@ export const frameLogic = kea<frameLogicType>([
       (lastDeploy, frame, requiresRecompilation, isFrameAdminMode): SummaryItem[] =>
         isFrameAdminMode ? [] : buildUndeployedSummaryItems(lastDeploy, frame, requiresRecompilation),
     ],
-    fastDeployPlan: [(s) => [s.deployPlans], (deployPlans) => deployPlans.fast],
-    fullDeployPlan: [(s) => [s.deployPlans], (deployPlans) => deployPlans.full],
+    deployPlan: [(s) => [s.deployPlans], (deployPlans) => deployPlans],
+    fastDeployPlan: [(s) => [s.deployPlan], (deployPlan) => deployPlan],
+    fullDeployPlan: [(s) => [s.deployPlan], (deployPlan) => deployPlan],
     fastDeployPlanSummary: [
       (s) => [s.fastDeployPlan],
       (fastDeployPlan): SummaryItem[] => buildFastDeployPlanSummary(fastDeployPlan),
@@ -1038,7 +1090,16 @@ export const frameLogic = kea<frameLogicType>([
       (s) => [s.fullDeployPlan],
       (fullDeployPlan): SummaryItem[] => buildFullDeployPlanSummary(fullDeployPlan),
     ],
-    deployPlanModalOpen: [(s) => [s.deployPlanModalMode], (deployPlanModalMode) => deployPlanModalMode !== null],
+    deployRecommendation: [
+      (s) => [s.deployPlan, s.frame, s.requiresRecompilation, s.undeployedChangeDetails],
+      (deployPlan, frame, requiresRecompilation, undeployedChangeDetails): DeployRecommendation | null =>
+        buildDeployRecommendation(
+          deployPlan,
+          Boolean(frame?.last_successful_deploy_at),
+          requiresRecompilation,
+          undeployedChangeDetails
+        ),
+    ],
     defaultScene: [
       (s) => [s.frame, s.frameForm],
       (frame, frameForm) => {

@@ -114,6 +114,41 @@ async def test_fast_plan_keeps_previous_version_and_marks_restart_for_tls_change
 
 
 @pytest.mark.asyncio
+async def test_combined_plan_includes_fast_and_full_sections(monkeypatch: pytest.MonkeyPatch):
+    frame = SimpleNamespace(
+        id=11,
+        name="Combined",
+        rpios={"crossCompilation": "auto"},
+        https_proxy={"enable": False},
+        reboot=None,
+        last_successful_deploy={"frameos_version": "9.9.9", "https_proxy": {"enable": False}},
+        last_successful_deploy_at="2026-01-01T00:00:00+00:00",
+        to_dict=lambda: {"id": 11, "name": "Combined", "https_proxy": {"enable": False}},
+    )
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.drivers_for_frame", lambda _frame: {})
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.get_settings_dict", lambda _db: {})
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.select_ssh_keys_for_frame", lambda _frame, _settings: [])
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.normalize_ssh_keys", lambda _settings: [])
+
+    workflow = FrameDeployWorkflow(
+        db=None,
+        redis=None,
+        frame=frame,
+        deployer=FakeDeployer(),
+        temp_dir="",
+        binary_builder=FakeBinaryBuilder(),
+    )
+
+    plan = await workflow.plan("combined")
+
+    assert plan.mode == "combined"
+    assert plan.fast_deploy is not None
+    assert plan.full_deploy is not None
+    assert any("Fast deploy keeps the frame configuration" in note for note in plan.notes)
+    assert any("Full deploy additionally rebuilds or uploads the FrameOS binary" in note for note in plan.notes)
+
+
+@pytest.mark.asyncio
 async def test_full_plan_reports_installed_state_and_remote_build_dependencies(monkeypatch: pytest.MonkeyPatch):
     frame = SimpleNamespace(
         id=7,

@@ -60,10 +60,10 @@ async def test_get_deploy_plan_returns_plan_without_execution(
     app.dependency_overrides[get_current_user] = lambda: object()
 
     try:
-        response = await no_auth_client.get(f"/api/frames/{frame.id}/deploy_plan", params={"mode": "full"})
+        response = await no_auth_client.get(f"/api/frames/{frame.id}/deploy_plan")
     finally:
         app.dependency_overrides.clear()
 
     assert response.status_code == 200
-    assert response.json() == {"plan": {"mode": "full", "ok": True}}
-    assert events == ["plan:full"]
+    assert response.json() == {"plan": {"mode": "combined", "ok": True}}
+    assert events == ["plan:combined"]

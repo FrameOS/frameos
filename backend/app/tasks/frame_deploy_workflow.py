@@ -190,6 +190,8 @@ class FrameDeployWorkflow:
         frame_dict.pop("last_successful_deploy_at", None)
         previous_frameos_version = (self.frame.last_successful_deploy or {}).get("frameos_version")
 
+        if mode == "combined":
+            return await self._plan_combined(frame_dict=frame_dict, previous_frameos_version=previous_frameos_version)
         if mode == "fast":
             return await self._plan_fast(frame_dict=frame_dict, previous_frameos_version=previous_frameos_version)
         if mode == "full":
@@ -204,6 +206,34 @@ class FrameDeployWorkflow:
             await self._execute_full(plan)
             return
         raise ValueError(f"Unsupported deploy mode: {plan.mode}")
+
+    async def _plan_combined(
+        self,
+        *,
+        frame_dict: dict[str, Any],
+        previous_frameos_version: str | None,
+    ) -> FrameDeployPlan:
+        fast_plan = await self._plan_fast(frame_dict=dict(frame_dict), previous_frameos_version=previous_frameos_version)
+        full_plan = await self._plan_full(frame_dict=dict(frame_dict), previous_frameos_version=previous_frameos_version)
+
+        notes = [
+            "Fast deploy keeps the frame configuration and interpreted scenes up to date without rebuilding FrameOS.",
+            "Full deploy additionally rebuilds or uploads the FrameOS binary, installs any missing dependencies, and applies system-level changes.",
+            *fast_plan.notes,
+            *[note for note in full_plan.notes if note not in fast_plan.notes],
+        ]
+
+        return FrameDeployPlan(
+            mode="combined",
+            frame_id=int(self.frame.id),
+            frame_name=self.frame.name,
+            build_id=self.deployer.build_id,
+            frame_dict=full_plan.frame_dict,
+            previous_frameos_version=previous_frameos_version if isinstance(previous_frameos_version, str) else None,
+            fast_deploy=fast_plan.fast_deploy,
+            full_deploy=full_plan.full_deploy,
+            notes=notes,
+        )
 
     async def _plan_fast(self, *, frame_dict: dict[str, Any], previous_frameos_version: str | None) -> FrameDeployPlan:
         distro = await self.deployer.get_distro()
