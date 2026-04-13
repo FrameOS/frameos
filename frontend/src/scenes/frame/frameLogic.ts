@@ -458,6 +458,14 @@ function buildUndeployedSummaryItems(
   return items
 }
 
+function buildDeployPlanRequestBody(frame: Partial<FrameType>): Record<string, any> {
+  const json: Record<string, any> = {}
+  for (const key of FRAME_KEYS) {
+    json[key] = frame[key]
+  }
+  return json
+}
+
 function buildFastDeployPlanSummary(plan?: DeployPlanResponse | null): SummaryItem[] {
   const fastPlan = plan?.fast_deploy
   if (!fastPlan) {
@@ -840,10 +848,7 @@ export const frameLogic = kea<frameLogicType>([
         })),
       }),
       submit: async (frame) => {
-        const json: Record<string, any> = {}
-        for (const key of FRAME_KEYS) {
-          json[key] = frame[key as keyof typeof frame]
-        }
+        const json = buildDeployPlanRequestBody(frame)
         if (values.nextAction) {
           json['next_action'] = values.nextAction
         }
@@ -1003,7 +1008,11 @@ export const frameLogic = kea<frameLogicType>([
       }
     },
     loadDeployPlans: async () => {
-      const response = await apiFetch(`/api/frames/${values.frameId}/deploy_plan`)
+      const response = await apiFetch(`/api/frames/${values.frameId}/deploy_plan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(buildDeployPlanRequestBody(values.frameForm)),
+      })
       if (!response.ok) {
         actions.loadDeployPlansFailure('Failed to load deploy plans')
         return

@@ -15,7 +15,6 @@ import { Form } from 'kea-forms'
 import { Field } from '../../components/Field'
 import { frameSettingsLogic } from './panels/FrameSettings/frameSettingsLogic'
 import { logsLogic } from './panels/Logs/logsLogic'
-import { Popover, Transition } from '@headlessui/react'
 import { isFrameControlMode } from '../../utils/frameControlMode'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
 import { Modal } from '../../components/Modal'
@@ -35,6 +34,8 @@ export function Frame(props: FrameSceneProps) {
     requiresRecompilation,
     deployWithAgent,
     unsavedChangeDetails,
+    undeployedChangeDetails,
+    lastDeploy,
     undeployedSummaryItems,
     fastDeployPlanSummary,
     fullDeployPlanSummary,
@@ -86,69 +87,22 @@ export function Frame(props: FrameSceneProps) {
         { label: 'Restart FrameOS', onClick: () => restartFrame() },
         { label: 'Stop FrameOS', onClick: () => stopFrame() },
         { label: 'Reboot device', onClick: () => rebootFrame() },
+        { label: 'Deploy plan', onClick: () => showDeployPlanModal() },
         {
-          content: (close: () => void) => (
-            <div className="flex items-center justify-between gap-3">
-              <button
-                className="text-left hover:underline"
-                onClick={(e) => {
-                  e.preventDefault()
-                  e.stopPropagation()
-                  fastDeployFrame()
-                  openLogs()
-                  close()
-                }}
-                type="button"
-              >
-                Fast deploy / reload
-              </button>
-              <button
-                className="text-right text-gray-300 hover:text-white hover:underline"
-                onClick={(e) => {
-                  e.preventDefault()
-                  e.stopPropagation()
-                  showDeployPlanModal()
-                  close()
-                }}
-                type="button"
-              >
-                Show plan
-              </button>
-            </div>
-          ),
+          label: 'Fast deploy / reload',
+          onClick: () => {
+            fastDeployFrame()
+            openLogs()
+          },
         },
         ...(!frameControlMode
           ? [
               {
-                content: (close: () => void) => (
-                  <div className="flex items-center justify-between gap-3">
-                    <button
-                      className="text-left hover:underline"
-                      onClick={(e) => {
-                        e.preventDefault()
-                        e.stopPropagation()
-                        fullDeployFrame()
-                        openLogs()
-                        close()
-                      }}
-                      type="button"
-                    >
-                      Full deploy / recompile
-                    </button>
-                    <button
-                      className="text-right text-gray-300 hover:text-white hover:underline"
-                      onClick={(e) => {
-                        e.preventDefault()
-                        e.stopPropagation()
-                        showDeployPlanModal()
-                        close()
-                      }}
-                      type="button"
-                    >
-                      Show plan
-                    </button>
-                  </div>
-                ),
+                label: 'Full deploy / recompile',
+                onClick: () => {
+                  fullDeployFrame()
+                  openLogs()
+                },
               },
             ]
           : []),
@@ -212,119 +166,18 @@ export function Frame(props: FrameSceneProps) {
             }
             buttons={
               <div className="flex divide-x divide-gray-700 space-x-2">
-                {!inFrameAdminMode && unsavedChanges ? (
-                  <Popover className="relative pr-2 text-[#9a9ad0] flex items-center">
-                    {({ open }) => (
-                      <>
-                        <Popover.Button className="underline underline-offset-2">
-                          Unsaved changes{requiresRecompilation ? ', requires full deploy!' : ''}
-                        </Popover.Button>
-                        <Transition
-                          show={open}
-                          enter="transition ease-out duration-100"
-                          enterFrom="transform opacity-0 scale-95"
-                          enterTo="transform opacity-100 scale-100"
-                          leave="transition ease-in duration-75"
-                          leaveFrom="transform opacity-100 scale-100"
-                          leaveTo="transform opacity-0 scale-95"
-                        >
-                          <Popover.Panel className="absolute right-0 top-7 z-50 min-w-96 max-w-[38rem] rounded-md border border-gray-700 bg-gray-900 p-3 shadow-lg">
-                            <div className="mb-2 flex items-center justify-between gap-3">
-                              <div className="text-xs text-gray-300">Unsaved changes</div>
-                              <Button
-                                color="secondary"
-                                size="small"
-                                type="button"
-                                onClick={() => resetUnsavedChanges()}
-                              >
-                                Reset changes
-                              </Button>
-                            </div>
-                            <ul className="space-y-1 text-sm text-gray-100">
-                              {unsavedChangeDetails.map((change, index) => (
-                                <li
-                                  key={`${change.label}-${index}`}
-                                  className="flex items-center justify-between gap-3"
-                                >
-                                  <span>{change.label}</span>
-                                  {change.requiresFullDeploy ? (
-                                    <span className="rounded bg-purple-700/40 px-2 py-0.5 text-[11px] text-purple-100">
-                                      Full deploy
-                                    </span>
-                                  ) : null}
-                                </li>
-                              ))}
-                            </ul>
-                          </Popover.Panel>
-                        </Transition>
-                      </>
-                    )}
-                  </Popover>
-                ) : !inFrameAdminMode && undeployedChanges ? (
-                  <Popover className="relative pr-2 text-[#9a9ad0] flex items-center">
-                    {({ open }) => (
-                      <>
-                        <Popover.Button className="underline underline-offset-2">
-                          Undeployed changes
-                        </Popover.Button>
-                        <Transition
-                          show={open}
-                          enter="transition ease-out duration-100"
-                          enterFrom="transform opacity-0 scale-95"
-                          enterTo="transform opacity-100 scale-100"
-                          leave="transition ease-in duration-75"
-                          leaveFrom="transform opacity-100 scale-100"
-                          leaveTo="transform opacity-0 scale-95"
-                        >
-                          <Popover.Panel className="absolute right-0 top-7 z-50 min-w-96 max-w-[38rem] rounded-md border border-gray-700 bg-gray-900 p-3 shadow-lg">
-                            <div className="mb-2 flex items-center justify-between gap-3">
-                              <div className="text-xs text-gray-300">
-                                {frame.last_successful_deploy_at ? 'Undeployed changes' : 'Not yet deployed'}
-                              </div>
-                              <Button
-                                color="secondary"
-                                size="small"
-                                type="button"
-                                onClick={() => resetUndeployedChanges()}
-                              >
-                                Reset changes
-                              </Button>
-                            </div>
-                            <div className="space-y-4 text-sm text-gray-100">
-                              {frame.last_successful_deploy_at ? (
-                                <div>
-                                  <div className="mb-2 text-xs text-gray-400">Changes</div>
-                                  <ul className="space-y-1">
-                                    {undeployedSummaryItems.map((item, index) => (
-                                      <li key={`${item.label}-${index}`} className="flex items-center justify-between gap-3">
-                                        <span>{item.label}</span>
-                                        <span className="text-right text-gray-300">{item.value}</span>
-                                      </li>
-                                    ))}
-                                  </ul>
-                                </div>
-                              ) : null}
-
-                              {deployRecommendation ? (
-                                <div className="rounded border border-gray-700 bg-gray-800/60 p-3">
-                                  <div className="mb-1 text-xs text-gray-400">{deployRecommendation.title}</div>
-                                  <div className="text-sm text-gray-200">{deployRecommendation.description}</div>
-                                </div>
-                              ) : null}
-
-                              <div className="flex justify-end">
-                                <Button color="secondary" type="button" onClick={() => showDeployPlanModal()}>
-                                  Show plan
-                                </Button>
-                              </div>
-
-                              {deployPlansError ? <div className="text-red-300">{deployPlansError}</div> : null}
-                            </div>
-                          </Popover.Panel>
-                        </Transition>
-                      </>
-                    )}
-                  </Popover>
+                {!inFrameAdminMode && (unsavedChanges || undeployedChanges) ? (
+                  <button
+                    className="pr-2 text-[#9a9ad0] underline underline-offset-2"
+                    type="button"
+                    onClick={() => showDeployPlanModal()}
+                  >
+                    {unsavedChanges
+                      ? `Unsaved changes${requiresRecompilation ? ', requires full deploy!' : ''}`
+                      : frame.last_successful_deploy_at
+                      ? 'Undeployed changes'
+                      : 'Not yet deployed'}
+                  </button>
                 ) : null}
 
                 <DropdownMenu buttonColor="secondary" className="items-center" items={dropdownItems} />
@@ -352,9 +205,6 @@ export function Frame(props: FrameSceneProps) {
                         >
                           Reload
                         </Button>
-                        <Button color="secondary" type="button" onClick={() => showDeployPlanModal()}>
-                          Show plan
-                        </Button>
                       </>
                     ) : (
                       <>
@@ -370,9 +220,6 @@ export function Frame(props: FrameSceneProps) {
                           {!frame.last_successful_deploy_at
                             ? 'First deploy'
                             : `Save & ${requiresRecompilation ? 'full deploy' : 'fast deploy'}`}
-                        </Button>
-                        <Button color="secondary" type="button" onClick={() => showDeployPlanModal()}>
-                          Show plan
                         </Button>
                       </>
                     )}
@@ -405,6 +252,74 @@ export function Frame(props: FrameSceneProps) {
                       <ul className="space-y-1 text-gray-200">
                         {deployPlan.notes.map((note, index) => (
                           <li key={`modal-note-${index}`}>{note}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+
+                  {unsavedChanges ? (
+                    <div>
+                      <div className="mb-2 flex items-center justify-between gap-3">
+                        <div className="text-xs text-gray-400">Unsaved changes</div>
+                        <Button color="secondary" size="small" type="button" onClick={() => resetUnsavedChanges()}>
+                          Reset changes
+                        </Button>
+                      </div>
+                      <ul className="space-y-1">
+                        {unsavedChangeDetails.map((change, index) => (
+                          <li key={`unsaved-${change.label}-${index}`} className="flex items-center justify-between gap-3">
+                            <span>{change.label}</span>
+                            <span className="text-right text-gray-300">
+                              {change.requiresFullDeploy ? 'Needs full deploy' : 'Fast deploy ok'}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+
+                  {undeployedChanges ? (
+                    <div>
+                      <div className="mb-2 flex items-center justify-between gap-3">
+                        <div className="text-xs text-gray-400">{lastDeploy ? 'Undeployed changes' : 'Not yet deployed'}</div>
+                        {lastDeploy ? (
+                          <Button color="secondary" size="small" type="button" onClick={() => resetUndeployedChanges()}>
+                            Reset changes
+                          </Button>
+                        ) : null}
+                      </div>
+                      <ul className="space-y-1">
+                        {lastDeploy
+                          ? undeployedChangeDetails.map((change, index) => (
+                              <li
+                                key={`undeployed-${change.label}-${index}`}
+                                className="flex items-center justify-between gap-3"
+                              >
+                                <span>{change.label}</span>
+                                <span className="text-right text-gray-300">
+                                  {change.requiresFullDeploy ? 'Needs full deploy' : 'Fast deploy ok'}
+                                </span>
+                              </li>
+                            ))
+                          : undeployedSummaryItems.map((item, index) => (
+                              <li key={`not-deployed-${item.label}-${index}`} className="flex items-center justify-between gap-3">
+                                <span>{item.label}</span>
+                                <span className="text-right text-gray-300">{item.value}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+
+                  {undeployedChanges && undeployedSummaryItems.length > 0 ? (
+                    <div>
+                      <div className="mb-2 text-xs text-gray-400">Deployment summary</div>
+                      <ul className="space-y-1">
+                        {undeployedSummaryItems.map((item, index) => (
+                          <li key={`summary-${item.label}-${index}`} className="flex items-center justify-between gap-3">
+                            <span>{item.label}</span>
+                            <span className="text-right text-gray-300">{item.value}</span>
+                          </li>
                         ))}
                       </ul>
                     </div>
