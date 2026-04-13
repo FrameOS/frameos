@@ -254,14 +254,16 @@ export function Frame(props: FrameSceneProps) {
           <Modal
             open={deployPlanModalOpen}
             onClose={hideDeployPlanModal}
-            title="Deploy Plan"
-          >
-            <div className="p-5 space-y-4 text-sm text-gray-100">
-              <div className="flex justify-end">
+            title={
+              <div className="flex items-center justify-between gap-3">
+                <span>Deploy Plan</span>
                 <Button color="secondary" size="small" type="button" onClick={() => loadDeployPlans()}>
-                  Reload plan
+                  Reload
                 </Button>
               </div>
+            }
+          >
+            <div className="p-5 space-y-4 text-sm text-gray-100">
               {deployPlansLoading ? (
                 <div className="text-gray-300">Loading…</div>
               ) : (
