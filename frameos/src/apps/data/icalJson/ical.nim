@@ -565,6 +565,8 @@ proc processLine*(self: var ParsedCalendar, line: string) =
         if key == "X-WR-TIMEZONE":
           self.timeZone = normalizeTimeZone(unescape(value))
 
+proc reconcileRecurringSeries*(self: var ParsedCalendar)
+
 proc parseICalendar*(content: string, timeZone = ""): ParsedCalendar =
   result = ParsedCalendar(timeZone: normalizeTimeZone(timeZone))
   result.timeZone = normalizeTimeZone(timeZone) # Default. Will be overridden by X-WR-TIMEZONE if given
