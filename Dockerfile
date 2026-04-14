@@ -4,8 +4,11 @@ FROM python:3.12-slim-bookworm
 # Set the working directory
 WORKDIR /app
 
+ARG NIM_VERSION=2.2.4
+ARG FRAMEOS_ARCHIVE_BASE_URL=https://archive.frameos.net
+
 # Install Node.js based on platform
-RUN apt-get update && apt-get install -y curl build-essential libffi-dev redis-server ca-certificates gnupg openssh-client \
+RUN apt-get update && apt-get install -y curl build-essential libffi-dev redis-server ca-certificates gnupg openssh-client git \
     && mkdir -p /etc/apt/keyrings \
     && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
     && NODE_MAJOR=22 \
@@ -15,19 +18,45 @@ RUN apt-get update && apt-get install -y curl build-essential libffi-dev redis-s
     && chmod a+r /etc/apt/keyrings/docker.gpg \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian bookworm stable" | tee /etc/apt/sources.list.d/docker.list \
     && apt-get update \
-    && apt-get install -y nodejs docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    && apt-get install -y nodejs docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install Nim
-RUN apt-get update && \
-  apt-get install -y curl xz-utils gcc openssl ca-certificates git # &&
-
-RUN mkdir -p /opt/nim && \
-    curl -L https://nim-lang.org/download/nim-2.2.4.tar.xz | tar -xJf - -C /opt/nim --strip-components=1 && \
-    cd /opt/nim && \
-    sh build.sh && \
-    bin/nim c koch && \
-    ./koch boot -d:release && \
-    ./koch tools
+# Install the matching prebuilt Nim toolchain for this base image instead of
+# rebuilding Nim from source on every clean Docker build.
+RUN set -eux; \
+    . /etc/os-release; \
+    distro="${ID}"; \
+    release="${VERSION_CODENAME:-${VERSION_ID:-}}"; \
+    case "${distro}" in \
+      raspios|raspbian) distro="debian" ;; \
+      debian|ubuntu) ;; \
+      *) echo "Unsupported prebuilt Nim distro: ${distro}" >&2; exit 1 ;; \
+    esac; \
+    case "${distro}" in \
+      debian) \
+        case "${release}" in \
+          bullseye|bookworm|trixie) ;; \
+          *) echo "Unsupported prebuilt Nim release: ${distro}-${release}" >&2; exit 1 ;; \
+        esac ;; \
+      ubuntu) \
+        case "${VERSION_ID}" in \
+          22.04|24.04) release="${VERSION_ID}" ;; \
+          *) echo "Unsupported prebuilt Nim release: ${distro}-${VERSION_ID}" >&2; exit 1 ;; \
+        esac ;; \
+    esac; \
+    arch="$(dpkg --print-architecture)"; \
+    case "${arch}" in \
+      amd64|arm64|armhf) ;; \
+      *) echo "Unsupported prebuilt Nim architecture: ${arch}" >&2; exit 1 ;; \
+    esac; \
+    nim_target="${distro}-${release}-${arch}"; \
+    mkdir -p /opt/nim /tmp/nim-download; \
+    curl -fsSL "${FRAMEOS_ARCHIVE_BASE_URL}/prebuilt-deps/${nim_target}/nim-${NIM_VERSION}.tar.gz" -o /tmp/nim.tar.gz; \
+    tar -xzf /tmp/nim.tar.gz -C /tmp/nim-download; \
+    rm -rf "/tmp/nim-download/nim-${NIM_VERSION}/nim/bin"; \
+    cp -a "/tmp/nim-download/nim-${NIM_VERSION}/bin" /opt/nim/bin; \
+    cp -a "/tmp/nim-download/nim-${NIM_VERSION}/nim/." /opt/nim/; \
+    rm -rf /tmp/nim-download /tmp/nim.tar.gz
 
 ENV PATH="/opt/nim/bin:${PATH}"
 
