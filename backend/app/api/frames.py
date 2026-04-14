@@ -21,6 +21,7 @@ import time
 import zipfile
 from tempfile import NamedTemporaryFile
 from typing import Any, Optional, Tuple
+from types import SimpleNamespace
 from urllib.parse import quote
 
 # third-party ---------------------------------------------------------------
@@ -85,7 +86,8 @@ from app.utils.frame_http import (
     _httpx_verify,
 )
 from app.tasks.utils import find_nim_v2
-from app.tasks.deploy_frame import FrameDeployer
+from app.tasks._frame_deployer import FrameDeployer
+from app.tasks.frame_deploy_workflow import FrameDeployWorkflow
 from app.redis import get_redis
 from app.websockets import publish_message
 from app.ws.agent_ws import (
@@ -119,6 +121,47 @@ def _serialize_datetime(value: Optional[datetime]) -> Optional[str]:
     if not value:
         return None
     return value.replace(tzinfo=timezone.utc).isoformat()
+
+
+def _apply_frame_preview_update(frame: Frame, data: FrameUpdateRequest) -> Any:
+    update_data = data.model_dump(exclude_unset=True)
+    if isinstance(update_data.get("scenes"), str):
+        try:
+            update_data["scenes"] = json.loads(update_data["scenes"])
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=400, detail="Invalid input for scenes (must be JSON)")
+
+    frame_dict = frame.to_dict()
+    preview_data = {**frame_dict, **update_data}
+    preview = SimpleNamespace(**preview_data)
+
+    preview.id = frame.id
+    preview.status = frame.status
+    preview.version = frame.version
+    preview.last_successful_deploy = frame.last_successful_deploy
+    preview.last_successful_deploy_at = frame.last_successful_deploy_at
+    preview.apps = frame.apps
+    preview.image_url = frame.image_url
+
+    if "https_proxy" in update_data:
+        preview.https_proxy = normalize_https_proxy(preview.https_proxy)
+        refresh_tls_certificate_validity_dates(preview)
+
+    old_mode = frame.mode
+    if data.mode == "buildroot" and old_mode != "buildroot" and preview.ssh_user == "pi":
+        preview.ssh_user = "root"
+    elif data.mode == "rpios" and old_mode == "buildroot" and preview.ssh_user == "root":
+        preview.ssh_user = "pi"
+
+    def _preview_to_dict():
+        result = {**frame.to_dict(), **preview_data}
+        result["mode"] = preview.mode
+        result["https_proxy"] = normalize_https_proxy(preview.https_proxy)
+        result["ssh_user"] = preview.ssh_user
+        return result
+
+    preview.to_dict = _preview_to_dict
+    return preview
 
 
 def _sanitize_scene_state_filename(scene_id: str) -> str:
@@ -846,7 +889,8 @@ async def api_frame_local_binary_zip(
         builder = FrameBinaryBuilder(db=db, redis=redis, frame=frame, deployer=deployer, temp_dir=tmp)
 
         try:
-            build_result = await builder.build(force_cross_compile=True)
+            build_plan = await builder.plan_build(force_cross_compile=True)
+            build_result = await builder.build(build_plan)
         except Exception as exc:
             raise HTTPException(
                 status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -1533,6 +1577,93 @@ async def api_frame_deploy_event(id: int, redis: Redis = Depends(get_redis)):
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 
+@api_with_auth.get("/frames/{id:int}/deploy_plan")
+async def api_frame_deploy_plan(
+    id: int,
+    mode: str = Query("combined"),
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    frame = db.get(Frame, id)
+    if not frame:
+        _not_found()
+
+    try:
+        if mode in {"combined", "full"}:
+            nim_path = find_nim_v2()
+            with tempfile.TemporaryDirectory() as temp_dir:
+                deployer = FrameDeployer(db=db, redis=redis, frame=frame, nim_path=nim_path, temp_dir=temp_dir)
+                workflow = FrameDeployWorkflow(
+                    db=db,
+                    redis=redis,
+                    frame=frame,
+                    deployer=deployer,
+                    temp_dir=temp_dir,
+                )
+                plan = await workflow.plan(mode)
+        elif mode == "fast":
+            deployer = FrameDeployer(db=db, redis=redis, frame=frame, nim_path="", temp_dir="")
+            workflow = FrameDeployWorkflow(
+                db=db,
+                redis=redis,
+                frame=frame,
+                deployer=deployer,
+                temp_dir="",
+            )
+            plan = await workflow.plan("fast")
+        else:
+            _bad_request("mode must be 'combined', 'full' or 'fast'")
+
+        return {"plan": plan.to_dict()}
+    except Exception as e:
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@api_with_auth.post("/frames/{id:int}/deploy_plan")
+async def api_frame_deploy_plan_preview(
+    id: int,
+    data: FrameUpdateRequest,
+    mode: str = Query("combined"),
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    frame = db.get(Frame, id)
+    if not frame:
+        _not_found()
+
+    preview_frame = _apply_frame_preview_update(frame, data)
+
+    try:
+        if mode in {"combined", "full"}:
+            nim_path = find_nim_v2()
+            with tempfile.TemporaryDirectory() as temp_dir:
+                deployer = FrameDeployer(db=db, redis=redis, frame=preview_frame, nim_path=nim_path, temp_dir=temp_dir)
+                workflow = FrameDeployWorkflow(
+                    db=db,
+                    redis=redis,
+                    frame=preview_frame,
+                    deployer=deployer,
+                    temp_dir=temp_dir,
+                )
+                plan = await workflow.plan(mode)
+        elif mode == "fast":
+            deployer = FrameDeployer(db=db, redis=redis, frame=preview_frame, nim_path="", temp_dir="")
+            workflow = FrameDeployWorkflow(
+                db=db,
+                redis=redis,
+                frame=preview_frame,
+                deployer=deployer,
+                temp_dir="",
+            )
+            plan = await workflow.plan("fast")
+        else:
+            _bad_request("mode must be 'combined', 'full' or 'fast'")
+
+        return {"plan": plan.to_dict()}
+    except Exception as e:
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+
 @api_with_auth.post("/frames/{id:int}/fast_deploy")
 async def api_frame_fast_deploy_event(id: int, redis: Redis = Depends(get_redis)):
     try:
@@ -1612,14 +1743,11 @@ async def api_frame_update_endpoint(
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
 
     update_data = data.model_dump(exclude_unset=True)
-    # If 'scenes' is a string, parse it as JSON
     if isinstance(update_data.get("scenes"), str):
         try:
             update_data["scenes"] = json.loads(update_data["scenes"])
         except json.JSONDecodeError:
-            raise HTTPException(
-                status_code=400, detail="Invalid input for scenes (must be JSON)"
-            )
+            raise HTTPException(status_code=400, detail="Invalid input for scenes (must be JSON)")
 
     old_mode = frame.mode
     for field, value in update_data.items():

@@ -3,6 +3,7 @@ import strformat
 import pixie
 import times
 import options
+import algorithm
 import frameos/utils/image
 import frameos/types
 import os, strutils
@@ -35,6 +36,14 @@ proc isImage(file: string): bool =
     if file.endsWith(ext):
       return true
   return false
+
+proc compareImagePaths(a, b: string): int =
+  result = cmpIgnoreCase(a, b)
+  if result == 0:
+    result = cmp(a, b)
+
+proc sortImagesAlphabetically(images: var seq[string]) =
+  images.sort(compareImagePaths)
 
 # Function to return all images in a folder
 proc getImagesInFolder(folder: string): seq[string] =
@@ -72,7 +81,9 @@ proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
   if appConfig.order == "random":
     randomize()
     result.images.shuffle()
-  elif appConfig.counterStateKey != "":
+  else:
+    result.images.sortImagesAlphabetically()
+  if appConfig.order != "random" and appConfig.counterStateKey != "" and result.images.len > 0:
     result.counter = scene.state{appConfig.counterStateKey}.getInt() mod result.images.len
 
 proc run*(self: App, context: ExecutionContext) =

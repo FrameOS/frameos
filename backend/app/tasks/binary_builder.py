@@ -39,6 +39,36 @@ def should_suggest_clearing_build_cache(error_message: str) -> bool:
 
 
 @dataclass(slots=True)
+class FrameBinaryPlan:
+    build_id: str
+    target: TargetMetadata
+    allow_cross_compile: bool
+    force_cross_compile: bool
+    cross_compile_supported: bool
+    build_host_configured: bool
+    will_attempt_cross_compile: bool
+    prebuilt_entry: PrebuiltEntry | None
+    prebuilt_target: str | None
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "build_id": self.build_id,
+            "target": {
+                "arch": self.target.arch,
+                "distro": self.target.distro,
+                "version": self.target.version,
+            },
+            "allow_cross_compile": self.allow_cross_compile,
+            "force_cross_compile": self.force_cross_compile,
+            "cross_compile_supported": self.cross_compile_supported,
+            "build_host_configured": self.build_host_configured,
+            "will_attempt_cross_compile": self.will_attempt_cross_compile,
+            "prebuilt_target": self.prebuilt_target,
+            "has_prebuilt_entry": self.prebuilt_entry is not None,
+        }
+
+
+@dataclass(slots=True)
 class FrameBinaryBuildResult:
     build_id: str
     target: TargetMetadata
@@ -112,13 +142,13 @@ class FrameBinaryBuilder:
         self.log_path = Path(temp_dir) / DEFAULT_BUILD_LOG
         self.logger = logger
 
-    async def build(
+    async def plan_build(
         self,
         *,
         allow_cross_compile: bool = True,
         force_cross_compile: bool = False,
         target_override: TargetMetadata | None = None,
-    ) -> FrameBinaryBuildResult:
+    ) -> FrameBinaryPlan:
         target = target_override or await self._detect_target()
         prebuilt_entry, prebuilt_target = await resolve_prebuilt_entry(
             distro=target.distro,
@@ -127,7 +157,23 @@ class FrameBinaryBuilder:
             logger=self._log,
         )
         build_host = get_build_host_config(self.db)
+        cross_compile_supported = can_cross_compile_target(target.arch)
+        will_attempt_cross_compile = allow_cross_compile and cross_compile_supported
 
+        return FrameBinaryPlan(
+            build_id=self.deployer.build_id,
+            target=target,
+            allow_cross_compile=allow_cross_compile,
+            force_cross_compile=force_cross_compile,
+            cross_compile_supported=cross_compile_supported,
+            build_host_configured=build_host is not None,
+            will_attempt_cross_compile=will_attempt_cross_compile,
+            prebuilt_entry=prebuilt_entry,
+            prebuilt_target=prebuilt_target,
+        )
+
+    async def build(self, plan: FrameBinaryPlan) -> FrameBinaryBuildResult:
+        build_host = get_build_host_config(self.db)
         source_dir = self.deployer.create_local_source_folder(
             self.temp_dir, source_root=self.source_root
         )
@@ -139,12 +185,12 @@ class FrameBinaryBuilder:
         build_dir = create_build_folder(self.temp_dir, self.deployer.build_id)
         await self._log("stdout", f"{icon} Creating build archive")
         archive_path = await self.deployer.create_local_build_archive(
-            build_dir, source_dir, target.arch
+            build_dir, source_dir, plan.target.arch
         )
 
         cross_compiled = False
         binary_path: str | None = None
-        if allow_cross_compile and can_cross_compile_target(target.arch):
+        if plan.will_attempt_cross_compile:
             if build_host:
                 await self._log(
                     "stdout",
@@ -161,9 +207,9 @@ class FrameBinaryBuilder:
                     source_dir=source_dir,
                     temp_dir=self.temp_dir,
                     build_dir=build_dir,
-                    prebuilt_entry=prebuilt_entry,
-                    prebuilt_target=prebuilt_target,
-                    target_override=target,
+                    prebuilt_entry=plan.prebuilt_entry,
+                    prebuilt_target=plan.prebuilt_target,
+                    target_override=plan.target,
                     logger=self._log,
                     build_host=build_host,
                 )
@@ -196,7 +242,7 @@ class FrameBinaryBuilder:
                         "stderr",
                         f"{icon} If the failure is caused by a stale linker cache, clear the build cache (press ... in logs or settings) and try deploying again.",
                     )
-                if force_cross_compile:
+                if plan.force_cross_compile:
                     raise
                 else:
                     await self._log(
@@ -206,19 +252,19 @@ class FrameBinaryBuilder:
             else:
                 cross_compiled = True
                 await self._log("stdout", f"{icon} Cross compilation succeeded; skipping remote build")
-        elif force_cross_compile:
+        elif plan.force_cross_compile:
             raise RuntimeError("Cross compilation required but not supported for this target")
 
         return FrameBinaryBuildResult(
             build_id=self.deployer.build_id,
-            target=target,
+            target=plan.target,
             source_dir=source_dir,
             build_dir=build_dir,
             archive_path=archive_path,
             binary_path=binary_path,
             cross_compiled=cross_compiled,
-            prebuilt_entry=prebuilt_entry,
-            prebuilt_target=prebuilt_target,
+            prebuilt_entry=plan.prebuilt_entry,
+            prebuilt_target=plan.prebuilt_target,
             log_path=str(self.log_path) if self.log_path.exists() else None,
         )
 

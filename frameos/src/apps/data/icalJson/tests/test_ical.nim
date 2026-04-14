@@ -1134,3 +1134,50 @@ SUMMARY:Block / Family Time (moved later)
     doAssert not starts.contains(parseICalDateTime("20241022T180000", "America/New_York")), "Parent series not cut off after split"
     echo len(events)
     doAssert len(events) == 6, "Expected 6 total visible events (2 before split + 4 after)"
+
+block test_rrules_46:
+    echo ">> Testing: newer recurring master suppresses stale older series"
+    let events = toFullCal("""
+DTSTART;TZID=Europe/Brussels:20220307T180000
+DTEND;TZID=Europe/Brussels:20220307T200000
+RRULE:FREQ=WEEKLY;BYDAY=FR,MO,TH,TU,WE
+LAST-MODIFIED:20250320T174938Z
+SEQUENCE:1
+SUMMARY:Block / Family Time
+END:VEVENT
+BEGIN:VEVENT
+UID:abcdef-newer-series@example.com
+DTSTART;TZID=Europe/Brussels:20250113T180000
+DTEND;TZID=Europe/Brussels:20250113T200000
+RRULE:FREQ=WEEKLY;BYDAY=FR,MO,TH,TU,WE
+LAST-MODIFIED:20250401T120000Z
+SEQUENCE:2
+SUMMARY:Block / Family Time
+""", "Europe/Brussels")
+
+    let starts = events.mapIt(it[0])
+    doAssert starts.contains(parseICalDateTime("20250110T180000", "Europe/Brussels"))
+    doAssert starts.contains(parseICalDateTime("20250113T180000", "Europe/Brussels"))
+    doAssert starts.filterIt(it == parseICalDateTime("20250113T180000", "Europe/Brussels")).len == 1,
+        "Expected the stale recurring master to be suppressed from the newer chain start"
+
+block test_rrules_47:
+    echo ">> Testing: exact duplicate occurrences keep the freshest event"
+    let events = toFullCal("""
+DTSTART;TZID=Europe/Brussels:20250113T180000
+DTEND;TZID=Europe/Brussels:20250113T200000
+LAST-MODIFIED:20250101T100000Z
+SEQUENCE:1
+SUMMARY:Block / Family Time
+END:VEVENT
+BEGIN:VEVENT
+UID:duplicate-fresher@example.com
+DTSTART;TZID=Europe/Brussels:20250113T180000
+DTEND;TZID=Europe/Brussels:20250113T200000
+LAST-MODIFIED:20250102T100000Z
+SEQUENCE:2
+SUMMARY:Block / Family Time
+""", "Europe/Brussels")
+
+    doAssert len(events) == 1
+    doAssert events[0][1].uid == "duplicate-fresher@example.com"

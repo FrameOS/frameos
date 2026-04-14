@@ -13,19 +13,30 @@ import { entityImagesModel } from '../../models/entityImagesModel'
 import { arrangeNodes } from '../../utils/arrangeNodes'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
 import { secureToken } from '../../utils/secureToken'
-import versions from '../../../../versions.json'
+import {
+  type ChangeDetail,
+  CURRENT_FRAMEOS_VERSION,
+  type DeployPlanResponse,
+  type DeployRecommendation,
+  type SummaryItem,
+  buildDeployPlanRequestBody,
+  buildDeployRecommendation,
+  buildFastDeployPlanSummary,
+  buildFullDeployPlanSummary,
+} from './frameDeployUtils'
+import { getDeployPlanErrorMessage } from './frameDeployErrors'
+
+export type { ChangeDetail, DeployPlanResponse, DeployRecommendation, SummaryItem } from './frameDeployUtils'
+
+interface DeployPlanApiResponse {
+  plan: DeployPlanResponse
+}
 
 export interface FrameLogicProps {
   frameId: number
 }
 
-export interface ChangeDetail {
-  label: string
-  requiresFullDeploy: boolean
-}
-
 const DEFAULT_BROWSER_TITLE = 'FrameOS Backend'
-const CURRENT_FRAMEOS_VERSION = (versions.frameos || 'dev').split('+')[0]
 
 function setBrowserTitle(frame?: FrameType | null): void {
   if (typeof document === 'undefined') {
@@ -117,6 +128,7 @@ const FRAME_KEY_LABELS: Partial<Record<keyof FrameType, string>> = {
   server_host: 'Server host',
   server_port: 'Server port',
   server_api_key: 'Server API key',
+  server_send_logs: 'Server Send Logs',
   width: 'Width',
   height: 'Height',
   color: 'Color support',
@@ -145,14 +157,46 @@ const FRAME_KEY_LABELS: Partial<Record<keyof FrameType, string>> = {
   rpios: 'Raspberry Pi OS settings',
 }
 
+const DEPLOYMENT_SUMMARY_KEYS: (keyof FrameType)[] = [
+  'name',
+  'mode',
+  'frame_host',
+  'frame_port',
+  'frame_access_key',
+  'frame_access',
+  'frame_admin_auth',
+  'https_proxy',
+  'ssh_user',
+  'ssh_pass',
+  'ssh_port',
+  'ssh_keys',
+  'server_host',
+  'server_port',
+  'server_api_key',
+  'server_send_logs',
+  'width',
+  'height',
+  'color',
+  'device',
+  'device_config',
+  'interval',
+  'metrics_interval',
+  'scaling_mode',
+  'rotate',
+  'flip',
+  'background_color',
+  'debug',
+  'log_to_file',
+  'assets_path',
+  'save_assets',
+]
+
 function keyLabel(key: keyof FrameType): string {
   return FRAME_KEY_LABELS[key] ?? key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
 function getRecompileFields(mode: FrameType['mode']): (keyof FrameType)[] {
-  return mode === 'buildroot'
-    ? FRAME_KEYS_REQUIRE_RECOMPILE_BUILDROOT
-    : FRAME_KEYS_REQUIRE_RECOMPILE_RPIOS
+  return mode === 'buildroot' ? FRAME_KEYS_REQUIRE_RECOMPILE_BUILDROOT : FRAME_KEYS_REQUIRE_RECOMPILE_RPIOS
 }
 
 function sceneChangeDetails(currentScenes: FrameScene[], deployedScenes: FrameScene[]): ChangeDetail[] {
@@ -251,6 +295,103 @@ function normalizeFrameKeyValueForComparison(key: keyof FrameType, value: unknow
 
 function frameKeyEqual(key: keyof FrameType, previous: unknown, next: unknown): boolean {
   return equal(normalizeFrameKeyValueForComparison(key, previous), normalizeFrameKeyValueForComparison(key, next))
+}
+
+function summarizeSecret(value: unknown): string {
+  return value ? 'Configured' : 'Not set'
+}
+
+function stringifyList(values: unknown[]): string {
+  if (values.length === 0) {
+    return 'None'
+  }
+  return values.map((value) => String(value)).join(', ')
+}
+
+function summarizeFrameFieldValue(key: keyof FrameType, value: unknown): string {
+  if (value === null || value === undefined || value === '') {
+    return 'Not set'
+  }
+
+  switch (key) {
+    case 'frame_access_key':
+    case 'server_api_key':
+    case 'ssh_pass':
+      return summarizeSecret(value)
+    case 'mode':
+      return value === 'buildroot' ? 'Buildroot' : 'Raspberry Pi OS'
+    case 'frame_admin_auth': {
+      const auth = value as FrameType['frame_admin_auth']
+      if (!auth?.enabled) {
+        return 'Disabled'
+      }
+      return auth.user ? `Enabled (${auth.user})` : 'Enabled'
+    }
+    case 'https_proxy': {
+      const proxy = value as FrameType['https_proxy']
+      if (!proxy?.enable) {
+        return 'Disabled'
+      }
+      const parts = [`Enabled on ${proxy.port || 8443}`]
+      if (proxy.expose_only_port) {
+        parts.push('port-only')
+      }
+      return parts.join(' · ')
+    }
+    case 'ssh_keys': {
+      const keys = Array.isArray(value) ? value : []
+      return keys.length > 0 ? `${keys.length} selected` : 'None'
+    }
+    case 'server_send_logs':
+    case 'debug':
+      return value ? 'Enabled' : 'Disabled'
+    case 'save_assets':
+      if (typeof value === 'boolean') {
+        return value ? 'Enabled' : 'Disabled'
+      }
+      if (value && typeof value === 'object') {
+        const enabledKeys = Object.entries(value as Record<string, boolean>)
+          .filter(([, enabled]) => Boolean(enabled))
+          .map(([app]) => app)
+        return enabledKeys.length > 0 ? stringifyList(enabledKeys) : 'Disabled'
+      }
+      return 'Disabled'
+    case 'device_config':
+      return value && typeof value === 'object' ? 'Configured' : 'Not set'
+    default:
+      return String(value)
+  }
+}
+
+function buildUndeployedSummaryItems(
+  previous: Partial<FrameType> | null | undefined,
+  next: Partial<FrameType> | null | undefined,
+  requiresRecompilation: boolean
+): SummaryItem[] {
+  const firstDeploy = !previous || Object.keys(previous).length === 0
+  const items: SummaryItem[] = [
+    {
+      label: 'Full deploy',
+      value: requiresRecompilation || firstDeploy ? 'Required' : 'Not required',
+    },
+  ]
+
+  for (const key of DEPLOYMENT_SUMMARY_KEYS) {
+    const nextValue = next?.[key]
+    const previousValue = previous?.[key]
+    const include = firstDeploy ? true : !frameKeyEqual(key, previousValue, nextValue)
+
+    if (!include) {
+      continue
+    }
+
+    items.push({
+      label: keyLabel(key),
+      value: summarizeFrameFieldValue(key, nextValue),
+    })
+  }
+
+  return items
 }
 
 async function resolveTemplateImageUrl(template: Partial<TemplateType>): Promise<string | null> {
@@ -478,6 +619,11 @@ export const frameLogic = kea<frameLogicType>([
     generateFrameAdminCredentials: true,
     generateTlsCertificates: true,
     verifyTlsCertificates: true,
+    showDeployPlanModal: true,
+    hideDeployPlanModal: true,
+    loadDeployPlans: true,
+    loadDeployPlansSuccess: (plan: DeployPlanResponse | null) => ({ plan }),
+    loadDeployPlansFailure: (error: string) => ({ error }),
   }),
   forms(({ values }) => ({
     frameForm: {
@@ -501,10 +647,7 @@ export const frameLogic = kea<frameLogicType>([
         })),
       }),
       submit: async (frame) => {
-        const json: Record<string, any> = {}
-        for (const key of FRAME_KEYS) {
-          json[key] = frame[key as keyof typeof frame]
-        }
+        const json = buildDeployPlanRequestBody(frame, FRAME_KEYS)
         if (values.nextAction) {
           json['next_action'] = values.nextAction
         }
@@ -543,6 +686,36 @@ export const frameLogic = kea<frameLogicType>([
             agent: { ...frame.agent, deployWithAgent },
           }
         },
+      },
+    ],
+    deployPlans: [
+      null as DeployPlanResponse | null,
+      {
+        loadDeployPlans: () => null,
+        loadDeployPlansSuccess: (_, { plan }) => plan,
+      },
+    ],
+    deployPlansLoading: [
+      false,
+      {
+        loadDeployPlans: () => true,
+        loadDeployPlansSuccess: () => false,
+        loadDeployPlansFailure: () => false,
+      },
+    ],
+    deployPlansError: [
+      null as string | null,
+      {
+        loadDeployPlans: () => null,
+        loadDeployPlansSuccess: () => null,
+        loadDeployPlansFailure: (_, { error }) => error,
+      },
+    ],
+    deployPlanModalOpen: [
+      false,
+      {
+        showDeployPlanModal: () => true,
+        hideDeployPlanModal: () => false,
       },
     ],
   }),
@@ -633,6 +806,26 @@ export const frameLogic = kea<frameLogicType>([
         })
       }
     },
+    loadDeployPlans: async () => {
+      const response = await apiFetch(`/api/frames/${values.frameId}/deploy_plan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(buildDeployPlanRequestBody(values.frameForm, FRAME_KEYS)),
+      })
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}))
+        actions.loadDeployPlansFailure(getDeployPlanErrorMessage(payload))
+        return
+      }
+
+      const payload = (await response.json()) as DeployPlanApiResponse
+      actions.loadDeployPlansSuccess(payload.plan)
+    },
+    showDeployPlanModal: async () => {
+      if (!values.deployPlans) {
+        actions.loadDeployPlans()
+      }
+    },
   })),
   selectors(() => ({
     frameId: [() => [(_, props) => props.frameId], (frameId) => frameId],
@@ -689,6 +882,43 @@ export const frameLogic = kea<frameLogicType>([
     requiresRecompilation: [
       (s) => [s.undeployedChangeDetails],
       (undeployedChangeDetails) => undeployedChangeDetails.some((change) => change.requiresFullDeploy),
+    ],
+    deployChangeDetails: [
+      (s) => [s.lastDeploy, s.frameForm, s.mode, s.isFrameAdminMode],
+      (lastDeploy, frameForm, mode, isFrameAdminMode): ChangeDetail[] =>
+        isFrameAdminMode ? [] : computeChangeDetails(lastDeploy, frameForm, mode),
+    ],
+    undeployedSummaryItems: [
+      (s) => [s.lastDeploy, s.frame, s.requiresRecompilation, s.isFrameAdminMode],
+      (lastDeploy, frame, requiresRecompilation, isFrameAdminMode): SummaryItem[] =>
+        isFrameAdminMode ? [] : buildUndeployedSummaryItems(lastDeploy, frame, requiresRecompilation),
+    ],
+    deployPlan: [(s) => [s.deployPlans], (deployPlans) => deployPlans],
+    fastDeployPlan: [(s) => [s.deployPlan], (deployPlan) => deployPlan],
+    fullDeployPlan: [(s) => [s.deployPlan], (deployPlan) => deployPlan],
+    fastDeployPlanSummary: [
+      (s) => [s.fastDeployPlan],
+      (fastDeployPlan): SummaryItem[] => buildFastDeployPlanSummary(fastDeployPlan),
+    ],
+    fullDeployPlanSummary: [
+      (s) => [s.fullDeployPlan, s.frameForm],
+      (fullDeployPlan: DeployPlanResponse | null, frameForm: Partial<FrameType>): SummaryItem[] =>
+        buildFullDeployPlanSummary(fullDeployPlan, frameForm),
+    ],
+    deployRecommendation: [
+      (s) => [s.deployPlan, s.lastDeploy, s.deployChangeDetails],
+      (deployPlan, lastDeploy, deployChangeDetails): DeployRecommendation | null =>
+        buildDeployRecommendation(deployPlan, Boolean(lastDeploy), deployChangeDetails),
+    ],
+    hasPendingFrameosUpgrade: [
+      (s) => [s.lastDeploy],
+      (lastDeploy: Partial<FrameType> | null): boolean => {
+        const previousVersion =
+          typeof (lastDeploy as Record<string, unknown> | null | undefined)?.frameos_version === 'string'
+            ? String((lastDeploy as Record<string, unknown>).frameos_version).split('+')[0]
+            : null
+        return Boolean(previousVersion && previousVersion !== CURRENT_FRAMEOS_VERSION)
+      },
     ],
     defaultScene: [
       (s) => [s.frame, s.frameForm],

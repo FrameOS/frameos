@@ -13,6 +13,8 @@ git.pkg-path = "git"
 git.outputs = "all"
 gnumake.pkg-path = "gnumake"
 gnumake.outputs = "all"
+libffi.pkg-path = "libffi"
+libffi.outputs = "all"
 nodejs.pkg-path = "nodejs_22"
 nodejs.outputs = "all"
 nim.pkg-path = "nim"
@@ -60,6 +62,14 @@ on-activate = '''
 
   unset NVM_BIN NVM_INC
   export PATH="$VIRTUAL_ENV/bin:$FLOX_ENV/bin${cleaned_path:+:$cleaned_path}"
+
+  # Rebuild toolchain flags from this environment. Inherited values from
+  # another Flox/Nix shell can point compilers at the wrong project.
+  export CPATH="$FLOX_ENV/include"
+  export CPPFLAGS="-I$FLOX_ENV/include"
+  export LDFLAGS="-L$FLOX_ENV/lib"
+  export LIBRARY_PATH="$FLOX_ENV/lib"
+  export PKG_CONFIG_PATH="$FLOX_ENV/lib/pkgconfig:$FLOX_ENV/share/pkgconfig"
 
   mkdir -p "$FRAMEOS_FLOX_CACHE_DIR" "$FRAMEOS_FLOX_REDIS_DIR"
 

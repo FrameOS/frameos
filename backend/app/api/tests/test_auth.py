@@ -95,6 +95,41 @@ async def test_signup_first_user(no_auth_client, db: Session):
 
 
 @pytest.mark.asyncio
+async def test_signup_accepts_localhost_domain(no_auth_client, db: Session):
+    db.query(User).delete()
+    db.commit()
+
+    signup_data = {
+        "email": "marius@localhost",
+        "password": "newpassword",
+        "password2": "newpassword",
+        "newsletter": False,
+    }
+    response = await no_auth_client.post("/api/signup", json=signup_data)
+
+    assert response.status_code == HTTP_200_OK
+    json_data = response.json()
+    assert json_data["success"] is True
+
+
+@pytest.mark.asyncio
+async def test_signup_invalid_email_rejected(no_auth_client, db: Session):
+    db.query(User).delete()
+    db.commit()
+
+    signup_data = {
+        "email": "not-an-email",
+        "password": "newpassword",
+        "password2": "newpassword",
+        "newsletter": False,
+    }
+    response = await no_auth_client.post("/api/signup", json=signup_data)
+
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["msg"] == "Value error, Please enter a valid email address."
+
+
+@pytest.mark.asyncio
 async def test_signup_already_exists(no_auth_client, db: Session):
     """
     Test that if a user already exists, we cannot sign up a new user,

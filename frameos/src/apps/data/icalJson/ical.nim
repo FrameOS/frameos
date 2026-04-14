@@ -16,8 +16,8 @@ import tables
 # - RDATE
 
 # Missing metadata fields:
-# - ORGANIZER, ATTENDEE, CONTACT, RELATED-TO, RESOURCES, VALARM, CLASS, CREATED, LAST-MODIFIED,
-# - SEQUENCE, TRANSP, PRIORITY, STATUS, GEO, CATEGORIES
+# - ORGANIZER, ATTENDEE, CONTACT, RELATED-TO, RESOURCES, VALARM, CLASS, CREATED,
+# - TRANSP, PRIORITY, GEO, CATEGORIES
 
 type
   RRuleFreq* = enum
@@ -58,6 +58,9 @@ type
     location*: string
     url*: string
     status*: EventStatus
+    sequence*: int
+    dtStamp*: Timestamp
+    lastModified*: Timestamp
 
   ParsedCalendar* = object
     events*: seq[VEvent]
@@ -71,6 +74,7 @@ type
     result*: EventsSeq
     splitCutoff*: Table[string, Timestamp]
     masterTzByUid*: Table[string, string]
+    staleSeriesCutoff*: Table[string, Timestamp]
 
 const MAX_RESULT_COUNT = 100000
 
@@ -354,8 +358,8 @@ proc processCurrentFields*(self: var ParsedCalendar) =
   if fields.hasKey("DURATION"):
     assert(false, "DURATION is not supported")
 
-  # if fields.hasKey("DTSTAMP"): # When the event was created
-  #   assert(false, "DTSTAMP is not supported")
+  if fields.hasKey("DTSTAMP"):
+    event.dtStamp = parseICalDateTime(getFirstValue("DTSTAMP"), "UTC")
 
   if fields.hasKey("RECURRENCE-ID"):
     event.recurrenceId = getFirstValue("RECURRENCE-ID")
@@ -488,6 +492,14 @@ proc processCurrentFields*(self: var ParsedCalendar) =
     of "CONFIRMED": event.status = stConfirmed
     else: event.status = stNone
 
+  if fields.hasKey("LAST-MODIFIED"):
+    event.lastModified = parseICalDateTime(getFirstValue("LAST-MODIFIED"), "UTC")
+  if fields.hasKey("SEQUENCE"):
+    try:
+      event.sequence = getFirstValue("SEQUENCE").parseInt()
+    except ValueError:
+      event.sequence = 0
+
   # Attendee and Alarm Properties
   # if fields.hasKey("ATTENDEE"):
   #   assert(false, "ATTENDEE is not supported")
@@ -553,10 +565,13 @@ proc processLine*(self: var ParsedCalendar, line: string) =
         if key == "X-WR-TIMEZONE":
           self.timeZone = normalizeTimeZone(unescape(value))
 
+proc reconcileRecurringSeries*(self: var ParsedCalendar)
+
 proc parseICalendar*(content: string, timeZone = ""): ParsedCalendar =
   result = ParsedCalendar(timeZone: normalizeTimeZone(timeZone))
   result.timeZone = normalizeTimeZone(timeZone) # Default. Will be overridden by X-WR-TIMEZONE if given
   result.masterTzByUid = initTable[string, string]()
+  result.staleSeriesCutoff = initTable[string, Timestamp]()
   var accumulator = ""
   for line in content.splitLines():
     if line.len > 0 and (line[0] == ' ' or line[0] == '\t'):
@@ -570,6 +585,7 @@ proc parseICalendar*(content: string, timeZone = ""): ParsedCalendar =
     processLine(result, accumulator.strip())
 
   result.events.sort(proc (a: VEvent, b: VEvent): int = cmp(a.startTs, b.startTs))
+  result.reconcileRecurringSeries()
 
 ####################################################################################################
 # Querying
@@ -582,6 +598,89 @@ proc fixDST(self: var Calendar, timeZone: string) =
   if normalized.len == 0:
     return
   self.shiftTimezone(normalized)
+
+proc eventFreshness*(event: VEvent): (int, float, float, float) =
+  (
+    event.sequence,
+    event.lastModified.float,
+    event.dtStamp.float,
+    event.startTs.float
+  )
+
+proc sameRRule*(a, b: RRule): bool =
+  a.freq == b.freq and
+  a.interval == b.interval and
+  a.byDay == b.byDay and
+  a.byMonth == b.byMonth and
+  a.byMonthDay == b.byMonthDay and
+  a.byYearDay == b.byYearDay and
+  a.byWeekNo == b.byWeekNo and
+  a.until == b.until and
+  a.count == b.count and
+  a.weekStart == b.weekStart
+
+proc sameRecurringMasterSignature*(a, b: VEvent): bool =
+  if a.uid == b.uid:
+    return false
+  if a.recurrenceId.len > 0 or b.recurrenceId.len > 0:
+    return false
+  if a.rrules.len == 0 or b.rrules.len == 0:
+    return false
+  if a.summary != b.summary:
+    return false
+  if a.fullDay != b.fullDay:
+    return false
+  if (a.endTs.float - a.startTs.float) != (b.endTs.float - b.startTs.float):
+    return false
+  if a.rrules.len != b.rrules.len:
+    return false
+  for i in 0 ..< a.rrules.len:
+    if not sameRRule(a.rrules[i], b.rrules[i]):
+      return false
+  return true
+
+proc choosePreferredEvent*(current, candidate: VEvent): VEvent =
+  if eventFreshness(candidate) > eventFreshness(current):
+    return candidate
+  return current
+
+proc reconcileRecurringSeries*(self: var ParsedCalendar) =
+  for i in 0 ..< self.events.len:
+    let older = self.events[i]
+    if older.status == stCancelled or older.rrules.len == 0 or older.recurrenceId.len > 0:
+      continue
+    for j in 0 ..< self.events.len:
+      if i == j:
+        continue
+      let newer = self.events[j]
+      if newer.status == stCancelled or newer.rrules.len == 0 or newer.recurrenceId.len > 0:
+        continue
+      if not sameRecurringMasterSignature(older, newer):
+        continue
+
+      if older.startTs < newer.startTs and eventFreshness(newer) >= eventFreshness(older):
+        if not self.staleSeriesCutoff.hasKey(older.uid) or newer.startTs < self.staleSeriesCutoff[older.uid]:
+          self.staleSeriesCutoff[older.uid] = newer.startTs
+      elif older.startTs == newer.startTs and eventFreshness(newer) > eventFreshness(older):
+        if not self.staleSeriesCutoff.hasKey(older.uid) or newer.startTs < self.staleSeriesCutoff[older.uid]:
+          self.staleSeriesCutoff[older.uid] = newer.startTs
+
+proc reconcileExactCollisions*(self: var ParsedCalendar) =
+  var winners = initTable[string, (Timestamp, VEvent)]()
+  for (ts, event) in self.result:
+    let duration = int64(event.endTs.float - event.startTs.float)
+    let collisionKey = event.summary & "|" & $int64(ts.float) & "|" & $duration
+    if winners.hasKey(collisionKey):
+      let current = winners[collisionKey]
+      let preferred = choosePreferredEvent(current[1], event)
+      if preferred.uid == event.uid and preferred.startTs == event.startTs and preferred.endTs == event.endTs:
+        winners[collisionKey] = (ts, event)
+    else:
+      winners[collisionKey] = (ts, event)
+
+  self.result = @[]
+  for (_, winner) in winners.pairs():
+    self.result.add(winner)
 
 proc trimDay(self: var Calendar) =
   self.secondFraction = 0.0
@@ -778,6 +877,10 @@ proc addMatchedEvent(self: var ParsedCalendar, ts: Timestamp, event: VEvent) =
   if self.result.len() > MAX_RESULT_COUNT:
     raise newException(ValueError, "Too many events in calendar. Increase MAX_RESULT_COUNT.")
 
+  if event.recurrenceId.len == 0 and event.rrules.len > 0 and self.staleSeriesCutoff.hasKey(event.uid):
+    if ts >= self.staleSeriesCutoff[event.uid]:
+      return
+
   if event.recurrenceId != "":
     var (ridTzParam, ridDate) = extractTzAndDate(event.recurrenceId)
     let ridTz = self.tzForRid(event, ridTzParam)
@@ -925,6 +1028,7 @@ proc getEvents*(self: var ParsedCalendar, startTs: Timestamp, endTs: Timestamp, 
   for key, (ts, event) in self.rRuleGenerated.pairs():
     self.result.add((ts, event))
 
+  self.reconcileExactCollisions()
   self.result.sort(cmp)
 
   if maxCount > 0 and self.result.len > maxCount:
