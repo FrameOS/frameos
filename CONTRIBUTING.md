@@ -42,6 +42,25 @@ cd ../frameos/frontend
 pnpm run dev
 ```
 
+Running a local dev build via docker:
+
+```bash
+SECRET_KEY=$(openssl rand -base64 32)
+docker build -t frameos .
+docker run -d -p 8989:8989 \
+    -v ./db:/app/db \
+    -v /tmp/frameos-cross:/tmp/frameos-cross \
+    -v /var/run/docker.sock:/var/run/docker.sock \
+    --privileged \
+    --name frameos \
+    --restart always \
+    -e SECRET_KEY="$SECRET_KEY" \
+    -e TMPDIR=/tmp/frameos-cross \
+    frameos
+```
+
+We need `docker.sock` and `--privileged` for docker-based cross-compilation.
+
 ## Creating migrations
 
 ```bash
