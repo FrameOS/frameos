@@ -3,37 +3,11 @@
 
 ## Prerequisites
 
-You'll need to install:
-Python >= 3.12
-`Node.js` and `pnpm`
-`redis-server`
-`nim >=2.0.0` (https://nim-lang.org/install.html)
-(Note that Debian distros have only packaged `1.6.x` as of Jan 2024)
+Install flox: https://flox.dev/docs/install-flox/install/
+
+Clone this repository and run `flox activate`
 
 ## FrameOS Backend
-
-Start a redis server if not running
-
-```bash
-redis-server --daemonize yes
-```
-
-Installing deps
-
-```bash
-cd backend
-python3 -m venv env
-source env/bin/activate
-uv pip install -r requirements.txt
-DEBUG=1 alembic upgrade head
-
-pnpm install
-
-cd ../frameos
-nimble install -d
-nimble setup
-cd ..
-```
 
 To run all services at once:
 
