@@ -1,4 +1,5 @@
 import importlib.util
+import subprocess
 import shutil
 import sys
 from pathlib import Path
@@ -134,6 +135,42 @@ def test_hash_frontend_inputs_ignores_node_modules(tmp_path):
     after = prepare_assets.hash_frontend_inputs(frameos_root)
 
     assert after == before
+
+
+def test_run_command_suppresses_success_output(tmp_path, capsys):
+    prepare_assets.run_command(
+        [sys.executable, "-c", "print('frontend noise')"],
+        cwd=tmp_path,
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+
+
+def test_run_command_replays_output_on_failure(tmp_path, capsys):
+    try:
+        prepare_assets.run_command(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import sys; "
+                    "print('build stdout'); "
+                    "print('build stderr', file=sys.stderr); "
+                    "raise SystemExit(3)"
+                ),
+            ],
+            cwd=tmp_path,
+        )
+    except subprocess.CalledProcessError as exc:
+        assert exc.returncode == 3
+    else:
+        assert False, "Expected run_command to raise CalledProcessError"
+
+    captured = capsys.readouterr()
+    assert "build stdout" in captured.out
+    assert "build stderr" in captured.err
 
 
 def test_prepare_assets_uses_packaged_frontend_when_shared_sources_are_missing(tmp_path, monkeypatch):

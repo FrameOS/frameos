@@ -1,4 +1,4 @@
-import std/[base64, json, options, strformat, strutils, tables, uri]
+import std/[base64, json, options, strformat, strutils, tables]
 import pixie
 
 import frameos/apps as frameos_apps
@@ -96,7 +96,6 @@ proc jsAppFieldToJson*(runtime: JsAppRuntime, value: int32): JsonNode = %* value
 proc jsAppFieldToJson*(runtime: JsAppRuntime, value: int64): JsonNode = %* value
 proc jsAppFieldToJson*(runtime: JsAppRuntime, value: float): JsonNode = %* value
 proc jsAppFieldToJson*(runtime: JsAppRuntime, value: float32): JsonNode = %* value
-proc jsAppFieldToJson*(runtime: JsAppRuntime, value: float64): JsonNode = %* value
 proc jsAppFieldToJson*(runtime: JsAppRuntime, value: JsonNode): JsonNode =
   if value.isNil:
     return %*{}
@@ -222,7 +221,7 @@ proc defaultImageHeight(owner: AppRoot, context: ExecutionContext, spec: JsonNod
 proc colorWithOpacity(spec: JsonNode): Color =
   var color = parseHtmlColor(spec{"color"}.getStr("#000000"))
   let opacity = min(1.0, max(0.0, valueFromJsonByType(spec{"opacity"}, "float").asFloat()))
-  color.a = (opacity * 255.0).uint8
+  color.a = opacity.float32
   return color
 
 proc imageFromSpec(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext, spec: JsonNode): Image =
