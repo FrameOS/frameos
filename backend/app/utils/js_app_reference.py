@@ -13,6 +13,15 @@ FrameOS JavaScript apps run in QuickJS. Use `app.js` or `app.ts` plus `config.js
 - `app.js` or `app.ts`: module that exports `init`, `get`, and/or `run`.
 - Extra local files can be imported and bundled into the compiled app.
 
+## TypeScript editor support
+
+When you edit `app.ts` in the FrameOS editor, it can keep a generated type block in sync with `config.json`.
+
+- `interface Config` mirrors config fields from `config.json`.
+- `interface Payload` mirrors the declared `output` fields.
+- `type App = FrameOSApp<Config>` and `type Context = FrameOSContext<Payload>` are generated for convenience.
+- The editor also exposes typed `frameos` globals and validates `config.json` with schema autocomplete.
+
 ## Exports
 
 ```ts
@@ -146,7 +155,7 @@ Use these helpers to work with files under `app.frame.assetsPath`.
 ## Example
 
 ```ts
-export function get(app, context) {
+export function get(app: App, context: Context) {
   const label = `${app.config.prefix}: ${app.config.message}`
   const suffix = context.event ? ` (${context.event})` : ''
   return `${label}${suffix}`

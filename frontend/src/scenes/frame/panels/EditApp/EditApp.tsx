@@ -6,8 +6,7 @@ import { PanelWithMetadata } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
 import { panelsLogic } from '../panelsLogic'
 import { chatLogic } from '../Chat/chatLogic'
-import { useEffect, useState } from 'react'
-import schema from '../../../../../schema/config_json.json'
+import { useEffect, useRef, useState } from 'react'
 import type { editor as importedEditor } from 'monaco-editor'
 import type { Monaco } from '@monaco-editor/react'
 import clsx from 'clsx'
@@ -46,11 +45,15 @@ export function EditApp({ panel, sceneId, nodeId }: EditAppProps) {
     isJsApp,
     jsAppReference,
     jsAppReferenceLoading,
+    jsAppConfigJsonSchema,
+    jsAppEditorDeclarations,
   } = useValues(logic)
-  const { saveChanges, setActiveFile, updateFile, addFile, deleteFile } = useActions(logic)
+  const { saveChanges, setActiveFile, updateFile, addFile, deleteFile, convertAppToTypeScript } = useActions(logic)
   const [[monaco, editor], setMonacoAndEditor] = useState<[Monaco | null, importedEditor.IStandaloneCodeEditor | null]>(
     [null, null]
   )
+  const tsExtraLibRef = useRef<{ dispose: () => void } | null>(null)
+  const jsExtraLibRef = useRef<{ dispose: () => void } | null>(null)
   const isHelpTab = activeFile === JS_APP_HELP_TAB
   const editorFile = !isJsApp && isHelpTab ? filenames[0] || 'config.json' : activeFile
   const showingHelp = isJsApp && isHelpTab
@@ -68,6 +71,55 @@ export function EditApp({ panel, sceneId, nodeId }: EditAppProps) {
     }
   }, [monaco, editorFile, showingHelp, modelMarkers])
 
+  useEffect(() => {
+    if (!monaco) {
+      return
+    }
+
+    monaco.languages.json.jsonDefaults.setDiagnosticsOptions({
+      validate: true,
+      schemas: [
+        {
+          uri: 'http://internal/node-schema.json',
+          fileMatch: ['config.json'],
+          schema: jsAppConfigJsonSchema,
+        },
+      ],
+    })
+  }, [monaco, jsAppConfigJsonSchema])
+
+  useEffect(() => {
+    if (!monaco) {
+      return
+    }
+
+    tsExtraLibRef.current?.dispose()
+    jsExtraLibRef.current?.dispose()
+    tsExtraLibRef.current = null
+    jsExtraLibRef.current = null
+
+    if (!isJsApp) {
+      return
+    }
+
+    const uri = `inmemory://edit-app/${sceneId}/${nodeId}/frameos-app-globals.d.ts`
+    const nextTsLib = monaco.languages.typescript.typescriptDefaults.addExtraLib(jsAppEditorDeclarations, uri)
+    const nextJsLib = monaco.languages.typescript.javascriptDefaults.addExtraLib(jsAppEditorDeclarations, uri)
+    tsExtraLibRef.current = nextTsLib
+    jsExtraLibRef.current = nextJsLib
+
+    return () => {
+      nextTsLib.dispose()
+      nextJsLib.dispose()
+      if (tsExtraLibRef.current === nextTsLib) {
+        tsExtraLibRef.current = null
+      }
+      if (jsExtraLibRef.current === nextJsLib) {
+        jsExtraLibRef.current = null
+      }
+    }
+  }, [isJsApp, jsAppEditorDeclarations, monaco, nodeId, sceneId])
+
   function beforeMount(monaco: Monaco) {
     monaco.editor.defineTheme('darkframe', {
       base: 'vs-dark',
@@ -75,15 +127,30 @@ export function EditApp({ panel, sceneId, nodeId }: EditAppProps) {
       rules: [],
       colors: { 'editor.background': '#000000' },
     })
-    monaco.languages.json.jsonDefaults.setDiagnosticsOptions({
-      validate: true,
-      schemas: [
-        {
-          uri: 'http://internal/node-schema.json',
-          fileMatch: ['config.json'], // associate with our model
-          schema: schema,
-        },
-      ],
+    monaco.languages.typescript.typescriptDefaults.setCompilerOptions({
+      allowNonTsExtensions: true,
+      module: monaco.languages.typescript.ModuleKind.ESNext,
+      moduleResolution: monaco.languages.typescript.ModuleResolutionKind.NodeJs,
+      noEmit: true,
+      strict: true,
+      target: monaco.languages.typescript.ScriptTarget.ES2020,
+    })
+    monaco.languages.typescript.javascriptDefaults.setCompilerOptions({
+      allowJs: true,
+      allowNonTsExtensions: true,
+      checkJs: true,
+      module: monaco.languages.typescript.ModuleKind.ESNext,
+      moduleResolution: monaco.languages.typescript.ModuleResolutionKind.NodeJs,
+      noEmit: true,
+      target: monaco.languages.typescript.ScriptTarget.ES2020,
+    })
+    monaco.languages.typescript.typescriptDefaults.setDiagnosticsOptions({
+      noSemanticValidation: false,
+      noSyntaxValidation: false,
+    })
+    monaco.languages.typescript.javascriptDefaults.setDiagnosticsOptions({
+      noSemanticValidation: false,
+      noSyntaxValidation: false,
     })
   }
 
@@ -147,6 +214,14 @@ export function EditApp({ panel, sceneId, nodeId }: EditAppProps) {
           <div>
             <Button color={showingHelp ? 'primary' : 'none'} size="small" onClick={() => setActiveFile(JS_APP_HELP_TAB)}>
               Help
+            </Button>
+          </div>
+        ) : null}
+
+        {isJsApp && sources['app.js'] && !sources['app.ts'] ? (
+          <div>
+            <Button color="none" size="small" onClick={convertAppToTypeScript}>
+              Convert to TypeScript
             </Button>
           </div>
         ) : null}

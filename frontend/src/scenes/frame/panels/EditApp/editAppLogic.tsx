@@ -9,6 +9,14 @@ import { AppNodeData } from '../../../../types'
 import { appsLogic } from '../Apps/appsLogic'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { diagramLogic } from '../Diagram/diagramLogic'
+import {
+  buildGlobalSettingKeys,
+  buildJsAppConfigJsonSchema,
+  buildJsAppEditorDeclarations,
+  convertJsSourceToTypeScript,
+  parseAppConfigSource,
+  syncGeneratedTypesToAppTs,
+} from './jsAppEditor'
 
 export interface ModelMarker extends editor.IMarkerData {}
 
@@ -56,6 +64,7 @@ export const editAppLogic = kea<editAppLogicType>([
     resetEnhanceSuggestion: true,
     addFile: true,
     deleteFile: (file: string) => ({ file }),
+    convertAppToTypeScript: true,
   }),
   selectors({
     app: [
@@ -105,6 +114,20 @@ export const editAppLogic = kea<editAppLogicType>([
           const response = await apiFetch('/api/apps/js_api_reference')
           const data = await response.json()
           return data.markdown || ''
+        },
+      },
+    ],
+    globalSettingKeys: [
+      buildGlobalSettingKeys(),
+      {
+        loadGlobalSettingKeys: async () => {
+          try {
+            const response = await apiFetch('/api/settings')
+            const data = response.ok ? await response.json() : {}
+            return buildGlobalSettingKeys(Object.keys(data || {}))
+          } catch {
+            return buildGlobalSettingKeys()
+          }
         },
       },
     ],
@@ -191,6 +214,11 @@ export const editAppLogic = kea<editAppLogicType>([
         ),
     ],
     isJsApp: [(s) => [s.sources], (sources): boolean => isJsAppSources(sources)],
+    jsAppConfigJsonSchema: [(s) => [s.globalSettingKeys], (globalSettingKeys) => buildJsAppConfigJsonSchema(globalSettingKeys)],
+    jsAppEditorDeclarations: [
+      (s) => [s.configJson, s.globalSettingKeys],
+      (configJson, globalSettingKeys): string => buildJsAppEditorDeclarations(configJson as any, globalSettingKeys),
+    ],
     filenames: [
       (s) => [s.sources],
       (sources): string[] => {
@@ -219,6 +247,15 @@ export const editAppLogic = kea<editAppLogicType>([
       if ((file.endsWith('.js') || file.endsWith('.ts')) && !values.jsAppReference && !values.jsAppReferenceLoading) {
         actions.loadJsAppReference()
       }
+      if (file === 'config.json' && values.sources['app.ts']) {
+        const parsedConfig = parseAppConfigSource(source)
+        if (parsedConfig) {
+          const nextTsSource = syncGeneratedTypesToAppTs(values.sources['app.ts'], parsedConfig)
+          if (nextTsSource !== values.sources['app.ts']) {
+            actions.updateFile('app.ts', nextTsSource)
+          }
+        }
+      }
     },
     validateSource: async ({ initial, file, source }, breakpoint) => {
       if (!initial) {
@@ -238,9 +275,36 @@ export const editAppLogic = kea<editAppLogicType>([
     addFile: () => {
       const fileName = window.prompt('Enter file name')
       if (fileName) {
-        actions.updateFile(fileName, '')
+        if (fileName === 'app.ts' && !values.sources['app.ts']) {
+          actions.updateFile(
+            fileName,
+            convertJsSourceToTypeScript(
+              values.sources['app.js'] ?? 'export function get(app, context) {\n  return {}\n}\n',
+              values.configJson as any
+            )
+          )
+        } else {
+          actions.updateFile(fileName, '')
+        }
         actions.setActiveFile(fileName)
       }
+    },
+    convertAppToTypeScript: () => {
+      if (values.sources['app.ts']) {
+        actions.setActiveFile('app.ts')
+        return
+      }
+      actions.updateFile(
+        'app.ts',
+        convertJsSourceToTypeScript(
+          values.sources['app.js'] ?? 'export function get(app, context) {\n  return {}\n}\n',
+          values.configJson as any
+        )
+      )
+      if (values.sources['app.js']) {
+        actions.deleteFile('app.js')
+      }
+      actions.setActiveFile('app.ts')
     },
     loadSourcesSuccess: ({ sources }) => {
       if (isJsAppSources(sources)) {
@@ -250,5 +314,6 @@ export const editAppLogic = kea<editAppLogicType>([
   })),
   afterMount(({ actions, values }) => {
     actions.loadSources()
+    actions.loadGlobalSettingKeys()
   }),
 ])
