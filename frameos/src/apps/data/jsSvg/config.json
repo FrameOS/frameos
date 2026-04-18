@@ -1,7 +1,7 @@
 {
   "name": "JS SVG",
   "category": "data",
-  "description": "Sample QuickJS app that returns SVG markup.",
+  "description": "Sample QuickJS app written in TypeScript that returns SVG markup.",
   "fields": [
     {
       "name": "label",

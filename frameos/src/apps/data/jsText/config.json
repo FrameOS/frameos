@@ -1,7 +1,7 @@
 {
   "name": "JS Text",
   "category": "data",
-  "description": "Sample QuickJS app that returns text from JavaScript.",
+  "description": "Sample QuickJS app written in TypeScript that returns text.",
   "fields": [
     {
       "name": "prefix",

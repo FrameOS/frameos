@@ -4,7 +4,7 @@ from app.utils.ai_app import _build_app_edit_system_prompt, _build_app_user_prom
 def test_build_app_user_prompt_includes_js_reference_for_js_apps():
     prompt = _build_app_user_prompt(
         prompt="Add a render image output",
-        sources={"config.json": "{}", "app.js": "export function get() { return 'ok' }"},
+        sources={"config.json": "{}", "app.ts": "export function get(): string { return 'ok' }"},
         app_name="JS Text",
         app_keyword="data/jsText",
         scene_id="scene-1",
@@ -15,7 +15,7 @@ def test_build_app_user_prompt_includes_js_reference_for_js_apps():
     assert "frameos.image" in prompt
     assert "frameos.assets.writeText" in prompt
     assert "interface Config" in prompt
-    assert "# app.js" in prompt
+    assert "# app.ts" in prompt
 
 
 def test_build_app_user_prompt_omits_js_reference_for_nim_apps():

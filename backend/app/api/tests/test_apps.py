@@ -38,10 +38,10 @@ async def test_api_apps_source_for_js_app(async_client):
     response = await async_client.get('/api/apps/source?keyword=data/jsText')
     data = response.json()
     assert response.status_code == 200
-    assert 'app.js' in data
+    assert 'app.ts' in data
     assert 'config.json' in data
     assert 'app_loader.nim' not in data
-    assert 'export function get' in data['app.js']
+    assert 'export function get' in data['app.ts']
 
 
 @pytest.mark.asyncio

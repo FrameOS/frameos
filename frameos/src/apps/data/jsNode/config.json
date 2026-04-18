@@ -1,7 +1,7 @@
 {
   "name": "JS Node",
   "category": "data",
-  "description": "Sample QuickJS app that returns a node reference.",
+  "description": "Sample QuickJS app written in TypeScript that returns a node reference.",
   "fields": [
     {
       "name": "targetNode",
