@@ -1,18 +1,12 @@
 // <frameos:generated-types>
-/**
- * Generated from config.json. Edit config.json to update these types.
- */
-export interface Config {
+// Generated from config.json. Edit config.json to update these types.
+interface Config {
   /** Duration */
   duration?: number
 }
 
-export interface Payload {
-  [key: string]: any
-}
-
-export type App = FrameOSApp<Config>
-export type Context = FrameOSContext<Payload>
+type Output = any
+interface App extends FrameOSApp<Config> {}
 // </frameos:generated-types>
 
 export function run(app: App) {

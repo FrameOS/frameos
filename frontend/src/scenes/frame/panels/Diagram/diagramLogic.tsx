@@ -123,6 +123,9 @@ const isEditableTarget = (target: EventTarget | null): boolean => {
   if (!(target instanceof HTMLElement)) {
     return false
   }
+  if (target.closest('.monaco-editor, .monaco-diff-editor')) {
+    return true
+  }
   if (target.isContentEditable) {
     return true
   }

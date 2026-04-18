@@ -18,8 +18,9 @@ FrameOS JavaScript apps run in QuickJS. Use `app.js` or `app.ts` plus `config.js
 When you edit `app.ts` in the FrameOS editor, it can keep a generated type block in sync with `config.json`.
 
 - `interface Config` mirrors config fields from `config.json`.
-- `interface Payload` mirrors the declared `output` fields.
-- `type App = FrameOSApp<Config>` and `type Context = FrameOSContext<Payload>` are generated for convenience.
+- `type Output = ...` is generated from the first declared output field. JS apps currently return one value, not multiple named outputs.
+- `interface App extends FrameOSApp<Config> {}` is generated so you can extend it locally in the same file.
+- Use `FrameOSContext` directly in function signatures when you want the runtime context type.
 - The editor also exposes typed `frameos` globals and validates `config.json` with schema autocomplete.
 
 ## Exports
@@ -32,6 +33,7 @@ export function run(app, context) {}
 
 - `init(app, context)` runs once before the first `get` or `run`.
 - `get(app, context)` returns the app output for data apps and value-producing calls.
+- For JS apps, FrameOS currently reads only the first entry in `config.json.output` to determine the return type and downstream coercion.
 - `run(app, context)` is for logic or render-side work.
 - You can also export `default { init, get, run }`.
 
@@ -155,7 +157,11 @@ Use these helpers to work with files under `app.frame.assetsPath`.
 ## Example
 
 ```ts
-export function get(app: App, context: Context) {
+interface App {
+  initialized?: boolean
+}
+
+export function get(app: App, context: FrameOSContext): Output {
   const label = `${app.config.prefix}: ${app.config.message}`
   const suffix = context.event ? ` (${context.event})` : ''
   return `${label}${suffix}`

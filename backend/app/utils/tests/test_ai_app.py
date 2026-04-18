@@ -15,6 +15,8 @@ def test_build_app_user_prompt_includes_js_reference_for_js_apps():
     assert "frameos.image" in prompt
     assert "frameos.assets.writeText" in prompt
     assert "interface Config" in prompt
+    assert "interface App extends FrameOSApp<Config> {}" in prompt
+    assert "type Output =" in prompt
     assert "# app.ts" in prompt
 
 

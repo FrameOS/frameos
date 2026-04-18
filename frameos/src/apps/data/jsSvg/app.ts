@@ -1,28 +1,20 @@
 // <frameos:generated-types>
-/**
- * Generated from config.json. Edit config.json to update these types.
- */
-export interface Config {
+// Generated from config.json. Edit config.json to update these types.
+interface Config {
   /** Label */
   label?: string
-
   /** Background */
   background?: string
-
   /** Foreground */
   foreground?: string
 }
 
-export interface Payload {
-  /** text output. Example: <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 120">...</svg> */
-  svg: string
-}
-
-export type App = FrameOSApp<Config>
-export type Context = FrameOSContext<Payload>
+/** text output. Example: <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 120">...</svg> */
+type Output = string
+interface App extends FrameOSApp<Config> {}
 // </frameos:generated-types>
 
-export function get(app: App) {
+export function get(app: App): Output {
   const label = app.config.label || 'QuickJS'
   const bg = app.config.background || '#ffffff'
   const fg = app.config.foreground || '#111111'

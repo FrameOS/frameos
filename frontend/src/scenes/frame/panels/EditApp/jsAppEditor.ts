@@ -19,6 +19,21 @@ const fieldTypeToTsType: Record<string, string> = {
   font: 'string',
 }
 
+const outputTypeToTsType: Record<string, string> = {
+  string: 'string',
+  text: 'string',
+  float: 'number',
+  integer: 'number',
+  boolean: 'boolean',
+  color: 'string | FrameOSColorValue',
+  date: 'string',
+  json: 'Record<string, any> | any[]',
+  node: 'number | FrameOSNodeValue',
+  scene: 'string | FrameOSSceneValue',
+  image: 'string | FrameOSImageValue | FrameOSImageRef',
+  font: 'string',
+}
+
 export const KNOWN_GLOBAL_SETTING_KEYS = [
   'buildHost',
   'defaults',
@@ -55,6 +70,10 @@ function fieldToTsType(field: Pick<AppConfigField, 'type' | 'options'>): string 
   return fieldTypeToTsType[field.type] ?? 'any'
 }
 
+function outputFieldToTsType(field: Pick<OutputField, 'type'>): string {
+  return outputTypeToTsType[field.type] ?? 'any'
+}
+
 function buildInterfaceBody(
   entries: { name: string; type: string; optional?: boolean; comment?: string }[],
   fallback = '[key: string]: any'
@@ -72,7 +91,7 @@ function buildInterfaceBody(
       lines.push(`  ${quoteTsProperty(name)}${optional ? '?' : ''}: ${type}`)
       return lines.join('\n')
     })
-    .join('\n\n')
+    .join('\n')
     .concat('\n')
 }
 
@@ -84,39 +103,33 @@ function buildConfigInterface(config: AppConfig | null): string {
     optional: !field.required,
     comment: field.label,
   }))
-  return `export interface Config {\n${buildInterfaceBody(entries)}}`
+  return `interface Config {\n${buildInterfaceBody(entries)}}`
 }
 
-function buildPayloadInterface(config: AppConfig | null): string {
-  const entries = (config?.output ?? []).map((field: OutputField) => ({
-    name: field.name,
-    type: fieldTypeToTsType[field.type] ?? 'any',
-    optional: false,
-    comment: field.example ? `${field.type} output. Example: ${field.example}` : `${field.type} output`,
-  }))
-  return `export interface Payload {\n${buildInterfaceBody(entries)}}`
+function buildOutputType(config: AppConfig | null): string {
+  const firstOutput = config?.output?.[0]
+  if (!firstOutput) {
+    return 'type Output = any'
+  }
+  const comment = firstOutput.example
+    ? `/** ${sanitizeComment(`${firstOutput.type} output. Example: ${firstOutput.example}`)} */\n`
+    : `/** ${sanitizeComment(`${firstOutput.type} output`)} */\n`
+  return `${comment}type Output = ${outputFieldToTsType(firstOutput)}`
 }
 
-function buildAmbientConfigInterface(config: AppConfig | null): string {
-  return buildConfigInterface(config).replace(/^export /, '')
-}
-
-function buildAmbientPayloadInterface(config: AppConfig | null): string {
-  return buildPayloadInterface(config).replace(/^export /, '')
+function buildAppInterface(): string {
+  return 'interface App extends FrameOSApp<Config> {}'
 }
 
 function buildGeneratedTypesBlock(config: AppConfig | null): string {
   return [
     GENERATED_TYPES_START,
-    '/**',
-    ' * Generated from config.json. Edit config.json to update these types.',
-    ' */',
+    '// Generated from config.json. Edit config.json to update these types.',
     buildConfigInterface(config),
     '',
-    buildPayloadInterface(config),
+    buildOutputType(config),
     '',
-    'export type App = FrameOSApp<Config>',
-    'export type Context = FrameOSContext<Payload>',
+    buildAppInterface(),
     GENERATED_TYPES_END,
   ].join('\n')
 }
@@ -147,14 +160,48 @@ function annotateTsEntryPointParameters(source: string): string {
 
     if (
       params.length > 2 ||
-      params.some((param: string) => param.includes(':') || param.includes('=') || param.includes('{') || param.includes('['))
+      params.some((param: string) => param.includes('=') || param.includes('{') || param.includes('[') || param.startsWith('...'))
     ) {
       return match
     }
 
-    const firstParam = params[0] || 'app'
-    const secondParam = params[1] || 'context'
-    return match.replace(paramsSource, `${firstParam}: App, ${secondParam}: Context`)
+    const normalizedParams = params.map((param: string, index: number) => {
+      const typedParam = param.match(/^([A-Za-z_$][\w$]*)(?:\s*:\s*(.+))?$/)
+
+      if (!typedParam) {
+        return null
+      }
+
+      const [, paramName, typeAnnotation] = typedParam
+
+      if (index === 0) {
+        if (!typeAnnotation || typeAnnotation === 'App' || typeAnnotation === 'FrameOSApp' || typeAnnotation === 'FrameOSApp<Config>') {
+          return `${paramName}: App`
+        }
+        return `${paramName}: ${typeAnnotation}`
+      }
+
+      if (index === 1) {
+        if (!typeAnnotation || typeAnnotation === 'Context' || typeAnnotation === 'FrameOSContext') {
+          return `${paramName}: FrameOSContext`
+        }
+        return `${paramName}: ${typeAnnotation}`
+      }
+
+      return param
+    })
+
+    if (normalizedParams.some((param: string | null) => param === null)) {
+      return match
+    }
+
+    return match.replace(paramsSource, normalizedParams.join(', '))
+  })
+}
+
+function syncGetReturnType(source: string): string {
+  return source.replace(/export function get\s*\(([^)]*)\)(?:\s*:\s*([^{]+))?\s*\{/g, (_match, paramsSource) => {
+    return `export function get(${paramsSource}): Output {`
   })
 }
 
@@ -187,7 +234,7 @@ export function buildJsAppConfigJsonSchema(globalSettingKeys: string[]): Record<
 }
 
 export function syncGeneratedTypesToAppTs(source: string, config: AppConfig | null): string {
-  return replaceOrInsertGeneratedTypes(source, buildGeneratedTypesBlock(config))
+  return syncGetReturnType(annotateTsEntryPointParameters(replaceOrInsertGeneratedTypes(source, buildGeneratedTypesBlock(config))))
 }
 
 export function convertJsSourceToTypeScript(source: string, config: AppConfig | null): string {
@@ -302,11 +349,10 @@ interface FrameOSContext<TPayload = any> {
 
 declare const frameos: FrameOSApi
 
-${buildAmbientConfigInterface(config)}
+${buildConfigInterface(config)}
 
-${buildAmbientPayloadInterface(config)}
+${buildOutputType(config)}
 
-type App = FrameOSApp<Config>
-type Context = FrameOSContext<Payload>
+${buildAppInterface()}
 `.trim()
 }
