@@ -1,0 +1,13 @@
+{
+  "name": "JS Next Sleep",
+  "category": "logic",
+  "description": "Sample QuickJS logic app that adjusts the next render delay.",
+  "fields": [
+    {
+      "name": "duration",
+      "label": "Duration",
+      "type": "float",
+      "value": 30
+    }
+  ]
+}

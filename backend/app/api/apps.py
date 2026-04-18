@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.apps import get_app_configs, get_one_app_sources
 from app.models.settings import get_settings_dict
+from app.utils.js_apps import validate_js_source
 from app.schemas.apps import (
  AppsListResponse,
  AppsSourceResponse,
@@ -43,6 +44,8 @@ async def validate_python_frame_source(data: ValidateSourceRequest):
 
     if file.endswith('.py'):
         errors = validate_python(source)
+    elif file.endswith('.js') or file.endswith('.ts'):
+        errors = validate_js_source(file, source)
     elif file.endswith('.nim'):
         errors = await validate_nim(source)
     elif file.endswith('.json'):

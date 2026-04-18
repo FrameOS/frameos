@@ -1,0 +1,37 @@
+{
+  "name": "JS Image",
+  "category": "data",
+  "description": "Sample QuickJS app that returns an image object.",
+  "fields": [
+    {
+      "name": "width",
+      "label": "Width",
+      "type": "integer",
+      "value": 320
+    },
+    {
+      "name": "height",
+      "label": "Height",
+      "type": "integer",
+      "value": 180
+    },
+    {
+      "name": "color",
+      "label": "Fill Color",
+      "type": "color",
+      "value": "#dde7f0"
+    },
+    {
+      "name": "opacity",
+      "label": "Opacity",
+      "type": "float",
+      "value": 1
+    }
+  ],
+  "output": [
+    {
+      "name": "image",
+      "type": "image"
+    }
+  ]
+}
