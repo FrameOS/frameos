@@ -50,6 +50,7 @@ proc ctx(scene: FrameScene, event: string): ExecutionContext =
   )
 
 let sceneId = "tests/interpreter-inline-js-app".SceneId
+let imageInputSceneId = "tests/interpreter-inline-js-app-image-input".SceneId
 var uploaded = initTable[SceneId, ExportedInterpretedScene]()
 
 uploaded[sceneId] = ExportedInterpretedScene(
@@ -111,12 +112,88 @@ globalThis.__frameosModule = {
   ]
 )
 
+uploaded[imageInputSceneId] = ExportedInterpretedScene(
+  name: "Interpreter inline JS app image input test",
+  backgroundColor: parseHtmlColor("#000000"),
+  refreshInterval: 1.0,
+  publicStateFields: @[],
+  nodes: @[
+    node(10, "event", %*{"keyword": "render"}),
+    node(1, "app", %*{
+      "name": "forked js image",
+      "keyword": "data/jsImage",
+      "config": {
+        "width": 4,
+        "height": 3
+      },
+      "sources": {
+        "config.json": """
+{
+  "name": "Forked JS Image",
+  "category": "data",
+  "fields": [
+    { "name": "width", "type": "integer", "value": 1 },
+    { "name": "height", "type": "integer", "value": 1 },
+    { "name": "color", "type": "color", "value": "#44aa22" },
+    { "name": "opacity", "type": "float", "value": 1 }
+  ],
+  "output": [
+    { "name": "image", "type": "image" }
+  ]
+}
+""",
+        "app.compiled.js": """
+globalThis.__frameosModule = {
+  get(app) {
+    return frameos.image({
+      width: app.config.width,
+      height: app.config.height,
+      color: app.config.color,
+      opacity: app.config.opacity
+    })
+  }
+}
+""",
+      }
+    }),
+    node(2, "app", %*{
+      "name": "forked js passthrough",
+      "keyword": "data/jsImage",
+      "sources": {
+        "config.json": """
+{
+  "name": "Forked JS Passthrough",
+  "category": "data",
+  "fields": [
+    { "name": "inputImage", "type": "image" }
+  ],
+  "output": [
+    { "name": "image", "type": "image" }
+  ]
+}
+""",
+        "app.compiled.js": """
+globalThis.__frameosModule = {
+  get(app) {
+    return app.config.inputImage
+  }
+}
+""",
+      }
+    })
+  ],
+  edges: @[
+    edge(101, 1, "fieldOutput", 2, "fieldInput/inputImage")
+  ]
+)
+
 setUploadedInterpretedScenes(uploaded)
 resetInterpretedScenes()
 
 let config = testConfig()
 let logger = testLogger(config)
 let scene = init(sceneId, config, logger, %*{})
+let imageInputScene = init(imageInputSceneId, config, logger, %*{})
 
 block test_interpreter_inline_js_data_node:
   let dataValue = scene.getDataNode(1.NodeId, ctx(scene, "render"))
@@ -133,6 +210,16 @@ block test_interpreter_inline_js_render_node:
   doAssert rendered.width == 4
   doAssert rendered.height == 3
   let px = rendered.data[rendered.dataIndex(0, 0)]
+  doAssert px.g > 0
+  doAssert px.a > 0
+
+block test_interpreter_inline_js_image_input:
+  let dataValue = imageInputScene.getDataNode(2.NodeId, ctx(imageInputScene, "render"))
+  doAssert dataValue.kind == fkImage
+  let dataImage = dataValue.asImage()
+  doAssert dataImage.width == 4
+  doAssert dataImage.height == 3
+  let px = dataImage.data[dataImage.dataIndex(0, 0)]
   doAssert px.g > 0
   doAssert px.a > 0
 

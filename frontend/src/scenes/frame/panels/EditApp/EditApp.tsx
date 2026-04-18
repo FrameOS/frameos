@@ -13,6 +13,7 @@ import clsx from 'clsx'
 import { TrashIcon } from '@heroicons/react/24/solid'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
 import { Markdown } from '../../../../components/Markdown'
+import { scenesLogic } from '../Scenes/scenesLogic'
 
 interface EditAppProps {
   panel: PanelWithMetadata
@@ -23,6 +24,8 @@ interface EditAppProps {
 export function EditApp({ panel, sceneId, nodeId }: EditAppProps) {
   const { frameId } = useValues(frameLogic)
   const { persistUntilClosed, openChat } = useActions(panelsLogic)
+  const { previewingSceneId } = useValues(scenesLogic({ frameId }))
+  const { previewScene } = useActions(scenesLogic({ frameId }))
   const { ensureChatForApp } = useActions(chatLogic({ frameId, sceneId }))
   const logicProps: EditAppLogicProps = {
     frameId,
@@ -57,6 +60,14 @@ export function EditApp({ panel, sceneId, nodeId }: EditAppProps) {
   const isHelpTab = activeFile === JS_APP_HELP_TAB
   const editorFile = !isJsApp && isHelpTab ? filenames[0] || 'config.json' : activeFile
   const showingHelp = isJsApp && isHelpTab
+  const saveButtonLabel = isInterpreted && isJsApp && !savedSources ? 'Fork and save' : 'Save changes'
+  const saveButtonTitle = isInterpreted && !isJsApp ? 'Saving this app will switch the scene from interpreted to compiled.' : undefined
+  const isPreviewing = previewingSceneId === sceneId
+
+  const handlePreview = () => {
+    saveChanges()
+    previewScene(sceneId)
+  }
 
   useEffect(() => {
     persistUntilClosed(panel, logic)
@@ -241,37 +252,24 @@ export function EditApp({ panel, sceneId, nodeId }: EditAppProps) {
       </div>
 
       <div className="overflow-y-auto overflow-x-auto w-full h-full max-h-full max-w-full gap-2 flex-1 flex flex-col">
-        {hasChanges ? (
-          <div className="bg-gray-900 p-2">
-            {isInterpreted && isJsApp ? (
-              <>
-                Saving changes will fork this app into the scene. Interpreted deploys will use this forked version for
-                this node and for any edited-app copies you add from the panel.
-                <Button size="small" onClick={saveChanges}>
-                  {savedSources ? 'Save forked app changes' : 'Fork this app into the scene'}
-                </Button>
-              </>
-            ) : isInterpreted ? (
-              <>
-                You have made changes to this app. If you save them, we will have to change the scene's execution model
-                from "interpreted" to "compiled". Thereafter, any changes to the scene will require a full frame
-                recompilation. If you have used any inline code nodes, you will also have to rewrite them from
-                JavaScript to Nim.
-                <Button size="small" onClick={saveChanges}>
-                  I understand. Save the changes
-                </Button>
-              </>
-            ) : (
-              <>
-                You have changes.{' '}
-                <Button size="small" onClick={saveChanges}>
-                  Click here to {!savedSources ? 'fork the app' : 'save them'}
-                </Button>
-              </>
-            )}
-          </div>
-        ) : null}
-        <div className="bg-black font-mono text-sm overflow-y-auto overflow-x-auto w-full flex-1">
+        <div className="relative bg-black font-mono text-sm overflow-y-auto overflow-x-auto w-full flex-1">
+          {hasChanges && !showingHelp ? (
+            <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-start justify-between p-3">
+              <Button size="small" onClick={saveChanges} title={saveButtonTitle} className="pointer-events-auto shadow-lg">
+                {saveButtonLabel}
+              </Button>
+              <Button
+                size="small"
+                color="secondary"
+                onClick={handlePreview}
+                disabled={isPreviewing}
+                title="Save app changes locally, then preview this scene on the frame without saving the frame."
+                className="pointer-events-auto shadow-lg"
+              >
+                {isPreviewing ? 'Previewing...' : 'Preview'}
+              </Button>
+            </div>
+          ) : null}
           {showingHelp ? (
             <div className="p-4 text-sm text-gray-200 overflow-y-auto h-full">
               {jsAppReferenceLoading ? (

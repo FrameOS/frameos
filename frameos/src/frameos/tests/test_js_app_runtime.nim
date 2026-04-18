@@ -1,4 +1,4 @@
-import std/[json, os, strutils, unittest]
+import std/[json, os, strutils, tables, unittest]
 import pixie
 
 import ../js_app_runtime
@@ -93,6 +93,41 @@ suite "js app runtime":
     check abs(context.nextSleep - 12.5) < 0.0001
     let pixel = context.image.data[context.image.dataIndex(0, 0)]
     check pixel.r > 0
+
+  test "image refs are scoped to a single invocation":
+    let config = testConfig()
+    let logger = testLogger(config)
+    let scene = FrameScene(id: "tests/js-app-image-refs".SceneId, frameConfig: config, state: %*{}, logger: logger)
+    let owner = AppRoot(nodeId: 12.NodeId, nodeName: "data/jsImage", scene: scene, frameConfig: config)
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
+
+    let runtime = newJsAppRuntime(
+      category = "data",
+      outputType = "image",
+      source = """globalThis.__frameosModule = {
+        get(app) {
+          return app.config.inputImage
+        }
+      }"""
+    )
+
+    var firstImage = newImage(2, 1)
+    firstImage.fill(parseHtmlColor("#ff0000"))
+    let firstValue = runtime.get(owner, %*{"inputImage": runtime.jsAppFieldToJson(firstImage)}, context)
+    check firstValue.kind == fkImage
+    if firstValue.kind == fkImage and not firstValue.asImage().isNil:
+      check firstValue.asImage().width == 2
+      check firstValue.asImage().height == 1
+    check runtime.images.len == 0
+
+    var secondImage = newImage(5, 4)
+    secondImage.fill(parseHtmlColor("#00ff00"))
+    let secondValue = runtime.get(owner, %*{"inputImage": runtime.jsAppFieldToJson(secondImage)}, context)
+    check secondValue.kind == fkImage
+    if secondValue.kind == fkImage and not secondValue.asImage().isNil:
+      check secondValue.asImage().width == 5
+      check secondValue.asImage().height == 4
+    check runtime.images.len == 0
 
   test "preserves app instance state across init get and run calls":
     let config = testConfig()

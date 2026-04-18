@@ -1,3 +1,5 @@
+import pytest
+
 from app.utils.js_apps import COMPILED_JS_APP_FILENAME, compile_js_app_sources, validate_js_source
 
 
@@ -22,3 +24,16 @@ def test_validate_js_source_returns_configuration_errors(monkeypatch):
     errors = validate_js_source("app.ts", "export function get() { return 'ok' }")
 
     assert errors == [{"line": 1, "column": 1, "error": "esbuild missing"}]
+
+
+@pytest.mark.parametrize("filename", ["../escape.ts", "/tmp/escape.ts"])
+def test_compile_js_app_sources_rejects_unsafe_filenames(filename, monkeypatch):
+    monkeypatch.setattr("app.utils.js_apps.compile_js_app_dir", lambda *_args, **_kwargs: None)
+
+    with pytest.raises(ValueError, match="Invalid JS source filename"):
+        compile_js_app_sources(
+            {
+                "app.ts": "export function get() { return 'ok' }",
+                filename: "export const ignored = true",
+            }
+        )

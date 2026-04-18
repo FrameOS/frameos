@@ -104,7 +104,7 @@ proc setInterpretedJsAppField*(app: AppRoot, field: string, value: Value) =
   let jsApp = InterpretedJsApp(app)
   if jsApp.configJson.isNil or jsApp.configJson.kind != JObject:
     jsApp.configJson = %*{}
-  jsApp.configJson[field] = valueToJson(value)
+  jsApp.configJson[field] = jsApp.runtime.jsAppFieldToJson(value)
 
 proc getInterpretedJsApp*(app: AppRoot, context: ExecutionContext): Value =
   let jsApp = InterpretedJsApp(app)

@@ -334,6 +334,28 @@ proc jsAppFieldToJson*(runtime: JsAppRuntime, value: Color): JsonNode = %* value
 proc jsAppFieldToJson*(runtime: JsAppRuntime, value: NodeId): JsonNode = %* value.int
 proc jsAppFieldToJson*(runtime: JsAppRuntime, value: SceneId): JsonNode = %* value.string
 proc jsAppFieldToJson*(runtime: JsAppRuntime, value: Image): JsonNode = runtime.storeImageJson(value)
+proc jsAppFieldToJson*(runtime: JsAppRuntime, value: Value): JsonNode =
+  case value.kind
+  of fkString, fkText:
+    return jsAppFieldToJson(runtime, value.s)
+  of fkFloat:
+    return jsAppFieldToJson(runtime, value.f)
+  of fkInteger:
+    return jsAppFieldToJson(runtime, value.i)
+  of fkBoolean:
+    return jsAppFieldToJson(runtime, value.b)
+  of fkColor:
+    return jsAppFieldToJson(runtime, value.col)
+  of fkJson:
+    return jsAppFieldToJson(runtime, value.j)
+  of fkImage:
+    return jsAppFieldToJson(runtime, value.img)
+  of fkNode:
+    return jsAppFieldToJson(runtime, value.nId)
+  of fkScene:
+    return jsAppFieldToJson(runtime, value.sId)
+  of fkNone:
+    return newJNull()
 proc jsAppFieldToJson*[T](runtime: JsAppRuntime, value: seq[T]): JsonNode =
   result = newJArray()
   for item in value:
@@ -342,6 +364,10 @@ proc jsAppFieldToJson*[T](runtime: JsAppRuntime, value: Option[T]): JsonNode =
   if value.isSome:
     return jsAppFieldToJson(runtime, value.get())
   return newJNull()
+
+proc resetImageRefs(runtime: JsAppRuntime) =
+  runtime.nextImageId = 0
+  runtime.images = initTable[int, Image]()
 
 proc ensureReady(runtime: JsAppRuntime) =
   if runtime.ready:
@@ -607,14 +633,20 @@ proc init*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode) =
   runtime.initialized = true
 
 proc get*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context: ExecutionContext): Value =
-  runtime.init(owner, configJson)
-  let payload = runtime.invoke(owner, configJson, context, "get")
-  return toValue(runtime, owner, context, payload, runtime.outputType)
+  try:
+    runtime.init(owner, configJson)
+    let payload = runtime.invoke(owner, configJson, context, "get")
+    return toValue(runtime, owner, context, payload, runtime.outputType)
+  finally:
+    runtime.resetImageRefs()
 
 proc run*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context: ExecutionContext) =
-  runtime.init(owner, configJson)
-  let payload = runtime.invoke(owner, configJson, context, "run")
-  if runtime.category == "render":
-    let value = toValue(runtime, owner, context, payload, "image")
-    if value.kind == fkImage and not value.asImage().isNil:
-      context.image.draw(value.asImage())
+  try:
+    runtime.init(owner, configJson)
+    let payload = runtime.invoke(owner, configJson, context, "run")
+    if runtime.category == "render":
+      let value = toValue(runtime, owner, context, payload, "image")
+      if value.kind == fkImage and not value.asImage().isNil:
+        context.image.draw(value.asImage())
+  finally:
+    runtime.resetImageRefs()

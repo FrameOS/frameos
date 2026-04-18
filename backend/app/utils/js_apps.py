@@ -193,6 +193,20 @@ def compile_js_app_dir(app_dir: str, out_filename: str = COMPILED_JS_APP_FILENAM
     return output_path
 
 
+def _resolve_js_source_path(app_dir: Path, filename: str) -> Path:
+    source_path = Path(filename)
+    if source_path.is_absolute():
+        raise ValueError(f"Invalid JS source filename: {filename!r}")
+
+    app_dir_path = app_dir.resolve()
+    resolved_path = (app_dir_path / source_path).resolve()
+    try:
+        resolved_path.relative_to(app_dir_path)
+    except ValueError as exc:
+        raise ValueError(f"Invalid JS source filename: {filename!r}") from exc
+    return resolved_path
+
+
 def compile_js_app_sources(sources: dict[str, str], out_filename: str = COMPILED_JS_APP_FILENAME) -> dict[str, str]:
     normalized_sources = {
         str(filename): str(source)
@@ -206,8 +220,21 @@ def compile_js_app_sources(sources: dict[str, str], out_filename: str = COMPILED
         return dict(normalized_sources)
 
     with tempfile.TemporaryDirectory() as app_dir:
+        app_dir_path = Path(app_dir)
+        resolved_paths: dict[str, Path] = {}
+        path_to_filename: dict[Path, str] = {}
+        for filename in normalized_sources:
+            path = _resolve_js_source_path(app_dir_path, filename)
+            if path in path_to_filename and path_to_filename[path] != filename:
+                raise ValueError(
+                    f"Duplicate JS source filename after normalization: {filename!r} conflicts with"
+                    f" {path_to_filename[path]!r}"
+                )
+            resolved_paths[filename] = path
+            path_to_filename[path] = filename
+
         for filename, source in normalized_sources.items():
-            path = Path(app_dir) / filename
+            path = resolved_paths[filename]
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(source, encoding="utf-8")
 
