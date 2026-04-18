@@ -24,7 +24,12 @@ export interface SourceError {
   error: string
 }
 
+export const JS_APP_HELP_TAB = '__js_app_help__'
+
 const primaryFiles = ['config.json', 'app.ts', 'app.js', 'app.nim']
+
+const isJsAppSources = (sources: Record<string, string>): boolean =>
+  Object.keys(sources).some((filename) => filename.endsWith('.js') || filename.endsWith('.ts'))
 
 export const editAppLogic = kea<editAppLogicType>([
   path(['src', 'scenes', 'frame', 'panels', 'EditApp', 'editAppLogic']),
@@ -90,6 +95,16 @@ export const editAppLogic = kea<editAppLogicType>([
             }
           }
           return sources
+        },
+      },
+    ],
+    jsAppReference: [
+      null as string | null,
+      {
+        loadJsAppReference: async () => {
+          const response = await apiFetch('/api/apps/js_api_reference')
+          const data = await response.json()
+          return data.markdown || ''
         },
       },
     ],
@@ -175,6 +190,7 @@ export const editAppLogic = kea<editAppLogicType>([
           ])
         ),
     ],
+    isJsApp: [(s) => [s.sources], (sources): boolean => isJsAppSources(sources)],
     filenames: [
       (s) => [s.sources],
       (sources): string[] => {
@@ -187,7 +203,7 @@ export const editAppLogic = kea<editAppLogicType>([
   }),
   listeners(({ actions, props, values }) => ({
     saveChanges: () => {
-      if (values.isInterpreted) {
+      if (values.isInterpreted && !values.isJsApp) {
         actions.updateScene(props.sceneId, { settings: { ...values.scene?.settings, execution: 'compiled' } })
       }
       actions.updateNodeData(props.sceneId, props.nodeId, { sources: values.sources })
@@ -200,6 +216,9 @@ export const editAppLogic = kea<editAppLogicType>([
     },
     updateFile: ({ file, source }) => {
       actions.validateSource(file, source)
+      if ((file.endsWith('.js') || file.endsWith('.ts')) && !values.jsAppReference && !values.jsAppReferenceLoading) {
+        actions.loadJsAppReference()
+      }
     },
     validateSource: async ({ initial, file, source }, breakpoint) => {
       if (!initial) {
@@ -221,6 +240,11 @@ export const editAppLogic = kea<editAppLogicType>([
       if (fileName) {
         actions.updateFile(fileName, '')
         actions.setActiveFile(fileName)
+      }
+    },
+    loadSourcesSuccess: ({ sources }) => {
+      if (isJsAppSources(sources)) {
+        actions.loadJsAppReference()
       }
     },
   })),

@@ -1,5 +1,5 @@
 import { useActions, useValues } from 'kea'
-import { editAppLogic, EditAppLogicProps } from './editAppLogic'
+import { editAppLogic, EditAppLogicProps, JS_APP_HELP_TAB } from './editAppLogic'
 import { Button } from '../../../../components/Button'
 import Editor from '@monaco-editor/react'
 import { PanelWithMetadata } from '../../../../types'
@@ -13,6 +13,7 @@ import type { Monaco } from '@monaco-editor/react'
 import clsx from 'clsx'
 import { TrashIcon } from '@heroicons/react/24/solid'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
+import { Markdown } from '../../../../components/Markdown'
 
 interface EditAppProps {
   panel: PanelWithMetadata
@@ -42,24 +43,30 @@ export function EditApp({ panel, sceneId, nodeId }: EditAppProps) {
     modelMarkers,
     savedKeyword,
     savedSources,
+    isJsApp,
+    jsAppReference,
+    jsAppReferenceLoading,
   } = useValues(logic)
   const { saveChanges, setActiveFile, updateFile, addFile, deleteFile } = useActions(logic)
   const [[monaco, editor], setMonacoAndEditor] = useState<[Monaco | null, importedEditor.IStandaloneCodeEditor | null]>(
     [null, null]
   )
+  const isHelpTab = activeFile === JS_APP_HELP_TAB
+  const editorFile = !isJsApp && isHelpTab ? filenames[0] || 'config.json' : activeFile
+  const showingHelp = isJsApp && isHelpTab
 
   useEffect(() => {
     persistUntilClosed(panel, logic)
   }, [])
 
   useEffect(() => {
-    if (monaco && editor && activeFile) {
+    if (monaco && editor && editorFile && !showingHelp) {
       const model = editor.getModel()
       if (model) {
-        monaco.editor.setModelMarkers(model, 'owner', modelMarkers[activeFile] || [])
+        monaco.editor.setModelMarkers(model, 'owner', modelMarkers[editorFile] || [])
       }
     }
-  }, [monaco, activeFile, modelMarkers])
+  }, [monaco, editorFile, showingHelp, modelMarkers])
 
   function beforeMount(monaco: Monaco) {
     monaco.editor.defineTheme('darkframe', {
@@ -85,11 +92,11 @@ export function EditApp({ panel, sceneId, nodeId }: EditAppProps) {
   }
 
   const name = configJson?.name || savedKeyword || nodeId
-  const editorLanguage = activeFile.endsWith('.json')
+  const editorLanguage = editorFile.endsWith('.json')
     ? 'json'
-    : activeFile.endsWith('.ts')
+    : editorFile.endsWith('.ts')
     ? 'typescript'
-    : activeFile.endsWith('.js')
+    : editorFile.endsWith('.js')
     ? 'javascript'
     : 'python'
 
@@ -136,6 +143,14 @@ export function EditApp({ panel, sceneId, nodeId }: EditAppProps) {
           </Button>
         </div>
 
+        {isJsApp ? (
+          <div>
+            <Button color={showingHelp ? 'primary' : 'none'} size="small" onClick={() => setActiveFile(JS_APP_HELP_TAB)}>
+              Help
+            </Button>
+          </div>
+        ) : null}
+
         <div>
           <Button
             color="none"
@@ -153,7 +168,15 @@ export function EditApp({ panel, sceneId, nodeId }: EditAppProps) {
       <div className="overflow-y-auto overflow-x-auto w-full h-full max-h-full max-w-full gap-2 flex-1 flex flex-col">
         {hasChanges ? (
           <div className="bg-gray-900 p-2">
-            {isInterpreted ? (
+            {isInterpreted && isJsApp ? (
+              <>
+                Saving changes will fork this app into the scene. Interpreted deploys will use this forked version for
+                this node and for any edited-app copies you add from the panel.
+                <Button size="small" onClick={saveChanges}>
+                  {savedSources ? 'Save forked app changes' : 'Fork this app into the scene'}
+                </Button>
+              </>
+            ) : isInterpreted ? (
               <>
                 You have made changes to this app. If you save them, we will have to change the scene's execution model
                 from "interpreted" to "compiled". Thereafter, any changes to the scene will require a full frame
@@ -174,17 +197,29 @@ export function EditApp({ panel, sceneId, nodeId }: EditAppProps) {
           </div>
         ) : null}
         <div className="bg-black font-mono text-sm overflow-y-auto overflow-x-auto w-full flex-1">
-          <Editor
-            height="100%"
-            path={`${nodeId}/${activeFile}`}
-            language={editorLanguage}
-            value={sources[activeFile] ?? sources[Object.keys(sources)[0]] ?? ''}
-            theme="darkframe"
-            beforeMount={beforeMount}
-            onMount={(editor, monaco) => setMonacoAndEditor([monaco, editor])}
-            onChange={(value) => updateFile(activeFile, value ?? '')}
-            options={{ minimap: { enabled: false } }}
-          />
+          {showingHelp ? (
+            <div className="p-4 text-sm text-gray-200 overflow-y-auto h-full">
+              {jsAppReferenceLoading ? (
+                <div>Loading help...</div>
+              ) : jsAppReference ? (
+                <Markdown value={jsAppReference} />
+              ) : (
+                <div>Unable to load JS app help.</div>
+              )}
+            </div>
+          ) : (
+            <Editor
+              height="100%"
+              path={`${nodeId}/${editorFile}`}
+              language={editorLanguage}
+              value={sources[editorFile] ?? sources[Object.keys(sources)[0]] ?? ''}
+              theme="darkframe"
+              beforeMount={beforeMount}
+              onMount={(editor, monaco) => setMonacoAndEditor([monaco, editor])}
+              onChange={(value) => updateFile(editorFile, value ?? '')}
+              options={{ minimap: { enabled: false } }}
+            />
+          )}
         </div>
       </div>
     </div>

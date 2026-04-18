@@ -44,6 +44,7 @@ import { arrangeNodes } from '../../../../utils/arrangeNodes'
 import copy from 'copy-to-clipboard'
 import { Option } from '../../../../components/Select'
 import _events from '../../../../../schema/events.json'
+import { buildCustomAppNodeData, getCustomAppId, getSceneCustomApps } from '../customApps'
 
 const events = _events as FrameEvent[]
 
@@ -682,11 +683,29 @@ export const diagramLogic = kea<diagramLogicType>([
     keywordDropped: ({ keyword, type, position }) => {
       // Whenever something is dropped on the diagram from the side panel
       if (type === 'app') {
+        const customAppId = getCustomAppId(keyword)
+        if (customAppId) {
+          const customApp = getSceneCustomApps(values.scene)[customAppId]
+          if (!customApp) {
+            console.error('Custom app not found:', keyword)
+            return
+          }
+          const newNode: DiagramNode = {
+            id: uuidv4(),
+            type: 'app',
+            position,
+            data: buildCustomAppNodeData(customApp),
+          }
+          actions.setNodes([...values.nodes, newNode])
+          return
+        }
+
         const app = values.apps[keyword]
         if (!app) {
           console.error('App not found:', keyword)
           return
         }
+
         const newNode: DiagramNode = {
           id: uuidv4(),
           type: 'app',

@@ -3,6 +3,7 @@ from typing import Any
 
 from app.config import config
 from app.utils.ai_scene import _build_ai_posthog_properties, _new_ai_span_id, _openai_client
+from app.utils.js_app_reference import get_js_app_api_reference_markdown
 
 APP_CHAT_ROUTER_SYSTEM_PROMPT = """
 You are a router that decides how to handle a FrameOS app chat request.
@@ -17,21 +18,34 @@ Rules:
 - Use ask_about_app for explanations, diagnostics, or how-to questions about the app.
 """.strip()
 
-APP_EDIT_SYSTEM_PROMPT = """
-You are editing a FrameOS app written in Nim. You have access to the Nim version 2.2 STL and the following nimble packages:
-pixie v5, chrono 0.3.1, checksums 0.2.1, ws 0.5.0, psutil 0.6.0, QRGen 3.1.0, zippy 0.10, chroma 0.2.7, bumpy 1.1.2
+APP_EDIT_BASE_SYSTEM_PROMPT = """
+You are editing a FrameOS app.
+Preserve the app's existing language and runtime. Do not rewrite JavaScript or TypeScript apps into Nim, and do not rewrite Nim apps into JavaScript, unless the user explicitly asks for that migration.
 
 Return the modified files in full with the changes inlined. Only modify what is necessary.
 Return JSON only with:
 - reply: a brief summary of the changes.
 - files: an object mapping filenames to their full updated contents (only include files you changed).
+""".strip()
 
-Make these changes:
+APP_EDIT_NIM_SYSTEM_PROMPT = """
+This app uses Nim. You have access to the Nim version 2.2 STL and the following nimble packages:
+pixie v5, chrono 0.3.1, checksums 0.2.1, ws 0.5.0, psutil 0.6.0, QRGen 3.1.0, zippy 0.10, chroma 0.2.7, bumpy 1.1.2
+""".strip()
+
+APP_EDIT_JS_SYSTEM_PROMPT = """
+This app uses JavaScript or TypeScript and runs in the FrameOS QuickJS runtime.
+Use the provided JS app API reference when choosing helpers, return types, and lifecycle methods.
 """.strip()
 
 APP_EDIT_FILES_PROMPT = """
 -------------
 Here are the relevant files of the app:
+""".strip()
+
+APP_JS_REFERENCE_PROMPT = """
+-------------
+FrameOS JavaScript app API reference:
 """.strip()
 
 APP_CHAT_ANSWER_SYSTEM_PROMPT = """
@@ -63,6 +77,47 @@ def _format_app_context(app_name: str | None, app_keyword: str | None, scene_id:
     if node_id:
         parts.append(f"Node id: {node_id}")
     return "\n".join(parts)
+
+
+def _is_js_app_sources(sources: dict[str, str]) -> bool:
+    return any(filename.endswith(".js") or filename.endswith(".ts") for filename in sources)
+
+
+def _build_app_edit_system_prompt(sources: dict[str, str]) -> str:
+    details = APP_EDIT_JS_SYSTEM_PROMPT if _is_js_app_sources(sources) else APP_EDIT_NIM_SYSTEM_PROMPT
+    return f"{APP_EDIT_BASE_SYSTEM_PROMPT}\n\n{details}"
+
+
+def _build_app_reference_block(sources: dict[str, str]) -> str | None:
+    if not _is_js_app_sources(sources):
+        return None
+    return f"{APP_JS_REFERENCE_PROMPT}\n{get_js_app_api_reference_markdown()}"
+
+
+def _build_app_user_prompt(
+    *,
+    prompt: str,
+    sources: dict[str, str],
+    app_name: str | None,
+    app_keyword: str | None,
+    scene_id: str | None,
+    node_id: str | None,
+) -> str:
+    context_lines = _format_app_context(app_name, app_keyword, scene_id, node_id)
+    sources_block = _format_app_sources(sources)
+    return "\n\n".join(
+        [
+            line
+            for line in [
+                context_lines or None,
+                prompt,
+                _build_app_reference_block(sources),
+                APP_EDIT_FILES_PROMPT,
+                sources_block,
+            ]
+            if line
+        ]
+    )
 
 
 async def route_app_chat(
@@ -121,19 +176,13 @@ async def answer_app_question(
 ) -> dict[str, Any]:
     client = _openai_client(api_key)
     span_id = _new_ai_span_id()
-    context_lines = _format_app_context(app_name, app_keyword, scene_id, node_id)
-    sources_block = _format_app_sources(sources)
-    user_prompt = "\n\n".join(
-        [
-            line
-            for line in [
-                context_lines or None,
-                prompt,
-                APP_EDIT_FILES_PROMPT,
-                sources_block,
-            ]
-            if line
-        ]
+    user_prompt = _build_app_user_prompt(
+        prompt=prompt,
+        sources=sources,
+        app_name=app_name,
+        app_keyword=app_keyword,
+        scene_id=scene_id,
+        node_id=node_id,
     )
     messages = [{"role": "system", "content": APP_CHAT_ANSWER_SYSTEM_PROMPT}]
     if history:
@@ -174,21 +223,15 @@ async def edit_app_sources(
 ) -> dict[str, Any]:
     client = _openai_client(api_key)
     span_id = _new_ai_span_id()
-    context_lines = _format_app_context(app_name, app_keyword, scene_id, node_id)
-    sources_block = _format_app_sources(sources)
-    user_prompt = "\n\n".join(
-        [
-            line
-            for line in [
-                context_lines or None,
-                prompt,
-                APP_EDIT_FILES_PROMPT,
-                sources_block,
-            ]
-            if line
-        ]
+    user_prompt = _build_app_user_prompt(
+        prompt=prompt,
+        sources=sources,
+        app_name=app_name,
+        app_keyword=app_keyword,
+        scene_id=scene_id,
+        node_id=node_id,
     )
-    messages = [{"role": "system", "content": APP_EDIT_SYSTEM_PROMPT}]
+    messages = [{"role": "system", "content": _build_app_edit_system_prompt(sources)}]
     if history:
         messages.extend(history)
     messages.append(

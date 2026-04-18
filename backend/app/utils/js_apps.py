@@ -138,3 +138,30 @@ def compile_js_app_dir(app_dir: str, out_filename: str = COMPILED_JS_APP_FILENAM
         errors = "; ".join(error.get("text", "Unknown JavaScript build error") for error in payload.get("errors", []))
         raise RuntimeError(f"Failed to compile JS app in {app_dir}: {errors}")
     return output_path
+
+
+def compile_js_app_sources(sources: dict[str, str], out_filename: str = COMPILED_JS_APP_FILENAME) -> dict[str, str]:
+    normalized_sources = {
+        str(filename): str(source)
+        for filename, source in sources.items()
+        if isinstance(filename, str) and isinstance(source, str)
+    }
+    if not normalized_sources:
+        return {}
+
+    if not any(filename in normalized_sources for filename in JS_APP_SOURCE_FILES):
+        return dict(normalized_sources)
+
+    with tempfile.TemporaryDirectory() as app_dir:
+        for filename, source in normalized_sources.items():
+            path = Path(app_dir) / filename
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(source, encoding="utf-8")
+
+        output_path = compile_js_app_dir(app_dir, out_filename)
+        if output_path is None:
+            return dict(normalized_sources)
+
+        compiled_sources = dict(normalized_sources)
+        compiled_sources[out_filename] = Path(output_path).read_text(encoding="utf-8")
+        return compiled_sources

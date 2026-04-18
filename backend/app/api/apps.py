@@ -11,18 +11,21 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.apps import get_app_configs, get_one_app_sources
 from app.models.settings import get_settings_dict
+from app.utils.js_app_reference import get_js_app_api_reference_markdown
 from app.utils.js_apps import validate_js_source
 from app.schemas.apps import (
- AppsListResponse,
- AppsSourceResponse,
- ValidateSourceRequest,
- ValidateSourceResponse,
- EnhanceSourceRequest,
- EnhanceSourceResponse
+    AppsListResponse,
+    AppsSourceResponse,
+    JsAppReferenceResponse,
+    ValidateSourceRequest,
+    ValidateSourceResponse,
+    EnhanceSourceRequest,
+    EnhanceSourceResponse,
 )
 from . import api_with_auth
 
 from typing import Optional
+
 
 @api_with_auth.get("/apps", response_model=AppsListResponse)
 async def api_apps_list(db: Session = Depends(get_db)):
@@ -35,6 +38,11 @@ async def api_apps_source(keyword: Optional[str] = None, db: Session = Depends(g
     if sources is None:
         raise HTTPException(status_code=404, detail="App sources not found")
     return sources
+
+
+@api_with_auth.get("/apps/js_api_reference", response_model=JsAppReferenceResponse)
+async def api_apps_js_api_reference():
+    return {"markdown": get_js_app_api_reference_markdown()}
 
 
 @api_with_auth.post("/apps/validate_source", response_model=ValidateSourceResponse)

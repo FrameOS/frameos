@@ -238,6 +238,10 @@ class AppsSourceResponse(RootModel):
     pass
 
 
+class JsAppReferenceResponse(BaseModel):
+    markdown: str
+
+
 class ValidateSourceRequest(BaseModel):
     file: str
     source: str

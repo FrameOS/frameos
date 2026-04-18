@@ -113,3 +113,37 @@ async def test_create_local_build_archive_runs_assets_task_without_env_switch(
     assert commands
     assert "cd " in commands[0]
     assert "nimble assets -y && nimble setup &&" in commands[0]
+
+
+def test_prepare_interpreted_scenes_json_compiles_forked_js_app_sources(monkeypatch: pytest.MonkeyPatch):
+    frame = SimpleNamespace(
+        scenes=[
+            {
+                "id": "scene-1",
+                "settings": {"execution": "interpreted"},
+                "nodes": [
+                    {
+                        "id": "node-1",
+                        "type": "app",
+                        "data": {
+                            "keyword": "data/jsText",
+                            "sources": {
+                                "config.json": '{"name":"Forked JS Text","category":"data","output":[{"name":"text","type":"text"}]}',
+                                "app.js": "export function get() { return 'hello' }",
+                            },
+                        },
+                    }
+                ],
+            }
+        ]
+    )
+
+    monkeypatch.setattr(
+        "app.tasks._frame_deployer.compile_js_app_sources",
+        lambda sources: {**sources, "app.compiled.js": "globalThis.__frameosModule={get(){return 'hello'}}"},
+    )
+
+    scenes = FrameDeployer._prepare_interpreted_scenes_json(frame)
+
+    assert scenes[0]["nodes"][0]["data"]["sources"]["app.compiled.js"].startswith("globalThis.__frameosModule")
+    assert "app.compiled.js" not in frame.scenes[0]["nodes"][0]["data"]["sources"]

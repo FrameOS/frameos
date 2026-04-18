@@ -27,6 +27,7 @@ import Fuse from 'fuse.js'
 import { Edge } from 'reactflow'
 import { sceneStateLogic } from '../SceneState/sceneStateLogic'
 import _events from '../../../../../schema/events.json'
+import { buildCustomAppKeyword, buildCustomAppNodeData, getCustomAppId, getSceneCustomApps } from '../customApps'
 
 export interface LocalFuse extends Fuse<OptionWithType> {}
 
@@ -83,6 +84,17 @@ function getAppsForType(apps: Record<string, AppConfig>, returnType: string = 'i
     }
   }
   return imageApps
+}
+
+function getCustomAppsForType(customApps: ReturnType<typeof getSceneCustomApps>, returnType: string): ReturnType<typeof getSceneCustomApps> {
+  return Object.fromEntries(
+    Object.entries(customApps).filter(
+      ([, app]) =>
+        app.config?.output &&
+        app.config.output.length > 0 &&
+        simplifyType(app.config.output[0].type) === simplifyType(returnType)
+    )
+  )
 }
 
 function toBaseType(type: string | FieldType): FieldType {
@@ -235,7 +247,14 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
             const arg = codeOutputs[0]
             return arg?.type ? toBaseType(arg.type) : null
           } else if (node.type === 'app') {
-            const app = apps[(node.data as AppNodeData).keyword]
+            let app = apps[(node.data as AppNodeData).keyword]
+            if ((node.data as AppNodeData)?.sources?.['config.json']) {
+              try {
+                app = JSON.parse((node.data as AppNodeData).sources?.['config.json'] ?? '{}')
+              } catch (e) {
+                console.error(e)
+              }
+            }
             const output = app.output?.[0]
             return output?.type ? toBaseType(output.type) : null
           }
@@ -251,6 +270,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
         }
         const { handleId, handleType, nodeId } = newNodePicker
         const options: OptionWithType[] = []
+        const customApps = getSceneCustomApps(scene)
 
         if (nodeId === CANVAS_NODE_ID) {
           options.push({
@@ -286,6 +306,20 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
               })
             }
           }
+          for (const [customAppId, customApp] of Object.entries(customApps)) {
+            if (
+              !customApp.config?.output ||
+              customApp.config.output.length === 0 ||
+              customApp.config.category === 'render'
+            ) {
+              options.push({
+                label: `edited: ${customApp.name}`,
+                value: `app/${buildCustomAppKeyword(customAppId)}`,
+                type: toFieldType(customApp.config?.output?.[0].type ?? 'string'),
+                keyword: customApp.keyword,
+              })
+            }
+          }
           for (const { id, name } of scenes) {
             options.push({ label: `scene: ${name}`, value: `scene/${id}`, type: 'scene', keyword: id })
           }
@@ -312,6 +346,15 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
               options.push({
                 label: `App: ${app.name}`,
                 value: `app/${keyword}`,
+                type: newNodeHandleDataType,
+                keyword: key,
+              })
+            }
+            const customAppsForType = getCustomAppsForType(customApps, newNodeHandleDataType)
+            for (const [customAppId, customApp] of Object.entries(customAppsForType)) {
+              options.push({
+                label: `Edited App: ${customApp.name}`,
+                value: `app/${buildCustomAppKeyword(customAppId)}`,
                 type: newNodeHandleDataType,
                 keyword: key,
               })
@@ -345,6 +388,16 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
                 })
               }
             }
+            for (const [customAppId, customApp] of Object.entries(customApps)) {
+              if (customApp.config?.output && customApp.config.output.length > 0) {
+                options.push({
+                  label: `Edited App: ${customApp.name}`,
+                  value: `app/${buildCustomAppKeyword(customAppId)}`,
+                  type: customApp.config.output[0].type,
+                  keyword: key,
+                })
+              }
+            }
             for (const field of scene?.fields ?? []) {
               options.push({
                 label: `State: ${field.label}`,
@@ -371,6 +424,20 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
               })
             }
           }
+          for (const [customAppId, customApp] of Object.entries(customApps)) {
+            if (
+              !customApp.config?.output ||
+              customApp.config.output.length === 0 ||
+              customApp.config.category === 'render'
+            ) {
+              options.push({
+                label: `edited: ${customApp.name}`,
+                value: `app/${buildCustomAppKeyword(customAppId)}`,
+                type: toFieldType(customApp.config?.output?.[0].type ?? 'string'),
+                keyword: customApp.keyword,
+              })
+            }
+          }
           for (const event of dispatchableEvents) {
             options.push({
               label: `dispatch: ${event.name}`,
@@ -392,8 +459,14 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
           if (node.type === 'code') {
             keyword = (node.data as CodeNodeData)?.codeOutputs?.[0].name || keyword
           } else if (node.type === 'app') {
-            const appKeyword = (node.data as AppNodeData)?.keyword || keyword
-            const app = apps[appKeyword]
+            let app = apps[(node.data as AppNodeData)?.keyword || keyword]
+            if ((node.data as AppNodeData)?.sources?.['config.json']) {
+              try {
+                app = JSON.parse((node.data as AppNodeData).sources?.['config.json'] ?? '{}')
+              } catch (e) {
+                console.error(e)
+              }
+            }
             keyword = app.output?.[0].name || keyword
           }
           options.push({
@@ -515,6 +588,34 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
       newNodePicker: { diagramX, diagramY, nodeId, handleId, handleType },
       option: { value, type, keyword },
     }) => {
+      const customApps = getSceneCustomApps(values.scene)
+      const getAppDefinition = (
+        appKeyword: string
+      ): { appConfig: AppConfig | null; appData: AppNodeData } | null => {
+        const customAppId = getCustomAppId(appKeyword)
+        if (customAppId) {
+          const customApp = customApps[customAppId]
+          if (!customApp) {
+            return null
+          }
+          return {
+            appConfig: customApp.config,
+            appData: buildCustomAppNodeData(customApp),
+          }
+        }
+
+        const app = values.apps[appKeyword]
+        if (!app) {
+          return null
+        }
+
+        const appData: AppNodeData = { keyword: appKeyword, config: {} }
+        if (app.cache) {
+          appData.cache = { ...app.cache }
+        }
+        return { appConfig: app, appData }
+      }
+
       if (value === 'clipboard/paste') {
         actions.setCursorPosition({ x: diagramX, y: diagramY })
         actions.pasteFromClipboard()
@@ -539,13 +640,13 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
           newNode.data = { keyword: eventKeyword, config: {} } satisfies DispatchNodeData
         } else if (value.startsWith('app/')) {
           const appKeyword = value.substring(4)
-          const app = values.apps[appKeyword]
-          newNode.type = 'app'
-          const appData: AppNodeData = { keyword: appKeyword, config: {} }
-          if (app?.cache) {
-            appData.cache = { ...app.cache }
+          const appDefinition = getAppDefinition(appKeyword)
+          if (!appDefinition) {
+            actions.setSearchValue('')
+            return
           }
-          newNode.data = appData
+          newNode.type = 'app'
+          newNode.data = appDefinition.appData
         } else if (value.startsWith('scene/')) {
           const sceneKeyword = value.substring(6)
           newNode.type = 'scene'
@@ -667,8 +768,12 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
         }
       } else if (value.startsWith('app/')) {
         const appKeyword = value.substring(4)
+        const appDefinition = getAppDefinition(appKeyword)
+        if (!appDefinition) {
+          return
+        }
         newNode.type = 'app'
-        newNode.data = { keyword: appKeyword, config: {} }
+        newNode.data = appDefinition.appData
         if (newNodeOutputHandle === 'prev') {
           newNode.position.x -= 20
           newNode.position.y -= 20
@@ -678,13 +783,10 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
         } else {
           newNode.position.x -= 20
           newNode.position.y -= 100
-          const app = values.apps[appKeyword]
+          const app = appDefinition.appConfig
           // Note: we place apps at a rough estimate above the node they're connected to. should be improved
-          for (const field of app.fields ?? []) {
+          for (const field of app?.fields ?? []) {
             newNode.position.y -= 30 + ('type' in field && field.type === 'text' ? (field.rows ?? 3) * 20 : 0)
-          }
-          if (app.cache) {
-            ;(newNode.data as AppNodeData).cache = { ...app.cache }
           }
         }
       } else if (value.startsWith('dispatch/')) {
