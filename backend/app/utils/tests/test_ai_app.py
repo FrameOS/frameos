@@ -13,6 +13,7 @@ def test_build_app_user_prompt_includes_js_reference_for_js_apps():
 
     assert "FrameOS JavaScript app API reference:" in prompt
     assert "frameos.image" in prompt
+    assert "frameos.assets.writeText" in prompt
     assert "# app.js" in prompt
 
 

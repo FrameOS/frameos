@@ -11,3 +11,4 @@ async def test_api_apps_js_api_reference():
     assert "FrameOS JavaScript App API" in data["markdown"]
     assert "frameos.image" in data["markdown"]
     assert "frameos.setNextSleep" in data["markdown"]
+    assert "frameos.assets.writeText" in data["markdown"]

@@ -81,6 +81,16 @@ export function run(app, context) {}
 - `frameos.log(...args)`
 - `frameos.error(...args)`
 - `frameos.setNextSleep(seconds)`
+- `frameos.assets.readText(path)`
+- `frameos.assets.writeText(path, content)`
+- `frameos.assets.readDataUrl(path)`
+- `frameos.assets.writeDataUrl(path, dataUrl)`
+- `frameos.assets.list(path = ".")`
+- `frameos.assets.stat(path = ".")`
+- `frameos.assets.exists(path = ".")`
+- `frameos.assets.mkdir(path)`
+- `frameos.assets.rename(fromPath, toPath)`
+- `frameos.assets.delete(path)`
 
 ### `frameos.image(spec)`
 
@@ -109,6 +119,21 @@ Use these when your app needs to return typed FrameOS values for downstream node
 ### `frameos.setNextSleep(seconds)`
 
 Schedules the next wake-up or render delay. This is most useful in logic apps.
+
+### `frameos.assets.*`
+
+Use these helpers to work with files under `app.frame.assetsPath`.
+
+- Paths are always scoped to the configured assets root.
+- Use relative paths like `images/photo.png` or `notes/today.txt`.
+- Absolute paths and `..` traversal are rejected.
+- `readText` and `writeText` are for plain text files.
+- `readDataUrl` and `writeDataUrl` are for binary-safe reads and writes via `data:` URLs.
+- `list(path)` returns direct children for a directory.
+- `stat(path)` returns metadata with `path`, `name`, `isDir`, `size`, and `mtime`.
+- `mkdir(path)` creates a directory.
+- `rename(fromPath, toPath)` moves or renames a file or directory inside the assets root.
+- `delete(path)` removes a file or directory.
 
 ## Returning values
 
@@ -143,6 +168,15 @@ export function get(app) {
     color: app.config.color,
     opacity: app.config.opacity,
   })
+}
+```
+
+```ts
+export function run(app) {
+  frameos.assets.mkdir("notes")
+  frameos.assets.writeText("notes/today.txt", "hello frame")
+  const note = frameos.assets.readText("notes/today.txt")
+  app.log(note)
 }
 ```
 """.strip()

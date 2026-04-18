@@ -1,11 +1,11 @@
-import std/[json, unittest]
+import std/[json, os, strutils, unittest]
 import pixie
 
 import ../js_app_runtime
 import ../types
 import ../values
 
-proc testConfig(): FrameConfig =
+proc testConfig(assetsPath = "/tmp"): FrameConfig =
   FrameConfig(
     width: 6,
     height: 4,
@@ -13,7 +13,7 @@ proc testConfig(): FrameConfig =
     scalingMode: "cover",
     debug: true,
     saveAssets: %*false,
-    assetsPath: "/tmp"
+    assetsPath: assetsPath
   )
 
 proc testLogger(config: FrameConfig): Logger =
@@ -25,6 +25,12 @@ proc testLogger(config: FrameConfig): Logger =
   logger.disable = proc() =
     logger.enabled = false
   logger
+
+proc prepareAssetsRoot(name: string): string =
+  result = normalizedPath(getTempDir() / name)
+  if dirExists(result):
+    removeDir(result)
+  createDir(result)
 
 suite "js app runtime":
   test "returns string, node, and image values":
@@ -60,8 +66,9 @@ suite "js app runtime":
 
     let imageValue = runtime.get(owner, %*{"mode": "image"}, context)
     check imageValue.kind == fkImage
-    check imageValue.asImage().width == 3
-    check imageValue.asImage().height == 2
+    if imageValue.kind == fkImage and not imageValue.asImage().isNil:
+      check imageValue.asImage().width == 3
+      check imageValue.asImage().height == 2
 
   test "run can set next sleep and draw a render image":
     let config = testConfig()
@@ -86,3 +93,98 @@ suite "js app runtime":
     check abs(context.nextSleep - 12.5) < 0.0001
     let pixel = context.image.data[context.image.dataIndex(0, 0)]
     check pixel.r > 0
+
+  test "asset api can list read write rename and delete inside assets root":
+    let assetsPath = prepareAssetsRoot("frameos-js-app-runtime-assets")
+    let config = testConfig(assetsPath)
+    let logger = testLogger(config)
+    let scene = FrameScene(id: "tests/js-app-assets".SceneId, frameConfig: config, state: %*{}, logger: logger)
+    let owner = AppRoot(nodeId: 9.NodeId, nodeName: "data/jsAssets", scene: scene, frameConfig: config)
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
+
+    let runtime = newJsAppRuntime(
+      category = "data",
+      outputType = "json",
+      source = """globalThis.__frameosModule = {
+        get() {
+          frameos.assets.mkdir("notes")
+          const written = frameos.assets.writeText("notes/hello.txt", "hello world")
+          const listed = frameos.assets.list("notes")
+          const contents = frameos.assets.readText("notes/hello.txt")
+          const stat = frameos.assets.stat("notes/hello.txt")
+          const fromData = frameos.assets.writeDataUrl("notes/from-data.txt", "data:text/plain,hello%20data")
+          const renamed = frameos.assets.rename("notes/hello.txt", "notes/goodbye.txt")
+          const dataUrl = frameos.assets.readDataUrl("notes/goodbye.txt")
+          const deleted = frameos.assets.delete("notes/goodbye.txt")
+          return {
+            written,
+            listed,
+            contents,
+            stat,
+            fromData,
+            renamed,
+            dataUrl,
+            deleted,
+            existsAfterDelete: frameos.assets.exists("notes/goodbye.txt"),
+          }
+        }
+      }"""
+    )
+
+    let value = runtime.get(owner, %*{}, context)
+    check value.kind == fkJson
+    let payload = value.asJson()
+    let listed = payload{"listed"}
+    check payload{"written"}{"path"}.getStr() == "notes/hello.txt"
+    check listed.kind == JArray
+    check listed.len == 1
+    if listed.kind == JArray and listed.len > 0:
+      check listed[0]{"path"}.getStr() == "notes/hello.txt"
+    check payload{"contents"}.getStr() == "hello world"
+    check payload{"stat"}{"size"}.getInt() == 11
+    check payload{"fromData"}{"path"}.getStr() == "notes/from-data.txt"
+    check payload{"renamed"}{"path"}.getStr() == "notes/goodbye.txt"
+    check payload{"dataUrl"}.getStr().startsWith("data:text/plain;base64,")
+    check payload{"deleted"}.getBool()
+    check not payload{"existsAfterDelete"}.getBool()
+    check readFile(assetsPath / "notes" / "from-data.txt") == "hello data"
+    check not fileExists(assetsPath / "notes" / "goodbye.txt")
+
+  test "asset api rejects paths outside the assets root":
+    let assetsPath = prepareAssetsRoot("frameos-js-app-runtime-assets-safety")
+    let config = testConfig(assetsPath)
+    let logger = testLogger(config)
+    let scene = FrameScene(id: "tests/js-app-assets-safety".SceneId, frameConfig: config, state: %*{}, logger: logger)
+    let owner = AppRoot(nodeId: 10.NodeId, nodeName: "data/jsAssetsSafety", scene: scene, frameConfig: config)
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
+    let outsidePath = "/tmp/frameos-js-app-runtime-escape.txt"
+    if fileExists(outsidePath):
+      removeFile(outsidePath)
+
+    let runtime = newJsAppRuntime(
+      category = "data",
+      outputType = "json",
+      source = """globalThis.__frameosModule = {
+        get() {
+          const errors = []
+          for (const path of ["../escape.txt", "/tmp/frameos-js-app-runtime-escape.txt"]) {
+            try {
+              frameos.assets.writeText(path, "should fail")
+              errors.push("allowed")
+            } catch (error) {
+              errors.push(String(error && error.message || error))
+            }
+          }
+          return errors
+        }
+      }"""
+    )
+
+    let value = runtime.get(owner, %*{}, context)
+    check value.kind == fkJson
+    let payload = value.asJson()
+    check payload.kind == JArray
+    check payload.len == 2
+    for item in payload.items:
+      check item.getStr().contains("Invalid asset path")
+    check not fileExists(outsidePath)

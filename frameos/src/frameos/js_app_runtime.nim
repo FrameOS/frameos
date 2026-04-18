@@ -1,4 +1,4 @@
-import std/[base64, json, options, strformat, strutils, tables]
+import std/[algorithm, base64, json, options, os, strformat, strutils, tables, times, uri]
 import pixie
 
 import frameos/apps as frameos_apps
@@ -32,6 +32,36 @@ proc jsUndefSentinel(ctx: ptr JSContext): JSValue {.inline.} =
   let obj = JS_NewObject(ctx)
   discard JS_SetPropertyStr(ctx, obj, "__frameosUndef", nimBoolToJS(ctx, true))
   return obj
+
+proc jsonToJS(ctx: ptr JSContext, j: JsonNode): JSValue =
+  if j.isNil:
+    return jsNull(ctx)
+  case j.kind
+  of JNull:
+    return jsNull(ctx)
+  of JBool:
+    return nimBoolToJS(ctx, j.getBool())
+  of JInt:
+    let value = j.getInt()
+    if value >= low(int32).int64 and value <= high(int32).int64:
+      return nimIntToJS(ctx, value.int32)
+    return nimFloatToJS(ctx, value.float64)
+  of JFloat:
+    return nimFloatToJS(ctx, j.getFloat())
+  of JString:
+    return nimStringToJS(ctx, j.getStr())
+  of JObject:
+    let obj = JS_NewObject(ctx)
+    for key in j.keys:
+      discard JS_SetPropertyStr(ctx, obj, key.cstring, jsonToJS(ctx, j[key]))
+    return obj
+  of JArray:
+    let arr = JS_NewArray(ctx)
+    var idx: uint32 = 0
+    for item in j.items:
+      discard JS_SetPropertyUint32(ctx, arr, idx, jsonToJS(ctx, item))
+      inc idx
+    return arr
 
 proc jsAppLog(ctx: ptr JSContext, level: JSValue, payloadJson: JSValue): JSValue {.nimcall.} =
   let e = env(ctx)
@@ -67,6 +97,206 @@ proc jsSetNextSleep(ctx: ptr JSContext, seconds: JSValue): JSValue {.nimcall.} =
   if e != nil:
     e.context.nextSleep = toNimFloat(ctx, seconds)
   return jsUndefSentinel(ctx)
+
+proc configuredAssetsPath(e: JsAppEvalEnv): string =
+  if e == nil:
+    raise newException(ValueError, "JS app environment is not ready")
+  absolutePath(normalizedPath(if e.owner.frameConfig.assetsPath.len > 0: e.owner.frameConfig.assetsPath else: "/srv/assets"))
+
+proc withinBasePath(path, basePath: string): bool =
+  let normalizedTargetPath = normalizedPath(path)
+  let normalizedBasePath = normalizedPath(basePath)
+  normalizedTargetPath == normalizedBasePath or normalizedTargetPath.startsWith(normalizedBasePath & DirSep)
+
+proc canonicalAssetPath(path: string): string =
+  var missingParts: seq[string] = @[]
+  var current = normalizedPath(path)
+
+  while current.len > 0 and not fileExists(current) and not dirExists(current):
+    let filename = extractFilename(current)
+    if filename.len > 0:
+      missingParts.add(filename)
+    let parent = parentDir(current)
+    if parent == current or parent.len == 0:
+      break
+    current = parent
+
+  if current.len > 0 and (fileExists(current) or dirExists(current)):
+    result = expandFilename(current)
+    if missingParts.len > 0:
+      for idx in countdown(missingParts.len - 1, 0):
+        result = normalizedPath(result / missingParts[idx])
+  else:
+    result = absolutePath(normalizedPath(path))
+
+proc resolveAssetPath(e: JsAppEvalEnv, path: string, allowRoot = false): string =
+  let assetsPath = configuredAssetsPath(e)
+  var relPath = path.strip()
+
+  if relPath.len == 0 or relPath == ".":
+    if allowRoot:
+      return canonicalAssetPath(assetsPath)
+    raise newException(ValueError, "Path is required")
+  if isAbsolute(relPath):
+    raise newException(ValueError, "Invalid asset path")
+
+  while relPath.startsWith("./"):
+    relPath = relPath[2 .. ^1]
+
+  if relPath.len == 0 or relPath == ".":
+    if allowRoot:
+      return canonicalAssetPath(assetsPath)
+    raise newException(ValueError, "Path is required")
+
+  let resolvedAssetsPath = canonicalAssetPath(assetsPath)
+  let resolvedTargetPath = canonicalAssetPath(assetsPath / relPath)
+  if not withinBasePath(resolvedTargetPath, resolvedAssetsPath):
+    raise newException(ValueError, "Invalid asset path")
+  if not allowRoot and resolvedTargetPath == resolvedAssetsPath:
+    raise newException(ValueError, "Path is required")
+  resolvedTargetPath
+
+proc relativeAssetPath(e: JsAppEvalEnv, path: string): string =
+  let assetsPath = canonicalAssetPath(configuredAssetsPath(e))
+  let fullPath = canonicalAssetPath(path)
+  if fullPath == assetsPath:
+    return "."
+  fullPath[(assetsPath.len + 1) .. ^1]
+
+proc assetContentType(path: string): string =
+  let lowerPath = path.toLowerAscii()
+  if lowerPath.endsWith(".png"):
+    return "image/png"
+  if lowerPath.endsWith(".jpg") or lowerPath.endsWith(".jpeg"):
+    return "image/jpeg"
+  if lowerPath.endsWith(".webp"):
+    return "image/webp"
+  if lowerPath.endsWith(".gif"):
+    return "image/gif"
+  if lowerPath.endsWith(".svg"):
+    return "image/svg+xml"
+  if lowerPath.endsWith(".json"):
+    return "application/json"
+  if lowerPath.endsWith(".js"):
+    return "application/javascript"
+  if lowerPath.endsWith(".css"):
+    return "text/css"
+  if lowerPath.endsWith(".txt") or lowerPath.endsWith(".md"):
+    return "text/plain"
+  "application/octet-stream"
+
+proc decodeAssetDataUrl(value: string): string =
+  if not value.startsWith("data:"):
+    raise newException(ValueError, "Invalid data URL")
+  let commaIndex = value.find(',')
+  if commaIndex < 0:
+    raise newException(ValueError, "Invalid data URL")
+  let header = value[0 ..< commaIndex]
+  let payload = value[(commaIndex + 1) .. ^1]
+  if ";base64" in header:
+    return decode(payload)
+  decodeUrl(payload)
+
+proc assetInfoJson(e: JsAppEvalEnv, fullPath: string): JsonNode =
+  let isDir = dirExists(fullPath)
+  if not isDir and not fileExists(fullPath):
+    raise newException(OSError, "Asset not found")
+  let info = getFileInfo(fullPath)
+  let relPath = relativeAssetPath(e, fullPath)
+  %*{
+    "path": relPath,
+    "name": if relPath == ".": "." else: extractFilename(fullPath),
+    "isDir": isDir,
+    "size": if isDir: BiggestInt(0) else: info.size,
+    "mtime": info.lastWriteTime.toUnix(),
+  }
+
+proc assetListJson(e: JsAppEvalEnv, path: string): JsonNode =
+  let targetPath = resolveAssetPath(e, path, allowRoot = true)
+  if targetPath == canonicalAssetPath(configuredAssetsPath(e)) and not dirExists(targetPath):
+    return %*[]
+  if not dirExists(targetPath):
+    raise newException(ValueError, "Asset path is not a directory")
+
+  var entries: seq[JsonNode] = @[]
+  for kind, entryPath in walkDir(targetPath, relative = false):
+    if kind in {pcDir, pcFile}:
+      entries.add(assetInfoJson(e, canonicalAssetPath(entryPath)))
+  entries.sort(proc(a, b: JsonNode): int = cmp(a{"path"}.getStr(), b{"path"}.getStr()))
+
+  result = newJArray()
+  for entry in entries:
+    result.add(entry)
+
+proc jsAssetReadText(ctx: ptr JSContext, path: JSValue): JSValue {.nimcall.} =
+  let targetPath = resolveAssetPath(env(ctx), toNimString(ctx, path))
+  if dirExists(targetPath):
+    raise newException(ValueError, "Asset path is a directory")
+  nimStringToJS(ctx, readFile(targetPath))
+
+proc jsAssetWriteText(ctx: ptr JSContext, path: JSValue, content: JSValue): JSValue {.nimcall.} =
+  let e = env(ctx)
+  let targetPath = resolveAssetPath(e, toNimString(ctx, path))
+  if dirExists(targetPath):
+    raise newException(ValueError, "Asset path is a directory")
+  createDir(parentDir(targetPath))
+  writeFile(targetPath, toNimString(ctx, content))
+  jsonToJS(ctx, assetInfoJson(e, targetPath))
+
+proc jsAssetReadDataUrl(ctx: ptr JSContext, path: JSValue): JSValue {.nimcall.} =
+  let targetPath = resolveAssetPath(env(ctx), toNimString(ctx, path))
+  if dirExists(targetPath):
+    raise newException(ValueError, "Asset path is a directory")
+  nimStringToJS(ctx, "data:" & assetContentType(targetPath) & ";base64," & encode(readFile(targetPath)))
+
+proc jsAssetWriteDataUrl(ctx: ptr JSContext, path: JSValue, dataUrl: JSValue): JSValue {.nimcall.} =
+  let e = env(ctx)
+  let targetPath = resolveAssetPath(e, toNimString(ctx, path))
+  if dirExists(targetPath):
+    raise newException(ValueError, "Asset path is a directory")
+  createDir(parentDir(targetPath))
+  writeFile(targetPath, decodeAssetDataUrl(toNimString(ctx, dataUrl)))
+  jsonToJS(ctx, assetInfoJson(e, targetPath))
+
+proc jsAssetList(ctx: ptr JSContext, path: JSValue): JSValue {.nimcall.} =
+  jsonToJS(ctx, assetListJson(env(ctx), toNimString(ctx, path)))
+
+proc jsAssetStat(ctx: ptr JSContext, path: JSValue): JSValue {.nimcall.} =
+  let e = env(ctx)
+  jsonToJS(ctx, assetInfoJson(e, resolveAssetPath(e, toNimString(ctx, path), allowRoot = true)))
+
+proc jsAssetExists(ctx: ptr JSContext, path: JSValue): JSValue {.nimcall.} =
+  let targetPath = resolveAssetPath(env(ctx), toNimString(ctx, path), allowRoot = true)
+  nimBoolToJS(ctx, fileExists(targetPath) or dirExists(targetPath))
+
+proc jsAssetMkdir(ctx: ptr JSContext, path: JSValue): JSValue {.nimcall.} =
+  let e = env(ctx)
+  let targetPath = resolveAssetPath(e, toNimString(ctx, path))
+  createDir(targetPath)
+  jsonToJS(ctx, assetInfoJson(e, targetPath))
+
+proc jsAssetRename(ctx: ptr JSContext, srcPath: JSValue, dstPath: JSValue): JSValue {.nimcall.} =
+  let e = env(ctx)
+  let sourcePath = resolveAssetPath(e, toNimString(ctx, srcPath))
+  let targetPath = resolveAssetPath(e, toNimString(ctx, dstPath))
+  if not fileExists(sourcePath) and not dirExists(sourcePath):
+    raise newException(OSError, "Asset not found")
+  createDir(parentDir(targetPath))
+  if dirExists(sourcePath):
+    moveDir(sourcePath, targetPath)
+  else:
+    moveFile(sourcePath, targetPath)
+  jsonToJS(ctx, assetInfoJson(e, targetPath))
+
+proc jsAssetDelete(ctx: ptr JSContext, path: JSValue): JSValue {.nimcall.} =
+  let targetPath = resolveAssetPath(env(ctx), toNimString(ctx, path))
+  if fileExists(targetPath):
+    removeFile(targetPath)
+  elif dirExists(targetPath):
+    removeDir(targetPath)
+  else:
+    raise newException(OSError, "Asset not found")
+  nimBoolToJS(ctx, true)
 
 proc newJsAppRuntime*(category: string, outputType: string, source: string): JsAppRuntime =
   return JsAppRuntime(
@@ -120,6 +350,16 @@ proc ensureReady(runtime: JsAppRuntime) =
   runtime.js = newQuickJS()
   runtime.js.registerFunction("jsAppLog", jsAppLog)
   runtime.js.registerFunction("jsSetNextSleep", jsSetNextSleep)
+  runtime.js.registerFunction("jsAssetReadText", jsAssetReadText)
+  runtime.js.registerFunction("jsAssetWriteText", jsAssetWriteText)
+  runtime.js.registerFunction("jsAssetReadDataUrl", jsAssetReadDataUrl)
+  runtime.js.registerFunction("jsAssetWriteDataUrl", jsAssetWriteDataUrl)
+  runtime.js.registerFunction("jsAssetList", jsAssetList)
+  runtime.js.registerFunction("jsAssetStat", jsAssetStat)
+  runtime.js.registerFunction("jsAssetExists", jsAssetExists)
+  runtime.js.registerFunction("jsAssetMkdir", jsAssetMkdir)
+  runtime.js.registerFunction("jsAssetRename", jsAssetRename)
+  runtime.js.registerFunction("jsAssetDelete", jsAssetDelete)
   discard runtime.js.eval("""
   "use strict";
   const __jsReplacer = (k, v) =>
@@ -133,6 +373,18 @@ proc ensureReady(runtime: JsAppRuntime) =
     log: (...args) => jsAppLog("log", JSON.stringify(args, __jsReplacer)),
     error: (...args) => jsAppLog("error", JSON.stringify(args, __jsReplacer)),
     setNextSleep: (seconds) => jsSetNextSleep(Number(seconds || 0)),
+    assets: {
+      readText: (path) => jsAssetReadText(String(path ?? "")),
+      writeText: (path, content) => jsAssetWriteText(String(path ?? ""), String(content ?? "")),
+      readDataUrl: (path) => jsAssetReadDataUrl(String(path ?? "")),
+      writeDataUrl: (path, dataUrl) => jsAssetWriteDataUrl(String(path ?? ""), String(dataUrl ?? "")),
+      list: (path = ".") => jsAssetList(String(path ?? ".")),
+      stat: (path = ".") => jsAssetStat(String(path ?? ".")),
+      exists: (path = ".") => jsAssetExists(String(path ?? ".")),
+      mkdir: (path) => jsAssetMkdir(String(path ?? "")),
+      rename: (fromPath, toPath) => jsAssetRename(String(fromPath ?? ""), String(toPath ?? "")),
+      delete: (path) => jsAssetDelete(String(path ?? "")),
+    },
   };
   function __frameosWrapApp(app) {
     return Object.assign(app || {}, {
@@ -220,7 +472,11 @@ proc defaultImageHeight(owner: AppRoot, context: ExecutionContext, spec: JsonNod
 
 proc colorWithOpacity(spec: JsonNode): Color =
   var color = parseHtmlColor(spec{"color"}.getStr("#000000"))
-  let opacity = min(1.0, max(0.0, valueFromJsonByType(spec{"opacity"}, "float").asFloat()))
+  let opacity =
+    if spec.kind == JObject and spec.hasKey("opacity"):
+      min(1.0, max(0.0, valueFromJsonByType(spec["opacity"], "float").asFloat()))
+    else:
+      1.0
   color.a = opacity.float32
   return color
 
