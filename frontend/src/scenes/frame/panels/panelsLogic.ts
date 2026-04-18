@@ -1,4 +1,4 @@
-import { actions, afterMount, BuiltLogic, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
+import { actions, afterMount, beforeUnmount, BuiltLogic, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 import equal from 'fast-deep-equal'
 import { AppNodeData, Area, Panel, PanelWithMetadata } from '../../../types'
 
@@ -8,6 +8,8 @@ import { actionToUrl, router, urlToAction } from 'kea-router'
 import { subscriptions } from 'kea-subscriptions'
 import { isFrameControlMode } from '../../../utils/frameControlMode'
 import { isInFrameAdminMode } from '../../../utils/frameAdmin'
+import { editAppLogic } from './EditApp/editAppLogic'
+import { sceneJSONLogic } from './SceneJSON/sceneJSONLogic'
 
 export interface PanelsLogicProps {
   frameId: number
@@ -64,7 +66,7 @@ export const panelsLogic = kea<panelsLogicType>([
   key((props) => props.frameId),
   connect((props: PanelsLogicProps) => ({
     values: [frameLogic(props), ['defaultScene', 'frame', 'frameForm']],
-    actions: [frameLogic(props), ['closeScenePanels']],
+    actions: [frameLogic(props), ['closeScenePanels', 'saveFrame']],
   })),
   actions({
     setPanels: (panels: Record<Area, PanelWithMetadata[]>) => ({ panels }),
@@ -374,7 +376,7 @@ export const panelsLogic = kea<panelsLogicType>([
       }
     },
   })),
-  afterMount(({ values, actions }) => {
+  afterMount(({ values, actions, props, cache }) => {
     const routerPanels = router.values.hashParams?.p
     if (routerPanels && !equal(values.panels, routerPanels)) {
       actions.setPanels(routerPanels)
@@ -383,6 +385,43 @@ export const panelsLogic = kea<panelsLogicType>([
       if (scenesPanel) {
         actions.setPanel(Area.TopRight, scenesPanel)
       }
+    }
+
+    cache.keydownHandler = (event: KeyboardEvent) => {
+      const key = event.key.toLowerCase()
+      if (!(event.metaKey || event.ctrlKey) || key !== 's') {
+        return
+      }
+
+      const activeEditAppPanel = values.activeEditAppPanel
+      const editAppMetadata = activeEditAppPanel?.metadata as { sceneId?: string; nodeId?: string } | undefined
+      if (editAppMetadata?.sceneId && editAppMetadata?.nodeId) {
+        event.preventDefault()
+        editAppLogic({
+          frameId: props.frameId,
+          sceneId: editAppMetadata.sceneId,
+          nodeId: editAppMetadata.nodeId,
+        }).actions.saveChanges()
+        return
+      }
+
+      const activeSceneJsonPanel = values.panels[Area.TopLeft].find((panel) => panel.panel === Panel.SceneJSON && panel.active)
+      const sceneId = activeSceneJsonPanel?.metadata?.sceneId
+      if (sceneId) {
+        event.preventDefault()
+        sceneJSONLogic({ frameId: props.frameId, sceneId }).actions.saveChanges()
+        return
+      }
+
+      event.preventDefault()
+      actions.saveFrame()
+    }
+    window.addEventListener('keydown', cache.keydownHandler)
+  }),
+  beforeUnmount(({ cache }) => {
+    if (cache.keydownHandler) {
+      window.removeEventListener('keydown', cache.keydownHandler)
+      cache.keydownHandler = null
     }
   }),
   subscriptions(({ actions }) => ({

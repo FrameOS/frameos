@@ -1052,28 +1052,14 @@ export const frameLogic = kea<frameLogicType>([
       })
     },
   })),
-  afterMount(({ actions, values, cache }) => {
+  afterMount(({ actions, values }) => {
     const defaultScene = values.frame?.scenes?.find((scene) => scene.id === 'default' && !scene.default)
     if (defaultScene) {
       const { name, id, default: _def, ...rest } = defaultScene
       actions.updateScene('default', { name: 'Default Scene', id: uuidv4(), default: true, ...rest })
     }
-
-    cache.keydownHandler = (event: KeyboardEvent) => {
-      const key = event.key.toLowerCase()
-      if (!(event.metaKey || event.ctrlKey) || key !== 's') {
-        return
-      }
-      event.preventDefault()
-      actions.saveFrame()
-    }
-    window.addEventListener('keydown', cache.keydownHandler)
   }),
-  beforeUnmount(({ cache }) => {
+  beforeUnmount(() => {
     setBrowserTitle(null)
-    if (cache.keydownHandler) {
-      window.removeEventListener('keydown', cache.keydownHandler)
-      cache.keydownHandler = null
-    }
   }),
 ])
