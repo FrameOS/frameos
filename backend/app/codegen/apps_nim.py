@@ -40,13 +40,15 @@ def write_apps_nim(tmp_dir: Optional[str] = None) -> str:
     all_apps = {}
     for app_dir in glob(os.path.join(source_dir, "src", "apps", "*", "*")):
         config_path = os.path.join(app_dir, "config.json")
-        if os.path.exists(config_path):
-            with open(config_path, "r") as f:
-                id = f"{app_dir.split('/')[-2]}/{app_dir.split('/')[-1]}"
-                if id.startswith("legacy"):
-                    continue
-                config = json.load(f)
-                all_apps[id] = config
+        loader_path = os.path.join(app_dir, "app_loader.nim")
+        if not os.path.exists(config_path) or not os.path.exists(loader_path):
+            continue
+        with open(config_path, "r") as f:
+            id = f"{app_dir.split('/')[-2]}/{app_dir.split('/')[-1]}"
+            if id.startswith("legacy"):
+                continue
+            config = json.load(f)
+            all_apps[id] = config
 
     # 1) Imports
     imports: list[str] = [

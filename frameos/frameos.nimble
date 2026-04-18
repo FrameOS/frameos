@@ -23,8 +23,12 @@ requires "psutil >= 0.6.0"
 requires "QRgen >= 3.1.0"
 requires "jsony >= 1.1.5"
 
+proc ensureGeneratedAppLoaders() =
+  exec "FRAMEOS_ROOT_DIR='.' python3 ../e2e/makeapploaders.py"
+
 before build:
   exec "nimble assets"
+  ensureGeneratedAppLoaders()
   if not dirExists("quickjs"):
     exec "nimble build_quickjs --silent"
 
@@ -44,6 +48,9 @@ task build_quickjs, "Build QuickJS":
   exec "cd quickjs && make"
 
 task test, "Run tests":
+  ensureGeneratedAppLoaders()
+  if not dirExists("quickjs"):
+    exec "nimble build_quickjs --silent"
   exec "testament pattern './src/**/tests/*.nim' --lineTrace:on"
   exec "testament pattern './src/**/**/tests/*.nim' --lineTrace:on"
   exec "testament pattern './src/**/**/**/tests/*.nim' --lineTrace:on"

@@ -392,6 +392,16 @@ proc ensureReady(runtime: JsAppRuntime) =
       logError: (...args) => jsAppLog("error", JSON.stringify(args, __jsReplacer)),
     });
   }
+  function __frameosSetCallState(app, context) {
+    const nextApp = __frameosWrapApp(app);
+    const currentApp = globalThis.__frameosAppInstance;
+    if (currentApp && typeof currentApp === "object") {
+      globalThis.__frameosAppInstance = Object.assign(currentApp, nextApp);
+    } else {
+      globalThis.__frameosAppInstance = nextApp;
+    }
+    globalThis.__frameosContext = context;
+  }
   function __frameosExports() {
     if (globalThis.__frameosModule && globalThis.__frameosModule.default) {
       return globalThis.__frameosModule.default;
@@ -453,8 +463,7 @@ proc buildContextJson(runtime: JsAppRuntime, context: ExecutionContext): JsonNod
 proc setCallGlobals(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context: ExecutionContext) =
   let appJson = buildAppJson(runtime, owner, configJson)
   let contextJson = buildContextJson(runtime, context)
-  discard runtime.js.eval("globalThis.__frameosAppInstance = __frameosWrapApp(" & $appJson & ");")
-  discard runtime.js.eval("globalThis.__frameosContext = " & $contextJson & ";")
+  discard runtime.js.eval("__frameosSetCallState(" & $appJson & ", " & $contextJson & ");")
 
 proc defaultImageWidth(owner: AppRoot, context: ExecutionContext, spec: JsonNode): int =
   if spec.kind == JObject and spec.hasKey("width"):

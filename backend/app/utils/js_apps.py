@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from functools import lru_cache
 import subprocess
 import tempfile
 from pathlib import Path
@@ -9,6 +10,7 @@ from pathlib import Path
 JS_APP_SOURCE_FILES = ("app.ts", "app.js")
 COMPILED_JS_APP_FILENAME = "app.compiled.js"
 GLOBAL_NAME = "__frameosModule"
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def find_js_app_source_filename(app_dir: str) -> str | None:
@@ -23,12 +25,59 @@ def is_js_app_dir(app_dir: str) -> bool:
     return find_js_app_source_filename(app_dir) is not None
 
 
+@lru_cache(maxsize=1)
+def _npm_global_node_modules_root() -> Path | None:
+    proc = subprocess.run(
+        ["npm", "root", "-g"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        return None
+    root = Path(proc.stdout.strip())
+    return root if root.exists() else None
+
+
+@lru_cache(maxsize=1)
+def _find_esbuild_module_path() -> Path:
+    candidates: list[Path] = []
+    env_path = os.environ.get("FRAMEOS_ESBUILD_MAIN")
+    if env_path:
+        candidates.append(Path(env_path))
+
+    candidates.extend(
+        [
+            REPO_ROOT / "frontend" / "node_modules" / "esbuild" / "lib" / "main.js",
+            REPO_ROOT / "node_modules" / "esbuild" / "lib" / "main.js",
+            REPO_ROOT / "frameos" / "frontend" / "node_modules" / "esbuild" / "lib" / "main.js",
+        ]
+    )
+
+    global_root = _npm_global_node_modules_root()
+    if global_root is not None:
+        candidates.append(global_root / "esbuild" / "lib" / "main.js")
+
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate.resolve()
+
+    raise RuntimeError(
+        "Unable to locate esbuild. Install frontend dependencies with `pnpm install`, "
+        "install `esbuild` globally, or set FRAMEOS_ESBUILD_MAIN."
+    )
+
+
 def _node_esbuild_script() -> str:
     return """
-import esbuild from 'esbuild';
 import fs from 'node:fs';
+import { pathToFileURL } from 'node:url';
 
-const mode = process.argv[1];
+const esbuildModulePath = process.argv[1];
+const mode = process.argv[2];
+const esbuildModule = await import(pathToFileURL(esbuildModulePath).href);
+const esbuild = esbuildModule.default ?? esbuildModule;
 
 function serializeError(error) {
   if (!error) {
@@ -42,8 +91,8 @@ function serializeError(error) {
 
 try {
   if (mode === 'validate') {
-    const filename = process.argv[2];
-    const source = fs.readFileSync(process.argv[3], 'utf8');
+    const filename = process.argv[3];
+    const source = fs.readFileSync(process.argv[4], 'utf8');
     const loader = filename.endsWith('.ts') ? 'ts' : 'js';
     await esbuild.transform(source, {
       loader,
@@ -55,8 +104,8 @@ try {
     });
     process.stdout.write(JSON.stringify({ ok: true }));
   } else if (mode === 'build') {
-    const entry = process.argv[2];
-    const outfile = process.argv[3];
+    const entry = process.argv[3];
+    const outfile = process.argv[4];
     await esbuild.build({
       entryPoints: [entry],
       bundle: true,
@@ -81,9 +130,10 @@ try {
 
 
 def _run_esbuild(args: list[str]) -> tuple[bool, dict]:
+    esbuild_module_path = _find_esbuild_module_path()
     proc = subprocess.run(
-        ["node", "--input-type=module", "-e", _node_esbuild_script(), *args],
-        cwd=Path(__file__).resolve().parents[3] / "frontend",
+        ["node", "--input-type=module", "-e", _node_esbuild_script(), str(esbuild_module_path), *args],
+        cwd=REPO_ROOT,
         capture_output=True,
         text=True,
         check=False,
@@ -105,7 +155,10 @@ def validate_js_source(filename: str, source: str) -> list[dict]:
         tmp_path = tmp.name
 
     try:
-        ok, payload = _run_esbuild(["validate", filename, tmp_path])
+        try:
+            ok, payload = _run_esbuild(["validate", filename, tmp_path])
+        except RuntimeError as exc:
+            return [{"line": 1, "column": 1, "error": str(exc)}]
     finally:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)

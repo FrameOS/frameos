@@ -94,6 +94,44 @@ suite "js app runtime":
     let pixel = context.image.data[context.image.dataIndex(0, 0)]
     check pixel.r > 0
 
+  test "preserves app instance state across init get and run calls":
+    let config = testConfig()
+    let logger = testLogger(config)
+    let scene = FrameScene(id: "tests/js-app-state".SceneId, frameConfig: config, state: %*{}, logger: logger)
+    let owner = AppRoot(nodeId: 11.NodeId, nodeName: "data/jsText", scene: scene, frameConfig: config)
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
+
+    let runtime = newJsAppRuntime(
+      category = "data",
+      outputType = "text",
+      source = """globalThis.__frameosModule = {
+        init(app) {
+          app.counter = 1
+        },
+        get(app) {
+          const value = `${app.counter}:${app.config.label}`
+          app.counter += 1
+          return value
+        },
+        run(app, context) {
+          frameos.setNextSleep(app.counter)
+          app.counter += 1
+          app.log(context.event)
+        }
+      }"""
+    )
+
+    let firstValue = runtime.get(owner, %*{"label": "first"}, context)
+    check firstValue.kind == fkString
+    check firstValue.asString() == "1:first"
+
+    runtime.run(owner, %*{"label": "second"}, context)
+    check abs(context.nextSleep - 2.0) < 0.0001
+
+    let secondValue = runtime.get(owner, %*{"label": "third"}, context)
+    check secondValue.kind == fkString
+    check secondValue.asString() == "3:third"
+
   test "asset api can list read write rename and delete inside assets root":
     let assetsPath = prepareAssetsRoot("frameos-js-app-runtime-assets")
     let config = testConfig(assetsPath)

@@ -107,8 +107,8 @@ RUN pip3 install --upgrade uv \
 # Change the working directory for pnpm install
 WORKDIR /tmp
 
-# Install pnpm and seed the workspace manifests for dependency caching
-RUN npm install -g pnpm@10.27.0
+# Install pnpm and a standalone esbuild package for backend JS-app compilation
+RUN npm install -g pnpm@10.27.0 esbuild@0.27.3
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml /tmp/
 COPY frontend/package.json /tmp/frontend/package.json
 COPY frameos/frontend/package.json /tmp/frameos/frontend/package.json
