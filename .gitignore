@@ -51,6 +51,7 @@ frameos/nimble.develop
 frameos/nimble.paths
 frameos/scene.json
 frameos/**/app_loader.nim
+frameos/**/app.compiled.js
 frameos/assets/compiled/frame_web
 frameos/assets/compiled/.manifest.json
 frameos/src/assets/*.nim

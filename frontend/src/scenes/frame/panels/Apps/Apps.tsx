@@ -8,14 +8,24 @@ import React from 'react'
 import { FieldTypeTag } from '../../../../components/FieldTypeTag'
 import { frameLogic } from '../../frameLogic'
 import { panelsLogic } from '../panelsLogic'
+import { buildCustomAppKeyword, getSceneCustomApps } from '../customApps'
+import { searchInText } from '../../../../utils/searchInText'
 
 export function Apps() {
   const { appsByCategory, search } = useValues(appsLogic)
   const { setSearch } = useActions(appsLogic)
-  const { frameId } = useValues(frameLogic)
-  const { scenesOpen } = useValues(panelsLogic({ frameId }))
-  const onDragStart = (event: any, keyword: string) => {
-    event.dataTransfer.setData('application/reactflow', JSON.stringify({ type: 'app', keyword }))
+  const { frameId, frameForm } = useValues(frameLogic)
+  const { scenesOpen, selectedSceneId } = useValues(panelsLogic({ frameId }))
+  const selectedScene = frameForm?.scenes?.find((scene) => scene.id === selectedSceneId) ?? null
+  const customApps = Object.values(getSceneCustomApps(selectedScene))
+    .filter(
+      (app) =>
+        searchInText(search, app.name) || searchInText(search, app.description) || searchInText(search, app.keyword)
+    )
+    .toSorted((left, right) => left.name.localeCompare(right.name))
+
+  const onDragStart = (event: any, keyword: string, name?: string) => {
+    event.dataTransfer.setData('application/reactflow', JSON.stringify({ type: 'app', keyword, name }))
     event.dataTransfer.effectAllowed = 'move'
   }
   return (
@@ -24,6 +34,30 @@ export function Apps() {
       {scenesOpen ? (
         <div className="text-xs text-gray-400">
           Apps can only be dragged onto the scene editor or into AI generation prompts.
+        </div>
+      ) : null}
+      {customApps.length > 0 ? (
+        <div className="space-y-2">
+          <H6>Edited Apps</H6>
+          <div className="text-xs text-gray-400">Reusable custom apps from this scene.</div>
+          {customApps.map((customApp) => (
+            <Box
+              key={customApp.id}
+              className="bg-gray-900 px-3 py-2 dndnode flex items-center justify-between space-x-2 cursor-move w-full"
+              draggable
+              onDragStart={(event) => onDragStart(event, buildCustomAppKeyword(customApp.id), customApp.name)}
+            >
+              <div className="w-full">
+                <div className="flex items-start justify-between">
+                  <H6>{customApp.name}</H6>
+                  {customApp.config?.output?.map((output, index) => (
+                    <FieldTypeTag key={index} className="mt-1" type={output.type} />
+                  ))}
+                </div>
+                <div className="text-sm">{customApp.description || `Forked from ${customApp.keyword}`}</div>
+              </div>
+            </Box>
+          ))}
         </div>
       ) : null}
       {Object.entries(appsByCategory).map(([category, apps]) => (
@@ -36,7 +70,7 @@ export function Apps() {
                 key={keyword}
                 className="bg-gray-900 px-3 py-2 dndnode flex items-center justify-between space-x-2 cursor-move w-full"
                 draggable
-                onDragStart={(event) => onDragStart(event, keyword)}
+                onDragStart={(event) => onDragStart(event, keyword, app.name)}
               >
                 <div className="w-full">
                   <div className="flex items-start justify-between">

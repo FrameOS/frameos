@@ -1,4 +1,5 @@
 from datetime import datetime
+from copy import deepcopy
 from glob import glob
 import hashlib
 import json
@@ -29,7 +30,8 @@ from app.codegen.drivers_nim import write_drivers_nim
 from app.codegen.scene_nim import write_scene_nim, write_scenes_nim
 from app.tasks.utils import find_nimbase_file
 from app.codegen.apps_nim import write_apps_nim
-from app.codegen.app_loader_nim import write_app_loader_nim
+from app.codegen.app_loader_nim import write_app_loader_nim, write_js_app_nim
+from app.utils.js_apps import compile_js_app_dir, compile_js_app_sources, is_js_app_dir
 
 class FrameDeployer:
     def __init__(self, db: Session, redis: Redis, frame: Frame, nim_path: str, temp_dir: str):
@@ -91,10 +93,33 @@ class FrameDeployer:
 
     async def _upload_scenes_json(self, path: str, gzip: bool = False) -> None:
         """Upload the release-specific `scenes.json`."""
-        json_data = json.dumps(get_interpreted_scenes_json(self.frame), indent=4).encode() + b"\n"
+        json_data = json.dumps(self._prepare_interpreted_scenes_json(self.frame), indent=4).encode() + b"\n"
         if gzip:
             json_data = compress(json_data)
         await upload_file(self.db, self.redis, self.frame, path, json_data)
+
+    @staticmethod
+    def _prepare_interpreted_scenes_json(frame: Frame) -> list[dict]:
+        interpreted_scenes = deepcopy(get_interpreted_scenes_json(frame))
+
+        for scene in interpreted_scenes:
+            scene_id = scene.get("id", "unknown-scene")
+            for node in scene.get("nodes", []):
+                data = node.get("data")
+                if not isinstance(data, dict):
+                    continue
+                sources = data.get("sources")
+                if not isinstance(sources, dict):
+                    continue
+                try:
+                    data["sources"] = compile_js_app_sources(sources)
+                except Exception as exc:
+                    node_id = node.get("id", "unknown-node")
+                    raise RuntimeError(
+                        f"Failed to compile forked JS app for interpreted scene '{scene_id}' node '{node_id}': {exc}"
+                    ) from exc
+
+        return interpreted_scenes
 
     async def get_hostname(self) -> str:
         hostname_out: list[str] = []
@@ -193,6 +218,10 @@ class FrameDeployer:
             if os.path.exists(config_path):
                 with open(config_path, "r") as f:
                     config = json.load(f)
+                    if is_js_app_dir(app_dir):
+                        compile_js_app_dir(app_dir)
+                        with open(os.path.join(app_dir, "app.nim"), "w") as af:
+                            af.write(write_js_app_nim(app_dir, config))
                     app_loader_nim = write_app_loader_nim(app_dir, config)
                     with open(os.path.join(app_dir, "app_loader.nim"), "w") as lf:
                         lf.write(app_loader_nim)
@@ -207,6 +236,10 @@ class FrameDeployer:
                     f.write(code)
             config_json = sources["config.json"] if "config.json" in sources else '{}'
             config = json.loads(config_json)
+            if is_js_app_dir(app_dir):
+                compile_js_app_dir(app_dir)
+                with open(os.path.join(app_dir, "app.nim"), "w") as af:
+                    af.write(write_js_app_nim(app_dir, config))
             app_loader_nim = write_app_loader_nim(app_dir, config)
             with open(os.path.join(app_dir, "app_loader.nim"), "w") as lf:
                 lf.write(app_loader_nim)

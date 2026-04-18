@@ -2,6 +2,7 @@ from __future__ import annotations
 
 # stdlib ---------------------------------------------------------------------
 import asyncio
+from copy import deepcopy
 from datetime import datetime, timezone
 from http import HTTPStatus
 import contextlib
@@ -85,6 +86,7 @@ from app.utils.frame_http import (
     _frame_scheme_port,
     _httpx_verify,
 )
+from app.utils.js_apps import compile_js_app_sources
 from app.tasks.utils import find_nim_v2
 from app.tasks._frame_deployer import FrameDeployer
 from app.tasks.frame_deploy_workflow import FrameDeployWorkflow
@@ -216,7 +218,37 @@ def _normalize_upload_scenes_payload(body: Any) -> tuple[list[dict[str, Any]], d
     scenes_payload = body.get("scenes")
     if not isinstance(scenes_payload, list):
         _bad_request("uploadScenes payload must include scenes as an array")
-    return scenes_payload, body
+
+    normalized_body = deepcopy(body)
+    normalized_scenes = normalized_body.get("scenes")
+    if not isinstance(normalized_scenes, list):
+        _bad_request("uploadScenes payload must include scenes as an array")
+
+    for scene in normalized_scenes:
+        if not isinstance(scene, dict):
+            continue
+        scene_id = scene.get("id", "unknown-scene")
+        nodes = scene.get("nodes") or []
+        if not isinstance(nodes, list):
+            continue
+        for node in nodes:
+            if not isinstance(node, dict):
+                continue
+            data = node.get("data")
+            if not isinstance(data, dict):
+                continue
+            sources = data.get("sources")
+            if not isinstance(sources, dict):
+                continue
+            try:
+                data["sources"] = compile_js_app_sources(sources)
+            except Exception as exc:
+                node_id = node.get("id", "unknown-node")
+                _bad_request(
+                    f"Failed to compile forked JS app for uploaded scene '{scene_id}' node '{node_id}': {exc}"
+                )
+
+    return normalized_scenes, normalized_body
     return [], body  # for mypy
 
 

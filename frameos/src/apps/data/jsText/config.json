@@ -1,0 +1,26 @@
+{
+  "name": "JS Text",
+  "category": "data",
+  "description": "Sample QuickJS app written in TypeScript that returns text.",
+  "fields": [
+    {
+      "name": "prefix",
+      "label": "Prefix",
+      "type": "string",
+      "value": "FrameOS"
+    },
+    {
+      "name": "message",
+      "label": "Message",
+      "type": "text",
+      "value": "Hello from QuickJS"
+    }
+  ],
+  "output": [
+    {
+      "name": "text",
+      "type": "text",
+      "example": "FrameOS: Hello from QuickJS"
+    }
+  ]
+}

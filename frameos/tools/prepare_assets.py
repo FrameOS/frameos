@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -72,7 +73,35 @@ class AssetPreparationResult:
 
 
 def run_command(command: list[str], *, cwd: Path) -> None:
-    subprocess.run(command, cwd=cwd, check=True)
+    if os.environ.get("FRAMEOS_ASSETS_VERBOSE") == "1":
+        subprocess.run(command, cwd=cwd, check=True)
+        return
+
+    completed = subprocess.run(
+        command,
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode == 0:
+        return
+
+    if completed.stdout:
+        sys.stdout.write(completed.stdout)
+        if not completed.stdout.endswith("\n"):
+            sys.stdout.write("\n")
+    if completed.stderr:
+        sys.stderr.write(completed.stderr)
+        if not completed.stderr.endswith("\n"):
+            sys.stderr.write("\n")
+
+    raise subprocess.CalledProcessError(
+        completed.returncode,
+        command,
+        output=completed.stdout,
+        stderr=completed.stderr,
+    )
 
 
 def iter_files(path: Path) -> list[Path]:

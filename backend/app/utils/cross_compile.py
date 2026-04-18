@@ -417,26 +417,34 @@ class CrossCompiler:
         fallback_src: Path | None,
         error_message: str,
     ) -> None:
-        libquickjs = dest / "libquickjs.a"
+        if self._quickjs_tree_ready(dest):
+            await self._log("stdout", f"{icon} Found QuickJS archive at {dest / 'libquickjs.a'}")
+            return
+
         prebuilt_quickjs = self.prebuilt_components.get("quickjs")
         if prebuilt_quickjs:
             await self._log(
                 "stdout",
                 f"{icon} Staging prebuilt QuickJS component from {prebuilt_quickjs} into {dest}",
             )
-            self._stage_prebuilt_quickjs(dest)
+            if not self._stage_prebuilt_quickjs(dest):
+                await self._log(
+                    "stderr",
+                    f"{icon} Prebuilt QuickJS component at {prebuilt_quickjs} is incomplete; skipping",
+                )
 
-        if not libquickjs.exists() and fallback_src:
-            if dest.exists():
+        if not self._quickjs_tree_ready(dest) and fallback_src:
+            if dest.exists() and dest.resolve() != fallback_src.resolve():
                 shutil.rmtree(dest)
             await self._log(
                 "stdout",
                 f"{icon} Copying QuickJS tree from {fallback_src} into {dest}",
             )
-            shutil.copytree(fallback_src, dest, dirs_exist_ok=True)
+            if dest.resolve() != fallback_src.resolve():
+                shutil.copytree(fallback_src, dest, dirs_exist_ok=True)
 
-        if libquickjs.exists():
-            await self._log("stdout", f"{icon} Found QuickJS archive at {libquickjs}")
+        if self._quickjs_tree_ready(dest):
+            await self._log("stdout", f"{icon} Found QuickJS archive at {dest / 'libquickjs.a'}")
             return
 
         await self._log_quickjs_probe(dest.parent, context)
@@ -495,7 +503,13 @@ class CrossCompiler:
         marker = dest_dir / ".build-info"
         expected_marker = f"{component}|{version}|{url}|{self.prebuilt_entry.md5_for(component) or ''}"
         if marker.exists() and marker.read_text() == expected_marker:
-            return dest_dir
+            if self._prebuilt_component_ready(component, dest_dir):
+                return dest_dir
+            await self._log(
+                "stderr",
+                f"{icon} Cached prebuilt {component} ({version}) at {dest_dir} is incomplete; re-downloading",
+            )
+            shutil.rmtree(dest_dir, ignore_errors=True)
 
         await self._log("stdout", f"{icon} Downloading prebuilt {component} ({version})")
         if dest_dir.exists():
@@ -504,6 +518,8 @@ class CrossCompiler:
         try:
             await self._download_and_extract(url, dest_dir, self.prebuilt_entry.md5_for(component))
             self._normalize_component_dir(dest_dir)
+            if not self._prebuilt_component_ready(component, dest_dir):
+                raise RuntimeError(f"Downloaded prebuilt {component} archive is incomplete")
         except Exception as exc:
             await self._log(
                 "stderr",
@@ -566,30 +582,58 @@ class CrossCompiler:
                 hasher.update(chunk)
         return hasher.hexdigest()
 
-    def _stage_prebuilt_quickjs(self, dest: Path) -> None:
+    @staticmethod
+    def _quickjs_tree_ready(root: Path) -> bool:
+        return all((root / filename).exists() for filename in ("libquickjs.a", "quickjs.h", "quickjs-libc.h"))
+
+    def _prebuilt_component_ready(self, component: str, root: Path) -> bool:
+        if component == "quickjs":
+            return all(
+                self._first_file_match(root, filename) is not None
+                for filename in ("libquickjs.a", "quickjs.h", "quickjs-libc.h")
+            )
+        if component == "lgpio":
+            return all(
+                self._first_file_match(root, filename) is not None
+                for filename in ("lgpio.h", "liblgpio.a")
+            )
+        return root.exists()
+
+    def _stage_prebuilt_quickjs(self, dest: Path) -> bool:
         quickjs_dir = self.prebuilt_components.get("quickjs")
         if not quickjs_dir:
-            return
-        if dest.exists():
-            shutil.rmtree(dest)
-        dest.mkdir(parents=True, exist_ok=True)
-        include_src = self._find_quickjs_include_dir(quickjs_dir)
-        if include_src:
-            target_include = dest / "include" / "quickjs"
-            target_include.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copytree(include_src, target_include, dirs_exist_ok=True)
+            return False
 
-        header = self._first_file_match(quickjs_dir, "quickjs.h")
-        if header:
-            shutil.copy2(header, dest / "quickjs.h")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        staging = Path(tempfile.mkdtemp(prefix=f"{dest.name}-", dir=dest.parent))
+        try:
+            include_src = self._find_quickjs_include_dir(quickjs_dir)
+            if include_src:
+                target_include = staging / "include" / "quickjs"
+                target_include.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copytree(include_src, target_include, dirs_exist_ok=True)
 
-        libc_header = self._first_file_match(quickjs_dir, "quickjs-libc.h")
-        if libc_header:
-            shutil.copy2(libc_header, dest / "quickjs-libc.h")
+            header = self._first_file_match(quickjs_dir, "quickjs.h")
+            if header:
+                shutil.copy2(header, staging / "quickjs.h")
 
-        libquickjs = self._first_file_match(quickjs_dir, "libquickjs.a")
-        if libquickjs:
-            shutil.copy2(libquickjs, dest / "libquickjs.a")
+            libc_header = self._first_file_match(quickjs_dir, "quickjs-libc.h")
+            if libc_header:
+                shutil.copy2(libc_header, staging / "quickjs-libc.h")
+
+            libquickjs = self._first_file_match(quickjs_dir, "libquickjs.a")
+            if libquickjs:
+                shutil.copy2(libquickjs, staging / "libquickjs.a")
+
+            if not self._quickjs_tree_ready(staging):
+                return False
+
+            if dest.exists():
+                shutil.rmtree(dest)
+            shutil.move(str(staging), str(dest))
+            return True
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
 
     @staticmethod
     def _find_quickjs_include_dir(root: Path) -> Path | None:
@@ -934,4 +978,3 @@ async def _log_line(
         await log(db, redis, int(frame.id), level, message)
     else:
         print(f"[{level}] {message}")
-

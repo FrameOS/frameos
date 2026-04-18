@@ -9,6 +9,14 @@ import { AppNodeData } from '../../../../types'
 import { appsLogic } from '../Apps/appsLogic'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { diagramLogic } from '../Diagram/diagramLogic'
+import {
+  buildGlobalSettingKeys,
+  buildJsAppConfigJsonSchema,
+  buildJsAppEditorDeclarations,
+  convertJsSourceToTypeScript,
+  parseAppConfigSource,
+  syncGeneratedTypesToAppTs,
+} from './jsAppEditor'
 
 export interface ModelMarker extends editor.IMarkerData {}
 
@@ -23,6 +31,13 @@ export interface SourceError {
   column: number
   error: string
 }
+
+export const JS_APP_HELP_TAB = '__js_app_help__'
+
+const primaryFiles = ['config.json', 'app.ts', 'app.js', 'app.nim']
+
+const isJsAppSources = (sources: Record<string, string>): boolean =>
+  Object.keys(sources).some((filename) => filename.endsWith('.js') || filename.endsWith('.ts'))
 
 export const editAppLogic = kea<editAppLogicType>([
   path(['src', 'scenes', 'frame', 'panels', 'EditApp', 'editAppLogic']),
@@ -49,6 +64,7 @@ export const editAppLogic = kea<editAppLogicType>([
     resetEnhanceSuggestion: true,
     addFile: true,
     deleteFile: (file: string) => ({ file }),
+    convertAppToTypeScript: true,
   }),
   selectors({
     app: [
@@ -69,7 +85,7 @@ export const editAppLogic = kea<editAppLogicType>([
       {} as Record<string, string>,
       {
         loadSources: async () => {
-          const files = ['README.md', 'app.nim', 'config.nim']
+          const files = ['README.md', 'app.ts', 'app.js', 'app.nim', 'config.nim']
           let sources: Record<string, string> = {}
           if (values.savedSources) {
             sources = values.savedSources
@@ -91,6 +107,30 @@ export const editAppLogic = kea<editAppLogicType>([
         },
       },
     ],
+    jsAppReference: [
+      null as string | null,
+      {
+        loadJsAppReference: async () => {
+          const response = await apiFetch('/api/apps/js_api_reference')
+          const data = await response.json()
+          return data.markdown || ''
+        },
+      },
+    ],
+    globalSettingKeys: [
+      buildGlobalSettingKeys(),
+      {
+        loadGlobalSettingKeys: async () => {
+          try {
+            const response = await apiFetch('/api/settings')
+            const data = response.ok ? await response.json() : {}
+            return buildGlobalSettingKeys(Object.keys(data || {}))
+          } catch {
+            return buildGlobalSettingKeys()
+          }
+        },
+      },
+    ],
   })),
   reducers(({ props }) => ({
     activeFile: [
@@ -98,7 +138,7 @@ export const editAppLogic = kea<editAppLogicType>([
       {
         setActiveFile: (_, { file }) => file,
         resetEnhanceSuggestion: (state) => (state === 'app.nim/suggestion' ? 'app.nim' : state),
-        deleteFile: (state, { file }) => (state === file ? 'app.nim' : state),
+        deleteFile: (state, { file }) => (state === file ? 'config.json' : state),
       },
     ],
     sources: {
@@ -173,19 +213,25 @@ export const editAppLogic = kea<editAppLogicType>([
           ])
         ),
     ],
+    isJsApp: [(s) => [s.sources], (sources): boolean => isJsAppSources(sources)],
+    jsAppConfigJsonSchema: [(s) => [s.globalSettingKeys], (globalSettingKeys) => buildJsAppConfigJsonSchema(globalSettingKeys)],
+    jsAppEditorDeclarations: [
+      (s) => [s.configJson, s.globalSettingKeys],
+      (configJson, globalSettingKeys): string => buildJsAppEditorDeclarations(configJson as any, globalSettingKeys),
+    ],
     filenames: [
       (s) => [s.sources],
       (sources): string[] => {
         const filenames = Object.keys(sources)
-        const first = filenames.filter((f) => f === 'config.json' || f === 'app.nim').sort()
-        const rest = filenames.filter((f) => f !== 'config.json' && f !== 'app.nim').sort()
+        const first = primaryFiles.filter((file) => filenames.includes(file))
+        const rest = filenames.filter((f) => !primaryFiles.includes(f)).sort()
         return [...first, ...rest]
       },
     ],
   }),
   listeners(({ actions, props, values }) => ({
     saveChanges: () => {
-      if (values.isInterpreted) {
+      if (values.isInterpreted && !values.isJsApp) {
         actions.updateScene(props.sceneId, { settings: { ...values.scene?.settings, execution: 'compiled' } })
       }
       actions.updateNodeData(props.sceneId, props.nodeId, { sources: values.sources })
@@ -198,6 +244,18 @@ export const editAppLogic = kea<editAppLogicType>([
     },
     updateFile: ({ file, source }) => {
       actions.validateSource(file, source)
+      if ((file.endsWith('.js') || file.endsWith('.ts')) && !values.jsAppReference && !values.jsAppReferenceLoading) {
+        actions.loadJsAppReference()
+      }
+      if (file === 'config.json' && values.sources['app.ts']) {
+        const parsedConfig = parseAppConfigSource(source)
+        if (parsedConfig) {
+          const nextTsSource = syncGeneratedTypesToAppTs(values.sources['app.ts'], parsedConfig)
+          if (nextTsSource !== values.sources['app.ts']) {
+            actions.updateFile('app.ts', nextTsSource)
+          }
+        }
+      }
     },
     validateSource: async ({ initial, file, source }, breakpoint) => {
       if (!initial) {
@@ -217,12 +275,45 @@ export const editAppLogic = kea<editAppLogicType>([
     addFile: () => {
       const fileName = window.prompt('Enter file name')
       if (fileName) {
-        actions.updateFile(fileName, '')
+        if (fileName === 'app.ts' && !values.sources['app.ts']) {
+          actions.updateFile(
+            fileName,
+            convertJsSourceToTypeScript(
+              values.sources['app.js'] ?? 'export function get(app, context) {\n  return {}\n}\n',
+              values.configJson as any
+            )
+          )
+        } else {
+          actions.updateFile(fileName, '')
+        }
         actions.setActiveFile(fileName)
+      }
+    },
+    convertAppToTypeScript: () => {
+      if (values.sources['app.ts']) {
+        actions.setActiveFile('app.ts')
+        return
+      }
+      actions.updateFile(
+        'app.ts',
+        convertJsSourceToTypeScript(
+          values.sources['app.js'] ?? 'export function get(app, context) {\n  return {}\n}\n',
+          values.configJson as any
+        )
+      )
+      if (values.sources['app.js']) {
+        actions.deleteFile('app.js')
+      }
+      actions.setActiveFile('app.ts')
+    },
+    loadSourcesSuccess: ({ sources }) => {
+      if (isJsAppSources(sources)) {
+        actions.loadJsAppReference()
       }
     },
   })),
   afterMount(({ actions, values }) => {
     actions.loadSources()
+    actions.loadGlobalSettingKeys()
   }),
 ])

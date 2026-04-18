@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.models import new_frame
+from app.api.frames import _normalize_upload_scenes_payload
 
 
 @pytest.mark.asyncio
@@ -75,6 +76,42 @@ async def test_api_frame_upload_scenes_forwards_payload(async_client, db, redis)
     _, kwargs = forward_request.call_args
     assert kwargs["path"] == "/uploadScenes"
     assert kwargs["json_body"] == payload
+
+
+def test_normalize_upload_scenes_payload_compiles_inline_js_sources(monkeypatch: pytest.MonkeyPatch):
+    payload = {
+        "scenes": [
+            {
+                "id": "scene-a",
+                "nodes": [
+                    {
+                        "id": "node-a",
+                        "type": "app",
+                        "data": {
+                            "keyword": "data/jsText",
+                            "sources": {
+                                "config.json": '{"name":"Forked JS Text","category":"data","output":[{"name":"text","type":"text"}]}',
+                                "app.ts": "export function get(): string { return 'hello' }",
+                            },
+                        },
+                    }
+                ],
+            }
+        ],
+        "sceneId": "scene-a",
+    }
+
+    monkeypatch.setattr(
+        "app.api.frames.compile_js_app_sources",
+        lambda sources: {**sources, "app.compiled.js": "globalThis.__frameosModule={get(){return 'hello'}}"},
+    )
+
+    scenes, normalized = _normalize_upload_scenes_payload(payload)
+
+    compiled_sources = scenes[0]["nodes"][0]["data"]["sources"]
+    assert compiled_sources["app.compiled.js"].startswith("globalThis.__frameosModule")
+    assert "app.compiled.js" not in payload["scenes"][0]["nodes"][0]["data"]["sources"]
+    assert normalized["scenes"][0]["nodes"][0]["data"]["sources"] == compiled_sources
 
 
 @pytest.mark.asyncio
