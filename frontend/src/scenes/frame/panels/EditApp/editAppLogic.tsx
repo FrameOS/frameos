@@ -24,6 +24,8 @@ export interface SourceError {
   error: string
 }
 
+const primaryFiles = ['config.json', 'app.ts', 'app.js', 'app.nim']
+
 export const editAppLogic = kea<editAppLogicType>([
   path(['src', 'scenes', 'frame', 'panels', 'EditApp', 'editAppLogic']),
   props({} as EditAppLogicProps),
@@ -69,7 +71,7 @@ export const editAppLogic = kea<editAppLogicType>([
       {} as Record<string, string>,
       {
         loadSources: async () => {
-          const files = ['README.md', 'app.nim', 'config.nim']
+          const files = ['README.md', 'app.ts', 'app.js', 'app.nim', 'config.nim']
           let sources: Record<string, string> = {}
           if (values.savedSources) {
             sources = values.savedSources
@@ -98,7 +100,7 @@ export const editAppLogic = kea<editAppLogicType>([
       {
         setActiveFile: (_, { file }) => file,
         resetEnhanceSuggestion: (state) => (state === 'app.nim/suggestion' ? 'app.nim' : state),
-        deleteFile: (state, { file }) => (state === file ? 'app.nim' : state),
+        deleteFile: (state, { file }) => (state === file ? 'config.json' : state),
       },
     ],
     sources: {
@@ -177,8 +179,8 @@ export const editAppLogic = kea<editAppLogicType>([
       (s) => [s.sources],
       (sources): string[] => {
         const filenames = Object.keys(sources)
-        const first = filenames.filter((f) => f === 'config.json' || f === 'app.nim').sort()
-        const rest = filenames.filter((f) => f !== 'config.json' && f !== 'app.nim').sort()
+        const first = primaryFiles.filter((file) => filenames.includes(file))
+        const rest = filenames.filter((f) => !primaryFiles.includes(f)).sort()
         return [...first, ...rest]
       },
     ],

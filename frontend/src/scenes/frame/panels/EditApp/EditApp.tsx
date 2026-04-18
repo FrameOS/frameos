@@ -85,6 +85,13 @@ export function EditApp({ panel, sceneId, nodeId }: EditAppProps) {
   }
 
   const name = configJson?.name || savedKeyword || nodeId
+  const editorLanguage = activeFile.endsWith('.json')
+    ? 'json'
+    : activeFile.endsWith('.ts')
+    ? 'typescript'
+    : activeFile.endsWith('.js')
+    ? 'javascript'
+    : 'python'
 
   return (
     <div className="flex flex-row gap-2 max-h-full h-full max-w-full w-full">
@@ -108,7 +115,7 @@ export function EditApp({ panel, sceneId, nodeId }: EditAppProps) {
               {changedFiles[file] ? '* ' : ''}
               {file}
             </Button>
-            {file === 'app.nim' || file === 'config.json' ? null : (
+            {['app.ts', 'app.js', 'app.nim', 'config.json'].includes(file) ? null : (
               <DropdownMenu
                 buttonColor="none"
                 items={[
@@ -170,7 +177,7 @@ export function EditApp({ panel, sceneId, nodeId }: EditAppProps) {
           <Editor
             height="100%"
             path={`${nodeId}/${activeFile}`}
-            language={activeFile.endsWith('.json') ? 'json' : 'python'}
+            language={editorLanguage}
             value={sources[activeFile] ?? sources[Object.keys(sources)[0]] ?? ''}
             theme="darkframe"
             beforeMount={beforeMount}

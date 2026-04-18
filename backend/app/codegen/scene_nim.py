@@ -6,6 +6,7 @@ import re
 from app.models.frame import Frame
 from app.models.apps import get_local_frame_apps, local_apps_path
 from app.codegen.utils import sanitize_nim_string, natural_keys
+from app.utils.js_apps import find_js_app_source_filename
 
 def get_events_schema() -> list[dict]:
     events_schema_path = os.path.join("..", "frontend", "schema", "events.json")
@@ -263,30 +264,53 @@ class SceneWriter:
         self.required_fields[node_id] = {}
         self.field_types[node_id] = {}
 
+        js_source_filename = None
+        if len(sources) > 0:
+            if sources.get("app.ts", None):
+                js_source_filename = "app.ts"
+            elif sources.get("app.js", None):
+                js_source_filename = "app.js"
+
         if len(sources) > 0 and sources.get("app.nim", None):
             source_lines = sources.get("app.nim").split("\n")
+        elif len(sources) > 0 and js_source_filename:
+            source_lines = sources.get(js_source_filename, "").split("\n")
         else:
             source_path = os.path.join(local_apps_path, name, "app.nim")
             if os.path.exists(source_path):
                 with open(source_path, "r") as file:
                     source_lines = file.read().split("\n")
             else:
-                source_lines = []
+                local_js_source = find_js_app_source_filename(os.path.join(local_apps_path, name))
+                if local_js_source:
+                    with open(os.path.join(local_apps_path, name, local_js_source), "r") as file:
+                        source_lines = file.read().split("\n")
+                    js_source_filename = local_js_source
+                else:
+                    source_lines = []
         self.app_sources[node_id] = source_lines
         capabilities = set()
-        for line in source_lines:
-            if line.startswith("proc get*(self: App"):
+        if js_source_filename:
+            category = (config.get("category") or "").strip().lower()
+            capabilities.add("init")
+            if category in ("data", "render"):
                 capabilities.add("get")
-                break
-            if line.startswith("proc run*(self: App"):
+            if category in ("logic", "render"):
                 capabilities.add("run")
-                break
-            if line.startswith("proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig)"):
-                capabilities.add("initOld")
-                break
-            if line.startswith("proc init*(self: App)") or line.startswith("proc init*(app: App)"):
-                capabilities.add("init")
-                break
+        else:
+            for line in source_lines:
+                if line.startswith("proc get*(self: App"):
+                    capabilities.add("get")
+                    break
+                if line.startswith("proc run*(self: App"):
+                    capabilities.add("run")
+                    break
+                if line.startswith("proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig)"):
+                    capabilities.add("initOld")
+                    break
+                if line.startswith("proc init*(self: App)") or line.startswith("proc init*(app: App)"):
+                    capabilities.add("init")
+                    break
         self.app_capabilities[node_id] = capabilities
 
         # { field: [['key1', 'from', 'to'], ['key2', 1, 5]] }

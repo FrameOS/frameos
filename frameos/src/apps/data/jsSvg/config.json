@@ -1,0 +1,32 @@
+{
+  "name": "JS SVG",
+  "category": "data",
+  "description": "Sample QuickJS app that returns SVG markup.",
+  "fields": [
+    {
+      "name": "label",
+      "label": "Label",
+      "type": "string",
+      "value": "QuickJS"
+    },
+    {
+      "name": "background",
+      "label": "Background",
+      "type": "color",
+      "value": "#ffffff"
+    },
+    {
+      "name": "foreground",
+      "label": "Foreground",
+      "type": "color",
+      "value": "#111111"
+    }
+  ],
+  "output": [
+    {
+      "name": "svg",
+      "type": "text",
+      "example": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 320 120\">...</svg>"
+    }
+  ]
+}
