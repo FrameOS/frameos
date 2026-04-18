@@ -15,7 +15,7 @@ const fieldTypeToTsType: Record<string, string> = {
   json: 'Record<string, any>',
   node: 'number',
   scene: 'string',
-  image: 'string',
+  image: 'FrameOSImageRef | null',
   font: 'string',
 }
 

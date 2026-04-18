@@ -27,13 +27,16 @@ def is_js_app_dir(app_dir: str) -> bool:
 
 @lru_cache(maxsize=1)
 def _npm_global_node_modules_root() -> Path | None:
-    proc = subprocess.run(
-        ["npm", "root", "-g"],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        proc = subprocess.run(
+            ["npm", "root", "-g"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        return None
     if proc.returncode != 0:
         return None
     root = Path(proc.stdout.strip())
@@ -131,13 +134,16 @@ try {
 
 def _run_esbuild(args: list[str]) -> tuple[bool, dict]:
     esbuild_module_path = _find_esbuild_module_path()
-    proc = subprocess.run(
-        ["node", "--input-type=module", "-e", _node_esbuild_script(), str(esbuild_module_path), *args],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        proc = subprocess.run(
+            ["node", "--input-type=module", "-e", _node_esbuild_script(), str(esbuild_module_path), *args],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError("Unable to run `node`. Install Node.js to validate or compile JavaScript apps.") from exc
     if proc.returncode == 0:
         stdout = proc.stdout.strip() or '{"ok": true}'
         return True, json.loads(stdout)

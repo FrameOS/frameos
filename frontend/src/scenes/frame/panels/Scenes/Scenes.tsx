@@ -164,11 +164,11 @@ export function Scenes() {
       return
     }
     try {
-      const { type, keyword } = JSON.parse(data)
+      const { type, keyword, name } = JSON.parse(data)
       if (type !== 'app' || !keyword) {
         return
       }
-      const appName = `[APP: ${apps[keyword]?.name ?? keyword}]`
+      const appName = `[APP: ${name || apps[keyword]?.name || keyword}]`
       const nextPrompt = aiPrompt ? `${aiPrompt} ${appName}` : appName
       setAiPrompt(nextPrompt)
     } catch (error) {

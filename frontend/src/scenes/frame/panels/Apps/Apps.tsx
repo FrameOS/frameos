@@ -24,8 +24,8 @@ export function Apps() {
     )
     .toSorted((left, right) => left.name.localeCompare(right.name))
 
-  const onDragStart = (event: any, keyword: string) => {
-    event.dataTransfer.setData('application/reactflow', JSON.stringify({ type: 'app', keyword }))
+  const onDragStart = (event: any, keyword: string, name?: string) => {
+    event.dataTransfer.setData('application/reactflow', JSON.stringify({ type: 'app', keyword, name }))
     event.dataTransfer.effectAllowed = 'move'
   }
   return (
@@ -45,7 +45,7 @@ export function Apps() {
               key={customApp.id}
               className="bg-gray-900 px-3 py-2 dndnode flex items-center justify-between space-x-2 cursor-move w-full"
               draggable
-              onDragStart={(event) => onDragStart(event, buildCustomAppKeyword(customApp.id))}
+              onDragStart={(event) => onDragStart(event, buildCustomAppKeyword(customApp.id), customApp.name)}
             >
               <div className="w-full">
                 <div className="flex items-start justify-between">
@@ -70,7 +70,7 @@ export function Apps() {
                 key={keyword}
                 className="bg-gray-900 px-3 py-2 dndnode flex items-center justify-between space-x-2 cursor-move w-full"
                 draggable
-                onDragStart={(event) => onDragStart(event, keyword)}
+                onDragStart={(event) => onDragStart(event, keyword, app.name)}
               >
                 <div className="w-full">
                   <div className="flex items-start justify-between">

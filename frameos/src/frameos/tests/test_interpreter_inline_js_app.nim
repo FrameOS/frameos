@@ -51,6 +51,7 @@ proc ctx(scene: FrameScene, event: string): ExecutionContext =
 
 let sceneId = "tests/interpreter-inline-js-app".SceneId
 let imageInputSceneId = "tests/interpreter-inline-js-app-image-input".SceneId
+let configDefaultsSceneId = "tests/interpreter-inline-js-app-config-defaults".SceneId
 var uploaded = initTable[SceneId, ExportedInterpretedScene]()
 
 uploaded[sceneId] = ExportedInterpretedScene(
@@ -187,6 +188,64 @@ globalThis.__frameosModule = {
   ]
 )
 
+uploaded[configDefaultsSceneId] = ExportedInterpretedScene(
+  name: "Interpreter inline JS app config defaults test",
+  backgroundColor: parseHtmlColor("#000000"),
+  refreshInterval: 1.0,
+  publicStateFields: @[],
+  nodes: @[
+    node(1, "app", %*{
+      "name": "forked js config defaults",
+      "keyword": "data/jsConfigDefaults",
+      "config": {
+        "count": "7",
+        "rows": "3",
+        "cols": "2",
+        "enabled": "false",
+        "grid[3][2]": 99
+      },
+      "sources": {
+        "config.json": """
+{
+  "name": "Forked JS Config Defaults",
+  "category": "data",
+  "fields": [
+    { "name": "count", "type": "integer", "required": true },
+    { "name": "rows", "type": "integer", "value": "1" },
+    { "name": "cols", "type": "integer", "value": "1" },
+    { "name": "enabled", "type": "boolean", "value": "true" },
+    { "name": "threshold", "type": "float", "value": "1.5" },
+    { "name": "inputNode", "type": "node", "required": true },
+    { "name": "inputImage", "type": "image", "required": true },
+    { "name": "grid", "type": "node", "seq": [["row", 1, "rows"], ["column", 1, "cols"]] }
+  ],
+  "output": [
+    { "name": "config", "type": "json" }
+  ]
+}
+""",
+        "app.compiled.js": """
+globalThis.__frameosModule = {
+  get(app) {
+    return {
+      count: app.config.count,
+      rows: app.config.rows,
+      cols: app.config.cols,
+      enabled: app.config.enabled,
+      threshold: app.config.threshold,
+      inputNode: app.config.inputNode,
+      inputImage: app.config.inputImage,
+      grid: app.config.grid
+    }
+  }
+}
+""",
+      }
+    })
+  ],
+  edges: @[]
+)
+
 setUploadedInterpretedScenes(uploaded)
 resetInterpretedScenes()
 
@@ -194,6 +253,7 @@ let config = testConfig()
 let logger = testLogger(config)
 let scene = init(sceneId, config, logger, %*{})
 let imageInputScene = init(imageInputSceneId, config, logger, %*{})
+let configDefaultsScene = init(configDefaultsSceneId, config, logger, %*{})
 
 block test_interpreter_inline_js_data_node:
   let dataValue = scene.getDataNode(1.NodeId, ctx(scene, "render"))
@@ -222,5 +282,23 @@ block test_interpreter_inline_js_image_input:
   let px = dataImage.data[dataImage.dataIndex(0, 0)]
   doAssert px.g > 0
   doAssert px.a > 0
+
+block test_interpreter_inline_js_config_defaults:
+  let dataValue = configDefaultsScene.getDataNode(1.NodeId, ctx(configDefaultsScene, "render"))
+  doAssert dataValue.kind == fkJson
+  let payload = dataValue.asJson()
+  doAssert payload["count"].getInt() == 7
+  doAssert payload["rows"].getInt() == 3
+  doAssert payload["cols"].getInt() == 2
+  doAssert not payload["enabled"].getBool()
+  doAssert abs(payload["threshold"].getFloat() - 1.5) < 0.00001
+  doAssert payload["inputNode"].getInt() == 0
+  doAssert payload["inputImage"].kind == JNull
+  doAssert payload["grid"].kind == JArray
+  doAssert payload["grid"].len == 3
+  doAssert payload["grid"][0].kind == JArray
+  doAssert payload["grid"][0].len == 2
+  doAssert payload["grid"][0][0].getInt() == 0
+  doAssert payload["grid"][2][1].getInt() == 99
 
 setUploadedInterpretedScenes(initTable[SceneId, ExportedInterpretedScene]())
