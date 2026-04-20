@@ -21,7 +21,7 @@ suite "scene runtime cleanup":
       sceneNodes: initTable[NodeId, FrameScene](),
       sceneExportByNodeId: initTable[NodeId, ExportedScene]()
     )
-    discard transpileSourceForTest(child, "const childValue: number = 1;")
+    ensureSceneJs(child)
 
     var parent = InterpretedFrameScene(
       id: "tests/cleanup-parent".SceneId,
@@ -29,7 +29,7 @@ suite "scene runtime cleanup":
       sceneNodes: initTable[NodeId, FrameScene](),
       sceneExportByNodeId: initTable[NodeId, ExportedScene]()
     )
-    discard transpileSourceForTest(parent, "const parentValue: number = 2;")
+    ensureSceneJs(parent)
     parent.sceneNodes[1.NodeId] = child
 
     cleanupSceneRuntime(parent)

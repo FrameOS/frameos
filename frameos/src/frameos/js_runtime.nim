@@ -7,7 +7,7 @@ import frameos/values
 import assets/vendor as vendorAssets
 import lib/tz
 import lib/burrito
-import tables, json, strutils
+import tables, json, strutils, locks
 import chrono, times
 
 # -------------------------
@@ -26,6 +26,43 @@ type
 
 var evalEnvByCtx = initTable[ptr JSContext, EvalEnv]()
 var tzName = ""
+var compilerJsLock: Lock
+var compilerJs: QuickJS
+var compilerJsReady = false
+initLock(compilerJsLock)
+
+const sceneJsPrelude = """
+const __frameosFragment = Symbol.for("frameos.fragment");
+const __frameosNormalizeChildren = (children) => {
+  if (children.length === 0) return undefined;
+  if (children.length === 1) return children[0];
+  return children;
+};
+const __frameosJsx = (type, props, ...children) => {
+  const nextProps = props ? { ...props } : {};
+  const explicitChildren = __frameosNormalizeChildren(children);
+  const propChildren = Object.prototype.hasOwnProperty.call(nextProps, "children")
+    ? nextProps.children
+    : undefined;
+
+  if (Object.prototype.hasOwnProperty.call(nextProps, "children")) {
+    delete nextProps.children;
+  }
+
+  const normalizedChildren = explicitChildren ?? propChildren;
+  if (type === __frameosFragment) {
+    return normalizedChildren ?? null;
+  }
+
+  if (normalizedChildren !== undefined) {
+    nextProps.children = normalizedChildren;
+  }
+
+  return { type, props: nextProps };
+};
+globalThis.__frameosFragment = __frameosFragment;
+globalThis.__frameosJsx = __frameosJsx;
+"""
 
 # -------------------------
 # Small string/JS helpers
@@ -63,10 +100,19 @@ proc getCodeSnippet(node: DiagramNode): string =
     return node.data["code"].getStr()
   ""
 
-proc transpileSource(scene: InterpretedFrameScene, source: string, filename: string): string =
+proc ensureCompilerJsLocked() =
+  if compilerJsReady:
+    return
+  compilerJs = newQuickJS()
+  discard compilerJs.eval(vendorAssets.getAsset("assets/compiled/vendor/sucrase.js"))
+  compilerJsReady = true
+
+proc transpileSource(source: string, filename: string): string =
   if source.len == 0:
     return source
-  scene.js.eval("__frameosTranspile(\"" & jsQuote(source) & "\", { filePath: \"" & jsQuote(filename) & "\" })")
+  withLock compilerJsLock:
+    ensureCompilerJsLocked()
+    result = compilerJs.eval("__frameosTranspile(\"" & jsQuote(source) & "\", { filePath: \"" & jsQuote(filename) & "\" })")
 
 proc logCompileError(
   scene: InterpretedFrameScene,
@@ -328,8 +374,7 @@ proc ensureSceneJs*(scene: InterpretedFrameScene) =
   const __state   = new Proxy({}, { get(_, k) { return (typeof k === 'string') ? __frameosUnwrap(getState(k))   : undefined; } });
   const __args    = new Proxy({}, { get(_, k) { return (typeof k === 'string') ? __frameosUnwrap(getArg(k))     : undefined; } });
   const __context = new Proxy({}, { get(_, k) { return (typeof k === 'string') ? __frameosUnwrap(getContext(k)) : undefined; } });
-  """)
-  discard scene.js.eval(vendorAssets.getAsset("assets/compiled/vendor/sucrase.js"))
+  """ & sceneJsPrelude)
   # Initialize registries
   scene.jsFuncNameByNode = initTable[NodeId, string]()
   scene.codeInlineFuncNameByNodeArg = initTable[NodeId, Table[string, string]]()
@@ -366,7 +411,7 @@ proc compileInlineFn(scene: InterpretedFrameScene,
   ensureSceneJs(scene)
   let fnName = nameBuilder(scene, nodeId, name)
   try:
-    let src = transpileSource(scene, buildEnvelopeFunction(snippet, @[], fnName),
+    let src = transpileSource(buildEnvelopeFunction(snippet, @[], fnName),
       "<frameos:inline:" & $nodeId.int & ":" & name & ">")
     discard scene.js.eval(src)
   except CatchableError as e:
@@ -406,7 +451,7 @@ proc compileCodeFn*(scene: InterpretedFrameScene, node: DiagramNode) =
 
   let fnName = uniqueCodeFnName(scene, node.id)
   try:
-    let src = transpileSource(scene, buildEnvelopeFunction(codeSnippet, argNames, fnName),
+    let src = transpileSource(buildEnvelopeFunction(codeSnippet, argNames, fnName),
       "<frameos:code:" & $node.id.int & ">")
     discard scene.js.eval(src)
   except CatchableError as e:
@@ -522,7 +567,7 @@ proc evalSnippet*(
   inc anonCounter
   let fnName = "__frameos_eval_" & $(nodeId.int) & "_" & $anonCounter
   try:
-    let src = transpileSource(scene, buildEnvelopeFunction(code, argNames, fnName),
+    let src = transpileSource(buildEnvelopeFunction(code, argNames, fnName),
       "<frameos:eval:" & $nodeId.int & ":" & $anonCounter & ">")
     discard scene.js.eval(src)
   except CatchableError as e:
@@ -546,9 +591,18 @@ proc jsQuoteForTest*(s: string): string =
 proc envelopeToValueForTest*(env: JsonNode, expectedType: string = ""): Value =
   envelopeToValue(env, expectedType)
 
-proc transpileSourceForTest*(scene: InterpretedFrameScene, source: string, filename: string = "<test>"): string =
-  ensureSceneJs(scene)
-  transpileSource(scene, source, filename)
+proc transpileSourceForTest*(source: string, filename: string = "<test>"): string =
+  transpileSource(source, filename)
+
+proc cleanupCompilerJs*() =
+  withLock compilerJsLock:
+    if not compilerJsReady:
+      return
+    if compilerJs.runtime != nil:
+      compilerJs.runPendingJobs()
+      JS_RunGC(compilerJs.runtime)
+    compilerJs.close()
+    compilerJsReady = false
 
 proc cleanupSceneJs*(scene: InterpretedFrameScene) =
   if not scene.jsReady:
