@@ -17,6 +17,9 @@ FRONTEND_OUTPUTS = (
     Path("assets/compiled/frame_web/index.html"),
     Path("assets/compiled/frame_web/static/main.js"),
     Path("assets/compiled/frame_web/static/main.css"),
+)
+
+OPTIONAL_FRONTEND_OUTPUTS = (
     Path("assets/compiled/vendor/sucrase.js"),
 )
 
@@ -25,7 +28,10 @@ MODULE_OUTPUTS = (
     Path("src/assets/web.nim"),
     Path("src/assets/frame_web.nim"),
     Path("src/assets/fonts.nim"),
-    Path("src/assets/vendor.nim"),
+)
+
+OPTIONAL_MODULE_OUTPUTS = (
+    (Path("assets/compiled/vendor"), Path("src/assets/vendor.nim")),
 )
 
 MODULE_SOURCE_FILES = (
@@ -149,11 +155,23 @@ def hash_module_inputs(project_root: Path) -> str:
 
 
 def frontend_outputs_exist(project_root: Path) -> bool:
-    return all((project_root / output).is_file() for output in FRONTEND_OUTPUTS)
+    if not all((project_root / output).is_file() for output in FRONTEND_OUTPUTS):
+        return False
+    for output in OPTIONAL_FRONTEND_OUTPUTS:
+        parent = project_root / output.parent
+        if parent.exists() and any(parent.rglob("*")) and not (project_root / output).is_file():
+            return False
+    return True
 
 
 def module_outputs_exist(project_root: Path) -> bool:
-    return all((project_root / output).is_file() for output in MODULE_OUTPUTS)
+    if not all((project_root / output).is_file() for output in MODULE_OUTPUTS):
+        return False
+    for source_dir, output in OPTIONAL_MODULE_OUTPUTS:
+        source_root = project_root / source_dir
+        if source_root.exists() and any(source_root.rglob("*")) and not (project_root / output).is_file():
+            return False
+    return True
 
 
 def load_manifest(project_root: Path) -> AssetsManifest | None:
