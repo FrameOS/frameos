@@ -101,6 +101,12 @@ declare const context: {
   }, [])
 
   function beforeMount(monaco: Monaco): void {
+    monaco.languages.typescript.typescriptDefaults.setCompilerOptions({
+      allowJs: true,
+      allowNonTsExtensions: true,
+      target: monaco.languages.typescript.ScriptTarget.ES2020,
+      jsx: monaco.languages.typescript.JsxEmit.Preserve,
+    })
     monaco.editor.defineTheme('darkframe-node', {
       base: 'vs-dark',
       inherit: true,
@@ -130,9 +136,6 @@ declare const context: {
     editorRef.current = editor
     monacoRef.current = monaco
     updateWheelHandling(editor)
-    editor.onKeyDown((event) => {
-      event.browserEvent.stopPropagation()
-    })
     editor.onDidFocusEditorWidget(() => updateWheelHandling(editor))
     editor.onDidBlurEditorWidget(() => updateWheelHandling(editor))
     updateCodeArgGlobals(monaco, data.codeArgs ?? [])
@@ -265,6 +268,7 @@ declare const context: {
             <Editor
               height="100%"
               language="typescript"
+              path={`inmemory://code-node/${id}.tsx`}
               value={data.codeJS ?? ''}
               theme="darkframe-node"
               beforeMount={beforeMount}
