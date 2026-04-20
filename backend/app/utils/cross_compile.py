@@ -495,7 +495,13 @@ class CrossCompiler:
         marker = dest_dir / ".build-info"
         expected_marker = f"{component}|{version}|{url}|{self.prebuilt_entry.md5_for(component) or ''}"
         if marker.exists() and marker.read_text() == expected_marker:
-            return dest_dir
+            if self._prebuilt_component_is_valid(component, dest_dir):
+                return dest_dir
+            await self._log(
+                "stderr",
+                f"{icon} Cached prebuilt {component} at {dest_dir} is incomplete; refreshing",
+            )
+            shutil.rmtree(dest_dir, ignore_errors=True)
 
         await self._log("stdout", f"{icon} Downloading prebuilt {component} ({version})")
         if dest_dir.exists():
@@ -504,6 +510,10 @@ class CrossCompiler:
         try:
             await self._download_and_extract(url, dest_dir, self.prebuilt_entry.md5_for(component))
             self._normalize_component_dir(dest_dir)
+            if not self._prebuilt_component_is_valid(component, dest_dir):
+                raise RuntimeError(
+                    f"downloaded prebuilt {component} is missing required files after extraction"
+                )
         except Exception as exc:
             await self._log(
                 "stderr",
@@ -565,6 +575,33 @@ class CrossCompiler:
             for chunk in iter(lambda: fh.read(1024 * 1024), b""):
                 hasher.update(chunk)
         return hasher.hexdigest()
+
+    def _prebuilt_component_is_valid(self, component: str, root: Path) -> bool:
+        validators = {
+            "quickjs": self._quickjs_component_is_valid,
+            "lgpio": self._lgpio_component_is_valid,
+        }
+        validator = validators.get(component)
+        if not validator:
+            return True
+        return validator(root)
+
+    def _quickjs_component_is_valid(self, root: Path) -> bool:
+        return all(
+            (
+                self._first_file_match(root, "quickjs.h"),
+                self._first_file_match(root, "quickjs-libc.h"),
+                self._first_file_match(root, "libquickjs.a"),
+            )
+        )
+
+    def _lgpio_component_is_valid(self, root: Path) -> bool:
+        return all(
+            (
+                self._first_file_match(root, "lgpio.h"),
+                self._first_file_match(root, "liblgpio.a"),
+            )
+        )
 
     def _stage_prebuilt_quickjs(self, dest: Path) -> None:
         quickjs_dir = self.prebuilt_components.get("quickjs")
@@ -934,4 +971,3 @@ async def _log_line(
         await log(db, redis, int(frame.id), level, message)
     else:
         print(f"[{level}] {message}")
-
