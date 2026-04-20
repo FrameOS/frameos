@@ -13,11 +13,16 @@ const UPLOADED_SCENES_JSON_PATH = &"{SCENE_STATE_JSON_FOLDER}/uploaded.json"
 # All scenes that are compiled into the FrameOS binary
 var sceneRegistryLock: Lock
 initLock(sceneRegistryLock)
+type RetiredExportedScenes = object
+  generation: int
+  scenes: Table[SceneId, ExportedScene]
+
 var systemScenes*: Table[SceneId, ExportedScene] = getSystemScenes()
 var compiledScenes*: Table[SceneId, ExportedScene] = getExportedScenes()
 var interpretedScenes*: Table[SceneId, ExportedInterpretedScene] = getInterpretedScenes()
 var uploadedScenes*: Table[SceneId, ExportedInterpretedScene] = initTable[SceneId, ExportedInterpretedScene]()
-var retiredExportedScenes: seq[Table[SceneId, ExportedScene]] = @[]
+var exportedScenesGeneration = 1
+var retiredExportedScenes: seq[RetiredExportedScenes] = @[]
 
 proc buildExportedScenesTable(
     interpreted: Table[SceneId, ExportedInterpretedScene],
@@ -43,6 +48,10 @@ var exportedScenes*: Table[SceneId, ExportedScene] = buildExportedScenesTable(in
 proc refreshExportedScenes*() =
   withLock sceneRegistryLock:
     exportedScenes = buildExportedScenesTable(interpretedScenes, uploadedScenes)
+
+proc currentExportedScenesGeneration*(): int =
+  withLock sceneRegistryLock:
+    return exportedScenesGeneration
 
 proc hasExportedScene*(sceneId: SceneId): bool =
   withLock sceneRegistryLock:
@@ -95,18 +104,67 @@ proc publishExportedScenes(
       "event": "reload:step",
       "step": "exportedScenes:publish:start",
       "reason": reason,
+      "currentGeneration": exportedScenesGeneration,
+      "nextGeneration": exportedScenesGeneration + 1,
       "retiredCount": retiredExportedScenes.len,
       "nextCount": nextExportedScenes.len
     })
-  retiredExportedScenes.add(exportedScenes)
+  retiredExportedScenes.add(RetiredExportedScenes(
+    generation: exportedScenesGeneration,
+    scenes: exportedScenes
+  ))
+  inc exportedScenesGeneration
   exportedScenes = nextExportedScenes
   if logger != nil:
     logger.log(%*{
       "event": "reload:step",
       "step": "exportedScenes:publish:done",
       "reason": reason,
+      "currentGeneration": exportedScenesGeneration,
       "retiredCount": retiredExportedScenes.len,
       "exportedCount": exportedScenes.len
+    })
+
+proc reclaimRetiredExportedScenes*(
+    renderedGeneration: int,
+    logger: Logger = nil,
+    keepGenerations = 1
+  ) =
+  let reclaimBeforeGeneration = renderedGeneration - keepGenerations
+  if reclaimBeforeGeneration <= 0:
+    return
+
+  var reclaimed: seq[RetiredExportedScenes] = @[]
+  var remainingRetiredCount = 0
+  withLock sceneRegistryLock:
+    var kept: seq[RetiredExportedScenes] = @[]
+    for entry in retiredExportedScenes:
+      if entry.generation < reclaimBeforeGeneration:
+        reclaimed.add(entry)
+      else:
+        kept.add(entry)
+    retiredExportedScenes = kept
+    remainingRetiredCount = retiredExportedScenes.len
+
+  if reclaimed.len == 0:
+    return
+
+  if logger != nil:
+    logger.log(%*{
+      "event": "reload:step",
+      "step": "exportedScenes:reclaim:start",
+      "renderedGeneration": renderedGeneration,
+      "reclaimBeforeGeneration": reclaimBeforeGeneration,
+      "reclaimedCount": reclaimed.len
+    })
+  reclaimed.setLen(0)
+  if logger != nil:
+    logger.log(%*{
+      "event": "reload:step",
+      "step": "exportedScenes:reclaim:done",
+      "renderedGeneration": renderedGeneration,
+      "reclaimBeforeGeneration": reclaimBeforeGeneration,
+      "remainingRetiredCount": remainingRetiredCount
     })
 
 proc reloadInterpretedScenes*(logger: Logger = nil) =
@@ -399,6 +457,15 @@ proc cleanupOrphanedUploadedStateFiles*() =
 when defined(testing):
   proc setUploadedStateCleanupRanForTest*(value: bool) =
     uploadedStateCleanupRan = value
+
+  proc retiredExportedScenesCountForTest*(): int =
+    withLock sceneRegistryLock:
+      return retiredExportedScenes.len
+
+  proc resetRetiredExportedScenesForTest*() =
+    withLock sceneRegistryLock:
+      exportedScenesGeneration = 1
+      retiredExportedScenes = @[]
 
 proc updateLastPersistedState*(self: FrameScene) =
   let sceneExport = findExportedScene(self.id)

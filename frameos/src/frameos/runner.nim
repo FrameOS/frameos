@@ -162,6 +162,7 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
 
     let interval = currentScene.refreshInterval
     let (lastRotatedImage, nextSleep) = self.renderSceneImage(exportedScene.get(), currentScene)
+    reclaimRetiredExportedScenes(currentExportedScenesGeneration(), self.logger)
     clearBootCrashCount()
     successfulSceneRenders += 1
     if interval < 1:

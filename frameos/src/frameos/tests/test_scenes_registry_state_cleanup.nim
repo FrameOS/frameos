@@ -46,6 +46,7 @@ suite "scene registry and cleanup helpers":
     interpretedScenes = interpretedBackup
     uploadedScenes = uploadedBackupTable
     refreshExportedScenes()
+    resetRetiredExportedScenesForTest()
     setUploadedStateCleanupRanForTest(false)
 
     if fileExists(uploadedKeepPath):
@@ -57,6 +58,7 @@ suite "scene registry and cleanup helpers":
     interpretedScenes = interpretedBackup
     uploadedScenes = uploadedBackupTable
     refreshExportedScenes()
+    resetRetiredExportedScenesForTest()
 
     restoreFile(uploadedStatePath, uploadedBackup)
     restoreFile(uploadedKeepPath, uploadedKeepBackup)
@@ -141,3 +143,18 @@ suite "scene registry and cleanup helpers":
 
     check fileExists(uploadedKeepPath)
     check not fileExists(uploadedOrphanPath)
+
+  test "reclaimRetiredExportedScenes keeps one previous generation":
+    var uploadedOne = initTable[SceneId, ExportedInterpretedScene]()
+    uploadedOne["uploaded/one".SceneId] = testInterpreted("One")
+    updateUploadedScenes(uploadedOne)
+
+    var uploadedTwo = initTable[SceneId, ExportedInterpretedScene]()
+    uploadedTwo["uploaded/two".SceneId] = testInterpreted("Two")
+    updateUploadedScenes(uploadedTwo)
+
+    check retiredExportedScenesCountForTest() == 2
+
+    reclaimRetiredExportedScenes(currentExportedScenesGeneration(), keepGenerations = 1)
+
+    check retiredExportedScenesCountForTest() == 1
