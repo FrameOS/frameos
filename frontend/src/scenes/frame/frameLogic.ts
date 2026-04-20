@@ -956,21 +956,21 @@ export const frameLogic = kea<frameLogicType>([
       }
     },
   })),
-  listeners(({ actions, values, props }) => ({
+  listeners(({ asyncActions, actions, values, props }) => ({
     saveFrame: () => actions.submitFrameForm(),
     saveAndDeployFrame: async () => {
-      await actions.submitFrameForm()
+      await asyncActions.submitFrameForm()
       framesModel.actions.deployFrame(
         props.frameId,
         Boolean(values.frame?.last_successful_deploy_at) && !values.requiresRecompilation
       )
     },
     saveAndFastDeployFrame: async () => {
-      await actions.submitFrameForm()
+      await asyncActions.submitFrameForm()
       framesModel.actions.deployFrame(props.frameId, true)
     },
     saveAndFullDeployFrame: async () => {
-      await actions.submitFrameForm()
+      await asyncActions.submitFrameForm()
       framesModel.actions.deployFrame(props.frameId, false)
     },
     renderFrame: () => framesModel.actions.renderFrame(props.frameId),
