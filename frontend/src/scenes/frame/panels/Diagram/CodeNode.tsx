@@ -258,7 +258,6 @@ declare const context: {
           data-editable="true"
           onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => e.stopPropagation()}
-          onKeyDownCapture={(e) => e.stopPropagation()}
           onCopy={(e) => e.stopPropagation()}
           onPaste={(e) => e.stopPropagation()}
         >
