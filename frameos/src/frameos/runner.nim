@@ -20,6 +20,7 @@ const INKY_FAST_RENDER_THRESHOLD_MS = 2.0
 
 # How frequently we announce a new render via websockets
 const SERVER_RENDER_DELAY_SECONDS = 1.0
+const RENDER_SLEEP_SLICE_MS = 100.0
 
 var thread: Thread[(FrameConfig, Logger, Option[SceneId])]
 
@@ -223,16 +224,16 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
                     else: max((interval - durationToSeconds(getMonoTime() - timer)) * 1000, 0.1)
     self.logger.log(%*{"event": "render:sleep", "ms": round(sleepDuration, 3)})
 
-    let future = sleepAsync(sleepDuration)
-    self.sleepFuture = some(future)
-    await future
-    self.sleepFuture = none(Future[void])
+    var remainingSleepMs = sleepDuration
+    while remainingSleepMs > 0:
+      if self.triggerRenderNext:
+        break
+      let nextSleepMs = min(remainingSleepMs, RENDER_SLEEP_SLICE_MS)
+      await sleepAsync(nextSleepMs)
+      remainingSleepMs -= nextSleepMs
 
 proc triggerRender*(self: RunnerThread): void =
-  if self.sleepFuture.isSome:
-    self.sleepFuture.get().complete()
-  else:
-    self.logger.log(%*{"event": "render", "error": "Render already in progress, ignoring."})
+  self.triggerRenderNext = true
 
 proc dispatchSceneEvent*(self: RunnerThread, sceneId: Option[SceneId], event: string, payload: JsonNode) =
   let targetSceneId: SceneId = if sceneId.isSome: sceneId.get() else: self.currentSceneId
@@ -337,8 +338,8 @@ proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.a
     # after we have processed all queued messages
     if not success:
       if self.triggerRenderNext and not self.isRendering:
-        self.triggerRenderNext = false
         self.triggerRender()
+        await sleepAsync(1)
       else:
         await sleepAsync(waitTime)
         if waitTime < 200:
