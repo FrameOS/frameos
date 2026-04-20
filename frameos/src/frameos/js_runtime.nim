@@ -555,6 +555,9 @@ proc cleanupSceneJs*(scene: InterpretedFrameScene) =
     return
   if scene.js.context != nil and evalEnvByCtx.hasKey(scene.js.context):
     evalEnvByCtx.del(scene.js.context)
+  if scene.js.runtime != nil:
+    scene.js.runPendingJobs()
+    JS_RunGC(scene.js.runtime)
   scene.js.close()
   scene.jsReady = false
   scene.jsFuncNameByNode = initTable[NodeId, string]()

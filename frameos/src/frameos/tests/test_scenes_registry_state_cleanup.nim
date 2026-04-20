@@ -38,7 +38,6 @@ suite "scene registry and cleanup helpers":
 
   let interpretedBackup = interpretedScenes
   let uploadedBackupTable = uploadedScenes
-  let exportedBackup = exportedScenes
 
   setup:
     if not dirExists("state"):
@@ -46,7 +45,7 @@ suite "scene registry and cleanup helpers":
 
     interpretedScenes = interpretedBackup
     uploadedScenes = uploadedBackupTable
-    exportedScenes = exportedBackup
+    refreshExportedScenes()
     setUploadedStateCleanupRanForTest(false)
 
     if fileExists(uploadedKeepPath):
@@ -57,7 +56,7 @@ suite "scene registry and cleanup helpers":
   teardown:
     interpretedScenes = interpretedBackup
     uploadedScenes = uploadedBackupTable
-    exportedScenes = exportedBackup
+    refreshExportedScenes()
 
     restoreFile(uploadedStatePath, uploadedBackup)
     restoreFile(uploadedKeepPath, uploadedKeepBackup)
@@ -66,6 +65,7 @@ suite "scene registry and cleanup helpers":
   test "getSceneDisplayName resolves compiled, system, interpreted and uploaded names":
     let interpretedId = "test/interpreted-name".SceneId
     interpretedScenes[interpretedId] = testInterpreted("Interpreted Name")
+    refreshExportedScenes()
 
     var uploadedOnly = initTable[SceneId, ExportedInterpretedScene]()
     let uploadedId = "uploaded/test-name".SceneId
@@ -82,6 +82,7 @@ suite "scene registry and cleanup helpers":
     interpretedScenes = initTable[SceneId, ExportedInterpretedScene]()
     interpretedScenes["test/with-name".SceneId] = testInterpreted("Friendly Name")
     interpretedScenes["test/no-name".SceneId] = testInterpreted("")
+    refreshExportedScenes()
 
     var uploadedOnly = initTable[SceneId, ExportedInterpretedScene]()
     uploadedOnly["uploaded/with-name".SceneId] = testInterpreted("Uploaded Friendly")
@@ -100,6 +101,7 @@ suite "scene registry and cleanup helpers":
 
   test "pruneUploadedPublicStates drops orphan uploaded states and falls back current scene":
     interpretedScenes = initTable[SceneId, ExportedInterpretedScene]()
+    refreshExportedScenes()
     var uploadedOnly = initTable[SceneId, ExportedInterpretedScene]()
     uploadedOnly["uploaded/keep".SceneId] = testInterpreted("Keep")
     uploadedOnly["uploaded/remove".SceneId] = testInterpreted("Remove")

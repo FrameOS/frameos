@@ -1027,33 +1027,55 @@ proc buildInterpretedScenes*(scenes: seq[FrameSceneInput]): Table[SceneId, Expor
   for scene in scenes:
     result[scene.id] = buildInterpretedSceneExport(scene)
 
-proc parseInterpretedScenes*(data: string): void =
+proc parseInterpretedScenes*(data: string): Table[SceneId, ExportedInterpretedScene] =
+  result = initTable[SceneId, ExportedInterpretedScene]()
   let scenes = parseInterpretedSceneInputs(data)
   if scenes.len == 0:
     return
   for scene in scenes:
     try:
-      loadedScenes[scene.id] = buildInterpretedSceneExport(scene)
+      result[scene.id] = buildInterpretedSceneExport(scene)
     except Exception as e:
       echo "Warning: Failed to load interpreted scene: ", e.msg
+
+proc loadInterpretedScenesFromDisk*(): Table[SceneId, ExportedInterpretedScene] =
+  let configuredFile = getEnv("FRAMEOS_SCENES_JSON")
+  var sourcePath = ""
+  var compressed = false
+
+  if configuredFile.len > 0:
+    if configuredFile.endsWith(".gz") and fileExists(configuredFile):
+      sourcePath = configuredFile
+      compressed = true
+    elif fileExists(configuredFile):
+      sourcePath = configuredFile
+  elif fileExists("./scenes.json.gz"):
+    sourcePath = "./scenes.json.gz"
+    compressed = true
+  elif fileExists("./scenes.json"):
+    sourcePath = "./scenes.json"
+
+  if sourcePath.len == 0:
+    return initTable[SceneId, ExportedInterpretedScene]()
+
+  let encoded = readFile(sourcePath)
+
+  let decoded =
+    if compressed:
+      uncompress(encoded)
+    else:
+      encoded
+
+  result = parseInterpretedScenes(decoded)
+
+proc replaceInterpretedScenesCache*(scenes: Table[SceneId, ExportedInterpretedScene]) =
+  loadedScenes = scenes
+  allScenesLoaded = true
 
 proc getInterpretedScenes*(): Table[SceneId, ExportedInterpretedScene] =
   if allScenesLoaded:
     return loadedScenes
 
-  let file = getEnv("FRAMEOS_SCENES_JSON")
-  if file != "":
-    if file.endsWith(".gz") and fileExists(file):
-      parseInterpretedScenes(uncompress(readFile(file)))
-    elif fileExists(file):
-      parseInterpretedScenes(readFile(file))
-
-  elif fileExists("./scenes.json.gz"):
-    parseInterpretedScenes(uncompress(readFile("./scenes.json.gz")))
-
-  elif fileExists("./scenes.json"):
-    parseInterpretedScenes(readFile("./scenes.json"))
-
-  allScenesLoaded = true
+  replaceInterpretedScenesCache(loadInterpretedScenesFromDisk())
 
   return loadedScenes
