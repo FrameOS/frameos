@@ -4,6 +4,7 @@ import scenes/scenes
 import system/scenes as systemScenesRegistry
 import frameos/types
 import frameos/interpreter
+import frameos/js_runtime
 
 # Where to store the persisted states
 const SCENE_STATE_JSON_FOLDER = "./state"
@@ -28,6 +29,21 @@ for sceneId, scene in compiledScenes:
   registerCompiledScene(sceneId, scene)
 for sceneId, scene in uploadedScenes:
   exportedScenes[sceneId] = scene.ExportedScene
+
+proc cleanupSceneRuntime*(scene: FrameScene) =
+  if scene.isNil:
+    return
+  if scene of InterpretedFrameScene:
+    let interpreted = InterpretedFrameScene(scene)
+    for _, childScene in interpreted.sceneNodes:
+      cleanupSceneRuntime(childScene)
+    interpreted.sceneNodes = initTable[NodeId, FrameScene]()
+    interpreted.sceneExportByNodeId = initTable[NodeId, ExportedScene]()
+    cleanupSceneJs(interpreted)
+
+proc cleanupSceneTableRuntime*(scenes: Table[SceneId, FrameScene]) =
+  for _, scene in scenes:
+    cleanupSceneRuntime(scene)
 
 proc reloadInterpretedScenes*() =
   withLock sceneRegistryLock:

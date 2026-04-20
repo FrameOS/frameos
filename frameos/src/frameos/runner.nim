@@ -307,6 +307,7 @@ proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.a
           of "reload":
             self.logger.log(%*{"event": "reload", "message": "Reloading config and interpreted scenes"})
             reloadInterpretedScenes()
+            cleanupSceneTableRuntime(self.scenes)
             self.scenes = initTable[SceneId, FrameScene]()
             self.currentSceneId = getFirstSceneId()
             self.configureControlCode()
@@ -322,6 +323,7 @@ proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.a
               setPersistedStateFromPayload(mainSceneId.get(), payload["state"])
             for sceneId in sceneIds:
               if self.scenes.hasKey(sceneId):
+                cleanupSceneRuntime(self.scenes[sceneId])
                 self.scenes.del(sceneId)
             self.currentSceneId = mainSceneId.get()
             self.forceSceneReload = true

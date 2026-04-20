@@ -104,3 +104,15 @@ function demo(input: number) {
     check jsonValue["type"].getStr() == "result"
     check jsonValue["props"]["total"].getInt() == 3
     check jsonValue["props"]["children"].getInt() == 2
+
+  test "cleanupSceneJs closes the quickjs runtime":
+    var scene = testScene()
+    discard transpileSourceForTest(scene, "const answer: number = 42;")
+    check scene.jsReady
+    check scene.js.context != nil
+
+    cleanupSceneJs(scene)
+
+    check scene.jsReady == false
+    check scene.js.context == nil
+    check scene.js.runtime == nil

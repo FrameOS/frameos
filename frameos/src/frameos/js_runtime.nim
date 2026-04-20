@@ -518,3 +518,14 @@ proc envelopeToValueForTest*(env: JsonNode, expectedType: string = ""): Value =
 proc transpileSourceForTest*(scene: InterpretedFrameScene, source: string, filename: string = "<test>"): string =
   ensureSceneJs(scene)
   transpileSource(scene, source, filename)
+
+proc cleanupSceneJs*(scene: InterpretedFrameScene) =
+  if not scene.jsReady:
+    return
+  if scene.js.context != nil and evalEnvByCtx.hasKey(scene.js.context):
+    evalEnvByCtx.del(scene.js.context)
+  scene.js.close()
+  scene.jsReady = false
+  scene.jsFuncNameByNode = initTable[NodeId, string]()
+  scene.codeInlineFuncNameByNodeArg = initTable[NodeId, Table[string, string]]()
+  scene.appInlineFuncNameByNodeArg = initTable[NodeId, Table[string, string]]()
