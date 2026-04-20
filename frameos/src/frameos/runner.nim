@@ -20,6 +20,7 @@ const INKY_FAST_RENDER_THRESHOLD_MS = 2.0
 
 # How frequently we announce a new render via websockets
 const SERVER_RENDER_DELAY_SECONDS = 1.0
+const RENDER_SLEEP_SLICE_MS = 100.0
 
 var thread: Thread[(FrameConfig, Logger, Option[SceneId])]
 
@@ -124,8 +125,18 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
     if self.forceSceneReload:
       lastSceneId = "".SceneId
       self.forceSceneReload = false
-    let sceneId = if exportedScenes.hasKey(self.currentSceneId): self.currentSceneId else: getFirstSceneId()
-    let exportedScene = exportedScenes[sceneId]
+    var sceneId = self.currentSceneId
+    var exportedScene = findExportedScene(sceneId)
+    if exportedScene.isNone:
+      sceneId = getFirstSceneId()
+      exportedScene = findExportedScene(sceneId)
+    if exportedScene.isNone:
+      self.logger.log(%*{"event": "render:error:scene:missing", "sceneId": sceneId.string})
+      self.isRendering = false
+      await sleepAsync(RENDER_SLEEP_SLICE_MS)
+      continue
+    if sceneId != self.currentSceneId:
+      self.currentSceneId = sceneId
     if lastSceneId != sceneId:
       self.logger.log(%*{"event": "render:sceneChange", "sceneId": sceneId.string})
       # Persist the active scene context early in boot, then stop writing it
@@ -136,7 +147,7 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
         currentScene = self.scenes[sceneId]
       else:
         try:
-          currentScene = exportedScenes[sceneId].init(sceneId, self.frameConfig, self.logger, loadPersistedState(sceneId))
+          currentScene = exportedScene.get().init(sceneId, self.frameConfig, self.logger, loadPersistedState(sceneId))
           self.scenes[sceneId] = currentScene
           currentScene.updateLastPublicState()
         except Exception as e:
@@ -150,7 +161,8 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
     self.triggerRenderNext = false # used to debounce render events received while rendering
 
     let interval = currentScene.refreshInterval
-    let (lastRotatedImage, nextSleep) = self.renderSceneImage(exportedScene, currentScene)
+    let (lastRotatedImage, nextSleep) = self.renderSceneImage(exportedScene.get(), currentScene)
+    reclaimRetiredExportedScenes(currentExportedScenesGeneration(), self.logger)
     clearBootCrashCount()
     successfulSceneRenders += 1
     if interval < 1:
@@ -223,16 +235,16 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
                     else: max((interval - durationToSeconds(getMonoTime() - timer)) * 1000, 0.1)
     self.logger.log(%*{"event": "render:sleep", "ms": round(sleepDuration, 3)})
 
-    let future = sleepAsync(sleepDuration)
-    self.sleepFuture = some(future)
-    await future
-    self.sleepFuture = none(Future[void])
+    var remainingSleepMs = sleepDuration
+    while remainingSleepMs > 0:
+      if self.triggerRenderNext:
+        break
+      let nextSleepMs = min(remainingSleepMs, RENDER_SLEEP_SLICE_MS)
+      await sleepAsync(nextSleepMs)
+      remainingSleepMs -= nextSleepMs
 
 proc triggerRender*(self: RunnerThread): void =
-  if self.sleepFuture.isSome:
-    self.sleepFuture.get().complete()
-  else:
-    self.logger.log(%*{"event": "render", "error": "Render already in progress, ignoring."})
+  self.triggerRenderNext = true
 
 proc dispatchSceneEvent*(self: RunnerThread, sceneId: Option[SceneId], event: string, payload: JsonNode) =
   let targetSceneId: SceneId = if sceneId.isSome: sceneId.get() else: self.currentSceneId
@@ -240,8 +252,12 @@ proc dispatchSceneEvent*(self: RunnerThread, sceneId: Option[SceneId], event: st
     self.logger.log(%*{"event": "dispatchEvent:error", "error": "Scene not initialized",
         "sceneId": targetSceneId.string, "event": event, "payload": payload})
     return
+  let exportedScene = findExportedScene(targetSceneId)
+  if exportedScene.isNone:
+    self.logger.log(%*{"event": "dispatchEvent:error", "error": "Scene not exported",
+        "sceneId": targetSceneId.string, "event": event, "payload": payload})
+    return
   let scene = self.scenes[targetSceneId]
-  let exportedScene = exportedScenes[targetSceneId]
   var context = ExecutionContext(
     scene: scene,
     event: event,
@@ -251,7 +267,7 @@ proc dispatchSceneEvent*(self: RunnerThread, sceneId: Option[SceneId], event: st
     loopKey: ".",
     nextSleep: -1
   )
-  exportedScene.runEvent(scene, context)
+  exportedScene.get().runEvent(scene, context)
   if event == "setSceneState" or event == "setCurrentScene":
     scene.updateLastPublicState()
     scene.updateLastPersistedState()
@@ -284,17 +300,15 @@ proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.a
               payload["y"] = %*((self.frameConfig.height.float * payload["y"].getInt().float / 32767.0).int)
           of "setCurrentScene":
             let sceneId = SceneId(payload["sceneId"].getStr())
-            if not exportedScenes.hasKey(sceneId) and not systemScenes.hasKey(sceneId):
+            let exportedScene = findExportedScene(sceneId)
+            if exportedScene.isNone:
               self.logger.log(%*{"event": "dispatchEvent:error", "error": "Scene not found", "sceneId": sceneId.string,
                   "event": event, "payload": payload})
               continue
             if sceneId != self.currentSceneId:
               self.dispatchSceneEvent(some(self.currentSceneId), "close", payload)
               if not self.scenes.hasKey(sceneId):
-                let scene = if exportedScenes.hasKey(sceneId):
-                  exportedScenes[sceneId].init(sceneId, self.frameConfig, self.logger, loadPersistedState(sceneId))
-                else:
-                  systemScenes[sceneId].init(sceneId, self.frameConfig, self.logger, loadPersistedState(sceneId))
+                let scene = exportedScene.get().init(sceneId, self.frameConfig, self.logger, loadPersistedState(sceneId))
                 self.scenes[sceneId] = scene
                 scene.updateLastPublicState()
               self.currentSceneId = sceneId
@@ -306,7 +320,8 @@ proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.a
             continue # don't dispatch this event to the scene
           of "reload":
             self.logger.log(%*{"event": "reload", "message": "Reloading config and interpreted scenes"})
-            reloadInterpretedScenes()
+            reloadInterpretedScenes(self.logger)
+            cleanupSceneTableRuntime(self.scenes)
             self.scenes = initTable[SceneId, FrameScene]()
             self.currentSceneId = getFirstSceneId()
             self.configureControlCode()
@@ -322,6 +337,7 @@ proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.a
               setPersistedStateFromPayload(mainSceneId.get(), payload["state"])
             for sceneId in sceneIds:
               if self.scenes.hasKey(sceneId):
+                cleanupSceneRuntime(self.scenes[sceneId])
                 self.scenes.del(sceneId)
             self.currentSceneId = mainSceneId.get()
             self.forceSceneReload = true
@@ -335,8 +351,8 @@ proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.a
     # after we have processed all queued messages
     if not success:
       if self.triggerRenderNext and not self.isRendering:
-        self.triggerRenderNext = false
         self.triggerRender()
+        await sleepAsync(1)
       else:
         await sleepAsync(waitTime)
         if waitTime < 200:

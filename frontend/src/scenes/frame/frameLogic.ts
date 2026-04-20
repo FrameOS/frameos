@@ -597,6 +597,9 @@ export const frameLogic = kea<frameLogicType>([
     updateScene: (sceneId: string, scene: Partial<FrameScene>) => ({ sceneId, scene }),
     updateNodeData: (sceneId: string, nodeId: string, nodeData: Record<string, any>) => ({ sceneId, nodeId, nodeData }),
     saveFrame: true,
+    saveAndDeployFrame: true,
+    saveAndFastDeployFrame: true,
+    saveAndFullDeployFrame: true,
     renderFrame: true,
     rebootFrame: true,
     restartFrame: true,
@@ -953,8 +956,23 @@ export const frameLogic = kea<frameLogicType>([
       }
     },
   })),
-  listeners(({ actions, values, props }) => ({
+  listeners(({ asyncActions, actions, values, props }) => ({
     saveFrame: () => actions.submitFrameForm(),
+    saveAndDeployFrame: async () => {
+      await asyncActions.submitFrameForm()
+      framesModel.actions.deployFrame(
+        props.frameId,
+        Boolean(values.frame?.last_successful_deploy_at) && !values.requiresRecompilation
+      )
+    },
+    saveAndFastDeployFrame: async () => {
+      await asyncActions.submitFrameForm()
+      framesModel.actions.deployFrame(props.frameId, true)
+    },
+    saveAndFullDeployFrame: async () => {
+      await asyncActions.submitFrameForm()
+      framesModel.actions.deployFrame(props.frameId, false)
+    },
     renderFrame: () => framesModel.actions.renderFrame(props.frameId),
     restartFrame: () => framesModel.actions.restartFrame(props.frameId),
     rebootFrame: () => framesModel.actions.rebootFrame(props.frameId),

@@ -123,3 +123,41 @@ suite "interpreter error paths":
 
     check scene.nodes[1.NodeId].data["config"].hasKey("state[broken")
     check scene.nodes[1.NodeId].data["config"]["state[broken"].getInt() == 7
+
+  test "invalid code syntax logs compile errors during interpreted scene init":
+    let sceneId = "tests/interpreter-errors/invalid-code".SceneId
+    let exported = ExportedInterpretedScene(
+      name: "invalid code syntax",
+      backgroundColor: parseHtmlColor("#000000"),
+      refreshInterval: 1.0,
+      publicStateFields: @[],
+      nodes: @[
+        node(10, "event", %*{"keyword": "render"}),
+        node(20, "code", %*{
+          "codeArgs": [],
+          "codeOutputs": [%*{"name": "text", "type": "text"}],
+          "codeJS": "(() => {"
+        })
+      ],
+      edges: @[
+        edge(101, 10, "next", 20, "prev")
+      ]
+    )
+
+    let config = testConfig()
+    let store = LogStore(entries: @[])
+    var uploaded = initTable[SceneId, ExportedInterpretedScene]()
+    uploaded[sceneId] = exported
+    setUploadedInterpretedScenes(uploaded)
+    resetInterpretedScenes()
+    try:
+      expect(Exception):
+        discard init(sceneId, config, testLogger(config, store), %*{})
+      let compileErr = eventPayload(store, "interpreter:jsCompileError")
+      check not compileErr.isNil
+      check compileErr["nodeId"].getInt() == 20
+      check compileErr["sourceKind"].getStr() == "code"
+      check compileErr["snippet"].getStr() == "(() => {"
+    finally:
+      setUploadedInterpretedScenes(initTable[SceneId, ExportedInterpretedScene]())
+      resetInterpretedScenes()

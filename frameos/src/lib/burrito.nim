@@ -988,6 +988,12 @@ proc eval*(js: QuickJS, code: string, filename: string = "<eval>"): string =
   let val = JS_Eval(js.context, code.cstring, code.len.csize_t, filename.cstring, JS_EVAL_TYPE_GLOBAL)
   defer: JS_FreeValue(js.context, val)
 
+  if JS_IsException(val) != 0:
+    let exception = JS_GetException(js.context)
+    defer: JS_FreeValue(js.context, exception)
+    let errorMsg = toNimString(js.context, exception)
+    raise newException(JSException, "Evaluation failed: " & errorMsg)
+
   result = toNimString(js.context, val)
 
 proc evalWithGlobals*(js: QuickJS, code: string, globals: Table[string, string] = initTable[string, string]()): string =

@@ -473,8 +473,8 @@ class FrameDeployWorkflow:
         await update_frame(self.db, self.redis, frame)
 
         try:
-            await self.deployer._upload_frame_json("/srv/frameos/current/frame.json")
-            await self.deployer._upload_scenes_json("/srv/frameos/current/scenes.json.gz", gzip=True)
+            await self.deployer._upload_frame_json_atomically("/srv/frameos/current/frame.json")
+            await self.deployer._upload_scenes_json_atomically("/srv/frameos/current/scenes.json.gz", gzip=True)
 
             if not plan.fast_deploy:
                 raise RuntimeError("Fast deploy plan missing")

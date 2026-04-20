@@ -20,7 +20,7 @@ from app.models.apps import get_app_configs, get_one_app_sources
 from app.models.frame import Frame, get_frame_json, get_interpreted_scenes_json
 from app.models.log import new_log as log
 from app.utils.local_exec import exec_local_command
-from app.utils.remote_exec import upload_file, run_command
+from app.utils.remote_exec import rename_path, upload_file, run_command
 from app.drivers.drivers import Driver
 from app.drivers.waveshare import write_waveshare_driver_nim, get_variant_folder
 from app.drivers.devices import drivers_for_frame
@@ -95,6 +95,16 @@ class FrameDeployer:
         if gzip:
             json_data = compress(json_data)
         await upload_file(self.db, self.redis, self.frame, path, json_data)
+
+    async def _upload_frame_json_atomically(self, path: str) -> None:
+        temp_path = f"{path}.tmp-{self.build_id}"
+        await self._upload_frame_json(temp_path)
+        await rename_path(self.db, self.redis, self.frame, temp_path, path)
+
+    async def _upload_scenes_json_atomically(self, path: str, gzip: bool = False) -> None:
+        temp_path = f"{path}.tmp-{self.build_id}"
+        await self._upload_scenes_json(temp_path, gzip=gzip)
+        await rename_path(self.db, self.redis, self.frame, temp_path, path)
 
     async def get_hostname(self) -> str:
         hostname_out: list[str] = []

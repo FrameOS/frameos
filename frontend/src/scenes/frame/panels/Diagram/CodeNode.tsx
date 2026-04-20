@@ -101,6 +101,12 @@ declare const context: {
   }, [])
 
   function beforeMount(monaco: Monaco): void {
+    monaco.languages.typescript.typescriptDefaults.setCompilerOptions({
+      allowJs: true,
+      allowNonTsExtensions: true,
+      target: monaco.languages.typescript.ScriptTarget.ES2020,
+      jsx: monaco.languages.typescript.JsxEmit.Preserve,
+    })
     monaco.editor.defineTheme('darkframe-node', {
       base: 'vs-dark',
       inherit: true,
@@ -250,11 +256,19 @@ declare const context: {
             ]}
           />
         </div>
-        <div className="p-1 flex-1 min-h-0 min-w-0">
+        <div
+          className="p-1 flex-1 min-h-0 min-w-0 nodrag nopan"
+          data-editable="true"
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+          onCopy={(e) => e.stopPropagation()}
+          onPaste={(e) => e.stopPropagation()}
+        >
           {codeNodeLanguage === 'js' ? (
             <Editor
               height="100%"
               language="typescript"
+              path={`inmemory://code-node/${id}.tsx`}
               value={data.codeJS ?? ''}
               theme="darkframe-node"
               beforeMount={beforeMount}

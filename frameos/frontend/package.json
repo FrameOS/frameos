@@ -16,8 +16,8 @@
     "@heroicons/react": "^2.0.18",
     "@microlink/react-json-view": "^1.23.0",
     "@monaco-editor/react": "^4.5.2",
-    "@reactflow/core": "^11.8.3",
     "@popperjs/core": "^2.11.8",
+    "@reactflow/core": "^11.8.3",
     "@tailwindcss/container-queries": "^0.1.1",
     "@uiw/color-convert": "^2.8.0",
     "@uiw/react-color-alpha": "^2.8.0",
@@ -43,9 +43,9 @@
     "fuse.js": "^7.0.0",
     "kea": "^3.1.7",
     "kea-forms": "^3.2.0",
-    "kea-router": "^3.4.1",
     "kea-loaders": "3.1.1",
     "kea-localstorage": "^3.1.0",
+    "kea-router": "^3.4.1",
     "kea-subscriptions": "^3.0.1",
     "messg": "^2.2.2",
     "monaco-editor": "^0.43.0",
@@ -59,6 +59,7 @@
     "reactflow": "^11.8.3",
     "remark-gfm": "^4.0.0",
     "streamsaver": "^2.0.6",
+    "sucrase": "^3.35.1",
     "uuid": "^9.0.0"
   },
   "devDependencies": {

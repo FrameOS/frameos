@@ -65,6 +65,9 @@ export function Frame(props: FrameSceneProps) {
   } = useValues(frameLogic(frameLogicProps))
   const {
     saveFrame,
+    saveAndDeployFrame,
+    saveAndFastDeployFrame,
+    saveAndFullDeployFrame,
     renderFrame,
     rebootFrame,
     restartFrame,
@@ -219,8 +222,7 @@ export function Frame(props: FrameSceneProps) {
                           color={unsavedChanges || undeployedChanges ? 'primary' : 'secondary'}
                           type="button"
                           onClick={() => {
-                            saveFrame()
-                            fastDeployFrame()
+                            saveAndFastDeployFrame()
                             openLogs()
                           }}
                         >
@@ -233,8 +235,7 @@ export function Frame(props: FrameSceneProps) {
                           color={unsavedChanges || undeployedChanges ? 'primary' : 'secondary'}
                           type="button"
                           onClick={() => {
-                            saveFrame()
-                            deployFrame()
+                            saveAndDeployFrame()
                             openLogs()
                           }}
                         >
@@ -279,8 +280,7 @@ export function Frame(props: FrameSceneProps) {
                             color={deployRecommendation.mode === 'fast' ? 'primary' : 'secondary'}
                             type="button"
                             onClick={() => {
-                              saveFrame()
-                              fastDeployFrame()
+                              saveAndFastDeployFrame()
                               openLogs()
                               hideDeployPlanModal()
                             }}
@@ -293,8 +293,7 @@ export function Frame(props: FrameSceneProps) {
                             color={deployRecommendation.mode === 'full' || isFirstDeploy ? 'primary' : 'secondary'}
                             type="button"
                             onClick={() => {
-                              saveFrame()
-                              fullDeployFrame()
+                              saveAndFullDeployFrame()
                               openLogs()
                               hideDeployPlanModal()
                             }}

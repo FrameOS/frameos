@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.tasks.binary_builder import FrameBinaryPlan
-from app.tasks.frame_deploy_workflow import FrameDeployWorkflow, FullDeployPlan, HelperActionPlan, PackagePlan
+from app.tasks.frame_deploy_workflow import FrameDeployPlan, FrameDeployWorkflow, FullDeployPlan, HelperActionPlan, PackagePlan
 from app.utils.cross_compile import TargetMetadata
 
 
@@ -58,6 +58,7 @@ class RecordingDeployer(FakeDeployer):
         self.commands: list[str] = []
         self.restarted_services: list[str] = []
         self.logs: list[tuple[str, str]] = []
+        self.atomic_uploads: list[tuple[str, bool]] = []
 
     async def exec_command(self, command: str, **_kwargs) -> int:
         self.commands.append(command)
@@ -70,6 +71,12 @@ class RecordingDeployer(FakeDeployer):
 
     async def log(self, log_type: str, message: str) -> None:
         self.logs.append((log_type, message))
+
+    async def _upload_frame_json_atomically(self, path: str) -> None:
+        self.atomic_uploads.append((path, False))
+
+    async def _upload_scenes_json_atomically(self, path: str, gzip: bool = False) -> None:
+        self.atomic_uploads.append((path, gzip))
 
 
 class FakeBinaryBuilder:
@@ -446,3 +453,57 @@ async def test_run_post_deploy_cleanup_uses_planned_actions_without_recalculatin
     assert deployer.restarted_services == ["frameos"]
     assert all("userconfig" not in command for command in deployer.commands)
     assert "sudo reboot" not in deployer.commands
+
+
+@pytest.mark.asyncio
+async def test_execute_fast_uses_atomic_uploads_before_reload(monkeypatch: pytest.MonkeyPatch):
+    frame = SimpleNamespace(
+        id=21,
+        name="FastFrame",
+        status="ready",
+        https_proxy={"enable": False},
+        last_successful_deploy={"frameos_version": "9.9.9", "https_proxy": {"enable": False}},
+        last_successful_deploy_at=None,
+        to_dict=lambda: {"id": 21, "name": "FastFrame"},
+    )
+    deployer = RecordingDeployer()
+    workflow = FrameDeployWorkflow(
+        db=None,
+        redis=None,
+        frame=frame,
+        deployer=deployer,
+        temp_dir="",
+        binary_builder=FakeBinaryBuilder(),
+    )
+
+    async def fake_update_frame(_db, _redis, _frame):
+        return _frame
+
+    async def fake_fetch_frame_http_bytes(_frame, _redis, *, path: str, method: str):
+        assert path == "/reload"
+        assert method == "POST"
+        return 200, b'{"status":"ok"}', {}
+
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.update_frame", fake_update_frame)
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow._fetch_frame_http_bytes", fake_fetch_frame_http_bytes)
+
+    plan = FrameDeployPlan(
+        mode="fast",
+        frame_id=21,
+        frame_name="FastFrame",
+        build_id="build12345678",
+        frame_dict={"id": 21, "name": "FastFrame"},
+        previous_frameos_version="9.9.9",
+        fast_deploy=SimpleNamespace(
+            tls_settings_changed=False,
+            reload_supported=True,
+            action="reload",
+        ),
+    )
+
+    await workflow._execute_fast(plan)
+
+    assert deployer.atomic_uploads == [
+        ("/srv/frameos/current/frame.json", False),
+        ("/srv/frameos/current/scenes.json.gz", True),
+    ]

@@ -4,6 +4,7 @@ import scenes/scenes
 import system/scenes as systemScenesRegistry
 import frameos/types
 import frameos/interpreter
+import frameos/js_runtime
 
 # Where to store the persisted states
 const SCENE_STATE_JSON_FOLDER = "./state"
@@ -12,53 +13,172 @@ const UPLOADED_SCENES_JSON_PATH = &"{SCENE_STATE_JSON_FOLDER}/uploaded.json"
 # All scenes that are compiled into the FrameOS binary
 var sceneRegistryLock: Lock
 initLock(sceneRegistryLock)
+type RetiredExportedScenes = object
+  generation: int
+  scenes: Table[SceneId, ExportedScene]
+
 var systemScenes*: Table[SceneId, ExportedScene] = getSystemScenes()
 var compiledScenes*: Table[SceneId, ExportedScene] = getExportedScenes()
 var interpretedScenes*: Table[SceneId, ExportedInterpretedScene] = getInterpretedScenes()
 var uploadedScenes*: Table[SceneId, ExportedInterpretedScene] = initTable[SceneId, ExportedInterpretedScene]()
+var exportedScenesGeneration = 1
+var retiredExportedScenes: seq[RetiredExportedScenes] = @[]
 
-var exportedScenes*: Table[SceneId, ExportedScene] = initTable[SceneId, ExportedScene]()
+proc buildExportedScenesTable(
+    interpreted: Table[SceneId, ExportedInterpretedScene],
+    uploaded: Table[SceneId, ExportedInterpretedScene]
+  ): Table[SceneId, ExportedScene] =
+  result = initTable[SceneId, ExportedScene]()
+  for sceneId, scene in systemScenes:
+    result[sceneId] = scene
+  for sceneId, scene in interpreted:
+    result[sceneId] = scene.ExportedScene
+  for sceneId, scene in compiledScenes:
+    result[sceneId] = scene
+  for sceneId, scene in uploaded:
+    result[sceneId] = scene.ExportedScene
+
 for sceneId, scene in systemScenes:
-  exportedScenes[sceneId] = scene
   registerCompiledScene(sceneId, scene)
-for sceneId, scene in interpretedScenes:
-  exportedScenes[sceneId] = scene.ExportedScene
 for sceneId, scene in compiledScenes:
-  exportedScenes[sceneId] = scene
   registerCompiledScene(sceneId, scene)
-for sceneId, scene in uploadedScenes:
-  exportedScenes[sceneId] = scene.ExportedScene
 
-proc reloadInterpretedScenes*() =
+var exportedScenes*: Table[SceneId, ExportedScene] = buildExportedScenesTable(interpretedScenes, uploadedScenes)
+
+proc refreshExportedScenes*() =
   withLock sceneRegistryLock:
-    let oldInterpreted = interpretedScenes
-    resetInterpretedScenes()
-    interpretedScenes = getInterpretedScenes()
-    for sceneId in keys(oldInterpreted):
-      if exportedScenes.hasKey(sceneId):
-        exportedScenes.del(sceneId)
-    for sceneId, scene in interpretedScenes:
-      exportedScenes[sceneId] = scene.ExportedScene
+    exportedScenes = buildExportedScenesTable(interpretedScenes, uploadedScenes)
+
+proc currentExportedScenesGeneration*(): int =
+  withLock sceneRegistryLock:
+    return exportedScenesGeneration
+
+proc hasExportedScene*(sceneId: SceneId): bool =
+  withLock sceneRegistryLock:
+    return exportedScenes.hasKey(sceneId)
+
+# Snapshot exported scene refs under the registry lock so reload can swap tables safely.
+proc findExportedScene*(sceneId: SceneId): Option[ExportedScene] =
+  withLock sceneRegistryLock:
+    if exportedScenes.hasKey(sceneId):
+      return some(exportedScenes[sceneId])
+  none(ExportedScene)
+
+proc cleanupSceneRuntime*(scene: FrameScene) =
+  if scene.isNil:
+    return
+  if scene of InterpretedFrameScene:
+    let interpreted = InterpretedFrameScene(scene)
+    for _, childScene in interpreted.sceneNodes:
+      cleanupSceneRuntime(childScene)
+    # Break common ORC/ARC cycles before closing the JS runtime.
+    interpreted.execNode = nil
+    interpreted.getDataNode = nil
+    interpreted.appsByNodeId = initTable[NodeId, AppRoot]()
+    interpreted.appInputsForNodeId = initTable[NodeId, Table[string, NodeId]]()
+    interpreted.appInlineInputsForNodeId = initTable[NodeId, Table[string, string]]()
+    interpreted.codeInputsForNodeId = initTable[NodeId, Table[string, NodeId]]()
+    interpreted.codeInlineInputsForNodeId = initTable[NodeId, Table[string, string]]()
+    interpreted.sceneNodes = initTable[NodeId, FrameScene]()
+    interpreted.sceneExportByNodeId = initTable[NodeId, ExportedScene]()
+    interpreted.nextNodeIds = initTable[NodeId, NodeId]()
+    interpreted.eventListeners = initTable[string, seq[NodeId]]()
+    interpreted.nodes = initTable[NodeId, DiagramNode]()
+    interpreted.edges = @[]
+    interpreted.cacheValues = initTable[NodeId, Value]()
+    interpreted.cacheTimes = initTable[NodeId, float]()
+    interpreted.cacheKeys = initTable[NodeId, JsonNode]()
+    cleanupSceneJs(interpreted)
+
+proc cleanupSceneTableRuntime*(scenes: Table[SceneId, FrameScene]) =
+  for _, scene in scenes:
+    cleanupSceneRuntime(scene)
+
+proc publishExportedScenes(
+    nextExportedScenes: Table[SceneId, ExportedScene],
+    logger: Logger = nil,
+    reason = "unknown"
+  ) =
+  if logger != nil:
+    logger.log(%*{
+      "event": "reload:step",
+      "step": "exportedScenes:publish:start",
+      "reason": reason,
+      "currentGeneration": exportedScenesGeneration,
+      "nextGeneration": exportedScenesGeneration + 1,
+      "retiredCount": retiredExportedScenes.len,
+      "nextCount": nextExportedScenes.len
+    })
+  retiredExportedScenes.add(RetiredExportedScenes(
+    generation: exportedScenesGeneration,
+    scenes: exportedScenes
+  ))
+  inc exportedScenesGeneration
+  exportedScenes = nextExportedScenes
+  if logger != nil:
+    logger.log(%*{
+      "event": "reload:step",
+      "step": "exportedScenes:publish:done",
+      "reason": reason,
+      "currentGeneration": exportedScenesGeneration,
+      "retiredCount": retiredExportedScenes.len,
+      "exportedCount": exportedScenes.len
+    })
+
+proc reclaimRetiredExportedScenes*(
+    renderedGeneration: int,
+    logger: Logger = nil,
+    keepGenerations = 1
+  ) =
+  let reclaimBeforeGeneration = renderedGeneration - keepGenerations
+  if reclaimBeforeGeneration <= 0:
+    return
+
+  var reclaimed: seq[RetiredExportedScenes] = @[]
+  var remainingRetiredCount = 0
+  withLock sceneRegistryLock:
+    var kept: seq[RetiredExportedScenes] = @[]
+    for entry in retiredExportedScenes:
+      if entry.generation < reclaimBeforeGeneration:
+        reclaimed.add(entry)
+      else:
+        kept.add(entry)
+    retiredExportedScenes = kept
+    remainingRetiredCount = retiredExportedScenes.len
+
+  if reclaimed.len == 0:
+    return
+
+  if logger != nil:
+    logger.log(%*{
+      "event": "reload:step",
+      "step": "exportedScenes:reclaim:start",
+      "renderedGeneration": renderedGeneration,
+      "reclaimBeforeGeneration": reclaimBeforeGeneration,
+      "reclaimedCount": reclaimed.len
+    })
+  reclaimed.setLen(0)
+  if logger != nil:
+    logger.log(%*{
+      "event": "reload:step",
+      "step": "exportedScenes:reclaim:done",
+      "renderedGeneration": renderedGeneration,
+      "reclaimBeforeGeneration": reclaimBeforeGeneration,
+      "remainingRetiredCount": remainingRetiredCount
+    })
+
+proc reloadInterpretedScenes*(logger: Logger = nil) =
+  let freshInterpreted = loadInterpretedScenesFromDisk()
+  withLock sceneRegistryLock:
+    replaceInterpretedScenesCache(freshInterpreted)
+    interpretedScenes = freshInterpreted
+    publishExportedScenes(buildExportedScenesTable(interpretedScenes, uploadedScenes), logger, "reload")
 
 proc updateUploadedScenes*(newScenes: Table[SceneId, ExportedInterpretedScene]) =
   withLock sceneRegistryLock:
-    # this is likely overkill as we prefix all uploaded scenes with "uploaded/"
-    let oldUploaded = getUploadedInterpretedScenes()
-    for sceneId in keys(oldUploaded):
-      if newScenes.hasKey(sceneId):
-        continue
-      if compiledScenes.hasKey(sceneId):
-        exportedScenes[sceneId] = compiledScenes[sceneId]
-      elif interpretedScenes.hasKey(sceneId):
-        exportedScenes[sceneId] = interpretedScenes[sceneId].ExportedScene
-      elif systemScenes.hasKey(sceneId):
-        exportedScenes[sceneId] = systemScenes[sceneId]
-      elif exportedScenes.hasKey(sceneId):
-        exportedScenes.del(sceneId)
     setUploadedInterpretedScenes(newScenes)
     uploadedScenes = newScenes
-    for sceneId, scene in newScenes:
-      exportedScenes[sceneId] = scene.ExportedScene
+    publishExportedScenes(buildExportedScenesTable(interpretedScenes, uploadedScenes), nil, "upload")
 
 
 proc getSceneDisplayName*(sceneId: SceneId): Option[string] =
@@ -216,7 +336,9 @@ proc updateUploadedScenesFromPayload*(
     return (none(SceneId), @[])
 
   let newScenes = buildInterpretedScenes(sceneInputs)
-  let oldUploaded = getUploadedInterpretedScenes()
+  var oldUploaded = initTable[SceneId, ExportedInterpretedScene]()
+  withLock sceneRegistryLock:
+    oldUploaded = uploadedScenes
   updateUploadedScenes(newScenes)
   setUploadedScenePayload(payloadString)
   for sceneId in oldUploaded.keys:
@@ -257,15 +379,23 @@ proc getLastImagePng*(): string =
   return encodePng(width, height, 4, copy[0].addr, copy.len * 4)
 
 proc getLastPublicState*(): (SceneId, JsonNode, seq[StateField], float) =
-  {.gcsafe.}: # It's fine: state is copied and .publicStateFields don't change
+  {.gcsafe.}:
+    var sceneId = "".SceneId
     var state = %*{}
     var lastUpdate = 0.0
     withLock lastPublicStatesLock:
-      if lastPublicStates.hasKey(lastPublicSceneId.string):
-        state = lastPublicStates[lastPublicSceneId.string].copy()
-      if lastPublicStateUpdates.hasKey(lastPublicSceneId):
-        lastUpdate = lastPublicStateUpdates[lastPublicSceneId]
-      return (lastPublicSceneId, state, exportedScenes[lastPublicSceneId].publicStateFields, lastUpdate)
+      sceneId = lastPublicSceneId
+      if lastPublicStates.hasKey(sceneId.string):
+        state = lastPublicStates[sceneId.string].copy()
+      if lastPublicStateUpdates.hasKey(sceneId):
+        lastUpdate = lastPublicStateUpdates[sceneId]
+    let sceneExport = findExportedScene(sceneId)
+    let publicStateFields =
+      if sceneExport.isSome:
+        sceneExport.get().publicStateFields
+      else:
+        @[]
+    return (sceneId, state, publicStateFields, lastUpdate)
 
 proc getAllPublicStates*(): (SceneId, JsonNode) =
   {.gcsafe.}: # It's fine: state is copied and .publicStateFields don't change
@@ -273,22 +403,20 @@ proc getAllPublicStates*(): (SceneId, JsonNode) =
       return (lastPublicSceneId, lastPublicStates.copy())
 
 proc setLastPublicSceneId*(sceneId: SceneId) =
+  if not hasExportedScene(sceneId):
+    raise newException(ValueError, "Scene not exported: " & sceneId.string)
   withLock lastPublicStatesLock:
-    if exportedScenes.hasKey(sceneId):
-      lastPublicSceneId = sceneId
-    else:
-      raise newException(ValueError, "Scene not exported: " & sceneId.string)
+    lastPublicSceneId = sceneId
 
 proc updateLastPublicState*(self: FrameScene) =
-  # Do not export systemScenes, as we use this to know where to come back to
-  if not exportedScenes.hasKey(self.id):
+  let sceneExport = findExportedScene(self.id)
+  if sceneExport.isNone:
     return
-  let sceneExport = exportedScenes[self.id]
   withLock lastPublicStatesLock:
     if not lastPublicStates.hasKey(self.id.string):
       lastPublicStates[self.id.string] = %*{}
     let lastSceneState = lastPublicStates[self.id.string]
-    for field in sceneExport.publicStateFields:
+    for field in sceneExport.get().publicStateFields:
       let key = field.name
       if self.state.hasKey(key) and self.state[key] != lastSceneState{key}:
         lastSceneState[key] = copy(self.state[key])
@@ -330,15 +458,24 @@ when defined(testing):
   proc setUploadedStateCleanupRanForTest*(value: bool) =
     uploadedStateCleanupRan = value
 
+  proc retiredExportedScenesCountForTest*(): int =
+    withLock sceneRegistryLock:
+      return retiredExportedScenes.len
+
+  proc resetRetiredExportedScenesForTest*() =
+    withLock sceneRegistryLock:
+      exportedScenesGeneration = 1
+      retiredExportedScenes = @[]
+
 proc updateLastPersistedState*(self: FrameScene) =
-  if not exportedScenes.hasKey(self.id):
+  let sceneExport = findExportedScene(self.id)
+  if sceneExport.isNone:
     return
-  let sceneExport = exportedScenes[self.id]
   var hasChanges = false
   if not lastPersistedStates.hasKey(self.id.string):
     lastPersistedStates[self.id.string] = %*{}
   let persistedState = lastPersistedStates[self.id.string]
-  for key in sceneExport.persistedStateKeys:
+  for key in sceneExport.get().persistedStateKeys:
     if self.state.hasKey(key) and self.state[key] != persistedState{key}:
       persistedState[key] = copy(self.state[key])
       hasChanges = true
@@ -374,26 +511,26 @@ proc getFirstSceneId*(): SceneId =
     let lastSceneId = loadLastScene()
     if lastSceneId.isSome():
       let persistedSceneId = lastSceneId.get()
-      if persistedSceneId.string.startsWith("uploaded/") and not exportedScenes.hasKey(persistedSceneId):
+      if persistedSceneId.string.startsWith("uploaded/") and not hasExportedScene(persistedSceneId):
         try:
           let uploadedPayload = parseJson(readFile(UPLOADED_SCENES_JSON_PATH))
           discard updateUploadedScenesFromPayload(uploadedPayload, false)
         except JsonParsingError, IOError:
           discard
-      if exportedScenes.hasKey(persistedSceneId):
+      if hasExportedScene(persistedSceneId):
         return persistedSceneId
-    # This array never changes and is read only
-    if len(compiledScenes) > 0:
-      for key in keys(compiledScenes):
-        return key
-    if len(interpretedScenes) > 0:
-      for key in keys(interpretedScenes):
-        return key
-    if len(compiledScenes) == 0 and len(interpretedScenes) == 0 and len(uploadedScenes) == 0:
-      let indexSceneId = "system/index".SceneId
-      if systemScenes.hasKey(indexSceneId):
-        return indexSceneId
-    if len(systemScenes) > 0:
-      for key in keys(systemScenes):
-        return key
+    withLock sceneRegistryLock:
+      if len(compiledScenes) > 0:
+        for key in keys(compiledScenes):
+          return key
+      if len(interpretedScenes) > 0:
+        for key in keys(interpretedScenes):
+          return key
+      if len(compiledScenes) == 0 and len(interpretedScenes) == 0 and len(uploadedScenes) == 0:
+        let indexSceneId = "system/index".SceneId
+        if systemScenes.hasKey(indexSceneId):
+          return indexSceneId
+      if len(systemScenes) > 0:
+        for key in keys(systemScenes):
+          return key
   return "".SceneId
