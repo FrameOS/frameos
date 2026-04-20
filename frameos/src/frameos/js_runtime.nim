@@ -68,6 +68,25 @@ proc transpileSource(scene: InterpretedFrameScene, source: string, filename: str
     return source
   scene.js.eval("__frameosTranspile(\"" & jsQuote(source) & "\", { filePath: \"" & jsQuote(filename) & "\" })")
 
+proc logCompileError(
+  scene: InterpretedFrameScene,
+  nodeId: NodeId,
+  sourceKind: string,
+  sourceName: string,
+  snippet: string,
+  error: ref CatchableError
+) =
+  scene.logger.log(%*{
+    "event": "interpreter:jsCompileError",
+    "sceneId": scene.id.string,
+    "nodeId": nodeId.int,
+    "sourceKind": sourceKind,
+    "sourceName": sourceName,
+    "error": error.msg,
+    "stacktrace": error.getStackTrace(),
+    "snippet": snippet
+  })
+
 # -------------------------
 # Build JS envelope function
 # -------------------------
@@ -346,9 +365,13 @@ proc compileInlineFn(scene: InterpretedFrameScene,
                      nameBuilder: InlineNameProc) =
   ensureSceneJs(scene)
   let fnName = nameBuilder(scene, nodeId, name)
-  let src = transpileSource(scene, buildEnvelopeFunction(snippet, @[], fnName),
-    "<frameos:inline:" & $nodeId.int & ":" & name & ">")
-  discard scene.js.eval(src)
+  try:
+    let src = transpileSource(scene, buildEnvelopeFunction(snippet, @[], fnName),
+      "<frameos:inline:" & $nodeId.int & ":" & name & ">")
+    discard scene.js.eval(src)
+  except CatchableError as e:
+    logCompileError(scene, nodeId, "inline", name, snippet, e)
+    raise
   if not mappingRef.hasKey(nodeId):
     mappingRef[nodeId] = initTable[string, string]()
   mappingRef[nodeId][name] = fnName
@@ -382,9 +405,13 @@ proc compileCodeFn*(scene: InterpretedFrameScene, node: DiagramNode) =
       if k notin argNames: argNames.add(k)
 
   let fnName = uniqueCodeFnName(scene, node.id)
-  let src = transpileSource(scene, buildEnvelopeFunction(codeSnippet, argNames, fnName),
-    "<frameos:code:" & $node.id.int & ">")
-  discard scene.js.eval(src)
+  try:
+    let src = transpileSource(scene, buildEnvelopeFunction(codeSnippet, argNames, fnName),
+      "<frameos:code:" & $node.id.int & ">")
+    discard scene.js.eval(src)
+  except CatchableError as e:
+    logCompileError(scene, node.id, "code", "codeJS", codeSnippet, e)
+    raise
   scene.jsFuncNameByNode[node.id] = fnName
 
 proc getOrCompileCodeFn*(scene: InterpretedFrameScene, node: DiagramNode): string =
@@ -494,9 +521,13 @@ proc evalSnippet*(
   ensureSceneJs(scene)
   inc anonCounter
   let fnName = "__frameos_eval_" & $(nodeId.int) & "_" & $anonCounter
-  let src = transpileSource(scene, buildEnvelopeFunction(code, argNames, fnName),
-    "<frameos:eval:" & $nodeId.int & ":" & $anonCounter & ">")
-  discard scene.js.eval(src)
+  try:
+    let src = transpileSource(scene, buildEnvelopeFunction(code, argNames, fnName),
+      "<frameos:eval:" & $nodeId.int & ":" & $anonCounter & ">")
+    discard scene.js.eval(src)
+  except CatchableError as e:
+    logCompileError(scene, nodeId, "eval", fnName, code, e)
+    raise
 
   var outs = outputTypes
   var targetField = ""
