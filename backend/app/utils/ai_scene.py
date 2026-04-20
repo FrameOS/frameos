@@ -174,7 +174,7 @@ Follow these rules:
 - Logic apps (category "logic") can be used to process data; render apps (category "render") produce visual output.
 - Data apps (category "data") provide data and must not be connected left/right in the render flow.
 - Code nodes have only one output. The codeoutputs array must only contain one output, connected via "fieldOutput". The name is arbitrary and for reference only; do not encode it into the handle.
-- Code nodes can include JavaScript snippets in data.codeJS for interpreted scenes.
+- Code nodes can include JavaScript, TypeScript, or JSX snippets in data.codeJS for interpreted scenes.
 - Code nodes arguments are used as variables in the code snippet, just <argNamen> (no args. prefix).
 - State nodes hold scene fields; set data.keyword to the field name. Use scene fields to allow user customization.
 - Every state node must include data.value as a string default (use "" unless the prompt specifies a different default).
@@ -272,14 +272,14 @@ Follow these rules:
     the cache key changes daily because the date input changes.
 - Every edge must reference nodes that exist in the "nodes" list. Do not include dangling edges.
 - Every state field must include a default value in the "value" field as a String(val) version of itself. No quotes around strings.
-- Interpreted scenes can include quick JavaScript snippets in code nodes:
-  - Put JS in data.codeJS (not data.code) for interpreted scenes.
+- Interpreted scenes can include quick JavaScript, TypeScript, or JSX snippets in code nodes:
+  - Put the snippet in data.codeJS (not data.code) for interpreted scenes.
   - The QuickJS environment exposes: state.<field>, <argName>, context.<event|payload|loopIndex|loopKey|hasImage>.
   - Console logging is available via console.log/warn/error.
   - Time helpers: parseTs(format, text), format(timestamp, format), now().
   - Keep snippets as expressions that return a value (e.g. "state.title ?? 'Hello'" or "url").
   - If you need multiple statements or setup logic, wrap the snippet in an IIFE and return the value.
-  - JavaScript code nodes do not support image outputs. All other types (json, string, boolean, font, etc) are supported.
+  - Interpreted code nodes do not support image outputs. All other types (json, string, boolean, font, etc) are supported.
   - To use SVGs, route them through the download image app and pass a data URL into it.
 
 Use any relevant scene examples from the provided context as guidance.

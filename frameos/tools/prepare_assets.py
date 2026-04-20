@@ -17,6 +17,7 @@ FRONTEND_OUTPUTS = (
     Path("assets/compiled/frame_web/index.html"),
     Path("assets/compiled/frame_web/static/main.js"),
     Path("assets/compiled/frame_web/static/main.css"),
+    Path("assets/compiled/vendor/sucrase.js"),
 )
 
 MODULE_OUTPUTS = (
@@ -24,6 +25,7 @@ MODULE_OUTPUTS = (
     Path("src/assets/web.nim"),
     Path("src/assets/frame_web.nim"),
     Path("src/assets/fonts.nim"),
+    Path("src/assets/vendor.nim"),
 )
 
 MODULE_SOURCE_FILES = (
@@ -137,7 +139,12 @@ def iter_app_config_entries(project_root: Path) -> list[Path]:
 
 
 def hash_module_inputs(project_root: Path) -> str:
-    entries = [*MODULE_SOURCE_FILES, Path("assets/compiled/frame_web"), *iter_app_config_entries(project_root)]
+    entries = [
+        *MODULE_SOURCE_FILES,
+        Path("assets/compiled/frame_web"),
+        Path("assets/compiled/vendor"),
+        *iter_app_config_entries(project_root),
+    ]
     return hash_inputs(project_root, entries)
 
 
@@ -290,6 +297,16 @@ def generate_asset_modules(project_root: Path) -> None:
             "assets/compiled/fonts/Ubuntu-Regular.ttf",
             "--output",
             "src/assets/fonts.nim",
+        ],
+        [
+            python,
+            "tools/generate_compressed_asset_nim.py",
+            "--source-dir",
+            ".",
+            "--dir",
+            "assets/compiled/vendor",
+            "--output",
+            "src/assets/vendor.nim",
         ],
     )
 

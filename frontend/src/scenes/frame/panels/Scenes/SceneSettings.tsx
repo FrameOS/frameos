@@ -67,8 +67,8 @@ export function SceneSettings({ sceneId, onClose }: SceneSettingsProps): JSX.Ele
                   <p>
                     <strong>Interpreted</strong> scenes are executed as-is, allowing for fast deploys without the need
                     for recompilation. This mode is slower, but when your frame takes 20 seconds to render, it doesn't
-                    matter much. You must use JavaScript in inline code nodes. You can't edit the nim source of apps in
-                    this mode.
+                    matter much. Inline code nodes can use JavaScript, TypeScript, or JSX. You can't edit the nim
+                    source of apps in this mode.
                   </p>
                   <p>A full deploy is needed if switching between modes.</p>
                 </div>

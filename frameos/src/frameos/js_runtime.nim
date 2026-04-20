@@ -4,6 +4,7 @@
 
 import frameos/types
 import frameos/values
+import assets/vendor as vendorAssets
 import lib/tz
 import lib/burrito
 import tables, json, strutils
@@ -61,6 +62,11 @@ proc getCodeSnippet(node: DiagramNode): string =
   elif node.data.hasKey("code") and node.data["code"].kind == JString:
     return node.data["code"].getStr()
   ""
+
+proc transpileSource(scene: InterpretedFrameScene, source: string, filename: string): string =
+  if source.len == 0:
+    return source
+  scene.js.eval("__frameosTranspile(\"" & jsQuote(source) & "\", { filePath: \"" & jsQuote(filename) & "\" })")
 
 # -------------------------
 # Build JS envelope function
@@ -304,6 +310,7 @@ proc ensureSceneJs*(scene: InterpretedFrameScene) =
   const __args    = new Proxy({}, { get(_, k) { return (typeof k === 'string') ? __frameosUnwrap(getArg(k))     : undefined; } });
   const __context = new Proxy({}, { get(_, k) { return (typeof k === 'string') ? __frameosUnwrap(getContext(k)) : undefined; } });
   """)
+  discard scene.js.eval(vendorAssets.getAsset("assets/compiled/vendor/sucrase.js"))
   # Initialize registries
   scene.jsFuncNameByNode = initTable[NodeId, string]()
   scene.codeInlineFuncNameByNodeArg = initTable[NodeId, Table[string, string]]()
@@ -339,7 +346,8 @@ proc compileInlineFn(scene: InterpretedFrameScene,
                      nameBuilder: InlineNameProc) =
   ensureSceneJs(scene)
   let fnName = nameBuilder(scene, nodeId, name)
-  let src = buildEnvelopeFunction(snippet, @[], fnName)
+  let src = transpileSource(scene, buildEnvelopeFunction(snippet, @[], fnName),
+    "<frameos:inline:" & $nodeId.int & ":" & name & ">")
   discard scene.js.eval(src)
   if not mappingRef.hasKey(nodeId):
     mappingRef[nodeId] = initTable[string, string]()
@@ -374,7 +382,8 @@ proc compileCodeFn*(scene: InterpretedFrameScene, node: DiagramNode) =
       if k notin argNames: argNames.add(k)
 
   let fnName = uniqueCodeFnName(scene, node.id)
-  let src = buildEnvelopeFunction(codeSnippet, argNames, fnName)
+  let src = transpileSource(scene, buildEnvelopeFunction(codeSnippet, argNames, fnName),
+    "<frameos:code:" & $node.id.int & ">")
   discard scene.js.eval(src)
   scene.jsFuncNameByNode[node.id] = fnName
 
@@ -485,7 +494,8 @@ proc evalSnippet*(
   ensureSceneJs(scene)
   inc anonCounter
   let fnName = "__frameos_eval_" & $(nodeId.int) & "_" & $anonCounter
-  let src = buildEnvelopeFunction(code, argNames, fnName)
+  let src = transpileSource(scene, buildEnvelopeFunction(code, argNames, fnName),
+    "<frameos:eval:" & $nodeId.int & ":" & $anonCounter & ">")
   discard scene.js.eval(src)
 
   var outs = outputTypes
@@ -504,3 +514,7 @@ proc jsQuoteForTest*(s: string): string =
 
 proc envelopeToValueForTest*(env: JsonNode, expectedType: string = ""): Value =
   envelopeToValue(env, expectedType)
+
+proc transpileSourceForTest*(scene: InterpretedFrameScene, source: string, filename: string = "<test>"): string =
+  ensureSceneJs(scene)
+  transpileSource(scene, source, filename)

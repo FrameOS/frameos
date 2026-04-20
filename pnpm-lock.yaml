@@ -166,6 +166,9 @@ importers:
       streamsaver:
         specifier: ^2.0.6
         version: 2.0.6
+      sucrase:
+        specifier: ^3.35.1
+        version: 3.35.1
       uuid:
         specifier: ^9.0.0
         version: 9.0.1

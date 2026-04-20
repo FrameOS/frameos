@@ -1,8 +1,29 @@
-import std/[json, unittest]
+import std/[json, strutils, unittest]
 
 import ../js_runtime
 import ../types
 import ../values
+
+proc testScene(): InterpretedFrameScene =
+  InterpretedFrameScene(
+    id: "tests/js-runtime".SceneId,
+    logger: Logger(
+      enabled: true,
+      log: proc(payload: JsonNode) = discard payload,
+      enable: proc() = discard,
+      disable: proc() = discard
+    )
+  )
+
+proc testContext(scene: FrameScene): ExecutionContext =
+  ExecutionContext(
+    scene: scene,
+    event: "render",
+    payload: %*{},
+    hasImage: false,
+    loopIndex: 0,
+    loopKey: "."
+  )
 
 suite "js runtime helper seams":
   test "toJsIdent sanitizes invalid identifiers":
@@ -56,3 +77,30 @@ suite "js runtime helper seams":
     let coerced = envelopeToValueForTest(%*{"k": "string", "v": "12"}, "integer")
     check coerced.kind == fkInteger
     check coerced.asInt() == 12
+
+  test "transpileSource removes types and lowers jsx":
+    var scene = testScene()
+    let transpiled = transpileSourceForTest(
+      scene,
+      """
+function demo(input: number) {
+  return <card active={input > 0}>{input as number}</card>;
+}
+"""
+    )
+    check "input: number" notin transpiled
+    check "__frameosJsx(" in transpiled
+
+  test "evalSnippet runs typescript and jsx through quickjs":
+    var scene = testScene()
+    let value = evalSnippet(
+      scene,
+      testContext(scene),
+      1.NodeId,
+      "(({count}: {count: number}) => <result total={count + 1}>{count}</result>)({ count: 2 })"
+    )
+    check value.kind == fkJson
+    let jsonValue = value.asJson()
+    check jsonValue["type"].getStr() == "result"
+    check jsonValue["props"]["total"].getInt() == 3
+    check jsonValue["props"]["children"].getInt() == 2
