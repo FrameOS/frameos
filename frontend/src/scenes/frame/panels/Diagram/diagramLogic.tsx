@@ -122,10 +122,19 @@ const isEditableTarget = (target: EventTarget | null): boolean => {
   if (!(target instanceof HTMLElement)) {
     return false
   }
+  if (target.closest('[data-editable="true"]')) {
+    return true
+  }
   if (target.isContentEditable) {
     return true
   }
   if (target.closest('[contenteditable="true"]')) {
+    return true
+  }
+  if (target.closest('.monaco-editor, .monaco-editor *')) {
+    return true
+  }
+  if (target.getAttribute('role') === 'textbox' || target.closest('[role="textbox"]')) {
     return true
   }
   const tagName = target.tagName

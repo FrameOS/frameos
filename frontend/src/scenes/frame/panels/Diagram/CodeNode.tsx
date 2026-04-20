@@ -130,6 +130,9 @@ declare const context: {
     editorRef.current = editor
     monacoRef.current = monaco
     updateWheelHandling(editor)
+    editor.onKeyDown((event) => {
+      event.browserEvent.stopPropagation()
+    })
     editor.onDidFocusEditorWidget(() => updateWheelHandling(editor))
     editor.onDidBlurEditorWidget(() => updateWheelHandling(editor))
     updateCodeArgGlobals(monaco, data.codeArgs ?? [])
@@ -250,7 +253,15 @@ declare const context: {
             ]}
           />
         </div>
-        <div className="p-1 flex-1 min-h-0 min-w-0">
+        <div
+          className="p-1 flex-1 min-h-0 min-w-0 nodrag nopan"
+          data-editable="true"
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+          onKeyDownCapture={(e) => e.stopPropagation()}
+          onCopy={(e) => e.stopPropagation()}
+          onPaste={(e) => e.stopPropagation()}
+        >
           {codeNodeLanguage === 'js' ? (
             <Editor
               height="100%"
