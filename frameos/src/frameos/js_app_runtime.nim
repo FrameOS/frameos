@@ -222,7 +222,7 @@ proc defaultImageHeight(owner: AppRoot, context: ExecutionContext, spec: JsonNod
 proc colorWithOpacity(spec: JsonNode): Color =
   var color = parseHtmlColor(spec{"color"}.getStr("#000000"))
   let opacity = min(1.0, max(0.0, valueFromJsonByType(spec{"opacity"}, "float").asFloat()))
-  color.a = (opacity * 255.0).uint8
+  color.a = opacity.float32
   return color
 
 proc imageFromSpec(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext, spec: JsonNode): Image =
