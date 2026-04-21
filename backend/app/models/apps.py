@@ -1,6 +1,6 @@
 import json
 import os
-from app.utils.js_apps import COMPILED_JS_APP_FILENAME, find_js_app_source_filename
+from app.utils.js_apps import find_js_app_source_filename
 
 local_apps_path = "../frameos/src/apps"
 
@@ -49,8 +49,6 @@ def get_one_app_sources(keyword: str) -> dict[str, str]:
         files = os.listdir(local_app_path)
         for file in files:
             if file == "app_loader.nim":
-                continue
-            if file == COMPILED_JS_APP_FILENAME:
                 continue
             if has_js_source and file == "app.nim":
                 continue

@@ -37,17 +37,15 @@ suite "js app runtime":
     let runtime = newJsAppRuntime(
       category = "data",
       outputType = "text",
-      source = """globalThis.__frameosModule = {
-        get(app, context) {
+      source = """export const get = (app: { config: { mode: string; message?: string; targetNode?: number } }, context: { event: string }) => {
           if (app.config.mode === "image") {
-            return frameos.image({ width: 3, height: 2, color: "#336699" })
+            return <image width={3} height={2} color="#336699" />
           }
           if (app.config.mode === "node") {
             return frameos.node(app.config.targetNode)
           }
           return `${app.config.message}:${context.event}`
-        }
-      }"""
+        }"""
     )
 
     let textValue = runtime.get(owner, %*{"message": "hello", "mode": "text"}, context)
@@ -74,12 +72,10 @@ suite "js app runtime":
     let runtime = newJsAppRuntime(
       category = "render",
       outputType = "image",
-      source = """globalThis.__frameosModule = {
-        run(app) {
+      source = """export function run(app: { config: { duration: number } }) {
           frameos.setNextSleep(app.config.duration)
-          return frameos.image({ width: 4, height: 3, color: "#ff0000" })
-        }
-      }"""
+          return <image width={4} height={3} color="#ff0000" />
+        }"""
     )
 
     runtime.run(owner, %*{"duration": 12.5}, context)

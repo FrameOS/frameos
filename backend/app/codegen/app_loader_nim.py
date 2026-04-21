@@ -2,7 +2,7 @@ import json
 from typing import Optional, Dict, Any, List, Union
 import os
 import re
-from app.utils.js_apps import COMPILED_JS_APP_FILENAME
+from app.utils.js_apps import find_js_app_source_filename
 
 Scalar = Union[str, int, float, bool, None]
 
@@ -607,6 +607,10 @@ def write_js_app_nim(app_dir: str, config: Optional[dict] = None) -> str:
             config = json.load(f)
             assert config is not None
 
+    source_filename = find_js_app_source_filename(app_dir)
+    if not source_filename:
+        raise FileNotFoundError(f"JS app source not found in {app_dir}")
+
     fields = [f for f in config.get("fields", []) if not f.get("markdown")]
     app_config_lines: List[str] = []
     json_lines: List[str] = []
@@ -642,7 +646,7 @@ proc ensureRuntime(self: App) =
     self.runtime = newJsAppRuntime(
       category = "{category}",
       outputType = "{output_type}",
-      source = staticRead("./{COMPILED_JS_APP_FILENAME}")
+      source = staticRead("./{source_filename}")
     )
 
 proc toConfigJson(self: App): JsonNode =

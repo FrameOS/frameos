@@ -2,6 +2,7 @@ import std/[base64, json, options, strformat, strutils, tables, uri]
 import pixie
 
 import frameos/apps as frameos_apps
+import frameos/js_runtime
 import frameos/types
 import frameos/values
 import frameos/utils/image
@@ -165,8 +166,8 @@ proc ensureReady(runtime: JsAppRuntime) =
       }, __jsReplacer);
     }
   }
-  """)
-  discard runtime.js.eval(runtime.source)
+  """ & sceneJsPrelude)
+  discard runtime.js.eval(transpileSource(runtime.source, "<frameos:app:" & runtime.category & ":" & runtime.outputType & ">"))
   runtime.ready = true
 
 proc buildAppJson(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode): JsonNode =

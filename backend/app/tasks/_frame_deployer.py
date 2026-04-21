@@ -30,7 +30,7 @@ from app.codegen.scene_nim import write_scene_nim, write_scenes_nim
 from app.tasks.utils import find_nimbase_file
 from app.codegen.apps_nim import write_apps_nim
 from app.codegen.app_loader_nim import write_app_loader_nim, write_js_app_nim
-from app.utils.js_apps import compile_js_app_dir, is_js_app_dir
+from app.utils.js_apps import is_js_app_dir
 
 class FrameDeployer:
     def __init__(self, db: Session, redis: Redis, frame: Frame, nim_path: str, temp_dir: str):
@@ -205,7 +205,6 @@ class FrameDeployer:
                 with open(config_path, "r") as f:
                     config = json.load(f)
                     if is_js_app_dir(app_dir):
-                        compile_js_app_dir(app_dir)
                         with open(os.path.join(app_dir, "app.nim"), "w") as af:
                             af.write(write_js_app_nim(app_dir, config))
                     app_loader_nim = write_app_loader_nim(app_dir, config)
@@ -223,7 +222,6 @@ class FrameDeployer:
             config_json = sources["config.json"] if "config.json" in sources else '{}'
             config = json.loads(config_json)
             if is_js_app_dir(app_dir):
-                compile_js_app_dir(app_dir)
                 with open(os.path.join(app_dir, "app.nim"), "w") as af:
                     af.write(write_js_app_nim(app_dir, config))
             app_loader_nim = write_app_loader_nim(app_dir, config)
