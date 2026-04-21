@@ -114,6 +114,13 @@ proc transpileSource*(source: string, filename: string): string =
     ensureCompilerJsLocked()
     result = compilerJs.eval("__frameosTranspile(\"" & jsQuote(source) & "\", { filePath: \"" & jsQuote(filename) & "\" })")
 
+proc transpileModuleSource*(source: string, filename: string): string =
+  if source.len == 0:
+    return source
+  withLock compilerJsLock:
+    ensureCompilerJsLocked()
+    result = compilerJs.eval("__frameosTranspile(\"" & jsQuote(source) & "\", { filePath: \"" & jsQuote(filename) & "\", transforms: [\"typescript\", \"jsx\", \"imports\"] })")
+
 proc logCompileError(
   scene: InterpretedFrameScene,
   nodeId: NodeId,

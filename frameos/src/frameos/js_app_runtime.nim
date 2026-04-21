@@ -135,6 +135,8 @@ proc ensureReady(runtime: JsAppRuntime) =
     error: (...args) => jsAppLog("error", JSON.stringify(args, __jsReplacer)),
     setNextSleep: (seconds) => jsSetNextSleep(Number(seconds || 0)),
   };
+  globalThis.__frameosModule = {};
+  const exports = globalThis.__frameosModule;
   function __frameosWrapApp(app) {
     return Object.assign(app || {}, {
       log: (...args) => jsAppLog("log", JSON.stringify(args, __jsReplacer)),
@@ -166,7 +168,7 @@ proc ensureReady(runtime: JsAppRuntime) =
     }
   }
   """ & sceneJsPrelude)
-  discard runtime.js.eval(transpileSource(runtime.source, "<frameos:app:" & runtime.category & ":" & runtime.outputType & ">"))
+  discard runtime.js.eval(transpileModuleSource(runtime.source, "<frameos:app:" & runtime.category & ":" & runtime.outputType & ">"))
   runtime.ready = true
 
 proc buildAppJson(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode): JsonNode =
