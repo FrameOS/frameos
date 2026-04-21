@@ -89,6 +89,8 @@ export function EditApp({ panel, sceneId, nodeId }: EditAppProps) {
     ? 'json'
     : activeFile.endsWith('.ts')
     ? 'typescript'
+    : activeFile.endsWith('.js')
+    ? 'javascript'
     : 'python'
 
   return (
@@ -113,7 +115,7 @@ export function EditApp({ panel, sceneId, nodeId }: EditAppProps) {
               {changedFiles[file] ? '* ' : ''}
               {file}
             </Button>
-            {['app.ts', 'app.nim', 'config.json'].includes(file) ? null : (
+            {['app.ts', 'app.js', 'app.nim', 'config.json'].includes(file) ? null : (
               <DropdownMenu
                 buttonColor="none"
                 items={[

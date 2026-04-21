@@ -44,7 +44,7 @@ async def validate_python_frame_source(data: ValidateSourceRequest):
 
     if file.endswith('.py'):
         errors = validate_python(source)
-    elif file.endswith('.ts'):
+    elif file.endswith('.js') or file.endswith('.ts'):
         errors = validate_js_source(file, source)
     elif file.endswith('.nim'):
         errors = await validate_nim(source)
