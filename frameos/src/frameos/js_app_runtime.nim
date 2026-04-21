@@ -97,7 +97,6 @@ proc jsAppFieldToJson*(runtime: JsAppRuntime, value: int32): JsonNode = %* value
 proc jsAppFieldToJson*(runtime: JsAppRuntime, value: int64): JsonNode = %* value
 proc jsAppFieldToJson*(runtime: JsAppRuntime, value: float): JsonNode = %* value
 proc jsAppFieldToJson*(runtime: JsAppRuntime, value: float32): JsonNode = %* value
-proc jsAppFieldToJson*(runtime: JsAppRuntime, value: float64): JsonNode = %* value
 proc jsAppFieldToJson*(runtime: JsAppRuntime, value: JsonNode): JsonNode =
   if value.isNil:
     return %*{}
