@@ -38,10 +38,10 @@ async def test_api_apps_source_for_js_app(async_client):
     response = await async_client.get('/api/apps/source?keyword=data/jsText')
     data = response.json()
     assert response.status_code == 200
-    assert 'app.js' in data
+    assert 'app.ts' in data
     assert 'config.json' in data
     assert 'app_loader.nim' not in data
-    assert 'export function get' in data['app.js']
+    assert 'export function get' in data['app.ts']
 
 
 @pytest.mark.asyncio
@@ -75,7 +75,7 @@ async def test_validate_python_frame_source_invalid(async_client):
 
 @pytest.mark.asyncio
 async def test_validate_js_frame_source_valid(async_client):
-    data = {'file': 'app.js', 'source': 'export function get() { return "ok" }'}
+    data = {'file': 'app.ts', 'source': 'export function get(): string { return "ok" }'}
     response = await async_client.post('/api/apps/validate_source', json=data)
     assert response.status_code == 200
     assert response.json().get('errors') == []

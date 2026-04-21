@@ -633,6 +633,8 @@ import frameos/types
 import frameos/values
 import frameos/js_app_runtime
 
+const jsAppSource = staticRead("./{source_filename}")
+
 type
   AppConfig* = object
 {newline.join(app_config_lines) if app_config_lines else "    discard"}
@@ -646,7 +648,7 @@ proc ensureRuntime(self: App) =
     self.runtime = newJsAppRuntime(
       category = "{category}",
       outputType = "{output_type}",
-      source = staticRead("./{source_filename}")
+      source = jsAppSource
     )
 
 proc toConfigJson(self: App): JsonNode =

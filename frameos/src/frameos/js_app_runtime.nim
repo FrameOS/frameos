@@ -1,4 +1,4 @@
-import std/[base64, json, options, strformat, strutils, tables, uri]
+import std/[base64, json, options, strformat, strutils, tables]
 import pixie
 
 import frameos/apps as frameos_apps

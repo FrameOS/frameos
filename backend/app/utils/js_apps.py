@@ -5,7 +5,7 @@ import os
 import subprocess
 from pathlib import Path
 
-JS_APP_SOURCE_FILES = ("app.ts", "app.js")
+JS_APP_SOURCE_FILES = ("app.ts",)
 
 
 def find_js_app_source_filename(app_dir: str) -> str | None:

@@ -268,8 +268,6 @@ class SceneWriter:
         if len(sources) > 0:
             if sources.get("app.ts", None):
                 js_source_filename = "app.ts"
-            elif sources.get("app.js", None):
-                js_source_filename = "app.js"
 
         if len(sources) > 0 and sources.get("app.nim", None):
             source_lines = sources.get("app.nim").split("\n")
