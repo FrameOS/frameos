@@ -241,6 +241,12 @@ proc imageFromSpec(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionCont
         return image.get()
     return decodeImageWithFallback(data)
 
+  if spec.kind == JObject and spec{"type"}.getStr() == "image":
+    let props = spec{"props"}
+    if props.kind == JObject:
+      return imageFromSpec(runtime, owner, context, props)
+    return nil
+
   let kind = spec{"__frameosType"}.getStr()
   case kind
   of "imageRef":
@@ -285,6 +291,9 @@ proc toValue(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext, p
       return VColor(parseHtmlColor(payload{"color"}.getStr("#000000")))
     else:
       discard
+
+  if payload.kind == JObject and payload{"type"}.getStr() == "image":
+    return VImage(imageFromSpec(runtime, owner, context, payload))
 
   if expectedType == "image":
     return VImage(imageFromSpec(runtime, owner, context, payload))
