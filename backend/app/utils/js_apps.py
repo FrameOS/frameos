@@ -22,21 +22,31 @@ def is_js_app_dir(app_dir: str) -> bool:
 
 def _node_sucrase_script() -> str:
     return """
-import { transform } from 'sucrase';
 import fs from 'node:fs';
 
 const filename = process.argv[1];
 const source = fs.readFileSync(process.argv[2], 'utf8');
+const vendorPath = process.argv[3];
 
-try {
-  transform(source, {
+async function transpile() {
+  if (vendorPath && fs.existsSync(vendorPath)) {
+    globalThis.eval(fs.readFileSync(vendorPath, 'utf8'));
+    return globalThis.__frameosTranspile(source, { filePath: filename });
+  }
+
+  const { transform } = await import('sucrase');
+  return transform(source, {
     filePath: filename,
     transforms: ['typescript', 'jsx'],
     jsxRuntime: 'classic',
     jsxPragma: '__frameosJsx',
     jsxFragmentPragma: '__frameosFragment',
     production: true,
-  });
+  }).code;
+}
+
+try {
+  await transpile();
   process.stdout.write(JSON.stringify({ ok: true }));
 } catch (error) {
   process.stderr.write(JSON.stringify({
@@ -55,9 +65,11 @@ try {
 
 
 def _run_sucrase(filename: str, source_path: str) -> tuple[bool, dict]:
+    repo_root = Path(__file__).resolve().parents[3]
+    vendor_path = repo_root / "frameos" / "assets" / "compiled" / "vendor" / "sucrase.js"
     proc = subprocess.run(
-        ["node", "--input-type=module", "-e", _node_sucrase_script(), filename, source_path],
-        cwd=Path(__file__).resolve().parents[3] / "frameos" / "frontend",
+        ["node", "--input-type=module", "-e", _node_sucrase_script(), filename, source_path, str(vendor_path)],
+        cwd=repo_root,
         capture_output=True,
         text=True,
         check=False,
