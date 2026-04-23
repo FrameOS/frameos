@@ -199,6 +199,23 @@ function getRecompileFields(mode: FrameType['mode']): (keyof FrameType)[] {
   return mode === 'buildroot' ? FRAME_KEYS_REQUIRE_RECOMPILE_BUILDROOT : FRAME_KEYS_REQUIRE_RECOMPILE_RPIOS
 }
 
+export function normalizeSceneForComparison(scene: Partial<FrameScene> | null | undefined): Partial<FrameScene> | null | undefined {
+  if (!scene) {
+    return scene
+  }
+  return {
+    ...scene,
+    apps: scene.apps ?? {},
+  }
+}
+
+export function sceneEqualForComparison(
+  first: Partial<FrameScene> | null | undefined,
+  second: Partial<FrameScene> | null | undefined
+): boolean {
+  return equal(normalizeSceneForComparison(first), normalizeSceneForComparison(second))
+}
+
 function sceneChangeDetails(currentScenes: FrameScene[], deployedScenes: FrameScene[]): ChangeDetail[] {
   const details: ChangeDetail[] = []
 
@@ -223,7 +240,7 @@ function sceneChangeDetails(currentScenes: FrameScene[], deployedScenes: FrameSc
       continue
     }
 
-    if (!equal(scene, deployed)) {
+    if (!sceneEqualForComparison(scene, deployed)) {
       details.push({
         label: `Scene updated: ${scene.name || scene.id}`,
         requiresFullDeploy: mode !== 'interpreted',
@@ -860,7 +877,7 @@ export const frameLogic = kea<frameLogicType>([
 
         unsavedScenes.forEach((scene) => {
           const original = frameScenes.find((candidate) => candidate.id === scene.id)
-          if (!original || !equal(original, scene)) {
+          if (!original || !sceneEqualForComparison(original, scene)) {
             changed.add(scene.id)
           }
         })
