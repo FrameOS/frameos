@@ -39,6 +39,8 @@ def field_type_to_nim_type(field_type: str, required: bool = True) -> str:
             return 'string'
         case 'string':
             return 'string'
+        case 'font':
+            return 'string'
         case 'float':
             return 'float'
         case 'integer':
@@ -57,6 +59,30 @@ def field_type_to_nim_type(field_type: str, required: bool = True) -> str:
             if not required:
                 return 'Option[Image]'
             return 'Image'
+        case _:
+            raise ValueError(f"Invalid field type {field_type}")
+
+
+def field_type_to_value_accessor(field_type: str) -> str:
+    match field_type:
+        case 'select' | 'text' | 'string' | 'font':
+            return '.asString()'
+        case 'float':
+            return '.asFloat()'
+        case 'integer':
+            return '.asInt().int'
+        case 'boolean':
+            return '.asBool()'
+        case 'color':
+            return '.asColor()'
+        case 'json':
+            return '.asJson()'
+        case 'node':
+            return '.asNode()'
+        case 'scene':
+            return '.asScene()'
+        case 'image':
+            return '.asImage()'
         case _:
             raise ValueError(f"Invalid field type {field_type}")
 
@@ -126,6 +152,7 @@ class SceneWriter:
         self.field_types: dict[str, dict[str, str]] = {}
         self.app_sources: dict[str, list[str]] = {}
         self.app_capabilities: dict[str, set[str]] = {}
+        self.app_get_returns_value: dict[str, bool] = {}
         self.code_field_source_nodes = {}
         self.source_field_inputs = {}
         self.node_fields = {}
@@ -347,6 +374,10 @@ class SceneWriter:
                     capabilities.add("init")
                     break
         self.app_capabilities[node_id] = capabilities
+        self.app_get_returns_value[node_id] = bool(js_source_filename) or any(
+            line.startswith("proc get*(self: App") and "): Value" in line
+            for line in source_lines
+        )
 
         # { field: [['key1', 'from', 'to'], ['key2', 1, 5]] }
         seq_fields_for_node: dict[str, list[list[str | int]]] = {}
@@ -456,6 +487,48 @@ class SceneWriter:
 
         return cache_fields
 
+    def wrap_value_lines(self, value_lines: list[str], final_line: str) -> list[str]:
+        if len(value_lines) == 1:
+            return [f"{value_lines[0]}{final_line}"]
+        return [
+            "block:",
+            f"  let frameosValue = {value_lines[0]}",
+            *[f"  {line}" for line in value_lines[1:]],
+            f"  frameosValue{final_line}",
+        ]
+
+    def wrap_value_lines_as_optional_image(self, value_lines: list[str]) -> list[str]:
+        return [
+            "block:",
+            f"  let frameosValue = {value_lines[0]}",
+            *[f"  {line}" for line in value_lines[1:]],
+            "  if frameosValue.kind == fkImage: some(frameosValue.asImage()) else: none(Image)",
+        ]
+
+    def coerce_code_field_lines(
+        self,
+        *,
+        node_id: str,
+        key: str,
+        source_node_id: str,
+        code_lines: list[str],
+        field_types: dict[str, str],
+        required_fields: dict[str, bool],
+    ) -> list[str]:
+        field_type = field_types.get(key, "string")
+        required = required_fields.get(key, False)
+        source_node = self.nodes_by_id.get(source_node_id)
+
+        if source_node and source_node.get("type") == "app" and self.app_get_returns_value.get(source_node_id, False):
+            if field_type == "image" and not required:
+                return self.wrap_value_lines_as_optional_image(code_lines)
+            return self.wrap_value_lines(code_lines, field_type_to_value_accessor(field_type))
+
+        if field_type == "image" and not required:
+            code_lines[0] = "some(" + code_lines[0]
+            code_lines[-1] = code_lines[-1] + ")"
+        return code_lines
+
     # case_or_block = 'case' or 'block' or 'vars' or 'blockWithVars'
     def process_app_run_lines(self, node, case_or_block = "case"):
         node_id = node["id"]
@@ -489,11 +562,15 @@ class SceneWriter:
                 continue
 
             if key in code_fields_for_node:
-                code_lines = self.get_code_field_value(code_fields_for_node[key])
-                # Wrap optional images with some()
-                if not self.required_fields[node_id].get(key, False) and field_types_for_node.get(key, "string") == "image":
-                    code_lines[0] = "some(" + code_lines[0]
-                    code_lines[-1] = code_lines[-1] + ")"
+                source_node_id = code_fields_for_node[key]
+                code_lines = self.coerce_code_field_lines(
+                    node_id=node_id,
+                    key=key,
+                    source_node_id=source_node_id,
+                    code_lines=self.get_code_field_value(source_node_id),
+                    field_types=field_types_for_node,
+                    required_fields=self.required_fields[node_id],
+                )
                 run_lines += [f"  {fieldAssignment} = {code_lines[0]}"]
                 for line in code_lines[1:]:
                     run_lines += [f"  {line}"]
@@ -989,12 +1066,15 @@ var exportedScene* = ExportedScene(
 
         if key in field_inputs_for_node:
             if key in code_fields_for_node:
-                code_lines = self.get_code_field_value(code_fields_for_node[key])
-                # Wrap optional images with some()
-                if not self.required_fields[node_id].get(key, False) and self.field_types[node_id].get(key, "string") == "image":
-                    code_lines[0] = "some(" + code_lines[0]
-                    code_lines[-1] = code_lines[-1] + ")"
-                return code_lines
+                source_node_id = code_fields_for_node[key]
+                return self.coerce_code_field_lines(
+                    node_id=node_id,
+                    key=key,
+                    source_node_id=source_node_id,
+                    code_lines=self.get_code_field_value(source_node_id),
+                    field_types=self.field_types[node_id],
+                    required_fields=required_fields,
+                )
 
             return [f"{field_inputs_for_node[key]}"]
         elif key in source_field_inputs_for_node:
@@ -1211,16 +1291,16 @@ var exportedScene* = ExportedScene(
         node_integer = self.node_id_to_integer(node_id)
         wrapped = [
             "block:",
-            "  let __frameosCodeValue = block:",
+            "  let frameosCodeValue = block:",
         ]
 
         for line in code_lines:
             wrapped.append(f"    {line}")
 
         wrapped.append(
-            f"  logCodeNodeOutput(self.FrameScene, {node_integer}.NodeId, __frameosCodeValue)"
+            f"  logCodeNodeOutput(self.FrameScene, {node_integer}.NodeId, frameosCodeValue)"
         )
-        wrapped.append("  __frameosCodeValue")
+        wrapped.append("  frameosCodeValue")
 
         return wrapped
 
@@ -1240,7 +1320,9 @@ var exportedScene* = ExportedScene(
 
         # data type
         cache_data_type = 'string'
-        if self.app_configs.get(node_id) is not None:
+        if self.app_get_returns_value.get(node_id, False):
+            cache_data_type = 'Value'
+        elif self.app_configs.get(node_id) is not None:
             app_config = self.app_configs[node_id]
             if app_config.get('output') is not None and len(app_config.get('output', [])) > 0:
                 output = app_config['output'][0]
