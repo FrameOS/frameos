@@ -9,6 +9,7 @@ import { AppNodeData } from '../../../../types'
 import { appsLogic } from '../Apps/appsLogic'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { diagramLogic } from '../Diagram/diagramLogic'
+import { buildSceneApp, isRepoAppKeyword } from '../../../../utils/sceneApps'
 
 export interface ModelMarker extends editor.IMarkerData {}
 
@@ -35,7 +36,7 @@ export const editAppLogic = kea<editAppLogicType>([
     values: [
       frameLogic({ frameId }),
       ['frameForm'],
-      appsLogic,
+      appsLogic({ frameId }),
       ['apps'],
       diagramLogic({ frameId, sceneId }),
       ['scene'],
@@ -62,8 +63,21 @@ export const editAppLogic = kea<editAppLogicType>([
       },
     ],
     appData: [(s) => [s.app], (app): AppNodeData | null => app?.data || null],
-    savedSources: [(s) => [s.appData], (appData): Record<string, string> | null => appData?.sources || null],
     savedKeyword: [(s) => [s.appData], (appData): string | null => appData?.keyword || null],
+    sceneAppKey: [
+      (s) => [s.scene, s.savedKeyword],
+      (scene, savedKeyword): string | null =>
+        savedKeyword && (scene?.apps?.[savedKeyword] || isRepoAppKeyword(savedKeyword)) ? savedKeyword : null,
+    ],
+    sceneApp: [
+      (s) => [s.scene, s.sceneAppKey],
+      (scene, sceneAppKey) => (sceneAppKey ? scene?.apps?.[sceneAppKey] ?? null : null),
+    ],
+    isSceneApp: [(s) => [s.sceneAppKey], (sceneAppKey): boolean => !!sceneAppKey],
+    savedSources: [
+      (s) => [s.appData, s.sceneApp],
+      (appData, sceneApp): Record<string, string> | null => appData?.sources || sceneApp?.sources || null,
+    ],
     isInterpreted: [(s) => [s.scene], (scene): boolean => scene?.settings?.execution === 'interpreted'],
   }),
   loaders(({ actions, values }) => ({
@@ -154,9 +168,9 @@ export const editAppLogic = kea<editAppLogicType>([
       },
     ],
     title: [
-      (s, p) => [s.savedKeyword, p.nodeId, s.apps, s.configJson],
-      (keyword, nodeId, apps, configJson): string =>
-        configJson?.name || (keyword ? apps[keyword]?.name || keyword : nodeId),
+      (s, p) => [s.savedKeyword, p.nodeId, s.apps, s.sceneApp, s.configJson],
+      (keyword, nodeId, apps, sceneApp, configJson): string =>
+        configJson?.name || sceneApp?.name || (keyword ? apps[keyword]?.name || keyword : nodeId),
     ],
     modelMarkers: [
       (s) => [s.sourceErrors],
@@ -187,10 +201,29 @@ export const editAppLogic = kea<editAppLogicType>([
   }),
   listeners(({ actions, props, values }) => ({
     saveChanges: () => {
-      if (values.isInterpreted) {
-        actions.updateScene(props.sceneId, { settings: { ...values.scene?.settings, execution: 'compiled' } })
+      const settings = values.isInterpreted
+        ? { ...values.scene?.settings, execution: 'compiled' as const }
+        : values.scene?.settings
+      if (values.sceneAppKey) {
+        const sceneApps = values.scene?.apps ?? {}
+        actions.updateScene(props.sceneId, {
+          apps: {
+            ...sceneApps,
+            [values.sceneAppKey]: buildSceneApp(
+              values.sceneAppKey,
+              values.apps[values.sceneAppKey],
+              values.sources,
+              values.sceneApp ?? undefined
+            ),
+          },
+          settings,
+        })
+      } else {
+        if (values.isInterpreted) {
+          actions.updateScene(props.sceneId, { settings })
+        }
+        actions.updateNodeData(props.sceneId, props.nodeId, { sources: values.sources })
       }
-      actions.updateNodeData(props.sceneId, props.nodeId, { sources: values.sources })
       actions.setInitialSources(values.sources)
     },
     setInitialSources: ({ sources }) => {

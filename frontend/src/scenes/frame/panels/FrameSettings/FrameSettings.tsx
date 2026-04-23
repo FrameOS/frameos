@@ -138,7 +138,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
     verifyTlsCertificates,
   } = useActions(frameLogic)
   const { deleteFrame } = useActions(framesModel)
-  const { appsWithSaveAssets } = useValues(appsLogic)
+  const { appsWithSaveAssets } = useValues(appsLogic({ frameId }))
   const {
     clearBuildCache,
     downloadBuildZip,

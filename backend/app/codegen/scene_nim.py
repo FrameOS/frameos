@@ -1,10 +1,12 @@
+from __future__ import annotations
+
 import json
 import os
 import math
 import re
 
 from app.models.frame import Frame
-from app.models.apps import get_local_frame_apps, local_apps_path
+from app.models.apps import get_local_frame_apps, get_local_app_path, get_one_app_sources, get_scene_app_id
 from app.codegen.utils import sanitize_nim_string, natural_keys
 from app.utils.js_apps import find_js_app_source_filename
 
@@ -106,6 +108,7 @@ class SceneWriter:
         self.scene_id = scene.get("id", "default")
         self.nodes = scene.get("nodes", [])
         self.nodes_by_id = {n["id"]: n for n in self.nodes}
+        self.scene_apps = scene.get("apps", {}) if isinstance(scene.get("apps", {}), dict) else {}
         self.app_configs = {}
         self.edges = scene.get("edges", [])
         self.node_integer_map = {}
@@ -135,6 +138,36 @@ class SceneWriter:
         if node_id not in self.node_integer_map:
             self.node_integer_map[node_id] = len(self.node_integer_map) + 1
         return self.node_integer_map[node_id]
+
+    def app_sources_for_node(self, node) -> dict:
+        data = node.get("data", {})
+        sources = data.get("sources", {})
+        if isinstance(sources, dict) and len(sources) > 0:
+            return sources
+
+        keyword = data.get("keyword", "")
+        scene_app = self.scene_apps.get(keyword)
+        if isinstance(scene_app, dict):
+            scene_sources = scene_app.get("sources", {})
+            if isinstance(scene_sources, dict) and len(scene_sources) > 0:
+                return scene_sources
+
+        if isinstance(keyword, str) and keyword.startswith("repo/"):
+            return get_one_app_sources(keyword)
+
+        return {}
+
+    def generated_app_id_for_node(self, node) -> str | None:
+        data = node.get("data", {})
+        sources = data.get("sources", {})
+        if isinstance(sources, dict) and len(sources) > 0:
+            return "nodeapp_" + node["id"].replace("-", "_")
+
+        keyword = data.get("keyword", "")
+        if keyword in self.scene_apps or (isinstance(keyword, str) and keyword.startswith("repo/")):
+            return get_scene_app_id(keyword)
+
+        return None
 
     def write_scene_nim(self) -> str:
         self.read_edges()
@@ -212,9 +245,9 @@ class SceneWriter:
 
     def process_app_import(self, node):
         node_id = node["id"]
-        sources = node.get("data", {}).get("sources", {})
+        sources = self.app_sources_for_node(node)
         name = node.get("data", {}).get("keyword", f"app_{node_id}")
-        name_identifier = name.replace("/", "_")
+        name_identifier = re.sub(r"\W+", "_", name)
         app_id = f"node{self.node_id_to_integer(node_id)}"
 
         if name not in self.available_apps and len(sources) == 0:
@@ -226,9 +259,9 @@ class SceneWriter:
             except Exception:
                 raise ValueError(message)
 
-        if len(sources) > 0:
-            node_app_id = "nodeapp_" + node_id.replace("-", "_")
-            app_import = f"import apps/{node_app_id}/app as nodeApp{self.node_id_to_integer(node_id)}"
+        generated_app_id = self.generated_app_id_for_node(node)
+        if generated_app_id:
+            app_import = f"import apps/{generated_app_id}/app as nodeApp{self.node_id_to_integer(node_id)}"
             self.scene_object_fields += [
                 f"{app_id}: nodeApp{self.node_id_to_integer(node_id)}.App"
             ]
@@ -245,7 +278,7 @@ class SceneWriter:
         if node_id in self.app_configs:
             return
 
-        sources = node.get("data", {}).get("sources", {})
+        sources = self.app_sources_for_node(node)
         name = node.get("data", {}).get("keyword", f"app_{node_id}")
         node_integer = self.node_id_to_integer(node_id)
         app_id = f"node{node_integer}"
@@ -254,8 +287,9 @@ class SceneWriter:
         if len(sources) > 0 and sources.get("config.json", None):
             config = json.loads(sources.get("config.json"))
         else:
-            config_path = os.path.join(local_apps_path, name, "config.json")
-            if os.path.exists(config_path):
+            local_app_path = get_local_app_path(name)
+            config_path = os.path.join(local_app_path, "config.json") if local_app_path else ""
+            if config_path and os.path.exists(config_path):
                 with open(config_path, "r") as file:
                     config = json.load(file)
             else:
@@ -276,14 +310,15 @@ class SceneWriter:
         elif len(sources) > 0 and js_source_filename:
             source_lines = sources.get(js_source_filename, "").split("\n")
         else:
-            source_path = os.path.join(local_apps_path, name, "app.nim")
-            if os.path.exists(source_path):
+            local_app_path = get_local_app_path(name)
+            source_path = os.path.join(local_app_path, "app.nim") if local_app_path else ""
+            if source_path and os.path.exists(source_path):
                 with open(source_path, "r") as file:
                     source_lines = file.read().split("\n")
             else:
-                local_js_source = find_js_app_source_filename(os.path.join(local_apps_path, name))
+                local_js_source = find_js_app_source_filename(local_app_path) if local_app_path else None
                 if local_js_source:
-                    with open(os.path.join(local_apps_path, name, local_js_source), "r") as file:
+                    with open(os.path.join(local_app_path, local_js_source), "r") as file:
                         source_lines = file.read().split("\n")
                     js_source_filename = local_js_source
                 else:

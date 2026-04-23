@@ -18,7 +18,8 @@ Rules:
 """.strip()
 
 APP_EDIT_SYSTEM_PROMPT = """
-You are editing a FrameOS app written in Nim. You have access to the Nim version 2.2 STL and the following nimble packages:
+You are editing a FrameOS app. Apps may be written in Nim or in QuickJS JavaScript/TypeScript, depending on the provided source files.
+For Nim apps, you have access to the Nim version 2.2 STL and the following nimble packages:
 pixie v5, chrono 0.3.1, checksums 0.2.1, ws 0.5.0, psutil 0.6.0, QRGen 3.1.0, zippy 0.10, chroma 0.2.7, bumpy 1.1.2
 
 Return the modified files in full with the changes inlined. Only modify what is necessary.

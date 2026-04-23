@@ -8,10 +8,6 @@ import apps/data/eventsToAgenda/app_loader as data_eventsToAgenda_loader
 import apps/data/frameOSGallery/app_loader as data_frameOSGallery_loader
 import apps/data/haSensor/app_loader as data_haSensor_loader
 import apps/data/icalJson/app_loader as data_icalJson_loader
-import apps/data/jsImage/app_loader as data_jsImage_loader
-import apps/data/jsNode/app_loader as data_jsNode_loader
-import apps/data/jsSvg/app_loader as data_jsSvg_loader
-import apps/data/jsText/app_loader as data_jsText_loader
 import apps/data/localImage/app_loader as data_localImage_loader
 import apps/data/log/app_loader as data_log_loader
 import apps/data/newImage/app_loader as data_newImage_loader
@@ -28,7 +24,6 @@ import apps/data/weather/app_loader as data_weather_loader
 import apps/data/xmlToJson/app_loader as data_xmlToJson_loader
 import apps/logic/breakIfRendering/app_loader as logic_breakIfRendering_loader
 import apps/logic/ifElse/app_loader as logic_ifElse_loader
-import apps/logic/jsNextSleep/app_loader as logic_jsNextSleep_loader
 import apps/logic/nextSleepDuration/app_loader as logic_nextSleepDuration_loader
 import apps/logic/setAsState/app_loader as logic_setAsState_loader
 import apps/render/calendar/app_loader as render_calendar_loader
@@ -51,10 +46,6 @@ proc initApp*(keyword: string, node: DiagramNode, scene: FrameScene): AppRoot =
   of "data/frameOSGallery": data_frameOSGallery_loader.init(node, scene)
   of "data/haSensor": data_haSensor_loader.init(node, scene)
   of "data/icalJson": data_icalJson_loader.init(node, scene)
-  of "data/jsImage": data_jsImage_loader.init(node, scene)
-  of "data/jsNode": data_jsNode_loader.init(node, scene)
-  of "data/jsSvg": data_jsSvg_loader.init(node, scene)
-  of "data/jsText": data_jsText_loader.init(node, scene)
   of "data/localImage": data_localImage_loader.init(node, scene)
   of "data/log": data_log_loader.init(node, scene)
   of "data/newImage": data_newImage_loader.init(node, scene)
@@ -71,7 +62,6 @@ proc initApp*(keyword: string, node: DiagramNode, scene: FrameScene): AppRoot =
   of "data/xmlToJson": data_xmlToJson_loader.init(node, scene)
   of "logic/breakIfRendering": logic_breakIfRendering_loader.init(node, scene)
   of "logic/ifElse": logic_ifElse_loader.init(node, scene)
-  of "logic/jsNextSleep": logic_jsNextSleep_loader.init(node, scene)
   of "logic/nextSleepDuration": logic_nextSleepDuration_loader.init(node, scene)
   of "logic/setAsState": logic_setAsState_loader.init(node, scene)
   of "render/calendar": render_calendar_loader.init(node, scene)
@@ -95,10 +85,6 @@ proc setAppField*(keyword: string, app: AppRoot, field: string, value: Value) =
   of "data/frameOSGallery": data_frameOSGallery_loader.setField(app, field, value)
   of "data/haSensor": data_haSensor_loader.setField(app, field, value)
   of "data/icalJson": data_icalJson_loader.setField(app, field, value)
-  of "data/jsImage": data_jsImage_loader.setField(app, field, value)
-  of "data/jsNode": data_jsNode_loader.setField(app, field, value)
-  of "data/jsSvg": data_jsSvg_loader.setField(app, field, value)
-  of "data/jsText": data_jsText_loader.setField(app, field, value)
   of "data/localImage": data_localImage_loader.setField(app, field, value)
   of "data/log": data_log_loader.setField(app, field, value)
   of "data/newImage": data_newImage_loader.setField(app, field, value)
@@ -115,7 +101,6 @@ proc setAppField*(keyword: string, app: AppRoot, field: string, value: Value) =
   of "data/xmlToJson": data_xmlToJson_loader.setField(app, field, value)
   of "logic/breakIfRendering": logic_breakIfRendering_loader.setField(app, field, value)
   of "logic/ifElse": logic_ifElse_loader.setField(app, field, value)
-  of "logic/jsNextSleep": logic_jsNextSleep_loader.setField(app, field, value)
   of "logic/nextSleepDuration": logic_nextSleepDuration_loader.setField(app, field, value)
   of "logic/setAsState": logic_setAsState_loader.setField(app, field, value)
   of "render/calendar": render_calendar_loader.setField(app, field, value)
@@ -132,7 +117,6 @@ proc runApp*(keyword: string, app: AppRoot, context: ExecutionContext) =
   case keyword:
   of "logic/breakIfRendering": logic_breakIfRendering_loader.run(app, context)
   of "logic/ifElse": logic_ifElse_loader.run(app, context)
-  of "logic/jsNextSleep": logic_jsNextSleep_loader.run(app, context)
   of "logic/nextSleepDuration": logic_nextSleepDuration_loader.run(app, context)
   of "logic/setAsState": logic_setAsState_loader.run(app, context)
   of "render/calendar": render_calendar_loader.run(app, context)
@@ -156,10 +140,6 @@ proc getApp*(keyword: string, app: AppRoot, context: ExecutionContext): Value =
   of "data/frameOSGallery": data_frameOSGallery_loader.get(app, context)
   of "data/haSensor": data_haSensor_loader.get(app, context)
   of "data/icalJson": data_icalJson_loader.get(app, context)
-  of "data/jsImage": data_jsImage_loader.get(app, context)
-  of "data/jsNode": data_jsNode_loader.get(app, context)
-  of "data/jsSvg": data_jsSvg_loader.get(app, context)
-  of "data/jsText": data_jsText_loader.get(app, context)
   of "data/localImage": data_localImage_loader.get(app, context)
   of "data/log": data_log_loader.get(app, context)
   of "data/newImage": data_newImage_loader.get(app, context)

@@ -31,7 +31,7 @@ suite "js app runtime":
     let config = testConfig()
     let logger = testLogger(config)
     let scene = FrameScene(id: "tests/js-app".SceneId, frameConfig: config, state: %*{}, logger: logger)
-    let owner = AppRoot(nodeId: 7.NodeId, nodeName: "data/jsText", scene: scene, frameConfig: config)
+    let owner = AppRoot(nodeId: 7.NodeId, nodeName: "repo/jsExamples/jsText", scene: scene, frameConfig: config)
     let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
 
     let runtime = newJsAppRuntime(
@@ -65,7 +65,7 @@ suite "js app runtime":
     let config = testConfig()
     let logger = testLogger(config)
     let scene = FrameScene(id: "tests/js-app-run".SceneId, frameConfig: config, state: %*{}, logger: logger)
-    let owner = AppRoot(nodeId: 8.NodeId, nodeName: "logic/jsNextSleep", scene: scene, frameConfig: config)
+    let owner = AppRoot(nodeId: 8.NodeId, nodeName: "repo/jsExamples/jsNextSleep", scene: scene, frameConfig: config)
     var image = newImage(4, 3)
     let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: true, image: image, loopIndex: 0, loopKey: ".", nextSleep: -1)
 

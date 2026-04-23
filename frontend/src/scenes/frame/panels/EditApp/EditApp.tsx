@@ -42,6 +42,7 @@ export function EditApp({ panel, sceneId, nodeId }: EditAppProps) {
     modelMarkers,
     savedKeyword,
     savedSources,
+    isSceneApp,
   } = useValues(logic)
   const { saveChanges, setActiveFile, updateFile, addFile, deleteFile } = useActions(logic)
   const [[monaco, editor], setMonacoAndEditor] = useState<[Monaco | null, importedEditor.IStandaloneCodeEditor | null]>(
@@ -167,7 +168,7 @@ export function EditApp({ panel, sceneId, nodeId }: EditAppProps) {
               <>
                 You have changes.{' '}
                 <Button size="small" onClick={saveChanges}>
-                  Click here to {!savedSources ? 'fork the app' : 'save them'}
+                  Click here to {isSceneApp ? 'save the scene app' : !savedSources ? 'fork the app' : 'save them'}
                 </Button>
               </>
             )}

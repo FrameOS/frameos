@@ -2,11 +2,12 @@ from __future__ import annotations
 import json
 import os
 import re
-from glob import glob
+from pathlib import Path
 from typing import Optional
 
 # from ..models.frame import Frame
 # from ..models.apps import get_apps_from_scenes
+
 
 def _alias_from_id(app_id: str) -> str:
     """
@@ -18,11 +19,34 @@ def _alias_from_id(app_id: str) -> str:
         alias = "_" + alias
     return alias
 
-def _module_from_id(app_id: str) -> str:
+
+def _module_from_app_dir(source_dir: Path, app_dir: Path) -> str:
     """
-    App loader Nim module path from id (works for both 'a/b' and 'nodeapp_x').
+    App loader Nim module path from src/apps/apps.nim.
     """
-    return f"apps/{app_id}/app_loader"
+    app_loader = app_dir / "app_loader"
+    src_root = source_dir / "src"
+    try:
+        module_path = app_loader.relative_to(src_root)
+    except ValueError:
+        module_path = Path(os.path.relpath(app_loader, source_dir / "src" / "apps"))
+    return str(module_path).replace(os.sep, "/")
+
+
+def _iter_config_app_dirs(apps_root: Path):
+    if not apps_root.exists():
+        return
+    for category_dir in sorted(apps_root.iterdir()):
+        if not category_dir.is_dir():
+            continue
+        if (category_dir / "config.json").exists():
+            yield category_dir.name, category_dir
+        for app_dir in sorted(category_dir.iterdir()):
+            if not app_dir.is_dir():
+                continue
+            if (app_dir / "config.json").exists():
+                yield f"{category_dir.name}/{app_dir.name}", app_dir
+
 
 def write_apps_nim(tmp_dir: Optional[str] = None) -> str:
     """
@@ -34,19 +58,19 @@ def write_apps_nim(tmp_dir: Optional[str] = None) -> str:
     """
     if not tmp_dir:
         tmp_dir = os.environ.get("FRAMEOS_ROOT_DIR", "frameos")
-    source_dir = os.path.abspath(tmp_dir)
+    source_dir = Path(os.path.abspath(tmp_dir))
 
     # find all apps
     all_apps = {}
-    for app_dir in glob(os.path.join(source_dir, "src", "apps", "*", "*")):
-        config_path = os.path.join(app_dir, "config.json")
-        if os.path.exists(config_path):
-            with open(config_path, "r") as f:
-                id = f"{app_dir.split('/')[-2]}/{app_dir.split('/')[-1]}"
-                if id.startswith("legacy"):
-                    continue
-                config = json.load(f)
-                all_apps[id] = config
+    app_modules = {}
+    for app_id, app_dir in _iter_config_app_dirs(source_dir / "src" / "apps"):
+        if app_id.startswith("legacy"):
+            continue
+        config_path = app_dir / "config.json"
+        with config_path.open("r") as f:
+            config = json.load(f)
+            all_apps[app_id] = config
+            app_modules[app_id] = _module_from_app_dir(source_dir, app_dir)
 
     # 1) Imports
     imports: list[str] = [
@@ -56,7 +80,7 @@ def write_apps_nim(tmp_dir: Optional[str] = None) -> str:
     items = []
 
     for app_id, cfg in sorted(all_apps.items(), key=lambda kv: kv[0]):
-        mod = _module_from_id(app_id)
+        mod = app_modules[app_id]
         alias_base = _alias_from_id(app_id) + "_loader"
         alias = alias_base
         n = 2

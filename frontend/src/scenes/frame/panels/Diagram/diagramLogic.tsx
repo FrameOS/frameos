@@ -36,6 +36,7 @@ import {
   FrameScene,
   FrameSceneSettings,
   MarkdownField,
+  SceneApp,
   StateNodeData,
 } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
@@ -44,6 +45,13 @@ import { arrangeNodes } from '../../../../utils/arrangeNodes'
 import copy from 'copy-to-clipboard'
 import { Option } from '../../../../components/Select'
 import _events from '../../../../../schema/events.json'
+import {
+  forkSceneAppKey,
+  mergeSceneAndCatalogApps,
+  sceneAppToAppConfig,
+  sceneAppsWithKeyword,
+  updateSceneAppsInScenes,
+} from '../../../../utils/sceneApps'
 
 const events = _events as FrameEvent[]
 
@@ -217,6 +225,8 @@ export const diagramLogic = kea<diagramLogicType>([
     rearrangeCurrentScene: true,
     fitDiagramView: true,
     keywordDropped: (keyword: string, type: string, position: XYPosition) => ({ keyword, type, position }),
+    setSceneApps: (apps: Record<string, SceneApp>, forceCompiled: boolean = false) => ({ apps, forceCompiled }),
+    forkSceneApp: (nodeId: string) => ({ nodeId }),
     updateNodeData: (id: string, data: Record<string, any>) => ({ id, data }),
     updateEdge: (edge: Edge) => ({ edge }),
     updateNodeConfig: (id: string, field: string, value: any) => ({ id, field, value }),
@@ -347,6 +357,12 @@ export const diagramLogic = kea<diagramLogicType>([
       (editingFrame, sceneId) => (editingFrame.scenes ?? []).find((s) => s.id === sceneId) || null,
     ],
     sceneName: [(s) => [s.scene], (scene) => scene?.name || (scene?.id ? `Scene: ${scene.id}` : 'Untitled scene')],
+    sceneApps: [(s) => [s.scene], (scene): Record<string, SceneApp> => scene?.apps ?? {}],
+    effectiveApps: [
+      (s) => [s.apps, s.scene],
+      (apps, scene): Record<string, AppConfig> => mergeSceneAndCatalogApps(apps, scene),
+      { resultEqualityCheck: equal },
+    ],
     selectedNode: [(s) => [s.nodes], (nodes): Node | null => nodes.find((node) => node.selected) ?? null],
     selectedNodeId: [(s) => [s.selectedNode], (node) => node?.id ?? null],
     selectedNodeIds: [
@@ -395,8 +411,8 @@ export const diagramLogic = kea<diagramLogicType>([
       },
     ],
     hasChanges: [
-      (s) => [s.nodes, s.edges, s.sceneId, s.originalFrame],
-      (nodes, edges, sceneId, originalFrame) => {
+      (s) => [s.nodes, s.edges, s.sceneApps, s.sceneId, s.originalFrame],
+      (nodes, edges, sceneApps, sceneId, originalFrame) => {
         const scene = originalFrame?.scenes?.find((s) => s.id === sceneId)
         return (
           !equal(
@@ -406,7 +422,8 @@ export const diagramLogic = kea<diagramLogicType>([
           !equal(
             edges?.map((e) => (e.selected ? { ...e, selected: false } : e)),
             scene?.edges
-          )
+          ) ||
+          !equal(sceneApps, scene?.apps ?? {})
         )
       },
     ],
@@ -632,6 +649,55 @@ export const diagramLogic = kea<diagramLogicType>([
       }
       actions.recordHistory(makeHistorySnapshot(values.nodes, values.rawEdges))
     },
+    setSceneApps: ({ apps, forceCompiled }) => {
+      actions.setFrameFormValues({
+        scenes: updateSceneAppsInScenes(values.editingFrame.scenes, props.sceneId, apps, forceCompiled),
+      })
+    },
+    forkSceneApp: ({ nodeId }) => {
+      const node = values.nodesById[nodeId]
+      if (!node || node.type !== 'app') {
+        return
+      }
+      const keyword = (node.data as AppNodeData).keyword
+      const sceneApp = values.sceneApps[keyword]
+      if (!sceneApp) {
+        return
+      }
+      const app = values.effectiveApps[keyword] ?? sceneAppToAppConfig(sceneApp)
+      const newKeyword = forkSceneAppKey(values.sceneApps, keyword, app)
+      const forkName = app.name ? `${app.name} copy` : sceneApp.name
+      const sources = { ...sceneApp.sources }
+      if (forkName && sources['config.json']) {
+        try {
+          sources['config.json'] = JSON.stringify({ ...JSON.parse(sources['config.json']), name: forkName }, null, 2)
+        } catch {
+          // Keep the original config if it is not valid JSON; the editor will surface the parse error.
+        }
+      }
+      const newApps = {
+        ...values.sceneApps,
+        [newKeyword]: {
+          ...sceneApp,
+          sources,
+          source: sceneApp.source || keyword,
+          name: forkName,
+        },
+      }
+      const newNodes = values.nodes.map((node) =>
+        node.id === nodeId ? { ...node, data: { ...node.data, keyword: newKeyword } } : node
+      )
+      actions.setFrameFormValues({
+        scenes: updateSceneAppsInScenes(
+          values.editingFrame.scenes,
+          props.sceneId,
+          newApps,
+          false,
+          newNodes.map((node) => (node.selected ? { ...node, selected: false } : node))
+        ),
+      })
+      actions.setNodes(newNodes)
+    },
     undo: () => {
       const previous = values.history.past[values.history.past.length - 1]
       if (!previous) {
@@ -661,7 +727,7 @@ export const diagramLogic = kea<diagramLogicType>([
         let fields: (AppConfigField | MarkdownField)[] | null = null
         if (node.type === 'app' || node.type === 'source') {
           const keyword = (node.data as AppNodeData)?.keyword
-          fields = keyword ? (values.apps[keyword] as AppConfig | undefined)?.fields ?? null : null
+          fields = keyword ? (values.effectiveApps[keyword] as AppConfig | undefined)?.fields ?? null : null
         } else if (node.type === 'dispatch' || node.type === 'event') {
           const keyword = (node.data as DispatchNodeData | EventNodeData)?.keyword
           const event = keyword ? events.find((event) => event.name === keyword) ?? null : null
@@ -688,13 +754,18 @@ export const diagramLogic = kea<diagramLogicType>([
       actions.setNodes(arrangeNodes(values.nodes, values.edges, { fieldOrderByNodeId }))
       actions.fitDiagramView()
     },
-    keywordDropped: ({ keyword, type, position }) => {
+    keywordDropped: async ({ keyword, type, position }) => {
       // Whenever something is dropped on the diagram from the side panel
       if (type === 'app') {
-        const app = values.apps[keyword]
+        let app = values.effectiveApps[keyword] ?? values.apps[keyword]
         if (!app) {
           console.error('App not found:', keyword)
           return
+        }
+        const sceneApps = await sceneAppsWithKeyword(values.sceneApps, keyword, app)
+        if (sceneApps !== values.sceneApps) {
+          actions.setSceneApps(sceneApps, true)
+          app = sceneAppToAppConfig(sceneApps[keyword])
         }
         const newNode: DiagramNode = {
           id: uuidv4(),

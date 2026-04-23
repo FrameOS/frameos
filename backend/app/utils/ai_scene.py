@@ -140,7 +140,7 @@ Keep the summary concise and technical. Do not include markdown.
 SCENE_JSON_SYSTEM_PROMPT = """
 You are a FrameOS scene generator. Build scenes JSON that can be uploaded to FrameOS.
 Reference TypeScript shapes (for structure sanity):
-- Scene: { id: string, name: string, nodes: Node[], edges: Edge[], settings: { execution: "interpreted", ... }, fields?: Field[] }
+- Scene: { id: string, name: string, nodes: Node[], edges: Edge[], apps?: object, settings: { execution: "interpreted", ... }, fields?: Field[] }
 - Node: { id: string, type: "event"|"dispatch"|"app"|"state"|"code"|"scene", data: NodeData, position?: { x:number, y:number } }
 - Edge: { id?: string, type?: "appNodeEdge"|"codeNodeEdge", source: string, target: string, sourceHandle?: string, targetHandle?: string }
 - Field: { name: string, type: FieldType, label?: string, description?: string, required?: boolean, value?: any, options?: string[] }
@@ -180,6 +180,7 @@ Follow these rules:
 - Every state node must include data.value as a string default (use "" unless the prompt specifies a different default).
 - Scene nodes embed other scenes; set data.keyword to the scene id.
 - App node data must include data.keyword (app identifier) and data.config (app configuration).
+- App keywords starting with "repo/" are repo app templates. Only use them when their sources are already provided in scene.apps; otherwise prefer built-in app keywords.
 - Data apps (e.g. "data/openaiText", "data/openaiImage") provide data via codeNodeEdge edges.
 - Use ONLY app keywords from the provided context. If none match, use "render/text" and a simple message.
 - Prefer minimal but valid configs; omit fields when not needed.

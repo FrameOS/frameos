@@ -7,7 +7,7 @@
 ## Top-level layout
 - `backend/` – Python FastAPI application that exposes REST/WS APIs, schedules background jobs, and manages persistence via SQLAlchemy. Includes Alembic migrations, ARQ worker tasks, and pytest suites. 【F:backend/app/fastapi.py†L1-L101】【F:backend/app/tasks/worker.py†L1-L64】【F:backend/app/models/user.py†L1-L16】
 - `frontend/` – React + TypeScript single-page application built with esbuild, Tailwind, and kea state management. Compiled assets live in `frontend/dist` and are served by the backend when present. 【F:frontend/package.json†L1-L66】【F:backend/app/fastapi.py†L38-L86】
-- `frameos/` – Nim-based runtime for devices, containing system drivers, app definitions, and assets compiled into the on-device application. Entry point `src/frameos.nim` boots the async runtime. 【F:frameos/src/frameos.nim†L1-L6】
+- `frameos/` – Nim-based runtime for devices, containing system drivers, Nim app definitions, and assets compiled into the on-device application. Nim apps live in `src/apps`; repo-provided JavaScript examples live outside the runtime under `repo/apps/<folder>`. Entry point `src/frameos.nim` boots the async runtime. 【F:frameos/src/frameos.nim†L1-L6】
 - `e2e/` – Scene/asset generation utilities and snapshot-based end-to-end tests for validating rendered output. 【F:e2e/README.md†L1-L6】
 - Supporting files at the root include Docker configuration, Procfile, install scripts, and version metadata for packaging and deployment. 【F:docker-compose.yml†L1-L14】
 
@@ -39,7 +39,8 @@
 
 ## Device runtime (Nim) notes
 - `frameos/frameos` houses the on-device runtime written in Nim with asyncdispatch.
-- Entry point `src/frameos.nim` waits on `startFrameOS()` defined under `src/frameos/frameos`. Drivers, system integrations, and app implementations live in nested directories (`src/apps`, `src/drivers`, `src/system`). 【F:frameos/src/frameos.nim†L1-L6】
+- Entry point `src/frameos.nim` waits on `startFrameOS()` defined under `src/frameos/frameos`. Drivers, system integrations, and Nim app implementations live in nested directories (`src/apps`, `src/drivers`, `src/system`); JavaScript example app sources/configs live under `repo/apps/<folder>/<app>`. 【F:frameos/src/frameos.nim†L1-L6】
+- JavaScript repo apps are catalog templates. Do not generate or commit Nim wrappers inside `repo/apps`; compiled scenes that use them copy their sources into generated `src/apps/sceneapp_*` folders during build/deploy.
 - Project uses Nimble (`frameos.nimble`) for builds; `Makefile` likely wraps build/deploy steps for device firmware.
 
 ## End-to-end tooling

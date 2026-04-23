@@ -504,7 +504,8 @@ class FrameDeployWorkflow:
 
     async def _execute_full(self, plan: FrameDeployPlan) -> None:
         if self.frame.status == "deploying":
-            raise Exception("Already deploying. Request again to force redeploy.")
+            await self._mark_stuck_deploy_as_undeployed()
+            return
         if not plan.full_deploy:
             raise RuntimeError("Full deploy plan missing")
 
@@ -550,6 +551,11 @@ class FrameDeployWorkflow:
             frame.status = "uninitialized"
             await update_frame(self.db, self.redis, frame)
             raise
+
+    async def _mark_stuck_deploy_as_undeployed(self) -> None:
+        self.frame.status = "uninitialized"
+        await update_frame(self.db, self.redis, self.frame)
+        await self.deployer.log("stderr", "Already deploying. Marked frame as undeployed; request deploy again to start fresh.")
 
     async def _install_authorized_keys_for_full_deploy(self, full_plan: FullDeployPlan) -> None:
         if full_plan.selected_public_keys and full_plan.ssh_keys_need_install:

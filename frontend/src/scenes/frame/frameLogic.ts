@@ -579,6 +579,7 @@ export function sanitizeScene(scene: Partial<FrameScene>, frame: Partial<FrameTy
     name: scene.name || 'Untitled scene',
     nodes: shouldArrange ? arrangeNodes(normalizedNodes, edges) : normalizedNodes,
     edges,
+    apps: scene.apps ?? {},
     fields: scene.fields ?? [],
     settings: {
       ...settings,

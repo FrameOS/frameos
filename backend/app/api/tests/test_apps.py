@@ -16,7 +16,8 @@ async def test_api_apps(async_client):
     # Check for known apps (example: 'logic/ifElse' is from the sample code)
     assert 'logic/ifElse' in data['apps'], "Expected 'logic/ifElse' to be listed among apps"
     assert 'data/clock' in data['apps'], "Expected 'data/clock' to be listed among apps"
-    assert 'data/jsText' in data['apps'], "Expected 'data/jsText' to be listed among apps"
+    assert 'repo/jsExamples/jsText' in data['apps'], "Expected 'repo/jsExamples/jsText' to be listed among apps"
+    assert data['apps']['repo/jsExamples/jsText']['source'] == 'repo/jsExamples/jsText'
 
 
 @pytest.mark.asyncio
@@ -35,7 +36,7 @@ async def test_api_apps_source(async_client):
 
 @pytest.mark.asyncio
 async def test_api_apps_source_for_js_app(async_client):
-    response = await async_client.get('/api/apps/source?keyword=data/jsText')
+    response = await async_client.get('/api/apps/source?keyword=repo/jsExamples/jsText')
     data = response.json()
     assert response.status_code == 200
     assert 'app.js' in data

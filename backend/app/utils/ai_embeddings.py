@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 from pathlib import Path
 from typing import Any
@@ -107,6 +109,13 @@ def _summarize_scene_template(template_path: Path, repo_root: Path) -> tuple[str
     return summary_input, metadata
 
 
+def _app_keyword(config_path: Path, repo_root: Path) -> str:
+    relative_parts = config_path.parent.relative_to(repo_root).parts
+    if len(relative_parts) >= 4 and relative_parts[0] == "repo" and relative_parts[1] == "apps":
+        return f"repo/{relative_parts[2]}/{relative_parts[3]}"
+    return f"{config_path.parent.parent.name}/{config_path.parent.name}"
+
+
 def _summarize_app_config(config_path: Path, repo_root: Path) -> tuple[str, dict[str, Any]]:
     config = _load_json(config_path)
     name = config.get("name") or config_path.parent.name
@@ -146,9 +155,10 @@ def _summarize_app_config(config_path: Path, repo_root: Path) -> tuple[str, dict
         for detail in output_details
         if detail.get("example")
     ]
+    keyword = _app_keyword(config_path, repo_root)
     summary_input = "\n".join(
         [
-            f"App keyword: {config_path.parent.parent.name}/{config_path.parent.name}",
+            f"App keyword: {keyword}",
             f"Name: {name}",
             f"Description: {description}",
             f"Category: {category}",
@@ -170,7 +180,7 @@ def _summarize_app_config(config_path: Path, repo_root: Path) -> tuple[str, dict
         "outputDetails": output_details,
         "settings": settings,
         "configPath": str(config_path.relative_to(repo_root)),
-        "keyword": f"{config_path.parent.parent.name}/{config_path.parent.name}",
+        "keyword": keyword,
         "appCategory": config.get("category") or "",
     }
     return summary_input, metadata
@@ -182,7 +192,11 @@ def _resolve_repo_root() -> Path:
 
 def _collect_ai_embedding_items(repo_root: Path) -> list[tuple[str, str, str | None, str, dict[str, Any]]]:
     scenes_root = repo_root / "repo" / "scenes"
-    apps_root = repo_root / "frameos" / "src" / "apps"
+    app_roots = (
+        repo_root / "frameos" / "src" / "apps",
+        repo_root / "repo" / "apps",
+    )
+    legacy_apps_root = repo_root / "frameos" / "src" / "apps" / "legacy"
 
     items: list[tuple[str, str, str | None, str, dict[str, Any]]] = []
 
@@ -198,19 +212,25 @@ def _collect_ai_embedding_items(repo_root: Path) -> list[tuple[str, str, str | N
             )
         )
 
-    for config_path in apps_root.rglob("config.json"):
-        if config_path.parts[-3] == "legacy" and config_path.parts[-4] == "apps" and config_path.parts[-5] == "src":
+    for apps_root in app_roots:
+        if not apps_root.exists():
             continue
-        summary_input, metadata = _summarize_app_config(config_path, repo_root)
-        items.append(
-            (
-                "app",
-                str(config_path.parent.relative_to(repo_root)),
-                metadata.get("name"),
-                summary_input,
-                metadata,
+        for config_path in apps_root.rglob("config.json"):
+            try:
+                config_path.relative_to(legacy_apps_root)
+                continue
+            except ValueError:
+                pass
+            summary_input, metadata = _summarize_app_config(config_path, repo_root)
+            items.append(
+                (
+                    "app",
+                    str(config_path.parent.relative_to(repo_root)),
+                    metadata.get("name"),
+                    summary_input,
+                    metadata,
+                )
             )
-        )
 
     return items
 

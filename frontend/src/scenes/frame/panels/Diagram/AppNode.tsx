@@ -11,7 +11,13 @@ import { TextArea } from '../../../../components/TextArea'
 import { panelsLogic } from '../panelsLogic'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
 import { Markdown } from '../../../../components/Markdown'
-import { ClipboardDocumentIcon, InformationCircleIcon, PencilSquareIcon, TrashIcon } from '@heroicons/react/24/solid'
+import {
+  ClipboardDocumentIcon,
+  DocumentDuplicateIcon,
+  InformationCircleIcon,
+  PencilSquareIcon,
+  TrashIcon,
+} from '@heroicons/react/24/solid'
 import { appNodeLogic } from './appNodeLogic'
 import { NodeCache } from './NodeCache'
 import { CodeArg } from './CodeArg'
@@ -25,7 +31,7 @@ const ReactJson = ((ReactJsonModule as any).default ?? ReactJsonModule) as any
 
 export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchNodeData>): JSX.Element {
   const { frameId, sceneId, sceneOptions } = useValues(diagramLogic)
-  const { updateNodeConfig, copyAppJSON, deleteApp } = useActions(diagramLogic)
+  const { updateNodeConfig, copyAppJSON, deleteApp, forkSceneApp } = useActions(diagramLogic)
   const { editApp } = useActions(panelsLogic)
   const appNodeLogicProps = { frameId, sceneId, nodeId: id }
   const {
@@ -36,6 +42,7 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
     name,
     fields,
     isCustomApp,
+    isSceneApp,
     isDataApp,
     configJsonError,
     output,
@@ -57,7 +64,7 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
       ? 'bg-black bg-opacity-70 border-fuchsia-900 shadow-fuchsia-700/50'
       : isDispatch
       ? 'bg-black bg-opacity-70 border-orange-900 shadow-orange-700/50 '
-      : isCustomApp
+      : isCustomApp || isSceneApp
       ? 'bg-black bg-opacity-70 border-teal-900 shadow-teal-700/50 '
       : isDataApp
       ? 'bg-black bg-opacity-70 border-green-700 shadow-green-500/50 '
@@ -70,7 +77,7 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
     ? 'bg-fuchsia-900'
     : isDispatch
     ? 'bg-orange-900'
-    : isCustomApp
+    : isCustomApp || isSceneApp
     ? 'bg-teal-900'
     : isDataApp
     ? 'bg-green-700'
@@ -123,7 +130,7 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
           ) : null}
           <div className="flex-1">
             {name}
-            {isCustomApp ? ' (edited)' : ''}
+            {isSceneApp ? ' (scene)' : isCustomApp ? ' (edited)' : ''}
           </div>
           <DropdownMenu
             className="w-fit"
@@ -138,6 +145,15 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
                       onClick: () => editApp(sceneId, id, data),
                       icon: <PencilSquareIcon className="w-5 h-5" />,
                     },
+                    ...(isSceneApp
+                      ? [
+                          {
+                            label: 'Fork App',
+                            onClick: () => forkSceneApp(id),
+                            icon: <DocumentDuplicateIcon className="w-5 h-5" />,
+                          },
+                        ]
+                      : []),
                   ]),
               {
                 label: 'Copy as JSON',

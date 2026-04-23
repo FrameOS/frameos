@@ -27,6 +27,7 @@ import Fuse from 'fuse.js'
 import { Edge } from 'reactflow'
 import { sceneStateLogic } from '../SceneState/sceneStateLogic'
 import _events from '../../../../../schema/events.json'
+import { appLabel, sceneAppToAppConfig, sceneAppsWithKeyword } from '../../../../utils/sceneApps'
 
 export interface LocalFuse extends Fuse<OptionWithType> {}
 
@@ -105,7 +106,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
       frameLogic({ frameId }),
       ['frame', 'frameForm', 'scenes'],
       diagramLogic({ frameId, sceneId }),
-      ['nodesById', 'nodes', 'edges', 'scene'],
+      ['nodesById', 'nodes', 'edges', 'scene', 'effectiveApps', 'sceneApps'],
       appsModel,
       ['apps'],
     ],
@@ -113,7 +114,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
       frameLogic({ frameId }),
       ['setFrameFormValues', 'applyTemplate'],
       diagramLogic({ frameId, sceneId }),
-      ['setNodes', 'setEdges', 'addEdge', 'setCursorPosition', 'pasteFromClipboard'],
+      ['setNodes', 'setEdges', 'addEdge', 'setCursorPosition', 'pasteFromClipboard', 'setSceneApps'],
       sceneStateLogic({ frameId, sceneId }),
       ['createField'],
     ],
@@ -187,8 +188,8 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
       },
     ],
     newNodeHandleDataType: [
-      (s) => [s.newNodePicker, s.apps, s.node, s.scenes],
-      (newNodePicker, apps, node, scenes): FieldType | null => {
+      (s) => [s.newNodePicker, s.effectiveApps, s.node, s.scenes],
+      (newNodePicker, effectiveApps, node, scenes): FieldType | null => {
         if (!newNodePicker || newNodePicker.nodeId === CANVAS_NODE_ID) {
           return null
         }
@@ -208,8 +209,8 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
             } catch (e) {
               console.error(e)
             }
-          } else if (node.type === 'app' && node.data && 'keyword' in node.data && apps[node.data?.keyword]) {
-            const app = apps[node.data.keyword]
+          } else if (node.type === 'app' && node.data && 'keyword' in node.data && effectiveApps[node.data?.keyword]) {
+            const app = effectiveApps[node.data.keyword]
             const field = app.fields?.find((f) => 'name' in f && f.name === key)
             const type = field && 'type' in field ? field.type || null : null
             return type ? toBaseType(type) : null
@@ -235,7 +236,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
             const arg = codeOutputs[0]
             return arg?.type ? toBaseType(arg.type) : null
           } else if (node.type === 'app') {
-            const app = apps[(node.data as AppNodeData).keyword]
+            const app = effectiveApps[(node.data as AppNodeData).keyword]
             const output = app.output?.[0]
             return output?.type ? toBaseType(output.type) : null
           }
@@ -244,8 +245,8 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
       },
     ],
     allNewNodeOptions: [
-      (s) => [s.newNodePicker, s.apps, s.scene, s.scenes, s.newNodeHandleDataType, s.node],
-      (newNodePicker, apps, scene, scenes, newNodeHandleDataType, node): OptionWithType[] => {
+      (s) => [s.newNodePicker, s.effectiveApps, s.scene, s.scenes, s.newNodeHandleDataType, s.node],
+      (newNodePicker, effectiveApps, scene, scenes, newNodeHandleDataType, node): OptionWithType[] => {
         if (!newNodePicker) {
           return []
         }
@@ -276,10 +277,10 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
               keyword: event.name,
             })
           }
-          for (const [keyword, app] of Object.entries(apps)) {
+          for (const [keyword, app] of Object.entries(effectiveApps)) {
             if (app.category !== 'legacy' && (!app.output || app.output.length == 0 || app.category === 'render')) {
               options.push({
-                label: `${app.category ?? 'app'}: ${app.name}`,
+                label: appLabel(app, app.category ?? 'app'),
                 value: `app/${keyword}`,
                 type: toFieldType(app.output?.[0].type ?? 'string'),
                 keyword,
@@ -307,10 +308,10 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
             keyword: key,
           })
           if (newNodeHandleDataType) {
-            const appsForType = getAppsForType(apps, newNodeHandleDataType)
+            const appsForType = getAppsForType(effectiveApps, newNodeHandleDataType)
             for (const [keyword, app] of Object.entries(appsForType)) {
               options.push({
-                label: `App: ${app.name}`,
+                label: appLabel(app, 'App'),
                 value: `app/${keyword}`,
                 type: newNodeHandleDataType,
                 keyword: key,
@@ -335,10 +336,10 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
               })
             }
           } else if (handleId === 'codeField/+') {
-            for (const [keyword, app] of Object.entries(apps)) {
+            for (const [keyword, app] of Object.entries(effectiveApps)) {
               if (app.output && app.output.length > 0) {
                 options.push({
-                  label: `App: ${app.name}`,
+                  label: appLabel(app, 'App'),
                   value: `app/${keyword}`,
                   type: app.output[0].type,
                   keyword: key,
@@ -361,10 +362,10 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
           (handleType === 'source' && (handleId === 'next' || handleId.startsWith('field/'))) ||
           (handleType === 'target' && handleId === 'prev')
         ) {
-          for (const [keyword, app] of Object.entries(apps)) {
+          for (const [keyword, app] of Object.entries(effectiveApps)) {
             if (app.category !== 'legacy' && (!app.output || app.output.length == 0 || app.category === 'render')) {
               options.push({
-                label: `${app.category ?? 'app'}: ${app.name}`,
+                label: appLabel(app, app.category ?? 'app'),
                 value: `app/${keyword}`,
                 type: toFieldType(app.output?.[0].type ?? 'string'),
                 keyword,
@@ -393,7 +394,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
             keyword = (node.data as CodeNodeData)?.codeOutputs?.[0].name || keyword
           } else if (node.type === 'app') {
             const appKeyword = (node.data as AppNodeData)?.keyword || keyword
-            const app = apps[appKeyword]
+            const app = effectiveApps[appKeyword]
             keyword = app.output?.[0].name || keyword
           }
           options.push({
@@ -522,6 +523,21 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
         return
       }
 
+      let currentSceneApps = values.sceneApps
+      const ensureAppInScene = async (appKeyword: string): Promise<AppConfig | null> => {
+        let app = values.effectiveApps[appKeyword] ?? values.apps[appKeyword]
+        if (!app) {
+          return null
+        }
+        const nextSceneApps = await sceneAppsWithKeyword(currentSceneApps, appKeyword, app)
+        if (nextSceneApps !== currentSceneApps) {
+          currentSceneApps = nextSceneApps
+          actions.setSceneApps(nextSceneApps, true)
+          app = sceneAppToAppConfig(nextSceneApps[appKeyword])
+        }
+        return app
+      }
+
       if (nodeId === CANVAS_NODE_ID) {
         const newNode: DiagramNode = {
           id: uuidv4(),
@@ -539,7 +555,11 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
           newNode.data = { keyword: eventKeyword, config: {} } satisfies DispatchNodeData
         } else if (value.startsWith('app/')) {
           const appKeyword = value.substring(4)
-          const app = values.apps[appKeyword]
+          const app = await ensureAppInScene(appKeyword)
+          if (!app) {
+            actions.setSearchValue('')
+            return
+          }
           newNode.type = 'app'
           const appData: AppNodeData = { keyword: appKeyword, config: {} }
           if (app?.cache) {
@@ -667,6 +687,10 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
         }
       } else if (value.startsWith('app/')) {
         const appKeyword = value.substring(4)
+        const app = await ensureAppInScene(appKeyword)
+        if (!app) {
+          return
+        }
         newNode.type = 'app'
         newNode.data = { keyword: appKeyword, config: {} }
         if (newNodeOutputHandle === 'prev') {
@@ -678,7 +702,6 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
         } else {
           newNode.position.x -= 20
           newNode.position.y -= 100
-          const app = values.apps[appKeyword]
           // Note: we place apps at a rough estimate above the node they're connected to. should be improved
           for (const field of app.fields ?? []) {
             newNode.position.y -= 30 + ('type' in field && field.type === 'text' ? (field.rows ?? 3) * 20 : 0)
@@ -794,8 +817,8 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
         let label = keyword
         let value = ''
         if (node?.type === 'app') {
-          const app = values.apps[(node.data as AppNodeData).keyword]
-          const field: any = app.fields?.find((f) => 'name' in f && f.name === keyword && 'label' in f)
+          const app = values.effectiveApps[(node.data as AppNodeData).keyword]
+          const field: any = app?.fields?.find((f) => 'name' in f && f.name === keyword && 'label' in f)
           if (field?.label) {
             label = field?.label
           }
