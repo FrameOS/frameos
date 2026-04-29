@@ -9,6 +9,7 @@ import { AppNodeData } from '../../../../types'
 import { appsLogic } from '../Apps/appsLogic'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { diagramLogic } from '../Diagram/diagramLogic'
+import { buildAppTypeDeclarations } from '../../../../utils/appTypeDeclarations'
 import { buildSceneApp, forkSceneAppKey, isRepoAppKeyword, sceneAppToAppConfig } from '../../../../utils/sceneApps'
 
 export interface ModelMarker extends editor.IMarkerData {}
@@ -183,6 +184,7 @@ export const editAppLogic = kea<editAppLogicType>([
         }
       },
     ],
+    appTypeDeclarations: [(s) => [s.configJson], (configJson): string => buildAppTypeDeclarations(configJson)],
     title: [
       (s, p) => [s.savedKeyword, p.nodeId, s.apps, s.sceneApp, s.configJson],
       (keyword, nodeId, apps, sceneApp, configJson): string =>

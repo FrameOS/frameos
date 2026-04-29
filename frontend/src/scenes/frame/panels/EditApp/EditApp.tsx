@@ -6,7 +6,7 @@ import { PanelWithMetadata } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
 import { panelsLogic } from '../panelsLogic'
 import { chatLogic } from '../Chat/chatLogic'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import schema from '../../../../../schema/config_json.json'
 import type { editor as importedEditor } from 'monaco-editor'
 import type { Monaco } from '@monaco-editor/react'
@@ -43,11 +43,13 @@ export function EditApp({ panel, sceneId, nodeId }: EditAppProps) {
     requiresCompiledOnSave,
     appUsageCount,
     hasMultipleAppUsages,
+    appTypeDeclarations,
   } = useValues(logic)
   const { saveChanges, forkAndSaveChanges, setActiveFile, updateFile, addFile, deleteFile } = useActions(logic)
   const [[monaco, editor], setMonacoAndEditor] = useState<[Monaco | null, importedEditor.IStandaloneCodeEditor | null]>(
     [null, null]
   )
+  const appTypesLibsRef = useRef<{ dispose: () => void }[]>([])
 
   useEffect(() => {
     persistUntilClosed(panel, logic)
@@ -62,7 +64,38 @@ export function EditApp({ panel, sceneId, nodeId }: EditAppProps) {
     }
   }, [monaco, activeFile, modelMarkers])
 
+  useEffect(() => {
+    if (!monaco) {
+      return
+    }
+
+    appTypesLibsRef.current.forEach((lib) => lib.dispose())
+    appTypesLibsRef.current = [
+      monaco.languages.typescript.typescriptDefaults.addExtraLib(
+        appTypeDeclarations,
+        `inmemory://app-editor/${nodeId}/frameos-app-typescript.d.ts`
+      ),
+      monaco.languages.typescript.javascriptDefaults.addExtraLib(
+        appTypeDeclarations,
+        `inmemory://app-editor/${nodeId}/frameos-app-javascript.d.ts`
+      ),
+    ]
+
+    return () => {
+      appTypesLibsRef.current.forEach((lib) => lib.dispose())
+      appTypesLibsRef.current = []
+    }
+  }, [monaco, appTypeDeclarations, nodeId])
+
   function beforeMount(monaco: Monaco) {
+    const compilerOptions = {
+      allowJs: true,
+      allowNonTsExtensions: true,
+      target: monaco.languages.typescript.ScriptTarget.ES2020,
+      jsx: monaco.languages.typescript.JsxEmit.Preserve,
+    }
+    monaco.languages.typescript.typescriptDefaults.setCompilerOptions(compilerOptions)
+    monaco.languages.typescript.javascriptDefaults.setCompilerOptions({ ...compilerOptions, checkJs: true })
     monaco.editor.defineTheme('darkframe', {
       base: 'vs-dark',
       inherit: true,
@@ -189,7 +222,7 @@ export function EditApp({ panel, sceneId, nodeId }: EditAppProps) {
         <div className="bg-black font-mono text-sm overflow-y-auto overflow-x-auto w-full flex-1">
           <Editor
             height="100%"
-            path={`${nodeId}/${activeFile}`}
+            path={`inmemory://app-editor/${nodeId}/${activeFile}`}
             language={editorLanguage}
             value={sources[activeFile] ?? sources[Object.keys(sources)[0]] ?? ''}
             theme="darkframe"
