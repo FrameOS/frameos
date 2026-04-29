@@ -159,6 +159,27 @@ def test_agent_ws_unknown_frame(client: TestClient) -> None:
 
 
 @pytest.mark.asyncio
+async def test_broadcast_removes_failed_connection_without_deadlock() -> None:
+    import asyncio
+
+    from app.websockets import ConnectionManager
+
+    class BrokenWebSocket:
+        client = "broken"
+
+        async def send_text(self, message: str) -> None:
+            raise RuntimeError("closed")
+
+    manager = ConnectionManager()
+    broken = BrokenWebSocket()
+    manager.active_connections.append(broken)  # type: ignore[arg-type]
+
+    await asyncio.wait_for(manager.broadcast("message"), timeout=1)
+
+    assert manager.active_connections == []
+
+
+@pytest.mark.asyncio
 async def test_agent_helper_closes_owned_redis(monkeypatch) -> None:
     from app.ws import agent_ws
 

@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 from typing import List
 from redis.asyncio import from_url as create_redis, Redis
 from fastapi import WebSocket, WebSocketDisconnect
@@ -7,6 +8,20 @@ from fastapi import WebSocket, WebSocketDisconnect
 from app.database import SessionLocal
 
 from app.config import config
+
+
+def _get_env_float(name: str, default: float) -> float:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    try:
+        parsed = float(value)
+        return parsed if parsed > 0 else default
+    except ValueError:
+        return default
+
+
+WEBSOCKET_BROADCAST_TIMEOUT = _get_env_float("WEBSOCKET_BROADCAST_TIMEOUT", 2.0)
 
 
 class ConnectionManager:
@@ -30,13 +45,25 @@ class ConnectionManager:
         await websocket.send_text(message)
 
     async def broadcast(self, message: str):
+        stale_connections: list[WebSocket] = []
         async with self.lock:
-            for connection in self.active_connections:
-                try:
-                    await connection.send_text(message)
-                except Exception as e:
-                    print(f"Error sending message to {connection.client}: {e}")
-                    await self.disconnect(connection)
+            connections = list(self.active_connections)
+
+        for connection in connections:
+            try:
+                await asyncio.wait_for(
+                    connection.send_text(message),
+                    timeout=WEBSOCKET_BROADCAST_TIMEOUT,
+                )
+            except Exception as e:
+                print(f"Error sending message to {connection.client}: {e}")
+                stale_connections.append(connection)
+
+        if stale_connections:
+            async with self.lock:
+                for connection in stale_connections:
+                    if connection in self.active_connections:
+                        self.active_connections.remove(connection)
 
 manager = ConnectionManager() # Local clients
 
