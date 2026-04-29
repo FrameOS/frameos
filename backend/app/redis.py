@@ -6,9 +6,12 @@ def create_redis_connection():
     pool = ConnectionPool.from_url(config.REDIS_URL)
     return ArqRedis(pool)
 
+async def close_redis_connection(redis: ArqRedis):
+    await redis.close(close_connection_pool=True)
+
 async def get_redis():
     redis = create_redis_connection()
     try:
         yield redis
     finally:
-        await redis.close()
+        await close_redis_connection(redis)

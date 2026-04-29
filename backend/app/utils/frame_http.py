@@ -160,6 +160,7 @@ async def _fetch_frame_http_bytes(
             _build_frame_path(frame, path, method),
             method=method,
             headers=_auth_headers(frame),
+            redis=redis,
         )
         if isinstance(resp, dict):
             status = int(resp.get("status", 0))

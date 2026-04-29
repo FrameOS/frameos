@@ -156,3 +156,40 @@ def test_agent_ws_unknown_frame(client: TestClient) -> None:
             ws.receive_text()
     assert exc.value.code == 1008
     assert exc.value.reason == "unknown frame"
+
+
+@pytest.mark.asyncio
+async def test_agent_helper_closes_owned_redis(monkeypatch) -> None:
+    from app.ws import agent_ws
+
+    class FakeRedis:
+        pass
+
+    fake_redis = FakeRedis()
+    closed = []
+
+    monkeypatch.setattr(agent_ws, "create_redis_connection", lambda: fake_redis)
+
+    async def fake_close_redis_connection(redis):
+        closed.append(redis)
+
+    async def fake_send_cmd(*args, **kwargs):
+        raise RuntimeError("command failed")
+
+    monkeypatch.setattr(agent_ws, "close_redis_connection", fake_close_redis_connection)
+    monkeypatch.setattr(agent_ws, "send_cmd", fake_send_cmd)
+
+    with pytest.raises(RuntimeError, match="command failed"):
+        await agent_ws.file_md5_on_frame(1, "/srv/assets/test.png")
+
+    assert closed == [fake_redis]
+
+
+@pytest.mark.asyncio
+async def test_agent_command_slot_times_out_when_frame_busy() -> None:
+    from app.ws.agent_bridge import frame_command_slot
+
+    async with frame_command_slot(987654, queue_timeout=None):
+        with pytest.raises(TimeoutError, match="agent command queue busy"):
+            async with frame_command_slot(987654, queue_timeout=0.01):
+                pass

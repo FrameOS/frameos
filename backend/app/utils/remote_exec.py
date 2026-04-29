@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from app.models.frame import Frame
 from app.models.log import new_log as log
 from app.ws.agent_ws import number_of_connections_for_frame, file_write_open_on_frame, file_write_chunk_on_frame, file_write_close_on_frame
+from app.ws.agent_bridge import frame_command_slot
 
 from app.utils.ssh_utils import (
     get_ssh_connection,
@@ -65,31 +66,32 @@ async def _exec_via_agent(
     """
     Push one *cmd* into the Redis bridge and wait for completion.
     """
-    cmd_id = str(uuid.uuid4())
-    payload = {"type": "cmd", "name": "shell", "args": {"cmd": cmd}}
+    async with frame_command_slot(frame.id):
+        cmd_id = str(uuid.uuid4())
+        payload = {"type": "cmd", "name": "shell", "args": {"cmd": cmd}}
 
-    message = {
-        "id": cmd_id,
-        "frame_id": frame.id,
-        "payload": payload,
-        "timeout": timeout,
-    }
+        message = {
+            "id": cmd_id,
+            "frame_id": frame.id,
+            "payload": payload,
+            "timeout": timeout,
+        }
 
-    await redis.rpush(f"agent:cmd:{frame.id}", json.dumps(message).encode())
+        await redis.rpush(f"agent:cmd:{frame.id}", json.dumps(message).encode())
 
-    resp_key = f"agent:resp:{cmd_id}"
-    res = await redis.blpop(resp_key, timeout=timeout)
-    if res is None:  # ⬅︎ handle timeout
-        raise TimeoutError(
-            f"_exec_via_agent via agent timed-out after {timeout}s "
-            f"(frame {frame.id}, command: {cmd})"
-        )
+        resp_key = f"agent:resp:{cmd_id}"
+        res = await redis.blpop(resp_key, timeout=timeout)
+        if res is None:  # ⬅︎ handle timeout
+            raise TimeoutError(
+                f"_exec_via_agent via agent timed-out after {timeout}s "
+                f"(frame {frame.id}, command: {cmd})"
+            )
 
-    _key, raw = res
-    reply = json.loads(raw)
+        _key, raw = res
+        reply = json.loads(raw)
 
-    if not reply.get("ok"):
-        raise RuntimeError(reply.get("error", "agent error"))
+        if not reply.get("ok"):
+            raise RuntimeError(reply.get("error", "agent error"))
 
 
 async def _file_write_via_agent(
@@ -99,46 +101,47 @@ async def _file_write_via_agent(
     data: bytes,
     timeout: int,
 ) -> None:
-    cmd_id = str(uuid.uuid4())
-    zipped = gzip.compress(data)
-    payload = {
-        "type": "cmd",
-        "name": "file_write",
-        "args": {"path": remote_path, "size": len(zipped)},
-    }
+    async with frame_command_slot(frame.id):
+        cmd_id = str(uuid.uuid4())
+        zipped = gzip.compress(data)
+        payload = {
+            "type": "cmd",
+            "name": "file_write",
+            "args": {"path": remote_path, "size": len(zipped)},
+        }
 
-    message = {
-        "id": cmd_id,
-        "frame_id": frame.id,
-        "payload": payload,
-        "timeout": timeout,
-        "blob": base64.b64encode(zipped).decode(),
-    }
+        message = {
+            "id": cmd_id,
+            "frame_id": frame.id,
+            "payload": payload,
+            "timeout": timeout,
+            "blob": base64.b64encode(zipped).decode(),
+        }
 
-    await redis.rpush(f"agent:cmd:{frame.id}", json.dumps(message).encode())
+        await redis.rpush(f"agent:cmd:{frame.id}", json.dumps(message).encode())
 
-    resp_key = f"agent:resp:{cmd_id}"
-    res = await redis.blpop(resp_key, timeout=timeout)
-    if res is None:  # ⬅︎ handle timeout
-        raise TimeoutError(
-            f"file_write via agent timed-out after {timeout}s "
-            f"(frame {frame.id}, path {remote_path})"
-        )
+        resp_key = f"agent:resp:{cmd_id}"
+        res = await redis.blpop(resp_key, timeout=timeout)
+        if res is None:  # ⬅︎ handle timeout
+            raise TimeoutError(
+                f"file_write via agent timed-out after {timeout}s "
+                f"(frame {frame.id}, path {remote_path})"
+            )
 
-    _key, raw = res
-    reply = json.loads(raw)
+        _key, raw = res
+        reply = json.loads(raw)
 
-    if not reply.get("ok"):
-        raise RuntimeError(reply.get("error", "agent error"))
+        if not reply.get("ok"):
+            raise RuntimeError(reply.get("error", "agent error"))
 
 async def _stream_file_via_agent(db, redis, frame, remote_path, data, timeout: int = 120):
     await file_write_open_on_frame(frame.id, remote_path,
-                                   meta={"compression": "zlib"})
+                                   meta={"compression": "zlib"}, redis=redis)
     for off in range(0, len(data), CHUNK_SIZE):
         raw  = data[off:off+CHUNK_SIZE]
         comp = zlib.compress(raw, CHUNK_ZLEVEL)
-        await file_write_chunk_on_frame(frame.id, comp, timeout)
-    await file_write_close_on_frame(frame.id)
+        await file_write_chunk_on_frame(frame.id, comp, timeout, redis=redis)
+    await file_write_close_on_frame(frame.id, redis=redis)
 
 # ---------------------------------------------------------------------------#
 # public facade                                                              #
@@ -263,7 +266,7 @@ async def delete_path(
 
         try:
             await log(db, redis, frame.id, "stdout", f"> rm -rf {remote_path} (agent)")
-            await file_delete_on_frame(frame.id, remote_path, timeout)
+            await file_delete_on_frame(frame.id, remote_path, timeout, redis=redis)
             return
         except Exception as e:  # noqa: BLE001
             await log(db, redis, frame.id, "stderr", f"Agent delete error ({e})")
@@ -293,7 +296,7 @@ async def rename_path(
 
         try:
             await log(db, redis, frame.id, "stdout", f"> mv {src} {dst} (agent)")
-            await file_rename_on_frame(frame.id, src, dst, timeout)
+            await file_rename_on_frame(frame.id, src, dst, timeout, redis=redis)
             return
         except Exception as e:  # noqa: BLE001
             await log(db, redis, frame.id, "stderr", f"Agent rename error ({e})")
@@ -324,7 +327,7 @@ async def make_dir(
             await log(
                 db, redis, frame.id, "stdout", f"> mkdir -p {remote_path} (agent)"
             )
-            await file_mkdir_on_frame(frame.id, remote_path, timeout)
+            await file_mkdir_on_frame(frame.id, remote_path, timeout, redis=redis)
             return
         except Exception as e:  # noqa: BLE001
             await log(db, redis, frame.id, "stderr", f"Agent mkdir error ({e})")
@@ -353,66 +356,67 @@ async def _run_command_agent(
     streamed through Redis (see STREAM_KEY in app.ws.agent_bridge).
     Returns (exit_status, stdout, stderr).
     """
-    cmd_id = str(uuid.uuid4())
-    payload = {"type": "cmd", "name": "shell", "args": {"cmd": cmd}}
+    async with frame_command_slot(frame.id):
+        cmd_id = str(uuid.uuid4())
+        payload = {"type": "cmd", "name": "shell", "args": {"cmd": cmd}}
 
-    if log_command:
-        await log(db, redis, frame.id, "stdout", f"> {log_command if isinstance(log_command, str) else cmd}")
+        if log_command:
+            await log(db, redis, frame.id, "stdout", f"> {log_command if isinstance(log_command, str) else cmd}")
 
-    from app.ws.agent_bridge import CMD_KEY, STREAM_KEY, RESP_KEY
+        from app.ws.agent_bridge import CMD_KEY, STREAM_KEY, RESP_KEY
 
-    job = {
-        "id":       cmd_id,
-        "frame_id": frame.id,
-        "payload":  payload,
-        "timeout":  timeout,
-        # TODO: "log": bool(log_command),  # not used yet
-    }
-    await redis.rpush(CMD_KEY.format(id=frame.id), json.dumps(job).encode())
+        job = {
+            "id":       cmd_id,
+            "frame_id": frame.id,
+            "payload":  payload,
+            "timeout":  timeout,
+            # TODO: "log": bool(log_command),  # not used yet
+        }
+        await redis.rpush(CMD_KEY.format(id=frame.id), json.dumps(job).encode())
 
-    stdout_lines: list[str] = []
-    stderr_lines: list[str] = []
-    exit_status: int | None = None
+        stdout_lines: list[str] = []
+        stderr_lines: list[str] = []
+        exit_status: int | None = None
 
-    # Wait for either stream chunks or the final response key
-    stream_key = STREAM_KEY.format(id=cmd_id)
-    resp_key   = RESP_KEY.format(id=cmd_id)
+        # Wait for either stream chunks or the final response key
+        stream_key = STREAM_KEY.format(id=cmd_id)
+        resp_key   = RESP_KEY.format(id=cmd_id)
 
-    while True:
-        res = await redis.blpop([stream_key, resp_key], timeout=timeout)
-        if res is None:
-            raise TimeoutError(f"agent timed-out after {timeout}s (cmd: {cmd})")
+        while True:
+            res = await redis.blpop([stream_key, resp_key], timeout=timeout)
+            if res is None:
+                raise TimeoutError(f"agent timed-out after {timeout}s (cmd: {cmd})")
 
-        key_bytes, raw = res
-        key = key_bytes.decode()
+            key_bytes, raw = res
+            key = key_bytes.decode()
 
-        # live stream -------------------------------------------------------
-        if key == stream_key:
+            # live stream -------------------------------------------------------
+            if key == stream_key:
+                chunk = json.loads(raw)
+                (stdout_lines if chunk.get("stream") == "stdout"
+                              else stderr_lines).append(chunk.get("data", ""))
+                continue
+
+            # final response ----------------------------------------------------
+            if key == resp_key:
+                reply = json.loads(raw)
+                ok    = reply.get("ok", False)
+                # shell reply → {"exit": <code>}
+                if isinstance(reply.get("result"), dict) and "exit" in reply["result"]:
+                    exit_status = int(reply["result"]["exit"])
+                else:  # fall-back
+                    exit_status = 0 if ok else 1
+                break
+
+        # drain anything still buffered
+        leftover = await redis.lrange(stream_key, 0, -1)
+        for raw in leftover:
             chunk = json.loads(raw)
             (stdout_lines if chunk.get("stream") == "stdout"
                           else stderr_lines).append(chunk.get("data", ""))
-            continue
+        await redis.delete(stream_key)
 
-        # final response ----------------------------------------------------
-        if key == resp_key:
-            reply = json.loads(raw)
-            ok    = reply.get("ok", False)
-            # shell reply → {"exit": <code>}
-            if isinstance(reply.get("result"), dict) and "exit" in reply["result"]:
-                exit_status = int(reply["result"]["exit"])
-            else:  # fall-back
-                exit_status = 0 if ok else 1
-            break
-
-    # drain anything still buffered
-    leftover = await redis.lrange(stream_key, 0, -1)
-    for raw in leftover:
-        chunk = json.loads(raw)
-        (stdout_lines if chunk.get("stream") == "stdout"
-                      else stderr_lines).append(chunk.get("data", ""))
-    await redis.delete(stream_key)
-
-    return exit_status or 0, "\n".join(stdout_lines), "\n".join(stderr_lines)
+        return exit_status or 0, "\n".join(stdout_lines), "\n".join(stderr_lines)
 
 
 async def _run_command_ssh(

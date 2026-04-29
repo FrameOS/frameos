@@ -10,6 +10,7 @@ import json
 import secrets
 import re
 import time
+from contextlib import asynccontextmanager
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect, status
@@ -18,7 +19,7 @@ from arq import ArqRedis as Redis
 
 # ── project locals ──────────────────────────────────────────────────────────
 from app.database import SessionLocal
-from app.redis import get_redis, create_redis_connection   # create_… gives a raw conn
+from app.redis import close_redis_connection, get_redis, create_redis_connection
 from app.websockets import publish_message
 from app.models.frame import Frame
 from app.models.log import new_log as log
@@ -82,8 +83,17 @@ async def number_of_connections_for_frame(redis: Redis, frame_id: int) -> int:
     return cnt
 
 
-async def _ensure_redis(redis: Optional[Redis]) -> Redis:
-    return redis or create_redis_connection()
+@asynccontextmanager
+async def _redis_for_command(redis: Optional[Redis]):
+    if redis is not None:
+        yield redis
+        return
+
+    owned_redis = create_redis_connection()
+    try:
+        yield owned_redis
+    finally:
+        await close_redis_connection(owned_redis)
 
 # ────────────────────────────────────────────────────────────────────────────
 # high-level helper wrappers (they now proxy *only* via Redis)
@@ -98,7 +108,6 @@ async def http_get_on_frame(           # used by /frames/… endpoints
     timeout: int = 30,
     redis: Optional[Redis] = None,
 ):
-    redis = await _ensure_redis(redis)
     payload = {
         "type": "cmd",
         "name": "http",
@@ -109,14 +118,15 @@ async def http_get_on_frame(           # used by /frames/… endpoints
             "headers": headers or {},
         },
     }
-    return await send_cmd(redis, frame_id, payload, timeout=timeout)
+    async with _redis_for_command(redis) as command_redis:
+        return await send_cmd(command_redis, frame_id, payload, timeout=timeout)
 
 
 async def assets_list_on_frame(frame_id: int, path: str, timeout: int = 60,
                                redis: Optional[Redis] = None):
-    redis = await _ensure_redis(redis)
     payload = {"type": "cmd", "name": "assets_list", "args": {"path": path}}
-    resp    = await send_cmd(redis, frame_id, payload, timeout=timeout)
+    async with _redis_for_command(redis) as command_redis:
+        resp = await send_cmd(command_redis, frame_id, payload, timeout=timeout)
     if isinstance(resp, dict) and "assets" in resp:
         return resp["assets"]
     raise RuntimeError("bad response from agent assets_list")
@@ -124,9 +134,9 @@ async def assets_list_on_frame(frame_id: int, path: str, timeout: int = 60,
 
 async def exec_shell_on_frame(frame_id: int, cmd: str, timeout: int = 120,
                               redis: Optional[Redis] = None):
-    redis   = await _ensure_redis(redis)
     payload = {"type": "cmd", "name": "shell", "args": {"cmd": cmd}}
-    reply   = await send_cmd(redis, frame_id, payload, timeout=timeout)
+    async with _redis_for_command(redis) as command_redis:
+        reply = await send_cmd(command_redis, frame_id, payload, timeout=timeout)
     if isinstance(reply, dict) and reply.get("exit", 1) == 0:
         return
     raise RuntimeError(f"shell failed: {reply}")
@@ -134,16 +144,16 @@ async def exec_shell_on_frame(frame_id: int, cmd: str, timeout: int = 120,
 
 async def file_md5_on_frame(frame_id: int, path: str, timeout: int = 30,
                             redis: Optional[Redis] = None):
-    redis   = await _ensure_redis(redis)
     payload = {"type": "cmd", "name": "file_md5", "args": {"path": path}}
-    return await send_cmd(redis, frame_id, payload, timeout=timeout)
+    async with _redis_for_command(redis) as command_redis:
+        return await send_cmd(command_redis, frame_id, payload, timeout=timeout)
 
 
 async def file_read_on_frame(frame_id: int, path: str, timeout: int = 60,
                              redis: Optional[Redis] = None) -> bytes:
-    redis   = await _ensure_redis(redis)
     payload = {"type": "cmd", "name": "file_read", "args": {"path": path}}
-    res     = await send_cmd(redis, frame_id, payload, timeout=timeout)
+    async with _redis_for_command(redis) as command_redis:
+        res = await send_cmd(command_redis, frame_id, payload, timeout=timeout)
     if isinstance(res, (bytes, bytearray)):
         return bytes(res)
     raise RuntimeError("bad response from agent file_read")
@@ -151,47 +161,47 @@ async def file_read_on_frame(frame_id: int, path: str, timeout: int = 60,
 
 async def file_write_on_frame(frame_id: int, path: str, data: bytes,
                               timeout: int = 60, redis: Optional[Redis] = None):
-    redis   = await _ensure_redis(redis)
     blob    = gzip.compress(data)
     payload = {"type": "cmd", "name": "file_write",
                "args": {"path": path, "size": len(blob)}}
-    return await send_cmd(redis, frame_id, payload, blob=blob, timeout=timeout)
+    async with _redis_for_command(redis) as command_redis:
+        return await send_cmd(command_redis, frame_id, payload, blob=blob, timeout=timeout)
 
 
 async def file_delete_on_frame(frame_id: int, path: str, timeout: int = 60,
                                redis: Optional[Redis] = None):
-    redis   = await _ensure_redis(redis)
     payload = {"type": "cmd", "name": "file_delete", "args": {"path": path}}
-    return await send_cmd(redis, frame_id, payload, timeout=timeout)
+    async with _redis_for_command(redis) as command_redis:
+        return await send_cmd(command_redis, frame_id, payload, timeout=timeout)
 
 
 async def file_mkdir_on_frame(frame_id: int, path: str, timeout: int = 60,
                               redis: Optional[Redis] = None):
-    redis   = await _ensure_redis(redis)
     payload = {"type": "cmd", "name": "file_mkdir", "args": {"path": path}}
-    return await send_cmd(redis, frame_id, payload, timeout=timeout)
+    async with _redis_for_command(redis) as command_redis:
+        return await send_cmd(command_redis, frame_id, payload, timeout=timeout)
 
 
 async def file_rename_on_frame(frame_id: int, src: str, dst: str,
                                timeout: int = 60, redis: Optional[Redis] = None):
-    redis   = await _ensure_redis(redis)
     payload = {
         "type": "cmd",
         "name": "file_rename",
         "args": {"src": src, "dst": dst},
     }
-    return await send_cmd(redis, frame_id, payload, timeout=timeout)
+    async with _redis_for_command(redis) as command_redis:
+        return await send_cmd(command_redis, frame_id, payload, timeout=timeout)
 
 async def file_write_open_on_frame(
     frame_id: int, path: str, meta: dict[str, Any] | None = None,
     timeout: int = 30, redis: Redis | None = None,
 ):
-    redis = await _ensure_redis(redis)
     payload = {
         "type": "cmd", "name": "file_write_open",
         "args": {"path": path, **(meta or {})},
     }
-    return await send_cmd(redis, frame_id, payload, timeout=timeout)
+    async with _redis_for_command(redis) as command_redis:
+        return await send_cmd(command_redis, frame_id, payload, timeout=timeout)
 
 
 async def file_write_chunk_on_frame(
@@ -199,24 +209,26 @@ async def file_write_chunk_on_frame(
     timeout: int = 60, redis: Redis | None = None,
 ):
     # small (< 300 KB) so embedding is OK
-    return await send_cmd(
-        await _ensure_redis(redis),
-        frame_id,
-        {"type": "cmd", "name": "file_write_chunk", "args": {"size": len(chunk)}},
-        blob=chunk,
-        timeout=timeout,
-    )
+    async with _redis_for_command(redis) as command_redis:
+        return await send_cmd(
+            command_redis,
+            frame_id,
+            {"type": "cmd", "name": "file_write_chunk", "args": {"size": len(chunk)}},
+            blob=chunk,
+            timeout=timeout,
+        )
 
 
 async def file_write_close_on_frame(
     frame_id: int, timeout: int = 30, redis: Redis | None = None,
 ):
-    return await send_cmd(
-        await _ensure_redis(redis),
-        frame_id,
-        {"type": "cmd", "name": "file_write_close", "args": {}},
-        timeout=timeout,
-    )
+    async with _redis_for_command(redis) as command_redis:
+        return await send_cmd(
+            command_redis,
+            frame_id,
+            {"type": "cmd", "name": "file_write_close", "args": {}},
+            timeout=timeout,
+        )
 
 # ────────────────────────────────────────────────────────────────────────────
 # Redis ⇄ WebSocket pump
