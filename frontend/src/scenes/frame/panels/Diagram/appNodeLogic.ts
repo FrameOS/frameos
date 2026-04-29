@@ -180,6 +180,10 @@ export const appNodeLogic = kea<appNodeLogicType>([
       (currentScene, node): boolean =>
         !!(node?.type === 'app' && 'keyword' in node.data && currentScene?.apps?.[node.data.keyword]),
     ],
+    isJavaScriptSceneApp: [
+      (s) => [s.isSceneApp, s.sources],
+      (isSceneApp, sources): boolean => isSceneApp && !!(sources?.['app.ts'] || sources?.['app.js']),
+    ],
     configJson: [
       (s) => [s.app, s.sourceConfigJson],
       (app, [config]): AppConfig | null => {

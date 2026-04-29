@@ -16,8 +16,8 @@ async def test_api_apps(async_client):
     # Check for known apps (example: 'logic/ifElse' is from the sample code)
     assert 'logic/ifElse' in data['apps'], "Expected 'logic/ifElse' to be listed among apps"
     assert 'data/clock' in data['apps'], "Expected 'data/clock' to be listed among apps"
-    assert 'repo/jsExamples/jsText' in data['apps'], "Expected 'repo/jsExamples/jsText' to be listed among apps"
-    assert data['apps']['repo/jsExamples/jsText']['source'] == 'repo/jsExamples/jsText'
+    assert 'repo/examples/jsText' in data['apps'], "Expected 'repo/examples/jsText' to be listed among apps"
+    assert data['apps']['repo/examples/jsText']['source'] == 'repo/examples/jsText'
 
 
 @pytest.mark.asyncio
@@ -35,14 +35,15 @@ async def test_api_apps_source(async_client):
 
 
 @pytest.mark.asyncio
-async def test_api_apps_source_for_js_app(async_client):
-    response = await async_client.get('/api/apps/source?keyword=repo/jsExamples/jsText')
+async def test_api_apps_source_for_ts_app(async_client):
+    response = await async_client.get('/api/apps/source?keyword=repo/examples/jsText')
     data = response.json()
     assert response.status_code == 200
-    assert 'app.js' in data
+    assert 'app.ts' in data
     assert 'config.json' in data
+    assert 'app.js' not in data
     assert 'app_loader.nim' not in data
-    assert 'export function get' in data['app.js']
+    assert 'export function get' in data['app.ts']
 
 
 @pytest.mark.asyncio

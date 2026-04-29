@@ -486,16 +486,41 @@ export const diagramLogic = kea<diagramLogicType>([
 
       // Do not update on first render
       if (typeof oldNodes !== 'undefined' && !equal(nodes, oldNodes)) {
+        const currentNodeIds = new Set(nodes.map((node) => node.id))
+        const deletedSceneAppKeys = Array.from(
+          new Set(
+            oldNodes
+              .filter((node) => !currentNodeIds.has(node.id))
+              .map((node) => (node.type === 'app' ? (node.data as AppNodeData).keyword : null))
+              .filter((keyword): keyword is string => !!keyword && !!values.sceneApps[keyword])
+          )
+        )
+        const unusedDeletedSceneAppKeys = deletedSceneAppKeys.filter(
+          (keyword) => !nodes.some((node) => node.type === 'app' && (node.data as AppNodeData).keyword === keyword)
+        )
+        const sceneApps =
+          unusedDeletedSceneAppKeys.length > 0
+            ? Object.fromEntries(
+                Object.entries(values.sceneApps).filter(([keyword]) => !unusedDeletedSceneAppKeys.includes(keyword))
+              )
+            : values.sceneApps
+
         actions.setFrameFormValues({
-          scenes: values.editingFrame.scenes?.map((scene) =>
-            scene.id === props.sceneId && !equal(scene.nodes, nodes)
-              ? // set the nodes on the scene's form, and remove the selected flag from all
-                ({
+          scenes: values.editingFrame.scenes?.map((scene) => {
+            if (scene.id !== props.sceneId) {
+              return scene
+            }
+            const sceneNodes = nodes.map((n) => (n.selected ? { ...n, selected: false } : n))
+            const nodesChanged = !equal(scene.nodes, nodes)
+            const sceneAppsChanged = !equal(scene.apps ?? {}, sceneApps)
+            return nodesChanged || sceneAppsChanged
+              ? ({
                   ...scene,
-                  nodes: nodes.map((n) => (n.selected ? { ...n, selected: false } : n)),
+                  ...(nodesChanged ? { nodes: sceneNodes } : {}),
+                  ...(sceneAppsChanged ? { apps: sceneApps } : {}),
                 } satisfies FrameScene)
               : scene
-          ),
+          }),
         })
       }
     },

@@ -43,6 +43,7 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
     fields,
     isCustomApp,
     isSceneApp,
+    isJavaScriptSceneApp,
     isDataApp,
     configJsonError,
     output,
@@ -145,7 +146,7 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
                       onClick: () => editApp(sceneId, id, data),
                       icon: <PencilSquareIcon className="w-5 h-5" />,
                     },
-                    ...(isSceneApp
+                    ...(isSceneApp && !isJavaScriptSceneApp
                       ? [
                           {
                             label: 'Fork App',

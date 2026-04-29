@@ -13,7 +13,7 @@ def test_app_output_field_input_is_coerced_to_target_field_type():
             {
                 "id": "js",
                 "type": "app",
-                "data": {"keyword": "repo/jsExamples/jsText", "config": {}},
+                "data": {"keyword": "repo/examples/jsText", "config": {}},
                 "position": {"x": 2, "y": 2},
             },
         ],
@@ -29,17 +29,17 @@ def test_app_output_field_input_is_coerced_to_target_field_type():
         "fields": [],
         "settings": {"execution": "compiled", "refreshInterval": 3600, "backgroundColor": "#000000"},
         "apps": {
-            "repo/jsExamples/jsText": {
+            "repo/examples/jsText": {
                 "sources": {
                     "config.json": """
 {
-  "name": "JS Text",
+  "name": "TypeScript Text",
   "category": "data",
   "fields": [],
   "output": [{"name": "text", "type": "text"}]
 }
 """,
-                    "app.js": "export function get() { return 'hello' }\n",
+                    "app.ts": "export function get(): string { return 'hello' }\n",
                 }
             }
         },

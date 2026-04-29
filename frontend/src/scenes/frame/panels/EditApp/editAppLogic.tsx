@@ -80,11 +80,6 @@ export const editAppLogic = kea<editAppLogicType>([
       (appData, sceneApp): Record<string, string> | null => appData?.sources || sceneApp?.sources || null,
     ],
     isInterpreted: [(s) => [s.scene], (scene): boolean => scene?.settings?.execution === 'interpreted'],
-    isJavaScriptApp: [(s) => [s.sources], (sources): boolean => !!(sources['app.ts'] || sources['app.js'])],
-    requiresCompiledOnSave: [
-      (s) => [s.isInterpreted, s.isJavaScriptApp],
-      (isInterpreted, isJavaScriptApp): boolean => isInterpreted && !isJavaScriptApp,
-    ],
     appUsageCount: [
       (s) => [s.scene, s.sceneAppKey],
       (scene, sceneAppKey): number =>
@@ -156,6 +151,11 @@ export const editAppLogic = kea<editAppLogicType>([
     ],
   })),
   selectors({
+    isJavaScriptApp: [(s) => [s.sources], (sources): boolean => !!(sources['app.ts'] || sources['app.js'])],
+    requiresCompiledOnSave: [
+      (s) => [s.isInterpreted, s.isJavaScriptApp],
+      (isInterpreted, isJavaScriptApp): boolean => isInterpreted && !isJavaScriptApp,
+    ],
     hasChanges: [
       (s) => [s.sources, s.sourcesLoading, s.initialSources],
       (sources, sourcesLoading, initialSources) => {
