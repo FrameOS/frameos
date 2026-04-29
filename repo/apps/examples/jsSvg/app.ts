@@ -1,4 +1,4 @@
-export function get(app) {
+export function get(app: FrameOSApp): string {
   const label = app.config.label || 'QuickJS'
   const bg = app.config.background || '#ffffff'
   const fg = app.config.foreground || '#111111'

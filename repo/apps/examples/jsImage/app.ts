@@ -1,4 +1,4 @@
-export function get(app) {
+export function get(app: FrameOSApp): FrameOSImageSpec {
   return frameos.image({
     width: app.config.width,
     height: app.config.height,
