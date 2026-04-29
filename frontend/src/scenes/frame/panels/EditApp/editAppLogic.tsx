@@ -10,7 +10,14 @@ import { appsLogic } from '../Apps/appsLogic'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { diagramLogic } from '../Diagram/diagramLogic'
 import { buildAppTypeDeclarations } from '../../../../utils/appTypeDeclarations'
-import { buildSceneApp, forkSceneAppKey, isRepoAppKeyword, sceneAppToAppConfig } from '../../../../utils/sceneApps'
+import {
+  buildSceneApp,
+  forkSceneAppKey,
+  hasCompiledAppSource,
+  hasJavaScriptAppSource,
+  isRepoAppKeyword,
+  sceneAppToAppConfig,
+} from '../../../../utils/sceneApps'
 
 export interface ModelMarker extends editor.IMarkerData {}
 
@@ -152,10 +159,10 @@ export const editAppLogic = kea<editAppLogicType>([
     ],
   })),
   selectors({
-    isJavaScriptApp: [(s) => [s.sources], (sources): boolean => !!(sources['app.ts'] || sources['app.js'])],
+    isJavaScriptApp: [(s) => [s.sources], (sources): boolean => hasJavaScriptAppSource(sources)],
     requiresCompiledOnSave: [
-      (s) => [s.isInterpreted, s.isJavaScriptApp],
-      (isInterpreted, isJavaScriptApp): boolean => isInterpreted && !isJavaScriptApp,
+      (s) => [s.isInterpreted, s.sources],
+      (isInterpreted, sources): boolean => isInterpreted && hasCompiledAppSource(sources),
     ],
     hasChanges: [
       (s) => [s.sources, s.sourcesLoading, s.initialSources],

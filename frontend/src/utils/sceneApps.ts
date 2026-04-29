@@ -5,6 +5,14 @@ export function isRepoAppKeyword(keyword?: string | null): boolean {
   return !!keyword && keyword.startsWith('repo/')
 }
 
+export function hasJavaScriptAppSource(sources?: Record<string, string> | null): boolean {
+  return !!(sources?.['app.ts'] || sources?.['app.js'] || sources?.['app.tsx'] || sources?.['app.jsx'])
+}
+
+export function hasCompiledAppSource(sources?: Record<string, string> | null): boolean {
+  return !!(sources?.['app.nim'] || sources?.['config.nim'])
+}
+
 export function parseAppConfigFromSources(sources?: Record<string, string> | null): Partial<AppConfig> {
   if (!sources?.['config.json']) {
     return {}
@@ -112,10 +120,11 @@ export async function sceneAppsWithKeyword(
 export function forkSceneAppKey(sceneApps: Record<string, SceneApp>, keyword: string, app?: AppConfig | null): string {
   const keywordParts = keyword.split('/')
   const rawBase = app?.name || keywordParts[keywordParts.length - 1] || 'app'
-  const base = rawBase
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/(^-|-$)/g, '') || 'app'
+  const base =
+    rawBase
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/(^-|-$)/g, '') || 'app'
   let index = 1
   let key = `scene/${base}`
   while (sceneApps[key]) {
@@ -132,6 +141,7 @@ export function updateSceneAppsInScenes(
   forceCompiled = false,
   nodes?: FrameScene['nodes']
 ): FrameScene[] | undefined {
+  const needsCompiled = forceCompiled && Object.values(apps).some((app) => hasCompiledAppSource(app.sources))
   return scenes?.map((scene) =>
     scene.id === sceneId
       ? {
@@ -139,7 +149,7 @@ export function updateSceneAppsInScenes(
           apps,
           ...(nodes ? { nodes } : {}),
           settings:
-            forceCompiled && scene.settings?.execution === 'interpreted'
+            needsCompiled && scene.settings?.execution === 'interpreted'
               ? { ...scene.settings, execution: 'compiled' }
               : scene.settings,
         }

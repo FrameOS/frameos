@@ -78,6 +78,11 @@ proc newJsAppRuntime*(category: string, outputType: string, source: string): JsA
     images: initTable[int, Image]()
   )
 
+type
+  DynamicJsApp* = ref object of AppRoot
+    configJson*: JsonNode
+    runtime*: JsAppRuntime
+
 proc storeImageJson(runtime: JsAppRuntime, image: Image): JsonNode =
   if image.isNil:
     return newJNull()
@@ -89,6 +94,29 @@ proc storeImageJson(runtime: JsAppRuntime, image: Image): JsonNode =
     "width": image.width,
     "height": image.height
   }
+
+proc jsAppValueToJson(runtime: JsAppRuntime, value: Value): JsonNode =
+  case value.kind
+  of fkString, fkText:
+    return %* value.s
+  of fkFloat:
+    return %* value.f
+  of fkInteger:
+    return %* value.i
+  of fkBoolean:
+    return %* value.b
+  of fkColor:
+    return %* value.col.toHtmlHex
+  of fkJson:
+    return value.j
+  of fkImage:
+    return runtime.storeImageJson(value.img)
+  of fkNode:
+    return %* value.nId.int
+  of fkScene:
+    return %* value.sId.string
+  of fkNone:
+    return newJNull()
 
 proc jsAppFieldToJson*(runtime: JsAppRuntime, value: string): JsonNode = %* value
 proc jsAppFieldToJson*(runtime: JsAppRuntime, value: bool): JsonNode = %* value
@@ -113,6 +141,90 @@ proc jsAppFieldToJson*[T](runtime: JsAppRuntime, value: Option[T]): JsonNode =
   if value.isSome:
     return jsAppFieldToJson(runtime, value.get())
   return newJNull()
+
+proc jsAppSourceFromSources*(sources: JsonNode): string =
+  if sources.isNil or sources.kind != JObject:
+    return ""
+  for filename in ["app.ts", "app.js", "app.tsx", "app.jsx"]:
+    if sources.hasKey(filename) and sources[filename].kind == JString:
+      return sources[filename].getStr()
+  return ""
+
+proc hasJsAppSource*(sources: JsonNode): bool =
+  jsAppSourceFromSources(sources).len > 0
+
+proc outputTypeFromConfig(config: JsonNode): string =
+  if config.isNil or config.kind != JObject:
+    return ""
+  if config{"category"}.getStr().toLowerAscii() == "render":
+    return "image"
+  let output = config{"output"}
+  if not output.isNil and output.kind == JArray and output.len > 0:
+    return output[0]{"type"}.getStr()
+  return ""
+
+proc runtimeConfigFromNode(config: JsonNode, nodeConfig: JsonNode): JsonNode =
+  result = %*{}
+  var fieldTypes = initTable[string, string]()
+  let fields = config{"fields"}
+  if not fields.isNil and fields.kind == JArray:
+    for field in fields.items:
+      if field.kind != JObject:
+        continue
+      let name = field{"name"}.getStr()
+      let fieldType = field{"type"}.getStr()
+      if name.len == 0:
+        continue
+      if fieldType.len > 0:
+        fieldTypes[name] = fieldType
+      if field.hasKey("value"):
+        if fieldType.len > 0:
+          result[name] = valueToJson(valueFromJsonByType(field["value"], fieldType))
+        else:
+          result[name] = field["value"]
+
+  if not nodeConfig.isNil and nodeConfig.kind == JObject:
+    for key, value in nodeConfig.pairs:
+      if fieldTypes.hasKey(key):
+        result[key] = valueToJson(valueFromJsonByType(value, fieldTypes[key]))
+      else:
+        result[key] = value
+
+proc configFromSources(sources: JsonNode): JsonNode =
+  if sources.isNil or sources.kind != JObject or not sources.hasKey("config.json"):
+    return %*{}
+  try:
+    result = parseJson(sources["config.json"].getStr("{}"))
+    if result.isNil or result.kind != JObject:
+      return %*{}
+  except CatchableError:
+    return %*{}
+
+proc initDynamicJsApp*(keyword: string, node: DiagramNode, scene: FrameScene, sources: JsonNode): AppRoot =
+  let source = jsAppSourceFromSources(sources)
+  if source.len == 0:
+    raise newException(ValueError, "Missing JavaScript app source for keyword: " & keyword)
+  let config = configFromSources(sources)
+  let category = config{"category"}.getStr().toLowerAscii()
+  let outputType = outputTypeFromConfig(config)
+  let runtime = newJsAppRuntime(category, outputType, source)
+  return DynamicJsApp(
+    nodeId: node.id,
+    nodeName: node.data{"name"}.getStr(keyword),
+    scene: scene,
+    frameConfig: scene.frameConfig,
+    configJson: runtimeConfigFromNode(config, node.data{"config"}),
+    runtime: runtime
+  )
+
+proc isDynamicJsApp*(app: AppRoot): bool =
+  app of DynamicJsApp
+
+proc setDynamicJsAppField*(app: AppRoot, field: string, value: Value) =
+  let dynamicApp = DynamicJsApp(app)
+  if dynamicApp.configJson.isNil or dynamicApp.configJson.kind != JObject:
+    dynamicApp.configJson = %*{}
+  dynamicApp.configJson[field] = dynamicApp.runtime.jsAppValueToJson(value)
 
 proc ensureReady(runtime: JsAppRuntime) =
   if runtime.ready:
@@ -204,7 +316,10 @@ proc buildContextJson(runtime: JsAppRuntime, context: ExecutionContext): JsonNod
 proc setCallGlobals(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context: ExecutionContext) =
   let appJson = buildAppJson(runtime, owner, configJson)
   let contextJson = buildContextJson(runtime, context)
-  discard runtime.js.eval("globalThis.__frameosAppInstance = __frameosWrapApp(" & $appJson & ");")
+  discard runtime.js.eval(
+    "globalThis.__frameosAppInstance = __frameosWrapApp(Object.assign(globalThis.__frameosAppInstance || {}, " &
+      $appJson & "));"
+  )
   discard runtime.js.eval("globalThis.__frameosContext = " & $contextJson & ";")
 
 proc defaultImageWidth(owner: AppRoot, context: ExecutionContext, spec: JsonNode): int =
@@ -372,3 +487,11 @@ proc run*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context: 
     let value = toValue(runtime, owner, context, payload, "image")
     if value.kind == fkImage and not value.asImage().isNil:
       context.image.draw(value.asImage())
+
+proc getDynamicJsApp*(app: AppRoot, context: ExecutionContext): Value =
+  let dynamicApp = DynamicJsApp(app)
+  dynamicApp.runtime.get(dynamicApp, dynamicApp.configJson, context)
+
+proc runDynamicJsApp*(app: AppRoot, context: ExecutionContext) =
+  let dynamicApp = DynamicJsApp(app)
+  dynamicApp.runtime.run(dynamicApp, dynamicApp.configJson, context)

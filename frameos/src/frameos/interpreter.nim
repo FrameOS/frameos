@@ -1,11 +1,35 @@
 import frameos/types
 import frameos/values
 import frameos/js_runtime
+import frameos/js_app_runtime
 import frameos/channels
 import tables, json, os, zippy, chroma, pixie, jsony, sequtils, options, strutils, times
 import apps/apps
 
 const TRACING = false
+
+proc initInterpretedApp(keyword: string, node: DiagramNode, scene: FrameScene): AppRoot =
+  let sources = node.data{"sources"}
+  if hasJsAppSource(sources):
+    return initDynamicJsApp(keyword, node, scene, sources)
+  initApp(keyword, node, scene)
+
+proc setInterpretedAppField(keyword: string, app: AppRoot, field: string, value: Value) =
+  if app.isDynamicJsApp():
+    app.setDynamicJsAppField(field, value)
+  else:
+    apps.setAppField(keyword, app, field, value)
+
+proc getInterpretedApp(keyword: string, app: AppRoot, context: ExecutionContext): Value =
+  if app.isDynamicJsApp():
+    return app.getDynamicJsApp(context)
+  apps.getApp(keyword, app, context)
+
+proc runInterpretedApp(keyword: string, app: AppRoot, context: ExecutionContext) =
+  if app.isDynamicJsApp():
+    app.runDynamicJsApp(context)
+  else:
+    apps.runApp(keyword, app, context)
 
 proc evalInline(scene: InterpretedFrameScene,
                 context: ExecutionContext,
@@ -241,7 +265,7 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
           if self.nodes.hasKey(producerNodeId):
             try:
               let vIn = runNode(self, producerNodeId, context, asDataNode = true)
-              apps.setAppField(keyword, app, inputName, vIn)
+              setInterpretedAppField(keyword, app, inputName, vIn)
               if cacheEnabled and cacheInputEnabled:
                 builtInputKey[inputName] = valueToKeyJson(vIn)
                 builtAnyInput = true
@@ -265,7 +289,7 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
                                  inputName, codeSnippet,
                                  self.appInlineFuncNameByNodeArg, compileAppInlineFn,
                                  inputName)
-            apps.setAppField(keyword, app, inputName, vIn)
+            setInterpretedAppField(keyword, app, inputName, vIn)
             if cacheEnabled and cacheInputEnabled:
               builtInputKey[inputName] = valueToKeyJson(vIn)
               builtAnyInput = true
@@ -286,13 +310,13 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
                            builtAnyInput, builtInputKey,
                            %*{"keyword": keyword}):
           (proc (): Value =
-            apps.getApp(keyword, app, context)
+            getInterpretedApp(keyword, app, context)
           )
       else:
         if asDataNode:
-          result = apps.getApp(keyword, app, context)
+          result = getInterpretedApp(keyword, app, context)
         else:
-          apps.runApp(keyword, app, context)
+          runInterpretedApp(keyword, app, context)
 
     of "source":
       raise newException(Exception, "Source nodes are not implemented for interpreted scenes")
@@ -832,7 +856,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
         else:
           @[])
         })
-      scene.appsByNodeId[node.id] = initApp(keyword, node, scene)
+      scene.appsByNodeId[node.id] = initInterpretedApp(keyword, node, scene)
 
     elif node.nodeType == "scene":
       let childSceneId = node.data{"keyword"}.getStr().SceneId

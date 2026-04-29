@@ -1,6 +1,16 @@
-import pytest
+from types import SimpleNamespace
 from unittest.mock import patch, AsyncMock
-from app.models.frame import Frame, delete_frame, new_frame, normalize_frame_admin_auth, update_frame
+
+import pytest
+
+from app.models.frame import (
+    Frame,
+    delete_frame,
+    get_interpreted_scenes_json,
+    new_frame,
+    normalize_frame_admin_auth,
+    update_frame,
+)
 
 
 @pytest.mark.asyncio
@@ -95,3 +105,22 @@ def test_normalize_frame_admin_auth_keeps_password_whitespace():
         "user": "admin",
         "pass": " secret ",
     }
+
+
+def test_get_interpreted_scenes_json_embeds_scene_app_sources():
+    sources = {
+        "config.json": '{"name":"Scene JS","category":"data"}',
+        "app.ts": "export function get() { return 'ok' }",
+    }
+    scene = {
+        "id": "scene",
+        "name": "Scene",
+        "settings": {"execution": "interpreted"},
+        "apps": {"repo/examples/jsText": {"sources": sources}},
+        "nodes": [{"id": "node", "type": "app", "data": {"keyword": "repo/examples/jsText", "config": {}}}],
+    }
+
+    interpreted = get_interpreted_scenes_json(SimpleNamespace(scenes=[scene]))
+
+    assert interpreted[0]["nodes"][0]["data"]["sources"] == sources
+    assert "sources" not in scene["nodes"][0]["data"]

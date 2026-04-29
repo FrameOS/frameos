@@ -24,7 +24,7 @@ import type { Edge } from '@reactflow/core/dist/esm/types/edges'
 import _events from '../../../../../schema/events.json'
 import equal from 'fast-deep-equal'
 import { frameLogic } from '../../frameLogic'
-import { sceneAppToAppConfig } from '../../../../utils/sceneApps'
+import { hasJavaScriptAppSource, sceneAppToAppConfig } from '../../../../utils/sceneApps'
 const events: FrameEvent[] = _events as any
 
 export interface AppNodeLogicProps extends DiagramLogicProps {
@@ -182,7 +182,7 @@ export const appNodeLogic = kea<appNodeLogicType>([
     ],
     isJavaScriptSceneApp: [
       (s) => [s.isSceneApp, s.sources],
-      (isSceneApp, sources): boolean => isSceneApp && !!(sources?.['app.ts'] || sources?.['app.js']),
+      (isSceneApp, sources): boolean => isSceneApp && hasJavaScriptAppSource(sources),
     ],
     configJson: [
       (s) => [s.app, s.sourceConfigJson],
