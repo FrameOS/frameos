@@ -58,7 +58,7 @@ async def test_get_apps_from_scenes():
 
 @pytest.mark.asyncio
 async def test_get_scene_apps_from_scenes():
-    sources = {"config.json": '{"name":"Scene TS"}', "app.ts": "export function get(): string { return 'ok' }"}
+    sources = {"config.json": '{"name":"Scene JS"}', "app.ts": "export function get(): string { return 'ok' }"}
     scenes = [{"apps": {"repo/examples/jsText": {"sources": sources}}, "nodes": []}]
     apps = get_scene_apps_from_scenes(scenes)
     assert apps[get_scene_app_id("repo/examples/jsText")] == sources
