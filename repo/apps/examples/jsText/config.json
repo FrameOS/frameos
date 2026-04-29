@@ -1,7 +1,7 @@
 {
-  "name": "TypeScript Text",
+  "name": "JS Text",
   "category": "data",
-  "description": "Sample TypeScript app that returns text.",
+  "description": "Sample JS app that returns text.",
   "fields": [
     {
       "name": "prefix",

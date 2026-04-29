@@ -1,7 +1,7 @@
 {
-  "name": "TypeScript SVG",
+  "name": "JS SVG",
   "category": "data",
-  "description": "Sample TypeScript app that returns SVG markup.",
+  "description": "Sample JS app that returns SVG markup.",
   "fields": [
     {
       "name": "label",

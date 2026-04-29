@@ -1,7 +1,7 @@
 {
-  "name": "TypeScript Image",
+  "name": "JS Image",
   "category": "data",
-  "description": "Sample TypeScript app that returns an image object.",
+  "description": "Sample JS app that returns an image object.",
   "fields": [
     {
       "name": "width",

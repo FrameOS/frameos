@@ -1,7 +1,7 @@
 {
-  "name": "TypeScript Node",
+  "name": "JS Node",
   "category": "data",
-  "description": "Sample TypeScript app that returns a node reference.",
+  "description": "Sample JS app that returns a node reference.",
   "fields": [
     {
       "name": "targetNode",

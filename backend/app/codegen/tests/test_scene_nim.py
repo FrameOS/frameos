@@ -33,7 +33,7 @@ def test_app_output_field_input_is_coerced_to_target_field_type():
                 "sources": {
                     "config.json": """
 {
-  "name": "TypeScript Text",
+  "name": "JS Text",
   "category": "data",
   "fields": [],
   "output": [{"name": "text", "type": "text"}]

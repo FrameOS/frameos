@@ -1,7 +1,7 @@
 {
-  "name": "TypeScript Next Sleep",
+  "name": "JS Next Sleep",
   "category": "logic",
-  "description": "Sample TypeScript logic app that adjusts the next render delay.",
+  "description": "Sample JS logic app that adjusts the next render delay.",
   "fields": [
     {
       "name": "duration",
