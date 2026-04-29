@@ -9,7 +9,7 @@ import { AppNodeData } from '../../../../types'
 import { appsLogic } from '../Apps/appsLogic'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { diagramLogic } from '../Diagram/diagramLogic'
-import { buildSceneApp, isRepoAppKeyword } from '../../../../utils/sceneApps'
+import { buildSceneApp, forkSceneAppKey, isRepoAppKeyword, sceneAppToAppConfig } from '../../../../utils/sceneApps'
 
 export interface ModelMarker extends editor.IMarkerData {}
 
@@ -46,6 +46,7 @@ export const editAppLogic = kea<editAppLogicType>([
     setActiveFile: (file: string) => ({ file }),
     updateFile: (file: string, source: string) => ({ file, source }),
     saveChanges: true,
+    forkAndSaveChanges: true,
     setInitialSources: (sources: Record<string, string>) => ({ sources }),
     validateSource: (file: string, source: string, initial: boolean = false) => ({ file, source, initial }),
     setSourceErrors: (file: string, errors: SourceError[]) => ({ file, errors }),
@@ -79,6 +80,21 @@ export const editAppLogic = kea<editAppLogicType>([
       (appData, sceneApp): Record<string, string> | null => appData?.sources || sceneApp?.sources || null,
     ],
     isInterpreted: [(s) => [s.scene], (scene): boolean => scene?.settings?.execution === 'interpreted'],
+    isJavaScriptApp: [(s) => [s.sources], (sources): boolean => !!(sources['app.ts'] || sources['app.js'])],
+    requiresCompiledOnSave: [
+      (s) => [s.isInterpreted, s.isJavaScriptApp],
+      (isInterpreted, isJavaScriptApp): boolean => isInterpreted && !isJavaScriptApp,
+    ],
+    appUsageCount: [
+      (s) => [s.scene, s.sceneAppKey],
+      (scene, sceneAppKey): number =>
+        sceneAppKey
+          ? (scene?.nodes ?? []).filter(
+              (node) => node.type === 'app' && (node.data as AppNodeData | undefined)?.keyword === sceneAppKey
+            ).length
+          : 1,
+    ],
+    hasMultipleAppUsages: [(s) => [s.appUsageCount], (appUsageCount): boolean => appUsageCount > 1],
   }),
   loaders(({ actions, values }) => ({
     sources: [
@@ -201,7 +217,7 @@ export const editAppLogic = kea<editAppLogicType>([
   }),
   listeners(({ actions, props, values }) => ({
     saveChanges: () => {
-      const settings = values.isInterpreted
+      const settings = values.requiresCompiledOnSave
         ? { ...values.scene?.settings, execution: 'compiled' as const }
         : values.scene?.settings
       if (values.sceneAppKey) {
@@ -224,6 +240,37 @@ export const editAppLogic = kea<editAppLogicType>([
         }
         actions.updateNodeData(props.sceneId, props.nodeId, { sources: values.sources })
       }
+      actions.setInitialSources(values.sources)
+    },
+    forkAndSaveChanges: () => {
+      const keyword = values.sceneAppKey
+      const scene = values.scene
+      if (!keyword || !scene) {
+        actions.saveChanges()
+        return
+      }
+
+      const sceneApps = scene.apps ?? {}
+      const app = values.apps[keyword] ?? (values.sceneApp ? sceneAppToAppConfig(values.sceneApp) : undefined)
+      const newKeyword = forkSceneAppKey(sceneApps, keyword, app)
+      const previous = values.sceneApp
+        ? { ...values.sceneApp, source: values.sceneApp.source || keyword }
+        : { source: keyword }
+      const nodes = scene.nodes?.map((node) => {
+        if (node.id !== props.nodeId || node.type !== 'app') {
+          return node
+        }
+        const { sources: _sources, ...data } = (node.data ?? {}) as AppNodeData
+        return { ...node, data: { ...data, keyword: newKeyword } }
+      })
+
+      actions.updateScene(props.sceneId, {
+        apps: {
+          ...sceneApps,
+          [newKeyword]: buildSceneApp(newKeyword, app, values.sources, previous),
+        },
+        ...(nodes ? { nodes } : {}),
+      })
       actions.setInitialSources(values.sources)
     },
     setInitialSources: ({ sources }) => {
