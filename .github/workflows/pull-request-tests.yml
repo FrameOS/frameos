@@ -60,6 +60,7 @@ jobs:
 
       - uses: jiro4989/setup-nim-action@v1
         with:
+          nim-version: 2.2.4
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: FrameOS nim setup
@@ -120,6 +121,7 @@ jobs:
 
       - uses: jiro4989/setup-nim-action@v1
         with:
+          nim-version: 2.2.4
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: FrameOS nim build
