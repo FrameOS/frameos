@@ -12,6 +12,7 @@ import { AppConfig } from '../../../../types'
 import { appTag } from '../../../../utils/sceneApps'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
 import { TrashIcon } from '@heroicons/react/24/solid'
+import { Tooltip } from '../../../../components/Tooltip'
 
 export function Apps() {
   const { frameId } = useValues(frameLogic)
@@ -80,7 +81,14 @@ export function Apps() {
       ) : null}
       {!scenesOpen && Object.keys(visibleSceneApps).length > 0 ? (
         <div className="space-y-2">
-          <H6>Scene apps</H6>
+          <div className="flex items-center gap-1.5">
+            <H6>Scene apps</H6>
+            <Tooltip
+              className="cursor-help text-gray-400 hover:text-gray-200"
+              title="Scene apps are saved with this scene. Their source files are included in the scene data and inlined when the scene runs, exports, or deploys, so edits here do not change the global app catalog."
+              titleClassName="w-72"
+            />
+          </div>
           {Object.entries(visibleSceneApps)
             .toSorted(([, a], [, b]) => a.name.localeCompare(b.name))
             .map(([keyword, app]) => renderApp(keyword, app, sceneAppUsageCounts[keyword] ?? 0))}
