@@ -31,7 +31,7 @@ const ReactJson = ((ReactJsonModule as any).default ?? ReactJsonModule) as any
 
 export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchNodeData>): JSX.Element {
   const { frameId, sceneId, sceneOptions } = useValues(diagramLogic)
-  const { updateNodeConfig, copyAppJSON, deleteApp, forkSceneApp } = useActions(diagramLogic)
+  const { updateNodeConfig, copyAppJSON, duplicateNode, deleteApp, forkSceneApp } = useActions(diagramLogic)
   const { editApp } = useActions(panelsLogic)
   const appNodeLogicProps = { frameId, sceneId, nodeId: id }
   const {
@@ -161,6 +161,11 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
                 label: 'Copy as JSON',
                 onClick: () => copyAppJSON(id),
                 icon: <ClipboardDocumentIcon className="w-5 h-5" />,
+              },
+              {
+                label: 'Duplicate',
+                onClick: () => duplicateNode(id),
+                icon: <DocumentDuplicateIcon className="w-5 h-5" />,
               },
               {
                 label: 'Delete Node',

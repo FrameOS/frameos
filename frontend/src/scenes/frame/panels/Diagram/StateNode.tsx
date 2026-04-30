@@ -7,9 +7,12 @@ import { appNodeLogic } from './appNodeLogic'
 import { NodeCache } from './NodeCache'
 import { CodeArg } from './CodeArg'
 import { newNodePickerLogic } from './newNodePickerLogic'
+import { DropdownMenu } from '../../../../components/DropdownMenu'
+import { ClipboardDocumentIcon, DocumentDuplicateIcon, TrashIcon } from '@heroicons/react/24/solid'
 
 export function StateNode({ id, isConnectable }: NodeProps<StateNodeData>): JSX.Element {
   const { frameId, sceneId } = useValues(diagramLogic)
+  const { copyAppJSON, duplicateNode, deleteApp } = useActions(diagramLogic)
   const appNodeLogicProps = { frameId, sceneId, nodeId: id }
   const { isSelected, node, stateFieldType, stateFieldTitle } = useValues(appNodeLogic(appNodeLogicProps))
   const data: StateNodeData = (node?.data as StateNodeData) ?? ({ keyword: '' } satisfies StateNodeData)
@@ -62,6 +65,28 @@ export function StateNode({ id, isConnectable }: NodeProps<StateNodeData>): JSX.
             }}
           />
           <CodeArg codeArg={{ name: stateFieldTitle ?? data.keyword, type: stateFieldType }} />
+          <DropdownMenu
+            className="w-fit"
+            buttonColor="none"
+            horizontal
+            items={[
+              {
+                label: 'Copy as JSON',
+                onClick: () => copyAppJSON(id),
+                icon: <ClipboardDocumentIcon className="w-5 h-5" />,
+              },
+              {
+                label: 'Duplicate',
+                onClick: () => duplicateNode(id),
+                icon: <DocumentDuplicateIcon className="w-5 h-5" />,
+              },
+              {
+                label: 'Delete Node',
+                onClick: () => deleteApp(id),
+                icon: <TrashIcon className="w-5 h-5" />,
+              },
+            ]}
+          />
         </div>
       </div>
     </BindLogic>

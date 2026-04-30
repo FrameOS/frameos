@@ -198,6 +198,16 @@ const getClipboardOffset = (nodes: DiagramNode[], basePosition?: XYPosition | nu
   return { x: anchor.x - minX, y: anchor.y - minY }
 }
 
+const duplicateDiagramNode = (node: DiagramNode): DiagramNode => {
+  return {
+    ...sanitizeClipboardNode(node),
+    id: uuidv4(),
+    position: { x: (node.position?.x ?? 0) + 40, y: (node.position?.y ?? 0) + 40 },
+    data: JSON.parse(JSON.stringify(node.data ?? {})),
+    selected: true,
+  }
+}
+
 const removeAutoArrangeMarker = (settings?: FrameSceneSettings): FrameSceneSettings | undefined => {
   if (!settings?.autoArrangeOnLoad) {
     return settings
@@ -231,6 +241,7 @@ export const diagramLogic = kea<diagramLogicType>([
     updateEdge: (edge: Edge) => ({ edge }),
     updateNodeConfig: (id: string, field: string, value: any) => ({ id, field, value }),
     copyAppJSON: (nodeId: string) => ({ nodeId }),
+    duplicateNode: (nodeId: string) => ({ nodeId }),
     copySelectedNodes: true,
     pasteFromClipboard: true,
     setCursorPosition: (position: XYPosition | null) => ({ position }),
@@ -865,6 +876,19 @@ export const diagramLogic = kea<diagramLogicType>([
         return
       }
       copy(JSON.stringify({ nodes: sanitizedNodes, edges: edgesToCopy }))
+    },
+    duplicateNode: ({ nodeId }) => {
+      const node = values.nodesById[nodeId]
+      if (!node) {
+        return
+      }
+      const baseNodes = values.nodes.map((node) => (node.selected ? { ...node, selected: false } : node))
+      const duplicatedNode = duplicateDiagramNode(node)
+      const nextNodes = [...baseNodes, duplicatedNode]
+      actions.setNodes(nextNodes)
+      window.setTimeout(() => {
+        props.updateNodeInternals?.(duplicatedNode.id)
+      }, 200)
     },
     pasteFromClipboard: async () => {
       if (typeof navigator === 'undefined' || !navigator.clipboard?.readText) {
