@@ -24,7 +24,12 @@ import type { Edge } from '@reactflow/core/dist/esm/types/edges'
 import _events from '../../../../../schema/events.json'
 import equal from 'fast-deep-equal'
 import { frameLogic } from '../../frameLogic'
-import { hasJavaScriptAppSource, sceneAppToAppConfig } from '../../../../utils/sceneApps'
+import {
+  hasCompiledAppSource,
+  hasJavaScriptAppSource,
+  isRepoAppKeyword,
+  sceneAppToAppConfig,
+} from '../../../../utils/sceneApps'
 const events: FrameEvent[] = _events as any
 
 export interface AppNodeLogicProps extends DiagramLogicProps {
@@ -183,6 +188,22 @@ export const appNodeLogic = kea<appNodeLogicType>([
     isJavaScriptSceneApp: [
       (s) => [s.isSceneApp, s.sources],
       (isSceneApp, sources): boolean => isSceneApp && hasJavaScriptAppSource(sources),
+    ],
+    isNimAppInInterpretedScene: [
+      (s) => [s.currentScene, s.node, s.sources],
+      (currentScene, node, sources): boolean => {
+        if (currentScene?.settings?.execution !== 'interpreted' || node?.type !== 'app') {
+          return false
+        }
+        if (sources) {
+          return hasCompiledAppSource(sources)
+        }
+        return 'keyword' in node.data && !isRepoAppKeyword(node.data.keyword)
+      },
+    ],
+    appMenuEditLabel: [
+      (s) => [s.isNimAppInInterpretedScene],
+      (isNimAppInInterpretedScene): string => (isNimAppInInterpretedScene ? 'View nim app' : 'Edit App'),
     ],
     configJson: [
       (s) => [s.app, s.sourceConfigJson],

@@ -40,6 +40,7 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
     isDispatch,
     isScene,
     name,
+    appMenuEditLabel,
     fields,
     isCustomApp,
     isSceneApp,
@@ -142,7 +143,7 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
                 ? []
                 : [
                     {
-                      label: 'Edit App',
+                      label: appMenuEditLabel,
                       onClick: () => editApp(sceneId, id, data),
                       icon: <PencilSquareIcon className="w-5 h-5" />,
                     },
