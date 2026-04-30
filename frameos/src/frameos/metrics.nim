@@ -1,4 +1,4 @@
-import json, os, psutil, strutils, sequtils, posix
+import json, os, strutils, sequtils, posix
 import frameos/types
 import frameos/channels
 
@@ -11,20 +11,77 @@ type
   SleepHook = proc(ms: int) {.gcsafe, nimcall.}
   MemoryUsageHook = proc(): tuple[total, available: int64, percentage: float] {.gcsafe, nimcall.}
   OpenFileDescriptorsHook = proc(): int {.gcsafe, nimcall.}
+  CpuTimes = tuple[idle, total: uint64]
 
 var thread: Thread[FrameConfig]
 var metricsReadFileHook: ReadFileHook = proc(path: string): string = readFile(path)
-var metricsCpuUsageHook: CpuUsageHook = proc(interval: float): float = psutil.cpuPercent(interval = interval)
 var metricsSleepHook: SleepHook = proc(ms: int) = sleep(ms)
-var metricsMemoryUsageHook: MemoryUsageHook = proc(): tuple[total, available: int64, percentage: float] =
-  let memoryInfo = psutil.virtualMemory()
-  (memoryInfo.total, memoryInfo.avail, memoryInfo.percent)
 var metricsOpenFileDescriptorsHook: OpenFileDescriptorsHook = proc(): int =
   var fdCount = 0
   let dir = "/proc/" & $getpid() & "/fd"
   for _ in walkDir(dir):
     inc(fdCount)
   fdCount
+
+proc parseCpuTimes(line: string): CpuTimes =
+  let parts = line.splitWhitespace()
+  if parts.len < 5 or parts[0] != "cpu":
+    return (0'u64, 0'u64)
+
+  for index in 1 ..< parts.len:
+    result.total += parseBiggestUInt(parts[index]).uint64
+  result.idle = parseBiggestUInt(parts[4]).uint64
+  if parts.len > 5:
+    result.idle += parseBiggestUInt(parts[5]).uint64
+
+proc readCpuTimes(): CpuTimes =
+  try:
+    let lines = metricsReadFileHook("/proc/stat").splitLines()
+    if lines.len > 0:
+      return parseCpuTimes(lines[0])
+  except CatchableError:
+    discard
+  (0'u64, 0'u64)
+
+proc defaultCpuUsage(interval: float): float =
+  let start = readCpuTimes()
+  let ms = max(0, (interval * 1000.0).int)
+  if ms > 0:
+    metricsSleepHook(ms)
+  let finish = readCpuTimes()
+  if finish.total <= start.total or finish.idle < start.idle:
+    return 0.0
+
+  let totalDelta = finish.total - start.total
+  if totalDelta == 0:
+    return 0.0
+
+  let idleDelta = finish.idle - start.idle
+  ((totalDelta - idleDelta).float / totalDelta.float) * 100.0
+
+proc parseMeminfoBytes(line: string): int64 =
+  let parts = line.splitWhitespace()
+  if parts.len < 2:
+    return 0
+  parseBiggestInt(parts[1]).int64 * 1024
+
+proc defaultMemoryUsage(): tuple[total, available: int64, percentage: float] =
+  try:
+    for line in metricsReadFileHook("/proc/meminfo").splitLines():
+      if line.startsWith("MemTotal:"):
+        result.total = parseMeminfoBytes(line)
+      elif line.startsWith("MemAvailable:"):
+        result.available = parseMeminfoBytes(line)
+  except CatchableError:
+    discard
+
+  if result.total > 0:
+    result.percentage = ((result.total - result.available).float / result.total.float) * 100.0
+  else:
+    result.percentage = 0.0
+
+var metricsCpuUsageHook: CpuUsageHook = proc(interval: float): float = defaultCpuUsage(interval)
+var metricsMemoryUsageHook: MemoryUsageHook = proc(): tuple[total, available: int64, percentage: float] = defaultMemoryUsage()
 
 proc getLoadAverage(self: MetricsLoggerThread): seq[float] =
   try:
@@ -115,11 +172,9 @@ proc setMetricsHooksForTest*(
 
 proc resetMetricsHooksForTest*() =
   metricsReadFileHook = proc(path: string): string = readFile(path)
-  metricsCpuUsageHook = proc(interval: float): float = psutil.cpuPercent(interval = interval)
+  metricsCpuUsageHook = proc(interval: float): float = defaultCpuUsage(interval)
   metricsSleepHook = proc(ms: int) = sleep(ms)
-  metricsMemoryUsageHook = proc(): tuple[total, available: int64, percentage: float] =
-    let memoryInfo = psutil.virtualMemory()
-    (memoryInfo.total, memoryInfo.avail, memoryInfo.percent)
+  metricsMemoryUsageHook = proc(): tuple[total, available: int64, percentage: float] = defaultMemoryUsage()
   metricsOpenFileDescriptorsHook = proc(): int =
     var fdCount = 0
     let dir = "/proc/" & $getpid() & "/fd"
