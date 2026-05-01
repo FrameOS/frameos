@@ -6,9 +6,9 @@ import math
 import re
 
 from app.models.frame import Frame
-from app.models.apps import get_local_frame_apps, get_local_app_path, get_one_app_sources, get_scene_app_id
+from app.models.apps import get_local_frame_apps, get_local_app_path, get_scene_app_id
 from app.codegen.utils import sanitize_nim_string, natural_keys
-from app.utils.js_apps import find_js_app_source_filename, find_js_app_source_key
+from app.utils.js_apps import find_js_app_source_key
 
 def get_events_schema() -> list[dict]:
     events_schema_path = os.path.join("..", "frontend", "schema", "events.json")
@@ -211,9 +211,6 @@ class SceneWriter:
             if isinstance(scene_sources, dict) and len(scene_sources) > 0:
                 return scene_sources
 
-        if isinstance(keyword, str) and keyword.startswith("repo/"):
-            return get_one_app_sources(keyword)
-
         return {}
 
     def generated_app_id_for_node(self, node) -> str | None:
@@ -224,32 +221,14 @@ class SceneWriter:
 
         keyword = data.get("keyword", "")
         sources = self.app_sources_for_node(node)
-        if len(sources) > 0 and (
-            keyword in self.scene_apps
-            or (isinstance(keyword, str) and keyword.startswith("repo/"))
-        ):
+        if len(sources) > 0 and keyword in self.scene_apps:
             return get_scene_app_id(keyword, sources)
 
         return None
 
     def js_source_filename_for_node(self, node) -> str | None:
         sources = self.app_sources_for_node(node)
-        if len(sources) > 0:
-            return find_js_app_source_key(sources)
-
-        keyword = node.get("data", {}).get("keyword", "")
-        local_app_path = get_local_app_path(keyword)
-        return find_js_app_source_filename(local_app_path) if local_app_path else None
-
-    def js_app_sources_for_node(self, node) -> dict:
-        sources = self.app_sources_for_node(node)
-        if len(sources) > 0:
-            return sources
-
-        keyword = node.get("data", {}).get("keyword", "")
-        if not isinstance(keyword, str):
-            return {}
-        return get_one_app_sources(keyword)
+        return find_js_app_source_key(sources) if len(sources) > 0 else None
 
     def is_js_app_node(self, node) -> bool:
         node_id = node["id"]
@@ -410,7 +389,7 @@ class SceneWriter:
         self.field_types[node_id] = {}
 
         js_source_filename = None
-        js_sources = self.js_app_sources_for_node(node) if is_js_app else {}
+        js_sources = sources if is_js_app else {}
         if len(js_sources) > 0:
             js_source_filename = find_js_app_source_key(js_sources)
         if is_js_app and not js_source_filename:
@@ -427,13 +406,7 @@ class SceneWriter:
                 with open(source_path, "r") as file:
                     source_lines = file.read().split("\n")
             else:
-                local_js_source = find_js_app_source_filename(local_app_path) if local_app_path else None
-                if local_js_source:
-                    with open(os.path.join(local_app_path, local_js_source), "r") as file:
-                        source_lines = file.read().split("\n")
-                    js_source_filename = local_js_source
-                else:
-                    source_lines = []
+                source_lines = []
         self.app_sources[node_id] = source_lines
         if js_source_filename:
             self.js_app_nodes.add(node_id)

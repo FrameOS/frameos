@@ -5,13 +5,6 @@ import { embeddedRepoAppConfigs, embeddedRepoAppSources } from '../generated/rep
 export const javascriptAppSourceFiles = ['app.ts', 'app.js', 'app.tsx', 'app.jsx']
 export const javascriptCatalogAppKeywords = Object.keys(embeddedRepoAppConfigs)
 
-const javascriptCatalogAppLabels: Record<string, string> = {
-  'repo/apps/code/jsLogic': 'code: new logic app (JS)',
-  'repo/apps/code/jsText': 'code: new text data app (JS)',
-  'repo/apps/code/jsImage': 'code: new image data app (JS)',
-  'repo/apps/code/jsSvg': 'code: new svg data app (JS)',
-}
-
 export function isRepoAppKeyword(keyword?: string | null): boolean {
   return !!keyword && keyword.startsWith('repo/')
 }
@@ -21,7 +14,7 @@ export function isJavaScriptCatalogApp(keyword?: string | null): boolean {
 }
 
 export function javascriptCatalogAppLabel(keyword: string, app?: Pick<AppConfig, 'name'> | null): string {
-  return javascriptCatalogAppLabels[keyword] ?? `code: ${app?.name ?? keyword}`
+  return `code: ${app?.name ?? keyword}`
 }
 
 export function hasJavaScriptAppSource(sources?: Record<string, string> | null): boolean {
@@ -32,7 +25,7 @@ export function hasCompiledAppSource(sources?: Record<string, string> | null): b
   return !!(sources?.['app.nim'] || sources?.['config.nim'])
 }
 
-export function parseAppConfigFromSources(sources?: Record<string, string> | null): Partial<AppConfig> {
+function parseAppConfigFromSources(sources?: Record<string, string> | null): Partial<AppConfig> {
   if (!sources?.['config.json']) {
     return {}
   }
@@ -120,15 +113,10 @@ export function appLabel(app: AppConfig, prefix?: string): string {
   return `${prefix ? `${prefix}: ` : ''}${app.name}${tag ? ` [${tag}]` : ''}`
 }
 
-export function embeddedRepoAppSourceFiles(keyword: string): Record<string, string> | null {
-  const sources = embeddedRepoAppSources[keyword]
-  return sources ? { ...sources } : null
-}
-
 export async function loadAppSources(keyword: string): Promise<Record<string, string>> {
-  const embeddedSources = embeddedRepoAppSourceFiles(keyword)
+  const embeddedSources = embeddedRepoAppSources[keyword]
   if (embeddedSources) {
-    return embeddedSources
+    return { ...embeddedSources }
   }
 
   const response = await apiFetch(`/api/apps/source?keyword=${encodeURIComponent(keyword)}`)
@@ -138,18 +126,14 @@ export async function loadAppSources(keyword: string): Promise<Record<string, st
   return await response.json()
 }
 
-export function sceneAppKeyBase(keyword: string, app?: Partial<Pick<AppConfig, 'name'>> | null): string {
-  const keywordParts = keyword.split('/').filter(Boolean)
-  const rawBase = keywordParts[keywordParts.length - 1] || app?.name || 'app'
-  return rawBase.replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/(^-|-$)/g, '') || 'app'
-}
-
 export function nextSceneAppKey(
   sceneApps: Record<string, SceneApp>,
   keyword: string,
   app?: Partial<Pick<AppConfig, 'name'>> | null
 ): string {
-  const base = sceneAppKeyBase(keyword, app)
+  const keywordParts = keyword.split('/').filter(Boolean)
+  const rawBase = keywordParts[keywordParts.length - 1] || app?.name || 'app'
+  const base = rawBase.replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/(^-|-$)/g, '') || 'app'
   if (!sceneApps[base]) {
     return base
   }
