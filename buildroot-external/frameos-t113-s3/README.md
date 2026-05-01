@@ -63,6 +63,16 @@ FRAMEOS_BUILD_RUNTIME=1 BUILDROOT_DIR=/path/to/buildroot ./scripts/build-t113-s3
 The wrapper copies the generated SD card image and checksum to
 `build/frameos-t113-s3-image/`.
 
+To create a compressed image artifact suitable for download or release upload:
+
+```bash
+./scripts/package-t113-s3-image.sh
+```
+
+This writes `frameos-t113-s3-sdcard.img.xz`, a checksum file, and a manifest
+next to the copied `sdcard.img`. Override `IMAGE_ARTIFACTS_DIR`, `PACKAGE_DIR`,
+or `IMAGE_NAME` when packaging variant-specific images.
+
 After a build, inspect the host artifacts and target root filesystem:
 
 ```bash

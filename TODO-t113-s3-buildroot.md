@@ -91,8 +91,8 @@ custom board variants. The first deliverable is a host-side system that can:
   network state, and FrameOS service log.
 - Add kernel/DTS customization points once the exact custom-board SPI, GPIO,
   UART, power, and Wi-Fi wiring is fixed.
-- Decide where downloadable SD-card artifacts should live in the existing
-  FrameOS archive/release workflow and add a repeatable publish step.
+- Wire packaged SD-card artifacts into the existing FrameOS archive/release
+  workflow once the release destination and retention policy are chosen.
 - Capture first-boot serial logs from the MangoPi-style custom board once the
   hardware is available.
 
@@ -184,3 +184,8 @@ custom board variants. The first deliverable is a host-side system that can:
   inspection passed. The runtime is `ELF32`, little-endian `ARM`, requests
   `/lib/ld-linux-armhf.so.3`, and links against `libm.so.6`, `libcrypto.so.3`,
   `libssl.so.3`, `liblgpio.so.1`, and `libc.so.6`.
+- Added `scripts/package-t113-s3-image.sh` to turn a copied `sdcard.img` into a
+  downloadable `*.img.xz` artifact with checksum and manifest. Packaging the
+  inspected no-Wi-Fi glibc runtime image produced a 15 MB compressed artifact at
+  `/tmp/frameos-image-full-nowifi-glibc-runtime/download/frameos-t113-s3-nowifi-glibc-runtime.img.xz`,
+  and `sha256sum -c` passed for the compressed image.
