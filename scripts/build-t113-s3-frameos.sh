@@ -3,6 +3,8 @@ set -euo pipefail
 
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 EXTERNAL_DIR="${ROOT_DIR}/buildroot-external/frameos-t113-s3"
+source "${ROOT_DIR}/scripts/lib/t113-s3-buildroot.sh"
+
 BUILDROOT_DIR="${BUILDROOT_DIR:-${ROOT_DIR}/build/buildroot}"
 BUILDROOT_OUTPUT_DIR="${BUILDROOT_OUTPUT_DIR:-${ROOT_DIR}/build/buildroot-t113-s3}"
 FRAMEOS_ROOT="${FRAMEOS_ROOT:-${ROOT_DIR}/frameos}"
@@ -24,11 +26,8 @@ fi
 
 mkdir -p "${BUILDROOT_OUTPUT_DIR}" "${ARTIFACTS_DIR}"
 
-if [[ ! -f "${BUILDROOT_OUTPUT_DIR}/.config" ]]; then
-  make -C "${BUILDROOT_DIR}" \
-    O="${BUILDROOT_OUTPUT_DIR}" \
-    BR2_EXTERNAL="${EXTERNAL_DIR}" \
-    "${DEFCONFIG}"
+if [[ "${FRAMEOS_RECONFIGURE:-0}" == "1" || ! -f "${BUILDROOT_OUTPUT_DIR}/.config" ]]; then
+  frameos_t113_s3_configure_buildroot "${BUILDROOT_DIR}" "${BUILDROOT_OUTPUT_DIR}" "${EXTERNAL_DIR}" "${DEFCONFIG}"
 fi
 
 make -C "${BUILDROOT_DIR}" \

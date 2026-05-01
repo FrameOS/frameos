@@ -45,6 +45,15 @@ If `FRAMEOS_RUNTIME_BINARY` is omitted, the image still builds the base OS and
 FrameOS service files, but the service exits until `/usr/bin/frameos` is
 installed.
 
+To build the runtime and include it in the image in one wrapper run:
+
+```bash
+FRAMEOS_BUILD_RUNTIME=1 BUILDROOT_DIR=/path/to/buildroot ./scripts/build-t113-s3-image.sh
+```
+
+The wrapper copies the generated SD card image and checksum to
+`build/frameos-t113-s3-image/`.
+
 To build the FrameOS runtime with the Buildroot target toolchain and sysroot:
 
 ```bash
@@ -58,6 +67,12 @@ them with the Buildroot target compiler. The binary is written to
 
 ## Board Customization Points
 
+- `FRAMEOS_WIFI_VARIANT=rtl8723ds` is the default. Use
+  `FRAMEOS_WIFI_VARIANT=rtl8189fs` for MangoPi-style RTL8189F/RTL8189FS
+  hardware, `FRAMEOS_WIFI_VARIANT=none` for no Wi-Fi driver fragment, or point
+  it at a custom Buildroot config fragment.
+- `FRAMEOS_CONFIG_FRAGMENTS="/path/to/one.config /path/to/two.config"` appends
+  extra Buildroot fragments for custom boards.
 - `board/mangopi/mq-dual/rootfs_overlay/etc/default/frameos` controls FrameOS
   runtime environment variables, including GPIO line numbers and SPI bus
   selection for the Waveshare e-paper driver.

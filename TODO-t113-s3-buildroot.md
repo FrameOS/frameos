@@ -86,13 +86,15 @@ custom board variants. The first deliverable is a host-side system that can:
 
 ## Immediate Next Steps
 
-- Scaffold the Buildroot external tree and wrapper scripts without attempting a
-  full Buildroot build yet.
-- Add T113-S3/ARMv7 target metadata to the existing cross-build target list.
-- Add tests for target listing and metadata resolution so the new target stays
-  visible to CI.
-- Document the expected first manual build command and where generated images
-  should appear.
+- Run a full Buildroot package/image build from a clean checkout and capture any
+  missing host dependencies, kernel/U-Boot package failures, or Wi-Fi driver
+  build issues.
+- Add kernel/DTS customization points once the exact custom-board SPI, GPIO,
+  UART, power, and Wi-Fi wiring is fixed.
+- Validate the generated `frameos` binary inside the Buildroot root filesystem
+  with `readelf`/`ldd` or target emulation before first board boot.
+- Capture first-boot serial logs from the TQT113-S3 dev board and MangoPi-style
+  board.
 
 ## Progress
 
@@ -118,3 +120,8 @@ custom board variants. The first deliverable is a host-side system that can:
   sysroot.
 - Added target OpenSSL and CA certificates to the T113-S3 Buildroot defconfig so
   the FrameOS runtime has the expected TLS link/runtime dependencies.
+- Added Wi-Fi/custom Buildroot config fragment selection to the local wrappers
+  through `FRAMEOS_WIFI_VARIANT` and `FRAMEOS_CONFIG_FRAGMENTS`.
+- Added `FRAMEOS_BUILD_RUNTIME=1` support to the image wrapper so one command
+  can compile the Buildroot-sysroot FrameOS runtime, install it into the rootfs,
+  and copy `sdcard.img` plus checksum into `build/frameos-t113-s3-image/`.
