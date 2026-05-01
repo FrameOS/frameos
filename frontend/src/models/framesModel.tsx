@@ -10,9 +10,19 @@ import { entityImagesModel } from './entityImagesModel'
 import { urls } from '../urls'
 
 function sanitizeFrameForStore(frame: FrameType): FrameType {
+  const lastSuccessfulDeploy = frame.last_successful_deploy
   return {
     ...frame,
     scenes: frame.scenes?.map((scene) => sanitizeScene(scene as FrameScene, frame)) ?? [],
+    last_successful_deploy:
+      lastSuccessfulDeploy && Array.isArray(lastSuccessfulDeploy.scenes)
+        ? {
+            ...lastSuccessfulDeploy,
+            scenes: lastSuccessfulDeploy.scenes.map((scene: FrameScene) =>
+              sanitizeScene(scene as FrameScene, lastSuccessfulDeploy as Partial<FrameType>)
+            ),
+          }
+        : lastSuccessfulDeploy,
   }
 }
 

@@ -39,16 +39,20 @@ function parseAppConfigFromSources(sources?: Record<string, string> | null): Par
 
 type LegacyAppOrigin = { source?: string }
 
+function stripUndefined<T extends Record<string, any>>(object: T): T {
+  return Object.fromEntries(Object.entries(object).filter(([, value]) => value !== undefined)) as T
+}
+
 export function appOrigin(app?: (Partial<Pick<AppConfig, 'origin'>> & LegacyAppOrigin) | null): string | undefined {
   return app?.origin ?? app?.source
 }
 
 export function sceneAppWithOrigin(sceneApp: SceneApp, fallbackOrigin?: string): SceneApp {
   const { source: _legacySource, ...sceneAppWithoutLegacySource } = sceneApp as SceneApp & LegacyAppOrigin
-  return {
+  return stripUndefined({
     ...sceneAppWithoutLegacySource,
     origin: appOrigin(sceneApp) || fallbackOrigin,
-  }
+  })
 }
 
 export function normalizeSceneApps(sceneApps?: Record<string, SceneApp> | null): Record<string, SceneApp> {
@@ -156,7 +160,7 @@ export function buildSceneApp(
   const origin = appOrigin(previous) || appOrigin(app) || (isRepoAppKeyword(keyword) ? keyword : undefined)
   const { source: _legacySource, ...previousWithoutLegacySource } = (previous ?? {}) as Partial<SceneApp> &
     LegacyAppOrigin
-  return {
+  return stripUndefined({
     ...previousWithoutLegacySource,
     origin,
     name: sourceConfig.name || previous?.name || app?.name || keyword,
@@ -169,7 +173,7 @@ export function buildSceneApp(
     output: sourceConfig.output || previous?.output || app?.output,
     cache: sourceConfig.cache || previous?.cache || app?.cache,
     sources,
-  }
+  }) as SceneApp
 }
 
 export interface InstalledSceneApp {
@@ -211,8 +215,7 @@ export function updateSceneAppsInScenes(
   nodes?: FrameScene['nodes']
 ): FrameScene[] | undefined {
   const normalizedApps = normalizeSceneApps(apps)
-  const needsCompiled =
-    forceCompiled && Object.values(normalizedApps).some((app) => hasCompiledAppSource(app.sources))
+  const needsCompiled = forceCompiled && Object.values(normalizedApps).some((app) => hasCompiledAppSource(app.sources))
   return scenes?.map((scene) =>
     scene.id === sceneId
       ? {
