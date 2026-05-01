@@ -1,12 +1,14 @@
 import { AppConfig, FrameScene, SceneApp } from '../types'
 import { apiFetch } from './apiFetch'
 
+export const javascriptAppSourceFiles = ['app.ts', 'app.js', 'app.tsx', 'app.jsx']
+
 export function isRepoAppKeyword(keyword?: string | null): boolean {
   return !!keyword && keyword.startsWith('repo/')
 }
 
 export function hasJavaScriptAppSource(sources?: Record<string, string> | null): boolean {
-  return !!(sources?.['app.ts'] || sources?.['app.js'] || sources?.['app.tsx'] || sources?.['app.jsx'])
+  return !!sources && javascriptAppSourceFiles.some((file) => !!sources[file])
 }
 
 export function hasCompiledAppSource(sources?: Record<string, string> | null): boolean {

@@ -13,6 +13,7 @@ import type { Monaco } from '@monaco-editor/react'
 import clsx from 'clsx'
 import { TrashIcon } from '@heroicons/react/24/solid'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
+import { javascriptAppSourceFiles } from '../../../../utils/sceneApps'
 
 interface EditAppProps {
   panel: PanelWithMetadata
@@ -121,9 +122,9 @@ export function EditApp({ panel, sceneId, nodeId }: EditAppProps) {
   const name = configJson?.name || savedKeyword || nodeId
   const editorLanguage = activeFile.endsWith('.json')
     ? 'json'
-    : activeFile.endsWith('.ts')
+    : activeFile.endsWith('.ts') || activeFile.endsWith('.tsx')
     ? 'typescript'
-    : activeFile.endsWith('.js')
+    : activeFile.endsWith('.js') || activeFile.endsWith('.jsx')
     ? 'javascript'
     : 'python'
 
@@ -149,7 +150,7 @@ export function EditApp({ panel, sceneId, nodeId }: EditAppProps) {
               {changedFiles[file] ? '* ' : ''}
               {file}
             </Button>
-            {['app.ts', 'app.js', 'app.nim', 'config.json'].includes(file) ? null : (
+            {[...javascriptAppSourceFiles, 'app.nim', 'config.json'].includes(file) ? null : (
               <DropdownMenu
                 buttonColor="none"
                 items={[

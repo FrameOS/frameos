@@ -8,7 +8,7 @@ import re
 from app.models.frame import Frame
 from app.models.apps import get_local_frame_apps, get_local_app_path, get_one_app_sources, get_scene_app_id
 from app.codegen.utils import sanitize_nim_string, natural_keys
-from app.utils.js_apps import find_js_app_source_filename
+from app.utils.js_apps import find_js_app_source_filename, find_js_app_source_key
 
 def get_events_schema() -> list[dict]:
     events_schema_path = os.path.join("..", "frontend", "schema", "events.json")
@@ -191,8 +191,12 @@ class SceneWriter:
             return "nodeapp_" + node["id"].replace("-", "_")
 
         keyword = data.get("keyword", "")
-        if keyword in self.scene_apps or (isinstance(keyword, str) and keyword.startswith("repo/")):
-            return get_scene_app_id(keyword)
+        sources = self.app_sources_for_node(node)
+        if len(sources) > 0 and (
+            keyword in self.scene_apps
+            or (isinstance(keyword, str) and keyword.startswith("repo/"))
+        ):
+            return get_scene_app_id(keyword, sources)
 
         return None
 
@@ -327,10 +331,7 @@ class SceneWriter:
 
         js_source_filename = None
         if len(sources) > 0:
-            if sources.get("app.ts", None):
-                js_source_filename = "app.ts"
-            elif sources.get("app.js", None):
-                js_source_filename = "app.js"
+            js_source_filename = find_js_app_source_key(sources)
 
         if len(sources) > 0 and sources.get("app.nim", None):
             source_lines = sources.get("app.nim").split("\n")

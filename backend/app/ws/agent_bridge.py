@@ -28,7 +28,7 @@ def _get_env_float(name: str, default: float) -> float:
 
 DEFAULT_AGENT_COMMAND_QUEUE_TIMEOUT = _get_env_float(
     "AGENT_COMMAND_QUEUE_TIMEOUT",
-    5.0,
+    30.0,
 )
 
 

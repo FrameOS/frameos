@@ -69,9 +69,12 @@ def is_repo_app(keyword: str | None) -> bool:
     return bool(keyword and keyword.startswith("repo/"))
 
 
-def get_scene_app_id(keyword: str) -> str:
+def get_scene_app_id(keyword: str, sources: dict | None = None) -> str:
     slug = re.sub(r"[^a-zA-Z0-9_]+", "_", keyword).strip("_") or "app"
-    digest = hashlib.sha1(keyword.encode("utf-8")).hexdigest()[:8]
+    digest_input = keyword
+    if sources is not None:
+        digest_input += "\0" + json.dumps(sources, sort_keys=True, separators=(",", ":"))
+    digest = hashlib.sha1(digest_input.encode("utf-8")).hexdigest()[:8]
     return f"sceneapp_{slug}_{digest}"
 
 
@@ -139,7 +142,7 @@ def get_scene_apps_from_scenes(scenes: list[dict]) -> dict[str, dict]:
             for keyword, app in scene_apps.items():
                 sources = app.get("sources", {}) if isinstance(app, dict) else {}
                 if isinstance(sources, dict) and len(sources) > 0:
-                    apps[get_scene_app_id(keyword)] = sources
+                    apps[get_scene_app_id(keyword, sources)] = sources
 
         for node in scene.get("nodes", []):
             if node.get("type") != "app":
@@ -149,5 +152,5 @@ def get_scene_apps_from_scenes(scenes: list[dict]) -> dict[str, dict]:
                 continue
             sources = get_one_app_sources(keyword)
             if len(sources) > 0:
-                apps[get_scene_app_id(keyword)] = sources
+                apps[get_scene_app_id(keyword, sources)] = sources
     return apps

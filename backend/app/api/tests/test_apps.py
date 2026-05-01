@@ -84,6 +84,14 @@ async def test_validate_js_frame_source_valid(async_client):
 
 
 @pytest.mark.asyncio
+async def test_validate_tsx_frame_source_valid(async_client):
+    data = {'file': 'app.tsx', 'source': 'const view = <text>ok</text>; export function get() { return "ok" }'}
+    response = await async_client.post('/api/apps/validate_source', json=data)
+    assert response.status_code == 200
+    assert response.json().get('errors') == []
+
+
+@pytest.mark.asyncio
 async def test_validate_ts_frame_source_invalid(async_client):
     data = {'file': 'app.ts', 'source': 'export function get(app: any) { return '}
     response = await async_client.post('/api/apps/validate_source', json=data)

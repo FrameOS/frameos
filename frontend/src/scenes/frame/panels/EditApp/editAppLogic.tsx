@@ -16,6 +16,7 @@ import {
   hasCompiledAppSource,
   hasJavaScriptAppSource,
   isRepoAppKeyword,
+  javascriptAppSourceFiles,
   sceneAppToAppConfig,
 } from '../../../../utils/sceneApps'
 
@@ -33,7 +34,7 @@ export interface SourceError {
   error: string
 }
 
-const primaryFiles = ['config.json', 'app.ts', 'app.js', 'app.nim']
+const primaryFiles = ['config.json', ...javascriptAppSourceFiles, 'app.nim']
 
 export const editAppLogic = kea<editAppLogicType>([
   path(['src', 'scenes', 'frame', 'panels', 'EditApp', 'editAppLogic']),
@@ -104,7 +105,7 @@ export const editAppLogic = kea<editAppLogicType>([
       {} as Record<string, string>,
       {
         loadSources: async () => {
-          const files = ['README.md', 'app.ts', 'app.js', 'app.nim', 'config.nim']
+          const files = ['README.md', ...javascriptAppSourceFiles, 'app.nim', 'config.nim']
           let sources: Record<string, string> = {}
           if (values.savedSources) {
             sources = values.savedSources
