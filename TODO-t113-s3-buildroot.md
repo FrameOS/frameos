@@ -269,3 +269,7 @@ custom board variants. The first deliverable is a host-side system that can:
   post-build hook now appends the `wlan0` DHCP stanza and keeps
   `/etc/wpa_supplicant.conf` only when the merged Buildroot config enables
   `wpa_supplicant`.
+- Added `scripts/test-t113-s3-buildroot.sh` as a fast smoke test for the shell
+  pipeline. It checks T113-S3 script syntax, default and explicit Wi-Fi
+  fragment selection, post-build Wi-Fi rootfs behavior, and compressed image
+  packaging without starting a full Buildroot build.

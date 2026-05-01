@@ -97,6 +97,15 @@ After a build, inspect the host artifacts and target root filesystem:
 This checks for the copied image/checksum, U-Boot, DTB, FrameOS service files,
 runtime libraries, CA certificates, and an ARM `frameos` ELF binary.
 
+For a fast local regression check that does not run a Buildroot build:
+
+```bash
+./scripts/test-t113-s3-buildroot.sh
+```
+
+This checks shell syntax, Wi-Fi fragment selection, post-build network
+configuration, and image packaging behavior.
+
 To build the FrameOS runtime with the Buildroot target toolchain and sysroot:
 
 ```bash
