@@ -200,12 +200,12 @@ function getRecompileFields(mode: FrameType['mode']): (keyof FrameType)[] {
 }
 
 export function normalizeSceneForComparison(scene: Partial<FrameScene> | null | undefined): Partial<FrameScene> | null | undefined {
-  if (!scene) {
+  if (!scene || scene.apps) {
     return scene
   }
   return {
     ...scene,
-    apps: scene.apps ?? {},
+    apps: {},
   }
 }
 
