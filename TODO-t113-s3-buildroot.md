@@ -189,3 +189,10 @@ custom board variants. The first deliverable is a host-side system that can:
   inspected no-Wi-Fi glibc runtime image produced a 15 MB compressed artifact at
   `/tmp/frameos-image-full-nowifi-glibc-runtime/download/frameos-t113-s3-nowifi-glibc-runtime.img.xz`,
   and `sha256sum -c` passed for the compressed image.
+- Validated the seed Wi-Fi config fragments at the configuration level against
+  Buildroot `2026.02.1`. `FRAMEOS_WIFI_VARIANT=rtl8723ds` selects
+  `BR2_PACKAGE_RTL8723DS=y`, leaves `BR2_PACKAGE_RTL8189FS` unset, and enables
+  `wireless_tools` plus `wpa_supplicant` CLI/passphrase/autoscan support.
+  `FRAMEOS_WIFI_VARIANT=rtl8189fs` selects `BR2_PACKAGE_RTL8189FS=y`, leaves
+  `BR2_PACKAGE_RTL8723DS` unset, and enables the same supplicant/userspace
+  tools. Driver build and firmware behavior still need hardware validation.
