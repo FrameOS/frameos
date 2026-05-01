@@ -43,7 +43,7 @@ if [[ -n "${FRAMEOS_RUNTIME_BINARY:-}" ]]; then
   export FRAMEOS_RUNTIME_BINARY
 fi
 
-make -C "${BUILDROOT_DIR}" \
+frameos_t113_s3_make -C "${BUILDROOT_DIR}" \
   O="${OUTPUT_DIR}" \
   BR2_EXTERNAL="${EXTERNAL_DIR}" \
   "$@"

@@ -121,6 +121,18 @@ EOF
   fi
 }
 
+frameos_t113_s3_make() {
+  env \
+    -u PYTHONPATH \
+    -u PYTHONHOME \
+    -u PYTHONUSERBASE \
+    -u PYTHONSTARTUP \
+    -u PYTHONEXECUTABLE \
+    -u _PYTHON_SYSCONFIGDATA_NAME \
+    PYTHONNOUSERSITE=1 \
+    make "$@"
+}
+
 frameos_t113_s3_collect_config_fragments() {
   local external_dir="$1"
   local wifi_variant="${FRAMEOS_WIFI_VARIANT:-rtl8723ds}"
@@ -187,7 +199,7 @@ frameos_t113_s3_configure_buildroot() {
   frameos_t113_s3_collect_config_fragments "${external_dir}"
 
   if [[ "${#FRAMEOS_T113_S3_CONFIG_FRAGMENTS[@]}" -eq 0 ]]; then
-    make -C "${buildroot_dir}" \
+    frameos_t113_s3_make -C "${buildroot_dir}" \
       O="${output_dir}" \
       BR2_EXTERNAL="${external_dir}" \
       "${defconfig}"

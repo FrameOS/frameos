@@ -86,9 +86,8 @@ custom board variants. The first deliverable is a host-side system that can:
 
 ## Immediate Next Steps
 
-- Run a full Buildroot package/image build from a clean checkout and capture any
-  missing host dependencies, kernel/U-Boot package failures, or Wi-Fi driver
-  build issues.
+- Resume the clean no-Wi-Fi glibc Buildroot package/image build after the
+  Python environment sanitization fix and capture the next package/image result.
 - Add kernel/DTS customization points once the exact custom-board SPI, GPIO,
   UART, power, and Wi-Fi wiring is fixed.
 - Validate the generated `frameos` binary inside the Buildroot root filesystem
@@ -150,3 +149,11 @@ custom board variants. The first deliverable is a host-side system that can:
   defconfig expects `arm-buildroot-linux-gnueabihf`. The image wrapper now
   detects this mismatch and asks for a fresh `OUTPUT_DIR` after C library or
   tuple changes.
+- A fresh no-Wi-Fi glibc image build then progressed through the internal
+  toolchain, linux headers, glibc, BusyBox, eudev, Dropbear, genimage, host
+  Python, and SWIG before failing in `host-python-pylibfdt`. The failure was
+  caused by the repo's active Flox `PYTHONPATH` pointing at Python 3.12
+  site-packages, which made Buildroot's host Python 3.14 import the wrong
+  sysconfig data and attempt to build a `cp312` extension. The Buildroot
+  wrappers now scrub Python-specific host environment variables before invoking
+  Buildroot `make`.

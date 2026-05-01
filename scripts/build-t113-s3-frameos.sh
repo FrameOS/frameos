@@ -30,7 +30,7 @@ if [[ "${FRAMEOS_RECONFIGURE:-0}" == "1" || ! -f "${BUILDROOT_OUTPUT_DIR}/.confi
   frameos_t113_s3_configure_buildroot "${BUILDROOT_DIR}" "${BUILDROOT_OUTPUT_DIR}" "${EXTERNAL_DIR}" "${DEFCONFIG}"
 fi
 
-make -C "${BUILDROOT_DIR}" \
+frameos_t113_s3_make -C "${BUILDROOT_DIR}" \
   O="${BUILDROOT_OUTPUT_DIR}" \
   BR2_EXTERNAL="${EXTERNAL_DIR}" \
   frameos-quickjs frameos-lgpio openssl
