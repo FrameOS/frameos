@@ -28,6 +28,7 @@
 #
 ******************************************************************************/
 #include "DEV_Config.h"
+#include <stdlib.h>
 
 int GPIO_Handle;
 int SPI_Handle;
@@ -42,6 +43,39 @@ int EPD_BUSY_PIN;
 int EPD_PWR_PIN;
 int EPD_MOSI_PIN;
 int EPD_SCLK_PIN;
+
+static int DEV_Read_Int_Env(const char *name, int default_value)
+{
+    const char *value = getenv(name);
+    if (value == NULL || value[0] == '\0') {
+        return default_value;
+    }
+
+    char *end = NULL;
+    long parsed = strtol(value, &end, 0);
+    if (end == value || *end != '\0') {
+        printf("Ignoring invalid %s=%s\n", name, value);
+        return default_value;
+    }
+
+    return (int)parsed;
+}
+
+static int DEV_Is_Raspberry_Pi_5(void)
+{
+    char buffer[NUM_MAXBUF];
+    FILE *fp;
+
+    fp = popen("cat /proc/cpuinfo | grep 'Raspberry Pi 5'", "r");
+    if (fp == NULL) {
+        Debug("It is not possible to determine the model of the Raspberry PI\n");
+        return 0;
+    }
+
+    int detected = fgets(buffer, sizeof(buffer), fp) != NULL;
+    pclose(fp);
+    return detected;
+}
 
 /**
  * GPIO read and write
@@ -111,9 +145,9 @@ static int DEV_Equipment_Testing(void)
 	fclose(fp);
 
 	printf("Current environment: ");
-	char systems[][9] = {"Raspbian", "Debian"};
+	char systems[][16] = {"Raspbian", "Debian", "Buildroot", "FrameOS"};
 	int detected = 0;
-	for(int i=0; i<2; i++) {
+	for(size_t i=0; i<sizeof(systems) / sizeof(systems[0]); i++) {
 		if (strstr(issue_str, systems[i]) != NULL) {
 			printf("%s\n", systems[i]);
 			detected = 1;
@@ -130,13 +164,13 @@ static int DEV_Equipment_Testing(void)
 
 void DEV_GPIO_Init(void)
 {
-	EPD_RST_PIN     = 17;
-	EPD_DC_PIN      = 25;
-	EPD_CS_PIN      = 8;
-    EPD_PWR_PIN     = 18;
-	EPD_BUSY_PIN    = 24;
-    EPD_MOSI_PIN    = 10;
-	EPD_SCLK_PIN    = 11;
+	EPD_RST_PIN     = DEV_Read_Int_Env("FRAMEOS_EPD_RST_PIN", 17);
+	EPD_DC_PIN      = DEV_Read_Int_Env("FRAMEOS_EPD_DC_PIN", 25);
+	EPD_CS_PIN      = DEV_Read_Int_Env("FRAMEOS_EPD_CS_PIN", 8);
+    EPD_PWR_PIN     = DEV_Read_Int_Env("FRAMEOS_EPD_PWR_PIN", 18);
+	EPD_BUSY_PIN    = DEV_Read_Int_Env("FRAMEOS_EPD_BUSY_PIN", 24);
+    EPD_MOSI_PIN    = DEV_Read_Int_Env("FRAMEOS_EPD_MOSI_PIN", 10);
+	EPD_SCLK_PIN    = DEV_Read_Int_Env("FRAMEOS_EPD_SCLK_PIN", 11);
 
     DEV_GPIO_Mode(EPD_BUSY_PIN, 0);
 	DEV_GPIO_Mode(EPD_RST_PIN, 1);
@@ -219,33 +253,26 @@ UBYTE DEV_Module_Init(void)
 	if(DEV_Equipment_Testing() < 0) {
 		return 1;
 	}
-    char buffer[NUM_MAXBUF];
-    FILE *fp;
-    fp = popen("cat /proc/cpuinfo | grep 'Raspberry Pi 5'", "r");
-    if (fp == NULL) {
-        Debug("It is not possible to determine the model of the Raspberry PI\n");
+
+    int default_gpio_chip = DEV_Is_Raspberry_Pi_5() ? 4 : 0;
+    int gpio_chip = DEV_Read_Int_Env("FRAMEOS_EPD_GPIO_CHIP", default_gpio_chip);
+    int spi_device = DEV_Read_Int_Env("FRAMEOS_EPD_SPI_DEVICE", 0);
+    int spi_channel = DEV_Read_Int_Env("FRAMEOS_EPD_SPI_CHANNEL", 0);
+    int spi_speed = DEV_Read_Int_Env("FRAMEOS_EPD_SPI_SPEED", 10000000);
+
+    GPIO_Handle = lgGpiochipOpen(gpio_chip);
+    if (GPIO_Handle < 0)
+    {
+        Debug( "gpiochip Export Failed\n");
         return -1;
     }
 
-    if(fgets(buffer, sizeof(buffer), fp) != NULL)
+    SPI_Handle = lgSpiOpen(spi_device, spi_channel, spi_speed, 0);
+    if (SPI_Handle < 0)
     {
-        GPIO_Handle = lgGpiochipOpen(4);
-        if (GPIO_Handle < 0)
-        {
-            Debug( "gpiochip4 Export Failed\n");
-            return -1;
-        }
+        Debug( "SPI open Failed\n");
+        return -1;
     }
-    else
-    {
-        GPIO_Handle = lgGpiochipOpen(0);
-        if (GPIO_Handle < 0)
-        {
-            Debug( "gpiochip0 Export Failed\n");
-            return -1;
-        }
-    }
-    SPI_Handle = lgSpiOpen(0, 0, 10000000, 0);
     DEV_GPIO_Init();
 	return 0;
 }

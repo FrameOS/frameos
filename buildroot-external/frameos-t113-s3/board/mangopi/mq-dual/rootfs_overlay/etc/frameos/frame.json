@@ -1,0 +1,48 @@
+{
+  "framePort": 8787,
+  "frameHost": "0.0.0.0",
+  "httpsProxy": {
+    "enable": false,
+    "port": 8443,
+    "exposeOnlyPort": false
+  },
+  "serverHost": "frameos.local",
+  "serverPort": 8989,
+  "serverApiKey": "",
+  "serverSendLogs": false,
+  "width": 800,
+  "height": 480,
+  "device": "waveshare.EPD_7in3e",
+  "deviceConfig": {},
+  "color": null,
+  "backgroundColor": "white",
+  "interval": 60.0,
+  "metricsInterval": 60.0,
+  "scalingMode": "cover",
+  "frameAccess": "public",
+  "frameAdminAuth": {
+    "user": "admin",
+    "pass": "adminadmin!!!",
+    "enabled": true
+  },
+  "logToFile": "/var/log/frameos.log",
+  "assetsPath": "/var/lib/frameos/assets",
+  "saveAssets": true,
+  "timezone": "UTC",
+  "rotate": 0,
+  "debug": false,
+  "settings": {},
+  "schedule": {},
+  "controlCode": {
+    "enabled": true
+  },
+  "network": {
+    "networkCheck": true,
+    "networkCheckTimeoutSeconds": 30,
+    "networkCheckUrl": "https://networkcheck.frameos.net/",
+    "wifiHotspot": "disabled",
+    "wifiHotspotSsid": "FrameOS",
+    "wifiHotspotPassword": "frame1234",
+    "wifiHotspotTimeoutSeconds": 300
+  }
+}

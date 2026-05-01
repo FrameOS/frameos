@@ -1,0 +1,4 @@
+config BR2_PACKAGE_FRAMEOS_LGPIO
+	bool "frameos lgpio"
+	help
+	  Build and stage lgpio for FrameOS GPIO, SPI, I2C, and serial access.

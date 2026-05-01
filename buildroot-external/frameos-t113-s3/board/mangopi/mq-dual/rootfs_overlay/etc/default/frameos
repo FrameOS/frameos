@@ -1,0 +1,21 @@
+# Runtime settings used by /etc/init.d/S99frameos.
+
+FRAMEOS_CONFIG=/etc/frameos/frame.json
+FRAMEOS_SCENES_JSON=/etc/frameos/scenes.json
+
+# The current FrameOS Waveshare C shim opens gpiochip0 and spidev 0.0 by
+# default. Override these after validating the custom board's DTS.
+FRAMEOS_EPD_GPIO_CHIP=0
+FRAMEOS_EPD_SPI_DEVICE=0
+FRAMEOS_EPD_SPI_CHANNEL=0
+FRAMEOS_EPD_SPI_SPEED=10000000
+
+# GPIO line offsets for the e-paper panel. These are placeholders matching the
+# existing Raspberry Pi defaults, not verified T113-S3 pin mappings.
+FRAMEOS_EPD_RST_PIN=17
+FRAMEOS_EPD_DC_PIN=25
+FRAMEOS_EPD_CS_PIN=8
+FRAMEOS_EPD_BUSY_PIN=24
+FRAMEOS_EPD_PWR_PIN=18
+FRAMEOS_EPD_MOSI_PIN=10
+FRAMEOS_EPD_SCLK_PIN=11

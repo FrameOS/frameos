@@ -1,0 +1,5 @@
+config BR2_PACKAGE_FRAMEOS_QUICKJS
+	bool "frameos quickjs"
+	help
+	  Build and stage QuickJS headers and static library for the FrameOS
+	  interpreter.

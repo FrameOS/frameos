@@ -1,0 +1,2 @@
+source "$BR2_EXTERNAL_FRAMEOS_T113_S3_PATH/package/frameos-quickjs/Config.in"
+source "$BR2_EXTERNAL_FRAMEOS_T113_S3_PATH/package/frameos-lgpio/Config.in"

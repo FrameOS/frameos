@@ -1,0 +1,61 @@
+#!/bin/sh
+
+DAEMON=/usr/bin/frameos
+NAME=frameos
+PIDFILE=/var/run/${NAME}.pid
+WORKDIR=/var/lib/frameos
+LOGFILE=/var/log/frameos.stdout.log
+DEFAULTS=/etc/default/frameos
+
+load_defaults() {
+	if [ -f "$DEFAULTS" ]; then
+		set -a
+		. "$DEFAULTS"
+		set +a
+	fi
+	export FRAMEOS_CONFIG="${FRAMEOS_CONFIG:-/etc/frameos/frame.json}"
+	export FRAMEOS_SCENES_JSON="${FRAMEOS_SCENES_JSON:-/etc/frameos/scenes.json}"
+}
+
+start() {
+	if [ ! -x "$DAEMON" ]; then
+		echo "$DAEMON is not installed"
+		return 0
+	fi
+	if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+		echo "$NAME is already running"
+		return 0
+	fi
+	load_defaults
+	mkdir -p "$WORKDIR" "$(dirname "$LOGFILE")"
+	echo "Starting $NAME"
+	cd "$WORKDIR" || exit 1
+	"$DAEMON" >>"$LOGFILE" 2>&1 &
+	echo $! > "$PIDFILE"
+}
+
+stop() {
+	if [ ! -f "$PIDFILE" ]; then
+		return 0
+	fi
+	echo "Stopping $NAME"
+	kill "$(cat "$PIDFILE")" 2>/dev/null || true
+	rm -f "$PIDFILE"
+}
+
+case "$1" in
+	start)
+		start
+		;;
+	stop)
+		stop
+		;;
+	restart|reload)
+		stop
+		start
+		;;
+	*)
+		echo "Usage: $0 {start|stop|restart}"
+		exit 1
+		;;
+esac
