@@ -73,5 +73,21 @@ export const frameSettingsLogic = kea<frameSettingsLogicType>([
         },
       },
     ],
+    sdImage: [
+      false,
+      {
+        downloadSdImage: async () => {
+          const response = await apiFetch(`/api/frames/${props.frameId}/download_sd_image`)
+          if (!response.ok) {
+            const payload = await response.json().catch(() => ({}))
+            throw new Error(payload.detail || 'Failed to download SD card image')
+          }
+          const disposition = response.headers.get('Content-Disposition') || ''
+          const filename = disposition.match(/filename="([^"]+)"/)?.[1] || `frame_${props.frameId}_sdcard.img.xz`
+          downloadZip(await response.blob(), filename)
+          return false
+        },
+      },
+    ],
   })),
 ])

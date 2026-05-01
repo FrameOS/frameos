@@ -89,6 +89,7 @@ class FrameCreateRequest(BaseModel):
     interval: Optional[float] = None
     device: Optional[str] = None
     platform: Optional[str] = None
+    buildroot: Optional[Dict[str, Any]] = None
 
 class FrameUpdateRequest(BaseModel):
     scenes: Optional[List[Any]] = None

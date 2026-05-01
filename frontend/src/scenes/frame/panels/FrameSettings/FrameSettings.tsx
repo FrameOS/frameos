@@ -14,6 +14,8 @@ import {
   spectraPalettes,
   withCustomPalette,
   buildrootPlatforms,
+  buildrootPlatformSupportsSdImage,
+  buildrootWifiVariants,
   modes,
 } from '../../../../devices'
 import { secureToken } from '../../../../utils/secureToken'
@@ -136,21 +138,16 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
     generateFrameAdminCredentials,
     generateTlsCertificates,
     verifyTlsCertificates,
+    setBuildrootPlatform,
   } = useActions(frameLogic)
   const { deleteFrame } = useActions(framesModel)
   const { appsWithSaveAssets } = useValues(appsLogic)
-  const {
-    clearBuildCache,
-    downloadBuildZip,
-    downloadCSourceZip,
-    downloadBinaryZip,
-  } = useActions(frameSettingsLogic({ frameId }))
-  const {
-    buildCacheLoading,
-    buildZipLoading,
-    cSourceZipLoading,
-    binaryZipLoading,
-  } = useValues(frameSettingsLogic({ frameId }))
+  const { clearBuildCache, downloadBuildZip, downloadCSourceZip, downloadBinaryZip, downloadSdImage } = useActions(
+    frameSettingsLogic({ frameId })
+  )
+  const { buildCacheLoading, buildZipLoading, cSourceZipLoading, binaryZipLoading, sdImageLoading } = useValues(
+    frameSettingsLogic({ frameId })
+  )
   const { openLogs } = useActions(panelsLogic({ frameId }))
   const { logs, ipAddresses } = useValues(logsLogic({ frameId }))
   const { savedSettings } = useValues(settingsLogic)
@@ -290,6 +287,18 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                       icon: <ArrowUpTrayIcon className="w-5 h-5" />,
                       loading: binaryZipLoading,
                     },
+                    ...(mode === 'buildroot'
+                      ? [
+                          {
+                            label: 'Download SD card image',
+                            onClick: () => {
+                              downloadSdImage()
+                            },
+                            icon: <ArrowDownTrayIcon className="w-5 h-5" />,
+                            loading: sdImageLoading,
+                          },
+                        ]
+                      : []),
                     {
                       label: 'Delete frame',
                       onClick: () => {
@@ -387,10 +396,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
               <Select name="mode" options={modes} disabled={inFrameAdminMode} />
             </Field>
           ) : null}
-          <Field
-            name="device"
-            label="Display driver"
-          >
+          <Field name="device" label="Display driver">
             <Select name="device" options={devices} />
           </Field>
           {frameForm.device === 'waveshare.EPD_10in3' ? (
@@ -468,8 +474,44 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
           {frameForm.mode === 'buildroot' ? (
             <Group name="buildroot">
               <Field name="platform" label="Platform">
-                <Select name="buildroot.platform" options={buildrootPlatforms} />
+                {({ value }) => (
+                  <Select value={value || ''} onChange={setBuildrootPlatform} options={buildrootPlatforms} />
+                )}
               </Field>
+              <Field name="wifiVariant" label="Wi-Fi chip">
+                <Select name="buildroot.wifiVariant" options={buildrootWifiVariants} />
+              </Field>
+              <Field name="buildrootRef" label="Buildroot ref">
+                <TextInput name="buildroot.buildrootRef" placeholder="2026.02.1" />
+              </Field>
+              <Field name="imageArtifactName" label="Image artifact name">
+                <TextInput name="buildroot.imageArtifactName" placeholder="frameos-t113-s3-glibc-runtime-docker" />
+              </Field>
+              <Field name="configFragments" label="Extra Buildroot config fragments">
+                <TextInput name="buildroot.configFragments" placeholder="/path/to/custom-board.config" />
+              </Field>
+              {buildrootPlatformSupportsSdImage(frameForm.buildroot?.platform) ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    color="secondary"
+                    size="small"
+                    onClick={() => {
+                      downloadSdImage()
+                    }}
+                    disabled={sdImageLoading}
+                  >
+                    {sdImageLoading ? <Spinner /> : 'Download SD card image'}
+                  </Button>
+                  <A
+                    href="https://github.com/FrameOS/frameos/actions/workflows/t113-s3-buildroot-image.yml"
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    className="text-blue-400 hover:underline text-sm"
+                  >
+                    Open image workflow
+                  </A>
+                </div>
+              ) : null}
             </Group>
           ) : null}
           {/* {frameForm.mode === 'rpios' || !frameForm.mode ? (
@@ -667,8 +709,8 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                         connect to the backend to await further commands.
                       </p>
                       <p>
-                        Note: after enabling the agent, you must manually deploy it from the "..." -&gt; "Deploy
-                        Agent" menu in the top.
+                        Note: after enabling the agent, you must manually deploy it from the "..." -&gt; "Deploy Agent"
+                        menu in the top.
                       </p>
                     </div>
                   }

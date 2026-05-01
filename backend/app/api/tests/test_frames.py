@@ -165,6 +165,61 @@ async def test_api_frame_new(async_client):
 
 
 @pytest.mark.asyncio
+async def test_api_frame_new_buildroot_t113_s3(async_client):
+    payload = {
+        "mode": "buildroot",
+        "name": "T113Frame",
+        "frame_host": "",
+        "server_host": "myserver",
+        "device": "waveshare.EPD_7in3e",
+        "buildroot": {
+            "platform": "allwinner-t113-s3-mangopi-mq-dual",
+            "wifiVariant": "rtl8189fs",
+            "buildrootRef": "2026.02.1",
+            "imageArtifactName": "frameos-t113-s3-glibc-runtime-docker",
+        },
+    }
+    response = await async_client.post('/api/frames/new', json=payload)
+    assert response.status_code == 200
+    frame = response.json()['frame']
+    assert frame['mode'] == 'buildroot'
+    assert frame['ssh_user'] == 'root'
+    assert frame['frame_host'].startswith('frame')
+    assert frame['device'] == 'waveshare.EPD_7in3e'
+    assert frame['buildroot'] == {
+        "platform": "allwinner-t113-s3-mangopi-mq-dual",
+        "wifiVariant": "rtl8189fs",
+        "buildrootRef": "2026.02.1",
+        "imageArtifactName": "frameos-t113-s3-glibc-runtime-docker",
+    }
+
+
+@pytest.mark.asyncio
+async def test_api_frame_download_buildroot_sd_image(async_client, db, redis, tmp_path, monkeypatch):
+    image_dir = tmp_path / "images"
+    image_dir.mkdir()
+    image_path = image_dir / "frameos-t113-s3-glibc-runtime-docker-none.img.xz"
+    image_path.write_bytes(b"compressed-image")
+    monkeypatch.setenv("FRAMEOS_BUILDROOT_SD_IMAGE_DIR", str(image_dir))
+
+    frame = await new_frame(db, redis, "T113ImageFrame", "localhost", "localhost", "waveshare.EPD_7in3e")
+    frame.mode = "buildroot"
+    frame.buildroot = {
+        "platform": "allwinner-t113-s3-mangopi-mq-dual",
+        "wifiVariant": "none",
+        "imageArtifactName": "frameos-t113-s3-glibc-runtime-docker",
+    }
+    db.add(frame)
+    db.commit()
+
+    response = await async_client.get(f"/api/frames/{frame.id}/download_sd_image")
+    assert response.status_code == 200
+    assert response.content == b"compressed-image"
+    assert response.headers["content-type"].startswith("application/x-xz")
+    assert "frameos-t113-s3-glibc-runtime-docker-none.img.xz" in response.headers["content-disposition"]
+
+
+@pytest.mark.asyncio
 async def test_api_frame_new_missing_fields(async_client):
     # Missing frame_host
     payload = {

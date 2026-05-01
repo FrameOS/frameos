@@ -12,6 +12,7 @@ import io
 import json
 import mimetypes
 import os
+from pathlib import Path
 import re
 import shlex
 import shutil
@@ -85,6 +86,7 @@ from app.utils.frame_http import (
     _frame_scheme_port,
     _httpx_verify,
 )
+
 from app.tasks.utils import find_nim_v2
 from app.tasks._frame_deployer import FrameDeployer
 from app.tasks.frame_deploy_workflow import FrameDeployWorkflow
@@ -107,6 +109,17 @@ from app.tasks.binary_builder import FrameBinaryBuilder
 from app.utils.local_exec import exec_local_command
 from app.utils.jwt_tokens import validate_scoped_token
 from . import api_with_auth, api_no_auth
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+T113_S3_BUILDROOT_PLATFORM = "allwinner-t113-s3-mangopi-mq-dual"
+T113_S3_BUILDROOT_PLATFORM_ALIASES = {
+    T113_S3_BUILDROOT_PLATFORM,
+    "t113-s3",
+    "frameos-t113-s3",
+    "allwinner-t113-s3",
+}
+T113_S3_DEFAULT_BUILDROOT_REF = "2026.02.1"
+T113_S3_DEFAULT_IMAGE_ARTIFACT_NAME = "frameos-t113-s3-glibc-runtime-docker"
 
 
 def _not_found():
@@ -152,12 +165,15 @@ def _apply_frame_preview_update(frame: Frame, data: FrameUpdateRequest) -> Any:
         preview.ssh_user = "root"
     elif data.mode == "rpios" and old_mode == "buildroot" and preview.ssh_user == "root":
         preview.ssh_user = "pi"
+    if preview.mode == "buildroot" and ("buildroot" in update_data or data.mode == "buildroot"):
+        preview.buildroot = _normalize_buildroot_frame_settings(preview.buildroot or {})
 
     def _preview_to_dict():
         result = {**frame.to_dict(), **preview_data}
         result["mode"] = preview.mode
         result["https_proxy"] = normalize_https_proxy(preview.https_proxy)
         result["ssh_user"] = preview.ssh_user
+        result["buildroot"] = preview.buildroot
         return result
 
     preview.to_dict = _preview_to_dict
@@ -270,6 +286,102 @@ def _validate_upload_scenes_payload(
 def _ascii_safe(name: str) -> str:
     """Return a stripped ASCII fallback (for very old clients)."""
     return _ascii_re.sub("_", name)[:150] or "download"
+
+
+def _buildroot_settings(frame: Frame) -> dict[str, Any]:
+    return dict(frame.buildroot or {})
+
+
+def _buildroot_wifi_variant(settings: dict[str, Any]) -> str:
+    return str(settings.get("wifiVariant") or settings.get("wifi_variant") or "none").strip() or "none"
+
+
+def _buildroot_image_artifact_name(settings: dict[str, Any]) -> str:
+    return str(settings.get("imageArtifactName") or T113_S3_DEFAULT_IMAGE_ARTIFACT_NAME).strip()
+
+
+def _normalize_buildroot_frame_settings(settings: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(settings or {})
+    platform = str(normalized.get("platform") or "").strip()
+    if platform in T113_S3_BUILDROOT_PLATFORM_ALIASES:
+        normalized["platform"] = T113_S3_BUILDROOT_PLATFORM
+        normalized.setdefault("wifiVariant", "none")
+        normalized.setdefault("buildrootRef", T113_S3_DEFAULT_BUILDROOT_REF)
+        normalized.setdefault("imageArtifactName", T113_S3_DEFAULT_IMAGE_ARTIFACT_NAME)
+    elif platform:
+        normalized["platform"] = platform
+    else:
+        normalized.pop("platform", None)
+    return normalized
+
+
+def _buildroot_sd_image_search_dirs() -> list[Path]:
+    roots: list[Path] = []
+    env_value = os.environ.get("FRAMEOS_BUILDROOT_SD_IMAGE_DIRS") or os.environ.get("FRAMEOS_BUILDROOT_SD_IMAGE_DIR")
+    if env_value:
+        for raw_path in env_value.split(os.pathsep):
+            if raw_path.strip():
+                roots.append(Path(raw_path).expanduser())
+
+    roots.extend(
+        [
+            REPO_ROOT / "build" / "frameos-t113-s3-image",
+            REPO_ROOT / "build" / "frameos-t113-s3-image-docker-default-nowifi",
+            REPO_ROOT / "build" / "frameos-t113-s3-image-docker-nowifi",
+        ]
+    )
+
+    dirs: list[Path] = []
+    seen: set[Path] = set()
+    for root in roots:
+        for candidate in (root, root / "download"):
+            resolved = candidate.resolve() if candidate.exists() else candidate.absolute()
+            if resolved not in seen:
+                dirs.append(candidate)
+                seen.add(resolved)
+    return dirs
+
+
+def _buildroot_sd_image_variant_matches(path: Path, wifi_variant: str) -> bool:
+    name = path.name.lower()
+    variant = wifi_variant.lower()
+    if variant in {"", "none", "no-wifi"}:
+        return "none" in name or "nowifi" in name or "no-wifi" in name
+    return variant in name
+
+
+def _find_buildroot_sd_image(frame: Frame) -> Path | None:
+    settings = _buildroot_settings(frame)
+    platform = str(settings.get("platform") or "").strip()
+    if platform not in T113_S3_BUILDROOT_PLATFORM_ALIASES:
+        return None
+
+    wifi_variant = _buildroot_wifi_variant(settings)
+    artifact_name = _buildroot_image_artifact_name(settings)
+    expected_names = [
+        f"{artifact_name}-{wifi_variant}.img.xz",
+        f"{artifact_name}.img.xz",
+    ]
+
+    exact_candidates: list[Path] = []
+    fallback_candidates: list[Path] = []
+    for search_dir in _buildroot_sd_image_search_dirs():
+        if not search_dir.is_dir():
+            continue
+        for filename in expected_names:
+            candidate = search_dir / filename
+            if candidate.is_file():
+                exact_candidates.append(candidate)
+        fallback_candidates.extend(
+            candidate
+            for candidate in search_dir.glob("*.img.xz")
+            if candidate.is_file() and _buildroot_sd_image_variant_matches(candidate, wifi_variant)
+        )
+
+    candidates = exact_candidates or fallback_candidates
+    if not candidates:
+        return None
+    return max(candidates, key=lambda candidate: candidate.stat().st_mtime)
 
 
 def _normalise_agent_response(resp: Any) -> tuple[int, Any]:
@@ -938,6 +1050,55 @@ async def api_frame_local_binary_zip(
         )
     }
     return StreamingResponse(sender(), headers=headers, media_type="application/zip")
+
+
+@api_with_auth.get("/frames/{id:int}/download_sd_image")
+async def api_frame_download_sd_image(
+    id: int,
+    db: Session = Depends(get_db),
+):
+    frame = db.get(Frame, id) or _not_found()
+    if frame.mode != "buildroot":
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail="SD card images are only available for Buildroot frames.",
+        )
+
+    settings = _buildroot_settings(frame)
+    platform = str(settings.get("platform") or "").strip()
+    if platform not in T113_S3_BUILDROOT_PLATFORM_ALIASES:
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail=f"No SD card image download is configured for Buildroot platform '{platform or 'unknown'}'.",
+        )
+
+    image_path = _find_buildroot_sd_image(frame)
+    if not image_path:
+        wifi_variant = _buildroot_wifi_variant(settings)
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail=(
+                "No packaged T113-S3 SD card image was found on this backend. "
+                "Run the 'T113-S3 Buildroot SD image' GitHub Actions workflow or "
+                "scripts/docker-t113-s3-buildroot.sh with FRAMEOS_PACKAGE_IMAGE=1 "
+                f"for Wi-Fi variant '{wifi_variant}'."
+            ),
+        )
+
+    async def sender():
+        async with aiofiles.open(image_path, "rb") as fh:
+            while True:
+                chunk = await fh.read(1024 * 1024)
+                if not chunk:
+                    break
+                yield chunk
+
+    filename = _ascii_safe(image_path.name)
+    headers = {
+        "Content-Disposition": f'attachment; filename="{filename}"',
+        "Content-Length": str(image_path.stat().st_size),
+    }
+    return StreamingResponse(sender(), headers=headers, media_type="application/x-xz")
 
 
 @api_no_auth.get("/frames/{id:int}/asset")
@@ -1761,6 +1922,8 @@ async def api_frame_update_endpoint(
         frame.ssh_user = "root"
     elif data.mode == "rpios" and old_mode == "buildroot" and frame.ssh_user == "root":
         frame.ssh_user = "pi"
+    if frame.mode == "buildroot" and ("buildroot" in update_data or data.mode == "buildroot"):
+        frame.buildroot = _normalize_buildroot_frame_settings(frame.buildroot or {})
 
     await update_frame(db, redis, frame)
 
@@ -1834,13 +1997,16 @@ async def api_frame_new(
         frame.mode = data.mode or "rpios"
         if frame.mode == "buildroot":
             frame.ssh_user = 'root'
-            selected_platform = (data.platform or (frame.buildroot or {}).get('platform') or '').strip()
-            buildroot_settings = {**(frame.buildroot or {})}
+            buildroot_settings = {
+                **(frame.buildroot or {}),
+                **(data.buildroot or {}),
+            }
+            selected_platform = (data.platform or buildroot_settings.get('platform') or '').strip()
             if selected_platform:
                 buildroot_settings['platform'] = selected_platform
             else:
                 buildroot_settings.pop('platform', None)
-            frame.buildroot = buildroot_settings
+            frame.buildroot = _normalize_buildroot_frame_settings(buildroot_settings)
             if not frame.frame_host:
                 frame.frame_host = f'frame{frame.id}.local'
             db.add(frame)

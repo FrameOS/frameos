@@ -25,8 +25,7 @@ import {
   buildFullDeployPlanSummary,
 } from './frameDeployUtils'
 import { getDeployPlanErrorMessage } from './frameDeployErrors'
-
-export type { ChangeDetail, DeployPlanResponse, DeployRecommendation, SummaryItem } from './frameDeployUtils'
+import { defaultsForBuildrootPlatform, t113S3BuildrootPlatformValue } from '../../devices'
 
 interface DeployPlanApiResponse {
   plan: DeployPlanResponse
@@ -619,6 +618,7 @@ export const frameLogic = kea<frameLogicType>([
     closeScenePanels: (sceneIds: string[]) => ({ sceneIds }),
     sendEvent: (event: string, payload: Record<string, any>) => ({ event, payload }),
     setDeployWithAgent: (deployWithAgent: boolean) => ({ deployWithAgent }),
+    setBuildrootPlatform: (platform: string) => ({ platform }),
     generateFrameAdminCredentials: true,
     generateTlsCertificates: true,
     verifyTlsCertificates: true,
@@ -689,6 +689,15 @@ export const frameLogic = kea<frameLogicType>([
             agent: { ...frame.agent, deployWithAgent },
           }
         },
+        setBuildrootPlatform: (state, { platform }) => ({
+          ...state,
+          device: platform === t113S3BuildrootPlatformValue ? 'waveshare.EPD_7in3e' : state.device,
+          buildroot: {
+            ...(state.buildroot || {}),
+            ...defaultsForBuildrootPlatform(platform),
+            platform,
+          },
+        }),
       },
     ],
     deployPlans: [

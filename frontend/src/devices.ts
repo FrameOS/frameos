@@ -1,5 +1,5 @@
 import { Option } from './components/Select'
-import { Palette } from './types'
+import type { FrameBuildrootConfig, Palette } from './types'
 
 // To generate a new version:
 // cd backend && python3 list_devices.py
@@ -183,7 +183,46 @@ export const luckfoxBuildrootPlatforms: Option[] = luckfoxBuildrootPlatformValue
   label: platform,
 }))
 
-export const buildrootPlatforms: Option[] = [{ value: '', label: '-- Please select --' }, ...luckfoxBuildrootPlatforms]
+export const t113S3BuildrootPlatformValue = 'allwinner-t113-s3-mangopi-mq-dual'
+
+export const t113S3BuildrootDefaults: Required<
+  Pick<FrameBuildrootConfig, 'platform' | 'wifiVariant' | 'buildrootRef' | 'imageArtifactName'>
+> = {
+  platform: t113S3BuildrootPlatformValue,
+  wifiVariant: 'none',
+  buildrootRef: '2026.02.1',
+  imageArtifactName: 'frameos-t113-s3-glibc-runtime-docker',
+}
+
+export const buildrootWifiVariants: Option[] = [
+  { value: 'none', label: 'No Wi-Fi driver' },
+  { value: 'rtl8189fs', label: 'Realtek RTL8189FS / RTL8189F' },
+  { value: 'rtl8723ds', label: 'Realtek RTL8723DS' },
+]
+
+export const allwinnerBuildrootPlatforms: Option[] = [
+  {
+    value: t113S3BuildrootPlatformValue,
+    label: 'Allwinner T113-S3 (MangoPi MQ Dual / TQT113-S3)',
+  },
+]
+
+export function defaultsForBuildrootPlatform(platform?: string | null): Partial<FrameBuildrootConfig> {
+  if (platform === t113S3BuildrootPlatformValue) {
+    return t113S3BuildrootDefaults
+  }
+  return { platform: platform || '' }
+}
+
+export function buildrootPlatformSupportsSdImage(platform?: string | null): boolean {
+  return platform === t113S3BuildrootPlatformValue
+}
+
+export const buildrootPlatforms: Option[] = [
+  { value: '', label: '-- Please select --' },
+  ...allwinnerBuildrootPlatforms,
+  ...luckfoxBuildrootPlatforms,
+]
 
 export const rpiOSPlatforms: Option[] = [
   { value: '', label: 'Autodetect' },

@@ -108,6 +108,7 @@ export interface NewFrameFormType {
   device?: string | null
   server_host?: string | null
   platform?: string | null
+  buildroot?: FrameBuildrootConfig
 }
 
 export interface GPIOButton {
@@ -649,6 +650,10 @@ export interface Palette {
 
 export interface FrameBuildrootConfig {
   platform?: string
+  wifiVariant?: '' | 'none' | 'rtl8189fs' | 'rtl8723ds'
+  buildrootRef?: string
+  configFragments?: string
+  imageArtifactName?: string
 }
 
 export interface FrameRpiOSConfig {

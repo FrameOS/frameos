@@ -7,11 +7,10 @@ import { Field } from '../../components/Field'
 import { newFrameForm } from './newFrameForm'
 import { Select } from '../../components/Select'
 import { useActions, useValues } from 'kea'
-import { devices, buildrootPlatforms } from '../../devices'
+import { buildrootPlatforms, buildrootWifiVariants, devices } from '../../devices'
 import { A } from 'kea-router'
 import { urls } from '../../urls'
 import { Spinner } from '../../components/Spinner'
-import { DropdownMenu } from '../../components/DropdownMenu'
 
 function isLocalServer(host?: string): boolean {
   const localHostRegex = /^(localhost|0\.0\.0\.0|127\.0\.0\.1|\[::1\])(:\d+)?$/
@@ -19,8 +18,8 @@ function isLocalServer(host?: string): boolean {
 }
 
 export function NewFrame(): JSX.Element {
-  const { hideForm, resetNewFrame, setNewFrameValue, setNewFrameValues, setFile, importFrame } =
-    useActions(newFrameForm)
+  const { hideForm, resetNewFrame, setNewFrameValue, setFile, importFrame } = useActions(newFrameForm)
+  const { selectRpiosMode, selectBuildrootMode, selectBuildrootPlatform } = useActions(newFrameForm)
   const { newFrame, file, importingFrameLoading } = useValues(newFrameForm)
   const mode = newFrame.mode
 
@@ -29,14 +28,11 @@ export function NewFrame(): JSX.Element {
       <H6 className="mb-4">Add a smart frame</H6>
       <Box id="add-frame" className="p-4 w-80 max-w-full">
         <div className="flex gap-2 mb-4">
-          <Button
-            size="small"
-            color={mode === 'rpios' ? 'primary' : 'secondary'}
-            onClick={() => {
-              setNewFrameValues({ mode: 'rpios', platform: null })
-            }}
-          >
+          <Button size="small" color={mode === 'rpios' ? 'primary' : 'secondary'} onClick={selectRpiosMode}>
             RPi OS
+          </Button>
+          <Button size="small" color={mode === 'buildroot' ? 'primary' : 'secondary'} onClick={selectBuildrootMode}>
+            Buildroot
           </Button>
           <Button
             size="small"
@@ -45,28 +41,6 @@ export function NewFrame(): JSX.Element {
           >
             Import JSON
           </Button>
-          {mode === 'buildroot' ? (
-            <Button
-              size="small"
-              color="primary"
-              onClick={() => {
-                setNewFrameValues({ mode: 'buildroot', platform: '' })
-              }}
-            >
-              Buildroot
-            </Button>
-          ) : null}
-          <DropdownMenu
-            buttonColor="secondary"
-            items={[
-              {
-                label: 'Buildroot (unfinished)',
-                onClick: () => {
-                  setNewFrameValues({ mode: 'buildroot', platform: '' })
-                },
-              },
-            ]}
-          />
         </div>
         {mode === 'rpios' ? (
           <Form logic={newFrameForm} formKey="newFrame" className="space-y-4" enableFormOnSubmit>
@@ -151,8 +125,16 @@ export function NewFrame(): JSX.Element {
             <Field name="device" label="Driver">
               <Select name="device" options={devices} />
             </Field>
-            <Field name="platform" label="Platform">
-              <Select name="platform" options={buildrootPlatforms} />
+            <Field name="buildroot.platform" label="Platform">
+              {({ value }) => (
+                <Select value={value || ''} onChange={selectBuildrootPlatform} options={buildrootPlatforms} />
+              )}
+            </Field>
+            <Field name="buildroot.wifiVariant" label="Wi-Fi chip">
+              <Select name="buildroot.wifiVariant" options={buildrootWifiVariants} />
+            </Field>
+            <Field name="buildroot.buildrootRef" label="Buildroot ref">
+              <TextInput name="buildroot.buildrootRef" placeholder="2026.02.1" />
             </Field>
             <div className="flex gap-2">
               <Button type="submit">Add Frame</Button>

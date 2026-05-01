@@ -9,6 +9,7 @@ import { router } from 'kea-router'
 import { apiFetch } from '../../utils/apiFetch'
 import { urls } from '../../urls'
 import { loaders } from 'kea-loaders'
+import { defaultsForBuildrootPlatform, t113S3BuildrootDefaults, t113S3BuildrootPlatformValue } from '../../devices'
 
 export const newFrameForm = kea<newFrameFormType>([
   path(['src', 'scenes', 'frames', 'newFrameForm']),
@@ -17,6 +18,9 @@ export const newFrameForm = kea<newFrameFormType>([
     hideForm: true,
     setFile: (file: File | null) => ({ file }),
     importFrame: true,
+    selectRpiosMode: true,
+    selectBuildrootMode: true,
+    selectBuildrootPlatform: (platform: string) => ({ platform }),
   }),
   reducers({
     file: [
@@ -41,6 +45,7 @@ export const newFrameForm = kea<newFrameFormType>([
         frame_host: '',
         device: 'web_only',
         platform: 'pi-zero2',
+        buildroot: t113S3BuildrootDefaults,
         server_host:
           typeof window !== 'undefined'
             ? `${window.location.hostname}:${
@@ -53,17 +58,29 @@ export const newFrameForm = kea<newFrameFormType>([
       errors: (frame: Partial<NewFrameFormType>) => ({
         name: !frame.name ? 'Please enter a name' : null,
         frame_host: frame.mode === 'rpios' && !frame.frame_host ? 'Please enter a host' : null,
-        platform:
-          frame.mode === 'buildroot' && !frame.platform
-            ? 'Please pick a platform'
-            : // no errors for RpiOS, support autodetection
-              null,
+        buildroot:
+          frame.mode === 'buildroot' && !(frame.buildroot?.platform || frame.platform)
+            ? { platform: 'Please pick a platform' }
+            : undefined,
       }),
       submit: async (frame) => {
         try {
+          const buildrootPlatform = frame.buildroot?.platform || frame.platform || ''
+          const body =
+            frame.mode === 'buildroot'
+              ? {
+                  ...frame,
+                  platform: buildrootPlatform,
+                  buildroot: {
+                    ...defaultsForBuildrootPlatform(buildrootPlatform),
+                    ...(frame.buildroot || {}),
+                    platform: buildrootPlatform,
+                  },
+                }
+              : frame
           const response = await apiFetch('/api/frames/new', {
             method: 'POST',
-            body: JSON.stringify(frame),
+            body: JSON.stringify(body),
             headers: {
               'Content-Type': 'application/json',
             },
@@ -84,6 +101,36 @@ export const newFrameForm = kea<newFrameFormType>([
           console.error(error)
         }
       },
+    },
+  })),
+  listeners(({ actions, values }) => ({
+    selectRpiosMode: () => {
+      actions.setNewFrameValues({ mode: 'rpios', platform: null })
+    },
+    selectBuildrootMode: () => {
+      const currentPlatform = values.newFrame.buildroot?.platform || t113S3BuildrootPlatformValue
+      actions.setNewFrameValues({
+        mode: 'buildroot',
+        device: currentPlatform === t113S3BuildrootPlatformValue ? 'waveshare.EPD_7in3e' : values.newFrame.device,
+        platform: currentPlatform,
+        buildroot: {
+          ...defaultsForBuildrootPlatform(currentPlatform),
+          ...(values.newFrame.buildroot || {}),
+          platform: currentPlatform,
+        },
+      })
+    },
+    selectBuildrootPlatform: ({ platform }) => {
+      actions.setNewFrameValues({
+        mode: 'buildroot',
+        device: platform === t113S3BuildrootPlatformValue ? 'waveshare.EPD_7in3e' : values.newFrame.device,
+        platform,
+        buildroot: {
+          ...(values.newFrame.buildroot || {}),
+          ...defaultsForBuildrootPlatform(platform),
+          platform,
+        },
+      })
     },
   })),
   loaders(({ actions, values }) => ({

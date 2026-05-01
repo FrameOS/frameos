@@ -293,3 +293,13 @@ custom board variants. The first deliverable is a host-side system that can:
 - Documented the first downloadable-image workflow from artifact verification
   through Linux/macOS SD-card writing and first-boot checks for serial console,
   DHCP Ethernet, FrameOS init, admin UI, and logs.
+- Added the T113-S3 Buildroot platform to the frontend frame creation and frame
+  settings flows. Buildroot frames can now select the Allwinner T113-S3
+  MangoPi/TQT113 platform, Wi-Fi variant (`none`, `rtl8189fs`, or
+  `rtl8723ds`), Buildroot ref, image artifact base name, and extra config
+  fragments.
+- Added a backend `/api/frames/{id}/download_sd_image` endpoint plus frontend
+  settings/dropdown actions for downloading a packaged local T113-S3
+  `*.img.xz` SD-card image when the backend has one. The settings panel also
+  links to the manual GitHub Actions image workflow for generating downloadable
+  artifacts.
