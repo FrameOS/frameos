@@ -2,6 +2,7 @@
 CC ?= gcc
 EXTRA_CFLAGS ?=
 EXTRA_LIBS ?=
+CACHE_DIR ?= ../cache
 
 SOURCES := $(shell ls -S *.c)
 OBJECTS = $(SOURCES:.c=.o)
@@ -21,7 +22,7 @@ clean:
 	rm -f *.o $(EXECUTABLE)
 
 pre-build:
-	@mkdir -p ../cache
+	@mkdir -p "$(CACHE_DIR)"
 	@echo "Compiling, largest files first. This could take a while."
 
 $(OBJECTS): pre-build
@@ -30,7 +31,7 @@ $(OBJECTS): pre-build
 	@if [ ! -e $@ ]; then \
 		md5sum=$$(md5sum $< | awk '{print $$1}'); \
 		file=$$(echo '$<' | sed 's/@s/\//g' | sed 's/@m//g' | sed 's/.*nimble\/pkgs2\/\(.*\)/\1/' | sed 's/.*\/\(nim\/lib\/.*\)/\1/'); \
-		cache_obj=../cache/$$md5sum.o; \
+		cache_obj="$(CACHE_DIR)/$$md5sum.o"; \
 		if [ -f "$$cache_obj" ]; then \
 			ln -s "$$cache_obj" $@; \
 		else \

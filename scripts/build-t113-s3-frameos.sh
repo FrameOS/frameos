@@ -72,16 +72,32 @@ if [[ ! -e "${STAGING_DIR}/usr/lib/liblgpio.so" && ! -e "${STAGING_DIR}/usr/lib/
   exit 1
 fi
 
-python3 "${ROOT_DIR}/backend/bin/cross" generate \
-  --target "${TARGET}" \
-  --frameos-root "${FRAMEOS_ROOT}" \
-  --build-dir "${GENERATED_DIR}"
+(
+  cd "${ROOT_DIR}/backend"
+  python3 "${ROOT_DIR}/backend/bin/cross" generate \
+    --target "${TARGET}" \
+    --frameos-root "${FRAMEOS_ROOT}" \
+    --build-dir "${GENERATED_DIR}"
+)
 
 rm -rf "${GENERATED_DIR}/quickjs"
 mkdir -p "${GENERATED_DIR}/quickjs"
 cp "${STAGING_DIR}/usr/lib/libquickjs.a" "${GENERATED_DIR}/quickjs/libquickjs.a"
 cp "${STAGING_DIR}/usr/include/quickjs/quickjs.h" "${GENERATED_DIR}/quickjs/quickjs.h"
 cp "${STAGING_DIR}/usr/include/quickjs/quickjs-libc.h" "${GENERATED_DIR}/quickjs/quickjs-libc.h"
+
+nimbase="${GENERATED_DIR}/nimbase.h"
+if [[ -f "${nimbase}" ]]; then
+  probe_obj="$(mktemp "${TMPDIR:-/tmp}/frameos-t113-s3-int32.XXXXXX")"
+  if printf '#include <stdint.h>\nint main(void) { int32_t value = 0; int *as_int = &value; return *as_int; }\n' |
+    "${target_gcc}" --sysroot="${STAGING_DIR}" -Werror -x c -c - -o "${probe_obj}" >/dev/null 2>&1; then
+    if grep -q 'defined(__arm__) || defined(__riscv)' "${nimbase}"; then
+      echo "Patching generated Nim overflow helpers for ARM int32_t ABI."
+      sed -i -e 's/#if (defined(__arm__) || defined(__riscv)) && defined(__GNUC__)/#if defined(__riscv) \&\& defined(__GNUC__)/' "${nimbase}"
+    fi
+  fi
+  rm -f "${probe_obj}"
+fi
 
 export CPATH="${GENERATED_DIR}:${STAGING_DIR}/usr/include:${STAGING_DIR}/usr/include/quickjs${CPATH:+:${CPATH}}"
 export LIBRARY_PATH="${STAGING_DIR}/usr/lib${LIBRARY_PATH:+:${LIBRARY_PATH}}"
@@ -90,6 +106,7 @@ export PKG_CONFIG_LIBDIR="${STAGING_DIR}/usr/lib/pkgconfig:${STAGING_DIR}/usr/sh
 
 make -C "${GENERATED_DIR}" \
   CC="${target_gcc}" \
+  CACHE_DIR="${GENERATED_DIR}/.cache" \
   EXTRA_CFLAGS="--sysroot=${STAGING_DIR} -I${GENERATED_DIR} -I${STAGING_DIR}/usr/include -I${STAGING_DIR}/usr/include/quickjs" \
   EXTRA_LIBS="--sysroot=${STAGING_DIR} -L${STAGING_DIR}/usr/lib -Wl,-rpath-link,${STAGING_DIR}/usr/lib"
 

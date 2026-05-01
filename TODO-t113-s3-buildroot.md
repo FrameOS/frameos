@@ -166,3 +166,14 @@ custom board variants. The first deliverable is a host-side system that can:
   certificates. The only remaining inspection failures were the expected
   missing FrameOS runtime binary and `/usr/bin/frameos` because that run did
   not set `FRAMEOS_BUILD_RUNTIME=1`.
+- The first `FRAMEOS_BUILD_RUNTIME=1` run exposed two runtime-build issues
+  before image regeneration. First, `backend/bin/cross generate` had to run from
+  `backend/` because existing Waveshare driver discovery uses paths relative to
+  that working directory. After that fix, Nim C-source generation succeeded, but
+  the ARM cross-compile failed because Nim 2.2.4's generated `nimbase.h`
+  selected `long` overflow builtins for every `__arm__` target while the
+  Buildroot glibc toolchain defines `int32_t` as `int`. The T113-S3 runtime
+  wrapper now probes the target ABI and patches only the generated `nimbase.h`
+  for this case, and the generated C makefile supports a target-local object
+  cache to avoid stale objects across sysroot/header changes. A single
+  previously failing generated C file now compiles with the patched header.
