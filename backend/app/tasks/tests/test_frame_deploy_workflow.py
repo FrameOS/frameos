@@ -215,6 +215,7 @@ async def test_full_plan_reports_installed_state_and_remote_build_dependencies(m
     assert plan.full_deploy.package_alternatives[0].installed_package == "ntp"
     assert plan.full_deploy.dependency_helper_plans == []
     assert [vendor.key for vendor in plan.full_deploy.vendor_sync_plans] == ["inkyPython"]
+    assert plan.full_deploy.vendor_sync_plans[0].preserve_remote_paths == ("env", "requirements.txt.sha256sum")
     assert plan.full_deploy.ssh_keys_need_install is False
     assert plan.full_deploy.post_deploy["i2c"]["needs_boot_config_line"] is False
     assert plan.full_deploy.post_deploy["i2c"]["needs_runtime_enable"] is False
@@ -222,6 +223,15 @@ async def test_full_plan_reports_installed_state_and_remote_build_dependencies(m
     assert plan.full_deploy.post_deploy["disable_caddy_service"] is True
     assert plan.full_deploy.post_deploy["bootconfig_changes"] == []
     assert plan.full_deploy.post_deploy["final_action"] == "restart_frameos"
+
+
+def test_python_vendor_setup_command_reinstalls_only_when_env_or_requirements_change():
+    command = FrameDeployWorkflow._python_vendor_setup_command("inkyPython")
+
+    assert "cd /srv/frameos/vendor/inkyPython && if [ ! -x env/bin/pip3 ]; then" in command
+    assert "elif sha256sum -c requirements.txt.sha256sum 2>/dev/null; then" in command
+    assert "requirements unchanged; reusing env" in command
+    assert command.count("&& env/bin/pip3 install -r requirements.txt &&") == 2
 
 
 @pytest.mark.asyncio

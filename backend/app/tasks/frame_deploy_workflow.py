@@ -85,6 +85,7 @@ class VendorSyncPlan:
     vendor_folder: str
     label: str
     setup_commands: list[str] = field(default_factory=list)
+    preserve_remote_paths: tuple[str, ...] = field(default_factory=tuple)
 
 
 @dataclass(slots=True)
@@ -384,6 +385,7 @@ class FrameDeployWorkflow:
                     vendor_folder=inky_python.vendor_folder or "",
                     label="inkyPython vendor files",
                     setup_commands=[self._python_vendor_setup_command(inky_python.vendor_folder or "")],
+                    preserve_remote_paths=("env", "requirements.txt.sha256sum"),
                 )
             )
         if inky_hyperpixel := drivers.get("inkyHyperPixel2r"):
@@ -393,6 +395,7 @@ class FrameDeployWorkflow:
                     vendor_folder=inky_hyperpixel.vendor_folder or "",
                     label="inkyHyperPixel2r vendor files",
                     setup_commands=[self._python_vendor_setup_command(inky_hyperpixel.vendor_folder or "")],
+                    preserve_remote_paths=("env", "requirements.txt.sha256sum"),
                 )
             )
 
@@ -721,6 +724,7 @@ class FrameDeployWorkflow:
                 vendor_plan.label,
                 build_result.cross_compiled,
                 build_id,
+                vendor_plan.preserve_remote_paths,
             )
             for command in vendor_plan.setup_commands:
                 await self.deployer.exec_command(command)
@@ -783,11 +787,18 @@ class FrameDeployWorkflow:
     def _python_vendor_setup_command(vendor_folder: str) -> str:
         return (
             f"cd /srv/frameos/vendor/{vendor_folder} && "
-            "([ ! -d env ] && python3 -m venv env || echo 'env exists') && "
-            "(sha256sum -c requirements.txt.sha256sum 2>/dev/null || "
-            "(echo '> env/bin/pip3 install -r requirements.txt' && "
+            "if [ ! -x env/bin/pip3 ]; then "
+            "rm -rf env && python3 -m venv env && "
+            "echo '> env/bin/pip3 install -r requirements.txt' && "
             "env/bin/pip3 install -r requirements.txt && "
-            "sha256sum requirements.txt > requirements.txt.sha256sum))"
+            "sha256sum requirements.txt > requirements.txt.sha256sum; "
+            "elif sha256sum -c requirements.txt.sha256sum 2>/dev/null; then "
+            "echo 'requirements unchanged; reusing env'; "
+            "else "
+            "echo '> env/bin/pip3 install -r requirements.txt' && "
+            "env/bin/pip3 install -r requirements.txt && "
+            "sha256sum requirements.txt > requirements.txt.sha256sum; "
+            "fi"
         )
 
     async def _run_post_deploy_cleanup(self, *, post_deploy: dict[str, Any]) -> None:
