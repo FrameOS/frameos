@@ -78,7 +78,15 @@ uploaded[sceneId] = ExportedInterpretedScene(
     }),
     node(3, "app", %*{
       "keyword": "repo/examples/jsText",
-      "config": {},
+      "config": {}
+    })
+  ],
+  edges: @[
+    edge(100, 10, "next", 2, "prev"),
+    edge(101, 1, "fieldOutput", 2, "fieldInput/image")
+  ],
+  apps: %*{
+    "repo/examples/jsText": {
       "sources": {
         "config.json": """
 {
@@ -102,12 +110,8 @@ export function get(app: FrameOSApp, context: FrameOSContext): string {
 }
 """
       }
-    })
-  ],
-  edges: @[
-    edge(100, 10, "next", 2, "prev"),
-    edge(101, 1, "fieldOutput", 2, "fieldInput/image")
-  ]
+    }
+  }
 )
 
 setUploadedInterpretedScenes(uploaded)

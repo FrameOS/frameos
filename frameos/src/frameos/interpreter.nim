@@ -8,8 +8,19 @@ import apps/apps
 
 const TRACING = false
 
+proc appSourcesFromSceneApps(scene: FrameScene, keyword: string): JsonNode =
+  if scene of InterpretedFrameScene:
+    let apps = InterpretedFrameScene(scene).apps
+    if not apps.isNil and apps.kind == JObject and apps.hasKey(keyword):
+      let app = apps[keyword]
+      if not app.isNil and app.kind == JObject and app.hasKey("sources") and app["sources"].kind == JObject:
+        return app["sources"]
+  nil
+
 proc initInterpretedApp(keyword: string, node: DiagramNode, scene: FrameScene): AppRoot =
-  let sources = node.data{"sources"}
+  var sources = node.data{"sources"}
+  if not hasJsAppSource(sources):
+    sources = appSourcesFromSceneApps(scene, keyword)
   if hasJsAppSource(sources):
     return initDynamicJsApp(keyword, node, scene, sources)
   initApp(keyword, node, scene)
@@ -673,6 +684,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     state: %*{},
     nodes: initTable[NodeId, DiagramNode](),
     edges: @[],
+    apps: exportedScene.apps,
     nextNodeIds: initTable[NodeId, NodeId](),
     appsByNodeId: initTable[NodeId, AppRoot](),
     eventListeners: initTable[string, seq[NodeId]](),
@@ -1032,6 +1044,7 @@ proc buildInterpretedSceneExport(scene: FrameSceneInput): ExportedInterpretedSce
     name: scene.name,
     nodes: scene.nodes,
     edges: scene.edges,
+    apps: if scene.apps.isNil: %*{} else: scene.apps,
     publicStateFields: scene.fields,
     persistedStateKeys: scene.fields.mapIt(it.name),
     init: init,
