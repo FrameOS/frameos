@@ -128,10 +128,10 @@ microSD card with a normal block-image writer.
 
 ## Board Customization Points
 
-- `FRAMEOS_WIFI_VARIANT=rtl8723ds` is the default. Use
-  `FRAMEOS_WIFI_VARIANT=rtl8189fs` for MangoPi-style RTL8189F/RTL8189FS
-  hardware, `FRAMEOS_WIFI_VARIANT=none` for no Wi-Fi driver fragment, or point
-  it at a custom Buildroot config fragment.
+- `FRAMEOS_WIFI_VARIANT=none` is the default. Use
+  `FRAMEOS_WIFI_VARIANT=rtl8723ds` or `FRAMEOS_WIFI_VARIANT=rtl8189fs` for the
+  seed MangoPi-style Wi-Fi fragments, or point it at a custom Buildroot config
+  fragment.
 - `FRAMEOS_CONFIG_FRAGMENTS="/path/to/one.config /path/to/two.config"` appends
   extra Buildroot fragments for custom boards.
 - `board/mangopi/mq-dual/rootfs_overlay/etc/default/frameos` controls FrameOS

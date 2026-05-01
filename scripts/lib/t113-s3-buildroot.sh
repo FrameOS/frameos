@@ -135,7 +135,7 @@ frameos_t113_s3_make() {
 
 frameos_t113_s3_collect_config_fragments() {
   local external_dir="$1"
-  local wifi_variant="${FRAMEOS_WIFI_VARIANT:-rtl8723ds}"
+  local wifi_variant="${FRAMEOS_WIFI_VARIANT:-none}"
 
   FRAMEOS_T113_S3_CONFIG_FRAGMENTS=()
 

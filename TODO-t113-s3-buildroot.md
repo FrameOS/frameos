@@ -261,3 +261,6 @@ custom board variants. The first deliverable is a host-side system that can:
   single containerized path instead of running inspection and packaging as
   separate host steps, and the external-tree README documents both the local
   full-artifact command and the manual downloadable-image workflow.
+- Changed the wrapper default Wi-Fi variant to `none`, matching the only fully
+  built and inspected image path so far. RTL8723DS and RTL8189FS remain
+  explicit Buildroot fragment choices pending real hardware validation.

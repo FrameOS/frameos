@@ -59,7 +59,7 @@ if [[ -f "${OUTPUT_DIR}/images/sdcard.img" ]]; then
   cat >"${IMAGE_ARTIFACTS_DIR}/metadata.json" <<EOF
 {
   "defconfig": "${DEFCONFIG}",
-  "wifi_variant": "${FRAMEOS_WIFI_VARIANT:-rtl8723ds}",
+  "wifi_variant": "${FRAMEOS_WIFI_VARIANT:-none}",
   "output_dir": "${OUTPUT_DIR}",
   "runtime_binary": "${FRAMEOS_RUNTIME_BINARY:-}",
   "image": "${IMAGE_ARTIFACTS_DIR}/sdcard.img",
