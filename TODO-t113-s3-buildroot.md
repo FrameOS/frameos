@@ -129,3 +129,5 @@ custom board variants. The first deliverable is a host-side system that can:
 - Added `scripts/inspect-t113-s3-build.sh` to check the Buildroot image,
   copied checksum, rootfs FrameOS service/runtime files, key shared libraries,
   CA certificates, and ARM ELF metadata before flashing an SD card.
+- Added `scripts/bootstrap-t113-s3-buildroot.sh` to clone or verify a Buildroot
+  checkout before starting the longer package/image build.

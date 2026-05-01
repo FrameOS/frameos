@@ -18,6 +18,14 @@ The baseline follows the upstream Buildroot MangoPi MQ1RDW2 support:
 - `make`, a working C toolchain for the host, and normal Buildroot host
   dependencies.
 
+The helper below clones or checks an external Buildroot checkout. It defaults
+to Buildroot `2026.02.1`, which has the config merge script and the Realtek
+Wi-Fi package entries used by the T113-S3 wrappers.
+
+```bash
+./scripts/bootstrap-t113-s3-buildroot.sh
+```
+
 ## Build
 
 From the FrameOS repository root:
