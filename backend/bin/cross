@@ -29,6 +29,7 @@ class TargetDefinition:
     platform: str
     image: str
     runner: str = "ubuntu-24.04"
+    include_in_matrix: bool = True
 
     @property
     def slug(self) -> str:
@@ -57,7 +58,15 @@ TARGETS: tuple[TargetDefinition, ...] = (
     TargetDefinition("ubuntu", "22.04", "amd64", "linux/amd64", "ubuntu:22.04"),
     TargetDefinition("ubuntu", "24.04", "arm64", "linux/arm64", "ubuntu:24.04", runner="ubuntu-24.04-arm"),
     TargetDefinition("ubuntu", "24.04", "amd64", "linux/amd64", "ubuntu:24.04"),
-    # TargetDefinition("buildroot", "luckfox-pico-plus", "armv7l", "linux/amd64", "ubuntu:22.04"),
+    TargetDefinition(
+        "buildroot",
+        "t113-s3",
+        "armhf",
+        "linux/arm/v7",
+        "debian:bookworm",
+        runner="ubuntu-24.04-arm",
+        include_in_matrix=False,
+    ),
 )
 
 TARGET_MAP = {target.slug: target for target in TARGETS}
@@ -104,7 +113,7 @@ def load_frame_stub(frameos_root: Path) -> FrameStub:
 
 
 def targets_matrix_json() -> str:
-    matrix = {"include": [target.to_matrix_entry() for target in TARGETS]}
+    matrix = {"include": [target.to_matrix_entry() for target in TARGETS if target.include_in_matrix]}
     return json.dumps(matrix, separators=(",", ":"))
 
 

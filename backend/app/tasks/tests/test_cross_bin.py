@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
@@ -20,6 +21,23 @@ def load_cross_module():
     sys.modules[loader.name] = module
     loader.exec_module(module)
     return module
+
+
+def test_t113_s3_target_is_listed_but_not_in_ci_matrix():
+    cross_module = load_cross_module()
+
+    target = cross_module.TARGET_MAP["buildroot-t113-s3-armhf"]
+    assert target.distro == "buildroot"
+    assert target.version == "t113-s3"
+    assert target.arch == "armhf"
+    assert target.platform == "linux/arm/v7"
+
+    listed_targets = cross_module.list_targets().splitlines()
+    assert "buildroot-t113-s3-armhf" in listed_targets
+
+    matrix = json.loads(cross_module.targets_matrix_json())
+    matrix_slugs = {entry["slug"] for entry in matrix["include"]}
+    assert "buildroot-t113-s3-armhf" not in matrix_slugs
 
 
 @pytest.mark.asyncio

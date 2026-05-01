@@ -129,6 +129,10 @@ def resolve_prebuilt_target(distro: str, version: str, arch: str) -> str | None:
             release_key = release
     elif distro_key == "ubuntu":
         release_key = _normalize_ubuntu_release(version)
+    elif distro_key == "buildroot":
+        allowed = {"t113-s3", "t113s3", "frameos-t113-s3", "allwinner-t113-s3"}
+        if release in allowed:
+            release_key = "t113-s3"
     if not release_key:
         return None
 

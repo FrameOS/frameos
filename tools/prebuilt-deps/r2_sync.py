@@ -88,6 +88,7 @@ DEFAULT_TARGETS = [
     "debian-trixie-armhf",
     "debian-trixie-arm64",
     "debian-trixie-amd64",
+    "buildroot-t113-s3-armhf",
     "ubuntu-22.04-arm64",
     "ubuntu-22.04-amd64",
     "ubuntu-24.04-arm64",

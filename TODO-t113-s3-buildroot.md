@@ -106,3 +106,9 @@ custom board variants. The first deliverable is a host-side system that can:
 - Made the Waveshare e-paper C shim accept FrameOS/Buildroot systems and read
   GPIO/SPI settings from environment variables so custom board pin mappings can
   be changed without rebuilding FrameOS.
+- Added `buildroot-t113-s3-armhf` metadata to the FrameOS cross-target list and
+  prebuilt dependency target matrix. It is intentionally excluded from the
+  GitHub Actions binary-build matrix until the Buildroot sysroot/toolchain path
+  is implemented.
+- Added tests for T113-S3 target listing and Buildroot prebuilt dependency
+  target resolution.
