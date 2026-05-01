@@ -80,6 +80,7 @@ export type CodeNodeLanguage = 'js' | 'nim'
 export type DiagramHistorySnapshot = {
   nodes: DiagramNode[]
   edges: Edge[]
+  apps: Record<string, SceneApp>
 }
 
 export type DiagramHistoryState = {
@@ -90,6 +91,7 @@ export type DiagramHistoryState = {
 type ClipboardDiagramPayload = {
   nodes: DiagramNode[]
   edges: Edge[]
+  apps?: Record<string, SceneApp>
 }
 
 const MAX_HISTORY_LENGTH = 100
@@ -107,9 +109,14 @@ const normalizeNodes = (nodes: DiagramNode[]): DiagramNode[] =>
 const normalizeEdges = (edges: Edge[]): Edge[] =>
   edges.map((edge) => (edge.selected ? { ...edge, selected: false } : edge))
 
-const makeHistorySnapshot = (nodes: DiagramNode[], edges: Edge[]): DiagramHistorySnapshot => ({
+const makeHistorySnapshot = (
+  nodes: DiagramNode[],
+  edges: Edge[],
+  apps: Record<string, SceneApp> = {}
+): DiagramHistorySnapshot => ({
   nodes: normalizeNodes(nodes),
   edges: normalizeEdges(edges),
+  apps,
 })
 
 const scheduleHistorySnapshot = (
@@ -168,6 +175,45 @@ const sanitizeClipboardNode = (node: DiagramNode): DiagramNode => {
   return rest as DiagramNode
 }
 
+const getNodeAppKeyword = (node: DiagramNode): string | null => {
+  if (node.type !== 'app') {
+    return null
+  }
+  const keyword = (node.data as AppNodeData | undefined)?.keyword
+  return typeof keyword === 'string' && keyword ? keyword : null
+}
+
+const collectSceneAppsForNodes = (
+  nodes: DiagramNode[],
+  sceneApps: Record<string, SceneApp>
+): Record<string, SceneApp> => {
+  const apps: Record<string, SceneApp> = {}
+  for (const node of nodes) {
+    const keyword = getNodeAppKeyword(node)
+    if (keyword && sceneApps[keyword]) {
+      apps[keyword] = sceneApps[keyword]
+    }
+  }
+  return apps
+}
+
+const clipboardPayloadForNodes = (
+  nodes: DiagramNode[],
+  edges: Edge[],
+  sceneApps: Record<string, SceneApp>
+): DiagramNode | ClipboardDiagramPayload => {
+  const sanitizedNodes = nodes.map(sanitizeClipboardNode)
+  const apps = collectSceneAppsForNodes(sanitizedNodes, sceneApps)
+  if (sanitizedNodes.length === 1 && edges.length === 0 && Object.keys(apps).length === 0) {
+    return sanitizedNodes[0]
+  }
+  return {
+    nodes: sanitizedNodes,
+    edges,
+    ...(Object.keys(apps).length > 0 ? { apps } : {}),
+  }
+}
+
 const parseClipboardPayload = (parsed: unknown): ClipboardDiagramPayload | null => {
   if (!parsed) {
     return null
@@ -176,15 +222,52 @@ const parseClipboardPayload = (parsed: unknown): ClipboardDiagramPayload | null 
     return { nodes: parsed as DiagramNode[], edges: [] }
   }
   if (typeof parsed === 'object') {
-    const payload = parsed as { nodes?: DiagramNode[]; edges?: Edge[] }
+    const payload = parsed as { nodes?: DiagramNode[]; edges?: Edge[]; apps?: Record<string, SceneApp> }
     if (Array.isArray(payload.nodes)) {
-      return { nodes: payload.nodes, edges: payload.edges ?? [] }
+      return { nodes: payload.nodes, edges: payload.edges ?? [], apps: payload.apps ?? {} }
     }
     if ('type' in (parsed as DiagramNode)) {
       return { nodes: [parsed as DiagramNode], edges: [] }
     }
   }
   return null
+}
+
+const mergePastedSceneApps = (
+  nodes: DiagramNode[],
+  sceneApps: Record<string, SceneApp>,
+  pastedApps: Record<string, SceneApp> = {}
+): { sceneApps: Record<string, SceneApp>; keywordMap: Map<string, string> } => {
+  const nextSceneApps = { ...sceneApps }
+  const keywordMap = new Map<string, string>()
+
+  for (const node of nodes) {
+    const keyword = getNodeAppKeyword(node)
+    if (!keyword || keywordMap.has(keyword) || !pastedApps[keyword]) {
+      continue
+    }
+
+    const pastedApp = pastedApps[keyword]
+    if (!nextSceneApps[keyword]) {
+      nextSceneApps[keyword] = pastedApp
+      keywordMap.set(keyword, keyword)
+      continue
+    }
+
+    if (equal(nextSceneApps[keyword], pastedApp)) {
+      keywordMap.set(keyword, keyword)
+      continue
+    }
+
+    const newKeyword = forkSceneAppKey(nextSceneApps, keyword, sceneAppToAppConfig(pastedApp))
+    nextSceneApps[newKeyword] = {
+      ...pastedApp,
+      source: pastedApp.source || keyword,
+    }
+    keywordMap.set(keyword, newKeyword)
+  }
+
+  return { sceneApps: nextSceneApps, keywordMap }
 }
 
 const getClipboardOffset = (nodes: DiagramNode[], basePosition?: XYPosition | null): XYPosition => {
@@ -568,7 +651,7 @@ export const diagramLogic = kea<diagramLogicType>([
         }
       }
       if (scene && scene.id !== oldScene?.id) {
-        actions.resetHistory(makeHistorySnapshot(scene.nodes ?? [], scene.edges ?? []))
+        actions.resetHistory(makeHistorySnapshot(scene.nodes ?? [], scene.edges ?? [], scene.apps ?? {}))
       }
     },
   })),
@@ -581,7 +664,7 @@ export const diagramLogic = kea<diagramLogicType>([
         if (cache.ignoreHistory) {
           return
         }
-        actions.recordHistory(makeHistorySnapshot(values.nodes, values.rawEdges))
+        actions.recordHistory(makeHistorySnapshot(values.nodes, values.rawEdges, values.sceneApps))
       },
     ],
     onNodesChange: [
@@ -599,7 +682,7 @@ export const diagramLogic = kea<diagramLogicType>([
         ) {
           return
         }
-        const snapshot = makeHistorySnapshot(values.nodes, values.rawEdges)
+        const snapshot = makeHistorySnapshot(values.nodes, values.rawEdges, values.sceneApps)
         const isDragging = changes.some((change) => change.type === 'position' && change.dragging)
         if (isDragging) {
           scheduleHistorySnapshot(cache, actions, snapshot)
@@ -614,7 +697,7 @@ export const diagramLogic = kea<diagramLogicType>([
         if (cache.ignoreHistory) {
           return
         }
-        scheduleHistorySnapshot(cache, actions, makeHistorySnapshot(values.nodes, values.rawEdges))
+        scheduleHistorySnapshot(cache, actions, makeHistorySnapshot(values.nodes, values.rawEdges, values.sceneApps))
       },
     ],
     updateNodeConfig: [
@@ -622,7 +705,7 @@ export const diagramLogic = kea<diagramLogicType>([
         if (cache.ignoreHistory) {
           return
         }
-        scheduleHistorySnapshot(cache, actions, makeHistorySnapshot(values.nodes, values.rawEdges))
+        scheduleHistorySnapshot(cache, actions, makeHistorySnapshot(values.nodes, values.rawEdges, values.sceneApps))
       },
       ({ id, field, value }) => {
         const { nodes } = values
@@ -655,14 +738,14 @@ export const diagramLogic = kea<diagramLogicType>([
         if (cache.ignoreHistory) {
           return
         }
-        actions.recordHistory(makeHistorySnapshot(values.nodes, values.rawEdges))
+        actions.recordHistory(makeHistorySnapshot(values.nodes, values.rawEdges, values.sceneApps))
       },
     ],
     setEdges: () => {
       if (cache.ignoreHistory) {
         return
       }
-      actions.recordHistory(makeHistorySnapshot(values.nodes, values.rawEdges))
+      actions.recordHistory(makeHistorySnapshot(values.nodes, values.rawEdges, values.sceneApps))
     },
     onEdgesChange: ({ changes }) => {
       if (cache.ignoreHistory) {
@@ -671,19 +754,19 @@ export const diagramLogic = kea<diagramLogicType>([
       if (changes.length > 0 && changes.every((change) => change.type === 'select')) {
         return
       }
-      actions.recordHistory(makeHistorySnapshot(values.nodes, values.rawEdges))
+      actions.recordHistory(makeHistorySnapshot(values.nodes, values.rawEdges, values.sceneApps))
     },
     addEdge: () => {
       if (cache.ignoreHistory) {
         return
       }
-      actions.recordHistory(makeHistorySnapshot(values.nodes, values.rawEdges))
+      actions.recordHistory(makeHistorySnapshot(values.nodes, values.rawEdges, values.sceneApps))
     },
     updateEdge: () => {
       if (cache.ignoreHistory) {
         return
       }
-      actions.recordHistory(makeHistorySnapshot(values.nodes, values.rawEdges))
+      actions.recordHistory(makeHistorySnapshot(values.nodes, values.rawEdges, values.sceneApps))
     },
     setSceneApps: ({ apps, forceCompiled }) => {
       actions.setFrameFormValues({
@@ -740,6 +823,13 @@ export const diagramLogic = kea<diagramLogicType>([
         return
       }
       cache.ignoreHistory = true
+      actions.setFrameFormValues({
+        scenes: values.editingFrame.scenes?.map((scene) =>
+          scene.id === props.sceneId
+            ? { ...scene, nodes: previous.nodes, edges: previous.edges, apps: previous.apps ?? {} }
+            : scene
+        ),
+      })
       actions.setNodes(previous.nodes)
       actions.setEdges(previous.edges)
       window.setTimeout(() => {
@@ -752,6 +842,11 @@ export const diagramLogic = kea<diagramLogicType>([
         return
       }
       cache.ignoreHistory = true
+      actions.setFrameFormValues({
+        scenes: values.editingFrame.scenes?.map((scene) =>
+          scene.id === props.sceneId ? { ...scene, nodes: next.nodes, edges: next.edges, apps: next.apps ?? {} } : scene
+        ),
+      })
       actions.setNodes(next.nodes)
       actions.setEdges(next.edges)
       window.setTimeout(() => {
@@ -856,12 +951,7 @@ export const diagramLogic = kea<diagramLogicType>([
       }
       const selectedIds = new Set(nodesToCopy.map((node) => node.id))
       const edgesToCopy = values.rawEdges.filter((edge) => selectedIds.has(edge.source) && selectedIds.has(edge.target))
-      const sanitizedNodes = nodesToCopy.map(sanitizeClipboardNode)
-      if (sanitizedNodes.length === 1 && edgesToCopy.length === 0) {
-        copy(JSON.stringify(sanitizedNodes[0]))
-        return
-      }
-      copy(JSON.stringify({ nodes: sanitizedNodes, edges: edgesToCopy }))
+      copy(JSON.stringify(clipboardPayloadForNodes(nodesToCopy, edgesToCopy, values.sceneApps)))
     },
     copySelectedNodes: () => {
       const selectedNodes = values.nodes.filter((node) => node.selected)
@@ -870,12 +960,7 @@ export const diagramLogic = kea<diagramLogicType>([
       }
       const selectedIds = new Set(selectedNodes.map((node) => node.id))
       const edgesToCopy = values.rawEdges.filter((edge) => selectedIds.has(edge.source) && selectedIds.has(edge.target))
-      const sanitizedNodes = selectedNodes.map(sanitizeClipboardNode)
-      if (sanitizedNodes.length === 1 && edgesToCopy.length === 0) {
-        copy(JSON.stringify(sanitizedNodes[0]))
-        return
-      }
-      copy(JSON.stringify({ nodes: sanitizedNodes, edges: edgesToCopy }))
+      copy(JSON.stringify(clipboardPayloadForNodes(selectedNodes, edgesToCopy, values.sceneApps)))
     },
     duplicateNode: ({ nodeId }) => {
       const node = values.nodesById[nodeId]
@@ -902,10 +987,11 @@ export const diagramLogic = kea<diagramLogicType>([
         if (!payload) {
           throw new Error('Clipboard does not contain valid node JSON')
         }
-        const { nodes, edges } = payload
+        const { nodes, edges, apps } = payload
         if (nodes.length === 0) {
           return
         }
+        const { sceneApps: nextSceneApps, keywordMap } = mergePastedSceneApps(nodes, values.sceneApps, apps)
         const offset = getClipboardOffset(nodes, values.cursorPosition)
         const idMap = new Map<string, string>()
         const baseNodes = values.nodes.map((node) => (node.selected ? { ...node, selected: false } : node))
@@ -914,9 +1000,15 @@ export const diagramLogic = kea<diagramLogicType>([
           const newId = uuidv4()
           idMap.set(node.id, newId)
           const { position } = node
+          const sanitizedNode = sanitizeClipboardNode(node)
+          const keyword = getNodeAppKeyword(sanitizedNode)
           return {
-            ...sanitizeClipboardNode(node),
+            ...sanitizedNode,
             id: newId,
+            data:
+              keyword && keywordMap.has(keyword)
+                ? { ...sanitizedNode.data, keyword: keywordMap.get(keyword) as string }
+                : sanitizedNode.data,
             position: { x: (position?.x ?? 0) + offset.x, y: (position?.y ?? 0) + offset.y },
             selected: true,
           }
@@ -937,10 +1029,15 @@ export const diagramLogic = kea<diagramLogicType>([
           cache.historyTimer = null
         }
         cache.ignoreHistory = true
+        if (!equal(nextSceneApps, values.sceneApps)) {
+          actions.setFrameFormValues({
+            scenes: updateSceneAppsInScenes(values.editingFrame.scenes, props.sceneId, nextSceneApps, true),
+          })
+        }
         actions.setNodes(nextNodes)
         actions.setEdges(nextEdges)
         cache.ignoreHistory = false
-        actions.recordHistory(makeHistorySnapshot(nextNodes, nextEdges))
+        actions.recordHistory(makeHistorySnapshot(nextNodes, nextEdges, nextSceneApps))
         window.setTimeout(() => {
           pastedNodes.forEach((node) => props.updateNodeInternals?.(node.id))
         }, 200)
@@ -955,7 +1052,7 @@ export const diagramLogic = kea<diagramLogicType>([
     cache.ignoreHistory = false
     cache.historyTimer = null
     cache.hasAutoArranged = false
-    actions.resetHistory(makeHistorySnapshot(values.nodes, values.rawEdges))
+    actions.resetHistory(makeHistorySnapshot(values.nodes, values.rawEdges, values.sceneApps))
 
     cache.keydownHandler = (event: KeyboardEvent) => {
       if (isEditableTarget(event.target)) {
