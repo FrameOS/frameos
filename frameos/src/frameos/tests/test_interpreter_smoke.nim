@@ -75,12 +75,44 @@ uploaded[sceneId] = ExportedInterpretedScene(
         "placement": "stretch",
         "blendMode": "overwrite"
       }
+    }),
+    node(3, "app", %*{
+      "keyword": "jsText",
+      "config": {}
     })
   ],
   edges: @[
     edge(100, 10, "next", 2, "prev"),
     edge(101, 1, "fieldOutput", 2, "fieldInput/image")
-  ]
+  ],
+  apps: %*{
+    "jsText": {
+      "origin": "repo/apps/code/jsText",
+      "sources": {
+        "config.json": """
+{
+  "name": "TypeScript Text",
+  "category": "data",
+  "fields": [
+    {"name": "prefix", "type": "string", "value": "FrameOS"},
+    {"name": "message", "type": "text", "value": "Hello from QuickJS"}
+  ],
+  "output": [{"name": "text", "type": "text"}]
+}
+""",
+        "app.ts": """
+export function init(app: FrameOSApp): void {
+  app.initialized = true
+}
+
+export function get(app: FrameOSApp, context: FrameOSContext): string {
+  const eventLabel = context.event ? ` (${context.event})` : ''
+  return `${app.config.prefix}: ${app.config.message}${app.initialized ? eventLabel : ''}`
+}
+"""
+      }
+    }
+  }
 )
 
 setUploadedInterpretedScenes(uploaded)
@@ -99,6 +131,11 @@ block test_interpreter_data_node_smoke:
   let px = dataImage.data[dataImage.dataIndex(0, 0)]
   doAssert px.r > 0
   doAssert px.a > 0
+
+block test_interpreter_dynamic_js_app_smoke:
+  let dataValue = scene.getDataNode(3.NodeId, ctx(scene, "render"))
+  doAssert dataValue.kind == fkString
+  doAssert dataValue.asString() == "FrameOS: Hello from QuickJS (render)"
 
 block test_interpreter_render_node_smoke:
   let rendered = render(scene, ctx(scene, "render"))

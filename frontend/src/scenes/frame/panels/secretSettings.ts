@@ -1,4 +1,5 @@
 import { AppConfig, FrameOSSettings, FrameScene } from '../../../types'
+import { sceneAppToAppConfig } from '../../../utils/sceneApps'
 
 export const settingsDetails: Record<
   string,
@@ -83,7 +84,8 @@ export function collectSecretSettingsFromScenes(
     for (const node of scene.nodes ?? []) {
       if (node.type === 'app') {
         const keyword = (node.data as { keyword?: string } | undefined)?.keyword
-        const appConfig = resolveAppConfig(apps, keyword)
+        const sceneApp = keyword ? scene.apps?.[keyword] : undefined
+        const appConfig = sceneApp ? sceneAppToAppConfig(sceneApp) : resolveAppConfig(apps, keyword)
         for (const setting of appConfig?.settings ?? []) {
           if (settingsDetails[setting]) {
             settingsKeys.add(setting)

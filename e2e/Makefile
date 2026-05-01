@@ -12,12 +12,14 @@ snapshots:
 	mkdir -p ./tmp/state && \
 	mkdir -p ./tmp/e2e && \
 	mkdir -p ./tmp/backend/app/codegen && \
+	mkdir -p ./tmp/backend/app/utils && \
 	mkdir -p ./tmp/frontend && \
 	rm -rf ./tmp/frameos ./tmp/frontend/src ./tmp/frontend/schema && \
 	mkdir -p ./tmp/frameos ./tmp/frontend/src ./tmp/frontend/schema && \
 	tmpdir=./tmp/frameos && \
 	cp -r ../e2e/*.py ./tmp/e2e && \
 	cp -r ../backend/app/codegen/*.py ./tmp/backend/app/codegen && \
+	cp ../backend/app/utils/js_apps.py ./tmp/backend/app/utils/js_apps.py && \
 	cp ../package.json ./tmp/package.json && \
 	cp ../pnpm-workspace.yaml ./tmp/pnpm-workspace.yaml && \
 	cp ../pnpm-lock.yaml ./tmp/pnpm-lock.yaml && \

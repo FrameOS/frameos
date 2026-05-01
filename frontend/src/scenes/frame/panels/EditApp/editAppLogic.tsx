@@ -9,6 +9,17 @@ import { AppNodeData } from '../../../../types'
 import { appsLogic } from '../Apps/appsLogic'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { diagramLogic } from '../Diagram/diagramLogic'
+import { buildAppTypeDeclarations } from '../../../../utils/appTypeDeclarations'
+import {
+  appOrigin,
+  buildSceneApp,
+  hasCompiledAppSource,
+  javascriptAppSourceFiles,
+  loadAppSources,
+  nextSceneAppKey,
+  normalizeSceneApps,
+  sceneAppToAppConfig,
+} from '../../../../utils/sceneApps'
 
 export interface ModelMarker extends editor.IMarkerData {}
 
@@ -24,6 +35,8 @@ export interface SourceError {
   error: string
 }
 
+const primaryFiles = ['config.json', ...javascriptAppSourceFiles, 'app.nim']
+
 export const editAppLogic = kea<editAppLogicType>([
   path(['src', 'scenes', 'frame', 'panels', 'EditApp', 'editAppLogic']),
   props({} as EditAppLogicProps),
@@ -33,7 +46,7 @@ export const editAppLogic = kea<editAppLogicType>([
     values: [
       frameLogic({ frameId }),
       ['frameForm'],
-      appsLogic,
+      appsLogic({ frameId }),
       ['apps'],
       diagramLogic({ frameId, sceneId }),
       ['scene'],
@@ -43,6 +56,7 @@ export const editAppLogic = kea<editAppLogicType>([
     setActiveFile: (file: string) => ({ file }),
     updateFile: (file: string, source: string) => ({ file, source }),
     saveChanges: true,
+    forkAndSaveChanges: true,
     setInitialSources: (sources: Record<string, string>) => ({ sources }),
     validateSource: (file: string, source: string, initial: boolean = false) => ({ file, source, initial }),
     setSourceErrors: (file: string, errors: SourceError[]) => ({ file, errors }),
@@ -60,22 +74,43 @@ export const editAppLogic = kea<editAppLogicType>([
       },
     ],
     appData: [(s) => [s.app], (app): AppNodeData | null => app?.data || null],
-    savedSources: [(s) => [s.appData], (appData): Record<string, string> | null => appData?.sources || null],
     savedKeyword: [(s) => [s.appData], (appData): string | null => appData?.keyword || null],
+    sceneAppKey: [
+      (s) => [s.scene, s.savedKeyword],
+      (scene, savedKeyword): string | null =>
+        savedKeyword && scene?.apps?.[savedKeyword] ? savedKeyword : null,
+    ],
+    sceneApp: [
+      (s) => [s.scene, s.sceneAppKey],
+      (scene, sceneAppKey) => (sceneAppKey ? scene?.apps?.[sceneAppKey] ?? null : null),
+    ],
+    savedSources: [
+      (s) => [s.appData, s.sceneApp],
+      (appData, sceneApp): Record<string, string> | null => appData?.sources || sceneApp?.sources || null,
+    ],
     isInterpreted: [(s) => [s.scene], (scene): boolean => scene?.settings?.execution === 'interpreted'],
+    appUsageCount: [
+      (s) => [s.scene, s.sceneAppKey],
+      (scene, sceneAppKey): number =>
+        sceneAppKey
+          ? (scene?.nodes ?? []).filter(
+              (node) => node.type === 'app' && (node.data as AppNodeData | undefined)?.keyword === sceneAppKey
+            ).length
+          : 1,
+    ],
+    hasMultipleAppUsages: [(s) => [s.appUsageCount], (appUsageCount): boolean => appUsageCount > 1],
   }),
   loaders(({ actions, values }) => ({
     sources: [
       {} as Record<string, string>,
       {
         loadSources: async () => {
-          const files = ['README.md', 'app.nim', 'config.nim']
+          const files = ['README.md', ...javascriptAppSourceFiles, 'app.nim', 'config.nim']
           let sources: Record<string, string> = {}
           if (values.savedSources) {
             sources = values.savedSources
           } else if (values.savedKeyword) {
-            const response = await apiFetch(`/api/apps/source?keyword=${encodeURIComponent(values.savedKeyword)}`)
-            sources = await response.json()
+            sources = await loadAppSources(values.savedKeyword)
           }
           if (sources['app_loader.nim'] !== undefined) {
             const { ['app_loader.nim']: _ignored, ...filteredSources } = sources
@@ -98,7 +133,7 @@ export const editAppLogic = kea<editAppLogicType>([
       {
         setActiveFile: (_, { file }) => file,
         resetEnhanceSuggestion: (state) => (state === 'app.nim/suggestion' ? 'app.nim' : state),
-        deleteFile: (state, { file }) => (state === file ? 'app.nim' : state),
+        deleteFile: (state, { file }) => (state === file ? 'config.json' : state),
       },
     ],
     sources: {
@@ -124,6 +159,10 @@ export const editAppLogic = kea<editAppLogicType>([
     ],
   })),
   selectors({
+    requiresCompiledOnSave: [
+      (s) => [s.isInterpreted, s.sources],
+      (isInterpreted, sources): boolean => isInterpreted && hasCompiledAppSource(sources),
+    ],
     hasChanges: [
       (s) => [s.sources, s.sourcesLoading, s.initialSources],
       (sources, sourcesLoading, initialSources) => {
@@ -134,8 +173,8 @@ export const editAppLogic = kea<editAppLogicType>([
       },
     ],
     changedFiles: [
-      (s) => [s.sources, s.sourcesLoading, s.initialSources],
-      (sources, sourcesLoading, initialSources): Record<string, boolean> => {
+      (s) => [s.sources, s.initialSources],
+      (sources, initialSources): Record<string, boolean> => {
         return Object.fromEntries(
           Object.entries(sources).map(([file, source]) => [file, source !== initialSources[file]])
         )
@@ -151,10 +190,11 @@ export const editAppLogic = kea<editAppLogicType>([
         }
       },
     ],
+    appTypeDeclarations: [(s) => [s.configJson], (configJson): string => buildAppTypeDeclarations(configJson)],
     title: [
-      (s, p) => [s.savedKeyword, p.nodeId, s.apps, s.configJson],
-      (keyword, nodeId, apps, configJson): string =>
-        configJson?.name || (keyword ? apps[keyword]?.name || keyword : nodeId),
+      (s, p) => [s.savedKeyword, p.nodeId, s.apps, s.sceneApp, s.configJson],
+      (keyword, nodeId, apps, sceneApp, configJson): string =>
+        configJson?.name || sceneApp?.name || (keyword ? apps[keyword]?.name || keyword : nodeId),
     ],
     modelMarkers: [
       (s) => [s.sourceErrors],
@@ -177,18 +217,68 @@ export const editAppLogic = kea<editAppLogicType>([
       (s) => [s.sources],
       (sources): string[] => {
         const filenames = Object.keys(sources)
-        const first = filenames.filter((f) => f === 'config.json' || f === 'app.nim').sort()
-        const rest = filenames.filter((f) => f !== 'config.json' && f !== 'app.nim').sort()
+        const first = primaryFiles.filter((file) => filenames.includes(file))
+        const rest = filenames.filter((f) => !primaryFiles.includes(f)).sort()
         return [...first, ...rest]
       },
     ],
   }),
   listeners(({ actions, props, values }) => ({
     saveChanges: () => {
-      if (values.isInterpreted) {
-        actions.updateScene(props.sceneId, { settings: { ...values.scene?.settings, execution: 'compiled' } })
+      const settings = values.requiresCompiledOnSave
+        ? { ...values.scene?.settings, execution: 'compiled' as const }
+        : values.scene?.settings
+      if (values.sceneAppKey) {
+        const sceneApps = normalizeSceneApps(values.scene?.apps)
+        actions.updateScene(props.sceneId, {
+          apps: {
+            ...sceneApps,
+            [values.sceneAppKey]: buildSceneApp(
+              values.sceneAppKey,
+              values.apps[values.sceneAppKey],
+              values.sources,
+              values.sceneApp ?? undefined
+            ),
+          },
+          settings,
+        })
+      } else {
+        if (values.isInterpreted) {
+          actions.updateScene(props.sceneId, { settings })
+        }
+        actions.updateNodeData(props.sceneId, props.nodeId, { sources: values.sources })
       }
-      actions.updateNodeData(props.sceneId, props.nodeId, { sources: values.sources })
+      actions.setInitialSources(values.sources)
+    },
+    forkAndSaveChanges: () => {
+      const keyword = values.sceneAppKey
+      const scene = values.scene
+      if (!keyword || !scene) {
+        actions.saveChanges()
+        return
+      }
+
+      const sceneApps = normalizeSceneApps(scene.apps)
+      const app = values.apps[keyword] ?? (values.sceneApp ? sceneAppToAppConfig(values.sceneApp) : undefined)
+      const newKeyword = nextSceneAppKey(sceneApps, keyword, app)
+      const previous = values.sceneApp
+        ? { ...values.sceneApp, origin: appOrigin(values.sceneApp) || keyword }
+        : { origin: keyword }
+      const nodes = scene.nodes?.map((node) => {
+        if (node.id !== props.nodeId || node.type !== 'app') {
+          return node
+        }
+        const { sources: _sources, ...data } = (node.data ?? {}) as AppNodeData
+        return { ...node, data: { ...data, keyword: newKeyword } }
+      })
+
+      actions.updateScene(props.sceneId, {
+        apps: {
+          ...sceneApps,
+          [newKeyword]: buildSceneApp(newKeyword, app, values.sources, previous),
+        },
+        ...(nodes ? { nodes } : {}),
+      })
       actions.setInitialSources(values.sources)
     },
     setInitialSources: ({ sources }) => {

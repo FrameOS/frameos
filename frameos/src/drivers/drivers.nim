@@ -27,10 +27,10 @@ proc render*(image: Image) =
   discard
 
 # Convert the rendered pixels to a PNG image. For accurate colors on the web.
-proc toPng*(rotate: int): string =
-  # return inkyDriverInstance.toPng(rotate)
-  # return frameBufferDriverInstance.toPng(rotate)
-  # return waveshareDriverInstance.toPng(rotate)
+proc toPng*(rotate: int, flip: string): string =
+  # return inkyDriverInstance.toPng(rotate, flip)
+  # return frameBufferDriverInstance.toPng(rotate, flip)
+  # return waveshareDriverInstance.toPng(rotate, flip)
   discard
 
 # Turn on the device, if supported

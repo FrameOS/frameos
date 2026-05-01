@@ -67,9 +67,11 @@ RUN nim --version && \
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml /app/
 COPY frontend/package.json /app/frontend/package.json
 
-# frameos/frontend needs files from the backend frontend/
+# frameos/frontend needs shared frontend files and embedded repo app templates.
 COPY frontend/src /app/frontend/src
 COPY frontend/schema /app/frontend/schema
+COPY frontend/scripts /app/frontend/scripts
+COPY repo/apps /app/repo/apps
 COPY versions.json /app/versions.json
 
 # Install frameos nim deps
@@ -116,6 +118,7 @@ RUN pnpm install --filter @frameos/frontend --frozen-lockfile
 
 # Copy frontend source files and run build
 COPY frontend/ /tmp/frontend/
+COPY repo/apps /tmp/repo/apps
 COPY versions.json /tmp/versions.json
 RUN pnpm --dir frontend run build
 

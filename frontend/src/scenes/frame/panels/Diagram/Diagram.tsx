@@ -40,6 +40,10 @@ import { AppNodeEdge } from './AppNodeEdge'
 import { NewNodePicker } from './NewNodePicker'
 import { CANVAS_NODE_ID, getNewFieldName, newNodePickerLogic } from './newNodePickerLogic'
 import { scenesLogic } from '../Scenes/scenesLogic'
+import { CompiledSceneTag } from '../Scenes/CompiledSceneTag'
+import { controlLogic } from '../Scenes/controlLogic'
+import { PlayIcon } from '@heroicons/react/24/solid'
+import { Spinner } from '../../../../components/Spinner'
 
 const nodeTypes: Record<NodeType, (props: NodeProps) => JSX.Element> = {
   app: AppNode,
@@ -72,7 +76,7 @@ function Diagram_({ sceneId }: DiagramProps) {
   const { frameId } = useValues(frameLogic)
   const updateNodeInternals = useUpdateNodeInternals()
   const diagramLogicProps: DiagramLogicProps = { frameId, sceneId, updateNodeInternals }
-  const { nodes, nodesWithStyle, edges, fitViewCounter } = useValues(diagramLogic(diagramLogicProps))
+  const { nodes, nodesWithStyle, edges, fitViewCounter, isCompiledScene } = useValues(diagramLogic(diagramLogicProps))
   const {
     onEdgesChange,
     onNodesChange,
@@ -84,11 +88,15 @@ function Diagram_({ sceneId }: DiagramProps) {
     setCursorPosition,
   } = useActions(diagramLogic(diagramLogicProps))
   const { previewScene } = useActions(scenesLogic({ frameId }))
-  const { unsavedSceneIds, undeployedSceneIds, previewingSceneId } = useValues(scenesLogic({ frameId }))
+  const { setCurrentScene } = useActions(controlLogic({ frameId }))
+  const { sceneChanging } = useValues(controlLogic({ frameId }))
+  const { unsavedSceneIds, undeployedSceneIds, previewingSceneId, linkedActiveSceneId } = useValues(scenesLogic({ frameId }))
   const { newNodePicker } = useValues(newNodePickerLogic(diagramLogicProps))
   const { openNewNodePicker } = useActions(newNodePickerLogic(diagramLogicProps))
   const sceneHasChanges = unsavedSceneIds.has(sceneId) || undeployedSceneIds.has(sceneId)
   const isPreviewing = previewingSceneId === sceneId
+  const isActiveScene = linkedActiveSceneId === sceneId
+  const isActivatingScene = sceneChanging === sceneId
   const previewTitle = isPreviewing
     ? 'Previewing scene on the frame'
     : sceneHasChanges
@@ -272,16 +280,37 @@ function Diagram_({ sceneId }: DiagramProps) {
           selectionMode={SelectionMode.Partial}
         >
           <Background id="1" gap={24} color="#cccccc" variant={BackgroundVariant.Dots} />
+          {isCompiledScene ? (
+            <div className="absolute top-1 left-1 z-10">
+              <CompiledSceneTag />
+            </div>
+          ) : null}
           <div className="absolute top-1 right-1 z-10 flex gap-2">
-            <Button
-              size="tiny"
-              onClick={() => previewScene(sceneId)}
-              title={previewTitle}
-              color="secondary"
-              disabled={!sceneHasChanges || isPreviewing}
-            >
-              <EyeIcon className="w-5 h-5" />
-            </Button>
+            {sceneHasChanges ? (
+              <Button
+                size="tiny"
+                onClick={() => previewScene(sceneId)}
+                title={previewTitle}
+                color="secondary"
+                disabled={isPreviewing}
+              >
+                <EyeIcon className="w-5 h-5" />
+              </Button>
+            ) : (
+              <Button
+                size="tiny"
+                onClick={() => setCurrentScene(sceneId)}
+                title={isActiveScene ? 'This scene is already active' : 'Activate'}
+                color="primary"
+                disabled={isActiveScene || isActivatingScene}
+              >
+                {isActivatingScene ? (
+                  <Spinner color="white" className="w-5 h-5 flex items-center justify-center" />
+                ) : (
+                  <PlayIcon className="w-5 h-5" />
+                )}
+              </Button>
+            )}
             <Button size="tiny" onClick={fitDiagramView} title="Fit to View" color="secondary">
               <ZoomOutArea className="w-5 h-5" />
             </Button>

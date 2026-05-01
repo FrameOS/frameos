@@ -87,7 +87,12 @@ async def install_if_necessary(
 
 
 async def upload_directory_tree(
-    deployer: FrameDeployer, local_dir: str, remote_dir: str, label: str, build_id: str
+    deployer: FrameDeployer,
+    local_dir: str,
+    remote_dir: str,
+    label: str,
+    build_id: str,
+    preserve_remote_paths: tuple[str, ...] = (),
 ) -> None:
     normalized_local = os.path.abspath(local_dir)
     if not os.path.isdir(normalized_local):
@@ -113,10 +118,37 @@ async def upload_directory_tree(
     await upload_file(deployer.db, deployer.redis, deployer.frame, remote_archive, data)
     parent_dir = os.path.dirname(remote_dir.rstrip("/")) or "/"
     await deployer.exec_command(f"mkdir -p {shlex.quote(parent_dir)}")
+    preserve_dir = f"/tmp/{arcname}_{build_id}_preserve"
+    normalized_preserve_paths = tuple(path.strip("/") for path in preserve_remote_paths if path.strip("/"))
+    if normalized_preserve_paths:
+        await deployer.exec_command(f"rm -rf {shlex.quote(preserve_dir)} && mkdir -p {shlex.quote(preserve_dir)}")
+        for relative_path in normalized_preserve_paths:
+            remote_path = f"{remote_dir.rstrip('/')}/{relative_path}"
+            preserve_path = f"{preserve_dir}/{relative_path}"
+            preserve_parent = os.path.dirname(preserve_path)
+            await deployer.exec_command(
+                f"if [ -e {shlex.quote(remote_path)} ]; then "
+                f"mkdir -p {shlex.quote(preserve_parent)}; "
+                f"mv {shlex.quote(remote_path)} {shlex.quote(preserve_path)}; "
+                "fi"
+            )
     await deployer.exec_command(f"rm -rf {shlex.quote(remote_dir)}", raise_on_error=False)
     await deployer.exec_command(
         f"tar -xzf {shlex.quote(remote_archive)} -C {shlex.quote(parent_dir)} && rm {shlex.quote(remote_archive)}"
     )
+    if normalized_preserve_paths:
+        for relative_path in normalized_preserve_paths:
+            remote_path = f"{remote_dir.rstrip('/')}/{relative_path}"
+            remote_parent = os.path.dirname(remote_path)
+            preserve_path = f"{preserve_dir}/{relative_path}"
+            await deployer.exec_command(
+                f"if [ -e {shlex.quote(preserve_path)} ]; then "
+                f"rm -rf {shlex.quote(remote_path)}; "
+                f"mkdir -p {shlex.quote(remote_parent)}; "
+                f"mv {shlex.quote(preserve_path)} {shlex.quote(remote_path)}; "
+                "fi"
+            )
+        await deployer.exec_command(f"rm -rf {shlex.quote(preserve_dir)}", raise_on_error=False)
 
 
 async def upload_binary(deployer: FrameDeployer, local_path: str, remote_path: str) -> None:
@@ -136,10 +168,18 @@ async def sync_vendor_dir(
     label: str,
     cross_compiled: bool,
     build_id: str,
+    preserve_remote_paths: tuple[str, ...] = (),
 ) -> None:
     remote_dir = f"/srv/frameos/vendor/{vendor_folder}"
     if cross_compiled:
-        await upload_directory_tree(deployer, local_dir, remote_dir, label, build_id)
+        await upload_directory_tree(
+            deployer,
+            local_dir,
+            remote_dir,
+            label,
+            build_id,
+            preserve_remote_paths,
+        )
     else:
         await deployer.exec_command(
             f"mkdir -p /srv/frameos/vendor && "

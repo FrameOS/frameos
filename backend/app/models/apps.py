@@ -1,58 +1,90 @@
-import json
-import os
+from __future__ import annotations
 
-local_apps_path = "../frameos/src/apps"
+import json
+import hashlib
+import re
+from pathlib import Path
+from app.utils.js_apps import find_js_app_source_filename, find_js_app_source_key
+
+repo_root = Path(__file__).resolve().parents[3]
+local_apps_path = str(repo_root / "frameos" / "src" / "apps")
+
+
+def _iter_local_app_dirs():
+    frame_apps_root = Path(local_apps_path)
+    if frame_apps_root.exists():
+        for category_dir in sorted(frame_apps_root.iterdir()):
+            if not category_dir.is_dir():
+                continue
+            for app_dir in sorted(category_dir.iterdir()):
+                if not app_dir.is_dir():
+                    continue
+                keyword = f"{category_dir.name}/{app_dir.name}"
+                yield keyword, app_dir
+
+
+def get_local_app_path(keyword: str | None) -> str | None:
+    if not keyword:
+        return None
+
+    app_path = Path(local_apps_path) / keyword
+    if app_path.is_dir():
+        return str(app_path)
+    return None
+
+
+def is_repo_app(keyword: str | None) -> bool:
+    return bool(keyword and keyword.startswith("repo/"))
+
+
+def get_scene_app_id(keyword: str, sources: dict | None = None) -> str:
+    slug = re.sub(r"[^a-zA-Z0-9_]+", "_", keyword).strip("_") or "app"
+    digest_input = keyword
+    if sources is not None:
+        digest_input += "\0" + json.dumps(sources, sort_keys=True, separators=(",", ":"))
+    digest = hashlib.sha1(digest_input.encode("utf-8")).hexdigest()[:8]
+    return f"sceneapp_{slug}_{digest}"
+
 
 def get_app_configs() -> dict[str, dict]:
     configs = {}
-    for category in os.listdir(local_apps_path):
-        category_app_path = os.path.join(local_apps_path, category)
-        if os.path.isdir(category_app_path):
-            for keyword in os.listdir(category_app_path):
-                local_app_path = os.path.join(category_app_path, keyword)
-                if os.path.isdir(local_app_path):
-                    config_path = os.path.join(local_app_path, "config.json")
-                    if os.path.exists(config_path):
-                        try:
-                            with open(config_path, 'r') as f:
-                                config = json.load(f)
-                                if 'name' in config:
-                                    configs[category + '/' + keyword] = config
-                        except Exception as e:
-                            print(f"Error loading config for {category}/{keyword}: {e}")
+    for keyword, app_dir in _iter_local_app_dirs():
+        config_path = app_dir / "config.json"
+        if config_path.exists():
+            try:
+                with config_path.open('r') as f:
+                    config = json.load(f)
+                    if 'name' in config:
+                        configs[keyword] = config
+            except Exception as e:
+                print(f"Error loading config for {keyword}: {e}")
     return configs
 
 
 def get_local_frame_apps() -> list[str]:
     clean_apps: list[str] = []
-    for category in os.listdir(local_apps_path):
-        category_app_path = os.path.join(local_apps_path, category)
-        if os.path.isdir(category_app_path):
-            apps = os.listdir(category_app_path)
-            for keyword in apps:
-                local_app_path = os.path.join(category_app_path, keyword)
-                app_path = os.path.join(local_app_path, "app.nim")
-                config_path = os.path.join(local_app_path, "config.json")
-                if os.path.exists(app_path) and os.path.exists(config_path):
-                    clean_apps.append(category + '/' + keyword)
+    for keyword, app_dir in _iter_local_app_dirs():
+        config_path = app_dir / "config.json"
+        has_source = (app_dir / "app.nim").exists() or find_js_app_source_filename(str(app_dir))
+        if has_source and config_path.exists():
+            clean_apps.append(keyword)
     return clean_apps
 
 
-
-def get_one_app_sources(keyword: str) -> dict[str, str]:
+def get_one_app_sources(keyword: str | None) -> dict[str, str]:
     sources: dict[str, str] = {}
-    apps = get_local_frame_apps()
-    if keyword in apps:
-        local_app_path = os.path.join(local_apps_path, keyword)
-        files = os.listdir(local_app_path)
-        for file in files:
-            if file == "app_loader.nim":
+    local_app_path = get_local_app_path(keyword)
+    if local_app_path and keyword in get_local_frame_apps():
+        app_path = Path(local_app_path)
+        has_js_source = find_js_app_source_filename(local_app_path) is not None
+        for path in sorted(app_path.iterdir()):
+            if not path.is_file() or path.name == "app_loader.nim":
                 continue
-            full_path = os.path.join(local_app_path, file)
-            if os.path.isfile(full_path):
-                # TODO: also support folders and binary files
-                with open(full_path, 'r') as f:
-                    sources[file] = f.read()
+            if has_js_source and path.name == "app.nim":
+                continue
+            # TODO: also support folders and binary files
+            with path.open('r') as f:
+                sources[path.name] = f.read()
     return sources
 
 
@@ -60,8 +92,38 @@ def get_apps_from_scenes(scenes: list[dict]) -> dict[str, dict]:
     apps = {}
     for scene in scenes:
         for node in scene.get('nodes', []):
-            if node['type'] == 'app' and node.get('data', {}).get('sources', None) is not None:
-                apps[node['id']] = node['data']['sources']
+            sources = node.get('data', {}).get('sources', None)
+            if (
+                node.get('type') == 'app'
+                and isinstance(sources, dict)
+                and "app.nim" in sources
+                and find_js_app_source_key(sources) is None
+            ):
+                apps[node['id']] = sources
     return apps
 
 
+def get_scene_apps_from_scenes(scenes: list[dict]) -> dict[str, dict]:
+    apps = {}
+    for scene in scenes:
+        scene_apps = scene.get("apps", {}) or {}
+        if isinstance(scene_apps, dict):
+            for keyword, app in scene_apps.items():
+                sources = app.get("sources", {}) if isinstance(app, dict) else {}
+                if (
+                    isinstance(sources, dict)
+                    and "app.nim" in sources
+                    and find_js_app_source_key(sources) is None
+                ):
+                    apps[get_scene_app_id(keyword, sources)] = sources
+
+        for node in scene.get("nodes", []):
+            if node.get("type") != "app":
+                continue
+            keyword = node.get("data", {}).get("keyword")
+            if not is_repo_app(keyword) or keyword in scene_apps:
+                continue
+            sources = get_one_app_sources(keyword)
+            if "app.nim" in sources and find_js_app_source_key(sources) is None:
+                apps[get_scene_app_id(keyword, sources)] = sources
+    return apps

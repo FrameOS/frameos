@@ -31,7 +31,7 @@ var compilerJs: QuickJS
 var compilerJsReady = false
 initLock(compilerJsLock)
 
-const sceneJsPrelude = """
+const sceneJsPrelude* = """
 const __frameosFragment = Symbol.for("frameos.fragment");
 const __frameosNormalizeChildren = (children) => {
   if (children.length === 0) return undefined;
@@ -107,12 +107,19 @@ proc ensureCompilerJsLocked() =
   discard compilerJs.eval(vendorAssets.getAsset("assets/compiled/vendor/sucrase.js"))
   compilerJsReady = true
 
-proc transpileSource(source: string, filename: string): string =
+proc transpileSource*(source: string, filename: string): string =
   if source.len == 0:
     return source
   withLock compilerJsLock:
     ensureCompilerJsLocked()
     result = compilerJs.eval("__frameosTranspile(\"" & jsQuote(source) & "\", { filePath: \"" & jsQuote(filename) & "\" })")
+
+proc transpileModuleSource*(source: string, filename: string): string =
+  if source.len == 0:
+    return source
+  withLock compilerJsLock:
+    ensureCompilerJsLocked()
+    result = compilerJs.eval("__frameosTranspile(\"" & jsQuote(source) & "\", { filePath: \"" & jsQuote(filename) & "\", transforms: [\"typescript\", \"jsx\", \"imports\"] })")
 
 proc logCompileError(
   scene: InterpretedFrameScene,

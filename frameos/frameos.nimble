@@ -19,7 +19,6 @@ requires "nim >= 2.2.4"
 requires "pixie >= 5.0.7"
 requires "mummy >= 0.4.7"
 requires "linuxfb >= 0.1.0"
-requires "psutil >= 0.6.0"
 requires "QRgen >= 3.1.0"
 requires "jsony >= 1.1.5"
 

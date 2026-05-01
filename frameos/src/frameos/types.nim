@@ -198,6 +198,7 @@ type
     refreshInterval*: float
     nodes*: seq[DiagramNode]
     edges*: seq[DiagramEdge]
+    apps*: JsonNode
     # TODO: add private state fields
 
   # Imported node from scenes.json
@@ -227,6 +228,7 @@ type
     name*: string
     nodes*: seq[DiagramNode]
     edges*: seq[DiagramEdge]
+    apps*: JsonNode
     fields*: seq[StateField]
     settings*: FrameSceneSettings
 
@@ -234,6 +236,7 @@ type
   InterpretedFrameScene* = ref object of FrameScene
     nodes*: Table[NodeId, DiagramNode]
     edges*: seq[DiagramEdge]
+    apps*: JsonNode
     nextNodeIds*: Table[NodeId, NodeId] # mapping from current node id to next node id for quick lookup
     eventListeners*: Table[string, seq[NodeId]] # mapping from event name to list of node ids that listen to that event
     appsByNodeId*: Table[NodeId, AppRoot] # mapping from node id to instantiated app for quick lookup
@@ -275,6 +278,7 @@ type
     placeholder*: string
     required*: bool
     secret*: bool
+    persist*: string
 
   RunnerThread* = ref object
     frameConfig*: FrameConfig

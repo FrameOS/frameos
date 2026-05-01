@@ -43,6 +43,10 @@
           "description": "Name for this app",
           "type": "string"
         },
+        "origin": {
+          "description": "Origin app this app was created from, such as repo/apps/code/jsText",
+          "type": "string"
+        },
         "output": {
           "description": "Returned fields",
           "items": {

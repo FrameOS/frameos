@@ -28,6 +28,7 @@ async def new_metrics(db: Session, redis: Redis, frame_id: int, metrics: dict) -
     db.add(metrics)
     db.commit()
     metrics_count = db.query(Metrics).filter_by(frame_id=frame_id).count()
+    payload = {**metrics.to_dict(), "timestamp": str(metrics.timestamp)}
     if metrics_count > 1100:
         oldest_metrics = (db.query(Metrics)
                           .filter_by(frame_id=frame_id)
@@ -36,7 +37,7 @@ async def new_metrics(db: Session, redis: Redis, frame_id: int, metrics: dict) -
                           .all())
         for old_metric in oldest_metrics:
             db.delete(old_metric)
-        db.commit()
+    db.commit()
 
-    await publish_message(redis, "new_metrics", {**metrics.to_dict(), "timestamp": str(metrics.timestamp)})
+    await publish_message(redis, "new_metrics", payload)
     return metrics

@@ -1,11 +1,46 @@
 import frameos/types
 import frameos/values
 import frameos/js_runtime
+import frameos/js_app_runtime
 import frameos/channels
 import tables, json, os, zippy, chroma, pixie, jsony, sequtils, options, strutils, times
 import apps/apps
 
 const TRACING = false
+
+proc appSourcesFromSceneApps(scene: FrameScene, keyword: string): JsonNode =
+  if scene of InterpretedFrameScene:
+    let apps = InterpretedFrameScene(scene).apps
+    if not apps.isNil and apps.kind == JObject and apps.hasKey(keyword):
+      let app = apps[keyword]
+      if not app.isNil and app.kind == JObject and app.hasKey("sources") and app["sources"].kind == JObject:
+        return app["sources"]
+  nil
+
+proc initInterpretedApp(keyword: string, node: DiagramNode, scene: FrameScene): AppRoot =
+  var sources = node.data{"sources"}
+  if not hasJsAppSource(sources):
+    sources = appSourcesFromSceneApps(scene, keyword)
+  if hasJsAppSource(sources):
+    return initDynamicJsApp(keyword, node, scene, sources)
+  initApp(keyword, node, scene)
+
+proc setInterpretedAppField(keyword: string, app: AppRoot, field: string, value: Value) =
+  if app.isDynamicJsApp():
+    app.setDynamicJsAppField(field, value)
+  else:
+    apps.setAppField(keyword, app, field, value)
+
+proc getInterpretedApp(keyword: string, app: AppRoot, context: ExecutionContext): Value =
+  if app.isDynamicJsApp():
+    return app.getDynamicJsApp(context)
+  apps.getApp(keyword, app, context)
+
+proc runInterpretedApp(keyword: string, app: AppRoot, context: ExecutionContext) =
+  if app.isDynamicJsApp():
+    app.runDynamicJsApp(context)
+  else:
+    apps.runApp(keyword, app, context)
 
 proc evalInline(scene: InterpretedFrameScene,
                 context: ExecutionContext,
@@ -241,7 +276,7 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
           if self.nodes.hasKey(producerNodeId):
             try:
               let vIn = runNode(self, producerNodeId, context, asDataNode = true)
-              apps.setAppField(keyword, app, inputName, vIn)
+              setInterpretedAppField(keyword, app, inputName, vIn)
               if cacheEnabled and cacheInputEnabled:
                 builtInputKey[inputName] = valueToKeyJson(vIn)
                 builtAnyInput = true
@@ -265,7 +300,7 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
                                  inputName, codeSnippet,
                                  self.appInlineFuncNameByNodeArg, compileAppInlineFn,
                                  inputName)
-            apps.setAppField(keyword, app, inputName, vIn)
+            setInterpretedAppField(keyword, app, inputName, vIn)
             if cacheEnabled and cacheInputEnabled:
               builtInputKey[inputName] = valueToKeyJson(vIn)
               builtAnyInput = true
@@ -286,13 +321,13 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
                            builtAnyInput, builtInputKey,
                            %*{"keyword": keyword}):
           (proc (): Value =
-            apps.getApp(keyword, app, context)
+            getInterpretedApp(keyword, app, context)
           )
       else:
         if asDataNode:
-          result = apps.getApp(keyword, app, context)
+          result = getInterpretedApp(keyword, app, context)
         else:
-          apps.runApp(keyword, app, context)
+          runInterpretedApp(keyword, app, context)
 
     of "source":
       raise newException(Exception, "Source nodes are not implemented for interpreted scenes")
@@ -383,7 +418,16 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
           "eventName": eventName,
           "payload": finalPayload
         })
-      sendEvent(eventName, finalPayload)
+      if eventName == "render" and context.event == "render":
+        self.logger.log(%*{
+          "event": "interpreter:dispatch:ignored",
+          "sceneId": self.id.string,
+          "nodeId": currentNodeId.int,
+          "eventName": eventName,
+          "reason": "renderSelfDispatch"
+        })
+      else:
+        sendEvent(eventName, finalPayload)
       if asDataNode:
         result = VJson(copy(finalPayload))
     of "code":
@@ -593,6 +637,9 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
     else:
       raise newException(Exception, "Unknown node type: " & nodeType)
 
+    if asDataNode:
+      break
+
     if self.nextNodeIds.hasKey(currentNodeId):
       currentNodeId = self.nextNodeIds[currentNodeId]
     else:
@@ -649,6 +696,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     state: %*{},
     nodes: initTable[NodeId, DiagramNode](),
     edges: @[],
+    apps: exportedScene.apps,
     nextNodeIds: initTable[NodeId, NodeId](),
     appsByNodeId: initTable[NodeId, AppRoot](),
     eventListeners: initTable[string, seq[NodeId]](),
@@ -832,7 +880,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
         else:
           @[])
         })
-      scene.appsByNodeId[node.id] = initApp(keyword, node, scene)
+      scene.appsByNodeId[node.id] = initInterpretedApp(keyword, node, scene)
 
     elif node.nodeType == "scene":
       let childSceneId = node.data{"keyword"}.getStr().SceneId
@@ -1008,8 +1056,9 @@ proc buildInterpretedSceneExport(scene: FrameSceneInput): ExportedInterpretedSce
     name: scene.name,
     nodes: scene.nodes,
     edges: scene.edges,
+    apps: if scene.apps.isNil: %*{} else: scene.apps,
     publicStateFields: scene.fields,
-    persistedStateKeys: scene.fields.mapIt(it.name),
+    persistedStateKeys: scene.fields.filterIt(it.persist == "disk").mapIt(it.name),
     init: init,
     render: render,
     runEvent: runEvent,

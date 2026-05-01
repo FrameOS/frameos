@@ -1,17 +1,43 @@
-import { actions, connect, kea, path, reducers, selectors } from 'kea'
+import { actions, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 
 import type { appsLogicType } from './appsLogicType'
 import { appsModel, categoryLabels } from '../../../../models/appsModel'
 import { searchInText } from '../../../../utils/searchInText'
-import { AppConfig } from '../../../../types'
+import { AppConfig, AppNodeData, SceneApp } from '../../../../types'
+import { frameLogic } from '../../frameLogic'
+import { panelsLogic } from '../panelsLogic'
+import { isJavaScriptCatalogApp, normalizeSceneApps, sceneAppsToAppConfigs } from '../../../../utils/sceneApps'
+
+export const INLINE_CODE_NODE_KEYWORD = '__frameos_inline_code_node__'
+
+export const INLINE_CODE_NODE_APP: AppConfig = {
+  name: 'Inline code node',
+  category: 'code',
+  description: 'Run inline code directly in the diagram.',
+}
+
+export interface AppsLogicProps {
+  frameId: number
+}
 
 export const appsLogic = kea<appsLogicType>([
   path(['src', 'scenes', 'frame', 'panels', 'Apps', 'appsLogic']),
-  connect(() => ({
-    values: [appsModel, ['apps as allApps']],
+  props({} as AppsLogicProps),
+  key((props) => props.frameId),
+  connect(({ frameId }: AppsLogicProps) => ({
+    actions: [frameLogic({ frameId }), ['updateScene']],
+    values: [
+      appsModel,
+      ['apps as allApps'],
+      frameLogic({ frameId }),
+      ['frameForm'],
+      panelsLogic({ frameId }),
+      ['selectedSceneId'],
+    ],
   })),
   actions({
     setSearch: (search: string) => ({ search }),
+    deleteUnusedSceneApp: (keyword: string) => ({ keyword }),
   }),
   reducers({
     search: ['', { setSearch: (_, { search }) => search }],
@@ -28,16 +54,23 @@ export const appsLogic = kea<appsLogicType>([
         )
       },
     ],
+    selectedScene: [
+      (s) => [s.frameForm, s.selectedSceneId],
+      (frameForm, selectedSceneId) => frameForm?.scenes?.find((scene) => scene.id === selectedSceneId) ?? null,
+    ],
     appsByCategory: [
-      (s) => [s.apps],
-      (apps: Record<string, AppConfig>): Record<string, Record<string, AppConfig>> => {
+      (s) => [s.apps, s.search],
+      (apps: Record<string, AppConfig>, search): Record<string, Record<string, AppConfig>> => {
         const defaultEntries: Record<string, Record<string, AppConfig>> = Object.fromEntries(
           Object.keys(categoryLabels).map((c) => [c, {}])
         )
+        if (searchInText(search, INLINE_CODE_NODE_APP.name) || searchInText(search, INLINE_CODE_NODE_APP.description)) {
+          defaultEntries.code[INLINE_CODE_NODE_KEYWORD] = INLINE_CODE_NODE_APP
+        }
         return Object.fromEntries(
           Object.entries(
             Object.entries(apps).reduce((acc, [keyword, app]) => {
-              const category = (app.category || 'other').toLowerCase()
+              const category = isJavaScriptCatalogApp(keyword) ? 'code' : (app.category || 'other').toLowerCase()
               if (!acc[category]) {
                 acc[category] = {}
               }
@@ -45,6 +78,40 @@ export const appsLogic = kea<appsLogicType>([
               return acc
             }, defaultEntries)
           ).filter(([_, apps]) => Object.keys(apps).length > 0)
+        )
+      },
+    ],
+    sceneApps: [
+      (s) => [s.selectedScene],
+      (selectedScene): Record<string, AppConfig> => sceneAppsToAppConfigs(selectedScene),
+    ],
+    rawSceneApps: [
+      (s) => [s.selectedScene],
+      (selectedScene): Record<string, SceneApp> => normalizeSceneApps(selectedScene?.apps),
+    ],
+    sceneAppUsageCounts: [
+      (s) => [s.selectedScene],
+      (selectedScene): Record<string, number> => {
+        const sceneAppKeys = Object.keys(selectedScene?.apps ?? {})
+        const counts = Object.fromEntries(sceneAppKeys.map((keyword) => [keyword, 0]))
+        for (const node of selectedScene?.nodes ?? []) {
+          if (node.type === 'app') {
+            const keyword = (node.data as AppNodeData | undefined)?.keyword
+            if (keyword && keyword in counts) {
+              counts[keyword] += 1
+            }
+          }
+        }
+        return counts
+      },
+    ],
+    visibleSceneApps: [
+      (s) => [s.search, s.sceneApps],
+      (search, sceneApps): Record<string, AppConfig> => {
+        return Object.fromEntries(
+          Object.entries(sceneApps).filter(
+            ([_, app]) => !search || searchInText(search, app.name) || searchInText(search, app.description)
+          )
         )
       },
     ],
@@ -59,4 +126,13 @@ export const appsLogic = kea<appsLogicType>([
       },
     ],
   }),
+  listeners(({ actions, values }) => ({
+    deleteUnusedSceneApp: ({ keyword }) => {
+      if (!values.selectedSceneId || values.sceneAppUsageCounts[keyword] !== 0) {
+        return
+      }
+      const { [keyword]: _deleted, ...apps } = values.rawSceneApps
+      actions.updateScene(values.selectedSceneId, { apps })
+    },
+  })),
 ])

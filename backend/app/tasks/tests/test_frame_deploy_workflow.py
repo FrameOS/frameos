@@ -215,6 +215,7 @@ async def test_full_plan_reports_installed_state_and_remote_build_dependencies(m
     assert plan.full_deploy.package_alternatives[0].installed_package == "ntp"
     assert plan.full_deploy.dependency_helper_plans == []
     assert [vendor.key for vendor in plan.full_deploy.vendor_sync_plans] == ["inkyPython"]
+    assert plan.full_deploy.vendor_sync_plans[0].preserve_remote_paths == ("env", "requirements.txt.sha256sum")
     assert plan.full_deploy.ssh_keys_need_install is False
     assert plan.full_deploy.post_deploy["i2c"]["needs_boot_config_line"] is False
     assert plan.full_deploy.post_deploy["i2c"]["needs_runtime_enable"] is False
@@ -222,6 +223,15 @@ async def test_full_plan_reports_installed_state_and_remote_build_dependencies(m
     assert plan.full_deploy.post_deploy["disable_caddy_service"] is True
     assert plan.full_deploy.post_deploy["bootconfig_changes"] == []
     assert plan.full_deploy.post_deploy["final_action"] == "restart_frameos"
+
+
+def test_python_vendor_setup_command_reinstalls_only_when_env_or_requirements_change():
+    command = FrameDeployWorkflow._python_vendor_setup_command("inkyPython")
+
+    assert "cd /srv/frameos/vendor/inkyPython && if [ ! -x env/bin/pip3 ]; then" in command
+    assert "elif sha256sum -c requirements.txt.sha256sum 2>/dev/null; then" in command
+    assert "requirements unchanged; reusing env" in command
+    assert command.count("&& env/bin/pip3 install -r requirements.txt &&") == 2
 
 
 @pytest.mark.asyncio
@@ -506,4 +516,55 @@ async def test_execute_fast_uses_atomic_uploads_before_reload(monkeypatch: pytes
     assert deployer.atomic_uploads == [
         ("/srv/frameos/current/frame.json", False),
         ("/srv/frameos/current/scenes.json.gz", True),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_execute_full_marks_stuck_deploy_as_undeployed(monkeypatch: pytest.MonkeyPatch):
+    frame = SimpleNamespace(
+        id=22,
+        name="StuckFrame",
+        status="deploying",
+        last_successful_deploy={"frameos_version": "9.9.9"},
+        last_successful_deploy_at="2026-01-01T00:00:00+00:00",
+        to_dict=lambda: {"id": 22, "name": "StuckFrame"},
+    )
+    deployer = RecordingDeployer()
+    workflow = FrameDeployWorkflow(
+        db=None,
+        redis=None,
+        frame=frame,
+        deployer=deployer,
+        temp_dir="",
+        binary_builder=FakeBinaryBuilder(),
+    )
+    updated_statuses: list[str] = []
+
+    async def fake_update_frame(_db, _redis, updated_frame):
+        updated_statuses.append(updated_frame.status)
+        return updated_frame
+
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.update_frame", fake_update_frame)
+
+    plan = FrameDeployPlan(
+        mode="full",
+        frame_id=22,
+        frame_name="StuckFrame",
+        build_id="build12345678",
+        frame_dict={"id": 22, "name": "StuckFrame"},
+        previous_frameos_version="9.9.9",
+        full_deploy=FullDeployPlan(
+            target={},
+            low_memory=False,
+            drivers=[],
+            binary_plan=await FakeBinaryBuilder().plan_build(),
+        ),
+    )
+
+    await workflow._execute_full(plan)
+
+    assert frame.status == "uninitialized"
+    assert updated_statuses == ["uninitialized"]
+    assert deployer.logs == [
+        ("stderr", "Already deploying. Marked frame as undeployed; request deploy again to start fresh."),
     ]

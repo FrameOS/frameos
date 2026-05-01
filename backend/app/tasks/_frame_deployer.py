@@ -1,5 +1,6 @@
+from __future__ import annotations
+
 from datetime import datetime
-from glob import glob
 import hashlib
 import json
 import math
@@ -16,7 +17,7 @@ from gzip import compress
 from arq import ArqRedis as Redis
 from sqlalchemy.orm import Session
 
-from app.models.apps import get_app_configs, get_one_app_sources
+from app.models.apps import get_app_configs, get_one_app_sources, get_scene_apps_from_scenes
 from app.models.frame import Frame, get_frame_json, get_interpreted_scenes_json
 from app.models.log import new_log as log
 from app.utils.local_exec import exec_local_command
@@ -30,6 +31,20 @@ from app.codegen.scene_nim import write_scene_nim, write_scenes_nim
 from app.tasks.utils import find_nimbase_file
 from app.codegen.apps_nim import write_apps_nim
 from app.codegen.app_loader_nim import write_app_loader_nim
+
+
+def _iter_config_app_dirs(apps_root: str) -> Iterable[str]:
+    if not os.path.isdir(apps_root):
+        return
+    for category in sorted(os.listdir(apps_root)):
+        category_dir = os.path.join(apps_root, category)
+        if not os.path.isdir(category_dir):
+            continue
+        for keyword in sorted(os.listdir(category_dir)):
+            app_dir = os.path.join(category_dir, keyword)
+            if os.path.isdir(app_dir) and os.path.exists(os.path.join(app_dir, "config.json")):
+                yield app_dir
+
 
 class FrameDeployer:
     def __init__(self, db: Session, redis: Redis, frame: Frame, nim_path: str, temp_dir: str):
@@ -198,7 +213,7 @@ class FrameDeployer:
 
         # find all apps
         os.makedirs(os.path.join(source_dir, "src", "apps"), exist_ok=True)
-        for app_dir in glob(os.path.join(source_dir, "src", "apps", "*", "*")):
+        for app_dir in _iter_config_app_dirs(os.path.join(source_dir, "src", "apps")):
             config_path = os.path.join(app_dir, "config.json")
             if os.path.exists(config_path):
                 with open(config_path, "r") as f:
@@ -208,6 +223,18 @@ class FrameDeployer:
                         lf.write(app_loader_nim)
 
         scenes = list(frame.scenes)
+        for app_id, sources in get_scene_apps_from_scenes(scenes).items():
+            app_dir = os.path.join(source_dir, "src", "apps", app_id)
+            os.makedirs(app_dir, exist_ok=True)
+            for filename, code in sources.items():
+                with open(os.path.join(app_dir, filename), "w") as f:
+                    f.write(code)
+            config_json = sources["config.json"] if "config.json" in sources else '{}'
+            config = json.loads(config_json)
+            app_loader_nim = write_app_loader_nim(app_dir, config)
+            with open(os.path.join(app_dir, "app_loader.nim"), "w") as lf:
+                lf.write(app_loader_nim)
+
         for node_id, sources in get_apps_from_scenes(scenes).items():
             app_id = "nodeapp_" + node_id.replace('-', '_')
             app_dir = os.path.join(source_dir, "src", "apps", app_id)
@@ -223,7 +250,7 @@ class FrameDeployer:
 
         # write apps.nim
         with open(os.path.join(source_dir, "src", "apps", "apps.nim"), "w") as f:
-            f.write(write_apps_nim("../frameos"))
+            f.write(write_apps_nim(source_dir))
 
         for scene in frame.scenes:
             execution = scene.get("settings", {}).get("execution", "compiled")
@@ -290,6 +317,16 @@ class FrameDeployer:
             frontend_schema_dir = Path(temp_dir) / "frontend" / "schema"
             frontend_schema_dir.parent.mkdir(parents=True, exist_ok=True)
             shutil.copytree(repo_frontend_schema, frontend_schema_dir, dirs_exist_ok=True)
+        repo_frontend_scripts = repo_root / "frontend" / "scripts"
+        if repo_frontend_scripts.is_dir():
+            frontend_scripts_dir = Path(temp_dir) / "frontend" / "scripts"
+            frontend_scripts_dir.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(repo_frontend_scripts, frontend_scripts_dir, dirs_exist_ok=True)
+        repo_apps_code = repo_root / "repo" / "apps" / "code"
+        if repo_apps_code.is_dir():
+            repo_apps_code_dir = Path(temp_dir) / "repo" / "apps" / "code"
+            repo_apps_code_dir.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(repo_apps_code, repo_apps_code_dir, dirs_exist_ok=True)
         repo_versions = repo_root / "versions.json"
         if repo_versions.is_file():
             shutil.copy2(repo_versions, Path(temp_dir) / "versions.json")
@@ -485,7 +522,20 @@ class FrameDeployer:
 
                 if node.get("type") == "app":
                     kw = node.get("data", {}).get("keyword")
-                    if kw:
+                    sources = node.get("data", {}).get("sources")
+                    scene_app = scene.get("apps", {}).get(kw) if isinstance(scene.get("apps", {}), dict) else None
+                    scene_app_sources = scene_app.get("sources") if isinstance(scene_app, dict) else None
+                    json_cfg = None
+                    if isinstance(sources, dict):
+                        json_cfg = sources.get("config.json")
+                    if not json_cfg and isinstance(scene_app_sources, dict):
+                        json_cfg = scene_app_sources.get("config.json")
+                    if json_cfg:
+                        try:
+                            cfg = json.loads(json_cfg)
+                        except Exception:
+                            pass
+                    elif kw:
                         try:
                             json_cfg = get_one_app_sources(kw).get("config.json")
                             if json_cfg:
