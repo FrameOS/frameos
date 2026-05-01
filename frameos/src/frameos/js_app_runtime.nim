@@ -144,6 +144,25 @@ proc clearTransientImages(runtime: JsAppRuntime) =
       runtime.images.del(id)
   runtime.transientImageIds.setLen(0)
 
+proc imageRefId(node: JsonNode): Option[int] =
+  if node.isNil or node.kind != JObject:
+    return none(int)
+  if node{"__frameosType"}.getStr() != "imageRef":
+    return none(int)
+  if not node.hasKey("id") or node["id"].kind != JInt:
+    return none(int)
+  return some(node["id"].getInt())
+
+proc releaseReplacedImageRef(runtime: JsAppRuntime, oldNode: JsonNode, newNode: JsonNode) =
+  let oldId = imageRefId(oldNode)
+  if oldId.isNone:
+    return
+  let newId = imageRefId(newNode)
+  if newId.isSome and newId.get() == oldId.get():
+    return
+  if runtime.images.hasKey(oldId.get()):
+    runtime.images.del(oldId.get())
+
 proc jsAppValueToJson(runtime: JsAppRuntime, value: Value): JsonNode =
   case value.kind
   of fkString, fkText:
@@ -249,7 +268,10 @@ proc setDynamicJsAppField*(app: AppRoot, field: string, value: Value) =
   let dynamicApp = DynamicJsApp(app)
   if dynamicApp.configJson.isNil or dynamicApp.configJson.kind != JObject:
     dynamicApp.configJson = %*{}
-  dynamicApp.configJson[field] = dynamicApp.runtime.jsAppValueToJson(value)
+  let nextValue = dynamicApp.runtime.jsAppValueToJson(value)
+  if dynamicApp.configJson.hasKey(field):
+    dynamicApp.runtime.releaseReplacedImageRef(dynamicApp.configJson[field], nextValue)
+  dynamicApp.configJson[field] = nextValue
 
 proc ensureReady(runtime: JsAppRuntime) =
   if runtime.ready:

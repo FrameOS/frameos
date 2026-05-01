@@ -108,3 +108,32 @@ suite "js app runtime":
       check value.asImage().width == 4 + i
       check value.asImage().height == 3
       check runtime.images.len == 0
+
+  test "releases overwritten dynamic field image refs":
+    let config = testConfig()
+    let logger = testLogger(config)
+    let scene = FrameScene(id: "tests/js-app-field-refs".SceneId, frameConfig: config, state: %*{}, logger: logger)
+    let runtime = newJsAppRuntime(category = "data", outputType = "image", source = "export const get = () => null")
+    let app = DynamicJsApp(
+      nodeId: 10.NodeId,
+      nodeName: "jsFieldRefs",
+      scene: scene,
+      frameConfig: config,
+      configJson: %*{},
+      runtime: runtime
+    )
+
+    setDynamicJsAppField(app, "inputImage", VImage(newImage(4, 3)))
+    check runtime.images.len == 1
+    let firstId = app.configJson["inputImage"]["id"].getInt()
+    check runtime.images.hasKey(firstId)
+
+    setDynamicJsAppField(app, "inputImage", VImage(newImage(5, 3)))
+    check runtime.images.len == 1
+    check not runtime.images.hasKey(firstId)
+    let secondId = app.configJson["inputImage"]["id"].getInt()
+    check secondId != firstId
+    check runtime.images.hasKey(secondId)
+
+    setDynamicJsAppField(app, "inputImage", VString("not an image"))
+    check runtime.images.len == 0

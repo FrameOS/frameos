@@ -118,6 +118,7 @@ RUN pnpm install --filter @frameos/frontend --frozen-lockfile
 
 # Copy frontend source files and run build
 COPY frontend/ /tmp/frontend/
+COPY repo/apps /tmp/repo/apps
 COPY versions.json /tmp/versions.json
 RUN pnpm --dir frontend run build
 

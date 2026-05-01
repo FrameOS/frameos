@@ -9,6 +9,13 @@ import { apiFetch } from '../utils/apiFetch'
 import { entityImagesModel } from './entityImagesModel'
 import { urls } from '../urls'
 
+function sanitizeFrameForStore(frame: FrameType): FrameType {
+  return {
+    ...frame,
+    scenes: frame.scenes?.map((scene) => sanitizeScene(scene as FrameScene, frame)) ?? [],
+  }
+}
+
 export const framesModel = kea<framesModelType>([
   connect(() => ({ logic: [socketLogic, entityImagesModel] })),
   path(['src', 'models', 'framesModel']),
@@ -39,10 +46,7 @@ export const framesModel = kea<framesModelType>([
             const frame = data.frame as FrameType
             return {
               ...values.frames,
-              [frame.id]: {
-                ...frame,
-                scenes: frame.scenes?.map((scene) => sanitizeScene(scene as FrameScene, frame)),
-              },
+              [frame.id]: sanitizeFrameForStore(frame),
             }
           } catch (error) {
             console.error(error)
@@ -57,13 +61,7 @@ export const framesModel = kea<framesModelType>([
             }
             const data = await response.json()
             const framesDict = Object.fromEntries(
-              (data.frames as FrameType[]).map((frame) => [
-                frame.id,
-                {
-                  ...frame,
-                  scenes: frame.scenes?.map((scene) => sanitizeScene(scene as FrameScene, frame)),
-                },
-              ])
+              (data.frames as FrameType[]).map((frame) => [frame.id, sanitizeFrameForStore(frame)])
             )
             return framesDict
           } catch (error) {
@@ -80,9 +78,7 @@ export const framesModel = kea<framesModelType>([
       {
         addFrame: (state, { frame }) => ({
           ...state,
-          [frame.id]: {
-            ...frame,
-          },
+          [frame.id]: sanitizeFrameForStore(frame),
         }),
         setDeployWithAgent: (state, { id, deployWithAgent }) => {
           const frame = state[id]
@@ -95,10 +91,13 @@ export const framesModel = kea<framesModelType>([
             },
           }
         },
-        [socketLogic.actionTypes.newFrame]: (state, { frame }) => ({ ...state, [frame.id]: frame }),
+        [socketLogic.actionTypes.newFrame]: (state, { frame }) => ({
+          ...state,
+          [frame.id]: sanitizeFrameForStore(frame),
+        }),
         [socketLogic.actionTypes.updateFrame]: (state, { frame }) => ({
           ...state,
-          [frame.id]: { ...(state[frame.id] ?? {}), ...frame },
+          [frame.id]: sanitizeFrameForStore({ ...(state[frame.id] ?? {}), ...frame }),
         }),
         [socketLogic.actionTypes.deleteFrame]: (state, { id }) => {
           const newState = { ...state }
