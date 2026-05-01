@@ -32,7 +32,7 @@ async def api_apps_list(db: Session = Depends(get_db)):
 @api_with_auth.get("/apps/source", response_model=AppsSourceResponse)
 async def api_apps_source(keyword: Optional[str] = None, db: Session = Depends(get_db)):
     sources = get_one_app_sources(keyword)
-    if sources is None:
+    if not sources:
         raise HTTPException(status_code=404, detail="App sources not found")
     return sources
 

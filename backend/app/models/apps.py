@@ -9,10 +9,9 @@ from app.utils.js_apps import find_js_app_source_filename, find_js_app_source_ke
 
 repo_root = Path(__file__).resolve().parents[3]
 local_apps_path = str(repo_root / "frameos" / "src" / "apps")
-repo_apps_path = str(repo_root / "repo" / "apps")
 
 
-def _iter_local_app_dirs(include_repo_apps: bool = True):
+def _iter_local_app_dirs():
     seen: set[str] = set()
     frame_apps_root = Path(local_apps_path)
     if frame_apps_root.exists():
@@ -28,35 +27,9 @@ def _iter_local_app_dirs(include_repo_apps: bool = True):
                 seen.add(keyword)
                 yield keyword, app_dir, {}
 
-    if not include_repo_apps:
-        return
-
-    repo_apps_root = Path(repo_apps_path)
-    if repo_apps_root.exists():
-        for folder_dir in sorted(repo_apps_root.iterdir()):
-            if not folder_dir.is_dir():
-                continue
-            for app_dir in sorted(folder_dir.iterdir()):
-                if not app_dir.is_dir():
-                    continue
-                keyword = f"repo/apps/{folder_dir.name}/{app_dir.name}"
-                if keyword in seen:
-                    continue
-                seen.add(keyword)
-                yield keyword, app_dir, {
-                    "source": keyword,
-                }
-
 
 def get_local_app_path(keyword: str | None) -> str | None:
     if not keyword:
-        return None
-    if keyword.startswith("repo/"):
-        parts = keyword.split("/")
-        if len(parts) == 4 and parts[1] == "apps":
-            app_path = Path(repo_apps_path) / parts[2] / parts[3]
-            if app_path.is_dir():
-                return str(app_path)
         return None
 
     app_path = Path(local_apps_path) / keyword

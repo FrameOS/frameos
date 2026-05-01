@@ -25,28 +25,6 @@ def get_app_configs(source_dir: Path) -> dict[str, dict]:
                     # Keep behavior resilient: skip malformed config files.
                     continue
 
-    repo_apps_root = source_dir.parent / "repo" / "apps"
-    if repo_apps_root.exists():
-        for folder_dir in sorted(repo_apps_root.iterdir()):
-            if not folder_dir.is_dir():
-                continue
-            for app_dir in sorted(folder_dir.iterdir()):
-                if not app_dir.is_dir():
-                    continue
-                config_path = app_dir / "config.json"
-                if not config_path.exists():
-                    continue
-                try:
-                    config = json.loads(config_path.read_text())
-                    if isinstance(config, dict) and "name" in config:
-                        keyword = f"repo/apps/{folder_dir.name}/{app_dir.name}"
-                        configs[keyword] = {
-                            **config,
-                            "source": keyword,
-                        }
-                except Exception:
-                    continue
-
     return configs
 
 
