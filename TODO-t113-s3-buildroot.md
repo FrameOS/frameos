@@ -92,9 +92,6 @@ custom board variants. The first deliverable is a host-side system that can:
 - Flash and boot the inspected no-Wi-Fi glibc `FRAMEOS_BUILD_RUNTIME=1` SD card
   image on the TQT113-S3 dev board, then capture the serial console log,
   network state, and FrameOS service log.
-- Rebuild the Docker image from `backend/tools/t113-buildroot.Dockerfile` after
-  the latest wrapper validation fixes if the cached local image is discarded or
-  before publishing this build path for other hosts.
 - Add kernel/DTS customization points once the exact custom-board SPI, GPIO,
   UART, power, and Wi-Fi wiring is fixed.
 - Wire packaged SD-card artifacts into the existing FrameOS archive/release
@@ -243,3 +240,8 @@ custom board variants. The first deliverable is a host-side system that can:
   `5b44fdb28c544b11c7365a96b9eb88b5dbf65f8637c71443ca445419b0549c9d`;
   the compressed artifact is 15,156,944 bytes with SHA-256
   `ca397a165d7afd62795f0cff9b39b1f893c3bc189343610b93ff6e5e51f6b915`.
+- Rebuilt `frameos-t113-s3-buildroot:bookworm` from
+  `backend/tools/t113-buildroot.Dockerfile` after the Docker validation fixes.
+  A container sanity check confirmed `FORCE_UNSAFE_CONFIGURE=1`,
+  `python` resolves to `/opt/frameos-python/bin/python`, and `arq 0.26.1` is
+  importable inside the rebuilt image.
