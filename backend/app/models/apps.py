@@ -5,7 +5,7 @@ import os
 import hashlib
 import re
 from pathlib import Path
-from app.utils.js_apps import find_js_app_source_filename
+from app.utils.js_apps import find_js_app_source_filename, find_js_app_source_key
 
 repo_root = Path(__file__).resolve().parents[3]
 local_apps_path = str(repo_root / "frameos" / "src" / "apps")
@@ -129,8 +129,14 @@ def get_apps_from_scenes(scenes: list[dict]) -> dict[str, dict]:
     apps = {}
     for scene in scenes:
         for node in scene.get('nodes', []):
-            if node['type'] == 'app' and node.get('data', {}).get('sources', None) is not None:
-                apps[node['id']] = node['data']['sources']
+            sources = node.get('data', {}).get('sources', None)
+            if (
+                node.get('type') == 'app'
+                and isinstance(sources, dict)
+                and "app.nim" in sources
+                and find_js_app_source_key(sources) is None
+            ):
+                apps[node['id']] = sources
     return apps
 
 
@@ -141,7 +147,11 @@ def get_scene_apps_from_scenes(scenes: list[dict]) -> dict[str, dict]:
         if isinstance(scene_apps, dict):
             for keyword, app in scene_apps.items():
                 sources = app.get("sources", {}) if isinstance(app, dict) else {}
-                if isinstance(sources, dict) and len(sources) > 0:
+                if (
+                    isinstance(sources, dict)
+                    and "app.nim" in sources
+                    and find_js_app_source_key(sources) is None
+                ):
                     apps[get_scene_app_id(keyword, sources)] = sources
 
         for node in scene.get("nodes", []):
@@ -151,6 +161,6 @@ def get_scene_apps_from_scenes(scenes: list[dict]) -> dict[str, dict]:
             if not is_repo_app(keyword) or keyword in scene_apps:
                 continue
             sources = get_one_app_sources(keyword)
-            if len(sources) > 0:
+            if "app.nim" in sources and find_js_app_source_key(sources) is None:
                 apps[get_scene_app_id(keyword, sources)] = sources
     return apps

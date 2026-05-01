@@ -1,9 +1,6 @@
 from types import SimpleNamespace
 
 from app.codegen.scene_nim import write_scene_nim
-from app.models.apps import get_scene_app_id
-
-
 def test_app_output_field_input_is_coerced_to_target_field_type():
     scene = {
         "id": "scene",
@@ -52,12 +49,12 @@ def test_app_output_field_input_is_coerced_to_target_field_type():
     assert (
         "self.node1.appConfig.text = block:\n"
         "        let frameosValue = block:\n"
-        "          nodeApp2.get(self.node2, context)\n"
+        "          js_app_runtime.getDynamicJsApp(self.node2, context)\n"
         "        frameosValue.asString()"
     ) in source
 
 
-def test_scene_app_import_uses_source_specific_module_id():
+def test_scene_js_app_uses_runtime_directly():
     sources = {
         "config.json": """
 {
@@ -89,7 +86,10 @@ def test_scene_app_import_uses_source_specific_module_id():
 
     source = write_scene_nim(frame, scene)
 
-    assert f"import apps/{get_scene_app_id('repo/examples/jsText', sources)}/app_loader as nodeApp1" in source
+    assert "import frameos/js_app_runtime as js_app_runtime" in source
+    assert "js_app_runtime.initDynamicJsApp" in source
+    assert "import apps/" not in source
+    assert "app_loader" not in source
 
 
 def test_native_app_output_field_input_keeps_native_return_type():

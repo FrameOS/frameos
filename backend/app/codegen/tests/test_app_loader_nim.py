@@ -1,7 +1,9 @@
+import pytest
+
 from app.codegen.app_loader_nim import write_app_loader_nim
 
 
-def test_write_app_loader_nim_supports_tsx_sources(tmp_path):
+def test_write_app_loader_nim_requires_nim_source(tmp_path):
     (tmp_path / "config.json").write_text(
         """
 {
@@ -18,8 +20,5 @@ def test_write_app_loader_nim_supports_tsx_sources(tmp_path):
         encoding="utf-8",
     )
 
-    source = write_app_loader_nim(str(tmp_path))
-
-    assert 'staticRead("./app.tsx")' in source
-    assert "initDynamicJsApp" in source
-    assert "import ./app as app_module" not in source
+    with pytest.raises(FileNotFoundError, match="Nim app source not found"):
+        write_app_loader_nim(str(tmp_path))

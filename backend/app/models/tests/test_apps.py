@@ -45,6 +45,11 @@ async def test_get_apps_from_scenes():
                     "data": {"sources": {"app.nim": "nim code"}}
                 },
                 {
+                    "id": "node-js",
+                    "type": "app",
+                    "data": {"sources": {"app.ts": "export function get() { return 'ok' }"}}
+                },
+                {
                     "id": "node2",
                     "type": "some_other_type"
                 }
@@ -54,27 +59,36 @@ async def test_get_apps_from_scenes():
     apps = get_apps_from_scenes(scenes)
     assert len(apps) == 1
     assert "node1" in apps
+    assert "node-js" not in apps
 
 
 @pytest.mark.asyncio
 async def test_get_scene_apps_from_scenes():
+    sources = {"config.json": '{"name":"Scene Nim"}', "app.nim": "nim code"}
+    scenes = [{"apps": {"repo/examples/nimText": {"sources": sources}}, "nodes": []}]
+    apps = get_scene_apps_from_scenes(scenes)
+    assert apps[get_scene_app_id("repo/examples/nimText", sources)] == sources
+
+
+@pytest.mark.asyncio
+async def test_get_scene_apps_from_scenes_skips_js_sources():
     sources = {"config.json": '{"name":"Scene JS"}', "app.ts": "export function get(): string { return 'ok' }"}
     scenes = [{"apps": {"repo/examples/jsText": {"sources": sources}}, "nodes": []}]
     apps = get_scene_apps_from_scenes(scenes)
-    assert apps[get_scene_app_id("repo/examples/jsText", sources)] == sources
+    assert apps == {}
 
 
 @pytest.mark.asyncio
 async def test_get_scene_apps_from_scenes_keeps_same_keyword_sources_separate():
-    first_sources = {"config.json": '{"name":"Scene JS"}', "app.ts": "export function get(): string { return 'one' }"}
-    second_sources = {"config.json": '{"name":"Scene JS"}', "app.ts": "export function get(): string { return 'two' }"}
+    first_sources = {"config.json": '{"name":"Scene Nim"}', "app.nim": "one"}
+    second_sources = {"config.json": '{"name":"Scene Nim"}', "app.nim": "two"}
     scenes = [
-        {"apps": {"repo/examples/jsText": {"sources": first_sources}}, "nodes": []},
-        {"apps": {"repo/examples/jsText": {"sources": second_sources}}, "nodes": []},
+        {"apps": {"repo/examples/nimText": {"sources": first_sources}}, "nodes": []},
+        {"apps": {"repo/examples/nimText": {"sources": second_sources}}, "nodes": []},
     ]
 
     apps = get_scene_apps_from_scenes(scenes)
 
     assert len(apps) == 2
-    assert apps[get_scene_app_id("repo/examples/jsText", first_sources)] == first_sources
-    assert apps[get_scene_app_id("repo/examples/jsText", second_sources)] == second_sources
+    assert apps[get_scene_app_id("repo/examples/nimText", first_sources)] == first_sources
+    assert apps[get_scene_app_id("repo/examples/nimText", second_sources)] == second_sources

@@ -241,11 +241,24 @@ class SceneWriter:
         local_app_path = get_local_app_path(keyword)
         return find_js_app_source_filename(local_app_path) if local_app_path else None
 
+    def js_app_sources_for_node(self, node) -> dict:
+        sources = self.app_sources_for_node(node)
+        if len(sources) > 0:
+            return sources
+
+        keyword = node.get("data", {}).get("keyword", "")
+        if not isinstance(keyword, str):
+            return {}
+        return get_one_app_sources(keyword)
+
     def is_js_app_node(self, node) -> bool:
         node_id = node["id"]
         return node_id in self.js_app_nodes or self.js_source_filename_for_node(node) is not None
 
     def app_module_alias_for_node(self, node) -> str:
+        if self.is_js_app_node(node):
+            return "js_app_runtime"
+
         node_id = node["id"]
         sources = self.app_sources_for_node(node)
         generated_app_id = self.generated_app_id_for_node(node)
@@ -349,23 +362,22 @@ class SceneWriter:
             except Exception:
                 raise ValueError(message)
 
+        if is_js_app:
+            js_import = "import frameos/js_app_runtime as js_app_runtime"
+            if js_import not in self.imports:
+                self.imports += [js_import]
+            self.scene_object_fields += [f"{app_id}: AppRoot"]
+            return
+
         generated_app_id = self.generated_app_id_for_node(node)
         if generated_app_id:
-            module_name = "app_loader" if is_js_app else "app"
-            app_import = f"import apps/{generated_app_id}/{module_name} as nodeApp{self.node_id_to_integer(node_id)}"
-            if is_js_app:
-                self.scene_object_fields += [f"{app_id}: AppRoot"]
-            else:
-                self.scene_object_fields += [
-                    f"{app_id}: nodeApp{self.node_id_to_integer(node_id)}.App"
-                ]
+            app_import = f"import apps/{generated_app_id}/app as nodeApp{self.node_id_to_integer(node_id)}"
+            self.scene_object_fields += [
+                f"{app_id}: nodeApp{self.node_id_to_integer(node_id)}.App"
+            ]
         else:
-            module_name = "app_loader" if is_js_app else "app"
-            app_import = f"import apps/{name}/{module_name} as {name_identifier}App"
-            if is_js_app:
-                self.scene_object_fields += [f"{app_id}: AppRoot"]
-            else:
-                self.scene_object_fields += [f"{app_id}: {name_identifier}App.App"]
+            app_import = f"import apps/{name}/app as {name_identifier}App"
+            self.scene_object_fields += [f"{app_id}: {name_identifier}App.App"]
 
         if app_import not in self.imports:
             self.imports += [app_import]
@@ -380,6 +392,7 @@ class SceneWriter:
         name = node.get("data", {}).get("keyword", f"app_{node_id}")
         node_integer = self.node_id_to_integer(node_id)
         app_id = f"node{node_integer}"
+        is_js_app = self.is_js_app_node(node)
 
         app_config = node.get("data", {}).get("config", {}).copy()
         if len(sources) > 0 and sources.get("config.json", None):
@@ -397,13 +410,16 @@ class SceneWriter:
         self.field_types[node_id] = {}
 
         js_source_filename = None
-        if len(sources) > 0:
-            js_source_filename = find_js_app_source_key(sources)
+        js_sources = self.js_app_sources_for_node(node) if is_js_app else {}
+        if len(js_sources) > 0:
+            js_source_filename = find_js_app_source_key(js_sources)
+        if is_js_app and not js_source_filename:
+            raise ValueError(f'Missing JavaScript app source for "{name}" in scene {self.scene_id}')
 
         if len(sources) > 0 and sources.get("app.nim", None):
             source_lines = sources.get("app.nim").split("\n")
-        elif len(sources) > 0 and js_source_filename:
-            source_lines = sources.get(js_source_filename, "").split("\n")
+        elif len(js_sources) > 0 and js_source_filename:
+            source_lines = js_sources.get(js_source_filename, "").split("\n")
         else:
             local_app_path = get_local_app_path(name)
             source_path = os.path.join(local_app_path, "app.nim") if local_app_path else ""
@@ -516,13 +532,16 @@ class SceneWriter:
                 )]
             )
 
-        if len(sources) > 0:
+        if js_source_filename:
+            appName = "js_app_runtime"
+        elif len(sources) > 0:
             appName = f"nodeApp{self.node_id_to_integer(node_id)}"
         else:
             name_identifier = name.replace("/", "_")
             appName = f"{name_identifier}App"
 
         if js_source_filename:
+            sources_json = nim_string_literal(json.dumps(js_sources, separators=(",", ":"), sort_keys=True))
             node_data = {
                 "keyword": name,
                 "name": node.get("data", {}).get("name", name),
@@ -534,7 +553,7 @@ class SceneWriter:
             }
             node_data_json = nim_string_literal(json.dumps(node_data, separators=(",", ":"), sort_keys=True))
             self.init_apps += [
-                f"scene.{app_id} = {appName}.init(DiagramNode(id: {node_integer}.NodeId, nodeType: \"app\", data: parseJson({node_data_json})), scene.FrameScene)",
+                f"scene.{app_id} = {appName}.initDynamicJsApp(\"{sanitize_nim_string(name)}\", DiagramNode(id: {node_integer}.NodeId, nodeType: \"app\", data: parseJson({node_data_json})), scene.FrameScene, parseJson({sources_json}))",
             ]
             return
 
@@ -639,10 +658,11 @@ class SceneWriter:
         value_lines: list[str],
     ) -> list[str]:
         key = sanitize_nim_string(key)
+        set_proc = "setDynamicJsAppField" if app_module == "js_app_runtime" else "setField"
         if len(value_lines) == 1:
-            return [f'  {app_module}.setField({app_expr}, "{key}", {value_lines[0]})']
+            return [f'  {app_module}.{set_proc}({app_expr}, "{key}", {value_lines[0]})']
 
-        lines = [f'  {app_module}.setField({app_expr}, "{key}", {value_lines[0]}']
+        lines = [f'  {app_module}.{set_proc}({app_expr}, "{key}", {value_lines[0]}']
         lines.extend(f"  {line}" for line in value_lines[1:])
         lines[-1] = lines[-1] + ")"
         return lines
@@ -775,8 +795,9 @@ class SceneWriter:
                 fieldAssignment = f"self.{app_id}.appConfig.{key}"
             if source_is_js:
                 source_module = self.app_module_alias_for_node(source_node)
+                get_field_proc = "getDynamicJsAppField" if source_module == "js_app_runtime" else "getField"
                 value_lines = [
-                    f'{source_module}.getField(self.node{self.node_id_to_integer(source_id)}, "{sanitize_nim_string(source_key)}", "{sanitize_nim_string(field_type)}")'
+                    f'{source_module}.{get_field_proc}(self.node{self.node_id_to_integer(source_id)}, "{sanitize_nim_string(source_key)}", "{sanitize_nim_string(field_type)}")'
                 ]
                 if case_or_block == "vars":
                     typed_lines = (
@@ -822,7 +843,7 @@ class SceneWriter:
 
         if case_or_block == "case":
             if is_js_app:
-                run_lines += [f"  {app_module}.run(self.{app_id}, context)"]
+                run_lines += [f"  {app_module}.runDynamicJsApp(self.{app_id}, context)"]
             else:
                 run_lines += [f"  self.{app_id}.run(context)"]
             run_lines += [
@@ -830,7 +851,7 @@ class SceneWriter:
             ]
         elif case_or_block == "block" or case_or_block == "blockWithVars":
             if is_js_app:
-                run_lines += [f"  {app_module}.get(self.{app_id}, context)"]
+                run_lines += [f"  {app_module}.getDynamicJsApp(self.{app_id}, context)"]
             else:
                 run_lines += [f"  self.{app_id}.get(context)"]
 
@@ -1321,8 +1342,9 @@ var exportedScene* = ExportedScene(
             source_node = self.nodes_by_id.get(source_id)
             if source_node and self.is_js_app_node(source_node):
                 source_module = self.app_module_alias_for_node(source_node)
+                get_field_proc = "getDynamicJsAppField" if source_module == "js_app_runtime" else "getField"
                 value_lines = [
-                    f'{source_module}.getField(self.node{self.node_id_to_integer(source_id)}, "{sanitize_nim_string(source_key)}", "{sanitize_nim_string(type)}")'
+                    f'{source_module}.{get_field_proc}(self.node{self.node_id_to_integer(source_id)}, "{sanitize_nim_string(source_key)}", "{sanitize_nim_string(type)}")'
                 ]
                 if type == "image" and not required_fields.get(key, False):
                     return self.wrap_value_lines_as_optional_image(value_lines)

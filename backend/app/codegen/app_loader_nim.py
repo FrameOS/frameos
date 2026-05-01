@@ -2,7 +2,6 @@ import json
 from typing import Optional, Dict, Any, List, Union
 import os
 import re
-from app.utils.js_apps import find_js_app_source_filename
 
 Scalar = Union[str, int, float, bool, None]
 
@@ -551,46 +550,6 @@ def _app_has_self_init(app_dir: str) -> bool:
     return re.search(r"proc\s+init\*?\s*\(\s*self\s*:\s*(?:var\s+)?App\b", app_source) is not None
 
 
-def _write_js_app_loader_nim(app_dir: str, config: dict) -> str:
-    source_filename = find_js_app_source_filename(app_dir)
-    if not source_filename:
-        raise FileNotFoundError(f"JS app source not found in {app_dir}")
-
-    fallback_keyword = _nim_quote(config.get("name") or os.path.basename(app_dir))
-
-    return f"""{{.warning[UnusedImport]: off.}}
-import json
-import frameos/types
-import frameos/values
-import frameos/js_app_runtime
-
-const jsAppSource = staticRead("./{source_filename}")
-const jsAppConfig = staticRead("./config.json")
-
-proc jsAppSources(): JsonNode =
-  result = %*{{}}
-  result["config.json"] = %*jsAppConfig
-  result["{source_filename}"] = %*jsAppSource
-
-proc init*(
-    node: DiagramNode,
-    scene: FrameScene,
-): AppRoot =
-  initDynamicJsApp(node.data{{"keyword"}}.getStr({fallback_keyword}), node, scene, jsAppSources())
-
-proc setField*(self: AppRoot, field: string, value: Value) =
-  self.setDynamicJsAppField(field, value)
-
-proc getField*(self: AppRoot, field: string, fieldType: string): Value =
-  self.getDynamicJsAppField(field, fieldType)
-
-proc get*(self: AppRoot, context: ExecutionContext): Value =
-  self.getDynamicJsApp(context)
-
-proc run*(self: AppRoot, context: ExecutionContext) =
-  self.runDynamicJsApp(context)
-"""
-
 def write_app_loader_nim(app_dir, config: Optional[dict] = None) -> str:
     if not config:
         config_path = os.path.join(app_dir, "config.json")
@@ -600,8 +559,9 @@ def write_app_loader_nim(app_dir, config: Optional[dict] = None) -> str:
             config = json.load(f)
             assert config is not None
 
-    if find_js_app_source_filename(app_dir):
-        return _write_js_app_loader_nim(app_dir, config)
+    app_source_path = os.path.join(app_dir, "app.nim")
+    if not os.path.exists(app_source_path):
+        raise FileNotFoundError(f"Nim app source not found: {app_source_path}")
 
     fields = [f for f in config.get("fields", []) if not f.get("markdown")]
     app_has_self_init = _app_has_self_init(app_dir)
