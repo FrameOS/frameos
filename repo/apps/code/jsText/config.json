@@ -1,7 +1,7 @@
 {
-  "name": "JS Text",
+  "name": "New text data app (JS)",
   "category": "data",
-  "description": "Sample JS app that returns text.",
+  "description": "JavaScript data app template that returns text.",
   "fields": [
     {
       "name": "prefix",

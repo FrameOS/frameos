@@ -112,7 +112,7 @@ def _summarize_scene_template(template_path: Path, repo_root: Path) -> tuple[str
 def _app_keyword(config_path: Path, repo_root: Path) -> str:
     relative_parts = config_path.parent.relative_to(repo_root).parts
     if len(relative_parts) >= 4 and relative_parts[0] == "repo" and relative_parts[1] == "apps":
-        return f"repo/{relative_parts[2]}/{relative_parts[3]}"
+        return f"repo/apps/{relative_parts[2]}/{relative_parts[3]}"
     return f"{config_path.parent.parent.name}/{config_path.parent.name}"
 
 

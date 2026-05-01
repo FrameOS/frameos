@@ -77,7 +77,7 @@ uploaded[sceneId] = ExportedInterpretedScene(
       }
     }),
     node(3, "app", %*{
-      "keyword": "repo/examples/jsText",
+      "keyword": "jsText",
       "config": {}
     })
   ],
@@ -86,7 +86,8 @@ uploaded[sceneId] = ExportedInterpretedScene(
     edge(101, 1, "fieldOutput", 2, "fieldInput/image")
   ],
   apps: %*{
-    "repo/examples/jsText": {
+    "jsText": {
+      "source": "repo/apps/code/jsText",
       "sources": {
         "config.json": """
 {

@@ -298,7 +298,7 @@ export interface AppConfig {
   output?: OutputField[]
   /** Default cache settings */
   cache?: CacheConfig
-  /** Original source for this app, such as repo/examples/jsText */
+  /** Original source for this app, such as repo/apps/code/jsText */
   source?: string
 }
 

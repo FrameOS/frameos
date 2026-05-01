@@ -6,7 +6,7 @@ import { searchInText } from '../../../../utils/searchInText'
 import { AppConfig, AppNodeData, SceneApp } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
 import { panelsLogic } from '../panelsLogic'
-import { sceneAppsToAppConfigs } from '../../../../utils/sceneApps'
+import { isJavaScriptCatalogApp, sceneAppsToAppConfigs } from '../../../../utils/sceneApps'
 
 export interface AppsLogicProps {
   frameId: number
@@ -55,7 +55,7 @@ export const appsLogic = kea<appsLogicType>([
         return Object.fromEntries(
           Object.entries(
             Object.entries(apps).reduce((acc, [keyword, app]) => {
-              const category = (app.category || 'other').toLowerCase()
+              const category = isJavaScriptCatalogApp(keyword) ? 'code' : (app.category || 'other').toLowerCase()
               if (!acc[category]) {
                 acc[category] = {}
               }

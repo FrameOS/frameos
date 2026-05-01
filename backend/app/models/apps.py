@@ -39,7 +39,7 @@ def _iter_local_app_dirs(include_repo_apps: bool = True):
             for app_dir in sorted(folder_dir.iterdir()):
                 if not app_dir.is_dir():
                     continue
-                keyword = f"repo/{folder_dir.name}/{app_dir.name}"
+                keyword = f"repo/apps/{folder_dir.name}/{app_dir.name}"
                 if keyword in seen:
                     continue
                 seen.add(keyword)
@@ -53,8 +53,8 @@ def get_local_app_path(keyword: str | None) -> str | None:
         return None
     if keyword.startswith("repo/"):
         parts = keyword.split("/")
-        if len(parts) == 3:
-            app_path = Path(repo_apps_path) / parts[1] / parts[2]
+        if len(parts) == 4 and parts[1] == "apps":
+            app_path = Path(repo_apps_path) / parts[2] / parts[3]
             if app_path.is_dir():
                 return str(app_path)
         return None

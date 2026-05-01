@@ -1,7 +1,7 @@
 {
-  "name": "JS Image",
+  "name": "New image data app (JS)",
   "category": "data",
-  "description": "Sample JS app that returns an image object.",
+  "description": "JavaScript data app template that returns an image object.",
   "fields": [
     {
       "name": "width",

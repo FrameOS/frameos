@@ -15,7 +15,6 @@ import {
   forkSceneAppKey,
   hasCompiledAppSource,
   hasJavaScriptAppSource,
-  isRepoAppKeyword,
   javascriptAppSourceFiles,
   sceneAppToAppConfig,
 } from '../../../../utils/sceneApps'
@@ -77,7 +76,7 @@ export const editAppLogic = kea<editAppLogicType>([
     sceneAppKey: [
       (s) => [s.scene, s.savedKeyword],
       (scene, savedKeyword): string | null =>
-        savedKeyword && (scene?.apps?.[savedKeyword] || isRepoAppKeyword(savedKeyword)) ? savedKeyword : null,
+        savedKeyword && scene?.apps?.[savedKeyword] ? savedKeyword : null,
     ],
     sceneApp: [
       (s) => [s.scene, s.sceneAppKey],

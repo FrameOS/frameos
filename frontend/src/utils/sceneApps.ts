@@ -2,9 +2,30 @@ import { AppConfig, FrameScene, SceneApp } from '../types'
 import { apiFetch } from './apiFetch'
 
 export const javascriptAppSourceFiles = ['app.ts', 'app.js', 'app.tsx', 'app.jsx']
+export const javascriptCatalogAppKeywords = [
+  'repo/apps/code/jsLogic',
+  'repo/apps/code/jsText',
+  'repo/apps/code/jsImage',
+  'repo/apps/code/jsSvg',
+]
+
+const javascriptCatalogAppLabels: Record<string, string> = {
+  'repo/apps/code/jsLogic': 'code: new logic app (JS)',
+  'repo/apps/code/jsText': 'code: new text data app (JS)',
+  'repo/apps/code/jsImage': 'code: new image data app (JS)',
+  'repo/apps/code/jsSvg': 'code: new svg data app (JS)',
+}
 
 export function isRepoAppKeyword(keyword?: string | null): boolean {
   return !!keyword && keyword.startsWith('repo/')
+}
+
+export function isJavaScriptCatalogApp(keyword?: string | null): boolean {
+  return !!keyword && javascriptCatalogAppKeywords.includes(keyword)
+}
+
+export function javascriptCatalogAppLabel(keyword: string, app?: Pick<AppConfig, 'name'> | null): string {
+  return javascriptCatalogAppLabels[keyword] ?? `code: ${app?.name ?? keyword}`
 }
 
 export function hasJavaScriptAppSource(sources?: Record<string, string> | null): boolean {
@@ -61,6 +82,9 @@ export function appTag(app?: Pick<AppConfig, 'source'> | null): string | null {
     return null
   }
   const parts = app.source.split('/')
+  if (parts[0] === 'repo' && parts[1] === 'apps' && parts[2]) {
+    return parts[2]
+  }
   if (parts[0] === 'repo' && parts[1]) {
     return parts[1]
   }
@@ -78,6 +102,30 @@ export function appLabel(app: AppConfig, prefix?: string): string {
 export async function loadAppSources(keyword: string): Promise<Record<string, string>> {
   const response = await apiFetch(`/api/apps/source?keyword=${encodeURIComponent(keyword)}`)
   return await response.json()
+}
+
+export function sceneAppKeyBase(keyword: string, app?: Partial<Pick<AppConfig, 'name'>> | null): string {
+  const keywordParts = keyword.split('/').filter(Boolean)
+  const rawBase = keywordParts[keywordParts.length - 1] || app?.name || 'app'
+  return rawBase.replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/(^-|-$)/g, '') || 'app'
+}
+
+export function nextSceneAppKey(
+  sceneApps: Record<string, SceneApp>,
+  keyword: string,
+  app?: Partial<Pick<AppConfig, 'name'>> | null
+): string {
+  const base = sceneAppKeyBase(keyword, app)
+  if (!sceneApps[base]) {
+    return base
+  }
+  let index = 2
+  let key = `${base}-${index}`
+  while (sceneApps[key]) {
+    index += 1
+    key = `${base}-${index}`
+  }
+  return key
 }
 
 export function buildSceneApp(
@@ -104,36 +152,43 @@ export function buildSceneApp(
   }
 }
 
-export async function sceneAppsWithKeyword(
+export interface InstalledSceneApp {
+  sceneApps: Record<string, SceneApp>
+  keyword: string
+  app: AppConfig | null
+}
+
+export async function installSceneAppForKeyword(
   sceneApps: Record<string, SceneApp>,
   keyword: string,
   app: Partial<AppConfig> | undefined
-): Promise<Record<string, SceneApp>> {
-  if (sceneApps[keyword] || !isRepoAppKeyword(keyword)) {
-    return sceneApps
+): Promise<InstalledSceneApp> {
+  if (!isRepoAppKeyword(keyword)) {
+    return {
+      sceneApps,
+      keyword,
+      app: (app as AppConfig | undefined) ?? null,
+    }
   }
   const sources = await loadAppSources(keyword)
+  const sceneKeyword = nextSceneAppKey(sceneApps, keyword, app)
+  const sceneApp = buildSceneApp(sceneKeyword, app, sources, { source: app?.source || keyword })
   return {
-    ...sceneApps,
-    [keyword]: buildSceneApp(keyword, app, sources),
+    sceneApps: {
+      ...sceneApps,
+      [sceneKeyword]: sceneApp,
+    },
+    keyword: sceneKeyword,
+    app: sceneAppToAppConfig(sceneApp),
   }
 }
 
-export function forkSceneAppKey(sceneApps: Record<string, SceneApp>, keyword: string, app?: AppConfig | null): string {
-  const keywordParts = keyword.split('/')
-  const rawBase = app?.name || keywordParts[keywordParts.length - 1] || 'app'
-  const base =
-    rawBase
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/(^-|-$)/g, '') || 'app'
-  let index = 1
-  let key = `scene/${base}`
-  while (sceneApps[key]) {
-    index += 1
-    key = `scene/${base}-${index}`
-  }
-  return key
+export function forkSceneAppKey(
+  sceneApps: Record<string, SceneApp>,
+  keyword: string,
+  app?: AppConfig | null
+): string {
+  return nextSceneAppKey(sceneApps, keyword, app)
 }
 
 export function updateSceneAppsInScenes(

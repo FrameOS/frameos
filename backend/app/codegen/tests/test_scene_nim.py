@@ -11,7 +11,7 @@ def test_app_output_field_input_is_coerced_to_target_field_type():
             {
                 "id": "js",
                 "type": "app",
-                "data": {"keyword": "repo/examples/jsText", "config": {}},
+                "data": {"keyword": "jsText", "config": {}},
                 "position": {"x": 2, "y": 2},
             },
         ],
@@ -27,7 +27,8 @@ def test_app_output_field_input_is_coerced_to_target_field_type():
         "fields": [],
         "settings": {"execution": "compiled", "refreshInterval": 3600, "backgroundColor": "#000000"},
         "apps": {
-            "repo/examples/jsText": {
+            "jsText": {
+                "source": "repo/apps/code/jsText",
                 "sources": {
                     "config.json": """
 {
@@ -73,14 +74,14 @@ def test_scene_js_app_uses_runtime_directly():
             {
                 "id": "js",
                 "type": "app",
-                "data": {"keyword": "repo/examples/jsText", "config": {}},
+                "data": {"keyword": "jsText", "config": {}},
                 "position": {"x": 0, "y": 0},
             },
         ],
         "edges": [],
         "fields": [],
         "settings": {"execution": "compiled", "refreshInterval": 3600, "backgroundColor": "#000000"},
-        "apps": {"repo/examples/jsText": {"sources": sources}},
+        "apps": {"jsText": {"source": "repo/apps/code/jsText", "sources": sources}},
     }
     frame = SimpleNamespace(interval=3600, debug=False, scenes=[])
 

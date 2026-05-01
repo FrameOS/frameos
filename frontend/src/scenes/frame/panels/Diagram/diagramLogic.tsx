@@ -47,9 +47,9 @@ import { Option } from '../../../../components/Select'
 import _events from '../../../../../schema/events.json'
 import {
   forkSceneAppKey,
+  installSceneAppForKeyword,
   mergeSceneAndCatalogApps,
   sceneAppToAppConfig,
-  sceneAppsWithKeyword,
   updateSceneAppsInScenes,
 } from '../../../../utils/sceneApps'
 
@@ -893,16 +893,17 @@ export const diagramLogic = kea<diagramLogicType>([
           console.error('App not found:', keyword)
           return
         }
-        const sceneApps = await sceneAppsWithKeyword(values.sceneApps, keyword, app)
+        const installed = await installSceneAppForKeyword(values.sceneApps, keyword, app)
+        const sceneApps = installed.sceneApps
         if (sceneApps !== values.sceneApps) {
           actions.setSceneApps(sceneApps, true)
-          app = sceneAppToAppConfig(sceneApps[keyword])
+          app = installed.app ?? app
         }
         const newNode: DiagramNode = {
           id: uuidv4(),
           type: 'app',
           position,
-          data: { keyword: keyword, config: {}, cache: { ...app.cache } } satisfies AppNodeData,
+          data: { keyword: installed.keyword, config: {}, cache: { ...app.cache } } satisfies AppNodeData,
         }
         actions.setNodes([...values.nodes, newNode])
       } else if (type === 'event') {

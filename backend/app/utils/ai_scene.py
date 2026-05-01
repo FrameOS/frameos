@@ -180,7 +180,13 @@ Follow these rules:
 - Every state node must include data.value as a string default (use "" unless the prompt specifies a different default).
 - Scene nodes embed other scenes; set data.keyword to the scene id.
 - App node data must include data.keyword (app identifier) and data.config (app configuration).
-- App keywords starting with "repo/" are repo app templates. Only use them when their sources are already provided in scene.apps; otherwise prefer built-in app keywords.
+- App keywords starting with "repo/apps/code/" are JavaScript code app templates. Use them when the user asks for a new custom
+  JavaScript logic/data app; their source files are loaded from the repo and can be edited after insertion.
+- When a repo app is copied into scene.apps, key it by the final path segment (for example
+  "repo/apps/code/jsText" becomes "jsText"; use "jsText-2", "jsText-3", etc. if needed) and keep the original
+  repo keyword in the scene app's source field. App nodes must then use that short scene app key in data.keyword.
+- Other app keywords starting with "repo/" are repo app templates. Only use them when their sources are already provided
+  in scene.apps; otherwise prefer built-in app keywords.
 - Data apps (e.g. "data/openaiText", "data/openaiImage") provide data via codeNodeEdge edges.
 - Use ONLY app keywords from the provided context. If none match, use "render/text" and a simple message.
 - Prefer minimal but valid configs; omit fields when not needed.

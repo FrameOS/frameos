@@ -135,6 +135,9 @@ declare const frameos: {
   log(...args: any[]): void;
   error(...args: any[]): void;
   setNextSleep(seconds: number): void;
+  fetchText(url: string): string;
+  fetchJson(url: string): any;
+  setState(key: string, value: FrameOSJson): void;
 };
 `
 }

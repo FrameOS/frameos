@@ -116,8 +116,8 @@ def test_get_interpreted_scenes_json_embeds_scene_app_sources():
         "id": "scene",
         "name": "Scene",
         "settings": {"execution": "interpreted"},
-        "apps": {"repo/examples/jsText": {"sources": sources}},
-        "nodes": [{"id": "node", "type": "app", "data": {"keyword": "repo/examples/jsText", "config": {}}}],
+        "apps": {"jsText": {"source": "repo/apps/code/jsText", "sources": sources}},
+        "nodes": [{"id": "node", "type": "app", "data": {"keyword": "jsText", "config": {}}}],
     }
 
     interpreted = get_interpreted_scenes_json(SimpleNamespace(scenes=[scene]))

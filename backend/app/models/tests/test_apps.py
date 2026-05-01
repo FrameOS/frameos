@@ -12,7 +12,11 @@ from app.models.apps import (
 async def test_get_app_configs():
     configs = get_app_configs()
     assert isinstance(configs, dict)
-    assert configs["repo/examples/jsText"]["source"] == "repo/examples/jsText"
+    assert configs["repo/apps/code/jsLogic"]["source"] == "repo/apps/code/jsLogic"
+    assert configs["repo/apps/code/jsText"]["source"] == "repo/apps/code/jsText"
+    assert "repo/apps/examples/jsText" not in configs
+    assert "repo/apps/code/jsNextSleep" not in configs
+    assert "repo/apps/code/jsNode" not in configs
 
 @pytest.mark.asyncio
 async def test_get_local_frame_apps():
@@ -27,7 +31,7 @@ async def test_get_one_app_sources():
 
 @pytest.mark.asyncio
 async def test_get_one_ts_app_sources():
-    sources = get_one_app_sources("repo/examples/jsText")
+    sources = get_one_app_sources("repo/apps/code/jsText")
     assert "app.ts" in sources
     assert "config.json" in sources
     assert "app.js" not in sources
@@ -65,15 +69,15 @@ async def test_get_apps_from_scenes():
 @pytest.mark.asyncio
 async def test_get_scene_apps_from_scenes():
     sources = {"config.json": '{"name":"Scene Nim"}', "app.nim": "nim code"}
-    scenes = [{"apps": {"repo/examples/nimText": {"sources": sources}}, "nodes": []}]
+    scenes = [{"apps": {"nimText": {"source": "repo/apps/examples/nimText", "sources": sources}}, "nodes": []}]
     apps = get_scene_apps_from_scenes(scenes)
-    assert apps[get_scene_app_id("repo/examples/nimText", sources)] == sources
+    assert apps[get_scene_app_id("nimText", sources)] == sources
 
 
 @pytest.mark.asyncio
 async def test_get_scene_apps_from_scenes_skips_js_sources():
     sources = {"config.json": '{"name":"Scene JS"}', "app.ts": "export function get(): string { return 'ok' }"}
-    scenes = [{"apps": {"repo/examples/jsText": {"sources": sources}}, "nodes": []}]
+    scenes = [{"apps": {"jsText": {"source": "repo/apps/code/jsText", "sources": sources}}, "nodes": []}]
     apps = get_scene_apps_from_scenes(scenes)
     assert apps == {}
 
@@ -83,12 +87,12 @@ async def test_get_scene_apps_from_scenes_keeps_same_keyword_sources_separate():
     first_sources = {"config.json": '{"name":"Scene Nim"}', "app.nim": "one"}
     second_sources = {"config.json": '{"name":"Scene Nim"}', "app.nim": "two"}
     scenes = [
-        {"apps": {"repo/examples/nimText": {"sources": first_sources}}, "nodes": []},
-        {"apps": {"repo/examples/nimText": {"sources": second_sources}}, "nodes": []},
+        {"apps": {"nimText": {"source": "repo/apps/examples/nimText", "sources": first_sources}}, "nodes": []},
+        {"apps": {"nimText": {"source": "repo/apps/examples/nimText", "sources": second_sources}}, "nodes": []},
     ]
 
     apps = get_scene_apps_from_scenes(scenes)
 
     assert len(apps) == 2
-    assert apps[get_scene_app_id("repo/examples/nimText", first_sources)] == first_sources
-    assert apps[get_scene_app_id("repo/examples/nimText", second_sources)] == second_sources
+    assert apps[get_scene_app_id("nimText", first_sources)] == first_sources
+    assert apps[get_scene_app_id("nimText", second_sources)] == second_sources

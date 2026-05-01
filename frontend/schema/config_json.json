@@ -58,7 +58,7 @@
           "type": "array"
         },
         "source": {
-          "description": "Original source for this app, such as repo/examples/jsText",
+          "description": "Original source for this app, such as repo/apps/code/jsText",
           "type": "string"
         },
         "version": {

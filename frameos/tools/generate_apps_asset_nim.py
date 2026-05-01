@@ -39,8 +39,8 @@ def get_app_configs(source_dir: Path) -> dict[str, dict]:
                 try:
                     config = json.loads(config_path.read_text())
                     if isinstance(config, dict) and "name" in config:
-                        keyword = f"repo/{folder_dir.name}/{app_dir.name}"
-                        configs[f"repo/{folder_dir.name}/{app_dir.name}"] = {
+                        keyword = f"repo/apps/{folder_dir.name}/{app_dir.name}"
+                        configs[keyword] = {
                             **config,
                             "source": keyword,
                         }

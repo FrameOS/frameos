@@ -31,7 +31,7 @@ suite "js app runtime":
     let config = testConfig()
     let logger = testLogger(config)
     let scene = FrameScene(id: "tests/js-app".SceneId, frameConfig: config, state: %*{}, logger: logger)
-    let owner = AppRoot(nodeId: 7.NodeId, nodeName: "repo/examples/jsText", scene: scene, frameConfig: config)
+    let owner = AppRoot(nodeId: 7.NodeId, nodeName: "jsText", scene: scene, frameConfig: config)
     let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
 
     let runtime = newJsAppRuntime(
@@ -61,11 +61,11 @@ suite "js app runtime":
     check imageValue.asImage().width == 3
     check imageValue.asImage().height == 2
 
-  test "run can set next sleep and draw a render image":
+  test "run can set next sleep, state, and draw a render image":
     let config = testConfig()
     let logger = testLogger(config)
     let scene = FrameScene(id: "tests/js-app-run".SceneId, frameConfig: config, state: %*{}, logger: logger)
-    let owner = AppRoot(nodeId: 8.NodeId, nodeName: "repo/examples/jsNextSleep", scene: scene, frameConfig: config)
+    let owner = AppRoot(nodeId: 8.NodeId, nodeName: "jsLogic", scene: scene, frameConfig: config)
     var image = newImage(4, 3)
     let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: true, image: image, loopIndex: 0, loopKey: ".", nextSleep: -1)
 
@@ -74,11 +74,13 @@ suite "js app runtime":
       outputType = "image",
       source = """export function run(app: { config: { duration: number } }) {
           frameos.setNextSleep(app.config.duration)
+          frameos.setState("lastDuration", app.config.duration)
           return <image width={4} height={3} color="#ff0000" />
         }"""
     )
 
     runtime.run(owner, %*{"duration": 12.5}, context)
     check abs(context.nextSleep - 12.5) < 0.0001
+    check scene.state["lastDuration"].getFloat() == 12.5
     let pixel = context.image.data[context.image.dataIndex(0, 0)]
     check pixel.r > 0

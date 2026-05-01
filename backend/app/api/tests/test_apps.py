@@ -16,8 +16,12 @@ async def test_api_apps(async_client):
     # Check for known apps (example: 'logic/ifElse' is from the sample code)
     assert 'logic/ifElse' in data['apps'], "Expected 'logic/ifElse' to be listed among apps"
     assert 'data/clock' in data['apps'], "Expected 'data/clock' to be listed among apps"
-    assert 'repo/examples/jsText' in data['apps'], "Expected 'repo/examples/jsText' to be listed among apps"
-    assert data['apps']['repo/examples/jsText']['source'] == 'repo/examples/jsText'
+    assert 'repo/apps/code/jsLogic' in data['apps'], "Expected 'repo/apps/code/jsLogic' to be listed among apps"
+    assert 'repo/apps/code/jsText' in data['apps'], "Expected 'repo/apps/code/jsText' to be listed among apps"
+    assert data['apps']['repo/apps/code/jsText']['source'] == 'repo/apps/code/jsText'
+    assert 'repo/apps/examples/jsText' not in data['apps'], "Expected JS templates to be moved out of repo/examples"
+    assert 'repo/apps/code/jsNextSleep' not in data['apps'], "Expected obsolete JS sleep example to be removed"
+    assert 'repo/apps/code/jsNode' not in data['apps'], "Expected obsolete JS node example to be removed"
 
 
 @pytest.mark.asyncio
@@ -36,7 +40,7 @@ async def test_api_apps_source(async_client):
 
 @pytest.mark.asyncio
 async def test_api_apps_source_for_ts_app(async_client):
-    response = await async_client.get('/api/apps/source?keyword=repo/examples/jsText')
+    response = await async_client.get('/api/apps/source?keyword=repo/apps/code/jsText')
     data = response.json()
     assert response.status_code == 200
     assert 'app.ts' in data

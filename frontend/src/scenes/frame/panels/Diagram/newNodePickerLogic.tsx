@@ -27,11 +27,18 @@ import Fuse from 'fuse.js'
 import { Edge } from 'reactflow'
 import { sceneStateLogic } from '../SceneState/sceneStateLogic'
 import _events from '../../../../../schema/events.json'
-import { appLabel, sceneAppToAppConfig, sceneAppsWithKeyword } from '../../../../utils/sceneApps'
+import {
+  appLabel,
+  installSceneAppForKeyword,
+  isJavaScriptCatalogApp,
+  javascriptCatalogAppKeywords,
+  javascriptCatalogAppLabel,
+} from '../../../../utils/sceneApps'
 
 export interface LocalFuse extends Fuse<OptionWithType> {}
 
 export const CANVAS_NODE_ID = '__canvas__'
+const INLINE_CODE_OPTION_LABEL = 'Code: new inline node'
 
 const events: FrameEvent[] = _events as any
 const dispatchableEvents: FrameEvent[] = events.filter((event) => event.canDispatch)
@@ -84,6 +91,30 @@ function getAppsForType(apps: Record<string, AppConfig>, returnType: string = 'i
     }
   }
   return imageApps
+}
+
+function isRunnableApp(app: AppConfig): boolean {
+  return app.category !== 'legacy' && (!app.output || app.output.length == 0 || app.category === 'render')
+}
+
+function addJavaScriptCatalogAppOptions(
+  options: OptionWithType[],
+  apps: Record<string, AppConfig>,
+  filter?: (app: AppConfig) => boolean,
+  optionKeyword?: string
+): void {
+  for (const keyword of javascriptCatalogAppKeywords) {
+    const app = apps[keyword]
+    if (!app || (filter && !filter(app))) {
+      continue
+    }
+    options.push({
+      label: javascriptCatalogAppLabel(keyword, app),
+      value: `app/${keyword}`,
+      type: toFieldType(app.output?.[0].type ?? 'string'),
+      keyword: optionKeyword ?? keyword,
+    })
+  }
 }
 
 function toBaseType(type: string | FieldType): FieldType {
@@ -260,7 +291,8 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
             type: 'string',
             keyword: 'clipboard',
           })
-          options.push({ label: 'Code node', value: 'code', type: 'string', keyword: 'code' })
+          options.push({ label: INLINE_CODE_OPTION_LABEL, value: 'code', type: 'string', keyword: 'code' })
+          addJavaScriptCatalogAppOptions(options, effectiveApps)
           for (const event of dispatchableEvents) {
             options.push({
               label: `dispatch: ${event.name}`,
@@ -278,7 +310,10 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
             })
           }
           for (const [keyword, app] of Object.entries(effectiveApps)) {
-            if (app.category !== 'legacy' && (!app.output || app.output.length == 0 || app.category === 'render')) {
+            if (isJavaScriptCatalogApp(keyword)) {
+              continue
+            }
+            if (isRunnableApp(app)) {
               options.push({
                 label: appLabel(app, app.category ?? 'app'),
                 value: `app/${keyword}`,
@@ -300,7 +335,12 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
         // Pulling out a field (e.g. "font size") to the left of an app to specify a custom input
         if (handleType === 'target' && (handleId.startsWith('fieldInput/') || handleId.startsWith('codeField/'))) {
           const key = handleId.split('/', 2)[1]
-          options.push({ label: 'Code', value: 'code', type: newNodeHandleDataType ?? 'string', keyword: key })
+          options.push({
+            label: INLINE_CODE_OPTION_LABEL,
+            value: 'code',
+            type: newNodeHandleDataType ?? 'string',
+            keyword: key,
+          })
           options.push({
             label: 'New state field',
             value: 'state',
@@ -309,7 +349,11 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
           })
           if (newNodeHandleDataType) {
             const appsForType = getAppsForType(effectiveApps, newNodeHandleDataType)
+            addJavaScriptCatalogAppOptions(options, appsForType, undefined, key)
             for (const [keyword, app] of Object.entries(appsForType)) {
+              if (isJavaScriptCatalogApp(keyword)) {
+                continue
+              }
               options.push({
                 label: appLabel(app, 'App'),
                 value: `app/${keyword}`,
@@ -336,7 +380,16 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
               })
             }
           } else if (handleId === 'codeField/+') {
+            addJavaScriptCatalogAppOptions(
+              options,
+              effectiveApps,
+              (app) => !!app.output && app.output.length > 0,
+              key
+            )
             for (const [keyword, app] of Object.entries(effectiveApps)) {
+              if (isJavaScriptCatalogApp(keyword)) {
+                continue
+              }
               if (app.output && app.output.length > 0) {
                 options.push({
                   label: appLabel(app, 'App'),
@@ -362,8 +415,12 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
           (handleType === 'source' && (handleId === 'next' || handleId.startsWith('field/'))) ||
           (handleType === 'target' && handleId === 'prev')
         ) {
+          addJavaScriptCatalogAppOptions(options, effectiveApps, isRunnableApp)
           for (const [keyword, app] of Object.entries(effectiveApps)) {
-            if (app.category !== 'legacy' && (!app.output || app.output.length == 0 || app.category === 'render')) {
+            if (isJavaScriptCatalogApp(keyword)) {
+              continue
+            }
+            if (isRunnableApp(app)) {
               options.push({
                 label: appLabel(app, app.category ?? 'app'),
                 value: `app/${keyword}`,
@@ -398,7 +455,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
             keyword = app.output?.[0].name || keyword
           }
           options.push({
-            label: 'Code',
+            label: INLINE_CODE_OPTION_LABEL,
             value: 'code',
             type: newNodeHandleDataType ?? 'string',
             keyword: keyword,
@@ -421,6 +478,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
       (allNewNodeOptions): OptionWithType[] => {
         const priority: Record<string, OptionWithType[]> = {
           special: [],
+          code: [],
           dispatch: [],
           render: [],
           logic: [],
@@ -428,11 +486,11 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
           other: [],
         }
         for (const option of allNewNodeOptions) {
-          if (option.label === 'Paste from clipboard' || option.label === 'Code node') {
+          if (option.label === 'Paste from clipboard' || option.value === 'code') {
             priority['special'].push(option)
             continue
           }
-          const type = option.label.split(':')[0]
+          const type = option.label.split(':')[0].toLowerCase()
           if (priority[type]) {
             priority[type].push(option)
           } else {
@@ -441,6 +499,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
         }
         return [
           ...priority['special'],
+          ...priority['code'],
           ...priority['render'],
           ...priority['logic'],
           ...priority['dispatch'],
@@ -524,18 +583,18 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
       }
 
       let currentSceneApps = values.sceneApps
-      const ensureAppInScene = async (appKeyword: string): Promise<AppConfig | null> => {
+      const ensureAppInScene = async (appKeyword: string): Promise<{ keyword: string; app: AppConfig } | null> => {
         let app = values.effectiveApps[appKeyword] ?? values.apps[appKeyword]
         if (!app) {
           return null
         }
-        const nextSceneApps = await sceneAppsWithKeyword(currentSceneApps, appKeyword, app)
+        const installed = await installSceneAppForKeyword(currentSceneApps, appKeyword, app)
+        const nextSceneApps = installed.sceneApps
         if (nextSceneApps !== currentSceneApps) {
           currentSceneApps = nextSceneApps
           actions.setSceneApps(nextSceneApps, true)
-          app = sceneAppToAppConfig(nextSceneApps[appKeyword])
         }
-        return app
+        return installed.app ? { keyword: installed.keyword, app: installed.app } : { keyword: appKeyword, app }
       }
 
       if (nodeId === CANVAS_NODE_ID) {
@@ -555,13 +614,14 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
           newNode.data = { keyword: eventKeyword, config: {} } satisfies DispatchNodeData
         } else if (value.startsWith('app/')) {
           const appKeyword = value.substring(4)
-          const app = await ensureAppInScene(appKeyword)
-          if (!app) {
+          const installed = await ensureAppInScene(appKeyword)
+          if (!installed) {
             actions.setSearchValue('')
             return
           }
+          const { keyword: installedKeyword, app } = installed
           newNode.type = 'app'
-          const appData: AppNodeData = { keyword: appKeyword, config: {} }
+          const appData: AppNodeData = { keyword: installedKeyword, config: {} }
           if (app?.cache) {
             appData.cache = { ...app.cache }
           }
@@ -687,12 +747,13 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
         }
       } else if (value.startsWith('app/')) {
         const appKeyword = value.substring(4)
-        const app = await ensureAppInScene(appKeyword)
-        if (!app) {
+        const installed = await ensureAppInScene(appKeyword)
+        if (!installed) {
           return
         }
+        const { keyword: installedKeyword, app } = installed
         newNode.type = 'app'
-        newNode.data = { keyword: appKeyword, config: {} }
+        newNode.data = { keyword: installedKeyword, config: {} }
         if (newNodeOutputHandle === 'prev') {
           newNode.position.x -= 20
           newNode.position.y -= 20

@@ -1,4 +1,5 @@
 import std/[base64, json, options, strformat, strutils, tables]
+import httpclient
 import pixie
 
 import frameos/apps as frameos_apps
@@ -68,6 +69,41 @@ proc jsSetNextSleep(ctx: ptr JSContext, seconds: JSValue): JSValue {.nimcall.} =
   if e != nil:
     e.context.nextSleep = toNimFloat(ctx, seconds)
   return jsUndefSentinel(ctx)
+
+proc jsSetState(ctx: ptr JSContext, key: JSValue, valueJson: JSValue): JSValue {.nimcall.} =
+  let e = env(ctx)
+  if e == nil:
+    return jsUndefSentinel(ctx)
+
+  let stateKey = toNimString(ctx, key)
+  if stateKey.len == 0:
+    return jsUndefSentinel(ctx)
+
+  let valueStr = toNimString(ctx, valueJson)
+  try:
+    if e.owner.scene.state.isNil:
+      e.owner.scene.state = %*{}
+    e.owner.scene.state[stateKey] = parseJson(valueStr)
+  except CatchableError:
+    e.owner.scene.state[stateKey] = %*valueStr
+
+  return jsUndefSentinel(ctx)
+
+proc jsFetchText(ctx: ptr JSContext, url: JSValue): JSValue {.nimcall.} =
+  let e = env(ctx)
+  let urlStr = toNimString(ctx, url)
+  if urlStr.len == 0:
+    return nimStringToJS(ctx, "")
+
+  let client = newHttpClient(timeout = 30000)
+  try:
+    return nimStringToJS(ctx, client.getContent(urlStr))
+  except CatchableError as err:
+    if e != nil:
+      frameos_apps.logError(e.owner, "JS app fetchText failed: " & err.msg)
+    return nimStringToJS(ctx, "")
+  finally:
+    client.close()
 
 proc newJsAppRuntime*(category: string, outputType: string, source: string): JsAppRuntime =
   return JsAppRuntime(
@@ -209,6 +245,8 @@ proc ensureReady(runtime: JsAppRuntime) =
   runtime.js = newQuickJS()
   runtime.js.registerFunction("jsAppLog", jsAppLog)
   runtime.js.registerFunction("jsSetNextSleep", jsSetNextSleep)
+  runtime.js.registerFunction("jsSetState", jsSetState)
+  runtime.js.registerFunction("jsFetchText", jsFetchText)
   discard runtime.js.eval("""
   "use strict";
   const __jsReplacer = (k, v) =>
@@ -222,6 +260,12 @@ proc ensureReady(runtime: JsAppRuntime) =
     log: (...args) => jsAppLog("log", JSON.stringify(args, __jsReplacer)),
     error: (...args) => jsAppLog("error", JSON.stringify(args, __jsReplacer)),
     setNextSleep: (seconds) => jsSetNextSleep(Number(seconds || 0)),
+    fetchText: (url) => jsFetchText(String(url || "")),
+    fetchJson: (url) => JSON.parse(jsFetchText(String(url || "")) || "null"),
+    setState: (key, value) => jsSetState(
+      String(key || ""),
+      JSON.stringify(value === undefined ? null : value, __jsReplacer)
+    ),
   };
   globalThis.__frameosModule = {};
   const exports = globalThis.__frameosModule;

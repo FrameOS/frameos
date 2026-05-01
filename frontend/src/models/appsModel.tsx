@@ -6,6 +6,7 @@ import { AppConfig } from '../types'
 import { apiFetch } from '../utils/apiFetch'
 
 export const categoryLabels: Record<string, any> = {
+  code: 'Code',
   render: 'Render',
   logic: 'Logic',
   data: 'Data',
