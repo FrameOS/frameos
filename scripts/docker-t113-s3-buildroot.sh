@@ -11,6 +11,7 @@ IMAGE_ARTIFACTS_DIR_HOST="${IMAGE_ARTIFACTS_DIR:-${ROOT_DIR}/build/frameos-t113-
 FRAMEOS_RUNTIME_ARTIFACTS_DIR_HOST="${FRAMEOS_RUNTIME_ARTIFACTS_DIR:-${ROOT_DIR}/build/frameos-t113-s3}"
 GENERATED_DIR_HOST="${GENERATED_DIR:-${ROOT_DIR}/build/frameos-t113-s3-c}"
 PACKAGE_DIR_HOST="${PACKAGE_DIR:-${IMAGE_ARTIFACTS_DIR_HOST}}"
+BR2_DL_DIR_HOST="${BR2_DL_DIR:-${BUILDROOT_DL_DIR:-}}"
 
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   cat <<EOF
@@ -33,6 +34,7 @@ Environment:
   FRAMEOS_RUNTIME_ARTIFACTS_DIR      Host runtime artifact directory
   GENERATED_DIR                      Host generated C source directory
   PACKAGE_DIR                        Host compressed image artifact directory
+  BR2_DL_DIR                         Optional host Buildroot download cache
   FRAMEOS_INSPECT_ARTIFACTS          Set to 1 to run inspect-t113-s3-build.sh
   FRAMEOS_PACKAGE_IMAGE              Set to 1 to run package-t113-s3-image.sh
 
@@ -133,6 +135,9 @@ IMAGE_ARTIFACTS_DIR_HOST="$(abs_dir "${IMAGE_ARTIFACTS_DIR_HOST}")"
 FRAMEOS_RUNTIME_ARTIFACTS_DIR_HOST="$(abs_dir "${FRAMEOS_RUNTIME_ARTIFACTS_DIR_HOST}")"
 GENERATED_DIR_HOST="$(abs_dir "${GENERATED_DIR_HOST}")"
 PACKAGE_DIR_HOST="$(abs_dir "${PACKAGE_DIR_HOST}")"
+if [[ -n "${BR2_DL_DIR_HOST}" ]]; then
+  BR2_DL_DIR_HOST="$(abs_dir "${BR2_DL_DIR_HOST}")"
+fi
 
 BUILDROOT_DIR_CONTAINER="$(container_dir_for "${BUILDROOT_DIR_HOST}" "buildroot")"
 OUTPUT_DIR_CONTAINER="$(container_dir_for "${OUTPUT_DIR_HOST}" "output")"
@@ -140,6 +145,10 @@ IMAGE_ARTIFACTS_DIR_CONTAINER="$(container_dir_for "${IMAGE_ARTIFACTS_DIR_HOST}"
 FRAMEOS_RUNTIME_ARTIFACTS_DIR_CONTAINER="$(container_dir_for "${FRAMEOS_RUNTIME_ARTIFACTS_DIR_HOST}" "runtime-artifacts")"
 GENERATED_DIR_CONTAINER="$(container_dir_for "${GENERATED_DIR_HOST}" "generated")"
 PACKAGE_DIR_CONTAINER="$(container_dir_for "${PACKAGE_DIR_HOST}" "package")"
+BR2_DL_DIR_CONTAINER=""
+if [[ -n "${BR2_DL_DIR_HOST}" ]]; then
+  BR2_DL_DIR_CONTAINER="$(container_dir_for "${BR2_DL_DIR_HOST}" "buildroot-dl")"
+fi
 
 FRAMEOS_RUNTIME_BINARY_CONTAINER=""
 if [[ -n "${FRAMEOS_RUNTIME_BINARY:-}" ]]; then
@@ -188,6 +197,9 @@ container_env=(
   -e "FORCE_UNSAFE_CONFIGURE=${FORCE_UNSAFE_CONFIGURE:-1}"
 )
 
+if [[ -n "${BR2_DL_DIR_CONTAINER}" ]]; then
+  container_env+=(-e "BR2_DL_DIR=${BR2_DL_DIR_CONTAINER}")
+fi
 if [[ -n "${FRAMEOS_RUNTIME_BINARY_CONTAINER}" ]]; then
   container_env+=(-e "FRAMEOS_RUNTIME_BINARY=${FRAMEOS_RUNTIME_BINARY_CONTAINER}")
 fi
@@ -231,7 +243,11 @@ docker run --rm \
 
     cleanup() {
       status=$?
-      for path in "$BUILDROOT_DIR" "$OUTPUT_DIR" "$IMAGE_ARTIFACTS_DIR" "$FRAMEOS_RUNTIME_ARTIFACTS_DIR" "$GENERATED_DIR" "$PACKAGE_DIR"; do
+      cleanup_paths=("$BUILDROOT_DIR" "$OUTPUT_DIR" "$IMAGE_ARTIFACTS_DIR" "$FRAMEOS_RUNTIME_ARTIFACTS_DIR" "$GENERATED_DIR" "$PACKAGE_DIR")
+      if [ -n "${BR2_DL_DIR:-}" ]; then
+        cleanup_paths+=("$BR2_DL_DIR")
+      fi
+      for path in "${cleanup_paths[@]}"; do
         if [ -e "$path" ]; then
           chown -R "$HOST_UID:$HOST_GID" "$path" 2>/dev/null || true
         fi

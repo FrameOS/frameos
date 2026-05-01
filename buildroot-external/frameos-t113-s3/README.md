@@ -121,14 +121,17 @@ The lower-level scripts still work on a Linux host with all Buildroot
 dependencies installed, but they are intended mainly for debugging inside the
 container. Use `FRAMEOS_T113_S3_DOCKER_BUILD=0` to reuse an existing local
 Docker image, or `FRAMEOS_T113_S3_DOCKER_PLATFORM=linux/amd64` to force a
-specific Docker platform.
+specific Docker platform. Set `BR2_DL_DIR=/path/to/buildroot-dl` to keep
+Buildroot source downloads in a reusable host cache mounted into the container.
 
 ## Downloadable Images
 
 The manual GitHub Actions workflow `T113-S3 Buildroot SD image` builds the same
 Dockerized path and uploads the compressed SD card image, checksum, manifest,
 and metadata as an Actions artifact. It exposes inputs for `wifi_variant`,
-`buildroot_ref`, `artifact_name`, and artifact retention.
+`buildroot_ref`, `artifact_name`, and artifact retention. The workflow caches
+Buildroot downloads between runs; the compiler output and final image are still
+rebuilt from the selected Buildroot ref and FrameOS commit.
 
 For first bring-up, use `wifi_variant=none` unless the target Wi-Fi module has
 already been validated. Download the `*.img.xz` artifact, verify it with the

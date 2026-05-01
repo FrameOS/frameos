@@ -122,6 +122,11 @@ EOF
 }
 
 frameos_t113_s3_make() {
+  local make_args=()
+  if [[ -n "${BR2_DL_DIR:-}" ]]; then
+    make_args+=("BR2_DL_DIR=${BR2_DL_DIR}")
+  fi
+
   env \
     -u PYTHONPATH \
     -u PYTHONHOME \
@@ -130,7 +135,7 @@ frameos_t113_s3_make() {
     -u PYTHONEXECUTABLE \
     -u _PYTHON_SYSCONFIGDATA_NAME \
     PYTHONNOUSERSITE=1 \
-    make "$@"
+    make "${make_args[@]}" "$@"
 }
 
 frameos_t113_s3_collect_config_fragments() {

@@ -276,3 +276,8 @@ custom board variants. The first deliverable is a host-side system that can:
 - Added the T113-S3 smoke script to the pull request workflow as a lightweight
   CI job, so shell-wrapper and rootfs-overlay regressions are caught without
   running a full Buildroot image build.
+- Added optional `BR2_DL_DIR` support to the Dockerized Buildroot wrapper and
+  configured the manual SD-card image workflow to cache Buildroot source
+  downloads between runs. This does not cache compiler output, but it avoids
+  re-downloading Linux, U-Boot, toolchain, and package tarballs for every
+  artifact build.
