@@ -144,3 +144,9 @@ custom board variants. The first deliverable is a host-side system that can:
   `<crypt.h>`. The T113-S3 Buildroot helpers now prefer `/usr/bin/gcc` and
   `/usr/bin/g++` when available, and they compile a small libcrypt probe before
   starting a long build so this failure is caught immediately.
+- Reusing the earlier failed output directory later exposed a stale toolchain
+  tuple problem: the directory still had `arm-buildroot-linux-uclibcgnueabihf`
+  host compiler files from the pre-glibc configuration, while the current
+  defconfig expects `arm-buildroot-linux-gnueabihf`. The image wrapper now
+  detects this mismatch and asks for a fresh `OUTPUT_DIR` after C library or
+  tuple changes.

@@ -27,6 +27,7 @@ frameos_t113_s3_assert_host_compilers
 if [[ "${FRAMEOS_RECONFIGURE:-1}" == "1" || ! -f "${OUTPUT_DIR}/.config" ]]; then
   frameos_t113_s3_configure_buildroot "${BUILDROOT_DIR}" "${OUTPUT_DIR}" "${EXTERNAL_DIR}" "${DEFCONFIG}"
 fi
+frameos_t113_s3_assert_output_toolchain_tuple "${OUTPUT_DIR}"
 
 if [[ -z "${FRAMEOS_RUNTIME_BINARY:-}" && "${FRAMEOS_BUILD_RUNTIME}" == "1" ]]; then
   FRAMEOS_RUNTIME_ARTIFACTS_DIR="${FRAMEOS_RUNTIME_ARTIFACTS_DIR:-${ROOT_DIR}/build/frameos-t113-s3}"

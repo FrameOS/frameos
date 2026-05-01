@@ -75,6 +75,52 @@ EOF
   rm -f "${test_bin}"
 }
 
+frameos_t113_s3_assert_output_toolchain_tuple() {
+  local output_dir="$1"
+  local config_file="${output_dir}/.config"
+  local libc
+  local expected_tuple
+  local stale_gcc
+
+  if [[ ! -f "${config_file}" || ! -d "${output_dir}/host/bin" ]]; then
+    return 0
+  fi
+
+  libc="$(sed -n 's/^BR2_TOOLCHAIN_BUILDROOT_LIBC="\(.*\)"/\1/p' "${config_file}")"
+  case "${libc}" in
+    glibc)
+      expected_tuple="arm-buildroot-linux-gnueabihf"
+      ;;
+    uclibc)
+      expected_tuple="arm-buildroot-linux-uclibcgnueabihf"
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+
+  if [[ -e "${output_dir}/host/bin/${expected_tuple}-gcc" ]]; then
+    return 0
+  fi
+
+  stale_gcc="$(find "${output_dir}/host/bin" -maxdepth 1 \
+    -name 'arm-buildroot-linux-*-gcc' \
+    ! -name "${expected_tuple}-gcc" \
+    -print -quit)"
+  if [[ -n "${stale_gcc}" ]]; then
+    cat >&2 <<EOF
+Buildroot output directory has a stale target compiler:
+  ${stale_gcc}
+
+Current .config expects:
+  ${expected_tuple}-gcc
+
+Use a fresh OUTPUT_DIR after changing the Buildroot C library/toolchain tuple.
+EOF
+    return 1
+  fi
+}
+
 frameos_t113_s3_collect_config_fragments() {
   local external_dir="$1"
   local wifi_variant="${FRAMEOS_WIFI_VARIANT:-rtl8723ds}"
