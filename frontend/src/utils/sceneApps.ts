@@ -1,13 +1,9 @@
 import { AppConfig, FrameScene, SceneApp } from '../types'
 import { apiFetch } from './apiFetch'
+import { embeddedRepoAppConfigs, embeddedRepoAppSources } from '../generated/repoApps'
 
 export const javascriptAppSourceFiles = ['app.ts', 'app.js', 'app.tsx', 'app.jsx']
-export const javascriptCatalogAppKeywords = [
-  'repo/apps/code/jsLogic',
-  'repo/apps/code/jsText',
-  'repo/apps/code/jsImage',
-  'repo/apps/code/jsSvg',
-]
+export const javascriptCatalogAppKeywords = Object.keys(embeddedRepoAppConfigs)
 
 const javascriptCatalogAppLabels: Record<string, string> = {
   'repo/apps/code/jsLogic': 'code: new logic app (JS)',
@@ -99,8 +95,21 @@ export function appLabel(app: AppConfig, prefix?: string): string {
   return `${prefix ? `${prefix}: ` : ''}${app.name}${tag ? ` [${tag}]` : ''}`
 }
 
+export function embeddedRepoAppSourceFiles(keyword: string): Record<string, string> | null {
+  const sources = embeddedRepoAppSources[keyword]
+  return sources ? { ...sources } : null
+}
+
 export async function loadAppSources(keyword: string): Promise<Record<string, string>> {
+  const embeddedSources = embeddedRepoAppSourceFiles(keyword)
+  if (embeddedSources) {
+    return embeddedSources
+  }
+
   const response = await apiFetch(`/api/apps/source?keyword=${encodeURIComponent(keyword)}`)
+  if (!response.ok) {
+    return {}
+  }
   return await response.json()
 }
 

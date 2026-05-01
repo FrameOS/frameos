@@ -12,11 +12,10 @@ from app.models.apps import (
 async def test_get_app_configs():
     configs = get_app_configs()
     assert isinstance(configs, dict)
-    assert configs["repo/apps/code/jsLogic"]["source"] == "repo/apps/code/jsLogic"
-    assert configs["repo/apps/code/jsText"]["source"] == "repo/apps/code/jsText"
-    assert "repo/apps/examples/jsText" not in configs
-    assert "repo/apps/code/jsNextSleep" not in configs
-    assert "repo/apps/code/jsNode" not in configs
+    assert "logic/ifElse" in configs
+    assert "data/clock" in configs
+    assert "repo/apps/code/jsLogic" not in configs
+    assert "repo/apps/code/jsText" not in configs
 
 @pytest.mark.asyncio
 async def test_get_local_frame_apps():
@@ -30,13 +29,9 @@ async def test_get_one_app_sources():
     assert "config.json" in sources
 
 @pytest.mark.asyncio
-async def test_get_one_ts_app_sources():
+async def test_get_one_app_sources_excludes_frontend_js_templates():
     sources = get_one_app_sources("repo/apps/code/jsText")
-    assert "app.ts" in sources
-    assert "config.json" in sources
-    assert "app.js" not in sources
-    assert "app.nim" not in sources
-    assert "app_loader.nim" not in sources
+    assert sources == {}
 
 @pytest.mark.asyncio
 async def test_get_apps_from_scenes():

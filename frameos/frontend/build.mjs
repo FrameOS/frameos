@@ -19,6 +19,8 @@ const outputDir = path.resolve(__dirname, '../assets/compiled/frame_web')
 const staticDir = path.join(outputDir, 'static')
 const vendorOutputDir = path.resolve(__dirname, '../assets/compiled/vendor')
 
+await import('../../frontend/scripts/generateRepoApps.mjs')
+
 await fs.rm(outputDir, { recursive: true, force: true })
 await fs.mkdir(staticDir, { recursive: true })
 await fs.rm(vendorOutputDir, { recursive: true, force: true })

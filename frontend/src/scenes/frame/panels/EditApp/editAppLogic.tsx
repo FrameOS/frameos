@@ -16,6 +16,7 @@ import {
   hasCompiledAppSource,
   hasJavaScriptAppSource,
   javascriptAppSourceFiles,
+  loadAppSources,
   sceneAppToAppConfig,
 } from '../../../../utils/sceneApps'
 
@@ -109,8 +110,7 @@ export const editAppLogic = kea<editAppLogicType>([
           if (values.savedSources) {
             sources = values.savedSources
           } else if (values.savedKeyword) {
-            const response = await apiFetch(`/api/apps/source?keyword=${encodeURIComponent(values.savedKeyword)}`)
-            sources = await response.json()
+            sources = await loadAppSources(values.savedKeyword)
           }
           if (sources['app_loader.nim'] !== undefined) {
             const { ['app_loader.nim']: _ignored, ...filteredSources } = sources

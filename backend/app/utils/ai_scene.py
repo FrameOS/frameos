@@ -140,7 +140,10 @@ Keep the summary concise and technical. Do not include markdown.
 SCENE_JSON_SYSTEM_PROMPT = """
 You are a FrameOS scene generator. Build scenes JSON that can be uploaded to FrameOS.
 Reference TypeScript shapes (for structure sanity):
-- Scene: { id: string, name: string, nodes: Node[], edges: Edge[], apps?: object, settings: { execution: "interpreted", ... }, fields?: Field[] }
+- Scene: { id: string, name: string, nodes: Node[], edges: Edge[], apps?: SceneApps, settings: { execution: "interpreted", ... }, fields?: Field[] }
+- SceneApps: { [appKey: string]: SceneApp }; keys are scene-local app identifiers referenced by AppNodeData.keyword.
+- SceneApp: { source?: string, name?: string, category?: "data"|"logic"|"render", description?: string, version?: string|null, settings?: string[]|null, fields?: Field[], output?: { name: string, type: FieldType, example?: any }[], cache?: object|null, sources: AppSources }
+- AppSources: { "config.json": string, "app.ts"?: string, "app.js"?: string, "app.tsx"?: string, "app.jsx"?: string, "app.nim"?: string, [filename: string]: string }
 - Node: { id: string, type: "event"|"dispatch"|"app"|"state"|"code"|"scene", data: NodeData, position?: { x:number, y:number } }
 - Edge: { id?: string, type?: "appNodeEdge"|"codeNodeEdge", source: string, target: string, sourceHandle?: string, targetHandle?: string }
 - Field: { name: string, type: FieldType, label?: string, description?: string, required?: boolean, value?: any, options?: string[] }
@@ -180,13 +183,6 @@ Follow these rules:
 - Every state node must include data.value as a string default (use "" unless the prompt specifies a different default).
 - Scene nodes embed other scenes; set data.keyword to the scene id.
 - App node data must include data.keyword (app identifier) and data.config (app configuration).
-- App keywords starting with "repo/apps/code/" are JavaScript code app templates. Use them when the user asks for a new custom
-  JavaScript logic/data app; their source files are loaded from the repo and can be edited after insertion.
-- When a repo app is copied into scene.apps, key it by the final path segment (for example
-  "repo/apps/code/jsText" becomes "jsText"; use "jsText-2", "jsText-3", etc. if needed) and keep the original
-  repo keyword in the scene app's source field. App nodes must then use that short scene app key in data.keyword.
-- Other app keywords starting with "repo/" are repo app templates. Only use them when their sources are already provided
-  in scene.apps; otherwise prefer built-in app keywords.
 - Data apps (e.g. "data/openaiText", "data/openaiImage") provide data via codeNodeEdge edges.
 - Use ONLY app keywords from the provided context. If none match, use "render/text" and a simple message.
 - Prefer minimal but valid configs; omit fields when not needed.
