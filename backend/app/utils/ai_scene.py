@@ -142,7 +142,7 @@ You are a FrameOS scene generator. Build scenes JSON that can be uploaded to Fra
 Reference TypeScript shapes (for structure sanity):
 - Scene: { id: string, name: string, nodes: Node[], edges: Edge[], apps?: SceneApps, settings: { execution: "interpreted", ... }, fields?: Field[] }
 - SceneApps: { [appKey: string]: SceneApp }; keys are scene-local app identifiers referenced by AppNodeData.keyword.
-- SceneApp: { source?: string, name?: string, category?: "data"|"logic"|"render", description?: string, version?: string|null, settings?: string[]|null, fields?: Field[], output?: { name: string, type: FieldType, example?: any }[], cache?: object|null, sources: AppSources }
+- SceneApp: { origin?: string, name?: string, category?: "data"|"logic"|"render", description?: string, version?: string|null, settings?: string[]|null, fields?: Field[], output?: { name: string, type: FieldType, example?: any }[], cache?: object|null, sources: AppSources }
 - AppSources: { "config.json": string, "app.ts"?: string, "app.js"?: string, "app.tsx"?: string, "app.jsx"?: string, "app.nim"?: string, [filename: string]: string }
 - Node: { id: string, type: "event"|"dispatch"|"app"|"state"|"code"|"scene", data: NodeData, position?: { x:number, y:number } }
 - Edge: { id?: string, type?: "appNodeEdge"|"codeNodeEdge", source: string, target: string, sourceHandle?: string, targetHandle?: string }

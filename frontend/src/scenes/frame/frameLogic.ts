@@ -13,6 +13,7 @@ import { entityImagesModel } from '../../models/entityImagesModel'
 import { arrangeNodes } from '../../utils/arrangeNodes'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
 import { secureToken } from '../../utils/secureToken'
+import { normalizeSceneApps } from '../../utils/sceneApps'
 import {
   type ChangeDetail,
   CURRENT_FRAMEOS_VERSION,
@@ -202,12 +203,12 @@ function getRecompileFields(mode: FrameType['mode']): (keyof FrameType)[] {
 export function normalizeSceneForComparison(
   scene: Partial<FrameScene> | null | undefined
 ): Partial<FrameScene> | null | undefined {
-  if (!scene || scene.apps) {
+  if (!scene) {
     return scene
   }
   return {
     ...scene,
-    apps: {},
+    apps: normalizeSceneApps(scene.apps),
   }
 }
 
@@ -598,7 +599,7 @@ export function sanitizeScene(scene: Partial<FrameScene>, frame: Partial<FrameTy
     name: scene.name || 'Untitled scene',
     nodes: shouldArrange ? arrangeNodes(normalizedNodes, edges) : normalizedNodes,
     edges,
-    apps: scene.apps ?? {},
+    apps: normalizeSceneApps(scene.apps),
     fields: scene.fields ?? [],
     settings: {
       ...settings,

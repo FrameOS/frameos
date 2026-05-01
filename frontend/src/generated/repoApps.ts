@@ -38,7 +38,7 @@ export const embeddedRepoAppConfigs: Record<string, AppConfig> = {
         "type": "image"
       }
     ],
-    "source": "repo/apps/code/jsImage"
+    "origin": "repo/apps/code/jsImage"
   },
   "repo/apps/code/jsLogic": {
     "name": "New logic app (JS)",
@@ -52,7 +52,7 @@ export const embeddedRepoAppConfigs: Record<string, AppConfig> = {
         "value": "jsLogicResult"
       }
     ],
-    "source": "repo/apps/code/jsLogic"
+    "origin": "repo/apps/code/jsLogic"
   },
   "repo/apps/code/jsSvg": {
     "name": "New SVG data app (JS)",
@@ -85,7 +85,7 @@ export const embeddedRepoAppConfigs: Record<string, AppConfig> = {
         "example": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 320 120\">...</svg>"
       }
     ],
-    "source": "repo/apps/code/jsSvg"
+    "origin": "repo/apps/code/jsSvg"
   },
   "repo/apps/code/jsText": {
     "name": "New text data app (JS)",
@@ -112,7 +112,7 @@ export const embeddedRepoAppConfigs: Record<string, AppConfig> = {
         "example": "FrameOS: Hello from QuickJS"
       }
     ],
-    "source": "repo/apps/code/jsText"
+    "origin": "repo/apps/code/jsText"
   }
 }
 

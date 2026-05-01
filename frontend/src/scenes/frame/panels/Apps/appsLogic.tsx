@@ -6,7 +6,7 @@ import { searchInText } from '../../../../utils/searchInText'
 import { AppConfig, AppNodeData, SceneApp } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
 import { panelsLogic } from '../panelsLogic'
-import { isJavaScriptCatalogApp, sceneAppsToAppConfigs } from '../../../../utils/sceneApps'
+import { isJavaScriptCatalogApp, normalizeSceneApps, sceneAppsToAppConfigs } from '../../../../utils/sceneApps'
 
 export const INLINE_CODE_NODE_KEYWORD = '__frameos_inline_code_node__'
 
@@ -88,7 +88,7 @@ export const appsLogic = kea<appsLogicType>([
       (s) => [s.frameForm, s.selectedSceneId],
       (frameForm, selectedSceneId): Record<string, SceneApp> => {
         const selectedScene = frameForm?.scenes?.find((scene) => scene.id === selectedSceneId)
-        return selectedScene?.apps ?? {}
+        return normalizeSceneApps(selectedScene?.apps)
       },
     ],
     sceneAppUsageCounts: [

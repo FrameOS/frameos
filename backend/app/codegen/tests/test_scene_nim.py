@@ -28,7 +28,7 @@ def test_app_output_field_input_is_coerced_to_target_field_type():
         "settings": {"execution": "compiled", "refreshInterval": 3600, "backgroundColor": "#000000"},
         "apps": {
             "jsText": {
-                "source": "repo/apps/code/jsText",
+                "origin": "repo/apps/code/jsText",
                 "sources": {
                     "config.json": """
 {
@@ -81,7 +81,7 @@ def test_scene_js_app_uses_runtime_directly():
         "edges": [],
         "fields": [],
         "settings": {"execution": "compiled", "refreshInterval": 3600, "backgroundColor": "#000000"},
-        "apps": {"jsText": {"source": "repo/apps/code/jsText", "sources": sources}},
+        "apps": {"jsText": {"origin": "repo/apps/code/jsText", "sources": sources}},
     }
     frame = SimpleNamespace(interval=3600, debug=False, scenes=[])
 

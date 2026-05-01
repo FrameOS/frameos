@@ -49,7 +49,9 @@ import {
   forkSceneAppKey,
   installSceneAppForKeyword,
   mergeSceneAndCatalogApps,
+  normalizeSceneApps,
   sceneAppToAppConfig,
+  sceneAppWithOrigin,
   updateSceneAppsInScenes,
 } from '../../../../utils/sceneApps'
 
@@ -253,7 +255,7 @@ const collectSceneAppsForNodes = (
   for (const node of nodes) {
     const keyword = getNodeAppKeyword(node)
     if (keyword && sceneApps[keyword]) {
-      apps[keyword] = sceneApps[keyword]
+      apps[keyword] = sceneAppWithOrigin(sceneApps[keyword], keyword)
     }
   }
   return apps
@@ -309,7 +311,7 @@ const mergePastedSceneApps = (
       continue
     }
 
-    const pastedApp = pastedApps[keyword]
+    const pastedApp = sceneAppWithOrigin(pastedApps[keyword], keyword)
     if (!nextSceneApps[keyword]) {
       nextSceneApps[keyword] = pastedApp
       keywordMap.set(keyword, keyword)
@@ -324,7 +326,6 @@ const mergePastedSceneApps = (
     const newKeyword = forkSceneAppKey(nextSceneApps, keyword, sceneAppToAppConfig(pastedApp))
     nextSceneApps[newKeyword] = {
       ...pastedApp,
-      source: pastedApp.source || keyword,
     }
     keywordMap.set(keyword, newKeyword)
   }
@@ -513,7 +514,7 @@ export const diagramLogic = kea<diagramLogicType>([
       (editingFrame, sceneId) => (editingFrame.scenes ?? []).find((s) => s.id === sceneId) || null,
     ],
     sceneName: [(s) => [s.scene], (scene) => scene?.name || (scene?.id ? `Scene: ${scene.id}` : 'Untitled scene')],
-    sceneApps: [(s) => [s.scene], (scene): Record<string, SceneApp> => scene?.apps ?? {}],
+    sceneApps: [(s) => [s.scene], (scene): Record<string, SceneApp> => normalizeSceneApps(scene?.apps)],
     effectiveApps: [
       (s) => [s.apps, s.scene],
       (apps, scene): Record<string, AppConfig> => mergeSceneAndCatalogApps(apps, scene),
@@ -668,7 +669,7 @@ export const diagramLogic = kea<diagramLogicType>([
             }
             const sceneNodes = nodes.map((n) => (n.selected ? { ...n, selected: false } : n))
             const nodesChanged = !equal(scene.nodes, nodes)
-            const sceneAppsChanged = !equal(scene.apps ?? {}, sceneApps)
+            const sceneAppsChanged = !equal(normalizeSceneApps(scene.apps), sceneApps)
             return nodesChanged || sceneAppsChanged
               ? ({
                   ...scene,
@@ -713,7 +714,7 @@ export const diagramLogic = kea<diagramLogicType>([
         }
       }
       if (scene && scene.id !== oldScene?.id) {
-        actions.resetHistory(makeHistorySnapshot(scene.nodes ?? [], scene.edges ?? [], scene.apps ?? {}))
+        actions.resetHistory(makeHistorySnapshot(scene.nodes ?? [], scene.edges ?? [], normalizeSceneApps(scene.apps)))
       }
     },
   })),
@@ -862,7 +863,8 @@ export const diagramLogic = kea<diagramLogicType>([
       const app = values.effectiveApps[keyword] ?? sceneAppToAppConfig(sceneApp)
       const newKeyword = forkSceneAppKey(values.sceneApps, keyword, app)
       const forkName = app.name ? `${app.name} copy` : sceneApp.name
-      const sources = { ...sceneApp.sources }
+      const sceneAppWithCurrentOrigin = sceneAppWithOrigin(sceneApp, keyword)
+      const sources = { ...sceneAppWithCurrentOrigin.sources }
       if (forkName && sources['config.json']) {
         try {
           sources['config.json'] = JSON.stringify({ ...JSON.parse(sources['config.json']), name: forkName }, null, 2)
@@ -873,9 +875,8 @@ export const diagramLogic = kea<diagramLogicType>([
       const newApps = {
         ...values.sceneApps,
         [newKeyword]: {
-          ...sceneApp,
+          ...sceneAppWithCurrentOrigin,
           sources,
-          source: sceneApp.source || keyword,
           name: forkName,
         },
       }

@@ -57,7 +57,7 @@ async function buildEmbeddedRepoApps() {
     const hasJavaScriptSource = files.some((file) => sourceFiles.includes(file))
     const keyword = `repo/apps/code/${appName}`
 
-    configs[keyword] = { ...config, source: keyword }
+    configs[keyword] = { ...config, origin: keyword }
     sources[keyword] = {}
 
     for (const file of files) {

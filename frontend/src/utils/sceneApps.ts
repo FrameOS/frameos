@@ -44,10 +44,31 @@ export function parseAppConfigFromSources(sources?: Record<string, string> | nul
   }
 }
 
+type LegacyAppOrigin = { source?: string }
+
+export function appOrigin(app?: (Partial<Pick<AppConfig, 'origin'>> & LegacyAppOrigin) | null): string | undefined {
+  return app?.origin ?? app?.source
+}
+
+export function sceneAppWithOrigin(sceneApp: SceneApp, fallbackOrigin?: string): SceneApp {
+  const { source: _legacySource, ...sceneAppWithoutLegacySource } = sceneApp as SceneApp & LegacyAppOrigin
+  return {
+    ...sceneAppWithoutLegacySource,
+    origin: appOrigin(sceneApp) || fallbackOrigin,
+  }
+}
+
+export function normalizeSceneApps(sceneApps?: Record<string, SceneApp> | null): Record<string, SceneApp> {
+  return Object.fromEntries(
+    Object.entries(sceneApps ?? {}).map(([keyword, sceneApp]) => [keyword, sceneAppWithOrigin(sceneApp, keyword)])
+  )
+}
+
 export function sceneAppToAppConfig(sceneApp: SceneApp): AppConfig {
   const sourceConfig = parseAppConfigFromSources(sceneApp.sources)
+  const origin = appOrigin(sceneApp)
   return {
-    name: sceneApp.name || sourceConfig.name || sceneApp.source || 'Scene app',
+    name: sceneApp.name || sourceConfig.name || origin || 'Scene app',
     category: sceneApp.category || sourceConfig.category,
     description: sceneApp.description || sourceConfig.description,
     version: sceneApp.version || sourceConfig.version,
@@ -56,13 +77,16 @@ export function sceneAppToAppConfig(sceneApp: SceneApp): AppConfig {
     fields: sceneApp.fields || sourceConfig.fields,
     output: sceneApp.output || sourceConfig.output,
     cache: sceneApp.cache || sourceConfig.cache,
-    source: sceneApp.source,
+    origin,
   }
 }
 
 export function sceneAppsToAppConfigs(scene?: FrameScene | null): Record<string, AppConfig> {
   return Object.fromEntries(
-    Object.entries(scene?.apps ?? {}).map(([keyword, sceneApp]) => [keyword, sceneAppToAppConfig(sceneApp)])
+    Object.entries(normalizeSceneApps(scene?.apps)).map(([keyword, sceneApp]) => [
+      keyword,
+      sceneAppToAppConfig(sceneApp),
+    ])
   )
 }
 
@@ -73,11 +97,12 @@ export function mergeSceneAndCatalogApps(
   return { ...apps, ...sceneAppsToAppConfigs(scene) }
 }
 
-export function appTag(app?: Pick<AppConfig, 'source'> | null): string | null {
-  if (!app?.source) {
+export function appTag(app?: (Pick<AppConfig, 'origin'> & LegacyAppOrigin) | null): string | null {
+  const origin = appOrigin(app)
+  if (!origin) {
     return null
   }
-  const parts = app.source.split('/')
+  const parts = origin.split('/')
   if (parts[0] === 'repo' && parts[1] === 'apps' && parts[2]) {
     return parts[2]
   }
@@ -144,10 +169,12 @@ export function buildSceneApp(
   previous?: Partial<SceneApp>
 ): SceneApp {
   const sourceConfig = parseAppConfigFromSources(sources)
-  const source = previous?.source || app?.source || (isRepoAppKeyword(keyword) ? keyword : undefined)
+  const origin = appOrigin(previous) || appOrigin(app) || (isRepoAppKeyword(keyword) ? keyword : undefined)
+  const { source: _legacySource, ...previousWithoutLegacySource } = (previous ?? {}) as Partial<SceneApp> &
+    LegacyAppOrigin
   return {
-    ...previous,
-    source,
+    ...previousWithoutLegacySource,
+    origin,
     name: sourceConfig.name || previous?.name || app?.name || keyword,
     category: sourceConfig.category || previous?.category || app?.category,
     description: sourceConfig.description || previous?.description || app?.description,
@@ -181,7 +208,7 @@ export async function installSceneAppForKeyword(
   }
   const sources = await loadAppSources(keyword)
   const sceneKeyword = nextSceneAppKey(sceneApps, keyword, app)
-  const sceneApp = buildSceneApp(sceneKeyword, app, sources, { source: app?.source || keyword })
+  const sceneApp = buildSceneApp(sceneKeyword, app, sources, { origin: appOrigin(app) || keyword })
   return {
     sceneApps: {
       ...sceneApps,
@@ -207,12 +234,14 @@ export function updateSceneAppsInScenes(
   forceCompiled = false,
   nodes?: FrameScene['nodes']
 ): FrameScene[] | undefined {
-  const needsCompiled = forceCompiled && Object.values(apps).some((app) => hasCompiledAppSource(app.sources))
+  const normalizedApps = normalizeSceneApps(apps)
+  const needsCompiled =
+    forceCompiled && Object.values(normalizedApps).some((app) => hasCompiledAppSource(app.sources))
   return scenes?.map((scene) =>
     scene.id === sceneId
       ? {
           ...scene,
-          apps,
+          apps: normalizedApps,
           ...(nodes ? { nodes } : {}),
           settings:
             needsCompiled && scene.settings?.execution === 'interpreted'

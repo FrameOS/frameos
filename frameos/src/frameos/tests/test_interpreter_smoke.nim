@@ -87,7 +87,7 @@ uploaded[sceneId] = ExportedInterpretedScene(
   ],
   apps: %*{
     "jsText": {
-      "source": "repo/apps/code/jsText",
+      "origin": "repo/apps/code/jsText",
       "sources": {
         "config.json": """
 {

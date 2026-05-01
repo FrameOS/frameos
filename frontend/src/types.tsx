@@ -298,8 +298,8 @@ export interface AppConfig {
   output?: OutputField[]
   /** Default cache settings */
   cache?: CacheConfig
-  /** Original source for this app, such as repo/apps/code/jsText */
-  source?: string
+  /** Origin app this app was created from, such as repo/apps/code/jsText */
+  origin?: string
 }
 
 export interface SceneApp extends Partial<AppConfig> {

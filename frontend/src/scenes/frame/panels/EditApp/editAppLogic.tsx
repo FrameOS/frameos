@@ -11,12 +11,14 @@ import { apiFetch } from '../../../../utils/apiFetch'
 import { diagramLogic } from '../Diagram/diagramLogic'
 import { buildAppTypeDeclarations } from '../../../../utils/appTypeDeclarations'
 import {
+  appOrigin,
   buildSceneApp,
   forkSceneAppKey,
   hasCompiledAppSource,
   hasJavaScriptAppSource,
   javascriptAppSourceFiles,
   loadAppSources,
+  normalizeSceneApps,
   sceneAppToAppConfig,
 } from '../../../../utils/sceneApps'
 
@@ -230,7 +232,7 @@ export const editAppLogic = kea<editAppLogicType>([
         ? { ...values.scene?.settings, execution: 'compiled' as const }
         : values.scene?.settings
       if (values.sceneAppKey) {
-        const sceneApps = values.scene?.apps ?? {}
+        const sceneApps = normalizeSceneApps(values.scene?.apps)
         actions.updateScene(props.sceneId, {
           apps: {
             ...sceneApps,
@@ -259,12 +261,12 @@ export const editAppLogic = kea<editAppLogicType>([
         return
       }
 
-      const sceneApps = scene.apps ?? {}
+      const sceneApps = normalizeSceneApps(scene.apps)
       const app = values.apps[keyword] ?? (values.sceneApp ? sceneAppToAppConfig(values.sceneApp) : undefined)
       const newKeyword = forkSceneAppKey(sceneApps, keyword, app)
       const previous = values.sceneApp
-        ? { ...values.sceneApp, source: values.sceneApp.source || keyword }
-        : { source: keyword }
+        ? { ...values.sceneApp, origin: appOrigin(values.sceneApp) || keyword }
+        : { origin: keyword }
       const nodes = scene.nodes?.map((node) => {
         if (node.id !== props.nodeId || node.type !== 'app') {
           return node
