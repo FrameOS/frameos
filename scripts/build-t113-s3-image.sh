@@ -22,6 +22,8 @@ EOF
   exit 1
 fi
 
+frameos_t113_s3_assert_host_compilers
+
 if [[ "${FRAMEOS_RECONFIGURE:-1}" == "1" || ! -f "${OUTPUT_DIR}/.config" ]]; then
   frameos_t113_s3_configure_buildroot "${BUILDROOT_DIR}" "${OUTPUT_DIR}" "${EXTERNAL_DIR}" "${DEFCONFIG}"
 fi

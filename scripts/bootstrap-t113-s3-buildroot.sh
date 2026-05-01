@@ -5,6 +5,7 @@ ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILDROOT_DIR="${BUILDROOT_DIR:-${ROOT_DIR}/build/buildroot}"
 BUILDROOT_REPO="${BUILDROOT_REPO:-https://gitlab.com/buildroot.org/buildroot.git}"
 BUILDROOT_REF="${BUILDROOT_REF:-2026.02.1}"
+source "${ROOT_DIR}/scripts/lib/t113-s3-buildroot.sh"
 
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   cat <<EOF
@@ -45,6 +46,10 @@ required_tools=(
   "unzip"
   "wget"
 )
+
+frameos_t113_s3_assert_host_compilers
+echo "ok: host C compiler ${HOSTCC}"
+echo "ok: host C++ compiler ${HOSTCXX}"
 
 missing_tools=0
 for tool in "${required_tools[@]}"; do

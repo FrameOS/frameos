@@ -139,3 +139,8 @@ custom board variants. The first deliverable is a host-side system that can:
   Buildroot was using the 6.6.5 kernel sources but still defaulted the custom
   header series to `2.6.x`. The T113-S3 defconfig now selects the 6.6.x custom
   header series while keeping headers sourced from the kernel being built.
+- The next resume moved into host tool builds and failed at Buildroot
+  `host-mkpasswd` because the active Flox-provided host `gcc` could not include
+  `<crypt.h>`. The T113-S3 Buildroot helpers now prefer `/usr/bin/gcc` and
+  `/usr/bin/g++` when available, and they compile a small libcrypt probe before
+  starting a long build so this failure is caught immediately.

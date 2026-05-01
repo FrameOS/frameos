@@ -7,6 +7,74 @@ frameos_t113_s3_abs_path() {
   printf '%s/%s\n' "${dir}" "$(basename -- "${path}")"
 }
 
+frameos_t113_s3_preferred_host_tool() {
+  local tool="$1"
+
+  if [[ -x "/usr/bin/${tool}" ]]; then
+    printf '/usr/bin/%s\n' "${tool}"
+  elif command -v "${tool}" >/dev/null 2>&1; then
+    command -v "${tool}"
+  fi
+}
+
+frameos_t113_s3_set_host_compilers() {
+  if [[ -z "${HOSTCC:-}" ]]; then
+    HOSTCC="$(frameos_t113_s3_preferred_host_tool gcc)"
+    export HOSTCC
+  fi
+
+  if [[ -z "${HOSTCXX:-}" ]]; then
+    HOSTCXX="$(frameos_t113_s3_preferred_host_tool g++)"
+    export HOSTCXX
+  fi
+}
+
+frameos_t113_s3_assert_host_compilers() {
+  local hostcc_cmd=()
+  local hostcxx_cmd=()
+  local test_bin
+
+  frameos_t113_s3_set_host_compilers
+
+  if [[ -z "${HOSTCC:-}" ]]; then
+    echo "No host C compiler found. Install gcc or set HOSTCC." >&2
+    return 1
+  fi
+  read -r -a hostcc_cmd <<<"${HOSTCC}"
+  if ! command -v "${hostcc_cmd[0]}" >/dev/null 2>&1; then
+    echo "HOSTCC is not executable or not on PATH: ${HOSTCC}" >&2
+    return 1
+  fi
+
+  if [[ -z "${HOSTCXX:-}" ]]; then
+    echo "No host C++ compiler found. Install g++ or set HOSTCXX." >&2
+    return 1
+  fi
+  read -r -a hostcxx_cmd <<<"${HOSTCXX}"
+  if ! command -v "${hostcxx_cmd[0]}" >/dev/null 2>&1; then
+    echo "HOSTCXX is not executable or not on PATH: ${HOSTCXX}" >&2
+    return 1
+  fi
+
+  test_bin="$(mktemp "${TMPDIR:-/tmp}/frameos-t113-s3-crypt.XXXXXX")"
+  rm -f "${test_bin}"
+  if ! printf '#include <crypt.h>\n#include <unistd.h>\nint main(void) { return crypt("x", "xx") == 0; }\n' |
+    "${hostcc_cmd[@]}" -x c - -lcrypt -o "${test_bin}"; then
+    rm -f "${test_bin}"
+    cat >&2 <<EOF
+HOSTCC cannot compile a program that includes <crypt.h> and links libcrypt.
+Buildroot needs this for host tools such as mkpasswd.
+
+Install the host crypt development headers, or set HOSTCC to a compiler that
+can use them. On Debian/Ubuntu:
+  sudo apt-get install -y libcrypt-dev
+  HOSTCC=/usr/bin/gcc HOSTCXX=/usr/bin/g++ ./scripts/build-t113-s3-image.sh
+EOF
+    return 1
+  fi
+  rm -f "${test_bin}"
+}
+
 frameos_t113_s3_collect_config_fragments() {
   local external_dir="$1"
   local wifi_variant="${FRAMEOS_WIFI_VARIANT:-rtl8723ds}"
