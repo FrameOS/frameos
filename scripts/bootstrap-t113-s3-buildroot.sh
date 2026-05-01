@@ -27,6 +27,45 @@ required_paths=(
   "package/wpa_supplicant/Config.in"
 )
 
+required_tools=(
+  "awk"
+  "bc"
+  "cpio"
+  "file"
+  "g++"
+  "gcc"
+  "git"
+  "make"
+  "patch"
+  "perl"
+  "python3"
+  "rsync"
+  "sed"
+  "tar"
+  "unzip"
+  "wget"
+)
+
+missing_tools=0
+for tool in "${required_tools[@]}"; do
+  if command -v "${tool}" >/dev/null 2>&1; then
+    echo "ok: host tool ${tool}"
+  else
+    echo "missing: host tool ${tool}" >&2
+    missing_tools=$((missing_tools + 1))
+  fi
+done
+
+if [[ "${missing_tools}" -gt 0 ]]; then
+  cat >&2 <<EOF
+
+Install the missing host tool(s) before starting a Buildroot build.
+On Debian/Ubuntu, the package names usually match the command names; start with:
+  sudo apt-get install -y build-essential bc cpio file patch perl python3 rsync unzip wget
+EOF
+  exit 1
+fi
+
 if [[ -d "${BUILDROOT_DIR}/.git" ]]; then
   echo "Using existing Buildroot checkout: ${BUILDROOT_DIR}"
   if [[ "${BUILDROOT_UPDATE:-0}" == "1" ]]; then

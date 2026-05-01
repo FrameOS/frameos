@@ -131,3 +131,6 @@ custom board variants. The first deliverable is a host-side system that can:
   CA certificates, and ARM ELF metadata before flashing an SD card.
 - Added `scripts/bootstrap-t113-s3-buildroot.sh` to clone or verify a Buildroot
   checkout before starting the longer package/image build.
+- First full Buildroot image build attempt against Buildroot `2026.02.1`
+  stopped at a missing host `rsync`; the bootstrap helper now checks common
+  Buildroot host tools before starting a build.
