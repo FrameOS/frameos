@@ -23,6 +23,27 @@ metadata="${IMAGE_ARTIFACTS_DIR}/metadata.json"
 compressed="${PACKAGE_DIR}/${IMAGE_NAME}.img.xz"
 manifest="${PACKAGE_DIR}/${IMAGE_NAME}.manifest.txt"
 
+sha256_file() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1"
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1"
+  else
+    echo "sha256sum or shasum is required to package the image." >&2
+    return 1
+  fi
+}
+
+file_size_bytes() {
+  if stat -c '%s' "$1" >/dev/null 2>&1; then
+    stat -c '%s' "$1"
+  elif stat -f '%z' "$1" >/dev/null 2>&1; then
+    stat -f '%z' "$1"
+  else
+    wc -c <"$1" | tr -d '[:space:]'
+  fi
+}
+
 if [[ ! -f "${image}" ]]; then
   cat >&2 <<EOF
 SD card image not found:
@@ -48,13 +69,13 @@ mv "${tmp_compressed}" "${compressed}"
 
 (
   cd "${PACKAGE_DIR}"
-  sha256sum "$(basename -- "${compressed}")" >"$(basename -- "${compressed}").sha256"
+  sha256_file "$(basename -- "${compressed}")" >"$(basename -- "${compressed}").sha256"
 )
 
-raw_sha256="$(sha256sum "${image}" | awk '{ print $1 }')"
-compressed_sha256="$(sha256sum "${compressed}" | awk '{ print $1 }')"
-raw_size_bytes="$(stat -c '%s' "${image}")"
-compressed_size_bytes="$(stat -c '%s' "${compressed}")"
+raw_sha256="$(sha256_file "${image}" | awk '{ print $1 }')"
+compressed_sha256="$(sha256_file "${compressed}" | awk '{ print $1 }')"
+raw_size_bytes="$(file_size_bytes "${image}")"
+compressed_size_bytes="$(file_size_bytes "${compressed}")"
 git_commit="$(git -C "${ROOT_DIR}" rev-parse --short HEAD 2>/dev/null || true)"
 
 cat >"${manifest}" <<EOF

@@ -108,6 +108,23 @@ check_readelf() {
   fi
 }
 
+check_sha256_file() {
+  local checksum_file="$1"
+  local checksum_dir
+  local checksum_name
+
+  checksum_dir="$(dirname -- "${checksum_file}")"
+  checksum_name="$(basename -- "${checksum_file}")"
+  if command -v sha256sum >/dev/null 2>&1; then
+    (cd "${checksum_dir}" && sha256sum -c "${checksum_name}")
+  elif command -v shasum >/dev/null 2>&1; then
+    (cd "${checksum_dir}" && shasum -a 256 -c "${checksum_name}")
+  else
+    echo "sha256sum or shasum is required to verify ${checksum_file}" >&2
+    return 1
+  fi
+}
+
 check_file "${BUILDROOT_OUTPUT_DIR}/.config" "Buildroot config"
 check_file "${IMAGE_DIR}/sdcard.img" "Buildroot SD card image"
 check_file "${IMAGE_DIR}/rootfs.ext4" "Buildroot rootfs.ext4"
@@ -126,10 +143,7 @@ check_glob "${TARGET_DIR}/etc/ssl/certs/*" "CA certificates"
 check_readelf "${FRAMEOS_RUNTIME_BINARY}"
 
 if [[ -f "${IMAGE_ARTIFACTS_DIR}/sdcard.img.sha256" ]]; then
-  (
-    cd "${IMAGE_ARTIFACTS_DIR}"
-    sha256sum -c sdcard.img.sha256
-  )
+  check_sha256_file "${IMAGE_ARTIFACTS_DIR}/sdcard.img.sha256"
 else
   fail "copied image checksum: ${IMAGE_ARTIFACTS_DIR}/sdcard.img.sha256"
 fi

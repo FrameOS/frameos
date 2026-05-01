@@ -66,6 +66,18 @@ FRAMEOS_BUILD_RUNTIME=1 ./scripts/docker-t113-s3-buildroot.sh
 The wrapper copies the generated SD card image and checksum to
 `build/frameos-t113-s3-image/`.
 
+To run the full local artifact path in Docker, including inspection and
+compression:
+
+```bash
+FRAMEOS_BUILD_RUNTIME=1 \
+  FRAMEOS_INSPECT_ARTIFACTS=1 \
+  FRAMEOS_PACKAGE_IMAGE=1 \
+  IMAGE_NAME=frameos-t113-s3-nowifi-glibc-runtime \
+  FRAMEOS_WIFI_VARIANT=none \
+  ./scripts/docker-t113-s3-buildroot.sh
+```
+
 To create a compressed image artifact suitable for download or release upload:
 
 ```bash
@@ -101,6 +113,18 @@ dependencies installed, but they are intended mainly for debugging inside the
 container. Use `FRAMEOS_T113_S3_DOCKER_BUILD=0` to reuse an existing local
 Docker image, or `FRAMEOS_T113_S3_DOCKER_PLATFORM=linux/amd64` to force a
 specific Docker platform.
+
+## Downloadable Images
+
+The manual GitHub Actions workflow `T113-S3 Buildroot SD image` builds the same
+Dockerized path and uploads the compressed SD card image, checksum, manifest,
+and metadata as an Actions artifact. It exposes inputs for `wifi_variant`,
+`buildroot_ref`, `artifact_name`, and artifact retention.
+
+For first bring-up, use `wifi_variant=none` unless the target Wi-Fi module has
+already been validated. Download the `*.img.xz` artifact, verify it with the
+matching `*.sha256` file, decompress it, then write the raw `*.img` to a
+microSD card with a normal block-image writer.
 
 ## Board Customization Points
 

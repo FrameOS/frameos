@@ -40,6 +40,8 @@ jobs:
       GENERATED_DIR: ${{ runner.temp }}/frameos-t113-s3/generated-c
       PACKAGE_DIR: ${{ runner.temp }}/frameos-t113-s3/download
       FRAMEOS_BUILD_RUNTIME: "1"
+      FRAMEOS_INSPECT_ARTIFACTS: "1"
+      FRAMEOS_PACKAGE_IMAGE: "1"
       FRAMEOS_WIFI_VARIANT: ${{ inputs.wifi_variant }}
       IMAGE_NAME: ${{ inputs.artifact_name }}-${{ inputs.wifi_variant }}
 
@@ -48,17 +50,8 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
-      - name: Build SD image in Docker
+      - name: Build, inspect, and package SD image in Docker
         run: ./scripts/docker-t113-s3-buildroot.sh
-
-      - name: Inspect SD image
-        env:
-          BUILDROOT_OUTPUT_DIR: ${{ env.OUTPUT_DIR }}
-          ARTIFACTS_DIR: ${{ env.FRAMEOS_RUNTIME_ARTIFACTS_DIR }}
-        run: ./scripts/inspect-t113-s3-build.sh
-
-      - name: Package download artifact
-        run: ./scripts/package-t113-s3-image.sh
 
       - name: Upload SD image artifact
         uses: actions/upload-artifact@v4

@@ -96,6 +96,8 @@ custom board variants. The first deliverable is a host-side system that can:
   UART, power, and Wi-Fi wiring is fixed.
 - Choose the permanent release destination and retention policy for SD-card
   images if GitHub Actions artifacts are not sufficient for distribution.
+- Trigger the manual `T113-S3 Buildroot SD image` workflow on GitHub and verify
+  the uploaded `*.img.xz`, checksum, manifest, and metadata artifact.
 - Capture first-boot serial logs from the MangoPi-style custom board once the
   hardware is available.
 
@@ -252,3 +254,10 @@ custom board variants. The first deliverable is a host-side system that can:
   `scripts/inspect-t113-s3-build.sh`, packages the result with
   `scripts/package-t113-s3-image.sh`, and uploads the compressed image,
   checksums, manifest, and image metadata as a retained Actions artifact.
+- Extended `scripts/docker-t113-s3-buildroot.sh` so a single Dockerized local or
+  CI command can build the image, run artifact inspection, and package the
+  compressed download by setting `FRAMEOS_INSPECT_ARTIFACTS=1` and
+  `FRAMEOS_PACKAGE_IMAGE=1`. The GitHub Actions image workflow now uses this
+  single containerized path instead of running inspection and packaging as
+  separate host steps, and the external-tree README documents both the local
+  full-artifact command and the manual downloadable-image workflow.

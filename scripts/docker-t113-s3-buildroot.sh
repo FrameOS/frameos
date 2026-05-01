@@ -10,6 +10,7 @@ OUTPUT_DIR_HOST="${OUTPUT_DIR:-${ROOT_DIR}/build/buildroot-t113-s3}"
 IMAGE_ARTIFACTS_DIR_HOST="${IMAGE_ARTIFACTS_DIR:-${ROOT_DIR}/build/frameos-t113-s3-image}"
 FRAMEOS_RUNTIME_ARTIFACTS_DIR_HOST="${FRAMEOS_RUNTIME_ARTIFACTS_DIR:-${ROOT_DIR}/build/frameos-t113-s3}"
 GENERATED_DIR_HOST="${GENERATED_DIR:-${ROOT_DIR}/build/frameos-t113-s3-c}"
+PACKAGE_DIR_HOST="${PACKAGE_DIR:-${IMAGE_ARTIFACTS_DIR_HOST}}"
 
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   cat <<EOF
@@ -31,11 +32,14 @@ Environment:
   IMAGE_ARTIFACTS_DIR                Host copied image artifact directory
   FRAMEOS_RUNTIME_ARTIFACTS_DIR      Host runtime artifact directory
   GENERATED_DIR                      Host generated C source directory
+  PACKAGE_DIR                        Host compressed image artifact directory
+  FRAMEOS_INSPECT_ARTIFACTS          Set to 1 to run inspect-t113-s3-build.sh
+  FRAMEOS_PACKAGE_IMAGE              Set to 1 to run package-t113-s3-image.sh
 
 Most variables accepted by build-t113-s3-image.sh are forwarded into the
 container, including FRAMEOS_BUILD_RUNTIME, FRAMEOS_WIFI_VARIANT, DEFCONFIG,
-BUILDROOT_REF, BUILDROOT_REPO, BUILDROOT_UPDATE, FRAMEOS_RECONFIGURE, and
-FRAMEOS_CONFIG_FRAGMENTS.
+BUILDROOT_REF, BUILDROOT_REPO, BUILDROOT_UPDATE, FRAMEOS_RECONFIGURE,
+FRAMEOS_CONFIG_FRAGMENTS, and IMAGE_NAME.
 EOF
   exit 0
 fi
@@ -128,12 +132,14 @@ OUTPUT_DIR_HOST="$(abs_dir "${OUTPUT_DIR_HOST}")"
 IMAGE_ARTIFACTS_DIR_HOST="$(abs_dir "${IMAGE_ARTIFACTS_DIR_HOST}")"
 FRAMEOS_RUNTIME_ARTIFACTS_DIR_HOST="$(abs_dir "${FRAMEOS_RUNTIME_ARTIFACTS_DIR_HOST}")"
 GENERATED_DIR_HOST="$(abs_dir "${GENERATED_DIR_HOST}")"
+PACKAGE_DIR_HOST="$(abs_dir "${PACKAGE_DIR_HOST}")"
 
 BUILDROOT_DIR_CONTAINER="$(container_dir_for "${BUILDROOT_DIR_HOST}" "buildroot")"
 OUTPUT_DIR_CONTAINER="$(container_dir_for "${OUTPUT_DIR_HOST}" "output")"
 IMAGE_ARTIFACTS_DIR_CONTAINER="$(container_dir_for "${IMAGE_ARTIFACTS_DIR_HOST}" "image-artifacts")"
 FRAMEOS_RUNTIME_ARTIFACTS_DIR_CONTAINER="$(container_dir_for "${FRAMEOS_RUNTIME_ARTIFACTS_DIR_HOST}" "runtime-artifacts")"
 GENERATED_DIR_CONTAINER="$(container_dir_for "${GENERATED_DIR_HOST}" "generated")"
+PACKAGE_DIR_CONTAINER="$(container_dir_for "${PACKAGE_DIR_HOST}" "package")"
 
 FRAMEOS_RUNTIME_BINARY_CONTAINER=""
 if [[ -n "${FRAMEOS_RUNTIME_BINARY:-}" ]]; then
@@ -171,10 +177,14 @@ container_env=(
   -e "BUILDROOT_OUTPUT_DIR=${OUTPUT_DIR_CONTAINER}"
   -e "IMAGE_ARTIFACTS_DIR=${IMAGE_ARTIFACTS_DIR_CONTAINER}"
   -e "FRAMEOS_RUNTIME_ARTIFACTS_DIR=${FRAMEOS_RUNTIME_ARTIFACTS_DIR_CONTAINER}"
+  -e "ARTIFACTS_DIR=${FRAMEOS_RUNTIME_ARTIFACTS_DIR_CONTAINER}"
   -e "GENERATED_DIR=${GENERATED_DIR_CONTAINER}"
+  -e "PACKAGE_DIR=${PACKAGE_DIR_CONTAINER}"
   -e "HOST_UID=$(id -u)"
   -e "HOST_GID=$(id -g)"
   -e "FRAMEOS_T113_S3_SKIP_BOOTSTRAP=${FRAMEOS_T113_S3_SKIP_BOOTSTRAP:-0}"
+  -e "FRAMEOS_INSPECT_ARTIFACTS=${FRAMEOS_INSPECT_ARTIFACTS:-0}"
+  -e "FRAMEOS_PACKAGE_IMAGE=${FRAMEOS_PACKAGE_IMAGE:-0}"
   -e "FORCE_UNSAFE_CONFIGURE=${FORCE_UNSAFE_CONFIGURE:-1}"
 )
 
@@ -193,6 +203,7 @@ forward_names=(
   FRAMEOS_BUILD_RUNTIME
   FRAMEOS_RECONFIGURE
   FRAMEOS_WIFI_VARIANT
+  IMAGE_NAME
   TARGET
 )
 
@@ -220,7 +231,7 @@ docker run --rm \
 
     cleanup() {
       status=$?
-      for path in "$BUILDROOT_DIR" "$OUTPUT_DIR" "$IMAGE_ARTIFACTS_DIR" "$FRAMEOS_RUNTIME_ARTIFACTS_DIR" "$GENERATED_DIR"; do
+      for path in "$BUILDROOT_DIR" "$OUTPUT_DIR" "$IMAGE_ARTIFACTS_DIR" "$FRAMEOS_RUNTIME_ARTIFACTS_DIR" "$GENERATED_DIR" "$PACKAGE_DIR"; do
         if [ -e "$path" ]; then
           chown -R "$HOST_UID:$HOST_GID" "$path" 2>/dev/null || true
         fi
@@ -234,4 +245,15 @@ docker run --rm \
       ./scripts/bootstrap-t113-s3-buildroot.sh
     fi
     ./scripts/build-t113-s3-image.sh "$@"
+    if [ "${FRAMEOS_INSPECT_ARTIFACTS:-0}" = "1" ]; then
+      BUILDROOT_OUTPUT_DIR="$OUTPUT_DIR" \
+        ARTIFACTS_DIR="$FRAMEOS_RUNTIME_ARTIFACTS_DIR" \
+        IMAGE_ARTIFACTS_DIR="$IMAGE_ARTIFACTS_DIR" \
+        ./scripts/inspect-t113-s3-build.sh
+    fi
+    if [ "${FRAMEOS_PACKAGE_IMAGE:-0}" = "1" ]; then
+      IMAGE_ARTIFACTS_DIR="$IMAGE_ARTIFACTS_DIR" \
+        PACKAGE_DIR="$PACKAGE_DIR" \
+        ./scripts/package-t113-s3-image.sh
+    fi
   ' bash "$@"
