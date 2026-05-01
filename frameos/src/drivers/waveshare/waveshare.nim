@@ -206,7 +206,7 @@ proc render*(self: Driver, image: Image) =
   waveshareDriver.sleep()
 
 # Convert the rendered pixels to a PNG image. For accurate colors on the web.
-proc toPng*(rotate: int = 0): string =
+proc toPng*(rotate: int = 0, flip: string = ""): string =
   var outputImage = newImage(width, height)
   case waveshareDriver.colorOption:
   of ColorOption.Black:
@@ -309,7 +309,4 @@ proc toPng*(rotate: int = 0): string =
         outputImage.data[index].b = spectra6ColorPalette[pixel][2].uint8
         outputImage.data[index].a = 255
 
-  if rotate != 0:
-    return outputImage.rotateDegrees(rotate).encodeImage(PngFormat)
-
-  return outputImage.encodeImage(PngFormat)
+  outputImage.previewTransform(rotate, flip).encodeImage(PngFormat)

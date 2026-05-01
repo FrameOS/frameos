@@ -7,6 +7,14 @@ import ../image
 proc pixel(image: Image, x, y: int): ColorRGBX =
   image.data[image.dataIndex(x, y)]
 
+proc testImage(width = 2, height = 2): Image =
+  result = newImage(width, height)
+  for y in 0 ..< result.height:
+    for x in 0 ..< result.width:
+      let idx = result.dataIndex(x, y)
+      result.data[idx].r = uint8(10 + x + y * result.width)
+      result.data[idx].a = 255
+
 suite "image helpers":
   test "decodeDataUrl supports base64 and plain payloads and rejects invalid urls":
     let source = newImage(1, 1)
@@ -28,12 +36,7 @@ suite "image helpers":
       discard decodeDataUrl("data:image/png;base64")
 
   test "rotateDegrees keeps dimensions and remaps pixels for right angles":
-    let src = newImage(2, 3)
-    for y in 0 ..< src.height:
-      for x in 0 ..< src.width:
-        let idx = src.dataIndex(x, y)
-        src.data[idx].r = uint8(10 + x + y * src.width)
-        src.data[idx].a = 255
+    let src = testImage(2, 3)
 
     let rot90 = rotateDegrees(src, 90)
     check rot90.width == 3
@@ -52,6 +55,42 @@ suite "image helpers":
     check rot270.height == 2
     check pixel(rot270, 0, 0).r == pixel(src, 1, 0).r
     check pixel(rot270, 2, 1).r == pixel(src, 0, 2).r
+
+  test "previewTransform restores driver images for preview":
+    let original = testImage()
+
+    var horizontal = testImage()
+    horizontal.flipHorizontal()
+    let restoredHorizontal = horizontal.previewTransform(0, "horizontal")
+    check pixel(restoredHorizontal, 0, 0).r == pixel(original, 0, 0).r
+    check pixel(restoredHorizontal, 1, 1).r == pixel(original, 1, 1).r
+
+    var vertical = testImage()
+    vertical.flipVertical()
+    let restoredVertical = vertical.previewTransform(0, "vertical")
+    check pixel(restoredVertical, 0, 0).r == pixel(original, 0, 0).r
+    check pixel(restoredVertical, 1, 1).r == pixel(original, 1, 1).r
+
+    var both = testImage()
+    both.flipHorizontal()
+    both.flipVertical()
+    let restoredBoth = both.previewTransform(0, "both")
+    check pixel(restoredBoth, 0, 0).r == pixel(original, 0, 0).r
+    check pixel(restoredBoth, 1, 1).r == pixel(original, 1, 1).r
+
+    var unchanged = testImage()
+    check unchanged.previewTransform(0, "unknown").data == original.data
+
+  test "previewTransform handles inverse rotation before preview flip":
+    let original = testImage(2, 3)
+    var deviceInput = testImage(2, 3)
+    deviceInput.flipHorizontal()
+    var deviceImage = deviceInput.rotateDegrees(90)
+    let preview = deviceImage.previewTransform(270, "horizontal")
+
+    check preview.width == original.width
+    check preview.height == original.height
+    check preview.data == original.data
 
   test "scaleAndDrawImage places content for contain cover stretch center and corner anchors":
     let red = rgba(255, 0, 0, 255)

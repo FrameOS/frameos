@@ -198,6 +198,23 @@ proc rotateDegrees*(image: Image, degrees: int): Image {.raises: [PixieError].} 
   else:
     result = image
 
+proc applyFlip*(image: Image, flip: string) =
+  case flip:
+  of "horizontal":
+    image.flipHorizontal()
+  of "vertical":
+    image.flipVertical()
+  of "both":
+    image.flipHorizontal()
+    image.flipVertical()
+  else:
+    discard
+
+proc previewTransform*(image: var Image, rotate: int, flip: string): Image {.raises: [PixieError].} =
+  # Driver preview paths pass disposable images, so avoid copying for the rotate=0 case.
+  result = if rotate != 0: image.rotateDegrees(rotate) else: image
+  result.applyFlip(flip)
+
 proc writeError*(image: Image, width, height: int, message: string) =
   let typeface = getDefaultTypeface()
   let font = newFont(typeface, 32, parseHtmlColor("#000000"))
