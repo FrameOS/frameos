@@ -16,6 +16,7 @@ from pathlib import Path
 import re
 import shlex
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -209,6 +210,7 @@ def _frame_state_dir(frame: Frame) -> str:
 
 _ascii_re = re.compile(r"[^A-Za-z0-9._-]")
 _frame_image_locks: dict[int, asyncio.Lock] = {}
+_buildroot_sd_image_build_lock = asyncio.Lock()
 
 
 def _get_frame_image_lock(frame_id: int) -> asyncio.Lock:
@@ -292,12 +294,24 @@ def _buildroot_settings(frame: Frame) -> dict[str, Any]:
     return dict(frame.buildroot or {})
 
 
+def _sanitize_buildroot_filename_token(value: str, fallback: str, max_length: int = 150) -> str:
+    sanitized = _ascii_re.sub("_", value.strip()).strip("._")
+    return sanitized[:max_length] or fallback
+
+
 def _buildroot_wifi_variant(settings: dict[str, Any]) -> str:
-    return str(settings.get("wifiVariant") or settings.get("wifi_variant") or "none").strip() or "none"
+    return _sanitize_buildroot_filename_token(
+        str(settings.get("wifiVariant") or settings.get("wifi_variant") or "none"),
+        "none",
+        80,
+    )
 
 
 def _buildroot_image_artifact_name(settings: dict[str, Any]) -> str:
-    return str(settings.get("imageArtifactName") or T113_S3_DEFAULT_IMAGE_ARTIFACT_NAME).strip()
+    return _sanitize_buildroot_filename_token(
+        str(settings.get("imageArtifactName") or T113_S3_DEFAULT_IMAGE_ARTIFACT_NAME),
+        T113_S3_DEFAULT_IMAGE_ARTIFACT_NAME,
+    )
 
 
 def _normalize_buildroot_frame_settings(settings: dict[str, Any]) -> dict[str, Any]:
@@ -350,8 +364,7 @@ def _buildroot_sd_image_variant_matches(path: Path, wifi_variant: str) -> bool:
     return variant in name
 
 
-def _find_buildroot_sd_image(frame: Frame) -> Path | None:
-    settings = _buildroot_settings(frame)
+def _find_buildroot_sd_image(settings: dict[str, Any]) -> Path | None:
     platform = str(settings.get("platform") or "").strip()
     if platform not in T113_S3_BUILDROOT_PLATFORM_ALIASES:
         return None
@@ -382,6 +395,162 @@ def _find_buildroot_sd_image(frame: Frame) -> Path | None:
     if not candidates:
         return None
     return max(candidates, key=lambda candidate: candidate.stat().st_mtime)
+
+
+def _buildroot_sd_image_settings(
+    frame: Frame,
+    *,
+    platform: str | None = None,
+    wifi_variant: str | None = None,
+    image_artifact_name: str | None = None,
+    buildroot_ref: str | None = None,
+    config_fragments: str | None = None,
+) -> dict[str, Any]:
+    settings = _buildroot_settings(frame)
+    if platform is not None:
+        settings["platform"] = platform
+    if wifi_variant is not None:
+        settings["wifiVariant"] = wifi_variant
+    if image_artifact_name is not None:
+        settings["imageArtifactName"] = image_artifact_name
+    if buildroot_ref is not None:
+        settings["buildrootRef"] = buildroot_ref
+    if config_fragments is not None:
+        settings["configFragments"] = config_fragments
+    return _normalize_buildroot_frame_settings(settings)
+
+
+def _buildroot_sd_image_auto_build_enabled() -> bool:
+    return os.environ.get("FRAMEOS_BUILDROOT_SD_IMAGE_AUTO_BUILD", "1").lower() in {"1", "true", "yes"}
+
+
+def _first_existing_path(candidates: list[Path], fallback: Path, required_file: str | None = None) -> Path:
+    for candidate in candidates:
+        if required_file:
+            if (candidate / required_file).exists():
+                return candidate
+        elif candidate.exists():
+            return candidate
+    return fallback
+
+
+def _optional_env_path(name: str) -> list[Path]:
+    value = os.environ.get(name)
+    return [Path(value).expanduser()] if value else []
+
+
+def _docker_image_exists(image: str) -> bool:
+    if not shutil.which("docker"):
+        return False
+    result = subprocess.run(
+        ["docker", "image", "inspect", image],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    return result.returncode == 0
+
+
+def _buildroot_sd_image_auto_build_env(settings: dict[str, Any]) -> dict[str, str]:
+    wifi_variant = _buildroot_wifi_variant(settings)
+    artifact_name = _buildroot_image_artifact_name(settings)
+    buildroot_ref = str(settings.get("buildrootRef") or T113_S3_DEFAULT_BUILDROOT_REF).strip()
+    config_fragments = str(settings.get("configFragments") or "").strip()
+
+    buildroot_dir = _first_existing_path(
+        _optional_env_path("FRAMEOS_BUILDROOT_DIR")
+        + [
+            REPO_ROOT / "build" / "buildroot",
+            REPO_ROOT / "build" / "buildroot-docker",
+        ],
+        REPO_ROOT / "build" / "buildroot",
+        "Makefile",
+    )
+    output_dir = _first_existing_path(
+        _optional_env_path("FRAMEOS_BUILDROOT_OUTPUT_DIR")
+        + [
+            REPO_ROOT / "build" / "buildroot-t113-s3",
+            REPO_ROOT / "build" / "buildroot-t113-s3-docker-nowifi",
+        ],
+        REPO_ROOT / "build" / "buildroot-t113-s3",
+    )
+    package_dir = Path(os.environ.get("FRAMEOS_BUILDROOT_SD_IMAGE_PACKAGE_DIR") or REPO_ROOT / "build" / "frameos-t113-s3-image")
+    runtime_artifacts_dir = REPO_ROOT / "build" / "frameos-t113-s3"
+    generated_dir = REPO_ROOT / "build" / "frameos-t113-s3-c"
+    runtime_binary = _first_existing_path(
+        _optional_env_path("FRAMEOS_RUNTIME_BINARY")
+        + [
+            runtime_artifacts_dir / "frameos",
+            REPO_ROOT / "build" / "frameos-t113-s3-docker-nowifi" / "frameos",
+        ],
+        runtime_artifacts_dir / "frameos",
+    )
+    download_dir = _first_existing_path(
+        _optional_env_path("BR2_DL_DIR")
+        + [
+            buildroot_dir / "dl",
+            REPO_ROOT / "build" / "buildroot-dl",
+        ],
+        REPO_ROOT / "build" / "buildroot-dl",
+    )
+    docker_image = os.environ.get("FRAMEOS_T113_S3_DOCKER_IMAGE", "frameos-t113-s3-buildroot:bookworm")
+
+    env = {
+        "FRAMEOS_T113_S3_DOCKER_BUILD": "0" if _docker_image_exists(docker_image) else "1",
+        "FRAMEOS_T113_S3_SKIP_BOOTSTRAP": "1" if (buildroot_dir / "Makefile").exists() else "0",
+        "BUILDROOT_DIR": str(buildroot_dir),
+        "OUTPUT_DIR": str(output_dir),
+        "IMAGE_ARTIFACTS_DIR": str(package_dir),
+        "PACKAGE_DIR": str(package_dir),
+        "BR2_DL_DIR": str(download_dir),
+        "FRAMEOS_RUNTIME_ARTIFACTS_DIR": str(runtime_artifacts_dir),
+        "GENERATED_DIR": str(generated_dir),
+        "FRAMEOS_BUILD_RUNTIME": "1",
+        "FRAMEOS_INSPECT_ARTIFACTS": "1",
+        "FRAMEOS_PACKAGE_IMAGE": "1",
+        "FRAMEOS_WIFI_VARIANT": wifi_variant,
+        "IMAGE_NAME": f"{artifact_name}-{wifi_variant}",
+        "BUILDROOT_REF": buildroot_ref,
+    }
+    if runtime_binary.is_file() and os.environ.get("FRAMEOS_BUILDROOT_SD_IMAGE_REBUILD_RUNTIME", "0").lower() not in {"1", "true", "yes"}:
+        env["FRAMEOS_BUILD_RUNTIME"] = "0"
+        env["FRAMEOS_RUNTIME_BINARY"] = str(runtime_binary)
+    if config_fragments:
+        env["FRAMEOS_CONFIG_FRAGMENTS"] = config_fragments
+    return env
+
+
+def _buildroot_sd_image_auto_build_command(settings: dict[str, Any]) -> str:
+    env = _buildroot_sd_image_auto_build_env(settings)
+    assignments = " ".join(f"{key}={shlex.quote(value)}" for key, value in env.items())
+    script = shlex.quote(str(REPO_ROOT / "scripts" / "docker-t113-s3-buildroot.sh"))
+    return f"cd {shlex.quote(str(REPO_ROOT))} && env {assignments} {script}"
+
+
+async def _ensure_buildroot_sd_image(frame: Frame, settings: dict[str, Any], db: Session, redis: Redis) -> Path | None:
+    image_path = _find_buildroot_sd_image(settings)
+    if image_path or not _buildroot_sd_image_auto_build_enabled():
+        return image_path
+
+    async with _buildroot_sd_image_build_lock:
+        image_path = _find_buildroot_sd_image(settings)
+        if image_path:
+            return image_path
+
+        command = _buildroot_sd_image_auto_build_command(settings)
+        code, _stdout, stderr = await exec_local_command(
+            db,
+            redis,
+            frame,
+            command,
+            log_command="Build and package T113-S3 Buildroot SD image",
+        )
+        if code != 0:
+            raise HTTPException(
+                status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                detail=f"Failed to build packaged T113-S3 SD card image: {stderr or f'exit status {code}'}",
+            )
+        return _find_buildroot_sd_image(settings)
 
 
 def _normalise_agent_response(resp: Any) -> tuple[int, Any]:
@@ -1055,7 +1224,13 @@ async def api_frame_local_binary_zip(
 @api_with_auth.get("/frames/{id:int}/download_sd_image")
 async def api_frame_download_sd_image(
     id: int,
+    platform: str | None = Query(default=None),
+    wifi_variant: str | None = Query(default=None, alias="wifiVariant"),
+    image_artifact_name: str | None = Query(default=None, alias="imageArtifactName"),
+    buildroot_ref: str | None = Query(default=None, alias="buildrootRef"),
+    config_fragments: str | None = Query(default=None, alias="configFragments"),
     db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
 ):
     frame = db.get(Frame, id) or _not_found()
     if frame.mode != "buildroot":
@@ -1064,7 +1239,14 @@ async def api_frame_download_sd_image(
             detail="SD card images are only available for Buildroot frames.",
         )
 
-    settings = _buildroot_settings(frame)
+    settings = _buildroot_sd_image_settings(
+        frame,
+        platform=platform,
+        wifi_variant=wifi_variant,
+        image_artifact_name=image_artifact_name,
+        buildroot_ref=buildroot_ref,
+        config_fragments=config_fragments,
+    )
     platform = str(settings.get("platform") or "").strip()
     if platform not in T113_S3_BUILDROOT_PLATFORM_ALIASES:
         raise HTTPException(
@@ -1072,7 +1254,7 @@ async def api_frame_download_sd_image(
             detail=f"No SD card image download is configured for Buildroot platform '{platform or 'unknown'}'.",
         )
 
-    image_path = _find_buildroot_sd_image(frame)
+    image_path = await _ensure_buildroot_sd_image(frame, settings, db, redis)
     if not image_path:
         wifi_variant = _buildroot_wifi_variant(settings)
         raise HTTPException(

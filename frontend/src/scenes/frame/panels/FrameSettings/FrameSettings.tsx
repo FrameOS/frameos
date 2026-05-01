@@ -292,7 +292,8 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                           {
                             label: 'Download SD card image',
                             onClick: () => {
-                              downloadSdImage()
+                              downloadSdImage({ buildroot: frameForm.buildroot })
+                              openLogs()
                             },
                             icon: <ArrowDownTrayIcon className="w-5 h-5" />,
                             loading: sdImageLoading,
@@ -496,7 +497,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                     color="secondary"
                     size="small"
                     onClick={() => {
-                      downloadSdImage()
+                      downloadSdImage({ buildroot: frameForm.buildroot })
                     }}
                     disabled={sdImageLoading}
                   >

@@ -4,6 +4,30 @@ import type { frameSettingsLogicType } from './frameSettingsLogicType'
 import { loaders } from 'kea-loaders'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { downloadZip } from '../../../../utils/downloadJson'
+import type { FrameBuildrootConfig } from '../../../../types'
+
+export type DownloadSdImagePayload = { buildroot?: FrameBuildrootConfig }
+
+function buildSdImageDownloadPath(frameId: number, buildroot?: FrameBuildrootConfig): string {
+  const params = new URLSearchParams()
+  if (buildroot?.platform) {
+    params.set('platform', buildroot.platform)
+  }
+  if (buildroot?.wifiVariant) {
+    params.set('wifiVariant', buildroot.wifiVariant)
+  }
+  if (buildroot?.imageArtifactName) {
+    params.set('imageArtifactName', buildroot.imageArtifactName)
+  }
+  if (buildroot?.buildrootRef) {
+    params.set('buildrootRef', buildroot.buildrootRef)
+  }
+  if (buildroot?.configFragments) {
+    params.set('configFragments', buildroot.configFragments)
+  }
+  const query = params.toString()
+  return `/api/frames/${frameId}/download_sd_image${query ? `?${query}` : ''}`
+}
 
 export const frameSettingsLogic = kea<frameSettingsLogicType>([
   path(['src', 'scenes', 'frame', 'panels', 'FrameSettings', 'frameSettingsLogic']),
@@ -76,8 +100,8 @@ export const frameSettingsLogic = kea<frameSettingsLogicType>([
     sdImage: [
       false,
       {
-        downloadSdImage: async () => {
-          const response = await apiFetch(`/api/frames/${props.frameId}/download_sd_image`)
+        downloadSdImage: async ({ buildroot }: DownloadSdImagePayload = {}) => {
+          const response = await apiFetch(buildSdImageDownloadPath(props.frameId, buildroot))
           if (!response.ok) {
             const payload = await response.json().catch(() => ({}))
             throw new Error(payload.detail || 'Failed to download SD card image')

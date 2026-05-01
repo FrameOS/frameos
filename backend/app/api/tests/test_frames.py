@@ -3,6 +3,7 @@ import pytest
 from unittest.mock import patch
 import httpx
 
+import app.api.frames as frames_api
 from app.models import new_frame
 from app.models.frame import Frame
 from app.models.user import User
@@ -217,6 +218,76 @@ async def test_api_frame_download_buildroot_sd_image(async_client, db, redis, tm
     assert response.content == b"compressed-image"
     assert response.headers["content-type"].startswith("application/x-xz")
     assert "frameos-t113-s3-glibc-runtime-docker-none.img.xz" in response.headers["content-disposition"]
+
+
+@pytest.mark.asyncio
+async def test_api_frame_download_buildroot_sd_image_accepts_query_overrides(
+    async_client, db, redis, tmp_path, monkeypatch
+):
+    image_dir = tmp_path / "images"
+    image_dir.mkdir()
+    image_path = image_dir / "frameos-t113-s3-nowifi-glibc-runtime-docker.img.xz"
+    image_path.write_bytes(b"no-wifi-image")
+    monkeypatch.setenv("FRAMEOS_BUILDROOT_SD_IMAGE_DIR", str(image_dir))
+
+    frame = await new_frame(db, redis, "T113ImageFrame", "localhost", "localhost", "waveshare.EPD_7in3e")
+    frame.mode = "buildroot"
+    frame.buildroot = {
+        "platform": "allwinner-t113-s3-mangopi-mq-dual",
+        "wifiVariant": "rtl8723ds",
+        "imageArtifactName": "frameos-t113-s3-glibc-runtime-docker",
+    }
+    db.add(frame)
+    db.commit()
+
+    response = await async_client.get(
+        f"/api/frames/{frame.id}/download_sd_image",
+        params={
+            "wifiVariant": "none",
+            "imageArtifactName": "frameos-t113-s3-glibc-runtime-docker",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.content == b"no-wifi-image"
+    assert "frameos-t113-s3-nowifi-glibc-runtime-docker.img.xz" in response.headers["content-disposition"]
+
+
+@pytest.mark.asyncio
+async def test_api_frame_download_buildroot_sd_image_auto_builds_missing_variant(
+    async_client, db, redis, tmp_path, monkeypatch
+):
+    image_dir = tmp_path / "images"
+    image_dir.mkdir()
+    monkeypatch.setenv("FRAMEOS_BUILDROOT_SD_IMAGE_DIR", str(image_dir))
+    monkeypatch.setenv("FRAMEOS_BUILDROOT_SD_IMAGE_PACKAGE_DIR", str(image_dir))
+    monkeypatch.setattr(frames_api, "_docker_image_exists", lambda _image: True)
+    monkeypatch.setattr(frames_api, "_buildroot_sd_image_search_dirs", lambda: [image_dir])
+
+    async def mock_exec_local_command(db_arg, redis_arg, frame_arg, command, log_command=True, log_output=True):
+        image_path = image_dir / "test-auto-build-rtl8723ds.img.xz"
+        image_path.write_bytes(b"built-rtl8723ds-image")
+        assert "FRAMEOS_WIFI_VARIANT=rtl8723ds" in command
+        assert "IMAGE_NAME=test-auto-build-rtl8723ds" in command
+        return 0, "built", None
+
+    monkeypatch.setattr(frames_api, "exec_local_command", mock_exec_local_command)
+
+    frame = await new_frame(db, redis, "T113ImageFrame", "localhost", "localhost", "waveshare.EPD_7in3e")
+    frame.mode = "buildroot"
+    frame.buildroot = {
+        "platform": "allwinner-t113-s3-mangopi-mq-dual",
+        "wifiVariant": "rtl8723ds",
+        "imageArtifactName": "test-auto-build",
+    }
+    db.add(frame)
+    db.commit()
+
+    response = await async_client.get(f"/api/frames/{frame.id}/download_sd_image")
+
+    assert response.status_code == 200
+    assert response.content == b"built-rtl8723ds-image"
+    assert "test-auto-build-rtl8723ds.img.xz" in response.headers["content-disposition"]
 
 
 @pytest.mark.asyncio

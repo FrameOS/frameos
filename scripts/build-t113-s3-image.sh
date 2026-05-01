@@ -10,6 +10,7 @@ OUTPUT_DIR="${OUTPUT_DIR:-${ROOT_DIR}/build/buildroot-t113-s3}"
 DEFCONFIG="${DEFCONFIG:-frameos_t113_s3_mangopi_mq_dual_defconfig}"
 IMAGE_ARTIFACTS_DIR="${IMAGE_ARTIFACTS_DIR:-${ROOT_DIR}/build/frameos-t113-s3-image}"
 FRAMEOS_BUILD_RUNTIME="${FRAMEOS_BUILD_RUNTIME:-0}"
+kernel_config_needs_rebuild=0
 
 if [[ ! -f "${BUILDROOT_DIR}/Makefile" ]]; then
   cat >&2 <<EOF
@@ -26,8 +27,21 @@ frameos_t113_s3_assert_host_compilers
 
 if [[ "${FRAMEOS_RECONFIGURE:-1}" == "1" || ! -f "${OUTPUT_DIR}/.config" ]]; then
   frameos_t113_s3_configure_buildroot "${BUILDROOT_DIR}" "${OUTPUT_DIR}" "${EXTERNAL_DIR}" "${DEFCONFIG}"
+  if [[ "${#FRAMEOS_T113_S3_CONFIG_FRAGMENTS[@]}" -gt 0 ]]; then
+    kernel_config_needs_rebuild=1
+  fi
 fi
 frameos_t113_s3_assert_output_toolchain_tuple "${OUTPUT_DIR}"
+
+if [[ "${kernel_config_needs_rebuild}" == "1" && -d "${OUTPUT_DIR}/build" ]]; then
+  find "${OUTPUT_DIR}/build" -maxdepth 1 -type d -name 'linux-*' -exec rm -f \
+    "{}/.stamp_kconfig_fixup_done" \
+    "{}/.stamp_configured" \
+    "{}/.stamp_built" \
+    "{}/.stamp_target_installed" \
+    "{}/.stamp_installed" \
+    "{}/.stamp_images_installed" \;
+fi
 
 if [[ -z "${FRAMEOS_RUNTIME_BINARY:-}" && "${FRAMEOS_BUILD_RUNTIME}" == "1" ]]; then
   FRAMEOS_RUNTIME_ARTIFACTS_DIR="${FRAMEOS_RUNTIME_ARTIFACTS_DIR:-${ROOT_DIR}/build/frameos-t113-s3}"
