@@ -82,7 +82,12 @@ jobs:
             HEAD_CHANGED_VERSIONS=true
           fi
 
-          if [ "${{ steps.detect.outputs.versions_changed }}" = "true" ] || [ "$HEAD_CHANGED_VERSIONS" = "true" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          HEAD_CHANGED_PUBLISH_WORKFLOW=false
+          if git rev-parse HEAD^ >/dev/null 2>&1 && ! git diff --quiet HEAD^ HEAD -- .github/workflows/docker-publish-multi.yml; then
+            HEAD_CHANGED_PUBLISH_WORKFLOW=true
+          fi
+
+          if [ "${{ steps.detect.outputs.versions_changed }}" = "true" ] || [ "$HEAD_CHANGED_VERSIONS" = "true" ] || [ "$HEAD_CHANGED_PUBLISH_WORKFLOW" = "true" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "should_publish=true" >> "$GITHUB_OUTPUT"
             echo "release_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           else
