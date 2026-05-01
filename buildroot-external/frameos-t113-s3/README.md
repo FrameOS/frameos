@@ -54,6 +54,15 @@ FRAMEOS_BUILD_RUNTIME=1 BUILDROOT_DIR=/path/to/buildroot ./scripts/build-t113-s3
 The wrapper copies the generated SD card image and checksum to
 `build/frameos-t113-s3-image/`.
 
+After a build, inspect the host artifacts and target root filesystem:
+
+```bash
+./scripts/inspect-t113-s3-build.sh
+```
+
+This checks for the copied image/checksum, U-Boot, DTB, FrameOS service files,
+runtime libraries, CA certificates, and an ARM `frameos` ELF binary.
+
 To build the FrameOS runtime with the Buildroot target toolchain and sysroot:
 
 ```bash

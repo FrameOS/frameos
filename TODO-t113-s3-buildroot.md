@@ -92,7 +92,8 @@ custom board variants. The first deliverable is a host-side system that can:
 - Add kernel/DTS customization points once the exact custom-board SPI, GPIO,
   UART, power, and Wi-Fi wiring is fixed.
 - Validate the generated `frameos` binary inside the Buildroot root filesystem
-  with `readelf`/`ldd` or target emulation before first board boot.
+  with the new inspection script and, if needed, target emulation before first
+  board boot.
 - Capture first-boot serial logs from the TQT113-S3 dev board and MangoPi-style
   board.
 
@@ -125,3 +126,6 @@ custom board variants. The first deliverable is a host-side system that can:
 - Added `FRAMEOS_BUILD_RUNTIME=1` support to the image wrapper so one command
   can compile the Buildroot-sysroot FrameOS runtime, install it into the rootfs,
   and copy `sdcard.img` plus checksum into `build/frameos-t113-s3-image/`.
+- Added `scripts/inspect-t113-s3-build.sh` to check the Buildroot image,
+  copied checksum, rootfs FrameOS service/runtime files, key shared libraries,
+  CA certificates, and ARM ELF metadata before flashing an SD card.
