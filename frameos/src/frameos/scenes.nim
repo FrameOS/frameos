@@ -467,20 +467,40 @@ when defined(testing):
       exportedScenesGeneration = 1
       retiredExportedScenes = @[]
 
+proc loadPersistedState*(sceneId: SceneId): JsonNode
+
 proc updateLastPersistedState*(self: FrameScene) =
   let sceneExport = findExportedScene(self.id)
   if sceneExport.isNone:
     return
+  let persistedStateKeys = sceneExport.get().persistedStateKeys
   var hasChanges = false
+  if not lastPersistedStates.hasKey(self.id.string):
+    discard loadPersistedState(self.id)
   if not lastPersistedStates.hasKey(self.id.string):
     lastPersistedStates[self.id.string] = %*{}
   let persistedState = lastPersistedStates[self.id.string]
-  for key in sceneExport.get().persistedStateKeys:
+  for key in persistedState.keys.toSeq():
+    if key notin persistedStateKeys:
+      persistedState.delete(key)
+      hasChanges = true
+  for key in persistedStateKeys:
     if self.state.hasKey(key) and self.state[key] != persistedState{key}:
       persistedState[key] = copy(self.state[key])
       hasChanges = true
+    elif not self.state.hasKey(key) and persistedState.hasKey(key):
+      persistedState.delete(key)
+      hasChanges = true
   if hasChanges:
-    writeFile(&"{SCENE_STATE_JSON_FOLDER}/scene-{sanitizePathString(self.id.string)}.json", $persistedState)
+    let statePath = &"{SCENE_STATE_JSON_FOLDER}/scene-{sanitizePathString(self.id.string)}.json"
+    if persistedState.len > 0:
+      writeFile(statePath, $persistedState)
+    else:
+      try:
+        if fileExists(statePath):
+          removeFile(statePath)
+      except OSError:
+        discard
   self.lastPersistedStateUpdate = epochTime()
   if not systemScenes.hasKey(self.id):
     # Persist the sceneId to know where to come back to. Do not persist system scenes.
@@ -490,7 +510,11 @@ proc updateLastPersistedState*(self: FrameScene) =
 
 proc loadPersistedState*(sceneId: SceneId): JsonNode =
   try:
-    return parseJson(readFile(&"{SCENE_STATE_JSON_FOLDER}/scene-{sanitizePathString(sceneId.string)}.json"))
+    let persisted = parseJson(readFile(&"{SCENE_STATE_JSON_FOLDER}/scene-{sanitizePathString(sceneId.string)}.json"))
+    if persisted.kind == JObject:
+      lastPersistedStates[sceneId.string] = copy(persisted)
+      return persisted
+    return %*{}
   except JsonParsingError, IOError:
     return %*{}
 

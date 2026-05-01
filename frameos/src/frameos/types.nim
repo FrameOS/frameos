@@ -278,6 +278,7 @@ type
     placeholder*: string
     required*: bool
     secret*: bool
+    persist*: string
 
   RunnerThread* = ref object
     frameConfig*: FrameConfig

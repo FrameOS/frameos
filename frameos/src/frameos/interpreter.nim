@@ -1058,7 +1058,7 @@ proc buildInterpretedSceneExport(scene: FrameSceneInput): ExportedInterpretedSce
     edges: scene.edges,
     apps: if scene.apps.isNil: %*{} else: scene.apps,
     publicStateFields: scene.fields,
-    persistedStateKeys: scene.fields.mapIt(it.name),
+    persistedStateKeys: scene.fields.filterIt(it.persist == "disk").mapIt(it.name),
     init: init,
     render: render,
     runEvent: runEvent,

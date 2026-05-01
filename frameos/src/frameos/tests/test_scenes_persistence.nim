@@ -1,5 +1,6 @@
-import std/[json, options, os, unittest]
+import std/[json, options, os, tables, unittest]
 
+import ../interpreter
 import ../scenes
 import ../types
 
@@ -50,6 +51,52 @@ suite "scene persistence helpers":
     check persisted["count"].getInt() == 1
     check persisted["name"].getStr() == "alpha"
     check persisted["enabled"].getBool()
+
+  test "interpreted scenes persist only fields marked for disk":
+    let sceneInputs = parseInterpretedSceneInputs($(%*[
+      {
+        "id": "test/persist-flags",
+        "name": "Persistence flags",
+        "nodes": [],
+        "edges": [],
+        "fields": [
+          {"name": "diskField", "type": "string", "persist": "disk"},
+          {"name": "memoryField", "type": "string", "persist": "memory"},
+          {"name": "defaultField", "type": "string"}
+        ],
+        "settings": {"backgroundColor": "#000000", "refreshInterval": 300.0}
+      }
+    ]))
+    let interpreted = buildInterpretedScenes(sceneInputs)
+    let exported = interpreted["test/persist-flags".SceneId]
+
+    check exported.persistedStateKeys == @["diskField"]
+
+  test "updateLastPersistedState removes stale keys when fields stop persisting":
+    let sceneId = "uploaded/persist-prune".SceneId
+    let path = persistedPath(sceneId)
+    let uploadedBackupTable = uploadedScenes
+    try:
+      if fileExists(path):
+        removeFile(path)
+      writeFile(path, $(%*{"stale": "old"}))
+      discard loadPersistedState(sceneId)
+
+      var uploadedOnly = initTable[SceneId, ExportedInterpretedScene]()
+      uploadedOnly[sceneId] = ExportedInterpretedScene(
+        name: "Persist Prune",
+        publicStateFields: @[],
+        persistedStateKeys: @[],
+      )
+      updateUploadedScenes(uploadedOnly)
+
+      let scene = FrameScene(id: sceneId, state: %*{"stale": "new"})
+      scene.updateLastPersistedState()
+
+      check not fileExists(path)
+    finally:
+      updateUploadedScenes(uploadedBackupTable)
+      removePersistedState(sceneId)
 
   test "load functions safely handle missing and invalid files":
     let missingSceneId = "test/persist-missing".SceneId
