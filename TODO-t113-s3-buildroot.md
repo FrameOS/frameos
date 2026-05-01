@@ -89,6 +89,9 @@ custom board variants. The first deliverable is a host-side system that can:
 
 ## Immediate Next Steps
 
+- Run a full Dockerized `FRAMEOS_BUILD_RUNTIME=1` no-Wi-Fi SD image build from
+  a clean output directory, then inspect and package that container-produced
+  artifact.
 - Flash and boot the inspected no-Wi-Fi glibc `FRAMEOS_BUILD_RUNTIME=1` SD card
   image on the TQT113-S3 dev board, then capture the serial console log,
   network state, and FrameOS service log.
