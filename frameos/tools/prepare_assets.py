@@ -50,7 +50,7 @@ REPO_ROOT_FILES = (
     Path("versions.json"),
 )
 
-FRONTEND_SOURCE_FILES = (
+FRONTEND_REQUIRED_SOURCE_FILES = (
     Path("frontend/build.mjs"),
     Path("frontend/package.json"),
     Path("frontend/postcss.config.js"),
@@ -60,8 +60,18 @@ FRONTEND_SOURCE_FILES = (
     Path("frontend/tsconfig.json"),
     Path("../frontend/package.json"),
     Path("../frontend/schema"),
+    Path("../frontend/scripts/generateRepoApps.mjs"),
     Path("../frontend/src"),
     *[Path("..") / entry for entry in REPO_ROOT_FILES],
+)
+
+FRONTEND_OPTIONAL_SOURCE_FILES = (
+    Path("../repo/apps/code"),
+)
+
+FRONTEND_SOURCE_FILES = (
+    *FRONTEND_REQUIRED_SOURCE_FILES,
+    *FRONTEND_OPTIONAL_SOURCE_FILES,
 )
 
 
@@ -134,7 +144,7 @@ def hash_frontend_inputs(project_root: Path) -> str:
 
 
 def missing_frontend_inputs(project_root: Path) -> list[Path]:
-    return [entry for entry in FRONTEND_SOURCE_FILES if not (project_root / entry).exists()]
+    return [entry for entry in FRONTEND_REQUIRED_SOURCE_FILES if not (project_root / entry).exists()]
 
 
 def iter_app_config_entries(project_root: Path) -> list[Path]:
@@ -361,6 +371,7 @@ def prepare_assets(project_root: Path) -> AssetPreparationResult:
 
         if rebuilt_frontend:
             build_frontend(project_root)
+            frontend_hash = hash_frontend_inputs(project_root)
         else:
             print("Frame frontend assets are up to date")
 
