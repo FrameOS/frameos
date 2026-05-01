@@ -204,6 +204,57 @@ async def build_target(slug: str, frameos_root: Path, artifacts_dir: Path) -> Pa
         return destination
 
 
+async def generate_target_sources(slug: str, frameos_root: Path, build_dir: Path) -> Path:
+    if slug not in TARGET_MAP:
+        raise SystemExit(f"Unknown target '{slug}'. Run --list-targets to see available options.")
+
+    target = TARGET_MAP[slug]
+    frameos_root = frameos_root.resolve()
+    build_dir = build_dir.resolve()
+
+    from backend.app.tasks._frame_deployer import FrameDeployer  # type: ignore  # noqa: E402
+    from backend.app.tasks.utils import find_nim_v2  # type: ignore  # noqa: E402
+    from backend.app.utils import local_exec  # type: ignore  # noqa: E402
+    from app.utils import local_exec as app_local_exec  # type: ignore  # noqa: E402
+
+    class StandaloneFrameDeployer(FrameDeployer):
+        def __init__(self, frame: FrameStub, nim_path: str, temp_dir: str, logger):
+            super().__init__(db=None, redis=None, frame=frame, nim_path=nim_path, temp_dir=temp_dir)
+            self._logger = logger
+
+        async def log(self, type: str, line: str, timestamp=None):  # type: ignore[override]
+            await self._logger(type, line)
+
+    nim_path = find_nim_v2()
+    frame = load_frame_stub(frameos_root)
+
+    async def console_log(level: str, message: str) -> None:
+        print(f"[{slug}][{level}] {message}")
+
+    async def exec_log(_db, _redis, _frame_id, level: str, message: str, timestamp=None):
+        await console_log(level, message)
+
+    local_exec.log = exec_log  # type: ignore[assignment]
+    app_local_exec.log = exec_log  # type: ignore[assignment]
+
+    with tempfile.TemporaryDirectory(prefix=f"frameos-generate-{slug}-") as tmp:
+        deployer = StandaloneFrameDeployer(frame=frame, nim_path=nim_path, temp_dir=tmp, logger=console_log)
+        source_dir = deployer.create_local_source_folder(tmp, source_root=frameos_root)
+        await console_log("stdout", "Applying local modifications")
+        await deployer.make_local_modifications(source_dir)
+
+        generated_dir = Path(tmp) / f"build_{deployer.build_id}"
+        await console_log("stdout", f"Generating C sources for {target.arch}")
+        await deployer.create_local_build_archive(str(generated_dir), source_dir, target.arch)
+
+        if build_dir.exists():
+            shutil.rmtree(build_dir)
+        shutil.copytree(generated_dir, build_dir)
+
+    print(f"Generated {slug} C sources → {build_dir}")
+    return build_dir
+
+
 def parse_args(argv: Iterable[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="FrameOS cross compilation helper")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -215,6 +266,11 @@ def parse_args(argv: Iterable[str]) -> argparse.Namespace:
     build.add_argument("--target", required=True, help="Target slug (distro-version-arch)")
     build.add_argument("--frameos-root", default=str(Path.cwd()), help="Path to the frameos source tree")
     build.add_argument("--artifacts-dir", default="build/cross", help="Directory for compiled binaries")
+
+    generate = subparsers.add_parser("generate", help="Generate C sources for a target without compiling")
+    generate.add_argument("--target", required=True, help="Target slug (distro-version-arch)")
+    generate.add_argument("--frameos-root", default=str(Path.cwd()), help="Path to the frameos source tree")
+    generate.add_argument("--build-dir", default="build/generated", help="Directory for generated C sources")
 
     return parser.parse_args(argv)
 
@@ -237,6 +293,17 @@ def main(argv: list[str]) -> int:
             return await build_target(args.target, frameos_root, artifacts_dir)
 
         asyncio.run(_build())
+        return 0
+    if args.command == "generate":
+        frameos_root = Path(args.frameos_root)
+        build_dir = Path(args.build_dir)
+        if not build_dir.is_absolute():
+            build_dir = frameos_root / build_dir
+
+        async def _generate() -> Path:
+            return await generate_target_sources(args.target, frameos_root, build_dir)
+
+        asyncio.run(_generate())
         return 0
     return 1
 

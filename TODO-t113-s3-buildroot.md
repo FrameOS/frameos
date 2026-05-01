@@ -112,3 +112,9 @@ custom board variants. The first deliverable is a host-side system that can:
   is implemented.
 - Added tests for T113-S3 target listing and Buildroot prebuilt dependency
   target resolution.
+- Added `backend/bin/cross generate` for producing generated C sources without
+  invoking the Docker cross compiler, plus `scripts/build-t113-s3-frameos.sh`
+  to compile those sources with the Buildroot target compiler and staging
+  sysroot.
+- Added target OpenSSL and CA certificates to the T113-S3 Buildroot defconfig so
+  the FrameOS runtime has the expected TLS link/runtime dependencies.

@@ -41,6 +41,53 @@ def test_t113_s3_target_is_listed_but_not_in_ci_matrix():
 
 
 @pytest.mark.asyncio
+async def test_generate_target_sources_uses_target_arch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    cross_module = load_cross_module()
+    frameos_root = tmp_path / "frameos"
+    build_dir = tmp_path / "generated"
+    frameos_root.mkdir()
+
+    class FakeFrameDeployer:
+        last_archive_arch = None
+        made_modifications = False
+
+        def __init__(self, db, redis, frame, nim_path, temp_dir):
+            self.db = db
+            self.redis = redis
+            self.frame = frame
+            self.nim_path = nim_path
+            self.temp_dir = temp_dir
+            self.build_id = "build12345678"
+
+        def create_local_source_folder(self, temp_dir, source_root=None):
+            source_dir = Path(temp_dir) / "source"
+            source_dir.mkdir()
+            return str(source_dir)
+
+        async def make_local_modifications(self, source_dir):
+            FakeFrameDeployer.made_modifications = True
+
+        async def create_local_build_archive(self, build_dir, source_dir, arch):
+            FakeFrameDeployer.last_archive_arch = arch
+            path = Path(build_dir)
+            path.mkdir(parents=True)
+            (path / "compile_frameos.sh").write_text("#!/bin/sh\n")
+            (path / "Makefile").write_text("all:\n")
+            return str(path.with_suffix(".tar.gz"))
+
+    monkeypatch.setattr("backend.app.tasks._frame_deployer.FrameDeployer", FakeFrameDeployer)
+    monkeypatch.setattr("backend.app.tasks.utils.find_nim_v2", lambda: "/tmp/nim")
+
+    result = await cross_module.generate_target_sources("buildroot-t113-s3-armhf", frameos_root, build_dir)
+
+    assert result == build_dir
+    assert FakeFrameDeployer.made_modifications is True
+    assert FakeFrameDeployer.last_archive_arch == "armhf"
+    assert (build_dir / "compile_frameos.sh").exists()
+    assert (build_dir / "Makefile").exists()
+
+
+@pytest.mark.asyncio
 async def test_build_target_plans_then_builds(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     cross_module = load_cross_module()
     binary_path = tmp_path / "frameos-bin"

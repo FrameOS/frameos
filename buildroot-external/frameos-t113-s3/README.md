@@ -45,6 +45,17 @@ If `FRAMEOS_RUNTIME_BINARY` is omitted, the image still builds the base OS and
 FrameOS service files, but the service exits until `/usr/bin/frameos` is
 installed.
 
+To build the FrameOS runtime with the Buildroot target toolchain and sysroot:
+
+```bash
+BUILDROOT_DIR=/path/to/buildroot ./scripts/build-t113-s3-frameos.sh
+```
+
+This first ensures the Buildroot toolchain, `frameos-quickjs`, `frameos-lgpio`,
+and OpenSSL staging files exist, then generates FrameOS C sources and compiles
+them with the Buildroot target compiler. The binary is written to
+`build/frameos-t113-s3/frameos`.
+
 ## Board Customization Points
 
 - `board/mangopi/mq-dual/rootfs_overlay/etc/default/frameos` controls FrameOS
