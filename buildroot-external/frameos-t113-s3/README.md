@@ -32,11 +32,15 @@ T113-S3 wrappers.
 From the FrameOS repository root:
 
 ```bash
-BUILDROOT_DIR=/path/to/buildroot ./scripts/build-t113-s3-image.sh
+./scripts/docker-t113-s3-buildroot.sh
 ```
 
-The wrapper configures Buildroot with this external tree and writes output to
-`build/buildroot-t113-s3` by default. The SD card image is expected at:
+This is the preferred entry point, including on macOS. It builds and runs a
+Linux container with the Buildroot host dependencies, Nim, Python dependencies,
+Node.js, and pnpm, then invokes the normal Buildroot scripts inside the
+container. The wrapper configures Buildroot with this external tree and writes
+output to `build/buildroot-t113-s3` by default. The SD card image is expected
+at:
 
 ```text
 build/buildroot-t113-s3/images/sdcard.img
@@ -46,8 +50,7 @@ To include a prebuilt FrameOS runtime binary in the image:
 
 ```bash
 FRAMEOS_RUNTIME_BINARY=/path/to/frameos \
-  BUILDROOT_DIR=/path/to/buildroot \
-  ./scripts/build-t113-s3-image.sh
+  ./scripts/docker-t113-s3-buildroot.sh
 ```
 
 If `FRAMEOS_RUNTIME_BINARY` is omitted, the image still builds the base OS and
@@ -57,7 +60,7 @@ installed.
 To build the runtime and include it in the image in one wrapper run:
 
 ```bash
-FRAMEOS_BUILD_RUNTIME=1 BUILDROOT_DIR=/path/to/buildroot ./scripts/build-t113-s3-image.sh
+FRAMEOS_BUILD_RUNTIME=1 ./scripts/docker-t113-s3-buildroot.sh
 ```
 
 The wrapper copies the generated SD card image and checksum to
@@ -92,6 +95,12 @@ This first ensures the Buildroot toolchain, `frameos-quickjs`, `frameos-lgpio`,
 and OpenSSL staging files exist, then generates FrameOS C sources and compiles
 them with the Buildroot target compiler. The binary is written to
 `build/frameos-t113-s3/frameos`.
+
+The lower-level scripts still work on a Linux host with all Buildroot
+dependencies installed, but they are intended mainly for debugging inside the
+container. Use `FRAMEOS_T113_S3_DOCKER_BUILD=0` to reuse an existing local
+Docker image, or `FRAMEOS_T113_S3_DOCKER_PLATFORM=linux/amd64` to force a
+specific Docker platform.
 
 ## Board Customization Points
 

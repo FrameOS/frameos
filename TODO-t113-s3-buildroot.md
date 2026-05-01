@@ -11,6 +11,9 @@ custom board variants. The first deliverable is a host-side system that can:
 - produce a bootable SD card image with FrameOS installed and preconfigured;
 - keep board-specific choices, especially Wi-Fi and GPIO/SPI pin mapping, in
   replaceable Buildroot config fragments or board overlays.
+- run the whole Buildroot image path inside Docker so the host can be Linux,
+  macOS, or another system with Docker, without depending on host compilers or
+  Buildroot tools.
 
 ## Current Assumptions
 
@@ -200,3 +203,14 @@ custom board variants. The first deliverable is a host-side system that can:
   `board/mangopi/mq-dual/patches/` and documented the expected `linux/` and
   `uboot/` patch layout so custom-board DTS and bootloader changes have a
   stable home once the final schematic pin map is known.
+- Added a Dockerized T113-S3 Buildroot entry point:
+  `scripts/docker-t113-s3-buildroot.sh`. It builds
+  `backend/tools/t113-buildroot.Dockerfile`, mounts the repo/build/artifact
+  directories, bootstraps Buildroot in the container, and runs the existing
+  image wrapper there. This makes the Buildroot path independent of host
+  compilers, Python environment, and Linux-only assumptions; macOS hosts only
+  need Docker.
+- Built the Docker image `frameos-t113-s3-buildroot:bookworm` and validated the
+  wrapper with a fresh containerized `olddefconfig` run against Buildroot
+  `2026.02.1` using external `/tmp` checkout/output/artifact directories and
+  `FRAMEOS_WIFI_VARIANT=none`.
