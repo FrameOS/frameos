@@ -94,8 +94,8 @@ custom board variants. The first deliverable is a host-side system that can:
   network state, and FrameOS service log.
 - Add kernel/DTS customization points once the exact custom-board SPI, GPIO,
   UART, power, and Wi-Fi wiring is fixed.
-- Wire packaged SD-card artifacts into the existing FrameOS archive/release
-  workflow once the release destination and retention policy are chosen.
+- Choose the permanent release destination and retention policy for SD-card
+  images if GitHub Actions artifacts are not sufficient for distribution.
 - Capture first-boot serial logs from the MangoPi-style custom board once the
   hardware is available.
 
@@ -245,3 +245,10 @@ custom board variants. The first deliverable is a host-side system that can:
   A container sanity check confirmed `FORCE_UNSAFE_CONFIGURE=1`,
   `python` resolves to `/opt/frameos-python/bin/python`, and `arq 0.26.1` is
   importable inside the rebuilt image.
+- Added the manual GitHub Actions workflow
+  `.github/workflows/t113-s3-buildroot-image.yml` so a downloadable T113-S3 SD
+  card image can be built without relying on the caller's host OS. The workflow
+  builds through `scripts/docker-t113-s3-buildroot.sh`, runs
+  `scripts/inspect-t113-s3-build.sh`, packages the result with
+  `scripts/package-t113-s3-image.sh`, and uploads the compressed image,
+  checksums, manifest, and image metadata as a retained Actions artifact.
