@@ -19,6 +19,7 @@ type
     initialized*: bool
     nextImageId*: int
     images*: Table[int, Image]
+    transientImageIds: seq[int]
 
   JsAppEvalEnv = ref object
     runtime: JsAppRuntime
@@ -111,7 +112,8 @@ proc newJsAppRuntime*(category: string, outputType: string, source: string): JsA
     outputType: outputType,
     source: source,
     nextImageId: 0,
-    images: initTable[int, Image]()
+    images: initTable[int, Image](),
+    transientImageIds: @[]
   )
 
 type
@@ -130,6 +132,17 @@ proc storeImageJson(runtime: JsAppRuntime, image: Image): JsonNode =
     "width": image.width,
     "height": image.height
   }
+
+proc storeTransientImageJson(runtime: JsAppRuntime, image: Image): JsonNode =
+  result = runtime.storeImageJson(image)
+  if result.kind == JObject:
+    runtime.transientImageIds.add(result["id"].getInt())
+
+proc clearTransientImages(runtime: JsAppRuntime) =
+  for id in runtime.transientImageIds:
+    if runtime.images.hasKey(id):
+      runtime.images.del(id)
+  runtime.transientImageIds.setLen(0)
 
 proc jsAppValueToJson(runtime: JsAppRuntime, value: Value): JsonNode =
   case value.kind
@@ -329,7 +342,7 @@ proc buildContextJson(runtime: JsAppRuntime, context: ExecutionContext): JsonNod
     "nextSleep": context.nextSleep,
   }
   if context.hasImage and not context.image.isNil:
-    result["image"] = runtime.storeImageJson(context.image)
+    result["image"] = runtime.storeTransientImageJson(context.image)
     result["imageWidth"] = %* context.image.width
     result["imageHeight"] = %* context.image.height
 
@@ -497,16 +510,22 @@ proc init*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode) =
 
 proc get*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context: ExecutionContext): Value =
   runtime.init(owner, configJson)
-  let payload = runtime.invoke(owner, configJson, context, "get")
-  return toValue(runtime, owner, context, payload, runtime.outputType)
+  try:
+    let payload = runtime.invoke(owner, configJson, context, "get")
+    return toValue(runtime, owner, context, payload, runtime.outputType)
+  finally:
+    runtime.clearTransientImages()
 
 proc run*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context: ExecutionContext) =
   runtime.init(owner, configJson)
-  let payload = runtime.invoke(owner, configJson, context, "run")
-  if runtime.category == "render":
-    let value = toValue(runtime, owner, context, payload, "image")
-    if value.kind == fkImage and not value.asImage().isNil:
-      context.image.draw(value.asImage())
+  try:
+    let payload = runtime.invoke(owner, configJson, context, "run")
+    if runtime.category == "render":
+      let value = toValue(runtime, owner, context, payload, "image")
+      if value.kind == fkImage and not value.asImage().isNil:
+        context.image.draw(value.asImage())
+  finally:
+    runtime.clearTransientImages()
 
 proc getDynamicJsApp*(app: AppRoot, context: ExecutionContext): Value =
   let dynamicApp = DynamicJsApp(app)

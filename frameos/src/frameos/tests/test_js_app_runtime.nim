@@ -1,4 +1,4 @@
-import std/[json, unittest]
+import std/[json, tables, unittest]
 import pixie
 
 import ../js_app_runtime
@@ -84,3 +84,27 @@ suite "js app runtime":
     check scene.state["lastDuration"].getFloat() == 12.5
     let pixel = context.image.data[context.image.dataIndex(0, 0)]
     check pixel.r > 0
+    check runtime.images.len == 0
+
+  test "clears transient context image refs after JS calls":
+    let config = testConfig()
+    let logger = testLogger(config)
+    let scene = FrameScene(id: "tests/js-app-image-refs".SceneId, frameConfig: config, state: %*{}, logger: logger)
+    let owner = AppRoot(nodeId: 9.NodeId, nodeName: "jsImageRefs", scene: scene, frameConfig: config)
+
+    let runtime = newJsAppRuntime(
+      category = "data",
+      outputType = "image",
+      source = """export function get(app, context) {
+          return context.image
+        }"""
+    )
+
+    for i in 0..<3:
+      let image = newImage(4 + i, 3)
+      let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: true, image: image, loopIndex: i, loopKey: ".", nextSleep: -1)
+      let value = runtime.get(owner, %*{}, context)
+      check value.kind == fkImage
+      check value.asImage().width == 4 + i
+      check value.asImage().height == 3
+      check runtime.images.len == 0
