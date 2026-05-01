@@ -199,7 +199,9 @@ function getRecompileFields(mode: FrameType['mode']): (keyof FrameType)[] {
   return mode === 'buildroot' ? FRAME_KEYS_REQUIRE_RECOMPILE_BUILDROOT : FRAME_KEYS_REQUIRE_RECOMPILE_RPIOS
 }
 
-export function normalizeSceneForComparison(scene: Partial<FrameScene> | null | undefined): Partial<FrameScene> | null | undefined {
+export function normalizeSceneForComparison(
+  scene: Partial<FrameScene> | null | undefined
+): Partial<FrameScene> | null | undefined {
   if (!scene || scene.apps) {
     return scene
   }
@@ -901,8 +903,14 @@ export const frameLogic = kea<frameLogicType>([
         isFrameAdminMode ? [] : computeChangeDetails(lastDeploy, frame, mode),
     ],
     requiresRecompilation: [
-      (s) => [s.undeployedChangeDetails],
-      (undeployedChangeDetails) => undeployedChangeDetails.some((change) => change.requiresFullDeploy),
+      (s) => [s.lastDeploy, s.frame, s.frameForm, s.mode, s.isFrameAdminMode],
+      (lastDeploy, frame, frameForm, mode, isFrameAdminMode): boolean => {
+        if (isFrameAdminMode) {
+          return false
+        }
+        const pendingFrame = Object.keys(frameForm ?? {}).length > 0 ? frameForm : frame
+        return computeChangeDetails(lastDeploy, pendingFrame, mode).some((change) => change.requiresFullDeploy)
+      },
     ],
     deployChangeDetails: [
       (s) => [s.lastDeploy, s.frameForm, s.mode, s.isFrameAdminMode],
@@ -910,9 +918,11 @@ export const frameLogic = kea<frameLogicType>([
         isFrameAdminMode ? [] : computeChangeDetails(lastDeploy, frameForm, mode),
     ],
     undeployedSummaryItems: [
-      (s) => [s.lastDeploy, s.frame, s.requiresRecompilation, s.isFrameAdminMode],
-      (lastDeploy, frame, requiresRecompilation, isFrameAdminMode): SummaryItem[] =>
-        isFrameAdminMode ? [] : buildUndeployedSummaryItems(lastDeploy, frame, requiresRecompilation),
+      (s) => [s.lastDeploy, s.frame, s.frameForm, s.requiresRecompilation, s.isFrameAdminMode],
+      (lastDeploy, frame, frameForm, requiresRecompilation, isFrameAdminMode): SummaryItem[] => {
+        const pendingFrame = Object.keys(frameForm ?? {}).length > 0 ? frameForm : frame
+        return isFrameAdminMode ? [] : buildUndeployedSummaryItems(lastDeploy, pendingFrame, requiresRecompilation)
+      },
     ],
     deployPlan: [(s) => [s.deployPlans], (deployPlans) => deployPlans],
     fastDeployPlan: [(s) => [s.deployPlan], (deployPlan) => deployPlan],
