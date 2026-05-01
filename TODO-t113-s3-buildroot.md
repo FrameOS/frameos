@@ -273,3 +273,6 @@ custom board variants. The first deliverable is a host-side system that can:
   pipeline. It checks T113-S3 script syntax, default and explicit Wi-Fi
   fragment selection, post-build Wi-Fi rootfs behavior, and compressed image
   packaging without starting a full Buildroot build.
+- Added the T113-S3 smoke script to the pull request workflow as a lightweight
+  CI job, so shell-wrapper and rootfs-overlay regressions are caught without
+  running a full Buildroot image build.

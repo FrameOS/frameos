@@ -189,6 +189,16 @@ jobs:
           mkdir -p ../frontend/dist/static
           TEST=1 pytest
 
+  t113-buildroot-smoke:
+    name: T113-S3 Buildroot Smoke
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run T113-S3 Buildroot smoke checks
+        run: ./scripts/test-t113-s3-buildroot.sh
+
   typescript:
     runs-on: ubuntu-latest
     steps:
