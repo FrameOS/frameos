@@ -418,7 +418,16 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
           "eventName": eventName,
           "payload": finalPayload
         })
-      sendEvent(eventName, finalPayload)
+      if eventName == "render" and context.event == "render":
+        self.logger.log(%*{
+          "event": "interpreter:dispatch:ignored",
+          "sceneId": self.id.string,
+          "nodeId": currentNodeId.int,
+          "eventName": eventName,
+          "reason": "renderSelfDispatch"
+        })
+      else:
+        sendEvent(eventName, finalPayload)
       if asDataNode:
         result = VJson(copy(finalPayload))
     of "code":
@@ -627,6 +636,9 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
       exportedChild.runEvent(childScene, context)
     else:
       raise newException(Exception, "Unknown node type: " & nodeType)
+
+    if asDataNode:
+      break
 
     if self.nextNodeIds.hasKey(currentNodeId):
       currentNodeId = self.nextNodeIds[currentNodeId]
