@@ -515,6 +515,7 @@ export const diagramLogic = kea<diagramLogicType>([
       (editingFrame, sceneId) => (editingFrame.scenes ?? []).find((s) => s.id === sceneId) || null,
     ],
     sceneName: [(s) => [s.scene], (scene) => scene?.name || (scene?.id ? `Scene: ${scene.id}` : 'Untitled scene')],
+    isCompiledScene: [(s) => [s.scene], (scene): boolean => !!scene && scene.settings?.execution !== 'interpreted'],
     sceneApps: [(s) => [s.scene], (scene): Record<string, SceneApp> => normalizeSceneApps(scene?.apps)],
     effectiveApps: [
       (s) => [s.apps, s.scene],

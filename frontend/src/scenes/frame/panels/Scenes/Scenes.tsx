@@ -11,7 +11,6 @@ import { Field } from '../../../../components/Field'
 import { H6 } from '../../../../components/H6'
 import { Tag } from '../../../../components/Tag'
 import {
-  AdjustmentsHorizontalIcon,
   ArrowPathIcon,
   ArrowUpTrayIcon,
   CloudArrowDownIcon,
@@ -46,6 +45,7 @@ import { appsModel } from '../../../../models/appsModel'
 import { chatLogic } from '../Chat/chatLogic'
 import { isFrameControlMode } from '../../../../utils/frameControlMode'
 import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
+import { CompiledSceneTag } from './CompiledSceneTag'
 export function Scenes() {
   const frameControlMode = isFrameControlMode()
   const inFrameAdminMode = isInFrameAdminMode()
@@ -677,20 +677,7 @@ export function Scenes() {
                             </Tooltip>
                           ) : null}
                           {scene.settings?.execution !== 'interpreted' ? (
-                            <Tooltip
-                              containerClassName="inline-block align-middle"
-                              title={
-                                <>
-                                  This is a compiled scene. All changes require a full redeploy. Click{' '}
-                                  <PencilSquareIcon className="w-5 h-5 inline-block" /> and then
-                                  <AdjustmentsHorizontalIcon className="w-5 h-5 inline-block" /> in to change.
-                                </>
-                              }
-                            >
-                              <Tag className="ml-2" color="none">
-                                🕖 COMPILED
-                              </Tag>
-                            </Tooltip>
+                            <CompiledSceneTag className="ml-2" />
                           ) : null}
                           {scene.default ? (
                             <Tag className="ml-2" color="primary">
