@@ -96,10 +96,17 @@ type ClipboardDiagramPayload = {
 
 const MAX_HISTORY_LENGTH = 100
 const HISTORY_DEBOUNCE_MS = 300
+const DELETE_HISTORY_DEBOUNCE_MS = 50
 
 const normalizeNodes = (nodes: DiagramNode[]): DiagramNode[] =>
   nodes.map((node) => {
-    const { selected, dragging, width, height, ...rest } = node
+    const { selected, dragging, positionAbsolute, dragHandle, resizing, width, height, ...rest } =
+      node as DiagramNode & {
+        dragging?: boolean
+        positionAbsolute?: XYPosition
+        dragHandle?: string
+        resizing?: boolean
+      }
     if (node.type === 'code' && typeof width !== 'undefined' && typeof height !== 'undefined') {
       return { ...rest, width, height } as DiagramNode
     }
@@ -107,7 +114,10 @@ const normalizeNodes = (nodes: DiagramNode[]): DiagramNode[] =>
   })
 
 const normalizeEdges = (edges: Edge[]): Edge[] =>
-  edges.map((edge) => (edge.selected ? { ...edge, selected: false } : edge))
+  edges.map((edge) => {
+    const { selected, ...rest } = edge
+    return rest as Edge
+  })
 
 const makeHistorySnapshot = (
   nodes: DiagramNode[],
@@ -119,18 +129,70 @@ const makeHistorySnapshot = (
   apps,
 })
 
+const sortById = <T extends { id: string }>(items: T[]): T[] => [...items].sort((a, b) => a.id.localeCompare(b.id))
+
+const comparableHistorySnapshot = (snapshot: DiagramHistorySnapshot): DiagramHistorySnapshot => ({
+  nodes: sortById(normalizeNodes(snapshot.nodes)),
+  edges: sortById(
+    normalizeEdges(snapshot.edges).map((edge) => {
+      const { type, ...rest } = edge
+      return rest as Edge
+    })
+  ),
+  apps: snapshot.apps,
+})
+
+const historySnapshotsEqual = (
+  first: DiagramHistorySnapshot | null | undefined,
+  second: DiagramHistorySnapshot | null | undefined
+): boolean => {
+  if (!first || !second) {
+    return first === second
+  }
+  return equal(comparableHistorySnapshot(first), comparableHistorySnapshot(second))
+}
+
 const scheduleHistorySnapshot = (
   cache: Record<string, any>,
   actions: { recordHistory: (snapshot: DiagramHistorySnapshot) => void },
-  snapshot: DiagramHistorySnapshot
+  snapshot: DiagramHistorySnapshot,
+  delayMs: number = HISTORY_DEBOUNCE_MS
 ): void => {
   if (cache.historyTimer) {
     window.clearTimeout(cache.historyTimer)
   }
+  cache.pendingHistorySnapshot = snapshot
   cache.historyTimer = window.setTimeout(() => {
     cache.historyTimer = null
-    actions.recordHistory(snapshot)
-  }, HISTORY_DEBOUNCE_MS)
+    const pendingSnapshot = cache.pendingHistorySnapshot
+    cache.pendingHistorySnapshot = null
+    actions.recordHistory(pendingSnapshot ?? snapshot)
+  }, delayMs)
+}
+
+const flushHistorySnapshot = (
+  cache: Record<string, any>,
+  actions: { recordHistory: (snapshot: DiagramHistorySnapshot) => void }
+): void => {
+  if (!cache.historyTimer) {
+    return
+  }
+  window.clearTimeout(cache.historyTimer)
+  cache.historyTimer = null
+  const pendingSnapshot = cache.pendingHistorySnapshot
+  cache.pendingHistorySnapshot = null
+  if (pendingSnapshot) {
+    actions.recordHistory(pendingSnapshot)
+  }
+}
+
+const recordHistorySnapshot = (
+  cache: Record<string, any>,
+  actions: { recordHistory: (snapshot: DiagramHistorySnapshot) => void },
+  snapshot: DiagramHistorySnapshot
+): void => {
+  flushHistorySnapshot(cache, actions)
+  actions.recordHistory(snapshot)
 }
 
 const isEditableTarget = (target: EventTarget | null): boolean => {
@@ -407,7 +469,7 @@ export const diagramLogic = kea<diagramLogicType>([
       {
         recordHistory: (state, { snapshot }) => {
           const last = state.past[state.past.length - 1]
-          if (last && equal(last, snapshot)) {
+          if (historySnapshotsEqual(last, snapshot)) {
             return state
           }
           const nextPast = [...state.past, snapshot].slice(-MAX_HISTORY_LENGTH)
@@ -664,7 +726,7 @@ export const diagramLogic = kea<diagramLogicType>([
         if (cache.ignoreHistory) {
           return
         }
-        actions.recordHistory(makeHistorySnapshot(values.nodes, values.rawEdges, values.sceneApps))
+        recordHistorySnapshot(cache, actions, makeHistorySnapshot(values.nodes, values.rawEdges, values.sceneApps))
       },
     ],
     onNodesChange: [
@@ -684,11 +746,16 @@ export const diagramLogic = kea<diagramLogicType>([
         }
         const snapshot = makeHistorySnapshot(values.nodes, values.rawEdges, values.sceneApps)
         const isDragging = changes.some((change) => change.type === 'position' && change.dragging)
+        const isDeleting = changes.some((change) => change.type === 'remove')
         if (isDragging) {
           scheduleHistorySnapshot(cache, actions, snapshot)
           return
         }
-        actions.recordHistory(snapshot)
+        if (isDeleting) {
+          scheduleHistorySnapshot(cache, actions, snapshot, DELETE_HISTORY_DEBOUNCE_MS)
+          return
+        }
+        recordHistorySnapshot(cache, actions, snapshot)
       },
     ],
     updateNodeData: [
@@ -738,14 +805,14 @@ export const diagramLogic = kea<diagramLogicType>([
         if (cache.ignoreHistory) {
           return
         }
-        actions.recordHistory(makeHistorySnapshot(values.nodes, values.rawEdges, values.sceneApps))
+        recordHistorySnapshot(cache, actions, makeHistorySnapshot(values.nodes, values.rawEdges, values.sceneApps))
       },
     ],
     setEdges: () => {
       if (cache.ignoreHistory) {
         return
       }
-      actions.recordHistory(makeHistorySnapshot(values.nodes, values.rawEdges, values.sceneApps))
+      recordHistorySnapshot(cache, actions, makeHistorySnapshot(values.nodes, values.rawEdges, values.sceneApps))
     },
     onEdgesChange: ({ changes }) => {
       if (cache.ignoreHistory) {
@@ -754,19 +821,28 @@ export const diagramLogic = kea<diagramLogicType>([
       if (changes.length > 0 && changes.every((change) => change.type === 'select')) {
         return
       }
-      actions.recordHistory(makeHistorySnapshot(values.nodes, values.rawEdges, values.sceneApps))
+      if (changes.some((change) => change.type === 'remove')) {
+        scheduleHistorySnapshot(
+          cache,
+          actions,
+          makeHistorySnapshot(values.nodes, values.rawEdges, values.sceneApps),
+          DELETE_HISTORY_DEBOUNCE_MS
+        )
+        return
+      }
+      recordHistorySnapshot(cache, actions, makeHistorySnapshot(values.nodes, values.rawEdges, values.sceneApps))
     },
     addEdge: () => {
       if (cache.ignoreHistory) {
         return
       }
-      actions.recordHistory(makeHistorySnapshot(values.nodes, values.rawEdges, values.sceneApps))
+      recordHistorySnapshot(cache, actions, makeHistorySnapshot(values.nodes, values.rawEdges, values.sceneApps))
     },
     updateEdge: () => {
       if (cache.ignoreHistory) {
         return
       }
-      actions.recordHistory(makeHistorySnapshot(values.nodes, values.rawEdges, values.sceneApps))
+      recordHistorySnapshot(cache, actions, makeHistorySnapshot(values.nodes, values.rawEdges, values.sceneApps))
     },
     setSceneApps: ({ apps, forceCompiled }) => {
       actions.setFrameFormValues({
@@ -1026,10 +1102,7 @@ export const diagramLogic = kea<diagramLogicType>([
           }))
         const nextNodes = [...baseNodes, ...pastedNodes]
         const nextEdges = [...baseEdges, ...pastedEdges]
-        if (cache.historyTimer) {
-          window.clearTimeout(cache.historyTimer)
-          cache.historyTimer = null
-        }
+        flushHistorySnapshot(cache, actions)
         cache.ignoreHistory = true
         if (!equal(nextSceneApps, values.sceneApps)) {
           actions.setFrameFormValues({
@@ -1039,7 +1112,7 @@ export const diagramLogic = kea<diagramLogicType>([
         actions.setNodes(nextNodes)
         actions.setEdges(nextEdges)
         cache.ignoreHistory = false
-        actions.recordHistory(makeHistorySnapshot(nextNodes, nextEdges, nextSceneApps))
+        recordHistorySnapshot(cache, actions, makeHistorySnapshot(nextNodes, nextEdges, nextSceneApps))
         window.setTimeout(() => {
           pastedNodes.forEach((node) => props.updateNodeInternals?.(node.id))
         }, 200)
@@ -1053,6 +1126,7 @@ export const diagramLogic = kea<diagramLogicType>([
     window.setTimeout(actions.fitDiagramView, 100)
     cache.ignoreHistory = false
     cache.historyTimer = null
+    cache.pendingHistorySnapshot = null
     cache.hasAutoArranged = false
     actions.resetHistory(makeHistorySnapshot(values.nodes, values.rawEdges, values.sceneApps))
 
@@ -1078,6 +1152,7 @@ export const diagramLogic = kea<diagramLogicType>([
         return
       }
       event.preventDefault()
+      flushHistorySnapshot(cache, actions)
       if (event.shiftKey) {
         actions.redo()
         return
@@ -1095,5 +1170,6 @@ export const diagramLogic = kea<diagramLogicType>([
       window.clearTimeout(cache.historyTimer)
       cache.historyTimer = null
     }
+    cache.pendingHistorySnapshot = null
   }),
 ])
