@@ -290,3 +290,6 @@ custom board variants. The first deliverable is a host-side system that can:
   `c77b8522e0f5f57c7e7b232d53875e694c8bf954a87c94582aebb945c11e0e9b`.
 - Fixed compressed-image manifest generation so `git_commit` is populated even
   when the package script runs as root inside Docker against the mounted repo.
+- Documented the first downloadable-image workflow from artifact verification
+  through Linux/macOS SD-card writing and first-boot checks for serial console,
+  DHCP Ethernet, FrameOS init, admin UI, and logs.

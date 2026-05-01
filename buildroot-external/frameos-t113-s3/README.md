@@ -138,6 +138,42 @@ already been validated. Download the `*.img.xz` artifact, verify it with the
 matching `*.sha256` file, decompress it, then write the raw `*.img` to a
 microSD card with a normal block-image writer.
 
+On Linux:
+
+```bash
+IMAGE=frameos-t113-s3-glibc-runtime-docker-none.img.xz
+sha256sum -c "${IMAGE}.sha256"
+xz -dk "${IMAGE}"
+sudo dd if="${IMAGE%.xz}" of=/dev/sdX bs=4M conv=fsync status=progress
+sync
+```
+
+On macOS:
+
+```bash
+IMAGE=frameos-t113-s3-glibc-runtime-docker-none.img.xz
+shasum -a 256 -c "${IMAGE}.sha256"
+xz -dk "${IMAGE}"
+diskutil list
+diskutil unmountDisk /dev/diskN
+sudo dd if="${IMAGE%.xz}" of=/dev/rdiskN bs=4m
+diskutil eject /dev/diskN
+```
+
+Replace `/dev/sdX` or `/dev/diskN` with the SD card device, not a partition
+such as `/dev/sdX1`.
+
+## First Boot
+
+- Serial console is expected on UART3 at 115200 baud.
+- The no-Wi-Fi image requests DHCP on Ethernet only.
+- FrameOS is installed as `/usr/bin/frameos` and started by
+  `/etc/init.d/S99frameos`.
+- FrameOS listens on port `8787` by default; the bundled frame config enables
+  the frame admin UI with `admin` / `adminadmin!!!` for bring-up only.
+- Logs are written to `/var/log/frameos.stdout.log` by the init script and to
+  `/var/log/frameos.log` by the default FrameOS config.
+
 ## Board Customization Points
 
 - `FRAMEOS_WIFI_VARIANT=none` is the default. Use
