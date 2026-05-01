@@ -86,16 +86,15 @@ custom board variants. The first deliverable is a host-side system that can:
 
 ## Immediate Next Steps
 
-- Run the no-Wi-Fi glibc image path with `FRAMEOS_BUILD_RUNTIME=1` so the
-  Buildroot sysroot FrameOS binary is compiled, installed into the rootfs, and
-  checked by `scripts/inspect-t113-s3-build.sh`.
+- Flash and boot the inspected no-Wi-Fi glibc `FRAMEOS_BUILD_RUNTIME=1` SD card
+  image on the TQT113-S3 dev board, then capture the serial console log,
+  network state, and FrameOS service log.
 - Add kernel/DTS customization points once the exact custom-board SPI, GPIO,
   UART, power, and Wi-Fi wiring is fixed.
-- Validate the generated `frameos` binary inside the Buildroot root filesystem
-  with the new inspection script and, if needed, target emulation before first
-  board boot.
-- Capture first-boot serial logs from the TQT113-S3 dev board and MangoPi-style
-  board.
+- Decide where downloadable SD-card artifacts should live in the existing
+  FrameOS archive/release workflow and add a repeatable publish step.
+- Capture first-boot serial logs from the MangoPi-style custom board once the
+  hardware is available.
 
 ## Progress
 
@@ -177,3 +176,11 @@ custom board variants. The first deliverable is a host-side system that can:
   for this case, and the generated C makefile supports a target-local object
   cache to avoid stale objects across sysroot/header changes. A single
   previously failing generated C file now compiles with the patched header.
+- The next no-Wi-Fi glibc `FRAMEOS_BUILD_RUNTIME=1` run completed end to end:
+  it generated FrameOS C sources, cross-compiled and linked the ARM runtime with
+  the Buildroot toolchain, installed `/usr/bin/frameos` into the rootfs through
+  the post-build hook, regenerated `rootfs.ext4`, and copied `sdcard.img` plus
+  checksum into `/tmp/frameos-image-full-nowifi-glibc-runtime`. Full artifact
+  inspection passed. The runtime is `ELF32`, little-endian `ARM`, requests
+  `/lib/ld-linux-armhf.so.3`, and links against `libm.so.6`, `libcrypto.so.3`,
+  `libssl.so.3`, `liblgpio.so.1`, and `libc.so.6`.
