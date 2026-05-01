@@ -281,3 +281,12 @@ custom board variants. The first deliverable is a host-side system that can:
   downloads between runs. This does not cache compiler output, but it avoids
   re-downloading Linux, U-Boot, toolchain, and package tarballs for every
   artifact build.
+- Re-ran the Dockerized no-Wi-Fi default artifact path with
+  `FRAMEOS_BUILD_RUNTIME=1`, Docker inspection, Docker packaging, and
+  `BR2_DL_DIR` enabled against the existing Buildroot output. The regenerated
+  target rootfs now has only loopback plus DHCP Ethernet in
+  `/etc/network/interfaces`, no `/etc/wpa_supplicant.conf`, and a passing ARM
+  runtime/image inspection. The packaged image checksum was
+  `c77b8522e0f5f57c7e7b232d53875e694c8bf954a87c94582aebb945c11e0e9b`.
+- Fixed compressed-image manifest generation so `git_commit` is populated even
+  when the package script runs as root inside Docker against the mounted repo.

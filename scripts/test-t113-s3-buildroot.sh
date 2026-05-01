@@ -133,6 +133,7 @@ check_packaging() {
     fi
   )
   assert_file_contains "${tmpdir}/download/test-image.manifest.txt" '^compressed_sha256='
+  assert_file_contains "${tmpdir}/download/test-image.manifest.txt" '^git_commit=[0-9a-f]+$'
 }
 
 check_shell_syntax

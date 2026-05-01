@@ -76,7 +76,7 @@ raw_sha256="$(sha256_file "${image}" | awk '{ print $1 }')"
 compressed_sha256="$(sha256_file "${compressed}" | awk '{ print $1 }')"
 raw_size_bytes="$(file_size_bytes "${image}")"
 compressed_size_bytes="$(file_size_bytes "${compressed}")"
-git_commit="$(git -C "${ROOT_DIR}" rev-parse --short HEAD 2>/dev/null || true)"
+git_commit="$(git -c safe.directory="${ROOT_DIR}" -C "${ROOT_DIR}" rev-parse --short HEAD 2>/dev/null || true)"
 
 cat >"${manifest}" <<EOF
 name=${IMAGE_NAME}
