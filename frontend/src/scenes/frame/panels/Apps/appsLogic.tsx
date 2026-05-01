@@ -8,6 +8,14 @@ import { frameLogic } from '../../frameLogic'
 import { panelsLogic } from '../panelsLogic'
 import { isJavaScriptCatalogApp, sceneAppsToAppConfigs } from '../../../../utils/sceneApps'
 
+export const INLINE_CODE_NODE_KEYWORD = '__frameos_inline_code_node__'
+
+export const INLINE_CODE_NODE_APP: AppConfig = {
+  name: 'Inline code node',
+  category: 'code',
+  description: 'Run inline code directly in the diagram.',
+}
+
 export interface AppsLogicProps {
   frameId: number
 }
@@ -47,11 +55,14 @@ export const appsLogic = kea<appsLogicType>([
       },
     ],
     appsByCategory: [
-      (s) => [s.apps],
-      (apps: Record<string, AppConfig>): Record<string, Record<string, AppConfig>> => {
+      (s) => [s.apps, s.search],
+      (apps: Record<string, AppConfig>, search): Record<string, Record<string, AppConfig>> => {
         const defaultEntries: Record<string, Record<string, AppConfig>> = Object.fromEntries(
           Object.keys(categoryLabels).map((c) => [c, {}])
         )
+        if (searchInText(search, INLINE_CODE_NODE_APP.name) || searchInText(search, INLINE_CODE_NODE_APP.description)) {
+          defaultEntries.code[INLINE_CODE_NODE_KEYWORD] = INLINE_CODE_NODE_APP
+        }
         return Object.fromEntries(
           Object.entries(
             Object.entries(apps).reduce((acc, [keyword, app]) => {

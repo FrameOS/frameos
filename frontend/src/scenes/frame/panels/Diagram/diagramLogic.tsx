@@ -935,7 +935,8 @@ export const diagramLogic = kea<diagramLogicType>([
           id: uuidv4(),
           type: type,
           position,
-          data: { code: keyword } satisfies CodeNodeData,
+          style: { width: 300, height: 119 },
+          data: { code: keyword, codeArgs: [], codeOutputs: [] } satisfies CodeNodeData,
         }
         actions.setNodes([...values.nodes, newNode])
       }

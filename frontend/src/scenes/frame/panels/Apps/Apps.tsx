@@ -2,7 +2,7 @@ import { useActions, useValues } from 'kea'
 import { categoryLabels } from '../../../../models/appsModel'
 import { Box } from '../../../../components/Box'
 import { H6 } from '../../../../components/H6'
-import { appsLogic } from './appsLogic'
+import { appsLogic, INLINE_CODE_NODE_KEYWORD } from './appsLogic'
 import { TextInput } from '../../../../components/TextInput'
 import React from 'react'
 import { FieldTypeTag } from '../../../../components/FieldTypeTag'
@@ -21,7 +21,8 @@ export function Apps() {
   const { setSearch, deleteUnusedSceneApp } = useActions(logic)
   const { scenesOpen } = useValues(panelsLogic({ frameId }))
   const onDragStart = (event: any, keyword: string) => {
-    event.dataTransfer.setData('application/reactflow', JSON.stringify({ type: 'app', keyword }))
+    const dragData = keyword === INLINE_CODE_NODE_KEYWORD ? { type: 'code', keyword: '' } : { type: 'app', keyword }
+    event.dataTransfer.setData('application/reactflow', JSON.stringify(dragData))
     event.dataTransfer.effectAllowed = 'move'
   }
   const renderApp = (keyword: string, app: AppConfig, usageCount?: number) => {
@@ -98,7 +99,13 @@ export function Apps() {
         <div className="space-y-2" key={category}>
           <H6 className="capitalize">{categoryLabels[category] ?? category}</H6>
           {Object.entries(apps)
-            .toSorted(([, a], [, b]) => a.name.localeCompare(b.name))
+            .toSorted(([keywordA, a], [keywordB, b]) =>
+              keywordA === INLINE_CODE_NODE_KEYWORD
+                ? -1
+                : keywordB === INLINE_CODE_NODE_KEYWORD
+                ? 1
+                : a.name.localeCompare(b.name)
+            )
             .map(([keyword, app]) => renderApp(keyword, app))}
         </div>
       ))}
