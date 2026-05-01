@@ -36,11 +36,21 @@ frameos_t113_s3_make -C "${BUILDROOT_DIR}" \
   frameos-quickjs frameos-lgpio openssl
 
 HOST_DIR="${BUILDROOT_OUTPUT_DIR}/host"
-STAGING_DIR="${BUILDROOT_OUTPUT_DIR}/staging"
+STAGING_DIR="${BUILDROOT_STAGING_DIR:-${BUILDROOT_OUTPUT_DIR}/staging}"
 
 if [[ ! -d "${STAGING_DIR}" ]]; then
-  echo "Buildroot staging directory missing: ${STAGING_DIR}" >&2
-  exit 1
+  staging_candidates=()
+  while IFS= read -r -d '' candidate; do
+    staging_candidates+=("${candidate}")
+  done < <(find "${HOST_DIR}" -mindepth 2 -maxdepth 2 -type d -name sysroot -print0 | sort -z)
+
+  if [[ "${#staging_candidates[@]}" -eq 1 ]]; then
+    STAGING_DIR="${staging_candidates[0]}"
+  else
+    echo "Buildroot staging directory missing: ${STAGING_DIR}" >&2
+    echo "Could not resolve a unique sysroot under: ${HOST_DIR}" >&2
+    exit 1
+  fi
 fi
 
 target_gcc=""

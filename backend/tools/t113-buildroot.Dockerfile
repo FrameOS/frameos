@@ -8,6 +8,7 @@ ARG NODE_MAJOR=22
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PATH="/opt/frameos-python/bin:/opt/nim/bin:${PATH}"
 ENV PYTHONUNBUFFERED=1
+ENV FORCE_UNSAFE_CONFIGURE=1
 
 RUN set -eux; \
     apt-get update; \

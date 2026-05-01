@@ -89,12 +89,12 @@ custom board variants. The first deliverable is a host-side system that can:
 
 ## Immediate Next Steps
 
-- Run a full Dockerized `FRAMEOS_BUILD_RUNTIME=1` no-Wi-Fi SD image build from
-  a clean output directory, then inspect and package that container-produced
-  artifact.
 - Flash and boot the inspected no-Wi-Fi glibc `FRAMEOS_BUILD_RUNTIME=1` SD card
   image on the TQT113-S3 dev board, then capture the serial console log,
   network state, and FrameOS service log.
+- Rebuild the Docker image from `backend/tools/t113-buildroot.Dockerfile` after
+  the latest wrapper validation fixes if the cached local image is discarded or
+  before publishing this build path for other hosts.
 - Add kernel/DTS customization points once the exact custom-board SPI, GPIO,
   UART, power, and Wi-Fi wiring is fixed.
 - Wire packaged SD-card artifacts into the existing FrameOS archive/release
@@ -217,3 +217,29 @@ custom board variants. The first deliverable is a host-side system that can:
   wrapper with a fresh containerized `olddefconfig` run against Buildroot
   `2026.02.1` using external `/tmp` checkout/output/artifact directories and
   `FRAMEOS_WIFI_VARIANT=none`.
+- Completed a full Dockerized no-Wi-Fi glibc `FRAMEOS_BUILD_RUNTIME=1` run
+  against Buildroot `2026.02.1`. The containerized path generated FrameOS C
+  sources, cross-compiled and linked the ARM runtime with the Buildroot
+  toolchain, built U-Boot `2024.01`, Linux `6.6.5`, the
+  `sun8i-t113s-mangopi-mq-r-t113.dtb`, `rootfs.ext4`, and `sdcard.img`, then
+  copied the raw SD image plus checksum into
+  `build/frameos-t113-s3-image-docker-nowifi/`.
+- The Dockerized run exposed and fixed container-specific issues: the bootstrap
+  helper now accepts an empty pre-created `BUILDROOT_DIR`, the wrapper passes
+  `FORCE_UNSAFE_CONFIGURE=1` for root-run Buildroot package configure scripts,
+  the container command uses the image Python/Nim paths instead of a login shell
+  that can reset `PATH`, and the runtime build can resolve Buildroot's
+  `host/<tuple>/sysroot` when `output/staging` has not yet been created.
+- Full inspection passed for the Dockerized artifact at
+  `build/frameos-t113-s3-image-docker-nowifi/sdcard.img`: Buildroot config,
+  rootfs image, U-Boot SPL image, T113-S3 DTB, FrameOS init/default/config
+  files, `/usr/bin/frameos`, lgpio, OpenSSL, CA certificates, checksum, and ARM
+  ELF metadata. The runtime is `ELF32`, little-endian `ARM`, requests
+  `/lib/ld-linux-armhf.so.3`, and links against `libm.so.6`, `liblgpio.so.1`,
+  `libc.so.6`, and `ld-linux-armhf.so.3`.
+- Packaged the inspected Dockerized no-Wi-Fi glibc runtime image as
+  `build/frameos-t113-s3-image-docker-nowifi/download/frameos-t113-s3-nowifi-glibc-runtime-docker.img.xz`.
+  The raw image is 63,963,136 bytes with SHA-256
+  `5b44fdb28c544b11c7365a96b9eb88b5dbf65f8637c71443ca445419b0549c9d`;
+  the compressed artifact is 15,156,944 bytes with SHA-256
+  `ca397a165d7afd62795f0cff9b39b1f893c3bc189343610b93ff6e5e51f6b915`.

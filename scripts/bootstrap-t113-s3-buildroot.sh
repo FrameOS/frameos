@@ -77,6 +77,8 @@ if [[ -d "${BUILDROOT_DIR}/.git" ]]; then
     git -C "${BUILDROOT_DIR}" fetch --depth 1 origin "${BUILDROOT_REF}"
     git -C "${BUILDROOT_DIR}" checkout --detach FETCH_HEAD
   fi
+elif [[ -d "${BUILDROOT_DIR}" && -z "$(find "${BUILDROOT_DIR}" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
+  git clone --depth 1 --branch "${BUILDROOT_REF}" "${BUILDROOT_REPO}" "${BUILDROOT_DIR}"
 elif [[ -e "${BUILDROOT_DIR}" ]]; then
   echo "BUILDROOT_DIR exists but is not a git checkout: ${BUILDROOT_DIR}" >&2
   exit 1

@@ -175,6 +175,7 @@ container_env=(
   -e "HOST_UID=$(id -u)"
   -e "HOST_GID=$(id -g)"
   -e "FRAMEOS_T113_S3_SKIP_BOOTSTRAP=${FRAMEOS_T113_S3_SKIP_BOOTSTRAP:-0}"
+  -e "FORCE_UNSAFE_CONFIGURE=${FORCE_UNSAFE_CONFIGURE:-1}"
 )
 
 if [[ -n "${FRAMEOS_RUNTIME_BINARY_CONTAINER}" ]]; then
@@ -212,8 +213,10 @@ docker run --rm \
   "${container_env[@]}" \
   -w "${CONTAINER_ROOT}" \
   "${IMAGE}" \
-  bash -lc '
+  bash -c '
     set -euo pipefail
+    export PATH="/opt/frameos-python/bin:/opt/nim/bin:${PATH}"
+    export VIRTUAL_ENV="/opt/frameos-python"
 
     cleanup() {
       status=$?
