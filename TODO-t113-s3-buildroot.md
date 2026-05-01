@@ -86,8 +86,9 @@ custom board variants. The first deliverable is a host-side system that can:
 
 ## Immediate Next Steps
 
-- Resume the clean no-Wi-Fi glibc Buildroot package/image build after the
-  Python environment sanitization fix and capture the next package/image result.
+- Run the no-Wi-Fi glibc image path with `FRAMEOS_BUILD_RUNTIME=1` so the
+  Buildroot sysroot FrameOS binary is compiled, installed into the rootfs, and
+  checked by `scripts/inspect-t113-s3-build.sh`.
 - Add kernel/DTS customization points once the exact custom-board SPI, GPIO,
   UART, power, and Wi-Fi wiring is fixed.
 - Validate the generated `frameos` binary inside the Buildroot root filesystem
@@ -157,3 +158,11 @@ custom board variants. The first deliverable is a host-side system that can:
   sysconfig data and attempt to build a `cp312` extension. The Buildroot
   wrappers now scrub Python-specific host environment variables before invoking
   Buildroot `make`.
+- After the Python environment sanitization fix, a clean no-Wi-Fi glibc
+  Buildroot run against Buildroot `2026.02.1` completed successfully and copied
+  `sdcard.img` plus checksum into `/tmp/frameos-image-full-nowifi-glibc`.
+  Artifact inspection passed for the Buildroot config, U-Boot SPL image, kernel
+  DTB, rootfs image, FrameOS service overlay, lgpio, OpenSSL, and CA
+  certificates. The only remaining inspection failures were the expected
+  missing FrameOS runtime binary and `/usr/bin/frameos` because that run did
+  not set `FRAMEOS_BUILD_RUNTIME=1`.

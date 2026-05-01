@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-BUILDROOT_OUTPUT_DIR="${BUILDROOT_OUTPUT_DIR:-${ROOT_DIR}/build/buildroot-t113-s3}"
+BUILDROOT_OUTPUT_DIR="${BUILDROOT_OUTPUT_DIR:-${OUTPUT_DIR:-${ROOT_DIR}/build/buildroot-t113-s3}}"
 ARTIFACTS_DIR="${ARTIFACTS_DIR:-${ROOT_DIR}/build/frameos-t113-s3}"
 IMAGE_ARTIFACTS_DIR="${IMAGE_ARTIFACTS_DIR:-${ROOT_DIR}/build/frameos-t113-s3-image}"
 FRAMEOS_RUNTIME_BINARY="${FRAMEOS_RUNTIME_BINARY:-${ARTIFACTS_DIR}/frameos}"
@@ -13,6 +13,7 @@ Usage: $0
 
 Environment:
   BUILDROOT_OUTPUT_DIR      Buildroot output directory
+  OUTPUT_DIR                Alias for BUILDROOT_OUTPUT_DIR
   ARTIFACTS_DIR             FrameOS runtime artifact directory
   IMAGE_ARTIFACTS_DIR       Copied image artifact directory
   FRAMEOS_RUNTIME_BINARY    Runtime binary to inspect
