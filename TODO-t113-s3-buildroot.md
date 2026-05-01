@@ -196,3 +196,7 @@ custom board variants. The first deliverable is a host-side system that can:
   `FRAMEOS_WIFI_VARIANT=rtl8189fs` selects `BR2_PACKAGE_RTL8189FS=y`, leaves
   `BR2_PACKAGE_RTL8723DS` unset, and enables the same supplicant/userspace
   tools. Driver build and firmware behavior still need hardware validation.
+- Wired `BR2_GLOBAL_PATCH_DIR` to
+  `board/mangopi/mq-dual/patches/` and documented the expected `linux/` and
+  `uboot/` patch layout so custom-board DTS and bootloader changes have a
+  stable home once the final schematic pin map is known.

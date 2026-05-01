@@ -107,8 +107,9 @@ them with the Buildroot target compiler. The binary is written to
 - `board/mangopi/mq-dual/wifi/` contains seed Buildroot fragments for common
   MangoPi Wi-Fi modules. Treat them as starting points and verify package names
   against the Buildroot version in use.
-- DTS changes for a custom board should be added as kernel patches under this
-  external tree and referenced with `BR2_GLOBAL_PATCH_DIR`.
+- `board/mangopi/mq-dual/patches/` is wired through `BR2_GLOBAL_PATCH_DIR`.
+  Put custom-board Linux or U-Boot patches under package subdirectories such as
+  `patches/linux/` or `patches/uboot/`.
 
 ## First Hardware Bring-Up Checklist
 
