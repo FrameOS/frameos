@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import tempfile
 from pathlib import Path
 
 JS_APP_SOURCE_FILES = ("app.ts", "app.js", "app.tsx", "app.jsx")
@@ -23,10 +24,6 @@ def find_js_app_source_filename(app_dir: str) -> str | None:
         if os.path.exists(path):
             return filename
     return None
-
-
-def is_js_app_dir(app_dir: str) -> bool:
-    return find_js_app_source_filename(app_dir) is not None
 
 
 def _node_sucrase_script() -> str:
@@ -97,9 +94,7 @@ def _run_sucrase(filename: str, source_path: str) -> tuple[bool, dict]:
 def validate_js_source(filename: str, source: str) -> list[dict]:
     tmp_path = ""
     try:
-        tmp_dir = Path(__file__).resolve().parents[3] / ".tmp"
-        tmp_dir.mkdir(exist_ok=True)
-        with (tmp_dir / f"validate_{os.getpid()}{Path(filename).suffix}").open("w") as tmp:
+        with tempfile.NamedTemporaryFile("w", suffix=Path(filename).suffix, encoding="utf-8", delete=False) as tmp:
             tmp.write(source)
             tmp_path = str(tmp.name)
 

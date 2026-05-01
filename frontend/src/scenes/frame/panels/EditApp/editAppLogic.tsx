@@ -13,11 +13,10 @@ import { buildAppTypeDeclarations } from '../../../../utils/appTypeDeclarations'
 import {
   appOrigin,
   buildSceneApp,
-  forkSceneAppKey,
   hasCompiledAppSource,
-  hasJavaScriptAppSource,
   javascriptAppSourceFiles,
   loadAppSources,
+  nextSceneAppKey,
   normalizeSceneApps,
   sceneAppToAppConfig,
 } from '../../../../utils/sceneApps'
@@ -85,7 +84,6 @@ export const editAppLogic = kea<editAppLogicType>([
       (s) => [s.scene, s.sceneAppKey],
       (scene, sceneAppKey) => (sceneAppKey ? scene?.apps?.[sceneAppKey] ?? null : null),
     ],
-    isSceneApp: [(s) => [s.sceneAppKey], (sceneAppKey): boolean => !!sceneAppKey],
     savedSources: [
       (s) => [s.appData, s.sceneApp],
       (appData, sceneApp): Record<string, string> | null => appData?.sources || sceneApp?.sources || null,
@@ -161,7 +159,6 @@ export const editAppLogic = kea<editAppLogicType>([
     ],
   })),
   selectors({
-    isJavaScriptApp: [(s) => [s.sources], (sources): boolean => hasJavaScriptAppSource(sources)],
     requiresCompiledOnSave: [
       (s) => [s.isInterpreted, s.sources],
       (isInterpreted, sources): boolean => isInterpreted && hasCompiledAppSource(sources),
@@ -176,8 +173,8 @@ export const editAppLogic = kea<editAppLogicType>([
       },
     ],
     changedFiles: [
-      (s) => [s.sources, s.sourcesLoading, s.initialSources],
-      (sources, sourcesLoading, initialSources): Record<string, boolean> => {
+      (s) => [s.sources, s.initialSources],
+      (sources, initialSources): Record<string, boolean> => {
         return Object.fromEntries(
           Object.entries(sources).map(([file, source]) => [file, source !== initialSources[file]])
         )
@@ -263,7 +260,7 @@ export const editAppLogic = kea<editAppLogicType>([
 
       const sceneApps = normalizeSceneApps(scene.apps)
       const app = values.apps[keyword] ?? (values.sceneApp ? sceneAppToAppConfig(values.sceneApp) : undefined)
-      const newKeyword = forkSceneAppKey(sceneApps, keyword, app)
+      const newKeyword = nextSceneAppKey(sceneApps, keyword, app)
       const previous = values.sceneApp
         ? { ...values.sceneApp, origin: appOrigin(values.sceneApp) || keyword }
         : { origin: keyword }

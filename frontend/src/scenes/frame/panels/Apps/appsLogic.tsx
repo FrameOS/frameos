@@ -54,6 +54,10 @@ export const appsLogic = kea<appsLogicType>([
         )
       },
     ],
+    selectedScene: [
+      (s) => [s.frameForm, s.selectedSceneId],
+      (frameForm, selectedSceneId) => frameForm?.scenes?.find((scene) => scene.id === selectedSceneId) ?? null,
+    ],
     appsByCategory: [
       (s) => [s.apps, s.search],
       (apps: Record<string, AppConfig>, search): Record<string, Record<string, AppConfig>> => {
@@ -78,23 +82,16 @@ export const appsLogic = kea<appsLogicType>([
       },
     ],
     sceneApps: [
-      (s) => [s.frameForm, s.selectedSceneId],
-      (frameForm, selectedSceneId): Record<string, AppConfig> => {
-        const selectedScene = frameForm?.scenes?.find((scene) => scene.id === selectedSceneId)
-        return sceneAppsToAppConfigs(selectedScene)
-      },
+      (s) => [s.selectedScene],
+      (selectedScene): Record<string, AppConfig> => sceneAppsToAppConfigs(selectedScene),
     ],
     rawSceneApps: [
-      (s) => [s.frameForm, s.selectedSceneId],
-      (frameForm, selectedSceneId): Record<string, SceneApp> => {
-        const selectedScene = frameForm?.scenes?.find((scene) => scene.id === selectedSceneId)
-        return normalizeSceneApps(selectedScene?.apps)
-      },
+      (s) => [s.selectedScene],
+      (selectedScene): Record<string, SceneApp> => normalizeSceneApps(selectedScene?.apps),
     ],
     sceneAppUsageCounts: [
-      (s) => [s.frameForm, s.selectedSceneId],
-      (frameForm, selectedSceneId): Record<string, number> => {
-        const selectedScene = frameForm?.scenes?.find((scene) => scene.id === selectedSceneId)
+      (s) => [s.selectedScene],
+      (selectedScene): Record<string, number> => {
         const sceneAppKeys = Object.keys(selectedScene?.apps ?? {})
         const counts = Object.fromEntries(sceneAppKeys.map((keyword) => [keyword, 0]))
         for (const node of selectedScene?.nodes ?? []) {

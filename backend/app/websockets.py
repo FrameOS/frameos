@@ -1,6 +1,5 @@
 import asyncio
 import json
-import os
 from typing import List
 from redis.asyncio import from_url as create_redis, Redis
 from fastapi import WebSocket, WebSocketDisconnect
@@ -8,20 +7,10 @@ from fastapi import WebSocket, WebSocketDisconnect
 from app.database import SessionLocal
 
 from app.config import config
+from app.utils.env import get_env_float
 
 
-def _get_env_float(name: str, default: float) -> float:
-    value = os.environ.get(name)
-    if value is None:
-        return default
-    try:
-        parsed = float(value)
-        return parsed if parsed > 0 else default
-    except ValueError:
-        return default
-
-
-WEBSOCKET_BROADCAST_TIMEOUT = _get_env_float("WEBSOCKET_BROADCAST_TIMEOUT", 2.0)
+WEBSOCKET_BROADCAST_TIMEOUT = get_env_float("WEBSOCKET_BROADCAST_TIMEOUT", 2.0)
 
 
 class ConnectionManager:

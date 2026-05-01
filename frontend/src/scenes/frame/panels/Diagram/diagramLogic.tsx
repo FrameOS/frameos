@@ -46,9 +46,9 @@ import copy from 'copy-to-clipboard'
 import { Option } from '../../../../components/Select'
 import _events from '../../../../../schema/events.json'
 import {
-  forkSceneAppKey,
   installSceneAppForKeyword,
   mergeSceneAndCatalogApps,
+  nextSceneAppKey,
   normalizeSceneApps,
   sceneAppToAppConfig,
   sceneAppWithOrigin,
@@ -120,6 +120,9 @@ const normalizeEdges = (edges: Edge[]): Edge[] =>
     const { selected, ...rest } = edge
     return rest as Edge
   })
+
+const deselectNodes = (nodes: DiagramNode[]): DiagramNode[] =>
+  nodes.map((node) => (node.selected ? { ...node, selected: false } : node))
 
 const makeHistorySnapshot = (
   nodes: DiagramNode[],
@@ -323,10 +326,8 @@ const mergePastedSceneApps = (
       continue
     }
 
-    const newKeyword = forkSceneAppKey(nextSceneApps, keyword, sceneAppToAppConfig(pastedApp))
-    nextSceneApps[newKeyword] = {
-      ...pastedApp,
-    }
+    const newKeyword = nextSceneAppKey(nextSceneApps, keyword, sceneAppToAppConfig(pastedApp))
+    nextSceneApps[newKeyword] = pastedApp
     keywordMap.set(keyword, newKeyword)
   }
 
@@ -573,14 +574,14 @@ export const diagramLogic = kea<diagramLogicType>([
         const scene = originalFrame?.scenes?.find((s) => s.id === sceneId)
         return (
           !equal(
-            nodes?.map((n) => (n.selected ? { ...n, selected: false } : n)),
+            deselectNodes(nodes),
             scene?.nodes
           ) ||
           !equal(
             edges?.map((e) => (e.selected ? { ...e, selected: false } : e)),
             scene?.edges
           ) ||
-          !equal(sceneApps, scene?.apps ?? {})
+          !equal(sceneApps, normalizeSceneApps(scene?.apps))
         )
       },
     ],
@@ -667,8 +668,8 @@ export const diagramLogic = kea<diagramLogicType>([
             if (scene.id !== props.sceneId) {
               return scene
             }
-            const sceneNodes = nodes.map((n) => (n.selected ? { ...n, selected: false } : n))
-            const nodesChanged = !equal(scene.nodes, nodes)
+            const sceneNodes = deselectNodes(nodes)
+            const nodesChanged = !equal(scene.nodes, sceneNodes)
             const sceneAppsChanged = !equal(normalizeSceneApps(scene.apps), sceneApps)
             return nodesChanged || sceneAppsChanged
               ? ({
@@ -775,25 +776,14 @@ export const diagramLogic = kea<diagramLogicType>([
         }
         scheduleHistorySnapshot(cache, actions, makeHistorySnapshot(values.nodes, values.rawEdges, values.sceneApps))
       },
-      ({ id, field, value }) => {
-        const { nodes } = values
+      () => {
+        const sceneNodes = deselectNodes(values.nodes)
         actions.setFrameFormValues({
           scenes: values.editingFrame.scenes?.map((scene) =>
-            scene.id === props.sceneId && !equal(scene.nodes, nodes)
-              ? // set the nodes on the scene's form, and remove the selected flag from all
-                ({
+            scene.id === props.sceneId && !equal(scene.nodes, sceneNodes)
+              ? ({
                   ...scene,
-                  nodes: values.nodes.map((node) =>
-                    node.id === id
-                      ? {
-                          ...node,
-                          data: {
-                            ...(node.data ?? {}),
-                            config: { ...('config' in node.data ? node.data?.config ?? {} : {}), [field]: value },
-                          },
-                        }
-                      : node
-                  ),
+                  nodes: sceneNodes,
                 } satisfies FrameScene)
               : scene
           ),
@@ -861,7 +851,7 @@ export const diagramLogic = kea<diagramLogicType>([
         return
       }
       const app = values.effectiveApps[keyword] ?? sceneAppToAppConfig(sceneApp)
-      const newKeyword = forkSceneAppKey(values.sceneApps, keyword, app)
+      const newKeyword = nextSceneAppKey(values.sceneApps, keyword, app)
       const forkName = app.name ? `${app.name} copy` : sceneApp.name
       const sceneAppWithCurrentOrigin = sceneAppWithOrigin(sceneApp, keyword)
       const sources = { ...sceneAppWithCurrentOrigin.sources }
@@ -889,7 +879,7 @@ export const diagramLogic = kea<diagramLogicType>([
           props.sceneId,
           newApps,
           false,
-          newNodes.map((node) => (node.selected ? { ...node, selected: false } : node))
+          deselectNodes(newNodes)
         ),
       })
       actions.setNodes(newNodes)

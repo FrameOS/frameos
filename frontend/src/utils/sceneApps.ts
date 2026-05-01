@@ -219,14 +219,6 @@ export async function installSceneAppForKeyword(
   }
 }
 
-export function forkSceneAppKey(
-  sceneApps: Record<string, SceneApp>,
-  keyword: string,
-  app?: AppConfig | null
-): string {
-  return nextSceneAppKey(sceneApps, keyword, app)
-}
-
 export function updateSceneAppsInScenes(
   scenes: FrameScene[] | undefined,
   sceneId: string,

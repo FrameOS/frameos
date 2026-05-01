@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 from http import HTTPStatus
-import os
 import ssl
 from typing import Optional
 
@@ -10,43 +9,22 @@ import httpx
 from fastapi import HTTPException
 
 from app.models.frame import Frame, normalize_https_proxy
+from app.utils.env import get_env_float, get_env_int
 from app.utils.network import is_safe_host
 from app.utils.remote_exec import _use_agent
 from app.ws.agent_ws import http_get_on_frame
 from arq import ArqRedis as Redis
 
 
-def _get_env_int(name: str, default: int) -> int:
-    value = os.environ.get(name)
-    if value is None:
-        return default
-    try:
-        parsed = int(value)
-        return parsed if parsed > 0 else default
-    except ValueError:
-        return default
-
-
-def _get_env_float(name: str, default: float) -> float:
-    value = os.environ.get(name)
-    if value is None:
-        return default
-    try:
-        parsed = float(value)
-        return parsed if parsed > 0 else default
-    except ValueError:
-        return default
-
-
-FRAME_HTTP_MAX_CONCURRENCY = _get_env_int("FRAME_HTTP_MAX_CONCURRENCY", 20)
+FRAME_HTTP_MAX_CONCURRENCY = get_env_int("FRAME_HTTP_MAX_CONCURRENCY", 20)
 FRAME_HTTP_TIMEOUT = httpx.Timeout(
-    connect=_get_env_float("FRAME_HTTP_CONNECT_TIMEOUT", 10.0),
-    read=_get_env_float("FRAME_HTTP_READ_TIMEOUT", 20.0),
-    write=_get_env_float("FRAME_HTTP_WRITE_TIMEOUT", 20.0),
-    pool=_get_env_float("FRAME_HTTP_POOL_TIMEOUT", 10.0),
+    connect=get_env_float("FRAME_HTTP_CONNECT_TIMEOUT", 10.0),
+    read=get_env_float("FRAME_HTTP_READ_TIMEOUT", 20.0),
+    write=get_env_float("FRAME_HTTP_WRITE_TIMEOUT", 20.0),
+    pool=get_env_float("FRAME_HTTP_POOL_TIMEOUT", 10.0),
 )
 _frame_http_semaphore = asyncio.Semaphore(FRAME_HTTP_MAX_CONCURRENCY)
-FRAME_HTTP_RETRIES = _get_env_int("FRAME_HTTP_RETRIES", 2)
+FRAME_HTTP_RETRIES = get_env_int("FRAME_HTTP_RETRIES", 2)
 DEFAULT_FRAME_HTTPS_PROXY_PORT = 8443
 
 

@@ -94,7 +94,7 @@ function getAppsForType(apps: Record<string, AppConfig>, returnType: string = 'i
 }
 
 function isRunnableApp(app: AppConfig): boolean {
-  return app.category !== 'legacy' && (!app.output || app.output.length == 0 || app.category === 'render')
+  return app.category !== 'legacy' && (!app.output || app.output.length === 0 || app.category === 'render')
 }
 
 function addJavaScriptCatalogAppOptions(

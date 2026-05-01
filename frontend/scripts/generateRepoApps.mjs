@@ -19,10 +19,6 @@ async function pathExists(filePath) {
   }
 }
 
-async function readTextFile(filePath) {
-  return await fs.readFile(filePath, 'utf8')
-}
-
 async function getAppDirs() {
   if (!(await pathExists(sourceRoot))) {
     return []
@@ -45,7 +41,7 @@ async function buildEmbeddedRepoApps() {
       continue
     }
 
-    const config = JSON.parse(await readTextFile(configPath))
+    const config = JSON.parse(await fs.readFile(configPath, 'utf8'))
     if (!config || typeof config !== 'object' || !config.name) {
       continue
     }
@@ -67,7 +63,7 @@ async function buildEmbeddedRepoApps() {
       if (hasJavaScriptSource && file === 'app.nim') {
         continue
       }
-      sources[keyword][file] = await readTextFile(path.join(appDir, file))
+      sources[keyword][file] = await fs.readFile(path.join(appDir, file), 'utf8')
     }
   }
 

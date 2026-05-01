@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import hashlib
 import re
 from pathlib import Path
@@ -12,7 +11,6 @@ local_apps_path = str(repo_root / "frameos" / "src" / "apps")
 
 
 def _iter_local_app_dirs():
-    seen: set[str] = set()
     frame_apps_root = Path(local_apps_path)
     if frame_apps_root.exists():
         for category_dir in sorted(frame_apps_root.iterdir()):
@@ -22,10 +20,7 @@ def _iter_local_app_dirs():
                 if not app_dir.is_dir():
                     continue
                 keyword = f"{category_dir.name}/{app_dir.name}"
-                if keyword in seen:
-                    continue
-                seen.add(keyword)
-                yield keyword, app_dir, {}
+                yield keyword, app_dir
 
 
 def get_local_app_path(keyword: str | None) -> str | None:
@@ -53,14 +48,14 @@ def get_scene_app_id(keyword: str, sources: dict | None = None) -> str:
 
 def get_app_configs() -> dict[str, dict]:
     configs = {}
-    for keyword, app_dir, metadata in _iter_local_app_dirs():
+    for keyword, app_dir in _iter_local_app_dirs():
         config_path = app_dir / "config.json"
         if config_path.exists():
             try:
                 with config_path.open('r') as f:
                     config = json.load(f)
                     if 'name' in config:
-                        configs[keyword] = {**config, **metadata}
+                        configs[keyword] = config
             except Exception as e:
                 print(f"Error loading config for {keyword}: {e}")
     return configs
@@ -68,7 +63,7 @@ def get_app_configs() -> dict[str, dict]:
 
 def get_local_frame_apps() -> list[str]:
     clean_apps: list[str] = []
-    for keyword, app_dir, _metadata in _iter_local_app_dirs():
+    for keyword, app_dir in _iter_local_app_dirs():
         config_path = app_dir / "config.json"
         has_source = (app_dir / "app.nim").exists() or find_js_app_source_filename(str(app_dir))
         if has_source and config_path.exists():
@@ -78,23 +73,18 @@ def get_local_frame_apps() -> list[str]:
 
 def get_one_app_sources(keyword: str | None) -> dict[str, str]:
     sources: dict[str, str] = {}
-    apps = get_local_frame_apps()
-    if keyword in apps:
-        local_app_path = get_local_app_path(keyword)
-        if not local_app_path:
-            return sources
+    local_app_path = get_local_app_path(keyword)
+    if local_app_path and keyword in get_local_frame_apps():
+        app_path = Path(local_app_path)
         has_js_source = find_js_app_source_filename(local_app_path) is not None
-        files = os.listdir(local_app_path)
-        for file in files:
-            if file == "app_loader.nim":
+        for path in sorted(app_path.iterdir()):
+            if not path.is_file() or path.name == "app_loader.nim":
                 continue
-            if has_js_source and file == "app.nim":
+            if has_js_source and path.name == "app.nim":
                 continue
-            full_path = os.path.join(local_app_path, file)
-            if os.path.isfile(full_path):
-                # TODO: also support folders and binary files
-                with open(full_path, 'r') as f:
-                    sources[file] = f.read()
+            # TODO: also support folders and binary files
+            with path.open('r') as f:
+                sources[path.name] = f.read()
     return sources
 
 

@@ -9,7 +9,7 @@ from sqlalchemy import Integer, String, Double, DateTime, Boolean
 from sqlalchemy.orm import Session, mapped_column
 from app.database import Base
 
-from app.models.apps import get_app_configs, get_one_app_sources
+from app.models.apps import get_app_configs
 from app.models.settings import get_settings_dict
 from app.utils.token import secure_token
 from app.utils.tls import generate_frame_tls_material, parse_certificate_not_valid_after
@@ -460,34 +460,10 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
     frame_json['settings'] = final_settings
     return frame_json
 
-
-def _scene_with_interpreted_app_sources(scene: dict) -> dict:
-    scene = copy.deepcopy(scene)
-    scene_apps = scene.get("apps", {}) if isinstance(scene.get("apps", {}), dict) else {}
-    for node in scene.get("nodes", []):
-        if node.get("type") != "app":
-            continue
-        data = node.setdefault("data", {})
-        if not isinstance(data, dict) or data.get("sources"):
-            continue
-        keyword = data.get("keyword")
-        if not isinstance(keyword, str):
-            continue
-
-        scene_app = scene_apps.get(keyword)
-        if isinstance(scene_app, dict) and isinstance(scene_app.get("sources"), dict) and scene_app["sources"]:
-            data["sources"] = scene_app["sources"]
-        elif keyword.startswith("repo/"):
-            sources = get_one_app_sources(keyword)
-            if sources:
-                data["sources"] = sources
-    return scene
-
-
 def get_interpreted_scenes_json(frame: Frame) -> list[dict]:
     interpreted_scenes = []
     for scene in frame.scenes:
         execution = scene.get("settings", {}).get("execution", "compiled")
         if execution == "interpreted":
-            interpreted_scenes.append(_scene_with_interpreted_app_sources(scene))
+            interpreted_scenes.append(scene)
     return interpreted_scenes

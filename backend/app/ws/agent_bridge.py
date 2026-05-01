@@ -4,9 +4,10 @@ import asyncio
 import base64
 from contextlib import asynccontextmanager
 import json
-import os
 import uuid
 from arq import ArqRedis as Redis
+
+from app.utils.env import get_env_float
 
 CMD_KEY  = "agent:cmd:{id}"     # per-frame inbound   queue
 RESP_KEY = "agent:resp:{id}"    # per-command outbound queue
@@ -15,18 +16,7 @@ STREAM_KEY = "agent:cmd:stream:{id}"
 _frame_locks: dict[int, asyncio.Lock] = {}
 
 
-def _get_env_float(name: str, default: float) -> float:
-    value = os.environ.get(name)
-    if value is None:
-        return default
-    try:
-        parsed = float(value)
-        return parsed if parsed > 0 else default
-    except ValueError:
-        return default
-
-
-DEFAULT_AGENT_COMMAND_QUEUE_TIMEOUT = _get_env_float(
+DEFAULT_AGENT_COMMAND_QUEUE_TIMEOUT = get_env_float(
     "AGENT_COMMAND_QUEUE_TIMEOUT",
     30.0,
 )
