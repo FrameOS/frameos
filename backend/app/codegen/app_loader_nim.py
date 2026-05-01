@@ -551,122 +551,44 @@ def _app_has_self_init(app_dir: str) -> bool:
     return re.search(r"proc\s+init\*?\s*\(\s*self\s*:\s*(?:var\s+)?App\b", app_source) is not None
 
 
-def _field_type_to_nim_type(field_type: str, required: bool) -> str:
-    if field_type in ("string", "text", "select", "font", "date"):
-        return "string"
-    if field_type == "integer":
-        return "int"
-    if field_type == "float":
-        return "float"
-    if field_type == "boolean":
-        return "bool"
-    if field_type == "image":
-        return "Image" if required else "Option[Image]"
-    if field_type == "node":
-        return "NodeId"
-    if field_type == "scene":
-        return "SceneId"
-    if field_type == "json":
-        return "JsonNode"
-    if field_type == "color":
-        return "Color"
-    raise ValueError(f"Unsupported field type: {field_type}")
-
-
-def _field_config_type(field: Dict[str, Any]) -> str:
-    field_type = _field_type_to_nim_type(field["type"], bool(field.get("required", False)))
-    seq_spec = field.get("seq") or []
-    for _ in seq_spec:
-        field_type = f"seq[{field_type}]"
-    return field_type
-
-
-def _field_json_expr(field_name: str, field_type: str, required: bool) -> str:
-    value_expr = f"self.appConfig.{field_name}"
-    if field_type == "image" and not required:
-        return f"jsAppFieldToJson(self.runtime, {value_expr})"
-    return f"jsAppFieldToJson(self.runtime, {value_expr})"
-
-
-def _category_output_type(config: dict) -> str:
-    category = (config.get("category") or "").strip().lower()
-    if category == "render":
-        return "image"
-    output = config.get("output") or []
-    if output:
-        return output[0].get("type", "")
-    return ""
-
-
-def write_js_app_nim(app_dir: str, config: Optional[dict] = None) -> str:
-    if not config:
-        config_path = os.path.join(app_dir, "config.json")
-        if not os.path.exists(config_path):
-            raise FileNotFoundError(f"Config file not found: {config_path}")
-        with open(config_path, "r") as f:
-            config = json.load(f)
-            assert config is not None
-
+def _write_js_app_loader_nim(app_dir: str, config: dict) -> str:
     source_filename = find_js_app_source_filename(app_dir)
     if not source_filename:
         raise FileNotFoundError(f"JS app source not found in {app_dir}")
 
-    fields = [f for f in config.get("fields", []) if not f.get("markdown")]
-    app_config_lines: List[str] = []
-    json_lines: List[str] = []
-    for field in fields:
-        field_name = field["name"]
-        field_type = field["type"]
-        required = bool(field.get("required", False))
-        app_config_lines.append(f"    {field_name}*: {_field_config_type(field)}")
-        json_lines.append(f'  result["{field_name}"] = {_field_json_expr(field_name, field_type, required)}')
-
-    category = (config.get("category") or "").strip().lower()
-    output_type = _category_output_type(config)
-    newline = os.linesep
+    fallback_keyword = _nim_quote(config.get("name") or os.path.basename(app_dir))
 
     return f"""{{.warning[UnusedImport]: off.}}
 import json
-import options
-import pixie
 import frameos/types
 import frameos/values
 import frameos/js_app_runtime
 
 const jsAppSource = staticRead("./{source_filename}")
+const jsAppConfig = staticRead("./config.json")
 
-type
-  AppConfig* = object
-{newline.join(app_config_lines) if app_config_lines else "    discard"}
-
-  App* = ref object of AppRoot
-    appConfig*: AppConfig
-    runtime*: JsAppRuntime
-
-proc ensureRuntime(self: App) =
-  if self.runtime.isNil:
-    self.runtime = newJsAppRuntime(
-      category = "{category}",
-      outputType = "{output_type}",
-      source = jsAppSource
-    )
-
-proc toConfigJson(self: App): JsonNode =
-  self.ensureRuntime()
+proc jsAppSources(): JsonNode =
   result = %*{{}}
-{newline.join(json_lines) if json_lines else "  discard"}
+  result["config.json"] = %*jsAppConfig
+  result["{source_filename}"] = %*jsAppSource
 
-proc init*(self: App) =
-  let configJson = self.toConfigJson()
-  self.runtime.init(self, configJson)
+proc init*(
+    node: DiagramNode,
+    scene: FrameScene,
+): AppRoot =
+  initDynamicJsApp(node.data{{"keyword"}}.getStr({fallback_keyword}), node, scene, jsAppSources())
 
-proc get*(self: App, context: ExecutionContext): Value =
-  let configJson = self.toConfigJson()
-  self.runtime.get(self, configJson, context)
+proc setField*(self: AppRoot, field: string, value: Value) =
+  self.setDynamicJsAppField(field, value)
 
-proc run*(self: App, context: ExecutionContext) =
-  let configJson = self.toConfigJson()
-  self.runtime.run(self, configJson, context)
+proc getField*(self: AppRoot, field: string, fieldType: string): Value =
+  self.getDynamicJsAppField(field, fieldType)
+
+proc get*(self: AppRoot, context: ExecutionContext): Value =
+  self.getDynamicJsApp(context)
+
+proc run*(self: AppRoot, context: ExecutionContext) =
+  self.runDynamicJsApp(context)
 """
 
 def write_app_loader_nim(app_dir, config: Optional[dict] = None) -> str:
@@ -677,6 +599,9 @@ def write_app_loader_nim(app_dir, config: Optional[dict] = None) -> str:
         with open(config_path, "r") as f:
             config = json.load(f)
             assert config is not None
+
+    if find_js_app_source_filename(app_dir):
+        return _write_js_app_loader_nim(app_dir, config)
 
     fields = [f for f in config.get("fields", []) if not f.get("markdown")]
     app_has_self_init = _app_has_self_init(app_dir)

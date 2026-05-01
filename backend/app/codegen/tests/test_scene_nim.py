@@ -52,7 +52,7 @@ def test_app_output_field_input_is_coerced_to_target_field_type():
     assert (
         "self.node1.appConfig.text = block:\n"
         "        let frameosValue = block:\n"
-        "          self.node2.get(context)\n"
+        "          nodeApp2.get(self.node2, context)\n"
         "        frameosValue.asString()"
     ) in source
 
@@ -89,7 +89,7 @@ def test_scene_app_import_uses_source_specific_module_id():
 
     source = write_scene_nim(frame, scene)
 
-    assert f"import apps/{get_scene_app_id('repo/examples/jsText', sources)}/app as nodeApp1" in source
+    assert f"import apps/{get_scene_app_id('repo/examples/jsText', sources)}/app_loader as nodeApp1" in source
 
 
 def test_native_app_output_field_input_keeps_native_return_type():

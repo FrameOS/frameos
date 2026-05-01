@@ -118,30 +118,6 @@ proc jsAppValueToJson(runtime: JsAppRuntime, value: Value): JsonNode =
   of fkNone:
     return newJNull()
 
-proc jsAppFieldToJson*(runtime: JsAppRuntime, value: string): JsonNode = %* value
-proc jsAppFieldToJson*(runtime: JsAppRuntime, value: bool): JsonNode = %* value
-proc jsAppFieldToJson*(runtime: JsAppRuntime, value: int): JsonNode = %* value
-proc jsAppFieldToJson*(runtime: JsAppRuntime, value: int32): JsonNode = %* value
-proc jsAppFieldToJson*(runtime: JsAppRuntime, value: int64): JsonNode = %* value
-proc jsAppFieldToJson*(runtime: JsAppRuntime, value: float): JsonNode = %* value
-proc jsAppFieldToJson*(runtime: JsAppRuntime, value: float32): JsonNode = %* value
-proc jsAppFieldToJson*(runtime: JsAppRuntime, value: JsonNode): JsonNode =
-  if value.isNil:
-    return %*{}
-  return value
-proc jsAppFieldToJson*(runtime: JsAppRuntime, value: Color): JsonNode = %* value.toHtmlHex
-proc jsAppFieldToJson*(runtime: JsAppRuntime, value: NodeId): JsonNode = %* value.int
-proc jsAppFieldToJson*(runtime: JsAppRuntime, value: SceneId): JsonNode = %* value.string
-proc jsAppFieldToJson*(runtime: JsAppRuntime, value: Image): JsonNode = runtime.storeImageJson(value)
-proc jsAppFieldToJson*[T](runtime: JsAppRuntime, value: seq[T]): JsonNode =
-  result = newJArray()
-  for item in value:
-    result.add(jsAppFieldToJson(runtime, item))
-proc jsAppFieldToJson*[T](runtime: JsAppRuntime, value: Option[T]): JsonNode =
-  if value.isSome:
-    return jsAppFieldToJson(runtime, value.get())
-  return newJNull()
-
 proc jsAppSourceFromSources*(sources: JsonNode): string =
   if sources.isNil or sources.kind != JObject:
     return ""
@@ -495,3 +471,20 @@ proc getDynamicJsApp*(app: AppRoot, context: ExecutionContext): Value =
 proc runDynamicJsApp*(app: AppRoot, context: ExecutionContext) =
   let dynamicApp = DynamicJsApp(app)
   dynamicApp.runtime.run(dynamicApp, dynamicApp.configJson, context)
+
+proc getDynamicJsAppField*(app: AppRoot, field: string, fieldType: string): Value =
+  let dynamicApp = DynamicJsApp(app)
+  if dynamicApp.configJson.isNil or dynamicApp.configJson.kind != JObject:
+    return valueFromJsonByType(newJNull(), fieldType)
+  if not dynamicApp.configJson.hasKey(field):
+    return valueFromJsonByType(newJNull(), fieldType)
+  let context = ExecutionContext(
+    scene: dynamicApp.scene,
+    event: "field",
+    payload: %*{},
+    hasImage: false,
+    loopIndex: 0,
+    loopKey: ".",
+    nextSleep: -1
+  )
+  dynamicApp.runtime.toValue(dynamicApp, context, dynamicApp.configJson[field], fieldType)
