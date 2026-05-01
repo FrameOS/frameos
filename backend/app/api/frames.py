@@ -676,6 +676,7 @@ async def _forward_frame_request(
             method=method.upper(),
             body=body_for_agent,
             headers=_auth_headers(frame),
+            redis=redis,
         )
         status, payload = _normalise_agent_response(agent_resp)
         if status == 200:
@@ -759,7 +760,7 @@ async def _remote_file_md5(
     Return (md5, exists). Prefer the websocket agent, fall back to SSH.
     """
     if await _use_agent(frame, redis):
-        resp = await file_md5_on_frame(frame.id, remote_path)
+        resp = await file_md5_on_frame(frame.id, remote_path, redis=redis)
         return resp.get("md5", ""), bool(resp.get("exists", False))
 
     ssh = await get_ssh_connection(db, redis, frame)
@@ -795,7 +796,7 @@ async def _remote_download_file(
     Download *remote_path* – agent first, SSH SCP otherwise.
     """
     if await _use_agent(frame, redis):
-        return await file_read_on_frame(frame.id, remote_path)
+        return await file_read_on_frame(frame.id, remote_path, redis=redis)
 
     ssh = await get_ssh_connection(db, redis, frame)
     try:
@@ -1352,7 +1353,7 @@ async def api_frame_get_asset(
                     f"convert {shlex.quote(full_path)} -thumbnail 320x320 "
                     f"{shlex.quote(thumb_full)}"
                 )
-                await exec_shell_on_frame(frame.id, cmd)
+                await exec_shell_on_frame(frame.id, cmd, redis=redis)
 
                 data = await _remote_download_file(db, redis, frame, thumb_full)
                 await redis.set(cache_key, data, ex=86400 * 30)
@@ -1361,7 +1362,7 @@ async def api_frame_get_asset(
 
     if await _use_agent(frame, redis):
         try:
-            data = await file_read_on_frame(frame.id, full_path)
+            data = await file_read_on_frame(frame.id, full_path, redis=redis)
         except Exception:  # file_read returns RuntimeError on missing file
             raise HTTPException(
                 status_code=HTTPStatus.NOT_FOUND, detail="Asset not found",
@@ -1598,7 +1599,7 @@ async def api_frame_get_assets(
     assets_path = frame.assets_path or "/srv/assets"
 
     if await _use_agent(frame, redis):
-        assets = await assets_list_on_frame(frame.id, assets_path)
+        assets = await assets_list_on_frame(frame.id, assets_path, redis=redis)
         assets.sort(key=lambda a: a["path"])
         return {"assets": assets}
 
@@ -1824,7 +1825,9 @@ async def api_frame_clear_build_cache(
                 "> rm -rf /srv/frameos/build/cache && echo DONE",
             )
             await exec_shell_on_frame(
-                frame.id, "rm -rf /srv/frameos/build/cache && echo DONE"
+                frame.id,
+                "rm -rf /srv/frameos/build/cache && echo DONE",
+                redis=redis,
             )
             return {"message": "Build cache cleared successfully"}
         except Exception as e:

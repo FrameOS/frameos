@@ -260,7 +260,7 @@ proc buildFrameImageResponse*(request: Request): tuple[status: httpcore.HttpCode
     let lastModified = format(fromUnix(int64(lastUpdate)), "ddd, dd MMM yyyy HH:mm:ss 'GMT'", utc())
     headers["Last-Modified"] = lastModified
   try:
-    let image = drivers.toPng(360 - globalFrameConfig.rotate)
+    let image = drivers.toPng(360 - globalFrameConfig.rotate, globalFrameConfig.flip)
     if image != "":
       return (Http200, headers, image)
     else:

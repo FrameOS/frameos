@@ -166,28 +166,6 @@
       "checksums": {
         "sha1": "64999611cd1093e28b62ed80e695783839441538"
       }
-    },
-    "unpack": {
-      "version": "0.4.0",
-      "vcsRevision": "1b6d749473bfb6bd7b749abf823503df633ba04c",
-      "url": "https://github.com/technicallyagd/unpack",
-      "downloadMethod": "git",
-      "dependencies": [],
-      "checksums": {
-        "sha1": "d65465ca8e74e9fcb590255491c8fe7763e38c42"
-      }
-    },
-    "psutil": {
-      "version": "0.6.1",
-      "vcsRevision": "8e5db60edb22a5fc21268127eb385e5d8f70b474",
-      "url": "https://github.com/juancarlospaco/psutil-nim",
-      "downloadMethod": "git",
-      "dependencies": [
-        "unpack"
-      ],
-      "checksums": {
-        "sha1": "137403c200c58c6cd566ab5fbfd597b535303fc6"
-      }
     }
   },
   "tasks": {}

@@ -222,7 +222,7 @@ proc render*(self: Driver, image: Image) =
   process.close()
 
 # Convert the rendered pixels to a PNG image. For accurate colors on the web.
-proc toPng*(rotate: int = 0): string =
+proc toPng*(rotate: int = 0, flip: string = ""): string =
   let width = lastWidth
   let height = lastHeight
   var outputImage = newImage(width, height)
@@ -241,7 +241,4 @@ proc toPng*(rotate: int = 0): string =
       outputImage.data[index].b = spectra6ColorPalette[pixel][2].uint8
       outputImage.data[index].a = 255
 
-  if rotate != 0:
-    return outputImage.rotateDegrees(rotate).encodeImage(PngFormat)
-
-  return outputImage.encodeImage(PngFormat)
+  outputImage.previewTransform(rotate, flip).encodeImage(PngFormat)

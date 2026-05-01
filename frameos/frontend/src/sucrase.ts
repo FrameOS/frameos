@@ -1,6 +1,6 @@
 import { transform } from 'sucrase'
 
-type TransformName = 'jsx' | 'typescript'
+type TransformName = 'jsx' | 'typescript' | 'imports'
 
 interface TranspileOptions {
   filePath?: string

@@ -13,6 +13,7 @@ import { entityImagesModel } from '../../models/entityImagesModel'
 import { arrangeNodes } from '../../utils/arrangeNodes'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
 import { secureToken } from '../../utils/secureToken'
+import { normalizeSceneApps } from '../../utils/sceneApps'
 import {
   type ChangeDetail,
   CURRENT_FRAMEOS_VERSION,
@@ -198,6 +199,25 @@ function getRecompileFields(mode: FrameType['mode']): (keyof FrameType)[] {
   return mode === 'buildroot' ? FRAME_KEYS_REQUIRE_RECOMPILE_BUILDROOT : FRAME_KEYS_REQUIRE_RECOMPILE_RPIOS
 }
 
+export function normalizeSceneForComparison(
+  scene: Partial<FrameScene> | null | undefined
+): Partial<FrameScene> | null | undefined {
+  if (!scene) {
+    return scene
+  }
+  return {
+    ...scene,
+    apps: normalizeSceneApps(scene.apps),
+  }
+}
+
+export function sceneEqualForComparison(
+  first: Partial<FrameScene> | null | undefined,
+  second: Partial<FrameScene> | null | undefined
+): boolean {
+  return equal(normalizeSceneForComparison(first), normalizeSceneForComparison(second))
+}
+
 function sceneChangeDetails(currentScenes: FrameScene[], deployedScenes: FrameScene[]): ChangeDetail[] {
   const details: ChangeDetail[] = []
 
@@ -222,7 +242,7 @@ function sceneChangeDetails(currentScenes: FrameScene[], deployedScenes: FrameSc
       continue
     }
 
-    if (!equal(scene, deployed)) {
+    if (!sceneEqualForComparison(scene, deployed)) {
       details.push({
         label: `Scene updated: ${scene.name || scene.id}`,
         requiresFullDeploy: mode !== 'interpreted',
@@ -578,6 +598,7 @@ export function sanitizeScene(scene: Partial<FrameScene>, frame: Partial<FrameTy
     name: scene.name || 'Untitled scene',
     nodes: shouldArrange ? arrangeNodes(normalizedNodes, edges) : normalizedNodes,
     edges,
+    apps: normalizeSceneApps(scene.apps),
     fields: scene.fields ?? [],
     settings: {
       ...settings,
@@ -868,7 +889,7 @@ export const frameLogic = kea<frameLogicType>([
 
         unsavedScenes.forEach((scene) => {
           const original = frameScenes.find((candidate) => candidate.id === scene.id)
-          if (!original || !equal(original, scene)) {
+          if (!original || !sceneEqualForComparison(original, scene)) {
             changed.add(scene.id)
           }
         })
@@ -892,8 +913,14 @@ export const frameLogic = kea<frameLogicType>([
         isFrameAdminMode ? [] : computeChangeDetails(lastDeploy, frame, mode),
     ],
     requiresRecompilation: [
-      (s) => [s.undeployedChangeDetails],
-      (undeployedChangeDetails) => undeployedChangeDetails.some((change) => change.requiresFullDeploy),
+      (s) => [s.lastDeploy, s.frame, s.frameForm, s.mode, s.isFrameAdminMode],
+      (lastDeploy, frame, frameForm, mode, isFrameAdminMode): boolean => {
+        if (isFrameAdminMode) {
+          return false
+        }
+        const pendingFrame = Object.keys(frameForm ?? {}).length > 0 ? frameForm : frame
+        return computeChangeDetails(lastDeploy, pendingFrame, mode).some((change) => change.requiresFullDeploy)
+      },
     ],
     deployChangeDetails: [
       (s) => [s.lastDeploy, s.frameForm, s.mode, s.isFrameAdminMode],
@@ -901,9 +928,11 @@ export const frameLogic = kea<frameLogicType>([
         isFrameAdminMode ? [] : computeChangeDetails(lastDeploy, frameForm, mode),
     ],
     undeployedSummaryItems: [
-      (s) => [s.lastDeploy, s.frame, s.requiresRecompilation, s.isFrameAdminMode],
-      (lastDeploy, frame, requiresRecompilation, isFrameAdminMode): SummaryItem[] =>
-        isFrameAdminMode ? [] : buildUndeployedSummaryItems(lastDeploy, frame, requiresRecompilation),
+      (s) => [s.lastDeploy, s.frame, s.frameForm, s.requiresRecompilation, s.isFrameAdminMode],
+      (lastDeploy, frame, frameForm, requiresRecompilation, isFrameAdminMode): SummaryItem[] => {
+        const pendingFrame = Object.keys(frameForm ?? {}).length > 0 ? frameForm : frame
+        return isFrameAdminMode ? [] : buildUndeployedSummaryItems(lastDeploy, pendingFrame, requiresRecompilation)
+      },
     ],
     deployPlan: [(s) => [s.deployPlans], (deployPlans) => deployPlans],
     fastDeployPlan: [(s) => [s.deployPlan], (deployPlan) => deployPlan],

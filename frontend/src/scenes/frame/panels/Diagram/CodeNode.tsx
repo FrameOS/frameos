@@ -8,7 +8,7 @@ import { TextArea } from '../../../../components/TextArea'
 import Editor, { Monaco } from '@monaco-editor/react'
 import type { editor as MonacoEditor } from 'monaco-editor'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
-import { CheckIcon, ClipboardDocumentIcon, TrashIcon } from '@heroicons/react/24/solid'
+import { CheckIcon, ClipboardDocumentIcon, DocumentDuplicateIcon, TrashIcon } from '@heroicons/react/24/solid'
 import { appNodeLogic } from './appNodeLogic'
 import { NodeCache } from './NodeCache'
 import { CodeArg } from './CodeArg'
@@ -17,7 +17,7 @@ import { newNodePickerLogic } from './newNodePickerLogic'
 export function CodeNode({ id, isConnectable }: NodeProps<CodeNodeData>): JSX.Element {
   const updateNodeInternals = useUpdateNodeInternals()
   const { frameId, sceneId } = useValues(diagramLogic)
-  const { updateNodeData, updateEdge, copyAppJSON, deleteApp } = useActions(diagramLogic)
+  const { updateNodeData, updateEdge, copyAppJSON, duplicateNode, deleteApp } = useActions(diagramLogic)
   const appNodeLogicProps = { frameId, sceneId, nodeId: id }
   const { isSelected, node, nodeEdges, codeNodeLanguage } = useValues(appNodeLogic(appNodeLogicProps))
   const data: CodeNodeData = (node?.data as CodeNodeData) ?? ({ code: '' } satisfies CodeNodeData)
@@ -241,6 +241,11 @@ declare const context: {
                 label: 'Copy as JSON',
                 onClick: () => copyAppJSON(id),
                 icon: <ClipboardDocumentIcon className="w-5 h-5" />,
+              },
+              {
+                label: 'Duplicate',
+                onClick: () => duplicateNode(id),
+                icon: <DocumentDuplicateIcon className="w-5 h-5" />,
               },
               {
                 label: 'Delete Node',

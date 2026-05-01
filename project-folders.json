@@ -8,7 +8,7 @@
       "include": ["frameos/agent"]
     },
     "docker": {
-      "include": ["repo", "backend", "frontend", "frameos", "Dockerfile", ".dockerignore"]
+      "include": ["repo", "backend", "frontend", "frameos", "Dockerfile", ".dockerignore", ".github/workflows/docker-publish-multi.yml", "project-folders.json"]
     }
   }
 }

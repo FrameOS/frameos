@@ -10,7 +10,7 @@ import _events from '../../../../../schema/events.json'
 import { ClipboardIcon, InformationCircleIcon } from '@heroicons/react/24/solid'
 import { frameLogic } from '../../frameLogic'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
-import { ClipboardDocumentIcon, TrashIcon } from '@heroicons/react/24/solid'
+import { ClipboardDocumentIcon, DocumentDuplicateIcon, TrashIcon } from '@heroicons/react/24/solid'
 import { appNodeLogic } from './appNodeLogic'
 import { newNodePickerLogic } from './newNodePickerLogic'
 import { TextInput } from '../../../../components/TextInput'
@@ -25,7 +25,7 @@ export function EventNode({ id, isConnectable }: NodeProps): JSX.Element {
   const { frameId, sceneId } = useValues(diagramLogic)
   const { width, height, defaultInterval } = useValues(frameLogic)
   const { scene } = useValues(diagramLogic)
-  const { selectNode, updateNodeData, copyAppJSON, deleteApp } = useActions(diagramLogic)
+  const { selectNode, updateNodeData, copyAppJSON, duplicateNode, deleteApp } = useActions(diagramLogic)
   const { updateScene } = useActions(frameLogic)
 
   const appNodeLogicProps = { frameId, sceneId, nodeId: id }
@@ -170,6 +170,11 @@ export function EventNode({ id, isConnectable }: NodeProps): JSX.Element {
                 label: 'Copy as JSON',
                 onClick: () => copyAppJSON(id),
                 icon: <ClipboardDocumentIcon className="w-5 h-5" />,
+              },
+              {
+                label: 'Duplicate',
+                onClick: () => duplicateNode(id),
+                icon: <DocumentDuplicateIcon className="w-5 h-5" />,
               },
               {
                 label: 'Delete Node',

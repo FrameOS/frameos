@@ -549,6 +549,7 @@ def _app_has_self_init(app_dir: str) -> bool:
     # Only match the App instance init proc, not legacy constructor-style `init(...) : App`.
     return re.search(r"proc\s+init\*?\s*\(\s*self\s*:\s*(?:var\s+)?App\b", app_source) is not None
 
+
 def write_app_loader_nim(app_dir, config: Optional[dict] = None) -> str:
     if not config:
         config_path = os.path.join(app_dir, "config.json")
@@ -557,6 +558,10 @@ def write_app_loader_nim(app_dir, config: Optional[dict] = None) -> str:
         with open(config_path, "r") as f:
             config = json.load(f)
             assert config is not None
+
+    app_source_path = os.path.join(app_dir, "app.nim")
+    if not os.path.exists(app_source_path):
+        raise FileNotFoundError(f"Nim app source not found: {app_source_path}")
 
     fields = [f for f in config.get("fields", []) if not f.get("markdown")]
     app_has_self_init = _app_has_self_init(app_dir)

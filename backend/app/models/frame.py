@@ -423,6 +423,10 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
         for node in scene.get('nodes', []):
             if node.get('type', None) == 'app':
                 sources = node.get('data', {}).get('sources', None)
+                keyword = node.get('data', {}).get('keyword', None)
+                scene_app = scene.get('apps', {}).get(keyword) if isinstance(scene.get('apps', {}), dict) else None
+                if not sources and isinstance(scene_app, dict):
+                    sources = scene_app.get('sources', None)
                 if sources and len(sources) > 0:
                     try:
                         config = sources.get('config.json', '{}')
@@ -433,7 +437,6 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
                     except:  # noqa: E722
                         pass
                 else:
-                    keyword = node.get('data', {}).get('keyword', None)
                     if keyword:
                         app_config = app_configs.get(keyword, None)
                         if app_config:

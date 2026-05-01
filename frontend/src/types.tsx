@@ -299,6 +299,12 @@ export interface AppConfig {
   output?: OutputField[]
   /** Default cache settings */
   cache?: CacheConfig
+  /** Origin app this app was created from, such as repo/apps/code/jsText */
+  origin?: string
+}
+
+export interface SceneApp extends Partial<AppConfig> {
+  sources: Record<string, string>
 }
 
 export interface FontMetadata {
@@ -487,6 +493,7 @@ export interface FrameScene {
   name: string
   nodes: DiagramNode[]
   edges: DiagramEdge[]
+  apps?: Record<string, SceneApp>
   fields?: StateField[]
   default?: boolean
   settings?: FrameSceneSettings

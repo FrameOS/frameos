@@ -4,11 +4,17 @@ import type { appsModelType } from './appsModelType'
 import { loaders } from 'kea-loaders'
 import { AppConfig } from '../types'
 import { apiFetch } from '../utils/apiFetch'
+import { embeddedRepoAppConfigs } from '../generated/repoApps'
 
 export const categoryLabels: Record<string, any> = {
+  code: 'Code',
   render: 'Render',
   logic: 'Logic',
   data: 'Data',
+}
+
+function withEmbeddedRepoApps(apps: Record<string, AppConfig>): Record<string, AppConfig> {
+  return { ...apps, ...embeddedRepoAppConfigs }
 }
 
 export const appsModel = kea<appsModelType>([
@@ -24,10 +30,10 @@ export const appsModel = kea<appsModelType>([
               throw new Error('Failed to fetch apps')
             }
             const data = await response.json()
-            return data.apps as Record<string, AppConfig>
+            return withEmbeddedRepoApps(data.apps as Record<string, AppConfig>)
           } catch (error) {
             console.error(error)
-            return values.apps
+            return withEmbeddedRepoApps(values.apps)
           }
         },
       },

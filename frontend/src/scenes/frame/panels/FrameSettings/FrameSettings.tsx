@@ -141,7 +141,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
     setBuildrootPlatform,
   } = useActions(frameLogic)
   const { deleteFrame } = useActions(framesModel)
-  const { appsWithSaveAssets } = useValues(appsLogic)
+  const { appsWithSaveAssets } = useValues(appsLogic({ frameId }))
   const { clearBuildCache, downloadBuildZip, downloadCSourceZip, downloadBinaryZip, downloadSdImage } = useActions(
     frameSettingsLogic({ frameId })
   )

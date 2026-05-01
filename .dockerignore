@@ -35,6 +35,9 @@ db
 *.db
 build
 repo
+!repo/
+!repo/apps/
+!repo/apps/**
 frameos/result
 frameos/tmp
 frameos/build

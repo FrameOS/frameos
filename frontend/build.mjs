@@ -13,6 +13,8 @@ import {
 
 export const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
+await import('./scripts/generateRepoApps.mjs')
+
 startDevServer(__dirname)
 copyPublicFolder(path.resolve(__dirname, 'public'), path.resolve(__dirname, 'dist'))
 writeIndexHtml()

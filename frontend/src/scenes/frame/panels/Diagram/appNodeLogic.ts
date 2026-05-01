@@ -24,6 +24,12 @@ import type { Edge } from '@reactflow/core/dist/esm/types/edges'
 import _events from '../../../../../schema/events.json'
 import equal from 'fast-deep-equal'
 import { frameLogic } from '../../frameLogic'
+import {
+  hasCompiledAppSource,
+  hasJavaScriptAppSource,
+  isRepoAppKeyword,
+  sceneAppToAppConfig,
+} from '../../../../utils/sceneApps'
 const events: FrameEvent[] = _events as any
 
 export interface AppNodeLogicProps extends DiagramLogicProps {
@@ -40,13 +46,13 @@ export const appNodeLogic = kea<appNodeLogicType>([
       appsModel,
       ['apps'],
       diagramLogic({ frameId, sceneId }),
-      ['nodes', 'edges', 'scene as currentScene', 'codeNodeLanguage'],
+      ['nodes', 'edges', 'scene as currentScene', 'codeNodeLanguage', 'effectiveApps'],
       frameLogic({ frameId }),
       ['scenes'],
     ],
     actions: [
       diagramLogic({ frameId, sceneId }),
-      ['selectNode', 'updateNodeData', 'deleteApp', 'setNodes', 'setEdges'],
+      ['selectNode', 'updateNodeData', 'deleteApp', 'setNodes', 'setEdges', 'forkSceneApp'],
     ],
   })),
   actions({
@@ -108,10 +114,13 @@ export const appNodeLogic = kea<appNodeLogicType>([
     ],
     isSelected: [(s) => [s.node], (node) => node?.selected ?? false],
     sources: [
-      (s) => [s.apps, s.node],
-      (apps, node): Record<string, string> | null => {
+      (s) => [s.currentScene, s.node],
+      (currentScene, node): Record<string, string> | null => {
         if (node && node.data && 'sources' in node.data && node.data.sources) {
           return node.data.sources
+        }
+        if (node?.type === 'app' && 'keyword' in node.data) {
+          return currentScene?.apps?.[node.data.keyword]?.sources ?? null
         }
         return null
       },
@@ -142,17 +151,11 @@ export const appNodeLogic = kea<appNodeLogicType>([
       },
     ],
     app: [
-      (s) => [s.apps, s.node],
-      (apps, node): AppConfig | null => {
-        if (
-          node &&
-          node.type === 'app' &&
-          node.data &&
-          'keyword' in node.data &&
-          node.data.keyword &&
-          !('sources' in node.data)
-        ) {
-          return apps[node.data.keyword] ?? null
+      (s) => [s.effectiveApps, s.currentScene, s.node],
+      (effectiveApps, currentScene, node): AppConfig | null => {
+        if (node && node.type === 'app' && node.data && 'keyword' in node.data && node.data.keyword) {
+          const sceneApp = currentScene?.apps?.[node.data.keyword]
+          return sceneApp ? sceneAppToAppConfig(sceneApp) : effectiveApps[node.data.keyword] ?? null
         }
         return null
       },
@@ -177,6 +180,31 @@ export const appNodeLogic = kea<appNodeLogicType>([
     isApp: [(s) => [s.node], (node) => node?.type === 'app'],
     isDispatch: [(s) => [s.node], (node) => node?.type === 'dispatch'],
     isScene: [(s) => [s.node], (node) => node?.type === 'scene'],
+    isSceneApp: [
+      (s) => [s.currentScene, s.node],
+      (currentScene, node): boolean =>
+        !!(node?.type === 'app' && 'keyword' in node.data && currentScene?.apps?.[node.data.keyword]),
+    ],
+    isJavaScriptSceneApp: [
+      (s) => [s.isSceneApp, s.sources],
+      (isSceneApp, sources): boolean => isSceneApp && hasJavaScriptAppSource(sources),
+    ],
+    isNimAppInInterpretedScene: [
+      (s) => [s.currentScene, s.node, s.sources],
+      (currentScene, node, sources): boolean => {
+        if (currentScene?.settings?.execution !== 'interpreted' || node?.type !== 'app') {
+          return false
+        }
+        if (sources) {
+          return hasCompiledAppSource(sources)
+        }
+        return 'keyword' in node.data && !isRepoAppKeyword(node.data.keyword)
+      },
+    ],
+    appMenuEditLabel: [
+      (s) => [s.isNimAppInInterpretedScene],
+      (isNimAppInInterpretedScene): string => (isNimAppInInterpretedScene ? 'View nim app' : 'Edit App'),
+    ],
     configJson: [
       (s) => [s.app, s.sourceConfigJson],
       (app, [config]): AppConfig | null => {

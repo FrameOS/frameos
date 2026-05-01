@@ -327,44 +327,43 @@ proc parseDateString(self: var ParsedCalendar, event: var VEvent, value: string)
     return parseICalDateTime(value, timeZone)
 
 proc processCurrentFields*(self: var ParsedCalendar) =
-  let fields = self.currentFields
   var event = VEvent()
 
   template getFirstValue(key: string): string =
-    fields[key].head.value
+    self.currentFields[key].head.value
 
-  if fields.hasKey("UID"):
+  if self.currentFields.hasKey("UID"):
     event.uid = getFirstValue("UID")
 
-  if fields.hasKey("TZID"):
-    event.timeZone = normalizeTimeZone(fields["TZID"].head.value)
+  if self.currentFields.hasKey("TZID"):
+    event.timeZone = normalizeTimeZone(self.currentFields["TZID"].head.value)
   else:
     event.timeZone = self.timeZone
 
-  if fields.hasKey("DTSTART"):
+  if self.currentFields.hasKey("DTSTART"):
     let value = getFirstValue("DTSTART")
     if value.startsWith("TZID="):
       event.timeZone = normalizeTimeZone(value.split(":")[0].split("=")[1])
     event.startTs = self.parseDateString(event, value)
     event.fullDay = value.contains("VALUE=DATE") or len(value) == 8
 
-  if fields.hasKey("DTEND"):
+  if self.currentFields.hasKey("DTEND"):
     let value = getFirstValue("DTEND")
     if value.startsWith("TZID="):
       event.timeZone = normalizeTimeZone(value.split(":")[0].split("=")[1])
     event.endTs = self.parseDateString(event, value)
     event.fullDay = value.contains("VALUE=DATE") or len(value) == 8
 
-  if fields.hasKey("DURATION"):
+  if self.currentFields.hasKey("DURATION"):
     assert(false, "DURATION is not supported")
 
-  if fields.hasKey("DTSTAMP"):
+  if self.currentFields.hasKey("DTSTAMP"):
     event.dtStamp = parseICalDateTime(getFirstValue("DTSTAMP"), "UTC")
 
-  if fields.hasKey("RECURRENCE-ID"):
+  if self.currentFields.hasKey("RECURRENCE-ID"):
     event.recurrenceId = getFirstValue("RECURRENCE-ID")
 
-  if fields.hasKey("RRULE"):
+  if self.currentFields.hasKey("RRULE"):
     var rrule = RRule(weekStart: RRuleDay.none, byDay: @[], byMonth: @[], byMonthDay: @[])
     let value = getFirstValue("RRULE")
     for split in value.split(';'):
@@ -447,8 +446,8 @@ proc processCurrentFields*(self: var ParsedCalendar) =
     event.rrules.add(rrule)
   # if fields.hasKey("RDATE"):
   #   assert(false, "RDATE is not supported")
-  if fields.hasKey("EXDATE"):
-    for raw in fields["EXDATE"].items():
+  if self.currentFields.hasKey("EXDATE"):
+    for raw in self.currentFields["EXDATE"].items():
       var tzParam = ""
       var datesPart = raw
       let colon = raw.find(':')
@@ -467,13 +466,13 @@ proc processCurrentFields*(self: var ParsedCalendar) =
         event.exDates.add(parseICalDateTime(token, tzToUse))
 
   # Text fields
-  if fields.hasKey("SUMMARY"):
+  if self.currentFields.hasKey("SUMMARY"):
     event.summary = unescape(getFirstValue("SUMMARY"))
-  if fields.hasKey("DESCRIPTION"):
+  if self.currentFields.hasKey("DESCRIPTION"):
     event.description = unescape(getFirstValue("DESCRIPTION"))
-  if fields.hasKey("LOCATION"):
+  if self.currentFields.hasKey("LOCATION"):
     event.location = unescape(getFirstValue("LOCATION"))
-  if fields.hasKey("URL"):
+  if self.currentFields.hasKey("URL"):
     event.url = unescape(getFirstValue("URL"))
   # if fields.hasKey("COMMENT"):
   #   return # Ignore comments
@@ -484,7 +483,7 @@ proc processCurrentFields*(self: var ParsedCalendar) =
   # if fields.hasKey("CATEGORIES"):
   #   assert(false, "CATEGORIES is not supported")
 
-  if fields.hasKey("STATUS"):
+  if self.currentFields.hasKey("STATUS"):
     let s = getFirstValue("STATUS").toUpperAscii()
     case s
     of "CANCELLED": event.status = stCancelled
@@ -492,9 +491,9 @@ proc processCurrentFields*(self: var ParsedCalendar) =
     of "CONFIRMED": event.status = stConfirmed
     else: event.status = stNone
 
-  if fields.hasKey("LAST-MODIFIED"):
+  if self.currentFields.hasKey("LAST-MODIFIED"):
     event.lastModified = parseICalDateTime(getFirstValue("LAST-MODIFIED"), "UTC")
-  if fields.hasKey("SEQUENCE"):
+  if self.currentFields.hasKey("SEQUENCE"):
     try:
       event.sequence = getFirstValue("SEQUENCE").parseInt()
     except ValueError:

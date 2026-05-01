@@ -52,6 +52,7 @@ async def new_log(
     db.add(log)
     db.commit()
     frame_logs_count = db.query(Log).filter_by(frame_id=frame_id).count()
+    payload = {**log.to_dict(), "timestamp": log.timestamp.replace(tzinfo=timezone.utc).isoformat()}
     if frame_logs_count > 1100:
         oldest_logs = (db.query(Log)
                        .filter_by(frame_id=frame_id)
@@ -60,9 +61,9 @@ async def new_log(
                        .all())
         for old_log in oldest_logs:
             db.delete(old_log)
-        db.commit()
+    db.commit()
 
-    await publish_message(redis, "new_log", {**log.to_dict(), "timestamp": log.timestamp.replace(tzinfo=timezone.utc).isoformat()})
+    await publish_message(redis, "new_log", payload)
     return log
 
 

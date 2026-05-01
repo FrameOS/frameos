@@ -1,6 +1,14 @@
-import pytest
 from unittest.mock import patch, AsyncMock
-from app.models.frame import Frame, delete_frame, new_frame, normalize_frame_admin_auth, update_frame
+
+import pytest
+
+from app.models.frame import (
+    Frame,
+    delete_frame,
+    new_frame,
+    normalize_frame_admin_auth,
+    update_frame,
+)
 
 
 @pytest.mark.asyncio

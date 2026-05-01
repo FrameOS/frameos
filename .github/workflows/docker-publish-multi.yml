@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -14,6 +15,8 @@ jobs:
     outputs:
       skip_release: ${{ steps.release-control.outputs.skip_release }}
       versions_changed: ${{ steps.detect.outputs.versions_changed }}
+      should_publish: ${{ steps.release-ref.outputs.should_publish }}
+      release_sha: ${{ steps.release-ref.outputs.release_sha }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -28,7 +31,7 @@ jobs:
       - name: Check release skip markers
         id: release-control
         env:
-          HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+          HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message || '' }}
         run: |
           if printf '%s\n' "$HEAD_COMMIT_MESSAGE" | grep -Eiq '(^|[[:space:]])#norelease([[:space:]]|$)|\[skip release\]'; then
             echo "skip_release=true" >> "$GITHUB_OUTPUT"
@@ -66,13 +69,40 @@ jobs:
           git commit -m "chore: version ${VERSION}"
           git push
 
+      - name: Select release commit
+        id: release-ref
+        run: |
+          if [ "${{ steps.release-control.outputs.skip_release }}" = "true" ]; then
+            echo "should_publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          HEAD_CHANGED_VERSIONS=false
+          if git rev-parse HEAD^ >/dev/null 2>&1 && ! git diff --quiet HEAD^ HEAD -- versions.json; then
+            HEAD_CHANGED_VERSIONS=true
+          fi
+
+          HEAD_CHANGED_PUBLISH_WORKFLOW=false
+          if git rev-parse HEAD^ >/dev/null 2>&1 && ! git diff --quiet HEAD^ HEAD -- .github/workflows/docker-publish-multi.yml; then
+            HEAD_CHANGED_PUBLISH_WORKFLOW=true
+          fi
+
+          if [ "${{ steps.detect.outputs.versions_changed }}" = "true" ] || [ "$HEAD_CHANGED_VERSIONS" = "true" ] || [ "$HEAD_CHANGED_PUBLISH_WORKFLOW" = "true" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "should_publish=true" >> "$GITHUB_OUTPUT"
+            echo "release_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_publish=false" >> "$GITHUB_OUTPUT"
+          fi
+
   test:
     needs: update-versions
-    if: needs.update-versions.outputs.versions_changed == 'true'
+    if: needs.update-versions.outputs.should_publish == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v2
+        with:
+          ref: ${{ needs.update-versions.outputs.release_sha }}
 
       - name: Set up Python
         uses: actions/setup-python@v2
@@ -113,7 +143,7 @@ jobs:
           TEST=1 pytest
 
   build:
-    if: needs.update-versions.outputs.versions_changed == 'true'
+    if: needs.update-versions.outputs.should_publish == 'true'
     needs: [update-versions, test]
     runs-on: ubuntu-latest
     strategy:
@@ -128,6 +158,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v2
+        with:
+          ref: ${{ needs.update-versions.outputs.release_sha }}
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v1
@@ -143,7 +175,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /tmp/.buildx-cache
-          key: ${{ runner.os }}-buildx-${{ matrix.platform }}-${{ github.sha }}
+          key: ${{ runner.os }}-buildx-${{ matrix.platform }}-${{ needs.update-versions.outputs.release_sha }}
           restore-keys: |
             ${{ runner.os }}-buildx-${{ matrix.platform }}-
 
@@ -153,7 +185,7 @@ jobs:
 
       - name: Short SHA
         shell: bash
-        run: echo "SHORT_SHA=${GITHUB_SHA:0:7}" >> $GITHUB_ENV
+        run: echo "SHORT_SHA=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
 
       - name: Read Docker version tags
         shell: bash
@@ -181,12 +213,14 @@ jobs:
           cache-to: type=local,dest=/tmp/.buildx-cache
 
   push-multiarch:
-    if: needs.update-versions.outputs.versions_changed == 'true'
+    if: needs.update-versions.outputs.should_publish == 'true'
     needs: [update-versions, build]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v2
+        with:
+          ref: ${{ needs.update-versions.outputs.release_sha }}
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v1
@@ -209,7 +243,7 @@ jobs:
 
       - name: Short SHA
         shell: bash
-        run: echo "SHORT_SHA=${GITHUB_SHA:0:7}" >> $GITHUB_ENV
+        run: echo "SHORT_SHA=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
 
       - name: Read Docker version tags
         shell: bash
@@ -239,13 +273,14 @@ jobs:
 
   update-addon-repo:
     name: Update Home Assistant Addon
-    if: needs.update-versions.outputs.versions_changed == 'true'
+    if: needs.update-versions.outputs.should_publish == 'true'
     needs: [update-versions, push-multiarch]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout frameos
         uses: actions/checkout@v4
         with:
+          ref: ${{ needs.update-versions.outputs.release_sha }}
           path: frameos
 
       - name: Checkout frameos-home-assistant-addon
@@ -255,14 +290,6 @@ jobs:
           token: ${{ secrets.ACTIONS_WRITE_TOKEN }}
           ref: main
           path: home-assistant-addon
-
-      - name: Extract branch name
-        shell: bash
-        run: echo "BRANCH_NAME=${GITHUB_REF##*/}" >> $GITHUB_ENV
-
-      - name: Short SHA
-        shell: bash
-        run: echo "SHORT_SHA=${GITHUB_SHA:0:7}" >> $GITHUB_ENV
 
       - name: Read Docker version
         shell: bash

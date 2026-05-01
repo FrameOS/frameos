@@ -1,7 +1,9 @@
 import std/[json, tables, strutils, unittest]
 import pixie
+import ../channels
 import ../interpreter
 import ../types
+import ../values
 
 
 type LogStore = ref object
@@ -55,6 +57,12 @@ proc eventPayload(store: LogStore, eventName: string): JsonNode =
     if entry.kind == JObject and entry.hasKey("event") and entry["event"].kind == JString and entry["event"].getStr() == eventName:
       return entry
   return nil
+
+proc clearEventChannel() =
+  while true:
+    let (ok, _) = eventChannel.tryRecv()
+    if not ok:
+      break
 
 proc withUploadedScene(sceneId: SceneId, exported: ExportedInterpretedScene, body: proc(store: LogStore, scene: FrameScene)) =
   let config = testConfig()
@@ -114,6 +122,68 @@ suite "interpreter error paths":
       check not err.isNil
       check err["nodeId"].getInt() == 2
       check "Source nodes" in err["error"].getStr()
+
+  test "data node evaluation does not continue through flow edges":
+    let sceneId = "tests/interpreter-errors/data-node-flow-edge".SceneId
+    let exported = ExportedInterpretedScene(
+      name: "data node flow edge",
+      backgroundColor: parseHtmlColor("#000000"),
+      refreshInterval: 1.0,
+      publicStateFields: @[
+        StateField(name: "bucket", fieldType: "string", value: %*"")
+      ],
+      nodes: @[
+        node(10, "code", %*{
+          "codeArgs": [],
+          "codeOutputs": [%*{"name": "bucket", "type": "string"}],
+          "codeJS": "'ok'"
+        }),
+        node(20, "app", %*{
+          "keyword": "logic/setAsState",
+          "config": {
+            "stateKey": "bucket",
+            "valueString": "should-not-run"
+          }
+        })
+      ],
+      edges: @[
+        edge(100, 10, "next", 20, "prev")
+      ]
+    )
+
+    withUploadedScene(sceneId, exported) do (store: LogStore, scene: FrameScene):
+      let value = scene.getDataNode(10.NodeId, ctx(scene, "render"))
+      check value.kind == fkString
+      check value.asString() == "ok"
+      check scene.state{"bucket"}.getStr() == ""
+      check eventPayload(store, "interpreter:dispatch:ignored").isNil
+
+  test "render dispatch from render event is ignored to avoid immediate self loop":
+    clearEventChannel()
+    let sceneId = "tests/interpreter-errors/render-self-dispatch".SceneId
+    let exported = ExportedInterpretedScene(
+      name: "render self dispatch",
+      backgroundColor: parseHtmlColor("#000000"),
+      refreshInterval: 1.0,
+      publicStateFields: @[],
+      nodes: @[
+        node(10, "event", %*{"keyword": "render"}),
+        node(20, "dispatch", %*{"keyword": "render", "config": {}})
+      ],
+      edges: @[
+        edge(100, 10, "next", 20, "prev")
+      ]
+    )
+
+    withUploadedScene(sceneId, exported) do (store: LogStore, scene: FrameScene):
+      discard render(scene, ctx(scene, "render"))
+      let (ok, _) = eventChannel.tryRecv()
+      check not ok
+      let ignored = eventPayload(store, "interpreter:dispatch:ignored")
+      check not ignored.isNil
+      check ignored["eventName"].getStr() == "render"
+      check ignored["reason"].getStr() == "renderSelfDispatch"
+    clearEventChannel()
 
   test "malformed field path is handled as literal key during edge wiring":
     var scene = InterpretedFrameScene(nodes: initTable[NodeId, DiagramNode]())

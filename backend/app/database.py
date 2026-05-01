@@ -9,7 +9,12 @@ engine = create_engine(
     pool_timeout=30,  # seconds
     pool_recycle=1800  # seconds
 )
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+SessionLocal = sessionmaker(
+    autocommit=False,
+    autoflush=False,
+    bind=engine,
+    expire_on_commit=False,
+)
 Base = declarative_base()
 
 def get_db():

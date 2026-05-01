@@ -6,13 +6,14 @@ import { PanelWithMetadata } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
 import { panelsLogic } from '../panelsLogic'
 import { chatLogic } from '../Chat/chatLogic'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import schema from '../../../../../schema/config_json.json'
 import type { editor as importedEditor } from 'monaco-editor'
 import type { Monaco } from '@monaco-editor/react'
 import clsx from 'clsx'
 import { TrashIcon } from '@heroicons/react/24/solid'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
+import { javascriptAppSourceFiles } from '../../../../utils/sceneApps'
 
 interface EditAppProps {
   panel: PanelWithMetadata
@@ -31,7 +32,6 @@ export function EditApp({ panel, sceneId, nodeId }: EditAppProps) {
   }
   const logic = editAppLogic(logicProps)
   const {
-    isInterpreted,
     sources,
     filenames,
     sourcesLoading,
@@ -41,12 +41,16 @@ export function EditApp({ panel, sceneId, nodeId }: EditAppProps) {
     configJson,
     modelMarkers,
     savedKeyword,
-    savedSources,
+    requiresCompiledOnSave,
+    appUsageCount,
+    hasMultipleAppUsages,
+    appTypeDeclarations,
   } = useValues(logic)
-  const { saveChanges, setActiveFile, updateFile, addFile, deleteFile } = useActions(logic)
+  const { saveChanges, forkAndSaveChanges, setActiveFile, updateFile, addFile, deleteFile } = useActions(logic)
   const [[monaco, editor], setMonacoAndEditor] = useState<[Monaco | null, importedEditor.IStandaloneCodeEditor | null]>(
     [null, null]
   )
+  const appTypesLibsRef = useRef<{ dispose: () => void }[]>([])
 
   useEffect(() => {
     persistUntilClosed(panel, logic)
@@ -61,7 +65,38 @@ export function EditApp({ panel, sceneId, nodeId }: EditAppProps) {
     }
   }, [monaco, activeFile, modelMarkers])
 
+  useEffect(() => {
+    if (!monaco) {
+      return
+    }
+
+    appTypesLibsRef.current.forEach((lib) => lib.dispose())
+    appTypesLibsRef.current = [
+      monaco.languages.typescript.typescriptDefaults.addExtraLib(
+        appTypeDeclarations,
+        `inmemory://app-editor/${nodeId}/frameos-app-typescript.d.ts`
+      ),
+      monaco.languages.typescript.javascriptDefaults.addExtraLib(
+        appTypeDeclarations,
+        `inmemory://app-editor/${nodeId}/frameos-app-javascript.d.ts`
+      ),
+    ]
+
+    return () => {
+      appTypesLibsRef.current.forEach((lib) => lib.dispose())
+      appTypesLibsRef.current = []
+    }
+  }, [monaco, appTypeDeclarations, nodeId])
+
   function beforeMount(monaco: Monaco) {
+    const compilerOptions = {
+      allowJs: true,
+      allowNonTsExtensions: true,
+      target: monaco.languages.typescript.ScriptTarget.ES2020,
+      jsx: monaco.languages.typescript.JsxEmit.Preserve,
+    }
+    monaco.languages.typescript.typescriptDefaults.setCompilerOptions(compilerOptions)
+    monaco.languages.typescript.javascriptDefaults.setCompilerOptions({ ...compilerOptions, checkJs: true })
     monaco.editor.defineTheme('darkframe', {
       base: 'vs-dark',
       inherit: true,
@@ -85,6 +120,13 @@ export function EditApp({ panel, sceneId, nodeId }: EditAppProps) {
   }
 
   const name = configJson?.name || savedKeyword || nodeId
+  const editorLanguage = activeFile.endsWith('.json')
+    ? 'json'
+    : activeFile.endsWith('.ts') || activeFile.endsWith('.tsx')
+    ? 'typescript'
+    : activeFile.endsWith('.js') || activeFile.endsWith('.jsx')
+    ? 'javascript'
+    : 'python'
 
   return (
     <div className="flex flex-row gap-2 max-h-full h-full max-w-full w-full">
@@ -108,7 +150,7 @@ export function EditApp({ panel, sceneId, nodeId }: EditAppProps) {
               {changedFiles[file] ? '* ' : ''}
               {file}
             </Button>
-            {file === 'app.nim' || file === 'config.json' ? null : (
+            {[...javascriptAppSourceFiles, 'app.nim', 'config.json'].includes(file) ? null : (
               <DropdownMenu
                 buttonColor="none"
                 items={[
@@ -146,7 +188,7 @@ export function EditApp({ panel, sceneId, nodeId }: EditAppProps) {
       <div className="overflow-y-auto overflow-x-auto w-full h-full max-h-full max-w-full gap-2 flex-1 flex flex-col">
         {hasChanges ? (
           <div className="bg-gray-900 p-2">
-            {isInterpreted ? (
+            {requiresCompiledOnSave ? (
               <>
                 You have made changes to this app. If you save them, we will have to change the scene's execution model
                 from "interpreted" to "compiled". Thereafter, any changes to the scene will require a full frame
@@ -156,11 +198,23 @@ export function EditApp({ panel, sceneId, nodeId }: EditAppProps) {
                   I understand. Save the changes
                 </Button>
               </>
+            ) : hasMultipleAppUsages ? (
+              <div className="space-y-2">
+                <div>You are editing all {appUsageCount} uses of this app in this scene.</div>
+                <div className="flex flex-wrap gap-2">
+                  <Button size="small" onClick={saveChanges}>
+                    Save for all usages
+                  </Button>
+                  <Button size="small" color="secondary" onClick={forkAndSaveChanges}>
+                    Fork and save this copy
+                  </Button>
+                </div>
+              </div>
             ) : (
               <>
                 You have changes.{' '}
                 <Button size="small" onClick={saveChanges}>
-                  Click here to {!savedSources ? 'fork the app' : 'save them'}
+                  Save changes
                 </Button>
               </>
             )}
@@ -169,8 +223,8 @@ export function EditApp({ panel, sceneId, nodeId }: EditAppProps) {
         <div className="bg-black font-mono text-sm overflow-y-auto overflow-x-auto w-full flex-1">
           <Editor
             height="100%"
-            path={`${nodeId}/${activeFile}`}
-            language={activeFile.endsWith('.json') ? 'json' : 'python'}
+            path={`inmemory://app-editor/${nodeId}/${activeFile}`}
+            language={editorLanguage}
             value={sources[activeFile] ?? sources[Object.keys(sources)[0]] ?? ''}
             theme="darkframe"
             beforeMount={beforeMount}

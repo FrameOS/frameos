@@ -4,28 +4,26 @@ from pathlib import Path
 
 
 def get_app_configs(source_dir: Path) -> dict[str, dict]:
-    apps_root = source_dir / "src" / "apps"
     configs: dict[str, dict] = {}
 
-    if not apps_root.exists():
-        return configs
-
-    for category_dir in sorted(apps_root.iterdir()):
-        if not category_dir.is_dir():
-            continue
-        for app_dir in sorted(category_dir.iterdir()):
-            if not app_dir.is_dir():
+    apps_root = source_dir / "src" / "apps"
+    if apps_root.exists():
+        for category_dir in sorted(apps_root.iterdir()):
+            if not category_dir.is_dir():
                 continue
-            config_path = app_dir / "config.json"
-            if not config_path.exists():
-                continue
-            try:
-                config = json.loads(config_path.read_text())
-                if isinstance(config, dict) and "name" in config:
-                    configs[f"{category_dir.name}/{app_dir.name}"] = config
-            except Exception:
-                # Keep behavior resilient: skip malformed config files.
-                continue
+            for app_dir in sorted(category_dir.iterdir()):
+                if not app_dir.is_dir():
+                    continue
+                config_path = app_dir / "config.json"
+                if not config_path.exists():
+                    continue
+                try:
+                    config = json.loads(config_path.read_text())
+                    if isinstance(config, dict) and "name" in config:
+                        configs[f"{category_dir.name}/{app_dir.name}"] = config
+                except Exception:
+                    # Keep behavior resilient: skip malformed config files.
+                    continue
 
     return configs
 
@@ -45,7 +43,7 @@ def render_apps_asset_nim(source_dir: Path) -> str:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Generate src/assets/apps.nim from src/apps config.json files")
+    parser = argparse.ArgumentParser(description="Generate src/assets/apps.nim from app config.json files")
     parser.add_argument("--source-dir", default=".", help="FrameOS project root containing src/apps")
     parser.add_argument("--output", default="src/assets/apps.nim", help="Output path for apps.nim")
     args = parser.parse_args()
