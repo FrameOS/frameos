@@ -1,6 +1,8 @@
 from types import SimpleNamespace
 
 from app.codegen.scene_nim import write_scene_nim
+
+
 def test_app_output_field_input_is_coerced_to_target_field_type():
     scene = {
         "id": "scene",
@@ -91,6 +93,64 @@ def test_scene_js_app_uses_runtime_directly():
     assert "js_app_runtime.initDynamicJsApp" in source
     assert "import apps/" not in source
     assert "app_loader" not in source
+
+
+def test_missing_app_without_sources_raises_clear_error():
+    scene = {
+        "id": "scene",
+        "name": "Scene",
+        "nodes": [
+            {
+                "id": "missing",
+                "type": "app",
+                "data": {"keyword": "missing/app", "config": {}},
+                "position": {"x": 0, "y": 0},
+            },
+        ],
+        "edges": [],
+        "fields": [],
+        "settings": {"execution": "compiled", "refreshInterval": 3600, "backgroundColor": "#000000"},
+    }
+    frame = SimpleNamespace(interval=3600, debug=False, scenes=[])
+
+    try:
+        write_scene_nim(frame, scene)
+        assert False, "Expected missing app to raise"
+    except ValueError as error:
+        assert 'App "missing/app" for node "missing" not found' in str(error)
+        assert "NoneType" not in str(error)
+
+
+def test_scene_app_with_empty_sources_raises_clear_error():
+    scene = {
+        "id": "scene",
+        "name": "Scene",
+        "nodes": [
+            {
+                "id": "js",
+                "type": "app",
+                "data": {"keyword": "jsText", "config": {}},
+                "position": {"x": 0, "y": 0},
+            },
+        ],
+        "edges": [],
+        "fields": [],
+        "settings": {"execution": "compiled", "refreshInterval": 3600, "backgroundColor": "#000000"},
+        "apps": {
+            "jsText": {
+                "origin": "repo/apps/code/jsText",
+                "sources": {},
+            }
+        },
+    }
+    frame = SimpleNamespace(interval=3600, debug=False, scenes=[])
+
+    try:
+        write_scene_nim(frame, scene)
+        assert False, "Expected empty scene app sources to raise"
+    except ValueError as error:
+        assert 'App "jsText" for node "js" not found' in str(error)
+        assert "NoneType" not in str(error)
 
 
 def test_native_app_output_field_input_keeps_native_return_type():

@@ -333,13 +333,7 @@ class SceneWriter:
             self.js_app_nodes.add(node_id)
 
         if name not in self.available_apps and len(sources) == 0:
-            message = f'- ERROR: When generating scene {self.scene_id}. App "{name}" for node "{node_id}" not found'
-            try:
-                from app.models.log import new_log as log
-                log(self.frame.id, "stderr", message)
-                return
-            except Exception:
-                raise ValueError(message)
+            raise ValueError(f'App "{name}" for node "{node_id}" not found while generating scene {self.scene_id}')
 
         if is_js_app:
             js_import = "import frameos/js_app_runtime as js_app_runtime"
@@ -446,7 +440,7 @@ class SceneWriter:
         required_fields_for_node = self.required_fields.get(node_id, {})
         field_types_for_node = self.field_types.get(node_id, {})
 
-        for field in config.get("fields"):
+        for field in config.get("fields", []) or []:
             if field.get('markdown'):
                 continue
             key = field.get("name", None)

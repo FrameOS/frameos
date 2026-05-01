@@ -47,11 +47,44 @@ export function appOrigin(app?: (Partial<Pick<AppConfig, 'origin'>> & LegacyAppO
   return app?.origin ?? app?.source
 }
 
+function hasSceneAppSources(sources?: Record<string, string> | null): boolean {
+  return !!sources && Object.keys(sources).length > 0
+}
+
+export function canonicalEmbeddedRepoAppKeyword(keyword?: string | null): string | undefined {
+  if (!keyword) {
+    return undefined
+  }
+  if (embeddedRepoAppSources[keyword]) {
+    return keyword
+  }
+  if (!isRepoAppKeyword(keyword)) {
+    return undefined
+  }
+
+  const parts = keyword.split('/').filter(Boolean)
+  const appName = parts[parts.length - 1]
+  const codeKeyword = appName ? `repo/apps/code/${appName}` : undefined
+  return codeKeyword && embeddedRepoAppSources[codeKeyword] ? codeKeyword : undefined
+}
+
+export function embeddedRepoAppSourcesForOrigin(origin?: string | null): Record<string, string> | undefined {
+  const keyword = canonicalEmbeddedRepoAppKeyword(origin)
+  const sources = keyword ? embeddedRepoAppSources[keyword] : undefined
+  return sources ? { ...sources } : undefined
+}
+
 export function sceneAppWithOrigin(sceneApp: SceneApp, fallbackOrigin?: string): SceneApp {
   const { source: _legacySource, ...sceneAppWithoutLegacySource } = sceneApp as SceneApp & LegacyAppOrigin
+  const origin = appOrigin(sceneApp) || fallbackOrigin
+  const canonicalOrigin = canonicalEmbeddedRepoAppKeyword(origin)
+  const sources = hasSceneAppSources(sceneApp.sources)
+    ? sceneApp.sources
+    : embeddedRepoAppSourcesForOrigin(origin) || sceneApp.sources || {}
   return stripUndefined({
     ...sceneAppWithoutLegacySource,
-    origin: appOrigin(sceneApp) || fallbackOrigin,
+    origin: canonicalOrigin || origin,
+    sources,
   })
 }
 
