@@ -264,3 +264,8 @@ custom board variants. The first deliverable is a host-side system that can:
 - Changed the wrapper default Wi-Fi variant to `none`, matching the only fully
   built and inspected image path so far. RTL8723DS and RTL8189FS remain
   explicit Buildroot fragment choices pending real hardware validation.
+- Updated the rootfs network overlay so the conservative no-Wi-Fi image does
+  not auto-configure `wlan0` or ship placeholder Wi-Fi credentials. The
+  post-build hook now appends the `wlan0` DHCP stanza and keeps
+  `/etc/wpa_supplicant.conf` only when the merged Buildroot config enables
+  `wpa_supplicant`.

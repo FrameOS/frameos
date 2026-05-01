@@ -140,6 +140,9 @@ microSD card with a normal block-image writer.
 - `board/mangopi/mq-dual/wifi/` contains seed Buildroot fragments for common
   MangoPi Wi-Fi modules. Treat them as starting points and verify package names
   against the Buildroot version in use.
+- `board/mangopi/mq-dual/post-build.sh` appends the `wlan0` ifupdown stanza and
+  keeps `/etc/wpa_supplicant.conf` only when the final Buildroot config enables
+  `wpa_supplicant`.
 - `board/mangopi/mq-dual/patches/` is wired through `BR2_GLOBAL_PATCH_DIR`.
   Put custom-board Linux or U-Boot patches under package subdirectories such as
   `patches/linux/` or `patches/uboot/`.
@@ -151,4 +154,5 @@ microSD card with a normal block-image writer.
   or update `/etc/default/frameos`.
 - Confirm the exact Waveshare 7.3 inch Spectra SKU uses the `EPD_7in3e` driver.
 - Confirm Wi-Fi module choice and firmware/driver package.
-- Replace `/etc/wpa_supplicant.conf` placeholders before expecting Wi-Fi DHCP.
+- For Wi-Fi variants, replace `/etc/wpa_supplicant.conf` placeholders before
+  expecting Wi-Fi DHCP.
