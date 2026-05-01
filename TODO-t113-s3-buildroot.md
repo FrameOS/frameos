@@ -134,3 +134,8 @@ custom board variants. The first deliverable is a host-side system that can:
 - First full Buildroot image build attempt against Buildroot `2026.02.1`
   stopped at a missing host `rsync`; the bootstrap helper now checks common
   Buildroot host tools before starting a build.
+- After installing `rsync`, the next full Buildroot attempt progressed into the
+  internal toolchain build and stopped at the linux-headers compatibility check:
+  Buildroot was using the 6.6.5 kernel sources but still defaulted the custom
+  header series to `2.6.x`. The T113-S3 defconfig now selects the 6.6.x custom
+  header series while keeping headers sourced from the kernel being built.
