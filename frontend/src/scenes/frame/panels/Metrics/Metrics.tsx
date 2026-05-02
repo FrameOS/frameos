@@ -1,4 +1,4 @@
-import { useValues } from 'kea'
+import { useActions, useValues } from 'kea'
 import { metricsLogic } from './metricsLogic'
 import { frameLogic } from '../../frameLogic'
 import { ParentSize } from '@visx/responsive'
@@ -6,7 +6,9 @@ import { BrushChart } from './BrushChart'
 
 export function Metrics() {
   const { frameId } = useValues(frameLogic)
-  const { metrics, metricsByCategory, metricsLoading } = useValues(metricsLogic({ frameId }))
+  const { metrics, metricsByCategory, metricsLoading, metricsTimeRange, visibleTimeRange, metricGapThresholdMs } =
+    useValues(metricsLogic({ frameId }))
+  const { setSelectedTimeRange, resetSelectedTimeRange } = useActions(metricsLogic({ frameId }))
 
   return metricsLoading ? (
     <div>...</div>
@@ -16,11 +18,32 @@ export function Metrics() {
     <div className="h-full p-2 relative">
       <ParentSize>
         {(parent) =>
-          Object.entries(metricsByCategory).map(([key, data]) => (
-            <div>
-              <strong>{key}</strong>
+          Object.entries(metricsByCategory).map(([key, series]) => (
+            <div key={key}>
+              <div className="mb-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+                <strong>{key}</strong>
+                {series.length > 1 &&
+                  series.map((chartSeries) => (
+                    <span key={chartSeries.key} className="inline-flex items-center gap-1">
+                      <span
+                        className="inline-block h-2 w-3 rounded-sm"
+                        style={{ backgroundColor: chartSeries.color }}
+                      />
+                      {chartSeries.label}
+                    </span>
+                  ))}
+              </div>
               <div className="h-[200px] text-white">
-                <BrushChart width={parent.width} height={200} data={data} />
+                <BrushChart
+                  width={parent.width}
+                  height={200}
+                  series={series}
+                  totalTimeRange={metricsTimeRange}
+                  visibleTimeRange={visibleTimeRange}
+                  gapThresholdMs={metricGapThresholdMs}
+                  onTimeRangeChange={setSelectedTimeRange}
+                  onResetTimeRange={resetSelectedTimeRange}
+                />
               </div>
             </div>
           ))
