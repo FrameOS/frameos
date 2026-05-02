@@ -9,7 +9,7 @@ type
   ReadFileHook = proc(path: string): string {.gcsafe, nimcall.}
   CpuUsageHook = proc(interval: float): float {.gcsafe, nimcall.}
   SleepHook = proc(ms: int) {.gcsafe, nimcall.}
-  MemoryUsageHook = proc(): tuple[total, available: int64, percentage: float] {.gcsafe, nimcall.}
+  MemoryUsageHook = proc(): tuple[total, used: int64, percentage: float] {.gcsafe, nimcall.}
   OpenFileDescriptorsHook = proc(): int {.gcsafe, nimcall.}
   CpuTimes = tuple[idle, total: uint64]
 
@@ -65,23 +65,51 @@ proc parseMeminfoBytes(line: string): int64 =
     return 0
   parseBiggestInt(parts[1]).int64 * 1024
 
-proc defaultMemoryUsage(): tuple[total, available: int64, percentage: float] =
+proc defaultMemoryUsage(): tuple[total, used: int64, percentage: float] =
+  var available: int64 = 0
   try:
     for line in metricsReadFileHook("/proc/meminfo").splitLines():
       if line.startsWith("MemTotal:"):
         result.total = parseMeminfoBytes(line)
       elif line.startsWith("MemAvailable:"):
-        result.available = parseMeminfoBytes(line)
+        available = parseMeminfoBytes(line)
   except CatchableError:
     discard
 
   if result.total > 0:
-    result.percentage = ((result.total - result.available).float / result.total.float) * 100.0
+    result.used = max(0'i64, result.total - available)
+    result.percentage = (result.used.float / result.total.float) * 100.0
   else:
     result.percentage = 0.0
 
+proc defaultProcessMemoryUsage*(): JsonNode =
+  let pid = getpid()
+  result = newJObject()
+  try:
+    for line in metricsReadFileHook("/proc/" & $pid & "/status").splitLines():
+      if line.startsWith("VmRSS:"):
+        result["rss"] = %(parseMeminfoBytes(line))
+      elif line.startsWith("VmHWM:"):
+        result["peakRss"] = %(parseMeminfoBytes(line))
+      elif line.startsWith("VmSize:"):
+        result["virtual"] = %(parseMeminfoBytes(line))
+      elif line.startsWith("VmData:"):
+        result["data"] = %(parseMeminfoBytes(line))
+      elif line.startsWith("VmStk:"):
+        result["stack"] = %(parseMeminfoBytes(line))
+      elif line.startsWith("VmSwap:"):
+        result["swap"] = %(parseMeminfoBytes(line))
+      elif line.startsWith("RssAnon:"):
+        result["rssAnon"] = %(parseMeminfoBytes(line))
+      elif line.startsWith("RssFile:"):
+        result["rssFile"] = %(parseMeminfoBytes(line))
+      elif line.startsWith("RssShmem:"):
+        result["rssShmem"] = %(parseMeminfoBytes(line))
+  except CatchableError:
+    discard
+
 var metricsCpuUsageHook: CpuUsageHook = proc(interval: float): float = defaultCpuUsage(interval)
-var metricsMemoryUsageHook: MemoryUsageHook = proc(): tuple[total, available: int64, percentage: float] = defaultMemoryUsage()
+var metricsMemoryUsageHook: MemoryUsageHook = proc(): tuple[total, used: int64, percentage: float] = defaultMemoryUsage()
 
 proc getLoadAverage(self: MetricsLoggerThread): seq[float] =
   try:
@@ -101,7 +129,7 @@ proc getMemoryUsage(self: MetricsLoggerThread): JsonNode =
   let memoryInfo = metricsMemoryUsageHook()
   result = %*{
     "total": memoryInfo.total,
-    "available": memoryInfo.available,
+    "used": memoryInfo.used,
     "percentage": memoryInfo.percentage,
   }
 
@@ -111,12 +139,16 @@ proc getCPUUsage(self: MetricsLoggerThread): float =
 proc getOpenFileDescriptors(self: MetricsLoggerThread): int =
   metricsOpenFileDescriptorsHook()
 
+proc getProcessMemoryUsage*(self: MetricsLoggerThread): JsonNode =
+  defaultProcessMemoryUsage()
+
 proc logMetrics(self: MetricsLoggerThread) =
   log(%*{
     "event": "metrics",
     "load": self.getLoadAverage(),
     "cpuTemperature": self.getCPUTemperature(),
     "memoryUsage": self.getMemoryUsage(),
+    "processMemory": self.getProcessMemoryUsage(),
     "cpuUsage": self.getCPUUsage(),
     "openFileDescriptors": self.getOpenFileDescriptors(),
   })
@@ -174,7 +206,7 @@ proc resetMetricsHooksForTest*() =
   metricsReadFileHook = proc(path: string): string = readFile(path)
   metricsCpuUsageHook = proc(interval: float): float = defaultCpuUsage(interval)
   metricsSleepHook = proc(ms: int) = sleep(ms)
-  metricsMemoryUsageHook = proc(): tuple[total, available: int64, percentage: float] = defaultMemoryUsage()
+  metricsMemoryUsageHook = proc(): tuple[total, used: int64, percentage: float] = defaultMemoryUsage()
   metricsOpenFileDescriptorsHook = proc(): int =
     var fdCount = 0
     let dir = "/proc/" & $getpid() & "/fd"

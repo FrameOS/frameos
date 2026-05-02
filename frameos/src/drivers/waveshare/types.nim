@@ -1,21 +1,14 @@
-import pixie, options, json
+import options, json, hashes
 import frameos/types
-
-type ColorOption* = enum
-  Black = "Black"
-  BlackWhiteRed = "BlackWhiteRed"
-  BlackWhiteYellow = "BlackWhiteYellow"
-  BlackWhiteYellowRed = "BlackWhiteYellowRed"
-  FourGray = "FourGray"
-  SixteenGray = "SixteenGray"
-  SevenColor = "SevenColor"
-  SpectraSixColor = "SpectraSixColor"
+import drivers/waveshare/color
+export color
 
 type Driver* = ref object of FrameOSDriver
   logger*: Logger
   width*: int
   height*: int
-  lastImageData*: seq[ColorRGBX]
+  lastImageHash*: Hash
+  lastImageBytes*: int
   lastRenderAt*: float
   palette*: Option[seq[(int, int, int)]]
   vcom*: float # used for the 10.3" display

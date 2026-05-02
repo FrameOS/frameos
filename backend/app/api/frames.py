@@ -1958,16 +1958,8 @@ async def api_frame_metrics(id: int, db: Session = Depends(get_db)):
     if frame is None:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
     try:
-        metrics = db.query(Metrics).filter_by(frame_id=id).all()
-        metrics_list = [
-            {
-                "id": metric.id,
-                "timestamp": metric.timestamp.isoformat(),
-                "frame_id": metric.frame_id,
-                "metrics": metric.metrics,
-            }
-            for metric in metrics
-        ]
+        metrics = db.query(Metrics).filter_by(frame_id=id).order_by(Metrics.timestamp).all()
+        metrics_list = [metric.to_dict() for metric in metrics]
         return {"metrics": metrics_list}
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))

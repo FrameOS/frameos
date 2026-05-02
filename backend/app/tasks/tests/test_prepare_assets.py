@@ -113,19 +113,59 @@ def test_ensure_frontend_dependencies_reinstalls_incomplete_existing_modules(tmp
     frontend_root = frameos_root / "frontend"
     write(frontend_root / "node_modules" / "autoprefixer" / "package.json", "{}\n")
 
-    commands: list[tuple[list[str], Path]] = []
+    commands: list[tuple[list[str], Path, bool, dict[str, str] | None]] = []
 
-    def fake_run_command(command: list[str], *, cwd: Path) -> None:
-        commands.append((command, cwd))
+    def fake_run_command(
+        command: list[str],
+        *,
+        cwd: Path,
+        quiet: bool = False,
+        env: dict[str, str] | None = None,
+    ) -> None:
+        commands.append((command, cwd, quiet, env))
 
     monkeypatch.setattr(prepare_assets, "frontend_dependencies_are_usable", lambda _frontend_root: False)
     monkeypatch.setattr(prepare_assets, "resolve_pnpm_command", lambda: ["pnpm"])
     monkeypatch.setattr(prepare_assets, "run_command", fake_run_command)
+    monkeypatch.setenv("DEBUG", "1")
 
     prepare_assets.ensure_frontend_dependencies(frameos_root)
 
-    assert commands == [(["pnpm", "install", "--frozen-lockfile"], frontend_root)]
+    assert len(commands) == 1
+    assert commands[0][:3] == (["pnpm", "install", "--frozen-lockfile"], frontend_root, True)
+    assert commands[0][3] is not None
+    assert "DEBUG" not in commands[0][3]
     assert not (frontend_root / "node_modules").exists()
+
+
+def test_build_frontend_runs_quietly_without_debug_env(tmp_path, monkeypatch):
+    frameos_root = create_project_layout(tmp_path)
+    frontend_root = frameos_root / "frontend"
+    commands: list[tuple[list[str], Path, bool, dict[str, str] | None]] = []
+
+    def fake_run_command(
+        command: list[str],
+        *,
+        cwd: Path,
+        quiet: bool = False,
+        env: dict[str, str] | None = None,
+    ) -> None:
+        commands.append((command, cwd, quiet, env))
+        write(frameos_root / "assets" / "compiled" / "frame_web" / "index.html", "<html></html>\n")
+        write(frameos_root / "assets" / "compiled" / "frame_web" / "static" / "main.js", "console.log(1)\n")
+        write(frameos_root / "assets" / "compiled" / "frame_web" / "static" / "main.css", "body{}\n")
+
+    monkeypatch.setattr(prepare_assets, "ensure_frontend_dependencies", lambda _project_root: None)
+    monkeypatch.setattr(prepare_assets, "resolve_pnpm_command", lambda: ["pnpm"])
+    monkeypatch.setattr(prepare_assets, "run_command", fake_run_command)
+    monkeypatch.setenv("DEBUG", "1")
+
+    prepare_assets.build_frontend(frameos_root)
+
+    assert len(commands) == 1
+    assert commands[0][:3] == (["pnpm", "run", "build"], frontend_root, True)
+    assert commands[0][3] is not None
+    assert "DEBUG" not in commands[0][3]
 
 
 def test_hash_frontend_inputs_ignores_node_modules(tmp_path):

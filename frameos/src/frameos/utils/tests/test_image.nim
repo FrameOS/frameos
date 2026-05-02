@@ -92,6 +92,22 @@ suite "image helpers":
     check preview.height == original.height
     check preview.data == original.data
 
+  test "previewSourceIndex matches previewTransform coordinates":
+    for width in [2, 3]:
+      for height in [2, 3]:
+        let source = testImage(width, height)
+        for rotate in [0, 90, 180, 270]:
+          for flip in ["", "horizontal", "vertical", "both"]:
+            var transformed = source.copy()
+            let preview = transformed.previewTransform(rotate, flip)
+            let dimensions = previewDimensions(width, height, rotate)
+            check preview.width == dimensions.width
+            check preview.height == dimensions.height
+            for y in 0 ..< dimensions.height:
+              for x in 0 ..< dimensions.width:
+                let sourceIndex = previewSourceIndex(x, y, width, height, rotate, flip)
+                check preview.data[preview.dataIndex(x, y)] == source.data[sourceIndex]
+
   test "scaleAndDrawImage places content for contain cover stretch center and corner anchors":
     let red = rgba(255, 0, 0, 255)
 

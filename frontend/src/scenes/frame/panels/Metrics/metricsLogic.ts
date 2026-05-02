@@ -37,11 +37,16 @@ const SINGLE_SERIES_COLOR = '#2dd4bf'
 const METRIC_SERIES_COLORS = ['#f59e0b', '#38bdf8', '#a78bfa', '#34d399', '#fb7185', '#f472b6']
 const MEMORY_USAGE_COLORS: Record<string, string> = {
   total: '#38bdf8',
-  available: '#34d399',
+  used: '#fb7185',
+}
+
+function parseMetricTimestamp(timestamp: string): number {
+  const hasTimeZone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(timestamp)
+  return Date.parse(hasTimeZone ? timestamp : `${timestamp}Z`)
 }
 
 function metricTimestamp(metric: MetricsType): number {
-  return Date.parse(metric.timestamp)
+  return parseMetricTimestamp(metric.timestamp)
 }
 
 function metricIntervalMs(metric: MetricsType): number | null {
@@ -114,6 +119,24 @@ function getOrCreateMetricSeries(
     categorySeries.push(series)
   }
   return series
+}
+
+function normalizeMemoryUsageEntries(value: Record<string, unknown>): [string, number][] {
+  const total = Number(value.total)
+  const used = Number(value.used)
+  const available = Number(value.available ?? value.free)
+  const entries: [string, number][] = []
+
+  if (Number.isFinite(total)) {
+    entries.push(['total', total])
+  }
+  if (Number.isFinite(used)) {
+    entries.push(['used', used])
+  } else if (Number.isFinite(total) && Number.isFinite(available)) {
+    entries.push(['used', Math.max(0, total - available)])
+  }
+
+  return entries
 }
 
 export const metricsLogic = kea<metricsLogicType>([
@@ -227,7 +250,7 @@ export const metricsLogic = kea<metricsLogicType>([
       (metrics) => {
         const metricsByCategory: Record<string, MetricSeries[]> = {}
         metrics.forEach((metric) => {
-          const timestamp = new Date(Date.parse(metric.timestamp))
+          const timestamp = new Date(metricTimestamp(metric))
           for (const [key, value] of Object.entries(metric.metrics)) {
             if (key === 'intervalMs') {
               continue
@@ -244,7 +267,11 @@ export const metricsLogic = kea<metricsLogicType>([
                 }
               }
             } else if (value && typeof value === 'object') {
-              for (const [subKey, subValue] of Object.entries(value)) {
+              const entries =
+                key === 'memoryUsage'
+                  ? normalizeMemoryUsageEntries(value as Record<string, unknown>)
+                  : Object.entries(value)
+              for (const [subKey, subValue] of entries) {
                 if (key === 'memoryUsage' && (subKey === 'active' || subKey === 'free' || subKey === 'percentage')) {
                   continue
                 }
