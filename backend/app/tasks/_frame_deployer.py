@@ -417,8 +417,11 @@ class FrameDeployer:
             if waveshare.variant:
                 variant_folder = get_variant_folder(waveshare.variant)
 
-                util_files = ["DEV_Config.c", "DEV_Config.h"]
-                if variant_folder != "it8951":
+                if waveshare.variant == "EPD_13in3e":
+                    util_files = []
+                else:
+                    util_files = ["DEV_Config.c", "DEV_Config.h"]
+                if variant_folder != "it8951" and waveshare.variant != "EPD_13in3e":
                     util_files.insert(0, "Debug.h")
 
                 # color e-paper variants
@@ -431,7 +434,7 @@ class FrameDeployer:
                     variant_files = [f"{waveshare.variant}.nim", f"{c_file}.c", f"{c_file}.h"]
                 elif waveshare.variant == "EPD_10in3":
                     variant_files = [f"{waveshare.variant}.nim", "IT8951.c", "IT8951.h", "IT8951.nim"]
-                elif waveshare.variant in ["EPD_4in0e", "EPD_4in01f", "EPD_7in3e"]:
+                elif waveshare.variant in ["EPD_4in0e", "EPD_4in01f", "EPD_7in3e", "EPD_13in3e"]:
                     variant_files = [f"{waveshare.variant}.nim"]
                 else:
                     variant_files = [f"{waveshare.variant}.nim", f"{waveshare.variant}.c", f"{waveshare.variant}.h"]
