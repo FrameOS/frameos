@@ -1,4 +1,5 @@
 import uuid
+from datetime import timezone
 from sqlalchemy.dialects.sqlite import JSON
 from sqlalchemy import Integer, String, ForeignKey, DateTime, func
 from arq import ArqRedis as Redis
@@ -15,9 +16,14 @@ class Metrics(Base):
     frame = relationship('Frame', backref=backref('metrics', lazy=True))
 
     def to_dict(self):
+        timestamp = self.timestamp
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
+        else:
+            timestamp = timestamp.astimezone(timezone.utc)
         return {
             'id': self.id,
-            'timestamp': self.timestamp.isoformat(),
+            'timestamp': timestamp.isoformat(),
             'frame_id': self.frame_id,
             'metrics': self.metrics,
         }
@@ -28,7 +34,7 @@ async def new_metrics(db: Session, redis: Redis, frame_id: int, metrics: dict) -
     db.add(metrics)
     db.commit()
     metrics_count = db.query(Metrics).filter_by(frame_id=frame_id).count()
-    payload = {**metrics.to_dict(), "timestamp": str(metrics.timestamp)}
+    payload = metrics.to_dict()
     if metrics_count > 1100:
         oldest_metrics = (db.query(Metrics)
                           .filter_by(frame_id=frame_id)

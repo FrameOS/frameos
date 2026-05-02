@@ -11,6 +11,8 @@ import frameos/config
 import ./state
 import ./auth
 import ./routes
+import ./workers
+export workers.httpWorkerThreads
 
 proc shouldLogHttpRequest*(path: string): bool =
   if path == "/ws" or path == "/ws/admin":
@@ -84,9 +86,11 @@ proc newServer*(frameOS: FrameOS): types.Server =
     if shouldLogHttpRequest(request.path):
       log(%*{"event": "http", "method": request.httpMethod, "path": request.path})
     routerHandler(request)
+  let workerThreads = httpWorkerThreads()
   let mummyServer = mummy.newServer(
     loggingHandler,
     makeWebsocketHandler(connectionsState, adminConnectionsState),
+    workerThreads = workerThreads,
     maxBodyLen = MAX_HTTP_BODY_LEN
   )
 
@@ -94,6 +98,7 @@ proc newServer*(frameOS: FrameOS): types.Server =
     frameConfig: frameOS.frameConfig,
     runner: frameOS.runner,
     mummy: mummyServer,
+    httpWorkerThreads: workerThreads,
     connectionsState: connectionsState,
   )
 
@@ -104,7 +109,11 @@ proc serverBindAddress*(frameConfig: FrameConfig): string =
   if frameConfig.httpsProxy.enable and frameConfig.httpsProxy.exposeOnlyPort: "127.0.0.1" else: "0.0.0.0"
 
 proc startServer*(self: types.Server) =
-  log(%*{"event": "http:start", "message": "Starting web server"})
+  log(%*{
+    "event": "http:start",
+    "message": "Starting web server",
+    "workerThreads": self.httpWorkerThreads,
+  })
   # mummy.serve blocks this thread, so run render notifications in a background thread.
   createThread(renderThread, listenForRenderThread, (self.connectionsState, globalAdminConnectionsState))
   createThread(logThread, listenForLogThread, globalAdminConnectionsState)

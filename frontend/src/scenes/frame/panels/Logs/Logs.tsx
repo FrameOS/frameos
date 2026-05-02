@@ -51,7 +51,10 @@ function renderMetricsLog(rest: Record<string, any>): JSX.Element {
   const memoryUsage = rest.memoryUsage ?? {}
 
   const ramTotalMb = toMb(Number(memoryUsage.total ?? 0))
-  const ramAvailableMb = toMb(Number(memoryUsage.available ?? memoryUsage.free ?? 0))
+  const ramAvailableBytes = Number(memoryUsage.available ?? memoryUsage.free ?? 0)
+  const ramUsedBytes = Number(memoryUsage.used ?? Number(memoryUsage.total ?? 0) - ramAvailableBytes)
+  const ramUsedMb = toMb(ramUsedBytes)
+  const ramAvailableMb = Math.max(0, ramTotalMb - ramUsedMb)
   const ramAvailablePercent = ramTotalMb > 0 ? (ramAvailableMb / ramTotalMb) * 100 : 0
 
   return (
@@ -63,7 +66,7 @@ function renderMetricsLog(rest: Record<string, any>): JSX.Element {
         </span>
       ))}
       cpu <span className={metricNumberColor(cpuTemperature, 60, 75)}>{cpuTemperature.toFixed(2)}°C</span> ram used{' '}
-      <span className={metricNumberColor(ramAvailablePercent, 15, 5, true)}>{ramTotalMb - ramAvailableMb} MB</span> /{' '}
+      <span className={metricNumberColor(ramAvailablePercent, 15, 5, true)}>{ramUsedMb} MB</span> /{' '}
       <span className="text-white">{ramTotalMb} MB</span>
     </span>
   )

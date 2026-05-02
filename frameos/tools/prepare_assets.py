@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -89,8 +90,44 @@ class AssetPreparationResult:
     manifest_path: Path
 
 
-def run_command(command: list[str], *, cwd: Path) -> None:
-    subprocess.run(command, cwd=cwd, check=True)
+def frontend_command_env() -> dict[str, str]:
+    env = os.environ.copy()
+    env.pop("DEBUG", None)
+    return env
+
+
+def run_command(
+    command: list[str],
+    *,
+    cwd: Path,
+    quiet: bool = False,
+    env: dict[str, str] | None = None,
+) -> None:
+    if not quiet:
+        subprocess.run(command, cwd=cwd, env=env, check=True)
+        return
+
+    result = subprocess.run(
+        command,
+        cwd=cwd,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode == 0:
+        return
+
+    if result.stdout:
+        print(result.stdout, end="")
+    if result.stderr:
+        print(result.stderr, end="", file=sys.stderr)
+    raise subprocess.CalledProcessError(
+        result.returncode,
+        command,
+        output=result.stdout,
+        stderr=result.stderr,
+    )
 
 
 def iter_files(path: Path) -> list[Path]:
@@ -264,28 +301,38 @@ def frontend_dependencies_are_usable(frontend_root: Path) -> bool:
 def ensure_frontend_dependencies(project_root: Path) -> None:
     frontend_root = project_root / "frontend"
     if frontend_dependencies_are_usable(frontend_root):
-        print("Using existing frontend dependencies in frontend/node_modules")
+        print("Using existing frontend dependencies in frontend/node_modules", flush=True)
         return
 
     if (frontend_root / "node_modules").exists():
-        print("Refreshing incomplete frontend dependencies in frontend/node_modules")
+        print("Refreshing incomplete frontend dependencies in frontend/node_modules", flush=True)
         shutil.rmtree(frontend_root / "node_modules")
     else:
-        print("Installing frontend dependencies")
+        print("Installing frontend dependencies", flush=True)
 
-    run_command([*resolve_pnpm_command(), "install", "--frozen-lockfile"], cwd=frontend_root)
+    run_command(
+        [*resolve_pnpm_command(), "install", "--frozen-lockfile"],
+        cwd=frontend_root,
+        env=frontend_command_env(),
+        quiet=True,
+    )
 
 
 def build_frontend(project_root: Path) -> None:
     ensure_frontend_dependencies(project_root)
-    print("Building frame frontend")
-    run_command([*resolve_pnpm_command(), "run", "build"], cwd=project_root / "frontend")
+    print("Building frame frontend", flush=True)
+    run_command(
+        [*resolve_pnpm_command(), "run", "build"],
+        cwd=project_root / "frontend",
+        env=frontend_command_env(),
+        quiet=True,
+    )
     if not frontend_outputs_exist(project_root):
         raise RuntimeError("Frame frontend build completed without producing expected assets")
 
 
 def generate_asset_modules(project_root: Path) -> None:
-    print("Generating embedded asset modules")
+    print("Generating embedded asset modules", flush=True)
     python = sys.executable
     commands = (
         [

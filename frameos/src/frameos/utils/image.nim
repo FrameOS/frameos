@@ -215,6 +215,49 @@ proc previewTransform*(image: var Image, rotate: int, flip: string): Image {.rai
   result = if rotate != 0: image.rotateDegrees(rotate) else: image
   result.applyFlip(flip)
 
+proc previewDimensions*(width, height, rotate: int): tuple[width: int, height: int] =
+  case (rotate + 1080) mod 360
+  of 90, 270:
+    (height, width)
+  else:
+    (width, height)
+
+proc previewSourceIndex*(x, y, width, height, rotate: int, flip: string): int =
+  let
+    rotation = (rotate + 1080) mod 360
+    dimensions = previewDimensions(width, height, rotation)
+  var
+    rotatedX = x
+    rotatedY = y
+
+  case flip:
+  of "horizontal":
+    rotatedX = dimensions.width - x - 1
+  of "vertical":
+    rotatedY = dimensions.height - y - 1
+  of "both":
+    rotatedX = dimensions.width - x - 1
+    rotatedY = dimensions.height - y - 1
+  else:
+    discard
+
+  var sourceX, sourceY: int
+  case rotation
+  of 90:
+    sourceX = rotatedY
+    sourceY = height - rotatedX - 1
+  of 180:
+    sourceX = width - rotatedX - 1
+    sourceY = height - rotatedY - 1
+  of 270:
+    sourceX = width - rotatedY - 1
+    sourceY = rotatedX
+  else:
+    sourceX = rotatedX
+    sourceY = rotatedY
+
+  sourceY * width + sourceX
+
 proc writeError*(image: Image, width, height: int, message: string) =
   let typeface = getDefaultTypeface()
   let font = newFont(typeface, 32, parseHtmlColor("#000000"))

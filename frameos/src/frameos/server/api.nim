@@ -10,10 +10,12 @@ import httpcore
 import assets/apps as appsAsset
 import drivers/drivers as drivers
 import frameos/apps
+import frameos/channels
 import frameos/types
 import frameos/utils/image
 import frameos/utils/font
 import frameos/config
+from frameos/metrics import defaultProcessMemoryUsage
 from frameos/scenes import getLastImagePng, getLastPublicState, getAllPublicStates, getUploadedScenePayload,
     getDynamicSceneOptions
 from scenes/scenes import sceneOptions
@@ -244,11 +246,25 @@ proc frameApiPayload*(connectionsState: ConnectionsState, exposeSecrets = false)
   }
 
 proc buildFrameImageResponse*(request: Request): tuple[status: httpcore.HttpCode, headers: mummy.HttpHeaders, body: string] =
+  let startedAt = epochTime()
+  let logImageRequest = globalFrameConfig.debug
+  let memoryBefore = if logImageRequest: defaultProcessMemoryUsage() else: newJObject()
   let (sceneId, _, _, lastUpdate) = getLastPublicState()
   if shouldReturnNotModified(request.headers, lastUpdate):
     var headers: mummy.HttpHeaders
     headers["X-Scene-Id"] = $sceneId
     headers["Access-Control-Expose-Headers"] = "X-Scene-Id"
+    if logImageRequest:
+      log(%*{
+        "event": "http:image",
+        "source": "notModified",
+        "status": int(Http304),
+        "sceneId": $sceneId,
+        "bytes": 0,
+        "ms": (epochTime() - startedAt) * 1000.0,
+        "processMemoryBefore": memoryBefore,
+        "processMemoryAfter": defaultProcessMemoryUsage(),
+      })
     return (Http304, headers, "")
 
   var headers: mummy.HttpHeaders
@@ -259,18 +275,58 @@ proc buildFrameImageResponse*(request: Request): tuple[status: httpcore.HttpCode
   if lastUpdate > 0.0:
     let lastModified = format(fromUnix(int64(lastUpdate)), "ddd, dd MMM yyyy HH:mm:ss 'GMT'", utc())
     headers["Last-Modified"] = lastModified
+  var driverErrorMessage = ""
   try:
     let image = drivers.toPng(360 - globalFrameConfig.rotate, globalFrameConfig.flip)
     if image != "":
+      if logImageRequest:
+        log(%*{
+          "event": "http:image",
+          "source": "driver",
+          "status": int(Http200),
+          "sceneId": $sceneId,
+          "bytes": image.len,
+          "ms": (epochTime() - startedAt) * 1000.0,
+          "processMemoryBefore": memoryBefore,
+          "processMemoryAfter": defaultProcessMemoryUsage(),
+        })
       return (Http200, headers, image)
     else:
       raise newException(Exception, "No image available")
-  except Exception:
+  except Exception as e:
+    driverErrorMessage = e.msg
     try:
-      return (Http200, headers, getLastImagePng())
-    except Exception as e:
-      return (Http200, headers, renderError(globalFrameConfig.renderWidth(), globalFrameConfig.renderHeight(),
-        &"Error: {$e.msg}\n{$e.getStackTrace()}").encodeImage(PngFormat))
+      let image = getLastImagePng()
+      if logImageRequest:
+        log(%*{
+          "event": "http:image",
+          "source": "lastImage",
+          "status": int(Http200),
+          "sceneId": $sceneId,
+          "bytes": image.len,
+          "ms": (epochTime() - startedAt) * 1000.0,
+          "driverError": driverErrorMessage,
+          "processMemoryBefore": memoryBefore,
+          "processMemoryAfter": defaultProcessMemoryUsage(),
+        })
+      return (Http200, headers, image)
+    except Exception as fallbackError:
+      let image = renderError(globalFrameConfig.renderWidth(), globalFrameConfig.renderHeight(),
+        &"Error: {$fallbackError.msg}\n{$fallbackError.getStackTrace()}").encodeImage(PngFormat)
+      if logImageRequest:
+        log(%*{
+          "event": "http:image",
+          "source": "error",
+          "status": int(Http200),
+          "sceneId": $sceneId,
+          "bytes": image.len,
+          "ms": (epochTime() - startedAt) * 1000.0,
+          "driverError": driverErrorMessage,
+          "fallbackError": fallbackError.msg,
+          "processMemoryBefore": memoryBefore,
+          "processMemoryAfter": defaultProcessMemoryUsage(),
+        })
+      return (Http200, headers, image)
 
 proc renderControlPage*(request: Request) =
   var fieldsHtml = ""

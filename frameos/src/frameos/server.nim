@@ -5,4 +5,5 @@ export server.startServer
 export server.serverPort
 export server.serverBindAddress
 export server.shouldLogHttpRequest
+export server.httpWorkerThreads
 export api.shouldReturnNotModified

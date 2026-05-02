@@ -303,6 +303,7 @@ type
   Server* = ref object
     frameConfig*: FrameConfig
     mummy*: mummy.Server
+    httpWorkerThreads*: int
     runner*: RunnerControl
     url*: string
     connectionsState*: ConnectionsState

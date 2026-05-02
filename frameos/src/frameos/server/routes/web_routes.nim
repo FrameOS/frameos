@@ -160,8 +160,8 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
     if not hasAccess(request, Read):
       request.respond(Http401, body = "Unauthorized")
       return
-    log(%*{"event": "http", "get": request.path})
     {.gcsafe.}:
+      log(%*{"event": "http", "get": request.path})
       let (status, headers, body) = buildFrameImageResponse(request)
       request.respond(status, headers, body)
   )

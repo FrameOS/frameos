@@ -53,3 +53,5 @@ suite "Server request logging":
     check shouldLogHttpRequest("/api/frames/1")
     check shouldLogHttpRequest("/api/frames/1/state")
     check shouldLogHttpRequest("/api/admin/login")
+    check shouldLogHttpRequest("/image")
+    check shouldLogHttpRequest("/api/frames/1/image")
