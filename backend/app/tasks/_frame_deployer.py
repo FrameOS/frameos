@@ -417,7 +417,7 @@ class FrameDeployer:
             if waveshare.variant:
                 variant_folder = get_variant_folder(waveshare.variant)
 
-                if waveshare.variant == "EPD_13in3e":
+                if waveshare.variant in ("EPD_10in3", "EPD_13in3e"):
                     util_files = []
                 else:
                     util_files = ["DEV_Config.c", "DEV_Config.h"]
@@ -433,7 +433,7 @@ class FrameDeployer:
                     c_file = re.sub(r'[bc]', 'bc', waveshare.variant)
                     variant_files = [f"{waveshare.variant}.nim", f"{c_file}.c", f"{c_file}.h"]
                 elif waveshare.variant == "EPD_10in3":
-                    variant_files = [f"{waveshare.variant}.nim", "IT8951.c", "IT8951.h", "IT8951.nim"]
+                    variant_files = [f"{waveshare.variant}.nim", "IT8951.nim"]
                 elif waveshare.variant in ["EPD_4in0e", "EPD_4in01f", "EPD_7in3e", "EPD_13in3e"]:
                     variant_files = [f"{waveshare.variant}.nim"]
                 else:
