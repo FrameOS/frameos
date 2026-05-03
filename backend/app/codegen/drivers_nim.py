@@ -4,13 +4,14 @@ from app.drivers.drivers import Driver
 
 DRIVER_BUILD_MODE_STATIC = "static"
 DRIVER_BUILD_MODE_SHARED = "shared"
+DEFAULT_DRIVER_BUILD_MODE = DRIVER_BUILD_MODE_SHARED
 VALID_DRIVER_BUILD_MODES = {DRIVER_BUILD_MODE_STATIC, DRIVER_BUILD_MODE_SHARED}
 
 
 def normalize_driver_build_mode(value: str | None) -> str:
-    normalized = (value or DRIVER_BUILD_MODE_STATIC).strip().lower()
+    normalized = (value or DEFAULT_DRIVER_BUILD_MODE).strip().lower()
     if normalized not in VALID_DRIVER_BUILD_MODES:
-        return DRIVER_BUILD_MODE_STATIC
+        return DEFAULT_DRIVER_BUILD_MODE
     return normalized
 
 
@@ -137,7 +138,7 @@ proc syncHostDriverContext(host: DriverContext, local: DriverContext) =
 
 def write_drivers_nim(
     drivers: dict[str, Driver],
-    driver_build_mode: str = DRIVER_BUILD_MODE_STATIC,
+    driver_build_mode: str = DEFAULT_DRIVER_BUILD_MODE,
 ) -> str:
     if normalize_driver_build_mode(driver_build_mode) == DRIVER_BUILD_MODE_SHARED:
         return write_shared_drivers_nim(drivers)

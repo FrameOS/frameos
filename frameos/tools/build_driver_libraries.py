@@ -127,7 +127,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--only-if-shared",
         action="store_true",
-        help="Skip unless frame.json selects rpios.driverBuildMode=shared",
+        help="Skip only when frame.json explicitly selects rpios.driverBuildMode=static",
     )
     parser.add_argument(
         "--nim-arg",

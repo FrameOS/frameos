@@ -96,6 +96,82 @@ class FakeBinaryBuilder:
 
 
 @pytest.mark.asyncio
+async def test_full_plan_defaults_to_shared_driver_libraries(monkeypatch: pytest.MonkeyPatch):
+    captured_modes: list[str] = []
+
+    class CapturingBinaryBuilder(FakeBinaryBuilder):
+        async def plan_build(self, **kwargs) -> FrameBinaryPlan:
+            captured_modes.append(kwargs["driver_build_mode"])
+            return await super().plan_build(**kwargs)
+
+    frame = SimpleNamespace(
+        id=2,
+        name="SharedDefault",
+        ssh_keys=[],
+        rpios={"crossCompilation": "auto"},
+        reboot=None,
+        last_successful_deploy={"frameos_version": "9.9.9"},
+        last_successful_deploy_at="2026-01-01T00:00:00+00:00",
+        to_dict=lambda: {"id": 2, "name": "SharedDefault"},
+    )
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.drivers_for_frame", lambda _frame: {})
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.get_settings_dict", lambda _db: {})
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.select_ssh_keys_for_frame", lambda _frame, _settings: [])
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.normalize_ssh_keys", lambda _settings: [])
+
+    workflow = FrameDeployWorkflow(
+        db=None,
+        redis=None,
+        frame=frame,
+        deployer=FakeDeployer(),
+        temp_dir="",
+        binary_builder=CapturingBinaryBuilder(),
+    )
+
+    await workflow.plan("full")
+
+    assert captured_modes == ["shared"]
+
+
+@pytest.mark.asyncio
+async def test_full_plan_uses_single_executable_only_when_explicit(monkeypatch: pytest.MonkeyPatch):
+    captured_modes: list[str] = []
+
+    class CapturingBinaryBuilder(FakeBinaryBuilder):
+        async def plan_build(self, **kwargs) -> FrameBinaryPlan:
+            captured_modes.append(kwargs["driver_build_mode"])
+            return await super().plan_build(**kwargs)
+
+    frame = SimpleNamespace(
+        id=3,
+        name="StaticExplicit",
+        ssh_keys=[],
+        rpios={"crossCompilation": "auto", "driverBuildMode": "static"},
+        reboot=None,
+        last_successful_deploy={"frameos_version": "9.9.9"},
+        last_successful_deploy_at="2026-01-01T00:00:00+00:00",
+        to_dict=lambda: {"id": 3, "name": "StaticExplicit"},
+    )
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.drivers_for_frame", lambda _frame: {})
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.get_settings_dict", lambda _db: {})
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.select_ssh_keys_for_frame", lambda _frame, _settings: [])
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.normalize_ssh_keys", lambda _settings: [])
+
+    workflow = FrameDeployWorkflow(
+        db=None,
+        redis=None,
+        frame=frame,
+        deployer=FakeDeployer(),
+        temp_dir="",
+        binary_builder=CapturingBinaryBuilder(),
+    )
+
+    await workflow.plan("full")
+
+    assert captured_modes == ["static"]
+
+
+@pytest.mark.asyncio
 async def test_fast_plan_keeps_previous_version_and_marks_restart_for_tls_change():
     frame = SimpleNamespace(
         id=1,

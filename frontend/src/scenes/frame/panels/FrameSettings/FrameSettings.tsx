@@ -543,8 +543,8 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                 tooltip={
                   <div className="space-y-2">
                     <p>
-                      Choose whether display/input drivers are linked into the FrameOS executable or built as separate
-                      shared libraries that are deployed next to it.
+                      Choose whether display/input drivers are built as separate shared libraries deployed next to
+                      FrameOS, or linked into the FrameOS executable.
                     </p>
                   </div>
                 }
@@ -552,8 +552,9 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                 <Select
                   name="rpios.driverBuildMode"
                   options={[
-                    { value: 'static', label: 'Single executable (default)' },
+                    { value: '', label: 'Default (shared driver libraries)' },
                     { value: 'shared', label: 'Shared driver libraries' },
+                    { value: 'static', label: 'Single executable' },
                   ]}
                 />
               </Field>

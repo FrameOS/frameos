@@ -27,6 +27,7 @@ from app.drivers.waveshare import write_waveshare_driver_nim, get_variant_folder
 from app.drivers.devices import drivers_for_frame
 from app.models import get_apps_from_scenes
 from app.codegen.drivers_nim import (
+    DEFAULT_DRIVER_BUILD_MODE,
     DRIVER_BUILD_MODE_SHARED,
     DRIVER_BUILD_MODE_STATIC,
     compiled_drivers,
@@ -260,7 +261,7 @@ class FrameDeployer:
     async def make_local_modifications(
         self,
         source_dir: str,
-        driver_build_mode: str = DRIVER_BUILD_MODE_STATIC,
+        driver_build_mode: str = DEFAULT_DRIVER_BUILD_MODE,
     ):
         frame = self.frame
         driver_build_mode = normalize_driver_build_mode(driver_build_mode)
@@ -584,7 +585,7 @@ $(OBJECTS): pre-build
         build_dir: str,
         source_dir: str,
         arch: str,
-        driver_build_mode: str = DRIVER_BUILD_MODE_STATIC,
+        driver_build_mode: str = DEFAULT_DRIVER_BUILD_MODE,
     ) -> str:
         db = self.db
         redis = self.redis

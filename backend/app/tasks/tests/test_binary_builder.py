@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.codegen.drivers_nim import DRIVER_BUILD_MODE_SHARED, DRIVER_BUILD_MODE_STATIC
 from app.tasks.binary_builder import FrameBinaryBuilder, FrameBinaryPlan
 from app.utils.cross_compile import TargetMetadata
 
@@ -12,7 +13,9 @@ class FakeDeployer:
     def __init__(self) -> None:
         self.build_id = "build12345678"
 
-    async def make_local_modifications(self, _source_dir: str, driver_build_mode: str = "static") -> None:
+    async def make_local_modifications(
+        self, _source_dir: str, driver_build_mode: str = DRIVER_BUILD_MODE_SHARED
+    ) -> None:
         return None
 
     def create_local_source_folder(self, _temp_dir: str, source_root: str | None = None) -> str:
@@ -23,7 +26,7 @@ class FakeDeployer:
         _build_dir: str,
         _source_dir: str,
         _arch: str,
-        driver_build_mode: str = "static",
+        driver_build_mode: str = DRIVER_BUILD_MODE_SHARED,
     ) -> str:
         return "/tmp/build.tar.gz"
 
@@ -32,6 +35,34 @@ class FakeDeployer:
 
     def driver_library_names(self, _drivers, _driver_build_mode):
         return []
+
+
+@pytest.mark.asyncio
+async def test_plan_build_defaults_to_shared_driver_mode(monkeypatch: pytest.MonkeyPatch):
+    async def fake_resolve_prebuilt_entry(**_kwargs):
+        return None, None
+
+    monkeypatch.setattr("app.tasks.binary_builder.get_build_host_config", lambda _db: None)
+    monkeypatch.setattr("app.tasks.binary_builder.resolve_prebuilt_entry", fake_resolve_prebuilt_entry)
+
+    builder = FrameBinaryBuilder(
+        db=None,
+        redis=None,
+        frame=SimpleNamespace(device="framebuffer", gpio_buttons=[], rpios={}),
+        deployer=FakeDeployer(),
+        temp_dir="/tmp",
+    )
+
+    plan = await builder.plan_build(
+        target_override=TargetMetadata(arch="aarch64", distro="raspios", version="trixie")
+    )
+    explicit_static_plan = await builder.plan_build(
+        target_override=TargetMetadata(arch="aarch64", distro="raspios", version="trixie"),
+        driver_build_mode=DRIVER_BUILD_MODE_STATIC,
+    )
+
+    assert plan.driver_build_mode == DRIVER_BUILD_MODE_SHARED
+    assert explicit_static_plan.driver_build_mode == DRIVER_BUILD_MODE_STATIC
 
 
 @pytest.mark.asyncio
