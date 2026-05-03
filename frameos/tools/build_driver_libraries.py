@@ -25,6 +25,7 @@ from app.codegen.drivers_nim import (  # noqa: E402
     compiled_drivers,
     driver_library_filename,
     frame_driver_build_mode,
+    normalize_driver_build_mode,
 )
 from app.drivers.devices import drivers_for_frame  # noqa: E402
 from generate_driver_sources import generate_driver_sources, load_frame_stub  # noqa: E402
@@ -66,10 +67,12 @@ async def build_driver_libraries(
     nim_args: Iterable[str],
     strip_command: str | None,
     only_if_shared: bool,
+    driver_build_mode: str | None,
 ) -> list[Path]:
     frame = load_frame_stub(config_path)
-    if only_if_shared and frame_driver_build_mode(frame) != DRIVER_BUILD_MODE_SHARED:
-        print("Driver build mode is static; skipping shared driver libraries")
+    mode = normalize_driver_build_mode(driver_build_mode or frame_driver_build_mode(frame))
+    if only_if_shared and mode != DRIVER_BUILD_MODE_SHARED:
+        print(f"Driver build mode is {mode}; skipping shared driver libraries")
         return []
 
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -127,7 +130,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--only-if-shared",
         action="store_true",
-        help="Skip only when frame.json explicitly selects rpios.driverBuildMode=static",
+        help="Skip unless the effective driver build mode is shared",
+    )
+    parser.add_argument(
+        "--driver-build-mode",
+        choices=("static", "shared"),
+        default=None,
+        help="Override frame.json rpios.driverBuildMode when deciding whether to skip",
     )
     parser.add_argument(
         "--nim-arg",
@@ -149,6 +158,7 @@ def main(argv: list[str]) -> int:
             nim_args=args.nim_arg,
             strip_command=None if args.no_strip else args.strip,
             only_if_shared=args.only_if_shared,
+            driver_build_mode=args.driver_build_mode,
         )
     )
     for path in built:

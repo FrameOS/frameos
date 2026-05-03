@@ -544,8 +544,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                   <div className="space-y-2">
                     <p>
                       Choose whether display/input drivers are built as separate shared libraries deployed next to
-                      FrameOS, or linked into the FrameOS executable. Shared libraries will be the future. This is
-                      presently a way to roll back in case of issues.
+                      FrameOS, or linked into the FrameOS executable.
                     </p>
                   </div>
                 }
@@ -553,7 +552,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                 <Select
                   name="rpios.driverBuildMode"
                   options={[
-                    { value: '', label: 'Default (shared driver libraries)' },
+                    { value: '', label: 'Default (single executable)' },
                     { value: 'shared', label: 'Shared driver libraries' },
                     { value: 'static', label: 'Single executable' },
                   ]}

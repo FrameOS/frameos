@@ -18,7 +18,7 @@ maybe-driver-libraries:
 	@if [ "$(SKIP_DRIVER_LIBRARIES)" = "1" ]; then \
 		echo "Skipping shared driver libraries"; \
 	else \
-		python3 tools/build_driver_libraries.py --config frame.json --out build/drivers --only-if-shared; \
+		python3 tools/build_driver_libraries.py --config frame.json --out build/drivers --only-if-shared $(DRIVER_BUILD_MODE_ARG); \
 	fi
 
 driver-libraries: drivers

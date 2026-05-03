@@ -47,7 +47,7 @@ async def test_build_target_plans_then_builds(monkeypatch: pytest.MonkeyPatch, t
 
         async def plan_build(self, **kwargs):
             FakeBinaryBuilder.last_plan_kwargs = kwargs
-            return SimpleNamespace(marker="plan", driver_build_mode=kwargs.get("driver_build_mode") or "shared")
+            return SimpleNamespace(marker="plan", driver_build_mode=kwargs.get("driver_build_mode") or "static")
 
         async def build(self, plan):
             FakeBinaryBuilder.last_build_plan = plan
@@ -77,4 +77,4 @@ async def test_build_target_plans_then_builds(monkeypatch: pytest.MonkeyPatch, t
     assert destination.exists()
     assert destination.read_bytes() == b"frameos"
     metadata = json.loads((artifacts_dir / "debian-trixie-amd64" / "metadata.json").read_text(encoding="utf-8"))
-    assert metadata["driver_build_mode"] == "shared"
+    assert metadata["driver_build_mode"] == "static"

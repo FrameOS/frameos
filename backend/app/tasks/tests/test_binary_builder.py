@@ -38,7 +38,7 @@ class FakeDeployer:
 
 
 @pytest.mark.asyncio
-async def test_plan_build_defaults_to_shared_driver_mode(monkeypatch: pytest.MonkeyPatch):
+async def test_plan_build_defaults_to_static_driver_mode(monkeypatch: pytest.MonkeyPatch):
     async def fake_resolve_prebuilt_entry(**_kwargs):
         return None, None
 
@@ -56,13 +56,13 @@ async def test_plan_build_defaults_to_shared_driver_mode(monkeypatch: pytest.Mon
     plan = await builder.plan_build(
         target_override=TargetMetadata(arch="aarch64", distro="raspios", version="trixie")
     )
-    explicit_static_plan = await builder.plan_build(
+    explicit_shared_plan = await builder.plan_build(
         target_override=TargetMetadata(arch="aarch64", distro="raspios", version="trixie"),
-        driver_build_mode=DRIVER_BUILD_MODE_STATIC,
+        driver_build_mode=DRIVER_BUILD_MODE_SHARED,
     )
 
-    assert plan.driver_build_mode == DRIVER_BUILD_MODE_SHARED
-    assert explicit_static_plan.driver_build_mode == DRIVER_BUILD_MODE_STATIC
+    assert plan.driver_build_mode == DRIVER_BUILD_MODE_STATIC
+    assert explicit_shared_plan.driver_build_mode == DRIVER_BUILD_MODE_SHARED
 
 
 @pytest.mark.asyncio
