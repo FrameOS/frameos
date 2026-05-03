@@ -22,6 +22,7 @@ from app.tasks.frame_deploy_helpers import (
     ensure_lgpio,
     ensure_ntp_installed,
     ensure_quickjs,
+    ensure_sudo_available,
     icon,
     install_if_necessary,
     sync_vendor_dir,
@@ -521,6 +522,7 @@ class FrameDeployWorkflow:
         await self.deployer.log("stdout", f"{icon} Deploying frame {frame.name} with build id {build_id}")
 
         try:
+            await ensure_sudo_available(self.deployer)
             await self._install_authorized_keys_for_full_deploy(full_plan)
             build_result = await self._build_full_release_binary(full_plan)
             quickjs_dirname = await self._prepare_remote_for_full_release(

@@ -72,7 +72,8 @@ export function NewFrame(): JSX.Element {
           <Form logic={newFrameForm} formKey="newFrame" className="space-y-4" enableFormOnSubmit>
             <p className="text-sm text-gray-500">
               Enter the credentials of a running Raspberry Pi OS Lite machine here. We will then deploy FrameOS over
-              SSH.
+              SSH. Fresh Raspberry Pi OS images may require disabling the Admin Password sudo requirement before
+              deployment.
             </p>
             <Field name="name" label="Name">
               <TextInput name="name" placeholder="Kitchen Frame" required />
