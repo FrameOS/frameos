@@ -48,6 +48,36 @@ def _iter_config_app_dirs(apps_root: Path):
                 yield f"{category_dir.name}/{app_dir.name}", app_dir
 
 
+def _app_has_proc(app_dir: Path, proc_name: str) -> bool:
+    app_file = app_dir / "app.nim"
+    if not app_file.exists():
+        return False
+
+    app_source = app_file.read_text()
+    return re.search(
+        rf"proc\s+{re.escape(proc_name)}\*?\s*\(\s*[A-Za-z_]\w*\s*:\s*(?:var\s+)?App\b",
+        app_source,
+    ) is not None
+
+
+def _app_capabilities(app_dir: Path, config: dict) -> set[str]:
+    capabilities: set[str] = set()
+    if _app_has_proc(app_dir, "get"):
+        capabilities.add("get")
+    if _app_has_proc(app_dir, "run"):
+        capabilities.add("run")
+
+    if capabilities:
+        return capabilities
+
+    category = (config.get("category") or "").strip().lower()
+    if category in ("data", "render"):
+        capabilities.add("get")
+    if category in ("logic", "render"):
+        capabilities.add("run")
+    return capabilities
+
+
 def write_apps_nim(tmp_dir: Optional[str] = None) -> str:
     """
     Generate src/apps/apps.nim with a registry covering all discovered apps.
@@ -63,6 +93,7 @@ def write_apps_nim(tmp_dir: Optional[str] = None) -> str:
     # find all apps
     all_apps = {}
     app_modules = {}
+    app_capabilities = {}
     for app_id, app_dir in _iter_config_app_dirs(source_dir / "src" / "apps"):
         if app_id.startswith("legacy"):
             continue
@@ -71,6 +102,7 @@ def write_apps_nim(tmp_dir: Optional[str] = None) -> str:
             config = json.load(f)
             all_apps[app_id] = config
             app_modules[app_id] = _module_from_app_dir(source_dir, app_dir)
+            app_capabilities[app_id] = _app_capabilities(app_dir, config)
 
     # 1) Imports
     imports: list[str] = [
@@ -89,7 +121,7 @@ def write_apps_nim(tmp_dir: Optional[str] = None) -> str:
             n += 1
         used_aliases.add(alias)
         imports.append(f"import {mod} as {alias}")
-        items.append((app_id, alias, (cfg.get("category") or "").strip().lower()))
+        items.append((app_id, alias, app_capabilities.get(app_id, set())))
 
     # 2) case branches
     init_cases = []
@@ -97,16 +129,13 @@ def write_apps_nim(tmp_dir: Optional[str] = None) -> str:
     run_cases  = []
     get_cases  = []
 
-    for app_id, alias, category in items:
+    for app_id, alias, capabilities in items:
         init_cases.append(f'  of "{app_id}": {alias}.init(node, scene)')
         set_cases.append(f'  of "{app_id}": {alias}.setField(app, field, value)')
 
-        if category == "render":
+        if "run" in capabilities:
             run_cases.append(f'  of "{app_id}": {alias}.run(app, context)')
-            get_cases.append(f'  of "{app_id}": {alias}.get(app, context)')
-        elif category == "logic":
-            run_cases.append(f'  of "{app_id}": {alias}.run(app, context)')
-        else:
+        if "get" in capabilities:
             get_cases.append(f'  of "{app_id}": {alias}.get(app, context)')
 
     init_cases.append('  else: raise newException(ValueError, "Unknown app keyword: " & keyword)')

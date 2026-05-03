@@ -550,6 +550,21 @@ def _app_has_self_init(app_dir: str) -> bool:
     return re.search(r"proc\s+init\*?\s*\(\s*self\s*:\s*(?:var\s+)?App\b", app_source) is not None
 
 
+def _app_has_proc(app_dir: str, proc_name: str) -> bool:
+    """Return True when app.nim defines an App instance proc with the given name."""
+    app_file = os.path.join(app_dir, "app.nim")
+    if not os.path.exists(app_file):
+        return False
+
+    with open(app_file, "r") as af:
+        app_source = af.read()
+
+    return re.search(
+        rf"proc\s+{re.escape(proc_name)}\*?\s*\(\s*[A-Za-z_]\w*\s*:\s*(?:var\s+)?App\b",
+        app_source,
+    ) is not None
+
+
 def write_app_loader_nim(app_dir, config: Optional[dict] = None) -> str:
     if not config:
         config_path = os.path.join(app_dir, "config.json")
@@ -565,6 +580,8 @@ def write_app_loader_nim(app_dir, config: Optional[dict] = None) -> str:
 
     fields = [f for f in config.get("fields", []) if not f.get("markdown")]
     app_has_self_init = _app_has_self_init(app_dir)
+    app_has_get = _app_has_proc(app_dir, "get")
+    app_has_run = _app_has_proc(app_dir, "run")
     # Build quick index for defaults/refs (used by seq bounds)
     fields_by_name: Dict[str, Dict[str, Any]] = {f["name"]: f for f in fields if "name" in f}
 
@@ -665,12 +682,12 @@ proc setField*(self: AppRoot, field: string, value: Value) =
   else:
     raise newException(ValueError, "Unknown field: " & field)
 """
-    if config.get("category") in ("data", "render"):
+    if app_has_get:
         nim_code += """
 proc get*(self: AppRoot, context: ExecutionContext): Value =
   return app_module.get(app_module.App(self), context)
 """
-    if config.get("category") in ("render", "logic"):
+    if app_has_run:
         nim_code += """
 proc run*(self: AppRoot, context: ExecutionContext) =
   app_module.run(app_module.App(self), context)
