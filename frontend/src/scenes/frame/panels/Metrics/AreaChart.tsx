@@ -267,6 +267,7 @@ export function AreaChart({
   hideBottomAxis = false,
   hideLeftAxis = false,
   hideRightAxis = false,
+  hideGrid = false,
   withPoints = true,
   gapThresholdMs = null,
   showTooltip = false,
@@ -285,6 +286,7 @@ export function AreaChart({
   hideBottomAxis?: boolean
   hideLeftAxis?: boolean
   hideRightAxis?: boolean
+  hideGrid?: boolean
   withPoints?: boolean
   gapThresholdMs?: number | null
   showTooltip?: boolean
@@ -381,10 +383,11 @@ export function AreaChart({
   return (
     <Group left={left || margin.left} top={top || margin.top}>
       <LinearGradient id={gradientId} from={primaryColor} fromOpacity={0.28} to={primaryColor} toOpacity={0.04} />
-      {gridTicks.map((tick) => {
-        const y = yScale(tick) || 0
-        return <line key={tick} x1={0} x2={xMax} y1={y} y2={y} stroke={gridColor} strokeWidth={1} />
-      })}
+      {!hideGrid &&
+        gridTicks.map((tick) => {
+          const y = yScale(tick) || 0
+          return <line key={tick} x1={0} x2={xMax} y1={y} y2={y} stroke={gridColor} strokeWidth={1} />
+        })}
       {seriesSegments.map((chartSeries) =>
         chartSeries.segments.map((segment, index) => (
           <React.Fragment key={`${chartSeries.key}-${getDate(segment[0]).getTime()}-${index}`}>
