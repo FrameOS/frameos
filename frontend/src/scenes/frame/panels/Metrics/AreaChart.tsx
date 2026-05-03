@@ -49,6 +49,21 @@ interface ChartTooltipRow {
   y: number
 }
 
+interface ChartTooltipRowAccumulator {
+  key: string
+  label: string
+  color: string
+  unit?: MetricSeries['unit']
+  values: number[]
+  yValues: number[]
+}
+
+interface ChartTooltipSnapshotAccumulator {
+  timestamp: number
+  x: number
+  rowsByKey: Map<string, ChartTooltipRowAccumulator>
+}
+
 interface ChartTooltipSnapshot {
   timestamp: number
   x: number
@@ -136,6 +151,19 @@ function formatMetricValue(value: number, unit?: MetricSeries['unit']): string {
     return `${formatMetricNumber(value)}%`
   }
   return formatMetricNumber(value)
+}
+
+function formatMetricValueRange(values: number[], unit?: MetricSeries['unit']): string {
+  const minValue = Math.min(...values)
+  const maxValue = Math.max(...values)
+  const formattedMin = formatMetricValue(minValue, unit)
+  const formattedMax = formatMetricValue(maxValue, unit)
+
+  return formattedMin === formattedMax ? formattedMin : `${formattedMin} - ${formattedMax}`
+}
+
+function average(values: number[]): number {
+  return values.reduce((sum, value) => sum + value, 0) / values.length
 }
 
 function formatTooltipTimestamp(timestamp: number): string {
@@ -281,7 +309,7 @@ export function AreaChart({
     [series, gapThresholdMs]
   )
   const tooltipSnapshots = useMemo(() => {
-    const snapshots = new Map<number, ChartTooltipSnapshot>()
+    const snapshots = new Map<number, ChartTooltipSnapshotAccumulator>()
 
     series.forEach((chartSeries) => {
       chartSeries.data.forEach((point) => {
@@ -302,20 +330,41 @@ export function AreaChart({
 
         let snapshot = snapshots.get(timestamp)
         if (!snapshot) {
-          snapshot = { timestamp, x, rows: [] }
+          snapshot = { timestamp, x, rowsByKey: new Map() }
           snapshots.set(timestamp, snapshot)
         }
-        snapshot.rows.push({
-          key: chartSeries.key,
-          label: chartSeries.label,
-          color: chartSeries.color,
-          formattedValue: formatMetricValue(value, chartSeries.unit),
-          y,
-        })
+        let row = snapshot.rowsByKey.get(chartSeries.key)
+        if (!row) {
+          row = {
+            key: chartSeries.key,
+            label: chartSeries.label,
+            color: chartSeries.color,
+            unit: chartSeries.unit,
+            values: [],
+            yValues: [],
+          }
+          snapshot.rowsByKey.set(chartSeries.key, row)
+        }
+        row.values.push(value)
+        row.yValues.push(y)
       })
     })
 
-    return [...snapshots.values()].sort((a, b) => a.timestamp - b.timestamp)
+    return [...snapshots.values()]
+      .map(
+        (snapshot): ChartTooltipSnapshot => ({
+          timestamp: snapshot.timestamp,
+          x: snapshot.x,
+          rows: [...snapshot.rowsByKey.values()].map((row) => ({
+            key: row.key,
+            label: row.label,
+            color: row.color,
+            formattedValue: formatMetricValueRange(row.values, row.unit),
+            y: average(row.yValues),
+          })),
+        })
+      )
+      .sort((a, b) => a.timestamp - b.timestamp)
   }, [series, xScale, yScale, yScaleRight])
   const isMultiSeries = series.length > 1
 
