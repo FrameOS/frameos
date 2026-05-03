@@ -1,4 +1,4 @@
-import React, { useId, useMemo } from 'react'
+import React, { useId, useMemo, useState } from 'react'
 import { Group } from '@visx/group'
 import { AreaClosed, LinePath } from '@visx/shape'
 import { AxisLeft, AxisBottom, AxisRight, AxisScale } from '@visx/axis'
@@ -31,10 +31,33 @@ const axisRightTickLabelProps = {
   textAnchor: 'start' as const,
   fill: axisColor,
 }
+const tooltipBackgroundColor = 'rgba(24,24,27,0.96)'
+const tooltipBorderColor = 'rgba(244,244,245,0.24)'
+const tooltipTextColor = 'rgba(244,244,245,0.92)'
+const tooltipMutedTextColor = 'rgba(244,244,245,0.62)'
+const tooltipShadowColor = 'rgba(0,0,0,0.24)'
 
 // accessors
 const getDate = (m: MetricPoint) => m.x
 const getValue = (m: MetricPoint) => m.y
+
+interface ChartTooltipRow {
+  key: string
+  label: string
+  color: string
+  formattedValue: string
+  y: number
+}
+
+interface ChartTooltipSnapshot {
+  timestamp: number
+  x: number
+  rows: ChartTooltipRow[]
+}
+
+interface ChartTooltipState extends ChartTooltipSnapshot {
+  pointerY: number
+}
 
 function splitDataByGap(data: MetricPoint[], gapThresholdMs?: number | null): MetricPoint[][] {
   if (!gapThresholdMs || data.length <= 1) {
@@ -95,6 +118,115 @@ function formatMetricTick(value: number, unit?: MetricSeries['unit']): string {
     : String(value)
 }
 
+function formatMetricNumber(value: number): string {
+  if (Number.isInteger(value)) {
+    return String(value)
+  }
+
+  const absValue = Math.abs(value)
+  const precision = absValue < 1 ? 3 : absValue < 100 ? 2 : 1
+  return value.toFixed(precision).replace(/\.?0+$/, '')
+}
+
+function formatMetricValue(value: number, unit?: MetricSeries['unit']): string {
+  if (unit === 'bytes') {
+    return formatBytes(value)
+  }
+  if (unit === 'percent') {
+    return `${formatMetricNumber(value)}%`
+  }
+  return formatMetricNumber(value)
+}
+
+function formatTooltipTimestamp(timestamp: number): string {
+  return new Date(timestamp).toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  })
+}
+
+function closestTooltipSnapshot(snapshots: ChartTooltipSnapshot[], x: number): ChartTooltipSnapshot | null {
+  let closest: ChartTooltipSnapshot | null = null
+  let closestDistance = Infinity
+
+  snapshots.forEach((snapshot) => {
+    const distance = Math.abs(snapshot.x - x)
+    if (distance < closestDistance) {
+      closest = snapshot
+      closestDistance = distance
+    }
+  })
+
+  return closest
+}
+
+function ChartTooltip({ tooltip, xMax, yMax }: { tooltip: ChartTooltipState; xMax: number; yMax: number }) {
+  const timeLabel = formatTooltipTimestamp(tooltip.timestamp)
+  const widestRowLength = tooltip.rows.reduce(
+    (length, row) => Math.max(length, row.label.length + row.formattedValue.length),
+    timeLabel.length
+  )
+  const tooltipWidth = Math.min(Math.max(170, widestRowLength * 7 + 48), Math.max(170, xMax))
+  const tooltipHeight = 32 + tooltip.rows.length * 18
+  const rawLeft = tooltip.x + tooltipWidth + 12 <= xMax ? tooltip.x + 12 : tooltip.x - tooltipWidth - 12
+  const left = Math.min(Math.max(rawLeft, 0), Math.max(xMax - tooltipWidth, 0))
+  const top = Math.min(Math.max(tooltip.pointerY - tooltipHeight / 2, 0), Math.max(yMax - tooltipHeight, 0))
+
+  return (
+    <g pointerEvents="none">
+      <line x1={tooltip.x} x2={tooltip.x} y1={0} y2={yMax} stroke={tooltipBorderColor} strokeWidth={1} />
+      {tooltip.rows.map((row) => (
+        <circle
+          key={row.key}
+          cx={tooltip.x}
+          cy={row.y}
+          r={4}
+          fill={tooltipBackgroundColor}
+          stroke={row.color}
+          strokeWidth={1.5}
+        />
+      ))}
+      <g transform={`translate(${left}, ${top})`}>
+        <rect x={2} y={3} width={tooltipWidth} height={tooltipHeight} rx={6} fill={tooltipShadowColor} opacity={0.9} />
+        <rect
+          width={tooltipWidth}
+          height={tooltipHeight}
+          rx={6}
+          fill={tooltipBackgroundColor}
+          stroke={tooltipBorderColor}
+        />
+        <text x={10} y={19} fontFamily="Arial" fontSize={10} fill={tooltipMutedTextColor}>
+          {timeLabel}
+        </text>
+        {tooltip.rows.map((row, index) => {
+          const y = 38 + index * 18
+          return (
+            <g key={row.key} transform={`translate(10, ${y})`}>
+              <rect x={0} y={-8} width={8} height={8} rx={2} fill={row.color} />
+              <text x={14} y={0} fontFamily="Arial" fontSize={11} fill={tooltipTextColor}>
+                {row.label}
+              </text>
+              <text
+                x={tooltipWidth - 20}
+                y={0}
+                fontFamily="Arial"
+                fontSize={11}
+                fill={tooltipTextColor}
+                textAnchor="end"
+              >
+                {row.formattedValue}
+              </text>
+            </g>
+          )
+        })}
+      </g>
+    </g>
+  )
+}
+
 export function AreaChart({
   series,
   gradientColor,
@@ -109,6 +241,7 @@ export function AreaChart({
   hideRightAxis = false,
   withPoints = true,
   gapThresholdMs = null,
+  showTooltip = false,
   top,
   left,
   children,
@@ -126,11 +259,13 @@ export function AreaChart({
   hideRightAxis?: boolean
   withPoints?: boolean
   gapThresholdMs?: number | null
+  showTooltip?: boolean
   top?: number
   left?: number
   children?: React.ReactNode
 }) {
   const gradientId = useId().replace(/:/g, '')
+  const [tooltip, setTooltip] = useState<ChartTooltipState | null>(null)
   const xMax = Math.max(width - margin.left - margin.right, 0)
   const primaryColor = series[0]?.color ?? gradientColor
   const leftUnit = series.find((chartSeries) => chartSeries.axis !== 'right')?.unit
@@ -145,7 +280,53 @@ export function AreaChart({
       })),
     [series, gapThresholdMs]
   )
+  const tooltipSnapshots = useMemo(() => {
+    const snapshots = new Map<number, ChartTooltipSnapshot>()
+
+    series.forEach((chartSeries) => {
+      chartSeries.data.forEach((point) => {
+        const timestamp = getDate(point).getTime()
+        const x = xScale(getDate(point))
+        const value = getValue(point)
+        const y = chartSeries.axis === 'right' && yScaleRight ? yScaleRight(value) : yScale(value)
+
+        if (
+          !Number.isFinite(timestamp) ||
+          typeof x !== 'number' ||
+          !Number.isFinite(x) ||
+          typeof y !== 'number' ||
+          !Number.isFinite(y)
+        ) {
+          return
+        }
+
+        let snapshot = snapshots.get(timestamp)
+        if (!snapshot) {
+          snapshot = { timestamp, x, rows: [] }
+          snapshots.set(timestamp, snapshot)
+        }
+        snapshot.rows.push({
+          key: chartSeries.key,
+          label: chartSeries.label,
+          color: chartSeries.color,
+          formattedValue: formatMetricValue(value, chartSeries.unit),
+          y,
+        })
+      })
+    })
+
+    return [...snapshots.values()].sort((a, b) => a.timestamp - b.timestamp)
+  }, [series, xScale, yScale, yScaleRight])
   const isMultiSeries = series.length > 1
+
+  const onTooltipPointerMove = (event: React.PointerEvent<SVGRectElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect()
+    const x = event.clientX - rect.left
+    const y = event.clientY - rect.top
+    const snapshot = closestTooltipSnapshot(tooltipSnapshots, x)
+
+    setTooltip(snapshot ? { ...snapshot, pointerY: y } : null)
+  }
 
   if (width < 10) return null
   return (
@@ -234,6 +415,20 @@ export function AreaChart({
         />
       )}
       {children}
+      {showTooltip && tooltipSnapshots.length > 0 && (
+        <rect
+          x={0}
+          y={0}
+          width={xMax}
+          height={yMax}
+          fill="transparent"
+          pointerEvents="all"
+          onPointerMove={onTooltipPointerMove}
+          onPointerLeave={() => setTooltip(null)}
+          style={{ cursor: 'crosshair' }}
+        />
+      )}
+      {showTooltip && tooltip && <ChartTooltip tooltip={tooltip} xMax={xMax} yMax={yMax} />}
     </Group>
   )
 }

@@ -229,6 +229,7 @@ export function BrushChart({
           yScaleRight={valueScaleRight}
           gradientColor={background2}
           gapThresholdMs={gapThresholdMs}
+          showTooltip
         />
         <AreaChart
           hideBottomAxis
