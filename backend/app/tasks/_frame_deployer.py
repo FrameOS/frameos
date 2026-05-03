@@ -62,6 +62,26 @@ DRIVER_LIBRARY_CFLAGS = (
 
 DRIVER_LIBRARY_LDFLAGS = ("-Wl,--gc-sections",)
 
+LOCAL_SOURCE_IGNORE_PATTERNS = (
+    ".DS_Store",
+    "__pycache__",
+    "*.pyc",
+    "node_modules",
+    "nimcache",
+    ".nimcache",
+    ".nimcache*",
+    "build",
+    "tmp",
+    ".tmp-cache",
+    ".tmp-home",
+    "testresults",
+    "tests",
+    "frameos.deps",
+    "nimble.develop",
+    "nimble.paths",
+    "*.admin_session_salt",
+)
+
 
 def _iter_config_app_dirs(apps_root: str) -> Iterable[str]:
     if not os.path.isdir(apps_root):
@@ -355,7 +375,7 @@ class FrameDeployer:
             base,
             source_dir,
             dirs_exist_ok=True,
-            ignore=shutil.ignore_patterns("node_modules"),
+            ignore=shutil.ignore_patterns(*LOCAL_SOURCE_IGNORE_PATTERNS),
         )
         repo_root = base.parent
         repo_root_package = repo_root / "package.json"

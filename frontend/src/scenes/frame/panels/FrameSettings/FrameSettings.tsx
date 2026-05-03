@@ -544,7 +544,8 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                   <div className="space-y-2">
                     <p>
                       Choose whether display/input drivers are built as separate shared libraries deployed next to
-                      FrameOS, or linked into the FrameOS executable.
+                      FrameOS, or linked into the FrameOS executable. Shared libraries will be the future. This is
+                      presently a way to roll back in case of issues.
                     </p>
                   </div>
                 }

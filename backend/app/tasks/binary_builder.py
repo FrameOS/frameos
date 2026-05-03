@@ -189,6 +189,10 @@ class FrameBinaryBuilder:
 
     async def build(self, plan: FrameBinaryPlan) -> FrameBinaryBuildResult:
         build_host = get_build_host_config(self.db)
+        await self._log(
+            "stdout",
+            f"{icon} Preparing local build sources",
+        )
         source_dir = self.deployer.create_local_source_folder(
             self.temp_dir, source_root=self.source_root
         )
