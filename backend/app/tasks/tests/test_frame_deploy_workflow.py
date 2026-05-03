@@ -84,6 +84,7 @@ class FakeBinaryBuilder:
         return FrameBinaryPlan(
             build_id="build12345678",
             target=TargetMetadata(arch="arm64", distro="raspios", version="bookworm"),
+            driver_build_mode="static",
             allow_cross_compile=True,
             force_cross_compile=False,
             cross_compile_supported=True,

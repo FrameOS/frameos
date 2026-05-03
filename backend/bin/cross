@@ -112,7 +112,12 @@ def list_targets() -> str:
     return "\n".join(target.slug for target in TARGETS)
 
 
-async def build_target(slug: str, frameos_root: Path, artifacts_dir: Path) -> Path:
+async def build_target(
+    slug: str,
+    frameos_root: Path,
+    artifacts_dir: Path,
+    driver_build_mode: str | None = None,
+) -> Path:
     if slug not in TARGET_MAP:
         raise SystemExit(f"Unknown target '{slug}'. Run --list-targets to see available options.")
 
@@ -170,6 +175,7 @@ async def build_target(slug: str, frameos_root: Path, artifacts_dir: Path) -> Pa
             allow_cross_compile=True,
             force_cross_compile=True,
             target_override=target_override,
+            driver_build_mode=driver_build_mode,
         )
         build_result = await builder.build(build_plan)
         binary_path = build_result.binary_path
@@ -181,6 +187,14 @@ async def build_target(slug: str, frameos_root: Path, artifacts_dir: Path) -> Pa
         destination = target_dir / "frameos"
         shutil.copy2(binary_path, destination)
         os.chmod(destination, 0o755)
+        if build_result.driver_library_paths:
+            driver_dir = target_dir / "drivers"
+            driver_dir.mkdir(parents=True, exist_ok=True)
+            for driver_library_path in build_result.driver_library_paths:
+                src = Path(driver_library_path)
+                if not src.is_file():
+                    raise RuntimeError(f"Shared driver library missing after build: {src}")
+                shutil.copy2(src, driver_dir / src.name)
         metadata = {
             "slug": slug,
             "arch": target.arch,
@@ -188,6 +202,8 @@ async def build_target(slug: str, frameos_root: Path, artifacts_dir: Path) -> Pa
             "version": target.version,
             "platform": target.platform,
             "image": target.image,
+            "driver_build_mode": build_plan.driver_build_mode,
+            "driver_libraries": build_result.driver_library_names,
         }
         with (target_dir / "metadata.json").open("w", encoding="utf-8") as fh:
             json.dump(metadata, fh, indent=2)
@@ -206,6 +222,12 @@ def parse_args(argv: Iterable[str]) -> argparse.Namespace:
     build.add_argument("--target", required=True, help="Target slug (distro-version-arch)")
     build.add_argument("--frameos-root", default=str(Path.cwd()), help="Path to the frameos source tree")
     build.add_argument("--artifacts-dir", default="build/cross", help="Directory for compiled binaries")
+    build.add_argument(
+        "--driver-build-mode",
+        choices=("static", "shared"),
+        default=None,
+        help="Override driver build mode (static single executable or shared driver libraries)",
+    )
 
     return parser.parse_args(argv)
 
@@ -225,7 +247,7 @@ def main(argv: list[str]) -> int:
             artifacts_dir = frameos_root / artifacts_dir
 
         async def _build() -> Path:
-            return await build_target(args.target, frameos_root, artifacts_dir)
+            return await build_target(args.target, frameos_root, artifacts_dir, args.driver_build_mode)
 
         asyncio.run(_build())
         return 0

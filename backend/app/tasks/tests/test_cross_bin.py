@@ -46,11 +46,15 @@ async def test_build_target_plans_then_builds(monkeypatch: pytest.MonkeyPatch, t
 
         async def plan_build(self, **kwargs):
             FakeBinaryBuilder.last_plan_kwargs = kwargs
-            return SimpleNamespace(marker="plan")
+            return SimpleNamespace(marker="plan", driver_build_mode=kwargs.get("driver_build_mode") or "static")
 
         async def build(self, plan):
             FakeBinaryBuilder.last_build_plan = plan
-            return SimpleNamespace(binary_path=str(binary_path))
+            return SimpleNamespace(
+                binary_path=str(binary_path),
+                driver_library_paths=[],
+                driver_library_names=[],
+            )
 
     monkeypatch.setattr("backend.app.tasks._frame_deployer.FrameDeployer", FakeFrameDeployer)
     monkeypatch.setattr("backend.app.tasks.binary_builder.FrameBinaryBuilder", FakeBinaryBuilder)

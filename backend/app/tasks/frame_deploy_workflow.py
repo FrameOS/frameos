@@ -11,6 +11,7 @@ from arq import ArqRedis as Redis
 from sqlalchemy.orm import Session
 
 from app.drivers.devices import drivers_for_frame
+from app.codegen.drivers_nim import normalize_driver_build_mode
 from app.models.assets import sync_assets
 from app.models.frame import Frame, normalize_https_proxy, update_frame
 from app.models.log import new_log as log
@@ -307,12 +308,14 @@ class FrameDeployWorkflow:
         cross_compilation_setting = (rpios_settings.get("crossCompilation") or "auto").lower()
         if cross_compilation_setting not in {"auto", "always", "never"}:
             cross_compilation_setting = "auto"
+        driver_build_mode = normalize_driver_build_mode(rpios_settings.get("driverBuildMode"))
 
         allow_cross_compile = cross_compilation_setting != "never"
         force_cross_compile = cross_compilation_setting == "always"
         binary_plan = await self.binary_builder.plan_build(
             allow_cross_compile=allow_cross_compile,
             force_cross_compile=force_cross_compile,
+            driver_build_mode=driver_build_mode,
         )
 
         settings = get_settings_dict(self.db)
@@ -426,6 +429,7 @@ class FrameDeployWorkflow:
         notes = [
             f"Detected distro: {distro} ({distro_version}), architecture: {arch}, total memory: {total_memory} MiB",
             f"Cross compilation setting: {cross_compilation_setting}",
+            f"Driver build mode: {driver_build_mode}",
         ]
         if low_memory:
             notes.append("Device is low memory; on-device build path will stop FrameOS before compilation.")
@@ -654,6 +658,7 @@ class FrameDeployWorkflow:
         release_frameos_path = self._release_frameos_path(build_id)
         if build_result.cross_compiled:
             await self._publish_cross_compiled_binary(build_result, release_frameos_path)
+            await self._publish_cross_compiled_driver_libraries(build_result, build_id)
             return
         await self._publish_remote_built_binary(build_result, build_id, release_frameos_path, quickjs_dirname)
 
@@ -666,6 +671,22 @@ class FrameDeployWorkflow:
         if not build_result.binary_path:
             raise RuntimeError("Cross compilation succeeded but binary path is unknown")
         await upload_binary(self.deployer, build_result.binary_path, release_frameos_path)
+
+    async def _publish_cross_compiled_driver_libraries(
+        self,
+        build_result: FrameBinaryBuildResult,
+        build_id: str,
+    ) -> None:
+        if not build_result.driver_library_paths:
+            return
+        await self.deployer.log("stdout", f"{icon} Uploading shared driver libraries")
+        release_driver_dir = self._release_driver_dir(build_id)
+        await self.deployer.exec_command(f"mkdir -p {shlex.quote(release_driver_dir)}")
+        for local_path in build_result.driver_library_paths:
+            if not os.path.isfile(local_path):
+                raise RuntimeError(f"Shared driver library missing after cross compilation: {local_path}")
+            remote_path = f"{release_driver_dir}/{os.path.basename(local_path)}"
+            await upload_binary(self.deployer, local_path, remote_path)
 
     async def _publish_remote_built_binary(
         self,
@@ -706,6 +727,16 @@ class FrameDeployWorkflow:
         await self.deployer.exec_command(
             f"cp {remote_build_dir}/frameos {release_frameos_path}"
         )
+        if build_result.driver_library_paths:
+            release_driver_dir = self._release_driver_dir(build_id)
+            await self.deployer.exec_command(f"mkdir -p {shlex.quote(release_driver_dir)}")
+            for local_path in build_result.driver_library_paths:
+                relative_path = os.path.relpath(local_path, build_result.build_dir)
+                remote_source = f"{remote_build_dir}/{relative_path}"
+                remote_dest = f"{release_driver_dir}/{os.path.basename(local_path)}"
+                await self.deployer.exec_command(
+                    f"cp {shlex.quote(remote_source)} {shlex.quote(remote_dest)}"
+                )
 
     async def _upload_release_metadata(self, build_id: str) -> None:
         await self.deployer._upload_scenes_json(f"{self._release_dir(build_id)}/scenes.json.gz", gzip=True)
@@ -776,6 +807,10 @@ class FrameDeployWorkflow:
     @classmethod
     def _release_frameos_path(cls, build_id: str) -> str:
         return f"{cls._release_dir(build_id)}/frameos"
+
+    @classmethod
+    def _release_driver_dir(cls, build_id: str) -> str:
+        return f"{cls._release_dir(build_id)}/drivers"
 
     @staticmethod
     def _remote_build_dir(build_id: str) -> str:

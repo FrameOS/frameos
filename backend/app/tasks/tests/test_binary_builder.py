@@ -12,14 +12,26 @@ class FakeDeployer:
     def __init__(self) -> None:
         self.build_id = "build12345678"
 
-    async def make_local_modifications(self, _source_dir: str) -> None:
+    async def make_local_modifications(self, _source_dir: str, driver_build_mode: str = "static") -> None:
         return None
 
     def create_local_source_folder(self, _temp_dir: str, source_root: str | None = None) -> str:
         return source_root or "/tmp/source"
 
-    async def create_local_build_archive(self, _build_dir: str, _source_dir: str, _arch: str) -> str:
+    async def create_local_build_archive(
+        self,
+        _build_dir: str,
+        _source_dir: str,
+        _arch: str,
+        driver_build_mode: str = "static",
+    ) -> str:
         return "/tmp/build.tar.gz"
+
+    def driver_library_paths(self, _build_dir, _drivers, _driver_build_mode):
+        return []
+
+    def driver_library_names(self, _drivers, _driver_build_mode):
+        return []
 
 
 @pytest.mark.asyncio
@@ -36,13 +48,14 @@ async def test_build_passes_plan_fields_to_cross_compile(monkeypatch: pytest.Mon
     builder = FrameBinaryBuilder(
         db=None,
         redis=None,
-        frame=SimpleNamespace(),
+        frame=SimpleNamespace(device="framebuffer", gpio_buttons=[]),
         deployer=FakeDeployer(),
         temp_dir="/tmp",
     )
     plan = FrameBinaryPlan(
         build_id="build12345678",
         target=TargetMetadata(arch="aarch64", distro="raspios", version="trixie"),
+        driver_build_mode="static",
         allow_cross_compile=True,
         force_cross_compile=False,
         cross_compile_supported=True,

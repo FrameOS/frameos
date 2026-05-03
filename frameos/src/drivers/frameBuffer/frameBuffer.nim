@@ -1,5 +1,5 @@
 import pixie, json, linuxfb, posix, strformat, osproc
-import frameos/types
+import frameos/driver_context
 
 const DEVICE = "/dev/fb0"
 
@@ -18,14 +18,14 @@ type ScreenInfo* = object
 
 type Driver* = ref object of FrameOSDriver
   screenInfo*: ScreenInfo
-  logger*: Logger
+  logger*: DriverLogger
 
 proc tryToDisableCursorBlinking() =
   let status = execCmd("echo 0 | sudo tee /sys/class/graphics/fbcon/cursor_blink")
   if status != 0:
     discard execCmd("sudo sh -c 'setterm -cursor off > /dev/tty0'")
 
-proc getScreenInfo(logger: Logger): ScreenInfo =
+proc getScreenInfo(logger: DriverLogger): ScreenInfo =
   let fd = open(DEVICE, O_RDWR)
   var var_info: fb_var_screeninfo
   discard ioctl(fd, FBIOGET_VSCREENINFO, addr var_info)
@@ -48,7 +48,7 @@ proc getScreenInfo(logger: Logger): ScreenInfo =
   })
   discard close(fd)
 
-proc init*(frameOS: FrameOS): Driver =
+proc init*(frameOS: DriverContext): Driver =
   let logger = frameOS.logger
   try:
     var res: Stat

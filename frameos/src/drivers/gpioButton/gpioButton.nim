@@ -1,6 +1,6 @@
-import pixie, json, strformat, strutils, tables
+import json, strformat, strutils, tables
 import lib/lgpio
-import frameos/types
+import frameos/driver_context
 import frameos/channels
 
 const debounce = 100000
@@ -31,7 +31,7 @@ proc determineGPIODevice(): int =
     discard
   return 0
 
-proc init*(frameOS: FrameOS): Driver =
+proc init*(frameOS: DriverContext): Driver =
   log("Initializing GPIO button driver")
   if frameOS.frameConfig.gpioButtons.len == 0:
     log("No buttons configured")

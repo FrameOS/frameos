@@ -27,6 +27,7 @@ export interface FullDeployPlanResponse {
   low_memory: boolean
   drivers: string[]
   binary: {
+    driver_build_mode?: 'static' | 'shared'
     will_attempt_cross_compile?: boolean
     cross_compile_supported?: boolean
     build_host_configured?: boolean
@@ -156,6 +157,9 @@ export function buildFullDeployPlanSummary(
 
   if (fullPlan.drivers.length > 0) {
     items.push({ label: 'Drivers', value: stringifyList(fullPlan.drivers) })
+  }
+  if (fullPlan.binary.driver_build_mode === 'shared') {
+    items.push({ label: 'Driver delivery', value: 'Shared libraries deployed next to the FrameOS binary' })
   }
   if (packagesToInstall.length > 0) {
     items.push({ label: 'Packages to install', value: stringifyList(packagesToInstall) })

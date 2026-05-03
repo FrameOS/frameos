@@ -5,14 +5,13 @@ import std/json
 import std/strutils
 import std/uri
 import checksums/md5
-import frameos/types
+import frameos/driver_context
 
 const DEFAULT_TIMEOUT_MS = 30000
 
 type
   Driver* = ref object of FrameOSDriver
-    frameOS*: FrameOS
-    logger*: Logger
+    logger*: DriverLogger
     url*: string
     headers*: seq[HttpHeaderPair]
     lastHash*: string
@@ -21,11 +20,10 @@ type
 
 var requestHook*: HttpUploadRequestFn
 
-proc init*(frameOS: FrameOS): Driver =
+proc init*(frameOS: DriverContext): Driver =
   let config = frameOS.frameConfig.deviceConfig
   result = Driver(
     name: "httpUpload",
-    frameOS: frameOS,
     logger: frameOS.logger,
     url: config.httpUploadUrl,
     headers: config.httpUploadHeaders,

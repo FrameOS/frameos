@@ -1,6 +1,12 @@
-from app.models.frame import Frame
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from app.drivers.drivers import Driver, DRIVERS
 from app.drivers.waveshare import get_variant_keys
+
+if TYPE_CHECKING:
+    from app.models.frame import Frame
 
 def drivers_for_frame(frame: Frame) -> dict[str, Driver]:
     device = frame.device
