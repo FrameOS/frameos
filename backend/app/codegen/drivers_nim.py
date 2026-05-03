@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from app.drivers.drivers import Driver
 
 DRIVER_BUILD_MODE_STATIC = "static"
@@ -25,7 +27,12 @@ def compiled_drivers(drivers: dict[str, Driver]) -> list[Driver]:
 
 
 def driver_library_filename(driver: Driver) -> str:
-    return f"libframeos_driver_{driver.name}.so"
+    suffix = driver.name
+    if driver.name == "waveshare" and driver.variant:
+        safe_variant = re.sub(r"[^A-Za-z0-9_]+", "_", driver.variant).strip("_")
+        if safe_variant:
+            suffix = f"{driver.name}_{safe_variant}"
+    return f"libframeos_driver_{suffix}.so"
 
 
 def driver_context_helpers_nim() -> str:

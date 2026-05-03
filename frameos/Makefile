@@ -1,6 +1,9 @@
 .PHONY: run build drivers maybe-driver-libraries driver-libraries test test-shard debug cross-list
 
 CROSS_OUT ?= build/cross
+DRIVER_BUILD_MODE ?=
+SKIP_DRIVER_LIBRARIES ?= 0
+DRIVER_BUILD_MODE_ARG = $(if $(DRIVER_BUILD_MODE),--driver-build-mode $(DRIVER_BUILD_MODE),)
 
 run: build
 	./build/frameos --verbose
@@ -9,10 +12,14 @@ build: apploaders drivers maybe-driver-libraries
 	nimble build -y --verbose --lineTrace:on --stackTrace:on
 
 drivers:
-	python3 tools/generate_driver_sources.py --config frame.json
+	python3 tools/generate_driver_sources.py --config frame.json $(DRIVER_BUILD_MODE_ARG)
 
 maybe-driver-libraries:
-	python3 tools/build_driver_libraries.py --config frame.json --out build/drivers --only-if-shared
+	@if [ "$(SKIP_DRIVER_LIBRARIES)" = "1" ]; then \
+		echo "Skipping shared driver libraries"; \
+	else \
+		python3 tools/build_driver_libraries.py --config frame.json --out build/drivers --only-if-shared; \
+	fi
 
 driver-libraries: drivers
 	python3 tools/build_driver_libraries.py --config frame.json --out build/drivers

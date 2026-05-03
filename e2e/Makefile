@@ -33,7 +33,7 @@ snapshots:
 	rm -rf "$$tmpdir/src/scenes" && \
 	cp -r ./generated "$$tmpdir/src/scenes" && \
 	cp -r ./generated/scenes.json "$$tmpdir/" && \
-	(cd "$$tmpdir" && make build) && \
+	(cd "$$tmpdir" && make build DRIVER_BUILD_MODE=shared SKIP_DRIVER_LIBRARIES=1) && \
 	cp "$$tmpdir/build/frameos" ./tmp/frameos-bin && \
 	cp "$$tmpdir/scenes.json" ./tmp/scenes.json
 
