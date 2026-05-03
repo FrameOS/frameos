@@ -84,7 +84,7 @@ export function BrushChart({
   onResetTimeRange,
   margin = {
     top: 20,
-    left: 40,
+    left: 56,
     bottom: 20,
     right: 45,
   },
@@ -215,7 +215,7 @@ export function BrushChart({
   }
 
   return (
-    <div>
+    <div style={{ userSelect: 'none' }}>
       <svg width={width} height={height}>
         <rect x={0} y={0} width={width} height={height} fill={background2} rx={14} />
         <AreaChart
@@ -229,6 +229,7 @@ export function BrushChart({
           yScaleRight={valueScaleRight}
           gradientColor={background2}
           gapThresholdMs={gapThresholdMs}
+          showTooltip
         />
         <AreaChart
           hideBottomAxis

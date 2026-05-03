@@ -15,7 +15,7 @@ export function Metrics() {
   ) : metrics.length === 0 ? (
     <div>No Metrics yet</div>
   ) : (
-    <div className="h-full p-2 relative">
+    <div className="h-full p-2 relative select-none">
       <ParentSize>
         {(parent) =>
           Object.entries(metricsByCategory).map(([key, series]) => (

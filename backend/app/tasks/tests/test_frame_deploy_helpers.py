@@ -4,7 +4,11 @@ from types import SimpleNamespace
 import pytest
 
 from app.tasks import frame_deploy_helpers
-from app.tasks.frame_deploy_helpers import upload_directory_tree
+from app.tasks.frame_deploy_helpers import (
+    RPIOS_SUDO_SECURITY_UPDATE_URL,
+    ensure_sudo_available,
+    upload_directory_tree,
+)
 
 
 class RecordingDeployer:
@@ -18,6 +22,27 @@ class RecordingDeployer:
     async def exec_command(self, command: str, **_kwargs) -> int:
         self.commands.append(command)
         return 0
+
+    async def log(self, log_type: str, message: str) -> None:
+        self.logs.append((log_type, message))
+
+
+class SudoCheckDeployer:
+    def __init__(
+        self,
+        *,
+        sudo_status: int = 0,
+    ):
+        self.frame = SimpleNamespace(id=1)
+        self.commands: list[tuple[str, dict]] = []
+        self.logs: list[tuple[str, str]] = []
+        self.sudo_status = sudo_status
+
+    async def exec_command(self, command: str, **kwargs) -> int:
+        self.commands.append((command, kwargs))
+        if command == "sudo -n true":
+            return self.sudo_status
+        raise AssertionError(f"Unexpected command: {command}")
 
     async def log(self, log_type: str, message: str) -> None:
         self.logs.append((log_type, message))
@@ -80,3 +105,26 @@ async def test_upload_directory_tree_preserves_requested_remote_paths(
     assert extract_vendor < restore_env
     assert extract_vendor < restore_checksum
     assert deployer.commands[-1] == "rm -rf /tmp/inkyPython_build12345678_preserve"
+
+
+@pytest.mark.asyncio
+async def test_ensure_sudo_available_passes_when_sudo_already_works():
+    deployer = SudoCheckDeployer(sudo_status=0)
+
+    await ensure_sudo_available(deployer)
+
+    assert [command for command, _kwargs in deployer.commands] == ["sudo -n true"]
+    assert deployer.logs == []
+
+
+@pytest.mark.asyncio
+async def test_ensure_sudo_available_blocks_with_rpios_message_when_sudo_requires_password():
+    deployer = SudoCheckDeployer(sudo_status=1)
+
+    with pytest.raises(RuntimeError, match="requires non-interactive sudo") as exc:
+        await ensure_sudo_available(deployer)
+
+    assert RPIOS_SUDO_SECURITY_UPDATE_URL in str(exc.value)
+    assert "sudo raspi-config" in str(exc.value)
+    assert [command for command, _kwargs in deployer.commands] == ["sudo -n true"]
+    assert deployer.logs == []

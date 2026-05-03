@@ -129,6 +129,9 @@ const
   readDataPreamble = UWORD(0x1000)
   busyPinWaitTimeoutMs = 30_000.0
   displayReadyTimeoutMs = 300_000.0
+  busyPinSpinLoopsBeforeDelay = 1000
+  busyPinPollDelayMs = UDOUBLE(1)
+  displayReadyPollDelayMs = UDOUBLE(50)
   it8951BusyTimeoutError = 1
   it8951DisplayTimeoutError = 2
   it8951InvalidArgumentError = 3
@@ -225,6 +228,8 @@ proc EPD_IT8951_ReadBusy(stage = "readBusy"): bool =
         &"Timed out waiting for IT8951 busy pin during {stage}"
       )
       return false
+    if loops >= busyPinSpinLoopsBeforeDelay:
+      DEV_Delay_ms(busyPinPollDelayMs)
     busyState = DEV_Digital_Read(EPD_BUSY_PIN)
 
   recordWait(startSeconds, loops, busyState)
@@ -443,6 +448,7 @@ proc EPD_IT8951_WaitForDisplayReady*() =
         &"Timed out waiting for IT8951 display engine; LUTAFSR={lutafsr}"
       )
       return
+    DEV_Delay_ms(displayReadyPollDelayMs)
 
   recordWait(startSeconds, loops, lastBusyPin)
   setStage("waitForDisplayReady:done")

@@ -21,6 +21,13 @@ DEFAULT_LGPIO_VERSION = "v0.2.2"
 DEFAULT_LGPIO_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 
 APT_PACKAGE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9+.-]*$")
+RPIOS_SUDO_SECURITY_UPDATE_URL = "https://www.raspberrypi.com/news/a-security-update-for-raspberry-pi-os/"
+
+SUDO_UNAVAILABLE_MESSAGE = (
+    "FrameOS deploy requires non-interactive sudo, but this Raspberry Pi OS image requires a sudo password. "
+    "Run `sudo raspi-config` on the device and disable the Admin Password requirement, then deploy again. "
+    f"More details: {RPIOS_SUDO_SECURITY_UPDATE_URL}"
+)
 
 
 def sanitize_apt_package_name(pkg: str) -> str:
@@ -84,6 +91,13 @@ async def install_if_necessary(
     elif run_after_install:
         response = await deployer.exec_command(run_after_install, raise_on_error=raise_on_error)
     return response
+
+
+async def ensure_sudo_available(deployer: FrameDeployer) -> None:
+    if await deployer.exec_command("sudo -n true", raise_on_error=False, log_command=False, log_output=False) == 0:
+        return
+
+    raise RuntimeError(SUDO_UNAVAILABLE_MESSAGE)
 
 
 async def upload_directory_tree(

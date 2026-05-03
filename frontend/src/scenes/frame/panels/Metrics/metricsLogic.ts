@@ -31,6 +31,7 @@ export interface TimeRange {
 }
 
 const DEFAULT_VISIBLE_MS = 4 * 60 * 60 * 1000
+const HEADER_VISIBLE_MS = 60 * 60 * 1000
 const MIN_VISIBLE_MS = 1000
 const GAP_THRESHOLD_MULTIPLIER = 1.75
 const SINGLE_SERIES_COLOR = '#2dd4bf'
@@ -71,13 +72,51 @@ function sameTimeRange(first: TimeRange | null, second: TimeRange | null): boole
   return first?.start === second?.start && first?.end === second?.end
 }
 
-function defaultVisibleTimeRange(timeRange: TimeRange | null): TimeRange | null {
+function trailingVisibleTimeRange(timeRange: TimeRange | null, visibleMs: number): TimeRange | null {
   if (!timeRange) {
     return null
   }
   const end = timeRange.end
-  const start = Math.max(timeRange.start, end - DEFAULT_VISIBLE_MS)
-  return normalizeTimeRange(start >= end ? end - DEFAULT_VISIBLE_MS : start, end)
+  const start = Math.max(timeRange.start, end - visibleMs)
+  return normalizeTimeRange(start >= end ? end - visibleMs : start, end)
+}
+
+function defaultVisibleTimeRange(timeRange: TimeRange | null): TimeRange | null {
+  return trailingVisibleTimeRange(timeRange, DEFAULT_VISIBLE_MS)
+}
+
+function filterMetricsByCategoryAndTimeRange(
+  metricsByCategory: Record<string, MetricSeries[]>,
+  categories: string[],
+  timeRange: TimeRange | null
+): Record<string, MetricSeries[]> {
+  if (!timeRange) {
+    return {}
+  }
+
+  return Object.fromEntries(
+    categories
+      .map((category) => {
+        const series = metricsByCategory[category]
+        if (!series) {
+          return [category, []]
+        }
+
+        return [
+          category,
+          series
+            .map((chartSeries) => ({
+              ...chartSeries,
+              data: chartSeries.data.filter((point) => {
+                const timestamp = point.x.getTime()
+                return timestamp >= timeRange.start && timestamp <= timeRange.end
+              }),
+            }))
+            .filter((chartSeries) => chartSeries.data.length > 0),
+        ]
+      })
+      .filter(([, series]) => (series as MetricSeries[]).length > 0)
+  ) as Record<string, MetricSeries[]>
 }
 
 function clampTimeRange(range: TimeRange, timeRange: TimeRange, fallback: TimeRange): TimeRange {
@@ -211,6 +250,10 @@ export const metricsLogic = kea<metricsLogicType>([
       (s) => [s.metricsTimeRange],
       (metricsTimeRange) => defaultVisibleTimeRange(metricsTimeRange),
     ],
+    headerMetricsTimeRange: [
+      (s) => [s.metricsTimeRange],
+      (metricsTimeRange) => trailingVisibleTimeRange(metricsTimeRange, HEADER_VISIBLE_MS),
+    ],
     visibleTimeRange: [
       (s) => [s.selectedTimeRange, s.metricsTimeRange, s.defaultSelectedTimeRange],
       (selectedTimeRange, metricsTimeRange, defaultSelectedTimeRange): TimeRange | null => {
@@ -306,6 +349,11 @@ export const metricsLogic = kea<metricsLogicType>([
         })
         return metricsByCategory
       },
+    ],
+    headerMetricsByCategory: [
+      (s) => [s.metricsByCategory, s.headerMetricsTimeRange],
+      (metricsByCategory, headerMetricsTimeRange) =>
+        filterMetricsByCategoryAndTimeRange(metricsByCategory, ['load', 'memoryUsage'], headerMetricsTimeRange),
     ],
   }),
   afterMount(({ actions, cache }) => {

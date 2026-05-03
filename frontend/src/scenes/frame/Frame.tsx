@@ -18,6 +18,7 @@ import { logsLogic } from './panels/Logs/logsLogic'
 import { isFrameControlMode } from '../../utils/frameControlMode'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
 import { Modal } from '../../components/Modal'
+import { HeaderMetrics } from './panels/Metrics/HeaderMetrics'
 
 interface FrameSceneProps {
   id: string // taken straight from the URL, thus a string
@@ -180,14 +181,14 @@ export function Frame(props: FrameSceneProps) {
               !frame ? (
                 `Loading frame ${props.id}...`
               ) : (
-                <div className="flex items-center gap-2">
-                  <span>{frame.name || frameHost(frame)}</span>
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="truncate">{frame.name || frameHost(frame)}</span>
                   <FrameConnection frame={frame} />
                 </div>
               )
             }
             buttons={
-              <div className="flex divide-x divide-gray-700 space-x-2">
+              <div className="flex items-center divide-x divide-gray-700 space-x-2">
                 {!inFrameAdminMode && (unsavedChanges || undeployedChanges) ? (
                   <button
                     className="pr-2 text-[#9a9ad0] underline underline-offset-2"
@@ -204,6 +205,7 @@ export function Frame(props: FrameSceneProps) {
                   </button>
                 ) : null}
 
+                <HeaderMetrics frameId={frameId} />
                 <DropdownMenu buttonColor="secondary" className="items-center" items={dropdownItems} />
                 {inFrameAdminMode ? (
                   <div className="flex pl-2 space-x-2">
