@@ -1,9 +1,9 @@
 import json
+import math
 import re
-from typing import Any, Iterable
+from typing import Any, Iterable, Sequence
 from uuid import uuid4
 
-import numpy as np
 from posthog.ai.openai import AsyncOpenAI
 
 from app.models.ai_embeddings import AiEmbedding
@@ -462,14 +462,35 @@ def _format_context_items(items: list[AiEmbedding]) -> str:
     return "\n\n".join(lines)
 
 
-def _cosine_similarity(query_vec: np.ndarray, matrix: np.ndarray) -> np.ndarray:
-    query_norm = np.linalg.norm(query_vec)
-    if query_norm == 0:
-        return np.zeros(matrix.shape[0])
-    matrix_norm = np.linalg.norm(matrix, axis=1)
-    denom = query_norm * matrix_norm
-    denom[denom == 0] = 1
-    return np.dot(matrix, query_vec) / denom
+def _as_embedding_vector(values: Iterable[float]) -> list[float]:
+    return [float(value) for value in values]
+
+
+def _vector_norm(vector: Sequence[float]) -> float:
+    return math.sqrt(sum(value * value for value in vector))
+
+
+def _cosine_similarity(
+    query_vec: Sequence[float],
+    embedding: Sequence[float],
+    *,
+    query_norm: float | None = None,
+    embedding_norm: float | None = None,
+) -> float:
+    if len(query_vec) != len(embedding):
+        raise ValueError(
+            f"Embedding dimension mismatch: {len(query_vec)} != {len(embedding)}"
+        )
+    resolved_query_norm = _vector_norm(query_vec) if query_norm is None else query_norm
+    resolved_embedding_norm = (
+        _vector_norm(embedding) if embedding_norm is None else embedding_norm
+    )
+    if resolved_query_norm == 0 or resolved_embedding_norm == 0:
+        return 0.0
+    return sum(
+        query_value * embedding_value
+        for query_value, embedding_value in zip(query_vec, embedding)
+    ) / (resolved_query_norm * resolved_embedding_norm)
 
 
 def _tokenize_prompt(prompt: str) -> list[str]:
@@ -539,8 +560,9 @@ def _build_ai_posthog_properties(
 
 def _mmr_select(
     items: list[AiEmbedding],
-    embeddings: np.ndarray,
-    scores: np.ndarray,
+    embeddings: list[list[float]],
+    embedding_norms: list[float],
+    scores: list[float],
     top_k: int,
     lambda_param: float = MMR_LAMBDA,
 ) -> list[AiEmbedding]:
@@ -555,13 +577,22 @@ def _mmr_select(
             candidate_indices.remove(best_idx)
             continue
         best_idx = None
-        best_score = -1.0
+        best_score = -math.inf
         for idx in candidate_indices:
             similarity_to_query = scores[idx]
             similarity_to_selected = max(
-                _cosine_similarity(embeddings[idx], embeddings[selected]) if selected else np.array([0.0])
+                _cosine_similarity(
+                    embeddings[idx],
+                    embeddings[selected_idx],
+                    query_norm=embedding_norms[idx],
+                    embedding_norm=embedding_norms[selected_idx],
+                )
+                for selected_idx in selected
             )
-            mmr_score = lambda_param * similarity_to_query - (1 - lambda_param) * similarity_to_selected
+            mmr_score = (
+                lambda_param * similarity_to_query
+                - (1 - lambda_param) * similarity_to_selected
+            )
             if mmr_score > best_score:
                 best_score = mmr_score
                 best_idx = idx
@@ -582,18 +613,41 @@ def rank_embeddings(
 ) -> list[AiEmbedding]:
     if not items:
         return []
-    embeddings = np.array([item.embedding for item in items], dtype=float)
-    cosine_scores = _cosine_similarity(np.array(query_embedding, dtype=float), embeddings)
+    query_vector = _as_embedding_vector(query_embedding)
+    query_norm = _vector_norm(query_vector)
+    embeddings = [_as_embedding_vector(item.embedding) for item in items]
+    embedding_norms = [_vector_norm(embedding) for embedding in embeddings]
+    cosine_scores = [
+        _cosine_similarity(
+            query_vector,
+            embedding,
+            query_norm=query_norm,
+            embedding_norm=embedding_norm,
+        )
+        for embedding, embedding_norm in zip(embeddings, embedding_norms)
+    ]
     prompt_tokens = _tokenize_prompt(prompt)
-    keyword_scores = np.array([_keyword_score(prompt_tokens, item) for item in items], dtype=float)
-    combined_scores = (0.7 * cosine_scores) + (0.3 * keyword_scores)
-    filtered_indices = [idx for idx, score in enumerate(combined_scores) if score >= min_score]
+    keyword_scores = [_keyword_score(prompt_tokens, item) for item in items]
+    combined_scores = [
+        (0.7 * cosine_score) + (0.3 * keyword_score)
+        for cosine_score, keyword_score in zip(cosine_scores, keyword_scores)
+    ]
+    filtered_indices = [
+        idx for idx, score in enumerate(combined_scores) if score >= min_score
+    ]
     if not filtered_indices:
         filtered_indices = list(range(len(items)))
     filtered_items = [items[idx] for idx in filtered_indices]
-    filtered_embeddings = embeddings[filtered_indices]
-    filtered_scores = combined_scores[filtered_indices]
-    return _mmr_select(filtered_items, filtered_embeddings, filtered_scores, top_k=top_k)
+    filtered_embeddings = [embeddings[idx] for idx in filtered_indices]
+    filtered_embedding_norms = [embedding_norms[idx] for idx in filtered_indices]
+    filtered_scores = [combined_scores[idx] for idx in filtered_indices]
+    return _mmr_select(
+        filtered_items,
+        filtered_embeddings,
+        filtered_embedding_norms,
+        filtered_scores,
+        top_k=top_k,
+    )
 
 
 async def create_embeddings(

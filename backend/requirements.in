@@ -8,7 +8,6 @@ fonttools
 honcho
 jwt
 mypy
-numpy
 packaging
 pillow
 pip-tools

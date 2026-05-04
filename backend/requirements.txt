@@ -119,8 +119,6 @@ mypy-extensions==1.0.0
     # via mypy
 nodeenv==1.8.0
     # via pre-commit
-numpy==1.26.4
-    # via -r requirements.in
 openai==2.15.0
     # via -r requirements.in
 packaging==23.2

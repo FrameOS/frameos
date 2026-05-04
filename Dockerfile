@@ -151,6 +151,7 @@ RUN pip install --no-cache-dir --upgrade uv \
     && uv venv \
     && sed -E 's/^fastapi\[standard\]==/fastapi==/' requirements.txt > /tmp/requirements.constraints.txt \
     && uv pip install --no-cache-dir -c /tmp/requirements.constraints.txt -r requirements.docker.in \
+    && find "${VIRTUAL_ENV}" -type f \( -name '*.so' -o -name '*.so.*' \) -exec strip --strip-unneeded {} + \
     && find "${VIRTUAL_ENV}" -type d -name __pycache__ -prune -exec rm -rf {} + \
     && find "${VIRTUAL_ENV}" -type f -name '*.pyc' -delete
 

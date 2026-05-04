@@ -9,7 +9,6 @@ email_validator
 fastapi[standard]
 fonttools
 jwt
-numpy
 openai
 packaging
 pillow
