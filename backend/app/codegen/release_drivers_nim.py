@@ -84,8 +84,14 @@ import std/[dynlib, json, options, os, strutils]
 import pixie
 import frameos/types
 import frameos/driver_context as driverContext
+import frameos/device_setup
 import frameos/channels as hostChannels
 import frameos/driver_abi
+import i2c/i2c as i2cSetupDriver
+import spi/spi as spiSetupDriver
+import noSpi/noSpi as noSpiSetupDriver
+import inkyPython/inkyPython as inkyPythonSetupDriver
+import inkyHyperPixel2r/inkyHyperPixel2r as inkyHyperPixel2rSetupDriver
 
 type
   DriverSpec = object
@@ -165,6 +171,28 @@ proc driverSpecsFor(frameOS: FrameOS): seq[DriverSpec] =
   for spec in availableDriverSpecs:
     if shouldLoadDriver(spec, frameOS):
       result.add(spec)
+
+proc setupDriverNames*(): seq[string] =
+  result = @[]
+
+proc setup*(frameOS: FrameOS): SetupResult =
+  let device = frameOS.frameConfig.device
+  let waveshareVariant = normalizedWaveshareVariant(device)
+  if isInkyDriverDevice(device):
+    addSetupResult(result, runSetupStep("inkyPython", proc(): SetupResult = inkyPythonSetupDriver.setup()))
+    addSetupResult(result, runSetupStep("i2c", proc(): SetupResult = i2cSetupDriver.setup()))
+    addSetupResult(result, runSetupStep("spi", proc(): SetupResult = spiSetupDriver.setup()))
+  elif device == "pimoroni.hyperpixel2r":
+    addSetupResult(result, runSetupStep("inkyHyperPixel2r", proc(): SetupResult = inkyHyperPixel2rSetupDriver.setup()))
+  elif device.startsWith("waveshare."):
+    if waveshareVariant in ["EPD_12in48", "EPD_12in48b", "EPD_12in48b_V2", "EPD_13in3e"]:
+      addSetupResult(result, runSetupStep("noSpi", proc(): SetupResult = noSpiSetupDriver.setup()))
+    else:
+      addSetupResult(result, runSetupStep("spi", proc(): SetupResult = spiSetupDriver.setup()))
+    if waveshareVariant == "EPD_10in3":
+      addSetupResult(result, runSetupStep("bootConfig", proc(): SetupResult = setupBootConfig(@["dtoverlay=spi0-0cs", "#dtparam=spi=on"])))
+    elif waveshareVariant == "EPD_13in3e":
+      addSetupResult(result, runSetupStep("bootConfig", proc(): SetupResult = setupBootConfig(@["gpio=7=op,dl", "gpio=8=op,dl"])))
 
 proc driverLibraryPath(spec: DriverSpec): string =
   getAppDir() / "drivers" / spec.libraryName

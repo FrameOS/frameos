@@ -48,9 +48,6 @@ class FakeDeployer:
             return 0 if path in self.existing_paths else 1
         raise AssertionError(f"Unexpected command: {command}")
 
-    def get_apt_packages(self) -> list[str]:
-        return ["custom-app-pkg"]
-
 
 class RecordingDeployer(FakeDeployer):
     def __init__(self):
@@ -59,9 +56,15 @@ class RecordingDeployer(FakeDeployer):
         self.restarted_services: list[str] = []
         self.logs: list[tuple[str, str]] = []
         self.atomic_uploads: list[tuple[str, bool]] = []
+        self.setup_exit_code = 0
 
     async def exec_command(self, command: str, **_kwargs) -> int:
         self.commands.append(command)
+        if (
+            command.startswith("cd /srv/frameos/releases/release_")
+            or command.startswith("cd /srv/frameos/current")
+        ) and command.endswith(" && sudo ./frameos setup"):
+            return self.setup_exit_code
         if command.startswith('grep -q "^dtoverlay=vc4-kms-v3d" '):
             return 1
         return 0
@@ -76,6 +79,9 @@ class RecordingDeployer(FakeDeployer):
         self.atomic_uploads.append((path, False))
 
     async def _upload_scenes_json_atomically(self, path: str, gzip: bool = False) -> None:
+        self.atomic_uploads.append((path, gzip))
+
+    async def _upload_all_scenes_json_atomically(self, path: str, gzip: bool = False) -> None:
         self.atomic_uploads.append((path, gzip))
 
 
@@ -287,7 +293,6 @@ async def test_full_plan_reports_installed_state_and_remote_build_dependencies(m
     assert "libicu-dev" not in package_map
     assert "zlib1g-dev" not in package_map
     assert package_map["caddy"].installed is False
-    assert package_map["custom-app-pkg"].installed is False
     assert package_map["python3-pip"].installed is True
     assert plan.full_deploy.package_alternatives[0].installed_package == "ntp"
     assert plan.full_deploy.dependency_helper_plans == []
@@ -300,16 +305,6 @@ async def test_full_plan_reports_installed_state_and_remote_build_dependencies(m
     assert plan.full_deploy.post_deploy["disable_caddy_service"] is True
     assert plan.full_deploy.post_deploy["bootconfig_changes"] == []
     assert plan.full_deploy.post_deploy["final_action"] == "restart_frameos"
-
-
-def test_python_vendor_setup_command_reinstalls_only_when_env_or_requirements_change():
-    command = FrameDeployWorkflow._python_vendor_setup_command("inkyPython")
-
-    assert "cd /srv/frameos/vendor/inkyPython && if [ ! -x env/bin/pip3 ]; then" in command
-    assert "elif sha256sum -c requirements.txt.sha256sum 2>/dev/null; then" in command
-    assert "requirements unchanged; reusing env" in command
-    assert command.count("&& env/bin/pip3 install -r requirements.txt &&") == 2
-
 
 @pytest.mark.asyncio
 async def test_full_plan_includes_post_deploy_driver_and_reboot_steps(monkeypatch: pytest.MonkeyPatch):
@@ -533,13 +528,89 @@ async def test_run_post_deploy_cleanup_uses_planned_actions_without_recalculatin
         }
     )
 
+    assert all("sudo ./frameos setup" not in command for command in deployer.commands)
     assert any("/boot/custom.txt" in command for command in deployer.commands)
-    assert "sudo raspi-config nonint do_spi 1" in deployer.commands
+    assert "sudo raspi-config nonint do_spi 1" not in deployer.commands
     assert any("/etc/cron.d/frameos-reboot" in command for command in deployer.commands)
     assert "sudo systemctl daemon-reload" in deployer.commands
     assert deployer.restarted_services == ["frameos"]
     assert all("userconfig" not in command for command in deployer.commands)
     assert "sudo reboot" not in deployer.commands
+
+
+@pytest.mark.asyncio
+async def test_run_release_setup_uses_staged_release_and_marks_reboot_when_setup_requires_it():
+    frame = SimpleNamespace(
+        id=10,
+        name="SetupRebootFrame",
+        reboot={"enabled": "false"},
+        last_successful_deploy_at=None,
+        last_successful_deploy={"frameos_version": "9.9.9"},
+        to_dict=lambda: {"id": 10, "name": "SetupRebootFrame"},
+    )
+    deployer = RecordingDeployer()
+    deployer.setup_exit_code = 2
+    workflow = FrameDeployWorkflow(
+        db=None,
+        redis=None,
+        frame=frame,
+        deployer=deployer,
+        temp_dir="",
+        binary_builder=FakeBinaryBuilder(),
+    )
+
+    post_deploy = {
+        "final_action": "restart_frameos",
+    }
+
+    await workflow._run_release_setup(
+        build_id="build12345678",
+        post_deploy=post_deploy,
+    )
+
+    assert "cd /srv/frameos/releases/release_build12345678 && sudo ./frameos setup" in deployer.commands
+    assert "cd /srv/frameos/current && sudo ./frameos setup" not in deployer.commands
+    assert post_deploy["final_action"] == "reboot"
+    assert "sudo systemctl enable frameos.service" not in deployer.commands
+    assert "sudo reboot" not in deployer.commands
+    assert deployer.restarted_services == []
+
+
+@pytest.mark.asyncio
+async def test_run_post_deploy_cleanup_reboots_when_setup_requested_it():
+    frame = SimpleNamespace(
+        id=10,
+        name="SetupRebootFrame",
+        reboot={"enabled": "false"},
+        last_successful_deploy_at=None,
+        last_successful_deploy={"frameos_version": "9.9.9"},
+        to_dict=lambda: {"id": 10, "name": "SetupRebootFrame"},
+    )
+    deployer = RecordingDeployer()
+    workflow = FrameDeployWorkflow(
+        db=None,
+        redis=None,
+        frame=frame,
+        deployer=deployer,
+        temp_dir="",
+        binary_builder=FakeBinaryBuilder(),
+    )
+
+    await workflow._run_post_deploy_cleanup(
+        post_deploy={
+            "boot_config_path": "/boot/custom.txt",
+            "low_memory_masks_apt_daily": False,
+            "reboot_schedule": {"needs_update": False, "needs_remove": False},
+            "bootconfig_changes": [],
+            "disable_userconfig": False,
+            "disable_caddy_service": False,
+            "final_action": "reboot",
+        }
+    )
+
+    assert "sudo systemctl enable frameos.service" in deployer.commands
+    assert "sudo reboot" in deployer.commands
+    assert deployer.restarted_services == []
 
 
 @pytest.mark.asyncio
@@ -593,7 +664,9 @@ async def test_execute_fast_uses_atomic_uploads_before_reload(monkeypatch: pytes
     assert deployer.atomic_uploads == [
         ("/srv/frameos/current/frame.json", False),
         ("/srv/frameos/current/scenes.json.gz", True),
+        ("/srv/frameos/current/all_scenes.json.gz", True),
     ]
+    assert "cd /srv/frameos/current && sudo ./frameos setup" in deployer.commands
 
 
 @pytest.mark.asyncio
@@ -645,3 +718,104 @@ async def test_execute_full_marks_stuck_deploy_as_undeployed(monkeypatch: pytest
     assert deployer.logs == [
         ("stderr", "Already deploying. Marked frame as undeployed; request deploy again to start fresh."),
     ]
+
+
+@pytest.mark.asyncio
+async def test_execute_full_does_not_activate_release_when_setup_fails(monkeypatch: pytest.MonkeyPatch):
+    frame = SimpleNamespace(
+        id=23,
+        name="SetupFailureFrame",
+        status="ready",
+        ssh_user="pi",
+        last_successful_deploy={"frameos_version": "9.9.9"},
+        last_successful_deploy_at="2026-01-01T00:00:00+00:00",
+        to_dict=lambda: {"id": 23, "name": "SetupFailureFrame"},
+    )
+    deployer = RecordingDeployer()
+    deployer.setup_exit_code = 1
+    workflow = FrameDeployWorkflow(
+        db=None,
+        redis=None,
+        frame=frame,
+        deployer=deployer,
+        temp_dir="",
+        binary_builder=FakeBinaryBuilder(),
+    )
+    updated_statuses: list[str] = []
+
+    async def fake_update_frame(_db, _redis, updated_frame):
+        updated_statuses.append(updated_frame.status)
+        return updated_frame
+
+    async def fake_ensure_sudo_available(_deployer):
+        return None
+
+    async def record_command(name: str):
+        deployer.commands.append(name)
+
+    async def fake_build_full_release_binary(_full_plan):
+        await record_command("build")
+        return SimpleNamespace(
+            cross_compiled=True,
+            prebuilt_entry=None,
+            build_dir="/tmp/build",
+            driver_library_paths=[],
+        )
+
+    async def fake_prepare_remote_for_full_release(**_kwargs):
+        await record_command("prepare_remote")
+        return None
+
+    async def fake_prepare_release_directory(_build_id):
+        await record_command("prepare_release")
+
+    async def fake_publish_release_binary(**_kwargs):
+        await record_command("publish_binary")
+
+    async def fake_upload_release_metadata(_build_id):
+        await record_command("upload_metadata")
+
+    async def fake_sync_vendor_dependencies(**_kwargs):
+        await record_command("sync_vendor")
+
+    async def fake_install_and_activate_release(_build_id):
+        await record_command("activate")
+
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.update_frame", fake_update_frame)
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.ensure_sudo_available", fake_ensure_sudo_available)
+    monkeypatch.setattr(
+        workflow,
+        "_install_authorized_keys_for_full_deploy",
+        lambda _full_plan: record_command("ssh_keys"),
+    )
+    monkeypatch.setattr(workflow, "_build_full_release_binary", fake_build_full_release_binary)
+    monkeypatch.setattr(workflow, "_prepare_remote_for_full_release", fake_prepare_remote_for_full_release)
+    monkeypatch.setattr(workflow, "_prepare_release_directory", fake_prepare_release_directory)
+    monkeypatch.setattr(workflow, "_publish_release_binary", fake_publish_release_binary)
+    monkeypatch.setattr(workflow, "_upload_release_metadata", fake_upload_release_metadata)
+    monkeypatch.setattr(workflow, "_sync_vendor_dependencies", fake_sync_vendor_dependencies)
+    monkeypatch.setattr(workflow, "_install_and_activate_release", fake_install_and_activate_release)
+
+    plan = FrameDeployPlan(
+        mode="full",
+        frame_id=23,
+        frame_name="SetupFailureFrame",
+        build_id="build12345678",
+        frame_dict={"id": 23, "name": "SetupFailureFrame"},
+        previous_frameos_version="9.9.9",
+        full_deploy=FullDeployPlan(
+            target={},
+            low_memory=False,
+            drivers=[],
+            binary_plan=await FakeBinaryBuilder().plan_build(),
+            post_deploy={"final_action": "restart_frameos"},
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="FrameOS setup failed with exit code 1"):
+        await workflow._execute_full(plan)
+
+    assert "cd /srv/frameos/releases/release_build12345678 && sudo ./frameos setup" in deployer.commands
+    assert "activate" not in deployer.commands
+    assert frame.status == "uninitialized"
+    assert updated_statuses == ["deploying", "uninitialized"]

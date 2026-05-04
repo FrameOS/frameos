@@ -9,6 +9,7 @@ from app.codegen.drivers_nim import (
     frame_driver_build_mode,
     normalize_driver_build_mode,
     write_shared_drivers_nim,
+    write_static_drivers_nim,
 )
 from app.drivers.drivers import Driver
 
@@ -43,3 +44,23 @@ def test_shared_driver_registry_types_empty_sequence():
     source = write_shared_drivers_nim({})
 
     assert "let driverSpecs: seq[DriverSpec] = @[]" in source
+
+
+def test_static_drivers_setup_uses_generated_driver_list():
+    source = write_static_drivers_nim(
+        {
+            "inkyPython": Driver(
+                name="inkyPython",
+                import_path="inkyPython/inkyPython",
+                setup_import_path="inkyPython/inkyPython",
+                can_render=True,
+            ),
+            "i2c": Driver(name="i2c", setup_import_path="i2c/i2c"),
+            "bootconfig": Driver(name="bootConfig", lines=["dtoverlay=spi0-0cs", "#dtparam=spi=on"]),
+        }
+    )
+
+    assert "proc setup*(frameOS: FrameOS): SetupResult" in source
+    assert 'runSetupStep("inkyPython"' in source
+    assert 'runSetupStep("i2c"' in source
+    assert 'setupBootConfig(@["dtoverlay=spi0-0cs", "#dtparam=spi=on"])' in source

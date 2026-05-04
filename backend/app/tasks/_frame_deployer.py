@@ -17,7 +17,7 @@ from gzip import compress
 from arq import ArqRedis as Redis
 from sqlalchemy.orm import Session
 
-from app.models.apps import get_app_configs, get_one_app_sources, get_scene_apps_from_scenes
+from app.models.apps import get_scene_apps_from_scenes
 from app.models.frame import Frame, get_frame_json, get_interpreted_scenes_json
 from app.models.log import new_log as log
 from app.utils.local_exec import exec_local_command
@@ -183,6 +183,13 @@ class FrameDeployer:
             json_data = compress(json_data)
         await upload_file(self.db, self.redis, self.frame, path, json_data)
 
+    async def _upload_all_scenes_json(self, path: str, gzip: bool = False) -> None:
+        """Upload the full scene payload for deploy-time metadata checks."""
+        json_data = json.dumps(list(self.frame.scenes or []), indent=4).encode() + b"\n"
+        if gzip:
+            json_data = compress(json_data)
+        await upload_file(self.db, self.redis, self.frame, path, json_data)
+
     async def _upload_frame_json_atomically(self, path: str) -> None:
         temp_path = f"{path}.tmp-{self.build_id}"
         await self._upload_frame_json(temp_path)
@@ -191,6 +198,11 @@ class FrameDeployer:
     async def _upload_scenes_json_atomically(self, path: str, gzip: bool = False) -> None:
         temp_path = f"{path}.tmp-{self.build_id}"
         await self._upload_scenes_json(temp_path, gzip=gzip)
+        await rename_path(self.db, self.redis, self.frame, temp_path, path)
+
+    async def _upload_all_scenes_json_atomically(self, path: str, gzip: bool = False) -> None:
+        temp_path = f"{path}.tmp-{self.build_id}"
+        await self._upload_all_scenes_json(temp_path, gzip=gzip)
         await rename_path(self.db, self.redis, self.frame, temp_path, path)
 
     async def get_hostname(self) -> str:
@@ -789,63 +801,3 @@ $(OBJECTS): pre-build
 
         local_sha = sha256(local_path)
         return remote_sha == local_sha
-
-    def _get_pkgs_from_apps(self: "FrameDeployer", field: str) -> list[str]:
-        extra_pkgs: set[str] = set()
-
-        for scene in self.frame.scenes or []:
-            for node in scene.get("nodes", []):
-                cfg: dict | None = None
-
-                if node.get("type") == "app":
-                    kw = node.get("data", {}).get("keyword")
-                    sources = node.get("data", {}).get("sources")
-                    scene_app = scene.get("apps", {}).get(kw) if isinstance(scene.get("apps", {}), dict) else None
-                    scene_app_sources = scene_app.get("sources") if isinstance(scene_app, dict) else None
-                    json_cfg = None
-                    if isinstance(sources, dict):
-                        json_cfg = sources.get("config.json")
-                    if not json_cfg and isinstance(scene_app_sources, dict):
-                        json_cfg = scene_app_sources.get("config.json")
-                    if json_cfg:
-                        try:
-                            cfg = json.loads(json_cfg)
-                        except Exception:
-                            pass
-                    elif kw:
-                        try:
-                            json_cfg = get_one_app_sources(kw).get("config.json")
-                            if json_cfg:
-                                cfg = json.loads(json_cfg)
-                        except Exception:
-                            pass
-
-                elif node.get("type") == "source":
-                    json_cfg = node.get("sources", {}).get("config.json")
-                    if json_cfg:
-                        try:
-                            cfg = json.loads(json_cfg)
-                        except Exception:
-                            pass
-
-                if cfg and field in cfg:
-                    for pkg in cfg[field]:
-                        if isinstance(pkg, str) and pkg:
-                            extra_pkgs.add(pkg)
-
-        return sorted(extra_pkgs)
-
-    def _get_pkgs_from_all_apps(self: "FrameDeployer", field: str) -> list[str]:
-        extra_pkgs: set[str] = set()
-        for config in get_app_configs().values():
-            if field in config:
-                for pkg in config[field]:
-                    if isinstance(pkg, str) and pkg:
-                        extra_pkgs.add(pkg)
-        return sorted(extra_pkgs)
-
-    def get_apt_packages(self: "FrameDeployer") -> list[str]:
-        apt_pkgs = self._get_pkgs_from_all_apps("apt")
-        if not apt_pkgs:
-            return []
-        return sorted(set(apt_pkgs))

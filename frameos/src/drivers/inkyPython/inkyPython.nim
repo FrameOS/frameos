@@ -1,5 +1,6 @@
 import osproc, os, streams, pixie, json, options, strutils, strformat, locks
 import frameos/driver_context
+import frameos/device_setup
 import frameos/utils/dither
 import frameos/utils/image
 
@@ -114,6 +115,10 @@ proc init*(frameOS: DriverContext): Driver =
         break toploop
 
   process.close()
+
+proc setup*(): SetupResult =
+  setupPythonVendor("inkyPython")
+  result = setupOk()
 
 proc logProcessExit(logger: DriverLogger, process: Process, context: string) =
   let exitCode = process.waitForExit()

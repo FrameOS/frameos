@@ -2,6 +2,7 @@
 import pixie
 import frameos/types
 import frameos/driver_context as driverContext
+import frameos/device_setup
 
 
 
@@ -71,4 +72,10 @@ proc turnOn*() =
 
 proc turnOff*() =
   discard
-    
+
+proc setupDriverNames*(): seq[string] =
+  result = @[]
+
+proc setup*(frameOS: FrameOS): SetupResult =
+  discard frameOS
+  result = setupOk()
