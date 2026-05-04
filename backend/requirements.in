@@ -6,9 +6,10 @@ email_validator
 fastapi[standard]
 fonttools
 honcho
-imagehash
 jwt
 mypy
+numpy
+packaging
 pillow
 pip-tools
 posthog>=7.5.1

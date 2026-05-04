@@ -1,28 +1,18 @@
-# Use the official Python 3.12 image as the base
-FROM python:3.12-slim-bookworm
+# syntax=docker/dockerfile:1.6
 
-# Set the working directory
-WORKDIR /app
+ARG PYTHON_IMAGE=python:3.12-slim-bookworm
+
+FROM ${PYTHON_IMAGE} AS nim-toolchain
 
 ARG NIM_VERSION=2.2.4
 ARG FRAMEOS_ARCHIVE_BASE_URL=https://archive.frameos.net
 
-# Install Node.js based on platform
-RUN apt-get update && apt-get install -y curl build-essential libffi-dev redis-server ca-certificates gnupg openssh-client git \
-    && mkdir -p /etc/apt/keyrings \
-    && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
-    && NODE_MAJOR=22 \
-    && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_$NODE_MAJOR.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list \
-    && install -m 0755 -d /etc/apt/keyrings \
-    && curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg \
-    && chmod a+r /etc/apt/keyrings/docker.gpg \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian bookworm stable" | tee /etc/apt/sources.list.d/docker.list \
-    && apt-get update \
-    && apt-get install -y nodejs docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin \
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install the matching prebuilt Nim toolchain for this base image instead of
-# rebuilding Nim from source on every clean Docker build.
 RUN set -eux; \
     . /etc/os-release; \
     distro="${ID}"; \
@@ -51,6 +41,7 @@ RUN set -eux; \
     esac; \
     nim_target="${distro}-${release}-${arch}"; \
     mkdir -p /opt/nim /tmp/nim-download; \
+    echo "${nim_target}" > /opt/nim/.frameos-prebuilt-target; \
     curl -fsSL "${FRAMEOS_ARCHIVE_BASE_URL}/prebuilt-deps/${nim_target}/nim-${NIM_VERSION}.tar.gz" -o /tmp/nim.tar.gz; \
     tar -xzf /tmp/nim.tar.gz -C /tmp/nim-download; \
     rm -rf "/tmp/nim-download/nim-${NIM_VERSION}/nim/bin"; \
@@ -60,78 +51,145 @@ RUN set -eux; \
 
 ENV PATH="/opt/nim/bin:${PATH}"
 
-RUN nim --version && \
-    nimble --version
+RUN nim --version && nimble --version
 
-# frameos/frontend asset compilation depends on the pnpm workspace root too.
-COPY package.json pnpm-workspace.yaml pnpm-lock.yaml /app/
-COPY frontend/package.json /app/frontend/package.json
+FROM nim-toolchain AS app-builder
 
-# frameos/frontend needs shared frontend files and embedded repo app templates.
-COPY frontend/src /app/frontend/src
-COPY frontend/schema /app/frontend/schema
-COPY frontend/scripts /app/frontend/scripts
-COPY repo/apps /app/repo/apps
-COPY versions.json /app/versions.json
+ARG FRAMEOS_ARCHIVE_BASE_URL=https://archive.frameos.net
+ARG QUICKJS_VERSION=2025-04-26
 
-# Install frameos nim deps
-WORKDIR /app/frameos
+ENV DEBIAN_FRONTEND=noninteractive
 
-COPY frameos/frameos.nimble ./
-COPY frameos/nimble.lock ./
-COPY frameos/nim.cfg ./
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+      build-essential \
+      ca-certificates \
+      curl \
+      git \
+      gnupg \
+      make \
+      pkg-config \
+    && mkdir -p /etc/apt/keyrings \
+    && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+      | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
+    && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" \
+      > /etc/apt/sources.list.d/nodesource.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends nodejs \
+    && npm install -g pnpm@10.27.0 \
+    && rm -rf /var/lib/apt/lists/*
 
-RUN nimble install -d -y && nimble setup
-
-# Install frameos agent nim deps
-WORKDIR /app/frameos/agent
-
-COPY frameos/agent/frameos_agent.nimble ./
-COPY frameos/agent/nimble.lock ./
-
-# Cache nimble deps for when deploying on frame
-RUN nimble install -d -y && nimble setup
-
-# Copy the requirements file and install using pip
-WORKDIR /app/frameos
-COPY frameos/ ./
-
-# Seed compiled assets and the freshness manifest before copying the rest of the repository
-RUN nimble assets -y
-
-# Copy the requirements file and install using pip
-WORKDIR /app/backend
-COPY backend/requirements.txt .
-RUN pip3 install --upgrade uv \
-    && uv venv \
-    && uv pip install --no-cache-dir -r requirements.txt
-
-# Change the working directory for pnpm install
-WORKDIR /tmp
-
-# Install pnpm and seed the workspace manifests for dependency caching
-RUN npm install -g pnpm@10.27.0
-COPY package.json pnpm-workspace.yaml pnpm-lock.yaml /tmp/
-COPY frontend/package.json /tmp/frontend/package.json
-COPY frameos/frontend/package.json /tmp/frameos/frontend/package.json
-RUN pnpm install --filter @frameos/frontend --frozen-lockfile
-
-# Copy frontend source files and run build
-COPY frontend/ /tmp/frontend/
-COPY repo/apps /tmp/repo/apps
-COPY versions.json /tmp/versions.json
-RUN pnpm --dir frontend run build
-
-# Delete all files except the dist and schema folders
-RUN cd /tmp/frontend && find . -maxdepth 1 ! -name 'dist' ! -name 'schema' ! -name '.' ! -name '..' -exec rm -rf {} \;
-
-# Change back to the main directory
 WORKDIR /app
 
-# Copy the rest of the application to the container
-COPY . .
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml versions.json ./
+COPY frontend/package.json frontend/package.json
+COPY frameos/frontend/package.json frameos/frontend/package.json
+RUN pnpm install --frozen-lockfile
 
-RUN rm -rf /app/frontend && mv /tmp/frontend /app/
+COPY frameos/frameos.nimble frameos/nimble.lock frameos/nim.cfg frameos/config.nims frameos/
+WORKDIR /app/frameos
+RUN nimble install -d -y && nimble setup
+
+COPY frameos/agent/frameos_agent.nimble frameos/agent/nimble.lock frameos/agent/config.nims /app/frameos/agent/
+WORKDIR /app/frameos/agent
+RUN nimble install -d -y && nimble setup
+
+WORKDIR /app
+COPY frontend frontend
+COPY repo/apps repo/apps
+COPY frameos frameos
+
+WORKDIR /app/frameos
+RUN nimble assets -y
+
+RUN set -eux; \
+    quickjs_target="$(cat /opt/nim/.frameos-prebuilt-target)"; \
+    mkdir -p /tmp/quickjs-download /app/frameos/quickjs; \
+    curl -fsSL "${FRAMEOS_ARCHIVE_BASE_URL}/prebuilt-deps/${quickjs_target}/quickjs-${QUICKJS_VERSION}.tar.gz" -o /tmp/quickjs.tar.gz; \
+    tar -xzf /tmp/quickjs.tar.gz -C /tmp/quickjs-download; \
+    quickjs_root="/tmp/quickjs-download/quickjs-${QUICKJS_VERSION}"; \
+    if [ ! -d "${quickjs_root}" ]; then quickjs_root="/tmp/quickjs-download"; fi; \
+    if [ -d "${quickjs_root}/include/quickjs" ]; then \
+      mkdir -p /app/frameos/quickjs/include; \
+      cp -a "${quickjs_root}/include/quickjs" /app/frameos/quickjs/include/quickjs; \
+      cp -a "${quickjs_root}/include/quickjs/quickjs.h" /app/frameos/quickjs/quickjs.h; \
+      cp -a "${quickjs_root}/include/quickjs/quickjs-libc.h" /app/frameos/quickjs/quickjs-libc.h; \
+    else \
+      cp -a "$(find "${quickjs_root}" -name quickjs.h -print -quit)" /app/frameos/quickjs/quickjs.h; \
+      cp -a "$(find "${quickjs_root}" -name quickjs-libc.h -print -quit)" /app/frameos/quickjs/quickjs-libc.h; \
+    fi; \
+    cp -a "$(find "${quickjs_root}" -name libquickjs.a -print -quit)" /app/frameos/quickjs/libquickjs.a; \
+    rm -rf /tmp/quickjs-download /tmp/quickjs.tar.gz
+
+WORKDIR /app/frontend
+RUN pnpm run build
+
+RUN find /app/frameos -path '*/tests' -type d -prune -exec rm -rf {} + \
+    && rm -rf \
+      /app/frameos/frontend \
+      /app/frameos/build \
+      /app/frameos/nimcache \
+      /app/frameos/testresults \
+      /app/frameos/tmp \
+      /app/frameos/agent/build \
+      /app/frameos/agent/tmp
+
+FROM ${PYTHON_IMAGE} AS python-deps
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV VIRTUAL_ENV=/app/backend/.venv
+ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
+
+WORKDIR /app/backend
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential libffi-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY backend/requirements.txt backend/requirements.docker.in ./
+RUN pip install --no-cache-dir --upgrade uv \
+    && uv venv \
+    && sed -E 's/^fastapi\[standard\]==/fastapi==/' requirements.txt > /tmp/requirements.constraints.txt \
+    && uv pip install --no-cache-dir -c /tmp/requirements.constraints.txt -r requirements.docker.in \
+    && find "${VIRTUAL_ENV}" -type d -name __pycache__ -prune -exec rm -rf {} + \
+    && find "${VIRTUAL_ENV}" -type f -name '*.pyc' -delete
+
+FROM ${PYTHON_IMAGE} AS runtime
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV VIRTUAL_ENV=/app/backend/.venv
+ENV PATH="/opt/nim/bin:${VIRTUAL_ENV}/bin:${PATH}"
+
+WORKDIR /app
+
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends ca-certificates curl gnupg nodejs redis-server; \
+    mkdir -p /etc/apt/keyrings; \
+    curl -fsSL https://download.docker.com/linux/debian/gpg \
+      | gpg --dearmor -o /etc/apt/keyrings/docker.gpg; \
+    chmod a+r /etc/apt/keyrings/docker.gpg; \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian bookworm stable" \
+      > /etc/apt/sources.list.d/docker.list; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends docker-ce-cli docker-buildx-plugin; \
+    apt-get purge -y --auto-remove curl gnupg; \
+    rm -rf /var/lib/apt/lists/*
+
+COPY --from=nim-toolchain /opt/nim /opt/nim
+COPY --from=app-builder /root/.nimble /root/.nimble
+COPY --from=python-deps /app/backend/.venv /app/backend/.venv
+
+COPY docker-entrypoint.sh versions.json ./
+COPY backend backend
+COPY repo/apps repo/apps
+COPY --from=app-builder /app/frontend/dist frontend/dist
+COPY --from=app-builder /app/frontend/schema frontend/schema
+COPY --from=app-builder /app/frameos frameos
+
+RUN mkdir -p /app/db
 
 EXPOSE 8989
 
