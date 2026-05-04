@@ -2,8 +2,8 @@
 import pixie
 import frameos/types
 import frameos/driver_context as driverContext
-import waveshare/waveshare as waveshareDriver
-var waveshareDriverInstance: waveshareDriver.Driver
+
+
 
 proc buildDriverContext(frameOS: FrameOS): driverContext.DriverContext =
   let sourceConfig = frameOS.frameConfig
@@ -57,14 +57,14 @@ proc syncDriverContext(frameOS: FrameOS, context: driverContext.DriverContext) =
 
 proc init*(frameOS: FrameOS) =
   let driverCtx = buildDriverContext(frameOS)
-  waveshareDriverInstance = waveshareDriver.init(driverCtx)
+  discard
   syncDriverContext(frameOS, driverCtx)
 
 proc render*(image: Image) =
-  waveshareDriverInstance.render(image)
+  discard
 
 proc toPng*(rotate: int, flip: string): string =
-  return waveshareDriver.toPng(rotate, flip)
+  result = ""
 
 proc turnOn*() =
   discard

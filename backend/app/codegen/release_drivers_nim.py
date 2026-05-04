@@ -128,7 +128,7 @@ proc isInkyDriverDevice(device: string): bool =
   ]
 
 proc evdevEnabledDevice(device: string): bool =
-  not isInkyButtonDevice(device) and not device.startsWith("waveshare.") and device != "http.upload"
+  not isInkyButtonDevice(device) and not device.startsWith("waveshare.") and device != "http.upload" and device != "web_only"
 
 proc normalizedWaveshareVariant(device: string): string =
   const prefix = "waveshare."

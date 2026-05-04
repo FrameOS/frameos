@@ -35,6 +35,7 @@ def test_release_shared_registry_filters_drivers_at_runtime():
     assert 'device == "framebuffer"' in source
     assert 'frameOS.frameConfig.gpioButtons.len > 0' in source
     assert "proc evdevEnabledDevice(device: string): bool" in source
+    assert 'device != "web_only"' in source
     assert 'not isInkyButtonDevice(device)' in source
     assert 'libraryName: "waveshare_EPD_7in3e.so"' in source
 
