@@ -170,7 +170,7 @@ async def test_create_local_build_archive_generates_shared_driver_makefiles(
         else:
             (cache_dir / "compile_httpUpload.sh").write_text(
                 "cc -c driver.c -o driver.o -fPIC -Wall\n"
-                "cc driver.o -shared -o libframeos_driver_httpUpload.so -pthread -lm -ldl\n",
+                "cc driver.o -shared -o httpUpload.so -pthread -lm -ldl\n",
                 encoding="utf-8",
             )
         return 0, "", ""
@@ -202,10 +202,14 @@ async def test_create_local_build_archive_generates_shared_driver_makefiles(
     assert "--stackTrace:off" in commands[1]
     assert "--lineTrace:off" in commands[1]
     assert "--passL:-Wl,--gc-sections" in commands[1]
-    assert "driver-libraries" in (build_dir / "Makefile").read_text(encoding="utf-8")
+    makefile_text = (build_dir / "Makefile").read_text(encoding="utf-8")
+    assert "DRIVER_DIRS = drivers/httpUpload" in makefile_text
+    assert "driver-libraries: $(DRIVER_DIRS)" in makefile_text
+    assert "+$(MAKE) -C $@" in makefile_text
+    assert "for dir in $(DRIVER_DIRS)" not in makefile_text
     driver_makefile = build_dir / "drivers" / "httpUpload" / "Makefile"
     driver_makefile_text = driver_makefile.read_text(encoding="utf-8")
-    assert "LIBRARY = libframeos_driver_httpUpload.so" in driver_makefile_text
+    assert "LIBRARY = httpUpload.so" in driver_makefile_text
     assert "STRIP ?= strip" in driver_makefile_text
     assert "--strip-unneeded $(LIBRARY)" in driver_makefile_text
     assert "-ffunction-sections" in driver_makefile_text

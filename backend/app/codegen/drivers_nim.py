@@ -32,7 +32,7 @@ def driver_library_filename(driver: Driver) -> str:
         safe_variant = re.sub(r"[^A-Za-z0-9_]+", "_", driver.variant).strip("_")
         if safe_variant:
             suffix = f"{driver.name}_{safe_variant}"
-    return f"libframeos_driver_{suffix}.so"
+    return f"{suffix}.so"
 
 
 def driver_context_helpers_nim() -> str:

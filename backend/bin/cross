@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import fnmatch
+import hashlib
 import json
 import os
 import shutil
@@ -62,6 +64,31 @@ TARGETS: tuple[TargetDefinition, ...] = (
 
 TARGET_MAP = {target.slug: target for target in TARGETS}
 
+RELEASE_CACHE_VERSION = "2"
+RELEASE_BUILD_MAKEFILE_VERSION = "3"
+RELEASE_BUILD_MARKER = ".frameos-release-build.json"
+RELEASE_HASH_IGNORED_NAMES = {
+    ".DS_Store",
+    ".git",
+    ".pytest_cache",
+    "__pycache__",
+    "build",
+    "frameos.deps",
+    "nimble.develop",
+    "nimble.paths",
+    "nimcache",
+    "node_modules",
+    "testresults",
+    "tests",
+    "tmp",
+}
+RELEASE_HASH_IGNORED_PATTERNS = (
+    "*.admin_session_salt",
+    "*.pyc",
+    ".nimcache*",
+    ".tmp-*",
+)
+
 
 @dataclass
 class FrameStub:
@@ -110,6 +137,174 @@ def targets_matrix_json() -> str:
 
 def list_targets() -> str:
     return "\n".join(target.slug for target in TARGETS)
+
+
+def cross_cache_root() -> Path:
+    cache_root = os.environ.get("FRAMEOS_CROSS_CACHE")
+    if cache_root:
+        return Path(cache_root)
+
+    tmpdir = os.environ.get("TMPDIR")
+    if tmpdir:
+        return Path(tmpdir) / "frameos-cross-cache"
+
+    return Path.home() / ".cache/frameos/cross"
+
+
+def release_cache_root() -> Path:
+    return cross_cache_root() / "release"
+
+
+def release_build_cache_dir(slug: str, input_hash: str) -> Path:
+    return release_cache_root() / "builds" / slug / input_hash / "build"
+
+
+def release_artifact_cache_dir(slug: str, input_hash: str) -> Path:
+    return release_cache_root() / "artifacts" / slug / input_hash
+
+
+def _release_hash_ignored(path: Path, root: Path) -> bool:
+    rel = path.relative_to(root)
+    for part in rel.parts:
+        if part in RELEASE_HASH_IGNORED_NAMES:
+            return True
+        if any(fnmatch.fnmatch(part, pattern) for pattern in RELEASE_HASH_IGNORED_PATTERNS):
+            return True
+    return False
+
+
+def _hash_file(hasher: hashlib._Hash, path: Path) -> None:
+    if path.is_symlink():
+        hasher.update(b"link\0")
+        hasher.update(os.readlink(path).encode("utf-8", errors="surrogateescape"))
+        hasher.update(b"\0")
+        return
+    hasher.update(b"file\0")
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            hasher.update(chunk)
+    hasher.update(b"\0")
+
+
+def compute_release_input_hash(
+    *,
+    slug: str,
+    target: TargetDefinition,
+    input_root: Path,
+    nim_path: str,
+    driver_library_names: Iterable[str],
+) -> str:
+    input_root = input_root.resolve()
+    hasher = hashlib.sha256()
+    metadata = {
+        "cache_version": RELEASE_CACHE_VERSION,
+        "slug": slug,
+        "target": target.to_matrix_entry(),
+        "nim_path": nim_path,
+        "driver_libraries": sorted(driver_library_names),
+    }
+    hasher.update(json.dumps(metadata, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+    hasher.update(b"\0")
+
+    for path in sorted(input_root.rglob("*")):
+        if _release_hash_ignored(path, input_root):
+            if path.is_dir():
+                continue
+            continue
+        if path.is_dir():
+            continue
+        rel = path.relative_to(input_root).as_posix()
+        hasher.update(rel.encode("utf-8", errors="surrogateescape"))
+        hasher.update(b"\0")
+        _hash_file(hasher, path)
+    return hasher.hexdigest()
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def release_artifact_complete(
+    artifact_dir: Path,
+    *,
+    input_hash: str,
+    driver_library_names: Iterable[str],
+) -> bool:
+    if not (artifact_dir / "frameos").is_file():
+        return False
+    metadata = _read_json(artifact_dir / "metadata.json")
+    if metadata.get("release_artifact") is not True:
+        return False
+    if metadata.get("release_cache_version") != RELEASE_CACHE_VERSION:
+        return False
+    if metadata.get("input_hash") != input_hash:
+        return False
+    expected = sorted(driver_library_names)
+    if sorted(metadata.get("driver_libraries") or []) != expected:
+        return False
+    return all((artifact_dir / "drivers" / name).is_file() for name in expected)
+
+
+def release_generated_build_dir_complete(
+    build_dir: Path,
+    *,
+    input_hash: str,
+    driver_names: Iterable[str],
+) -> bool:
+    marker = _read_json(build_dir / RELEASE_BUILD_MARKER)
+    if marker.get("input_hash") != input_hash:
+        return False
+    if marker.get("makefile_version") != RELEASE_BUILD_MAKEFILE_VERSION:
+        return False
+    if not (build_dir / "compile_frameos.sh").is_file() or not (build_dir / "Makefile").is_file():
+        return False
+    for driver_name in driver_names:
+        driver_dir = build_dir / "drivers" / driver_name
+        if not (driver_dir / "Makefile").is_file():
+            return False
+        if not any(driver_dir.glob("compile_*.sh")):
+            return False
+    return True
+
+
+def release_build_outputs_complete(
+    build_dir: Path,
+    *,
+    driver_library_paths: Iterable[str],
+) -> bool:
+    return (build_dir / "frameos").is_file() and all(Path(path).is_file() for path in driver_library_paths)
+
+
+def write_release_build_marker(
+    build_dir: Path,
+    *,
+    slug: str,
+    input_hash: str,
+    driver_names: Iterable[str],
+    driver_library_names: Iterable[str],
+) -> None:
+    marker = {
+        "cache_version": RELEASE_CACHE_VERSION,
+        "slug": slug,
+        "input_hash": input_hash,
+        "driver_names": sorted(driver_names),
+        "driver_libraries": sorted(driver_library_names),
+        "makefile_version": RELEASE_BUILD_MAKEFILE_VERSION,
+    }
+    build_dir.mkdir(parents=True, exist_ok=True)
+    (build_dir / RELEASE_BUILD_MARKER).write_text(json.dumps(marker, indent=2), encoding="utf-8")
+
+
+def replace_tree(source: Path, destination: Path) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    tmp = destination.parent / f".{destination.name}.tmp-{os.getpid()}"
+    shutil.rmtree(tmp, ignore_errors=True)
+    shutil.copytree(source, tmp)
+    shutil.rmtree(destination, ignore_errors=True)
+    tmp.rename(destination)
 
 
 async def build_target(
@@ -211,6 +406,225 @@ async def build_target(
         return destination
 
 
+async def build_release_target(
+    slug: str,
+    frameos_root: Path,
+    artifacts_dir: Path,
+    *,
+    rebuild: bool = False,
+) -> Path:
+    if slug not in TARGET_MAP:
+        raise SystemExit(f"Unknown target '{slug}'. Run --list-targets to see available options.")
+
+    target = TARGET_MAP[slug]
+    frameos_root = frameos_root.resolve()
+    artifacts_dir = artifacts_dir.resolve()
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    from backend.app.tasks._frame_deployer import FrameDeployer  # type: ignore  # noqa: E402
+    from backend.app.tasks.binary_builder import resolve_prebuilt_entry  # type: ignore  # noqa: E402
+    from backend.app.tasks.utils import find_nim_v2  # type: ignore  # noqa: E402
+    from backend.app.utils import local_exec  # type: ignore  # noqa: E402
+    from backend.app.utils.cross_compile import CrossCompiler, TargetMetadata  # type: ignore  # noqa: E402
+    from app.codegen.drivers_nim import DRIVER_BUILD_MODE_SHARED, compiled_drivers  # type: ignore  # noqa: E402
+    from app.codegen.release_drivers_nim import (  # type: ignore  # noqa: E402
+        release_driver_specs,
+        write_release_driver_libraries,
+        write_release_shared_drivers_nim,
+        write_release_waveshare_driver_modules,
+    )
+    from app.utils import local_exec as app_local_exec  # type: ignore  # noqa: E402
+
+    class StandaloneFrameDeployer(FrameDeployer):
+        def __init__(self, frame: FrameStub, nim_path: str, temp_dir: str, logger):
+            super().__init__(db=None, redis=None, frame=frame, nim_path=nim_path, temp_dir=temp_dir)
+            self._logger = logger
+
+        async def log(self, type: str, line: str, timestamp=None):  # type: ignore[override]
+            await self._logger(type, line)
+
+    nim_path = find_nim_v2()
+    frame = load_frame_stub(frameos_root)
+    release_drivers = release_driver_specs()
+    driver_library_names = FrameDeployer.driver_library_names(
+        release_drivers,
+        DRIVER_BUILD_MODE_SHARED,
+    )
+    driver_names = [driver.name for driver in compiled_drivers(release_drivers)]
+
+    async def console_log(level: str, message: str) -> None:
+        print(f"[{slug}][{level}] {message}")
+
+    async def exec_log(_db, _redis, _frame_id, level: str, message: str, timestamp=None):
+        await console_log(level, message)
+
+    local_exec.log = exec_log  # type: ignore[assignment]
+    app_local_exec.log = exec_log  # type: ignore[assignment]
+
+    with tempfile.TemporaryDirectory(prefix=f"frameos-release-{slug}-") as tmp:
+        deployer = StandaloneFrameDeployer(frame=frame, nim_path=nim_path, temp_dir=tmp, logger=console_log)
+        source_dir = deployer.create_local_source_folder(tmp, source_root=str(frameos_root))
+        await deployer.log("stdout", "Preparing release driver registry")
+        await deployer.make_local_modifications(
+            source_dir,
+            driver_build_mode=DRIVER_BUILD_MODE_SHARED,
+            drivers_override=release_drivers,
+            drivers_nim_source=write_release_shared_drivers_nim(release_drivers),
+        )
+        write_release_waveshare_driver_modules(Path(source_dir), release_drivers)
+        write_release_driver_libraries(Path(source_dir), release_drivers)
+
+        input_hash = compute_release_input_hash(
+            slug=slug,
+            target=target,
+            input_root=Path(tmp),
+            nim_path=nim_path,
+            driver_library_names=driver_library_names,
+        )
+        target_dir = artifacts_dir / slug
+        destination = target_dir / "frameos"
+        artifact_cache_dir = release_artifact_cache_dir(slug, input_hash)
+        if not rebuild and release_artifact_complete(
+            target_dir,
+            input_hash=input_hash,
+            driver_library_names=driver_library_names,
+        ):
+            print(f"Using local release {slug} → {destination}")
+            return destination
+        if not rebuild and release_artifact_complete(
+            artifact_cache_dir,
+            input_hash=input_hash,
+            driver_library_names=driver_library_names,
+        ):
+            replace_tree(artifact_cache_dir, target_dir)
+            print(f"Restored cached release {slug} → {destination}")
+            return destination
+
+        build_dir = release_build_cache_dir(slug, input_hash)
+        if rebuild:
+            shutil.rmtree(build_dir, ignore_errors=True)
+            shutil.rmtree(artifact_cache_dir, ignore_errors=True)
+        if release_generated_build_dir_complete(
+            build_dir,
+            input_hash=input_hash,
+            driver_names=driver_names,
+        ):
+            await deployer.log("stdout", f"Using cached generated release build directory: {build_dir}")
+        else:
+            shutil.rmtree(build_dir, ignore_errors=True)
+            build_dir.mkdir(parents=True, exist_ok=True)
+            await deployer.create_local_build_archive(
+                str(build_dir),
+                source_dir,
+                target.arch,
+                driver_build_mode=DRIVER_BUILD_MODE_SHARED,
+                drivers_override=release_drivers,
+            )
+            write_release_build_marker(
+                build_dir,
+                slug=slug,
+                input_hash=input_hash,
+                driver_names=driver_names,
+                driver_library_names=driver_library_names,
+            )
+
+        driver_library_paths = deployer.driver_library_paths(
+            str(build_dir),
+            release_drivers,
+            DRIVER_BUILD_MODE_SHARED,
+        )
+
+        if not rebuild and release_build_outputs_complete(
+            build_dir,
+            driver_library_paths=driver_library_paths,
+        ):
+            await deployer.log("stdout", f"Using cached compiled release outputs: {build_dir}")
+            binary_path = str(build_dir / "frameos")
+        else:
+            target_override = TargetMetadata(
+                arch=target.arch,
+                distro=target.distro,
+                version=target.version,
+                platform=target.platform,
+                image=target.image,
+            )
+            prebuilt_entry, prebuilt_target = await resolve_prebuilt_entry(
+                distro=target.distro,
+                distro_version=target.version,
+                arch=target.arch,
+                logger=console_log,
+            )
+            compiler = CrossCompiler(
+                db=None,
+                redis=None,
+                frame=frame,
+                deployer=deployer,
+                target=target_override,
+                temp_dir=tmp,
+                build_dir=build_dir,
+                prebuilt_entry=prebuilt_entry,
+                prebuilt_target=prebuilt_target,
+                logger=console_log,
+            )
+            binary_path = await compiler.build(source_dir)
+        if not binary_path:
+            raise RuntimeError("Release cross compilation completed without producing a binary")
+
+        target_tmp = artifacts_dir / f".{slug}.tmp-{os.getpid()}"
+        shutil.rmtree(target_tmp, ignore_errors=True)
+        target_tmp.mkdir(parents=True, exist_ok=True)
+        tmp_destination = target_tmp / "frameos"
+        shutil.copy2(binary_path, tmp_destination)
+        os.chmod(tmp_destination, 0o755)
+
+        driver_dir = target_tmp / "drivers"
+        driver_dir.mkdir(parents=True, exist_ok=True)
+        for driver_library_path in driver_library_paths:
+            src = Path(driver_library_path)
+            if not src.is_file():
+                raise RuntimeError(f"Shared driver library missing after build: {src}")
+            shutil.copy2(src, driver_dir / src.name)
+
+        vendor_folders: list[str] = []
+        build_vendor_dir = build_dir / "vendor"
+        target_vendor_dir = target_tmp / "vendor"
+        if build_vendor_dir.is_dir():
+            target_vendor_dir.mkdir(parents=True, exist_ok=True)
+            for vendor in sorted(build_vendor_dir.iterdir()):
+                if not vendor.is_dir():
+                    continue
+                shutil.copytree(vendor, target_vendor_dir / vendor.name, dirs_exist_ok=True)
+                vendor_folders.append(vendor.name)
+
+        metadata = {
+            "slug": slug,
+            "arch": target.arch,
+            "distro": target.distro,
+            "version": target.version,
+            "platform": target.platform,
+            "image": target.image,
+            "release_artifact": True,
+            "driver_build_mode": DRIVER_BUILD_MODE_SHARED,
+            "driver_registry": "runtime-filtered",
+            "driver_libraries": driver_library_names,
+            "vendor_folders": vendor_folders,
+            "release_cache_version": RELEASE_CACHE_VERSION,
+            "input_hash": input_hash,
+        }
+        with (target_tmp / "metadata.json").open("w", encoding="utf-8") as fh:
+            json.dump(metadata, fh, indent=2)
+        shutil.rmtree(target_dir, ignore_errors=True)
+        target_tmp.rename(target_dir)
+        if not release_artifact_complete(
+            artifact_cache_dir,
+            input_hash=input_hash,
+            driver_library_names=driver_library_names,
+        ):
+            replace_tree(target_dir, artifact_cache_dir)
+        print(f"Built release {slug} → {destination}")
+        return destination
+
+
 def parse_args(argv: Iterable[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="FrameOS cross compilation helper")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -227,6 +641,38 @@ def parse_args(argv: Iterable[str]) -> argparse.Namespace:
         choices=("static", "shared"),
         default=None,
         help="Override driver build mode (static single executable or shared driver libraries)",
+    )
+
+    release = subparsers.add_parser(
+        "release",
+        help="Build release artifacts: frameos plus every shared driver library",
+    )
+    release.add_argument(
+        "--target",
+        action="append",
+        dest="targets",
+        help="Target slug to build. Repeat for multiple targets.",
+    )
+    release.add_argument(
+        "--all-targets",
+        action="store_true",
+        help="Build every target from the cross compilation matrix",
+    )
+    release.add_argument("--frameos-root", default=str(Path.cwd()), help="Path to the frameos source tree")
+    release.add_argument(
+        "--artifacts-dir",
+        default="build/prebuilt-cross",
+        help="Directory for release artifacts",
+    )
+    release.add_argument(
+        "--clean",
+        action="store_true",
+        help="Remove each selected target artifact directory before building",
+    )
+    release.add_argument(
+        "--rebuild",
+        action="store_true",
+        help="Ignore cached release artifacts and rebuild the selected targets",
     )
 
     return parser.parse_args(argv)
@@ -250,6 +696,27 @@ def main(argv: list[str]) -> int:
             return await build_target(args.target, frameos_root, artifacts_dir, args.driver_build_mode)
 
         asyncio.run(_build())
+        return 0
+    if args.command == "release":
+        frameos_root = Path(args.frameos_root)
+        artifacts_dir = Path(args.artifacts_dir)
+        if not artifacts_dir.is_absolute():
+            artifacts_dir = frameos_root / artifacts_dir
+        targets = [target.slug for target in TARGETS] if args.all_targets else list(args.targets or [])
+        if not targets:
+            raise SystemExit("release requires --target <slug> or --all-targets")
+        for target in targets:
+            if target not in TARGET_MAP:
+                raise SystemExit(f"Unknown target '{target}'. Run --list-targets to see available options.")
+        if args.clean:
+            for target in targets:
+                shutil.rmtree(artifacts_dir / target, ignore_errors=True)
+
+        async def _release() -> None:
+            for target in targets:
+                await build_release_target(target, frameos_root, artifacts_dir, rebuild=args.rebuild)
+
+        asyncio.run(_release())
         return 0
     return 1
 

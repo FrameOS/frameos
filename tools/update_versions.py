@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
 import datetime as dt
 import hashlib
 import json
@@ -117,8 +120,25 @@ def _increment_base_version(version: str) -> str:
     return f"{year}.{month}.{patch + 1}"
 
 
-def main() -> int:
+def _parse_args(argv: List[str] | None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Update FrameOS component versions from tracked file hashes.")
+    parser.add_argument(
+        "--force-project",
+        action="append",
+        default=[],
+        help="Force the named project to receive the next release version even if its file hash is unchanged.",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: List[str] | None = None) -> int:
+    args = _parse_args(argv)
     projects_config = json.loads(PROJECTS_FILE.read_text(encoding="utf-8"))
+    forced_projects = set(args.force_project)
+    unknown_projects = sorted(forced_projects - set(projects_config["projects"]))
+    if unknown_projects:
+        raise SystemExit(f"Unknown project(s) for --force-project: {', '.join(unknown_projects)}")
+
     tracked_files = _git_tracked_files()
     dockerignore_patterns = _load_dockerignore()
 
@@ -146,8 +166,9 @@ def main() -> int:
         project_hashes[project_name] = project_hash
         previous = existing_versions.get(project_name)
         previous_hash = previous.split("+", 1)[1] if previous and "+" in previous else None
+        forced = project_name in forced_projects
 
-        if previous_hash == project_hash:
+        if previous_hash == project_hash and not forced:
             updated_versions[project_name] = previous
             continue
 

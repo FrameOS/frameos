@@ -1,9 +1,13 @@
 import os
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional, Literal
 
 from app.drivers.drivers import Driver
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+FRAMEOS_ROOT = REPO_ROOT / "frameos"
 
 @dataclass
 class WaveshareVariant:
@@ -72,7 +76,7 @@ VARIANT_COLORS = {
 }
 
 def get_variant_keys_for(folder: str) -> list[str]:
-    directory = os.path.join("..", "frameos", "src", "drivers", "waveshare", folder)
+    directory = FRAMEOS_ROOT / "src" / "drivers" / "waveshare" / folder
     return [
         filename[0:-4]
         for filename in os.listdir(directory)
@@ -109,10 +113,34 @@ def get_proc_arguments(line: str, variant_key: str) -> list[str]:
         "picdata": VARIANT_COLORS.get(variant_key, unknown_color),
     }
     arg_names = []
-    for arg in line.split('*(')[1].split(') {.')[0].split(';'):
+    for arg in get_proc_parameters(line):
         name = arg.strip().split(': ')[0]
         arg_names.append(argmap.get(name.lower(), name))
     return arg_names
+
+def get_proc_parameters(line: str) -> list[str]:
+    if "*(" not in line:
+        return []
+    parameters = line.split("*(", 1)[1].split(")", 1)[0].strip()
+    if not parameters:
+        return []
+    return [parameter.strip() for parameter in parameters.split(";")]
+
+def get_default_proc_arguments(line: str) -> str:
+    default_args = []
+    for parameter in get_proc_parameters(line):
+        parameter_type = parameter.split(": ", 1)[1].strip() if ": " in parameter else ""
+        if parameter_type == "UBYTE":
+            default_args.append("0.uint8")
+        elif parameter_type == "UWORD":
+            default_args.append("0.uint16")
+        elif parameter_type == "UDOUBLE":
+            default_args.append("0.uint32")
+        elif parameter_type.startswith("ptr "):
+            default_args.append("nil")
+        else:
+            default_args.append("0")
+    return ", ".join(default_args)
 
 def key_to_float(key: str) -> tuple[Optional[float], Optional[str]]:
     match = re.search(r'(\d+)in(\d+)([a-zA-Z_0-9]*)', key)
@@ -134,7 +162,8 @@ def convert_waveshare_source(variant_key: Optional[str]) -> WaveshareVariant:
     if size is None or code is None:
         raise Exception(f"Invalid waveshare driver variant {variant_key}")
 
-    with open(os.path.join("..", "frameos", "src", "drivers", "waveshare", get_variant_folder(variant_key), f"{variant_key}.nim"), "r") as f:
+    source_path = FRAMEOS_ROOT / "src" / "drivers" / "waveshare" / get_variant_folder(variant_key) / f"{variant_key}.nim"
+    with open(source_path, "r") as f:
         variant = WaveshareVariant(key=variant_key, prefix='', size=size, code=code)
         lines = []
         in_proc = False
@@ -170,12 +199,15 @@ def convert_waveshare_source(variant_key: Optional[str]) -> WaveshareVariant:
                 proc_name = line.split("*(")[0].split(" ")[1]
                 if proc_name.lower() == f"{variant.prefix}_Init".lower() and variant.init_function is None:
                     variant.init_function = proc_name
+                    variant.init_args = get_default_proc_arguments(line)
                     variant.init_returns_zero = "): UBYTE" in line
                 if proc_name.lower() == f"{variant.prefix}_Init_4Gray".lower():
                     variant.init_function = proc_name
+                    variant.init_args = get_default_proc_arguments(line)
                     variant.init_returns_zero = "): UBYTE" in line
                 if proc_name.lower() == f"{variant.prefix}_4Gray_Init".lower():
                     variant.init_function = proc_name
+                    variant.init_args = get_default_proc_arguments(line)
                     variant.init_returns_zero = "): UBYTE" in line
                 if proc_name.lower() == f"{variant.prefix}_Clear".lower() and variant.clear_function is None:
                     variant.clear_function = proc_name

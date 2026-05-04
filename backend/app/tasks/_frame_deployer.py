@@ -282,6 +282,8 @@ class FrameDeployer:
         self,
         source_dir: str,
         driver_build_mode: str = DEFAULT_DRIVER_BUILD_MODE,
+        drivers_override: dict[str, Driver] | None = None,
+        drivers_nim_source: str | None = None,
     ):
         frame = self.frame
         driver_build_mode = normalize_driver_build_mode(driver_build_mode)
@@ -349,9 +351,9 @@ class FrameDeployer:
             source = write_scenes_nim(frame)
             f.write(source)
 
-        drivers = drivers_for_frame(frame)
+        drivers = drivers_override or drivers_for_frame(frame)
         with open(os.path.join(source_dir, "src", "drivers", "drivers.nim"), "w") as f:
-            source = write_drivers_nim(drivers, driver_build_mode=driver_build_mode)
+            source = drivers_nim_source or write_drivers_nim(drivers, driver_build_mode=driver_build_mode)
             f.write(source)
 
         if drivers.get("waveshare"):
@@ -485,9 +487,10 @@ class FrameDeployer:
 
             if driver_dirs:
                 mk.write("\nDRIVER_DIRS = " + " ".join(driver_dirs) + "\n\n")
-                mk.write(".PHONY: driver-libraries\n")
-                mk.write("driver-libraries:\n")
-                mk.write("\t@for dir in $(DRIVER_DIRS); do $(MAKE) -C $$dir; done\n")
+                mk.write(".PHONY: driver-libraries $(DRIVER_DIRS)\n")
+                mk.write("driver-libraries: $(DRIVER_DIRS)\n\n")
+                mk.write("$(DRIVER_DIRS):\n")
+                mk.write("\t+$(MAKE) -C $@\n")
 
     @staticmethod
     def _write_driver_makefile(
@@ -546,7 +549,9 @@ $(OBJECTS): pre-build
 \t\t\tln -s "$$cache_obj" $@; \\
 \t\telse \\
 \t\t\t$(CC) -c $(CFLAGS) $< -o $@; \\
-\t\t\tcp $@ "$$cache_obj"; \\
+\t\t\ttmp_cache_obj="$$cache_obj.$$PPID.tmp"; \\
+\t\t\tcp $@ "$$tmp_cache_obj"; \\
+\t\t\tmv -n "$$tmp_cache_obj" "$$cache_obj" 2>/dev/null || rm -f "$$tmp_cache_obj"; \\
 \t\t\techo "[$$(ls *.o | wc -l)/$(TOTAL)] $$file"; \\
 \t\tfi; \\
 \tfi
@@ -591,6 +596,14 @@ $(OBJECTS): pre-build
         drivers: dict[str, Driver],
     ) -> None:
         waveshare = drivers.get("waveshare")
+        self._copy_waveshare_driver_build_files(source_dir, destination_dir, waveshare)
+
+    def _copy_waveshare_driver_build_files(
+        self,
+        source_dir: str,
+        destination_dir: str,
+        waveshare: Driver | None,
+    ) -> None:
         if not waveshare or not waveshare.variant:
             return
         variant_folder, waveshare_files = self._waveshare_files(waveshare)
@@ -606,6 +619,7 @@ $(OBJECTS): pre-build
         source_dir: str,
         arch: str,
         driver_build_mode: str = DEFAULT_DRIVER_BUILD_MODE,
+        drivers_override: dict[str, Driver] | None = None,
     ) -> str:
         db = self.db
         redis = self.redis
@@ -614,12 +628,12 @@ $(OBJECTS): pre-build
         nim_path = self.nim_path
         temp_dir = self.temp_dir
 
-        drivers = drivers_for_frame(frame)
+        drivers = drivers_override or drivers_for_frame(frame)
         if inkyPython := drivers.get('inkyPython'):
             vendor_folder = inkyPython.vendor_folder or ""
             os.makedirs(os.path.join(build_dir, "vendor"), exist_ok=True)
             shutil.copytree(
-                f"../frameos/vendor/{vendor_folder}/",
+                os.path.join(source_dir, "vendor", vendor_folder),
                 os.path.join(build_dir, "vendor", vendor_folder),
                 dirs_exist_ok=True
             )
@@ -630,7 +644,7 @@ $(OBJECTS): pre-build
             vendor_folder = inkyHyperPixel2r.vendor_folder or ""
             os.makedirs(os.path.join(build_dir, "vendor"), exist_ok=True)
             shutil.copytree(
-                f"../frameos/vendor/{vendor_folder}/",
+                os.path.join(source_dir, "vendor", vendor_folder),
                 os.path.join(build_dir, "vendor", vendor_folder),
                 dirs_exist_ok=True
             )
@@ -719,8 +733,8 @@ $(OBJECTS): pre-build
                         f"{driver_err or driver_out or 'see logs'}"
                     )
                 shutil.copy(nimbase_path, os.path.join(driver_dir, "nimbase.h"))
-                if driver.name == "waveshare":
-                    self._copy_waveshare_build_files(source_dir, driver_dir, drivers)
+                if driver.name == "waveshare" or driver.name.startswith("waveshare_"):
+                    self._copy_waveshare_driver_build_files(source_dir, driver_dir, driver)
 
                 driver_script_path = self._find_compile_script(driver_dir)
                 driver_linker_flags, driver_compiler_flags = self._extract_compile_flags(
@@ -750,7 +764,8 @@ $(OBJECTS): pre-build
 
         archive_path = os.path.join(temp_dir, f"build_{build_id}.tar.gz")
         zip_base = os.path.join(temp_dir, f"build_{build_id}")
-        shutil.make_archive(zip_base, 'gztar', temp_dir, f"build_{build_id}")
+        build_path = Path(build_dir)
+        shutil.make_archive(zip_base, 'gztar', str(build_path.parent), build_path.name)
         return archive_path
 
     async def file_in_sync(

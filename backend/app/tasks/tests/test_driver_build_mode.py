@@ -34,6 +34,6 @@ def test_driver_build_mode_static_is_valid():
 def test_waveshare_driver_library_filename_includes_variant():
     waveshare = Driver(name="waveshare", variant="EPD_7in3e", import_path="waveshare/waveshare")
 
-    assert driver_library_filename(waveshare) == "libframeos_driver_waveshare_EPD_7in3e.so"
-    assert 'libraryName: "libframeos_driver_waveshare_EPD_7in3e.so"' in write_shared_drivers_nim({"waveshare": waveshare})
-    assert driver_library_filename(Driver(name="frameBuffer")) == "libframeos_driver_frameBuffer.so"
+    assert driver_library_filename(waveshare) == "waveshare_EPD_7in3e.so"
+    assert 'libraryName: "waveshare_EPD_7in3e.so"' in write_shared_drivers_nim({"waveshare": waveshare})
+    assert driver_library_filename(Driver(name="frameBuffer")) == "frameBuffer.so"
