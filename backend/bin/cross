@@ -660,9 +660,9 @@ def parse_args(argv: Iterable[str]) -> argparse.Namespace:
     build.add_argument("--artifacts-dir", default="build/cross", help="Directory for compiled binaries")
     build.add_argument(
         "--driver-build-mode",
-        choices=("static", "shared"),
+        choices=("static", "shared", "precompiled"),
         default=None,
-        help="Override driver build mode (static single executable or shared driver libraries)",
+        help="Override driver build mode (static, shared, or precompiled release when eligible)",
     )
 
     release = subparsers.add_parser(

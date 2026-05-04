@@ -6,8 +6,13 @@ from app.drivers.drivers import Driver
 
 DRIVER_BUILD_MODE_STATIC = "static"
 DRIVER_BUILD_MODE_SHARED = "shared"
+DRIVER_BUILD_MODE_PRECOMPILED = "precompiled"
 DEFAULT_DRIVER_BUILD_MODE = DRIVER_BUILD_MODE_STATIC
-VALID_DRIVER_BUILD_MODES = {DRIVER_BUILD_MODE_STATIC, DRIVER_BUILD_MODE_SHARED}
+VALID_DRIVER_BUILD_MODES = {
+    DRIVER_BUILD_MODE_STATIC,
+    DRIVER_BUILD_MODE_SHARED,
+    DRIVER_BUILD_MODE_PRECOMPILED,
+}
 
 
 def normalize_driver_build_mode(value: str | None) -> str:
@@ -20,6 +25,13 @@ def normalize_driver_build_mode(value: str | None) -> str:
 def frame_driver_build_mode(frame) -> str:
     rpios_settings = getattr(frame, "rpios", None) or {}
     return normalize_driver_build_mode(rpios_settings.get("driverBuildMode"))
+
+
+def driver_build_mode_uses_shared_libraries(value: str | None) -> bool:
+    return normalize_driver_build_mode(value) in {
+        DRIVER_BUILD_MODE_SHARED,
+        DRIVER_BUILD_MODE_PRECOMPILED,
+    }
 
 
 def compiled_drivers(drivers: dict[str, Driver]) -> list[Driver]:
@@ -147,7 +159,7 @@ def write_drivers_nim(
     drivers: dict[str, Driver],
     driver_build_mode: str = DEFAULT_DRIVER_BUILD_MODE,
 ) -> str:
-    if normalize_driver_build_mode(driver_build_mode) == DRIVER_BUILD_MODE_SHARED:
+    if driver_build_mode_uses_shared_libraries(driver_build_mode):
         return write_shared_drivers_nim(drivers)
     return write_static_drivers_nim(drivers)
 

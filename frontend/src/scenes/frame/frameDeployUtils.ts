@@ -27,12 +27,15 @@ export interface FullDeployPlanResponse {
   low_memory: boolean
   drivers: string[]
   binary: {
-    driver_build_mode?: 'static' | 'shared'
+    driver_build_mode?: 'static' | 'shared' | 'precompiled'
     will_attempt_cross_compile?: boolean
+    will_attempt_precompiled?: boolean
     cross_compile_supported?: boolean
     build_host_configured?: boolean
     prebuilt_target?: string | null
     has_prebuilt_entry?: boolean
+    precompiled_release_url?: string | null
+    precompiled_skip_reason?: string | null
   }
   packages: {
     name: string
@@ -145,7 +148,9 @@ export function buildFullDeployPlanSummary(
     },
     {
       label: 'Build strategy',
-      value: fullPlan.binary.will_attempt_cross_compile
+      value: fullPlan.binary.will_attempt_precompiled
+        ? 'Download the precompiled FrameOS release'
+        : fullPlan.binary.will_attempt_cross_compile
         ? fullPlan.binary.build_host_configured
           ? 'Cross-compile on the configured build host'
           : 'Cross-compile locally on this server'
@@ -161,10 +166,25 @@ export function buildFullDeployPlanSummary(
   if (fullPlan.binary.driver_build_mode === 'shared') {
     items.push({ label: 'Driver delivery', value: 'Shared libraries deployed next to the FrameOS binary' })
   }
+  if (fullPlan.binary.driver_build_mode === 'precompiled') {
+    items.push({
+      label: 'Driver delivery',
+      value: fullPlan.binary.will_attempt_precompiled
+        ? 'Precompiled FrameOS binary and shared driver libraries'
+        : `Shared driver libraries; precompiled release skipped${
+            fullPlan.binary.precompiled_skip_reason ? ` (${fullPlan.binary.precompiled_skip_reason})` : ''
+          }`,
+    })
+  }
   if (packagesToInstall.length > 0) {
     items.push({ label: 'Packages to install', value: stringifyList(packagesToInstall) })
   }
-  if (!fullPlan.binary.will_attempt_cross_compile && fullPlan.quickjs.required_if_remote_build && !fullPlan.quickjs.installed) {
+  if (
+    !fullPlan.binary.will_attempt_precompiled &&
+    !fullPlan.binary.will_attempt_cross_compile &&
+    fullPlan.quickjs.required_if_remote_build &&
+    !fullPlan.quickjs.installed
+  ) {
     items.push({
       label: 'QuickJS',
       value: `${fullPlan.quickjs.dirname || 'Required'} will be prepared for the on-device build`,
@@ -202,7 +222,11 @@ export function buildFullDeployPlanSummary(
   if (fullPlan.post_deploy?.reboot_schedule?.needs_remove) {
     items.push({ label: 'Reboot schedule', value: 'Old scheduled reboot config will be removed' })
   }
-  if (fullPlan.low_memory && !fullPlan.binary.will_attempt_cross_compile) {
+  if (
+    fullPlan.low_memory &&
+    !fullPlan.binary.will_attempt_precompiled &&
+    !fullPlan.binary.will_attempt_cross_compile
+  ) {
     items.push({ label: 'Low memory', value: 'FrameOS will be stopped before the on-device build' })
   }
   if (fullPlan.post_deploy?.final_action === 'reboot') {

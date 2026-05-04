@@ -265,7 +265,7 @@ jobs:
           cache-to: type=local,dest=/tmp/.buildx-cache
 
   push-multiarch:
-    needs: [update-versions, build]
+    needs: [update-versions, build, build-prebuilt-cross]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code

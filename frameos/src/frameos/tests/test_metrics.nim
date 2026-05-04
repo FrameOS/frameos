@@ -29,7 +29,7 @@ suite "metrics loop":
     let (hasNext, _) = logChannel.tryRecv()
     check not hasNext
 
-  test "enabled interval logs one metrics sample with hook values":
+  test "enabled interval logs one metrics sample with hook values and no startup placeholder":
     setMetricsHooksForTest(
       readFileHook = proc(path: string): string {.gcsafe, nimcall.} =
         if path == "/proc/loadavg":
@@ -47,13 +47,11 @@ suite "metrics loop":
 
     runMetricsLoopForTest(FrameConfig(metricsInterval: 1), iterations = 1)
 
-    let (_, enabledPayload) = logChannel.tryRecv()
-    check enabledPayload[1]["state"].getStr() == "enabled"
-    check enabledPayload[1]["intervalMs"].getInt() == 1000
-
     let (okSample, samplePayload) = logChannel.tryRecv()
     check okSample
     check samplePayload[1]["event"].getStr() == "metrics"
+    check not samplePayload[1].hasKey("state")
+    check not samplePayload[1].hasKey("intervalMs")
     check samplePayload[1]["load"].len == 3
     check abs(samplePayload[1]["cpuTemperature"].getFloat() - 42.0) < 0.0001
     check samplePayload[1]["memoryUsage"]["total"].getInt() == 1234
@@ -79,7 +77,6 @@ suite "metrics loop":
 
     runMetricsLoopForTest(FrameConfig(metricsInterval: 1), iterations = 1)
 
-    discard logChannel.tryRecv() # enabled message
     let (okError, errorPayload) = logChannel.tryRecv()
     check okError
     check errorPayload[1]["event"].getStr() == "metrics"

@@ -158,7 +158,6 @@ proc runMetricsLoop(self: MetricsLoggerThread, maxIterations = -1) {.gcsafe.} =
   if ms == 0:
     log(%*{"event": "metrics", "state": "disabled"})
   else:
-    log(%*{"event": "metrics", "state": "enabled", "intervalMs": ms})
     var iterations = 0
     while true:
       if maxIterations >= 0 and iterations >= maxIterations:

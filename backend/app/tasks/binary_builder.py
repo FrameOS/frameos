@@ -14,8 +14,14 @@ from app.models.log import new_log as log
 from app.tasks._frame_deployer import FrameDeployer
 from app.drivers.devices import drivers_for_frame
 from app.codegen.drivers_nim import (
+    DRIVER_BUILD_MODE_PRECOMPILED,
     frame_driver_build_mode,
     normalize_driver_build_mode,
+)
+from app.tasks.precompiled_frameos import (
+    download_precompiled_frameos_release,
+    frame_compiled_scene_count,
+    precompiled_frameos_release_url,
 )
 from app.tasks.prebuilt_deps import PrebuiltEntry, fetch_prebuilt_manifest, resolve_prebuilt_target
 from app.utils.build_host import get_build_host_config
@@ -55,6 +61,9 @@ class FrameBinaryPlan:
     will_attempt_cross_compile: bool
     prebuilt_entry: PrebuiltEntry | None
     prebuilt_target: str | None
+    will_attempt_precompiled: bool = False
+    precompiled_release_url: str | None = None
+    precompiled_skip_reason: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -72,6 +81,9 @@ class FrameBinaryPlan:
             "will_attempt_cross_compile": self.will_attempt_cross_compile,
             "prebuilt_target": self.prebuilt_target,
             "has_prebuilt_entry": self.prebuilt_entry is not None,
+            "will_attempt_precompiled": self.will_attempt_precompiled,
+            "precompiled_release_url": self.precompiled_release_url,
+            "precompiled_skip_reason": self.precompiled_skip_reason,
         }
 
 
@@ -90,6 +102,7 @@ class FrameBinaryBuildResult:
     prebuilt_entry: PrebuiltEntry | None
     prebuilt_target: str | None
     log_path: str | None
+    precompiled: bool = False
 
 
 def create_build_folder(temp_dir: str, build_id: str) -> str:
@@ -170,9 +183,30 @@ class FrameBinaryBuilder:
             arch=target.arch,
             logger=self._log,
         )
+        will_attempt_precompiled = False
+        precompiled_url = None
+        precompiled_skip_reason = None
+        if resolved_driver_build_mode == DRIVER_BUILD_MODE_PRECOMPILED:
+            compiled_scene_count = frame_compiled_scene_count(self.frame)
+            precompiled_url = precompiled_frameos_release_url(prebuilt_target or "")
+            if compiled_scene_count > 0:
+                precompiled_skip_reason = (
+                    f"{compiled_scene_count} compiled scene"
+                    + ("s are" if compiled_scene_count != 1 else " is")
+                    + " configured"
+                )
+            elif not prebuilt_target:
+                precompiled_skip_reason = "no matching precompiled target"
+            elif not precompiled_url:
+                precompiled_skip_reason = "no matching precompiled release URL"
+            else:
+                will_attempt_precompiled = True
+
         build_host = get_build_host_config(self.db)
         cross_compile_supported = can_cross_compile_target(target.arch)
-        will_attempt_cross_compile = allow_cross_compile and cross_compile_supported
+        will_attempt_cross_compile = (
+            allow_cross_compile and cross_compile_supported and not will_attempt_precompiled
+        )
 
         return FrameBinaryPlan(
             build_id=self.deployer.build_id,
@@ -185,6 +219,9 @@ class FrameBinaryBuilder:
             will_attempt_cross_compile=will_attempt_cross_compile,
             prebuilt_entry=prebuilt_entry,
             prebuilt_target=prebuilt_target,
+            will_attempt_precompiled=will_attempt_precompiled,
+            precompiled_release_url=precompiled_url,
+            precompiled_skip_reason=precompiled_skip_reason,
         )
 
     async def build(self, plan: FrameBinaryPlan) -> FrameBinaryBuildResult:
@@ -202,6 +239,38 @@ class FrameBinaryBuilder:
             await copy_custom_fonts_to_local_source_folder(self.db, source_dir)
 
         build_dir = create_build_folder(self.temp_dir, self.deployer.build_id)
+        if plan.will_attempt_precompiled:
+            await self._log("stdout", f"{icon} Using precompiled FrameOS release")
+            precompiled_result = await download_precompiled_frameos_release(
+                frame=self.frame,
+                target=plan.prebuilt_target or "",
+                build_dir=build_dir,
+                temp_dir=self.temp_dir,
+                build_id=self.deployer.build_id,
+                logger=self._log,
+            )
+            release_action = "Using cached" if precompiled_result.cache_hit else "Downloaded"
+            await self._log(
+                "stdout",
+                f"{icon} {release_action} precompiled FrameOS release: {precompiled_result.release_url}",
+            )
+            return FrameBinaryBuildResult(
+                build_id=self.deployer.build_id,
+                target=plan.target,
+                driver_build_mode=plan.driver_build_mode,
+                source_dir=source_dir,
+                build_dir=build_dir,
+                archive_path=precompiled_result.archive_path,
+                binary_path=precompiled_result.binary_path,
+                driver_library_paths=precompiled_result.driver_library_paths,
+                driver_library_names=precompiled_result.driver_library_names,
+                cross_compiled=True,
+                prebuilt_entry=plan.prebuilt_entry,
+                prebuilt_target=plan.prebuilt_target,
+                log_path=str(self.log_path) if self.log_path.exists() else None,
+                precompiled=True,
+            )
+
         await self._log("stdout", f"{icon} Creating build archive")
         archive_path = await self.deployer.create_local_build_archive(
             build_dir, source_dir, plan.target.arch, driver_build_mode=plan.driver_build_mode
