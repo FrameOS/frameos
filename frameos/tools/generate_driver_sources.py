@@ -20,8 +20,8 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 from app.codegen.drivers_nim import (  # noqa: E402
-    DRIVER_BUILD_MODE_SHARED,
     compiled_drivers,
+    driver_build_mode_uses_shared_libraries,
     frame_driver_build_mode,
     normalize_driver_build_mode,
     write_driver_library_nim,
@@ -86,7 +86,7 @@ def generate_driver_sources(
 
     shared_dir = drivers_dir / "shared"
     shutil.rmtree(shared_dir, ignore_errors=True)
-    if mode == DRIVER_BUILD_MODE_SHARED:
+    if driver_build_mode_uses_shared_libraries(mode):
         shared_dir.mkdir(parents=True, exist_ok=True)
         for driver in compiled_drivers(drivers):
             (shared_dir / f"{driver.name}.nim").write_text(
@@ -103,7 +103,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--config", default=str(FRAMEOS_ROOT / "frame.json"), help="Frame config JSON")
     parser.add_argument(
         "--driver-build-mode",
-        choices=("static", "shared"),
+        choices=("static", "shared", "precompiled"),
         default=None,
         help="Override frame.json rpios.driverBuildMode",
     )

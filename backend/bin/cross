@@ -15,6 +15,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
 
+DEFAULT_RUNNER_PROFILE = "default"
+DEPOT_8_CPU_RUNNER_PROFILE = "depot-8"
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BACKEND_ROOT = REPO_ROOT / "backend"
 if str(REPO_ROOT) not in sys.path:
@@ -36,7 +39,7 @@ class TargetDefinition:
     def slug(self) -> str:
         return f"{self.distro}-{self.version}-{self.arch}"
 
-    def to_matrix_entry(self) -> dict[str, str]:
+    def to_matrix_entry(self, runner: str | None = None) -> dict[str, str]:
         return {
             "slug": self.slug,
             "distro": self.distro,
@@ -44,7 +47,7 @@ class TargetDefinition:
             "arch": self.arch,
             "platform": self.platform,
             "image": self.image,
-            "runner": self.runner,
+            "runner": runner or self.runner,
         }
 
 
@@ -63,6 +66,14 @@ TARGETS: tuple[TargetDefinition, ...] = (
 )
 
 TARGET_MAP = {target.slug: target for target in TARGETS}
+
+
+def runner_for_profile(target: TargetDefinition, runner_profile: str) -> str:
+    if runner_profile == DEFAULT_RUNNER_PROFILE:
+        return target.runner
+    if runner_profile == DEPOT_8_CPU_RUNNER_PROFILE:
+        return f"depot-{target.runner}-8"
+    raise ValueError(f"Unknown runner profile: {runner_profile}")
 
 RELEASE_CACHE_VERSION = "2"
 RELEASE_BUILD_MAKEFILE_VERSION = "3"
@@ -130,8 +141,13 @@ def load_frame_stub(frameos_root: Path) -> FrameStub:
     )
 
 
-def targets_matrix_json() -> str:
-    matrix = {"include": [target.to_matrix_entry() for target in TARGETS]}
+def targets_matrix_json(runner_profile: str = DEFAULT_RUNNER_PROFILE) -> str:
+    matrix = {
+        "include": [
+            target.to_matrix_entry(runner=runner_for_profile(target, runner_profile))
+            for target in TARGETS
+        ]
+    }
     return json.dumps(matrix, separators=(",", ":"))
 
 
@@ -630,7 +646,13 @@ def parse_args(argv: Iterable[str]) -> argparse.Namespace:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     subparsers.add_parser("list", help="List available cross compilation targets")
-    subparsers.add_parser("matrix", help="Emit the GitHub Actions matrix JSON")
+    matrix = subparsers.add_parser("matrix", help="Emit the GitHub Actions matrix JSON")
+    matrix.add_argument(
+        "--runner-profile",
+        choices=(DEFAULT_RUNNER_PROFILE, DEPOT_8_CPU_RUNNER_PROFILE),
+        default=DEFAULT_RUNNER_PROFILE,
+        help="Runner label profile for matrix entries",
+    )
 
     build = subparsers.add_parser("build", help="Build a specific cross compilation target")
     build.add_argument("--target", required=True, help="Target slug (distro-version-arch)")
@@ -638,9 +660,9 @@ def parse_args(argv: Iterable[str]) -> argparse.Namespace:
     build.add_argument("--artifacts-dir", default="build/cross", help="Directory for compiled binaries")
     build.add_argument(
         "--driver-build-mode",
-        choices=("static", "shared"),
+        choices=("static", "shared", "precompiled"),
         default=None,
-        help="Override driver build mode (static single executable or shared driver libraries)",
+        help="Override driver build mode (static, shared, or precompiled release when eligible)",
     )
 
     release = subparsers.add_parser(
@@ -684,7 +706,7 @@ def main(argv: list[str]) -> int:
         print(list_targets())
         return 0
     if args.command == "matrix":
-        print(targets_matrix_json())
+        print(targets_matrix_json(args.runner_profile))
         return 0
     if args.command == "build":
         frameos_root = Path(args.frameos_root)

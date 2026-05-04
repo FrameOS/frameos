@@ -546,6 +546,10 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                       Choose whether display/input drivers are built as separate shared libraries deployed next to
                       FrameOS, or linked into the FrameOS executable.
                     </p>
+                    <p>
+                      Precompiled only downloads a published FrameOS release when all scenes are interpreted; otherwise
+                      it falls back to shared driver libraries.
+                    </p>
                   </div>
                 }
               >
@@ -554,6 +558,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                   options={[
                     { value: '', label: 'Default (single executable)' },
                     { value: 'shared', label: 'Shared driver libraries' },
+                    { value: 'precompiled', label: 'Precompiled only / experimental' },
                     { value: 'static', label: 'Single executable' },
                   ]}
                 />

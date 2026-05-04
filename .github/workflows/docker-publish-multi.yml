@@ -113,7 +113,7 @@ jobs:
 
       - id: set-matrix
         run: |
-          MATRIX=$(python3 backend/bin/cross matrix)
+          MATRIX=$(python3 backend/bin/cross matrix --runner-profile depot-8)
           echo "targets=$MATRIX" >> "$GITHUB_OUTPUT"
 
   build-prebuilt-cross:
@@ -265,7 +265,7 @@ jobs:
           cache-to: type=local,dest=/tmp/.buildx-cache
 
   push-multiarch:
-    needs: [update-versions, build]
+    needs: [update-versions, build, build-prebuilt-cross]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code

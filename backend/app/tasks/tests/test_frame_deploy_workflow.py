@@ -95,6 +95,24 @@ class FakeBinaryBuilder:
         )
 
 
+class FakePrecompiledBinaryBuilder:
+    async def plan_build(self, **_kwargs) -> FrameBinaryPlan:
+        return FrameBinaryPlan(
+            build_id="build12345678",
+            target=TargetMetadata(arch="arm64", distro="raspios", version="bookworm"),
+            driver_build_mode="precompiled",
+            allow_cross_compile=True,
+            force_cross_compile=False,
+            cross_compile_supported=True,
+            build_host_configured=False,
+            will_attempt_cross_compile=False,
+            prebuilt_entry=None,
+            prebuilt_target="debian-bookworm-arm64",
+            will_attempt_precompiled=True,
+            precompiled_release_url="https://example.test/frameos.tar.gz",
+        )
+
+
 @pytest.mark.asyncio
 async def test_full_plan_defaults_to_single_executable(monkeypatch: pytest.MonkeyPatch):
     captured_modes: list[str] = []
@@ -300,6 +318,52 @@ async def test_full_plan_reports_installed_state_and_remote_build_dependencies(m
     assert plan.full_deploy.post_deploy["disable_caddy_service"] is True
     assert plan.full_deploy.post_deploy["bootconfig_changes"] == []
     assert plan.full_deploy.post_deploy["final_action"] == "restart_frameos"
+
+
+@pytest.mark.asyncio
+async def test_full_plan_skips_remote_build_dependencies_for_precompiled(monkeypatch: pytest.MonkeyPatch):
+    frame = SimpleNamespace(
+        id=17,
+        name="PrecompiledFrame",
+        ssh_keys=[],
+        rpios={"crossCompilation": "auto", "driverBuildMode": "precompiled"},
+        reboot=None,
+        last_successful_deploy={"frameos_version": "9.9.9"},
+        last_successful_deploy_at="2026-01-01T00:00:00+00:00",
+        to_dict=lambda: {"id": 17, "name": "PrecompiledFrame"},
+    )
+    deployer = FakeDeployer()
+
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.drivers_for_frame", lambda _frame: {})
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.get_settings_dict", lambda _db: {})
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.select_ssh_keys_for_frame", lambda _frame, _settings: [])
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.normalize_ssh_keys", lambda _settings: [])
+
+    workflow = FrameDeployWorkflow(
+        db=None,
+        redis=None,
+        frame=frame,
+        deployer=deployer,
+        temp_dir="",
+        binary_builder=FakePrecompiledBinaryBuilder(),
+    )
+
+    plan = await workflow.plan("full")
+
+    assert plan.full_deploy is not None
+    assert plan.full_deploy.binary_plan.will_attempt_precompiled is True
+    assert plan.full_deploy.quickjs_required_if_remote_build is False
+    assert plan.full_deploy.remote_build_fallback_package_plans == []
+    package_names = {pkg.name for pkg in plan.full_deploy.package_plans}
+    assert "build-essential" not in package_names
+    assert "libssl-dev" not in package_names
+    assert "libunistring-dev" not in package_names
+    assert "libtool" not in package_names
+    assert "cmake" not in package_names
+    assert "pkg-config" not in package_names
+    assert "libatomic-ops-dev" not in package_names
+    assert "libicu-dev" not in package_names
+    assert "zlib1g-dev" not in package_names
 
 
 def test_python_vendor_setup_command_reinstalls_only_when_env_or_requirements_change():
