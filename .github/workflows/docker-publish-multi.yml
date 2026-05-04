@@ -390,12 +390,10 @@ jobs:
           ls -lh release-assets
           cat > release-notes.md <<EOF
           Docker images:
-          - frameos/frameos:latest
-          - frameos/frameos:${DOCKER_VERSION}
-          - frameos/frameos:${DOCKER_VERSION%.*}
-          - frameos/frameos:${DOCKER_VERSION%%.*}
-
-          FrameOS binary archives are attached as versioned tar.gz files.
+          - [frameos/frameos:latest](https://hub.docker.com/r/frameos/frameos/tags?name=latest)
+          - [frameos/frameos:${DOCKER_VERSION}](https://hub.docker.com/r/frameos/frameos/tags?name=${DOCKER_VERSION})
+          - [frameos/frameos:${DOCKER_VERSION%.*}](https://hub.docker.com/r/frameos/frameos/tags?name=${DOCKER_VERSION%.*})
+          - [frameos/frameos:${DOCKER_VERSION%%.*}](https://hub.docker.com/r/frameos/frameos/tags?name=${DOCKER_VERSION%%.*})
           EOF
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             gh release upload "$RELEASE_TAG" release-assets/*.tar.gz --clobber
