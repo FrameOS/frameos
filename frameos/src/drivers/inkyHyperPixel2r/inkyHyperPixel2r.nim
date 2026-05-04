@@ -1,5 +1,5 @@
 import pixie, osproc
-import frameos/types
+import frameos/driver_context
 
 import drivers/frameBuffer/frameBuffer as frameBuffer
 
@@ -15,7 +15,7 @@ proc runCommand(command: string): int =
     return execCmdHook(command)
   execCmd(command)
 
-proc init*(frameOS: FrameOS): Driver =
+proc init*(frameOS: DriverContext): Driver =
   let fbDriver = frameBuffer.init(frameOS)
   result = Driver(
     screenInfo: fbDriver.screenInfo,

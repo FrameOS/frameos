@@ -224,6 +224,12 @@ class CrossCompiler:
             shlex.quote(" ".join(extra_cflags_parts)) if extra_cflags_parts else "''"
         )
         extra_libs = shlex.quote(" ".join(f"-L{path}" for path in lib_dirs)) if lib_dirs else "''"
+        make_jobs = (os.environ.get("FRAMEOS_CROSS_MAKE_JOBS") or "").strip()
+        make_jobs_assignment = (
+            f"make_jobs={shlex.quote(make_jobs)}"
+            if make_jobs
+            else 'make_jobs="$(nproc)"'
+        )
         script_content = (
             dedent(
                 f"""
@@ -239,6 +245,7 @@ class CrossCompiler:
 
                 extra_cflags={extra_cflags}
                 extra_libs={extra_libs}
+                {make_jobs_assignment}
                 if [ -n "$extra_cflags" ]; then
                     log_debug "Using extra CFLAGS: $extra_cflags"
                     export EXTRA_CFLAGS="$extra_cflags"
@@ -250,7 +257,8 @@ class CrossCompiler:
 
                 cd /src
                 log_debug "Compiling generated C sources"
-                make -j"$(nproc)"
+                log_debug "Using make jobs: $make_jobs"
+                make -j"$make_jobs"
                 log_debug "build completed"
                 """
             ).strip()
@@ -336,6 +344,19 @@ class CrossCompiler:
 
         local_binary = os.path.join(build_dir, "frameos")
         await host.download_file(f"{remote_build_dir}/frameos", local_binary)
+        status, stdout, _err = await host.run(
+            f"cd {shlex.quote(remote_build_dir)} && find drivers -type f -name '*.so' 2>/dev/null || true",
+            log_command=False,
+            log_output=False,
+        )
+        if status == 0 and stdout:
+            for rel_path in stdout.splitlines():
+                rel_path = rel_path.strip()
+                if not rel_path:
+                    continue
+                local_path = os.path.join(build_dir, rel_path)
+                os.makedirs(os.path.dirname(local_path), exist_ok=True)
+                await host.download_file(f"{remote_build_dir}/{rel_path}", local_path)
         return local_binary
 
     async def _run_command(

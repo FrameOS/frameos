@@ -537,6 +537,27 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                   ]}
                 />
               </Field>
+              <Field
+                name="driverBuildMode"
+                label="Driver build mode"
+                tooltip={
+                  <div className="space-y-2">
+                    <p>
+                      Choose whether display/input drivers are built as separate shared libraries deployed next to
+                      FrameOS, or linked into the FrameOS executable.
+                    </p>
+                  </div>
+                }
+              >
+                <Select
+                  name="rpios.driverBuildMode"
+                  options={[
+                    { value: '', label: 'Default (single executable)' },
+                    { value: 'shared', label: 'Shared driver libraries' },
+                    { value: 'static', label: 'Single executable' },
+                  ]}
+                />
+              </Field>
             </Group>
           ) : null}
           <Field name="debug" label="Debug mode (noisy)">

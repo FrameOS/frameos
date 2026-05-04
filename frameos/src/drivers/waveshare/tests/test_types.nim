@@ -1,19 +1,15 @@
 import std/[json, strutils, unittest]
 
 import ../types
-import frameos/types
+import frameos/driver_context
 
 type LogSink = ref object
   entries: seq[JsonNode]
 
-proc makeLogger(sink: LogSink; debug: bool; withConfig: bool = true): Logger =
-  result = Logger(enabled: true)
-  if withConfig:
-    result.frameConfig = FrameConfig(debug: debug)
+proc makeLogger(sink: LogSink; debug: bool): DriverLogger =
+  result = DriverLogger(enabled: true, debug: debug)
   result.log = proc(payload: JsonNode) =
     sink.entries.add(copy(payload))
-  result.enable = proc() = discard
-  result.disable = proc() = discard
 
 suite "waveshare driver helper types":
   setup:

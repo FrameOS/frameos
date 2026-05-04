@@ -1,9 +1,6 @@
 name: Publish Docker Image to Docker Hub
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
 
 permissions:
@@ -13,14 +10,14 @@ jobs:
   update-versions:
     runs-on: ubuntu-latest
     outputs:
-      skip_release: ${{ steps.release-control.outputs.skip_release }}
-      versions_changed: ${{ steps.detect.outputs.versions_changed }}
-      should_publish: ${{ steps.release-ref.outputs.should_publish }}
       release_sha: ${{ steps.release-ref.outputs.release_sha }}
+      docker_version: ${{ steps.release-ref.outputs.docker_version }}
+      release_tag: ${{ steps.release-ref.outputs.release_tag }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
+          ref: main
           fetch-depth: 0
 
       - name: Set up Python
@@ -28,75 +25,36 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Check release skip markers
-        id: release-control
-        env:
-          HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message || '' }}
-        run: |
-          if printf '%s\n' "$HEAD_COMMIT_MESSAGE" | grep -Eiq '(^|[[:space:]])#norelease([[:space:]]|$)|\[skip release\]'; then
-            echo "skip_release=true" >> "$GITHUB_OUTPUT"
-            echo "Release skipped by commit message marker"
-          else
-            echo "skip_release=false" >> "$GITHUB_OUTPUT"
-            echo "No release skip marker found"
-          fi
-
       - name: Recompute component versions
-        if: steps.release-control.outputs.skip_release != 'true'
-        run: python3 tools/update_versions.py
+        run: python3 tools/update_versions.py --force-project docker
 
-      - name: Detect version changes
-        id: detect
+      - name: Verify version changes
         run: |
-          if [ "${{ steps.release-control.outputs.skip_release }}" = "true" ]; then
-            echo "versions_changed=false" >> "$GITHUB_OUTPUT"
-            echo "Release skipped by commit message marker"
-          elif git diff --quiet -- versions.json; then
-            echo "versions_changed=false" >> "$GITHUB_OUTPUT"
-            echo "No version changes detected"
-          else
-            echo "versions_changed=true" >> "$GITHUB_OUTPUT"
-            echo "Version changes detected"
+          if git diff --quiet -- versions.json; then
+            echo "Release did not change versions.json"
+            exit 1
           fi
+          echo "Version changes detected"
 
       - name: Commit updated versions
-        if: steps.detect.outputs.versions_changed == 'true'
         run: |
           VERSION=$(python3 -c "import json; print(json.load(open('versions.json'))['docker'].split('+', 1)[0])")
           git config user.name "frameos-bot"
           git config user.email "git@frameos.net"
           git add versions.json
           git commit -m "chore: version ${VERSION}"
-          git push
+          git push origin HEAD:main
 
       - name: Select release commit
         id: release-ref
         run: |
-          if [ "${{ steps.release-control.outputs.skip_release }}" = "true" ]; then
-            echo "should_publish=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          HEAD_CHANGED_VERSIONS=false
-          if git rev-parse HEAD^ >/dev/null 2>&1 && ! git diff --quiet HEAD^ HEAD -- versions.json; then
-            HEAD_CHANGED_VERSIONS=true
-          fi
-
-          HEAD_CHANGED_PUBLISH_WORKFLOW=false
-          if git rev-parse HEAD^ >/dev/null 2>&1 && ! git diff --quiet HEAD^ HEAD -- .github/workflows/docker-publish-multi.yml; then
-            HEAD_CHANGED_PUBLISH_WORKFLOW=true
-          fi
-
-          if [ "${{ steps.detect.outputs.versions_changed }}" = "true" ] || [ "$HEAD_CHANGED_VERSIONS" = "true" ] || [ "$HEAD_CHANGED_PUBLISH_WORKFLOW" = "true" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "should_publish=true" >> "$GITHUB_OUTPUT"
-            echo "release_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          else
-            echo "should_publish=false" >> "$GITHUB_OUTPUT"
-          fi
+          VERSION=$(python3 -c "import json; print(json.load(open('versions.json'))['docker'].split('+', 1)[0])")
+          echo "release_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "docker_version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "release_tag=v$VERSION" >> "$GITHUB_OUTPUT"
 
   test:
     needs: update-versions
-    if: needs.update-versions.outputs.should_publish == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -142,8 +100,102 @@ jobs:
           source .venv/bin/activate
           TEST=1 pytest
 
+  determine-release-targets:
+    needs: update-versions
+    runs-on: ubuntu-24.04
+    outputs:
+      targets: ${{ steps.set-matrix.outputs.targets }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.update-versions.outputs.release_sha }}
+
+      - id: set-matrix
+        run: |
+          MATRIX=$(python3 backend/bin/cross matrix)
+          echo "targets=$MATRIX" >> "$GITHUB_OUTPUT"
+
+  build-prebuilt-cross:
+    name: Build Prebuilt Cross (${{ matrix.slug }})
+    needs: [update-versions, determine-release-targets, test]
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.determine-release-targets.outputs.targets) }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.update-versions.outputs.release_sha }}
+
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.27.0
+          run_install: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install backend dependencies
+        run: |
+          pip install -r backend/requirements.txt
+
+      - name: Install Nim (prebuilt)
+        env:
+          NIM_VERSION: 2.2.4
+        run: |
+          set -euo pipefail
+          distro=$(lsb_release -si | tr '[:upper:]' '[:lower:]')
+          version=$(lsb_release -sr)
+          case "$(uname -m)" in
+            aarch64) host_arch=arm64 ;;
+            armv7l|armv6l) host_arch=armhf ;;
+            x86_64) host_arch=amd64 ;;
+            *) echo "Unsupported runner architecture: $(uname -m)" >&2; exit 1 ;;
+          esac
+          nim_slug="${distro}-${version}-${host_arch}"
+          echo "$nim_slug"
+          mkdir -p "$HOME/.nim"
+          curl -L "https://archive.frameos.net/prebuilt-deps/${nim_slug}/nim-${NIM_VERSION}.tar.gz" -o /tmp/nim.tar.gz
+          tar -xzf /tmp/nim.tar.gz -C "$HOME/.nim"
+          rm -rf "$HOME/.nim/nim-${NIM_VERSION}/nim/bin"
+          mv "$HOME/.nim/nim-${NIM_VERSION}/nim/"* "$HOME/.nim/nim-${NIM_VERSION}/"
+          echo "$HOME/.nim/nim-${NIM_VERSION}/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.nim/nim-${NIM_VERSION}/bin:$PATH"
+          nim --version
+
+      - name: Build release artifacts for ${{ matrix.slug }}
+        run: |
+          cd frameos
+          make release-${{ matrix.slug }}
+
+      - name: Package release artifacts
+        env:
+          DOCKER_VERSION: ${{ needs.update-versions.outputs.docker_version }}
+          TARGET_SLUG: ${{ matrix.slug }}
+        run: |
+          mkdir -p release-assets
+          tar -czf "release-assets/frameos-prebuilt-cross-${DOCKER_VERSION}-${TARGET_SLUG}.tar.gz" \
+            -C frameos/build \
+            "prebuilt-cross/${TARGET_SLUG}"
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: prebuilt-cross-${{ matrix.slug }}
+          path: release-assets/*.tar.gz
+          if-no-files-found: error
+
   build:
-    if: needs.update-versions.outputs.should_publish == 'true'
     needs: [update-versions, test]
     runs-on: ubuntu-latest
     strategy:
@@ -213,7 +265,6 @@ jobs:
           cache-to: type=local,dest=/tmp/.buildx-cache
 
   push-multiarch:
-    if: needs.update-versions.outputs.should_publish == 'true'
     needs: [update-versions, build]
     runs-on: ubuntu-latest
     steps:
@@ -273,7 +324,6 @@ jobs:
 
   update-addon-repo:
     name: Update Home Assistant Addon
-    if: needs.update-versions.outputs.should_publish == 'true'
     needs: [update-versions, push-multiarch]
     runs-on: ubuntu-latest
     steps:
@@ -312,3 +362,46 @@ jobs:
           push: true
           author_name: FrameOS Bot
           author_email: git@frameos.net
+
+  github-release:
+    name: Create GitHub Release
+    needs: [update-versions, push-multiarch, build-prebuilt-cross, update-addon-repo]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout release commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.update-versions.outputs.release_sha }}
+
+      - name: Download prebuilt cross artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: prebuilt-cross-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DOCKER_VERSION: ${{ needs.update-versions.outputs.docker_version }}
+          RELEASE_TAG: ${{ needs.update-versions.outputs.release_tag }}
+          RELEASE_SHA: ${{ needs.update-versions.outputs.release_sha }}
+        run: |
+          ls -lh release-assets
+          cat > release-notes.md <<EOF
+          Docker images:
+          - frameos/frameos:latest
+          - frameos/frameos:${DOCKER_VERSION}
+          - frameos/frameos:${DOCKER_VERSION%.*}
+          - frameos/frameos:${DOCKER_VERSION%%.*}
+
+          Prebuilt cross artifacts are attached as versioned tar.gz archives.
+          EOF
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" release-assets/*.tar.gz --clobber
+          else
+            gh release create "$RELEASE_TAG" release-assets/*.tar.gz \
+              --target "$RELEASE_SHA" \
+              --title "FrameOS ${DOCKER_VERSION}" \
+              --notes-file release-notes.md
+          fi

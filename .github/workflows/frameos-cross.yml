@@ -5,6 +5,8 @@ on:
   pull_request:
     paths:
       - frameos/**
+      - backend/app/codegen/release_drivers_nim.py
+      - backend/app/drivers/waveshare.py
       - backend/app/utils/cross_compile.py
       - backend/app/tasks/_frame_deployer.py
       - backend/bin/cross

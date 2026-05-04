@@ -1,4 +1,6 @@
-import json, pixie, hashes, locks, tables, options, asyncdispatch, mummy
+import json, pixie, locks, tables, options, asyncdispatch, mummy
+import frameos/ids
+export ids
 import lib/burrito
 
 type
@@ -117,9 +119,6 @@ type
   MetricsLogger* = ref object
     frameConfig*: FrameConfig
     logger*: Logger
-
-  NodeId* = distinct int
-  SceneId* = distinct string
 
   FieldKind* = enum
     fkString, fkText, fkFloat, fkInteger, fkBoolean, fkColor, fkJson, fkImage, fkNode, fkScene, fkNone
@@ -334,13 +333,3 @@ type
     server*: Server
     runner*: RunnerControl
     network*: Network
-
-proc `==`*(x, y: NodeId): bool = x.int == y.int
-proc `==`*(x: int, y: NodeId): bool = x == y.int
-proc `==`*(x: NodeId, y: int): bool = x.int == y
-proc `$`*(x: NodeId): string = $(x.int)
-proc `%`*(x: NodeId): JsonNode = %(x.int)
-proc hash*(x: SceneId): Hash = x.string.hash
-proc `==`*(x, y: SceneId): bool = x.string == y.string
-proc `$`*(x: SceneId): string = x.string
-proc `%`*(x: SceneId): JsonNode = %*(x.string)

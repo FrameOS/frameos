@@ -12,6 +12,7 @@ snapshots:
 	mkdir -p ./tmp/state && \
 	mkdir -p ./tmp/e2e && \
 	mkdir -p ./tmp/backend/app/codegen && \
+	mkdir -p ./tmp/backend/app/drivers && \
 	mkdir -p ./tmp/backend/app/utils && \
 	mkdir -p ./tmp/frontend && \
 	rm -rf ./tmp/frameos ./tmp/frontend/src ./tmp/frontend/schema && \
@@ -19,6 +20,7 @@ snapshots:
 	tmpdir=./tmp/frameos && \
 	cp -r ../e2e/*.py ./tmp/e2e && \
 	cp -r ../backend/app/codegen/*.py ./tmp/backend/app/codegen && \
+	cp -r ../backend/app/drivers/*.py ./tmp/backend/app/drivers && \
 	cp ../backend/app/utils/js_apps.py ./tmp/backend/app/utils/js_apps.py && \
 	cp ../package.json ./tmp/package.json && \
 	cp ../pnpm-workspace.yaml ./tmp/pnpm-workspace.yaml && \
@@ -31,7 +33,7 @@ snapshots:
 	rm -rf "$$tmpdir/src/scenes" && \
 	cp -r ./generated "$$tmpdir/src/scenes" && \
 	cp -r ./generated/scenes.json "$$tmpdir/" && \
-	(cd "$$tmpdir" && make build) && \
+	(cd "$$tmpdir" && make build DRIVER_BUILD_MODE=shared SKIP_DRIVER_LIBRARIES=1) && \
 	cp "$$tmpdir/build/frameos" ./tmp/frameos-bin && \
 	cp "$$tmpdir/scenes.json" ./tmp/scenes.json
 

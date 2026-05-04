@@ -35,7 +35,9 @@ $(OBJECTS): pre-build
 			ln -s "$$cache_obj" $@; \
 		else \
 			$(CC) -c $(CFLAGS) $< -o $@; \
-			cp $@ "$$cache_obj"; \
+			tmp_cache_obj="$$cache_obj.$$PPID.tmp"; \
+			cp $@ "$$tmp_cache_obj"; \
+			mv -n "$$tmp_cache_obj" "$$cache_obj" 2>/dev/null || rm -f "$$tmp_cache_obj"; \
 			echo "[$$(ls *.o | wc -l)/$(TOTAL)] $$file"; \
 		fi; \
 	fi

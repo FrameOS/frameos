@@ -1,5 +1,5 @@
 import osproc, os, streams, pixie, json, options, strutils, strformat, locks
-import frameos/types
+import frameos/driver_context
 import frameos/utils/dither
 import frameos/utils/image
 
@@ -13,7 +13,7 @@ type Driver* = ref object of FrameOSDriver
   mode*: string
   device*: string
   palette*: PaletteConfig
-  logger: Logger
+  logger: DriverLogger
   lastImageData: seq[ColorRGBX]
   debug: bool
 
@@ -36,7 +36,7 @@ proc getLastPixels*(): seq[uint8] =
 proc notifyImageAvailable*(self: Driver) =
   self.logger.log(%*{"event": "render:dither", "info": "Dithered image available"})
 
-proc safeLog*(logger: Logger, message: string): JsonNode =
+proc safeLog*(logger: DriverLogger, message: string): JsonNode =
   try:
     result = parseJson(message)
     result["event"] = %*("driver:inky")
@@ -45,7 +45,7 @@ proc safeLog*(logger: Logger, message: string): JsonNode =
   logger.log(result)
 
 proc safeStartProcess*(cmd: string; args: seq[string] = @[];
-                       wdir: string; logger: Logger): Option[Process] =
+                       wdir: string; logger: DriverLogger): Option[Process] =
   try:
     result = some startProcess(
       workingDir = wdir,
@@ -61,7 +61,7 @@ proc safeStartProcess*(cmd: string; args: seq[string] = @[];
 proc deviceArgs*(dev: string): seq[string] =
   if dev.len > 0: @["--device", dev] else: @[]
 
-proc init*(frameOS: FrameOS): Driver =
+proc init*(frameOS: DriverContext): Driver =
   discard frameOS.logger.safeLog("Initializing Inky driver")
 
   result = Driver(
@@ -115,7 +115,7 @@ proc init*(frameOS: FrameOS): Driver =
 
   process.close()
 
-proc logProcessExit(logger: Logger, process: Process, context: string) =
+proc logProcessExit(logger: DriverLogger, process: Process, context: string) =
   let exitCode = process.waitForExit()
   if exitCode != 0:
     discard logger.safeLog(fmt"{context} exited with status {exitCode}")

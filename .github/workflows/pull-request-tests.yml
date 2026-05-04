@@ -1,9 +1,12 @@
-name: Run Tests on Pull Requests
+name: Run Tests
 
 on:
   pull_request:
     branches:
       - '**'
+  push:
+    branches:
+      - main
 
 jobs:
   nim:
@@ -23,8 +26,8 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.ref }}
+          repository: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref }}
 
       - name: Set up Python
         uses: actions/setup-python@v2
@@ -84,8 +87,8 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.ref }}
+          repository: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref }}
 
       - name: Set up Python
         uses: actions/setup-python@v2
@@ -141,7 +144,7 @@ jobs:
           git diff --name-only
 
       - name: Commit updated snapshots
-        if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
         uses: EndBug/add-and-commit@v9
         id: commit
         with:

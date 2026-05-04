@@ -1,4 +1,4 @@
-import { actions, afterMount, connect, kea, key, path, props, reducers, selectors } from 'kea'
+import { actions, afterMount, beforeUnmount, connect, kea, key, path, props, reducers, selectors } from 'kea'
 
 import { MetricsType } from '../../../../types'
 import { loaders } from 'kea-loaders'
@@ -33,6 +33,7 @@ export interface TimeRange {
 const DEFAULT_VISIBLE_MS = 4 * 60 * 60 * 1000
 const HEADER_VISIBLE_MS = 60 * 60 * 1000
 const MIN_VISIBLE_MS = 1000
+const CURRENT_TIME_UPDATE_MS = 60 * 1000
 const GAP_THRESHOLD_MULTIPLIER = 1.75
 const SINGLE_SERIES_COLOR = '#2dd4bf'
 const METRIC_SERIES_COLORS = ['#f59e0b', '#38bdf8', '#a78bfa', '#34d399', '#fb7185', '#f472b6']
@@ -53,6 +54,24 @@ function metricTimestamp(metric: MetricsType): number {
 function metricIntervalMs(metric: MetricsType): number | null {
   const interval = Number(metric.metrics?.intervalMs)
   return Number.isFinite(interval) && interval > 0 ? interval : null
+}
+
+function getMetricsDataTimeRange(metrics: MetricsType[]): TimeRange | null {
+  const timestamps = metrics.map(metricTimestamp).filter(Number.isFinite)
+  if (timestamps.length === 0) {
+    return null
+  }
+  return normalizeTimeRange(Math.min(...timestamps), Math.max(...timestamps))
+}
+
+function getDefaultVisibleTimeRange(metrics: MetricsType[]): TimeRange | null {
+  const timestamps = metrics.map(metricTimestamp).filter(Number.isFinite)
+  if (timestamps.length === 0) {
+    return null
+  }
+
+  const end = Math.max(...timestamps)
+  return normalizeTimeRange(end - DEFAULT_VISIBLE_MS, end)
 }
 
 function normalizeTimeRange(start: number, end: number): TimeRange {
@@ -79,10 +98,6 @@ function trailingVisibleTimeRange(timeRange: TimeRange | null, visibleMs: number
   const end = timeRange.end
   const start = Math.max(timeRange.start, end - visibleMs)
   return normalizeTimeRange(start >= end ? end - visibleMs : start, end)
-}
-
-function defaultVisibleTimeRange(timeRange: TimeRange | null): TimeRange | null {
-  return trailingVisibleTimeRange(timeRange, DEFAULT_VISIBLE_MS)
 }
 
 function filterMetricsByCategoryAndTimeRange(
@@ -186,6 +201,7 @@ export const metricsLogic = kea<metricsLogicType>([
   actions({
     setSelectedTimeRange: (start: number, end: number) => ({ start, end }),
     resetSelectedTimeRange: true,
+    setCurrentTime: (currentTime: number) => ({ currentTime }),
   }),
   loaders(({ props }) => ({
     metrics: [
@@ -219,6 +235,12 @@ export const metricsLogic = kea<metricsLogicType>([
         loadMetricsSuccess: () => null,
       },
     ],
+    currentTime: [
+      Date.now(),
+      {
+        setCurrentTime: (_, { currentTime }) => currentTime,
+      },
+    ],
     metrics: {
       [socketLogic.actionTypes.newLog]: (state, { log }) => {
         try {
@@ -237,19 +259,16 @@ export const metricsLogic = kea<metricsLogicType>([
       (metrics) => [...metrics].sort((a, b) => metricTimestamp(a) - metricTimestamp(b)),
     ],
     metricsTimeRange: [
-      (s) => [s.sortedMetrics],
-      (metrics): TimeRange | null => {
-        const timestamps = metrics.map(metricTimestamp).filter(Number.isFinite)
-        if (timestamps.length === 0) {
+      (s) => [s.sortedMetrics, s.currentTime],
+      (metrics, currentTime): TimeRange | null => {
+        const dataTimeRange = getMetricsDataTimeRange(metrics)
+        if (!dataTimeRange) {
           return null
         }
-        return normalizeTimeRange(Math.min(...timestamps), Math.max(...timestamps))
+        return normalizeTimeRange(dataTimeRange.start, Math.max(dataTimeRange.end, currentTime))
       },
     ],
-    defaultSelectedTimeRange: [
-      (s) => [s.metricsTimeRange],
-      (metricsTimeRange) => defaultVisibleTimeRange(metricsTimeRange),
-    ],
+    defaultSelectedTimeRange: [(s) => [s.sortedMetrics], (metrics) => getDefaultVisibleTimeRange(metrics)],
     headerMetricsTimeRange: [
       (s) => [s.metricsTimeRange],
       (metricsTimeRange) => trailingVisibleTimeRange(metricsTimeRange, HEADER_VISIBLE_MS),
@@ -358,5 +377,13 @@ export const metricsLogic = kea<metricsLogicType>([
   }),
   afterMount(({ actions, cache }) => {
     actions.loadMetrics()
+    actions.setCurrentTime(Date.now())
+    cache.currentTimeInterval = window.setInterval(() => actions.setCurrentTime(Date.now()), CURRENT_TIME_UPDATE_MS)
+  }),
+  beforeUnmount(({ cache }) => {
+    if (cache.currentTimeInterval) {
+      window.clearInterval(cache.currentTimeInterval)
+      cache.currentTimeInterval = null
+    }
   }),
 ])

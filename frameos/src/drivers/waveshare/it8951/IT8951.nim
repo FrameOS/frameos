@@ -181,8 +181,8 @@ proc setError(code: int; message: string) =
 proc toUdouble(value: int): UDOUBLE =
   if value <= 0:
     UDOUBLE(0)
-  elif value > int(uint32.high):
-    uint32.high
+  elif value.uint64 > uint32.high.uint64:
+    UDOUBLE(uint32.high)
   else:
     UDOUBLE(value)
 

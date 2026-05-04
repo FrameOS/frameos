@@ -1,17 +1,15 @@
 import std/[json, options, strutils, unittest]
 
 import ../inkyPython
-import frameos/types
+import frameos/driver_context
 
 type LogSink = ref object
   entries: seq[JsonNode]
 
-proc makeLogger(sink: LogSink): Logger =
-  result = Logger(enabled: true)
+proc makeLogger(sink: LogSink): DriverLogger =
+  result = DriverLogger(enabled: true)
   result.log = proc(payload: JsonNode) =
     sink.entries.add(copy(payload))
-  result.enable = proc() = discard
-  result.disable = proc() = discard
 
 suite "inkyPython helper procs":
   test "deviceArgs includes device only when provided":

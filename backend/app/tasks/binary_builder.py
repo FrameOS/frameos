@@ -12,6 +12,11 @@ from app.models.assets import copy_custom_fonts_to_local_source_folder
 from app.models.frame import Frame
 from app.models.log import new_log as log
 from app.tasks._frame_deployer import FrameDeployer
+from app.drivers.devices import drivers_for_frame
+from app.codegen.drivers_nim import (
+    frame_driver_build_mode,
+    normalize_driver_build_mode,
+)
 from app.tasks.prebuilt_deps import PrebuiltEntry, fetch_prebuilt_manifest, resolve_prebuilt_target
 from app.utils.build_host import get_build_host_config
 from app.utils.cross_compile import (
@@ -42,6 +47,7 @@ def should_suggest_clearing_build_cache(error_message: str) -> bool:
 class FrameBinaryPlan:
     build_id: str
     target: TargetMetadata
+    driver_build_mode: str
     allow_cross_compile: bool
     force_cross_compile: bool
     cross_compile_supported: bool
@@ -58,6 +64,7 @@ class FrameBinaryPlan:
                 "distro": self.target.distro,
                 "version": self.target.version,
             },
+            "driver_build_mode": self.driver_build_mode,
             "allow_cross_compile": self.allow_cross_compile,
             "force_cross_compile": self.force_cross_compile,
             "cross_compile_supported": self.cross_compile_supported,
@@ -72,10 +79,13 @@ class FrameBinaryPlan:
 class FrameBinaryBuildResult:
     build_id: str
     target: TargetMetadata
+    driver_build_mode: str
     source_dir: str
     build_dir: str
     archive_path: str
     binary_path: str | None
+    driver_library_paths: list[str]
+    driver_library_names: list[str]
     cross_compiled: bool
     prebuilt_entry: PrebuiltEntry | None
     prebuilt_target: str | None
@@ -148,8 +158,12 @@ class FrameBinaryBuilder:
         allow_cross_compile: bool = True,
         force_cross_compile: bool = False,
         target_override: TargetMetadata | None = None,
+        driver_build_mode: str | None = None,
     ) -> FrameBinaryPlan:
         target = target_override or await self._detect_target()
+        resolved_driver_build_mode = normalize_driver_build_mode(
+            driver_build_mode or frame_driver_build_mode(self.frame)
+        )
         prebuilt_entry, prebuilt_target = await resolve_prebuilt_entry(
             distro=target.distro,
             distro_version=target.version,
@@ -163,6 +177,7 @@ class FrameBinaryBuilder:
         return FrameBinaryPlan(
             build_id=self.deployer.build_id,
             target=target,
+            driver_build_mode=resolved_driver_build_mode,
             allow_cross_compile=allow_cross_compile,
             force_cross_compile=force_cross_compile,
             cross_compile_supported=cross_compile_supported,
@@ -174,18 +189,22 @@ class FrameBinaryBuilder:
 
     async def build(self, plan: FrameBinaryPlan) -> FrameBinaryBuildResult:
         build_host = get_build_host_config(self.db)
+        await self._log(
+            "stdout",
+            f"{icon} Preparing local build sources",
+        )
         source_dir = self.deployer.create_local_source_folder(
             self.temp_dir, source_root=self.source_root
         )
         await self._log("stdout", f"{icon} Applying local modifications")
-        await self.deployer.make_local_modifications(source_dir)
+        await self.deployer.make_local_modifications(source_dir, driver_build_mode=plan.driver_build_mode)
         if self.db:
             await copy_custom_fonts_to_local_source_folder(self.db, source_dir)
 
         build_dir = create_build_folder(self.temp_dir, self.deployer.build_id)
         await self._log("stdout", f"{icon} Creating build archive")
         archive_path = await self.deployer.create_local_build_archive(
-            build_dir, source_dir, plan.target.arch
+            build_dir, source_dir, plan.target.arch, driver_build_mode=plan.driver_build_mode
         )
 
         cross_compiled = False
@@ -258,10 +277,20 @@ class FrameBinaryBuilder:
         return FrameBinaryBuildResult(
             build_id=self.deployer.build_id,
             target=plan.target,
+            driver_build_mode=plan.driver_build_mode,
             source_dir=source_dir,
             build_dir=build_dir,
             archive_path=archive_path,
             binary_path=binary_path,
+            driver_library_paths=self.deployer.driver_library_paths(
+                build_dir,
+                drivers_for_frame(self.frame),
+                plan.driver_build_mode,
+            ),
+            driver_library_names=self.deployer.driver_library_names(
+                drivers_for_frame(self.frame),
+                plan.driver_build_mode,
+            ),
             cross_compiled=cross_compiled,
             prebuilt_entry=plan.prebuilt_entry,
             prebuilt_target=plan.prebuilt_target,

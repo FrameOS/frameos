@@ -26,11 +26,61 @@ from app.drivers.drivers import Driver
 from app.drivers.waveshare import write_waveshare_driver_nim, get_variant_folder
 from app.drivers.devices import drivers_for_frame
 from app.models import get_apps_from_scenes
-from app.codegen.drivers_nim import write_drivers_nim
+from app.codegen.drivers_nim import (
+    DEFAULT_DRIVER_BUILD_MODE,
+    DRIVER_BUILD_MODE_SHARED,
+    DRIVER_BUILD_MODE_STATIC,
+    compiled_drivers,
+    driver_library_filename,
+    normalize_driver_build_mode,
+    write_driver_library_nim,
+    write_drivers_nim,
+)
 from app.codegen.scene_nim import write_scene_nim, write_scenes_nim
 from app.tasks.utils import find_nimbase_file
 from app.codegen.apps_nim import write_apps_nim
 from app.codegen.app_loader_nim import write_app_loader_nim
+
+DRIVER_LIBRARY_NIM_FLAGS = (
+    "--define:frameosDriverLibrary",
+    "--opt:size",
+    "--stackTrace:off",
+    "--lineTrace:off",
+    "--passC:-ffunction-sections",
+    "--passC:-fdata-sections",
+    "--passC:-fno-asynchronous-unwind-tables",
+    "--passC:-fno-unwind-tables",
+    "--passL:-Wl,--gc-sections",
+)
+
+DRIVER_LIBRARY_CFLAGS = (
+    "-ffunction-sections",
+    "-fdata-sections",
+    "-fno-asynchronous-unwind-tables",
+    "-fno-unwind-tables",
+)
+
+DRIVER_LIBRARY_LDFLAGS = ("-Wl,--gc-sections",)
+
+LOCAL_SOURCE_IGNORE_PATTERNS = (
+    ".DS_Store",
+    "__pycache__",
+    "*.pyc",
+    "node_modules",
+    "nimcache",
+    ".nimcache",
+    ".nimcache*",
+    "build",
+    "tmp",
+    ".tmp-cache",
+    ".tmp-home",
+    "testresults",
+    "tests",
+    "frameos.deps",
+    "nimble.develop",
+    "nimble.paths",
+    "*.admin_session_salt",
+)
 
 
 def _iter_config_app_dirs(apps_root: str) -> Iterable[str]:
@@ -98,6 +148,28 @@ class FrameDeployer:
                 if flag not in flags:
                     flags.append(flag)
         return flags
+
+    @staticmethod
+    def driver_library_paths(
+        build_dir: str,
+        drivers: dict[str, Driver],
+        driver_build_mode: str,
+    ) -> list[str]:
+        if normalize_driver_build_mode(driver_build_mode) != DRIVER_BUILD_MODE_SHARED:
+            return []
+        return [
+            os.path.join(build_dir, "drivers", driver.name, driver_library_filename(driver))
+            for driver in compiled_drivers(drivers)
+        ]
+
+    @staticmethod
+    def driver_library_names(
+        drivers: dict[str, Driver],
+        driver_build_mode: str,
+    ) -> list[str]:
+        if normalize_driver_build_mode(driver_build_mode) != DRIVER_BUILD_MODE_SHARED:
+            return []
+        return [driver_library_filename(driver) for driver in compiled_drivers(drivers)]
 
     async def _upload_frame_json(self, path: str) -> None:
         """Upload the release-specific `frame.json`."""
@@ -206,8 +278,15 @@ class FrameDeployer:
     async def disable_service(self, service_name: str) -> None:
         await self.exec_command(f"sudo systemctl disable {service_name}.service", raise_on_error=False)
 
-    async def make_local_modifications(self, source_dir: str):
+    async def make_local_modifications(
+        self,
+        source_dir: str,
+        driver_build_mode: str = DEFAULT_DRIVER_BUILD_MODE,
+        drivers_override: dict[str, Driver] | None = None,
+        drivers_nim_source: str | None = None,
+    ):
         frame = self.frame
+        driver_build_mode = normalize_driver_build_mode(driver_build_mode)
         shutil.rmtree(os.path.join(source_dir, "src", "scenes"), ignore_errors=True)
         os.makedirs(os.path.join(source_dir, "src", "scenes"), exist_ok=True)
 
@@ -272,15 +351,23 @@ class FrameDeployer:
             source = write_scenes_nim(frame)
             f.write(source)
 
-        drivers = drivers_for_frame(frame)
+        drivers = drivers_override or drivers_for_frame(frame)
         with open(os.path.join(source_dir, "src", "drivers", "drivers.nim"), "w") as f:
-            source = write_drivers_nim(drivers)
+            source = drivers_nim_source or write_drivers_nim(drivers, driver_build_mode=driver_build_mode)
             f.write(source)
 
         if drivers.get("waveshare"):
             with open(os.path.join(source_dir, "src", "drivers", "waveshare", "driver.nim"), "w") as wf:
                 source = write_waveshare_driver_nim(drivers)
                 wf.write(source)
+
+        shared_driver_dir = os.path.join(source_dir, "src", "drivers", "shared")
+        shutil.rmtree(shared_driver_dir, ignore_errors=True)
+        if driver_build_mode == DRIVER_BUILD_MODE_SHARED:
+            os.makedirs(shared_driver_dir, exist_ok=True)
+            for driver in compiled_drivers(drivers):
+                with open(os.path.join(shared_driver_dir, f"{driver.name}.nim"), "w") as sf:
+                    sf.write(write_driver_library_nim(driver))
 
     def create_local_source_folder(self, temp_dir: str, source_root: str | None = None) -> str:
         source_dir = os.path.join(temp_dir, "frameos")
@@ -290,7 +377,7 @@ class FrameDeployer:
             base,
             source_dir,
             dirs_exist_ok=True,
-            ignore=shutil.ignore_patterns("node_modules"),
+            ignore=shutil.ignore_patterns(*LOCAL_SOURCE_IGNORE_PATTERNS),
         )
         repo_root = base.parent
         repo_root_package = repo_root / "package.json"
@@ -332,11 +419,207 @@ class FrameDeployer:
             shutil.copy2(repo_versions, Path(temp_dir) / "versions.json")
         return source_dir
 
+    @staticmethod
+    def _find_compile_script(build_dir: str, preferred_name: str | None = None) -> str:
+        if preferred_name:
+            preferred = os.path.join(build_dir, preferred_name)
+            if os.path.exists(preferred):
+                return preferred
+        scripts = sorted(Path(build_dir).glob("compile_*.sh"))
+        if not scripts:
+            raise Exception(f"No generated Nim compile script found in {build_dir}")
+        return str(scripts[0])
+
+    @staticmethod
+    def _extract_compile_flags(script_path: str, output_name: str) -> tuple[list[str], list[str]]:
+        linker_flags = ["-pthread", "-lm", "-lrt", "-ldl"]
+        compiler_flags: list[str] = []
+        with open(script_path, "r") as sc:
+            lines_sc = sc.readlines()
+        for line in lines_sc:
+            try:
+                parts = shlex.split(line)
+            except ValueError:
+                parts = line.split()
+            if "-o" in parts and output_name in parts and "-c" not in parts:
+                linker_flags = [
+                    fl.strip() for fl in parts
+                    if fl.startswith("-") and fl != "-o"
+                ]
+            elif "-c" in parts and not compiler_flags:
+                compiler_flags = [
+                    fl for fl in parts
+                    if fl.startswith("-") and not fl.startswith("-I")
+                    and fl not in ["-o", "-c", "-D"]
+                ]
+        return linker_flags, compiler_flags
+
+    @staticmethod
+    def _write_c_makefile(
+        *,
+        makefile_path: str,
+        template_path: str,
+        output_name: str,
+        linker_flags: Iterable[str],
+        compiler_flags: Iterable[str],
+        driver_dirs: list[str] | None = None,
+    ) -> None:
+        driver_dirs = driver_dirs or []
+        with open(template_path, "r") as mf_in, open(makefile_path, "w") as mk:
+            for ln in mf_in.readlines():
+                if ln.startswith("EXECUTABLE = "):
+                    ln = f"EXECUTABLE = {output_name}\n"
+                if ln.startswith("LIBS = "):
+                    ln = (
+                        "LIBS = -L. "
+                        + " ".join(linker_flags)
+                        + " $(EXTRA_LIBS)\n"
+                    )
+                if ln.startswith("CFLAGS = "):
+                    ln = (
+                        "CFLAGS = "
+                        + " ".join([f for f in compiler_flags if f != "-c"])
+                        + " $(EXTRA_CFLAGS)\n"
+                    )
+                if driver_dirs and ln.startswith("all:"):
+                    ln = "all: $(EXECUTABLE) driver-libraries\n"
+                mk.write(ln)
+
+            if driver_dirs:
+                mk.write("\nDRIVER_DIRS = " + " ".join(driver_dirs) + "\n\n")
+                mk.write(".PHONY: driver-libraries $(DRIVER_DIRS)\n")
+                mk.write("driver-libraries: $(DRIVER_DIRS)\n\n")
+                mk.write("$(DRIVER_DIRS):\n")
+                mk.write("\t+$(MAKE) -C $@\n")
+
+    @staticmethod
+    def _write_driver_makefile(
+        *,
+        makefile_path: str,
+        output_name: str,
+        linker_flags: Iterable[str],
+        compiler_flags: Iterable[str],
+    ) -> None:
+        linker_flags_text = " ".join(
+            FrameDeployer._dedupe_preserve_order(list(linker_flags) + list(DRIVER_LIBRARY_LDFLAGS))
+        )
+        compiler_flags_text = " ".join(
+            FrameDeployer._dedupe_preserve_order(
+                [f for f in compiler_flags if f != "-c"] + ["-fPIC"] + list(DRIVER_LIBRARY_CFLAGS)
+            )
+        )
+        with open(makefile_path, "w") as mk:
+            mk.write(
+                f"""# This Makefile is used for compiling driver C sources generated by Nim
+CC ?= gcc
+STRIP ?= strip
+EXTRA_CFLAGS ?=
+EXTRA_LIBS ?=
+
+SOURCES := $(shell ls -S *.c 2>/dev/null)
+OBJECTS = $(SOURCES:.c=.o)
+TOTAL = $(words $(SOURCES))
+LIBRARY = {output_name}
+LIBS = -L. {linker_flags_text} $(EXTRA_LIBS)
+CFLAGS = {compiler_flags_text} $(EXTRA_CFLAGS)
+
+all: $(LIBRARY)
+
+$(LIBRARY): $(OBJECTS)
+\t@echo "Linking $(LIBRARY)"
+\t@echo "LIBS: $(LIBS)"
+\t@$(CC) -shared -o $(LIBRARY) $(OBJECTS) $(LIBS)
+\t@$(STRIP) --strip-unneeded $(LIBRARY) 2>/dev/null || true
+
+clean:
+\trm -f *.o $(LIBRARY)
+
+pre-build:
+\t@mkdir -p ../../../cache
+\t@echo "Compiling driver $(LIBRARY)"
+
+$(OBJECTS): pre-build
+
+%.o: %.c
+\t@if [ ! -e $@ ]; then \\
+\t\tmd5sum=$$(md5sum $< | awk '{{print $$1}}'); \\
+\t\tfile=$$(echo '$<' | sed 's/@s/\\//g' | sed 's/@m//g' | sed 's/.*nimble\\/pkgs2\\/\\(.*\\)/\\1/' | sed 's/.*\\/\\(nim\\/lib\\/.*\\)/\\1/'); \\
+\t\tcache_obj=../../../cache/$$md5sum.o; \\
+\t\tif [ -f "$$cache_obj" ]; then \\
+\t\t\tln -s "$$cache_obj" $@; \\
+\t\telse \\
+\t\t\t$(CC) -c $(CFLAGS) $< -o $@; \\
+\t\t\ttmp_cache_obj="$$cache_obj.$$PPID.tmp"; \\
+\t\t\tcp $@ "$$tmp_cache_obj"; \\
+\t\t\tmv -n "$$tmp_cache_obj" "$$cache_obj" 2>/dev/null || rm -f "$$tmp_cache_obj"; \\
+\t\t\techo "[$$(ls *.o | wc -l)/$(TOTAL)] $$file"; \\
+\t\tfi; \\
+\tfi
+
+.PHONY: all clean pre-build
+"""
+            )
+
+    @staticmethod
+    def _waveshare_files(waveshare: Driver) -> tuple[str, list[str]]:
+        if not waveshare.variant:
+            return "", []
+        variant_folder = get_variant_folder(waveshare.variant)
+
+        if waveshare.variant in ("EPD_10in3", "EPD_13in3e"):
+            util_files: list[str] = []
+        else:
+            util_files = ["DEV_Config.c", "DEV_Config.h"]
+        if variant_folder != "it8951" and waveshare.variant != "EPD_13in3e":
+            util_files.insert(0, "Debug.h")
+
+        if waveshare.variant in [
+            "EPD_2in9b", "EPD_2in9c", "EPD_2in13b", "EPD_2in13c",
+            "EPD_4in2b", "EPD_4in2c", "EPD_5in83b", "EPD_5in83c",
+            "EPD_7in5b", "EPD_7in5c"
+        ]:
+            c_file = re.sub(r'[bc]', 'bc', waveshare.variant)
+            variant_files = [f"{waveshare.variant}.nim", f"{c_file}.c", f"{c_file}.h"]
+        elif waveshare.variant == "EPD_10in3":
+            variant_files = [f"{waveshare.variant}.nim", "IT8951.nim"]
+        elif waveshare.variant in ["EPD_4in0e", "EPD_4in01f", "EPD_7in3e", "EPD_13in3e"]:
+            variant_files = [f"{waveshare.variant}.nim"]
+        else:
+            variant_files = [f"{waveshare.variant}.nim", f"{waveshare.variant}.c", f"{waveshare.variant}.h"]
+
+        return variant_folder, list(dict.fromkeys(util_files + variant_files))
+
+    def _copy_waveshare_build_files(
+        self,
+        source_dir: str,
+        destination_dir: str,
+        drivers: dict[str, Driver],
+    ) -> None:
+        waveshare = drivers.get("waveshare")
+        self._copy_waveshare_driver_build_files(source_dir, destination_dir, waveshare)
+
+    def _copy_waveshare_driver_build_files(
+        self,
+        source_dir: str,
+        destination_dir: str,
+        waveshare: Driver | None,
+    ) -> None:
+        if not waveshare or not waveshare.variant:
+            return
+        variant_folder, waveshare_files = self._waveshare_files(waveshare)
+        for wf in waveshare_files:
+            shutil.copy(
+                os.path.join(source_dir, "src", "drivers", "waveshare", variant_folder, wf),
+                os.path.join(destination_dir, wf),
+            )
+
     async def create_local_build_archive(
         self,
         build_dir: str,
         source_dir: str,
-        arch: str
+        arch: str,
+        driver_build_mode: str = DEFAULT_DRIVER_BUILD_MODE,
+        drivers_override: dict[str, Driver] | None = None,
     ) -> str:
         db = self.db
         redis = self.redis
@@ -345,12 +628,12 @@ class FrameDeployer:
         nim_path = self.nim_path
         temp_dir = self.temp_dir
 
-        drivers = drivers_for_frame(frame)
+        drivers = drivers_override or drivers_for_frame(frame)
         if inkyPython := drivers.get('inkyPython'):
             vendor_folder = inkyPython.vendor_folder or ""
             os.makedirs(os.path.join(build_dir, "vendor"), exist_ok=True)
             shutil.copytree(
-                f"../frameos/vendor/{vendor_folder}/",
+                os.path.join(source_dir, "vendor", vendor_folder),
                 os.path.join(build_dir, "vendor", vendor_folder),
                 dirs_exist_ok=True
             )
@@ -361,7 +644,7 @@ class FrameDeployer:
             vendor_folder = inkyHyperPixel2r.vendor_folder or ""
             os.makedirs(os.path.join(build_dir, "vendor"), exist_ok=True)
             shutil.copytree(
-                f"../frameos/vendor/{vendor_folder}/",
+                os.path.join(source_dir, "vendor", vendor_folder),
                 os.path.join(build_dir, "vendor", vendor_folder),
                 dirs_exist_ok=True
             )
@@ -413,85 +696,76 @@ class FrameDeployer:
 
         shutil.copy(nimbase_path, os.path.join(build_dir, "nimbase.h"))
 
-        if waveshare := drivers.get('waveshare'):
-            if waveshare.variant:
-                variant_folder = get_variant_folder(waveshare.variant)
+        driver_build_mode = normalize_driver_build_mode(driver_build_mode)
+        driver_make_dirs: list[str] = []
+        if driver_build_mode == DRIVER_BUILD_MODE_STATIC:
+            self._copy_waveshare_build_files(source_dir, build_dir, drivers)
 
-                if waveshare.variant in ("EPD_10in3", "EPD_13in3e"):
-                    util_files = []
-                else:
-                    util_files = ["DEV_Config.c", "DEV_Config.h"]
-                if variant_folder != "it8951" and waveshare.variant != "EPD_13in3e":
-                    util_files.insert(0, "Debug.h")
+        script_path = self._find_compile_script(build_dir, "compile_frameos.sh")
+        linker_flags, compiler_flags = self._extract_compile_flags(script_path, "frameos")
+        main_driver_linker_flags = (
+            self._driver_linker_flags(drivers)
+            if driver_build_mode == DRIVER_BUILD_MODE_STATIC
+            else []
+        )
+        linker_flags = self._dedupe_preserve_order(
+            linker_flags
+            + ["quickjs/libquickjs.a"]
+            + main_driver_linker_flags
+        )
 
-                # color e-paper variants
-                if waveshare.variant in [
-                    "EPD_2in9b", "EPD_2in9c", "EPD_2in13b", "EPD_2in13c",
-                    "EPD_4in2b", "EPD_4in2c", "EPD_5in83b", "EPD_5in83c",
-                    "EPD_7in5b", "EPD_7in5c"
-                ]:
-                    c_file = re.sub(r'[bc]', 'bc', waveshare.variant)
-                    variant_files = [f"{waveshare.variant}.nim", f"{c_file}.c", f"{c_file}.h"]
-                elif waveshare.variant == "EPD_10in3":
-                    variant_files = [f"{waveshare.variant}.nim", "IT8951.nim"]
-                elif waveshare.variant in ["EPD_4in0e", "EPD_4in01f", "EPD_7in3e", "EPD_13in3e"]:
-                    variant_files = [f"{waveshare.variant}.nim"]
-                else:
-                    variant_files = [f"{waveshare.variant}.nim", f"{waveshare.variant}.c", f"{waveshare.variant}.h"]
-
-                waveshare_files = list(dict.fromkeys(util_files + variant_files))
-
-                for wf in waveshare_files:
-                    shutil.copy(
-                        os.path.join(source_dir, "src", "drivers", "waveshare", variant_folder, wf),
-                        os.path.join(build_dir, wf)
+        if driver_build_mode == DRIVER_BUILD_MODE_SHARED:
+            for driver in compiled_drivers(drivers):
+                driver_dir = os.path.join(build_dir, "drivers", driver.name)
+                os.makedirs(driver_dir, exist_ok=True)
+                output_name = driver_library_filename(driver)
+                await self.log("stdout", f"🔥 Generating C sources for driver {driver.name}.")
+                driver_cmd = (
+                    f"cd {source_dir} && {nim_path} compile --app:lib --os:linux --cpu:{cpu} "
+                    f"{' '.join(DRIVER_LIBRARY_NIM_FLAGS)} "
+                    f"--compileOnly --genScript --nimcache:{driver_dir} --out:{output_name} "
+                    f"{debug_options} src/drivers/shared/{driver.name}.nim 2>&1"
+                )
+                driver_status, driver_out, driver_err = await exec_local_command(db, redis, frame, driver_cmd)
+                if driver_status != 0:
+                    raise Exception(
+                        f"Failed to generate driver sources for {driver.name}: "
+                        f"{driver_err or driver_out or 'see logs'}"
                     )
+                shutil.copy(nimbase_path, os.path.join(driver_dir, "nimbase.h"))
+                if driver.name == "waveshare" or driver.name.startswith("waveshare_"):
+                    self._copy_waveshare_driver_build_files(source_dir, driver_dir, driver)
 
-        with open(os.path.join(build_dir, "Makefile"), "w") as mk:
-            script_path = os.path.join(build_dir, "compile_frameos.sh")
-            linker_flags = ["-pthread", "-lm", "-lrt", "-ldl"] # Defaults just in case, Will be overridden before
-            compiler_flags: list[str] = []
-            with open(script_path, "r") as sc:
-                lines_sc = sc.readlines()
-            for line in lines_sc:
-                if " -o frameos " in line and " -l" in line:
-                    linker_flags = [
-                        fl.strip() for fl in line.split(' ')
-                        if fl.startswith('-') and fl != '-o'
-                    ]
-                elif " -c " in line and not compiler_flags:
-                    compiler_flags = [
-                        fl for fl in line.split(' ')
-                        if fl.startswith('-') and not fl.startswith('-I')
-                        and fl not in ['-o', '-c', '-D']
-                    ]
+                driver_script_path = self._find_compile_script(driver_dir)
+                driver_linker_flags, driver_compiler_flags = self._extract_compile_flags(
+                    driver_script_path, output_name
+                )
+                driver_linker_flags = self._dedupe_preserve_order(
+                    driver_linker_flags
+                    + ["../../quickjs/libquickjs.a"]
+                    + list(driver.link_flags)
+                )
+                self._write_driver_makefile(
+                    makefile_path=os.path.join(driver_dir, "Makefile"),
+                    output_name=output_name,
+                    linker_flags=driver_linker_flags,
+                    compiler_flags=driver_compiler_flags,
+                )
+                driver_make_dirs.append(os.path.join("drivers", driver.name))
 
-            linker_flags = self._dedupe_preserve_order(
-                linker_flags
-                + ["quickjs/libquickjs.a"]
-                + self._driver_linker_flags(drivers)
-            )
-
-            with open(os.path.join(source_dir, "tools", "nimc.Makefile"), "r") as mf_in:
-                lines_make = mf_in.readlines()
-            for ln in lines_make:
-                if ln.startswith("LIBS = "):
-                    ln = (
-                        "LIBS = -L. "
-                        + " ".join(linker_flags)
-                        + " $(EXTRA_LIBS)\n"
-                    )
-                if ln.startswith("CFLAGS = "):
-                    ln = (
-                        "CFLAGS = "
-                        + " ".join([f for f in compiler_flags if f != '-c'])
-                        + " $(EXTRA_CFLAGS)\n"
-                    )
-                mk.write(ln)
+        self._write_c_makefile(
+            makefile_path=os.path.join(build_dir, "Makefile"),
+            template_path=os.path.join(source_dir, "tools", "nimc.Makefile"),
+            output_name="frameos",
+            linker_flags=linker_flags,
+            compiler_flags=compiler_flags,
+            driver_dirs=driver_make_dirs,
+        )
 
         archive_path = os.path.join(temp_dir, f"build_{build_id}.tar.gz")
         zip_base = os.path.join(temp_dir, f"build_{build_id}")
-        shutil.make_archive(zip_base, 'gztar', temp_dir, f"build_{build_id}")
+        build_path = Path(build_dir)
+        shutil.make_archive(zip_base, 'gztar', str(build_path.parent), build_path.name)
         return archive_path
 
     async def file_in_sync(
