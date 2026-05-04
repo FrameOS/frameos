@@ -184,14 +184,14 @@ jobs:
           TARGET_SLUG: ${{ matrix.slug }}
         run: |
           mkdir -p release-assets
-          tar -czf "release-assets/frameos-prebuilt-cross-${DOCKER_VERSION}-${TARGET_SLUG}.tar.gz" \
+          tar -czf "release-assets/frameos-${DOCKER_VERSION}-${TARGET_SLUG}.tar.gz" \
             -C frameos/build \
             "prebuilt-cross/${TARGET_SLUG}"
 
       - name: Upload release artifact
         uses: actions/upload-artifact@v4
         with:
-          name: prebuilt-cross-${{ matrix.slug }}
+          name: frameos-${{ needs.update-versions.outputs.docker_version }}-${{ matrix.slug }}
           path: release-assets/*.tar.gz
           if-no-files-found: error
 
@@ -376,7 +376,7 @@ jobs:
       - name: Download prebuilt cross artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: prebuilt-cross-*
+          pattern: frameos-${{ needs.update-versions.outputs.docker_version }}-*
           path: release-assets
           merge-multiple: true
 
@@ -395,7 +395,7 @@ jobs:
           - frameos/frameos:${DOCKER_VERSION%.*}
           - frameos/frameos:${DOCKER_VERSION%%.*}
 
-          Prebuilt cross artifacts are attached as versioned tar.gz archives.
+          FrameOS binary archives are attached as versioned tar.gz files.
           EOF
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             gh release upload "$RELEASE_TAG" release-assets/*.tar.gz --clobber
