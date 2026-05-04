@@ -22,6 +22,10 @@ jobs:
             shard_name: shard 2
           - shard: 3
             shard_name: shard 3
+          - shard: 4
+            shard_name: shard 4
+          - shard: 5
+            shard_name: shard 5
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
