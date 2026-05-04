@@ -1,0 +1,21 @@
+# Runtime-only top-level backend dependencies for the Docker image.
+# Keep this as a subset of requirements.in. Docker constrains these packages
+# with requirements.txt, while Flox installs the full development lock.
+aiofiles
+alembic
+arq
+asyncssh
+email_validator
+fastapi[standard]
+fonttools
+jwt
+openai
+packaging
+pillow
+posthog>=7.5.1
+python-jose
+redis
+requests
+sqlalchemy
+sqlmodel
+werkzeug
