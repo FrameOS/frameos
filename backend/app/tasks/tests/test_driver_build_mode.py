@@ -37,3 +37,9 @@ def test_waveshare_driver_library_filename_includes_variant():
     assert driver_library_filename(waveshare) == "waveshare_EPD_7in3e.so"
     assert 'libraryName: "waveshare_EPD_7in3e.so"' in write_shared_drivers_nim({"waveshare": waveshare})
     assert driver_library_filename(Driver(name="frameBuffer")) == "frameBuffer.so"
+
+
+def test_shared_driver_registry_types_empty_sequence():
+    source = write_shared_drivers_nim({})
+
+    assert "let driverSpecs: seq[DriverSpec] = @[]" in source

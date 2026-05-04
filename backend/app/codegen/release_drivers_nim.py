@@ -104,7 +104,7 @@ type
     turnOn: DriverActionProc
     turnOff: DriverActionProc
 
-let availableDriverSpecs = @[{spec_lines}]
+let availableDriverSpecs: seq[DriverSpec] = @[{spec_lines}]
 
 var loadedDrivers: seq[LoadedDriver] = @[]
 {driver_context_helpers_nim()}
