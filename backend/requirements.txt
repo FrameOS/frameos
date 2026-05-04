@@ -13,6 +13,7 @@ annotated-types==0.7.0
 anyio==4.7.0
     # via
     #   httpx
+    #   openai
     #   starlette
     #   watchfiles
 arq==0.26.1
@@ -50,7 +51,9 @@ cryptography==41.0.3
 distlib==0.3.8
     # via virtualenv
 distro==1.9.0
-    # via posthog
+    # via
+    #   openai
+    #   posthog
 dnspython==2.4.2
     # via email-validator
 ecdsa==0.19.0
@@ -62,9 +65,7 @@ email-validator==2.0.0.post2
 fastapi[standard]==0.115.6
     # via -r requirements.in
 fastapi-cli[standard]==0.0.6
-    # via
-    #   fastapi
-    #   fastapi-cli
+    # via fastapi
 filelock==3.13.1
     # via virtualenv
 fonttools==4.55.3
@@ -82,7 +83,9 @@ httpcore==1.0.7
 httptools==0.6.4
     # via uvicorn
 httpx==0.28.1
-    # via fastapi
+    # via
+    #   fastapi
+    #   openai
 identify==2.5.33
     # via pre-commit
 idna==3.4
@@ -91,8 +94,6 @@ idna==3.4
     #   email-validator
     #   httpx
     #   requests
-imagehash==4.3.1
-    # via -r requirements.in
 iniconfig==2.0.0
     # via pytest
 jinja2==3.1.2
@@ -118,22 +119,16 @@ mypy-extensions==1.0.0
     # via mypy
 nodeenv==1.8.0
     # via pre-commit
-numpy==1.26.4
-    # via
-    #   imagehash
-    #   pywavelets
-    #   scipy
 openai==2.15.0
     # via -r requirements.in
 packaging==23.2
     # via
+    #   -r requirements.in
     #   build
     #   pytest
 pillow==11.3.0
-    # via
-    #   -r requirements.in
-    #   imagehash
-pip-tools==7.3.0
+    # via -r requirements.in
+pip-tools==7.5.3
     # via -r requirements.in
 platformdirs==4.1.0
     # via virtualenv
@@ -152,13 +147,16 @@ pycparser==2.21
 pydantic==2.10.3
     # via
     #   fastapi
+    #   openai
     #   sqlmodel
 pydantic-core==2.27.1
     # via pydantic
 pygments==2.16.1
     # via rich
 pyproject-hooks==1.0.0
-    # via build
+    # via
+    #   build
+    #   pip-tools
 pytest==7.4.3
     # via
     #   -r requirements.in
@@ -173,8 +171,6 @@ python-jose==3.3.0
     # via -r requirements.in
 python-multipart==0.0.19
     # via fastapi
-pywavelets==1.5.0
-    # via imagehash
 pyyaml==6.0.1
     # via
     #   pre-commit
@@ -197,8 +193,6 @@ rsa==4.9
     # via python-jose
 ruff==0.1.14
     # via -r requirements.in
-scipy==1.12.0
-    # via imagehash
 shellingham==1.5.4
     # via typer
 six==1.16.0
@@ -207,7 +201,9 @@ six==1.16.0
     #   posthog
     #   python-dateutil
 sniffio==1.3.1
-    # via anyio
+    # via
+    #   anyio
+    #   openai
 sqlalchemy==2.0.19
     # via
     #   -r requirements.in
@@ -244,6 +240,8 @@ typing-extensions==4.12.2
     #   asyncssh
     #   fastapi
     #   mypy
+    #   openai
+    #   posthog
     #   pydantic
     #   pydantic-core
     #   rich-toolkit
@@ -257,7 +255,6 @@ uvicorn[standard]==0.32.1
     # via
     #   fastapi
     #   fastapi-cli
-    #   uvicorn
 uvloop==0.21.0
     # via uvicorn
 virtualenv==20.25.0

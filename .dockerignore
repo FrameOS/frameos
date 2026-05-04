@@ -3,7 +3,10 @@ __pycache__
 *.pyo
 *.pyd
 .Python
+.DS_Store
+.flox
 env
+.venv
 pip-log.txt
 pip-delete-this-directory.txt
 .tox
@@ -26,6 +29,7 @@ coverage.xml
 **/env
 npm-debug.log
 .env
+**/.env
 .env.docker.local
 .aws
 .vscode
@@ -34,6 +38,7 @@ frameos/nimble.paths
 db
 *.db
 build
+files
 repo
 !repo/
 !repo/apps/
@@ -43,10 +48,19 @@ frameos/tmp
 frameos/build
 frameos/nimcache
 frameos/.nimcache*
-frameos/testresults
 frameos/quickjs
+frameos/**/tests
+frameos/testresults
+frameos/frameos.deps
+frameos/nimble.develop
+frameos/src/codegen
+frameos/src/assets/*.nim
+frameos/assets/compiled/frame_web
+frameos/assets/compiled/.manifest.json
 frameos/agent/build
 frameos/agent/tmp
+frameos/agent/agent.deps
+frameos/agent/nimble.paths
 frameos/buildroot/output
 frameos/buildroot/sources
 frameos/buildroot/dl

@@ -87,7 +87,15 @@ on-activate = '''
     rm -f "$FRAMEOS_FLOX_CACHE_DIR/python-requirements.sha256"
   fi
 
-  python_requirements_hash="$(sha256sum backend/requirements.txt | awk '{print $1}')"
+  # Flox installs the full development lock. Include the Docker runtime input
+  # in the stamp so production dependency changes also refresh the local venv.
+  python_requirements_hash="$(
+    sha256sum \
+      backend/requirements.in \
+      backend/requirements.txt \
+      backend/requirements.docker.in \
+    | sha256sum | awk '{print $1}'
+  )"
   python_stamp="$FRAMEOS_FLOX_CACHE_DIR/python-requirements.sha256"
   if [ ! -f "$python_stamp" ] || [ "$(cat "$python_stamp")" != "$python_requirements_hash" ]; then
     echo "Syncing backend Python dependencies..."

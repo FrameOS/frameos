@@ -500,7 +500,7 @@ class CrossCompiler:
         await self._log(
             "stderr",
             "lgpio headers or libraries are missing from the sysroot after staging; "
-            "publish a prebuilt lgpio archive to archive.frameos.org and retry the build.",
+            "publish a prebuilt lgpio archive to archive.frameos.net and retry the build.",
         )
         raise RuntimeError("lgpio libraries missing from sysroot; unable to continue cross compilation")
 
