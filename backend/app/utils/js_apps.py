@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -70,25 +71,75 @@ try {
 """
 
 
-def _run_sucrase(filename: str, source_path: str) -> tuple[bool, dict]:
-    repo_root = Path(__file__).resolve().parents[3]
-    vendor_path = repo_root / "frameos" / "assets" / "compiled" / "vendor" / "sucrase.js"
+def _json_payload_from_process(proc: subprocess.CompletedProcess[str], fallback: str) -> tuple[bool, dict]:
+    output = proc.stdout.strip() or proc.stderr.strip()
+    if not output:
+        output = fallback
+    try:
+        payload = json.loads(output)
+    except json.JSONDecodeError:
+        payload = {"ok": False, "errors": [{"text": output, "location": {"line": 1, "column": 0}}]}
+    return proc.returncode == 0, payload
+
+
+def _quickjs_binary(repo_root: Path) -> str | None:
+    candidates = [
+        repo_root / "frameos" / "quickjs" / "qjs",
+        Path("/app/frameos/quickjs/qjs"),
+    ]
+    for candidate in candidates:
+        if candidate.exists() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    return shutil.which("qjs")
+
+
+def _run_quickjs_sucrase(filename: str, source_path: str, repo_root: Path, vendor_path: Path) -> tuple[bool, dict] | None:
+    qjs = _quickjs_binary(repo_root)
+    if not qjs or not vendor_path.exists():
+        return None
+
+    script_path = Path(__file__).resolve().with_name("js_validate_quickjs.js")
     proc = subprocess.run(
-        ["node", "--input-type=module", "-e", _node_sucrase_script(), filename, source_path, str(vendor_path)],
+        [qjs, "--std", str(script_path), filename, source_path, str(vendor_path)],
         cwd=repo_root,
         capture_output=True,
         text=True,
         check=False,
     )
-    if proc.returncode == 0:
-        stdout = proc.stdout.strip() or '{"ok": true}'
-        return True, json.loads(stdout)
+    ok, payload = _json_payload_from_process(
+        proc,
+        '{"ok": false, "errors": [{"text": "quickjs sucrase validation failed"}]}',
+    )
+    if ok or payload.get("errors"):
+        return ok, payload
+    return None
 
-    stderr = proc.stderr.strip() or '{"ok": false, "errors": [{"text": "sucrase failed"}]}'
-    try:
-        return False, json.loads(stderr)
-    except json.JSONDecodeError:
-        return False, {"ok": False, "errors": [{"text": stderr, "location": {"line": 1, "column": 0}}]}
+
+def _run_node_sucrase(filename: str, source_path: str, repo_root: Path, vendor_path: Path) -> tuple[bool, dict]:
+    node = shutil.which("node")
+    if not node:
+        return False, {"ok": False, "errors": [{"text": "JavaScript validation requires QuickJS or Node", "location": {"line": 1, "column": 0}}]}
+
+    proc = subprocess.run(
+        [node, "--input-type=module", "-e", _node_sucrase_script(), filename, source_path, str(vendor_path)],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return _json_payload_from_process(
+        proc,
+        '{"ok": false, "errors": [{"text": "sucrase failed"}]}',
+    )
+
+
+def _run_sucrase(filename: str, source_path: str) -> tuple[bool, dict]:
+    repo_root = Path(__file__).resolve().parents[3]
+    vendor_path = repo_root / "frameos" / "assets" / "compiled" / "vendor" / "sucrase.js"
+    quickjs_result = _run_quickjs_sucrase(filename, source_path, repo_root, vendor_path)
+    if quickjs_result is not None:
+        return quickjs_result
+    return _run_node_sucrase(filename, source_path, repo_root, vendor_path)
 
 
 def validate_js_source(filename: str, source: str) -> list[dict]:

@@ -57,6 +57,7 @@ FROM nim-toolchain AS app-builder
 
 ARG FRAMEOS_ARCHIVE_BASE_URL=https://archive.frameos.net
 ARG QUICKJS_VERSION=2025-04-26
+ARG QUICKJS_SHA256=2f20074c25166ef6f781f381c50d57b502cb85d470d639abccebbef7954c83bf
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -69,6 +70,7 @@ RUN apt-get update \
       gnupg \
       make \
       pkg-config \
+      xz-utils \
     && mkdir -p /etc/apt/keyrings \
     && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
       | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
@@ -103,23 +105,22 @@ WORKDIR /app/frameos
 RUN nimble assets -y
 
 RUN set -eux; \
-    quickjs_target="$(cat /opt/nim/.frameos-prebuilt-target)"; \
-    mkdir -p /tmp/quickjs-download /app/frameos/quickjs; \
-    curl -fsSL "${FRAMEOS_ARCHIVE_BASE_URL}/prebuilt-deps/${quickjs_target}/quickjs-${QUICKJS_VERSION}.tar.gz" -o /tmp/quickjs.tar.gz; \
-    tar -xzf /tmp/quickjs.tar.gz -C /tmp/quickjs-download; \
-    quickjs_root="/tmp/quickjs-download/quickjs-${QUICKJS_VERSION}"; \
-    if [ ! -d "${quickjs_root}" ]; then quickjs_root="/tmp/quickjs-download"; fi; \
-    if [ -d "${quickjs_root}/include/quickjs" ]; then \
-      mkdir -p /app/frameos/quickjs/include; \
-      cp -a "${quickjs_root}/include/quickjs" /app/frameos/quickjs/include/quickjs; \
-      cp -a "${quickjs_root}/include/quickjs/quickjs.h" /app/frameos/quickjs/quickjs.h; \
-      cp -a "${quickjs_root}/include/quickjs/quickjs-libc.h" /app/frameos/quickjs/quickjs-libc.h; \
-    else \
-      cp -a "$(find "${quickjs_root}" -name quickjs.h -print -quit)" /app/frameos/quickjs/quickjs.h; \
-      cp -a "$(find "${quickjs_root}" -name quickjs-libc.h -print -quit)" /app/frameos/quickjs/quickjs-libc.h; \
-    fi; \
-    cp -a "$(find "${quickjs_root}" -name libquickjs.a -print -quit)" /app/frameos/quickjs/libquickjs.a; \
-    rm -rf /tmp/quickjs-download /tmp/quickjs.tar.gz
+    mkdir -p /tmp/quickjs-source /app/frameos/quickjs/include/quickjs; \
+    curl -fsSL "${FRAMEOS_ARCHIVE_BASE_URL}/source/vendor/quickjs-${QUICKJS_VERSION}.tar.xz" -o /tmp/quickjs-source.tar.xz; \
+    echo "${QUICKJS_SHA256}  /tmp/quickjs-source.tar.xz" | sha256sum -c -; \
+    tar -xf /tmp/quickjs-source.tar.xz -C /tmp/quickjs-source; \
+    quickjs_source_root="/tmp/quickjs-source/quickjs-${QUICKJS_VERSION}"; \
+    make -C "${quickjs_source_root}" qjs libquickjs.a; \
+    cp -a "${quickjs_source_root}/quickjs.h" /app/frameos/quickjs/quickjs.h; \
+    cp -a "${quickjs_source_root}/quickjs-libc.h" /app/frameos/quickjs/quickjs-libc.h; \
+    cp -a "${quickjs_source_root}/quickjs.h" /app/frameos/quickjs/include/quickjs/quickjs.h; \
+    cp -a "${quickjs_source_root}/quickjs-libc.h" /app/frameos/quickjs/include/quickjs/quickjs-libc.h; \
+    cp -a "${quickjs_source_root}/libquickjs.a" /app/frameos/quickjs/libquickjs.a; \
+    cp -a "${quickjs_source_root}/qjs" /app/frameos/quickjs/qjs; \
+    chmod +x /app/frameos/quickjs/qjs; \
+    strip /app/frameos/quickjs/qjs; \
+    /app/frameos/quickjs/qjs -e 'console.log("quickjs ok")'; \
+    rm -rf /tmp/quickjs-source /tmp/quickjs-source.tar.xz
 
 WORKDIR /app/frontend
 RUN pnpm run build
@@ -167,7 +168,7 @@ WORKDIR /app
 
 RUN set -eux; \
     apt-get update; \
-    apt-get install -y --no-install-recommends ca-certificates curl gnupg nodejs redis-server; \
+    apt-get install -y --no-install-recommends ca-certificates curl gnupg redis-server; \
     mkdir -p /etc/apt/keyrings; \
     curl -fsSL https://download.docker.com/linux/debian/gpg \
       | gpg --dearmor -o /etc/apt/keyrings/docker.gpg; \
