@@ -105,3 +105,23 @@ async def test_ensure_prebuilt_component_rejects_invalid_download(tmp_path, monk
 
     assert result is None
     assert dest_dir.exists() is False
+
+
+@pytest.mark.asyncio
+async def test_ensure_lgpio_builds_from_source_without_prebuilt_sysroot(
+    tmp_path,
+):
+    compiler = CrossCompiler(
+        db=None,
+        redis=None,
+        frame=SimpleNamespace(id=1),
+        deployer=SimpleNamespace(build_id="build12345678"),
+        target=TargetMetadata(arch="aarch64", distro="raspios", version="bullseye"),
+        temp_dir=str(tmp_path / "tmp"),
+        prebuilt_entry=None,
+    )
+
+    await compiler._ensure_lgpio_in_sysroot()
+
+    assert compiler._build_lgpio_from_source is True
+    assert "Building lgpio v0.2.2 from source" in compiler._build_lgpio_source_script()

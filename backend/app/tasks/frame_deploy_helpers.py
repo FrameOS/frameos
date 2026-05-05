@@ -18,7 +18,7 @@ DEFAULT_QUICKJS_SHA256 = "2f20074c25166ef6f781f381c50d57b502cb85d470d639abccebbe
 
 LGPIO_ARCHIVE_URL = "https://archive.frameos.net/source/vendor/lgpio-{version}.tar.gz"
 DEFAULT_LGPIO_VERSION = "v0.2.2"
-DEFAULT_LGPIO_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+DEFAULT_LGPIO_SHA256 = "b08d8569d6dc8fa91a42ba1e37f620fdcb19d6bf2330e4b7d7301431ddbe124c"
 
 APT_PACKAGE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9+.-]*$")
 RPIOS_SUDO_SECURITY_UPDATE_URL = "https://www.raspberrypi.com/news/a-security-update-for-raspberry-pi-os/"

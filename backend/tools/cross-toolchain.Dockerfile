@@ -20,12 +20,15 @@ ARG TOOLCHAIN_PACKAGES="build-essential \
     libjpeg-dev \
     libfreetype6-dev \
     libevdev-dev"
-
 RUN set -eu \
     && apt-get update \
-    && SSL_PACKAGE="libssl3" \
+    && SSL_PACKAGE="" \
     &&  if apt-cache show libssl3t64 >/dev/null 2>&1; then \
             SSL_PACKAGE="libssl3t64"; \
+        elif apt-cache show libssl3 >/dev/null 2>&1; then \
+            SSL_PACKAGE="libssl3"; \
+        elif apt-cache show libssl1.1 >/dev/null 2>&1; then \
+            SSL_PACKAGE="libssl1.1"; \
         fi \
     && apt-get install -y --no-install-recommends $TOOLCHAIN_PACKAGES ${SSL_PACKAGE:+$SSL_PACKAGE} \
     && rm -rf /var/lib/apt/lists/*
