@@ -3,6 +3,8 @@ import frameos/driver_context
 import frameos/device_setup
 import frameos/utils/dither
 import frameos/utils/image
+import drivers/i2c/i2c as i2cSetupDriver
+import drivers/spi/spi as spiSetupDriver
 
 type ScreenInfo* = object
   width*: int
@@ -62,6 +64,16 @@ proc safeStartProcess*(cmd: string; args: seq[string] = @[];
 proc deviceArgs*(dev: string): seq[string] =
   if dev.len > 0: @["--device", dev] else: @[]
 
+proc isInkyButtonDevice(device: string): bool =
+  device in [
+    "pimoroni.inky_impression",
+    "pimoroni.inky_impression_7",
+    "pimoroni.inky_impression_13",
+  ]
+
+proc isInkyDriverDevice(device: string): bool =
+  isInkyButtonDevice(device) or device == "pimoroni.inky_python"
+
 proc init*(frameOS: DriverContext): Driver =
   discard frameOS.logger.safeLog("Initializing Inky driver")
 
@@ -116,9 +128,17 @@ proc init*(frameOS: DriverContext): Driver =
 
   process.close()
 
-proc setup*(): SetupResult =
+proc setup*(frameOS: DriverContext = nil): SetupResult =
   setupPythonVendor("inkyPython")
-  result = setupOk()
+  if frameOS.isNil or frameOS.frameConfig.isNil:
+    return
+
+  let device = frameOS.frameConfig.device
+  if isInkyDriverDevice(device):
+    addSetupResult(result, runSetupStep("i2c", proc(): SetupResult = i2cSetupDriver.setup()))
+    addSetupResult(result, runSetupStep("spi", proc(): SetupResult = spiSetupDriver.setup()))
+    if isInkyButtonDevice(device):
+      addSetupResult(result, runSetupStep("bootConfig", proc(): SetupResult = setupBootConfig(@["dtoverlay=spi0-0cs"])))
 
 proc logProcessExit(logger: DriverLogger, process: Process, context: string) =
   let exitCode = process.waitForExit()

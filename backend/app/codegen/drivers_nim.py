@@ -376,7 +376,7 @@ proc loadRequiredSymbol[T](library: LibHandle, driverName: string, symbol: strin
     return nil
   cast[T](address)
 
-proc setupSharedDriver(spec: DriverSpec): SetupResult =
+proc setupSharedDriver(spec: DriverSpec, driverCtx: driverContext.DriverContext): SetupResult =
   let path = driverLibraryPath(spec)
   let library = loadLib(path)
   if library.isNil:
@@ -385,16 +385,17 @@ proc setupSharedDriver(spec: DriverSpec): SetupResult =
     let setupProc = loadRequiredSymbol[DriverSetupProc](library, spec.name, "frameos_driver_setup")
     if setupProc.isNil:
       raise newException(OSError, "Missing setup symbol for driver: " & spec.name)
-    result.rebootRequired = setupProc()
+    result.rebootRequired = setupProc(cast[pointer](driverCtx))
   finally:
     unloadLib(library)
 
 proc setupSharedDrivers(frameOS: FrameOS): SetupResult =
-  discard frameOS
+  let driverCtx = buildDriverContext(frameOS)
   for spec in driverSpecs:
     if spec.canSetup:
       let setupSpec = spec
-      addSetupResult(result, runSetupStep(setupSpec.name, proc(): SetupResult = setupSharedDriver(setupSpec)))
+      addSetupResult(result, runSetupStep(setupSpec.name, proc(): SetupResult = setupSharedDriver(setupSpec, driverCtx)))
+      syncDriverContext(frameOS, driverCtx)
 
 proc init*(frameOS: FrameOS) =
   loadedDrivers = @[]
@@ -484,9 +485,20 @@ def write_driver_library_nim(driver: Driver) -> str:
         if driver.setup_import_path != driver.import_path:
             setup_driver_alias = f"{driver.name}SetupDriver"
             setup_import = f"import drivers/{driver.setup_import_path} as {setup_driver_alias}\n"
+        if driver.setup_accepts_context:
+            setup_context_init = """  let hostContext = cast[DriverContext](driverContextPtr)
+  driverContextInstance = cloneDriverContext(hostContext)
+"""
+            setup_call = f"{setup_driver_alias}.setup(driverContextInstance).rebootRequired"
+            setup_context_sync = "  syncHostDriverContext(hostContext, driverContextInstance)\n"
+        else:
+            setup_context_init = "  discard driverContextPtr\n"
+            setup_call = f"{setup_driver_alias}.setup().rebootRequired"
+            setup_context_sync = ""
         setup_proc = f"""
-proc frameos_driver_setup*(): bool {{.cdecl, exportc, dynlib.}} =
-  {setup_driver_alias}.setup().rebootRequired
+proc frameos_driver_setup*(driverContextPtr: pointer): bool {{.cdecl, exportc, dynlib.}} =
+{setup_context_init}  result = {setup_call}
+{setup_context_sync}
 """
 
     render_proc = ""

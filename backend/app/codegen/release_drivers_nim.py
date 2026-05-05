@@ -49,6 +49,9 @@ def release_driver_specs() -> dict[str, Driver]:
             # The same shared library must serve every Pimoroni Inky device.
             # Export PNG support so models with preview-capable palettes work.
             driver.can_png = True
+            # Release builds choose the concrete device at runtime, so the
+            # Inky setup proc needs frame config to install GPIO/SPI/I2C support.
+            driver.setup_accepts_context = True
         drivers[driver.name] = driver
 
     for variant in sorted(get_variant_keys()):
@@ -56,6 +59,7 @@ def release_driver_specs() -> dict[str, Driver]:
         driver.name = release_waveshare_driver_name(variant)
         driver.variant = variant
         driver.import_path = f"waveshare/{driver.name}"
+        driver.setup_import_path = driver.import_path
         drivers[driver.name] = driver
 
     return drivers
@@ -88,9 +92,6 @@ import frameos/driver_context as driverContext
 import frameos/device_setup
 import frameos/channels as hostChannels
 import frameos/driver_abi
-import i2c/i2c as i2cSetupDriver
-import spi/spi as spiSetupDriver
-import noSpi/noSpi as noSpiSetupDriver
 
 type
   DriverSpec = object
@@ -183,7 +184,7 @@ proc loadRequiredSymbol[T](library: LibHandle, driverName: string, symbol: strin
     return nil
   cast[T](address)
 
-proc setupSharedDriver(spec: DriverSpec): SetupResult =
+proc setupSharedDriver(spec: DriverSpec, driverCtx: driverContext.DriverContext): SetupResult =
   let path = driverLibraryPath(spec)
   let library = loadLib(path)
   if library.isNil:
@@ -192,40 +193,23 @@ proc setupSharedDriver(spec: DriverSpec): SetupResult =
     let setupProc = loadRequiredSymbol[DriverSetupProc](library, spec.name, "frameos_driver_setup")
     if setupProc.isNil:
       raise newException(OSError, "Missing setup symbol for driver: " & spec.name)
-    result.rebootRequired = setupProc()
+    result.rebootRequired = setupProc(cast[pointer](driverCtx))
   finally:
     unloadLib(library)
 
 proc setupSharedDrivers(frameOS: FrameOS): SetupResult =
+  let driverCtx = buildDriverContext(frameOS)
   for spec in driverSpecsFor(frameOS):
     if spec.canSetup:
       let setupSpec = spec
-      addSetupResult(result, runSetupStep(setupSpec.name, proc(): SetupResult = setupSharedDriver(setupSpec)))
-
-proc setupReleaseDriverSupport(frameOS: FrameOS): SetupResult =
-  let device = frameOS.frameConfig.device
-  let waveshareVariant = normalizedWaveshareVariant(device)
-  if isInkyDriverDevice(device):
-    addSetupResult(result, runSetupStep("i2c", proc(): SetupResult = i2cSetupDriver.setup()))
-    addSetupResult(result, runSetupStep("spi", proc(): SetupResult = spiSetupDriver.setup()))
-    if isInkyButtonDevice(device):
-      addSetupResult(result, runSetupStep("bootConfig", proc(): SetupResult = setupBootConfig(@["dtoverlay=spi0-0cs"])))
-  elif device.startsWith("waveshare."):
-    if waveshareVariant in ["EPD_12in48", "EPD_12in48b", "EPD_12in48b_V2", "EPD_13in3e"]:
-      addSetupResult(result, runSetupStep("noSpi", proc(): SetupResult = noSpiSetupDriver.setup()))
-    else:
-      addSetupResult(result, runSetupStep("spi", proc(): SetupResult = spiSetupDriver.setup()))
-    if waveshareVariant == "EPD_10in3":
-      addSetupResult(result, runSetupStep("bootConfig", proc(): SetupResult = setupBootConfig(@["dtoverlay=spi0-0cs", "#dtparam=spi=on"])))
-    elif waveshareVariant == "EPD_13in3e":
-      addSetupResult(result, runSetupStep("bootConfig", proc(): SetupResult = setupBootConfig(@["gpio=7=op,dl", "gpio=8=op,dl"])))
+      addSetupResult(result, runSetupStep(setupSpec.name, proc(): SetupResult = setupSharedDriver(setupSpec, driverCtx)))
+      syncDriverContext(frameOS, driverCtx)
 
 proc setupDriverNames*(): seq[string] =
   result = @[]
 
 proc setup*(frameOS: FrameOS): SetupResult =
   addSetupResult(result, setupSharedDrivers(frameOS))
-  addSetupResult(result, setupReleaseDriverSupport(frameOS))
 
 proc init*(frameOS: FrameOS) =
   loadedDrivers = @[]

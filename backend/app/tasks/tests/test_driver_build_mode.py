@@ -72,7 +72,8 @@ def test_shared_drivers_run_compiled_driver_setup_from_library():
 
     assert 'canSetup: true, canRender: true' in source
     assert '"frameos_driver_setup"' in source
-    assert "proc setupSharedDriver(spec: DriverSpec): SetupResult" in source
+    assert "proc setupSharedDriver(spec: DriverSpec, driverCtx: driverContext.DriverContext): SetupResult" in source
+    assert "setupProc(cast[pointer](driverCtx))" in source
     assert "import inkyPython/inkyPython as inkyPythonSetupDriver" not in source
     assert "import i2c/i2c as i2cSetupDriver" in source
     assert 'runSetupStep("i2c"' in source
@@ -88,8 +89,26 @@ def test_driver_library_exports_setup_symbol_when_driver_has_setup():
         )
     )
 
-    assert "proc frameos_driver_setup*(): bool" in source
+    assert "proc frameos_driver_setup*(driverContextPtr: pointer): bool" in source
+    assert "discard driverContextPtr" in source
     assert "inkyPythonDriver.setup().rebootRequired" in source
+
+
+def test_driver_library_can_pass_context_to_setup_symbol():
+    source = write_driver_library_nim(
+        Driver(
+            name="inkyPython",
+            import_path="inkyPython/inkyPython",
+            setup_import_path="inkyPython/inkyPython",
+            setup_accepts_context=True,
+            can_render=True,
+        )
+    )
+
+    assert "proc frameos_driver_setup*(driverContextPtr: pointer): bool" in source
+    assert "driverContextInstance = cloneDriverContext(hostContext)" in source
+    assert "inkyPythonDriver.setup(driverContextInstance).rebootRequired" in source
+    assert "syncHostDriverContext(hostContext, driverContextInstance)" in source
 
 
 def test_static_drivers_setup_uses_generated_driver_list():
