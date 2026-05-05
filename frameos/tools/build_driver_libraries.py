@@ -23,6 +23,7 @@ if str(BACKEND_ROOT) not in sys.path:
 from app.codegen.drivers_nim import (  # noqa: E402
     DRIVER_BUILD_MODE_SHARED,
     compiled_drivers,
+    driver_build_mode_uses_shared_libraries,
     driver_library_filename,
     frame_driver_build_mode,
     normalize_driver_build_mode,
@@ -71,7 +72,7 @@ async def build_driver_libraries(
 ) -> list[Path]:
     frame = load_frame_stub(config_path)
     mode = normalize_driver_build_mode(driver_build_mode or frame_driver_build_mode(frame))
-    if only_if_shared and mode != DRIVER_BUILD_MODE_SHARED:
+    if only_if_shared and not driver_build_mode_uses_shared_libraries(mode):
         print(f"Driver build mode is {mode}; skipping shared driver libraries")
         return []
 
@@ -130,11 +131,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--only-if-shared",
         action="store_true",
-        help="Skip unless the effective driver build mode is shared",
+        help="Skip unless the effective driver build mode uses shared libraries",
     )
     parser.add_argument(
         "--driver-build-mode",
-        choices=("static", "shared"),
+        choices=("static", "shared", "precompiled"),
         default=None,
         help="Override frame.json rpios.driverBuildMode when deciding whether to skip",
     )

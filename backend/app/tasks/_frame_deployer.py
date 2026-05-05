@@ -28,9 +28,9 @@ from app.drivers.devices import drivers_for_frame
 from app.models import get_apps_from_scenes
 from app.codegen.drivers_nim import (
     DEFAULT_DRIVER_BUILD_MODE,
-    DRIVER_BUILD_MODE_SHARED,
     DRIVER_BUILD_MODE_STATIC,
     compiled_drivers,
+    driver_build_mode_uses_shared_libraries,
     driver_library_filename,
     normalize_driver_build_mode,
     write_driver_library_nim,
@@ -155,7 +155,7 @@ class FrameDeployer:
         drivers: dict[str, Driver],
         driver_build_mode: str,
     ) -> list[str]:
-        if normalize_driver_build_mode(driver_build_mode) != DRIVER_BUILD_MODE_SHARED:
+        if not driver_build_mode_uses_shared_libraries(driver_build_mode):
             return []
         return [
             os.path.join(build_dir, "drivers", driver.name, driver_library_filename(driver))
@@ -167,7 +167,7 @@ class FrameDeployer:
         drivers: dict[str, Driver],
         driver_build_mode: str,
     ) -> list[str]:
-        if normalize_driver_build_mode(driver_build_mode) != DRIVER_BUILD_MODE_SHARED:
+        if not driver_build_mode_uses_shared_libraries(driver_build_mode):
             return []
         return [driver_library_filename(driver) for driver in compiled_drivers(drivers)]
 
@@ -375,7 +375,7 @@ class FrameDeployer:
 
         shared_driver_dir = os.path.join(source_dir, "src", "drivers", "shared")
         shutil.rmtree(shared_driver_dir, ignore_errors=True)
-        if driver_build_mode == DRIVER_BUILD_MODE_SHARED:
+        if driver_build_mode_uses_shared_libraries(driver_build_mode):
             os.makedirs(shared_driver_dir, exist_ok=True)
             for driver in compiled_drivers(drivers):
                 with open(os.path.join(shared_driver_dir, f"{driver.name}.nim"), "w") as sf:
@@ -726,7 +726,7 @@ $(OBJECTS): pre-build
             + main_driver_linker_flags
         )
 
-        if driver_build_mode == DRIVER_BUILD_MODE_SHARED:
+        if driver_build_mode_uses_shared_libraries(driver_build_mode):
             for driver in compiled_drivers(drivers):
                 driver_dir = os.path.join(build_dir, "drivers", driver.name)
                 os.makedirs(driver_dir, exist_ok=True)

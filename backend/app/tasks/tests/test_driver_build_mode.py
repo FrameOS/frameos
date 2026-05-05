@@ -3,8 +3,10 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from app.codegen.drivers_nim import (
+    DRIVER_BUILD_MODE_PRECOMPILED,
     DRIVER_BUILD_MODE_SHARED,
     DRIVER_BUILD_MODE_STATIC,
+    driver_build_mode_uses_shared_libraries,
     driver_library_filename,
     frame_driver_build_mode,
     normalize_driver_build_mode,
@@ -30,6 +32,14 @@ def test_driver_build_mode_shared_requires_explicit_setting():
 def test_driver_build_mode_static_is_valid():
     assert normalize_driver_build_mode("static") == DRIVER_BUILD_MODE_STATIC
     assert frame_driver_build_mode(SimpleNamespace(rpios={"driverBuildMode": "static"})) == DRIVER_BUILD_MODE_STATIC
+
+
+def test_driver_build_mode_precompiled_uses_shared_libraries():
+    assert normalize_driver_build_mode("precompiled") == DRIVER_BUILD_MODE_PRECOMPILED
+    assert frame_driver_build_mode(SimpleNamespace(rpios={"driverBuildMode": "precompiled"})) == DRIVER_BUILD_MODE_PRECOMPILED
+    assert driver_build_mode_uses_shared_libraries("precompiled") is True
+    assert driver_build_mode_uses_shared_libraries("shared") is True
+    assert driver_build_mode_uses_shared_libraries("static") is False
 
 
 def test_waveshare_driver_library_filename_includes_variant():

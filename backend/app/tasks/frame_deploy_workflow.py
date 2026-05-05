@@ -11,7 +11,7 @@ from arq import ArqRedis as Redis
 from sqlalchemy.orm import Session
 
 from app.drivers.devices import drivers_for_frame
-from app.codegen.drivers_nim import normalize_driver_build_mode
+from app.codegen.drivers_nim import DRIVER_BUILD_MODE_PRECOMPILED, normalize_driver_build_mode
 from app.models.assets import sync_assets
 from app.models.frame import Frame, normalize_https_proxy, update_frame
 from app.models.log import new_log as log
@@ -35,11 +35,11 @@ from app.utils.ssh_authorized_keys import _install_authorized_keys
 from app.utils.ssh_key_utils import normalize_ssh_keys, select_ssh_keys_for_frame
 from app.utils.versions import current_frameos_version
 
-REMOTE_BUILD_APT_PACKAGES = (
-    "build-essential",
+REMOTE_RUNTIME_APT_PACKAGES = (
     "hostapd",
     "imagemagick",
 )
+REMOTE_BUILD_APT_PACKAGES = ("build-essential",)
 
 HELPER_ENSURE_NTP = "ensure_ntp"
 
@@ -335,14 +335,18 @@ class FrameDeployWorkflow:
         ]
         remote_build_fallback_package_plans: list[PackagePlan] = []
 
-        for pkg_name in REMOTE_BUILD_APT_PACKAGES:
-            package_plans.append(await self._plan_package(pkg_name, "base remote deploy/build dependency"))
-        if not binary_plan.will_attempt_cross_compile:
-            package_plans.append(await self._plan_package("libssl-dev", "OpenSSL headers for on-device FrameOS build"))
-        else:
-            remote_build_fallback_package_plans.append(
-                await self._plan_package("libssl-dev", "OpenSSL headers if cross-compilation falls back to an on-device build")
-            )
+        for pkg_name in REMOTE_RUNTIME_APT_PACKAGES:
+            package_plans.append(await self._plan_package(pkg_name, "base remote deploy dependency"))
+
+        if not binary_plan.will_attempt_precompiled:
+            for pkg_name in REMOTE_BUILD_APT_PACKAGES:
+                package_plans.append(await self._plan_package(pkg_name, "base remote build dependency"))
+            if not binary_plan.will_attempt_cross_compile:
+                package_plans.append(await self._plan_package("libssl-dev", "OpenSSL headers for on-device FrameOS build"))
+            else:
+                remote_build_fallback_package_plans.append(
+                    await self._plan_package("libssl-dev", "OpenSSL headers if cross-compilation falls back to an on-device build")
+                )
         package_plans.append(
             await self._plan_package(
                 "caddy",
@@ -397,7 +401,7 @@ class FrameDeployWorkflow:
                 )
             )
 
-        quickjs_required_if_remote_build = not force_cross_compile
+        quickjs_required_if_remote_build = not force_cross_compile and not binary_plan.will_attempt_precompiled
         quickjs_dirname = None
         quickjs_installed = False
         if quickjs_required_if_remote_build:
@@ -425,7 +429,19 @@ class FrameDeployWorkflow:
             f"Cross compilation setting: {cross_compilation_setting}",
             f"Driver build mode: {driver_build_mode}",
         ]
-        if low_memory:
+        if driver_build_mode == DRIVER_BUILD_MODE_PRECOMPILED:
+            if binary_plan.will_attempt_precompiled:
+                notes.append("Precompiled FrameOS release will be used because all scenes are interpreted.")
+            else:
+                notes.append(
+                    "Precompiled FrameOS release will be skipped"
+                    + (
+                        f": {binary_plan.precompiled_skip_reason}."
+                        if binary_plan.precompiled_skip_reason
+                        else "."
+                    )
+                )
+        if low_memory and not binary_plan.will_attempt_precompiled:
             notes.append("Device is low memory; on-device build path will stop FrameOS before compilation.")
         if not selected_public_keys:
             notes.append("No SSH public keys selected for deployment.")
@@ -674,7 +690,8 @@ class FrameDeployWorkflow:
         build_result: FrameBinaryBuildResult,
         release_frameos_path: str,
     ) -> None:
-        await self.deployer.log("stdout", f"{icon} Using cross-compiled binary")
+        message = "Using precompiled FrameOS binary" if build_result.precompiled else "Using cross-compiled binary"
+        await self.deployer.log("stdout", f"{icon} {message}")
         if not build_result.binary_path:
             raise RuntimeError("Cross compilation succeeded but binary path is unknown")
         await upload_binary(self.deployer, build_result.binary_path, release_frameos_path)
