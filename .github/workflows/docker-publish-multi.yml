@@ -113,7 +113,7 @@ jobs:
 
       - id: set-matrix
         run: |
-          MATRIX=$(python3 backend/bin/cross matrix --runner-profile depot-8)
+          MATRIX=$(python3 backend/bin/cross matrix)
           echo "targets=$MATRIX" >> "$GITHUB_OUTPUT"
 
   build-prebuilt-cross:
