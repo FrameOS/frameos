@@ -14,7 +14,7 @@
         "value": "Generate ideas for a smart e-ink display around the house."
       },
       { "access": "private", "label": "Reply", "name": "reply", "persist": "disk", "type": "text" },
-      { "name": "model", "label": "Model", "type": "string", "value": "gpt-5", "persist": "disk", "access": "public" },
+      { "name": "model", "label": "Model", "type": "string", "value": "gpt-5.5", "persist": "disk", "access": "public" },
       {
         "name": "seconds",
         "label": "Refresh after (seconds)",

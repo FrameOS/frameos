@@ -601,9 +601,14 @@ export interface FrameOSSettings {
   openAI?: {
     apiKey?: string
     backendApiKey?: string
+    chatModel?: string
     summaryModel?: string
     embeddingModel?: string
     sceneModel?: string
+    reviewModel?: string
+    promptExpansionModel?: string
+    appChatModel?: string
+    appEditModel?: string
     appEnhanceModel?: string
   }
   posthog?: {

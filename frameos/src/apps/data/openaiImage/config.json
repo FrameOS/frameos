@@ -17,8 +17,8 @@
     {
       "name": "model",
       "type": "select",
-      "options": ["gpt-image-1.5", "gpt-image-1", "dall-e-3", "dall-e-2"],
-      "value": "gpt-image-1.5",
+      "options": ["gpt-image-2", "gpt-image-1.5", "gpt-image-1", "dall-e-3", "dall-e-2"],
+      "value": "gpt-image-2",
       "required": true,
       "label": "Model"
     },
@@ -34,6 +34,11 @@
       "value": "best for orientation",
       "label": "Size",
       "showIf": [
+        {
+          "field": "model",
+          "operator": "eq",
+          "value": "gpt-image-2"
+        },
         {
           "field": "model",
           "operator": "eq",

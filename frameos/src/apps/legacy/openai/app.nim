@@ -4,6 +4,7 @@ import options
 import json
 import strformat
 import httpclient
+import base64
 import frameos/utils/image
 import frameos/types
 
@@ -64,22 +65,45 @@ proc run*(self: App, context: ExecutionContext) =
         ("Authorization", "Bearer " & apiKey),
         ("Content-Type", "application/json"),
     ])
+    let defaultSize = "1024x1024"
+    let gptImageSizes = @["1024x1024", "1536x1024", "1024x1536"]
+    let dalle3Sizes = @["1024x1024", "1792x1024", "1024x1792"]
+    let dalle2Sizes = @["256x256", "512x512", "1024x1024"]
     let size = if self.appConfig.size == "best for orientation":
-                 if self.appConfig.model == "dall-e-3":
+                 case self.appConfig.model
+                 of "gpt-image-1", "gpt-image-1.5", "gpt-image-2":
+                   if context.image.width > context.image.height: "1536x1024"
+                   elif context.image.width < context.image.height: "1024x1536"
+                   else: defaultSize
+                 of "dall-e-3":
                    if context.image.width > context.image.height: "1792x1024"
                    elif context.image.width < context.image.height: "1024x1792"
-                   else: "1024x1024"
-                 else: "1024x1024"
-               elif self.appConfig.size != "": self.appConfig.size
-               else: "1024x1024"
-    let body = %*{
+                   else: defaultSize
+                 else:
+                   defaultSize
+               elif self.appConfig.size != "":
+                 case self.appConfig.model
+                 of "gpt-image-1", "gpt-image-1.5", "gpt-image-2":
+                   if self.appConfig.size in gptImageSizes: self.appConfig.size else: defaultSize
+                 of "dall-e-3":
+                   if self.appConfig.size in dalle3Sizes: self.appConfig.size else: defaultSize
+                 of "dall-e-2":
+                   if self.appConfig.size in dalle2Sizes: self.appConfig.size else: defaultSize
+                 else:
+                   defaultSize
+               else:
+                 defaultSize
+    var body = %*{
         "prompt": prompt,
         "n": 1,
-        "style": self.appConfig.style,
         "size": size,
-        "quality": self.appConfig.quality,
         "model": self.appConfig.model
       }
+    if self.appConfig.model == "dall-e-3":
+      if self.appConfig.style != "":
+        body["style"] = %self.appConfig.style
+      if self.appConfig.quality != "":
+        body["quality"] = %self.appConfig.quality
     try:
       let response = client.request("https://api.openai.com/v1/images/generations",
           httpMethod = HttpPost, body = $body)
@@ -92,20 +116,27 @@ proc run*(self: App, context: ExecutionContext) =
           self.error "Error making request " & $response.status & ": " & response.body
         return
       let json = parseJson(response.body)
-      let imageUrl = json{"data"}{0}{"url"}.getStr
-      if imageUrl == "":
-        self.error("No image URL returned from OpenAI.")
-        return
-      var client2 = newHttpClient(timeout = 60000)
-      try:
-        let imageData = client2.request(imageUrl, httpMethod = HttpGet)
-        if imageData.code != Http200:
-          self.error "Error fetching image " & $imageData.status
+      let imageNode = json{"data"}{0}
+      let imageBase64 = imageNode{"b64_json"}.getStr
+      var imageDataBody = ""
+      if imageBase64 != "":
+        imageDataBody = imageBase64.decode
+      else:
+        let imageUrl = imageNode{"url"}.getStr
+        if imageUrl == "":
+          self.error("No image data returned from OpenAI.")
           return
+        var client2 = newHttpClient(timeout = 60000)
+        try:
+          let imageData = client2.request(imageUrl, httpMethod = HttpGet)
+          if imageData.code != Http200:
+            self.error "Error fetching image " & $imageData.status
+            return
+          imageDataBody = imageData.body
+        finally:
+          client2.close()
 
-        downloadedImage = some(decodeImageWithFallback(imageData.body))
-      finally:
-        client2.close()
+      downloadedImage = some(decodeImageWithFallback(imageDataBody))
     except CatchableError as e:
       self.error "Error fetching image from OpenAI: " & $e.msg
     finally:

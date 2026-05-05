@@ -10,12 +10,12 @@ from app.models.ai_embeddings import AiEmbedding
 from app.config import config
 from app.utils.posthog import get_posthog_client, llm_analytics_enabled
 
-SUMMARY_MODEL = "gpt-5-mini"
-SCENE_MODEL = "gpt-5.2"
-CHAT_MODEL = "gpt-5-mini"
+SUMMARY_MODEL = "gpt-5.4-mini"
+SCENE_MODEL = "gpt-5.5"
+CHAT_MODEL = "gpt-5.4-mini"
 EMBEDDING_MODEL = "text-embedding-3-large"
-SCENE_REVIEW_MODEL = "gpt-5-mini"
-PROMPT_EXPANSION_MODEL = "gpt-5-mini"
+SCENE_REVIEW_MODEL = "gpt-5.4-mini"
+PROMPT_EXPANSION_MODEL = "gpt-5.4-mini"
 
 DEFAULT_APP_CONTEXT_K = 6
 DEFAULT_SCENE_CONTEXT_K = 4

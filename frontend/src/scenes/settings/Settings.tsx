@@ -238,16 +238,16 @@ export function Settings() {
                       <TextInput name="backendApiKey" />
                     </Field>
                     <Field name="summaryModel" label="Summary model">
-                      <TextInput name="summaryModel" placeholder="gpt-5-mini" />
+                      <TextInput name="summaryModel" placeholder="gpt-5.4-mini" />
                     </Field>
                     <Field name="embeddingModel" label="Embedding model">
                       <TextInput name="embeddingModel" placeholder="text-embedding-3-large" />
                     </Field>
                     <Field name="sceneModel" label="Scene generation model">
-                      <TextInput name="sceneModel" placeholder="gpt-5.2" />
+                      <TextInput name="sceneModel" placeholder="gpt-5.5" />
                     </Field>
                     <Field name="appEnhanceModel" label="App edit model">
-                      <TextInput name="appEnhanceModel" placeholder="gpt-5.2" />
+                      <TextInput name="appEnhanceModel" placeholder="gpt-5.5" />
                     </Field>
                     <div className="flex flex-wrap items-center gap-2 text-sm text-gray-300">
                       <span>
