@@ -38,6 +38,11 @@ def test_release_shared_registry_filters_drivers_at_runtime():
     assert 'device != "web_only"' in source
     assert 'not isInkyButtonDevice(device)' in source
     assert 'libraryName: "waveshare_EPD_7in3e.so"' in source
+    assert '"frameos_driver_setup"' in source
+    assert "proc setupSharedDriver(spec: DriverSpec): SetupResult" in source
+    assert "import inkyPython/inkyPython as inkyPythonSetupDriver" not in source
+    assert "import inkyHyperPixel2r/inkyHyperPixel2r as inkyHyperPixel2rSetupDriver" not in source
+    assert 'setupBootConfig(@["dtoverlay=spi0-0cs"])' in source
 
 
 def test_release_waveshare_modules_are_variant_specific(tmp_path: Path):

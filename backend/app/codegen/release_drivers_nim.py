@@ -68,6 +68,7 @@ def write_release_shared_drivers_nim(drivers: dict[str, Driver]) -> str:
             "DriverSpec("
             f'name: "{driver.name}", '
             f'libraryName: "{driver_library_filename(driver)}", '
+            f"canSetup: {str(bool(driver.setup_import_path)).lower()}, "
             f"canRender: {str(driver.can_render).lower()}, "
             f"canPng: {str(driver.can_png).lower()}, "
             f"canTurnOnOff: {str(driver.can_turn_on_off).lower()}"
@@ -90,13 +91,12 @@ import frameos/driver_abi
 import i2c/i2c as i2cSetupDriver
 import spi/spi as spiSetupDriver
 import noSpi/noSpi as noSpiSetupDriver
-import inkyPython/inkyPython as inkyPythonSetupDriver
-import inkyHyperPixel2r/inkyHyperPixel2r as inkyHyperPixel2rSetupDriver
 
 type
   DriverSpec = object
     name: string
     libraryName: string
+    canSetup: bool
     canRender: bool
     canPng: bool
     canTurnOnOff: bool
@@ -172,28 +172,6 @@ proc driverSpecsFor(frameOS: FrameOS): seq[DriverSpec] =
     if shouldLoadDriver(spec, frameOS):
       result.add(spec)
 
-proc setupDriverNames*(): seq[string] =
-  result = @[]
-
-proc setup*(frameOS: FrameOS): SetupResult =
-  let device = frameOS.frameConfig.device
-  let waveshareVariant = normalizedWaveshareVariant(device)
-  if isInkyDriverDevice(device):
-    addSetupResult(result, runSetupStep("inkyPython", proc(): SetupResult = inkyPythonSetupDriver.setup()))
-    addSetupResult(result, runSetupStep("i2c", proc(): SetupResult = i2cSetupDriver.setup()))
-    addSetupResult(result, runSetupStep("spi", proc(): SetupResult = spiSetupDriver.setup()))
-  elif device == "pimoroni.hyperpixel2r":
-    addSetupResult(result, runSetupStep("inkyHyperPixel2r", proc(): SetupResult = inkyHyperPixel2rSetupDriver.setup()))
-  elif device.startsWith("waveshare."):
-    if waveshareVariant in ["EPD_12in48", "EPD_12in48b", "EPD_12in48b_V2", "EPD_13in3e"]:
-      addSetupResult(result, runSetupStep("noSpi", proc(): SetupResult = noSpiSetupDriver.setup()))
-    else:
-      addSetupResult(result, runSetupStep("spi", proc(): SetupResult = spiSetupDriver.setup()))
-    if waveshareVariant == "EPD_10in3":
-      addSetupResult(result, runSetupStep("bootConfig", proc(): SetupResult = setupBootConfig(@["dtoverlay=spi0-0cs", "#dtparam=spi=on"])))
-    elif waveshareVariant == "EPD_13in3e":
-      addSetupResult(result, runSetupStep("bootConfig", proc(): SetupResult = setupBootConfig(@["gpio=7=op,dl", "gpio=8=op,dl"])))
-
 proc driverLibraryPath(spec: DriverSpec): string =
   getAppDir() / "drivers" / spec.libraryName
 
@@ -204,6 +182,50 @@ proc loadRequiredSymbol[T](library: LibHandle, driverName: string, symbol: strin
         "error": "Missing symbol", "symbol": symbol}})
     return nil
   cast[T](address)
+
+proc setupSharedDriver(spec: DriverSpec): SetupResult =
+  let path = driverLibraryPath(spec)
+  let library = loadLib(path)
+  if library.isNil:
+    raise newException(OSError, "Unable to load driver library: " & path)
+  try:
+    let setupProc = loadRequiredSymbol[DriverSetupProc](library, spec.name, "frameos_driver_setup")
+    if setupProc.isNil:
+      raise newException(OSError, "Missing setup symbol for driver: " & spec.name)
+    result.rebootRequired = setupProc()
+  finally:
+    unloadLib(library)
+
+proc setupSharedDrivers(frameOS: FrameOS): SetupResult =
+  for spec in driverSpecsFor(frameOS):
+    if spec.canSetup:
+      let setupSpec = spec
+      addSetupResult(result, runSetupStep(setupSpec.name, proc(): SetupResult = setupSharedDriver(setupSpec)))
+
+proc setupReleaseDriverSupport(frameOS: FrameOS): SetupResult =
+  let device = frameOS.frameConfig.device
+  let waveshareVariant = normalizedWaveshareVariant(device)
+  if isInkyDriverDevice(device):
+    addSetupResult(result, runSetupStep("i2c", proc(): SetupResult = i2cSetupDriver.setup()))
+    addSetupResult(result, runSetupStep("spi", proc(): SetupResult = spiSetupDriver.setup()))
+    if isInkyButtonDevice(device):
+      addSetupResult(result, runSetupStep("bootConfig", proc(): SetupResult = setupBootConfig(@["dtoverlay=spi0-0cs"])))
+  elif device.startsWith("waveshare."):
+    if waveshareVariant in ["EPD_12in48", "EPD_12in48b", "EPD_12in48b_V2", "EPD_13in3e"]:
+      addSetupResult(result, runSetupStep("noSpi", proc(): SetupResult = noSpiSetupDriver.setup()))
+    else:
+      addSetupResult(result, runSetupStep("spi", proc(): SetupResult = spiSetupDriver.setup()))
+    if waveshareVariant == "EPD_10in3":
+      addSetupResult(result, runSetupStep("bootConfig", proc(): SetupResult = setupBootConfig(@["dtoverlay=spi0-0cs", "#dtparam=spi=on"])))
+    elif waveshareVariant == "EPD_13in3e":
+      addSetupResult(result, runSetupStep("bootConfig", proc(): SetupResult = setupBootConfig(@["gpio=7=op,dl", "gpio=8=op,dl"])))
+
+proc setupDriverNames*(): seq[string] =
+  result = @[]
+
+proc setup*(frameOS: FrameOS): SetupResult =
+  addSetupResult(result, setupSharedDrivers(frameOS))
+  addSetupResult(result, setupReleaseDriverSupport(frameOS))
 
 proc init*(frameOS: FrameOS) =
   loadedDrivers = @[]
