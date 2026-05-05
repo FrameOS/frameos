@@ -28,8 +28,8 @@ proc logGrayBuffer(self: Driver, mode: string, pixelCount: int, grayBytes: int, 
     "packedBytes": packedBytes,
   })
 
-proc setup*(): SetupResult =
-  waveshareDriver.setup()
+proc setup*(frameOS: DriverContext = nil): SetupResult =
+  waveshareDriver.setup(frameOS)
 
 proc init*(frameOS: DriverContext): Driver =
   let logger = frameOS.logger

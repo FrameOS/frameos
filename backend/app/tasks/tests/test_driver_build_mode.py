@@ -90,22 +90,6 @@ def test_driver_library_exports_setup_symbol_when_driver_has_setup():
     )
 
     assert "proc frameos_driver_setup*(driverContextPtr: pointer): bool" in source
-    assert "discard driverContextPtr" in source
-    assert "inkyPythonDriver.setup().rebootRequired" in source
-
-
-def test_driver_library_can_pass_context_to_setup_symbol():
-    source = write_driver_library_nim(
-        Driver(
-            name="inkyPython",
-            import_path="inkyPython/inkyPython",
-            setup_import_path="inkyPython/inkyPython",
-            setup_with_context=True,
-            can_render=True,
-        )
-    )
-
-    assert "proc frameos_driver_setup*(driverContextPtr: pointer): bool" in source
     assert "driverContextInstance = cloneDriverContext(hostContext)" in source
     assert "inkyPythonDriver.setup(driverContextInstance).rebootRequired" in source
     assert "syncHostDriverContext(hostContext, driverContextInstance)" in source

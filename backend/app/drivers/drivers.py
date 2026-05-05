@@ -13,7 +13,6 @@ class Driver:
     can_turn_on_off: bool = False # add turnOn() and turnOff()
     lines: Optional[list[str]] = None # extra config lines for drivers
     link_flags: tuple[str, ...] = () # additional linker flags required when this driver is present
-    setup_with_context: bool = False # pass DriverContext to setup in shared driver libraries
 
 DRIVERS = {
     "inkyPython": Driver(

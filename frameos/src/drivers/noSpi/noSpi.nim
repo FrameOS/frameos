@@ -1,6 +1,8 @@
 import frameos/device_setup
+import frameos/driver_context
 
-proc setup*(): SetupResult =
+proc setup*(frameOS: DriverContext = nil): SetupResult =
+  discard frameOS
   if not commandExists("raspi-config"):
     echo "raspi-config not found; skipped SPI setup"
     return

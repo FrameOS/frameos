@@ -49,9 +49,6 @@ def release_driver_specs() -> dict[str, Driver]:
             # The same shared library must serve every Pimoroni Inky device.
             # Export PNG support so models with preview-capable palettes work.
             driver.can_png = True
-            # Release builds choose the concrete device at runtime, so the
-            # Inky setup proc needs frame config to install GPIO/SPI/I2C support.
-            driver.setup_with_context = True
         drivers[driver.name] = driver
 
     for variant in sorted(get_variant_keys()):

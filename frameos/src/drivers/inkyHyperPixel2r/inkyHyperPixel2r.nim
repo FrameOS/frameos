@@ -24,7 +24,8 @@ proc init*(frameOS: DriverContext): Driver =
     mode: frameOS.frameConfig.mode,
   )
 
-proc setup*(): SetupResult =
+proc setup*(frameOS: DriverContext = nil): SetupResult =
+  discard frameOS
   setupPythonVendor("inkyHyperPixel2r")
   result = setupOk()
 

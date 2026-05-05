@@ -1,6 +1,8 @@
 import frameos/device_setup
+import frameos/driver_context
 
-proc setup*(): SetupResult =
+proc setup*(frameOS: DriverContext = nil): SetupResult =
+  discard frameOS
   result = setupBootConfig(@["dtparam=i2c_vc=on"])
   if not commandExists("raspi-config"):
     echo "raspi-config not found; skipped runtime I2C enable"

@@ -3,6 +3,7 @@
 import ePaper/DEV_Config as waveshareConfig
 import ePaper/EPD_7in3e as waveshareDisplay
 import frameos/device_setup
+import frameos/driver_context
 import drivers/spi/spi as spiSetupDriver
 import drivers/waveshare/types
 
@@ -11,7 +12,8 @@ let height* = waveshareDisplay.EPD_7IN3E_HEIGHT
 
 let color_option* = ColorOption.SpectraSixColor
 
-proc setup*(): SetupResult =
+proc setup*(frameOS: DriverContext = nil): SetupResult =
+  discard frameOS
   addSetupResult(result, runSetupStep("spi", proc(): SetupResult = spiSetupDriver.setup()))
 
 proc init*() =

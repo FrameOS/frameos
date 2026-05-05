@@ -485,20 +485,12 @@ def write_driver_library_nim(driver: Driver) -> str:
         if driver.setup_import_path != driver.import_path:
             setup_driver_alias = f"{driver.name}SetupDriver"
             setup_import = f"import drivers/{driver.setup_import_path} as {setup_driver_alias}\n"
-        if driver.setup_with_context:
-            setup_context_init = """  let hostContext = cast[DriverContext](driverContextPtr)
-  driverContextInstance = cloneDriverContext(hostContext)
-"""
-            setup_call = f"{setup_driver_alias}.setup(driverContextInstance).rebootRequired"
-            setup_context_sync = "  syncHostDriverContext(hostContext, driverContextInstance)\n"
-        else:
-            setup_context_init = "  discard driverContextPtr\n"
-            setup_call = f"{setup_driver_alias}.setup().rebootRequired"
-            setup_context_sync = ""
         setup_proc = f"""
 proc frameos_driver_setup*(driverContextPtr: pointer): bool {{.cdecl, exportc, dynlib.}} =
-{setup_context_init}  result = {setup_call}
-{setup_context_sync}
+  let hostContext = cast[DriverContext](driverContextPtr)
+  driverContextInstance = cloneDriverContext(hostContext)
+  result = {setup_driver_alias}.setup(driverContextInstance).rebootRequired
+  syncHostDriverContext(hostContext, driverContextInstance)
 """
 
     render_proc = ""

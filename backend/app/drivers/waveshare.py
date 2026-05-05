@@ -127,6 +127,7 @@ def waveshare_setup_imports_nim(variant_key: str) -> str:
     setup_driver = "noSpi" if variant_key in NO_SPI_VARIANTS else "spi"
     return "\n".join([
         "import frameos/device_setup",
+        "import frameos/driver_context",
         f"import drivers/{setup_driver}/{setup_driver} as {setup_driver}SetupDriver",
     ])
 
@@ -318,7 +319,8 @@ let height* = waveshareDisplay.{variant.prefix}_HEIGHT
 let color_option* = ColorOption.{variant.color_option}
 {color_warning}
 
-proc setup*(): SetupResult =
+proc setup*(frameOS: DriverContext = nil): SetupResult =
+  discard frameOS
   {waveshare_setup_body_nim(variant.key)}
 
 proc init*() =
