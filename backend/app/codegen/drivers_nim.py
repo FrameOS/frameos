@@ -485,7 +485,7 @@ def write_driver_library_nim(driver: Driver) -> str:
         if driver.setup_import_path != driver.import_path:
             setup_driver_alias = f"{driver.name}SetupDriver"
             setup_import = f"import drivers/{driver.setup_import_path} as {setup_driver_alias}\n"
-        if driver.setup_accepts_context:
+        if driver.setup_with_context:
             setup_context_init = """  let hostContext = cast[DriverContext](driverContextPtr)
   driverContextInstance = cloneDriverContext(hostContext)
 """

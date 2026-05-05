@@ -100,7 +100,7 @@ def test_driver_library_can_pass_context_to_setup_symbol():
             name="inkyPython",
             import_path="inkyPython/inkyPython",
             setup_import_path="inkyPython/inkyPython",
-            setup_accepts_context=True,
+            setup_with_context=True,
             can_render=True,
         )
     )

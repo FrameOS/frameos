@@ -51,7 +51,7 @@ def release_driver_specs() -> dict[str, Driver]:
             driver.can_png = True
             # Release builds choose the concrete device at runtime, so the
             # Inky setup proc needs frame config to install GPIO/SPI/I2C support.
-            driver.setup_accepts_context = True
+            driver.setup_with_context = True
         drivers[driver.name] = driver
 
     for variant in sorted(get_variant_keys()):
