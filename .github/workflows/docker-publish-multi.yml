@@ -372,6 +372,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ needs.update-versions.outputs.release_sha }}
+          fetch-depth: 0
 
       - name: Download prebuilt cross artifacts
         uses: actions/download-artifact@v4
@@ -386,16 +387,27 @@ jobs:
           DOCKER_VERSION: ${{ needs.update-versions.outputs.docker_version }}
           RELEASE_TAG: ${{ needs.update-versions.outputs.release_tag }}
           RELEASE_SHA: ${{ needs.update-versions.outputs.release_sha }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           ls -lh release-assets
-          cat > release-notes.md <<EOF
-          Docker images:
+          python3 tools/generate_release_notes.py \
+            --version "$DOCKER_VERSION" \
+            --release-tag "$RELEASE_TAG" \
+            --head "$RELEASE_SHA" \
+            --output release-notes.md
+
+          cat >> release-notes.md <<EOF
+
+          ## Docker images
           - [frameos/frameos:latest](https://hub.docker.com/r/frameos/frameos/tags?name=latest)
           - [frameos/frameos:${DOCKER_VERSION}](https://hub.docker.com/r/frameos/frameos/tags?name=${DOCKER_VERSION})
           - [frameos/frameos:${DOCKER_VERSION%.*}](https://hub.docker.com/r/frameos/frameos/tags?name=${DOCKER_VERSION%.*})
           - [frameos/frameos:${DOCKER_VERSION%%.*}](https://hub.docker.com/r/frameos/frameos/tags?name=${DOCKER_VERSION%%.*})
           EOF
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" \
+              --title "FrameOS ${DOCKER_VERSION}" \
+              --notes-file release-notes.md
             gh release upload "$RELEASE_TAG" release-assets/*.tar.gz --clobber
           else
             gh release create "$RELEASE_TAG" release-assets/*.tar.gz \
