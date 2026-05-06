@@ -5,7 +5,14 @@ from types import SimpleNamespace
 import pytest
 
 from app.tasks.binary_builder import FrameBinaryPlan
-from app.tasks.frame_deploy_workflow import FrameDeployPlan, FrameDeployWorkflow, FullDeployPlan, HelperActionPlan, PackagePlan
+from app.tasks.frame_deploy_workflow import (
+    FRAMEOS_AVAILABLE_COMMANDS,
+    FrameDeployPlan,
+    FrameDeployWorkflow,
+    FullDeployPlan,
+    HelperActionPlan,
+    PackagePlan,
+)
 from app.utils.cross_compile import TargetMetadata
 
 
@@ -683,7 +690,11 @@ async def test_execute_fast_uses_atomic_uploads_before_reload(monkeypatch: pytes
         name="FastFrame",
         status="ready",
         https_proxy={"enable": False},
-        last_successful_deploy={"frameos_version": "9.9.9", "https_proxy": {"enable": False}},
+        last_successful_deploy={
+            "frameos_version": "9.9.9",
+            "frameos_commands": list(FRAMEOS_AVAILABLE_COMMANDS),
+            "https_proxy": {"enable": False},
+        },
         last_successful_deploy_at=None,
         to_dict=lambda: {"id": 21, "name": "FastFrame"},
     )
@@ -730,6 +741,63 @@ async def test_execute_fast_uses_atomic_uploads_before_reload(monkeypatch: pytes
         ("/srv/frameos/current/all_scenes.json.gz", True),
     ]
     assert "cd /srv/frameos/current && sudo ./frameos setup" in deployer.commands
+
+
+@pytest.mark.asyncio
+async def test_execute_fast_skips_setup_for_old_frameos_without_setup_command(monkeypatch: pytest.MonkeyPatch):
+    frame = SimpleNamespace(
+        id=24,
+        name="OldFastFrame",
+        status="ready",
+        https_proxy={"enable": False},
+        last_successful_deploy={"frameos_version": "2026.1.1", "https_proxy": {"enable": False}},
+        last_successful_deploy_at=None,
+        to_dict=lambda: {"id": 24, "name": "OldFastFrame"},
+    )
+    deployer = RecordingDeployer()
+    workflow = FrameDeployWorkflow(
+        db=None,
+        redis=None,
+        frame=frame,
+        deployer=deployer,
+        temp_dir="",
+        binary_builder=FakeBinaryBuilder(),
+    )
+
+    async def fake_update_frame(_db, _redis, _frame):
+        return _frame
+
+    async def fake_fetch_frame_http_bytes(_frame, _redis, *, path: str, method: str):
+        assert path == "/reload"
+        assert method == "POST"
+        return 200, b'{"status":"ok"}', {}
+
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.update_frame", fake_update_frame)
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow._fetch_frame_http_bytes", fake_fetch_frame_http_bytes)
+
+    plan = FrameDeployPlan(
+        mode="fast",
+        frame_id=24,
+        frame_name="OldFastFrame",
+        build_id="build12345678",
+        frame_dict={"id": 24, "name": "OldFastFrame"},
+        previous_frameos_version="2026.1.1",
+        fast_deploy=SimpleNamespace(
+            tls_settings_changed=False,
+            reload_supported=True,
+            action="reload",
+        ),
+    )
+
+    await workflow._execute_fast(plan)
+
+    assert not any(command.endswith("&& sudo ./frameos setup") for command in deployer.commands)
+    assert not any("grep -aq 'FrameOS setup: starting'" in command for command in deployer.commands)
+    assert (
+        "stdout",
+        "🔷 Skipping FrameOS device setup; current FrameOS does not list the setup command",
+    ) in deployer.logs
+    assert deployer.restarted_services == []
 
 
 @pytest.mark.asyncio
@@ -879,6 +947,10 @@ async def test_execute_full_does_not_activate_release_when_setup_fails(monkeypat
         await workflow._execute_full(plan)
 
     assert "cd /srv/frameos/releases/release_build12345678 && sudo ./frameos setup" in deployer.commands
+    assert deployer.commands.index("sudo service frameos stop") < deployer.commands.index(
+        "cd /srv/frameos/releases/release_build12345678 && sudo ./frameos setup"
+    )
     assert "activate" not in deployer.commands
+    assert deployer.restarted_services == ["frameos"]
     assert frame.status == "uninitialized"
     assert updated_statuses == ["deploying", "uninitialized"]

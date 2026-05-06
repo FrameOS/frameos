@@ -14,7 +14,7 @@ all: $(EXECUTABLE)
 
 $(EXECUTABLE): $(OBJECTS)
 	@echo "Linking frameos"
-	@echo "LIBS: $(LIBS)"
+	@if [ "$${FRAMEOS_CROSS_VERBOSE:-}" = "1" ]; then echo "LIBS: $(LIBS)"; fi
 	@$(CC) -o $(EXECUTABLE) $(OBJECTS) $(LIBS)
 
 clean:
@@ -29,7 +29,6 @@ $(OBJECTS): pre-build
 %.o: %.c
 	@if [ ! -e $@ ]; then \
 		md5sum=$$(md5sum $< | awk '{print $$1}'); \
-		file=$$(echo '$<' | sed 's/@s/\//g' | sed 's/@m//g' | sed 's/.*nimble\/pkgs2\/\(.*\)/\1/' | sed 's/.*\/\(nim\/lib\/.*\)/\1/'); \
 		cache_obj=../cache/$$md5sum.o; \
 		if [ -f "$$cache_obj" ]; then \
 			ln -s "$$cache_obj" $@; \
@@ -38,7 +37,10 @@ $(OBJECTS): pre-build
 			tmp_cache_obj="$$cache_obj.$$PPID.tmp"; \
 			cp $@ "$$tmp_cache_obj"; \
 			mv -n "$$tmp_cache_obj" "$$cache_obj" 2>/dev/null || rm -f "$$tmp_cache_obj"; \
-			echo "[$$(ls *.o | wc -l)/$(TOTAL)] $$file"; \
+			count=$$(ls *.o | wc -l | tr -d ' '); \
+			if [ "$$count" = "$(TOTAL)" ] || [ "$$((count % 25))" = "0" ]; then \
+				echo "[$$count/$(TOTAL)] Compiled generated C sources"; \
+			fi; \
 		fi; \
 	fi
 

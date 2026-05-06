@@ -378,14 +378,18 @@ proc loadRequiredSymbol[T](library: LibHandle, driverName: string, symbol: strin
 
 proc setupSharedDriver(spec: DriverSpec, driverCtx: driverContext.DriverContext): SetupResult =
   let path = driverLibraryPath(spec)
+  echo "FrameOS setup: shared driver " & spec.name & ": loading " & path
   let library = loadLib(path)
   if library.isNil:
+    echo "FrameOS setup: shared driver " & spec.name & ": failed to load " & path
     raise newException(OSError, "Unable to load driver library: " & path)
   try:
     let setupProc = loadRequiredSymbol[DriverSetupProc](library, spec.name, "frameos_driver_setup")
     if setupProc.isNil:
       raise newException(OSError, "Missing setup symbol for driver: " & spec.name)
+    echo "FrameOS setup: shared driver " & spec.name & ": running setup"
     result.rebootRequired = setupProc(cast[pointer](driverCtx))
+    echo "FrameOS setup: shared driver " & spec.name & ": setup complete"
   finally:
     unloadLib(library)
 

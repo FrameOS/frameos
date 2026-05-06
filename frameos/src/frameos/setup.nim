@@ -134,11 +134,14 @@ proc setupAppAptPackages*(): SetupResult =
 proc setupFrameOS*(): SetupResult =
   echo "FrameOS setup: starting"
   let frameOS = FrameOS(frameConfig: loadConfig())
+  echo "FrameOS setup: target " & frameOS.frameConfig.device & " (" & frameOS.frameConfig.mode & ")"
   if frameOS.frameConfig.mode == "rpios":
     addSetupResult(result, runSetupStep("app apt packages", proc(): SetupResult = setupAppAptPackages()))
   else:
-    echo "FrameOS setup: app apt packages skipped for mode " & frameOS.frameConfig.mode
+    echo "FrameOS setup: app apt packages: skipped for mode " & frameOS.frameConfig.mode
+  echo "FrameOS setup: driver setup: starting"
   addSetupResult(result, drivers.setup(frameOS))
+  echo "FrameOS setup: driver setup: complete"
   if result.rebootRequired:
     echo "FrameOS setup: reboot required"
   echo "FrameOS setup: complete"

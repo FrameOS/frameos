@@ -98,11 +98,11 @@ proc setupAptPackages*(packages: seq[string]): SetupResult =
       missingPackages.add(normalized)
 
   if normalizedPackages.len == 0:
-    echo "FrameOS setup: no app apt packages required"
+    echo "FrameOS setup: app apt packages: none required"
     return setupOk()
 
   if missingPackages.len == 0:
-    echo "FrameOS setup: app apt packages already installed: " & normalizedPackages.join(", ")
+    echo "FrameOS setup: app apt packages: already installed (" & normalizedPackages.join(", ") & ")"
     return setupOk()
 
   if not commandExists("apt-get"):
@@ -111,12 +111,12 @@ proc setupAptPackages*(packages: seq[string]): SetupResult =
       "apt-get not found; required to install app apt packages: " & missingPackages.join(", ")
     )
 
-  echo "FrameOS setup: installing app apt packages: " & missingPackages.join(", ")
+  echo "FrameOS setup: app apt packages: installing " & missingPackages.join(", ")
   let packageArgs = missingPackages.mapIt(shellQuote(it)).join(" ")
   let installCommand = privilegedAptCommand("apt-get install -y --no-install-recommends " & packageArgs)
   let installResult = runSetupCommand(installCommand, raiseOnError = false)
   if installResult.exitCode != 0:
-    echo "FrameOS setup: apt install failed; updating apt and retrying"
+    echo "FrameOS setup: app apt packages: install failed; updating apt and retrying"
     discard runSetupCommand(privilegedAptCommand("apt-get update"))
     discard runSetupCommand(installCommand)
 
@@ -171,9 +171,9 @@ proc setupBootConfig*(requestedLines: seq[string], bootConfigPath = ""): SetupRe
   let current = if fileExists(path): readFile(path) else: ""
   let applied = applyBootConfigLines(current, requestedLines)
   if not applied.changed:
-    echo "Boot config already up to date: " & path
+    echo "FrameOS setup: boot config: already up to date (" & path & ")"
     return
-  echo "Updating boot config: " & path
+  echo "FrameOS setup: boot config: updating " & path
   writePrivilegedFile(path, applied.content)
   result.rebootRequired = true
 
@@ -196,5 +196,13 @@ proc setupPythonVendor*(vendorFolder: string) =
   )
 
 proc runSetupStep*(name: string, action: proc(): SetupResult): SetupResult =
-  echo "FrameOS setup: " & name
-  result = action()
+  echo "FrameOS setup: checking " & name
+  try:
+    result = action()
+    if result.rebootRequired:
+      echo "FrameOS setup: " & name & ": complete (reboot required)"
+    else:
+      echo "FrameOS setup: " & name & ": complete"
+  except CatchableError as e:
+    echo "FrameOS setup: " & name & ": failed: " & e.msg
+    raise

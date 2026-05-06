@@ -3,10 +3,15 @@ import os
 import system
 import strutils
 
+var timeZoneDataLoaded = false
+
 proc initTimeZone*() =
+  if timeZoneDataLoaded:
+    return
   # TODO: allow users to only load the timezones and years that matter
   const tzData = staticRead("../../assets/compiled/tz/tzdata.json")
   loadTzData(tzData)
+  timeZoneDataLoaded = true
 
 
 proc detectSystemTimeZone*(): string =
@@ -40,7 +45,8 @@ proc detectSystemTimeZone*(): string =
   if lc in ["etc/utc", "utc", "uct", "universal", "zulu", "z"]:
     return "UTC"
 
+  initTimeZone()
   # check if result is a valid timezone
   if not valid(findTimeZone(result)):
-    echo "Warning: Detected timezone is not valid: ", result
+    echo "FrameOS warning: timezone not recognized, using UTC instead of ", result
     return "UTC"

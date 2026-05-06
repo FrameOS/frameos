@@ -42,6 +42,7 @@ REMOTE_RUNTIME_APT_PACKAGES = (
 REMOTE_BUILD_APT_PACKAGES = ("build-essential",)
 
 HELPER_ENSURE_NTP = "ensure_ntp"
+FRAMEOS_AVAILABLE_COMMANDS = ("start", "check", "setup", "help")
 
 
 @dataclass(slots=True)
@@ -205,6 +206,18 @@ class FrameDeployWorkflow:
             temp_dir=temp_dir,
         )
 
+    def _previous_frameos_commands(self) -> list[str]:
+        previous_deploy = self.frame.last_successful_deploy
+        if not isinstance(previous_deploy, dict):
+            return []
+        commands = previous_deploy.get("frameos_commands")
+        if not isinstance(commands, list):
+            return []
+        return [command for command in commands if isinstance(command, str)]
+
+    def _current_frameos_supports_command(self, command: str) -> bool:
+        return command in self._previous_frameos_commands()
+
     async def plan(self, mode: str) -> FrameDeployPlan:
         frame_dict = self.frame.to_dict()
         frame_dict.pop("last_successful_deploy", None)
@@ -272,10 +285,13 @@ class FrameDeployWorkflow:
             frame_dict["frameos_version"] = previous_frameos_version
         else:
             frame_dict["frameos_version"] = current_frameos_version()
+        previous_commands = self._previous_frameos_commands()
+        if previous_commands:
+            frame_dict["frameos_commands"] = previous_commands
 
         notes = [
             f"Detected distro: {distro}",
-            "Fast deploy updates frame metadata and scene payloads, runs FrameOS setup, then reloads FrameOS.",
+            "Fast deploy updates frame metadata and scene payloads, runs FrameOS setup when supported, then reloads FrameOS.",
         ]
         if tls_changed:
             notes.append("TLS settings changed; plan will restart FrameOS instead of using the reload endpoint.")
@@ -299,6 +315,8 @@ class FrameDeployWorkflow:
 
         if distro not in {"raspios", "debian", "ubuntu"}:
             raise Exception(f"Unsupported target distro '{distro}'")
+        frame_dict["frameos_version"] = current_frameos_version()
+        frame_dict["frameos_commands"] = list(FRAMEOS_AVAILABLE_COMMANDS)
 
         drivers = drivers_for_frame(self.frame)
         driver_names = sorted(drivers.keys())
@@ -544,6 +562,7 @@ class FrameDeployWorkflow:
         frame.status = "deploying"
         await update_frame(self.db, self.redis, frame)
         build_id = plan.build_id
+        stopped_frameos_for_setup = False
 
         await self.deployer.log("stdout", f"{icon} Deploying frame {frame.name} with build id {build_id}")
 
@@ -568,6 +587,7 @@ class FrameDeployWorkflow:
                 build_result=build_result,
                 build_id=build_id,
             )
+            stopped_frameos_for_setup = await self._stop_frameos_for_release_setup()
             await self._run_release_setup(build_id=build_id, post_deploy=full_plan.post_deploy)
             await self._install_and_activate_release(build_id)
             await sync_assets(self.db, self.redis, frame)
@@ -576,12 +596,22 @@ class FrameDeployWorkflow:
 
             frame.status = "starting"
             plan.frame_dict["frameos_version"] = current_frameos_version()
+            plan.frame_dict["frameos_commands"] = list(FRAMEOS_AVAILABLE_COMMANDS)
             frame.last_successful_deploy = plan.frame_dict
             frame.last_successful_deploy_at = datetime.now(timezone.utc)
             await update_frame(self.db, self.redis, frame)
         except Exception:
             frame.status = "uninitialized"
             await update_frame(self.db, self.redis, frame)
+            if stopped_frameos_for_setup:
+                try:
+                    await self.deployer.log("stdout", f"{icon} Restarting previous FrameOS service after failed deploy")
+                    await self.deployer.restart_service("frameos")
+                except Exception as restart_error:
+                    await self.deployer.log(
+                        "stderr",
+                        f"Failed to restart previous FrameOS service after failed deploy: {restart_error}",
+                    )
             raise
 
     async def _mark_stuck_deploy_as_undeployed(self) -> None:
@@ -790,7 +820,24 @@ class FrameDeployWorkflow:
         if setup_requires_reboot:
             post_deploy["final_action"] = "reboot"
 
+    async def _stop_frameos_for_release_setup(self) -> bool:
+        await self.deployer.log("stdout", f"{icon} Stopping running FrameOS before device setup")
+        status = await self.deployer.exec_command("sudo service frameos stop", raise_on_error=False)
+        if status != 0:
+            await self.deployer.log(
+                "stderr",
+                f"Could not stop FrameOS before device setup; continuing with setup anyway (exit code {status})",
+            )
+            return False
+        return True
+
     async def _run_current_setup(self) -> bool:
+        if not self._current_frameos_supports_command("setup"):
+            await self.deployer.log(
+                "stdout",
+                f"{icon} Skipping FrameOS device setup; current FrameOS does not list the setup command",
+            )
+            return False
         return await self._run_setup_in_directory("/srv/frameos/current")
 
     async def _run_setup_in_directory(self, path: str) -> bool:
@@ -798,12 +845,31 @@ class FrameDeployWorkflow:
         setup_status = await self.deployer.exec_command(
             f"cd {shlex.quote(path)} && sudo ./frameos setup",
             raise_on_error=False,
+            log_command="sudo ./frameos setup",
         )
         if setup_status == 2:
             return True
         if setup_status != 0:
+            await self._log_setup_failure_diagnostics(setup_status)
             raise RuntimeError(f"FrameOS setup failed with exit code {setup_status}")
         return False
+
+    async def _log_setup_failure_diagnostics(self, setup_status: int) -> None:
+        await self.deployer.log("stderr", f"FrameOS setup exited with code {setup_status}; collecting diagnostics")
+        diagnostics = (
+            ("memory usage", "free -m"),
+            (
+                "FrameOS processes",
+                "ps -eo pid,ppid,stat,rss,comm,args | grep -E '[f]rameos|[f]rameos_agent'",
+            ),
+            ("kernel messages", "sudo dmesg -T | tail -80"),
+        )
+        for label, command in diagnostics:
+            await self.deployer.exec_command(
+                command,
+                raise_on_error=False,
+                log_command=f"diagnostics: {label}",
+            )
 
     async def _install_and_activate_release(self, build_id: str) -> None:
         with open("../frameos/frameos.service", "r", encoding="utf-8") as f:
