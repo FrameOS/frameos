@@ -96,13 +96,21 @@ proc buildDriverContext(frameOS: FrameOS): driverContext.DriverContext =
   for button in sourceConfig.gpioButtons:
     config.gpioButtons.add(driverContext.GPIOButton(pin: button.pin, label: button.label))
 
-  result = driverContext.DriverContext(
-    frameConfig: config,
-    logger: driverContext.DriverLogger(
+  var logger = driverContext.DriverLogger(
+    log: nil,
+    enabled: false,
+    debug: sourceConfig.debug,
+  )
+  if not frameOS.logger.isNil:
+    logger = driverContext.DriverLogger(
       log: frameOS.logger.log,
       enabled: frameOS.logger.enabled,
       debug: sourceConfig.debug,
-    ),
+    )
+
+  result = driverContext.DriverContext(
+    frameConfig: config,
+    logger: logger,
   )
 
 proc syncDriverContext(frameOS: FrameOS, context: driverContext.DriverContext) =
@@ -394,7 +402,9 @@ proc setupSharedDriver(spec: DriverSpec, driverCtx: driverContext.DriverContext)
     unloadLib(library)
 
 proc setupSharedDrivers(frameOS: FrameOS): SetupResult =
+  echo "FrameOS setup: shared driver registry: building context"
   let driverCtx = buildDriverContext(frameOS)
+  echo "FrameOS setup: shared driver registry: selected " & $driverSpecs.len & " driver(s)"
   for spec in driverSpecs:
     if spec.canSetup:
       let setupSpec = spec
@@ -466,8 +476,12 @@ proc setupDriverNames*(): seq[string] =
   return {setup_names_source}
 
 proc setup*(frameOS: FrameOS): SetupResult =
+  echo "FrameOS setup: shared driver setup: starting"
   addSetupResult(result, setupSharedDrivers(frameOS))
+  echo "FrameOS setup: shared driver setup: complete"
+  echo "FrameOS setup: local driver setup: starting"
   addSetupResult(result, setupLocalDrivers(frameOS))
+  echo "FrameOS setup: local driver setup: complete"
     """
 
     return code

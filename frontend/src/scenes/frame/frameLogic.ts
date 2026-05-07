@@ -743,7 +743,7 @@ export const frameLogic = kea<frameLogicType>([
       },
     ],
   }),
-  listeners(({ actions, values }) => ({
+  listeners(({ asyncActions, actions, values }) => ({
     resetUnsavedChanges: () => {
       if (!values.frame) {
         return
@@ -761,7 +761,7 @@ export const frameLogic = kea<frameLogicType>([
     },
     updateDeployedSshKeys: async () => {
       actions.clearNextAction()
-      await actions.submitFrameForm()
+      await asyncActions.submitFrameForm()
       const response = await apiFetch(`/api/frames/${values.frameId}/ssh_keys`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

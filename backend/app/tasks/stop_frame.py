@@ -3,7 +3,8 @@ from arq import ArqRedis
 from sqlalchemy.orm import Session
 
 from app.models.log import new_log as log
-from app.models.frame import Frame, update_frame
+from app.models.frame import update_frame
+from app.tasks.utils import get_fresh_frame
 from app.utils.remote_exec import run_commands
 
 async def stop_frame(id: int, redis: ArqRedis):
@@ -15,7 +16,7 @@ async def stop_frame_task(ctx: dict[str, Any], id: int):
 
     frame = None
     try:
-        frame = db.get(Frame, id)
+        frame = get_fresh_frame(db, id)
         if not frame:
             return
 

@@ -200,7 +200,9 @@ proc setupSharedDriver(spec: DriverSpec, driverCtx: driverContext.DriverContext)
 
 proc setupSharedDrivers(frameOS: FrameOS): SetupResult =
   let driverCtx = buildDriverContext(frameOS)
-  for spec in driverSpecsFor(frameOS):
+  let specs = driverSpecsFor(frameOS)
+  echo "FrameOS setup: shared driver registry: selected " & $specs.len & " driver(s)"
+  for spec in specs:
     if spec.canSetup:
       let setupSpec = spec
       addSetupResult(result, runSetupStep(setupSpec.name, proc(): SetupResult = setupSharedDriver(setupSpec, driverCtx)))

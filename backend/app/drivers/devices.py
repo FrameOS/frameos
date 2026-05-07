@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from app.drivers.drivers import Driver, DRIVERS
-from app.drivers.waveshare import BOOT_CONFIG_LINES_BY_VARIANT, NO_SPI_VARIANTS, get_variant_keys
+from app.drivers.waveshare import BOOT_CONFIG_LINES_BY_VARIANT, BOOT_CONFIG_SPI_VARIANTS, NO_SPI_VARIANTS, get_variant_keys
 
 if TYPE_CHECKING:
     from app.models.frame import Frame
@@ -49,7 +49,9 @@ def drivers_for_frame(frame: Frame) -> dict[str, Driver]:
         if waveshare.variant not in get_variant_keys():
             raise Exception(f"Unknown waveshare driver variant {waveshare.variant}")
 
-        if waveshare.variant in NO_SPI_VARIANTS:
+        if waveshare.variant in BOOT_CONFIG_SPI_VARIANTS:
+            device_drivers = {"waveshare": waveshare}
+        elif waveshare.variant in NO_SPI_VARIANTS:
             device_drivers = {"waveshare": waveshare, "noSpi": DRIVERS["noSpi"]}
         else:
             device_drivers = {"waveshare": waveshare, "spi": DRIVERS["spi"]}

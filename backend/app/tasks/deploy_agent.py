@@ -18,7 +18,7 @@ from app.utils.ssh_utils import (
 )
 from app.utils.local_exec import exec_local_command
 from app.tasks._frame_deployer import FrameDeployer
-from .utils import find_nim_v2, find_nimbase_file
+from .utils import find_nim_v2, find_nimbase_file, get_fresh_frame
 
 async def deploy_agent(id: int, redis: Redis) -> None:  # noqa: N802
     await redis.enqueue_job("deploy_agent", id=id)
@@ -28,7 +28,7 @@ async def deploy_agent_task(ctx: dict[str, Any], id: int):  # noqa: N802
     db: Session = ctx["db"]
     redis: Redis = ctx["redis"]
 
-    frame: Optional[Frame] = db.get(Frame, id)
+    frame: Optional[Frame] = get_fresh_frame(db, id)
     if frame is None:  # keep the early-exit guard
         raise Exception("Frame not found")
 

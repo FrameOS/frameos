@@ -538,7 +538,7 @@ CFLAGS = {compiler_flags_text} $(EXTRA_CFLAGS)
 all: $(LIBRARY)
 
 $(LIBRARY): $(OBJECTS)
-\t@echo "Linking $(LIBRARY)"
+\t@echo "🟣 Linking $(LIBRARY)"
 \t@echo "LIBS: $(LIBS)"
 \t@$(CC) -shared -o $(LIBRARY) $(OBJECTS) $(LIBS)
 \t@$(STRIP) --strip-unneeded $(LIBRARY) 2>/dev/null || true
@@ -548,14 +548,22 @@ clean:
 
 pre-build:
 \t@mkdir -p ../../../cache
-\t@echo "Compiling driver $(LIBRARY)"
+\t@echo "🟣 Compiling driver $(LIBRARY)"
 
 $(OBJECTS): pre-build
 
 %.o: %.c
 \t@if [ ! -e $@ ]; then \\
 \t\tmd5sum=$$(md5sum $< | awk '{{print $$1}}'); \\
-\t\tfile=$$(echo '$<' | sed 's/@s/\\//g' | sed 's/@m//g' | sed 's/.*nimble\\/pkgs2\\/\\(.*\\)/\\1/' | sed 's/.*\\/\\(nim\\/lib\\/.*\\)/\\1/'); \\
+\t\traw='$<'; \\
+\t\tif printf '%s' "$$raw" | grep -q '\\.nim\\.c$$'; then \\
+\t\t\tencoded=$${{raw%.nim.c}}; \\
+\t\t\tfile=$$(printf '%s' "$$encoded" | sed 's/@f/\\//g; s/@z//g; s/@m/-/g' | tr 'A-Za-z' 'N-ZA-Mn-za-m'); \\
+\t\t\tfile="$${{file}}.nim"; \\
+\t\telse \\
+\t\t\tfile="$$raw"; \\
+\t\tfi; \\
+\t\tfile=$$(printf '%s' "$$file" | sed 's#^\\(\\.\\./\\)*##' | sed 's#.*nimble/pkgs2/##' | sed 's#.*nim/lib/#nim/lib/#'); \\
 \t\tcache_obj=../../../cache/$$md5sum.o; \\
 \t\tif [ -f "$$cache_obj" ]; then \\
 \t\t\tln -s "$$cache_obj" $@; \\

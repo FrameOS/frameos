@@ -211,6 +211,10 @@ async def test_create_local_build_archive_generates_shared_driver_makefiles(
     driver_makefile_text = driver_makefile.read_text(encoding="utf-8")
     assert "LIBRARY = httpUpload.so" in driver_makefile_text
     assert "STRIP ?= strip" in driver_makefile_text
+    assert "🟣 Compiling driver $(LIBRARY)" in driver_makefile_text
+    assert "🟣 Linking $(LIBRARY)" in driver_makefile_text
+    assert "sed 's/@f/" in driver_makefile_text
+    assert "tr 'A-Za-z' 'N-ZA-Mn-za-m'" in driver_makefile_text
     assert "--strip-unneeded $(LIBRARY)" in driver_makefile_text
     assert "-ffunction-sections" in driver_makefile_text
     assert "-fdata-sections" in driver_makefile_text

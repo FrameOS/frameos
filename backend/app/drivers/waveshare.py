@@ -83,6 +83,10 @@ NO_SPI_VARIANTS = {
     "EPD_13in3e",
 }
 
+BOOT_CONFIG_SPI_VARIANTS = {
+    "EPD_10in3",
+}
+
 BOOT_CONFIG_LINES_BY_VARIANT = {
     "EPD_10in3": [
         "dtoverlay=spi0-0cs",
@@ -124,25 +128,34 @@ def nim_string_seq_literal(values: list[str]) -> str:
     return "@[" + ", ".join(json.dumps(value) for value in values) + "]"
 
 def waveshare_setup_imports_nim(variant_key: str) -> str:
-    setup_driver = "noSpi" if variant_key in NO_SPI_VARIANTS else "spi"
-    return "\n".join([
+    setup_driver = waveshare_setup_driver(variant_key)
+    imports = [
         "import frameos/device_setup",
         "import frameos/driver_context",
-        f"import drivers/{setup_driver}/{setup_driver} as {setup_driver}SetupDriver",
-    ])
+    ]
+    if setup_driver:
+        imports.append(f"import drivers/{setup_driver}/{setup_driver} as {setup_driver}SetupDriver")
+    return "\n".join(imports)
+
+def waveshare_setup_driver(variant_key: str) -> str | None:
+    if variant_key in BOOT_CONFIG_SPI_VARIANTS:
+        return None
+    return "noSpi" if variant_key in NO_SPI_VARIANTS else "spi"
 
 def waveshare_setup_body_nim(variant_key: str) -> str:
-    setup_driver = "noSpi" if variant_key in NO_SPI_VARIANTS else "spi"
-    setup_calls = [
-        f'addSetupResult(result, runSetupStep("{setup_driver}", proc(): SetupResult = {setup_driver}SetupDriver.setup()))'
-    ]
+    setup_driver = waveshare_setup_driver(variant_key)
+    setup_calls = []
+    if setup_driver:
+        setup_calls.append(
+            f'addSetupResult(result, runSetupStep("{setup_driver}", proc(): SetupResult = {setup_driver}SetupDriver.setup()))'
+        )
     boot_config_lines = BOOT_CONFIG_LINES_BY_VARIANT.get(variant_key, [])
     if boot_config_lines:
         setup_calls.append(
             'addSetupResult(result, runSetupStep("bootConfig", proc(): SetupResult = '
             f"setupBootConfig({nim_string_seq_literal(boot_config_lines)})))"
         )
-    return "\n  ".join(setup_calls)
+    return "\n  ".join(setup_calls or ["result = setupOk()"])
 
 def get_proc_arguments(line: str, variant_key: str) -> list[str]:
     unknown_color = "FourGray" if "4Gray" in line else "Unknown"
