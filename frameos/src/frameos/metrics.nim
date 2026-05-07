@@ -1,6 +1,7 @@
 import json, os, strutils, sequtils, posix
 import frameos/types
 import frameos/channels
+import frameos/runtime_diagnostics
 
 type
   MetricsLoggerThread = ref object
@@ -143,7 +144,7 @@ proc getProcessMemoryUsage*(self: MetricsLoggerThread): JsonNode =
   defaultProcessMemoryUsage()
 
 proc logMetrics(self: MetricsLoggerThread) =
-  log(%*{
+  var payload = %*{
     "event": "metrics",
     "load": self.getLoadAverage(),
     "cpuTemperature": self.getCPUTemperature(),
@@ -151,7 +152,10 @@ proc logMetrics(self: MetricsLoggerThread) =
     "processMemory": self.getProcessMemoryUsage(),
     "cpuUsage": self.getCPUUsage(),
     "openFileDescriptors": self.getOpenFileDescriptors(),
-  })
+  }
+  if self.frameConfig.debug:
+    payload["runtime"] = runtimeDiagnosticsSnapshot()
+  log(payload)
 
 proc runMetricsLoop(self: MetricsLoggerThread, maxIterations = -1) {.gcsafe.} =
   let ms = (self.frameConfig.metricsInterval * 1000).int

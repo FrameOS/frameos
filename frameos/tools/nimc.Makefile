@@ -14,6 +14,7 @@ all: $(EXECUTABLE)
 
 $(EXECUTABLE): $(OBJECTS)
 	@echo "🟣 Linking frameos"
+	@if [ -f quickjs/libquickjs.a ] && command -v ranlib >/dev/null 2>&1; then ranlib quickjs/libquickjs.a; fi
 	@if [ "$${FRAMEOS_CROSS_VERBOSE:-}" = "1" ]; then echo "LIBS: $(LIBS)"; fi
 	@$(CC) -o $(EXECUTABLE) $(OBJECTS) $(LIBS)
 
