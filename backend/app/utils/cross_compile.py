@@ -229,6 +229,7 @@ class CrossCompiler:
         )
         extra_libs = shlex.quote(" ".join(f"-L{path}" for path in lib_dirs)) if lib_dirs else "''"
         build_lgpio_script = indent(self._build_lgpio_source_script(), " " * 16)
+        prepare_quickjs_script = indent(self._prepare_quickjs_archive_script(), " " * 16)
         make_jobs = (os.environ.get("FRAMEOS_CROSS_MAKE_JOBS") or "").strip()
         make_jobs_assignment = (
             f"make_jobs={shlex.quote(make_jobs)}"
@@ -262,6 +263,7 @@ class CrossCompiler:
                 fi
 
                 cd /src
+                {prepare_quickjs_script}
                 log_debug "Compiling generated C sources"
                 log_debug "Using make jobs: $make_jobs"
                 make -j"$make_jobs"
@@ -508,6 +510,24 @@ class CrossCompiler:
             f"{icon} No prebuilt lgpio sysroot component available; building lgpio from source during cross compilation",
         )
         self._build_lgpio_from_source = True
+
+    def _prepare_quickjs_archive_script(self) -> str:
+        return dedent(
+            """
+            if [ -d quickjs ]; then
+                if [ -f quickjs/Makefile ]; then
+                    log_debug "Rebuilding QuickJS archive for target"
+                    make -C quickjs clean >/dev/null
+                    make -C quickjs libquickjs.a
+                elif [ -f quickjs/libquickjs.a ]; then
+                    log_debug "Indexing QuickJS archive"
+                fi
+                if [ -f quickjs/libquickjs.a ]; then
+                    ranlib quickjs/libquickjs.a
+                fi
+            fi
+            """
+        ).strip()
 
     def _build_lgpio_source_script(self) -> str:
         if not self._build_lgpio_from_source:
