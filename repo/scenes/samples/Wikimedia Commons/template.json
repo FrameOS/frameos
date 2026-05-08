@@ -1,0 +1,9 @@
+{
+  "name": "Wikimedia Commons",
+  "description": "Display Wikimedia Commons Picture of the Day or random Commons images.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 960,
+  "imageHeight": 431,
+  "scenes": "./scenes.json"
+}
