@@ -31,10 +31,15 @@ task assets, "Create assets":
   exec "python tools/prepare_assets.py"
 
 task build_quickjs, "Build QuickJS":
-  echo "Downloading and building QuickJS..."
   if dirExists("quickjs"):
     echo "QuickJS directory already exists, skipping download and build."
     return
+  echo "Downloading prebuilt QuickJS if available..."
+  exec "python tools/install_prebuilt_quickjs.py || true"
+  if dirExists("quickjs"):
+    echo "Using prebuilt QuickJS."
+    return
+  echo "Downloading and building QuickJS from source..."
   exec "curl -L -o quickjs.tar.xz https://bellard.org/quickjs/quickjs-2025-04-26.tar.xz"
   exec "echo '2f20074c25166ef6f781f381c50d57b502cb85d470d639abccebbef7954c83bf  quickjs.tar.xz' | sha256sum -c -"
   exec "tar -xf quickjs.tar.xz"

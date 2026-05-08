@@ -43,6 +43,10 @@ REMOTE_BUILD_APT_PACKAGES = ("build-essential",)
 
 HELPER_ENSURE_NTP = "ensure_ntp"
 FRAMEOS_AVAILABLE_COMMANDS = ("start", "check", "setup", "help")
+REMOTE_BUILD_FEATURE_CFLAGS = {
+    "amd64": ("-mavx2", "-mavx", "-msse4.1", "-mssse3", "-mpclmul", "-mvpclmulqdq"),
+    "x86_64": ("-mavx2", "-mavx", "-msse4.1", "-mssse3", "-mpclmul", "-mvpclmulqdq"),
+}
 
 
 @dataclass(slots=True)
@@ -771,11 +775,13 @@ class FrameDeployWorkflow:
             await self.deployer.exec_command(
                 f"ln -s /srv/frameos/vendor/quickjs/{quickjs_dirname} {remote_build_dir}/quickjs",
             )
+        extra_cflags = " ".join(REMOTE_BUILD_FEATURE_CFLAGS.get(build_result.target.arch.lower(), ()))
+        make_prefix = f"EXTRA_CFLAGS={shlex.quote(extra_cflags)} " if extra_cflags else ""
         await self.deployer.exec_command(
             f"cd {remote_build_dir} && "
             "PARALLEL_MEM=$(awk '/MemTotal/{printf \"%.0f\\n\", $2/1024/250}' /proc/meminfo) && "
             "PARALLEL=$(($PARALLEL_MEM < $(nproc) ? $PARALLEL_MEM : $(nproc))) && "
-            "make -j$PARALLEL",
+            f"{make_prefix}make -j$PARALLEL",
             timeout=3600,
         )
         await self.deployer.exec_command(
