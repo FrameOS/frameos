@@ -49,7 +49,7 @@ jobs:
           pip install -r backend/requirements.txt
       - name: Install Nim (prebuilt)
         env:
-          NIM_VERSION: 2.2.4
+          NIM_VERSION: 2.2.10
         run: |
           set -euo pipefail
           distro=$(lsb_release -si | tr '[:upper:]' '[:lower:]')
@@ -65,8 +65,8 @@ jobs:
           mkdir -p "$HOME/.nim"
           curl -L "https://archive.frameos.net/prebuilt-deps/${nim_slug}/nim-${NIM_VERSION}.tar.gz" -o /tmp/nim.tar.gz
           tar -xzf /tmp/nim.tar.gz -C "$HOME/.nim"
-          rm -rf "$HOME/.nim/nim-2.2.4/nim/bin"
-          mv $HOME/.nim/nim-2.2.4/nim/* "$HOME/.nim/nim-2.2.4/"
+          rm -rf "$HOME/.nim/nim-${NIM_VERSION}/nim/bin"
+          mv "$HOME/.nim/nim-${NIM_VERSION}/nim/"* "$HOME/.nim/nim-${NIM_VERSION}/"
           echo "$HOME/.nim/nim-${NIM_VERSION}/bin" >> "$GITHUB_PATH"
           export PATH="$HOME/.nim/nim-${NIM_VERSION}/bin:$PATH"
           nim --version

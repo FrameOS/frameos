@@ -31,13 +31,13 @@ directories so you can keep several revisions side-by-side, e.g.:
 
 ```
 metadata.json
-nim-2.2.4/bin/*
-nim-2.2.4/lib/*
+nim-2.2.10/bin/*
+nim-2.2.10/lib/*
 quickjs-2025-04-26/include/quickjs/*.h
 quickjs-2025-04-26/lib/libquickjs.a
 lgpio-v0.2.2/include/*.h
 lgpio-v0.2.2/lib/*
-nim-2.2.4/.build-info
+nim-2.2.10/.build-info
 quickjs-2025-04-26/.build-info
 lgpio-v0.2.2/.build-info
 ```
@@ -61,7 +61,7 @@ QuickJS from source when no published component matches.
 Override the versions with environment variables when invoking the script:
 
 ```bash
-NIM_VERSION=2.2.4 QUICKJS_VERSION=2025-04-26 \
+NIM_VERSION=2.2.10 QUICKJS_VERSION=2025-04-26 \
 LGPIO_VERSION=v0.2.2 ./tools/prebuilt-deps/build.sh
 ```
 
@@ -109,7 +109,7 @@ python tools/prebuilt-deps/r2_sync.py download
 # Upload whatever you have built locally (matching build/prebuilt-deps/*)
 python tools/prebuilt-deps/r2_sync.py upload
 
-# End-to-end sync: download, rebuild missing targets, upload archives
+# End-to-end sync: download, rebuild missing or stale targets, upload archives
 python tools/prebuilt-deps/r2_sync.py sync
 ```
 

@@ -225,7 +225,7 @@ def test_compute_release_input_hash_tracks_source_and_target(tmp_path: Path):
         slug=target.slug,
         target=target,
         input_root=input_root,
-        nim_path="/nix/store/nim-2.2.4/bin/nim",
+        nim_path="/nix/store/nim-2.2.10/bin/nim",
         driver_library_names=["httpUpload.so"],
     )
     source.write_text("echo 2\n", encoding="utf-8")
@@ -233,7 +233,7 @@ def test_compute_release_input_hash_tracks_source_and_target(tmp_path: Path):
         slug=target.slug,
         target=target,
         input_root=input_root,
-        nim_path="/nix/store/nim-2.2.4/bin/nim",
+        nim_path="/nix/store/nim-2.2.10/bin/nim",
         driver_library_names=["httpUpload.so"],
     )
     arm_target = cross_module.TARGET_MAP["debian-trixie-arm64"]
@@ -241,7 +241,7 @@ def test_compute_release_input_hash_tracks_source_and_target(tmp_path: Path):
         slug=arm_target.slug,
         target=arm_target,
         input_root=input_root,
-        nim_path="/nix/store/nim-2.2.4/bin/nim",
+        nim_path="/nix/store/nim-2.2.10/bin/nim",
         driver_library_names=["httpUpload.so"],
     )
 

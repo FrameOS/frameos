@@ -151,7 +151,7 @@ jobs:
 
       - name: Install Nim (prebuilt)
         env:
-          NIM_VERSION: 2.2.4
+          NIM_VERSION: 2.2.10
         run: |
           set -euo pipefail
           distro=$(lsb_release -si | tr '[:upper:]' '[:lower:]')
