@@ -83,6 +83,7 @@ async def _run_create_local_build_archive(tmp_path: Path, monkeypatch: pytest.Mo
     temp_dir = tmp_path / "temp"
     source_dir.mkdir()
     temp_dir.mkdir()
+    (tmp_path / "versions.json").write_text("{\"frameos\":\"1.2.3+abc\"}\n", encoding="utf-8")
     (source_dir / "tools").mkdir()
     (source_dir / "tools" / "nimc.Makefile").write_text(
         "LIBS =\nCFLAGS =\nall:\n\t@true\n",
@@ -135,6 +136,7 @@ async def test_create_local_build_archive_runs_assets_task_without_env_switch(
     assert commands
     assert "cd " in commands[0]
     assert "nimble assets -y && nimble setup &&" in commands[0]
+    assert "--define:frameosVersion:1.2.3+abc" in commands[0]
 
 
 @pytest.mark.asyncio
@@ -211,6 +213,10 @@ async def test_create_local_build_archive_generates_shared_driver_makefiles(
     driver_makefile_text = driver_makefile.read_text(encoding="utf-8")
     assert "LIBRARY = httpUpload.so" in driver_makefile_text
     assert "STRIP ?= strip" in driver_makefile_text
+    assert "🟣 Compiling driver $(LIBRARY)" in driver_makefile_text
+    assert "🟣 Linking $(LIBRARY)" in driver_makefile_text
+    assert "sed 's/@f/" in driver_makefile_text
+    assert "tr 'A-Za-z' 'N-ZA-Mn-za-m'" in driver_makefile_text
     assert "--strip-unneeded $(LIBRARY)" in driver_makefile_text
     assert "-ffunction-sections" in driver_makefile_text
     assert "-fdata-sections" in driver_makefile_text

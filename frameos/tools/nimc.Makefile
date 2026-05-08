@@ -13,8 +13,9 @@ CFLAGS = -w -fmax-errors=3 -pthread -O3 -fno-strict-aliasing -fno-ident -fno-mat
 all: $(EXECUTABLE)
 
 $(EXECUTABLE): $(OBJECTS)
-	@echo "Linking frameos"
-	@echo "LIBS: $(LIBS)"
+	@echo "🟣 Linking frameos"
+	@if [ -f quickjs/libquickjs.a ] && command -v ranlib >/dev/null 2>&1; then ranlib quickjs/libquickjs.a; fi
+	@if [ "$${FRAMEOS_CROSS_VERBOSE:-}" = "1" ]; then echo "LIBS: $(LIBS)"; fi
 	@$(CC) -o $(EXECUTABLE) $(OBJECTS) $(LIBS)
 
 clean:
@@ -22,14 +23,22 @@ clean:
 
 pre-build:
 	@mkdir -p ../cache
-	@echo "Compiling, largest files first. This could take a while."
+	@echo "🟣 Compiling frameos, this could take a while"
 
 $(OBJECTS): pre-build
 
 %.o: %.c
 	@if [ ! -e $@ ]; then \
 		md5sum=$$(md5sum $< | awk '{print $$1}'); \
-		file=$$(echo '$<' | sed 's/@s/\//g' | sed 's/@m//g' | sed 's/.*nimble\/pkgs2\/\(.*\)/\1/' | sed 's/.*\/\(nim\/lib\/.*\)/\1/'); \
+		raw='$<'; \
+		if printf '%s' "$$raw" | grep -q '\.nim\.c$$'; then \
+			encoded=$${raw%.nim.c}; \
+			file=$$(printf '%s' "$$encoded" | sed 's/@f/\//g; s/@z//g; s/@m/-/g' | tr 'A-Za-z' 'N-ZA-Mn-za-m'); \
+			file="$${file}.nim"; \
+		else \
+			file="$$raw"; \
+		fi; \
+		file=$$(printf '%s' "$$file" | sed 's#^\(\.\./\)*##' | sed 's#.*nimble/pkgs2/##' | sed 's#.*nim/lib/#nim/lib/#'); \
 		cache_obj=../cache/$$md5sum.o; \
 		if [ -f "$$cache_obj" ]; then \
 			ln -s "$$cache_obj" $@; \
@@ -38,7 +47,8 @@ $(OBJECTS): pre-build
 			tmp_cache_obj="$$cache_obj.$$PPID.tmp"; \
 			cp $@ "$$tmp_cache_obj"; \
 			mv -n "$$tmp_cache_obj" "$$cache_obj" 2>/dev/null || rm -f "$$tmp_cache_obj"; \
-			echo "[$$(ls *.o | wc -l)/$(TOTAL)] $$file"; \
+			count=$$(ls *.o | wc -l | tr -d ' '); \
+			echo "[$$count/$(TOTAL)] $$file"; \
 		fi; \
 	fi
 

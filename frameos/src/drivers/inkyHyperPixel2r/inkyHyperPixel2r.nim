@@ -1,5 +1,6 @@
 import pixie, osproc
 import frameos/driver_context
+import frameos/device_setup
 
 import drivers/frameBuffer/frameBuffer as frameBuffer
 
@@ -22,6 +23,11 @@ proc init*(frameOS: DriverContext): Driver =
     logger: fbDriver.logger,
     mode: frameOS.frameConfig.mode,
   )
+
+proc setup*(frameOS: DriverContext = nil): SetupResult =
+  discard frameOS
+  setupPythonVendor("inkyHyperPixel2r")
+  result = setupOk()
 
 proc render*(self: Driver, image: Image) =
   frameBuffer.render(self, image)

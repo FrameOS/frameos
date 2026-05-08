@@ -56,6 +56,7 @@ def release_driver_specs() -> dict[str, Driver]:
         driver.name = release_waveshare_driver_name(variant)
         driver.variant = variant
         driver.import_path = f"waveshare/{driver.name}"
+        driver.setup_import_path = driver.import_path
         drivers[driver.name] = driver
 
     return drivers
@@ -68,6 +69,7 @@ def write_release_shared_drivers_nim(drivers: dict[str, Driver]) -> str:
             "DriverSpec("
             f'name: "{driver.name}", '
             f'libraryName: "{driver_library_filename(driver)}", '
+            f"canSetup: {str(bool(driver.setup_import_path)).lower()}, "
             f"canRender: {str(driver.can_render).lower()}, "
             f"canPng: {str(driver.can_png).lower()}, "
             f"canTurnOnOff: {str(driver.can_turn_on_off).lower()}"
@@ -84,6 +86,7 @@ import std/[dynlib, json, options, os, strutils]
 import pixie
 import frameos/types
 import frameos/driver_context as driverContext
+import frameos/device_setup
 import frameos/channels as hostChannels
 import frameos/driver_abi
 
@@ -91,6 +94,7 @@ type
   DriverSpec = object
     name: string
     libraryName: string
+    canSetup: bool
     canRender: bool
     canPng: bool
     canTurnOnOff: bool
@@ -176,6 +180,39 @@ proc loadRequiredSymbol[T](library: LibHandle, driverName: string, symbol: strin
         "error": "Missing symbol", "symbol": symbol}})
     return nil
   cast[T](address)
+
+proc setupSharedDriver(spec: DriverSpec, driverCtx: driverContext.DriverContext): SetupResult =
+  let path = driverLibraryPath(spec)
+  echo "FrameOS setup: shared driver " & spec.name & ": loading " & path
+  let library = loadLib(path)
+  if library.isNil:
+    echo "FrameOS setup: shared driver " & spec.name & ": failed to load " & path
+    raise newException(OSError, "Unable to load driver library: " & path)
+  try:
+    let setupProc = loadRequiredSymbol[DriverSetupProc](library, spec.name, "frameos_driver_setup")
+    if setupProc.isNil:
+      raise newException(OSError, "Missing setup symbol for driver: " & spec.name)
+    echo "FrameOS setup: shared driver " & spec.name & ": running setup"
+    result.rebootRequired = setupProc(cast[pointer](driverCtx))
+    echo "FrameOS setup: shared driver " & spec.name & ": setup complete"
+  finally:
+    unloadLib(library)
+
+proc setupSharedDrivers(frameOS: FrameOS): SetupResult =
+  let driverCtx = buildDriverContext(frameOS)
+  let specs = driverSpecsFor(frameOS)
+  echo "FrameOS setup: shared driver registry: selected " & $specs.len & " driver(s)"
+  for spec in specs:
+    if spec.canSetup:
+      let setupSpec = spec
+      addSetupResult(result, runSetupStep(setupSpec.name, proc(): SetupResult = setupSharedDriver(setupSpec, driverCtx)))
+      syncDriverContext(frameOS, driverCtx)
+
+proc setupDriverNames*(): seq[string] =
+  result = @[]
+
+proc setup*(frameOS: FrameOS): SetupResult =
+  addSetupResult(result, setupSharedDrivers(frameOS))
 
 proc init*(frameOS: FrameOS) =
   loadedDrivers = @[]

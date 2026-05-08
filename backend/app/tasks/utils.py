@@ -4,6 +4,17 @@ import subprocess
 import platform
 import hashlib
 
+from sqlalchemy.orm import Session
+
+from app.models.frame import Frame
+
+
+def get_fresh_frame(db: Session, id: int) -> Frame | None:
+    """Return the latest frame row when reusing a long-lived worker session."""
+    db.expire_all()
+    return db.get(Frame, id, populate_existing=True)
+
+
 def get_nim_version(executable_path: str):
     try:
         result = subprocess.run([executable_path, '--version'],
@@ -108,4 +119,3 @@ def compile_line_md5(input_str: str) -> str:
         else:
             words.append(word)
     return hashlib.md5(" ".join(words).encode()).hexdigest()
-

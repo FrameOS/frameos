@@ -9,7 +9,7 @@ import { Button } from '../../../../components/Button'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
 import { frameSettingsLogic } from '../FrameSettings/frameSettingsLogic'
 import { Spinner } from '../../../../components/Spinner'
-import { ArrowUpTrayIcon, ArrowPathIcon } from '@heroicons/react/24/solid'
+import { ArrowDownTrayIcon, ArrowUpTrayIcon, ArrowPathIcon } from '@heroicons/react/24/solid'
 import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
 
 function formatTimestamp(isoTimestamp: string): string {
@@ -75,32 +75,13 @@ function renderMetricsLog(rest: Record<string, any>): JSX.Element {
 export function Logs() {
   const inFrameAdminMode = isInFrameAdminMode()
   const { frameId } = useValues(frameLogic)
-  const { logs, logsLoading } = useValues(logsLogic({ frameId }))
+  const { logs, logsLoading, fullLogDownloading } = useValues(logsLogic({ frameId }))
+  const { downloadLog, downloadFullLog } = useActions(logsLogic({ frameId }))
   const [atBottom, setAtBottom] = useState(true)
   const virtuosoRef = useRef<VirtuosoHandle>(null)
   const shouldStickToBottomRef = useRef(true)
   const { buildCacheLoading } = useValues(frameSettingsLogic({ frameId }))
   const { clearBuildCache } = useActions(frameSettingsLogic({ frameId }))
-
-  const downloadLogs = () => {
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
-    const logContent = logs
-      .map((log) => {
-        const isoTimestamp = new Date(log.timestamp).toISOString()
-        return `[${isoTimestamp}] (${log.type}) ${log.line}`
-      })
-      .join('\n')
-    const blob = new Blob([logContent], { type: 'text/plain;charset=utf-8' })
-    const fileName = `frame-${frameId}-logs-${timestamp}.log`
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = fileName
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-    URL.revokeObjectURL(url)
-  }
 
   useEffect(() => {
     if (!shouldStickToBottomRef.current) {
@@ -129,8 +110,18 @@ export function Logs() {
         items={[
           {
             label: 'Download log',
-            onClick: downloadLogs,
+            onClick: downloadLog,
             icon: <ArrowUpTrayIcon className="w-5 h-5" />,
+          },
+          {
+            label: 'Download full log',
+            onClick: downloadFullLog,
+            icon: fullLogDownloading ? (
+              <Spinner color="white" className="w-4 h-4" />
+            ) : (
+              <ArrowDownTrayIcon className="w-5 h-5" />
+            ),
+            loading: fullLogDownloading,
           },
           ...(!inFrameAdminMode
             ? [

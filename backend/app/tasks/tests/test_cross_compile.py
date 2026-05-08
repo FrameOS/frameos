@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.tasks.prebuilt_deps import PrebuiltEntry
+from app.tasks.prebuilt_deps import PrebuiltEntry, resolve_prebuilt_target
 from app.utils.cross_compile import CrossCompiler, TargetMetadata
 
 
@@ -51,6 +51,10 @@ def write_component_payload(component: str, dest_dir, *, valid: bool) -> None:
         return
 
     raise AssertionError(f"Unexpected component: {component}")
+
+
+def test_resolve_prebuilt_target_maps_raspios_bullseye_arm64():
+    assert resolve_prebuilt_target("raspios", "bullseye", "aarch64") == "debian-bullseye-arm64"
 
 
 @pytest.mark.asyncio
@@ -105,3 +109,64 @@ async def test_ensure_prebuilt_component_rejects_invalid_download(tmp_path, monk
 
     assert result is None
     assert dest_dir.exists() is False
+
+
+@pytest.mark.asyncio
+async def test_ensure_lgpio_builds_from_source_without_prebuilt_sysroot(
+    tmp_path,
+):
+    compiler = CrossCompiler(
+        db=None,
+        redis=None,
+        frame=SimpleNamespace(id=1),
+        deployer=SimpleNamespace(build_id="build12345678"),
+        target=TargetMetadata(arch="aarch64", distro="raspios", version="bullseye"),
+        temp_dir=str(tmp_path / "tmp"),
+        prebuilt_entry=None,
+    )
+
+    await compiler._ensure_lgpio_in_sysroot()
+
+    assert compiler._build_lgpio_from_source is True
+    assert "Building lgpio v0.2.2 from source" in compiler._build_lgpio_source_script()
+
+
+@pytest.mark.asyncio
+async def test_run_docker_build_prepares_quickjs_archive_before_linking(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    temp_dir = tmp_path / "tmp"
+    build_dir = tmp_path / "build"
+    temp_dir.mkdir()
+    build_dir.mkdir()
+    captured_script: dict[str, str] = {}
+
+    compiler = CrossCompiler(
+        db=None,
+        redis=None,
+        frame=SimpleNamespace(id=1),
+        deployer=SimpleNamespace(build_id="build12345678"),
+        target=TargetMetadata(arch="aarch64", distro="raspios", version="bullseye"),
+        temp_dir=str(temp_dir),
+        prebuilt_entry=None,
+    )
+
+    async def fake_ensure_toolchain_image() -> str:
+        return "frameos-cross-test"
+
+    async def fake_exec_local_command(_db, _redis, _frame, _cmd, **_kwargs):
+        captured_script["content"] = (temp_dir / "frameos-cross-build.sh").read_text()
+        return 0, "", ""
+
+    monkeypatch.setattr(compiler, "_ensure_toolchain_image", fake_ensure_toolchain_image)
+    monkeypatch.setattr("app.utils.cross_compile.exec_local_command", fake_exec_local_command)
+
+    result = await compiler._run_docker_build(str(build_dir))
+
+    script = captured_script["content"]
+    assert result == str(build_dir / "frameos")
+    assert "Rebuilding QuickJS archive for target" in script
+    assert "make -C quickjs clean" in script
+    assert "make -C quickjs libquickjs.a" in script
+    assert script.index("make -C quickjs libquickjs.a") < script.index("make -j\"$make_jobs\"")

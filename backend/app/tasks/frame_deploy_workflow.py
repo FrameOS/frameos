@@ -42,6 +42,7 @@ REMOTE_RUNTIME_APT_PACKAGES = (
 REMOTE_BUILD_APT_PACKAGES = ("build-essential",)
 
 HELPER_ENSURE_NTP = "ensure_ntp"
+FRAMEOS_AVAILABLE_COMMANDS = ("start", "check", "setup", "help")
 
 
 @dataclass(slots=True)
@@ -86,7 +87,6 @@ class VendorSyncPlan:
     key: str
     vendor_folder: str
     label: str
-    setup_commands: list[str] = field(default_factory=list)
     preserve_remote_paths: tuple[str, ...] = field(default_factory=tuple)
 
 
@@ -206,6 +206,18 @@ class FrameDeployWorkflow:
             temp_dir=temp_dir,
         )
 
+    def _previous_frameos_commands(self) -> list[str]:
+        previous_deploy = self.frame.last_successful_deploy
+        if not isinstance(previous_deploy, dict):
+            return []
+        commands = previous_deploy.get("frameos_commands")
+        if not isinstance(commands, list):
+            return []
+        return [command for command in commands if isinstance(command, str)]
+
+    def _current_frameos_supports_command(self, command: str) -> bool:
+        return command in self._previous_frameos_commands()
+
     async def plan(self, mode: str) -> FrameDeployPlan:
         frame_dict = self.frame.to_dict()
         frame_dict.pop("last_successful_deploy", None)
@@ -273,10 +285,13 @@ class FrameDeployWorkflow:
             frame_dict["frameos_version"] = previous_frameos_version
         else:
             frame_dict["frameos_version"] = current_frameos_version()
+        previous_commands = self._previous_frameos_commands()
+        if previous_commands:
+            frame_dict["frameos_commands"] = previous_commands
 
         notes = [
             f"Detected distro: {distro}",
-            "Fast deploy only updates frame metadata and interpreted scene payloads.",
+            "Fast deploy updates frame metadata and scene payloads, runs FrameOS setup when supported, then reloads FrameOS.",
         ]
         if tls_changed:
             notes.append("TLS settings changed; plan will restart FrameOS instead of using the reload endpoint.")
@@ -300,6 +315,8 @@ class FrameDeployWorkflow:
 
         if distro not in {"raspios", "debian", "ubuntu"}:
             raise Exception(f"Unsupported target distro '{distro}'")
+        frame_dict["frameos_version"] = current_frameos_version()
+        frame_dict["frameos_commands"] = list(FRAMEOS_AVAILABLE_COMMANDS)
 
         drivers = drivers_for_frame(self.frame)
         driver_names = sorted(drivers.keys())
@@ -366,9 +383,6 @@ class FrameDeployWorkflow:
             if not lgpio_installed:
                 package_plans.append(await self._plan_package("liblgpio-dev", "GPIO/Waveshare driver support"))
 
-        for pkg_name in self.deployer.get_apt_packages():
-            package_plans.append(await self._plan_package(pkg_name, "app-declared apt dependency"))
-
         if drivers.get("inkyPython"):
             package_plans.extend(
                 [
@@ -392,7 +406,6 @@ class FrameDeployWorkflow:
                     key="inkyPython",
                     vendor_folder=inky_python.vendor_folder or "",
                     label="inkyPython vendor files",
-                    setup_commands=[self._python_vendor_setup_command(inky_python.vendor_folder or "")],
                     preserve_remote_paths=("env", "requirements.txt.sha256sum"),
                 )
             )
@@ -402,7 +415,6 @@ class FrameDeployWorkflow:
                     key="inkyHyperPixel2r",
                     vendor_folder=inky_hyperpixel.vendor_folder or "",
                     label="inkyHyperPixel2r vendor files",
-                    setup_commands=[self._python_vendor_setup_command(inky_hyperpixel.vendor_folder or "")],
                     preserve_remote_paths=("env", "requirements.txt.sha256sum"),
                 )
             )
@@ -499,9 +511,21 @@ class FrameDeployWorkflow:
         try:
             await self.deployer._upload_frame_json_atomically("/srv/frameos/current/frame.json")
             await self.deployer._upload_scenes_json_atomically("/srv/frameos/current/scenes.json.gz", gzip=True)
+            await self.deployer._upload_all_scenes_json_atomically("/srv/frameos/current/all_scenes.json.gz", gzip=True)
 
             if not plan.fast_deploy:
                 raise RuntimeError("Fast deploy plan missing")
+
+            setup_requires_reboot = await self._run_current_setup()
+            if setup_requires_reboot:
+                frame.status = "starting"
+                frame.last_successful_deploy = plan.frame_dict
+                frame.last_successful_deploy_at = datetime.now(timezone.utc)
+                await update_frame(self.db, self.redis, frame)
+                await self.deployer.exec_command("sudo systemctl enable frameos.service")
+                await log(self.db, self.redis, int(frame.id), "stdinfo", f"{icon} Deployed! Rebooting device after setup changes")
+                await self.deployer.exec_command("sudo reboot")
+                return
 
             if plan.fast_deploy.tls_settings_changed:
                 await log(self.db, self.redis, int(frame.id), "stdout", "- TLS settings changed, restarting FrameOS service")
@@ -538,6 +562,7 @@ class FrameDeployWorkflow:
         frame.status = "deploying"
         await update_frame(self.db, self.redis, frame)
         build_id = plan.build_id
+        stopped_frameos_for_setup = False
 
         await self.deployer.log("stdout", f"{icon} Deploying frame {frame.name} with build id {build_id}")
 
@@ -562,6 +587,8 @@ class FrameDeployWorkflow:
                 build_result=build_result,
                 build_id=build_id,
             )
+            stopped_frameos_for_setup = await self._stop_frameos_for_release_setup()
+            await self._run_release_setup(build_id=build_id, post_deploy=full_plan.post_deploy)
             await self._install_and_activate_release(build_id)
             await sync_assets(self.db, self.redis, frame)
             await self._cleanup_release_artifacts()
@@ -569,12 +596,22 @@ class FrameDeployWorkflow:
 
             frame.status = "starting"
             plan.frame_dict["frameos_version"] = current_frameos_version()
+            plan.frame_dict["frameos_commands"] = list(FRAMEOS_AVAILABLE_COMMANDS)
             frame.last_successful_deploy = plan.frame_dict
             frame.last_successful_deploy_at = datetime.now(timezone.utc)
             await update_frame(self.db, self.redis, frame)
         except Exception:
             frame.status = "uninitialized"
             await update_frame(self.db, self.redis, frame)
+            if stopped_frameos_for_setup:
+                try:
+                    await self.deployer.log("stdout", f"{icon} Restarting previous FrameOS service after failed deploy")
+                    await self.deployer.restart_service("frameos")
+                except Exception as restart_error:
+                    await self.deployer.log(
+                        "stderr",
+                        f"Failed to restart previous FrameOS service after failed deploy: {restart_error}",
+                    )
             raise
 
     async def _mark_stuck_deploy_as_undeployed(self) -> None:
@@ -757,6 +794,7 @@ class FrameDeployWorkflow:
 
     async def _upload_release_metadata(self, build_id: str) -> None:
         await self.deployer._upload_scenes_json(f"{self._release_dir(build_id)}/scenes.json.gz", gzip=True)
+        await self.deployer._upload_all_scenes_json(f"{self._release_dir(build_id)}/all_scenes.json.gz", gzip=True)
         await self.deployer._upload_frame_json(f"{self._release_dir(build_id)}/frame.json")
 
     async def _sync_vendor_dependencies(
@@ -776,8 +814,62 @@ class FrameDeployWorkflow:
                 build_id,
                 vendor_plan.preserve_remote_paths,
             )
-            for command in vendor_plan.setup_commands:
-                await self.deployer.exec_command(command)
+
+    async def _run_release_setup(self, *, build_id: str, post_deploy: dict[str, Any]) -> None:
+        setup_requires_reboot = await self._run_setup_in_directory(self._release_dir(build_id))
+        if setup_requires_reboot:
+            post_deploy["final_action"] = "reboot"
+
+    async def _stop_frameos_for_release_setup(self) -> bool:
+        await self.deployer.log("stdout", f"{icon} Stopping running FrameOS before device setup")
+        status = await self.deployer.exec_command("sudo service frameos stop", raise_on_error=False)
+        if status != 0:
+            await self.deployer.log(
+                "stderr",
+                f"Could not stop FrameOS before device setup; continuing with setup anyway (exit code {status})",
+            )
+            return False
+        return True
+
+    async def _run_current_setup(self) -> bool:
+        if not self._current_frameos_supports_command("setup"):
+            await self.deployer.log(
+                "stdout",
+                f"{icon} Skipping FrameOS device setup; current FrameOS does not list the setup command",
+            )
+            return False
+        return await self._run_setup_in_directory("/srv/frameos/current")
+
+    async def _run_setup_in_directory(self, path: str) -> bool:
+        await self.deployer.log("stdout", f"{icon} Running FrameOS device setup")
+        setup_status = await self.deployer.exec_command(
+            f"cd {shlex.quote(path)} && sudo ./frameos setup",
+            raise_on_error=False,
+            log_command="sudo ./frameos setup",
+        )
+        if setup_status == 2:
+            return True
+        if setup_status != 0:
+            await self._log_setup_failure_diagnostics(setup_status)
+            raise RuntimeError(f"FrameOS setup failed with exit code {setup_status}")
+        return False
+
+    async def _log_setup_failure_diagnostics(self, setup_status: int) -> None:
+        await self.deployer.log("stderr", f"FrameOS setup exited with code {setup_status}; collecting diagnostics")
+        diagnostics = (
+            ("memory usage", "free -m"),
+            (
+                "FrameOS processes",
+                "ps -eo pid,ppid,stat,rss,comm,args | grep -E '[f]rameos|[f]rameos_agent'",
+            ),
+            ("kernel messages", "sudo dmesg -T | tail -80"),
+        )
+        for label, command in diagnostics:
+            await self.deployer.exec_command(
+                command,
+                raise_on_error=False,
+                log_command=f"diagnostics: {label}",
+            )
 
     async def _install_and_activate_release(self, build_id: str) -> None:
         with open("../frameos/frameos.service", "r", encoding="utf-8") as f:
@@ -837,44 +929,9 @@ class FrameDeployWorkflow:
     def _remote_build_archive_path(build_id: str) -> str:
         return f"/srv/frameos/build/build_{build_id}.tar.gz"
 
-    @staticmethod
-    def _python_vendor_setup_command(vendor_folder: str) -> str:
-        return (
-            f"cd /srv/frameos/vendor/{vendor_folder} && "
-            "if [ ! -x env/bin/pip3 ]; then "
-            "rm -rf env && python3 -m venv env && "
-            "echo '> env/bin/pip3 install -r requirements.txt' && "
-            "env/bin/pip3 install -r requirements.txt && "
-            "sha256sum requirements.txt > requirements.txt.sha256sum; "
-            "elif sha256sum -c requirements.txt.sha256sum 2>/dev/null; then "
-            "echo 'requirements unchanged; reusing env'; "
-            "else "
-            "echo '> env/bin/pip3 install -r requirements.txt' && "
-            "env/bin/pip3 install -r requirements.txt && "
-            "sha256sum requirements.txt > requirements.txt.sha256sum; "
-            "fi"
-        )
-
     async def _run_post_deploy_cleanup(self, *, post_deploy: dict[str, Any]) -> None:
         await self.deployer.log("stdout", f"{icon} Running final cleanup scripts")
         boot_config = str(post_deploy.get("boot_config_path") or "/boot/config.txt")
-
-        i2c_plan = post_deploy.get("i2c") or {}
-        if i2c_plan.get("needs_boot_config_line"):
-            await self.deployer.exec_command(
-                'grep -q "^dtparam=i2c_vc=on$" ' + boot_config + ' || echo "dtparam=i2c_vc=on" | sudo tee -a ' + boot_config
-            )
-        if i2c_plan.get("needs_runtime_enable"):
-            await self.deployer.exec_command(
-                'command -v raspi-config > /dev/null && '
-                'sudo raspi-config nonint get_i2c | grep -q "1" && { sudo raspi-config nonint do_i2c 0; echo "I2C enabled"; } || echo "I2C already enabled"'
-            )
-
-        spi_action = post_deploy.get("spi_action")
-        if spi_action == "enable":
-            await self.deployer.exec_command("sudo raspi-config nonint do_spi 0")
-        elif spi_action == "disable":
-            await self.deployer.exec_command("sudo raspi-config nonint do_spi 1")
 
         if post_deploy.get("low_memory_masks_apt_daily"):
             await self.deployer.exec_command(
@@ -990,7 +1047,13 @@ class FrameDeployWorkflow:
         disable_caddy_service = await self._command_succeeds(
             "systemctl is-enabled caddy.service >/dev/null 2>&1 || systemctl is-active caddy.service >/dev/null 2>&1"
         )
-        must_reboot = bool(bootconfig_changes) or disable_userconfig
+        must_reboot = (
+            bool(bootconfig_changes)
+            or disable_userconfig
+            or i2c_needs_boot_config_line
+            or i2c_needs_runtime_enable
+            or spi_action != "unchanged"
+        )
 
         return {
             "boot_config_path": boot_config,

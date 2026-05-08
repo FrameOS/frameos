@@ -6,12 +6,11 @@ from typing import Any
 from arq import ArqRedis as Redis
 from sqlalchemy.orm import Session
 
-from app.models.frame import Frame
 from app.models.log import new_log as log
 from app.tasks._frame_deployer import FrameDeployer
 from app.tasks.frame_deploy_workflow import FrameDeployWorkflow
 
-from .utils import find_nim_v2
+from .utils import find_nim_v2, get_fresh_frame
 
 
 async def deploy_frame(id: int, redis: Redis) -> None:
@@ -22,7 +21,7 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int) -> None:
     db: Session = ctx["db"]
     redis: Redis = ctx["redis"]
 
-    frame = db.get(Frame, id)
+    frame = get_fresh_frame(db, id)
     if not frame:
         raise Exception("Frame not found")
 

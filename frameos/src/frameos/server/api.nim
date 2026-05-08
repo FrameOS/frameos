@@ -275,7 +275,8 @@ proc buildFrameImageResponse*(request: Request): tuple[status: httpcore.HttpCode
   if lastUpdate > 0.0:
     let lastModified = format(fromUnix(int64(lastUpdate)), "ddd, dd MMM yyyy HH:mm:ss 'GMT'", utc())
     headers["Last-Modified"] = lastModified
-  var driverErrorMessage = ""
+  var driverPreview = "unknown"
+  var driverPreviewError = ""
   try:
     let image = drivers.toPng(360 - globalFrameConfig.rotate, globalFrameConfig.flip)
     if image != "":
@@ -292,41 +293,48 @@ proc buildFrameImageResponse*(request: Request): tuple[status: httpcore.HttpCode
         })
       return (Http200, headers, image)
     else:
-      raise newException(Exception, "No image available")
+      driverPreview = "unavailable"
   except Exception as e:
-    driverErrorMessage = e.msg
-    try:
-      let image = getLastImagePng()
-      if logImageRequest:
-        log(%*{
-          "event": "http:image",
-          "source": "lastImage",
-          "status": int(Http200),
-          "sceneId": $sceneId,
-          "bytes": image.len,
-          "ms": (epochTime() - startedAt) * 1000.0,
-          "driverError": driverErrorMessage,
-          "processMemoryBefore": memoryBefore,
-          "processMemoryAfter": defaultProcessMemoryUsage(),
-        })
-      return (Http200, headers, image)
-    except Exception as fallbackError:
-      let image = renderError(globalFrameConfig.renderWidth(), globalFrameConfig.renderHeight(),
-        &"Error: {$fallbackError.msg}\n{$fallbackError.getStackTrace()}").encodeImage(PngFormat)
-      if logImageRequest:
-        log(%*{
-          "event": "http:image",
-          "source": "error",
-          "status": int(Http200),
-          "sceneId": $sceneId,
-          "bytes": image.len,
-          "ms": (epochTime() - startedAt) * 1000.0,
-          "driverError": driverErrorMessage,
-          "fallbackError": fallbackError.msg,
-          "processMemoryBefore": memoryBefore,
-          "processMemoryAfter": defaultProcessMemoryUsage(),
-        })
-      return (Http200, headers, image)
+    driverPreview = "error"
+    driverPreviewError = e.msg
+  try:
+    let image = getLastImagePng()
+    if logImageRequest:
+      var payload = %*{
+        "event": "http:image",
+        "source": "lastImage",
+        "status": int(Http200),
+        "sceneId": $sceneId,
+        "bytes": image.len,
+        "ms": (epochTime() - startedAt) * 1000.0,
+        "driverPreview": driverPreview,
+        "processMemoryBefore": memoryBefore,
+        "processMemoryAfter": defaultProcessMemoryUsage(),
+      }
+      if driverPreviewError.len > 0:
+        payload["driverPreviewError"] = %driverPreviewError
+      log(payload)
+    return (Http200, headers, image)
+  except Exception as fallbackError:
+    let image = renderError(globalFrameConfig.renderWidth(), globalFrameConfig.renderHeight(),
+      &"Error: {$fallbackError.msg}\n{$fallbackError.getStackTrace()}").encodeImage(PngFormat)
+    if logImageRequest:
+      var payload = %*{
+        "event": "http:image",
+        "source": "error",
+        "status": int(Http200),
+        "sceneId": $sceneId,
+        "bytes": image.len,
+        "ms": (epochTime() - startedAt) * 1000.0,
+        "driverPreview": driverPreview,
+        "fallbackError": fallbackError.msg,
+        "processMemoryBefore": memoryBefore,
+        "processMemoryAfter": defaultProcessMemoryUsage(),
+      }
+      if driverPreviewError.len > 0:
+        payload["driverPreviewError"] = %driverPreviewError
+      log(payload)
+    return (Http200, headers, image)
 
 proc renderControlPage*(request: Request) =
   var fieldsHtml = ""

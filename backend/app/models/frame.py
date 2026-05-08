@@ -13,6 +13,7 @@ from app.models.apps import get_app_configs
 from app.models.settings import get_settings_dict
 from app.utils.token import secure_token
 from app.utils.tls import generate_frame_tls_material, parse_certificate_not_valid_after
+from app.utils.versions import get_versions
 from app.websockets import publish_message
 
 
@@ -328,7 +329,9 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
     https_proxy = normalize_https_proxy(frame.https_proxy)
     network = frame.network or {}
     agent = frame.agent or {}
+    frameos_version = get_versions().get("frameos")
     frame_json: dict = {
+        **({"frameosVersion": frameos_version} if isinstance(frameos_version, str) and frameos_version else {}),
         "name": frame.name,
         "mode": frame.mode or 'rpios',
         "frameHost": frame.frame_host or "localhost",

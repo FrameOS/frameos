@@ -2,9 +2,13 @@ import json
 import pytest
 from unittest.mock import patch
 import httpx
+from datetime import datetime, timedelta
 
+from app.api.auth import get_current_user
+from app.fastapi import app
 from app.models import new_frame
 from app.models.frame import Frame
+from app.models.log import Log
 from app.models.user import User
 
 @pytest.mark.asyncio
@@ -36,6 +40,68 @@ async def test_api_frame_get_not_found(async_client):
     assert response.status_code == 404
     assert response.json()['detail'] == 'Frame not found'
 
+
+@pytest.mark.asyncio
+async def test_api_frame_logs_full_download_includes_all_persisted_logs(no_auth_client, db):
+    frame = Frame(
+        name="LogFrame",
+        mode="rpios",
+        frame_host="localhost",
+        frame_port=8787,
+        frame_access_key="key",
+        frame_access="private",
+        ssh_user="pi",
+        ssh_port=22,
+        server_host="localhost",
+        server_port=8989,
+        server_api_key="server-key",
+        server_send_logs=True,
+        status="uninitialized",
+        interval=300,
+        metrics_interval=60,
+        scenes=[],
+        apps=[],
+        scaling_mode="contain",
+        rotate=0,
+        assets_path="/srv/assets",
+        save_assets=True,
+        upload_fonts="",
+    )
+    db.add(frame)
+    db.commit()
+    db.refresh(frame)
+    base_timestamp = datetime(2026, 5, 8, 8, 0, 0)
+    db.add_all(
+        Log(
+            frame_id=frame.id,
+            type='stdout',
+            line=f'line {index}',
+            timestamp=base_timestamp + timedelta(seconds=index),
+        )
+        for index in range(1002)
+    )
+    db.commit()
+
+    app.dependency_overrides[get_current_user] = lambda: object()
+    try:
+        capped_response = await no_auth_client.get(f'/api/frames/{frame.id}/logs')
+        assert capped_response.status_code == 200
+        capped_logs = capped_response.json()['logs']
+        assert len(capped_logs) == 1000
+        assert capped_logs[0]['line'] == 'line 2'
+        assert capped_logs[-1]['line'] == 'line 1001'
+
+        full_response = await no_auth_client.get(f'/api/frames/{frame.id}/logs/full')
+        assert full_response.status_code == 200
+        assert full_response.headers['content-type'].startswith('text/plain')
+        assert 'attachment;' in full_response.headers['content-disposition']
+        assert f'frame-{frame.id}-full-logs-' in full_response.headers['content-disposition']
+        full_lines = full_response.text.splitlines()
+        assert len(full_lines) == 1002
+        assert full_lines[0].endswith('(stdout) line 0')
+        assert full_lines[-1].endswith('(stdout) line 1001')
+    finally:
+        app.dependency_overrides.clear()
 
 @pytest.mark.asyncio
 async def test_api_frame_get_image_cached(async_client, db, redis):

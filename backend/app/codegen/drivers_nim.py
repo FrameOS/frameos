@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 
 from app.drivers.drivers import Driver
@@ -38,6 +39,10 @@ def compiled_drivers(drivers: dict[str, Driver]) -> list[Driver]:
     return [driver for driver in drivers.values() if driver.import_path]
 
 
+def setup_drivers(drivers: dict[str, Driver]) -> list[Driver]:
+    return [driver for driver in drivers.values() if driver.setup_import_path or driver.lines]
+
+
 def driver_library_filename(driver: Driver) -> str:
     suffix = driver.name
     if driver.name == "waveshare" and driver.variant:
@@ -45,6 +50,14 @@ def driver_library_filename(driver: Driver) -> str:
         if safe_variant:
             suffix = f"{driver.name}_{safe_variant}"
     return f"{suffix}.so"
+
+
+def nim_string_literal(value: str) -> str:
+    return json.dumps(value)
+
+
+def nim_string_seq_literal(values: list[str]) -> str:
+    return "@[" + ", ".join(nim_string_literal(value) for value in values) + "]"
 
 
 def driver_context_helpers_nim() -> str:
@@ -83,13 +96,21 @@ proc buildDriverContext(frameOS: FrameOS): driverContext.DriverContext =
   for button in sourceConfig.gpioButtons:
     config.gpioButtons.add(driverContext.GPIOButton(pin: button.pin, label: button.label))
 
-  result = driverContext.DriverContext(
-    frameConfig: config,
-    logger: driverContext.DriverLogger(
+  var logger = driverContext.DriverLogger(
+    log: nil,
+    enabled: false,
+    debug: sourceConfig.debug,
+  )
+  if not frameOS.logger.isNil:
+    logger = driverContext.DriverLogger(
       log: frameOS.logger.log,
       enabled: frameOS.logger.enabled,
       debug: sourceConfig.debug,
-    ),
+    )
+
+  result = driverContext.DriverContext(
+    frameConfig: config,
+    logger: logger,
   )
 
 proc syncDriverContext(frameOS: FrameOS, context: driverContext.DriverContext) =
@@ -98,6 +119,69 @@ proc syncDriverContext(frameOS: FrameOS, context: driverContext.DriverContext) =
   frameOS.frameConfig.width = context.frameConfig.width
   frameOS.frameConfig.height = context.frameConfig.height
 """
+
+
+def setup_parts_nim(
+    drivers: dict[str, Driver],
+    include_compiled_drivers: bool = True,
+) -> tuple[list[str], list[str], list[str]]:
+    imports: list[str] = []
+    setup_calls: list[str] = []
+    names: list[str] = []
+    imported_aliases: set[str] = set()
+
+    for driver in setup_drivers(drivers):
+        if driver.import_path and not include_compiled_drivers:
+            continue
+        if driver.setup_import_path:
+            alias = f"{driver.name}SetupDriver"
+            if alias not in imported_aliases:
+                imports.append(f"import {driver.setup_import_path} as {alias}")
+                imported_aliases.add(alias)
+            setup_calls.append(
+                f'addSetupResult(result, runSetupStep("{driver.name}", proc(): SetupResult = {alias}.setup()))'
+            )
+            names.append(driver.name)
+        if driver.lines:
+            setup_calls.append(
+                f'addSetupResult(result, runSetupStep("{driver.name}", proc(): SetupResult = setupBootConfig({nim_string_seq_literal(driver.lines)})))'
+            )
+            names.append(driver.name)
+
+    return imports, setup_calls, names
+
+
+def setup_helpers_nim(
+    drivers: dict[str, Driver],
+    include_compiled_drivers: bool = True,
+    setup_proc_name: str = "setup",
+    setup_proc_exported: bool = True,
+    include_setup_driver_names: bool = True,
+) -> tuple[list[str], str, str]:
+    imports, setup_calls, names = setup_parts_nim(
+        drivers,
+        include_compiled_drivers=include_compiled_drivers,
+    )
+    newline = "\n"
+    setup_body = (newline + "  ").join(setup_calls or ["result = setupOk()"])
+    names_source = nim_string_seq_literal(names)
+    names_proc = (
+        f"""
+proc setupDriverNames*(): seq[string] =
+  {("return " + names_source) if names else "result = @[]"}
+"""
+        if include_setup_driver_names
+        else ""
+    )
+    setup_proc_star = "*" if setup_proc_exported else ""
+    code = f"""
+{names_proc}
+
+proc {setup_proc_name}{setup_proc_star}(frameOS: FrameOS): SetupResult =
+  discard frameOS
+  {setup_body}
+"""
+    return imports, code, names_source
 
 
 def driver_library_context_helpers_nim() -> str:
@@ -172,6 +256,7 @@ def write_static_drivers_nim(drivers: dict[str, Driver]) -> str:
     png_drivers: list[str] = []
     on_drivers = []
     off_drivers = []
+    setup_imports, setup_code, _setup_names = setup_helpers_nim(drivers)
 
     for driver in drivers.values():
         if driver.import_path:
@@ -192,7 +277,9 @@ def write_static_drivers_nim(drivers: dict[str, Driver]) -> str:
 import pixie
 import frameos/types
 import frameos/driver_context as driverContext
+import frameos/device_setup
 {newline.join(imports)}
+{newline.join(setup_imports)}
 {newline.join(vars)}
 {driver_context_helpers_nim()}
 
@@ -212,6 +299,8 @@ proc turnOn*() =
 
 proc turnOff*() =
   {(newline + '  ').join(off_drivers or ["discard"])}
+
+{setup_code}
     """
 
     return code
@@ -224,6 +313,7 @@ def write_shared_drivers_nim(drivers: dict[str, Driver]) -> str:
             "DriverSpec("
             f'name: "{driver.name}", '
             f'libraryName: "{driver_library_filename(driver)}", '
+            f"canSetup: {str(bool(driver.setup_import_path)).lower()}, "
             f"canRender: {str(driver.can_render).lower()}, "
             f"canPng: {str(driver.can_png).lower()}, "
             f"canTurnOnOff: {str(driver.can_turn_on_off).lower()}"
@@ -234,19 +324,31 @@ def write_shared_drivers_nim(drivers: dict[str, Driver]) -> str:
     spec_lines = ("," + newline + "  ").join(specs)
     if spec_lines:
         spec_lines = newline + "  " + spec_lines + newline
+    setup_imports, setup_local_code, _setup_names = setup_helpers_nim(
+        drivers,
+        include_compiled_drivers=False,
+        setup_proc_name="setupLocalDrivers",
+        setup_proc_exported=False,
+        include_setup_driver_names=False,
+    )
+    setup_names = [driver.name for driver in setup_drivers(drivers)]
+    setup_names_source = nim_string_seq_literal(setup_names)
 
     code = f"""
 import std/[dynlib, json, options, os]
 import pixie
 import frameos/types
 import frameos/driver_context as driverContext
+import frameos/device_setup
 import frameos/channels as hostChannels
 import frameos/driver_abi
+{newline.join(setup_imports)}
 
 type
   DriverSpec = object
     name: string
     libraryName: string
+    canSetup: bool
     canRender: bool
     canPng: bool
     canTurnOnOff: bool
@@ -281,6 +383,33 @@ proc loadRequiredSymbol[T](library: LibHandle, driverName: string, symbol: strin
         "error": "Missing symbol", "symbol": symbol}})
     return nil
   cast[T](address)
+
+proc setupSharedDriver(spec: DriverSpec, driverCtx: driverContext.DriverContext): SetupResult =
+  let path = driverLibraryPath(spec)
+  echo "FrameOS setup: shared driver " & spec.name & ": loading " & path
+  let library = loadLib(path)
+  if library.isNil:
+    echo "FrameOS setup: shared driver " & spec.name & ": failed to load " & path
+    raise newException(OSError, "Unable to load driver library: " & path)
+  try:
+    let setupProc = loadRequiredSymbol[DriverSetupProc](library, spec.name, "frameos_driver_setup")
+    if setupProc.isNil:
+      raise newException(OSError, "Missing setup symbol for driver: " & spec.name)
+    echo "FrameOS setup: shared driver " & spec.name & ": running setup"
+    result.rebootRequired = setupProc(cast[pointer](driverCtx))
+    echo "FrameOS setup: shared driver " & spec.name & ": setup complete"
+  finally:
+    unloadLib(library)
+
+proc setupSharedDrivers(frameOS: FrameOS): SetupResult =
+  echo "FrameOS setup: shared driver registry: building context"
+  let driverCtx = buildDriverContext(frameOS)
+  echo "FrameOS setup: shared driver registry: selected " & $driverSpecs.len & " driver(s)"
+  for spec in driverSpecs:
+    if spec.canSetup:
+      let setupSpec = spec
+      addSetupResult(result, runSetupStep(setupSpec.name, proc(): SetupResult = setupSharedDriver(setupSpec, driverCtx)))
+      syncDriverContext(frameOS, driverCtx)
 
 proc init*(frameOS: FrameOS) =
   loadedDrivers = @[]
@@ -340,6 +469,19 @@ proc turnOff*() =
   for driver in loadedDrivers:
     if driver.spec.canTurnOnOff and not driver.turnOff.isNil:
       driver.turnOff(driver.instance)
+
+{setup_local_code}
+
+proc setupDriverNames*(): seq[string] =
+  return {setup_names_source}
+
+proc setup*(frameOS: FrameOS): SetupResult =
+  echo "FrameOS setup: shared driver setup: starting"
+  addSetupResult(result, setupSharedDrivers(frameOS))
+  echo "FrameOS setup: shared driver setup: complete"
+  echo "FrameOS setup: local driver setup: starting"
+  addSetupResult(result, setupLocalDrivers(frameOS))
+  echo "FrameOS setup: local driver setup: complete"
     """
 
     return code
@@ -353,6 +495,21 @@ def write_driver_library_nim(driver: Driver) -> str:
     png_var = "\n  pngBuffer: string" if driver.can_png else ""
 
     image_import = "import pixie\n" if driver.can_render else ""
+
+    setup_import = ""
+    setup_proc = ""
+    setup_driver_alias = f"{driver.name}Driver"
+    if driver.setup_import_path:
+        if driver.setup_import_path != driver.import_path:
+            setup_driver_alias = f"{driver.name}SetupDriver"
+            setup_import = f"import drivers/{driver.setup_import_path} as {setup_driver_alias}\n"
+        setup_proc = f"""
+proc frameos_driver_setup*(driverContextPtr: pointer): bool {{.cdecl, exportc, dynlib.}} =
+  let hostContext = cast[DriverContext](driverContextPtr)
+  driverContextInstance = cloneDriverContext(hostContext)
+  result = {setup_driver_alias}.setup(driverContextInstance).rebootRequired
+  syncHostDriverContext(hostContext, driverContextInstance)
+"""
 
     render_proc = ""
     if driver.can_render:
@@ -402,11 +559,14 @@ import frameos/channels
 import frameos/driver_context
 import frameos/driver_abi
 import drivers/{driver.import_path} as {driver.name}Driver
+{setup_import}
 
 var
   driverContextInstance: DriverContext
   driverInstance: {driver.name}Driver.Driver{png_var}
 {driver_library_context_helpers_nim()}
+
+{setup_proc}
 
 proc frameos_driver_init*(driverContextPtr: pointer, logHook: HostLogProc, sendEventHook: HostSendEventProc): pointer {{.cdecl, exportc, dynlib.}} =
   setSharedHostCallbacks(logHook, sendEventHook)

@@ -9,7 +9,7 @@ import tarfile
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from textwrap import dedent
+from textwrap import dedent, indent
 from typing import Awaitable, Callable, Iterable
 
 import httpx
@@ -56,6 +56,9 @@ TOOLCHAIN_PACKAGES = (
     "build-essential ca-certificates curl git make pkg-config python3 python3-pip "
     "unzip xz-utils zlib1g-dev libssl-dev libffi-dev libjpeg-dev libfreetype6-dev libevdev-dev"
 )
+LGPIO_ARCHIVE_URL = "https://archive.frameos.net/source/vendor/lgpio-{version}.tar.gz"
+DEFAULT_LGPIO_VERSION = "v0.2.2"
+DEFAULT_LGPIO_SHA256 = "b08d8569d6dc8fa91a42ba1e37f620fdcb19d6bf2330e4b7d7301431ddbe124c"
 
 
 PLATFORM_MAP = {
@@ -129,6 +132,7 @@ class CrossCompiler:
         self._remote_root: Path | None = None
         self._sysroot_include_dirs: set[str] = set()
         self._sysroot_lib_dirs: set[str] = set()
+        self._build_lgpio_from_source = False
         for rel in ("usr/include", "usr/local/include", "usr/lib", "usr/local/lib"):
             (self.sysroot_dir / rel).mkdir(parents=True, exist_ok=True)
 
@@ -224,6 +228,8 @@ class CrossCompiler:
             shlex.quote(" ".join(extra_cflags_parts)) if extra_cflags_parts else "''"
         )
         extra_libs = shlex.quote(" ".join(f"-L{path}" for path in lib_dirs)) if lib_dirs else "''"
+        build_lgpio_script = indent(self._build_lgpio_source_script(), " " * 16)
+        prepare_quickjs_script = indent(self._prepare_quickjs_archive_script(), " " * 16)
         make_jobs = (os.environ.get("FRAMEOS_CROSS_MAKE_JOBS") or "").strip()
         make_jobs_assignment = (
             f"make_jobs={shlex.quote(make_jobs)}"
@@ -246,6 +252,7 @@ class CrossCompiler:
                 extra_cflags={extra_cflags}
                 extra_libs={extra_libs}
                 {make_jobs_assignment}
+                {build_lgpio_script}
                 if [ -n "$extra_cflags" ]; then
                     log_debug "Using extra CFLAGS: $extra_cflags"
                     export EXTRA_CFLAGS="$extra_cflags"
@@ -256,6 +263,7 @@ class CrossCompiler:
                 fi
 
                 cd /src
+                {prepare_quickjs_script}
                 log_debug "Compiling generated C sources"
                 log_debug "Using make jobs: $make_jobs"
                 make -j"$make_jobs"
@@ -479,7 +487,7 @@ class CrossCompiler:
                 self.prebuilt_components[component] = path
 
     async def _ensure_lgpio_in_sysroot(self) -> None:
-        """Guarantee lgpio headers and libraries are staged in the sysroot."""
+        """Guarantee lgpio is available to the cross compiler."""
 
         header = self.sysroot_dir / "usr/local/include/lgpio.h"
         static_lib = self.sysroot_dir / "usr/local/lib/liblgpio.a"
@@ -498,11 +506,62 @@ class CrossCompiler:
             return
 
         await self._log(
-            "stderr",
-            "lgpio headers or libraries are missing from the sysroot after staging; "
-            "publish a prebuilt lgpio archive to archive.frameos.net and retry the build.",
+            "stdout",
+            f"{icon} No prebuilt lgpio sysroot component available; building lgpio from source during cross compilation",
         )
-        raise RuntimeError("lgpio libraries missing from sysroot; unable to continue cross compilation")
+        self._build_lgpio_from_source = True
+
+    def _prepare_quickjs_archive_script(self) -> str:
+        return dedent(
+            """
+            if [ -d quickjs ]; then
+                if [ -f quickjs/Makefile ]; then
+                    log_debug "Rebuilding QuickJS archive for target"
+                    make -C quickjs clean >/dev/null
+                    make -C quickjs libquickjs.a
+                elif [ -f quickjs/libquickjs.a ]; then
+                    log_debug "Indexing QuickJS archive"
+                fi
+                if [ -f quickjs/libquickjs.a ]; then
+                    ranlib quickjs/libquickjs.a
+                fi
+            fi
+            """
+        ).strip()
+
+    def _build_lgpio_source_script(self) -> str:
+        if not self._build_lgpio_from_source:
+            return ""
+
+        url = LGPIO_ARCHIVE_URL.format(version=DEFAULT_LGPIO_VERSION)
+        source_dir = f"lg-{DEFAULT_LGPIO_VERSION.lstrip('v')}"
+        checksum_line = f"{DEFAULT_LGPIO_SHA256}  lgpio.tar.gz"
+        return dedent(
+            f"""
+            if [ ! -f /usr/local/include/lgpio.h ] || [ ! -f /usr/local/lib/liblgpio.a ]; then
+                log_debug "Building lgpio {DEFAULT_LGPIO_VERSION} from source"
+                rm -rf /tmp/frameos-lgpio
+                mkdir -p /tmp/frameos-lgpio
+                cd /tmp/frameos-lgpio
+                curl -fsSL -o lgpio.tar.gz {shlex.quote(url)}
+                echo {shlex.quote(checksum_line)} | sha256sum -c -
+                tar -xzf lgpio.tar.gz
+                cd {shlex.quote(source_dir)}
+                make
+                mapfile -t LGPIO_OBJS < <(make -qp | awk '/^OBJ_LGPIO =/ {{for (i=3; i<=NF; ++i) print $i}}')
+                mapfile -t RGPIO_OBJS < <(make -qp | awk '/^OBJ_RGPIO =/ {{for (i=3; i<=NF; ++i) print $i}}')
+                ar rcs liblgpio.a "${{LGPIO_OBJS[@]}}"
+                ar rcs librgpio.a "${{RGPIO_OBJS[@]}}"
+                install -d /usr/local/include /usr/local/lib
+                install -m 0644 lgpio.h rgpio.h /usr/local/include/
+                install -m 0644 liblgpio.a librgpio.a /usr/local/lib/
+                cd /
+                rm -rf /tmp/frameos-lgpio
+            fi
+            extra_cflags="${{extra_cflags:+$extra_cflags }}-I/usr/local/include"
+            extra_libs="${{extra_libs:+$extra_libs }}-L/usr/local/lib"
+            """
+        ).strip()
 
     async def _ensure_prebuilt_component(self, component: str) -> Path | None:
         if not self.prebuilt_entry:

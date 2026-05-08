@@ -1,6 +1,7 @@
 import pixie, json, times, options, math, hashes
 
 import frameos/driver_context
+import frameos/device_setup
 import frameos/utils/dither
 import drivers/waveshare/driver as waveshareDriver
 import drivers/waveshare/preview
@@ -26,6 +27,9 @@ proc logGrayBuffer(self: Driver, mode: string, pixelCount: int, grayBytes: int, 
     "previewBytes": previewBytes,
     "packedBytes": packedBytes,
   })
+
+proc setup*(frameOS: DriverContext = nil): SetupResult =
+  waveshareDriver.setup(frameOS)
 
 proc init*(frameOS: DriverContext): Driver =
   let logger = frameOS.logger

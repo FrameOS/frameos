@@ -8,7 +8,8 @@ SKIP_DRIVER_LIBRARIES ?= 0
 DRIVER_BUILD_MODE_ARG = $(if $(DRIVER_BUILD_MODE),--driver-build-mode $(DRIVER_BUILD_MODE),)
 NIM ?= nim
 NIMCACHE ?= .nimcache
-NIM_BUILD_FLAGS = --out:build/frameos --nimcache:"$(NIMCACHE)" --lineTrace:on --stackTrace:on
+FRAMEOS_VERSION ?= $(shell python3 tools/frameos_version.py ../versions.json)
+NIM_BUILD_FLAGS = --out:build/frameos --nimcache:"$(NIMCACHE)" --lineTrace:on --stackTrace:on --define:frameosVersion:"$(FRAMEOS_VERSION)"
 
 run: build
 	./build/frameos --verbose

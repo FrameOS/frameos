@@ -5,10 +5,10 @@ from typing import Any
 from arq import ArqRedis as Redis
 from sqlalchemy.orm import Session
 
-from app.models.frame import Frame
 from app.models.log import new_log as log
 from app.tasks._frame_deployer import FrameDeployer
 from app.tasks.frame_deploy_workflow import FrameDeployWorkflow, tls_settings_changed
+from app.tasks.utils import get_fresh_frame
 
 
 async def fast_deploy_frame(id: int, redis: Redis) -> None:
@@ -19,7 +19,7 @@ async def fast_deploy_frame_task(ctx: dict[str, Any], id: int) -> None:
     db: Session = ctx["db"]
     redis: Redis = ctx["redis"]
 
-    frame = db.get(Frame, id)
+    frame = get_fresh_frame(db, id)
     if not frame:
         await log(db, redis, id, "stderr", "Frame not found")
         return

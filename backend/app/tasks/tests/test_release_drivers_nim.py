@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
-from app.codegen.drivers_nim import driver_library_filename
+from app.codegen.drivers_nim import driver_library_filename, write_driver_library_nim
 from app.codegen.release_drivers_nim import (
     release_driver_specs,
     write_release_shared_drivers_nim,
     write_release_waveshare_driver_modules,
 )
+from app.drivers.drivers import DRIVERS
+from app.drivers.waveshare import write_waveshare_driver_nim
 
 
 def test_release_driver_specs_include_base_drivers_and_waveshare_variants():
@@ -21,6 +24,7 @@ def test_release_driver_specs_include_base_drivers_and_waveshare_variants():
     assert "waveshare_EPD_7in3e" in drivers
     assert drivers["waveshare_EPD_7in3e"].variant == "EPD_7in3e"
     assert drivers["waveshare_EPD_7in3e"].import_path == "waveshare/waveshare_EPD_7in3e"
+    assert drivers["waveshare_EPD_7in3e"].setup_import_path == "waveshare/waveshare_EPD_7in3e"
     assert (
         driver_library_filename(drivers["waveshare_EPD_7in3e"])
         == "waveshare_EPD_7in3e.so"
@@ -38,6 +42,35 @@ def test_release_shared_registry_filters_drivers_at_runtime():
     assert 'device != "web_only"' in source
     assert 'not isInkyButtonDevice(device)' in source
     assert 'libraryName: "waveshare_EPD_7in3e.so"' in source
+    assert '"frameos_driver_setup"' in source
+    assert "proc setupSharedDriver(spec: DriverSpec, driverCtx: driverContext.DriverContext): SetupResult" in source
+    assert "import inkyPython/inkyPython as inkyPythonSetupDriver" not in source
+    assert "import inkyHyperPixel2r/inkyHyperPixel2r as inkyHyperPixel2rSetupDriver" not in source
+    assert "proc setupReleaseDriverSupport" not in source
+    assert "import i2c/i2c as i2cSetupDriver" not in source
+    assert "import spi/spi as spiSetupDriver" not in source
+    assert "import noSpi/noSpi as noSpiSetupDriver" not in source
+
+
+def test_release_driver_library_setup_gets_frame_context_for_inky_support():
+    source = write_driver_library_nim(release_driver_specs()["inkyPython"])
+
+    assert "proc frameos_driver_setup*(driverContextPtr: pointer): bool" in source
+    assert "driverContextInstance = cloneDriverContext(hostContext)" in source
+    assert "inkyPythonDriver.setup(driverContextInstance).rebootRequired" in source
+
+
+def test_release_waveshare_variant_setup_lives_in_generated_driver():
+    epd10in3 = replace(DRIVERS["waveshare"], variant="EPD_10in3")
+    epd13in3e = replace(DRIVERS["waveshare"], variant="EPD_13in3e")
+
+    epd10_source = write_waveshare_driver_nim({"waveshare": epd10in3})
+    epd13_source = write_waveshare_driver_nim({"waveshare": epd13in3e})
+
+    assert 'runSetupStep("spi", proc(): SetupResult = spiSetupDriver.setup())' not in epd10_source
+    assert 'setupBootConfig(@["dtoverlay=spi0-0cs", "#dtparam=spi=on"])' in epd10_source
+    assert 'runSetupStep("noSpi", proc(): SetupResult = noSpiSetupDriver.setup())' in epd13_source
+    assert 'setupBootConfig(@["gpio=7=op,dl", "gpio=8=op,dl"])' in epd13_source
 
 
 def test_release_waveshare_modules_are_variant_specific(tmp_path: Path):

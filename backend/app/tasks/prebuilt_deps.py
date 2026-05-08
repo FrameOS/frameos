@@ -124,7 +124,7 @@ def resolve_prebuilt_target(distro: str, version: str, arch: str) -> str | None:
     release_key: str | None = None
     release = (version or "").lower()
     if distro_key == "debian":
-        allowed = {"buster", "bookworm", "trixie"}
+        allowed = {"buster", "bullseye", "bookworm", "trixie"}
         if release in allowed:
             release_key = release
     elif distro_key == "ubuntu":

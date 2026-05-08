@@ -17,7 +17,7 @@ from gzip import compress
 from arq import ArqRedis as Redis
 from sqlalchemy.orm import Session
 
-from app.models.apps import get_app_configs, get_one_app_sources, get_scene_apps_from_scenes
+from app.models.apps import get_scene_apps_from_scenes
 from app.models.frame import Frame, get_frame_json, get_interpreted_scenes_json
 from app.models.log import new_log as log
 from app.utils.local_exec import exec_local_command
@@ -82,6 +82,8 @@ LOCAL_SOURCE_IGNORE_PATTERNS = (
     "*.admin_session_salt",
 )
 
+FRAMEOS_VERSION_KEYS = ("frameosVersion", "frameos_version", "frameos")
+
 
 def _iter_config_app_dirs(apps_root: str) -> Iterable[str]:
     if not os.path.isdir(apps_root):
@@ -94,6 +96,31 @@ def _iter_config_app_dirs(apps_root: str) -> Iterable[str]:
             app_dir = os.path.join(category_dir, keyword)
             if os.path.isdir(app_dir) and os.path.exists(os.path.join(app_dir, "config.json")):
                 yield app_dir
+
+
+def _frameos_version_from_json(path: Path) -> str:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ""
+
+    if not isinstance(data, dict):
+        return ""
+
+    for key in FRAMEOS_VERSION_KEYS:
+        version = data.get(key)
+        if isinstance(version, str) and version:
+            return version
+    return ""
+
+
+def _frameos_version_for_source(source_dir: str) -> str:
+    source_path = Path(source_dir)
+    for path in (source_path.parent / "versions.json", source_path / "frame.json"):
+        version = _frameos_version_from_json(path)
+        if version:
+            return version
+    return "unknown"
 
 
 class FrameDeployer:
@@ -183,6 +210,13 @@ class FrameDeployer:
             json_data = compress(json_data)
         await upload_file(self.db, self.redis, self.frame, path, json_data)
 
+    async def _upload_all_scenes_json(self, path: str, gzip: bool = False) -> None:
+        """Upload the full scene payload for deploy-time metadata checks."""
+        json_data = json.dumps(list(self.frame.scenes or []), indent=4).encode() + b"\n"
+        if gzip:
+            json_data = compress(json_data)
+        await upload_file(self.db, self.redis, self.frame, path, json_data)
+
     async def _upload_frame_json_atomically(self, path: str) -> None:
         temp_path = f"{path}.tmp-{self.build_id}"
         await self._upload_frame_json(temp_path)
@@ -191,6 +225,11 @@ class FrameDeployer:
     async def _upload_scenes_json_atomically(self, path: str, gzip: bool = False) -> None:
         temp_path = f"{path}.tmp-{self.build_id}"
         await self._upload_scenes_json(temp_path, gzip=gzip)
+        await rename_path(self.db, self.redis, self.frame, temp_path, path)
+
+    async def _upload_all_scenes_json_atomically(self, path: str, gzip: bool = False) -> None:
+        temp_path = f"{path}.tmp-{self.build_id}"
+        await self._upload_all_scenes_json(temp_path, gzip=gzip)
         await rename_path(self.db, self.redis, self.frame, temp_path, path)
 
     async def get_hostname(self) -> str:
@@ -526,7 +565,7 @@ CFLAGS = {compiler_flags_text} $(EXTRA_CFLAGS)
 all: $(LIBRARY)
 
 $(LIBRARY): $(OBJECTS)
-\t@echo "Linking $(LIBRARY)"
+\t@echo "🟣 Linking $(LIBRARY)"
 \t@echo "LIBS: $(LIBS)"
 \t@$(CC) -shared -o $(LIBRARY) $(OBJECTS) $(LIBS)
 \t@$(STRIP) --strip-unneeded $(LIBRARY) 2>/dev/null || true
@@ -536,14 +575,22 @@ clean:
 
 pre-build:
 \t@mkdir -p ../../../cache
-\t@echo "Compiling driver $(LIBRARY)"
+\t@echo "🟣 Compiling driver $(LIBRARY)"
 
 $(OBJECTS): pre-build
 
 %.o: %.c
 \t@if [ ! -e $@ ]; then \\
 \t\tmd5sum=$$(md5sum $< | awk '{{print $$1}}'); \\
-\t\tfile=$$(echo '$<' | sed 's/@s/\\//g' | sed 's/@m//g' | sed 's/.*nimble\\/pkgs2\\/\\(.*\\)/\\1/' | sed 's/.*\\/\\(nim\\/lib\\/.*\\)/\\1/'); \\
+\t\traw='$<'; \\
+\t\tif printf '%s' "$$raw" | grep -q '\\.nim\\.c$$'; then \\
+\t\t\tencoded=$${{raw%.nim.c}}; \\
+\t\t\tfile=$$(printf '%s' "$$encoded" | sed 's/@f/\\//g; s/@z//g; s/@m/-/g' | tr 'A-Za-z' 'N-ZA-Mn-za-m'); \\
+\t\t\tfile="$${{file}}.nim"; \\
+\t\telse \\
+\t\t\tfile="$$raw"; \\
+\t\tfi; \\
+\t\tfile=$$(printf '%s' "$$file" | sed 's#^\\(\\.\\./\\)*##' | sed 's#.*nimble/pkgs2/##' | sed 's#.*nim/lib/#nim/lib/#'); \\
 \t\tcache_obj=../../../cache/$$md5sum.o; \\
 \t\tif [ -f "$$cache_obj" ]; then \\
 \t\t\tln -s "$$cache_obj" $@; \\
@@ -658,9 +705,11 @@ $(OBJECTS): pre-build
 
         cpu = await self.arch_to_nim_cpu(arch)
         debug_options = "--lineTrace:on" if frame.debug else ""
+        version_option = shlex.quote(f"--define:frameosVersion:{_frameos_version_for_source(source_dir)}")
         cmd = (
             f"cd {source_dir} && nimble assets -y && nimble setup && "
             f"{nim_path} compile --os:linux --cpu:{cpu} "
+            f"{version_option} "
             f"--compileOnly --genScript --nimcache:{build_dir} "
             f"{debug_options} src/frameos.nim 2>&1"
         )
@@ -789,63 +838,3 @@ $(OBJECTS): pre-build
 
         local_sha = sha256(local_path)
         return remote_sha == local_sha
-
-    def _get_pkgs_from_apps(self: "FrameDeployer", field: str) -> list[str]:
-        extra_pkgs: set[str] = set()
-
-        for scene in self.frame.scenes or []:
-            for node in scene.get("nodes", []):
-                cfg: dict | None = None
-
-                if node.get("type") == "app":
-                    kw = node.get("data", {}).get("keyword")
-                    sources = node.get("data", {}).get("sources")
-                    scene_app = scene.get("apps", {}).get(kw) if isinstance(scene.get("apps", {}), dict) else None
-                    scene_app_sources = scene_app.get("sources") if isinstance(scene_app, dict) else None
-                    json_cfg = None
-                    if isinstance(sources, dict):
-                        json_cfg = sources.get("config.json")
-                    if not json_cfg and isinstance(scene_app_sources, dict):
-                        json_cfg = scene_app_sources.get("config.json")
-                    if json_cfg:
-                        try:
-                            cfg = json.loads(json_cfg)
-                        except Exception:
-                            pass
-                    elif kw:
-                        try:
-                            json_cfg = get_one_app_sources(kw).get("config.json")
-                            if json_cfg:
-                                cfg = json.loads(json_cfg)
-                        except Exception:
-                            pass
-
-                elif node.get("type") == "source":
-                    json_cfg = node.get("sources", {}).get("config.json")
-                    if json_cfg:
-                        try:
-                            cfg = json.loads(json_cfg)
-                        except Exception:
-                            pass
-
-                if cfg and field in cfg:
-                    for pkg in cfg[field]:
-                        if isinstance(pkg, str) and pkg:
-                            extra_pkgs.add(pkg)
-
-        return sorted(extra_pkgs)
-
-    def _get_pkgs_from_all_apps(self: "FrameDeployer", field: str) -> list[str]:
-        extra_pkgs: set[str] = set()
-        for config in get_app_configs().values():
-            if field in config:
-                for pkg in config[field]:
-                    if isinstance(pkg, str) and pkg:
-                        extra_pkgs.add(pkg)
-        return sorted(extra_pkgs)
-
-    def get_apt_packages(self: "FrameDeployer") -> list[str]:
-        apt_pkgs = self._get_pkgs_from_all_apps("apt")
-        if not apt_pkgs:
-            return []
-        return sorted(set(apt_pkgs))

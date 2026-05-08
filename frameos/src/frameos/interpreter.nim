@@ -3,6 +3,7 @@ import frameos/values
 import frameos/js_runtime
 import frameos/js_app_runtime
 import frameos/channels
+import frameos/runtime_diagnostics
 import tables, json, os, zippy, chroma, pixie, jsony, sequtils, options, strutils, times
 import apps/apps
 
@@ -206,6 +207,15 @@ proc getUploadedInterpretedScenes*(): Table[SceneId, ExportedInterpretedScene] =
 
 proc runEvent*(self: FrameScene, context: ExecutionContext)
 
+proc diagnosticKeyword(node: DiagramNode): string =
+  if node.data.isNil or node.data.kind != JObject:
+    return ""
+  if node.data.hasKey("keyword") and node.data["keyword"].kind == JString:
+    return node.data["keyword"].getStr()
+  if node.data.hasKey("name") and node.data["name"].kind == JString:
+    return node.data["name"].getStr()
+  ""
+
 # -------------------------
 # Core node runner
 # -------------------------
@@ -246,6 +256,11 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
 
     let currentNode = self.nodes[currentNodeId]
     let nodeType = currentNode.nodeType
+    var checkpointKeyword = ""
+    if self.frameConfig.debug:
+      checkpointKeyword = diagnosticKeyword(currentNode)
+      markRuntimeCheckpoint("node:start", currentSceneId = self.id.string, contextEvent = context.event,
+        nodeId = currentNodeId.int, nodeType = nodeType, keyword = checkpointKeyword)
     if TRACING:
       self.logger.log(%*{"event": "interpreter:runNode", "sceneId": self.id, "nodeId": currentNodeId.int,
         "nodeType": nodeType})
@@ -633,9 +648,17 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
 
       # Delegate handling of the current event to the child scene.
       exportedChild = self.sceneExportByNodeId[currentNodeId]
+      if self.frameConfig.debug:
+        markRuntimeCheckpoint("scene:delegate", currentSceneId = self.id.string, contextEvent = context.event,
+          nodeId = currentNodeId.int, nodeType = nodeType, keyword = checkpointKeyword,
+          childSceneId = childScene.id.string)
       exportedChild.runEvent(childScene, context)
     else:
       raise newException(Exception, "Unknown node type: " & nodeType)
+
+    if self.frameConfig.debug:
+      markRuntimeCheckpoint("node:done", currentSceneId = self.id.string, contextEvent = context.event,
+        nodeId = currentNodeId.int, nodeType = nodeType, keyword = checkpointKeyword)
 
     if asDataNode:
       break
@@ -949,6 +972,9 @@ proc applyPublicStateFromPayload(scene: InterpretedFrameScene, payload: JsonNode
 proc runEvent*(self: FrameScene, context: ExecutionContext) =
   var scene: InterpretedFrameScene = InterpretedFrameScene(self)
   self.logger.log(%*{"event": "runEventInterpreted", "sceneId": self.id, "contextEvent": context.event})
+  if self.frameConfig.debug:
+    markRuntimeCheckpoint("event:start", currentSceneId = self.id.string, contextEvent = context.event,
+      clearNode = true)
 
   case context.event:
   of "setSceneState":

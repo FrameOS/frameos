@@ -10,7 +10,9 @@ from app.codegen.drivers_nim import (
     driver_library_filename,
     frame_driver_build_mode,
     normalize_driver_build_mode,
+    write_driver_library_nim,
     write_shared_drivers_nim,
+    write_static_drivers_nim,
 )
 from app.drivers.drivers import Driver
 
@@ -53,3 +55,61 @@ def test_shared_driver_registry_types_empty_sequence():
     source = write_shared_drivers_nim({})
 
     assert "let driverSpecs: seq[DriverSpec] = @[]" in source
+
+
+def test_shared_drivers_run_compiled_driver_setup_from_library():
+    source = write_shared_drivers_nim(
+        {
+            "inkyPython": Driver(
+                name="inkyPython",
+                import_path="inkyPython/inkyPython",
+                setup_import_path="inkyPython/inkyPython",
+                can_render=True,
+            ),
+            "i2c": Driver(name="i2c", setup_import_path="i2c/i2c"),
+        }
+    )
+
+    assert 'canSetup: true, canRender: true' in source
+    assert '"frameos_driver_setup"' in source
+    assert "proc setupSharedDriver(spec: DriverSpec, driverCtx: driverContext.DriverContext): SetupResult" in source
+    assert "setupProc(cast[pointer](driverCtx))" in source
+    assert "import inkyPython/inkyPython as inkyPythonSetupDriver" not in source
+    assert "import i2c/i2c as i2cSetupDriver" in source
+    assert 'runSetupStep("i2c"' in source
+
+
+def test_driver_library_exports_setup_symbol_when_driver_has_setup():
+    source = write_driver_library_nim(
+        Driver(
+            name="inkyPython",
+            import_path="inkyPython/inkyPython",
+            setup_import_path="inkyPython/inkyPython",
+            can_render=True,
+        )
+    )
+
+    assert "proc frameos_driver_setup*(driverContextPtr: pointer): bool" in source
+    assert "driverContextInstance = cloneDriverContext(hostContext)" in source
+    assert "inkyPythonDriver.setup(driverContextInstance).rebootRequired" in source
+    assert "syncHostDriverContext(hostContext, driverContextInstance)" in source
+
+
+def test_static_drivers_setup_uses_generated_driver_list():
+    source = write_static_drivers_nim(
+        {
+            "inkyPython": Driver(
+                name="inkyPython",
+                import_path="inkyPython/inkyPython",
+                setup_import_path="inkyPython/inkyPython",
+                can_render=True,
+            ),
+            "i2c": Driver(name="i2c", setup_import_path="i2c/i2c"),
+            "bootconfig": Driver(name="bootConfig", lines=["dtoverlay=spi0-0cs", "#dtparam=spi=on"]),
+        }
+    )
+
+    assert "proc setup*(frameOS: FrameOS): SetupResult" in source
+    assert 'runSetupStep("inkyPython"' in source
+    assert 'runSetupStep("i2c"' in source
+    assert 'setupBootConfig(@["dtoverlay=spi0-0cs", "#dtparam=spi=on"])' in source
