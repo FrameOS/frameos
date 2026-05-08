@@ -922,6 +922,16 @@ async def api_frame_local_binary_zip(
                         detail=f"Shared driver library missing after build: {driver_library_path}",
                     )
                 shutil.copy2(driver_library_path, os.path.join(driver_dir, os.path.basename(driver_library_path)))
+        if build_result.scene_library_paths:
+            scene_dir = os.path.join(dist_dir, "scenes")
+            os.makedirs(scene_dir, exist_ok=True)
+            for scene_library_path in build_result.scene_library_paths:
+                if not os.path.isfile(scene_library_path):
+                    raise HTTPException(
+                        status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                        detail=f"Shared scene library missing after build: {scene_library_path}",
+                    )
+                shutil.copy2(scene_library_path, os.path.join(scene_dir, os.path.basename(scene_library_path)))
 
         zip_path = os.path.join(tmp, f"frameos_{deployer.build_id}_binary.zip")
         with zipfile.ZipFile(

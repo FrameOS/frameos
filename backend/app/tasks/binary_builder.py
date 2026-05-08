@@ -98,6 +98,8 @@ class FrameBinaryBuildResult:
     binary_path: str | None
     driver_library_paths: list[str]
     driver_library_names: list[str]
+    scene_library_paths: list[str]
+    scene_library_names: list[str]
     cross_compiled: bool
     prebuilt_entry: PrebuiltEntry | None
     prebuilt_target: str | None
@@ -264,6 +266,8 @@ class FrameBinaryBuilder:
                 binary_path=precompiled_result.binary_path,
                 driver_library_paths=precompiled_result.driver_library_paths,
                 driver_library_names=precompiled_result.driver_library_names,
+                scene_library_paths=precompiled_result.scene_library_paths,
+                scene_library_names=precompiled_result.scene_library_names,
                 cross_compiled=True,
                 prebuilt_entry=plan.prebuilt_entry,
                 prebuilt_target=plan.prebuilt_target,
@@ -358,6 +362,15 @@ class FrameBinaryBuilder:
             ),
             driver_library_names=self.deployer.driver_library_names(
                 drivers_for_frame(self.frame),
+                plan.driver_build_mode,
+            ),
+            scene_library_paths=self.deployer.scene_library_paths(
+                build_dir,
+                self.frame,
+                plan.driver_build_mode,
+            ),
+            scene_library_names=self.deployer.scene_library_names(
+                self.frame,
                 plan.driver_build_mode,
             ),
             cross_compiled=cross_compiled,

@@ -390,6 +390,14 @@ async def build_target(
                 if not src.is_file():
                     raise RuntimeError(f"Shared driver library missing after build: {src}")
                 shutil.copy2(src, driver_dir / src.name)
+        if build_result.scene_library_paths:
+            scene_dir = target_dir / "scenes"
+            scene_dir.mkdir(parents=True, exist_ok=True)
+            for scene_library_path in build_result.scene_library_paths:
+                src = Path(scene_library_path)
+                if not src.is_file():
+                    raise RuntimeError(f"Shared scene library missing after build: {src}")
+                shutil.copy2(src, scene_dir / src.name)
         metadata = {
             "slug": slug,
             "arch": target.arch,
@@ -399,6 +407,7 @@ async def build_target(
             "image": target.image,
             "driver_build_mode": build_plan.driver_build_mode,
             "driver_libraries": build_result.driver_library_names,
+            "scene_libraries": build_result.scene_library_names,
         }
         with (target_dir / "metadata.json").open("w", encoding="utf-8") as fh:
             json.dump(metadata, fh, indent=2)
@@ -637,10 +646,12 @@ def parse_args(argv: Iterable[str]) -> argparse.Namespace:
     build.add_argument("--frameos-root", default=str(Path.cwd()), help="Path to the frameos source tree")
     build.add_argument("--artifacts-dir", default="build/cross", help="Directory for compiled binaries")
     build.add_argument(
+        "--compilation-mode",
         "--driver-build-mode",
+        dest="driver_build_mode",
         choices=("static", "shared", "precompiled"),
         default=None,
-        help="Override driver build mode (static, shared, or precompiled release when eligible)",
+        help="Override compilation mode (static, shared, or precompiled release when eligible)",
     )
 
     release = subparsers.add_parser(

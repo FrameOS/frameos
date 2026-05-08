@@ -561,9 +561,16 @@ function hasValidPosition(node: DiagramNode): boolean {
 function sanitizeFrame(frame: Partial<FrameType>): Partial<FrameType> {
   const frameAdminAuthUser = frame.frame_admin_auth?.user ?? ''
   const frameAdminAuthPass = frame.frame_admin_auth?.pass ?? ''
+  const rpios = frame.rpios
+    ? {
+        ...frame.rpios,
+        compilationMode: frame.rpios.compilationMode ?? frame.rpios.driverBuildMode ?? '',
+      }
+    : frame.rpios
 
   return {
     ...frame,
+    rpios,
     frame_admin_auth: {
       enabled: frame.frame_admin_auth?.enabled ?? false,
       user: frameAdminAuthUser,
@@ -905,7 +912,13 @@ export const frameLogic = kea<frameLogicType>([
     ],
     requiresRecompilation: [
       (s) => [s.lastDeploy, s.frame, s.frameForm, s.mode, s.isFrameAdminMode],
-      (lastDeploy, frame, frameForm, mode, isFrameAdminMode): boolean => {
+      (
+        lastDeploy: Partial<FrameType> | null,
+        frame: FrameType,
+        frameForm: Partial<FrameType>,
+        mode: FrameType['mode'],
+        isFrameAdminMode: boolean
+      ): boolean => {
         if (isFrameAdminMode) {
           return false
         }
@@ -920,7 +933,13 @@ export const frameLogic = kea<frameLogicType>([
     ],
     undeployedSummaryItems: [
       (s) => [s.lastDeploy, s.frame, s.frameForm, s.requiresRecompilation, s.isFrameAdminMode],
-      (lastDeploy, frame, frameForm, requiresRecompilation, isFrameAdminMode): SummaryItem[] => {
+      (
+        lastDeploy: Partial<FrameType> | null,
+        frame: FrameType,
+        frameForm: Partial<FrameType>,
+        requiresRecompilation: boolean,
+        isFrameAdminMode: boolean
+      ): SummaryItem[] => {
         const pendingFrame = Object.keys(frameForm ?? {}).length > 0 ? frameForm : frame
         return isFrameAdminMode ? [] : buildUndeployedSummaryItems(lastDeploy, pendingFrame, requiresRecompilation)
       },

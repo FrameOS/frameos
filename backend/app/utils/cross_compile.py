@@ -353,7 +353,7 @@ class CrossCompiler:
         local_binary = os.path.join(build_dir, "frameos")
         await host.download_file(f"{remote_build_dir}/frameos", local_binary)
         status, stdout, _err = await host.run(
-            f"cd {shlex.quote(remote_build_dir)} && find drivers -type f -name '*.so' 2>/dev/null || true",
+            f"cd {shlex.quote(remote_build_dir)} && find drivers scenes -type f -name '*.so' 2>/dev/null || true",
             log_command=False,
             log_output=False,
         )

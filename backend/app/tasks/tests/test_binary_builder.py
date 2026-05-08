@@ -37,6 +37,12 @@ class FakeDeployer:
     def driver_library_names(self, _drivers, _driver_build_mode):
         return []
 
+    def scene_library_paths(self, _build_dir, _frame, _driver_build_mode):
+        return []
+
+    def scene_library_names(self, _frame, _driver_build_mode):
+        return []
+
 
 @pytest.mark.asyncio
 async def test_plan_build_defaults_to_static_driver_mode(monkeypatch: pytest.MonkeyPatch):
@@ -193,6 +199,8 @@ async def test_build_uses_precompiled_release_when_planned(monkeypatch: pytest.M
             binary_path=binary_path,
             driver_library_paths=[driver_path],
             driver_library_names=["frameBuffer.so"],
+            scene_library_paths=[],
+            scene_library_names=[],
             vendor_folders=[],
             archive_path=archive_path,
         )

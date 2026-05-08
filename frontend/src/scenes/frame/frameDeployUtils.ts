@@ -164,14 +164,14 @@ export function buildFullDeployPlanSummary(
     items.push({ label: 'Drivers', value: stringifyList(fullPlan.drivers) })
   }
   if (fullPlan.binary.driver_build_mode === 'shared') {
-    items.push({ label: 'Driver delivery', value: 'Shared libraries deployed next to the FrameOS binary' })
+    items.push({ label: 'Compilation', value: 'Shared libraries deployed next to the FrameOS binary' })
   }
   if (fullPlan.binary.driver_build_mode === 'precompiled') {
     items.push({
-      label: 'Driver delivery',
+      label: 'Compilation',
       value: fullPlan.binary.will_attempt_precompiled
         ? 'Precompiled FrameOS binary and shared driver libraries'
-        : `Shared driver libraries; precompiled release skipped${
+        : `Shared libraries; precompiled release skipped${
             fullPlan.binary.precompiled_skip_reason ? ` (${fullPlan.binary.precompiled_skip_reason})` : ''
           }`,
     })

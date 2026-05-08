@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Build configured FrameOS drivers as shared libraries."""
+"""Build configured FrameOS compiled scenes as shared libraries."""
 from __future__ import annotations
 
 import argparse
-import asyncio
 import shutil
 import subprocess
 import sys
@@ -21,15 +20,11 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 from app.codegen.drivers_nim import (  # noqa: E402
-    DRIVER_BUILD_MODE_SHARED,
-    compiled_drivers,
-    driver_build_mode_uses_shared_libraries,
-    driver_library_filename,
-    frame_driver_build_mode,
-    normalize_driver_build_mode,
+    compilation_mode_uses_shared_libraries,
+    frame_compilation_mode,
+    normalize_compilation_mode,
 )
-from app.drivers.devices import drivers_for_frame  # noqa: E402
-from generate_driver_sources import generate_driver_sources, load_frame_stub  # noqa: E402
+from generate_driver_sources import load_frame_stub  # noqa: E402
 
 LINUX_SIZE_FLAGS = [
     "--opt:size",
@@ -59,7 +54,7 @@ def strip_library(path: Path, strip_command: str | None) -> None:
         print(f"Skipping strip for {path}: {err}", file=sys.stderr)
 
 
-async def build_driver_libraries(
+def build_scene_libraries(
     *,
     frameos_root: Path,
     config_path: Path,
@@ -68,27 +63,27 @@ async def build_driver_libraries(
     nim_args: Iterable[str],
     strip_command: str | None,
     only_if_shared: bool,
-    driver_build_mode: str | None,
+    compilation_mode: str | None,
 ) -> list[Path]:
     frame = load_frame_stub(config_path)
-    mode = normalize_driver_build_mode(driver_build_mode or frame_driver_build_mode(frame))
-    if only_if_shared and not driver_build_mode_uses_shared_libraries(mode):
-        print(f"Compilation mode is {mode}; skipping shared driver libraries")
+    mode = normalize_compilation_mode(compilation_mode or frame_compilation_mode(frame))
+    if only_if_shared and not compilation_mode_uses_shared_libraries(mode):
+        print(f"Compilation mode is {mode}; skipping shared scene libraries")
+        return []
+
+    shared_scene_sources = sorted((frameos_root / "src" / "scenes" / "shared").glob("*.nim"))
+    if not shared_scene_sources:
+        print("No shared scene sources found; skipping shared scene libraries")
         return []
 
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    with tempfile.TemporaryDirectory(prefix="frameos-driver-libs-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="frameos-scene-libs-") as tmp:
         source_dir = Path(tmp) / "frameos"
         shutil.copytree(
             frameos_root,
             source_dir,
             ignore=shutil.ignore_patterns("build", "node_modules"),
-        )
-        generate_driver_sources(
-            frameos_root=source_dir,
-            config_path=config_path,
-            driver_build_mode=DRIVER_BUILD_MODE_SHARED,
         )
 
         if not (source_dir / "quickjs" / "libquickjs.a").exists():
@@ -97,21 +92,23 @@ async def build_driver_libraries(
         run(["nimble", "setup"], cwd=source_dir)
 
         built: list[Path] = []
-        for driver in compiled_drivers(drivers_for_frame(frame)):
-            output = out_dir / driver_library_filename(driver)
-            nimcache = out_dir / ".nimcache" / driver.name
+        for source_path in shared_scene_sources:
+            source_name = source_path.name
+            library_name = source_path.with_suffix(".so").name
+            output = out_dir / library_name
+            nimcache = out_dir / ".nimcache" / source_path.stem
             if nimcache.exists():
                 shutil.rmtree(nimcache)
             command = [
                 nim_path,
                 "compile",
                 "--app:lib",
-                "--define:frameosDriverLibrary",
+                "--define:frameosSharedLibrary",
                 *(LINUX_SIZE_FLAGS if sys.platform.startswith("linux") else ["--opt:size"]),
                 f"--nimcache:{nimcache}",
                 f"--out:{output}",
                 *list(nim_args),
-                f"src/drivers/shared/{driver.name}.nim",
+                f"src/scenes/shared/{source_name}",
             ]
             run(command, cwd=source_dir)
             strip_library(output, strip_command)
@@ -123,8 +120,8 @@ async def build_driver_libraries(
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--frameos-root", default=str(FRAMEOS_ROOT), help="Path to the frameos source tree")
-    parser.add_argument("--config", default=str(FRAMEOS_ROOT / "frame.json"), help="Frame config JSON to select drivers")
-    parser.add_argument("--out", default=str(FRAMEOS_ROOT / "build" / "drivers"), help="Output directory for .so files")
+    parser.add_argument("--config", default=str(FRAMEOS_ROOT / "frame.json"), help="Frame config JSON")
+    parser.add_argument("--out", default=str(FRAMEOS_ROOT / "build" / "scenes"), help="Output directory for .so files")
     parser.add_argument("--nim", default="nim", help="Nim compiler executable")
     parser.add_argument("--strip", default="strip", help="Strip executable to run on built libraries")
     parser.add_argument("--no-strip", action="store_true", help="Do not strip built libraries")
@@ -151,17 +148,15 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
-    built = asyncio.run(
-        build_driver_libraries(
-            frameos_root=Path(args.frameos_root).resolve(),
-            config_path=Path(args.config).resolve(),
-            out_dir=Path(args.out).resolve(),
-            nim_path=args.nim,
-            nim_args=args.nim_arg,
-            strip_command=None if args.no_strip else args.strip,
-            only_if_shared=args.only_if_shared,
-            driver_build_mode=args.compilation_mode,
-        )
+    built = build_scene_libraries(
+        frameos_root=Path(args.frameos_root).resolve(),
+        config_path=Path(args.config).resolve(),
+        out_dir=Path(args.out).resolve(),
+        nim_path=args.nim,
+        nim_args=args.nim_arg,
+        strip_command=None if args.no_strip else args.strip,
+        only_if_shared=args.only_if_shared,
+        compilation_mode=args.compilation_mode,
     )
     for path in built:
         print(f"Built {path}")

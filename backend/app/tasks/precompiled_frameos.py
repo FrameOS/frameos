@@ -34,6 +34,8 @@ class PrecompiledFrameOSResult:
     binary_path: str
     driver_library_paths: list[str]
     driver_library_names: list[str]
+    scene_library_paths: list[str]
+    scene_library_names: list[str]
     vendor_folders: list[str]
     archive_path: str
     cache_hit: bool = False
@@ -126,6 +128,8 @@ async def download_precompiled_frameos_release(
         binary_path=str(binary_dest),
         driver_library_paths=[str(path) for path in copied_driver_paths],
         driver_library_names=required_driver_names,
+        scene_library_paths=[],
+        scene_library_names=[],
         vendor_folders=vendor_folders,
         archive_path=result_archive,
         cache_hit=cache_hit,

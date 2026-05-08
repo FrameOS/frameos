@@ -56,6 +56,8 @@ async def test_build_target_plans_then_builds(monkeypatch: pytest.MonkeyPatch, t
                 binary_path=str(binary_path),
                 driver_library_paths=[],
                 driver_library_names=[],
+                scene_library_paths=[],
+                scene_library_names=[],
             )
 
     monkeypatch.setattr("backend.app.tasks._frame_deployer.FrameDeployer", FakeFrameDeployer)

@@ -102,10 +102,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--frameos-root", default=str(FRAMEOS_ROOT), help="Path to the frameos source tree")
     parser.add_argument("--config", default=str(FRAMEOS_ROOT / "frame.json"), help="Frame config JSON")
     parser.add_argument(
+        "--compilation-mode",
         "--driver-build-mode",
         choices=("static", "shared", "precompiled"),
         default=None,
-        help="Override frame.json rpios.driverBuildMode",
+        help="Override frame.json rpios.compilationMode",
     )
     return parser.parse_args(argv)
 
@@ -115,7 +116,7 @@ def main(argv: list[str]) -> int:
     mode = generate_driver_sources(
         frameos_root=Path(args.frameos_root).resolve(),
         config_path=Path(args.config).resolve(),
-        driver_build_mode=args.driver_build_mode,
+        driver_build_mode=args.compilation_mode,
     )
     print(f"Generated driver sources in {mode} mode")
     return 0

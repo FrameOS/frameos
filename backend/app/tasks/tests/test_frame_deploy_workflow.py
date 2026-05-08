@@ -891,6 +891,7 @@ async def test_execute_full_does_not_activate_release_when_setup_fails(monkeypat
             prebuilt_entry=None,
             build_dir="/tmp/build",
             driver_library_paths=[],
+            scene_library_paths=[],
         )
 
     async def fake_prepare_remote_for_full_release(**_kwargs):
@@ -985,6 +986,7 @@ async def test_remote_build_uses_x86_feature_flags(monkeypatch: pytest.MonkeyPat
             archive_path=str(archive_path),
             build_dir=str(tmp_path / "build_build12345678"),
             driver_library_paths=[],
+            scene_library_paths=[],
             target=TargetMetadata(arch="x86_64", distro="debian", version="bookworm"),
         ),
         "build12345678",

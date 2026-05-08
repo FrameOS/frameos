@@ -8,6 +8,7 @@ from app.codegen.drivers_nim import (
     DRIVER_BUILD_MODE_STATIC,
     driver_build_mode_uses_shared_libraries,
     driver_library_filename,
+    frame_compilation_mode,
     frame_driver_build_mode,
     normalize_driver_build_mode,
     write_driver_library_nim,
@@ -28,6 +29,10 @@ def test_driver_build_mode_defaults_to_static():
 def test_driver_build_mode_shared_requires_explicit_setting():
     assert normalize_driver_build_mode("shared") == DRIVER_BUILD_MODE_SHARED
     assert frame_driver_build_mode(SimpleNamespace(rpios={"driverBuildMode": "shared"})) == DRIVER_BUILD_MODE_SHARED
+    assert frame_compilation_mode(SimpleNamespace(rpios={"compilationMode": "shared"})) == DRIVER_BUILD_MODE_SHARED
+    assert frame_compilation_mode(
+        SimpleNamespace(rpios={"compilationMode": "static", "driverBuildMode": "shared"})
+    ) == DRIVER_BUILD_MODE_STATIC
 
 
 def test_driver_build_mode_static_is_valid():

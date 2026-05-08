@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from app.codegen.scene_nim import write_scene_nim
+from app.codegen.scene_nim import scene_library_filename, write_scene_library_nim, write_scene_nim, write_scenes_nim
 
 
 def test_app_output_field_input_is_coerced_to_target_field_type():
@@ -180,3 +180,41 @@ def test_native_app_output_field_input_keeps_native_return_type():
 
     assert "self.node1.appConfig.text = block:\n        self.node2.get(context)" in source
     assert "self.node2.get(context).asString()" not in source
+
+
+def test_shared_scene_registry_loads_scene_libraries():
+    frame = SimpleNamespace(
+        scenes=[
+            {
+                "id": "my-scene",
+                "name": "My Scene",
+                "default": True,
+                "settings": {"execution": "compiled"},
+            },
+            {
+                "id": "live-scene",
+                "name": "Live Scene",
+                "settings": {"execution": "interpreted"},
+            },
+        ]
+    )
+
+    source = write_scenes_nim(frame, compilation_mode="shared")
+
+    assert 'libraryName: "scene_myscene.so"' in source
+    assert '"my-scene".SceneId' in source
+    assert "loadLib(path)" in source
+    assert '"frameos_scene_init"' in source
+    assert '"frameos_scene_export"' in source
+    assert "scene_live_scene" not in source
+
+
+def test_scene_library_wrapper_exports_scene_symbols():
+    scene = {"id": "my-scene", "name": "My Scene"}
+    source = write_scene_library_nim(scene)
+
+    assert scene_library_filename(scene) == "scene_myscene.so"
+    assert "import scenes/scene_myscene as sceneModule" in source
+    assert "proc frameos_scene_init*" in source
+    assert "setSharedHostCallbacks(logHook, sendEventHook)" in source
+    assert "proc frameos_scene_export*" in source

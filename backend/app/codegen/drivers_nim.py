@@ -15,6 +15,12 @@ VALID_DRIVER_BUILD_MODES = {
     DRIVER_BUILD_MODE_PRECOMPILED,
 }
 
+COMPILATION_MODE_STATIC = DRIVER_BUILD_MODE_STATIC
+COMPILATION_MODE_SHARED = DRIVER_BUILD_MODE_SHARED
+COMPILATION_MODE_PRECOMPILED = DRIVER_BUILD_MODE_PRECOMPILED
+DEFAULT_COMPILATION_MODE = DEFAULT_DRIVER_BUILD_MODE
+VALID_COMPILATION_MODES = VALID_DRIVER_BUILD_MODES
+
 
 def normalize_driver_build_mode(value: str | None) -> str:
     normalized = (value or DEFAULT_DRIVER_BUILD_MODE).strip().lower()
@@ -23,9 +29,17 @@ def normalize_driver_build_mode(value: str | None) -> str:
     return normalized
 
 
+def normalize_compilation_mode(value: str | None) -> str:
+    return normalize_driver_build_mode(value)
+
+
 def frame_driver_build_mode(frame) -> str:
     rpios_settings = getattr(frame, "rpios", None) or {}
-    return normalize_driver_build_mode(rpios_settings.get("driverBuildMode"))
+    return normalize_driver_build_mode(rpios_settings.get("compilationMode") or rpios_settings.get("driverBuildMode"))
+
+
+def frame_compilation_mode(frame) -> str:
+    return frame_driver_build_mode(frame)
 
 
 def driver_build_mode_uses_shared_libraries(value: str | None) -> bool:
@@ -33,6 +47,10 @@ def driver_build_mode_uses_shared_libraries(value: str | None) -> bool:
         DRIVER_BUILD_MODE_SHARED,
         DRIVER_BUILD_MODE_PRECOMPILED,
     }
+
+
+def compilation_mode_uses_shared_libraries(value: str | None) -> bool:
+    return driver_build_mode_uses_shared_libraries(value)
 
 
 def compiled_drivers(drivers: dict[str, Driver]) -> list[Driver]:
