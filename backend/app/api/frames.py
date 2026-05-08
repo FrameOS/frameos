@@ -43,7 +43,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from arq import ArqRedis as Redis
 from app.models.frame import Frame, new_frame, delete_frame, normalize_https_proxy, refresh_tls_certificate_validity_dates, update_frame
-from app.models.log import new_log as log
+from app.models.log import Log, new_log as log
 from app.models.metrics import Metrics
 from app.codegen.scene_nim import write_scene_nim
 from app.utils.ssh_utils import (
@@ -1089,8 +1089,49 @@ async def api_frame_get_logs(id: int, db: Session = Depends(get_db)):
     frame = db.get(Frame, id)
     if frame is None:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
-    logs = [ll.to_dict() for ll in frame.logs][-1000:]
+    latest_logs = (
+        db.query(Log)
+        .filter_by(frame_id=id)
+        .order_by(Log.timestamp.desc(), Log.id.desc())
+        .limit(1000)
+        .all()
+    )
+    logs = [log_entry.to_dict() for log_entry in reversed(latest_logs)]
     return {"logs": logs}
+
+
+def _format_frame_log_line(log_entry: Log) -> str:
+    timestamp = log_entry.timestamp.replace(tzinfo=timezone.utc).isoformat()
+    return f"[{timestamp}] ({log_entry.type}) {log_entry.line}"
+
+
+@api_with_auth.get("/frames/{id:int}/logs/full")
+async def api_frame_download_full_logs(id: int, db: Session = Depends(get_db)):
+    frame = db.get(Frame, id)
+    if frame is None:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
+
+    logs = (
+        db.query(Log)
+        .filter_by(frame_id=id)
+        .order_by(Log.timestamp.asc(), Log.id.asc())
+        .all()
+    )
+    content = "\n".join(_format_frame_log_line(log_entry) for log_entry in logs)
+    if content:
+        content += "\n"
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
+    filename = f"frame-{id}-full-logs-{timestamp}.log"
+    return Response(
+        content,
+        media_type="text/plain; charset=utf-8",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="{_ascii_safe(filename)}"; '
+                f"filename*=UTF-8''{quote(filename, safe='')}"
+            ),
+        },
+    )
 
 
 @api_no_auth.get("/frames/{id:int}/image")
