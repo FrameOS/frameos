@@ -1,6 +1,11 @@
 import json, strformat, options, times, strutils, httpclient
 import frameos/types
 
+const
+  RequestTimeoutMs = 10000
+  MaxResponseBytes = 1024 * 1024
+  MaxResponseSeconds = 15.0
+
 type
   AppConfig* = object
     entityId*: string
@@ -32,6 +37,13 @@ proc log*(self: App, message: string) =
 proc error*(self: App, message: string) =
   self.scene.logger.log(%*{"event": "legacy/haSensor:error", "error": message})
 
+proc guardResponseProgress(startedAt: float): proc(total, progress, speed: BiggestInt) {.closure, gcsafe.} =
+  result = proc(total, progress, speed: BiggestInt) {.closure, gcsafe.} =
+    if total > MaxResponseBytes.BiggestInt or progress > MaxResponseBytes.BiggestInt:
+      raise newException(IOError, &"Home Assistant response exceeded {MaxResponseBytes} bytes")
+    if epochTime() > startedAt + MaxResponseSeconds:
+      raise newException(IOError, &"Home Assistant response exceeded {MaxResponseSeconds} seconds")
+
 proc run*(self: App, context: ExecutionContext) =
   let haUrl = self.frameConfig.settings{"homeAssistant"}{"url"}.getStr
   if haUrl == "":
@@ -43,12 +55,13 @@ proc run*(self: App, context: ExecutionContext) =
     self.error("Please provide a Home Assistant access token in the settings.")
     return
 
-  var client = newHttpClient(timeout = 10000)
+  var client = newHttpClient(timeout = RequestTimeoutMs)
   try:
     client.headers = newHttpHeaders([
         ("Authorization", "Bearer " & accessToken),
-        ("Content-Type", "application/json"),
-        ("Content-Encoding", "gzip")
+        ("Accept", "application/json"),
+        ("Accept-Encoding", "identity"),
+        ("Connection", "close")
     ])
     var slashlessUrl = haUrl
     slashlessUrl.removeSuffix("/")
@@ -59,10 +72,17 @@ proc run*(self: App, context: ExecutionContext) =
     if self.json.isNone or self.lastFetchAt == 0 or self.lastFetchAt +
         self.appConfig.cacheSeconds < epochTime():
       try:
+        client.onProgressChanged = guardResponseProgress(epochTime())
         let response = client.request(url)
         if response.code != Http200:
           self.error "Error fetching Home Assistant status: HTTP " &
               $response.status
+          return
+        if response.contentLength() > MaxResponseBytes:
+          self.error &"Error fetching Home Assistant status: response exceeded {MaxResponseBytes} bytes"
+          return
+        if response.body.len > MaxResponseBytes:
+          self.error &"Error fetching Home Assistant status: response exceeded {MaxResponseBytes} bytes"
           return
         self.json = some(parseJson(response.body))
         self.lastFetchAt = epochTime()

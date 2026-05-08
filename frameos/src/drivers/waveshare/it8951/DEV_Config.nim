@@ -1,32 +1,14 @@
-{.compile: "DEV_Config.c".}
-{.passl: "-llgpio -lm -lrt".}
 ## ***************************************************************************
-##  | File      	:   DEV_Config.h
-##  | Author      :   Waveshare team
+##  | File        :   DEV_Config.nim
+##  | Author      :   Waveshare team (original C implementation)
+##  | Nim Port    :   FrameOS maintainers
 ##  | Function    :   Hardware underlying interface
-##  | Info        :
-##                 Used to shield the underlying layers of each master
-##                 and enhance portability
+##  | Info        :   Native Nim implementation for the IT8951 driver
 ## ----------------
-##  |	This version:   V2.0
-##  | Date        :   2018-10-30
+##  | This version:   V3.0
+##  | Date        :   2019-09-17
 ##  | Info        :
-##  1.add:
-##    UBYTE\UWORD\UDOUBLE
-##  2.Change:
-##    EPD_RST -> EPD_RST_PIN
-##    EPD_DC -> EPD_DC_PIN
-##    EPD_CS -> EPD_CS_PIN
-##    EPD_BUSY -> EPD_BUSY_PIN
-##  3.Remote:
-##    EPD_RST_1\EPD_RST_0
-##    EPD_DC_1\EPD_DC_0
-##    EPD_CS_1\EPD_CS_0
-##    EPD_BUSY_1\EPD_BUSY_0
-##  3.add:
-##    #define DEV_Digital_Write(_pin, _value) bcm2835_GPIOI_write(_pin, _value)
-##    #define DEV_Digital_Read(_pin) bcm2835_GPIOI_lev(_pin)
-##    #define DEV_SPI_WriteByte(__value) bcm2835_spi_transfer(__value)
+##  -----------------------------------------------------------------------------
 ## #
 ## # Permission is hereby granted, free of charge, to any person obtaining a copy
 ## # of this software and associated documnetation files (the "Software"), to deal
@@ -34,9 +16,6 @@
 ## # to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 ## # copies of the Software, and to permit persons to  whom the Software is
 ## # furished to do so, subject to the following conditions:
-## #
-## # The above copyright notice and this permission notice shall be included in
-## # all copies or substantial portions of the Software.
 ## #
 ## # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 ## # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -48,21 +27,105 @@
 ## #
 ## ****************************************************************************
 
-## !!!Ignored construct:  # _DEV_CONFIG_H_ [NewLine] # _DEV_CONFIG_H_ [NewLine] # < stdint . h > [NewLine] # < stdlib . h > [NewLine] # < stdio . h > [NewLine] # < unistd . h > [NewLine] # < errno . h > [NewLine] # < stdio . h > [NewLine] # < string . h > [NewLine] # < lgpio . h > [NewLine] # Debug ( fmt , ... ) printf ( fmt , ## __VA_ARGS__ ) [NewLine] # LFLAGS 0 [NewLine] # NUM_MAXBUF 4 [NewLine] # HIGH 0x1 [NewLine] # LOW 0x0 [NewLine]
-##  GPIO
-##  # EPD_RST_PIN 17 [NewLine] # EPD_CS_PIN 8 [NewLine] # EPD_BUSY_PIN 24 [NewLine]
-##  data
-##  # UBYTE uint8_t [NewLine] # UWORD uint16_t [NewLine] # UDOUBLE uint32_t [NewLine] ------------------------------------------------------------------------------------------------------ void DEV_Digital_Write ( UWORD Pin , UBYTE Value ) ;
-## Error: did not expect ##!!!
+import
+  strformat,
+  strutils
+
+import lib/lgpio
+
+const
+  LFLAGS* = 0
+  NUM_MAXBUF* = 4
+  HIGH* = 0x1
+  LOW* = 0x0
+
 type
   UBYTE* = uint8
   UWORD* = uint16
   UDOUBLE* = uint32
 
-proc DEV_Digital_Read*(Pin: UWORD): UBYTE {.importc: "DEV_Digital_Read".}
-proc DEV_SPI_WriteByte*(Value: UBYTE) {.importc: "DEV_SPI_WriteByte".}
-proc DEV_SPI_ReadByte*(): UBYTE {.importc: "DEV_SPI_ReadByte".}
-proc DEV_Delay_ms*(xms: UDOUBLE) {.importc: "DEV_Delay_ms".}
-proc DEV_Delay_us*(xus: UDOUBLE) {.importc: "DEV_Delay_us".}
-proc DEV_Module_Init*(): UBYTE {.importc: "DEV_Module_Init".}
-proc DEV_Module_Exit*() {.importc: "DEV_Module_Exit".}
+const
+  EPD_RST_PIN* = UWORD(17)
+  EPD_CS_PIN* = UWORD(8)
+  EPD_BUSY_PIN* = UWORD(24)
+
+var
+  gpioHandle = cint(-1)
+  spiHandle = cint(-1)
+
+proc DEV_Digital_Write*(pin: UWORD; value: UBYTE) =
+  discard lgGpioWrite(gpioHandle, pin.cint, value.cint)
+
+proc DEV_Digital_Read*(pin: UWORD): UBYTE =
+  let readValue = lgGpioRead(gpioHandle, pin.cint)
+  if readValue <= 0:
+    UBYTE(0)
+  else:
+    UBYTE(readValue)
+
+proc DEV_SPI_WriteByte*(value: UBYTE) =
+  if spiHandle < 0:
+    return
+
+  var data = value
+  discard lgSpiWrite(spiHandle, cast[cstring](addr data), cint(1))
+
+proc DEV_SPI_ReadByte*(): UBYTE =
+  if spiHandle < 0:
+    return UBYTE(0)
+
+  var data = UBYTE(0)
+  discard lgSpiRead(spiHandle, cast[cstring](addr data), cint(1))
+  data
+
+proc DEV_Delay_ms*(xms: UDOUBLE) =
+  lguSleep(xms.float / 1000.0)
+
+proc DEV_Delay_us*(xus: UDOUBLE) =
+  lguSleep(xus.float / 1_000_000.0)
+
+proc DEV_GPIO_Mode*(pin: UWORD; mode: UWORD) =
+  if mode == 0 or mode == UWORD(LG_SET_INPUT):
+    discard lgGpioClaimInput(gpioHandle, LFLAGS.cint, pin.cint)
+  else:
+    discard lgGpioClaimOutput(gpioHandle, LFLAGS.cint, pin.cint, LG_LOW.cint)
+
+proc DEV_GPIO_Init*() =
+  DEV_GPIO_Mode(EPD_BUSY_PIN, UWORD(0))
+  DEV_GPIO_Mode(EPD_RST_PIN, UWORD(1))
+  DEV_GPIO_Mode(EPD_CS_PIN, UWORD(1))
+
+  DEV_Digital_Write(EPD_CS_PIN, UBYTE(HIGH))
+
+proc determineGpioChip(): cint =
+  try:
+    if readFile("/proc/cpuinfo").contains("Raspberry Pi 5"):
+      return 4
+  except CatchableError:
+    discard
+  0
+
+proc DEV_Module_Init*(): UBYTE =
+  let gpioChip = determineGpioChip()
+  gpioHandle = lgGpiochipOpen(gpioChip)
+  if gpioHandle < 0:
+    echo &"gpiochip{gpioChip} Export Failed"
+    return UBYTE(1)
+
+  spiHandle = lgSpiOpen(0, 0, 12_500_000, 0)
+  if spiHandle < 0:
+    echo &"lgSpiOpen failed: {spiHandle}"
+    discard lgGpiochipClose(gpioHandle)
+    gpioHandle = cint(-1)
+    return UBYTE(1)
+
+  DEV_GPIO_Init()
+  UBYTE(0)
+
+proc DEV_Module_Exit*() =
+  if spiHandle >= 0:
+    discard lgSpiClose(spiHandle)
+    spiHandle = cint(-1)
+  if gpioHandle >= 0:
+    discard lgGpiochipClose(gpioHandle)
+    gpioHandle = cint(-1)

@@ -1,0 +1,9 @@
+{
+  "name": "CyberPunk EU",
+  "description": "European capitals reimagined as cyberpunk dystopias. Guess the capital. 43 images",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 1280,
+  "imageHeight": 720,
+  "scenes": "./scenes.json"
+}

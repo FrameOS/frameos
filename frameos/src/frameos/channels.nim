@@ -1,36 +1,72 @@
-import json
-import options
-import times
-import frameos/types
+when defined(frameosDriverLibrary):
+  import json
+  import options
+  import frameos/ids
+  import frameos/driver_abi
 
-# Event
+  var
+    sharedHostLogHook: HostLogProc
+    sharedHostSendEventHook: HostSendEventProc
 
-var eventChannel*: Channel[(Option[SceneId], string, JsonNode)]
-eventChannel.open()
+  proc setSharedHostCallbacks*(logHook: HostLogProc, sendEventHook: HostSendEventProc) =
+    sharedHostLogHook = logHook
+    sharedHostSendEventHook = sendEventHook
 
-# Send an event to the current scene
-proc sendEvent*(event: string, payload: JsonNode) {.gcsafe.} =
-  eventChannel.send((none(SceneId), event, payload))
+  # Send an event to the current scene
+  proc sendEvent*(event: string, payload: JsonNode) {.gcsafe.} =
+    if not sharedHostSendEventHook.isNil:
+      sharedHostSendEventHook(none(SceneId), event, payload)
 
-# Send an event to a specific scene
-proc sendEvent*(scene: Option[SceneId], event: string, payload: JsonNode) =
-  eventChannel.send((scene, event, payload))
+  # Send an event to a specific scene
+  proc sendEvent*(scene: Option[SceneId], event: string, payload: JsonNode) {.gcsafe.} =
+    if not sharedHostSendEventHook.isNil:
+      sharedHostSendEventHook(scene, event, payload)
 
-# Log
+  proc log*(event: JsonNode) {.gcsafe.} =
+    if not sharedHostLogHook.isNil:
+      sharedHostLogHook(event)
 
-var logChannel*: Channel[(float, JsonNode)]
-logChannel.open()
+  proc debug*(message: string) =
+    log(%*{"event": "debug", "message": message})
+else:
+  import json
+  import options
+  import times
+  import frameos/ids
 
-proc log*(event: JsonNode) =
-  logChannel.send((epochTime(), event))
+  # Event
 
-proc debug*(message: string) =
-  logChannel.send((epochTime(), %*{"event": "debug", "message": message}))
+  var eventChannel*: Channel[(Option[SceneId], string, JsonNode)]
+  eventChannel.open()
 
-# Server
+  # Send an event to the current scene
+  proc sendEvent*(event: string, payload: JsonNode) {.gcsafe.} =
+    eventChannel.send((none(SceneId), event, payload))
 
-var serverChannel*: Channel[bool]
-serverChannel.open(1)
+  # Send an event to a specific scene
+  proc sendEvent*(scene: Option[SceneId], event: string, payload: JsonNode) {.gcsafe.} =
+    eventChannel.send((scene, event, payload))
 
-proc triggerServerRender*() =
-  discard serverChannel.trySend(true)
+  # Log
+
+  var logChannel*: Channel[(float, JsonNode)]
+  logChannel.open()
+
+  var logBroadcastChannel*: Channel[(float, JsonNode)]
+  logBroadcastChannel.open(5000)
+
+  proc log*(event: JsonNode) {.gcsafe.} =
+    let payload = (epochTime(), event)
+    logChannel.send(payload)
+    discard logBroadcastChannel.trySend(payload)
+
+  proc debug*(message: string) =
+    log(%*{"event": "debug", "message": message})
+
+  # Server
+
+  var serverChannel*: Channel[bool]
+  serverChannel.open(1)
+
+  proc triggerServerRender*() =
+    discard serverChannel.trySend(true)

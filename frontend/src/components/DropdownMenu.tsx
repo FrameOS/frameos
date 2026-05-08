@@ -5,14 +5,17 @@ import React, { useState } from 'react'
 import { usePopper } from 'react-popper'
 import clsx from 'clsx'
 import { ButtonProps, buttonColor } from './Button'
+import { Spinner } from './Spinner'
 
 export interface DropdownMenuItem {
-  label: React.ReactNode
+  label?: React.ReactNode
+  content?: (close: () => void) => React.ReactNode
   icon?: React.ReactNode
   confirm?: string
   title?: string
   keepOpen?: boolean
   onClick?: (e: React.MouseEvent) => void
+  loading?: boolean
 }
 
 export interface DropdownMenuProps {
@@ -25,7 +28,31 @@ export interface DropdownMenuProps {
 export function DropdownMenu({ items, className, horizontal, buttonColor: _buttonColor }: DropdownMenuProps) {
   const [referenceElement, setReferenceElement] = useState<HTMLButtonElement | null>(null)
   const [popperElement, setPopperElement] = useState<HTMLDivElement | null>(null)
-  const { styles, attributes } = usePopper(referenceElement, popperElement, { strategy: 'fixed' })
+  const { styles, attributes } = usePopper(referenceElement, popperElement, {
+    strategy: 'fixed',
+    placement: 'bottom-end',
+    modifiers: [
+      {
+        name: 'offset',
+        options: {
+          offset: [0, 4],
+        },
+      },
+      {
+        name: 'flip',
+        options: {
+          fallbackPlacements: ['top-end', 'bottom-start', 'top-start'],
+        },
+      },
+      {
+        name: 'preventOverflow',
+        options: {
+          padding: 8,
+        },
+      },
+    ],
+  })
+  const isLoading = items.some((item) => item.loading)
 
   return (
     <Menu>
@@ -40,7 +67,9 @@ export function DropdownMenu({ items, className, horizontal, buttonColor: _butto
               className
             )}
           >
-            {horizontal ? (
+            {isLoading ? (
+              <Spinner color="white" className="w-5 h-5" />
+            ) : horizontal ? (
               <EllipsisHorizontalIcon className="w-5 h-5" aria-label="Menu" />
             ) : (
               <EllipsisVerticalIcon className="w-5 h-5" aria-label="Menu" />
@@ -50,15 +79,15 @@ export function DropdownMenu({ items, className, horizontal, buttonColor: _butto
             <Transition
               show={open}
               enter="transition ease-out duration-100"
-              enterFrom="transform opacity-0 scale-95"
-              enterTo="transform opacity-100 scale-100"
+              enterFrom="opacity-0"
+              enterTo="opacity-100"
               leave="transition ease-in duration-75"
-              leaveFrom="transform opacity-100 scale-100"
-              leaveTo="transform opacity-0 scale-95"
+              leaveFrom="opacity-100"
+              leaveTo="opacity-0"
             >
               <Menu.Items
                 static
-                className="absolute right-0 w-56 mt-2 origin-top-right bg-gray-600 divide-y divide-gray-100 rounded-md shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none"
+                className="z-[100] w-56 origin-top-right bg-gray-600 divide-y divide-gray-100 rounded-md shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none"
                 ref={setPopperElement}
                 style={styles.popper}
                 {...attributes.popper}
@@ -67,36 +96,48 @@ export function DropdownMenu({ items, className, horizontal, buttonColor: _butto
                   {items.map((item, index) => (
                     <Menu.Item key={index}>
                       {({ active }) => (
-                        <a
-                          href="#"
-                          className={clsx(
-                            `${
-                              active && !!item.onClick ? 'bg-[#2a2b50] text-white' : 'text-white'
-                            } px-4 py-2 text-sm flex gap-2`
-                          )}
-                          title={item.title}
-                          onClick={
-                            item.onClick
-                              ? (e) => {
-                                  e.preventDefault()
-                                  e.stopPropagation()
-                                  if (item.confirm) {
-                                    if (confirm(item.confirm)) {
+                        item.content ? (
+                          <div
+                            className={clsx(
+                              active ? 'bg-[#2a2b50] text-white' : 'text-white',
+                              'px-4 py-2 text-sm'
+                            )}
+                            title={item.title}
+                          >
+                            {item.content(close)}
+                          </div>
+                        ) : (
+                          <a
+                            href="#"
+                            className={clsx(
+                              `${
+                                active && !!item.onClick ? 'bg-[#2a2b50] text-white' : 'text-white'
+                              } px-4 py-2 text-sm flex gap-2`
+                            )}
+                            title={item.title}
+                            onClick={
+                              item.onClick
+                                ? (e) => {
+                                    e.preventDefault()
+                                    e.stopPropagation()
+                                    if (item.confirm) {
+                                      if (confirm(item.confirm)) {
+                                        item.onClick?.(e)
+                                      }
+                                    } else {
                                       item.onClick?.(e)
                                     }
-                                  } else {
-                                    item.onClick?.(e)
+                                    if (!item.keepOpen) {
+                                      close()
+                                    }
                                   }
-                                  if (!item.keepOpen) {
-                                    close()
-                                  }
-                                }
-                              : undefined
-                          }
-                        >
-                          {item.icon}
-                          {item.label}
-                        </a>
+                                : undefined
+                            }
+                          >
+                            {item.loading ? <Spinner color="white" className="w-4 h-4" /> : item.icon}
+                            {item.label}
+                          </a>
+                        )
                       )}
                     </Menu.Item>
                   ))}

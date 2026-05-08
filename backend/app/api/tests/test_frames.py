@@ -2,9 +2,14 @@ import json
 import pytest
 from unittest.mock import patch
 import httpx
+from datetime import datetime, timedelta
 
+from app.api.auth import get_current_user
+from app.fastapi import app
 from app.models import new_frame
 from app.models.frame import Frame
+from app.models.log import Log
+from app.models.user import User
 
 @pytest.mark.asyncio
 async def test_api_frames(async_client, db, redis):
@@ -37,21 +42,75 @@ async def test_api_frame_get_not_found(async_client):
 
 
 @pytest.mark.asyncio
+async def test_api_frame_logs_full_download_includes_all_persisted_logs(no_auth_client, db):
+    frame = Frame(
+        name="LogFrame",
+        mode="rpios",
+        frame_host="localhost",
+        frame_port=8787,
+        frame_access_key="key",
+        frame_access="private",
+        ssh_user="pi",
+        ssh_port=22,
+        server_host="localhost",
+        server_port=8989,
+        server_api_key="server-key",
+        server_send_logs=True,
+        status="uninitialized",
+        interval=300,
+        metrics_interval=60,
+        scenes=[],
+        apps=[],
+        scaling_mode="contain",
+        rotate=0,
+        assets_path="/srv/assets",
+        save_assets=True,
+        upload_fonts="",
+    )
+    db.add(frame)
+    db.commit()
+    db.refresh(frame)
+    base_timestamp = datetime(2026, 5, 8, 8, 0, 0)
+    db.add_all(
+        Log(
+            frame_id=frame.id,
+            type='stdout',
+            line=f'line {index}',
+            timestamp=base_timestamp + timedelta(seconds=index),
+        )
+        for index in range(1002)
+    )
+    db.commit()
+
+    app.dependency_overrides[get_current_user] = lambda: object()
+    try:
+        capped_response = await no_auth_client.get(f'/api/frames/{frame.id}/logs')
+        assert capped_response.status_code == 200
+        capped_logs = capped_response.json()['logs']
+        assert len(capped_logs) == 1000
+        assert capped_logs[0]['line'] == 'line 2'
+        assert capped_logs[-1]['line'] == 'line 1001'
+
+        full_response = await no_auth_client.get(f'/api/frames/{frame.id}/logs/full')
+        assert full_response.status_code == 200
+        assert full_response.headers['content-type'].startswith('text/plain')
+        assert 'attachment;' in full_response.headers['content-disposition']
+        assert f'frame-{frame.id}-full-logs-' in full_response.headers['content-disposition']
+        full_lines = full_response.text.splitlines()
+        assert len(full_lines) == 1002
+        assert full_lines[0].endswith('(stdout) line 0')
+        assert full_lines[-1].endswith('(stdout) line 1001')
+    finally:
+        app.dependency_overrides.clear()
+
+@pytest.mark.asyncio
 async def test_api_frame_get_image_cached(async_client, db, redis):
     # Create the frame
     frame = await new_frame(db, redis, 'CachedImageFrame', 'localhost', 'localhost')
     cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
     await redis.set(cache_key, b'cached_image_data')
 
-    # First, get the image link (which gives us the token)
-    image_token_resp = await async_client.get(f'/api/frames/{frame.id}/image_token')
-    assert image_token_resp.status_code == 200
-    link_info = image_token_resp.json()
-    token = link_info['token']
-    image_url = f'/api/frames/{frame.id}/image?token={token}'
-
-    # Append t=-1 to force returning the cached data
-    image_url += "&t=-1"
+    image_url = f'/api/frames/{frame.id}/image?t=-1'
     response = await async_client.get(image_url)
     assert response.status_code == 200
     assert response.content == b'cached_image_data'
@@ -110,6 +169,25 @@ async def test_api_frame_update_name(async_client, db, redis):
 
 
 @pytest.mark.asyncio
+async def test_api_frame_update_requires_admin_credentials_when_enabled(async_client, db, redis):
+    frame = await new_frame(db, redis, 'AdminFrame', 'localhost', 'localhost')
+
+    resp = await async_client.post(
+        f'/api/frames/{frame.id}',
+        json={
+            'frame_admin_auth': {
+                'enabled': True,
+                'user': 'admin',
+                'pass': '',
+            }
+        },
+    )
+
+    assert resp.status_code == 422
+    assert 'Username and password are required when frame admin is enabled' in json.dumps(resp.json()['detail'])
+
+
+@pytest.mark.asyncio
 async def test_api_frame_update_scenes_json_format(async_client, db, redis):
     frame = await new_frame(db, redis, 'SceneTest', 'localhost', 'localhost')
     resp = await async_client.post(
@@ -143,6 +221,13 @@ async def test_api_frame_new(async_client):
     data = response.json()
     assert 'frame' in data
     assert data['frame']['name'] == "NewFrame"
+    assert data['frame']['https_proxy']['enable'] is True
+    assert data['frame']['https_proxy']['expose_only_port'] is True
+    assert 'BEGIN CERTIFICATE' in data['frame']['https_proxy']['certs']['server']
+    assert 'BEGIN RSA PRIVATE KEY' in data['frame']['https_proxy']['certs']['server_key']
+    assert 'BEGIN CERTIFICATE' in data['frame']['https_proxy']['certs']['client_ca']
+    assert data['frame']['https_proxy']['server_cert_not_valid_after'] is not None
+    assert data['frame']['https_proxy']['client_ca_cert_not_valid_after'] is not None
 
 
 @pytest.mark.asyncio
@@ -182,3 +267,38 @@ async def test_api_frame_delete_not_found(async_client):
     resp = await async_client.delete('/api/frames/999999')
     assert resp.status_code == 404
     assert resp.json()['detail'] == 'Frame not found'
+
+@pytest.mark.asyncio
+async def test_api_frame_get_image_with_cookie_no_token(no_auth_client, db, redis):
+    frame = await new_frame(db, redis, 'CookieImageFrame', 'localhost', 'localhost')
+    cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
+    await redis.set(cache_key, b'cookie_cached_image_data')
+
+    user = User(email='cookieframe@example.com')
+    user.set_password('testpassword')
+    db.add(user)
+    db.commit()
+
+    login_resp = await no_auth_client.post('/api/login', data={'username': 'cookieframe@example.com', 'password': 'testpassword'})
+    assert login_resp.status_code == 200
+
+    response = await no_auth_client.get(f'/api/frames/{frame.id}/image?t=-1')
+    assert response.status_code == 200
+    assert response.content == b'cookie_cached_image_data'
+
+
+@pytest.mark.asyncio
+async def test_api_frame_generate_tls_material_includes_validity_dates(async_client, db, redis):
+    frame = await new_frame(db, redis, 'TlsFrame', 'localhost', 'localhost')
+
+    response = await async_client.post(f'/api/frames/{frame.id}/tls/generate')
+    assert response.status_code == 200
+
+    data = response.json()
+    assert 'BEGIN CERTIFICATE' in data['certs']['server']
+    assert 'BEGIN RSA PRIVATE KEY' in data['certs']['server_key']
+    assert 'BEGIN CERTIFICATE' in data['certs']['client_ca']
+    assert data['server_cert_not_valid_after'] is not None
+    assert data['client_ca_cert_not_valid_after'] is not None
+    assert data['server_cert_not_valid_after'].endswith('+00:00')
+    assert data['client_ca_cert_not_valid_after'].endswith('+00:00')

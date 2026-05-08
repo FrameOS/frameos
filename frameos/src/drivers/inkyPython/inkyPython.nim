@@ -1,7 +1,10 @@
 import osproc, os, streams, pixie, json, options, strutils, strformat, locks
-import frameos/types
+import frameos/driver_context
+import frameos/device_setup
 import frameos/utils/dither
 import frameos/utils/image
+import drivers/i2c/i2c as i2cSetupDriver
+import drivers/spi/spi as spiSetupDriver
 
 type ScreenInfo* = object
   width*: int
@@ -13,7 +16,7 @@ type Driver* = ref object of FrameOSDriver
   mode*: string
   device*: string
   palette*: PaletteConfig
-  logger: Logger
+  logger: DriverLogger
   lastImageData: seq[ColorRGBX]
   debug: bool
 
@@ -36,7 +39,7 @@ proc getLastPixels*(): seq[uint8] =
 proc notifyImageAvailable*(self: Driver) =
   self.logger.log(%*{"event": "render:dither", "info": "Dithered image available"})
 
-proc safeLog(logger: Logger, message: string): JsonNode =
+proc safeLog*(logger: DriverLogger, message: string): JsonNode =
   try:
     result = parseJson(message)
     result["event"] = %*("driver:inky")
@@ -45,7 +48,7 @@ proc safeLog(logger: Logger, message: string): JsonNode =
   logger.log(result)
 
 proc safeStartProcess*(cmd: string; args: seq[string] = @[];
-                       wdir: string; logger: Logger): Option[Process] =
+                       wdir: string; logger: DriverLogger): Option[Process] =
   try:
     result = some startProcess(
       workingDir = wdir,
@@ -58,10 +61,20 @@ proc safeStartProcess*(cmd: string; args: seq[string] = @[];
     discard logger.safeLog(errorMsg)
     result = none(Process)
 
-proc deviceArgs(dev: string): seq[string] =
+proc deviceArgs*(dev: string): seq[string] =
   if dev.len > 0: @["--device", dev] else: @[]
 
-proc init*(frameOS: FrameOS): Driver =
+proc isInkyButtonDevice(device: string): bool =
+  device in [
+    "pimoroni.inky_impression",
+    "pimoroni.inky_impression_7",
+    "pimoroni.inky_impression_13",
+  ]
+
+proc isInkyDriverDevice(device: string): bool =
+  isInkyButtonDevice(device) or device == "pimoroni.inky_python"
+
+proc init*(frameOS: DriverContext): Driver =
   discard frameOS.logger.safeLog("Initializing Inky driver")
 
   result = Driver(
@@ -79,14 +92,9 @@ proc init*(frameOS: FrameOS): Driver =
   )
 
   let pOpt =
-    if result.mode == "nixos":
-      safeStartProcess("/nix/var/nix/profiles/system/sw/bin/inkyPython-check",
-                       deviceArgs(result.device),
-                       "/srv/frameos/vendor/inkyPython", result.logger)
-    else:
-      safeStartProcess("./env/bin/python3",
-                       @["check.py"] & deviceArgs(result.device),
-                       "/srv/frameos/vendor/inkyPython", result.logger)
+    safeStartProcess("./env/bin/python3",
+                     @["check.py"] & deviceArgs(result.device),
+                     "/srv/frameos/vendor/inkyPython", result.logger)
 
   if pOpt.isNone:
     discard result.logger.safeLog("Inky command not found - driver disabled.")
@@ -120,7 +128,19 @@ proc init*(frameOS: FrameOS): Driver =
 
   process.close()
 
-proc logProcessExit(logger: Logger, process: Process, context: string) =
+proc setup*(frameOS: DriverContext = nil): SetupResult =
+  setupPythonVendor("inkyPython")
+  if frameOS.isNil or frameOS.frameConfig.isNil:
+    return
+
+  let device = frameOS.frameConfig.device
+  if isInkyDriverDevice(device):
+    addSetupResult(result, runSetupStep("i2c", proc(): SetupResult = i2cSetupDriver.setup()))
+    addSetupResult(result, runSetupStep("spi", proc(): SetupResult = spiSetupDriver.setup()))
+    if isInkyButtonDevice(device):
+      addSetupResult(result, runSetupStep("bootConfig", proc(): SetupResult = setupBootConfig(@["dtoverlay=spi0-0cs"])))
+
+proc logProcessExit(logger: DriverLogger, process: Process, context: string) =
   let exitCode = process.waitForExit()
   if exitCode != 0:
     discard logger.safeLog(fmt"{context} exited with status {exitCode}")
@@ -156,14 +176,9 @@ proc render*(self: Driver, image: Image) =
     imageData = cast[seq[uint8]](image.encodeImage(BmpFormat))
 
   let pOpt =
-    if self.mode == "nixos":
-      safeStartProcess("/nix/var/nix/profiles/system/sw/bin/inkyPython-run",
-                       deviceArgs(self.device) & extraArgs,
-                       "/srv/frameos/vendor/inkyPython", self.logger)
-    else:
-      safeStartProcess("./env/bin/python3",
-                       @["run.py"] & deviceArgs(self.device) & extraArgs,
-                       "/srv/frameos/vendor/inkyPython", self.logger)
+    safeStartProcess("./env/bin/python3",
+                     @["run.py"] & deviceArgs(self.device) & extraArgs,
+                     "/srv/frameos/vendor/inkyPython", self.logger)
 
   if pOpt.isNone:
     discard self.logger.safeLog("Render skipped - command missing.")
@@ -232,7 +247,7 @@ proc render*(self: Driver, image: Image) =
   process.close()
 
 # Convert the rendered pixels to a PNG image. For accurate colors on the web.
-proc toPng*(rotate: int = 0): string =
+proc toPng*(rotate: int = 0, flip: string = ""): string =
   let width = lastWidth
   let height = lastHeight
   var outputImage = newImage(width, height)
@@ -251,7 +266,4 @@ proc toPng*(rotate: int = 0): string =
       outputImage.data[index].b = spectra6ColorPalette[pixel][2].uint8
       outputImage.data[index].a = 255
 
-  if rotate != 0:
-    return outputImage.rotateDegrees(rotate).encodeImage(PngFormat)
-
-  return outputImage.encodeImage(PngFormat)
+  outputImage.previewTransform(rotate, flip).encodeImage(PngFormat)

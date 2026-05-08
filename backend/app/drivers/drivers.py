@@ -6,16 +6,19 @@ class Driver:
     name: str # camelCase, safe for nim code, unique within this file
     variant: Optional[str] = None # device name, e.g. "EPD_1in54b_V2"
     import_path: Optional[str] = None # nim local import path for driver
+    setup_import_path: Optional[str] = None # nim local import path for setup proc
     vendor_folder: Optional[str] = None # vendor/folder to be copied to the release folder
     can_render: bool = False # add render(image)
     can_png: bool = False # add toPng(rotate)
     can_turn_on_off: bool = False # add turnOn() and turnOff()
     lines: Optional[list[str]] = None # extra config lines for drivers
+    link_flags: tuple[str, ...] = () # additional linker flags required when this driver is present
 
 DRIVERS = {
     "inkyPython": Driver(
         name="inkyPython",
         import_path="inkyPython/inkyPython",
+        setup_import_path="inkyPython/inkyPython",
         vendor_folder="inkyPython",
         can_png=False, # will be set to true for the frames that support this
         can_render=True,
@@ -23,6 +26,7 @@ DRIVERS = {
     "gpioButton": Driver(
         name="gpioButton",
         import_path="gpioButton/gpioButton",
+        link_flags=("-llgpio",),
     ),
     "frameBuffer": Driver(
         name="frameBuffer",
@@ -35,26 +39,37 @@ DRIVERS = {
         import_path="waveshare/waveshare",
         can_render=True,
         can_png=True,
+        link_flags=("-llgpio",),
     ),
     "inkyHyperPixel2r": Driver(
         name="inkyHyperPixel2r",
         import_path="inkyHyperPixel2r/inkyHyperPixel2r",
+        setup_import_path="inkyHyperPixel2r/inkyHyperPixel2r",
         vendor_folder="inkyHyperPixel2r",
         can_render=True,
         can_turn_on_off=True
     ),
+    "httpUpload": Driver(
+        name="httpUpload",
+        import_path="httpUpload/httpUpload",
+        can_render=True,
+    ),
     "evdev": Driver( # touch and mouse inputs
         name="evdev",
         import_path="evdev/evdev",
+        link_flags=("-levdev",),
     ),
     "spi": Driver( # enables spi on deploy
         name="spi",
+        setup_import_path="spi/spi",
     ),
     "noSpi": Driver( # disables spi on deploy
         name="noSpi",
+        setup_import_path="noSpi/noSpi",
     ),
     "i2c": Driver( # enables i2c on deploy
         name="i2c",
+        setup_import_path="i2c/i2c",
     ),
     "bootConfig": Driver( # assures lines in /boot/firmware/config.txt
         name="bootConfig",

@@ -16,8 +16,8 @@ import tables
 # - RDATE
 
 # Missing metadata fields:
-# - ORGANIZER, ATTENDEE, CONTACT, RELATED-TO, RESOURCES, VALARM, CLASS, CREATED, LAST-MODIFIED,
-# - SEQUENCE, TRANSP, PRIORITY, STATUS, GEO, CATEGORIES
+# - ORGANIZER, ATTENDEE, CONTACT, RELATED-TO, RESOURCES, VALARM, CLASS, CREATED,
+# - TRANSP, PRIORITY, GEO, CATEGORIES
 
 type
   RRuleFreq* = enum
@@ -42,6 +42,8 @@ type
   FieldsTable* = Table[string, DoublyLinkedList[string]]
   EventsSeq* = seq[(Timestamp, VEvent)]
 
+  EventStatus* = enum stNone, stTentative, stConfirmed, stCancelled
+
   VEvent* = object
     uid*: string
     timeZone*: string
@@ -55,6 +57,10 @@ type
     description*: string
     location*: string
     url*: string
+    status*: EventStatus
+    sequence*: int
+    dtStamp*: Timestamp
+    lastModified*: Timestamp
 
   ParsedCalendar* = object
     events*: seq[VEvent]
@@ -66,8 +72,189 @@ type
     rRuleProvided*: Table[string, (Timestamp, VEvent)]
     rRuleGenerated*: Table[string, (Timestamp, VEvent)]
     result*: EventsSeq
+    splitCutoff*: Table[string, Timestamp]
+    masterTzByUid*: Table[string, string]
+    staleSeriesCutoff*: Table[string, Timestamp]
 
 const MAX_RESULT_COUNT = 100000
+
+let windowsTimezoneMap = block:
+  var table = initTable[string, string]()
+  for pair in @[
+    ("dateline standard time", "Etc/GMT+12"),
+    ("utc-11", "Etc/GMT+11"),
+    ("aleutian standard time", "America/Adak"),
+    ("hawaiian standard time", "Pacific/Honolulu"),
+    ("marquesas standard time", "Pacific/Marquesas"),
+    ("alaskan standard time", "America/Anchorage"),
+    ("utc-09", "Etc/GMT+9"),
+    ("pacific standard time (mexico)", "America/Tijuana"),
+    ("pacific standard time", "America/Los_Angeles"),
+    ("us mountain standard time", "America/Phoenix"),
+    ("mountain standard time (mexico)", "America/Chihuahua"),
+    ("mountain standard time", "America/Denver"),
+    ("yukon standard time", "America/Whitehorse"),
+    ("central america standard time", "America/Guatemala"),
+    ("central standard time", "America/Chicago"),
+    ("central standard time (mexico)", "America/Mexico_City"),
+    ("canada central standard time", "America/Regina"),
+    ("sa pacific standard time", "America/Bogota"),
+    ("eastern standard time (mexico)", "America/Cancun"),
+    ("eastern standard time", "America/New_York"),
+    ("us eastern standard time", "America/Indiana/Indianapolis"),
+    ("haiti standard time", "America/Port-au-Prince"),
+    ("cuba standard time", "America/Havana"),
+    ("turks and caicos standard time", "America/Grand_Turk"),
+    ("venezuela standard time", "America/Caracas"),
+    ("paraguay standard time", "America/Asuncion"),
+    ("atlantic standard time", "America/Halifax"),
+    ("central brazilian standard time", "America/Cuiaba"),
+    ("sa western standard time", "America/La_Paz"),
+    ("pacific sa standard time", "America/Santiago"),
+    ("newfoundland standard time", "America/St_Johns"),
+    ("tocantins standard time", "America/Araguaina"),
+    ("e. south america standard time", "America/Sao_Paulo"),
+    ("sa eastern standard time", "America/Cayenne"),
+    ("argentina standard time", "America/Buenos_Aires"),
+    ("greenland standard time", "America/Nuuk"),
+    ("montevideo standard time", "America/Montevideo"),
+    ("magallanes standard time", "America/Punta_Arenas"),
+    ("saint pierre standard time", "America/Miquelon"),
+    ("bahia standard time", "America/Bahia"),
+    ("utc-02", "Etc/GMT+2"),
+    ("azores standard time", "Atlantic/Azores"),
+    ("cape verde standard time", "Atlantic/Cape_Verde"),
+    ("gmt standard time", "Europe/London"),
+    ("greenwich standard time", "Atlantic/Reykjavik"),
+    ("morocco standard time", "Africa/Casablanca"),
+    ("gmt daylight time", "Europe/London"),
+    ("w. europe standard time", "Europe/Berlin"),
+    ("central europe standard time", "Europe/Warsaw"),
+    ("romance standard time", "Europe/Paris"),
+    ("central european standard time", "Europe/Warsaw"),
+    ("w. central africa standard time", "Africa/Lagos"),
+    ("namibia standard time", "Africa/Windhoek"),
+    ("gtb standard time", "Europe/Bucharest"),
+    ("middle east standard time", "Asia/Beirut"),
+    ("egypt standard time", "Africa/Cairo"),
+    ("e. europe standard time", "Europe/Chisinau"),
+    ("syria standard time", "Asia/Damascus"),
+    ("west bank standard time", "Asia/Hebron"),
+    ("south africa standard time", "Africa/Johannesburg"),
+    ("fle standard time", "Europe/Kyiv"),
+    ("israel standard time", "Asia/Jerusalem"),
+    ("kaliningrad standard time", "Europe/Kaliningrad"),
+    ("sudan standard time", "Africa/Khartoum"),
+    ("libya standard time", "Africa/Tripoli"),
+    ("turkey standard time", "Europe/Istanbul"),
+    ("arabic standard time", "Asia/Baghdad"),
+    ("arabian standard time", "Asia/Dubai"),
+    ("belarus standard time", "Europe/Minsk"),
+    ("russian standard time", "Europe/Moscow"),
+    ("volgograd standard time", "Europe/Volgograd"),
+    ("saratov standard time", "Europe/Saratov"),
+    ("georgian standard time", "Asia/Tbilisi"),
+    ("azerbaijan standard time", "Asia/Baku"),
+    ("mauritius standard time", "Indian/Mauritius"),
+    ("saratov standard time", "Europe/Saratov"),
+    ("caucasus standard time", "Asia/Yerevan"),
+    ("afghanistan standard time", "Asia/Kabul"),
+    ("west asia standard time", "Asia/Tashkent"),
+    ("ekaterinburg standard time", "Asia/Yekaterinburg"),
+    ("pakistan standard time", "Asia/Karachi"),
+    ("india standard time", "Asia/Kolkata"),
+    ("sri lanka standard time", "Asia/Colombo"),
+    ("nepal standard time", "Asia/Kathmandu"),
+    ("central asia standard time", "Asia/Almaty"),
+    ("bangladesh standard time", "Asia/Dhaka"),
+    ("myanmar standard time", "Asia/Yangon"),
+    ("se asia standard time", "Asia/Bangkok"),
+    ("north asia standard time", "Asia/Novosibirsk"),
+    ("china standard time", "Asia/Shanghai"),
+    ("north asia east standard time", "Asia/Irkutsk"),
+    ("singapore standard time", "Asia/Singapore"),
+    ("taipei standard time", "Asia/Taipei"),
+    ("w. australia standard time", "Australia/Perth"),
+    ("korea standard time", "Asia/Seoul"),
+    ("tokyo standard time", "Asia/Tokyo"),
+    ("yakutsk standard time", "Asia/Yakutsk"),
+    ("cen. australia standard time", "Australia/Adelaide"),
+    ("aus central standard time", "Australia/Darwin"),
+    ("aus eastern standard time", "Australia/Sydney"),
+    ("w. pacific standard time", "Pacific/Port_Moresby"),
+    ("tonga standard time", "Pacific/Tongatapu"),
+    ("lord howe standard time", "Australia/Lord_Howe"),
+    ("tokelau standard time", "Pacific/Fakaofo"),
+    ("fiji standard time", "Pacific/Fiji"),
+    ("new zealand standard time", "Pacific/Auckland"),
+    ("utc+12", "Etc/GMT-12"),
+    ("utc+13", "Etc/GMT-13"),
+    ("samoa standard time", "Pacific/Apia"),
+    ("line islands standard time", "Pacific/Kiritimati"),
+    ("chatham islands standard time", "Pacific/Chatham"),
+    ("argentina daylight time", "America/Buenos_Aires"),
+    ("greenwich daylight time", "Atlantic/Reykjavik"),
+    ("w. europe daylight time", "Europe/Berlin"),
+    ("central europe daylight time", "Europe/Warsaw"),
+    ("romance daylight time", "Europe/Paris"),
+    ("central european daylight time", "Europe/Warsaw"),
+    ("fle daylight time", "Europe/Kyiv"),
+    ("turkey daylight time", "Europe/Istanbul"),
+    ("russian daylight time", "Europe/Moscow"),
+    ("caucasus daylight time", "Asia/Yerevan"),
+    ("aus eastern daylight time", "Australia/Sydney"),
+    ("cen. australia daylight time", "Australia/Adelaide"),
+    ("aus central daylight time", "Australia/Darwin"),
+    ("tasmania standard time", "Australia/Hobart"),
+    ("e. australia standard time", "Australia/Brisbane"),
+    ("central pacific standard time", "Pacific/Guadalcanal"),
+    ("vladivostok standard time", "Asia/Vladivostok"),
+    ("sakhalin standard time", "Asia/Sakhalin"),
+    ("magadan standard time", "Asia/Magadan"),
+    ("kamchatka standard time", "Asia/Kamchatka"),
+    ("utc+14", "Etc/GMT-14"),
+    ("iran standard time", "Asia/Tehran"),
+    ("azerbaijan daylight time", "Asia/Baku"),
+    ("bangladesh daylight time", "Asia/Dhaka"),
+    ("central asia daylight time", "Asia/Almaty"),
+    ("china daylight time", "Asia/Shanghai"),
+    ("korea daylight time", "Asia/Seoul"),
+    ("tokyo daylight time", "Asia/Tokyo"),
+    ("newfoundland daylight time", "America/St_Johns")
+  ]:
+    table[pair[0]] = pair[1]
+  table
+
+proc normalizeTimeZone(timeZone: string): string =
+  let trimmed = timeZone.strip()
+  if trimmed.len == 0:
+    return ""
+  let lower = trimmed.toLowerAscii()
+  if windowsTimezoneMap.hasKey(lower):
+    return windowsTimezoneMap[lower]
+  if trimmed.toUpperAscii() == "UTC" or trimmed.toUpperAscii() == "GMT":
+    return "Etc/UTC"
+  if trimmed.startsWith("UTC") and trimmed.len > 3:
+    let sign = trimmed[3]
+    if sign in ['+', '-']:
+      let rest = trimmed[4..^1]
+      var hour = 0
+      var minute = 0
+      try:
+        if rest.contains(":"):
+          let parts = rest.split(":")
+          if parts.len >= 1 and parts[0].len > 0:
+            hour = parts[0].parseInt()
+          if parts.len >= 2 and parts[1].len > 0:
+            minute = parts[1].parseInt()
+        else:
+          hour = rest.parseInt()
+      except ValueError:
+        return trimmed
+      if minute == 0:
+        let offset = (if sign == '+': -hour else: hour)
+        return "Etc/GMT" & (if offset >= 0: "+" & $offset else: $offset)
+  return trimmed
 
 ####################################################################################################
 # Parsing
@@ -116,13 +303,20 @@ proc parseICalDateTime*(dateTimeStr: string, timeZone: string): Timestamp =
 
     # Otherwise the date/time was in the local zone
     var cal = ts.calendar()
-    cal.shiftTimezone(timeZone)
+    let normalizedZone = normalizeTimeZone(timeZone)
+    if normalizedZone.len == 0:
+      return cal.ts
+    try:
+      cal.shiftTimezone(normalizedZone)
+    except CatchableError as e:
+      raise newException(TimeParseError,
+        "Failed to shift timezone '" & timeZone & "': " & e.msg)
     return cal.ts
   except ValueError as e:
     raise newException(TimeParseError, "Failed to parse datetime string: " & dateTimeStr & ". Error: " & e.msg)
 
 proc parseDateString(self: var ParsedCalendar, event: var VEvent, value: string): Timestamp =
-  let timeZone = if event.timeZone == "": self.timeZone else: event.timeZone
+  let timeZone = normalizeTimeZone(if event.timeZone == "": self.timeZone else: event.timeZone)
   if value.contains("VALUE=DATE"):
     let parts = value.split(":")
     let date = parts[len(parts) - 1]
@@ -133,44 +327,43 @@ proc parseDateString(self: var ParsedCalendar, event: var VEvent, value: string)
     return parseICalDateTime(value, timeZone)
 
 proc processCurrentFields*(self: var ParsedCalendar) =
-  let fields = self.currentFields
   var event = VEvent()
 
   template getFirstValue(key: string): string =
-    fields[key].head.value
+    self.currentFields[key].head.value
 
-  if fields.hasKey("UID"):
+  if self.currentFields.hasKey("UID"):
     event.uid = getFirstValue("UID")
 
-  if fields.hasKey("TZID"):
-    event.timeZone = fields["TZID"].head.value
+  if self.currentFields.hasKey("TZID"):
+    event.timeZone = normalizeTimeZone(self.currentFields["TZID"].head.value)
   else:
     event.timeZone = self.timeZone
 
-  if fields.hasKey("DTSTART"):
+  if self.currentFields.hasKey("DTSTART"):
     let value = getFirstValue("DTSTART")
     if value.startsWith("TZID="):
-      event.timeZone = value.split(":")[0].split("=")[1]
+      event.timeZone = normalizeTimeZone(value.split(":")[0].split("=")[1])
     event.startTs = self.parseDateString(event, value)
     event.fullDay = value.contains("VALUE=DATE") or len(value) == 8
 
-  if fields.hasKey("DTEND"):
+  if self.currentFields.hasKey("DTEND"):
     let value = getFirstValue("DTEND")
     if value.startsWith("TZID="):
-      event.timeZone = value.split(":")[0].split("=")[1]
+      event.timeZone = normalizeTimeZone(value.split(":")[0].split("=")[1])
     event.endTs = self.parseDateString(event, value)
     event.fullDay = value.contains("VALUE=DATE") or len(value) == 8
 
-  if fields.hasKey("DURATION"):
+  if self.currentFields.hasKey("DURATION"):
     assert(false, "DURATION is not supported")
 
-  # if fields.hasKey("DTSTAMP"): # When the event was created
-  #   assert(false, "DTSTAMP is not supported")
+  if self.currentFields.hasKey("DTSTAMP"):
+    event.dtStamp = parseICalDateTime(getFirstValue("DTSTAMP"), "UTC")
 
-  if fields.hasKey("RECURRENCE-ID"):
+  if self.currentFields.hasKey("RECURRENCE-ID"):
     event.recurrenceId = getFirstValue("RECURRENCE-ID")
 
-  if fields.hasKey("RRULE"):
+  if self.currentFields.hasKey("RRULE"):
     var rrule = RRule(weekStart: RRuleDay.none, byDay: @[], byMonth: @[], byMonthDay: @[])
     let value = getFirstValue("RRULE")
     for split in value.split(';'):
@@ -253,18 +446,33 @@ proc processCurrentFields*(self: var ParsedCalendar) =
     event.rrules.add(rrule)
   # if fields.hasKey("RDATE"):
   #   assert(false, "RDATE is not supported")
-  if fields.hasKey("EXDATE"):
-    for value in fields["EXDATE"].items():
-      event.exDates.add(parseICalDateTime(value, event.timeZone))
+  if self.currentFields.hasKey("EXDATE"):
+    for raw in self.currentFields["EXDATE"].items():
+      var tzParam = ""
+      var datesPart = raw
+      let colon = raw.find(':')
+      if colon != -1:
+        for p in raw[0 ..< colon].split(';'):
+          if p.startsWith("TZID="):
+            tzParam = normalizeTimeZone(p.split("=", 1)[1])
+        datesPart = raw[colon + 1 .. ^1]
+      let tzToUse =
+        if tzParam.len > 0: tzParam
+        elif self.masterTzByUid.hasKey(event.uid): self.masterTzByUid[event.uid]
+        elif event.timeZone.len > 0: event.timeZone
+        else: self.timeZone
+
+      for token in datesPart.split(','):
+        event.exDates.add(parseICalDateTime(token, tzToUse))
 
   # Text fields
-  if fields.hasKey("SUMMARY"):
+  if self.currentFields.hasKey("SUMMARY"):
     event.summary = unescape(getFirstValue("SUMMARY"))
-  if fields.hasKey("DESCRIPTION"):
+  if self.currentFields.hasKey("DESCRIPTION"):
     event.description = unescape(getFirstValue("DESCRIPTION"))
-  if fields.hasKey("LOCATION"):
+  if self.currentFields.hasKey("LOCATION"):
     event.location = unescape(getFirstValue("LOCATION"))
-  if fields.hasKey("URL"):
+  if self.currentFields.hasKey("URL"):
     event.url = unescape(getFirstValue("URL"))
   # if fields.hasKey("COMMENT"):
   #   return # Ignore comments
@@ -274,8 +482,22 @@ proc processCurrentFields*(self: var ParsedCalendar) =
   #   assert(false, "GEO is not supported")
   # if fields.hasKey("CATEGORIES"):
   #   assert(false, "CATEGORIES is not supported")
-  # if fields.hasKey("STATUS"):
-  #   assert(false, "STATUS is not supported")
+
+  if self.currentFields.hasKey("STATUS"):
+    let s = getFirstValue("STATUS").toUpperAscii()
+    case s
+    of "CANCELLED": event.status = stCancelled
+    of "TENTATIVE": event.status = stTentative
+    of "CONFIRMED": event.status = stConfirmed
+    else: event.status = stNone
+
+  if self.currentFields.hasKey("LAST-MODIFIED"):
+    event.lastModified = parseICalDateTime(getFirstValue("LAST-MODIFIED"), "UTC")
+  if self.currentFields.hasKey("SEQUENCE"):
+    try:
+      event.sequence = getFirstValue("SEQUENCE").parseInt()
+    except ValueError:
+      event.sequence = 0
 
   # Attendee and Alarm Properties
   # if fields.hasKey("ATTENDEE"):
@@ -300,6 +522,10 @@ proc processCurrentFields*(self: var ParsedCalendar) =
   #   assert(false, "TRANSP is not supported")
   # if fields.hasKey("PRIORITY"):
   #   assert(false, "PRIORITY is not supported")
+
+  if event.recurrenceId.len == 0 and event.uid.len > 0:
+    self.masterTzByUid[event.uid] = event.timeZone
+
   self.events.add(event)
 
 proc processLine*(self: var ParsedCalendar, line: string) =
@@ -336,11 +562,15 @@ proc processLine*(self: var ParsedCalendar, line: string) =
         self.currentFields[key].add(value)
       else:
         if key == "X-WR-TIMEZONE":
-          self.timeZone = unescape(value)
+          self.timeZone = normalizeTimeZone(unescape(value))
+
+proc reconcileRecurringSeries*(self: var ParsedCalendar)
 
 proc parseICalendar*(content: string, timeZone = ""): ParsedCalendar =
-  result = ParsedCalendar(timeZone: timeZone)
-  result.timeZone = timeZone # Default. Will be overridden by X-WR-TIMEZONE if given
+  result = ParsedCalendar(timeZone: normalizeTimeZone(timeZone))
+  result.timeZone = normalizeTimeZone(timeZone) # Default. Will be overridden by X-WR-TIMEZONE if given
+  result.masterTzByUid = initTable[string, string]()
+  result.staleSeriesCutoff = initTable[string, Timestamp]()
   var accumulator = ""
   for line in content.splitLines():
     if line.len > 0 and (line[0] == ' ' or line[0] == '\t'):
@@ -354,6 +584,7 @@ proc parseICalendar*(content: string, timeZone = ""): ParsedCalendar =
     processLine(result, accumulator.strip())
 
   result.events.sort(proc (a: VEvent, b: VEvent): int = cmp(a.startTs, b.startTs))
+  result.reconcileRecurringSeries()
 
 ####################################################################################################
 # Querying
@@ -362,7 +593,93 @@ proc fixDST(self: var Calendar, timeZone: string) =
   self.tzOffset = 0
   self.tzName = ""
   self.dstName = ""
-  self.shiftTimezone(timeZone)
+  let normalized = normalizeTimeZone(timeZone)
+  if normalized.len == 0:
+    return
+  self.shiftTimezone(normalized)
+
+proc eventFreshness*(event: VEvent): (int, float, float, float) =
+  (
+    event.sequence,
+    event.lastModified.float,
+    event.dtStamp.float,
+    event.startTs.float
+  )
+
+proc sameRRule*(a, b: RRule): bool =
+  a.freq == b.freq and
+  a.interval == b.interval and
+  a.byDay == b.byDay and
+  a.byMonth == b.byMonth and
+  a.byMonthDay == b.byMonthDay and
+  a.byYearDay == b.byYearDay and
+  a.byWeekNo == b.byWeekNo and
+  a.until == b.until and
+  a.count == b.count and
+  a.weekStart == b.weekStart
+
+proc sameRecurringMasterSignature*(a, b: VEvent): bool =
+  if a.uid == b.uid:
+    return false
+  if a.recurrenceId.len > 0 or b.recurrenceId.len > 0:
+    return false
+  if a.rrules.len == 0 or b.rrules.len == 0:
+    return false
+  if a.summary != b.summary:
+    return false
+  if a.fullDay != b.fullDay:
+    return false
+  if (a.endTs.float - a.startTs.float) != (b.endTs.float - b.startTs.float):
+    return false
+  if a.rrules.len != b.rrules.len:
+    return false
+  for i in 0 ..< a.rrules.len:
+    if not sameRRule(a.rrules[i], b.rrules[i]):
+      return false
+  return true
+
+proc choosePreferredEvent*(current, candidate: VEvent): VEvent =
+  if eventFreshness(candidate) > eventFreshness(current):
+    return candidate
+  return current
+
+proc reconcileRecurringSeries*(self: var ParsedCalendar) =
+  for i in 0 ..< self.events.len:
+    let older = self.events[i]
+    if older.status == stCancelled or older.rrules.len == 0 or older.recurrenceId.len > 0:
+      continue
+    for j in 0 ..< self.events.len:
+      if i == j:
+        continue
+      let newer = self.events[j]
+      if newer.status == stCancelled or newer.rrules.len == 0 or newer.recurrenceId.len > 0:
+        continue
+      if not sameRecurringMasterSignature(older, newer):
+        continue
+
+      if older.startTs < newer.startTs and eventFreshness(newer) >= eventFreshness(older):
+        if not self.staleSeriesCutoff.hasKey(older.uid) or newer.startTs < self.staleSeriesCutoff[older.uid]:
+          self.staleSeriesCutoff[older.uid] = newer.startTs
+      elif older.startTs == newer.startTs and eventFreshness(newer) > eventFreshness(older):
+        if not self.staleSeriesCutoff.hasKey(older.uid) or newer.startTs < self.staleSeriesCutoff[older.uid]:
+          self.staleSeriesCutoff[older.uid] = newer.startTs
+
+proc reconcileExactCollisions*(self: var ParsedCalendar) =
+  var winners = initTable[string, (Timestamp, VEvent)]()
+  for (ts, event) in self.result:
+    let duration = int64(event.endTs.float - event.startTs.float)
+    let collisionKey = event.summary & "|" & $int64(ts.float) & "|" & $duration
+    if winners.hasKey(collisionKey):
+      let current = winners[collisionKey]
+      let preferred = choosePreferredEvent(current[1], event)
+      if preferred.uid == event.uid and preferred.startTs == event.startTs and preferred.endTs == event.endTs:
+        winners[collisionKey] = (ts, event)
+    else:
+      winners[collisionKey] = (ts, event)
+
+  self.result = @[]
+  for (_, winner) in winners.pairs():
+    self.result.add(winner)
 
 proc trimDay(self: var Calendar) =
   self.secondFraction = 0.0
@@ -522,23 +839,79 @@ proc matchesRRule*(currentCal: Calendar, rrule: RRule): bool =
 
   return true
 
+proc hasThisAndFuture*(value: string): bool =
+  let i = value.find(':')
+  if i == -1: return false
+  for p in value[0 ..< i].split(';'):
+    let up = p.toUpperAscii()
+    if up.startsWith("RANGE="):
+      let v = up.split("=", 1)[1]
+      if v == "THISANDFUTURE":
+        return true
+  return false
+
+proc tzForRid(self: ParsedCalendar, ev: VEvent, ridTzParam: string): string =
+  if ridTzParam.len > 0: return normalizeTimeZone(ridTzParam)
+  if self.masterTzByUid.hasKey(ev.uid): return self.masterTzByUid[ev.uid]
+  if ev.timeZone.len > 0: return ev.timeZone
+  return self.timeZone
+
+proc extractTzAndDate*(value: string): (string, string) =
+  ## Extract timezone and the actual datetime part from a RECURRENCE-ID line
+  var tz = ""
+  var datePart = value
+  let colon = value.find(':')
+  if colon != -1:
+    let paramsPart = value[0 ..< colon]
+    datePart = value[colon + 1 .. ^1]
+    for p in paramsPart.split(';'):
+      if p.startsWith("TZID="):
+        tz = normalizeTimeZone(p.split("=", 1)[1])
+  return (tz, datePart)
+
+proc keyFor(uid: string, ts: Timestamp): string =
+  uid & "/" & $int64(ts.float) # use toUnix if you have it
+
 proc addMatchedEvent(self: var ParsedCalendar, ts: Timestamp, event: VEvent) =
   if self.result.len() > MAX_RESULT_COUNT:
     raise newException(ValueError, "Too many events in calendar. Increase MAX_RESULT_COUNT.")
 
-  let key = event.uid & "/" & $ts
+  if event.recurrenceId.len == 0 and event.rrules.len > 0 and self.staleSeriesCutoff.hasKey(event.uid):
+    if ts >= self.staleSeriesCutoff[event.uid]:
+      return
+
   if event.recurrenceId != "":
-    self.rRuleProvided[key] = (ts, event)
+    var (ridTzParam, ridDate) = extractTzAndDate(event.recurrenceId)
+    let ridTz = self.tzForRid(event, ridTzParam)
+    let ridTs = parseICalDateTime(ridDate, ridTz)
+
+    # If the override defines a child series (has RRULE) or is marked THISANDFUTURE,
+    # (a) key by *this occurrence's* ts so it replaces the parent's same slot
+    # (b) remember a cutoff so the parent series stops after ridTs.
+    if event.rrules.len() > 0 or hasThisAndFuture(event.recurrenceId):
+      # record/keep earliest cutoff
+      if not self.splitCutoff.hasKey(event.uid) or ridTs < self.splitCutoff[event.uid]:
+        self.splitCutoff[event.uid] = ridTs
+      let key = keyFor(event.uid, ts)
+      self.rRuleProvided[key] = (ts, event)
+    else:
+      # Single-instance override (move/cancel this one occurrence)
+      let key = keyFor(event.uid, ridTs) # key by ORIGINAL occurrence time
+      self.rRuleProvided[key] = (ts, event)
 
   elif event.rrules.len() > 0:
+    if event.status == stCancelled:
+      return
+    let key = keyFor(event.uid, ts)
     self.rRuleGenerated[key] = (ts, event)
 
   else:
-    self.result.add((ts, event))
+    if event.status != stCancelled:
+      self.result.add((ts, event))
 
 proc applyRRule(self: var ParsedCalendar, startTs: Timestamp, endTs: Timestamp, event: VEvent,
     rrule: RRule) =
-  let timeZone = if event.timeZone == "": self.timeZone else: event.timeZone
+  let timeZone = normalizeTimeZone(if event.timeZone == "": self.timeZone else: event.timeZone)
   let duration = event.endTs.float - event.startTs.float
   var
     currentTs = event.startTs
@@ -557,7 +930,7 @@ proc applyRRule(self: var ParsedCalendar, startTs: Timestamp, endTs: Timestamp, 
 
     if simpleRepeat:
       nextIntervalStart = getSimpleNextInterval(currentCal, rrule, timeZone)
-      if currentTs <= endTs and newEndTs >= startTs:
+      if not event.exDates.contains(currentTs) and currentTs <= endTs and newEndTs >= startTs:
         self.addMatchedEvent(currentTs, event)
         counter += 1
 
@@ -586,8 +959,13 @@ proc applyRRule(self: var ParsedCalendar, startTs: Timestamp, endTs: Timestamp, 
 
 proc getEvents*(self: var ParsedCalendar, startTs: Timestamp, endTs: Timestamp, search: string = "",
     maxCount: int = 1000): EventsSeq =
+
   for event in self.events:
     if search != "" and not event.summary.contains(search):
+      continue
+
+    # ⬅️ Skip whole-series cancellations (master VEVENT without RECURRENCE-ID)
+    if event.status == stCancelled and event.recurrenceId.len == 0:
       continue
 
     for rrule in event.rrules:
@@ -596,14 +974,60 @@ proc getEvents*(self: var ParsedCalendar, startTs: Timestamp, endTs: Timestamp, 
     if event.rrules.len == 0 and event.startTs <= endTs and event.endTs >= startTs:
       self.addMatchedEvent(event.startTs, event)
 
+    if event.recurrenceId != "":
+      var (ridTzParam, ridDate) = extractTzAndDate(event.recurrenceId)
+      let ridTz = self.tzForRid(event, ridTzParam) # NEW
+      let ridTs = parseICalDateTime(ridDate, ridTz)
+      if ridTs <= endTs and ridTs >= startTs:
+        let displayTs = if event.startTs == 0.Timestamp: ridTs else: event.startTs
+        self.addMatchedEvent(displayTs, event)
+
+  var removedParentCounts: Table[string, int]
+
+  # Stop original parent series after any THISANDFUTURE split points
+  for uid, cutoff in self.splitCutoff.pairs():
+    var kill: seq[string] = @[]
+    for key, (ts, ev) in self.rRuleGenerated.pairs():
+      # ev.recurrenceId == "" identifies instances generated from the *parent* series
+      if ev.uid == uid and ev.recurrenceId == "" and ts >= cutoff:
+        kill.add(key)
+    if kill.len > 0:
+      removedParentCounts[uid] = kill.len
+    for k in kill:
+      self.rRuleGenerated.del(k)
+
+  # Child series here = overrides with RRULE *or* RANGE=THISANDFUTURE
+  for uid, removed in removedParentCounts.pairs():
+    if removed <= 0: continue
+    if not self.splitCutoff.hasKey(uid): continue
+    let cutoff = self.splitCutoff[uid]
+
+    # collect child instances >= cutoff
+    var childKeys: seq[(Timestamp, string)] = @[]
+    for key, (ts, ev) in self.rRuleProvided.pairs():
+      if ev.uid != uid: continue
+      if ts < cutoff: continue
+      if ev.rrules.len > 0 or hasThisAndFuture(ev.recurrenceId):
+        childKeys.add((ts, key))
+
+    # sort by occurrence time and keep only the first `removed`
+    childKeys.sort(proc (a, b: (Timestamp, string)): int = cmp(a[0], b[0]))
+    if childKeys.len > removed:
+      for i in removed ..< childKeys.len:
+        let k = childKeys[i][1]
+        self.rRuleProvided.del(k)
+
   # dedupe rrule results and standalone results
   for key, (ts, event) in self.rRuleProvided.pairs():
     if self.rRuleGenerated.hasKey(key):
-      self.rRuleGenerated.del(key)
-    self.result.add((ts, event))
+      self.rRuleGenerated.del(key) # remove the RRULE-generated original
+    if event.status != stCancelled:
+      self.result.add((ts, event)) # add overrides only if not cancelled
+
   for key, (ts, event) in self.rRuleGenerated.pairs():
     self.result.add((ts, event))
 
+  self.reconcileExactCollisions()
   self.result.sort(cmp)
 
   if maxCount > 0 and self.result.len > maxCount:

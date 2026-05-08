@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.settings import get_settings_dict, Settings
 from app.schemas.settings import SettingsResponse, SettingsUpdateRequest
+from app.utils.posthog import initialize_posthog
 from . import api_with_auth
 
 @api_with_auth.get("/settings", response_model=SettingsResponse)
@@ -32,4 +33,7 @@ async def set_settings(data: SettingsUpdateRequest, db: Session = Depends(get_db
     except SQLAlchemyError:
         raise HTTPException(status_code=500, detail="Database error")
 
-    return get_settings_dict(db)
+    updated_settings = get_settings_dict(db)
+    if "posthog" in payload:
+        initialize_posthog(updated_settings)
+    return updated_settings

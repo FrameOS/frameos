@@ -11,12 +11,15 @@ from sqlalchemy import Integer, String, DateTime, ForeignKey, Text, func
 from sqlalchemy.orm import relationship, backref, Session, mapped_column
 from app.websockets import publish_message
 
+LOG_LIMIT_PER_FRAME = 10000
+
 class Log(Base):
     __tablename__ = 'log'
     id = mapped_column(Integer, primary_key=True)
     timestamp = mapped_column(DateTime, nullable=False, default=func.current_timestamp())
     type = mapped_column(String(10), nullable=False)
     line = mapped_column(Text, nullable=False)
+    ip = mapped_column(String(64), nullable=True)
     frame_id = mapped_column(Integer, ForeignKey('frame.id'), nullable=False)
 
     frame = relationship('Frame', backref=backref('logs', lazy=True))
@@ -27,16 +30,32 @@ class Log(Base):
             'timestamp': self.timestamp.replace(tzinfo=timezone.utc).isoformat(),
             'type': self.type,
             'line': self.line,
+            'ip': self.ip,
             'frame_id': self.frame_id
         }
 
 
-async def new_log(db: Session, redis: Redis, frame_id: int, type: str, line: str, timestamp: Optional[datetime] = None) -> Log:
-    log = Log(frame_id=frame_id, type=type, line=line, timestamp=timestamp or datetime.utcnow())
+async def new_log(
+    db: Session,
+    redis: Redis,
+    frame_id: int,
+    type: str,
+    line: str,
+    timestamp: Optional[datetime] = None,
+    ip: Optional[str] = None,
+) -> Log:
+    log = Log(
+        frame_id=frame_id,
+        type=type,
+        line=line,
+        timestamp=timestamp or datetime.utcnow(),
+        ip=ip,
+    )
     db.add(log)
     db.commit()
     frame_logs_count = db.query(Log).filter_by(frame_id=frame_id).count()
-    if frame_logs_count > 1100:
+    payload = {**log.to_dict(), "timestamp": log.timestamp.replace(tzinfo=timezone.utc).isoformat()}
+    if frame_logs_count > LOG_LIMIT_PER_FRAME + 100:
         oldest_logs = (db.query(Log)
                        .filter_by(frame_id=frame_id)
                        .order_by(Log.timestamp)
@@ -44,20 +63,26 @@ async def new_log(db: Session, redis: Redis, frame_id: int, type: str, line: str
                        .all())
         for old_log in oldest_logs:
             db.delete(old_log)
-        db.commit()
+    db.commit()
 
-    await publish_message(redis, "new_log", {**log.to_dict(), "timestamp": log.timestamp.replace(tzinfo=timezone.utc).isoformat()})
+    await publish_message(redis, "new_log", payload)
     return log
 
 
-async def process_log(db: Session, redis: Redis, frame: Frame, log: dict | list):
+async def process_log(
+    db: Session,
+    redis: Redis,
+    frame: Frame,
+    log: dict | list,
+    ip: Optional[str] = None,
+):
     if isinstance(log, list):
         timestamp = datetime.utcfromtimestamp(log[0])
         log = log[1]
     else:
         timestamp = datetime.utcnow()
 
-    await new_log(db, redis, int(frame.id), "webhook", json.dumps(log), timestamp)
+    await new_log(db, redis, int(frame.id), "webhook", json.dumps(log), timestamp, ip=ip)
 
     assert isinstance(log, dict), f"Log must be a dict, got {type(log)}"
 
@@ -97,4 +122,3 @@ async def process_log(db: Session, redis: Redis, frame: Frame, log: dict | list)
         if 'timestamp' in metrics_dict:
             del metrics_dict['timestamp']
         await new_metrics(db, redis, int(frame.id), metrics_dict)
-

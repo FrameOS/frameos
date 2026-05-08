@@ -8,42 +8,26 @@ import { sanitizeScene } from '../scenes/frame/frameLogic'
 import { apiFetch } from '../utils/apiFetch'
 import { entityImagesModel } from './entityImagesModel'
 import { urls } from '../urls'
-import streamSaver from 'streamsaver'
 
-export interface FrameImageInfo {
-  url: string
-  expiresAt: number
-}
-
-async function buildSDCard(id: number): Promise<void> {
-  const resp = await apiFetch(`/api/frames/${id}/build_sd_image`, { method: 'POST' })
-  if (!resp.ok) throw new Error(await resp.text())
-
-  const cd = resp.headers.get('content-disposition') ?? ''
-  const name = decodeURIComponent(
-    cd.match(/filename\*=UTF-8''([^;]+)|filename="([^"]+)"/)?.[1] ??
-      cd.match(/filename\*=UTF-8''([^;]+)|filename="([^"]+)"/)?.[2] ??
-      `frame_${id}.img.zst`
-  )
-
-  const size = Number(resp.headers.get('content-length')) || undefined
-  const fileStream = streamSaver.createWriteStream(name, { size })
-  const writer = fileStream.getWriter()
-  if (!resp.body) {
-    throw new Error('No response body received')
+function sanitizeFrameForStore(frame: FrameType): FrameType {
+  const lastSuccessfulDeploy = frame.last_successful_deploy
+  return {
+    ...frame,
+    scenes: frame.scenes?.map((scene) => sanitizeScene(scene as FrameScene, frame)) ?? [],
+    last_successful_deploy:
+      lastSuccessfulDeploy && Array.isArray(lastSuccessfulDeploy.scenes)
+        ? {
+            ...lastSuccessfulDeploy,
+            scenes: lastSuccessfulDeploy.scenes.map((scene: FrameScene) =>
+              sanitizeScene(scene as FrameScene, lastSuccessfulDeploy as Partial<FrameType>)
+            ),
+          }
+        : lastSuccessfulDeploy,
   }
-  const reader = resp.body.getReader()
-
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    await writer.write(value) // chunk-by-chunk, zero extra copies
-  }
-  await writer.close()
 }
 
 export const framesModel = kea<framesModelType>([
-  connect({ logic: [socketLogic, entityImagesModel] }),
+  connect(() => ({ logic: [socketLogic, entityImagesModel] })),
   path(['src', 'models', 'framesModel']),
   actions({
     addFrame: (frame: FrameType) => ({ frame }),
@@ -56,7 +40,6 @@ export const framesModel = kea<framesModelType>([
     deleteFrame: (id: number) => ({ id }),
     deployAgent: (id: number) => ({ id }),
     restartAgent: (id: number) => ({ id }),
-    buildSDCard: (id: number) => ({ id }),
     setDeployWithAgent: (id: number, deployWithAgent: boolean) => ({ id, deployWithAgent }),
   }),
   loaders(({ values }) => ({
@@ -73,10 +56,7 @@ export const framesModel = kea<framesModelType>([
             const frame = data.frame as FrameType
             return {
               ...values.frames,
-              [frame.id]: {
-                ...frame,
-                scenes: frame.scenes?.map((scene) => sanitizeScene(scene as FrameScene, frame)),
-              },
+              [frame.id]: sanitizeFrameForStore(frame),
             }
           } catch (error) {
             console.error(error)
@@ -91,13 +71,7 @@ export const framesModel = kea<framesModelType>([
             }
             const data = await response.json()
             const framesDict = Object.fromEntries(
-              (data.frames as FrameType[]).map((frame) => [
-                frame.id,
-                {
-                  ...frame,
-                  scenes: frame.scenes?.map((scene) => sanitizeScene(scene as FrameScene, frame)),
-                },
-              ])
+              (data.frames as FrameType[]).map((frame) => [frame.id, sanitizeFrameForStore(frame)])
             )
             return framesDict
           } catch (error) {
@@ -114,9 +88,7 @@ export const framesModel = kea<framesModelType>([
       {
         addFrame: (state, { frame }) => ({
           ...state,
-          [frame.id]: {
-            ...frame,
-          },
+          [frame.id]: sanitizeFrameForStore(frame),
         }),
         setDeployWithAgent: (state, { id, deployWithAgent }) => {
           const frame = state[id]
@@ -129,10 +101,13 @@ export const framesModel = kea<framesModelType>([
             },
           }
         },
-        [socketLogic.actionTypes.newFrame]: (state, { frame }) => ({ ...state, [frame.id]: frame }),
+        [socketLogic.actionTypes.newFrame]: (state, { frame }) => ({
+          ...state,
+          [frame.id]: sanitizeFrameForStore(frame),
+        }),
         [socketLogic.actionTypes.updateFrame]: (state, { frame }) => ({
           ...state,
-          [frame.id]: { ...(state[frame.id] ?? {}), ...frame },
+          [frame.id]: sanitizeFrameForStore({ ...(state[frame.id] ?? {}), ...frame }),
         }),
         [socketLogic.actionTypes.deleteFrame]: (state, { id }) => {
           const newState = { ...state }
@@ -150,6 +125,7 @@ export const framesModel = kea<framesModelType>([
           (a, b) => a.frame_host.localeCompare(b.frame_host) || (a.ssh_user || '').localeCompare(b.ssh_user || '')
         ) as FrameType[],
     ],
+    framesLoaded: [(s) => [s.frames], (frames) => Object.keys(frames).length > 0],
   }),
   afterMount(({ actions }) => {
     actions.loadFrames()
@@ -188,9 +164,6 @@ export const framesModel = kea<framesModelType>([
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ agent: { ...frame?.agent, deployWithAgent } }),
       })
-    },
-    buildSDCard: async ({ id }) => {
-      await buildSDCard(id)
     },
     deleteFrame: async ({ id }) => {
       await apiFetch(`/api/frames/${id}`, { method: 'DELETE' })

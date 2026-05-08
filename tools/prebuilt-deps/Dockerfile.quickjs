@@ -1,0 +1,50 @@
+# syntax=docker/dockerfile:1.6
+ARG BASE_IMAGE=debian:bookworm
+FROM ${BASE_IMAGE} AS builder
+ARG BASE_IMAGE
+ARG DISTRO_NAME=debian
+ARG DISTRO_RELEASE=bookworm
+ARG TARGET_NAME=${DISTRO_NAME}-${DISTRO_RELEASE}
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+ARG TARGETPLATFORM
+ARG BUILDPLATFORM
+ARG QUICKJS_VERSION=2025-04-26
+ARG QUICKJS_SHA256=2f20074c25166ef6f781f381c50d57b502cb85d470d639abccebbef7954c83bf
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+      build-essential \
+      ca-certificates \
+      curl \
+      git \
+      pkg-config \
+      python3 \
+      xz-utils \
+      openssl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+RUN mkdir -p /artifacts
+
+RUN set -euxo pipefail \
+    && curl -fsSL -o quickjs.tar.xz "https://bellard.org/quickjs/quickjs-${QUICKJS_VERSION}.tar.xz" \
+    && echo "${QUICKJS_SHA256}  quickjs.tar.xz" | sha256sum -c - \
+    && tar -xf quickjs.tar.xz \
+    && rm quickjs.tar.xz \
+    && cd quickjs-${QUICKJS_VERSION} \
+    && make libquickjs.a \
+    && mkdir -p /artifacts/lib /artifacts/include/quickjs \
+    && cp libquickjs.a /artifacts/lib/ \
+    && cp quickjs.h quickjs-libc.h /artifacts/include/quickjs/ \
+    && cd /build \
+    && rm -rf quickjs-${QUICKJS_VERSION}
+
+RUN set -euxo pipefail \
+    && find /artifacts -type f -print0 | xargs -0 chmod 0644 \
+    && find /artifacts -type d -print0 | xargs -0 chmod 0755
+
+FROM scratch AS artifacts
+COPY --from=builder /artifacts /

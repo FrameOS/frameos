@@ -1,6 +1,6 @@
 # FrameOS notice!
 # This file is copied from https://github.com/tapsterbot/burrito/blob/main/src/burrito/qjs.nim
-# Burrito is not a nimble package, and I couldn't get the NixOS build to work with all the workarounds.
+# Burrito is not a nimble package, and the packaged build path was more trouble than it was worth here.
 # I'm happy to work with upstream and change it to a dependency in the future, but I inlined it now to move fast.
 # Thanks for all the hard work!
 #
@@ -987,6 +987,12 @@ proc eval*(js: QuickJS, code: string, filename: string = "<eval>"): string =
   ## Evaluate JavaScript code and return result as string
   let val = JS_Eval(js.context, code.cstring, code.len.csize_t, filename.cstring, JS_EVAL_TYPE_GLOBAL)
   defer: JS_FreeValue(js.context, val)
+
+  if JS_IsException(val) != 0:
+    let exception = JS_GetException(js.context)
+    defer: JS_FreeValue(js.context, exception)
+    let errorMsg = toNimString(js.context, exception)
+    raise newException(JSException, "Evaluation failed: " & errorMsg)
 
   result = toNimString(js.context, val)
 

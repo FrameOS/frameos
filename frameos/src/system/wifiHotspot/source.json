@@ -136,7 +136,7 @@
         "y": 907.8704525210367
       },
       "data": {
-        "code": "fmt(\"^(48)Welcome to FrameOS!^(28)\\n\\n1. Scan the first QR code or join the Wifi “{frameConfig.network.wifiHotspotSsid}” (pw “{frameConfig.network.wifiHotspotPassword}”).\\n2. Then scan the second QR code or open ^(underline)http://10.42.0.1:{frameConfig.framePort}/^(no-underline) to continue.\")",
+        "code": "fmt(\"^(48)Welcome to FrameOS!^(28)\n\n1. Scan the first QR code or join the Wifi “{frameConfig.network.wifiHotspotSsid}” (pw “{frameConfig.network.wifiHotspotPassword}”).\n2. Then scan the second QR code or open ^(underline)http://10.42.0.1:{hotspotSetupPort(frameConfig)}/^(no-underline) to continue.\")",
         "codeArgs": [],
         "codeOutputs": [
           {
@@ -275,7 +275,7 @@
         "y": 25.498228511649245
       },
       "data": {
-        "code": "fmt\"http://10.42.0.1:{frameConfig.framePort}/\"",
+        "code": "fmt\"http://10.42.0.1:{hotspotSetupPort(frameConfig)}/\"",
         "codeArgs": [],
         "codeOutputs": [
           {

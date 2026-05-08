@@ -1,0 +1,564 @@
+[
+  {
+    "id": "bb3d9f9d-9ccc-4372-b9ca-e35bb04e13ed",
+    "name": "Haiku of the hour",
+    "settings": {
+      "backgroundColor": "#000000",
+      "refreshInterval": 60,
+      "execution": "interpreted"
+    },
+    "fields": [
+      {
+        "access": "private",
+        "label": "reply",
+        "name": "reply",
+        "persist": "disk",
+        "type": "string"
+      },
+      {
+        "access": "public",
+        "label": "Text type",
+        "name": "textType",
+        "persist": "disk",
+        "type": "text",
+        "value": "A witty and punny Haiku, but don't use the word \"pun\""
+      },
+      {
+        "access": "public",
+        "label": "Clock type",
+        "name": "clockType",
+        "options": [
+          "12h",
+          "24h"
+        ],
+        "persist": "disk",
+        "type": "select",
+        "value": "24h"
+      },
+      {
+        "access": "public",
+        "label": "Your location (helps with seasons)",
+        "name": "location",
+        "persist": "disk",
+        "placeholder": "",
+        "type": "string",
+        "value": "the northern hemisphere"
+      }
+    ],
+    "nodes": [
+      {
+        "data": {
+          "keyword": "render"
+        },
+        "dragging": false,
+        "height": 161,
+        "id": "463556ab-e4fe-40c7-93f3-40bc723f454e",
+        "position": {
+          "x": -144.10871172903896,
+          "y": 108.13787466396982
+        },
+        "positionAbsolute": {
+          "x": -144.10871172903896,
+          "y": 108.13787466396982
+        },
+        "selected": false,
+        "type": "event",
+        "width": 212
+      },
+      {
+        "data": {
+          "config": {},
+          "keyword": "render/image"
+        },
+        "dragging": false,
+        "height": 134,
+        "id": "d9f36ed0-30e4-406b-9f58-e7e0c954223e",
+        "position": {
+          "x": 773.2632299199217,
+          "y": 161.06641145752388
+        },
+        "positionAbsolute": {
+          "x": 773.2632299199217,
+          "y": 161.06641145752388
+        },
+        "selected": false,
+        "type": "app",
+        "width": 325
+      },
+      {
+        "data": {
+          "cache": {
+            "duration": "3600",
+            "durationEnabled": true,
+            "enabled": true,
+            "inputEnabled": true
+          },
+          "config": {},
+          "keyword": "data/openaiImage"
+        },
+        "dragging": false,
+        "height": 252,
+        "id": "21fb03cb-a86e-4f9c-a3b6-0a7df144d05c",
+        "position": {
+          "x": 737.0588986162081,
+          "y": -139.80005621923516
+        },
+        "positionAbsolute": {
+          "x": 737.0588986162081,
+          "y": -139.80005621923516
+        },
+        "selected": false,
+        "type": "app",
+        "width": 364
+      },
+      {
+        "data": {
+          "code": "\"Generate an abstract full screen background image best suited for the current hour of the current day (24h format): \" & now().format(\"dddd, yyyy-MM-dd HH\") & \"\\nWe're located in: \" & location & \"\\nAlso take inspiration from this \" & textType & \":\\n\\n\" & reply",
+          "codeJS": "`Generate an abstract full screen background image best suited for the current hour of the current day (24h format): ${format(now(), '{weekday}, {year/4}-{month/2}-{day/2} {hour/2}')}\nWe're located in: ${location}\nAlso take inspiration from this ${textType}:\n\n${reply}`,",
+          "codeArgs": [
+            {
+              "name": "reply",
+              "type": "string"
+            },
+            {
+              "name": "location",
+              "type": "string"
+            },
+            {
+              "name": "textType",
+              "type": "string"
+            }
+          ],
+          "codeOutputs": [
+            {
+              "name": "prompt",
+              "type": "string"
+            }
+          ]
+        },
+        "dragging": false,
+        "height": 280,
+        "id": "b64e55b6-5516-458b-9d50-861af448277a",
+        "position": {
+          "x": 701.6545999549674,
+          "y": -487.4902217044924
+        },
+        "positionAbsolute": {
+          "x": 701.6545999549674,
+          "y": -487.4902217044924
+        },
+        "resizing": false,
+        "selected": false,
+        "style": {
+          "height": 280,
+          "width": 456
+        },
+        "type": "code",
+        "width": 456
+      },
+      {
+        "data": {
+          "config": {
+            "stateKey": "reply"
+          },
+          "keyword": "logic/setAsState"
+        },
+        "height": 134,
+        "id": "0dbd1558-6ead-49ae-b1bc-d4b65ab905e4",
+        "position": {
+          "x": 287.1423214616442,
+          "y": 164.1442134886737
+        },
+        "selected": false,
+        "type": "app",
+        "width": 333,
+        "positionAbsolute": {
+          "x": 287.1423214616442,
+          "y": 164.1442134886737
+        },
+        "dragging": false
+      },
+      {
+        "data": {
+          "cache": {
+            "duration": "3600",
+            "durationEnabled": true,
+            "enabled": true,
+            "inputEnabled": true
+          },
+          "config": {},
+          "keyword": "data/openaiText"
+        },
+        "dragging": false,
+        "height": 168,
+        "id": "ae956e18-ba45-445c-a9e6-272125ecfff2",
+        "position": {
+          "x": 202.092553788727,
+          "y": -52.127254486393156
+        },
+        "positionAbsolute": {
+          "x": 202.092553788727,
+          "y": -52.127254486393156
+        },
+        "selected": false,
+        "type": "app",
+        "width": 285
+      },
+      {
+        "data": {
+          "code": "\"Generate: \" & textType",
+          "codeJS": "`Generate: ${textType}`",
+          "codeArgs": [
+            {
+              "name": "textType",
+              "type": "string"
+            }
+          ],
+          "codeOutputs": [
+            {
+              "name": "user",
+              "type": "string"
+            }
+          ]
+        },
+        "dragging": false,
+        "height": 119,
+        "id": "666daaf6-eaa4-4d25-9c3c-5bcaa747e8f3",
+        "position": {
+          "x": 104.74908610367049,
+          "y": -198.46856723526753
+        },
+        "positionAbsolute": {
+          "x": 104.74908610367049,
+          "y": -198.46856723526753
+        },
+        "selected": false,
+        "style": {
+          "height": 119,
+          "width": 300
+        },
+        "type": "code",
+        "width": 300
+      },
+      {
+        "data": {
+          "code": "\"Generate the following plain text (no quotes) based on the current hour of the current day (given in 24h format): \" & now().format(\"dddd, yyyy-MM-dd HH\") & \":00. Include at least the hour as a word in the reply. \" & (if clockType == \"12h\": \"Use the \" & now().format(\"tt\") & \" format of the hour as a word in the text: \" & now().format(\"hh\") else: \"Use the 24h format of the hour as a word in the text: \" & now().format(\"HH\")) & \"\\n. Use calendar seasonality for: \" & location",
+          "codeJS": "`Generate the following plain text (no quotes) based on the current hour of the current day (given in 24h format): ${format(now(), '{weekday}, {year/4}-{month/2}-{day/2} {hour}/2')}:00. Include at least the hour as a word in the reply. ${clockType == '12h' ? 'Use the ' + format(now(), '{am/pm}') + ' format of the hour as a word in the text: ' : 'Use the 24h format of the hour as a word in the text: ' + format(now(), '{hour/2}')}\n. Use calendar seasonality for: ${location}`",
+          "codeArgs": [
+            {
+              "name": "clockType",
+              "type": "string"
+            },
+            {
+              "name": "location",
+              "type": "string"
+            }
+          ],
+          "codeOutputs": [
+            {
+              "name": "system",
+              "type": "string"
+            }
+          ]
+        },
+        "dragging": false,
+        "height": 323,
+        "id": "7db2055a-2846-44e1-9194-2fa7b2a2396b",
+        "position": {
+          "x": 30.73061201263249,
+          "y": -629.6812773165286
+        },
+        "positionAbsolute": {
+          "x": 30.73061201263249,
+          "y": -629.6812773165286
+        },
+        "resizing": false,
+        "selected": false,
+        "style": {
+          "height": 323,
+          "width": 589
+        },
+        "type": "code",
+        "width": 589
+      },
+      {
+        "data": {
+          "config": {
+            "fontSize": "90",
+            "font": "ComicRelief.ttf"
+          },
+          "keyword": "render/text"
+        },
+        "dragging": false,
+        "height": 492,
+        "id": "da24b58c-5b42-4e92-a294-21ec11c9acf7",
+        "position": {
+          "x": 1221.32705710028,
+          "y": 113.42254541621432
+        },
+        "positionAbsolute": {
+          "x": 1221.32705710028,
+          "y": 113.42254541621432
+        },
+        "selected": false,
+        "type": "app",
+        "width": 419
+      },
+      {
+        "id": "a91590ee-e1fc-4e11-9c12-df2ea2efd0b8",
+        "position": {
+          "x": 698.8651321596811,
+          "y": -569.9551867853149
+        },
+        "data": {
+          "keyword": "reply"
+        },
+        "type": "state",
+        "width": 141,
+        "height": 48,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 698.8651321596811,
+          "y": -569.9551867853149
+        },
+        "dragging": false
+      },
+      {
+        "id": "a949d089-b700-42bc-8f47-32ad407076fe",
+        "position": {
+          "x": 1188.0478513666908,
+          "y": 31.898922286325046
+        },
+        "data": {
+          "keyword": "reply"
+        },
+        "type": "state",
+        "width": 141,
+        "height": 48,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 1188.0478513666908,
+          "y": 31.898922286325046
+        },
+        "dragging": false
+      },
+      {
+        "id": "0022e63d-42ca-4d82-ac17-d424941a2ef4",
+        "position": {
+          "x": 100.95180832337297,
+          "y": -277.85080930835665
+        },
+        "data": {
+          "keyword": "textType"
+        },
+        "type": "state",
+        "width": 164,
+        "height": 48,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 100.95180832337297,
+          "y": -277.85080930835665
+        },
+        "dragging": false
+      },
+      {
+        "id": "bc1f29c0-6933-47b8-8fa1-943b1fb0f7d4",
+        "position": {
+          "x": -16.723931515134723,
+          "y": -727.3003808702683
+        },
+        "data": {
+          "keyword": "clockType"
+        },
+        "type": "state",
+        "width": 192,
+        "height": 48,
+        "selected": false,
+        "positionAbsolute": {
+          "x": -16.723931515134723,
+          "y": -727.3003808702683
+        },
+        "dragging": false
+      },
+      {
+        "id": "fc069b8e-8f1c-4ab6-8db2-53ab7a1fa0b2",
+        "position": {
+          "x": 223.12143446180795,
+          "y": -722.1478636768488
+        },
+        "data": {
+          "keyword": "location"
+        },
+        "type": "state",
+        "width": 394,
+        "height": 48,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 223.12143446180795,
+          "y": -722.1478636768488
+        },
+        "dragging": false
+      },
+      {
+        "id": "2e153f48-e6ee-46e9-9711-c310909eba10",
+        "position": {
+          "x": 809.2627636105715,
+          "y": -657.6690631794239
+        },
+        "data": {
+          "keyword": "location"
+        },
+        "type": "state",
+        "width": 394,
+        "height": 48,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 809.2627636105715,
+          "y": -657.6690631794239
+        },
+        "dragging": false
+      },
+      {
+        "id": "b33ec86c-7ee9-4791-a7f5-1bce8edd12fd",
+        "position": {
+          "x": 947.014332575227,
+          "y": -575.0014100883734
+        },
+        "data": {
+          "keyword": "textType"
+        },
+        "type": "state",
+        "width": 164,
+        "height": 48,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 947.014332575227,
+          "y": -575.0014100883734
+        },
+        "dragging": false
+      }
+    ],
+    "edges": [
+      {
+        "id": "eb7c87bd-ebd1-4547-916e-d10952195a8d",
+        "source": "21fb03cb-a86e-4f9c-a3b6-0a7df144d05c",
+        "sourceHandle": "fieldOutput",
+        "target": "d9f36ed0-30e4-406b-9f58-e7e0c954223e",
+        "targetHandle": "fieldInput/image",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "6134c379-6ac0-4d4a-ba98-8d8621913734",
+        "source": "b64e55b6-5516-458b-9d50-861af448277a",
+        "sourceHandle": "fieldOutput",
+        "target": "21fb03cb-a86e-4f9c-a3b6-0a7df144d05c",
+        "targetHandle": "fieldInput/prompt",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "e415f1e1-577b-46a6-bcdf-e71a8c7bb89a",
+        "source": "0dbd1558-6ead-49ae-b1bc-d4b65ab905e4",
+        "sourceHandle": "next",
+        "target": "d9f36ed0-30e4-406b-9f58-e7e0c954223e",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "6be29c13-56b2-4c39-b8d2-0da2a272e0d1",
+        "source": "ae956e18-ba45-445c-a9e6-272125ecfff2",
+        "sourceHandle": "fieldOutput",
+        "target": "0dbd1558-6ead-49ae-b1bc-d4b65ab905e4",
+        "targetHandle": "fieldInput/valueString",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "c4eb450d-a530-4829-bf0b-01aed8d6903d",
+        "source": "666daaf6-eaa4-4d25-9c3c-5bcaa747e8f3",
+        "sourceHandle": "fieldOutput",
+        "target": "ae956e18-ba45-445c-a9e6-272125ecfff2",
+        "targetHandle": "fieldInput/user",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "1fb8e389-7e86-48c6-b491-85bc9617c804",
+        "source": "7db2055a-2846-44e1-9194-2fa7b2a2396b",
+        "sourceHandle": "fieldOutput",
+        "target": "ae956e18-ba45-445c-a9e6-272125ecfff2",
+        "targetHandle": "fieldInput/system",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "679b6f8f-7635-47cd-bf57-a738ad894fb4",
+        "source": "463556ab-e4fe-40c7-93f3-40bc723f454e",
+        "sourceHandle": "next",
+        "target": "0dbd1558-6ead-49ae-b1bc-d4b65ab905e4",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "8575a0ce-7b40-4e5e-bae0-6d9fefa5368a",
+        "source": "d9f36ed0-30e4-406b-9f58-e7e0c954223e",
+        "sourceHandle": "next",
+        "target": "da24b58c-5b42-4e92-a294-21ec11c9acf7",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "468c39ff-82df-4e0d-a3a6-736082383012",
+        "target": "b64e55b6-5516-458b-9d50-861af448277a",
+        "targetHandle": "codeField/reply",
+        "source": "a91590ee-e1fc-4e11-9c12-df2ea2efd0b8",
+        "sourceHandle": "fieldOutput",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "b296206a-1db5-4a1c-97b6-bddec3db5a8f",
+        "target": "da24b58c-5b42-4e92-a294-21ec11c9acf7",
+        "targetHandle": "fieldInput/text",
+        "source": "a949d089-b700-42bc-8f47-32ad407076fe",
+        "sourceHandle": "fieldOutput",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "f931087d-3271-438d-a640-999e7cee1a2a",
+        "target": "666daaf6-eaa4-4d25-9c3c-5bcaa747e8f3",
+        "targetHandle": "codeField/textType",
+        "source": "0022e63d-42ca-4d82-ac17-d424941a2ef4",
+        "sourceHandle": "fieldOutput",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "84e72b9a-c118-4852-867f-e1bbfabc0cf1",
+        "target": "7db2055a-2846-44e1-9194-2fa7b2a2396b",
+        "targetHandle": "codeField/clockType",
+        "source": "bc1f29c0-6933-47b8-8fa1-943b1fb0f7d4",
+        "sourceHandle": "fieldOutput",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "9f68d95f-577e-4ac5-b975-1dd871586f09",
+        "target": "7db2055a-2846-44e1-9194-2fa7b2a2396b",
+        "targetHandle": "codeField/location",
+        "source": "fc069b8e-8f1c-4ab6-8db2-53ab7a1fa0b2",
+        "sourceHandle": "fieldOutput",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "6460553f-3ac5-4425-89d3-d33dda017fc1",
+        "target": "b64e55b6-5516-458b-9d50-861af448277a",
+        "targetHandle": "codeField/location",
+        "source": "2e153f48-e6ee-46e9-9711-c310909eba10",
+        "sourceHandle": "fieldOutput",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "d0af7ec4-1116-4608-aa80-1463a8475aa4",
+        "target": "b64e55b6-5516-458b-9d50-861af448277a",
+        "targetHandle": "codeField/textType",
+        "source": "b33ec86c-7ee9-4791-a7f5-1bce8edd12fd",
+        "sourceHandle": "fieldOutput",
+        "type": "codeNodeEdge"
+      }
+    ]
+  }
+]

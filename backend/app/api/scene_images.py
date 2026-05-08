@@ -1,17 +1,18 @@
 import io
-from jose import JWTError, jwt
+from datetime import datetime
+from http import HTTPStatus
 
 from fastapi import Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from PIL import Image, ImageDraw, ImageFont
 from sqlalchemy.orm import Session
-from app.api.auth import ALGORITHM, SECRET_KEY
-
 from app.config import config
 from app.database import get_db
 from app.models.scene_image import SceneImage            # created earlier
 from app.models.frame import Frame
-from . import api_no_auth
+from . import api_no_auth, api_with_auth
+from app.utils.jwt_tokens import validate_scoped_token
+from app.api.auth import get_current_user_from_request
 
 
 def _generate_placeholder(
@@ -84,8 +85,8 @@ def _generate_thumbnail(image_bytes: bytes) -> tuple[bytes, int, int]:
 async def get_scene_image(
     frame_id: int,
     scene_id: str,
-    token: str,
     request: Request,
+    token: str | None = None,
     db: Session = Depends(get_db),
 ):
     """
@@ -95,12 +96,10 @@ async def get_scene_image(
     """
 
     if config.HASSIO_RUN_MODE != 'ingress':
-        try:
-            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-            if payload.get("sub") != f"frame={frame_id}":
-                raise HTTPException(status_code=401, detail="Unauthorized")
-        except JWTError:
-            raise HTTPException(status_code=401, detail="Unauthorized")
+        if await get_current_user_from_request(request, db):
+            pass
+        else:
+            validate_scoped_token(token, expected_subject=f"frame={frame_id}")
 
 
     img_row: SceneImage | None = (
@@ -152,3 +151,59 @@ async def get_scene_image(
 
     png = _generate_placeholder(new_width, new_height)
     return StreamingResponse(io.BytesIO(png), media_type="image/png")
+
+
+@api_with_auth.post("/frames/{frame_id}/scene_images/{scene_id}", status_code=201)
+async def upsert_scene_image(
+    frame_id: int,
+    scene_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    frame = db.get(Frame, frame_id)
+    if frame is None:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
+
+    body = await request.body()
+    if not body:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Missing image payload")
+
+    try:
+        with Image.open(io.BytesIO(body)) as img:
+            if img.mode != "RGB":
+                img = img.convert("RGB")
+            width, height = img.size
+            png_buffer = io.BytesIO()
+            img.save(png_buffer, format="PNG")
+            png_buffer.seek(0)
+            image_bytes = png_buffer.read()
+    except Exception:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Not an image")
+
+    thumb, t_width, t_height = _generate_thumbnail(image_bytes)
+    now = datetime.utcnow()
+    img_row = db.query(SceneImage).filter_by(frame_id=frame_id, scene_id=scene_id).first()
+    if img_row:
+        img_row.image = image_bytes
+        img_row.timestamp = now
+        img_row.width = width
+        img_row.height = height
+        img_row.thumb_image = thumb
+        img_row.thumb_width = t_width
+        img_row.thumb_height = t_height
+    else:
+        img_row = SceneImage(
+            frame_id=frame_id,
+            scene_id=scene_id,
+            image=image_bytes,
+            timestamp=now,
+            width=width,
+            height=height,
+            thumb_image=thumb,
+            thumb_width=t_width,
+            thumb_height=t_height,
+        )
+        db.add(img_row)
+    db.commit()
+    db.refresh(img_row)
+    return img_row.to_dict()

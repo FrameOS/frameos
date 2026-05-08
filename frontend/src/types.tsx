@@ -3,17 +3,36 @@ import { Edge, Node } from 'reactflow'
 export interface FrameType {
   id: number
   name: string
-  mode?: 'rpios' | 'nixos'
+  mode?: 'rpios' | 'buildroot'
   frame_host: string
   frame_port: number
   frame_access_key: string
   frame_access: string
+  frame_admin_auth?: {
+    enabled?: boolean
+    user?: string
+    pass?: string
+  }
+  https_proxy?: {
+    enable?: boolean
+    port?: number
+    expose_only_port?: boolean
+    certs?: {
+      server?: string
+      server_key?: string
+      client_ca?: string
+    }
+    server_cert_not_valid_after?: string
+    client_ca_cert_not_valid_after?: string
+  }
   ssh_user?: string
   ssh_pass?: string
   ssh_port: number
+  ssh_keys?: string[]
   server_host?: string
   server_port: number
   server_api_key?: string
+  server_send_logs?: boolean
   status: string
   version?: string
   width?: number
@@ -21,6 +40,8 @@ export interface FrameType {
   device?: string
   device_config?: {
     vcom?: number
+    uploadUrl?: string
+    uploadHeaders?: { name: string; value: string }[]
   }
   color?: string
   interval: number
@@ -73,17 +94,20 @@ export interface FrameType {
     deployWithAgent?: boolean
   }
   palette?: Palette
-  nix?: FrameNixConfig
+  buildroot?: FrameBuildrootConfig
+  rpios?: FrameRpiOSConfig
+  terminal_history?: string[]
   active_connections?: number
 }
 
-export type FrameMode = 'rpios' | 'nixos' | 'import'
+export type FrameMode = 'rpios' | 'buildroot' | 'import'
 export interface NewFrameFormType {
   mode: FrameMode
   name?: string | null
   frame_host?: string | null
   device?: string | null
   server_host?: string | null
+  platform?: string | null
 }
 
 export interface GPIOButton {
@@ -132,9 +156,18 @@ export interface RepositoryType {
 export interface LogType {
   id: number
   timestamp: string
+  ip: string
   type: string
   line: string
   frame_id: number
+}
+
+export interface AiSceneLogType {
+  message: string
+  requestId?: string
+  status?: string
+  stage?: string
+  timestamp: string
 }
 
 export interface AssetType {
@@ -158,6 +191,7 @@ export type FieldType =
   | 'integer'
   | 'boolean'
   | 'color'
+  | 'date'
   | 'json'
   | 'node'
   | 'scene'
@@ -171,6 +205,7 @@ export const fieldTypes = [
   'integer',
   'boolean',
   'color',
+  'date',
   'json',
   'node',
   'scene',
@@ -239,6 +274,8 @@ export interface OutputField {
   name: string
   /** Type of the field */
   type: FieldType
+  /** Example output (stringified) */
+  example?: string
 }
 
 /** config.json schema */
@@ -255,14 +292,18 @@ export interface AppConfig {
   settings?: string[]
   /** List of apt packages to install (mode=rpios) */
   apt?: string[]
-  /** List of nix packages to install (mode=nixos) */
-  nixpkgs?: string[]
   /** Fields for app in diagram editor */
   fields?: (AppConfigField | MarkdownField)[]
   /** Returned fields */
   output?: OutputField[]
   /** Default cache settings */
   cache?: CacheConfig
+  /** Origin app this app was created from, such as repo/apps/code/jsText */
+  origin?: string
+}
+
+export interface SceneApp extends Partial<AppConfig> {
+  sources: Record<string, string>
 }
 
 export interface FontMetadata {
@@ -329,6 +370,11 @@ export interface StateNodeData {
 
 export interface EventNodeData {
   keyword: string
+}
+
+export interface ButtonEventNodeData extends EventNodeData {
+  keyword: 'button'
+  label?: string
 }
 
 export interface DispatchNodeData {
@@ -437,6 +483,8 @@ export interface FrameSceneSettings {
   refreshInterval?: number
   backgroundColor?: string
   execution?: 'compiled' | 'interpreted'
+  prompt?: string
+  autoArrangeOnLoad?: boolean
 }
 
 export interface FrameScene {
@@ -444,6 +492,7 @@ export interface FrameScene {
   name: string
   nodes: DiagramNode[]
   edges: DiagramEdge[]
+  apps?: Record<string, SceneApp>
   fields?: StateField[]
   default?: boolean
   settings?: FrameSceneSettings
@@ -454,6 +503,28 @@ export interface FrameSceneIndexed {
   name: string
   nodes: Record<string, DiagramNode>
   edges: Record<string, DiagramEdge[]>
+}
+
+export type ChatContextType = 'scene' | 'frame' | 'app'
+
+export interface ChatSummary {
+  id: string
+  frameId: number
+  sceneId?: string | null
+  contextType?: ChatContextType | null
+  contextId?: string | null
+  createdAt: string
+  updatedAt: string
+  messageCount?: number
+  isLocal?: boolean
+}
+
+export interface ChatMessageRecord {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  tool?: string | null
+  createdAt: string
 }
 
 /** config.json schema */
@@ -482,6 +553,7 @@ export enum Panel {
   Apps = 'Apps',
   Asset = 'Asset',
   Assets = 'Assets',
+  Chat = 'Chat',
   Debug = 'Debug',
   Diagram = 'Diagram',
   EditApp = 'EditApp',
@@ -490,6 +562,7 @@ export enum Panel {
   Image = 'Image',
   Logs = 'Logs',
   Metrics = 'Metrics',
+  Ping = 'Ping',
   SceneJSON = 'SceneJSON',
   Scenes = 'Scenes',
   SceneSource = 'SceneSource',
@@ -527,30 +600,57 @@ export interface FrameOSSettings {
   }
   openAI?: {
     apiKey?: string
+    backendApiKey?: string
+    chatModel?: string
+    summaryModel?: string
+    embeddingModel?: string
+    sceneModel?: string
+    reviewModel?: string
+    promptExpansionModel?: string
+    appChatModel?: string
+    appEditModel?: string
+    appEnhanceModel?: string
+  }
+  posthog?: {
+    backendApiKey?: string
+    backendHost?: string
+    backendEnableErrorTracking?: boolean
+    backendEnableLlmAnalytics?: boolean
   }
   repositories?: RepositoryType[]
   ssh_keys?: {
+    keys?: SSHKeyEntry[]
     default?: string
     default_public?: string
   }
   unsplash?: {
     accessKey?: string
   }
-  nix?: {
-    buildExtraArgs?: string
-    buildServerEnabled?: boolean
-    buildServer?: string
-    buildServerPort?: number
-    buildServerUser?: string
-    buildServerPrivateKey?: string
-    buildServerPublicKey?: string
-    buildServerMaxParallelJobs?: number
+  buildHost?: {
+    enabled?: boolean
+    host?: string
+    user?: string
+    port?: number
+    sshKey?: string
+    sshPublicKey?: string
   }
+}
+
+export interface SSHKeyEntry {
+  id: string
+  name?: string
+  private?: string
+  public?: string
+  use_for_new_frames?: boolean
 }
 
 export interface FrameStateRecord {
   sceneId: string
   states: Record<string, Record<string, any>>
+}
+
+export interface FrameUploadedScenesRecord {
+  scenes: FrameScene[]
 }
 
 export interface Palette {
@@ -559,9 +659,12 @@ export interface Palette {
   colorNames?: string[]
 }
 
-export interface FrameNixConfig {
-  hostname?: string
+export interface FrameBuildrootConfig {
   platform?: string
-  timezone?: string
-  customModule?: string
+}
+
+export interface FrameRpiOSConfig {
+  platform?: string
+  crossCompilation?: '' | 'auto' | 'always' | 'never'
+  driverBuildMode?: '' | 'static' | 'shared' | 'precompiled'
 }

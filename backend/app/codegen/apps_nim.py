@@ -2,11 +2,12 @@ from __future__ import annotations
 import json
 import os
 import re
-from glob import glob
+from pathlib import Path
 from typing import Optional
 
 # from ..models.frame import Frame
 # from ..models.apps import get_apps_from_scenes
+
 
 def _alias_from_id(app_id: str) -> str:
     """
@@ -18,11 +19,64 @@ def _alias_from_id(app_id: str) -> str:
         alias = "_" + alias
     return alias
 
-def _module_from_id(app_id: str) -> str:
+
+def _module_from_app_dir(source_dir: Path, app_dir: Path) -> str:
     """
-    App loader Nim module path from id (works for both 'a/b' and 'nodeapp_x').
+    App loader Nim module path from src/apps/apps.nim.
     """
-    return f"apps/{app_id}/app_loader"
+    app_loader = app_dir / "app_loader"
+    src_root = source_dir / "src"
+    try:
+        module_path = app_loader.relative_to(src_root)
+    except ValueError:
+        module_path = Path(os.path.relpath(app_loader, source_dir / "src" / "apps"))
+    return str(module_path).replace(os.sep, "/")
+
+
+def _iter_config_app_dirs(apps_root: Path):
+    if not apps_root.exists():
+        return
+    for category_dir in sorted(apps_root.iterdir()):
+        if not category_dir.is_dir():
+            continue
+        if (category_dir / "config.json").exists():
+            yield category_dir.name, category_dir
+        for app_dir in sorted(category_dir.iterdir()):
+            if not app_dir.is_dir():
+                continue
+            if (app_dir / "config.json").exists():
+                yield f"{category_dir.name}/{app_dir.name}", app_dir
+
+
+def _app_has_proc(app_dir: Path, proc_name: str) -> bool:
+    app_file = app_dir / "app.nim"
+    if not app_file.exists():
+        return False
+
+    app_source = app_file.read_text()
+    return re.search(
+        rf"proc\s+{re.escape(proc_name)}\*?\s*\(\s*[A-Za-z_]\w*\s*:\s*(?:var\s+)?App\b",
+        app_source,
+    ) is not None
+
+
+def _app_capabilities(app_dir: Path, config: dict) -> set[str]:
+    capabilities: set[str] = set()
+    if _app_has_proc(app_dir, "get"):
+        capabilities.add("get")
+    if _app_has_proc(app_dir, "run"):
+        capabilities.add("run")
+
+    if capabilities:
+        return capabilities
+
+    category = (config.get("category") or "").strip().lower()
+    if category in ("data", "render"):
+        capabilities.add("get")
+    if category in ("logic", "render"):
+        capabilities.add("run")
+    return capabilities
+
 
 def write_apps_nim(tmp_dir: Optional[str] = None) -> str:
     """
@@ -34,19 +88,21 @@ def write_apps_nim(tmp_dir: Optional[str] = None) -> str:
     """
     if not tmp_dir:
         tmp_dir = os.environ.get("FRAMEOS_ROOT_DIR", "frameos")
-    source_dir = os.path.abspath(tmp_dir)
+    source_dir = Path(os.path.abspath(tmp_dir))
 
     # find all apps
     all_apps = {}
-    for app_dir in glob(os.path.join(source_dir, "src", "apps", "*", "*")):
-        config_path = os.path.join(app_dir, "config.json")
-        if os.path.exists(config_path):
-            with open(config_path, "r") as f:
-                id = f"{app_dir.split('/')[-2]}/{app_dir.split('/')[-1]}"
-                if id.startswith("legacy"):
-                    continue
-                config = json.load(f)
-                all_apps[id] = config
+    app_modules = {}
+    app_capabilities = {}
+    for app_id, app_dir in _iter_config_app_dirs(source_dir / "src" / "apps"):
+        if app_id.startswith("legacy"):
+            continue
+        config_path = app_dir / "config.json"
+        with config_path.open("r") as f:
+            config = json.load(f)
+            all_apps[app_id] = config
+            app_modules[app_id] = _module_from_app_dir(source_dir, app_dir)
+            app_capabilities[app_id] = _app_capabilities(app_dir, config)
 
     # 1) Imports
     imports: list[str] = [
@@ -56,7 +112,7 @@ def write_apps_nim(tmp_dir: Optional[str] = None) -> str:
     items = []
 
     for app_id, cfg in sorted(all_apps.items(), key=lambda kv: kv[0]):
-        mod = _module_from_id(app_id)
+        mod = app_modules[app_id]
         alias_base = _alias_from_id(app_id) + "_loader"
         alias = alias_base
         n = 2
@@ -65,7 +121,7 @@ def write_apps_nim(tmp_dir: Optional[str] = None) -> str:
             n += 1
         used_aliases.add(alias)
         imports.append(f"import {mod} as {alias}")
-        items.append((app_id, alias, (cfg.get("category") or "").strip().lower()))
+        items.append((app_id, alias, app_capabilities.get(app_id, set())))
 
     # 2) case branches
     init_cases = []
@@ -73,16 +129,13 @@ def write_apps_nim(tmp_dir: Optional[str] = None) -> str:
     run_cases  = []
     get_cases  = []
 
-    for app_id, alias, category in items:
+    for app_id, alias, capabilities in items:
         init_cases.append(f'  of "{app_id}": {alias}.init(node, scene)')
         set_cases.append(f'  of "{app_id}": {alias}.setField(app, field, value)')
 
-        if category == "render":
+        if "run" in capabilities:
             run_cases.append(f'  of "{app_id}": {alias}.run(app, context)')
-            get_cases.append(f'  of "{app_id}": {alias}.get(app, context)')
-        elif category == "logic":
-            run_cases.append(f'  of "{app_id}": {alias}.run(app, context)')
-        else:
+        if "get" in capabilities:
             get_cases.append(f'  of "{app_id}": {alias}.get(app, context)')
 
     init_cases.append('  else: raise newException(ValueError, "Unknown app keyword: " & keyword)')

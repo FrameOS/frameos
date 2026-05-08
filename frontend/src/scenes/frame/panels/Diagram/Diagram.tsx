@@ -10,6 +10,7 @@ import ReactFlow, {
   EdgeProps,
   useUpdateNodeInternals,
   ReactFlowProvider,
+  SelectionMode,
 } from 'reactflow'
 import { frameLogic } from '../../frameLogic'
 import {
@@ -28,7 +29,7 @@ import { StateNode } from './StateNode'
 import { Button, buttonColor, buttonSize } from '../../../../components/Button'
 import { diagramLogic, DiagramLogicProps } from './diagramLogic'
 import { NodeType, EdgeType, CodeNodeData } from '../../../../types'
-import { AdjustmentsHorizontalIcon } from '@heroicons/react/24/outline'
+import { AdjustmentsHorizontalIcon, ArrowsPointingInIcon, EyeIcon } from '@heroicons/react/24/outline'
 import { Tooltip } from '../../../../components/Tooltip'
 import { SceneSettings } from '../Scenes/SceneSettings'
 import { ZoomOutArea } from '../../../../icons/ZoomOutArea'
@@ -37,7 +38,12 @@ import { CodeNodeEdge } from './CodeNodeEdge'
 import { SceneDropDown } from '../Scenes/SceneDropDown'
 import { AppNodeEdge } from './AppNodeEdge'
 import { NewNodePicker } from './NewNodePicker'
-import { getNewFieldName, newNodePickerLogic } from './newNodePickerLogic'
+import { CANVAS_NODE_ID, getNewFieldName, newNodePickerLogic } from './newNodePickerLogic'
+import { scenesLogic } from '../Scenes/scenesLogic'
+import { CompiledSceneTag } from '../Scenes/CompiledSceneTag'
+import { controlLogic } from '../Scenes/controlLogic'
+import { PlayIcon } from '@heroicons/react/24/solid'
+import { Spinner } from '../../../../components/Spinner'
 
 const nodeTypes: Record<NodeType, (props: NodeProps) => JSX.Element> = {
   app: AppNode,
@@ -70,12 +76,32 @@ function Diagram_({ sceneId }: DiagramProps) {
   const { frameId } = useValues(frameLogic)
   const updateNodeInternals = useUpdateNodeInternals()
   const diagramLogicProps: DiagramLogicProps = { frameId, sceneId, updateNodeInternals }
-  const { nodes, nodesWithStyle, edges, fitViewCounter } = useValues(diagramLogic(diagramLogicProps))
-  const { onEdgesChange, onNodesChange, setNodes, addEdge, fitDiagramView, keywordDropped } = useActions(
-    diagramLogic(diagramLogicProps)
-  )
+  const { nodes, nodesWithStyle, edges, fitViewCounter, isCompiledScene } = useValues(diagramLogic(diagramLogicProps))
+  const {
+    onEdgesChange,
+    onNodesChange,
+    setNodes,
+    addEdge,
+    fitDiagramView,
+    keywordDropped,
+    rearrangeCurrentScene,
+    setCursorPosition,
+  } = useActions(diagramLogic(diagramLogicProps))
+  const { previewScene } = useActions(scenesLogic({ frameId }))
+  const { setCurrentScene } = useActions(controlLogic({ frameId }))
+  const { sceneChanging } = useValues(controlLogic({ frameId }))
+  const { unsavedSceneIds, undeployedSceneIds, previewingSceneId, linkedActiveSceneId } = useValues(scenesLogic({ frameId }))
   const { newNodePicker } = useValues(newNodePickerLogic(diagramLogicProps))
   const { openNewNodePicker } = useActions(newNodePickerLogic(diagramLogicProps))
+  const sceneHasChanges = unsavedSceneIds.has(sceneId) || undeployedSceneIds.has(sceneId)
+  const isPreviewing = previewingSceneId === sceneId
+  const isActiveScene = linkedActiveSceneId === sceneId
+  const isActivatingScene = sceneChanging === sceneId
+  const previewTitle = isPreviewing
+    ? 'Previewing scene on the frame'
+    : sceneHasChanges
+    ? 'Preview unsaved changes on the frame'
+    : 'No unsaved changes to preview'
 
   const onDragOver = useCallback((event: any) => {
     event.preventDefault()
@@ -162,13 +188,61 @@ function Diagram_({ sceneId }: DiagramProps) {
     [reactFlowInstance, nodes, edges, setNodes, addEdge]
   )
 
-  const onWheelCapture = useCallback((event: ReactWheelEvent) => {
+  const onWheel = useCallback((event: ReactWheelEvent) => {
     const target = event.target as HTMLElement | null
     const focusedTextarea = target?.closest('textarea')
     if (focusedTextarea && focusedTextarea === document.activeElement) {
       event.stopPropagation()
     }
+    const monacoEditor = target?.closest('.monaco-editor') as HTMLElement | null
+    if (monacoEditor) {
+      const nodeWrapper = monacoEditor.closest('.react-flow__node')
+      const nodeSelected = nodeWrapper?.classList.contains('selected')
+      const editorFocused = document.activeElement ? monacoEditor.contains(document.activeElement) : false
+      if (nodeSelected || editorFocused) {
+        event.stopPropagation()
+      }
+    }
   }, [])
+
+  const onContextMenu = useCallback(
+    (event: ReactMouseEvent) => {
+      const target = event.target as HTMLElement | null
+      const pane = target?.closest('.react-flow__pane') as HTMLElement | null
+      if (!pane) {
+        return
+      }
+      event.preventDefault()
+      if (!reactFlowInstance) {
+        return
+      }
+      const reactFlowBounds = reactFlowWrapper.current?.getBoundingClientRect()
+      const position = reactFlowInstance.project({
+        x: event.clientX - (reactFlowBounds?.left ?? 0),
+        y: event.clientY - (reactFlowBounds?.top ?? 0),
+      })
+      openNewNodePicker(event.clientX, event.clientY, position.x, position.y, CANVAS_NODE_ID, 'canvas', 'canvas')
+    },
+    [openNewNodePicker, reactFlowInstance]
+  )
+
+  const onMouseMove = useCallback(
+    (event: ReactMouseEvent) => {
+      if (!reactFlowInstance) {
+        return
+      }
+      const reactFlowBounds = reactFlowWrapper.current?.getBoundingClientRect()
+      if (!reactFlowBounds) {
+        return
+      }
+      const position = reactFlowInstance.project({
+        x: event.clientX - reactFlowBounds.left,
+        y: event.clientY - reactFlowBounds.top,
+      })
+      setCursorPosition(position)
+    },
+    [reactFlowInstance, setCursorPosition]
+  )
 
   useEffect(() => {
     if (fitViewCounter > 0) {
@@ -178,7 +252,12 @@ function Diagram_({ sceneId }: DiagramProps) {
 
   return (
     <BindLogic logic={diagramLogic} props={diagramLogicProps}>
-      <div className="w-full h-full dndflow" ref={reactFlowWrapper}>
+      <div
+        className="w-full h-full dndflow"
+        ref={reactFlowWrapper}
+        onContextMenu={onContextMenu}
+        onMouseMove={onMouseMove}
+      >
         <ReactFlow
           nodes={nodesWithStyle}
           edges={edges}
@@ -190,17 +269,53 @@ function Diagram_({ sceneId }: DiagramProps) {
           onConnectEnd={onConnectEnd}
           onDrop={onDrop}
           onDragOver={onDragOver}
-          onWheelCapture={onWheelCapture}
-          minZoom={0.2}
+          onWheel={onWheel}
+          panActivationKeyCode={null}
+          minZoom={0.05}
           maxZoom={4}
           proOptions={{ hideAttribution: true }}
+          deleteKeyCode={['Backspace', 'Delete']}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
+          selectionMode={SelectionMode.Partial}
         >
           <Background id="1" gap={24} color="#cccccc" variant={BackgroundVariant.Dots} />
+          {isCompiledScene ? (
+            <div className="absolute top-1 left-1 z-10">
+              <CompiledSceneTag />
+            </div>
+          ) : null}
           <div className="absolute top-1 right-1 z-10 flex gap-2">
+            {sceneHasChanges ? (
+              <Button
+                size="tiny"
+                onClick={() => previewScene(sceneId)}
+                title={previewTitle}
+                color="secondary"
+                disabled={isPreviewing}
+              >
+                <EyeIcon className="w-5 h-5" />
+              </Button>
+            ) : (
+              <Button
+                size="tiny"
+                onClick={() => setCurrentScene(sceneId)}
+                title={isActiveScene ? 'This scene is already active' : 'Activate'}
+                color="primary"
+                disabled={isActiveScene || isActivatingScene}
+              >
+                {isActivatingScene ? (
+                  <Spinner color="white" className="w-5 h-5 flex items-center justify-center" />
+                ) : (
+                  <PlayIcon className="w-5 h-5" />
+                )}
+              </Button>
+            )}
             <Button size="tiny" onClick={fitDiagramView} title="Fit to View" color="secondary">
               <ZoomOutArea className="w-5 h-5" />
+            </Button>
+            <Button size="tiny" onClick={rearrangeCurrentScene} title="Realign nodes" color="secondary">
+              <ArrowsPointingInIcon className="w-5 h-5" />
             </Button>
             <Tooltip
               tooltipColor="gray"

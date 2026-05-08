@@ -15,15 +15,19 @@ api_no_auth = APIRouter()
 api_with_auth = APIRouter()
 
 from .auth import *  # noqa: E402, F403
+from .ai_embeddings import *  # noqa: E402, F403
+from .ai_apps import *  # noqa: E402, F403
+from .ai_scenes import *  # noqa: E402, F403
 from .apps import *  # noqa: E402, F403
 from .assets import *  # noqa: E402, F403
+from .chats import *  # noqa: E402, F403
 from .frames import *  # noqa: E402, F403
 from .fonts import *  # noqa: E402, F403
 from .log import *  # noqa: E402, F403
 from .repositories import *  # noqa: E402, F403
 from .scene_images import *  # noqa: E402, F403
 from .settings import *  # noqa: E402, F403
+from .system import *  # noqa: E402, F403
 from .ssh import *  # noqa: E402, F403
 from .templates import *  # noqa: E402, F403
 from .users import *  # noqa: E402, F403
-

@@ -7,13 +7,18 @@ import chrono
 import httpclient
 import frameos/apps
 import frameos/types
+import frameos/utils/http_client
 
 const API_ENDPOINT = "https://api.fostplus.be/recycle-public/app/v1"
 const USER_AGENT = "Mozilla/5.0"
 const X_CONSUMER = "recycleapp.be"
 const X_SECRET = "Op2tDi2pBmh1wzeC5TaN2U3knZan7ATcfOQgxh4vqC0mDKmnPP2qzoQusmInpglfIkxx8SZrasBqi5zgMSvyHggK9j6xCQNQ8xwPFY2o03GCcQfcXVOyKsvGWLze7iwcfcgk2Ujpl0dmrt3hSJMCDqzAlvTrsvAEiaSzC9hKRwhijQAFHuFIhJssnHtDSB76vnFQeTCCvwVB27DjSVpDmq8fWQKEmjEncdLqIsRnfxLcOjGIVwX5V0LBntVbeiBvcjyKF2nQ08rIxqHHGXNJ6SbnAmTgsPTg7k6Ejqa7dVfTmGtEPdftezDbuEc8DdK66KDecqnxwOOPSJIN0zaJ6k2Ye2tgMSxxf16gxAmaOUqHS0i7dtG5PgPSINti3qlDdw6DTKEPni7X0rxM"
+const MaxBeRecycleResponseBytes = 2 * 1024 * 1024
 
 type
+  BeRecycleAuthenticateHook* = proc(self: App)
+  BeRecycleFetchCollectionsHook* = proc(self: App, fromDate: string, toDate: string): JsonNode
+
   AppConfig* = object
     exportFrom*: string
     exportUntil*: string
@@ -34,74 +39,66 @@ type
     street: string
     housenumber: int
 
+var
+  beRecycleAuthenticateHook*: BeRecycleAuthenticateHook = nil
+  beRecycleFetchCollectionsHook*: BeRecycleFetchCollectionsHook = nil
+
 proc authenticate(self: App) =
   self.headers = newHttpHeaders([
     ("User-Agent", USER_AGENT),
     ("x-consumer", X_CONSUMER),
     ("x-secret", if self.appConfig.xSecret != "": self.appConfig.xSecret else: X_SECRET)
   ])
-  var client = newHttpClient(headers = self.headers)
-  try:
-    let url = API_ENDPOINT & "/access-token"
-    let atResp = client.getContent(url)
-    let atRespJson = parseJson(atResp)
-    if atRespJson.hasKey("accessToken"):
-      self.headers.add("Authorization", atRespJson["accessToken"].getStr())
-      # TODO: refetch if expired
-      self.expiresAt = atRespJson["expiresAt"].getStr()
-    else:
-      raise newException(ValueError, "Error occurred while requesting access-token.")
-  finally:
-    client.close()
+  let url = API_ENDPOINT & "/access-token"
+  let atResp = boundedGetContent(url, headers = self.headers, maxBytes = MaxBeRecycleResponseBytes)
+  let atRespJson = parseJson(atResp)
+  if atRespJson.hasKey("accessToken"):
+    self.headers.add("Authorization", atRespJson["accessToken"].getStr())
+    # TODO: refetch if expired
+    self.expiresAt = atRespJson["expiresAt"].getStr()
+  else:
+    raise newException(ValueError, "Error occurred while requesting access-token.")
 
 proc fetchAddressIds(self: App): AddressIds =
-  var client = newHttpClient(headers = self.headers)
-  try:
-    let url = API_ENDPOINT & "/zipcodes?q=" & $self.appConfig.postalCode
-    let zipResp = client.getContent(url)
-    let zipJson = parseJson(zipResp)
-    var zipId = ""
+  let url = API_ENDPOINT & "/zipcodes?q=" & $self.appConfig.postalCode
+  let zipResp = boundedGetContent(url, headers = self.headers, maxBytes = MaxBeRecycleResponseBytes)
+  let zipJson = parseJson(zipResp)
+  var zipId = ""
 
-    for item in zipJson["items"].items:
-      if item["code"].getStr.parseInt == self.appConfig.postalCode:
-        zipId = item["id"].getStr
-        break
+  for item in zipJson["items"].items:
+    if item["code"].getStr.parseInt == self.appConfig.postalCode:
+      zipId = item["id"].getStr
+      break
 
-    if zipId == "":
-      raise newException(ValueError, "Could not find the right zip code.")
+  if zipId == "":
+    raise newException(ValueError, "Could not find the right zip code.")
 
-    let streetUrl = API_ENDPOINT & "/streets?q=" & self.appConfig.streetName & "&zipcodes=" & zipId
-    let streetResp = client.postContent(streetUrl, "")
-    let streetJson = parseJson(streetResp)
-    var streetId = ""
+  let streetUrl = API_ENDPOINT & "/streets?q=" & self.appConfig.streetName & "&zipcodes=" & zipId
+  let streetResp = boundedPostContent(streetUrl, "", headers = self.headers, maxBytes = MaxBeRecycleResponseBytes)
+  let streetJson = parseJson(streetResp)
+  var streetId = ""
 
-    for item in streetJson["items"].items:
-      if self.appConfig.streetName == item{"name"}.getStr:
-        streetId = item["id"].getStr
-        break
+  for item in streetJson["items"].items:
+    if self.appConfig.streetName == item{"name"}.getStr:
+      streetId = item["id"].getStr
+      break
 
-    if streetId == "":
-      raise newException(ValueError, "Could not find the right street name.")
-    result = AddressIds(zip: zipId, street: streetId, housenumber: self.appConfig.number)
-  finally:
-    client.close()
+  if streetId == "":
+    raise newException(ValueError, "Could not find the right street name.")
+  result = AddressIds(zip: zipId, street: streetId, housenumber: self.appConfig.number)
 
 proc fetchCollections(self: App, addressIds: AddressIds, fromDate: string, toDate: string): JsonNode =
-  var client = newHttpClient(headers = self.headers)
-  try:
-    let url = API_ENDPOINT & "/collections?zipcodeId=" & addressIds.zip & "&streetId=" & addressIds.street &
-        "&houseNumber=" & $addressIds.housenumber & "&fromDate=" & fromDate & "&untilDate=" & toDate & "&size=200"
-    let collectionResp = client.getContent(url)
-    let collections = parseJson(collectionResp)
+  let url = API_ENDPOINT & "/collections?zipcodeId=" & addressIds.zip & "&streetId=" & addressIds.street &
+      "&houseNumber=" & $addressIds.housenumber & "&fromDate=" & fromDate & "&untilDate=" & toDate & "&size=200"
+  let collectionResp = boundedGetContent(url, headers = self.headers, maxBytes = MaxBeRecycleResponseBytes)
+  let collections = parseJson(collectionResp)
 
-    if collections.hasKey("items"):
-      return collections
-    else:
-      raise newException(ValueError, "Something went wrong while fetching collections.")
-  finally:
-    client.close()
+  if collections.hasKey("items"):
+    return collections
+  else:
+    raise newException(ValueError, "Something went wrong while fetching collections.")
 
-proc collectionsToEvents(self: App, collections: JsonNode): seq[JsonNode] =
+proc collectionsToEvents*(self: App, collections: JsonNode): seq[JsonNode] =
   let timezone = if self.frameConfig.timeZone != "": self.frameConfig.timeZone else: "UTC"
   var events: seq[JsonNode] = @[]
   for item in collections["items"].items:
@@ -126,11 +123,20 @@ proc get*(self: App, context: ExecutionContext): JsonNode =
   let endDay = endTs.format("{year/4}-{month/2}-{day/2}", timezone)
 
   self.log("Authenticating...")
-  self.authenticate()
-  self.log("Fetching address IDs...")
-  let addressIds = self.fetchAddressIds()
+  if beRecycleAuthenticateHook == nil:
+    self.authenticate()
+  else:
+    beRecycleAuthenticateHook(self)
+
+  var collections: JsonNode
   self.log("Fetching collections...")
-  let collections = self.fetchCollections(addressIds, startDay, endDay)
+  if beRecycleFetchCollectionsHook == nil:
+    self.log("Fetching address IDs...")
+    let addressIds = self.fetchAddressIds()
+    collections = self.fetchCollections(addressIds, startDay, endDay)
+  else:
+    collections = beRecycleFetchCollectionsHook(self, startDay, endDay)
+
   self.log(%*{"event": "reply", "eventsInRange": len(collections)})
   self.log("Converting collections to events...")
   let events = self.collectionsToEvents(collections)

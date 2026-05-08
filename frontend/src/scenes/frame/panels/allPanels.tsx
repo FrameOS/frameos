@@ -1,6 +1,7 @@
 import { Apps } from './Apps/Apps'
 import { Asset } from './Assets/Asset'
 import { Assets } from './Assets/Assets'
+import { Chat } from './Chat/Chat'
 import { Debug } from './Debug/Debug'
 import { Diagram } from './Diagram/Diagram'
 import { EditApp } from './EditApp/EditApp'
@@ -9,6 +10,7 @@ import { FrameSettings } from './FrameSettings/FrameSettings'
 import { Image } from './Image/Image'
 import { Logs } from './Logs/Logs'
 import { Metrics } from './Metrics/Metrics'
+import { Ping } from './Ping/Ping'
 import { Panel } from '../../../types'
 import { SceneJSON } from './SceneJSON/SceneJSON'
 import { Scenes } from './Scenes/Scenes'
@@ -23,6 +25,7 @@ export const allPanels: Record<Panel, (...props: any[]) => JSX.Element> = {
   Apps,
   Asset,
   Assets,
+  Chat,
   Debug,
   Diagram,
   EditApp,
@@ -31,6 +34,7 @@ export const allPanels: Record<Panel, (...props: any[]) => JSX.Element> = {
   Image,
   Logs,
   Metrics,
+  Ping,
   SceneJSON,
   Scenes,
   SceneSource,

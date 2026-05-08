@@ -1,17 +1,34 @@
-from app.models.frame import Frame
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from app.drivers.drivers import Driver, DRIVERS
-from app.drivers.waveshare import get_variant_keys
+from app.drivers.waveshare import BOOT_CONFIG_LINES_BY_VARIANT, BOOT_CONFIG_SPI_VARIANTS, NO_SPI_VARIANTS, get_variant_keys
+
+if TYPE_CHECKING:
+    from app.models.frame import Frame
+
+INKY_BUTTON_DEVICES = {
+    "pimoroni.inky_impression",
+    "pimoroni.inky_impression_7",
+    "pimoroni.inky_impression_13",
+}
+VIRTUAL_OUTPUT_DEVICES = {
+    "http.upload",
+    "web_only",
+}
+
 
 def drivers_for_frame(frame: Frame) -> dict[str, Driver]:
     device = frame.device
     device_drivers: dict[str, Driver] = {}
-    if device == "pimoroni.inky_impression" or device == "pimoroni.inky_impression_7" or device == "pimoroni.inky_impression_13" or device == "pimoroni.inky_python":
+    if device in INKY_BUTTON_DEVICES or device == "pimoroni.inky_python":
         device_drivers = {
             "inkyPython": DRIVERS["inkyPython"],
             "spi": DRIVERS["spi"],
             "i2c": DRIVERS["i2c"],
         }
-        if device == "pimoroni.inky_impression" or device == "pimoroni.inky_impression_7" or device == "pimoroni.inky_impression_13":
+        if device in INKY_BUTTON_DEVICES:
             device_drivers["gpioButton"] = DRIVERS["gpioButton"]
         if device == "pimoroni.inky_impression_7" or device == "pimoroni.inky_impression_13":
             device_drivers["inkyPython"].can_png = True
@@ -19,6 +36,8 @@ def drivers_for_frame(frame: Frame) -> dict[str, Driver]:
         device_drivers = {"inkyHyperPixel2r": DRIVERS["inkyHyperPixel2r"]}
     elif device == "framebuffer":
         device_drivers = {"frameBuffer": DRIVERS["frameBuffer"]}
+    elif device == "http.upload":
+        device_drivers = {"httpUpload": DRIVERS["httpUpload"]}
     elif device.startswith("waveshare."):
         waveshare = DRIVERS["waveshare"]
         waveshare.variant = device.split(".")[1]
@@ -30,29 +49,23 @@ def drivers_for_frame(frame: Frame) -> dict[str, Driver]:
         if waveshare.variant not in get_variant_keys():
             raise Exception(f"Unknown waveshare driver variant {waveshare.variant}")
 
-        if waveshare.variant in ("EPD_12in48", "EPD_12in48b", "EPD_12in48b_V2", "EPD_13in3e"):
+        if waveshare.variant in BOOT_CONFIG_SPI_VARIANTS:
+            device_drivers = {"waveshare": waveshare}
+        elif waveshare.variant in NO_SPI_VARIANTS:
             device_drivers = {"waveshare": waveshare, "noSpi": DRIVERS["noSpi"]}
         else:
             device_drivers = {"waveshare": waveshare, "spi": DRIVERS["spi"]}
 
-        if waveshare.variant == "EPD_10in3":
+        boot_config_lines = BOOT_CONFIG_LINES_BY_VARIANT.get(waveshare.variant)
+        if boot_config_lines:
             device_drivers["bootconfig"] = DRIVERS["bootConfig"]
-            device_drivers["bootconfig"].lines = [
-                "dtoverlay=spi0-0cs",
-                "#dtparam=spi=on"
-            ]
-        if waveshare.variant == "EPD_13in3e":
-            device_drivers["bootconfig"] = DRIVERS["bootConfig"]
-            device_drivers["bootconfig"].lines = [
-                "gpio=7=op,dl",
-                "gpio=8=op,dl",
-            ]
+            device_drivers["bootconfig"].lines = list(boot_config_lines)
 
-    # Always enable evdev if not eink
-    if device != "pimoroni.inky_impression" and device != "pimoroni.inky_impression_7" and device != "pimoroni.inky_impression_13" and not device.startswith("waveshare."):
-        device_drivers['evdev'] = DRIVERS['evdev']
+    # Enable evdev for devices that can have local input attached.
+    if device not in INKY_BUTTON_DEVICES and not device.startswith("waveshare.") and device not in VIRTUAL_OUTPUT_DEVICES:
+        device_drivers["evdev"] = DRIVERS["evdev"]
 
-    if frame.device == "pimoroni.inky_impression" or device == "pimoroni.inky_impression_7" or frame.device == "pimoroni.inky_impression_13":
+    if frame.device in INKY_BUTTON_DEVICES:
         if frame.device == "pimoroni.inky_impression_13":
             frame.gpio_buttons = [
                 {"pin": 5, "label": "A"},

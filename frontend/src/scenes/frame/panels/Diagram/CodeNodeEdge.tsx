@@ -28,7 +28,7 @@ export function CodeNodeEdge({
       <BaseEdge
         id={id}
         path={edgePath}
-        style={selected ? { strokeWidth: 6, stroke: '#ffffff' } : { strokeWidth: 4, stroke: 'hsl(220 100% 91%)' }}
+        style={selected ? { strokeWidth: 6, stroke: '#f29cf6' } : { strokeWidth: 4, stroke: 'hsl(220 100% 91%)' }}
       />
       <EdgeLabelRenderer>
         {selected ? (

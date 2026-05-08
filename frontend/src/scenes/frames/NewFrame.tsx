@@ -7,10 +7,11 @@ import { Field } from '../../components/Field'
 import { newFrameForm } from './newFrameForm'
 import { Select } from '../../components/Select'
 import { useActions, useValues } from 'kea'
-import { devices, devicesNixOS, platforms } from '../../devices'
+import { devices, buildrootPlatforms } from '../../devices'
 import { A } from 'kea-router'
 import { urls } from '../../urls'
 import { Spinner } from '../../components/Spinner'
+import { DropdownMenu } from '../../components/DropdownMenu'
 
 function isLocalServer(host?: string): boolean {
   const localHostRegex = /^(localhost|0\.0\.0\.0|127\.0\.0\.1|\[::1\])(:\d+)?$/
@@ -18,7 +19,8 @@ function isLocalServer(host?: string): boolean {
 }
 
 export function NewFrame(): JSX.Element {
-  const { hideForm, resetNewFrame, setNewFrameValue, setFile, importFrame } = useActions(newFrameForm)
+  const { hideForm, resetNewFrame, setNewFrameValue, setNewFrameValues, setFile, importFrame } =
+    useActions(newFrameForm)
   const { newFrame, file, importingFrameLoading } = useValues(newFrameForm)
   const mode = newFrame.mode
 
@@ -30,16 +32,11 @@ export function NewFrame(): JSX.Element {
           <Button
             size="small"
             color={mode === 'rpios' ? 'primary' : 'secondary'}
-            onClick={() => setNewFrameValue('mode', 'rpios')}
+            onClick={() => {
+              setNewFrameValues({ mode: 'rpios', platform: null })
+            }}
           >
             RPi OS
-          </Button>
-          <Button
-            size="small"
-            color={mode === 'nixos' ? 'primary' : 'secondary'}
-            onClick={() => setNewFrameValue('mode', 'nixos')}
-          >
-            NixOS (alpha)
           </Button>
           <Button
             size="small"
@@ -48,12 +45,35 @@ export function NewFrame(): JSX.Element {
           >
             Import JSON
           </Button>
+          {mode === 'buildroot' ? (
+            <Button
+              size="small"
+              color="primary"
+              onClick={() => {
+                setNewFrameValues({ mode: 'buildroot', platform: '' })
+              }}
+            >
+              Buildroot
+            </Button>
+          ) : null}
+          <DropdownMenu
+            buttonColor="secondary"
+            items={[
+              {
+                label: 'Buildroot (unfinished)',
+                onClick: () => {
+                  setNewFrameValues({ mode: 'buildroot', platform: '' })
+                },
+              },
+            ]}
+          />
         </div>
         {mode === 'rpios' ? (
           <Form logic={newFrameForm} formKey="newFrame" className="space-y-4" enableFormOnSubmit>
             <p className="text-sm text-gray-500">
-              Enter the credentials of a running Raspberry Pi OS Lite (Bookworm) machine here. We will then deploy
-              FrameOS over SSH.
+              Enter the credentials of a running Raspberry Pi OS Lite machine here. We will then deploy FrameOS over
+              SSH. Fresh Raspberry Pi OS images may require disabling the Admin Password sudo requirement before
+              deployment.
             </p>
             <Field name="name" label="Name">
               <TextInput name="name" placeholder="Kitchen Frame" required />
@@ -84,9 +104,12 @@ export function NewFrame(): JSX.Element {
                 </>
               )}
             </Field>
-            <Field name="device" label="Driver">
+            <Field name="device" label="Display driver">
               <Select name="device" options={devices} />
             </Field>
+            {/* <Field name="platform" label="Platform">
+              <Select name="platform" options={rpiOSPlatforms} />
+            </Field> */}
             <div className="flex gap-2">
               <Button type="submit">Add Frame</Button>
               <Button
@@ -100,14 +123,15 @@ export function NewFrame(): JSX.Element {
               </Button>
             </div>
           </Form>
-        ) : mode === 'nixos' ? (
+        ) : mode === 'buildroot' ? (
           <Form logic={newFrameForm} formKey="newFrame" className="space-y-4" enableFormOnSubmit>
             <p className="text-sm text-yellow-500">
-              This mode is <strong>under active development</strong>. Your frames could break with any new update, so
-              proceed with caution and take backups! Not all devices are supported yet.
+              Buildroot images bundle a full FrameOS runtime into a dedicated firmware image. Support is still evolving,
+              so expect rough edges while we iterate.
             </p>
             <p className="text-sm text-gray-500">
-              Steps: 1) add your frame, 2) add scenes to it, 3) download a SD card image, 4) flash it, 5) boot
+              Steps: 1) add your frame, 2) configure scenes, 3) download or provision the Buildroot image, 4) flash it,
+              5) boot.
             </p>
             <Field name="name" label="Name">
               <TextInput name="name" placeholder="Kitchen Frame" required />
@@ -126,10 +150,10 @@ export function NewFrame(): JSX.Element {
               )}
             </Field>
             <Field name="device" label="Driver">
-              <Select name="device" options={devicesNixOS} />
+              <Select name="device" options={devices} />
             </Field>
             <Field name="platform" label="Platform">
-              <Select name="platform" options={platforms} />
+              <Select name="platform" options={buildrootPlatforms} />
             </Field>
             <div className="flex gap-2">
               <Button type="submit">Add Frame</Button>

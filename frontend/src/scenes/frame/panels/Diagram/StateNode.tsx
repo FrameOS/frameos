@@ -7,9 +7,12 @@ import { appNodeLogic } from './appNodeLogic'
 import { NodeCache } from './NodeCache'
 import { CodeArg } from './CodeArg'
 import { newNodePickerLogic } from './newNodePickerLogic'
+import { DropdownMenu } from '../../../../components/DropdownMenu'
+import { ClipboardDocumentIcon, DocumentDuplicateIcon, TrashIcon } from '@heroicons/react/24/solid'
 
 export function StateNode({ id, isConnectable }: NodeProps<StateNodeData>): JSX.Element {
   const { frameId, sceneId } = useValues(diagramLogic)
+  const { copyAppJSON, duplicateNode, deleteApp } = useActions(diagramLogic)
   const appNodeLogicProps = { frameId, sceneId, nodeId: id }
   const { isSelected, node, stateFieldType, stateFieldTitle } = useValues(appNodeLogic(appNodeLogicProps))
   const data: StateNodeData = (node?.data as StateNodeData) ?? ({ keyword: '' } satisfies StateNodeData)
@@ -23,14 +26,14 @@ export function StateNode({ id, isConnectable }: NodeProps<StateNodeData>): JSX.
         className={clsx(
           'shadow-lg border-2 h-full flex flex-col',
           isSelected
-            ? 'bg-black bg-opacity-70 border-indigo-900 shadow-indigo-700/50'
+            ? 'bg-black bg-opacity-70 border-fuchsia-900 shadow-fuchsia-700/50'
             : 'bg-black bg-opacity-70 border-[#81701d] shadow-[#81701d]/50'
         )}
       >
         <div
           className={clsx(
             'frameos-node-title text-xl p-2',
-            isSelected ? 'bg-indigo-900' : 'bg-[#7f6e1d]',
+            isSelected ? 'bg-fuchsia-900' : 'bg-[#7f6e1d]',
             'flex w-full justify-between items-center gap-1'
           )}
         >
@@ -42,7 +45,7 @@ export function StateNode({ id, isConnectable }: NodeProps<StateNodeData>): JSX.
             style={{
               position: 'relative',
               transform: 'none',
-              right: 0,
+              left: 0,
               top: 0,
               background: 'black',
               borderColor: 'white',
@@ -62,6 +65,28 @@ export function StateNode({ id, isConnectable }: NodeProps<StateNodeData>): JSX.
             }}
           />
           <CodeArg codeArg={{ name: stateFieldTitle ?? data.keyword, type: stateFieldType }} />
+          <DropdownMenu
+            className="w-fit"
+            buttonColor="none"
+            horizontal
+            items={[
+              {
+                label: 'Copy as JSON',
+                onClick: () => copyAppJSON(id),
+                icon: <ClipboardDocumentIcon className="w-5 h-5" />,
+              },
+              {
+                label: 'Duplicate',
+                onClick: () => duplicateNode(id),
+                icon: <DocumentDuplicateIcon className="w-5 h-5" />,
+              },
+              {
+                label: 'Delete Node',
+                onClick: () => deleteApp(id),
+                icon: <TrashIcon className="w-5 h-5" />,
+              },
+            ]}
+          />
         </div>
       </div>
     </BindLogic>

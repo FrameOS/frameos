@@ -2,6 +2,8 @@ from pydantic import BaseModel, ConfigDict, RootModel
 from typing import Any, List, Optional
 from datetime import datetime
 
+from .common import ImageTokenResponse
+
 class RepositoryBase(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -31,3 +33,7 @@ class RepositoryResponse(BaseModel):
     url: Optional[str]
     last_updated_at: Optional[datetime]
     templates: Optional[List[Any]]
+
+
+class RepositoryImageTokenResponse(ImageTokenResponse):
+    pass

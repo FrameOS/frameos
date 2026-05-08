@@ -3,6 +3,7 @@ import { frameLogic } from '../../frameLogic'
 import { useEffect, useState } from 'react'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { Button } from '../../../../components/Button'
+import { frameAssetUrl } from '../../../../utils/frameAssetsApi'
 
 interface AssetProps {
   path: string
@@ -10,8 +11,12 @@ interface AssetProps {
 
 export function Asset({ path }: AssetProps) {
   const { frame } = useValues(frameLogic)
-
-  const isImage = path.endsWith('.png') || path.endsWith('.jpg') || path.endsWith('.jpeg') || path.endsWith('.gif')
+  const lowerPath = path.toLowerCase()
+  const isImage =
+    lowerPath.endsWith('.png') ||
+    lowerPath.endsWith('.jpg') ||
+    lowerPath.endsWith('.jpeg') ||
+    lowerPath.endsWith('.gif')
   const [isLoading, setIsLoading] = useState(true)
   const [asset, setAsset] = useState<string | null>(null)
 
@@ -19,7 +24,11 @@ export function Asset({ path }: AssetProps) {
     async function fetchAsset() {
       setIsLoading(true)
       setAsset(null)
-      const resource = await apiFetch(`/api/frames/${frame.id}/asset?path=${encodeURIComponent(path)}`)
+      const resource = await apiFetch(frameAssetUrl(frame.id, path))
+      if (!resource.ok) {
+        setIsLoading(false)
+        return
+      }
       const blob = await resource.blob()
       setAsset(URL.createObjectURL(blob))
       setIsLoading(false)

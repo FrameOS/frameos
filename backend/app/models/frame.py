@@ -1,7 +1,7 @@
 import json
 import copy
 import os
-from datetime import timezone
+from datetime import datetime, timezone
 from arq import ArqRedis as Redis
 from typing import Optional
 from sqlalchemy.dialects.sqlite import JSON
@@ -12,7 +12,69 @@ from app.database import Base
 from app.models.apps import get_app_configs
 from app.models.settings import get_settings_dict
 from app.utils.token import secure_token
+from app.utils.tls import generate_frame_tls_material, parse_certificate_not_valid_after
+from app.utils.versions import get_versions
 from app.websockets import publish_message
+
+
+def _to_isoformat(value: Optional[datetime]) -> Optional[str]:
+    if not value:
+        return None
+    return value.replace(tzinfo=timezone.utc).isoformat()
+
+
+def normalize_https_proxy(https_proxy: Optional[dict]) -> dict:
+    proxy = dict(https_proxy or {})
+    certs = dict(proxy.get('certs') or {})
+
+    return {
+        **proxy,
+        'certs': {
+            'server': certs.get('server', ''),
+            'server_key': certs.get('server_key', ''),
+            'client_ca': certs.get('client_ca', ''),
+        },
+    }
+
+
+def _serialize_https_proxy(https_proxy: Optional[dict]) -> dict:
+    proxy = normalize_https_proxy(https_proxy)
+
+    def _as_iso(value):
+        if isinstance(value, datetime):
+            return _to_isoformat(value)
+        return value
+
+    return {
+        'enable': bool(proxy.get('enable', False)),
+        'port': proxy.get('port', 8443),
+        'expose_only_port': bool(proxy.get('expose_only_port', True)),
+        'certs': {
+            'server': proxy.get('certs', {}).get('server', ''),
+            'server_key': proxy.get('certs', {}).get('server_key', ''),
+            'client_ca': proxy.get('certs', {}).get('client_ca', ''),
+        },
+        'server_cert_not_valid_after': _as_iso(proxy.get('server_cert_not_valid_after')),
+        'client_ca_cert_not_valid_after': _as_iso(proxy.get('client_ca_cert_not_valid_after')),
+    }
+
+
+def normalize_frame_admin_auth(frame_admin_auth: Optional[dict]) -> dict:
+    auth = dict(frame_admin_auth or {})
+    user = auth.get('user') or ''
+    password = auth.get('pass') or ''
+
+    if not isinstance(user, str):
+        user = ''
+    if not isinstance(password, str):
+        password = ''
+
+    return {
+        'enabled': bool(auth.get('enabled', False)),
+        'user': user.strip(),
+        'pass': password,
+    }
+
 
 
 # NB! Update frontend/src/types.tsx if you change this
@@ -20,19 +82,23 @@ class Frame(Base):
     __tablename__ = 'frame'
     id = mapped_column(Integer, primary_key=True)
     name = mapped_column(String(256), nullable=False)
-    mode = mapped_column(String(32), nullable=True)
+    mode = mapped_column(String(32), nullable=True) # rpios, buildroot
     # sending commands to frame
     frame_host = mapped_column(String(256), nullable=False)
     frame_port = mapped_column(Integer, default=8787)
     frame_access_key = mapped_column(String(256), nullable=True)
     frame_access = mapped_column(String(50), nullable=True)
+    frame_admin_auth = mapped_column(JSON, nullable=True)
+    https_proxy = mapped_column(JSON, nullable=True)
     ssh_user = mapped_column(String(50), nullable=True)
     ssh_pass = mapped_column(String(50), nullable=True)
     ssh_port = mapped_column(Integer, default=22)
+    ssh_keys = mapped_column(JSON, nullable=True)
     # receiving logs, connection from frame to us
     server_host = mapped_column(String(256), nullable=True)
     server_port = mapped_column(Integer, default=8989)
     server_api_key = mapped_column(String(64), nullable=True)
+    server_send_logs = mapped_column(Boolean, default=True)
     # frame metadata
     status = mapped_column(String(15), nullable=False)
     version = mapped_column(String(50), nullable=True)
@@ -62,7 +128,9 @@ class Frame(Base):
     network = mapped_column(JSON, nullable=True)
     agent = mapped_column(JSON, nullable=True)
     palette = mapped_column(JSON, nullable=True)
-    nix = mapped_column(JSON, nullable=True)
+    buildroot = mapped_column(JSON, nullable=True)
+    rpios = mapped_column(JSON, nullable=True)
+    terminal_history = mapped_column(JSON, nullable=True, default=list)
 
     # not used
     apps = mapped_column(JSON, nullable=True)
@@ -78,12 +146,16 @@ class Frame(Base):
             'frame_port': self.frame_port,
             'frame_access_key': self.frame_access_key,
             'frame_access': self.frame_access,
+            'frame_admin_auth': normalize_frame_admin_auth(self.frame_admin_auth),
+            'https_proxy': _serialize_https_proxy(self.https_proxy),
             'ssh_user': self.ssh_user,
             'ssh_pass': self.ssh_pass,
             'ssh_port': self.ssh_port,
+            'ssh_keys': self.ssh_keys,
             'server_host': self.server_host,
             'server_port': self.server_port,
             'server_api_key': self.server_api_key,
+            'server_send_logs': self.server_send_logs,
             'status': self.status,
             'version': self.version,
             'width': self.width,
@@ -111,7 +183,9 @@ class Frame(Base):
             'network': self.network,
             'agent': self.agent,
             'palette': self.palette,
-            'nix': self.nix,
+            'buildroot': self.buildroot,
+            'rpios': self.rpios,
+            'terminal_history': self.terminal_history,
             'last_successful_deploy': self.last_successful_deploy,
             'last_successful_deploy_at': self.last_successful_deploy_at.replace(tzinfo=timezone.utc).isoformat() if self.last_successful_deploy_at else None,
         }
@@ -141,6 +215,8 @@ async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, serve
     else:
         server_port = 8989
 
+    tls_material = generate_frame_tls_material(frame_host)
+
     frame = Frame(
         name=name,
         mode="rpios",
@@ -150,9 +226,22 @@ async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, serve
         frame_host=frame_host,
         frame_access_key=secure_token(20),
         frame_access="private",
+        https_proxy={
+            "enable": True,
+            "port": 8443,
+            "expose_only_port": True,
+            "certs": {
+                "server": tls_material["server"],
+                "server_key": tls_material["server_key"],
+                "client_ca": tls_material["client_ca"],
+            },
+            "server_cert_not_valid_after": _to_isoformat(parse_certificate_not_valid_after(tls_material["server"])),
+            "client_ca_cert_not_valid_after": _to_isoformat(parse_certificate_not_valid_after(tls_material["client_ca"])),
+        },
         server_host=server_host,
         server_port=int(server_port),
         server_api_key=secure_token(32),
+        server_send_logs=True,
         interval=interval or 300,
         status="uninitialized",
         scenes=[],
@@ -180,8 +269,7 @@ async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, serve
         },
         control_code={"enabled": "false", "position": "top-right"},
         schedule={"events": []},
-        reboot={"enabled": "true", "crontab": "4 0 * * *"},
-        nix={}
+        reboot={"enabled": "true", "crontab": "4 0 * * *"}
     )
     db.add(frame)
     db.commit()
@@ -191,6 +279,16 @@ async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, serve
     await new_log(db, redis, int(frame.id), "welcome", f"The frame \"{frame.name}\" has been created!")
 
     return frame
+
+
+
+
+def refresh_tls_certificate_validity_dates(frame: Frame):
+    https_proxy = normalize_https_proxy(frame.https_proxy)
+    certs = https_proxy.get('certs', {})
+    https_proxy['server_cert_not_valid_after'] = _to_isoformat(parse_certificate_not_valid_after(certs.get('server', '')))
+    https_proxy['client_ca_cert_not_valid_after'] = _to_isoformat(parse_certificate_not_valid_after(certs.get('client_ca', '')))
+    frame.https_proxy = https_proxy
 
 
 async def update_frame(db: Session, redis: Redis, frame: Frame):
@@ -228,24 +326,41 @@ def get_templates_json() -> dict:
         return {}
 
 def get_frame_json(db: Session, frame: Frame) -> dict:
+    https_proxy = normalize_https_proxy(frame.https_proxy)
     network = frame.network or {}
     agent = frame.agent or {}
+    frameos_version = get_versions().get("frameos")
     frame_json: dict = {
+        **({"frameosVersion": frameos_version} if isinstance(frameos_version, str) and frameos_version else {}),
         "name": frame.name,
         "mode": frame.mode or 'rpios',
         "frameHost": frame.frame_host or "localhost",
         "framePort": frame.frame_port or 8787,
         "frameAccessKey": frame.frame_access_key,
         "frameAccess": frame.frame_access,
+        "httpsProxy": {
+            "enable": bool(https_proxy.get("enable", False)),
+            "port": https_proxy.get("port", 8443),
+            "exposeOnlyPort": bool(https_proxy.get("expose_only_port", True)),
+            "serverCert": https_proxy.get("certs", {}).get("server", ""),
+            "serverKey": https_proxy.get("certs", {}).get("server_key", ""),
+        },
         "serverHost": frame.server_host or "localhost",
         "serverPort": frame.server_port or 8989,
         "serverApiKey": frame.server_api_key,
+        "serverSendLogs": bool(frame.server_send_logs if frame.server_send_logs is not None else True),
         "width": frame.width or 0,
         "height": frame.height or 0,
         "device": frame.device or "web_only",
-        "deviceConfig": {
-            **({"vcom": float(frame.device_config.get('vcom', '0'))} if frame.device_config and frame.device_config.get('vcom') else {})
-        },
+        "deviceConfig": (lambda cfg: {
+            **({"vcom": float(cfg.get('vcom', '0'))} if cfg.get('vcom') not in (None, "") else {}),
+            **({"uploadUrl": str(cfg.get('uploadUrl'))} if cfg.get('uploadUrl') else {}),
+            **({"uploadHeaders": [
+                {"name": str(h.get('name')).strip(), "value": str(h.get('value', ''))}
+                for h in cfg.get('uploadHeaders', [])
+                if isinstance(h, dict) and str(h.get('name', '')).strip()
+            ]} if cfg.get('uploadHeaders') else {}),
+        })(frame.device_config or {}),
         "metricsInterval": frame.metrics_interval or 60.0,
         "debug": frame.debug or False,
         "scalingMode": frame.scaling_mode or "contain",
@@ -311,6 +426,10 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
         for node in scene.get('nodes', []):
             if node.get('type', None) == 'app':
                 sources = node.get('data', {}).get('sources', None)
+                keyword = node.get('data', {}).get('keyword', None)
+                scene_app = scene.get('apps', {}).get(keyword) if isinstance(scene.get('apps', {}), dict) else None
+                if not sources and isinstance(scene_app, dict):
+                    sources = scene_app.get('sources', None)
                 if sources and len(sources) > 0:
                     try:
                         config = sources.get('config.json', '{}')
@@ -321,7 +440,6 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
                     except:  # noqa: E722
                         pass
                 else:
-                    keyword = node.get('data', {}).get('keyword', None)
                     if keyword:
                         app_config = app_configs.get(keyword, None)
                         if app_config:
@@ -333,6 +451,14 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
     final_settings = {}
     for key in setting_keys:
         final_settings[key] = all_settings.get(key, None)
+
+    frame_admin_auth = normalize_frame_admin_auth(frame.frame_admin_auth)
+
+    frame_json['frameAdminAuth'] = {
+        'enabled': frame_admin_auth['enabled'],
+        **({'user': frame_admin_auth['user']} if frame_admin_auth['user'] else {}),
+        **({'pass': frame_admin_auth['pass']} if frame_admin_auth['pass'] else {}),
+    }
 
     frame_json['settings'] = final_settings
     return frame_json

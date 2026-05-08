@@ -1,3 +1,5 @@
+from typing import Optional
+
 from sqlalchemy import Integer, String
 from sqlalchemy.orm import Session, mapped_column
 from app.database import Base
@@ -17,5 +19,8 @@ class Settings(Base):
         }
 
 
-def get_settings_dict(db: Session) -> dict:
+def get_settings_dict(db: Optional[Session]) -> dict:
+    if db is None:
+        return {}
+
     return {setting.key: setting.value for setting in db.query(Settings).all()}

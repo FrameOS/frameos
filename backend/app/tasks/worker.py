@@ -9,7 +9,6 @@ from typing import Any, Dict
 from arq.connections import RedisSettings
 from arq.worker import func
 
-from app.tasks.build_sd_card_image import build_sd_card_image_task
 from app.tasks.deploy_frame import deploy_frame_task
 from app.tasks.fast_deploy_frame import fast_deploy_frame_task
 from app.tasks.reset_frame import reset_frame_task
@@ -18,7 +17,7 @@ from app.tasks.stop_frame import stop_frame_task
 from app.tasks.deploy_agent import deploy_agent_task
 from app.tasks.restart_agent import restart_agent_task
 from app.config import config
-from app.redis import create_redis_connection
+from app.redis import close_redis_connection, create_redis_connection
 from app.database import SessionLocal
 
 REDIS_SETTINGS = RedisSettings.from_dsn(config.REDIS_URL)
@@ -35,7 +34,7 @@ async def shutdown(ctx: Dict[str, Any]):
     if 'client' in ctx:
         await ctx['client'].aclose()
     if 'redis' in ctx:
-        await ctx['redis'].close()
+        await close_redis_connection(ctx['redis'])
     if 'db' in ctx:
         ctx['db'].close()
 
@@ -48,7 +47,6 @@ class WorkerSettings:
     You run it with: `arq app.tasks.worker.WorkerSettings`.
     """
     functions = [
-        func(build_sd_card_image_task, name="build_sd_card_image"),
         func(deploy_frame_task,      name="deploy_frame"),
         func(fast_deploy_frame_task, name="fast_deploy_frame"),
         func(reset_frame_task,       name="reset_frame"),

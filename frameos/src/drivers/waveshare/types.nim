@@ -1,31 +1,24 @@
-import pixie, options, json
-import frameos/types
-
-type ColorOption* = enum
-  Black = "Black"
-  BlackWhiteRed = "BlackWhiteRed"
-  BlackWhiteYellow = "BlackWhiteYellow"
-  BlackWhiteYellowRed = "BlackWhiteYellowRed"
-  FourGray = "FourGray"
-  SixteenGray = "SixteenGray"
-  SevenColor = "SevenColor"
-  SpectraSixColor = "SpectraSixColor"
+import options, json, hashes
+import frameos/driver_context
+import drivers/waveshare/color
+export color
 
 type Driver* = ref object of FrameOSDriver
-  logger*: Logger
+  logger*: DriverLogger
   width*: int
   height*: int
-  lastImageData*: seq[ColorRGBX]
+  lastImageHash*: Hash
+  lastImageBytes*: int
   lastRenderAt*: float
   palette*: Option[seq[(int, int, int)]]
   vcom*: float # used for the 10.3" display
 
-var driverDebugLogger*: Logger
+var driverDebugLogger*: DriverLogger
 var driverDebugEnabled*: bool
 
-proc setDriverDebugLogger*(logger: Logger) =
+proc setDriverDebugLogger*(logger: DriverLogger) =
   driverDebugLogger = logger
-  driverDebugEnabled = logger != nil and logger.frameConfig != nil and logger.frameConfig.debug
+  driverDebugEnabled = logger != nil and logger.debug
 
 proc clearDriverDebugLogger*() =
   driverDebugLogger = nil

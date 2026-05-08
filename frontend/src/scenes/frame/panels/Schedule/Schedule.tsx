@@ -222,7 +222,7 @@ export function Schedule() {
     <div className="space-y-2">
       <Form logic={frameLogic} formKey="frameForm" className="space-y-2">
         <div className="flex w-full items-center justify-between">
-          <Field name={['schedule', 'disabled']}>
+          <Field name={['schedule', 'disabled']} className="w-full">
             {({ value, onChange }) => <Switch label="Enable schedule" value={!value} onChange={(v) => onChange(!v)} />}
           </Field>
           <Select

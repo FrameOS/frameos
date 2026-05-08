@@ -19,7 +19,8 @@ type
 
 proc render*(self: App, context: ExecutionContext, image: Image) =
   try:
-    if self.appConfig.image.isNil:
+    let sourceImage = self.appConfig.image
+    if sourceImage.isNil:
       raise newException(Exception, "No image provided.")
     let blendMode = case self.appConfig.blendMode:
       of "normal": NormalBlend
@@ -43,7 +44,7 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
       of "inverse-mask": SubtractMaskBlend
       of "exclude-mask": ExcludeMaskBlend
       else: NormalBlend
-    scaleAndDrawImage(image, self.appConfig.image, self.appConfig.placement, self.appConfig.offsetX,
+    scaleAndDrawImage(image, sourceImage, self.appConfig.placement, self.appConfig.offsetX,
         self.appConfig.offsetY, blendMode)
   except Exception as e:
     let message = &"Error rendering image: {e.msg}"
@@ -62,4 +63,3 @@ proc get*(self: App, context: ExecutionContext): Image =
   else:
     newImage(self.frameConfig.renderWidth(), self.frameConfig.renderHeight())
   render(self, context, result)
-

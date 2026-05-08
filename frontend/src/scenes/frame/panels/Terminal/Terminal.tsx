@@ -65,15 +65,30 @@ function ansiToHtml(value: string): string {
 
 export function Terminal() {
   const { frameId } = useValues(frameLogic)
-  const { lines } = useValues(terminalLogic({ frameId }))
-  const { connect, sendCommand, sendKeys } = useActions(terminalLogic({ frameId }))
-  const [cmd, setCmd] = useState('')
+  const { lines, commandInput, connectionState } = useValues(terminalLogic({ frameId }))
+  const { connect, sendCommand, sendKeys, setCommandInput, historyPrev, historyNext } = useActions(terminalLogic({ frameId }))
   const virtuosoRef = useRef<VirtuosoHandle>(null)
   const [atBottom, setAtBottom] = useState(true)
+  const shouldStickToBottomRef = useRef(true)
 
   useEffect(() => {
     connect()
   }, [])
+
+  useEffect(() => {
+    if (!shouldStickToBottomRef.current) {
+      return
+    }
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        virtuosoRef.current?.scrollToIndex({
+          index: lines.length - 1,
+          align: 'end',
+          behavior: 'auto',
+        })
+      })
+    })
+  }, [lines.length])
 
   const downloadTerminalLog = () => {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
@@ -89,15 +104,20 @@ export function Terminal() {
     URL.revokeObjectURL(url)
   }
 
-  const handleCommand = () => {
-    sendCommand(cmd)
-    setCmd('')
-  }
-
   const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       e.preventDefault()
-      handleCommand()
+      sendCommand()
+      return
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      historyPrev()
+      return
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      historyNext()
     }
   }
 
@@ -118,10 +138,10 @@ export function Terminal() {
       .join('')
 
   const handleSendKeys = (withCtrl: boolean) => {
-    if (!cmd.trim()) {
+    if (!commandInput.trim()) {
       return
     }
-    const payload = withCtrl ? translateCtrlKeys(cmd) : cmd
+    const payload = withCtrl ? translateCtrlKeys(commandInput) : commandInput
     if (payload) {
       sendKeys(payload)
     }
@@ -144,8 +164,12 @@ export function Terminal() {
         className="flex-1 bg-black text-white font-mono text-sm overflow-y-scroll overflow-x-hidden p-2 rounded"
         data={lines}
         ref={virtuosoRef}
-        followOutput={(isBottom) => (isBottom ? 'smooth' : false)}
-        atBottomStateChange={(bottom) => setAtBottom(bottom)}
+        followOutput={(isBottom) => (isBottom ? 'auto' : false)}
+        atBottomStateChange={(bottom) => {
+          shouldStickToBottomRef.current = bottom
+          setAtBottom(bottom)
+        }}
+        atBottomThreshold={200}
         increaseViewportBy={{ top: 0, bottom: 600 }}
         initialTopMostItemIndex={lines.length - 1}
         itemContent={(_index, line) => (
@@ -165,16 +189,16 @@ export function Terminal() {
           Scroll to latest
         </Button>
       )}
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:flex-wrap">
         <input
-          value={cmd}
-          onChange={(e) => setCmd(e.target.value)}
+          value={commandInput}
+          onChange={(e) => setCommandInput(e.target.value)}
           onKeyDown={handleKeyDown}
           autoFocus
           className="w-full focus:outline-none p-1 rounded bg-black text-white"
           placeholder="enter command"
         />
-        <Button color="secondary" size="small" onClick={() => handleCommand()}>
+        <Button color="secondary" size="small" onClick={() => sendCommand()}>
           Send command
         </Button>
         <Button color="secondary" size="small" onClick={() => handleSendKeys(false)}>
@@ -183,6 +207,11 @@ export function Terminal() {
         <Button color="secondary" size="small" onClick={() => handleSendKeys(true)}>
           Send CTRL
         </Button>
+        {connectionState === 'closed' && (
+          <Button color="secondary" size="small" onClick={() => connect()}>
+            Reconnect
+          </Button>
+        )}
       </div>
     </div>
   )

@@ -1,15 +1,173 @@
 import pixie
-import httpclient
+import base64
+import json
+import random
+import os
+import osproc
+import options
+import sequtils
+import strutils
+import strformat
+import streams
+import times
+import uri
 
 import frameos/utils/font
+import frameos/utils/http_client
+
+const MaxImageDownloadBytes = 15 * 1024 * 1024
+
+proc imageMagickCommand(): string =
+  let magick = findExe("magick")
+  if magick != "":
+    return magick
+  let convert = findExe("convert")
+  if convert != "":
+    return convert
+  return ""
+
+proc isJpegData(data: string): bool =
+  data.len >= 2 and data[0].byte == 0xFF and data[1].byte == 0xD8
+
+proc isJpegPath(path: string): bool =
+  let lowerPath = path.toLowerAscii()
+  lowerPath.endsWith(".jpg") or lowerPath.endsWith(".jpeg")
+
+proc decodeJpegWithImageMagick(data: string): Option[Image] =
+  let cmd = imageMagickCommand()
+  if cmd == "":
+    return none(Image)
+  var p = startProcess(cmd,
+    args = @["-quiet", "-", "-auto-orient", "bmp:-"],
+    options = {poUsePath})
+  try:
+    p.inputStream.write(data)
+    p.inputStream.close()
+    let output = p.outputStream.readAll()
+    let rc = p.waitForExit()
+    if rc == 0 and output.len > 0:
+      try:
+        return some(decodeImage(output))
+      except CatchableError:
+        return none(Image)
+  finally:
+    p.close()
+  return none(Image)
+
+proc decodeJpegFileWithImageMagick(path: string): Option[Image] =
+  let cmd = imageMagickCommand()
+  if cmd == "":
+    return none(Image)
+  var p = startProcess(cmd,
+    args = @["-quiet", path, "-auto-orient", "bmp:-"],
+    options = {poUsePath})
+  try:
+    let output = p.outputStream.readAll()
+    let rc = p.waitForExit()
+    if rc == 0 and output.len > 0:
+      try:
+        return some(decodeImage(output))
+      except CatchableError:
+        return none(Image)
+  finally:
+    p.close()
+  return none(Image)
+
+proc decodeSvgWithImageMagick*(svg: string, width: int, height: int): Option[Image] =
+  let cmd = imageMagickCommand()
+  if cmd == "":
+    return none(Image)
+  let sizeArg = &"{width}x{height}"
+  var p = startProcess(cmd,
+    args = @["-quiet", "-background", "none", "-size", sizeArg, "svg:-", "-resize", sizeArg, "bmp:-"],
+    options = {poUsePath})
+  try:
+    p.inputStream.write(svg)
+    p.inputStream.close()
+    let output = p.outputStream.readAll()
+    let rc = p.waitForExit()
+    if rc == 0 and output.len > 0:
+      try:
+        return some(decodeImage(output))
+      except CatchableError:
+        return none(Image)
+  finally:
+    p.close()
+  return none(Image)
+
+proc decodeImageWithFallback*(data: string): Image =
+  if isJpegData(data):
+    let converted = decodeJpegWithImageMagick(data)
+    if converted.isSome:
+      return converted.get()
+  return decodeImage(data)
+
+proc readImageWithFallback*(path: string): Image =
+  if isJpegPath(path):
+    let converted = decodeJpegFileWithImageMagick(path)
+    if converted.isSome:
+      return converted.get()
+  return readImage(path)
+
+proc decodeDataUrl*(dataUrl: string): Image =
+  if not dataUrl.startsWith("data:"):
+    raise newException(ValueError, "Invalid data URL.")
+  let commaIndex = dataUrl.find(',')
+  if commaIndex == -1:
+    raise newException(ValueError, "Invalid data URL.")
+  let header = dataUrl[5 ..< commaIndex]
+  let dataBody = dataUrl[commaIndex + 1 .. ^1]
+  let headerParts = if header.len > 0: header.split(';') else: @[""]
+  let isBase64 = headerParts.anyIt(it == "base64")
+  let decodedData =
+    if isBase64:
+      dataBody.decode
+    else:
+      decodeUrl(dataBody)
+  return decodeImageWithFallback(decodedData)
 
 proc downloadImage*(url: string): Image =
-  let client = newHttpClient(timeout = 30000)
+  if url.startsWith("data:"):
+    return decodeDataUrl(url)
+  let content = boundedGetContent(url, maxBytes = MaxImageDownloadBytes)
+  result = decodeImageWithFallback(content)
+
+proc downloadImageWithData*(url: string): tuple[image: Image, data: string] =
+  let content = boundedGetContent(url, maxBytes = MaxImageDownloadBytes)
+  result = (decodeImageWithFallback(content), content)
+
+proc parseExifJson(output: string): Option[JsonNode] =
   try:
-    let content = client.getContent(url)
-    result = decodeImage(content)
+    let parsed = parseJson(output)
+    if parsed.kind == JArray and parsed.len > 0:
+      return some(parsed[0])
+  except CatchableError:
+    discard
+  return none(JsonNode)
+
+proc getExifMetadataFromPath*(path: string): Option[JsonNode] =
+  let exiftool = findExe("exiftool")
+  if exiftool == "":
+    return none(JsonNode)
+  try:
+    let output = execProcess(exiftool, args = @["-j", "-n", path])
+    return parseExifJson(output)
+  except CatchableError:
+    discard
+  return none(JsonNode)
+
+proc getExifMetadataFromData*(data: string): Option[JsonNode] =
+  let exiftool = findExe("exiftool")
+  if exiftool == "":
+    return none(JsonNode)
+  randomize()
+  let tmpPath = getTempDir() / &"frameos-exif-{epochTime().int}-{rand(1_000_000)}.img"
+  writeFile(tmpPath, data)
+  try:
+    return getExifMetadataFromPath(tmpPath)
   finally:
-    client.close()
+    if fileExists(tmpPath):
+      removeFile(tmpPath)
 
 proc rotateDegrees*(image: Image, degrees: int): Image {.raises: [PixieError].} =
   case (degrees + 1080) mod 360: # TODO: yuck
@@ -33,6 +191,66 @@ proc rotateDegrees*(image: Image, degrees: int): Image {.raises: [PixieError].} 
           image.data[image.dataIndex(image.width - y - 1, x)]
   else:
     result = image
+
+proc applyFlip*(image: Image, flip: string) =
+  case flip:
+  of "horizontal":
+    image.flipHorizontal()
+  of "vertical":
+    image.flipVertical()
+  of "both":
+    image.flipHorizontal()
+    image.flipVertical()
+  else:
+    discard
+
+proc previewTransform*(image: var Image, rotate: int, flip: string): Image {.raises: [PixieError].} =
+  # Driver preview paths pass disposable images, so avoid copying for the rotate=0 case.
+  result = if rotate != 0: image.rotateDegrees(rotate) else: image
+  result.applyFlip(flip)
+
+proc previewDimensions*(width, height, rotate: int): tuple[width: int, height: int] =
+  case (rotate + 1080) mod 360
+  of 90, 270:
+    (height, width)
+  else:
+    (width, height)
+
+proc previewSourceIndex*(x, y, width, height, rotate: int, flip: string): int =
+  let
+    rotation = (rotate + 1080) mod 360
+    dimensions = previewDimensions(width, height, rotation)
+  var
+    rotatedX = x
+    rotatedY = y
+
+  case flip:
+  of "horizontal":
+    rotatedX = dimensions.width - x - 1
+  of "vertical":
+    rotatedY = dimensions.height - y - 1
+  of "both":
+    rotatedX = dimensions.width - x - 1
+    rotatedY = dimensions.height - y - 1
+  else:
+    discard
+
+  var sourceX, sourceY: int
+  case rotation
+  of 90:
+    sourceX = rotatedY
+    sourceY = height - rotatedX - 1
+  of 180:
+    sourceX = width - rotatedX - 1
+    sourceY = height - rotatedY - 1
+  of 270:
+    sourceX = width - rotatedY - 1
+    sourceY = rotatedX
+  else:
+    sourceX = rotatedX
+    sourceY = rotatedY
+
+  sourceY * width + sourceX
 
 proc writeError*(image: Image, width, height: int, message: string) =
   let typeface = getDefaultTypeface()

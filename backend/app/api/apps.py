@@ -11,6 +11,8 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.apps import get_app_configs, get_one_app_sources
 from app.models.settings import get_settings_dict
+from app.utils.ai_scene import SCENE_MODEL
+from app.utils.js_apps import validate_js_source
 from app.schemas.apps import (
  AppsListResponse,
  AppsSourceResponse,
@@ -31,7 +33,7 @@ async def api_apps_list(db: Session = Depends(get_db)):
 @api_with_auth.get("/apps/source", response_model=AppsSourceResponse)
 async def api_apps_source(keyword: Optional[str] = None, db: Session = Depends(get_db)):
     sources = get_one_app_sources(keyword)
-    if sources is None:
+    if not sources:
         raise HTTPException(status_code=404, detail="App sources not found")
     return sources
 
@@ -43,6 +45,8 @@ async def validate_python_frame_source(data: ValidateSourceRequest):
 
     if file.endswith('.py'):
         errors = validate_python(source)
+    elif file.endswith(('.js', '.ts', '.jsx', '.tsx')):
+        errors = validate_js_source(file, source)
     elif file.endswith('.nim'):
         errors = await validate_nim(source)
     elif file.endswith('.json'):
@@ -60,10 +64,11 @@ async def validate_python_frame_source(data: ValidateSourceRequest):
 async def enhance_python_frame_source(data: EnhanceSourceRequest, db: Session = Depends(get_db)):
     source = data.source
     prompt = data.prompt
-    api_key = get_settings_dict(db).get('openAI', {}).get('apiKey', None)
+    openai_settings = get_settings_dict(db).get("openAI", {})
+    api_key = openai_settings.get("backendApiKey")
 
     if api_key is None:
-        raise HTTPException(status_code=400, detail="OpenAI API key not set")
+        raise HTTPException(status_code=400, detail="OpenAI backend API key not set")
 
     ai_context = f"""
     You are helping a python developer write a FrameOS application. You are editing app.nim, the main file in FrameOS.
@@ -80,7 +85,7 @@ async def enhance_python_frame_source(data: EnhanceSourceRequest, db: Session = 
             {"role": "system", "content": ai_context},
             {"role": "user", "content": prompt}
         ],
-        "model": "gpt-4",
+        "model": openai_settings.get("appEnhanceModel") or SCENE_MODEL,
     }
 
     headers = {

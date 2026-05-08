@@ -264,6 +264,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     path: "./assets/bird.png",
     order: "random",
     counterStateKey: "",
+    metadataStateKey: "",
     search: "",
   ))
   scene.node9.init()
@@ -283,6 +284,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     path: "./assets/mask.png",
     order: "random",
     counterStateKey: "",
+    metadataStateKey: "",
     search: "",
   ))
   scene.node10.init()

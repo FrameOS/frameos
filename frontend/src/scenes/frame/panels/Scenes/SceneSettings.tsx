@@ -7,6 +7,8 @@ import { NumberTextInput } from '../../../../components/NumberTextInput'
 import { Button } from '../../../../components/Button'
 import { ColorInput } from '../../../../components/ColorInput'
 import { Select } from '../../../../components/Select'
+import { Label } from '../../../../components/Label'
+import { TextArea } from '../../../../components/TextArea'
 
 export interface SceneSettingsProps {
   sceneId: string
@@ -65,8 +67,8 @@ export function SceneSettings({ sceneId, onClose }: SceneSettingsProps): JSX.Ele
                   <p>
                     <strong>Interpreted</strong> scenes are executed as-is, allowing for fast deploys without the need
                     for recompilation. This mode is slower, but when your frame takes 20 seconds to render, it doesn't
-                    matter much. You must use JavaScript in inline code nodes. You can't edit the nim source of apps in
-                    this mode.
+                    matter much. Inline code nodes can use JavaScript, TypeScript, or JSX. You can't edit the nim
+                    source of apps in this mode.
                   </p>
                   <p>A full deploy is needed if switching between modes.</p>
                 </div>
@@ -81,6 +83,14 @@ export function SceneSettings({ sceneId, onClose }: SceneSettingsProps): JSX.Ele
                 ]}
               />
             </Field>
+            {scene.settings?.prompt ? (
+              <div className="space-y-1 @md:flex @md:gap-2">
+                <Label className="@md:w-1/3">Prompt</Label>
+                <div className="flex-1">
+                  <TextArea readOnly value={scene.settings.prompt} rows={4} />
+                </div>
+              </div>
+            ) : null}
           </Group>
           {onClose ? (
             <Button size="small" onClick={onClose}>

@@ -13,6 +13,9 @@ async def test_new_metrics(mock_pub, db, redis):
     assert metric_entry.id is not None
     assert "cpu" in metric_entry.metrics
     assert metric_entry.metrics["cpu"] == 50
+    assert metric_entry.to_dict()["timestamp"].endswith("+00:00")
+    published_payload = mock_pub.await_args.args[2]
+    assert published_payload["timestamp"].endswith("+00:00")
 
 @pytest.mark.asyncio
 @patch("app.models.metrics.publish_message", new_callable=AsyncMock)

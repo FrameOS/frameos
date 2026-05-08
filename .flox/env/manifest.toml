@@ -1,0 +1,227 @@
+schema-version = "1.10.0"
+
+[install]
+cacert.pkg-path = "cacert"
+cacert.outputs = "all"
+coreutils.pkg-path = "coreutils"
+coreutils.outputs = "all"
+curl.pkg-path = "curl"
+curl.outputs = "all"
+gcc.pkg-path = "gcc"
+gcc.outputs = "all"
+git.pkg-path = "git"
+git.outputs = "all"
+gnumake.pkg-path = "gnumake"
+gnumake.outputs = "all"
+libffi.pkg-path = "libffi"
+libffi.outputs = "all"
+nodejs.pkg-path = "nodejs_22"
+nodejs.outputs = "all"
+nim.pkg-path = "nim"
+openssl.pkg-path = "openssl"
+openssl.outputs = "all"
+pkg-config.pkg-path = "pkg-config"
+pkg-config.outputs = "all"
+pnpm.pkg-path = "pnpm"
+python.pkg-path = "python312"
+redis.pkg-path = "redis"
+xz.pkg-path = "xz"
+xz.outputs = "all"
+nimble.pkg-path = "nimble"
+
+[vars]
+PIP_DISABLE_PIP_VERSION_CHECK = "1"
+PIP_NO_COLOR = "1"
+PYTHONDONTWRITEBYTECODE = "1"
+
+[hook]
+on-activate = '''
+  set -euo pipefail
+
+  cd "$FLOX_ENV_PROJECT"
+
+  export VIRTUAL_ENV="$FLOX_ENV_PROJECT/.venv"
+  export FRAMEOS_FLOX_CACHE_DIR="$FLOX_ENV_PROJECT/.flox/cache"
+  export FRAMEOS_FLOX_REDIS_DIR="$FLOX_ENV_PROJECT/.flox/redis"
+
+  nvm_dir="${NVM_DIR:-$HOME/.nvm}"
+  cleaned_path=""
+  old_ifs=$IFS
+  IFS=:
+  for path_entry in $PATH; do
+    case "$path_entry" in
+      "$FLOX_ENV/bin"|"$VIRTUAL_ENV/bin"|"$nvm_dir"/*/bin|"${NVM_BIN:-__frameos_no_nvm_bin__}")
+        continue
+        ;;
+      *)
+        cleaned_path="${cleaned_path:+$cleaned_path:}$path_entry"
+        ;;
+    esac
+  done
+  IFS="$old_ifs"
+
+  unset NVM_BIN NVM_INC
+  export PATH="$VIRTUAL_ENV/bin:$FLOX_ENV/bin${cleaned_path:+:$cleaned_path}"
+
+  # Rebuild toolchain flags from this environment. Inherited values from
+  # another Flox/Nix shell can point compilers at the wrong project.
+  export CPATH="$FLOX_ENV/include"
+  export CPPFLAGS="-I$FLOX_ENV/include"
+  export LDFLAGS="-L$FLOX_ENV/lib"
+  export LIBRARY_PATH="$FLOX_ENV/lib"
+  export PKG_CONFIG_PATH="$FLOX_ENV/lib/pkgconfig:$FLOX_ENV/share/pkgconfig"
+
+  mkdir -p "$FRAMEOS_FLOX_CACHE_DIR" "$FRAMEOS_FLOX_REDIS_DIR"
+
+  new_venv=0
+  if [ ! -d "$VIRTUAL_ENV" ]; then
+    python -m venv "$VIRTUAL_ENV"
+    new_venv=1
+  fi
+
+  if ! "$VIRTUAL_ENV/bin/python" -m pip --version >/dev/null 2>&1; then
+    "$VIRTUAL_ENV/bin/python" -m ensurepip --upgrade
+  fi
+
+  if [ "$new_venv" -eq 1 ]; then
+    rm -f "$FRAMEOS_FLOX_CACHE_DIR/python-requirements.sha256"
+  fi
+
+  # Flox installs the full development lock. Include the Docker runtime input
+  # in the stamp so production dependency changes also refresh the local venv.
+  python_requirements_hash="$(
+    sha256sum \
+      backend/requirements.in \
+      backend/requirements.txt \
+      backend/requirements.docker.in \
+    | sha256sum | awk '{print $1}'
+  )"
+  python_stamp="$FRAMEOS_FLOX_CACHE_DIR/python-requirements.sha256"
+  if [ ! -f "$python_stamp" ] || [ "$(cat "$python_stamp")" != "$python_requirements_hash" ]; then
+    echo "Syncing backend Python dependencies..."
+    "$VIRTUAL_ENV/bin/python" -m pip install --upgrade pip setuptools wheel
+    "$VIRTUAL_ENV/bin/python" -m pip install -r backend/requirements.txt
+    printf '%s' "$python_requirements_hash" > "$python_stamp"
+  fi
+
+  js_workspace_hash="$(
+    sha256sum \
+      package.json \
+      pnpm-lock.yaml \
+      pnpm-workspace.yaml \
+      frontend/package.json \
+      frameos/frontend/package.json \
+    | sha256sum | awk '{print $1}'
+  )"
+  js_stamp="$FRAMEOS_FLOX_CACHE_DIR/pnpm-workspace.sha256"
+  if [ ! -f node_modules/.modules.yaml ] || [ ! -f "$js_stamp" ] || [ "$(cat "$js_stamp")" != "$js_workspace_hash" ]; then
+    echo "Syncing pnpm workspace dependencies..."
+    pnpm install --frozen-lockfile
+    printf '%s' "$js_workspace_hash" > "$js_stamp"
+  fi
+
+  frameos_nim_hash="$(sha256sum frameos/frameos.nimble | awk '{print $1}')"
+  frameos_nim_stamp="$FRAMEOS_FLOX_CACHE_DIR/frameos-nim.sha256"
+  if [ ! -f frameos/nimble.paths ] || [ ! -f "$frameos_nim_stamp" ] || [ "$(cat "$frameos_nim_stamp")" != "$frameos_nim_hash" ]; then
+    echo "Syncing FrameOS Nim dependencies..."
+    (
+      cd frameos
+      nimble install -dy
+    )
+    printf '%s' "$frameos_nim_hash" > "$frameos_nim_stamp"
+  fi
+
+  agent_nim_hash="$(sha256sum frameos/agent/frameos_agent.nimble | awk '{print $1}')"
+  agent_nim_stamp="$FRAMEOS_FLOX_CACHE_DIR/frameos-agent-nim.sha256"
+  if [ ! -f frameos/agent/nimble.paths ] || [ ! -f "$agent_nim_stamp" ] || [ "$(cat "$agent_nim_stamp")" != "$agent_nim_hash" ]; then
+    echo "Syncing FrameOS agent Nim dependencies..."
+    (
+      cd frameos/agent
+      nimble install -dy
+    )
+    printf '%s' "$agent_nim_hash" > "$agent_nim_stamp"
+  fi
+'''
+
+[profile]
+bash = '''
+  # Rebuild PATH so the repo venv wins over Flox's base Python.
+  nvm_dir="${NVM_DIR:-$HOME/.nvm}"
+  cleaned_path=""
+  old_ifs=$IFS
+  IFS=:
+  for path_entry in $PATH; do
+    case "$path_entry" in
+      "$FLOX_ENV/bin"|"$FLOX_ENV/sbin"|"$VIRTUAL_ENV/bin"|"$nvm_dir"/*/bin|"${NVM_BIN:-__frameos_no_nvm_bin__}")
+        continue
+        ;;
+      *)
+        cleaned_path="${cleaned_path:+$cleaned_path:}$path_entry"
+        ;;
+    esac
+  done
+  IFS="$old_ifs"
+
+  unset NVM_BIN NVM_INC
+  export PATH="$VIRTUAL_ENV/bin:$FLOX_ENV/bin:$FLOX_ENV/sbin${cleaned_path:+:$cleaned_path}"
+  hash -r 2>/dev/null || true
+'''
+
+zsh = '''
+  # Rebuild PATH so the repo venv wins over Flox's base Python.
+  nvm_dir="${NVM_DIR:-$HOME/.nvm}"
+  cleaned_path=""
+  old_ifs=$IFS
+  IFS=:
+  for path_entry in $PATH; do
+    case "$path_entry" in
+      "$FLOX_ENV/bin"|"$FLOX_ENV/sbin"|"$VIRTUAL_ENV/bin"|"$nvm_dir"/*/bin|"${NVM_BIN:-__frameos_no_nvm_bin__}")
+        continue
+        ;;
+      *)
+        cleaned_path="${cleaned_path:+$cleaned_path:}$path_entry"
+        ;;
+    esac
+  done
+  IFS="$old_ifs"
+
+  unset NVM_BIN NVM_INC
+  export PATH="$VIRTUAL_ENV/bin:$FLOX_ENV/bin:$FLOX_ENV/sbin${cleaned_path:+:$cleaned_path}"
+  hash -r 2>/dev/null || true
+'''
+
+fish = '''
+  set -e NVM_BIN NVM_INC NVM_HAS_RUN
+
+  for fn in node npm npx yarn
+    if functions -q $fn
+      functions -e $fn
+    end
+  end
+
+  set -l cleaned_path
+  for path_entry in $PATH
+    if test "$path_entry" = "$FLOX_ENV/bin"
+      continue
+    end
+
+    if test "$path_entry" = "$FLOX_ENV/sbin"
+      continue
+    end
+
+    if test "$path_entry" = "$VIRTUAL_ENV/bin"
+      continue
+    end
+
+    if string match -q "$HOME/.nvm/*/bin" -- $path_entry
+      continue
+    end
+
+    set cleaned_path $cleaned_path $path_entry
+  end
+
+  set -gx PATH "$VIRTUAL_ENV/bin" "$FLOX_ENV/bin" "$FLOX_ENV/sbin" $cleaned_path
+'''
+
+[services.redis]
+command = "redis-server --save '' --appendonly no --dir \"$FLOX_ENV_PROJECT/.flox/redis\""

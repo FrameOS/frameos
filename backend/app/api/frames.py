@@ -1,34 +1,49 @@
 from __future__ import annotations
 
 # stdlib ---------------------------------------------------------------------
-from datetime import datetime, timedelta
+import asyncio
+from datetime import datetime, timezone
 from http import HTTPStatus
+import contextlib
 import aiofiles
 import asyncssh
 import hashlib
 import io
 import json
+import mimetypes
 import os
 import re
-import tempfile
 import shlex
+import shutil
+import sys
+import tempfile
+import time
 import zipfile
 from tempfile import NamedTemporaryFile
 from typing import Any, Optional, Tuple
+from types import SimpleNamespace
 from urllib.parse import quote
 
 # third-party ---------------------------------------------------------------
 import httpx
-from jose import JWTError, jwt
-from fastapi import Depends, File, Form, Request, HTTPException, UploadFile, Header
+from fastapi import (
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Header,
+    Query,
+    Request,
+    UploadFile,
+)
 from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.orm import Session
 
 # local ---------------------------------------------------------------------
 from app.database import get_db
 from arq import ArqRedis as Redis
-from app.models.frame import Frame, new_frame, delete_frame, update_frame
-from app.models.log import new_log as log
+from app.models.frame import Frame, new_frame, delete_frame, normalize_https_proxy, refresh_tls_certificate_validity_dates, update_frame
+from app.models.log import Log, new_log as log
 from app.models.metrics import Metrics
 from app.codegen.scene_nim import write_scene_nim
 from app.utils.ssh_utils import (
@@ -42,13 +57,16 @@ from app.schemas.frames import (
     FrameResponse,
     FrameLogsResponse,
     FrameMetricsResponse,
-    FrameImageLinkResponse,
     FrameStateResponse,
+    FrameUploadedScenesResponse,
     FrameAssetsResponse,
     FrameCreateRequest,
     FrameUpdateRequest,
+    FramePingResponse,
+    FrameSSHKeysUpdateRequest,
+    FrameSetNextSceneRequest,
 )
-from app.api.auth import ALGORITHM, SECRET_KEY, get_current_user
+from app.api.auth import get_current_user_from_request
 from app.config import config
 from app.utils.network import is_safe_host
 from app.utils.remote_exec import (
@@ -56,10 +74,20 @@ from app.utils.remote_exec import (
     delete_path,
     rename_path,
     make_dir,
+    run_command,
     _use_agent,
 )
+from app.utils.frame_http import (
+    _build_frame_path,
+    _build_frame_url,
+    _auth_headers,
+    _fetch_frame_http_bytes,
+    _frame_scheme_port,
+    _httpx_verify,
+)
 from app.tasks.utils import find_nim_v2
-from app.tasks.deploy_frame import FrameDeployer
+from app.tasks._frame_deployer import FrameDeployer
+from app.tasks.frame_deploy_workflow import FrameDeployWorkflow
 from app.redis import get_redis
 from app.websockets import publish_message
 from app.ws.agent_ws import (
@@ -72,7 +100,13 @@ from app.ws.agent_ws import (
 )
 from app.models.assets import copy_custom_fonts_to_local_source_folder
 from app.models.settings import get_settings_dict
+from app.utils.ssh_key_utils import default_ssh_key_ids
+from app.utils.tls import generate_frame_tls_material, parse_certificate_not_valid_after
+from app.utils.ssh_authorized_keys import _install_authorized_keys, resolve_authorized_keys_update
+from app.tasks.binary_builder import FrameBinaryBuilder
+from app.codegen.drivers_nim import frame_driver_build_mode
 from app.utils.local_exec import exec_local_command
+from app.utils.jwt_tokens import validate_scoped_token
 from . import api_with_auth, api_no_auth
 
 
@@ -84,61 +118,159 @@ def _bad_request(msg: str):
     raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=msg)
 
 
+def _serialize_datetime(value: Optional[datetime]) -> Optional[str]:
+    if not value:
+        return None
+    return value.replace(tzinfo=timezone.utc).isoformat()
+
+
+def _apply_frame_preview_update(frame: Frame, data: FrameUpdateRequest) -> Any:
+    update_data = data.model_dump(exclude_unset=True)
+    if isinstance(update_data.get("scenes"), str):
+        try:
+            update_data["scenes"] = json.loads(update_data["scenes"])
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=400, detail="Invalid input for scenes (must be JSON)")
+
+    frame_dict = frame.to_dict()
+    preview_data = {**frame_dict, **update_data}
+    preview = SimpleNamespace(**preview_data)
+
+    preview.id = frame.id
+    preview.status = frame.status
+    preview.version = frame.version
+    preview.last_successful_deploy = frame.last_successful_deploy
+    preview.last_successful_deploy_at = frame.last_successful_deploy_at
+    preview.apps = frame.apps
+    preview.image_url = frame.image_url
+
+    if "https_proxy" in update_data:
+        preview.https_proxy = normalize_https_proxy(preview.https_proxy)
+        refresh_tls_certificate_validity_dates(preview)
+
+    old_mode = frame.mode
+    if data.mode == "buildroot" and old_mode != "buildroot" and preview.ssh_user == "pi":
+        preview.ssh_user = "root"
+    elif data.mode == "rpios" and old_mode == "buildroot" and preview.ssh_user == "root":
+        preview.ssh_user = "pi"
+
+    def _preview_to_dict():
+        result = {**frame.to_dict(), **preview_data}
+        result["mode"] = preview.mode
+        result["https_proxy"] = normalize_https_proxy(preview.https_proxy)
+        result["ssh_user"] = preview.ssh_user
+        return result
+
+    preview.to_dict = _preview_to_dict
+    return preview
+
+
+def _sanitize_scene_state_filename(scene_id: str) -> str:
+    sanitized = []
+    for ch in scene_id:
+        if ch.isalnum() or ch in ["-", "_", "."]:
+            sanitized.append(ch)
+        else:
+            sanitized.append("_")
+    collapsed = []
+    last_was_underscore = False
+    for ch in sanitized:
+        if ch == "_":
+            if not last_was_underscore:
+                collapsed.append(ch)
+            last_was_underscore = True
+        else:
+            collapsed.append(ch)
+            last_was_underscore = False
+    trimmed = "".join(collapsed).strip("_.")
+    if not trimmed:
+        trimmed = "untitled"
+    return trimmed[:120]
+
+
+def _frame_state_dir(frame: Frame) -> str:
+    return "/srv/frameos/state"
+
+
 _ascii_re = re.compile(r"[^A-Za-z0-9._-]")
+_frame_image_locks: dict[int, asyncio.Lock] = {}
+
+
+def _get_frame_image_lock(frame_id: int) -> asyncio.Lock:
+    lock = _frame_image_locks.get(frame_id)
+    if not lock:
+        lock = asyncio.Lock()
+        _frame_image_locks[frame_id] = lock
+    return lock
+
+
+def _normalize_upload_scenes_payload(body: Any) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    if isinstance(body, (bytes, bytearray)):
+        try:
+            body = json.loads(body)
+        except json.JSONDecodeError:
+            _bad_request("uploadScenes payload must be valid JSON")
+
+    if not isinstance(body, dict):
+        _bad_request("uploadScenes payload must be a JSON object")
+
+    scenes_payload = body.get("scenes")
+    if not isinstance(scenes_payload, list):
+        _bad_request("uploadScenes payload must include scenes as an array")
+    return scenes_payload, body
+    return [], body  # for mypy
+
+
+def _validate_upload_scenes_payload(
+    scenes: list[dict[str, Any]],
+    scene_id: str | None = None,
+) -> None:
+    if not scenes:
+        _bad_request("uploadScenes payload must include at least one scene")
+
+    scene_ids: set[str] = set()
+    for scene in scenes:
+        if not isinstance(scene, dict):
+            _bad_request("uploadScenes scenes must be objects")
+        scene_id = scene.get("id")
+        if not isinstance(scene_id, str) or not scene_id:
+            _bad_request("uploadScenes scenes must include an id")
+        scene_ids.add(scene_id)
+
+    if scene_id and scene_id not in scene_ids:
+        _bad_request("uploadScenes sceneId must reference one of the uploaded scenes")
+
+    for scene in scenes:
+        nodes = scene.get("nodes") or []
+        if not isinstance(nodes, list):
+            _bad_request(f"Scene '{scene.get('id')}' has invalid nodes list")
+        for node in nodes:
+            if not isinstance(node, dict):
+                _bad_request(f"Scene '{scene.get('id')}' has invalid node entry")
+            node_type = node.get("type")
+            data = node.get("data") or {}
+            if not isinstance(data, dict):
+                _bad_request(f"Scene '{scene.get('id')}' has invalid node data")
+            if node_type == "scene":
+                keyword = data.get("keyword")
+                if not isinstance(keyword, str) or not keyword:
+                    _bad_request(f"Scene '{scene.get('id')}' has invalid scene reference")
+                if keyword not in scene_ids:
+                    _bad_request(f"Scene '{scene.get('id')}' references missing scene '{keyword}'")
+            elif node_type == "dispatch" and data.get("keyword") == "setCurrentScene":
+                config = data.get("config") or {}
+                if not isinstance(config, dict):
+                    _bad_request(f"Scene '{scene.get('id')}' has invalid dispatch config")
+                target_scene_id = config.get("sceneId")
+                if isinstance(target_scene_id, str) and target_scene_id and target_scene_id not in scene_ids:
+                    _bad_request(
+                        f"Scene '{scene.get('id')}' references missing scene '{target_scene_id}'"
+                    )
 
 
 def _ascii_safe(name: str) -> str:
     """Return a stripped ASCII fallback (for very old clients)."""
     return _ascii_re.sub("_", name)[:150] or "download"
-
-
-def _build_frame_path(
-    frame: Frame,
-    path: str,
-    method: str = "GET",
-) -> str:
-    """
-    Build the relative path used when talking to the device.
-
-    * For **GET** we keep the historical `?k=` query parameter so the
-      WebSocket agent (which cannot add headers) can authenticate.
-    * For **POST** and every other verb we **omit** the query parameter
-      – the plain-HTTP fallback is able to use the `Authorization`
-      header instead.
-    """
-    if not is_safe_host(frame.frame_host):
-        raise HTTPException(status_code=400, detail="Unsafe frame host")
-
-    if (
-        method == "GET"
-        and frame.frame_access not in ("public", "protected")
-        and frame.frame_access_key
-    ):
-        sep = "&" if "?" in path else "?"
-        path = f"{path}{sep}k={frame.frame_access_key}"
-    return path
-
-
-def _build_frame_url(frame: Frame, path: str, method: str) -> str:
-    """Return full http://host:port/… URL (adds access key when required)."""
-    if not is_safe_host(frame.frame_host):
-        raise HTTPException(status_code=400, detail="Unsafe frame host")
-
-    scheme = "https" if frame.frame_port % 1000 == 443 else "http"
-    url = f"{scheme}://{frame.frame_host}:{frame.frame_port}{_build_frame_path(frame, path, method)}"
-    return url
-
-
-def _auth_headers(
-    frame: Frame, hdrs: Optional[dict[str, str]] = None
-) -> dict[str, str]:
-    """
-    Inject HTTP Authorization header when the frame is not public.
-    """
-    hdrs = dict(hdrs or {})
-    if frame.frame_access != "public" and frame.frame_access_key:
-        hdrs.setdefault("Authorization", f"Bearer {frame.frame_access_key}")
-    return hdrs
 
 
 def _normalise_agent_response(resp: Any) -> tuple[int, Any]:
@@ -174,6 +306,65 @@ def _bytes_or_json(blob: bytes | str):
     return blob
 
 
+def _decode_bytes(data: bytes) -> str:
+    try:
+        return data.decode()
+    except Exception:
+        return data.decode("latin1", errors="replace")
+
+
+def _truncate_text(msg: str, limit: int = 400) -> str:
+    msg = msg.strip()
+    if len(msg) > limit:
+        msg = msg[: limit - 3].rstrip() + "..."
+    return msg
+
+
+def _format_body_preview(body: bytes) -> str:
+    if not body:
+        return ""
+    return _truncate_text(_decode_bytes(body))
+
+
+
+
+async def _icmp_ping_host(host: str, *, timeout: float = 2.0) -> tuple[bool, float | None, str]:
+    if not shutil.which("ping"):
+        return False, None, "ping command not available on server"
+
+    started = time.perf_counter()
+    timeout_arg = str(int(timeout * 1000)) if sys.platform == "darwin" else str(int(timeout))
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ping",
+            "-c",
+            "1",
+            "-W",
+            timeout_arg,
+            host,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    except FileNotFoundError:
+        return False, None, "ping command not available on server"
+
+    try:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout + 1.0)
+    except asyncio.TimeoutError:
+        proc.kill()
+        with contextlib.suppress(Exception):
+            await proc.wait()
+        return False, None, f"Timeout after {timeout:.1f}s"
+
+    elapsed_ms = (time.perf_counter() - started) * 1000
+    if proc.returncode == 0:
+        message = _decode_bytes(stdout or b"") or f"Reply from {host}"
+        return True, elapsed_ms, _truncate_text(message)
+
+    message = _decode_bytes(stderr or stdout or b"") or f"Unable to reach {host}"
+    return False, elapsed_ms, _truncate_text(message)
+
+
 async def _forward_frame_request(
     frame: Frame,
     redis: Redis,
@@ -205,6 +396,7 @@ async def _forward_frame_request(
             method=method.upper(),
             body=body_for_agent,
             headers=_auth_headers(frame),
+            redis=redis,
         )
         status, payload = _normalise_agent_response(agent_resp)
         if status == 200:
@@ -224,7 +416,8 @@ async def _forward_frame_request(
 
     url = _build_frame_url(frame, path, method)
     hdrs = _auth_headers(frame)
-    async with httpx.AsyncClient() as client:
+    verify = _httpx_verify(frame)
+    async with httpx.AsyncClient(verify=verify) as client:
         try:
             if isinstance(json_body, (bytes, bytearray)):
                 # binary/event bodies
@@ -287,7 +480,7 @@ async def _remote_file_md5(
     Return (md5, exists). Prefer the websocket agent, fall back to SSH.
     """
     if await _use_agent(frame, redis):
-        resp = await file_md5_on_frame(frame.id, remote_path)
+        resp = await file_md5_on_frame(frame.id, remote_path, redis=redis)
         return resp.get("md5", ""), bool(resp.get("exists", False))
 
     ssh = await get_ssh_connection(db, redis, frame)
@@ -323,7 +516,7 @@ async def _remote_download_file(
     Download *remote_path* – agent first, SSH SCP otherwise.
     """
     if await _use_agent(frame, redis):
-        return await file_read_on_frame(frame.id, remote_path)
+        return await file_read_on_frame(frame.id, remote_path, redis=redis)
 
     ssh = await get_ssh_connection(db, redis, frame)
     try:
@@ -336,48 +529,6 @@ async def _remote_download_file(
         return data
     finally:
         await remove_ssh_connection(db, redis, ssh, frame)
-
-
-async def _fetch_frame_http_bytes(
-    frame: Frame,
-    redis: Redis,
-    *,
-    path: str,
-    method: str = "GET",
-) -> tuple[int, bytes, dict[str, str]]:
-    """Fetch *path* from the frame returning (status, body-bytes, headers)."""
-
-    if await _use_agent(frame, redis):
-        resp = await http_get_on_frame(frame.id, _build_frame_path(frame, path, method))
-        if isinstance(resp, dict):
-            status = int(resp.get("status", 0))
-            if resp.get("binary"):
-                body = resp.get("body", b"")  # already bytes
-            else:
-                raw = resp.get("body", "")
-                body = raw.encode("latin1") if isinstance(raw, str) else raw
-            hdrs = {
-                str(k).lower(): str(v) for k, v in (resp.get("headers") or {}).items()
-            }
-            return status, body, hdrs
-        else:
-            raise HTTPException(status_code=500, detail="Bad agent response")
-
-    url = _build_frame_url(frame, path, method)
-    hdrs = _auth_headers(frame)
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.get(url, headers=hdrs, timeout=60.0)
-        except httpx.ReadTimeout:
-            raise HTTPException(
-                status_code=HTTPStatus.REQUEST_TIMEOUT, detail=f"Timeout to {url}"
-            )
-        except Exception as exc:
-            raise HTTPException(
-                status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(exc)
-            )
-
-    return response.status_code, response.content, dict(response.headers)
 
 
 # ---------------------------------------------------------------------------
@@ -435,6 +586,99 @@ async def api_frame_get_states(
     return states
 
 
+@api_with_auth.get(
+    "/frames/{id:int}/uploaded_scenes", response_model=FrameUploadedScenesResponse
+)
+async def api_frame_get_uploaded_scenes(
+    id: int, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)
+):
+    frame = db.get(Frame, id) or _not_found()
+    payload = await _forward_frame_request(
+        frame,
+        redis,
+        path="/getUploadedScenes",
+        cache_key=f"frame:{frame.frame_host}:{frame.frame_port}:uploaded_scenes",
+    )
+    if isinstance(payload, dict) and payload.get("sceneId"):
+        await redis.set(f"frame:{frame.id}:active_scene", payload["sceneId"])
+    return payload
+
+
+@api_with_auth.get("/frames/{id:int}/ping", response_model=FramePingResponse)
+async def api_frame_ping(
+    id: int,
+    mode: str = Query("icmp"),
+    path: str | None = Query(None),
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    frame = db.get(Frame, id) or _not_found()
+
+    mode_normalised = (mode or "").strip().lower()
+    if mode_normalised not in {"icmp", "http"}:
+        _bad_request("Ping mode must be 'icmp' or 'http'")
+
+    if not is_safe_host(frame.frame_host):
+        raise HTTPException(status_code=400, detail="Unsafe frame host")
+
+    if mode_normalised == "icmp":
+        ok, elapsed_ms, message = await _icmp_ping_host(frame.frame_host)
+        return FramePingResponse(
+            ok=ok,
+            mode="icmp",
+            target=frame.frame_host,
+            elapsed_ms=elapsed_ms,
+            status=None,
+            message=message,
+        )
+
+    ping_path = (path or "/ping").strip() or "/ping"
+    if not ping_path.startswith("/"):
+        ping_path = f"/{ping_path}"
+    if len(ping_path) > 512:
+        _bad_request("Ping path is too long")
+
+    scheme, port = _frame_scheme_port(frame)
+    display_target = f"{scheme}://{frame.frame_host}:{port}{ping_path}"
+    started = time.perf_counter()
+
+    try:
+        status, body, _hdrs = await _fetch_frame_http_bytes(
+            frame, redis, path=ping_path, method="GET"
+        )
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        message = _format_body_preview(body) or f"HTTP {status}"
+        return FramePingResponse(
+            ok=200 <= status < 400,
+            mode="http",
+            target=display_target,
+            elapsed_ms=elapsed_ms,
+            status=status,
+            message=message,
+        )
+    except HTTPException as exc:
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+        return FramePingResponse(
+            ok=False,
+            mode="http",
+            target=display_target,
+            elapsed_ms=elapsed_ms,
+            status=None,
+            message=_truncate_text(detail),
+        )
+    except Exception as exc:
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        return FramePingResponse(
+            ok=False,
+            mode="http",
+            target=display_target,
+            elapsed_ms=elapsed_ms,
+            status=None,
+            message=_truncate_text(str(exc)),
+        )
+
+
 @api_with_auth.post("/frames/{id:int}/event/{event}")
 async def api_frame_event(
     id: int,
@@ -449,6 +693,10 @@ async def api_frame_event(
         if request.headers.get("content-type") == "application/json"
         else request.body()
     )
+    if event == "uploadScenes":
+        scenes, body = _normalize_upload_scenes_payload(body)
+        scene_id = body.get("sceneId")
+        _validate_upload_scenes_payload(scenes, scene_id)
     try:
         await _forward_frame_request(
             frame, redis, path=f"/event/{event}", method="POST", json_body=body
@@ -461,6 +709,41 @@ async def api_frame_event(
         raise exc
     except RuntimeError as exc:
         await log(db, redis, id, "stderr", f"Error on frame event {event}: {str(exc)}")
+        raise exc
+
+
+@api_with_auth.post("/frames/{id:int}/upload_scenes")
+async def api_frame_upload_scenes(
+    id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    frame = db.get(Frame, id) or _not_found()
+    body = await (
+        request.json()
+        if request.headers.get("content-type") == "application/json"
+        else request.body()
+    )
+    scenes, body = _normalize_upload_scenes_payload(body)
+    scene_id = body.get("sceneId")
+    _validate_upload_scenes_payload(scenes, scene_id)
+    try:
+        await _forward_frame_request(
+            frame, redis, path="/uploadScenes", method="POST", json_body=body
+        )
+        return "OK"
+    except HTTPException as exc:
+        await log(
+            db,
+            redis,
+            id,
+            "stderr",
+            f"Error on upload scenes request: {exc.detail}",
+        )
+        raise exc
+    except RuntimeError as exc:
+        await log(db, redis, id, "stderr", f"Error on upload scenes request: {str(exc)}")
         raise exc
 
 
@@ -487,7 +770,7 @@ async def api_frame_local_build_zip(                 # noqa: D401
         source_dir = deployer.create_local_source_folder(tmp)
 
         # Apply all frame‑specific code generation (scenes, drivers, …)
-        await deployer.make_local_modifications(source_dir)
+        await deployer.make_local_modifications(source_dir, driver_build_mode=frame_driver_build_mode(frame))
         await copy_custom_fonts_to_local_source_folder(db, source_dir)
 
         # Package → .zip
@@ -522,6 +805,154 @@ async def api_frame_local_build_zip(                 # noqa: D401
         return StreamingResponse(sender(), headers=headers, media_type="application/zip")
 
 
+@api_with_auth.post("/frames/{id:int}/download_c_source_zip")
+async def api_frame_local_c_source_zip(
+    id: int,
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    frame = db.get(Frame, id) or _not_found()
+
+    try:
+        nim_path = find_nim_v2()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail=f"Unable to locate Nim installation: {exc}",
+        )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        deployer = FrameDeployer(db, redis, frame, nim_path, tmp)
+
+        try:
+            arch = await deployer.get_cpu_architecture()
+        except Exception as exc:
+            raise HTTPException(
+                status_code=HTTPStatus.BAD_GATEWAY,
+                detail=f"Unable to detect frame architecture: {exc}",
+            )
+
+        source_dir = deployer.create_local_source_folder(tmp)
+        driver_build_mode = frame_driver_build_mode(frame)
+        await deployer.make_local_modifications(source_dir, driver_build_mode=driver_build_mode)
+        await copy_custom_fonts_to_local_source_folder(db, source_dir)
+
+        build_dir = os.path.join(tmp, f"build_{deployer.build_id}")
+        os.makedirs(build_dir, exist_ok=True)
+        await deployer.create_local_build_archive(build_dir, source_dir, arch, driver_build_mode=driver_build_mode)
+
+        zip_path = os.path.join(tmp, f"frameos_{deployer.build_id}_c_source.zip")
+        with zipfile.ZipFile(
+            zip_path,
+            "w",
+            compression=zipfile.ZIP_DEFLATED,
+            strict_timestamps=False,
+        ) as zf:
+            for root, _dirs, files in os.walk(build_dir):
+                for file in files:
+                    full = os.path.join(root, file)
+                    arc = os.path.relpath(full, build_dir)
+                    zf.write(full, arc)
+
+        async with aiofiles.open(zip_path, "rb") as fh:
+            zip_bytes = await fh.read()
+
+    async def sender():
+        yield zip_bytes
+
+    safe_name = (frame.name or "frame").replace(" ", "_").replace("/", "_")
+    filename = f"{safe_name}_{deployer.build_id}_c_source.zip"
+    headers = {
+        "Content-Disposition": (
+            f'attachment; filename="{_ascii_safe(filename)}"'
+        )
+    }
+    return StreamingResponse(sender(), headers=headers, media_type="application/zip")
+
+
+@api_with_auth.post("/frames/{id:int}/download_binary_zip")
+async def api_frame_local_binary_zip(
+    id: int,
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    frame = db.get(Frame, id) or _not_found()
+
+    try:
+        # Ensure Nim is available before attempting to build
+        nim_path = find_nim_v2()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail=f"Unable to locate Nim installation: {exc}",
+        )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        deployer = FrameDeployer(db, redis, frame, nim_path, tmp)
+        builder = FrameBinaryBuilder(db=db, redis=redis, frame=frame, deployer=deployer, temp_dir=tmp)
+
+        try:
+            build_plan = await builder.plan_build(force_cross_compile=True)
+            build_result = await builder.build(build_plan)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                detail=f"Failed to build FrameOS binary: {exc}",
+            ) from exc
+
+        binary_path = build_result.binary_path
+        if not binary_path:
+            raise HTTPException(
+                status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                detail="Cross compilation completed without producing a binary",
+            )
+
+        dist_dir = os.path.join(tmp, "dist")
+        os.makedirs(dist_dir, exist_ok=True)
+        bin_dir = os.path.join(dist_dir, "bin")
+        os.makedirs(bin_dir, exist_ok=True)
+        shutil.copy2(binary_path, os.path.join(bin_dir, "frameos"))
+        if build_result.driver_library_paths:
+            driver_dir = os.path.join(dist_dir, "drivers")
+            os.makedirs(driver_dir, exist_ok=True)
+            for driver_library_path in build_result.driver_library_paths:
+                if not os.path.isfile(driver_library_path):
+                    raise HTTPException(
+                        status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                        detail=f"Shared driver library missing after build: {driver_library_path}",
+                    )
+                shutil.copy2(driver_library_path, os.path.join(driver_dir, os.path.basename(driver_library_path)))
+
+        zip_path = os.path.join(tmp, f"frameos_{deployer.build_id}_binary.zip")
+        with zipfile.ZipFile(
+            zip_path,
+            "w",
+            compression=zipfile.ZIP_DEFLATED,
+            strict_timestamps=False,
+        ) as zf:
+            for root, _dirs, files in os.walk(dist_dir):
+                for file in files:
+                    full = os.path.join(root, file)
+                    relative = os.path.relpath(full, dist_dir)
+                    arc = os.path.join("dist", relative)
+                    zf.write(full, arc)
+
+        async with aiofiles.open(zip_path, "rb") as fh:
+            zip_bytes = await fh.read()
+
+    async def sender():
+        yield zip_bytes
+
+    safe_name = (frame.name or "frame").replace(" ", "_").replace("/", "_")
+    filename = f"{safe_name}_{deployer.build_id}_binary.zip"
+    headers = {
+        "Content-Disposition": (
+            f'attachment; filename="{_ascii_safe(filename)}"'
+        )
+    }
+    return StreamingResponse(sender(), headers=headers, media_type="application/zip")
+
+
 @api_no_auth.get("/frames/{id:int}/asset")
 async def api_frame_get_asset(
     id: int,
@@ -532,18 +963,10 @@ async def api_frame_get_asset(
     redis: Redis = Depends(get_redis),
 ):
     if config.HASSIO_RUN_MODE != "ingress":
-        if authorization and authorization.startswith("Bearer "):
-            try:
-                await get_current_user(authorization.split(" ")[1], db)
-            except HTTPException:
-                raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Unauthorized")
+        if await get_current_user_from_request(request, db, authorization):
+            pass
         elif token:
-            try:
-                payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-                if payload.get("sub") != f"frame={id}":
-                    raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Unauthorized")
-            except JWTError:
-                raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Unauthorized")
+            validate_scoped_token(token, expected_subject=f"frame={id}")
         else:
             raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Unauthorized")
 
@@ -599,7 +1022,7 @@ async def api_frame_get_asset(
                     f"convert {shlex.quote(full_path)} -thumbnail 320x320 "
                     f"{shlex.quote(thumb_full)}"
                 )
-                await exec_shell_on_frame(frame.id, cmd)
+                await exec_shell_on_frame(frame.id, cmd, redis=redis)
 
                 data = await _remote_download_file(db, redis, frame, thumb_full)
                 await redis.set(cache_key, data, ex=86400 * 30)
@@ -608,7 +1031,7 @@ async def api_frame_get_asset(
 
     if await _use_agent(frame, redis):
         try:
-            data = await file_read_on_frame(frame.id, full_path)
+            data = await file_read_on_frame(frame.id, full_path, redis=redis)
         except Exception:  # file_read returns RuntimeError on missing file
             raise HTTPException(
                 status_code=HTTPStatus.NOT_FOUND, detail="Asset not found",
@@ -666,37 +1089,64 @@ async def api_frame_get_logs(id: int, db: Session = Depends(get_db)):
     frame = db.get(Frame, id)
     if frame is None:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
-    logs = [ll.to_dict() for ll in frame.logs][-1000:]
+    latest_logs = (
+        db.query(Log)
+        .filter_by(frame_id=id)
+        .order_by(Log.timestamp.desc(), Log.id.desc())
+        .limit(1000)
+        .all()
+    )
+    logs = [log_entry.to_dict() for log_entry in reversed(latest_logs)]
     return {"logs": logs}
 
 
-@api_with_auth.get(
-    "/frames/{id:int}/image_token", response_model=FrameImageLinkResponse
-)
-async def get_image_token(id: int):
-    expire_minutes = 5
-    now = datetime.utcnow()
-    expire = now + timedelta(minutes=expire_minutes)
-    to_encode = {"sub": f"frame={id}", "exp": expire}
-    token = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    return {"token": token, "expires_in": int((expire - now).total_seconds())}
+def _format_frame_log_line(log_entry: Log) -> str:
+    timestamp = log_entry.timestamp.replace(tzinfo=timezone.utc).isoformat()
+    return f"[{timestamp}] ({log_entry.type}) {log_entry.line}"
+
+
+@api_with_auth.get("/frames/{id:int}/logs/full")
+async def api_frame_download_full_logs(id: int, db: Session = Depends(get_db)):
+    frame = db.get(Frame, id)
+    if frame is None:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
+
+    logs = (
+        db.query(Log)
+        .filter_by(frame_id=id)
+        .order_by(Log.timestamp.asc(), Log.id.asc())
+        .all()
+    )
+    content = "\n".join(_format_frame_log_line(log_entry) for log_entry in logs)
+    if content:
+        content += "\n"
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
+    filename = f"frame-{id}-full-logs-{timestamp}.log"
+    return Response(
+        content,
+        media_type="text/plain; charset=utf-8",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="{_ascii_safe(filename)}"; '
+                f"filename*=UTF-8''{quote(filename, safe='')}"
+            ),
+        },
+    )
 
 
 @api_no_auth.get("/frames/{id:int}/image")
 async def api_frame_get_image(
     id: int,
-    token: str,
     request: Request,
+    token: str | None = None,
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
     if config.HASSIO_RUN_MODE != "ingress":
-        try:
-            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-            if payload.get("sub") != f"frame={id}":
-                raise HTTPException(status_code=401, detail="Unauthorized")
-        except JWTError:
-            raise HTTPException(status_code=401, detail="Unauthorized")
+        if await get_current_user_from_request(request, db):
+            pass
+        else:
+            validate_scoped_token(token, expected_subject=f"frame={id}")
 
     frame = db.get(Frame, id)
     if frame is None:
@@ -719,103 +1169,119 @@ async def api_frame_get_image(
             body = render_line_of_text_png("no image", width, height)
             return Response(content=body, media_type="image/png")
 
-    # Use shared semaphore and client
-    status = 0
-    body = b""
-    try:
-        status, body, headers = await _fetch_frame_http_bytes(frame, redis, path=path)
+    frame_image_lock = _get_frame_image_lock(id)
+    waited_for_lock = frame_image_lock.locked()
+    async with frame_image_lock:
+        if waited_for_lock:
+            cached = await redis.get(cache_key)
+            if cached:
+                return Response(content=cached, media_type="image/png")
 
-        if status == 200:
-            await redis.set(cache_key, body, ex=86400 * 30)
-            scene_id = headers.get("x-scene-id")
-            if not scene_id:
-                encoded_scene_id = await redis.get(f"frame:{id}:active_scene")
-                if encoded_scene_id:
-                    scene_id = encoded_scene_id.decode("utf-8")
-            if scene_id:
-                # dimensions (best‑effort – don’t crash if Pillow missing)
-                width = height = None
-                try:
-                    from PIL import Image
-
-                    img = Image.open(io.BytesIO(body))
-                    width, height = img.width, img.height
-                except Exception:
-                    pass
-
-                # upsert into SceneImage
-                from app.models.scene_image import SceneImage
-                from app.api.scene_images import _generate_thumbnail
-
-                now = datetime.utcnow()
-                img_row = (
-                    db.query(SceneImage)
-                    .filter_by(frame_id=id, scene_id=scene_id)
-                    .first()
-                )
-                thumb, t_width, t_height = _generate_thumbnail(body)
-                if img_row:
-                    img_row.image = body
-                    img_row.timestamp = now
-                    img_row.width = width
-                    img_row.height = height
-                    img_row.thumb_image = thumb
-                    img_row.thumb_width = t_width
-                    img_row.thumb_height = t_height
-                else:
-                    img_row = SceneImage(
-                        frame_id=id,
-                        scene_id=scene_id,
-                        image=body,
-                        timestamp=now,
-                        width=width,
-                        height=height,
-                        thumb_image=thumb,
-                        thumb_width=t_width,
-                        thumb_height=t_height,
-                    )
-                    db.add(img_row)
-                db.commit()
-
-            await publish_message(
-                redis,
-                "new_scene_image",
-                {
-                    "frameId": id,
-                    "sceneId": scene_id,
-                    "timestamp": now.isoformat(),
-                    "width": width,
-                    "height": height,
-                },
+        # Use shared semaphore and client
+        status = 0
+        body = b""
+        try:
+            status, body, headers = await _fetch_frame_http_bytes(
+                frame, redis, path=path
             )
 
-            return Response(content=body, media_type="image/png")
-        else:
+            if status == 200:
+                await redis.set(cache_key, body, ex=86400 * 30)
+                scene_id = headers.get("x-scene-id")
+                if not scene_id:
+                    encoded_scene_id = await redis.get(f"frame:{id}:active_scene")
+                    if encoded_scene_id:
+                        scene_id = encoded_scene_id.decode("utf-8")
+                if scene_id:
+                    # dimensions (best‑effort – don’t crash if Pillow missing)
+                    width = height = None
+                    try:
+                        from PIL import Image
+
+                        img = Image.open(io.BytesIO(body))
+                        width, height = img.width, img.height
+                    except Exception:
+                        pass
+
+                    # upsert into SceneImage
+                    from app.models.scene_image import SceneImage
+                    from app.api.scene_images import _generate_thumbnail
+
+                    now = datetime.utcnow()
+                    img_row = (
+                        db.query(SceneImage)
+                        .filter_by(frame_id=id, scene_id=scene_id)
+                        .first()
+                    )
+                    thumb, t_width, t_height = _generate_thumbnail(body)
+                    if img_row:
+                        img_row.image = body
+                        img_row.timestamp = now
+                        img_row.width = width
+                        img_row.height = height
+                        img_row.thumb_image = thumb
+                        img_row.thumb_width = t_width
+                        img_row.thumb_height = t_height
+                    else:
+                        img_row = SceneImage(
+                            frame_id=id,
+                            scene_id=scene_id,
+                            image=body,
+                            timestamp=now,
+                            width=width,
+                            height=height,
+                            thumb_image=thumb,
+                            thumb_width=t_width,
+                            thumb_height=t_height,
+                        )
+                        db.add(img_row)
+                    db.commit()
+
+                await publish_message(
+                    redis,
+                    "new_scene_image",
+                    {
+                        "frameId": id,
+                        "sceneId": scene_id,
+                        "timestamp": now.isoformat(),
+                        "width": width,
+                        "height": height,
+                    },
+                )
+
+                return Response(content=body, media_type="image/png")
+            else:
+                await log(
+                    db,
+                    redis,
+                    id,
+                    "stderr",
+                    f"Error fetching image from frame {id}: {status} {body.decode(errors='ignore')}",
+                )
+                raise HTTPException(status_code=status, detail="Unable to fetch image")
+
+        except httpx.ReadTimeout:
             await log(
                 db,
                 redis,
                 id,
                 "stderr",
-                f"Error fetching image from frame {id}: {status} {body.decode(errors='ignore')}",
+                f"Error fetching image from frame {id}: request timeout",
             )
-            raise HTTPException(status_code=status, detail="Unable to fetch image")
-
-    except httpx.ReadTimeout:
-        await log(
-            db,
-            redis,
-            id,
-            "stderr",
-            f"Error fetching image from frame {id}: request timeout",
-        )
-        raise HTTPException(
-            status_code=HTTPStatus.REQUEST_TIMEOUT, detail="Request Timeout"
-        )
-    except Exception as e:
-        await log(
-            db, redis, id, "stderr", f"Error fetching image from frame {id}: {str(e)}"
-        )
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+            raise HTTPException(
+                status_code=HTTPStatus.REQUEST_TIMEOUT, detail="Request Timeout"
+            )
+        except Exception as e:
+            await log(
+                db,
+                redis,
+                id,
+                "stderr",
+                f"Error fetching image from frame {id}: {str(e)}",
+            )
+            raise HTTPException(
+                status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e)
+            )
 
 
 @api_with_auth.get("/frames/{id:int}/scene_source/{scene}")
@@ -843,7 +1309,7 @@ async def api_frame_get_assets(
     assets_path = frame.assets_path or "/srv/assets"
 
     if await _use_agent(frame, redis):
-        assets = await assets_list_on_frame(frame.id, assets_path)
+        assets = await assets_list_on_frame(frame.id, assets_path, redis=redis)
         assets.sort(key=lambda a: a["path"])
         return {"assets": assets}
 
@@ -888,6 +1354,57 @@ async def api_frame_assets_sync(
         return {"message": "Assets synced successfully"}
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@api_with_auth.post("/frames/{id:int}/assets/upload_image")
+async def api_frame_assets_upload_image(
+    id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    frame = db.get(Frame, id) or _not_found()
+
+    data = await file.read()
+    if not data:
+        _bad_request("Uploaded file is empty")
+
+    original_name = os.path.basename(file.filename or "image")
+    base_name, extension = os.path.splitext(original_name)
+    safe_base = _ascii_re.sub("_", base_name).strip("._") or "image"
+    safe_extension = _ascii_re.sub("", extension)
+    md5sum = hashlib.md5(data).hexdigest()
+    filename = f"{safe_base}.{md5sum}{safe_extension}"
+
+    assets_path = frame.assets_path or "/srv/assets"
+    upload_dir = os.path.normpath(os.path.join(assets_path, "uploads"))
+    combined_path = os.path.normpath(os.path.join(upload_dir, filename))
+
+    if not combined_path.startswith(os.path.normpath(assets_path) + os.sep):
+        _bad_request("Invalid asset path")
+
+    await make_dir(db, redis, frame, upload_dir)
+
+    exists_status, _, _ = await run_command(
+        db,
+        redis,
+        frame,
+        f"test -f {shlex.quote(combined_path)}",
+        log_output=False,
+        log_command=False,
+    )
+    uploaded = False
+    if exists_status != 0:
+        await upload_file(db, redis, frame, combined_path, data)
+        uploaded = True
+
+    rel = os.path.relpath(combined_path, assets_path)
+    return {
+        "path": rel,
+        "filename": filename,
+        "size": len(data),
+        "uploaded": uploaded,
+    }
 
 
 @api_with_auth.post("/frames/{id:int}/assets/upload")
@@ -1018,7 +1535,9 @@ async def api_frame_clear_build_cache(
                 "> rm -rf /srv/frameos/build/cache && echo DONE",
             )
             await exec_shell_on_frame(
-                frame.id, "rm -rf /srv/frameos/build/cache && echo DONE"
+                frame.id,
+                "rm -rf /srv/frameos/build/cache && echo DONE",
+                redis=redis,
             )
             return {"message": "Build cache cleared successfully"}
         except Exception as e:
@@ -1036,46 +1555,6 @@ async def api_frame_clear_build_cache(
         return {"message": "Build cache cleared successfully"}
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
-
-
-@api_with_auth.post("/frames/{id:int}/nix_collect_garbage_frame")
-async def api_frame_nix_collect_garbage_frame(
-    id: int, redis: Redis = Depends(get_redis), db: Session = Depends(get_db)
-):
-    frame = db.get(Frame, id)
-    if frame is None:
-        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
-
-    if await _use_agent(frame, redis):
-        try:
-            await log( db, redis, id, "stdout", "> nix-collect-garbage")
-            await exec_shell_on_frame(frame.id, "nix-collect-garbage")
-            return {"message": "Garbage collected"}
-        except Exception as e:
-            raise HTTPException(
-                status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e)
-            )
-    try:
-        ssh = await get_ssh_connection(db, redis, frame)
-        try:
-            await exec_command(db, redis, frame, ssh, "nix-collect-garbage")
-        finally:
-            await remove_ssh_connection(db, redis, ssh, frame)
-        return {"message": "Garbage collected"}
-    except Exception as e:
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
-
-@api_with_auth.post("/frames/{id:int}/nix_collect_garbage_backend")
-async def api_frame_nix_collect_garbage_backend(
-    id: int, redis: Redis = Depends(get_redis), db: Session = Depends(get_db)
-):
-    cmd = 'nix-collect-garbage'
-    frame = db.get(Frame, id)
-    if frame is None:
-        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
-
-    await exec_local_command(db, redis, frame, cmd)
-    return {"message": "Garbage collected"}
 
 
 @api_with_auth.post("/frames/{id:int}/reset")
@@ -1143,43 +1622,6 @@ async def api_frame_stop_event(id: int, redis: Redis = Depends(get_redis)):
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
-@api_with_auth.post("/frames/{id:int}/build_sd_image")
-async def api_frame_build_sd_image_event(id: int, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)):
-    try:
-        from app.tasks.build_sd_card_image import build_sd_card_image_task
-
-        try:
-            img_path = await build_sd_card_image_task({"db": db, "redis": redis}, id=id)
-        except Exception as exc:
-            raise HTTPException(
-                status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(exc)
-            )
-
-        if not img_path.exists():
-            raise HTTPException(status_code=500, detail="Image build failed")
-
-        async def sender():
-            try:
-                async with aiofiles.open(img_path, "rb") as fh:
-                    while chunk := await fh.read(64 << 14):   # 1 MiB chunks
-                        yield chunk
-            finally:
-                # do not remove the file, as it won't rebuild next time
-                pass
-
-        frame = db.get(Frame, id)
-        if not frame:
-            raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
-        name = (frame.name or "Untitled Frame").replace(" ", "_").replace("/", "_")
-
-        filename = f"{name}.img.zst"
-        headers  = {
-            "Content-Disposition": f'attachment; filename="{filename}"'
-        }
-        return StreamingResponse(sender(), headers=headers, media_type="application/zstd")
-    except Exception as e:
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
-
 @api_with_auth.post("/frames/{id:int}/deploy")
 async def api_frame_deploy_event(id: int, redis: Redis = Depends(get_redis)):
     try:
@@ -1187,6 +1629,93 @@ async def api_frame_deploy_event(id: int, redis: Redis = Depends(get_redis)):
 
         await deploy_frame(id, redis)
         return "Success"
+    except Exception as e:
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@api_with_auth.get("/frames/{id:int}/deploy_plan")
+async def api_frame_deploy_plan(
+    id: int,
+    mode: str = Query("combined"),
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    frame = db.get(Frame, id)
+    if not frame:
+        _not_found()
+
+    try:
+        if mode in {"combined", "full"}:
+            nim_path = find_nim_v2()
+            with tempfile.TemporaryDirectory() as temp_dir:
+                deployer = FrameDeployer(db=db, redis=redis, frame=frame, nim_path=nim_path, temp_dir=temp_dir)
+                workflow = FrameDeployWorkflow(
+                    db=db,
+                    redis=redis,
+                    frame=frame,
+                    deployer=deployer,
+                    temp_dir=temp_dir,
+                )
+                plan = await workflow.plan(mode)
+        elif mode == "fast":
+            deployer = FrameDeployer(db=db, redis=redis, frame=frame, nim_path="", temp_dir="")
+            workflow = FrameDeployWorkflow(
+                db=db,
+                redis=redis,
+                frame=frame,
+                deployer=deployer,
+                temp_dir="",
+            )
+            plan = await workflow.plan("fast")
+        else:
+            _bad_request("mode must be 'combined', 'full' or 'fast'")
+
+        return {"plan": plan.to_dict()}
+    except Exception as e:
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@api_with_auth.post("/frames/{id:int}/deploy_plan")
+async def api_frame_deploy_plan_preview(
+    id: int,
+    data: FrameUpdateRequest,
+    mode: str = Query("combined"),
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    frame = db.get(Frame, id)
+    if not frame:
+        _not_found()
+
+    preview_frame = _apply_frame_preview_update(frame, data)
+
+    try:
+        if mode in {"combined", "full"}:
+            nim_path = find_nim_v2()
+            with tempfile.TemporaryDirectory() as temp_dir:
+                deployer = FrameDeployer(db=db, redis=redis, frame=preview_frame, nim_path=nim_path, temp_dir=temp_dir)
+                workflow = FrameDeployWorkflow(
+                    db=db,
+                    redis=redis,
+                    frame=preview_frame,
+                    deployer=deployer,
+                    temp_dir=temp_dir,
+                )
+                plan = await workflow.plan(mode)
+        elif mode == "fast":
+            deployer = FrameDeployer(db=db, redis=redis, frame=preview_frame, nim_path="", temp_dir="")
+            workflow = FrameDeployWorkflow(
+                db=db,
+                redis=redis,
+                frame=preview_frame,
+                deployer=deployer,
+                temp_dir="",
+            )
+            plan = await workflow.plan("fast")
+        else:
+            _bad_request("mode must be 'combined', 'full' or 'fast'")
+
+        return {"plan": plan.to_dict()}
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
@@ -1202,6 +1731,62 @@ async def api_frame_fast_deploy_event(id: int, redis: Redis = Depends(get_redis)
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 
+@api_with_auth.post("/frames/{id:int}/set_next_scene")
+async def api_frame_set_next_scene(
+    id: int,
+    data: FrameSetNextSceneRequest,
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    frame = db.get(Frame, id)
+    if not frame:
+        _not_found()
+
+    if not any(scene.get("id") == data.sceneId for scene in (frame.scenes or [])):
+        _bad_request(f"Scene {data.sceneId} not found on frame")
+
+    if data.state is not None and not isinstance(data.state, dict):
+        _bad_request("State must be an object")
+
+    state_dir = _frame_state_dir(frame)
+    await make_dir(db, redis, frame, state_dir)
+
+    scene_payload = {"sceneId": data.sceneId}
+    state_payload = data.state or {}
+    scene_state_path = os.path.join(
+        state_dir, f"scene-{_sanitize_scene_state_filename(data.sceneId)}.json"
+    )
+
+    await upload_file(
+        db,
+        redis,
+        frame,
+        os.path.join(state_dir, "scene.json"),
+        (json.dumps(scene_payload, indent=2) + "\n").encode("utf-8"),
+    )
+    await upload_file(
+        db,
+        redis,
+        frame,
+        scene_state_path,
+        (json.dumps(state_payload, indent=2) + "\n").encode("utf-8"),
+    )
+
+    try:
+        if data.fastDeploy:
+            from app.tasks import fast_deploy_frame
+
+            await fast_deploy_frame(id, redis)
+        else:
+            from app.tasks import deploy_frame
+
+            await deploy_frame(id, redis)
+    except Exception as e:
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+    return {"message": "Next scene queued for boot"}
+
+
 @api_with_auth.post("/frames/{id:int}")
 async def api_frame_update_endpoint(
     id: int,
@@ -1214,25 +1799,24 @@ async def api_frame_update_endpoint(
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
 
     update_data = data.model_dump(exclude_unset=True)
-    # If 'scenes' is a string, parse it as JSON
     if isinstance(update_data.get("scenes"), str):
         try:
             update_data["scenes"] = json.loads(update_data["scenes"])
         except json.JSONDecodeError:
-            raise HTTPException(
-                status_code=400, detail="Invalid input for scenes (must be JSON)"
-            )
+            raise HTTPException(status_code=400, detail="Invalid input for scenes (must be JSON)")
 
-    old_mode = data.mode
+    old_mode = frame.mode
     for field, value in update_data.items():
         setattr(frame, field, value)
 
-    if data.mode == "nixos" and old_mode == "rpios":
-        if frame.ssh_user == "pi":
-            frame.ssh_user = "frame"
-    elif data.mode == "rpios" and old_mode == "nixos":
-        if frame.ssh_user == "frame":
-            frame.ssh_user = "pi"
+    if "https_proxy" in update_data:
+        frame.https_proxy = normalize_https_proxy(frame.https_proxy)
+        refresh_tls_certificate_validity_dates(frame)
+
+    if data.mode == "buildroot" and old_mode != "buildroot" and frame.ssh_user == "pi":
+        frame.ssh_user = "root"
+    elif data.mode == "rpios" and old_mode == "buildroot" and frame.ssh_user == "root":
+        frame.ssh_user = "pi"
 
     await update_frame(db, redis, frame)
 
@@ -1256,6 +1840,33 @@ async def api_frame_update_endpoint(
     return {"message": "Frame updated successfully"}
 
 
+
+
+@api_with_auth.post("/frames/{id:int}/tls/generate")
+async def api_frame_generate_tls_material_endpoint(
+    id: int,
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    frame = db.get(Frame, id)
+    if not frame:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
+
+    material = generate_frame_tls_material(frame.frame_host or "")
+    server_not_valid_after = parse_certificate_not_valid_after(material["server"])
+    client_ca_not_valid_after = parse_certificate_not_valid_after(material["client_ca"])
+
+    return {
+        "certs": {
+            "server": material["server"],
+            "server_key": material["server_key"],
+            "client_ca": material["client_ca"],
+        },
+        "server_cert_not_valid_after": _serialize_datetime(server_not_valid_after),
+        "client_ca_cert_not_valid_after": _serialize_datetime(client_ca_not_valid_after),
+    }
+
+
 @api_with_auth.post("/frames/new", response_model=FrameResponse)
 async def api_frame_new(
     data: FrameCreateRequest,
@@ -1273,27 +1884,28 @@ async def api_frame_new(
             data.device,
             data.interval,
         )
-        frame.mode = data.mode
-        if data.mode == "nixos":
-            frame.mode = 'nixos'
-            frame.ssh_user = 'frame'
-            frame.network = {} # mark as changed for the orm
-            frame.network['wifiHotspot'] = 'bootOnly'
-            frame.agent = {} # mark as changed for the orm
-            frame.agent['agentEnabled'] = False
-            frame.agent['agentRunCommands'] = True
-            if timezone := settings.get('defaults', {}).get('timezone'):
-                frame.nix = {} # mark as changed for the orm
-                frame.nix['timezone'] = timezone
-            if wifi_ssid := settings.get('defaults', {}).get('wifiSSID'):
-                frame.network['wifiSSID'] = wifi_ssid
-            if wifi_password := settings.get('defaults', {}).get('wifiPassword'):
-                frame.network['wifiPassword'] = wifi_password
+
+        frame.ssh_keys = default_ssh_key_ids(settings) or None
+
+        frame.mode = data.mode or "rpios"
+        if frame.mode == "buildroot":
+            frame.ssh_user = 'root'
+            selected_platform = (data.platform or (frame.buildroot or {}).get('platform') or '').strip()
+            buildroot_settings = {**(frame.buildroot or {})}
+            if selected_platform:
+                buildroot_settings['platform'] = selected_platform
+            else:
+                buildroot_settings.pop('platform', None)
+            frame.buildroot = buildroot_settings
+            if not frame.frame_host:
+                frame.frame_host = f'frame{frame.id}.local'
             db.add(frame)
             db.commit()
             db.refresh(frame)
-            frame.nix = { **frame.nix, 'hostname': f'frame{frame.id}' }
-            frame.frame_host = f'frame{frame.id}.local'
+        else:
+            rpios_settings = {**(frame.rpios or {})}
+            rpios_settings["platform"] = data.platform or (frame.rpios or {}).get('platform') or ''
+            frame.rpios = rpios_settings
             db.add(frame)
             db.commit()
             db.refresh(frame)
@@ -1301,6 +1913,33 @@ async def api_frame_new(
         return {"frame": frame.to_dict()}
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@api_with_auth.post("/frames/{id:int}/ssh_keys")
+async def api_frame_update_ssh_keys(
+    id: int,
+    data: FrameSSHKeysUpdateRequest,
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    frame = db.get(Frame, id)
+    if not frame:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
+
+    settings = get_settings_dict(db)
+    try:
+        new_keys, public_keys, known_public_keys = resolve_authorized_keys_update(
+            data.ssh_keys,
+            frame.ssh_keys,
+            settings,
+        )
+        await _install_authorized_keys(db, redis, frame, public_keys, known_public_keys)
+    except ValueError as exc:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
+    frame.ssh_keys = new_keys
+    await update_frame(db, redis, frame)
+
+    return {"message": "SSH keys updated successfully"}
 
 
 @api_with_auth.post("/frames/import", response_model=FrameResponse)
@@ -1332,7 +1971,15 @@ async def api_frame_import(
         )
 
         for key, value in data.items():
-            if key in ["id", "name", "frame_host", "server_host", "device", "interval", "last_success"]:
+            if key in [
+                "id",
+                "name",
+                "frame_host",
+                "server_host",
+                "device",
+                "interval",
+                "last_success",
+            ]:
                 continue
             if hasattr(frame, key):
                 if key in ["last_successful_deploy_at", "last_log_at"]:
@@ -1364,16 +2011,8 @@ async def api_frame_metrics(id: int, db: Session = Depends(get_db)):
     if frame is None:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
     try:
-        metrics = db.query(Metrics).filter_by(frame_id=id).all()
-        metrics_list = [
-            {
-                "id": metric.id,
-                "timestamp": metric.timestamp.isoformat(),
-                "frame_id": metric.frame_id,
-                "metrics": metric.metrics,
-            }
-            for metric in metrics
-        ]
+        metrics = db.query(Metrics).filter_by(frame_id=id).order_by(Metrics.timestamp).all()
+        metrics_list = [metric.to_dict() for metric in metrics]
         return {"metrics": metrics_list}
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))

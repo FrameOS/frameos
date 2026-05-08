@@ -1,6 +1,25 @@
-from pydantic import BaseModel, ConfigDict, RootModel
-from typing import Any, Dict, List, Optional
+from pydantic import BaseModel, ConfigDict, RootModel, field_validator
+from typing import Any, Dict, List, Literal, Optional
+
+from .common import ImageTokenResponse
 from datetime import datetime
+
+
+class FrameHttpsProxyCerts(BaseModel):
+    server: Optional[str] = None
+    server_key: Optional[str] = None
+    client_ca: Optional[str] = None
+
+
+class FrameHttpsProxy(BaseModel):
+    enable: Optional[bool] = None
+    port: Optional[int] = None
+    expose_only_port: Optional[bool] = None
+    certs: Optional[FrameHttpsProxyCerts] = None
+    server_cert_not_valid_after: Optional[datetime] = None
+    client_ca_cert_not_valid_after: Optional[datetime] = None
+
+
 
 class FrameBase(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -12,12 +31,16 @@ class FrameBase(BaseModel):
     frame_port: int
     frame_access_key: Optional[str]
     frame_access: Optional[str]
+    frame_admin_auth: Optional[Dict[str, Any]] = None
+    https_proxy: Optional[FrameHttpsProxy] = None
     ssh_user: Optional[str]
     ssh_pass: Optional[str]
     ssh_port: int
+    ssh_keys: Optional[List[str]] = None
     server_host: Optional[str]
     server_port: int
     server_api_key: Optional[str]
+    server_send_logs: Optional[bool]
     status: str
     version: Optional[str]
     width: Optional[int]
@@ -45,7 +68,9 @@ class FrameBase(BaseModel):
     network: Optional[Dict[str, Any]]
     agent: Optional[Dict[str, Any]]
     palette: Optional[Dict[str, Any]]
-    nix: Optional[Dict[str, Any]] = None
+    buildroot: Optional[Dict[str, Any]] = None
+    rpios: Optional[Dict[str, Any]] = None
+    terminal_history: Optional[List[str]] = None
     last_successful_deploy: Optional[Dict[str, Any]]
     last_successful_deploy_at: Optional[datetime]
     active_connections: Optional[int] = None
@@ -57,7 +82,7 @@ class FramesListResponse(BaseModel):
     frames: List[FrameBase]
 
 class FrameCreateRequest(BaseModel):
-    mode: Optional[str] = None
+    mode: Optional[Literal["rpios", "buildroot"]] = None
     name: str
     frame_host: str
     server_host: str
@@ -67,18 +92,22 @@ class FrameCreateRequest(BaseModel):
 
 class FrameUpdateRequest(BaseModel):
     scenes: Optional[List[Any]] = None
-    mode: Optional[str] = None
+    mode: Optional[Literal["rpios", "buildroot"]] = None
     name: Optional[str] = None
     frame_host: Optional[str] = None
     frame_port: Optional[int] = None
     frame_access_key: Optional[str] = None
     frame_access: Optional[str] = None
+    frame_admin_auth: Optional[Dict[str, Any]] = None
+    https_proxy: Optional[FrameHttpsProxy] = None
     ssh_user: Optional[str] = None
     ssh_pass: Optional[str] = None
     ssh_port: Optional[int] = None
+    ssh_keys: Optional[List[str]] = None
     server_host: Optional[str] = None
     server_port: Optional[int] = None
     server_api_key: Optional[str] = None
+    server_send_logs: Optional[bool] = None
     width: Optional[int] = None
     height: Optional[int] = None
     rotate: Optional[int] = None
@@ -101,8 +130,29 @@ class FrameUpdateRequest(BaseModel):
     network: Optional[Dict[str, Any]] = None
     agent: Optional[Dict[str, Any]] = None
     palette: Optional[Dict[str, Any]] = None
-    nix: Optional[Dict[str, Any]] = None
+    buildroot: Optional[Dict[str, Any]] = None
+    rpios: Optional[Dict[str, Any]] = None
+    terminal_history: Optional[List[str]] = None
     next_action: Optional[str] = None
+
+    @field_validator('frame_admin_auth')
+    @classmethod
+    def validate_frame_admin_auth(cls, value: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        if not value:
+            return value
+
+        auth = dict(value)
+        if auth.get('enabled'):
+            user = str(auth.get('user', '')).strip()
+            password = str(auth.get('pass', '')).strip()
+            if not user or not password:
+                raise ValueError('Username and password are required when frame admin is enabled')
+
+        return value
+
+
+class FrameSSHKeysUpdateRequest(BaseModel):
+    ssh_keys: List[str]
 
 class FrameLogsResponse(BaseModel):
     logs: List[Dict[str, Any]]
@@ -110,13 +160,30 @@ class FrameLogsResponse(BaseModel):
 class FrameMetricsResponse(BaseModel):
     metrics: List[Dict[str, Any]]
 
-class FrameImageLinkResponse(BaseModel):
-    token: str
-    expires_in: int
+class FrameImageLinkResponse(ImageTokenResponse):
+    pass
 
 class FrameStateResponse(RootModel):
     # The state is returned as JSON
     pass
 
+class FrameUploadedScenesResponse(BaseModel):
+    scenes: List[Dict[str, Any]]
+
 class FrameAssetsResponse(BaseModel):
     assets: List[Dict[str, Any]]
+
+
+class FramePingResponse(BaseModel):
+    ok: bool
+    mode: Literal["icmp", "http"]
+    target: str
+    elapsed_ms: Optional[float] = None
+    status: Optional[int] = None
+    message: str
+
+
+class FrameSetNextSceneRequest(BaseModel):
+    sceneId: str
+    state: Optional[Dict[str, Any]] = None
+    fastDeploy: Optional[bool] = True

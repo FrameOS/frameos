@@ -18,6 +18,23 @@ To get started:
 
 ![](https://frameos.net/assets/images/walkthrough-c32e7b67dd9a6f14ebef743755b0fc8e.gif)
 
+## Development with Flox
+
+If you use [Flox](https://flox.dev), this repo now ships a checked-in environment. Running `flox activate` bootstraps the core toolchains and installs the repo-local development dependencies for Python, pnpm, and Nim.
+
+```bash
+flox activate
+pnpm dev
+```
+
+The activation hook creates a local `.venv`, installs `backend/requirements.txt`, runs `pnpm install --frozen-lockfile` for the workspace, and installs the Nim dependencies for `frameos/` and `frameos/agent/`.
+
+If you want Redis managed by Flox as well, start it with:
+
+```bash
+flox services start redis
+```
+
 
 
 ## Supported platforms
@@ -50,8 +67,30 @@ bash <(curl -fsSL https://frameos.net/install.sh)
 ```bash
 # running the latest release
 SECRET_KEY=$(openssl rand -base64 32)
-mkdir db
-docker run -d -p 8989:8989 -v ./db:/app/db --name frameos --restart always -e SECRET_KEY="$SECRET_KEY" frameos/frameos
+mkdir -p db
+docker run -d -p 8989:8989 \
+    -v ./db:/app/db \ 
+    --name frameos \
+    --restart always \
+    -e SECRET_KEY="$SECRET_KEY" \
+    frameos/frameos
+
+# If you want to speed up your builds with cross-compilation, you must enable privileged mode.
+# This lets FrameOS spin up docker containers for the various build environments.
+# Alernatively, skip this, and configure a remote build server, or build on devices directly.
+SECRET_KEY=$(openssl rand -base64 32)
+mkdir -p db
+mkdir -p /tmp/frameos-cross
+docker run -d -p 8989:8989 \
+    -v ./db:/app/db \
+    -v /tmp/frameos-cross:/tmp/frameos-cross \
+    -v /var/run/docker.sock:/var/run/docker.sock \
+    --privileged \
+    --name frameos \
+    --restart always \
+    -e SECRET_KEY="$SECRET_KEY" \
+    -e TMPDIR=/tmp/frameos-cross \
+    frameos/frameos
 
 # update daily to the latest release
 docker run -d \
@@ -71,5 +110,14 @@ docker run \
 # running a local dev build via docker
 SECRET_KEY=$(openssl rand -base64 32)
 docker build -t frameos .
-docker run -d -p 8989:8989 -v ./db:/app/db --name frameos --restart always -e SECRET_KEY="$SECRET_KEY" frameos
+docker run -d -p 8989:8989 \
+    -v ./db:/app/db \
+    -v /tmp/frameos-cross:/tmp/frameos-cross \
+    -v /var/run/docker.sock:/var/run/docker.sock \
+    --privileged \
+    --name frameos \
+    --restart always \
+    -e SECRET_KEY="$SECRET_KEY" \
+    -e TMPDIR=/tmp/frameos-cross \
+    frameos
 ```

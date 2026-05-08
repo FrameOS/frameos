@@ -1,6 +1,15 @@
-import pytest
 from unittest.mock import patch, AsyncMock
-from app.models.frame import new_frame, update_frame, delete_frame, Frame
+
+import pytest
+
+from app.models.frame import (
+    Frame,
+    delete_frame,
+    new_frame,
+    normalize_frame_admin_auth,
+    update_frame,
+)
+
 
 @pytest.mark.asyncio
 @patch("app.models.frame.publish_message", new_callable=AsyncMock)  # mock out the websocket broadcast
@@ -12,7 +21,7 @@ async def test_new_frame(mock_publish, db, redis):
         frame_host="pi@192.168.1.1:8787",
         server_host="server_host.com",
         device="testDevice",
-        interval=123
+        interval=123,
     )
     assert frame.id is not None
     assert frame.name == "TestFrame"
@@ -21,7 +30,16 @@ async def test_new_frame(mock_publish, db, redis):
     assert frame.ssh_user == "pi"
     assert frame.device == "testDevice"
     assert frame.interval == 123
+    assert frame.server_send_logs is True
+    assert frame.https_proxy["enable"] is True
+    assert frame.https_proxy["expose_only_port"] is True
+    assert frame.https_proxy["certs"]["server"] and "BEGIN CERTIFICATE" in frame.https_proxy["certs"]["server"]
+    assert frame.https_proxy["certs"]["server_key"] and "BEGIN RSA PRIVATE KEY" in frame.https_proxy["certs"]["server_key"]
+    assert frame.https_proxy["certs"]["client_ca"] and "BEGIN CERTIFICATE" in frame.https_proxy["certs"]["client_ca"]
+    assert frame.https_proxy["server_cert_not_valid_after"] is not None
+    assert frame.https_proxy["client_ca_cert_not_valid_after"] is not None
     mock_publish.assert_awaited_once()
+
 
 @pytest.mark.asyncio
 @patch("app.models.frame.publish_message", new_callable=AsyncMock)
@@ -33,6 +51,7 @@ async def test_update_frame(mock_publish, db, redis):
     assert updated.frame_host == "updated_host"
     # 2 calls to publish_message: "new_frame" & "update_frame"
     assert mock_publish.await_count == 2
+
 
 @pytest.mark.asyncio
 @patch("app.models.frame.publish_message", new_callable=AsyncMock)
@@ -47,16 +66,14 @@ async def test_delete_frame(mock_publish, db, redis):
     # 2 calls: "new_frame", "delete_frame"
     assert mock_publish.await_count == 2
 
+
 @pytest.mark.asyncio
 @patch("app.models.frame.publish_message", new_callable=AsyncMock)
 async def test_delete_nonexistent_frame(mock_publish, db, redis):
-    # Attempt to delete an ID that doesn't exist
     success = await delete_frame(db, redis, 999999)
     assert success is False
-    # No new frame creation, so no calls before
-    # We only get one publish call if you coded publish_message for "delete_frame"
-    # but your code might skip if frame not found
     assert mock_publish.await_count == 0
+
 
 @pytest.mark.asyncio
 @patch("app.models.frame.publish_message", new_callable=AsyncMock)
@@ -65,5 +82,24 @@ async def test_frame_to_dict(mock_publish, db, redis):
     data = frame.to_dict()
     assert data["frame_host"] == "host"
     assert data["interval"] == 55
-    # 1 call to publish_message (the new frame creation)
+    assert data["server_send_logs"] is True
+    assert data["https_proxy"]["certs"]["server"]
+    assert data["https_proxy"]["certs"]["server_key"]
+    assert data["https_proxy"]["certs"]["client_ca"]
+    assert data["https_proxy"]["server_cert_not_valid_after"] is not None
+    assert data["https_proxy"]["client_ca_cert_not_valid_after"] is not None
     assert mock_publish.await_count == 1
+
+
+def test_normalize_frame_admin_auth_keeps_password_whitespace():
+    assert normalize_frame_admin_auth(
+        {
+            "enabled": True,
+            "user": " admin ",
+            "pass": " secret ",
+        }
+    ) == {
+        "enabled": True,
+        "user": "admin",
+        "pass": " secret ",
+    }

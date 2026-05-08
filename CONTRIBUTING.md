@@ -3,54 +3,26 @@
 
 ## Prerequisites
 
-You'll need to install:
-Python >= 3.12
-`Node.js` and `npm`
-`redis-server`
-`nim >=2.0.0` (https://nim-lang.org/install.html)
-(Note that Debian distros have only packaged `1.6.x` as of Jan 2024)
+Install flox: https://flox.dev/docs/install-flox/install/
+
+Clone this repository and run `flox activate`
 
 ## FrameOS Backend
-
-Start a redis server if not running
-
-```bash
-redis-server --daemonize yes
-```
-
-Installing deps
-
-```bash
-cd backend
-python3 -m venv env
-source env/bin/activate
-uv pip install -r requirements.txt
-DEBUG=1 alembic upgrade head
-
-cd ../frontend
-npm install
-
-cd ../frameos
-nimble install -d
-nimble setup
-cd ..
-```
 
 To run all services at once:
 
 ```bash
-cd frontend
-npm run dev &
-cd ../backend
-bin/dev
+pnpm dev
 ```
+
+This opens `mprocs` with panes for the backend API, ARQ worker, main frontend, and the frame-local frontend watcher. The `redis` pane is available but does not autostart.
 
 To run all of these separately:
 
 ```bash
 # start the frontend
 cd frontend
-npm run dev
+pnpm run dev
 cd ..
 
 # apply any migrations
@@ -63,8 +35,31 @@ DEBUG=1 python -m app.fastapi
 
 # start the job queue
 cd backend
-DEBUG=1 arq app.tasks.worker
+DEBUG=1 arq app.tasks.worker.WorkerSettings
+
+# start the frame-local frontend asset watcher
+cd ../frameos/frontend
+pnpm run dev
 ```
+
+Running a local dev build via docker:
+
+```bash
+SECRET_KEY=$(openssl rand -base64 32)
+docker build -t frameos .
+docker run -d -p 8989:8989 \
+    -v ./db:/app/db \
+    -v /tmp/frameos-cross:/tmp/frameos-cross \
+    -v /var/run/docker.sock:/var/run/docker.sock \
+    --privileged \
+    --name frameos \
+    --restart always \
+    -e SECRET_KEY="$SECRET_KEY" \
+    -e TMPDIR=/tmp/frameos-cross \
+    frameos
+```
+
+We need `docker.sock` and `--privileged` for docker-based cross-compilation.
 
 ## Creating migrations
 

@@ -1,18 +1,23 @@
-import json, jester, pixie, hashes, locks
+import json, pixie, locks, tables, options, asyncdispatch, mummy
+import frameos/ids
+export ids
 import lib/burrito
 
 type
-  # Parsed config.json
+  # Parsed from config.json
   FrameConfig* = ref object
     name*: string
     mode*: string
     serverHost*: string
     serverPort*: int
     serverApiKey*: string
+    serverSendLogs*: bool
     frameHost*: string
     framePort*: int
+    httpsProxy*: HttpsProxyConfig
     frameAccessKey*: string
     frameAccess*: string
+    frameAdminAuth*: JsonNode
     width*: int
     height*: int
     device*: string
@@ -33,6 +38,14 @@ type
     network*: NetworkConfig
     agent*: AgentConfig
     palette*: PaletteConfig
+
+  # Part of FrameConfig
+  HttpsProxyConfig* = ref object
+    enable*: bool
+    port*: int
+    exposeOnlyPort*: bool
+    serverCert*: string
+    serverKey*: string
 
   # Part of FrameConfig
   GPIOButton* = ref object
@@ -84,8 +97,14 @@ type
     payload*: JsonNode
 
   # Part of FrameConfig
+  HttpHeaderPair* = object
+    name*: string
+    value*: string
+
   DeviceConfig* = ref object
     vcom*: float # used for the 10.3" display
+    httpUploadUrl*: string
+    httpUploadHeaders*: seq[HttpHeaderPair]
 
   Logger* = ref object
     frameConfig*: FrameConfig
@@ -100,9 +119,6 @@ type
   MetricsLogger* = ref object
     frameConfig*: FrameConfig
     logger*: Logger
-
-  NodeId* = distinct int
-  SceneId* = distinct string
 
   FieldKind* = enum
     fkString, fkText, fkFloat, fkInteger, fkBoolean, fkColor, fkJson, fkImage, fkNode, fkScene, fkNone
@@ -176,10 +192,12 @@ type
 
   # Exported data/functions for interpreted scenes, adds some local state that's normally compiled into the scene
   ExportedInterpretedScene* = ref object of ExportedScene
+    name*: string
     backgroundColor*: Color
     refreshInterval*: float
     nodes*: seq[DiagramNode]
     edges*: seq[DiagramEdge]
+    apps*: JsonNode
     # TODO: add private state fields
 
   # Imported node from scenes.json
@@ -209,6 +227,7 @@ type
     name*: string
     nodes*: seq[DiagramNode]
     edges*: seq[DiagramEdge]
+    apps*: JsonNode
     fields*: seq[StateField]
     settings*: FrameSceneSettings
 
@@ -216,6 +235,7 @@ type
   InterpretedFrameScene* = ref object of FrameScene
     nodes*: Table[NodeId, DiagramNode]
     edges*: seq[DiagramEdge]
+    apps*: JsonNode
     nextNodeIds*: Table[NodeId, NodeId] # mapping from current node id to next node id for quick lookup
     eventListeners*: Table[string, seq[NodeId]] # mapping from event name to list of node ids that listen to that event
     appsByNodeId*: Table[NodeId, AppRoot] # mapping from node id to instantiated app for quick lookup
@@ -252,11 +272,12 @@ type
     name*: string
     label*: string
     fieldType*: string
-    value*: string
+    value*: JsonNode
     options*: seq[string]
     placeholder*: string
     required*: bool
     secret*: bool
+    persist*: string
 
   RunnerThread* = ref object
     frameConfig*: FrameConfig
@@ -267,17 +288,24 @@ type
     sleepFuture*: Option[Future[void]]
     isRendering*: bool = false
     triggerRenderNext*: bool = false
+    forceSceneReload*: bool = false
     controlCodeRender*: AppRoot
     controlCodeData*: AppRoot
 
   RunnerControl* = ref object
     start*: proc(firstSceneId: Option[SceneId])
 
+  ConnectionsState* = ref object
+    lock*: Lock
+    items*: seq[WebSocket]
+
   Server* = ref object
     frameConfig*: FrameConfig
-    jester*: Jester
+    mummy*: mummy.Server
+    httpWorkerThreads*: int
     runner*: RunnerControl
     url*: string
+    connectionsState*: ConnectionsState
 
   FrameOSDriver* = ref object of RootObj
     name*: string
@@ -305,13 +333,3 @@ type
     server*: Server
     runner*: RunnerControl
     network*: Network
-
-proc `==`*(x, y: NodeId): bool = x.int == y.int
-proc `==`*(x: int, y: NodeId): bool = x == y.int
-proc `==`*(x: NodeId, y: int): bool = x.int == y
-proc `$`*(x: NodeId): string = $(x.int)
-proc `%`*(x: NodeId): JsonNode = %(x.int)
-proc hash*(x: SceneId): Hash = x.string.hash
-proc `==`*(x, y: SceneId): bool = x.string == y.string
-proc `$`*(x: SceneId): string = x.string
-proc `%`*(x: SceneId): JsonNode = %*(x.string)

@@ -1,14 +1,21 @@
 import { useActions, useValues } from 'kea'
+import equal from 'fast-deep-equal'
 import { Button } from '../../../../components/Button'
 import { framesModel } from '../../../../models/framesModel'
 import { Form, Group } from 'kea-forms'
 import { TextInput } from '../../../../components/TextInput'
 import { Select } from '../../../../components/Select'
-import { frameControlUrl, frameImageUrl, frameUrl } from '../../../../decorators/frame'
+import { frameAdminUrl, frameControlUrl, frameImageUrl, frameRootUrl, frameUrl } from '../../../../decorators/frame'
 import { frameLogic } from '../../frameLogic'
 import { downloadJson } from '../../../../utils/downloadJson'
 import { Field } from '../../../../components/Field'
-import { devices, spectraPalettes, withCustomPalette, platforms, modes, devicesNixOS } from '../../../../devices'
+import {
+  devices,
+  spectraPalettes,
+  withCustomPalette,
+  buildrootPlatforms,
+  modes,
+} from '../../../../devices'
 import { secureToken } from '../../../../utils/secureToken'
 import { appsLogic } from '../Apps/appsLogic'
 import { frameSettingsLogic } from './frameSettingsLogic'
@@ -16,15 +23,21 @@ import { Spinner } from '../../../../components/Spinner'
 import { H6 } from '../../../../components/H6'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
 import { ArrowDownTrayIcon, ArrowPathIcon, ArrowUpTrayIcon } from '@heroicons/react/24/outline'
-import { PlusIcon, TrashIcon } from '@heroicons/react/24/solid'
+import { ExclamationTriangleIcon, PlusIcon, TrashIcon } from '@heroicons/react/24/solid'
 import { panelsLogic } from '../panelsLogic'
 import { Switch } from '../../../../components/Switch'
 import { NumberTextInput } from '../../../../components/NumberTextInput'
-import { Palette } from '../../../../types'
+import { FrameType, Palette } from '../../../../types'
 import { A } from 'kea-router'
-import { timezoneOptions } from '../../../../decorators/timezones'
 import { TextArea } from '../../../../components/TextArea'
 import { ColorInput } from '../../../../components/ColorInput'
+import { settingsLogic } from '../../../settings/settingsLogic'
+import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
+import { normalizeSshKeys } from '../../../../utils/sshKeys'
+import { Label } from '../../../../components/Label'
+import { logsLogic } from '../Logs/logsLogic'
+import { Tag } from '../../../../components/Tag'
+import { getCertificateValidityInfo, getFrameCertificateStatus } from '../../../../utils/certificates'
 
 export interface FrameSettingsProps {
   className?: string
@@ -32,22 +45,127 @@ export interface FrameSettingsProps {
   hideDeploymentMode?: boolean
 }
 
-const customModule = `{ lib, ... }:\n{\n  # boot.kernelParams = [ \"quiet\" ];\n}\n`
+function getCertificateHint(certificateName: string, value?: string): JSX.Element | undefined {
+  const validityInfo = getCertificateValidityInfo(value)
+
+  if (!validityInfo) {
+    return undefined
+  }
+
+  const colorClass =
+    validityInfo.severity === 'expired'
+      ? 'text-red-300'
+      : validityInfo.severity === 'expiring'
+      ? 'text-yellow-300'
+      : 'text-gray-300'
+
+  return (
+    <div className={colorClass} title={validityInfo.exactDateTime}>
+      {(validityInfo.severity === 'expired' || validityInfo.severity === 'expiring') && (
+        <ExclamationTriangleIcon
+          className={
+            validityInfo.severity === 'expired'
+              ? 'inline-block mr-1 h-4 w-4 text-red-300'
+              : 'inline-block mr-1 h-4 w-4 text-yellow-300'
+          }
+        />
+      )}
+      {certificateName} {validityInfo.humanText}
+      {validityInfo.severity === 'expired' || validityInfo.severity === 'expiring'
+        ? ' - Please regenerate and redeploy.'
+        : ''}
+    </div>
+  )
+}
+
+function CertificateTriangle({
+  frame,
+  frameForm,
+}: {
+  frame: FrameType | null
+  frameForm: Partial<FrameType> | null
+}): JSX.Element | null {
+  const certificateStatus = getFrameCertificateStatus({
+    https_proxy: {
+      client_ca_cert_not_valid_after:
+        frameForm?.https_proxy?.client_ca_cert_not_valid_after ?? frame?.https_proxy?.client_ca_cert_not_valid_after,
+      server_cert_not_valid_after:
+        frameForm?.https_proxy?.server_cert_not_valid_after ?? frame?.https_proxy?.server_cert_not_valid_after,
+    },
+  })
+  if (certificateStatus !== 'expired' && certificateStatus !== 'expiring') {
+    return null
+  }
+  return (
+    <span
+      title={
+        certificateStatus === 'expired'
+          ? 'HTTPS certificates have expired. Please regenerate and redeploy.'
+          : 'HTTPS certificates are expiring soon. Please regenerate and redeploy.'
+      }
+    >
+      <ExclamationTriangleIcon
+        className={certificateStatus === 'expired' ? 'h-4 w-4 text-red-300' : 'h-4 w-4 text-yellow-300'}
+      />
+    </span>
+  )
+}
+function scrollToFrameHttpApiSection(e: React.MouseEvent): void {
+  if (typeof document === 'undefined') {
+    return
+  }
+  const frameSettingsDiv =
+    e.target instanceof HTMLElement
+      ? e.target.closest('#panel-settings-div')
+      : document.getElementById('panel-settings-div')
+  const scrollingOuterDiv = frameSettingsDiv?.parentElement
+  const httpApiSection = frameSettingsDiv?.querySelector('#frame-http-proxy-section')
+  if (scrollingOuterDiv && httpApiSection) {
+    const offset = httpApiSection.getBoundingClientRect().top - scrollingOuterDiv.getBoundingClientRect().top
+    scrollingOuterDiv.scrollTo({ top: offset, behavior: 'smooth' }) // works in frame settings panel
+    scrollingOuterDiv?.parentElement?.scrollTo({ top: offset, behavior: 'smooth' }) // works in sd card modal
+  }
+}
+
 export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: FrameSettingsProps) {
   const { mode, frameId, frame, frameForm, frameFormTouches } = useValues(frameLogic)
-  const { touchFrameFormField, setFrameFormValues } = useActions(frameLogic)
+  const {
+    touchFrameFormField,
+    setFrameFormValues,
+    updateDeployedSshKeys,
+    generateFrameAdminCredentials,
+    generateTlsCertificates,
+    verifyTlsCertificates,
+  } = useActions(frameLogic)
   const { deleteFrame } = useActions(framesModel)
-  const { appsWithSaveAssets } = useValues(appsLogic)
-  const { nixCollectGarbageFrame, nixCollectGarbageBackend, clearBuildCache, downloadBuildZip } = useActions(
-    frameSettingsLogic({ frameId })
-  )
-  const { buildCacheLoading } = useValues(frameSettingsLogic({ frameId }))
+  const { appsWithSaveAssets } = useValues(appsLogic({ frameId }))
+  const {
+    clearBuildCache,
+    downloadBuildZip,
+    downloadCSourceZip,
+    downloadBinaryZip,
+  } = useActions(frameSettingsLogic({ frameId }))
+  const {
+    buildCacheLoading,
+    buildZipLoading,
+    cSourceZipLoading,
+    binaryZipLoading,
+  } = useValues(frameSettingsLogic({ frameId }))
   const { openLogs } = useActions(panelsLogic({ frameId }))
-  const url = frameUrl(frame)
-  const controlUrl = frameControlUrl(frame)
-  const imageUrl = frameImageUrl(frame)
+  const { logs, ipAddresses } = useValues(logsLogic({ frameId }))
+  const { savedSettings } = useValues(settingsLogic)
+  const tlsEnabled = !!(frameForm.https_proxy?.enable ?? frame.https_proxy?.enable)
+  const inFrameAdminMode = isInFrameAdminMode()
 
   const palette = withCustomPalette[frame.device || '']
+  const sshKeyOptions = normalizeSshKeys(savedSettings?.ssh_keys).keys
+  const normalizeKeyIds = (keys: string[]) => Array.from(new Set(keys)).sort()
+  const deployedSshKeyIds = normalizeKeyIds(
+    (frame.last_successful_deploy?.ssh_keys as string[]) ?? frame.ssh_keys ?? []
+  )
+  const selectedSshKeyIds = normalizeKeyIds(frameForm.ssh_keys ?? frame.ssh_keys ?? [])
+  const hasSshKeyChangesToDeploy = !equal(deployedSshKeyIds, selectedSshKeyIds)
+  const showFrameInfo = !!frame.frame_host || (!inFrameAdminMode && logs.length > 0)
 
   if (!frame) {
     return (
@@ -58,57 +176,43 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
     )
   }
 
+  const linkFrame: FrameType = {
+    ...frame,
+    frame_access: frameForm.frame_access ?? frame.frame_access,
+    frame_access_key: frameForm.frame_access_key ?? frame.frame_access_key,
+    frame_admin_auth: {
+      ...(frame.frame_admin_auth ?? {}),
+      ...(frameForm.frame_admin_auth ?? {}),
+    },
+  }
+  const url = frameUrl(linkFrame)
+  const controlUrl = frameControlUrl(linkFrame)
+  const adminUrl = frameAdminUrl(linkFrame)
+  const imageUrl = frameImageUrl(linkFrame)
+
   return (
-    <div className={className}>
+    <div className={className} id="panel-settings-div">
       {!hideDropdown ? (
         <div className="float-right">
           <DropdownMenu
             className="w-fit"
             buttonColor="secondary"
             items={[
-              ...(mode === 'rpios'
+              ...(mode === 'rpios' && !inFrameAdminMode
                 ? [
                     {
-                      label: 'Clear build cache',
+                      label: 'Clear build cache on frame',
                       onClick: () => {
                         clearBuildCache()
                         openLogs()
                       },
-                      icon: buildCacheLoading ? (
-                        <Spinner color="white" className="w-4 h-4" />
-                      ) : (
-                        <ArrowPathIcon className="w-5 h-5" />
-                      ),
+                      icon: <ArrowPathIcon className="w-5 h-5" />,
+                      loading: buildCacheLoading,
                     },
                   ]
-                : [
-                    {
-                      label: 'Collect NixOS garbage (on frame)',
-                      onClick: () => {
-                        nixCollectGarbageFrame()
-                        openLogs()
-                      },
-                      icon: buildCacheLoading ? (
-                        <Spinner color="white" className="w-4 h-4" />
-                      ) : (
-                        <ArrowPathIcon className="w-5 h-5" />
-                      ),
-                    },
-                    {
-                      label: 'Collect NixOS garbage (on backend)',
-                      onClick: () => {
-                        nixCollectGarbageBackend()
-                        openLogs()
-                      },
-                      icon: buildCacheLoading ? (
-                        <Spinner color="white" className="w-4 h-4" />
-                      ) : (
-                        <ArrowPathIcon className="w-5 h-5" />
-                      ),
-                    },
-                  ]),
+                : []),
               {
-                label: 'Import .json',
+                label: 'Import frame .json',
                 onClick: () => {
                   function handleFileSelect(event: Event): void {
                     const inputElement = event.target as HTMLInputElement
@@ -147,30 +251,57 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                   fileInput.click()
                 },
                 icon: <ArrowDownTrayIcon className="w-5 h-5" />,
+                loading: false,
               },
               {
-                label: 'Export .json',
+                label: 'Export frame .json',
                 onClick: () => {
                   downloadJson(frame, `${frame.name || `frame${frame.id}`}.json`)
                 },
                 icon: <ArrowUpTrayIcon className="w-5 h-5" />,
+                loading: false,
               },
-              {
-                label: 'Download build .zip',
-                onClick: () => {
-                  downloadBuildZip()
-                },
-                icon: <ArrowUpTrayIcon className="w-5 h-5" />,
-              },
-              {
-                label: 'Delete frame',
-                onClick: () => {
-                  if (confirm('Are you sure you want to DELETE this frame?')) {
-                    deleteFrame(frame.id)
-                  }
-                },
-                icon: <TrashIcon className="w-5 h-5" />,
-              },
+              ...(!inFrameAdminMode
+                ? [
+                    {
+                      label: 'Download Nim build .zip',
+                      onClick: () => {
+                        downloadBuildZip()
+                        openLogs()
+                      },
+                      icon: <ArrowUpTrayIcon className="w-5 h-5" />,
+                      loading: buildZipLoading,
+                    },
+                    {
+                      label: 'Generate C sources .zip',
+                      onClick: () => {
+                        downloadCSourceZip()
+                        openLogs()
+                      },
+                      icon: <ArrowUpTrayIcon className="w-5 h-5" />,
+                      loading: cSourceZipLoading,
+                    },
+                    {
+                      label: 'Download built binary .zip',
+                      onClick: () => {
+                        downloadBinaryZip()
+                        openLogs()
+                      },
+                      icon: <ArrowUpTrayIcon className="w-5 h-5" />,
+                      loading: binaryZipLoading,
+                    },
+                    {
+                      label: 'Delete frame',
+                      onClick: () => {
+                        if (confirm('Are you sure you want to DELETE this frame?')) {
+                          deleteFrame(frame.id)
+                        }
+                      },
+                      icon: <TrashIcon className="w-5 h-5" />,
+                      loading: false,
+                    },
+                  ]
+                : []),
             ]}
           />
         </div>
@@ -182,26 +313,85 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
         className="space-y-4 @container"
         enableFormOnSubmit
       >
-        <H6 className="mt-2">Basic Settings</H6>
+        {showFrameInfo ? (
+          <>
+            <H6 className="mt-2">Frame info</H6>
+            <div className="pl-2 @md:pl-8 space-y-2">
+              {frame.frame_host ? (
+                <Field
+                  name="_noop"
+                  label="Load directly"
+                  tooltip={`Open URLs for this frame directly in the browser. Loads ${frameRootUrl(frame)}`}
+                >
+                  <div className="w-full flex flex-wrap gap-2 items-center">
+                    <A href={url} target="_blank" rel="noreferrer noopener" className="text-blue-400 hover:underline">
+                      Frame URL
+                    </A>
+                    <A
+                      href={controlUrl}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                      className="text-blue-400 hover:underline"
+                    >
+                      Control URL
+                    </A>
+                    {adminUrl ? (
+                      <A
+                        href={adminUrl}
+                        target="_blank"
+                        rel="noreferrer noopener"
+                        className="text-blue-400 hover:underline"
+                      >
+                        Admin URL
+                      </A>
+                    ) : null}
+                    <A
+                      href={imageUrl}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                      className="text-blue-400 hover:underline"
+                    >
+                      Image URL
+                    </A>
+                    <button
+                      type="button"
+                      onClick={scrollToFrameHttpApiSection}
+                      className="cursor-pointer"
+                      aria-label="Jump to HTTP API on frame settings"
+                    >
+                      <Tag color={tlsEnabled ? 'teal' : 'gray'} className="flex gap-1">
+                        {tlsEnabled ? 'HTTPS enabled' : 'HTTPS disabled'}
+                        <CertificateTriangle frame={frame} frameForm={frameForm} />
+                      </Tag>
+                    </button>
+                  </div>
+                </Field>
+              ) : null}
+              {!inFrameAdminMode && logs.length > 0 ? (
+                <Field name="_noop" label="Last seen IPs">
+                  <div className="text-sm text-gray-200 break-words w-full">
+                    {ipAddresses.length > 0 ? ipAddresses.join(', ') : 'No logs have been sent for the frame yet.'}
+                  </div>
+                </Field>
+              ) : null}
+            </div>
+          </>
+        ) : null}
+        <H6 className="mt-2">Device settings</H6>
         <div className="pl-2 @md:pl-8 space-y-2">
           <Field name="name" label="Name">
             <TextInput name="name" placeholder="Hallway frame" required />
           </Field>
           {!hideDeploymentMode ? (
             <Field name="mode" label="Deployment mode">
-              <Select name="mode" options={modes} />
+              <Select name="mode" options={modes} disabled={inFrameAdminMode} />
             </Field>
           ) : null}
           <Field
             name="device"
-            label="Device"
-            tooltip={
-              frameForm.mode === 'nixos'
-                ? "We're adding support for all the devices into the NixOS version. Check back later for more."
-                : undefined
-            }
+            label="Display driver"
           >
-            <Select name="device" options={mode === 'nixos' ? devicesNixOS : devices} />
+            <Select name="device" options={devices} />
           </Field>
           {frameForm.device === 'waveshare.EPD_10in3' ? (
             <Group name="device_config">
@@ -210,15 +400,85 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
               </Field>
             </Group>
           ) : null}
-          {frameForm.mode === 'nixos' ? (
-            <Field
-              name="nix.platform"
-              label="Platform"
-              tooltip='More coming soon... Try the generic "rpios" mode until then.'
-            >
-              <Select name="nix.platform" options={platforms} />
-            </Field>
+          {frameForm.device === 'http.upload' ? (
+            <div className="">
+              <Group name="device_config">
+                <Field
+                  name="uploadUrl"
+                  label="Upload URL"
+                  tooltip="Upload the rendered image here as PNG in the POST body. Only upload when the image changes."
+                >
+                  {({ value, onChange }) => (
+                    <TextInput
+                      value={(value as string) ?? ''}
+                      onChange={onChange}
+                      placeholder="https://example.com/upload"
+                      required
+                    />
+                  )}
+                </Field>
+                <Field
+                  name="uploadHeaders"
+                  label="HTTP headers"
+                  tooltip="Optional headers (for example Authorization) to send with every upload."
+                >
+                  {({ value, onChange }) => {
+                    const headers = Array.isArray(value) ? [...value] : []
+                    const updateHeader = (index: number, key: 'name' | 'value', newValue: string) => {
+                      const next = headers.map((header: { name?: string; value?: string }, idx: number) =>
+                        idx === index
+                          ? { name: header?.name ?? '', value: header?.value ?? '', [key]: newValue }
+                          : header
+                      )
+                      onChange(next)
+                    }
+                    const addHeader = () => onChange([...headers, { name: '', value: '' }])
+                    const removeHeader = (index: number) => {
+                      onChange(headers.filter((_: unknown, idx: number) => idx !== index))
+                    }
+                    return (
+                      <div className="space-y-2">
+                        {headers.map((header: { name?: string; value?: string }, index: number) => (
+                          <div key={index} className="flex flex-col gap-2 @md:flex-row @md:items-center">
+                            <TextInput
+                              value={header?.name ?? ''}
+                              onChange={(val) => updateHeader(index, 'name', val)}
+                              placeholder="Header name"
+                            />
+                            <TextInput
+                              value={header?.value ?? ''}
+                              onChange={(val) => updateHeader(index, 'value', val)}
+                              placeholder="Header value"
+                            />
+                            <Button color="gray" size="small" onClick={() => removeHeader(index)}>
+                              Remove
+                            </Button>
+                          </div>
+                        ))}
+                        <Button color="secondary" size="small" onClick={addHeader}>
+                          Add header
+                        </Button>
+                      </div>
+                    )
+                  }}
+                </Field>
+              </Group>
+            </div>
           ) : null}
+          {frameForm.mode === 'buildroot' ? (
+            <Group name="buildroot">
+              <Field name="platform" label="Platform">
+                <Select name="buildroot.platform" options={buildrootPlatforms} />
+              </Field>
+            </Group>
+          ) : null}
+          {/* {frameForm.mode === 'rpios' || !frameForm.mode ? (
+            <Group name="rpios">
+              <Field name="platform" label="Platform">
+                <Select name="rpios.platform" options={rpiOSPlatforms} />
+              </Field>
+            </Group>
+          ) : null} */}
           <Field name="rotate" label="Rotation">
             {({ value, onChange }) => (
               <Select
@@ -249,6 +509,62 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
               />
             )}
           </Field>
+          {(!inFrameAdminMode && frameForm.mode === 'rpios') || (!inFrameAdminMode && !frameForm.mode) ? (
+            <Group name="rpios">
+              <Field
+                name="crossCompilation"
+                label="Cross compilation"
+                tooltip={
+                  <div className="space-y-2">
+                    <p>
+                      Choose how to build the FrameOS binary: auto will try to cross-compile and fall back to on-device
+                      builds, always will fail if cross compilation is unavailable, and never will always build on the
+                      device.
+                    </p>
+                    <p>
+                      If you're running FrameOS via Docker, you may need to configure a build host for cross-compilation
+                      on the global settings page.
+                    </p>
+                  </div>
+                }
+              >
+                <Select
+                  name="rpios.crossCompilation"
+                  options={[
+                    { value: 'auto', label: 'Auto (try to cross-compile, fallback if needed)' },
+                    { value: 'always', label: 'Always cross-compile (fail if unavailable)' },
+                    { value: 'never', label: 'Never cross-compile (build on device)' },
+                  ]}
+                />
+              </Field>
+              <Field
+                name="driverBuildMode"
+                label="Driver build mode"
+                tooltip={
+                  <div className="space-y-2">
+                    <p>
+                      Choose whether display/input drivers are built as separate shared libraries deployed next to
+                      FrameOS, or linked into the FrameOS executable.
+                    </p>
+                    <p>
+                      Precompiled only downloads a published FrameOS release when all scenes are interpreted; otherwise
+                      it falls back to shared driver libraries.
+                    </p>
+                  </div>
+                }
+              >
+                <Select
+                  name="rpios.driverBuildMode"
+                  options={[
+                    { value: '', label: 'Default (single executable)' },
+                    { value: 'shared', label: 'Shared driver libraries' },
+                    { value: 'precompiled', label: 'Precompiled only / experimental' },
+                    { value: 'static', label: 'Single executable' },
+                  ]}
+                />
+              </Field>
+            </Group>
+          ) : null}
           <Field name="debug" label="Debug mode (noisy)">
             <Select
               name="debug"
@@ -260,83 +576,24 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
           </Field>
         </div>
 
-        {frameForm.mode == 'nixos' ? (
+        {!inFrameAdminMode ? (
           <>
-            <H6 className="mt-2">System settings</H6>
+            <H6 className="mt-2">
+              SSH <span className="text-gray-500">(backend &#8594; frame)</span>
+            </H6>
             <div className="pl-2 @md:pl-8 space-y-2">
               <Field
-                name="nix.hostname"
-                label="Hostname"
-                tooltip="You can use the hostname specificied here followed by .local to access the frame over mDNS."
-              >
-                <TextInput name="nix.hostname" placeholder={`frame${frame.id}`} />
-              </Field>
-              <Field name="ssh_user" label="Username" tooltip='The username is always "frame" in the NixOS mode.'>
-                <TextInput name="ssh_user" value="frame" disabled required />
-              </Field>
-              <Field
-                name="ssh_pass"
-                label="Password"
+                name="frame_host"
+                label="Frame host"
                 tooltip={
-                  <div>
-                    <p>
-                      Whatever you specify here is used for both SSH and terminal access. You can leave it blank to
-                      disable password access.
-                    </p>
-                    <p>
-                      You can also access the frame with the SSH key configured under{' '}
-                      <A href="/settings" className="text-blue-400 hover:underline">
-                        global settings.
-                      </A>
-                    </p>
+                  <div className="space-y-2">
+                    <p>The hostname or IP address that the backend uses to connect to the frame for SSH and HTTP.</p>
+                    <p>You can leave it blank if you only use the FrameOS agent to communicate.</p>
                   </div>
                 }
               >
-                <TextInput
-                  name="ssh_pass"
-                  onClick={() => touchFrameFormField('ssh_pass')}
-                  type={frameFormTouches.ssh_pass ? 'text' : 'password'}
-                  placeholder="no password, using SSH key"
-                />
+                <TextInput name="frame_host" placeholder={`frame${frame.id}.local`} required />
               </Field>
-              <Field name="nix.timezone" label="Timezone">
-                <Select name="nix.timezone" options={timezoneOptions} />
-              </Field>
-              <Field name="nix.customModule" label="Custom NixOS module">
-                <TextArea
-                  rows={4}
-                  placeholder={customModule}
-                  onClick={() => {
-                    if (!frameFormTouches['nix.customModule'] && !frameForm.nix?.customModule) {
-                      setFrameFormValues({
-                        nix: { ...(frameForm.nix ?? {}), customModule },
-                      })
-                    }
-                  }}
-                />
-              </Field>
-            </div>
-          </>
-        ) : null}
-
-        <H6 className="mt-2">
-          SSH <span className="text-gray-500">(backend &#8594; frame)</span>
-        </H6>
-        <div className="pl-2 @md:pl-8 space-y-2">
-          <Field
-            name="frame_host"
-            label="Frame host"
-            tooltip={
-              <div className="space-y-2">
-                <p>The hostname or IP address that the backend uses to connect to the frame for SSH and HTTP.</p>
-                <p>You can leave it blank if you only use the FrameOS agent to communicate.</p>
-              </div>
-            }
-          >
-            <TextInput name="frame_host" placeholder={`frame${frame.id}.local`} required />
-          </Field>
-          {frameForm.mode !== 'nixos' ? (
-            <>
               <Field name="ssh_user" label="SSH user">
                 <TextInput name="ssh_user" placeholder="pi" required />
               </Field>
@@ -359,99 +616,149 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                   placeholder="no password, using SSH key"
                 />
               </Field>
-            </>
-          ) : null}
-          <Field name="ssh_port" label="SSH port">
-            <TextInput name="ssh_port" placeholder="22" required />
-          </Field>
-        </div>
-
-        <H6>
-          Agent (beta) <span className="text-gray-500">(frame &#8594; backend &#8594; frame)</span>
-        </H6>
-        <div className="pl-2 @md:pl-8 space-y-2">
-          <Group name="agent">
-            <Field
-              name="agentEnabled"
-              label="Agent enabled"
-              tooltip={
-                <div className="space-y-2">
-                  <p>
-                    The FrameOS Agent opens a websocket connection from the frame to the backend, which is then used by
-                    the backend to control the frame. This allows you to control the frame even if it's behind a
-                    firewall. The backend must be publicly accessible for this to work.
-                  </p>
-                  <p>
-                    This is still beta. Enable both toggles, then save. Download the SD card image, and deploy it to the
-                    frame. The agent will then connect to the backend to await further commands.
-                  </p>
-                  {frameForm.mode !== 'nixos' && (
-                    <p>
-                      Note: after enabling the agent, you must manually deploy it from the "..." -&gt; "Deploy Agent"
-                      menu in the top.
-                    </p>
+              <Field name="ssh_port" label="SSH port">
+                <TextInput name="ssh_port" placeholder="22" required />
+              </Field>
+              <div className="@md:flex @md:gap-2">
+                <Label className="@md:w-1/3">SSH Keys</Label>
+                <div className="w-full space-y-2">
+                  {sshKeyOptions.length === 0 ? (
+                    <div className="text-sm text-gray-500">No SSH keys configured in settings.</div>
+                  ) : (
+                    <div className="space-y-2">
+                      {sshKeyOptions.map((key) => {
+                        const selectedKeys = new Set(frameForm.ssh_keys ?? frame.ssh_keys ?? [])
+                        return (
+                          <div key={key.id} className="flex flex-row gap-2">
+                            <Switch
+                              value={selectedKeys.has(key.id)}
+                              onChange={(value) => {
+                                const next = new Set(selectedKeys)
+                                if (value) {
+                                  next.add(key.id)
+                                } else {
+                                  next.delete(key.id)
+                                }
+                                setFrameFormValues({ ssh_keys: Array.from(next) })
+                              }}
+                            />
+                            <div className="text-sm">{key.name || key.id}</div>
+                            {key.use_for_new_frames ? (
+                              <div className="text-xs text-gray-500">Default for new frames</div>
+                            ) : null}
+                          </div>
+                        )
+                      })}
+                    </div>
                   )}
+                  {mode === 'rpios' ? (
+                    <div className="flex gap-2">
+                      <Button
+                        size="small"
+                        color={hasSshKeyChangesToDeploy ? 'primary' : 'secondary'}
+                        onClick={() => {
+                          updateDeployedSshKeys()
+                          openLogs()
+                        }}
+                        disabled={(frameForm.ssh_keys ?? frame.ssh_keys ?? []).length === 0}
+                      >
+                        Save changes & update deployed keys
+                      </Button>
+                    </div>
+                  ) : null}
+                  <p className="text-xs text-gray-500">
+                    At least one previously installed key must remain when updating deployed keys.
+                  </p>
                 </div>
-              }
-            >
-              <Switch name="agentEnabled" fullWidth />
-            </Field>
-            {frameForm.agent?.agentEnabled && (
-              <>
+              </div>
+            </div>
+
+            <H6>
+              Agent (beta) <span className="text-gray-500">(frame &#8594; backend &#8594; frame)</span>
+            </H6>
+            <div className="pl-2 @md:pl-8 space-y-2">
+              <Group name="agent">
                 <Field
-                  name="agentRunCommands"
-                  label="Allow remote control"
+                  name="agentEnabled"
+                  label="Agent enabled"
                   tooltip={
                     <div className="space-y-2">
-                      <p>Can the FrameOS agent actually run commands and execute updates?</p>
                       <p>
-                        This is a second "are you really sure?" toggle, as this comes with risk when enabled on an
-                        unsecure connection.
+                        The FrameOS Agent opens a websocket connection from the frame to the backend, which is then used
+                        by the backend to control the frame. This allows you to control the frame even if it's behind a
+                        firewall. The backend must be publicly accessible for this to work.
                       </p>
                       <p>
-                        Make sure you're either aware of the risks, or that the backend is only accessible over HTTPS
-                        before enabling this.
+                        This is still beta. Enable both toggles, then save and deploy the frame. The agent will then
+                        connect to the backend to await further commands.
+                      </p>
+                      <p>
+                        Note: after enabling the agent, you must manually deploy it from the "..." -&gt; "Deploy
+                        Agent" menu in the top.
                       </p>
                     </div>
                   }
                 >
-                  {({ value, onChange }) => (
-                    <div className="w-full">
-                      <Switch name="agentRunCommands" value={value} onChange={onChange} />
-                    </div>
-                  )}
+                  <Switch name="agentEnabled" fullWidth />
                 </Field>
-                <Field
-                  name="agentSharedSecret"
-                  label={<div>Agent shared secret</div>}
-                  labelRight={
-                    <Button
-                      color="secondary"
-                      size="small"
-                      onClick={() => {
-                        setFrameFormValues({
-                          agent: { ...(frameForm.agent ?? {}), agentSharedSecret: secureToken(20) },
-                        })
-                        touchFrameFormField('agent.agentSharedSecret')
-                      }}
+                {frameForm.agent?.agentEnabled && (
+                  <>
+                    <Field
+                      name="agentRunCommands"
+                      label="Allow remote control"
+                      tooltip={
+                        <div className="space-y-2">
+                          <p>Can the FrameOS agent actually run commands and execute updates?</p>
+                          <p>
+                            This is a second "are you really sure?" toggle, as this comes with risk when enabled on an
+                            unsecure connection.
+                          </p>
+                          <p>
+                            Make sure you're either aware of the risks, or that the backend is only accessible over
+                            HTTPS before enabling this.
+                          </p>
+                        </div>
+                      }
                     >
-                      Regenerate
-                    </Button>
-                  }
-                  tooltip="This key is used as part of the handshake when communicating with the frame over websockets."
-                >
-                  <TextInput
-                    name="agentSharedSecret"
-                    onClick={() => touchFrameFormField('agent.agentSharedSecret')}
-                    type={frameFormTouches['agent.agentSharedSecret'] ? 'text' : 'password'}
-                    placeholder=""
-                    required
-                  />
-                </Field>
-              </>
-            )}
-          </Group>
-        </div>
+                      {({ value, onChange }) => (
+                        <div className="w-full">
+                          <Switch name="agentRunCommands" value={value} onChange={onChange} />
+                        </div>
+                      )}
+                    </Field>
+                    <Field
+                      name="agentSharedSecret"
+                      label={<div>Agent shared secret</div>}
+                      labelRight={
+                        <Button
+                          color="secondary"
+                          size="small"
+                          onClick={() => {
+                            setFrameFormValues({
+                              agent: { ...(frameForm.agent ?? {}), agentSharedSecret: secureToken(20) },
+                            })
+                            touchFrameFormField('agent.agentSharedSecret')
+                          }}
+                        >
+                          Regenerate
+                        </Button>
+                      }
+                      tooltip="This key is used as part of the handshake when communicating with the frame over websockets."
+                    >
+                      <TextInput
+                        name="agentSharedSecret"
+                        onClick={() => touchFrameFormField('agent.agentSharedSecret')}
+                        type={frameFormTouches['agent.agentSharedSecret'] ? 'text' : 'password'}
+                        placeholder=""
+                        required
+                      />
+                    </Field>
+                  </>
+                )}
+              </Group>
+            </div>
+          </>
+        ) : null}
 
         <H6 className="mt-2">
           Backend access <span className="text-gray-500">(frame &#8594; backend)</span>
@@ -501,18 +808,31 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
               required
             />
           </Field>
+          <Field
+            name="server_send_logs"
+            label="Send logs to backend"
+            tooltip="When disabled, the frame will not upload logs to the backend API."
+          >
+            {({ value, onChange }) => (
+              <Switch name="server_send_logs" value={value ?? true} onChange={onChange} fullWidth />
+            )}
+          </Field>
         </div>
 
-        <H6>
+        <H6 id="frame-http-api-section">
           HTTP API on frame <span className="text-gray-500">(backend &#8594; frame)</span>
         </H6>
         <div className="pl-2 @md:pl-8 space-y-2">
           <Field
             name="frame_port"
-            label="FrameOS port"
+            label="HTTP port on frame"
             tooltip={
               <div className="space-y-2">
                 <p>The port on which the frame accepts HTTP API requests and serves a simple control interface.</p>
+                <p>
+                  Traffic on this port is UNSECURED! Please also enable the HTTPS proxy service for secure
+                  communication.
+                </p>
               </div>
             }
           >
@@ -524,14 +844,14 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
             tooltip={
               <div className="space-y-2">
                 <p>
-                  <strong>Private (default):</strong> You need a key to both view and control the frame.
+                  <strong>Private (default):</strong> You need a key to both view and administer the frame.
                 </p>
                 <p>
-                  <strong>Protected:</strong> Everyone can view the frame's image, but you need the access key to update
-                  content.
+                  <strong>Protected:</strong> Everyone can view the frame's image, but you need the access key to
+                  administer content.
                 </p>
                 <p>
-                  <strong>Public:</strong> Everyone can view or control the frame without a key.
+                  <strong>Public:</strong> Everyone can view or administer the frame without a key.
                 </p>
               </div>
             }
@@ -539,9 +859,9 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
             <Select
               name="frame_access"
               options={[
-                { value: 'private', label: 'Private (key needed to view and edit)' },
-                { value: 'protected', label: 'Protected (no key needed to view, key needed to edit)' },
-                { value: 'public', label: 'Public (no key needed to view or edit)' },
+                { value: 'private', label: 'Private (key needed to view and administer)' },
+                { value: 'protected', label: 'Protected (no key needed to view, key needed to administer)' },
+                { value: 'public', label: 'Public (no key needed to view or administer)' },
               ]}
             />
           </Field>
@@ -570,49 +890,148 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
               required
             />
           </Field>
-          {frame.frame_host ? (
-            <Field name="_noop" label="Load">
-              <div className="w-full">
-                <A href={url} target="_blank" rel="noreferrer noopener" className="text-blue-400 hover:underline">
-                  Frame URL
-                </A>
-                {', '}
+        </div>
+
+        <H6>Frame admin panel (BETA)</H6>
+        <p className="pl-2 @md:pl-8 text-sm text-gray-500">
+          Hosted on the frame at <code>/admin</code>, similar to the interface you&apos;re using now. This is still in
+          beta: you can't save any changes.{' '}
+        </p>
+        <div className="pl-2 @md:pl-8 space-y-2">
+          <Field
+            name="frame_admin_auth.enabled"
+            label="Admin panel enabled"
+            labelRight={
+              adminUrl ? (
                 <A
-                  href={controlUrl}
+                  href={adminUrl}
                   target="_blank"
                   rel="noreferrer noopener"
-                  className="text-blue-400 hover:underline"
+                  className="text-blue-400 hover:underline text-sm"
                 >
-                  Control URL
+                  Open
                 </A>
-                {', '}
-                <A href={imageUrl} target="_blank" rel="noreferrer noopener" className="text-blue-400 hover:underline">
-                  Image URL
-                </A>
-              </div>
-            </Field>
+              ) : (
+                <></>
+              )
+            }
+          >
+            <Switch />
+          </Field>
+          {frameForm.frame_admin_auth?.enabled ? (
+            <>
+              <Field name="frame_admin_auth.user" label="Username">
+                <TextInput />
+              </Field>
+              <Field
+                name="frame_admin_auth.pass"
+                label="Password"
+                labelRight={
+                  <Button color="secondary" size="small" onClick={() => generateFrameAdminCredentials()}>
+                    Generate
+                  </Button>
+                }
+              >
+                <TextInput
+                  onClick={() => touchFrameFormField('frame_admin_auth.pass')}
+                  type={frameFormTouches['frame_admin_auth.pass'] ? 'text' : 'password'}
+                  placeholder=""
+                  required
+                />
+              </Field>
+            </>
+          ) : null}
+        </div>
+        <H6 id="frame-http-proxy-section">
+          HTTPS proxy <span className="text-gray-500">(backend &#8594; frame)</span>
+        </H6>
+        <div className="pl-2 @md:pl-8 space-y-2">
+          <Field
+            name="https_proxy.enable"
+            label="HTTPS proxy via Caddy"
+            tooltip="Enable Caddy as a local HTTPS proxy for the FrameOS HTTP API. You may need to do a full deploy if this is your first time enabling this."
+          >
+            {({ value, onChange }) => (
+              <Switch
+                name="https_proxy.enable"
+                value={value}
+                onChange={(enableTls) => {
+                  if (enableTls) {
+                    verifyTlsCertificates()
+                  }
+                  onChange(enableTls)
+                }}
+                fullWidth
+              />
+            )}
+          </Field>
+          {tlsEnabled ? (
+            <>
+              <Field
+                name="https_proxy.port"
+                label="HTTPS port"
+                tooltip={
+                  <div className="space-y-2">
+                    <p>The port Caddy listens on for HTTPS connections.</p>
+                    <p>It's best if this ends with *443.</p>
+                  </div>
+                }
+              >
+                <NumberTextInput name="https_proxy.port" placeholder="8443" />
+              </Field>
+              <Field
+                name="https_proxy.expose_only_port"
+                label="Expose only HTTPS port"
+                tooltip="Bind the HTTP port to 127.0.0.1 so only the HTTPS proxy is accessible externally."
+              >
+                <Switch name="https_proxy.expose_only_port" fullWidth />
+              </Field>
+              <Field
+                name="https_proxy.certs.client_ca"
+                label="HTTPS backend CA certificate"
+                labelRight={
+                  <Button color="secondary" size="small" onClick={(e) => generateTlsCertificates()}>
+                    Regenerate
+                  </Button>
+                }
+                tooltip="Used by the backend to validate HTTPS connections to this frame when TLS is enabled."
+                secret={!frameFormTouches['https_proxy.certs.client_ca'] && !!frameForm.https_proxy?.certs?.client_ca}
+                hint={getCertificateHint(
+                  'Root CA certificate',
+                  frameForm.https_proxy?.client_ca_cert_not_valid_after ??
+                    frame.https_proxy?.client_ca_cert_not_valid_after
+                )}
+              >
+                <TextArea name="https_proxy.certs.client_ca" rows={4} placeholder="-----BEGIN CERTIFICATE-----" />
+              </Field>
+              <Field
+                name="https_proxy.certs.server"
+                label="HTTPS frame certificate"
+                tooltip="PEM certificate used by Caddy for HTTPS on this frame."
+                secret={!frameFormTouches['https_proxy.certs.server'] && !!frameForm.https_proxy?.certs?.server}
+                hint={getCertificateHint(
+                  'Server certificate',
+                  frameForm.https_proxy?.server_cert_not_valid_after ?? frame.https_proxy?.server_cert_not_valid_after
+                )}
+              >
+                <TextArea name="https_proxy.certs.server" rows={4} placeholder="-----BEGIN CERTIFICATE-----" />
+              </Field>
+
+              <Field
+                name="https_proxy.certs.server_key"
+                label={<div>HTTPS frame private key</div>}
+                tooltip="PEM private key used by Caddy for HTTPS on this frame. Keep this secret."
+                secret={!frameFormTouches['https_proxy.certs.server_key'] && !!frameForm.https_proxy?.certs?.server_key}
+              >
+                <TextArea name="https_proxy.certs.server_key" rows={4} placeholder="-----BEGIN RSA PRIVATE KEY-----" />
+              </Field>
+            </>
           ) : null}
         </div>
 
         <H6>Network</H6>
         <div className="pl-2 @md:pl-8 space-y-2">
           <Group name="network">
-            {frameForm.mode === 'nixos' ? (
-              <>
-                <Field name="wifiSSID" label="Wifi SSID" tooltip="The SSID of the wifi network to connect to on boot.">
-                  <TextInput name="wifiSSID" placeholder="MyWifi" />
-                </Field>
-                <Field name="wifiPassword" label="Wifi Password">
-                  <TextInput
-                    name="wifiPassword"
-                    placeholder="MyWifiPassword"
-                    onClick={() => touchFrameFormField('network.wifiPassword')}
-                    type={frameFormTouches['network.wifiPassword'] ? 'text' : 'password'}
-                  />
-                </Field>
-              </>
-            ) : null}
-
             <Field name="networkCheck" label="Wait for network before rendering">
               <Switch name="networkCheck" fullWidth />
             </Field>
@@ -937,19 +1356,21 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
               </div>
             </>
           </Field>
-          <Field
-            name="upload_fonts"
-            label="Upload fonts"
-            tooltip="When deploying a frame, FrameOS uploads fonts to /srv/assets/fonts. You can disable this here"
-          >
-            <Select
+          {!inFrameAdminMode ? (
+            <Field
               name="upload_fonts"
-              options={[
-                { value: '', label: 'All' },
-                { value: 'none', label: 'None' },
-              ]}
-            />
-          </Field>
+              label="Upload fonts"
+              tooltip="When deploying a frame, FrameOS uploads fonts to /srv/assets/fonts. You can disable this here"
+            >
+              <Select
+                name="upload_fonts"
+                options={[
+                  { value: '', label: 'All' },
+                  { value: 'none', label: 'None' },
+                ]}
+              />
+            </Field>
+          ) : null}
         </div>
         <H6 className="flex items-center gap-2">
           GPIO buttons
@@ -1018,11 +1439,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                 color="secondary"
                 size="small"
                 onClick={() => {
-                  if (frameForm.mode === 'nixos') {
-                    setFrameFormValues({ log_to_file: '/var/log/frameos/frame-{date}.log' })
-                  } else {
-                    setFrameFormValues({ log_to_file: '/srv/frameos/logs/frame-{date}.log' })
-                  }
+                  setFrameFormValues({ log_to_file: '/srv/frameos/logs/frame-{date}.log' })
                   touchFrameFormField('log_to_file')
                 }}
               >
@@ -1102,6 +1519,14 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
     </div>
   )
 }
+
 FrameSettings.PanelTitle = function FrameSettingsPanelTitle(): JSX.Element {
-  return <>Settings</>
+  const { frame, frameForm } = useValues(frameLogic)
+
+  return (
+    <div className="flex items-center gap-1">
+      <span>Settings</span>
+      <CertificateTriangle frame={frame} frameForm={frameForm} />
+    </div>
+  )
 }

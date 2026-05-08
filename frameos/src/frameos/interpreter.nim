@@ -1,11 +1,47 @@
 import frameos/types
 import frameos/values
 import frameos/js_runtime
+import frameos/js_app_runtime
 import frameos/channels
+import frameos/runtime_diagnostics
 import tables, json, os, zippy, chroma, pixie, jsony, sequtils, options, strutils, times
 import apps/apps
 
 const TRACING = false
+
+proc appSourcesFromSceneApps(scene: FrameScene, keyword: string): JsonNode =
+  if scene of InterpretedFrameScene:
+    let apps = InterpretedFrameScene(scene).apps
+    if not apps.isNil and apps.kind == JObject and apps.hasKey(keyword):
+      let app = apps[keyword]
+      if not app.isNil and app.kind == JObject and app.hasKey("sources") and app["sources"].kind == JObject:
+        return app["sources"]
+  nil
+
+proc initInterpretedApp(keyword: string, node: DiagramNode, scene: FrameScene): AppRoot =
+  var sources = node.data{"sources"}
+  if not hasJsAppSource(sources):
+    sources = appSourcesFromSceneApps(scene, keyword)
+  if hasJsAppSource(sources):
+    return initDynamicJsApp(keyword, node, scene, sources)
+  initApp(keyword, node, scene)
+
+proc setInterpretedAppField(keyword: string, app: AppRoot, field: string, value: Value) =
+  if app.isDynamicJsApp():
+    app.setDynamicJsAppField(field, value)
+  else:
+    apps.setAppField(keyword, app, field, value)
+
+proc getInterpretedApp(keyword: string, app: AppRoot, context: ExecutionContext): Value =
+  if app.isDynamicJsApp():
+    return app.getDynamicJsApp(context)
+  apps.getApp(keyword, app, context)
+
+proc runInterpretedApp(keyword: string, app: AppRoot, context: ExecutionContext) =
+  if app.isDynamicJsApp():
+    app.runDynamicJsApp(context)
+  else:
+    apps.runApp(keyword, app, context)
 
 proc evalInline(scene: InterpretedFrameScene,
                 context: ExecutionContext,
@@ -149,16 +185,36 @@ var nodeMappingTable = initTable[string, NodeId]()
 var stateFieldTypesByScene = initTable[SceneId, Table[string, string]]()
 var allScenesLoaded = false
 var loadedScenes = initTable[SceneId, ExportedInterpretedScene]()
+var uploadedScenes = initTable[SceneId, ExportedInterpretedScene]()
+
+proc resetInterpretedScenes*() =
+  allScenesLoaded = false
+  loadedScenes = initTable[SceneId, ExportedInterpretedScene]()
 var compiledSceneExports = initTable[SceneId, ExportedScene]()
 
 proc registerCompiledScene*(sceneId: SceneId, exported: ExportedScene) =
   compiledSceneExports[sceneId] = exported
+
+proc setUploadedInterpretedScenes*(scenes: Table[SceneId, ExportedInterpretedScene]) =
+  uploadedScenes = scenes
+
+proc getUploadedInterpretedScenes*(): Table[SceneId, ExportedInterpretedScene] =
+  uploadedScenes
 
 # -------------------------
 # Forward decl
 # -------------------------
 
 proc runEvent*(self: FrameScene, context: ExecutionContext)
+
+proc diagnosticKeyword(node: DiagramNode): string =
+  if node.data.isNil or node.data.kind != JObject:
+    return ""
+  if node.data.hasKey("keyword") and node.data["keyword"].kind == JString:
+    return node.data["keyword"].getStr()
+  if node.data.hasKey("name") and node.data["name"].kind == JString:
+    return node.data["name"].getStr()
+  ""
 
 # -------------------------
 # Core node runner
@@ -200,6 +256,11 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
 
     let currentNode = self.nodes[currentNodeId]
     let nodeType = currentNode.nodeType
+    var checkpointKeyword = ""
+    if self.frameConfig.debug:
+      checkpointKeyword = diagnosticKeyword(currentNode)
+      markRuntimeCheckpoint("node:start", currentSceneId = self.id.string, contextEvent = context.event,
+        nodeId = currentNodeId.int, nodeType = nodeType, keyword = checkpointKeyword)
     if TRACING:
       self.logger.log(%*{"event": "interpreter:runNode", "sceneId": self.id, "nodeId": currentNodeId.int,
         "nodeType": nodeType})
@@ -230,7 +291,7 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
           if self.nodes.hasKey(producerNodeId):
             try:
               let vIn = runNode(self, producerNodeId, context, asDataNode = true)
-              apps.setAppField(keyword, app, inputName, vIn)
+              setInterpretedAppField(keyword, app, inputName, vIn)
               if cacheEnabled and cacheInputEnabled:
                 builtInputKey[inputName] = valueToKeyJson(vIn)
                 builtAnyInput = true
@@ -254,7 +315,7 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
                                  inputName, codeSnippet,
                                  self.appInlineFuncNameByNodeArg, compileAppInlineFn,
                                  inputName)
-            apps.setAppField(keyword, app, inputName, vIn)
+            setInterpretedAppField(keyword, app, inputName, vIn)
             if cacheEnabled and cacheInputEnabled:
               builtInputKey[inputName] = valueToKeyJson(vIn)
               builtAnyInput = true
@@ -275,13 +336,13 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
                            builtAnyInput, builtInputKey,
                            %*{"keyword": keyword}):
           (proc (): Value =
-            apps.getApp(keyword, app, context)
+            getInterpretedApp(keyword, app, context)
           )
       else:
         if asDataNode:
-          result = apps.getApp(keyword, app, context)
+          result = getInterpretedApp(keyword, app, context)
         else:
-          apps.runApp(keyword, app, context)
+          runInterpretedApp(keyword, app, context)
 
     of "source":
       raise newException(Exception, "Source nodes are not implemented for interpreted scenes")
@@ -372,7 +433,16 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
           "eventName": eventName,
           "payload": finalPayload
         })
-      sendEvent(eventName, finalPayload)
+      if eventName == "render" and context.event == "render":
+        self.logger.log(%*{
+          "event": "interpreter:dispatch:ignored",
+          "sceneId": self.id.string,
+          "nodeId": currentNodeId.int,
+          "eventName": eventName,
+          "reason": "renderSelfDispatch"
+        })
+      else:
+        sendEvent(eventName, finalPayload)
       if asDataNode:
         result = VJson(copy(finalPayload))
     of "code":
@@ -510,6 +580,12 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
           needsInitEvent = true
         elif compiledSceneExports.hasKey(childSceneId):
           exportedChild = compiledSceneExports[childSceneId]
+        elif uploadedScenes.hasKey(childSceneId):
+          # uploaded scene id-s start with "uploaded/"
+          # we should implement isloated scopes/applications later, but this will do for now
+          let interpretedExport = uploadedScenes[childSceneId]
+          exportedChild = ExportedScene(interpretedExport)
+          needsInitEvent = true
         else:
           raise newException(Exception,
             "Scene node references unknown scene id: " & childSceneId.string)
@@ -572,9 +648,20 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
 
       # Delegate handling of the current event to the child scene.
       exportedChild = self.sceneExportByNodeId[currentNodeId]
+      if self.frameConfig.debug:
+        markRuntimeCheckpoint("scene:delegate", currentSceneId = self.id.string, contextEvent = context.event,
+          nodeId = currentNodeId.int, nodeType = nodeType, keyword = checkpointKeyword,
+          childSceneId = childScene.id.string)
       exportedChild.runEvent(childScene, context)
     else:
       raise newException(Exception, "Unknown node type: " & nodeType)
+
+    if self.frameConfig.debug:
+      markRuntimeCheckpoint("node:done", currentSceneId = self.id.string, contextEvent = context.event,
+        nodeId = currentNodeId.int, nodeType = nodeType, keyword = checkpointKeyword)
+
+    if asDataNode:
+      break
 
     if self.nextNodeIds.hasKey(currentNodeId):
       currentNodeId = self.nextNodeIds[currentNodeId]
@@ -614,8 +701,12 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
   if TRACING:
     logger.log(%*{"event": "initInterpreted", "sceneId": sceneId.string})
 
-  let exportedScene = loadedScenes[sceneId]
-  if exportedScene == nil:
+  var exportedScene: ExportedInterpretedScene
+  if loadedScenes.hasKey(sceneId):
+    exportedScene = loadedScenes[sceneId]
+  elif uploadedScenes.hasKey(sceneId):
+    exportedScene = uploadedScenes[sceneId]
+  else:
     raise newException(Exception, "Scene not found: " & sceneId.string)
 
   let scene = InterpretedFrameScene(
@@ -628,6 +719,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     state: %*{},
     nodes: initTable[NodeId, DiagramNode](),
     edges: @[],
+    apps: exportedScene.apps,
     nextNodeIds: initTable[NodeId, NodeId](),
     appsByNodeId: initTable[NodeId, AppRoot](),
     eventListeners: initTable[string, seq[NodeId]](),
@@ -657,9 +749,10 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
   var typeMap = initTable[string, string]()
   for field in exportedScene.publicStateFields:
     typeMap[field.name] = field.fieldType
-    if not scene.state.hasKey(field.name) and field.value.len > 0:
-      # TODO: better string to value parser - no need to go via json
-      scene.state[field.name] = valueToJson(valueFromJsonByType(%*(field.value), field.fieldType))
+    if not scene.state.hasKey(field.name) and not field.value.isNil and field.value.kind != JNull:
+      if field.value.kind == JString and field.value.getStr().len == 0:
+        continue
+      scene.state[field.name] = valueToJson(valueFromJsonByType(field.value, field.fieldType))
   stateFieldTypesByScene[sceneId] = typeMap
 
   ## Pass 1: register nodes & event listeners (do not init apps yet)
@@ -810,7 +903,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
         else:
           @[])
         })
-      scene.appsByNodeId[node.id] = initApp(keyword, node, scene)
+      scene.appsByNodeId[node.id] = initInterpretedApp(keyword, node, scene)
 
     elif node.nodeType == "scene":
       let childSceneId = node.data{"keyword"}.getStr().SceneId
@@ -823,6 +916,10 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
         isInterpretedChild = true
       elif compiledSceneExports.hasKey(childSceneId):
         exportedChild = compiledSceneExports[childSceneId]
+      elif uploadedScenes.hasKey(childSceneId):
+        let interpretedExport = uploadedScenes[childSceneId]
+        exportedChild = ExportedScene(interpretedExport)
+        isInterpretedChild = true
       else:
         raise newException(Exception,
           "Scene node references unknown scene id: " & childSceneId.string)
@@ -875,6 +972,9 @@ proc applyPublicStateFromPayload(scene: InterpretedFrameScene, payload: JsonNode
 proc runEvent*(self: FrameScene, context: ExecutionContext) =
   var scene: InterpretedFrameScene = InterpretedFrameScene(self)
   self.logger.log(%*{"event": "runEventInterpreted", "sceneId": self.id, "contextEvent": context.event})
+  if self.frameConfig.debug:
+    markRuntimeCheckpoint("event:start", currentSceneId = self.id.string, contextEvent = context.event,
+      clearNode = true)
 
   case context.event:
   of "setSceneState":
@@ -897,6 +997,16 @@ proc runEvent*(self: FrameScene, context: ExecutionContext) =
     for nodeId in scene.eventListeners[context.event]:
       let nextNode = if scene.nextNodeIds.hasKey(nodeId): scene.nextNodeIds[nodeId] else: -1.NodeId
       if nextNode != 0.NodeId and nextNode != -1.NodeId:
+        if context.event == "button":
+          if scene.nodes.hasKey(nodeId):
+            let node = scene.nodes[nodeId]
+            if not node.data.isNil and node.data.hasKey("label"):
+              let buttonFilter = strip(node.data["label"].getStr())
+              if buttonFilter.len > 0:
+                if context.payload.isNil or context.payload.kind != JObject:
+                  continue
+                if not context.payload.hasKey("label") or context.payload["label"].getStr() != buttonFilter:
+                  continue
         try:
           discard scene.runNode(nextNode, context)
         except Exception as e:
@@ -956,50 +1066,91 @@ proc parseHook*(s: string, i: var int, v: var Color) =
   parseHook(s, i, tmp)
   v = parseHtmlColor(tmp)
 
+proc dumpHook*(s: var string, v: Color) =
+  s.add('"')
+  s.add(toHtmlHex(v))
+  s.add('"')
+
 # -------------------------
 # Scene registry (loader)
 # -------------------------
 
-proc parseInterpretedScenes*(data: string): void =
+proc buildInterpretedSceneExport(scene: FrameSceneInput): ExportedInterpretedScene =
+  let refreshInterval = if scene.settings != nil: scene.settings.refreshInterval else: 300.0
+  let backgroundColor = if scene.settings != nil: scene.settings.backgroundColor else: parseHtmlColor("#000000")
+  ExportedInterpretedScene(
+    name: scene.name,
+    nodes: scene.nodes,
+    edges: scene.edges,
+    apps: if scene.apps.isNil: %*{} else: scene.apps,
+    publicStateFields: scene.fields,
+    persistedStateKeys: scene.fields.filterIt(it.persist == "disk").mapIt(it.name),
+    init: init,
+    render: render,
+    runEvent: runEvent,
+    refreshInterval: if refreshInterval > 0.0: refreshInterval else: 300.0,
+    backgroundColor: backgroundColor
+  )
+
+proc parseInterpretedSceneInputs*(data: string): seq[FrameSceneInput] =
   if data == "":
+    return @[]
+  data.fromJson(seq[FrameSceneInput])
+
+proc buildInterpretedScenes*(scenes: seq[FrameSceneInput]): Table[SceneId, ExportedInterpretedScene] =
+  result = initTable[SceneId, ExportedInterpretedScene]()
+  for scene in scenes:
+    result[scene.id] = buildInterpretedSceneExport(scene)
+
+proc parseInterpretedScenes*(data: string): Table[SceneId, ExportedInterpretedScene] =
+  result = initTable[SceneId, ExportedInterpretedScene]()
+  let scenes = parseInterpretedSceneInputs(data)
+  if scenes.len == 0:
     return
-  let scenes = data.fromJson(seq[FrameSceneInput])
   for scene in scenes:
     try:
-      let refreshInterval = if scene.settings != nil: scene.settings.refreshInterval else: 300.0
-      let backgroundColor = if scene.settings != nil: scene.settings.backgroundColor else: parseHtmlColor("#000000")
-      let exported = ExportedInterpretedScene(
-        nodes: scene.nodes,
-        edges: scene.edges,
-        publicStateFields: scene.fields,
-        persistedStateKeys: scene.fields.mapIt(it.name),
-        init: init,
-        render: render,
-        runEvent: runEvent,
-        refreshInterval: if refreshInterval > 0.0: refreshInterval else: 300.0,
-        backgroundColor: backgroundColor
-      )
-      loadedScenes[scene.id] = exported
+      result[scene.id] = buildInterpretedSceneExport(scene)
     except Exception as e:
       echo "Warning: Failed to load interpreted scene: ", e.msg
+
+proc loadInterpretedScenesFromDisk*(): Table[SceneId, ExportedInterpretedScene] =
+  let configuredFile = getEnv("FRAMEOS_SCENES_JSON")
+  var sourcePath = ""
+  var compressed = false
+
+  if configuredFile.len > 0:
+    if configuredFile.endsWith(".gz") and fileExists(configuredFile):
+      sourcePath = configuredFile
+      compressed = true
+    elif fileExists(configuredFile):
+      sourcePath = configuredFile
+  elif fileExists("./scenes.json.gz"):
+    sourcePath = "./scenes.json.gz"
+    compressed = true
+  elif fileExists("./scenes.json"):
+    sourcePath = "./scenes.json"
+
+  if sourcePath.len == 0:
+    return initTable[SceneId, ExportedInterpretedScene]()
+
+  let encoded = readFile(sourcePath)
+
+  let decoded =
+    if compressed:
+      uncompress(encoded)
+    else:
+      encoded
+
+  result = parseInterpretedScenes(decoded)
+
+proc replaceInterpretedScenesCache*(scenes: Table[SceneId, ExportedInterpretedScene]) =
+  loadedScenes = scenes
+  allScenesLoaded = true
 
 proc getInterpretedScenes*(): Table[SceneId, ExportedInterpretedScene] =
   if allScenesLoaded:
     return loadedScenes
 
-  let file = getEnv("FRAMEOS_SCENES_JSON")
-  if file != "":
-    if file.endsWith(".gz") and fileExists(file):
-      parseInterpretedScenes(uncompress(readFile(file)))
-    elif fileExists(file):
-      parseInterpretedScenes(readFile(file))
-
-  elif fileExists("./scenes.json.gz"):
-    parseInterpretedScenes(uncompress(readFile("./scenes.json.gz")))
-
-  elif fileExists("./scenes.json"):
-    parseInterpretedScenes(readFile("./scenes.json"))
-
-  allScenesLoaded = true
+  replaceInterpretedScenesCache(loadInterpretedScenesFromDisk())
 
   return loadedScenes

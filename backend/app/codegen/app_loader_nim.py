@@ -1,6 +1,7 @@
 import json
 from typing import Optional, Dict, Any, List, Union
 import os
+import re
 
 Scalar = Union[str, int, float, bool, None]
 
@@ -41,9 +42,9 @@ def _as_float(v: Scalar, default: float) -> float:
             pass
     return default
 
-def _default_literal(field_type: str, default: Scalar, required: bool) -> str:
+def _default_literal(field_name: str, field_type: str, default: Scalar, required: bool) -> str:
     """Return a Nim literal/expression usable as the fallback/default element value."""
-    if field_type in ("string", "text", "select", "font"):
+    if field_type in ("string", "text", "select", "font", "date"):
         return _nim_quote(default if isinstance(default, str) else "")
     if field_type == "integer":
         return str(_as_int(default, 0))
@@ -65,7 +66,7 @@ def _default_literal(field_type: str, default: Scalar, required: bool) -> str:
         # fallback to black if not provided
         s = default if isinstance(default, str) and default else "#000000"
         return f'parseHtmlColor({_nim_quote(s)})'
-    raise ValueError(f"Unsupported field type: {field_type}")
+    raise ValueError(f"Unsupported field type: {field_type}, field name: {field_name}")
 
 def _scalar_getter(field_name: str, field_type: str, default_expr: str, required: bool) -> str:
     """
@@ -73,7 +74,7 @@ def _scalar_getter(field_name: str, field_type: str, default_expr: str, required
     Returns a Nim *expression* (often a 'block:' expression).
     """
     k = f'params{{"{field_name}"}}'
-    if field_type in ("string", "text", "select", "font"):
+    if field_type in ("string", "text", "select", "font", "date"):
         return f'{k}.getStr({default_expr})'
 
     if field_type == "integer":
@@ -82,7 +83,7 @@ def _scalar_getter(field_name: str, field_type: str, default_expr: str, required
   if params.hasKey("{field_name}"):
     let n = {k}
     if n.kind == JInt:
-      v = n.getInt()
+      v = n.getInt().int
     elif n.kind == JFloat:
       v = int(n.getFloat())
     elif n.kind == JString:
@@ -126,7 +127,7 @@ def _scalar_getter(field_name: str, field_type: str, default_expr: str, required
   if params.hasKey("{field_name}"):
     let n = {k}
     if n.kind == JInt:
-        v = n.getInt().NodeId
+      v = n.getInt().int.NodeId
     elif n.kind == JFloat:
         v = int(n.getFloat()).NodeId
     elif n.kind == JString:
@@ -150,7 +151,7 @@ def _scalar_getter(field_name: str, field_type: str, default_expr: str, required
       except CatchableError:
         discard
   v"""
-    raise ValueError(f"Unsupported field type: {field_type}")
+    raise ValueError(f"Unsupported field type: {field_type}, fieldName: {field_name}")
 
 def _field_elem_nim_type(field_type: str, required: bool) -> str:
     """Element type (for seqs)."""
@@ -195,7 +196,7 @@ def _size_expr(bound: Union[int, str], all_fields: Dict[str, Dict[str, Any]], de
   if params.hasKey("{ref}"):
     let n = {k}
     if n.kind == JInt:
-      v = n.getInt()
+      v = n.getInt().int
     elif n.kind == JFloat:
       v = int(n.getFloat())
     elif n.kind == JString:
@@ -218,7 +219,7 @@ def _seq_init_expr(field: Dict[str, Any], all_fields: Dict[str, Dict[str, Any]])
     ftype = field["type"]
     required = bool(field.get("required", False))
     elem_type = _field_elem_nim_type(ftype, required)
-    elem_default = _default_literal(ftype, field.get("value"), required)
+    elem_default = _default_literal(name, ftype, field.get("value"), required)
 
     seq_spec: List[List[Union[str, int]]] = field.get("seq", [])
     dims = len(seq_spec)
@@ -253,7 +254,7 @@ def _seq_init_expr(field: Dict[str, Any], all_fields: Dict[str, Dict[str, Any]])
             return (
                 f'if params.hasKey({key_var}):\n'
                 f'      let n2 = params[{key_var}]\n'
-                f'      if n2.kind == JInt: {var_name} = n2.getInt()\n'
+                f'      if n2.kind == JInt: {var_name} = n2.getInt().int\n'
                 f'      elif n2.kind == JFloat: {var_name} = int(n2.getFloat())\n'
                 f'      elif n2.kind == JString:\n'
                 f'        try: {var_name} = parseInt(n2.getStr())\n'
@@ -287,7 +288,7 @@ def _seq_init_expr(field: Dict[str, Any], all_fields: Dict[str, Dict[str, Any]])
             return (
                 f'if params.hasKey({key_var}):\n'
                 f'      let n2 = params[{key_var}]\n'
-                f'      if n2.kind == JInt: {var_name} = n2.getInt().NodeId\n'
+                f'      if n2.kind == JInt: {var_name} = n2.getInt().int.NodeId\n'
                 f'      elif n2.kind == JFloat: {var_name} = int(n2.getFloat()).NodeId\n'
                 f'      elif n2.kind == JString:\n'
                 f'        try: {var_name} = int(parseFloat(n2.getStr())).NodeId\n'
@@ -405,7 +406,7 @@ def _set_field_seq_case(field: Dict[str, Any]) -> List[str]:
             parse_lines = ['if it.kind == JString: arr.add(it.getStr())']
         elif elem_type == "int":
             parse_lines = [
-                'if it.kind == JInt: arr.add(it.getInt())',
+                'if it.kind == JInt: arr.add(it.getInt().int)',
                 'elif it.kind == JFloat: arr.add(int(it.getFloat()))',
                 'elif it.kind == JString:',
                 '  try: arr.add(parseInt(it.getStr()))',
@@ -430,7 +431,7 @@ def _set_field_seq_case(field: Dict[str, Any]) -> List[str]:
             parse_lines = ['if it.kind == JString: arr.add(parseHtmlColor(it.getStr()))']
         elif elem_type == "NodeId":
             parse_lines = [
-                'if it.kind == JInt: arr.add(it.getInt().NodeId)',
+                'if it.kind == JInt: arr.add(it.getInt().int.NodeId)',
                 'elif it.kind == JFloat: arr.add(int(it.getFloat()).NodeId)',
                 'elif it.kind == JString:',
                 '  try: arr.add(int(parseFloat(it.getStr())).NodeId)',
@@ -459,7 +460,7 @@ def _set_field_seq_case(field: Dict[str, Any]) -> List[str]:
             parse_lines = ['if it.kind == JString: r.add(it.getStr())']
         elif elem_type == "int":
             parse_lines = [
-                'if it.kind == JInt: r.add(it.getInt())',
+                'if it.kind == JInt: r.add(it.getInt().int)',
                 'elif it.kind == JFloat: r.add(int(it.getFloat()))',
                 'elif it.kind == JString:',
                 '  try: r.add(parseInt(it.getStr()))',
@@ -484,7 +485,7 @@ def _set_field_seq_case(field: Dict[str, Any]) -> List[str]:
             parse_lines = ['if it.kind == JString: r.add(parseHtmlColor(it.getStr()))']
         elif elem_type == "NodeId":
             parse_lines = [
-                'if it.kind == JInt: r.add(it.getInt().NodeId)',
+                'if it.kind == JInt: r.add(it.getInt().int.NodeId)',
                 'elif it.kind == JFloat: r.add(int(it.getFloat()).NodeId)',
                 'elif it.kind == JString:',
                 '  try: r.add(int(parseFloat(it.getStr())).NodeId)',
@@ -535,6 +536,35 @@ def _format_field_block(field_name: str, block_lines: list[str]) -> str:
     body = "\n".join("      " + ln for ln in block_lines[1:])
     return f"    {field_name}: {head}\n{body},"
 
+
+def _app_has_self_init(app_dir: str) -> bool:
+    """Return True when app.nim defines `proc init*(self: App)` (or non-exported equivalent)."""
+    app_file = os.path.join(app_dir, "app.nim")
+    if not os.path.exists(app_file):
+        return False
+
+    with open(app_file, "r") as af:
+        app_source = af.read()
+
+    # Only match the App instance init proc, not legacy constructor-style `init(...) : App`.
+    return re.search(r"proc\s+init\*?\s*\(\s*self\s*:\s*(?:var\s+)?App\b", app_source) is not None
+
+
+def _app_has_proc(app_dir: str, proc_name: str) -> bool:
+    """Return True when app.nim defines an App instance proc with the given name."""
+    app_file = os.path.join(app_dir, "app.nim")
+    if not os.path.exists(app_file):
+        return False
+
+    with open(app_file, "r") as af:
+        app_source = af.read()
+
+    return re.search(
+        rf"proc\s+{re.escape(proc_name)}\*?\s*\(\s*[A-Za-z_]\w*\s*:\s*(?:var\s+)?App\b",
+        app_source,
+    ) is not None
+
+
 def write_app_loader_nim(app_dir, config: Optional[dict] = None) -> str:
     if not config:
         config_path = os.path.join(app_dir, "config.json")
@@ -544,15 +574,27 @@ def write_app_loader_nim(app_dir, config: Optional[dict] = None) -> str:
             config = json.load(f)
             assert config is not None
 
+    app_source_path = os.path.join(app_dir, "app.nim")
+    if not os.path.exists(app_source_path):
+        raise FileNotFoundError(f"Nim app source not found: {app_source_path}")
+
     fields = [f for f in config.get("fields", []) if not f.get("markdown")]
+    app_has_self_init = _app_has_self_init(app_dir)
+    app_has_get = _app_has_proc(app_dir, "get")
+    app_has_run = _app_has_proc(app_dir, "run")
     # Build quick index for defaults/refs (used by seq bounds)
     fields_by_name: Dict[str, Dict[str, Any]] = {f["name"]: f for f in fields if "name" in f}
 
     app_config_lines: List[str] = []
     app_set_lines: List[str] = []
 
+    inserted_fields: set[str] = set() # prevent duplicate keys
+
     for field in fields:
         field_name = field["name"]  # NOTE: assumes name matches AppConfig slot
+        if field_name in inserted_fields:
+            continue
+        inserted_fields.add(field_name)
         field_type = field["type"]
         field_default = field.get("value")
         field_required = bool(field.get("required", False))
@@ -567,7 +609,7 @@ def write_app_loader_nim(app_dir, config: Optional[dict] = None) -> str:
             continue
 
         # Scalars
-        default_expr = _default_literal(field_type, field_default, field_required)
+        default_expr = _default_literal(field_name, field_type, field_default, field_required)
         getter_expr = _scalar_getter(field_name, field_type, default_expr, field_required)
         if getter_expr.startswith("block:"):
             formatted = _format_block_value_after_colon(getter_expr)
@@ -585,7 +627,7 @@ def write_app_loader_nim(app_dir, config: Optional[dict] = None) -> str:
             if field_type in ("string", "text", "select", "font"):
                 app_set_lines.append(f"    app.appConfig.{field_name} = value.asString()")
             elif field_type == "integer":
-                app_set_lines.append(f"    app.appConfig.{field_name} = value.asInt()")
+                app_set_lines.append(f"    app.appConfig.{field_name} = value.asInt().int")
             elif field_type == "float":
                 app_set_lines.append(f"    app.appConfig.{field_name} = value.asFloat()")
             elif field_type == "boolean":
@@ -603,6 +645,7 @@ def write_app_loader_nim(app_dir, config: Optional[dict] = None) -> str:
                 app_set_lines.append(f'    raise newException(ValueError, "Unsupported field type for set: {field_type}")')
 
     newline = os.linesep
+    init_call = "  app_module.init(app_module.App(result))" if app_has_self_init else ""
     nim_code = f"""{{.warning[UnusedImport]: off.}}
 import json
 import options
@@ -630,6 +673,7 @@ proc init*(
     scene: scene,
     frameConfig: scene.frameConfig,
   )
+{init_call}
 
 proc setField*(self: AppRoot, field: string, value: Value) =
   let app = app_module.App(self)
@@ -638,12 +682,12 @@ proc setField*(self: AppRoot, field: string, value: Value) =
   else:
     raise newException(ValueError, "Unknown field: " & field)
 """
-    if config.get("category") in ("data", "render"):
+    if app_has_get:
         nim_code += """
 proc get*(self: AppRoot, context: ExecutionContext): Value =
   return app_module.get(app_module.App(self), context)
 """
-    if config.get("category") in ("render", "logic"):
+    if app_has_run:
         nim_code += """
 proc run*(self: AppRoot, context: ExecutionContext) =
   app_module.run(app_module.App(self), context)

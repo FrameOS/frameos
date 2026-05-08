@@ -10,19 +10,20 @@ import json
 import secrets
 import re
 import time
+from contextlib import asynccontextmanager
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect, status
 from starlette.websockets import WebSocketState
-from sqlalchemy.orm import Session
 from arq import ArqRedis as Redis
 
 # ── project locals ──────────────────────────────────────────────────────────
-from app.database import get_db
-from app.redis import get_redis, create_redis_connection   # create_… gives a raw conn
+from app.database import SessionLocal
+from app.redis import close_redis_connection, get_redis, create_redis_connection
 from app.websockets import publish_message
 from app.models.frame import Frame
 from app.models.log import new_log as log
+from app.utils.request_ip import extract_client_ip
 from app.ws.agent_bridge import CMD_KEY, RESP_KEY, STREAM_KEY, send_cmd
 
 router = APIRouter()
@@ -33,6 +34,14 @@ CONN_TTL   = 60           # seconds – Redis key self-expiry
 # frame_id → list[websocket] (only for UI statistics)
 active_sockets_by_frame: dict[int, list[WebSocket]] = {}
 active_sockets: set[WebSocket] = set()
+
+
+async def write_log(redis: Redis, frame_id: int, type: str, line: str, ip: str | None = None):
+    db = SessionLocal()
+    try:
+        await log(db, redis, frame_id, type, line, ip=ip)
+    finally:
+        db.close()
 
 # ────────────────────────────────────────────────────────────────────────────
 # tiny helpers
@@ -74,8 +83,17 @@ async def number_of_connections_for_frame(redis: Redis, frame_id: int) -> int:
     return cnt
 
 
-async def _ensure_redis(redis: Optional[Redis]) -> Redis:
-    return redis or create_redis_connection()
+@asynccontextmanager
+async def _redis_for_command(redis: Optional[Redis]):
+    if redis is not None:
+        yield redis
+        return
+
+    owned_redis = create_redis_connection()
+    try:
+        yield owned_redis
+    finally:
+        await close_redis_connection(owned_redis)
 
 # ────────────────────────────────────────────────────────────────────────────
 # high-level helper wrappers (they now proxy *only* via Redis)
@@ -90,7 +108,6 @@ async def http_get_on_frame(           # used by /frames/… endpoints
     timeout: int = 30,
     redis: Optional[Redis] = None,
 ):
-    redis = await _ensure_redis(redis)
     payload = {
         "type": "cmd",
         "name": "http",
@@ -101,14 +118,15 @@ async def http_get_on_frame(           # used by /frames/… endpoints
             "headers": headers or {},
         },
     }
-    return await send_cmd(redis, frame_id, payload, timeout=timeout)
+    async with _redis_for_command(redis) as command_redis:
+        return await send_cmd(command_redis, frame_id, payload, timeout=timeout)
 
 
 async def assets_list_on_frame(frame_id: int, path: str, timeout: int = 60,
                                redis: Optional[Redis] = None):
-    redis = await _ensure_redis(redis)
     payload = {"type": "cmd", "name": "assets_list", "args": {"path": path}}
-    resp    = await send_cmd(redis, frame_id, payload, timeout=timeout)
+    async with _redis_for_command(redis) as command_redis:
+        resp = await send_cmd(command_redis, frame_id, payload, timeout=timeout)
     if isinstance(resp, dict) and "assets" in resp:
         return resp["assets"]
     raise RuntimeError("bad response from agent assets_list")
@@ -116,9 +134,9 @@ async def assets_list_on_frame(frame_id: int, path: str, timeout: int = 60,
 
 async def exec_shell_on_frame(frame_id: int, cmd: str, timeout: int = 120,
                               redis: Optional[Redis] = None):
-    redis   = await _ensure_redis(redis)
     payload = {"type": "cmd", "name": "shell", "args": {"cmd": cmd}}
-    reply   = await send_cmd(redis, frame_id, payload, timeout=timeout)
+    async with _redis_for_command(redis) as command_redis:
+        reply = await send_cmd(command_redis, frame_id, payload, timeout=timeout)
     if isinstance(reply, dict) and reply.get("exit", 1) == 0:
         return
     raise RuntimeError(f"shell failed: {reply}")
@@ -126,16 +144,16 @@ async def exec_shell_on_frame(frame_id: int, cmd: str, timeout: int = 120,
 
 async def file_md5_on_frame(frame_id: int, path: str, timeout: int = 30,
                             redis: Optional[Redis] = None):
-    redis   = await _ensure_redis(redis)
     payload = {"type": "cmd", "name": "file_md5", "args": {"path": path}}
-    return await send_cmd(redis, frame_id, payload, timeout=timeout)
+    async with _redis_for_command(redis) as command_redis:
+        return await send_cmd(command_redis, frame_id, payload, timeout=timeout)
 
 
 async def file_read_on_frame(frame_id: int, path: str, timeout: int = 60,
                              redis: Optional[Redis] = None) -> bytes:
-    redis   = await _ensure_redis(redis)
     payload = {"type": "cmd", "name": "file_read", "args": {"path": path}}
-    res     = await send_cmd(redis, frame_id, payload, timeout=timeout)
+    async with _redis_for_command(redis) as command_redis:
+        res = await send_cmd(command_redis, frame_id, payload, timeout=timeout)
     if isinstance(res, (bytes, bytearray)):
         return bytes(res)
     raise RuntimeError("bad response from agent file_read")
@@ -143,47 +161,47 @@ async def file_read_on_frame(frame_id: int, path: str, timeout: int = 60,
 
 async def file_write_on_frame(frame_id: int, path: str, data: bytes,
                               timeout: int = 60, redis: Optional[Redis] = None):
-    redis   = await _ensure_redis(redis)
     blob    = gzip.compress(data)
     payload = {"type": "cmd", "name": "file_write",
                "args": {"path": path, "size": len(blob)}}
-    return await send_cmd(redis, frame_id, payload, blob=blob, timeout=timeout)
+    async with _redis_for_command(redis) as command_redis:
+        return await send_cmd(command_redis, frame_id, payload, blob=blob, timeout=timeout)
 
 
 async def file_delete_on_frame(frame_id: int, path: str, timeout: int = 60,
                                redis: Optional[Redis] = None):
-    redis   = await _ensure_redis(redis)
     payload = {"type": "cmd", "name": "file_delete", "args": {"path": path}}
-    return await send_cmd(redis, frame_id, payload, timeout=timeout)
+    async with _redis_for_command(redis) as command_redis:
+        return await send_cmd(command_redis, frame_id, payload, timeout=timeout)
 
 
 async def file_mkdir_on_frame(frame_id: int, path: str, timeout: int = 60,
                               redis: Optional[Redis] = None):
-    redis   = await _ensure_redis(redis)
     payload = {"type": "cmd", "name": "file_mkdir", "args": {"path": path}}
-    return await send_cmd(redis, frame_id, payload, timeout=timeout)
+    async with _redis_for_command(redis) as command_redis:
+        return await send_cmd(command_redis, frame_id, payload, timeout=timeout)
 
 
 async def file_rename_on_frame(frame_id: int, src: str, dst: str,
                                timeout: int = 60, redis: Optional[Redis] = None):
-    redis   = await _ensure_redis(redis)
     payload = {
         "type": "cmd",
         "name": "file_rename",
         "args": {"src": src, "dst": dst},
     }
-    return await send_cmd(redis, frame_id, payload, timeout=timeout)
+    async with _redis_for_command(redis) as command_redis:
+        return await send_cmd(command_redis, frame_id, payload, timeout=timeout)
 
 async def file_write_open_on_frame(
     frame_id: int, path: str, meta: dict[str, Any] | None = None,
     timeout: int = 30, redis: Redis | None = None,
 ):
-    redis = await _ensure_redis(redis)
     payload = {
         "type": "cmd", "name": "file_write_open",
         "args": {"path": path, **(meta or {})},
     }
-    return await send_cmd(redis, frame_id, payload, timeout=timeout)
+    async with _redis_for_command(redis) as command_redis:
+        return await send_cmd(command_redis, frame_id, payload, timeout=timeout)
 
 
 async def file_write_chunk_on_frame(
@@ -191,24 +209,26 @@ async def file_write_chunk_on_frame(
     timeout: int = 60, redis: Redis | None = None,
 ):
     # small (< 300 KB) so embedding is OK
-    return await send_cmd(
-        await _ensure_redis(redis),
-        frame_id,
-        {"type": "cmd", "name": "file_write_chunk", "args": {"size": len(chunk)}},
-        blob=chunk,
-        timeout=timeout,
-    )
+    async with _redis_for_command(redis) as command_redis:
+        return await send_cmd(
+            command_redis,
+            frame_id,
+            {"type": "cmd", "name": "file_write_chunk", "args": {"size": len(chunk)}},
+            blob=chunk,
+            timeout=timeout,
+        )
 
 
 async def file_write_close_on_frame(
     frame_id: int, timeout: int = 30, redis: Redis | None = None,
 ):
-    return await send_cmd(
-        await _ensure_redis(redis),
-        frame_id,
-        {"type": "cmd", "name": "file_write_close", "args": {}},
-        timeout=timeout,
-    )
+    async with _redis_for_command(redis) as command_redis:
+        return await send_cmd(
+            command_redis,
+            frame_id,
+            {"type": "cmd", "name": "file_write_close", "args": {}},
+            timeout=timeout,
+        )
 
 # ────────────────────────────────────────────────────────────────────────────
 # Redis ⇄ WebSocket pump
@@ -263,7 +283,6 @@ async def pump_commands(
 @router.websocket("/ws/agent")
 async def ws_agent_endpoint(
     ws: WebSocket,
-    db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
     # ----- rudimentary DoS guard (per-worker) ------------------------------
@@ -285,7 +304,12 @@ async def ws_agent_endpoint(
         return
 
     server_api_key = str(hello_msg.get("serverApiKey", "")) or ""
-    frame = db.query(Frame).filter_by(server_api_key=server_api_key).first()
+    db = SessionLocal()
+    try:
+        frame = db.query(Frame).filter_by(server_api_key=server_api_key).first()
+    finally:
+        db.close()
+
     if frame is None:
         await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="unknown frame")
         return
@@ -321,6 +345,11 @@ async def ws_agent_endpoint(
         pump_commands(ws, frame.id, server_api_key, shared_secret, redis)
     )
 
+    client_ip = extract_client_ip(
+        ws.headers,
+        ws.client.host if ws.client else None,
+    )
+
     # ----- bookkeeping -----------------------------------------------------
     active_sockets.add(ws)
     active_sockets_by_frame.setdefault(frame.id, []).append(ws)
@@ -334,7 +363,7 @@ async def ws_agent_endpoint(
         {"active_connections": await number_of_connections_for_frame(redis, frame.id),
          "id": frame.id}
     )
-    await log(db, redis, frame.id, "agent", f'☎️ Frame "{frame.name}" connected ☎️')
+    await write_log(redis, frame.id, "agent", f'☎️ Frame "{frame.name}" connected ☎️', ip=client_ip)
 
     # =======================================================================
     #                           RECEIVE LOOP
@@ -427,7 +456,7 @@ async def ws_agent_endpoint(
 
                 for line in data.splitlines():
                     if line:
-                        await log(db, redis, frame.id, stream, line)
+                        await write_log(redis, frame.id, stream, line, ip=client_ip)
                         await redis.rpush(STREAM_KEY.format(id=pl["id"]),
                                           json.dumps({"stream": stream, "data": line}).encode())
                 await redis.expire(STREAM_KEY.format(id=pl["id"]), 300)
@@ -457,4 +486,4 @@ async def ws_agent_endpoint(
             {"active_connections": await number_of_connections_for_frame(redis, frame.id),
              "id": frame.id}
         )
-        await log(db, redis, frame.id, "agent", f'👋 Frame "{frame.name}" disconnected 👋')
+        await write_log(redis, frame.id, "agent", f'👋 Frame "{frame.name}" disconnected 👋', ip=client_ip)

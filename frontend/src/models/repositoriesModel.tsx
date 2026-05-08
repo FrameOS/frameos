@@ -4,6 +4,7 @@ import type { repositoriesModelType } from './repositoriesModelType'
 import { loaders } from 'kea-loaders'
 import { RepositoryType } from '../types'
 import { apiFetch } from '../utils/apiFetch'
+import { isFrameControlMode } from '../utils/frameControlMode'
 
 export const repositoriesModel = kea<repositoriesModelType>([
   path(['src', 'models', 'repositoriesModel']),
@@ -18,12 +19,17 @@ export const repositoriesModel = kea<repositoriesModelType>([
       {
         loadRepositories: async () => {
           try {
+            const systemResponse = await apiFetch('/api/repositories/system')
+            if (!systemResponse.ok) {
+              throw new Error('Failed to fetch system repositories')
+            }
+            const systemData = await systemResponse.json()
             const response = await apiFetch('/api/repositories')
             if (!response.ok) {
               throw new Error('Failed to fetch repositories')
             }
             const data = await response.json()
-            return data as RepositoryType[]
+            return [...systemData, ...data] as RepositoryType[]
           } catch (error) {
             console.error(error)
             return values.repositories
@@ -75,6 +81,9 @@ export const repositoriesModel = kea<repositoriesModelType>([
     },
   }),
   afterMount(({ actions }) => {
+    if (isFrameControlMode()) {
+      return
+    }
     actions.loadRepositories()
   }),
 ])

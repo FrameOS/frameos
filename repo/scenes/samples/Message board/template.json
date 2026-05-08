@@ -1,0 +1,9 @@
+{
+  "name": "Message board",
+  "description": "A simple message board, background from Unsplash.",
+  "config": null,
+  "image": "./image.jpg",
+  "image_width": 480,
+  "image_height": 800,
+  "scenes": "./scenes.json"
+}

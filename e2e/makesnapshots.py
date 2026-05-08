@@ -49,7 +49,7 @@ def main():
     filter_str = filter_str.strip().lower()
     os.environ["FRAMEOS_SCENES_JSON"] = Path('./tmp/scenes.json').resolve().as_posix()
     # Start the frameos binary in the background
-    process = subprocess.Popen(['./tmp/frameos', '--debug'])
+    process = subprocess.Popen(['./tmp/frameos-bin', '--debug'])
     print(f"Started frameos with PID {process.pid}")
     time.sleep(2)
 

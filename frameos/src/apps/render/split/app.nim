@@ -21,7 +21,7 @@ type
   App* = ref object of AppRoot
     appConfig*: AppConfig
 
-proc extractMargins(marginString: string): (float, float, float, float) =
+proc extractMargins*(marginString: string): (float, float, float, float) =
   let
     margins = if marginString == "": @[] else: marginString.split(' ')
     marginTop = if margins.len > 0: parseFloat(margins[0]) else: 0.0
@@ -30,14 +30,14 @@ proc extractMargins(marginString: string): (float, float, float, float) =
     marginLeft = if margins.len > 3: parseFloat(margins[3]) else: marginRight
   result = (marginTop, marginRight, marginBottom, marginLeft)
 
-proc extractGaps(gapString: string): (float, float) =
+proc extractGaps*(gapString: string): (float, float) =
   let
     gaps = if gapString == "": @[] else: gapString.split(' ')
     gapHorizontal = if gaps.len > 0: parseFloat(gaps[0]) else: 0.0
     gapVertical = if gaps.len > 1: parseFloat(gaps[1]) else: gapHorizontal
   result = (gapHorizontal, gapVertical)
 
-proc extractRatios(widthRatios: string, heightRatios: string, columns: int,
+proc extractRatios*(widthRatios: string, heightRatios: string, columns: int,
     rows: int): (seq[float], seq[float], float, float) =
   let
     widthRatios = if widthRatios == "": @[] else: widthRatios.split(' ')
@@ -59,7 +59,7 @@ proc extractRatios(widthRatios: string, heightRatios: string, columns: int,
     totalHeightRatio += normalizedHeightRatios[i]
   result = (normalizedWidthRatios, normalizedHeightRatios, totalWidthRatio, totalHeightRatio)
 
-proc splitDimensions(width: int, height: int, appConfig: AppConfig): seq[(int, int)] =
+proc splitDimensions*(width: int, height: int, appConfig: AppConfig): seq[(int, int)] =
   let
     rows = appConfig.rows
     columns = appConfig.columns
@@ -161,4 +161,3 @@ proc get*(self: App, context: ExecutionContext): Image =
   else:
     newImage(self.frameConfig.renderWidth(), self.frameConfig.renderHeight())
   render(self, context, result)
-

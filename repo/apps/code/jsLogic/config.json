@@ -1,0 +1,13 @@
+{
+  "name": "New logic app (JS)",
+  "category": "logic",
+  "description": "JavaScript logic app template for side effects and scene state updates.",
+  "fields": [
+    {
+      "name": "stateKey",
+      "label": "State key",
+      "type": "string",
+      "value": "jsLogicResult"
+    }
+  ]
+}

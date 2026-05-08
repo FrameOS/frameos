@@ -8,7 +8,7 @@ import sequtils
 
 var thread: Thread[FrameOS]
 
-# Returns the weekday as 1=Monday .. 7=Sunday
+# Returns the weekday as 1=Monday..7=Sunday
 proc weekdayMonSun(dt: DateTime): int =
   return dt.weekday.ord + 1
 
@@ -40,7 +40,7 @@ proc handleSchedule*(self: Scheduler, dt: DateTime) =
     ev.minute == dt.minute and ev.hour == dt.hour and weekdayMatches(ev.weekday, dt)
   )
 
-  if self.frameConfig.debug:
+  if self.frameConfig.debug and len(matched) > 0:
     log(%*{
       "event": "scheduler:debug",
       "hour": dt.hour,

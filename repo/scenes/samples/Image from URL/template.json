@@ -1,0 +1,9 @@
+{
+  "name": "Image from URL",
+  "description": "Download and render an image",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 480,
+  "scenes": "./scenes.json"
+}

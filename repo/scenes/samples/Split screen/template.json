@@ -1,0 +1,9 @@
+{
+  "name": "Split screen",
+  "description": "A split screen example with multiple dependent scenes",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 1280,
+  "imageHeight": 720,
+  "scenes": "./scenes.json"
+}

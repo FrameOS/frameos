@@ -95,6 +95,41 @@ async def test_signup_first_user(no_auth_client, db: Session):
 
 
 @pytest.mark.asyncio
+async def test_signup_accepts_localhost_domain(no_auth_client, db: Session):
+    db.query(User).delete()
+    db.commit()
+
+    signup_data = {
+        "email": "marius@localhost",
+        "password": "newpassword",
+        "password2": "newpassword",
+        "newsletter": False,
+    }
+    response = await no_auth_client.post("/api/signup", json=signup_data)
+
+    assert response.status_code == HTTP_200_OK
+    json_data = response.json()
+    assert json_data["success"] is True
+
+
+@pytest.mark.asyncio
+async def test_signup_invalid_email_rejected(no_auth_client, db: Session):
+    db.query(User).delete()
+    db.commit()
+
+    signup_data = {
+        "email": "not-an-email",
+        "password": "newpassword",
+        "password2": "newpassword",
+        "newsletter": False,
+    }
+    response = await no_auth_client.post("/api/signup", json=signup_data)
+
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["msg"] == "Value error, Please enter a valid email address."
+
+
+@pytest.mark.asyncio
 async def test_signup_already_exists(no_auth_client, db: Session):
     """
     Test that if a user already exists, we cannot sign up a new user,
@@ -156,3 +191,42 @@ async def test_signup_password_too_short(no_auth_client, db: Session):
     response = await no_auth_client.post("/api/signup", json=signup_data)
     assert response.status_code == HTTP_400_BAD_REQUEST
     assert response.json()["detail"] == "Password too short."
+
+
+@pytest.mark.asyncio
+async def test_cookie_auth_on_protected_route(no_auth_client, db: Session):
+    user = User(email="cookieuser@example.com")
+    user.set_password("testpassword")
+    db.add(user)
+    db.commit()
+
+    login_data = {"username": "cookieuser@example.com", "password": "testpassword"}
+    login_response = await no_auth_client.post("/api/login", data=login_data)
+    assert login_response.status_code == HTTP_200_OK
+    assert "frameos_session" in login_response.cookies
+
+    no_auth_client.headers.pop("Authorization", None)
+    response = await no_auth_client.get("/api/system/metrics")
+    assert response.status_code == HTTP_200_OK
+
+
+@pytest.mark.asyncio
+async def test_login_cookie_secure_flag_depends_on_request_scheme(no_auth_client, db: Session):
+    user = User(email="securecookie@example.com")
+    user.set_password("testpassword")
+    db.add(user)
+    db.commit()
+
+    login_data = {"username": "securecookie@example.com", "password": "testpassword"}
+
+    http_response = await no_auth_client.post("/api/login", data=login_data)
+    assert http_response.status_code == HTTP_200_OK
+    assert "Secure" not in http_response.headers.get("set-cookie", "")
+
+    https_response = await no_auth_client.post(
+        "/api/login",
+        data=login_data,
+        headers={"x-forwarded-proto": "https"},
+    )
+    assert https_response.status_code == HTTP_200_OK
+    assert "Secure" in https_response.headers.get("set-cookie", "")

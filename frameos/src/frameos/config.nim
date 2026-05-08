@@ -13,6 +13,8 @@ proc setConfigDefaults*(config: var FrameConfig) =
   if config.scalingMode == "": config.scalingMode = "cover"
   if config.framePort == 0: config.framePort = 8787
   if config.frameHost == "": config.frameHost = "localhost"
+  if config.httpsProxy == nil: config.httpsProxy = HttpsProxyConfig()
+  if config.httpsProxy.port == 0: config.httpsProxy.port = 8443
   if config.frameAccess == "": config.frameAccess = "private"
   if config.name == "": config.name = config.frameHost
   if config.timeZone == "": config.timeZone = detectSystemTimeZone()
@@ -72,11 +74,26 @@ proc loadNetwork*(data: JsonNode): NetworkConfig =
     )
 
 proc loadDeviceConfig*(data: JsonNode): DeviceConfig =
+  var headers: seq[HttpHeaderPair] = @[]
+  if data != nil and data.kind == JObject and data.hasKey("uploadHeaders") and data["uploadHeaders"].kind == JArray:
+    for header in data["uploadHeaders"].items:
+      if header.kind == JObject:
+        let name = header{"name"}.getStr("").strip()
+        let value = header{"value"}.getStr("")
+        if name.len > 0:
+          headers.add(HttpHeaderPair(name: name, value: value))
+
   if data == nil or data.kind != JObject:
-    result = DeviceConfig(vcom: 0)
+    result = DeviceConfig(
+      vcom: 0,
+      httpUploadUrl: "",
+      httpUploadHeaders: headers,
+    )
   else:
     result = DeviceConfig(
-      vcom: data{"vcom"}.getFloat(0)
+      vcom: data{"vcom"}.getFloat(0),
+      httpUploadUrl: data{"uploadUrl"}.getStr(""),
+      httpUploadHeaders: headers,
     )
 
 proc loadPalette*(data: JsonNode): PaletteConfig =
@@ -120,10 +137,19 @@ proc loadConfig*(): FrameConfig =
     serverHost: data{"serverHost"}.getStr(),
     serverPort: data{"serverPort"}.getInt(),
     serverApiKey: data{"serverApiKey"}.getStr(),
+    serverSendLogs: data{"serverSendLogs"}.getBool(true),
     frameHost: data{"frameHost"}.getStr(),
     framePort: data{"framePort"}.getInt(),
+    httpsProxy: HttpsProxyConfig(
+      enable: data{"httpsProxy"}{"enable"}.getBool(),
+      port: data{"httpsProxy"}{"port"}.getInt(),
+      exposeOnlyPort: data{"httpsProxy"}{"exposeOnlyPort"}.getBool(),
+      serverCert: data{"httpsProxy"}{"serverCert"}.getStr(""),
+      serverKey: data{"httpsProxy"}{"serverKey"}.getStr(""),
+    ),
     frameAccess: data{"frameAccess"}.getStr(),
     frameAccessKey: data{"frameAccessKey"}.getStr(),
+    frameAdminAuth: if data{"frameAdminAuth"} == nil: %*{} else: data{"frameAdminAuth"},
     width: data{"width"}.getInt(),
     height: data{"height"}.getInt(),
     device: data{"device"}.getStr(),
@@ -147,3 +173,45 @@ proc loadConfig*(): FrameConfig =
   if result.assetsPath.endswith("/"):
     result.assetsPath = result.assetsPath.strip(leading = false, trailing = true, chars = {'/'})
   setConfigDefaults(result)
+
+proc updateSchedule(target: var FrameSchedule, source: FrameSchedule) =
+  if target == nil:
+    target = source
+  else:
+    target.events = source.events
+
+proc updateFrameConfigFrom*(target: FrameConfig, source: FrameConfig) =
+  if target == nil:
+    return
+  target.name = source.name
+  target.mode = source.mode
+  target.serverHost = source.serverHost
+  target.serverPort = source.serverPort
+  target.serverApiKey = source.serverApiKey
+  target.serverSendLogs = source.serverSendLogs
+  target.frameHost = source.frameHost
+  target.framePort = source.framePort
+  target.httpsProxy = source.httpsProxy
+  target.frameAccessKey = source.frameAccessKey
+  target.frameAccess = source.frameAccess
+  target.frameAdminAuth = source.frameAdminAuth
+  target.width = source.width
+  target.height = source.height
+  target.device = source.device
+  target.deviceConfig = source.deviceConfig
+  target.metricsInterval = source.metricsInterval
+  target.rotate = source.rotate
+  target.flip = source.flip
+  target.scalingMode = source.scalingMode
+  target.settings = source.settings
+  target.assetsPath = source.assetsPath
+  target.saveAssets = source.saveAssets
+  target.logToFile = source.logToFile
+  target.debug = source.debug
+  target.timeZone = source.timeZone
+  target.gpioButtons = source.gpioButtons
+  target.controlCode = source.controlCode
+  target.network = source.network
+  target.agent = source.agent
+  target.palette = source.palette
+  updateSchedule(target.schedule, source.schedule)

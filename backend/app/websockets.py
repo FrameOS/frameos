@@ -1,14 +1,17 @@
 import asyncio
 import json
-from jose import jwt, JWTError
 from typing import List
 from redis.asyncio import from_url as create_redis, Redis
-from fastapi import WebSocket, WebSocketDisconnect, Depends
-from sqlalchemy.orm import Session
-from app.database import get_db
+from fastapi import WebSocket, WebSocketDisconnect
+
+from app.database import SessionLocal
 
 from app.config import config
-from app.models.user import User
+from app.utils.env import get_env_float
+
+
+WEBSOCKET_BROADCAST_TIMEOUT = get_env_float("WEBSOCKET_BROADCAST_TIMEOUT", 2.0)
+
 
 class ConnectionManager:
     def __init__(self):
@@ -31,13 +34,25 @@ class ConnectionManager:
         await websocket.send_text(message)
 
     async def broadcast(self, message: str):
+        stale_connections: list[WebSocket] = []
         async with self.lock:
-            for connection in self.active_connections:
-                try:
-                    await connection.send_text(message)
-                except Exception as e:
-                    print(f"Error sending message to {connection.client}: {e}")
-                    await self.disconnect(connection)
+            connections = list(self.active_connections)
+
+        for connection in connections:
+            try:
+                await asyncio.wait_for(
+                    connection.send_text(message),
+                    timeout=WEBSOCKET_BROADCAST_TIMEOUT,
+                )
+            except Exception as e:
+                print(f"Error sending message to {connection.client}: {e}")
+                stale_connections.append(connection)
+
+        if stale_connections:
+            async with self.lock:
+                for connection in stale_connections:
+                    if connection in self.active_connections:
+                        self.active_connections.remove(connection)
 
 manager = ConnectionManager() # Local clients
 
@@ -70,27 +85,19 @@ async def publish_message(redis: Redis, event: str, data: dict):
 
 def register_ws_routes(app):
     @app.websocket("/ws")
-    async def websocket_endpoint(websocket: WebSocket, db: Session = Depends(get_db)):
+    async def websocket_endpoint(websocket: WebSocket):
         # Full access in the HASSIO ingress mode
         if config.HASSIO_RUN_MODE != "ingress":
-            token = websocket.query_params.get('token')
-            if not token:
-                await websocket.close(code=1008, reason="Missing token")
-                return
+            from app.api.auth import get_current_user_from_websocket
 
+            db = SessionLocal()
             try:
-                from app.api.auth import ALGORITHM, SECRET_KEY
-                payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-                user_email = payload.get("sub")
-                if not user_email:
-                    raise ValueError("Invalid token")
-            except JWTError:
-                await websocket.close(code=1008, reason="Invalid token")
-                return
+                user, error_reason = get_current_user_from_websocket(websocket, db)
+            finally:
+                db.close()
 
-            user = db.query(User).filter(User.email == user_email).first()
             if user is None:
-                await websocket.close(code=1008, reason="User not found")
+                await websocket.close(code=1008, reason=error_reason or "Could not validate credentials")
                 return
 
         await manager.connect(websocket)

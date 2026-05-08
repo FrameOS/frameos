@@ -1,7 +1,8 @@
-import { kea, path } from 'kea'
+import { afterMount, kea, path } from 'kea'
 import { forms } from 'kea-forms'
 import type { signupLogicType } from './signupLogicType'
 import { urls } from '../../urls'
+import { userExists } from '../../utils/apiFetch'
 
 export interface SignupForm {
   email: string
@@ -38,8 +39,6 @@ export const signupLogic = kea<signupLogicType>([
             body: JSON.stringify({ email, password, password2, newsletter }),
           })
           if (response.ok) {
-            const json = await response.json()
-            localStorage.setItem('token', json.access_token)
             window.location.href = urls.frames()
           } else {
             let errors = {}
@@ -49,6 +48,12 @@ export const signupLogic = kea<signupLogicType>([
                 errors = json.errors
               } else if (json.error) {
                 errors = { password2: json.error }
+              } else if (Array.isArray(json.detail)) {
+                const message = json.detail
+                  .map((detail: { msg?: string }) => detail?.msg)
+                  .filter(Boolean)
+                  .join(' ')
+                errors = { password2: message || response.statusText }
               } else if (json.detail) {
                 errors = { password2: json.detail }
               }
@@ -64,4 +69,9 @@ export const signupLogic = kea<signupLogicType>([
       },
     },
   })),
+  afterMount(async ({ actions }) => {
+    if (await userExists()) {
+      window.location.href = urls.login()
+    }
+  }),
 ])

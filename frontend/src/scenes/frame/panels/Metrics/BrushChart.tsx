@@ -1,64 +1,95 @@
-import React, { useRef, useState, useMemo } from 'react'
+import React, { useEffect, useMemo, useRef } from 'react'
 import { scaleTime, scaleLinear } from '@visx/scale'
 import { Brush } from '@visx/brush'
 import { Bounds } from '@visx/brush/lib/types'
 import BaseBrush from '@visx/brush/lib/BaseBrush'
 import { PatternLines } from '@visx/pattern'
 import { Group } from '@visx/group'
-import { max, extent } from '@visx/vendor/d3-array'
+import { max } from '@visx/vendor/d3-array'
 import { BrushHandleRenderProps } from '@visx/brush/lib/BrushHandle'
 import { AreaChart } from './AreaChart'
 import { WithParentSizeProps } from '@visx/responsive/lib/enhancers/withParentSize'
+import type { MetricPoint, MetricSeries, TimeRange } from './metricsLogic'
 
 // Initialize some variables
 const brushMargin = { top: 10, bottom: 15, left: 50, right: 20 }
 const chartSeparation = 30
 const PATTERN_ID = 'brush_pattern'
-const GRADIENT_ID = 'brush_gradient'
 export const accentColor = '#f6acc8'
-export const background2 = '#4c507a'
+export const background2 = '#18181b'
 const selectedBrushStyle = {
   fill: `url(#${PATTERN_ID})`,
   stroke: 'white',
 }
 
 // accessors
-const getDate = (m: { x: Date; y: number }) => m.x
-const getValue = (m: { x: Date; y: number }) => m.y
+const getDate = (m: MetricPoint) => m.x
+const getValue = (m: MetricPoint) => m.y
+const fallbackTimeRange = () => ({ start: Date.now() - 60 * 60 * 1000, end: Date.now() })
+
+function normalizeTimeRange(start: number, end: number): TimeRange {
+  const min = Math.min(start, end)
+  const max = Math.max(start, end)
+  return max - min >= 1000 ? { start: min, end: max } : { start: min - 500, end: max + 500 }
+}
+
+function getDataTimeRange(data: MetricPoint[]): TimeRange {
+  const timestamps = data.map((d) => getDate(d).getTime()).filter(Number.isFinite)
+  if (timestamps.length === 0) {
+    return fallbackTimeRange()
+  }
+  return normalizeTimeRange(Math.min(...timestamps), Math.max(...timestamps))
+}
+
+function getValueMax(data: MetricPoint[]): number {
+  return Math.max(max(data, getValue) || 0, 1)
+}
+
+function getBrushPosition(timeRange: TimeRange, scale: (date: Date) => number | undefined, width: number) {
+  const start = Math.max(0, Math.min(scale(new Date(timeRange.start)) || 0, width))
+  const end = Math.max(0, Math.min(scale(new Date(timeRange.end)) || 0, width))
+
+  return {
+    start: { x: start },
+    end: { x: end },
+  }
+}
+
+function flattenSeriesData(series: MetricSeries[], axis?: 'left' | 'right'): MetricPoint[] {
+  return series.filter((chartSeries) => !axis || chartSeries.axis === axis).flatMap((chartSeries) => chartSeries.data)
+}
 
 export type BrushProps = {
   width: number
   height: number
   margin?: { top: number; right: number; bottom: number; left: number }
   compact?: boolean
-  data: { x: Date; y: number }[]
-}
-
-const getInitialBounds = (data: { x: Date; y: number }[]) => {
-  const last =
-    data.length > 0 ? Math.min(getDate(data[data?.length - 1]).getTime(), new Date().getTime()) : new Date().getTime()
-  const first = data.length > 0 ? Math.max(getDate(data[0]).getTime(), last - 3600000) : last - 3600000
-  return [first, last]
+  series: MetricSeries[]
+  totalTimeRange: TimeRange | null
+  visibleTimeRange: TimeRange | null
+  gapThresholdMs: number | null
+  onTimeRangeChange: (start: number, end: number) => void
+  onResetTimeRange: () => void
 }
 
 export function BrushChart({
   compact = false,
   width,
   height,
-  data,
+  series,
+  totalTimeRange,
+  visibleTimeRange,
+  gapThresholdMs,
+  onTimeRangeChange,
+  onResetTimeRange,
   margin = {
     top: 20,
-    left: 40,
+    left: 56,
     bottom: 20,
-    right: 20,
+    right: 45,
   },
 }: BrushProps & WithParentSizeProps) {
   const brushRef = useRef<BaseBrush | null>(null)
-  const [filteredData, setFilteredData] = useState(() => {
-    const [min, max] = getInitialBounds(data)
-    const filteredData = data.filter((d) => getDate(d).getTime() >= min && getDate(d).getTime() <= max)
-    return filteredData
-  })
 
   const innerHeight = height - margin.top - margin.bottom
   const topChartBottomMargin = compact ? chartSeparation / 2 : chartSeparation + 10
@@ -70,92 +101,151 @@ export function BrushChart({
   const yMax = Math.max(topChartHeight, 0)
   const xBrushMax = Math.max(width - brushMargin.left - brushMargin.right, 0)
   const yBrushMax = Math.max(bottomChartHeight - brushMargin.top - brushMargin.bottom, 0)
+  const allData = useMemo(() => flattenSeriesData(series), [series])
+  const chartTimeRange = visibleTimeRange ?? totalTimeRange ?? getDataTimeRange(allData)
+  const brushTimeRange = totalTimeRange ?? chartTimeRange
+  const filteredSeries = useMemo(
+    () =>
+      series.map((chartSeries) => ({
+        ...chartSeries,
+        data: chartSeries.data.filter((d) => {
+          const timestamp = getDate(d).getTime()
+          return timestamp >= chartTimeRange.start && timestamp <= chartTimeRange.end
+        }),
+      })),
+    [series, chartTimeRange.start, chartTimeRange.end]
+  )
+  const filteredData = useMemo(() => flattenSeriesData(filteredSeries), [filteredSeries])
+  const filteredLeftData = useMemo(() => flattenSeriesData(filteredSeries, 'left'), [filteredSeries])
+  const filteredRightData = useMemo(() => flattenSeriesData(filteredSeries, 'right'), [filteredSeries])
+  const leftData = useMemo(() => flattenSeriesData(series, 'left'), [series])
+  const rightData = useMemo(() => flattenSeriesData(series, 'right'), [series])
 
   // scales
   const dateScale = useMemo(
     () =>
       scaleTime<number>({
         range: [0, xMax],
-        domain: extent(filteredData, getDate) as [Date, Date],
+        domain: [new Date(chartTimeRange.start), new Date(chartTimeRange.end)],
       }),
-    [xMax, filteredData]
+    [xMax, chartTimeRange.start, chartTimeRange.end]
   )
   const valueScale = useMemo(
     () =>
       scaleLinear<number>({
         range: [yMax, 0],
-        domain: [0, max(filteredData, getValue) || 0],
+        domain: [0, getValueMax(filteredLeftData.length > 0 ? filteredLeftData : filteredData)],
         nice: true,
       }),
-    [yMax, filteredData]
+    [yMax, filteredData, filteredLeftData]
+  )
+  const valueScaleRight = useMemo(
+    () =>
+      scaleLinear<number>({
+        range: [yMax, 0],
+        domain: [0, Math.max(getValueMax(filteredRightData), 100)],
+        nice: true,
+      }),
+    [yMax, filteredRightData]
   )
   const brushDateScale = useMemo(
     () =>
       scaleTime<number>({
         range: [0, xBrushMax],
-        domain: extent(data, getDate) as [Date, Date],
+        domain: [new Date(brushTimeRange.start), new Date(brushTimeRange.end)],
       }),
-    [xBrushMax]
+    [xBrushMax, brushTimeRange.start, brushTimeRange.end]
   )
   const brushValueScale = useMemo(
     () =>
       scaleLinear({
         range: [yBrushMax, 0],
-        domain: [0, max(data, getValue) || 0],
+        domain: [0, getValueMax(leftData.length > 0 ? leftData : allData)],
         nice: true,
       }),
-    [yBrushMax]
+    [yBrushMax, allData, leftData]
+  )
+  const brushValueScaleRight = useMemo(
+    () =>
+      scaleLinear({
+        range: [yBrushMax, 0],
+        domain: [0, Math.max(getValueMax(rightData), 100)],
+        nice: true,
+      }),
+    [yBrushMax, rightData]
   )
 
   const initialBrushPosition = useMemo(
-    () => ({
-      start: {
-        x: brushDateScale(getInitialBounds(data)[0]),
-      },
-      end: {
-        x: brushDateScale(getInitialBounds(data)[1]),
-      },
-    }),
-    [brushDateScale]
+    () => getBrushPosition(chartTimeRange, brushDateScale, xBrushMax),
+    [brushDateScale, chartTimeRange.start, chartTimeRange.end, xBrushMax]
   )
+
+  useEffect(() => {
+    const brush = brushRef.current
+    if (!brush || brush.state.isBrushing || xBrushMax <= 0 || yBrushMax <= 0) {
+      return
+    }
+
+    const position = getBrushPosition(chartTimeRange, brushDateScale, xBrushMax)
+    const x0 = Math.min(position.start.x, position.end.x)
+    const x1 = Math.max(position.start.x, position.end.x)
+    const current = brush.state.extent
+    if (Math.abs(current.x0 - x0) < 1 && Math.abs(current.x1 - x1) < 1) {
+      return
+    }
+
+    brush.setState((previous) => ({
+      ...previous,
+      start: { x: x0, y: 0 },
+      end: { x: x1, y: yBrushMax },
+      extent: { x0, x1, y0: 0, y1: yBrushMax },
+      bounds: { x0: 0, x1: xBrushMax, y0: 0, y1: yBrushMax },
+      activeHandle: null,
+      brushingType: undefined,
+      isBrushing: false,
+    }))
+  }, [brushDateScale, chartTimeRange.start, chartTimeRange.end, xBrushMax, yBrushMax])
 
   const onBrushChange = (domain: Bounds | null) => {
     if (!domain) return
-    const { x0, x1, y0, y1 } = domain
-    const dataCopy = data.filter((s) => {
-      const x = getDate(s).getTime()
-      const y = getValue(s)
-      return x > x0 && x < x1 && y > y0 && y < y1
-    })
-    setFilteredData(dataCopy)
+    const { x0, x1 } = domain
+    if (Number.isFinite(x0) && Number.isFinite(x1)) {
+      onTimeRangeChange(Number(x0), Number(x1))
+    }
   }
 
   return (
-    <div>
+    <div style={{ userSelect: 'none' }}>
       <svg width={width} height={height}>
-        <rect x={0} y={0} width={width} height={height} fill={`url(#${GRADIENT_ID})`} rx={14} />
+        <rect x={0} y={0} width={width} height={height} fill={background2} rx={14} />
         <AreaChart
           hideBottomAxis={compact}
-          data={filteredData}
+          series={filteredSeries}
           width={width}
           margin={{ ...margin, bottom: topChartBottomMargin }}
           yMax={yMax}
           xScale={dateScale}
           yScale={valueScale}
+          yScaleRight={valueScaleRight}
           gradientColor={background2}
+          gapThresholdMs={gapThresholdMs}
+          showTooltip
         />
         <AreaChart
           hideBottomAxis
           hideLeftAxis
-          data={data}
+          series={series}
           width={width}
           yMax={yBrushMax}
           xScale={brushDateScale}
           yScale={brushValueScale}
+          yScaleRight={brushValueScaleRight}
           margin={brushMargin}
+          hideRightAxis
           top={topChartHeight + topChartBottomMargin + margin.top}
           gradientColor={background2}
           withPoints={false}
+          gapThresholdMs={gapThresholdMs}
         >
           <PatternLines
             id={PATTERN_ID}
@@ -177,7 +267,7 @@ export function BrushChart({
             brushDirection="horizontal"
             initialBrushPosition={initialBrushPosition}
             onChange={onBrushChange}
-            onClick={() => setFilteredData(data)}
+            onClick={onResetTimeRange}
             selectedBoxStyle={selectedBrushStyle}
             useWindowMoveEvents
             renderBrushHandle={(props) => <BrushHandle {...props} />}

@@ -1,0 +1,9 @@
+{
+  "name": "XKCD",
+  "description": "Everyone's favorite webcomic",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 1304,
+  "imageHeight": 984,
+  "scenes": "./scenes.json"
+}

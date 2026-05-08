@@ -10,7 +10,6 @@
 #root {
   max-width: 1280px;
   margin: 0 auto;
-  padding: 1rem;
   text-align: left;
 }
 
@@ -34,11 +33,32 @@ body {
   animation: fadeInOut 3s infinite ease-in-out;
 }
 
+@keyframes aiSceneEllipsis {
+  0% {
+    width: 0ch;
+  }
+  99% {
+    width: 2ch;
+  }
+  100% {
+    width: 0ch;
+  }
+}
+
+.ai-scene-ellipsis {
+  display: inline-block;
+  overflow: hidden;
+  vertical-align: bottom;
+  width: 1ch;
+  animation: aiSceneEllipsis 3s infinite;
+}
+
+.ai-scene-ellipsis::after {
+  content: '...';
+}
+
 .react-flow .react-flow__node {
   cursor: default;
-}
-.react-flow .react-flow__node-code {
-  overflow: hidden;
 }
 
 .react-flow .react-flow__node .frameos-node-title {
@@ -63,9 +83,9 @@ body {
 }
 .react-flow__resize-control.line {
   border-color: rgba(0, 0, 0, 0.1);
-  &:hover {
-    border-color: rgba(255, 255, 255, 0.3);
-  }
+}
+.react-flow__resize-control.line:hover {
+  border-color: rgba(255, 255, 255, 0.3);
 }
 .react-flow__resize-control.handle {
   width: 12px;
@@ -119,4 +139,25 @@ select.with-triangle {
 .w-color-alpha {
   --alpha-pointer-background-color: #6a6a6a !important;
   --alpha-pointer-box-shadow: rgb(0 0 0 / 37%) 0px 1px 4px 0px !important;
+}
+
+.frameos-working-message {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.frameos-working-message__spinner {
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  border-top-color: rgba(255, 255, 255, 0.9);
+  animation: frameosWorkingSpinner 0.8s linear infinite;
+}
+
+@keyframes frameosWorkingSpinner {
+  to {
+    transform: rotate(360deg);
+  }
 }

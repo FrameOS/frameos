@@ -38,7 +38,14 @@ template expectKind(v: Value; k: FieldKind) =
 
 proc asString*(v: Value): string {.inline.} =
   assert v.kind in {fkString, fkText}; v.s
-proc asFloat*(v: Value): float64 {.inline.} = v.expectKind fkFloat; v.f
+proc asFloat*(v: Value): float64 {.inline.} =
+  case v.kind
+  of fkFloat:
+    v.f
+  of fkInteger:
+    v.i.float64
+  else:
+    raise newException(ValueError, "Value is " & $v.kind & ", expected fkFloat or fkInteger")
 proc asInt*(v: Value): int64 {.inline.} = v.expectKind fkInteger; v.i
 proc asBool*(v: Value): bool {.inline.} = v.expectKind fkBoolean; v.b
 proc asColor*(v: Value): Color = (doAssert v.kind == fkColor; v.col)

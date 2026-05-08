@@ -4,12 +4,13 @@ import { H5 } from '../../components/H5'
 import { Box } from '../../components/Box'
 import { frameHost, frameStatus } from '../../decorators/frame'
 import { DropdownMenu } from '../../components/DropdownMenu'
-import { TrashIcon } from '@heroicons/react/24/solid'
+import { ExclamationTriangleIcon, TrashIcon } from '@heroicons/react/24/solid'
 import { useActions } from 'kea'
 import { framesModel } from '../../models/framesModel'
 import { FrameImage } from '../../components/FrameImage'
 import { urls } from '../../urls'
 import { Tooltip } from '../../components/Tooltip'
+import { getFrameCertificateStatus } from '../../utils/certificates'
 
 interface FrameProps {
   frame: FrameType
@@ -54,6 +55,8 @@ export function FrameConnection({ frame }: FrameProps): JSX.Element | null {
 
 export function Frame({ frame }: FrameProps): JSX.Element {
   const { deleteFrame } = useActions(framesModel)
+  const certificateStatus = getFrameCertificateStatus(frame)
+
   return (
     <Box id={`frame-${frame.id}`} className="relative">
       <div className="flex gap-2 absolute z-10 right-2 top-2">
@@ -73,8 +76,22 @@ export function Frame({ frame }: FrameProps): JSX.Element {
         <FrameImage frameId={frame.id} className="p-2 m-auto" refreshable={false} />
       </A>
       <div className="flex justify-between px-4 pt-2 mb-2">
-        <H5 className="text-ellipsis overflow-hidden">
+        <H5 className="text-ellipsis overflow-hidden flex items-center gap-1">
           <A href={urls.frame(frame.id)}>{frame.name || frameHost(frame)}</A>
+          {certificateStatus === 'expiring' || certificateStatus === 'expired' ? (
+            <Tooltip
+              title={
+                certificateStatus === 'expired'
+                  ? 'HTTPS certificates have expired, please regenerate and redeploy.'
+                  : 'HTTPS certificates expiring soon, please regenerate and redeploy.'
+              }
+              className="cursor-help"
+            >
+              <ExclamationTriangleIcon
+                className={certificateStatus === 'expired' ? 'h-4 w-4 text-red-300' : 'h-4 w-4 text-yellow-300'}
+              />
+            </Tooltip>
+          ) : null}
         </H5>
       </div>
       <div className="px-4 pb-4">

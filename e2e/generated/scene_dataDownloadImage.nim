@@ -126,6 +126,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   ))
   scene.node2 = data_downloadImageApp.App(nodeName: "data/downloadImage", nodeId: 2.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_downloadImageApp.AppConfig(
     url: "https://frameos.net/img/logo_in_ci_tests.png",
+    metadataStateKey: "",
   ))
   scene.node3 = render_splitApp.App(nodeName: "render/split", nodeId: 3.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_splitApp.AppConfig(
     rows: 2,
@@ -151,6 +152,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   ))
   scene.node6 = data_downloadImageApp.App(nodeName: "data/downloadImage", nodeId: 6.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_downloadImageApp.AppConfig(
     url: "this is not an url",
+    metadataStateKey: "",
   ))
   scene.node4 = render_colorApp.App(nodeName: "render/color", nodeId: 4.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_colorApp.AppConfig(
     inputImage: none(Image),

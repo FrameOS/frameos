@@ -1,7 +1,0 @@
-build/
-tmp/
-agent.deps
-nimcache
-testresults
-nimble.develop
-nimble.paths

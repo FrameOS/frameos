@@ -1,4 +1,4 @@
-import zippy, json, os, times, strutils, net, httpclient
+import zippy, json, os, osproc, times, strutils, net, httpclient
 
 import frameos/channels
 import frameos/types
@@ -10,6 +10,7 @@ type
     url: string
     logs: seq[(float, JsonNode)]
     lastSendAt: float
+    lastLogFilePath: string
 
 const LOG_FLUSH_SECONDS = 1.0
 
@@ -17,13 +18,36 @@ var threadInitDone = false
 var thread: Thread[FrameConfig]
 var logFile: File
 
-proc logToFile(filename: string, logJson: JsonNode) =
+proc gzipLogFile(path: string) =
+  if path.len == 0 or path.endsWith(".gz") or not fileExists(path):
+    return
+  var target = path & ".gz"
+  var suffix = 1
+  while fileExists(target):
+    target = path & "." & $suffix & ".gz"
+    suffix += 1
+  let status = if target == path & ".gz":
+    execShellCmd("gzip -f " & quoteShell(path))
+  else:
+    execShellCmd("gzip -c " & quoteShell(path) & " > " & quoteShell(target))
+  if status != 0:
+    echo "Error gzipping log file: gzip exited with " & $status & " for " & path
+  elif target != path & ".gz":
+    try:
+      removeFile(path)
+    except OSError as e:
+      echo "Error removing compressed log file: " & e.msg
+
+proc logToFile(filename: string, logJson: JsonNode, lastLogFilePath: var string) =
   try:
     if filename.len > 0:
       let file = if "{date}" in filename:
         filename.replace("{date}", now().format("yyyyMMdd"))
       else:
         filename
+      if lastLogFilePath.len > 0 and lastLogFilePath != file:
+        gzipLogFile(lastLogFilePath)
+      lastLogFilePath = file
       logFile = open(file, fmAppend)
       logFile.write(now().format("[yyyy-MM-dd'T'HH:mm:ss]") & " " & $logJson & "\n")
       logFile.close()
@@ -43,6 +67,9 @@ proc processQueue(self: LoggerThread): int =
 
     if newLogs.len == 0:
       return 0
+
+    if not self.frameConfig.serverSendLogs:
+      return newLogs.len
 
     if newLogs.len > 1000:
       newLogs = newLogs[(newLogs.len - 1000) .. (newLogs.len - 1)]
@@ -79,7 +106,7 @@ proc run(self: LoggerThread) =
     if success:
       echo payload # print to stdout / journal
       self.logs.add(payload)
-      logToFile(self.frameConfig.logToFile, payload[1])
+      logToFile(self.frameConfig.logToFile, payload[1], self.lastLogFilePath)
       run = 2
     else:
       sleep(run)
@@ -94,13 +121,15 @@ proc createThreadRunner(frameConfig: FrameConfig) {.thread.} =
     url: url,
     logs: @[],
     lastSendAt: 0.0,
+    lastLogFilePath: "",
   )
+  var errorLogFilePath = ""
   while true:
     try:
       run(loggerThread)
     except Exception as e:
       echo "Error in logger thread: " & $e.msg
-      logToFile(frameConfig.logToFile, %*{"error": "Error in logger thread", "message": $e.msg})
+      logToFile(frameConfig.logToFile, %*{"error": "Error in logger thread", "message": $e.msg}, errorLogFilePath)
       sleep(1000)
 
 proc newLogger*(frameConfig: FrameConfig): Logger =
@@ -114,7 +143,7 @@ proc newLogger*(frameConfig: FrameConfig): Logger =
   )
   logger.log = proc(payload: JsonNode) =
     if logger.enabled:
-      logChannel.send((epochTime(), payload))
+      log(payload)
   logger.enable = proc() =
     logger.enabled = true
   logger.disable = proc() =

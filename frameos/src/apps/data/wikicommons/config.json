@@ -7,28 +7,27 @@
     {
       "name": "mode",
       "type": "select",
-      "value": "potd",
-      "options": ["potd", "random"],
+      "value": "pictureOfTheDay",
+      "options": ["pictureOfTheDay", "onThisDay", "randomPictureOfTheDay", "randomImage"],
       "required": false,
       "label": "Mode",
-      "hint": "Picture of the Day or Random Image"
-    },
-    {
-      "name": "submode",
-      "type": "select",
-      "value": "day",
-      "options": ["day", "onthisday", "month", "random"],
-      "required": false,
-      "label": "Sub-mode (for POTD)",
-      "hint": "Type of Picture of the Day selection"
+      "hint": "Choose today's Picture of the Day, the Picture of the Day from this date in a previous year, a random previous Picture of the Day, or a random Commons image."
     },
     {
       "name": "saveAssets",
       "type": "select",
-      "value": "never",
+      "value": "auto",
       "options": ["auto", "always", "never"],
       "label": "Save asset",
-      "hint": "Save the generated image to disk as an asset. It'll be placed into the frame's assets folder.\\n\\nYou can later use the 'Local image' app to view saved assets.\\n\\nIf set to 'auto', the image will be saved if the frame is set to save assets. If set to 'always', the image will always be saved. If set to 'never', the image will never be saved."
+      "hint": "Save the generated image to disk as an asset. It'll be placed into the frame's assets folder.\n\nYou can later use the 'Local image' app to view saved assets.\n\nIf set to 'auto', the image will be saved if the frame is set to save assets. If set to 'always', the image will always be saved. If set to 'never', the image will never be saved."
+    },
+    {
+      "name": "metadataStateKey",
+      "type": "string",
+      "value": "",
+      "required": false,
+      "label": "Metadata state key",
+      "placeholder": "e.g. wikimediaMetadata"
     }
   ],
   "output": [

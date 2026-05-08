@@ -1,6 +1,7 @@
 import json
 import pytest
 from app.models import Repository
+from app.models.user import User
 from sqlalchemy.exc import InvalidRequestError
 
 @pytest.mark.asyncio
@@ -79,3 +80,21 @@ async def test_delete_nonexistent_repository(async_client):
     response = await async_client.delete('/api/repositories/999999')
     assert response.status_code == 404
     assert response.json()['detail'] == "Repository not found"
+
+
+@pytest.mark.asyncio
+async def test_system_repository_image_allows_session_cookie_without_token(no_auth_client, db):
+    user = User(email="reposcookie@example.com")
+    user.set_password("testpassword")
+    db.add(user)
+    db.commit()
+
+    login_resp = await no_auth_client.post(
+        '/api/login',
+        data={'username': 'reposcookie@example.com', 'password': 'testpassword'},
+    )
+    assert login_resp.status_code == 200
+
+    response = await no_auth_client.get('/api/repositories/system/samples/templates/Calendar/image?t=-1')
+    assert response.status_code == 200
+    assert response.content

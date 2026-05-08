@@ -6,6 +6,8 @@ import type { panelsLogicType } from './panelsLogicType'
 import { frameLogic } from '../frameLogic'
 import { actionToUrl, router, urlToAction } from 'kea-router'
 import { subscriptions } from 'kea-subscriptions'
+import { isFrameControlMode } from '../../../utils/frameControlMode'
+import { isInFrameAdminMode } from '../../../utils/frameAdmin'
 
 export interface PanelsLogicProps {
   frameId: number
@@ -16,16 +18,18 @@ export interface AnyBuiltLogic extends BuiltLogic {}
 const DEFAULT_LAYOUT: Record<Area, PanelWithMetadata[]> = {
   [Area.TopLeft]: [{ panel: Panel.Scenes, active: false, hidden: false }],
   [Area.TopRight]: [
+    { panel: Panel.Templates, active: false, hidden: false },
+    { panel: Panel.Schedule, active: false, hidden: false },
     { panel: Panel.SceneState, active: true, hidden: false },
     { panel: Panel.Apps, active: false, hidden: false },
     { panel: Panel.Events, active: false, hidden: false },
-    { panel: Panel.Templates, active: false, hidden: false },
-    { panel: Panel.Schedule, active: false, hidden: false },
+    { panel: Panel.Chat, active: false, hidden: false },
   ],
   [Area.BottomLeft]: [
     { panel: Panel.Logs, active: true, hidden: false },
     { panel: Panel.Metrics, active: false, hidden: false },
     { panel: Panel.Terminal, active: false, hidden: false },
+    { panel: Panel.Ping, active: false, hidden: false },
     { panel: Panel.Debug, active: false, hidden: false },
     { panel: Panel.Assets, active: false, hidden: false },
     { panel: Panel.SceneSource, active: false, hidden: false },
@@ -36,6 +40,22 @@ const DEFAULT_LAYOUT: Record<Area, PanelWithMetadata[]> = {
 
 function panelsEqual(panel1: PanelWithMetadata, panel2: PanelWithMetadata) {
   return panel1.panel === panel2.panel && panel1.key === panel2.key
+}
+
+export function panelScrollKey(panel: PanelWithMetadata): string {
+  return `${panel.panel}.${panel.key ?? 'default'}`
+}
+
+function hideOnFramePanels(panels: Record<Area, PanelWithMetadata[]>): Record<Area, PanelWithMetadata[]> {
+  if (!isFrameControlMode()) {
+    return panels
+  }
+
+  return {
+    ...panels,
+    [Area.TopRight]: panels[Area.TopRight].filter((panel) => panel.panel !== Panel.Chat),
+    [Area.BottomLeft]: panels[Area.BottomLeft].filter((panel) => panel.panel !== Panel.Terminal),
+  }
 }
 
 export const panelsLogic = kea<panelsLogicType>([
@@ -53,6 +73,7 @@ export const panelsLogic = kea<panelsLogicType>([
     closePanel: (panel: PanelWithMetadata) => ({ panel }),
     toggleFullScreenPanel: (panel: PanelWithMetadata) => ({ panel }),
     disableFullscreenPanel: true,
+    openChat: true,
     openTemplates: true,
     openLogs: true,
     editApp: (sceneId: string, nodeId: string, nodeData: AppNodeData) => ({ sceneId, nodeId, nodeData }),
@@ -60,6 +81,7 @@ export const panelsLogic = kea<panelsLogicType>([
     editSceneJSON: (sceneId: string) => ({ sceneId }),
     openAsset: (path: string) => ({ path }),
     persistUntilClosed: (panel: PanelWithMetadata, logic: AnyBuiltLogic) => ({ panel, logic }),
+    rememberPanelScroll: (panel: PanelWithMetadata, scrollTop: number) => ({ panel, scrollTop }),
     updateUrl: true,
   }),
   reducers({
@@ -146,6 +168,29 @@ export const panelsLogic = kea<panelsLogicType>([
             a.panel === Panel.Templates ? { ...a, active: true } : a.active ? { ...a, active: false } : a
           ),
         }),
+        openChat: (state) => {
+          const existingChat = state[Area.TopRight].find((panel) => panel.panel === Panel.Chat)
+          const updatedPanels = state[Area.TopRight].map((panel) =>
+            panel.panel === Panel.Chat
+              ? { ...panel, active: true, hidden: false }
+              : panel.active
+              ? { ...panel, active: false }
+              : panel
+          )
+          if (existingChat) {
+            return {
+              ...state,
+              [Area.TopRight]: updatedPanels,
+            }
+          }
+          return {
+            ...state,
+            [Area.TopRight]: [
+              ...updatedPanels.map((panel) => (panel.active ? { ...panel, active: false } : panel)),
+              { panel: Panel.Chat, active: true, hidden: false },
+            ],
+          }
+        },
         openLogs: (state, _) => ({
           ...state,
           [Area.BottomLeft]: state[Area.BottomLeft].map((a) =>
@@ -181,6 +226,7 @@ export const panelsLogic = kea<panelsLogicType>([
       {
         toggleFullScreenPanel: (state, { panel }) => (state && panelsEqual(state, panel) ? null : panel),
         disableFullscreenPanel: () => null,
+        openChat: () => null,
         openTemplates: () => null,
         openAsset: () => null,
         editApp: () => null,
@@ -195,6 +241,21 @@ export const panelsLogic = kea<panelsLogicType>([
         editSceneJSON: (_, { sceneId }) => sceneId,
       },
     ],
+    panelScrollPositions: [
+      {} as Record<string, number>,
+      {
+        rememberPanelScroll: (state, { panel, scrollTop }) => {
+          const key = panelScrollKey(panel)
+          if (state[key] === scrollTop) {
+            return state
+          }
+          return {
+            ...state,
+            [key]: scrollTop,
+          }
+        },
+      },
+    ],
   }),
   selectors(() => ({
     id: [() => [(_, props) => props.id], (id) => id],
@@ -206,20 +267,27 @@ export const panelsLogic = kea<panelsLogicType>([
         !!panels[Area.TopLeft].find((p) => p.panel === Panel.Scenes && p.active),
     ],
     panelsWithConditions: [
-      (s) => [s.panels, s.fullScreenPanel, s.scenesOpen],
-      (panels, fullScreenPanel, scenesOpen): Record<Area, PanelWithMetadata[]> => {
-        if (!fullScreenPanel) {
-          return {
+      (s) => [s.panels, s.fullScreenPanel, s.scenesOpen, s.selectedSceneIsInterpreted],
+      (panels, fullScreenPanel, scenesOpen, selectedSceneIsInterpreted): Record<Area, PanelWithMetadata[]> => {
+        const showTemplates = !isInFrameAdminMode()
+        const showSceneSource = !isInFrameAdminMode() && !selectedSceneIsInterpreted
+
+        if (
+          !fullScreenPanel ||
+          (fullScreenPanel.panel === Panel.Templates && !showTemplates) ||
+          (fullScreenPanel.panel === Panel.SceneSource && !showSceneSource)
+        ) {
+          return hideOnFramePanels({
             ...panels,
             [Area.TopRight]: panels[Area.TopRight].filter((p) =>
               scenesOpen
-                ? [Panel.Templates, Panel.Schedule].includes(p.panel)
-                : [Panel.Apps, Panel.Events, Panel.SceneState].includes(p.panel)
+                ? [Panel.Schedule, Panel.Chat, ...(showTemplates ? [Panel.Templates] : [])].includes(p.panel)
+                : [Panel.SceneState, Panel.Apps, Panel.Events, Panel.Chat].includes(p.panel)
             ),
-            [Area.BottomLeft]: panels[Area.BottomLeft].filter((p) =>
-              !scenesOpen ? true : p.panel !== Panel.SceneSource
+            [Area.BottomLeft]: panels[Area.BottomLeft].filter(
+              (p) => p.panel !== Panel.SceneSource || (showSceneSource && !scenesOpen)
             ),
-          }
+          })
         }
         // we keep the full screen panel in the same area to not lose any mounted focus
         const topLeft = panels.TopLeft.filter((p) => panelsEqual(p, fullScreenPanel))
@@ -234,19 +302,34 @@ export const panelsLogic = kea<panelsLogicType>([
           closable: false,
           metadata: fullScreenPanel.metadata,
         }
-        return {
+        return hideOnFramePanels({
           [Area.TopLeft]: [...(topLeft.length > 0 ? [goBack] : []), ...topLeft],
           [Area.TopRight]: [...(topRight.length > 0 ? [goBack] : []), ...topRight],
           [Area.BottomLeft]: [...(bottomLeft.length > 0 ? [goBack] : []), ...bottomLeft],
           [Area.BottomRight]: [...(bottomRight.length > 0 ? [goBack] : []), ...bottomRight],
+        })
+      },
+    ],
+    selectedScenePanelId: [
+      (s) => [s.panels],
+      (panels): string | null =>
+        panels[Area.TopLeft].find((p) => p.active && (p.panel === Panel.Diagram || p.panel === Panel.SceneJSON))?.key ??
+        null,
+    ],
+    activeEditAppPanel: [
+      (s) => [s.panels, s.fullScreenPanel],
+      (panels, fullScreenPanel): PanelWithMetadata | null => {
+        if (fullScreenPanel?.panel === Panel.EditApp) {
+          return fullScreenPanel
         }
+        return panels[Area.TopLeft].find((p) => p.panel === Panel.EditApp && p.active) ?? null
       },
     ],
     selectedSceneId: [
-      (s) => [s.frameForm, s.lastSelectedScene, s.panels],
-      (frameForm, lastSelectedScene, panels): string | null =>
+      (s) => [s.frameForm, s.lastSelectedScene, s.selectedScenePanelId],
+      (frameForm, lastSelectedScene, selectedScenePanelId): string | null =>
         lastSelectedScene ??
-        panels[Area.TopLeft].find((p) => p.active && (p.panel === Panel.Diagram || p.panel === Panel.SceneJSON))?.key ??
+        selectedScenePanelId ??
         frameForm?.scenes?.find((s) => s.default)?.id ??
         frameForm?.scenes?.[0]?.id ??
         null,
@@ -255,6 +338,13 @@ export const panelsLogic = kea<panelsLogicType>([
       (s) => [s.frameForm, s.selectedSceneId],
       (frameForm, selectedSceneId): string | null =>
         selectedSceneId ? frameForm?.scenes?.find((s) => s.id === selectedSceneId)?.name ?? null : null,
+    ],
+    selectedSceneIsInterpreted: [
+      (s) => [s.frameForm, s.selectedSceneId],
+      (frameForm, selectedSceneId): boolean =>
+        !!selectedSceneId &&
+        (frameForm?.scenes?.find((scene) => scene.id === selectedSceneId)?.settings?.execution ?? 'compiled') ===
+          'interpreted',
     ],
   })),
   listeners(({ actions, cache, values }) => ({

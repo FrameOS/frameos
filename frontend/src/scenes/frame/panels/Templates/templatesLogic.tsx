@@ -40,10 +40,9 @@ export const templatesLogic = kea<templatesLogicType>([
     editLocalTemplate: (template: TemplateType) => ({ template }),
     hideModal: true,
     saveRemoteAsLocal: (repository: RepositoryType, template: TemplateType) => ({ repository, template }),
-    applyRemoteToFrame: (repository: RepositoryType, template: TemplateType, replace?: boolean) => ({
+    applyRemoteToFrame: (repository: RepositoryType, template: TemplateType) => ({
       repository,
       template,
-      replace,
     }),
     showRemoteTemplate: true,
     hideRemoteTemplate: true,
@@ -296,7 +295,7 @@ export const templatesLogic = kea<templatesLogicType>([
       (frameForm) => Object.fromEntries(frameForm?.scenes?.map((s) => [s.name, true]) || []),
     ],
   }),
-  listeners(({ actions, values, props }) => ({
+  listeners(({ actions, values }) => ({
     saveRemoteAsLocal: async ({ template, repository }) => {
       if ('zip' in template) {
         let zipPath = (template as any).zip
@@ -308,20 +307,29 @@ export const templatesLogic = kea<templatesLogicType>([
         actions.submitAddTemplateUrlForm()
       }
     },
-    applyRemoteToFrame: async ({ template, repository, replace }) => {
+    applyRemoteToFrame: async ({ template, repository }) => {
+      if (template.scenes?.length) {
+        actions.applyTemplate(template)
+        return
+      }
+
       const request: Record<string, any> = {
         format: 'scenes',
       }
-      if ('zip' in template) {
-        let zipPath = (template as any).zip
-        if (zipPath.startsWith('./')) {
-          const repositoryPath = repository.url.replace(/\/[^/]+$/, '')
-          zipPath = `${repositoryPath}/${zipPath.slice(2)}`
-        }
-        request['url'] = zipPath
-      } else {
+
+      const templateWithZip = template as TemplateType & { zip?: string }
+      let zipPath = templateWithZip.zip
+      if (!zipPath) {
         throw new Error('Failed to load template')
       }
+
+      if (zipPath.startsWith('./')) {
+        const repositoryPath = repository.url.replace(/\/[^/]+$/, '')
+        zipPath = `${repositoryPath}/${zipPath.slice(2)}`
+      }
+
+      request['url'] = zipPath
+
       const response = await apiFetch(`/api/templates`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -331,7 +339,7 @@ export const templatesLogic = kea<templatesLogicType>([
         throw new Error('Failed to update frame')
       }
       const scenes = await response.json()
-      actions.applyTemplate({ scenes }, replace)
+      actions.applyTemplate({ scenes })
     },
     saveAsTemplate: () => {
       if ((values.templateForm.exportScenes?.length ?? 0) === 0) {

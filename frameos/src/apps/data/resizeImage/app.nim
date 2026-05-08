@@ -14,5 +14,10 @@ type
 
 proc get*(self: App, context: ExecutionContext): Image =
   let image = newImage(self.appConfig.width, self.appConfig.height)
-  image.scaleAndDrawImage(self.appConfig.image, self.appConfig.scalingMode)
+  var scalingMode = self.appConfig.scalingMode
+  if scalingMode == "contain" and
+      self.appConfig.image.width <= self.appConfig.width and
+      self.appConfig.image.height <= self.appConfig.height:
+    scalingMode = "center"
+  image.scaleAndDrawImage(self.appConfig.image, scalingMode)
   return image

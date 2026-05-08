@@ -1,14 +1,15 @@
 import { actions, afterMount, kea, path } from 'kea'
-import { FrameType, LogType } from '../types'
+import { AiSceneLogType, FrameType, LogType } from '../types'
 
 import type { socketLogicType } from './socketLogicType'
-import { inHassioIngress } from '../utils/inHassioIngress'
 import { getBasePath } from '../utils/getBasePath'
+import { getFrameControlFrameId, isFrameControlMode } from '../utils/frameControlMode'
 
 export const socketLogic = kea<socketLogicType>([
   path(['src', 'scenes', 'socketLogic']),
   actions({
     newLog: (log: LogType) => ({ log }),
+    aiSceneLog: (log: AiSceneLogType) => ({ log }),
     newFrame: (frame: FrameType) => ({ frame }),
     newSceneImage: (frameId: number, sceneId: string, width: number, height: number) => ({
       frameId,
@@ -20,27 +21,36 @@ export const socketLogic = kea<socketLogicType>([
     deleteFrame: ({ id }: { id: number }) => ({ id }),
     updateSettings: (settings: Record<string, any>) => ({ settings }),
     newMetrics: (metrics: Record<string, any>) => ({ metrics }),
+    frameRendered: (frameId: number) => ({ frameId }),
   }),
   afterMount(({ actions, cache }) => {
-    const token = localStorage.getItem('token')
-    if (!token && !inHassioIngress()) {
-      console.error('🔴 No token found in localStorage, cannot connect to WebSocket.')
-      return
-    }
+    const frameControlMode = isFrameControlMode()
+    const isFrameOSAdmin =
+      typeof window !== 'undefined' &&
+      !!(window as any).FRAMEOS_APP_CONFIG &&
+      (window.location.pathname.startsWith('/admin') || window.location.pathname.startsWith('/control'))
 
     function openConnection() {
-      cache.ws = new WebSocket(`${getBasePath()}/ws` + (token ? `?token=${token}` : ''))
+      const wsPath = isFrameOSAdmin ? '/ws/admin' : '/ws'
+      cache.ws = new WebSocket(`${getBasePath()}${wsPath}`)
       cache.ws.onopen = function (event: any) {
         console.log('🔵 Connected to the WebSocket server.')
       }
 
       cache.ws.onmessage = function (event: any) {
+        if (frameControlMode && event.data === 'render') {
+          actions.frameRendered(getFrameControlFrameId())
+          return
+        }
         try {
           const data = JSON.parse(event.data)
           console.info('🟢 WebSocket message received:', data)
           switch (data.event) {
             case 'new_log':
               actions.newLog(data.data)
+              break
+            case 'ai_scene_log':
+              actions.aiSceneLog(data.data)
               break
             case 'new_frame':
               actions.newFrame(data.data)
@@ -66,7 +76,9 @@ export const socketLogic = kea<socketLogicType>([
               console.log('🟡 Unhandled websocket event:', data)
           }
         } catch (err) {
-          console.error('🔴 Failed to parse message as JSON:', event.data)
+          if (!frameControlMode) {
+            console.error('🔴 Failed to parse message as JSON:', event.data)
+          }
         }
       }
 

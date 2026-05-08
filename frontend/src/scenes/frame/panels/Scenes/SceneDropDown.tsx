@@ -9,6 +9,7 @@ import {
   CloudArrowDownIcon,
   DocumentDuplicateIcon,
   DocumentMagnifyingGlassIcon,
+  EyeIcon,
   FolderPlusIcon,
   TagIcon,
   ArrowsPointingInIcon,
@@ -32,10 +33,10 @@ export function SceneDropDown({ sceneId, context }: SceneDropDownProps) {
   const { frameId } = useValues(frameLogic)
   const { editScene, editSceneJSON, toggleFullScreenPanel } = useActions(panelsLogic)
   const { fullScreenPanel } = useValues(panelsLogic)
-  const { scenes } = useValues(scenesLogic({ frameId }))
-  const { renameScene, duplicateScene, deleteScene, setAsDefault, removeDefault, copySceneJSON } = useActions(
-    scenesLogic({ frameId })
-  )
+  const { sceneId: currentSceneId } = useValues(controlLogic({ frameId }))
+  const { scenes, undeployedSceneIds, unsavedSceneIds, previewingSceneId } = useValues(scenesLogic({ frameId }))
+  const { renameScene, duplicateScene, deleteScene, setAsDefault, removeDefault, copySceneJSON, previewScene } =
+    useActions(scenesLogic({ frameId }))
   const { saveAsTemplate, saveAsZip } = useActions(templatesLogic({ frameId }))
   const { setCurrentScene } = useActions(controlLogic({ frameId }))
   const isFullScreen = fullScreenPanel?.panel === Panel.Diagram && fullScreenPanel?.key === sceneId
@@ -43,6 +44,8 @@ export function SceneDropDown({ sceneId, context }: SceneDropDownProps) {
   if (!scene) {
     return null
   }
+  const sceneHasChanges = unsavedSceneIds.has(scene.id) || undeployedSceneIds.has(scene.id)
+  const isPreviewing = previewingSceneId === scene.id
   return (
     <DropdownMenu
       buttonColor="secondary"
@@ -63,6 +66,15 @@ export function SceneDropDown({ sceneId, context }: SceneDropDownProps) {
           onClick: () => setCurrentScene(scene.id),
           icon: <PlayIcon className="w-5 h-5" />,
         },
+        scene.id !== currentSceneId && sceneHasChanges
+          ? {
+              label: 'Preview',
+              onClick: () => previewScene(scene.id),
+              icon: <EyeIcon className="w-5 h-5" />,
+              title: 'Preview unsaved changes on the frame',
+              loading: isPreviewing,
+            }
+          : null,
         context === 'scenes'
           ? {
               label: 'Edit scene',

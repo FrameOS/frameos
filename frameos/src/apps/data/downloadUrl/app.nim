@@ -1,6 +1,8 @@
-import httpclient
 import frameos/apps
 import frameos/types
+import frameos/utils/http_client
+
+const MaxDownloadedUrlBytes = 2 * 1024 * 1024
 
 type
   AppConfig* = object
@@ -11,11 +13,8 @@ type
 
 proc get*(self: App, context: ExecutionContext): string =
   let url = self.appConfig.url
-  let client = newHttpClient(timeout = 30000)
   try:
-    return client.getContent(url)
+    return boundedGetContent(url, maxBytes = MaxDownloadedUrlBytes)
   except CatchableError as e:
     self.logError e.msg
     return e.msg
-  finally:
-    client.close()

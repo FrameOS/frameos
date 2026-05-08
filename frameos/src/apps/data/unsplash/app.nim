@@ -13,6 +13,7 @@ type
     search*: string
     orientation*: string
     saveAssets*: string
+    metadataStateKey*: string
 
   App* = ref object of AppRoot
     appConfig*: AppConfig
@@ -34,8 +35,8 @@ proc get*(self: App, context: ExecutionContext): Image =
   let height = if context.hasImage: context.image.height else: self.frameConfig.renderHeight()
   let search = self.appConfig.search
   let orientation = if self.appConfig.orientation == "auto":
-                      if width > height: "portrait"
-                      elif width < height: "landscape"
+                      if height > width: "portrait"
+                      elif width > height: "landscape"
                       else: "squarish"
                     elif self.appConfig.orientation == "any": ""
                     else: self.appConfig.orientation
@@ -74,10 +75,23 @@ proc get*(self: App, context: ExecutionContext): Image =
     if imageData.code != Http200:
       return self.error(context, &"Error {imageData.status} fetching image")
 
+    if self.appConfig.metadataStateKey != "":
+      self.scene.state[self.appConfig.metadataStateKey] = %*{
+        "source": "unsplash",
+        "search": search,
+        "orientation": orientation,
+        "imageUrl": realImageUrl,
+        "id": json{"id"}.getStr,
+        "description": json{"description"}.getStr(json{"alt_description"}.getStr("")),
+        "photoUrl": json{"links"}{"html"}.getStr,
+        "author": json{"user"}{"name"}.getStr,
+        "authorUsername": json{"user"}{"username"}.getStr,
+        "authorUrl": json{"user"}{"links"}{"html"}.getStr
+      }
+
     if self.appConfig.saveAssets == "auto" or self.appConfig.saveAssets == "always":
       discard self.saveAsset(&"{search} {width}x{height}", ".jpg", imageData.body, self.appConfig.saveAssets == "auto")
 
-    result = decodeImage(imageData.body)
+    result = decodeImageWithFallback(imageData.body)
   except CatchableError as e:
     return self.error(context, "Error fetching image from Unsplash: " & $e.msg)
-

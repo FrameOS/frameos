@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import patch, AsyncMock
 from app.models.frame import new_frame, Frame
-from app.models.log import new_log, process_log, Log
+from app.models.log import LOG_LIMIT_PER_FRAME, new_log, process_log, Log
 
 @pytest.mark.asyncio
 @patch("app.models.log.publish_message", new_callable=AsyncMock)
@@ -50,8 +50,9 @@ async def test_new_log_trimming(mock_pub, db, redis):
     db.query(Log).delete()
     db.commit()
 
-    # Insert 1200 logs => older logs should be truncated to keep total at 1100
-    for i in range(1200):
-        await new_log(db, redis, frame.id, "info", f"Log {i}")
+    # Seed logs up to the trim threshold, then add one via new_log to trigger pruning.
+    db.add_all([Log(frame_id=frame.id, type="info", line=f"Log {i}") for i in range(LOG_LIMIT_PER_FRAME + 100)])
+    db.commit()
+    await new_log(db, redis, frame.id, "info", "Trigger trim")
     count = db.query(Log).filter_by(frame_id=frame.id).count()
-    assert count == 1100
+    assert count == LOG_LIMIT_PER_FRAME + 1

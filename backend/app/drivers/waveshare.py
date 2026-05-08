@@ -1,9 +1,14 @@
+import json
 import os
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional, Literal
 
 from app.drivers.drivers import Driver
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+FRAMEOS_ROOT = REPO_ROOT / "frameos"
 
 @dataclass
 class WaveshareVariant:
@@ -71,8 +76,30 @@ VARIANT_COLORS = {
     "EPD_10in3": "SixteenGray",
 }
 
+NO_SPI_VARIANTS = {
+    "EPD_12in48",
+    "EPD_12in48b",
+    "EPD_12in48b_V2",
+    "EPD_13in3e",
+}
+
+BOOT_CONFIG_SPI_VARIANTS = {
+    "EPD_10in3",
+}
+
+BOOT_CONFIG_LINES_BY_VARIANT = {
+    "EPD_10in3": [
+        "dtoverlay=spi0-0cs",
+        "#dtparam=spi=on",
+    ],
+    "EPD_13in3e": [
+        "gpio=7=op,dl",
+        "gpio=8=op,dl",
+    ],
+}
+
 def get_variant_keys_for(folder: str) -> list[str]:
-    directory = os.path.join("..", "frameos", "src", "drivers", "waveshare", folder)
+    directory = FRAMEOS_ROOT / "src" / "drivers" / "waveshare" / folder
     return [
         filename[0:-4]
         for filename in os.listdir(directory)
@@ -97,6 +124,39 @@ def get_variant_folder(variant_key: str) -> str:
     else:
         return "epd12in48"
 
+def nim_string_seq_literal(values: list[str]) -> str:
+    return "@[" + ", ".join(json.dumps(value) for value in values) + "]"
+
+def waveshare_setup_imports_nim(variant_key: str) -> str:
+    setup_driver = waveshare_setup_driver(variant_key)
+    imports = [
+        "import frameos/device_setup",
+        "import frameos/driver_context",
+    ]
+    if setup_driver:
+        imports.append(f"import drivers/{setup_driver}/{setup_driver} as {setup_driver}SetupDriver")
+    return "\n".join(imports)
+
+def waveshare_setup_driver(variant_key: str) -> str | None:
+    if variant_key in BOOT_CONFIG_SPI_VARIANTS:
+        return None
+    return "noSpi" if variant_key in NO_SPI_VARIANTS else "spi"
+
+def waveshare_setup_body_nim(variant_key: str) -> str:
+    setup_driver = waveshare_setup_driver(variant_key)
+    setup_calls = []
+    if setup_driver:
+        setup_calls.append(
+            f'addSetupResult(result, runSetupStep("{setup_driver}", proc(): SetupResult = {setup_driver}SetupDriver.setup()))'
+        )
+    boot_config_lines = BOOT_CONFIG_LINES_BY_VARIANT.get(variant_key, [])
+    if boot_config_lines:
+        setup_calls.append(
+            'addSetupResult(result, runSetupStep("bootConfig", proc(): SetupResult = '
+            f"setupBootConfig({nim_string_seq_literal(boot_config_lines)})))"
+        )
+    return "\n  ".join(setup_calls or ["result = setupOk()"])
+
 def get_proc_arguments(line: str, variant_key: str) -> list[str]:
     unknown_color = "FourGray" if "4Gray" in line else "Unknown"
     argmap = {
@@ -109,10 +169,34 @@ def get_proc_arguments(line: str, variant_key: str) -> list[str]:
         "picdata": VARIANT_COLORS.get(variant_key, unknown_color),
     }
     arg_names = []
-    for arg in line.split('*(')[1].split(') {.')[0].split(';'):
+    for arg in get_proc_parameters(line):
         name = arg.strip().split(': ')[0]
         arg_names.append(argmap.get(name.lower(), name))
     return arg_names
+
+def get_proc_parameters(line: str) -> list[str]:
+    if "*(" not in line:
+        return []
+    parameters = line.split("*(", 1)[1].split(")", 1)[0].strip()
+    if not parameters:
+        return []
+    return [parameter.strip() for parameter in parameters.split(";")]
+
+def get_default_proc_arguments(line: str) -> str:
+    default_args = []
+    for parameter in get_proc_parameters(line):
+        parameter_type = parameter.split(": ", 1)[1].strip() if ": " in parameter else ""
+        if parameter_type == "UBYTE":
+            default_args.append("0.uint8")
+        elif parameter_type == "UWORD":
+            default_args.append("0.uint16")
+        elif parameter_type == "UDOUBLE":
+            default_args.append("0.uint32")
+        elif parameter_type.startswith("ptr "):
+            default_args.append("nil")
+        else:
+            default_args.append("0")
+    return ", ".join(default_args)
 
 def key_to_float(key: str) -> tuple[Optional[float], Optional[str]]:
     match = re.search(r'(\d+)in(\d+)([a-zA-Z_0-9]*)', key)
@@ -134,7 +218,8 @@ def convert_waveshare_source(variant_key: Optional[str]) -> WaveshareVariant:
     if size is None or code is None:
         raise Exception(f"Invalid waveshare driver variant {variant_key}")
 
-    with open(os.path.join("..", "frameos", "src", "drivers", "waveshare", get_variant_folder(variant_key), f"{variant_key}.nim"), "r") as f:
+    source_path = FRAMEOS_ROOT / "src" / "drivers" / "waveshare" / get_variant_folder(variant_key) / f"{variant_key}.nim"
+    with open(source_path, "r") as f:
         variant = WaveshareVariant(key=variant_key, prefix='', size=size, code=code)
         lines = []
         in_proc = False
@@ -170,12 +255,15 @@ def convert_waveshare_source(variant_key: Optional[str]) -> WaveshareVariant:
                 proc_name = line.split("*(")[0].split(" ")[1]
                 if proc_name.lower() == f"{variant.prefix}_Init".lower() and variant.init_function is None:
                     variant.init_function = proc_name
+                    variant.init_args = get_default_proc_arguments(line)
                     variant.init_returns_zero = "): UBYTE" in line
                 if proc_name.lower() == f"{variant.prefix}_Init_4Gray".lower():
                     variant.init_function = proc_name
+                    variant.init_args = get_default_proc_arguments(line)
                     variant.init_returns_zero = "): UBYTE" in line
                 if proc_name.lower() == f"{variant.prefix}_4Gray_Init".lower():
                     variant.init_function = proc_name
+                    variant.init_args = get_default_proc_arguments(line)
                     variant.init_returns_zero = "): UBYTE" in line
                 if proc_name.lower() == f"{variant.prefix}_Clear".lower() and variant.clear_function is None:
                     variant.clear_function = proc_name
@@ -235,6 +323,7 @@ def write_waveshare_driver_nim(drivers: dict[str, Driver]) -> str:
 
 import {variant_folder}/DEV_Config as waveshareConfig
 import {variant_folder}/{variant.key} as waveshareDisplay
+{waveshare_setup_imports_nim(variant.key)}
 import drivers/waveshare/types
 
 let width* = waveshareDisplay.{variant.prefix}_WIDTH
@@ -242,6 +331,10 @@ let height* = waveshareDisplay.{variant.prefix}_HEIGHT
 
 let color_option* = ColorOption.{variant.color_option}
 {color_warning}
+
+proc setup*(frameOS: DriverContext = nil): SetupResult =
+  discard frameOS
+  {waveshare_setup_body_nim(variant.key)}
 
 proc init*() =
   let resp = waveshareConfig.DEV_Module_Init()

@@ -43,12 +43,9 @@
           "description": "Name for this app",
           "type": "string"
         },
-        "nixpkgs": {
-          "description": "List of nix packages to install (mode=nixos)",
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
+        "origin": {
+          "description": "Origin app this app was created from, such as repo/apps/code/jsText",
+          "type": "string"
         },
         "output": {
           "description": "Returned fields",
@@ -229,7 +226,20 @@
       "type": "string"
     },
     "FieldType": {
-      "enum": ["string", "text", "float", "integer", "boolean", "color", "json", "node", "scene", "image", "font"],
+      "enum": [
+        "string",
+        "text",
+        "float",
+        "integer",
+        "boolean",
+        "color",
+        "date",
+        "json",
+        "node",
+        "scene",
+        "image",
+        "font"
+      ],
       "type": "string"
     },
     "MarkdownField": {
@@ -253,6 +263,10 @@
     "OutputField": {
       "additionalProperties": false,
       "properties": {
+        "example": {
+          "description": "Example output (stringified)",
+          "type": "string"
+        },
         "name": {
           "description": "Name of the output field",
           "type": "string"

@@ -1,14 +1,13 @@
 {.passl: "-levdev".}
-import pixie, json, posix, strformat, os, options
+import json, posix, strformat, os, options
 
 import ./libevdev
 import ./linuxInput
 
-import frameos/types
+import frameos/driver_context
 import frameos/channels
 
 type Driver* = ref object of FrameOSDriver
-  discard
 
 var thread: Thread[void]
 
@@ -126,6 +125,6 @@ proc startThread*() {.thread.} =
         "error": "Failed to initialize driver", "exception": e.msg,
         "stack": e.getStackTrace()})
 
-proc init*(frameOS: FrameOS): Driver =
+proc init*(frameOS: DriverContext): Driver =
   createThread(thread, startThread)
   result = Driver(name: "evdev")

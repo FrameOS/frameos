@@ -11,7 +11,13 @@ import { TextArea } from '../../../../components/TextArea'
 import { panelsLogic } from '../panelsLogic'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
 import { Markdown } from '../../../../components/Markdown'
-import { ClipboardDocumentIcon, InformationCircleIcon, PencilSquareIcon, TrashIcon } from '@heroicons/react/24/solid'
+import {
+  ClipboardDocumentIcon,
+  DocumentDuplicateIcon,
+  InformationCircleIcon,
+  PencilSquareIcon,
+  TrashIcon,
+} from '@heroicons/react/24/solid'
 import { appNodeLogic } from './appNodeLogic'
 import { NodeCache } from './NodeCache'
 import { CodeArg } from './CodeArg'
@@ -20,10 +26,12 @@ import { FieldTypeTag } from '../../../../components/FieldTypeTag'
 import { Tooltip } from '../../../../components/Tooltip'
 import { FontSelect } from '../../../../components/FontSelect'
 import { ColorInput } from '../../../../components/ColorInput'
+import * as ReactJsonModule from '@microlink/react-json-view'
+const ReactJson = ((ReactJsonModule as any).default ?? ReactJsonModule) as any
 
 export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchNodeData>): JSX.Element {
   const { frameId, sceneId, sceneOptions } = useValues(diagramLogic)
-  const { updateNodeConfig, copyAppJSON, deleteApp } = useActions(diagramLogic)
+  const { updateNodeConfig, copyAppJSON, duplicateNode, deleteApp, forkSceneApp } = useActions(diagramLogic)
   const { editApp } = useActions(panelsLogic)
   const appNodeLogicProps = { frameId, sceneId, nodeId: id }
   const {
@@ -32,8 +40,11 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
     isDispatch,
     isScene,
     name,
+    appMenuEditLabel,
     fields,
     isCustomApp,
+    isSceneApp,
+    isJavaScriptSceneApp,
     isDataApp,
     configJsonError,
     output,
@@ -55,7 +66,7 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
       ? 'bg-black bg-opacity-70 border-fuchsia-900 shadow-fuchsia-700/50'
       : isDispatch
       ? 'bg-black bg-opacity-70 border-orange-900 shadow-orange-700/50 '
-      : isCustomApp
+      : isCustomApp || isSceneApp
       ? 'bg-black bg-opacity-70 border-teal-900 shadow-teal-700/50 '
       : isDataApp
       ? 'bg-black bg-opacity-70 border-green-700 shadow-green-500/50 '
@@ -68,7 +79,7 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
     ? 'bg-fuchsia-900'
     : isDispatch
     ? 'bg-orange-900'
-    : isCustomApp
+    : isCustomApp || isSceneApp
     ? 'bg-teal-900'
     : isDataApp
     ? 'bg-green-700'
@@ -121,7 +132,7 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
           ) : null}
           <div className="flex-1">
             {name}
-            {isCustomApp ? ' (edited)' : ''}
+            {isSceneApp ? ' (scene)' : isCustomApp ? ' (edited)' : ''}
           </div>
           <DropdownMenu
             className="w-fit"
@@ -132,15 +143,29 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
                 ? []
                 : [
                     {
-                      label: 'Edit App',
+                      label: appMenuEditLabel,
                       onClick: () => editApp(sceneId, id, data),
                       icon: <PencilSquareIcon className="w-5 h-5" />,
                     },
+                    ...(isSceneApp && !isJavaScriptSceneApp
+                      ? [
+                          {
+                            label: 'Fork App',
+                            onClick: () => forkSceneApp(id),
+                            icon: <DocumentDuplicateIcon className="w-5 h-5" />,
+                          },
+                        ]
+                      : []),
                   ]),
               {
                 label: 'Copy as JSON',
                 onClick: () => copyAppJSON(id),
                 icon: <ClipboardDocumentIcon className="w-5 h-5" />,
+              },
+              {
+                label: 'Duplicate',
+                onClick: () => duplicateNode(id),
+                icon: <DocumentDuplicateIcon className="w-5 h-5" />,
               },
               {
                 label: 'Delete Node',
@@ -199,7 +224,7 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
                     (codeArgs.includes(field.name) ||
                       fieldInputFields.includes(field.name) ||
                       nodeOutputFields.includes(field.name) ||
-                      (field.name in data.config && data.config[field.name] !== field.value))
+                      (data.config && field.name in data.config && data.config[field.name] !== field.value))
 
                   const isFieldWithInput =
                     'name' in field &&
@@ -263,7 +288,7 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
                                 : ''
                             )}
                             title={
-                              field.name in data.config && data.config[field.name] !== field.value
+                              data.config && field.name in data.config && data.config[field.name] !== field.value
                                 ? `${field.name} has been modified`
                                 : undefined
                             }
@@ -345,20 +370,28 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
                               ) : field.type === 'font' ? (
                                 <FontSelect
                                   theme="node"
-                                  value={(field.name in data.config ? data.config[field.name] : field.value) || ''}
+                                  value={
+                                    (data.config && field.name in data.config
+                                      ? data.config[field.name]
+                                      : field.value) || ''
+                                  }
                                   onChange={(value) => updateNodeConfig(id, field.name, value)}
                                 />
                               ) : field.type === 'select' ? (
                                 <Select
                                   theme="node"
-                                  value={field.name in data.config ? data.config[field.name] : field.value}
+                                  value={
+                                    data.config && field.name in data.config ? data.config[field.name] : field.value
+                                  }
                                   options={(field.options ?? []).map((o) => ({ value: o, label: o }))}
                                   onChange={(value) => updateNodeConfig(id, field.name, value)}
                                 />
                               ) : field.type === 'scene' ? (
                                 <Select
                                   theme="node"
-                                  value={field.name in data.config ? data.config[field.name] : field.value}
+                                  value={
+                                    data.config && field.name in data.config ? data.config[field.name] : field.value
+                                  }
                                   options={sceneOptions}
                                   onChange={(value) => updateNodeConfig(id, field.name, value)}
                                 />
@@ -367,7 +400,9 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
                                   theme="node"
                                   placeholder={field.placeholder}
                                   value={String(
-                                    (field.name in data.config ? data.config[field.name] : field.value) ?? ''
+                                    (data.config && field.name in data.config
+                                      ? data.config[field.name]
+                                      : field.value) ?? ''
                                   )}
                                   onChange={(value) => updateNodeConfig(id, field.name, value)}
                                   rows={field.rows ?? 3}
@@ -376,7 +411,9 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
                                 <input
                                   type="checkbox"
                                   checked={
-                                    (field.name in data.config ? data.config[field.name] : field.value) == 'true'
+                                    (data.config && field.name in data.config
+                                      ? data.config[field.name]
+                                      : field.value) == 'true'
                                   }
                                   onChange={(e) =>
                                     updateNodeConfig(id, field.name, e.target.checked ? 'true' : 'false')
@@ -387,17 +424,33 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
                                   theme="node"
                                   placeholder={field.placeholder}
                                   value={String(
-                                    (field.name in data.config ? data.config[field.name] : field.value) ?? ''
+                                    (data.config && field.name in data.config
+                                      ? data.config[field.name]
+                                      : field.value) ?? ''
                                   )}
                                   onChange={(value) => updateNodeConfig(id, field.name, value)}
                                   className="!min-w-[50px]"
+                                />
+                              ) : field.type === 'date' ? (
+                                <TextInput
+                                  theme="node"
+                                  type="date"
+                                  placeholder={field.placeholder}
+                                  value={String(
+                                    (data.config && field.name in data.config
+                                      ? data.config[field.name]
+                                      : field.value) ?? ''
+                                  )}
+                                  onChange={(value) => updateNodeConfig(id, field.name, value)}
                                 />
                               ) : (
                                 <TextInput
                                   theme="node"
                                   placeholder={field.placeholder}
                                   value={String(
-                                    (field.name in data.config ? data.config[field.name] : field.value) ?? ''
+                                    (data.config && field.name in data.config
+                                      ? data.config[field.name]
+                                      : field.value) ?? ''
                                   )}
                                   onChange={(value) => updateNodeConfig(id, field.name, value)}
                                   type={field.type === 'integer' || field.type === 'float' ? 'tel' : 'text'}
@@ -426,7 +479,7 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
                     style={{
                       position: 'relative',
                       transform: 'none',
-                      right: 0,
+                      left: 0,
                       top: 0,
                       background: 'black',
                       borderColor: 'white',
@@ -446,6 +499,39 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
                     }}
                   />
                   <CodeArg codeArg={{ type: out.type, name: out.name }} />
+                  {out.example
+                    ? (() => {
+                        let output = { [out.name]: out.example }
+                        try {
+                          output = JSON.parse(out.example)
+                        } catch {}
+
+                        return (
+                          <Tooltip
+                            title={
+                              <div className="p-2 bg-gray-700">
+                                <div className="min-w-[40vw] w-[500px] max-w-[90vw] max-h-[60vh] overflow-auto">
+                                  <ReactJson
+                                    collapsed={2}
+                                    theme="ocean"
+                                    src={output}
+                                    name={`example output for ${out.name}`}
+                                    enableClipboard={false}
+                                    displayDataTypes={false}
+                                  />
+                                </div>
+                              </div>
+                            }
+                            containerClassName="flex"
+                            className="ml-1 inline-flex rounded-full p-0.5 text-indigo-100 hover:text-white"
+                            tooltipColor="gray"
+                            noPadding
+                          >
+                            <InformationCircleIcon className="w-4 h-4" aria-label="Example output" />
+                          </Tooltip>
+                        )
+                      })()
+                    : null}
                 </div>
               ))}
             </div>

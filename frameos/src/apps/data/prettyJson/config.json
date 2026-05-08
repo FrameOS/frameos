@@ -16,6 +16,13 @@
       "value": "2",
       "required": false,
       "label": "Indent"
+    },
+    {
+      "name": "prettify",
+      "type": "boolean",
+      "value": "true",
+      "required": false,
+      "label": "Prettify"
     }
   ],
   "output": [

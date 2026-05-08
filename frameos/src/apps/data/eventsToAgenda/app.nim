@@ -19,6 +19,7 @@ type
 
   App* = ref object of AppRoot
     appConfig*: AppConfig
+    testOverrideToday*: string
 
 const titleFormat = "{weekday}, {month/n} {day}"
 
@@ -31,12 +32,27 @@ proc getTimezone*(self: App, json: JsonNode): string =
   if self.frameConfig.timeZone != "":
     return self.frameConfig.timeZone
 
+proc formatFontSize(value: float): string =
+  var formatted = value.formatFloat(ffDecimal, 6)
+  while formatted.len > 0 and formatted[^1] == '0':
+    formatted.setLen(formatted.len - 1)
+  if formatted.len > 0 and formatted[^1] == '.':
+    formatted.setLen(formatted.len - 1)
+  if formatted.len == 0:
+    return "0"
+  result = formatted
+
 proc get*(self: App, context: ExecutionContext): string =
-  let title = &"^({self.appConfig.titleFontSize},{self.appConfig.titleColor.toHtmlHex()})"
-  let normal = &"^({self.appConfig.baseFontSize},{self.appConfig.textColor.toHtmlHex()})"
-  let time = &"^({self.appConfig.baseFontSize},{self.appConfig.timeColor.toHtmlHex()})"
+  let title = &"^({formatFontSize(self.appConfig.titleFontSize)},{self.appConfig.titleColor.toHtmlHex()})"
+  let normal = &"^({formatFontSize(self.appConfig.baseFontSize)},{self.appConfig.textColor.toHtmlHex()})"
+  let time = &"^({formatFontSize(self.appConfig.baseFontSize)},{self.appConfig.timeColor.toHtmlHex()})"
   let events = self.appConfig.events
   let timezone = self.getTimezone(events)
+  let todayTs =
+    if self.testOverrideToday.len > 0:
+      parseTs("{year/4}-{month/2}-{day/2}", self.testOverrideToday)
+    else:
+      epochTime().Timestamp
 
   proc h1(text: string): string = &"{title}{text}\n{normal}\n"
   proc formatDay(day: string): string = format(parseTs("{year/4}-{month/2}-{day/2}", day), titleFormat)
@@ -47,7 +63,6 @@ proc get*(self: App, context: ExecutionContext): string =
 
   var currentDay = ""
   if self.appConfig.startWithToday or noEvents:
-    let todayTs = epochTime().Timestamp
     result &= h1(format(todayTs, titleFormat, tzName = timezone))
     currentDay = format(todayTs, "{year/4}-{month/2}-{day/2}", tzName = timezone)
 
@@ -65,12 +80,18 @@ proc get*(self: App, context: ExecutionContext): string =
     let endDay = obj{"endTime"}.getStr()
     let withTime = "T" in startDay
     let startDate = startDay.split("T")[0]
+    let endDate = endDay.split("T")[0]
+    var displayDay = startDate
 
-    if startDate != currentDay: # new day, past or future
-      if not hasAny and startDate != currentDay and self.appConfig.startWithToday:
+    if self.appConfig.startWithToday and currentDay != "" and
+        startDate <= currentDay and currentDay <= endDate:
+      displayDay = currentDay
+
+    if displayDay != currentDay: # new day, past or future
+      if not hasAny and displayDay != currentDay and self.appConfig.startWithToday:
         result &= "No events today\n"
-      result &= "\n" & h1(formatDay(startDate))
-      currentDay = startDate
+      result &= "\n" & h1(formatDay(displayDay))
+      currentDay = displayDay
 
     hasAny = true
 

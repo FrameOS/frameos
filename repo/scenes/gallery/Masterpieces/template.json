@@ -1,0 +1,9 @@
+{
+  "name": "Masterpieces",
+  "description": "A collection of architectural masterpieces from around the world.. 65 images",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 1280,
+  "imageHeight": 720,
+  "scenes": "./scenes.json"
+}

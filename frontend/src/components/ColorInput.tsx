@@ -4,7 +4,6 @@ import { Tooltip } from './Tooltip'
 import { frameLogic } from '../scenes/frame/frameLogic'
 import { withCustomPalette } from '../devices'
 
-import type * as CSS from 'csstype'
 import Saturation from '@uiw/react-color-saturation'
 import Alpha, { PointerProps } from '@uiw/react-color-alpha'
 import Hue from '@uiw/react-color-hue'
@@ -44,14 +43,15 @@ const PRESET_COLORS = [
   '#FFFFFF',
 ]
 const getNumberValue = (value: string) => Number(String(value).replace(/%/g, ''))
+type Style = React.CSSProperties & Record<`--${string}`, string | number | undefined>
 
 export interface EditableInputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'onChange'> {
   prefixCls?: string
   value?: string | number
   label?: React.ReactNode
-  labelStyle?: CSS.Properties<string | number>
+  labelStyle?: Style
   placement?: 'top' | 'left' | 'bottom' | 'right'
-  inputStyle?: CSS.Properties<string | number>
+  inputStyle?: Style
   onChange?: (evn: React.ChangeEvent<HTMLInputElement>, value: string | number) => void
   renderInput?: (
     props: React.InputHTMLAttributes<HTMLInputElement>,
@@ -100,7 +100,7 @@ const EditableInput = React.forwardRef<HTMLInputElement, EditableInputProps>(fun
     setValue(props.value)
     onBlur && onBlur(evn)
   }
-  const placementStyle: CSS.Properties<string | number> = {}
+  const placementStyle: Style = {}
   if (placement === 'bottom') {
     placementStyle['flexDirection'] = 'column'
   }
@@ -111,7 +111,7 @@ const EditableInput = React.forwardRef<HTMLInputElement, EditableInputProps>(fun
     placementStyle['flexDirection'] = 'row-reverse'
   }
 
-  const wrapperStyle: CSS.Properties<string | number> = {
+  const wrapperStyle: Style = {
     '--editable-input-label-color': 'rgb(153, 153, 153)',
     '--editable-input-box-shadow': 'rgb(204 204 204) 0px 0px 0px 1px inset',
     '--editable-input-color': '#666',
@@ -121,9 +121,9 @@ const EditableInput = React.forwardRef<HTMLInputElement, EditableInputProps>(fun
     fontSize: 11,
     ...placementStyle,
     ...style,
-  } as CSS.Properties<string | number>
+  }
 
-  const editableStyle: CSS.Properties<string | number> = {
+  const editableStyle: Style = {
     width: '100%',
     paddingTop: 2,
     paddingBottom: 2,
@@ -136,7 +136,7 @@ const EditableInput = React.forwardRef<HTMLInputElement, EditableInputProps>(fun
     color: 'var(--editable-input-color)',
     boxShadow: 'var(--editable-input-box-shadow)',
     ...inputStyle,
-  } as CSS.Properties<string | number>
+  }
 
   const inputProps: React.InputHTMLAttributes<HTMLInputElement> = {
     value,
@@ -624,7 +624,7 @@ const Sketch = React.forwardRef<HTMLDivElement, SketchProps>(function Sketch(pro
     } catch {}
   }
 
-  const styleMain = {
+  const styleMain: Style = {
     '--sketch-background': 'rgb(255, 255, 255)',
     '--sketch-box-shadow': 'rgb(0 0 0 / 15%) 0px 0px 0px 1px, rgb(0 0 0 / 15%) 0px 8px 16px',
     '--sketch-swatch-box-shadow': 'rgb(0 0 0 / 15%) 0px 0px 0px 1px inset',
@@ -635,18 +635,18 @@ const Sketch = React.forwardRef<HTMLDivElement, SketchProps>(function Sketch(pro
     boxShadow: 'var(--sketch-box-shadow)',
     width,
     ...style,
-  } as CSS.Properties<string | number>
-  const styleAlpha: CSS.Properties<string | number> = {
+  }
+  const styleAlpha: Style = {
     borderRadius: 2,
     background: hsvaToRgbaString(hsva),
     boxShadow: 'var(--sketch-alpha-box-shadow)',
   }
-  const styleSwatch: CSS.Properties<string | number> = {
+  const styleSwatch: Style = {
     borderTop: 'var(--sketch-swatch-border-top)',
     paddingTop: 10,
     paddingLeft: 10,
   }
-  const styleSwatchRect: CSS.Properties<string | number> = {
+  const styleSwatchRect: Style = {
     marginRight: 10,
     marginBottom: 10,
     borderRadius: 3,
