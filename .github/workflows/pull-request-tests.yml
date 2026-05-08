@@ -198,6 +198,73 @@ jobs:
           mkdir -p ../frontend/dist/static
           TEST=1 pytest
 
+  deploy-e2e:
+    name: Deploy E2E SSH
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.12'
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.27.0
+          run_install: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+          cache-dependency-path: pnpm-lock.yaml
+
+      - uses: jiro4989/setup-nim-action@v1
+        with:
+          nim-version: 2.2.4
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify Docker
+        run: docker version
+
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install python dependencies
+        run: |
+          cd backend
+          python -m pip install --upgrade uv
+          uv venv
+          uv pip install -r requirements.txt
+
+      - name: Prepare FrameOS build inputs
+        run: |
+          cd frameos
+          nimble install -d
+          nimble assets
+          nimble build_quickjs --silent
+          nimble setup
+          FRAMEOS_ROOT_DIR="." python3 ../e2e/makeapploaders.py
+
+      - name: Run SSH deploy E2E test
+        run: |
+          cd backend
+          source .venv/bin/activate
+          mkdir -p ../frontend/dist/assets
+          mkdir -p ../frontend/dist/img
+          mkdir -p ../frontend/dist/static
+          TEST=1 FRAMEOS_E2E_DEPLOY=1 pytest app/tasks/tests/test_real_ssh_deploy_e2e.py -q -s
+
   typescript:
     runs-on: ubuntu-latest
     steps:

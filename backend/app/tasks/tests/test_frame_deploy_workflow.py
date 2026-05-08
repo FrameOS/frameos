@@ -954,3 +954,44 @@ async def test_execute_full_does_not_activate_release_when_setup_fails(monkeypat
     assert deployer.restarted_services == ["frameos"]
     assert frame.status == "uninitialized"
     assert updated_statuses == ["deploying", "uninitialized"]
+
+
+@pytest.mark.asyncio
+async def test_remote_build_uses_x86_feature_flags(monkeypatch: pytest.MonkeyPatch, tmp_path):
+    archive_path = tmp_path / "build_build12345678.tar.gz"
+    archive_path.write_bytes(b"archive")
+    frame = SimpleNamespace(id=24, name="RemoteBuildFlags")
+    deployer = RecordingDeployer()
+    deployer.db = None
+    deployer.redis = None
+    deployer.frame = frame
+    workflow = FrameDeployWorkflow(
+        db=None,
+        redis=None,
+        frame=frame,
+        deployer=deployer,
+        temp_dir="",
+        binary_builder=FakeBinaryBuilder(),
+    )
+    uploaded: list[str] = []
+
+    async def fake_upload_file(_db, _redis, _frame, remote_path, _data):
+        uploaded.append(remote_path)
+
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.upload_file", fake_upload_file)
+
+    await workflow._publish_remote_built_binary(
+        SimpleNamespace(
+            archive_path=str(archive_path),
+            build_dir=str(tmp_path / "build_build12345678"),
+            driver_library_paths=[],
+            target=TargetMetadata(arch="x86_64", distro="debian", version="bookworm"),
+        ),
+        "build12345678",
+        "/srv/frameos/releases/release_build12345678/frameos",
+        "quickjs-2025-04-26",
+    )
+
+    assert uploaded == ["/srv/frameos/build/build_build12345678.tar.gz"]
+    make_command = next(command for command in deployer.commands if "make -j$PARALLEL" in command)
+    assert "EXTRA_CFLAGS='-mavx2 -mavx -msse4.1 -mssse3 -mpclmul -mvpclmulqdq' make -j$PARALLEL" in make_command
