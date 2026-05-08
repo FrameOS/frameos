@@ -28,7 +28,7 @@
       "value": "",
       "required": false,
       "label": "Metadata state key",
-      "hint": "Enter a state key to persist metadata about the image. Stores: {search, description, author, ...}."
+      "hint": "Enter a state key to persist metadata about the image. Stores: {search, title, description, location, author, links, ...}."
     },
     {
       "name": "saveAssets",

@@ -14,12 +14,13 @@ proc newLogger(store: LogStore): Logger =
   )
 
 suite "data/unsplash app":
-  test "init trims search string":
-    let app = App(appConfig: AppConfig(search: "  blue sky  "))
+  test "init trims text fields":
+    let app = App(appConfig: AppConfig(search: "  blue sky  ", metadataStateKey: "  meta  "))
 
     app.init()
 
     check app.appConfig.search == "blue sky"
+    check app.appConfig.metadataStateKey == "meta"
 
   test "missing api key returns error image with context dimensions":
     let logs = LogStore(items: @[])

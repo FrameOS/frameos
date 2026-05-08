@@ -1,8 +1,12 @@
 [
   {
-    "id": "e8453561-4f50-4cd6-829f-4109547ea810",
+    "id": "75d30a36-62ed-4b61-9a89-b3a78cefff6f",
     "name": "Unsplash image",
-    "settings": { "backgroundColor": "#000000", "refreshInterval": 600, "execution": "interpreted" },
+    "settings": {
+      "backgroundColor": "#000000",
+      "refreshInterval": 600,
+      "execution": "interpreted"
+    },
     "fields": [
       {
         "access": "public",
@@ -20,96 +24,445 @@
         "persist": "disk",
         "access": "public",
         "value": "600"
+      },
+      {
+        "name": "showMetadata",
+        "label": "Show metadata",
+        "type": "boolean",
+        "persist": "disk",
+        "access": "public",
+        "value": "true"
+      },
+      {
+        "name": "metadataPosition",
+        "label": "Metadata horizontal align",
+        "type": "select",
+        "persist": "disk",
+        "access": "public",
+        "options": [
+          "left",
+          "center",
+          "right"
+        ],
+        "value": "left"
+      },
+      {
+        "name": "metadataVAlign",
+        "label": "Metadata vertical align",
+        "type": "select",
+        "persist": "disk",
+        "access": "public",
+        "options": [
+          "top",
+          "middle",
+          "bottom"
+        ],
+        "value": "bottom"
+      },
+      {
+        "name": "metadataFontSize",
+        "label": "Metadata font size",
+        "type": "float",
+        "persist": "disk",
+        "access": "public",
+        "value": "22"
+      },
+      {
+        "name": "metadataFontColor",
+        "label": "Metadata font color",
+        "type": "color",
+        "persist": "disk",
+        "access": "public",
+        "value": "#ffffff"
+      },
+      {
+        "name": "metadataBorderColor",
+        "label": "Metadata border color",
+        "type": "color",
+        "persist": "disk",
+        "access": "public",
+        "value": "#000000"
+      },
+      {
+        "name": "metadataBorderWidth",
+        "label": "Metadata border width",
+        "type": "integer",
+        "persist": "disk",
+        "access": "public",
+        "value": "2"
+      },
+      {
+        "name": "metadataPadding",
+        "label": "Metadata padding",
+        "type": "float",
+        "persist": "disk",
+        "access": "public",
+        "value": "12"
+      },
+      {
+        "name": "unsplashMetadata",
+        "label": "Metadata",
+        "type": "json",
+        "value": "",
+        "persist": "disk",
+        "access": "private"
+      },
+      {
+        "name": "text",
+        "label": "Text",
+        "type": "text",
+        "persist": "disk",
+        "access": "private"
       }
     ],
     "nodes": [
       {
-        "data": { "keyword": "render" },
-        "dragging": false,
-        "height": 134,
+        "data": {
+          "keyword": "render"
+        },
         "id": "463556ab-e4fe-40c7-93f3-40bc723f454e",
-        "position": { "x": 146, "y": 79 },
-        "positionAbsolute": { "x": 146, "y": 79 },
-        "selected": false,
+        "position": {
+          "x": 461.0144643277597,
+          "y": -76.51346973142563
+        },
         "type": "event",
-        "width": 237
-      },
-      {
-        "data": { "config": {}, "keyword": "render/image" },
-        "height": 134,
-        "id": "7d4ca5fe-cb1a-413c-8ac1-c7c12c8dcd12",
-        "position": { "x": 472.75, "y": 97 },
-        "type": "app",
-        "width": 325
+        "width": 237,
+        "height": 134
       },
       {
         "data": {
-          "cache": { "duration": "3600", "durationEnabled": true, "enabled": false, "inputEnabled": true },
           "config": {},
+          "keyword": "render/image"
+        },
+        "id": "7d4ca5fe-cb1a-413c-8ac1-c7c12c8dcd12",
+        "position": {
+          "x": 935.3028843293687,
+          "y": -50.53842000160893
+        },
+        "type": "app",
+        "width": 324,
+        "height": 134
+      },
+      {
+        "data": {
+          "cache": {
+            "duration": "3600",
+            "durationEnabled": true,
+            "enabled": false,
+            "inputEnabled": true
+          },
+          "config": {
+            "metadataStateKey": "unsplashMetadata"
+          },
           "keyword": "data/unsplash"
         },
-        "dragging": false,
-        "height": 168,
         "id": "c03a1fe5-5806-45a4-8a61-16c9c0ce1bc8",
-        "position": { "x": 448.75, "y": -99 },
-        "positionAbsolute": { "x": 448.75, "y": -99 },
-        "selected": false,
+        "position": {
+          "x": 823.577337301385,
+          "y": -282.4261437857841
+        },
         "type": "app",
-        "width": 300
+        "width": 400,
+        "height": 196
       },
       {
         "id": "69a6d642-cfe5-49ea-9286-f3e8be061264",
-        "position": { "x": 413.885067114094, "y": -166.40939597315435 },
-        "data": { "keyword": "search" },
+        "position": {
+          "x": 772.7623049558456,
+          "y": -401.67336300274707
+        },
+        "data": {
+          "keyword": "search"
+        },
         "type": "state",
-        "width": 204,
-        "height": 48,
-        "selected": false,
-        "positionAbsolute": { "x": 413.885067114094, "y": -166.40939597315435 },
-        "dragging": false
+        "width": 236,
+        "height": 48
       },
       {
         "id": "b37c9037-74bc-4b31-ac50-b11a1ef9c7bb",
-        "position": { "x": 855.375, "y": 78.79530201342277 },
-        "data": { "keyword": "logic/nextSleepDuration", "config": {} },
+        "position": {
+          "x": 2800.5805676949135,
+          "y": -44.39912856632478
+        },
+        "data": {
+          "keyword": "logic/nextSleepDuration",
+          "config": {}
+        },
         "type": "app",
         "width": 289,
         "height": 78,
         "selected": false,
-        "positionAbsolute": { "x": 855.375, "y": 78.79530201342277 },
+        "positionAbsolute": {
+          "x": 2800.5805676949135,
+          "y": -44.39912856632478
+        },
         "dragging": false
       },
       {
         "id": "21e68640-8dd8-4295-9db0-ae1a3315e32e",
-        "position": { "x": 821.375, "y": 1.79530201342277 },
-        "data": { "keyword": "secondsBetweenImages" },
+        "position": {
+          "x": 2757.8721554912154,
+          "y": -139.5114562331248
+        },
+        "data": {
+          "keyword": "secondsBetweenImages"
+        },
         "type": "state",
-        "width": 320,
+        "width": 352,
         "height": 48,
         "selected": false,
-        "positionAbsolute": { "x": 821.375, "y": 1.79530201342277 },
+        "positionAbsolute": {
+          "x": 2757.8721554912154,
+          "y": -139.5114562331248
+        },
         "dragging": false
       },
       {
         "id": "4d36077c-2202-47ae-a479-1dcba01dfe28",
         "type": "event",
-        "position": { "x": 667.6875, "y": -235.70469798657717 },
-        "data": { "keyword": "button" },
+        "position": {
+          "x": 472.29878161949074,
+          "y": 266.7234349918749
+        },
+        "data": {
+          "keyword": "button"
+        },
         "width": 209,
-        "height": 98,
+        "height": 98
+      },
+      {
+        "id": "f4c05ea5-a0bc-4fd0-b13a-5c7e149a35aa",
+        "position": {
+          "x": 1997.4271523247876,
+          "y": -75.93134990032468
+        },
+        "data": {
+          "keyword": "logic/ifElse",
+          "config": {}
+        },
+        "type": "app",
+        "width": 166,
+        "height": 134
+      },
+      {
+        "id": "16038c90-8090-411f-a0ea-75d1f0052e4c",
+        "position": {
+          "x": 2479.7371515364357,
+          "y": 175.5739411272549
+        },
+        "data": {
+          "keyword": "render/text",
+          "config": {
+            "borderColor": "#000000",
+            "borderWidth": "2",
+            "fontColor": "#ffffff",
+            "fontSize": "22",
+            "overflow": "fit-bounds",
+            "padding": "12",
+            "position": "left",
+            "vAlign": "bottom"
+          }
+        },
+        "type": "app",
+        "width": 418,
+        "height": 414,
         "selected": false,
-        "positionAbsolute": { "x": 667.6875, "y": -235.70469798657717 },
+        "positionAbsolute": {
+          "x": 2479.7371515364357,
+          "y": 175.5739411272549
+        },
         "dragging": false
       },
       {
-        "id": "b913208e-09b1-412a-917f-493b1fb1f5ed",
-        "position": { "x": 904.6875, "y": -238.70469798657717 },
-        "data": { "keyword": "render", "config": {} },
+        "id": "f7109786-ce84-489d-b862-cf094d77c6de",
+        "position": {
+          "x": 1331.5113791370625,
+          "y": -444.58209187177204
+        },
+        "data": {
+          "code": "state{\"unsplashMetadata\"}{\"description\"}.getStr(state{\"unsplashMetadata\"}{\"altDescription\"}.getStr(\"\"))",
+          "codeArgs": [],
+          "codeOutputs": [
+            {
+              "name": "text",
+              "type": "text"
+            }
+          ],
+          "codeJS": "(() => { const meta = state.unsplashMetadata || {}; const lines = []; const title = meta.description || meta.altDescription || meta.title || ''; if (title) lines.push(title); if (meta.author) lines.push('Photo by ' + meta.author + (meta.authorUsername ? ' (@' + meta.authorUsername + ')' : '')); const details = []; if (meta.location) details.push(meta.location); if (meta.search) details.push('Search: ' + meta.search); if (details.length) lines.push(details.join(' - ')); return lines.join('\\n'); })()"
+        },
+        "type": "code",
+        "style": {
+          "width": 541,
+          "height": 222
+        },
+        "width": 541,
+        "height": 222
+      },
+      {
+        "id": "2081c5a1-73bc-4b87-9787-0752f414cf68",
+        "position": {
+          "x": 1896.338917188656,
+          "y": -170.9184654950343
+        },
+        "data": {
+          "keyword": "showMetadata"
+        },
+        "type": "state",
+        "width": 283,
+        "height": 48
+      },
+      {
+        "id": "03f01fd1-370a-4777-b79b-bdf98f4b8c38",
+        "position": {
+          "x": 2218.857476335605,
+          "y": -510.02980709691826
+        },
+        "data": {
+          "keyword": "metadataPosition"
+        },
+        "type": "state",
+        "width": 356,
+        "height": 48
+      },
+      {
+        "id": "0d4a5356-8ee1-49e3-968b-a2a753ae33d3",
+        "position": {
+          "x": 2251.122848868471,
+          "y": -430.506459763752
+        },
+        "data": {
+          "keyword": "metadataVAlign"
+        },
+        "type": "state",
+        "width": 332,
+        "height": 48
+      },
+      {
+        "id": "78365153-8f1c-45a2-8984-e03e3a227b97",
+        "position": {
+          "x": 2276.4742130014365,
+          "y": -350.9831124305856
+        },
+        "data": {
+          "keyword": "metadataFontSize"
+        },
+        "type": "state",
+        "width": 288,
+        "height": 48
+      },
+      {
+        "id": "b64af178-a7a6-4f04-b784-c420a90854f5",
+        "position": {
+          "x": 2301.8255771344025,
+          "y": -271.4597650974192
+        },
+        "data": {
+          "keyword": "metadataFontColor"
+        },
+        "type": "state",
+        "width": 305,
+        "height": 48
+      },
+      {
+        "id": "2b2e56b2-0879-4945-870a-4ff5f8fe58af",
+        "position": {
+          "x": 2336.3956191339016,
+          "y": -187.3270788309864
+        },
+        "data": {
+          "keyword": "metadataBorderColor"
+        },
+        "type": "state",
+        "width": 329,
+        "height": 48
+      },
+      {
+        "id": "54f91a7e-f956-4f76-842e-67c8da01f5fe",
+        "position": {
+          "x": 2361.7469832668676,
+          "y": -112.41307043108668
+        },
+        "data": {
+          "keyword": "metadataBorderWidth"
+        },
+        "type": "state",
+        "width": 342,
+        "height": 48
+      },
+      {
+        "id": "372d5a24-4d35-4da6-8d30-4a8d2f08d6bc",
+        "position": {
+          "x": 2398.6216947329995,
+          "y": -32.88972309792021
+        },
+        "data": {
+          "keyword": "metadataPadding"
+        },
+        "type": "state",
+        "width": 289,
+        "height": 48
+      },
+      {
+        "id": "603c69c6-1b0d-4f69-86b6-2a7aa974561f",
+        "position": {
+          "x": 745.5604077036561,
+          "y": 266.3755430449715
+        },
+        "data": {
+          "keyword": "logic/breakIfRendering",
+          "config": {}
+        },
+        "type": "app",
+        "width": 271,
+        "height": 40
+      },
+      {
+        "id": "1b7c5db6-8ce3-4d98-920c-6e92729e9e54",
+        "position": {
+          "x": 1100.4501206804994,
+          "y": 262.38801818006306
+        },
+        "data": {
+          "keyword": "render",
+          "config": {}
+        },
         "type": "dispatch",
         "width": 260,
-        "height": 40,
+        "height": 40
+      },
+      {
+        "id": "b9bc7fd0-35ac-4095-87ba-9958849268a6",
+        "position": {
+          "x": 1403.5980782249221,
+          "y": -95.07820349407638
+        },
+        "data": {
+          "keyword": "logic/setAsState",
+          "config": {
+            "stateKey": "text"
+          }
+        },
+        "type": "app",
+        "width": 329,
+        "height": 162
+      },
+      {
+        "id": "1cc0a7df-6cad-4fd6-9e2a-645e9e4d5345",
+        "position": {
+          "x": 2441.4869591356646,
+          "y": 63.18231073434629
+        },
+        "data": {
+          "keyword": "text"
+        },
+        "type": "state",
+        "width": 151,
+        "height": 48,
         "selected": false,
-        "positionAbsolute": { "x": 904.6875, "y": -238.70469798657717 },
+        "positionAbsolute": {
+          "x": 2441.4869591356646,
+          "y": 63.18231073434629
+        },
         "dragging": false
       }
     ],
@@ -139,12 +492,76 @@
         "type": "codeNodeEdge"
       },
       {
-        "id": "188ab18d-cab5-4753-bfc5-b4b2ef330329",
-        "target": "b37c9037-74bc-4b31-ac50-b11a1ef9c7bb",
+        "id": "09e1a6bc-316f-4bbd-b3d2-e9452ae38f3d",
+        "source": "2081c5a1-73bc-4b87-9787-0752f414cf68",
+        "sourceHandle": "fieldOutput",
+        "target": "f4c05ea5-a0bc-4fd0-b13a-5c7e149a35aa",
+        "targetHandle": "fieldInput/condition",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "b8d401a9-6b78-46e1-8f52-0aa45de728a5",
+        "source": "f4c05ea5-a0bc-4fd0-b13a-5c7e149a35aa",
+        "sourceHandle": "field/thenNode",
+        "target": "16038c90-8090-411f-a0ea-75d1f0052e4c",
         "targetHandle": "prev",
-        "source": "7d4ca5fe-cb1a-413c-8ac1-c7c12c8dcd12",
-        "sourceHandle": "next",
         "type": "appNodeEdge"
+      },
+      {
+        "id": "1dddbb1f-8819-41a1-97fb-3bd7e2292b52",
+        "source": "03f01fd1-370a-4777-b79b-bdf98f4b8c38",
+        "sourceHandle": "fieldOutput",
+        "target": "16038c90-8090-411f-a0ea-75d1f0052e4c",
+        "targetHandle": "fieldInput/position",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "70ba3f20-f15a-4ab4-9a93-57f515568efd",
+        "source": "0d4a5356-8ee1-49e3-968b-a2a753ae33d3",
+        "sourceHandle": "fieldOutput",
+        "target": "16038c90-8090-411f-a0ea-75d1f0052e4c",
+        "targetHandle": "fieldInput/vAlign",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "9ad0effb-4c30-419a-8eeb-07ad8733bbd2",
+        "source": "78365153-8f1c-45a2-8984-e03e3a227b97",
+        "sourceHandle": "fieldOutput",
+        "target": "16038c90-8090-411f-a0ea-75d1f0052e4c",
+        "targetHandle": "fieldInput/fontSize",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "cc2f9259-a7ca-492a-85a4-d92b2b4451eb",
+        "source": "b64af178-a7a6-4f04-b784-c420a90854f5",
+        "sourceHandle": "fieldOutput",
+        "target": "16038c90-8090-411f-a0ea-75d1f0052e4c",
+        "targetHandle": "fieldInput/fontColor",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "6831d67e-7c7d-4133-954c-40f698bd42ba",
+        "source": "2b2e56b2-0879-4945-870a-4ff5f8fe58af",
+        "sourceHandle": "fieldOutput",
+        "target": "16038c90-8090-411f-a0ea-75d1f0052e4c",
+        "targetHandle": "fieldInput/borderColor",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "9827d796-d014-4fb0-b294-c560c4854d4b",
+        "source": "54f91a7e-f956-4f76-842e-67c8da01f5fe",
+        "sourceHandle": "fieldOutput",
+        "target": "16038c90-8090-411f-a0ea-75d1f0052e4c",
+        "targetHandle": "fieldInput/borderWidth",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "42de1768-580d-4875-9e65-cacff7fe16b0",
+        "source": "372d5a24-4d35-4da6-8d30-4a8d2f08d6bc",
+        "sourceHandle": "fieldOutput",
+        "target": "16038c90-8090-411f-a0ea-75d1f0052e4c",
+        "targetHandle": "fieldInput/padding",
+        "type": "codeNodeEdge"
       },
       {
         "id": "6fa5abe1-12eb-47a7-ab00-d5650ede0792",
@@ -155,13 +572,62 @@
         "type": "codeNodeEdge"
       },
       {
-        "id": "47b7fb81-9624-4732-be1d-18fcb1e42c49",
-        "target": "b913208e-09b1-412a-917f-493b1fb1f5ed",
+        "id": "4720adc7-b40a-4ca8-8e37-f254019d4303",
+        "target": "603c69c6-1b0d-4f69-86b6-2a7aa974561f",
         "targetHandle": "prev",
         "source": "4d36077c-2202-47ae-a479-1dcba01dfe28",
         "sourceHandle": "next",
         "type": "appNodeEdge"
+      },
+      {
+        "id": "507882f0-e240-4527-a7b1-20e7751f12ed",
+        "target": "1b7c5db6-8ce3-4d98-920c-6e92729e9e54",
+        "targetHandle": "prev",
+        "source": "603c69c6-1b0d-4f69-86b6-2a7aa974561f",
+        "sourceHandle": "next",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "9d3dde55-a8aa-4c58-a65e-99118e1caa21",
+        "source": "f4c05ea5-a0bc-4fd0-b13a-5c7e149a35aa",
+        "sourceHandle": "next",
+        "target": "b37c9037-74bc-4b31-ac50-b11a1ef9c7bb",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "236f7965-2de1-4ec9-ab82-10b705c6fe1d",
+        "target": "b9bc7fd0-35ac-4095-87ba-9958849268a6",
+        "targetHandle": "prev",
+        "source": "7d4ca5fe-cb1a-413c-8ac1-c7c12c8dcd12",
+        "sourceHandle": "next",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "188ab18d-cab5-4753-bfc5-b4b2ef330329",
+        "target": "f4c05ea5-a0bc-4fd0-b13a-5c7e149a35aa",
+        "targetHandle": "prev",
+        "source": "b9bc7fd0-35ac-4095-87ba-9958849268a6",
+        "sourceHandle": "next",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "e68a4422-5ddc-4911-8d7b-526abbf7e108",
+        "source": "f7109786-ce84-489d-b862-cf094d77c6de",
+        "sourceHandle": "fieldOutput",
+        "target": "b9bc7fd0-35ac-4095-87ba-9958849268a6",
+        "targetHandle": "fieldInput/valueString",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "d6984813-5e3e-4370-bbda-ac8f0fd4efe6",
+        "source": "1cc0a7df-6cad-4fd6-9e2a-645e9e4d5345",
+        "sourceHandle": "fieldOutput",
+        "target": "16038c90-8090-411f-a0ea-75d1f0052e4c",
+        "targetHandle": "fieldInput/text",
+        "type": "codeNodeEdge"
       }
-    ]
+    ],
+    "apps": {}
   }
 ]

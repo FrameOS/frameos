@@ -20,6 +20,7 @@ type
 
 proc init*(self: App) =
   self.appConfig.search = self.appConfig.search.strip()
+  self.appConfig.metadataStateKey = self.appConfig.metadataStateKey.strip()
 
 proc error*(self: App, context: ExecutionContext, message: string): Image =
   self.logError(message)
@@ -76,13 +77,18 @@ proc get*(self: App, context: ExecutionContext): Image =
       return self.error(context, &"Error {imageData.status} fetching image")
 
     if self.appConfig.metadataStateKey != "":
+      let description = json{"description"}.getStr(json{"alt_description"}.getStr(""))
       self.scene.state[self.appConfig.metadataStateKey] = %*{
         "source": "unsplash",
         "search": search,
         "orientation": orientation,
         "imageUrl": realImageUrl,
         "id": json{"id"}.getStr,
-        "description": json{"description"}.getStr(json{"alt_description"}.getStr("")),
+        "title": json{"slug"}.getStr(description),
+        "description": description,
+        "altDescription": json{"alt_description"}.getStr,
+        "location": json{"location"}{"name"}.getStr,
+        "createdAt": json{"created_at"}.getStr,
         "photoUrl": json{"links"}{"html"}.getStr,
         "author": json{"user"}{"name"}.getStr,
         "authorUsername": json{"user"}{"username"}.getStr,
