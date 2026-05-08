@@ -51,6 +51,11 @@ component directory (e.g. `rm -rf build/prebuilt-deps/debian-bookworm-arm64/nim`
 or `build/prebuilt-deps/ubuntu-22.04-amd64/nim`) or the entire target folder to
 force a rebuild.
 
+FrameOS local builds also use this manifest. `nimble build_quickjs` first tries
+to download the matching prebuilt QuickJS component for the current Linux
+distro and CPU architecture, then falls back to downloading and building
+QuickJS from source when no published component matches.
+
 ### Custom versions
 
 Override the versions with environment variables when invoking the script:
