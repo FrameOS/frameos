@@ -1,6 +1,6 @@
 [
   {
-    "id": "d233f912-c8d6-4ac1-9184-122d22ecb477",
+    "id": "3dce3563-0e60-4a0c-bb8c-5cd9605c7cc0",
     "name": "Image from URL",
     "settings": {
       "refreshInterval": 86400,
@@ -45,6 +45,14 @@
         "persist": "disk",
         "access": "public",
         "value": "#ffffff"
+      },
+      {
+        "name": "showUrl",
+        "label": "Show URL",
+        "type": "boolean",
+        "persist": "disk",
+        "access": "public",
+        "value": "false"
       }
     ],
     "nodes": [
@@ -58,8 +66,8 @@
         "data": {
           "keyword": "render"
         },
-        "width": 212,
-        "height": 168,
+        "width": 237,
+        "height": 134,
         "selected": false,
         "dragging": false,
         "positionAbsolute": {
@@ -107,8 +115,8 @@
           }
         },
         "type": "app",
-        "width": 230,
-        "height": 112,
+        "width": 457,
+        "height": 140,
         "selected": false,
         "positionAbsolute": {
           "x": 402.67078973825255,
@@ -119,27 +127,27 @@
       {
         "id": "9ff201f2-c88f-4d84-84ec-caf90a83fd41",
         "position": {
-          "x": 368.42120259199675,
-          "y": -126.99857537603084
+          "x": 364.1341961760641,
+          "y": -138.43059248518446
         },
         "data": {
           "keyword": "url"
         },
         "type": "state",
-        "width": 194,
+        "width": 226,
         "height": 48,
         "selected": false,
         "positionAbsolute": {
-          "x": 368.42120259199675,
-          "y": -126.99857537603084
+          "x": 364.1341961760641,
+          "y": -138.43059248518446
         },
         "dragging": false
       },
       {
         "id": "0b58d93b-fb74-4d7e-b203-877e21fbc3bf",
         "position": {
-          "x": 826.0842042795699,
-          "y": 116.86894534813112
+          "x": 1221.9177966840145,
+          "y": 206.896080082716
         },
         "data": {
           "keyword": "logic/nextSleepDuration",
@@ -150,27 +158,27 @@
         "height": 78,
         "selected": false,
         "positionAbsolute": {
-          "x": 826.0842042795699,
-          "y": 116.86894534813112
+          "x": 1221.9177966840145,
+          "y": 206.896080082716
         },
         "dragging": false
       },
       {
         "id": "025c353c-b869-4e4a-b4fa-71cbd08d813f",
         "position": {
-          "x": 798.7145835435958,
-          "y": 46.73429221219766
+          "x": 1177.40015028431,
+          "y": 116.75539700576368
         },
         "data": {
           "keyword": "seconds"
         },
         "type": "state",
-        "width": 328,
+        "width": 360,
         "height": 48,
         "selected": false,
         "positionAbsolute": {
-          "x": 798.7145835435958,
-          "y": 46.73429221219766
+          "x": 1177.40015028431,
+          "y": 116.75539700576368
         },
         "dragging": false
       },
@@ -184,7 +192,7 @@
           "keyword": "scalingMode"
         },
         "type": "state",
-        "width": 218,
+        "width": 250,
         "height": 48,
         "selected": false,
         "positionAbsolute": {
@@ -223,7 +231,7 @@
           "keyword": "backgroundColor"
         },
         "type": "state",
-        "width": 257,
+        "width": 289,
         "height": 48,
         "selected": false,
         "positionAbsolute": {
@@ -242,8 +250,8 @@
         "data": {
           "keyword": "button"
         },
-        "width": 201,
-        "height": 40,
+        "width": 209,
+        "height": 98,
         "selected": false,
         "positionAbsolute": {
           "x": -217.30180485423057,
@@ -270,6 +278,74 @@
           "y": -134.30146463530124
         },
         "dragging": false
+      },
+      {
+        "id": "b9152d0d-d586-4c38-bd71-f0a09b31f779",
+        "position": {
+          "x": 909.311126180008,
+          "y": 235.71600855457677
+        },
+        "data": {
+          "keyword": "logic/ifElse",
+          "config": {}
+        },
+        "type": "app",
+        "width": 166,
+        "height": 134,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 909.311126180008,
+          "y": 235.71600855457677
+        },
+        "dragging": false
+      },
+      {
+        "id": "c2b9a4d4-7a90-4819-b4ca-2e844642b06a",
+        "position": {
+          "x": 1176.4440769911914,
+          "y": 352.17214542780584
+        },
+        "data": {
+          "keyword": "render/text",
+          "config": {
+            "borderColor": "#000000",
+            "borderWidth": "2",
+            "fontColor": "#ffffff",
+            "fontSize": "22",
+            "overflow": "fit-bounds",
+            "padding": "12",
+            "position": "left",
+            "vAlign": "bottom"
+          }
+        },
+        "type": "app",
+        "width": 418,
+        "height": 414,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 1176.4440769911914,
+          "y": 352.17214542780584
+        },
+        "dragging": false
+      },
+      {
+        "id": "89a5939d-5320-4ab9-b437-68758b612ba3",
+        "position": {
+          "x": 870.0241197640755,
+          "y": 147.8580042772884
+        },
+        "data": {
+          "keyword": "showUrl"
+        },
+        "type": "state",
+        "width": 234,
+        "height": 48,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 870.0241197640755,
+          "y": 147.8580042772884
+        },
+        "dragging": false
       }
     ],
     "edges": [
@@ -290,8 +366,8 @@
         "type": "codeNodeEdge"
       },
       {
-        "id": "d28127bb-4dbf-4fd3-9108-79ba334dd046",
-        "target": "0b58d93b-fb74-4d7e-b203-877e21fbc3bf",
+        "id": "b7b11c4b-40bc-4ba8-a565-c9f20a394868",
+        "target": "b9152d0d-d586-4c38-bd71-f0a09b31f779",
         "targetHandle": "prev",
         "source": "fb3b145f-38e6-440b-b583-9228bc24baf1",
         "sourceHandle": "next",
@@ -344,7 +420,40 @@
         "target": "50c3340b-ae30-4877-9fca-bbde377a30fb",
         "targetHandle": "prev",
         "type": "appNodeEdge"
+      },
+      {
+        "id": "5fa9d48f-faae-4928-81f2-63665fa31f4b",
+        "source": "89a5939d-5320-4ab9-b437-68758b612ba3",
+        "sourceHandle": "fieldOutput",
+        "target": "b9152d0d-d586-4c38-bd71-f0a09b31f779",
+        "targetHandle": "fieldInput/condition",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "78c6c36e-ec75-4f1c-85c7-393704f93bea",
+        "source": "b9152d0d-d586-4c38-bd71-f0a09b31f779",
+        "sourceHandle": "field/thenNode",
+        "target": "c2b9a4d4-7a90-4819-b4ca-2e844642b06a",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "0ec23c69-f9aa-43ed-9535-b49414d92e40",
+        "source": "b9152d0d-d586-4c38-bd71-f0a09b31f779",
+        "sourceHandle": "next",
+        "target": "0b58d93b-fb74-4d7e-b203-877e21fbc3bf",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "41532c70-c4a5-43b3-ae36-016ec89506ff",
+        "source": "9ff201f2-c88f-4d84-84ec-caf90a83fd41",
+        "sourceHandle": "fieldOutput",
+        "target": "c2b9a4d4-7a90-4819-b4ca-2e844642b06a",
+        "targetHandle": "fieldInput/text",
+        "type": "codeNodeEdge"
       }
-    ]
+    ],
+    "apps": {}
   }
 ]
