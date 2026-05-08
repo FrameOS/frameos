@@ -1,6 +1,6 @@
 [
   {
-    "id": "3f441f19-27f2-4c09-ae2f-654c2f4897dd",
+    "id": "89bb1087-7cb1-4a58-92de-27fb70591907",
     "name": "Wikimedia Commons",
     "settings": {
       "refreshInterval": 3600,
@@ -14,7 +14,12 @@
         "type": "select",
         "persist": "disk",
         "access": "public",
-        "options": ["pictureOfTheDay", "onThisDay", "randomPictureOfTheDay", "randomImage"],
+        "options": [
+          "pictureOfTheDay",
+          "onThisDay",
+          "randomPictureOfTheDay",
+          "randomImage"
+        ],
         "value": "pictureOfTheDay"
       },
       {
@@ -31,7 +36,12 @@
         "type": "select",
         "persist": "disk",
         "access": "public",
-        "options": ["cover", "contain", "stretch", "center"],
+        "options": [
+          "cover",
+          "contain",
+          "stretch",
+          "center"
+        ],
         "value": "cover"
       }
     ],
@@ -39,18 +49,29 @@
       {
         "id": "82ec99e1-20e1-475e-9560-01f47bcf9d85",
         "type": "event",
-        "position": { "x": 80, "y": 120 },
-        "data": { "keyword": "render" },
-        "width": 212,
-        "height": 168,
+        "position": {
+          "x": 78.74986072423394,
+          "y": 182.50696378830082
+        },
+        "data": {
+          "keyword": "render"
+        },
+        "width": 237,
+        "height": 134,
         "selected": false,
         "dragging": false,
-        "positionAbsolute": { "x": 80, "y": 120 }
+        "positionAbsolute": {
+          "x": 78.74986072423394,
+          "y": 182.50696378830082
+        }
       },
       {
         "id": "aef22d4c-7257-4d35-87c8-a0367dcbce8a",
         "type": "app",
-        "position": { "x": 430, "y": -50 },
+        "position": {
+          "x": 406.24735376044566,
+          "y": -61.25125348189414
+        },
         "data": {
           "keyword": "data/wikicommons",
           "config": {
@@ -64,52 +85,80 @@
             "duration": "3600"
           }
         },
-        "width": 320,
-        "height": 150,
+        "width": 380,
+        "height": 168,
         "selected": false,
         "dragging": false,
-        "positionAbsolute": { "x": 430, "y": -50 }
+        "positionAbsolute": {
+          "x": 406.24735376044566,
+          "y": -61.25125348189414
+        }
       },
       {
         "id": "04a2abe4-aa72-47c3-8868-543ecab1cd7c",
         "type": "state",
-        "position": { "x": 420, "y": -145 },
-        "data": { "keyword": "mode" },
-        "width": 220,
+        "position": {
+          "x": 366.7703514489353,
+          "y": -157.43568126624126
+        },
+        "data": {
+          "keyword": "mode"
+        },
+        "width": 182,
         "height": 48,
         "selected": false,
         "dragging": false,
-        "positionAbsolute": { "x": 420, "y": -145 }
+        "positionAbsolute": {
+          "x": 366.7703514489353,
+          "y": -157.43568126624126
+        }
       },
       {
         "id": "dbf7d3bd-9c7f-45bc-adb7-dd5a2bcaf768",
         "type": "app",
-        "position": { "x": 455, "y": 145 },
+        "position": {
+          "x": 439.99832869080785,
+          "y": 183.75431754874649
+        },
         "data": {
           "keyword": "render/image",
           "config": {}
         },
-        "width": 325,
+        "width": 319,
         "height": 134,
         "selected": false,
         "dragging": false,
-        "positionAbsolute": { "x": 455, "y": 145 }
+        "positionAbsolute": {
+          "x": 439.99832869080785,
+          "y": 183.75431754874649
+        }
       },
       {
         "id": "ab3f83e7-8b9f-4742-adbd-7dbd7929a787",
         "type": "state",
-        "position": { "x": 420, "y": 330 },
-        "data": { "keyword": "placement" },
-        "width": 230,
+        "position": {
+          "x": 333.54293131012685,
+          "y": -235.7210401237126
+        },
+        "data": {
+          "keyword": "placement"
+        },
+        "width": 284,
         "height": 48,
         "selected": false,
         "dragging": false,
-        "positionAbsolute": { "x": 420, "y": 330 }
+        "positionAbsolute": {
+          "x": 333.54293131012685,
+          "y": -235.7210401237126
+        }
       },
       {
         "id": "11479647-0bc3-4bc3-9e8e-84ead1d378e4",
         "type": "app",
-        "position": { "x": 875, "y": 150 },
+        "position": {
+          "x": 955.008913649025,
+          "y": 210.00668523676882
+        },
         "data": {
           "keyword": "logic/nextSleepDuration",
           "config": {}
@@ -118,43 +167,88 @@
         "height": 78,
         "selected": false,
         "dragging": false,
-        "positionAbsolute": { "x": 875, "y": 150 }
+        "positionAbsolute": {
+          "x": 955.008913649025,
+          "y": 210.00668523676882
+        }
       },
       {
         "id": "fc90ee5d-889b-41eb-a914-e74f93f21b72",
         "type": "state",
-        "position": { "x": 850, "y": 70 },
-        "data": { "keyword": "secondsBetweenImages" },
-        "width": 340,
+        "position": {
+          "x": 918.7576601671309,
+          "y": 100.00334261838438
+        },
+        "data": {
+          "keyword": "secondsBetweenImages"
+        },
+        "width": 352,
         "height": 48,
         "selected": false,
         "dragging": false,
-        "positionAbsolute": { "x": 850, "y": 70 }
+        "positionAbsolute": {
+          "x": 918.7576601671309,
+          "y": 100.00334261838438
+        }
       },
       {
         "id": "f91321b6-674f-4a38-949b-c85827f8dc54",
         "type": "event",
-        "position": { "x": 80, "y": -130 },
-        "data": { "keyword": "button" },
-        "width": 210,
-        "height": 40,
+        "position": {
+          "x": 73.15692763511564,
+          "y": -349.62991939854413
+        },
+        "data": {
+          "keyword": "button"
+        },
+        "width": 209,
+        "height": 98,
         "selected": false,
         "dragging": false,
-        "positionAbsolute": { "x": 80, "y": -130 }
+        "positionAbsolute": {
+          "x": 73.15692763511564,
+          "y": -349.62991939854413
+        }
       },
       {
-        "id": "334a786c-6955-4c7b-87dc-8652211db529",
-        "type": "dispatch",
-        "position": { "x": 340, "y": -130 },
+        "id": "6f173db6-e47f-451e-8207-ec90b3fd5294",
+        "position": {
+          "x": 330.9343459949327,
+          "y": -368.0584881176743
+        },
+        "data": {
+          "keyword": "logic/breakIfRendering",
+          "config": {}
+        },
+        "type": "app",
+        "width": 271,
+        "height": 40,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 330.9343459949327,
+          "y": -368.0584881176743
+        },
+        "dragging": false
+      },
+      {
+        "id": "5e941a2a-077a-4fab-8c4b-a3b4c6b6d84e",
+        "position": {
+          "x": 663.471393348693,
+          "y": -344.43726486095784
+        },
         "data": {
           "keyword": "render",
           "config": {}
         },
+        "type": "dispatch",
         "width": 260,
         "height": 40,
         "selected": false,
-        "dragging": false,
-        "positionAbsolute": { "x": 340, "y": -130 }
+        "positionAbsolute": {
+          "x": 663.471393348693,
+          "y": -344.43726486095784
+        },
+        "dragging": false
       }
     ],
     "edges": [
@@ -207,13 +301,22 @@
         "type": "codeNodeEdge"
       },
       {
-        "id": "0a4fec88-b857-40ef-b321-9f277d88d292",
+        "id": "b76605bb-cc2f-4beb-b9b2-3a01b906dec3",
+        "target": "6f173db6-e47f-451e-8207-ec90b3fd5294",
+        "targetHandle": "prev",
         "source": "f91321b6-674f-4a38-949b-c85827f8dc54",
         "sourceHandle": "next",
-        "target": "334a786c-6955-4c7b-87dc-8652211db529",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "36d8231a-46c1-4336-9d69-d17ec56fecd8",
+        "target": "5e941a2a-077a-4fab-8c4b-a3b4c6b6d84e",
         "targetHandle": "prev",
+        "source": "6f173db6-e47f-451e-8207-ec90b3fd5294",
+        "sourceHandle": "next",
         "type": "appNodeEdge"
       }
-    ]
+    ],
+    "apps": {}
   }
 ]
