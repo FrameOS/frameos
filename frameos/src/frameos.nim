@@ -1,34 +1,19 @@
 import asyncdispatch
-import std/json
 import std/os
 import std/segfaults
 import std/strutils
 from ./frameos/frameos import startFrameOS, describeFatalStartupError
 from ./frameos/setup import setupFrameOS
 
-proc versionFromJsonFile(path: string): string =
-  try:
-    if fileExists(path):
-      let data = parseFile(path)
-      for key in ["frameosVersion", "frameos_version", "frameos"]:
-        let version = data{key}.getStr("")
-        if version.len > 0:
-          return version
-  except CatchableError:
-    discard
-  return ""
+const frameosVersion {.strdefine.}: string = "unknown"
 
-proc frameOSVersion(): string =
-  for path in [getEnv("FRAMEOS_CONFIG"), "./frame.json", "../versions.json", "versions.json"]:
-    if path.len == 0:
-      continue
-    let version = versionFromJsonFile(path)
-    if version.len > 0:
-      return version
-  return "unknown"
+proc compiledFrameOSVersion(): string =
+  result = frameosVersion.strip()
+  if result.len == 0:
+    result = "unknown"
 
 proc printHelp() =
-  echo "FrameOS version: " & frameOSVersion()
+  echo "FrameOS version: " & compiledFrameOSVersion()
   echo ""
   echo "Available commands:"
   echo "  start   Start FrameOS (default)"

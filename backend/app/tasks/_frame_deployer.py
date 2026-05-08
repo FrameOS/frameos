@@ -82,6 +82,8 @@ LOCAL_SOURCE_IGNORE_PATTERNS = (
     "*.admin_session_salt",
 )
 
+FRAMEOS_VERSION_KEYS = ("frameosVersion", "frameos_version", "frameos")
+
 
 def _iter_config_app_dirs(apps_root: str) -> Iterable[str]:
     if not os.path.isdir(apps_root):
@@ -94,6 +96,31 @@ def _iter_config_app_dirs(apps_root: str) -> Iterable[str]:
             app_dir = os.path.join(category_dir, keyword)
             if os.path.isdir(app_dir) and os.path.exists(os.path.join(app_dir, "config.json")):
                 yield app_dir
+
+
+def _frameos_version_from_json(path: Path) -> str:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ""
+
+    if not isinstance(data, dict):
+        return ""
+
+    for key in FRAMEOS_VERSION_KEYS:
+        version = data.get(key)
+        if isinstance(version, str) and version:
+            return version
+    return ""
+
+
+def _frameos_version_for_source(source_dir: str) -> str:
+    source_path = Path(source_dir)
+    for path in (source_path.parent / "versions.json", source_path / "frame.json"):
+        version = _frameos_version_from_json(path)
+        if version:
+            return version
+    return "unknown"
 
 
 class FrameDeployer:
@@ -678,9 +705,11 @@ $(OBJECTS): pre-build
 
         cpu = await self.arch_to_nim_cpu(arch)
         debug_options = "--lineTrace:on" if frame.debug else ""
+        version_option = shlex.quote(f"--define:frameosVersion:{_frameos_version_for_source(source_dir)}")
         cmd = (
             f"cd {source_dir} && nimble assets -y && nimble setup && "
             f"{nim_path} compile --os:linux --cpu:{cpu} "
+            f"{version_option} "
             f"--compileOnly --genScript --nimcache:{build_dir} "
             f"{debug_options} src/frameos.nim 2>&1"
         )
