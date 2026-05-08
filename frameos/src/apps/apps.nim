@@ -21,6 +21,7 @@ import apps/data/rotateImage/app_loader as data_rotateImage_loader
 import apps/data/rstpSnapshot/app_loader as data_rstpSnapshot_loader
 import apps/data/unsplash/app_loader as data_unsplash_loader
 import apps/data/weather/app_loader as data_weather_loader
+import apps/data/wikicommons/app_loader as data_wikicommons_loader
 import apps/data/xmlToJson/app_loader as data_xmlToJson_loader
 import apps/logic/breakIfRendering/app_loader as logic_breakIfRendering_loader
 import apps/logic/ifElse/app_loader as logic_ifElse_loader
@@ -59,6 +60,7 @@ proc initApp*(keyword: string, node: DiagramNode, scene: FrameScene): AppRoot =
   of "data/rstpSnapshot": data_rstpSnapshot_loader.init(node, scene)
   of "data/unsplash": data_unsplash_loader.init(node, scene)
   of "data/weather": data_weather_loader.init(node, scene)
+  of "data/wikicommons": data_wikicommons_loader.init(node, scene)
   of "data/xmlToJson": data_xmlToJson_loader.init(node, scene)
   of "logic/breakIfRendering": logic_breakIfRendering_loader.init(node, scene)
   of "logic/ifElse": logic_ifElse_loader.init(node, scene)
@@ -98,6 +100,7 @@ proc setAppField*(keyword: string, app: AppRoot, field: string, value: Value) =
   of "data/rstpSnapshot": data_rstpSnapshot_loader.setField(app, field, value)
   of "data/unsplash": data_unsplash_loader.setField(app, field, value)
   of "data/weather": data_weather_loader.setField(app, field, value)
+  of "data/wikicommons": data_wikicommons_loader.setField(app, field, value)
   of "data/xmlToJson": data_xmlToJson_loader.setField(app, field, value)
   of "logic/breakIfRendering": logic_breakIfRendering_loader.setField(app, field, value)
   of "logic/ifElse": logic_ifElse_loader.setField(app, field, value)
@@ -153,6 +156,7 @@ proc getApp*(keyword: string, app: AppRoot, context: ExecutionContext): Value =
   of "data/rstpSnapshot": data_rstpSnapshot_loader.get(app, context)
   of "data/unsplash": data_unsplash_loader.get(app, context)
   of "data/weather": data_weather_loader.get(app, context)
+  of "data/wikicommons": data_wikicommons_loader.get(app, context)
   of "data/xmlToJson": data_xmlToJson_loader.get(app, context)
   of "render/calendar": render_calendar_loader.get(app, context)
   of "render/color": render_color_loader.get(app, context)
