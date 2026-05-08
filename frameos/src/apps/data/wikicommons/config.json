@@ -27,7 +27,8 @@
       "value": "",
       "required": false,
       "label": "Metadata state key",
-      "placeholder": "e.g. wikimediaMetadata"
+      "placeholder": "e.g. wikimediaMetadata",
+      "hint": "Enter a state key to persist metadata about the image. Stores: {title, description, author, license, pageUrl, imageUrl, mime}."
     }
   ],
   "output": [

@@ -92,6 +92,7 @@ proc get*(self: App, context: ExecutionContext): Image =
         return self.error(context, "Error making request " & $response.status & ": " & response.body)
     let json = parseJson(response.body)
     let imageNode = json{"data"}{0}
+    let revisedPrompt = imageNode{"revised_prompt"}.getStr
     let imageBase64 = imageNode{"b64_json"}.getStr
     var imageDataBody = ""
     if imageBase64 != "":
@@ -112,9 +113,12 @@ proc get*(self: App, context: ExecutionContext): Image =
       var metadata = %*{
         "source": "openai",
         "prompt": prompt,
+        "generatedPrompt": if revisedPrompt != "": revisedPrompt else: prompt,
         "model": self.appConfig.model,
         "size": size,
       }
+      if revisedPrompt != "":
+        metadata["revisedPrompt"] = %revisedPrompt
       self.scene.state[self.appConfig.metadataStateKey] = metadata
 
     result = decodeImageWithFallback(imageDataBody)
