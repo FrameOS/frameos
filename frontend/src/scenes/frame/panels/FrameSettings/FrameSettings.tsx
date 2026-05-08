@@ -538,26 +538,26 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                 />
               </Field>
               <Field
-                name="driverBuildMode"
-                label="Driver build mode"
+                name="compilationMode"
+                label="Compilation mode"
                 tooltip={
                   <div className="space-y-2">
                     <p>
-                      Choose whether display/input drivers are built as separate shared libraries deployed next to
-                      FrameOS, or linked into the FrameOS executable.
+                      Choose whether display/input drivers and compiled scenes are built as separate shared libraries
+                      deployed next to FrameOS, or linked into the FrameOS executable.
                     </p>
                     <p>
                       Precompiled only downloads a published FrameOS release when all scenes are interpreted; otherwise
-                      it falls back to shared driver libraries.
+                      it falls back to shared libraries.
                     </p>
                   </div>
                 }
               >
                 <Select
-                  name="rpios.driverBuildMode"
+                  name="rpios.compilationMode"
                   options={[
                     { value: '', label: 'Default (single executable)' },
-                    { value: 'shared', label: 'Shared driver libraries' },
+                    { value: 'shared', label: 'Shared libraries' },
                     { value: 'precompiled', label: 'Precompiled only / experimental' },
                     { value: 'static', label: 'Single executable' },
                   ]}

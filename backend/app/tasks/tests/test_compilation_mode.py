@@ -3,13 +3,13 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from app.codegen.drivers_nim import (
-    DRIVER_BUILD_MODE_PRECOMPILED,
-    DRIVER_BUILD_MODE_SHARED,
-    DRIVER_BUILD_MODE_STATIC,
-    driver_build_mode_uses_shared_libraries,
+    COMPILATION_MODE_PRECOMPILED,
+    COMPILATION_MODE_SHARED,
+    COMPILATION_MODE_STATIC,
+    compilation_mode_uses_shared_libraries,
     driver_library_filename,
-    frame_driver_build_mode,
-    normalize_driver_build_mode,
+    frame_compilation_mode,
+    normalize_compilation_mode,
     write_driver_library_nim,
     write_shared_drivers_nim,
     write_static_drivers_nim,
@@ -17,30 +17,30 @@ from app.codegen.drivers_nim import (
 from app.drivers.drivers import Driver
 
 
-def test_driver_build_mode_defaults_to_static():
-    assert normalize_driver_build_mode(None) == DRIVER_BUILD_MODE_STATIC
-    assert normalize_driver_build_mode("") == DRIVER_BUILD_MODE_STATIC
-    assert normalize_driver_build_mode("unexpected") == DRIVER_BUILD_MODE_STATIC
-    assert frame_driver_build_mode(SimpleNamespace(rpios=None)) == DRIVER_BUILD_MODE_STATIC
-    assert frame_driver_build_mode(SimpleNamespace(rpios={})) == DRIVER_BUILD_MODE_STATIC
+def test_compilation_mode_defaults_to_static():
+    assert normalize_compilation_mode(None) == COMPILATION_MODE_STATIC
+    assert normalize_compilation_mode("") == COMPILATION_MODE_STATIC
+    assert normalize_compilation_mode("unexpected") == COMPILATION_MODE_STATIC
+    assert frame_compilation_mode(SimpleNamespace(rpios=None)) == COMPILATION_MODE_STATIC
+    assert frame_compilation_mode(SimpleNamespace(rpios={})) == COMPILATION_MODE_STATIC
 
 
-def test_driver_build_mode_shared_requires_explicit_setting():
-    assert normalize_driver_build_mode("shared") == DRIVER_BUILD_MODE_SHARED
-    assert frame_driver_build_mode(SimpleNamespace(rpios={"driverBuildMode": "shared"})) == DRIVER_BUILD_MODE_SHARED
+def test_compilation_mode_shared_requires_explicit_setting():
+    assert normalize_compilation_mode("shared") == COMPILATION_MODE_SHARED
+    assert frame_compilation_mode(SimpleNamespace(rpios={"compilationMode": "shared"})) == COMPILATION_MODE_SHARED
 
 
-def test_driver_build_mode_static_is_valid():
-    assert normalize_driver_build_mode("static") == DRIVER_BUILD_MODE_STATIC
-    assert frame_driver_build_mode(SimpleNamespace(rpios={"driverBuildMode": "static"})) == DRIVER_BUILD_MODE_STATIC
+def test_compilation_mode_static_is_valid():
+    assert normalize_compilation_mode("static") == COMPILATION_MODE_STATIC
+    assert frame_compilation_mode(SimpleNamespace(rpios={"compilationMode": "static"})) == COMPILATION_MODE_STATIC
 
 
-def test_driver_build_mode_precompiled_uses_shared_libraries():
-    assert normalize_driver_build_mode("precompiled") == DRIVER_BUILD_MODE_PRECOMPILED
-    assert frame_driver_build_mode(SimpleNamespace(rpios={"driverBuildMode": "precompiled"})) == DRIVER_BUILD_MODE_PRECOMPILED
-    assert driver_build_mode_uses_shared_libraries("precompiled") is True
-    assert driver_build_mode_uses_shared_libraries("shared") is True
-    assert driver_build_mode_uses_shared_libraries("static") is False
+def test_compilation_mode_precompiled_uses_shared_libraries():
+    assert normalize_compilation_mode("precompiled") == COMPILATION_MODE_PRECOMPILED
+    assert frame_compilation_mode(SimpleNamespace(rpios={"compilationMode": "precompiled"})) == COMPILATION_MODE_PRECOMPILED
+    assert compilation_mode_uses_shared_libraries("precompiled") is True
+    assert compilation_mode_uses_shared_libraries("shared") is True
+    assert compilation_mode_uses_shared_libraries("static") is False
 
 
 def test_waveshare_driver_library_filename_includes_variant():

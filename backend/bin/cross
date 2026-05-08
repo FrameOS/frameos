@@ -311,7 +311,7 @@ async def build_target(
     slug: str,
     frameos_root: Path,
     artifacts_dir: Path,
-    driver_build_mode: str | None = None,
+    compilation_mode: str | None = None,
 ) -> Path:
     if slug not in TARGET_MAP:
         raise SystemExit(f"Unknown target '{slug}'. Run --list-targets to see available options.")
@@ -370,7 +370,7 @@ async def build_target(
             allow_cross_compile=True,
             force_cross_compile=True,
             target_override=target_override,
-            driver_build_mode=driver_build_mode,
+            compilation_mode=compilation_mode,
         )
         build_result = await builder.build(build_plan)
         binary_path = build_result.binary_path
@@ -390,6 +390,14 @@ async def build_target(
                 if not src.is_file():
                     raise RuntimeError(f"Shared driver library missing after build: {src}")
                 shutil.copy2(src, driver_dir / src.name)
+        if build_result.scene_library_paths:
+            scene_dir = target_dir / "scenes"
+            scene_dir.mkdir(parents=True, exist_ok=True)
+            for scene_library_path in build_result.scene_library_paths:
+                src = Path(scene_library_path)
+                if not src.is_file():
+                    raise RuntimeError(f"Shared scene library missing after build: {src}")
+                shutil.copy2(src, scene_dir / src.name)
         metadata = {
             "slug": slug,
             "arch": target.arch,
@@ -397,8 +405,9 @@ async def build_target(
             "version": target.version,
             "platform": target.platform,
             "image": target.image,
-            "driver_build_mode": build_plan.driver_build_mode,
+            "compilation_mode": build_plan.compilation_mode,
             "driver_libraries": build_result.driver_library_names,
+            "scene_libraries": build_result.scene_library_names,
         }
         with (target_dir / "metadata.json").open("w", encoding="utf-8") as fh:
             json.dump(metadata, fh, indent=2)
@@ -426,7 +435,7 @@ async def build_release_target(
     from backend.app.tasks.utils import find_nim_v2  # type: ignore  # noqa: E402
     from backend.app.utils import local_exec  # type: ignore  # noqa: E402
     from backend.app.utils.cross_compile import CrossCompiler, TargetMetadata  # type: ignore  # noqa: E402
-    from app.codegen.drivers_nim import DRIVER_BUILD_MODE_SHARED, compiled_drivers  # type: ignore  # noqa: E402
+    from app.codegen.drivers_nim import COMPILATION_MODE_SHARED, compiled_drivers  # type: ignore  # noqa: E402
     from app.codegen.release_drivers_nim import (  # type: ignore  # noqa: E402
         release_driver_specs,
         write_release_driver_libraries,
@@ -448,7 +457,7 @@ async def build_release_target(
     release_drivers = release_driver_specs()
     driver_library_names = FrameDeployer.driver_library_names(
         release_drivers,
-        DRIVER_BUILD_MODE_SHARED,
+        COMPILATION_MODE_SHARED,
     )
     driver_names = [driver.name for driver in compiled_drivers(release_drivers)]
 
@@ -467,7 +476,7 @@ async def build_release_target(
         await deployer.log("stdout", "Preparing release driver registry")
         await deployer.make_local_modifications(
             source_dir,
-            driver_build_mode=DRIVER_BUILD_MODE_SHARED,
+            compilation_mode=COMPILATION_MODE_SHARED,
             drivers_override=release_drivers,
             drivers_nim_source=write_release_shared_drivers_nim(release_drivers),
         )
@@ -517,7 +526,7 @@ async def build_release_target(
                 str(build_dir),
                 source_dir,
                 target.arch,
-                driver_build_mode=DRIVER_BUILD_MODE_SHARED,
+                compilation_mode=COMPILATION_MODE_SHARED,
                 drivers_override=release_drivers,
             )
             write_release_build_marker(
@@ -531,7 +540,7 @@ async def build_release_target(
         driver_library_paths = deployer.driver_library_paths(
             str(build_dir),
             release_drivers,
-            DRIVER_BUILD_MODE_SHARED,
+            COMPILATION_MODE_SHARED,
         )
 
         if not rebuild and release_build_outputs_complete(
@@ -604,7 +613,7 @@ async def build_release_target(
             "platform": target.platform,
             "image": target.image,
             "release_artifact": True,
-            "driver_build_mode": DRIVER_BUILD_MODE_SHARED,
+            "compilation_mode": COMPILATION_MODE_SHARED,
             "driver_registry": "runtime-filtered",
             "driver_libraries": driver_library_names,
             "vendor_folders": vendor_folders,
@@ -637,10 +646,11 @@ def parse_args(argv: Iterable[str]) -> argparse.Namespace:
     build.add_argument("--frameos-root", default=str(Path.cwd()), help="Path to the frameos source tree")
     build.add_argument("--artifacts-dir", default="build/cross", help="Directory for compiled binaries")
     build.add_argument(
-        "--driver-build-mode",
+        "--compilation-mode",
+        dest="compilation_mode",
         choices=("static", "shared", "precompiled"),
         default=None,
-        help="Override driver build mode (static, shared, or precompiled release when eligible)",
+        help="Override compilation mode (static, shared, or precompiled release when eligible)",
     )
 
     release = subparsers.add_parser(
@@ -693,7 +703,7 @@ def main(argv: list[str]) -> int:
             artifacts_dir = frameos_root / artifacts_dir
 
         async def _build() -> Path:
-            return await build_target(args.target, frameos_root, artifacts_dir, args.driver_build_mode)
+            return await build_target(args.target, frameos_root, artifacts_dir, args.compilation_mode)
 
         asyncio.run(_build())
         return 0

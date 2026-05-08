@@ -48,7 +48,7 @@ async def test_build_target_plans_then_builds(monkeypatch: pytest.MonkeyPatch, t
 
         async def plan_build(self, **kwargs):
             FakeBinaryBuilder.last_plan_kwargs = kwargs
-            return SimpleNamespace(marker="plan", driver_build_mode=kwargs.get("driver_build_mode") or "static")
+            return SimpleNamespace(marker="plan", compilation_mode=kwargs.get("compilation_mode") or "static")
 
         async def build(self, plan):
             FakeBinaryBuilder.last_build_plan = plan
@@ -56,6 +56,8 @@ async def test_build_target_plans_then_builds(monkeypatch: pytest.MonkeyPatch, t
                 binary_path=str(binary_path),
                 driver_library_paths=[],
                 driver_library_names=[],
+                scene_library_paths=[],
+                scene_library_names=[],
             )
 
     monkeypatch.setattr("backend.app.tasks._frame_deployer.FrameDeployer", FakeFrameDeployer)
@@ -78,7 +80,7 @@ async def test_build_target_plans_then_builds(monkeypatch: pytest.MonkeyPatch, t
     assert destination.exists()
     assert destination.read_bytes() == b"frameos"
     metadata = json.loads((artifacts_dir / "debian-trixie-amd64" / "metadata.json").read_text(encoding="utf-8"))
-    assert metadata["driver_build_mode"] == "static"
+    assert metadata["compilation_mode"] == "static"
 
 
 @pytest.mark.asyncio
@@ -129,11 +131,11 @@ async def test_build_release_target_uses_runtime_filtered_driver_catalog(
             return str(Path(self.temp_dir) / "build_release12345.tar.gz")
 
         @staticmethod
-        def driver_library_paths(build_dir, _drivers, _driver_build_mode):
+        def driver_library_paths(build_dir, _drivers, _compilation_mode):
             return [str(Path(build_dir) / "drivers" / "httpUpload" / "httpUpload.so")]
 
         @staticmethod
-        def driver_library_names(_drivers, _driver_build_mode):
+        def driver_library_names(_drivers, _compilation_mode):
             return ["httpUpload.so"]
 
     class FakeCrossCompiler:

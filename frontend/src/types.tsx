@@ -666,5 +666,5 @@ export interface FrameBuildrootConfig {
 export interface FrameRpiOSConfig {
   platform?: string
   crossCompilation?: '' | 'auto' | 'always' | 'never'
-  driverBuildMode?: '' | 'static' | 'shared' | 'precompiled'
+  compilationMode?: '' | 'static' | 'shared' | 'precompiled'
 }

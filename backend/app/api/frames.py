@@ -104,7 +104,7 @@ from app.utils.ssh_key_utils import default_ssh_key_ids
 from app.utils.tls import generate_frame_tls_material, parse_certificate_not_valid_after
 from app.utils.ssh_authorized_keys import _install_authorized_keys, resolve_authorized_keys_update
 from app.tasks.binary_builder import FrameBinaryBuilder
-from app.codegen.drivers_nim import frame_driver_build_mode
+from app.codegen.drivers_nim import frame_compilation_mode
 from app.utils.local_exec import exec_local_command
 from app.utils.jwt_tokens import validate_scoped_token
 from . import api_with_auth, api_no_auth
@@ -770,7 +770,7 @@ async def api_frame_local_build_zip(                 # noqa: D401
         source_dir = deployer.create_local_source_folder(tmp)
 
         # Apply all frame‑specific code generation (scenes, drivers, …)
-        await deployer.make_local_modifications(source_dir, driver_build_mode=frame_driver_build_mode(frame))
+        await deployer.make_local_modifications(source_dir, compilation_mode=frame_compilation_mode(frame))
         await copy_custom_fonts_to_local_source_folder(db, source_dir)
 
         # Package → .zip
@@ -833,13 +833,13 @@ async def api_frame_local_c_source_zip(
             )
 
         source_dir = deployer.create_local_source_folder(tmp)
-        driver_build_mode = frame_driver_build_mode(frame)
-        await deployer.make_local_modifications(source_dir, driver_build_mode=driver_build_mode)
+        compilation_mode = frame_compilation_mode(frame)
+        await deployer.make_local_modifications(source_dir, compilation_mode=compilation_mode)
         await copy_custom_fonts_to_local_source_folder(db, source_dir)
 
         build_dir = os.path.join(tmp, f"build_{deployer.build_id}")
         os.makedirs(build_dir, exist_ok=True)
-        await deployer.create_local_build_archive(build_dir, source_dir, arch, driver_build_mode=driver_build_mode)
+        await deployer.create_local_build_archive(build_dir, source_dir, arch, compilation_mode=compilation_mode)
 
         zip_path = os.path.join(tmp, f"frameos_{deployer.build_id}_c_source.zip")
         with zipfile.ZipFile(
@@ -922,6 +922,16 @@ async def api_frame_local_binary_zip(
                         detail=f"Shared driver library missing after build: {driver_library_path}",
                     )
                 shutil.copy2(driver_library_path, os.path.join(driver_dir, os.path.basename(driver_library_path)))
+        if build_result.scene_library_paths:
+            scene_dir = os.path.join(dist_dir, "scenes")
+            os.makedirs(scene_dir, exist_ok=True)
+            for scene_library_path in build_result.scene_library_paths:
+                if not os.path.isfile(scene_library_path):
+                    raise HTTPException(
+                        status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                        detail=f"Shared scene library missing after build: {scene_library_path}",
+                    )
+                shutil.copy2(scene_library_path, os.path.join(scene_dir, os.path.basename(scene_library_path)))
 
         zip_path = os.path.join(tmp, f"frameos_{deployer.build_id}_binary.zip")
         with zipfile.ZipFile(
