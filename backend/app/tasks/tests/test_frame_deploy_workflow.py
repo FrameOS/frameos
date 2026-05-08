@@ -97,7 +97,7 @@ class FakeBinaryBuilder:
         return FrameBinaryPlan(
             build_id="build12345678",
             target=TargetMetadata(arch="arm64", distro="raspios", version="bookworm"),
-            driver_build_mode="static",
+            compilation_mode="static",
             allow_cross_compile=True,
             force_cross_compile=False,
             cross_compile_supported=True,
@@ -113,7 +113,7 @@ class FakePrecompiledBinaryBuilder:
         return FrameBinaryPlan(
             build_id="build12345678",
             target=TargetMetadata(arch="arm64", distro="raspios", version="bookworm"),
-            driver_build_mode="precompiled",
+            compilation_mode="precompiled",
             allow_cross_compile=True,
             force_cross_compile=False,
             cross_compile_supported=True,
@@ -132,7 +132,7 @@ async def test_full_plan_defaults_to_single_executable(monkeypatch: pytest.Monke
 
     class CapturingBinaryBuilder(FakeBinaryBuilder):
         async def plan_build(self, **kwargs) -> FrameBinaryPlan:
-            captured_modes.append(kwargs["driver_build_mode"])
+            captured_modes.append(kwargs["compilation_mode"])
             return await super().plan_build(**kwargs)
 
     frame = SimpleNamespace(
@@ -170,14 +170,14 @@ async def test_full_plan_uses_shared_driver_libraries_when_explicit(monkeypatch:
 
     class CapturingBinaryBuilder(FakeBinaryBuilder):
         async def plan_build(self, **kwargs) -> FrameBinaryPlan:
-            captured_modes.append(kwargs["driver_build_mode"])
+            captured_modes.append(kwargs["compilation_mode"])
             return await super().plan_build(**kwargs)
 
     frame = SimpleNamespace(
         id=3,
         name="SharedExplicit",
         ssh_keys=[],
-        rpios={"crossCompilation": "auto", "driverBuildMode": "shared"},
+        rpios={"crossCompilation": "auto", "compilationMode": "shared"},
         reboot=None,
         last_successful_deploy={"frameos_version": "9.9.9"},
         last_successful_deploy_at="2026-01-01T00:00:00+00:00",
@@ -337,7 +337,7 @@ async def test_full_plan_skips_remote_build_dependencies_for_precompiled(monkeyp
         id=17,
         name="PrecompiledFrame",
         ssh_keys=[],
-        rpios={"crossCompilation": "auto", "driverBuildMode": "precompiled"},
+        rpios={"crossCompilation": "auto", "compilationMode": "precompiled"},
         reboot=None,
         last_successful_deploy={"frameos_version": "9.9.9"},
         last_successful_deploy_at="2026-01-01T00:00:00+00:00",
@@ -891,6 +891,7 @@ async def test_execute_full_does_not_activate_release_when_setup_fails(monkeypat
             prebuilt_entry=None,
             build_dir="/tmp/build",
             driver_library_paths=[],
+            scene_library_paths=[],
         )
 
     async def fake_prepare_remote_for_full_release(**_kwargs):
@@ -985,6 +986,7 @@ async def test_remote_build_uses_x86_feature_flags(monkeypatch: pytest.MonkeyPat
             archive_path=str(archive_path),
             build_dir=str(tmp_path / "build_build12345678"),
             driver_library_paths=[],
+            scene_library_paths=[],
             target=TargetMetadata(arch="x86_64", distro="debian", version="bookworm"),
         ),
         "build12345678",

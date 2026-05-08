@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.codegen.drivers_nim import DRIVER_BUILD_MODE_PRECOMPILED, DRIVER_BUILD_MODE_SHARED, DRIVER_BUILD_MODE_STATIC
+from app.codegen.drivers_nim import COMPILATION_MODE_PRECOMPILED, COMPILATION_MODE_SHARED, COMPILATION_MODE_STATIC
 from app.tasks.binary_builder import FrameBinaryBuilder, FrameBinaryPlan
 from app.tasks.precompiled_frameos import PrecompiledFrameOSResult, release_version
 from app.utils.cross_compile import TargetMetadata
@@ -15,7 +15,7 @@ class FakeDeployer:
         self.build_id = "build12345678"
 
     async def make_local_modifications(
-        self, _source_dir: str, driver_build_mode: str = DRIVER_BUILD_MODE_SHARED
+        self, _source_dir: str, compilation_mode: str = COMPILATION_MODE_SHARED
     ) -> None:
         return None
 
@@ -27,19 +27,25 @@ class FakeDeployer:
         _build_dir: str,
         _source_dir: str,
         _arch: str,
-        driver_build_mode: str = DRIVER_BUILD_MODE_SHARED,
+        compilation_mode: str = COMPILATION_MODE_SHARED,
     ) -> str:
         return "/tmp/build.tar.gz"
 
-    def driver_library_paths(self, _build_dir, _drivers, _driver_build_mode):
+    def driver_library_paths(self, _build_dir, _drivers, _compilation_mode):
         return []
 
-    def driver_library_names(self, _drivers, _driver_build_mode):
+    def driver_library_names(self, _drivers, _compilation_mode):
+        return []
+
+    def scene_library_paths(self, _build_dir, _frame, _compilation_mode):
+        return []
+
+    def scene_library_names(self, _frame, _compilation_mode):
         return []
 
 
 @pytest.mark.asyncio
-async def test_plan_build_defaults_to_static_driver_mode(monkeypatch: pytest.MonkeyPatch):
+async def test_plan_build_defaults_to_static_compilation_mode(monkeypatch: pytest.MonkeyPatch):
     async def fake_resolve_prebuilt_entry(**_kwargs):
         return None, None
 
@@ -59,11 +65,11 @@ async def test_plan_build_defaults_to_static_driver_mode(monkeypatch: pytest.Mon
     )
     explicit_shared_plan = await builder.plan_build(
         target_override=TargetMetadata(arch="aarch64", distro="raspios", version="trixie"),
-        driver_build_mode=DRIVER_BUILD_MODE_SHARED,
+        compilation_mode=COMPILATION_MODE_SHARED,
     )
 
-    assert plan.driver_build_mode == DRIVER_BUILD_MODE_STATIC
-    assert explicit_shared_plan.driver_build_mode == DRIVER_BUILD_MODE_SHARED
+    assert plan.compilation_mode == COMPILATION_MODE_STATIC
+    assert explicit_shared_plan.compilation_mode == COMPILATION_MODE_SHARED
 
 
 @pytest.mark.asyncio
@@ -80,7 +86,7 @@ async def test_plan_build_attempts_precompiled_when_all_scenes_are_interpreted(m
         frame=SimpleNamespace(
             device="framebuffer",
             gpio_buttons=[],
-            rpios={"driverBuildMode": "precompiled"},
+            rpios={"compilationMode": "precompiled"},
             scenes=[{"settings": {"execution": "interpreted"}}],
         ),
         deployer=FakeDeployer(),
@@ -91,7 +97,7 @@ async def test_plan_build_attempts_precompiled_when_all_scenes_are_interpreted(m
         target_override=TargetMetadata(arch="aarch64", distro="debian", version="trixie")
     )
 
-    assert plan.driver_build_mode == DRIVER_BUILD_MODE_PRECOMPILED
+    assert plan.compilation_mode == COMPILATION_MODE_PRECOMPILED
     assert plan.will_attempt_precompiled is True
     assert plan.will_attempt_cross_compile is False
     assert plan.precompiled_release_url is not None
@@ -115,7 +121,7 @@ async def test_plan_build_skips_precompiled_when_compiled_scenes_exist(monkeypat
         frame=SimpleNamespace(
             device="framebuffer",
             gpio_buttons=[],
-            rpios={"driverBuildMode": "precompiled"},
+            rpios={"compilationMode": "precompiled"},
             scenes=[{"settings": {"execution": "compiled"}}],
         ),
         deployer=FakeDeployer(),
@@ -126,7 +132,7 @@ async def test_plan_build_skips_precompiled_when_compiled_scenes_exist(monkeypat
         target_override=TargetMetadata(arch="aarch64", distro="debian", version="trixie")
     )
 
-    assert plan.driver_build_mode == DRIVER_BUILD_MODE_PRECOMPILED
+    assert plan.compilation_mode == COMPILATION_MODE_PRECOMPILED
     assert plan.will_attempt_precompiled is False
     assert plan.will_attempt_cross_compile is True
     assert plan.precompiled_skip_reason == "1 compiled scene is configured"
@@ -153,7 +159,7 @@ async def test_build_passes_plan_fields_to_cross_compile(monkeypatch: pytest.Mon
     plan = FrameBinaryPlan(
         build_id="build12345678",
         target=TargetMetadata(arch="aarch64", distro="raspios", version="trixie"),
-        driver_build_mode="static",
+        compilation_mode="static",
         allow_cross_compile=True,
         force_cross_compile=False,
         cross_compile_supported=True,
@@ -193,6 +199,8 @@ async def test_build_uses_precompiled_release_when_planned(monkeypatch: pytest.M
             binary_path=binary_path,
             driver_library_paths=[driver_path],
             driver_library_names=["frameBuffer.so"],
+            scene_library_paths=[],
+            scene_library_names=[],
             vendor_folders=[],
             archive_path=archive_path,
         )
@@ -213,7 +221,7 @@ async def test_build_uses_precompiled_release_when_planned(monkeypatch: pytest.M
     plan = FrameBinaryPlan(
         build_id="build12345678",
         target=TargetMetadata(arch="aarch64", distro="debian", version="trixie"),
-        driver_build_mode="precompiled",
+        compilation_mode="precompiled",
         allow_cross_compile=True,
         force_cross_compile=False,
         cross_compile_supported=True,

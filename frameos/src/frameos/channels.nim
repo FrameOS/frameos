@@ -1,4 +1,4 @@
-when defined(frameosDriverLibrary):
+when defined(frameosDriverLibrary) or defined(frameosSharedLibrary):
   import json
   import options
   import frameos/ids

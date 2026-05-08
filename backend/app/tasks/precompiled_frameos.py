@@ -13,7 +13,7 @@ from urllib.parse import urljoin
 
 import httpx
 
-from app.codegen.drivers_nim import DRIVER_BUILD_MODE_SHARED
+from app.codegen.drivers_nim import COMPILATION_MODE_SHARED
 from app.drivers.devices import drivers_for_frame
 from app.models.frame import Frame
 from app.tasks._frame_deployer import FrameDeployer
@@ -34,6 +34,8 @@ class PrecompiledFrameOSResult:
     binary_path: str
     driver_library_paths: list[str]
     driver_library_names: list[str]
+    scene_library_paths: list[str]
+    scene_library_names: list[str]
     vendor_folders: list[str]
     archive_path: str
     cache_hit: bool = False
@@ -99,7 +101,7 @@ async def download_precompiled_frameos_release(
 
         required_driver_names = FrameDeployer.driver_library_names(
             drivers_for_frame(frame),
-            DRIVER_BUILD_MODE_SHARED,
+            COMPILATION_MODE_SHARED,
         )
         copied_driver_paths = _copy_required_drivers(
             artifact_root=artifact_root,
@@ -126,6 +128,8 @@ async def download_precompiled_frameos_release(
         binary_path=str(binary_dest),
         driver_library_paths=[str(path) for path in copied_driver_paths],
         driver_library_names=required_driver_names,
+        scene_library_paths=[],
+        scene_library_names=[],
         vendor_folders=vendor_folders,
         archive_path=result_archive,
         cache_hit=cache_hit,
