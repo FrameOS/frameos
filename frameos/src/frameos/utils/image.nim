@@ -1,6 +1,5 @@
 import pixie
 import base64
-import httpclient
 import json
 import random
 import os
@@ -14,6 +13,9 @@ import times
 import uri
 
 import frameos/utils/font
+import frameos/utils/http_client
+
+const MaxImageDownloadBytes = 15 * 1024 * 1024
 
 proc imageMagickCommand(): string =
   let magick = findExe("magick")
@@ -127,20 +129,12 @@ proc decodeDataUrl*(dataUrl: string): Image =
 proc downloadImage*(url: string): Image =
   if url.startsWith("data:"):
     return decodeDataUrl(url)
-  let client = newHttpClient(timeout = 30000)
-  try:
-    let content = client.getContent(url)
-    result = decodeImageWithFallback(content)
-  finally:
-    client.close()
+  let content = boundedGetContent(url, maxBytes = MaxImageDownloadBytes)
+  result = decodeImageWithFallback(content)
 
 proc downloadImageWithData*(url: string): tuple[image: Image, data: string] =
-  let client = newHttpClient(timeout = 30000)
-  try:
-    let content = client.getContent(url)
-    result = (decodeImageWithFallback(content), content)
-  finally:
-    client.close()
+  let content = boundedGetContent(url, maxBytes = MaxImageDownloadBytes)
+  result = (decodeImageWithFallback(content), content)
 
 proc parseExifJson(output: string): Option[JsonNode] =
   try:

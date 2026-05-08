@@ -1,13 +1,15 @@
 import std/[base64, json, options, strformat, strutils, tables]
-import httpclient
 import pixie
 
 import frameos/apps as frameos_apps
 import frameos/js_runtime
 import frameos/types
 import frameos/values
+import frameos/utils/http_client
 import frameos/utils/image
 import lib/burrito
+
+const MaxJsFetchTextBytes = 2 * 1024 * 1024
 
 type
   JsAppRuntime* = ref object
@@ -96,15 +98,12 @@ proc jsFetchText(ctx: ptr JSContext, url: JSValue): JSValue {.nimcall.} =
   if urlStr.len == 0:
     return nimStringToJS(ctx, "")
 
-  let client = newHttpClient(timeout = 30000)
   try:
-    return nimStringToJS(ctx, client.getContent(urlStr))
+    return nimStringToJS(ctx, boundedGetContent(urlStr, maxBytes = MaxJsFetchTextBytes))
   except CatchableError as err:
     if e != nil:
       frameos_apps.logError(e.owner, "JS app fetchText failed: " & err.msg)
     return nimStringToJS(ctx, "")
-  finally:
-    client.close()
 
 proc newJsAppRuntime*(category: string, outputType: string, source: string): JsAppRuntime =
   return JsAppRuntime(

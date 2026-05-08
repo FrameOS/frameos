@@ -1,4 +1,4 @@
-import std/[json, unittest]
+import std/[json, options, times, unittest]
 
 import ../app
 import frameos/types
@@ -40,3 +40,14 @@ suite "data/haSensor app":
 
     let output = app.error("boom")
     check output == %*{"error": "boom"}
+
+  test "recent cached response avoids a new fetch":
+    let app = makeApp(%*{"homeAssistant": {"url": "http://127.0.0.1:9", "accessToken": "token"}})
+    app.json = some(%*{"state": "cached"})
+    app.lastFetchAt = epochTime()
+
+    let output = app.get(ExecutionContext())
+    output["state"] = %"changed"
+
+    check output["state"].getStr() == "changed"
+    check app.json.get()["state"].getStr() == "cached"

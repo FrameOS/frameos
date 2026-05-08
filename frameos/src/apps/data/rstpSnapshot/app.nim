@@ -1,10 +1,15 @@
+import os
 import osproc
 import pixie
 import strutils
-import streams
+import times
 import frameos/apps
 import frameos/types
 import frameos/utils/image
+
+const
+  FfmpegTimeoutMs = 15000
+  MaxFfmpegOutputBytes = 50 * 1024 * 1024
 
 type
   RtspSnapshotFfmpegRunHook* = proc(command: string): tuple[data: string, exitCode: int]
@@ -28,18 +33,34 @@ proc runFfmpeg(command: string): tuple[data: string, exitCode: int] =
   if rtspSnapshotFfmpegRunHook != nil:
     return rtspSnapshotFfmpegRunHook(command)
 
-  var p = startProcess(command, options = {poUsePath, poEvalCommand, poDaemon})
+  let outputPath = getTempDir() / ("frameos-rtsp-" & $getCurrentProcessId() & "-" & $(epochTime() * 1000).int & ".bmp")
+  let commandWithOutput = command & " " & quoteShell(outputPath)
+  var p = startProcess(commandWithOutput, options = {poUsePath, poEvalCommand, poDaemon})
   defer:
     p.close()
+    if fileExists(outputPath):
+      try:
+        removeFile(outputPath)
+      except OSError:
+        discard
 
-  let outputStream = p.outputStream()
-  result.data = outputStream.readAll()
-  result.exitCode = p.waitForExit()
+  result.exitCode = p.waitForExit(FfmpegTimeoutMs)
+  if result.exitCode != 0:
+    return
+
+  if not fileExists(outputPath):
+    result.exitCode = 1
+    return
+
+  if getFileSize(outputPath) > MaxFfmpegOutputBytes:
+    raise newException(IOError, "ffmpeg output exceeded " & $MaxFfmpegOutputBytes & " bytes")
+
+  result.data = readFile(outputPath)
 
 proc get*(self: App, context: ExecutionContext): Image =
   try:
     let url = self.appConfig.url.replace("'", "\\'")
-    let command = "ffmpeg -loglevel quiet -y -i '" & url & "' -vframes 1 -f image2 -c:v bmp pipe:1"
+    let command = "ffmpeg -loglevel quiet -nostdin -y -i '" & url & "' -vframes 1 -f image2 -c:v bmp"
 
     if self.frameConfig.debug:
       self.log "Running: " & command

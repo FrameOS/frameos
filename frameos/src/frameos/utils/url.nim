@@ -1,8 +1,10 @@
-import httpclient
 import strformat
 import strutils
 import frameos/types
 import frameos/setup_proxy
+import frameos/utils/http_client
+
+const MaxDownloadedUrlBytes = 2 * 1024 * 1024
 
 proc publicScheme*(config: FrameConfig): string =
   if config.httpsProxy.enable: "https" else: "http"
@@ -38,8 +40,4 @@ proc authenticatedFrameUrl*(config: FrameConfig, path: string, requireWriteAcces
     result &= (if path.contains("?"): "&" else: "?") & "k=" & config.frameAccessKey
 
 proc downloadUrl*(url: string): string =
-  let client = newHttpClient(timeout = 30000)
-  try:
-    result = client.getContent(url)
-  finally:
-    client.close()
+  boundedGetContent(url, maxBytes = MaxDownloadedUrlBytes)
