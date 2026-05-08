@@ -21,9 +21,9 @@ if str(BACKEND_ROOT) not in sys.path:
 
 from app.codegen.drivers_nim import (  # noqa: E402
     compiled_drivers,
-    driver_build_mode_uses_shared_libraries,
-    frame_driver_build_mode,
-    normalize_driver_build_mode,
+    compilation_mode_uses_shared_libraries,
+    frame_compilation_mode,
+    normalize_compilation_mode,
     write_driver_library_nim,
     write_drivers_nim,
 )
@@ -66,15 +66,15 @@ def generate_driver_sources(
     *,
     frameos_root: Path,
     config_path: Path,
-    driver_build_mode: str | None,
+    compilation_mode: str | None,
 ) -> str:
     frame = load_frame_stub(config_path)
-    mode = normalize_driver_build_mode(driver_build_mode or frame_driver_build_mode(frame))
+    mode = normalize_compilation_mode(compilation_mode or frame_compilation_mode(frame))
     drivers = drivers_for_frame(frame)
 
     drivers_dir = frameos_root / "src" / "drivers"
     (drivers_dir / "drivers.nim").write_text(
-        write_drivers_nim(drivers, driver_build_mode=mode),
+        write_drivers_nim(drivers, compilation_mode=mode),
         encoding="utf-8",
     )
 
@@ -86,7 +86,7 @@ def generate_driver_sources(
 
     shared_dir = drivers_dir / "shared"
     shutil.rmtree(shared_dir, ignore_errors=True)
-    if driver_build_mode_uses_shared_libraries(mode):
+    if compilation_mode_uses_shared_libraries(mode):
         shared_dir.mkdir(parents=True, exist_ok=True)
         for driver in compiled_drivers(drivers):
             (shared_dir / f"{driver.name}.nim").write_text(
@@ -103,7 +103,6 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--config", default=str(FRAMEOS_ROOT / "frame.json"), help="Frame config JSON")
     parser.add_argument(
         "--compilation-mode",
-        "--driver-build-mode",
         choices=("static", "shared", "precompiled"),
         default=None,
         help="Override frame.json rpios.compilationMode",
@@ -116,7 +115,7 @@ def main(argv: list[str]) -> int:
     mode = generate_driver_sources(
         frameos_root=Path(args.frameos_root).resolve(),
         config_path=Path(args.config).resolve(),
-        driver_build_mode=args.compilation_mode,
+        compilation_mode=args.compilation_mode,
     )
     print(f"Generated driver sources in {mode} mode")
     return 0

@@ -467,7 +467,7 @@ async def test_real_ssh_full_fast_cross_and_precompiled_deploy(
                 db,
                 ssh_target,
                 name="DeployE2EPrecompiled",
-                rpios={"crossCompilation": "auto", "driverBuildMode": "precompiled"},
+                rpios={"crossCompilation": "auto", "compilationMode": "precompiled"},
             )
             precompiled_plan = await _run_full_deploy(
                 db,

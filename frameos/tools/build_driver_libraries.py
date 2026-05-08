@@ -21,12 +21,12 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 from app.codegen.drivers_nim import (  # noqa: E402
-    DRIVER_BUILD_MODE_SHARED,
+    COMPILATION_MODE_SHARED,
     compiled_drivers,
-    driver_build_mode_uses_shared_libraries,
+    compilation_mode_uses_shared_libraries,
     driver_library_filename,
-    frame_driver_build_mode,
-    normalize_driver_build_mode,
+    frame_compilation_mode,
+    normalize_compilation_mode,
 )
 from app.drivers.devices import drivers_for_frame  # noqa: E402
 from generate_driver_sources import generate_driver_sources, load_frame_stub  # noqa: E402
@@ -68,11 +68,11 @@ async def build_driver_libraries(
     nim_args: Iterable[str],
     strip_command: str | None,
     only_if_shared: bool,
-    driver_build_mode: str | None,
+    compilation_mode: str | None,
 ) -> list[Path]:
     frame = load_frame_stub(config_path)
-    mode = normalize_driver_build_mode(driver_build_mode or frame_driver_build_mode(frame))
-    if only_if_shared and not driver_build_mode_uses_shared_libraries(mode):
+    mode = normalize_compilation_mode(compilation_mode or frame_compilation_mode(frame))
+    if only_if_shared and not compilation_mode_uses_shared_libraries(mode):
         print(f"Compilation mode is {mode}; skipping shared driver libraries")
         return []
 
@@ -88,7 +88,7 @@ async def build_driver_libraries(
         generate_driver_sources(
             frameos_root=source_dir,
             config_path=config_path,
-            driver_build_mode=DRIVER_BUILD_MODE_SHARED,
+            compilation_mode=COMPILATION_MODE_SHARED,
         )
 
         if not (source_dir / "quickjs" / "libquickjs.a").exists():
@@ -135,7 +135,6 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--compilation-mode",
-        "--driver-build-mode",
         choices=("static", "shared", "precompiled"),
         default=None,
         help="Override frame.json rpios.compilationMode when deciding whether to skip",
@@ -160,7 +159,7 @@ def main(argv: list[str]) -> int:
             nim_args=args.nim_arg,
             strip_command=None if args.no_strip else args.strip,
             only_if_shared=args.only_if_shared,
-            driver_build_mode=args.compilation_mode,
+            compilation_mode=args.compilation_mode,
         )
     )
     for path in built:

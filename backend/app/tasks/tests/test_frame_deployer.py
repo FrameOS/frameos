@@ -195,7 +195,7 @@ async def test_create_local_build_archive_generates_shared_driver_makefiles(
     build_dir = temp_dir / f"build_{deployer.build_id}"
     build_dir.mkdir()
 
-    await deployer.create_local_build_archive(str(build_dir), str(source_dir), "arm64", driver_build_mode="shared")
+    await deployer.create_local_build_archive(str(build_dir), str(source_dir), "arm64", compilation_mode="shared")
 
     assert len(commands) == 2
     assert "src/drivers/shared/httpUpload.nim" in commands[1]
@@ -288,7 +288,7 @@ async def test_create_local_build_archive_generates_shared_scene_makefiles(
     build_dir = temp_dir / f"build_{deployer.build_id}"
     build_dir.mkdir()
 
-    await deployer.create_local_build_archive(str(build_dir), str(source_dir), "arm64", driver_build_mode="shared")
+    await deployer.create_local_build_archive(str(build_dir), str(source_dir), "arm64", compilation_mode="shared")
 
     assert len(commands) == 2
     assert "src/scenes/shared/scene_myscene.nim" in commands[1]

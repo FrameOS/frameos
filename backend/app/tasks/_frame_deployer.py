@@ -27,10 +27,10 @@ from app.drivers.waveshare import write_waveshare_driver_nim, get_variant_folder
 from app.drivers.devices import drivers_for_frame
 from app.models import get_apps_from_scenes
 from app.codegen.drivers_nim import (
-    DEFAULT_DRIVER_BUILD_MODE,
-    DRIVER_BUILD_MODE_STATIC,
+    DEFAULT_COMPILATION_MODE,
+    COMPILATION_MODE_STATIC,
     compiled_drivers,
-    driver_build_mode_uses_shared_libraries,
+    compilation_mode_uses_shared_libraries,
     driver_library_filename,
     normalize_compilation_mode,
     write_driver_library_nim,
@@ -192,9 +192,9 @@ class FrameDeployer:
     def driver_library_paths(
         build_dir: str,
         drivers: dict[str, Driver],
-        driver_build_mode: str,
+        compilation_mode: str,
     ) -> list[str]:
-        if not driver_build_mode_uses_shared_libraries(driver_build_mode):
+        if not compilation_mode_uses_shared_libraries(compilation_mode):
             return []
         return [
             os.path.join(build_dir, "drivers", driver.name, driver_library_filename(driver))
@@ -204,9 +204,9 @@ class FrameDeployer:
     @staticmethod
     def driver_library_names(
         drivers: dict[str, Driver],
-        driver_build_mode: str,
+        compilation_mode: str,
     ) -> list[str]:
-        if not driver_build_mode_uses_shared_libraries(driver_build_mode):
+        if not compilation_mode_uses_shared_libraries(compilation_mode):
             return []
         return [driver_library_filename(driver) for driver in compiled_drivers(drivers)]
 
@@ -216,7 +216,7 @@ class FrameDeployer:
         frame: Frame,
         compilation_mode: str,
     ) -> list[str]:
-        if not driver_build_mode_uses_shared_libraries(compilation_mode):
+        if not compilation_mode_uses_shared_libraries(compilation_mode):
             return []
         return [
             os.path.join(build_dir, "scenes", scene_module_suffix(scene), scene_library_filename(scene))
@@ -228,7 +228,7 @@ class FrameDeployer:
         frame: Frame,
         compilation_mode: str,
     ) -> list[str]:
-        if not driver_build_mode_uses_shared_libraries(compilation_mode):
+        if not compilation_mode_uses_shared_libraries(compilation_mode):
             return []
         return [scene_library_filename(scene) for scene in compiled_frame_scenes(frame)]
 
@@ -354,12 +354,12 @@ class FrameDeployer:
     async def make_local_modifications(
         self,
         source_dir: str,
-        driver_build_mode: str = DEFAULT_DRIVER_BUILD_MODE,
+        compilation_mode: str = DEFAULT_COMPILATION_MODE,
         drivers_override: dict[str, Driver] | None = None,
         drivers_nim_source: str | None = None,
     ):
         frame = self.frame
-        driver_build_mode = normalize_compilation_mode(driver_build_mode)
+        compilation_mode = normalize_compilation_mode(compilation_mode)
         shutil.rmtree(os.path.join(source_dir, "src", "scenes"), ignore_errors=True)
         os.makedirs(os.path.join(source_dir, "src", "scenes"), exist_ok=True)
 
@@ -421,19 +421,19 @@ class FrameDeployer:
 
         shared_scene_dir = os.path.join(source_dir, "src", "scenes", "shared")
         shutil.rmtree(shared_scene_dir, ignore_errors=True)
-        if driver_build_mode_uses_shared_libraries(driver_build_mode):
+        if compilation_mode_uses_shared_libraries(compilation_mode):
             os.makedirs(shared_scene_dir, exist_ok=True)
             for scene in compiled_frame_scenes(frame):
                 with open(os.path.join(shared_scene_dir, scene_module_filename(scene)), "w") as sf:
                     sf.write(write_scene_library_nim(scene))
 
         with open(os.path.join(source_dir, "src", "scenes", "scenes.nim"), "w") as f:
-            source = write_scenes_nim(frame, compilation_mode=driver_build_mode)
+            source = write_scenes_nim(frame, compilation_mode=compilation_mode)
             f.write(source)
 
         drivers = drivers_override or drivers_for_frame(frame)
         with open(os.path.join(source_dir, "src", "drivers", "drivers.nim"), "w") as f:
-            source = drivers_nim_source or write_drivers_nim(drivers, driver_build_mode=driver_build_mode)
+            source = drivers_nim_source or write_drivers_nim(drivers, compilation_mode=compilation_mode)
             f.write(source)
 
         if drivers.get("waveshare"):
@@ -443,7 +443,7 @@ class FrameDeployer:
 
         shared_driver_dir = os.path.join(source_dir, "src", "drivers", "shared")
         shutil.rmtree(shared_driver_dir, ignore_errors=True)
-        if driver_build_mode_uses_shared_libraries(driver_build_mode):
+        if compilation_mode_uses_shared_libraries(compilation_mode):
             os.makedirs(shared_driver_dir, exist_ok=True)
             for driver in compiled_drivers(drivers):
                 with open(os.path.join(shared_driver_dir, f"{driver.name}.nim"), "w") as sf:
@@ -714,7 +714,7 @@ $(OBJECTS): pre-build
         build_dir: str,
         source_dir: str,
         arch: str,
-        driver_build_mode: str = DEFAULT_DRIVER_BUILD_MODE,
+        compilation_mode: str = DEFAULT_COMPILATION_MODE,
         drivers_override: dict[str, Driver] | None = None,
     ) -> str:
         db = self.db
@@ -794,17 +794,17 @@ $(OBJECTS): pre-build
 
         shutil.copy(nimbase_path, os.path.join(build_dir, "nimbase.h"))
 
-        driver_build_mode = normalize_compilation_mode(driver_build_mode)
+        compilation_mode = normalize_compilation_mode(compilation_mode)
         driver_make_dirs: list[str] = []
         scene_make_dirs: list[str] = []
-        if driver_build_mode == DRIVER_BUILD_MODE_STATIC:
+        if compilation_mode == COMPILATION_MODE_STATIC:
             self._copy_waveshare_build_files(source_dir, build_dir, drivers)
 
         script_path = self._find_compile_script(build_dir, "compile_frameos.sh")
         linker_flags, compiler_flags = self._extract_compile_flags(script_path, "frameos")
         main_driver_linker_flags = (
             self._driver_linker_flags(drivers)
-            if driver_build_mode == DRIVER_BUILD_MODE_STATIC
+            if compilation_mode == COMPILATION_MODE_STATIC
             else []
         )
         linker_flags = self._dedupe_preserve_order(
@@ -813,7 +813,7 @@ $(OBJECTS): pre-build
             + main_driver_linker_flags
         )
 
-        if driver_build_mode_uses_shared_libraries(driver_build_mode):
+        if compilation_mode_uses_shared_libraries(compilation_mode):
             for driver in compiled_drivers(drivers):
                 driver_dir = os.path.join(build_dir, "drivers", driver.name)
                 os.makedirs(driver_dir, exist_ok=True)

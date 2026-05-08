@@ -13,7 +13,7 @@ from urllib.parse import urljoin
 
 import httpx
 
-from app.codegen.drivers_nim import DRIVER_BUILD_MODE_SHARED
+from app.codegen.drivers_nim import COMPILATION_MODE_SHARED
 from app.drivers.devices import drivers_for_frame
 from app.models.frame import Frame
 from app.tasks._frame_deployer import FrameDeployer
@@ -101,7 +101,7 @@ async def download_precompiled_frameos_release(
 
         required_driver_names = FrameDeployer.driver_library_names(
             drivers_for_frame(frame),
-            DRIVER_BUILD_MODE_SHARED,
+            COMPILATION_MODE_SHARED,
         )
         copied_driver_paths = _copy_required_drivers(
             artifact_root=artifact_root,

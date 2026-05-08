@@ -5,52 +5,34 @@ import re
 
 from app.drivers.drivers import Driver
 
-DRIVER_BUILD_MODE_STATIC = "static"
-DRIVER_BUILD_MODE_SHARED = "shared"
-DRIVER_BUILD_MODE_PRECOMPILED = "precompiled"
-DEFAULT_DRIVER_BUILD_MODE = DRIVER_BUILD_MODE_STATIC
-VALID_DRIVER_BUILD_MODES = {
-    DRIVER_BUILD_MODE_STATIC,
-    DRIVER_BUILD_MODE_SHARED,
-    DRIVER_BUILD_MODE_PRECOMPILED,
+COMPILATION_MODE_STATIC = "static"
+COMPILATION_MODE_SHARED = "shared"
+COMPILATION_MODE_PRECOMPILED = "precompiled"
+DEFAULT_COMPILATION_MODE = COMPILATION_MODE_STATIC
+VALID_COMPILATION_MODES = {
+    COMPILATION_MODE_STATIC,
+    COMPILATION_MODE_SHARED,
+    COMPILATION_MODE_PRECOMPILED,
 }
-
-COMPILATION_MODE_STATIC = DRIVER_BUILD_MODE_STATIC
-COMPILATION_MODE_SHARED = DRIVER_BUILD_MODE_SHARED
-COMPILATION_MODE_PRECOMPILED = DRIVER_BUILD_MODE_PRECOMPILED
-DEFAULT_COMPILATION_MODE = DEFAULT_DRIVER_BUILD_MODE
-VALID_COMPILATION_MODES = VALID_DRIVER_BUILD_MODES
-
-
-def normalize_driver_build_mode(value: str | None) -> str:
-    normalized = (value or DEFAULT_DRIVER_BUILD_MODE).strip().lower()
-    if normalized not in VALID_DRIVER_BUILD_MODES:
-        return DEFAULT_DRIVER_BUILD_MODE
-    return normalized
 
 
 def normalize_compilation_mode(value: str | None) -> str:
-    return normalize_driver_build_mode(value)
-
-
-def frame_driver_build_mode(frame) -> str:
-    rpios_settings = getattr(frame, "rpios", None) or {}
-    return normalize_driver_build_mode(rpios_settings.get("compilationMode") or rpios_settings.get("driverBuildMode"))
+    normalized = (value or DEFAULT_COMPILATION_MODE).strip().lower()
+    if normalized not in VALID_COMPILATION_MODES:
+        return DEFAULT_COMPILATION_MODE
+    return normalized
 
 
 def frame_compilation_mode(frame) -> str:
-    return frame_driver_build_mode(frame)
-
-
-def driver_build_mode_uses_shared_libraries(value: str | None) -> bool:
-    return normalize_driver_build_mode(value) in {
-        DRIVER_BUILD_MODE_SHARED,
-        DRIVER_BUILD_MODE_PRECOMPILED,
-    }
+    rpios_settings = getattr(frame, "rpios", None) or {}
+    return normalize_compilation_mode(rpios_settings.get("compilationMode"))
 
 
 def compilation_mode_uses_shared_libraries(value: str | None) -> bool:
-    return driver_build_mode_uses_shared_libraries(value)
+    return normalize_compilation_mode(value) in {
+        COMPILATION_MODE_SHARED,
+        COMPILATION_MODE_PRECOMPILED,
+    }
 
 
 def compiled_drivers(drivers: dict[str, Driver]) -> list[Driver]:
@@ -259,9 +241,9 @@ proc syncHostDriverContext(host: DriverContext, local: DriverContext) =
 
 def write_drivers_nim(
     drivers: dict[str, Driver],
-    driver_build_mode: str = DEFAULT_DRIVER_BUILD_MODE,
+    compilation_mode: str = DEFAULT_COMPILATION_MODE,
 ) -> str:
-    if driver_build_mode_uses_shared_libraries(driver_build_mode):
+    if compilation_mode_uses_shared_libraries(compilation_mode):
         return write_shared_drivers_nim(drivers)
     return write_static_drivers_nim(drivers)
 

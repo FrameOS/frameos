@@ -11,7 +11,7 @@ from arq import ArqRedis as Redis
 from sqlalchemy.orm import Session
 
 from app.drivers.devices import drivers_for_frame
-from app.codegen.drivers_nim import DRIVER_BUILD_MODE_PRECOMPILED, normalize_driver_build_mode
+from app.codegen.drivers_nim import COMPILATION_MODE_PRECOMPILED, normalize_compilation_mode
 from app.models.assets import sync_assets
 from app.models.frame import Frame, normalize_https_proxy, update_frame
 from app.models.log import new_log as log
@@ -329,16 +329,14 @@ class FrameDeployWorkflow:
         cross_compilation_setting = (rpios_settings.get("crossCompilation") or "auto").lower()
         if cross_compilation_setting not in {"auto", "always", "never"}:
             cross_compilation_setting = "auto"
-        driver_build_mode = normalize_driver_build_mode(
-            rpios_settings.get("compilationMode") or rpios_settings.get("driverBuildMode")
-        )
+        compilation_mode = normalize_compilation_mode(rpios_settings.get("compilationMode"))
 
         allow_cross_compile = cross_compilation_setting != "never"
         force_cross_compile = cross_compilation_setting == "always"
         binary_plan = await self.binary_builder.plan_build(
             allow_cross_compile=allow_cross_compile,
             force_cross_compile=force_cross_compile,
-            driver_build_mode=driver_build_mode,
+            compilation_mode=compilation_mode,
         )
 
         settings = get_settings_dict(self.db)
@@ -451,9 +449,9 @@ class FrameDeployWorkflow:
         notes = [
             f"Detected distro: {distro} ({distro_version}), architecture: {arch}, total memory: {total_memory} MiB",
             f"Cross compilation setting: {cross_compilation_setting}",
-            f"Compilation mode: {driver_build_mode}",
+            f"Compilation mode: {compilation_mode}",
         ]
-        if driver_build_mode == DRIVER_BUILD_MODE_PRECOMPILED:
+        if compilation_mode == COMPILATION_MODE_PRECOMPILED:
             if binary_plan.will_attempt_precompiled:
                 notes.append("Precompiled FrameOS release will be used because all scenes are interpreted.")
             else:

@@ -564,7 +564,7 @@ function sanitizeFrame(frame: Partial<FrameType>): Partial<FrameType> {
   const rpios = frame.rpios
     ? {
         ...frame.rpios,
-        compilationMode: frame.rpios.compilationMode ?? frame.rpios.driverBuildMode ?? '',
+        compilationMode: frame.rpios.compilationMode ?? '',
       }
     : frame.rpios
 
