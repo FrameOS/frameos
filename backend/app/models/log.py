@@ -11,6 +11,8 @@ from sqlalchemy import Integer, String, DateTime, ForeignKey, Text, func
 from sqlalchemy.orm import relationship, backref, Session, mapped_column
 from app.websockets import publish_message
 
+LOG_LIMIT_PER_FRAME = 10000
+
 class Log(Base):
     __tablename__ = 'log'
     id = mapped_column(Integer, primary_key=True)
@@ -53,7 +55,7 @@ async def new_log(
     db.commit()
     frame_logs_count = db.query(Log).filter_by(frame_id=frame_id).count()
     payload = {**log.to_dict(), "timestamp": log.timestamp.replace(tzinfo=timezone.utc).isoformat()}
-    if frame_logs_count > 1100:
+    if frame_logs_count > LOG_LIMIT_PER_FRAME + 100:
         oldest_logs = (db.query(Log)
                        .filter_by(frame_id=frame_id)
                        .order_by(Log.timestamp)
