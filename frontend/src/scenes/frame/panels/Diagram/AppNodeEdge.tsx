@@ -12,6 +12,7 @@ export function AppNodeEdge({
   sourceHandleId,
   targetHandleId,
   selected,
+  data,
 }: EdgeProps) {
   const { setEdges } = useReactFlow()
   const [edgePath, labelX, labelY] = getSimpleBezierPath({
@@ -23,21 +24,21 @@ export function AppNodeEdge({
     targetPosition,
   })
   const isNodeConnection = sourceHandleId === 'next' || targetHandleId === 'prev'
+  const connectedToSelectedNode = Boolean(data?.connectedToSelectedNode)
+  const edgeStyle = isNodeConnection
+    ? selected
+      ? { strokeWidth: 8, stroke: '#f29cf6' }
+      : connectedToSelectedNode
+      ? { strokeWidth: 8, stroke: '#38bdf8' }
+      : { strokeWidth: 6, stroke: 'hsl(56 60% 70% / 1)' }
+    : selected
+    ? { strokeWidth: 4, stroke: '#f29cf6' }
+    : connectedToSelectedNode
+    ? { strokeWidth: 5, stroke: '#38bdf8' }
+    : { strokeWidth: 2, stroke: '#c5c5c5' }
   return (
     <>
-      <BaseEdge
-        id={id}
-        path={edgePath}
-        style={
-          isNodeConnection
-            ? selected
-              ? { strokeWidth: 8, stroke: '#f29cf6' }
-              : { strokeWidth: 6, stroke: 'hsl(56 60% 70% / 1)' }
-            : selected
-            ? { strokeWidth: 4, stroke: '#f29cf6' }
-            : { strokeWidth: 2, stroke: '#c5c5c5' }
-        }
-      />
+      <BaseEdge id={id} path={edgePath} style={edgeStyle} />
       <EdgeLabelRenderer>
         {selected ? (
           <button

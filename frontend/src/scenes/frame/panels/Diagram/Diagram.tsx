@@ -19,6 +19,7 @@ import {
   WheelEvent as ReactWheelEvent,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from 'react'
@@ -76,7 +77,9 @@ function Diagram_({ sceneId }: DiagramProps) {
   const { frameId } = useValues(frameLogic)
   const updateNodeInternals = useUpdateNodeInternals()
   const diagramLogicProps: DiagramLogicProps = { frameId, sceneId, updateNodeInternals }
-  const { nodes, nodesWithStyle, edges, fitViewCounter, isCompiledScene } = useValues(diagramLogic(diagramLogicProps))
+  const { nodes, nodesWithStyle, edges, selectedNodeIds, fitViewCounter, isCompiledScene } = useValues(
+    diagramLogic(diagramLogicProps)
+  )
   const {
     onEdgesChange,
     onNodesChange,
@@ -90,7 +93,9 @@ function Diagram_({ sceneId }: DiagramProps) {
   const { previewScene } = useActions(scenesLogic({ frameId }))
   const { setCurrentScene } = useActions(controlLogic({ frameId }))
   const { sceneChanging } = useValues(controlLogic({ frameId }))
-  const { unsavedSceneIds, undeployedSceneIds, previewingSceneId, linkedActiveSceneId } = useValues(scenesLogic({ frameId }))
+  const { unsavedSceneIds, undeployedSceneIds, previewingSceneId, linkedActiveSceneId } = useValues(
+    scenesLogic({ frameId })
+  )
   const { newNodePicker } = useValues(newNodePickerLogic(diagramLogicProps))
   const { openNewNodePicker } = useActions(newNodePickerLogic(diagramLogicProps))
   const sceneHasChanges = unsavedSceneIds.has(sceneId) || undeployedSceneIds.has(sceneId)
@@ -102,6 +107,23 @@ function Diagram_({ sceneId }: DiagramProps) {
     : sceneHasChanges
     ? 'Preview unsaved changes on the frame'
     : 'No unsaved changes to preview'
+  const highlightedEdges = useMemo(() => {
+    if (selectedNodeIds.length === 0) {
+      return edges
+    }
+    const selectedNodeIdSet = new Set(selectedNodeIds)
+    return edges.map((edge) => {
+      const connectedToSelectedNode = selectedNodeIdSet.has(edge.source) || selectedNodeIdSet.has(edge.target)
+      const currentData = edge.data ?? {}
+      return currentData.connectedToSelectedNode === connectedToSelectedNode
+        ? { ...edge, zIndex: connectedToSelectedNode ? 1 : edge.zIndex }
+        : {
+            ...edge,
+            data: { ...currentData, connectedToSelectedNode },
+            zIndex: connectedToSelectedNode ? 1 : edge.zIndex,
+          }
+    })
+  }, [edges, selectedNodeIds])
 
   const onDragOver = useCallback((event: any) => {
     event.preventDefault()
@@ -260,7 +282,7 @@ function Diagram_({ sceneId }: DiagramProps) {
       >
         <ReactFlow
           nodes={nodesWithStyle}
-          edges={edges}
+          edges={highlightedEdges}
           onInit={setReactFlowInstance}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}

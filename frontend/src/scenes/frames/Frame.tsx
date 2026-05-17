@@ -2,7 +2,7 @@ import { A } from 'kea-router'
 import { FrameType } from '../../types'
 import { H5 } from '../../components/H5'
 import { Box } from '../../components/Box'
-import { frameHost, frameStatus } from '../../decorators/frame'
+import { frameHost, frameIsHealthy, frameStatus } from '../../decorators/frame'
 import { DropdownMenu } from '../../components/DropdownMenu'
 import { ArrowUpCircleIcon, ExclamationTriangleIcon, TrashIcon } from '@heroicons/react/24/solid'
 import { useActions } from 'kea'
@@ -51,6 +51,42 @@ export function FrameConnection({ frame }: FrameProps): JSX.Element | null {
     <Tooltip title={title} className="cursor-help">
       {icon}
     </Tooltip>
+  )
+}
+
+export function FrameHealth({ frame }: FrameProps): JSX.Element | null {
+  if (!frameIsHealthy(frame)) {
+    return null
+  }
+
+  return (
+    <Tooltip title="Frame is healthy" className="cursor-help">
+      <span className="inline-block h-2.5 w-2.5 rounded-full bg-green-400 shadow-[0_0_8px_rgba(74,222,128,0.75)]" />
+    </Tooltip>
+  )
+}
+
+function FrameCardIndicators({ frame }: FrameProps): JSX.Element {
+  const [agentTitle, agentIcon] = getTitleAndIcon(
+    !!frame.agent?.agentEnabled,
+    !!frame.agent?.agentRunCommands,
+    frame?.active_connections ?? 0
+  )
+  const healthy = frameIsHealthy(frame)
+
+  if (healthy && agentIcon === '🟢') {
+    return (
+      <Tooltip title={`Frame is healthy. ${agentTitle}.`} className="cursor-help">
+        <span className="inline-block h-2.5 w-2.5 rounded-full bg-green-400 shadow-[0_0_8px_rgba(74,222,128,0.75)]" />
+      </Tooltip>
+    )
+  }
+
+  return (
+    <>
+      <FrameHealth frame={frame} />
+      <FrameConnection frame={frame} />
+    </>
   )
 }
 
@@ -107,7 +143,7 @@ export function Frame({ frame }: FrameProps): JSX.Element {
       </div>
       <div className="px-4 pb-4">
         <div className="flex sm:text-lg text-gray-400 items-center gap-1">
-          <FrameConnection frame={frame} />
+          <FrameCardIndicators frame={frame} />
           <span>{frameStatus(frame)}</span>
         </div>
       </div>

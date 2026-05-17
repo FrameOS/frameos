@@ -2,8 +2,18 @@ import dagre from '@dagrejs/dagre'
 import type { Edge } from '@reactflow/core/dist/esm/types/edges'
 import type { CodeNodeData, DiagramNode } from '../types'
 
-const NODE_PADDING_X = 60
-const NODE_PADDING_Y = 50
+const FLOW_NODE_SEPARATION = 90
+const FLOW_RANK_SEPARATION = 220
+const ANCHOR_VERTICAL_GAP = 90
+const ANCHOR_HORIZONTAL_GAP = 70
+const FIELD_SLOT_PADDING_X = 44
+const COLLISION_GAP_X = 40
+const COLLISION_GAP_Y = 40
+const COLLISION_PASSES = 24
+const STATE_INPUT_LEFT_OFFSET = 32
+const STATE_INPUT_STAGGER_X = 12
+const STATE_INPUT_VERTICAL_GAP = COLLISION_GAP_Y
+const STATE_INPUT_HORIZONTAL_GAP = 28
 const NODE_FALLBACK_WIDTH = 260
 const NODE_FALLBACK_HEIGHT = 180
 const CODE_NODE_MIN_WIDTH = 360
@@ -13,10 +23,20 @@ const CODE_NODE_EXPANDED_MIN_HEIGHT = 400
 const CODE_NODE_COMPACT_MAX_LINES = 4
 const CODE_NODE_COMPACT_MAX_CHARS = 160
 const CODE_ARG_HORIZONTAL_PADDING = 40
-const CODE_ARG_MAX_LEVEL = 5
 
 interface ArrangeNodesOptions {
   fieldOrderByNodeId?: Record<string, string[]>
+}
+
+interface RowItem {
+  node: DiagramNode
+  desiredCenterX: number
+  order: number
+}
+
+interface RowLayoutItem extends RowItem {
+  left: number
+  width: number
 }
 
 function getNodeSize(node: DiagramNode): { width: number; height: number } {
@@ -83,14 +103,113 @@ function isDataAppNode(node: DiagramNode): boolean {
   return typeof keyword === 'string' && keyword.startsWith('data/')
 }
 
-function isFlowNode(node: DiagramNode): boolean {
-  if (node.type === 'event' || node.type === 'dispatch') {
+function isStateInputTargetNode(node: DiagramNode): boolean {
+  if (node.type !== 'app') {
+    return false
+  }
+  const keyword = (node.data as { keyword?: string } | undefined)?.keyword
+  return typeof keyword === 'string' && (keyword.startsWith('data/') || keyword.startsWith('logic/'))
+}
+
+function isAlwaysFlowNode(node: DiagramNode): boolean {
+  if (node.type === 'event' || node.type === 'dispatch' || node.type === 'source') {
     return true
   }
-  if (node.type === 'app') {
-    return !isDataAppNode(node)
-  }
   return false
+}
+
+function nodeCenterX(node: DiagramNode): number {
+  return node.position.x + getNodeSize(node).width / 2
+}
+
+function handleOrderIndex(
+  nodeId: string,
+  handle: string | null | undefined,
+  fieldOrderByNodeId: Record<string, string[]>
+): number {
+  const fieldName = fieldNameFromHandle(handle)
+  if (!fieldName) {
+    return Number.MAX_SAFE_INTEGER
+  }
+  const fieldOrder = fieldOrderByNodeId[nodeId] ?? []
+  const index = fieldOrder.indexOf(fieldName)
+  return index < 0 ? Number.MAX_SAFE_INTEGER : index
+}
+
+function orderedFieldCenterX(
+  node: DiagramNode,
+  handle: string | null | undefined,
+  fieldOrderByNodeId: Record<string, string[]>
+): number | null {
+  const fieldName = fieldNameFromHandle(handle)
+  if (!fieldName) {
+    return null
+  }
+
+  const fieldOrder = fieldOrderByNodeId[node.id] ?? []
+  const fieldIndex = fieldOrder.indexOf(fieldName)
+  if (fieldIndex < 0) {
+    return null
+  }
+
+  const { width } = getNodeSize(node)
+  const padding = handle?.startsWith('codeField/') ? CODE_ARG_HORIZONTAL_PADDING : FIELD_SLOT_PADDING_X
+  const usableWidth = Math.max(width - padding * 2, 1)
+  const denominator = Math.max(fieldOrder.length - 1, 1)
+  return node.position.x + padding + (usableWidth * fieldIndex) / denominator
+}
+
+function handleCenterX(
+  node: DiagramNode,
+  handle: string | null | undefined,
+  fieldOrderByNodeId: Record<string, string[]>
+): number {
+  const { width } = getNodeSize(node)
+  if (handle === 'prev') {
+    return node.position.x
+  }
+  if (handle === 'next') {
+    return node.position.x + width
+  }
+  return orderedFieldCenterX(node, handle, fieldOrderByNodeId) ?? nodeCenterX(node)
+}
+
+function compactRow(items: RowItem[], gap: number): Map<string, number> {
+  const layouts: RowLayoutItem[] = [...items]
+    .sort(
+      (a, b) =>
+        a.desiredCenterX - b.desiredCenterX ||
+        a.order - b.order ||
+        (a.node.type ?? '').localeCompare(b.node.type ?? '') ||
+        a.node.id.localeCompare(b.node.id)
+    )
+    .map((item) => {
+      const { width } = getNodeSize(item.node)
+      return {
+        ...item,
+        width,
+        left: item.desiredCenterX - width / 2,
+      }
+    })
+
+  for (let i = 1; i < layouts.length; i += 1) {
+    const previous = layouts[i - 1]
+    const item = layouts[i]
+    item.left = Math.max(item.left, previous.left + previous.width + gap)
+  }
+
+  if (layouts.length > 1) {
+    const desiredMin = Math.min(...layouts.map((item) => item.desiredCenterX - item.width / 2))
+    const desiredMax = Math.max(...layouts.map((item) => item.desiredCenterX + item.width / 2))
+    const placedMin = Math.min(...layouts.map((item) => item.left))
+    const placedMax = Math.max(...layouts.map((item) => item.left + item.width))
+    const shift = (desiredMin + desiredMax) / 2 - (placedMin + placedMax) / 2
+    layouts.forEach((item) => {
+      item.left += shift
+    })
+  }
+
+  return new Map(layouts.map((item) => [item.node.id, item.left]))
 }
 
 export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: ArrangeNodesOptions = {}): DiagramNode[] {
@@ -99,7 +218,19 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
   }
 
   const sizedNodes = nodes.map(expandCodeNode)
-  const flowNodes = sizedNodes.filter(isFlowNode)
+  const flowConnectedNodeIds = new Set<string>()
+  edges.forEach((edge) => {
+    if (edge.sourceHandle === 'next') {
+      flowConnectedNodeIds.add(edge.source)
+    }
+    if (edge.targetHandle === 'prev') {
+      flowConnectedNodeIds.add(edge.target)
+    }
+  })
+  const flowNodes = sizedNodes.filter(
+    (node) =>
+      isAlwaysFlowNode(node) || (node.type === 'app' && !isDataAppNode(node) && flowConnectedNodeIds.has(node.id))
+  )
   const flowNodeIds = new Set(flowNodes.map((node) => node.id))
   const flowEdges = edges.filter(
     (edge) => flowNodeIds.has(edge.source) && flowNodeIds.has(edge.target) && isFlowEdge(edge)
@@ -112,8 +243,8 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
   const graph = new dagre.graphlib.Graph({ multigraph: true })
   graph.setGraph({
     rankdir: 'LR',
-    nodesep: NODE_PADDING_X,
-    ranksep: NODE_PADDING_Y,
+    nodesep: FLOW_NODE_SEPARATION,
+    ranksep: FLOW_RANK_SEPARATION,
     edgesep: 25,
   })
   graph.setDefaultEdgeLabel(() => ({}))
@@ -249,38 +380,52 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
   }, {} as Record<string, DiagramNode>)
 
   const fieldOrderByNodeId = options.fieldOrderByNodeId ?? {}
-  const offsetCache = new Map<string, number>()
-  const resolveFieldOffset = (nodeId: string): number => {
-    if (offsetCache.has(nodeId)) {
-      return offsetCache.get(nodeId) ?? 0
+  const depthByAnchor = new Map<string, Map<string, number>>()
+
+  const depthFor = (nodeId: string, anchorId: string): number => {
+    const depths = depthByAnchor.get(anchorId)
+    if (!depths) {
+      return nodeId === anchorId ? 0 : 1
     }
-    const nodeEdges = [...(outgoingEdges[nodeId] ?? []), ...(incomingEdges[nodeId] ?? [])]
-    let bestIndex: number | null = null
-    for (const edge of nodeEdges) {
-      let ownerId: string | null = null
-      let fieldName: string | null = null
-      if (edge.source === nodeId) {
-        fieldName = fieldNameFromHandle(edge.targetHandle)
-        ownerId = fieldName ? edge.target : null
-      } else if (edge.target === nodeId) {
-        fieldName = fieldNameFromHandle(edge.sourceHandle)
-        ownerId = fieldName ? edge.source : null
+    return nodeId === anchorId ? 0 : depths.get(nodeId) ?? 1
+  }
+
+  const desiredPlacement = (node: DiagramNode, anchorId: string, depth: number): { centerX: number; order: number } => {
+    const candidates: { centerX: number; order: number; priority: number }[] = []
+    const considerEdge = (edge: Edge, fixedNodeId: string, fixedHandle: string | null | undefined): void => {
+      const fixedNode = positionedById[fixedNodeId] ?? nodesById[fixedNodeId]
+      if (!fixedNode) {
+        return
       }
-      if (!ownerId || !fieldName) {
-        continue
+      const fixedDepth = depthFor(fixedNodeId, anchorId)
+      const priority = fixedDepth === depth - 1 ? 0 : fixedDepth < depth ? 1 : 2
+      if (priority > 1) {
+        return
       }
-      const fieldOrder = fieldOrderByNodeId[ownerId] ?? []
-      const fieldIndex = fieldOrder.indexOf(fieldName)
-      if (fieldIndex < 0) {
-        continue
-      }
-      if (bestIndex === null || fieldIndex < bestIndex) {
-        bestIndex = fieldIndex
+      candidates.push({
+        centerX: handleCenterX(fixedNode, fixedHandle, fieldOrderByNodeId),
+        order: handleOrderIndex(fixedNodeId, fixedHandle, fieldOrderByNodeId),
+        priority,
+      })
+    }
+
+    for (const edge of outgoingEdges[node.id] ?? []) {
+      considerEdge(edge, edge.target, edge.targetHandle)
+    }
+    for (const edge of incomingEdges[node.id] ?? []) {
+      considerEdge(edge, edge.source, edge.sourceHandle)
+    }
+
+    if (candidates.length === 0) {
+      const anchorNode = positionedById[anchorId] ?? nodesById[anchorId]
+      return {
+        centerX: anchorNode ? nodeCenterX(anchorNode) : nodeCenterX(node),
+        order: Number.MAX_SAFE_INTEGER,
       }
     }
-    const offset = bestIndex === null ? 0 : 10 + bestIndex * 15
-    offsetCache.set(nodeId, offset)
-    return offset
+
+    candidates.sort((a, b) => a.priority - b.priority || a.order - b.order || a.centerX - b.centerX)
+    return { centerX: candidates[0].centerX, order: candidates[0].order }
   }
 
   Object.entries(nodesByAnchor).forEach(([anchorId, anchored]) => {
@@ -288,98 +433,198 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
     if (!anchorNode) {
       return
     }
-    const anchorSize = getNodeSize(anchorNode)
-    const anchorX = anchorNode.position.x
-    const anchorY = anchorNode.position.y
-    const anchoredNodes = [...anchored]
 
-    const sortByDepth = (node: DiagramNode) => resolveDepth(node.id, anchorId)
-    anchoredNodes.sort((a, b) => sortByDepth(b) - sortByDepth(a))
-
-    const aboveTotalHeight =
-      anchoredNodes.reduce((sum, node) => sum + getNodeSize(node).height, 0) +
-      Math.max(0, anchoredNodes.length - 1) * NODE_PADDING_Y
-    let currentY = anchorY - NODE_PADDING_Y - aboveTotalHeight
-    anchoredNodes.forEach((node) => {
-      const size = getNodeSize(node)
-      const fieldOffset = resolveFieldOffset(node.id)
-      positionedById[node.id] = {
-        ...node,
-        position: {
-          x: anchorX - fieldOffset,
-          y: currentY,
-        },
-      }
-      currentY += size.height + NODE_PADDING_Y
+    const depthMap = new Map<string, number>()
+    anchored.forEach((node) => {
+      depthMap.set(node.id, Math.max(1, resolveDepth(node.id, anchorId)))
     })
-  })
+    depthByAnchor.set(anchorId, depthMap)
 
-  const codeArgUsage = new Map<string, number>()
-  edges.forEach((edge) => {
-    if (!edge.target || !edge.source) {
-      return
-    }
-    if (!edge.targetHandle?.startsWith('codeField/')) {
-      return
-    }
-    const codeNode = positionedById[edge.target] ?? nodesById[edge.target]
-    if (!codeNode || codeNode.type !== 'code') {
-      return
-    }
-    const sourceNode = positionedById[edge.source] ?? nodesById[edge.source]
-    if (!sourceNode || isFlowNode(sourceNode)) {
-      return
-    }
-    const argName = fieldNameFromHandle(edge.targetHandle)
-    const argOrder = fieldOrderByNodeId[codeNode.id] ?? []
-    const argIndex = argName ? argOrder.indexOf(argName) : -1
-    if (argIndex < 0) {
-      return
-    }
-    const sourceSize = getNodeSize(sourceNode)
-    const codeSize = getNodeSize(codeNode)
-    const usableWidth = Math.max(codeSize.width - CODE_ARG_HORIZONTAL_PADDING * 2, 1)
-    const argSpacing = argOrder.length > 1 ? usableWidth / (argOrder.length - 1) : 0
-    const argX = codeNode.position.x + CODE_ARG_HORIZONTAL_PADDING + argSpacing * argIndex
-    const usageKey = `${codeNode.id}:${argName}`
-    const usageCount = codeArgUsage.get(usageKey) ?? 0
-    codeArgUsage.set(usageKey, usageCount + 1)
-    const level = usageCount % CODE_ARG_MAX_LEVEL
-    const baseY = codeNode.position.y - NODE_PADDING_Y - sourceSize.height
-    positionedById[sourceNode.id] = {
-      ...sourceNode,
-      position: {
-        x: argX - sourceSize.width / 2,
-        y: baseY - level * NODE_PADDING_Y,
-      },
+    const maxDepth = Math.max(...depthMap.values(), 1)
+    let rowBottom = anchorNode.position.y - ANCHOR_VERTICAL_GAP
+
+    for (let depth = 1; depth <= maxDepth; depth += 1) {
+      const rowNodes = anchored.filter((node) => depthMap.get(node.id) === depth)
+      if (rowNodes.length === 0) {
+        continue
+      }
+
+      const rowHeight = Math.max(...rowNodes.map((node) => getNodeSize(node).height))
+      const rowTop = rowBottom - rowHeight
+      const rowItems = rowNodes.map((node) => {
+        const placement = desiredPlacement(node, anchorId, depth)
+        return {
+          node,
+          desiredCenterX: placement.centerX,
+          order: placement.order,
+        }
+      })
+      const leftByNodeId = compactRow(rowItems, ANCHOR_HORIZONTAL_GAP)
+
+      rowNodes.forEach((node) => {
+        const size = getNodeSize(node)
+        positionedById[node.id] = {
+          ...node,
+          position: {
+            x: leftByNodeId.get(node.id) ?? nodeCenterX(anchorNode) - size.width / 2,
+            y: rowTop + rowHeight - size.height,
+          },
+        }
+      })
+
+      rowBottom = rowTop - ANCHOR_VERTICAL_GAP
     }
   })
 
-  const resolveOverlaps = (nodesToResolve: DiagramNode[], passes: number): void => {
-    const bumpX = NODE_PADDING_X
-    const bumpY = NODE_PADDING_Y
-    for (let pass = 0; pass < passes; pass += 1) {
-      let moved = false
-      for (let i = 0; i < nodesToResolve.length; i += 1) {
-        const nodeA = positionedById[nodesToResolve[i].id] ?? nodesToResolve[i]
-        const sizeA = getNodeSize(nodeA)
-        for (let j = i + 1; j < nodesToResolve.length; j += 1) {
-          const nodeB = positionedById[nodesToResolve[j].id] ?? nodesToResolve[j]
-          const sizeB = getNodeSize(nodeB)
-          const overlapX =
-            nodeA.position.x < nodeB.position.x + sizeB.width && nodeA.position.x + sizeA.width > nodeB.position.x
-          const overlapY =
-            nodeA.position.y < nodeB.position.y + sizeB.height && nodeA.position.y + sizeA.height > nodeB.position.y
-          if (overlapX && overlapY) {
-            positionedById[nodeB.id] = {
-              ...nodeB,
-              position: {
-                x: nodeB.position.x + bumpX,
-                y: nodeB.position.y + bumpY,
-              },
+  const overlaps = (nodeA: DiagramNode, nodeB: DiagramNode, gapX: number, gapY: number): boolean => {
+    const sizeA = getNodeSize(nodeA)
+    const sizeB = getNodeSize(nodeB)
+    return (
+      nodeA.position.x < nodeB.position.x + sizeB.width + gapX &&
+      nodeA.position.x + sizeA.width + gapX > nodeB.position.x &&
+      nodeA.position.y < nodeB.position.y + sizeB.height + gapY &&
+      nodeA.position.y + sizeA.height + gapY > nodeB.position.y
+    )
+  }
+
+  const moveNode = (node: DiagramNode, position: { x: number; y: number }): void => {
+    positionedById[node.id] = {
+      ...node,
+      position,
+    }
+  }
+
+  const stateInputTargetByNodeId = new Map<string, string>()
+
+  const placeStateInputsNearTargets = (): void => {
+    stateInputTargetByNodeId.clear()
+
+    const stateInputEdgesByTarget = edges.reduce((acc, edge) => {
+      if (!edge.source || !edge.target || !edge.targetHandle?.startsWith('fieldInput/')) {
+        return acc
+      }
+      const sourceNode = positionedById[edge.source] ?? nodesById[edge.source]
+      const targetNode = positionedById[edge.target] ?? nodesById[edge.target]
+      if (sourceNode?.type !== 'state' || !targetNode || !isStateInputTargetNode(targetNode)) {
+        return acc
+      }
+      acc[edge.target] = [...(acc[edge.target] ?? []), edge]
+      return acc
+    }, {} as Record<string, Edge[]>)
+
+    Object.entries(stateInputEdgesByTarget).forEach(([targetId, inputEdges]) => {
+      const targetNode = positionedById[targetId] ?? nodesById[targetId]
+      if (!targetNode) {
+        return
+      }
+
+      const uniqueInputEdges = Array.from(
+        inputEdges
+          .sort(
+            (a, b) =>
+              handleOrderIndex(targetId, a.targetHandle, fieldOrderByNodeId) -
+                handleOrderIndex(targetId, b.targetHandle, fieldOrderByNodeId) || a.source.localeCompare(b.source)
+          )
+          .reduce((acc, edge) => {
+            if (!acc.has(edge.source)) {
+              acc.set(edge.source, edge)
             }
+            return acc
+          }, new Map<string, Edge>())
+          .values()
+      )
+
+      const rowItems = uniqueInputEdges
+        .map((edge, index) => {
+          const node = positionedById[edge.source] ?? nodesById[edge.source]
+          if (!node) {
+            return null
+          }
+          const size = getNodeSize(node)
+          return {
+            node,
+            desiredCenterX:
+              targetNode.position.x - STATE_INPUT_LEFT_OFFSET + STATE_INPUT_STAGGER_X * index + size.width / 2,
+            order: index,
+          }
+        })
+        .filter((item): item is RowItem => item !== null)
+
+      if (rowItems.length === 0) {
+        return
+      }
+
+      const rowHeight = Math.max(...rowItems.map((item) => getNodeSize(item.node).height))
+      const rowTop = targetNode.position.y - STATE_INPUT_VERTICAL_GAP - rowHeight
+      const leftByNodeId = compactRow(rowItems, STATE_INPUT_HORIZONTAL_GAP)
+
+      rowItems.forEach((item) => {
+        const size = getNodeSize(item.node)
+        stateInputTargetByNodeId.set(item.node.id, targetId)
+        moveNode(item.node, {
+          x: leftByNodeId.get(item.node.id) ?? item.desiredCenterX - size.width / 2,
+          y: rowTop + rowHeight - size.height,
+        })
+      })
+    })
+  }
+
+  const resolveOverlaps = (): void => {
+    const flowIds = sizedNodes
+      .map((node) => node.id)
+      .filter((nodeId) => flowNodeIds.has(nodeId))
+      .sort((a, b) => {
+        const nodeA = positionedById[a] ?? nodesById[a]
+        const nodeB = positionedById[b] ?? nodesById[b]
+        return nodeA.position.y - nodeB.position.y || nodeA.position.x - nodeB.position.x || a.localeCompare(b)
+      })
+    const nonFlowIds = sizedNodes
+      .map((node) => node.id)
+      .filter((nodeId) => !flowNodeIds.has(nodeId))
+      .sort((a, b) => {
+        const nodeA = positionedById[a] ?? nodesById[a]
+        const nodeB = positionedById[b] ?? nodesById[b]
+        return nodeA.position.y - nodeB.position.y || nodeA.position.x - nodeB.position.x || a.localeCompare(b)
+      })
+
+    for (let pass = 0; pass < COLLISION_PASSES; pass += 1) {
+      let moved = false
+
+      for (const nonFlowId of nonFlowIds) {
+        const node = positionedById[nonFlowId] ?? nodesById[nonFlowId]
+        const size = getNodeSize(node)
+        for (const flowId of flowIds) {
+          const flowNode = positionedById[flowId] ?? nodesById[flowId]
+          const isTargetedStateInput = stateInputTargetByNodeId.has(node.id)
+          const isOwnFlowTarget = stateInputTargetByNodeId.get(node.id) === flowId
+          const gapX = isTargetedStateInput && !isOwnFlowTarget ? 0 : COLLISION_GAP_X
+          const gapY = isTargetedStateInput && !isOwnFlowTarget ? 0 : COLLISION_GAP_Y
+          if (!overlaps(node, flowNode, gapX, gapY)) {
+            continue
+          }
+          const nextY = flowNode.position.y - size.height - COLLISION_GAP_Y
+          if (nextY < node.position.y) {
+            moveNode(node, { x: node.position.x, y: nextY })
             moved = true
           }
+        }
+      }
+
+      for (let i = 0; i < nonFlowIds.length; i += 1) {
+        for (let j = i + 1; j < nonFlowIds.length; j += 1) {
+          const nodeA = positionedById[nonFlowIds[i]] ?? nodesById[nonFlowIds[i]]
+          const nodeB = positionedById[nonFlowIds[j]] ?? nodesById[nonFlowIds[j]]
+          if (!overlaps(nodeA, nodeB, COLLISION_GAP_X, COLLISION_GAP_Y)) {
+            continue
+          }
+
+          const [fixedNode, movableNode] = nodeA.position.x <= nodeB.position.x ? [nodeA, nodeB] : [nodeB, nodeA]
+          const fixedSize = getNodeSize(fixedNode)
+          moveNode(movableNode, {
+            x: fixedNode.position.x + fixedSize.width + COLLISION_GAP_X,
+            y: movableNode.position.y,
+          })
+          moved = true
         }
       }
       if (!moved) {
@@ -388,8 +633,10 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
     }
   }
 
-  const resolvedNodes = sizedNodes.map((node) => positionedById[node.id] ?? node)
-  resolveOverlaps(resolvedNodes, 3)
+  placeStateInputsNearTargets()
+  resolveOverlaps()
+  placeStateInputsNearTargets()
+  resolveOverlaps()
 
   return sizedNodes.map((node) => positionedById[node.id] ?? node)
 }
