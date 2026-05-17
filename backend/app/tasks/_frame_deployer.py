@@ -49,7 +49,10 @@ from app.tasks.utils import find_nimbase_file
 from app.codegen.apps_nim import write_apps_nim
 from app.codegen.app_loader_nim import write_app_loader_nim
 
+FRAMEOS_NIM_FLAGS = ("-d:malloc",)
+
 DRIVER_LIBRARY_NIM_FLAGS = (
+    *FRAMEOS_NIM_FLAGS,
     "--define:frameosDriverLibrary",
     "--opt:size",
     "--stackTrace:off",
@@ -758,6 +761,7 @@ $(OBJECTS): pre-build
         cmd = (
             f"cd {source_dir} && nimble assets -y && nimble setup && "
             f"{nim_path} compile --os:linux --cpu:{cpu} "
+            f"{' '.join(FRAMEOS_NIM_FLAGS)} "
             f"{version_option} "
             f"--compileOnly --genScript --nimcache:{build_dir} "
             f"{debug_options} src/frameos.nim 2>&1"

@@ -136,6 +136,7 @@ async def test_create_local_build_archive_runs_assets_task_without_env_switch(
     assert commands
     assert "cd " in commands[0]
     assert "nimble assets -y && nimble setup &&" in commands[0]
+    assert "-d:malloc" in commands[0]
     assert "--define:frameosVersion:1.2.3+abc" in commands[0]
 
 
@@ -198,7 +199,9 @@ async def test_create_local_build_archive_generates_shared_driver_makefiles(
     await deployer.create_local_build_archive(str(build_dir), str(source_dir), "arm64", compilation_mode="shared")
 
     assert len(commands) == 2
+    assert "-d:malloc" in commands[0]
     assert "src/drivers/shared/httpUpload.nim" in commands[1]
+    assert "-d:malloc" in commands[1]
     assert "--define:frameosDriverLibrary" in commands[1]
     assert "--opt:size" in commands[1]
     assert "--stackTrace:off" in commands[1]
@@ -291,7 +294,9 @@ async def test_create_local_build_archive_generates_shared_scene_makefiles(
     await deployer.create_local_build_archive(str(build_dir), str(source_dir), "arm64", compilation_mode="shared")
 
     assert len(commands) == 2
+    assert "-d:malloc" in commands[0]
     assert "src/scenes/shared/scene_myscene.nim" in commands[1]
+    assert "-d:malloc" in commands[1]
     assert "--define:frameosSharedLibrary" in commands[1]
     scene_makefile = build_dir / "scenes" / "myscene" / "Makefile"
     scene_makefile_text = scene_makefile.read_text(encoding="utf-8")

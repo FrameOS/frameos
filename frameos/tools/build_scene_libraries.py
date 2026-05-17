@@ -36,6 +36,7 @@ LINUX_SIZE_FLAGS = [
     "--passC:-fno-unwind-tables",
     "--passL:-Wl,--gc-sections",
 ]
+FRAMEOS_NIM_FLAGS = ["-d:malloc"]
 
 
 def run(command: list[str], *, cwd: Path) -> None:
@@ -103,6 +104,7 @@ def build_scene_libraries(
                 nim_path,
                 "compile",
                 "--app:lib",
+                *FRAMEOS_NIM_FLAGS,
                 "--define:frameosSharedLibrary",
                 *(LINUX_SIZE_FLAGS if sys.platform.startswith("linux") else ["--opt:size"]),
                 f"--nimcache:{nimcache}",
