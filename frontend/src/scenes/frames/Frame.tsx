@@ -4,13 +4,14 @@ import { H5 } from '../../components/H5'
 import { Box } from '../../components/Box'
 import { frameHost, frameStatus } from '../../decorators/frame'
 import { DropdownMenu } from '../../components/DropdownMenu'
-import { ExclamationTriangleIcon, TrashIcon } from '@heroicons/react/24/solid'
+import { ArrowUpCircleIcon, ExclamationTriangleIcon, TrashIcon } from '@heroicons/react/24/solid'
 import { useActions } from 'kea'
 import { framesModel } from '../../models/framesModel'
 import { FrameImage } from '../../components/FrameImage'
 import { urls } from '../../urls'
 import { Tooltip } from '../../components/Tooltip'
 import { getFrameCertificateStatus } from '../../utils/certificates'
+import { CURRENT_FRAMEOS_VERSION } from '../frame/frameDeployUtils'
 
 interface FrameProps {
   frame: FrameType
@@ -56,6 +57,11 @@ export function FrameConnection({ frame }: FrameProps): JSX.Element | null {
 export function Frame({ frame }: FrameProps): JSX.Element {
   const { deleteFrame } = useActions(framesModel)
   const certificateStatus = getFrameCertificateStatus(frame)
+  const deployedFrameOSVersion =
+    typeof frame.last_successful_deploy?.frameos_version === 'string'
+      ? frame.last_successful_deploy.frameos_version.split('+')[0]
+      : null
+  const hasFrameOSUpdate = Boolean(deployedFrameOSVersion && deployedFrameOSVersion !== CURRENT_FRAMEOS_VERSION)
 
   return (
     <Box id={`frame-${frame.id}`} className="relative">
@@ -90,6 +96,11 @@ export function Frame({ frame }: FrameProps): JSX.Element {
               <ExclamationTriangleIcon
                 className={certificateStatus === 'expired' ? 'h-4 w-4 text-red-300' : 'h-4 w-4 text-yellow-300'}
               />
+            </Tooltip>
+          ) : null}
+          {hasFrameOSUpdate ? (
+            <Tooltip title={`FrameOS update available (${deployedFrameOSVersion} -> ${CURRENT_FRAMEOS_VERSION})`}>
+              <ArrowUpCircleIcon className="h-4 w-4 text-blue-300" />
             </Tooltip>
           ) : null}
         </H5>
