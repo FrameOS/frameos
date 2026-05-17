@@ -1,5 +1,5 @@
 {
-  "frameos": "2026.5.10+d6c105d41144fcafe9935bb4d2fb3711f4ba376f",
-  "agent": "2026.3.3+86f4a3d85eeb5c89b5a2b3c2ffbc30883e675160",
-  "docker": "2026.5.10+b425a677b5d56feecab519242b3fbfa801410a79"
+  "frameos": "2026.5.11+63c4ecda5fbea5e56bd440ec9bb2ad8f8c1750ea",
+  "agent": "2026.5.11+f8b19da70ce0acda3cbc8493c14885f441dfda30",
+  "docker": "2026.5.11+db7f37e805b1320c1c5cf053fb6e2bd068920652"
 }
