@@ -42,6 +42,10 @@ function panelsEqual(panel1: PanelWithMetadata, panel2: PanelWithMetadata) {
   return panel1.panel === panel2.panel && panel1.key === panel2.key
 }
 
+function normalizeHashPanel(panel: unknown): PanelWithMetadata | null {
+  return panel && typeof panel === 'object' && 'panel' in panel ? (panel as PanelWithMetadata) : null
+}
+
 export function panelScrollKey(panel: PanelWithMetadata): string {
   return `${panel.panel}.${panel.key ?? 'default'}`
 }
@@ -72,6 +76,7 @@ export const panelsLogic = kea<panelsLogicType>([
     openPanel: (panel: PanelWithMetadata) => ({ panel }),
     closePanel: (panel: PanelWithMetadata) => ({ panel }),
     toggleFullScreenPanel: (panel: PanelWithMetadata) => ({ panel }),
+    setFullScreenPanel: (panel: PanelWithMetadata | null) => ({ panel }),
     disableFullscreenPanel: true,
     openChat: true,
     openTemplates: true,
@@ -224,7 +229,9 @@ export const panelsLogic = kea<panelsLogicType>([
     fullScreenPanel: [
       null as PanelWithMetadata | null,
       {
+        setFullScreenPanel: (_, { panel }) => panel,
         toggleFullScreenPanel: (state, { panel }) => (state && panelsEqual(state, panel) ? null : panel),
+        closePanel: (state, { panel }) => (state && panelsEqual(state, panel) ? null : state),
         disableFullscreenPanel: () => null,
         openChat: () => null,
         openTemplates: () => null,
@@ -376,6 +383,7 @@ export const panelsLogic = kea<panelsLogicType>([
   })),
   afterMount(({ values, actions }) => {
     const routerPanels = router.values.hashParams?.p
+    const routerFullScreenPanel = normalizeHashPanel(router.values.hashParams?.f)
     if (routerPanels && !equal(values.panels, routerPanels)) {
       actions.setPanels(routerPanels)
     } else {
@@ -384,11 +392,20 @@ export const panelsLogic = kea<panelsLogicType>([
         actions.setPanel(Area.TopRight, scenesPanel)
       }
     }
+    if (!equal(values.fullScreenPanel, routerFullScreenPanel)) {
+      actions.setFullScreenPanel(routerFullScreenPanel)
+    }
   }),
   subscriptions(({ actions }) => ({
     panels: (panels) => {
       const routerPanels = router.values.hashParams?.p
       if (!routerPanels || !equal(panels, routerPanels)) {
+        actions.updateUrl()
+      }
+    },
+    fullScreenPanel: (fullScreenPanel) => {
+      const routerFullScreenPanel = normalizeHashPanel(router.values.hashParams?.f)
+      if (!equal(fullScreenPanel, routerFullScreenPanel)) {
         actions.updateUrl()
       }
     },
@@ -402,13 +419,21 @@ export const panelsLogic = kea<panelsLogicType>([
       if (panels && typeof panels === 'object' && !equal(panels, values.panels)) {
         actions.setPanels(panels)
       }
+      const fullScreenPanel = normalizeHashPanel(hash.f)
+      if (!equal(fullScreenPanel, values.fullScreenPanel)) {
+        actions.setFullScreenPanel(fullScreenPanel)
+      }
     },
   })),
   actionToUrl(({ values }) => ({
-    updateUrl: () => [
-      router.values.location.pathname,
-      router.values.searchParams,
-      { ...router.values.hashParams, p: values.panels },
-    ],
+    updateUrl: () => {
+      const hash: Record<string, unknown> = { ...router.values.hashParams, p: values.panels }
+      if (values.fullScreenPanel) {
+        hash.f = values.fullScreenPanel
+      } else {
+        delete hash.f
+      }
+      return [router.values.location.pathname, router.values.searchParams, hash]
+    },
   })),
 ])

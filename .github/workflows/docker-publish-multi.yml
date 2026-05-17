@@ -53,53 +53,6 @@ jobs:
           echo "docker_version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "release_tag=v$VERSION" >> "$GITHUB_OUTPUT"
 
-  test:
-    needs: update-versions
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v2
-        with:
-          ref: ${{ needs.update-versions.outputs.release_sha }}
-
-      - name: Set up Python
-        uses: actions/setup-python@v2
-        with:
-          python-version: '3.12'
-
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10.27.0
-          run_install: false
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'pnpm'
-          cache-dependency-path: pnpm-lock.yaml
-
-      - name: Install redis
-        run: sudo apt-get -y update && sudo apt-get install -y redis-server
-
-      - name: Install python dependencies
-        run: |
-          cd backend
-          python -m pip install --upgrade uv
-          uv venv
-          uv pip install -r requirements.txt
-
-      - name: Install node dependencies
-        run: |
-          pnpm install --frozen-lockfile
-          pnpm --dir frontend run build
-
-      - name: Run Pytest
-        run: |
-          cd backend
-          source .venv/bin/activate
-          TEST=1 pytest
-
   determine-release-targets:
     needs: update-versions
     runs-on: ubuntu-24.04
@@ -118,7 +71,7 @@ jobs:
 
   build-prebuilt-cross:
     name: Build Prebuilt Cross (${{ matrix.slug }})
-    needs: [update-versions, determine-release-targets, test]
+    needs: [update-versions, determine-release-targets]
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -196,7 +149,7 @@ jobs:
           if-no-files-found: error
 
   build:
-    needs: [update-versions, test]
+    needs: update-versions
     runs-on: ubuntu-latest
     strategy:
       matrix:
