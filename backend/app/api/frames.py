@@ -1247,17 +1247,18 @@ async def api_frame_get_image(
                         db.add(img_row)
                     db.commit()
 
-                await publish_message(
-                    redis,
-                    "new_scene_image",
-                    {
-                        "frameId": id,
-                        "sceneId": scene_id,
-                        "timestamp": now.isoformat(),
-                        "width": width,
-                        "height": height,
-                    },
-                )
+                if scene_id:
+                    await publish_message(
+                        redis,
+                        "new_scene_image",
+                        {
+                            "frameId": id,
+                            "sceneId": scene_id,
+                            "timestamp": now.isoformat(),
+                            "width": width,
+                            "height": height,
+                        },
+                    )
 
                 return Response(content=body, media_type="image/png")
             else:
