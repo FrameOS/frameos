@@ -30,6 +30,10 @@ export interface TimeRange {
   end: number
 }
 
+export function metricSeriesVisibilityKey(category: string, seriesKey: string): string {
+  return `${category}:${seriesKey}`
+}
+
 const DEFAULT_VISIBLE_MS = 4 * 60 * 60 * 1000
 const HEADER_VISIBLE_MS = 60 * 60 * 1000
 const MIN_VISIBLE_MS = 1000
@@ -279,6 +283,7 @@ export const metricsLogic = kea<metricsLogicType>([
     setSelectedTimeRange: (start: number, end: number) => ({ start, end }),
     resetSelectedTimeRange: true,
     setCurrentTime: (currentTime: number) => ({ currentTime }),
+    toggleMetricSeries: (category: string, seriesKey: string) => ({ category, seriesKey }),
   }),
   loaders(({ props }) => ({
     metrics: [
@@ -316,6 +321,21 @@ export const metricsLogic = kea<metricsLogicType>([
       Date.now(),
       {
         setCurrentTime: (_, { currentTime }) => currentTime,
+      },
+    ],
+    hiddenMetricSeries: [
+      {} as Record<string, boolean>,
+      {
+        toggleMetricSeries: (state, { category, seriesKey }) => {
+          const key = metricSeriesVisibilityKey(category, seriesKey)
+          const next = { ...state }
+          if (next[key]) {
+            delete next[key]
+          } else {
+            next[key] = true
+          }
+          return next
+        },
       },
     ],
     metrics: {
@@ -415,7 +435,8 @@ export const metricsLogic = kea<metricsLogicType>([
               for (const [subKey, subValue] of entries) {
                 if (
                   (key === 'memoryUsage' && (subKey === 'active' || subKey === 'free' || subKey === 'percentage')) ||
-                  (key === 'diskUsage' && (subKey === 'filesystems' || subKey === 'percentage'))
+                  (key === 'diskUsage' && (subKey === 'filesystems' || subKey === 'percentage')) ||
+                  (key === 'processMemory' && subKey === 'pid')
                 ) {
                   continue
                 }
@@ -439,6 +460,16 @@ export const metricsLogic = kea<metricsLogicType>([
                           fullSubKey,
                           subKey,
                           DISK_USAGE_COLORS[subKey] ?? metricSeriesColor(metricsByCategory[key]?.length ?? 0),
+                          'left',
+                          'bytes'
+                        )
+                      : key === 'processMemory'
+                      ? getOrCreateMetricSeries(
+                          metricsByCategory,
+                          key,
+                          fullSubKey,
+                          subKey,
+                          metricSeriesColor(metricsByCategory[key]?.length ?? 0),
                           'left',
                           'bytes'
                         )
@@ -468,6 +499,16 @@ export const metricsLogic = kea<metricsLogicType>([
           metricsByCategory,
           ['load', 'memoryUsage', 'diskUsage'],
           headerMetricsTimeRange
+        ),
+    ],
+    visibleMetricsByCategory: [
+      (s) => [s.metricsByCategory, s.hiddenMetricSeries],
+      (metricsByCategory, hiddenMetricSeries): Record<string, MetricSeries[]> =>
+        Object.fromEntries(
+          Object.entries(metricsByCategory).map(([category, series]) => [
+            category,
+            series.filter((chartSeries) => !hiddenMetricSeries[metricSeriesVisibilityKey(category, chartSeries.key)]),
+          ])
         ),
     ],
     latestMetricSummariesByCategory: [
