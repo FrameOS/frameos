@@ -11,6 +11,7 @@ type
   HookMode = enum
     hmSuccess
     hmExitFailure
+    hmTimeout
     hmDecodeFailure
     hmOSError
 
@@ -33,6 +34,8 @@ proc fakeFfmpegRunner(command: string): tuple[data: string, exitCode: int] =
     result = (img.encodeImage(BmpFormat), 0)
   of hmExitFailure:
     result = ("", 7)
+  of hmTimeout:
+    result = ("", -1)
   of hmDecodeFailure:
     result = ("not-an-image", 0)
   of hmOSError:
@@ -68,6 +71,20 @@ suite "data/rstpSnapshot app":
       rtspSnapshotFfmpegRunHook = previousHook
 
     hookMode = hmExitFailure
+    rtspSnapshotFfmpegRunHook = fakeFfmpegRunner
+
+    let app = makeApp(FrameScene(logger: newLogger(LogStore(items: @[]))), FrameConfig(width: 9, height: 6))
+    let outputImage = app.get(ExecutionContext(hasImage: true, image: newImage(13, 7)))
+
+    check outputImage.width == 13
+    check outputImage.height == 7
+
+  test "ffmpeg timeout returns context-sized error image":
+    let previousHook = rtspSnapshotFfmpegRunHook
+    defer:
+      rtspSnapshotFfmpegRunHook = previousHook
+
+    hookMode = hmTimeout
     rtspSnapshotFfmpegRunHook = fakeFfmpegRunner
 
     let app = makeApp(FrameScene(logger: newLogger(LogStore(items: @[]))), FrameConfig(width: 9, height: 6))
