@@ -4,10 +4,23 @@ import { frameLogic } from '../../frameLogic'
 import { ParentSize } from '@visx/responsive'
 import { BrushChart } from './BrushChart'
 
+const metricLabels: Record<string, string> = {
+  load: 'Load',
+  memoryUsage: 'Memory',
+  diskUsage: 'Disk',
+}
+
 export function Metrics() {
   const { frameId } = useValues(frameLogic)
-  const { metrics, metricsByCategory, metricsLoading, metricsTimeRange, visibleTimeRange, metricGapThresholdMs } =
-    useValues(metricsLogic({ frameId }))
+  const {
+    metrics,
+    metricsByCategory,
+    metricsLoading,
+    metricsTimeRange,
+    visibleTimeRange,
+    metricGapThresholdMs,
+    latestMetricSummariesByCategory,
+  } = useValues(metricsLogic({ frameId }))
   const { setSelectedTimeRange, resetSelectedTimeRange } = useActions(metricsLogic({ frameId }))
 
   return metricsLoading ? (
@@ -21,7 +34,10 @@ export function Metrics() {
           Object.entries(metricsByCategory).map(([key, series]) => (
             <div key={key}>
               <div className="mb-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
-                <strong>{key}</strong>
+                <strong>{metricLabels[key] ?? key}</strong>
+                {latestMetricSummariesByCategory[key] ? (
+                  <span className="text-gray-400">{latestMetricSummariesByCategory[key]}</span>
+                ) : null}
                 {series.length > 1 &&
                   series.map((chartSeries) => (
                     <span key={chartSeries.key} className="inline-flex items-center gap-1">

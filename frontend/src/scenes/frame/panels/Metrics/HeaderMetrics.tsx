@@ -12,6 +12,7 @@ const chartMargin = { top: 3, right: 2, bottom: 3, left: 2 }
 const metricLabels: Record<string, string> = {
   load: 'Load',
   memoryUsage: 'Mem',
+  diskUsage: 'Disk',
 }
 
 const getValue = (point: MetricPoint) => point.y
@@ -77,7 +78,9 @@ function HeaderMetricChart({ series, timeRange }: { series: MetricSeries[]; time
 }
 
 export function HeaderMetrics({ frameId }: { frameId: number }) {
-  const { headerMetricsByCategory, headerMetricsTimeRange } = useValues(metricsLogic({ frameId }))
+  const { headerMetricsByCategory, headerMetricsTimeRange, latestMetricSummariesByCategory } = useValues(
+    metricsLogic({ frameId })
+  )
   const metricEntries = Object.entries(headerMetricsByCategory).filter(([, series]) => series.length > 0)
 
   if (!headerMetricsTimeRange || metricEntries.length === 0) {
@@ -91,8 +94,13 @@ export function HeaderMetrics({ frameId }: { frameId: number }) {
           key={key}
           className="flex h-[42px] items-center gap-1.5 rounded border border-gray-700 bg-gray-900/40 px-2"
         >
-          <span className="w-8 text-xs font-medium text-gray-300">{metricLabels[key] ?? key}</span>
-          <HeaderMetricChart series={series} timeRange={headerMetricsTimeRange} />
+          <span className="flex-none whitespace-nowrap text-xs font-medium text-gray-300">
+            {metricLabels[key] ?? key}
+            {latestMetricSummariesByCategory[key] ? (
+              <span className="ml-1 text-gray-400">{latestMetricSummariesByCategory[key]}</span>
+            ) : null}
+          </span>
+          {key !== 'diskUsage' ? <HeaderMetricChart series={series} timeRange={headerMetricsTimeRange} /> : null}
         </div>
       ))}
     </div>

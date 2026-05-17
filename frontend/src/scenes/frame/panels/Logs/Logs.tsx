@@ -94,6 +94,24 @@ function formatBytes(bytes: number): string {
   return `${formatNumber(value)} ${units[unitIndex]}`
 }
 
+function formatBytesInUnit(bytes: number, unitIndex: number): string {
+  return formatNumber(bytes / 1024 ** unitIndex)
+}
+
+function byteUnitIndex(bytes: number): number {
+  const absBytes = Math.abs(bytes)
+  if (absBytes >= 1024 * 1024 * 1024) {
+    return 3
+  }
+  if (absBytes >= 1024 * 1024) {
+    return 2
+  }
+  if (absBytes >= 1024) {
+    return 1
+  }
+  return 0
+}
+
 function formatMetricValue(key: string, value: unknown): string {
   if (value === null) {
     return 'null'
@@ -108,7 +126,7 @@ function formatMetricValue(key: string, value: unknown): string {
     if (key === 'intervalMs') {
       return `${formatNumber(value)} ms`
     }
-    if (key.toLowerCase().includes('memory')) {
+    if (key.toLowerCase().includes('memory') || key.toLowerCase().includes('disk')) {
       return formatBytes(value)
     }
     return formatNumber(value)
@@ -146,6 +164,7 @@ function renderMetricsLog(rest: Record<string, any>, expanded: boolean, onToggle
   const load = Array.isArray(rest.load) ? rest.load : [0, 0, 0]
   const cpuTemperature = Number(rest.cpuTemperature ?? 0)
   const memoryUsage = rest.memoryUsage ?? {}
+  const diskUsage = rest.diskUsage ?? {}
 
   const ramTotalMb = toMb(Number(memoryUsage.total ?? 0))
   const ramAvailableBytes = Number(memoryUsage.available ?? memoryUsage.free ?? 0)
@@ -153,9 +172,15 @@ function renderMetricsLog(rest: Record<string, any>, expanded: boolean, onToggle
   const ramUsedMb = toMb(ramUsedBytes)
   const ramAvailableMb = Math.max(0, ramTotalMb - ramUsedMb)
   const ramAvailablePercent = ramTotalMb > 0 ? (ramAvailableMb / ramTotalMb) * 100 : 0
+  const diskTotalBytes = Number(diskUsage.total ?? 0)
+  const diskAvailableBytes = Number(diskUsage.available ?? diskUsage.free ?? 0)
+  const diskUsedBytes = Number(diskUsage.used ?? diskTotalBytes - diskAvailableBytes)
+  const diskUnitIndex = byteUnitIndex(diskTotalBytes)
+  const diskUnit = ['B', 'KB', 'MB', 'GB'][diskUnitIndex]
+  const diskAvailablePercent = diskTotalBytes > 0 ? ((diskTotalBytes - diskUsedBytes) / diskTotalBytes) * 100 : 0
   const entries = flattenMetricEntries(rest)
   const metricState = typeof rest.state === 'string' ? rest.state : null
-  const hasStandardMetrics = 'load' in rest || 'cpuTemperature' in rest || 'memoryUsage' in rest
+  const hasStandardMetrics = 'load' in rest || 'cpuTemperature' in rest || 'memoryUsage' in rest || 'diskUsage' in rest
 
   return (
     <div className="text-gray-400">
@@ -176,9 +201,22 @@ function renderMetricsLog(rest: Record<string, any>, expanded: boolean, onToggle
                 {value}
               </span>
             ))}
-            cpu <span className={metricNumberColor(cpuTemperature, 60, 75)}>{cpuTemperature.toFixed(2)}°C</span> ram
-            used <span className={metricNumberColor(ramAvailablePercent, 15, 5, true)}>{ramUsedMb} MB</span> /{' '}
+            cpu <span className={metricNumberColor(cpuTemperature, 60, 75)}>{cpuTemperature.toFixed(2)}°C</span> ram{' '}
+            <span className={metricNumberColor(ramAvailablePercent, 15, 5, true)}>{ramUsedMb}</span> /{' '}
             <span className="text-white">{ramTotalMb} MB</span>
+            {diskTotalBytes > 0 ? (
+              <>
+                {' '}
+                disk{' '}
+                <span className={metricNumberColor(diskAvailablePercent, 15, 5, true)}>
+                  {formatBytesInUnit(diskUsedBytes, diskUnitIndex)}
+                </span>{' '}
+                /{' '}
+                <span className="text-white">
+                  {formatBytesInUnit(diskTotalBytes, diskUnitIndex)} {diskUnit}
+                </span>
+              </>
+            ) : null}
           </>
         )}
         {entries.length > 0 ? (

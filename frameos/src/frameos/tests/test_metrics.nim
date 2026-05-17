@@ -45,6 +45,23 @@ suite "metrics loop":
       sleepHook = proc(ms: int) {.gcsafe, nimcall.} = discard,
       memoryUsageHook = proc(): tuple[total, used: int64, percentage: float] {.gcsafe, nimcall.} =
         (1234'i64, 778'i64, 63.0),
+      diskUsageHook = proc(): JsonNode {.gcsafe, nimcall.} = %*{
+        "total": 16000'i64,
+        "used": 8900'i64,
+        "available": 7100'i64,
+        "percentage": 55.625,
+        "filesystems": [
+          {
+            "mount": "/",
+            "device": "/dev/root",
+            "type": "ext4",
+            "total": 16000'i64,
+            "used": 8900'i64,
+            "available": 7100'i64,
+            "percentage": 55.625,
+          }
+        ],
+      },
       openFileDescriptorsHook = proc(): int {.gcsafe, nimcall.} = 9
     )
 
@@ -60,6 +77,12 @@ suite "metrics loop":
     check samplePayload[1]["memoryUsage"]["total"].getInt() == 1234
     check samplePayload[1]["memoryUsage"]["used"].getInt() == 778
     check abs(samplePayload[1]["memoryUsage"]["percentage"].getFloat() - 63.0) < 0.0001
+    check samplePayload[1]["diskUsage"]["total"].getInt() == 16000
+    check samplePayload[1]["diskUsage"]["used"].getInt() == 8900
+    check samplePayload[1]["diskUsage"]["available"].getInt() == 7100
+    check abs(samplePayload[1]["diskUsage"]["percentage"].getFloat() - 55.625) < 0.0001
+    check samplePayload[1]["diskUsage"]["filesystems"].len == 1
+    check samplePayload[1]["diskUsage"]["filesystems"][0]["mount"].getStr() == "/"
     check not samplePayload[1]["processMemory"].hasKey("pid")
     check abs(samplePayload[1]["cpuUsage"].getFloat() - 12.5) < 0.0001
     check samplePayload[1]["openFileDescriptors"].getInt() == 9

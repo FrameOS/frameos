@@ -41,6 +41,11 @@ const MEMORY_USAGE_COLORS: Record<string, string> = {
   total: '#38bdf8',
   used: '#fb7185',
 }
+const DISK_USAGE_COLORS: Record<string, string> = {
+  total: '#38bdf8',
+  used: '#fb7185',
+  available: '#34d399',
+}
 
 function parseMetricTimestamp(timestamp: string): number {
   const hasTimeZone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(timestamp)
@@ -193,6 +198,78 @@ function normalizeMemoryUsageEntries(value: Record<string, unknown>): [string, n
   return entries
 }
 
+function normalizeDiskUsageEntries(value: Record<string, unknown>): [string, number][] {
+  const total = Number(value.total)
+  const used = Number(value.used)
+  const available = Number(value.available)
+  const entries: [string, number][] = []
+
+  if (Number.isFinite(total)) {
+    entries.push(['total', total])
+  }
+  if (Number.isFinite(used)) {
+    entries.push(['used', used])
+  } else if (Number.isFinite(total) && Number.isFinite(available)) {
+    entries.push(['used', Math.max(0, total - available)])
+  }
+  if (Number.isFinite(available)) {
+    entries.push(['available', available])
+  }
+
+  return entries
+}
+
+function formatShortBytes(value: number): string {
+  const units = ['B', 'K', 'M', 'G', 'T']
+  let unitIndex = 0
+  let scaledValue = Math.max(0, value)
+
+  while (scaledValue >= 1024 && unitIndex < units.length - 1) {
+    scaledValue /= 1024
+    unitIndex += 1
+  }
+
+  const rounded = unitIndex === 0 ? Math.round(scaledValue) : Math.round(scaledValue * 10) / 10
+  const formatted = rounded >= 10 || unitIndex === 0 ? String(Math.round(rounded)) : rounded.toFixed(1)
+  return `${formatted.replace(/\.0$/, '')}${units[unitIndex]}`
+}
+
+function formatShortBytesPair(used: number, total: number): string {
+  const usedValue = formatShortBytes(used)
+  const totalValue = formatShortBytes(total)
+  const usedUnit = usedValue.match(/[A-Z]$/)?.[0]
+  const totalUnit = totalValue.match(/[A-Z]$/)?.[0]
+
+  if (usedUnit && totalUnit && usedUnit === totalUnit) {
+    return `${usedValue.slice(0, -1)}/${totalValue}`
+  }
+  return `${usedValue}/${totalValue}`
+}
+
+function getLatestDiskUsageSummary(metrics: MetricsType[]): string | null {
+  for (let i = metrics.length - 1; i >= 0; i--) {
+    const diskUsage = metrics[i].metrics?.diskUsage
+    if (!diskUsage || typeof diskUsage !== 'object' || Array.isArray(diskUsage)) {
+      continue
+    }
+
+    const diskUsageRecord = diskUsage as Record<string, unknown>
+    const total = Number(diskUsageRecord.total)
+    const used = Number(diskUsageRecord.used)
+    const available = Number(diskUsageRecord.available)
+    const resolvedUsed =
+      Number.isFinite(used) || !Number.isFinite(total) || !Number.isFinite(available)
+        ? used
+        : Math.max(0, total - available)
+
+    if (Number.isFinite(total) && total > 0 && Number.isFinite(resolvedUsed)) {
+      return formatShortBytesPair(resolvedUsed, total)
+    }
+  }
+
+  return null
+}
+
 export const metricsLogic = kea<metricsLogicType>([
   path(['src', 'scenes', 'frame', 'metricsLogic']),
   props({} as metricsLogicProps),
@@ -332,9 +409,14 @@ export const metricsLogic = kea<metricsLogicType>([
               const entries =
                 key === 'memoryUsage'
                   ? normalizeMemoryUsageEntries(value as Record<string, unknown>)
+                  : key === 'diskUsage'
+                  ? normalizeDiskUsageEntries(value as Record<string, unknown>)
                   : Object.entries(value)
               for (const [subKey, subValue] of entries) {
-                if (key === 'memoryUsage' && (subKey === 'active' || subKey === 'free' || subKey === 'percentage')) {
+                if (
+                  (key === 'memoryUsage' && (subKey === 'active' || subKey === 'free' || subKey === 'percentage')) ||
+                  (key === 'diskUsage' && (subKey === 'filesystems' || subKey === 'percentage'))
+                ) {
                   continue
                 }
                 if (typeof subValue === 'number') {
@@ -347,6 +429,16 @@ export const metricsLogic = kea<metricsLogicType>([
                           fullSubKey,
                           subKey,
                           MEMORY_USAGE_COLORS[subKey] ?? metricSeriesColor(metricsByCategory[key]?.length ?? 0),
+                          'left',
+                          'bytes'
+                        )
+                      : key === 'diskUsage'
+                      ? getOrCreateMetricSeries(
+                          metricsByCategory,
+                          key,
+                          fullSubKey,
+                          subKey,
+                          DISK_USAGE_COLORS[subKey] ?? metricSeriesColor(metricsByCategory[key]?.length ?? 0),
                           'left',
                           'bytes'
                         )
@@ -372,7 +464,18 @@ export const metricsLogic = kea<metricsLogicType>([
     headerMetricsByCategory: [
       (s) => [s.metricsByCategory, s.headerMetricsTimeRange],
       (metricsByCategory, headerMetricsTimeRange) =>
-        filterMetricsByCategoryAndTimeRange(metricsByCategory, ['load', 'memoryUsage'], headerMetricsTimeRange),
+        filterMetricsByCategoryAndTimeRange(
+          metricsByCategory,
+          ['load', 'memoryUsage', 'diskUsage'],
+          headerMetricsTimeRange
+        ),
+    ],
+    latestMetricSummariesByCategory: [
+      (s) => [s.sortedMetrics],
+      (metrics): Record<string, string> => {
+        const diskUsageSummary = getLatestDiskUsageSummary(metrics)
+        return diskUsageSummary ? { diskUsage: diskUsageSummary } : {}
+      },
     ],
   }),
   afterMount(({ actions, cache }) => {
