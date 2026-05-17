@@ -3,6 +3,7 @@ import osproc
 import pixie
 import strutils
 import times
+import strformat
 import frameos/apps
 import frameos/types
 import frameos/utils/image
@@ -35,16 +36,45 @@ proc runFfmpeg(command: string): tuple[data: string, exitCode: int] =
 
   let outputPath = getTempDir() / ("frameos-rtsp-" & $getCurrentProcessId() & "-" & $(epochTime() * 1000).int & ".bmp")
   let commandWithOutput = command & " " & quoteShell(outputPath)
-  var p = startProcess(commandWithOutput, options = {poUsePath, poEvalCommand, poDaemon})
+  var p = startProcess(commandWithOutput, options = {poUsePath, poEvalCommand})
   defer:
-    p.close()
+    if p != nil:
+      if p.running():
+        try:
+          p.terminate()
+          discard p.waitForExit(1500)
+          if p.running():
+            p.kill()
+            discard p.waitForExit(500)
+        except CatchableError:
+          discard
+      p.close()
     if fileExists(outputPath):
       try:
         removeFile(outputPath)
       except OSError:
         discard
 
-  result.exitCode = p.waitForExit(FfmpegTimeoutMs)
+  let startedAt = epochTime()
+  while p.running():
+    if fileExists(outputPath) and getFileSize(outputPath) > MaxFfmpegOutputBytes:
+      p.terminate()
+      discard p.waitForExit(1500)
+      if p.running():
+        p.kill()
+        discard p.waitForExit(500)
+      raise newException(IOError, "ffmpeg output exceeded " & $MaxFfmpegOutputBytes & " bytes")
+    if epochTime() > startedAt + (FfmpegTimeoutMs.float / 1000.0):
+      p.terminate()
+      discard p.waitForExit(1500)
+      if p.running():
+        p.kill()
+        discard p.waitForExit(500)
+      result.exitCode = -1
+      return
+    sleep(100)
+
+  result.exitCode = p.waitForExit()
   if result.exitCode != 0:
     return
 
@@ -69,8 +99,12 @@ proc get*(self: App, context: ExecutionContext): Image =
     let (data, exitCode) = runFfmpeg(command)
 
     if exitCode != 0:
-      self.logError "ffmpeg exited with code " & $exitCode
-      return renderError(self, context, "ffmpeg failed to run (exit code " & $exitCode & ")")
+      let reason = if exitCode == -1: "timeout after " & $(FfmpegTimeoutMs div 1000) & "s" else: "exit code " & $exitCode
+      self.logError "ffmpeg failed: " & reason
+      return renderError(self, context, "ffmpeg failed to run (" & reason & ")")
+
+    if data.len > MaxFfmpegOutputBytes:
+      raise newException(IOError, &"ffmpeg output exceeded {MaxFfmpegOutputBytes} bytes")
 
     try:
       return decodeImageWithFallback(data)
