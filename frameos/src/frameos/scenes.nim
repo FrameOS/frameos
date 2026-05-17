@@ -239,6 +239,7 @@ proc normalizeUploadedScenePayload*(sceneInputs: seq[FrameSceneInput]): seq[Fram
 var
   lastImageLock: Lock
   lastImage {.guard: lastImageLock.} = newImage(1, 1)
+  lastImageSceneId {.guard: lastImageLock.} = "".SceneId
   lastImagePresent = false
   lastPublicStatesLock: Lock
   lastPublicStates {.guard: lastPublicStatesLock.} = %*{}
@@ -362,21 +363,27 @@ proc updateUploadedScenesFromPayload*(
   pruneUploadedPublicStates(sceneIds, some(mainSceneId))
   return (some(mainSceneId), sceneIds & oldSceneIds)
 
-proc setLastImage*(image: Image) =
+proc setLastImage*(image: Image, sceneId: SceneId = "".SceneId) =
   withLock lastImageLock:
     lastImage = copy(image)
+    lastImageSceneId = sceneId
     lastImagePresent = true
 
-proc getLastImagePng*(): string =
+proc getLastImagePngWithSceneId*(): tuple[png: string, sceneId: SceneId] =
   if not lastImagePresent:
     raise newException(Exception, "No image rendered yet")
   var copy: seq[ColorRGBX]
   var width, height: int
+  var sceneId = "".SceneId
   withLock lastImageLock:
     copy = lastImage.data
     width = lastImage.width
     height = lastImage.height
-  return encodePng(width, height, 4, copy[0].addr, copy.len * 4)
+    sceneId = lastImageSceneId
+  return (png: encodePng(width, height, 4, copy[0].addr, copy.len * 4), sceneId: sceneId)
+
+proc getLastImagePng*(): string =
+  return getLastImagePngWithSceneId().png
 
 proc getLastPublicState*(): (SceneId, JsonNode, seq[StateField], float) =
   {.gcsafe.}:

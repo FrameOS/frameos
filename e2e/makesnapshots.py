@@ -9,6 +9,8 @@ import subprocess
 import signal
 
 DEFAULT_DIFF_THRESHOLD = float(os.environ.get("SNAPSHOT_DIFF_THRESHOLD", "0.01"))
+SCENE_RENDER_TIMEOUT = float(os.environ.get("SNAPSHOT_SCENE_RENDER_TIMEOUT", "30"))
+SCENE_RENDER_POLL_INTERVAL = float(os.environ.get("SNAPSHOT_SCENE_RENDER_POLL_INTERVAL", "0.1"))
 RESAMPLE_FILTER = getattr(Image, "Resampling", Image).LANCZOS
 
 def compare_images(img_path1, img_path2, threshold=DEFAULT_DIFF_THRESHOLD):
@@ -42,6 +44,39 @@ def compare_images(img_path1, img_path2, threshold=DEFAULT_DIFF_THRESHOLD):
 def is_similar_image(img_path1, img_path2, threshold=DEFAULT_DIFF_THRESHOLD):
     result = compare_images(img_path1, img_path2, threshold)
     return result["similar"]
+
+def set_current_scene(port, scene_id):
+    response = requests.post(
+        f'http://localhost:{port}/event/setCurrentScene',
+        json={'sceneId': scene_id},
+        timeout=5,
+    )
+    if response.status_code != 200:
+        raise RuntimeError(f"Failed to set scene {scene_id}: HTTP {response.status_code}")
+
+def wait_for_scene_image(port, scene_id):
+    deadline = time.monotonic() + SCENE_RENDER_TIMEOUT
+    last_rendered_scene_id = ""
+    last_public_scene_id = ""
+    last_status = ""
+    last_error = ""
+
+    while time.monotonic() < deadline:
+        try:
+            response = requests.get(f'http://localhost:{port}/image', timeout=5)
+            last_status = str(response.status_code)
+            last_rendered_scene_id = response.headers.get("X-Rendered-Scene-Id", "")
+            last_public_scene_id = response.headers.get("X-Scene-Id", "")
+            if response.status_code == 200 and last_rendered_scene_id == scene_id:
+                return response.content
+        except requests.RequestException as error:
+            last_error = str(error)
+        time.sleep(SCENE_RENDER_POLL_INTERVAL)
+
+    details = f"last rendered scene={last_rendered_scene_id or '<none>'}, public scene={last_public_scene_id or '<none>'}, status={last_status or '<none>'}"
+    if last_error:
+        details += f", error={last_error}"
+    raise TimeoutError(f"Timed out waiting for rendered scene {scene_id}: {details}")
 
 def main():
     # filter from env or argv (argv optional)
@@ -78,26 +113,24 @@ def main():
             ]:
                 print(f"🍿 Processing scene: {scene_id}")
 
-                r = requests.post(f'http://localhost:{port}/event/setCurrentScene', json={'sceneId': 'black'})
-                if r.status_code != 200:
-                    print(f"Failed to set scene {scene_id} to black")
+                try:
+                    set_current_scene(port, 'black')
+                    wait_for_scene_image(port, 'black')
+                except Exception as error:
+                    print(f"Failed to render black before scene {scene_id}: {error}")
                     continue
-                time.sleep(0.5)
 
-                r = requests.post(f'http://localhost:{port}/event/setCurrentScene', json={'sceneId': scene_id})
-                if r.status_code != 200:
-                    print(f"Failed to set scene {scene_id}")
+                try:
+                    set_current_scene(port, scene_id)
+                    image_content = wait_for_scene_image(port, scene_id)
+                except Exception as error:
+                    print(f"Failed to render scene {scene_id}: {error}")
                     continue
-                time.sleep(1)
 
-                image_response = requests.get(f'http://localhost:{port}/image')
-                if image_response.status_code == 200:
-                    snapshot_path = snapshots_dir / f"{filename}.png"
-                    with open(snapshot_path, 'wb') as f:
-                        f.write(image_response.content)
-                    print(f"Snapshot captured: {snapshot_path}")
-                else:
-                    print(f"Failed to get snapshot for scene {scene_id}")
+                snapshot_path = snapshots_dir / f"{filename}.png"
+                with open(snapshot_path, 'wb') as f:
+                    f.write(image_content)
+                print(f"Snapshot captured: {snapshot_path}")
             # compare files: base_id + '_compiled' and base_id + '_interpreted'
             compiled_path = snapshots_dir / f"{base_id}_compiled.png"
             interpreted_path = snapshots_dir / f"{base_id}_interpreted.png"

@@ -87,7 +87,7 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
       scaleAndDrawImage(outImage, image, self.frameConfig.scalingMode)
     else:
       outImage = image
-    setLastImage(outImage)
+    setLastImage(outImage, scene.id)
     case self.frameConfig.flip:
     of "horizontal":
       outImage.flipHorizontal()
