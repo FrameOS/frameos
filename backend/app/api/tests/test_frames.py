@@ -288,6 +288,25 @@ async def test_api_frame_get_image_with_cookie_no_token(no_auth_client, db, redi
 
 
 @pytest.mark.asyncio
+async def test_api_frame_get_image_no_scene_id(async_client, db, redis):
+    """When the frame returns a 200 image but no x-scene-id header and no
+    cached active scene, the endpoint should still return the image without
+    crashing (no NameError on `now`/`width`/`height`)."""
+    frame = await new_frame(db, redis, 'NoSceneFrame', 'example.com', 'localhost')
+
+    fake_png = b'\x89PNG\r\n\x1a\n' + b'\x00' * 100
+
+    async def mock_fetch(frame_obj, redis_obj, *, path, method="GET"):
+        # Return 200 with image bytes but NO x-scene-id header
+        return 200, fake_png, {}
+
+    with patch('app.api.frames._fetch_frame_http_bytes', side_effect=mock_fetch):
+        response = await async_client.get(f'/api/frames/{frame.id}/image')
+    assert response.status_code == 200
+    assert response.content == fake_png
+
+
+@pytest.mark.asyncio
 async def test_api_frame_generate_tls_material_includes_validity_dates(async_client, db, redis):
     frame = await new_frame(db, redis, 'TlsFrame', 'localhost', 'localhost')
 
