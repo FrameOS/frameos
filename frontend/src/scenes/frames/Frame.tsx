@@ -28,12 +28,12 @@ function getTitleAndIcon(enabled: boolean, runCommands: boolean, activeConnectio
     if (activeConnections > 0) {
       return ['FrameOS Agent connected and ready to run commands', '🟢']
     }
-    return ['FrameOS Agent not connected', '⚪️']
+    return ['FrameOS Agent not connected', '']
   }
   if (activeConnections > 0) {
     return ['FrameOS Agent connected, but not configured to run commands', '🟡']
   }
-  return ['FrameOS Agent not connected', '⚪️']
+  return ['FrameOS Agent not connected', '']
 }
 
 export function FrameConnection({ frame }: FrameProps): JSX.Element | null {
