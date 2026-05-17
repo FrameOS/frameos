@@ -9,14 +9,15 @@ import frameos/types
 import frameos/utils/image
 
 const
-  FfmpegTimeoutMs = 15000
+  DefaultFfmpegTimeoutSeconds = 15
   MaxFfmpegOutputBytes = 50 * 1024 * 1024
 
 type
-  RtspSnapshotFfmpegRunHook* = proc(command: string): tuple[data: string, exitCode: int]
+  RtspSnapshotFfmpegRunHook* = proc(command: string, timeoutMs: int): tuple[data: string, exitCode: int]
 
   AppConfig* = object
     url*: string
+    timeoutSeconds*: int
 
   App* = ref object of AppRoot
     appConfig*: AppConfig
@@ -30,9 +31,12 @@ proc renderError(self: App, context: ExecutionContext, message: string): Image =
     message
   )
 
-proc runFfmpeg(command: string): tuple[data: string, exitCode: int] =
+proc ffmpegTimeoutMs(self: App): int =
+  max(1, (if self.appConfig.timeoutSeconds > 0: self.appConfig.timeoutSeconds else: DefaultFfmpegTimeoutSeconds)) * 1000
+
+proc runFfmpeg(command: string, timeoutMs: int): tuple[data: string, exitCode: int] =
   if rtspSnapshotFfmpegRunHook != nil:
-    return rtspSnapshotFfmpegRunHook(command)
+    return rtspSnapshotFfmpegRunHook(command, timeoutMs)
 
   let outputPath = getTempDir() / ("frameos-rtsp-" & $getCurrentProcessId() & "-" & $(epochTime() * 1000).int & ".bmp")
   let commandWithOutput = command & " " & quoteShell(outputPath)
@@ -64,7 +68,7 @@ proc runFfmpeg(command: string): tuple[data: string, exitCode: int] =
         p.kill()
         discard p.waitForExit(500)
       raise newException(IOError, "ffmpeg output exceeded " & $MaxFfmpegOutputBytes & " bytes")
-    if epochTime() > startedAt + (FfmpegTimeoutMs.float / 1000.0):
+    if epochTime() > startedAt + (timeoutMs.float / 1000.0):
       p.terminate()
       discard p.waitForExit(1500)
       if p.running():
@@ -96,10 +100,11 @@ proc get*(self: App, context: ExecutionContext): Image =
       self.log "Running: " & command
 
     # Run ffmpeg
-    let (data, exitCode) = runFfmpeg(command)
+    let timeoutMs = self.ffmpegTimeoutMs()
+    let (data, exitCode) = runFfmpeg(command, timeoutMs)
 
     if exitCode != 0:
-      let reason = if exitCode == -1: "timeout after " & $(FfmpegTimeoutMs div 1000) & "s" else: "exit code " & $exitCode
+      let reason = if exitCode == -1: "timeout after " & $(timeoutMs div 1000) & "s" else: "exit code " & $exitCode
       self.logError "ffmpeg failed: " & reason
       return renderError(self, context, "ffmpeg failed to run (" & reason & ")")
 

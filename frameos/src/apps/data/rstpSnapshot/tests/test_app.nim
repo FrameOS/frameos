@@ -18,6 +18,7 @@ type
 var
   hookMode {.global.}: HookMode
   capturedCommand {.global.}: string
+  capturedTimeoutMs {.global.}: int
 
 proc newLogger(store: LogStore): Logger =
   Logger(
@@ -25,8 +26,9 @@ proc newLogger(store: LogStore): Logger =
       store.items.add(payload)
   )
 
-proc fakeFfmpegRunner(command: string): tuple[data: string, exitCode: int] =
+proc fakeFfmpegRunner(command: string, timeoutMs: int): tuple[data: string, exitCode: int] =
   capturedCommand = command
+  capturedTimeoutMs = timeoutMs
   case hookMode
   of hmSuccess:
     var img = newImage(3, 2)
@@ -41,11 +43,11 @@ proc fakeFfmpegRunner(command: string): tuple[data: string, exitCode: int] =
   of hmOSError:
     raise newException(OSError, "ffmpeg missing")
 
-proc makeApp(scene: FrameScene, frameConfig: FrameConfig, url = "rtsp://cam/live"): App =
+proc makeApp(scene: FrameScene, frameConfig: FrameConfig, url = "rtsp://cam/live", timeoutSeconds = 0): App =
   App(
     scene: scene,
     frameConfig: frameConfig,
-    appConfig: AppConfig(url: url)
+    appConfig: AppConfig(url: url, timeoutSeconds: timeoutSeconds)
   )
 
 suite "data/rstpSnapshot app":
@@ -56,14 +58,16 @@ suite "data/rstpSnapshot app":
 
     hookMode = hmOSError
     capturedCommand = ""
+    capturedTimeoutMs = 0
     rtspSnapshotFfmpegRunHook = fakeFfmpegRunner
 
-    let app = makeApp(FrameScene(logger: newLogger(LogStore(items: @[]))), FrameConfig(width: 8, height: 5, rotate: 90))
+    let app = makeApp(FrameScene(logger: newLogger(LogStore(items: @[]))), FrameConfig(width: 8, height: 5, rotate: 90), timeoutSeconds = 4)
     let outputImage = app.get(ExecutionContext(hasImage: false))
 
     check outputImage.width == 5
     check outputImage.height == 8
     check capturedCommand.contains("ffmpeg -loglevel quiet")
+    check capturedTimeoutMs == 4000
 
   test "non-zero ffmpeg exit returns context-sized error image":
     let previousHook = rtspSnapshotFfmpegRunHook
@@ -78,6 +82,7 @@ suite "data/rstpSnapshot app":
 
     check outputImage.width == 13
     check outputImage.height == 7
+    check capturedTimeoutMs == 15000
 
   test "ffmpeg timeout returns context-sized error image":
     let previousHook = rtspSnapshotFfmpegRunHook
@@ -87,11 +92,14 @@ suite "data/rstpSnapshot app":
     hookMode = hmTimeout
     rtspSnapshotFfmpegRunHook = fakeFfmpegRunner
 
-    let app = makeApp(FrameScene(logger: newLogger(LogStore(items: @[]))), FrameConfig(width: 9, height: 6))
+    let store = LogStore(items: @[])
+    let app = makeApp(FrameScene(logger: newLogger(store)), FrameConfig(width: 9, height: 6), timeoutSeconds = 3)
     let outputImage = app.get(ExecutionContext(hasImage: true, image: newImage(13, 7)))
 
     check outputImage.width == 13
     check outputImage.height == 7
+    check capturedTimeoutMs == 3000
+    check ($store.items).contains("timeout after 3s")
 
   test "decode failure branch returns frame-sized error image":
     let previousHook = rtspSnapshotFfmpegRunHook

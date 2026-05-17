@@ -12,6 +12,14 @@
       "required": true,
       "label": "RTSP URL",
       "placeholder": "rstp://domain/cam"
+    },
+    {
+      "name": "timeoutSeconds",
+      "type": "integer",
+      "value": 15,
+      "required": true,
+      "label": "FFmpeg timeout in seconds",
+      "placeholder": "15"
     }
   ],
   "output": [
