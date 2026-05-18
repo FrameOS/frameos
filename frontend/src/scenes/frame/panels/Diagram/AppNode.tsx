@@ -93,7 +93,7 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
     titleBackground,
     'flex w-full justify-between items-center'
   )
-  const appZoomLabel = <NodeZoomLabel label={name.toUpperCase()} backgroundClassName={titleBackground} />
+  const appZoomLabel = <NodeZoomLabel label={name} backgroundClassName={titleBackground} />
 
   return (
     <BindLogic logic={appNodeLogic} props={appNodeLogicProps}>

@@ -80,7 +80,7 @@ export function EventNode({ id, isConnectable }: NodeProps): JSX.Element {
     titleBackground,
     'flex w-full justify-between items-center'
   )
-  const eventZoomLabel = <NodeZoomLabel label={keyword.toUpperCase()} backgroundClassName={titleBackground} />
+  const eventZoomLabel = <NodeZoomLabel label={keyword} backgroundClassName={titleBackground} />
 
   const configRows: JSX.Element[] = []
 

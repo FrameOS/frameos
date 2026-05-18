@@ -90,7 +90,7 @@ export function StateNode({ id, isConnectable }: NodeProps<StateNodeData>): JSX.
             ]}
           />
         </div>
-        <NodeZoomLabel label={(stateFieldTitle ?? data.keyword).toUpperCase()} backgroundClassName={titleBackground} />
+        <NodeZoomLabel label={stateFieldTitle ?? data.keyword} backgroundClassName={titleBackground} />
       </div>
     </BindLogic>
   )
