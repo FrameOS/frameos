@@ -15,6 +15,8 @@ const COLLISION_GAP_Y = 40
 const COLLISION_PASSES = 24
 const FLOW_GROUP_HORIZONTAL_GAP = 16
 const FLOW_GROUP_VERTICAL_GAP = 0
+const FLOW_COMPONENT_HORIZONTAL_GAP = 180
+const FLOW_COMPONENT_VERTICAL_GAP = 120
 const APP_INPUT_HORIZONTAL_GAP = COLLISION_GAP_X
 const STATE_INPUT_LEFT_OFFSET = 32
 const STATE_INPUT_STAGGER_X = 24
@@ -1497,6 +1499,97 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
       })
   }
 
+  const flowComponentNodeIds = (): Map<string, Set<string>> => {
+    const components = new Map<string, Set<string>>()
+
+    flowNodes.forEach((node) => {
+      const componentId = flowComponentId(node.id)
+      if (!componentId) {
+        return
+      }
+      const component = components.get(componentId) ?? new Set<string>()
+      component.add(node.id)
+      components.set(componentId, component)
+    })
+
+    sizedNodes.forEach((node) => {
+      if (flowNodeIds.has(node.id)) {
+        return
+      }
+      const anchorId = resolveAnchor(node.id)
+      const componentId = anchorId ? flowComponentId(anchorId) : null
+      if (!componentId) {
+        return
+      }
+      const component = components.get(componentId) ?? new Set<string>()
+      component.add(node.id)
+      components.set(componentId, component)
+    })
+
+    return components
+  }
+
+  const requiredShiftForComponentOverlap = (currentNodeIds: Set<string>, placedNodeIds: Set<string>): number => {
+    let shiftY = 0
+
+    currentNodeIds.forEach((currentNodeId) => {
+      const currentNode = positionedById[currentNodeId] ?? nodesById[currentNodeId]
+      if (!currentNode) {
+        return
+      }
+      const currentBounds = nodeBounds(currentNode)
+
+      placedNodeIds.forEach((placedNodeId) => {
+        const placedNode = positionedById[placedNodeId] ?? nodesById[placedNodeId]
+        if (!placedNode) {
+          return
+        }
+        const placedBounds = nodeBounds(placedNode)
+        const overlapsHorizontally =
+          currentBounds.left < placedBounds.right + FLOW_COMPONENT_HORIZONTAL_GAP &&
+          currentBounds.right + FLOW_COMPONENT_HORIZONTAL_GAP > placedBounds.left
+        const overlapsVertically =
+          currentBounds.top < placedBounds.bottom + FLOW_COMPONENT_VERTICAL_GAP &&
+          currentBounds.bottom + FLOW_COMPONENT_VERTICAL_GAP > placedBounds.top
+        if (!overlapsHorizontally || !overlapsVertically) {
+          return
+        }
+        shiftY = Math.max(shiftY, placedBounds.bottom + FLOW_COMPONENT_VERTICAL_GAP - currentBounds.top)
+      })
+    })
+
+    return shiftY
+  }
+
+  const resolveFlowComponentOverlaps = (): void => {
+    const components = Array.from(flowComponentNodeIds().values()).sort((componentA, componentB) => {
+      const boundsA = boundsForNodeIds(componentA)
+      const boundsB = boundsForNodeIds(componentB)
+      return (
+        (boundsA?.top ?? 0) - (boundsB?.top ?? 0) ||
+        (boundsA?.left ?? 0) - (boundsB?.left ?? 0) ||
+        flowGroupOrder(componentA) - flowGroupOrder(componentB)
+      )
+    })
+    const placedComponents: Array<{ nodeIds: Set<string> }> = []
+
+    components.forEach((nodeIds) => {
+      for (let pass = 0; pass < COLLISION_PASSES; pass += 1) {
+        const shiftY = placedComponents.reduce(
+          (shift, placedComponent) =>
+            Math.max(shift, requiredShiftForComponentOverlap(nodeIds, placedComponent.nodeIds)),
+          0
+        )
+        if (shiftY <= 0) {
+          break
+        }
+        moveNodeIds(nodeIds, { x: 0, y: shiftY })
+      }
+
+      placedComponents.push({ nodeIds })
+    })
+  }
+
   const placeCodeInputsNearTargets = (): void => {
     const codeInputEdgesByTarget = edges.reduce((acc, edge) => {
       if (!edge.source || !edge.target || !edge.targetHandle?.startsWith('codeField/')) {
@@ -1797,6 +1890,7 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
   placeStateInputsNearTargets()
   placeCodeInputsNearTargets()
   resolveFlowGroupOverlaps()
+  resolveFlowComponentOverlaps()
 
   return sizedNodes.map((node) => positionedById[node.id] ?? node)
 }
