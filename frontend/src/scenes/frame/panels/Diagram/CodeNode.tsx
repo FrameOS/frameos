@@ -13,6 +13,7 @@ import { appNodeLogic } from './appNodeLogic'
 import { NodeCache } from './NodeCache'
 import { CodeArg } from './CodeArg'
 import { newNodePickerLogic } from './newNodePickerLogic'
+import { NodeZoomLabel } from './NodeZoomLabel'
 
 export function CodeNode({ id, isConnectable }: NodeProps<CodeNodeData>): JSX.Element {
   const updateNodeInternals = useUpdateNodeInternals()
@@ -141,21 +142,22 @@ declare const context: {
     updateCodeArgGlobals(monaco, data.codeArgs ?? [])
   }
 
+  const titleBackground = isSelected ? 'bg-fuchsia-900' : 'bg-green-900'
+  const outputLabel = data.codeOutputs?.find((output) => output.name.trim())?.name ?? 'output'
+
   return (
     <BindLogic logic={appNodeLogic} props={appNodeLogicProps}>
       <div
         onClick={select}
         className={clsx(
-          'shadow-lg border-2 h-full flex flex-col',
+          'shadow-lg border-2 h-full flex flex-col relative',
           isSelected
             ? 'bg-black bg-opacity-70 border-fuchsia-900 shadow-fuchsia-700/50'
             : 'bg-black bg-opacity-70 border-green-900 shadow-green-700/50 '
         )}
       >
         <NodeResizer minWidth={200} minHeight={119} />
-        <div
-          className={clsx('flex w-full items-center justify-between', isSelected ? 'bg-fuchsia-900' : 'bg-green-900')}
-        >
+        <div className={clsx('flex w-full items-center justify-between', titleBackground)}>
           <div className={clsx('frameos-node-title text-xl px-1 gap-2', 'flex w-full items-center')}>
             {[...(data.codeArgs ?? []), '+'].map((codeField, i) => (
               <div key={i} className="flex gap-1 items-center">
@@ -364,6 +366,7 @@ declare const context: {
             <NodeCache nodeType="code" />
           </div>
         </div>
+        <NodeZoomLabel label={outputLabel} backgroundClassName={titleBackground} />
       </div>
     </BindLogic>
   )

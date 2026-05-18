@@ -65,6 +65,35 @@ body {
   cursor: grab;
 }
 
+.frameos-node-zoom-label {
+  overflow: hidden;
+}
+
+.frameos-node-zoom-label__surface {
+  align-items: center;
+  display: flex;
+  height: 100%;
+  justify-content: center;
+  min-height: 64px;
+  overflow: hidden;
+  padding: 0.25rem;
+  width: 100%;
+  container-type: size;
+}
+
+.frameos-node-zoom-label__text {
+  color: #ffffff;
+  font-size: clamp(0.75rem, min(72cqh, calc(136cqw / var(--frameos-node-label-length, 6))), 6rem);
+  font-weight: 800;
+  letter-spacing: 0;
+  line-height: 0.9;
+  max-width: 100%;
+  overflow: hidden;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .react-flow .react-flow__handle {
   width: 16px;
   height: 16px;
