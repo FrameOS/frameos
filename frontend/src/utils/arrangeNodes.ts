@@ -5,6 +5,8 @@ import type { CodeNodeData, DiagramNode } from '../types'
 const FLOW_NODE_SEPARATION = 90
 const FLOW_RANK_SEPARATION = 90
 const FLOW_BRANCH_HORIZONTAL_GAP = 120
+const FLOW_BRANCH_GRID_HORIZONTAL_GAP = 64
+const FLOW_BRANCH_GRID_VERTICAL_GAP = 56
 const ANCHOR_VERTICAL_GAP = 50
 const ANCHOR_HORIZONTAL_GAP = 70
 const FIELD_SLOT_PADDING_X = 44
@@ -604,6 +606,29 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
     return nodes
   }
 
+  const flowComponentParent = new Map(flowNodes.map((node) => [node.id, node.id]))
+  const flowComponentRoot = (nodeId: string): string => {
+    const parent = flowComponentParent.get(nodeId)
+    if (!parent || parent === nodeId) {
+      return nodeId
+    }
+    const root = flowComponentRoot(parent)
+    flowComponentParent.set(nodeId, root)
+    return root
+  }
+  const connectFlowNodes = (nodeA: string, nodeB: string): void => {
+    const rootA = flowComponentRoot(nodeA)
+    const rootB = flowComponentRoot(nodeB)
+    if (rootA !== rootB) {
+      flowComponentParent.set(rootB, rootA)
+    }
+  }
+  orderedFlowEdges.forEach((edge) => {
+    connectFlowNodes(edge.source, edge.target)
+  })
+  const flowComponentId = (nodeId: string): string | null =>
+    flowNodeIds.has(nodeId) ? flowComponentRoot(nodeId) : null
+
   const graph = new dagre.graphlib.Graph({ multigraph: true })
   graph.setGraph({
     rankdir: 'LR',
@@ -941,8 +966,8 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
       rowHeights[item.row] = Math.max(rowHeights[item.row], item.footprintHeight)
     })
 
-    const cellGapX = Math.max(FLOW_NODE_SEPARATION * 2, FLOW_BRANCH_HORIZONTAL_GAP)
-    const cellGapY = FLOW_NODE_SEPARATION
+    const cellGapX = useHandleGrid ? FLOW_BRANCH_HORIZONTAL_GAP : FLOW_BRANCH_GRID_HORIZONTAL_GAP
+    const cellGapY = useHandleGrid ? FLOW_NODE_SEPARATION : FLOW_BRANCH_GRID_VERTICAL_GAP
     const columnOffsets = columnWidths.reduce((offsets, _width, index) => {
       const previousOffset = index === 0 ? 0 : offsets[index - 1] + columnWidths[index - 1] + cellGapX
       offsets.push(previousOffset)
@@ -1434,33 +1459,41 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
   const flowGroupOrder = (nodeIds: Set<string>): number =>
     Math.min(...Array.from(nodeIds).map((nodeId) => flowOrderByNodeId.get(nodeId) ?? Number.MAX_SAFE_INTEGER))
 
+  const flowGroupComponentId = (nodeIds: Set<string>): string | null => {
+    const flowNodeId = Array.from(nodeIds).find((nodeId) => flowNodeIds.has(nodeId))
+    return flowNodeId ? flowComponentId(flowNodeId) : null
+  }
+
   const resolveFlowGroupOverlaps = (): void => {
     const groups = flowGroupNodeIdsByAnchor()
-    const placedGroups: Array<{ nodeIds: Set<string> }> = []
+    const placedGroups: Array<{ nodeIds: Set<string>; componentId: string | null }> = []
 
     Array.from(groups.values())
       .sort((groupA, groupB) => {
         const boundsA = boundsForNodeIds(groupA)
         const boundsB = boundsForNodeIds(groupB)
         return (
-          flowGroupOrder(groupA) - flowGroupOrder(groupB) ||
           (boundsA?.left ?? 0) - (boundsB?.left ?? 0) ||
-          (boundsA?.top ?? 0) - (boundsB?.top ?? 0)
+          (boundsA?.top ?? 0) - (boundsB?.top ?? 0) ||
+          flowGroupOrder(groupA) - flowGroupOrder(groupB)
         )
       })
       .forEach((nodeIds) => {
+        const componentId = flowGroupComponentId(nodeIds)
         for (let pass = 0; pass < COLLISION_PASSES; pass += 1) {
-          const shiftX = placedGroups.reduce(
-            (shift, placedGroup) => Math.max(shift, requiredShiftForGroupOverlap(nodeIds, placedGroup.nodeIds)),
-            0
-          )
+          const shiftX = placedGroups
+            .filter((placedGroup) => placedGroup.componentId === componentId)
+            .reduce(
+              (shift, placedGroup) => Math.max(shift, requiredShiftForGroupOverlap(nodeIds, placedGroup.nodeIds)),
+              0
+            )
           if (shiftX <= 0) {
             break
           }
           moveNodeIds(nodeIds, { x: shiftX, y: 0 })
         }
 
-        placedGroups.push({ nodeIds })
+        placedGroups.push({ nodeIds, componentId })
       })
   }
 
