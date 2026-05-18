@@ -11,8 +11,8 @@ proc drainLogChannel() =
     if not ok:
       break
 
-proc logJson(payload: (float, string)): JsonNode =
-  parseJson(payload[1])
+proc logJson(payload: SerializedLog): JsonNode =
+  parseJson(payload.line)
 
 suite "metrics loop":
   setup:
@@ -29,6 +29,7 @@ suite "metrics loop":
 
     let (ok, payload) = logChannel.tryRecv()
     check ok
+    check payload.event == "metrics"
     let payloadJson = logJson(payload)
     check payloadJson["event"].getStr() == "metrics"
     check payloadJson["state"].getStr() == "disabled"
@@ -73,6 +74,7 @@ suite "metrics loop":
 
     let (okSample, samplePayload) = logChannel.tryRecv()
     check okSample
+    check samplePayload.event == "metrics"
     let sampleJson = logJson(samplePayload)
     check sampleJson["event"].getStr() == "metrics"
     check not sampleJson.hasKey("state")
@@ -116,6 +118,7 @@ suite "metrics loop":
 
     let (okSample, samplePayload) = logChannel.tryRecv()
     check okSample
+    check samplePayload.event == "metrics"
     let runtime = logJson(samplePayload)["runtime"]
     check runtime["active"].getBool() == true
     check runtime["mode"].getStr() == "render"
@@ -144,6 +147,7 @@ suite "metrics loop":
 
     let (okError, errorPayload) = logChannel.tryRecv()
     check okError
+    check errorPayload.event == "metrics"
     let errorJson = logJson(errorPayload)
     check errorJson["event"].getStr() == "metrics"
     check errorJson["state"].getStr() == "error"

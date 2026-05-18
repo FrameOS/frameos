@@ -87,6 +87,7 @@ proc configureServerState*(config: FrameConfig, hotspotActive = false) =
     initLock(globalRecentLogsLock)
     recentLogsLockInitialized = true
   globalRecentLogs = @[]
+  globalRecentMetrics = @[]
   globalRecentLogId = 0
   globalFrameConfig = config
   clearAdminSessions()

@@ -8,7 +8,7 @@ type
     frameConfig: FrameConfig
     client: HttpClient
     url: string
-    logs: seq[(float, string)]
+    logs: seq[SerializedLog]
     lastSendAt: float
     lastLogFilePath: string
 
@@ -54,14 +54,14 @@ proc logToFile(filename: string, logLine: string, lastLogFilePath: var string) =
   except Exception as e:
     echo "Error writing to log file: " & $e.msg
 
-proc addLogPayload(body: var string, payload: (float, string)) =
+proc addLogPayload(body: var string, payload: SerializedLog) =
   body.add("[")
-  body.add($payload[0])
+  body.add($payload.timestamp)
   body.add(",")
-  body.add(payload[1])
+  body.add(payload.line)
   body.add("]")
 
-proc logsRequestBody*(logs: seq[(float, string)]): string =
+proc logsRequestBody*(logs: seq[SerializedLog]): string =
   result = "{\"logs\":["
   for index, logPayload in logs:
     if index > 0:
@@ -115,9 +115,9 @@ proc run(self: LoggerThread) =
         run += 2
     let (success, payload) = logChannel.tryRecv()
     if success:
-      echo "(" & $payload[0] & ", " & payload[1] & ")" # print to stdout / journal
+      echo "(" & $payload.timestamp & ", " & payload.line & ")" # print to stdout / journal
       self.logs.add(payload)
-      logToFile(self.frameConfig.logToFile, payload[1], self.lastLogFilePath)
+      logToFile(self.frameConfig.logToFile, payload.line, self.lastLogFilePath)
       run = 2
     else:
       sleep(run)

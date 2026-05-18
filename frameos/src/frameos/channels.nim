@@ -33,6 +33,7 @@ else:
   import options
   import times
   import frameos/ids
+  import frameos/types
 
   # Event
 
@@ -49,14 +50,15 @@ else:
 
   # Log
 
-  var logChannel*: Channel[(float, string)]
+  var logChannel*: Channel[SerializedLog]
   logChannel.open()
 
-  var logBroadcastChannel*: Channel[(float, string)]
+  var logBroadcastChannel*: Channel[SerializedLog]
   logBroadcastChannel.open(5000)
 
-  proc log*(event: JsonNode) {.gcsafe.} =
-    let payload = (epochTime(), $event)
+  proc log*(eventPayload: JsonNode) {.gcsafe.} =
+    let eventName = if eventPayload.kind == JObject: eventPayload{"event"}.getStr("log") else: "log"
+    let payload = SerializedLog(timestamp: epochTime(), event: eventName, line: $eventPayload)
     logChannel.send(payload)
     discard logBroadcastChannel.trySend(payload)
 

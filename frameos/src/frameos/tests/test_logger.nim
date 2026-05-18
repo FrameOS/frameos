@@ -3,6 +3,7 @@ import os, times, strutils
 import ../logger
 import ../config
 import ../channels
+import ../types
 import std/json
 
 proc waitFor(condition: proc(): bool {.closure.}, timeoutMs = 1200, pollMs = 20): bool =
@@ -13,8 +14,8 @@ proc waitFor(condition: proc(): bool {.closure.}, timeoutMs = 1200, pollMs = 20)
     sleep(pollMs)
   condition()
 
-proc logJson(payload: (float, string)): JsonNode =
-  parseJson(payload[1])
+proc logJson(payload: SerializedLog): JsonNode =
+  parseJson(payload.line)
 
 suite "Logger Tests":
   # We load your real config, but you can also stub or mock if you like.
@@ -38,8 +39,8 @@ suite "Logger Tests":
 
   test "logsRequestBody embeds serialized JSON without quoting it":
     let body = logsRequestBody(@[
-      (1.5, """{"event":"one"}"""),
-      (2.0, """{"event":"two","value":3}"""),
+      SerializedLog(timestamp: 1.5, event: "one", line: """{"event":"one"}"""),
+      SerializedLog(timestamp: 2.0, event: "two", line: """{"event":"two","value":3}"""),
     ])
     check body == """{"logs":[[1.5,{"event":"one"}],[2.0,{"event":"two","value":3}]]}"""
     check parseJson(body)["logs"][1][1]["value"].getInt() == 3
