@@ -60,6 +60,11 @@ interface ArrangeNodesOptions {
   fieldOrderByNodeId?: Record<string, string[]>
 }
 
+interface ArrangeGraphResult {
+  nodes: DiagramNode[]
+  edges: Edge[]
+}
+
 interface RowItem {
   node: DiagramNode
   desiredCenterX: number
@@ -417,6 +422,118 @@ function compactRow(items: RowItem[], gap: number): Map<string, number> {
   }
 
   return new Map(layouts.map((item) => [item.node.id, item.left]))
+}
+
+function uniqueNodeId(baseId: string, usedNodeIds: Set<string>): string {
+  if (!usedNodeIds.has(baseId)) {
+    usedNodeIds.add(baseId)
+    return baseId
+  }
+
+  let suffix = 2
+  while (usedNodeIds.has(`${baseId}-${suffix}`)) {
+    suffix += 1
+  }
+  const id = `${baseId}-${suffix}`
+  usedNodeIds.add(id)
+  return id
+}
+
+function splitSharedStateNodes(nodes: DiagramNode[], edges: Edge[]): ArrangeGraphResult {
+  const nodesById = nodes.reduce((acc, node) => {
+    acc[node.id] = node
+    return acc
+  }, {} as Record<string, DiagramNode>)
+  const usedNodeIds = new Set(nodes.map((node) => node.id))
+  const edgeOrderByEdge = new WeakMap<Edge, number>()
+  edges.forEach((edge, index) => {
+    edgeOrderByEdge.set(edge, index)
+  })
+
+  const stateInputEdgesBySource = edges.reduce((acc, edge) => {
+    const sourceNode = nodesById[edge.source]
+    const targetNode = nodesById[edge.target]
+    const targetsNodeInput = edge.targetHandle?.startsWith('fieldInput/') || edge.targetHandle?.startsWith('codeField/')
+    if (
+      sourceNode?.type !== 'state' ||
+      !targetNode ||
+      (targetNode.type !== 'app' && targetNode.type !== 'code') ||
+      edge.sourceHandle !== 'fieldOutput' ||
+      !targetsNodeInput
+    ) {
+      return acc
+    }
+    acc[edge.source] = [...(acc[edge.source] ?? []), edge]
+    return acc
+  }, {} as Record<string, Edge[]>)
+
+  const clonedNodes: DiagramNode[] = []
+  const replacementSourceByEdge = new WeakMap<Edge, string>()
+
+  Object.entries(stateInputEdgesBySource).forEach(([stateNodeId, stateEdges]) => {
+    const stateNode = nodesById[stateNodeId]
+    if (!stateNode) {
+      return
+    }
+
+    const edgesByTarget = stateEdges.reduce((acc, edge) => {
+      acc[edge.target] = [...(acc[edge.target] ?? []), edge]
+      return acc
+    }, {} as Record<string, Edge[]>)
+    const targetGroups = Object.entries(edgesByTarget).sort(
+      ([targetA, edgesA], [targetB, edgesB]) =>
+        (edgeOrderByEdge.get(edgesA[0]) ?? 0) - (edgeOrderByEdge.get(edgesB[0]) ?? 0) || targetA.localeCompare(targetB)
+    )
+
+    if (targetGroups.length <= 1) {
+      return
+    }
+
+    targetGroups.slice(1).forEach(([targetId, targetEdges]) => {
+      const cloneId = uniqueNodeId(`${stateNodeId}__for__${targetId}`, usedNodeIds)
+      const {
+        id: _id,
+        selected: _selected,
+        dragging: _dragging,
+        positionAbsolute: _positionAbsolute,
+        ...stateNodeWithoutTransientState
+      } = stateNode as DiagramNode & { positionAbsolute?: unknown }
+      clonedNodes.push({
+        ...stateNodeWithoutTransientState,
+        id: cloneId,
+        position: { ...stateNode.position },
+        selected: false,
+        dragging: false,
+      })
+      targetEdges.forEach((edge) => {
+        replacementSourceByEdge.set(edge, cloneId)
+      })
+    })
+  })
+
+  if (clonedNodes.length === 0) {
+    return { nodes, edges }
+  }
+
+  return {
+    nodes: [...nodes, ...clonedNodes],
+    edges: edges.map((edge) => {
+      const replacementSource = replacementSourceByEdge.get(edge)
+      return replacementSource ? { ...edge, source: replacementSource } : edge
+    }),
+  }
+}
+
+export function arrangeSceneGraph(
+  nodes: DiagramNode[],
+  edges: Edge[],
+  options: ArrangeNodesOptions = {}
+): ArrangeGraphResult {
+  const splitGraph = splitSharedStateNodes(nodes, edges)
+  return {
+    nodes: arrangeNodes(splitGraph.nodes, splitGraph.edges, options),
+    edges: splitGraph.edges,
+  }
 }
 
 export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: ArrangeNodesOptions = {}): DiagramNode[] {
