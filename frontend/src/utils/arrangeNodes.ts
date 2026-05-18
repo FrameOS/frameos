@@ -670,8 +670,102 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
     acc[edge.source] = [...(acc[edge.source] ?? []), edge]
     return acc
   }, {} as Record<string, Edge[]>)
+  const branchTargetIds = new Set(
+    Object.values(branchEdgesBySource).flatMap((sourceEdges) =>
+      sourceEdges.length > 1 ? sourceEdges.map((edge) => edge.target) : []
+    )
+  )
+  const incomingFlowEdgesByTarget = orderedFlowEdges.reduce((acc, edge) => {
+    acc[edge.target] = [...(acc[edge.target] ?? []), edge]
+    return acc
+  }, {} as Record<string, Edge[]>)
+  const nearestBranchRootCache = new Map<string, string | null>()
+  const nearestBranchRoot = (nodeId: string, visited: Set<string> = new Set()): string | null => {
+    if (nearestBranchRootCache.has(nodeId)) {
+      return nearestBranchRootCache.get(nodeId) ?? null
+    }
+    if (!flowNodeIds.has(nodeId)) {
+      nearestBranchRootCache.set(nodeId, null)
+      return null
+    }
+    if (branchTargetIds.has(nodeId)) {
+      nearestBranchRootCache.set(nodeId, nodeId)
+      return nodeId
+    }
+    if (visited.has(nodeId)) {
+      return null
+    }
+    visited.add(nodeId)
 
-  const sortedUniqueInputEdgesForEstimate = (targetId: string): Edge[] =>
+    for (const edge of incomingFlowEdgesByTarget[nodeId] ?? []) {
+      const root = nearestBranchRoot(edge.source, new Set(visited))
+      if (root) {
+        nearestBranchRootCache.set(nodeId, root)
+        return root
+      }
+    }
+
+    nearestBranchRootCache.set(nodeId, null)
+    return null
+  }
+
+  const flowDescendantCache = new Map<string, Set<string>>()
+  const flowDescendantIds = (nodeId: string, visited: Set<string> = new Set()): Set<string> => {
+    const cached = flowDescendantCache.get(nodeId)
+    if (cached) {
+      return new Set(cached)
+    }
+    const descendants = new Set<string>()
+    if (visited.has(nodeId)) {
+      return descendants
+    }
+    visited.add(nodeId)
+    if (flowNodeIds.has(nodeId)) {
+      descendants.add(nodeId)
+    }
+    orderedFlowEdges
+      .filter((edge) => edge.source === nodeId)
+      .forEach((edge) => {
+        flowDescendantIds(edge.target, new Set(visited)).forEach((descendantId) => descendants.add(descendantId))
+      })
+    flowDescendantCache.set(nodeId, new Set(descendants))
+    return descendants
+  }
+
+  const reachableFlowTargetCache = new Map<string, Set<string>>()
+  const reachableFlowTargetIds = (nodeId: string, visited: Set<string> = new Set()): Set<string> => {
+    const cached = reachableFlowTargetCache.get(nodeId)
+    if (cached) {
+      return new Set(cached)
+    }
+    const targets = new Set<string>()
+    if (visited.has(nodeId)) {
+      return targets
+    }
+    visited.add(nodeId)
+    if (flowNodeIds.has(nodeId)) {
+      targets.add(nodeId)
+    } else {
+      const outgoing = outgoingEdges[nodeId] ?? []
+      outgoing.forEach((edge) => {
+        reachableFlowTargetIds(edge.target, new Set(visited)).forEach((targetId) => targets.add(targetId))
+      })
+    }
+    reachableFlowTargetCache.set(nodeId, new Set(targets))
+    return targets
+  }
+
+  const isLocalToFlowTargets = (nodeId: string, allowedFlowIds?: Set<string>): boolean => {
+    if (!allowedFlowIds) {
+      return true
+    }
+    const reachableFlowIds = reachableFlowTargetIds(nodeId)
+    return reachableFlowIds.size === 0 || [...reachableFlowIds].every((flowId) => allowedFlowIds.has(flowId))
+  }
+
+  const isSharedAcrossFlowTargets = (nodeId: string): boolean => reachableFlowTargetIds(nodeId).size > 1
+
+  const sortedUniqueInputEdgesForEstimate = (targetId: string, allowedFlowIds?: Set<string>): Edge[] =>
     Array.from(
       (incomingEdges[targetId] ?? [])
         .filter(
@@ -679,6 +773,7 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
             edge.source &&
             edge.target &&
             !flowNodeIds.has(edge.source) &&
+            isLocalToFlowTargets(edge.source, allowedFlowIds) &&
             (edge.targetHandle?.startsWith('fieldInput/') || edge.targetHandle?.startsWith('codeField/'))
         )
         .sort(
@@ -697,7 +792,11 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
         .values()
     )
 
-  const estimateLocalInputTreeBounds = (targetId: string, visited: Set<string> = new Set()): Bounds => {
+  const estimateLocalInputTreeBounds = (
+    targetId: string,
+    visited: Set<string> = new Set(),
+    allowedFlowIds?: Set<string>
+  ): Bounds => {
     const targetNode = nodesById[targetId]
     if (!targetNode) {
       return { left: 0, right: 0, top: 0, bottom: 0 }
@@ -717,7 +816,7 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
 
     let stackBottom = 0
     let previousInputBounds: Bounds | null = null
-    sortedUniqueInputEdgesForEstimate(targetId).forEach((edge, index) => {
+    sortedUniqueInputEdgesForEstimate(targetId, allowedFlowIds).forEach((edge, index) => {
       const sourceNode = nodesById[edge.source]
       if (!sourceNode) {
         return
@@ -731,7 +830,7 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
         -leftOffset - LOCAL_INPUT_STAGGER_X * index,
         previousInputBounds ? previousInputBounds.left - LOCAL_INPUT_EDGE_CLEARANCE : Number.POSITIVE_INFINITY
       )
-      const sourceBounds = shiftBounds(estimateLocalInputTreeBounds(sourceNode.id, new Set(visited)), {
+      const sourceBounds = shiftBounds(estimateLocalInputTreeBounds(sourceNode.id, new Set(visited), allowedFlowIds), {
         x: stackLeft,
         y: stackTop,
       })
@@ -744,13 +843,17 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
     return bounds
   }
 
-  const estimateFlowBranchBounds = (rootId: string, visited: Set<string> = new Set()): Bounds => {
+  const estimateFlowBranchBounds = (
+    rootId: string,
+    branchFlowIds: Set<string>,
+    visited: Set<string> = new Set()
+  ): Bounds => {
     const rootPosition = basePositions.get(rootId)
     if (!rootPosition) {
-      return estimateLocalInputTreeBounds(rootId)
+      return estimateLocalInputTreeBounds(rootId, new Set(), branchFlowIds)
     }
 
-    let bounds = estimateLocalInputTreeBounds(rootId)
+    let bounds = estimateLocalInputTreeBounds(rootId, new Set(), branchFlowIds)
     if (visited.has(rootId)) {
       return bounds
     }
@@ -765,7 +868,7 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
         }
         bounds = mergeBounds(
           bounds,
-          shiftBounds(estimateFlowBranchBounds(edge.target, new Set(visited)), {
+          shiftBounds(estimateFlowBranchBounds(edge.target, branchFlowIds, new Set(visited)), {
             x: childPosition.x - rootPosition.x,
             y: childPosition.y - rootPosition.y,
           })
@@ -811,7 +914,7 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
         }
         const row = useHandleGrid ? handleRowValues.indexOf(pathIndexes[0]) : Math.floor(index / automaticColumnCount)
         const column = useHandleGrid ? handleColumnValues.indexOf(pathIndexes[1]) : index % automaticColumnCount
-        const footprint = estimateFlowBranchBounds(edge.target)
+        const footprint = estimateFlowBranchBounds(edge.target, flowDescendantIds(edge.target))
         return {
           edge,
           targetPosition,
@@ -1138,9 +1241,10 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
     return acc
   }, {} as Record<string, Edge[]>)
 
-  const sortedUniqueLocalInputEdges = (targetId: string): Edge[] =>
+  const sortedUniqueLocalInputEdges = (targetId: string, allowedFlowIds?: Set<string>): Edge[] =>
     Array.from(
       (localInputEdgesByTarget[targetId] ?? [])
+        .filter((edge) => isLocalToFlowTargets(edge.source, allowedFlowIds))
         .sort((a, b) => {
           return (
             handleOrderIndex(targetId, a.targetHandle, fieldOrderByNodeId) -
@@ -1158,7 +1262,11 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
         .values()
     )
 
-  const placedLocalInputTreeBounds = (targetId: string, visited: Set<string> = new Set()): Bounds | null => {
+  const placedLocalInputTreeBounds = (
+    targetId: string,
+    visited: Set<string> = new Set(),
+    allowedFlowIds?: Set<string>
+  ): Bounds | null => {
     const targetNode = positionedById[targetId] ?? nodesById[targetId]
     if (!targetNode) {
       return null
@@ -1170,12 +1278,12 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
     }
     visited.add(targetId)
 
-    sortedUniqueLocalInputEdges(targetId).forEach((edge) => {
+    sortedUniqueLocalInputEdges(targetId, allowedFlowIds).forEach((edge) => {
       const sourceNode = positionedById[edge.source] ?? nodesById[edge.source]
       if (!sourceNode || flowNodeIds.has(sourceNode.id)) {
         return
       }
-      const sourceBounds = placedLocalInputTreeBounds(sourceNode.id, new Set(visited))
+      const sourceBounds = placedLocalInputTreeBounds(sourceNode.id, new Set(visited), allowedFlowIds)
       if (sourceBounds) {
         bounds = mergeBounds(bounds, sourceBounds)
       }
@@ -1184,7 +1292,11 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
     return bounds
   }
 
-  const placeLocalInputTree = (targetId: string, visited: Set<string> = new Set()): void => {
+  const placeLocalInputTree = (
+    targetId: string,
+    visited: Set<string> = new Set(),
+    allowedFlowIds?: Set<string>
+  ): void => {
     if (visited.has(targetId)) {
       return
     }
@@ -1195,7 +1307,7 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
       return
     }
 
-    const inputEdges = sortedUniqueLocalInputEdges(targetId).filter((edge) => {
+    const inputEdges = sortedUniqueLocalInputEdges(targetId, allowedFlowIds).filter((edge) => {
       const sourceNode = positionedById[edge.source] ?? nodesById[edge.source]
       return sourceNode && !flowNodeIds.has(sourceNode.id)
     })
@@ -1226,8 +1338,8 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
         x: stackLeft,
         y: stackTop,
       })
-      placeLocalInputTree(sourceNode.id, new Set(visited))
-      const sourceBounds = placedLocalInputTreeBounds(sourceNode.id, new Set(visited))
+      placeLocalInputTree(sourceNode.id, new Set(visited), allowedFlowIds)
+      const sourceBounds = placedLocalInputTreeBounds(sourceNode.id, new Set(visited), allowedFlowIds)
       if (sourceBounds) {
         previousInputBounds = previousInputBounds ? mergeBounds(previousInputBounds, sourceBounds) : sourceBounds
       }
@@ -1246,27 +1358,34 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
           a.id.localeCompare(b.id)
       )
       .forEach((node) => {
-        placeLocalInputTree(node.id)
+        placeLocalInputTree(node.id, new Set(), flowDescendantIds(node.id))
       })
   }
 
   const flowGroupNodeIdsByAnchor = (): Map<string, Set<string>> => {
     const groups = new Map<string, Set<string>>()
     flowNodes.forEach((node) => {
-      groups.set(node.id, new Set([node.id]))
+      const groupId = nearestBranchRoot(node.id) ?? node.id
+      const group = groups.get(groupId) ?? new Set<string>()
+      group.add(node.id)
+      groups.set(groupId, group)
     })
 
     sizedNodes.forEach((node) => {
       if (flowNodeIds.has(node.id)) {
         return
       }
+      if (isSharedAcrossFlowTargets(node.id)) {
+        return
+      }
       const anchorId = resolveAnchor(node.id)
       if (!anchorId || !flowNodeIds.has(anchorId)) {
         return
       }
-      const group = groups.get(anchorId) ?? new Set<string>()
+      const groupId = nearestBranchRoot(anchorId) ?? anchorId
+      const group = groups.get(groupId) ?? new Set<string>()
       group.add(node.id)
-      groups.set(anchorId, group)
+      groups.set(groupId, group)
     })
 
     return groups
@@ -1302,22 +1421,34 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
     return shiftX
   }
 
+  const boundsForNodeIds = (nodeIds: Set<string>): Bounds | null =>
+    Array.from(nodeIds)
+      .map((nodeId) => positionedById[nodeId] ?? nodesById[nodeId])
+      .filter((node): node is DiagramNode => Boolean(node))
+      .map(nodeBounds)
+      .reduce(
+        (bounds, boundsForNode) => (bounds ? mergeBounds(bounds, boundsForNode) : boundsForNode),
+        null as Bounds | null
+      )
+
+  const flowGroupOrder = (nodeIds: Set<string>): number =>
+    Math.min(...Array.from(nodeIds).map((nodeId) => flowOrderByNodeId.get(nodeId) ?? Number.MAX_SAFE_INTEGER))
+
   const resolveFlowGroupOverlaps = (): void => {
     const groups = flowGroupNodeIdsByAnchor()
     const placedGroups: Array<{ nodeIds: Set<string> }> = []
 
-    flowNodes
-      .map((node) => positionedById[node.id] ?? node)
-      .sort(
-        (a, b) =>
-          a.position.x - b.position.x ||
-          a.position.y - b.position.y ||
-          (flowOrderByNodeId.get(a.id) ?? 0) - (flowOrderByNodeId.get(b.id) ?? 0) ||
-          a.id.localeCompare(b.id)
-      )
-      .forEach((flowNode) => {
-        const nodeIds = groups.get(flowNode.id) ?? new Set([flowNode.id])
-
+    Array.from(groups.values())
+      .sort((groupA, groupB) => {
+        const boundsA = boundsForNodeIds(groupA)
+        const boundsB = boundsForNodeIds(groupB)
+        return (
+          flowGroupOrder(groupA) - flowGroupOrder(groupB) ||
+          (boundsA?.left ?? 0) - (boundsB?.left ?? 0) ||
+          (boundsA?.top ?? 0) - (boundsB?.top ?? 0)
+        )
+      })
+      .forEach((nodeIds) => {
         for (let pass = 0; pass < COLLISION_PASSES; pass += 1) {
           const shiftX = placedGroups.reduce(
             (shift, placedGroup) => Math.max(shift, requiredShiftForGroupOverlap(nodeIds, placedGroup.nodeIds)),
