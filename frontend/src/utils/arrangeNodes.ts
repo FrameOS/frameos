@@ -85,6 +85,17 @@ function getNodeSize(node: DiagramNode): { width: number; height: number } {
   }
 }
 
+function numericDimension(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value
+  }
+  if (typeof value === 'string') {
+    const parsed = Number.parseFloat(value)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+  return null
+}
+
 function getCodeNodeAutoSize(node: DiagramNode): { width: number; height: number } {
   const data = (node.data as CodeNodeData | undefined) ?? {}
   const codeArgs = data.codeArgs ?? []
@@ -125,7 +136,17 @@ function resizeCodeNodeForArrange(node: DiagramNode): DiagramNode {
   if (node.type !== 'code') {
     return node
   }
-  const { width, height } = getCodeNodeAutoSize(node)
+  const autoSize = getCodeNodeAutoSize(node)
+  const currentWidth = numericDimension(node.width) ?? numericDimension(node.style?.width)
+  const currentHeight = numericDimension(node.height) ?? numericDimension(node.style?.height)
+  const width =
+    currentWidth !== null && currentWidth > CODE_NODE_MAX_AUTO_WIDTH
+      ? Math.max(currentWidth, autoSize.width)
+      : autoSize.width
+  const height =
+    currentHeight !== null && currentHeight > CODE_NODE_MAX_AUTO_HEIGHT
+      ? Math.max(currentHeight, autoSize.height)
+      : autoSize.height
   const style = { ...(node.style ?? {}), width, height }
   return { ...node, width, height, style }
 }
