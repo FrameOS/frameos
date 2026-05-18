@@ -1,6 +1,8 @@
 import { BaseEdge, EdgeLabelRenderer, EdgeProps, getSimpleBezierPath, useReactFlow } from 'reactflow'
 import { XCircleIcon } from '@heroicons/react/24/solid'
 
+const CONNECTED_TO_SELECTED_NODE_STROKE = '#facc15'
+
 export function AppNodeEdge({
   id,
   sourcePosition,
@@ -29,12 +31,12 @@ export function AppNodeEdge({
     ? selected
       ? { strokeWidth: 8, stroke: '#f29cf6' }
       : connectedToSelectedNode
-      ? { strokeWidth: 8, stroke: '#38bdf8' }
+      ? { strokeWidth: 8, stroke: CONNECTED_TO_SELECTED_NODE_STROKE }
       : { strokeWidth: 6, stroke: 'hsl(56 60% 70% / 1)' }
     : selected
     ? { strokeWidth: 4, stroke: '#f29cf6' }
     : connectedToSelectedNode
-    ? { strokeWidth: 5, stroke: '#38bdf8' }
+    ? { strokeWidth: 5, stroke: CONNECTED_TO_SELECTED_NODE_STROKE }
     : { strokeWidth: 2, stroke: '#c5c5c5' }
   return (
     <>
