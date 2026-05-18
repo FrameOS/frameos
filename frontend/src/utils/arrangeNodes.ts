@@ -25,6 +25,7 @@ const LOCAL_NARROW_TARGET_HEIGHT = 140
 const LOCAL_STATE_INPUT_LEFT_OFFSET = 8
 const LOCAL_DATA_INPUT_LEFT_OFFSET = 49
 const LOCAL_INPUT_STAGGER_X = 16
+const LOCAL_INPUT_EDGE_CLEARANCE = LOCAL_INPUT_STAGGER_X + 12
 const LOCAL_INPUT_VERTICAL_GAP = 50
 const LOCAL_DATA_INPUT_VERTICAL_GAP = 38
 const LOCAL_COMPACT_CODE_INPUT_VERTICAL_GAP = 30
@@ -267,6 +268,9 @@ function shiftBounds(bounds: Bounds, delta: { x: number; y: number }): Bounds {
 
 function localInputLeftOffset(sourceNode: DiagramNode, targetNode: DiagramNode): number {
   if (sourceNode.type === 'state') {
+    if (isDataAppNode(targetNode)) {
+      return STATE_INPUT_LEFT_OFFSET
+    }
     return LOCAL_STATE_INPUT_LEFT_OFFSET
   }
   if (isDataAppNode(sourceNode) && isDataAppNode(targetNode)) {
@@ -712,6 +716,7 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
     visited.add(targetId)
 
     let stackBottom = 0
+    let previousInputBounds: Bounds | null = null
     sortedUniqueInputEdgesForEstimate(targetId).forEach((edge, index) => {
       const sourceNode = nodesById[edge.source]
       if (!sourceNode) {
@@ -722,13 +727,18 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
       const verticalGap = localInputVerticalGap(sourceNode, targetNode)
       const leftOffset = localInputLeftOffset(sourceNode, targetNode)
       const stackTop = stackBottom - (index === 0 ? verticalGap : 0) - sourceSize.height
+      const stackLeft = Math.min(
+        -leftOffset - LOCAL_INPUT_STAGGER_X * index,
+        previousInputBounds ? previousInputBounds.left - LOCAL_INPUT_EDGE_CLEARANCE : Number.POSITIVE_INFINITY
+      )
       const sourceBounds = shiftBounds(estimateLocalInputTreeBounds(sourceNode.id, new Set(visited)), {
-        x: -leftOffset - LOCAL_INPUT_STAGGER_X * index,
+        x: stackLeft,
         y: stackTop,
       })
 
       bounds = mergeBounds(bounds, sourceBounds)
-      stackBottom = stackTop - LOCAL_INPUT_STACK_GAP
+      previousInputBounds = previousInputBounds ? mergeBounds(previousInputBounds, sourceBounds) : sourceBounds
+      stackBottom = sourceBounds.top - LOCAL_INPUT_STACK_GAP
     })
 
     return bounds
@@ -1162,6 +1172,7 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
     }
 
     let stackBottom = targetNode.position.y
+    let previousInputBounds: Bounds | null = null
 
     inputEdges.forEach((edge, index) => {
       const sourceNode = positionedById[edge.source] ?? nodesById[edge.source]
@@ -1173,14 +1184,21 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
       const verticalGap = localInputVerticalGap(sourceNode, targetNode)
       const leftOffset = localInputLeftOffset(sourceNode, targetNode)
       const stackTop = stackBottom - (index === 0 ? verticalGap : 0) - sourceSize.height
+      const stackLeft = Math.min(
+        targetNode.position.x - leftOffset - LOCAL_INPUT_STAGGER_X * index,
+        previousInputBounds ? previousInputBounds.left - LOCAL_INPUT_EDGE_CLEARANCE : Number.POSITIVE_INFINITY
+      )
 
       moveNode(sourceNode, {
-        x: targetNode.position.x - leftOffset - LOCAL_INPUT_STAGGER_X * index,
+        x: stackLeft,
         y: stackTop,
       })
       placeLocalInputTree(sourceNode.id, new Set(visited))
-      stackBottom =
-        (placedLocalInputTreeBounds(sourceNode.id, new Set(visited))?.top ?? stackTop) - LOCAL_INPUT_STACK_GAP
+      const sourceBounds = placedLocalInputTreeBounds(sourceNode.id, new Set(visited))
+      if (sourceBounds) {
+        previousInputBounds = previousInputBounds ? mergeBounds(previousInputBounds, sourceBounds) : sourceBounds
+      }
+      stackBottom = (sourceBounds?.top ?? stackTop) - LOCAL_INPUT_STACK_GAP
     })
   }
 
