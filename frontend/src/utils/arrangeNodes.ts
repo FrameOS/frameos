@@ -78,6 +78,16 @@ interface Bounds {
   bottom: number
 }
 
+interface BranchLayoutItem {
+  edge: Edge
+  targetPosition: { x: number; y: number }
+  row: number
+  column: number
+  footprint: Bounds
+  footprintWidth: number
+  footprintHeight: number
+}
+
 function getNodeSize(node: DiagramNode): { width: number; height: number } {
   return {
     width: node.width ?? NODE_FALLBACK_WIDTH,
@@ -173,15 +183,19 @@ function baseFieldNameFromHandle(handle?: string | null): string | null {
 }
 
 function fieldPathOrderOffset(handle?: string | null): number | null {
+  const indexes = fieldPathIndexes(handle)
+  if (indexes.length === 0) {
+    return null
+  }
+  return indexes.reduce((offset, pathIndex, index) => offset + pathIndex / FIELD_HANDLE_ORDER_SPAN ** index, 0)
+}
+
+function fieldPathIndexes(handle?: string | null): number[] {
   const fieldName = fieldNameFromHandle(handle)
   if (!fieldName) {
-    return null
+    return []
   }
-  const matches = Array.from(fieldName.matchAll(/\[(\d+)\]/g))
-  if (matches.length === 0) {
-    return null
-  }
-  return matches.reduce((offset, match, index) => offset + Number(match[1]) / FIELD_HANDLE_ORDER_SPAN ** index, 0)
+  return Array.from(fieldName.matchAll(/\[(\d+)\]/g)).map((match) => Number(match[1]))
 }
 
 function isFlowEdge(edge: Edge): boolean {
@@ -226,6 +240,61 @@ function nodeBounds(node: DiagramNode): Bounds {
     top: node.position.y,
     bottom: node.position.y + size.height,
   }
+}
+
+function mergeBounds(boundsA: Bounds, boundsB: Bounds): Bounds {
+  return {
+    left: Math.min(boundsA.left, boundsB.left),
+    right: Math.max(boundsA.right, boundsB.right),
+    top: Math.min(boundsA.top, boundsB.top),
+    bottom: Math.max(boundsA.bottom, boundsB.bottom),
+  }
+}
+
+function shiftBounds(bounds: Bounds, delta: { x: number; y: number }): Bounds {
+  return {
+    left: bounds.left + delta.x,
+    right: bounds.right + delta.x,
+    top: bounds.top + delta.y,
+    bottom: bounds.bottom + delta.y,
+  }
+}
+
+function localInputLeftOffset(sourceNode: DiagramNode, targetNode: DiagramNode): number {
+  if (sourceNode.type === 'state') {
+    return LOCAL_STATE_INPUT_LEFT_OFFSET
+  }
+  if (isDataAppNode(sourceNode) && isDataAppNode(targetNode)) {
+    return LOCAL_DATA_INPUT_LEFT_OFFSET
+  }
+
+  const targetSize = getNodeSize(targetNode)
+  if (sourceNode.type === 'code' && targetSize.width <= LOCAL_NARROW_TARGET_WIDTH) {
+    return LOCAL_NARROW_TARGET_INPUT_LEFT_OFFSET
+  }
+  return LOCAL_INPUT_LEFT_OFFSET
+}
+
+function localInputVerticalGap(sourceNode: DiagramNode, targetNode: DiagramNode): number {
+  const targetSize = getNodeSize(targetNode)
+  if (sourceNode.type === 'state') {
+    return targetSize.height >= LOCAL_LARGE_INPUT_TARGET_HEIGHT
+      ? LOCAL_STATE_INPUT_LARGE_TARGET_VERTICAL_GAP
+      : LOCAL_STATE_INPUT_VERTICAL_GAP
+  }
+  if (isDataAppNode(sourceNode) && isDataAppNode(targetNode)) {
+    return LOCAL_DATA_INPUT_VERTICAL_GAP
+  }
+  if (sourceNode.type === 'code') {
+    if (targetSize.height <= LOCAL_NARROW_TARGET_HEIGHT) {
+      return LOCAL_NARROW_TARGET_CODE_INPUT_VERTICAL_GAP
+    }
+    if (targetSize.height >= LOCAL_LARGE_INPUT_TARGET_HEIGHT) {
+      return LOCAL_COMPACT_CODE_INPUT_VERTICAL_GAP
+    }
+    return LOCAL_MEDIUM_CODE_INPUT_VERTICAL_GAP
+  }
+  return LOCAL_INPUT_VERTICAL_GAP
 }
 
 function handleOrderIndex(
@@ -370,10 +439,32 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
     (node) =>
       isAlwaysFlowNode(node) || (node.type === 'app' && !isDataAppNode(node) && flowConnectedNodeIds.has(node.id))
   )
+  const nodesById = sizedNodes.reduce((acc, node) => {
+    acc[node.id] = node
+    return acc
+  }, {} as Record<string, DiagramNode>)
   const flowNodeIds = new Set(flowNodes.map((node) => node.id))
   const flowEdges = edges.filter(
     (edge) => flowNodeIds.has(edge.source) && flowNodeIds.has(edge.target) && isFlowEdge(edge)
   )
+  const outgoingEdges = edges.reduce((acc, edge) => {
+    if (!edge.source || !edge.target) {
+      return acc
+    }
+    acc[edge.source] = [...(acc[edge.source] ?? []), edge]
+    return acc
+  }, {} as Record<string, Edge[]>)
+  const incomingEdges = edges.reduce((acc, edge) => {
+    if (!edge.source || !edge.target) {
+      return acc
+    }
+    acc[edge.target] = [...(acc[edge.target] ?? []), edge]
+    return acc
+  }, {} as Record<string, Edge[]>)
+  const edgeOrderByEdge = new WeakMap<Edge, number>()
+  edges.forEach((edge, index) => {
+    edgeOrderByEdge.set(edge, index)
+  })
   const flowOrderByNodeId = new Map(flowNodes.map((node, index) => [node.id, index]))
   const orderedFlowEdges = [...flowEdges].sort(
     (a, b) =>
@@ -456,6 +547,73 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
     return acc
   }, {} as Record<string, Edge[]>)
 
+  const sortedUniqueInputEdgesForEstimate = (targetId: string): Edge[] =>
+    Array.from(
+      (incomingEdges[targetId] ?? [])
+        .filter(
+          (edge) =>
+            edge.source &&
+            edge.target &&
+            !flowNodeIds.has(edge.source) &&
+            (edge.targetHandle?.startsWith('fieldInput/') || edge.targetHandle?.startsWith('codeField/'))
+        )
+        .sort(
+          (a, b) =>
+            handleOrderIndex(targetId, a.targetHandle, fieldOrderByNodeId) -
+              handleOrderIndex(targetId, b.targetHandle, fieldOrderByNodeId) ||
+            (edgeOrderByEdge.get(a) ?? 0) - (edgeOrderByEdge.get(b) ?? 0) ||
+            a.source.localeCompare(b.source)
+        )
+        .reduce((acc, edge) => {
+          if (!acc.has(edge.source)) {
+            acc.set(edge.source, edge)
+          }
+          return acc
+        }, new Map<string, Edge>())
+        .values()
+    )
+
+  const estimateLocalInputTreeBounds = (targetId: string, visited: Set<string> = new Set()): Bounds => {
+    const targetNode = nodesById[targetId]
+    if (!targetNode) {
+      return { left: 0, right: 0, top: 0, bottom: 0 }
+    }
+
+    const targetSize = getNodeSize(targetNode)
+    let bounds = {
+      left: 0,
+      right: targetSize.width,
+      top: 0,
+      bottom: targetSize.height,
+    }
+    if (visited.has(targetId)) {
+      return bounds
+    }
+    visited.add(targetId)
+
+    let stackBottom = 0
+    sortedUniqueInputEdgesForEstimate(targetId).forEach((edge, index) => {
+      const sourceNode = nodesById[edge.source]
+      if (!sourceNode) {
+        return
+      }
+
+      const sourceSize = getNodeSize(sourceNode)
+      const verticalGap = localInputVerticalGap(sourceNode, targetNode)
+      const leftOffset = localInputLeftOffset(sourceNode, targetNode)
+      const stackTop = stackBottom - (index === 0 ? verticalGap : 0) - sourceSize.height
+      const sourceBounds = shiftBounds(estimateLocalInputTreeBounds(sourceNode.id, new Set(visited)), {
+        x: -leftOffset - LOCAL_INPUT_STAGGER_X * index,
+        y: stackTop,
+      })
+
+      bounds = mergeBounds(bounds, sourceBounds)
+      stackBottom = stackTop - LOCAL_INPUT_STACK_GAP
+    })
+
+    return bounds
+  }
+
   Object.entries(branchEdgesBySource).forEach(([sourceId, sourceEdges]) => {
     if (sourceEdges.length < 2) {
       return
@@ -466,48 +624,91 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
       return
     }
 
-    let cursorY = sourcePosition.y + 24
-    const branchGap = Math.max(FLOW_NODE_SEPARATION, getNodeSize(sourceNode).height)
     const visited = new Set<string>()
-    sourceEdges.forEach((edge, index) => {
-      const targetNode = flowNodes.find((node) => node.id === edge.target)
-      const targetPosition = basePositions.get(edge.target)
-      if (!targetNode || !targetPosition) {
-        return
-      }
+    const indexedEdges = sourceEdges.map((edge, index) => ({
+      edge,
+      index,
+      pathIndexes: fieldPathIndexes(edge.sourceHandle),
+    }))
+    const hasGridHandles = indexedEdges.every(({ pathIndexes }) => pathIndexes.length >= 2)
+
+    const rowValues = hasGridHandles
+      ? Array.from(new Set(indexedEdges.map(({ pathIndexes }) => pathIndexes[0]))).sort((a, b) => a - b)
+      : []
+    const columnValues = hasGridHandles
+      ? Array.from(new Set(indexedEdges.map(({ pathIndexes }) => pathIndexes[1]))).sort((a, b) => a - b)
+      : []
+    const automaticColumnCount = Math.max(1, Math.ceil(Math.sqrt(indexedEdges.length)))
+    const branchItems = indexedEdges
+      .map(({ edge, index, pathIndexes }) => {
+        const targetNode = nodesById[edge.target]
+        const targetPosition = basePositions.get(edge.target)
+        if (!targetNode || !targetPosition) {
+          return null
+        }
+        const row = hasGridHandles ? rowValues.indexOf(pathIndexes[0]) : Math.floor(index / automaticColumnCount)
+        const column = hasGridHandles ? columnValues.indexOf(pathIndexes[1]) : index % automaticColumnCount
+        const footprint = estimateLocalInputTreeBounds(edge.target)
+        return {
+          edge,
+          targetPosition,
+          row,
+          column,
+          footprint,
+          footprintWidth: footprint.right - footprint.left,
+          footprintHeight: footprint.bottom - footprint.top,
+        }
+      })
+      .filter((item): item is BranchLayoutItem => item !== null && item.row >= 0 && item.column >= 0)
+
+    if (branchItems.length === 0) {
+      return
+    }
+
+    const columnCount = Math.max(...branchItems.map((item) => item.column)) + 1
+    const rowCount = Math.max(...branchItems.map((item) => item.row)) + 1
+    const columnWidths = Array.from({ length: columnCount }, () => 0)
+    const rowHeights = Array.from({ length: rowCount }, () => 0)
+
+    branchItems.forEach((item) => {
+      columnWidths[item.column] = Math.max(columnWidths[item.column], item.footprintWidth)
+      rowHeights[item.row] = Math.max(rowHeights[item.row], item.footprintHeight)
+    })
+
+    const cellGapX = Math.max(FLOW_NODE_SEPARATION * 2, FLOW_BRANCH_HORIZONTAL_GAP)
+    const cellGapY = FLOW_NODE_SEPARATION
+    const columnOffsets = columnWidths.reduce((offsets, _width, index) => {
+      const previousOffset = index === 0 ? 0 : offsets[index - 1] + columnWidths[index - 1] + cellGapX
+      offsets.push(previousOffset)
+      return offsets
+    }, [] as number[])
+    const rowOffsets = rowHeights.reduce((offsets, _height, index) => {
+      const previousOffset = index === 0 ? 0 : offsets[index - 1] + rowHeights[index - 1] + cellGapY
+      offsets.push(previousOffset)
+      return offsets
+    }, [] as number[])
+    const fanoutHeight =
+      rowHeights.reduce((height, rowHeight) => height + rowHeight, 0) + Math.max(0, rowCount - 1) * cellGapY
+    const sourceSize = getNodeSize(sourceNode)
+    const startX = sourcePosition.x + sourceSize.width + cellGapX
+    const startY = sourcePosition.y + sourceSize.height / 2 - fanoutHeight / 2
+
+    branchItems.forEach((item) => {
+      const cellX = startX + columnOffsets[item.column] + (columnWidths[item.column] - item.footprintWidth) / 2
+      const cellY = startY + rowOffsets[item.row] + (rowHeights[item.row] - item.footprintHeight) / 2
       const desiredPosition = {
-        x: sourcePosition.x + getNodeSize(sourceNode).width + FLOW_BRANCH_HORIZONTAL_GAP + index * FLOW_NODE_SEPARATION,
-        y: cursorY,
+        x: cellX - item.footprint.left,
+        y: cellY - item.footprint.top,
       }
       moveFlowSubtree(
-        edge.target,
+        item.edge.target,
         {
-          x: desiredPosition.x - targetPosition.x,
-          y: desiredPosition.y - targetPosition.y,
+          x: desiredPosition.x - item.targetPosition.x,
+          y: desiredPosition.y - item.targetPosition.y,
         },
         visited
       )
-      cursorY += getNodeSize(targetNode).height + branchGap
     })
-  })
-
-  const outgoingEdges = edges.reduce((acc, edge) => {
-    if (!edge.source || !edge.target) {
-      return acc
-    }
-    acc[edge.source] = [...(acc[edge.source] ?? []), edge]
-    return acc
-  }, {} as Record<string, Edge[]>)
-  const incomingEdges = edges.reduce((acc, edge) => {
-    if (!edge.source || !edge.target) {
-      return acc
-    }
-    acc[edge.target] = [...(acc[edge.target] ?? []), edge]
-    return acc
-  }, {} as Record<string, Edge[]>)
-  const edgeOrderByEdge = new WeakMap<Edge, number>()
-  edges.forEach((edge, index) => {
-    edgeOrderByEdge.set(edge, index)
   })
 
   const anchorCache = new Map<string, string | null>()
@@ -565,11 +766,6 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
     depthCache.set(cacheKey, best)
     return best
   }
-
-  const nodesById = sizedNodes.reduce((acc, node) => {
-    acc[node.id] = node
-    return acc
-  }, {} as Record<string, DiagramNode>)
 
   const anchoredNodes = sizedNodes.filter((node) => !flowNodeIds.has(node.id))
   const nodesByAnchor = anchoredNodes.reduce((acc, node) => {
@@ -798,43 +994,6 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
         }, new Map<string, Edge>())
         .values()
     )
-
-  const localInputLeftOffset = (sourceNode: DiagramNode, targetNode: DiagramNode): number => {
-    if (sourceNode.type === 'state') {
-      return LOCAL_STATE_INPUT_LEFT_OFFSET
-    }
-    if (isDataAppNode(sourceNode) && isDataAppNode(targetNode)) {
-      return LOCAL_DATA_INPUT_LEFT_OFFSET
-    }
-
-    const targetSize = getNodeSize(targetNode)
-    if (sourceNode.type === 'code' && targetSize.width <= LOCAL_NARROW_TARGET_WIDTH) {
-      return LOCAL_NARROW_TARGET_INPUT_LEFT_OFFSET
-    }
-    return LOCAL_INPUT_LEFT_OFFSET
-  }
-
-  const localInputVerticalGap = (sourceNode: DiagramNode, targetNode: DiagramNode): number => {
-    const targetSize = getNodeSize(targetNode)
-    if (sourceNode.type === 'state') {
-      return targetSize.height >= LOCAL_LARGE_INPUT_TARGET_HEIGHT
-        ? LOCAL_STATE_INPUT_LARGE_TARGET_VERTICAL_GAP
-        : LOCAL_STATE_INPUT_VERTICAL_GAP
-    }
-    if (isDataAppNode(sourceNode) && isDataAppNode(targetNode)) {
-      return LOCAL_DATA_INPUT_VERTICAL_GAP
-    }
-    if (sourceNode.type === 'code') {
-      if (targetSize.height <= LOCAL_NARROW_TARGET_HEIGHT) {
-        return LOCAL_NARROW_TARGET_CODE_INPUT_VERTICAL_GAP
-      }
-      if (targetSize.height >= LOCAL_LARGE_INPUT_TARGET_HEIGHT) {
-        return LOCAL_COMPACT_CODE_INPUT_VERTICAL_GAP
-      }
-      return LOCAL_MEDIUM_CODE_INPUT_VERTICAL_GAP
-    }
-    return LOCAL_INPUT_VERTICAL_GAP
-  }
 
   const placeLocalInputTree = (targetId: string, visited: Set<string> = new Set()): void => {
     if (visited.has(targetId)) {
