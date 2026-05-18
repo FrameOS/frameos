@@ -957,8 +957,9 @@ export const diagramLogic = kea<diagramLogicType>([
       recordHistorySnapshot(cache, actions, makeHistorySnapshot(arranged.nodes, arranged.edges, values.sceneApps))
       window.setTimeout(() => {
         cache.ignoreHistory = false
+        actions.fitDiagramView()
       }, 0)
-      actions.fitDiagramView()
+      window.setTimeout(actions.fitDiagramView, 100)
     },
     keywordDropped: async ({ keyword, type, position }) => {
       // Whenever something is dropped on the diagram from the side panel

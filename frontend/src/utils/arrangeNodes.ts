@@ -283,6 +283,9 @@ function localInputLeftOffset(sourceNode: DiagramNode, targetNode: DiagramNode):
 function localInputVerticalGap(sourceNode: DiagramNode, targetNode: DiagramNode): number {
   const targetSize = getNodeSize(targetNode)
   if (sourceNode.type === 'state') {
+    if (isDataAppNode(targetNode)) {
+      return LOCAL_INPUT_STACK_GAP
+    }
     return targetSize.height >= LOCAL_LARGE_INPUT_TARGET_HEIGHT
       ? LOCAL_STATE_INPUT_LARGE_TARGET_VERTICAL_GAP
       : LOCAL_STATE_INPUT_VERTICAL_GAP
@@ -1112,6 +1115,32 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
         .values()
     )
 
+  const placedLocalInputTreeBounds = (targetId: string, visited: Set<string> = new Set()): Bounds | null => {
+    const targetNode = positionedById[targetId] ?? nodesById[targetId]
+    if (!targetNode) {
+      return null
+    }
+
+    let bounds = nodeBounds(targetNode)
+    if (visited.has(targetId)) {
+      return bounds
+    }
+    visited.add(targetId)
+
+    sortedUniqueLocalInputEdges(targetId).forEach((edge) => {
+      const sourceNode = positionedById[edge.source] ?? nodesById[edge.source]
+      if (!sourceNode || flowNodeIds.has(sourceNode.id)) {
+        return
+      }
+      const sourceBounds = placedLocalInputTreeBounds(sourceNode.id, new Set(visited))
+      if (sourceBounds) {
+        bounds = mergeBounds(bounds, sourceBounds)
+      }
+    })
+
+    return bounds
+  }
+
   const placeLocalInputTree = (targetId: string, visited: Set<string> = new Set()): void => {
     if (visited.has(targetId)) {
       return
@@ -1149,8 +1178,9 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
         x: targetNode.position.x - leftOffset - LOCAL_INPUT_STAGGER_X * index,
         y: stackTop,
       })
-      stackBottom = stackTop - LOCAL_INPUT_STACK_GAP
       placeLocalInputTree(sourceNode.id, new Set(visited))
+      stackBottom =
+        (placedLocalInputTreeBounds(sourceNode.id, new Set(visited))?.top ?? stackTop) - LOCAL_INPUT_STACK_GAP
     })
   }
 
@@ -1436,11 +1466,12 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
         return
       }
 
-      let stackBottom = targetNode.position.y - STATE_INPUT_VERTICAL_GAP
+      let stackBottom = targetNode.position.y
 
       inputNodes.forEach((node, index) => {
         const size = getNodeSize(node)
-        const stackTop = stackBottom - size.height
+        const verticalGap = index === 0 ? localInputVerticalGap(node, targetNode) : 0
+        const stackTop = stackBottom - verticalGap - size.height
         stateInputTargetByNodeId.set(node.id, targetId)
         moveNode(node, {
           x: targetNode.position.x - STATE_INPUT_LEFT_OFFSET - STATE_INPUT_STAGGER_X * index,
