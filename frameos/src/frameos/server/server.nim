@@ -72,6 +72,7 @@ proc initServerGlobals(frameOS: FrameOS) =
   clearAdminSessions()
   initLock(globalRecentLogsLock)
   globalRecentLogs = @[]
+  globalRecentMetrics = @[]
   globalRecentLogId = 0
 
 proc newServer*(frameOS: FrameOS): types.Server =

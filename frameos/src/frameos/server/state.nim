@@ -12,6 +12,7 @@ var globalRunner*: RunnerControl
 var globalAdminSessionSalt*: cstring
 var globalAdminConnectionsState*: ConnectionsState
 var globalRecentLogs*: seq[JsonNode] = @[]
+var globalRecentMetrics*: seq[JsonNode] = @[]
 var globalRecentLogsLock*: Lock
 var globalRecentLogId* = 0
 
@@ -68,18 +69,43 @@ proc parseFrameApiId*(rawId: string): int =
   except CatchableError:
     return -1
 
-proc toUiLog*(payload: (float, JsonNode)): JsonNode =
-  let (timestamp, logPayload) = payload
+proc toUiLog*(payload: SerializedLog): JsonNode =
   globalRecentLogId += 1
-  let isoTimestamp = format(fromUnix(int64(timestamp)), "yyyy-MM-dd'T'HH:mm:ss'Z'", utc())
+  let isoTimestamp = format(fromUnix(int64(payload.timestamp)), "yyyy-MM-dd'T'HH:mm:ss'Z'", utc())
   result = %*{
     "id": globalRecentLogId,
     "timestamp": isoTimestamp,
     "ip": "",
     "type": "webhook",
-    "line": $logPayload,
+    "event": payload.event,
+    "line": payload.line,
     "frame_id": FRAME_API_ID,
   }
+
+proc metricsEntryFromLog(logEntry: JsonNode): JsonNode =
+  if not logEntry.hasKey("event") or logEntry["event"].getStr() != "metrics":
+    return nil
+  if not logEntry.hasKey("line"):
+    return nil
+
+  try:
+    let payload = parseJson(logEntry["line"].getStr())
+    if payload.kind != JObject:
+      return nil
+
+    var metricsPayload = newJObject()
+    for key, value in payload:
+      if key != "event":
+        metricsPayload[key] = value
+
+    return %*{
+      "id": $logEntry["id"].getInt(),
+      "timestamp": logEntry["timestamp"].getStr(),
+      "frame_id": logEntry["frame_id"].getInt(),
+      "metrics": metricsPayload,
+    }
+  except CatchableError:
+    return nil
 
 proc storeUiLog*(logEntry: JsonNode) =
   {.gcsafe.}:
@@ -87,6 +113,11 @@ proc storeUiLog*(logEntry: JsonNode) =
       globalRecentLogs.add(logEntry)
       if globalRecentLogs.len > MAX_RECENT_LOGS:
         globalRecentLogs = globalRecentLogs[(globalRecentLogs.len - MAX_RECENT_LOGS) .. (globalRecentLogs.len - 1)]
+      let metricEntry = metricsEntryFromLog(logEntry)
+      if metricEntry != nil:
+        globalRecentMetrics.add(metricEntry)
+        if globalRecentMetrics.len > MAX_RECENT_LOGS:
+          globalRecentMetrics = globalRecentMetrics[(globalRecentMetrics.len - MAX_RECENT_LOGS) .. (globalRecentMetrics.len - 1)]
 
 proc getUiLogs*(): JsonNode =
   {.gcsafe.}:
@@ -94,29 +125,6 @@ proc getUiLogs*(): JsonNode =
       return %*globalRecentLogs
 
 proc getUiMetrics*(): JsonNode =
-  result = newJArray()
   {.gcsafe.}:
     withLock globalRecentLogsLock:
-      for logEntry in globalRecentLogs:
-        try:
-          if not logEntry.hasKey("line"):
-            continue
-          let payload = parseJson(logEntry["line"].getStr())
-          if payload.kind != JObject:
-            continue
-          if not payload.hasKey("event") or payload["event"].getStr() != "metrics":
-            continue
-
-          var metricsPayload = newJObject()
-          for key, value in payload:
-            if key != "event":
-              metricsPayload[key] = value
-
-          result.add(%*{
-            "id": $logEntry["id"].getInt(),
-            "timestamp": logEntry["timestamp"].getStr(),
-            "frame_id": logEntry["frame_id"].getInt(),
-            "metrics": metricsPayload,
-          })
-        except CatchableError:
-          discard
+      return %*globalRecentMetrics

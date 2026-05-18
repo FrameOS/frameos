@@ -10,7 +10,7 @@ import { duplicateScenes } from '../../utils/duplicateScenes'
 import { apiFetch } from '../../utils/apiFetch'
 import { getBasePath } from '../../utils/getBasePath'
 import { entityImagesModel } from '../../models/entityImagesModel'
-import { arrangeNodes } from '../../utils/arrangeNodes'
+import { arrangeSceneGraph } from '../../utils/arrangeNodes'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
 import { secureToken } from '../../utils/secureToken'
 import { normalizeSceneApps } from '../../utils/sceneApps'
@@ -600,12 +600,13 @@ export function sanitizeScene(scene: Partial<FrameScene>, frame: Partial<FrameTy
   )
   const edges = (scene.edges ?? []).map((edge) => normalizeEdge(edge))
   const shouldArrange = normalizedNodes.length > 0 && sanitizedNodes.every((node) => !hasValidPosition(node))
+  const arranged = shouldArrange ? arrangeSceneGraph(normalizedNodes, edges) : { nodes: normalizedNodes, edges }
   return {
     ...scene,
     id: scene.id ?? uuidv4(),
     name: scene.name || 'Untitled scene',
-    nodes: shouldArrange ? arrangeNodes(normalizedNodes, edges) : normalizedNodes,
-    edges,
+    nodes: arranged.nodes,
+    edges: arranged.edges,
     apps: normalizeSceneApps(scene.apps),
     fields: scene.fields ?? [],
     settings: {

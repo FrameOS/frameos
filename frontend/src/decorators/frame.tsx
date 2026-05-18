@@ -12,6 +12,19 @@ export function frameHost(frame: FrameType): string {
 
 export const frameStatusWithSpinner = ['deploying', 'preparing', 'rendering', 'restarting', 'starting']
 
+export function frameIsStale(frame: FrameType): boolean {
+  if (!frame.last_log_at) {
+    return false
+  }
+  const lastLogAt = new Date(frame.last_log_at)
+  const now = new Date()
+  return now.getTime() - lastLogAt.getTime() > 1000 * 60 * 60
+}
+
+export function frameIsHealthy(frame: FrameType): boolean {
+  return frame.status === 'ready' && !frameIsStale(frame)
+}
+
 function frameSchemeAndPort(frame: FrameType): { scheme: string; port: number } {
   if (frame.https_proxy?.enable) {
     const tlsPort = frame.https_proxy?.port ?? 0
@@ -25,12 +38,8 @@ function frameSchemeAndPort(frame: FrameType): { scheme: string; port: number } 
 
 export function frameStatus(frame: FrameType): JSX.Element {
   let status = frame.status
-  if (frame.last_log_at) {
-    const lastLogAt = new Date(frame.last_log_at)
-    const now = new Date()
-    if (now.getTime() - lastLogAt.getTime() > 1000 * 60 * 60) {
-      status = 'stale'
-    }
+  if (frameIsStale(frame)) {
+    status = 'stale'
   }
 
   if (frame.status === 'ready' && (frame?.active_connections ?? 0) > 0) {

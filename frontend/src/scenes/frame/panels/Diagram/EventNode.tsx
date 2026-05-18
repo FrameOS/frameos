@@ -18,6 +18,7 @@ import { NumberTextInput } from '../../../../components/NumberTextInput'
 import { ColorInput } from '../../../../components/ColorInput'
 import { FieldTypeTag } from '../../../../components/FieldTypeTag'
 import { Tooltip } from '../../../../components/Tooltip'
+import { NodeZoomLabel } from './NodeZoomLabel'
 
 const events: FrameEvent[] = _events as any
 
@@ -72,11 +73,14 @@ export function EventNode({ id, isConnectable }: NodeProps): JSX.Element {
       : 'bg-black bg-opacity-70 border-red-900 shadow-red-700/50 '
   )
 
+  const titleBackground = isSelected ? 'bg-fuchsia-900' : 'bg-red-900'
+
   const titleClassName = clsx(
     'frameos-node-title text-xl p-1 px-2 gap-2',
-    isSelected ? 'bg-fuchsia-900' : 'bg-red-900',
+    titleBackground,
     'flex w-full justify-between items-center'
   )
+  const eventZoomLabel = <NodeZoomLabel label={keyword.toUpperCase()} backgroundClassName={titleBackground} />
 
   const configRows: JSX.Element[] = []
 
@@ -156,7 +160,7 @@ export function EventNode({ id, isConnectable }: NodeProps): JSX.Element {
           selectNode(id)
         }
       }}
-      className={backgroundClassName}
+      className={clsx(backgroundClassName, 'relative')}
     >
       <div className={titleClassName}>
         <div>{keyword} (event)</div>
@@ -215,63 +219,66 @@ export function EventNode({ id, isConnectable }: NodeProps): JSX.Element {
           />
         </div>
       </div>
-      {configRows.length > 0 ? (
-        <div className="p-1">
-          <table className="table-auto border-separate border-spacing-x-1 border-spacing-y-0.5 w-full">
-            <tbody>{configRows}</tbody>
-          </table>
-        </div>
-      ) : null}
-      {sourceFieldsToShow.length > 0 ? (
-        <div className="p-1">
-          <table className="table-auto border-separate border-spacing-x-1 border-spacing-y-0.5 w-full">
-            <tbody>
-              {sourceFieldsToShow.map((field: StateField, i) => {
-                const fieldValue = isEventWithStateFields
-                  ? stateFieldAccess(scene, field, 'state')
-                  : stateFieldAccess(scene, field, 'context.payload')
-                return (
-                  <tr key={i}>
-                    <td className="font-sm text-indigo-200 w-full" colSpan={3}>
-                      <div className="flex items-center gap-2">
-                        {field.type ? <FieldTypeTag type={field.type} /> : null}
-                        <div className="flex-1" title={field.label}>
-                          {field.label ?? field.name}
+      <div className="relative">
+        {configRows.length > 0 ? (
+          <div className="p-1">
+            <table className="table-auto border-separate border-spacing-x-1 border-spacing-y-0.5 w-full">
+              <tbody>{configRows}</tbody>
+            </table>
+          </div>
+        ) : null}
+        {sourceFieldsToShow.length > 0 ? (
+          <div className="p-1">
+            <table className="table-auto border-separate border-spacing-x-1 border-spacing-y-0.5 w-full">
+              <tbody>
+                {sourceFieldsToShow.map((field: StateField, i) => {
+                  const fieldValue = isEventWithStateFields
+                    ? stateFieldAccess(scene, field, 'state')
+                    : stateFieldAccess(scene, field, 'context.payload')
+                  return (
+                    <tr key={i}>
+                      <td className="font-sm text-indigo-200 w-full" colSpan={3}>
+                        <div className="flex items-center gap-2">
+                          {field.type ? <FieldTypeTag type={field.type} /> : null}
+                          <div className="flex-1" title={field.label}>
+                            {field.label ?? field.name}
+                          </div>
+                          <ClipboardIcon
+                            className="w-5 h-5 cursor-pointer"
+                            onClick={() =>
+                              copy(
+                                isEventWithStateFields
+                                  ? stateFieldAccess(scene, field, 'state')
+                                  : stateFieldAccess(scene, field, 'context.payload')
+                              )
+                            }
+                          />
+                          <Handle
+                            type="source"
+                            position={Position.Right}
+                            id={`code/${fieldValue}`}
+                            style={{
+                              position: 'relative',
+                              transform: 'none',
+                              right: 0,
+                              top: 0,
+                              background: '#000000',
+                              borderBottomLeftRadius: 0,
+                              borderTopLeftRadius: 0,
+                            }}
+                            isConnectable={isConnectable}
+                          />
                         </div>
-                        <ClipboardIcon
-                          className="w-5 h-5 cursor-pointer"
-                          onClick={() =>
-                            copy(
-                              isEventWithStateFields
-                                ? stateFieldAccess(scene, field, 'state')
-                                : stateFieldAccess(scene, field, 'context.payload')
-                            )
-                          }
-                        />
-                        <Handle
-                          type="source"
-                          position={Position.Right}
-                          id={`code/${fieldValue}`}
-                          style={{
-                            position: 'relative',
-                            transform: 'none',
-                            right: 0,
-                            top: 0,
-                            background: '#000000',
-                            borderBottomLeftRadius: 0,
-                            borderTopLeftRadius: 0,
-                          }}
-                          isConnectable={isConnectable}
-                        />
-                      </div>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
-      ) : null}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+      </div>
+      {eventZoomLabel}
     </div>
   )
 }

@@ -2,15 +2,16 @@ import { A } from 'kea-router'
 import { FrameType } from '../../types'
 import { H5 } from '../../components/H5'
 import { Box } from '../../components/Box'
-import { frameHost, frameStatus } from '../../decorators/frame'
+import { frameHost, frameIsHealthy, frameStatus } from '../../decorators/frame'
 import { DropdownMenu } from '../../components/DropdownMenu'
-import { ExclamationTriangleIcon, TrashIcon } from '@heroicons/react/24/solid'
+import { ArrowUpCircleIcon, ExclamationTriangleIcon, TrashIcon } from '@heroicons/react/24/solid'
 import { useActions } from 'kea'
 import { framesModel } from '../../models/framesModel'
 import { FrameImage } from '../../components/FrameImage'
 import { urls } from '../../urls'
 import { Tooltip } from '../../components/Tooltip'
 import { getFrameCertificateStatus } from '../../utils/certificates'
+import { CURRENT_FRAMEOS_VERSION } from '../frame/frameDeployUtils'
 
 interface FrameProps {
   frame: FrameType
@@ -27,12 +28,12 @@ function getTitleAndIcon(enabled: boolean, runCommands: boolean, activeConnectio
     if (activeConnections > 0) {
       return ['FrameOS Agent connected and ready to run commands', '🟢']
     }
-    return ['FrameOS Agent not connected', '⚪️']
+    return ['FrameOS Agent not connected', '']
   }
   if (activeConnections > 0) {
     return ['FrameOS Agent connected, but not configured to run commands', '🟡']
   }
-  return ['FrameOS Agent not connected', '⚪️']
+  return ['FrameOS Agent not connected', '']
 }
 
 export function FrameConnection({ frame }: FrameProps): JSX.Element | null {
@@ -53,9 +54,50 @@ export function FrameConnection({ frame }: FrameProps): JSX.Element | null {
   )
 }
 
+export function FrameHealth({ frame }: FrameProps): JSX.Element | null {
+  if (!frameIsHealthy(frame)) {
+    return null
+  }
+
+  return (
+    <Tooltip title="Frame is healthy" className="cursor-help">
+      <span className="inline-block h-2.5 w-2.5 rounded-full bg-green-400 shadow-[0_0_8px_rgba(74,222,128,0.75)]" />
+    </Tooltip>
+  )
+}
+
+function FrameCardIndicators({ frame }: FrameProps): JSX.Element {
+  const [agentTitle, agentIcon] = getTitleAndIcon(
+    !!frame.agent?.agentEnabled,
+    !!frame.agent?.agentRunCommands,
+    frame?.active_connections ?? 0
+  )
+  const healthy = frameIsHealthy(frame)
+
+  if (healthy && agentIcon === '🟢') {
+    return (
+      <Tooltip title={`Frame is healthy. ${agentTitle}.`} className="cursor-help">
+        <span className="inline-block h-2.5 w-2.5 rounded-full bg-green-400 shadow-[0_0_8px_rgba(74,222,128,0.75)]" />
+      </Tooltip>
+    )
+  }
+
+  return (
+    <>
+      <FrameHealth frame={frame} />
+      <FrameConnection frame={frame} />
+    </>
+  )
+}
+
 export function Frame({ frame }: FrameProps): JSX.Element {
   const { deleteFrame } = useActions(framesModel)
   const certificateStatus = getFrameCertificateStatus(frame)
+  const deployedFrameOSVersion =
+    typeof frame.last_successful_deploy?.frameos_version === 'string'
+      ? frame.last_successful_deploy.frameos_version.split('+')[0]
+      : null
+  const hasFrameOSUpdate = Boolean(deployedFrameOSVersion && deployedFrameOSVersion !== CURRENT_FRAMEOS_VERSION)
 
   return (
     <Box id={`frame-${frame.id}`} className="relative">
@@ -92,11 +134,16 @@ export function Frame({ frame }: FrameProps): JSX.Element {
               />
             </Tooltip>
           ) : null}
+          {hasFrameOSUpdate ? (
+            <Tooltip title={`FrameOS update available (${deployedFrameOSVersion} -> ${CURRENT_FRAMEOS_VERSION})`}>
+              <ArrowUpCircleIcon className="h-4 w-4 text-blue-300" />
+            </Tooltip>
+          ) : null}
         </H5>
       </div>
       <div className="px-4 pb-4">
         <div className="flex sm:text-lg text-gray-400 items-center gap-1">
-          <FrameConnection frame={frame} />
+          <FrameCardIndicators frame={frame} />
           <span>{frameStatus(frame)}</span>
         </div>
       </div>

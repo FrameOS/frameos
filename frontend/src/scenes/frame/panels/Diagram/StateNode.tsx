@@ -9,6 +9,7 @@ import { CodeArg } from './CodeArg'
 import { newNodePickerLogic } from './newNodePickerLogic'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
 import { ClipboardDocumentIcon, DocumentDuplicateIcon, TrashIcon } from '@heroicons/react/24/solid'
+import { NodeZoomLabel } from './NodeZoomLabel'
 
 export function StateNode({ id, isConnectable }: NodeProps<StateNodeData>): JSX.Element {
   const { frameId, sceneId } = useValues(diagramLogic)
@@ -18,13 +19,14 @@ export function StateNode({ id, isConnectable }: NodeProps<StateNodeData>): JSX.
   const data: StateNodeData = (node?.data as StateNodeData) ?? ({ keyword: '' } satisfies StateNodeData)
   const { select } = useActions(appNodeLogic(appNodeLogicProps))
   const { openNewNodePicker } = useActions(newNodePickerLogic({ sceneId, frameId }))
+  const titleBackground = isSelected ? 'bg-fuchsia-900' : 'bg-[#7f6e1d]'
 
   return (
     <BindLogic logic={appNodeLogic} props={appNodeLogicProps}>
       <div
         onClick={select}
         className={clsx(
-          'shadow-lg border-2 h-full flex flex-col',
+          'shadow-lg border-2 h-full flex flex-col relative',
           isSelected
             ? 'bg-black bg-opacity-70 border-fuchsia-900 shadow-fuchsia-700/50'
             : 'bg-black bg-opacity-70 border-[#81701d] shadow-[#81701d]/50'
@@ -33,7 +35,7 @@ export function StateNode({ id, isConnectable }: NodeProps<StateNodeData>): JSX.
         <div
           className={clsx(
             'frameos-node-title text-xl p-2',
-            isSelected ? 'bg-fuchsia-900' : 'bg-[#7f6e1d]',
+            titleBackground,
             'flex w-full justify-between items-center gap-1'
           )}
         >
@@ -88,6 +90,7 @@ export function StateNode({ id, isConnectable }: NodeProps<StateNodeData>): JSX.
             ]}
           />
         </div>
+        <NodeZoomLabel label={(stateFieldTitle ?? data.keyword).toUpperCase()} backgroundClassName={titleBackground} />
       </div>
     </BindLogic>
   )

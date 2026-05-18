@@ -41,7 +41,7 @@ import {
 } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
 import { appsModel } from '../../../../models/appsModel'
-import { arrangeNodes } from '../../../../utils/arrangeNodes'
+import { arrangeSceneGraph } from '../../../../utils/arrangeNodes'
 import copy from 'copy-to-clipboard'
 import { Option } from '../../../../components/Select'
 import _events from '../../../../../schema/events.json'
@@ -950,8 +950,16 @@ export const diagramLogic = kea<diagramLogicType>([
         return acc
       }, {} as Record<string, string[]>)
 
-      actions.setNodes(arrangeNodes(values.nodes, values.edges, { fieldOrderByNodeId }))
-      actions.fitDiagramView()
+      const arranged = arrangeSceneGraph(values.nodes, values.edges, { fieldOrderByNodeId })
+      cache.ignoreHistory = true
+      actions.setNodes(arranged.nodes)
+      actions.setEdges(arranged.edges)
+      recordHistorySnapshot(cache, actions, makeHistorySnapshot(arranged.nodes, arranged.edges, values.sceneApps))
+      window.setTimeout(() => {
+        cache.ignoreHistory = false
+        actions.fitDiagramView()
+      }, 0)
+      window.setTimeout(actions.fitDiagramView, 100)
     },
     keywordDropped: async ({ keyword, type, position }) => {
       // Whenever something is dropped on the diagram from the side panel

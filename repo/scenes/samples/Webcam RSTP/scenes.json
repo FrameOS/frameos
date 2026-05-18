@@ -60,6 +60,17 @@
         "dragging": false
       },
       {
+        "id": "78939a5c-cc6b-4c81-9fb1-60228a3f8cf1",
+        "position": { "x": 704.25, "y": -104.11100171274424 },
+        "data": { "keyword": "timeoutSeconds" },
+        "type": "state",
+        "width": 260,
+        "height": 48,
+        "selected": false,
+        "positionAbsolute": { "x": 704.25, "y": -104.11100171274424 },
+        "dragging": false
+      },
+      {
         "id": "d1fcef56-e22d-49c1-86f6-ee754cb1225e",
         "position": { "x": 935.25, "y": 117.44449914362792 },
         "data": { "keyword": "logic/nextSleepDuration", "config": {} },
@@ -108,6 +119,14 @@
         "type": "codeNodeEdge"
       },
       {
+        "id": "7ac2d612-4d1d-4519-b380-3db2487a605a",
+        "source": "78939a5c-cc6b-4c81-9fb1-60228a3f8cf1",
+        "sourceHandle": "fieldOutput",
+        "target": "46430b0e-8a20-420c-a735-6a8b8f7fef5b",
+        "targetHandle": "fieldInput/timeoutSeconds",
+        "type": "codeNodeEdge"
+      },
+      {
         "id": "f5af825f-acde-49ba-b5d9-5de82d78ab42",
         "target": "d1fcef56-e22d-49c1-86f6-ee754cb1225e",
         "targetHandle": "prev",
@@ -126,6 +145,14 @@
     ],
     "fields": [
       { "name": "url", "label": "Webcam URL", "type": "text", "value": "", "persist": "disk", "access": "public" },
+      {
+        "name": "timeoutSeconds",
+        "label": "FFmpeg timeout in seconds",
+        "type": "integer",
+        "persist": "disk",
+        "access": "public",
+        "value": "15"
+      },
       {
         "name": "seconds",
         "label": "Refresh interval in seconds",

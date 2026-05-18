@@ -1,6 +1,6 @@
 [
   {
-    "id": "75d30a36-62ed-4b61-9a89-b3a78cefff6f",
+    "id": "8d03fd19-526a-4e49-9850-0349cc1575a3",
     "name": "Unsplash image",
     "settings": {
       "backgroundColor": "#000000",
@@ -276,8 +276,8 @@
       {
         "id": "f7109786-ce84-489d-b862-cf094d77c6de",
         "position": {
-          "x": 1331.5113791370625,
-          "y": -444.58209187177204
+          "x": 1280.3346508599075,
+          "y": -479.3293964559071
         },
         "data": {
           "code": "state{\"unsplashMetadata\"}{\"description\"}.getStr(state{\"unsplashMetadata\"}{\"altDescription\"}.getStr(\"\"))",
@@ -288,15 +288,22 @@
               "type": "text"
             }
           ],
-          "codeJS": "(() => { const meta = state.unsplashMetadata || {}; const lines = []; const title = meta.description || meta.altDescription || meta.title || ''; if (title) lines.push(title); if (meta.author) lines.push('Photo by ' + meta.author + (meta.authorUsername ? ' (@' + meta.authorUsername + ')' : '')); const details = []; if (meta.location) details.push(meta.location); if (meta.search) details.push('Search: ' + meta.search); if (details.length) lines.push(details.join(' - ')); return lines.join('\\n'); })()"
+          "codeJS": "(() => {\n  const meta = state.unsplashMetadata || {};\n  return [\n    meta.description || meta.altDescription || meta.title || \"\",\n    `Photo by ${meta.author}${meta.authorUsername ? ` (@${meta.authorUsername})` : \"\"}`,\n    meta.location,\n    // `Search: ${meta.search}`,\n  ].filter(a => a).join(\"\\n\")\n})()\n"
         },
         "type": "code",
         "style": {
-          "width": 541,
-          "height": 222
+          "width": 688,
+          "height": 256
         },
-        "width": 541,
-        "height": 222
+        "width": 688,
+        "height": 256,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 1280.3346508599075,
+          "y": -479.3293964559071
+        },
+        "dragging": false,
+        "resizing": false
       },
       {
         "id": "2081c5a1-73bc-4b87-9787-0752f414cf68",

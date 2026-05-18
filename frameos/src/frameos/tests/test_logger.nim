@@ -3,6 +3,7 @@ import os, times, strutils
 import ../logger
 import ../config
 import ../channels
+import ../types
 import std/json
 
 proc waitFor(condition: proc(): bool {.closure.}, timeoutMs = 1200, pollMs = 20): bool =
@@ -12,6 +13,9 @@ proc waitFor(condition: proc(): bool {.closure.}, timeoutMs = 1200, pollMs = 20)
       return true
     sleep(pollMs)
   condition()
+
+proc logJson(payload: SerializedLog): JsonNode =
+  parseJson(payload.line)
 
 suite "Logger Tests":
   # We load your real config, but you can also stub or mock if you like.
@@ -32,6 +36,14 @@ suite "Logger Tests":
   test "logger is enabled by default":
     let logger = newLogger(testConfig)
     doAssert logger.enabled == true
+
+  test "logsRequestBody embeds serialized JSON without quoting it":
+    let body = logsRequestBody(@[
+      SerializedLog(timestamp: 1.5, event: "one", line: """{"event":"one"}"""),
+      SerializedLog(timestamp: 2.0, event: "two", line: """{"event":"two","value":3}"""),
+    ])
+    check body == """{"logs":[[1.5,{"event":"one"}],[2.0,{"event":"two","value":3}]]}"""
+    check parseJson(body)["logs"][1][1]["value"].getInt() == 3
 
   test "logger enable/disable toggles":
     let logger = newLogger(testConfig)
@@ -107,6 +119,7 @@ suite "Logger Tests":
     while true:
       let (success, item) = logChannel.tryRecv()
       if not success: break
-      if item[1].hasKey("event") and item[1]["event"].getStr() == "disabledTest":
+      let itemJson = logJson(item)
+      if itemJson.hasKey("event") and itemJson["event"].getStr() == "disabledTest":
         anyFromDisabled = true
     doAssert not anyFromDisabled, "We found a log from the disabled period, which should not happen"

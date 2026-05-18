@@ -106,11 +106,16 @@ type
     httpUploadUrl*: string
     httpUploadHeaders*: seq[HttpHeaderPair]
 
+  SerializedLog* = object
+    timestamp*: float
+    event*: string
+    line*: string
+
   Logger* = ref object
     frameConfig*: FrameConfig
     lock*: Lock
     thread*: Thread[FrameConfig]
-    channel*: Channel[(float, JsonNode)]
+    channel*: Channel[SerializedLog]
     log*: proc (payload: JsonNode)
     enabled*: bool
     enable*: proc ()

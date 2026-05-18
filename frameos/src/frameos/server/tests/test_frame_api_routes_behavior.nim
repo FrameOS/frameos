@@ -253,6 +253,7 @@ suite "frame api route behavior":
       "timestamp": "2026-03-08T10:00:00Z",
       "ip": "",
       "type": "webhook",
+      "event": "metrics",
       "line": $(%*{"event": "metrics", "cpuUsage": 42.5, "openFileDescriptors": 17}),
       "frame_id": 1,
     })
@@ -261,6 +262,7 @@ suite "frame api route behavior":
       "timestamp": "2026-03-08T10:00:05Z",
       "ip": "",
       "type": "webhook",
+      "event": "http",
       "line": $(%*{"event": "http", "path": "/ping"}),
       "frame_id": 1,
     })

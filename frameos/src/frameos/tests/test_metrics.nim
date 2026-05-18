@@ -11,6 +11,9 @@ proc drainLogChannel() =
     if not ok:
       break
 
+proc logJson(payload: SerializedLog): JsonNode =
+  parseJson(payload.line)
+
 suite "metrics loop":
   setup:
     drainLogChannel()
@@ -26,8 +29,10 @@ suite "metrics loop":
 
     let (ok, payload) = logChannel.tryRecv()
     check ok
-    check payload[1]["event"].getStr() == "metrics"
-    check payload[1]["state"].getStr() == "disabled"
+    check payload.event == "metrics"
+    let payloadJson = logJson(payload)
+    check payloadJson["event"].getStr() == "metrics"
+    check payloadJson["state"].getStr() == "disabled"
 
     let (hasNext, _) = logChannel.tryRecv()
     check not hasNext
@@ -69,24 +74,26 @@ suite "metrics loop":
 
     let (okSample, samplePayload) = logChannel.tryRecv()
     check okSample
-    check samplePayload[1]["event"].getStr() == "metrics"
-    check not samplePayload[1].hasKey("state")
-    check not samplePayload[1].hasKey("intervalMs")
-    check samplePayload[1]["load"].len == 3
-    check abs(samplePayload[1]["cpuTemperature"].getFloat() - 42.0) < 0.0001
-    check samplePayload[1]["memoryUsage"]["total"].getInt() == 1234
-    check samplePayload[1]["memoryUsage"]["used"].getInt() == 778
-    check abs(samplePayload[1]["memoryUsage"]["percentage"].getFloat() - 63.0) < 0.0001
-    check samplePayload[1]["diskUsage"]["total"].getInt() == 16000
-    check samplePayload[1]["diskUsage"]["used"].getInt() == 8900
-    check samplePayload[1]["diskUsage"]["available"].getInt() == 7100
-    check abs(samplePayload[1]["diskUsage"]["percentage"].getFloat() - 55.625) < 0.0001
-    check samplePayload[1]["diskUsage"]["filesystems"].len == 1
-    check samplePayload[1]["diskUsage"]["filesystems"][0]["mount"].getStr() == "/"
-    check not samplePayload[1]["processMemory"].hasKey("pid")
-    check abs(samplePayload[1]["cpuUsage"].getFloat() - 12.5) < 0.0001
-    check samplePayload[1]["openFileDescriptors"].getInt() == 9
-    check not samplePayload[1].hasKey("runtime")
+    check samplePayload.event == "metrics"
+    let sampleJson = logJson(samplePayload)
+    check sampleJson["event"].getStr() == "metrics"
+    check not sampleJson.hasKey("state")
+    check not sampleJson.hasKey("intervalMs")
+    check sampleJson["load"].len == 3
+    check abs(sampleJson["cpuTemperature"].getFloat() - 42.0) < 0.0001
+    check sampleJson["memoryUsage"]["total"].getInt() == 1234
+    check sampleJson["memoryUsage"]["used"].getInt() == 778
+    check abs(sampleJson["memoryUsage"]["percentage"].getFloat() - 63.0) < 0.0001
+    check sampleJson["diskUsage"]["total"].getInt() == 16000
+    check sampleJson["diskUsage"]["used"].getInt() == 8900
+    check sampleJson["diskUsage"]["available"].getInt() == 7100
+    check abs(sampleJson["diskUsage"]["percentage"].getFloat() - 55.625) < 0.0001
+    check sampleJson["diskUsage"]["filesystems"].len == 1
+    check sampleJson["diskUsage"]["filesystems"][0]["mount"].getStr() == "/"
+    check not sampleJson["processMemory"].hasKey("pid")
+    check abs(sampleJson["cpuUsage"].getFloat() - 12.5) < 0.0001
+    check sampleJson["openFileDescriptors"].getInt() == 9
+    check not sampleJson.hasKey("runtime")
 
   test "enabled interval includes active runtime diagnostics":
     setMetricsHooksForTest(
@@ -111,7 +118,8 @@ suite "metrics loop":
 
     let (okSample, samplePayload) = logChannel.tryRecv()
     check okSample
-    let runtime = samplePayload[1]["runtime"]
+    check samplePayload.event == "metrics"
+    let runtime = logJson(samplePayload)["runtime"]
     check runtime["active"].getBool() == true
     check runtime["mode"].getStr() == "render"
     check runtime["sceneId"].getStr() == "scene-a"
@@ -139,6 +147,8 @@ suite "metrics loop":
 
     let (okError, errorPayload) = logChannel.tryRecv()
     check okError
-    check errorPayload[1]["event"].getStr() == "metrics"
-    check errorPayload[1]["state"].getStr() == "error"
-    check "cpu probe failed" in errorPayload[1]["error"].getStr()
+    check errorPayload.event == "metrics"
+    let errorJson = logJson(errorPayload)
+    check errorJson["event"].getStr() == "metrics"
+    check errorJson["state"].getStr() == "error"
+    check "cpu probe failed" in errorJson["error"].getStr()

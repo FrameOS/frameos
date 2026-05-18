@@ -1,6 +1,8 @@
 import { BaseEdge, EdgeLabelRenderer, EdgeProps, getSmoothStepPath, useReactFlow } from 'reactflow'
 import { XCircleIcon } from '@heroicons/react/24/solid'
 
+const CONNECTED_TO_SELECTED_NODE_STROKE = '#facc15'
+
 export function CodeNodeEdge({
   id,
   sourcePosition,
@@ -12,6 +14,7 @@ export function CodeNodeEdge({
   sourceHandleId,
   targetHandleId,
   selected,
+  data,
 }: EdgeProps) {
   const { setEdges } = useReactFlow()
   const [edgePath, labelX, labelY] = getSmoothStepPath({
@@ -23,12 +26,19 @@ export function CodeNodeEdge({
     targetPosition,
   })
   const isNodeConnection = sourceHandleId === 'next' && targetHandleId === 'prev'
+  const connectedToSelectedNode = Boolean(data?.connectedToSelectedNode)
   return (
     <>
       <BaseEdge
         id={id}
         path={edgePath}
-        style={selected ? { strokeWidth: 6, stroke: '#f29cf6' } : { strokeWidth: 4, stroke: 'hsl(220 100% 91%)' }}
+        style={
+          selected
+            ? { strokeWidth: 6, stroke: '#f29cf6' }
+            : connectedToSelectedNode
+            ? { strokeWidth: 6, stroke: CONNECTED_TO_SELECTED_NODE_STROKE }
+            : { strokeWidth: 4, stroke: 'hsl(220 100% 91%)' }
+        }
       />
       <EdgeLabelRenderer>
         {selected ? (
