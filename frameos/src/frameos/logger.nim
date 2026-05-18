@@ -8,7 +8,7 @@ type
     frameConfig: FrameConfig
     client: HttpClient
     url: string
-    logs: seq[(float, JsonNode)]
+    logs: seq[(float, string)]
     lastSendAt: float
     lastLogFilePath: string
 
@@ -38,7 +38,7 @@ proc gzipLogFile(path: string) =
     except OSError as e:
       echo "Error removing compressed log file: " & e.msg
 
-proc logToFile(filename: string, logJson: JsonNode, lastLogFilePath: var string) =
+proc logToFile(filename: string, logLine: string, lastLogFilePath: var string) =
   try:
     if filename.len > 0:
       let file = if "{date}" in filename:
@@ -49,14 +49,25 @@ proc logToFile(filename: string, logJson: JsonNode, lastLogFilePath: var string)
         gzipLogFile(lastLogFilePath)
       lastLogFilePath = file
       logFile = open(file, fmAppend)
-      logFile.write(now().format("[yyyy-MM-dd'T'HH:mm:ss]") & " " & $logJson & "\n")
+      logFile.write(now().format("[yyyy-MM-dd'T'HH:mm:ss]") & " " & logLine & "\n")
       logFile.close()
   except Exception as e:
     echo "Error writing to log file: " & $e.msg
 
-proc `%`*(payload: (float, JsonNode)): JsonNode =
-  let (timestamp, log) = payload
-  result = %*[timestamp, log]
+proc addLogPayload(body: var string, payload: (float, string)) =
+  body.add("[")
+  body.add($payload[0])
+  body.add(",")
+  body.add(payload[1])
+  body.add("]")
+
+proc logsRequestBody*(logs: seq[(float, string)]): string =
+  result = "{\"logs\":["
+  for index, logPayload in logs:
+    if index > 0:
+      result.add(",")
+    result.addLogPayload(logPayload)
+  result.add("]}")
 
 proc processQueue(self: LoggerThread): int =
   let logCount = self.logs.len
@@ -81,8 +92,8 @@ proc processQueue(self: LoggerThread): int =
           ("Content-Type", "application/json"),
           ("Content-Encoding", "gzip")
       ])
-      let body = %*{"logs": newLogs}
-      let response = client.request(self.url, httpMethod = HttpPost, body = compress($body))
+      let body = logsRequestBody(newLogs)
+      let response = client.request(self.url, httpMethod = HttpPost, body = compress(body))
       self.lastSendAt = epochTime()
       if response.code != Http200:
         echo "Error sending logs: HTTP " & $response.status
@@ -104,7 +115,7 @@ proc run(self: LoggerThread) =
         run += 2
     let (success, payload) = logChannel.tryRecv()
     if success:
-      echo payload # print to stdout / journal
+      echo "(" & $payload[0] & ", " & payload[1] & ")" # print to stdout / journal
       self.logs.add(payload)
       logToFile(self.frameConfig.logToFile, payload[1], self.lastLogFilePath)
       run = 2
@@ -129,7 +140,7 @@ proc createThreadRunner(frameConfig: FrameConfig) {.thread.} =
       run(loggerThread)
     except Exception as e:
       echo "Error in logger thread: " & $e.msg
-      logToFile(frameConfig.logToFile, %*{"error": "Error in logger thread", "message": $e.msg}, errorLogFilePath)
+      logToFile(frameConfig.logToFile, $(%*{"error": "Error in logger thread", "message": $e.msg}), errorLogFilePath)
       sleep(1000)
 
 proc newLogger*(frameConfig: FrameConfig): Logger =

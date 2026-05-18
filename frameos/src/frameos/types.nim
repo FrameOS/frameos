@@ -110,7 +110,7 @@ type
     frameConfig*: FrameConfig
     lock*: Lock
     thread*: Thread[FrameConfig]
-    channel*: Channel[(float, JsonNode)]
+    channel*: Channel[(float, string)]
     log*: proc (payload: JsonNode)
     enabled*: bool
     enable*: proc ()

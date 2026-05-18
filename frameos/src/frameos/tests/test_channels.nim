@@ -25,6 +25,9 @@ proc drainServerChannel() =
     if not ok:
       break
 
+proc logJson(payload: (float, string)): JsonNode =
+  parseJson(payload[1])
+
 suite "frameos channels":
   setup:
     drainEventChannel()
@@ -55,12 +58,13 @@ suite "frameos channels":
     let (okMain, mainPayload) = logChannel.tryRecv()
     check okMain
     check mainPayload[0] >= before
-    check mainPayload[1]["event"].getStr() == "unit"
-    check mainPayload[1]["value"].getInt() == 42
+    let mainLog = logJson(mainPayload)
+    check mainLog["event"].getStr() == "unit"
+    check mainLog["value"].getInt() == 42
 
     let (okBroadcast, broadcastPayload) = logBroadcastChannel.tryRecv()
     check okBroadcast
-    check broadcastPayload[1]["event"].getStr() == "unit"
+    check logJson(broadcastPayload)["event"].getStr() == "unit"
 
   test "triggerServerRender uses bounded queue semantics":
     triggerServerRender()

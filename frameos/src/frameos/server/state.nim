@@ -68,7 +68,7 @@ proc parseFrameApiId*(rawId: string): int =
   except CatchableError:
     return -1
 
-proc toUiLog*(payload: (float, JsonNode)): JsonNode =
+proc toUiLog*(payload: (float, string)): JsonNode =
   let (timestamp, logPayload) = payload
   globalRecentLogId += 1
   let isoTimestamp = format(fromUnix(int64(timestamp)), "yyyy-MM-dd'T'HH:mm:ss'Z'", utc())
@@ -77,7 +77,7 @@ proc toUiLog*(payload: (float, JsonNode)): JsonNode =
     "timestamp": isoTimestamp,
     "ip": "",
     "type": "webhook",
-    "line": $logPayload,
+    "line": logPayload,
     "frame_id": FRAME_API_ID,
   }
 

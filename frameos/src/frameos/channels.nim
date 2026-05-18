@@ -49,14 +49,14 @@ else:
 
   # Log
 
-  var logChannel*: Channel[(float, JsonNode)]
+  var logChannel*: Channel[(float, string)]
   logChannel.open()
 
-  var logBroadcastChannel*: Channel[(float, JsonNode)]
+  var logBroadcastChannel*: Channel[(float, string)]
   logBroadcastChannel.open(5000)
 
   proc log*(event: JsonNode) {.gcsafe.} =
-    let payload = (epochTime(), event)
+    let payload = (epochTime(), $event)
     logChannel.send(payload)
     discard logBroadcastChannel.trySend(payload)
 
