@@ -114,7 +114,9 @@ async def test_ensure_prebuilt_component_rejects_invalid_download(tmp_path, monk
 @pytest.mark.asyncio
 async def test_ensure_lgpio_builds_from_source_without_prebuilt_sysroot(
     tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
 ):
+    monkeypatch.setenv("FRAMEOS_CROSS_CACHE", str(tmp_path / "cross-cache"))
     compiler = CrossCompiler(
         db=None,
         redis=None,
