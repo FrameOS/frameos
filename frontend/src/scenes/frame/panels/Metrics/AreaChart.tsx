@@ -36,6 +36,19 @@ const tooltipBorderColor = 'rgba(244,244,245,0.24)'
 const tooltipTextColor = 'rgba(244,244,245,0.92)'
 const tooltipMutedTextColor = 'rgba(244,244,245,0.62)'
 const tooltipShadowColor = 'rgba(0,0,0,0.24)'
+const axisTimeFormatter = new Intl.DateTimeFormat(undefined, {
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+})
+const tooltipTimestampFormatter = new Intl.DateTimeFormat(undefined, {
+  month: 'short',
+  day: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hourCycle: 'h23',
+})
 
 // accessors
 const getDate = (m: MetricPoint) => m.x
@@ -166,14 +179,16 @@ function average(values: number[]): number {
   return values.reduce((sum, value) => sum + value, 0) / values.length
 }
 
+function metricDate(value: Date | number | { valueOf(): number }): Date {
+  return value instanceof Date ? value : new Date(value.valueOf())
+}
+
+function formatAxisTimestamp(value: Date | number | { valueOf(): number }): string {
+  return axisTimeFormatter.format(metricDate(value))
+}
+
 function formatTooltipTimestamp(timestamp: number): string {
-  return new Date(timestamp).toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  })
+  return tooltipTimestampFormatter.format(new Date(timestamp))
 }
 
 function closestTooltipSnapshot(snapshots: ChartTooltipSnapshot[], x: number): ChartTooltipSnapshot | null {
@@ -443,6 +458,7 @@ export function AreaChart({
           stroke={axisColor}
           tickStroke={axisColor}
           tickLabelProps={axisBottomTickLabelProps}
+          tickFormat={formatAxisTimestamp}
         />
       )}
       {!hideLeftAxis && (
