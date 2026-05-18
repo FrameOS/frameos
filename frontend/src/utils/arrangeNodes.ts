@@ -23,8 +23,10 @@ const LOCAL_NARROW_TARGET_INPUT_LEFT_OFFSET = 64
 const LOCAL_NARROW_TARGET_WIDTH = 340
 const LOCAL_NARROW_TARGET_HEIGHT = 140
 const LOCAL_STATE_INPUT_LEFT_OFFSET = 8
+const LOCAL_DATA_INPUT_LEFT_OFFSET = 49
 const LOCAL_INPUT_STAGGER_X = 16
 const LOCAL_INPUT_VERTICAL_GAP = 50
+const LOCAL_DATA_INPUT_VERTICAL_GAP = 38
 const LOCAL_COMPACT_CODE_INPUT_VERTICAL_GAP = 30
 const LOCAL_MEDIUM_CODE_INPUT_VERTICAL_GAP = 39
 const LOCAL_NARROW_TARGET_CODE_INPUT_VERTICAL_GAP = 67
@@ -780,6 +782,9 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
     if (sourceNode.type === 'state') {
       return LOCAL_STATE_INPUT_LEFT_OFFSET
     }
+    if (isDataAppNode(sourceNode) && isDataAppNode(targetNode)) {
+      return LOCAL_DATA_INPUT_LEFT_OFFSET
+    }
 
     const targetSize = getNodeSize(targetNode)
     if (sourceNode.type === 'code' && targetSize.width <= LOCAL_NARROW_TARGET_WIDTH) {
@@ -794,6 +799,9 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
       return targetSize.height >= LOCAL_LARGE_INPUT_TARGET_HEIGHT
         ? LOCAL_STATE_INPUT_LARGE_TARGET_VERTICAL_GAP
         : LOCAL_STATE_INPUT_VERTICAL_GAP
+    }
+    if (isDataAppNode(sourceNode) && isDataAppNode(targetNode)) {
+      return LOCAL_DATA_INPUT_VERTICAL_GAP
     }
     if (sourceNode.type === 'code') {
       if (targetSize.height <= LOCAL_NARROW_TARGET_HEIGHT) {
@@ -1049,6 +1057,7 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
           targetNode &&
           isDataAppNode(sourceNode) &&
           targetNode.type === 'app' &&
+          !isDataAppNode(targetNode) &&
           !flowNodeIds.has(sourceNode.id) &&
           !flowNodeIds.has(targetNode.id) &&
           edge.sourceHandle === 'fieldOutput' &&
