@@ -744,6 +744,37 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
     return bounds
   }
 
+  const estimateFlowBranchBounds = (rootId: string, visited: Set<string> = new Set()): Bounds => {
+    const rootPosition = basePositions.get(rootId)
+    if (!rootPosition) {
+      return estimateLocalInputTreeBounds(rootId)
+    }
+
+    let bounds = estimateLocalInputTreeBounds(rootId)
+    if (visited.has(rootId)) {
+      return bounds
+    }
+    visited.add(rootId)
+
+    orderedFlowEdges
+      .filter((edge) => edge.source === rootId)
+      .forEach((edge) => {
+        const childPosition = basePositions.get(edge.target)
+        if (!childPosition) {
+          return
+        }
+        bounds = mergeBounds(
+          bounds,
+          shiftBounds(estimateFlowBranchBounds(edge.target, new Set(visited)), {
+            x: childPosition.x - rootPosition.x,
+            y: childPosition.y - rootPosition.y,
+          })
+        )
+      })
+
+    return bounds
+  }
+
   Object.entries(branchEdgesBySource).forEach(([sourceId, sourceEdges]) => {
     if (sourceEdges.length < 2) {
       return
@@ -761,13 +792,15 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
       pathIndexes: fieldPathIndexes(edge.sourceHandle),
     }))
     const hasGridHandles = indexedEdges.every(({ pathIndexes }) => pathIndexes.length >= 2)
-
-    const rowValues = hasGridHandles
+    const handleRowValues = hasGridHandles
       ? Array.from(new Set(indexedEdges.map(({ pathIndexes }) => pathIndexes[0]))).sort((a, b) => a - b)
       : []
-    const columnValues = hasGridHandles
+    const handleColumnValues = hasGridHandles
       ? Array.from(new Set(indexedEdges.map(({ pathIndexes }) => pathIndexes[1]))).sort((a, b) => a - b)
       : []
+    const shouldWrapOneDimensionalGrid =
+      hasGridHandles && indexedEdges.length > 3 && (handleRowValues.length === 1 || handleColumnValues.length === 1)
+    const useHandleGrid = hasGridHandles && !shouldWrapOneDimensionalGrid
     const automaticColumnCount = Math.max(1, Math.ceil(Math.sqrt(indexedEdges.length)))
     const branchItems = indexedEdges
       .map(({ edge, index, pathIndexes }) => {
@@ -776,9 +809,9 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
         if (!targetNode || !targetPosition) {
           return null
         }
-        const row = hasGridHandles ? rowValues.indexOf(pathIndexes[0]) : Math.floor(index / automaticColumnCount)
-        const column = hasGridHandles ? columnValues.indexOf(pathIndexes[1]) : index % automaticColumnCount
-        const footprint = estimateLocalInputTreeBounds(edge.target)
+        const row = useHandleGrid ? handleRowValues.indexOf(pathIndexes[0]) : Math.floor(index / automaticColumnCount)
+        const column = useHandleGrid ? handleColumnValues.indexOf(pathIndexes[1]) : index % automaticColumnCount
+        const footprint = estimateFlowBranchBounds(edge.target)
         return {
           edge,
           targetPosition,
