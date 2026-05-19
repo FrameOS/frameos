@@ -464,6 +464,35 @@ async def test_full_plan_includes_post_deploy_driver_and_reboot_steps(monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_post_deploy_plan_normalizes_legacy_reboot_crontab():
+    frame = SimpleNamespace(
+        id=9,
+        name="LegacyCronFrame",
+        reboot={"enabled": "true", "crontab": "4 0 * * *", "type": "frameos"},
+        last_successful_deploy_at=None,
+    )
+    workflow = FrameDeployWorkflow(
+        db=None,
+        redis=None,
+        frame=frame,
+        deployer=FakeDeployer(),
+        temp_dir="",
+        binary_builder=FakeBinaryBuilder(),
+    )
+
+    post_deploy = await workflow._plan_post_deploy_cleanup(drivers={}, low_memory=False)
+
+    assert post_deploy["reboot_schedule"] == {
+        "enabled": True,
+        "crontab": "0 4 * * *",
+        "type": "frameos",
+        "command": "systemctl restart frameos.service",
+        "needs_update": True,
+        "needs_remove": False,
+    }
+
+
+@pytest.mark.asyncio
 async def test_full_plan_tracks_helper_actions_and_fallback_packages(monkeypatch: pytest.MonkeyPatch):
     frame = SimpleNamespace(
         id=12,

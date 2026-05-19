@@ -21,7 +21,7 @@ export interface MetricSeries {
   label: string
   color: string
   axis: 'left' | 'right'
-  unit?: 'bytes' | 'percent'
+  unit?: 'bytes' | 'percent' | 'pixels'
   data: MetricPoint[]
 }
 
@@ -49,6 +49,10 @@ const DISK_USAGE_COLORS: Record<string, string> = {
   total: '#38bdf8',
   used: '#fb7185',
   available: '#34d399',
+}
+const RUNTIME_DIMENSION_COLORS: Record<string, string> = {
+  width: '#38bdf8',
+  height: '#34d399',
 }
 
 function parseMetricTimestamp(timestamp: string): number {
@@ -173,7 +177,7 @@ function getOrCreateMetricSeries(
   label: string,
   color: string,
   axis: 'left' | 'right' = 'left',
-  unit?: 'bytes' | 'percent'
+  unit?: MetricSeries['unit']
 ): MetricSeries {
   const categorySeries = (metricsByCategory[category] ||= [])
   let series = categorySeries.find((existingSeries) => existingSeries.key === key)
@@ -223,6 +227,12 @@ function normalizeDiskUsageEntries(value: Record<string, unknown>): [string, num
   return entries
 }
 
+function normalizeRuntimeDimensionEntries(value: Record<string, unknown>): [string, number][] {
+  return ['width', 'height']
+    .map((key): [string, number] => [key, Number(value[key])])
+    .filter(([, value]) => Number.isFinite(value) && value > 0)
+}
+
 function formatShortBytes(value: number): string {
   const units = ['B', 'K', 'M', 'G', 'T']
   let unitIndex = 0
@@ -268,6 +278,24 @@ function getLatestDiskUsageSummary(metrics: MetricsType[]): string | null {
 
     if (Number.isFinite(total) && total > 0 && Number.isFinite(resolvedUsed)) {
       return formatShortBytesPair(resolvedUsed, total)
+    }
+  }
+
+  return null
+}
+
+function getLatestRuntimeDimensionsSummary(metrics: MetricsType[]): string | null {
+  for (let i = metrics.length - 1; i >= 0; i--) {
+    const runtime = metrics[i].metrics?.runtime
+    if (!runtime || typeof runtime !== 'object' || Array.isArray(runtime)) {
+      continue
+    }
+
+    const runtimeRecord = runtime as Record<string, unknown>
+    const width = Number(runtimeRecord.width)
+    const height = Number(runtimeRecord.height)
+    if (Number.isFinite(width) && width > 0 && Number.isFinite(height) && height > 0) {
+      return `${width}x${height}`
     }
   }
 
@@ -426,17 +454,33 @@ export const metricsLogic = kea<metricsLogicType>([
                 }
               }
             } else if (value && typeof value === 'object') {
+              const valueRecord = value as Record<string, unknown>
+              if (key === 'runtime') {
+                normalizeRuntimeDimensionEntries(valueRecord).forEach(([subKey, subValue]) => {
+                  const series = getOrCreateMetricSeries(
+                    metricsByCategory,
+                    'runtimeDimensions',
+                    `runtime.${subKey}`,
+                    subKey,
+                    RUNTIME_DIMENSION_COLORS[subKey] ?? metricSeriesColor(metricsByCategory.runtimeDimensions?.length ?? 0),
+                    'left',
+                    'pixels'
+                  )
+                  series.data.push({ x: timestamp, y: subValue })
+                })
+              }
               const entries =
                 key === 'memoryUsage'
-                  ? normalizeMemoryUsageEntries(value as Record<string, unknown>)
+                  ? normalizeMemoryUsageEntries(valueRecord)
                   : key === 'diskUsage'
-                  ? normalizeDiskUsageEntries(value as Record<string, unknown>)
+                  ? normalizeDiskUsageEntries(valueRecord)
                   : Object.entries(value)
               for (const [subKey, subValue] of entries) {
                 if (
                   (key === 'memoryUsage' && (subKey === 'active' || subKey === 'free' || subKey === 'percentage')) ||
                   (key === 'diskUsage' && (subKey === 'filesystems' || subKey === 'percentage')) ||
-                  (key === 'processMemory' && subKey === 'pid')
+                  (key === 'processMemory' && subKey === 'pid') ||
+                  (key === 'runtime' && (subKey === 'width' || subKey === 'height'))
                 ) {
                   continue
                 }
@@ -515,7 +559,11 @@ export const metricsLogic = kea<metricsLogicType>([
       (s) => [s.sortedMetrics],
       (metrics): Record<string, string> => {
         const diskUsageSummary = getLatestDiskUsageSummary(metrics)
-        return diskUsageSummary ? { diskUsage: diskUsageSummary } : {}
+        const runtimeDimensionsSummary = getLatestRuntimeDimensionsSummary(metrics)
+        return {
+          ...(diskUsageSummary ? { diskUsage: diskUsageSummary } : {}),
+          ...(runtimeDimensionsSummary ? { runtimeDimensions: runtimeDimensionsSummary } : {}),
+        }
       },
     ],
   }),

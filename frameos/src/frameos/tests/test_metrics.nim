@@ -37,7 +37,7 @@ suite "metrics loop":
     let (hasNext, _) = logChannel.tryRecv()
     check not hasNext
 
-  test "enabled interval logs one metrics sample with hook values and no startup placeholder":
+  test "enabled interval logs one metrics sample with hook values and runtime diagnostics":
     setMetricsHooksForTest(
       readFileHook = proc(path: string): string {.gcsafe, nimcall.} =
         if path == "/proc/loadavg":
@@ -93,9 +93,10 @@ suite "metrics loop":
     check not sampleJson["processMemory"].hasKey("pid")
     check abs(sampleJson["cpuUsage"].getFloat() - 12.5) < 0.0001
     check sampleJson["openFileDescriptors"].getInt() == 9
-    check not sampleJson.hasKey("runtime")
+    check sampleJson["runtime"]["active"].getBool() == false
+    check sampleJson["runtime"]["sequence"].getInt() == 0
 
-  test "enabled interval includes active runtime diagnostics":
+  test "enabled interval includes active runtime diagnostics without debug mode":
     setMetricsHooksForTest(
       readFileHook = proc(path: string): string {.gcsafe, nimcall.} =
         if path == "/proc/loadavg":
@@ -114,7 +115,7 @@ suite "metrics loop":
     markRuntimeCheckpoint("node:start", currentSceneId = "scene-b", contextEvent = "render",
       nodeId = 42, nodeType = "app", keyword = "data/demo")
 
-    runMetricsLoopForTest(FrameConfig(metricsInterval: 1, debug: true), iterations = 1)
+    runMetricsLoopForTest(FrameConfig(metricsInterval: 1), iterations = 1)
 
     let (okSample, samplePayload) = logChannel.tryRecv()
     check okSample

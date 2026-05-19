@@ -7,6 +7,7 @@ from app.models.frame import (
     delete_frame,
     new_frame,
     normalize_frame_admin_auth,
+    normalize_reboot_crontab,
     update_frame,
 )
 
@@ -30,6 +31,7 @@ async def test_new_frame(mock_publish, db, redis):
     assert frame.ssh_user == "pi"
     assert frame.device == "testDevice"
     assert frame.interval == 123
+    assert frame.reboot == {"enabled": "true", "crontab": "0 4 * * *"}
     assert frame.server_send_logs is True
     assert frame.https_proxy["enable"] is True
     assert frame.https_proxy["expose_only_port"] is True
@@ -83,6 +85,7 @@ async def test_frame_to_dict(mock_publish, db, redis):
     assert data["frame_host"] == "host"
     assert data["interval"] == 55
     assert data["server_send_logs"] is True
+    assert data["reboot"]["crontab"] == "0 4 * * *"
     assert data["https_proxy"]["certs"]["server"]
     assert data["https_proxy"]["certs"]["server_key"]
     assert data["https_proxy"]["certs"]["client_ca"]
@@ -103,3 +106,10 @@ def test_normalize_frame_admin_auth_keeps_password_whitespace():
         "user": "admin",
         "pass": " secret ",
     }
+
+
+def test_normalize_reboot_crontab_fixes_legacy_hour_minute_swap():
+    assert normalize_reboot_crontab("4 0 * * *") == "0 4 * * *"
+    assert normalize_reboot_crontab("23 0 * * *") == "0 23 * * *"
+    assert normalize_reboot_crontab("0 4 * * *") == "0 4 * * *"
+    assert normalize_reboot_crontab("*/15 * * * *") == "*/15 * * * *"

@@ -1474,32 +1474,10 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                 <Field name="crontab" label="Reboot time">
                   <Select
                     name="crontab"
-                    options={[
-                      { value: '0 0 * * *', label: '00:00' },
-                      { value: '1 0 * * *', label: '01:00' },
-                      { value: '2 0 * * *', label: '02:00' },
-                      { value: '3 0 * * *', label: '03:00' },
-                      { value: '4 0 * * *', label: '04:00' },
-                      { value: '5 0 * * *', label: '05:00' },
-                      { value: '6 0 * * *', label: '06:00' },
-                      { value: '7 0 * * *', label: '07:00' },
-                      { value: '8 0 * * *', label: '08:00' },
-                      { value: '9 0 * * *', label: '09:00' },
-                      { value: '10 0 * * *', label: '10:00' },
-                      { value: '11 0 * * *', label: '11:00' },
-                      { value: '12 0 * * *', label: '12:00' },
-                      { value: '13 0 * * *', label: '13:00' },
-                      { value: '14 0 * * *', label: '14:00' },
-                      { value: '15 0 * * *', label: '15:00' },
-                      { value: '16 0 * * *', label: '16:00' },
-                      { value: '17 0 * * *', label: '17:00' },
-                      { value: '18 0 * * *', label: '18:00' },
-                      { value: '19 0 * * *', label: '19:00' },
-                      { value: '20 0 * * *', label: '20:00' },
-                      { value: '21 0 * * *', label: '21:00' },
-                      { value: '22 0 * * *', label: '22:00' },
-                      { value: '23 0 * * *', label: '23:00' },
-                    ]}
+                    options={[...Array(24).keys()].map((hour) => ({
+                      value: `0 ${hour} * * *`,
+                      label: `${hour.toString().padStart(2, '0')}:00`,
+                    }))}
                   />
                 </Field>
                 <Field name="type" label="What to reboot">

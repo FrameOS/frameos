@@ -10,6 +10,7 @@ const metricLabels: Record<string, string> = {
   memoryUsage: 'Memory',
   diskUsage: 'Disk',
   processMemory: 'Process memory',
+  runtimeDimensions: 'Runtime size',
 }
 
 export function Metrics() {
