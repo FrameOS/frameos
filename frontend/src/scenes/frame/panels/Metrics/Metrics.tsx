@@ -1,9 +1,15 @@
 import { useActions, useValues } from 'kea'
 import clsx from 'clsx'
-import { metricSeriesVisibilityKey, metricsLogic } from './metricsLogic'
+import {
+  metricSeriesVisibilityKey,
+  metricsLogic,
+  metricsTimeRangeOptions,
+  type MetricsTimeRangePreset,
+} from './metricsLogic'
 import { frameLogic } from '../../frameLogic'
 import { ParentSize } from '@visx/responsive'
 import { BrushChart } from './BrushChart'
+import { Select } from '../../../../components/Select'
 
 const metricLabels: Record<string, string> = {
   load: 'Load',
@@ -23,10 +29,17 @@ export function Metrics() {
     metricsLoading,
     metricsTimeRange,
     visibleTimeRange,
+    selectedTimeRangePreset,
     metricGapThresholdMs,
     latestMetricSummariesByCategory,
   } = useValues(metricsLogic({ frameId }))
-  const { setSelectedTimeRange, resetSelectedTimeRange, toggleMetricSeries } = useActions(metricsLogic({ frameId }))
+  const { setSelectedTimeRange, resetSelectedTimeRange, setSelectedTimeRangePreset, toggleMetricSeries } = useActions(
+    metricsLogic({ frameId })
+  )
+  const timeRangeOptions =
+    selectedTimeRangePreset === 'custom'
+      ? [...metricsTimeRangeOptions, { value: 'custom' as const, label: 'Custom' }]
+      : metricsTimeRangeOptions
 
   return metricsLoading ? (
     <div>...</div>
@@ -34,6 +47,18 @@ export function Metrics() {
     <div>No Metrics yet</div>
   ) : (
     <div className="h-full p-2 relative select-none">
+      <div className="mb-2 flex items-center gap-3">
+        <Select
+          aria-label="Metrics time range"
+          className="!w-32 rounded border-gray-600 bg-gray-800 py-1 text-xs"
+          options={timeRangeOptions}
+          value={selectedTimeRangePreset}
+          onChange={(value) => setSelectedTimeRangePreset(value as MetricsTimeRangePreset)}
+        />
+        <div className="text-sm text-gray-400">
+          {metrics.length} point{metrics.length === 1 ? '' : 's'}
+        </div>
+      </div>
       <ParentSize>
         {(parent) =>
           Object.entries(metricsByCategory).map(([key, series]) => {

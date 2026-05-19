@@ -7,6 +7,9 @@ from app.database import Base
 from sqlalchemy.orm import relationship, backref, Session, mapped_column
 from app.websockets import publish_message
 
+METRICS_RETAINED_PER_FRAME = 11000
+
+
 class Metrics(Base):
     __tablename__ = 'metrics'
     id = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -35,11 +38,12 @@ async def new_metrics(db: Session, redis: Redis, frame_id: int, metrics: dict) -
     db.commit()
     metrics_count = db.query(Metrics).filter_by(frame_id=frame_id).count()
     payload = metrics.to_dict()
-    if metrics_count > 1100:
+    if metrics_count > METRICS_RETAINED_PER_FRAME:
+        trim_count = metrics_count - METRICS_RETAINED_PER_FRAME
         oldest_metrics = (db.query(Metrics)
                           .filter_by(frame_id=frame_id)
                           .order_by(Metrics.timestamp)
-                          .limit(10)
+                          .limit(trim_count)
                           .all())
         for old_metric in oldest_metrics:
             db.delete(old_metric)

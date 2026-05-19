@@ -23,6 +23,7 @@ let frameWebIndexHtml* =
     frameWebAssets.getAsset("assets/compiled/frame_web/index.html")
 
 const MAX_RECENT_LOGS* = 5000
+const MAX_RECENT_METRICS* = MAX_RECENT_LOGS * 10
 const FRAME_API_ID* = 1
 
 proc initConnectionsState*(): ConnectionsState =
@@ -116,8 +117,8 @@ proc storeUiLog*(logEntry: JsonNode) =
       let metricEntry = metricsEntryFromLog(logEntry)
       if metricEntry != nil:
         globalRecentMetrics.add(metricEntry)
-        if globalRecentMetrics.len > MAX_RECENT_LOGS:
-          globalRecentMetrics = globalRecentMetrics[(globalRecentMetrics.len - MAX_RECENT_LOGS) .. (globalRecentMetrics.len - 1)]
+        if globalRecentMetrics.len > MAX_RECENT_METRICS:
+          globalRecentMetrics = globalRecentMetrics[(globalRecentMetrics.len - MAX_RECENT_METRICS) .. (globalRecentMetrics.len - 1)]
 
 proc getUiLogs*(): JsonNode =
   {.gcsafe.}:

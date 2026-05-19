@@ -1,7 +1,9 @@
-import pytest
+from datetime import datetime, timedelta
 from unittest.mock import patch, AsyncMock
-from app.models.metrics import new_metrics, Metrics
+
+import pytest
 from app.models.frame import new_frame
+from app.models.metrics import METRICS_RETAINED_PER_FRAME, Metrics, new_metrics
 
 @pytest.mark.asyncio
 @patch("app.models.metrics.publish_message", new_callable=AsyncMock)
@@ -24,7 +26,15 @@ async def test_new_metrics_trimming(mock_pub, db, redis):
     db.query(Metrics).delete()
     db.commit()
 
-    for i in range(1200):
-        await new_metrics(db, redis, frame.id, {"index": i})
+    base_timestamp = datetime(2026, 1, 1)
+    db.add_all(
+        [
+            Metrics(frame_id=frame.id, metrics={"index": i}, timestamp=base_timestamp + timedelta(seconds=i))
+            for i in range(METRICS_RETAINED_PER_FRAME)
+        ]
+    )
+    db.commit()
+
+    await new_metrics(db, redis, frame.id, {"index": METRICS_RETAINED_PER_FRAME})
     count = db.query(Metrics).filter_by(frame_id=frame.id).count()
-    assert count == 1100
+    assert count == METRICS_RETAINED_PER_FRAME
