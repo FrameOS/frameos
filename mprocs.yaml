@@ -1,8 +1,10 @@
 procs:
+  cloud:
+    shell: pnpm run dev:cloud
   backend:
-    shell: pnpm run dev:backend
+    shell: FRAMEOS_CLOUD_URL=http://localhost:3000 pnpm run dev:backend
   worker:
-    shell: pnpm run dev:worker
+    shell: FRAMEOS_CLOUD_URL=http://localhost:3000 pnpm run dev:worker
   vite:
     shell: pnpm --dir frontend run dev:vite
   kea:

@@ -5,11 +5,12 @@ import { Field } from '../../components/Field'
 import { TextInput } from '../../components/TextInput'
 import { Button } from '../../components/Button'
 import { signupLogic } from './signupLogic'
-import { useValues } from 'kea'
+import { useActions, useValues } from 'kea'
 import darkMarkSmall from '../../assets/logo/dark-mark-small.png'
 
 export function Signup() {
-  const { isSignupFormSubmitting } = useValues(signupLogic)
+  const { isSignupFormSubmitting, isCloudSignupSubmitting } = useValues(signupLogic)
+  const { cloudSignup } = useActions(signupLogic)
   return (
     <div className="h-full w-full min-h-screen max-w-screen flex flex-col items-center justify-center gap-8">
       <div className="flex gap-4 justify-center items-center">
@@ -38,6 +39,17 @@ export function Signup() {
           <div className="flex gap-2">
             <Button disabled={isSignupFormSubmitting} type="submit" className="w-full bg-[#5B5983] hover:bg-[#7A6D86]">
               Sign Up
+            </Button>
+          </div>
+          <div className="flex flex-col gap-2 border-t border-gray-700 pt-4">
+            <Button
+              color="secondary"
+              disabled={isSignupFormSubmitting || isCloudSignupSubmitting}
+              onClick={cloudSignup}
+              type="button"
+              className="w-full"
+            >
+              Authenticate via FrameOS Cloud
             </Button>
           </div>
         </Form>

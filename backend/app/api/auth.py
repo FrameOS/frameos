@@ -2,6 +2,7 @@ import datetime
 from typing import Optional
 
 from fastapi import Depends, HTTPException, status, Request, Response, WebSocket
+from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import jwt, JWTError
 from sqlalchemy.orm import Session
@@ -17,6 +18,8 @@ from app.utils.session_cookie import (
     create_session_cookie_value,
     decode_session_cookie_value,
 )
+from app.utils.cloud_auth import create_cloud_auth_session
+from app.utils.cloud import sanitize_return_to
 
 from . import api_no_auth, api_with_auth
 
@@ -160,12 +163,28 @@ async def login(
         raise HTTPException(status_code=429, detail="Too many login attempts")
 
     user = db.query(User).filter_by(email=email).first()
-    if user is None or not check_password_hash(user.password, password):
+    if user is None or not user.password or not check_password_hash(user.password, password):
         await redis.incr(key)
         await redis.expire(key, 300)  # expire after 5 minutes
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
     await redis.delete(key)
+    if user.cloud_auth_required:
+        _, cloud_auth_url = create_cloud_auth_session(
+            db=db,
+            request=request,
+            purpose="login",
+            user_id=user.id,
+            return_to=sanitize_return_to(request, request.headers.get("x-frameos-return-to")),
+        )
+        return JSONResponse(
+            status_code=403,
+            content={
+                "detail": "FrameOS Cloud authentication required",
+                "cloud_auth_url": cloud_auth_url,
+            },
+        )
+
     access_token_expires = datetime.timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(data={"sub": user.email}, expires_delta=access_token_expires)
     session_value, max_age = create_session_cookie_value(email=user.email, expires_delta=access_token_expires)

@@ -634,6 +634,10 @@ export interface FrameOSSettings {
     sshKey?: string
     sshPublicKey?: string
   }
+  cloudBackups?: {
+    keyName?: string
+    encryptionKey?: string
+  }
 }
 
 export interface SSHKeyEntry {

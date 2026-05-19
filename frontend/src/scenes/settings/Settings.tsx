@@ -10,7 +10,7 @@ import { Button } from '../../components/Button'
 import { Field } from '../../components/Field'
 import { TextArea } from '../../components/TextArea'
 import { sceneLogic } from '../sceneLogic'
-import { ArrowPathIcon, PlusIcon, TrashIcon } from '@heroicons/react/24/solid'
+import { ArrowPathIcon, KeyIcon, PlusIcon, TrashIcon } from '@heroicons/react/24/solid'
 import { NumberTextInput } from '../../components/NumberTextInput'
 import { Switch } from '../../components/Switch'
 import { Select } from '../../components/Select'
@@ -21,6 +21,7 @@ import { frameHost } from '../../decorators/frame'
 import { A } from 'kea-router'
 import { urls } from '../../urls'
 import { Tag } from '../../components/Tag'
+import { SecretField } from '../../components/SecretField'
 
 export function Settings() {
   const {
@@ -39,6 +40,9 @@ export function Settings() {
     customFonts,
     generatingSshKeyId,
     sshKeyExpandedIds,
+    cloudStatus,
+    cloudStatusLoading,
+    isCloudReauthStarting,
   } = useValues(settingsLogic)
   const { framesList } = useValues(framesModel)
   const {
@@ -53,12 +57,41 @@ export function Settings() {
     deleteEmbeddings,
     loadAiEmbeddingsStatus,
     toggleSshKeyExpanded,
+    loadCloudStatus,
+    saveCloudBackupKey,
+    forgetCloudBackupKey,
+    generateCloudBackupKey,
+    startCloudReauth,
   } = useActions(settingsLogic)
   const { isHassioIngress } = useValues(sceneLogic)
   const { logout } = useActions(sceneLogic)
   const defaultSshKeyIds = getDefaultSshKeyIds(settings?.ssh_keys)
   const framesUsingKey = (keyId: string) =>
     framesList.filter((frame) => (frame.ssh_keys ?? defaultSshKeyIds).includes(keyId))
+  const cloudBackupKey = settings?.cloudBackups?.encryptionKey ?? ''
+  const cloudBackupKeyName = settings?.cloudBackups?.keyName ?? 'Default backup key'
+  const savedCloudBackupKey = savedSettings?.cloudBackups?.encryptionKey ?? ''
+  const savedCloudBackupKeyName = savedSettings?.cloudBackups?.keyName ?? 'Default backup key'
+  const cloudBackupKeyChanged = cloudBackupKey !== savedCloudBackupKey || cloudBackupKeyName !== savedCloudBackupKeyName
+  const cloudBackupKeySaved = !!savedCloudBackupKey && !cloudBackupKeyChanged
+  const cloudBackupStatus = cloudBackupKeyChanged
+    ? 'Unsaved changes'
+    : cloudBackupKeySaved
+    ? 'Saved locally'
+    : 'Not saved'
+  const cloudStatusHasError = !!cloudStatus?.cloud_error
+  const cloudStatusLinked = !!cloudStatus?.linked && !cloudStatusHasError
+  const cloudStatusLabel = cloudStatusHasError ? 'Error' : cloudStatusLinked ? 'Linked' : 'Not linked'
+  const cloudStatusDetail =
+    cloudStatus?.cloud_error || cloudStatus?.cloud_backend_name || cloudStatus?.cloud_url || 'FrameOS Cloud'
+  const cloudBackupKeyInput = (
+    <TextInput
+      autoComplete="off"
+      placeholder="Generate or paste a backup key"
+      value={cloudBackupKey}
+      onChange={(value) => setSettingsValue(['cloudBackups', 'encryptionKey'] as any, value)}
+    />
+  )
 
   return (
     <div className="h-full w-full overflow-hidden max-w-screen max-h-screen left-0 top-0 absolute">
@@ -81,6 +114,88 @@ export function Settings() {
             <Spinner />
           ) : (
             <>
+              <H6 className="pt-4">FrameOS Cloud</H6>
+              <Box className="p-2 space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="space-y-1">
+                    <div className="flex flex-wrap items-center gap-2 text-sm font-semibold text-gray-200">
+                      <span>Cloud authentication</span>
+                      <Tag color={cloudStatusHasError ? 'red' : cloudStatusLinked ? 'teal' : 'secondary'}>
+                        {cloudStatusLabel}
+                      </Tag>
+                      {cloudStatusLoading ? <Spinner color="white" /> : null}
+                    </div>
+                    <div className={cloudStatusHasError ? 'text-xs text-red-300' : 'text-xs text-gray-400'}>
+                      {cloudStatusDetail}
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      color="secondary"
+                      size="small"
+                      onClick={loadCloudStatus}
+                      disabled={cloudStatusLoading || isCloudReauthStarting}
+                      aria-label="Refresh FrameOS Cloud status"
+                      title="Refresh FrameOS Cloud status"
+                    >
+                      <ArrowPathIcon className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      color={cloudStatusLinked ? 'secondary' : 'primary'}
+                      size="small"
+                      onClick={startCloudReauth}
+                      disabled={isCloudReauthStarting}
+                      className="inline-flex items-center gap-1"
+                    >
+                      {isCloudReauthStarting ? <Spinner color="white" /> : null}
+                      {cloudStatus?.cloud_auth_required || cloudStatusLinked
+                        ? 'Re-authenticate with FrameOS Cloud'
+                        : 'Connect FrameOS Cloud'}
+                    </Button>
+                  </div>
+                </div>
+                <div className="border-t border-gray-700 pt-4 space-y-3">
+                  <div className="flex flex-wrap items-center gap-2 text-sm font-semibold text-gray-200">
+                    <span>Backup encryption key</span>
+                    <Tag color={cloudBackupKeySaved ? 'teal' : cloudBackupKeyChanged ? 'primary' : 'secondary'}>
+                      {cloudBackupStatus}
+                    </Tag>
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+                    <label className="space-y-1 text-sm">
+                      <span className="text-gray-300">Key name</span>
+                      <TextInput
+                        value={cloudBackupKeyName}
+                        onChange={(value) => setSettingsValue(['cloudBackups', 'keyName'] as any, value)}
+                      />
+                    </label>
+                    <label className="space-y-1 text-sm">
+                      <span className="text-gray-300">Key</span>
+                      {cloudBackupKeySaved ? <SecretField>{cloudBackupKeyInput}</SecretField> : cloudBackupKeyInput}
+                    </label>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      size="small"
+                      color="secondary"
+                      onClick={generateCloudBackupKey}
+                      className="inline-flex items-center gap-1"
+                    >
+                      <KeyIcon className="h-4 w-4" />
+                      Generate key
+                    </Button>
+                    <Button size="small" color="primary" onClick={saveCloudBackupKey}>
+                      Save key
+                    </Button>
+                    <Button size="small" color="secondary" onClick={forgetCloudBackupKey}>
+                      Forget key
+                    </Button>
+                  </div>
+                  <p className="text-xs text-gray-400">
+                    The key is stored on this local backend and is needed to encrypt and decrypt backups.
+                  </p>
+                </div>
+              </Box>
               <Form logic={settingsLogic} formKey="settings" props={{}} onSubmit={submitSettings} className="space-y-4">
                 <Group name="ssh_keys">
                   <H6 className="pt-4">SSH Keys</H6>
@@ -395,7 +510,6 @@ export function Settings() {
                     ) : null}
                   </Box>
                 </Group>
-
               </Form>
               <H6 className="pt-4">System information</H6>
               <SystemInfo />

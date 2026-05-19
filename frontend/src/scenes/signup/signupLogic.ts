@@ -1,4 +1,4 @@
-import { afterMount, kea, path } from 'kea'
+import { actions, afterMount, kea, listeners, path, reducers } from 'kea'
 import { forms } from 'kea-forms'
 import type { signupLogicType } from './signupLogicType'
 import { urls } from '../../urls'
@@ -13,6 +13,18 @@ export interface SignupForm {
 
 export const signupLogic = kea<signupLogicType>([
   path(['src', 'scenes', 'signup', 'signupLogic']),
+  actions({
+    cloudSignup: true,
+    setIsCloudSignupSubmitting: (isSubmitting: boolean) => ({ isSubmitting }),
+  }),
+  reducers({
+    isCloudSignupSubmitting: [
+      false,
+      {
+        setIsCloudSignupSubmitting: (_, { isSubmitting }) => isSubmitting,
+      },
+    ],
+  }),
   forms(({ actions }) => ({
     signupForm: {
       defaults: {
@@ -74,4 +86,33 @@ export const signupLogic = kea<signupLogicType>([
       window.location.href = urls.login()
     }
   }),
+  listeners(({ values, actions }) => ({
+    cloudSignup: async () => {
+      actions.setIsCloudSignupSubmitting(true)
+      try {
+        const { email, password, password2, newsletter } = values.signupForm
+        const response = await fetch(`/api/cloud/signup/start`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-FrameOS-Return-To': new URL(urls.frames(), window.location.origin).toString(),
+          },
+          body: JSON.stringify({ email, password, password2, newsletter }),
+        })
+        const json = await response.json().catch(() => ({}))
+        if (response.ok && json.cloud_auth_url) {
+          window.location.href = json.cloud_auth_url
+          return
+        }
+        actions.setSignupFormManualErrors({
+          password2: json.detail || json.error || response.statusText || 'Could not start cloud signup.',
+        })
+      } catch (error) {
+        console.error(error)
+        actions.setSignupFormManualErrors({ password2: 'An unexpected error occurred.' })
+      } finally {
+        actions.setIsCloudSignupSubmitting(false)
+      }
+    },
+  })),
 ])

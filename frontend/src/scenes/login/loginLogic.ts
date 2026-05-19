@@ -36,7 +36,10 @@ export const loginLogic = kea<loginLogicType>([
           formData.append('scope', 'password')
           const response = await fetch(`/api/login`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            headers: {
+              'Content-Type': 'application/x-www-form-urlencoded',
+              'X-FrameOS-Return-To': new URL(urls.frames(), window.location.origin).toString(),
+            },
             body: formData.toString(),
           })
           if (response.ok) {
@@ -45,6 +48,10 @@ export const loginLogic = kea<loginLogicType>([
             let error
             try {
               const json = await response.json()
+              if (json.cloud_auth_url) {
+                window.location.href = json.cloud_auth_url
+                return
+              }
               error = json.detail || json.error
             } catch (e) {
               error = response.statusText

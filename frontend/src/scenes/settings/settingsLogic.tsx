@@ -9,8 +9,11 @@ import { normalizeSshKeys } from '../../utils/sshKeys'
 import { v4 as uuidv4 } from 'uuid'
 import { showWorkingMessage } from '../../utils/workingMessage'
 import { isFrameControlMode } from '../../utils/frameControlMode'
+import { secureToken } from '../../utils/secureToken'
 
 const embeddingsGeneratingStorageKey = 'frameos.embeddings.generating'
+const legacyCloudBackupKeyStorageKey = 'frameos.cloudBackups.key'
+const legacyCloudBackupKeyNameStorageKey = 'frameos.cloudBackups.keyName'
 
 function setDefaultSettings(settings: Partial<FrameOSSettings> | Record<string, any>): FrameOSSettings {
   return {
@@ -24,6 +27,7 @@ function setDefaultSettings(settings: Partial<FrameOSSettings> | Record<string, 
     ssh_keys: normalizeSshKeys(settings.ssh_keys),
     unsplash: settings.unsplash ?? {},
     buildHost: settings.buildHost ?? {},
+    cloudBackups: settings.cloudBackups ?? {},
   }
 }
 
@@ -31,6 +35,16 @@ export interface CustomFont {
   id: string
   path: string
   size: number
+}
+
+export interface CloudStatus {
+  linked: boolean
+  cloud_auth_required: boolean
+  cloud_user_id?: string | null
+  cloud_backend_name?: string | null
+  cloud_backend_url?: string | null
+  cloud_error?: string | null
+  cloud_url: string
 }
 
 export const settingsLogic = kea<settingsLogicType>([
@@ -53,6 +67,11 @@ export const settingsLogic = kea<settingsLogicType>([
     stopEmbeddingsPolling: true,
     generateMissingEmbeddings: true,
     deleteEmbeddings: true,
+    saveCloudBackupKey: true,
+    forgetCloudBackupKey: true,
+    generateCloudBackupKey: true,
+    setIsCloudReauthStarting: (isStarting: boolean) => ({ isStarting }),
+    startCloudReauth: true,
   }),
   loaders(({ values }) => ({
     savedSettings: [
@@ -135,6 +154,33 @@ export const settingsLogic = kea<settingsLogicType>([
         },
       },
     ],
+    cloudStatus: [
+      {
+        linked: false,
+        cloud_auth_required: false,
+        cloud_url: 'https://frameos.net',
+      } as CloudStatus,
+      {
+        loadCloudStatus: async () => {
+          try {
+            const response = await apiFetch(`/api/cloud/status`)
+            const payload = await response.json().catch(() => ({}))
+            if (!response.ok) {
+              throw new Error(payload.detail || payload.error || 'Failed to fetch FrameOS Cloud status')
+            }
+            return payload
+          } catch (error) {
+            console.error(error)
+            return {
+              ...values.cloudStatus,
+              linked: false,
+              cloud_auth_required: true,
+              cloud_error: error instanceof Error ? error.message : 'Failed to fetch FrameOS Cloud status',
+            }
+          }
+        },
+      },
+    ],
   })),
   reducers({
     savedSettings: {
@@ -174,6 +220,12 @@ export const settingsLogic = kea<settingsLogicType>([
         setEmbeddingsPollingIntervalId: (_, { id }) => id,
       },
     ],
+    isCloudReauthStarting: [
+      false,
+      {
+        setIsCloudReauthStarting: (_, { isStarting }) => isStarting,
+      },
+    ],
   }),
   selectors({
     embeddingsCount: [
@@ -201,7 +253,9 @@ export const settingsLogic = kea<settingsLogicType>([
         if (!response.ok) {
           throw new Error('Failed to update frame')
         }
-        actions.resetSettings(setDefaultSettings(await response.json()))
+        const updatedSettings = setDefaultSettings(await response.json())
+        actions.updateSavedSettings(updatedSettings)
+        actions.resetSettings(updatedSettings)
       },
     },
     customFontsForm: {
@@ -243,6 +297,7 @@ export const settingsLogic = kea<settingsLogicType>([
     actions.loadSettings()
     actions.loadAiEmbeddingsStatus()
     actions.loadCustomFonts()
+    actions.loadCloudStatus()
     if (window.localStorage.getItem(embeddingsGeneratingStorageKey) === 'true') {
       actions.setIsGeneratingEmbeddings(true)
       actions.startEmbeddingsPolling()
@@ -253,93 +308,272 @@ export const settingsLogic = kea<settingsLogicType>([
       actions.stopEmbeddingsPolling()
     },
   })),
-  listeners(({ values, asyncActions, actions }) => ({
-    loadSettingsSuccess: ({ savedSettings }) => {
-      actions.resetSettings(setDefaultSettings(savedSettings))
-      const savedKeys = normalizeSshKeys(savedSettings.ssh_keys).keys
-      const expandedIds = savedKeys.filter((key) => !key.private && !key.public).map((key) => key.id)
-      actions.setSshKeyExpandedIds(expandedIds)
-    },
-    loadAiEmbeddingsStatusSuccess: ({ aiEmbeddingsStatus }) => {
-      const missing = Math.max(aiEmbeddingsStatus.total - aiEmbeddingsStatus.count, 0)
-      if (values.isGeneratingEmbeddings && missing === 0) {
-        actions.setIsGeneratingEmbeddings(false)
-        actions.stopEmbeddingsPolling()
-        window.localStorage.removeItem(embeddingsGeneratingStorageKey)
-      }
-    },
-    startEmbeddingsPolling: () => {
-      if (values.embeddingsPollingIntervalId !== null) {
-        return
-      }
-      actions.loadAiEmbeddingsStatus()
-      const intervalId = window.setInterval(() => {
-        actions.loadAiEmbeddingsStatus()
-      }, 1000)
-      actions.setEmbeddingsPollingIntervalId(intervalId)
-    },
-    stopEmbeddingsPolling: () => {
-      if (values.embeddingsPollingIntervalId === null) {
-        return
-      }
-      window.clearInterval(values.embeddingsPollingIntervalId)
-      actions.setEmbeddingsPollingIntervalId(null)
-    },
-    generateMissingEmbeddings: async () => {
-      if (values.isGeneratingEmbeddings) {
-        return
-      }
-      actions.setIsGeneratingEmbeddings(true)
-      window.localStorage.setItem(embeddingsGeneratingStorageKey, 'true')
-      actions.startEmbeddingsPolling()
+  listeners(({ values, asyncActions, actions }) => {
+    const settingsWithoutCloudBackups = (settings: FrameOSSettings) => {
+      const { cloudBackups: _cloudBackups, ...rest } = setDefaultSettings(settings)
+      return rest
+    }
+
+    const hasOnlyCloudBackupChanges = () =>
+      JSON.stringify(settingsWithoutCloudBackups(values.settings)) ===
+      JSON.stringify(settingsWithoutCloudBackups(values.savedSettings))
+
+    const saveSettingsPatch = async (
+      settingsPatch: Partial<FrameOSSettings> | Record<string, any>,
+      working: string,
+      success: string
+    ) => {
+      const workingMessage = showWorkingMessage(working)
       try {
-        await asyncActions.generateMissingAiEmbeddings()
+        const response = await apiFetch(`/api/settings`, {
+          method: 'POST',
+          body: JSON.stringify(settingsPatch),
+          headers: { 'Content-Type': 'application/json' },
+        })
+        if (!response.ok) {
+          throw new Error('Failed to update settings')
+        }
+        const updatedSettings = setDefaultSettings(await response.json())
+        actions.updateSavedSettings(updatedSettings)
+        workingMessage.success(success)
+        return updatedSettings
       } catch (error) {
-        actions.setIsGeneratingEmbeddings(false)
-        actions.stopEmbeddingsPolling()
-        window.localStorage.removeItem(embeddingsGeneratingStorageKey)
+        workingMessage.error(error instanceof Error ? error.message : 'Failed to update settings')
         throw error
       }
-    },
-    deleteEmbeddings: async () => {
-      if (values.isDeletingEmbeddings) {
-        return
+    }
+
+    const readAndClearLegacyCloudBackupKey = () => {
+      const encryptionKey = window.localStorage.getItem(legacyCloudBackupKeyStorageKey)
+      const keyName = window.localStorage.getItem(legacyCloudBackupKeyNameStorageKey)
+      window.localStorage.removeItem(legacyCloudBackupKeyStorageKey)
+      window.localStorage.removeItem(legacyCloudBackupKeyNameStorageKey)
+      return { encryptionKey, keyName }
+    }
+
+    const migrateLegacyCloudBackupKey = async (savedSettings: FrameOSSettings) => {
+      const legacyKey = readAndClearLegacyCloudBackupKey()
+      const encryptionKey = legacyKey.encryptionKey?.trim()
+      if (!encryptionKey || savedSettings.cloudBackups?.encryptionKey) {
+        return null
       }
-      if (!window.confirm('Delete all embeddings? This might be costly to redo.')) {
-        return
-      }
-      actions.setIsDeletingEmbeddings(true)
-      actions.startEmbeddingsPolling()
-      try {
-        await asyncActions.deleteAiEmbeddings()
-      } finally {
-        actions.setIsDeletingEmbeddings(false)
-        actions.loadAiEmbeddingsStatus()
-        actions.stopEmbeddingsPolling()
-      }
-    },
-    [socketLogic.actionTypes.updateSettings]: ({ settings }) => {
-      actions.updateSavedSettings(setDefaultSettings(settings))
-      actions.resetSettings(setDefaultSettings({ ...values.savedSettings, ...settings }))
-    },
-    addSshKey: async () => {
-      const keyId = uuidv4()
-      const keys = values.settings.ssh_keys?.keys ?? []
-      actions.setSettingsValue(['ssh_keys', 'keys'] as any, [
-        ...keys,
+      return await saveSettingsPatch(
         {
-          id: keyId,
-          name: `Key ${keys.length + 1}`,
-          private: '',
-          public: '',
-          use_for_new_frames: keys.length === 0,
-        } satisfies SSHKeyEntry,
-      ])
-      actions.setSshKeyExpanded(keyId, true)
-    },
-    generateSshKey: async ({ id }) => {
-      actions.setGeneratingSshKeyId(id)
-      try {
+          cloudBackups: {
+            ...(savedSettings.cloudBackups ?? {}),
+            keyName: legacyKey.keyName?.trim() || 'Default backup key',
+            encryptionKey,
+          },
+        },
+        'Moving backup key to the local backend...',
+        'Backup key saved locally'
+      )
+    }
+
+    const saveCloudBackups = async (
+      cloudBackups: FrameOSSettings['cloudBackups'],
+      working: string,
+      success: string
+    ) => {
+      const resetWholeForm = hasOnlyCloudBackupChanges()
+      const updatedSettings = await saveSettingsPatch({ cloudBackups }, working, success)
+      if (resetWholeForm) {
+        actions.resetSettings(updatedSettings)
+      } else {
+        actions.setSettingsValue(['cloudBackups'] as any, updatedSettings.cloudBackups ?? {})
+      }
+    }
+
+    return {
+      loadSettingsSuccess: async ({ savedSettings }) => {
+        const migratedSettings = await migrateLegacyCloudBackupKey(setDefaultSettings(savedSettings))
+        const nextSettings = migratedSettings ?? setDefaultSettings(savedSettings)
+        actions.resetSettings(nextSettings)
+        const savedKeys = normalizeSshKeys(nextSettings.ssh_keys).keys
+        const expandedIds = savedKeys.filter((key) => !key.private && !key.public).map((key) => key.id)
+        actions.setSshKeyExpandedIds(expandedIds)
+      },
+      loadAiEmbeddingsStatusSuccess: ({ aiEmbeddingsStatus }) => {
+        const missing = Math.max(aiEmbeddingsStatus.total - aiEmbeddingsStatus.count, 0)
+        if (values.isGeneratingEmbeddings && missing === 0) {
+          actions.setIsGeneratingEmbeddings(false)
+          actions.stopEmbeddingsPolling()
+          window.localStorage.removeItem(embeddingsGeneratingStorageKey)
+        }
+      },
+      startEmbeddingsPolling: () => {
+        if (values.embeddingsPollingIntervalId !== null) {
+          return
+        }
+        actions.loadAiEmbeddingsStatus()
+        const intervalId = window.setInterval(() => {
+          actions.loadAiEmbeddingsStatus()
+        }, 1000)
+        actions.setEmbeddingsPollingIntervalId(intervalId)
+      },
+      stopEmbeddingsPolling: () => {
+        if (values.embeddingsPollingIntervalId === null) {
+          return
+        }
+        window.clearInterval(values.embeddingsPollingIntervalId)
+        actions.setEmbeddingsPollingIntervalId(null)
+      },
+      saveCloudBackupKey: async () => {
+        const cloudBackups = values.settings.cloudBackups ?? {}
+        const encryptionKey = (cloudBackups.encryptionKey ?? '').trim()
+        const keyName = (cloudBackups.keyName ?? '').trim() || 'Default backup key'
+        await saveCloudBackups(
+          {
+            ...cloudBackups,
+            keyName,
+            encryptionKey,
+          },
+          encryptionKey ? 'Saving backup key...' : 'Removing backup key...',
+          encryptionKey ? 'Backup key saved locally' : 'Backup key removed'
+        )
+      },
+      forgetCloudBackupKey: async () => {
+        if (
+          values.savedSettings.cloudBackups?.encryptionKey &&
+          !window.confirm('Forget the backup key stored on this backend?')
+        ) {
+          return
+        }
+        await saveCloudBackups(
+          {
+            ...(values.settings.cloudBackups ?? {}),
+            keyName: 'Default backup key',
+            encryptionKey: '',
+          },
+          'Removing backup key...',
+          'Backup key removed'
+        )
+      },
+      generateCloudBackupKey: () => {
+        actions.setSettingsValue(['cloudBackups', 'encryptionKey'] as any, secureToken(32))
+        if (!(values.settings.cloudBackups?.keyName ?? '').trim()) {
+          actions.setSettingsValue(['cloudBackups', 'keyName'] as any, 'Default backup key')
+        }
+      },
+      startCloudReauth: async () => {
+        if (values.isCloudReauthStarting) {
+          return
+        }
+        actions.setIsCloudReauthStarting(true)
+        const workingMessage = showWorkingMessage('Starting FrameOS Cloud authentication...')
+        try {
+          const response = await apiFetch(`/api/cloud/reauth/start`, {
+            method: 'POST',
+            headers: { 'X-FrameOS-Return-To': window.location.href },
+          })
+          const payload = await response.json().catch(() => ({}))
+          if (!response.ok || !payload.cloud_auth_url) {
+            throw new Error(payload.detail || payload.error || 'Could not start FrameOS Cloud authentication')
+          }
+          window.location.href = payload.cloud_auth_url
+        } catch (error) {
+          actions.setIsCloudReauthStarting(false)
+          workingMessage.error(error instanceof Error ? error.message : 'Could not start FrameOS Cloud authentication')
+        }
+      },
+      generateMissingEmbeddings: async () => {
+        if (values.isGeneratingEmbeddings) {
+          return
+        }
+        actions.setIsGeneratingEmbeddings(true)
+        window.localStorage.setItem(embeddingsGeneratingStorageKey, 'true')
+        actions.startEmbeddingsPolling()
+        try {
+          await asyncActions.generateMissingAiEmbeddings()
+        } catch (error) {
+          actions.setIsGeneratingEmbeddings(false)
+          actions.stopEmbeddingsPolling()
+          window.localStorage.removeItem(embeddingsGeneratingStorageKey)
+          throw error
+        }
+      },
+      deleteEmbeddings: async () => {
+        if (values.isDeletingEmbeddings) {
+          return
+        }
+        if (!window.confirm('Delete all embeddings? This might be costly to redo.')) {
+          return
+        }
+        actions.setIsDeletingEmbeddings(true)
+        actions.startEmbeddingsPolling()
+        try {
+          await asyncActions.deleteAiEmbeddings()
+        } finally {
+          actions.setIsDeletingEmbeddings(false)
+          actions.loadAiEmbeddingsStatus()
+          actions.stopEmbeddingsPolling()
+        }
+      },
+      [socketLogic.actionTypes.updateSettings]: ({ settings }) => {
+        actions.updateSavedSettings(setDefaultSettings(settings))
+        actions.resetSettings(setDefaultSettings({ ...values.savedSettings, ...settings }))
+      },
+      addSshKey: async () => {
+        const keyId = uuidv4()
+        const keys = values.settings.ssh_keys?.keys ?? []
+        actions.setSettingsValue(['ssh_keys', 'keys'] as any, [
+          ...keys,
+          {
+            id: keyId,
+            name: `Key ${keys.length + 1}`,
+            private: '',
+            public: '',
+            use_for_new_frames: keys.length === 0,
+          } satisfies SSHKeyEntry,
+        ])
+        actions.setSshKeyExpanded(keyId, true)
+      },
+      generateSshKey: async ({ id }) => {
+        actions.setGeneratingSshKeyId(id)
+        try {
+          const response = await apiFetch(`/api/generate_ssh_keys`, {
+            method: 'POST',
+          })
+          if (!response.ok) {
+            throw new Error('Failed to generate new key')
+          }
+          const data = await response.json()
+          const keys = values.settings.ssh_keys?.keys ?? []
+          actions.setSettingsValue(
+            ['ssh_keys', 'keys'] as any,
+            keys.map((key) =>
+              key.id === id
+                ? ({
+                    ...key,
+                    private: data.private,
+                    public: `${data.public} frameos@${window.location.hostname}`,
+                  } satisfies SSHKeyEntry)
+                : key
+            )
+          )
+        } finally {
+          actions.setGeneratingSshKeyId(null)
+        }
+      },
+      removeSshKey: async ({ id }) => {
+        const keys = values.settings.ssh_keys?.keys ?? []
+        if (keys.length <= 1) {
+          return
+        }
+        actions.setSettingsValue(
+          ['ssh_keys', 'keys'] as any,
+          keys.filter((key) => key.id !== id)
+        )
+        actions.setSshKeyExpanded(id, false)
+      },
+      newBuildHostKey: async () => {
+        if (values.savedSettings.buildHost?.sshKey) {
+          if (
+            !confirm('Are you sure you want to generate a new key? You might lose access to the existing build host.')
+          ) {
+            return
+          }
+        }
         const response = await apiFetch(`/api/generate_ssh_keys`, {
           method: 'POST',
         })
@@ -347,54 +581,12 @@ export const settingsLogic = kea<settingsLogicType>([
           throw new Error('Failed to generate new key')
         }
         const data = await response.json()
-        const keys = values.settings.ssh_keys?.keys ?? []
+        actions.setSettingsValue(['buildHost', 'sshKey'], data.private)
         actions.setSettingsValue(
-          ['ssh_keys', 'keys'] as any,
-          keys.map((key) =>
-            key.id === id
-              ? ({
-                  ...key,
-                  private: data.private,
-                  public: `${data.public} frameos@${window.location.hostname}`,
-                } satisfies SSHKeyEntry)
-              : key
-          )
+          ['buildHost', 'sshPublicKey'],
+          `${data.public} frameos-buildhost@${window.location.hostname}`
         )
-      } finally {
-        actions.setGeneratingSshKeyId(null)
-      }
-    },
-    removeSshKey: async ({ id }) => {
-      const keys = values.settings.ssh_keys?.keys ?? []
-      if (keys.length <= 1) {
-        return
-      }
-      actions.setSettingsValue(
-        ['ssh_keys', 'keys'] as any,
-        keys.filter((key) => key.id !== id)
-      )
-      actions.setSshKeyExpanded(id, false)
-    },
-    newBuildHostKey: async () => {
-      if (values.savedSettings.buildHost?.sshKey) {
-        if (
-          !confirm('Are you sure you want to generate a new key? You might lose access to the existing build host.')
-        ) {
-          return
-        }
-      }
-      const response = await apiFetch(`/api/generate_ssh_keys`, {
-        method: 'POST',
-      })
-      if (!response.ok) {
-        throw new Error('Failed to generate new key')
-      }
-      const data = await response.json()
-      actions.setSettingsValue(['buildHost', 'sshKey'], data.private)
-      actions.setSettingsValue(
-        ['buildHost', 'sshPublicKey'],
-        `${data.public} frameos-buildhost@${window.location.hostname}`
-      )
-    },
-  })),
+      },
+    }
+  }),
 ])
