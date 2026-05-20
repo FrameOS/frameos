@@ -19,6 +19,7 @@ import { isFrameControlMode } from '../../utils/frameControlMode'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
 import { Modal } from '../../components/Modal'
 import { HeaderMetrics } from './panels/Metrics/HeaderMetrics'
+import { Tag } from '../../components/Tag'
 
 interface FrameSceneProps {
   id: string // taken straight from the URL, thus a string
@@ -183,6 +184,11 @@ export function Frame(props: FrameSceneProps) {
               ) : (
                 <div className="flex min-w-0 items-center gap-2">
                   <span className="truncate">{frame.name || frameHost(frame)}</span>
+                  {frame.archived ? (
+                    <Tag color="secondary" className="shrink-0">
+                      Archived
+                    </Tag>
+                  ) : null}
                   <FrameConnection frame={frame} />
                 </div>
               )
@@ -310,7 +316,9 @@ export function Frame(props: FrameSceneProps) {
                   {(unsavedChanges || undeployedChanges) && !isFirstDeploy ? (
                     <div>
                       <div className="mb-2 flex items-center justify-between gap-3">
-                        <div className="text-xs text-gray-400">{lastDeploy ? 'Changes to deploy' : 'Not yet deployed'}</div>
+                        <div className="text-xs text-gray-400">
+                          {lastDeploy ? 'Changes to deploy' : 'Not yet deployed'}
+                        </div>
                         {lastDeploy ? (
                           <Button color="secondary" size="small" type="button" onClick={() => resetUndeployedChanges()}>
                             Reset to deployed

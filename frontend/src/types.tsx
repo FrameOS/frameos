@@ -34,6 +34,7 @@ export interface FrameType {
   server_api_key?: string
   server_send_logs?: boolean
   status: string
+  archived?: boolean
   version?: string
   width?: number
   height?: number

@@ -26,6 +26,12 @@ function sanitizeFrameForStore(frame: FrameType): FrameType {
   }
 }
 
+function sortFrames(frames: FrameType[]): FrameType[] {
+  return frames.sort(
+    (a, b) => a.frame_host.localeCompare(b.frame_host) || (a.ssh_user || '').localeCompare(b.ssh_user || '')
+  )
+}
+
 export const framesModel = kea<framesModelType>([
   connect(() => ({ logic: [socketLogic, entityImagesModel] })),
   path(['src', 'models', 'framesModel']),
@@ -41,6 +47,8 @@ export const framesModel = kea<framesModelType>([
     deployAgent: (id: number) => ({ id }),
     restartAgent: (id: number) => ({ id }),
     setDeployWithAgent: (id: number, deployWithAgent: boolean) => ({ id, deployWithAgent }),
+    setFrameArchived: (id: number, archived: boolean) => ({ id, archived }),
+    toggleArchivedFramesExpanded: true,
   }),
   loaders(({ values }) => ({
     frames: [
@@ -101,6 +109,17 @@ export const framesModel = kea<framesModelType>([
             },
           }
         },
+        setFrameArchived: (state, { id, archived }) => {
+          const frame = state[id]
+          if (!frame) return state
+          return {
+            ...state,
+            [id]: {
+              ...frame,
+              archived,
+            },
+          }
+        },
         [socketLogic.actionTypes.newFrame]: (state, { frame }) => ({
           ...state,
           [frame.id]: sanitizeFrameForStore(frame),
@@ -116,14 +135,23 @@ export const framesModel = kea<framesModelType>([
         },
       },
     ],
+    archivedFramesExpanded: [
+      false,
+      { persist: true, storageKey: 'framesModel.archivedFramesExpanded' },
+      {
+        toggleArchivedFramesExpanded: (state) => !state,
+      },
+    ],
   })),
   selectors({
-    framesList: [
+    framesList: [(s) => [s.frames], (frames) => sortFrames(Object.values(frames)) as FrameType[]],
+    activeFramesList: [
       (s) => [s.frames],
-      (frames) =>
-        Object.values(frames).sort(
-          (a, b) => a.frame_host.localeCompare(b.frame_host) || (a.ssh_user || '').localeCompare(b.ssh_user || '')
-        ) as FrameType[],
+      (frames) => sortFrames(Object.values(frames).filter((frame) => !frame.archived)) as FrameType[],
+    ],
+    archivedFramesList: [
+      (s) => [s.frames],
+      (frames) => sortFrames(Object.values(frames).filter((frame) => frame.archived)) as FrameType[],
     ],
     framesLoaded: [(s) => [s.frames], (frames) => Object.keys(frames).length > 0],
   }),
@@ -164,6 +192,21 @@ export const framesModel = kea<framesModelType>([
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ agent: { ...frame?.agent, deployWithAgent } }),
       })
+    },
+    setFrameArchived: async ({ id, archived }) => {
+      try {
+        const response = await apiFetch(`/api/frames/${id}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ archived }),
+        })
+        if (!response.ok) {
+          throw new Error('Failed to update frame archive status')
+        }
+      } catch (error) {
+        console.error(error)
+        actions.loadFrame(id)
+      }
     },
     deleteFrame: async ({ id }) => {
       await apiFetch(`/api/frames/${id}`, { method: 'DELETE' })

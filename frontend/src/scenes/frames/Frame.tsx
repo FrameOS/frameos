@@ -1,10 +1,17 @@
-import { A } from 'kea-router'
+import { A, router } from 'kea-router'
 import { FrameType } from '../../types'
 import { H5 } from '../../components/H5'
 import { Box } from '../../components/Box'
 import { frameHost, frameIsHealthy, frameStatus } from '../../decorators/frame'
 import { DropdownMenu } from '../../components/DropdownMenu'
-import { ArrowUpCircleIcon, ExclamationTriangleIcon, TrashIcon } from '@heroicons/react/24/solid'
+import {
+  ArchiveBoxIcon,
+  ArrowUpCircleIcon,
+  ArrowUturnLeftIcon,
+  ExclamationTriangleIcon,
+  PencilSquareIcon,
+  TrashIcon,
+} from '@heroicons/react/24/solid'
 import { useActions } from 'kea'
 import { framesModel } from '../../models/framesModel'
 import { FrameImage } from '../../components/FrameImage'
@@ -91,7 +98,7 @@ function FrameCardIndicators({ frame }: FrameProps): JSX.Element {
 }
 
 export function Frame({ frame }: FrameProps): JSX.Element {
-  const { deleteFrame } = useActions(framesModel)
+  const { deleteFrame, setFrameArchived } = useActions(framesModel)
   const certificateStatus = getFrameCertificateStatus(frame)
   const deployedFrameOSVersion =
     typeof frame.last_successful_deploy?.frameos_version === 'string'
@@ -105,6 +112,22 @@ export function Frame({ frame }: FrameProps): JSX.Element {
         <DropdownMenu
           buttonColor="none"
           items={[
+            {
+              label: 'Edit',
+              onClick: () => router.actions.push(urls.frame(frame.id)),
+              icon: <PencilSquareIcon className="w-5 h-5" />,
+            },
+            frame.archived
+              ? {
+                  label: 'Unarchive',
+                  onClick: () => setFrameArchived(frame.id, false),
+                  icon: <ArrowUturnLeftIcon className="w-5 h-5" />,
+                }
+              : {
+                  label: 'Archive',
+                  onClick: () => setFrameArchived(frame.id, true),
+                  icon: <ArchiveBoxIcon className="w-5 h-5" />,
+                },
             {
               label: 'Delete',
               onClick: () =>

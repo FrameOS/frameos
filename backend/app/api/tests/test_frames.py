@@ -169,6 +169,20 @@ async def test_api_frame_update_name(async_client, db, redis):
 
 
 @pytest.mark.asyncio
+async def test_api_frame_update_archived(async_client, db, redis):
+    frame = await new_frame(db, redis, 'ArchiveMe', 'localhost', 'localhost')
+    resp = await async_client.post(f'/api/frames/{frame.id}', json={"archived": True})
+    assert resp.status_code == 200
+    db.expire_all()
+    updated_frame = db.get(Frame, frame.id)
+    assert updated_frame.archived is True
+
+    frames_response = await async_client.get('/api/frames')
+    assert frames_response.status_code == 200
+    assert frames_response.json()['frames'][0]['archived'] is True
+
+
+@pytest.mark.asyncio
 async def test_api_frame_update_requires_admin_credentials_when_enabled(async_client, db, redis):
     frame = await new_frame(db, redis, 'AdminFrame', 'localhost', 'localhost')
 

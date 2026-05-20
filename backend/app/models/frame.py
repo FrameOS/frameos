@@ -132,6 +132,7 @@ class Frame(Base):
     server_send_logs = mapped_column(Boolean, default=True)
     # frame metadata
     status = mapped_column(String(15), nullable=False)
+    archived = mapped_column(Boolean, nullable=False, default=False)
     version = mapped_column(String(50), nullable=True)
     width = mapped_column(Integer, nullable=True)
     height = mapped_column(Integer, nullable=True)
@@ -188,6 +189,7 @@ class Frame(Base):
             'server_api_key': self.server_api_key,
             'server_send_logs': self.server_send_logs,
             'status': self.status,
+            'archived': self.archived,
             'version': self.version,
             'width': self.width,
             'height': self.height,
