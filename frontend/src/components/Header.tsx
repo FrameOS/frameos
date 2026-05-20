@@ -2,6 +2,7 @@ import { A } from 'kea-router'
 import React from 'react'
 import { H5 } from './H5'
 import { urls } from '../urls'
+import { assetUrl } from '../utils/assetUrl'
 import { frameAdminPath, isInFrameAdminMode } from '../utils/frameAdmin'
 
 import darkMarkSmall from '../assets/logo/dark-mark-small.png'
@@ -24,7 +25,7 @@ export function Header({ title, version, right, buttons }: HeaderProps) {
     >
       <div className="min-w-0 flex flex-1 items-center justify-start gap-3">
         <A href={homeHref}>
-          <img src={darkMarkSmall} className="w-[28px] h-[28px] inline-block align-center" alt="FrameOS" />
+          <img src={assetUrl(darkMarkSmall)} className="w-[28px] h-[28px] inline-block align-center" alt="FrameOS" />
         </A>
         {version ? (
           <H5 className="flex min-w-0 items-end gap-1">

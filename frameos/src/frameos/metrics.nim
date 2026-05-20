@@ -252,9 +252,8 @@ proc logMetrics(self: MetricsLoggerThread) =
     "processMemory": self.getProcessMemoryUsage(),
     "cpuUsage": self.getCPUUsage(),
     "openFileDescriptors": self.getOpenFileDescriptors(),
+    "runtime": runtimeDiagnosticsSnapshot(),
   }
-  if self.frameConfig.debug:
-    payload["runtime"] = runtimeDiagnosticsSnapshot()
   log(payload)
 
 proc runMetricsLoop(self: MetricsLoggerThread, maxIterations = -1) {.gcsafe.} =

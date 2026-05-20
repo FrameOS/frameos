@@ -256,8 +256,9 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
 
     let currentNode = self.nodes[currentNodeId]
     let nodeType = currentNode.nodeType
+    let debugRuntime = self.frameConfig.debug
     var checkpointKeyword = ""
-    if self.frameConfig.debug:
+    if debugRuntime:
       checkpointKeyword = diagnosticKeyword(currentNode)
       markRuntimeCheckpoint("node:start", currentSceneId = self.id.string, contextEvent = context.event,
         nodeId = currentNodeId.int, nodeType = nodeType, keyword = checkpointKeyword)
@@ -648,7 +649,7 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
 
       # Delegate handling of the current event to the child scene.
       exportedChild = self.sceneExportByNodeId[currentNodeId]
-      if self.frameConfig.debug:
+      if debugRuntime:
         markRuntimeCheckpoint("scene:delegate", currentSceneId = self.id.string, contextEvent = context.event,
           nodeId = currentNodeId.int, nodeType = nodeType, keyword = checkpointKeyword,
           childSceneId = childScene.id.string)
@@ -656,7 +657,7 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
     else:
       raise newException(Exception, "Unknown node type: " & nodeType)
 
-    if self.frameConfig.debug:
+    if debugRuntime:
       markRuntimeCheckpoint("node:done", currentSceneId = self.id.string, contextEvent = context.event,
         nodeId = currentNodeId.int, nodeType = nodeType, keyword = checkpointKeyword)
 
@@ -972,9 +973,8 @@ proc applyPublicStateFromPayload(scene: InterpretedFrameScene, payload: JsonNode
 proc runEvent*(self: FrameScene, context: ExecutionContext) =
   var scene: InterpretedFrameScene = InterpretedFrameScene(self)
   self.logger.log(%*{"event": "runEventInterpreted", "sceneId": self.id, "contextEvent": context.event})
-  if self.frameConfig.debug:
-    markRuntimeCheckpoint("event:start", currentSceneId = self.id.string, contextEvent = context.event,
-      clearNode = true)
+  markRuntimeCheckpoint("event:start", currentSceneId = self.id.string, contextEvent = context.event,
+    clearNode = true)
 
   case context.event:
   of "setSceneState":

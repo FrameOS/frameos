@@ -103,7 +103,13 @@ export function BrushChart({
   const yBrushMax = Math.max(bottomChartHeight - brushMargin.top - brushMargin.bottom, 0)
   const allData = useMemo(() => flattenSeriesData(series), [series])
   const chartTimeRange = visibleTimeRange ?? totalTimeRange ?? getDataTimeRange(allData)
-  const brushTimeRange = totalTimeRange ?? chartTimeRange
+  const brushTimeRangeBase = totalTimeRange ?? chartTimeRange
+  const brushTimeRange = visibleTimeRange
+    ? normalizeTimeRange(
+        Math.min(brushTimeRangeBase.start, visibleTimeRange.start),
+        Math.max(brushTimeRangeBase.end, visibleTimeRange.end)
+      )
+    : brushTimeRangeBase
   const filteredSeries = useMemo(
     () =>
       series.map((chartSeries) => ({

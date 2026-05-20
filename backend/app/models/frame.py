@@ -1,9 +1,9 @@
-import json
 import copy
+import json
 import os
 from datetime import datetime, timezone
 from arq import ArqRedis as Redis
-from typing import Optional
+from typing import Any, Optional
 from sqlalchemy.dialects.sqlite import JSON
 from sqlalchemy import Integer, String, Double, DateTime, Boolean
 from sqlalchemy.orm import Session, mapped_column
@@ -73,6 +73,37 @@ def normalize_frame_admin_auth(frame_admin_auth: Optional[dict]) -> dict:
         'enabled': bool(auth.get('enabled', False)),
         'user': user.strip(),
         'pass': password,
+    }
+
+
+def normalize_reboot_crontab(crontab: Any, default: str = "0 0 * * *") -> str:
+    if not isinstance(crontab, str):
+        return default
+
+    cron = crontab.strip()
+    if not cron:
+        return default
+
+    parts = cron.split()
+    if len(parts) == 5:
+        minute, hour, day_of_month, month, day_of_week = parts
+        if hour == "0" and day_of_month == month == day_of_week == "*":
+            try:
+                legacy_hour = int(minute)
+            except ValueError:
+                legacy_hour = -1
+            if 1 <= legacy_hour <= 23:
+                return f"0 {legacy_hour} * * *"
+
+    return cron
+
+
+def normalize_reboot_config(reboot: Any) -> Any:
+    if not isinstance(reboot, dict):
+        return reboot
+    return {
+        **reboot,
+        "crontab": normalize_reboot_crontab(reboot.get("crontab", "0 0 * * *")),
     }
 
 
@@ -176,7 +207,7 @@ class Frame(Base):
             'assets_path': self.assets_path,
             'save_assets': self.save_assets,
             'upload_fonts': self.upload_fonts,
-            'reboot': self.reboot,
+            'reboot': normalize_reboot_config(self.reboot),
             'control_code': self.control_code,
             'schedule': self.schedule,
             'gpio_buttons': self.gpio_buttons,
@@ -269,7 +300,7 @@ async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, serve
         },
         control_code={"enabled": "false", "position": "top-right"},
         schedule={"events": []},
-        reboot={"enabled": "true", "crontab": "4 0 * * *"}
+        reboot={"enabled": "true", "crontab": "0 4 * * *"}
     )
     db.add(frame)
     db.commit()

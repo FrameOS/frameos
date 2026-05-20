@@ -55,8 +55,7 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
   let sceneTimer = getMonoTime()
   let requiredWidth = self.frameConfig.renderWidth()
   let requiredHeight = self.frameConfig.renderHeight()
-  if self.frameConfig.debug:
-    markRuntimeStart("render", scene.id.string, "render", requiredWidth, requiredHeight)
+  markRuntimeStart("render", scene.id.string, "render", requiredWidth, requiredHeight)
   self.logger.log(%*{"event": "render:scene", "width": requiredWidth, "height": requiredHeight,
       "sceneId": scene.id.string})
 
@@ -106,8 +105,7 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
 
   self.lastRenderAt = epochTime()
   let elapsedMs = durationToMilliseconds(getMonoTime() - sceneTimer)
-  if self.frameConfig.debug:
-    markRuntimeCheckpoint("scene:done", currentSceneId = scene.id.string, clearNode = true)
+  markRuntimeCheckpoint("scene:done", currentSceneId = scene.id.string, clearNode = true)
   self.logger.log(%*{"event": "render:done", "sceneId": scene.id.string, "ms": round(elapsedMs, 3)})
 
 proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.} =
@@ -181,9 +179,8 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
       triggerServerRender()
 
     driverTimer = getMonoTime()
-    if self.frameConfig.debug:
-      markRuntimeCheckpoint("driver:start", currentSceneId = currentScene.id.string, device = self.frameConfig.device,
-        clearNode = true)
+    markRuntimeCheckpoint("driver:start", currentSceneId = currentScene.id.string, device = self.frameConfig.device,
+      clearNode = true)
     try:
       # TODO: render the driver part in another thread
       drivers.render(lastRotatedImage)
@@ -197,8 +194,7 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
           "message": "Driver render finished suspiciously fast; check inkyPython logs for errors."})
     except Exception as e:
       self.logger.log(%*{"event": "render:driver:error", "error": $e.msg, "stacktrace": e.getStackTrace()})
-    if self.frameConfig.debug:
-      markRuntimeDone()
+    markRuntimeDone()
 
     if interval < 1 or (nextSleep > 0 and nextSleep < interval):
       let now = getMonoTime()
@@ -277,17 +273,14 @@ proc dispatchSceneEvent*(self: RunnerThread, sceneId: Option[SceneId], event: st
     loopKey: ".",
     nextSleep: -1
   )
-  let debugRuntime = self.frameConfig.debug
-  if debugRuntime:
-    markRuntimeStart("event", targetSceneId.string, event)
+  markRuntimeStart("event", targetSceneId.string, event)
   try:
     exportedScene.get().runEvent(scene, context)
     if event == "setSceneState" or event == "setCurrentScene":
       scene.updateLastPublicState()
       scene.updateLastPersistedState()
   finally:
-    if debugRuntime:
-      markRuntimeDone()
+    markRuntimeDone()
 
 proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.async.} =
   var waitTime = 10

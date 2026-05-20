@@ -114,10 +114,10 @@ class BuildHostSession:
         async def pump(stream: asyncio.StreamReader, level: str, buf: list[str]) -> None:
             pending = ""
 
-            async def _flush(segment: str) -> None:
+            async def _flush(segment: str, *, terminated: bool) -> None:
                 if not segment:
                     return
-                buf.append(segment)
+                buf.append(f"{segment}\n" if terminated else segment)
                 if log_output:
                     await self._log(level, segment)
 
@@ -132,10 +132,10 @@ class BuildHostSession:
                         break
                     segment = pending[:split_index]
                     pending = pending[split_index + 1 :]
-                    await _flush(segment.rstrip("\r"))
+                    await _flush(segment.rstrip("\r"), terminated=True)
             pending = pending.rstrip("\r")
             if pending:
-                await _flush(pending)
+                await _flush(pending, terminated=False)
 
         out_buf: list[str] = []
         err_buf: list[str] = []

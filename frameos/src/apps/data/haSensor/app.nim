@@ -25,16 +25,14 @@ proc error*(self: App, message: string): JsonNode =
   return %*{"error": message}
 
 proc get*(self: App, context: ExecutionContext): JsonNode =
+  let sceneId = if self.scene.isNil: "" else: self.scene.id.string
+  let contextEvent = if context.isNil: "" else: context.event
   let diagnosticsEnabled = self.frameConfig.debug
   if diagnosticsEnabled:
-    let sceneId = if self.scene.isNil: "" else: self.scene.id.string
-    let contextEvent = if context.isNil: "" else: context.event
     markRuntimeCheckpoint("app:get", currentSceneId = sceneId, contextEvent = contextEvent,
       nodeId = self.nodeId.int, nodeType = "app", keyword = self.nodeName)
   defer:
     if diagnosticsEnabled:
-      let sceneId = if self.scene.isNil: "" else: self.scene.id.string
-      let contextEvent = if context.isNil: "" else: context.event
       markRuntimeCheckpoint("app:get:done", currentSceneId = sceneId, contextEvent = contextEvent,
         nodeId = self.nodeId.int, nodeType = "app", keyword = self.nodeName)
 

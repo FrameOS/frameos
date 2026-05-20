@@ -21,7 +21,7 @@ export interface MetricSeries {
   label: string
   color: string
   axis: 'left' | 'right'
-  unit?: 'bytes' | 'percent'
+  unit?: 'bytes' | 'percent' | 'pixels'
   data: MetricPoint[]
 }
 
@@ -30,15 +30,35 @@ export interface TimeRange {
   end: number
 }
 
+export type MetricsTimeRangePreset = '1h' | '6h' | '12h' | '24h' | '7d' | 'all' | 'custom'
+
+export const metricsTimeRangeOptions: { value: MetricsTimeRangePreset; label: string }[] = [
+  { value: '1h', label: 'Last 1h' },
+  { value: '6h', label: 'Last 6h' },
+  { value: '12h', label: 'Last 12h' },
+  { value: '24h', label: 'Last 24h' },
+  { value: '7d', label: 'Last 7d' },
+  { value: 'all', label: 'All' },
+]
+
 export function metricSeriesVisibilityKey(category: string, seriesKey: string): string {
   return `${category}:${seriesKey}`
 }
 
-const DEFAULT_VISIBLE_MS = 4 * 60 * 60 * 1000
+const DEFAULT_VISIBLE_MS = 60 * 60 * 1000
 const HEADER_VISIBLE_MS = 60 * 60 * 1000
 const MIN_VISIBLE_MS = 1000
 const CURRENT_TIME_UPDATE_MS = 60 * 1000
 const GAP_THRESHOLD_MULTIPLIER = 1.75
+const MIN_GAP_CONNECTION_MS = 20 * 60 * 1000
+const DEFAULT_TIME_RANGE_PRESET: MetricsTimeRangePreset = '1h'
+const METRICS_TIME_RANGE_MS: Partial<Record<MetricsTimeRangePreset, number>> = {
+  '1h': 60 * 60 * 1000,
+  '6h': 6 * 60 * 60 * 1000,
+  '12h': 12 * 60 * 60 * 1000,
+  '24h': 24 * 60 * 60 * 1000,
+  '7d': 7 * 24 * 60 * 60 * 1000,
+}
 const SINGLE_SERIES_COLOR = '#2dd4bf'
 const METRIC_SERIES_COLORS = ['#f59e0b', '#38bdf8', '#a78bfa', '#34d399', '#fb7185', '#f472b6']
 const MEMORY_USAGE_COLORS: Record<string, string> = {
@@ -49,6 +69,10 @@ const DISK_USAGE_COLORS: Record<string, string> = {
   total: '#38bdf8',
   used: '#fb7185',
   available: '#34d399',
+}
+const RUNTIME_DIMENSION_COLORS: Record<string, string> = {
+  width: '#38bdf8',
+  height: '#34d399',
 }
 
 function parseMetricTimestamp(timestamp: string): number {
@@ -107,6 +131,18 @@ function trailingVisibleTimeRange(timeRange: TimeRange | null, visibleMs: number
   const end = timeRange.end
   const start = Math.max(timeRange.start, end - visibleMs)
   return normalizeTimeRange(start >= end ? end - visibleMs : start, end)
+}
+
+function timeRangeForPreset(timeRange: TimeRange | null, preset: MetricsTimeRangePreset): TimeRange | null {
+  if (!timeRange) {
+    return null
+  }
+  if (preset === 'all') {
+    return timeRange
+  }
+
+  const visibleMs = METRICS_TIME_RANGE_MS[preset] ?? METRICS_TIME_RANGE_MS[DEFAULT_TIME_RANGE_PRESET]
+  return normalizeTimeRange(timeRange.end - (visibleMs ?? DEFAULT_VISIBLE_MS), timeRange.end)
 }
 
 function filterMetricsByCategoryAndTimeRange(
@@ -173,7 +209,7 @@ function getOrCreateMetricSeries(
   label: string,
   color: string,
   axis: 'left' | 'right' = 'left',
-  unit?: 'bytes' | 'percent'
+  unit?: MetricSeries['unit']
 ): MetricSeries {
   const categorySeries = (metricsByCategory[category] ||= [])
   let series = categorySeries.find((existingSeries) => existingSeries.key === key)
@@ -221,6 +257,12 @@ function normalizeDiskUsageEntries(value: Record<string, unknown>): [string, num
   }
 
   return entries
+}
+
+function normalizeRuntimeDimensionEntries(value: Record<string, unknown>): [string, number][] {
+  return ['width', 'height']
+    .map((key): [string, number] => [key, Number(value[key])])
+    .filter(([, value]) => Number.isFinite(value) && value > 0)
 }
 
 function formatShortBytes(value: number): string {
@@ -274,6 +316,24 @@ function getLatestDiskUsageSummary(metrics: MetricsType[]): string | null {
   return null
 }
 
+function getLatestRuntimeDimensionsSummary(metrics: MetricsType[]): string | null {
+  for (let i = metrics.length - 1; i >= 0; i--) {
+    const runtime = metrics[i].metrics?.runtime
+    if (!runtime || typeof runtime !== 'object' || Array.isArray(runtime)) {
+      continue
+    }
+
+    const runtimeRecord = runtime as Record<string, unknown>
+    const width = Number(runtimeRecord.width)
+    const height = Number(runtimeRecord.height)
+    if (Number.isFinite(width) && width > 0 && Number.isFinite(height) && height > 0) {
+      return `${width}x${height}`
+    }
+  }
+
+  return null
+}
+
 export const metricsLogic = kea<metricsLogicType>([
   path(['src', 'scenes', 'frame', 'metricsLogic']),
   props({} as metricsLogicProps),
@@ -282,6 +342,7 @@ export const metricsLogic = kea<metricsLogicType>([
   actions({
     setSelectedTimeRange: (start: number, end: number) => ({ start, end }),
     resetSelectedTimeRange: true,
+    setSelectedTimeRangePreset: (preset: MetricsTimeRangePreset) => ({ preset }),
     setCurrentTime: (currentTime: number) => ({ currentTime }),
     toggleMetricSeries: (category: string, seriesKey: string) => ({ category, seriesKey }),
   }),
@@ -314,7 +375,17 @@ export const metricsLogic = kea<metricsLogicType>([
           return sameTimeRange(state, next) ? state : next
         },
         resetSelectedTimeRange: () => null,
+        setSelectedTimeRangePreset: () => null,
         loadMetricsSuccess: () => null,
+      },
+    ],
+    selectedTimeRangePreset: [
+      DEFAULT_TIME_RANGE_PRESET as MetricsTimeRangePreset,
+      {
+        setSelectedTimeRange: () => 'custom' as MetricsTimeRangePreset,
+        resetSelectedTimeRange: () => DEFAULT_TIME_RANGE_PRESET,
+        setSelectedTimeRangePreset: (_, { preset }) => preset,
+        loadMetricsSuccess: (state) => (state === 'custom' ? DEFAULT_TIME_RANGE_PRESET : state),
       },
     ],
     currentTime: [
@@ -371,14 +442,14 @@ export const metricsLogic = kea<metricsLogicType>([
       (metricsTimeRange) => trailingVisibleTimeRange(metricsTimeRange, HEADER_VISIBLE_MS),
     ],
     visibleTimeRange: [
-      (s) => [s.selectedTimeRange, s.metricsTimeRange, s.defaultSelectedTimeRange],
-      (selectedTimeRange, metricsTimeRange, defaultSelectedTimeRange): TimeRange | null => {
+      (s) => [s.selectedTimeRange, s.selectedTimeRangePreset, s.metricsTimeRange, s.defaultSelectedTimeRange],
+      (selectedTimeRange, selectedTimeRangePreset, metricsTimeRange, defaultSelectedTimeRange): TimeRange | null => {
         if (!metricsTimeRange || !defaultSelectedTimeRange) {
           return null
         }
         return selectedTimeRange
           ? clampTimeRange(selectedTimeRange, metricsTimeRange, defaultSelectedTimeRange)
-          : defaultSelectedTimeRange
+          : timeRangeForPreset(metricsTimeRange, selectedTimeRangePreset) ?? defaultSelectedTimeRange
       },
     ],
     metricGapThresholdMs: [
@@ -401,7 +472,7 @@ export const metricsLogic = kea<metricsLogicType>([
           }
         })
         const interval = median(configuredIntervals) ?? median(deltas)
-        return interval ? interval * GAP_THRESHOLD_MULTIPLIER : null
+        return Math.max(interval ? interval * GAP_THRESHOLD_MULTIPLIER : 0, MIN_GAP_CONNECTION_MS)
       },
     ],
     metricsByCategory: [
@@ -426,17 +497,34 @@ export const metricsLogic = kea<metricsLogicType>([
                 }
               }
             } else if (value && typeof value === 'object') {
+              const valueRecord = value as Record<string, unknown>
+              if (key === 'runtime') {
+                normalizeRuntimeDimensionEntries(valueRecord).forEach(([subKey, subValue]) => {
+                  const series = getOrCreateMetricSeries(
+                    metricsByCategory,
+                    'runtimeDimensions',
+                    `runtime.${subKey}`,
+                    subKey,
+                    RUNTIME_DIMENSION_COLORS[subKey] ??
+                      metricSeriesColor(metricsByCategory.runtimeDimensions?.length ?? 0),
+                    'left',
+                    'pixels'
+                  )
+                  series.data.push({ x: timestamp, y: subValue })
+                })
+              }
               const entries =
                 key === 'memoryUsage'
-                  ? normalizeMemoryUsageEntries(value as Record<string, unknown>)
+                  ? normalizeMemoryUsageEntries(valueRecord)
                   : key === 'diskUsage'
-                  ? normalizeDiskUsageEntries(value as Record<string, unknown>)
+                  ? normalizeDiskUsageEntries(valueRecord)
                   : Object.entries(value)
               for (const [subKey, subValue] of entries) {
                 if (
                   (key === 'memoryUsage' && (subKey === 'active' || subKey === 'free' || subKey === 'percentage')) ||
                   (key === 'diskUsage' && (subKey === 'filesystems' || subKey === 'percentage')) ||
-                  (key === 'processMemory' && subKey === 'pid')
+                  (key === 'processMemory' && subKey === 'pid') ||
+                  (key === 'runtime' && (subKey === 'width' || subKey === 'height'))
                 ) {
                   continue
                 }
@@ -515,7 +603,11 @@ export const metricsLogic = kea<metricsLogicType>([
       (s) => [s.sortedMetrics],
       (metrics): Record<string, string> => {
         const diskUsageSummary = getLatestDiskUsageSummary(metrics)
-        return diskUsageSummary ? { diskUsage: diskUsageSummary } : {}
+        const runtimeDimensionsSummary = getLatestRuntimeDimensionsSummary(metrics)
+        return {
+          ...(diskUsageSummary ? { diskUsage: diskUsageSummary } : {}),
+          ...(runtimeDimensionsSummary ? { runtimeDimensions: runtimeDimensionsSummary } : {}),
+        }
       },
     ],
   }),

@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app.drivers.devices import drivers_for_frame
 from app.codegen.drivers_nim import COMPILATION_MODE_PRECOMPILED, normalize_compilation_mode
 from app.models.assets import sync_assets
-from app.models.frame import Frame, normalize_https_proxy, update_frame
+from app.models.frame import Frame, normalize_https_proxy, normalize_reboot_crontab, update_frame
 from app.models.log import new_log as log
 from app.models.settings import get_settings_dict
 from app.tasks._frame_deployer import FrameDeployer
@@ -1045,7 +1045,7 @@ class FrameDeployWorkflow:
 
         reboot_schedule: dict[str, Any] = {"enabled": False, "needs_update": False, "needs_remove": False}
         if self.frame.reboot and self.frame.reboot.get("enabled") == "true":
-            cron_schedule = self.frame.reboot.get("crontab", "0 0 * * *")
+            cron_schedule = normalize_reboot_crontab(self.frame.reboot.get("crontab", "0 0 * * *"))
             reboot_type = self.frame.reboot.get("type")
             reboot_command = "/sbin/shutdown -r now" if reboot_type == "raspberry" else "systemctl restart frameos.service"
             desired_crontab = f"{cron_schedule} root {reboot_command}"

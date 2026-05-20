@@ -1,7 +1,9 @@
+from types import SimpleNamespace
+
 import pytest
 
 from app.models.settings import Settings
-from app.utils.build_host import BuildHostConfig, get_build_host_config
+from app.utils.build_host import BuildHostConfig, BuildHostSession, get_build_host_config
 
 
 @pytest.mark.asyncio
@@ -46,3 +48,48 @@ async def test_get_build_host_config_requires_fields(db):
     db.commit()
 
     assert get_build_host_config(db) is None
+
+
+@pytest.mark.asyncio
+async def test_build_host_run_preserves_buffered_stdout_line_breaks():
+    class FakeStream:
+        def __init__(self, chunks):
+            self.chunks = list(chunks)
+
+        async def read(self, _size):
+            if self.chunks:
+                return self.chunks.pop(0)
+            return ""
+
+    class FakeProcess:
+        def __init__(self):
+            self.stdout = FakeStream(
+                [
+                    "drivers/inkyPython/inkyPython.so\n"
+                    "drivers/gpioButton/gpioButton.so\n"
+                    "scenes/abc/scene_abc.so"
+                ]
+            )
+            self.stderr = FakeStream([])
+
+        async def wait(self):
+            return SimpleNamespace(returncode=0)
+
+    class FakeConnection:
+        async def create_process(self, _command):
+            return FakeProcess()
+
+    session = BuildHostSession(
+        BuildHostConfig(host="builder.local", user="ubuntu", ssh_key="dummy-key")
+    )
+    session._conn = FakeConnection()
+
+    status, stdout, stderr = await session.run("find drivers scenes", log_command=False)
+
+    assert status == 0
+    assert stdout == (
+        "drivers/inkyPython/inkyPython.so\n"
+        "drivers/gpioButton/gpioButton.so\n"
+        "scenes/abc/scene_abc.so"
+    )
+    assert stderr is None

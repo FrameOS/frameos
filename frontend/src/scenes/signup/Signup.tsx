@@ -6,6 +6,7 @@ import { TextInput } from '../../components/TextInput'
 import { Button } from '../../components/Button'
 import { signupLogic } from './signupLogic'
 import { useActions, useValues } from 'kea'
+import { assetUrl } from '../../utils/assetUrl'
 import darkMarkSmall from '../../assets/logo/dark-mark-small.png'
 
 export function Signup() {
@@ -14,7 +15,7 @@ export function Signup() {
   return (
     <div className="h-full w-full min-h-screen max-w-screen flex flex-col items-center justify-center gap-8">
       <div className="flex gap-4 justify-center items-center">
-        <img src={darkMarkSmall} className="w-[48px] h-[48px] inline-block align-center" alt="FrameOS" />
+        <img src={assetUrl(darkMarkSmall)} className="w-[48px] h-[48px] inline-block align-center" alt="FrameOS" />
         <H4 className="tracking-wide text-[2.9rem]">FrameOS</H4>
       </div>
       <Box id="signup" className="p-4 mb-12 w-80 max-w-full">

@@ -139,6 +139,9 @@ function formatMetricTick(value: number, unit?: MetricSeries['unit']): string {
   if (unit === 'percent') {
     return `${value}%`
   }
+  if (unit === 'pixels') {
+    return `${value}px`
+  }
   return value >= 1000000
     ? `${Math.floor(value / 100000) / 10}M`
     : value >= 1000
@@ -162,6 +165,9 @@ function formatMetricValue(value: number, unit?: MetricSeries['unit']): string {
   }
   if (unit === 'percent') {
     return `${formatMetricNumber(value)}%`
+  }
+  if (unit === 'pixels') {
+    return `${formatMetricNumber(value)}px`
   }
   return formatMetricNumber(value)
 }
