@@ -192,7 +192,10 @@ class FrameBinaryBuilder:
         will_attempt_precompiled = False
         precompiled_url = None
         precompiled_skip_reason = None
-        if requested_compilation_mode == COMPILATION_MODE_PRECOMPILED:
+        if requested_compilation_mode == COMPILATION_MODE_PRECOMPILED and force_cross_compile:
+            resolved_compilation_mode = COMPILATION_MODE_STATIC
+            precompiled_skip_reason = "cross compilation is required"
+        elif requested_compilation_mode == COMPILATION_MODE_PRECOMPILED:
             compiled_scene_count = frame_compiled_scene_count(self.frame)
             precompiled_url = precompiled_frameos_release_url(prebuilt_target or "")
             if compiled_scene_count > 0:

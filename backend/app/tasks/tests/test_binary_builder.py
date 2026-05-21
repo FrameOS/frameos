@@ -111,6 +111,39 @@ async def test_plan_build_attempts_precompiled_when_all_scenes_are_interpreted(m
 
 
 @pytest.mark.asyncio
+async def test_plan_build_force_cross_compile_skips_precompiled(monkeypatch: pytest.MonkeyPatch):
+    async def fake_resolve_prebuilt_entry(**_kwargs):
+        return None, "debian-trixie-arm64"
+
+    monkeypatch.setattr("app.tasks.binary_builder.get_build_host_config", lambda _db: None)
+    monkeypatch.setattr("app.tasks.binary_builder.resolve_prebuilt_entry", fake_resolve_prebuilt_entry)
+
+    builder = FrameBinaryBuilder(
+        db=None,
+        redis=None,
+        frame=SimpleNamespace(
+            device="framebuffer",
+            gpio_buttons=[],
+            rpios={"compilationMode": "precompiled"},
+            scenes=[{"settings": {"execution": "interpreted"}}],
+        ),
+        deployer=FakeDeployer(),
+        temp_dir="/tmp",
+    )
+
+    plan = await builder.plan_build(
+        force_cross_compile=True,
+        target_override=TargetMetadata(arch="aarch64", distro="debian", version="trixie"),
+    )
+
+    assert plan.requested_compilation_mode == COMPILATION_MODE_PRECOMPILED
+    assert plan.compilation_mode == COMPILATION_MODE_STATIC
+    assert plan.will_attempt_precompiled is False
+    assert plan.will_attempt_cross_compile is True
+    assert plan.precompiled_skip_reason == "cross compilation is required"
+
+
+@pytest.mark.asyncio
 async def test_plan_build_skips_precompiled_when_compiled_scenes_exist(monkeypatch: pytest.MonkeyPatch):
     async def fake_resolve_prebuilt_entry(**_kwargs):
         return None, "debian-trixie-arm64"
