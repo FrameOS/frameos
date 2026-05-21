@@ -18,6 +18,7 @@ from typing import Any, Iterator
 import asyncssh
 import pytest
 
+from app.codegen.drivers_nim import COMPILATION_MODE_STATIC
 from app.models.frame import Frame
 from app.models.log import Log
 from app.tasks._frame_deployer import FrameDeployer
@@ -405,7 +406,7 @@ async def test_real_ssh_full_fast_cross_and_precompiled_deploy(
             db,
             ssh_target,
             name="DeployE2ERemote",
-            rpios={"crossCompilation": "never"},
+            rpios={"crossCompilation": "never", "compilationMode": COMPILATION_MODE_STATIC},
         )
         remote_plan = await _run_full_deploy(
             db,
@@ -415,6 +416,8 @@ async def test_real_ssh_full_fast_cross_and_precompiled_deploy(
             nim_path=nim_path,
         )
     assert remote_plan.full_deploy is not None
+    assert remote_plan.full_deploy.binary_plan.compilation_mode == COMPILATION_MODE_STATIC
+    assert remote_plan.full_deploy.binary_plan.will_attempt_precompiled is False
     assert remote_plan.full_deploy.binary_plan.will_attempt_cross_compile is False
     assert remote_frame.status == "starting"
     with _phase("verify remote-built binary runs"):
