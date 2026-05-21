@@ -99,6 +99,7 @@ RUN nimble install -d -y && nimble setup
 WORKDIR /app
 COPY frontend frontend
 COPY repo/apps repo/apps
+COPY repo/scenes repo/scenes
 COPY frameos frameos
 
 WORKDIR /app/frameos
@@ -187,6 +188,7 @@ COPY --from=python-deps /app/backend/.venv /app/backend/.venv
 COPY docker-entrypoint.sh versions.json ./
 COPY backend backend
 COPY repo/apps repo/apps
+COPY repo/scenes repo/scenes
 COPY tools/prebuilt-deps/manifest.json tools/prebuilt-deps/manifest.json
 COPY --from=app-builder /app/frontend/dist frontend/dist
 COPY --from=app-builder /app/frontend/schema frontend/schema

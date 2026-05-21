@@ -43,6 +43,8 @@ repo
 !repo/
 !repo/apps/
 !repo/apps/**
+!repo/scenes/
+!repo/scenes/**
 frameos/result
 frameos/tmp
 frameos/build

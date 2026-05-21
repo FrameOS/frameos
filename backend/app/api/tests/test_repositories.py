@@ -30,6 +30,19 @@ async def test_get_repositories(async_client, db):
     repos = response.json()
     assert isinstance(repos, list)
 
+
+@pytest.mark.asyncio
+async def test_get_system_repositories_includes_packaged_templates(async_client):
+    response = await async_client.get('/api/repositories/system')
+    assert response.status_code == 200
+
+    repos = response.json()
+    repo_ids = {repo["id"] for repo in repos}
+    assert "system-samples" in repo_ids
+    assert "system-gallery" in repo_ids
+    assert all(repo.get("templates") for repo in repos)
+
+
 @pytest.mark.asyncio
 async def test_get_repository(async_client, db):
     repo = Repository(name="Test Repo", url="http://example.com/test.json")
