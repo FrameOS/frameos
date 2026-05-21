@@ -1,6 +1,9 @@
 import os
 import osproc
 import pixie
+import json
+import math
+import sequtils
 import strutils
 import times
 import strformat
@@ -34,24 +37,51 @@ proc renderError(self: App, context: ExecutionContext, message: string): Image =
 proc ffmpegTimeoutMs(self: App): int =
   max(1, (if self.appConfig.timeoutSeconds > 0: self.appConfig.timeoutSeconds else: DefaultFfmpegTimeoutSeconds)) * 1000
 
-proc runFfmpeg(command: string, timeoutMs: int): tuple[data: string, exitCode: int] =
+proc ffmpegArgs(url: string, outputPath: string): seq[string] =
+  result = @[
+    "-loglevel", "quiet",
+    "-nostdin",
+    "-y",
+    "-threads", "1",
+    "-i", url,
+    "-an",
+    "-vframes", "1",
+    "-f", "image2",
+    "-c:v", "bmp",
+    outputPath
+  ]
+
+proc shellDisplayArg(arg: string): string =
+  for ch in arg:
+    if ch in {' ', '\'', '"', '$', '&', '?', '*', '(', ')', ';', '<', '>', '|', '\\'}:
+      return quoteShell(arg)
+  arg
+
+proc ffmpegCommandForLog(url: string, outputPath = ""): string =
+  let args = ffmpegArgs(url, outputPath).filterIt(it.len > 0)
+  "ffmpeg " & args.mapIt(shellDisplayArg(it)).join(" ")
+
+proc stopFfmpeg(p: Process) =
+  if p == nil or not p.running():
+    return
+  try:
+    p.terminate()
+    discard p.waitForExit(1500)
+    if p.running():
+      p.kill()
+      discard p.waitForExit(500)
+  except CatchableError:
+    discard
+
+proc runFfmpeg(command: string, url: string, timeoutMs: int): tuple[data: string, exitCode: int] =
   if rtspSnapshotFfmpegRunHook != nil:
     return rtspSnapshotFfmpegRunHook(command, timeoutMs)
 
   let outputPath = getTempDir() / ("frameos-rtsp-" & $getCurrentProcessId() & "-" & $(epochTime() * 1000).int & ".bmp")
-  let commandWithOutput = command & " " & quoteShell(outputPath)
-  var p = startProcess(commandWithOutput, options = {poUsePath, poEvalCommand})
+  var p = startProcess("ffmpeg", args = ffmpegArgs(url, outputPath), options = {poUsePath})
   defer:
     if p != nil:
-      if p.running():
-        try:
-          p.terminate()
-          discard p.waitForExit(1500)
-          if p.running():
-            p.kill()
-            discard p.waitForExit(500)
-        except CatchableError:
-          discard
+      p.stopFfmpeg()
       p.close()
     if fileExists(outputPath):
       try:
@@ -62,18 +92,10 @@ proc runFfmpeg(command: string, timeoutMs: int): tuple[data: string, exitCode: i
   let startedAt = epochTime()
   while p.running():
     if fileExists(outputPath) and getFileSize(outputPath) > MaxFfmpegOutputBytes:
-      p.terminate()
-      discard p.waitForExit(1500)
-      if p.running():
-        p.kill()
-        discard p.waitForExit(500)
+      p.stopFfmpeg()
       raise newException(IOError, "ffmpeg output exceeded " & $MaxFfmpegOutputBytes & " bytes")
     if epochTime() > startedAt + (timeoutMs.float / 1000.0):
-      p.terminate()
-      discard p.waitForExit(1500)
-      if p.running():
-        p.kill()
-        discard p.waitForExit(500)
+      p.stopFfmpeg()
       result.exitCode = -1
       return
     sleep(100)
@@ -93,23 +115,35 @@ proc runFfmpeg(command: string, timeoutMs: int): tuple[data: string, exitCode: i
 
 proc get*(self: App, context: ExecutionContext): Image =
   try:
-    let url = self.appConfig.url.replace("'", "\\'")
-    let command = "ffmpeg -loglevel quiet -nostdin -y -i '" & url & "' -vframes 1 -f image2 -c:v bmp"
+    let url = self.appConfig.url
+    let command = ffmpegCommandForLog(url)
+    let timeoutMs = self.ffmpegTimeoutMs()
 
     if self.frameConfig.debug:
-      self.log "Running: " & command
+      self.log(%*{
+        "event": "ffmpeg:start",
+        "message": "Running: " & command,
+        "timeoutMs": timeoutMs
+      })
 
-    # Run ffmpeg
-    let timeoutMs = self.ffmpegTimeoutMs()
-    let (data, exitCode) = runFfmpeg(command, timeoutMs)
+    let startedAt = epochTime()
+    let (data, exitCode) = runFfmpeg(command, url, timeoutMs)
+    let elapsedMs = round((epochTime() - startedAt) * 1000, 3)
 
     if exitCode != 0:
       let reason = if exitCode == -1: "timeout after " & $(timeoutMs div 1000) & "s" else: "exit code " & $exitCode
-      self.logError "ffmpeg failed: " & reason
+      self.logError "ffmpeg failed: " & reason & " after " & $elapsedMs & "ms"
       return renderError(self, context, "ffmpeg failed to run (" & reason & ")")
 
     if data.len > MaxFfmpegOutputBytes:
       raise newException(IOError, &"ffmpeg output exceeded {MaxFfmpegOutputBytes} bytes")
+
+    if self.frameConfig.debug:
+      self.log(%*{
+        "event": "ffmpeg:done",
+        "ms": elapsedMs,
+        "bytes": data.len
+      })
 
     try:
       return decodeImageWithFallback(data)

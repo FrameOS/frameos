@@ -32,6 +32,9 @@ suite "Logger Tests":
     if fileExists("test-logger.log"):
       try: removeFile("test-logger.log")
       except: discard
+    if fileExists("test-logger-20231114.log"):
+      try: removeFile("test-logger-20231114.log")
+      except: discard
 
   test "logger is enabled by default":
     let logger = newLogger(testConfig)
@@ -74,6 +77,24 @@ suite "Logger Tests":
     let contents = readFile("test-logger.log")
     doAssert "Hello world" in contents,
       "Log file contents did not contain the expected message"
+
+  test "logger file timestamps use event time":
+    testConfig.logToFile = "test-logger-{date}.log"
+    discard newLogger(testConfig)
+
+    logChannel.send(SerializedLog(
+      timestamp: 1700000000.0,
+      event: "historical",
+      line: """{"event":"historical","message":"from event time"}"""
+    ))
+
+    doAssert waitFor(proc(): bool =
+      fileExists("test-logger-20231114.log") and ("from event time" in readFile("test-logger-20231114.log"))
+    ), "Expected log file to be named from the event timestamp"
+
+    let contents = readFile("test-logger-20231114.log")
+    doAssert contents.startsWith("[2023-11-14T"),
+      "Expected log line timestamp to come from the event timestamp"
 
   test "logger does not write to file when disabled":
     # Fresh file

@@ -38,18 +38,19 @@ proc gzipLogFile(path: string) =
     except OSError as e:
       echo "Error removing compressed log file: " & e.msg
 
-proc logToFile(filename: string, logLine: string, lastLogFilePath: var string) =
+proc logToFile(filename: string, logLine: string, lastLogFilePath: var string, timestamp: float) =
   try:
     if filename.len > 0:
+      let loggedAt = fromUnix(timestamp.int64).local
       let file = if "{date}" in filename:
-        filename.replace("{date}", now().format("yyyyMMdd"))
+        filename.replace("{date}", loggedAt.format("yyyyMMdd"))
       else:
         filename
       if lastLogFilePath.len > 0 and lastLogFilePath != file:
         gzipLogFile(lastLogFilePath)
       lastLogFilePath = file
       logFile = open(file, fmAppend)
-      logFile.write(now().format("[yyyy-MM-dd'T'HH:mm:ss]") & " " & logLine & "\n")
+      logFile.write(loggedAt.format("[yyyy-MM-dd'T'HH:mm:ss]") & " " & logLine & "\n")
       logFile.close()
   except Exception as e:
     echo "Error writing to log file: " & $e.msg
@@ -117,7 +118,7 @@ proc run(self: LoggerThread) =
     if success:
       echo "(" & $payload.timestamp & ", " & payload.line & ")" # print to stdout / journal
       self.logs.add(payload)
-      logToFile(self.frameConfig.logToFile, payload.line, self.lastLogFilePath)
+      logToFile(self.frameConfig.logToFile, payload.line, self.lastLogFilePath, payload.timestamp)
       run = 2
     else:
       sleep(run)
@@ -140,7 +141,7 @@ proc createThreadRunner(frameConfig: FrameConfig) {.thread.} =
       run(loggerThread)
     except Exception as e:
       echo "Error in logger thread: " & $e.msg
-      logToFile(frameConfig.logToFile, $(%*{"error": "Error in logger thread", "message": $e.msg}), errorLogFilePath)
+      logToFile(frameConfig.logToFile, $(%*{"error": "Error in logger thread", "message": $e.msg}), errorLogFilePath, epochTime())
       sleep(1000)
 
 proc newLogger*(frameConfig: FrameConfig): Logger =

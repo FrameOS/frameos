@@ -128,3 +128,21 @@ suite "data/rstpSnapshot app":
 
     check outputImage.width == 3
     check outputImage.height == 2
+
+  test "debug logging includes ffmpeg completion details":
+    let previousHook = rtspSnapshotFfmpegRunHook
+    defer:
+      rtspSnapshotFfmpegRunHook = previousHook
+
+    hookMode = hmSuccess
+    rtspSnapshotFfmpegRunHook = fakeFfmpegRunner
+
+    let store = LogStore(items: @[])
+    let app = makeApp(FrameScene(logger: newLogger(store)), FrameConfig(width: 20, height: 20, debug: true))
+    discard app.get(ExecutionContext(hasImage: false))
+
+    let logs = $store.items
+    check logs.contains("ffmpeg:start")
+    check logs.contains("timeoutMs")
+    check logs.contains("ffmpeg:done")
+    check logs.contains("bytes")
