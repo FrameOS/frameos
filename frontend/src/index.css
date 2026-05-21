@@ -4,17 +4,30 @@
 
 :root {
   font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 #root {
-  max-width: 1280px;
-  margin: 0 auto;
+  width: 100%;
+  min-height: 100vh;
   text-align: left;
 }
 
+html,
 body {
   height: 100%;
+  margin: 0;
+  background: #eef0f7;
+}
+
+.frameos-homey-shell {
+  background: linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.68),
+      rgba(238, 240, 247, 0.9) 44%,
+      rgba(245, 243, 238, 0.82)
+    ),
+    #eef0f7;
 }
 
 @keyframes fadeInOut {
