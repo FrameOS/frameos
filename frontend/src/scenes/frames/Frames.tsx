@@ -39,25 +39,27 @@ export function Frames() {
             }
           />
         </div>
-        <div className="overflow-auto h-full">
-          <Masonry id="frames" className="p-4">
-            {activeFramesList.map((frame) => (
-              <div key={`frame-${frame.id}`} className="mb-4">
-                <Frame frame={frame} />
-              </div>
-            ))}
-          </Masonry>
-          <div className="p-4">
-            {formVisible ? (
-              <NewFrame />
-            ) : (
-              <Button color="secondary" onClick={showForm}>
-                Add a smart frame
-              </Button>
-            )}
+        <div className="flex min-h-0 flex-1 flex-col overflow-auto">
+          <div className="flex-1">
+            <Masonry id="frames" className="p-4">
+              {activeFramesList.map((frame) => (
+                <div key={`frame-${frame.id}`} className="mb-4">
+                  <Frame frame={frame} />
+                </div>
+              ))}
+            </Masonry>
+            <div className="p-4">
+              {formVisible ? (
+                <NewFrame />
+              ) : (
+                <Button color="secondary" onClick={showForm}>
+                  Add a smart frame
+                </Button>
+              )}
+            </div>
           </div>
           {archivedFramesList.length > 0 ? (
-            <section className="border-t border-gray-700 bg-gray-950/30 px-4 py-3">
+            <section className="shrink-0 border-t border-gray-700 px-4 py-3">
               <button
                 type="button"
                 className="group flex w-full items-center justify-between gap-3 px-1 py-2 text-left transition focus:outline-none focus-visible:rounded-md focus-visible:ring-1 focus-visible:ring-gray-500"
