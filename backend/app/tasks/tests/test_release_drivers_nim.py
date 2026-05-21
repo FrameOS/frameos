@@ -44,6 +44,8 @@ def test_release_shared_registry_filters_drivers_at_runtime():
     assert 'libraryName: "waveshare_EPD_7in3e.so"' in source
     assert '"frameos_driver_setup"' in source
     assert "proc setupSharedDriver(spec: DriverSpec, driverCtx: driverContext.DriverContext): SetupResult" in source
+    assert "setupLibraries.add(library)" in source
+    assert "finally:\n    unloadLib(library)" not in source
     assert "import inkyPython/inkyPython as inkyPythonSetupDriver" not in source
     assert "import inkyHyperPixel2r/inkyHyperPixel2r as inkyHyperPixel2rSetupDriver" not in source
     assert "proc setupReleaseDriverSupport" not in source

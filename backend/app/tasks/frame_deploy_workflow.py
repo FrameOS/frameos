@@ -462,6 +462,7 @@ class FrameDeployWorkflow:
                         if binary_plan.precompiled_skip_reason
                         else "."
                     )
+                    + " Falling back to single executable."
                 )
         if low_memory and not binary_plan.will_attempt_precompiled:
             notes.append("Device is low memory; on-device build path will stop FrameOS before compilation.")
@@ -869,17 +870,38 @@ class FrameDeployWorkflow:
 
     async def _run_setup_in_directory(self, path: str) -> bool:
         await self.deployer.log("stdout", f"{icon} Running FrameOS device setup")
+        setup_output: list[str] = []
         setup_status = await self.deployer.exec_command(
             f"cd {shlex.quote(path)} && sudo ./frameos setup",
+            output=setup_output,
             raise_on_error=False,
             log_command="sudo ./frameos setup",
         )
+        if self._setup_completed_before_legacy_shared_driver_segfault(setup_status, setup_output):
+            await self.deployer.log(
+                "stderr",
+                "FrameOS setup completed, then exited during legacy shared-driver teardown; continuing deploy.",
+            )
+            return False
         if setup_status == 2:
             return True
         if setup_status != 0:
             await self._log_setup_failure_diagnostics(setup_status)
             raise RuntimeError(f"FrameOS setup failed with exit code {setup_status}")
         return False
+
+    @staticmethod
+    def _setup_completed_before_legacy_shared_driver_segfault(setup_status: int, setup_output: list[str]) -> bool:
+        if setup_status not in {-1, 139}:
+            return False
+        setup_failed = any(": failed:" in line for line in setup_output)
+        if setup_failed:
+            return False
+        return any(
+            line.strip() == "FrameOS setup: complete"
+            or (line.startswith("FrameOS setup: shared driver ") and line.endswith(": setup complete"))
+            for line in setup_output
+        )
 
     async def _log_setup_failure_diagnostics(self, setup_status: int) -> None:
         await self.deployer.log("stderr", f"FrameOS setup exited with code {setup_status}; collecting diagnostics")

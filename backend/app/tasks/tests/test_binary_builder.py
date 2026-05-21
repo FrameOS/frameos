@@ -45,7 +45,7 @@ class FakeDeployer:
 
 
 @pytest.mark.asyncio
-async def test_plan_build_defaults_to_static_compilation_mode(monkeypatch: pytest.MonkeyPatch):
+async def test_plan_build_defaults_to_precompiled_with_static_fallback(monkeypatch: pytest.MonkeyPatch):
     async def fake_resolve_prebuilt_entry(**_kwargs):
         return None, None
 
@@ -68,7 +68,9 @@ async def test_plan_build_defaults_to_static_compilation_mode(monkeypatch: pytes
         compilation_mode=COMPILATION_MODE_SHARED,
     )
 
+    assert plan.requested_compilation_mode == COMPILATION_MODE_PRECOMPILED
     assert plan.compilation_mode == COMPILATION_MODE_STATIC
+    assert plan.precompiled_skip_reason == "no matching precompiled target"
     assert explicit_shared_plan.compilation_mode == COMPILATION_MODE_SHARED
 
 
@@ -98,6 +100,7 @@ async def test_plan_build_attempts_precompiled_when_all_scenes_are_interpreted(m
     )
 
     assert plan.compilation_mode == COMPILATION_MODE_PRECOMPILED
+    assert plan.requested_compilation_mode == COMPILATION_MODE_PRECOMPILED
     assert plan.will_attempt_precompiled is True
     assert plan.will_attempt_cross_compile is False
     assert plan.precompiled_release_url is not None
@@ -132,7 +135,8 @@ async def test_plan_build_skips_precompiled_when_compiled_scenes_exist(monkeypat
         target_override=TargetMetadata(arch="aarch64", distro="debian", version="trixie")
     )
 
-    assert plan.compilation_mode == COMPILATION_MODE_PRECOMPILED
+    assert plan.requested_compilation_mode == COMPILATION_MODE_PRECOMPILED
+    assert plan.compilation_mode == COMPILATION_MODE_STATIC
     assert plan.will_attempt_precompiled is False
     assert plan.will_attempt_cross_compile is True
     assert plan.precompiled_skip_reason == "1 compiled scene is configured"

@@ -27,6 +27,7 @@ export interface FullDeployPlanResponse {
   low_memory: boolean
   drivers: string[]
   binary: {
+    requested_compilation_mode?: 'static' | 'shared' | 'precompiled'
     compilation_mode?: 'static' | 'shared' | 'precompiled'
     will_attempt_cross_compile?: boolean
     will_attempt_precompiled?: boolean
@@ -163,15 +164,17 @@ export function buildFullDeployPlanSummary(
   if (fullPlan.drivers.length > 0) {
     items.push({ label: 'Drivers', value: stringifyList(fullPlan.drivers) })
   }
-  if (fullPlan.binary.compilation_mode === 'shared') {
+  const requestedCompilationMode = fullPlan.binary.requested_compilation_mode ?? fullPlan.binary.compilation_mode
+  if (fullPlan.binary.compilation_mode === 'shared' && requestedCompilationMode !== 'precompiled') {
     items.push({ label: 'Compilation', value: 'Shared libraries deployed next to the FrameOS binary' })
   }
-  if (fullPlan.binary.compilation_mode === 'precompiled') {
+  if (requestedCompilationMode === 'precompiled') {
+    const fallbackMode = fullPlan.binary.compilation_mode === 'static' ? 'Single executable' : 'Shared libraries'
     items.push({
       label: 'Compilation',
       value: fullPlan.binary.will_attempt_precompiled
         ? 'Precompiled FrameOS binary and shared driver libraries'
-        : `Shared libraries; precompiled release skipped${
+        : `${fallbackMode}; precompiled release skipped${
             fullPlan.binary.precompiled_skip_reason ? ` (${fullPlan.binary.precompiled_skip_reason})` : ''
           }`,
     })

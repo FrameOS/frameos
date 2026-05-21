@@ -17,12 +17,12 @@ from app.codegen.drivers_nim import (
 from app.drivers.drivers import Driver
 
 
-def test_compilation_mode_defaults_to_static():
-    assert normalize_compilation_mode(None) == COMPILATION_MODE_STATIC
-    assert normalize_compilation_mode("") == COMPILATION_MODE_STATIC
-    assert normalize_compilation_mode("unexpected") == COMPILATION_MODE_STATIC
-    assert frame_compilation_mode(SimpleNamespace(rpios=None)) == COMPILATION_MODE_STATIC
-    assert frame_compilation_mode(SimpleNamespace(rpios={})) == COMPILATION_MODE_STATIC
+def test_compilation_mode_defaults_to_precompiled():
+    assert normalize_compilation_mode(None) == COMPILATION_MODE_PRECOMPILED
+    assert normalize_compilation_mode("") == COMPILATION_MODE_PRECOMPILED
+    assert normalize_compilation_mode("unexpected") == COMPILATION_MODE_PRECOMPILED
+    assert frame_compilation_mode(SimpleNamespace(rpios=None)) == COMPILATION_MODE_PRECOMPILED
+    assert frame_compilation_mode(SimpleNamespace(rpios={})) == COMPILATION_MODE_PRECOMPILED
 
 
 def test_compilation_mode_shared_requires_explicit_setting():
@@ -74,6 +74,8 @@ def test_shared_drivers_run_compiled_driver_setup_from_library():
     assert '"frameos_driver_setup"' in source
     assert "proc setupSharedDriver(spec: DriverSpec, driverCtx: driverContext.DriverContext): SetupResult" in source
     assert "setupProc(cast[pointer](driverCtx))" in source
+    assert "setupLibraries.add(library)" in source
+    assert "finally:\n    unloadLib(library)" not in source
     assert "import inkyPython/inkyPython as inkyPythonSetupDriver" not in source
     assert "import i2c/i2c as i2cSetupDriver" in source
     assert 'runSetupStep("i2c"' in source

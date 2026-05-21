@@ -8,7 +8,7 @@ from app.drivers.drivers import Driver
 COMPILATION_MODE_STATIC = "static"
 COMPILATION_MODE_SHARED = "shared"
 COMPILATION_MODE_PRECOMPILED = "precompiled"
-DEFAULT_COMPILATION_MODE = COMPILATION_MODE_STATIC
+DEFAULT_COMPILATION_MODE = COMPILATION_MODE_PRECOMPILED
 VALID_COMPILATION_MODES = {
     COMPILATION_MODE_STATIC,
     COMPILATION_MODE_SHARED,
@@ -365,6 +365,7 @@ type
 let driverSpecs: seq[DriverSpec] = @[{spec_lines}]
 
 var loadedDrivers: seq[LoadedDriver] = @[]
+var setupLibraries: seq[LibHandle] = @[]
 {driver_context_helpers_nim()}
 
 proc hostLog(event: JsonNode) {{.cdecl, gcsafe.}} =
@@ -391,15 +392,13 @@ proc setupSharedDriver(spec: DriverSpec, driverCtx: driverContext.DriverContext)
   if library.isNil:
     echo "FrameOS setup: shared driver " & spec.name & ": failed to load " & path
     raise newException(OSError, "Unable to load driver library: " & path)
-  try:
-    let setupProc = loadRequiredSymbol[DriverSetupProc](library, spec.name, "frameos_driver_setup")
-    if setupProc.isNil:
-      raise newException(OSError, "Missing setup symbol for driver: " & spec.name)
-    echo "FrameOS setup: shared driver " & spec.name & ": running setup"
-    result.rebootRequired = setupProc(cast[pointer](driverCtx))
-    echo "FrameOS setup: shared driver " & spec.name & ": setup complete"
-  finally:
-    unloadLib(library)
+  let setupProc = loadRequiredSymbol[DriverSetupProc](library, spec.name, "frameos_driver_setup")
+  if setupProc.isNil:
+    raise newException(OSError, "Missing setup symbol for driver: " & spec.name)
+  echo "FrameOS setup: shared driver " & spec.name & ": running setup"
+  result.rebootRequired = setupProc(cast[pointer](driverCtx))
+  setupLibraries.add(library)
+  echo "FrameOS setup: shared driver " & spec.name & ": setup complete"
 
 proc setupSharedDrivers(frameOS: FrameOS): SetupResult =
   echo "FrameOS setup: shared driver registry: building context"

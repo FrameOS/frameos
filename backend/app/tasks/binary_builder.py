@@ -15,6 +15,7 @@ from app.tasks._frame_deployer import FrameDeployer
 from app.drivers.devices import drivers_for_frame
 from app.codegen.drivers_nim import (
     COMPILATION_MODE_PRECOMPILED,
+    COMPILATION_MODE_STATIC,
     frame_compilation_mode,
     normalize_compilation_mode,
 )
@@ -61,6 +62,7 @@ class FrameBinaryPlan:
     will_attempt_cross_compile: bool
     prebuilt_entry: PrebuiltEntry | None
     prebuilt_target: str | None
+    requested_compilation_mode: str | None = None
     will_attempt_precompiled: bool = False
     precompiled_release_url: str | None = None
     precompiled_skip_reason: str | None = None
@@ -73,6 +75,7 @@ class FrameBinaryPlan:
                 "distro": self.target.distro,
                 "version": self.target.version,
             },
+            "requested_compilation_mode": self.requested_compilation_mode or self.compilation_mode,
             "compilation_mode": self.compilation_mode,
             "allow_cross_compile": self.allow_cross_compile,
             "force_cross_compile": self.force_cross_compile,
@@ -176,9 +179,10 @@ class FrameBinaryBuilder:
         compilation_mode: str | None = None,
     ) -> FrameBinaryPlan:
         target = target_override or await self._detect_target()
-        resolved_compilation_mode = normalize_compilation_mode(
+        requested_compilation_mode = normalize_compilation_mode(
             compilation_mode or frame_compilation_mode(self.frame)
         )
+        resolved_compilation_mode = requested_compilation_mode
         prebuilt_entry, prebuilt_target = await resolve_prebuilt_entry(
             distro=target.distro,
             distro_version=target.version,
@@ -188,7 +192,7 @@ class FrameBinaryBuilder:
         will_attempt_precompiled = False
         precompiled_url = None
         precompiled_skip_reason = None
-        if resolved_compilation_mode == COMPILATION_MODE_PRECOMPILED:
+        if requested_compilation_mode == COMPILATION_MODE_PRECOMPILED:
             compiled_scene_count = frame_compiled_scene_count(self.frame)
             precompiled_url = precompiled_frameos_release_url(prebuilt_target or "")
             if compiled_scene_count > 0:
@@ -203,6 +207,8 @@ class FrameBinaryBuilder:
                 precompiled_skip_reason = "no matching precompiled release URL"
             else:
                 will_attempt_precompiled = True
+            if not will_attempt_precompiled:
+                resolved_compilation_mode = COMPILATION_MODE_STATIC
 
         build_host = get_build_host_config(self.db)
         cross_compile_supported = can_cross_compile_target(target.arch)
@@ -221,6 +227,7 @@ class FrameBinaryBuilder:
             will_attempt_cross_compile=will_attempt_cross_compile,
             prebuilt_entry=prebuilt_entry,
             prebuilt_target=prebuilt_target,
+            requested_compilation_mode=requested_compilation_mode,
             will_attempt_precompiled=will_attempt_precompiled,
             precompiled_release_url=precompiled_url,
             precompiled_skip_reason=precompiled_skip_reason,

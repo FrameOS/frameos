@@ -547,8 +547,8 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                       deployed next to FrameOS, or linked into the FrameOS executable.
                     </p>
                     <p>
-                      Precompiled only downloads a published FrameOS release when all scenes are interpreted; otherwise
-                      it falls back to shared libraries.
+                      Precompiled downloads a published FrameOS release when all scenes are interpreted; otherwise it
+                      falls back to a single executable.
                     </p>
                   </div>
                 }
@@ -556,10 +556,10 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                 <Select
                   name="rpios.compilationMode"
                   options={[
-                    { value: '', label: 'Default (single executable)' },
-                    { value: 'shared', label: 'Shared libraries' },
-                    { value: 'precompiled', label: 'Precompiled only / experimental' },
-                    { value: 'static', label: 'Single executable' },
+                    { value: '', label: 'Default (Precompiled)' },
+                    { value: 'precompiled', label: 'Use precompiled binaries if possible' },
+                    { value: 'static', label: 'Build as a single executable' },
+                    { value: 'shared', label: 'Scenes and drivers as shared libraries' },
                   ]}
                 />
               </Field>

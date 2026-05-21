@@ -64,13 +64,17 @@ class RecordingDeployer(FakeDeployer):
         self.logs: list[tuple[str, str]] = []
         self.atomic_uploads: list[tuple[str, bool]] = []
         self.setup_exit_code = 0
+        self.setup_output: list[str] = []
 
-    async def exec_command(self, command: str, **_kwargs) -> int:
+    async def exec_command(self, command: str, **kwargs) -> int:
         self.commands.append(command)
         if (
             command.startswith("cd /srv/frameos/releases/release_")
             or command.startswith("cd /srv/frameos/current")
         ) and command.endswith(" && sudo ./frameos setup"):
+            output = kwargs.get("output")
+            if output is not None:
+                output.extend(self.setup_output)
             return self.setup_exit_code
         if command.startswith('grep -q "^dtoverlay=vc4-kms-v3d" '):
             return 1
@@ -127,7 +131,7 @@ class FakePrecompiledBinaryBuilder:
 
 
 @pytest.mark.asyncio
-async def test_full_plan_defaults_to_single_executable(monkeypatch: pytest.MonkeyPatch):
+async def test_full_plan_defaults_to_precompiled(monkeypatch: pytest.MonkeyPatch):
     captured_modes: list[str] = []
 
     class CapturingBinaryBuilder(FakeBinaryBuilder):
@@ -161,7 +165,7 @@ async def test_full_plan_defaults_to_single_executable(monkeypatch: pytest.Monke
 
     await workflow.plan("full")
 
-    assert captured_modes == ["static"]
+    assert captured_modes == ["precompiled"]
 
 
 @pytest.mark.asyncio
@@ -984,6 +988,97 @@ async def test_execute_full_does_not_activate_release_when_setup_fails(monkeypat
     assert deployer.restarted_services == ["frameos"]
     assert frame.status == "uninitialized"
     assert updated_statuses == ["deploying", "uninitialized"]
+
+
+@pytest.mark.asyncio
+async def test_full_deploy_continues_when_legacy_shared_driver_setup_segfaults_after_completion(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    frame = SimpleNamespace(
+        id=24,
+        name="LegacyPrecompiled",
+        status="ready",
+        ssh_keys=[],
+        rpios=None,
+        reboot=None,
+        last_successful_deploy={},
+        to_dict=lambda: {"id": 24, "name": "LegacyPrecompiled"},
+    )
+    deployer = RecordingDeployer()
+    deployer.setup_exit_code = 139
+    deployer.setup_output = [
+        "FrameOS setup: starting",
+        "FrameOS setup: checking bootConfig",
+        "FrameOS setup: bootConfig: complete",
+        "FrameOS setup: shared driver inkyPython: setup complete",
+    ]
+    workflow = FrameDeployWorkflow(
+        db=None,
+        redis=None,
+        frame=frame,
+        deployer=deployer,
+        temp_dir="",
+        binary_builder=FakeBinaryBuilder(),
+    )
+    updated_statuses: list[str] = []
+
+    async def fake_update_frame(_db, _redis, updated_frame):
+        updated_statuses.append(updated_frame.status)
+
+    async def record_command(command: str):
+        deployer.commands.append(command)
+
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.update_frame", fake_update_frame)
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.ensure_sudo_available", lambda _deployer: record_command("sudo"))
+    monkeypatch.setattr(workflow, "_install_authorized_keys_for_full_deploy", lambda _full_plan: record_command("ssh_keys"))
+    monkeypatch.setattr(workflow, "_build_full_release_binary", lambda _full_plan: record_command("build"))
+    monkeypatch.setattr(workflow, "_prepare_remote_for_full_release", lambda **_kwargs: record_command("prepare_remote"))
+    monkeypatch.setattr(workflow, "_prepare_release_directory", lambda _build_id: record_command("prepare_release"))
+    monkeypatch.setattr(workflow, "_publish_release_binary", lambda **_kwargs: record_command("publish_binary"))
+    monkeypatch.setattr(workflow, "_upload_release_metadata", lambda _build_id: record_command("upload_metadata"))
+    monkeypatch.setattr(workflow, "_sync_vendor_dependencies", lambda **_kwargs: record_command("sync_vendor"))
+    monkeypatch.setattr(workflow, "_install_and_activate_release", lambda _build_id: record_command("activate"))
+    monkeypatch.setattr(workflow, "_cleanup_release_artifacts", lambda: record_command("cleanup"))
+    monkeypatch.setattr(workflow, "_run_post_deploy_cleanup", lambda **_kwargs: record_command("post_cleanup"))
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.sync_assets", lambda _db, _redis, _frame: record_command("assets"))
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.current_frameos_version", lambda: "2026.test")
+
+    plan = FrameDeployPlan(
+        mode="full",
+        frame_id=24,
+        frame_name="LegacyPrecompiled",
+        build_id="build12345678",
+        frame_dict={"id": 24, "name": "LegacyPrecompiled"},
+        previous_frameos_version="9.9.9",
+        full_deploy=FullDeployPlan(
+            target={},
+            low_memory=False,
+            drivers=[],
+            binary_plan=await FakeBinaryBuilder().plan_build(),
+            post_deploy={"final_action": "restart_frameos"},
+        ),
+    )
+
+    await workflow._execute_full(plan)
+
+    assert "activate" in deployer.commands
+    assert ("stderr", "FrameOS setup completed, then exited during legacy shared-driver teardown; continuing deploy.") in deployer.logs
+    assert frame.status == "starting"
+    assert updated_statuses == ["deploying", "starting"]
+
+
+def test_legacy_shared_driver_setup_segfault_guard_requires_successful_setup_output():
+    assert FrameDeployWorkflow._setup_completed_before_legacy_shared_driver_segfault(
+        139,
+        [
+            "FrameOS setup: shared driver inkyPython: running setup",
+            "FrameOS setup: inkyPython: failed: nope",
+        ],
+    ) is False
+    assert FrameDeployWorkflow._setup_completed_before_legacy_shared_driver_segfault(
+        1,
+        ["FrameOS setup: shared driver inkyPython: setup complete"],
+    ) is False
 
 
 @pytest.mark.asyncio
