@@ -1,4 +1,5 @@
 import { useActions, useValues } from 'kea'
+import { router } from 'kea-router'
 import { chatLogic } from './chatLogic'
 import { frameLogic } from '../../frameLogic'
 import { panelsLogic } from '../panelsLogic'
@@ -13,6 +14,7 @@ import clsx from 'clsx'
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso'
 import { Area, Panel } from '../../../../types'
 import { ChevronLeftIcon } from '@heroicons/react/24/solid'
+import { urls } from '../../../../urls'
 
 export function Chat() {
   const { frameId, scenes } = useValues(frameLogic)
@@ -68,6 +70,7 @@ export function Chat() {
       setPanel(Area.TopLeft, scenesPanel)
     }
     focusScene(sceneId)
+    router.actions.push(urls.scenes(frameId, sceneId))
   }
 
   const appLabel =
@@ -137,12 +140,19 @@ export function Chat() {
   const sendButtonColor = input.trim() ? 'primary' : 'secondary'
   const activeChatLoading = activeChatId ? chatMessagesLoading[activeChatId] : false
 
-  const handleOpenScene = (e: React.MouseEvent<HTMLAnchorElement>) => {
-    e.preventDefault()
-    if (!chatSceneId) {
+  const handleSceneLinkClick = (event: React.MouseEvent<HTMLAnchorElement>, sceneId?: string | null) => {
+    if (!sceneId) {
       return
     }
-    focusSceneById(chatSceneId)
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) {
+      return
+    }
+    event.preventDefault()
+    focusSceneById(sceneId)
+  }
+
+  const handleOpenScene = (event: React.MouseEvent<HTMLAnchorElement>) => {
+    handleSceneLinkClick(event, chatSceneId)
   }
 
   const handleOpenApp = (e: React.MouseEvent<HTMLAnchorElement>) => {
@@ -164,10 +174,14 @@ export function Chat() {
     return date.toLocaleString()
   }
 
-  const normalizeGeneratedSceneName = (sceneName: string) => sceneName.replace(/^["']|["']$/g, '').trim()
+  const normalizeGeneratedSceneName = (sceneName: string) =>
+    sceneName
+      .replace(/\.$/, '')
+      .replace(/^["']|["']$/g, '')
+      .trim()
 
   const extractGeneratedSceneName = (message: string) => {
-    const match = message.match(/Scene generated:\s*(.+)$/)
+    const match = message.match(/(?:Scene generated|Generated a new scene):\s*(.+)$/)
     if (!match) {
       return null
     }
@@ -181,13 +195,13 @@ export function Chat() {
       <>
         <span>Scene generated: </span>
         {targetScene ? (
-          <button
-            type="button"
-            onClick={() => focusSceneById(targetScene.id)}
+          <a
+            href={urls.scenes(frameId, targetScene.id)}
+            onClick={(event) => handleSceneLinkClick(event, targetScene.id)}
             className="text-sky-300 hover:text-sky-200 underline underline-offset-2 decoration-sky-300/70"
           >
             {label}
-          </button>
+          </a>
         ) : (
           <span>{label}</span>
         )}
@@ -360,6 +374,11 @@ export function Chat() {
       return null
     }
 
+    const generatedSceneName = extractGeneratedSceneName(messageContent.trim())
+    if (generatedSceneName) {
+      return <div className="whitespace-pre-wrap break-words">{renderGeneratedSceneMessage(generatedSceneName)}</div>
+    }
+
     return <div className="whitespace-pre-wrap break-words">{messageContent}</div>
   }
 
@@ -383,7 +402,7 @@ export function Chat() {
               <span>
                 Chat about{' '}
                 <a
-                  href="#"
+                  href={chatSceneId ? urls.scenes(frameId, chatSceneId) : '#'}
                   onClick={handleOpenScene}
                   className="text-sky-300 hover:text-sky-200 underline underline-offset-2 decoration-sky-300/70 inline"
                 >

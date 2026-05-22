@@ -103,7 +103,7 @@ export function NewFrame(): JSX.Element {
         <h2 className="homey-strong mt-1 text-2xl font-bold tracking-normal text-slate-950">Add frame</h2>
       </div>
 
-      <div className="flex rounded-2xl bg-slate-100 p-1">
+      <div className="homey-segment-group flex rounded-2xl bg-slate-100 p-1">
         <ModeButton active={mode === 'rpios'} onClick={() => setNewFrameValues(setModeValues('rpios'))}>
           <span className="inline-flex items-center gap-2">
             <CpuChipIcon className="h-4 w-4" />

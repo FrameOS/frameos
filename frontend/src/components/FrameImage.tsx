@@ -34,6 +34,12 @@ export function FrameImage({
   const { frames } = useValues(framesModel)
   const { updateEntityImage } = useActions(entityImagesModel)
   const frame = frames[frameId]
+  const frameAspectRatio =
+    frame?.width && frame.height
+      ? frame.rotate === 90 || frame.rotate === 270
+        ? `${frame.height} / ${frame.width}`
+        : `${frame.width} / ${frame.height}`
+      : undefined
 
   const entityId = `frames/${frameId}`
   const subEntityId = sceneId ? `scene_images/${sceneId}` : 'image'
@@ -74,19 +80,12 @@ export function FrameImage({
           src={imageUrl ? imageUrl + (thumb ? (imageUrl.includes('?') ? '&thumb=1' : '?thumb=1') : '') : undefined}
           onLoad={() => setIsLoading(false)}
           onError={() => setIsLoading(false)}
-          style={
-            frame.width && frame.height
-              ? {
-                  aspectRatio:
-                frame.rotate === 90 || frame.rotate === 270
-                  ? `${frame.height} / ${frame.width}`
-                  : `${frame.width} / ${frame.height}`,
-                objectFit,
-                maxWidth: 'inherit',
-                maxHeight: 'inherit',
-              }
-            : {}
-          }
+          style={{
+            aspectRatio: frameAspectRatio,
+            objectFit,
+            maxWidth: 'inherit',
+            maxHeight: 'inherit',
+          }}
           alt=""
         />
       )}

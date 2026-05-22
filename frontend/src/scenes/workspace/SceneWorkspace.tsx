@@ -253,7 +253,10 @@ function SceneNodesList({ frameId, scene }: { frameId: number; scene: FrameScene
   const { selectedNodeId } = useValues(workspaceLogic)
   const { selectNode } = useActions(workspaceLogic)
   const nodeTreeItems = buildDiagramNodeTreeItems(scene.nodes ?? [], scene.edges ?? [])
-  const diagramActions = diagramLogic({ frameId, sceneId: scene.id }).actions
+  const diagram = diagramLogic({ frameId, sceneId: scene.id })
+  const { selectedNodeIds } = useValues(diagram)
+  const diagramActions = diagram.actions
+  const highlightedNodeIds = new Set(selectedNodeIds.length > 0 ? selectedNodeIds : selectedNodeId ? [selectedNodeId] : [])
 
   if (nodeTreeItems.length === 0) {
     return (
@@ -264,47 +267,53 @@ function SceneNodesList({ frameId, scene }: { frameId: number; scene: FrameScene
   return (
     <div className="space-y-0.5">
       {nodeTreeItems.map((item) => (
-        <button
+        <SceneNodeTreeButton
           key={item.node.id}
-          type="button"
+          item={item}
+          highlighted={highlightedNodeIds.has(item.node.id)}
           onClick={() => {
             selectNode(item.node.id)
             diagramActions.selectNode(item.node.id)
           }}
-          className={clsx(
-            'flex w-full items-center gap-2 rounded-xl py-1.5 pr-3 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-            selectedNodeId === item.node.id
-              ? 'bg-slate-900 text-white'
-              : 'homey-strong text-slate-700 hover:bg-slate-100',
-            item.kind === 'disconnected' && selectedNodeId !== item.node.id && 'opacity-70'
-          )}
-          style={{ paddingLeft: `${12 + item.depth * 14}px` }}
-        >
-          {item.depth > 0 ? (
-            <span
-              className={clsx(
-                'h-px w-3 shrink-0',
-                selectedNodeId === item.node.id ? 'bg-slate-500' : 'homey-divider bg-slate-300'
-              )}
-            />
-          ) : null}
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/80 text-xs font-bold uppercase text-slate-500">
-            {item.node.type?.slice(0, 2) ?? 'no'}
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-semibold">{nodeLabel(item.node.data, item.node.id)}</span>
-            <span
-              className={clsx(
-                'block truncate text-xs',
-                selectedNodeId === item.node.id ? 'text-slate-300' : 'homey-muted text-slate-400'
-              )}
-            >
-              {nodeKindLabel(item)}
-            </span>
-          </span>
-        </button>
+        />
       ))}
     </div>
+  )
+}
+
+function SceneNodeTreeButton({
+  item,
+  highlighted,
+  onClick,
+}: {
+  item: DiagramNodeTreeItem
+  highlighted: boolean
+  onClick: () => void
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={clsx(
+        'flex w-full items-center gap-2 rounded-xl py-1.5 pr-3 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+        highlighted ? 'bg-slate-900 text-white' : 'homey-strong text-slate-700 hover:bg-slate-100',
+        item.kind === 'disconnected' && !highlighted && 'opacity-70'
+      )}
+      style={{ paddingLeft: `${12 + item.depth * 14}px` }}
+    >
+      {item.depth > 0 ? (
+        <span className={clsx('h-px w-3 shrink-0', highlighted ? 'bg-slate-500' : 'homey-divider bg-slate-300')} />
+      ) : null}
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/80 text-xs font-bold uppercase text-slate-500">
+        {item.node.type?.slice(0, 2) ?? 'no'}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-semibold">{nodeLabel(item.node.data, item.node.id)}</span>
+        <span className={clsx('block truncate text-xs', highlighted ? 'text-slate-300' : 'homey-muted text-slate-400')}>
+          {nodeKindLabel(item)}
+        </span>
+      </span>
+    </button>
   )
 }
 

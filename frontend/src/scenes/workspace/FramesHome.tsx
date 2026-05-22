@@ -1,4 +1,4 @@
-import { BindLogic, useActions, useValues } from 'kea'
+import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
 import { A } from 'kea-router'
 import clsx from 'clsx'
 import {
@@ -8,6 +8,7 @@ import {
   ComputerDesktopIcon,
   PhotoIcon,
   PlusIcon,
+  SparklesIcon,
   TrashIcon,
   XMarkIcon,
 } from '@heroicons/react/24/outline'
@@ -26,6 +27,7 @@ import { panelsLogic } from '../frame/panels/panelsLogic'
 import { ExpandedScene } from '../frame/panels/Scenes/ExpandedScene'
 import { EditTemplateModal } from '../frame/panels/Templates/EditTemplateModal'
 import { Templates } from '../frame/panels/Templates/Templates'
+import { framesHomeLogic } from './framesHomeLogic'
 
 function SidebarStatusDots({ frame }: { frame: FrameType }): JSX.Element {
   const stale = frameIsStale(frame)
@@ -44,38 +46,25 @@ function SidebarStatusDots({ frame }: { frame: FrameType }): JSX.Element {
 }
 
 function FrameTree(): JSX.Element {
-  const { activeFramesList, archivedFramesExpanded, archivedFramesList } = useValues(framesModel)
+  const { archivedFramesExpanded } = useValues(framesModel)
   const { toggleArchivedFramesExpanded } = useActions(framesModel)
-  const { selectedFrameId } = useValues(workspaceLogic)
+  const {
+    homeActiveFramesList: activeFramesList,
+    homeInactiveFramesList: inactiveFramesList,
+    orderedArchivedFramesList: archivedFramesList,
+    selectedFrameId,
+  } = useValues(workspaceLogic)
   const { focusFrame } = useActions(workspaceLogic)
 
   return (
     <div className="space-y-5">
-      <div>
-        <div className="mb-2 px-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
-          Frames ({activeFramesList.length})
-        </div>
-        <div className="space-y-1">
-          {activeFramesList.map((frame) => (
-            <button
-              key={frame.id}
-              type="button"
-              onClick={() => focusFrame(frame.id)}
-              className={clsx(
-                'homey-frame-row flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-                selectedFrameId === frame.id
-                  ? 'homey-frame-row-selected bg-blue-50 text-blue-600'
-                  : 'text-slate-700 hover:bg-slate-100'
-              )}
-            >
-              <ComputerDesktopIcon className="h-5 w-5 shrink-0" />
-              <span className="min-w-0 flex-1 truncate text-base font-medium">{frame.name || frameHost(frame)}</span>
-              <SidebarStatusDots frame={frame} />
-              <ChevronRightIcon className="h-4 w-4 shrink-0 text-slate-300" />
-            </button>
-          ))}
-        </div>
-      </div>
+      <FrameTreeGroup title="Active" frames={activeFramesList} selectedFrameId={selectedFrameId} onFocus={focusFrame} />
+      <FrameTreeGroup
+        title="Inactive"
+        frames={inactiveFramesList}
+        selectedFrameId={selectedFrameId}
+        onFocus={focusFrame}
+      />
       {archivedFramesList.length > 0 ? (
         <div>
           <button
@@ -118,6 +107,50 @@ function FrameTree(): JSX.Element {
           ) : null}
         </div>
       ) : null}
+    </div>
+  )
+}
+
+function FrameTreeGroup({
+  title,
+  frames,
+  selectedFrameId,
+  onFocus,
+}: {
+  title: string
+  frames: FrameType[]
+  selectedFrameId: number | null
+  onFocus: (frameId: number) => void
+}): JSX.Element | null {
+  if (frames.length === 0) {
+    return null
+  }
+
+  return (
+    <div>
+      <div className="mb-2 px-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+        {title} ({frames.length})
+      </div>
+      <div className="space-y-1">
+        {frames.map((frame) => (
+          <button
+            key={frame.id}
+            type="button"
+            onClick={() => onFocus(frame.id)}
+            className={clsx(
+              'homey-frame-row flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+              selectedFrameId === frame.id
+                ? 'homey-frame-row-selected bg-blue-50 text-blue-600'
+                : 'text-slate-700 hover:bg-slate-100'
+            )}
+          >
+            <ComputerDesktopIcon className="h-5 w-5 shrink-0" />
+            <span className="min-w-0 flex-1 truncate text-base font-medium">{frame.name || frameHost(frame)}</span>
+            <SidebarStatusDots frame={frame} />
+            <ChevronRightIcon className="h-4 w-4 shrink-0 text-slate-300" />
+          </button>
+        ))}
+      </div>
     </div>
   )
 }
@@ -224,12 +257,55 @@ export function TemplateDrawer(): JSX.Element | null {
               </button>
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+              <AddSceneDrawerActions frame={frame} />
               <Templates persistOnInstall />
             </div>
             <EditTemplateModal />
           </div>
         </BindLogic>
       </BindLogic>
+    </div>
+  )
+}
+
+function AddSceneDrawerActions({ frame }: { frame: FrameType }): JSX.Element {
+  const { createBlankSceneAndSave } = useActions(frameLogic({ frameId: frame.id }))
+  const { closeTemplateDrawer, openChatDrawer } = useActions(workspaceLogic)
+
+  return (
+    <div className="mb-4 grid gap-3">
+      <button
+        type="button"
+        onClick={() => {
+          createBlankSceneAndSave(undefined, true)
+          closeTemplateDrawer()
+        }}
+        className="homey-card group flex items-center gap-3 rounded-2xl border border-white/90 bg-white/80 px-4 py-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:bg-white hover:shadow-lg hover:shadow-slate-300/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+      >
+        <span className="homey-icon-tile flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition group-hover:bg-blue-50 group-hover:text-blue-500">
+          <PlusIcon className="h-6 w-6" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="homey-strong block truncate text-sm font-semibold text-slate-900">New blank scene</span>
+          <span className="homey-muted block truncate text-xs text-slate-500">Start with a render event</span>
+        </span>
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          closeTemplateDrawer()
+          openChatDrawer(frame.id, null)
+        }}
+        className="group flex items-center gap-3 rounded-2xl border border-blue-300/70 bg-gradient-to-br from-fuchsia-500 via-blue-500 to-cyan-400 px-4 py-3 text-left text-white shadow-lg shadow-blue-500/25 transition hover:-translate-y-0.5 hover:shadow-xl hover:shadow-blue-500/35 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+      >
+        <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/18 text-white shadow-sm transition group-hover:bg-white/24">
+          <SparklesIcon className="h-6 w-6" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-semibold">Generate scene</span>
+          <span className="block truncate text-xs text-blue-50/90">Open AI chat for this frame</span>
+        </span>
+      </button>
     </div>
   )
 }
@@ -265,6 +341,7 @@ function CurrentSnapshotCard({ frame }: { frame: FrameType }): JSX.Element {
 function FrameSection({ section }: { section: OverviewFrameSection }): JSX.Element {
   const { frame, scenes, archived, frameMatchesSearch } = section
   const { search } = useValues(workspaceLogic)
+  const { openChatDrawer } = useActions(workspaceLogic)
   const healthy = frameIsHealthy(frame)
   const connected = (frame.active_connections ?? 0) > 0
 
@@ -275,7 +352,10 @@ function FrameSection({ section }: { section: OverviewFrameSection }): JSX.Eleme
       className={clsx('scroll-mt-6', archived && 'opacity-80')}
     >
       <div className="mb-4 flex items-center justify-between gap-4">
-        <div className="flex min-w-0 items-center gap-3">
+        <A
+          href={urls.frame(frame.id, 'overview')}
+          className="group flex min-w-0 items-center gap-3 rounded-2xl transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+        >
           <div className="homey-icon-tile flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white/70 text-slate-700 shadow-sm">
             <ComputerDesktopIcon className="h-7 w-7" />
           </div>
@@ -299,13 +379,23 @@ function FrameSection({ section }: { section: OverviewFrameSection }): JSX.Eleme
             </div>
             <div className="homey-muted truncate text-sm text-slate-500">{frameStatus(frame)}</div>
           </div>
-        </div>
-        <A
-          href={urls.frame(frame.id, 'overview')}
-          className="homey-secondary-button shrink-0 rounded-full bg-white/80 px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-        >
-          Edit
         </A>
+        <div className="flex shrink-0 items-center gap-2">
+          <A
+            href={urls.frame(frame.id, 'overview')}
+            className="homey-secondary-button rounded-full bg-white/80 px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          >
+            Edit
+          </A>
+          <button
+            type="button"
+            title="Open AI chat"
+            onClick={() => openChatDrawer(frame.id, null)}
+            className="homey-ai-button flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-fuchsia-500 via-blue-500 to-cyan-400 text-white shadow-lg shadow-blue-500/25 transition hover:-translate-y-0.5 hover:shadow-xl hover:shadow-blue-500/35 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          >
+            <SparklesIcon className="h-5 w-5" />
+          </button>
+        </div>
       </div>
       <div className="flex items-start gap-5 max-xl:flex-col">
         <CurrentSnapshotCard frame={frame} />
@@ -325,6 +415,26 @@ function FrameSection({ section }: { section: OverviewFrameSection }): JSX.Eleme
         )}
       </div>
     </section>
+  )
+}
+
+function FrameSectionGroup({ title, sections }: { title: string; sections: OverviewFrameSection[] }): JSX.Element | null {
+  if (sections.length === 0) {
+    return null
+  }
+
+  return (
+    <div className="space-y-8">
+      <div className="homey-muted flex items-center gap-3 text-sm font-semibold uppercase tracking-wide text-slate-500">
+        <span>{title}</span>
+        <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-semibold text-slate-500">
+          {sections.length}
+        </span>
+      </div>
+      {sections.map((section) => (
+        <FrameSection key={section.frame.id} section={section} />
+      ))}
+    </div>
   )
 }
 
@@ -437,15 +547,18 @@ function AddFramePanel(): JSX.Element | null {
 }
 
 export function FramesHome(): JSX.Element {
-  const { overviewFrameSections } = useValues(workspaceLogic)
+  useMountedLogic(framesHomeLogic)
+
+  const { overviewActiveFrameSections, overviewInactiveFrameSections, overviewArchivedFrameSections } =
+    useValues(workspaceLogic)
   const { showForm } = useActions(newFrameForm)
   const { formVisible } = useValues(newFrameForm)
   const { closeSceneControl, closeTemplateDrawer } = useActions(workspaceLogic)
   const { sceneControlSelection, templateDrawerFrameId } = useValues(workspaceLogic)
   const { archivedFramesExpanded } = useValues(framesModel)
   const { toggleArchivedFramesExpanded } = useActions(framesModel)
-  const activeSections = overviewFrameSections.filter((section) => !section.archived)
-  const archivedSections = overviewFrameSections.filter((section) => section.archived)
+  const hasFrameSections =
+    overviewActiveFrameSections.length + overviewInactiveFrameSections.length + overviewArchivedFrameSections.length > 0
 
   return (
     <HomeyShell
@@ -469,12 +582,11 @@ export function FramesHome(): JSX.Element {
       }
     >
       <div className="space-y-12 pb-12">
-        {overviewFrameSections.length > 0 ? (
+        {hasFrameSections ? (
           <>
-            {activeSections.map((section) => (
-              <FrameSection key={section.frame.id} section={section} />
-            ))}
-            {archivedSections.length > 0 ? (
+            <FrameSectionGroup title="Active" sections={overviewActiveFrameSections} />
+            <FrameSectionGroup title="Inactive" sections={overviewInactiveFrameSections} />
+            {overviewArchivedFrameSections.length > 0 ? (
               <div className="space-y-8 border-t border-slate-300/70 pt-8">
                 <button
                   type="button"
@@ -490,11 +602,13 @@ export function FramesHome(): JSX.Element {
                   <ArchiveBoxIcon className="h-5 w-5" />
                   <span className="flex-1">Archived</span>
                   <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-semibold text-slate-500">
-                    {archivedSections.length}
+                    {overviewArchivedFrameSections.length}
                   </span>
                 </button>
                 {archivedFramesExpanded
-                  ? archivedSections.map((section) => <FrameSection key={section.frame.id} section={section} />)
+                  ? overviewArchivedFrameSections.map((section) => (
+                      <FrameSection key={section.frame.id} section={section} />
+                    ))
                   : null}
               </div>
             ) : null}

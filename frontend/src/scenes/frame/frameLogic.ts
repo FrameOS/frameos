@@ -1,4 +1,5 @@
 import { actions, afterMount, beforeUnmount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
+import { router } from 'kea-router'
 import { framesModel } from '../../models/framesModel'
 import type { frameLogicType } from './frameLogicType'
 import { subscriptions } from 'kea-subscriptions'
@@ -26,6 +27,7 @@ import {
   buildFullDeployPlanSummary,
 } from './frameDeployUtils'
 import { getDeployPlanErrorMessage } from './frameDeployErrors'
+import { urls } from '../../urls'
 
 export type { ChangeDetail, DeployPlanResponse, DeployRecommendation, SummaryItem } from './frameDeployUtils'
 
@@ -639,6 +641,27 @@ function getCurrentFrameForm(frame: FrameType | null | undefined, frameForm: Par
   return Object.keys(frameForm ?? {}).length > 0 ? frameForm : frame ? sanitizeFrame(frame) : frameForm
 }
 
+function buildBlankScene(frame: Partial<FrameType>, name: string = 'New blank scene'): FrameScene {
+  return sanitizeScene(
+    {
+      id: uuidv4(),
+      name,
+      nodes: [
+        {
+          id: uuidv4(),
+          type: 'event',
+          position: { x: 121, y: 113 },
+          data: { keyword: 'render' },
+        },
+      ],
+      edges: [],
+      fields: [],
+      settings: { execution: 'interpreted' },
+    },
+    frame
+  )
+}
+
 async function saveFrameForm(frame: Partial<FrameType>, frameId: number, nextAction: FrameNextAction): Promise<void> {
   const json = buildDeployPlanRequestBody(frame, FRAME_KEYS)
   if (nextAction) {
@@ -722,6 +745,7 @@ export const frameLogic = kea<frameLogicType>([
     applyTemplateAndSave: (template: Partial<TemplateType>) => ({
       template,
     }),
+    createBlankSceneAndSave: (name?: string, openEditor?: boolean) => ({ name, openEditor: openEditor ?? false }),
     deleteSceneAndSave: (sceneId: string) => ({ sceneId }),
     closeScenePanels: (sceneIds: string[]) => ({ sceneIds }),
     sendEvent: (event: string, payload: Record<string, any>) => ({ event, payload }),
@@ -1163,6 +1187,18 @@ export const frameLogic = kea<frameLogicType>([
       await saveFrameForm(nextFrameForm, props.frameId, values.nextAction)
       framesModel.actions.loadFrame(props.frameId)
       await saveTemplateSceneImages(props.frameId, template, newScenes)
+    },
+    createBlankSceneAndSave: async ({ name, openEditor }) => {
+      const frameForm = getCurrentFrameForm(values.frame, values.frameForm)
+      const scene = buildBlankScene(frameForm, name)
+      const scenes = [...(frameForm.scenes ?? []), scene]
+      const nextFrameForm = { ...frameForm, scenes }
+      actions.setFrameFormValues({ scenes })
+      await saveFrameForm(nextFrameForm, props.frameId, values.nextAction)
+      framesModel.actions.loadFrame(props.frameId)
+      if (openEditor) {
+        router.actions.push(urls.scenes(props.frameId, scene.id))
+      }
     },
     deleteSceneAndSave: async ({ sceneId }) => {
       const frameForm = getCurrentFrameForm(values.frame, values.frameForm)

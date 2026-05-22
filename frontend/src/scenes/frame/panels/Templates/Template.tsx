@@ -138,7 +138,7 @@ export function TemplateRow({
                   size="small"
                   color={installedTemplatesByName[template.name] ? 'tertiary' : 'secondary'}
                   onClick={() => applyTemplate(template)}
-                  title="Install scene"
+                  title="Add scene"
                 >
                   {!installedTemplatesByName[template.name] ? (
                     <FolderPlusIcon className="w-5 h-5" />
@@ -147,9 +147,9 @@ export function TemplateRow({
                   )}
                   <span className="hidden @xs:inline">
                     {installedTemplatesByName[template.name] ? (
-                      'Installed'
+                      'Added'
                     ) : (
-                      <>Install{(template.scenes || []).length > 1 ? ` (${(template.scenes || []).length})` : ''}</>
+                      <>Add{(template.scenes || []).length > 1 ? ` (${(template.scenes || []).length})` : ''}</>
                     )}
                   </span>
                 </Button>
@@ -162,10 +162,10 @@ export function TemplateRow({
                         {
                           label:
                             'scenes' in template && Array.isArray(template.scenes)
-                              ? `Install ${(template.scenes || []).length} scene${
+                              ? `Add ${(template.scenes || []).length} scene${
                                   (template.scenes || []).length === 1 ? '' : 's'
                                 } onto frame`
-                              : 'Install onto frame',
+                              : 'Add onto frame',
                           onClick: () => applyTemplate(template),
                           icon: <DocumentPlusIcon className="w-5 h-5" />,
                         },

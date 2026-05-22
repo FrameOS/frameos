@@ -1,5 +1,5 @@
 import { A } from 'kea-router'
-import { useActions, useValues } from 'kea'
+import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
 import clsx from 'clsx'
 import type { CSSProperties, MouseEvent } from 'react'
 import {
@@ -9,12 +9,21 @@ import {
   MoonIcon,
   PlusIcon,
   RectangleGroupIcon,
+  SparklesIcon,
   Squares2X2Icon,
   SunIcon,
+  XMarkIcon,
 } from '@heroicons/react/24/outline'
 import { urls } from '../../urls'
 import logo from '../../assets/logo/dark-mark-small.png'
 import { workspaceLogic } from './workspaceLogic'
+import { framesModel } from '../../models/framesModel'
+import { frameHost } from '../../decorators/frame'
+import { frameLogic } from '../frame/frameLogic'
+import { panelsLogic } from '../frame/panels/panelsLogic'
+import { Chat } from '../frame/panels/Chat/Chat'
+import { chatLogic } from '../frame/panels/Chat/chatLogic'
+import { workspaceChatDrawerLogic } from './workspaceChatDrawerLogic'
 
 type WorkspaceMode = 'frames' | 'frame' | 'scenes' | 'settings'
 
@@ -32,6 +41,7 @@ interface HomeyShellProps {
   toolbar?: JSX.Element | null
   primaryActionLabel?: string
   onPrimaryAction?: () => void
+  showAiButton?: boolean
 }
 
 function NavButton({
@@ -73,6 +83,73 @@ function NavButton({
   )
 }
 
+function AiMagicButton({
+  active,
+  onClick,
+  floating = false,
+}: {
+  active: boolean
+  onClick: () => void
+  floating?: boolean
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      title="Open AI chat"
+      onClick={onClick}
+      className={clsx(
+        'homey-ai-button flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-fuchsia-500 via-blue-500 to-cyan-400 text-white shadow-lg shadow-blue-500/30 transition hover:-translate-y-0.5 hover:shadow-xl hover:shadow-blue-500/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+        active && 'ring-2 ring-blue-300',
+        floating && 'pointer-events-auto'
+      )}
+    >
+      <SparklesIcon className="h-6 w-6" />
+    </button>
+  )
+}
+
+function WorkspaceChatDrawer({ frameId, sceneId }: { frameId: number; sceneId: string | null }): JSX.Element | null {
+  useMountedLogic(chatLogic({ frameId, sceneId }))
+  useMountedLogic(workspaceChatDrawerLogic({ frameId, sceneId }))
+  const { frames } = useValues(framesModel)
+  const { closeChatDrawer } = useActions(workspaceLogic)
+  const frame = frames[frameId]
+  const frameLogicProps = { frameId }
+
+  if (!frame) {
+    return null
+  }
+
+  return (
+    <div className="fixed bottom-5 right-5 top-5 z-40 flex w-[430px] max-w-[calc(100vw-40px)] overflow-hidden rounded-[24px] border border-slate-800 bg-slate-950 text-white shadow-2xl shadow-slate-500/30">
+      <BindLogic logic={frameLogic} props={frameLogicProps}>
+        <BindLogic logic={panelsLogic} props={frameLogicProps}>
+          <div className="flex min-w-0 flex-1 flex-col">
+            <div className="flex items-start justify-between gap-3 border-b border-white/10 px-5 py-4">
+              <div className="min-w-0">
+                <div className="truncate text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  {frame.name || frameHost(frame)}
+                </div>
+                <h2 className="truncate text-xl font-bold tracking-normal">AI chat</h2>
+              </div>
+              <button
+                type="button"
+                onClick={closeChatDrawer}
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-slate-400 transition hover:bg-white/10 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+              >
+                <XMarkIcon className="h-6 w-6" />
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-hidden p-5">
+              <Chat />
+            </div>
+          </div>
+        </BindLogic>
+      </BindLogic>
+    </div>
+  )
+}
+
 export function HomeyShell({
   mode,
   tree,
@@ -85,11 +162,30 @@ export function HomeyShell({
   toolbar,
   primaryActionLabel,
   onPrimaryAction,
+  showAiButton: showAiButtonProp,
 }: HomeyShellProps): JSX.Element {
-  const { search, secondarySidebarOpen, selectedFrame, selectedSceneId, theme } = useValues(workspaceLogic)
-  const { openSecondarySidebar, setSearch, toggleSecondarySidebar, toggleTheme } = useActions(workspaceLogic)
+  const { chatDrawerSelection, search, secondarySidebarOpen, selectedFrame, selectedSceneId, theme } =
+    useValues(workspaceLogic)
+  const { openChatDrawer, openSecondarySidebar, setSearch, toggleSecondarySidebar, toggleTheme } =
+    useActions(workspaceLogic)
   const frameHref = selectedFrame ? urls.frame(selectedFrame.id) : urls.frames()
   const scenesHref = selectedFrame ? urls.scenes(selectedFrame.id, selectedSceneId ?? undefined) : urls.scenes()
+  const showAiButton = showAiButtonProp ?? (mode !== 'frames' && mode !== 'settings' && !!selectedFrame)
+  const chatSceneId = mode === 'scenes' ? selectedSceneId : null
+  const chatDrawerIsOpen = !!chatDrawerSelection
+  const workspaceRightPanel = chatDrawerSelection ? (
+    <WorkspaceChatDrawer frameId={chatDrawerSelection.frameId} sceneId={chatDrawerSelection.sceneId} />
+  ) : (
+    rightPanel
+  )
+  const aiButton =
+    showAiButton && selectedFrame ? (
+      <AiMagicButton
+        active={chatDrawerIsOpen}
+        onClick={() => openChatDrawer(selectedFrame.id, chatSceneId)}
+        floating={topBar === null}
+      />
+    ) : null
   const workspaceMainStyle = {
     '--workspace-main-offset': secondarySidebarOpen ? '480px' : '128px',
   } as CSSProperties
@@ -175,13 +271,31 @@ export function HomeyShell({
         style={workspaceMainStyle}
         className={clsx(
           'workspace-main',
-          rightPanel && 'workspace-main-with-right-panel',
+          workspaceRightPanel && 'workspace-main-with-right-panel',
           mainClassName ??
             'h-screen overflow-y-auto py-6 pr-8 max-lg:h-auto max-lg:overflow-visible max-lg:px-4 max-lg:pb-6 max-lg:pt-0'
         )}
       >
         {topBar !== undefined ? (
-          topBar
+          topBar === null ? (
+            aiButton ? (
+              <div
+                className={clsx(
+                  'pointer-events-none fixed top-6 z-20 max-lg:right-6',
+                  workspaceRightPanel ? 'right-[520px]' : 'right-8'
+                )}
+              >
+                {aiButton}
+              </div>
+            ) : null
+          ) : aiButton ? (
+            <div className="relative pr-14">
+              {topBar}
+              <div className="absolute right-0 top-0">{aiButton}</div>
+            </div>
+          ) : (
+            topBar
+          )
         ) : (
           <div
             className={clsx(
@@ -200,6 +314,7 @@ export function HomeyShell({
             </div>
             <div className="flex items-center justify-end gap-3">
               {toolbar}
+              {aiButton}
               {onPrimaryAction ? (
                 <button
                   type="button"
@@ -215,7 +330,7 @@ export function HomeyShell({
         )}
         {children}
       </main>
-      {rightPanel}
+      {workspaceRightPanel}
     </div>
   )
 }

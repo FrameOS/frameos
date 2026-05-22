@@ -577,7 +577,7 @@ function FrameToolSurface({
   if (activeTool === 'schedule') return <Schedule />
   if (activeTool === 'ping') return <Ping />
   if (activeTool === 'debug') return <Debug />
-  return <Image className="h-full min-h-[26rem]" />
+  return <Image className="h-full min-h-[26rem] w-full" objectFit="contain" />
 }
 
 function frameToolIsFullBleed(activeTool: WorkspaceUtilityPanel): boolean {
@@ -621,6 +621,7 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
           title="Frame"
           tree={<FrameTree frame={frame} frames={framesList} activeTool={activeTool.panel} />}
           topBar={toolUsesSearch ? undefined : null}
+          showAiButton={activeTool.panel === 'overview'}
           mainClassName="h-screen overflow-hidden py-6 pl-[480px] pr-8 max-lg:h-auto max-lg:overflow-visible max-lg:px-4 max-lg:pb-6 max-lg:pt-0"
           rightPanel={templateDrawerFrameId ? <TemplateDrawer /> : sceneControlSelection ? <SceneControlPanel /> : null}
         >

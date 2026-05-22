@@ -1,7 +1,7 @@
 import { actions, afterMount, connect, kea, listeners, path, reducers, selectors } from 'kea'
 import { router, urlToAction } from 'kea-router'
 import { framesModel } from '../../models/framesModel'
-import { frameHost } from '../../decorators/frame'
+import { frameHost, frameIsStale } from '../../decorators/frame'
 import { FrameScene, FrameType } from '../../types'
 import { urls } from '../../urls'
 import { newFrameForm } from '../frames/newFrameForm'
@@ -65,6 +65,11 @@ export interface SceneSelection {
   sceneId: string
 }
 
+export interface ChatDrawerSelection {
+  frameId: number
+  sceneId: string | null
+}
+
 export interface OverviewFrameSection {
   frame: FrameType
   scenes: FrameScene[]
@@ -125,6 +130,53 @@ function frameMatchesSearch(frame: FrameType, search: string): boolean {
 function defaultSceneId(frame: FrameType | null | undefined): string | null {
   const scenes = frame?.scenes ?? []
   return scenes.find((scene) => scene.default)?.id ?? scenes[0]?.id ?? null
+}
+
+function frameIsActiveForHome(frame: FrameType): boolean {
+  return frame.status === 'ready' && !frameIsStale(frame)
+}
+
+function frameIsActiveInSnapshot(
+  frame: FrameType,
+  frameActiveSnapshot: Record<number, boolean>,
+  hasFrameOrderSnapshot: boolean
+): boolean {
+  if (!hasFrameOrderSnapshot) {
+    return frameIsActiveForHome(frame)
+  }
+  return frameActiveSnapshot[frame.id] === true
+}
+
+function frameSortName(frame: FrameType): string {
+  return (frame.name || frameHost(frame)).trim()
+}
+
+function compareFramesForHome(first: FrameType, second: FrameType): number {
+  const firstActive = frameIsActiveForHome(first) ? 1 : 0
+  const secondActive = frameIsActiveForHome(second) ? 1 : 0
+
+  return (
+    secondActive - firstActive ||
+    frameSortName(first).localeCompare(frameSortName(second), undefined, { numeric: true, sensitivity: 'base' }) ||
+    first.id - second.id
+  )
+}
+
+function rankFramesForSnapshot(frames: FrameType[]): FrameType[] {
+  return [...frames].sort(compareFramesForHome)
+}
+
+function applyFrameOrderSnapshot(frames: FrameType[], frameOrderSnapshot: number[]): FrameType[] {
+  if (frameOrderSnapshot.length === 0) {
+    return rankFramesForSnapshot(frames)
+  }
+
+  const order = new Map(frameOrderSnapshot.map((frameId, index) => [frameId, index]))
+  return [...frames].sort((first, second) => {
+    const firstIndex = order.get(first.id) ?? Number.MAX_SAFE_INTEGER
+    const secondIndex = order.get(second.id) ?? Number.MAX_SAFE_INTEGER
+    return firstIndex - secondIndex || compareFramesForHome(first, second)
+  })
 }
 
 function framesMainElement(): HTMLElement | null {
@@ -259,9 +311,13 @@ export const workspaceLogic = kea<workspaceLogicType>([
     closeSceneControl: true,
     openTemplateDrawer: (frameId: number) => ({ frameId }),
     closeTemplateDrawer: true,
+    openChatDrawer: (frameId: number, sceneId: string | null = null) => ({ frameId, sceneId }),
+    closeChatDrawer: true,
     openUtilityPanel: (panel: WorkspaceUtilityPanel) => ({ panel }),
     closeUtilityPanel: true,
     selectNode: (nodeId: string | null) => ({ nodeId }),
+    snapshotFrameOrder: true,
+    setFrameOrderSnapshot: (frameIds: number[], activeFrameIds: number[]) => ({ frameIds, activeFrameIds }),
   }),
   reducers({
     search: [
@@ -334,6 +390,13 @@ export const workspaceLogic = kea<workspaceLogicType>([
         openSceneControl: () => null,
       },
     ],
+    chatDrawerSelection: [
+      null as ChatDrawerSelection | null,
+      {
+        openChatDrawer: (_, { frameId, sceneId }) => ({ frameId, sceneId }),
+        closeChatDrawer: () => null,
+      },
+    ],
     utilityPanel: [
       'state' as WorkspaceUtilityPanel | null,
       {
@@ -348,6 +411,19 @@ export const workspaceLogic = kea<workspaceLogicType>([
         selectNode: (_, { nodeId }) => nodeId,
         navigateToScene: () => null,
         setRouteSelection: () => null,
+      },
+    ],
+    frameOrderSnapshot: [
+      [] as number[],
+      {
+        setFrameOrderSnapshot: (_, { frameIds }) => frameIds,
+      },
+    ],
+    frameActiveSnapshot: [
+      {} as Record<number, boolean>,
+      {
+        setFrameOrderSnapshot: (_, { activeFrameIds }) =>
+          Object.fromEntries(activeFrameIds.map((frameId: number) => [frameId, true])),
       },
     ],
   }),
@@ -379,14 +455,38 @@ export const workspaceLogic = kea<workspaceLogicType>([
       (selectedFrame, selectedSceneId): FrameScene | null =>
         selectedFrame?.scenes?.find((scene) => scene.id === selectedSceneId) ?? null,
     ],
+    orderedActiveFramesList: [
+      (s) => [s.activeFramesList, s.frameOrderSnapshot],
+      (activeFramesList, frameOrderSnapshot): FrameType[] =>
+        applyFrameOrderSnapshot(activeFramesList, frameOrderSnapshot),
+    ],
+    orderedArchivedFramesList: [
+      (s) => [s.archivedFramesList, s.frameOrderSnapshot],
+      (archivedFramesList, frameOrderSnapshot): FrameType[] =>
+        applyFrameOrderSnapshot(archivedFramesList, frameOrderSnapshot),
+    ],
+    homeActiveFramesList: [
+      (s) => [s.orderedActiveFramesList, s.frameActiveSnapshot, s.frameOrderSnapshot],
+      (orderedActiveFramesList, frameActiveSnapshot, frameOrderSnapshot): FrameType[] =>
+        orderedActiveFramesList.filter((frame) =>
+          frameIsActiveInSnapshot(frame, frameActiveSnapshot, frameOrderSnapshot.length > 0)
+        ),
+    ],
+    homeInactiveFramesList: [
+      (s) => [s.orderedActiveFramesList, s.frameActiveSnapshot, s.frameOrderSnapshot],
+      (orderedActiveFramesList, frameActiveSnapshot, frameOrderSnapshot): FrameType[] =>
+        orderedActiveFramesList.filter(
+          (frame) => !frameIsActiveInSnapshot(frame, frameActiveSnapshot, frameOrderSnapshot.length > 0)
+        ),
+    ],
     filteredOverviewFrames: [
-      (s) => [s.activeFramesList, s.search],
-      (activeFramesList, search): FrameType[] => {
+      (s) => [s.orderedActiveFramesList, s.search],
+      (orderedActiveFramesList, search): FrameType[] => {
         const normalizedSearch = search.trim().toLowerCase()
         if (!normalizedSearch) {
-          return activeFramesList
+          return orderedActiveFramesList
         }
-        return activeFramesList.filter(
+        return orderedActiveFramesList.filter(
           (frame) =>
             frameMatchesSearch(frame, normalizedSearch) ||
             (frame.scenes ?? []).some((scene) => sceneMatchesSearch(scene, normalizedSearch))
@@ -394,12 +494,12 @@ export const workspaceLogic = kea<workspaceLogicType>([
       },
     ],
     overviewFrameSections: [
-      (s) => [s.activeFramesList, s.archivedFramesList, s.search],
-      (activeFramesList, archivedFramesList, search): OverviewFrameSection[] => {
+      (s) => [s.orderedActiveFramesList, s.orderedArchivedFramesList, s.search],
+      (orderedActiveFramesList, orderedArchivedFramesList, search): OverviewFrameSection[] => {
         const normalizedSearch = search.trim().toLowerCase()
         const frames = [
-          ...activeFramesList.map((frame) => ({ frame, archived: false })),
-          ...archivedFramesList.map((frame) => ({ frame, archived: true })),
+          ...orderedActiveFramesList.map((frame) => ({ frame, archived: false })),
+          ...orderedArchivedFramesList.map((frame) => ({ frame, archived: true })),
         ]
 
         return frames
@@ -412,6 +512,27 @@ export const workspaceLogic = kea<workspaceLogicType>([
           })
           .filter(({ scenes, frameMatchesSearch }) => !normalizedSearch || frameMatchesSearch || scenes.length > 0)
       },
+    ],
+    overviewActiveFrameSections: [
+      (s) => [s.overviewFrameSections, s.frameActiveSnapshot, s.frameOrderSnapshot],
+      (overviewFrameSections, frameActiveSnapshot, frameOrderSnapshot): OverviewFrameSection[] =>
+        overviewFrameSections.filter(
+          (section) =>
+            !section.archived && frameIsActiveInSnapshot(section.frame, frameActiveSnapshot, frameOrderSnapshot.length > 0)
+        ),
+    ],
+    overviewInactiveFrameSections: [
+      (s) => [s.overviewFrameSections, s.frameActiveSnapshot, s.frameOrderSnapshot],
+      (overviewFrameSections, frameActiveSnapshot, frameOrderSnapshot): OverviewFrameSection[] =>
+        overviewFrameSections.filter(
+          (section) =>
+            !section.archived &&
+            !frameIsActiveInSnapshot(section.frame, frameActiveSnapshot, frameOrderSnapshot.length > 0)
+        ),
+    ],
+    overviewArchivedFrameSections: [
+      (s) => [s.overviewFrameSections],
+      (overviewFrameSections): OverviewFrameSection[] => overviewFrameSections.filter((section) => section.archived),
     ],
     filteredSelectedFrameScenes: [
       (s) => [s.selectedFrame, s.search],
@@ -441,6 +562,8 @@ export const workspaceLogic = kea<workspaceLogicType>([
       closeSceneControl: preserveFramesScroll,
       openTemplateDrawer: preserveFramesScroll,
       closeTemplateDrawer: preserveFramesScroll,
+      openChatDrawer: preserveFramesScroll,
+      closeChatDrawer: preserveFramesScroll,
       [newFrameForm.actionTypes.showForm]: preserveFramesScroll,
       [newFrameForm.actionTypes.hideForm]: preserveFramesScroll,
       setTheme: ({ theme }) => {
@@ -471,6 +594,13 @@ export const workspaceLogic = kea<workspaceLogicType>([
       navigateToScene: ({ frameId, sceneId }) => {
         actions.setRouteSelection(frameId, sceneId)
         router.actions.push(urls.scenes(frameId, sceneId))
+      },
+      snapshotFrameOrder: () => {
+        const rankedFrames = rankFramesForSnapshot(values.framesList)
+        actions.setFrameOrderSnapshot(
+          rankedFrames.map((frame) => frame.id),
+          rankedFrames.filter(frameIsActiveForHome).map((frame) => frame.id)
+        )
       },
     }
   }),

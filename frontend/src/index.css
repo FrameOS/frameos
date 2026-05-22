@@ -113,6 +113,11 @@ html[data-frameos-theme='dark'] body {
   color: #f8fafc;
 }
 
+.frameos-theme-dark .homey-segment-group {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
 .frameos-theme-dark .homey-frame-row {
   color: #e5e7eb;
 }
