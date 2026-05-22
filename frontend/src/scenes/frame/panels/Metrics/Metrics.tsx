@@ -63,43 +63,44 @@ export function Metrics() {
           {metrics.length} point{metrics.length === 1 ? '' : 's'}
         </div>
       </div>
-      <ParentSize>
-        {(parent) =>
-          Object.entries(metricsByCategory).map(([key, series]) => {
-            const visibleSeries = visibleMetricsByCategory[key] ?? []
-            return (
-              <div key={key} className="frame-tool-card mb-4 rounded-[22px] p-4">
-                <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
-                  <strong className="frame-tool-heading">{metricLabels[key] ?? key}</strong>
-                  {latestMetricSummariesByCategory[key] ? (
-                    <span className="frame-tool-muted">{latestMetricSummariesByCategory[key]}</span>
-                  ) : null}
-                  {series.length > 1 &&
-                    series.map((chartSeries) => {
-                      const hidden = hiddenMetricSeries[metricSeriesVisibilityKey(key, chartSeries.key)]
-                      return (
-                        <button
-                          key={chartSeries.key}
-                          type="button"
-                          className={clsx(
-                            'inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500',
-                            hidden ? 'frame-tool-muted line-through opacity-60' : 'frame-tool-row hover:bg-white/80'
-                          )}
-                          onClick={() => toggleMetricSeries(key, chartSeries.key)}
-                        >
-                          <span
-                            className={clsx('inline-block h-2 w-3 rounded-sm', hidden ? 'opacity-30' : '')}
-                            style={{ backgroundColor: chartSeries.color }}
-                          />
-                          {chartSeries.label}
-                        </button>
-                      )
-                    })}
-                </div>
-                <div className="h-[200px] rounded-2xl bg-slate-950/95 p-2 text-white">
+      {Object.entries(metricsByCategory).map(([key, series]) => {
+        const visibleSeries = visibleMetricsByCategory[key] ?? []
+        return (
+          <div key={key} className="frame-tool-card mb-3 overflow-hidden rounded-[22px]">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 text-sm">
+              <strong className="frame-tool-heading">{metricLabels[key] ?? key}</strong>
+              {latestMetricSummariesByCategory[key] ? (
+                <span className="frame-tool-muted">{latestMetricSummariesByCategory[key]}</span>
+              ) : null}
+              {series.length > 1 &&
+                series.map((chartSeries) => {
+                  const hidden = hiddenMetricSeries[metricSeriesVisibilityKey(key, chartSeries.key)]
+                  return (
+                    <button
+                      key={chartSeries.key}
+                      type="button"
+                      className={clsx(
+                        'inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500',
+                        hidden ? 'frame-tool-muted line-through opacity-60' : 'frame-tool-row hover:bg-white/80'
+                      )}
+                      onClick={() => toggleMetricSeries(key, chartSeries.key)}
+                    >
+                      <span
+                        className={clsx('inline-block h-2 w-3 rounded-sm', hidden ? 'opacity-30' : '')}
+                        style={{ backgroundColor: chartSeries.color }}
+                      />
+                      {chartSeries.label}
+                    </button>
+                  )
+                })}
+            </div>
+            <div className="h-[200px] bg-slate-950/95 p-0 text-white">
+              <ParentSize>
+                {(parent) => (
                   <BrushChart
                     width={parent.width}
                     height={200}
+                    margin={{ top: 20, left: 56, bottom: 12, right: 45 }}
                     series={visibleSeries}
                     totalTimeRange={metricsTimeRange}
                     visibleTimeRange={visibleTimeRange}
@@ -107,12 +108,12 @@ export function Metrics() {
                     onTimeRangeChange={setSelectedTimeRange}
                     onResetTimeRange={resetSelectedTimeRange}
                   />
-                </div>
-              </div>
-            )
-          })
-        }
-      </ParentSize>
+                )}
+              </ParentSize>
+            </div>
+          </div>
+        )
+      })}
     </div>
   )
 }

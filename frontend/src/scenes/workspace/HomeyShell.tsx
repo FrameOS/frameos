@@ -75,8 +75,6 @@ function NavButton({
 
 export function HomeyShell({
   mode,
-  title,
-  subtitle,
   tree,
   children,
   mainClassName,
@@ -167,26 +165,17 @@ export function HomeyShell({
         </div>
         {secondarySidebarOpen ? (
           <div className="flex min-w-0 flex-1 flex-col">
-            {sidebarHeader !== undefined ? (
-              sidebarHeader
-            ) : (
-              <div className="flex items-center gap-3 px-6 pb-4 pt-6">
-                <div className="min-w-0 flex-1">
-                  <h1 className="homey-strong truncate text-2xl font-bold tracking-normal text-slate-950">{title}</h1>
-                  {subtitle ? (
-                    <div className="homey-muted mt-0.5 truncate text-sm text-slate-500">{subtitle}</div>
-                  ) : null}
-                </div>
-              </div>
-            )}
-            <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-5">{tree}</div>
+            {sidebarHeader}
+            <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-5 pt-6">{tree}</div>
           </div>
         ) : null}
       </aside>
       <main
+        data-workspace-main={mode}
         style={workspaceMainStyle}
         className={clsx(
           'workspace-main',
+          rightPanel && 'workspace-main-with-right-panel',
           mainClassName ??
             'h-screen overflow-y-auto py-6 pr-8 max-lg:h-auto max-lg:overflow-visible max-lg:px-4 max-lg:pb-6 max-lg:pt-0'
         )}

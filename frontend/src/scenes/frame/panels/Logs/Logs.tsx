@@ -325,7 +325,7 @@ export function Logs() {
         ]}
       />
       <Virtuoso
-        className="h-full overflow-y-scroll overflow-x-hidden bg-transparent pr-2 font-mono text-sm"
+        className="h-full overflow-y-scroll overflow-x-hidden bg-transparent pr-2 font-mono text-sm leading-5"
         ref={virtuosoRef}
         initialTopMostItemIndex={logs.length - 1}
         data={logs}
@@ -375,7 +375,7 @@ export function Logs() {
           return (
             <div
               key={log.id}
-              className={clsx('rounded-lg px-2 py-1.5 transition sm:flex sm:flex-row', {
+              className={clsx('rounded-lg px-2 py-0.5 transition sm:flex sm:flex-row', {
                 'text-yellow-300': log.type === 'stdinfo',
                 'text-red-300': log.type === 'stderr',
                 'text-blue-300': log.type === 'agent',

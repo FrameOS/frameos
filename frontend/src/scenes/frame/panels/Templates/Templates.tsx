@@ -19,10 +19,15 @@ import { panelsLogic } from '../panelsLogic'
 import { TemplateType } from '../../../../types'
 import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
 
-export function Templates() {
+interface TemplatesProps {
+  persistOnInstall?: boolean
+}
+
+export function Templates({ persistOnInstall = false }: TemplatesProps = {}) {
   const inFrameAdminMode = isInFrameAdminMode()
-  const { applyTemplate } = useActions(frameLogic)
+  const { applyTemplate, applyTemplateAndSave } = useActions(frameLogic)
   const { frameId } = useValues(frameLogic)
+  const installTemplate = persistOnInstall ? applyTemplateAndSave : applyTemplate
   const { removeTemplate, exportTemplate } = useActions(templatesModel)
   const {
     applyRemoteToFrame,
@@ -149,7 +154,7 @@ export function Templates() {
                   exportTemplate={exportTemplate}
                   removeTemplate={removeTemplate}
                   applyTemplate={(template: TemplateType) => {
-                    applyTemplate(template)
+                    installTemplate(template)
                     disableFullscreenPanel()
                   }}
                   editTemplate={editLocalTemplate}
@@ -216,7 +221,7 @@ export function Templates() {
                       frameId={frameId}
                       saveRemoteAsLocal={(template) => saveRemoteAsLocal(repository, template)}
                       applyTemplate={(template) => {
-                        applyRemoteToFrame(repository, template)
+                        applyRemoteToFrame(repository, template, persistOnInstall)
                         disableFullscreenPanel()
                       }}
                       installedTemplatesByName={installedTemplatesByName}

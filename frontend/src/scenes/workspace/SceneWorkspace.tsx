@@ -7,7 +7,6 @@ import {
   CubeTransparentIcon,
   ListBulletIcon,
   PhotoIcon,
-  RectangleGroupIcon,
   ServerStackIcon,
   XMarkIcon,
 } from '@heroicons/react/24/outline'
@@ -22,7 +21,7 @@ import { workspaceLogic, WorkspaceUtilityPanel } from './workspaceLogic'
 import { frameLogic } from '../frame/frameLogic'
 import { panelsLogic } from '../frame/panels/panelsLogic'
 import { Diagram, DiagramToolbar } from '../frame/panels/Diagram/Diagram'
-import { diagramLogic } from '../frame/panels/Diagram/diagramLogic'
+import { buildDiagramNodeTreeItems, diagramLogic, type DiagramNodeTreeItem } from '../frame/panels/Diagram/diagramLogic'
 import { Apps } from '../frame/panels/Apps/Apps'
 import { Events } from '../frame/panels/Events/Events'
 import { SceneJSON } from '../frame/panels/SceneJSON/SceneJSON'
@@ -55,6 +54,10 @@ const utilityDefinitions: UtilityDefinition[] = [
   { panel: 'json', label: 'JSON', icon: <ServerStackIcon className="h-5 w-5" /> },
 ]
 
+function sceneUtilityDefinition(panel: WorkspaceUtilityPanel | null): UtilityDefinition | null {
+  return utilityDefinitions.find((definition) => definition.panel === panel) ?? null
+}
+
 function nodeLabel(nodeData: NodeData | undefined, fallback: string): string {
   if (!nodeData) {
     return fallback
@@ -66,6 +69,16 @@ function nodeLabel(nodeData: NodeData | undefined, fallback: string): string {
     return nodeData.keyword
   }
   return fallback
+}
+
+function nodeKindLabel(item: DiagramNodeTreeItem): string {
+  if (item.kind === 'root') {
+    return 'root event'
+  }
+  if (item.kind === 'disconnected') {
+    return `${item.node.type} · disconnected`
+  }
+  return item.node.type ?? item.kind
 }
 
 function SceneSelector({
@@ -140,20 +153,16 @@ function SceneTree({
   unsavedChanges: boolean
   undeployedChanges: boolean
 }): JSX.Element {
-  const { sceneNodesOpen, selectedNodeId } = useValues(workspaceLogic)
-  const { openUtilityPanel, selectNode, toggleSceneNodesOpen } = useActions(workspaceLogic)
+  const { sceneNodesOpen } = useValues(workspaceLogic)
+  const { openUtilityPanel, toggleSceneNodesOpen } = useActions(workspaceLogic)
   const { saveFrame, saveAndDeployFrame } = useActions(frameLogic({ frameId: frame.id }))
   const { linkedActiveSceneId } = useValues(scenesLogic({ frameId: frame.id }))
-  const diagramActions =
-    selectedSceneId !== null
-      ? diagramLogic({ frameId: frame.id, sceneId: selectedSceneId, updateNodeInternals: () => {} }).actions
-      : null
   const sceneNodes = selectedScene?.nodes ?? []
   const execution = selectedScene?.settings?.execution === 'interpreted' ? 'Interpreted' : 'Compiled'
   const selectedSceneIsActive = selectedSceneId !== null && linkedActiveSceneId === selectedSceneId
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       <SceneSelector frame={frame} frames={frames} scenes={scenes} selectedSceneId={selectedSceneId} />
       <div className="homey-inset mx-2 rounded-2xl border border-slate-200 bg-white/55 p-3">
         <div className="homey-muted text-xs font-semibold uppercase tracking-wide text-slate-400">
@@ -224,7 +233,7 @@ function SceneTree({
           <button
             type="button"
             onClick={toggleSceneNodesOpen}
-            className="homey-icon-button mb-2 flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            className="homey-icon-button mb-1 flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
             aria-expanded={sceneNodesOpen}
           >
             {sceneNodesOpen ? <ChevronDownIcon className="h-4 w-4" /> : <ChevronRightIcon className="h-4 w-4" />}
@@ -233,49 +242,68 @@ function SceneTree({
               {sceneNodes.length}
             </span>
           </button>
-          {sceneNodesOpen ? (
-            <div className="space-y-1">
-              {sceneNodes.length > 0 ? (
-                sceneNodes.map((node) => (
-                  <button
-                    key={node.id}
-                    type="button"
-                    onClick={() => {
-                      selectNode(node.id)
-                      diagramActions?.selectNode(node.id)
-                    }}
-                    className={clsx(
-                      'flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-                      selectedNodeId === node.id
-                        ? 'bg-slate-900 text-white'
-                        : 'homey-strong text-slate-700 hover:bg-slate-100'
-                    )}
-                  >
-                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/80 text-xs font-bold uppercase text-slate-500">
-                      {node.type?.slice(0, 2) ?? 'no'}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-semibold">{nodeLabel(node.data, node.id)}</span>
-                      <span
-                        className={clsx(
-                          'block truncate text-xs',
-                          selectedNodeId === node.id ? 'text-slate-300' : 'homey-muted text-slate-400'
-                        )}
-                      >
-                        {node.type}
-                      </span>
-                    </span>
-                  </button>
-                ))
-              ) : (
-                <div className="homey-muted px-3 py-2 text-sm text-slate-400">
-                  No nodes yet. Add one from the tools above.
-                </div>
-              )}
-            </div>
-          ) : null}
+          {sceneNodesOpen ? selectedSceneId ? <SceneNodesList frameId={frame.id} scene={selectedScene} /> : null : null}
         </div>
       ) : null}
+    </div>
+  )
+}
+
+function SceneNodesList({ frameId, scene }: { frameId: number; scene: FrameScene }): JSX.Element {
+  const { selectedNodeId } = useValues(workspaceLogic)
+  const { selectNode } = useActions(workspaceLogic)
+  const nodeTreeItems = buildDiagramNodeTreeItems(scene.nodes ?? [], scene.edges ?? [])
+  const diagramActions = diagramLogic({ frameId, sceneId: scene.id }).actions
+
+  if (nodeTreeItems.length === 0) {
+    return (
+      <div className="homey-muted px-3 py-2 text-sm text-slate-400">No nodes yet. Add one from the tools above.</div>
+    )
+  }
+
+  return (
+    <div className="space-y-0.5">
+      {nodeTreeItems.map((item) => (
+        <button
+          key={item.node.id}
+          type="button"
+          onClick={() => {
+            selectNode(item.node.id)
+            diagramActions.selectNode(item.node.id)
+          }}
+          className={clsx(
+            'flex w-full items-center gap-2 rounded-xl py-1.5 pr-3 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+            selectedNodeId === item.node.id
+              ? 'bg-slate-900 text-white'
+              : 'homey-strong text-slate-700 hover:bg-slate-100',
+            item.kind === 'disconnected' && selectedNodeId !== item.node.id && 'opacity-70'
+          )}
+          style={{ paddingLeft: `${12 + item.depth * 14}px` }}
+        >
+          {item.depth > 0 ? (
+            <span
+              className={clsx(
+                'h-px w-3 shrink-0',
+                selectedNodeId === item.node.id ? 'bg-slate-500' : 'homey-divider bg-slate-300'
+              )}
+            />
+          ) : null}
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/80 text-xs font-bold uppercase text-slate-500">
+            {item.node.type?.slice(0, 2) ?? 'no'}
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm font-semibold">{nodeLabel(item.node.data, item.node.id)}</span>
+            <span
+              className={clsx(
+                'block truncate text-xs',
+                selectedNodeId === item.node.id ? 'text-slate-300' : 'homey-muted text-slate-400'
+              )}
+            >
+              {nodeKindLabel(item)}
+            </span>
+          </span>
+        </button>
+      ))}
     </div>
   )
 }
@@ -318,7 +346,7 @@ function SceneEditorTopBar({ sceneId }: { sceneId: string | null }): JSX.Element
 function UtilityDrawer({ frameId, scene }: { frameId: number; scene: FrameScene | null }): JSX.Element | null {
   const { utilityPanel } = useValues(workspaceLogic)
   const { closeUtilityPanel, openUtilityPanel } = useActions(workspaceLogic)
-  const activeDefinition = utilityDefinitions.find((definition) => definition.panel === utilityPanel)
+  const activeDefinition = sceneUtilityDefinition(utilityPanel)
 
   if (!utilityPanel || !activeDefinition) {
     return null
@@ -417,7 +445,8 @@ function SceneWorkspaceFrame({ frameId }: SceneWorkspaceFrameProps): JSX.Element
   const frameLogicProps = { frameId }
   const { frame, scenes, unsavedChanges, undeployedChanges } = useValues(frameLogic(frameLogicProps))
   const { framesList } = useValues(framesModel)
-  const { selectedSceneId } = useValues(workspaceLogic)
+  const { selectedSceneId, utilityPanel } = useValues(workspaceLogic)
+  const activeUtilityDefinition = sceneUtilityDefinition(utilityPanel)
 
   if (!frame) {
     return (
@@ -450,7 +479,7 @@ function SceneWorkspaceFrame({ frameId }: SceneWorkspaceFrameProps): JSX.Element
           }
           topBar={<SceneEditorTopBar sceneId={resolvedSceneId} />}
           mainClassName="h-screen overflow-hidden py-5 pl-[456px] pr-5 max-lg:h-auto max-lg:overflow-visible max-lg:px-4"
-          rightPanel={<UtilityDrawer frameId={frameId} scene={selectedScene} />}
+          rightPanel={activeUtilityDefinition ? <UtilityDrawer frameId={frameId} scene={selectedScene} /> : null}
         >
           <SceneCanvas selectedSceneId={resolvedSceneId} />
         </HomeyShell>

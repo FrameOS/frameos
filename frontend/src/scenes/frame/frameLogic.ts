@@ -37,6 +37,8 @@ export interface FrameLogicProps {
   frameId: number
 }
 
+export type FrameNextAction = 'render' | 'restart' | 'reboot' | 'stop' | 'deploy' | null
+
 const DEFAULT_BROWSER_TITLE = 'FrameOS Backend'
 
 function setBrowserTitle(frame?: FrameType | null): void {
@@ -449,6 +451,59 @@ async function fetchTemplateImageBlob(template: Partial<TemplateType>): Promise<
   return await response.blob()
 }
 
+function buildScenesFromTemplate(template: Partial<TemplateType>, frame: Partial<FrameType>): FrameScene[] {
+  if (!('scenes' in template)) {
+    return []
+  }
+
+  const newScenes = duplicateScenes((template.scenes ?? []).map((scene) => sanitizeScene(scene, frame)))
+  if (newScenes.length === 1) {
+    newScenes[0].name = template?.name || newScenes[0].name || 'Untitled scene'
+  }
+  for (const scene of newScenes) {
+    if ('default' in scene) {
+      delete scene.default
+    }
+  }
+  return newScenes
+}
+
+async function saveTemplateSceneImages(
+  frameId: number,
+  template: Partial<TemplateType>,
+  newScenes: FrameScene[]
+): Promise<void> {
+  if (!newScenes.length) {
+    return
+  }
+
+  try {
+    const imageBlob = await fetchTemplateImageBlob(template)
+    if (!imageBlob) {
+      return
+    }
+
+    const targetScenes = getScenesWithoutParents(newScenes)
+    if (!targetScenes.length) {
+      return
+    }
+
+    await Promise.all(
+      targetScenes.map((scene) =>
+        apiFetch(`/api/frames/${frameId}/scene_images/${scene.id}`, {
+          method: 'POST',
+          body: imageBlob,
+        })
+      )
+    )
+    targetScenes.forEach((scene) =>
+      entityImagesModel.actions.updateEntityImage(`frames/${frameId}`, `scene_images/${scene.id}`)
+    )
+  } catch (error) {
+    console.error('Failed to save template image for scenes', error)
+  }
+}
+
 function getScenesWithoutParents(scenes: FrameScene[]): FrameScene[] {
   if (scenes.length <= 1) {
     return scenes
@@ -580,6 +635,25 @@ function sanitizeFrame(frame: Partial<FrameType>): Partial<FrameType> {
   }
 }
 
+function getCurrentFrameForm(frame: FrameType | null | undefined, frameForm: Partial<FrameType>): Partial<FrameType> {
+  return Object.keys(frameForm ?? {}).length > 0 ? frameForm : frame ? sanitizeFrame(frame) : frameForm
+}
+
+async function saveFrameForm(frame: Partial<FrameType>, frameId: number, nextAction: FrameNextAction): Promise<void> {
+  const json = buildDeployPlanRequestBody(frame, FRAME_KEYS)
+  if (nextAction) {
+    json['next_action'] = nextAction
+  }
+  const response = await apiFetch(`/api/frames/${frameId}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(json),
+  })
+  if (!response.ok) {
+    throw new Error('Failed to update frame')
+  }
+}
+
 export function sanitizeScene(scene: Partial<FrameScene>, frame: Partial<FrameType>): FrameScene {
   const settings = scene.settings ?? {}
   const normalizedRawNodes = (scene.nodes ?? []).map((node) => normalizeNode(node as DiagramNode))
@@ -645,6 +719,10 @@ export const frameLogic = kea<frameLogicType>([
     applyTemplate: (template: Partial<TemplateType>) => ({
       template,
     }),
+    applyTemplateAndSave: (template: Partial<TemplateType>) => ({
+      template,
+    }),
+    deleteSceneAndSave: (sceneId: string) => ({ sceneId }),
     closeScenePanels: (sceneIds: string[]) => ({ sceneIds }),
     sendEvent: (event: string, payload: Record<string, any>) => ({ event, payload }),
     setDeployWithAgent: (deployWithAgent: boolean) => ({ deployWithAgent }),
@@ -679,24 +757,13 @@ export const frameLogic = kea<frameLogicType>([
         })),
       }),
       submit: async (frame) => {
-        const json = buildDeployPlanRequestBody(frame, FRAME_KEYS)
-        if (values.nextAction) {
-          json['next_action'] = values.nextAction
-        }
-        const response = await apiFetch(`/api/frames/${values.frameId}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(json),
-        })
-        if (!response.ok) {
-          throw new Error('Failed to update frame')
-        }
+        await saveFrameForm(frame, values.frameId, values.nextAction)
       },
     },
   })),
   reducers({
     nextAction: [
-      null as 'render' | 'restart' | 'reboot' | 'stop' | 'deploy' | null,
+      null as FrameNextAction,
       {
         saveFrame: () => null,
         clearNextAction: () => null,
@@ -1007,6 +1074,9 @@ export const frameLogic = kea<frameLogicType>([
   })),
   listeners(({ asyncActions, actions, values, props }) => ({
     saveFrame: () => actions.submitFrameForm(),
+    submitFrameFormSuccess: () => {
+      framesModel.actions.loadFrame(props.frameId)
+    },
     saveAndDeployFrame: async () => {
       await asyncActions.submitFrameForm()
       framesModel.actions.deployFrame(
@@ -1069,47 +1139,43 @@ export const frameLogic = kea<frameLogicType>([
     },
     applyTemplate: async ({ template }) => {
       if ('scenes' in template) {
-        const oldScenes = values.frameForm?.scenes || []
-        const newScenes = duplicateScenes(
-          (template.scenes ?? []).map((scene) => sanitizeScene(scene, values.frameForm))
-        )
-        if (newScenes.length === 1) {
-          newScenes[0].name = template?.name || newScenes[0].name || 'Untitled scene'
-        }
-        for (const scene of newScenes) {
-          if ('default' in scene) {
-            delete scene.default
-          }
-        }
+        const frameForm = getCurrentFrameForm(values.frame, values.frameForm)
+        const oldScenes = frameForm.scenes || []
+        const newScenes = buildScenesFromTemplate(template, frameForm)
         actions.setFrameFormValues({
           scenes: [...oldScenes, ...newScenes],
         })
 
-        if (newScenes.length) {
-          try {
-            const imageBlob = await fetchTemplateImageBlob(template)
-            if (imageBlob) {
-              const targetScenes = getScenesWithoutParents(newScenes)
-              if (!targetScenes.length) {
-                return
-              }
-              await Promise.all(
-                targetScenes.map((scene) =>
-                  apiFetch(`/api/frames/${props.frameId}/scene_images/${scene.id}`, {
-                    method: 'POST',
-                    body: imageBlob,
-                  })
-                )
-              )
-              targetScenes.forEach((scene) =>
-                entityImagesModel.actions.updateEntityImage(`frames/${props.frameId}`, `scene_images/${scene.id}`)
-              )
-            }
-          } catch (error) {
-            console.error('Failed to save template image for scenes', error)
-          }
-        }
+        await saveTemplateSceneImages(props.frameId, template, newScenes)
       }
+    },
+    applyTemplateAndSave: async ({ template }) => {
+      const frameForm = getCurrentFrameForm(values.frame, values.frameForm)
+      const oldScenes = frameForm.scenes || []
+      const newScenes = buildScenesFromTemplate(template, frameForm)
+      if (!newScenes.length) {
+        return
+      }
+
+      const scenes = [...oldScenes, ...newScenes]
+      const nextFrameForm = { ...frameForm, scenes }
+      actions.setFrameFormValues({ scenes })
+      await saveFrameForm(nextFrameForm, props.frameId, values.nextAction)
+      framesModel.actions.loadFrame(props.frameId)
+      await saveTemplateSceneImages(props.frameId, template, newScenes)
+    },
+    deleteSceneAndSave: async ({ sceneId }) => {
+      const frameForm = getCurrentFrameForm(values.frame, values.frameForm)
+      const scenes = frameForm.scenes ?? []
+      if (!scenes.some((scene) => scene.id === sceneId)) {
+        return
+      }
+
+      const nextScenes = scenes.filter((scene) => scene.id !== sceneId)
+      const nextFrameForm = { ...frameForm, scenes: nextScenes }
+      actions.setFrameFormValues({ scenes: nextScenes })
+      await saveFrameForm(nextFrameForm, props.frameId, values.nextAction)
+      framesModel.actions.loadFrame(props.frameId)
     },
     sendEvent: async ({ event, payload }) => {
       await apiFetch(`/api/frames/${props.frameId}/event/${event}`, {

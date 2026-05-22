@@ -7,10 +7,16 @@
   color-scheme: light;
 }
 
+html[data-frameos-theme='dark'] {
+  background: #1b1c22;
+  color-scheme: dark;
+}
+
 #root {
   width: 100%;
   min-height: 100vh;
   text-align: left;
+  background: inherit;
 }
 
 html,
@@ -18,6 +24,10 @@ body {
   height: 100%;
   margin: 0;
   background: #eef0f7;
+}
+
+html[data-frameos-theme='dark'] body {
+  background: #1b1c22;
 }
 
 .frameos-homey-shell {
@@ -103,6 +113,56 @@ body {
   color: #f8fafc;
 }
 
+.frameos-theme-dark .homey-frame-row {
+  color: #e5e7eb;
+}
+
+.frameos-theme-dark .homey-frame-row:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #f8fafc;
+}
+
+.frameos-theme-dark .homey-frame-row-archived {
+  color: #8f99a8;
+}
+
+.frameos-theme-dark .homey-frame-row-selected {
+  background: rgba(59, 130, 246, 0.16);
+  color: #93c5fd;
+}
+
+.frameos-theme-dark .homey-frame-tool-row {
+  color: #e5e7eb;
+}
+
+.frameos-theme-dark .homey-frame-tool-row:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #f8fafc;
+}
+
+.frameos-theme-dark .homey-frame-tool-row .homey-frame-tool-icon {
+  background: rgba(255, 255, 255, 0.05);
+  color: #aeb6c3;
+}
+
+.frameos-theme-dark .homey-frame-tool-row .homey-frame-tool-description {
+  color: #8f99a8;
+}
+
+.frameos-theme-dark .homey-frame-tool-row-selected {
+  background: rgba(59, 130, 246, 0.16);
+  color: #bfdbfe;
+}
+
+.frameos-theme-dark .homey-frame-tool-row-selected .homey-frame-tool-icon {
+  background: rgba(255, 255, 255, 0.1);
+  color: #dbeafe;
+}
+
+.frameos-theme-dark .homey-frame-tool-row-selected .homey-frame-tool-description {
+  color: #93c5fd;
+}
+
 .frameos-theme-dark .homey-link {
   color: #8ab4ff;
 }
@@ -112,9 +172,17 @@ body {
   transition: padding-left 0.2s ease;
 }
 
+.workspace-main-with-right-panel {
+  padding-right: 490px;
+}
+
 @media (max-width: 1023px) {
   .workspace-main {
     padding-left: 1rem;
+  }
+
+  .workspace-main-with-right-panel {
+    padding-right: 1rem;
   }
 }
 

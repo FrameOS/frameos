@@ -31,7 +31,7 @@ export const templatesLogic = kea<templatesLogicType>([
       repositoriesModel,
       ['updateRepository'],
       frameLogic(props),
-      ['applyTemplate'],
+      ['applyTemplate', 'applyTemplateAndSave'],
     ],
   })),
   actions({
@@ -40,7 +40,8 @@ export const templatesLogic = kea<templatesLogicType>([
     editLocalTemplate: (template: TemplateType) => ({ template }),
     hideModal: true,
     saveRemoteAsLocal: (repository: RepositoryType, template: TemplateType) => ({ repository, template }),
-    applyRemoteToFrame: (repository: RepositoryType, template: TemplateType) => ({
+    applyRemoteToFrame: (repository: RepositoryType, template: TemplateType, persistOnInstall?: boolean) => ({
+      persistOnInstall: persistOnInstall ?? false,
       repository,
       template,
     }),
@@ -307,9 +308,13 @@ export const templatesLogic = kea<templatesLogicType>([
         actions.submitAddTemplateUrlForm()
       }
     },
-    applyRemoteToFrame: async ({ template, repository }) => {
+    applyRemoteToFrame: async ({ template, repository, persistOnInstall }) => {
       if (template.scenes?.length) {
-        actions.applyTemplate(template)
+        if (persistOnInstall) {
+          actions.applyTemplateAndSave(template)
+        } else {
+          actions.applyTemplate(template)
+        }
         return
       }
 
@@ -339,7 +344,11 @@ export const templatesLogic = kea<templatesLogicType>([
         throw new Error('Failed to update frame')
       }
       const scenes = await response.json()
-      actions.applyTemplate({ scenes })
+      if (persistOnInstall) {
+        actions.applyTemplateAndSave({ scenes })
+      } else {
+        actions.applyTemplate({ scenes })
+      }
     },
     saveAsTemplate: () => {
       if ((values.templateForm.exportScenes?.length ?? 0) === 0) {

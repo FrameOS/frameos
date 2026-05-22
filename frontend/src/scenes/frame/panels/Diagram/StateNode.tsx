@@ -4,12 +4,11 @@ import { StateNodeData } from '../../../../types'
 import clsx from 'clsx'
 import { diagramLogic } from './diagramLogic'
 import { appNodeLogic } from './appNodeLogic'
-import { NodeCache } from './NodeCache'
-import { CodeArg } from './CodeArg'
 import { newNodePickerLogic } from './newNodePickerLogic'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
 import { ClipboardDocumentIcon, DocumentDuplicateIcon, TrashIcon } from '@heroicons/react/24/solid'
 import { NodeZoomLabel } from './NodeZoomLabel'
+import { FieldTypeTag } from '../../../../components/FieldTypeTag'
 
 export function StateNode({ id, isConnectable }: NodeProps<StateNodeData>): JSX.Element {
   const { frameId, sceneId } = useValues(diagramLogic)
@@ -34,9 +33,9 @@ export function StateNode({ id, isConnectable }: NodeProps<StateNodeData>): JSX.
       >
         <div
           className={clsx(
-            'frameos-node-title text-xl p-2',
+            'frameos-node-title text-xl p-2 gap-2',
             titleBackground,
-            'flex w-full justify-between items-center gap-1'
+            'flex w-full items-center'
           )}
         >
           <Handle
@@ -66,7 +65,10 @@ export function StateNode({ id, isConnectable }: NodeProps<StateNodeData>): JSX.
               )
             }}
           />
-          <CodeArg codeArg={{ name: stateFieldTitle ?? data.keyword, type: stateFieldType }} />
+          <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
+            <div className="min-w-0 truncate text-left">{stateFieldTitle ?? data.keyword}</div>
+            <FieldTypeTag type={stateFieldType} className="shrink-0" />
+          </div>
           <DropdownMenu
             className="w-fit"
             buttonColor="none"

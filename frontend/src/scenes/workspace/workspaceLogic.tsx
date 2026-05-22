@@ -1,9 +1,10 @@
 import { actions, afterMount, connect, kea, listeners, path, reducers, selectors } from 'kea'
-import { router } from 'kea-router'
+import { router, urlToAction } from 'kea-router'
 import { framesModel } from '../../models/framesModel'
 import { frameHost } from '../../decorators/frame'
 import { FrameScene, FrameType } from '../../types'
 import { urls } from '../../urls'
+import { newFrameForm } from '../frames/newFrameForm'
 import type { workspaceLogicType } from './workspaceLogicType'
 
 export type WorkspaceUtilityPanel =
@@ -25,6 +26,40 @@ export type WorkspaceUtilityPanel =
   | 'ping'
   | 'debug'
 
+const frameToolPanels = [
+  'overview',
+  'preview',
+  'scenes',
+  'logs',
+  'metrics',
+  'assets',
+  'terminal',
+  'schedule',
+  'ping',
+  'debug',
+  'settings',
+] as const satisfies readonly WorkspaceUtilityPanel[]
+
+function isFrameToolPanel(panel: unknown): panel is (typeof frameToolPanels)[number] {
+  return typeof panel === 'string' && (frameToolPanels as readonly string[]).includes(panel)
+}
+
+function searchValue(search: Record<string, unknown>, key: string): string | null {
+  const value = search[key]
+  if (typeof value === 'string') {
+    return value
+  }
+  if (Array.isArray(value) && typeof value[0] === 'string') {
+    return value[0]
+  }
+  return null
+}
+
+function frameToolFromSearch(search: Record<string, unknown>): WorkspaceUtilityPanel {
+  const tool = searchValue(search, 'tool')
+  return isFrameToolPanel(tool) ? tool : 'overview'
+}
+
 export interface SceneSelection {
   frameId: number
   sceneId: string
@@ -45,6 +80,11 @@ export interface WorkspaceSceneOption {
 }
 
 export type WorkspaceTheme = 'light' | 'dark'
+
+interface FramesScrollAnchor {
+  frameId: string
+  top: number
+}
 
 function getInitialWorkspaceTheme(): WorkspaceTheme {
   if (typeof window === 'undefined') {
@@ -87,6 +127,115 @@ function defaultSceneId(frame: FrameType | null | undefined): string | null {
   return scenes.find((scene) => scene.default)?.id ?? scenes[0]?.id ?? null
 }
 
+function framesMainElement(): HTMLElement | null {
+  if (typeof document === 'undefined') {
+    return null
+  }
+  return document.querySelector<HTMLElement>('[data-workspace-main="frames"]')
+}
+
+function frameTitleElement(frameId: string): HTMLElement | null {
+  if (typeof document === 'undefined') {
+    return null
+  }
+  return (
+    Array.from(document.querySelectorAll<HTMLElement>('[data-workspace-frame-title]')).find(
+      (title) => title.dataset.workspaceFrameTitle === frameId
+    ) ?? null
+  )
+}
+
+function captureFramesScrollAnchor(): FramesScrollAnchor | null {
+  const main = framesMainElement()
+  if (!main) {
+    return null
+  }
+
+  const mainRect = main.getBoundingClientRect()
+  const sections = Array.from(document.querySelectorAll<HTMLElement>('[data-workspace-frame-section]'))
+  const candidates = sections
+    .map((section) => {
+      const frameId = section.dataset.workspaceFrameSection
+      const title = frameId ? frameTitleElement(frameId) : null
+      return {
+        frameId,
+        section,
+        sectionRect: section.getBoundingClientRect(),
+        title,
+        titleRect: title?.getBoundingClientRect() ?? section.getBoundingClientRect(),
+      }
+    })
+    .filter(
+      (
+        candidate
+      ): candidate is {
+        frameId: string
+        section: HTMLElement
+        sectionRect: DOMRect
+        title: HTMLElement | null
+        titleRect: DOMRect
+      } =>
+        Boolean(candidate.frameId) &&
+        candidate.sectionRect.bottom >= mainRect.top &&
+        candidate.sectionRect.top <= mainRect.bottom
+    )
+
+  if (candidates.length === 0) {
+    return null
+  }
+
+  const visibleTitle = candidates
+    .filter((candidate) => candidate.titleRect.bottom >= mainRect.top && candidate.titleRect.top <= mainRect.bottom)
+    .toSorted((first, second) => first.titleRect.top - second.titleRect.top)[0]
+
+  const activeFrame =
+    visibleTitle ??
+    candidates
+      .filter((candidate) => candidate.sectionRect.top <= mainRect.top && candidate.sectionRect.bottom >= mainRect.top)
+      .toSorted((first, second) => second.sectionRect.top - first.sectionRect.top)[0] ??
+    candidates.toSorted(
+      (first, second) =>
+        Math.abs(first.sectionRect.top - mainRect.top) - Math.abs(second.sectionRect.top - mainRect.top)
+    )[0]
+
+  return activeFrame ? { frameId: activeFrame.frameId, top: activeFrame.titleRect.top } : null
+}
+
+function restoreFramesScrollAnchor(anchor: FramesScrollAnchor | null): void {
+  if (!anchor) {
+    return
+  }
+  const main = framesMainElement()
+  const title = frameTitleElement(anchor.frameId)
+  if (!main || !title) {
+    return
+  }
+  const nextTop = title.getBoundingClientRect().top
+  main.scrollTop += nextTop - anchor.top
+}
+
+function preserveFramesScrollAfterLayoutChange(cache: Record<string, any>): void {
+  const anchor = captureFramesScrollAnchor()
+  if (!anchor || typeof window === 'undefined') {
+    return
+  }
+
+  if (cache.framesScrollAnchorFrame) {
+    window.cancelAnimationFrame(cache.framesScrollAnchorFrame)
+  }
+  if (cache.framesScrollAnchorNestedFrame) {
+    window.cancelAnimationFrame(cache.framesScrollAnchorNestedFrame)
+  }
+
+  cache.framesScrollAnchorFrame = window.requestAnimationFrame(() => {
+    cache.framesScrollAnchorNestedFrame = window.requestAnimationFrame(() => {
+      restoreFramesScrollAnchor(anchor)
+      cache.framesScrollAnchorFrame = null
+      cache.framesScrollAnchorNestedFrame = null
+    })
+  })
+}
+
 export const workspaceLogic = kea<workspaceLogicType>([
   path(['src', 'scenes', 'workspace', 'workspaceLogic']),
   connect(() => ({
@@ -108,6 +257,8 @@ export const workspaceLogic = kea<workspaceLogicType>([
     navigateToScene: (frameId: number, sceneId: string) => ({ frameId, sceneId }),
     openSceneControl: (frameId: number, sceneId: string) => ({ frameId, sceneId }),
     closeSceneControl: true,
+    openTemplateDrawer: (frameId: number) => ({ frameId }),
+    closeTemplateDrawer: true,
     openUtilityPanel: (panel: WorkspaceUtilityPanel) => ({ panel }),
     closeUtilityPanel: true,
     selectNode: (nodeId: string | null) => ({ nodeId }),
@@ -137,8 +288,6 @@ export const workspaceLogic = kea<workspaceLogicType>([
       false,
       {
         toggleSceneNodesOpen: (open) => !open,
-        navigateToScene: () => false,
-        setRouteSelection: () => false,
       },
     ],
     selectedFrameId: [
@@ -169,6 +318,20 @@ export const workspaceLogic = kea<workspaceLogicType>([
         navigateToSceneFrame: () => null,
         navigateToScene: () => null,
         openUtilityPanel: () => null,
+        openTemplateDrawer: () => null,
+      },
+    ],
+    templateDrawerFrameId: [
+      null as number | null,
+      {
+        openTemplateDrawer: (_, { frameId }) => frameId,
+        closeTemplateDrawer: () => null,
+        setSearch: () => null,
+        navigateToFrame: () => null,
+        openFrameTool: () => null,
+        navigateToSceneFrame: () => null,
+        navigateToScene: () => null,
+        openSceneControl: () => null,
       },
     ],
     utilityPanel: [
@@ -270,34 +433,54 @@ export const workspaceLogic = kea<workspaceLogicType>([
         ),
     ],
   }),
-  listeners(({ actions, values }) => ({
-    setTheme: ({ theme }) => {
-      window.localStorage.setItem('frameos.workspaceTheme', theme)
-      applyWorkspaceTheme(theme)
-    },
-    toggleTheme: () => {
-      window.localStorage.setItem('frameos.workspaceTheme', values.theme)
-      applyWorkspaceTheme(values.theme)
-    },
-    focusFrame: ({ frameId }) => {
-      window.requestAnimationFrame(() => {
-        document.getElementById(`workspace-frame-${frameId}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-      })
-    },
-    navigateToFrame: ({ frameId }) => {
-      actions.selectFrame(frameId)
-      router.actions.push(urls.frame(frameId))
-    },
-    openFrameTool: ({ frameId }) => {
-      router.actions.push(urls.frame(frameId))
-    },
-    navigateToSceneFrame: ({ frameId }) => {
-      actions.selectFrame(frameId)
-      router.actions.push(urls.scenes(frameId))
-    },
-    navigateToScene: ({ frameId, sceneId }) => {
-      actions.setRouteSelection(frameId, sceneId)
-      router.actions.push(urls.scenes(frameId, sceneId))
+  listeners(({ actions, cache, values }) => {
+    const preserveFramesScroll = () => preserveFramesScrollAfterLayoutChange(cache)
+
+    return {
+      openSceneControl: preserveFramesScroll,
+      closeSceneControl: preserveFramesScroll,
+      openTemplateDrawer: preserveFramesScroll,
+      closeTemplateDrawer: preserveFramesScroll,
+      [newFrameForm.actionTypes.showForm]: preserveFramesScroll,
+      [newFrameForm.actionTypes.hideForm]: preserveFramesScroll,
+      setTheme: ({ theme }) => {
+        window.localStorage.setItem('frameos.workspaceTheme', theme)
+        applyWorkspaceTheme(theme)
+      },
+      toggleTheme: () => {
+        window.localStorage.setItem('frameos.workspaceTheme', values.theme)
+        applyWorkspaceTheme(values.theme)
+      },
+      focusFrame: ({ frameId }) => {
+        window.requestAnimationFrame(() => {
+          document.getElementById(`workspace-frame-${frameId}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        })
+      },
+      navigateToFrame: ({ frameId }) => {
+        actions.selectFrame(frameId)
+        const panel = isFrameToolPanel(values.utilityPanel) ? values.utilityPanel : 'overview'
+        router.actions.push(urls.frame(frameId, panel))
+      },
+      openFrameTool: ({ frameId, panel }) => {
+        router.actions.push(urls.frame(frameId, panel))
+      },
+      navigateToSceneFrame: ({ frameId }) => {
+        actions.selectFrame(frameId)
+        router.actions.push(urls.scenes(frameId))
+      },
+      navigateToScene: ({ frameId, sceneId }) => {
+        actions.setRouteSelection(frameId, sceneId)
+        router.actions.push(urls.scenes(frameId, sceneId))
+      },
+    }
+  }),
+  urlToAction(({ actions }) => ({
+    [urls.frame(':id')]: ({ id }, search) => {
+      const frameId = parseInt(String(id), 10)
+      if (Number.isFinite(frameId)) {
+        actions.selectFrame(frameId)
+      }
+      actions.openUtilityPanel(frameToolFromSearch(search))
     },
   })),
   afterMount(({ values }) => {

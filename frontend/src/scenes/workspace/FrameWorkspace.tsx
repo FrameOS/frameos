@@ -1,4 +1,5 @@
 import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
+import { A } from 'kea-router'
 import clsx from 'clsx'
 import {
   AdjustmentsHorizontalIcon,
@@ -18,8 +19,9 @@ import { frameHost, frameIsHealthy, frameIsStale } from '../../decorators/frame'
 import { FrameImage } from '../../components/FrameImage'
 import { FrameScene, FrameType, LogType } from '../../types'
 import { framesModel } from '../../models/framesModel'
+import { insertBreaks } from '../../utils/insertBreaks'
 import { HomeyShell } from './HomeyShell'
-import { SceneControlPanel } from './FramesHome'
+import { AddSceneTile, SceneControlPanel, TemplateDrawer } from './FramesHome'
 import { sceneWorkspaceLogic } from './sceneWorkspaceLogic'
 import { workspaceLogic, WorkspaceUtilityPanel } from './workspaceLogic'
 import { urls } from '../../urls'
@@ -58,8 +60,8 @@ const frameToolDefinitions: FrameToolDefinition[] = [
     description: 'Health dashboard',
     icon: <Squares2X2Icon className="h-5 w-5" />,
   },
-  { panel: 'preview', label: 'Snapshot', description: 'Current image', icon: <EyeIcon className="h-5 w-5" /> },
   { panel: 'scenes', label: 'Scenes', description: 'Frame scenes', icon: <PhotoIcon className="h-5 w-5" /> },
+  { panel: 'preview', label: 'Live view', description: 'Current image', icon: <EyeIcon className="h-5 w-5" /> },
   { panel: 'logs', label: 'Logs', description: 'Runtime output', icon: <DocumentTextIcon className="h-5 w-5" /> },
   { panel: 'metrics', label: 'Metrics', description: 'Health charts', icon: <ChartBarIcon className="h-5 w-5" /> },
   { panel: 'assets', label: 'Assets', description: 'Files on frame', icon: <CircleStackIcon className="h-5 w-5" /> },
@@ -109,21 +111,26 @@ function FrameSelector({ frame, frames }: { frame: FrameType; frames: FrameType[
   )
 }
 
-function FrameToolRow({ definition, active }: { definition: FrameToolDefinition; active: boolean }): JSX.Element {
-  const { openUtilityPanel } = useActions(workspaceLogic)
-
+function FrameToolRow({
+  definition,
+  active,
+  frameId,
+}: {
+  definition: FrameToolDefinition
+  active: boolean
+  frameId: number
+}): JSX.Element {
   return (
-    <button
-      type="button"
-      onClick={() => openUtilityPanel(definition.panel)}
+    <A
+      href={urls.frame(frameId, definition.panel)}
       className={clsx(
-        'flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-        active ? 'bg-slate-900 text-white' : 'text-slate-700 hover:bg-slate-100'
+        'homey-frame-tool-row flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+        active ? 'homey-frame-tool-row-selected bg-slate-900 text-white' : 'text-slate-700 hover:bg-slate-100'
       )}
     >
       <span
         className={clsx(
-          'flex h-9 w-9 shrink-0 items-center justify-center rounded-xl',
+          'homey-frame-tool-icon flex h-9 w-9 shrink-0 items-center justify-center rounded-xl',
           active ? 'bg-white/12 text-white' : 'bg-slate-100 text-slate-500'
         )}
       >
@@ -131,11 +138,16 @@ function FrameToolRow({ definition, active }: { definition: FrameToolDefinition;
       </span>
       <span className="min-w-0 flex-1">
         <span className="block truncate text-sm font-semibold">{definition.label}</span>
-        <span className={clsx('block truncate text-xs', active ? 'text-slate-300' : 'text-slate-400')}>
+        <span
+          className={clsx(
+            'homey-frame-tool-description block truncate text-xs',
+            active ? 'text-slate-300' : 'text-slate-400'
+          )}
+        >
           {definition.description}
         </span>
       </span>
-    </button>
+    </A>
   )
 }
 
@@ -155,7 +167,12 @@ function FrameTree({
         <div className="mb-2 px-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Frame Tools</div>
         <div className="space-y-1">
           {frameToolDefinitions.map((definition) => (
-            <FrameToolRow key={definition.panel} definition={definition} active={activeTool === definition.panel} />
+            <FrameToolRow
+              key={definition.panel}
+              definition={definition}
+              active={activeTool === definition.panel}
+              frameId={frame.id}
+            />
           ))}
         </div>
       </div>
@@ -199,6 +216,27 @@ function SceneTile({ frame, scene }: { frame: FrameType; scene: FrameScene }): J
   )
 }
 
+function CurrentSnapshotTile({ frame }: { frame: FrameType }): JSX.Element {
+  return (
+    <A
+      href={urls.frame(frame.id, 'preview')}
+      className="homey-card group flex w-[22rem] max-w-full shrink-0 flex-col overflow-hidden rounded-[22px] border border-white/90 bg-white text-left shadow-xl shadow-slate-300/35 transition hover:-translate-y-0.5 hover:shadow-2xl hover:shadow-slate-300/45 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+    >
+      <div className="homey-card-media relative flex h-52 items-center justify-center bg-slate-100">
+        <FrameImage frameId={frame.id} refreshable={false} objectFit="contain" className="h-full w-full" />
+        <div className="absolute right-3 top-3 rounded-full bg-white/90 px-2.5 py-1 text-xs font-semibold text-slate-500 shadow-sm transition group-hover:text-blue-500">
+          Open
+        </div>
+      </div>
+      <div className="px-4 py-3">
+        <div className="homey-muted text-xs text-slate-500">
+          Last rendered image from {frame.name || frameHost(frame)}
+        </div>
+      </div>
+    </A>
+  )
+}
+
 function FrameScenesSurface({
   frame,
   scenes,
@@ -213,27 +251,32 @@ function FrameScenesSurface({
   if (scenes.length === 0) {
     if (totalScenes > 0 && search.trim()) {
       return (
-        <div className="homey-empty flex h-44 w-full items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white/45 text-sm font-medium text-slate-500">
-          No scenes match this search.
+        <div className="flex items-start gap-5 max-xl:flex-col">
+          <CurrentSnapshotTile frame={frame} />
+          <div className="homey-empty flex h-40 min-w-64 items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white/45 px-6 text-center text-sm font-medium text-slate-500">
+            No scenes match this search.
+          </div>
         </div>
       )
     }
 
     return (
-      <a
-        href={urls.scenes(frame.id)}
-        className="homey-empty flex h-44 w-full items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white/45 text-sm font-medium text-slate-500 transition hover:bg-white/75"
-      >
-        Add scenes
-      </a>
+      <div className="flex items-start gap-5 max-xl:flex-col">
+        <CurrentSnapshotTile frame={frame} />
+        <AddSceneTile frame={frame} compact />
+      </div>
     )
   }
 
   return (
-    <div className="flex flex-wrap gap-4">
-      {scenes.map((scene) => (
-        <SceneTile key={scene.id} frame={frame} scene={scene} />
-      ))}
+    <div className="flex items-start gap-5 max-xl:flex-col">
+      <CurrentSnapshotTile frame={frame} />
+      <div className="flex flex-wrap gap-4">
+        {scenes.map((scene) => (
+          <SceneTile key={scene.id} frame={frame} scene={scene} />
+        ))}
+        <AddSceneTile frame={frame} compact />
+      </div>
     </div>
   )
 }
@@ -272,12 +315,47 @@ function frameStatusText(frame: FrameType): string {
   return frame.status
 }
 
-function formatLogLine(log: LogType): string {
+function formatLogTimestamp(isoTimestamp: string): string {
+  const date = new Date(isoTimestamp)
+  return `${date.getFullYear()}-${date.getMonth() + 1 < 10 ? '0' : ''}${date.getMonth() + 1}-${
+    date.getDate() < 10 ? '0' : ''
+  }${date.getDate()} ${date.getHours() < 10 ? '0' : ''}${date.getHours()}:${
+    date.getMinutes() < 10 ? '0' : ''
+  }${date.getMinutes()}:${date.getSeconds() < 10 ? '0' : ''}${date.getSeconds()}`
+}
+
+function renderOverviewLogLine(log: LogType): string | JSX.Element {
   if (log.type === 'webhook') {
     try {
-      const parsed = JSON.parse(log.line)
-      return parsed.event ? `${parsed.event} ${JSON.stringify(parsed)}` : log.line
+      const { event, timestamp, ...rest } = JSON.parse(log.line) as {
+        event?: string
+        timestamp?: unknown
+        [key: string]: unknown
+      }
+      const entries = Object.entries(rest)
+      if (event || entries.length > 0) {
+        return (
+          <>
+            {event ? <span className="mr-2 text-yellow-300">{event}</span> : null}
+            {entries.map(([key, value]) => {
+              const formattedValue = value === undefined ? 'undefined' : JSON.stringify(value)
+              return (
+                <span key={key} className="mr-2">
+                  <span className="text-slate-500">{key}=</span>
+                  <span>{insertBreaks(formattedValue ?? 'null')}</span>
+                </span>
+              )
+            })}
+          </>
+        )
+      }
     } catch (error) {}
+  } else if (log.type === 'agent') {
+    return (
+      <>
+        <span className="text-blue-300">{'[AGENT]'}</span> {log.line}
+      </>
+    )
   }
   return log.line
 }
@@ -320,9 +398,20 @@ function FrameOverviewSurface({ frame, scenes }: { frame: FrameType; scenes: Fra
   const recentLogs = logs.slice(-6).reverse()
   const healthTone = healthy ? 'good' : stale ? 'warning' : frame.status === 'error' ? 'danger' : 'neutral'
   const metricsSummaries = Object.entries(latestMetricSummariesByCategory)
+  const frameAspectRatio =
+    frame.width && frame.height
+      ? frame.rotate === 90 || frame.rotate === 270
+        ? `${frame.height} / ${frame.width}`
+        : `${frame.width} / ${frame.height}`
+      : null
 
   return (
-    <div className="frame-tool-panel grid h-full min-h-0 gap-5 overflow-y-auto pr-2 xl:grid-cols-[minmax(0,1.2fr)_minmax(22rem,0.8fr)]">
+    <div className="frame-tool-panel grid h-full min-h-0 content-start gap-x-5 gap-y-3 overflow-y-auto pr-2 xl:grid-cols-[minmax(0,1.2fr)_minmax(22rem,0.8fr)]">
+      <header className="min-w-0 xl:col-span-2">
+        <h1 className="homey-strong truncate text-4xl font-bold leading-tight tracking-normal text-slate-950 max-md:text-3xl">
+          {frame.name || frameHost(frame)}
+        </h1>
+      </header>
       <div className="space-y-5">
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <OverviewStatCard
@@ -403,30 +492,36 @@ function FrameOverviewSurface({ frame, scenes }: { frame: FrameType; scenes: Fra
           </div>
         </div>
 
-        <div className="frame-tool-terminal rounded-[22px] p-4">
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <div className="font-semibold text-white">Recent logs</div>
+        <div className="frame-tool-terminal rounded-[22px] p-3">
+          <div className="mb-2 flex items-center justify-between gap-3 px-1">
+            <A
+              href={urls.frame(frame.id, 'logs')}
+              className="font-semibold text-white transition hover:text-blue-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            >
+              Recent logs
+            </A>
             <div className="text-xs text-slate-500">{logsLoading ? 'Loading...' : `${logs.length} loaded`}</div>
           </div>
           {recentLogs.length === 0 ? (
-            <div className="flex h-36 items-center justify-center text-sm text-slate-500">No logs yet.</div>
+            <div className="flex h-24 items-center justify-center text-sm text-slate-500">No logs yet.</div>
           ) : (
-            <div className="space-y-1.5 font-mono text-xs">
+            <div className="font-mono text-xs leading-4">
               {recentLogs.map((log) => (
                 <div
                   key={log.id}
-                  className="grid gap-2 rounded-xl bg-white/[0.03] px-3 py-2 md:grid-cols-[7rem_4.5rem_1fr]"
+                  className={clsx('rounded-lg px-2 py-0.5 text-slate-300 transition sm:flex sm:flex-row', {
+                    'text-yellow-300': log.type === 'stdinfo',
+                    'text-red-300': log.type === 'stderr',
+                    'text-blue-300': log.type === 'agent',
+                    'text-yellow-200': log.type === 'build',
+                  })}
                 >
-                  <span className="text-slate-500">{formatRelativeTime(log.timestamp)}</span>
-                  <span
-                    className={clsx(
-                      'truncate font-semibold',
-                      log.type === 'stderr' ? 'text-red-300' : log.type === 'agent' ? 'text-blue-300' : 'text-slate-300'
-                    )}
-                  >
-                    {log.type}
-                  </span>
-                  <span className="truncate text-slate-300">{formatLogLine(log)}</span>
+                  <div className="flex-0 mr-3 whitespace-nowrap text-slate-500">
+                    {formatLogTimestamp(log.timestamp)}
+                  </div>
+                  <div className="min-w-0 flex-1 break-words" style={{ wordBreak: 'break-word' }}>
+                    {renderOverviewLogLine(log)}
+                  </div>
                 </div>
               ))}
             </div>
@@ -436,7 +531,10 @@ function FrameOverviewSurface({ frame, scenes }: { frame: FrameType; scenes: Fra
 
       <div className="space-y-5">
         <div className="frame-tool-card overflow-hidden rounded-[22px]">
-          <div className="homey-card-media h-[26rem] max-h-[48vh] bg-slate-100">
+          <div
+            className={clsx('homey-card-media bg-slate-100', frameAspectRatio ? 'w-full' : 'h-64')}
+            style={frameAspectRatio ? { aspectRatio: frameAspectRatio } : undefined}
+          >
             <FrameImage frameId={frame.id} refreshable objectFit="contain" className="h-full w-full" />
           </div>
         </div>
@@ -500,7 +598,8 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
 
   const { framesList } = useValues(framesModel)
   const { frame, scenes } = useValues(frameLogic(frameLogicProps))
-  const { filteredSelectedFrameScenes, utilityPanel } = useValues(workspaceLogic)
+  const { filteredSelectedFrameScenes, sceneControlSelection, templateDrawerFrameId, utilityPanel } =
+    useValues(workspaceLogic)
   const activeTool =
     frameToolDefinitions.find((definition) => definition.panel === utilityPanel) ?? frameToolDefinitions[0]
   const visibleScenes = activeTool.panel === 'scenes' ? filteredSelectedFrameScenes : scenes
@@ -523,7 +622,7 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
           tree={<FrameTree frame={frame} frames={framesList} activeTool={activeTool.panel} />}
           topBar={toolUsesSearch ? undefined : null}
           mainClassName="h-screen overflow-hidden py-6 pl-[480px] pr-8 max-lg:h-auto max-lg:overflow-visible max-lg:px-4 max-lg:pb-6 max-lg:pt-0"
-          rightPanel={<SceneControlPanel />}
+          rightPanel={templateDrawerFrameId ? <TemplateDrawer /> : sceneControlSelection ? <SceneControlPanel /> : null}
         >
           <div className="h-full">
             <div

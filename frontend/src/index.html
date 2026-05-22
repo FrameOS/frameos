@@ -3,6 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      try {
+        if (window.localStorage.getItem('frameos.workspaceTheme') === 'dark') {
+          document.documentElement.dataset.frameosTheme = 'dark'
+          document.documentElement.style.colorScheme = 'dark'
+        }
+      } catch (error) {}
+    </script>
     <title>FrameOS Backend</title>
   </head>
   <body class="text-white">
