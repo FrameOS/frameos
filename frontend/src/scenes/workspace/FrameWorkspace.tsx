@@ -588,6 +588,10 @@ function frameToolUsesWorkspaceSearch(activeTool: WorkspaceUtilityPanel): boolea
   return activeTool === 'scenes'
 }
 
+function frameToolUsesPageScroll(activeTool: WorkspaceUtilityPanel): boolean {
+  return activeTool === 'scenes'
+}
+
 function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
   const frameLogicProps = { frameId }
   useMountedLogic(assetsLogic(frameLogicProps))
@@ -604,6 +608,7 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
     frameToolDefinitions.find((definition) => definition.panel === utilityPanel) ?? frameToolDefinitions[0]
   const visibleScenes = activeTool.panel === 'scenes' ? filteredSelectedFrameScenes : scenes
   const toolUsesSearch = frameToolUsesWorkspaceSearch(activeTool.panel)
+  const toolUsesPageScroll = frameToolUsesPageScroll(activeTool.panel)
 
   if (!frame) {
     return (
@@ -622,15 +627,23 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
           tree={<FrameTree frame={frame} frames={framesList} activeTool={activeTool.panel} />}
           topBar={toolUsesSearch ? undefined : null}
           showAiButton={activeTool.panel === 'overview'}
-          mainClassName="h-screen overflow-hidden py-6 pl-[480px] pr-8 max-lg:h-auto max-lg:overflow-visible max-lg:px-4 max-lg:pb-6 max-lg:pt-0"
+          mainClassName={clsx(
+            toolUsesPageScroll ? 'min-h-screen overflow-visible' : 'h-screen overflow-hidden',
+            'py-6 pl-[480px] pr-8 max-lg:h-auto max-lg:overflow-visible max-lg:px-4 max-lg:pb-6 max-lg:pt-0'
+          )}
           rightPanel={templateDrawerFrameId ? <TemplateDrawer /> : sceneControlSelection ? <SceneControlPanel /> : null}
         >
-          <div className="h-full">
+          <div className={toolUsesPageScroll ? undefined : 'h-full'}>
             <div
               className={clsx(
-                toolUsesSearch ? 'h-[calc(100vh-8rem)]' : 'h-[calc(100vh-3rem)]',
-                'min-h-[32rem] max-lg:h-auto',
-                frameToolIsFullBleed(activeTool.panel) ? 'overflow-hidden' : 'overflow-y-auto'
+                toolUsesPageScroll
+                  ? 'min-h-[32rem]'
+                  : [toolUsesSearch ? 'h-[calc(100vh-8rem)]' : 'h-[calc(100vh-3rem)]', 'max-lg:h-auto'],
+                toolUsesPageScroll
+                  ? 'overflow-visible'
+                  : frameToolIsFullBleed(activeTool.panel)
+                  ? 'overflow-hidden'
+                  : 'overflow-y-auto'
               )}
             >
               <FrameToolSurface

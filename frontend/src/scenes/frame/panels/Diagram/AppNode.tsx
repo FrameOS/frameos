@@ -1,4 +1,5 @@
 import { BindLogic, useActions, useValues } from 'kea'
+import { router } from 'kea-router'
 import { NodeProps, Handle, Position, NodeResizer } from 'reactflow'
 import { AppNodeData, DispatchNodeData } from '../../../../types'
 import clsx from 'clsx'
@@ -9,6 +10,7 @@ import { Select } from '../../../../components/Select'
 import React, { useState } from 'react'
 import { TextArea } from '../../../../components/TextArea'
 import { panelsLogic } from '../panelsLogic'
+import { urls } from '../../../../urls'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
 import { Markdown } from '../../../../components/Markdown'
 import {
@@ -146,7 +148,10 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
                 : [
                     {
                       label: appMenuEditLabel,
-                      onClick: () => editApp(sceneId, id, data),
+                      onClick: () => {
+                        editApp(sceneId, id, data)
+                        router.actions.push(urls.apps(frameId, sceneId, id))
+                      },
                       icon: <PencilSquareIcon className="w-5 h-5" />,
                     },
                     ...(isSceneApp && !isJavaScriptSceneApp

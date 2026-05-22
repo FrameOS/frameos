@@ -5,6 +5,7 @@ import type { CSSProperties, MouseEvent } from 'react'
 import {
   Cog6ToothIcon,
   ComputerDesktopIcon,
+  CubeTransparentIcon,
   MagnifyingGlassIcon,
   MoonIcon,
   PlusIcon,
@@ -25,7 +26,7 @@ import { Chat } from '../frame/panels/Chat/Chat'
 import { chatLogic } from '../frame/panels/Chat/chatLogic'
 import { workspaceChatDrawerLogic } from './workspaceChatDrawerLogic'
 
-type WorkspaceMode = 'frames' | 'frame' | 'scenes' | 'settings'
+type WorkspaceMode = 'frames' | 'frame' | 'scenes' | 'apps' | 'settings'
 
 interface HomeyShellProps {
   mode: WorkspaceMode
@@ -127,10 +128,10 @@ function WorkspaceChatDrawer({ frameId, sceneId }: { frameId: number; sceneId: s
           <div className="flex min-w-0 flex-1 flex-col">
             <div className="flex items-start justify-between gap-3 border-b border-white/10 px-5 py-4">
               <div className="min-w-0">
+                <h2 className="truncate text-xl font-bold tracking-normal">AI chat</h2>
                 <div className="truncate text-xs font-semibold uppercase tracking-wide text-slate-500">
                   {frame.name || frameHost(frame)}
                 </div>
-                <h2 className="truncate text-xl font-bold tracking-normal">AI chat</h2>
               </div>
               <button
                 type="button"
@@ -170,8 +171,9 @@ export function HomeyShell({
     useActions(workspaceLogic)
   const frameHref = selectedFrame ? urls.frame(selectedFrame.id) : urls.frames()
   const scenesHref = selectedFrame ? urls.scenes(selectedFrame.id, selectedSceneId ?? undefined) : urls.scenes()
+  const appsHref = selectedFrame ? urls.apps(selectedFrame.id, selectedSceneId ?? undefined) : urls.apps()
   const showAiButton = showAiButtonProp ?? (mode !== 'frames' && mode !== 'settings' && !!selectedFrame)
-  const chatSceneId = mode === 'scenes' ? selectedSceneId : null
+  const chatSceneId = mode === 'scenes' || mode === 'apps' ? selectedSceneId : null
   const chatDrawerIsOpen = !!chatDrawerSelection
   const workspaceRightPanel = chatDrawerSelection ? (
     <WorkspaceChatDrawer frameId={chatDrawerSelection.frameId} sceneId={chatDrawerSelection.sceneId} />
@@ -206,7 +208,7 @@ export function HomeyShell({
         <div
           className={clsx(
             'homey-rail flex w-[88px] shrink-0 flex-col items-center py-5',
-            secondarySidebarOpen && 'border-r border-slate-200/80'
+            secondarySidebarOpen ? 'border-r border-slate-200/80' : 'max-lg:border-r max-lg:border-slate-200/80'
           )}
         >
           <div className="mb-8 flex h-12 w-12 items-center justify-center">
@@ -240,6 +242,15 @@ export function HomeyShell({
             >
               <RectangleGroupIcon className="h-7 w-7" />
             </NavButton>
+            <NavButton
+              active={mode === 'apps'}
+              href={appsHref}
+              title={secondarySidebarOpen && mode === 'apps' ? 'Hide apps panel' : 'Apps'}
+              onActiveClick={toggleSecondarySidebar}
+              onInactiveClick={openSecondarySidebar}
+            >
+              <CubeTransparentIcon className="h-7 w-7" />
+            </NavButton>
           </nav>
           <button
             type="button"
@@ -259,12 +270,10 @@ export function HomeyShell({
             <Cog6ToothIcon className="h-8 w-8" />
           </NavButton>
         </div>
-        {secondarySidebarOpen ? (
-          <div className="flex min-w-0 flex-1 flex-col">
-            {sidebarHeader}
-            <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-5 pt-6">{tree}</div>
-          </div>
-        ) : null}
+        <div className={clsx('min-w-0 flex-1 flex-col', secondarySidebarOpen ? 'flex' : 'hidden max-lg:flex')}>
+          {sidebarHeader}
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-5 pt-6">{tree}</div>
+        </div>
       </aside>
       <main
         data-workspace-main={mode}

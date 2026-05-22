@@ -256,7 +256,9 @@ function SceneNodesList({ frameId, scene }: { frameId: number; scene: FrameScene
   const diagram = diagramLogic({ frameId, sceneId: scene.id })
   const { selectedNodeIds } = useValues(diagram)
   const diagramActions = diagram.actions
-  const highlightedNodeIds = new Set(selectedNodeIds.length > 0 ? selectedNodeIds : selectedNodeId ? [selectedNodeId] : [])
+  const highlightedNodeIds = new Set(
+    selectedNodeIds.length > 0 ? selectedNodeIds : selectedNodeId ? [selectedNodeId] : []
+  )
 
   if (nodeTreeItems.length === 0) {
     return (

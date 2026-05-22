@@ -161,6 +161,7 @@ export function Chat() {
       return
     }
     editApp(chatAppContext.sceneId, chatAppContext.nodeId, chatAppContext.nodeData)
+    router.actions.push(urls.apps(frameId, chatAppContext.sceneId, chatAppContext.nodeId))
   }
 
   const formatTimestamp = (timestamp?: string | null) => {

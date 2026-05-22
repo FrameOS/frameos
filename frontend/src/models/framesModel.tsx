@@ -44,6 +44,7 @@ export const framesModel = kea<framesModelType>([
     rebootFrame: (id: number) => ({ id }),
     renderFrame: (id: number) => ({ id }),
     deleteFrame: (id: number) => ({ id }),
+    renameFrame: (id: number, name: string) => ({ id, name }),
     deployAgent: (id: number) => ({ id }),
     restartAgent: (id: number) => ({ id }),
     setDeployWithAgent: (id: number, deployWithAgent: boolean) => ({ id, deployWithAgent }),
@@ -117,6 +118,17 @@ export const framesModel = kea<framesModelType>([
             [id]: {
               ...frame,
               archived,
+            },
+          }
+        },
+        renameFrame: (state, { id, name }) => {
+          const frame = state[id]
+          if (!frame) return state
+          return {
+            ...state,
+            [id]: {
+              ...frame,
+              name,
             },
           }
         },
@@ -212,6 +224,21 @@ export const framesModel = kea<framesModelType>([
       await apiFetch(`/api/frames/${id}`, { method: 'DELETE' })
       if (router.values.location.pathname.includes('/frames/' + id)) {
         router.actions.push(urls.frames())
+      }
+    },
+    renameFrame: async ({ id, name }) => {
+      try {
+        const response = await apiFetch(`/api/frames/${id}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name }),
+        })
+        if (!response.ok) {
+          throw new Error('Failed to rename frame')
+        }
+      } catch (error) {
+        console.error(error)
+        actions.loadFrame(id)
       }
     },
     [socketLogic.actionTypes.newLog]: ({ log }) => {

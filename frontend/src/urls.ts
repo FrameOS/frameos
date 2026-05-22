@@ -6,6 +6,12 @@ export const urls = {
     getBasePath() + '/frames/' + id + (tool ? `?tool=${encodeURIComponent(tool)}` : ''),
   scenes: (frameId?: number | string, sceneId?: string) =>
     getBasePath() + '/scenes' + (frameId ? '/' + frameId : '') + (frameId && sceneId ? '/' + sceneId : ''),
+  apps: (frameId?: number | string, sceneId?: string, nodeId?: string) =>
+    getBasePath() +
+    '/apps' +
+    (frameId ? '/' + frameId : '') +
+    (frameId && sceneId ? '/' + sceneId : '') +
+    (frameId && sceneId && nodeId ? '/' + nodeId : ''),
   settings: () => getBasePath() + '/settings',
   login: () => getBasePath() + '/login',
   logout: () => getBasePath() + '/logout',

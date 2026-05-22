@@ -3,31 +3,53 @@ import { A } from 'kea-router'
 import clsx from 'clsx'
 import {
   ArchiveBoxIcon,
+  ArrowUturnLeftIcon,
   ChevronDownIcon,
   ChevronRightIcon,
   ComputerDesktopIcon,
   PhotoIcon,
+  PencilSquareIcon,
   PlusIcon,
+  RocketLaunchIcon,
   SparklesIcon,
   TrashIcon,
   XMarkIcon,
 } from '@heroicons/react/24/outline'
 import { PlayIcon } from '@heroicons/react/24/solid'
 import { framesModel } from '../../models/framesModel'
+import { DropdownMenu } from '../../components/DropdownMenu'
 import { FrameImage } from '../../components/FrameImage'
 import { frameHost, frameIsHealthy, frameIsStale, frameStatus } from '../../decorators/frame'
 import { urls } from '../../urls'
 import { FrameScene, FrameType } from '../../types'
 import { HomeyShell } from './HomeyShell'
-import { OverviewFrameSection, workspaceLogic } from './workspaceLogic'
+import { workspaceLogic } from './workspaceLogic'
+import type { OverviewFrameSection, WorkspaceUtilityPanel } from './workspaceLogic'
 import { NewFrame } from '../frames/NewFrame'
 import { newFrameForm } from '../frames/newFrameForm'
 import { frameLogic } from '../frame/frameLogic'
 import { panelsLogic } from '../frame/panels/panelsLogic'
+import { controlLogic } from '../frame/panels/Scenes/controlLogic'
 import { ExpandedScene } from '../frame/panels/Scenes/ExpandedScene'
 import { EditTemplateModal } from '../frame/panels/Templates/EditTemplateModal'
 import { Templates } from '../frame/panels/Templates/Templates'
 import { framesHomeLogic } from './framesHomeLogic'
+
+const uploadedScenePrefix = 'uploaded/'
+const activeSurfaceClassName = 'border-[#4a4b8c] shadow-[0_0_3px_3px_rgba(128,0,255,0.5)]'
+
+const frameSectionToolLinks = [
+  { label: 'Overview', panel: 'overview' },
+  { label: 'Scenes', panel: 'scenes' },
+  { label: 'Logs', panel: 'logs' },
+  { label: 'Metrics', panel: 'metrics' },
+  { label: 'Schedule', panel: 'schedule' },
+  { label: 'Settings', panel: 'settings' },
+] as const satisfies readonly { label: string; panel: WorkspaceUtilityPanel }[]
+
+function sceneIsActive(scene: FrameScene, currentSceneId: string | null | undefined): boolean {
+  return currentSceneId === scene.id || currentSceneId === `${uploadedScenePrefix}${scene.id}`
+}
 
 function SidebarStatusDots({ frame }: { frame: FrameType }): JSX.Element {
   const stale = frameIsStale(frame)
@@ -155,7 +177,7 @@ function FrameTreeGroup({
   )
 }
 
-function SceneTile({ frame, scene }: { frame: FrameType; scene: FrameScene }): JSX.Element {
+function SceneTile({ frame, scene, active }: { frame: FrameType; scene: FrameScene; active: boolean }): JSX.Element {
   const { openSceneControl } = useActions(workspaceLogic)
   const { hideForm } = useActions(newFrameForm)
   const fieldCount = scene.fields?.filter((field) => field.access === 'public').length ?? 0
@@ -167,7 +189,12 @@ function SceneTile({ frame, scene }: { frame: FrameType; scene: FrameScene }): J
         hideForm()
         openSceneControl(frame.id, scene.id)
       }}
-      className="homey-card group flex h-40 w-40 shrink-0 flex-col overflow-hidden rounded-2xl border border-white/90 bg-white text-left shadow-lg shadow-slate-300/35 transition hover:-translate-y-0.5 hover:shadow-xl hover:shadow-slate-300/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+      className={clsx(
+        'homey-card group flex min-h-36 w-full max-w-40 min-w-0 flex-col overflow-hidden rounded-2xl border bg-white text-left transition hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+        active
+          ? `${activeSurfaceClassName} hover:shadow-[0_0_4px_4px_rgba(128,0,255,0.55)]`
+          : 'border-white/90 shadow-lg shadow-slate-300/35 hover:shadow-xl hover:shadow-slate-300/50'
+      )}
     >
       <div className="homey-card-media relative flex min-h-0 flex-1 items-center justify-center bg-slate-100">
         <FrameImage
@@ -178,6 +205,11 @@ function SceneTile({ frame, scene }: { frame: FrameType; scene: FrameScene }): J
           objectFit="cover"
           className="h-full w-full rounded-none"
         />
+        {active ? (
+          <div className="absolute left-2 top-2 rounded-full bg-[#4a4b8c] px-2 py-0.5 text-[11px] font-semibold text-white shadow-sm">
+            Active
+          </div>
+        ) : null}
         <div className="absolute right-2 top-2 rounded-full bg-white/90 p-1 text-slate-400 shadow-sm transition group-hover:text-blue-500">
           <PlayIcon className="h-4 w-4" />
         </div>
@@ -209,7 +241,7 @@ export function AddSceneTile({ frame, compact = false }: { frame: FrameType; com
       }}
       className={clsx(
         'homey-card group flex shrink-0 flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-slate-300 bg-white/55 text-center text-slate-500 shadow-sm transition hover:-translate-y-0.5 hover:bg-white/80 hover:text-blue-500 hover:shadow-lg hover:shadow-slate-300/35 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-        compact ? 'h-36 w-36' : 'h-40 w-40'
+        compact ? 'h-36 w-36' : 'min-h-36 w-full max-w-40 min-w-0'
       )}
     >
       <span className="homey-icon-tile flex h-12 w-12 items-center justify-center rounded-full bg-white/80 text-slate-400 shadow-sm transition group-hover:text-blue-500">
@@ -310,7 +342,7 @@ function AddSceneDrawerActions({ frame }: { frame: FrameType }): JSX.Element {
   )
 }
 
-function CurrentSnapshotCard({ frame }: { frame: FrameType }): JSX.Element {
+function CurrentSnapshotCard({ frame, active }: { frame: FrameType; active: boolean }): JSX.Element {
   const { openFrameTool } = useActions(workspaceLogic)
   const { hideForm } = useActions(newFrameForm)
 
@@ -321,10 +353,15 @@ function CurrentSnapshotCard({ frame }: { frame: FrameType }): JSX.Element {
         hideForm()
         openFrameTool(frame.id, 'preview')
       }}
-      className="homey-card group flex w-[22rem] max-w-full shrink-0 flex-col overflow-hidden rounded-[22px] border border-white/90 bg-white text-left shadow-xl shadow-slate-300/35 transition hover:-translate-y-0.5 hover:shadow-2xl hover:shadow-slate-300/45 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+      className={clsx(
+        'homey-card group flex w-80 max-w-full shrink-0 flex-col overflow-hidden rounded-[22px] border bg-white text-left transition hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+        active
+          ? `${activeSurfaceClassName} hover:shadow-[0_0_4px_4px_rgba(128,0,255,0.55)]`
+          : 'border-white/90 shadow-xl shadow-slate-300/35 hover:shadow-2xl hover:shadow-slate-300/45'
+      )}
     >
-      <div className="homey-card-media relative flex h-52 items-center justify-center bg-slate-100">
-        <FrameImage frameId={frame.id} refreshable={false} objectFit="contain" className="h-full w-full" />
+      <div className="homey-card-media relative flex max-h-[19rem] min-h-0 items-center justify-center overflow-hidden bg-slate-100">
+        <FrameImage frameId={frame.id} refreshable={false} objectFit="contain" className="max-h-[19rem] w-full" />
         <div className="absolute right-3 top-3 rounded-full bg-white/90 px-2.5 py-1 text-xs font-semibold text-slate-500 shadow-sm transition group-hover:text-blue-500">
           Open
         </div>
@@ -338,20 +375,47 @@ function CurrentSnapshotCard({ frame }: { frame: FrameType }): JSX.Element {
   )
 }
 
+function FrameSectionToolLinks({ frame }: { frame: FrameType }): JSX.Element {
+  return (
+    <div className="flex min-w-0 max-w-full flex-wrap items-center justify-start gap-1.5 @4xl:justify-end">
+      {frameSectionToolLinks.map(({ label, panel }) => (
+        <A
+          key={panel}
+          href={urls.frame(frame.id, panel)}
+          className="homey-secondary-button rounded-full bg-white/80 px-3 py-1.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+        >
+          {label}
+        </A>
+      ))}
+    </div>
+  )
+}
+
 function FrameSection({ section }: { section: OverviewFrameSection }): JSX.Element {
   const { frame, scenes, archived, frameMatchesSearch } = section
   const { search } = useValues(workspaceLogic)
   const { openChatDrawer } = useActions(workspaceLogic)
+  const { deleteFrame, deployFrame, renderFrame, renameFrame, setFrameArchived } = useActions(framesModel)
+  const { sceneId: currentSceneId } = useValues(controlLogic({ frameId: frame.id }))
   const healthy = frameIsHealthy(frame)
   const connected = (frame.active_connections ?? 0) > 0
+  const frameName = frame.name || frameHost(frame)
+
+  const promptRenameFrame = (): void => {
+    const nextName = window.prompt('Rename frame', frameName)?.trim()
+    if (!nextName || nextName === frameName) {
+      return
+    }
+    renameFrame(frame.id, nextName)
+  }
 
   return (
     <section
       id={`workspace-frame-${frame.id}`}
       data-workspace-frame-section={frame.id}
-      className={clsx('scroll-mt-6', archived && 'opacity-80')}
+      className={clsx('group @container scroll-mt-6', archived && 'opacity-80')}
     >
-      <div className="mb-4 flex items-center justify-between gap-4">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
         <A
           href={urls.frame(frame.id, 'overview')}
           className="group flex min-w-0 items-center gap-3 rounded-2xl transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
@@ -380,13 +444,46 @@ function FrameSection({ section }: { section: OverviewFrameSection }): JSX.Eleme
             <div className="homey-muted truncate text-sm text-slate-500">{frameStatus(frame)}</div>
           </div>
         </A>
-        <div className="flex shrink-0 items-center gap-2">
-          <A
-            href={urls.frame(frame.id, 'overview')}
-            className="homey-secondary-button rounded-full bg-white/80 px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-          >
-            Edit
-          </A>
+        <div className="flex w-full shrink-0 flex-wrap items-center justify-start gap-2 @4xl:w-auto @4xl:justify-end">
+          <FrameSectionToolLinks frame={frame} />
+          <DropdownMenu
+            buttonColor="none"
+            horizontal
+            className="homey-secondary-button flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/80 !px-0 !py-0 text-slate-700 shadow-sm transition hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            items={[
+              {
+                label: 'Rename',
+                title: 'Rename frame',
+                onClick: promptRenameFrame,
+                icon: <PencilSquareIcon className="h-5 w-5" />,
+              },
+              {
+                label: 'Render now',
+                title: 'Render frame now',
+                onClick: () => renderFrame(frame.id),
+                icon: <PlayIcon className="h-5 w-5" />,
+              },
+              {
+                label: 'Deploy',
+                title: 'Deploy frame',
+                onClick: () => deployFrame(frame.id),
+                icon: <RocketLaunchIcon className="h-5 w-5" />,
+              },
+              {
+                label: archived ? 'Restore' : 'Archive',
+                title: archived ? 'Restore frame' : 'Archive frame',
+                onClick: () => setFrameArchived(frame.id, !archived),
+                icon: archived ? <ArrowUturnLeftIcon className="h-5 w-5" /> : <ArchiveBoxIcon className="h-5 w-5" />,
+              },
+              {
+                label: 'Delete',
+                title: 'Delete frame',
+                confirm: `Delete "${frameName}"? This cannot be undone.`,
+                onClick: () => deleteFrame(frame.id),
+                icon: <TrashIcon className="h-5 w-5" />,
+              },
+            ]}
+          />
           <button
             type="button"
             title="Open AI chat"
@@ -397,12 +494,12 @@ function FrameSection({ section }: { section: OverviewFrameSection }): JSX.Eleme
           </button>
         </div>
       </div>
-      <div className="flex items-start gap-5 max-xl:flex-col">
-        <CurrentSnapshotCard frame={frame} />
+      <div className="flex flex-col items-start gap-5 @3xl:flex-row">
+        <CurrentSnapshotCard frame={frame} active={!!currentSceneId} />
         {scenes.length > 0 ? (
-          <div className="flex flex-wrap gap-4">
+          <div className="homey-scene-grid w-full">
             {scenes.map((scene) => (
-              <SceneTile key={scene.id} frame={frame} scene={scene} />
+              <SceneTile key={scene.id} frame={frame} scene={scene} active={sceneIsActive(scene, currentSceneId)} />
             ))}
             <AddSceneTile frame={frame} />
           </div>
@@ -411,14 +508,22 @@ function FrameSection({ section }: { section: OverviewFrameSection }): JSX.Eleme
             Frame matched. No scenes match this search.
           </div>
         ) : (
-          <AddSceneTile frame={frame} />
+          <div className="homey-scene-grid w-full">
+            <AddSceneTile frame={frame} />
+          </div>
         )}
       </div>
     </section>
   )
 }
 
-function FrameSectionGroup({ title, sections }: { title: string; sections: OverviewFrameSection[] }): JSX.Element | null {
+function FrameSectionGroup({
+  title,
+  sections,
+}: {
+  title: string
+  sections: OverviewFrameSection[]
+}): JSX.Element | null {
   if (sections.length === 0) {
     return null
   }

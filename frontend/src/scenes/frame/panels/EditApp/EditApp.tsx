@@ -16,15 +16,109 @@ import { DropdownMenu } from '../../../../components/DropdownMenu'
 import { javascriptAppSourceFiles } from '../../../../utils/sceneApps'
 
 interface EditAppProps {
-  panel: PanelWithMetadata
+  panel?: PanelWithMetadata
   sceneId: string
   nodeId: string
+  onOpenChat?: () => void
+  showFileList?: boolean
 }
 
-export function EditApp({ panel, sceneId, nodeId }: EditAppProps) {
+interface EditAppFileListProps {
+  sceneId: string
+  nodeId: string
+  onOpenChat?: () => void
+  className?: string
+}
+
+export function EditAppFileList({ sceneId, nodeId, onOpenChat, className }: EditAppFileListProps) {
   const { frameId } = useValues(frameLogic)
-  const { persistUntilClosed, openChat } = useActions(panelsLogic)
+  const { openChat } = useActions(panelsLogic)
   const { ensureChatForApp } = useActions(chatLogic({ frameId, sceneId }))
+  const logicProps: EditAppLogicProps = {
+    frameId,
+    sceneId,
+    nodeId,
+  }
+  const logic = editAppLogic(logicProps)
+  const { filenames, sourcesLoading, activeFile, changedFiles, modelMarkers } = useValues(logic)
+  const { setActiveFile, addFile, deleteFile } = useActions(logic)
+
+  if (sourcesLoading) {
+    return <div className="homey-muted rounded-2xl bg-white/55 p-3 text-sm text-slate-400">Loading files...</div>
+  }
+
+  return (
+    <div className={clsx('homey-inset rounded-2xl border border-slate-200 bg-white/55 p-3', className)}>
+      <div className="homey-muted mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Files</div>
+      <div className="space-y-1">
+        {filenames.map((file) => (
+          <div key={file} className="flex w-full items-center justify-between gap-2">
+            <button
+              type="button"
+              onClick={() => setActiveFile(file)}
+              className={clsx(
+                'min-w-0 flex-1 truncate rounded-xl px-3 py-2 text-left text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+                activeFile === file
+                  ? modelMarkers[file]?.length
+                    ? 'bg-red-500 text-white'
+                    : 'bg-slate-900 text-white'
+                  : modelMarkers[file]?.length
+                  ? 'text-red-500 hover:bg-red-50'
+                  : 'homey-strong text-slate-700 hover:bg-white'
+              )}
+              title={
+                modelMarkers[file]?.length
+                  ? `line ${modelMarkers[file][0].startLineNumber}, col ${modelMarkers[file][0].startColumn}: ${modelMarkers[file][0].message}`
+                  : file
+              }
+            >
+              {changedFiles[file] ? '* ' : ''}
+              {file}
+            </button>
+            {[...javascriptAppSourceFiles, 'app.nim', 'config.json'].includes(file) ? null : (
+              <DropdownMenu
+                buttonColor="none"
+                horizontal
+                className="homey-icon-button flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/70 !px-0 !py-0 text-slate-500 shadow-sm transition hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                items={[
+                  {
+                    label: 'Delete file',
+                    confirm: `Are you sure you want to delete ${file}?`,
+                    onClick: () => deleteFile(file),
+                    icon: <TrashIcon className="w-5 h-5" />,
+                  },
+                ]}
+              />
+            )}
+          </div>
+        ))}
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Button color="none" size="small" onClick={() => addFile()} title="Add file">
+          + Add file
+        </Button>
+        <Button
+          color="none"
+          size="small"
+          onClick={() => {
+            ensureChatForApp(sceneId, nodeId)
+            if (onOpenChat) {
+              onOpenChat()
+            } else {
+              openChat()
+            }
+          }}
+        >
+          Chat about this app
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+export function EditApp({ panel, sceneId, nodeId, onOpenChat, showFileList = true }: EditAppProps) {
+  const { frameId } = useValues(frameLogic)
+  const { persistUntilClosed } = useActions(panelsLogic)
   const logicProps: EditAppLogicProps = {
     frameId,
     sceneId,
@@ -33,28 +127,26 @@ export function EditApp({ panel, sceneId, nodeId }: EditAppProps) {
   const logic = editAppLogic(logicProps)
   const {
     sources,
-    filenames,
     sourcesLoading,
     activeFile,
     hasChanges,
-    changedFiles,
-    configJson,
     modelMarkers,
-    savedKeyword,
     requiresCompiledOnSave,
     appUsageCount,
     hasMultipleAppUsages,
     appTypeDeclarations,
   } = useValues(logic)
-  const { saveChanges, forkAndSaveChanges, setActiveFile, updateFile, addFile, deleteFile } = useActions(logic)
+  const { saveChanges, forkAndSaveChanges, updateFile } = useActions(logic)
   const [[monaco, editor], setMonacoAndEditor] = useState<[Monaco | null, importedEditor.IStandaloneCodeEditor | null]>(
     [null, null]
   )
   const appTypesLibsRef = useRef<{ dispose: () => void }[]>([])
 
   useEffect(() => {
-    persistUntilClosed(panel, logic)
-  }, [])
+    if (panel) {
+      persistUntilClosed(panel, logic)
+    }
+  }, [panel])
 
   useEffect(() => {
     if (monaco && editor && activeFile) {
@@ -119,7 +211,6 @@ export function EditApp({ panel, sceneId, nodeId }: EditAppProps) {
     return <div>Loading...</div>
   }
 
-  const name = configJson?.name || savedKeyword || nodeId
   const editorLanguage = activeFile.endsWith('.json')
     ? 'json'
     : activeFile.endsWith('.ts') || activeFile.endsWith('.tsx')
@@ -130,60 +221,14 @@ export function EditApp({ panel, sceneId, nodeId }: EditAppProps) {
 
   return (
     <div className="flex flex-row gap-2 max-h-full h-full max-w-full w-full">
-      <div className="w-auto max-w-60 max-h-full h-full overflow-x-auto space-y-1">
-        {filenames.map((file) => (
-          <div key={file} className="w-full flex justify-between gap-2">
-            <Button
-              size="small"
-              color={activeFile === file ? (modelMarkers[file]?.length ? 'red' : 'primary') : 'none'}
-              onClick={() => setActiveFile(file)}
-              className={clsx(
-                'whitespace-nowrap',
-                modelMarkers[file]?.length ? (activeFile === file ? 'text-red-200' : 'text-red-500') : ''
-              )}
-              title={
-                modelMarkers[file]?.length
-                  ? `line ${modelMarkers[file][0].startLineNumber}, col ${modelMarkers[file][0].startColumn}: ${modelMarkers[file][0].message}`
-                  : undefined
-              }
-            >
-              {changedFiles[file] ? '* ' : ''}
-              {file}
-            </Button>
-            {[...javascriptAppSourceFiles, 'app.nim', 'config.json'].includes(file) ? null : (
-              <DropdownMenu
-                buttonColor="none"
-                items={[
-                  {
-                    label: 'Delete file',
-                    confirm: `Are you sure you want to delete ${file}?`,
-                    onClick: () => deleteFile(file),
-                    icon: <TrashIcon className="w-5 h-5" />,
-                  },
-                ]}
-              />
-            )}
-          </div>
-        ))}
-        <div>
-          <Button color="none" size="small" onClick={() => addFile()} title="Add file">
-            + Add file
-          </Button>
-        </div>
-
-        <div>
-          <Button
-            color="none"
-            size="small"
-            onClick={() => {
-              openChat()
-              ensureChatForApp(sceneId, nodeId)
-            }}
-          >
-            💬 Chat about this app
-          </Button>
-        </div>
-      </div>
+      {showFileList ? (
+        <EditAppFileList
+          sceneId={sceneId}
+          nodeId={nodeId}
+          onOpenChat={onOpenChat}
+          className="h-full max-h-full w-auto max-w-60 overflow-x-auto"
+        />
+      ) : null}
 
       <div className="overflow-y-auto overflow-x-auto w-full h-full max-h-full max-w-full gap-2 flex-1 flex flex-col">
         {hasChanges ? (
