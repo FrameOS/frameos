@@ -81,6 +81,7 @@ export const panelsLogic = kea<panelsLogicType>([
     openChat: true,
     openTemplates: true,
     openLogs: true,
+    selectScene: (sceneId: string) => ({ sceneId }),
     editApp: (sceneId: string, nodeId: string, nodeData: AppNodeData) => ({ sceneId, nodeId, nodeData }),
     editScene: (sceneId: string) => ({ sceneId }),
     editSceneJSON: (sceneId: string) => ({ sceneId }),
@@ -244,6 +245,7 @@ export const panelsLogic = kea<panelsLogicType>([
       {
         openPanel: (state, { panel }) => (panel.panel === Panel.Diagram ? panel.key ?? state : state),
         setPanel: (state, { panel }) => (panel.panel === Panel.Diagram ? panel.key ?? state : state),
+        selectScene: (_, { sceneId }) => sceneId,
         editScene: (_, { sceneId }) => sceneId,
         editSceneJSON: (_, { sceneId }) => sceneId,
       },
@@ -399,13 +401,13 @@ export const panelsLogic = kea<panelsLogicType>([
   subscriptions(({ actions }) => ({
     panels: (panels) => {
       const routerPanels = router.values.hashParams?.p
-      if (!routerPanels || !equal(panels, routerPanels)) {
+      if (routerPanels && !equal(panels, routerPanels)) {
         actions.updateUrl()
       }
     },
     fullScreenPanel: (fullScreenPanel) => {
       const routerFullScreenPanel = normalizeHashPanel(router.values.hashParams?.f)
-      if (!equal(fullScreenPanel, routerFullScreenPanel)) {
+      if (routerFullScreenPanel && !equal(fullScreenPanel, routerFullScreenPanel)) {
         actions.updateUrl()
       }
     },
@@ -427,12 +429,9 @@ export const panelsLogic = kea<panelsLogicType>([
   })),
   actionToUrl(({ values }) => ({
     updateUrl: () => {
-      const hash: Record<string, unknown> = { ...router.values.hashParams, p: values.panels }
-      if (values.fullScreenPanel) {
-        hash.f = values.fullScreenPanel
-      } else {
-        delete hash.f
-      }
+      const hash: Record<string, unknown> = { ...router.values.hashParams }
+      delete hash.p
+      delete hash.f
       return [router.values.location.pathname, router.values.searchParams, hash]
     },
   })),

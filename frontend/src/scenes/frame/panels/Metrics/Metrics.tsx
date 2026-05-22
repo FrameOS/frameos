@@ -42,20 +42,24 @@ export function Metrics() {
       : metricsTimeRangeOptions
 
   return metricsLoading ? (
-    <div>...</div>
+    <div className="frame-tool-panel frame-tool-card flex h-full items-center justify-center rounded-[22px] text-sm frame-tool-muted">
+      Loading metrics...
+    </div>
   ) : metrics.length === 0 ? (
-    <div>No Metrics yet</div>
+    <div className="frame-tool-panel frame-tool-card flex h-full items-center justify-center rounded-[22px] text-sm frame-tool-muted">
+      No metrics yet.
+    </div>
   ) : (
-    <div className="h-full p-2 relative select-none">
-      <div className="mb-2 flex items-center gap-3">
+    <div className="frame-tool-panel relative h-full select-none overflow-y-auto pr-2">
+      <div className="mb-4 flex flex-wrap items-center gap-3">
         <Select
           aria-label="Metrics time range"
-          className="!w-32 rounded border-gray-600 bg-gray-800 py-1 text-xs"
+          className="!w-36 rounded-xl py-2 text-xs"
           options={timeRangeOptions}
           value={selectedTimeRangePreset}
           onChange={(value) => setSelectedTimeRangePreset(value as MetricsTimeRangePreset)}
         />
-        <div className="text-sm text-gray-400">
+        <div className="frame-tool-muted text-sm">
           {metrics.length} point{metrics.length === 1 ? '' : 's'}
         </div>
       </div>
@@ -64,11 +68,11 @@ export function Metrics() {
           Object.entries(metricsByCategory).map(([key, series]) => {
             const visibleSeries = visibleMetricsByCategory[key] ?? []
             return (
-              <div key={key}>
-                <div className="mb-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
-                  <strong>{metricLabels[key] ?? key}</strong>
+              <div key={key} className="frame-tool-card mb-4 rounded-[22px] p-4">
+                <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+                  <strong className="frame-tool-heading">{metricLabels[key] ?? key}</strong>
                   {latestMetricSummariesByCategory[key] ? (
-                    <span className="text-gray-400">{latestMetricSummariesByCategory[key]}</span>
+                    <span className="frame-tool-muted">{latestMetricSummariesByCategory[key]}</span>
                   ) : null}
                   {series.length > 1 &&
                     series.map((chartSeries) => {
@@ -78,8 +82,8 @@ export function Metrics() {
                           key={chartSeries.key}
                           type="button"
                           className={clsx(
-                            'inline-flex items-center gap-1 rounded-sm focus:outline-none focus:ring-1 focus:ring-blue-500',
-                            hidden ? 'text-gray-500 line-through' : 'text-gray-200 hover:text-white'
+                            'inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500',
+                            hidden ? 'frame-tool-muted line-through opacity-60' : 'frame-tool-row hover:bg-white/80'
                           )}
                           onClick={() => toggleMetricSeries(key, chartSeries.key)}
                         >
@@ -92,7 +96,7 @@ export function Metrics() {
                       )
                     })}
                 </div>
-                <div className="h-[200px] text-white">
+                <div className="h-[200px] rounded-2xl bg-slate-950/95 p-2 text-white">
                   <BrushChart
                     width={parent.width}
                     height={200}

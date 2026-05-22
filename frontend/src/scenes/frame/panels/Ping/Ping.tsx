@@ -14,14 +14,14 @@ export function Ping() {
   const activeMode: PingMode = isFrameAdminMode ? 'http' : pingMode
 
   return (
-    <div className="flex flex-col h-full space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+    <div className="frame-tool-panel flex h-full flex-col space-y-4">
+      <div className="frame-tool-card flex flex-col gap-3 rounded-[22px] p-4 sm:flex-row sm:items-end sm:justify-between">
         <div className="flex items-center gap-2">
           <Button color={isRunning ? 'secondary' : 'primary'} size="small" onClick={() => toggleRunning()}>
             {isRunning ? 'Stop' : 'Start'}
           </Button>
           {isPinging ? (
-            <span className="text-sm text-gray-400 break-all">
+            <span className="frame-tool-muted break-all text-sm">
               {activeMode === 'http' ? 'Requesting' : 'Pinging'} {targetLabel}...
             </span>
           ) : null}
@@ -30,7 +30,7 @@ export function Ping() {
           {!isFrameAdminMode ? (
             <>
               <div className="flex items-center gap-2">
-                <label className="text-sm font-medium text-gray-300" htmlFor="ping-mode">
+                <label className="text-sm font-medium frame-tool-muted" htmlFor="ping-mode">
                   Mode:
                 </label>
                 <Select
@@ -46,7 +46,7 @@ export function Ping() {
               </div>
               {pingMode === 'http' ? (
                 <div className="flex items-center gap-2">
-                  <label className="text-sm font-medium text-gray-300" htmlFor="ping-path">
+                  <label className="text-sm font-medium frame-tool-muted" htmlFor="ping-path">
                     Path:
                   </label>
                   <TextInput
@@ -61,34 +61,36 @@ export function Ping() {
             </>
           ) : null}
           <div className="flex flex-row gap-2 items-center">
-            <label className="text-sm font-medium text-gray-300" htmlFor="ping-interval">
+            <label className="text-sm font-medium frame-tool-muted" htmlFor="ping-interval">
               Interval:
             </label>
             <NumberTextInput
               id="ping-interval"
               min={1}
               step={1}
-              className="!w-14 rounded bg-black text-white p-2 focus:outline-none"
+              className="!w-16 rounded-xl p-2 focus:outline-none"
               value={intervalSeconds}
               onChange={(value) => {
                 setIntervalSeconds(Number.isFinite(value) ? Math.max(1, value ?? 1) : 1)
               }}
             />
-            <label className="text-sm font-medium text-gray-300" htmlFor="ping-interval">
+            <label className="text-sm font-medium frame-tool-muted" htmlFor="ping-interval">
               seconds
             </label>
           </div>
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto rounded border border-gray-800 bg-black/60 p-3 text-sm">
+      <div className="min-h-0 flex-1 overflow-y-auto rounded-[22px] text-sm">
         {results.length === 0 ? (
-          <div className="text-gray-400">No pings yet.</div>
+          <div className="frame-tool-card flex h-full items-center justify-center rounded-[22px] frame-tool-muted">
+            No pings yet.
+          </div>
         ) : (
           <ul className="space-y-2">
             {results.map((result) => (
-              <li key={result.id} className="flex flex-col gap-1 rounded border border-gray-800 bg-black/80 p-2">
-                <div className="flex items-center justify-between text-xs text-gray-400">
+              <li key={result.id} className="frame-tool-card flex flex-col gap-1 rounded-2xl p-3">
+                <div className="frame-tool-muted flex items-center justify-between text-xs">
                   <span>
                     {result.timestamp} · {result.mode === 'http' ? 'HTTP' : 'ICMP'} · {result.target}
                     {result.status ? ` (status ${result.status})` : ''}

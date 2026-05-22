@@ -1,15 +1,10 @@
 import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
 import clsx from 'clsx'
 import {
-  AdjustmentsHorizontalIcon,
-  CalendarDaysIcon,
-  ChartBarIcon,
-  CircleStackIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
   CodeBracketIcon,
-  CommandLineIcon,
   CubeTransparentIcon,
-  DocumentTextIcon,
-  EyeIcon,
   ListBulletIcon,
   PhotoIcon,
   RectangleGroupIcon,
@@ -17,35 +12,24 @@ import {
   XMarkIcon,
 } from '@heroicons/react/24/outline'
 import { PlayIcon } from '@heroicons/react/24/solid'
+import { FrameImage } from '../../components/FrameImage'
 import { framesModel } from '../../models/framesModel'
 import { frameHost } from '../../decorators/frame'
 import { FrameScene, FrameType, NodeData } from '../../types'
-import { urls } from '../../urls'
 import { HomeyShell } from './HomeyShell'
 import { sceneWorkspaceLogic } from './sceneWorkspaceLogic'
 import { workspaceLogic, WorkspaceUtilityPanel } from './workspaceLogic'
 import { frameLogic } from '../frame/frameLogic'
 import { panelsLogic } from '../frame/panels/panelsLogic'
-import { Diagram } from '../frame/panels/Diagram/Diagram'
+import { Diagram, DiagramToolbar } from '../frame/panels/Diagram/Diagram'
 import { diagramLogic } from '../frame/panels/Diagram/diagramLogic'
-import { assetsLogic } from '../frame/panels/Assets/assetsLogic'
-import { terminalLogic } from '../frame/panels/Terminal/terminalLogic'
-import { frameSettingsLogic } from '../frame/panels/FrameSettings/frameSettingsLogic'
-import { logsLogic } from '../frame/panels/Logs/logsLogic'
 import { Apps } from '../frame/panels/Apps/Apps'
-import { Assets } from '../frame/panels/Assets/Assets'
 import { Events } from '../frame/panels/Events/Events'
-import { FrameSettings } from '../frame/panels/FrameSettings/FrameSettings'
-import { Image } from '../frame/panels/Image/Image'
-import { Logs } from '../frame/panels/Logs/Logs'
-import { Metrics } from '../frame/panels/Metrics/Metrics'
 import { SceneJSON } from '../frame/panels/SceneJSON/SceneJSON'
 import { SceneSource } from '../frame/panels/SceneSource/SceneSource'
 import { SceneState } from '../frame/panels/SceneState/SceneState'
-import { Schedule } from '../frame/panels/Schedule/Schedule'
-import { Templates } from '../frame/panels/Templates/Templates'
+import { scenesLogic } from '../frame/panels/Scenes/scenesLogic'
 import { EditTemplateModal } from '../frame/panels/Templates/EditTemplateModal'
-import { Terminal } from '../frame/panels/Terminal/Terminal'
 import { ExpandedScene } from '../frame/panels/Scenes/ExpandedScene'
 
 interface SceneWorkspaceProps {
@@ -67,14 +51,6 @@ const utilityDefinitions: UtilityDefinition[] = [
   { panel: 'state', label: 'State', icon: <PlayIcon className="h-5 w-5" /> },
   { panel: 'apps', label: 'Apps', icon: <CubeTransparentIcon className="h-5 w-5" /> },
   { panel: 'events', label: 'Events', icon: <ListBulletIcon className="h-5 w-5" /> },
-  { panel: 'templates', label: 'Templates', icon: <RectangleGroupIcon className="h-5 w-5" /> },
-  { panel: 'schedule', label: 'Schedule', icon: <CalendarDaysIcon className="h-5 w-5" /> },
-  { panel: 'preview', label: 'Preview', icon: <EyeIcon className="h-5 w-5" /> },
-  { panel: 'logs', label: 'Logs', icon: <DocumentTextIcon className="h-5 w-5" /> },
-  { panel: 'metrics', label: 'Metrics', icon: <ChartBarIcon className="h-5 w-5" /> },
-  { panel: 'assets', label: 'Assets', icon: <CircleStackIcon className="h-5 w-5" /> },
-  { panel: 'terminal', label: 'Terminal', icon: <CommandLineIcon className="h-5 w-5" /> },
-  { panel: 'settings', label: 'Frame', icon: <AdjustmentsHorizontalIcon className="h-5 w-5" /> },
   { panel: 'source', label: 'Source', icon: <CodeBracketIcon className="h-5 w-5" /> },
   { panel: 'json', label: 'JSON', icon: <ServerStackIcon className="h-5 w-5" /> },
 ]
@@ -92,7 +68,7 @@ function nodeLabel(nodeData: NodeData | undefined, fallback: string): string {
   return fallback
 }
 
-function SceneTree({
+function SceneSelector({
   frame,
   frames,
   scenes,
@@ -103,22 +79,16 @@ function SceneTree({
   scenes: FrameScene[]
   selectedSceneId: string | null
 }): JSX.Element {
-  const { filteredSelectedFrameScenes, selectedNodeId } = useValues(workspaceLogic)
-  const { navigateToSceneFrame, navigateToScene, selectNode } = useActions(workspaceLogic)
-  const selectedScene = scenes.find((scene) => scene.id === selectedSceneId) ?? null
-  const diagramActions =
-    selectedSceneId !== null
-      ? diagramLogic({ frameId: frame.id, sceneId: selectedSceneId, updateNodeInternals: () => {} }).actions
-      : null
+  const { navigateToScene, navigateToSceneFrame } = useActions(workspaceLogic)
 
   return (
-    <div className="space-y-5">
-      <div className="px-2">
+    <div className="space-y-3 px-2">
+      <div>
         <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-400">Frame</label>
         <select
           value={frame.id}
           onChange={(event) => navigateToSceneFrame(parseInt(event.target.value, 10))}
-          className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-blue-400"
+          className="homey-form-control min-h-12 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-blue-400"
         >
           {frames.map((candidate) => (
             <option key={candidate.id} value={candidate.id}>
@@ -128,67 +98,182 @@ function SceneTree({
         </select>
       </div>
       <div>
-        <div className="mb-2 px-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Scenes</div>
-        <div className="space-y-1">
-          {filteredSelectedFrameScenes.map((scene) => (
-            <button
-              key={scene.id}
-              type="button"
-              onClick={() => navigateToScene(frame.id, scene.id)}
-              className={clsx(
-                'flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-                selectedSceneId === scene.id ? 'bg-blue-50 text-blue-600' : 'text-slate-700 hover:bg-slate-100'
-              )}
-            >
-              <PhotoIcon className="h-5 w-5 shrink-0" />
-              <span className="min-w-0 flex-1 truncate text-base font-medium">{scene.name || 'Untitled scene'}</span>
-              {scene.default ? (
-                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-500">
-                  Default
-                </span>
-              ) : null}
-            </button>
-          ))}
+        <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-400">Scene</label>
+        <select
+          value={selectedSceneId ?? ''}
+          onChange={(event) => {
+            if (event.target.value) {
+              navigateToScene(frame.id, event.target.value)
+            }
+          }}
+          className="homey-form-control min-h-12 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-blue-400"
+        >
+          {scenes.length === 0 ? (
+            <option value="">No scenes</option>
+          ) : (
+            scenes.map((scene) => (
+              <option key={scene.id} value={scene.id}>
+                {scene.name || 'Untitled scene'}
+              </option>
+            ))
+          )}
+        </select>
+      </div>
+    </div>
+  )
+}
+
+function SceneTree({
+  frame,
+  frames,
+  scenes,
+  selectedScene,
+  selectedSceneId,
+  unsavedChanges,
+  undeployedChanges,
+}: {
+  frame: FrameType
+  frames: FrameType[]
+  scenes: FrameScene[]
+  selectedScene: FrameScene | null
+  selectedSceneId: string | null
+  unsavedChanges: boolean
+  undeployedChanges: boolean
+}): JSX.Element {
+  const { sceneNodesOpen, selectedNodeId } = useValues(workspaceLogic)
+  const { openUtilityPanel, selectNode, toggleSceneNodesOpen } = useActions(workspaceLogic)
+  const { saveFrame, saveAndDeployFrame } = useActions(frameLogic({ frameId: frame.id }))
+  const { linkedActiveSceneId } = useValues(scenesLogic({ frameId: frame.id }))
+  const diagramActions =
+    selectedSceneId !== null
+      ? diagramLogic({ frameId: frame.id, sceneId: selectedSceneId, updateNodeInternals: () => {} }).actions
+      : null
+  const sceneNodes = selectedScene?.nodes ?? []
+  const execution = selectedScene?.settings?.execution === 'interpreted' ? 'Interpreted' : 'Compiled'
+  const selectedSceneIsActive = selectedSceneId !== null && linkedActiveSceneId === selectedSceneId
+
+  return (
+    <div className="space-y-5">
+      <SceneSelector frame={frame} frames={frames} scenes={scenes} selectedSceneId={selectedSceneId} />
+      <div className="homey-inset mx-2 rounded-2xl border border-slate-200 bg-white/55 p-3">
+        <div className="homey-muted text-xs font-semibold uppercase tracking-wide text-slate-400">
+          {frame.name || frameHost(frame)}
+        </div>
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-500">
+            {sceneNodes.length} nodes
+          </span>
+          <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-500">{execution}</span>
+          {unsavedChanges ? (
+            <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-700">Unsaved</span>
+          ) : null}
+          {!unsavedChanges && undeployedChanges ? (
+            <span className="rounded-full bg-blue-100 px-2 py-1 text-xs font-semibold text-blue-700">Undeployed</span>
+          ) : null}
+        </div>
+        <div className="mt-3 grid grid-cols-3 gap-2">
+          <button
+            type="button"
+            onClick={() => openUtilityPanel('state')}
+            className="rounded-full bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          >
+            Run
+          </button>
+          <button
+            type="button"
+            onClick={() => saveFrame()}
+            className={clsx(
+              'rounded-full px-3 py-2 text-xs font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+              unsavedChanges ? 'bg-blue-500 text-white hover:bg-blue-600' : 'bg-white text-slate-700 hover:bg-slate-100'
+            )}
+          >
+            Save
+          </button>
+          <button
+            type="button"
+            onClick={() => saveAndDeployFrame()}
+            className={clsx(
+              'rounded-full px-3 py-2 text-xs font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+              unsavedChanges || undeployedChanges
+                ? 'bg-slate-900 text-white hover:bg-slate-700'
+                : 'bg-white text-slate-700 hover:bg-slate-100'
+            )}
+          >
+            Deploy
+          </button>
         </div>
       </div>
       {selectedScene ? (
-        <div>
-          <div className="mb-2 px-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Nodes</div>
-          <div className="space-y-1">
-            {(selectedScene.nodes ?? []).length > 0 ? (
-              selectedScene.nodes.map((node) => (
-                <button
-                  key={node.id}
-                  type="button"
-                  onClick={() => {
-                    selectNode(node.id)
-                    diagramActions?.selectNode(node.id)
-                  }}
-                  className={clsx(
-                    'flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-                    selectedNodeId === node.id ? 'bg-slate-900 text-white' : 'text-slate-700 hover:bg-slate-100'
-                  )}
-                >
-                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/80 text-xs font-bold uppercase text-slate-500">
-                    {node.type?.slice(0, 2) ?? 'no'}
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-semibold">{nodeLabel(node.data, node.id)}</span>
-                    <span
-                      className={clsx(
-                        'block truncate text-xs',
-                        selectedNodeId === node.id ? 'text-slate-300' : 'text-slate-400'
-                      )}
-                    >
-                      {node.type}
-                    </span>
-                  </span>
-                </button>
-              ))
-            ) : (
-              <div className="px-3 py-2 text-sm text-slate-400">No nodes yet.</div>
-            )}
+        <div className="homey-card mx-2 overflow-hidden rounded-2xl border border-white/80 bg-white/65 shadow-sm">
+          <div className="homey-card-media relative h-32 bg-slate-100">
+            <FrameImage
+              frameId={frame.id}
+              sceneId={selectedSceneIsActive ? undefined : selectedScene.id}
+              refreshable
+              objectFit="contain"
+              className="h-full w-full"
+            />
+            <div className="absolute right-2 top-2 rounded-full bg-white/90 px-2 py-0.5 text-[11px] font-semibold text-slate-500 shadow-sm">
+              {selectedSceneIsActive ? 'Current' : 'Scene'}
+            </div>
           </div>
+        </div>
+      ) : null}
+      {selectedScene ? (
+        <div>
+          <button
+            type="button"
+            onClick={toggleSceneNodesOpen}
+            className="homey-icon-button mb-2 flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            aria-expanded={sceneNodesOpen}
+          >
+            {sceneNodesOpen ? <ChevronDownIcon className="h-4 w-4" /> : <ChevronRightIcon className="h-4 w-4" />}
+            <span className="flex-1">Nodes</span>
+            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
+              {sceneNodes.length}
+            </span>
+          </button>
+          {sceneNodesOpen ? (
+            <div className="space-y-1">
+              {sceneNodes.length > 0 ? (
+                sceneNodes.map((node) => (
+                  <button
+                    key={node.id}
+                    type="button"
+                    onClick={() => {
+                      selectNode(node.id)
+                      diagramActions?.selectNode(node.id)
+                    }}
+                    className={clsx(
+                      'flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+                      selectedNodeId === node.id
+                        ? 'bg-slate-900 text-white'
+                        : 'homey-strong text-slate-700 hover:bg-slate-100'
+                    )}
+                  >
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/80 text-xs font-bold uppercase text-slate-500">
+                      {node.type?.slice(0, 2) ?? 'no'}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-semibold">{nodeLabel(node.data, node.id)}</span>
+                      <span
+                        className={clsx(
+                          'block truncate text-xs',
+                          selectedNodeId === node.id ? 'text-slate-300' : 'homey-muted text-slate-400'
+                        )}
+                      >
+                        {node.type}
+                      </span>
+                    </span>
+                  </button>
+                ))
+              ) : (
+                <div className="homey-muted px-3 py-2 text-sm text-slate-400">
+                  No nodes yet. Add one from the tools above.
+                </div>
+              )}
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>
@@ -221,6 +306,15 @@ function UtilityToolbar(): JSX.Element {
   )
 }
 
+function SceneEditorTopBar({ sceneId }: { sceneId: string | null }): JSX.Element {
+  return (
+    <div className="mb-4 flex items-center justify-between gap-4 max-md:flex-col max-md:items-stretch">
+      <div className="flex min-w-0 items-center gap-2">{sceneId ? <DiagramToolbar sceneId={sceneId} /> : null}</div>
+      <UtilityToolbar />
+    </div>
+  )
+}
+
 function UtilityDrawer({ frameId, scene }: { frameId: number; scene: FrameScene | null }): JSX.Element | null {
   const { utilityPanel } = useValues(workspaceLogic)
   const { closeUtilityPanel, openUtilityPanel } = useActions(workspaceLogic)
@@ -245,14 +339,6 @@ function UtilityDrawer({ frameId, scene }: { frameId: number; scene: FrameScene 
     }
     if (utilityPanel === 'apps') return <Apps />
     if (utilityPanel === 'events') return <Events />
-    if (utilityPanel === 'templates') return <Templates />
-    if (utilityPanel === 'schedule') return <Schedule />
-    if (utilityPanel === 'logs') return <Logs />
-    if (utilityPanel === 'metrics') return <Metrics />
-    if (utilityPanel === 'assets') return <Assets />
-    if (utilityPanel === 'terminal') return <Terminal />
-    if (utilityPanel === 'settings') return <FrameSettings />
-    if (utilityPanel === 'preview') return <Image className="h-full min-h-[22rem]" />
     if (utilityPanel === 'source') return <SceneSource />
     if (utilityPanel === 'json') return scene ? <SceneJSON sceneId={scene.id} /> : <div>Select a scene first.</div>
     return null
@@ -298,12 +384,12 @@ function UtilityDrawer({ frameId, scene }: { frameId: number; scene: FrameScene 
   )
 }
 
-function SceneCanvas({ frameId, selectedSceneId }: { frameId: number; selectedSceneId: string | null }): JSX.Element {
+function SceneCanvas({ selectedSceneId }: { selectedSceneId: string | null }): JSX.Element {
   const { openUtilityPanel } = useActions(workspaceLogic)
 
   if (!selectedSceneId) {
     return (
-      <div className="flex h-[70vh] items-center justify-center rounded-[24px] border border-white/80 bg-white/55 text-slate-500 shadow-lg shadow-slate-300/25">
+      <div className="flex h-[calc(100vh-6rem)] items-center justify-center rounded-[24px] border border-white/80 bg-white/55 text-slate-500 shadow-lg shadow-slate-300/25">
         <div className="text-center">
           <PhotoIcon className="mx-auto mb-3 h-10 w-10 text-slate-300" />
           <div className="text-lg font-semibold text-slate-700">No scene selected</div>
@@ -314,8 +400,8 @@ function SceneCanvas({ frameId, selectedSceneId }: { frameId: number; selectedSc
   }
 
   return (
-    <div className="h-[calc(100vh-9rem)] min-h-[34rem] overflow-hidden rounded-[24px] border border-white/90 bg-white shadow-xl shadow-slate-300/30">
-      <Diagram sceneId={selectedSceneId} />
+    <div className="scene-editor-canvas h-[calc(100vh-5.25rem)] min-h-[34rem] overflow-hidden">
+      <Diagram sceneId={selectedSceneId} showToolbar={false} />
       <button
         type="button"
         onClick={() => openUtilityPanel('apps')}
@@ -329,18 +415,9 @@ function SceneCanvas({ frameId, selectedSceneId }: { frameId: number; selectedSc
 
 function SceneWorkspaceFrame({ frameId }: SceneWorkspaceFrameProps): JSX.Element {
   const frameLogicProps = { frameId }
-  useMountedLogic(assetsLogic(frameLogicProps))
-  useMountedLogic(terminalLogic(frameLogicProps))
-  useMountedLogic(frameSettingsLogic(frameLogicProps))
-  useMountedLogic(logsLogic(frameLogicProps))
-
+  const { frame, scenes, unsavedChanges, undeployedChanges } = useValues(frameLogic(frameLogicProps))
   const { framesList } = useValues(framesModel)
-  const { frame, scenes, unsavedChanges, undeployedChanges, requiresRecompilation } = useValues(
-    frameLogic(frameLogicProps)
-  )
   const { selectedSceneId } = useValues(workspaceLogic)
-  const { saveFrame, saveAndDeployFrame } = useActions(frameLogic(frameLogicProps))
-  const { openUtilityPanel } = useActions(workspaceLogic)
 
   if (!frame) {
     return (
@@ -360,70 +437,22 @@ function SceneWorkspaceFrame({ frameId }: SceneWorkspaceFrameProps): JSX.Element
         <HomeyShell
           mode="scenes"
           title="Scenes"
-          subtitle={frame.name || frameHost(frame)}
-          tree={<SceneTree frame={frame} frames={framesList} scenes={scenes} selectedSceneId={resolvedSceneId} />}
-          toolbar={<UtilityToolbar />}
+          tree={
+            <SceneTree
+              frame={frame}
+              frames={framesList}
+              scenes={scenes}
+              selectedScene={selectedScene}
+              selectedSceneId={resolvedSceneId}
+              unsavedChanges={unsavedChanges}
+              undeployedChanges={undeployedChanges}
+            />
+          }
+          topBar={<SceneEditorTopBar sceneId={resolvedSceneId} />}
+          mainClassName="h-screen overflow-hidden py-5 pl-[456px] pr-5 max-lg:h-auto max-lg:overflow-visible max-lg:px-4"
           rightPanel={<UtilityDrawer frameId={frameId} scene={selectedScene} />}
         >
-          <div className="pb-12">
-            <div className="mb-4 flex items-center justify-between gap-4">
-              <div className="min-w-0">
-                <h2 className="truncate text-3xl font-bold tracking-normal text-slate-950">
-                  {selectedScene?.name || 'Untitled scene'}
-                </h2>
-                <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-slate-500">
-                  <span>{scenes.length} scenes</span>
-                  <span>{selectedScene?.nodes?.length ?? 0} nodes</span>
-                  {selectedScene?.settings?.execution === 'interpreted' ? (
-                    <span>Interpreted</span>
-                  ) : (
-                    <span>Compiled</span>
-                  )}
-                  {unsavedChanges ? <span className="font-semibold text-amber-600">Unsaved</span> : null}
-                  {!unsavedChanges && undeployedChanges ? (
-                    <span className="font-semibold text-blue-600">Undeployed</span>
-                  ) : null}
-                </div>
-              </div>
-              <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => openUtilityPanel('state')}
-                  className="rounded-full bg-white/85 px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-                >
-                  Run
-                </button>
-                <button
-                  type="button"
-                  onClick={() => saveFrame()}
-                  className={clsx(
-                    'rounded-full px-4 py-2 text-sm font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-                    unsavedChanges
-                      ? 'bg-blue-500 text-white hover:bg-blue-600'
-                      : 'bg-white/85 text-slate-700 hover:bg-white'
-                  )}
-                >
-                  Save
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    saveAndDeployFrame()
-                    openUtilityPanel('logs')
-                  }}
-                  className={clsx(
-                    'rounded-full px-4 py-2 text-sm font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-                    unsavedChanges || undeployedChanges
-                      ? 'bg-slate-900 text-white hover:bg-slate-700'
-                      : 'bg-white/85 text-slate-700 hover:bg-white'
-                  )}
-                >
-                  {requiresRecompilation ? 'Full deploy' : 'Deploy'}
-                </button>
-              </div>
-            </div>
-            <SceneCanvas frameId={frameId} selectedSceneId={resolvedSceneId} />
-          </div>
+          <SceneCanvas selectedSceneId={resolvedSceneId} />
         </HomeyShell>
         <EditTemplateModal />
       </BindLogic>

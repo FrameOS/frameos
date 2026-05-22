@@ -282,13 +282,15 @@ export function Logs() {
   }
 
   return logsLoading ? (
-    <div>...</div>
+    <div className="frame-tool-panel frame-tool-card flex h-full items-center justify-center rounded-[22px] text-sm frame-tool-muted">
+      Loading logs...
+    </div>
   ) : (
-    <div className="h-full bg-black p-2 relative">
+    <div className="frame-tool-panel frame-tool-terminal relative h-full overflow-hidden rounded-[22px] p-3">
       <DropdownMenu
         horizontal
         buttonColor="tertiary"
-        className={logs.length > 0 ? 'absolute top-1 right-8 z-10' : 'absolute top-1 right-1 z-10'}
+        className={logs.length > 0 ? 'absolute right-9 top-3 z-10' : 'absolute right-3 top-3 z-10'}
         items={[
           {
             label: 'Download log',
@@ -323,7 +325,7 @@ export function Logs() {
         ]}
       />
       <Virtuoso
-        className="h-full bg-black font-mono text-sm overflow-y-scroll overflow-x-hidden relative"
+        className="h-full overflow-y-scroll overflow-x-hidden bg-transparent pr-2 font-mono text-sm"
         ref={virtuosoRef}
         initialTopMostItemIndex={logs.length - 1}
         data={logs}
@@ -373,14 +375,14 @@ export function Logs() {
           return (
             <div
               key={log.id}
-              className={clsx('flex sm:flex-row flex-col', {
+              className={clsx('rounded-lg px-2 py-1.5 transition sm:flex sm:flex-row', {
                 'text-yellow-300': log.type === 'stdinfo',
                 'text-red-300': log.type === 'stderr',
                 'text-blue-300': log.type === 'agent',
                 'text-yellow-200': log.type === 'build',
               })}
             >
-              <div className="flex-0 mr-2 text-yellow-900 whitespace-nowrap">{formatTimestamp(log.timestamp)}</div>
+              <div className="flex-0 mr-3 whitespace-nowrap text-slate-500">{formatTimestamp(log.timestamp)}</div>
               <div className="flex-1 break-words" style={{ wordBreak: 'break-word' }}>
                 {logLine}
               </div>
@@ -393,7 +395,7 @@ export function Logs() {
           onClick={() => virtuosoRef.current?.scrollToIndex({ index: logs.length - 1, behavior: 'smooth' })}
           color="secondary"
           size="small"
-          className="absolute right-6 bottom-2"
+          className="absolute bottom-4 right-6"
         >
           Scroll to latest
         </Button>

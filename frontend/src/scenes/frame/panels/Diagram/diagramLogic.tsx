@@ -24,6 +24,7 @@ import type { EdgeChange, NodeChange } from '@reactflow/core/dist/esm/types/chan
 import equal from 'fast-deep-equal'
 import type { diagramLogicType } from './diagramLogicType'
 import { subscriptions } from 'kea-subscriptions'
+import type { CSSProperties } from 'react'
 import {
   AppConfig,
   AppConfigField,
@@ -99,6 +100,24 @@ type ClipboardDiagramPayload = {
 const MAX_HISTORY_LENGTH = 100
 const HISTORY_DEBOUNCE_MS = 300
 const DELETE_HISTORY_DEBOUNCE_MS = 50
+const DEFAULT_NODE_STYLES: Record<string, CSSProperties> = {
+  app: { width: 300 },
+  source: { width: 300 },
+  dispatch: { width: 300 },
+  scene: { width: 300 },
+  event: { width: 300 },
+  state: { width: 300 },
+  code: { width: 300, height: 119 },
+}
+
+const renderNodeWithStyle = (node: DiagramNode): DiagramNode => {
+  const defaultStyle = node.type ? DEFAULT_NODE_STYLES[node.type] : undefined
+  return {
+    ...node,
+    dragHandle: '.frameos-node-title',
+    style: defaultStyle ? { ...defaultStyle, ...(node.style ?? {}) } : node.style,
+  }
+}
 
 const normalizeNodes = (nodes: DiagramNode[]): DiagramNode[] =>
   nodes.map((node) => {
@@ -574,10 +593,7 @@ export const diagramLogic = kea<diagramLogicType>([
       (nodes, edges, sceneApps, sceneId, originalFrame) => {
         const scene = originalFrame?.scenes?.find((s) => s.id === sceneId)
         return (
-          !equal(
-            deselectNodes(nodes),
-            scene?.nodes
-          ) ||
+          !equal(normalizeNodes(nodes), scene?.nodes) ||
           !equal(
             edges?.map((e) => (e.selected ? { ...e, selected: false } : e)),
             scene?.edges
@@ -586,10 +602,7 @@ export const diagramLogic = kea<diagramLogicType>([
         )
       },
     ],
-    nodesWithStyle: [
-      (s) => [s.nodes],
-      (nodes: DiagramNode[]): DiagramNode[] => nodes.map((node) => ({ ...node, dragHandle: '.frameos-node-title' })),
-    ],
+    nodesWithStyle: [(s) => [s.nodes], (nodes: DiagramNode[]): DiagramNode[] => nodes.map(renderNodeWithStyle)],
     sceneOptions: [
       (s) => [s.editingFrame],
       (frame): Option[] => [
@@ -669,7 +682,7 @@ export const diagramLogic = kea<diagramLogicType>([
             if (scene.id !== props.sceneId) {
               return scene
             }
-            const sceneNodes = deselectNodes(nodes)
+            const sceneNodes = normalizeNodes(nodes)
             const nodesChanged = !equal(scene.nodes, sceneNodes)
             const sceneAppsChanged = !equal(normalizeSceneApps(scene.apps), sceneApps)
             return nodesChanged || sceneAppsChanged
@@ -778,7 +791,7 @@ export const diagramLogic = kea<diagramLogicType>([
         scheduleHistorySnapshot(cache, actions, makeHistorySnapshot(values.nodes, values.rawEdges, values.sceneApps))
       },
       () => {
-        const sceneNodes = deselectNodes(values.nodes)
+        const sceneNodes = normalizeNodes(values.nodes)
         actions.setFrameFormValues({
           scenes: values.editingFrame.scenes?.map((scene) =>
             scene.id === props.sceneId && !equal(scene.nodes, sceneNodes)

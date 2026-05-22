@@ -63,6 +63,7 @@ const edgeTypes: Record<EdgeType, (props: EdgeProps) => JSX.Element> = {
 
 interface DiagramProps {
   sceneId: string
+  showToolbar?: boolean
 }
 
 interface ConnectingNode {
@@ -71,33 +72,16 @@ interface ConnectingNode {
   handleId: string | null
 }
 
-function Diagram_({ sceneId }: DiagramProps) {
-  const reactFlowWrapper = useRef<HTMLDivElement>(null)
-  const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null)
+export function DiagramToolbar({ sceneId }: { sceneId: string }) {
   const { frameId } = useValues(frameLogic)
-  const updateNodeInternals = useUpdateNodeInternals()
-  const diagramLogicProps: DiagramLogicProps = { frameId, sceneId, updateNodeInternals }
-  const { nodes, nodesWithStyle, edges, selectedNodeIds, fitViewCounter, isCompiledScene } = useValues(
-    diagramLogic(diagramLogicProps)
-  )
-  const {
-    onEdgesChange,
-    onNodesChange,
-    setNodes,
-    addEdge,
-    fitDiagramView,
-    keywordDropped,
-    rearrangeCurrentScene,
-    setCursorPosition,
-  } = useActions(diagramLogic(diagramLogicProps))
+  const diagramLogicProps: DiagramLogicProps = { frameId, sceneId }
+  const { fitDiagramView, rearrangeCurrentScene } = useActions(diagramLogic(diagramLogicProps))
   const { previewScene } = useActions(scenesLogic({ frameId }))
   const { setCurrentScene } = useActions(controlLogic({ frameId }))
   const { sceneChanging } = useValues(controlLogic({ frameId }))
   const { unsavedSceneIds, undeployedSceneIds, previewingSceneId, linkedActiveSceneId } = useValues(
     scenesLogic({ frameId })
   )
-  const { newNodePicker } = useValues(newNodePickerLogic(diagramLogicProps))
-  const { openNewNodePicker } = useActions(newNodePickerLogic(diagramLogicProps))
   const sceneHasChanges = unsavedSceneIds.has(sceneId) || undeployedSceneIds.has(sceneId)
   const isPreviewing = previewingSceneId === sceneId
   const isActiveScene = linkedActiveSceneId === sceneId
@@ -107,6 +91,66 @@ function Diagram_({ sceneId }: DiagramProps) {
     : sceneHasChanges
     ? 'Preview unsaved changes on the frame'
     : 'No unsaved changes to preview'
+
+  return (
+    <div className="flex items-center gap-2">
+      {sceneHasChanges ? (
+        <Button
+          size="tiny"
+          onClick={() => previewScene(sceneId)}
+          title={previewTitle}
+          color="secondary"
+          disabled={isPreviewing}
+        >
+          <EyeIcon className="w-5 h-5" />
+        </Button>
+      ) : (
+        <Button
+          size="tiny"
+          onClick={() => setCurrentScene(sceneId)}
+          title={isActiveScene ? 'This scene is already active' : 'Activate'}
+          color="primary"
+          disabled={isActiveScene || isActivatingScene}
+        >
+          {isActivatingScene ? (
+            <Spinner color="white" className="w-5 h-5 flex items-center justify-center" />
+          ) : (
+            <PlayIcon className="w-5 h-5" />
+          )}
+        </Button>
+      )}
+      <Button size="tiny" onClick={fitDiagramView} title="Fit to View" color="secondary">
+        <ZoomOutArea className="w-5 h-5" />
+      </Button>
+      <Button size="tiny" onClick={rearrangeCurrentScene} title="Realign nodes" color="secondary">
+        <ArrowsPointingInIcon className="w-5 h-5" />
+      </Button>
+      <Tooltip
+        tooltipColor="gray"
+        className={clsx(buttonSize('tiny'), buttonColor('secondary'))}
+        title={<SceneSettings sceneId={sceneId} />}
+      >
+        <AdjustmentsHorizontalIcon className="w-5 h-5" />
+      </Tooltip>
+      <SceneDropDown sceneId={sceneId} context="editDiagram" />
+    </div>
+  )
+}
+
+function Diagram_({ sceneId, showToolbar = true }: DiagramProps) {
+  const reactFlowWrapper = useRef<HTMLDivElement>(null)
+  const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null)
+  const { frameId } = useValues(frameLogic)
+  const updateNodeInternals = useUpdateNodeInternals()
+  const diagramLogicProps: DiagramLogicProps = { frameId, sceneId, updateNodeInternals }
+  const { nodes, nodesWithStyle, edges, selectedNodeIds, fitViewCounter, isCompiledScene } = useValues(
+    diagramLogic(diagramLogicProps)
+  )
+  const { onEdgesChange, onNodesChange, setNodes, addEdge, keywordDropped, setCursorPosition } = useActions(
+    diagramLogic(diagramLogicProps)
+  )
+  const { newNodePicker } = useValues(newNodePickerLogic(diagramLogicProps))
+  const { openNewNodePicker } = useActions(newNodePickerLogic(diagramLogicProps))
   const highlightedEdges = useMemo(() => {
     if (selectedNodeIds.length === 0) {
       return edges
@@ -307,47 +351,11 @@ function Diagram_({ sceneId }: DiagramProps) {
               <CompiledSceneTag />
             </div>
           ) : null}
-          <div className="absolute top-1 right-1 z-10 flex gap-2">
-            {sceneHasChanges ? (
-              <Button
-                size="tiny"
-                onClick={() => previewScene(sceneId)}
-                title={previewTitle}
-                color="secondary"
-                disabled={isPreviewing}
-              >
-                <EyeIcon className="w-5 h-5" />
-              </Button>
-            ) : (
-              <Button
-                size="tiny"
-                onClick={() => setCurrentScene(sceneId)}
-                title={isActiveScene ? 'This scene is already active' : 'Activate'}
-                color="primary"
-                disabled={isActiveScene || isActivatingScene}
-              >
-                {isActivatingScene ? (
-                  <Spinner color="white" className="w-5 h-5 flex items-center justify-center" />
-                ) : (
-                  <PlayIcon className="w-5 h-5" />
-                )}
-              </Button>
-            )}
-            <Button size="tiny" onClick={fitDiagramView} title="Fit to View" color="secondary">
-              <ZoomOutArea className="w-5 h-5" />
-            </Button>
-            <Button size="tiny" onClick={rearrangeCurrentScene} title="Realign nodes" color="secondary">
-              <ArrowsPointingInIcon className="w-5 h-5" />
-            </Button>
-            <Tooltip
-              tooltipColor="gray"
-              className={clsx(buttonSize('tiny'), buttonColor('secondary'))}
-              title={<SceneSettings sceneId={sceneId} />}
-            >
-              <AdjustmentsHorizontalIcon className="w-5 h-5" />
-            </Tooltip>
-            <SceneDropDown sceneId={sceneId} context="editDiagram" />
-          </div>
+          {showToolbar ? (
+            <div className="absolute top-1 right-1 z-10">
+              <DiagramToolbar sceneId={sceneId} />
+            </div>
+          ) : null}
         </ReactFlow>
       </div>
       {newNodePicker && <NewNodePicker />}
@@ -355,10 +363,10 @@ function Diagram_({ sceneId }: DiagramProps) {
   )
 }
 
-export function Diagram({ sceneId }: DiagramProps) {
+export function Diagram({ sceneId, showToolbar }: DiagramProps) {
   return (
     <ReactFlowProvider>
-      <Diagram_ sceneId={sceneId} />
+      <Diagram_ sceneId={sceneId} showToolbar={showToolbar} />
     </ReactFlowProvider>
   )
 }

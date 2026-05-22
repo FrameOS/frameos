@@ -1,7 +1,9 @@
 import { useActions, useValues } from 'kea'
+import clsx from 'clsx'
 import { frameLogic } from '../../frameLogic'
 import { assetsLogic } from './assetsLogic'
 import { panelsLogic } from '../panelsLogic'
+import { DocumentIcon, FolderIcon, FolderOpenIcon } from '@heroicons/react/24/outline'
 import {
   CloudArrowDownIcon,
   DocumentArrowUpIcon,
@@ -107,17 +109,27 @@ function TreeNode({
     return (
       <div className="ml-1">
         <div
-          className={
-            isDragOver ? 'flex items-center space-x-1 bg-blue-500/10 rounded px-1' : 'flex items-center space-x-1'
-          }
+          className={clsx(
+            'frame-tool-row mb-1 flex items-center gap-2 rounded-xl px-3 py-2 transition',
+            isDragOver && 'border-blue-400 bg-blue-500/10'
+          )}
           onDragOver={onDragOver}
           onDragLeave={onDragLeave}
           onDrop={onDropFiles}
         >
-          <span className="cursor-pointer" onClick={() => setExpanded(!expanded)}>
-            {expanded ? '📂' : '📁'} <span className="hover:underline text-blue-400">{node.name || '/'}</span>
-          </span>
-          <span className="text-xs text-gray-400"> ({Object.keys(node.children).length} items)</span>
+          <button
+            type="button"
+            className="flex min-w-0 flex-1 items-center gap-2 text-left"
+            onClick={() => setExpanded(!expanded)}
+          >
+            {expanded ? (
+              <FolderOpenIcon className="h-5 w-5 shrink-0 text-blue-400" />
+            ) : (
+              <FolderIcon className="h-5 w-5 shrink-0 text-blue-400" />
+            )}
+            <span className="truncate font-medium">{node.name || '/'}</span>
+            <span className="frame-tool-muted shrink-0 text-xs">{Object.keys(node.children).length} items</span>
+          </button>
           <DropdownMenu
             horizontal
             className="w-fit"
@@ -173,7 +185,7 @@ function TreeNode({
         </div>
         {expanded && (
           <div
-            className={isDragOver ? 'ml-2 border-l border-blue-500 pl-2' : 'ml-2 border-l border-gray-600 pl-2'}
+            className={clsx('ml-4 border-l pl-3', isDragOver ? 'border-blue-500' : 'border-slate-300/70')}
             onDragOver={onDragOver}
             onDragLeave={onDragLeave}
             onDrop={onDropFiles}
@@ -205,11 +217,10 @@ function TreeNode({
     const isUploading = node.mtime === -1
     return (
       <div
-        className={
-          isDragOver
-            ? 'ml-1 flex items-center space-x-2 bg-blue-500/10 rounded px-1'
-            : 'ml-1 flex items-center space-x-2'
-        }
+        className={clsx(
+          'frame-tool-row mb-1 ml-1 flex items-center gap-3 rounded-xl px-3 py-2 transition',
+          isDragOver && 'border-blue-400 bg-blue-500/10'
+        )}
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
         onDrop={onDropFiles}
@@ -229,8 +240,9 @@ function TreeNode({
               />
             </div>
           )}
+        {!isImage ? <DocumentIcon className="h-5 w-5 shrink-0 frame-tool-muted" /> : null}
         <div className="flex-1">
-          <span className="cursor-pointer hover:underline text-white" onClick={() => openAsset(node.path)}>
+          <span className="cursor-pointer font-medium hover:underline" onClick={() => openAsset(node.path)}>
             {node.name}
           </span>
         </div>
@@ -245,10 +257,13 @@ function TreeNode({
           </button>
         ) : null}
         {typeof node.size === 'number' && node.size >= 0 && (node.size > 0 || isUploading) ? (
-          <span className="text-xs text-gray-400">{humaniseSize(node.size)}</span>
+          <span className="frame-tool-muted text-xs">{humaniseSize(node.size)}</span>
         ) : null}
         {node.mtime && node.mtime > 0 && (
-          <span className="text-xs text-gray-500" title={new Date(node.mtime * 1000).toLocaleString()}>
+          <span
+            className="frame-tool-muted hidden text-xs md:inline"
+            title={new Date(node.mtime * 1000).toLocaleString()}
+          >
             {new Date(node.mtime * 1000).toLocaleString()}
           </span>
         )}
@@ -358,9 +373,9 @@ export function Assets(): JSX.Element {
   }, [])
 
   return (
-    <div className="space-y-2">
+    <div className="frame-tool-panel h-full overflow-y-auto pr-2">
       {!isInFrameAdminMode() ? (
-        <div className="float-right mt-[-8px]">
+        <div className="mb-3 flex justify-end">
           <DropdownMenu
             className="w-fit"
             buttonColor="secondary"
@@ -378,16 +393,14 @@ export function Assets(): JSX.Element {
         </div>
       ) : null}
       {assetsLoading && (!assetTree.children || Object.keys(assetTree.children).length === 0) ? (
-        <div>
-          <div className="float-right mr-2">
-            <Spinner />
-          </div>
-          <div>Loading assets...</div>
+        <div className="frame-tool-card flex h-44 items-center justify-center gap-2 rounded-[22px] text-sm frame-tool-muted">
+          <Spinner />
+          Loading assets...
         </div>
       ) : (
-        <div>
+        <div className="space-y-1">
           {assetsLoading ? (
-            <div className="float-right mr-2">
+            <div className="mb-2 flex justify-end">
               <Spinner />
             </div>
           ) : null}

@@ -1,4 +1,5 @@
 import { useActions, useValues } from 'kea'
+import clsx from 'clsx'
 import equal from 'fast-deep-equal'
 import { Button } from '../../../../components/Button'
 import { framesModel } from '../../../../models/framesModel'
@@ -9,13 +10,7 @@ import { frameAdminUrl, frameControlUrl, frameImageUrl, frameRootUrl, frameUrl }
 import { frameLogic } from '../../frameLogic'
 import { downloadJson } from '../../../../utils/downloadJson'
 import { Field } from '../../../../components/Field'
-import {
-  devices,
-  spectraPalettes,
-  withCustomPalette,
-  buildrootPlatforms,
-  modes,
-} from '../../../../devices'
+import { devices, spectraPalettes, withCustomPalette, buildrootPlatforms, modes } from '../../../../devices'
 import { secureToken } from '../../../../utils/secureToken'
 import { appsLogic } from '../Apps/appsLogic'
 import { frameSettingsLogic } from './frameSettingsLogic'
@@ -139,18 +134,12 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
   } = useActions(frameLogic)
   const { deleteFrame } = useActions(framesModel)
   const { appsWithSaveAssets } = useValues(appsLogic({ frameId }))
-  const {
-    clearBuildCache,
-    downloadBuildZip,
-    downloadCSourceZip,
-    downloadBinaryZip,
-  } = useActions(frameSettingsLogic({ frameId }))
-  const {
-    buildCacheLoading,
-    buildZipLoading,
-    cSourceZipLoading,
-    binaryZipLoading,
-  } = useValues(frameSettingsLogic({ frameId }))
+  const { clearBuildCache, downloadBuildZip, downloadCSourceZip, downloadBinaryZip } = useActions(
+    frameSettingsLogic({ frameId })
+  )
+  const { buildCacheLoading, buildZipLoading, cSourceZipLoading, binaryZipLoading } = useValues(
+    frameSettingsLogic({ frameId })
+  )
   const { openLogs } = useActions(panelsLogic({ frameId }))
   const { logs, ipAddresses } = useValues(logsLogic({ frameId }))
   const { savedSettings } = useValues(settingsLogic)
@@ -191,9 +180,12 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
   const imageUrl = frameImageUrl(linkFrame)
 
   return (
-    <div className={className} id="panel-settings-div">
+    <div
+      className={clsx('frame-tool-panel frame-settings-panel h-full overflow-y-auto pr-2', className)}
+      id="panel-settings-div"
+    >
       {!hideDropdown ? (
-        <div className="float-right">
+        <div className="sticky top-0 z-10 mb-3 flex justify-end">
           <DropdownMenu
             className="w-fit"
             buttonColor="secondary"
@@ -387,10 +379,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
               <Select name="mode" options={modes} disabled={inFrameAdminMode} />
             </Field>
           ) : null}
-          <Field
-            name="device"
-            label="Display driver"
-          >
+          <Field name="device" label="Display driver">
             <Select name="device" options={devices} />
           </Field>
           {frameForm.device === 'waveshare.EPD_10in3' ? (
@@ -693,8 +682,8 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                         connect to the backend to await further commands.
                       </p>
                       <p>
-                        Note: after enabling the agent, you must manually deploy it from the "..." -&gt; "Deploy
-                        Agent" menu in the top.
+                        Note: after enabling the agent, you must manually deploy it from the "..." -&gt; "Deploy Agent"
+                        menu in the top.
                       </p>
                     </div>
                   }

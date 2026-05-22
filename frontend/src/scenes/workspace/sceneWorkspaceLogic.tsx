@@ -26,8 +26,12 @@ export const sceneWorkspaceLogic = kea<sceneWorkspaceLogicType>([
 
     workspaceLogic.actions.setRouteSelection(frameId, sceneId)
 
-    if (frameId && sceneId) {
-      panelsLogic({ frameId }).actions.editScene(sceneId)
+    if (frameId) {
+      const panelsActions = panelsLogic({ frameId }).actions
+      if (sceneId) {
+        panelsActions.selectScene(sceneId)
+      }
+      panelsActions.updateUrl()
     }
   }),
 ])

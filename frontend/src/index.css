@@ -30,6 +30,202 @@ body {
     #eef0f7;
 }
 
+.frameos-homey-shell.frameos-theme-dark {
+  background: linear-gradient(135deg, rgba(26, 27, 32, 0.96), rgba(35, 37, 43, 0.95) 48%, rgba(22, 24, 29, 0.98)),
+    #1b1c22;
+  color: #e5e7eb;
+}
+
+.frameos-theme-dark .homey-panel,
+.frameos-theme-dark .homey-drawer {
+  background: rgba(29, 31, 37, 0.94);
+  border-color: rgba(255, 255, 255, 0.11);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.36);
+  color: #e5e7eb;
+}
+
+.frameos-theme-dark .homey-rail,
+.frameos-theme-dark .homey-divider {
+  border-color: rgba(255, 255, 255, 0.09);
+}
+
+.frameos-theme-dark .homey-card,
+.frameos-theme-dark .homey-inset,
+.frameos-theme-dark .homey-form-control,
+.frameos-theme-dark .homey-import-target {
+  background: rgba(38, 40, 47, 0.96);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: #f3f4f6;
+}
+
+.frameos-theme-dark .homey-card-media,
+.frameos-theme-dark .homey-empty {
+  background: rgba(22, 24, 29, 0.78);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.frameos-theme-dark .homey-strong,
+.frameos-theme-dark .homey-form-label {
+  color: #f8fafc;
+}
+
+.frameos-theme-dark .homey-muted,
+.frameos-theme-dark .homey-form-hint {
+  color: #aeb6c3;
+}
+
+.frameos-theme-dark .homey-input {
+  background: rgba(38, 40, 47, 0.94);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: #f3f4f6;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.2);
+}
+
+.frameos-theme-dark .homey-input::placeholder,
+.frameos-theme-dark .homey-form-control::placeholder {
+  color: #7d8593;
+}
+
+.frameos-theme-dark .homey-nav-button:not(.bg-blue-500),
+.frameos-theme-dark .homey-icon-button,
+.frameos-theme-dark .homey-secondary-button,
+.frameos-theme-dark .homey-segment:not(.bg-blue-500),
+.frameos-theme-dark .homey-icon-tile {
+  background: rgba(255, 255, 255, 0.04);
+  color: #aeb6c3;
+}
+
+.frameos-theme-dark .homey-nav-button:not(.bg-blue-500):hover,
+.frameos-theme-dark .homey-icon-button:hover,
+.frameos-theme-dark .homey-secondary-button:hover,
+.frameos-theme-dark .homey-segment:not(.bg-blue-500):hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #f8fafc;
+}
+
+.frameos-theme-dark .homey-link {
+  color: #8ab4ff;
+}
+
+.workspace-main {
+  padding-left: var(--workspace-main-offset);
+  transition: padding-left 0.2s ease;
+}
+
+@media (max-width: 1023px) {
+  .workspace-main {
+    padding-left: 1rem;
+  }
+}
+
+.frame-tool-panel {
+  --tool-bg: rgba(255, 255, 255, 0.72);
+  --tool-bg-strong: rgba(255, 255, 255, 0.9);
+  --tool-border: rgba(203, 213, 225, 0.72);
+  --tool-muted: #64748b;
+  --tool-strong: #0f172a;
+  --tool-control-bg: rgba(255, 255, 255, 0.84);
+  --tool-terminal-bg: rgba(15, 23, 42, 0.96);
+  --tool-terminal-border: rgba(15, 23, 42, 0.18);
+  color: var(--tool-strong);
+}
+
+.frameos-theme-dark .frame-tool-panel {
+  --tool-bg: rgba(38, 40, 47, 0.74);
+  --tool-bg-strong: rgba(29, 31, 37, 0.92);
+  --tool-border: rgba(255, 255, 255, 0.1);
+  --tool-muted: #aeb6c3;
+  --tool-strong: #f8fafc;
+  --tool-control-bg: rgba(22, 24, 29, 0.78);
+  --tool-terminal-bg: rgba(5, 8, 13, 0.92);
+  --tool-terminal-border: rgba(255, 255, 255, 0.1);
+}
+
+.frame-tool-card {
+  background: var(--tool-bg);
+  border: 1px solid var(--tool-border);
+  box-shadow: 0 18px 42px rgba(100, 116, 139, 0.16);
+  color: var(--tool-strong);
+}
+
+.frameos-theme-dark .frame-tool-card {
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.22);
+}
+
+.frame-tool-row {
+  background: var(--tool-bg);
+  border: 1px solid var(--tool-border);
+  color: var(--tool-strong);
+}
+
+.frame-tool-muted {
+  color: var(--tool-muted);
+}
+
+.frame-tool-terminal {
+  background: var(--tool-terminal-bg);
+  border: 1px solid var(--tool-terminal-border);
+  color: #dbeafe;
+}
+
+.frame-tool-panel input:not([type='checkbox']):not([type='radio']),
+.frame-tool-panel select,
+.frame-tool-panel textarea {
+  background: var(--tool-control-bg);
+  border-color: var(--tool-border);
+  color: var(--tool-strong);
+}
+
+.frame-tool-panel input::placeholder,
+.frame-tool-panel textarea::placeholder {
+  color: var(--tool-muted);
+}
+
+.frame-tool-panel h6,
+.frame-tool-panel .frame-tool-heading {
+  color: var(--tool-strong);
+  font-size: 0.9rem;
+  letter-spacing: 0;
+  line-height: 1.25rem;
+}
+
+.frame-settings-panel form > h6 {
+  border-top: 1px solid var(--tool-border);
+  margin-top: 1.5rem;
+  padding-top: 1.5rem;
+}
+
+.frame-settings-panel form > h6:first-child {
+  border-top: 0;
+  margin-top: 0;
+  padding-top: 0;
+}
+
+.frame-settings-panel form > h6 + div,
+.frame-settings-panel form > h6 + p + div {
+  background: var(--tool-bg);
+  border: 1px solid var(--tool-border);
+  border-radius: 22px;
+  margin-top: 0.75rem;
+  padding: 1rem;
+}
+
+.frame-settings-panel form > h6 + p {
+  color: var(--tool-muted);
+  margin-top: 0.5rem;
+}
+
+.frameos-homey-shell:not(.frameos-theme-dark) .frame-tool-panel:not(.frame-tool-terminal) .text-white,
+.frameos-homey-shell:not(.frameos-theme-dark) .frame-tool-panel:not(.frame-tool-terminal) .text-gray-200,
+.frameos-homey-shell:not(.frameos-theme-dark) .frame-tool-panel:not(.frame-tool-terminal) .text-gray-300 {
+  color: #334155;
+}
+
+.frameos-homey-shell:not(.frameos-theme-dark) .frame-tool-panel .text-gray-400,
+.frameos-homey-shell:not(.frameos-theme-dark) .frame-tool-panel .text-gray-500 {
+  color: #64748b;
+}
+
 @keyframes fadeInOut {
   0% {
     opacity: 0.2;
@@ -76,6 +272,12 @@ body {
 
 .react-flow .react-flow__node .frameos-node-title {
   cursor: grab;
+}
+
+.scene-editor-canvas .react-flow,
+.scene-editor-canvas .react-flow__renderer,
+.scene-editor-canvas .react-flow__pane {
+  background: transparent;
 }
 
 .frameos-node-zoom-label {

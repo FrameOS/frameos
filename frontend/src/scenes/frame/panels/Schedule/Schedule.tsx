@@ -1,5 +1,4 @@
 import { Form, Group } from 'kea-forms'
-import { H6 } from '../../../../components/H6'
 import { frameLogic } from '../../frameLogic'
 import { Field } from '../../../../components/Field'
 import { Button } from '../../../../components/Button'
@@ -65,7 +64,7 @@ function ViewRow({
 
   return (
     <>
-      <div className={clsx('flex justify-between items-start', (event.disabled || disabled) && 'line-through')}>
+      <div className={clsx('flex items-start justify-between', (event.disabled || disabled) && 'line-through')}>
         <div className="w-full py-1">
           {weekDays[String(event.weekday || 0)]} at {event.hour < 10 ? '0' : ''}
           {event.hour}:{event.minute < 10 ? '0' : ''}
@@ -99,14 +98,14 @@ function ViewRow({
         </div>
       </div>
       <div
-        className={showToggle ? 'font-bold cursor-pointer space-x-1' : 'font-bold space-x-2'}
+        className={showToggle ? 'cursor-pointer space-x-1 font-bold' : 'space-x-2 font-bold'}
         onClick={() => toggleDescription(event.id)}
       >
         <span>
           {scenesAsOptions.find((scene) => scene.value === event.payload.sceneId)?.label || 'Unspecified Scene'}
         </span>
         {showToggle ? (
-          <span className="text-xs font-normal text-gray-500">[{expandedDescription ? 'hide' : 'expand'}]</span>
+          <span className="frame-tool-muted text-xs font-normal">[{expandedDescription ? 'hide' : 'expand'}]</span>
         ) : null}
       </div>
       {(expandedDescription ? publicFields : modifiedFields).map((field) => (
@@ -114,7 +113,7 @@ function ViewRow({
           key={field.name}
           className="flex gap-1 @container w-full flex-col items-start @md:items-center @md:flex-row"
         >
-          <div className="@md:w-1/3 text-xs font-normal text-gray-500 mb-[-0.25rem] @md:mb-0">
+          <div className="@md:w-1/3 frame-tool-muted mb-[-0.25rem] text-xs font-normal @md:mb-0">
             {field.label || field.name}
           </div>
           <div className="@md:w-2/3">{event.payload.state[field.name] ?? field.value}</div>
@@ -219,9 +218,9 @@ export function Schedule() {
     scheduleLogic({ frameId })
   )
   return (
-    <div className="space-y-2">
+    <div className="frame-tool-panel h-full overflow-y-auto pr-2">
       <Form logic={frameLogic} formKey="frameForm" className="space-y-2">
-        <div className="flex w-full items-center justify-between">
+        <div className="frame-tool-card mb-4 flex w-full flex-wrap items-center justify-between gap-3 rounded-[22px] p-4">
           <Field name={['schedule', 'disabled']} className="w-full">
             {({ value, onChange }) => <Switch label="Enable schedule" value={!value} onChange={(v) => onChange(!v)} />}
           </Field>
@@ -238,7 +237,7 @@ export function Schedule() {
         {sortedEvents.map((event, index) => (
           <div
             className={clsx(
-              'bg-gray-900 p-2 space-y-2 @container',
+              'frame-tool-card @container space-y-2 rounded-[22px] p-4',
               !editingEvents[event.id] && (event.disabled || disabled) ? 'opacity-50' : ''
             )}
             key={event.id}
@@ -270,7 +269,7 @@ export function Schedule() {
           </div>
         ))}
       </Form>
-      <Button onClick={() => addEvent()} size="small" className="flex gap-1 items-center">
+      <Button onClick={() => addEvent()} size="small" className="mt-3 flex items-center gap-1">
         <PlusIcon className="w-5 h-5" />
         Add another entry
       </Button>
