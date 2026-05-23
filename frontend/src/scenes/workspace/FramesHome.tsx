@@ -22,7 +22,7 @@ import { FrameImage } from '../../components/FrameImage'
 import { frameHost, frameIsHealthy, frameIsStale, frameStatus } from '../../decorators/frame'
 import { urls } from '../../urls'
 import { FrameScene, FrameType } from '../../types'
-import { HomeyShell } from './HomeyShell'
+import { FrameosShell } from './FrameosShell'
 import { workspaceLogic } from './workspaceLogic'
 import type { OverviewFrameSection, WorkspaceUtilityPanel } from './workspaceLogic'
 import { NewFrame } from '../frames/NewFrame'
@@ -68,7 +68,7 @@ function SidebarStatusDots({ frame }: { frame: FrameType }): JSX.Element {
 }
 
 function FrameTree(): JSX.Element {
-  const { archivedFramesExpanded } = useValues(framesModel)
+  const { archivedFramesExpanded, framesLoading } = useValues(framesModel)
   const { toggleArchivedFramesExpanded } = useActions(framesModel)
   const {
     homeActiveFramesList: activeFramesList,
@@ -80,20 +80,31 @@ function FrameTree(): JSX.Element {
 
   return (
     <div className="space-y-5">
-      <FrameTreeGroup title="Active" frames={activeFramesList} selectedFrameId={selectedFrameId} onFocus={focusFrame} />
-      <FrameTreeGroup
-        title="Inactive"
-        frames={inactiveFramesList}
-        selectedFrameId={selectedFrameId}
-        onFocus={focusFrame}
-      />
+      {framesLoading && activeFramesList.length + inactiveFramesList.length + archivedFramesList.length === 0 ? (
+        <FrameTreeLoadingPlaceholder />
+      ) : (
+        <>
+          <FrameTreeGroup
+            title="Active"
+            frames={activeFramesList}
+            selectedFrameId={selectedFrameId}
+            onFocus={focusFrame}
+          />
+          <FrameTreeGroup
+            title="Inactive"
+            frames={inactiveFramesList}
+            selectedFrameId={selectedFrameId}
+            onFocus={focusFrame}
+          />
+        </>
+      )}
       {archivedFramesList.length > 0 ? (
         <div>
           <button
             type="button"
             onClick={toggleArchivedFramesExpanded}
             aria-expanded={archivedFramesExpanded}
-            className="homey-icon-button mb-2 flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            className="frameos-icon-button mb-2 flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
           >
             {archivedFramesExpanded ? (
               <ChevronDownIcon className="h-4 w-4" />
@@ -114,10 +125,8 @@ function FrameTree(): JSX.Element {
                   type="button"
                   onClick={() => focusFrame(frame.id)}
                   className={clsx(
-                    'homey-frame-row homey-frame-row-archived flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-                    selectedFrameId === frame.id
-                      ? 'homey-frame-row-selected bg-blue-50 text-blue-600'
-                      : 'text-slate-500 hover:bg-slate-100'
+                    'frameos-frame-row frameos-frame-row-archived flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+                    selectedFrameId === frame.id ? 'frameos-frame-row-selected' : 'text-slate-500 hover:bg-slate-100'
                   )}
                 >
                   <ComputerDesktopIcon className="h-5 w-5 shrink-0" />
@@ -129,6 +138,29 @@ function FrameTree(): JSX.Element {
           ) : null}
         </div>
       ) : null}
+    </div>
+  )
+}
+
+function FrameTreeLoadingPlaceholder(): JSX.Element {
+  return (
+    <div>
+      <div className="mb-2 px-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Loading</div>
+      <div className="space-y-1.5">
+        {[0, 1, 2, 3].map((index) => (
+          <div key={index} className="flex w-full items-center gap-1.5">
+            <div className="frameos-skeleton-surface flex min-w-0 flex-1 items-center gap-3 rounded-xl px-3 py-2.5">
+              <div className="frameos-skeleton-media h-5 w-5 shrink-0 animate-pulse rounded-md" />
+              <div className="min-w-0 flex-1 space-y-2">
+                <div className="frameos-skeleton-line h-3 w-28 max-w-full animate-pulse rounded-full" />
+                <div className="frameos-skeleton-line h-2 w-20 max-w-full animate-pulse rounded-full opacity-70" />
+              </div>
+              <div className="frameos-skeleton-line h-2.5 w-7 shrink-0 animate-pulse rounded-full" />
+            </div>
+            <div className="frameos-skeleton-surface h-10 w-10 shrink-0 animate-pulse rounded-xl" />
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
@@ -154,24 +186,32 @@ function FrameTreeGroup({
         {title} ({frames.length})
       </div>
       <div className="space-y-1">
-        {frames.map((frame) => (
-          <button
-            key={frame.id}
-            type="button"
-            onClick={() => onFocus(frame.id)}
-            className={clsx(
-              'homey-frame-row flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-              selectedFrameId === frame.id
-                ? 'homey-frame-row-selected bg-blue-50 text-blue-600'
-                : 'text-slate-700 hover:bg-slate-100'
-            )}
-          >
-            <ComputerDesktopIcon className="h-5 w-5 shrink-0" />
-            <span className="min-w-0 flex-1 truncate text-base font-medium">{frame.name || frameHost(frame)}</span>
-            <SidebarStatusDots frame={frame} />
-            <ChevronRightIcon className="h-4 w-4 shrink-0 text-slate-300" />
-          </button>
-        ))}
+        {frames.map((frame) => {
+          const frameName = frame.name || frameHost(frame)
+          return (
+            <div key={frame.id} className="flex w-full items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => onFocus(frame.id)}
+                className={clsx(
+                  'frameos-frame-row flex min-w-0 flex-1 items-center gap-3 rounded-xl px-3 py-2.5 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+                  selectedFrameId === frame.id ? 'frameos-frame-row-selected' : 'text-slate-700 hover:bg-slate-100'
+                )}
+              >
+                <ComputerDesktopIcon className="h-5 w-5 shrink-0" />
+                <span className="min-w-0 flex-1 truncate text-base font-medium">{frameName}</span>
+                <SidebarStatusDots frame={frame} />
+              </button>
+              <A
+                href={urls.frame(frame.id, 'overview')}
+                title={`Open ${frameName} overview`}
+                className="frameos-icon-button flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/55 text-slate-300 transition hover:bg-white hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+              >
+                <ChevronRightIcon className="h-4 w-4" />
+              </A>
+            </div>
+          )
+        })}
       </div>
     </div>
   )
@@ -190,13 +230,13 @@ function SceneTile({ frame, scene, active }: { frame: FrameType; scene: FrameSce
         openSceneControl(frame.id, scene.id)
       }}
       className={clsx(
-        'homey-card group flex min-h-36 w-full max-w-40 min-w-0 flex-col overflow-hidden rounded-2xl border bg-white text-left transition hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+        'frameos-card group flex min-h-36 w-full max-w-40 min-w-0 flex-col overflow-hidden rounded-2xl border bg-white text-left transition hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
         active
           ? `${activeSurfaceClassName} hover:shadow-[0_0_4px_4px_rgba(128,0,255,0.55)]`
           : 'border-white/90 shadow-lg shadow-slate-300/35 hover:shadow-xl hover:shadow-slate-300/50'
       )}
     >
-      <div className="homey-card-media relative flex min-h-0 flex-1 items-center justify-center bg-slate-100">
+      <div className="frameos-card-media relative flex min-h-0 flex-1 items-center justify-center bg-slate-100">
         <FrameImage
           frameId={frame.id}
           sceneId={scene.id}
@@ -210,15 +250,15 @@ function SceneTile({ frame, scene, active }: { frame: FrameType; scene: FrameSce
             Active
           </div>
         ) : null}
-        <div className="absolute right-2 top-2 rounded-full bg-white/90 p-1 text-slate-400 shadow-sm transition group-hover:text-blue-500">
+        <div className="frameos-primary-hover-text absolute right-2 top-2 rounded-full bg-white/90 p-1 text-slate-400 shadow-sm transition">
           <PlayIcon className="h-4 w-4" />
         </div>
       </div>
       <div className="w-full px-3 py-2">
-        <div className="homey-strong truncate text-sm font-semibold text-slate-900">
+        <div className="frameos-strong truncate text-sm font-semibold text-slate-900">
           {scene.name || 'Untitled scene'}
         </div>
-        <div className="homey-muted mt-0.5 truncate text-xs text-slate-500">
+        <div className="frameos-muted mt-0.5 truncate text-xs text-slate-500">
           {scene.nodes?.length ?? 0} nodes
           {fieldCount > 0 ? ` · ${fieldCount} controls` : ''}
         </div>
@@ -240,14 +280,14 @@ export function AddSceneTile({ frame, compact = false }: { frame: FrameType; com
         openTemplateDrawer(frame.id)
       }}
       className={clsx(
-        'homey-card group flex shrink-0 flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-slate-300 bg-white/55 text-center text-slate-500 shadow-sm transition hover:-translate-y-0.5 hover:bg-white/80 hover:text-blue-500 hover:shadow-lg hover:shadow-slate-300/35 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+        'frameos-primary-hover-text frameos-card group flex shrink-0 flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-slate-300 bg-white/55 text-center text-slate-500 shadow-sm transition hover:-translate-y-0.5 hover:bg-white/80 hover:shadow-lg hover:shadow-slate-300/35 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
         compact ? 'h-36 w-36' : 'min-h-36 w-full max-w-40 min-w-0'
       )}
     >
-      <span className="homey-icon-tile flex h-12 w-12 items-center justify-center rounded-full bg-white/80 text-slate-400 shadow-sm transition group-hover:text-blue-500">
+      <span className="frameos-primary-hover-text frameos-icon-tile flex h-12 w-12 items-center justify-center rounded-full bg-white/80 text-slate-400 shadow-sm transition">
         <PlusIcon className="h-7 w-7" />
       </span>
-      <span className="homey-strong text-sm font-semibold text-slate-700">Add scene</span>
+      <span className="frameos-strong text-sm font-semibold text-slate-700">Add scene</span>
     </button>
   )
 }
@@ -269,21 +309,21 @@ export function TemplateDrawer(): JSX.Element | null {
   const frameLogicProps = { frameId: frame.id }
 
   return (
-    <div className="homey-drawer fixed bottom-5 right-5 top-5 z-40 w-[430px] max-w-[calc(100vw-40px)] overflow-hidden rounded-[24px] border border-white/80 bg-white/95 shadow-2xl shadow-slate-500/30 backdrop-blur-xl">
+    <div className="frameos-drawer fixed bottom-5 right-5 top-5 z-40 w-[430px] max-w-[calc(100vw-40px)] overflow-hidden rounded-[24px] border border-white/80 bg-white/95 shadow-2xl shadow-slate-500/30 backdrop-blur-xl">
       <BindLogic logic={frameLogic} props={frameLogicProps}>
         <BindLogic logic={panelsLogic} props={frameLogicProps}>
           <div className="flex h-full flex-col">
-            <div className="homey-divider flex items-start justify-between gap-3 border-b border-slate-200/80 px-5 py-4">
+            <div className="frameos-divider flex items-start justify-between gap-3 border-b border-slate-200/80 px-5 py-4">
               <div className="min-w-0">
-                <div className="homey-muted text-xs font-semibold uppercase tracking-wide text-slate-400">
+                <div className="frameos-muted text-xs font-semibold uppercase tracking-wide text-slate-400">
                   {frame.name || frameHost(frame)}
                 </div>
-                <h2 className="homey-strong truncate text-xl font-bold tracking-normal text-slate-950">Add scene</h2>
+                <h2 className="frameos-strong truncate text-xl font-bold tracking-normal text-slate-950">Add scene</h2>
               </div>
               <button
                 type="button"
                 onClick={closeTemplateDrawer}
-                className="homey-icon-button flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                className="frameos-icon-button flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
               >
                 <XMarkIcon className="h-6 w-6" />
               </button>
@@ -312,20 +352,19 @@ function AddSceneDrawerActions({ frame }: { frame: FrameType }): JSX.Element {
           createBlankSceneAndSave(undefined, true)
           closeTemplateDrawer()
         }}
-        className="homey-card group flex items-center gap-3 rounded-2xl border border-white/90 bg-white/80 px-4 py-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:bg-white hover:shadow-lg hover:shadow-slate-300/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+        className="frameos-card group flex items-center gap-3 rounded-2xl border border-white/90 bg-white/80 px-4 py-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:bg-white hover:shadow-lg hover:shadow-slate-300/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
       >
-        <span className="homey-icon-tile flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition group-hover:bg-blue-50 group-hover:text-blue-500">
+        <span className="frameos-primary-hover-bg frameos-primary-hover-text frameos-icon-tile flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition">
           <PlusIcon className="h-6 w-6" />
         </span>
         <span className="min-w-0 flex-1">
-          <span className="homey-strong block truncate text-sm font-semibold text-slate-900">New blank scene</span>
-          <span className="homey-muted block truncate text-xs text-slate-500">Start with a render event</span>
+          <span className="frameos-strong block truncate text-sm font-semibold text-slate-900">New blank scene</span>
+          <span className="frameos-muted block truncate text-xs text-slate-500">Start with a render event</span>
         </span>
       </button>
       <button
         type="button"
         onClick={() => {
-          closeTemplateDrawer()
           openChatDrawer(frame.id, null)
         }}
         className="group flex items-center gap-3 rounded-2xl border border-blue-300/70 bg-gradient-to-br from-fuchsia-500 via-blue-500 to-cyan-400 px-4 py-3 text-left text-white shadow-lg shadow-blue-500/25 transition hover:-translate-y-0.5 hover:shadow-xl hover:shadow-blue-500/35 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
@@ -354,20 +393,20 @@ function CurrentSnapshotCard({ frame, active }: { frame: FrameType; active: bool
         openFrameTool(frame.id, 'preview')
       }}
       className={clsx(
-        'homey-card group flex w-80 max-w-full shrink-0 flex-col overflow-hidden rounded-[22px] border bg-white text-left transition hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+        'frameos-card group flex w-80 max-w-full shrink-0 flex-col overflow-hidden rounded-[22px] border bg-white text-left transition hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
         active
           ? `${activeSurfaceClassName} hover:shadow-[0_0_4px_4px_rgba(128,0,255,0.55)]`
           : 'border-white/90 shadow-xl shadow-slate-300/35 hover:shadow-2xl hover:shadow-slate-300/45'
       )}
     >
-      <div className="homey-card-media relative flex max-h-[19rem] min-h-0 items-center justify-center overflow-hidden bg-slate-100">
+      <div className="frameos-card-media relative flex max-h-[19rem] min-h-0 items-center justify-center overflow-hidden bg-slate-100">
         <FrameImage frameId={frame.id} refreshable={false} objectFit="contain" className="max-h-[19rem] w-full" />
-        <div className="absolute right-3 top-3 rounded-full bg-white/90 px-2.5 py-1 text-xs font-semibold text-slate-500 shadow-sm transition group-hover:text-blue-500">
+        <div className="frameos-primary-hover-text absolute right-3 top-3 rounded-full bg-white/90 px-2.5 py-1 text-xs font-semibold text-slate-500 shadow-sm transition">
           Open
         </div>
       </div>
       <div className="px-4 py-3">
-        <div className="homey-muted text-xs text-slate-500">
+        <div className="frameos-muted text-xs text-slate-500">
           Last rendered image from {frame.name || frameHost(frame)}
         </div>
       </div>
@@ -382,7 +421,7 @@ function FrameSectionToolLinks({ frame }: { frame: FrameType }): JSX.Element {
         <A
           key={panel}
           href={urls.frame(frame.id, panel)}
-          className="homey-secondary-button rounded-full bg-white/80 px-3 py-1.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          className="frameos-secondary-button rounded-full bg-white/80 px-3 py-1.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
         >
           {label}
         </A>
@@ -420,14 +459,14 @@ function FrameSection({ section }: { section: OverviewFrameSection }): JSX.Eleme
           href={urls.frame(frame.id, 'overview')}
           className="group flex min-w-0 items-center gap-3 rounded-2xl transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
         >
-          <div className="homey-icon-tile flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white/70 text-slate-700 shadow-sm">
+          <div className="frameos-icon-tile flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white/70 text-slate-700 shadow-sm">
             <ComputerDesktopIcon className="h-7 w-7" />
           </div>
           <div className="min-w-0">
             <div className="flex min-w-0 items-center gap-2">
               <h2
                 data-workspace-frame-title={frame.id}
-                className="homey-strong truncate text-2xl font-bold tracking-normal text-slate-950"
+                className="frameos-strong truncate text-2xl font-bold tracking-normal text-slate-950"
               >
                 {frame.name || frameHost(frame)}
               </h2>
@@ -441,7 +480,7 @@ function FrameSection({ section }: { section: OverviewFrameSection }): JSX.Eleme
                 <span title="FrameOS agent connected" className="h-2.5 w-2.5 rounded-full bg-blue-400" />
               ) : null}
             </div>
-            <div className="homey-muted truncate text-sm text-slate-500">{frameStatus(frame)}</div>
+            <div className="frameos-muted truncate text-sm text-slate-500">{frameStatus(frame)}</div>
           </div>
         </A>
         <div className="flex w-full shrink-0 flex-wrap items-center justify-start gap-2 @4xl:w-auto @4xl:justify-end">
@@ -449,7 +488,7 @@ function FrameSection({ section }: { section: OverviewFrameSection }): JSX.Eleme
           <DropdownMenu
             buttonColor="none"
             horizontal
-            className="homey-secondary-button flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/80 !px-0 !py-0 text-slate-700 shadow-sm transition hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            className="frameos-secondary-button flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/80 !px-0 !py-0 text-slate-700 shadow-sm transition hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
             items={[
               {
                 label: 'Rename',
@@ -488,7 +527,7 @@ function FrameSection({ section }: { section: OverviewFrameSection }): JSX.Eleme
             type="button"
             title="Open AI chat"
             onClick={() => openChatDrawer(frame.id, null)}
-            className="homey-ai-button flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-fuchsia-500 via-blue-500 to-cyan-400 text-white shadow-lg shadow-blue-500/25 transition hover:-translate-y-0.5 hover:shadow-xl hover:shadow-blue-500/35 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            className="frameos-ai-button flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-fuchsia-500 via-blue-500 to-cyan-400 text-white shadow-lg shadow-blue-500/25 transition hover:-translate-y-0.5 hover:shadow-xl hover:shadow-blue-500/35 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
           >
             <SparklesIcon className="h-5 w-5" />
           </button>
@@ -497,18 +536,18 @@ function FrameSection({ section }: { section: OverviewFrameSection }): JSX.Eleme
       <div className="flex flex-col items-start gap-5 @3xl:flex-row">
         <CurrentSnapshotCard frame={frame} active={!!currentSceneId} />
         {scenes.length > 0 ? (
-          <div className="homey-scene-grid w-full">
+          <div className="frameos-scene-grid w-full">
             {scenes.map((scene) => (
               <SceneTile key={scene.id} frame={frame} scene={scene} active={sceneIsActive(scene, currentSceneId)} />
             ))}
             <AddSceneTile frame={frame} />
           </div>
         ) : search.trim() && frameMatchesSearch ? (
-          <div className="homey-empty flex h-40 min-w-64 items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white/45 px-6 text-center text-sm font-medium text-slate-500">
+          <div className="frameos-empty flex h-40 min-w-64 items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white/45 px-6 text-center text-sm font-medium text-slate-500">
             Frame matched. No scenes match this search.
           </div>
         ) : (
-          <div className="homey-scene-grid w-full">
+          <div className="frameos-scene-grid w-full">
             <AddSceneTile frame={frame} />
           </div>
         )}
@@ -530,7 +569,7 @@ function FrameSectionGroup({
 
   return (
     <div className="space-y-8">
-      <div className="homey-muted flex items-center gap-3 text-sm font-semibold uppercase tracking-wide text-slate-500">
+      <div className="frameos-muted flex items-center gap-3 text-sm font-semibold uppercase tracking-wide text-slate-500">
         <span>{title}</span>
         <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-semibold text-slate-500">
           {sections.length}
@@ -562,21 +601,23 @@ export function SceneControlPanel(): JSX.Element | null {
   const frameLogicProps = { frameId: frame.id }
 
   return (
-    <div className="homey-drawer fixed bottom-5 right-5 top-5 z-40 w-[390px] max-w-[calc(100vw-40px)] overflow-hidden rounded-[24px] border border-white/80 bg-white/95 shadow-2xl shadow-slate-500/30 backdrop-blur-xl">
+    <div className="frameos-drawer fixed bottom-5 right-5 top-5 z-40 w-[390px] max-w-[calc(100vw-40px)] overflow-hidden rounded-[24px] border border-white/80 bg-white/95 shadow-2xl shadow-slate-500/30 backdrop-blur-xl">
       <BindLogic logic={frameLogic} props={frameLogicProps}>
         <BindLogic logic={panelsLogic} props={frameLogicProps}>
           <div className="flex h-full flex-col">
-            <div className="homey-divider flex items-start justify-between gap-3 border-b border-slate-200/80 px-5 py-4">
+            <div className="frameos-divider flex items-start justify-between gap-3 border-b border-slate-200/80 px-5 py-4">
               <div className="min-w-0">
-                <div className="homey-muted text-xs font-semibold uppercase tracking-wide text-slate-400">
+                <div className="frameos-muted text-xs font-semibold uppercase tracking-wide text-slate-400">
                   {frame.name || frameHost(frame)}
                 </div>
-                <h2 className="homey-strong truncate text-xl font-bold tracking-normal text-slate-950">{scene.name}</h2>
+                <h2 className="frameos-strong truncate text-xl font-bold tracking-normal text-slate-950">
+                  {scene.name}
+                </h2>
               </div>
               <button
                 type="button"
                 onClick={closeSceneControl}
-                className="homey-icon-button flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                className="frameos-icon-button flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
               >
                 <XMarkIcon className="h-6 w-6" />
               </button>
@@ -585,7 +626,7 @@ export function SceneControlPanel(): JSX.Element | null {
               <div className="mb-4 overflow-hidden rounded-2xl bg-slate-100">
                 <FrameImage frameId={frame.id} sceneId={scene.id} refreshable={false} className="max-h-52 w-full" />
               </div>
-              <div className="homey-inset rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2 text-slate-800">
+              <div className="frameos-inset rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2 text-slate-800">
                 <ExpandedScene frameId={frame.id} sceneId={scene.id} scene={scene} showEditButton={false} />
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
@@ -619,7 +660,7 @@ function DeleteInstalledSceneButton({ frame, scene }: { frame: FrameType; scene:
         deleteSceneAndSave(scene.id)
         closeSceneControl()
       }}
-      className="homey-secondary-button flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/80 text-red-500 shadow-sm transition hover:bg-red-50 hover:text-red-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
+      className="frameos-secondary-button flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/80 text-red-500 shadow-sm transition hover:bg-red-50 hover:text-red-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
       title="Delete scene"
     >
       <TrashIcon className="h-5 w-5" />
@@ -636,17 +677,57 @@ function AddFramePanel(): JSX.Element | null {
   }
 
   return (
-    <div className="homey-drawer fixed bottom-5 right-5 top-5 z-40 w-[390px] max-w-[calc(100vw-40px)] overflow-y-auto rounded-[24px] border border-white/80 bg-white/95 p-5 text-slate-900 shadow-2xl shadow-slate-500/30 backdrop-blur-xl">
+    <div className="frameos-drawer fixed bottom-5 right-5 top-5 z-40 w-[390px] max-w-[calc(100vw-40px)] overflow-y-auto rounded-[24px] border border-white/80 bg-white/95 p-5 text-slate-900 shadow-2xl shadow-slate-500/30 backdrop-blur-xl">
       <div className="mb-4 flex justify-end">
         <button
           type="button"
           onClick={hideForm}
-          className="homey-icon-button flex h-10 w-10 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          className="frameos-icon-button flex h-10 w-10 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
         >
           <XMarkIcon className="h-6 w-6" />
         </button>
       </div>
       <NewFrame />
+    </div>
+  )
+}
+
+function FramesLoadingPlaceholder(): JSX.Element {
+  return (
+    <div className="space-y-8 pb-12">
+      <div className="frameos-muted flex items-center gap-3 text-sm font-semibold uppercase tracking-wide text-slate-500">
+        <span>Loading frames</span>
+        <span className="frameos-skeleton-line h-5 w-10 animate-pulse rounded-full" />
+      </div>
+      {[0, 1, 2].map((index) => (
+        <section
+          key={index}
+          className="frameos-card overflow-hidden rounded-[24px] border border-white/80 bg-white/55 p-5 shadow-lg shadow-slate-300/25"
+        >
+          <div className="mb-5 flex items-center gap-3">
+            <div className="frameos-skeleton-media h-11 w-11 animate-pulse rounded-2xl" />
+            <div className="min-w-0 flex-1 space-y-2">
+              <div className="frameos-skeleton-line h-5 w-44 max-w-full animate-pulse rounded-full" />
+              <div className="frameos-skeleton-line h-3 w-64 max-w-full animate-pulse rounded-full opacity-75" />
+            </div>
+            <div className="frameos-skeleton-line h-9 w-24 animate-pulse rounded-full opacity-80" />
+          </div>
+          <div className="flex gap-4 overflow-hidden">
+            {[0, 1, 2, 3].map((tile) => (
+              <div
+                key={tile}
+                className="frameos-skeleton-surface h-36 w-36 shrink-0 overflow-hidden rounded-2xl shadow-sm"
+              >
+                <div className="frameos-skeleton-media h-24 animate-pulse" />
+                <div className="space-y-2 p-3">
+                  <div className="frameos-skeleton-line h-3 animate-pulse rounded-full" />
+                  <div className="frameos-skeleton-line h-3 w-2/3 animate-pulse rounded-full opacity-75" />
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      ))}
     </div>
   )
 }
@@ -660,13 +741,13 @@ export function FramesHome(): JSX.Element {
   const { formVisible } = useValues(newFrameForm)
   const { closeSceneControl, closeTemplateDrawer } = useActions(workspaceLogic)
   const { sceneControlSelection, templateDrawerFrameId } = useValues(workspaceLogic)
-  const { archivedFramesExpanded } = useValues(framesModel)
+  const { archivedFramesExpanded, framesLoading } = useValues(framesModel)
   const { toggleArchivedFramesExpanded } = useActions(framesModel)
   const hasFrameSections =
     overviewActiveFrameSections.length + overviewInactiveFrameSections.length + overviewArchivedFrameSections.length > 0
 
   return (
-    <HomeyShell
+    <FrameosShell
       mode="frames"
       title="Frames"
       tree={<FrameTree />}
@@ -697,7 +778,7 @@ export function FramesHome(): JSX.Element {
                   type="button"
                   onClick={toggleArchivedFramesExpanded}
                   aria-expanded={archivedFramesExpanded}
-                  className="homey-icon-button homey-muted flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left text-sm font-semibold uppercase tracking-wide text-slate-500 transition hover:bg-white/55 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                  className="frameos-icon-button frameos-muted flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left text-sm font-semibold uppercase tracking-wide text-slate-500 transition hover:bg-white/55 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
                 >
                   {archivedFramesExpanded ? (
                     <ChevronDownIcon className="h-5 w-5" />
@@ -718,6 +799,8 @@ export function FramesHome(): JSX.Element {
               </div>
             ) : null}
           </>
+        ) : framesLoading ? (
+          <FramesLoadingPlaceholder />
         ) : (
           <div className="flex h-[50vh] items-center justify-center rounded-[24px] border border-white/80 bg-white/55 text-slate-500 shadow-lg shadow-slate-300/25">
             <div className="text-center">
@@ -728,7 +811,7 @@ export function FramesHome(): JSX.Element {
           </div>
         )}
       </div>
-    </HomeyShell>
+    </FrameosShell>
   )
 }
 

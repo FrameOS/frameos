@@ -30,7 +30,89 @@ html[data-frameos-theme='dark'] body {
   background: #1b1c22;
 }
 
-.frameos-homey-shell {
+.frameos-app-shell,
+.frameos-auth-screen {
+  --frameos-primary: #4a4b8c;
+  --frameos-primary-hover: #484984;
+  --frameos-primary-soft: rgba(74, 75, 140, 0.12);
+  --frameos-primary-text: #4a4b8c;
+  --frameos-primary-ring: rgba(74, 75, 140, 0.42);
+  --frameos-primary-shadow: rgba(74, 75, 140, 0.28);
+}
+
+.frameos-app-shell.frameos-theme-dark,
+.frameos-auth-screen.frameos-theme-dark {
+  --frameos-primary-soft: rgba(74, 75, 140, 0.32);
+  --frameos-primary-text: #d8d5ff;
+  --frameos-primary-ring: rgba(132, 123, 207, 0.55);
+  --frameos-primary-shadow: rgba(74, 75, 140, 0.34);
+}
+
+.frameos-app-shell .frameos-primary-active,
+.frameos-auth-screen .frameos-primary-active,
+.frameos-app-shell .frameos-primary-action,
+.frameos-auth-screen .frameos-primary-action {
+  background: var(--frameos-primary);
+  color: #ffffff;
+  box-shadow: 0 12px 28px var(--frameos-primary-shadow);
+}
+
+.frameos-app-shell .frameos-primary-active:hover,
+.frameos-auth-screen .frameos-primary-active:hover,
+.frameos-app-shell .frameos-primary-action:hover,
+.frameos-auth-screen .frameos-primary-action:hover {
+  background: var(--frameos-primary-hover);
+}
+
+.frameos-app-shell .frameos-primary-soft-active,
+.frameos-auth-screen .frameos-primary-soft-active,
+.frameos-app-shell .frameos-frame-row-selected,
+.frameos-app-shell .frameos-frame-tool-row-selected {
+  background: var(--frameos-primary-soft);
+  color: var(--frameos-primary-text);
+}
+
+.frameos-app-shell .frameos-primary-text,
+.frameos-auth-screen .frameos-primary-text,
+.frameos-app-shell .frameos-link,
+.frameos-auth-screen .frameos-link {
+  color: var(--frameos-primary-text);
+}
+
+.frameos-app-shell .frameos-primary-fill,
+.frameos-auth-screen .frameos-primary-fill {
+  background: var(--frameos-primary);
+}
+
+.frameos-app-shell .frameos-primary-hover-text:hover,
+.frameos-auth-screen .frameos-primary-hover-text:hover,
+.frameos-app-shell .group:hover .frameos-primary-hover-text,
+.frameos-auth-screen .group:hover .frameos-primary-hover-text {
+  color: var(--frameos-primary-text);
+}
+
+.frameos-app-shell .group:hover .frameos-primary-hover-bg,
+.frameos-auth-screen .group:hover .frameos-primary-hover-bg {
+  background: var(--frameos-primary-soft);
+}
+
+.frameos-app-shell .focus-visible\:ring-blue-400:focus-visible,
+.frameos-auth-screen .focus-visible\:ring-blue-400:focus-visible,
+.frameos-app-shell .focus\:ring-blue-400:focus,
+.frameos-auth-screen .focus\:ring-blue-400:focus,
+.frameos-app-shell .focus\:ring-blue-500:focus,
+.frameos-auth-screen .focus\:ring-blue-500:focus {
+  --tw-ring-color: var(--frameos-primary-ring);
+}
+
+.frameos-app-shell .focus\:border-blue-400:focus,
+.frameos-auth-screen .focus\:border-blue-400:focus,
+.frameos-app-shell .focus\:border-blue-500:focus,
+.frameos-auth-screen .focus\:border-blue-500:focus {
+  border-color: var(--frameos-primary);
+}
+
+.frameos-app-shell {
   background: linear-gradient(
       135deg,
       rgba(255, 255, 255, 0.68),
@@ -40,139 +122,201 @@ html[data-frameos-theme='dark'] body {
     #eef0f7;
 }
 
-.frameos-homey-shell.frameos-theme-dark {
+.frameos-app-shell.frameos-theme-dark {
   background: linear-gradient(135deg, rgba(26, 27, 32, 0.96), rgba(35, 37, 43, 0.95) 48%, rgba(22, 24, 29, 0.98)),
     #1b1c22;
   color: #e5e7eb;
 }
 
-.frameos-theme-dark .homey-panel,
-.frameos-theme-dark .homey-drawer {
+.frameos-theme-dark .frameos-panel,
+.frameos-theme-dark .frameos-drawer {
   background: rgba(29, 31, 37, 0.94);
   border-color: rgba(255, 255, 255, 0.11);
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.36);
   color: #e5e7eb;
 }
 
-.frameos-theme-dark .homey-rail,
-.frameos-theme-dark .homey-divider {
+.frameos-theme-dark .frameos-rail,
+.frameos-theme-dark .frameos-divider {
   border-color: rgba(255, 255, 255, 0.09);
 }
 
-.frameos-theme-dark .homey-card,
-.frameos-theme-dark .homey-inset,
-.frameos-theme-dark .homey-form-control,
-.frameos-theme-dark .homey-import-target {
+.frameos-theme-dark .frameos-card,
+.frameos-theme-dark .frameos-inset,
+.frameos-theme-dark .frameos-form-control,
+.frameos-theme-dark .frameos-import-target {
   background: rgba(38, 40, 47, 0.96);
   border-color: rgba(255, 255, 255, 0.1);
   color: #f3f4f6;
 }
 
-.frameos-theme-dark .homey-card-media,
-.frameos-theme-dark .homey-empty {
+.frameos-theme-dark .frameos-card-media,
+.frameos-theme-dark .frameos-empty {
   background: rgba(22, 24, 29, 0.78);
   border-color: rgba(255, 255, 255, 0.1);
 }
 
-.frameos-theme-dark .homey-strong,
-.frameos-theme-dark .homey-form-label {
+.frameos-skeleton-line {
+  background: rgba(203, 213, 225, 0.72);
+}
+
+.frameos-skeleton-surface {
+  background: rgba(255, 255, 255, 0.68);
+}
+
+.frameos-skeleton-media {
+  background: rgba(203, 213, 225, 0.74);
+}
+
+.frameos-theme-dark .frameos-skeleton-line {
+  background: rgba(100, 116, 139, 0.42);
+}
+
+.frameos-theme-dark .frameos-skeleton-surface {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.frameos-theme-dark .frameos-skeleton-media {
+  background: rgba(100, 116, 139, 0.34);
+}
+
+.frameos-theme-dark .frameos-strong,
+.frameos-theme-dark .frameos-form-label {
   color: #f8fafc;
 }
 
-.frameos-theme-dark .homey-muted,
-.frameos-theme-dark .homey-form-hint {
+.frameos-theme-dark .frameos-muted,
+.frameos-theme-dark .frameos-form-hint {
   color: #aeb6c3;
 }
 
-.frameos-theme-dark .homey-input {
+.frameos-theme-dark .frameos-input {
   background: rgba(38, 40, 47, 0.94);
   border-color: rgba(255, 255, 255, 0.1);
   color: #f3f4f6;
   box-shadow: 0 16px 36px rgba(0, 0, 0, 0.2);
 }
 
-.frameos-theme-dark .homey-input::placeholder,
-.frameos-theme-dark .homey-form-control::placeholder {
+.frameos-theme-dark .frameos-input::placeholder,
+.frameos-theme-dark .frameos-form-control::placeholder {
   color: #7d8593;
 }
 
-.frameos-theme-dark .homey-nav-button:not(.bg-blue-500),
-.frameos-theme-dark .homey-icon-button,
-.frameos-theme-dark .homey-secondary-button,
-.frameos-theme-dark .homey-segment:not(.bg-blue-500),
-.frameos-theme-dark .homey-icon-tile {
+.frameos-theme-dark .frameos-nav-button:not(.frameos-primary-active),
+.frameos-theme-dark .frameos-icon-button,
+.frameos-theme-dark .frameos-secondary-button,
+.frameos-theme-dark .frameos-segment:not(.frameos-primary-active),
+.frameos-theme-dark .frameos-icon-tile {
   background: rgba(255, 255, 255, 0.04);
   color: #aeb6c3;
 }
 
-.frameos-theme-dark .homey-nav-button:not(.bg-blue-500):hover,
-.frameos-theme-dark .homey-icon-button:hover,
-.frameos-theme-dark .homey-secondary-button:hover,
-.frameos-theme-dark .homey-segment:not(.bg-blue-500):hover {
+.frameos-theme-dark .frameos-nav-button:not(.frameos-primary-active):hover,
+.frameos-theme-dark .frameos-icon-button:hover,
+.frameos-theme-dark .frameos-secondary-button:hover,
+.frameos-theme-dark .frameos-segment:not(.frameos-primary-active):hover {
   background: rgba(255, 255, 255, 0.08);
   color: #f8fafc;
 }
 
-.frameos-theme-dark .homey-segment-group {
+.frameos-theme-dark .frameos-segment-group {
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
-.frameos-theme-dark .homey-frame-row {
+.frameos-theme-dark .frameos-frame-row {
   color: #e5e7eb;
 }
 
-.frameos-theme-dark .homey-frame-row:hover {
+.frameos-theme-dark .frameos-frame-row:hover {
   background: rgba(255, 255, 255, 0.08);
   color: #f8fafc;
 }
 
-.frameos-theme-dark .homey-frame-row-archived {
+.frameos-theme-dark .frameos-frame-row-archived {
   color: #8f99a8;
 }
 
-.frameos-theme-dark .homey-frame-row-selected {
-  background: rgba(59, 130, 246, 0.16);
-  color: #93c5fd;
+.frameos-theme-dark .frameos-frame-row-selected {
+  background: var(--frameos-primary-soft);
+  color: var(--frameos-primary-text);
 }
 
-.frameos-theme-dark .homey-frame-tool-row {
+.frameos-theme-dark .frameos-frame-tool-row {
   color: #e5e7eb;
 }
 
-.frameos-theme-dark .homey-frame-tool-row:hover {
+.frameos-theme-dark .frameos-frame-tool-row:hover {
   background: rgba(255, 255, 255, 0.08);
   color: #f8fafc;
 }
 
-.frameos-theme-dark .homey-frame-tool-row .homey-frame-tool-icon {
+.frameos-theme-dark .frameos-frame-tool-row .frameos-frame-tool-icon {
   background: rgba(255, 255, 255, 0.05);
   color: #aeb6c3;
 }
 
-.frameos-theme-dark .homey-frame-tool-row .homey-frame-tool-description {
+.frameos-theme-dark .frameos-frame-tool-row .frameos-frame-tool-description {
   color: #8f99a8;
 }
 
-.frameos-theme-dark .homey-frame-tool-row-selected {
-  background: rgba(59, 130, 246, 0.16);
-  color: #bfdbfe;
+.frameos-theme-dark .frameos-frame-tool-row-selected {
+  background: var(--frameos-primary-soft);
+  color: var(--frameos-primary-text);
 }
 
-.frameos-theme-dark .homey-frame-tool-row-selected .homey-frame-tool-icon {
+.frameos-theme-dark .frameos-frame-tool-row-selected .frameos-frame-tool-icon {
   background: rgba(255, 255, 255, 0.1);
-  color: #dbeafe;
+  color: #f8fafc;
 }
 
-.frameos-theme-dark .homey-frame-tool-row-selected .homey-frame-tool-description {
-  color: #93c5fd;
+.frameos-theme-dark .frameos-frame-tool-row-selected .frameos-frame-tool-description {
+  color: #c9c4ff;
 }
 
-.frameos-theme-dark .homey-link {
-  color: #8ab4ff;
+.frameos-auth-screen .auth-field label {
+  color: #334155;
 }
 
-.homey-scene-grid {
+.frameos-auth-screen .auth-input {
+  height: 3rem !important;
+  border: 1px solid rgba(148, 163, 184, 0.55) !important;
+  border-radius: 1rem !important;
+  background: rgba(255, 255, 255, 0.9) !important;
+  color: #0f172a !important;
+  padding: 0.75rem 1rem !important;
+  font-size: 1rem !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06) !important;
+}
+
+.frameos-auth-screen .auth-input::placeholder {
+  color: #94a3b8 !important;
+}
+
+.frameos-auth-screen.frameos-theme-dark .auth-field label {
+  color: #f8fafc;
+}
+
+.frameos-auth-screen.frameos-theme-dark .auth-input {
+  background: rgba(38, 40, 47, 0.94) !important;
+  border-color: rgba(148, 163, 184, 0.34) !important;
+  color: #f3f4f6 !important;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.2) !important;
+}
+
+.frameos-auth-screen.frameos-theme-dark .auth-input::placeholder {
+  color: #7d8593 !important;
+}
+
+.frameos-auth-screen .auth-button {
+  border: 1px solid rgba(15, 23, 42, 0.12);
+}
+
+.frameos-auth-screen.frameos-theme-dark .auth-button {
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+.frameos-scene-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 8rem), 1fr));
   justify-items: start;
@@ -180,7 +324,7 @@ html[data-frameos-theme='dark'] body {
 }
 
 @media (min-width: 640px) {
-  .homey-scene-grid {
+  .frameos-scene-grid {
     gap: 1rem;
   }
 }
@@ -258,6 +402,7 @@ html[data-frameos-theme='dark'] body {
 .frame-tool-panel select,
 .frame-tool-panel textarea {
   background: var(--tool-control-bg);
+  border-width: 1px;
   border-color: var(--tool-border);
   color: var(--tool-strong);
 }
@@ -273,6 +418,64 @@ html[data-frameos-theme='dark'] body {
   font-size: 0.9rem;
   letter-spacing: 0;
   line-height: 1.25rem;
+}
+
+.frame-tool-panel label {
+  color: var(--tool-strong);
+}
+
+.frame-tool-panel .frameos-tooltip-button {
+  color: var(--tool-muted);
+}
+
+.frame-tool-panel .frameos-tooltip-button:hover {
+  color: var(--tool-strong);
+}
+
+.frame-tool-panel .secret-field-reveal {
+  min-height: 2.25rem;
+  background: var(--tool-control-bg);
+  border: 1px solid var(--tool-border);
+  border-radius: 0.5rem;
+  color: var(--tool-muted);
+}
+
+.frame-tool-panel .frameos-switch-track {
+  background: rgba(226, 232, 240, 0.9);
+  border: 1px solid rgba(148, 163, 184, 0.48);
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.08);
+  transition: background-color 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.frame-tool-panel .frameos-switch-track-on {
+  background: var(--frameos-primary, #4a4b8c);
+  border-color: var(--frameos-primary, #4a4b8c);
+  box-shadow: 0 8px 18px rgba(74, 75, 140, 0.25);
+}
+
+.frame-tool-panel .frameos-switch-thumb {
+  background: #ffffff;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.28);
+}
+
+.frame-tool-panel .frameos-switch-label {
+  color: var(--tool-strong);
+}
+
+.frameos-theme-dark .frame-tool-panel .frameos-switch-track {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.16);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.26);
+}
+
+.frameos-theme-dark .frame-tool-panel .frameos-switch-track-on {
+  background: var(--frameos-primary, #4a4b8c);
+  border-color: var(--frameos-primary, #4a4b8c);
+  box-shadow: 0 8px 18px rgba(74, 75, 140, 0.28);
+}
+
+.frameos-theme-dark .frame-tool-panel .frameos-switch-thumb {
+  background: #f8fafc;
 }
 
 .frame-settings-panel form > h6 {
@@ -301,14 +504,40 @@ html[data-frameos-theme='dark'] body {
   margin-top: 0.5rem;
 }
 
-.frameos-homey-shell:not(.frameos-theme-dark) .frame-tool-panel:not(.frame-tool-terminal) .text-white,
-.frameos-homey-shell:not(.frameos-theme-dark) .frame-tool-panel:not(.frame-tool-terminal) .text-gray-200,
-.frameos-homey-shell:not(.frameos-theme-dark) .frame-tool-panel:not(.frame-tool-terminal) .text-gray-300 {
+.frame-settings-panel .bg-gray-800 {
+  background: var(--tool-bg);
+}
+
+.frame-settings-panel .border-gray-700,
+.frame-settings-panel .border-white\/10 {
+  border-color: var(--tool-border);
+}
+
+.frame-settings-panel .shadow {
+  box-shadow: 0 12px 30px rgba(100, 116, 139, 0.14);
+}
+
+.frameos-theme-dark .frame-settings-panel .shadow {
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.18);
+}
+
+.frame-settings-panel .text-gray-200,
+.frame-settings-panel .text-gray-300 {
+  color: var(--tool-strong);
+}
+
+.frame-settings-panel .text-gray-400,
+.frame-settings-panel .text-gray-500 {
+  color: var(--tool-muted);
+}
+
+.frameos-app-shell:not(.frameos-theme-dark) .frame-tool-panel:not(.frame-tool-terminal) .text-gray-200,
+.frameos-app-shell:not(.frameos-theme-dark) .frame-tool-panel:not(.frame-tool-terminal) .text-gray-300 {
   color: #334155;
 }
 
-.frameos-homey-shell:not(.frameos-theme-dark) .frame-tool-panel .text-gray-400,
-.frameos-homey-shell:not(.frameos-theme-dark) .frame-tool-panel .text-gray-500 {
+.frameos-app-shell:not(.frameos-theme-dark) .frame-tool-panel .text-gray-400,
+.frameos-app-shell:not(.frameos-theme-dark) .frame-tool-panel .text-gray-500 {
   color: #64748b;
 }
 

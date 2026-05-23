@@ -111,7 +111,7 @@ function TreeNode({
         <div
           className={clsx(
             'frame-tool-row mb-1 flex items-center gap-2 rounded-xl px-3 py-2 transition',
-            isDragOver && 'border-blue-400 bg-blue-500/10'
+            isDragOver && 'border-[#4a4b8c] bg-[#4a4b8c]/10'
           )}
           onDragOver={onDragOver}
           onDragLeave={onDragLeave}
@@ -185,7 +185,7 @@ function TreeNode({
         </div>
         {expanded && (
           <div
-            className={clsx('ml-4 border-l pl-3', isDragOver ? 'border-blue-500' : 'border-slate-300/70')}
+            className={clsx('ml-4 border-l pl-3', isDragOver ? 'border-[#4a4b8c]' : 'border-slate-300/70')}
             onDragOver={onDragOver}
             onDragLeave={onDragLeave}
             onDrop={onDropFiles}
@@ -219,7 +219,7 @@ function TreeNode({
       <div
         className={clsx(
           'frame-tool-row mb-1 ml-1 flex items-center gap-3 rounded-xl px-3 py-2 transition',
-          isDragOver && 'border-blue-400 bg-blue-500/10'
+          isDragOver && 'border-[#4a4b8c] bg-[#4a4b8c]/10'
         )}
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
@@ -326,7 +326,11 @@ function TreeNode({
   }
 }
 
-export function Assets(): JSX.Element {
+interface AssetsProps {
+  scrollContainer?: boolean
+}
+
+export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Element {
   const { frame, frameForm } = useValues(frameLogic)
   const { sendEvent } = useActions(frameLogic)
   const { openLogs } = useActions(panelsLogic)
@@ -373,7 +377,7 @@ export function Assets(): JSX.Element {
   }, [])
 
   return (
-    <div className="frame-tool-panel h-full overflow-y-auto pr-2">
+    <div className={clsx('frame-tool-panel', scrollContainer ? 'h-full overflow-y-auto pr-2' : 'overflow-visible')}>
       {!isInFrameAdminMode() ? (
         <div className="mb-3 flex justify-end">
           <DropdownMenu

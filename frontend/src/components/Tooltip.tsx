@@ -36,7 +36,7 @@ export function Tooltip({
           <Popover.Button
             ref={setReferenceElement}
             className={clsx(
-              'block justify-center text-sm font-medium text-white rounded-md focus:outline-none shadow-sm',
+              'frameos-tooltip-button block justify-center rounded-md text-sm font-medium text-white shadow-sm focus:outline-none',
               className
             )}
           >

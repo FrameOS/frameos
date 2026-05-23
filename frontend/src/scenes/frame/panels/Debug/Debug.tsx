@@ -1,5 +1,6 @@
 import * as ReactJsonImport from '@microlink/react-json-view'
 import { useActions, useValues } from 'kea'
+import clsx from 'clsx'
 import { frameLogic } from '../../frameLogic'
 import { workspaceLogic } from '../../../workspace/workspaceLogic'
 
@@ -10,7 +11,11 @@ const ReactJsonComponent: any =
   (typeof reactJsonModule?.default?.default === 'function' && reactJsonModule.default.default) ||
   null
 
-export function Debug() {
+interface DebugProps {
+  scrollContainer?: boolean
+}
+
+export function Debug({ scrollContainer = true }: DebugProps = {}) {
   const { frameForm } = useValues(frameLogic)
   const { theme } = useValues(workspaceLogic)
   const { setFrameFormValue } = useActions(frameLogic)
@@ -27,7 +32,12 @@ export function Debug() {
   }
 
   return (
-    <div className="frame-tool-panel frame-tool-card h-full overflow-auto rounded-[22px] p-4">
+    <div
+      className={clsx(
+        'frame-tool-panel frame-tool-card rounded-[22px] p-4',
+        scrollContainer ? 'h-full overflow-auto' : 'overflow-visible'
+      )}
+    >
       <ReactJsonComponent
         src={frameForm}
         collapsed={2}

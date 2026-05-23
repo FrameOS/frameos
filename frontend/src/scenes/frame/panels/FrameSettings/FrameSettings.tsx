@@ -38,6 +38,7 @@ export interface FrameSettingsProps {
   className?: string
   hideDropdown?: boolean
   hideDeploymentMode?: boolean
+  scrollContainer?: boolean
 }
 
 function getCertificateHint(certificateName: string, value?: string): JSX.Element | undefined {
@@ -122,7 +123,12 @@ function scrollToFrameHttpApiSection(e: React.MouseEvent): void {
   }
 }
 
-export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: FrameSettingsProps) {
+export function FrameSettings({
+  className,
+  hideDropdown,
+  hideDeploymentMode,
+  scrollContainer = true,
+}: FrameSettingsProps) {
   const { mode, frameId, frame, frameForm, frameFormTouches } = useValues(frameLogic)
   const {
     touchFrameFormField,
@@ -181,7 +187,11 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
 
   return (
     <div
-      className={clsx('frame-tool-panel frame-settings-panel h-full overflow-y-auto pr-2', className)}
+      className={clsx(
+        'frame-tool-panel frame-settings-panel',
+        scrollContainer ? 'h-full overflow-y-auto pr-2' : 'overflow-visible',
+        className
+      )}
       id="panel-settings-div"
     >
       {!hideDropdown ? (

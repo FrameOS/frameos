@@ -35,8 +35,8 @@ function ModeButton({
       type="button"
       onClick={onClick}
       className={clsx(
-        'homey-segment flex min-h-10 flex-1 items-center justify-center rounded-xl px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-        active ? 'bg-blue-500 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+        'frameos-segment flex min-h-10 flex-1 items-center justify-center rounded-xl px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+        active ? 'frameos-primary-active text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
       )}
     >
       {children}
@@ -58,20 +58,20 @@ function FormField({
   const resolvedError = errorText(error)
   return (
     <label className="block space-y-2">
-      <span className="homey-form-label block text-sm font-semibold text-slate-700">{label}</span>
+      <span className="frameos-form-label block text-sm font-semibold text-slate-700">{label}</span>
       {children}
-      {hint ? <span className="homey-form-hint block text-xs leading-relaxed text-slate-500">{hint}</span> : null}
+      {hint ? <span className="frameos-form-hint block text-xs leading-relaxed text-slate-500">{hint}</span> : null}
       {resolvedError ? <span className="block text-xs font-semibold text-red-500">{resolvedError}</span> : null}
     </label>
   )
 }
 
 function textInputClassName(): string {
-  return 'homey-form-control h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-400/30'
+  return 'frameos-form-control h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-400/30'
 }
 
 function selectClassName(): string {
-  return 'homey-form-control h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-400/30'
+  return 'frameos-form-control h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-400/30'
 }
 
 function setModeValues(mode: NewFrameFormType['mode']): Partial<NewFrameFormType> {
@@ -97,13 +97,13 @@ export function NewFrame(): JSX.Element {
   }
 
   return (
-    <div className="homey-form-surface space-y-5 text-slate-900">
+    <div className="frameos-form-surface space-y-5 text-slate-900">
       <div>
-        <div className="homey-muted text-xs font-semibold uppercase tracking-wide text-slate-400">FrameOS</div>
-        <h2 className="homey-strong mt-1 text-2xl font-bold tracking-normal text-slate-950">Add frame</h2>
+        <div className="frameos-muted text-xs font-semibold uppercase tracking-wide text-slate-400">FrameOS</div>
+        <h2 className="frameos-strong mt-1 text-2xl font-bold tracking-normal text-slate-950">Add frame</h2>
       </div>
 
-      <div className="homey-segment-group flex rounded-2xl bg-slate-100 p-1">
+      <div className="frameos-segment-group flex rounded-2xl bg-slate-100 p-1">
         <ModeButton active={mode === 'rpios'} onClick={() => setNewFrameValues(setModeValues('rpios'))}>
           <span className="inline-flex items-center gap-2">
             <CpuChipIcon className="h-4 w-4" />
@@ -126,7 +126,7 @@ export function NewFrame(): JSX.Element {
 
       {mode === 'rpios' ? (
         <Form logic={newFrameForm} formKey="newFrame" className="space-y-4" enableFormOnSubmit>
-          <p className="homey-form-hint text-sm leading-relaxed text-slate-500">
+          <p className="frameos-form-hint text-sm leading-relaxed text-slate-500">
             Enter the credentials for a running Raspberry Pi OS Lite machine. FrameOS will deploy over SSH.
           </p>
           <FormField label="Name" error={newFrameErrors.name}>
@@ -142,7 +142,7 @@ export function NewFrame(): JSX.Element {
             label={
               <>
                 SSH connection string{' '}
-                <A href={urls.settings()} className="homey-link text-blue-500 hover:underline">
+                <A href={urls.settings()} className="frameos-link hover:underline">
                   setup keys
                 </A>
               </>
@@ -192,14 +192,14 @@ export function NewFrame(): JSX.Element {
           <div className="flex gap-2 pt-2">
             <button
               type="submit"
-              className="flex h-11 flex-1 items-center justify-center rounded-full bg-blue-500 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+              className="frameos-primary-action flex h-11 flex-1 items-center justify-center rounded-full px-4 text-sm font-semibold text-white shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
             >
               Add frame
             </button>
             <button
               type="button"
               onClick={cancel}
-              className="homey-secondary-button h-11 rounded-full bg-slate-100 px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+              className="frameos-secondary-button h-11 rounded-full bg-slate-100 px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
             >
               Cancel
             </button>
@@ -207,7 +207,7 @@ export function NewFrame(): JSX.Element {
         </Form>
       ) : mode === 'buildroot' ? (
         <Form logic={newFrameForm} formKey="newFrame" className="space-y-4" enableFormOnSubmit>
-          <p className="homey-form-hint text-sm leading-relaxed text-slate-500">
+          <p className="frameos-form-hint text-sm leading-relaxed text-slate-500">
             Buildroot bundles FrameOS into a dedicated firmware image. Support is still evolving.
           </p>
           <FormField label="Name" error={newFrameErrors.name}>
@@ -267,14 +267,14 @@ export function NewFrame(): JSX.Element {
           <div className="flex gap-2 pt-2">
             <button
               type="submit"
-              className="flex h-11 flex-1 items-center justify-center rounded-full bg-blue-500 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+              className="frameos-primary-action flex h-11 flex-1 items-center justify-center rounded-full px-4 text-sm font-semibold text-white shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
             >
               Add frame
             </button>
             <button
               type="button"
               onClick={cancel}
-              className="homey-secondary-button h-11 rounded-full bg-slate-100 px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+              className="frameos-secondary-button h-11 rounded-full bg-slate-100 px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
             >
               Cancel
             </button>
@@ -282,12 +282,12 @@ export function NewFrame(): JSX.Element {
         </Form>
       ) : (
         <div className="space-y-4">
-          <label className="homey-import-target flex min-h-36 cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center transition hover:bg-slate-100">
+          <label className="frameos-import-target flex min-h-36 cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center transition hover:bg-slate-100">
             <ArrowUpTrayIcon className="mb-2 h-8 w-8 text-slate-400" />
-            <span className="homey-strong text-sm font-semibold text-slate-800">
+            <span className="frameos-strong text-sm font-semibold text-slate-800">
               {file ? file.name : 'Choose frame JSON'}
             </span>
-            <span className="homey-muted mt-1 text-xs text-slate-500">Import a previously exported frame.</span>
+            <span className="frameos-muted mt-1 text-xs text-slate-500">Import a previously exported frame.</span>
             <input
               type="file"
               accept=".json"
@@ -300,14 +300,14 @@ export function NewFrame(): JSX.Element {
               type="button"
               onClick={importFrame}
               disabled={!file || importingFrameLoading}
-              className="flex h-11 flex-1 items-center justify-center rounded-full bg-blue-500 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-40"
+              className="frameos-primary-action flex h-11 flex-1 items-center justify-center rounded-full px-4 text-sm font-semibold text-white shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-40"
             >
               {importingFrameLoading ? <Spinner color="white" /> : 'Import'}
             </button>
             <button
               type="button"
               onClick={cancel}
-              className="homey-secondary-button h-11 rounded-full bg-slate-100 px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+              className="frameos-secondary-button h-11 rounded-full bg-slate-100 px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
             >
               Cancel
             </button>

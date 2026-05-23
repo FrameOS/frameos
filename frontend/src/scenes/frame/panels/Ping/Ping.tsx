@@ -5,8 +5,13 @@ import { NumberTextInput } from '../../../../components/NumberTextInput'
 import { Select } from '../../../../components/Select'
 import { TextInput } from '../../../../components/TextInput'
 import { formatMs, pingLogic, PingMode } from './pingLogic'
+import clsx from 'clsx'
 
-export function Ping() {
+interface PingProps {
+  scrollContainer?: boolean
+}
+
+export function Ping({ scrollContainer = true }: PingProps = {}) {
   const { frameId } = useValues(frameLogic)
   const { intervalSeconds, pingMode, httpPath, isFrameAdminMode, isRunning, isPinging, results, targetLabel } =
     useValues(pingLogic({ frameId }))
@@ -14,7 +19,7 @@ export function Ping() {
   const activeMode: PingMode = isFrameAdminMode ? 'http' : pingMode
 
   return (
-    <div className="frame-tool-panel flex h-full flex-col space-y-4">
+    <div className={clsx('frame-tool-panel flex flex-col space-y-4', scrollContainer && 'h-full')}>
       <div className="frame-tool-card flex flex-col gap-3 rounded-[22px] p-4 sm:flex-row sm:items-end sm:justify-between">
         <div className="flex items-center gap-2">
           <Button color={isRunning ? 'secondary' : 'primary'} size="small" onClick={() => toggleRunning()}>
@@ -81,9 +86,19 @@ export function Ping() {
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto rounded-[22px] text-sm">
+      <div
+        className={clsx(
+          'min-h-0 rounded-[22px] text-sm',
+          scrollContainer ? 'flex-1 overflow-y-auto' : 'overflow-visible'
+        )}
+      >
         {results.length === 0 ? (
-          <div className="frame-tool-card flex h-full items-center justify-center rounded-[22px] frame-tool-muted">
+          <div
+            className={clsx(
+              'frame-tool-card flex min-h-44 items-center justify-center rounded-[22px] frame-tool-muted',
+              scrollContainer && 'h-full'
+            )}
+          >
             No pings yet.
           </div>
         ) : (

@@ -28,7 +28,7 @@ import { workspaceChatDrawerLogic } from './workspaceChatDrawerLogic'
 
 type WorkspaceMode = 'frames' | 'frame' | 'scenes' | 'apps' | 'settings'
 
-interface HomeyShellProps {
+interface FrameosShellProps {
   mode: WorkspaceMode
   title: string
   subtitle?: string
@@ -73,9 +73,9 @@ function NavButton({
         }
       }}
       className={clsx(
-        'homey-nav-button flex h-12 w-12 items-center justify-center rounded-xl transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+        'frameos-nav-button flex h-12 w-12 items-center justify-center rounded-xl transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
         active
-          ? 'bg-blue-500 text-white shadow-lg shadow-blue-500/25'
+          ? 'frameos-primary-active text-white shadow-lg'
           : 'text-slate-400 hover:bg-slate-100 hover:text-slate-700'
       )}
     >
@@ -99,7 +99,7 @@ function AiMagicButton({
       title="Open AI chat"
       onClick={onClick}
       className={clsx(
-        'homey-ai-button flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-fuchsia-500 via-blue-500 to-cyan-400 text-white shadow-lg shadow-blue-500/30 transition hover:-translate-y-0.5 hover:shadow-xl hover:shadow-blue-500/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+        'frameos-ai-button flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-fuchsia-500 via-blue-500 to-cyan-400 text-white shadow-lg shadow-blue-500/30 transition hover:-translate-y-0.5 hover:shadow-xl hover:shadow-blue-500/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
         active && 'ring-2 ring-blue-300',
         floating && 'pointer-events-auto'
       )}
@@ -151,7 +151,7 @@ function WorkspaceChatDrawer({ frameId, sceneId }: { frameId: number; sceneId: s
   )
 }
 
-export function HomeyShell({
+export function FrameosShell({
   mode,
   tree,
   children,
@@ -164,7 +164,7 @@ export function HomeyShell({
   primaryActionLabel,
   onPrimaryAction,
   showAiButton: showAiButtonProp,
-}: HomeyShellProps): JSX.Element {
+}: FrameosShellProps): JSX.Element {
   const { chatDrawerSelection, search, secondarySidebarOpen, selectedFrame, selectedSceneId, theme } =
     useValues(workspaceLogic)
   const { openChatDrawer, openSecondarySidebar, setSearch, toggleSecondarySidebar, toggleTheme } =
@@ -195,19 +195,19 @@ export function HomeyShell({
   return (
     <div
       className={clsx(
-        'frameos-homey-shell min-h-screen overflow-hidden text-slate-900 max-lg:overflow-auto',
+        'frameos-app-shell min-h-screen overflow-hidden text-slate-900 max-lg:overflow-auto',
         `frameos-theme-${theme}`
       )}
     >
       <aside
         className={clsx(
-          'homey-panel fixed bottom-5 left-5 top-5 z-30 flex max-w-[calc(100vw-40px)] overflow-hidden rounded-[24px] border border-white/80 bg-white/90 shadow-2xl shadow-slate-400/30 backdrop-blur-xl transition-[width] duration-200 max-lg:static max-lg:m-4 max-lg:h-[48vh] max-lg:w-auto',
+          'frameos-panel fixed bottom-5 left-5 top-5 z-30 flex max-w-[calc(100vw-40px)] overflow-hidden rounded-[24px] border border-white/80 bg-white/90 shadow-2xl shadow-slate-400/30 backdrop-blur-xl transition-[width] duration-200 max-lg:static max-lg:m-4 max-lg:h-[48vh] max-lg:w-auto',
           secondarySidebarOpen ? 'w-[420px]' : 'w-[88px]'
         )}
       >
         <div
           className={clsx(
-            'homey-rail flex w-[88px] shrink-0 flex-col items-center py-5',
+            'frameos-rail flex w-[88px] shrink-0 flex-col items-center py-5',
             secondarySidebarOpen ? 'border-r border-slate-200/80' : 'max-lg:border-r max-lg:border-slate-200/80'
           )}
         >
@@ -256,7 +256,7 @@ export function HomeyShell({
             type="button"
             title={theme === 'dark' ? 'Use light mode' : 'Use dark mode'}
             onClick={toggleTheme}
-            className="homey-icon-button mb-4 flex h-12 w-12 items-center justify-center rounded-xl text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            className="frameos-icon-button mb-4 flex h-12 w-12 items-center justify-center rounded-xl text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
           >
             {theme === 'dark' ? <SunIcon className="h-7 w-7" /> : <MoonIcon className="h-7 w-7" />}
           </button>
@@ -318,7 +318,7 @@ export function HomeyShell({
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder="Search..."
-                className="homey-input h-12 w-full rounded-2xl border border-white/90 bg-white/90 pl-12 pr-4 text-base text-slate-900 shadow-lg shadow-slate-300/35 outline-none transition placeholder:text-slate-400 focus:ring-2 focus:ring-blue-400"
+                className="frameos-input h-12 w-full rounded-2xl border border-white/90 bg-white/90 pl-12 pr-4 text-base text-slate-900 shadow-lg shadow-slate-300/35 outline-none transition placeholder:text-slate-400 focus:ring-2 focus:ring-blue-400"
               />
             </div>
             <div className="flex items-center justify-end gap-3">
@@ -329,7 +329,7 @@ export function HomeyShell({
                   type="button"
                   onClick={onPrimaryAction}
                   title={primaryActionLabel}
-                  className="homey-primary-action flex h-12 w-12 items-center justify-center rounded-full bg-blue-500 text-white shadow-lg shadow-blue-500/30 transition hover:bg-blue-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                  className="frameos-primary-action flex h-12 w-12 items-center justify-center rounded-full text-white shadow-lg transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
                 >
                   <PlusIcon className="h-7 w-7" />
                 </button>

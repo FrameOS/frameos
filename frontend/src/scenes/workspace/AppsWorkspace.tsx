@@ -7,7 +7,7 @@ import { framesModel } from '../../models/framesModel'
 import { frameHost } from '../../decorators/frame'
 import { urls } from '../../urls'
 import type { AppNodeData, DiagramNode, FrameScene, FrameType } from '../../types'
-import { HomeyShell } from './HomeyShell'
+import { FrameosShell } from './FrameosShell'
 import { activeAppSelectionLogic } from './activeAppSelectionLogic'
 import { appsWorkspaceLogic } from './appsWorkspaceLogic'
 import { workspaceLogic } from './workspaceLogic'
@@ -89,7 +89,7 @@ function SelectionSelect({
         value={value}
         disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
-        className="homey-form-control min-h-12 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 outline-none transition disabled:cursor-not-allowed disabled:opacity-50 focus:ring-2 focus:ring-blue-400"
+        className="frameos-form-control min-h-12 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 outline-none transition disabled:cursor-not-allowed disabled:opacity-50 focus:ring-2 focus:ring-blue-400"
       >
         {children}
       </select>
@@ -179,8 +179,8 @@ function AppsSelector({
           onOpenChat={() => openChatDrawer(frame.id, selectedScene.id)}
         />
       ) : (
-        <div className="homey-inset rounded-2xl border border-slate-200 bg-white/55 p-3">
-          <div className="homey-muted text-xs font-semibold uppercase tracking-wide text-slate-400">Files</div>
+        <div className="frameos-inset rounded-2xl border border-slate-200 bg-white/55 p-3">
+          <div className="frameos-muted text-xs font-semibold uppercase tracking-wide text-slate-400">Files</div>
           <div className="mt-3 flex items-center gap-2 text-sm font-semibold text-slate-500">
             <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-white text-slate-400 shadow-sm">
               <CubeTransparentIcon className="h-4 w-4" />
@@ -210,11 +210,11 @@ function AppsTopBar({
   return (
     <div className="mb-4 flex items-center justify-between gap-4 max-md:flex-col max-md:items-stretch">
       <div className="min-w-0">
-        <div className="homey-muted text-xs font-semibold uppercase tracking-wide text-slate-400">
+        <div className="frameos-muted text-xs font-semibold uppercase tracking-wide text-slate-400">
           {frame.name || frameHost(frame)}
           {scene ? ` / ${scene.name || 'Untitled scene'}` : ''}
         </div>
-        <h1 className="homey-strong flex min-w-0 items-center gap-2 truncate text-2xl font-bold tracking-normal text-slate-950">
+        <h1 className="frameos-strong flex min-w-0 items-center gap-2 truncate text-2xl font-bold tracking-normal text-slate-950">
           <CodeBracketIcon className="h-7 w-7 shrink-0 text-slate-400" />
           <span className="truncate">{app?.label ?? 'Apps'}</span>
         </h1>
@@ -225,7 +225,7 @@ function AppsTopBar({
           onClick={() => saveFrame()}
           className={clsx(
             'rounded-full px-4 py-2 text-sm font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-            unsavedChanges ? 'bg-blue-500 text-white hover:bg-blue-600' : 'bg-white/85 text-slate-700 hover:bg-white'
+            unsavedChanges ? 'frameos-primary-action text-white' : 'bg-white/85 text-slate-700 hover:bg-white'
           )}
         >
           Save
@@ -320,9 +320,9 @@ function AppsWorkspaceFrame({ frameId, routeSceneId, routeNodeId }: AppsWorkspac
 
   if (!frame) {
     return (
-      <HomeyShell mode="apps" title="Apps" tree={<div className="px-3 py-2 text-slate-400">Loading...</div>}>
+      <FrameosShell mode="apps" title="Apps" tree={<div className="px-3 py-2 text-slate-400">Loading...</div>}>
         <div className="flex h-[60vh] items-center justify-center text-slate-500">Loading frame...</div>
-      </HomeyShell>
+      </FrameosShell>
     )
   }
 
@@ -339,7 +339,7 @@ function AppsWorkspaceFrame({ frameId, routeSceneId, routeNodeId }: AppsWorkspac
   return (
     <BindLogic logic={frameLogic} props={frameLogicProps}>
       <BindLogic logic={panelsLogic} props={frameLogicProps}>
-        <HomeyShell
+        <FrameosShell
           mode="apps"
           title="Apps"
           tree={
@@ -364,7 +364,7 @@ function AppsWorkspaceFrame({ frameId, routeSceneId, routeNodeId }: AppsWorkspac
           mainClassName="flex h-screen flex-col overflow-hidden pb-5 pl-[456px] pr-5 pt-5 max-lg:h-auto max-lg:overflow-visible max-lg:px-4"
         >
           <AppsEditorSurface frame={frame} scene={selectedSceneId ? selectedScene : null} app={selectedApp} />
-        </HomeyShell>
+        </FrameosShell>
       </BindLogic>
     </BindLogic>
   )
@@ -386,7 +386,7 @@ export function AppsWorkspace({ frameId, sceneId, nodeId }: AppsWorkspaceProps):
 
   if (!firstFrame) {
     return (
-      <HomeyShell
+      <FrameosShell
         mode="apps"
         title="Apps"
         subtitle="No frames"
@@ -395,7 +395,7 @@ export function AppsWorkspace({ frameId, sceneId, nodeId }: AppsWorkspaceProps):
         <div className="flex h-[60vh] items-center justify-center rounded-[24px] border border-white/80 bg-white/55 text-slate-500 shadow-lg shadow-slate-300/25">
           No frames available.
         </div>
-      </HomeyShell>
+      </FrameosShell>
     )
   }
 

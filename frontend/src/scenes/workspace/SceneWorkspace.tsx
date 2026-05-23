@@ -15,7 +15,7 @@ import { FrameImage } from '../../components/FrameImage'
 import { framesModel } from '../../models/framesModel'
 import { frameHost } from '../../decorators/frame'
 import { FrameScene, FrameType, NodeData } from '../../types'
-import { HomeyShell } from './HomeyShell'
+import { FrameosShell } from './FrameosShell'
 import { sceneWorkspaceLogic } from './sceneWorkspaceLogic'
 import { workspaceLogic, WorkspaceUtilityPanel } from './workspaceLogic'
 import { frameLogic } from '../frame/frameLogic'
@@ -101,7 +101,7 @@ function SceneSelector({
         <select
           value={frame.id}
           onChange={(event) => navigateToSceneFrame(parseInt(event.target.value, 10))}
-          className="homey-form-control min-h-12 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-blue-400"
+          className="frameos-form-control min-h-12 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-blue-400"
         >
           {frames.map((candidate) => (
             <option key={candidate.id} value={candidate.id}>
@@ -119,7 +119,7 @@ function SceneSelector({
               navigateToScene(frame.id, event.target.value)
             }
           }}
-          className="homey-form-control min-h-12 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-blue-400"
+          className="frameos-form-control min-h-12 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-blue-400"
         >
           {scenes.length === 0 ? (
             <option value="">No scenes</option>
@@ -164,8 +164,8 @@ function SceneTree({
   return (
     <div className="space-y-4">
       <SceneSelector frame={frame} frames={frames} scenes={scenes} selectedSceneId={selectedSceneId} />
-      <div className="homey-inset mx-2 rounded-2xl border border-slate-200 bg-white/55 p-3">
-        <div className="homey-muted text-xs font-semibold uppercase tracking-wide text-slate-400">
+      <div className="frameos-inset mx-2 rounded-2xl border border-slate-200 bg-white/55 p-3">
+        <div className="frameos-muted text-xs font-semibold uppercase tracking-wide text-slate-400">
           {frame.name || frameHost(frame)}
         </div>
         <div className="mt-2 flex flex-wrap gap-1.5">
@@ -193,7 +193,7 @@ function SceneTree({
             onClick={() => saveFrame()}
             className={clsx(
               'rounded-full px-3 py-2 text-xs font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-              unsavedChanges ? 'bg-blue-500 text-white hover:bg-blue-600' : 'bg-white text-slate-700 hover:bg-slate-100'
+              unsavedChanges ? 'frameos-primary-action text-white' : 'bg-white text-slate-700 hover:bg-slate-100'
             )}
           >
             Save
@@ -213,8 +213,8 @@ function SceneTree({
         </div>
       </div>
       {selectedScene ? (
-        <div className="homey-card mx-2 overflow-hidden rounded-2xl border border-white/80 bg-white/65 shadow-sm">
-          <div className="homey-card-media relative h-32 bg-slate-100">
+        <div className="frameos-card mx-2 overflow-hidden rounded-2xl border border-white/80 bg-white/65 shadow-sm">
+          <div className="frameos-card-media relative h-32 bg-slate-100">
             <FrameImage
               frameId={frame.id}
               sceneId={selectedSceneIsActive ? undefined : selectedScene.id}
@@ -233,7 +233,7 @@ function SceneTree({
           <button
             type="button"
             onClick={toggleSceneNodesOpen}
-            className="homey-icon-button mb-1 flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            className="frameos-icon-button mb-1 flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
             aria-expanded={sceneNodesOpen}
           >
             {sceneNodesOpen ? <ChevronDownIcon className="h-4 w-4" /> : <ChevronRightIcon className="h-4 w-4" />}
@@ -262,7 +262,7 @@ function SceneNodesList({ frameId, scene }: { frameId: number; scene: FrameScene
 
   if (nodeTreeItems.length === 0) {
     return (
-      <div className="homey-muted px-3 py-2 text-sm text-slate-400">No nodes yet. Add one from the tools above.</div>
+      <div className="frameos-muted px-3 py-2 text-sm text-slate-400">No nodes yet. Add one from the tools above.</div>
     )
   }
 
@@ -298,20 +298,22 @@ function SceneNodeTreeButton({
       onClick={onClick}
       className={clsx(
         'flex w-full items-center gap-2 rounded-xl py-1.5 pr-3 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-        highlighted ? 'bg-slate-900 text-white' : 'homey-strong text-slate-700 hover:bg-slate-100',
+        highlighted ? 'bg-slate-900 text-white' : 'frameos-strong text-slate-700 hover:bg-slate-100',
         item.kind === 'disconnected' && !highlighted && 'opacity-70'
       )}
       style={{ paddingLeft: `${12 + item.depth * 14}px` }}
     >
       {item.depth > 0 ? (
-        <span className={clsx('h-px w-3 shrink-0', highlighted ? 'bg-slate-500' : 'homey-divider bg-slate-300')} />
+        <span className={clsx('h-px w-3 shrink-0', highlighted ? 'bg-slate-500' : 'frameos-divider bg-slate-300')} />
       ) : null}
       <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/80 text-xs font-bold uppercase text-slate-500">
         {item.node.type?.slice(0, 2) ?? 'no'}
       </span>
       <span className="min-w-0 flex-1">
         <span className="block truncate text-sm font-semibold">{nodeLabel(item.node.data, item.node.id)}</span>
-        <span className={clsx('block truncate text-xs', highlighted ? 'text-slate-300' : 'homey-muted text-slate-400')}>
+        <span
+          className={clsx('block truncate text-xs', highlighted ? 'text-slate-300' : 'frameos-muted text-slate-400')}
+        >
           {nodeKindLabel(item)}
         </span>
       </span>
@@ -395,7 +397,7 @@ function UtilityDrawer({ frameId, scene }: { frameId: number; scene: FrameScene 
             className={clsx(
               'flex h-11 w-11 items-center justify-center rounded-xl transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
               utilityPanel === definition.panel
-                ? 'bg-blue-500 text-white'
+                ? 'frameos-primary-active text-white'
                 : 'text-slate-400 hover:bg-white/10 hover:text-white'
             )}
           >
@@ -461,9 +463,9 @@ function SceneWorkspaceFrame({ frameId }: SceneWorkspaceFrameProps): JSX.Element
 
   if (!frame) {
     return (
-      <HomeyShell mode="scenes" title="Scenes" tree={<div className="px-3 py-2 text-slate-400">Loading...</div>}>
+      <FrameosShell mode="scenes" title="Scenes" tree={<div className="px-3 py-2 text-slate-400">Loading...</div>}>
         <div className="flex h-[60vh] items-center justify-center text-slate-500">Loading frame...</div>
-      </HomeyShell>
+      </FrameosShell>
     )
   }
 
@@ -474,7 +476,7 @@ function SceneWorkspaceFrame({ frameId }: SceneWorkspaceFrameProps): JSX.Element
   return (
     <BindLogic logic={frameLogic} props={frameLogicProps}>
       <BindLogic logic={panelsLogic} props={frameLogicProps}>
-        <HomeyShell
+        <FrameosShell
           mode="scenes"
           title="Scenes"
           tree={
@@ -493,7 +495,7 @@ function SceneWorkspaceFrame({ frameId }: SceneWorkspaceFrameProps): JSX.Element
           rightPanel={activeUtilityDefinition ? <UtilityDrawer frameId={frameId} scene={selectedScene} /> : null}
         >
           <SceneCanvas selectedSceneId={resolvedSceneId} />
-        </HomeyShell>
+        </FrameosShell>
         <EditTemplateModal />
       </BindLogic>
     </BindLogic>
@@ -508,7 +510,7 @@ export function SceneWorkspace({ frameId, sceneId }: SceneWorkspaceProps): JSX.E
 
   if (!firstFrame) {
     return (
-      <HomeyShell
+      <FrameosShell
         mode="scenes"
         title="Scenes"
         subtitle="No frames"
@@ -517,7 +519,7 @@ export function SceneWorkspace({ frameId, sceneId }: SceneWorkspaceProps): JSX.E
         <div className="flex h-[60vh] items-center justify-center rounded-[24px] border border-white/80 bg-white/55 text-slate-500 shadow-lg shadow-slate-300/25">
           No frames available.
         </div>
-      </HomeyShell>
+      </FrameosShell>
     )
   }
 

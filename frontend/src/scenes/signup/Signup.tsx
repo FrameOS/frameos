@@ -1,49 +1,66 @@
-import { H4 } from '../../components/H4'
-import { Box } from '../../components/Box'
 import { Form } from 'kea-forms'
 import { Field } from '../../components/Field'
 import { TextInput } from '../../components/TextInput'
-import { Button } from '../../components/Button'
 import { signupLogic } from './signupLogic'
 import { useValues } from 'kea'
-import { assetUrl } from '../../utils/assetUrl'
-import darkMarkSmall from '../../assets/logo/dark-mark-small.png'
+import { AuthScreen, AuthLink } from '../auth/AuthScreen'
+import { urls } from '../../urls'
+
+const authInputClassName =
+  'frameos-input auth-input h-12 rounded-2xl px-4 py-3 text-base shadow-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-400'
 
 export function Signup() {
   const { isSignupFormSubmitting } = useValues(signupLogic)
   return (
-    <div className="h-full w-full min-h-screen max-w-screen flex flex-col items-center justify-center gap-8">
-      <div className="flex gap-4 justify-center items-center">
-        <img src={assetUrl(darkMarkSmall)} className="w-[48px] h-[48px] inline-block align-center" alt="FrameOS" />
-        <H4 className="tracking-wide text-[2.9rem]">FrameOS</H4>
-      </div>
-      <Box id="signup" className="p-4 mb-12 w-80 max-w-full">
-        <Form logic={signupLogic} formKey="signupForm" className="space-y-4" enableFormOnSubmit>
-          <Field name="email" label="Email">
-            <TextInput name="email" placeholder="email@example.com" autoComplete="email" type="email" required />
-          </Field>
-          <Field name="password" label="Password">
-            <TextInput name="password" placeholder="" type="password" required autoComplete="new-password" />
-          </Field>
-          <Field name="password2" label="Confirm Password">
-            <TextInput name="password2" placeholder="" type="password" required autoComplete="new-password" />
-          </Field>
-          {/* <Field name="newsletter">
-            {({ value, onChange }) => (
-              <Label>
-                <input type="checkbox" checked={!!value} onChange={(e) => onChange(e.target.checked)} />
-                <span>Sign up to the newsletter</span>
-              </Label>
-            )}
-          </Field> */}
-          <div className="flex gap-2">
-            <Button disabled={isSignupFormSubmitting} type="submit" className="w-full bg-[#5B5983] hover:bg-[#7A6D86]">
-              Sign Up
-            </Button>
-          </div>
-        </Form>
-      </Box>
-    </div>
+    <AuthScreen
+      title="Create account"
+      subtitle="Set up the first FrameOS user for this installation."
+      footer={
+        <>
+          Already configured? <AuthLink href={urls.login()}>Log in</AuthLink>
+        </>
+      }
+    >
+      <Form logic={signupLogic} formKey="signupForm" className="space-y-4" enableFormOnSubmit>
+        <Field name="email" label="Email" className="auth-field">
+          <TextInput
+            name="email"
+            placeholder="email@example.com"
+            autoComplete="email"
+            type="email"
+            className={authInputClassName}
+            required
+          />
+        </Field>
+        <Field name="password" label="Password" className="auth-field">
+          <TextInput
+            name="password"
+            placeholder="Password"
+            type="password"
+            required
+            autoComplete="new-password"
+            className={authInputClassName}
+          />
+        </Field>
+        <Field name="password2" label="Confirm password" className="auth-field">
+          <TextInput
+            name="password2"
+            placeholder="Confirm password"
+            type="password"
+            required
+            autoComplete="new-password"
+            className={authInputClassName}
+          />
+        </Field>
+        <button
+          disabled={isSignupFormSubmitting}
+          type="submit"
+          className="frameos-primary-action auth-button flex h-12 w-full items-center justify-center rounded-full px-5 text-sm font-semibold text-white shadow-lg transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Create account
+        </button>
+      </Form>
+    </AuthScreen>
   )
 }
 

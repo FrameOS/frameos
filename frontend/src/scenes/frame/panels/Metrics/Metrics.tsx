@@ -19,7 +19,11 @@ const metricLabels: Record<string, string> = {
   runtimeDimensions: 'Runtime size',
 }
 
-export function Metrics() {
+interface MetricsProps {
+  scrollContainer?: boolean
+}
+
+export function Metrics({ scrollContainer = true }: MetricsProps = {}) {
   const { frameId } = useValues(frameLogic)
   const {
     metrics,
@@ -50,7 +54,12 @@ export function Metrics() {
       No metrics yet.
     </div>
   ) : (
-    <div className="frame-tool-panel relative h-full select-none overflow-y-auto pr-2">
+    <div
+      className={clsx(
+        'frame-tool-panel relative select-none',
+        scrollContainer ? 'h-full overflow-y-auto pr-2' : 'overflow-visible'
+      )}
+    >
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <Select
           aria-label="Metrics time range"
@@ -60,7 +69,7 @@ export function Metrics() {
           onChange={(value) => setSelectedTimeRangePreset(value as MetricsTimeRangePreset)}
         />
         <div className="frame-tool-muted text-sm">
-          {metrics.length} point{metrics.length === 1 ? '' : 's'}
+          {metrics.length} datapoint{metrics.length === 1 ? '' : 's'}
         </div>
       </div>
       {Object.entries(metricsByCategory).map(([key, series]) => {

@@ -209,7 +209,11 @@ function EditRow({ event, scenesAsOptions, eventFields, closeEvent, deleteEvent 
   )
 }
 
-export function Schedule() {
+interface ScheduleProps {
+  scrollContainer?: boolean
+}
+
+export function Schedule({ scrollContainer = true }: ScheduleProps = {}) {
   const { frameId } = useValues(frameLogic)
   const { sendEvent } = useActions(frameLogic)
   const { editingEvents, sortedEvents, scenesAsOptions, fieldsForScene, expandedDescriptions, sort, disabled } =
@@ -218,7 +222,7 @@ export function Schedule() {
     scheduleLogic({ frameId })
   )
   return (
-    <div className="frame-tool-panel h-full overflow-y-auto pr-2">
+    <div className={clsx('frame-tool-panel', scrollContainer ? 'h-full overflow-y-auto pr-2' : 'overflow-visible')}>
       <Form logic={frameLogic} formKey="frameForm" className="space-y-2">
         <div className="frame-tool-card mb-4 flex w-full flex-wrap items-center justify-between gap-3 rounded-[22px] p-4">
           <Field name={['schedule', 'disabled']} className="w-full">

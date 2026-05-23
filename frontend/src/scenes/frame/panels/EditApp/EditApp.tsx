@@ -44,12 +44,12 @@ export function EditAppFileList({ sceneId, nodeId, onOpenChat, className }: Edit
   const { setActiveFile, addFile, deleteFile } = useActions(logic)
 
   if (sourcesLoading) {
-    return <div className="homey-muted rounded-2xl bg-white/55 p-3 text-sm text-slate-400">Loading files...</div>
+    return <div className="frameos-muted rounded-2xl bg-white/55 p-3 text-sm text-slate-400">Loading files...</div>
   }
 
   return (
-    <div className={clsx('homey-inset rounded-2xl border border-slate-200 bg-white/55 p-3', className)}>
-      <div className="homey-muted mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Files</div>
+    <div className={clsx('frameos-inset rounded-2xl border border-slate-200 bg-white/55 p-3', className)}>
+      <div className="frameos-muted mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Files</div>
       <div className="space-y-1">
         {filenames.map((file) => (
           <div key={file} className="flex w-full items-center justify-between gap-2">
@@ -64,7 +64,7 @@ export function EditAppFileList({ sceneId, nodeId, onOpenChat, className }: Edit
                     : 'bg-slate-900 text-white'
                   : modelMarkers[file]?.length
                   ? 'text-red-500 hover:bg-red-50'
-                  : 'homey-strong text-slate-700 hover:bg-white'
+                  : 'frameos-strong text-slate-700 hover:bg-white'
               )}
               title={
                 modelMarkers[file]?.length
@@ -79,7 +79,7 @@ export function EditAppFileList({ sceneId, nodeId, onOpenChat, className }: Edit
               <DropdownMenu
                 buttonColor="none"
                 horizontal
-                className="homey-icon-button flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/70 !px-0 !py-0 text-slate-500 shadow-sm transition hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                className="frameos-icon-button flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/70 !px-0 !py-0 text-slate-500 shadow-sm transition hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
                 items={[
                   {
                     label: 'Delete file',

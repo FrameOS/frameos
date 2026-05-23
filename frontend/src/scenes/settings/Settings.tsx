@@ -20,7 +20,7 @@ import { frameHost } from '../../decorators/frame'
 import { A } from 'kea-router'
 import { urls } from '../../urls'
 import { Tag } from '../../components/Tag'
-import { HomeyShell } from '../workspace/HomeyShell'
+import { FrameosShell } from '../workspace/FrameosShell'
 
 export function Settings() {
   const {
@@ -82,7 +82,7 @@ export function Settings() {
   )
 
   return (
-    <HomeyShell
+    <FrameosShell
       mode="settings"
       title="Settings"
       subtitle="System configuration"
@@ -102,7 +102,7 @@ export function Settings() {
             type="button"
             onClick={submitSettings}
             className={`rounded-full px-4 py-2 text-sm font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 ${
-              settingsChanged ? 'bg-blue-500 text-white hover:bg-blue-600' : 'bg-white/85 text-slate-700 hover:bg-white'
+              settingsChanged ? 'frameos-primary-action text-white' : 'bg-white/85 text-slate-700 hover:bg-white'
             }`}
           >
             Save
@@ -110,7 +110,7 @@ export function Settings() {
         </div>
       }
     >
-      <div className="mx-auto max-w-5xl rounded-[24px] border border-slate-800 bg-slate-950/95 p-5 text-white shadow-xl shadow-slate-400/25 @container">
+      <div className="frame-tool-panel frame-settings-panel settings-panel mx-auto max-w-5xl @container">
         {savedSettingsLoading ? (
           <Spinner />
         ) : (
@@ -191,7 +191,7 @@ export function Settings() {
                                       <A
                                         key={frame.id}
                                         href={urls.frame(frame.id)}
-                                        className="text-blue-400 hover:underline"
+                                        className="frameos-link hover:underline"
                                       >
                                         {frame.name || frameHost(frame)}
                                       </A>
@@ -242,7 +242,7 @@ export function Settings() {
                 </H6>
                 <Box className="p-2 space-y-2">
                   <p className="text-sm leading-loose">
-                    <a className="text-blue-400 hover:underline" target="_blank" href="https://gallery.frameos.net/">
+                    <a className="frameos-link hover:underline" target="_blank" href="https://gallery.frameos.net/">
                       Premium AI slop
                     </a>{' '}
                     to get you started.
@@ -485,7 +485,7 @@ export function Settings() {
           </>
         )}
       </div>
-    </HomeyShell>
+    </FrameosShell>
   )
 }
 
