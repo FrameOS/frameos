@@ -12,10 +12,11 @@ export function Tag({ children, className, color, ...props }: TagProps) {
   return (
     <div
       className={clsx(
-        `inline-block px-1 py-0.5 text-xs font-normal ${textColor} rounded-md uppercase align-middle`,
+        `frameos-tag inline-block px-1 py-0.5 text-xs font-normal ${textColor} rounded-md uppercase align-middle`,
         buttonColor(color || 'gray'),
         className
       )}
+      data-tag-color={color || 'gray'}
       {...props}
     >
       {children}

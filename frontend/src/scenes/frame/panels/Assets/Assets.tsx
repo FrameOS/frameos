@@ -21,6 +21,8 @@ import { buildLocalImageFolderScene, buildLocalImageScene } from '../Scenes/scen
 import { v4 as uuidv4 } from 'uuid'
 import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
 import { frameAssetUrl } from '../../../../utils/frameAssetsApi'
+import { metricsLogic } from '../Metrics/metricsLogic'
+import type { MetricsType } from '../../../../types'
 
 function humaniseSize(size: number) {
   const units = ['B', 'KB', 'MB', 'GB', 'TB']
@@ -38,6 +40,23 @@ const hasImageExtension = (fileName: string): boolean => {
   const normalizedName = fileName.toLowerCase()
   return normalizedImageExtensions.some((extension) => normalizedName.endsWith(extension))
 }
+const playSceneButtonClassName =
+  'frameos-primary-text shrink-0 rounded-full border border-[#4a4b8c]/35 bg-[#4a4b8c]/10 p-1.5 transition hover:bg-[#4a4b8c]/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400'
+
+interface AssetStats {
+  files: number
+  folders: number
+  images: number
+  totalBytes: number
+  latestMtime: number | null
+}
+
+interface DiskStats {
+  totalBytes: number
+  usedBytes: number
+  availableBytes: number
+  usedPercent: number
+}
 
 // Define the shape of the node we get back from buildAssetTree
 interface AssetNode {
@@ -47,6 +66,69 @@ interface AssetNode {
   size?: number
   mtime?: number
   children: Record<string, AssetNode>
+}
+
+function collectAssetStats(node: AssetNode, isRoot = true): AssetStats {
+  const stats: AssetStats = {
+    files: 0,
+    folders: isRoot ? 0 : 1,
+    images: 0,
+    totalBytes: 0,
+    latestMtime: node.mtime && node.mtime > 0 ? node.mtime : null,
+  }
+
+  if (!node.isFolder) {
+    stats.files = 1
+    stats.folders = 0
+    stats.images =
+      hasImageExtension(node.name) && !node.path.startsWith('.thumbs/') && !node.path.includes('/.thumbs/') ? 1 : 0
+    stats.totalBytes = typeof node.size === 'number' && node.size > 0 ? node.size : 0
+  }
+
+  Object.values(node.children).forEach((child) => {
+    const childStats = collectAssetStats(child, false)
+    stats.files += childStats.files
+    stats.folders += childStats.folders
+    stats.images += childStats.images
+    stats.totalBytes += childStats.totalBytes
+    stats.latestMtime =
+      stats.latestMtime && childStats.latestMtime
+        ? Math.max(stats.latestMtime, childStats.latestMtime)
+        : stats.latestMtime ?? childStats.latestMtime
+  })
+
+  return stats
+}
+
+function latestDiskStats(metrics: MetricsType[]): DiskStats | null {
+  for (let index = metrics.length - 1; index >= 0; index--) {
+    const diskUsage = metrics[index].metrics?.diskUsage
+    if (!diskUsage || typeof diskUsage !== 'object') {
+      continue
+    }
+
+    const totalBytes = Number(diskUsage.total ?? 0)
+    const availableBytes = Number(diskUsage.available ?? diskUsage.free ?? 0)
+    const usedBytes = Number(diskUsage.used ?? totalBytes - availableBytes)
+    const percentage = Number(diskUsage.percentage)
+    if (totalBytes > 0 && Number.isFinite(usedBytes) && Number.isFinite(availableBytes)) {
+      return {
+        totalBytes,
+        usedBytes,
+        availableBytes,
+        usedPercent: Number.isFinite(percentage) ? percentage : (usedBytes / totalBytes) * 100,
+      }
+    }
+  }
+
+  return null
+}
+
+function formatDateFromSeconds(timestamp: number | null): string {
+  if (!timestamp) {
+    return 'Never'
+  }
+  return new Date(timestamp * 1000).toLocaleString()
 }
 
 /** A recursive component that renders a folder or a file */
@@ -129,6 +211,14 @@ function TreeNode({
             )}
             <span className="truncate font-medium">{node.name || '/'}</span>
             <span className="frame-tool-muted shrink-0 text-xs">{Object.keys(node.children).length} items</span>
+          </button>
+          <button
+            type="button"
+            className={playSceneButtonClassName}
+            title="Play all images in this folder"
+            onClick={() => createImageFolderScene(node.path)}
+          >
+            <PlayIcon className="h-4 w-4" />
           </button>
           <DropdownMenu
             horizontal
@@ -249,7 +339,7 @@ function TreeNode({
         {isPlayableImage ? (
           <button
             type="button"
-            className="rounded-full border border-purple-500/40 bg-purple-500/10 p-1 text-purple-300 hover:bg-purple-500/20 hover:text-purple-200"
+            className={playSceneButtonClassName}
             title="Run image scene"
             onClick={() => createImageScene(node.path)}
           >
@@ -326,6 +416,155 @@ function TreeNode({
   }
 }
 
+function AssetsLoadingSkeleton(): JSX.Element {
+  const rows = [
+    { indent: 'pl-0', icon: 'rounded-md', name: 'w-36', detail: 'w-14' },
+    { indent: 'pl-6', icon: 'rounded', name: 'w-48', detail: 'w-20' },
+    { indent: 'pl-6', icon: 'rounded', name: 'w-40', detail: 'w-16' },
+    { indent: 'pl-0', icon: 'rounded-md', name: 'w-32', detail: 'w-12' },
+    { indent: 'pl-6', icon: 'rounded', name: 'w-52', detail: 'w-20' },
+    { indent: 'pl-12', icon: 'rounded', name: 'w-44', detail: 'w-16' },
+    { indent: 'pl-12', icon: 'rounded', name: 'w-28', detail: 'w-14' },
+  ]
+
+  return (
+    <div className="space-y-4">
+      <div className="frameos-skeleton-surface frameos-divider rounded-[22px] border border-slate-200/70 p-4 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="frameos-skeleton-media h-10 w-10 animate-pulse rounded-2xl" />
+            <div className="min-w-0 space-y-2">
+              <div className="frameos-skeleton-line h-4 w-36 max-w-full animate-pulse rounded-full" />
+              <div className="frameos-skeleton-line h-3 w-56 max-w-full animate-pulse rounded-full opacity-70" />
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="frameos-skeleton-line h-9 w-24 animate-pulse rounded-full opacity-80" />
+            <div className="frameos-skeleton-media h-9 w-9 animate-pulse rounded-full" />
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_18rem]">
+        <div className="frameos-skeleton-surface frameos-divider rounded-[22px] border border-slate-200/70 p-3 shadow-sm">
+          <div className="mb-3 flex items-center gap-2 px-2">
+            <div className="frameos-skeleton-line h-3 w-24 animate-pulse rounded-full" />
+            <div className="frameos-skeleton-line h-3 w-14 animate-pulse rounded-full opacity-60" />
+          </div>
+          <div className="space-y-1">
+            {rows.map((row, index) => (
+              <div key={index} className={clsx('flex items-center gap-3 rounded-xl px-3 py-2', row.indent)}>
+                <div className={clsx('frameos-skeleton-media h-5 w-5 shrink-0 animate-pulse', row.icon)} />
+                <div className="min-w-0 flex-1 space-y-2">
+                  <div className={clsx('frameos-skeleton-line h-3 max-w-full animate-pulse rounded-full', row.name)} />
+                  {index % 3 === 1 ? (
+                    <div className="frameos-skeleton-line h-2 w-24 max-w-full animate-pulse rounded-full opacity-60" />
+                  ) : null}
+                </div>
+                <div className={clsx('frameos-skeleton-line h-3 shrink-0 animate-pulse rounded-full', row.detail)} />
+                <div className="frameos-skeleton-media h-8 w-8 shrink-0 animate-pulse rounded-full" />
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="frameos-skeleton-surface frameos-divider hidden rounded-[22px] border border-slate-200/70 p-4 shadow-sm xl:block">
+          <div className="frameos-skeleton-line mb-4 h-3 w-28 animate-pulse rounded-full" />
+          <div className="grid grid-cols-2 gap-3">
+            {Array.from({ length: 6 }).map((_, index) => (
+              <div key={index} className="space-y-2">
+                <div className="frameos-skeleton-media aspect-square animate-pulse rounded-2xl" />
+                <div className="frameos-skeleton-line h-2.5 animate-pulse rounded-full" />
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function AssetsSummaryHeader({
+  rootName,
+  stats,
+  diskStats,
+  showSyncAction,
+  onSync,
+}: {
+  rootName: string
+  stats: AssetStats
+  diskStats: DiskStats | null
+  showSyncAction: boolean
+  onSync: () => void
+}): JSX.Element {
+  const diskUsedPercent = diskStats ? Math.min(Math.max(diskStats.usedPercent, 0), 100) : null
+  const statItems = [
+    {
+      label: 'Files',
+      value: String(stats.files),
+      detail: `${stats.folders} folder${stats.folders === 1 ? '' : 's'}`,
+    },
+    { label: 'Images', value: String(stats.images), detail: `${humaniseSize(stats.totalBytes)} assets` },
+    { label: 'Updated', value: formatDateFromSeconds(stats.latestMtime), detail: rootName || '/srv/assets' },
+  ]
+
+  return (
+    <div className="frame-tool-card mb-4 overflow-hidden rounded-[22px]">
+      <div className="flex flex-wrap items-start justify-between gap-3 px-4 py-4">
+        <div className="min-w-0">
+          <div className="frame-tool-muted text-xs font-semibold uppercase tracking-wide">Assets</div>
+          <div className="mt-1 truncate text-xl font-bold tracking-normal text-[color:var(--tool-strong)]">
+            {rootName || '/srv/assets'}
+          </div>
+        </div>
+        {showSyncAction ? (
+          <DropdownMenu
+            className="w-fit"
+            buttonColor="secondary"
+            items={[
+              {
+                label: 'Sync fonts',
+                onClick: onSync,
+                icon: <DocumentArrowUpIcon className="w-5 h-5" />,
+              },
+            ]}
+          />
+        ) : null}
+      </div>
+      <div className="grid gap-px border-t border-[color:var(--tool-border)] bg-[var(--tool-border)] md:grid-cols-4">
+        {statItems.map((item) => (
+          <div key={item.label} className="bg-[var(--tool-bg)] px-4 py-3">
+            <div className="frame-tool-muted text-xs font-semibold uppercase tracking-wide">{item.label}</div>
+            <div className="mt-1 truncate text-lg font-semibold text-[color:var(--tool-strong)]">{item.value}</div>
+            <div className="frame-tool-muted mt-0.5 truncate text-xs">{item.detail}</div>
+          </div>
+        ))}
+        <div className="bg-[var(--tool-bg)] px-4 py-3">
+          <div className="frame-tool-muted text-xs font-semibold uppercase tracking-wide">Disk</div>
+          {diskStats ? (
+            <>
+              <div className="mt-1 text-lg font-semibold text-[color:var(--tool-strong)]">
+                {Math.round(diskUsedPercent ?? 0)}% used
+              </div>
+              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-400/20">
+                <div className="h-full rounded-full bg-[#4a4b8c]" style={{ width: `${diskUsedPercent ?? 0}%` }} />
+              </div>
+              <div className="frame-tool-muted mt-1 truncate text-xs">
+                {humaniseSize(diskStats.availableBytes)} free / {humaniseSize(diskStats.totalBytes)}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="mt-1 text-lg font-semibold text-[color:var(--tool-strong)]">No sample</div>
+              <div className="frame-tool-muted mt-0.5 text-xs">Waiting for metrics</div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 interface AssetsProps {
   scrollContainer?: boolean
 }
@@ -335,9 +574,18 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
   const { sendEvent } = useActions(frameLogic)
   const { openLogs } = useActions(panelsLogic)
   const { assetsLoading, assetTree } = useValues(assetsLogic({ frameId: frame.id }))
+  const { sortedMetrics } = useValues(metricsLogic({ frameId: frame.id }))
   const { loadAssets, syncAssets, uploadAssets, uploadDroppedFiles, deleteAsset, renameAsset, createFolder } =
     useActions(assetsLogic({ frameId: frame.id }))
   const { openAsset } = useActions(panelsLogic({ frameId: frame.id }))
+  const assetStats = collectAssetStats(assetTree)
+  const diskStats = latestDiskStats(sortedMetrics)
+  const showSyncAction = !isInFrameAdminMode()
+
+  const handleSyncAssets = () => {
+    syncAssets()
+    openLogs()
+  }
 
   const createImageScene = async (path: string): Promise<void> => {
     const assetsPath = frameForm.assets_path || frame.assets_path || '/srv/assets'
@@ -378,36 +626,17 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
 
   return (
     <div className={clsx('frame-tool-panel', scrollContainer ? 'h-full overflow-y-auto pr-2' : 'overflow-visible')}>
-      {!isInFrameAdminMode() ? (
-        <div className="mb-3 flex justify-end">
-          <DropdownMenu
-            className="w-fit"
-            buttonColor="secondary"
-            items={[
-              {
-                label: 'Sync fonts',
-                onClick: () => {
-                  syncAssets()
-                  openLogs()
-                },
-                icon: <DocumentArrowUpIcon className="w-5 h-5" />,
-              },
-            ]}
-          />
-        </div>
-      ) : null}
       {assetsLoading && (!assetTree.children || Object.keys(assetTree.children).length === 0) ? (
-        <div className="frame-tool-card flex h-44 items-center justify-center gap-2 rounded-[22px] text-sm frame-tool-muted">
-          <Spinner />
-          Loading assets...
-        </div>
+        <AssetsLoadingSkeleton />
       ) : (
         <div className="space-y-1">
-          {assetsLoading ? (
-            <div className="mb-2 flex justify-end">
-              <Spinner />
-            </div>
-          ) : null}
+          <AssetsSummaryHeader
+            rootName={assetTree.name}
+            stats={assetStats}
+            diskStats={diskStats}
+            showSyncAction={showSyncAction}
+            onSync={handleSyncAssets}
+          />
           <TreeNode
             node={assetTree}
             frameId={frame.id}

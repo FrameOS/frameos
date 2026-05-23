@@ -4,13 +4,19 @@ import { useRef, useState, useEffect } from 'react'
 import { logsLogic } from './logsLogic'
 import { insertBreaks } from '../../../../utils/insertBreaks'
 import { frameLogic } from '../../frameLogic'
-import { Virtuoso, VirtuosoHandle } from 'react-virtuoso'
-import { Button } from '../../../../components/Button'
+import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
 import { frameSettingsLogic } from '../FrameSettings/frameSettingsLogic'
 import { Spinner } from '../../../../components/Spinner'
-import { ArrowDownTrayIcon, ArrowUpTrayIcon, ArrowPathIcon } from '@heroicons/react/24/solid'
+import {
+  ArrowDownTrayIcon,
+  ArrowUpTrayIcon,
+  ArrowPathIcon,
+  MagnifyingGlassIcon,
+  XMarkIcon,
+} from '@heroicons/react/24/solid'
 import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
+import { workspaceLogic, type WorkspaceTheme } from '../../../workspace/workspaceLogic'
 
 function formatTimestamp(isoTimestamp: string): string {
   const date = new Date(isoTimestamp)
@@ -25,24 +31,34 @@ function toMb(bytes: number): number {
   return Math.round(bytes / 1024 / 1024)
 }
 
-function metricNumberColor(value: number, warning: number, critical: number, lowerIsWorse = false): string {
+function terminalTextColor(theme: WorkspaceTheme): string {
+  return theme === 'dark' ? 'text-white' : 'text-slate-950'
+}
+
+function metricNumberColor(
+  value: number,
+  warning: number,
+  critical: number,
+  lowerIsWorse = false,
+  theme: WorkspaceTheme = 'dark'
+): string {
   if (lowerIsWorse) {
     if (value <= critical) {
-      return 'text-red-400'
+      return theme === 'dark' ? 'text-red-400' : 'text-red-700'
     }
     if (value <= warning) {
-      return 'text-yellow-300'
+      return theme === 'dark' ? 'text-yellow-300' : 'text-amber-700'
     }
-    return 'text-white'
+    return terminalTextColor(theme)
   }
 
   if (value >= critical) {
-    return 'text-red-400'
+    return theme === 'dark' ? 'text-red-400' : 'text-red-700'
   }
   if (value >= warning) {
-    return 'text-yellow-300'
+    return theme === 'dark' ? 'text-yellow-300' : 'text-amber-700'
   }
-  return 'text-white'
+  return terminalTextColor(theme)
 }
 
 interface MetricEntry {
@@ -143,24 +159,29 @@ function formatMetricValue(key: string, value: unknown): string {
   return JSON.stringify(value)
 }
 
-function metricEntryValueColor(key: string, value: unknown): string {
+function metricEntryValueColor(key: string, value: unknown, theme: WorkspaceTheme): string {
   const numericValue = Number(value)
   if (!Number.isFinite(numericValue)) {
-    return 'text-white'
+    return terminalTextColor(theme)
   }
   if (key === 'cpuTemperature') {
-    return metricNumberColor(numericValue, 60, 75)
+    return metricNumberColor(numericValue, 60, 75, false, theme)
   }
   if (key === 'cpuUsage' || key.endsWith('.percentage')) {
-    return metricNumberColor(numericValue, 80, 95)
+    return metricNumberColor(numericValue, 80, 95, false, theme)
   }
   if (key.startsWith('load[')) {
-    return metricNumberColor(numericValue, 1, 2)
+    return metricNumberColor(numericValue, 1, 2, false, theme)
   }
-  return 'text-white'
+  return terminalTextColor(theme)
 }
 
-function renderMetricsLog(rest: Record<string, any>, expanded: boolean, onToggleExpanded: () => void): JSX.Element {
+function renderMetricsLog(
+  rest: Record<string, any>,
+  expanded: boolean,
+  onToggleExpanded: () => void,
+  theme: WorkspaceTheme
+): JSX.Element {
   const load = Array.isArray(rest.load) ? rest.load : [0, 0, 0]
   const cpuTemperature = Number(rest.cpuTemperature ?? 0)
   const memoryUsage = rest.memoryUsage ?? {}
@@ -183,36 +204,43 @@ function renderMetricsLog(rest: Record<string, any>, expanded: boolean, onToggle
   const hasStandardMetrics = 'load' in rest || 'cpuTemperature' in rest || 'memoryUsage' in rest || 'diskUsage' in rest
 
   return (
-    <div className="text-gray-400">
+    <div className={theme === 'dark' ? 'text-gray-400' : 'text-slate-600'}>
       <span>
-        <span className="text-yellow-600">metrics</span>{' '}
+        <span className={theme === 'dark' ? 'text-yellow-600' : 'text-amber-700'}>metrics</span>{' '}
         {metricState && !hasStandardMetrics ? (
           <>
-            <span className={metricState === 'error' ? 'text-red-300' : 'text-white'}>{metricState}</span>
+            <span className={metricState === 'error' ? (theme === 'dark' ? 'text-red-300' : 'text-red-700') : terminalTextColor(theme)}>
+              {metricState}
+            </span>
             {typeof rest.error === 'string' ? (
-              <span className="ml-2 text-red-200">{insertBreaks(rest.error)}</span>
+              <span className={clsx('ml-2', theme === 'dark' ? 'text-red-200' : 'text-red-700')}>
+                {insertBreaks(rest.error)}
+              </span>
             ) : null}
           </>
         ) : (
           <>
             load{' '}
             {load.map((value, index) => (
-              <span key={index} className={clsx(metricNumberColor(Number(value), 1, 2), 'mr-2')}>
+              <span key={index} className={clsx(metricNumberColor(Number(value), 1, 2, false, theme), 'mr-2')}>
                 {value}
               </span>
             ))}
-            cpu <span className={metricNumberColor(cpuTemperature, 60, 75)}>{cpuTemperature.toFixed(2)}°C</span> ram{' '}
-            <span className={metricNumberColor(ramAvailablePercent, 15, 5, true)}>{ramUsedMb}</span> /{' '}
-            <span className="text-white">{ramTotalMb} MB</span>
+            cpu{' '}
+            <span className={metricNumberColor(cpuTemperature, 60, 75, false, theme)}>
+              {cpuTemperature.toFixed(2)}°C
+            </span>{' '}
+            ram <span className={metricNumberColor(ramAvailablePercent, 15, 5, true, theme)}>{ramUsedMb}</span> /{' '}
+            <span className={terminalTextColor(theme)}>{ramTotalMb} MB</span>
             {diskTotalBytes > 0 ? (
               <>
                 {' '}
                 disk{' '}
-                <span className={metricNumberColor(diskAvailablePercent, 15, 5, true)}>
+                <span className={metricNumberColor(diskAvailablePercent, 15, 5, true, theme)}>
                   {formatBytesInUnit(diskUsedBytes, diskUnitIndex)}
                 </span>{' '}
                 /{' '}
-                <span className="text-white">
+                <span className={terminalTextColor(theme)}>
                   {formatBytesInUnit(diskTotalBytes, diskUnitIndex)} {diskUnit}
                 </span>
               </>
@@ -222,7 +250,10 @@ function renderMetricsLog(rest: Record<string, any>, expanded: boolean, onToggle
         {entries.length > 0 ? (
           <button
             type="button"
-            className="ml-2 inline text-blue-300 underline underline-offset-2 hover:text-blue-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className={clsx(
+              'ml-2 inline underline underline-offset-2 focus:outline-none focus:ring-1 focus:ring-blue-500',
+              theme === 'dark' ? 'text-blue-300 hover:text-blue-100' : 'frameos-primary-text hover:underline'
+            )}
             aria-expanded={expanded}
             onClick={onToggleExpanded}
           >
@@ -235,10 +266,15 @@ function renderMetricsLog(rest: Record<string, any>, expanded: boolean, onToggle
           {entries.map(({ key, value }) => (
             <span
               key={key}
-              className="inline-flex max-w-full items-center rounded border border-gray-800 bg-gray-950 px-1.5"
+              className={clsx(
+                'inline-flex max-w-full items-center rounded border px-1.5',
+                theme === 'dark' ? 'border-gray-800 bg-gray-950' : 'border-slate-200 bg-white/70'
+              )}
             >
-              <span className="mr-1 shrink-0 text-gray-500">{key}</span>
-              <span className={clsx('min-w-0 break-all font-semibold', metricEntryValueColor(key, value))}>
+              <span className={clsx('mr-1 shrink-0', theme === 'dark' ? 'text-gray-500' : 'text-slate-500')}>
+                {key}
+              </span>
+              <span className={clsx('min-w-0 break-all font-semibold', metricEntryValueColor(key, value, theme))}>
                 {insertBreaks(formatMetricValue(key, value))}
               </span>
             </span>
@@ -249,17 +285,41 @@ function renderMetricsLog(rest: Record<string, any>, expanded: boolean, onToggle
   )
 }
 
-export function Logs() {
+interface LogsProps {
+  fullScreen?: boolean
+}
+
+function logTypeClassName(type: string, theme: WorkspaceTheme): string {
+  if (type === 'stdinfo') {
+    return theme === 'dark' ? 'text-yellow-300' : 'text-amber-700'
+  }
+  if (type === 'stderr') {
+    return theme === 'dark' ? 'text-red-300' : 'text-red-700'
+  }
+  if (type === 'agent') {
+    return theme === 'dark' ? 'text-blue-300' : 'frameos-primary-text'
+  }
+  if (type === 'build') {
+    return theme === 'dark' ? 'text-yellow-200' : 'text-amber-700'
+  }
+  return theme === 'dark' ? 'text-slate-100' : 'text-slate-900'
+}
+
+export function Logs({ fullScreen = false }: LogsProps = {}) {
   const inFrameAdminMode = isInFrameAdminMode()
   const { frameId } = useValues(frameLogic)
-  const { logs, logsLoading, fullLogDownloading } = useValues(logsLogic({ frameId }))
-  const { downloadLog, downloadFullLog } = useActions(logsLogic({ frameId }))
+  const { theme: workspaceTheme } = useValues(workspaceLogic)
+  const { logs, filteredLogs, logSearch, logsLoading, fullLogDownloading } = useValues(logsLogic({ frameId }))
+  const { downloadLog, downloadFullLog, setLogSearch } = useActions(logsLogic({ frameId }))
   const [atBottom, setAtBottom] = useState(true)
   const [expandedMetricLogIds, setExpandedMetricLogIds] = useState<number[]>([])
   const virtuosoRef = useRef<VirtuosoHandle>(null)
   const shouldStickToBottomRef = useRef(true)
   const { buildCacheLoading } = useValues(frameSettingsLogic({ frameId }))
   const { clearBuildCache } = useActions(frameSettingsLogic({ frameId }))
+  const renderTheme: WorkspaceTheme = fullScreen ? workspaceTheme : 'dark'
+  const searchActive = logSearch.trim().length > 0
+  const visibleLogs = filteredLogs
 
   useEffect(() => {
     if (!shouldStickToBottomRef.current) {
@@ -268,70 +328,159 @@ export function Logs() {
     // wait for layout/measurement so large bursts keep us pinned
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
+        if (visibleLogs.length === 0) {
+          return
+        }
         virtuosoRef.current?.scrollToIndex({
-          index: logs.length - 1,
+          index: visibleLogs.length - 1,
           align: 'end',
           behavior: 'auto',
         })
       })
     })
-  }, [logs.length])
+  }, [visibleLogs.length, logSearch])
+
+  const scrollToLatest = (behavior: 'auto' | 'smooth' = 'smooth') => {
+    if (visibleLogs.length === 0) {
+      return
+    }
+    virtuosoRef.current?.scrollToIndex({ index: visibleLogs.length - 1, behavior })
+  }
 
   const toggleMetricLogExpanded = (logId: number) => {
     setExpandedMetricLogIds((ids) => (ids.includes(logId) ? ids.filter((id) => id !== logId) : [...ids, logId]))
   }
 
+  const menuItems = [
+    {
+      label: 'Download log',
+      onClick: downloadLog,
+      icon: <ArrowUpTrayIcon className="w-5 h-5" />,
+    },
+    {
+      label: 'Download full log',
+      onClick: downloadFullLog,
+      icon: fullLogDownloading ? (
+        <Spinner color="white" className="w-4 h-4" />
+      ) : (
+        <ArrowDownTrayIcon className="w-5 h-5" />
+      ),
+      loading: fullLogDownloading,
+    },
+    ...(!inFrameAdminMode
+      ? [
+          {
+            label: 'Clear build cache on frame',
+            onClick: () => {
+              clearBuildCache()
+            },
+            icon: buildCacheLoading ? (
+              <Spinner color="white" className="w-4 h-4" />
+            ) : (
+              <ArrowPathIcon className="w-5 h-5" />
+            ),
+          },
+        ]
+      : []),
+  ]
+
   return logsLoading ? (
-    <div className="frame-tool-panel frame-tool-card flex h-full items-center justify-center rounded-[22px] text-sm frame-tool-muted">
+    <div
+      className={clsx(
+        'frame-tool-panel flex h-full items-center justify-center text-sm frame-tool-muted',
+        fullScreen ? 'min-h-[calc(100vh-3rem)]' : 'frame-tool-card rounded-[22px]'
+      )}
+    >
       Loading logs...
     </div>
   ) : (
-    <div className="frame-tool-panel frame-tool-terminal relative h-full overflow-hidden rounded-[22px] p-3">
-      <DropdownMenu
-        horizontal
-        buttonColor="tertiary"
-        className={logs.length > 0 ? 'absolute right-9 top-3 z-10' : 'absolute right-3 top-3 z-10'}
-        items={[
-          {
-            label: 'Download log',
-            onClick: downloadLog,
-            icon: <ArrowUpTrayIcon className="w-5 h-5" />,
-          },
-          {
-            label: 'Download full log',
-            onClick: downloadFullLog,
-            icon: fullLogDownloading ? (
-              <Spinner color="white" className="w-4 h-4" />
-            ) : (
-              <ArrowDownTrayIcon className="w-5 h-5" />
-            ),
-            loading: fullLogDownloading,
-          },
-          ...(!inFrameAdminMode
-            ? [
-                {
-                  label: 'Clear build cache on frame',
-                  onClick: () => {
-                    clearBuildCache()
-                  },
-                  icon: buildCacheLoading ? (
-                    <Spinner color="white" className="w-4 h-4" />
-                  ) : (
-                    <ArrowPathIcon className="w-5 h-5" />
-                  ),
-                },
-              ]
-            : []),
-        ]}
-      />
+    <div
+      className={clsx(
+        'frame-tool-panel relative',
+        fullScreen
+          ? ['min-h-[calc(100vh-3rem)] w-full pb-12', renderTheme === 'dark' ? 'text-slate-100' : 'text-slate-950']
+          : 'frame-tool-terminal h-full overflow-hidden rounded-[22px] p-3'
+      )}
+    >
+      {fullScreen ? (
+        <DropdownMenu
+          horizontal
+          buttonColor="none"
+          className="frameos-secondary-button fixed right-8 top-6 z-30 flex h-10 w-10 items-center justify-center rounded-full !px-0 !py-0 max-lg:right-4 max-lg:top-4"
+          items={menuItems}
+        />
+      ) : (
+        <DropdownMenu
+          horizontal
+          buttonColor="tertiary"
+          className={visibleLogs.length > 0 ? 'absolute right-9 top-3 z-10' : 'absolute right-3 top-3 z-10'}
+          items={menuItems}
+        />
+      )}
+      <div
+        className={clsx(
+          'logs-filter-toolbar z-20 mb-4 flex flex-wrap items-center gap-3',
+          fullScreen ? 'sticky top-0 py-3 pr-16 backdrop-blur-sm max-lg:pr-14' : 'px-1 pb-2 pr-12'
+        )}
+      >
+        <label className="relative block min-w-[16rem] flex-1 sm:max-w-2xl">
+          <span className="sr-only">Search logs</span>
+          <MagnifyingGlassIcon
+            className={clsx(
+              'pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2',
+              renderTheme === 'dark' ? 'text-slate-500' : 'text-slate-400'
+            )}
+          />
+          <input
+            value={logSearch}
+            onChange={(event) => setLogSearch(event.target.value)}
+            placeholder="Search logs..."
+            className={clsx(
+              'h-10 w-full rounded-full border py-2 pl-9 pr-10 font-sans text-sm shadow-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-400',
+              renderTheme === 'dark'
+                ? 'border-white/10 bg-white/[0.04] text-slate-100 placeholder:text-slate-500'
+                : 'border-slate-200/80 bg-white/80 text-slate-950 placeholder:text-slate-400'
+            )}
+          />
+          {searchActive ? (
+            <button
+              type="button"
+              onClick={() => setLogSearch('')}
+              className={clsx(
+                'absolute right-1.5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+                renderTheme === 'dark'
+                  ? 'text-slate-400 hover:bg-white/10 hover:text-slate-100'
+                  : 'text-slate-400 hover:bg-slate-100 hover:text-slate-700'
+              )}
+              aria-label="Clear log search"
+            >
+              <XMarkIcon className="h-4 w-4" />
+            </button>
+          ) : null}
+        </label>
+        <div
+          className={clsx(
+            'whitespace-nowrap font-sans text-xs font-semibold',
+            renderTheme === 'dark' ? 'text-slate-400' : 'text-slate-500'
+          )}
+        >
+          {searchActive ? `${visibleLogs.length} of ${logs.length} lines` : `${logs.length} lines`}
+        </div>
+      </div>
       <Virtuoso
-        className="h-full overflow-y-scroll overflow-x-hidden bg-transparent pr-2 font-mono text-sm leading-5"
+        useWindowScroll={fullScreen}
+        className={clsx(
+          'overflow-x-hidden bg-transparent font-mono text-sm leading-5',
+          fullScreen ? 'min-h-[calc(100vh-6rem)] w-full pr-14' : 'h-full overflow-y-auto pr-2'
+        )}
         ref={virtuosoRef}
-        initialTopMostItemIndex={logs.length - 1}
-        data={logs}
+        initialTopMostItemIndex={Math.max(visibleLogs.length - 1, 0)}
+        data={visibleLogs}
         components={{
           EmptyPlaceholder: () => (
-            <div className="text-gray-400 h-full flex items-center justify-center">No logs yet</div>
+            <div className={clsx('flex h-full items-center justify-center', renderTheme === 'dark' ? 'text-gray-400' : 'text-slate-500')}>
+              {searchActive ? 'No matching logs' : 'No logs yet'}
+            </div>
           ),
         }}
         followOutput={(isBottom) => (isBottom ? 'auto' : false)}
@@ -349,14 +498,16 @@ export function Logs() {
               if (event === 'metrics') {
                 logLine = renderMetricsLog(rest, expandedMetricLogIds.includes(log.id), () => {
                   toggleMetricLogExpanded(log.id)
-                })
+                }, renderTheme)
               } else {
                 logLine = (
                   <>
-                    <span className="text-yellow-600 mr-2">{event}</span>
+                    <span className={clsx('mr-2', renderTheme === 'dark' ? 'text-yellow-600' : 'text-amber-700')}>
+                      {event}
+                    </span>
                     {Object.entries(rest).map(([key, value]) => (
                       <span key={key} className="mr-2">
-                        <span className="text-gray-400">{key}=</span>
+                        <span className={renderTheme === 'dark' ? 'text-gray-400' : 'text-slate-600'}>{key}=</span>
                         <span>{insertBreaks(JSON.stringify(value))}</span>
                       </span>
                     ))}
@@ -367,7 +518,8 @@ export function Logs() {
           } else if (log.type === 'agent') {
             logLine = (
               <>
-                <span className="text-blue-600">{'[AGENT]'}</span> {logLine}
+                <span className={renderTheme === 'dark' ? 'text-blue-300' : 'frameos-primary-text'}>{'[AGENT]'}</span>{' '}
+                {logLine}
               </>
             )
           }
@@ -375,12 +527,7 @@ export function Logs() {
           return (
             <div
               key={log.id}
-              className={clsx('rounded-lg px-2 py-0.5 transition sm:flex sm:flex-row', {
-                'text-yellow-300': log.type === 'stdinfo',
-                'text-red-300': log.type === 'stderr',
-                'text-blue-300': log.type === 'agent',
-                'text-yellow-200': log.type === 'build',
-              })}
+              className={clsx('rounded-lg px-2 py-0.5 transition sm:flex sm:flex-row', logTypeClassName(log.type, renderTheme))}
             >
               <div className="flex-0 mr-3 whitespace-nowrap text-slate-500">{formatTimestamp(log.timestamp)}</div>
               <div className="flex-1 break-words" style={{ wordBreak: 'break-word' }}>
@@ -391,14 +538,16 @@ export function Logs() {
         }}
       />
       {!atBottom && (
-        <Button
-          onClick={() => virtuosoRef.current?.scrollToIndex({ index: logs.length - 1, behavior: 'smooth' })}
-          color="secondary"
-          size="small"
-          className="absolute bottom-4 right-6"
+        <button
+          type="button"
+          onClick={() => scrollToLatest()}
+          className={clsx(
+            'frameos-secondary-button z-10 rounded-full px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+            fullScreen ? 'fixed bottom-6 right-8 max-lg:right-4' : 'absolute bottom-5 right-6'
+          )}
         >
           Scroll to latest
-        </Button>
+        </button>
       )}
     </div>
   )

@@ -34,7 +34,6 @@ const frameToolPanels = [
   'metrics',
   'assets',
   'terminal',
-  'schedule',
   'ping',
   'debug',
   'settings',
@@ -297,6 +296,8 @@ export const workspaceLogic = kea<workspaceLogicType>([
     setSearch: (search: string) => ({ search }),
     setTheme: (theme: WorkspaceTheme) => ({ theme }),
     toggleTheme: true,
+    openPrimarySidebar: true,
+    collapsePrimarySidebar: true,
     openSecondarySidebar: true,
     toggleSecondarySidebar: true,
     toggleSceneNodesOpen: true,
@@ -311,6 +312,8 @@ export const workspaceLogic = kea<workspaceLogicType>([
     closeSceneControl: true,
     openTemplateDrawer: (frameId: number) => ({ frameId }),
     closeTemplateDrawer: true,
+    openScheduleDrawer: (frameId: number) => ({ frameId }),
+    closeScheduleDrawer: true,
     openChatDrawer: (frameId: number, sceneId: string | null = null) => ({ frameId, sceneId }),
     closeChatDrawer: true,
     openUtilityPanel: (panel: WorkspaceUtilityPanel) => ({ panel }),
@@ -331,6 +334,13 @@ export const workspaceLogic = kea<workspaceLogicType>([
       {
         setTheme: (_, { theme }) => theme,
         toggleTheme: (theme) => (theme === 'dark' ? 'light' : 'dark'),
+      },
+    ],
+    primarySidebarOpen: [
+      true,
+      {
+        openPrimarySidebar: () => true,
+        collapsePrimarySidebar: () => false,
       },
     ],
     secondarySidebarOpen: [
@@ -375,6 +385,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
         navigateToScene: () => null,
         openUtilityPanel: () => null,
         openTemplateDrawer: () => null,
+        openScheduleDrawer: () => null,
       },
     ],
     templateDrawerFrameId: [
@@ -387,6 +398,22 @@ export const workspaceLogic = kea<workspaceLogicType>([
         openFrameTool: () => null,
         navigateToSceneFrame: () => null,
         navigateToScene: () => null,
+        openSceneControl: () => null,
+        openScheduleDrawer: () => null,
+        openUtilityPanel: (state, { panel }) => (panel === 'scenes' ? state : null),
+      },
+    ],
+    scheduleDrawerFrameId: [
+      null as number | null,
+      {
+        openScheduleDrawer: (_, { frameId }) => frameId,
+        closeScheduleDrawer: () => null,
+        setSearch: () => null,
+        navigateToFrame: () => null,
+        openFrameTool: () => null,
+        navigateToSceneFrame: () => null,
+        navigateToScene: () => null,
+        openTemplateDrawer: () => null,
         openSceneControl: () => null,
       },
     ],
@@ -518,7 +545,8 @@ export const workspaceLogic = kea<workspaceLogicType>([
       (overviewFrameSections, frameActiveSnapshot, frameOrderSnapshot): OverviewFrameSection[] =>
         overviewFrameSections.filter(
           (section) =>
-            !section.archived && frameIsActiveInSnapshot(section.frame, frameActiveSnapshot, frameOrderSnapshot.length > 0)
+            !section.archived &&
+            frameIsActiveInSnapshot(section.frame, frameActiveSnapshot, frameOrderSnapshot.length > 0)
         ),
     ],
     overviewInactiveFrameSections: [
@@ -562,6 +590,8 @@ export const workspaceLogic = kea<workspaceLogicType>([
       closeSceneControl: preserveFramesScroll,
       openTemplateDrawer: preserveFramesScroll,
       closeTemplateDrawer: preserveFramesScroll,
+      openScheduleDrawer: preserveFramesScroll,
+      closeScheduleDrawer: preserveFramesScroll,
       openChatDrawer: preserveFramesScroll,
       closeChatDrawer: preserveFramesScroll,
       [newFrameForm.actionTypes.showForm]: preserveFramesScroll,
@@ -609,6 +639,11 @@ export const workspaceLogic = kea<workspaceLogicType>([
       const frameId = parseInt(String(id), 10)
       if (Number.isFinite(frameId)) {
         actions.selectFrame(frameId)
+      }
+      if (Number.isFinite(frameId) && searchValue(search, 'tool') === 'schedule') {
+        actions.openUtilityPanel('scenes')
+        actions.openScheduleDrawer(frameId)
+        return
       }
       actions.openUtilityPanel(frameToolFromSearch(search))
     },

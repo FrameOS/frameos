@@ -1,7 +1,7 @@
 import { useActions, useValues } from 'kea'
 import { frameLogic } from '../../frameLogic'
 import { scenesLogic } from './scenesLogic'
-import { DropdownMenu } from '../../../../components/DropdownMenu'
+import { DropdownMenu, DropdownMenuProps } from '../../../../components/DropdownMenu'
 import { PencilSquareIcon, TrashIcon, FlagIcon, PlayIcon } from '@heroicons/react/24/solid'
 import { panelsLogic } from '../panelsLogic'
 import {
@@ -23,13 +23,16 @@ import { Panel } from '../../../../types'
 interface SceneDropDownProps {
   sceneId: string
   context: 'scenes' | 'editDiagram'
+  className?: string
+  horizontal?: boolean
+  buttonColor?: DropdownMenuProps['buttonColor']
 }
 
 function isNotNull<T>(value: T | null): value is T {
   return value !== null
 }
 
-export function SceneDropDown({ sceneId, context }: SceneDropDownProps) {
+export function SceneDropDown({ sceneId, context, className, horizontal, buttonColor }: SceneDropDownProps) {
   const { frameId } = useValues(frameLogic)
   const { editScene, editSceneJSON, toggleFullScreenPanel } = useActions(panelsLogic)
   const { fullScreenPanel } = useValues(panelsLogic)
@@ -48,7 +51,9 @@ export function SceneDropDown({ sceneId, context }: SceneDropDownProps) {
   const isPreviewing = previewingSceneId === scene.id
   return (
     <DropdownMenu
-      buttonColor="secondary"
+      buttonColor={buttonColor ?? 'secondary'}
+      className={className}
+      horizontal={horizontal}
       items={[
         context === 'editDiagram'
           ? {

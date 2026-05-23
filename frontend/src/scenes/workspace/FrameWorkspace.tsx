@@ -1,10 +1,10 @@
 import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
 import { A } from 'kea-router'
 import clsx from 'clsx'
+import type { DragEvent } from 'react'
 import {
   AdjustmentsHorizontalIcon,
   BoltIcon,
-  CalendarDaysIcon,
   ChartBarIcon,
   CircleStackIcon,
   CommandLineIcon,
@@ -13,8 +13,8 @@ import {
   PhotoIcon,
   SignalIcon,
   Squares2X2Icon,
+  XMarkIcon,
 } from '@heroicons/react/24/outline'
-import { PlayIcon } from '@heroicons/react/24/solid'
 import { frameHost, frameIsHealthy, frameIsStale } from '../../decorators/frame'
 import { FrameImage } from '../../components/FrameImage'
 import { FrameScene, FrameType, LogType, MetricsType } from '../../types'
@@ -32,6 +32,7 @@ import { frameSettingsLogic } from '../frame/panels/FrameSettings/frameSettingsL
 import { logsLogic } from '../frame/panels/Logs/logsLogic'
 import { metricsLogic } from '../frame/panels/Metrics/metricsLogic'
 import { controlLogic } from '../frame/panels/Scenes/controlLogic'
+import { SceneDropDown } from '../frame/panels/Scenes/SceneDropDown'
 import { Assets } from '../frame/panels/Assets/Assets'
 import { Debug } from '../frame/panels/Debug/Debug'
 import { FrameSettings } from '../frame/panels/FrameSettings/FrameSettings'
@@ -41,6 +42,8 @@ import { Metrics } from '../frame/panels/Metrics/Metrics'
 import { Ping } from '../frame/panels/Ping/Ping'
 import { Schedule } from '../frame/panels/Schedule/Schedule'
 import { Terminal } from '../frame/panels/Terminal/Terminal'
+import { getFrameosSceneDragData, hasFrameosSceneDragData, setFrameosSceneDragData } from './sceneDrag'
+import { groupFramesByStatus } from './frameStatusGroups'
 
 interface FrameWorkspaceProps {
   id?: string
@@ -64,17 +67,11 @@ const frameToolDefinitions: FrameToolDefinition[] = [
     icon: <Squares2X2Icon className="h-5 w-5" />,
   },
   { panel: 'scenes', label: 'Scenes', description: 'Frame scenes', icon: <PhotoIcon className="h-5 w-5" /> },
-  { panel: 'preview', label: 'Live view', description: 'Current image', icon: <EyeIcon className="h-5 w-5" /> },
+  { panel: 'preview', label: 'Preview', description: 'Current image', icon: <EyeIcon className="h-5 w-5" /> },
   { panel: 'logs', label: 'Logs', description: 'Runtime output', icon: <DocumentTextIcon className="h-5 w-5" /> },
   { panel: 'metrics', label: 'Metrics', description: 'Health charts', icon: <ChartBarIcon className="h-5 w-5" /> },
   { panel: 'assets', label: 'Assets', description: 'Files on frame', icon: <CircleStackIcon className="h-5 w-5" /> },
   { panel: 'terminal', label: 'Terminal', description: 'Shell access', icon: <CommandLineIcon className="h-5 w-5" /> },
-  {
-    panel: 'schedule',
-    label: 'Schedule',
-    description: 'Scene changes',
-    icon: <CalendarDaysIcon className="h-5 w-5" />,
-  },
   { panel: 'ping', label: 'Ping', description: 'Connectivity', icon: <SignalIcon className="h-5 w-5" /> },
   { panel: 'debug', label: 'Debug', description: 'Diagnostics', icon: <BoltIcon className="h-5 w-5" /> },
   {
@@ -95,6 +92,7 @@ function parseFrameId(frameId?: string): number | null {
 
 function FrameSelector({ frame, frames }: { frame: FrameType; frames: FrameType[] }): JSX.Element {
   const { navigateToFrame } = useActions(workspaceLogic)
+  const frameGroups = groupFramesByStatus(frames)
 
   return (
     <div className="px-2">
@@ -104,10 +102,14 @@ function FrameSelector({ frame, frames }: { frame: FrameType; frames: FrameType[
         onChange={(event) => navigateToFrame(parseInt(event.target.value, 10))}
         className="frameos-form-control w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-blue-400"
       >
-        {frames.map((candidate) => (
-          <option key={candidate.id} value={candidate.id}>
-            {candidate.name || frameHost(candidate)}
-          </option>
+        {frameGroups.map((group) => (
+          <optgroup key={group.key} label={group.label}>
+            {group.frames.map((candidate) => (
+              <option key={candidate.id} value={candidate.id}>
+                {candidate.name || frameHost(candidate)}
+              </option>
+            ))}
+          </optgroup>
         ))}
       </select>
     </div>
@@ -192,44 +194,57 @@ function SceneTile({ frame, scene, active }: { frame: FrameType; scene: FrameSce
   const fieldCount = scene.fields?.filter((field) => field.access === 'public').length ?? 0
 
   return (
-    <button
-      type="button"
-      onClick={() => openSceneControl(frame.id, scene.id)}
+    <div
+      draggable
+      onDragStart={(event) => setFrameosSceneDragData(event.dataTransfer, scene.id)}
       className={clsx(
-        'frameos-card group flex h-36 w-36 shrink-0 flex-col overflow-hidden rounded-2xl border bg-white text-left transition hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+        'frameos-card group relative h-36 w-36 shrink-0 overflow-hidden rounded-2xl border bg-white text-left transition hover:-translate-y-0.5 focus-within:ring-2 focus-within:ring-blue-400',
         active
           ? `${activeSurfaceClassName} hover:shadow-[0_0_4px_4px_rgba(128,0,255,0.55)]`
           : 'border-white/90 shadow-lg shadow-slate-300/35 hover:shadow-xl hover:shadow-slate-300/50'
       )}
     >
-      <div className="frameos-card-media relative flex min-h-0 flex-1 items-center justify-center bg-slate-100">
-        <FrameImage
-          frameId={frame.id}
-          sceneId={scene.id}
-          thumb
-          refreshable={false}
-          objectFit="cover"
-          className="h-full w-full rounded-none"
-        />
-        {active ? (
-          <div className="absolute left-2 top-2 rounded-full bg-[#4a4b8c] px-2 py-0.5 text-[11px] font-semibold text-white shadow-sm">
-            Active
+      <button
+        type="button"
+        onClick={() => openSceneControl(frame.id, scene.id)}
+        className="flex h-full w-full flex-col"
+      >
+        <div className="frameos-card-media relative flex min-h-0 flex-1 items-center justify-center bg-slate-100">
+          <FrameImage
+            frameId={frame.id}
+            sceneId={scene.id}
+            thumb
+            refreshable={false}
+            objectFit="cover"
+            className="h-full w-full rounded-none"
+          />
+          {active ? (
+            <div className="absolute left-2 top-2 rounded-full bg-[#4a4b8c] px-2 py-0.5 text-[11px] font-semibold text-white shadow-sm">
+              Active
+            </div>
+          ) : null}
+          <div className="frameos-primary-hover-text absolute right-2 top-2 rounded-full bg-white/90 p-1 text-slate-400 shadow-sm transition">
+            <EyeIcon className="h-4 w-4" />
           </div>
-        ) : null}
-        <div className="frameos-primary-hover-text absolute right-2 top-2 rounded-full bg-white/90 p-1 text-slate-400 shadow-sm transition">
-          <PlayIcon className="h-4 w-4" />
         </div>
-      </div>
-      <div className="w-full px-3 py-2">
-        <div className="frameos-strong truncate text-sm font-semibold text-slate-900">
-          {scene.name || 'Untitled scene'}
+        <div className="w-full px-3 py-2">
+          <div className="frameos-strong truncate text-sm font-semibold text-slate-900">
+            {scene.name || 'Untitled scene'}
+          </div>
+          <div className="frameos-muted mt-0.5 truncate text-xs text-slate-500">
+            {scene.nodes?.length ?? 0} nodes
+            {fieldCount > 0 ? ` · ${fieldCount} controls` : ''}
+          </div>
         </div>
-        <div className="frameos-muted mt-0.5 truncate text-xs text-slate-500">
-          {scene.nodes?.length ?? 0} nodes
-          {fieldCount > 0 ? ` · ${fieldCount} controls` : ''}
-        </div>
-      </div>
-    </button>
+      </button>
+      <SceneDropDown
+        context="scenes"
+        sceneId={scene.id}
+        horizontal
+        buttonColor="none"
+        className="absolute bottom-2 right-2 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-white/90 !px-0 !py-0 text-slate-600 shadow-sm"
+      />
+    </div>
   )
 }
 
@@ -243,30 +258,75 @@ function FrameScenesSurface({
   totalScenes: number
 }): JSX.Element {
   const { search } = useValues(workspaceLogic)
+  const { openScheduleDrawer, openSceneControl } = useActions(workspaceLogic)
   const { sceneId: currentSceneId } = useValues(controlLogic({ frameId: frame.id }))
+
+  const handleScenesDragOver = (event: DragEvent<HTMLDivElement>) => {
+    if (!hasFrameosSceneDragData(event.dataTransfer)) {
+      return
+    }
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'move'
+  }
+
+  const handleScenesDrop = (event: DragEvent<HTMLDivElement>) => {
+    const sceneId = getFrameosSceneDragData(event.dataTransfer)
+    if (!sceneId || !frame.scenes?.some((scene) => scene.id === sceneId)) {
+      return
+    }
+    event.preventDefault()
+    openSceneControl(frame.id, sceneId)
+  }
+
+  const header = (
+    <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <div className="frameos-muted text-xs font-semibold uppercase tracking-wide text-slate-500">Scenes</div>
+        <h2 className="frameos-strong text-2xl font-bold tracking-normal text-slate-950">
+          {totalScenes} {totalScenes === 1 ? 'scene' : 'scenes'}
+        </h2>
+      </div>
+      <button
+        type="button"
+        onClick={() => openScheduleDrawer(frame.id)}
+        className="frameos-secondary-button rounded-full bg-white/80 px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+      >
+        Schedule
+      </button>
+    </div>
+  )
 
   if (scenes.length === 0) {
     if (totalScenes > 0 && search.trim()) {
       return (
-        <div className="frameos-empty flex h-40 min-w-64 items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white/45 px-6 text-center text-sm font-medium text-slate-500">
-          No scenes match this search.
+        <div onDragOver={handleScenesDragOver} onDrop={handleScenesDrop}>
+          {header}
+          <div className="frameos-empty flex h-40 min-w-64 items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white/45 px-6 text-center text-sm font-medium text-slate-500">
+            No scenes match this search.
+          </div>
         </div>
       )
     }
 
     return (
-      <div className="flex flex-wrap gap-4">
-        <AddSceneTile frame={frame} compact />
+      <div onDragOver={handleScenesDragOver} onDrop={handleScenesDrop}>
+        {header}
+        <div className="flex flex-wrap gap-4">
+          <AddSceneTile frame={frame} compact />
+        </div>
       </div>
     )
   }
 
   return (
-    <div className="flex flex-wrap gap-4">
-      {scenes.map((scene) => (
-        <SceneTile key={scene.id} frame={frame} scene={scene} active={sceneIsActive(scene, currentSceneId)} />
-      ))}
-      <AddSceneTile frame={frame} compact />
+    <div onDragOver={handleScenesDragOver} onDrop={handleScenesDrop}>
+      {header}
+      <div className="flex flex-wrap gap-4">
+        {scenes.map((scene) => (
+          <SceneTile key={scene.id} frame={frame} scene={scene} active={sceneIsActive(scene, currentSceneId)} />
+        ))}
+        <AddSceneTile frame={frame} compact />
+      </div>
     </div>
   )
 }
@@ -710,7 +770,7 @@ function FrameToolSurface({
 }): JSX.Element {
   if (activeTool === 'overview') return <FrameOverviewSurface frame={frame} scenes={scenes} />
   if (activeTool === 'scenes') return <FrameScenesSurface frame={frame} scenes={scenes} totalScenes={totalScenes} />
-  if (activeTool === 'logs') return <Logs />
+  if (activeTool === 'logs') return <Logs fullScreen />
   if (activeTool === 'metrics') return <Metrics scrollContainer={!pageScroll} />
   if (activeTool === 'assets') return <Assets scrollContainer={!pageScroll} />
   if (activeTool === 'terminal') return <Terminal />
@@ -730,7 +790,39 @@ function frameToolUsesWorkspaceSearch(activeTool: WorkspaceUtilityPanel): boolea
 }
 
 function frameToolUsesPageScroll(activeTool: WorkspaceUtilityPanel): boolean {
-  return activeTool !== 'preview' && activeTool !== 'logs' && activeTool !== 'terminal'
+  return activeTool !== 'preview'
+}
+
+function ScheduleDrawer({ frame }: { frame: FrameType }): JSX.Element {
+  const { closeScheduleDrawer } = useActions(workspaceLogic)
+  const frameLogicProps = { frameId: frame.id }
+
+  return (
+    <div className="frameos-drawer fixed bottom-5 right-5 top-5 z-40 w-[430px] max-w-[calc(100vw-40px)] overflow-hidden rounded-[24px] border border-white/80 bg-white/95 shadow-2xl shadow-slate-500/30 backdrop-blur-xl">
+      <BindLogic logic={frameLogic} props={frameLogicProps}>
+        <div className="flex h-full flex-col">
+          <div className="frameos-divider flex items-start justify-between gap-3 border-b border-slate-200/80 px-5 py-4">
+            <div className="min-w-0">
+              <div className="frameos-muted text-xs font-semibold uppercase tracking-wide text-slate-400">
+                {frame.name || frameHost(frame)}
+              </div>
+              <h2 className="frameos-strong truncate text-xl font-bold tracking-normal text-slate-950">Schedule</h2>
+            </div>
+            <button
+              type="button"
+              onClick={closeScheduleDrawer}
+              className="frameos-icon-button flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            >
+              <XMarkIcon className="h-6 w-6" />
+            </button>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+            <Schedule scrollContainer={false} drawerMode />
+          </div>
+        </div>
+      </BindLogic>
+    </div>
+  )
 }
 
 function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
@@ -743,8 +835,13 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
 
   const { framesList } = useValues(framesModel)
   const { frame, scenes } = useValues(frameLogic(frameLogicProps))
-  const { filteredSelectedFrameScenes, sceneControlSelection, templateDrawerFrameId, utilityPanel } =
-    useValues(workspaceLogic)
+  const {
+    filteredSelectedFrameScenes,
+    sceneControlSelection,
+    scheduleDrawerFrameId,
+    templateDrawerFrameId,
+    utilityPanel,
+  } = useValues(workspaceLogic)
   const activeTool =
     frameToolDefinitions.find((definition) => definition.panel === utilityPanel) ?? frameToolDefinitions[0]
   const visibleScenes = activeTool.panel === 'scenes' ? filteredSelectedFrameScenes : scenes
@@ -772,7 +869,15 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
             toolUsesPageScroll ? 'min-h-screen overflow-visible' : 'h-screen overflow-hidden',
             'py-6 pl-[480px] pr-8 max-lg:h-auto max-lg:overflow-visible max-lg:px-4 max-lg:pb-6 max-lg:pt-0'
           )}
-          rightPanel={templateDrawerFrameId ? <TemplateDrawer /> : sceneControlSelection ? <SceneControlPanel /> : null}
+          rightPanel={
+            templateDrawerFrameId ? (
+              <TemplateDrawer />
+            ) : scheduleDrawerFrameId === frame.id ? (
+              <ScheduleDrawer frame={frame} />
+            ) : sceneControlSelection ? (
+              <SceneControlPanel />
+            ) : null
+          }
         >
           <div className={toolUsesPageScroll ? undefined : 'h-full'}>
             <div

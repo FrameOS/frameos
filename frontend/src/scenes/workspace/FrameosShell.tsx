@@ -165,10 +165,26 @@ export function FrameosShell({
   onPrimaryAction,
   showAiButton: showAiButtonProp,
 }: FrameosShellProps): JSX.Element {
-  const { chatDrawerSelection, search, secondarySidebarOpen, selectedFrame, selectedSceneId, theme } =
-    useValues(workspaceLogic)
-  const { openChatDrawer, openSecondarySidebar, setSearch, toggleSecondarySidebar, toggleTheme } =
-    useActions(workspaceLogic)
+  const {
+    chatDrawerSelection,
+    primarySidebarOpen,
+    search,
+    secondarySidebarOpen,
+    selectedFrame,
+    selectedSceneId,
+    theme,
+  } = useValues(workspaceLogic)
+  const {
+    collapsePrimarySidebar,
+    closeScheduleDrawer,
+    closeTemplateDrawer,
+    openChatDrawer,
+    openPrimarySidebar,
+    openSecondarySidebar,
+    setSearch,
+    toggleSecondarySidebar,
+    toggleTheme,
+  } = useActions(workspaceLogic)
   const frameHref = selectedFrame ? urls.frame(selectedFrame.id) : urls.frames()
   const scenesHref = selectedFrame ? urls.scenes(selectedFrame.id, selectedSceneId ?? undefined) : urls.scenes()
   const appsHref = selectedFrame ? urls.apps(selectedFrame.id, selectedSceneId ?? undefined) : urls.apps()
@@ -189,8 +205,13 @@ export function FrameosShell({
       />
     ) : null
   const workspaceMainStyle = {
-    '--workspace-main-offset': secondarySidebarOpen ? '480px' : '128px',
+    '--workspace-main-offset': primarySidebarOpen ? (secondarySidebarOpen ? '480px' : '128px') : '0px',
   } as CSSProperties
+  const leaveSceneWorkspace = () => {
+    closeTemplateDrawer()
+    closeScheduleDrawer()
+    openSecondarySidebar()
+  }
 
   return (
     <div
@@ -199,87 +220,107 @@ export function FrameosShell({
         `frameos-theme-${theme}`
       )}
     >
-      <aside
-        className={clsx(
-          'frameos-panel fixed bottom-5 left-5 top-5 z-30 flex max-w-[calc(100vw-40px)] overflow-hidden rounded-[24px] border border-white/80 bg-white/90 shadow-2xl shadow-slate-400/30 backdrop-blur-xl transition-[width] duration-200 max-lg:static max-lg:m-4 max-lg:h-[48vh] max-lg:w-auto',
-          secondarySidebarOpen ? 'w-[420px]' : 'w-[88px]'
-        )}
-      >
-        <div
+      {primarySidebarOpen ? (
+        <aside
           className={clsx(
-            'frameos-rail flex w-[88px] shrink-0 flex-col items-center py-5',
-            secondarySidebarOpen ? 'border-r border-slate-200/80' : 'max-lg:border-r max-lg:border-slate-200/80'
+            'frameos-panel fixed bottom-5 left-5 top-5 z-30 flex max-w-[calc(100vw-40px)] overflow-hidden rounded-[24px] border border-white/80 bg-white/90 shadow-2xl shadow-slate-400/30 backdrop-blur-xl transition-[width] duration-200 max-lg:static max-lg:m-4 max-lg:h-[48vh] max-lg:w-auto',
+            secondarySidebarOpen ? 'w-[420px]' : 'w-[88px]'
           )}
         >
-          <div className="mb-8 flex h-12 w-12 items-center justify-center">
-            <img src={logo} alt="FrameOS" className="h-10 w-10" />
+          <div
+            className={clsx(
+              'frameos-rail flex w-[88px] shrink-0 flex-col items-center py-5',
+              secondarySidebarOpen ? 'border-r border-slate-200/80' : 'max-lg:border-r max-lg:border-slate-200/80'
+            )}
+          >
+            <button
+              type="button"
+              title="Collapse sidebars"
+              onClick={collapsePrimarySidebar}
+              className="frameos-icon-button mb-8 flex h-12 w-12 items-center justify-center rounded-xl transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            >
+              <img src={logo} alt="FrameOS" className="h-10 w-10" />
+            </button>
+            <nav className="flex flex-1 flex-col items-center gap-4">
+              <NavButton
+                active={mode === 'frames'}
+                href={urls.frames()}
+                title={secondarySidebarOpen && mode === 'frames' ? 'Hide frames panel' : 'Frames'}
+                onActiveClick={toggleSecondarySidebar}
+                onInactiveClick={leaveSceneWorkspace}
+              >
+                <Squares2X2Icon className="h-7 w-7" />
+              </NavButton>
+              <NavButton
+                active={mode === 'frame'}
+                href={frameHref}
+                title={secondarySidebarOpen && mode === 'frame' ? 'Hide frame panel' : 'Frame'}
+                onActiveClick={toggleSecondarySidebar}
+                onInactiveClick={mode === 'scenes' ? leaveSceneWorkspace : openSecondarySidebar}
+              >
+                <ComputerDesktopIcon className="h-7 w-7" />
+              </NavButton>
+              <NavButton
+                active={mode === 'scenes'}
+                href={scenesHref}
+                title={secondarySidebarOpen && mode === 'scenes' ? 'Hide scenes panel' : 'Scenes'}
+                onActiveClick={toggleSecondarySidebar}
+                onInactiveClick={openSecondarySidebar}
+              >
+                <RectangleGroupIcon className="h-7 w-7" />
+              </NavButton>
+              <NavButton
+                active={mode === 'apps'}
+                href={appsHref}
+                title={secondarySidebarOpen && mode === 'apps' ? 'Hide apps panel' : 'Apps'}
+                onActiveClick={toggleSecondarySidebar}
+                onInactiveClick={mode === 'scenes' ? leaveSceneWorkspace : openSecondarySidebar}
+              >
+                <CubeTransparentIcon className="h-7 w-7" />
+              </NavButton>
+            </nav>
+            <button
+              type="button"
+              title={theme === 'dark' ? 'Use light mode' : 'Use dark mode'}
+              onClick={toggleTheme}
+              className="frameos-icon-button mb-4 flex h-12 w-12 items-center justify-center rounded-xl text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            >
+              {theme === 'dark' ? <SunIcon className="h-7 w-7" /> : <MoonIcon className="h-7 w-7" />}
+            </button>
+            <NavButton
+              active={mode === 'settings'}
+              href={urls.settings()}
+              title={secondarySidebarOpen && mode === 'settings' ? 'Hide settings panel' : 'Settings'}
+              onActiveClick={toggleSecondarySidebar}
+              onInactiveClick={leaveSceneWorkspace}
+            >
+              <Cog6ToothIcon className="h-8 w-8" />
+            </NavButton>
           </div>
-          <nav className="flex flex-1 flex-col items-center gap-4">
-            <NavButton
-              active={mode === 'frames'}
-              href={urls.frames()}
-              title={secondarySidebarOpen && mode === 'frames' ? 'Hide frames panel' : 'Frames'}
-              onActiveClick={toggleSecondarySidebar}
-              onInactiveClick={openSecondarySidebar}
-            >
-              <Squares2X2Icon className="h-7 w-7" />
-            </NavButton>
-            <NavButton
-              active={mode === 'frame'}
-              href={frameHref}
-              title={secondarySidebarOpen && mode === 'frame' ? 'Hide frame panel' : 'Frame'}
-              onActiveClick={toggleSecondarySidebar}
-              onInactiveClick={openSecondarySidebar}
-            >
-              <ComputerDesktopIcon className="h-7 w-7" />
-            </NavButton>
-            <NavButton
-              active={mode === 'scenes'}
-              href={scenesHref}
-              title={secondarySidebarOpen && mode === 'scenes' ? 'Hide scenes panel' : 'Scenes'}
-              onActiveClick={toggleSecondarySidebar}
-              onInactiveClick={openSecondarySidebar}
-            >
-              <RectangleGroupIcon className="h-7 w-7" />
-            </NavButton>
-            <NavButton
-              active={mode === 'apps'}
-              href={appsHref}
-              title={secondarySidebarOpen && mode === 'apps' ? 'Hide apps panel' : 'Apps'}
-              onActiveClick={toggleSecondarySidebar}
-              onInactiveClick={openSecondarySidebar}
-            >
-              <CubeTransparentIcon className="h-7 w-7" />
-            </NavButton>
-          </nav>
-          <button
-            type="button"
-            title={theme === 'dark' ? 'Use light mode' : 'Use dark mode'}
-            onClick={toggleTheme}
-            className="frameos-icon-button mb-4 flex h-12 w-12 items-center justify-center rounded-xl text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-          >
-            {theme === 'dark' ? <SunIcon className="h-7 w-7" /> : <MoonIcon className="h-7 w-7" />}
-          </button>
-          <NavButton
-            active={mode === 'settings'}
-            href={urls.settings()}
-            title={secondarySidebarOpen && mode === 'settings' ? 'Hide settings panel' : 'Settings'}
-            onActiveClick={toggleSecondarySidebar}
-            onInactiveClick={openSecondarySidebar}
-          >
-            <Cog6ToothIcon className="h-8 w-8" />
-          </NavButton>
-        </div>
-        <div className={clsx('min-w-0 flex-1 flex-col', secondarySidebarOpen ? 'flex' : 'hidden max-lg:flex')}>
-          {sidebarHeader}
-          <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-5 pt-6">{tree}</div>
-        </div>
-      </aside>
+          <div className={clsx('min-w-0 flex-1 flex-col', secondarySidebarOpen ? 'flex' : 'hidden max-lg:flex')}>
+            {sidebarHeader}
+            <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-5 pt-6">{tree}</div>
+          </div>
+        </aside>
+      ) : (
+        <button
+          type="button"
+          title="Open sidebars"
+          onClick={openPrimarySidebar}
+          className={clsx(
+            'frameos-panel fixed z-40 flex h-14 w-14 items-center justify-center rounded-2xl border border-white/80 bg-white/90 shadow-2xl shadow-slate-400/30 backdrop-blur-xl transition hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+            mode === 'scenes' ? 'left-6 top-24 max-lg:left-5 max-lg:top-5' : 'left-5 top-5'
+          )}
+        >
+          <img src={logo} alt="FrameOS" className="h-10 w-10" />
+        </button>
+      )}
       <main
         data-workspace-main={mode}
         style={workspaceMainStyle}
         className={clsx(
           'workspace-main',
+          !primarySidebarOpen && 'workspace-main-primary-collapsed',
           workspaceRightPanel && 'workspace-main-with-right-panel',
           mainClassName ??
             'h-screen overflow-y-auto py-6 pr-8 max-lg:h-auto max-lg:overflow-visible max-lg:px-4 max-lg:pb-6 max-lg:pt-0'

@@ -178,13 +178,25 @@ function Diagram_({ sceneId, showToolbar = true }: DiagramProps) {
     (event: any) => {
       event.preventDefault()
       const reactFlowBounds = reactFlowWrapper.current?.getBoundingClientRect()
-      const { keyword, type } = JSON.parse(event.dataTransfer.getData('application/reactflow') ?? '{}')
+      const reactFlowData = event.dataTransfer.getData('application/reactflow')
+      if (!reactFlowData) {
+        return
+      }
+      let keyword: string | undefined
+      let type: string | undefined
+      try {
+        const parsed = JSON.parse(reactFlowData)
+        keyword = parsed.keyword
+        type = parsed.type
+      } catch {
+        return
+      }
       if (typeof keyword === 'string') {
         const position = reactFlowInstance?.project({
           x: event.clientX - (reactFlowBounds?.left ?? 0),
           y: event.clientY - (reactFlowBounds?.top ?? 0),
         }) ?? { x: 0, y: 0 }
-        keywordDropped(keyword, type, position)
+        keywordDropped(keyword, typeof type === 'string' ? type : '', position)
       }
     },
     [reactFlowInstance, nodes]

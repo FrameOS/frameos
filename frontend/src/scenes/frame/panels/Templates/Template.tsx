@@ -2,14 +2,7 @@ import { TemplateType } from '../../../../types'
 import { H6 } from '../../../../components/H6'
 import { ArrowDownTrayIcon, PencilSquareIcon, TrashIcon, ExclamationTriangleIcon } from '@heroicons/react/24/solid'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
-import {
-  FolderPlusIcon,
-  CloudArrowDownIcon,
-  DocumentPlusIcon,
-  DocumentIcon,
-  CheckIcon,
-} from '@heroicons/react/24/outline'
-import { PlayIcon } from '@heroicons/react/24/solid'
+import { FolderPlusIcon, CloudArrowDownIcon, DocumentPlusIcon, CheckIcon, EyeIcon } from '@heroicons/react/24/outline'
 import { Button } from '../../../../components/Button'
 import { useEntityImage } from '../../../../models/entityImagesModel'
 import { useMemo, useState } from 'react'
@@ -88,8 +81,8 @@ export function TemplateRow({
   return (
     <div
       className={clsx(
-        '@container border rounded-lg shadow bg-gray-900 break-inside-avoid p-2 space-y-1',
-        'border-gray-700'
+        'frame-tool-card @container break-inside-avoid space-y-2 rounded-[18px] p-3 transition',
+        installedTemplatesByName[template.name] ? 'border-[#4a4b8c]/50' : ''
       )}
     >
       <div className="flex items-start justify-between gap-2">
@@ -102,7 +95,7 @@ export function TemplateRow({
             }
           >
             <div
-              className="w-[90px] h-[90px] border bg-cover bg-center flex-shrink-0 cursor-zoom-in"
+              className="h-[90px] w-[90px] flex-shrink-0 cursor-zoom-in rounded-2xl border border-slate-500/20 bg-cover bg-center"
               style={{ backgroundImage: `url(${JSON.stringify(imageUrl)})` }}
             />
           </Tooltip>
@@ -127,9 +120,9 @@ export function TemplateRow({
                     openTrySceneModal()
                   }}
                   disabled={tryLoading || !frameId}
-                  title="Run this interpreted scene on the frame"
+                  title="Preview this interpreted scene on the frame"
                 >
-                  <PlayIcon className="w-5 h-5" />
+                  <EyeIcon className="w-5 h-5" />
                 </Button>
               ) : null}
               {applyTemplate ? (
@@ -214,7 +207,7 @@ export function TemplateRow({
           </div>
 
           <div className="flex items-center gap-2 w-full justify-between">
-            {template.description && <div className="text-white text-sm">{template.description}</div>}
+            {template.description ? <div className="frame-tool-muted text-sm">{template.description}</div> : null}
           </div>
           {missingSecretSettings.size ? (
             <div className="flex flex-wrap gap-2 pt-1">
@@ -224,7 +217,7 @@ export function TemplateRow({
                   <button
                     key={settingKey}
                     type="button"
-                    className="inline-flex items-center rounded border border-gray-400/80 bg-gray-950 px-2 py-0.5 text-xs font-semibold uppercase text-gray-300 hover:bg-gray-900"
+                    className="inline-flex items-center rounded-full border border-amber-400/40 bg-amber-500/10 px-2 py-0.5 text-xs font-semibold uppercase text-amber-500 hover:bg-amber-500/15"
                     onClick={() => setActiveSettingsKey(settingKey)}
                   >
                     <ExclamationTriangleIcon className="mr-1 h-3 w-3 text-yellow-300" />
@@ -248,7 +241,7 @@ export function TemplateRow({
         <Modal
           open={trySceneModalOpen}
           onClose={closeTrySceneModal}
-          title={`Run "${trySceneConfig.mainScene.name || template.name}"`}
+          title={`Preview "${trySceneConfig.mainScene.name || template.name}"`}
         >
           <Form
             logic={templateRowLogic}
@@ -273,14 +266,14 @@ export function TemplateRow({
                 ))}
               </div>
             ) : (
-              <div>This scene does not export publicly controllable state.</div>
+              <div className="frame-tool-muted text-sm">This scene does not export publicly controllable state.</div>
             )}
-            <div className="flex justify-end gap-2 border-t border-gray-600 pt-4">
+            <div className="flex justify-end gap-2 border-t border-slate-500/20 pt-4">
               <Button onClick={closeTrySceneModal} color="secondary">
                 Cancel
               </Button>
               <Button onClick={submitTrySceneState} color="primary" disabled={tryLoading}>
-                {tryLoading ? 'Running…' : 'Run scene'}
+                {tryLoading ? 'Previewing…' : 'Preview scene'}
               </Button>
             </div>
           </Form>

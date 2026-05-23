@@ -1,16 +1,18 @@
 import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
 import clsx from 'clsx'
 import {
+  CalendarDaysIcon,
   ChevronDownIcon,
   ChevronRightIcon,
   CodeBracketIcon,
   CubeTransparentIcon,
+  EyeIcon,
   ListBulletIcon,
   PhotoIcon,
   ServerStackIcon,
   XMarkIcon,
 } from '@heroicons/react/24/outline'
-import { PlayIcon } from '@heroicons/react/24/solid'
+import type { DragEvent } from 'react'
 import { FrameImage } from '../../components/FrameImage'
 import { framesModel } from '../../models/framesModel'
 import { frameHost } from '../../decorators/frame'
@@ -30,6 +32,10 @@ import { SceneState } from '../frame/panels/SceneState/SceneState'
 import { scenesLogic } from '../frame/panels/Scenes/scenesLogic'
 import { EditTemplateModal } from '../frame/panels/Templates/EditTemplateModal'
 import { ExpandedScene } from '../frame/panels/Scenes/ExpandedScene'
+import { Schedule } from '../frame/panels/Schedule/Schedule'
+import { SceneDropDown } from '../frame/panels/Scenes/SceneDropDown'
+import { getFrameosSceneDragData, hasFrameosSceneDragData, setFrameosSceneDragData } from './sceneDrag'
+import { groupFramesByStatus } from './frameStatusGroups'
 
 interface SceneWorkspaceProps {
   frameId?: string
@@ -47,7 +53,8 @@ interface UtilityDefinition {
 }
 
 const utilityDefinitions: UtilityDefinition[] = [
-  { panel: 'state', label: 'State', icon: <PlayIcon className="h-5 w-5" /> },
+  { panel: 'state', label: 'Preview', icon: <EyeIcon className="h-5 w-5" /> },
+  { panel: 'schedule', label: 'Schedule', icon: <CalendarDaysIcon className="h-5 w-5" /> },
   { panel: 'apps', label: 'Apps', icon: <CubeTransparentIcon className="h-5 w-5" /> },
   { panel: 'events', label: 'Events', icon: <ListBulletIcon className="h-5 w-5" /> },
   { panel: 'source', label: 'Source', icon: <CodeBracketIcon className="h-5 w-5" /> },
@@ -93,6 +100,25 @@ function SceneSelector({
   selectedSceneId: string | null
 }): JSX.Element {
   const { navigateToScene, navigateToSceneFrame } = useActions(workspaceLogic)
+  const { linkedActiveSceneId, undeployedSceneIds, unsavedSceneIds } = useValues(scenesLogic({ frameId: frame.id }))
+  const frameGroups = groupFramesByStatus(frames)
+
+  const handleSceneListDragOver = (event: DragEvent<HTMLDivElement>) => {
+    if (!hasFrameosSceneDragData(event.dataTransfer)) {
+      return
+    }
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'move'
+  }
+
+  const handleSceneListDrop = (event: DragEvent<HTMLDivElement>) => {
+    const sceneId = getFrameosSceneDragData(event.dataTransfer)
+    if (!sceneId || !scenes.some((scene) => scene.id === sceneId)) {
+      return
+    }
+    event.preventDefault()
+    navigateToScene(frame.id, sceneId)
+  }
 
   return (
     <div className="space-y-3 px-2">
@@ -103,34 +129,81 @@ function SceneSelector({
           onChange={(event) => navigateToSceneFrame(parseInt(event.target.value, 10))}
           className="frameos-form-control min-h-12 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-blue-400"
         >
-          {frames.map((candidate) => (
-            <option key={candidate.id} value={candidate.id}>
-              {candidate.name || frameHost(candidate)}
-            </option>
+          {frameGroups.map((group) => (
+            <optgroup key={group.key} label={group.label}>
+              {group.frames.map((candidate) => (
+                <option key={candidate.id} value={candidate.id}>
+                  {candidate.name || frameHost(candidate)}
+                </option>
+              ))}
+            </optgroup>
           ))}
         </select>
       </div>
-      <div>
-        <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-400">Scene</label>
-        <select
-          value={selectedSceneId ?? ''}
-          onChange={(event) => {
-            if (event.target.value) {
-              navigateToScene(frame.id, event.target.value)
-            }
-          }}
-          className="frameos-form-control min-h-12 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-blue-400"
-        >
-          {scenes.length === 0 ? (
-            <option value="">No scenes</option>
-          ) : (
-            scenes.map((scene) => (
-              <option key={scene.id} value={scene.id}>
-                {scene.name || 'Untitled scene'}
-              </option>
-            ))
-          )}
-        </select>
+      <div onDragOver={handleSceneListDragOver} onDrop={handleSceneListDrop}>
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <label className="block text-xs font-semibold uppercase tracking-wide text-slate-400">Scenes</label>
+          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
+            {scenes.length}
+          </span>
+        </div>
+        {scenes.length === 0 ? (
+          <div className="frameos-muted rounded-xl px-3 py-2 text-sm text-slate-400">No scenes</div>
+        ) : (
+          <div className="space-y-1">
+            {scenes.map((scene) => {
+              const selected = scene.id === selectedSceneId
+              const active = scene.id === linkedActiveSceneId
+              const changed = unsavedSceneIds.has(scene.id) || undeployedSceneIds.has(scene.id)
+
+              return (
+                <div
+                  key={scene.id}
+                  draggable
+                  onDragStart={(event) => setFrameosSceneDragData(event.dataTransfer, scene.id)}
+                  className={clsx(
+                    'group flex items-center gap-1.5 rounded-xl transition',
+                    selected ? 'frameos-primary-soft-active' : 'frameos-frame-row text-slate-700'
+                  )}
+                >
+                  <button
+                    type="button"
+                    onClick={() => navigateToScene(frame.id, scene.id)}
+                    className="flex min-w-0 flex-1 items-center gap-2 rounded-xl px-3 py-2 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                  >
+                    <span className="frameos-card-media relative h-10 w-12 shrink-0 overflow-hidden rounded-lg border border-white/70 bg-slate-100 shadow-sm">
+                      <FrameImage
+                        frameId={frame.id}
+                        sceneId={scene.id}
+                        thumb
+                        refreshable={false}
+                        objectFit="cover"
+                        className="h-full w-full rounded-none"
+                      />
+                      <span
+                        className={clsx(
+                          'absolute bottom-1 right-1 h-2.5 w-2.5 rounded-full ring-2 ring-white',
+                          active ? 'bg-[#4a4b8c]' : changed ? 'bg-amber-400' : 'bg-slate-300'
+                        )}
+                      />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="frameos-strong block truncate text-sm font-semibold text-slate-700">
+                        {scene.name || 'Untitled scene'}
+                      </span>
+                      <span className="frameos-muted block truncate text-xs text-slate-400">
+                        {scene.nodes?.length ?? 0} nodes{active ? ' · active' : ''}
+                      </span>
+                    </span>
+                  </button>
+                  <div className="pr-1">
+                    <SceneDropDown context="scenes" sceneId={scene.id} />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
       </div>
     </div>
   )
@@ -356,6 +429,100 @@ function SceneEditorTopBar({ sceneId }: { sceneId: string | null }): JSX.Element
   )
 }
 
+function SceneEditorTopBarLoadingPlaceholder(): JSX.Element {
+  return (
+    <div className="mb-4 flex items-center justify-between gap-4 max-md:flex-col max-md:items-stretch">
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        {[0, 1, 2, 3].map((index) => (
+          <div key={index} className="frameos-skeleton-surface h-10 w-10 animate-pulse rounded-full" />
+        ))}
+      </div>
+      <div className="flex flex-wrap justify-end gap-2">
+        {[0, 1, 2, 3, 4, 5].map((index) => (
+          <div key={index} className="frameos-skeleton-surface h-11 w-11 animate-pulse rounded-full" />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function SceneTreeLoadingPlaceholder(): JSX.Element {
+  return (
+    <div className="space-y-4 px-2">
+      <div>
+        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Frame</div>
+        <div className="frameos-skeleton-surface h-12 animate-pulse rounded-xl" />
+      </div>
+      <div>
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Scenes</div>
+          <div className="frameos-skeleton-line h-5 w-8 animate-pulse rounded-full" />
+        </div>
+        <div className="space-y-1">
+          {[0, 1, 2, 3].map((index) => (
+            <div key={index} className="frameos-skeleton-surface flex items-center gap-2 rounded-xl px-3 py-2">
+              <div className="frameos-skeleton-media h-2.5 w-2.5 shrink-0 animate-pulse rounded-full" />
+              <div className="min-w-0 flex-1 space-y-2">
+                <div className="frameos-skeleton-line h-3 w-32 max-w-full animate-pulse rounded-full" />
+                <div className="frameos-skeleton-line h-2 w-20 max-w-full animate-pulse rounded-full opacity-70" />
+              </div>
+              <div className="frameos-skeleton-line h-8 w-8 shrink-0 animate-pulse rounded-xl" />
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="frameos-inset rounded-2xl border border-slate-200 bg-white/55 p-3">
+        <div className="frameos-skeleton-line h-3 w-28 animate-pulse rounded-full" />
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {[0, 1, 2].map((index) => (
+            <div key={index} className="frameos-skeleton-line h-6 w-16 animate-pulse rounded-full" />
+          ))}
+        </div>
+        <div className="mt-3 grid grid-cols-3 gap-2">
+          {[0, 1, 2].map((index) => (
+            <div key={index} className="frameos-skeleton-surface h-8 animate-pulse rounded-full" />
+          ))}
+        </div>
+      </div>
+      <div className="frameos-skeleton-surface mx-2 h-32 overflow-hidden rounded-2xl">
+        <div className="frameos-skeleton-media h-full animate-pulse" />
+      </div>
+      <div>
+        <div className="mb-2 flex items-center gap-2 px-2">
+          <div className="frameos-skeleton-media h-4 w-4 animate-pulse rounded" />
+          <div className="frameos-skeleton-line h-3 w-20 animate-pulse rounded-full" />
+        </div>
+        <div className="space-y-1">
+          {[0, 1, 2].map((index) => (
+            <div key={index} className="flex items-center gap-2 rounded-xl px-3 py-1.5">
+              <div className="frameos-skeleton-surface h-8 w-8 shrink-0 animate-pulse rounded-lg" />
+              <div className="min-w-0 flex-1 space-y-2">
+                <div className="frameos-skeleton-line h-3 w-28 max-w-full animate-pulse rounded-full" />
+                <div className="frameos-skeleton-line h-2 w-16 max-w-full animate-pulse rounded-full opacity-70" />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function SceneCanvasLoadingPlaceholder(): JSX.Element {
+  return (
+    <div className="scene-editor-canvas h-[calc(100vh-5.25rem)] min-h-[34rem] overflow-hidden rounded-[24px] border border-white/80 bg-white/35 p-5 shadow-lg shadow-slate-300/20">
+      <div className="relative h-full overflow-hidden rounded-[20px]">
+        <div className="frameos-skeleton-surface absolute left-[8%] top-[12%] h-20 w-52 animate-pulse rounded-2xl" />
+        <div className="frameos-skeleton-surface absolute right-[10%] top-[18%] h-20 w-52 animate-pulse rounded-2xl" />
+        <div className="frameos-skeleton-surface absolute bottom-[24%] left-[26%] h-20 w-56 animate-pulse rounded-2xl" />
+        <div className="frameos-skeleton-surface absolute bottom-[16%] right-[18%] h-20 w-48 animate-pulse rounded-2xl" />
+        <div className="frameos-skeleton-line absolute left-[28%] top-[22%] h-1 w-[28%] rotate-6 animate-pulse rounded-full opacity-70" />
+        <div className="frameos-skeleton-line absolute left-[42%] top-[46%] h-1 w-[22%] -rotate-12 animate-pulse rounded-full opacity-70" />
+      </div>
+    </div>
+  )
+}
+
 function UtilityDrawer({ frameId, scene }: { frameId: number; scene: FrameScene | null }): JSX.Element | null {
   const { utilityPanel } = useValues(workspaceLogic)
   const { closeUtilityPanel, openUtilityPanel } = useActions(workspaceLogic)
@@ -380,14 +547,15 @@ function UtilityDrawer({ frameId, scene }: { frameId: number; scene: FrameScene 
     }
     if (utilityPanel === 'apps') return <Apps />
     if (utilityPanel === 'events') return <Events />
+    if (utilityPanel === 'schedule') return <Schedule scrollContainer={false} drawerMode />
     if (utilityPanel === 'source') return <SceneSource />
     if (utilityPanel === 'json') return scene ? <SceneJSON sceneId={scene.id} /> : <div>Select a scene first.</div>
     return null
   }
 
   return (
-    <div className="fixed bottom-5 right-5 top-5 z-40 flex w-[430px] max-w-[calc(100vw-40px)] overflow-hidden rounded-[24px] border border-slate-800 bg-slate-950 text-white shadow-2xl shadow-slate-500/30">
-      <div className="flex w-[72px] shrink-0 flex-col items-center gap-2 border-r border-white/10 py-4">
+    <div className="frameos-drawer fixed bottom-5 right-5 top-5 z-40 flex w-[430px] max-w-[calc(100vw-40px)] overflow-hidden rounded-[24px] border border-white/80 bg-white/95 text-slate-900 shadow-2xl shadow-slate-500/30 backdrop-blur-xl">
+      <div className="frameos-divider flex w-[72px] shrink-0 flex-col items-center gap-2 border-r border-slate-200/80 py-4">
         {utilityDefinitions.map((definition) => (
           <button
             key={definition.panel}
@@ -395,10 +563,10 @@ function UtilityDrawer({ frameId, scene }: { frameId: number; scene: FrameScene 
             title={definition.label}
             onClick={() => openUtilityPanel(definition.panel)}
             className={clsx(
-              'flex h-11 w-11 items-center justify-center rounded-xl transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+              'frameos-icon-button flex h-11 w-11 items-center justify-center rounded-xl transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
               utilityPanel === definition.panel
                 ? 'frameos-primary-active text-white'
-                : 'text-slate-400 hover:bg-white/10 hover:text-white'
+                : 'text-slate-400 hover:bg-slate-100 hover:text-slate-700'
             )}
           >
             {definition.icon}
@@ -406,15 +574,17 @@ function UtilityDrawer({ frameId, scene }: { frameId: number; scene: FrameScene 
         ))}
       </div>
       <div className="flex min-w-0 flex-1 flex-col">
-        <div className="flex items-center justify-between gap-3 border-b border-white/10 px-5 py-4">
+        <div className="frameos-divider flex items-center justify-between gap-3 border-b border-slate-200/80 px-5 py-4">
           <div className="min-w-0">
-            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Tools</div>
-            <h2 className="truncate text-xl font-bold tracking-normal">{activeDefinition.label}</h2>
+            <div className="frameos-muted text-xs font-semibold uppercase tracking-wide text-slate-500">Tools</div>
+            <h2 className="frameos-strong truncate text-xl font-bold tracking-normal text-slate-950">
+              {activeDefinition.label}
+            </h2>
           </div>
           <button
             type="button"
             onClick={closeUtilityPanel}
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-slate-400 transition hover:bg-white/10 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            className="frameos-icon-button flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
           >
             <XMarkIcon className="h-6 w-6" />
           </button>
@@ -425,12 +595,34 @@ function UtilityDrawer({ frameId, scene }: { frameId: number; scene: FrameScene 
   )
 }
 
-function SceneCanvas({ selectedSceneId }: { selectedSceneId: string | null }): JSX.Element {
-  const { openUtilityPanel } = useActions(workspaceLogic)
+function SceneCanvas({ frameId, selectedSceneId }: { frameId: number; selectedSceneId: string | null }): JSX.Element {
+  const { openUtilityPanel, navigateToScene } = useActions(workspaceLogic)
+
+  const handleSceneDragOver = (event: DragEvent<HTMLDivElement>) => {
+    if (!hasFrameosSceneDragData(event.dataTransfer)) {
+      return
+    }
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'move'
+  }
+
+  const handleSceneDrop = (event: DragEvent<HTMLDivElement>) => {
+    const sceneId = getFrameosSceneDragData(event.dataTransfer)
+    if (!sceneId) {
+      return
+    }
+    event.preventDefault()
+    event.stopPropagation()
+    navigateToScene(frameId, sceneId)
+  }
 
   if (!selectedSceneId) {
     return (
-      <div className="flex h-[calc(100vh-6rem)] items-center justify-center rounded-[24px] border border-white/80 bg-white/55 text-slate-500 shadow-lg shadow-slate-300/25">
+      <div
+        className="flex h-[calc(100vh-6rem)] items-center justify-center rounded-[24px] border border-white/80 bg-white/55 text-slate-500 shadow-lg shadow-slate-300/25"
+        onDragOver={handleSceneDragOver}
+        onDrop={handleSceneDrop}
+      >
         <div className="text-center">
           <PhotoIcon className="mx-auto mb-3 h-10 w-10 text-slate-300" />
           <div className="text-lg font-semibold text-slate-700">No scene selected</div>
@@ -441,7 +633,11 @@ function SceneCanvas({ selectedSceneId }: { selectedSceneId: string | null }): J
   }
 
   return (
-    <div className="scene-editor-canvas h-[calc(100vh-5.25rem)] min-h-[34rem] overflow-hidden">
+    <div
+      className="scene-editor-canvas h-[calc(100vh-5.25rem)] min-h-[34rem] overflow-hidden"
+      onDragOverCapture={handleSceneDragOver}
+      onDropCapture={handleSceneDrop}
+    >
       <Diagram sceneId={selectedSceneId} showToolbar={false} />
       <button
         type="button"
@@ -463,8 +659,14 @@ function SceneWorkspaceFrame({ frameId }: SceneWorkspaceFrameProps): JSX.Element
 
   if (!frame) {
     return (
-      <FrameosShell mode="scenes" title="Scenes" tree={<div className="px-3 py-2 text-slate-400">Loading...</div>}>
-        <div className="flex h-[60vh] items-center justify-center text-slate-500">Loading frame...</div>
+      <FrameosShell
+        mode="scenes"
+        title="Scenes"
+        tree={<SceneTreeLoadingPlaceholder />}
+        topBar={<SceneEditorTopBarLoadingPlaceholder />}
+        mainClassName="h-screen overflow-hidden py-5 pl-[456px] pr-5 max-lg:h-auto max-lg:overflow-visible max-lg:px-4"
+      >
+        <SceneCanvasLoadingPlaceholder />
       </FrameosShell>
     )
   }
@@ -494,7 +696,7 @@ function SceneWorkspaceFrame({ frameId }: SceneWorkspaceFrameProps): JSX.Element
           mainClassName="h-screen overflow-hidden py-5 pl-[456px] pr-5 max-lg:h-auto max-lg:overflow-visible max-lg:px-4"
           rightPanel={activeUtilityDefinition ? <UtilityDrawer frameId={frameId} scene={selectedScene} /> : null}
         >
-          <SceneCanvas selectedSceneId={resolvedSceneId} />
+          <SceneCanvas frameId={frame.id} selectedSceneId={resolvedSceneId} />
         </FrameosShell>
         <EditTemplateModal />
       </BindLogic>
@@ -505,10 +707,30 @@ function SceneWorkspaceFrame({ frameId }: SceneWorkspaceFrameProps): JSX.Element
 export function SceneWorkspace({ frameId, sceneId }: SceneWorkspaceProps): JSX.Element {
   useMountedLogic(sceneWorkspaceLogic({ routeFrameId: frameId ?? null, routeSceneId: sceneId ?? null }))
   const { selectedFrame } = useValues(workspaceLogic)
-  const { activeFramesList } = useValues(framesModel)
+  const { activeFramesList, framesLoading } = useValues(framesModel)
+  const routeFrameId = frameId ? parseInt(frameId, 10) : null
+
+  if (routeFrameId && Number.isFinite(routeFrameId)) {
+    return <SceneWorkspaceFrame frameId={routeFrameId} />
+  }
+
   const firstFrame = selectedFrame ?? activeFramesList[0] ?? null
 
   if (!firstFrame) {
+    if (framesLoading) {
+      return (
+        <FrameosShell
+          mode="scenes"
+          title="Scenes"
+          tree={<SceneTreeLoadingPlaceholder />}
+          topBar={<SceneEditorTopBarLoadingPlaceholder />}
+          mainClassName="h-screen overflow-hidden py-5 pl-[456px] pr-5 max-lg:h-auto max-lg:overflow-visible max-lg:px-4"
+        >
+          <SceneCanvasLoadingPlaceholder />
+        </FrameosShell>
+      )
+    }
+
     return (
       <FrameosShell
         mode="scenes"

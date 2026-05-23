@@ -10,6 +10,8 @@ import { frameLogic } from '../../frameLogic'
 import { ParentSize } from '@visx/responsive'
 import { BrushChart } from './BrushChart'
 import { Select } from '../../../../components/Select'
+import { workspaceLogic } from '../../../workspace/workspaceLogic'
+import { metricChartThemes, themeMetricSeries } from './chartTheme'
 
 const metricLabels: Record<string, string> = {
   load: 'Load',
@@ -25,6 +27,7 @@ interface MetricsProps {
 
 export function Metrics({ scrollContainer = true }: MetricsProps = {}) {
   const { frameId } = useValues(frameLogic)
+  const { theme } = useValues(workspaceLogic)
   const {
     metrics,
     metricsByCategory,
@@ -44,6 +47,7 @@ export function Metrics({ scrollContainer = true }: MetricsProps = {}) {
     selectedTimeRangePreset === 'custom'
       ? [...metricsTimeRangeOptions, { value: 'custom' as const, label: 'Custom' }]
       : metricsTimeRangeOptions
+  const chartTheme = metricChartThemes[theme]
 
   return metricsLoading ? (
     <div className="frame-tool-panel frame-tool-card flex h-full items-center justify-center rounded-[22px] text-sm frame-tool-muted">
@@ -69,11 +73,12 @@ export function Metrics({ scrollContainer = true }: MetricsProps = {}) {
           onChange={(value) => setSelectedTimeRangePreset(value as MetricsTimeRangePreset)}
         />
         <div className="frame-tool-muted text-sm">
-          {metrics.length} datapoint{metrics.length === 1 ? '' : 's'}
+          {metrics.length} datapoint{metrics.length === 1 ? '' : 's'} loaded
         </div>
       </div>
       {Object.entries(metricsByCategory).map(([key, series]) => {
-        const visibleSeries = visibleMetricsByCategory[key] ?? []
+        const themedSeries = themeMetricSeries(series, chartTheme)
+        const visibleSeries = themeMetricSeries(visibleMetricsByCategory[key] ?? [], chartTheme)
         return (
           <div key={key} className="frame-tool-card mb-3 overflow-hidden rounded-[22px]">
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 text-sm">
@@ -82,7 +87,7 @@ export function Metrics({ scrollContainer = true }: MetricsProps = {}) {
                 <span className="frame-tool-muted">{latestMetricSummariesByCategory[key]}</span>
               ) : null}
               {series.length > 1 &&
-                series.map((chartSeries) => {
+                themedSeries.map((chartSeries) => {
                   const hidden = hiddenMetricSeries[metricSeriesVisibilityKey(key, chartSeries.key)]
                   return (
                     <button
@@ -103,7 +108,12 @@ export function Metrics({ scrollContainer = true }: MetricsProps = {}) {
                   )
                 })}
             </div>
-            <div className="h-[200px] bg-slate-950/95 p-0 text-white">
+            <div
+              className={clsx(
+                'h-[200px] p-0',
+                theme === 'dark' ? 'bg-[#18181b] text-white' : 'bg-white/70 text-slate-900'
+              )}
+            >
               <ParentSize>
                 {(parent) => (
                   <BrushChart
@@ -116,6 +126,7 @@ export function Metrics({ scrollContainer = true }: MetricsProps = {}) {
                     gapThresholdMs={metricGapThresholdMs}
                     onTimeRangeChange={setSelectedTimeRange}
                     onResetTimeRange={resetSelectedTimeRange}
+                    chartTheme={chartTheme}
                   />
                 )}
               </ParentSize>

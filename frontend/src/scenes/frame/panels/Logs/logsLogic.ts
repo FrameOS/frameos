@@ -37,6 +37,18 @@ function formatLogLine(log: LogType): string {
   return `[${isoTimestamp}] (${log.type}) ${log.line}`
 }
 
+function logMatchesSearch(log: LogType, search: string): boolean {
+  const normalizedSearch = search.trim().toLowerCase()
+  if (!normalizedSearch) {
+    return true
+  }
+  return [log.timestamp, log.type, log.ip, log.line].some((value) =>
+    String(value ?? '')
+      .toLowerCase()
+      .includes(normalizedSearch)
+  )
+}
+
 function fileNameFromContentDisposition(header: string | null): string | null {
   if (!header) {
     return null
@@ -58,6 +70,7 @@ export const logsLogic = kea<logsLogicType>([
     downloadLog: true,
     downloadFullLog: true,
     setFullLogDownloading: (downloading: boolean) => ({ downloading }),
+    setLogSearch: (search: string) => ({ search }),
   }),
   loaders(({ props }) => ({
     logs: [
@@ -90,8 +103,24 @@ export const logsLogic = kea<logsLogicType>([
         setFullLogDownloading: (_, { downloading }) => downloading,
       },
     ],
+    logSearch: [
+      '',
+      {
+        setLogSearch: (_, { search }) => search,
+      },
+    ],
   })),
   selectors({
+    filteredLogs: [
+      (selectors) => [selectors.logs, selectors.logSearch],
+      (logs, logSearch) => {
+        const normalizedSearch = logSearch.trim()
+        if (!normalizedSearch) {
+          return logs
+        }
+        return logs.filter((log) => logMatchesSearch(log, normalizedSearch))
+      },
+    ],
     ipAddresses: [
       (selectors) => [selectors.logs],
       (logs) => {

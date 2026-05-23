@@ -50,6 +50,7 @@ export const framesModel = kea<framesModelType>([
     setDeployWithAgent: (id: number, deployWithAgent: boolean) => ({ id, deployWithAgent }),
     setFrameArchived: (id: number, archived: boolean) => ({ id, archived }),
     toggleArchivedFramesExpanded: true,
+    toggleInactiveFramesExpanded: true,
   }),
   loaders(({ values }) => ({
     frames: [
@@ -152,6 +153,13 @@ export const framesModel = kea<framesModelType>([
       { persist: true, storageKey: 'framesModel.archivedFramesExpanded' },
       {
         toggleArchivedFramesExpanded: (state) => !state,
+      },
+    ],
+    inactiveFramesExpanded: [
+      true,
+      { persist: true, storageKey: 'framesModel.inactiveFramesExpanded' },
+      {
+        toggleInactiveFramesExpanded: (state) => !state,
       },
     ],
   })),

@@ -21,6 +21,7 @@ export const scheduleLogic = kea<scheduleLogicType>([
 
   actions({
     addEvent: () => ({ event: newScheduledEvent() }),
+    addEventForScene: (sceneId: string) => ({ event: newScheduledEvent(sceneId) }),
     editEvent: (id: string) => ({ id }),
     closeEvent: (id: string) => ({ id }),
     deleteEvent: (id: string) => ({ id }),
@@ -33,6 +34,7 @@ export const scheduleLogic = kea<scheduleLogicType>([
       {} as Record<string, boolean>,
       {
         addEvent: (state, { event }) => ({ ...state, [event.id]: true }),
+        addEventForScene: (state, { event }) => ({ ...state, [event.id]: true }),
         editEvent: (state, { id }) => ({ ...state, [id]: true }),
         closeEvent: (state, { id }) => {
           const { [id]: _, ...rest } = state
@@ -95,11 +97,11 @@ export const scheduleLogic = kea<scheduleLogicType>([
       (s) => [s.events, s.sort, s.sceneNames],
       (events, sort, sceneNames) => {
         if (sort === 'day') {
-          return events.sort((a, b) => a.weekday - b.weekday)
+          return [...events].sort((a, b) => a.weekday - b.weekday)
         } else if (sort === 'hour') {
-          return events.sort((a, b) => (a.hour === b.hour ? a.minute - b.minute : a.hour - b.hour))
+          return [...events].sort((a, b) => (a.hour === b.hour ? a.minute - b.minute : a.hour - b.hour))
         } else if (sort === 'scene') {
-          return events.sort((a, b) =>
+          return [...events].sort((a, b) =>
             (sceneNames[a.payload.sceneId ?? ''] || a.payload.sceneId).localeCompare(
               sceneNames[b.payload.sceneId ?? ''] || b.payload.sceneId
             )
@@ -112,24 +114,33 @@ export const scheduleLogic = kea<scheduleLogicType>([
 
   listeners(({ actions, values }) => ({
     addEvent: ({ event }) => {
-      actions.setFrameFormValues({ ...values.frameForm, schedule: { events: [...values.events, event] } })
+      actions.setFrameFormValues({
+        ...values.frameForm,
+        schedule: { ...values.schedule, events: [...values.events, event] },
+      })
+    },
+    addEventForScene: ({ event }) => {
+      actions.setFrameFormValues({
+        ...values.frameForm,
+        schedule: { ...values.schedule, events: [...values.events, event] },
+      })
     },
     deleteEvent: ({ id }) => {
       actions.setFrameFormValues({
         ...values.frameForm,
-        schedule: { events: values.events.filter((event) => event.id !== id) },
+        schedule: { ...values.schedule, events: values.events.filter((event) => event.id !== id) },
       })
     },
   })),
 ])
 
-function newScheduledEvent(): ScheduledEvent {
+function newScheduledEvent(sceneId = ''): ScheduledEvent {
   return {
     id: uuidv4(),
     hour: 23,
     minute: 59,
     weekday: 0,
     event: 'setCurrentScene',
-    payload: { sceneId: '', state: {} },
+    payload: { sceneId, state: {} },
   }
 }

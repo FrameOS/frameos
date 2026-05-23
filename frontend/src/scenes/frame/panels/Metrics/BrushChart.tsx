@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef } from 'react'
+import React, { useEffect, useId, useMemo, useRef } from 'react'
 import { scaleTime, scaleLinear } from '@visx/scale'
 import { Brush } from '@visx/brush'
 import { Bounds } from '@visx/brush/lib/types'
@@ -10,17 +10,11 @@ import { BrushHandleRenderProps } from '@visx/brush/lib/BrushHandle'
 import { AreaChart } from './AreaChart'
 import { WithParentSizeProps } from '@visx/responsive/lib/enhancers/withParentSize'
 import type { MetricPoint, MetricSeries, TimeRange } from './metricsLogic'
+import { metricChartThemes, type MetricChartTheme } from './chartTheme'
 
 // Initialize some variables
 const brushMargin = { top: 10, bottom: 15, left: 50, right: 20 }
 const chartSeparation = 30
-const PATTERN_ID = 'brush_pattern'
-export const accentColor = '#f6acc8'
-export const background2 = '#18181b'
-const selectedBrushStyle = {
-  fill: `url(#${PATTERN_ID})`,
-  stroke: 'white',
-}
 
 // accessors
 const getDate = (m: MetricPoint) => m.x
@@ -70,6 +64,7 @@ export type BrushProps = {
   gapThresholdMs: number | null
   onTimeRangeChange: (start: number, end: number) => void
   onResetTimeRange: () => void
+  chartTheme?: MetricChartTheme
 }
 
 export function BrushChart({
@@ -82,6 +77,7 @@ export function BrushChart({
   gapThresholdMs,
   onTimeRangeChange,
   onResetTimeRange,
+  chartTheme = metricChartThemes.dark,
   margin = {
     top: 20,
     left: 56,
@@ -90,6 +86,14 @@ export function BrushChart({
   },
 }: BrushProps & WithParentSizeProps) {
   const brushRef = useRef<BaseBrush | null>(null)
+  const patternId = useId().replace(/:/g, '')
+  const selectedBrushStyle = useMemo(
+    () => ({
+      fill: `url(#${patternId})`,
+      stroke: chartTheme.brushSelectionStroke,
+    }),
+    [chartTheme.brushSelectionStroke, patternId]
+  )
 
   const innerHeight = height - margin.top - margin.bottom
   const topChartBottomMargin = compact ? chartSeparation / 2 : chartSeparation + 10
@@ -223,7 +227,7 @@ export function BrushChart({
   return (
     <div style={{ userSelect: 'none' }}>
       <svg width={width} height={height}>
-        <rect x={0} y={0} width={width} height={height} fill={background2} rx={14} />
+        <rect x={0} y={0} width={width} height={height} fill={chartTheme.background} rx={14} />
         <AreaChart
           hideBottomAxis={compact}
           series={filteredSeries}
@@ -233,9 +237,10 @@ export function BrushChart({
           xScale={dateScale}
           yScale={valueScale}
           yScaleRight={valueScaleRight}
-          gradientColor={background2}
+          gradientColor={chartTheme.background}
           gapThresholdMs={gapThresholdMs}
           showTooltip
+          chartTheme={chartTheme}
         />
         <AreaChart
           hideBottomAxis
@@ -249,15 +254,16 @@ export function BrushChart({
           margin={brushMargin}
           hideRightAxis
           top={topChartHeight + topChartBottomMargin + margin.top}
-          gradientColor={background2}
+          gradientColor={chartTheme.background}
           withPoints={false}
           gapThresholdMs={gapThresholdMs}
+          chartTheme={chartTheme}
         >
           <PatternLines
-            id={PATTERN_ID}
+            id={patternId}
             height={8}
             width={8}
-            stroke={accentColor}
+            stroke={chartTheme.brushAccent}
             strokeWidth={1}
             orientation={['diagonal']}
           />
@@ -276,7 +282,7 @@ export function BrushChart({
             onClick={onResetTimeRange}
             selectedBoxStyle={selectedBrushStyle}
             useWindowMoveEvents
-            renderBrushHandle={(props) => <BrushHandle {...props} />}
+            renderBrushHandle={(props) => <BrushHandle {...props} chartTheme={chartTheme} />}
           />
         </AreaChart>
       </svg>
@@ -284,7 +290,12 @@ export function BrushChart({
   )
 }
 // We need to manually offset the handles for them to be rendered at the right position
-function BrushHandle({ x, height, isBrushActive }: BrushHandleRenderProps) {
+function BrushHandle({
+  x,
+  height,
+  isBrushActive,
+  chartTheme,
+}: BrushHandleRenderProps & { chartTheme: MetricChartTheme }) {
   const pathWidth = 8
   const pathHeight = 15
   if (!isBrushActive) {
@@ -293,9 +304,9 @@ function BrushHandle({ x, height, isBrushActive }: BrushHandleRenderProps) {
   return (
     <Group left={x + pathWidth / 2} top={(height - pathHeight) / 2}>
       <path
-        fill="#f2f2f2"
+        fill={chartTheme.brushHandleFill}
         d="M -4.5 0.5 L 3.5 0.5 L 3.5 15.5 L -4.5 15.5 L -4.5 0.5 M -1.5 4 L -1.5 12 M 0.5 4 L 0.5 12"
-        stroke="#999999"
+        stroke={chartTheme.brushHandleStroke}
         strokeWidth="1"
         style={{ cursor: 'ew-resize' }}
       />

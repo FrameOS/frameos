@@ -7,6 +7,7 @@ import {
   ChevronDownIcon,
   ChevronRightIcon,
   ComputerDesktopIcon,
+  EyeIcon,
   PhotoIcon,
   PencilSquareIcon,
   PlusIcon,
@@ -43,7 +44,6 @@ const frameSectionToolLinks = [
   { label: 'Scenes', panel: 'scenes' },
   { label: 'Logs', panel: 'logs' },
   { label: 'Metrics', panel: 'metrics' },
-  { label: 'Schedule', panel: 'schedule' },
   { label: 'Settings', panel: 'settings' },
 ] as const satisfies readonly { label: string; panel: WorkspaceUtilityPanel }[]
 
@@ -68,8 +68,8 @@ function SidebarStatusDots({ frame }: { frame: FrameType }): JSX.Element {
 }
 
 function FrameTree(): JSX.Element {
-  const { archivedFramesExpanded, framesLoading } = useValues(framesModel)
-  const { toggleArchivedFramesExpanded } = useActions(framesModel)
+  const { archivedFramesExpanded, inactiveFramesExpanded, framesLoading } = useValues(framesModel)
+  const { toggleArchivedFramesExpanded, toggleInactiveFramesExpanded } = useActions(framesModel)
   const {
     homeActiveFramesList: activeFramesList,
     homeInactiveFramesList: inactiveFramesList,
@@ -95,6 +95,8 @@ function FrameTree(): JSX.Element {
             frames={inactiveFramesList}
             selectedFrameId={selectedFrameId}
             onFocus={focusFrame}
+            expanded={inactiveFramesExpanded}
+            onToggle={toggleInactiveFramesExpanded}
           />
         </>
       )}
@@ -170,49 +172,72 @@ function FrameTreeGroup({
   frames,
   selectedFrameId,
   onFocus,
+  expanded,
+  onToggle,
 }: {
   title: string
   frames: FrameType[]
   selectedFrameId: number | null
   onFocus: (frameId: number) => void
+  expanded?: boolean
+  onToggle?: () => void
 }): JSX.Element | null {
   if (frames.length === 0) {
     return null
   }
 
+  const isExpanded = expanded ?? true
+
   return (
     <div>
-      <div className="mb-2 px-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
-        {title} ({frames.length})
-      </div>
-      <div className="space-y-1">
-        {frames.map((frame) => {
-          const frameName = frame.name || frameHost(frame)
-          return (
-            <div key={frame.id} className="flex w-full items-center gap-1.5">
-              <button
-                type="button"
-                onClick={() => onFocus(frame.id)}
-                className={clsx(
-                  'frameos-frame-row flex min-w-0 flex-1 items-center gap-3 rounded-xl px-3 py-2.5 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-                  selectedFrameId === frame.id ? 'frameos-frame-row-selected' : 'text-slate-700 hover:bg-slate-100'
-                )}
-              >
-                <ComputerDesktopIcon className="h-5 w-5 shrink-0" />
-                <span className="min-w-0 flex-1 truncate text-base font-medium">{frameName}</span>
-                <SidebarStatusDots frame={frame} />
-              </button>
-              <A
-                href={urls.frame(frame.id, 'overview')}
-                title={`Open ${frameName} overview`}
-                className="frameos-icon-button flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/55 text-slate-300 transition hover:bg-white hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-              >
-                <ChevronRightIcon className="h-4 w-4" />
-              </A>
-            </div>
-          )
-        })}
-      </div>
+      {onToggle ? (
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={isExpanded}
+          className="frameos-icon-button mb-2 flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+        >
+          {isExpanded ? <ChevronDownIcon className="h-4 w-4" /> : <ChevronRightIcon className="h-4 w-4" />}
+          <span className="flex-1">{title}</span>
+          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
+            {frames.length}
+          </span>
+        </button>
+      ) : (
+        <div className="mb-2 px-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+          {title} ({frames.length})
+        </div>
+      )}
+      {isExpanded ? (
+        <div className="space-y-1">
+          {frames.map((frame) => {
+            const frameName = frame.name || frameHost(frame)
+            return (
+              <div key={frame.id} className="flex w-full items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => onFocus(frame.id)}
+                  className={clsx(
+                    'frameos-frame-row flex min-w-0 flex-1 items-center gap-3 rounded-xl px-3 py-2.5 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+                    selectedFrameId === frame.id ? 'frameos-frame-row-selected' : 'text-slate-700 hover:bg-slate-100'
+                  )}
+                >
+                  <ComputerDesktopIcon className="h-5 w-5 shrink-0" />
+                  <span className="min-w-0 flex-1 truncate text-base font-medium">{frameName}</span>
+                  <SidebarStatusDots frame={frame} />
+                </button>
+                <A
+                  href={urls.frame(frame.id, 'overview')}
+                  title={`Open ${frameName} overview`}
+                  className="frameos-icon-button flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/55 text-slate-300 transition hover:bg-white hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                >
+                  <ChevronRightIcon className="h-4 w-4" />
+                </A>
+              </div>
+            )
+          })}
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -251,7 +276,7 @@ function SceneTile({ frame, scene, active }: { frame: FrameType; scene: FrameSce
           </div>
         ) : null}
         <div className="frameos-primary-hover-text absolute right-2 top-2 rounded-full bg-white/90 p-1 text-slate-400 shadow-sm transition">
-          <PlayIcon className="h-4 w-4" />
+          <EyeIcon className="h-4 w-4" />
         </div>
       </div>
       <div className="w-full px-3 py-2">
@@ -559,25 +584,46 @@ function FrameSection({ section }: { section: OverviewFrameSection }): JSX.Eleme
 function FrameSectionGroup({
   title,
   sections,
+  expanded,
+  onToggle,
 }: {
   title: string
   sections: OverviewFrameSection[]
+  expanded?: boolean
+  onToggle?: () => void
 }): JSX.Element | null {
   if (sections.length === 0) {
     return null
   }
 
+  const isExpanded = expanded ?? true
+
   return (
     <div className="space-y-8">
-      <div className="frameos-muted flex items-center gap-3 text-sm font-semibold uppercase tracking-wide text-slate-500">
-        <span>{title}</span>
-        <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-semibold text-slate-500">
-          {sections.length}
-        </span>
-      </div>
-      {sections.map((section) => (
-        <FrameSection key={section.frame.id} section={section} />
-      ))}
+      {onToggle ? (
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={isExpanded}
+          className="frameos-icon-button frameos-muted flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left text-sm font-semibold uppercase tracking-wide text-slate-500 transition hover:bg-white/55 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+        >
+          {isExpanded ? <ChevronDownIcon className="h-5 w-5" /> : <ChevronRightIcon className="h-5 w-5" />}
+          <span className="flex-1">{title}</span>
+          <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-semibold text-slate-500">
+            {sections.length}
+          </span>
+        </button>
+      ) : (
+        <div className="frameos-muted flex items-center gap-3 text-sm font-semibold uppercase tracking-wide text-slate-500">
+          <span>{title}</span>
+          <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-semibold text-slate-500">
+            {sections.length}
+          </span>
+        </div>
+      )}
+      {isExpanded
+        ? sections.map((section) => <FrameSection key={section.frame.id} section={section} />)
+        : null}
     </div>
   )
 }
@@ -741,8 +787,8 @@ export function FramesHome(): JSX.Element {
   const { formVisible } = useValues(newFrameForm)
   const { closeSceneControl, closeTemplateDrawer } = useActions(workspaceLogic)
   const { sceneControlSelection, templateDrawerFrameId } = useValues(workspaceLogic)
-  const { archivedFramesExpanded, framesLoading } = useValues(framesModel)
-  const { toggleArchivedFramesExpanded } = useActions(framesModel)
+  const { archivedFramesExpanded, inactiveFramesExpanded, framesLoading } = useValues(framesModel)
+  const { toggleArchivedFramesExpanded, toggleInactiveFramesExpanded } = useActions(framesModel)
   const hasFrameSections =
     overviewActiveFrameSections.length + overviewInactiveFrameSections.length + overviewArchivedFrameSections.length > 0
 
@@ -771,7 +817,12 @@ export function FramesHome(): JSX.Element {
         {hasFrameSections ? (
           <>
             <FrameSectionGroup title="Active" sections={overviewActiveFrameSections} />
-            <FrameSectionGroup title="Inactive" sections={overviewInactiveFrameSections} />
+            <FrameSectionGroup
+              title="Inactive"
+              sections={overviewInactiveFrameSections}
+              expanded={inactiveFramesExpanded}
+              onToggle={toggleInactiveFramesExpanded}
+            />
             {overviewArchivedFrameSections.length > 0 ? (
               <div className="space-y-8 border-t border-slate-300/70 pt-8">
                 <button

@@ -5,37 +5,28 @@ import { AxisLeft, AxisBottom, AxisRight, AxisScale } from '@visx/axis'
 import { LinearGradient } from '@visx/gradient'
 import { curveMonotoneX } from '@visx/curve'
 import type { MetricPoint, MetricSeries } from './metricsLogic'
+import { metricChartThemes, type MetricChartTheme } from './chartTheme'
 
 // Initialize some variables
-const axisColor = 'rgba(244,244,245,0.78)'
-const gridColor = 'rgba(244,244,245,0.1)'
-const axisBottomTickLabelProps = {
+const axisBottomTickLabelBaseProps = {
   textAnchor: 'middle' as const,
   fontFamily: 'Arial',
   fontSize: 10,
-  fill: axisColor,
 }
-const axisLeftTickLabelProps = {
+const axisLeftTickLabelBaseProps = {
   dx: '-0.25em',
   dy: '0.25em',
   fontFamily: 'Arial',
   fontSize: 10,
   textAnchor: 'end' as const,
-  fill: axisColor,
 }
-const axisRightTickLabelProps = {
+const axisRightTickLabelBaseProps = {
   dx: '0.25em',
   dy: '0.25em',
   fontFamily: 'Arial',
   fontSize: 10,
   textAnchor: 'start' as const,
-  fill: axisColor,
 }
-const tooltipBackgroundColor = 'rgba(24,24,27,0.96)'
-const tooltipBorderColor = 'rgba(244,244,245,0.24)'
-const tooltipTextColor = 'rgba(244,244,245,0.92)'
-const tooltipMutedTextColor = 'rgba(244,244,245,0.62)'
-const tooltipShadowColor = 'rgba(0,0,0,0.24)'
 const axisTimeFormatter = new Intl.DateTimeFormat(undefined, {
   hour: '2-digit',
   minute: '2-digit',
@@ -212,7 +203,17 @@ function closestTooltipSnapshot(snapshots: ChartTooltipSnapshot[], x: number): C
   return closest
 }
 
-function ChartTooltip({ tooltip, xMax, yMax }: { tooltip: ChartTooltipState; xMax: number; yMax: number }) {
+function ChartTooltip({
+  tooltip,
+  xMax,
+  yMax,
+  chartTheme,
+}: {
+  tooltip: ChartTooltipState
+  xMax: number
+  yMax: number
+  chartTheme: MetricChartTheme
+}) {
   const timeLabel = formatTooltipTimestamp(tooltip.timestamp)
   const widestRowLength = tooltip.rows.reduce(
     (length, row) => Math.max(length, row.label.length + row.formattedValue.length),
@@ -226,28 +227,36 @@ function ChartTooltip({ tooltip, xMax, yMax }: { tooltip: ChartTooltipState; xMa
 
   return (
     <g pointerEvents="none">
-      <line x1={tooltip.x} x2={tooltip.x} y1={0} y2={yMax} stroke={tooltipBorderColor} strokeWidth={1} />
+      <line x1={tooltip.x} x2={tooltip.x} y1={0} y2={yMax} stroke={chartTheme.tooltipBorder} strokeWidth={1} />
       {tooltip.rows.map((row) => (
         <circle
           key={row.key}
           cx={tooltip.x}
           cy={row.y}
           r={4}
-          fill={tooltipBackgroundColor}
+          fill={chartTheme.tooltipBackground}
           stroke={row.color}
           strokeWidth={1.5}
         />
       ))}
       <g transform={`translate(${left}, ${top})`}>
-        <rect x={2} y={3} width={tooltipWidth} height={tooltipHeight} rx={6} fill={tooltipShadowColor} opacity={0.9} />
+        <rect
+          x={2}
+          y={3}
+          width={tooltipWidth}
+          height={tooltipHeight}
+          rx={6}
+          fill={chartTheme.tooltipShadow}
+          opacity={0.9}
+        />
         <rect
           width={tooltipWidth}
           height={tooltipHeight}
           rx={6}
-          fill={tooltipBackgroundColor}
-          stroke={tooltipBorderColor}
+          fill={chartTheme.tooltipBackground}
+          stroke={chartTheme.tooltipBorder}
         />
-        <text x={10} y={19} fontFamily="Arial" fontSize={10} fill={tooltipMutedTextColor}>
+        <text x={10} y={19} fontFamily="Arial" fontSize={10} fill={chartTheme.tooltipMutedText}>
           {timeLabel}
         </text>
         {tooltip.rows.map((row, index) => {
@@ -255,7 +264,7 @@ function ChartTooltip({ tooltip, xMax, yMax }: { tooltip: ChartTooltipState; xMa
           return (
             <g key={row.key} transform={`translate(10, ${y})`}>
               <rect x={0} y={-8} width={8} height={8} rx={2} fill={row.color} />
-              <text x={14} y={0} fontFamily="Arial" fontSize={11} fill={tooltipTextColor}>
+              <text x={14} y={0} fontFamily="Arial" fontSize={11} fill={chartTheme.tooltipText}>
                 {row.label}
               </text>
               <text
@@ -263,7 +272,7 @@ function ChartTooltip({ tooltip, xMax, yMax }: { tooltip: ChartTooltipState; xMa
                 y={0}
                 fontFamily="Arial"
                 fontSize={11}
-                fill={tooltipTextColor}
+                fill={chartTheme.tooltipText}
                 textAnchor="end"
               >
                 {row.formattedValue}
@@ -292,6 +301,7 @@ export function AreaChart({
   withPoints = true,
   gapThresholdMs = null,
   showTooltip = false,
+  chartTheme = metricChartThemes.dark,
   top,
   left,
   children,
@@ -311,6 +321,7 @@ export function AreaChart({
   withPoints?: boolean
   gapThresholdMs?: number | null
   showTooltip?: boolean
+  chartTheme?: MetricChartTheme
   top?: number
   left?: number
   children?: React.ReactNode
@@ -323,6 +334,18 @@ export function AreaChart({
   const rightUnit = series.find((chartSeries) => chartSeries.axis === 'right')?.unit
   const hasRightAxis = Boolean(yScaleRight && series.some((chartSeries) => chartSeries.axis === 'right'))
   const gridTicks = useMemo(() => getScaleTicks(yScale, 5), [yScale])
+  const axisBottomTickLabelProps = useMemo(
+    () => ({ ...axisBottomTickLabelBaseProps, fill: chartTheme.axis }),
+    [chartTheme.axis]
+  )
+  const axisLeftTickLabelProps = useMemo(
+    () => ({ ...axisLeftTickLabelBaseProps, fill: chartTheme.axis }),
+    [chartTheme.axis]
+  )
+  const axisRightTickLabelProps = useMemo(
+    () => ({ ...axisRightTickLabelBaseProps, fill: chartTheme.axis }),
+    [chartTheme.axis]
+  )
   const seriesSegments = useMemo(
     () =>
       series.map((chartSeries) => ({
@@ -407,7 +430,7 @@ export function AreaChart({
       {!hideGrid &&
         gridTicks.map((tick) => {
           const y = yScale(tick) || 0
-          return <line key={tick} x1={0} x2={xMax} y1={y} y2={y} stroke={gridColor} strokeWidth={1} />
+          return <line key={tick} x1={0} x2={xMax} y1={y} y2={y} stroke={chartTheme.grid} strokeWidth={1} />
         })}
       {seriesSegments.map((chartSeries) =>
         chartSeries.segments.map((segment, index) => (
@@ -461,8 +484,8 @@ export function AreaChart({
           top={yMax}
           scale={xScale}
           numTicks={width > 520 ? 10 : 5}
-          stroke={axisColor}
-          tickStroke={axisColor}
+          stroke={chartTheme.axis}
+          tickStroke={chartTheme.axis}
           tickLabelProps={axisBottomTickLabelProps}
           tickFormat={formatAxisTimestamp}
         />
@@ -471,8 +494,8 @@ export function AreaChart({
         <AxisLeft
           scale={yScale}
           numTicks={5}
-          stroke={axisColor}
-          tickStroke={axisColor}
+          stroke={chartTheme.axis}
+          tickStroke={chartTheme.axis}
           tickLabelProps={axisLeftTickLabelProps}
           tickFormat={(v: number) => formatMetricTick(v, leftUnit)}
         />
@@ -482,8 +505,8 @@ export function AreaChart({
           left={xMax}
           scale={yScaleRight}
           numTicks={5}
-          stroke={axisColor}
-          tickStroke={axisColor}
+          stroke={chartTheme.axis}
+          tickStroke={chartTheme.axis}
           tickLabelProps={axisRightTickLabelProps}
           tickFormat={(v: number) => formatMetricTick(v, rightUnit)}
         />
@@ -502,7 +525,7 @@ export function AreaChart({
           style={{ cursor: 'crosshair' }}
         />
       )}
-      {showTooltip && tooltip && <ChartTooltip tooltip={tooltip} xMax={xMax} yMax={yMax} />}
+      {showTooltip && tooltip && <ChartTooltip tooltip={tooltip} xMax={xMax} yMax={yMax} chartTheme={chartTheme} />}
     </Group>
   )
 }
