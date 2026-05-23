@@ -7,8 +7,9 @@ This suite photographs the backend-served FrameOS frontend with Playwright. It c
 1. Start Redis, for example `pnpm dev:redis`.
 2. Build the frontend once: `pnpm --dir frontend run build`.
 3. Install Playwright browsers once: `pnpm exec playwright install chromium`.
-4. Run the comparison: `pnpm test:frontend-visual`.
-5. Refresh snapshots intentionally: `pnpm test:frontend-visual:update`.
+4. Run the e2e smoke coverage only: `pnpm test:frontend-e2e`.
+5. Run the full e2e and visual comparison: `pnpm test:frontend-visual`.
+6. Refresh snapshots intentionally: `pnpm test:frontend-visual:update`.
 
 The Playwright web server command seeds a disposable SQLite database at `.tmp/frontend-visual.db`, uses Redis database 15 by default, then starts FastAPI on `127.0.0.1:8989`.
 
@@ -31,7 +32,7 @@ Add one entry to `tests/visual-cases.ts`:
 }
 ```
 
-Each case is automatically captured in light and dark mode at mobile, mid, and full-width viewports unless you override `themes` or `viewports`. Keep fixture data in `scripts/seed_backend.py` when a page needs realistic backend state.
+Each case is automatically captured in light and dark mode at mobile, mid, and full-width viewports unless you override `themes` or `viewports`. Keep fixture data in `scripts/seed_backend.py` when a page needs realistic backend state. Add non-screenshot route and interaction coverage to `tests/frontend-e2e.spec.ts` when a page has important buttons, drawers, or section navigation that should be exercised without multiplying snapshot count.
 
 ## CI Behavior
 

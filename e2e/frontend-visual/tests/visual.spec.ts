@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { login, prepareStablePage, settleForScreenshot } from './visual-helpers'
+import { attachFrontendErrorCollector, login, prepareStablePage, settleForScreenshot } from './visual-helpers'
 import { visualCases, visualThemes, visualViewports } from './visual-cases'
 
 for (const visualCase of visualCases) {
@@ -13,6 +13,7 @@ for (const visualCase of visualCases) {
         const title = `${visualCase.title} / ${variant.id} / ${theme} / ${viewport.name}`
 
         test(title, async ({ page }) => {
+          const readErrors = attachFrontendErrorCollector(page)
           await page.setViewportSize({ width: viewport.width, height: viewport.height })
           await prepareStablePage(page, theme)
           if (visualCase.authenticated !== false) {
@@ -30,6 +31,8 @@ for (const visualCase of visualCases) {
               fullPage: variant.fullPage ?? visualCase.fullPage ?? false,
             }
           )
+          const errors = [...new Set(readErrors())]
+          expect(errors, `Unexpected frontend errors:\n${errors.join('\n\n')}`).toEqual([])
         })
       }
     }

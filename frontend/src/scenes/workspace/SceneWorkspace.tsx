@@ -1,7 +1,6 @@
 import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
 import clsx from 'clsx'
 import {
-  CalendarDaysIcon,
   ChevronDownIcon,
   ChevronRightIcon,
   CodeBracketIcon,
@@ -32,7 +31,6 @@ import { SceneState } from '../frame/panels/SceneState/SceneState'
 import { scenesLogic } from '../frame/panels/Scenes/scenesLogic'
 import { EditTemplateModal } from '../frame/panels/Templates/EditTemplateModal'
 import { ExpandedScene } from '../frame/panels/Scenes/ExpandedScene'
-import { Schedule } from '../frame/panels/Schedule/Schedule'
 import { SceneDropDown } from '../frame/panels/Scenes/SceneDropDown'
 import { getFrameosSceneDragData, hasFrameosSceneDragData, setFrameosSceneDragData } from './sceneDrag'
 import { groupFramesByStatus } from './frameStatusGroups'
@@ -54,7 +52,6 @@ interface UtilityDefinition {
 
 const utilityDefinitions: UtilityDefinition[] = [
   { panel: 'state', label: 'Preview', icon: <EyeIcon className="h-5 w-5" /> },
-  { panel: 'schedule', label: 'Schedule', icon: <CalendarDaysIcon className="h-5 w-5" /> },
   { panel: 'apps', label: 'Apps', icon: <CubeTransparentIcon className="h-5 w-5" /> },
   { panel: 'events', label: 'Events', icon: <ListBulletIcon className="h-5 w-5" /> },
   { panel: 'source', label: 'Source', icon: <CodeBracketIcon className="h-5 w-5" /> },
@@ -547,7 +544,6 @@ function UtilityDrawer({ frameId, scene }: { frameId: number; scene: FrameScene 
     }
     if (utilityPanel === 'apps') return <Apps />
     if (utilityPanel === 'events') return <Events />
-    if (utilityPanel === 'schedule') return <Schedule scrollContainer={false} drawerMode />
     if (utilityPanel === 'source') return <SceneSource />
     if (utilityPanel === 'json') return scene ? <SceneJSON sceneId={scene.id} /> : <div>Select a scene first.</div>
     return null

@@ -160,7 +160,7 @@ jobs:
             default_author: github_actions
 
   frontend-visual-regression:
-    name: Frontend Visual Regression Tests
+    name: Frontend E2E + Visual Regression Tests
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code

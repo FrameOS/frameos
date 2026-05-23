@@ -51,9 +51,39 @@ async function openOverviewScheduleDrawer(page: Page): Promise<void> {
   await page.getByRole('heading', { name: /Schedule|Scene schedule/ }).last().waitFor()
 }
 
-async function openSceneWorkspaceScheduleDrawer(page: Page): Promise<void> {
-  await page.locator('.workspace-drawer button[title="Schedule"]').click()
-  await page.getByRole('heading', { name: /Scene schedule|Schedule/i }).last().waitFor()
+async function openSceneWorkspaceUtilityDrawer(page: Page, label: string): Promise<void> {
+  const heading = page.getByRole('heading', { name: new RegExp(`^${label}$`, 'i') }).last()
+  if (await heading.isVisible().catch(() => false)) {
+    return
+  }
+
+  const drawerButton = page.locator(`.workspace-drawer button[title="${label}"]`).first()
+  if (await drawerButton.count()) {
+    await drawerButton.click()
+  } else {
+    await page.locator(`button[title="${label}"]`).first().click()
+  }
+  await heading.waitFor()
+}
+
+async function openSceneWorkspacePreviewDrawer(page: Page): Promise<void> {
+  await openSceneWorkspaceUtilityDrawer(page, 'Preview')
+}
+
+async function openSceneWorkspaceAppsDrawer(page: Page): Promise<void> {
+  await openSceneWorkspaceUtilityDrawer(page, 'Apps')
+}
+
+async function openSceneWorkspaceEventsDrawer(page: Page): Promise<void> {
+  await openSceneWorkspaceUtilityDrawer(page, 'Events')
+}
+
+async function openSceneWorkspaceSourceDrawer(page: Page): Promise<void> {
+  await openSceneWorkspaceUtilityDrawer(page, 'Source')
+}
+
+async function openSceneWorkspaceJsonDrawer(page: Page): Promise<void> {
+  await openSceneWorkspaceUtilityDrawer(page, 'JSON')
 }
 
 async function openAddSceneDrawer(page: Page): Promise<void> {
@@ -70,6 +100,11 @@ async function collapsePrimarySidebar(page: Page): Promise<void> {
   if (await logoButton.count()) {
     await logoButton.click()
   }
+}
+
+async function openAddFrameDrawer(page: Page): Promise<void> {
+  await page.getByRole('button', { name: /Add frame/i }).first().click()
+  await page.getByRole('heading', { name: /Add frame/i }).last().waitFor()
 }
 
 async function openSettingsNetworkSection(page: Page): Promise<void> {
@@ -106,7 +141,15 @@ export const visualCases: VisualCase[] = [
     variants: [
       { id: 'default' },
       { id: 'collapsed-sidebar', prepare: collapsePrimarySidebar },
+      { id: 'add-frame', prepare: openAddFrameDrawer },
     ],
+  },
+  {
+    id: 'frame-overview-route',
+    title: 'Frame overview route',
+    path: '/frames/1',
+    fullPage: true,
+    variants: [{ id: 'default' }],
   },
   {
     id: 'frame-overview',
@@ -128,6 +171,13 @@ export const visualCases: VisualCase[] = [
       { id: 'add-scene', prepare: openAddSceneDrawer },
       { id: 'schedule-drawer', prepare: openScheduleDrawer },
     ],
+  },
+  {
+    id: 'frame-schedule-route',
+    title: 'Frame schedule route',
+    path: '/frames/1?tool=schedule',
+    fullPage: true,
+    variants: [{ id: 'default' }],
   },
   {
     id: 'frame-preview',
@@ -189,17 +239,53 @@ export const visualCases: VisualCase[] = [
     ],
   },
   {
+    id: 'scene-workspace-root',
+    title: 'Scene workspace root',
+    path: '/scenes',
+    fullPage: true,
+    variants: [{ id: 'default' }],
+  },
+  {
+    id: 'scene-workspace-frame',
+    title: 'Scene workspace frame',
+    path: '/scenes/1',
+    fullPage: true,
+    variants: [{ id: 'default' }],
+  },
+  {
     id: 'scene-workspace',
     title: 'Scene workspace',
     path: '/scenes/1/scene-dashboard',
     fullPage: true,
     variants: [
       { id: 'diagram' },
-      {
-        id: 'schedule-drawer',
-        prepare: openSceneWorkspaceScheduleDrawer,
-      },
+      { id: 'preview-drawer', prepare: openSceneWorkspacePreviewDrawer },
+      { id: 'apps-drawer', prepare: openSceneWorkspaceAppsDrawer },
+      { id: 'events-drawer', prepare: openSceneWorkspaceEventsDrawer },
+      { id: 'source-drawer', prepare: openSceneWorkspaceSourceDrawer },
+      { id: 'json-drawer', prepare: openSceneWorkspaceJsonDrawer },
     ],
+  },
+  {
+    id: 'apps-workspace-root',
+    title: 'Apps workspace root',
+    path: '/apps',
+    fullPage: true,
+    variants: [{ id: 'default' }],
+  },
+  {
+    id: 'apps-workspace-frame',
+    title: 'Apps workspace frame',
+    path: '/apps/1',
+    fullPage: true,
+    variants: [{ id: 'default' }],
+  },
+  {
+    id: 'apps-workspace-scene',
+    title: 'Apps workspace scene',
+    path: '/apps/1/scene-dashboard',
+    fullPage: true,
+    variants: [{ id: 'default' }],
   },
   {
     id: 'apps-workspace',

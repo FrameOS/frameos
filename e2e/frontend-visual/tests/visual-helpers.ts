@@ -34,6 +34,17 @@ export async function prepareStablePage(page: Page, theme: 'light' | 'dark'): Pr
     load: { one: 0.14, five: 0.1, fifteen: 0.08 },
   }))
 
+  await page.route('**/api/system/info', fulfillJson({
+    disk: { totalBytes: 58_000_000_000, usedBytes: 4_100_000_000, freeBytes: 53_900_000_000 },
+    memory: { totalBytes: 512_000_000, availableBytes: 302_000_000 },
+    load: { one: 0.14, five: 0.1, fifteen: 0.08 },
+    caches: [
+      { name: 'Build cache', path: '.tmp/build-cache', sizeBytes: 42_000_000, exists: true },
+      { name: 'Frontend assets', path: 'frontend/dist', sizeBytes: 18_000_000, exists: true },
+    ],
+    database: { path: '.tmp/frontend-visual.db', sizeBytes: 2_400_000, exists: true },
+  }))
+
   await page.route('**/api/frames/1/assets', fulfillJson({
     assets: [
       { path: '/srv/assets', size: 4096, mtime: 1_779_535_200, is_dir: true },
@@ -55,10 +66,54 @@ export async function prepareStablePage(page: Page, theme: 'light' | 'dark'): Pr
     message: 'Reply from 127.0.0.1',
   }))
 
+  await page.route('**/api/frames/1/states', fulfillJson({
+    sceneId: 'scene-dashboard',
+    states: {
+      'scene-dashboard': { headline: 'Morning', accent: '#6f42c1' },
+      'scene-gradient': {},
+    },
+  }))
+  await page.route('**/api/frames/1/state', fulfillJson({
+    sceneId: 'scene-dashboard',
+    state: { headline: 'Morning', accent: '#6f42c1' },
+  }))
+  await page.route('**/api/frames/1/uploaded_scenes', fulfillJson({
+    sceneId: 'scene-dashboard',
+    scenes: [
+      { id: 'scene-dashboard', name: 'Dashboard' },
+      { id: 'scene-gradient', name: 'Gradient status' },
+      { id: 'scene-gallery', name: 'Gallery' },
+    ],
+  }))
   await page.route('**/api/frames/1/event/**', fulfillText('OK'))
   await page.route('**/api/frames/1/fast_deploy', fulfillJson({ message: 'Deployment queued' }))
   await page.route('**/api/frames/1/deploy', fulfillJson({ message: 'Deployment queued' }))
   await page.route('**/api/frames/1/assets/sync', fulfillJson({ message: 'Assets synced successfully' }))
+  await page.route('**/api/frames/1/scene_source/**', fulfillJson({
+    source: [
+      'import frameos/apps',
+      '',
+      'proc renderScene*() =',
+      '  let title = state{"headline"}.getStr("Morning")',
+      '  renderText(title)',
+      '',
+    ].join('\n'),
+  }))
+  await page.route('**/api/apps/validate_source', fulfillJson({ errors: [] }))
+  await page.routeWebSocket('**/ws', (ws) => {
+    ws.onMessage((message) => {
+      if (String(message) === 'ping') {
+        ws.send(JSON.stringify({ event: 'pong', data: {} }))
+      }
+    })
+  })
+  await page.routeWebSocket('**/ws/terminal/*', (ws) => {
+    ws.send('visual@frameos:~$ uptime\n 12:00 up 4 days, load average: 0.14, 0.10, 0.08\n')
+    ws.onMessage((message) => ws.send(`visual@frameos:~$ ${String(message).trim()}\n`))
+    setTimeout(() => {
+      ws.close()
+    }, 150)
+  })
 }
 
 export async function login(page: Page): Promise<void> {
@@ -91,6 +146,27 @@ export async function settleForScreenshot(page: Page): Promise<void> {
   await page.waitForFunction(() => document.body.innerText.trim().length > 0)
   await page.waitForLoadState('domcontentloaded')
   await page.waitForTimeout(500)
+}
+
+export function attachFrontendErrorCollector(page: Page): () => string[] {
+  const errors: string[] = []
+  page.on('pageerror', (error) => {
+    errors.push(error.stack || error.message)
+  })
+  page.on('console', (message) => {
+    if (message.type() !== 'error') {
+      return
+    }
+    const text = message.text()
+    if (/favicon\.ico/i.test(text)) {
+      return
+    }
+    if (/TypeError: Failed to fetch[\s\S]*\bat sync\b/.test(text)) {
+      return
+    }
+    errors.push(text)
+  })
+  return () => errors
 }
 
 function fulfillJson(body: unknown): (route: Route) => Promise<void> {
