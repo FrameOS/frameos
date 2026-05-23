@@ -206,6 +206,7 @@ export function FrameosShell({
     ) : null
   const workspaceMainStyle = {
     '--workspace-main-offset': primarySidebarOpen ? (secondarySidebarOpen ? '480px' : '128px') : '0px',
+    '--workspace-sidebar-edge': primarySidebarOpen ? (secondarySidebarOpen ? '440px' : '108px') : '0px',
   } as CSSProperties
   const floatingSidebarHeaderClassName = !primarySidebarOpen ? 'workspace-header-with-floating-sidebar' : undefined
   const leaveSceneWorkspace = () => {

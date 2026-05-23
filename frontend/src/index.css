@@ -694,6 +694,83 @@ body {
   }
 }
 
+.scene-workspace-main {
+  padding-left: var(--workspace-sidebar-edge, var(--workspace-main-offset, 0px));
+}
+
+.scene-workspace-main.workspace-main-primary-collapsed {
+  padding-left: 0;
+}
+
+.scene-workspace-main.workspace-main-floating-sidebar-clearance {
+  padding-top: 0;
+}
+
+.scene-workspace-main.scene-workspace-main {
+  padding-right: 0;
+}
+
+.scene-workspace-main.workspace-main-with-right-panel {
+  padding-right: 490px;
+}
+
+.scene-editor-canvas.scene-editor-canvas-full {
+  height: 100vh;
+  min-height: 100vh;
+}
+
+.scene-diagram-utility-buttons,
+.scene-diagram-ai-control,
+.scene-diagram-node-toolbar {
+  max-width: calc(100% - 1rem);
+}
+
+.scene-diagram-utility-buttons {
+  right: 3.375rem;
+  top: 1.25rem;
+}
+
+.scene-diagram-ai-control {
+  right: 0.5rem;
+  top: 1.25rem;
+}
+
+.frameos-theme-dark .scene-diagram-utility-toolbar .frameos-icon-button:not(.frameos-primary-active) {
+  background: rgba(29, 31, 37, 0.88);
+  border-color: rgba(255, 255, 255, 0.12);
+  color: #cbd5e1;
+}
+
+.frameos-theme-dark .scene-diagram-utility-toolbar .frameos-icon-button:not(.frameos-primary-active):hover {
+  background: rgba(38, 40, 47, 0.96);
+  color: #ffffff;
+}
+
+@media (max-width: 1023px) {
+  .scene-workspace-main,
+  .scene-workspace-main.workspace-main-with-right-panel {
+    padding-left: 0;
+    padding-right: 0;
+  }
+}
+
+@container (max-width: 36rem) {
+  .scene-diagram-utility-buttons {
+    right: 3.375rem;
+    top: 0.75rem;
+  }
+
+  .scene-diagram-ai-control {
+    right: 0.5rem;
+    top: 0.75rem;
+  }
+
+  .scene-diagram-node-toolbar {
+    left: 0.5rem;
+    top: 4.25rem;
+  }
+}
+
 .frame-tool-panel {
   --tool-bg: rgba(255, 255, 255, 0.72);
   --tool-bg-strong: rgba(255, 255, 255, 0.9);

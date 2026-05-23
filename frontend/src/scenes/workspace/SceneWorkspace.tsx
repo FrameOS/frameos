@@ -9,6 +9,7 @@ import {
   ListBulletIcon,
   PhotoIcon,
   ServerStackIcon,
+  SparklesIcon,
   XMarkIcon,
 } from '@heroicons/react/24/outline'
 import type { DragEvent } from 'react'
@@ -396,7 +397,7 @@ function UtilityToolbar(): JSX.Element {
   const { openUtilityPanel } = useActions(workspaceLogic)
 
   return (
-    <div className="flex flex-wrap justify-end gap-2">
+    <div className="scene-diagram-utility-toolbar flex shrink-0 flex-nowrap justify-end gap-1.5">
       {utilityDefinitions.slice(0, 6).map((definition) => (
         <button
           key={definition.panel}
@@ -404,10 +405,10 @@ function UtilityToolbar(): JSX.Element {
           title={definition.label}
           onClick={() => openUtilityPanel(definition.panel)}
           className={clsx(
-            'flex h-11 w-11 items-center justify-center rounded-full border border-white/90 shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+            'frameos-icon-button flex h-10 w-10 items-center justify-center rounded-full border border-white/90 bg-white/90 text-slate-500 shadow-lg shadow-slate-300/25 backdrop-blur-xl transition hover:bg-white hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
             utilityPanel === definition.panel
-              ? 'bg-slate-900 text-white'
-              : 'bg-white/85 text-slate-500 hover:bg-white hover:text-slate-900'
+              ? 'frameos-primary-active text-white'
+              : 'bg-white/90 text-slate-500 hover:bg-white hover:text-slate-900'
           )}
         >
           {definition.icon}
@@ -417,27 +418,35 @@ function UtilityToolbar(): JSX.Element {
   )
 }
 
-function SceneEditorTopBar({ sceneId }: { sceneId: string | null }): JSX.Element {
-  return (
-    <div className="mb-4 flex flex-col items-stretch justify-between gap-4 @md:flex-row @md:items-center">
-      <div className="flex min-w-0 items-center gap-2">{sceneId ? <DiagramToolbar sceneId={sceneId} /> : null}</div>
-      <UtilityToolbar />
-    </div>
-  )
-}
+function SceneDiagramOverlay({
+  frameId,
+  sceneId,
+}: {
+  frameId: number
+  sceneId: string | null
+}): JSX.Element {
+  const { chatDrawerSelection } = useValues(workspaceLogic)
+  const { openChatDrawer } = useActions(workspaceLogic)
+  const chatDrawerIsOpen = !!chatDrawerSelection
 
-function SceneEditorTopBarLoadingPlaceholder(): JSX.Element {
   return (
-    <div className="mb-4 flex flex-col items-stretch justify-between gap-4 @md:flex-row @md:items-center">
-      <div className="flex min-w-0 flex-wrap items-center gap-2">
-        {[0, 1, 2, 3].map((index) => (
-          <div key={index} className="frameos-skeleton-surface h-10 w-10 animate-pulse rounded-full" />
-        ))}
+    <div className="scene-diagram-overlay pointer-events-none absolute inset-0 z-20">
+      <div className="scene-diagram-utility-buttons pointer-events-auto absolute flex shrink-0 flex-nowrap items-center justify-end">
+        <UtilityToolbar />
       </div>
-      <div className="flex flex-wrap justify-end gap-2">
-        {[0, 1, 2, 3, 4, 5].map((index) => (
-          <div key={index} className="frameos-skeleton-surface h-11 w-11 animate-pulse rounded-full" />
-        ))}
+      <button
+        type="button"
+        title="Open AI chat"
+        onClick={() => openChatDrawer(frameId, sceneId)}
+        className={clsx(
+          'scene-diagram-ai-control frameos-ai-button pointer-events-auto absolute flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-fuchsia-500 via-blue-500 to-cyan-400 text-white shadow-lg shadow-blue-500/30 transition hover:-translate-y-0.5 hover:shadow-xl hover:shadow-blue-500/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+          chatDrawerIsOpen && 'ring-2 ring-blue-300'
+        )}
+      >
+        <SparklesIcon className="h-5 w-5" />
+      </button>
+      <div className="scene-diagram-node-toolbar pointer-events-auto absolute left-2 top-5 flex min-w-0 flex-wrap items-center gap-2">
+        {sceneId ? <DiagramToolbar sceneId={sceneId} /> : null}
       </div>
     </div>
   )
@@ -507,8 +516,8 @@ function SceneTreeLoadingPlaceholder(): JSX.Element {
 
 function SceneCanvasLoadingPlaceholder(): JSX.Element {
   return (
-    <div className="scene-editor-canvas h-[calc(100vh-5.25rem)] min-h-[34rem] overflow-hidden rounded-[24px] border border-white/80 bg-white/35 p-5 shadow-lg shadow-slate-300/20">
-      <div className="relative h-full overflow-hidden rounded-[20px]">
+    <div className="scene-editor-canvas scene-editor-canvas-full h-screen min-h-screen overflow-hidden bg-white/35 p-5">
+      <div className="relative h-full overflow-hidden">
         <div className="frameos-skeleton-surface absolute left-[8%] top-[12%] h-20 w-52 animate-pulse rounded-2xl" />
         <div className="frameos-skeleton-surface absolute right-[10%] top-[18%] h-20 w-52 animate-pulse rounded-2xl" />
         <div className="frameos-skeleton-surface absolute bottom-[24%] left-[26%] h-20 w-56 animate-pulse rounded-2xl" />
@@ -615,7 +624,7 @@ function SceneCanvas({ frameId, selectedSceneId }: { frameId: number; selectedSc
   if (!selectedSceneId) {
     return (
       <div
-        className="flex h-[calc(100vh-6rem)] items-center justify-center rounded-[24px] border border-white/80 bg-white/55 text-slate-500 shadow-lg shadow-slate-300/25"
+        className="flex h-screen min-h-screen items-center justify-center bg-white/35 text-slate-500"
         onDragOver={handleSceneDragOver}
         onDrop={handleSceneDrop}
       >
@@ -630,11 +639,12 @@ function SceneCanvas({ frameId, selectedSceneId }: { frameId: number; selectedSc
 
   return (
     <div
-      className="scene-editor-canvas @container h-[calc(100vh-5.25rem)] min-h-[34rem] overflow-hidden"
+      className="scene-editor-canvas scene-editor-canvas-full @container relative h-screen min-h-screen overflow-hidden"
       onDragOverCapture={handleSceneDragOver}
       onDropCapture={handleSceneDrop}
     >
       <Diagram sceneId={selectedSceneId} showToolbar={false} />
+      <SceneDiagramOverlay frameId={frameId} sceneId={selectedSceneId} />
       <button
         type="button"
         onClick={() => openUtilityPanel('apps')}
@@ -659,8 +669,9 @@ function SceneWorkspaceFrame({ frameId }: SceneWorkspaceFrameProps): JSX.Element
         mode="scenes"
         title="Scenes"
         tree={<SceneTreeLoadingPlaceholder />}
-        topBar={<SceneEditorTopBarLoadingPlaceholder />}
-        mainClassName="scene-workspace-main h-screen overflow-hidden py-5 pr-5 max-lg:h-auto max-lg:overflow-visible max-lg:px-4"
+        topBar={null}
+        showAiButton={false}
+        mainClassName="scene-workspace-main h-screen overflow-hidden p-0"
       >
         <SceneCanvasLoadingPlaceholder />
       </FrameosShell>
@@ -688,8 +699,9 @@ function SceneWorkspaceFrame({ frameId }: SceneWorkspaceFrameProps): JSX.Element
               undeployedChanges={undeployedChanges}
             />
           }
-          topBar={<SceneEditorTopBar sceneId={resolvedSceneId} />}
-          mainClassName="scene-workspace-main h-screen overflow-hidden py-5 pr-5 max-lg:h-auto max-lg:overflow-visible max-lg:px-4"
+          topBar={null}
+          showAiButton={false}
+          mainClassName="scene-workspace-main h-screen overflow-hidden p-0"
           rightPanel={activeUtilityDefinition ? <UtilityDrawer frameId={frameId} scene={selectedScene} /> : null}
         >
           <SceneCanvas frameId={frame.id} selectedSceneId={resolvedSceneId} />
@@ -719,8 +731,9 @@ export function SceneWorkspace({ frameId, sceneId }: SceneWorkspaceProps): JSX.E
           mode="scenes"
           title="Scenes"
           tree={<SceneTreeLoadingPlaceholder />}
-          topBar={<SceneEditorTopBarLoadingPlaceholder />}
-          mainClassName="scene-workspace-main h-screen overflow-hidden py-5 pr-5 max-lg:h-auto max-lg:overflow-visible max-lg:px-4"
+          topBar={null}
+          showAiButton={false}
+          mainClassName="scene-workspace-main h-screen overflow-hidden p-0"
         >
           <SceneCanvasLoadingPlaceholder />
         </FrameosShell>
