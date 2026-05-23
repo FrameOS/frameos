@@ -10,6 +10,7 @@ import type { workspaceLogicType } from './workspaceLogicType'
 export type WorkspaceUtilityPanel =
   | 'overview'
   | 'state'
+  | 'stateVariables'
   | 'apps'
   | 'events'
   | 'templates'

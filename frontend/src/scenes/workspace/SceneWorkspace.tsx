@@ -4,12 +4,13 @@ import {
   ChevronDownIcon,
   ChevronRightIcon,
   CodeBracketIcon,
-  CubeTransparentIcon,
+  CodeBracketSquareIcon,
   EyeIcon,
   ListBulletIcon,
   PhotoIcon,
   ServerStackIcon,
   SparklesIcon,
+  VariableIcon,
   XMarkIcon,
 } from '@heroicons/react/24/outline'
 import type { DragEvent } from 'react'
@@ -29,6 +30,7 @@ import { Events } from '../frame/panels/Events/Events'
 import { SceneJSON } from '../frame/panels/SceneJSON/SceneJSON'
 import { SceneSource } from '../frame/panels/SceneSource/SceneSource'
 import { SceneState } from '../frame/panels/SceneState/SceneState'
+import { Logs } from '../frame/panels/Logs/Logs'
 import { scenesLogic } from '../frame/panels/Scenes/scenesLogic'
 import { EditTemplateModal } from '../frame/panels/Templates/EditTemplateModal'
 import { ExpandedScene } from '../frame/panels/Scenes/ExpandedScene'
@@ -53,7 +55,8 @@ interface UtilityDefinition {
 
 const utilityDefinitions: UtilityDefinition[] = [
   { panel: 'state', label: 'Preview', icon: <EyeIcon className="h-5 w-5" /> },
-  { panel: 'apps', label: 'Apps', icon: <CubeTransparentIcon className="h-5 w-5" /> },
+  { panel: 'stateVariables', label: 'State variables', icon: <VariableIcon className="h-5 w-5" /> },
+  { panel: 'apps', label: 'Apps', icon: <CodeBracketSquareIcon className="h-5 w-5" /> },
   { panel: 'events', label: 'Events', icon: <ListBulletIcon className="h-5 w-5" /> },
   { panel: 'source', label: 'Source', icon: <CodeBracketIcon className="h-5 w-5" /> },
   { panel: 'json', label: 'JSON', icon: <ServerStackIcon className="h-5 w-5" /> },
@@ -274,9 +277,7 @@ function SceneTree({
             onClick={() => saveAndDeployFrame()}
             className={clsx(
               'rounded-lg px-3 py-2 text-xs font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-              unsavedChanges || undeployedChanges
-                ? 'frameos-primary-action'
-                : 'frameos-secondary-button'
+              unsavedChanges || undeployedChanges ? 'frameos-primary-action' : 'frameos-secondary-button'
             )}
           >
             Deploy
@@ -382,7 +383,9 @@ function SceneNodeTreeButton({
       </span>
       <span className="min-w-0 flex-1">
         <span className="block truncate text-sm font-semibold">{nodeLabel(item.node.data, item.node.id)}</span>
-        <span className={clsx('block truncate text-xs', highlighted ? 'text-white/75' : 'frameos-muted text-slate-400')}>
+        <span
+          className={clsx('block truncate text-xs', highlighted ? 'text-white/75' : 'frameos-muted text-slate-400')}
+        >
           {nodeKindLabel(item)}
         </span>
       </span>
@@ -416,13 +419,7 @@ function UtilityToolbar(): JSX.Element {
   )
 }
 
-function SceneDiagramOverlay({
-  frameId,
-  sceneId,
-}: {
-  frameId: number
-  sceneId: string | null
-}): JSX.Element {
+function SceneDiagramOverlay({ frameId, sceneId }: { frameId: number; sceneId: string | null }): JSX.Element {
   const { chatDrawerSelection } = useValues(workspaceLogic)
   const { openChatDrawer } = useActions(workspaceLogic)
   const chatDrawerIsOpen = !!chatDrawerSelection
@@ -527,6 +524,28 @@ function SceneCanvasLoadingPlaceholder(): JSX.Element {
   )
 }
 
+function ScenePreviewPanel({ frameId, scene }: { frameId: number; scene: FrameScene }): JSX.Element {
+  return (
+    <div className="flex h-full min-h-0 flex-col gap-5">
+      <div className="shrink-0">
+        <ExpandedScene frameId={frameId} sceneId={scene.id} scene={scene} showEditButton={false} />
+      </div>
+      <section className="frame-tool-panel frame-tool-card flex min-h-[33vh] flex-1 flex-col overflow-hidden rounded-2xl">
+        <div className="frameos-divider flex items-center justify-between gap-3 border-b px-4 py-3">
+          <div className="min-w-0">
+            <div className="frame-tool-muted text-xs font-semibold uppercase tracking-wide">Live logs</div>
+            <div className="frame-tool-heading truncate text-sm font-semibold">{scene.name || 'Untitled scene'}</div>
+          </div>
+          <div className="frame-tool-muted whitespace-nowrap text-xs font-semibold">Frame output</div>
+        </div>
+        <div className="min-h-0 flex-1 px-3 py-3">
+          <Logs compact className="h-full" />
+        </div>
+      </section>
+    </div>
+  )
+}
+
 function UtilityDrawer({ frameId, scene }: { frameId: number; scene: FrameScene | null }): JSX.Element | null {
   const { utilityPanel } = useValues(workspaceLogic)
   const { closeUtilityPanel, openUtilityPanel } = useActions(workspaceLogic)
@@ -538,16 +557,10 @@ function UtilityDrawer({ frameId, scene }: { frameId: number; scene: FrameScene 
 
   const renderPanel = () => {
     if (utilityPanel === 'state') {
-      return scene ? (
-        <div className="space-y-6">
-          <ExpandedScene frameId={frameId} sceneId={scene.id} scene={scene} showEditButton={false} />
-          <div className="border-t border-white/10 pt-5">
-            <SceneState />
-          </div>
-        </div>
-      ) : (
-        <div>Select a scene first.</div>
-      )
+      return scene ? <ScenePreviewPanel frameId={frameId} scene={scene} /> : <div>Select a scene first.</div>
+    }
+    if (utilityPanel === 'stateVariables') {
+      return scene ? <SceneState sceneId={scene.id} /> : <div>Select a scene first.</div>
     }
     if (utilityPanel === 'apps') return <Apps />
     if (utilityPanel === 'events') return <Events />
@@ -592,7 +605,9 @@ function UtilityDrawer({ frameId, scene }: { frameId: number; scene: FrameScene 
             <XMarkIcon className="h-6 w-6" />
           </button>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto p-5">{renderPanel()}</div>
+        <div className={clsx('min-h-0 flex-1 p-5', utilityPanel === 'state' ? 'overflow-hidden' : 'overflow-y-auto')}>
+          {renderPanel()}
+        </div>
       </div>
     </div>
   )

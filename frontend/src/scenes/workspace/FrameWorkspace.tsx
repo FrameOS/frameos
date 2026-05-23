@@ -21,6 +21,7 @@ import { FrameScene, FrameType, LogType, MetricsType, ScheduledEvent } from '../
 import { framesModel } from '../../models/framesModel'
 import { FrameosShell } from './FrameosShell'
 import { AddSceneTile, SceneControlPanel, TemplateDrawer } from './FramesHome'
+import { FrameDashboardSurface, FrameScheduleDrawer } from './FrameDashboardSurface'
 import { sceneWorkspaceLogic } from './sceneWorkspaceLogic'
 import { workspaceLogic, WorkspaceUtilityPanel } from './workspaceLogic'
 import { urls } from '../../urls'
@@ -62,8 +63,8 @@ const activeSurfaceClassName = 'border-[#4a4b8c] shadow-[0_0_3px_3px_rgba(128,0,
 const frameToolDefinitions: FrameToolDefinition[] = [
   {
     panel: 'overview',
-    label: 'Overview',
-    description: 'Health dashboard',
+    label: 'Frame',
+    description: 'Preview and scenes',
     icon: <Squares2X2Icon className="h-5 w-5" />,
   },
   { panel: 'scenes', label: 'Scenes', description: 'Frame scenes', icon: <PhotoIcon className="h-5 w-5" /> },
@@ -202,12 +203,29 @@ function FrameToolRow({
       </span>
       <span className="min-w-0 flex-1">
         <span className="block truncate text-sm font-semibold">{definition.label}</span>
-        <span
-          className={clsx('frameos-frame-tool-description block truncate text-xs', !active && 'text-slate-400')}
-        >
+        <span className={clsx('frameos-frame-tool-description block truncate text-xs', !active && 'text-slate-400')}>
           {definition.description}
         </span>
       </span>
+    </A>
+  )
+}
+
+function FrameSidebarPreview({ frame, active }: { frame: FrameType; active: boolean }): JSX.Element {
+  return (
+    <A
+      href={urls.frame(frame.id, 'preview')}
+      className={clsx(
+        'frameos-card mx-2 block overflow-hidden rounded-2xl border bg-white/65 shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg hover:shadow-slate-300/35 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+        active ? activeSurfaceClassName : 'border-white/80'
+      )}
+    >
+      <div className="frameos-card-media relative h-32 bg-slate-100">
+        <FrameImage frameId={frame.id} refreshable objectFit="contain" className="h-full w-full" />
+        <div className="absolute right-2 top-2 rounded-lg bg-white/90 px-2 py-0.5 text-[11px] font-semibold text-slate-500 shadow-sm">
+          Preview
+        </div>
+      </div>
     </A>
   )
 }
@@ -224,6 +242,7 @@ function FrameTree({
   return (
     <div className="space-y-5">
       <FrameSelector frame={frame} frames={frames} />
+      <FrameSidebarPreview frame={frame} active={activeTool === 'preview'} />
       <div>
         <div className="frameos-muted mb-2 px-2 text-xs font-semibold uppercase tracking-wide">Frame Tools</div>
         <div className="space-y-1">
@@ -903,8 +922,16 @@ function FrameToolSurface({
   totalScenes: number
   pageScroll: boolean
 }): JSX.Element {
-  if (activeTool === 'overview') return <FrameOverviewSurface frame={frame} scenes={scenes} />
-  if (activeTool === 'scenes') return <FrameScenesSurface frame={frame} scenes={scenes} totalScenes={totalScenes} />
+  if (activeTool === 'overview' || activeTool === 'scenes') {
+    return (
+      <FrameDashboardSurface
+        frame={frame}
+        scenes={scenes}
+        totalScenes={totalScenes}
+        showSceneMenus={activeTool === 'scenes'}
+      />
+    )
+  }
   if (activeTool === 'logs') return <Logs fullScreen />
   if (activeTool === 'metrics') return <Metrics scrollContainer={!pageScroll} />
   if (activeTool === 'assets') return <Assets scrollContainer={!pageScroll} />
@@ -1008,7 +1035,7 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
             templateDrawerFrameId ? (
               <TemplateDrawer />
             ) : scheduleDrawerFrameId === frame.id ? (
-              <ScheduleDrawer frame={frame} />
+              <FrameScheduleDrawer frame={frame} />
             ) : sceneControlSelection ? (
               <SceneControlPanel />
             ) : null

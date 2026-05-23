@@ -14,6 +14,7 @@ import { workspaceLogic } from './workspaceLogic'
 import { frameLogic } from '../frame/frameLogic'
 import { panelsLogic } from '../frame/panels/panelsLogic'
 import { EditApp, EditAppFileList } from '../frame/panels/EditApp/EditApp'
+import { groupFramesByStatus } from './frameStatusGroups'
 
 interface AppsWorkspaceProps {
   frameId?: string
@@ -113,6 +114,7 @@ function AppsSelector({
   appOptions: AppNodeOption[]
 }): JSX.Element {
   const { openChatDrawer } = useActions(workspaceLogic)
+  const frameGroups = groupFramesByStatus(frames)
 
   return (
     <div className="space-y-4 px-2">
@@ -128,10 +130,14 @@ function AppsSelector({
           pushAppsUrl(nextFrame, nextScene, defaultApp(nextScene))
         }}
       >
-        {frames.map((candidate) => (
-          <option key={candidate.id} value={candidate.id}>
-            {candidate.name || frameHost(candidate)}
-          </option>
+        {frameGroups.map((group) => (
+          <optgroup key={group.key} label={group.label}>
+            {group.frames.map((candidate) => (
+              <option key={candidate.id} value={candidate.id}>
+                {candidate.name || frameHost(candidate)}
+              </option>
+            ))}
+          </optgroup>
         ))}
       </SelectionSelect>
       <SelectionSelect
@@ -235,9 +241,7 @@ function AppsTopBar({
           onClick={() => saveAndDeployFrame()}
           className={clsx(
             'rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-            unsavedChanges || undeployedChanges
-              ? 'frameos-primary-action'
-              : 'frameos-secondary-button'
+            unsavedChanges || undeployedChanges ? 'frameos-primary-action' : 'frameos-secondary-button'
           )}
         >
           Deploy

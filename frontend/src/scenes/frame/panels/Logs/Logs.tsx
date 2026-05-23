@@ -209,7 +209,15 @@ function renderMetricsLog(
         <span className={theme === 'dark' ? 'text-yellow-600' : 'text-amber-700'}>metrics</span>{' '}
         {metricState && !hasStandardMetrics ? (
           <>
-            <span className={metricState === 'error' ? (theme === 'dark' ? 'text-red-300' : 'text-red-700') : terminalTextColor(theme)}>
+            <span
+              className={
+                metricState === 'error'
+                  ? theme === 'dark'
+                    ? 'text-red-300'
+                    : 'text-red-700'
+                  : terminalTextColor(theme)
+              }
+            >
               {metricState}
             </span>
             {typeof rest.error === 'string' ? (
@@ -287,6 +295,8 @@ function renderMetricsLog(
 
 interface LogsProps {
   fullScreen?: boolean
+  compact?: boolean
+  className?: string
 }
 
 function logTypeClassName(type: string, theme: WorkspaceTheme): string {
@@ -305,7 +315,7 @@ function logTypeClassName(type: string, theme: WorkspaceTheme): string {
   return theme === 'dark' ? 'text-slate-100' : 'text-slate-900'
 }
 
-export function Logs({ fullScreen = false }: LogsProps = {}) {
+export function Logs({ fullScreen = false, compact = false, className }: LogsProps = {}) {
   const inFrameAdminMode = isInFrameAdminMode()
   const { frameId } = useValues(frameLogic)
   const { theme: workspaceTheme } = useValues(workspaceLogic)
@@ -317,9 +327,9 @@ export function Logs({ fullScreen = false }: LogsProps = {}) {
   const shouldStickToBottomRef = useRef(true)
   const { buildCacheLoading } = useValues(frameSettingsLogic({ frameId }))
   const { clearBuildCache } = useActions(frameSettingsLogic({ frameId }))
-  const renderTheme: WorkspaceTheme = fullScreen ? workspaceTheme : 'dark'
-  const searchActive = logSearch.trim().length > 0
-  const visibleLogs = filteredLogs
+  const renderTheme: WorkspaceTheme = fullScreen || compact ? workspaceTheme : 'dark'
+  const searchActive = !compact && logSearch.trim().length > 0
+  const visibleLogs = compact ? logs : filteredLogs
 
   useEffect(() => {
     if (!shouldStickToBottomRef.current) {
@@ -388,7 +398,8 @@ export function Logs({ fullScreen = false }: LogsProps = {}) {
     <div
       className={clsx(
         'frame-tool-panel flex h-full items-center justify-center text-sm frame-tool-muted',
-        fullScreen ? 'min-h-[calc(100vh-3rem)]' : 'frame-tool-card rounded-[22px]'
+        className,
+        fullScreen ? 'min-h-[calc(100vh-3rem)]' : compact ? 'min-h-0 bg-transparent' : 'frame-tool-card rounded-[22px]'
       )}
     >
       Loading logs...
@@ -397,12 +408,18 @@ export function Logs({ fullScreen = false }: LogsProps = {}) {
     <div
       className={clsx(
         'frame-tool-panel @container relative',
+        className,
         fullScreen
           ? ['min-h-[calc(100vh-3rem)] w-full pb-12', renderTheme === 'dark' ? 'text-slate-100' : 'text-slate-950']
+          : compact
+          ? [
+              'h-full min-h-0 overflow-hidden bg-transparent',
+              renderTheme === 'dark' ? 'text-slate-100' : 'text-slate-950',
+            ]
           : 'frame-tool-terminal h-full overflow-hidden rounded-[22px] p-3'
       )}
     >
-      {fullScreen ? (
+      {compact ? null : fullScreen ? (
         <DropdownMenu
           horizontal
           buttonColor="none"
@@ -417,68 +434,79 @@ export function Logs({ fullScreen = false }: LogsProps = {}) {
           items={menuItems}
         />
       )}
-      <div
-        className={clsx(
-          'logs-filter-toolbar z-20 mb-4 flex flex-wrap items-center gap-3',
-          fullScreen ? 'sticky top-0 py-3 pr-14 backdrop-blur-sm @4xl:pr-16' : 'px-1 pb-2 pr-12'
-        )}
-      >
-        <label className="relative block min-w-0 flex-[1_1_14rem] @md:max-w-2xl">
-          <span className="sr-only">Search logs</span>
-          <MagnifyingGlassIcon
-            className={clsx(
-              'pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2',
-              renderTheme === 'dark' ? 'text-slate-500' : 'text-slate-400'
-            )}
-          />
-          <input
-            value={logSearch}
-            onChange={(event) => setLogSearch(event.target.value)}
-            placeholder="Search logs..."
-            className={clsx(
-              'h-10 w-full rounded-full border py-2 pl-9 pr-10 font-sans text-sm shadow-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-400',
-              renderTheme === 'dark'
-                ? 'border-white/10 bg-white/[0.04] text-slate-100 placeholder:text-slate-500'
-                : 'border-slate-200/80 bg-white/80 text-slate-950 placeholder:text-slate-400'
-            )}
-          />
-          {searchActive ? (
-            <button
-              type="button"
-              onClick={() => setLogSearch('')}
-              className={clsx(
-                'absolute right-1.5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-lg transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-                renderTheme === 'dark'
-                  ? 'text-slate-400 hover:bg-white/10 hover:text-slate-100'
-                  : 'text-slate-400 hover:bg-slate-100 hover:text-slate-700'
-              )}
-              aria-label="Clear log search"
-            >
-              <XMarkIcon className="h-4 w-4" />
-            </button>
-          ) : null}
-        </label>
+      {compact ? null : (
         <div
           className={clsx(
-            'whitespace-nowrap font-sans text-xs font-semibold',
-            renderTheme === 'dark' ? 'text-slate-400' : 'text-slate-500'
+            'logs-filter-toolbar z-20 mb-4 flex flex-wrap items-center gap-3',
+            fullScreen ? 'sticky top-0 py-3 pr-14 backdrop-blur-sm @4xl:pr-16' : 'px-1 pb-2 pr-12'
           )}
         >
-          {searchActive ? `${visibleLogs.length} of ${logs.length} lines` : `${logs.length} lines`}
+          <label className="relative block min-w-0 flex-[1_1_14rem] @md:max-w-2xl">
+            <span className="sr-only">Search logs</span>
+            <MagnifyingGlassIcon
+              className={clsx(
+                'pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2',
+                renderTheme === 'dark' ? 'text-slate-500' : 'text-slate-400'
+              )}
+            />
+            <input
+              value={logSearch}
+              onChange={(event) => setLogSearch(event.target.value)}
+              placeholder="Search logs..."
+              className={clsx(
+                'h-10 w-full rounded-full border py-2 pl-9 pr-10 font-sans text-sm shadow-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-400',
+                renderTheme === 'dark'
+                  ? 'border-white/10 bg-white/[0.04] text-slate-100 placeholder:text-slate-500'
+                  : 'border-slate-200/80 bg-white/80 text-slate-950 placeholder:text-slate-400'
+              )}
+            />
+            {searchActive ? (
+              <button
+                type="button"
+                onClick={() => setLogSearch('')}
+                className={clsx(
+                  'absolute right-1.5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-lg transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+                  renderTheme === 'dark'
+                    ? 'text-slate-400 hover:bg-white/10 hover:text-slate-100'
+                    : 'text-slate-400 hover:bg-slate-100 hover:text-slate-700'
+                )}
+                aria-label="Clear log search"
+              >
+                <XMarkIcon className="h-4 w-4" />
+              </button>
+            ) : null}
+          </label>
+          <div
+            className={clsx(
+              'whitespace-nowrap font-sans text-xs font-semibold',
+              renderTheme === 'dark' ? 'text-slate-400' : 'text-slate-500'
+            )}
+          >
+            {searchActive ? `${visibleLogs.length} of ${logs.length} lines` : `${logs.length} lines`}
+          </div>
         </div>
-      </div>
+      )}
       <Virtuoso
         useWindowScroll={fullScreen}
         className={clsx(
           'overflow-x-hidden bg-transparent font-mono text-sm leading-5',
-          fullScreen ? 'min-h-[calc(100vh-6rem)] w-full pr-14' : 'h-full overflow-y-auto pr-2'
+          fullScreen
+            ? 'min-h-[calc(100vh-6rem)] w-full pr-14'
+            : compact
+            ? 'h-full min-h-0 pr-2'
+            : 'h-full overflow-y-auto pr-2'
         )}
         ref={virtuosoRef}
         initialTopMostItemIndex={Math.max(visibleLogs.length - 1, 0)}
         data={visibleLogs}
         components={{
           EmptyPlaceholder: () => (
-            <div className={clsx('flex h-full items-center justify-center', renderTheme === 'dark' ? 'text-gray-400' : 'text-slate-500')}>
+            <div
+              className={clsx(
+                'flex h-full items-center justify-center',
+                renderTheme === 'dark' ? 'text-gray-400' : 'text-slate-500'
+              )}
+            >
               {searchActive ? 'No matching logs' : 'No logs yet'}
             </div>
           ),
@@ -496,9 +524,14 @@ export function Logs({ fullScreen = false }: LogsProps = {}) {
             try {
               const { event, timestamp, ...rest } = JSON.parse(log.line)
               if (event === 'metrics') {
-                logLine = renderMetricsLog(rest, expandedMetricLogIds.includes(log.id), () => {
-                  toggleMetricLogExpanded(log.id)
-                }, renderTheme)
+                logLine = renderMetricsLog(
+                  rest,
+                  expandedMetricLogIds.includes(log.id),
+                  () => {
+                    toggleMetricLogExpanded(log.id)
+                  },
+                  renderTheme
+                )
               } else {
                 logLine = (
                   <>
@@ -527,7 +560,10 @@ export function Logs({ fullScreen = false }: LogsProps = {}) {
           return (
             <div
               key={log.id}
-              className={clsx('rounded-lg px-2 py-0.5 transition @md:flex @md:flex-row', logTypeClassName(log.type, renderTheme))}
+              className={clsx(
+                'rounded-lg px-2 py-0.5 transition @md:flex @md:flex-row',
+                logTypeClassName(log.type, renderTheme)
+              )}
             >
               <div className="flex-0 mr-3 whitespace-nowrap text-slate-500">{formatTimestamp(log.timestamp)}</div>
               <div className="flex-1 break-words" style={{ wordBreak: 'break-word' }}>

@@ -34,6 +34,7 @@ import { controlLogic } from '../frame/panels/Scenes/controlLogic'
 import { ExpandedScene } from '../frame/panels/Scenes/ExpandedScene'
 import { EditTemplateModal } from '../frame/panels/Templates/EditTemplateModal'
 import { Templates } from '../frame/panels/Templates/Templates'
+import { FrameDashboardSurface, FrameScheduleDrawer } from './FrameDashboardSurface'
 import { framesHomeLogic } from './framesHomeLogic'
 
 const uploadedScenePrefix = 'uploaded/'
@@ -425,12 +426,7 @@ function CurrentSnapshotCard({ frame, active }: { frame: FrameType; active: bool
       )}
     >
       <div className="frameos-card-media relative flex h-[24rem] max-h-[75vh] min-h-0 items-center justify-center overflow-hidden bg-slate-100">
-        <FrameImage
-          frameId={frame.id}
-          refreshable={false}
-          objectFit="contain"
-          className="h-full w-full rounded-none"
-        />
+        <FrameImage frameId={frame.id} refreshable={false} objectFit="contain" className="h-full w-full rounded-none" />
         <div className="frameos-primary-hover-text absolute right-3 top-3 rounded-full bg-white/90 px-2.5 py-1 text-xs font-semibold text-slate-500 shadow-sm transition">
           Open
         </div>
@@ -462,127 +458,17 @@ function FrameSectionToolLinks({ frame }: { frame: FrameType }): JSX.Element {
 
 function FrameSection({ section }: { section: OverviewFrameSection }): JSX.Element {
   const { frame, scenes, archived, frameMatchesSearch } = section
-  const { search } = useValues(workspaceLogic)
-  const { openChatDrawer } = useActions(workspaceLogic)
-  const { deleteFrame, deployFrame, renderFrame, renameFrame, setFrameArchived } = useActions(framesModel)
-  const { sceneId: currentSceneId } = useValues(controlLogic({ frameId: frame.id }))
-  const healthy = frameIsHealthy(frame)
-  const connected = (frame.active_connections ?? 0) > 0
-  const frameName = frame.name || frameHost(frame)
-
-  const promptRenameFrame = (): void => {
-    const nextName = window.prompt('Rename frame', frameName)?.trim()
-    if (!nextName || nextName === frameName) {
-      return
-    }
-    renameFrame(frame.id, nextName)
-  }
 
   return (
-    <section
-      id={`workspace-frame-${frame.id}`}
-      data-workspace-frame-section={frame.id}
-      className={clsx('group @container scroll-mt-6', archived && 'opacity-80')}
-    >
-      <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
-        <A
-          href={urls.frame(frame.id, 'overview')}
-          className="group flex min-w-0 items-center gap-3 rounded-2xl transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-        >
-          <div className="frameos-icon-tile flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white/70 text-slate-700 shadow-sm">
-            <ComputerDesktopIcon className="h-7 w-7" />
-          </div>
-          <div className="min-w-0">
-            <div className="flex min-w-0 items-center gap-2">
-              <h2
-                data-workspace-frame-title={frame.id}
-                className="frameos-strong truncate text-2xl font-bold tracking-normal text-slate-950"
-              >
-                {frame.name || frameHost(frame)}
-              </h2>
-              {archived ? (
-                <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-semibold text-slate-500">
-                  Archived
-                </span>
-              ) : null}
-              {healthy ? <span title="Frame is healthy" className="h-2.5 w-2.5 rounded-full bg-emerald-400" /> : null}
-              {connected ? (
-                <span title="FrameOS agent connected" className="h-2.5 w-2.5 rounded-full bg-blue-400" />
-              ) : null}
-            </div>
-            <div className="frameos-muted truncate text-sm text-slate-500">{frameStatus(frame)}</div>
-          </div>
-        </A>
-        <div className="flex w-full shrink-0 flex-wrap items-center justify-start gap-2 @4xl:w-auto @4xl:justify-end">
-          <FrameSectionToolLinks frame={frame} />
-          <DropdownMenu
-            buttonColor="none"
-            horizontal
-            className="frameos-secondary-button flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white/80 !px-0 !py-0 text-slate-700 shadow-sm transition hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-            items={[
-              {
-                label: 'Rename',
-                title: 'Rename frame',
-                onClick: promptRenameFrame,
-                icon: <PencilSquareIcon className="h-5 w-5" />,
-              },
-              {
-                label: 'Render now',
-                title: 'Render frame now',
-                onClick: () => renderFrame(frame.id),
-                icon: <PlayIcon className="h-5 w-5" />,
-              },
-              {
-                label: 'Deploy',
-                title: 'Deploy frame',
-                onClick: () => deployFrame(frame.id),
-                icon: <RocketLaunchIcon className="h-5 w-5" />,
-              },
-              {
-                label: archived ? 'Restore' : 'Archive',
-                title: archived ? 'Restore frame' : 'Archive frame',
-                onClick: () => setFrameArchived(frame.id, !archived),
-                icon: archived ? <ArrowUturnLeftIcon className="h-5 w-5" /> : <ArchiveBoxIcon className="h-5 w-5" />,
-              },
-              {
-                label: 'Delete',
-                title: 'Delete frame',
-                confirm: `Delete "${frameName}"? This cannot be undone.`,
-                onClick: () => deleteFrame(frame.id),
-                icon: <TrashIcon className="h-5 w-5" />,
-              },
-            ]}
-          />
-          <button
-            type="button"
-            title="Open AI chat"
-            onClick={() => openChatDrawer(frame.id, null)}
-            className="frameos-ai-button flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-fuchsia-500 via-blue-500 to-cyan-400 text-white shadow-lg shadow-blue-500/25 transition hover:-translate-y-0.5 hover:shadow-xl hover:shadow-blue-500/35 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-          >
-            <SparklesIcon className="h-5 w-5" />
-          </button>
-        </div>
-      </div>
-      <div className="flex flex-col items-start gap-5 @3xl:flex-row">
-        <CurrentSnapshotCard frame={frame} active={!!currentSceneId} />
-        {scenes.length > 0 ? (
-          <div className="frameos-scene-grid w-full">
-            {scenes.map((scene) => (
-              <SceneTile key={scene.id} frame={frame} scene={scene} active={sceneIsActive(scene, currentSceneId)} />
-            ))}
-            <AddSceneTile frame={frame} />
-          </div>
-        ) : search.trim() && frameMatchesSearch ? (
-          <div className="frameos-empty flex h-40 min-w-64 items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white/45 px-6 text-center text-sm font-medium text-slate-500">
-            Frame matched. No scenes match this search.
-          </div>
-        ) : (
-          <div className="frameos-scene-grid w-full">
-            <AddSceneTile frame={frame} />
-          </div>
-        )}
-      </div>
-    </section>
+    <FrameDashboardSurface
+      frame={frame}
+      scenes={scenes}
+      totalScenes={frame.scenes?.length ?? scenes.length}
+      archived={archived}
+      frameMatchesSearch={frameMatchesSearch}
+      sectionId={`workspace-frame-${frame.id}`}
+      showOpenFrameAction
+    />
   )
 }
 
@@ -626,9 +512,7 @@ function FrameSectionGroup({
           </span>
         </div>
       )}
-      {isExpanded
-        ? sections.map((section) => <FrameSection key={section.frame.id} section={section} />)
-        : null}
+      {isExpanded ? sections.map((section) => <FrameSection key={section.frame.id} section={section} />) : null}
     </div>
   )
 }
@@ -686,11 +570,20 @@ export function SceneControlPanel(): JSX.Element | null {
                 </A>
                 <DeleteInstalledSceneButton frame={frame} scene={scene} />
               </div>
+              <SceneControlPanelModeTitle />
               <ExpandedScene frameId={frame.id} sceneId={scene.id} scene={scene} showEditButton={false} />
             </div>
           </div>
         </BindLogic>
       </BindLogic>
+    </div>
+  )
+}
+
+function SceneControlPanelModeTitle(): JSX.Element {
+  return (
+    <div className="frameos-divider mb-4 border-t border-slate-200/80 pt-4">
+      <div className="frameos-muted text-xs font-semibold uppercase tracking-wide">Scene control</div>
     </div>
   )
 }
@@ -789,12 +682,13 @@ export function FramesHome(): JSX.Element {
     useValues(workspaceLogic)
   const { showForm } = useActions(newFrameForm)
   const { formVisible } = useValues(newFrameForm)
-  const { closeSceneControl, closeTemplateDrawer } = useActions(workspaceLogic)
-  const { sceneControlSelection, templateDrawerFrameId } = useValues(workspaceLogic)
-  const { archivedFramesExpanded, inactiveFramesExpanded, framesLoading } = useValues(framesModel)
+  const { closeSceneControl, closeScheduleDrawer, closeTemplateDrawer } = useActions(workspaceLogic)
+  const { sceneControlSelection, scheduleDrawerFrameId, templateDrawerFrameId } = useValues(workspaceLogic)
+  const { archivedFramesExpanded, inactiveFramesExpanded, frames, framesLoading } = useValues(framesModel)
   const { toggleArchivedFramesExpanded, toggleInactiveFramesExpanded } = useActions(framesModel)
   const hasFrameSections =
     overviewActiveFrameSections.length + overviewInactiveFrameSections.length + overviewArchivedFrameSections.length > 0
+  const scheduleDrawerFrame = scheduleDrawerFrameId ? frames[scheduleDrawerFrameId] : null
 
   return (
     <FrameosShell
@@ -804,6 +698,7 @@ export function FramesHome(): JSX.Element {
       primaryActionLabel="Add frame"
       onPrimaryAction={() => {
         closeSceneControl()
+        closeScheduleDrawer()
         closeTemplateDrawer()
         showForm()
       }}
@@ -812,6 +707,8 @@ export function FramesHome(): JSX.Element {
           <AddFramePanel />
         ) : templateDrawerFrameId ? (
           <TemplateDrawer />
+        ) : scheduleDrawerFrame ? (
+          <FrameScheduleDrawer frame={scheduleDrawerFrame} />
         ) : sceneControlSelection ? (
           <SceneControlPanel />
         ) : null

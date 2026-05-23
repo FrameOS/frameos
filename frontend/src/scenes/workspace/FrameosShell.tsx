@@ -4,8 +4,8 @@ import clsx from 'clsx'
 import type { CSSProperties, MouseEvent } from 'react'
 import {
   Cog6ToothIcon,
+  CodeBracketIcon,
   ComputerDesktopIcon,
-  CubeTransparentIcon,
   MagnifyingGlassIcon,
   MoonIcon,
   PlusIcon,
@@ -254,12 +254,7 @@ export function FrameosShell({
   }
 
   return (
-    <div
-      className={clsx(
-        'frameos-app-shell min-h-screen overflow-x-hidden text-slate-900',
-        `frameos-theme-${theme}`
-      )}
-    >
+    <div className={clsx('frameos-app-shell min-h-screen overflow-x-hidden text-slate-900', `frameos-theme-${theme}`)}>
       {primarySidebarOpen ? (
         <aside
           className={clsx(
@@ -324,7 +319,7 @@ export function FrameosShell({
                 onMobileClose={closeMobileSidebar}
                 onMobileNavigate={closeMobileSidebarAfterNavigation}
               >
-                <CubeTransparentIcon className="h-7 w-7" />
+                <CodeBracketIcon className="h-7 w-7" />
               </NavButton>
             </nav>
             <button
@@ -359,11 +354,11 @@ export function FrameosShell({
           aria-label="Open menu"
           onClick={openSidebarButton}
           className={clsx(
-            'workspace-sidebar-open-button frameos-panel fixed z-40 flex h-14 w-14 items-center justify-center rounded-2xl border border-white/80 bg-white/90 shadow-2xl shadow-slate-400/30 backdrop-blur-xl transition hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+            'workspace-sidebar-open-button frameos-panel fixed z-40 flex h-10 w-10 items-center justify-center rounded-xl border border-white/80 bg-white/90 shadow-2xl shadow-slate-400/30 backdrop-blur-xl transition hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
             mode === 'scenes' ? 'left-6 top-24 max-lg:left-5 max-lg:top-5' : 'left-5 top-5'
           )}
         >
-          <img src={logo} alt="FrameOS" className="h-10 w-10" />
+          <img src={logo} alt="FrameOS" className="h-8 w-8" />
         </button>
       )}
       <main
@@ -390,7 +385,7 @@ export function FrameosShell({
                 {aiButton}
               </div>
             ) : null
-            ) : aiButton ? (
+          ) : aiButton ? (
             <div className={clsx('relative pr-14', floatingSidebarHeaderClassName)}>
               {topBar}
               <div className="absolute right-0 top-0">{aiButton}</div>
