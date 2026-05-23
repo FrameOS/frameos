@@ -91,6 +91,30 @@ async function openAddSceneDrawer(page: Page): Promise<void> {
   await page.getByRole('heading', { name: /Add scene/i }).last().waitFor()
 }
 
+async function expandDashboardScene(page: Page): Promise<void> {
+  const legacySceneRow = page.locator('[data-scene-id="scene-dashboard"]').first()
+  if (await legacySceneRow.count()) {
+    await legacySceneRow.scrollIntoViewIfNeeded()
+
+    const openEditorButton = legacySceneRow.getByRole('button', { name: /^Open editor$/ })
+    if (!(await openEditorButton.isVisible().catch(() => false))) {
+      await legacySceneRow.getByText(/^Dashboard$/).first().click()
+    }
+
+    await openEditorButton.waitFor()
+    await legacySceneRow.getByRole('button', { name: /^Delete$/ }).waitFor()
+    return
+  }
+
+  const sceneButton = page.getByRole('button', { name: /Dashboard.*nodes/i }).first()
+  await sceneButton.scrollIntoViewIfNeeded()
+  await sceneButton.click()
+
+  const sceneDrawer = page.locator('.workspace-drawer').filter({ has: page.getByRole('heading', { name: /^Dashboard$/ }) }).last()
+  await sceneDrawer.getByRole('link', { name: /^Open editor$/ }).waitFor()
+  await sceneDrawer.getByRole('button', { name: /^Delete$/ }).waitFor()
+}
+
 async function fillLogsSearch(page: Page): Promise<void> {
   await page.getByPlaceholder(/Search logs/i).fill('render')
 }
@@ -174,6 +198,7 @@ export const visualCases: VisualCase[] = [
     fullPage: true,
     variants: [
       { id: 'default' },
+      { id: 'expanded-scene', prepare: expandDashboardScene },
       { id: 'add-scene', prepare: openAddSceneDrawer },
       { id: 'schedule-drawer', prepare: openScheduleDrawer },
     ],
