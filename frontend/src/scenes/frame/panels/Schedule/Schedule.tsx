@@ -138,7 +138,7 @@ function ViewRow({
         </div>
       </div>
       {shownFields.length ? (
-        <div className="grid gap-2 pl-[4.75rem] text-sm">
+        <div className="grid gap-2 pl-0 text-sm @md:pl-[4.75rem]">
           {shownFields.map((field) => (
             <div key={field.name} className="grid gap-1 rounded-xl bg-slate-500/10 px-3 py-2 @md:grid-cols-3">
               <div className="frame-tool-muted text-xs font-semibold uppercase">{field.label || field.name}</div>
@@ -162,20 +162,30 @@ interface EditRowProps {
 function EditRow({ event, scenesAsOptions, eventFields, closeEvent, deleteEvent }: EditRowProps) {
   return (
     <div className="space-y-4">
-      <div className="grid gap-3 @md:grid-cols-[1fr_5.5rem_5.5rem]">
-        <Field name="weekday" label="Repeats">
+      <div className="grid grid-cols-[minmax(6rem,1fr)_4rem_4rem] gap-2">
+        <Field name="weekday" label="Repeats" className="min-w-0">
           {({ value, onChange }) => (
             <Select options={weekDayOptions} value={value} onChange={(value_) => onChange(parseInt(value_))} />
           )}
         </Field>
-        <Field name="hour" label="Hour">
+        <Field name="hour" label="Hour" className="min-w-0">
           {({ value, onChange }) => (
-            <Select value={value} onChange={(value_) => onChange(parseInt(value_))} options={hourOptions} />
+            <Select
+              value={value}
+              onChange={(value_) => onChange(parseInt(value_))}
+              options={hourOptions}
+              className="px-2"
+            />
           )}
         </Field>
-        <Field name="minute" label="Minute">
+        <Field name="minute" label="Minute" className="min-w-0">
           {({ value, onChange }) => (
-            <Select value={value} onChange={(value_) => onChange(parseInt(value_))} options={minuteOptions} />
+            <Select
+              value={value}
+              onChange={(value_) => onChange(parseInt(value_))}
+              options={minuteOptions}
+              className="px-2"
+            />
           )}
         </Field>
       </div>
@@ -269,7 +279,7 @@ export function Schedule({ scrollContainer = true, drawerMode = false }: Schedul
 
   return (
     <div
-      className={clsx('frame-tool-panel', scrollContainer ? 'h-full overflow-y-auto pr-2' : 'overflow-visible')}
+      className={clsx('frame-tool-panel @container', scrollContainer ? 'h-full overflow-y-auto pr-2' : 'overflow-visible')}
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >

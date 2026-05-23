@@ -33,14 +33,14 @@ export function SystemInfo() {
   const { loadSystemInfo } = useActions(systemInfoLogic)
 
   return (
-    <Box className="p-4 space-y-4">
+    <Box className="p-4 space-y-4 @container">
       {!systemInfo && !systemMetrics && systemInfoLoading && systemMetricsLoading ? (
         <div className="flex justify-center">
           <Spinner />
         </div>
       ) : (
         <>
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-col gap-2 @md:flex-row @md:items-center @md:justify-between">
             <p className="text-sm text-slate-200">Overview of the server running the backend.</p>
             <div className="flex items-center gap-2">
               {(systemInfoLoading || systemMetricsLoading) && <Spinner />}

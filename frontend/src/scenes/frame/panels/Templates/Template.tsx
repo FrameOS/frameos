@@ -101,7 +101,7 @@ export function TemplateRow({
           </Tooltip>
         ) : null}
         <div className="break-inside-avoid space-y-1 w-full">
-          <div className="flex items-start justify-between gap-1 @xm:flex-col @md:flex-row">
+          <div className="flex flex-col items-start justify-between gap-1 @md:flex-row">
             <div className="flex-1">
               <H6>{template.name}</H6>
             </div>

@@ -122,7 +122,7 @@ function WorkspaceChatDrawer({ frameId, sceneId }: { frameId: number; sceneId: s
   }
 
   return (
-    <div className="fixed bottom-5 right-5 top-5 z-40 flex w-[430px] max-w-[calc(100vw-40px)] overflow-hidden rounded-[24px] border border-slate-800 bg-slate-950 text-white shadow-2xl shadow-slate-500/30">
+    <div className="workspace-drawer fixed bottom-5 right-5 top-5 z-40 flex w-[430px] overflow-hidden rounded-[24px] border border-slate-800 bg-slate-950 text-white shadow-2xl shadow-slate-500/30">
       <BindLogic logic={frameLogic} props={frameLogicProps}>
         <BindLogic logic={panelsLogic} props={frameLogicProps}>
           <div className="flex min-w-0 flex-1 flex-col">
@@ -207,6 +207,7 @@ export function FrameosShell({
   const workspaceMainStyle = {
     '--workspace-main-offset': primarySidebarOpen ? (secondarySidebarOpen ? '480px' : '128px') : '0px',
   } as CSSProperties
+  const floatingSidebarHeaderClassName = !primarySidebarOpen ? 'workspace-header-with-floating-sidebar' : undefined
   const leaveSceneWorkspace = () => {
     closeTemplateDrawer()
     closeScheduleDrawer()
@@ -216,15 +217,15 @@ export function FrameosShell({
   return (
     <div
       className={clsx(
-        'frameos-app-shell min-h-screen overflow-hidden text-slate-900 max-lg:overflow-auto',
+        'frameos-app-shell min-h-screen overflow-x-hidden text-slate-900',
         `frameos-theme-${theme}`
       )}
     >
       {primarySidebarOpen ? (
         <aside
           className={clsx(
-            'frameos-panel fixed bottom-5 left-5 top-5 z-30 flex max-w-[calc(100vw-40px)] overflow-hidden rounded-[24px] border border-white/80 bg-white/90 shadow-2xl shadow-slate-400/30 backdrop-blur-xl transition-[width] duration-200 max-lg:static max-lg:m-4 max-lg:h-[48vh] max-lg:w-auto',
-            secondarySidebarOpen ? 'w-[420px]' : 'w-[88px]'
+            'workspace-sidebar frameos-panel fixed bottom-5 left-5 top-5 z-30 flex max-w-[calc(100vw-40px)] overflow-hidden rounded-[24px] border border-white/80 bg-white/90 shadow-2xl shadow-slate-400/30 backdrop-blur-xl transition-[width] duration-200',
+            secondarySidebarOpen ? 'w-[420px]' : 'workspace-sidebar-collapsed w-[88px]'
           )}
         >
           <div
@@ -308,7 +309,7 @@ export function FrameosShell({
           title="Open sidebars"
           onClick={openPrimarySidebar}
           className={clsx(
-            'frameos-panel fixed z-40 flex h-14 w-14 items-center justify-center rounded-2xl border border-white/80 bg-white/90 shadow-2xl shadow-slate-400/30 backdrop-blur-xl transition hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+            'workspace-sidebar-open-button frameos-panel fixed z-40 flex h-14 w-14 items-center justify-center rounded-2xl border border-white/80 bg-white/90 shadow-2xl shadow-slate-400/30 backdrop-blur-xl transition hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
             mode === 'scenes' ? 'left-6 top-24 max-lg:left-5 max-lg:top-5' : 'left-5 top-5'
           )}
         >
@@ -319,8 +320,9 @@ export function FrameosShell({
         data-workspace-main={mode}
         style={workspaceMainStyle}
         className={clsx(
-          'workspace-main',
+          'workspace-main @container',
           !primarySidebarOpen && 'workspace-main-primary-collapsed',
+          !primarySidebarOpen && topBar === null && 'workspace-main-floating-sidebar-clearance',
           workspaceRightPanel && 'workspace-main-with-right-panel',
           mainClassName ??
             'h-screen overflow-y-auto py-6 pr-8 max-lg:h-auto max-lg:overflow-visible max-lg:px-4 max-lg:pb-6 max-lg:pt-0'
@@ -331,25 +333,26 @@ export function FrameosShell({
             aiButton ? (
               <div
                 className={clsx(
-                  'pointer-events-none fixed top-6 z-20 max-lg:right-6',
+                  'workspace-floating-ai-button pointer-events-none fixed top-6 z-20',
                   workspaceRightPanel ? 'right-[520px]' : 'right-8'
                 )}
               >
                 {aiButton}
               </div>
             ) : null
-          ) : aiButton ? (
-            <div className="relative pr-14">
+            ) : aiButton ? (
+            <div className={clsx('relative pr-14', floatingSidebarHeaderClassName)}>
               {topBar}
               <div className="absolute right-0 top-0">{aiButton}</div>
             </div>
           ) : (
-            topBar
+            <div className={floatingSidebarHeaderClassName}>{topBar}</div>
           )
         ) : (
           <div
             className={clsx(
-              'mb-8 flex items-center justify-between gap-4 max-md:flex-col max-md:items-stretch',
+              'mb-8 flex flex-col items-stretch justify-between gap-4 @md:flex-row @md:items-center',
+              floatingSidebarHeaderClassName,
               topBarClassName
             )}
           >

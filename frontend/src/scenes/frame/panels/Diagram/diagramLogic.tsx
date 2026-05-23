@@ -142,7 +142,7 @@ const normalizeNodes = (nodes: DiagramNode[]): DiagramNode[] =>
     return rest as DiagramNode
   })
 
-const normalizeEdges = (edges: Edge[]): Edge[] =>
+const normalizeEdges = (edges: Edge[] = []): Edge[] =>
   edges.map((edge) => {
     const { selected, ...rest } = edge
     return rest as Edge
@@ -161,12 +161,16 @@ const makeHistorySnapshot = (
   apps,
 })
 
-const sortById = <T extends { id: string }>(items: T[]): T[] => [...items].sort((a, b) => a.id.localeCompare(b.id))
+const sortById = <T extends { id?: string | null }>(items: T[]): T[] =>
+  items
+    .map((item, index) => ({ item, index, id: item.id ?? '' }))
+    .sort((a, b) => a.id.localeCompare(b.id) || a.index - b.index)
+    .map(({ item }) => item)
 
 const comparableHistorySnapshot = (snapshot: DiagramHistorySnapshot): DiagramHistorySnapshot => ({
-  nodes: sortById(normalizeNodes(snapshot.nodes)),
+  nodes: sortById(normalizeNodes(snapshot.nodes ?? [])),
   edges: sortById(
-    normalizeEdges(snapshot.edges).map((edge) => {
+    normalizeEdges(snapshot.edges ?? []).map((edge) => {
       const { type, ...rest } = edge
       return rest as Edge
     })
@@ -670,7 +674,13 @@ export const diagramLogic = kea<diagramLogicType>([
           return equal(state, newEdges) ? state : newEdges
         },
         addEdge: (state, { edge }) => {
-          const newEdges = addEdge({ id: uuidv4(), ...edge }, state)
+          const newEdges = addEdge(
+            {
+              ...edge,
+              id: 'id' in edge && typeof edge.id === 'string' && edge.id ? edge.id : uuidv4(),
+            },
+            state
+          )
           return equal(state, newEdges) ? state : newEdges
         },
         deleteApp: (state, { id }) => {

@@ -396,7 +396,7 @@ export function Logs({ fullScreen = false }: LogsProps = {}) {
   ) : (
     <div
       className={clsx(
-        'frame-tool-panel relative',
+        'frame-tool-panel @container relative',
         fullScreen
           ? ['min-h-[calc(100vh-3rem)] w-full pb-12', renderTheme === 'dark' ? 'text-slate-100' : 'text-slate-950']
           : 'frame-tool-terminal h-full overflow-hidden rounded-[22px] p-3'
@@ -406,7 +406,7 @@ export function Logs({ fullScreen = false }: LogsProps = {}) {
         <DropdownMenu
           horizontal
           buttonColor="none"
-          className="frameos-secondary-button fixed right-8 top-6 z-30 flex h-10 w-10 items-center justify-center rounded-full !px-0 !py-0 max-lg:right-4 max-lg:top-4"
+          className="frameos-secondary-button fixed right-4 top-4 z-30 flex h-10 w-10 items-center justify-center rounded-full !px-0 !py-0 @4xl:right-8 @4xl:top-6"
           items={menuItems}
         />
       ) : (
@@ -420,10 +420,10 @@ export function Logs({ fullScreen = false }: LogsProps = {}) {
       <div
         className={clsx(
           'logs-filter-toolbar z-20 mb-4 flex flex-wrap items-center gap-3',
-          fullScreen ? 'sticky top-0 py-3 pr-16 backdrop-blur-sm max-lg:pr-14' : 'px-1 pb-2 pr-12'
+          fullScreen ? 'sticky top-0 py-3 pr-14 backdrop-blur-sm @4xl:pr-16' : 'px-1 pb-2 pr-12'
         )}
       >
-        <label className="relative block min-w-[16rem] flex-1 sm:max-w-2xl">
+        <label className="relative block min-w-0 flex-[1_1_14rem] @md:max-w-2xl">
           <span className="sr-only">Search logs</span>
           <MagnifyingGlassIcon
             className={clsx(
@@ -527,7 +527,7 @@ export function Logs({ fullScreen = false }: LogsProps = {}) {
           return (
             <div
               key={log.id}
-              className={clsx('rounded-lg px-2 py-0.5 transition sm:flex sm:flex-row', logTypeClassName(log.type, renderTheme))}
+              className={clsx('rounded-lg px-2 py-0.5 transition @md:flex @md:flex-row', logTypeClassName(log.type, renderTheme))}
             >
               <div className="flex-0 mr-3 whitespace-nowrap text-slate-500">{formatTimestamp(log.timestamp)}</div>
               <div className="flex-1 break-words" style={{ wordBreak: 'break-word' }}>
@@ -543,7 +543,7 @@ export function Logs({ fullScreen = false }: LogsProps = {}) {
           onClick={() => scrollToLatest()}
           className={clsx(
             'frameos-secondary-button z-10 rounded-full px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-            fullScreen ? 'fixed bottom-6 right-8 max-lg:right-4' : 'absolute bottom-5 right-6'
+            fullScreen ? 'fixed bottom-6 right-4 @4xl:right-8' : 'absolute bottom-5 right-6'
           )}
         >
           Scroll to latest

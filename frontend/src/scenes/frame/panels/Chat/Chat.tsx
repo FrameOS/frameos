@@ -384,7 +384,7 @@ export function Chat() {
   }
 
   return (
-    <div className="flex flex-col h-full gap-3">
+    <div className="flex h-full flex-col gap-3 @container">
       {missingBackendApiKey ? (
         <div className="rounded-2xl border border-amber-500/40 bg-amber-950/40 px-4 py-3 text-xs text-amber-200">
           <div className="font-semibold text-amber-200">OpenAI backend API key not configured.</div>
@@ -497,7 +497,7 @@ export function Chat() {
                       <div key={message.id} className={clsx('flex', isUser ? 'justify-end' : 'justify-start')}>
                         <div
                           className={clsx(
-                            'rounded-2xl border px-4 py-3 text-sm shadow-sm mb-3 max-w-[90%] sm:max-w-[75%]',
+                            'mb-3 max-w-[90%] rounded-2xl border px-4 py-3 text-sm shadow-sm @md:max-w-[75%]',
                             isUser
                               ? 'border-blue-900/70 bg-blue-950/70 text-blue-100 shadow-[0_0_12px_rgba(30,64,175,0.25)]'
                               : 'border-slate-800/80 bg-slate-950/80 text-slate-100'
@@ -518,7 +518,7 @@ export function Chat() {
                     <div key={message.id} className={clsx('flex', isUser ? 'justify-end' : 'justify-start')}>
                       <div
                         className={clsx(
-                          'rounded-2xl border px-4 py-3 text-sm shadow-sm mb-3 max-w-[90%] sm:max-w-[75%]',
+                          'mb-3 max-w-[90%] rounded-2xl border px-4 py-3 text-sm shadow-sm @md:max-w-[75%]',
                           isUser
                             ? 'border-blue-900/70 bg-blue-950/70 text-blue-100 shadow-[0_0_12px_rgba(30,64,175,0.25)]'
                             : isLog

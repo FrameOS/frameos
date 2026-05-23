@@ -208,7 +208,7 @@ function AppsTopBar({
 }): JSX.Element {
   const { saveAndDeployFrame, saveFrame } = useActions(frameLogic({ frameId: frame.id }))
   return (
-    <div className="mb-4 flex items-center justify-between gap-4 max-md:flex-col max-md:items-stretch">
+    <div className="mb-4 flex flex-col items-stretch justify-between gap-4 @md:flex-row @md:items-center">
       <div className="min-w-0">
         <div className="frameos-muted text-xs font-semibold uppercase tracking-wide text-slate-400">
           {frame.name || frameHost(frame)}
@@ -289,7 +289,7 @@ function AppsEditorSurface({
   return (
     <>
       <ActiveAppSelectionMount frameId={frame.id} sceneId={scene.id} app={app} />
-      <div className="min-h-0 flex-1 overflow-hidden">
+      <div className="apps-editor-surface min-h-0 flex-1 overflow-hidden">
         <EditApp
           sceneId={scene.id}
           nodeId={app.nodeId}
@@ -361,7 +361,7 @@ function AppsWorkspaceFrame({ frameId, routeSceneId, routeNodeId }: AppsWorkspac
               undeployedChanges={undeployedChanges}
             />
           }
-          mainClassName="flex h-screen flex-col overflow-hidden pb-5 pl-[456px] pr-5 pt-5 max-lg:h-auto max-lg:overflow-visible max-lg:px-4"
+          mainClassName="apps-workspace-main flex h-screen flex-col overflow-hidden pb-5 pr-5 pt-5 max-lg:h-auto max-lg:overflow-visible max-lg:px-4"
         >
           <AppsEditorSurface frame={frame} scene={selectedSceneId ? selectedScene : null} app={selectedApp} />
         </FrameosShell>

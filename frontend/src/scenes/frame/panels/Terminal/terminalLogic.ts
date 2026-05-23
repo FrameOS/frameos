@@ -4,6 +4,7 @@ import type { terminalLogicType } from './terminalLogicType'
 import { frameLogic } from '../../frameLogic'
 import { getBasePath } from '../../../../utils/getBasePath'
 import { apiFetch } from '../../../../utils/apiFetch'
+import { FrameType } from '../../../../types'
 
 export interface TerminalLogicProps {
   frameId: number
@@ -24,6 +25,28 @@ function nextCommandHistory(history: string[], command: string): string[] {
   const next = [...history, trimmed]
   return next.length > MAX_HISTORY_SIZE ? next.slice(next.length - MAX_HISTORY_SIZE) : next
 }
+
+function hasActiveAgentConnection(frame: FrameType): boolean {
+  return (frame.active_connections ?? 0) > 0
+}
+
+function hasDirectSshConfig(frame: FrameType): boolean {
+  return Boolean(frame.frame_host?.trim() && frame.ssh_user?.trim() && Number(frame.ssh_port || 0) > 0)
+}
+
+function terminalSshTarget(frame: FrameType): string {
+  const user = frame.ssh_user?.trim()
+  const host = frame.frame_host?.trim()
+
+  if (user && host) {
+    return `${user}@${host}`
+  }
+
+  return host || 'frame'
+}
+
+const AGENT_TERMINAL_LIMIT_MESSAGE =
+  '*** Terminal access is only available over SSH; agent connections do not provide a shell. ***\n'
 
 export const terminalLogic = kea<terminalLogicType>([
   path(['src', 'scenes', 'frame', 'panels', 'Terminal', 'terminalLogic']),
@@ -108,19 +131,27 @@ export const terminalLogic = kea<terminalLogicType>([
       }
       cache.ws = null
       const { frame } = values
+      const hasAgentConnection = hasActiveAgentConnection(frame)
+      const hasSshConfig = hasDirectSshConfig(frame)
+      cache.manualDisconnect = false
+      cache.receivedTerminalOutput = false
       actions.setConnectionState('connecting')
       actions.initializeHistory(frame.terminal_history || [])
-      if (frame.agent?.agentEnabled) {
-        actions.appendText(
-          '*** Terminal access is only available over SSH; agent connections do not provide a shell. ***\n'
-        )
+      if (hasAgentConnection && !hasSshConfig) {
+        actions.appendText(AGENT_TERMINAL_LIMIT_MESSAGE)
       }
-      actions.appendText(`***connecting to ${frame.ssh_user}@${frame.frame_host} via SSH***\n`)
+      actions.appendText(`***connecting to ${terminalSshTarget(frame)} via SSH***\n`)
       const ws = new WebSocket(`${getBasePath()}/ws/terminal/${frame.id}`)
       ws.onopen = () => actions.setConnectionState('connected')
-      ws.onmessage = (event) => actions.appendText(event.data)
+      ws.onmessage = (event) => {
+        cache.receivedTerminalOutput = true
+        actions.appendText(event.data)
+      }
       ws.onclose = () => {
         actions.setConnectionState('closed')
+        if (hasAgentConnection && hasSshConfig && !cache.manualDisconnect && !cache.receivedTerminalOutput) {
+          actions.appendText(`\n${AGENT_TERMINAL_LIMIT_MESSAGE}`)
+        }
         actions.appendText('\n*** connection closed ***\n')
         cache.ws = null
       }
@@ -128,6 +159,7 @@ export const terminalLogic = kea<terminalLogicType>([
     },
     disconnect: () => {
       if (cache.ws) {
+        cache.manualDisconnect = true
         cache.ws.close()
         cache.ws = null
       }

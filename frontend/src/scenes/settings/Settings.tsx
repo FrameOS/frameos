@@ -73,7 +73,7 @@ export function Settings() {
         <a
           key={href}
           href={href}
-          className="block rounded-xl px-3 py-2.5 text-base font-medium text-slate-700 transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          className="frameos-settings-nav-link block rounded-xl px-3 py-2.5 text-base font-medium text-slate-700 transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
         >
           {label}
         </a>
@@ -87,6 +87,7 @@ export function Settings() {
       title="Settings"
       subtitle="System configuration"
       tree={settingsTree}
+      mainClassName="settings-workspace-main min-h-screen overflow-visible py-6 pr-8 max-lg:min-h-0 max-lg:px-4 max-lg:pb-6 max-lg:pt-0"
       toolbar={
         <div className="flex gap-2">
           {!isHassioIngress ? (

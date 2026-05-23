@@ -334,7 +334,7 @@ export function TemplateDrawer(): JSX.Element | null {
   const frameLogicProps = { frameId: frame.id }
 
   return (
-    <div className="frameos-drawer fixed bottom-5 right-5 top-5 z-40 w-[430px] max-w-[calc(100vw-40px)] overflow-hidden rounded-[24px] border border-white/80 bg-white/95 shadow-2xl shadow-slate-500/30 backdrop-blur-xl">
+    <div className="workspace-drawer frameos-drawer fixed bottom-5 right-5 top-5 z-40 w-[430px] overflow-hidden rounded-[24px] border border-white/80 bg-white/95 shadow-2xl shadow-slate-500/30 backdrop-blur-xl">
       <BindLogic logic={frameLogic} props={frameLogicProps}>
         <BindLogic logic={panelsLogic} props={frameLogicProps}>
           <div className="flex h-full flex-col">
@@ -424,8 +424,13 @@ function CurrentSnapshotCard({ frame, active }: { frame: FrameType; active: bool
           : 'border-white/90 shadow-xl shadow-slate-300/35 hover:shadow-2xl hover:shadow-slate-300/45'
       )}
     >
-      <div className="frameos-card-media relative flex max-h-[19rem] min-h-0 items-center justify-center overflow-hidden bg-slate-100">
-        <FrameImage frameId={frame.id} refreshable={false} objectFit="contain" className="max-h-[19rem] w-full" />
+      <div className="frameos-card-media relative flex h-[24rem] max-h-[75vh] min-h-0 items-center justify-center overflow-hidden bg-slate-100">
+        <FrameImage
+          frameId={frame.id}
+          refreshable={false}
+          objectFit="contain"
+          className="h-full w-full rounded-none"
+        />
         <div className="frameos-primary-hover-text absolute right-3 top-3 rounded-full bg-white/90 px-2.5 py-1 text-xs font-semibold text-slate-500 shadow-sm transition">
           Open
         </div>
@@ -647,7 +652,7 @@ export function SceneControlPanel(): JSX.Element | null {
   const frameLogicProps = { frameId: frame.id }
 
   return (
-    <div className="frameos-drawer fixed bottom-5 right-5 top-5 z-40 w-[390px] max-w-[calc(100vw-40px)] overflow-hidden rounded-[24px] border border-white/80 bg-white/95 shadow-2xl shadow-slate-500/30 backdrop-blur-xl">
+    <div className="workspace-drawer frameos-drawer fixed bottom-5 right-5 top-5 z-40 w-[390px] overflow-hidden rounded-[24px] border border-white/80 bg-white/95 shadow-2xl shadow-slate-500/30 backdrop-blur-xl">
       <BindLogic logic={frameLogic} props={frameLogicProps}>
         <BindLogic logic={panelsLogic} props={frameLogicProps}>
           <div className="flex h-full flex-col">
@@ -723,7 +728,7 @@ function AddFramePanel(): JSX.Element | null {
   }
 
   return (
-    <div className="frameos-drawer fixed bottom-5 right-5 top-5 z-40 w-[390px] max-w-[calc(100vw-40px)] overflow-y-auto rounded-[24px] border border-white/80 bg-white/95 p-5 text-slate-900 shadow-2xl shadow-slate-500/30 backdrop-blur-xl">
+    <div className="workspace-drawer frameos-drawer fixed bottom-5 right-5 top-5 z-40 w-[390px] overflow-y-auto rounded-[24px] border border-white/80 bg-white/95 p-5 text-slate-900 shadow-2xl shadow-slate-500/30 backdrop-blur-xl">
       <div className="mb-4 flex justify-end">
         <button
           type="button"

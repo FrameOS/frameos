@@ -209,7 +209,7 @@ export function Terminal() {
   return (
     <div
       className={clsx(
-        'frame-tool-panel relative min-h-[calc(100vh-3rem)] w-full pb-44 lg:pb-28',
+        'frame-tool-panel @container relative min-h-[calc(100vh-3rem)] w-full pb-44 @4xl:pb-28',
         theme === 'dark' ? 'text-slate-100' : 'text-slate-950'
       )}
     >
@@ -270,7 +270,7 @@ export function Terminal() {
             ]}
           />
         </div>
-        <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
+        <div className="flex flex-col gap-2 @4xl:flex-row @4xl:items-center">
           <input
             value={commandInput}
             onChange={(e) => setCommandInput(e.target.value)}

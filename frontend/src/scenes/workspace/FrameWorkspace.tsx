@@ -17,7 +17,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { frameHost, frameIsHealthy, frameIsStale } from '../../decorators/frame'
 import { FrameImage } from '../../components/FrameImage'
-import { FrameScene, FrameType, LogType, MetricsType } from '../../types'
+import { FrameScene, FrameType, LogType, MetricsType, ScheduledEvent } from '../../types'
 import { framesModel } from '../../models/framesModel'
 import { FrameosShell } from './FrameosShell'
 import { AddSceneTile, SceneControlPanel, TemplateDrawer } from './FramesHome'
@@ -82,6 +82,43 @@ const frameToolDefinitions: FrameToolDefinition[] = [
   },
 ]
 
+const frameSettingsSections = [
+  { id: 'frame-settings-info', label: 'Info' },
+  { id: 'frame-settings-device', label: 'Device' },
+  { id: 'frame-settings-ssh', label: 'SSH' },
+  { id: 'frame-settings-agent', label: 'Agent' },
+  { id: 'frame-settings-backend', label: 'Backend' },
+  { id: 'frame-http-api-section', label: 'HTTP API' },
+  { id: 'frame-settings-admin', label: 'Admin' },
+  { id: 'frame-http-proxy-section', label: 'HTTPS' },
+  { id: 'frame-settings-network', label: 'Network' },
+  { id: 'frame-settings-defaults', label: 'Defaults' },
+  { id: 'frame-settings-palette', label: 'Palette' },
+  { id: 'frame-settings-qr', label: 'QR code' },
+  { id: 'frame-settings-assets', label: 'Assets' },
+  { id: 'frame-settings-gpio', label: 'GPIO' },
+  { id: 'frame-settings-logs', label: 'Logs' },
+  { id: 'frame-settings-reboot', label: 'Reboot' },
+]
+
+function scrollToFrameSettingsSection(sectionId: string, attempt = 0): void {
+  if (typeof document === 'undefined' || typeof window === 'undefined') {
+    return
+  }
+
+  window.requestAnimationFrame(() => {
+    const section = document.getElementById(sectionId)
+    if (section) {
+      section.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      return
+    }
+
+    if (attempt < 8) {
+      window.setTimeout(() => scrollToFrameSettingsSection(sectionId, attempt + 1), 50)
+    }
+  })
+}
+
 function parseFrameId(frameId?: string): number | null {
   if (!frameId) {
     return null
@@ -112,6 +149,28 @@ function FrameSelector({ frame, frames }: { frame: FrameType; frames: FrameType[
           </optgroup>
         ))}
       </select>
+    </div>
+  )
+}
+
+function FrameSettingsSectionLinks({ frameId }: { frameId: number }): JSX.Element {
+  const { openFrameTool } = useActions(workspaceLogic)
+
+  return (
+    <div className="frameos-frame-tool-subnav ml-12 grid grid-cols-2 gap-1 border-l border-slate-200/70 pl-3">
+      {frameSettingsSections.map((section) => (
+        <button
+          key={section.id}
+          type="button"
+          onClick={() => {
+            openFrameTool(frameId, 'settings')
+            scrollToFrameSettingsSection(section.id)
+          }}
+          className="frameos-frame-tool-subrow min-w-0 rounded-lg px-2 py-1 text-left text-xs font-semibold text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+        >
+          <span className="block truncate">{section.label}</span>
+        </button>
+      ))}
     </div>
   )
 }
@@ -171,14 +230,15 @@ function FrameTree({
       <div>
         <div className="mb-2 px-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Frame Tools</div>
         <div className="space-y-1">
-          {frameToolDefinitions.map((definition) => (
-            <FrameToolRow
-              key={definition.panel}
-              definition={definition}
-              active={activeTool === definition.panel}
-              frameId={frame.id}
-            />
-          ))}
+          {frameToolDefinitions.map((definition) => {
+            const active = activeTool === definition.panel
+            return (
+              <div key={definition.panel} className="space-y-1">
+                <FrameToolRow definition={definition} active={active} frameId={frame.id} />
+                {definition.panel === 'settings' && active ? <FrameSettingsSectionLinks frameId={frame.id} /> : null}
+              </div>
+            )
+          })}
         </div>
       </div>
     </div>
@@ -644,6 +704,85 @@ function OverviewSystemMetricTiles({
   )
 }
 
+function scheduleWeekdayLabel(weekday?: number | null): string {
+  if (!weekday) {
+    return 'Every day'
+  }
+  if (weekday === 8) {
+    return 'Weekdays'
+  }
+  if (weekday === 9) {
+    return 'Weekends'
+  }
+  return ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][weekday - 1] ?? 'Custom'
+}
+
+function scheduleTimeLabel(event: ScheduledEvent): string {
+  return `${String(event.hour).padStart(2, '0')}:${String(event.minute).padStart(2, '0')}`
+}
+
+function OverviewScheduleCard({ frame, scenes }: { frame: FrameType; scenes: FrameScene[] }): JSX.Element {
+  const { openScheduleDrawer } = useActions(workspaceLogic)
+  const schedule = frame.schedule
+  const events = schedule?.events ?? []
+  const enabledEvents = events.filter((event) => !event.disabled)
+  const disabled = !!schedule?.disabled
+  const visibleEvents = enabledEvents.slice(0, 3)
+  const sceneNameById = new Map(scenes.map((scene) => [scene.id, scene.name || 'Untitled scene']))
+  const summary = disabled
+    ? 'Paused'
+    : enabledEvents.length === 0
+    ? 'No active entries'
+    : `${enabledEvents.length} active ${enabledEvents.length === 1 ? 'entry' : 'entries'}`
+
+  return (
+    <div className="frame-tool-card rounded-[22px] p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="frame-tool-muted text-xs font-semibold uppercase tracking-wide">Schedule</div>
+          <div
+            className={clsx(
+              'mt-1 truncate text-xl font-bold tracking-normal',
+              disabled || enabledEvents.length === 0 ? 'text-amber-500' : 'text-emerald-500'
+            )}
+          >
+            {summary}
+          </div>
+          <div className="frame-tool-muted mt-0.5 truncate text-xs">
+            {events.length} total {events.length === 1 ? 'entry' : 'entries'}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => openScheduleDrawer(frame.id)}
+          className="frameos-secondary-button rounded-full px-3 py-1.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+        >
+          Open
+        </button>
+      </div>
+      {visibleEvents.length > 0 ? (
+        <div className="mt-4 space-y-2">
+          {visibleEvents.map((event) => (
+            <div key={event.id} className="flex items-center gap-3 rounded-xl bg-slate-500/10 px-3 py-2 text-sm">
+              <div className="shrink-0 font-bold text-[color:var(--tool-strong)]">{scheduleTimeLabel(event)}</div>
+              <div className="min-w-0 flex-1">
+                <div className="truncate font-semibold text-[color:var(--tool-strong)]">
+                  {sceneNameById.get(event.payload.sceneId) ?? 'Unknown scene'}
+                </div>
+                <div className="frame-tool-muted truncate text-xs">{scheduleWeekdayLabel(event.weekday)}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="frame-tool-muted mt-4 rounded-xl bg-slate-500/10 px-3 py-3 text-sm">
+          Add entries to rotate scenes automatically.
+        </div>
+      )}
+    </div>
+  )
+}
+
 function FrameOverviewSurface({ frame, scenes }: { frame: FrameType; scenes: FrameScene[] }): JSX.Element {
   const { logs } = useValues(logsLogic({ frameId: frame.id }))
   const { metrics, metricsLoading } = useValues(metricsLogic({ frameId: frame.id }))
@@ -661,14 +800,14 @@ function FrameOverviewSurface({ frame, scenes }: { frame: FrameType; scenes: Fra
       : null
 
   return (
-    <div className="frame-tool-panel grid min-h-0 content-start gap-x-5 gap-y-3 xl:grid-cols-[minmax(0,1.2fr)_minmax(22rem,0.8fr)]">
-      <header className="min-w-0 xl:col-span-2">
-        <h1 className="frameos-strong truncate text-4xl font-bold leading-tight tracking-normal text-slate-950 max-md:text-3xl">
+    <div className="frame-tool-panel @container grid min-h-0 content-start gap-x-5 gap-y-3 @6xl:grid-cols-[minmax(0,1.2fr)_minmax(22rem,0.8fr)]">
+      <header className="min-w-0 @6xl:col-span-2">
+        <h1 className="frameos-strong truncate text-3xl font-bold leading-tight tracking-normal text-slate-950 @md:text-4xl">
           {frame.name || frameHost(frame)}
         </h1>
       </header>
       <div className="space-y-5">
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-4 @md:grid-cols-2 @6xl:grid-cols-4">
           <OverviewStatCard
             label="Health"
             value={healthy ? 'Healthy' : stale ? 'Stale' : frame.status}
@@ -694,7 +833,7 @@ function FrameOverviewSurface({ frame, scenes }: { frame: FrameType; scenes: Fra
           />
         </div>
 
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-4 @md:grid-cols-2 @6xl:grid-cols-4">
           <div className="frame-tool-card rounded-[22px] p-4">
             <div className="frame-tool-heading mb-3 font-semibold">Runtime</div>
             <div className="grid gap-3 text-sm">
@@ -729,6 +868,7 @@ function FrameOverviewSurface({ frame, scenes }: { frame: FrameType; scenes: Fra
       </div>
 
       <div className="space-y-5">
+        <OverviewScheduleCard frame={frame} scenes={scenes} />
         <div className="frame-tool-card overflow-hidden rounded-[22px]">
           <div
             className={clsx('frameos-card-media bg-slate-100', frameAspectRatio ? 'w-full' : 'h-64')}
@@ -737,7 +877,7 @@ function FrameOverviewSurface({ frame, scenes }: { frame: FrameType; scenes: Fra
             <FrameImage frameId={frame.id} refreshable objectFit="contain" className="h-full w-full" />
           </div>
         </div>
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+        <div className="grid gap-3 @md:grid-cols-2 @6xl:grid-cols-1">
           <OverviewStatCard
             label="Render interval"
             value={`${frame.interval}s`}
@@ -798,7 +938,7 @@ function ScheduleDrawer({ frame }: { frame: FrameType }): JSX.Element {
   const frameLogicProps = { frameId: frame.id }
 
   return (
-    <div className="frameos-drawer fixed bottom-5 right-5 top-5 z-40 w-[430px] max-w-[calc(100vw-40px)] overflow-hidden rounded-[24px] border border-white/80 bg-white/95 shadow-2xl shadow-slate-500/30 backdrop-blur-xl">
+    <div className="workspace-drawer frameos-drawer fixed bottom-5 right-5 top-5 z-40 w-[430px] overflow-hidden rounded-[24px] border border-white/80 bg-white/95 shadow-2xl shadow-slate-500/30 backdrop-blur-xl">
       <BindLogic logic={frameLogic} props={frameLogicProps}>
         <div className="flex h-full flex-col">
           <div className="frameos-divider flex items-start justify-between gap-3 border-b border-slate-200/80 px-5 py-4">
@@ -867,7 +1007,7 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
           showAiButton={activeTool.panel === 'overview'}
           mainClassName={clsx(
             toolUsesPageScroll ? 'min-h-screen overflow-visible' : 'h-screen overflow-hidden',
-            'py-6 pl-[480px] pr-8 max-lg:h-auto max-lg:overflow-visible max-lg:px-4 max-lg:pb-6 max-lg:pt-0'
+            'frame-workspace-main py-6 pr-8 max-lg:h-auto max-lg:overflow-visible max-lg:px-4 max-lg:pb-6 max-lg:pt-0'
           )}
           rightPanel={
             templateDrawerFrameId ? (

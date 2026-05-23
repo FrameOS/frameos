@@ -422,7 +422,7 @@ function UtilityToolbar(): JSX.Element {
 
 function SceneEditorTopBar({ sceneId }: { sceneId: string | null }): JSX.Element {
   return (
-    <div className="mb-4 flex items-center justify-between gap-4 max-md:flex-col max-md:items-stretch">
+    <div className="mb-4 flex flex-col items-stretch justify-between gap-4 @md:flex-row @md:items-center">
       <div className="flex min-w-0 items-center gap-2">{sceneId ? <DiagramToolbar sceneId={sceneId} /> : null}</div>
       <UtilityToolbar />
     </div>
@@ -431,7 +431,7 @@ function SceneEditorTopBar({ sceneId }: { sceneId: string | null }): JSX.Element
 
 function SceneEditorTopBarLoadingPlaceholder(): JSX.Element {
   return (
-    <div className="mb-4 flex items-center justify-between gap-4 max-md:flex-col max-md:items-stretch">
+    <div className="mb-4 flex flex-col items-stretch justify-between gap-4 @md:flex-row @md:items-center">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
         {[0, 1, 2, 3].map((index) => (
           <div key={index} className="frameos-skeleton-surface h-10 w-10 animate-pulse rounded-full" />
@@ -554,7 +554,7 @@ function UtilityDrawer({ frameId, scene }: { frameId: number; scene: FrameScene 
   }
 
   return (
-    <div className="frameos-drawer fixed bottom-5 right-5 top-5 z-40 flex w-[430px] max-w-[calc(100vw-40px)] overflow-hidden rounded-[24px] border border-white/80 bg-white/95 text-slate-900 shadow-2xl shadow-slate-500/30 backdrop-blur-xl">
+    <div className="workspace-drawer frameos-drawer fixed bottom-5 right-5 top-5 z-40 flex w-[430px] overflow-hidden rounded-[24px] border border-white/80 bg-white/95 text-slate-900 shadow-2xl shadow-slate-500/30 backdrop-blur-xl">
       <div className="frameos-divider flex w-[72px] shrink-0 flex-col items-center gap-2 border-r border-slate-200/80 py-4">
         {utilityDefinitions.map((definition) => (
           <button
@@ -634,7 +634,7 @@ function SceneCanvas({ frameId, selectedSceneId }: { frameId: number; selectedSc
 
   return (
     <div
-      className="scene-editor-canvas h-[calc(100vh-5.25rem)] min-h-[34rem] overflow-hidden"
+      className="scene-editor-canvas @container h-[calc(100vh-5.25rem)] min-h-[34rem] overflow-hidden"
       onDragOverCapture={handleSceneDragOver}
       onDropCapture={handleSceneDrop}
     >
@@ -642,7 +642,7 @@ function SceneCanvas({ frameId, selectedSceneId }: { frameId: number; selectedSc
       <button
         type="button"
         onClick={() => openUtilityPanel('apps')}
-        className="fixed bottom-9 left-[500px] z-20 hidden rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-lg transition hover:bg-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 lg:block"
+        className="scene-add-nodes-button fixed bottom-9 z-20 hidden rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-lg transition hover:bg-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 @3xl:block"
       >
         Add nodes
       </button>
@@ -664,7 +664,7 @@ function SceneWorkspaceFrame({ frameId }: SceneWorkspaceFrameProps): JSX.Element
         title="Scenes"
         tree={<SceneTreeLoadingPlaceholder />}
         topBar={<SceneEditorTopBarLoadingPlaceholder />}
-        mainClassName="h-screen overflow-hidden py-5 pl-[456px] pr-5 max-lg:h-auto max-lg:overflow-visible max-lg:px-4"
+        mainClassName="scene-workspace-main h-screen overflow-hidden py-5 pr-5 max-lg:h-auto max-lg:overflow-visible max-lg:px-4"
       >
         <SceneCanvasLoadingPlaceholder />
       </FrameosShell>
@@ -693,7 +693,7 @@ function SceneWorkspaceFrame({ frameId }: SceneWorkspaceFrameProps): JSX.Element
             />
           }
           topBar={<SceneEditorTopBar sceneId={resolvedSceneId} />}
-          mainClassName="h-screen overflow-hidden py-5 pl-[456px] pr-5 max-lg:h-auto max-lg:overflow-visible max-lg:px-4"
+          mainClassName="scene-workspace-main h-screen overflow-hidden py-5 pr-5 max-lg:h-auto max-lg:overflow-visible max-lg:px-4"
           rightPanel={activeUtilityDefinition ? <UtilityDrawer frameId={frameId} scene={selectedScene} /> : null}
         >
           <SceneCanvas frameId={frame.id} selectedSceneId={resolvedSceneId} />
@@ -724,7 +724,7 @@ export function SceneWorkspace({ frameId, sceneId }: SceneWorkspaceProps): JSX.E
           title="Scenes"
           tree={<SceneTreeLoadingPlaceholder />}
           topBar={<SceneEditorTopBarLoadingPlaceholder />}
-          mainClassName="h-screen overflow-hidden py-5 pl-[456px] pr-5 max-lg:h-auto max-lg:overflow-visible max-lg:px-4"
+          mainClassName="scene-workspace-main h-screen overflow-hidden py-5 pr-5 max-lg:h-auto max-lg:overflow-visible max-lg:px-4"
         >
           <SceneCanvasLoadingPlaceholder />
         </FrameosShell>

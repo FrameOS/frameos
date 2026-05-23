@@ -957,7 +957,7 @@ export const frameLogic = kea<frameLogicType>([
     isFrameAdminMode: [() => [], () => isInFrameAdminMode()],
     scenes: [
       (s) => [s.frame, s.frameForm],
-      (frame, frameForm): FrameScene[] => frameForm?.scenes ?? frame.scenes ?? [],
+      (frame, frameForm): FrameScene[] => frameForm?.scenes ?? frame?.scenes ?? [],
     ],
     sortedScenes: [
       (s) => [s.scenes],

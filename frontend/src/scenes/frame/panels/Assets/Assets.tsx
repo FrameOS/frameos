@@ -42,6 +42,7 @@ const hasImageExtension = (fileName: string): boolean => {
 }
 const playSceneButtonClassName =
   'frameos-primary-text shrink-0 rounded-full border border-[#4a4b8c]/35 bg-[#4a4b8c]/10 p-1.5 transition hover:bg-[#4a4b8c]/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400'
+const assetRowActionsClassName = 'ml-auto flex w-[5.25rem] shrink-0 items-center justify-end gap-2'
 
 interface AssetStats {
   files: number
@@ -212,66 +213,68 @@ function TreeNode({
             <span className="truncate font-medium">{node.name || '/'}</span>
             <span className="frame-tool-muted shrink-0 text-xs">{Object.keys(node.children).length} items</span>
           </button>
-          <button
-            type="button"
-            className={playSceneButtonClassName}
-            title="Play all images in this folder"
-            onClick={() => createImageFolderScene(node.path)}
-          >
-            <PlayIcon className="h-4 w-4" />
-          </button>
-          <DropdownMenu
-            horizontal
-            className="w-fit"
-            buttonColor="none"
-            items={
-              [
-                {
-                  label: 'Upload files',
-                  icon: <DocumentArrowUpIcon className="w-5 h-5" />,
-                  onClick: () => uploadAssets(node.path),
-                },
-                {
-                  label: 'New folder',
-                  icon: <FolderPlusIcon className="w-5 h-5" />,
-                  onClick: () => {
-                    const name = window.prompt('Folder name')
-                    if (name) {
-                      const newPath = (node.path ? node.path + '/' : '') + name
-                      createFolder(newPath)
-                    }
+          <div className={assetRowActionsClassName}>
+            <button
+              type="button"
+              className={playSceneButtonClassName}
+              title="Play all images in this folder"
+              onClick={() => createImageFolderScene(node.path)}
+            >
+              <PlayIcon className="h-4 w-4" />
+            </button>
+            <DropdownMenu
+              horizontal
+              className="w-fit"
+              buttonColor="none"
+              items={
+                [
+                  {
+                    label: 'Upload files',
+                    icon: <DocumentArrowUpIcon className="w-5 h-5" />,
+                    onClick: () => uploadAssets(node.path),
                   },
-                },
-                {
-                  label: 'Play all images in this folder',
-                  icon: <PlayIcon className="w-5 h-5" />,
-                  onClick: () => createImageFolderScene(node.path),
-                },
-                node.path
-                  ? {
-                      label: 'Rename',
-                      icon: <PencilSquareIcon className="w-5 h-5" />,
-                      onClick: () => {
-                        const base = node.path.split('/').slice(0, -1).join('/')
-                        const newName = window.prompt('New name', node.name)
-                        if (newName) {
-                          const newPath = (base ? base + '/' : '') + newName
-                          renameAsset(node.path, newPath)
-                        }
-                      },
-                    }
-                  : null,
-                node.path
-                  ? {
-                      label: 'Delete',
-                      confirm: 'Are you sure?',
-                      icon: <TrashIcon className="w-5 h-5" />,
-                      onClick: () => deleteAsset(node.path),
-                    }
-                  : null,
-              ].filter(Boolean) as DropdownMenuItem[]
-            }
-          />
+                  {
+                    label: 'New folder',
+                    icon: <FolderPlusIcon className="w-5 h-5" />,
+                    onClick: () => {
+                      const name = window.prompt('Folder name')
+                      if (name) {
+                        const newPath = (node.path ? node.path + '/' : '') + name
+                        createFolder(newPath)
+                      }
+                    },
+                  },
+                  {
+                    label: 'Play all images in this folder',
+                    icon: <PlayIcon className="w-5 h-5" />,
+                    onClick: () => createImageFolderScene(node.path),
+                  },
+                  node.path
+                    ? {
+                        label: 'Rename',
+                        icon: <PencilSquareIcon className="w-5 h-5" />,
+                        onClick: () => {
+                          const base = node.path.split('/').slice(0, -1).join('/')
+                          const newName = window.prompt('New name', node.name)
+                          if (newName) {
+                            const newPath = (base ? base + '/' : '') + newName
+                            renameAsset(node.path, newPath)
+                          }
+                        },
+                      }
+                    : null,
+                  node.path
+                    ? {
+                        label: 'Delete',
+                        confirm: 'Are you sure?',
+                        icon: <TrashIcon className="w-5 h-5" />,
+                        onClick: () => deleteAsset(node.path),
+                      }
+                    : null,
+                ].filter(Boolean) as DropdownMenuItem[]
+              }
+            />
+          </div>
         </div>
         {expanded && (
           <div
@@ -331,27 +334,20 @@ function TreeNode({
             </div>
           )}
         {!isImage ? <DocumentIcon className="h-5 w-5 shrink-0 frame-tool-muted" /> : null}
-        <div className="flex-1">
-          <span className="cursor-pointer font-medium hover:underline" onClick={() => openAsset(node.path)}>
+        <div className="min-w-0 flex-1">
+          <span
+            className="block truncate cursor-pointer font-medium hover:underline"
+            onClick={() => openAsset(node.path)}
+          >
             {node.name}
           </span>
         </div>
-        {isPlayableImage ? (
-          <button
-            type="button"
-            className={playSceneButtonClassName}
-            title="Run image scene"
-            onClick={() => createImageScene(node.path)}
-          >
-            <PlayIcon className="w-4 h-4" />
-          </button>
-        ) : null}
         {typeof node.size === 'number' && node.size >= 0 && (node.size > 0 || isUploading) ? (
-          <span className="frame-tool-muted text-xs">{humaniseSize(node.size)}</span>
+          <span className="frame-tool-muted shrink-0 text-xs">{humaniseSize(node.size)}</span>
         ) : null}
         {node.mtime && node.mtime > 0 && (
           <span
-            className="frame-tool-muted hidden text-xs md:inline"
+            className="frame-tool-muted hidden shrink-0 text-xs @md:inline"
             title={new Date(node.mtime * 1000).toLocaleString()}
           >
             {new Date(node.mtime * 1000).toLocaleString()}
@@ -362,55 +358,67 @@ function TreeNode({
         ) : node.size === -2 && node.mtime === -2 ? (
           <span className="text-red-500">Upload error</span>
         ) : null}
-        <DropdownMenu
-          horizontal
-          className="w-fit"
-          buttonColor="none"
-          items={[
-            {
-              label: 'Download',
-              icon: isDownloading ? (
-                <Spinner className="w-4 h-4 inline-block" />
-              ) : (
-                <CloudArrowDownIcon className="w-4 h-4 inline-block" />
-              ),
-              onClick: async () => {
-                setIsDownloading(true)
-                const resource = await apiFetch(frameAssetUrl(frameId, node.path))
-                if (!resource.ok) {
+        <div className={assetRowActionsClassName}>
+          {isPlayableImage ? (
+            <button
+              type="button"
+              className={playSceneButtonClassName}
+              title="Run image scene"
+              onClick={() => createImageScene(node.path)}
+            >
+              <PlayIcon className="w-4 h-4" />
+            </button>
+          ) : null}
+          <DropdownMenu
+            horizontal
+            className="w-fit"
+            buttonColor="none"
+            items={[
+              {
+                label: 'Download',
+                icon: isDownloading ? (
+                  <Spinner className="w-4 h-4 inline-block" />
+                ) : (
+                  <CloudArrowDownIcon className="w-4 h-4 inline-block" />
+                ),
+                onClick: async () => {
+                  setIsDownloading(true)
+                  const resource = await apiFetch(frameAssetUrl(frameId, node.path))
+                  if (!resource.ok) {
+                    setIsDownloading(false)
+                    throw new Error('Failed to download asset')
+                  }
+                  const blob = await resource.blob()
+                  const url = URL.createObjectURL(blob)
+                  const a = document.createElement('a')
+                  a.href = url
+                  a.download = node.name
+                  a.click()
+                  URL.revokeObjectURL(url)
                   setIsDownloading(false)
-                  throw new Error('Failed to download asset')
-                }
-                const blob = await resource.blob()
-                const url = URL.createObjectURL(blob)
-                const a = document.createElement('a')
-                a.href = url
-                a.download = node.name
-                a.click()
-                URL.revokeObjectURL(url)
-                setIsDownloading(false)
+                },
               },
-            },
-            {
-              label: 'Rename',
-              icon: <PencilSquareIcon className="w-4 h-4" />,
-              onClick: () => {
-                const base = node.path.split('/').slice(0, -1).join('/')
-                const newName = window.prompt('New name', node.name)
-                if (newName) {
-                  const newPath = (base ? base + '/' : '') + newName
-                  renameAsset(node.path, newPath)
-                }
+              {
+                label: 'Rename',
+                icon: <PencilSquareIcon className="w-4 h-4" />,
+                onClick: () => {
+                  const base = node.path.split('/').slice(0, -1).join('/')
+                  const newName = window.prompt('New name', node.name)
+                  if (newName) {
+                    const newPath = (base ? base + '/' : '') + newName
+                    renameAsset(node.path, newPath)
+                  }
+                },
               },
-            },
-            {
-              label: 'Delete',
-              confirm: 'Are you sure?',
-              icon: <TrashIcon className="w-4 h-4" />,
-              onClick: () => deleteAsset(node.path),
-            },
-          ]}
-        />
+              {
+                label: 'Delete',
+                confirm: 'Are you sure?',
+                icon: <TrashIcon className="w-4 h-4" />,
+                onClick: () => deleteAsset(node.path),
+              },
+            ]}
+          />
+        </div>
       </div>
     )
   }
@@ -445,7 +453,7 @@ function AssetsLoadingSkeleton(): JSX.Element {
         </div>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_18rem]">
+      <div className="grid gap-4 @5xl:grid-cols-[minmax(0,1fr)_18rem]">
         <div className="frameos-skeleton-surface frameos-divider rounded-[22px] border border-slate-200/70 p-3 shadow-sm">
           <div className="mb-3 flex items-center gap-2 px-2">
             <div className="frameos-skeleton-line h-3 w-24 animate-pulse rounded-full" />
@@ -468,7 +476,7 @@ function AssetsLoadingSkeleton(): JSX.Element {
           </div>
         </div>
 
-        <div className="frameos-skeleton-surface frameos-divider hidden rounded-[22px] border border-slate-200/70 p-4 shadow-sm xl:block">
+        <div className="frameos-skeleton-surface frameos-divider hidden rounded-[22px] border border-slate-200/70 p-4 shadow-sm @5xl:block">
           <div className="frameos-skeleton-line mb-4 h-3 w-28 animate-pulse rounded-full" />
           <div className="grid grid-cols-2 gap-3">
             {Array.from({ length: 6 }).map((_, index) => (
@@ -531,7 +539,7 @@ function AssetsSummaryHeader({
           />
         ) : null}
       </div>
-      <div className="grid gap-px border-t border-[color:var(--tool-border)] bg-[var(--tool-border)] md:grid-cols-4">
+      <div className="grid gap-px border-t border-[color:var(--tool-border)] bg-[var(--tool-border)] @3xl:grid-cols-4">
         {statItems.map((item) => (
           <div key={item.label} className="bg-[var(--tool-bg)] px-4 py-3">
             <div className="frame-tool-muted text-xs font-semibold uppercase tracking-wide">{item.label}</div>
@@ -625,7 +633,7 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
   }, [])
 
   return (
-    <div className={clsx('frame-tool-panel', scrollContainer ? 'h-full overflow-y-auto pr-2' : 'overflow-visible')}>
+    <div className={clsx('frame-tool-panel @container', scrollContainer ? 'h-full overflow-y-auto pr-2' : 'overflow-visible')}>
       {assetsLoading && (!assetTree.children || Object.keys(assetTree.children).length === 0) ? (
         <AssetsLoadingSkeleton />
       ) : (
