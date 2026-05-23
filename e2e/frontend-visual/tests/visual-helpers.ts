@@ -45,6 +45,8 @@ export async function prepareStablePage(page: Page, theme: 'light' | 'dark'): Pr
     database: { path: '.tmp/frontend-visual.db', sizeBytes: 2_400_000, exists: true },
   }))
 
+  await page.route('**/api/repositories', fulfillJson([]))
+
   await page.route('**/api/frames/1/assets', fulfillJson({
     assets: [
       { path: '/srv/assets', size: 4096, mtime: 1_779_535_200, is_dir: true },
