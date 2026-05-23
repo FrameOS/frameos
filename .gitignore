@@ -17,6 +17,7 @@ lerna-debug.log*
 
 instance
 node_modules
+.pnpm-store/
 result
 dist
 dist-ssr
@@ -85,6 +86,9 @@ frameos/buildroot/dl
 build/prebuilt-deps/
 frameos/.nimcache*
 .tmp-cache/
+.tmp/
+e2e/frontend-visual/playwright-report/
+e2e/frontend-visual/test-results/
 frameos/.tmp-home/
 build/
 files/
