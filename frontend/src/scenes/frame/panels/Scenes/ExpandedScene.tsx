@@ -32,9 +32,9 @@ export function ExpandedScene({
   const { states, sceneId: currentSceneId } = useValues(controlLogic({ frameId }))
   const { requiresRecompilation, changedScenes } = useValues(frameLogic({ frameId }))
   const { submitStateChanges, resetStateChanges } = useActions(expandedSceneLogic({ frameId, sceneId, scene }))
-  const { previewScene } = useActions(scenesLogic({ frameId }))
+  const { previewScene, deleteScene } = useActions(scenesLogic({ frameId }))
   const { editScene } = useActions(panelsLogic)
-  const fieldCount = fields.length ?? 0
+  const fieldCount = fields.length
 
   const currentState = states[sceneId] ?? {}
   const sceneHasChanges = changedScenes.has(sceneId) || Boolean(isUndeployed)
@@ -82,8 +82,24 @@ export function ExpandedScene({
     }
   }
 
+  const handleDelete = () => {
+    if (window.confirm('Are you sure you want to delete this scene?')) {
+      deleteScene(sceneId)
+    }
+  }
+
   return (
-    <div className="py-2">
+    <div className="space-y-3">
+      {showEditButton ? (
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <Button onClick={() => editScene(sceneId)} color="secondary">
+            Open editor
+          </Button>
+          <Button onClick={handleDelete} color="red">
+            Delete
+          </Button>
+        </div>
+      ) : null}
       {fieldCount === 0 ? (
         <div className="space-y-2">
           <div>This scene does not export publicly controllable state.</div>
@@ -100,11 +116,6 @@ export function ExpandedScene({
                 {activateLabel}
               </Button>
             )}
-            {showEditButton ? (
-              <Button onClick={() => editScene(sceneId)} color="secondary">
-                Edit scene
-              </Button>
-            ) : null}
           </div>
         </div>
       ) : (
@@ -157,11 +168,6 @@ export function ExpandedScene({
                 <Button onClick={() => resetStateChanges()} color="secondary">
                   Reset
                 </Button>
-                {showEditButton ? (
-                  <Button onClick={() => editScene(sceneId)} color="secondary">
-                    Edit scene
-                  </Button>
-                ) : null}
               </div>
             </div>
           ) : null}

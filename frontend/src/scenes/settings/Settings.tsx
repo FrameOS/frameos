@@ -91,7 +91,7 @@ export function Settings() {
       toolbar={
         <div className="flex gap-2">
           {!isHassioIngress ? (
-            <Button size="small" color="secondary" onClick={logout} className="rounded-full px-4 py-2">
+            <Button size="small" color="secondary" onClick={logout} className="rounded-lg px-4 py-2">
               Logout
             </Button>
           ) : null}
@@ -99,7 +99,7 @@ export function Settings() {
             size="small"
             color={settingsChanged ? 'primary' : 'secondary'}
             onClick={submitSettings}
-            className="rounded-full px-4 py-2"
+            className="rounded-lg px-4 py-2"
           >
             Save
           </Button>

@@ -120,7 +120,7 @@ function AiMagicButton({
       title="Open AI chat"
       onClick={onClick}
       className={clsx(
-        'frameos-ai-button flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-fuchsia-500 via-blue-500 to-cyan-400 text-white shadow-lg shadow-blue-500/30 transition hover:-translate-y-0.5 hover:shadow-xl hover:shadow-blue-500/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+        'frameos-ai-button flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-fuchsia-500 via-blue-500 to-cyan-400 text-white shadow-lg shadow-blue-500/30 transition hover:-translate-y-0.5 hover:shadow-xl hover:shadow-blue-500/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
         active && 'ring-2 ring-blue-300',
         floating && 'pointer-events-auto'
       )}
@@ -157,7 +157,7 @@ function WorkspaceChatDrawer({ frameId, sceneId }: { frameId: number; sceneId: s
               <button
                 type="button"
                 onClick={closeChatDrawer}
-                className="frameos-icon-button flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                className="frameos-icon-button flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
               >
                 <XMarkIcon className="h-6 w-6" />
               </button>
@@ -423,7 +423,7 @@ export function FrameosShell({
                   type="button"
                   onClick={onPrimaryAction}
                   title={primaryActionLabel}
-                  className="frameos-primary-action flex h-12 w-12 items-center justify-center rounded-full text-white shadow-lg transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                  className="frameos-primary-action flex h-12 w-12 items-center justify-center rounded-xl text-white shadow-lg transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
                 >
                   <PlusIcon className="h-7 w-7" />
                 </button>

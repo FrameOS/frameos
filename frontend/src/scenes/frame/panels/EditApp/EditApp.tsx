@@ -80,7 +80,7 @@ export function EditAppFileList({ sceneId, nodeId, onOpenChat, className }: Edit
               <DropdownMenu
                 buttonColor="none"
                 horizontal
-                className="frameos-icon-button flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/70 !px-0 !py-0 text-slate-500 shadow-sm transition hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                className="frameos-icon-button flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/70 !px-0 !py-0 text-slate-500 shadow-sm transition hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
                 items={[
                   {
                     label: 'Delete file',

@@ -255,7 +255,7 @@ function SceneTree({
           <button
             type="button"
             onClick={() => openUtilityPanel('state')}
-            className="frameos-secondary-button rounded-full px-3 py-2 text-xs font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            className="frameos-secondary-button rounded-lg px-3 py-2 text-xs font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
           >
             Run
           </button>
@@ -263,7 +263,7 @@ function SceneTree({
             type="button"
             onClick={() => saveFrame()}
             className={clsx(
-              'rounded-full px-3 py-2 text-xs font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+              'rounded-lg px-3 py-2 text-xs font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
               unsavedChanges ? 'frameos-primary-action' : 'frameos-secondary-button'
             )}
           >
@@ -273,7 +273,7 @@ function SceneTree({
             type="button"
             onClick={() => saveAndDeployFrame()}
             className={clsx(
-              'rounded-full px-3 py-2 text-xs font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+              'rounded-lg px-3 py-2 text-xs font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
               unsavedChanges || undeployedChanges
                 ? 'frameos-primary-action'
                 : 'frameos-secondary-button'
@@ -403,7 +403,7 @@ function UtilityToolbar(): JSX.Element {
           title={definition.label}
           onClick={() => openUtilityPanel(definition.panel)}
           className={clsx(
-            'frameos-icon-button flex h-10 w-10 items-center justify-center rounded-full border border-white/90 bg-white/90 text-slate-500 shadow-lg shadow-slate-300/25 backdrop-blur-xl transition hover:bg-white hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+            'frameos-icon-button flex h-10 w-10 items-center justify-center rounded-xl border border-white/90 bg-white/90 text-slate-500 shadow-lg shadow-slate-300/25 backdrop-blur-xl transition hover:bg-white hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
             utilityPanel === definition.panel
               ? 'frameos-primary-active text-white'
               : 'bg-white/90 text-slate-500 hover:bg-white hover:text-slate-900'
@@ -437,7 +437,7 @@ function SceneDiagramOverlay({
         title="Open AI chat"
         onClick={() => openChatDrawer(frameId, sceneId)}
         className={clsx(
-          'scene-diagram-ai-control frameos-ai-button pointer-events-auto absolute flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-fuchsia-500 via-blue-500 to-cyan-400 text-white shadow-lg shadow-blue-500/30 transition hover:-translate-y-0.5 hover:shadow-xl hover:shadow-blue-500/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+          'scene-diagram-ai-control frameos-ai-button pointer-events-auto absolute flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-fuchsia-500 via-blue-500 to-cyan-400 text-white shadow-lg shadow-blue-500/30 transition hover:-translate-y-0.5 hover:shadow-xl hover:shadow-blue-500/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
           chatDrawerIsOpen && 'ring-2 ring-blue-300'
         )}
       >
@@ -587,7 +587,7 @@ function UtilityDrawer({ frameId, scene }: { frameId: number; scene: FrameScene 
           <button
             type="button"
             onClick={closeUtilityPanel}
-            className="frameos-icon-button flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            className="frameos-icon-button flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
           >
             <XMarkIcon className="h-6 w-6" />
           </button>
@@ -646,7 +646,7 @@ function SceneCanvas({ frameId, selectedSceneId }: { frameId: number; selectedSc
       <button
         type="button"
         onClick={() => openUtilityPanel('apps')}
-        className="scene-add-nodes-button frameos-primary-action fixed bottom-9 z-20 hidden rounded-full px-4 py-2 text-sm font-semibold shadow-lg transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 @3xl:block"
+        className="scene-add-nodes-button frameos-primary-action fixed bottom-9 z-20 hidden rounded-lg px-4 py-2 text-sm font-semibold shadow-lg transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 @3xl:block"
       >
         Add nodes
       </button>

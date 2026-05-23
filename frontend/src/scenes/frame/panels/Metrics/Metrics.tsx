@@ -94,7 +94,7 @@ export function Metrics({ scrollContainer = true }: MetricsProps = {}) {
                       key={chartSeries.key}
                       type="button"
                       className={clsx(
-                        'inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500',
+                        'inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500',
                         hidden ? 'frame-tool-muted line-through opacity-60' : 'frame-tool-row hover:bg-white/80'
                       )}
                       onClick={() => toggleMetricSeries(key, chartSeries.key)}

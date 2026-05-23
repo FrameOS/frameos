@@ -109,7 +109,7 @@ export function SceneState(): JSX.Element {
                 </div>
               ) : null}
               {editingFields[index] ? (
-                <div className="frame-tool-card rounded-2xl p-3 space-y-4">
+                <div className="space-y-4">
                   <Field name="label" label="Field label (human readable)">
                     {({ value, onChange }) => (
                       <TextInput

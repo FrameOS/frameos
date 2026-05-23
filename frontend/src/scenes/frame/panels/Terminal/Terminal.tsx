@@ -204,7 +204,7 @@ export function Terminal() {
       : 'bg-slate-500/10 text-slate-600 ring-slate-500/20'
 
   const controlButtonClassName =
-    'frameos-secondary-button h-10 shrink-0 rounded-full px-4 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400'
+    'frameos-secondary-button h-10 shrink-0 rounded-lg px-4 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400'
 
   return (
     <div
@@ -237,7 +237,7 @@ export function Terminal() {
         <button
           type="button"
           onClick={() => scrollToLatest()}
-          className="terminal-scroll-latest-button frameos-secondary-button rounded-full px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          className="terminal-scroll-latest-button frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
         >
           Scroll to latest
         </button>
@@ -261,7 +261,7 @@ export function Terminal() {
           <DropdownMenu
             horizontal
             buttonColor="none"
-            className="frameos-secondary-button flex h-10 w-10 items-center justify-center rounded-full !px-0 !py-0"
+            className="frameos-secondary-button flex h-10 w-10 items-center justify-center rounded-lg !px-0 !py-0"
             items={[
               {
                 label: 'Download log',

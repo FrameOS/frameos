@@ -55,7 +55,7 @@ export function Signup() {
         <button
           disabled={isSignupFormSubmitting}
           type="submit"
-          className="frameos-primary-action auth-button flex h-12 w-full items-center justify-center rounded-full px-5 text-sm font-semibold text-white shadow-lg transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-50"
+          className="frameos-primary-action auth-button flex h-12 w-full items-center justify-center rounded-xl px-5 text-sm font-semibold text-white shadow-lg transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-50"
         >
           Create account
         </button>

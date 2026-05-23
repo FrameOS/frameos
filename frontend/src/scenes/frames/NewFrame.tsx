@@ -192,14 +192,14 @@ export function NewFrame(): JSX.Element {
           <div className="flex gap-2 pt-2">
             <button
               type="submit"
-              className="frameos-primary-action flex h-11 flex-1 items-center justify-center rounded-full px-4 text-sm font-semibold text-white shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+              className="frameos-primary-action flex h-11 flex-1 items-center justify-center rounded-xl px-4 text-sm font-semibold text-white shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
             >
               Add frame
             </button>
             <button
               type="button"
               onClick={cancel}
-              className="frameos-secondary-button h-11 rounded-full bg-slate-100 px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+              className="frameos-secondary-button h-11 rounded-xl bg-slate-100 px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
             >
               Cancel
             </button>
@@ -267,14 +267,14 @@ export function NewFrame(): JSX.Element {
           <div className="flex gap-2 pt-2">
             <button
               type="submit"
-              className="frameos-primary-action flex h-11 flex-1 items-center justify-center rounded-full px-4 text-sm font-semibold text-white shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+              className="frameos-primary-action flex h-11 flex-1 items-center justify-center rounded-xl px-4 text-sm font-semibold text-white shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
             >
               Add frame
             </button>
             <button
               type="button"
               onClick={cancel}
-              className="frameos-secondary-button h-11 rounded-full bg-slate-100 px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+              className="frameos-secondary-button h-11 rounded-xl bg-slate-100 px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
             >
               Cancel
             </button>
@@ -300,14 +300,14 @@ export function NewFrame(): JSX.Element {
               type="button"
               onClick={importFrame}
               disabled={!file || importingFrameLoading}
-              className="frameos-primary-action flex h-11 flex-1 items-center justify-center rounded-full px-4 text-sm font-semibold text-white shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-40"
+              className="frameos-primary-action flex h-11 flex-1 items-center justify-center rounded-xl px-4 text-sm font-semibold text-white shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-40"
             >
               {importingFrameLoading ? <Spinner color="white" /> : 'Import'}
             </button>
             <button
               type="button"
               onClick={cancel}
-              className="frameos-secondary-button h-11 rounded-full bg-slate-100 px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+              className="frameos-secondary-button h-11 rounded-xl bg-slate-100 px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
             >
               Cancel
             </button>

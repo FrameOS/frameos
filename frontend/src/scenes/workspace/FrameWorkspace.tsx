@@ -299,7 +299,7 @@ function SceneTile({ frame, scene, active }: { frame: FrameType; scene: FrameSce
         sceneId={scene.id}
         horizontal
         buttonColor="none"
-        className="absolute bottom-2 right-2 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-white/90 !px-0 !py-0 text-slate-600 shadow-sm"
+        className="absolute bottom-2 right-2 z-10 flex h-8 w-8 items-center justify-center rounded-lg bg-white/90 !px-0 !py-0 text-slate-600 shadow-sm"
       />
     </div>
   )
@@ -346,7 +346,7 @@ function FrameScenesSurface({
       <button
         type="button"
         onClick={() => openScheduleDrawer(frame.id)}
-        className="frameos-secondary-button rounded-full bg-white/80 px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+        className="frameos-secondary-button rounded-lg bg-white/80 px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
       >
         Schedule
       </button>
@@ -752,7 +752,7 @@ function OverviewScheduleCard({ frame, scenes }: { frame: FrameType; scenes: Fra
         <button
           type="button"
           onClick={() => openScheduleDrawer(frame.id)}
-          className="frameos-secondary-button rounded-full px-3 py-1.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          className="frameos-secondary-button rounded-lg px-3 py-1.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
         >
           Open
         </button>
@@ -946,7 +946,7 @@ function ScheduleDrawer({ frame }: { frame: FrameType }): JSX.Element {
             <button
               type="button"
               onClick={closeScheduleDrawer}
-              className="frameos-icon-button flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+              className="frameos-icon-button flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
             >
               <XMarkIcon className="h-6 w-6" />
             </button>

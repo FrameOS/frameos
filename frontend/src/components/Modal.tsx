@@ -21,7 +21,7 @@ export function Modal({ open, children, title, footer, onClose }: ModalProps): J
                   <Dialog.Title className="frameos-strong text-3xl font-semibold">{title}</Dialog.Title>
                   {onClose ? (
                     <button
-                      className="frameos-icon-button ml-auto flex h-9 w-9 items-center justify-center rounded-full border-0 text-3xl leading-none font-semibold outline-none transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                      className="frameos-icon-button ml-auto flex h-9 w-9 items-center justify-center rounded-xl border-0 text-3xl leading-none font-semibold outline-none transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
                       onClick={onClose}
                     >
                       <span className="block h-6 w-6 text-2xl leading-5 outline-none focus:outline-none">

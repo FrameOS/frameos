@@ -104,7 +104,7 @@ function ModeButton({
       disabled={disabled}
       onClick={onClick}
       className={clsx(
-        'rounded-full px-3 py-1.5 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-50',
+        'rounded-lg px-3 py-1.5 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-50',
         active ? 'frameos-primary-active text-white' : 'frameos-secondary-button bg-white/75 text-slate-700'
       )}
     >
@@ -201,7 +201,7 @@ export function Ping({ scrollContainer = true }: PingProps = {}) {
             type="button"
             onClick={() => toggleRunning()}
             className={clsx(
-              'inline-flex h-12 shrink-0 items-center justify-center gap-2 rounded-full px-5 text-sm font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+              'inline-flex h-12 shrink-0 items-center justify-center gap-2 rounded-lg px-5 text-sm font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
               isRunning
                 ? 'ping-stop-button frameos-secondary-button'
                 : 'frameos-primary-action text-white hover:shadow-lg'

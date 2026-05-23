@@ -348,7 +348,7 @@ export function TemplateDrawer(): JSX.Element | null {
               <button
                 type="button"
                 onClick={closeTemplateDrawer}
-                className="frameos-icon-button flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                className="frameos-icon-button flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
               >
                 <XMarkIcon className="h-6 w-6" />
               </button>
@@ -451,7 +451,7 @@ function FrameSectionToolLinks({ frame }: { frame: FrameType }): JSX.Element {
         <A
           key={panel}
           href={urls.frame(frame.id, panel)}
-          className="frameos-secondary-button rounded-full bg-white/80 px-3 py-1.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          className="frameos-secondary-button rounded-lg bg-white/80 px-3 py-1.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
         >
           {label}
         </A>
@@ -518,7 +518,7 @@ function FrameSection({ section }: { section: OverviewFrameSection }): JSX.Eleme
           <DropdownMenu
             buttonColor="none"
             horizontal
-            className="frameos-secondary-button flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/80 !px-0 !py-0 text-slate-700 shadow-sm transition hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            className="frameos-secondary-button flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white/80 !px-0 !py-0 text-slate-700 shadow-sm transition hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
             items={[
               {
                 label: 'Rename',
@@ -557,7 +557,7 @@ function FrameSection({ section }: { section: OverviewFrameSection }): JSX.Eleme
             type="button"
             title="Open AI chat"
             onClick={() => openChatDrawer(frame.id, null)}
-            className="frameos-ai-button flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-fuchsia-500 via-blue-500 to-cyan-400 text-white shadow-lg shadow-blue-500/25 transition hover:-translate-y-0.5 hover:shadow-xl hover:shadow-blue-500/35 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            className="frameos-ai-button flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-fuchsia-500 via-blue-500 to-cyan-400 text-white shadow-lg shadow-blue-500/25 transition hover:-translate-y-0.5 hover:shadow-xl hover:shadow-blue-500/35 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
           >
             <SparklesIcon className="h-5 w-5" />
           </button>
@@ -668,7 +668,7 @@ export function SceneControlPanel(): JSX.Element | null {
               <button
                 type="button"
                 onClick={closeSceneControl}
-                className="frameos-icon-button flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                className="frameos-icon-button flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
               >
                 <XMarkIcon className="h-6 w-6" />
               </button>
@@ -677,18 +677,16 @@ export function SceneControlPanel(): JSX.Element | null {
               <div className="mb-4 overflow-hidden rounded-2xl bg-slate-100">
                 <FrameImage frameId={frame.id} sceneId={scene.id} refreshable={false} className="max-h-52 w-full" />
               </div>
-              <div className="frameos-inset rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2 text-slate-800">
-                <ExpandedScene frameId={frame.id} sceneId={scene.id} scene={scene} showEditButton={false} />
-              </div>
-              <div className="mt-4 flex flex-wrap gap-2">
+              <div className="mb-4 flex flex-wrap gap-2">
                 <A
                   href={urls.scenes(frame.id, scene.id)}
-                  className="frameos-primary-action flex flex-1 items-center justify-center rounded-full px-4 py-2.5 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                  className="frameos-primary-action flex flex-1 items-center justify-center rounded-lg px-4 py-2.5 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
                 >
                   Open editor
                 </A>
                 <DeleteInstalledSceneButton frame={frame} scene={scene} />
               </div>
+              <ExpandedScene frameId={frame.id} sceneId={scene.id} scene={scene} showEditButton={false} />
             </div>
           </div>
         </BindLogic>
@@ -711,10 +709,11 @@ function DeleteInstalledSceneButton({ frame, scene }: { frame: FrameType; scene:
         deleteSceneAndSave(scene.id)
         closeSceneControl()
       }}
-      className="frameos-secondary-button flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/80 text-red-500 shadow-sm transition hover:bg-red-50 hover:text-red-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
+      className="frameos-danger-button flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg px-4 text-sm font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
       title="Delete scene"
     >
       <TrashIcon className="h-5 w-5" />
+      Delete
     </button>
   )
 }
@@ -733,7 +732,7 @@ function AddFramePanel(): JSX.Element | null {
         <button
           type="button"
           onClick={hideForm}
-          className="frameos-icon-button flex h-10 w-10 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          className="frameos-icon-button flex h-10 w-10 items-center justify-center rounded-xl text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
         >
           <XMarkIcon className="h-6 w-6" />
         </button>

@@ -41,7 +41,7 @@ const hasImageExtension = (fileName: string): boolean => {
   return normalizedImageExtensions.some((extension) => normalizedName.endsWith(extension))
 }
 const playSceneButtonClassName =
-  'frameos-primary-text shrink-0 rounded-full border border-[#4a4b8c]/35 bg-[#4a4b8c]/10 p-1.5 transition hover:bg-[#4a4b8c]/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400'
+  'frameos-primary-text shrink-0 rounded-lg border border-[#4a4b8c]/35 bg-[#4a4b8c]/10 p-1.5 transition hover:bg-[#4a4b8c]/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400'
 const assetRowActionsClassName = 'ml-auto flex w-[5.25rem] shrink-0 items-center justify-end gap-2'
 
 interface AssetStats {

@@ -224,7 +224,7 @@ function AppsTopBar({
           type="button"
           onClick={() => saveFrame()}
           className={clsx(
-            'rounded-full px-4 py-2 text-sm font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+            'rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
             unsavedChanges ? 'frameos-primary-action' : 'frameos-secondary-button'
           )}
         >
@@ -234,7 +234,7 @@ function AppsTopBar({
           type="button"
           onClick={() => saveAndDeployFrame()}
           className={clsx(
-            'rounded-full px-4 py-2 text-sm font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+            'rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
             unsavedChanges || undeployedChanges
               ? 'frameos-primary-action'
               : 'frameos-secondary-button'

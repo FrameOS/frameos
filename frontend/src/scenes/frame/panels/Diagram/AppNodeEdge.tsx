@@ -49,7 +49,7 @@ export function AppNodeEdge({
               transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
               pointerEvents: 'all',
             }}
-            className="frameos-secondary-button nodrag nopan rounded-full"
+            className="frameos-secondary-button nodrag nopan rounded-lg"
             onClick={() => {
               setEdges((es) => es.filter((e) => e.id !== id))
             }}
