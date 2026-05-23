@@ -15,9 +15,9 @@ export const TextInput = forwardRef<HTMLInputElement, TextInputProps>(function T
       {...props}
       className={clsx(
         (!theme || theme === 'full') &&
-          'border text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full px-2.5 py-1.5 bg-gray-600 border-gray-500 placeholder-gray-400 text-white',
+          'frameos-control border text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full px-2.5 py-1.5',
         theme === 'node' &&
-          'block text-white bg-zinc-800 focus:bg-zinc-700 hover:bg-zinc-700 w-full min-w-min px-0.5 nodrag nopan',
+          'frameos-node-control block focus:ring-1 focus:ring-blue-500 w-full min-w-min px-0.5 nodrag nopan',
         className
       )}
       data-editable="true"

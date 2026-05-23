@@ -67,10 +67,10 @@ export function EventNode({ id, isConnectable }: NodeProps): JSX.Element {
   })
 
   const backgroundClassName = clsx(
-    'shadow-lg border-2',
+    'frameos-diagram-node shadow-lg border-2',
     isSelected
-      ? 'bg-black bg-opacity-70 border-fuchsia-900 shadow-fuchsia-700/50'
-      : 'bg-black bg-opacity-70 border-red-900 shadow-red-700/50 '
+      ? 'border-fuchsia-900 shadow-fuchsia-700/50'
+      : 'border-red-900 shadow-red-700/50 '
   )
 
   const titleBackground = isSelected ? 'bg-fuchsia-900' : 'bg-red-900'

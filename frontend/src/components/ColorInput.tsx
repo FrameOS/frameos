@@ -742,7 +742,7 @@ const Sketch = React.forwardRef<HTMLDivElement, SketchProps>(function Sketch(pro
           <div className="w-16 min-w-16 flex-grow">
             <Select
               theme="node"
-              className="border !bg-[#1f2937] border-gray-500"
+              className="border"
               value={mode}
               onChange={(value) => setMode(value as 'hex' | 'rgba' | 'hsla')}
               options={[
@@ -817,9 +817,9 @@ export const ColorInput = forwardRef<HTMLInputElement, ColorInputProps>(function
       <div
         className={clsx(
           (!theme || theme === 'full') &&
-            'border text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full px-2.5 py-1.5 bg-gray-600 border-gray-500 placeholder-gray-400 text-white h-[34px] cursor-pointer min-w-[120px]',
+            'frameos-control border text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full px-2.5 py-1.5 h-[34px] cursor-pointer min-w-[120px]',
           theme === 'node' &&
-            'block border border-1 border-gray-500 text-white bg-zinc-800 focus:bg-zinc-700 hover:bg-zinc-700 w-full min-w-min px-0.5 h-[20px] cursor-pointer',
+            'frameos-node-control block focus:ring-1 focus:ring-blue-500 w-full min-w-min px-0.5 h-[20px] cursor-pointer',
           className
         )}
         size={theme === 'node' ? 15 : 20}

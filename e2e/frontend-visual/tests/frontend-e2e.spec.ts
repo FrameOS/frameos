@@ -112,6 +112,42 @@ test.describe('backend frontend e2e coverage @e2e', () => {
     expectNoFrontendErrors(readErrors)
   })
 
+  test('mobile workspace menu opens full screen and closes with browser back', async ({ page }) => {
+    const readErrors = attachFrontendErrorCollector(page)
+    await page.setViewportSize({ width: 390, height: 844 })
+    await prepareStablePage(page, 'light')
+    await login(page)
+
+    await page.goto('/frames/1?tool=scenes', { waitUntil: 'domcontentloaded' })
+    await settleForScreenshot(page)
+
+    await expect(page.locator('.workspace-sidebar')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: /Open menu/i })).toBeVisible()
+
+    await page.getByRole('button', { name: /Open menu/i }).click()
+    const sidebar = page.locator('.workspace-sidebar').first()
+    await expect(sidebar).toBeVisible()
+    await expect(sidebar).toHaveCSS('position', 'fixed')
+
+    const sidebarBox = await sidebar.boundingBox()
+    expect(sidebarBox?.x).toBe(0)
+    expect(sidebarBox?.y).toBe(0)
+    expect(Math.round(sidebarBox?.width ?? 0)).toBe(390)
+    expect(Math.round(sidebarBox?.height ?? 0)).toBe(844)
+
+    await page.goBack()
+    await expect(page.locator('.workspace-sidebar')).toHaveCount(0)
+    await expect(page).toHaveURL(/\/frames\/1\?tool=scenes$/)
+
+    await page.getByRole('button', { name: /Open menu/i }).click()
+    await expect(sidebar).toBeVisible()
+    await page.locator('button[title="Close menu"]').click()
+    await expect(page.locator('.workspace-sidebar')).toHaveCount(0)
+    await expect(page).toHaveURL(/\/frames\/1\?tool=scenes$/)
+
+    expectNoFrontendErrors(readErrors)
+  })
+
   test('all frame tool routes render', async ({ page }) => {
     const readErrors = await prepareAuthenticatedPage(page)
 

@@ -48,7 +48,7 @@ export function CodeNodeEdge({
               transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
               pointerEvents: 'all',
             }}
-            className="nodrag nopan bg-black rounded-full text-white hover:text-gray-200"
+            className="frameos-secondary-button nodrag nopan rounded-full"
             onClick={() => {
               setEdges((es) => es.filter((e) => e.id !== id))
             }}

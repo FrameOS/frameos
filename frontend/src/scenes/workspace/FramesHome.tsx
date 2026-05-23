@@ -683,7 +683,7 @@ export function SceneControlPanel(): JSX.Element | null {
               <div className="mt-4 flex flex-wrap gap-2">
                 <A
                   href={urls.scenes(frame.id, scene.id)}
-                  className="flex flex-1 items-center justify-center rounded-full bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                  className="frameos-primary-action flex flex-1 items-center justify-center rounded-full px-4 py-2.5 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
                 >
                   Open editor
                 </A>

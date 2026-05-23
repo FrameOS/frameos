@@ -133,7 +133,7 @@ function FrameSelector({ frame, frames }: { frame: FrameType; frames: FrameType[
 
   return (
     <div className="px-2">
-      <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-400">Frame</label>
+      <label className="frameos-muted mb-2 block text-xs font-semibold uppercase tracking-wide">Frame</label>
       <select
         value={frame.id}
         onChange={(event) => navigateToFrame(parseInt(event.target.value, 10))}
@@ -189,13 +189,13 @@ function FrameToolRow({
       href={urls.frame(frameId, definition.panel)}
       className={clsx(
         'frameos-frame-tool-row flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-        active ? 'frameos-frame-tool-row-selected bg-slate-900 text-white' : 'text-slate-700 hover:bg-slate-100'
+        active ? 'frameos-frame-tool-row-selected' : 'text-slate-700 hover:bg-slate-100'
       )}
     >
       <span
         className={clsx(
           'frameos-frame-tool-icon flex h-9 w-9 shrink-0 items-center justify-center rounded-xl',
-          active ? 'bg-white/12 text-white' : 'bg-slate-100 text-slate-500'
+          active ? 'frameos-frame-tool-icon-selected' : 'bg-slate-100 text-slate-500'
         )}
       >
         {definition.icon}
@@ -203,10 +203,7 @@ function FrameToolRow({
       <span className="min-w-0 flex-1">
         <span className="block truncate text-sm font-semibold">{definition.label}</span>
         <span
-          className={clsx(
-            'frameos-frame-tool-description block truncate text-xs',
-            active ? 'text-slate-300' : 'text-slate-400'
-          )}
+          className={clsx('frameos-frame-tool-description block truncate text-xs', !active && 'text-slate-400')}
         >
           {definition.description}
         </span>
@@ -228,7 +225,7 @@ function FrameTree({
     <div className="space-y-5">
       <FrameSelector frame={frame} frames={frames} />
       <div>
-        <div className="mb-2 px-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Frame Tools</div>
+        <div className="frameos-muted mb-2 px-2 text-xs font-semibold uppercase tracking-wide">Frame Tools</div>
         <div className="space-y-1">
           {frameToolDefinitions.map((definition) => {
             const active = activeTool === definition.panel
@@ -800,8 +797,8 @@ function FrameOverviewSurface({ frame, scenes }: { frame: FrameType; scenes: Fra
       : null
 
   return (
-    <div className="frame-tool-panel @container grid min-h-0 content-start gap-x-5 gap-y-3 @6xl:grid-cols-[minmax(0,1.2fr)_minmax(22rem,0.8fr)]">
-      <header className="min-w-0 @6xl:col-span-2">
+    <div className="frame-tool-panel @container grid min-h-0 content-start gap-x-5 gap-y-3 @4xl:grid-cols-[minmax(0,1.2fr)_minmax(22rem,0.8fr)]">
+      <header className="min-w-0 @4xl:col-span-2">
         <h1 className="frameos-strong truncate text-3xl font-bold leading-tight tracking-normal text-slate-950 @md:text-4xl">
           {frame.name || frameHost(frame)}
         </h1>
@@ -830,6 +827,17 @@ function FrameOverviewSurface({ frame, scenes }: { frame: FrameType; scenes: Fra
             value={formatRelativeTime(latestLogAt)}
             detail={frameStatusText(frameWithLatestLog)}
             tone={stale ? 'warning' : 'neutral'}
+          />
+          <OverviewStatCard
+            label="Render interval"
+            value={`${frame.interval}s`}
+            detail={`Metrics every ${frame.metrics_interval}s`}
+          />
+          <OverviewStatCard
+            label="Storage"
+            value={frame.save_assets ? 'Assets saved' : 'Assets transient'}
+            detail={frame.assets_path || 'Default path'}
+            tone="neutral"
           />
         </div>
 
@@ -876,19 +884,6 @@ function FrameOverviewSurface({ frame, scenes }: { frame: FrameType; scenes: Fra
           >
             <FrameImage frameId={frame.id} refreshable objectFit="contain" className="h-full w-full" />
           </div>
-        </div>
-        <div className="grid gap-3 @md:grid-cols-2 @6xl:grid-cols-1">
-          <OverviewStatCard
-            label="Render interval"
-            value={`${frame.interval}s`}
-            detail={`Metrics every ${frame.metrics_interval}s`}
-          />
-          <OverviewStatCard
-            label="Storage"
-            value={frame.save_assets ? 'Assets saved' : 'Assets transient'}
-            detail={frame.assets_path || 'Default path'}
-            tone="neutral"
-          />
         </div>
       </div>
     </div>

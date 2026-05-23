@@ -21,34 +21,34 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
 
 export function buttonColor(color: ButtonProps['color']): string {
   return color === 'gray'
-    ? 'bg-gray-900 hover:bg-gray-950 focus:ring-gray-950'
+    ? 'frameos-secondary-button focus:ring-blue-400'
     : color === 'red'
-    ? 'bg-red-900 hover:bg-red-800 focus:ring-red-800'
+    ? 'frameos-danger-button focus:ring-red-400'
     : color === 'orange'
-    ? 'bg-orange-900 hover:bg-orange-800 focus:ring-orange-800'
+    ? 'frameos-warning-button focus:ring-amber-400'
     : color === 'yellow'
-    ? 'bg-yellow-300 hover:bg-yellow-500 focus:ring-yellow-500'
+    ? 'frameos-warning-button focus:ring-amber-400'
     : color === 'blue'
-    ? 'bg-blue-900 hover:bg-blue-800 focus:ring-blue-800'
+    ? 'frameos-primary-action focus:ring-blue-400'
     : color === 'light-gray' || color === 'secondary'
-    ? 'bg-gray-600 hover:bg-gray-500 focus:ring-gray-500'
+    ? 'frameos-secondary-button focus:ring-blue-400'
     : color === 'tertiary'
-    ? 'bg-gray-800 hover:bg-gray-700 focus:ring-gray-700'
+    ? 'frameos-secondary-button focus:ring-blue-400'
     : color === 'none'
-    ? 'hover:bg-[#484984] focus:ring-[#484984]'
+    ? 'frameos-clear-button focus:ring-blue-400'
     : color === 'none-gray'
-    ? 'hover:bg-gray-950 focus:ring-gray-950'
+    ? 'frameos-clear-button focus:ring-blue-400'
     : color === 'teal'
-    ? 'bg-teal-700 hover:bg-teal-600 focus:ring-teal-600'
-    : 'bg-[#4a4b8c] hover:bg-[#484984] focus:ring-[#484984]'
+    ? 'frameos-success-button focus:ring-teal-400'
+    : 'frameos-primary-action focus:ring-blue-400'
 }
 
 export function buttonSize(size: 'normal' | 'small' | 'tiny' | undefined): string {
   return size === 'small'
-    ? 'text-white focus:ring-1 focus:outline-none font-medium rounded-md text-sm px-2 py-1 text-center'
+    ? 'frameos-button focus:ring-1 focus:outline-none font-medium rounded-md text-sm px-2 py-1 text-center'
     : size === 'tiny'
-    ? 'text-white focus:ring-1 focus:outline-none font-medium rounded-md text-sm px-1 py-1 text-center'
-    : 'text-white focus:ring-2 focus:outline-none font-medium rounded-lg text-sm px-5 py-2.5 text-center'
+    ? 'frameos-button focus:ring-1 focus:outline-none font-medium rounded-md text-sm px-1 py-1 text-center'
+    : 'frameos-button focus:ring-2 focus:outline-none font-medium rounded-lg text-sm px-5 py-2.5 text-center'
 }
 
 export function Button({ size, color, children, className, disabled, full, ...props }: ButtonProps) {

@@ -96,9 +96,9 @@ async function fillLogsSearch(page: Page): Promise<void> {
 }
 
 async function collapsePrimarySidebar(page: Page): Promise<void> {
-  const logoButton = page.locator('button[title*="sidebar"], button[aria-label*="sidebar"]').first()
-  if (await logoButton.count()) {
-    await logoButton.click()
+  const collapseButton = page.locator('button[title="Close menu"], button[title="Collapse sidebars"]').first()
+  if (await collapseButton.isVisible().catch(() => false)) {
+    await collapseButton.click()
   }
 }
 
@@ -108,8 +108,14 @@ async function openAddFrameDrawer(page: Page): Promise<void> {
 }
 
 async function openSettingsNetworkSection(page: Page): Promise<void> {
-  await page.getByRole('button', { name: /Network/i }).first().click()
-  await page.locator('#frame-settings-network').waitFor()
+  const networkShortcut = page
+    .locator('.frameos-frame-tool-subnav button')
+    .filter({ hasText: /^Network$/ })
+    .first()
+  if (await networkShortcut.isVisible().catch(() => false)) {
+    await networkShortcut.click()
+  }
+  await page.locator('#frame-settings-network').scrollIntoViewIfNeeded()
 }
 
 async function stabilizeTerminal(page: Page): Promise<void> {

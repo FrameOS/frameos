@@ -1,4 +1,4 @@
-import { A } from 'kea-router'
+import { A, router } from 'kea-router'
 import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
 import clsx from 'clsx'
 import type { CSSProperties, MouseEvent } from 'react'
@@ -27,6 +27,11 @@ import { chatLogic } from '../frame/panels/Chat/chatLogic'
 import { workspaceChatDrawerLogic } from './workspaceChatDrawerLogic'
 
 type WorkspaceMode = 'frames' | 'frame' | 'scenes' | 'apps' | 'settings'
+const MOBILE_SIDEBAR_MEDIA_QUERY = '(max-width: 1023px)'
+
+function isMobileSidebarViewport(): boolean {
+  return typeof window !== 'undefined' && window.matchMedia?.(MOBILE_SIDEBAR_MEDIA_QUERY).matches
+}
 
 interface FrameosShellProps {
   mode: WorkspaceMode
@@ -51,6 +56,8 @@ function NavButton({
   title,
   onActiveClick,
   onInactiveClick,
+  onMobileClose,
+  onMobileNavigate,
   children,
 }: {
   active: boolean
@@ -58,6 +65,8 @@ function NavButton({
   title: string
   onActiveClick: () => void
   onInactiveClick: () => void
+  onMobileClose: () => void
+  onMobileNavigate: () => void
   children: JSX.Element
 }): JSX.Element {
   return (
@@ -65,6 +74,18 @@ function NavButton({
       href={href}
       title={title}
       onClick={(event: MouseEvent<HTMLAnchorElement>) => {
+        if (isMobileSidebarViewport()) {
+          event.preventDefault()
+          if (active) {
+            onActiveClick()
+            onMobileClose()
+          } else {
+            onInactiveClick()
+            onMobileNavigate()
+            router.actions.push(href)
+          }
+          return
+        }
         if (active) {
           event.preventDefault()
           onActiveClick()
@@ -122,21 +143,21 @@ function WorkspaceChatDrawer({ frameId, sceneId }: { frameId: number; sceneId: s
   }
 
   return (
-    <div className="workspace-drawer fixed bottom-5 right-5 top-5 z-40 flex w-[430px] overflow-hidden rounded-[24px] border border-slate-800 bg-slate-950 text-white shadow-2xl shadow-slate-500/30">
+    <div className="workspace-drawer frameos-drawer fixed bottom-5 right-5 top-5 z-40 flex w-[430px] overflow-hidden rounded-[24px] border border-white/80 bg-white/95 shadow-2xl shadow-slate-500/30 backdrop-blur-xl">
       <BindLogic logic={frameLogic} props={frameLogicProps}>
         <BindLogic logic={panelsLogic} props={frameLogicProps}>
           <div className="flex min-w-0 flex-1 flex-col">
-            <div className="flex items-start justify-between gap-3 border-b border-white/10 px-5 py-4">
+            <div className="frameos-divider flex items-start justify-between gap-3 border-b px-5 py-4">
               <div className="min-w-0">
-                <h2 className="truncate text-xl font-bold tracking-normal">AI chat</h2>
-                <div className="truncate text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <h2 className="frameos-strong truncate text-xl font-bold tracking-normal">AI chat</h2>
+                <div className="frameos-muted truncate text-xs font-semibold uppercase tracking-wide">
                   {frame.name || frameHost(frame)}
                 </div>
               </div>
               <button
                 type="button"
                 onClick={closeChatDrawer}
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-slate-400 transition hover:bg-white/10 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                className="frameos-icon-button flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
               >
                 <XMarkIcon className="h-6 w-6" />
               </button>
@@ -176,8 +197,11 @@ export function FrameosShell({
   } = useValues(workspaceLogic)
   const {
     collapsePrimarySidebar,
+    closeMobileSidebar,
+    closeMobileSidebarAfterNavigation,
     closeScheduleDrawer,
     closeTemplateDrawer,
+    openMobileSidebar,
     openChatDrawer,
     openPrimarySidebar,
     openSecondarySidebar,
@@ -214,6 +238,20 @@ export function FrameosShell({
     closeScheduleDrawer()
     openSecondarySidebar()
   }
+  const openSidebarButton = () => {
+    if (isMobileSidebarViewport()) {
+      openMobileSidebar()
+    } else {
+      openPrimarySidebar()
+    }
+  }
+  const closeSidebarButton = () => {
+    if (isMobileSidebarViewport()) {
+      closeMobileSidebar()
+    } else {
+      collapsePrimarySidebar()
+    }
+  }
 
   return (
     <div
@@ -237,8 +275,8 @@ export function FrameosShell({
           >
             <button
               type="button"
-              title="Collapse sidebars"
-              onClick={collapsePrimarySidebar}
+              title="Close menu"
+              onClick={closeSidebarButton}
               className="frameos-icon-button mb-8 flex h-12 w-12 items-center justify-center rounded-xl transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
             >
               <img src={logo} alt="FrameOS" className="h-10 w-10" />
@@ -250,6 +288,8 @@ export function FrameosShell({
                 title={secondarySidebarOpen && mode === 'frames' ? 'Hide frames panel' : 'Frames'}
                 onActiveClick={toggleSecondarySidebar}
                 onInactiveClick={leaveSceneWorkspace}
+                onMobileClose={closeMobileSidebar}
+                onMobileNavigate={closeMobileSidebarAfterNavigation}
               >
                 <Squares2X2Icon className="h-7 w-7" />
               </NavButton>
@@ -259,6 +299,8 @@ export function FrameosShell({
                 title={secondarySidebarOpen && mode === 'frame' ? 'Hide frame panel' : 'Frame'}
                 onActiveClick={toggleSecondarySidebar}
                 onInactiveClick={mode === 'scenes' ? leaveSceneWorkspace : openSecondarySidebar}
+                onMobileClose={closeMobileSidebar}
+                onMobileNavigate={closeMobileSidebarAfterNavigation}
               >
                 <ComputerDesktopIcon className="h-7 w-7" />
               </NavButton>
@@ -268,6 +310,8 @@ export function FrameosShell({
                 title={secondarySidebarOpen && mode === 'scenes' ? 'Hide scenes panel' : 'Scenes'}
                 onActiveClick={toggleSecondarySidebar}
                 onInactiveClick={openSecondarySidebar}
+                onMobileClose={closeMobileSidebar}
+                onMobileNavigate={closeMobileSidebarAfterNavigation}
               >
                 <RectangleGroupIcon className="h-7 w-7" />
               </NavButton>
@@ -277,6 +321,8 @@ export function FrameosShell({
                 title={secondarySidebarOpen && mode === 'apps' ? 'Hide apps panel' : 'Apps'}
                 onActiveClick={toggleSecondarySidebar}
                 onInactiveClick={mode === 'scenes' ? leaveSceneWorkspace : openSecondarySidebar}
+                onMobileClose={closeMobileSidebar}
+                onMobileNavigate={closeMobileSidebarAfterNavigation}
               >
                 <CubeTransparentIcon className="h-7 w-7" />
               </NavButton>
@@ -295,6 +341,8 @@ export function FrameosShell({
               title={secondarySidebarOpen && mode === 'settings' ? 'Hide settings panel' : 'Settings'}
               onActiveClick={toggleSecondarySidebar}
               onInactiveClick={leaveSceneWorkspace}
+              onMobileClose={closeMobileSidebar}
+              onMobileNavigate={closeMobileSidebarAfterNavigation}
             >
               <Cog6ToothIcon className="h-8 w-8" />
             </NavButton>
@@ -307,8 +355,9 @@ export function FrameosShell({
       ) : (
         <button
           type="button"
-          title="Open sidebars"
-          onClick={openPrimarySidebar}
+          title="Open menu"
+          aria-label="Open menu"
+          onClick={openSidebarButton}
           className={clsx(
             'workspace-sidebar-open-button frameos-panel fixed z-40 flex h-14 w-14 items-center justify-center rounded-2xl border border-white/80 bg-white/90 shadow-2xl shadow-slate-400/30 backdrop-blur-xl transition hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
             mode === 'scenes' ? 'left-6 top-24 max-lg:left-5 max-lg:top-5' : 'left-5 top-5'

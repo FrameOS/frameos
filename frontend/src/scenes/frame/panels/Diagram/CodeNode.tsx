@@ -152,8 +152,8 @@ declare const context: {
         className={clsx(
           'shadow-lg border-2 h-full flex flex-col relative',
           isSelected
-            ? 'bg-black bg-opacity-70 border-fuchsia-900 shadow-fuchsia-700/50'
-            : 'bg-black bg-opacity-70 border-green-900 shadow-green-700/50 '
+            ? 'frameos-diagram-node border-fuchsia-900 shadow-fuchsia-700/50'
+            : 'frameos-diagram-node border-green-900 shadow-green-700/50 '
         )}
       >
         <NodeResizer minWidth={200} minHeight={119} />

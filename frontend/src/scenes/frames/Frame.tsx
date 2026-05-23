@@ -165,7 +165,7 @@ export function Frame({ frame }: FrameProps): JSX.Element {
         </H5>
       </div>
       <div className="px-4 pb-4">
-        <div className="flex sm:text-lg text-gray-400 items-center gap-1">
+        <div className="frameos-muted flex sm:text-lg items-center gap-1">
           <FrameCardIndicators frame={frame} />
           <span>{frameStatus(frame)}</span>
         </div>

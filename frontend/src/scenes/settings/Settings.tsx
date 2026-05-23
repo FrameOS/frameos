@@ -91,23 +91,18 @@ export function Settings() {
       toolbar={
         <div className="flex gap-2">
           {!isHassioIngress ? (
-            <button
-              type="button"
-              onClick={logout}
-              className="rounded-full bg-white/85 px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-            >
+            <Button size="small" color="secondary" onClick={logout} className="rounded-full px-4 py-2">
               Logout
-            </button>
+            </Button>
           ) : null}
-          <button
-            type="button"
+          <Button
+            size="small"
+            color={settingsChanged ? 'primary' : 'secondary'}
             onClick={submitSettings}
-            className={`rounded-full px-4 py-2 text-sm font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 ${
-              settingsChanged ? 'frameos-primary-action text-white' : 'bg-white/85 text-slate-700 hover:bg-white'
-            }`}
+            className="rounded-full px-4 py-2"
           >
             Save
-          </button>
+          </Button>
         </div>
       }
     >
@@ -139,7 +134,7 @@ export function Settings() {
                       return (
                         <Box key={key.id} className="border border-white/10 p-3 space-y-2">
                           <div className="flex items-center justify-between">
-                            <div className="text-sm font-semibold text-gray-200">
+                            <div className="frameos-strong text-sm font-semibold">
                               {key.name || `Key ${index + 1}`}
                               {isUsedForNewFrames ? (
                                 <Tag color="primary" className="ml-2">
@@ -182,8 +177,8 @@ export function Settings() {
                               >
                                 <TextArea />
                               </Field>
-                              <div className="text-xs text-gray-400 space-y-1">
-                                <span className="font-semibold text-gray-300">Frames using this key:</span>
+                              <div className="frameos-muted text-xs space-y-1">
+                                <span className="frameos-strong font-semibold">Frames using this key:</span>
                                 {matchingFrames.length === 0 ? (
                                   <div>None.</div>
                                 ) : (
@@ -289,7 +284,7 @@ export function Settings() {
                   <Field name="appEnhanceModel" label="App edit model">
                     <TextInput name="appEnhanceModel" placeholder="gpt-5.5" />
                   </Field>
-                  <div className="flex flex-wrap items-center gap-2 text-sm text-gray-300">
+                  <div className="frameos-muted flex flex-wrap items-center gap-2 text-sm">
                     <span>
                       Embeddings: {embeddingsCount}/{embeddingsTotal}
                     </span>

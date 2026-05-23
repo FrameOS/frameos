@@ -25,10 +25,10 @@ export function Tab({
   return (
     <div
       className={clsx(
-        'flex gap-1 w-auto text-white focus:ring-4 focus:outline-none font-medium px-2 py-1 text-base text-center cursor-pointer border border-b-0',
+        'flex gap-1 w-auto frameos-strong focus:ring-4 focus:outline-none font-medium px-2 py-1 text-base text-center cursor-pointer border border-b-0 rounded-t-md transition',
         active
-          ? `${activeColorClass || 'bg-gray-800'} border-gray-700 hover:bg-gray-500 focus:ring-gray-500`
-          : 'border-transparent hover:bg-gray-500 focus:ring-gray-500',
+          ? `${activeColorClass || 'frameos-inset'} border-slate-300/70 focus:ring-blue-400`
+          : 'border-transparent hover:bg-white/55 focus:ring-blue-400',
         className
       )}
       title={typeof children === 'string' ? children : undefined}
@@ -37,7 +37,7 @@ export function Tab({
     >
       <div className="truncate">{children}</div>
       {closable ? (
-        <Button size="tiny" color="none-gray" className="text-sm text-white" onClick={onClose}>
+        <Button size="tiny" color="none-gray" className="text-sm" onClick={onClose}>
           <XMarkIcon className="w-4 h-4" />
         </Button>
       ) : null}

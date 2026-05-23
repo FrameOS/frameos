@@ -24,12 +24,12 @@ export function StateNode({ id, isConnectable }: NodeProps<StateNodeData>): JSX.
     <BindLogic logic={appNodeLogic} props={appNodeLogicProps}>
       <div
         onClick={select}
-        className={clsx(
-          'shadow-lg border-2 h-full flex flex-col relative',
-          isSelected
-            ? 'bg-black bg-opacity-70 border-fuchsia-900 shadow-fuchsia-700/50'
-            : 'bg-black bg-opacity-70 border-[#81701d] shadow-[#81701d]/50'
-        )}
+          className={clsx(
+            'frameos-diagram-node shadow-lg border-2 h-full flex flex-col relative',
+            isSelected
+              ? 'border-fuchsia-900 shadow-fuchsia-700/50'
+              : 'border-[#81701d] shadow-[#81701d]/50'
+          )}
       >
         <div
           className={clsx(

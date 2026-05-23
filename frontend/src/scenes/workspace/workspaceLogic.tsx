@@ -1,4 +1,4 @@
-import { actions, afterMount, connect, kea, listeners, path, reducers, selectors } from 'kea'
+import { actions, afterMount, beforeUnmount, connect, kea, listeners, path, reducers, selectors } from 'kea'
 import { router, urlToAction } from 'kea-router'
 import { framesModel } from '../../models/framesModel'
 import { frameHost, frameIsStale } from '../../decorators/frame'
@@ -107,6 +107,43 @@ function applyWorkspaceTheme(theme: WorkspaceTheme): void {
   }
   document.documentElement.dataset.frameosTheme = theme
   document.documentElement.style.colorScheme = theme
+}
+
+const MOBILE_SIDEBAR_MEDIA_QUERY = '(max-width: 1023px)'
+const MOBILE_SIDEBAR_HISTORY_KEY = '__frameosMobileSidebar'
+
+function isMobileSidebarViewport(): boolean {
+  return typeof window !== 'undefined' && window.matchMedia?.(MOBILE_SIDEBAR_MEDIA_QUERY).matches
+}
+
+function getInitialPrimarySidebarOpen(): boolean {
+  return !isMobileSidebarViewport()
+}
+
+function historyStateWithoutMobileSidebarMarker(): Record<string, unknown> {
+  const currentState = typeof window !== 'undefined' && window.history.state ? window.history.state : {}
+  const { [MOBILE_SIDEBAR_HISTORY_KEY]: _mobileSidebar, ...state } = currentState
+  return state
+}
+
+function pushMobileSidebarHistory(cache: Record<string, any>): void {
+  if (!isMobileSidebarViewport() || cache.mobileSidebarHistoryActive || typeof window === 'undefined') {
+    return
+  }
+  window.history.pushState(
+    { ...historyStateWithoutMobileSidebarMarker(), [MOBILE_SIDEBAR_HISTORY_KEY]: true },
+    '',
+    window.location.href
+  )
+  cache.mobileSidebarHistoryActive = true
+}
+
+function replaceMobileSidebarHistory(cache: Record<string, any>): void {
+  if (!cache.mobileSidebarHistoryActive || typeof window === 'undefined') {
+    return
+  }
+  window.history.replaceState(historyStateWithoutMobileSidebarMarker(), '', window.location.href)
+  cache.mobileSidebarHistoryActive = false
 }
 
 function sceneMatchesSearch(scene: FrameScene, search: string): boolean {
@@ -298,6 +335,9 @@ export const workspaceLogic = kea<workspaceLogicType>([
     toggleTheme: true,
     openPrimarySidebar: true,
     collapsePrimarySidebar: true,
+    openMobileSidebar: true,
+    closeMobileSidebar: true,
+    closeMobileSidebarAfterNavigation: true,
     openSecondarySidebar: true,
     toggleSecondarySidebar: true,
     toggleSceneNodesOpen: true,
@@ -337,16 +377,20 @@ export const workspaceLogic = kea<workspaceLogicType>([
       },
     ],
     primarySidebarOpen: [
-      true,
+      getInitialPrimarySidebarOpen(),
       {
         openPrimarySidebar: () => true,
+        openMobileSidebar: () => true,
         collapsePrimarySidebar: () => false,
+        closeMobileSidebar: () => false,
+        closeMobileSidebarAfterNavigation: () => false,
       },
     ],
     secondarySidebarOpen: [
       true,
       {
         openSecondarySidebar: () => true,
+        openMobileSidebar: () => true,
         toggleSecondarySidebar: (open) => !open,
       },
     ],
@@ -596,6 +640,18 @@ export const workspaceLogic = kea<workspaceLogicType>([
       closeChatDrawer: preserveFramesScroll,
       [newFrameForm.actionTypes.showForm]: preserveFramesScroll,
       [newFrameForm.actionTypes.hideForm]: preserveFramesScroll,
+      openMobileSidebar: () => {
+        pushMobileSidebarHistory(cache)
+      },
+      closeMobileSidebar: () => {
+        if (cache.mobileSidebarHistoryActive && typeof window !== 'undefined') {
+          cache.mobileSidebarHistoryActive = false
+          window.history.back()
+        }
+      },
+      closeMobileSidebarAfterNavigation: () => {
+        replaceMobileSidebarHistory(cache)
+      },
       setTheme: ({ theme }) => {
         window.localStorage.setItem('frameos.workspaceTheme', theme)
         applyWorkspaceTheme(theme)
@@ -648,7 +704,56 @@ export const workspaceLogic = kea<workspaceLogicType>([
       actions.openUtilityPanel(frameToolFromSearch(search))
     },
   })),
-  afterMount(({ values }) => {
+  afterMount(({ actions, cache, values }) => {
     applyWorkspaceTheme(values.theme)
+    cache.mobileSidebarHistoryActive = Boolean(window.history.state?.[MOBILE_SIDEBAR_HISTORY_KEY])
+    const mobileSidebarMedia = window.matchMedia?.(MOBILE_SIDEBAR_MEDIA_QUERY)
+    cache.mobileSidebarMedia = mobileSidebarMedia
+    cache.mobileSidebarMediaChangeHandler = () => {
+      if (!mobileSidebarMedia?.matches) {
+        replaceMobileSidebarHistory(cache)
+        actions.openPrimarySidebar()
+        actions.openSecondarySidebar()
+        return
+      }
+      if (!cache.mobileSidebarHistoryActive) {
+        actions.collapsePrimarySidebar()
+      }
+    }
+    if (mobileSidebarMedia) {
+      mobileSidebarMedia.addEventListener('change', cache.mobileSidebarMediaChangeHandler)
+    }
+    if (cache.mobileSidebarHistoryActive && isMobileSidebarViewport()) {
+      actions.openPrimarySidebar()
+      actions.openSecondarySidebar()
+    } else if (cache.mobileSidebarHistoryActive) {
+      replaceMobileSidebarHistory(cache)
+    } else if (mobileSidebarMedia?.matches) {
+      actions.collapsePrimarySidebar()
+    }
+    cache.mobileSidebarPopstateHandler = () => {
+      const markerActive = Boolean(window.history.state?.[MOBILE_SIDEBAR_HISTORY_KEY])
+      if (!markerActive && cache.mobileSidebarHistoryActive) {
+        cache.mobileSidebarHistoryActive = false
+        actions.collapsePrimarySidebar()
+      } else if (markerActive && isMobileSidebarViewport()) {
+        cache.mobileSidebarHistoryActive = true
+        actions.openPrimarySidebar()
+        actions.openSecondarySidebar()
+      }
+    }
+    window.addEventListener('popstate', cache.mobileSidebarPopstateHandler)
+  }),
+  beforeUnmount(({ cache }) => {
+    if (cache.mobileSidebarPopstateHandler) {
+      window.removeEventListener('popstate', cache.mobileSidebarPopstateHandler)
+      cache.mobileSidebarPopstateHandler = null
+    }
+    const mobileSidebarMedia = cache.mobileSidebarMedia
+    if (mobileSidebarMedia && cache.mobileSidebarMediaChangeHandler) {
+      mobileSidebarMedia.removeEventListener('change', cache.mobileSidebarMediaChangeHandler)
+      cache.mobileSidebarMediaChangeHandler = null
+      cache.mobileSidebarMedia = null
+    }
   }),
 ])

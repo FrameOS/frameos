@@ -143,7 +143,13 @@ export async function settleForScreenshot(page: Page): Promise<void> {
     `,
   })
   await page.locator('body').waitFor({ state: 'visible' })
-  await page.waitForFunction(() => document.body.innerText.trim().length > 0)
+  await page.waitForFunction(() => {
+    const body = document.body
+    if (body.innerText.trim().length > 0) {
+      return true
+    }
+    return Boolean(body.querySelector('button, canvas, img, input, select, textarea, video, [role="button"]'))
+  })
   await page.waitForLoadState('domcontentloaded')
   await page.waitForTimeout(500)
 }

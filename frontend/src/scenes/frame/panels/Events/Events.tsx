@@ -25,11 +25,11 @@ export function Events() {
     <div className="space-y-2">
       <TextInput placeholder="Search events..." onChange={setSearch} value={search} />
       {scenesOpen ? (
-        <div className="text-xs text-gray-400">
+        <div className="frame-tool-muted text-xs">
           Events can only be dragged onto the scene editor or into AI generation prompts.
         </div>
       ) : null}
-      <Tabs className="border border-t-0 border-l-0 border-r-0 border-b-1 border-gray-700 pl-2">
+      <Tabs className="frameos-divider border border-t-0 border-l-0 border-r-0 border-b-1 pl-2">
         <Tab onClick={showListen} active={tab === 'listen'} activeColorClass="bg-[#4a4b8c]" className="mb-[-1px]">
           Listen ({tabCounts.listen})
         </Tab>
@@ -43,7 +43,7 @@ export function Events() {
         .map(({ name, description, fields }) => (
           <Box
             key={name}
-            className="bg-gray-900 px-3 py-2 dndnode cursor-move"
+            className="frame-tool-row px-3 py-2 dndnode cursor-move"
             draggable
             onDragStart={(event) => onDragStart(event, tab === 'listen' ? 'event' : 'dispatch', name)}
           >

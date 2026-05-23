@@ -53,7 +53,7 @@ function getCertificateHint(certificateName: string, value?: string): JSX.Elemen
       ? 'text-red-300'
       : validityInfo.severity === 'expiring'
       ? 'text-yellow-300'
-      : 'text-gray-300'
+      : 'frame-tool-muted'
 
   return (
     <div className={colorClass} title={validityInfo.exactDateTime}>
@@ -373,7 +373,7 @@ export function FrameSettings({
               ) : null}
               {!inFrameAdminMode && logs.length > 0 ? (
                 <Field name="_noop" label="Last seen IPs">
-                  <div className="text-sm text-gray-200 break-words w-full">
+                  <div className="frameos-strong text-sm break-words w-full">
                     {ipAddresses.length > 0 ? ipAddresses.join(', ') : 'No logs have been sent for the frame yet.'}
                   </div>
                 </Field>

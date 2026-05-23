@@ -5,9 +5,11 @@ import { Spinner } from '../../../../components/Spinner'
 import Editor, { Monaco } from '@monaco-editor/react'
 import { panelsLogic } from '../panelsLogic'
 import { useEffect, useState } from 'react'
+import { workspaceLogic } from '../../../workspace/workspaceLogic'
 
 export function SceneSource() {
   const { frame } = useValues(frameLogic)
+  const { theme } = useValues(workspaceLogic)
   const { selectedSceneId } = useValues(panelsLogic({ frameId: frame.id }))
   const { sceneSource, sceneSourceLoading, modelMarkers } = useValues(
     sceneSourceLogic({ frameId: frame.id, sceneId: selectedSceneId })
@@ -19,7 +21,13 @@ export function SceneSource() {
       base: 'vs-dark',
       inherit: true,
       rules: [],
-      colors: { 'editor.background': '#000000' },
+      colors: { 'editor.background': '#111827' },
+    })
+    monaco.editor.defineTheme('lightframe', {
+      base: 'vs',
+      inherit: true,
+      rules: [],
+      colors: { 'editor.background': '#f8fafc' },
     })
   }
   const [[monaco, editor], setMonacoAndEditor] = useState<[Monaco | null, any | null]>([null, null])
@@ -45,7 +53,7 @@ export function SceneSource() {
           language="python" // no nim support :/
           value={sceneSource || 'Error generating source. Make sure to save the scene between changes.'}
           onChange={(value) => updateSource(value ?? '')}
-          theme="darkframe"
+          theme={theme === 'dark' ? 'darkframe' : 'lightframe'}
           onMount={(editor, monaco) => setMonacoAndEditor([monaco, editor])}
           beforeMount={beforeMount}
           options={{ minimap: { enabled: false } }}

@@ -328,7 +328,7 @@ function TreeNode({
             <div className="w-8 h-8">
               <DeferredImage
                 url={frameAssetUrl(frameId, node.path, true)}
-                className="w-8 h-8 object-cover border border-gray-600 rounded"
+                className="frameos-card-media w-8 h-8 object-cover border rounded"
                 spinnerClassName="w-4 h-4"
               />
             </div>

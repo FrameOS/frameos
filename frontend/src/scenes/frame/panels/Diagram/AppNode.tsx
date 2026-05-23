@@ -64,18 +64,18 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
   const [secretRevealed, setSecretRevealed] = useState<Record<string, boolean>>({})
 
   const backgroundClassName = clsx(
-    'shadow-lg border-2',
+    'frameos-diagram-node shadow-lg border-2',
     isSelected
-      ? 'bg-black bg-opacity-70 border-fuchsia-900 shadow-fuchsia-700/50'
-      : isDispatch
-      ? 'bg-black bg-opacity-70 border-orange-900 shadow-orange-700/50 '
-      : isCustomApp || isSceneApp
-      ? 'bg-black bg-opacity-70 border-teal-900 shadow-teal-700/50 '
-      : isDataApp
-      ? 'bg-black bg-opacity-70 border-green-700 shadow-green-500/50 '
-      : isScene
-      ? 'bg-black bg-opacity-70 border-indigo-900 shadow-indigo-700/50 '
-      : 'bg-black bg-opacity-70 border-sky-900 shadow-sky-700/50 '
+      ? 'border-fuchsia-900 shadow-fuchsia-700/50'
+    : isDispatch
+    ? 'border-orange-900 shadow-orange-700/50 '
+    : isCustomApp || isSceneApp
+    ? 'border-teal-900 shadow-teal-700/50 '
+    : isDataApp
+    ? 'border-green-700 shadow-green-500/50 '
+    : isScene
+    ? 'border-indigo-900 shadow-indigo-700/50 '
+    : 'border-sky-900 shadow-sky-700/50 '
   )
 
   const titleBackground = isSelected
@@ -517,7 +517,7 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
                           return (
                             <Tooltip
                               title={
-                                <div className="p-2 bg-gray-700">
+                                <div className="frameos-inset p-2">
                                   <div className="min-w-[40vw] w-[500px] max-w-[90vw] max-h-[60vh] overflow-auto">
                                     <ReactJson
                                       collapsed={2}

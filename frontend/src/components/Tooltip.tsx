@@ -4,7 +4,7 @@ import ReactDOM from 'react-dom'
 import React, { useState } from 'react'
 import { usePopper } from 'react-popper'
 import clsx from 'clsx'
-import { ButtonProps, buttonColor } from './Button'
+import { ButtonProps } from './Button'
 
 export interface TooltipProps {
   title: JSX.Element | string
@@ -36,7 +36,7 @@ export function Tooltip({
           <Popover.Button
             ref={setReferenceElement}
             className={clsx(
-              'frameos-tooltip-button block justify-center rounded-md text-sm font-medium text-white shadow-sm focus:outline-none',
+              'frameos-tooltip-button block justify-center rounded-md text-sm font-medium shadow-sm focus:outline-none',
               className
             )}
           >
@@ -55,17 +55,17 @@ export function Tooltip({
               <Popover.Panel
                 static
                 className={clsx(
-                  'absolute right-0 mt-2 origin-top-right divide-y divide-gray-100 rounded-md shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none',
+                  'frameos-tooltip-panel absolute right-0 mt-2 origin-top-right rounded-md focus:outline-none',
                   noPadding ? '' : 'w-56',
-                  buttonColor(tooltipColor || 'light-gray'),
                   titleClassName ? titleClassName : ''
                 )}
                 ref={setPopperElement}
                 style={styles.popper}
+                data-tooltip-color={tooltipColor || 'light-gray'}
                 {...attributes.popper}
               >
                 <div className={noPadding ? '' : 'py-1'}>
-                  <div className={noPadding ? 'text-sm text-gray-100' : 'px-4 py-2 text-sm text-gray-100'}>{title}</div>
+                  <div className={noPadding ? 'text-sm' : 'px-4 py-2 text-sm'}>{title}</div>
                 </div>
               </Popover.Panel>
             </Transition>,

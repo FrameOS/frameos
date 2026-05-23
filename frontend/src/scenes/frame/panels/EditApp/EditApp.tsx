@@ -14,6 +14,7 @@ import clsx from 'clsx'
 import { TrashIcon } from '@heroicons/react/24/solid'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
 import { javascriptAppSourceFiles } from '../../../../utils/sceneApps'
+import { workspaceLogic } from '../../../workspace/workspaceLogic'
 
 interface EditAppProps {
   panel?: PanelWithMetadata
@@ -58,10 +59,10 @@ export function EditAppFileList({ sceneId, nodeId, onOpenChat, className }: Edit
               onClick={() => setActiveFile(file)}
               className={clsx(
                 'min-w-0 flex-1 truncate rounded-xl px-3 py-2 text-left text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-                activeFile === file
-                  ? modelMarkers[file]?.length
-                    ? 'bg-red-500 text-white'
-                    : 'bg-slate-900 text-white'
+                  activeFile === file
+                    ? modelMarkers[file]?.length
+                      ? 'bg-red-500 text-white'
+                      : 'frameos-primary-active'
                   : modelMarkers[file]?.length
                   ? 'text-red-500 hover:bg-red-50'
                   : 'frameos-strong text-slate-700 hover:bg-white'
@@ -118,6 +119,7 @@ export function EditAppFileList({ sceneId, nodeId, onOpenChat, className }: Edit
 
 export function EditApp({ panel, sceneId, nodeId, onOpenChat, showFileList = true }: EditAppProps) {
   const { frameId } = useValues(frameLogic)
+  const { theme } = useValues(workspaceLogic)
   const { persistUntilClosed } = useActions(panelsLogic)
   const logicProps: EditAppLogicProps = {
     frameId,
@@ -193,7 +195,13 @@ export function EditApp({ panel, sceneId, nodeId, onOpenChat, showFileList = tru
       base: 'vs-dark',
       inherit: true,
       rules: [],
-      colors: { 'editor.background': '#000000' },
+      colors: { 'editor.background': '#111827' },
+    })
+    monaco.editor.defineTheme('lightframe', {
+      base: 'vs',
+      inherit: true,
+      rules: [],
+      colors: { 'editor.background': '#f8fafc' },
     })
     monaco.languages.json.jsonDefaults.setDiagnosticsOptions({
       validate: true,
@@ -232,7 +240,7 @@ export function EditApp({ panel, sceneId, nodeId, onOpenChat, showFileList = tru
 
       <div className="overflow-y-auto overflow-x-auto w-full h-full max-h-full max-w-full gap-2 flex-1 flex flex-col">
         {hasChanges ? (
-          <div className="bg-gray-900 p-2">
+          <div className="frame-tool-card rounded-2xl p-3">
             {requiresCompiledOnSave ? (
               <>
                 You have made changes to this app. If you save them, we will have to change the scene's execution model
@@ -265,13 +273,13 @@ export function EditApp({ panel, sceneId, nodeId, onOpenChat, showFileList = tru
             )}
           </div>
         ) : null}
-        <div className="bg-black font-mono text-sm overflow-y-auto overflow-x-auto w-full flex-1">
+        <div className="frameos-inset overflow-hidden rounded-2xl border font-mono text-sm w-full flex-1">
           <Editor
             height="100%"
             path={`inmemory://app-editor/${nodeId}/${activeFile}`}
             language={editorLanguage}
             value={sources[activeFile] ?? sources[Object.keys(sources)[0]] ?? ''}
-            theme="darkframe"
+            theme={theme === 'dark' ? 'darkframe' : 'lightframe'}
             beforeMount={beforeMount}
             onMount={(editor, monaco) => setMonacoAndEditor([monaco, editor])}
             onChange={(value) => updateFile(activeFile, value ?? '')}

@@ -20,7 +20,7 @@ export function Header({ title, version, right, buttons }: HeaderProps) {
 
   return (
     <span
-      className="relative z-30 overflow-visible bg-gray-800 text-white h-full w-full space-x-2 p-2 pt-3 px-4 flex justify-between items-center"
+      className="frameos-panel relative z-30 overflow-visible h-full w-full space-x-2 p-2 pt-3 px-4 flex justify-between items-center"
       style={{ height: 60 }}
     >
       <div className="min-w-0 flex flex-1 items-center justify-start gap-3">

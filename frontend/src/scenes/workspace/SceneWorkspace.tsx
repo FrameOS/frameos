@@ -121,7 +121,7 @@ function SceneSelector({
   return (
     <div className="space-y-3 px-2">
       <div>
-        <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-400">Frame</label>
+        <label className="frameos-muted mb-2 block text-xs font-semibold uppercase tracking-wide">Frame</label>
         <select
           value={frame.id}
           onChange={(event) => navigateToSceneFrame(parseInt(event.target.value, 10))}
@@ -140,7 +140,7 @@ function SceneSelector({
       </div>
       <div onDragOver={handleSceneListDragOver} onDrop={handleSceneListDrop}>
         <div className="mb-2 flex items-center justify-between gap-2">
-          <label className="block text-xs font-semibold uppercase tracking-wide text-slate-400">Scenes</label>
+          <label className="frameos-muted block text-xs font-semibold uppercase tracking-wide">Scenes</label>
           <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
             {scenes.length}
           </span>
@@ -255,7 +255,7 @@ function SceneTree({
           <button
             type="button"
             onClick={() => openUtilityPanel('state')}
-            className="rounded-full bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            className="frameos-secondary-button rounded-full px-3 py-2 text-xs font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
           >
             Run
           </button>
@@ -264,7 +264,7 @@ function SceneTree({
             onClick={() => saveFrame()}
             className={clsx(
               'rounded-full px-3 py-2 text-xs font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-              unsavedChanges ? 'frameos-primary-action text-white' : 'bg-white text-slate-700 hover:bg-slate-100'
+              unsavedChanges ? 'frameos-primary-action' : 'frameos-secondary-button'
             )}
           >
             Save
@@ -275,8 +275,8 @@ function SceneTree({
             className={clsx(
               'rounded-full px-3 py-2 text-xs font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
               unsavedChanges || undeployedChanges
-                ? 'bg-slate-900 text-white hover:bg-slate-700'
-                : 'bg-white text-slate-700 hover:bg-slate-100'
+                ? 'frameos-primary-action'
+                : 'frameos-secondary-button'
             )}
           >
             Deploy
@@ -369,7 +369,7 @@ function SceneNodeTreeButton({
       onClick={onClick}
       className={clsx(
         'flex w-full items-center gap-2 rounded-xl py-1.5 pr-3 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-        highlighted ? 'bg-slate-900 text-white' : 'frameos-strong text-slate-700 hover:bg-slate-100',
+        highlighted ? 'frameos-primary-active' : 'frameos-strong hover:bg-white/55',
         item.kind === 'disconnected' && !highlighted && 'opacity-70'
       )}
       style={{ paddingLeft: `${12 + item.depth * 14}px` }}
@@ -382,9 +382,7 @@ function SceneNodeTreeButton({
       </span>
       <span className="min-w-0 flex-1">
         <span className="block truncate text-sm font-semibold">{nodeLabel(item.node.data, item.node.id)}</span>
-        <span
-          className={clsx('block truncate text-xs', highlighted ? 'text-slate-300' : 'frameos-muted text-slate-400')}
-        >
+        <span className={clsx('block truncate text-xs', highlighted ? 'text-white/75' : 'frameos-muted text-slate-400')}>
           {nodeKindLabel(item)}
         </span>
       </span>
@@ -456,12 +454,12 @@ function SceneTreeLoadingPlaceholder(): JSX.Element {
   return (
     <div className="space-y-4 px-2">
       <div>
-        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Frame</div>
+        <div className="frameos-muted mb-2 text-xs font-semibold uppercase tracking-wide">Frame</div>
         <div className="frameos-skeleton-surface h-12 animate-pulse rounded-xl" />
       </div>
       <div>
         <div className="mb-2 flex items-center justify-between gap-2">
-          <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Scenes</div>
+          <div className="frameos-muted text-xs font-semibold uppercase tracking-wide">Scenes</div>
           <div className="frameos-skeleton-line h-5 w-8 animate-pulse rounded-full" />
         </div>
         <div className="space-y-1">
@@ -648,7 +646,7 @@ function SceneCanvas({ frameId, selectedSceneId }: { frameId: number; selectedSc
       <button
         type="button"
         onClick={() => openUtilityPanel('apps')}
-        className="scene-add-nodes-button fixed bottom-9 z-20 hidden rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-lg transition hover:bg-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 @3xl:block"
+        className="scene-add-nodes-button frameos-primary-action fixed bottom-9 z-20 hidden rounded-full px-4 py-2 text-sm font-semibold shadow-lg transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 @3xl:block"
       >
         Add nodes
       </button>

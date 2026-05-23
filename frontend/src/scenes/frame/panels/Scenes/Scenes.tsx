@@ -236,7 +236,7 @@ export function Scenes() {
 
   const renderNewSceneForm = () => (
     <Form logic={scenesLogic} props={{ frameId }} formKey="newScene">
-      <Box className="p-4 space-y-4 bg-gray-900">
+      <Box className="p-4 space-y-4">
         <H6>New scene</H6>
         <Field label="Name" name="name">
           <TextInput placeholder="e.g. Camera view" />
@@ -254,12 +254,12 @@ export function Scenes() {
   )
 
   const renderAiSceneForm = () => (
-    <Box className="p-4 space-y-3 bg-gray-900">
+    <Box className="p-4 space-y-3">
       <H6>Generate scene (alpha)</H6>
       {missingBackendApiKey ? (
-        <div className="rounded-md border border-red-500/40 bg-red-950/40 p-3 text-xs text-red-200">
-          <div className="font-semibold text-red-200">Missing OpenAI backend API key.</div>
-          <p className="mt-1 text-red-200/80">Add the backend API key in Settings to enable AI scene generation.</p>
+        <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-600">
+          <div className="font-semibold">Missing OpenAI backend API key.</div>
+          <p className="mt-1 opacity-80">Add the backend API key in Settings to enable AI scene generation.</p>
           <div className="mt-2">
             <Button size="small" color="secondary" onClick={() => router.actions.push(urls.settings())}>
               Fix in settings
@@ -268,7 +268,7 @@ export function Scenes() {
         </div>
       ) : null}
       <div className="space-y-1">
-        <div className="text-xs font-semibold uppercase text-gray-400">Prompt</div>
+        <div className="frame-tool-muted text-xs font-semibold uppercase">Prompt</div>
         <TextArea
           rows={3}
           placeholder='e.g. "show an analog clock"'
@@ -278,13 +278,13 @@ export function Scenes() {
           onDrop={onPromptDrop}
           disabled={!hasEmbeddings}
         />
-        <div className="flex flex-wrap items-center gap-2 text-xs text-gray-400">
+        <div className="frame-tool-muted flex flex-wrap items-center gap-2 text-xs">
           <span>Try:</span>
           {promptSuggestions.map((suggestion) => (
             <button
               key={suggestion.label}
               type="button"
-              className="text-blue-300 hover:text-blue-200 hover:underline"
+              className="frameos-link hover:underline"
               onMouseEnter={() => handlePromptHoverEnter(suggestion.prompt)}
               onMouseLeave={() => handlePromptHoverLeave(suggestion.prompt)}
               onClick={() => handlePromptSuggestionClick(suggestion.prompt)}
@@ -296,16 +296,16 @@ export function Scenes() {
         </div>
       </div>
       {!hasEmbeddings ? (
-        <div className="text-xs text-gray-400">
+        <div className="frame-tool-muted text-xs">
           No embeddings generated.{' '}
-          <A className="text-blue-400 hover:underline" href={urls.settings()}>
+          <A className="frameos-link hover:underline" href={urls.settings()}>
             Open settings
           </A>
         </div>
       ) : null}
       {aiError ? <span className="text-xs text-red-400">{aiError}</span> : null}
       <div className="space-y-2">
-        <div className="text-gray-400">
+        <div className="frame-tool-muted">
           Please note: Scene generation is still a work in progress. Generated scenes may not work well or may even
           crash your frame. Use with caution and always review the generated code. Progress logs will stream in the Chat
           panel.
@@ -410,7 +410,7 @@ export function Scenes() {
       <div className="flex h-full items-center justify-center">
         <div className="text-center space-y-4 mb-8">
           <H6>{frame.last_successful_deploy_at ? 'No scenes installed' : 'Not deployed yet'}</H6>
-          <p className="text-gray-400">
+          <p className="frame-tool-muted">
             {frame.last_successful_deploy_at
               ? 'Scenes are the building blocks of your frame. They can be anything from a simple clock to a complex interactive thermostat.'
               : 'Press the purple "First deploy" button to deploy FrameOS for the first time.'}
@@ -434,7 +434,7 @@ export function Scenes() {
                 <div className="flex gap-1">
                   {multiSelectEnabled ? (
                     <div className="flex items-center gap-2">
-                      <span className="text-xs text-gray-300">{selectedSceneIds.size} selected</span>
+                      <span className="frame-tool-muted text-xs">{selectedSceneIds.size} selected</span>
                       <Button
                         size="small"
                         color="secondary"
@@ -519,12 +519,12 @@ export function Scenes() {
             )
           : null}
         {filteredScenes.length === 0 && search && !missingActiveMatchesSearch ? (
-          <div className="text-center text-gray-400">No scenes matching "{search}"</div>
+          <div className="frame-tool-muted text-center">No scenes matching "{search}"</div>
         ) : null}
         {missingActiveMatchesSearch ? (
           <div
             className={clsx(
-              'border rounded-lg shadow bg-gray-900 break-inside-avoid p-2 space-y-1 border-blue-700/60',
+              'frame-tool-row border rounded-lg shadow break-inside-avoid p-2 space-y-1 border-blue-700/60',
               missingActiveExpanded ? 'shadow-[0_0_3px_3px_rgba(128,0,255,0.3)]' : null
             )}
           >
@@ -576,7 +576,7 @@ export function Scenes() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2 w-full pl-7 justify-between">
-                  <div className="text-xs text-gray-400 flex flex-wrap gap-1 items-center">
+                  <div className="frame-tool-muted text-xs flex flex-wrap gap-1 items-center">
                     <div>This scene is currently running, but it is not saved on the frame.</div>
                   </div>
                 </div>
@@ -615,10 +615,10 @@ export function Scenes() {
               <div
                 data-scene-id={scene.id}
                 className={clsx(
-                  'border rounded-lg shadow bg-gray-900 break-inside-avoid p-2 space-y-1 transition',
+                  'frame-tool-row border rounded-lg shadow break-inside-avoid p-2 space-y-1 transition',
                   linkedActiveSceneId === scene.id
                     ? 'border border-[#4a4b8c] shadow-[0_0_3px_3px_rgba(128,0,255,0.5)]'
-                    : 'border-gray-700',
+                    : 'border-transparent',
                   multiSelectEnabled && isSelected ? 'border-blue-400 shadow-[0_0_4px_2px_rgba(96,165,250,0.4)]' : null,
                   focusedSceneId === scene.id
                     ? 'border-sky-300 shadow-[0_0_6px_2px_rgba(56,189,248,0.45)] ring-1 ring-sky-300/70'
@@ -645,7 +645,7 @@ export function Scenes() {
                         <label className="mt-1 flex items-center">
                           <input
                             type="checkbox"
-                            className="h-4 w-4 rounded border-gray-500 bg-gray-900 text-blue-400 focus:ring-blue-400"
+                            className="frameos-checkbox h-4 w-4 rounded focus:ring-blue-400"
                             checked={isSelected}
                             onChange={() => toggleSceneSelection(scene.id)}
                           />
@@ -761,7 +761,7 @@ export function Scenes() {
                     </div>
 
                     <div className="flex items-center gap-2 w-full pl-7 justify-between">
-                      <div className="text-xs text-gray-400 flex flex-wrap gap-1 items-center">
+                      <div className="frame-tool-muted text-xs flex flex-wrap gap-1 items-center">
                         <div>{scene.id}</div>
                         {!inFrameAdminMode
                           ? secretSettings
@@ -771,8 +771,8 @@ export function Scenes() {
                                   key={settingKey}
                                   type="button"
                                   className={clsx(
-                                    'inline-flex items-center rounded border border-gray-400/80 bg-gray-950 px-2 py-0.5 text-[10px] font-semibold uppercase text-gray-300',
-                                    multiSelectEnabled ? 'cursor-default opacity-60' : 'hover:bg-gray-900'
+                                    'frameos-tag inline-flex items-center rounded px-2 py-0.5 text-[10px] font-semibold uppercase',
+                                    multiSelectEnabled ? 'cursor-default opacity-60' : ''
                                   )}
                                   onClick={() => {
                                     if (!multiSelectEnabled) {
@@ -802,7 +802,7 @@ export function Scenes() {
                                       }}
                                       className={clsx(
                                         'hover:underline',
-                                        multiSelectEnabled ? 'cursor-default text-gray-500' : 'cursor-pointer'
+                                        multiSelectEnabled ? 'cursor-default frame-tool-muted' : 'cursor-pointer'
                                       )}
                                     >
                                       {sceneTitles[sceneId] || sceneId}
@@ -832,7 +832,7 @@ export function Scenes() {
                                       }}
                                       className={clsx(
                                         'hover:underline',
-                                        multiSelectEnabled ? 'cursor-default text-gray-500' : 'cursor-pointer'
+                                        multiSelectEnabled ? 'cursor-default frame-tool-muted' : 'cursor-pointer'
                                       )}
                                     >
                                       {sceneTitles[sceneId] || sceneId}
@@ -854,7 +854,7 @@ export function Scenes() {
                       ) : null}
                     </div>
                     {!inFrameAdminMode ? (
-                      <div className="flex flex-wrap items-center gap-2 pl-7 text-xs text-gray-500">
+                      <div className="frame-tool-muted flex flex-wrap items-center gap-2 pl-7 text-xs">
                         {sceneServiceEntries?.map(({ key, label, missing }) => (
                           <Tag key={key} color={missing ? 'orange' : 'teal'}>
                             {label}
@@ -879,7 +879,7 @@ export function Scenes() {
               </div>
 
               {showingSettings[scene.id] && !multiSelectEnabled ? (
-                <Box className="p-2 pl-4 pr-3 space-y-2 bg-gray-900 flex items-start justify-between gap-1 ml-4">
+                <Box className="p-2 pl-4 pr-3 space-y-2 flex items-start justify-between gap-1 ml-4">
                   <SceneSettings sceneId={scene.id} onClose={() => toggleSettings(scene.id)} />
                 </Box>
               ) : null}

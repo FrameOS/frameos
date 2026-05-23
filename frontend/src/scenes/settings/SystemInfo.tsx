@@ -41,7 +41,7 @@ export function SystemInfo() {
       ) : (
         <>
           <div className="flex flex-col gap-2 @md:flex-row @md:items-center @md:justify-between">
-            <p className="text-sm text-slate-200">Overview of the server running the backend.</p>
+            <p className="frameos-muted text-sm">Overview of the server running the backend.</p>
             <div className="flex items-center gap-2">
               {(systemInfoLoading || systemMetricsLoading) && <Spinner />}
               <Button size="small" color="secondary" onClick={loadSystemInfo}>
@@ -50,25 +50,25 @@ export function SystemInfo() {
             </div>
           </div>
           <div className="grid grid-cols-1 gap-3 @md:grid-cols-3">
-            <div className="rounded border border-slate-800 bg-slate-900 p-3">
-              <div className="text-xs uppercase text-slate-400">Load (1m / 5m / 15m)</div>
-              <div className="text-lg font-semibold">
+            <div className="frameos-inset rounded-xl border p-3">
+              <div className="frameos-muted text-xs uppercase">Load (1m / 5m / 15m)</div>
+              <div className="frameos-strong text-lg font-semibold">
                 {formatLoad(currentLoad?.one)} / {formatLoad(currentLoad?.five)} / {formatLoad(currentLoad?.fifteen)}
               </div>
             </div>
-            <div className="rounded border border-slate-800 bg-slate-900 p-3">
-              <div className="text-xs uppercase text-slate-400">Memory</div>
-              <div className="text-lg font-semibold">{formatBytes(currentMemory?.availableBytes)} free</div>
-              <div className="text-xs text-slate-400">of {formatBytes(currentMemory?.totalBytes)} total</div>
+            <div className="frameos-inset rounded-xl border p-3">
+              <div className="frameos-muted text-xs uppercase">Memory</div>
+              <div className="frameos-strong text-lg font-semibold">{formatBytes(currentMemory?.availableBytes)} free</div>
+              <div className="frameos-muted text-xs">of {formatBytes(currentMemory?.totalBytes)} total</div>
             </div>
-            <div className="rounded border border-slate-800 bg-slate-900 p-3">
-              <div className="text-xs uppercase text-slate-400">Disk</div>
-              <div className="text-lg font-semibold">{formatBytes(currentDisk?.freeBytes)} free</div>
-              <div className="text-xs text-slate-400">of {formatBytes(currentDisk?.totalBytes)} total</div>
+            <div className="frameos-inset rounded-xl border p-3">
+              <div className="frameos-muted text-xs uppercase">Disk</div>
+              <div className="frameos-strong text-lg font-semibold">{formatBytes(currentDisk?.freeBytes)} free</div>
+              <div className="frameos-muted text-xs">of {formatBytes(currentDisk?.totalBytes)} total</div>
             </div>
           </div>
           <div className="space-y-3">
-            <div className="flex items-center justify-between text-sm font-semibold">
+            <div className="frameos-strong flex items-center justify-between text-sm font-semibold">
               <span>Cache usage</span>
             </div>
             {systemInfoLoading ? (
@@ -76,28 +76,28 @@ export function SystemInfo() {
                 <Spinner />
               </div>
             ) : (
-              <div className="overflow-hidden rounded border border-slate-800/80 bg-slate-950/50">
+              <div className="frameos-inset overflow-hidden rounded-xl border">
                 <table className="w-full text-sm">
-                  <thead className="bg-slate-900/60 text-left text-xs uppercase tracking-wide text-slate-400">
+                  <thead className="frameos-muted text-left text-xs uppercase tracking-wide">
                     <tr>
                       <th className="py-2 pl-3 pr-2 font-semibold">Name</th>
                       <th className="py-2 pr-2 font-semibold">Path</th>
                       <th className="py-2 pr-3 text-right font-semibold">Size</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-800/60">
+                  <tbody className="divide-y divide-slate-200/70">
                     {(systemInfo?.caches ?? []).map((cache) => (
-                      <tr key={cache.path} className="hover:bg-slate-900/40">
+                      <tr key={cache.path} className="hover:bg-white/40">
                         <td className="py-2 pl-3 pr-2 align-top">{cache.name}</td>
-                        <td className="py-2 pr-2 align-top font-mono text-xs text-slate-200">{cache.path}</td>
-                        <td className="py-2 pr-3 text-right font-semibold text-slate-100 align-top">
+                        <td className="frameos-muted py-2 pr-2 align-top font-mono text-xs">{cache.path}</td>
+                        <td className="frameos-strong py-2 pr-3 text-right font-semibold align-top">
                           {formatBytes(cache.sizeBytes)}
                         </td>
                       </tr>
                     ))}
                     {(systemInfo?.caches?.length ?? 0) === 0 ? (
                       <tr>
-                        <td className="py-3 text-center text-slate-400" colSpan={3}>
+                        <td className="frameos-muted py-3 text-center" colSpan={3}>
                           No cache directories found.
                         </td>
                       </tr>
@@ -108,15 +108,15 @@ export function SystemInfo() {
             )}
           </div>
           <div className="space-y-1">
-            <div className="text-sm font-semibold">Database</div>
+            <div className="frameos-strong text-sm font-semibold">Database</div>
             {systemInfoLoading ? (
               <div className="flex justify-center">
                 <Spinner />
               </div>
             ) : (
               <>
-                <div className="text-sm text-slate-200">{systemInfo?.database?.path ?? 'Not using SQLite storage'}</div>
-                <div className="text-xs text-slate-400">Size: {formatBytes(systemInfo?.database?.sizeBytes)}</div>
+                <div className="frameos-strong text-sm">{systemInfo?.database?.path ?? 'Not using SQLite storage'}</div>
+                <div className="frameos-muted text-xs">Size: {formatBytes(systemInfo?.database?.sizeBytes)}</div>
               </>
             )}
           </div>

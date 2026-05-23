@@ -84,7 +84,7 @@ function SelectionSelect({
 }): JSX.Element {
   return (
     <div>
-      <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-400">{label}</label>
+      <label className="frameos-muted mb-2 block text-xs font-semibold uppercase tracking-wide">{label}</label>
       <select
         value={value}
         disabled={disabled}
@@ -225,7 +225,7 @@ function AppsTopBar({
           onClick={() => saveFrame()}
           className={clsx(
             'rounded-full px-4 py-2 text-sm font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-            unsavedChanges ? 'frameos-primary-action text-white' : 'bg-white/85 text-slate-700 hover:bg-white'
+            unsavedChanges ? 'frameos-primary-action' : 'frameos-secondary-button'
           )}
         >
           Save
@@ -236,8 +236,8 @@ function AppsTopBar({
           className={clsx(
             'rounded-full px-4 py-2 text-sm font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
             unsavedChanges || undeployedChanges
-              ? 'bg-slate-900 text-white hover:bg-slate-700'
-              : 'bg-white/85 text-slate-700 hover:bg-white'
+              ? 'frameos-primary-action'
+              : 'frameos-secondary-button'
           )}
         >
           Deploy

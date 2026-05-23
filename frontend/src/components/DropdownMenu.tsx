@@ -63,7 +63,7 @@ export function DropdownMenu({ items, className, horizontal, buttonColor: _butto
             onClick={(e) => e.stopPropagation()}
             className={clsx(
               buttonColor(_buttonColor),
-              'inline-flex justify-center px-1 py-1 text-sm font-medium text-white rounded-md focus:outline-none shadow-sm',
+              'inline-flex justify-center px-1 py-1 text-sm font-medium rounded-md focus:outline-none shadow-sm',
               className
             )}
           >
@@ -87,7 +87,7 @@ export function DropdownMenu({ items, className, horizontal, buttonColor: _butto
             >
               <Menu.Items
                 static
-                className="z-[100] w-56 origin-top-right bg-gray-600 divide-y divide-gray-100 rounded-md shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none"
+                className="frameos-dropdown-menu z-[100] w-56 origin-top-right divide-y divide-slate-200/60 rounded-md focus:outline-none"
                 ref={setPopperElement}
                 style={styles.popper}
                 {...attributes.popper}
@@ -99,7 +99,8 @@ export function DropdownMenu({ items, className, horizontal, buttonColor: _butto
                         item.content ? (
                           <div
                             className={clsx(
-                              active ? 'bg-[#2a2b50] text-white' : 'text-white',
+                              'frameos-dropdown-item',
+                              active && 'frameos-dropdown-item-active',
                               'px-4 py-2 text-sm'
                             )}
                             title={item.title}
@@ -110,9 +111,8 @@ export function DropdownMenu({ items, className, horizontal, buttonColor: _butto
                           <a
                             href="#"
                             className={clsx(
-                              `${
-                                active && !!item.onClick ? 'bg-[#2a2b50] text-white' : 'text-white'
-                              } px-4 py-2 text-sm flex gap-2`
+                              'frameos-dropdown-item px-4 py-2 text-sm flex gap-2',
+                              active && !!item.onClick && 'frameos-dropdown-item-active'
                             )}
                             title={item.title}
                             onClick={

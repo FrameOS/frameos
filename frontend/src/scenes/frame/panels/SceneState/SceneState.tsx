@@ -109,7 +109,7 @@ export function SceneState(): JSX.Element {
                 </div>
               ) : null}
               {editingFields[index] ? (
-                <div className="bg-gray-900 p-2 space-y-4">
+                <div className="frame-tool-card rounded-2xl p-3 space-y-4">
                   <Field name="label" label="Field label (human readable)">
                     {({ value, onChange }) => (
                       <TextInput
@@ -206,7 +206,7 @@ export function SceneState(): JSX.Element {
                 </div>
               ) : (
                 <div
-                  className="bg-gray-900 p-2 dndnode cursor-move"
+                  className="frame-tool-row rounded-2xl p-3 dndnode cursor-move"
                   draggable
                   onDragStart={(event) => onDragStart(event, 'state', field.name, index)}
                   onDragOver={onDragOverField}
@@ -257,7 +257,7 @@ export function SceneState(): JSX.Element {
                       className="w-4 h-4 min-w-4 min-h-4 cursor-pointer inline-block"
                       onClick={() => copy(stateFieldAccess(scene, field))}
                     />
-                    <code className="text-sm text-gray-400 break-words truncate">{stateFieldAccess(scene, field)}</code>
+                    <code className="frame-tool-muted text-sm break-words truncate">{stateFieldAccess(scene, field)}</code>
                   </div>
                 </div>
               )}
