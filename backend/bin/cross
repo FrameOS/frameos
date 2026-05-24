@@ -8,6 +8,7 @@ import fnmatch
 import hashlib
 import json
 import os
+import shlex
 import shutil
 import sys
 import tempfile

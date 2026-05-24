@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import shlex
 import shutil
 import sys
 from importlib.machinery import SourceFileLoader
@@ -22,6 +23,75 @@ def load_cross_module():
     sys.modules[loader.name] = module
     loader.exec_module(module)
     return module
+
+
+@pytest.mark.asyncio
+async def test_generate_agent_build_dir_constructs_versioned_command(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    cross_module = load_cross_module()
+    repo_root = tmp_path / "repo"
+    agent_source_dir = repo_root / "frameos" / "agent source"
+    build_dir = tmp_path / "agent-build"
+    nimbase = tmp_path / "nimbase.h"
+    repo_root.mkdir()
+    agent_source_dir.mkdir(parents=True)
+    nimbase.write_text("// nimbase\n", encoding="utf-8")
+    (repo_root / "versions.json").write_text('{"agent":"2026.5.14"}\n', encoding="utf-8")
+
+    captured: dict[str, str] = {}
+
+    class FakeDeployer:
+        frame = SimpleNamespace(id=1)
+
+        async def arch_to_nim_cpu(self, arch):
+            assert arch == "aarch64"
+            return "arm64"
+
+    async def fake_exec_local_command(_db, _redis, _frame, command):
+        captured["command"] = command
+        (build_dir / "compile_frameos_agent.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        return 0, "", ""
+
+    monkeypatch.setattr(
+        "backend.app.utils.local_exec.exec_local_command",
+        fake_exec_local_command,
+    )
+    monkeypatch.setattr("backend.app.tasks.utils.find_nimbase_file", lambda _nim_path: str(nimbase))
+    monkeypatch.setattr(
+        "backend.app.tasks._frame_deployer.FrameDeployer._find_compile_script",
+        staticmethod(
+            lambda build_dir_arg, _name: str(Path(build_dir_arg) / "compile_frameos_agent.sh")
+        ),
+    )
+    monkeypatch.setattr(
+        "backend.app.tasks._frame_deployer.FrameDeployer._extract_compile_flags",
+        staticmethod(lambda _script_path, _output_name: ("", "")),
+    )
+    monkeypatch.setattr(
+        "backend.app.tasks._frame_deployer.FrameDeployer._write_c_makefile",
+        staticmethod(
+            lambda makefile_path, **_kwargs: Path(makefile_path).write_text(
+                "all:\n",
+                encoding="utf-8",
+            )
+        ),
+    )
+
+    await cross_module.generate_agent_build_dir(
+        deployer=FakeDeployer(),
+        agent_source_dir=agent_source_dir,
+        build_dir=build_dir,
+        arch="aarch64",
+        nim_path="/opt/nim/bin/nim",
+        repo_root=repo_root,
+    )
+
+    assert "--define:frameosAgentVersion:2026.5.14" in captured["command"]
+    assert shlex.quote(str(agent_source_dir)) in captured["command"]
+    assert (build_dir / "nimbase.h").read_text(encoding="utf-8") == "// nimbase\n"
+    assert (build_dir / "Makefile").exists()
 
 
 @pytest.mark.asyncio
