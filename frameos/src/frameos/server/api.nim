@@ -16,7 +16,7 @@ import frameos/utils/image
 import frameos/utils/font
 import frameos/config
 from frameos/metrics import defaultProcessMemoryUsage
-from frameos/scenes import getLastImagePng, getLastPublicState, getAllPublicStates, getUploadedScenePayload,
+from frameos/scenes import getLastImagePngWithSceneId, getLastPublicState, getAllPublicStates, getUploadedScenePayload,
     getDynamicSceneOptions
 from scenes/scenes import sceneOptions
 import ./embedded_assets
@@ -253,7 +253,7 @@ proc buildFrameImageResponse*(request: Request): tuple[status: httpcore.HttpCode
   if shouldReturnNotModified(request.headers, lastUpdate):
     var headers: mummy.HttpHeaders
     headers["X-Scene-Id"] = $sceneId
-    headers["Access-Control-Expose-Headers"] = "X-Scene-Id"
+    headers["Access-Control-Expose-Headers"] = "X-Scene-Id, X-Rendered-Scene-Id"
     if logImageRequest:
       log(%*{
         "event": "http:image",
@@ -271,7 +271,7 @@ proc buildFrameImageResponse*(request: Request): tuple[status: httpcore.HttpCode
   headers["Content-Type"] = "image/png"
   headers["Content-Disposition"] = &"inline; filename=\"{sceneId}.png\""
   headers["X-Scene-Id"] = $sceneId
-  headers["Access-Control-Expose-Headers"] = "X-Scene-Id"
+  headers["Access-Control-Expose-Headers"] = "X-Scene-Id, X-Rendered-Scene-Id"
   if lastUpdate > 0.0:
     let lastModified = format(fromUnix(int64(lastUpdate)), "ddd, dd MMM yyyy HH:mm:ss 'GMT'", utc())
     headers["Last-Modified"] = lastModified
@@ -280,6 +280,7 @@ proc buildFrameImageResponse*(request: Request): tuple[status: httpcore.HttpCode
   try:
     let image = drivers.toPng(360 - globalFrameConfig.rotate, globalFrameConfig.flip)
     if image != "":
+      headers["X-Rendered-Scene-Id"] = $sceneId
       if logImageRequest:
         log(%*{
           "event": "http:image",
@@ -298,13 +299,15 @@ proc buildFrameImageResponse*(request: Request): tuple[status: httpcore.HttpCode
     driverPreview = "error"
     driverPreviewError = e.msg
   try:
-    let image = getLastImagePng()
+    let (image, renderedSceneId) = getLastImagePngWithSceneId()
+    headers["X-Rendered-Scene-Id"] = $renderedSceneId
     if logImageRequest:
       var payload = %*{
         "event": "http:image",
         "source": "lastImage",
         "status": int(Http200),
         "sceneId": $sceneId,
+        "renderedSceneId": $renderedSceneId,
         "bytes": image.len,
         "ms": (epochTime() - startedAt) * 1000.0,
         "driverPreview": driverPreview,

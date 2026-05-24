@@ -4,7 +4,7 @@ ARG PYTHON_IMAGE=python:3.12-slim-bookworm
 
 FROM ${PYTHON_IMAGE} AS nim-toolchain
 
-ARG NIM_VERSION=2.2.4
+ARG NIM_VERSION=2.2.10
 ARG FRAMEOS_ARCHIVE_BASE_URL=https://archive.frameos.net
 
 ENV DEBIAN_FRONTEND=noninteractive

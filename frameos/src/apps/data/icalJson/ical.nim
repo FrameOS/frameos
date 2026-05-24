@@ -4,7 +4,6 @@ import strutils
 import chrono
 import options
 import std/algorithm
-import std/lists
 import system
 import tables
 
@@ -39,8 +38,9 @@ type
     count*: int
     weekStart*: RRuleDay
 
-  FieldsTable* = Table[string, DoublyLinkedList[string]]
+  FieldsTable* = Table[string, seq[string]]
   EventsSeq* = seq[(Timestamp, VEvent)]
+  EventTable* = Table[string, (Timestamp, ref VEvent)]
 
   EventStatus* = enum stNone, stTentative, stConfirmed, stCancelled
 
@@ -69,8 +69,8 @@ type
     inVAlarm*: bool
     inVEvent*: bool
     inVCalendar*: bool
-    rRuleProvided*: Table[string, (Timestamp, VEvent)]
-    rRuleGenerated*: Table[string, (Timestamp, VEvent)]
+    rRuleProvided*: EventTable
+    rRuleGenerated*: EventTable
     result*: EventsSeq
     splitCutoff*: Table[string, Timestamp]
     masterTzByUid*: Table[string, string]
@@ -330,13 +330,13 @@ proc processCurrentFields*(self: var ParsedCalendar) =
   var event = VEvent()
 
   template getFirstValue(key: string): string =
-    self.currentFields[key].head.value
+    self.currentFields[key][0]
 
   if self.currentFields.hasKey("UID"):
     event.uid = getFirstValue("UID")
 
   if self.currentFields.hasKey("TZID"):
-    event.timeZone = normalizeTimeZone(self.currentFields["TZID"].head.value)
+    event.timeZone = normalizeTimeZone(getFirstValue("TZID"))
   else:
     event.timeZone = self.timeZone
 
@@ -447,7 +447,7 @@ proc processCurrentFields*(self: var ParsedCalendar) =
   # if fields.hasKey("RDATE"):
   #   assert(false, "RDATE is not supported")
   if self.currentFields.hasKey("EXDATE"):
-    for raw in self.currentFields["EXDATE"].items():
+    for raw in self.currentFields["EXDATE"]:
       var tzParam = ""
       var datesPart = raw
       let colon = raw.find(':')
@@ -531,7 +531,7 @@ proc processCurrentFields*(self: var ParsedCalendar) =
 proc processLine*(self: var ParsedCalendar, line: string) =
   if line.startsWith("BEGIN:VEVENT"):
     self.inVEvent = true
-    self.currentFields = initTable[string, DoublyLinkedList[string]]()
+    self.currentFields = initTable[string, seq[string]]()
   elif line.startsWith("END:VEVENT"):
     self.inVEvent = false
     try:
@@ -558,7 +558,7 @@ proc processLine*(self: var ParsedCalendar, line: string) =
       let value = arr[1]
       if self.inVEvent:
         if not self.currentFields.hasKey(key):
-          self.currentFields[key] = initDoublyLinkedList[string]()
+          self.currentFields[key] = @[]
         self.currentFields[key].add(value)
       else:
         if key == "X-WR-TIMEZONE":
@@ -570,6 +570,9 @@ proc parseICalendar*(content: string, timeZone = ""): ParsedCalendar =
   result = ParsedCalendar(timeZone: normalizeTimeZone(timeZone))
   result.timeZone = normalizeTimeZone(timeZone) # Default. Will be overridden by X-WR-TIMEZONE if given
   result.masterTzByUid = initTable[string, string]()
+  result.rRuleProvided = initTable[string, (Timestamp, ref VEvent)]()
+  result.rRuleGenerated = initTable[string, (Timestamp, ref VEvent)]()
+  result.splitCutoff = initTable[string, Timestamp]()
   result.staleSeriesCutoff = initTable[string, Timestamp]()
   var accumulator = ""
   for line in content.splitLines():
@@ -643,6 +646,58 @@ proc choosePreferredEvent*(current, candidate: VEvent): VEvent =
     return candidate
   return current
 
+proc cloneString(value: string): string =
+  result = newStringOfCap(value.len)
+  result.add(value)
+
+proc cloneRRule(rule: RRule): RRule =
+  result = RRule(
+    freq: rule.freq,
+    interval: rule.interval,
+    until: rule.until,
+    count: rule.count,
+    weekStart: rule.weekStart
+  )
+  result.byDay = @[]
+  for item in rule.byDay:
+    result.byDay.add(item)
+  result.byMonth = @[]
+  for item in rule.byMonth:
+    result.byMonth.add(item)
+  result.byMonthDay = @[]
+  for item in rule.byMonthDay:
+    result.byMonthDay.add(item)
+  result.byYearDay = @[]
+  for item in rule.byYearDay:
+    result.byYearDay.add(item)
+  result.byWeekNo = @[]
+  for item in rule.byWeekNo:
+    result.byWeekNo.add(item)
+
+proc cloneEvent(event: VEvent): VEvent =
+  result = VEvent(
+    uid: cloneString(event.uid),
+    timeZone: cloneString(event.timeZone),
+    startTs: event.startTs,
+    endTs: event.endTs,
+    fullDay: event.fullDay,
+    recurrenceId: cloneString(event.recurrenceId),
+    summary: cloneString(event.summary),
+    description: cloneString(event.description),
+    location: cloneString(event.location),
+    url: cloneString(event.url),
+    status: event.status,
+    sequence: event.sequence,
+    dtStamp: event.dtStamp,
+    lastModified: event.lastModified
+  )
+  result.rrules = @[]
+  for rule in event.rrules:
+    result.rrules.add(cloneRRule(rule))
+  result.exDates = @[]
+  for ts in event.exDates:
+    result.exDates.add(ts)
+
 proc reconcileRecurringSeries*(self: var ParsedCalendar) =
   for i in 0 ..< self.events.len:
     let older = self.events[i]
@@ -665,21 +720,24 @@ proc reconcileRecurringSeries*(self: var ParsedCalendar) =
           self.staleSeriesCutoff[older.uid] = newer.startTs
 
 proc reconcileExactCollisions*(self: var ParsedCalendar) =
-  var winners = initTable[string, (Timestamp, VEvent)]()
-  for (ts, event) in self.result:
+  var winners = initTable[string, int]()
+  for index, item in self.result:
+    let (ts, event) = item
     let duration = int64(event.endTs.float - event.startTs.float)
     let collisionKey = event.summary & "|" & $int64(ts.float) & "|" & $duration
     if winners.hasKey(collisionKey):
-      let current = winners[collisionKey]
+      let current = self.result[winners[collisionKey]]
       let preferred = choosePreferredEvent(current[1], event)
       if preferred.uid == event.uid and preferred.startTs == event.startTs and preferred.endTs == event.endTs:
-        winners[collisionKey] = (ts, event)
+        winners[collisionKey] = index
     else:
-      winners[collisionKey] = (ts, event)
+      winners[collisionKey] = index
 
-  self.result = @[]
-  for (_, winner) in winners.pairs():
-    self.result.add(winner)
+  var deduped: EventsSeq = @[]
+  for _, index in winners.pairs():
+    var cloned = cloneEvent(self.result[index][1])
+    deduped.add((self.result[index][0], move(cloned)))
+  self.result = deduped
 
 proc trimDay(self: var Calendar) =
   self.secondFraction = 0.0
@@ -872,6 +930,10 @@ proc extractTzAndDate*(value: string): (string, string) =
 proc keyFor(uid: string, ts: Timestamp): string =
   uid & "/" & $int64(ts.float) # use toUnix if you have it
 
+proc eventRef(event: VEvent): ref VEvent =
+  new(result)
+  result[] = event
+
 proc addMatchedEvent(self: var ParsedCalendar, ts: Timestamp, event: VEvent) =
   if self.result.len() > MAX_RESULT_COUNT:
     raise newException(ValueError, "Too many events in calendar. Increase MAX_RESULT_COUNT.")
@@ -893,17 +955,17 @@ proc addMatchedEvent(self: var ParsedCalendar, ts: Timestamp, event: VEvent) =
       if not self.splitCutoff.hasKey(event.uid) or ridTs < self.splitCutoff[event.uid]:
         self.splitCutoff[event.uid] = ridTs
       let key = keyFor(event.uid, ts)
-      self.rRuleProvided[key] = (ts, event)
+      self.rRuleProvided[key] = (ts, eventRef(event))
     else:
       # Single-instance override (move/cancel this one occurrence)
       let key = keyFor(event.uid, ridTs) # key by ORIGINAL occurrence time
-      self.rRuleProvided[key] = (ts, event)
+      self.rRuleProvided[key] = (ts, eventRef(event))
 
   elif event.rrules.len() > 0:
     if event.status == stCancelled:
       return
     let key = keyFor(event.uid, ts)
-    self.rRuleGenerated[key] = (ts, event)
+    self.rRuleGenerated[key] = (ts, eventRef(event))
 
   else:
     if event.status != stCancelled:
@@ -959,6 +1021,10 @@ proc applyRRule(self: var ParsedCalendar, startTs: Timestamp, endTs: Timestamp, 
 
 proc getEvents*(self: var ParsedCalendar, startTs: Timestamp, endTs: Timestamp, search: string = "",
     maxCount: int = 1000): EventsSeq =
+  self.rRuleProvided = initTable[string, (Timestamp, ref VEvent)]()
+  self.rRuleGenerated = initTable[string, (Timestamp, ref VEvent)]()
+  self.result = @[]
+  self.splitCutoff = initTable[string, Timestamp]()
 
   for event in self.events:
     if search != "" and not event.summary.contains(search):
@@ -982,12 +1048,13 @@ proc getEvents*(self: var ParsedCalendar, startTs: Timestamp, endTs: Timestamp, 
         let displayTs = if event.startTs == 0.Timestamp: ridTs else: event.startTs
         self.addMatchedEvent(displayTs, event)
 
-  var removedParentCounts: Table[string, int]
+  var removedParentCounts = initTable[string, int]()
 
   # Stop original parent series after any THISANDFUTURE split points
   for uid, cutoff in self.splitCutoff.pairs():
     var kill: seq[string] = @[]
-    for key, (ts, ev) in self.rRuleGenerated.pairs():
+    for key, (ts, eventRef) in self.rRuleGenerated.pairs():
+      let ev = eventRef[]
       # ev.recurrenceId == "" identifies instances generated from the *parent* series
       if ev.uid == uid and ev.recurrenceId == "" and ts >= cutoff:
         kill.add(key)
@@ -1004,7 +1071,8 @@ proc getEvents*(self: var ParsedCalendar, startTs: Timestamp, endTs: Timestamp, 
 
     # collect child instances >= cutoff
     var childKeys: seq[(Timestamp, string)] = @[]
-    for key, (ts, ev) in self.rRuleProvided.pairs():
+    for key, (ts, eventRef) in self.rRuleProvided.pairs():
+      let ev = eventRef[]
       if ev.uid != uid: continue
       if ts < cutoff: continue
       if ev.rrules.len > 0 or hasThisAndFuture(ev.recurrenceId):
@@ -1018,18 +1086,27 @@ proc getEvents*(self: var ParsedCalendar, startTs: Timestamp, endTs: Timestamp, 
         self.rRuleProvided.del(k)
 
   # dedupe rrule results and standalone results
-  for key, (ts, event) in self.rRuleProvided.pairs():
+  for key, (ts, eventRef) in self.rRuleProvided.pairs():
     if self.rRuleGenerated.hasKey(key):
       self.rRuleGenerated.del(key) # remove the RRULE-generated original
+    let event = eventRef[]
     if event.status != stCancelled:
       self.result.add((ts, event)) # add overrides only if not cancelled
 
-  for key, (ts, event) in self.rRuleGenerated.pairs():
-    self.result.add((ts, event))
+  for key, (ts, eventRef) in self.rRuleGenerated.pairs():
+    self.result.add((ts, eventRef[]))
 
   self.reconcileExactCollisions()
   self.result.sort(cmp)
 
   if maxCount > 0 and self.result.len > maxCount:
     self.result = self.result[0..<maxCount]
-  return self.result
+
+  result = @[]
+  for item in self.result:
+    var cloned = cloneEvent(item[1])
+    result.add((item[0], move(cloned)))
+  self.result = @[]
+  self.rRuleProvided = initTable[string, (Timestamp, ref VEvent)]()
+  self.rRuleGenerated = initTable[string, (Timestamp, ref VEvent)]()
+  self.splitCutoff = initTable[string, Timestamp]()

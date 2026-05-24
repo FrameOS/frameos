@@ -67,7 +67,7 @@ jobs:
 
       - uses: jiro4989/setup-nim-action@v1
         with:
-          nim-version: 2.2.4
+          nim-version: 2.2.10
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: FrameOS nim setup
@@ -87,6 +87,8 @@ jobs:
   visual-regression:
     name: Visual Regression Tests
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -128,7 +130,7 @@ jobs:
 
       - uses: jiro4989/setup-nim-action@v1
         with:
-          nim-version: 2.2.4
+          nim-version: 2.2.10
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: FrameOS nim build
@@ -226,7 +228,7 @@ jobs:
 
       - uses: jiro4989/setup-nim-action@v1
         with:
-          nim-version: 2.2.4
+          nim-version: 2.2.10
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Verify Docker

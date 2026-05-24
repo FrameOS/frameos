@@ -10,7 +10,7 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 ARG TARGETPLATFORM
 ARG BUILDPLATFORM
-ARG NIM_VERSION=2.2.4
+ARG NIM_VERSION=2.2.10
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \

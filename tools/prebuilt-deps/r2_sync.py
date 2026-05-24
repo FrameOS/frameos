@@ -94,6 +94,11 @@ DEFAULT_TARGETS = [
     "ubuntu-24.04-amd64",
 ]
 COMPONENTS = ["nim", "quickjs", "lgpio"]
+DEFAULT_VERSIONS = {
+    "nim": os.environ.get("NIM_VERSION", "2.2.10"),
+    "quickjs": os.environ.get("QUICKJS_VERSION", "2025-04-26"),
+    "lgpio": os.environ.get("LGPIO_VERSION", "v0.2.2"),
+}
 TARGET_PLATFORMS = {
     "armhf": "linux/arm/v7",
     "arm64": "linux/arm64",
@@ -278,6 +283,15 @@ def metadata_matches_entry(metadata: Dict[str, str], entry: ManifestEntry) -> bo
         return False
     for key, version in entry.versions.items():
         if metadata.get(f"{key}_version") != version:
+            return False
+    return True
+
+
+def metadata_matches_desired_versions(metadata: Optional[Dict[str, str]], target: str) -> bool:
+    if not metadata or metadata.get("target") != target:
+        return False
+    for component, version in DEFAULT_VERSIONS.items():
+        if metadata.get(f"{component}_version") != version:
             return False
     return True
 
@@ -713,9 +727,16 @@ def command_sync(args):
         else:
             print(f"No remote archive for {target}")
 
-    missing = [t for t in targets if not (BUILD_DIR / t / "metadata.json").exists()]
+    missing = [
+        t
+        for t in targets
+        if not metadata_matches_desired_versions(read_local_metadata(BUILD_DIR / t), t)
+    ]
     if missing and args.skip_build:
-        print("Some targets are still missing locally but --skip-build was passed:", missing)
+        print(
+            "Some targets are missing or stale locally but --skip-build was passed:",
+            missing,
+        )
         return
 
     ensure_build(missing, args.build_script)
