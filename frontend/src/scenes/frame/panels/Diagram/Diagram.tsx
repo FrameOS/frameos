@@ -45,6 +45,7 @@ import { CompiledSceneTag } from '../Scenes/CompiledSceneTag'
 import { controlLogic } from '../Scenes/controlLogic'
 import { PlayIcon } from '@heroicons/react/24/solid'
 import { Spinner } from '../../../../components/Spinner'
+import { workspaceLogic } from '../../../workspace/workspaceLogic'
 
 const nodeTypes: Record<NodeType, (props: NodeProps) => JSX.Element> = {
   app: AppNode,
@@ -141,6 +142,7 @@ function Diagram_({ sceneId, showToolbar = true }: DiagramProps) {
   const reactFlowWrapper = useRef<HTMLDivElement>(null)
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null)
   const { frameId } = useValues(frameLogic)
+  const { theme } = useValues(workspaceLogic)
   const updateNodeInternals = useUpdateNodeInternals()
   const diagramLogicProps: DiagramLogicProps = { frameId, sceneId, updateNodeInternals }
   const { nodes, nodesWithStyle, edges, selectedNodeIds, fitViewCounter, isCompiledScene } = useValues(
@@ -357,7 +359,13 @@ function Diagram_({ sceneId, showToolbar = true }: DiagramProps) {
           edgeTypes={edgeTypes}
           selectionMode={SelectionMode.Partial}
         >
-          <Background id="1" gap={24} color="#cccccc" variant={BackgroundVariant.Dots} />
+          <Background
+            id="1"
+            gap={28}
+            size={theme === 'dark' ? 1.1 : 1.35}
+            color={theme === 'dark' ? 'rgba(148, 163, 184, 0.18)' : 'rgba(100, 116, 139, 0.24)'}
+            variant={BackgroundVariant.Dots}
+          />
           {isCompiledScene ? (
             <div className="absolute top-1 left-1 z-10">
               <CompiledSceneTag />

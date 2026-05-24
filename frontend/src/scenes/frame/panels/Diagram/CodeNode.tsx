@@ -14,10 +14,12 @@ import { NodeCache } from './NodeCache'
 import { CodeArg } from './CodeArg'
 import { newNodePickerLogic } from './newNodePickerLogic'
 import { NodeZoomLabel } from './NodeZoomLabel'
+import { workspaceLogic } from '../../../workspace/workspaceLogic'
 
 export function CodeNode({ id, isConnectable }: NodeProps<CodeNodeData>): JSX.Element {
   const updateNodeInternals = useUpdateNodeInternals()
   const { frameId, sceneId } = useValues(diagramLogic)
+  const { theme } = useValues(workspaceLogic)
   const { updateNodeData, updateEdge, copyAppJSON, duplicateNode, deleteApp } = useActions(diagramLogic)
   const appNodeLogicProps = { frameId, sceneId, nodeId: id }
   const { isSelected, node, nodeEdges, codeNodeLanguage } = useValues(appNodeLogic(appNodeLogicProps))
@@ -113,6 +115,12 @@ declare const context: {
       inherit: true,
       rules: [],
       colors: { 'editor.background': '#18181b' },
+    })
+    monaco.editor.defineTheme('lightframe-node', {
+      base: 'vs',
+      inherit: true,
+      rules: [],
+      colors: { 'editor.background': '#f8fafc' },
     })
   }
 
@@ -277,7 +285,7 @@ declare const context: {
               language="typescript"
               path={`inmemory://code-node/${id}.tsx`}
               value={data.codeJS ?? ''}
-              theme="darkframe-node"
+              theme={theme === 'dark' ? 'darkframe-node' : 'lightframe-node'}
               beforeMount={beforeMount}
               options={{
                 minimap: { enabled: false },

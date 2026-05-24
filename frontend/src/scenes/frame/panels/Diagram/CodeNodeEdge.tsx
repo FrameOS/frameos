@@ -1,7 +1,10 @@
 import { BaseEdge, EdgeLabelRenderer, EdgeProps, getSmoothStepPath, useReactFlow } from 'reactflow'
 import { XCircleIcon } from '@heroicons/react/24/solid'
+import { useValues } from 'kea'
+import { workspaceLogic } from '../../../workspace/workspaceLogic'
 
 const CONNECTED_TO_SELECTED_NODE_STROKE = '#facc15'
+const LIGHT_CONNECTED_TO_SELECTED_NODE_STROKE = '#b7791f'
 
 export function CodeNodeEdge({
   id,
@@ -17,6 +20,8 @@ export function CodeNodeEdge({
   data,
 }: EdgeProps) {
   const { setEdges } = useReactFlow()
+  const { theme } = useValues(workspaceLogic)
+  const lightMode = theme !== 'dark'
   const [edgePath, labelX, labelY] = getSmoothStepPath({
     sourceX,
     sourceY,
@@ -27,6 +32,10 @@ export function CodeNodeEdge({
   })
   const isNodeConnection = sourceHandleId === 'next' && targetHandleId === 'prev'
   const connectedToSelectedNode = Boolean(data?.connectedToSelectedNode)
+  const selectedStroke = lightMode ? '#c026d3' : '#f29cf6'
+  const connectedStroke = lightMode ? LIGHT_CONNECTED_TO_SELECTED_NODE_STROKE : CONNECTED_TO_SELECTED_NODE_STROKE
+  const defaultStroke = lightMode ? '#8aa4ce' : 'hsl(220 100% 91%)'
+  const roundedStroke = { strokeLinecap: 'round' as const }
   return (
     <>
       <BaseEdge
@@ -34,10 +43,10 @@ export function CodeNodeEdge({
         path={edgePath}
         style={
           selected
-            ? { strokeWidth: 6, stroke: '#f29cf6' }
+            ? { strokeWidth: 6, stroke: selectedStroke, ...roundedStroke }
             : connectedToSelectedNode
-            ? { strokeWidth: 6, stroke: CONNECTED_TO_SELECTED_NODE_STROKE }
-            : { strokeWidth: 4, stroke: 'hsl(220 100% 91%)' }
+            ? { strokeWidth: 6, stroke: connectedStroke, ...roundedStroke }
+            : { strokeWidth: 4, stroke: defaultStroke, ...roundedStroke }
         }
       />
       <EdgeLabelRenderer>

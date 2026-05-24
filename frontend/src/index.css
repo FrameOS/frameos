@@ -1173,6 +1173,10 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
   min-height: 100vh;
 }
 
+.frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas {
+  background: linear-gradient(135deg, rgba(248, 250, 252, 0.96), rgba(238, 242, 247, 0.98));
+}
+
 .scene-diagram-utility-buttons,
 .scene-diagram-ai-control,
 .scene-diagram-node-toolbar {
@@ -1198,6 +1202,22 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
 .frameos-theme-dark .scene-diagram-utility-toolbar .frameos-icon-button:not(.frameos-primary-active):hover {
   background: rgba(38, 40, 47, 0.96);
   color: #ffffff;
+}
+
+.frameos-app-shell:not(.frameos-theme-dark)
+  .scene-diagram-utility-toolbar
+  .frameos-icon-button:not(.frameos-primary-active) {
+  background: rgba(255, 255, 255, 0.86);
+  border-color: rgba(203, 213, 225, 0.88);
+  color: #475569;
+  box-shadow: 0 10px 24px rgba(100, 116, 139, 0.16);
+}
+
+.frameos-app-shell:not(.frameos-theme-dark)
+  .scene-diagram-utility-toolbar
+  .frameos-icon-button:not(.frameos-primary-active):hover {
+  background: #ffffff;
+  color: #0f172a;
 }
 
 @media (max-width: 1023px) {
@@ -1549,6 +1569,7 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
 }
 
 .react-flow .react-flow__node .frameos-node-title {
+  color: #ffffff;
   cursor: grab;
 }
 
@@ -1556,6 +1577,117 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
 .scene-editor-canvas .react-flow__renderer,
 .scene-editor-canvas .react-flow__pane {
   background: transparent;
+}
+
+.frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .frameos-diagram-node {
+  background: rgba(255, 255, 255, 0.96);
+  border-radius: 0.75rem;
+  border-width: 1px;
+  box-shadow: 0 16px 34px rgba(15, 23, 42, 0.12);
+  color: #0f172a;
+}
+
+.frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .frameos-diagram-node.border-sky-900 {
+  border-color: rgba(14, 116, 144, 0.42);
+  box-shadow: 0 16px 34px rgba(14, 116, 144, 0.16);
+}
+
+.frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .frameos-diagram-node.border-indigo-900 {
+  border-color: rgba(79, 70, 229, 0.38);
+  box-shadow: 0 16px 34px rgba(79, 70, 229, 0.14);
+}
+
+.frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .frameos-diagram-node.border-green-700,
+.frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .frameos-diagram-node.border-green-900 {
+  border-color: rgba(22, 163, 74, 0.4);
+  box-shadow: 0 16px 34px rgba(22, 163, 74, 0.14);
+}
+
+.frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .frameos-diagram-node.border-teal-900 {
+  border-color: rgba(13, 148, 136, 0.4);
+  box-shadow: 0 16px 34px rgba(13, 148, 136, 0.14);
+}
+
+.frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .frameos-diagram-node.border-orange-900 {
+  border-color: rgba(217, 119, 6, 0.42);
+  box-shadow: 0 16px 34px rgba(217, 119, 6, 0.14);
+}
+
+.frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .frameos-diagram-node.border-red-900 {
+  border-color: rgba(220, 38, 38, 0.4);
+  box-shadow: 0 16px 34px rgba(220, 38, 38, 0.14);
+}
+
+.frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .frameos-diagram-node.border-fuchsia-900 {
+  border-color: rgba(192, 38, 211, 0.48);
+  box-shadow: 0 18px 38px rgba(192, 38, 211, 0.16);
+}
+
+.frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .frameos-diagram-node.bg-\[\#7f6e1d\],
+.frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .frameos-diagram-node.border-\[\#81701d\] {
+  border-color: rgba(161, 98, 7, 0.42);
+  box-shadow: 0 16px 34px rgba(161, 98, 7, 0.14);
+}
+
+.frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .bg-sky-900,
+.frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .frameos-node-title.bg-sky-900 {
+  background: #0e7490;
+}
+
+.frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .bg-indigo-900,
+.frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .frameos-node-title.bg-indigo-900 {
+  background: #4f46e5;
+}
+
+.frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .bg-green-700,
+.frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .bg-green-900,
+.frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .frameos-node-title.bg-green-700,
+.frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .frameos-node-title.bg-green-900 {
+  background: #15803d;
+}
+
+.frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .bg-teal-900,
+.frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .frameos-node-title.bg-teal-900 {
+  background: #0f766e;
+}
+
+.frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .bg-orange-900,
+.frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .frameos-node-title.bg-orange-900 {
+  background: #c2410c;
+}
+
+.frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .bg-red-900,
+.frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .frameos-node-title.bg-red-900 {
+  background: #be123c;
+}
+
+.frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .bg-fuchsia-900,
+.frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .frameos-node-title.bg-fuchsia-900 {
+  background: #a21caf;
+}
+
+.frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .bg-\[\#7f6e1d\],
+.frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .frameos-node-title.bg-\[\#7f6e1d\] {
+  background: #a16207;
+}
+
+.frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .frameos-diagram-node .text-indigo-200,
+.frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .frameos-diagram-node .text-indigo-100 {
+  color: #475569;
+}
+
+.frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .frameos-diagram-node .text-white {
+  color: #0f172a;
+}
+
+.frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .frameos-diagram-node .frameos-node-title .text-white,
+.frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .frameos-diagram-node .frameos-node-title,
+.frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .frameos-node-zoom-label__text {
+  color: #ffffff;
+}
+
+.frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .react-flow__edge-path {
+  filter: drop-shadow(0 1px 1px rgba(15, 23, 42, 0.08));
 }
 
 .frameos-node-zoom-label {
@@ -1594,6 +1726,12 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
   border: 3px solid white;
   background-color: #264e17;
 }
+
+.frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .react-flow__handle {
+  border-color: rgba(255, 255, 255, 0.96);
+  background-color: #166534;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.22);
+}
 .react-flow__handle-bottom,
 .react-flow__handle-top,
 .react-flow__handle-left,
@@ -1608,6 +1746,12 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
 }
 .react-flow__resize-control.line:hover {
   border-color: rgba(255, 255, 255, 0.3);
+}
+.frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .react-flow__resize-control.line {
+  border-color: rgba(15, 23, 42, 0.16);
+}
+.frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .react-flow__resize-control.line:hover {
+  border-color: var(--frameos-primary);
 }
 .react-flow__resize-control.handle {
   width: 12px;
