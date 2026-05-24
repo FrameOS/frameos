@@ -24,3 +24,10 @@ def current_frameos_version() -> str | None:
     if not isinstance(version, str):
         return None
     return version.split("+")[0]
+
+
+def current_agent_version() -> str | None:
+    version = get_versions().get("agent")
+    if not isinstance(version, str):
+        return None
+    return version.split("+")[0]

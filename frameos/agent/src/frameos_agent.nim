@@ -10,6 +10,7 @@ import zippy
 const
   DefaultConfigPath* = "./frame.json" # secure location
   MaxBackoffSeconds* = 60             # don’t wait longer than this
+  frameosAgentVersion* {.strdefine.} = "0.0.0"
 
 # ----------------------------------------------------------------------------
 # Types
@@ -251,7 +252,7 @@ proc handleCmd(cmd: JsonNode; ws: WebSocket; cfg: FrameConfig): Future[void] {.a
   try:
     case name
     of "version":
-      await sendResp(ws, cfg, id, true, %*{"version": "0.0.0"})
+      await sendResp(ws, cfg, id, true, %*{"version": frameosAgentVersion})
 
     of "http":
       let methodArg = args{"method"}.getStr("GET")

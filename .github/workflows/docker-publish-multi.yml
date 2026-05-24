@@ -26,7 +26,7 @@ jobs:
           python-version: '3.12'
 
       - name: Recompute component versions
-        run: python3 tools/update_versions.py --force-project docker
+        run: python3 tools/update_versions.py --force-project docker --force-project agent
 
       - name: Verify version changes
         run: |
@@ -140,6 +140,10 @@ jobs:
           tar -czf "release-assets/frameos-${DOCKER_VERSION}-${TARGET_SLUG}.tar.gz" \
             -C frameos/build \
             "prebuilt-cross/${TARGET_SLUG}"
+          tar -czf "release-assets/frameos-agent-${DOCKER_VERSION}-${TARGET_SLUG}.tar.gz" \
+            -C frameos/build \
+            "prebuilt-cross/${TARGET_SLUG}/frameos_agent" \
+            "prebuilt-cross/${TARGET_SLUG}/metadata.json"
 
       - name: Upload release artifact
         uses: actions/upload-artifact@v4

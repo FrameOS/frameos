@@ -67,6 +67,9 @@ TARGET_MAP = {target.slug: target for target in TARGETS}
 RELEASE_CACHE_VERSION = "2"
 RELEASE_BUILD_MAKEFILE_VERSION = "3"
 RELEASE_BUILD_MARKER = ".frameos-release-build.json"
+AGENT_RELEASE_BUILD_MAKEFILE_VERSION = "1"
+AGENT_RELEASE_BUILD_MARKER = ".frameos-agent-release-build.json"
+AGENT_BINARY = "frameos_agent"
 RELEASE_HASH_IGNORED_NAMES = {
     ".DS_Store",
     ".git",
@@ -159,6 +162,10 @@ def release_build_cache_dir(slug: str, input_hash: str) -> Path:
     return release_cache_root() / "builds" / slug / input_hash / "build"
 
 
+def release_agent_build_cache_dir(slug: str, input_hash: str) -> Path:
+    return release_cache_root() / "agent-builds" / slug / input_hash / "build"
+
+
 def release_artifact_cache_dir(slug: str, input_hash: str) -> Path:
     return release_cache_root() / "artifacts" / slug / input_hash
 
@@ -235,6 +242,8 @@ def release_artifact_complete(
 ) -> bool:
     if not (artifact_dir / "frameos").is_file():
         return False
+    if not (artifact_dir / AGENT_BINARY).is_file():
+        return False
     metadata = _read_json(artifact_dir / "metadata.json")
     if metadata.get("release_artifact") is not True:
         return False
@@ -270,12 +279,29 @@ def release_generated_build_dir_complete(
     return True
 
 
+def release_agent_generated_build_dir_complete(
+    build_dir: Path,
+    *,
+    input_hash: str,
+) -> bool:
+    marker = _read_json(build_dir / AGENT_RELEASE_BUILD_MARKER)
+    if marker.get("input_hash") != input_hash:
+        return False
+    if marker.get("makefile_version") != AGENT_RELEASE_BUILD_MAKEFILE_VERSION:
+        return False
+    return (build_dir / "compile_frameos_agent.sh").is_file() and (build_dir / "Makefile").is_file()
+
+
 def release_build_outputs_complete(
     build_dir: Path,
     *,
     driver_library_paths: Iterable[str],
 ) -> bool:
     return (build_dir / "frameos").is_file() and all(Path(path).is_file() for path in driver_library_paths)
+
+
+def release_agent_build_output_complete(build_dir: Path) -> bool:
+    return (build_dir / AGENT_BINARY).is_file()
 
 
 def write_release_build_marker(
@@ -298,6 +324,23 @@ def write_release_build_marker(
     (build_dir / RELEASE_BUILD_MARKER).write_text(json.dumps(marker, indent=2), encoding="utf-8")
 
 
+def write_release_agent_build_marker(
+    build_dir: Path,
+    *,
+    slug: str,
+    input_hash: str,
+) -> None:
+    marker = {
+        "cache_version": RELEASE_CACHE_VERSION,
+        "slug": slug,
+        "input_hash": input_hash,
+        "output": AGENT_BINARY,
+        "makefile_version": AGENT_RELEASE_BUILD_MAKEFILE_VERSION,
+    }
+    build_dir.mkdir(parents=True, exist_ok=True)
+    (build_dir / AGENT_RELEASE_BUILD_MARKER).write_text(json.dumps(marker, indent=2), encoding="utf-8")
+
+
 def replace_tree(source: Path, destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     tmp = destination.parent / f".{destination.name}.tmp-{os.getpid()}"
@@ -305,6 +348,61 @@ def replace_tree(source: Path, destination: Path) -> None:
     shutil.copytree(source, tmp)
     shutil.rmtree(destination, ignore_errors=True)
     tmp.rename(destination)
+
+
+def agent_version_for_repo(repo_root: Path) -> str:
+    versions_path = repo_root / "versions.json"
+    try:
+        data = json.loads(versions_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return "unknown"
+    version = data.get("agent")
+    if isinstance(version, str) and version:
+        return version
+    return "unknown"
+
+
+async def generate_agent_build_dir(
+    *,
+    deployer,
+    agent_source_dir: Path,
+    build_dir: Path,
+    arch: str,
+    nim_path: str,
+    repo_root: Path,
+) -> None:
+    from backend.app.tasks._frame_deployer import FrameDeployer  # type: ignore  # noqa: E402
+    from backend.app.tasks.utils import find_nimbase_file  # type: ignore  # noqa: E402
+    from backend.app.utils.local_exec import exec_local_command  # type: ignore  # noqa: E402
+
+    build_dir.mkdir(parents=True, exist_ok=True)
+    cpu = await deployer.arch_to_nim_cpu(arch)
+    agent_version = agent_version_for_repo(repo_root)
+    version_option = shlex.quote(f"--define:frameosAgentVersion:{agent_version}")
+    command = (
+        f"cd {shlex.quote(str(agent_source_dir))} && nimble install -dy && nimble setup && "
+        f"{shlex.quote(nim_path)} compile --os:linux --cpu:{cpu} "
+        f"--compileOnly --genScript --nimcache:{shlex.quote(str(build_dir))} "
+        f"-d:ssl {version_option} src/frameos_agent.nim 2>&1"
+    )
+    status, out, err = await exec_local_command(None, None, deployer.frame, command)
+    if status != 0:
+        raise RuntimeError(f"Failed to generate agent sources: {err or out or 'see logs'}")
+
+    nimbase_path = find_nimbase_file(nim_path)
+    if not nimbase_path:
+        raise RuntimeError("nimbase.h not found")
+    shutil.copy(nimbase_path, build_dir / "nimbase.h")
+
+    script_path = FrameDeployer._find_compile_script(str(build_dir), "compile_frameos_agent.sh")
+    linker_flags, compiler_flags = FrameDeployer._extract_compile_flags(script_path, AGENT_BINARY)
+    FrameDeployer._write_c_makefile(
+        makefile_path=str(build_dir / "Makefile"),
+        template_path=str(repo_root / "frameos" / "tools" / "nimc.Makefile"),
+        output_name=AGENT_BINARY,
+        linker_flags=linker_flags,
+        compiler_flags=compiler_flags,
+    )
 
 
 async def build_target(
@@ -579,12 +677,68 @@ async def build_release_target(
         if not binary_path:
             raise RuntimeError("Release cross compilation completed without producing a binary")
 
+        agent_source_dir = Path(source_dir) / "agent"
+        if not agent_source_dir.is_dir():
+            raise RuntimeError(f"FrameOS agent source directory is missing: {agent_source_dir}")
+        agent_build_dir = release_agent_build_cache_dir(slug, input_hash)
+        if rebuild:
+            shutil.rmtree(agent_build_dir, ignore_errors=True)
+        if release_agent_generated_build_dir_complete(agent_build_dir, input_hash=input_hash):
+            await deployer.log("stdout", f"Using cached generated agent build directory: {agent_build_dir}")
+        else:
+            shutil.rmtree(agent_build_dir, ignore_errors=True)
+            await generate_agent_build_dir(
+                deployer=deployer,
+                agent_source_dir=agent_source_dir,
+                build_dir=agent_build_dir,
+                arch=target.arch,
+                nim_path=nim_path,
+                repo_root=frameos_root.parent,
+            )
+            write_release_agent_build_marker(
+                agent_build_dir,
+                slug=slug,
+                input_hash=input_hash,
+            )
+
+        if not rebuild and release_agent_build_output_complete(agent_build_dir):
+            await deployer.log("stdout", f"Using cached compiled agent output: {agent_build_dir}")
+            agent_binary_path = str(agent_build_dir / AGENT_BINARY)
+        else:
+            target_override = TargetMetadata(
+                arch=target.arch,
+                distro=target.distro,
+                version=target.version,
+                platform=target.platform,
+                image=target.image,
+            )
+            agent_compiler = CrossCompiler(
+                db=None,
+                redis=None,
+                frame=frame,
+                deployer=deployer,
+                target=target_override,
+                temp_dir=tmp,
+                build_dir=agent_build_dir,
+                logger=console_log,
+                output_name=AGENT_BINARY,
+                compile_script_name="compile_frameos_agent.sh",
+                needs_quickjs=False,
+                needs_lgpio=False,
+            )
+            agent_binary_path = await agent_compiler.build(str(agent_source_dir))
+        if not agent_binary_path:
+            raise RuntimeError("Release cross compilation completed without producing an agent binary")
+
         target_tmp = artifacts_dir / f".{slug}.tmp-{os.getpid()}"
         shutil.rmtree(target_tmp, ignore_errors=True)
         target_tmp.mkdir(parents=True, exist_ok=True)
         tmp_destination = target_tmp / "frameos"
         shutil.copy2(binary_path, tmp_destination)
         os.chmod(tmp_destination, 0o755)
+        tmp_agent_destination = target_tmp / AGENT_BINARY
+        shutil.copy2(agent_binary_path, tmp_agent_destination)
+        os.chmod(tmp_agent_destination, 0o755)
 
         driver_dir = target_tmp / "drivers"
         driver_dir.mkdir(parents=True, exist_ok=True)
@@ -617,6 +771,7 @@ async def build_release_target(
             "driver_registry": "runtime-filtered",
             "driver_libraries": driver_library_names,
             "vendor_folders": vendor_folders,
+            "agent_binary": AGENT_BINARY,
             "release_cache_version": RELEASE_CACHE_VERSION,
             "input_hash": input_hash,
         }

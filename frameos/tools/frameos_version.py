@@ -10,7 +10,7 @@ from typing import Any
 VERSION_KEYS = ("frameosVersion", "frameos_version", "frameos")
 
 
-def version_from_json(path: Path) -> str:
+def version_from_json(path: Path, keys: tuple[str, ...] = VERSION_KEYS) -> str:
     try:
         data: Any = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
@@ -19,7 +19,7 @@ def version_from_json(path: Path) -> str:
     if not isinstance(data, dict):
         return ""
 
-    for key in VERSION_KEYS:
+    for key in keys:
         version = data.get(key)
         if isinstance(version, str) and version:
             return version
@@ -27,8 +27,13 @@ def version_from_json(path: Path) -> str:
 
 
 def main(argv: list[str]) -> int:
+    keys = VERSION_KEYS
+    if argv and argv[0].startswith("--key="):
+        key = argv.pop(0).split("=", 1)[1].strip()
+        if key:
+            keys = (key,)
     for arg in argv:
-        version = version_from_json(Path(arg))
+        version = version_from_json(Path(arg), keys)
         if version:
             print(version)
             return 0
