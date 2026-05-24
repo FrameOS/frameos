@@ -16,7 +16,7 @@ import {
   XMarkIcon,
 } from '@heroicons/react/24/outline'
 import { urls } from '../../urls'
-import logo from '../../assets/logo/dark-mark-small.png'
+import { FrameosLogo } from '../../components/FrameosLogo'
 import { workspaceLogic } from './workspaceLogic'
 import { framesModel } from '../../models/framesModel'
 import { frameHost } from '../../decorators/frame'
@@ -225,7 +225,7 @@ export function FrameosShell({
             onClick={toggleSecondarySidebar}
             className="workspace-logo-button frameos-icon-button mb-8 flex h-12 w-12 items-center justify-center rounded-xl transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
           >
-            <img src={logo} alt="FrameOS" className="h-10 w-10" />
+            <FrameosLogo variant={theme === 'dark' ? 'white-colors' : 'color'} className="h-10 w-10" />
           </button>
           <nav className="flex flex-1 flex-col items-center gap-4">
             <NavButton

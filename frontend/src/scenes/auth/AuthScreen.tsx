@@ -3,8 +3,7 @@ import { useActions, useValues } from 'kea'
 import { MoonIcon, SunIcon } from '@heroicons/react/24/outline'
 import clsx from 'clsx'
 import type { ReactNode } from 'react'
-import { assetUrl } from '../../utils/assetUrl'
-import darkMarkSmall from '../../assets/logo/dark-mark-small.png'
+import { FrameosLogo } from '../../components/FrameosLogo'
 import { authThemeLogic } from './authThemeLogic'
 
 interface AuthScreenProps {
@@ -36,7 +35,7 @@ export function AuthScreen({ title, subtitle, children, footer }: AuthScreenProp
       <main className="frameos-panel w-full max-w-[25rem] overflow-hidden rounded-[24px] border border-white/80 bg-white/90 shadow-2xl shadow-slate-400/30 backdrop-blur-xl">
         <div className="px-6 pb-5 pt-6">
           <div className="mb-7 flex items-center gap-3">
-            <img src={assetUrl(darkMarkSmall)} className="h-11 w-11 shrink-0" alt="FrameOS" />
+            <FrameosLogo variant={theme === 'dark' ? 'white-colors' : 'color'} className="h-11 w-11 shrink-0" />
             <div className="min-w-0">
               <div className="frameos-muted text-xs font-semibold uppercase tracking-wide text-slate-400">FrameOS</div>
               <h1 className="frameos-strong truncate text-2xl font-bold tracking-normal text-slate-950">{title}</h1>
