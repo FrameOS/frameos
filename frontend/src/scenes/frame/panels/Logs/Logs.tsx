@@ -6,16 +6,8 @@ import { insertBreaks } from '../../../../utils/insertBreaks'
 import { frameLogic } from '../../frameLogic'
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
-import { frameSettingsLogic } from '../FrameSettings/frameSettingsLogic'
 import { Spinner } from '../../../../components/Spinner'
-import {
-  ArrowDownTrayIcon,
-  ArrowUpTrayIcon,
-  ArrowPathIcon,
-  MagnifyingGlassIcon,
-  XMarkIcon,
-} from '@heroicons/react/24/solid'
-import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
+import { ArrowDownTrayIcon, ArrowUpTrayIcon, MagnifyingGlassIcon, XMarkIcon } from '@heroicons/react/24/solid'
 import { workspaceLogic, type WorkspaceTheme } from '../../../workspace/workspaceLogic'
 
 function formatTimestamp(isoTimestamp: string): string {
@@ -316,7 +308,6 @@ function logTypeClassName(type: string, theme: WorkspaceTheme): string {
 }
 
 export function Logs({ fullScreen = false, compact = false, className }: LogsProps = {}) {
-  const inFrameAdminMode = isInFrameAdminMode()
   const { frameId } = useValues(frameLogic)
   const { theme: workspaceTheme } = useValues(workspaceLogic)
   const { logs, filteredLogs, logSearch, logsLoading, fullLogDownloading } = useValues(logsLogic({ frameId }))
@@ -325,8 +316,6 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
   const [expandedMetricLogIds, setExpandedMetricLogIds] = useState<number[]>([])
   const virtuosoRef = useRef<VirtuosoHandle>(null)
   const shouldStickToBottomRef = useRef(true)
-  const { buildCacheLoading } = useValues(frameSettingsLogic({ frameId }))
-  const { clearBuildCache } = useActions(frameSettingsLogic({ frameId }))
   const renderTheme: WorkspaceTheme = fullScreen || compact ? workspaceTheme : 'dark'
   const searchActive = !compact && logSearch.trim().length > 0
   const visibleLogs = compact ? logs : filteredLogs
@@ -377,21 +366,6 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
       ),
       loading: fullLogDownloading,
     },
-    ...(!inFrameAdminMode
-      ? [
-          {
-            label: 'Clear build cache on frame',
-            onClick: () => {
-              clearBuildCache()
-            },
-            icon: buildCacheLoading ? (
-              <Spinner color="white" className="w-4 h-4" />
-            ) : (
-              <ArrowPathIcon className="w-5 h-5" />
-            ),
-          },
-        ]
-      : []),
   ]
 
   return logsLoading ? (

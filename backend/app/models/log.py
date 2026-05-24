@@ -12,13 +12,11 @@ from sqlalchemy.orm import relationship, backref, Session, mapped_column
 from app.websockets import publish_message
 
 LOG_LIMIT_PER_FRAME = 10000
-IGNORED_FRAME_ACTIVITY_LOG_PREFIX = "Error fetching image from frame "
+FRAME_ACTIVITY_LOG_TYPES = ("webhook",)
 
 
-def is_frame_activity_log(type: str, line: str) -> bool:
-    if type == "stderr" and line.startswith(IGNORED_FRAME_ACTIVITY_LOG_PREFIX):
-        return False
-    return True
+def is_frame_activity_log(type: str, _line: str) -> bool:
+    return type in FRAME_ACTIVITY_LOG_TYPES
 
 class Log(Base):
     __tablename__ = 'log'

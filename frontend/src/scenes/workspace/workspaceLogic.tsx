@@ -54,14 +54,34 @@ function searchValue(search: Record<string, unknown>, key: string): string | nul
   return null
 }
 
+function searchNumberValue(search: Record<string, unknown>, key: string): number | null {
+  const value = search[key]
+  const candidate = Array.isArray(value) ? value[0] : value
+  if (typeof candidate === 'number') {
+    return Number.isFinite(candidate) ? candidate : null
+  }
+  if (typeof candidate === 'string') {
+    const parsed = Number(candidate)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+  return null
+}
+
 function frameToolFromSearch(search: Record<string, unknown>): WorkspaceUtilityPanel {
   const tool = searchValue(search, 'tool')
   return isFrameToolPanel(tool) ? tool : 'overview'
 }
 
+export function frameToolScrollKey(frameId: number, panel: WorkspaceUtilityPanel): string {
+  return `${frameId}:${panel}`
+}
+
+export function frameAssetFolderExpansionKey(frameId: number, path: string): string {
+  return `${frameId}:${path}`
+}
+
 function drawerFrameIdFromSearch(search: Record<string, unknown>): number | null {
-  const frameId = Number(searchValue(search, 'frameId'))
-  return Number.isFinite(frameId) ? frameId : null
+  return searchNumberValue(search, 'frameId')
 }
 
 function clearDrawerSearchParams(search: Record<string, unknown>): Record<string, unknown> {
@@ -477,6 +497,16 @@ export const workspaceLogic = kea<workspaceLogicType>([
     selectNode: (nodeId: string | null) => ({ nodeId }),
     snapshotFrameOrder: true,
     setFrameOrderSnapshot: (frameIds: number[], activeFrameIds: number[]) => ({ frameIds, activeFrameIds }),
+    rememberFrameToolScroll: (frameId: number, panel: WorkspaceUtilityPanel, scrollTop: number) => ({
+      frameId,
+      panel,
+      scrollTop,
+    }),
+    setFrameAssetFolderExpanded: (frameId: number, path: string, expanded: boolean) => ({
+      frameId,
+      path,
+      expanded,
+    }),
   }),
   reducers({
     search: [
@@ -613,6 +643,49 @@ export const workspaceLogic = kea<workspaceLogicType>([
       {
         setFrameOrderSnapshot: (_, { activeFrameIds }) =>
           Object.fromEntries(activeFrameIds.map((frameId: number) => [frameId, true])),
+      },
+    ],
+    frameToolScrollPositions: [
+      {} as Record<string, number>,
+      {
+        rememberFrameToolScroll: (state, { frameId, panel, scrollTop }) => {
+          const key = frameToolScrollKey(frameId, panel)
+          const nextScrollTop = Math.max(0, Math.round(scrollTop))
+          if (state[key] === nextScrollTop) {
+            return state
+          }
+          return {
+            ...state,
+            [key]: nextScrollTop,
+          }
+        },
+      },
+    ],
+    frameAssetFolderExpansion: [
+      {} as Record<string, boolean>,
+      { persist: true, storageKey: 'workspaceLogic.frameAssetFolderExpansion' },
+      {
+        setFrameAssetFolderExpanded: (state, { frameId, path, expanded }) => {
+          const key = frameAssetFolderExpansionKey(frameId, path)
+          if (expanded) {
+            if (path === '') {
+              if (!Object.prototype.hasOwnProperty.call(state, key)) {
+                return state
+              }
+              const { [key]: _, ...nextState } = state
+              return nextState
+            }
+            return state[key] ? state : { ...state, [key]: true }
+          }
+          if (path === '') {
+            return state[key] === false ? state : { ...state, [key]: false }
+          }
+          if (!state[key]) {
+            return state
+          }
+          const { [key]: _, ...nextState } = state
+          return nextState
+        },
       },
     ],
   }),
@@ -811,6 +884,11 @@ export const workspaceLogic = kea<workspaceLogicType>([
     }
   }),
   urlToAction(({ actions, values }) => {
+    const closeSecondarySidebarForMobile = () => {
+      if (isMobileWorkspaceViewport()) {
+        actions.closeSecondarySidebar()
+      }
+    }
     const closeDrawersFromUrl = () => {
       if (values.sceneControlSelection) {
         actions.closeSceneControl()
@@ -848,9 +926,11 @@ export const workspaceLogic = kea<workspaceLogicType>([
     }
 
     const applyFramesRoute = (_: Record<string, unknown>, search: Record<string, unknown>) => {
+      closeSecondarySidebarForMobile()
       applyDrawerFromSearch(drawerFrameIdFromSearch(search), search)
     }
     const applySceneOrAppRoute = ({ frameId, sceneId }: Record<string, unknown>, search: Record<string, unknown>) => {
+      closeSecondarySidebarForMobile()
       const validFrameId = Number(frameId)
       const validSceneId = typeof sceneId === 'string' ? sceneId : null
 
@@ -870,6 +950,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
       [framesPath]: applyFramesRoute,
       [`${framesPath.replace(/\/$/, '')}/`]: applyFramesRoute,
       [urls.frame(':id')]: ({ id }, search) => {
+        closeSecondarySidebarForMobile()
         const frameId = parseInt(String(id), 10)
         const validFrameId = Number.isFinite(frameId) ? frameId : null
         if (validFrameId) {

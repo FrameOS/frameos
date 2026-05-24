@@ -409,8 +409,8 @@ export function Schedule({ scrollContainer = true }: ScheduleProps = {}) {
       onDrop={handleDrop}
     >
       {dropZoneVisible ? (
-        <div className="pointer-events-none absolute inset-0 z-20 flex min-h-full rounded-[24px] border-2 border-dashed border-[#4a4b8c]/55 bg-[#4a4b8c]/10 p-4 backdrop-blur-[1px]">
-          <div className="flex min-h-full flex-1 items-center justify-center rounded-[20px] bg-white/50 text-center text-sm font-semibold text-[#4a4b8c]">
+        <div className="pointer-events-none absolute inset-0 z-20 flex min-h-full rounded-[24px] border-2 border-dashed border-[color:var(--tool-border)] bg-[var(--tool-control-bg)] p-4 backdrop-blur-[1px]">
+          <div className="flex min-h-full flex-1 items-center justify-center rounded-[20px] border border-[color:var(--tool-border)] bg-[var(--tool-bg-strong)] text-center text-sm font-semibold text-[color:var(--tool-strong)] shadow-sm">
             Drop scene to schedule
           </div>
         </div>
@@ -475,7 +475,7 @@ export function Schedule({ scrollContainer = true }: ScheduleProps = {}) {
           ) : null}
           {sortedEvents.length === 0 ? (
             <div className="frame-tool-card rounded-[22px] border-dashed p-5 text-center">
-              <div className="text-sm font-semibold">No scheduled scenes</div>
+              <div className="text-sm font-semibold">No scheduled scenes. Drag one here.</div>
             </div>
           ) : null}
           {sortedEvents.map((event, sortedIndex) => {

@@ -1637,6 +1637,55 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
   color: #ffffff;
 }
 
+.frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .frameos-diagram-node .frameos-node-title .frameos-tag {
+  background: rgba(255, 255, 255, 0.94);
+  border-color: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.18);
+  color: #334155;
+}
+
+.frameos-app-shell:not(.frameos-theme-dark)
+  .scene-editor-canvas
+  .frameos-diagram-node
+  .frameos-node-title
+  .frameos-tag[data-tag-color='teal'] {
+  color: #0f766e;
+}
+
+.frameos-app-shell:not(.frameos-theme-dark)
+  .scene-editor-canvas
+  .frameos-diagram-node
+  .frameos-node-title
+  .frameos-tag[data-tag-color='blue'],
+.frameos-app-shell:not(.frameos-theme-dark)
+  .scene-editor-canvas
+  .frameos-diagram-node
+  .frameos-node-title
+  .frameos-tag[data-tag-color='primary'] {
+  color: #3730a3;
+}
+
+.frameos-app-shell:not(.frameos-theme-dark)
+  .scene-editor-canvas
+  .frameos-diagram-node
+  .frameos-node-title
+  .frameos-tag[data-tag-color='yellow'],
+.frameos-app-shell:not(.frameos-theme-dark)
+  .scene-editor-canvas
+  .frameos-diagram-node
+  .frameos-node-title
+  .frameos-tag[data-tag-color='orange'] {
+  color: #92400e;
+}
+
+.frameos-app-shell:not(.frameos-theme-dark)
+  .scene-editor-canvas
+  .frameos-diagram-node
+  .frameos-node-title
+  .frameos-tag[data-tag-color='red'] {
+  color: #991b1b;
+}
+
 .frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .react-flow__edge-path {
   filter: drop-shadow(0 1px 1px rgba(15, 23, 42, 0.08));
 }

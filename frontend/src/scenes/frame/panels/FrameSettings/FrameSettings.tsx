@@ -198,7 +198,7 @@ export function FrameSettings({
         <div className="sticky top-0 z-10 mb-3 flex justify-end">
           <DropdownMenu
             className="w-fit"
-            buttonColor="secondary"
+            buttonColor="tertiary"
             items={[
               ...(mode === 'rpios' && !inFrameAdminMode
                 ? [

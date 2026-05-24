@@ -1,4 +1,4 @@
-import { useActions, useValues } from 'kea'
+import { useActions, useMountedLogic, useValues } from 'kea'
 import clsx from 'clsx'
 import { frameLogic } from '../../frameLogic'
 import { assetsLogic } from './assetsLogic'
@@ -23,6 +23,7 @@ import { v4 as uuidv4 } from 'uuid'
 import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
 import { frameAssetUrl } from '../../../../utils/frameAssetsApi'
 import { metricsLogic } from '../Metrics/metricsLogic'
+import { frameAssetFolderExpansionKey, workspaceLogic } from '../../../workspace/workspaceLogic'
 import type { MetricsType } from '../../../../types'
 
 function humaniseSize(size: number) {
@@ -165,6 +166,8 @@ function TreeNode({
   createImageScene,
   createImageFolderScene,
   uploadDroppedFiles,
+  frameAssetFolderExpansion,
+  setFrameAssetFolderExpanded,
 }: {
   node: AssetNode
   frameId: number
@@ -176,8 +179,11 @@ function TreeNode({
   createImageScene: (path: string) => void
   createImageFolderScene: (path: string) => void
   uploadDroppedFiles: (path: string, files: File[]) => void
+  frameAssetFolderExpansion: Record<string, boolean>
+  setFrameAssetFolderExpanded: (frameId: number, path: string, expanded: boolean) => void
 }): JSX.Element {
-  const [expanded, setExpanded] = useState(node.path === '')
+  const expansionKey = frameAssetFolderExpansionKey(frameId, node.path)
+  const expanded = frameAssetFolderExpansion[expansionKey] ?? (node.path === '')
   const [isDownloading, setIsDownloading] = useState(false)
   const [isDragOver, setIsDragOver] = useState(false)
 
@@ -226,7 +232,7 @@ function TreeNode({
           <button
             type="button"
             className="flex min-w-0 flex-1 items-center gap-2 text-left"
-            onClick={() => setExpanded(!expanded)}
+            onClick={() => setFrameAssetFolderExpanded(frameId, node.path, !expanded)}
           >
             {expanded ? (
               <FolderOpenIcon className="h-5 w-5 shrink-0 text-blue-400" />
@@ -250,7 +256,7 @@ function TreeNode({
             <DropdownMenu
               horizontal
               className="w-fit"
-              buttonColor="none"
+              buttonColor="tertiary"
               items={
                 [
                   {
@@ -323,6 +329,8 @@ function TreeNode({
                 createImageScene={createImageScene}
                 createImageFolderScene={createImageFolderScene}
                 uploadDroppedFiles={uploadDroppedFiles}
+                frameAssetFolderExpansion={frameAssetFolderExpansion}
+                setFrameAssetFolderExpanded={setFrameAssetFolderExpanded}
               />
             ))}
           </div>
@@ -397,7 +405,7 @@ function TreeNode({
           <DropdownMenu
             horizontal
             className="w-fit"
-            buttonColor="none"
+            buttonColor="tertiary"
             items={[
               {
                 label: 'Download',
@@ -559,7 +567,7 @@ function AssetsSummaryHeader({
         </div>
         <DropdownMenu
           className="w-fit"
-          buttonColor="secondary"
+          buttonColor="tertiary"
           items={
             [
               {
@@ -619,12 +627,16 @@ interface AssetsProps {
 
 export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Element {
   const { frame, frameForm } = useValues(frameLogic)
+  const assetsLogicProps = { frameId: frame.id }
+  useMountedLogic(assetsLogic(assetsLogicProps))
   const { sendEvent } = useActions(frameLogic)
   const { openLogs } = useActions(panelsLogic)
-  const { assetsLoading, assetsRefreshing, assetTree } = useValues(assetsLogic({ frameId: frame.id }))
+  const { assetsLoading, assetsRefreshing, assetTree } = useValues(assetsLogic(assetsLogicProps))
   const { sortedMetrics } = useValues(metricsLogic({ frameId: frame.id }))
+  const { frameAssetFolderExpansion } = useValues(workspaceLogic)
   const { refreshAssets, syncAssets, uploadAssets, uploadDroppedFiles, deleteAsset, renameAsset, createFolder } =
-    useActions(assetsLogic({ frameId: frame.id }))
+    useActions(assetsLogic(assetsLogicProps))
+  const { setFrameAssetFolderExpanded } = useActions(workspaceLogic)
   const { openAsset } = useActions(panelsLogic({ frameId: frame.id }))
   const assetStats = collectAssetStats(assetTree)
   const diskStats = latestDiskStats(sortedMetrics)
@@ -699,6 +711,8 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
             createImageScene={createImageScene}
             createImageFolderScene={createImageFolderScene}
             uploadDroppedFiles={uploadDroppedFiles}
+            frameAssetFolderExpansion={frameAssetFolderExpansion}
+            setFrameAssetFolderExpanded={setFrameAssetFolderExpanded}
           />
         </div>
       )}

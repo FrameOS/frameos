@@ -441,8 +441,8 @@ function SceneDiagramOverlay({ frameId, sceneId }: { frameId: number; sceneId: s
             openChatDrawer(frameId, sceneId)
           }}
           className={clsx(
-            'frameos-ai-button flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-fuchsia-500 via-blue-500 to-cyan-400 text-white shadow-lg shadow-blue-500/30 transition hover:-translate-y-0.5 hover:shadow-xl hover:shadow-blue-500/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-            chatDrawerIsOpen && 'ring-2 ring-blue-300'
+            'frameos-icon-button flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/90 bg-white/90 text-slate-500 shadow-lg shadow-slate-300/25 backdrop-blur-xl transition hover:bg-white hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+            chatDrawerIsOpen && 'frameos-primary-active text-white'
           )}
         >
           <SparklesIcon className="h-5 w-5" />

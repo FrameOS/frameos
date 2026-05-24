@@ -271,7 +271,7 @@ function FrameHeaderActions({ frame, archived }: { frame: FrameType; archived?: 
         type="button"
         title="Open AI chat"
         onClick={() => openChatDrawer(frame.id, null)}
-        className="frameos-ai-button flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-fuchsia-500 via-blue-500 to-cyan-400 text-white shadow-lg shadow-blue-500/25 transition hover:-translate-y-0.5 hover:shadow-xl hover:shadow-blue-500/35 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+        className="frameos-secondary-button flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white/80 !px-0 !py-0 text-slate-700 shadow-sm transition hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
       >
         <SparklesIcon className="h-5 w-5" />
       </button>

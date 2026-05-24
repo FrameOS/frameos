@@ -3,10 +3,8 @@ import { FrameType, LogType } from '../types'
 import { frameAdminPath } from '../utils/frameAdmin'
 import { withFrameAdminLoginParams } from '../utils/frameAdminLoginParams'
 
-const ignoredFrameActivityLogPrefix = 'Error fetching image from frame '
-
 export function logUpdatesFrameActivity(log: Pick<LogType, 'type' | 'line'>): boolean {
-  return !(log.type === 'stderr' && log.line.startsWith(ignoredFrameActivityLogPrefix))
+  return log.type === 'webhook'
 }
 
 export function frameHost(frame: FrameType): string {

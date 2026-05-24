@@ -25,7 +25,7 @@ export interface DropdownMenuProps {
   horizontal?: boolean
 }
 
-export function DropdownMenu({ items, className, horizontal, buttonColor: _buttonColor }: DropdownMenuProps) {
+export function DropdownMenu({ items, className, horizontal = true, buttonColor: _buttonColor }: DropdownMenuProps) {
   const [referenceElement, setReferenceElement] = useState<HTMLButtonElement | null>(null)
   const [popperElement, setPopperElement] = useState<HTMLDivElement | null>(null)
   const { styles, attributes } = usePopper(referenceElement, popperElement, {

@@ -1,7 +1,7 @@
 import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
 import { A } from 'kea-router'
 import clsx from 'clsx'
-import type { DragEvent } from 'react'
+import { useCallback, useLayoutEffect, useRef, type DragEvent } from 'react'
 import {
   AdjustmentsHorizontalIcon,
   BoltIcon,
@@ -14,7 +14,7 @@ import {
   Squares2X2Icon,
   XMarkIcon,
 } from '@heroicons/react/24/outline'
-import { frameHost, frameIsHealthy, frameIsStale } from '../../decorators/frame'
+import { frameHost, frameIsHealthy, frameIsStale, logUpdatesFrameActivity } from '../../decorators/frame'
 import { FrameImage } from '../../components/FrameImage'
 import { FrameScene, FrameType, LogType, MetricsType, ScheduledEvent } from '../../types'
 import { framesModel } from '../../models/framesModel'
@@ -23,11 +23,10 @@ import { AddSceneTile, SceneControlPanel, TemplateDrawer } from './FramesHome'
 import { FrameDashboardSurface, FrameScheduleDrawer } from './FrameDashboardSurface'
 import { FrameSidebarPreview } from './FrameSidebarPreview'
 import { sceneWorkspaceLogic } from './sceneWorkspaceLogic'
-import { workspaceLogic, WorkspaceUtilityPanel } from './workspaceLogic'
+import { frameToolScrollKey, workspaceLogic, WorkspaceUtilityPanel } from './workspaceLogic'
 import { urls } from '../../urls'
 import { frameLogic } from '../frame/frameLogic'
 import { panelsLogic } from '../frame/panels/panelsLogic'
-import { assetsLogic } from '../frame/panels/Assets/assetsLogic'
 import { terminalLogic } from '../frame/panels/Terminal/terminalLogic'
 import { frameSettingsLogic } from '../frame/panels/FrameSettings/frameSettingsLogic'
 import { logsLogic } from '../frame/panels/Logs/logsLogic'
@@ -59,11 +58,159 @@ interface FrameToolDefinition {
 
 const uploadedScenePrefix = 'uploaded/'
 const activeSurfaceClassName = 'border-[#4a4b8c] shadow-[0_0_3px_3px_rgba(128,0,255,0.5)]'
+const scrollRestoreMaxDurationMs = 1500
+const scrollRestoreRetryMs = 50
+const scrollRestoreTolerance = 2
+
+function frameWorkspaceMainElement(): HTMLElement | null {
+  if (typeof document === 'undefined') {
+    return null
+  }
+  return document.querySelector<HTMLElement>('[data-workspace-main="frame"]')
+}
+
+function frameWorkspaceMainScrollElement(): HTMLElement | null {
+  if (typeof window === 'undefined') {
+    return null
+  }
+
+  const main = frameWorkspaceMainElement()
+  if (!main) {
+    return null
+  }
+
+  const mainStyle = window.getComputedStyle(main)
+  const mainCanScroll = main.scrollHeight > main.clientHeight + 1 && mainStyle.overflowY !== 'visible'
+  return mainCanScroll ? main : null
+}
+
+function frameToolScrollTarget(): HTMLElement | Window | null {
+  if (typeof window === 'undefined') {
+    return null
+  }
+  return frameWorkspaceMainScrollElement() ?? window
+}
+
+function readFrameToolScrollTop(): number {
+  const main = frameWorkspaceMainScrollElement()
+  if (main) {
+    return main.scrollTop
+  }
+  if (typeof window === 'undefined') {
+    return 0
+  }
+  return document.scrollingElement?.scrollTop ?? window.scrollY
+}
+
+function frameToolMaxScrollTop(): number {
+  const main = frameWorkspaceMainScrollElement()
+  if (main) {
+    return Math.max(0, main.scrollHeight - main.clientHeight)
+  }
+  if (typeof window === 'undefined') {
+    return 0
+  }
+  const scrollElement = document.scrollingElement ?? document.documentElement
+  return Math.max(0, scrollElement.scrollHeight - scrollElement.clientHeight)
+}
+
+function scrollFrameToolTo(scrollTop: number): void {
+  const nextScrollTop = Math.max(0, scrollTop)
+  const main = frameWorkspaceMainScrollElement()
+  if (main) {
+    main.scrollTo({ top: nextScrollTop, behavior: 'auto' })
+  } else if (typeof window !== 'undefined') {
+    window.scrollTo({ top: nextScrollTop, behavior: 'auto' })
+  }
+}
+
+function restoreFrameToolScrollTop(scrollTop: number): () => void {
+  if (typeof window === 'undefined') {
+    return () => {}
+  }
+
+  const targetScrollTop = Math.max(0, Math.round(scrollTop))
+  if (targetScrollTop === 0) {
+    scrollFrameToolTo(0)
+    return () => {}
+  }
+
+  let cancelled = false
+  let animationFrameId: number | null = null
+  let timeoutId: number | null = null
+  const startedAt = window.performance.now()
+
+  const cancel = () => {
+    cancelled = true
+    if (animationFrameId !== null) {
+      window.cancelAnimationFrame(animationFrameId)
+      animationFrameId = null
+    }
+    if (timeoutId !== null) {
+      window.clearTimeout(timeoutId)
+      timeoutId = null
+    }
+    window.removeEventListener('wheel', cancel)
+    window.removeEventListener('touchstart', cancel)
+    window.removeEventListener('keydown', cancel)
+  }
+
+  const scheduleRestore = (delayMs = 0) => {
+    if (cancelled) {
+      return
+    }
+    if (delayMs > 0) {
+      timeoutId = window.setTimeout(restore, delayMs)
+    } else {
+      animationFrameId = window.requestAnimationFrame(restore)
+    }
+  }
+
+  const restore = () => {
+    if (cancelled) {
+      return
+    }
+    animationFrameId = null
+    timeoutId = null
+    scrollFrameToolTo(targetScrollTop)
+
+    const currentScrollTop = readFrameToolScrollTop()
+    const reachedTarget = Math.abs(currentScrollTop - targetScrollTop) <= scrollRestoreTolerance
+    const expired = window.performance.now() - startedAt >= scrollRestoreMaxDurationMs
+    if (reachedTarget || expired) {
+      cancel()
+      return
+    }
+
+    const contentCanReachTarget = frameToolMaxScrollTop() + scrollRestoreTolerance >= targetScrollTop
+    scheduleRestore(contentCanReachTarget ? 0 : scrollRestoreRetryMs)
+  }
+
+  window.addEventListener('wheel', cancel, { passive: true })
+  window.addEventListener('touchstart', cancel, { passive: true })
+  window.addEventListener('keydown', cancel)
+
+  restore()
+  return cancel
+}
+
+function frameToolInitialScrollTop(
+  positions: Record<string, number>,
+  frameId: number,
+  panel: WorkspaceUtilityPanel
+): number | null {
+  const key = frameToolScrollKey(frameId, panel)
+  if (Object.prototype.hasOwnProperty.call(positions, key)) {
+    return positions[key]
+  }
+
+  return panel === 'logs' || panel === 'terminal' ? null : 0
+}
 
 const frameToolDefinitions: FrameToolDefinition[] = [
   {
     panel: 'overview',
-    label: 'Frame',
+    label: 'Overview',
     description: 'Preview and scenes',
     icon: <Squares2X2Icon className="h-5 w-5" />,
   },
@@ -549,6 +696,9 @@ function getLatestLogTimestamp(logs: LogType[], fallback?: string | null): strin
   let latestTimestampMs = fallback ? parseMetricTimestamp(fallback) : -Infinity
 
   logs.forEach((log) => {
+    if (!logUpdatesFrameActivity(log)) {
+      return
+    }
     const timestamp = parseMetricTimestamp(log.timestamp)
     if (Number.isFinite(timestamp) && timestamp >= latestTimestampMs) {
       latestTimestampMs = timestamp
@@ -965,7 +1115,6 @@ function ScheduleDrawer({ frame }: { frame: FrameType }): JSX.Element {
 
 function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
   const frameLogicProps = { frameId }
-  useMountedLogic(assetsLogic(frameLogicProps))
   useMountedLogic(terminalLogic(frameLogicProps))
   useMountedLogic(frameSettingsLogic(frameLogicProps))
   useMountedLogic(logsLogic(frameLogicProps))
@@ -973,13 +1122,85 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
 
   const { framesList } = useValues(framesModel)
   const { frame, scenes } = useValues(frameLogic(frameLogicProps))
-  const { sceneControlSelection, scheduleDrawerFrameId, templateDrawerFrameId, utilityPanel } =
-    useValues(workspaceLogic)
+  const {
+    sceneControlSelection,
+    scheduleDrawerFrameId,
+    templateDrawerFrameId,
+    utilityPanel,
+    frameToolScrollPositions,
+  } = useValues(workspaceLogic)
+  const { rememberFrameToolScroll } = useActions(workspaceLogic)
   const activeTool =
     frameToolDefinitions.find((definition) => definition.panel === utilityPanel) ?? frameToolDefinitions[0]
+  const activeToolPanel = activeTool.panel
+  const activeToolScrollKey = frameToolScrollKey(frameId, activeToolPanel)
+  const frameToolScrollPositionsRef = useRef(frameToolScrollPositions)
+  const lastObservedFrameToolScrollTopRef = useRef(0)
   const visibleScenes = scenes
+  const frameLoaded = !!frame
   const toolUsesSearch = false
-  const toolUsesPageScroll = frameToolUsesPageScroll(activeTool.panel)
+  const toolUsesPageScroll = frameToolUsesPageScroll(activeToolPanel)
+
+  frameToolScrollPositionsRef.current = frameToolScrollPositions
+
+  const rememberFrameToolScrollTop = useCallback(
+    (scrollTop: number) => {
+      const nextScrollTop = Math.max(0, Math.round(scrollTop))
+      frameToolScrollPositionsRef.current = {
+        ...frameToolScrollPositionsRef.current,
+        [frameToolScrollKey(frameId, activeToolPanel)]: nextScrollTop,
+      }
+      rememberFrameToolScroll(frameId, activeToolPanel, nextScrollTop)
+    },
+    [activeToolPanel, frameId, rememberFrameToolScroll]
+  )
+
+  useLayoutEffect(() => {
+    return () => {
+      rememberFrameToolScrollTop(lastObservedFrameToolScrollTopRef.current)
+    }
+  }, [rememberFrameToolScrollTop])
+
+  useLayoutEffect(() => {
+    if (!frameLoaded || typeof window === 'undefined') {
+      return
+    }
+
+    const restoredScrollTop = frameToolInitialScrollTop(frameToolScrollPositionsRef.current, frameId, activeToolPanel)
+    if (restoredScrollTop === null) {
+      return
+    }
+
+    lastObservedFrameToolScrollTopRef.current = restoredScrollTop
+    return restoreFrameToolScrollTop(restoredScrollTop)
+  }, [activeToolScrollKey, activeToolPanel, frameId, frameLoaded])
+
+  useLayoutEffect(() => {
+    const target = frameToolScrollTarget()
+    if (!target) {
+      return
+    }
+
+    let scrollFrameId: number | null = null
+    const handleScroll = () => {
+      lastObservedFrameToolScrollTopRef.current = Math.max(0, Math.round(readFrameToolScrollTop()))
+      if (scrollFrameId !== null || typeof window === 'undefined') {
+        return
+      }
+      scrollFrameId = window.requestAnimationFrame(() => {
+        scrollFrameId = null
+        rememberFrameToolScrollTop(lastObservedFrameToolScrollTopRef.current)
+      })
+    }
+
+    target.addEventListener('scroll', handleScroll, { passive: true })
+    return () => {
+      if (scrollFrameId !== null && typeof window !== 'undefined') {
+        window.cancelAnimationFrame(scrollFrameId)
+      }
+      target.removeEventListener('scroll', handleScroll)
+    }
+  }, [rememberFrameToolScrollTop])
 
   if (!frame) {
     return (
@@ -995,7 +1216,7 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
         <FrameosShell
           mode="frame"
           title="Frame"
-          tree={<FrameTree frame={frame} frames={framesList} activeTool={activeTool.panel} />}
+          tree={<FrameTree frame={frame} frames={framesList} activeTool={activeToolPanel} />}
           topBar={toolUsesSearch ? undefined : null}
           showAiButton={false}
           mainClassName={clsx(
@@ -1020,13 +1241,13 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
                   : [toolUsesSearch ? 'h-[calc(100vh-8rem)]' : 'h-[calc(100vh-3rem)]', 'max-lg:h-auto'],
                 toolUsesPageScroll
                   ? 'overflow-visible'
-                  : frameToolIsFullBleed(activeTool.panel)
+                  : frameToolIsFullBleed(activeToolPanel)
                   ? 'overflow-hidden'
                   : 'overflow-y-auto'
               )}
             >
               <FrameToolSurface
-                activeTool={activeTool.panel}
+                activeTool={activeToolPanel}
                 frame={frame}
                 scenes={visibleScenes}
                 totalScenes={scenes.length}

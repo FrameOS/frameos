@@ -45,7 +45,7 @@ from sqlalchemy.orm import Session
 from app.database import SessionLocal, get_db
 from arq import ArqRedis as Redis
 from app.models.frame import Frame, new_frame, delete_frame, normalize_https_proxy, refresh_tls_certificate_validity_dates, update_frame
-from app.models.log import IGNORED_FRAME_ACTIVITY_LOG_PREFIX, Log, new_log as log
+from app.models.log import FRAME_ACTIVITY_LOG_TYPES, Log, new_log as log
 from app.models.metrics import Metrics
 from app.codegen.scene_nim import write_scene_nim
 from app.utils.ssh_utils import (
@@ -599,14 +599,21 @@ async def _remote_download_file(
 # ---------------------------------------------------------------------------
 
 
+_LATEST_LOG_AT_UNSET = object()
+
+
 def _frame_activity_log_filter():
-    return ~((Log.type == "stderr") & Log.line.like(f"{IGNORED_FRAME_ACTIVITY_LOG_PREFIX}%"))
+    return Log.type.in_(FRAME_ACTIVITY_LOG_TYPES)
 
 
-def _frame_to_response_dict(frame: Frame, latest_log_at: datetime | None = None) -> dict[str, Any]:
+def _frame_to_response_dict(
+    frame: Frame, latest_log_at: datetime | None | object = _LATEST_LOG_AT_UNSET
+) -> dict[str, Any]:
     data = frame.to_dict()
-    if latest_log_at:
-        data["last_log_at"] = latest_log_at.replace(tzinfo=timezone.utc).isoformat()
+    if latest_log_at is not _LATEST_LOG_AT_UNSET:
+        data["last_log_at"] = (
+            latest_log_at.replace(tzinfo=timezone.utc).isoformat() if isinstance(latest_log_at, datetime) else None
+        )
     return data
 
 

@@ -78,7 +78,7 @@ function FrameTree(): JSX.Element {
     orderedArchivedFramesList: archivedFramesList,
     selectedFrameId,
   } = useValues(workspaceLogic)
-  const { focusFrame } = useActions(workspaceLogic)
+  const { selectFrame } = useActions(workspaceLogic)
 
   return (
     <div className="space-y-5">
@@ -90,13 +90,13 @@ function FrameTree(): JSX.Element {
             title="Active"
             frames={activeFramesList}
             selectedFrameId={selectedFrameId}
-            onFocus={focusFrame}
+            onSelect={selectFrame}
           />
           <FrameTreeGroup
             title="Inactive"
             frames={inactiveFramesList}
             selectedFrameId={selectedFrameId}
-            onFocus={focusFrame}
+            onSelect={selectFrame}
             expanded={inactiveFramesExpanded}
             onToggle={toggleInactiveFramesExpanded}
           />
@@ -124,10 +124,11 @@ function FrameTree(): JSX.Element {
           {archivedFramesExpanded ? (
             <div className="space-y-1">
               {archivedFramesList.map((frame) => (
-                <button
+                <A
                   key={frame.id}
-                  type="button"
-                  onClick={() => focusFrame(frame.id)}
+                  href={urls.frame(frame.id, 'overview')}
+                  title={`Open ${frame.name || frameHost(frame)} overview`}
+                  onClick={() => selectFrame(frame.id)}
                   className={clsx(
                     'frameos-frame-row frameos-frame-row-archived flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
                     selectedFrameId === frame.id ? 'frameos-frame-row-selected' : 'text-slate-500 hover:bg-slate-100'
@@ -139,7 +140,7 @@ function FrameTree(): JSX.Element {
                     <span className="block truncate text-xs text-slate-400">{frameStatusDescription(frame)}</span>
                   </span>
                   <SidebarStatusDots frame={frame} />
-                </button>
+                </A>
               ))}
             </div>
           ) : null}
@@ -164,7 +165,6 @@ function FrameTreeLoadingPlaceholder(): JSX.Element {
               </div>
               <div className="frameos-skeleton-line h-2.5 w-7 shrink-0 animate-pulse rounded-full" />
             </div>
-            <div className="frameos-skeleton-surface h-10 w-10 shrink-0 animate-pulse rounded-xl" />
           </div>
         ))}
       </div>
@@ -176,14 +176,14 @@ function FrameTreeGroup({
   title,
   frames,
   selectedFrameId,
-  onFocus,
+  onSelect,
   expanded,
   onToggle,
 }: {
   title: string
   frames: FrameType[]
   selectedFrameId: number | null
-  onFocus: (frameId: number) => void
+  onSelect: (frameId: number | null) => void
   expanded?: boolean
   onToggle?: () => void
 }): JSX.Element | null {
@@ -218,30 +218,23 @@ function FrameTreeGroup({
           {frames.map((frame) => {
             const frameName = frame.name || frameHost(frame)
             return (
-              <div key={frame.id} className="flex w-full items-center gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => onFocus(frame.id)}
-                  className={clsx(
-                    'frameos-frame-row flex min-w-0 flex-1 items-center gap-3 rounded-xl px-3 py-2.5 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-                    selectedFrameId === frame.id ? 'frameos-frame-row-selected' : 'text-slate-700 hover:bg-slate-100'
-                  )}
-                >
-                  <ComputerDesktopIcon className="h-5 w-5 shrink-0" />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-base font-medium">{frameName}</span>
-                    <span className="block truncate text-xs text-slate-400">{frameStatusDescription(frame)}</span>
-                  </span>
-                  <SidebarStatusDots frame={frame} />
-                </button>
-                <A
-                  href={urls.frame(frame.id, 'overview')}
-                  title={`Open ${frameName} overview`}
-                  className="frameos-icon-button flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/55 text-slate-300 transition hover:bg-white hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-                >
-                  <ChevronRightIcon className="h-4 w-4" />
-                </A>
-              </div>
+              <A
+                key={frame.id}
+                href={urls.frame(frame.id, 'overview')}
+                title={`Open ${frameName} overview`}
+                onClick={() => onSelect(frame.id)}
+                className={clsx(
+                  'frameos-frame-row flex w-full min-w-0 items-center gap-3 rounded-xl px-3 py-2.5 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+                  selectedFrameId === frame.id ? 'frameos-frame-row-selected' : 'text-slate-700 hover:bg-slate-100'
+                )}
+              >
+                <ComputerDesktopIcon className="h-5 w-5 shrink-0" />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-base font-medium">{frameName}</span>
+                  <span className="block truncate text-xs text-slate-400">{frameStatusDescription(frame)}</span>
+                </span>
+                <SidebarStatusDots frame={frame} />
+              </A>
             )
           })}
         </div>
@@ -407,14 +400,14 @@ function AddSceneDrawerActions({ frame }: { frame: FrameType }): JSX.Element {
         onClick={() => {
           openChatDrawer(frame.id, null)
         }}
-        className="group flex items-center gap-3 rounded-2xl border border-blue-300/70 bg-gradient-to-br from-fuchsia-500 via-blue-500 to-cyan-400 px-4 py-3 text-left text-white shadow-lg shadow-blue-500/25 transition hover:-translate-y-0.5 hover:shadow-xl hover:shadow-blue-500/35 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+        className="frameos-card group flex items-center gap-3 rounded-2xl border border-white/90 bg-white/80 px-4 py-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:bg-white hover:shadow-lg hover:shadow-slate-300/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
       >
-        <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/18 text-white shadow-sm transition group-hover:bg-white/24">
+        <span className="frameos-primary-hover-bg frameos-primary-hover-text frameos-icon-tile flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition">
           <SparklesIcon className="h-6 w-6" />
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-semibold">Generate scene</span>
-          <span className="block truncate text-xs text-blue-50/90">Open AI chat for this frame</span>
+          <span className="frameos-strong block truncate text-sm font-semibold text-slate-900">Generate scene</span>
+          <span className="frameos-muted block truncate text-xs text-slate-500">Open AI chat for this frame</span>
         </span>
       </button>
     </div>

@@ -46,17 +46,33 @@ async def test_api_frame_uses_latest_activity_log_timestamp(async_client, db, re
     db.add(
         Log(
             frame_id=frame.id,
-            type='stdout',
-            line='newer line',
+            type='webhook',
+            line='{"event":"metrics"}',
             timestamp=latest_timestamp,
         )
     )
     db.add(
         Log(
             frame_id=frame.id,
-            type='stderr',
+            type='info',
             line=f'Error fetching image from frame {frame.id}: 502: All connection attempts failed',
             timestamp=ignored_timestamp,
+        )
+    )
+    db.add(
+        Log(
+            frame_id=frame.id,
+            type='stdinfo',
+            line='Connecting via SSH to pi@10.8.0.62 (keypair: Default)',
+            timestamp=datetime(2026, 6, 1, 12, 6, 0),
+        )
+    )
+    db.add(
+        Log(
+            frame_id=frame.id,
+            type='stderr',
+            line="Unable to connect to 10.8.0.62:22 via SSH: [Errno 51] Connect call failed ('10.8.0.62', 22)",
+            timestamp=datetime(2026, 6, 1, 12, 7, 0),
         )
     )
     db.commit()
@@ -68,6 +84,28 @@ async def test_api_frame_uses_latest_activity_log_timestamp(async_client, db, re
     assert detail_response.json()['frame']['last_log_at'] == expected_timestamp
     latest_frame = next(item for item in list_response.json()['frames'] if item['id'] == frame.id)
     assert latest_frame['last_log_at'] == expected_timestamp
+
+
+@pytest.mark.asyncio
+async def test_api_frame_clears_last_log_at_without_frame_activity_logs(async_client, db, redis):
+    frame = await new_frame(db, redis, 'NoActivityFrame', 'localhost', 'localhost')
+    frame.last_log_at = datetime(2026, 1, 1, 0, 0, 0)
+    db.add(
+        Log(
+            frame_id=frame.id,
+            type='stdinfo',
+            line='Connecting via SSH to pi@10.8.0.62 (keypair: Default)',
+            timestamp=datetime(2026, 6, 1, 12, 0, 0),
+        )
+    )
+    db.commit()
+
+    detail_response = await async_client.get(f'/api/frames/{frame.id}')
+    list_response = await async_client.get('/api/frames')
+
+    assert detail_response.json()['frame']['last_log_at'] is None
+    latest_frame = next(item for item in list_response.json()['frames'] if item['id'] == frame.id)
+    assert latest_frame['last_log_at'] is None
 
 
 @pytest.mark.asyncio

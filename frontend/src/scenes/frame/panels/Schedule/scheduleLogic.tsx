@@ -9,6 +9,9 @@ export interface ScheduleLogicProps {
   frameId: number
 }
 
+const defaultScheduleMinute = 14 * 60
+const scheduleInsertStepMinutes = 30
+
 export const scheduleLogic = kea<scheduleLogicType>([
   path(['src', 'scenes', 'frame', 'panels', 'Schedule', 'scheduleLogic']),
   props({} as ScheduleLogicProps),
@@ -59,7 +62,8 @@ export const scheduleLogic = kea<scheduleLogicType>([
     editingEvents: [
       {} as Record<string, boolean>,
       {
-        addEventForScene: (state, { event }) => ({ ...state, [event.id]: true }),
+        addEventForScene: (state, { event, insertIndex }) =>
+          insertIndex === undefined || insertIndex === null ? { ...state, [event.id]: true } : state,
         editEvent: (state, { id }) => ({ ...state, [id]: true }),
         closeEvent: (state, { id }) => {
           const { [id]: _, ...rest } = state
@@ -123,12 +127,13 @@ export const scheduleLogic = kea<scheduleLogicType>([
 
   listeners(({ actions, values }) => ({
     addEventForScene: ({ event, insertIndex }) => {
-      const nextEvent = configureEventForInsert(event, values.sortedEvents, insertIndex)
+      const effectiveInsertIndex = eventInsertIndex(values.sortedEvents, insertIndex)
+      const nextEvent = configureEventForInsert(event, values.sortedEvents, effectiveInsertIndex)
       actions.setFrameFormValues({
         ...values.frameForm,
         schedule: {
           ...values.schedule,
-          events: insertEvent(values.events, values.sortedEvents, nextEvent, insertIndex),
+          events: insertEvent(values.events, values.sortedEvents, nextEvent, effectiveInsertIndex),
         },
       })
     },
@@ -170,23 +175,26 @@ function insertedMinute(before: ScheduledEvent | undefined, after: ScheduledEven
     return beforeMinute
   }
   if (before) {
-    return Math.min(1439, eventMinute(before) + 30)
+    return Math.min(1439, eventMinute(before) + scheduleInsertStepMinutes)
   }
   if (after) {
-    return Math.max(0, eventMinute(after) - 30)
+    return Math.max(0, eventMinute(after) - scheduleInsertStepMinutes)
   }
-  return 23 * 60 + 59
+  return defaultScheduleMinute
+}
+
+function eventInsertIndex(sortedEvents: ScheduledEvent[], insertIndex?: number | null): number {
+  if (insertIndex === undefined || insertIndex === null) {
+    return sortedEvents.length
+  }
+  return Math.max(0, Math.min(sortedEvents.length, insertIndex))
 }
 
 function configureEventForInsert(
   event: ScheduledEvent,
   sortedEvents: ScheduledEvent[],
-  insertIndex?: number | null
+  insertIndex: number
 ): ScheduledEvent {
-  if (insertIndex === undefined || insertIndex === null) {
-    return event
-  }
-
   const before = sortedEvents[insertIndex - 1]
   const after = sortedEvents[insertIndex]
   const time = minuteConfig(insertedMinute(before, after))
@@ -230,8 +238,8 @@ function insertEvent(
 function newScheduledEvent(sceneId = ''): ScheduledEvent {
   return {
     id: uuidv4(),
-    hour: 23,
-    minute: 59,
+    hour: 14,
+    minute: 0,
     weekday: 0,
     event: 'setCurrentScene',
     payload: { sceneId, state: {} },
