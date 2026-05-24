@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
 import tempfile
-from http import HTTPStatus
 from typing import Any, Optional
 
 import asyncssh
 from arq import ArqRedis as Redis
-from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.models.frame import Frame
@@ -18,7 +17,31 @@ from app.utils.ssh_utils import (
 )
 from app.utils.local_exec import exec_local_command
 from app.tasks._frame_deployer import FrameDeployer
+from app.tasks.prebuilt_deps import resolve_prebuilt_target
+from app.tasks.precompiled_agent import download_precompiled_agent_release
+from app.utils.versions import current_agent_version, get_versions
 from .utils import find_nim_v2, find_nimbase_file, get_fresh_frame
+
+
+PRECOMPILED_AGENT_ENV = "FRAMEOS_AGENT_PRECOMPILED"
+
+
+def precompiled_agent_enabled() -> bool:
+    return os.environ.get(PRECOMPILED_AGENT_ENV, "").strip().lower() not in {
+        "0",
+        "false",
+        "local",
+        "no",
+        "source",
+    }
+
+
+def agent_build_version() -> str:
+    version = get_versions().get("agent")
+    if isinstance(version, str) and version:
+        return version
+    return current_agent_version() or "unknown"
+
 
 async def deploy_agent(id: int, redis: Redis) -> None:  # noqa: N802
     await redis.enqueue_job("deploy_agent", id=id)
@@ -32,18 +55,9 @@ async def deploy_agent_task(ctx: dict[str, Any], id: int):  # noqa: N802
     if frame is None:  # keep the early-exit guard
         raise Exception("Frame not found")
 
-    # Locate Nim (needed only for path checks inside helpers)
-    try:
-        nim_path = find_nim_v2()
-    except Exception as exc:
-        raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail=f"Unable to locate Nim installation: {exc}",
-        )
-
     # Workspace ────────────────────────────────────────────────────────────
     with tempfile.TemporaryDirectory() as tmp:
-        deployer = AgentDeployer(db, redis, frame, nim_path, tmp)
+        deployer = AgentDeployer(db, redis, frame, "", tmp)
         await deployer.run()
 
 class AgentDeployer(FrameDeployer):
@@ -52,7 +66,6 @@ class AgentDeployer(FrameDeployer):
     async def run(self) -> None:
         """Main orchestration coroutine (used by global ``deploy_agent_task``)."""
         try:
-            self.nim_path = find_nim_v2()
             self.ssh = await get_ssh_connection(self.db, self.redis, self.frame)
 
             with tempfile.TemporaryDirectory() as temp_dir:
@@ -65,16 +78,21 @@ class AgentDeployer(FrameDeployer):
 
                 # 1. Detect CPU architecture on target
                 arch = await self.get_cpu_architecture()
+                distro = await self.get_distro()
+                distro_version = await self.get_distro_version()
 
                 # 2. Build & deploy the agent (if needed)
                 if self._can_deploy_agent():
                     await self.log("stdout", "- Deploying agent")
 
-                    distro = await self.get_distro()
                     if distro not in {"raspios", "debian", "ubuntu", "buildroot"}:
                         raise Exception(f"Unsupported target distro '{distro}'")
 
-                    await self._deploy_agent(arch)
+                    await self._deploy_agent(
+                        arch=arch,
+                        distro=distro,
+                        distro_version=distro_version,
+                    )
                     await self._setup_agent_service()
 
                     # 3. Upload *frame.json* for this release
@@ -142,13 +160,17 @@ class AgentDeployer(FrameDeployer):
         arch: str,
     ) -> str:
         """Compile locally (generate C + scripts), tarball the build directory, return archive path."""
+        if not self.nim_path:
+            self.nim_path = find_nim_v2()
         debug_opts = "--lineTrace:on" if self.frame.debug else ""
         cpu = await self.arch_to_nim_cpu(arch)
+        agent_version = agent_build_version()
+        version_option = shlex.quote(f"--define:frameosAgentVersion:{agent_version}")
         cmd = (
-            f"cd {source_dir} && nimble setup && "
+            f"cd {source_dir} && nimble install -dy && nimble setup && "
             f"{self.nim_path} compile --os:linux --cpu:{cpu} "
             f"--compileOnly --genScript --nimcache:{build_dir} -d:ssl "
-            f"{debug_opts} src/frameos_agent.nim 2>&1"
+            f"{version_option} {debug_opts} src/frameos_agent.nim 2>&1"
         )
 
         status, *_ = await exec_local_command(self.db, self.redis, self.frame, cmd)
@@ -172,7 +194,44 @@ class AgentDeployer(FrameDeployer):
 
     # --------------- DEPLOY ─────────────────────────────────────────--- #
 
-    async def _deploy_agent(self, arch: str) -> None:
+    async def _deploy_agent(self, *, arch: str, distro: str, distro_version: str) -> None:
+        """
+        Prefer the released binary for the target platform. Fall back to the
+        source-generated native build path when no supported release exists.
+        """
+        if precompiled_agent_enabled():
+            prebuilt_target = resolve_prebuilt_target(distro, distro_version, arch)
+            if prebuilt_target:
+                try:
+                    await self.log("stdout", f"- Trying precompiled agent release for {prebuilt_target}")
+                    build_dir = os.path.join(self.temp_dir, f"agent_{self.build_id}")
+                    result = await download_precompiled_agent_release(
+                        target=prebuilt_target,
+                        build_dir=build_dir,
+                        temp_dir=self.temp_dir,
+                        build_id=self.build_id,
+                        logger=self.log,
+                    )
+                    action = "Using cached" if result.cache_hit else "Downloaded"
+                    await self.log("stdout", f"- {action} precompiled agent release: {result.release_url}")
+                    await self._stage_agent_binary(result.binary_path)
+                    return
+                except Exception as exc:
+                    await self.log(
+                        "stderr",
+                        f"- Could not use precompiled agent for {prebuilt_target}: {exc}. Falling back to source build.",
+                    )
+            else:
+                await self.log(
+                    "stdout",
+                    f"- No precompiled agent target for {distro} {distro_version} on {arch}; falling back to source build",
+                )
+        else:
+            await self.log("stdout", f"- {PRECOMPILED_AGENT_ENV}=source; building agent on the device")
+
+        await self._deploy_agent_from_source(arch)
+
+    async def _deploy_agent_from_source(self, arch: str) -> None:
         """
         Build the agent locally, upload the tarball to the device,
         compile natively, and stage the binary in the new release folder.
@@ -180,10 +239,7 @@ class AgentDeployer(FrameDeployer):
         build_dir, source_dir = self._create_agent_build_folders()
         archive_path = await self._create_local_build_archive(build_dir, source_dir, arch)
 
-        # Ensure directory structure exists
-        await self.exec_command(
-            "mkdir -p /srv/frameos/agent/build/ /srv/frameos/agent/logs/ /srv/frameos/agent/releases/"
-        )
+        await self._ensure_agent_directories()
 
         # Upload archive
         await asyncssh.scp(
@@ -203,11 +259,29 @@ class AgentDeployer(FrameDeployer):
 
         # Stage binary into new release dir
         await self.exec_command(
-            f"mkdir -p /srv/frameos/agent/releases/release_{self.build_id}"
-        )
-        await self.exec_command(
             f"cp /srv/frameos/agent/build/agent_{self.build_id}/frameos_agent "
             f"/srv/frameos/agent/releases/release_{self.build_id}/frameos_agent"
+        )
+
+    async def _stage_agent_binary(self, binary_path: str) -> None:
+        if self.ssh is None:
+            raise RuntimeError("SSH connection missing while staging FrameOS agent binary")
+
+        await self._ensure_agent_directories()
+        remote_binary = f"/srv/frameos/agent/releases/release_{self.build_id}/frameos_agent"
+        await asyncssh.scp(
+            binary_path,
+            (self.ssh, remote_binary),
+            recurse=False,
+        )
+        await self.exec_command(f"chmod +x {remote_binary}")
+
+    async def _ensure_agent_directories(self) -> None:
+        await self.exec_command(
+            "mkdir -p "
+            "/srv/frameos/agent/build/ "
+            "/srv/frameos/agent/logs/ "
+            f"/srv/frameos/agent/releases/release_{self.build_id}"
         )
 
     # --------------- SYSTEMD SERVICE ----------------------------------- #

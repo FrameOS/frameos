@@ -46,6 +46,7 @@ from app.codegen.scene_nim import (
     write_scenes_nim,
 )
 from app.tasks.utils import find_nimbase_file
+from app.tasks.utils import find_nim_v2
 from app.codegen.apps_nim import write_apps_nim
 from app.codegen.app_loader_nim import write_app_loader_nim
 
@@ -724,7 +725,8 @@ $(OBJECTS): pre-build
         redis = self.redis
         frame = self.frame
         build_id = self.build_id
-        nim_path = self.nim_path
+        nim_path = self.nim_path or find_nim_v2()
+        self.nim_path = nim_path
         temp_dir = self.temp_dir
 
         drivers = drivers_override or drivers_for_frame(frame)

@@ -108,6 +108,7 @@ async def test_build_release_target_uses_runtime_filtered_driver_catalog(
 
         def create_local_source_folder(self, temp_dir, source_root=None):
             source_dir = Path(temp_dir) / "frameos"
+            (source_dir / "agent").mkdir(parents=True)
             (source_dir / "src" / "drivers" / "waveshare").mkdir(parents=True)
             (source_dir / "src" / "drivers" / "shared").mkdir(parents=True)
             (source_dir / "src" / "drivers" / "waveshare" / "waveshare.nim").write_text(
@@ -147,20 +148,29 @@ async def test_build_release_target_uses_runtime_filtered_driver_catalog(
         async def build(self, _source_dir):
             FakeCrossCompiler.build_calls += 1
             build_dir = Path(self.kwargs["build_dir"])
-            binary_path = build_dir / "frameos"
-            binary_path.write_bytes(b"release-frameos")
-            driver_path = build_dir / "drivers" / "httpUpload" / "httpUpload.so"
-            driver_path.parent.mkdir(parents=True, exist_ok=True)
-            driver_path.write_bytes(b"driver")
+            output_name = self.kwargs.get("output_name", "frameos")
+            binary_path = build_dir / output_name
+            binary_path.write_bytes(b"release-agent" if output_name == "frameos_agent" else b"release-frameos")
+            if output_name == "frameos":
+                driver_path = build_dir / "drivers" / "httpUpload" / "httpUpload.so"
+                driver_path.parent.mkdir(parents=True, exist_ok=True)
+                driver_path.write_bytes(b"driver")
             return str(binary_path)
 
     async def fake_resolve_prebuilt_entry(**_kwargs):
         return None, None
 
+    async def fake_generate_agent_build_dir(**kwargs):
+        build_dir = Path(kwargs["build_dir"])
+        build_dir.mkdir(parents=True, exist_ok=True)
+        (build_dir / "compile_frameos_agent.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        (build_dir / "Makefile").write_text("all:\n", encoding="utf-8")
+
     monkeypatch.setattr("backend.app.tasks._frame_deployer.FrameDeployer", FakeFrameDeployer)
     monkeypatch.setattr("backend.app.tasks.utils.find_nim_v2", lambda: "/tmp/nim")
     monkeypatch.setattr("backend.app.tasks.binary_builder.resolve_prebuilt_entry", fake_resolve_prebuilt_entry)
     monkeypatch.setattr("backend.app.utils.cross_compile.CrossCompiler", FakeCrossCompiler)
+    monkeypatch.setattr(cross_module, "generate_agent_build_dir", fake_generate_agent_build_dir)
     monkeypatch.setattr(
         "app.codegen.release_drivers_nim.release_driver_specs",
         lambda: {
@@ -193,13 +203,15 @@ async def test_build_release_target_uses_runtime_filtered_driver_catalog(
         / "drivers"
         / "httpUpload.so"
     ).read_bytes() == b"driver"
+    assert (artifacts_dir / "debian-trixie-amd64" / "frameos_agent").read_bytes() == b"release-agent"
     metadata = json.loads((artifacts_dir / "debian-trixie-amd64" / "metadata.json").read_text(encoding="utf-8"))
     assert metadata["release_artifact"] is True
     assert metadata["driver_registry"] == "runtime-filtered"
     assert metadata["driver_libraries"] == ["httpUpload.so"]
+    assert metadata["agent_binary"] == "frameos_agent"
     assert metadata["input_hash"]
     assert FakeFrameDeployer.archive_calls == 1
-    assert FakeCrossCompiler.build_calls == 1
+    assert FakeCrossCompiler.build_calls == 2
 
     shutil.rmtree(artifacts_dir / "debian-trixie-amd64")
     restored_destination = await cross_module.build_release_target(
@@ -210,7 +222,7 @@ async def test_build_release_target_uses_runtime_filtered_driver_catalog(
 
     assert restored_destination.read_bytes() == b"release-frameos"
     assert FakeFrameDeployer.archive_calls == 1
-    assert FakeCrossCompiler.build_calls == 1
+    assert FakeCrossCompiler.build_calls == 2
 
 
 def test_compute_release_input_hash_tracks_source_and_target(tmp_path: Path):

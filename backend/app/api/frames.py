@@ -1657,9 +1657,8 @@ async def api_frame_deploy_plan(
 
     try:
         if mode in {"combined", "full"}:
-            nim_path = find_nim_v2()
             with tempfile.TemporaryDirectory() as temp_dir:
-                deployer = FrameDeployer(db=db, redis=redis, frame=frame, nim_path=nim_path, temp_dir=temp_dir)
+                deployer = FrameDeployer(db=db, redis=redis, frame=frame, nim_path="", temp_dir=temp_dir)
                 workflow = FrameDeployWorkflow(
                     db=db,
                     redis=redis,
@@ -1702,9 +1701,8 @@ async def api_frame_deploy_plan_preview(
 
     try:
         if mode in {"combined", "full"}:
-            nim_path = find_nim_v2()
             with tempfile.TemporaryDirectory() as temp_dir:
-                deployer = FrameDeployer(db=db, redis=redis, frame=preview_frame, nim_path=nim_path, temp_dir=temp_dir)
+                deployer = FrameDeployer(db=db, redis=redis, frame=preview_frame, nim_path="", temp_dir=temp_dir)
                 workflow = FrameDeployWorkflow(
                     db=db,
                     redis=redis,

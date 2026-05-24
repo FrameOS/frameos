@@ -150,16 +150,22 @@ def precompiled_frameos_cache_path(url: str) -> Path:
     return precompiled_frameos_cache_dir() / f"{digest}-{safe_filename}"
 
 
-async def _cached_release_archive(url: str, target: str, timeout: float, logger) -> tuple[Path, bool]:
+async def _cached_release_archive(
+    url: str,
+    target: str,
+    timeout: float,
+    logger,
+    label: str = "FrameOS",
+) -> tuple[Path, bool]:
     cache_path = precompiled_frameos_cache_path(url)
     if _has_cached_archive(cache_path):
-        await logger("stdout", f"Using cached precompiled FrameOS release for {target}")
+        await logger("stdout", f"Using cached precompiled {label} release for {target}")
         return cache_path, True
 
-    await logger("stdout", f"Downloading precompiled FrameOS release for {target}")
+    await logger("stdout", f"Downloading precompiled {label} release for {target}")
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     if _has_cached_archive(cache_path):
-        await logger("stdout", f"Using cached precompiled FrameOS release for {target}")
+        await logger("stdout", f"Using cached precompiled {label} release for {target}")
         return cache_path, True
 
     temp_path: Path | None = None
