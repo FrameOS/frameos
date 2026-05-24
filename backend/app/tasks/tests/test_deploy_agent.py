@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.tasks.deploy_agent import AgentDeployer
+from app.tasks.deploy_agent import AgentDeployer, deploy_agent_task
 from app.tasks.precompiled_agent import PrecompiledAgentResult
 
 
@@ -50,6 +50,11 @@ async def test_deploy_agent_prefers_precompiled_binary(
     deploy_agent_module = importlib.import_module("app.tasks.deploy_agent")
     monkeypatch.setattr(
         deploy_agent_module,
+        "find_nim_v2",
+        lambda: (_ for _ in ()).throw(RuntimeError("Nim should not be needed")),
+    )
+    monkeypatch.setattr(
+        deploy_agent_module,
         "download_precompiled_agent_release",
         fake_download_precompiled_agent_release,
     )
@@ -60,6 +65,30 @@ async def test_deploy_agent_prefers_precompiled_binary(
     assert deployer.staged_binary == str(tmp_path / "frameos_agent")
     assert deployer.source_arch is None
     assert any("precompiled agent release" in message for _level, message in deployer.logs)
+
+
+@pytest.mark.asyncio
+async def test_deploy_agent_task_does_not_require_nim_before_running_deployer(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    deploy_agent_module = importlib.import_module("app.tasks.deploy_agent")
+    ran = False
+
+    async def fake_run(self):
+        nonlocal ran
+        ran = True
+
+    monkeypatch.setattr(
+        deploy_agent_module,
+        "find_nim_v2",
+        lambda: (_ for _ in ()).throw(RuntimeError("Nim should not be needed")),
+    )
+    monkeypatch.setattr(deploy_agent_module, "get_fresh_frame", lambda _db, _id: SimpleNamespace(id=1))
+    monkeypatch.setattr(AgentDeployer, "run", fake_run)
+
+    await deploy_agent_task({"db": object(), "redis": object()}, id=1)
+
+    assert ran is True
 
 
 @pytest.mark.asyncio
