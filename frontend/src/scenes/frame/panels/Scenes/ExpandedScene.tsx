@@ -10,6 +10,7 @@ import { FrameScene } from '../../../../types'
 import { scenesLogic } from './scenesLogic'
 import { frameLogic } from '../../frameLogic'
 import { apiFetch } from '../../../../utils/apiFetch'
+import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
 
 export interface ExpandedSceneProps {
   sceneId: string
@@ -67,16 +68,36 @@ export function ExpandedScene({
 
   const handleActivate = async () => {
     if (sceneHasChanges) {
-      await frameLogic({ frameId }).asyncActions.saveFrame()
-      await apiFetch(`/api/frames/${frameId}/set_next_scene`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sceneId,
-          state: buildNextState(),
-          fastDeploy: !requiresRecompilation,
-        }),
+      longRunningTasksModel.actions.startTask({
+        frameId,
+        kind: 'deploy',
+        sceneId,
+        title: requiresRecompilation ? 'Deploying scene changes' : 'Fast deploying scene changes',
+        detail: scene?.name || sceneId,
       })
+      try {
+        await frameLogic({ frameId }).asyncActions.saveFrame()
+        const response = await apiFetch(`/api/frames/${frameId}/set_next_scene`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sceneId,
+            state: buildNextState(),
+            fastDeploy: !requiresRecompilation,
+          }),
+        })
+        if (!response.ok) {
+          throw new Error('Failed to queue scene deploy')
+        }
+      } catch (error) {
+        longRunningTasksModel.actions.taskFailed({
+          frameId,
+          kind: 'deploy',
+          sceneId,
+          detail: error instanceof Error ? error.message : 'Failed to deploy scene changes',
+        })
+        throw error
+      }
     } else {
       submitStateChanges()
     }

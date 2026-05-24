@@ -40,6 +40,15 @@ const hasImageExtension = (fileName: string): boolean => {
   const normalizedName = fileName.toLowerCase()
   return normalizedImageExtensions.some((extension) => normalizedName.endsWith(extension))
 }
+const isInThumbsFolder = (path: string): boolean => {
+  const normalizedPath = path.replace(/\\/g, '/')
+  return (
+    normalizedPath === '.thumbs' ||
+    normalizedPath.endsWith('/.thumbs') ||
+    normalizedPath.startsWith('.thumbs/') ||
+    normalizedPath.includes('/.thumbs/')
+  )
+}
 const playSceneButtonClassName =
   'frameos-primary-text shrink-0 rounded-lg border border-[#4a4b8c]/35 bg-[#4a4b8c]/10 p-1.5 transition hover:bg-[#4a4b8c]/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400'
 const assetRowActionsClassName = 'ml-auto flex w-[5.25rem] shrink-0 items-center justify-end gap-2'
@@ -81,8 +90,7 @@ function collectAssetStats(node: AssetNode, isRoot = true): AssetStats {
   if (!node.isFolder) {
     stats.files = 1
     stats.folders = 0
-    stats.images =
-      hasImageExtension(node.name) && !node.path.startsWith('.thumbs/') && !node.path.includes('/.thumbs/') ? 1 : 0
+    stats.images = hasImageExtension(node.name) && !isInThumbsFolder(node.path) ? 1 : 0
     stats.totalBytes = typeof node.size === 'number' && node.size > 0 ? node.size : 0
   }
 
@@ -99,6 +107,18 @@ function collectAssetStats(node: AssetNode, isRoot = true): AssetStats {
   })
 
   return stats
+}
+
+function nodeHasPlayableImages(node: AssetNode): boolean {
+  if (isInThumbsFolder(node.path)) {
+    return false
+  }
+
+  if (!node.isFolder) {
+    return hasImageExtension(node.name)
+  }
+
+  return Object.values(node.children).some(nodeHasPlayableImages)
 }
 
 function latestDiskStats(metrics: MetricsType[]): DiskStats | null {
@@ -189,6 +209,8 @@ function TreeNode({
 
   // If this node is a folder, display a collapsible section
   if (node.isFolder) {
+    const hasPlayableImages = nodeHasPlayableImages(node)
+
     return (
       <div className="ml-1">
         <div
@@ -214,14 +236,16 @@ function TreeNode({
             <span className="frame-tool-muted shrink-0 text-xs">{Object.keys(node.children).length} items</span>
           </button>
           <div className={assetRowActionsClassName}>
-            <button
-              type="button"
-              className={playSceneButtonClassName}
-              title="Play all images in this folder"
-              onClick={() => createImageFolderScene(node.path)}
-            >
-              <PlayIcon className="h-4 w-4" />
-            </button>
+            {hasPlayableImages ? (
+              <button
+                type="button"
+                className={playSceneButtonClassName}
+                title="Play all images in this folder"
+                onClick={() => createImageFolderScene(node.path)}
+              >
+                <PlayIcon className="h-4 w-4" />
+              </button>
+            ) : null}
             <DropdownMenu
               horizontal
               className="w-fit"
@@ -244,11 +268,13 @@ function TreeNode({
                       }
                     },
                   },
-                  {
-                    label: 'Play all images in this folder',
-                    icon: <PlayIcon className="w-5 h-5" />,
-                    onClick: () => createImageFolderScene(node.path),
-                  },
+                  hasPlayableImages
+                    ? {
+                        label: 'Play all images in this folder',
+                        icon: <PlayIcon className="w-5 h-5" />,
+                        onClick: () => createImageFolderScene(node.path),
+                      }
+                    : null,
                   node.path
                     ? {
                         label: 'Rename',
@@ -305,8 +331,7 @@ function TreeNode({
   } else {
     // This is a file
     const isImage = node.name.match(/\.(png|jpe?g|gif|bmp|webp)$/i)
-    const isPlayableImage =
-      hasImageExtension(node.name) && !node.path.startsWith('.thumbs/') && !node.path.includes('/.thumbs/')
+    const isPlayableImage = nodeHasPlayableImages(node)
     const isUploading = node.mtime === -1
     return (
       <div
@@ -323,8 +348,7 @@ function TreeNode({
           node.mtime !== undefined &&
           node.size >= 0 &&
           node.mtime >= 0 &&
-          !node.path.startsWith('.thumbs/') &&
-          !node.path.includes('/.thumbs/') && (
+          !isInThumbsFolder(node.path) && (
             <div className="w-8 h-8">
               <DeferredImage
                 url={frameAssetUrl(frameId, node.path, true)}
@@ -633,7 +657,12 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
   }, [])
 
   return (
-    <div className={clsx('frame-tool-panel @container', scrollContainer ? 'h-full overflow-y-auto pr-2' : 'overflow-visible')}>
+    <div
+      className={clsx(
+        'frame-tool-panel @container',
+        scrollContainer ? 'h-full overflow-y-auto pr-2' : 'overflow-visible'
+      )}
+    >
       {assetsLoading && (!assetTree.children || Object.keys(assetTree.children).length === 0) ? (
         <AssetsLoadingSkeleton />
       ) : (

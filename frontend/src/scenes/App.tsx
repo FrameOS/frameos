@@ -8,6 +8,8 @@ import { appsModel } from '../models/appsModel'
 import { fontsModel } from '../models/fontsModel'
 import { templatesModel } from '../models/templatesModel'
 import { entityImagesModel } from '../models/entityImagesModel'
+import { longRunningTasksModel } from '../models/longRunningTasksModel'
+import { LongRunningTaskToasts } from '../components/LongRunningTaskToasts'
 import { inHassioIngress } from '../utils/inHassioIngress'
 
 export function DelayedLoading() {
@@ -27,6 +29,7 @@ export function LoggedInApp() {
   useMountedLogic(appsModel)
   useMountedLogic(fontsModel)
   useMountedLogic(entityImagesModel)
+  useMountedLogic(longRunningTasksModel)
   useMountedLogic(framesModel)
   useMountedLogic(templatesModel)
   const { scene, params } = useValues(sceneLogic)
@@ -37,6 +40,7 @@ export function LoggedInApp() {
   return (
     <Suspense fallback={<DelayedLoading />}>
       <SceneComponent {...params} />
+      <LongRunningTaskToasts />
     </Suspense>
   )
 }

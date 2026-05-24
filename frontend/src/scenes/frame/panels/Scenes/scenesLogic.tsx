@@ -14,6 +14,7 @@ import { frameAssetsApiPath } from '../../../../utils/frameAssetsApi'
 import { uploadFileInChunks } from '../../../../utils/uploadFileInChunks'
 import { buildSdCardImageScene } from './sceneShortcuts'
 import { socketLogic } from '../../../socketLogic'
+import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
 
 export interface ScenesLogicProps {
   frameId: number
@@ -612,6 +613,13 @@ export const scenesLogic = kea<scenesLogicType>([
         actions.previewSceneFailure()
         return
       }
+      longRunningTasksModel.actions.startTask({
+        frameId: props.frameId,
+        kind: 'preview',
+        sceneId,
+        title: 'Previewing scene',
+        detail: scene.name || scene.id,
+      })
       try {
         const resolvedState = state ?? values.states?.[scene.id] ?? values.states?.[`uploaded/${scene.id}`] ?? null
         const payloadScene = applyStateToSceneFields(scene, resolvedState)
@@ -620,11 +628,23 @@ export const scenesLogic = kea<scenesLogicType>([
           sceneId: scene.id,
           ...(resolvedState && Object.keys(resolvedState).length > 0 ? { state: resolvedState } : {}),
         }
-        await actions.sendEvent('uploadScenes', payload)
+        const response = await apiFetch(`/api/frames/${props.frameId}/event/uploadScenes`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+        if (!response.ok) {
+          throw new Error('Failed to send preview scene event')
+        }
         actions.previewSceneSuccess()
       } catch (error) {
         console.error(error)
-        alert('Failed to preview the scene')
+        longRunningTasksModel.actions.taskFailed({
+          frameId: props.frameId,
+          kind: 'preview',
+          sceneId,
+          detail: error instanceof Error ? error.message : 'Failed to preview the scene',
+        })
         actions.previewSceneFailure()
       }
     },

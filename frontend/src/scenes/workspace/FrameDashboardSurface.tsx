@@ -424,8 +424,10 @@ function FrameSceneTile({
 }
 
 export function FrameAddSceneTile({ frame, compact = false }: { frame: FrameType; compact?: boolean }): JSX.Element {
+  const { templateDrawerFrameId } = useValues(workspaceLogic)
   const { hideForm } = useActions(newFrameForm)
   const { closeSceneControl, openTemplateDrawer } = useActions(workspaceLogic)
+  const active = templateDrawerFrameId === frame.id
 
   return (
     <button
@@ -436,7 +438,10 @@ export function FrameAddSceneTile({ frame, compact = false }: { frame: FrameType
         openTemplateDrawer(frame.id)
       }}
       className={clsx(
-        'frameos-primary-hover-text frameos-card group flex shrink-0 flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-slate-300 bg-white/55 text-center text-slate-500 shadow-sm transition hover:-translate-y-0.5 hover:bg-white/80 hover:shadow-lg hover:shadow-slate-300/35 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+        'frameos-primary-hover-text frameos-card group flex shrink-0 flex-col items-center justify-center gap-3 rounded-lg border border-dashed bg-white/55 text-center text-slate-500 shadow-sm transition hover:-translate-y-0.5 hover:bg-white/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+        active
+          ? `${activeSurfaceClassName} hover:shadow-[0_0_4px_4px_rgba(128,0,255,0.55)]`
+          : 'border-slate-300 hover:shadow-lg hover:shadow-slate-300/35',
         compact ? 'h-36 w-36' : 'min-h-36 w-full max-w-40 min-w-0'
       )}
     >

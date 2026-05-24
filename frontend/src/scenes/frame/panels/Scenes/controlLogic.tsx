@@ -9,6 +9,7 @@ import { loaders } from 'kea-loaders'
 import type { controlLogicType } from './controlLogicType'
 import { socketLogic } from '../../../socketLogic'
 import { apiFetch } from '../../../../utils/apiFetch'
+import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
 
 export interface ControlLogicProps {
   frameId: number
@@ -111,12 +112,35 @@ export const controlLogic = kea<controlLogicType>([
   }),
   listeners(({ actions, props, values }) => ({
     setCurrentScene: async ({ sceneId }) => {
-      const response = await apiFetch(`/api/frames/${props.frameId}/event/setCurrentScene`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sceneId }),
+      const scene =
+        values.frameForm.scenes?.find((item) => item.id === sceneId) ??
+        values.frame?.scenes?.find((item) => item.id === sceneId)
+      longRunningTasksModel.actions.startTask({
+        frameId: props.frameId,
+        kind: 'activate',
+        sceneId,
+        title: 'Activating scene',
+        detail: scene?.name || sceneId,
       })
-      await response.text()
+      try {
+        const response = await apiFetch(`/api/frames/${props.frameId}/event/setCurrentScene`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sceneId }),
+        })
+        if (!response.ok) {
+          throw new Error('Failed to send scene activation event')
+        }
+        await response.text()
+      } catch (error) {
+        longRunningTasksModel.actions.taskFailed({
+          frameId: props.frameId,
+          kind: 'activate',
+          sceneId,
+          detail: error instanceof Error ? error.message : 'Failed to activate scene',
+        })
+        throw error
+      }
     },
     syncSuccess: ({ stateRecord }) => {
       if (stateRecord?.sceneId?.startsWith(UPLOADED_SCENE_PREFIX)) {

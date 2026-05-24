@@ -6,6 +6,7 @@ import { apiFetch } from '../../../../utils/apiFetch'
 import { FrameScene } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
 import { controlLogic } from './controlLogic'
+import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
 
 export interface ExpandedSceneLogicProps {
   frameId: number
@@ -25,27 +26,47 @@ export const expandedSceneLogic = kea<expandedSceneLogicType>([
     stateChanges: {
       defaults: {} as Record<string, any>,
       submit: async (formValues) => {
+        longRunningTasksModel.actions.startTask({
+          frameId: props.frameId,
+          kind: 'activate',
+          sceneId: props.sceneId,
+          title: 'Activating scene',
+          detail: values.scene?.name || props.sceneId,
+        })
         const state: Record<string, any> = {}
         const fields = values.scene?.fields ?? []
-        for (const field of fields) {
-          if (field.name in formValues && field.access === 'public') {
-            if (field.type === 'boolean') {
-              state[field.name] = formValues[field.name] === 'true' || field.value
-            } else if (field.type === 'integer') {
-              state[field.name] = parseInt(formValues[field.name] ?? field.value)
-            } else if (field.type === 'float') {
-              state[field.name] = parseFloat(formValues[field.name] ?? field.value)
-            } else {
-              state[field.name] = formValues[field.name] ?? field.value
+        try {
+          for (const field of fields) {
+            if (field.name in formValues && field.access === 'public') {
+              if (field.type === 'boolean') {
+                state[field.name] = formValues[field.name] === 'true' || field.value
+              } else if (field.type === 'integer') {
+                state[field.name] = parseInt(formValues[field.name] ?? field.value)
+              } else if (field.type === 'float') {
+                state[field.name] = parseFloat(formValues[field.name] ?? field.value)
+              } else {
+                state[field.name] = formValues[field.name] ?? field.value
+              }
             }
           }
+          const response = await apiFetch(`/api/frames/${props.frameId}/event/setCurrentScene`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sceneId: props.sceneId, state }),
+          })
+          if (!response.ok) {
+            throw new Error('Failed to send scene activation event')
+          }
+          await response.json()
+        } catch (error) {
+          longRunningTasksModel.actions.taskFailed({
+            frameId: props.frameId,
+            kind: 'activate',
+            sceneId: props.sceneId,
+            detail: error instanceof Error ? error.message : 'Failed to activate scene',
+          })
+          throw error
         }
-        const response = await apiFetch(`/api/frames/${props.frameId}/event/setCurrentScene`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sceneId: props.sceneId, state }),
-        })
-        await response.json()
       },
     },
   })),

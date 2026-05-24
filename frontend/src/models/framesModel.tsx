@@ -9,6 +9,7 @@ import { apiFetch } from '../utils/apiFetch'
 import { entityImagesModel } from './entityImagesModel'
 import { urls } from '../urls'
 import { logUpdatesFrameActivity } from '../decorators/frame'
+import { longRunningTasksModel } from './longRunningTasksModel'
 
 function sanitizeFrameForStore(frame: FrameType): FrameType {
   const lastSuccessfulDeploy = frame.last_successful_deploy
@@ -205,13 +206,47 @@ export const framesModel = kea<framesModelType>([
   }),
   listeners(({ actions, values }) => ({
     renderFrame: async ({ id }) => {
-      await apiFetch(`/api/frames/${id}/event/render`, { method: 'POST' })
+      longRunningTasksModel.actions.startTask({
+        frameId: id,
+        kind: 'render',
+        title: 'Rendering frame',
+        detail: 'Render request sent',
+      })
+      try {
+        const response = await apiFetch(`/api/frames/${id}/event/render`, { method: 'POST' })
+        if (!response.ok) {
+          throw new Error('Failed to send render event')
+        }
+      } catch (error) {
+        longRunningTasksModel.actions.taskFailed({
+          frameId: id,
+          kind: 'render',
+          detail: error instanceof Error ? error.message : 'Failed to render frame',
+        })
+        throw error
+      }
     },
     deployFrame: async ({ id, fastDeploy }) => {
-      if (fastDeploy) {
-        await apiFetch(`/api/frames/${id}/fast_deploy`, { method: 'POST' })
-      } else {
-        await apiFetch(`/api/frames/${id}/deploy`, { method: 'POST' })
+      longRunningTasksModel.actions.startTask({
+        frameId: id,
+        kind: 'deploy',
+        title: fastDeploy ? 'Fast deploying frame' : 'Deploying frame',
+        detail: 'Deploy request sent',
+      })
+      try {
+        const response = fastDeploy
+          ? await apiFetch(`/api/frames/${id}/fast_deploy`, { method: 'POST' })
+          : await apiFetch(`/api/frames/${id}/deploy`, { method: 'POST' })
+        if (!response.ok) {
+          throw new Error(fastDeploy ? 'Failed to start fast deploy' : 'Failed to start deploy')
+        }
+      } catch (error) {
+        longRunningTasksModel.actions.taskFailed({
+          frameId: id,
+          kind: 'deploy',
+          detail: error instanceof Error ? error.message : 'Failed to deploy frame',
+        })
+        throw error
       }
     },
     stopFrame: async ({ id }) => {

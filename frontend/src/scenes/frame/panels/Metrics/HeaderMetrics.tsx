@@ -103,7 +103,7 @@ export function HeaderMetrics({ frameId }: { frameId: number }) {
   }
 
   return (
-    <div className="relative z-50 hidden items-center gap-1.5 overflow-visible pl-1.5 pr-2 @5xl:flex">
+    <div className="relative z-50 flex max-w-full flex-wrap items-center gap-1.5 overflow-visible pl-1.5 pr-2 @5xl:w-auto @5xl:flex-nowrap">
       {metricEntries.map(([key, series]) => (
         <div
           key={key}

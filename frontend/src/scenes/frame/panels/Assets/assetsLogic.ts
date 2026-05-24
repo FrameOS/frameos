@@ -10,6 +10,8 @@ import { apiFetch } from '../../../../utils/apiFetch'
 import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
 import { frameAssetsApiPath } from '../../../../utils/frameAssetsApi'
 import { uploadFileInChunks } from '../../../../utils/uploadFileInChunks'
+import { uploadFormDataWithProgress } from '../../../../utils/uploadFormDataWithProgress'
+import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
 
 export interface AssetsLogicProps {
   frameId: number
@@ -182,12 +184,43 @@ export const assetsLogic = kea<assetsLogicType>([
   }),
   listeners(({ actions, props, values }) => ({
     uploadDroppedFiles: async ({ path, files }) => {
+      if (files.length === 0) {
+        return
+      }
       const assetsPath = values.frame.assets_path ?? '/srv/assets'
       const uploadedFiles = files.map((file) => normalizeAssetPath(`${path ? path + '/' : ''}${file.name}`, assetsPath))
+      const taskId = `asset-upload:${props.frameId}:${Date.now()}:${files.length}`
+      const taskTotalBytes = files.reduce((total, file) => total + Math.max(file.size, 1), 0)
+      let completedTaskBytes = 0
+      let failures = 0
+
+      longRunningTasksModel.actions.startTask({
+        id: taskId,
+        frameId: props.frameId,
+        kind: 'upload',
+        title: files.length === 1 ? 'Uploading asset' : `Uploading ${files.length} assets`,
+        detail: files.length === 1 ? files[0].name : 'Preparing upload',
+        progressCurrent: 0,
+        progressTotal: taskTotalBytes,
+      })
+
       actions.filesToUpload(uploadedFiles)
       for (const file of files) {
         const uploadPath = frameAssetsApiPath(props.frameId, 'assets/upload')
         const normalizedPath = normalizeAssetPath(`${path ? path + '/' : ''}${file.name}`, assetsPath)
+        const fileTaskBytes = Math.max(file.size, 1)
+        const updateProgress = (fileUploadedBytes: number, detail = `Uploading ${file.name}`) => {
+          const safeFileUploadedBytes = Math.max(0, Math.min(fileTaskBytes, fileUploadedBytes || 0))
+          actions.uploadProgress(normalizedPath, Math.min(file.size, fileUploadedBytes || 0))
+          longRunningTasksModel.actions.updateTaskProgress({
+            taskId,
+            frameId: props.frameId,
+            kind: 'upload',
+            progressCurrent: Math.min(taskTotalBytes, completedTaskBytes + safeFileUploadedBytes),
+            progressTotal: taskTotalBytes,
+            detail,
+          })
+        }
         try {
           const asset = isInFrameAdminMode()
             ? await uploadFileInChunks({
@@ -196,28 +229,58 @@ export const assetsLogic = kea<assetsLogicType>([
                 file,
                 path,
                 filename: file.name,
-                onProgress: (size) => actions.uploadProgress(normalizedPath, size),
+                onProgress: (size) => updateProgress(size),
               })
             : await (async () => {
                 const formData = new FormData()
                 formData.append('file', file)
                 formData.append('path', path)
-                const response = await apiFetch(uploadPath, {
-                  method: 'POST',
-                  body: formData,
+                return await uploadFormDataWithProgress<AssetType>({
+                  url: uploadPath,
+                  formData,
+                  onProgress: (uploadedBytes, totalBytes) => {
+                    const fileUploadedBytes =
+                      totalBytes && totalBytes > 0
+                        ? Math.round((uploadedBytes / totalBytes) * fileTaskBytes)
+                        : uploadedBytes
+                    updateProgress(fileUploadedBytes)
+                  },
                 })
-                if (!response.ok) {
-                  throw new Error('Failed to upload asset')
-                }
-                return await response.json()
               })()
+          completedTaskBytes += fileTaskBytes
+          updateProgress(fileTaskBytes, `Uploaded ${file.name}`)
           actions.assetUploaded({
             ...asset,
             path: normalizeAssetPath(asset.path, assetsPath),
           })
         } catch (error) {
+          failures += 1
+          completedTaskBytes += fileTaskBytes
           actions.uploadFailure(normalizedPath)
+          longRunningTasksModel.actions.updateTaskProgress({
+            taskId,
+            frameId: props.frameId,
+            kind: 'upload',
+            progressCurrent: Math.min(taskTotalBytes, completedTaskBytes),
+            progressTotal: taskTotalBytes,
+            detail: `Failed ${file.name}`,
+          })
         }
+      }
+      if (failures > 0) {
+        longRunningTasksModel.actions.taskFailed({
+          taskId,
+          frameId: props.frameId,
+          kind: 'upload',
+          detail: failures === 1 ? '1 asset failed to upload' : `${failures} assets failed to upload`,
+        })
+      } else {
+        longRunningTasksModel.actions.finishTask({
+          taskId,
+          frameId: props.frameId,
+          kind: 'upload',
+          detail: files.length === 1 ? `Uploaded ${files[0].name}` : `Uploaded ${files.length} assets`,
+        })
       }
     },
     uploadAssets: async ({ path }) => {
