@@ -302,6 +302,7 @@ export function AreaChart({
   gapThresholdMs = null,
   showTooltip = false,
   chartTheme = metricChartThemes.dark,
+  compact = false,
   top,
   left,
   children,
@@ -322,6 +323,7 @@ export function AreaChart({
   gapThresholdMs?: number | null
   showTooltip?: boolean
   chartTheme?: MetricChartTheme
+  compact?: boolean
   top?: number
   left?: number
   children?: React.ReactNode
@@ -413,6 +415,10 @@ export function AreaChart({
       .sort((a, b) => a.timestamp - b.timestamp)
   }, [series, xScale, yScale, yScaleRight])
   const isMultiSeries = series.length > 1
+  const areaFromOpacity = compact ? 0.1 : 0.28
+  const areaToOpacity = compact ? 0 : 0.04
+  const lineStrokeWidth = compact ? 1.35 : isMultiSeries ? 1.75 : 1.5
+  const lineStrokeOpacity = compact ? 0.9 : 0.95
 
   const onTooltipPointerMove = (event: React.PointerEvent<SVGRectElement>) => {
     const rect = event.currentTarget.getBoundingClientRect()
@@ -426,7 +432,13 @@ export function AreaChart({
   if (width < 10) return null
   return (
     <Group left={left || margin.left} top={top || margin.top}>
-      <LinearGradient id={gradientId} from={primaryColor} fromOpacity={0.28} to={primaryColor} toOpacity={0.04} />
+      <LinearGradient
+        id={gradientId}
+        from={primaryColor}
+        fromOpacity={areaFromOpacity}
+        to={primaryColor}
+        toOpacity={areaToOpacity}
+      />
       {!hideGrid &&
         gridTicks.map((tick) => {
           const y = yScale(tick) || 0
@@ -443,8 +455,8 @@ export function AreaChart({
                   (chartSeries.axis === 'right' && yScaleRight ? yScaleRight(getValue(d)) : yScale(getValue(d))) || 0
                 }
                 yScale={chartSeries.axis === 'right' && yScaleRight ? yScaleRight : yScale}
-                strokeWidth={1}
-                stroke={`url(#${gradientId})`}
+                strokeWidth={compact ? 0 : 1}
+                stroke={compact ? 'transparent' : `url(#${gradientId})`}
                 fill={`url(#${gradientId})`}
                 curve={curveMonotoneX}
               />
@@ -457,10 +469,10 @@ export function AreaChart({
                 (chartSeries.axis === 'right' && yScaleRight ? yScaleRight(getValue(d)) : yScale(getValue(d))) || 0
               }
               stroke={chartSeries.color}
-              strokeWidth={isMultiSeries ? 1.75 : 1.5}
-              strokeOpacity={0.95}
-              shapeRendering="geometricPrecision"
-              markerMid="url(#marker-circle)"
+              strokeWidth={lineStrokeWidth}
+              strokeOpacity={lineStrokeOpacity}
+              shapeRendering={compact ? 'auto' : 'geometricPrecision'}
+              markerMid={compact ? undefined : 'url(#marker-circle)'}
             />
           </React.Fragment>
         ))
@@ -522,7 +534,7 @@ export function AreaChart({
           pointerEvents="all"
           onPointerMove={onTooltipPointerMove}
           onPointerLeave={() => setTooltip(null)}
-          style={{ cursor: 'crosshair' }}
+          style={{ cursor: compact ? 'default' : 'crosshair' }}
         />
       )}
       {showTooltip && tooltip && <ChartTooltip tooltip={tooltip} xMax={xMax} yMax={yMax} chartTheme={chartTheme} />}

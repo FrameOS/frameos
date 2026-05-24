@@ -10,8 +10,8 @@ import { metricsLogic, type MetricPoint, type MetricSeries, type TimeRange } fro
 import { workspaceLogic } from '../../../workspace/workspaceLogic'
 import { metricChartThemes, themeMetricSeries, type MetricChartTheme } from './chartTheme'
 
-const chartHeight = 34
-const chartMargin = { top: 3, right: 2, bottom: 3, left: 2 }
+const chartHeight = 28
+const chartMargin = { top: 3, right: 1, bottom: 3, left: 1 }
 const metricLabels: Record<string, string> = {
   load: 'Load',
   memoryUsage: 'Mem',
@@ -44,7 +44,7 @@ function HeaderMetricChart({
   }
 
   return (
-    <div className="h-[34px] w-[118px] overflow-visible">
+    <div className="h-7 w-[104px] overflow-visible">
       <ParentSize>
         {({ width }) => {
           if (width < 10) {
@@ -80,6 +80,7 @@ function HeaderMetricChart({
                 yScale={yScale}
                 gradientColor={chartTheme.background}
                 chartTheme={chartTheme}
+                compact
               />
             </svg>
           )
@@ -102,24 +103,31 @@ export function HeaderMetrics({ frameId }: { frameId: number }) {
   }
 
   return (
-    <div className="relative z-50 hidden items-center gap-2 overflow-visible pl-2 pr-2 @5xl:flex">
+    <div className="relative z-50 hidden items-center gap-1.5 overflow-visible pl-1.5 pr-2 @5xl:flex">
       {metricEntries.map(([key, series]) => (
         <div
           key={key}
           className={clsx(
-            'flex h-[42px] items-center gap-1.5 rounded border px-2',
-            theme === 'dark' ? 'border-gray-700 bg-gray-900/40' : 'border-slate-200/80 bg-white/65'
+            'relative z-0 flex h-9 items-center gap-2 overflow-visible rounded-lg border px-2.5 shadow-sm backdrop-blur-sm transition-colors hover:z-[80] focus-within:z-[80]',
+            theme === 'dark'
+              ? 'border-white/10 bg-white/[0.06] shadow-black/10 hover:bg-white/[0.09]'
+              : 'border-slate-200/70 bg-white/70 shadow-slate-950/5 hover:bg-white/90'
           )}
         >
           <span
             className={clsx(
-              'flex-none whitespace-nowrap text-xs font-medium',
+              'flex min-w-[2.35rem] flex-none flex-col justify-center whitespace-nowrap leading-none',
               theme === 'dark' ? 'text-gray-300' : 'text-slate-700'
             )}
           >
-            {metricLabels[key] ?? key}
+            <span className="text-[10px] font-semibold uppercase">{metricLabels[key] ?? key}</span>
             {latestMetricSummariesByCategory[key] ? (
-              <span className={clsx('ml-1', theme === 'dark' ? 'text-gray-400' : 'text-slate-500')}>
+              <span
+                className={clsx(
+                  'mt-0.5 text-[11px] font-medium',
+                  theme === 'dark' ? 'text-gray-400' : 'text-slate-500'
+                )}
+              >
                 {latestMetricSummariesByCategory[key]}
               </span>
             ) : null}

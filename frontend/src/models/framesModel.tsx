@@ -8,6 +8,7 @@ import { sanitizeScene } from '../scenes/frame/frameLogic'
 import { apiFetch } from '../utils/apiFetch'
 import { entityImagesModel } from './entityImagesModel'
 import { urls } from '../urls'
+import { logUpdatesFrameActivity } from '../decorators/frame'
 
 function sanitizeFrameForStore(frame: FrameType): FrameType {
   const lastSuccessfulDeploy = frame.last_successful_deploy
@@ -141,6 +142,30 @@ export const framesModel = kea<framesModelType>([
           ...state,
           [frame.id]: sanitizeFrameForStore({ ...(state[frame.id] ?? {}), ...frame }),
         }),
+        [socketLogic.actionTypes.newLog]: (state, { log }) => {
+          const frame = state[log.frame_id]
+          if (!frame) {
+            return state
+          }
+          if (!logUpdatesFrameActivity(log)) {
+            return state
+          }
+          const currentLastLogAt = frame.last_log_at ? Date.parse(frame.last_log_at) : NaN
+          const nextLastLogAt = Date.parse(log.timestamp)
+          if (
+            !Number.isFinite(nextLastLogAt) ||
+            (Number.isFinite(currentLastLogAt) && currentLastLogAt >= nextLastLogAt)
+          ) {
+            return state
+          }
+          return {
+            ...state,
+            [log.frame_id]: {
+              ...frame,
+              last_log_at: log.timestamp,
+            },
+          }
+        },
         [socketLogic.actionTypes.deleteFrame]: (state, { id }) => {
           const newState = { ...state }
           delete newState[id]

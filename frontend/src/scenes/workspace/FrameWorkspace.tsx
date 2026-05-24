@@ -21,6 +21,7 @@ import { framesModel } from '../../models/framesModel'
 import { FrameosShell } from './FrameosShell'
 import { AddSceneTile, SceneControlPanel, TemplateDrawer } from './FramesHome'
 import { FrameDashboardSurface, FrameScheduleDrawer } from './FrameDashboardSurface'
+import { FrameSidebarPreview } from './FrameSidebarPreview'
 import { sceneWorkspaceLogic } from './sceneWorkspaceLogic'
 import { workspaceLogic, WorkspaceUtilityPanel } from './workspaceLogic'
 import { urls } from '../../urls'
@@ -154,21 +155,27 @@ function FrameSelector({ frame, frames }: { frame: FrameType; frames: FrameType[
 
 function FrameSettingsSectionLinks({ frameId }: { frameId: number }): JSX.Element {
   const { openFrameTool } = useActions(workspaceLogic)
+  const splitIndex = Math.ceil(frameSettingsSections.length / 2)
+  const sectionColumns = [frameSettingsSections.slice(0, splitIndex), frameSettingsSections.slice(splitIndex)]
 
   return (
-    <div className="frameos-frame-tool-subnav ml-12 grid grid-cols-2 gap-1 border-l border-slate-200/70 pl-3">
-      {frameSettingsSections.map((section) => (
-        <button
-          key={section.id}
-          type="button"
-          onClick={() => {
-            openFrameTool(frameId, 'settings')
-            scrollToFrameSettingsSection(section.id)
-          }}
-          className="frameos-frame-tool-subrow min-w-0 rounded-lg px-2 py-1 text-left text-xs font-semibold text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-        >
-          <span className="block truncate">{section.label}</span>
-        </button>
+    <div className="frameos-frame-tool-subnav ml-12 grid grid-cols-2 gap-x-1 border-l border-slate-200/70 pl-3">
+      {sectionColumns.map((sections, columnIndex) => (
+        <div key={columnIndex} className="grid gap-1">
+          {sections.map((section) => (
+            <button
+              key={section.id}
+              type="button"
+              onClick={() => {
+                openFrameTool(frameId, 'settings')
+                scrollToFrameSettingsSection(section.id)
+              }}
+              className="frameos-frame-tool-subrow min-w-0 rounded-lg px-2 py-1 text-left text-xs font-semibold text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            >
+              <span className="block truncate">{section.label}</span>
+            </button>
+          ))}
+        </div>
       ))}
     </div>
   )
@@ -209,25 +216,6 @@ function FrameToolRow({
   )
 }
 
-function FrameSidebarPreview({ frame, active }: { frame: FrameType; active: boolean }): JSX.Element {
-  return (
-    <A
-      href={urls.frame(frame.id, 'preview')}
-      className={clsx(
-        'frameos-card mx-2 block overflow-hidden rounded-2xl border bg-white/65 shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg hover:shadow-slate-300/35 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-        active ? activeSurfaceClassName : 'border-white/80'
-      )}
-    >
-      <div className="frameos-card-media relative h-32 bg-slate-100">
-        <FrameImage frameId={frame.id} refreshable objectFit="contain" className="h-full w-full" />
-        <div className="absolute right-2 top-2 rounded-lg bg-white/90 px-2 py-0.5 text-[11px] font-semibold text-slate-500 shadow-sm">
-          Preview
-        </div>
-      </div>
-    </A>
-  )
-}
-
 function FrameTree({
   frame,
   frames,
@@ -240,7 +228,7 @@ function FrameTree({
   return (
     <div className="space-y-5">
       <FrameSelector frame={frame} frames={frames} />
-      <FrameSidebarPreview frame={frame} active={activeTool === 'preview'} />
+      <FrameSidebarPreview frame={frame} active={activeTool === 'preview'} className="mx-2" />
       <div>
         <div className="frameos-muted mb-2 px-2 text-xs font-semibold uppercase tracking-wide">Frame Tools</div>
         <div className="space-y-1">
@@ -355,10 +343,9 @@ function FrameScenesSurface({
   const header = (
     <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
       <div>
-        <div className="frameos-muted text-xs font-semibold uppercase tracking-wide text-slate-500">Scenes</div>
-        <h2 className="frameos-strong text-2xl font-bold tracking-normal text-slate-950">
+        <div className="frameos-muted text-xs font-semibold text-slate-500">
           {totalScenes} {totalScenes === 1 ? 'scene' : 'scenes'}
-        </h2>
+        </div>
       </div>
       <button
         type="button"
@@ -984,12 +971,8 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
 
   const { framesList } = useValues(framesModel)
   const { frame, scenes } = useValues(frameLogic(frameLogicProps))
-  const {
-    sceneControlSelection,
-    scheduleDrawerFrameId,
-    templateDrawerFrameId,
-    utilityPanel,
-  } = useValues(workspaceLogic)
+  const { sceneControlSelection, scheduleDrawerFrameId, templateDrawerFrameId, utilityPanel } =
+    useValues(workspaceLogic)
   const activeTool =
     frameToolDefinitions.find((definition) => definition.panel === utilityPanel) ?? frameToolDefinitions[0]
   const visibleScenes = scenes

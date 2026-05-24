@@ -20,7 +20,7 @@ import { PlayIcon } from '@heroicons/react/24/solid'
 import { framesModel } from '../../models/framesModel'
 import { DropdownMenu } from '../../components/DropdownMenu'
 import { FrameImage } from '../../components/FrameImage'
-import { frameHost, frameIsHealthy, frameIsStale, frameStatus } from '../../decorators/frame'
+import { frameHost, frameIsHealthy, frameIsStale, frameStatusDescription } from '../../decorators/frame'
 import { urls } from '../../urls'
 import { FrameScene, FrameType } from '../../types'
 import { FrameosShell } from './FrameosShell'
@@ -35,6 +35,7 @@ import { ExpandedScene } from '../frame/panels/Scenes/ExpandedScene'
 import { EditTemplateModal } from '../frame/panels/Templates/EditTemplateModal'
 import { Templates } from '../frame/panels/Templates/Templates'
 import { FrameDashboardSurface, FrameScheduleDrawer } from './FrameDashboardSurface'
+import { FrameLiveBadge } from './FrameLiveBadge'
 import { framesHomeLogic } from './framesHomeLogic'
 
 const uploadedScenePrefix = 'uploaded/'
@@ -55,14 +56,15 @@ function SidebarStatusDots({ frame }: { frame: FrameType }): JSX.Element {
   const stale = frameIsStale(frame)
   const ready = frame.status === 'ready' && !stale
   const connected = (frame.active_connections ?? 0) > 0
+  const statusDescription = frameStatusDescription(frame)
 
   return (
     <span className="flex shrink-0 items-center gap-1">
       <span
-        title={stale ? 'Stale' : ready ? 'Ready' : frame.status}
+        title={statusDescription}
         className={clsx('h-2.5 w-2.5 rounded-full', stale ? 'bg-amber-400' : ready ? 'bg-emerald-400' : 'bg-slate-300')}
       />
-      {connected ? <span title="Connected" className="h-2.5 w-2.5 rounded-full bg-blue-400" /> : null}
+      {connected ? <span title={statusDescription} className="h-2.5 w-2.5 rounded-full bg-blue-400" /> : null}
     </span>
   )
 }
@@ -132,7 +134,10 @@ function FrameTree(): JSX.Element {
                   )}
                 >
                   <ComputerDesktopIcon className="h-5 w-5 shrink-0" />
-                  <span className="min-w-0 flex-1 truncate">{frame.name || frameHost(frame)}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate">{frame.name || frameHost(frame)}</span>
+                    <span className="block truncate text-xs text-slate-400">{frameStatusDescription(frame)}</span>
+                  </span>
                   <SidebarStatusDots frame={frame} />
                 </button>
               ))}
@@ -223,7 +228,10 @@ function FrameTreeGroup({
                   )}
                 >
                   <ComputerDesktopIcon className="h-5 w-5 shrink-0" />
-                  <span className="min-w-0 flex-1 truncate text-base font-medium">{frameName}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-base font-medium">{frameName}</span>
+                    <span className="block truncate text-xs text-slate-400">{frameStatusDescription(frame)}</span>
+                  </span>
                   <SidebarStatusDots frame={frame} />
                 </button>
                 <A
@@ -426,9 +434,7 @@ function CurrentSnapshotCard({ frame, active }: { frame: FrameType; active: bool
     >
       <div className="frameos-card-media relative flex h-[24rem] max-h-[75vh] min-h-0 items-center justify-center overflow-hidden bg-slate-100">
         <FrameImage frameId={frame.id} refreshable={false} objectFit="contain" className="h-full w-full rounded-none" />
-        <div className="frameos-primary-hover-text absolute right-3 top-3 rounded-full bg-white/90 px-2.5 py-1 text-xs font-semibold text-slate-500 shadow-sm transition">
-          Open
-        </div>
+        <FrameLiveBadge frame={frame} className="right-3 top-3" />
       </div>
       <div className="px-4 py-3">
         <div className="frameos-muted text-xs text-slate-500">
@@ -466,7 +472,6 @@ function FrameSection({ section }: { section: OverviewFrameSection }): JSX.Eleme
       archived={archived}
       frameMatchesSearch={frameMatchesSearch}
       sectionId={`workspace-frame-${frame.id}`}
-      showOpenFrameAction
     />
   )
 }

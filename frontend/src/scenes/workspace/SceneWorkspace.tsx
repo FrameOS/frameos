@@ -19,6 +19,7 @@ import { framesModel } from '../../models/framesModel'
 import { frameHost } from '../../decorators/frame'
 import { FrameScene, FrameType, NodeData } from '../../types'
 import { FrameosShell } from './FrameosShell'
+import { FrameSidebarPreview } from './FrameSidebarPreview'
 import { sceneWorkspaceLogic } from './sceneWorkspaceLogic'
 import { workspaceLogic, WorkspaceUtilityPanel } from './workspaceLogic'
 import { frameLogic } from '../frame/frameLogic'
@@ -141,6 +142,7 @@ function SceneSelector({
           ))}
         </select>
       </div>
+      <FrameSidebarPreview frame={frame} />
       <div onDragOver={handleSceneListDragOver} onDrop={handleSceneListDrop}>
         <div className="mb-2 flex items-center justify-between gap-2">
           <label className="frameos-muted block text-xs font-semibold uppercase tracking-wide">Scenes</label>
@@ -453,6 +455,9 @@ function SceneTreeLoadingPlaceholder(): JSX.Element {
       <div>
         <div className="frameos-muted mb-2 text-xs font-semibold uppercase tracking-wide">Frame</div>
         <div className="frameos-skeleton-surface h-12 animate-pulse rounded-xl" />
+      </div>
+      <div className="frameos-skeleton-surface h-32 overflow-hidden rounded-2xl">
+        <div className="frameos-skeleton-media h-full animate-pulse" />
       </div>
       <div>
         <div className="mb-2 flex items-center justify-between gap-2">

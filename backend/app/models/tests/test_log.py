@@ -1,5 +1,6 @@
 import pytest
 from unittest.mock import patch, AsyncMock
+from datetime import datetime, timedelta, timezone
 from app.models.frame import new_frame, Frame
 from app.models.log import LOG_LIMIT_PER_FRAME, new_log, process_log, Log
 
@@ -14,6 +15,38 @@ async def test_new_log(mock_pub, db, redis):
     assert log_entry.frame_id == frame.id
     # First publish_message: "new_frame", second: "new_log"
     assert mock_pub.await_count == 2
+
+
+@pytest.mark.asyncio
+@patch("app.models.log.publish_message", new_callable=AsyncMock)
+async def test_new_log_updates_frame_last_log_at(mock_pub, db, redis):
+    frame = await new_frame(db, redis, "LogFrame", "localhost", "server_host")
+    timestamp = (datetime.now(timezone.utc) + timedelta(seconds=1)).replace(tzinfo=None)
+
+    await new_log(db, redis, frame.id, "info", "Sample log", timestamp=timestamp)
+
+    updated = db.get(Frame, frame.id)
+    assert updated.last_log_at == timestamp
+
+
+@pytest.mark.asyncio
+@patch("app.models.log.publish_message", new_callable=AsyncMock)
+async def test_new_log_ignores_frame_image_fetch_errors_for_last_log_at(mock_pub, db, redis):
+    frame = await new_frame(db, redis, "LogFrame", "localhost", "server_host")
+    original_last_log_at = frame.last_log_at
+    timestamp = (datetime.now(timezone.utc) + timedelta(seconds=1)).replace(tzinfo=None)
+
+    await new_log(
+        db,
+        redis,
+        frame.id,
+        "stderr",
+        f"Error fetching image from frame {frame.id}: 502: All connection attempts failed",
+        timestamp=timestamp,
+    )
+
+    updated = db.get(Frame, frame.id)
+    assert updated.last_log_at == original_last_log_at
 
 @pytest.mark.asyncio
 @patch("app.models.log.publish_message", new_callable=AsyncMock)

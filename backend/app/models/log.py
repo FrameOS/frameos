@@ -12,6 +12,13 @@ from sqlalchemy.orm import relationship, backref, Session, mapped_column
 from app.websockets import publish_message
 
 LOG_LIMIT_PER_FRAME = 10000
+IGNORED_FRAME_ACTIVITY_LOG_PREFIX = "Error fetching image from frame "
+
+
+def is_frame_activity_log(type: str, line: str) -> bool:
+    if type == "stderr" and line.startswith(IGNORED_FRAME_ACTIVITY_LOG_PREFIX):
+        return False
+    return True
 
 class Log(Base):
     __tablename__ = 'log'
@@ -44,14 +51,18 @@ async def new_log(
     timestamp: Optional[datetime] = None,
     ip: Optional[str] = None,
 ) -> Log:
+    timestamp = timestamp or datetime.utcnow()
     log = Log(
         frame_id=frame_id,
         type=type,
         line=line,
-        timestamp=timestamp or datetime.utcnow(),
+        timestamp=timestamp,
         ip=ip,
     )
     db.add(log)
+    if frame := db.get(Frame, frame_id):
+        if is_frame_activity_log(type, line) and (frame.last_log_at is None or timestamp > frame.last_log_at):
+            frame.last_log_at = timestamp
     db.commit()
     frame_logs_count = db.query(Log).filter_by(frame_id=frame_id).count()
     payload = {**log.to_dict(), "timestamp": log.timestamp.replace(tzinfo=timezone.utc).isoformat()}

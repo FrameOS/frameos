@@ -37,13 +37,14 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.responses import Response, StreamingResponse
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 # local ---------------------------------------------------------------------
 from app.database import get_db
 from arq import ArqRedis as Redis
 from app.models.frame import Frame, new_frame, delete_frame, normalize_https_proxy, refresh_tls_certificate_validity_dates, update_frame
-from app.models.log import Log, new_log as log
+from app.models.log import IGNORED_FRAME_ACTIVITY_LOG_PREFIX, Log, new_log as log
 from app.models.metrics import Metrics
 from app.codegen.scene_nim import write_scene_nim
 from app.utils.ssh_utils import (
@@ -536,15 +537,32 @@ async def _remote_download_file(
 # ---------------------------------------------------------------------------
 
 
+def _frame_activity_log_filter():
+    return ~((Log.type == "stderr") & Log.line.like(f"{IGNORED_FRAME_ACTIVITY_LOG_PREFIX}%"))
+
+
+def _frame_to_response_dict(frame: Frame, latest_log_at: datetime | None = None) -> dict[str, Any]:
+    data = frame.to_dict()
+    if latest_log_at:
+        data["last_log_at"] = latest_log_at.replace(tzinfo=timezone.utc).isoformat()
+    return data
+
+
 @api_with_auth.get("/frames", response_model=FramesListResponse)
 async def api_frames_list(
     db: Session = Depends(get_db), redis: Redis = Depends(get_redis)
 ):
     frames = db.query(Frame).all()
+    latest_logs = dict(
+        db.query(Log.frame_id, func.max(Log.timestamp))
+        .filter(_frame_activity_log_filter())
+        .group_by(Log.frame_id)
+        .all()
+    )
     return {
         "frames": [
             {
-                **f.to_dict(),
+                **_frame_to_response_dict(f, latest_logs.get(f.id)),
                 "active_connections": await number_of_connections_for_frame(
                     redis, f.id
                 ),
@@ -1088,7 +1106,10 @@ async def api_frame_get(
     if frame is None:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
 
-    data = frame.to_dict()
+    latest_log_at = (
+        db.query(func.max(Log.timestamp)).filter_by(frame_id=frame.id).filter(_frame_activity_log_filter()).scalar()
+    )
+    data = _frame_to_response_dict(frame, latest_log_at)
     active = await redis.get(f"frame:{frame.id}:active_connections")
     data["active_connections"] = int(active or 0)
     return {"frame": data}

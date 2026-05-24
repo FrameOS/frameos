@@ -2,7 +2,7 @@ import json
 import pytest
 from unittest.mock import patch
 import httpx
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from app.api.auth import get_current_user
 from app.fastapi import app
@@ -32,6 +32,40 @@ async def test_api_frame_get_found(async_client, db, redis):
     data = response.json()
     assert 'frame' in data
     assert data['frame']['name'] == 'FoundFrame'
+
+
+@pytest.mark.asyncio
+async def test_api_frame_uses_latest_activity_log_timestamp(async_client, db, redis):
+    frame = await new_frame(db, redis, 'LatestLogFrame', 'localhost', 'localhost')
+    frame.last_log_at = datetime(2026, 1, 1, 0, 0, 0)
+    latest_timestamp = datetime(2026, 6, 1, 12, 0, 0)
+    ignored_timestamp = datetime(2026, 6, 1, 12, 5, 0)
+    db.add(
+        Log(
+            frame_id=frame.id,
+            type='stdout',
+            line='newer line',
+            timestamp=latest_timestamp,
+        )
+    )
+    db.add(
+        Log(
+            frame_id=frame.id,
+            type='stderr',
+            line=f'Error fetching image from frame {frame.id}: 502: All connection attempts failed',
+            timestamp=ignored_timestamp,
+        )
+    )
+    db.commit()
+
+    detail_response = await async_client.get(f'/api/frames/{frame.id}')
+    list_response = await async_client.get('/api/frames')
+
+    expected_timestamp = latest_timestamp.replace(tzinfo=timezone.utc).isoformat().replace("+00:00", "Z")
+    assert detail_response.json()['frame']['last_log_at'] == expected_timestamp
+    latest_frame = next(item for item in list_response.json()['frames'] if item['id'] == frame.id)
+    assert latest_frame['last_log_at'] == expected_timestamp
+
 
 @pytest.mark.asyncio
 async def test_api_frame_get_not_found(async_client):
