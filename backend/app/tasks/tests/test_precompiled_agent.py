@@ -28,7 +28,7 @@ async def test_download_precompiled_agent_release_extracts_binary(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    source_root = tmp_path / "source" / "prebuilt-cross" / "debian-trixie-arm64"
+    source_root = tmp_path / "source" / "frameos-2026.5.14-debian-trixie-arm64"
     source_root.mkdir(parents=True)
     (source_root / "frameos_agent").write_bytes(b"agent")
     (source_root / "metadata.json").write_text(
@@ -37,7 +37,7 @@ async def test_download_precompiled_agent_release_extracts_binary(
     )
     archive = tmp_path / "release.tar.gz"
     with tarfile.open(archive, "w:gz") as tar:
-        tar.add(tmp_path / "source" / "prebuilt-cross", arcname="prebuilt-cross")
+        tar.add(source_root, arcname=source_root.name)
 
     async def fake_download(_url: str, destination: Path, _timeout: float) -> None:
         shutil.copy2(archive, destination)

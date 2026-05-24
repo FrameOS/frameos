@@ -212,15 +212,11 @@ def _safe_extract(tar: tarfile.TarFile, path: Path) -> None:
     tar.extractall(path=path, filter="data")
 
 
-def _find_artifact_root(extract_dir: Path, target: str) -> Path | None:
-    expected = extract_dir / "prebuilt-cross" / target
-    if (expected / "frameos").is_file():
-        return expected
-
+def _find_release_artifact_root(extract_dir: Path, target: str, binary_name: str) -> Path | None:
     candidates = []
     for metadata_path in extract_dir.rglob("metadata.json"):
         root = metadata_path.parent
-        if not (root / "frameos").is_file():
+        if not (root / binary_name).is_file():
             continue
         try:
             metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
@@ -229,9 +225,18 @@ def _find_artifact_root(extract_dir: Path, target: str) -> Path | None:
         if metadata.get("slug") == target:
             return root
         candidates.append(root)
+
+    legacy = extract_dir / "prebuilt-cross" / target
+    if (legacy / binary_name).is_file():
+        return legacy
+
     if len(candidates) == 1:
         return candidates[0]
     return None
+
+
+def _find_artifact_root(extract_dir: Path, target: str) -> Path | None:
+    return _find_release_artifact_root(extract_dir, target, "frameos")
 
 
 def _copy_required_drivers(

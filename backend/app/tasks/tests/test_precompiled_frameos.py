@@ -27,7 +27,7 @@ async def test_download_precompiled_frameos_release_extracts_required_files(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    source_root = tmp_path / "source" / "prebuilt-cross" / "debian-trixie-arm64"
+    source_root = tmp_path / "source" / "frameos-2026.5.14-debian-trixie-arm64"
     (source_root / "drivers").mkdir(parents=True)
     (source_root / "frameos").write_bytes(b"frameos")
     (source_root / "drivers" / "frameBuffer.so").write_bytes(b"driver")
@@ -38,7 +38,7 @@ async def test_download_precompiled_frameos_release_extracts_required_files(
     )
     archive = tmp_path / "release.tar.gz"
     with tarfile.open(archive, "w:gz") as tar:
-        tar.add(tmp_path / "source" / "prebuilt-cross", arcname="prebuilt-cross")
+        tar.add(source_root, arcname=source_root.name)
 
     async def fake_download(_url: str, destination: Path, _timeout: float) -> None:
         shutil.copy2(archive, destination)
@@ -74,7 +74,7 @@ async def test_download_precompiled_frameos_release_reuses_cached_archive(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    source_root = tmp_path / "source" / "prebuilt-cross" / "debian-trixie-arm64"
+    source_root = tmp_path / "source" / "frameos-2026.5.14-debian-trixie-arm64"
     (source_root / "drivers").mkdir(parents=True)
     (source_root / "frameos").write_bytes(b"frameos")
     (source_root / "drivers" / "frameBuffer.so").write_bytes(b"driver")
@@ -85,7 +85,7 @@ async def test_download_precompiled_frameos_release_reuses_cached_archive(
     )
     archive = tmp_path / "release.tar.gz"
     with tarfile.open(archive, "w:gz") as tar:
-        tar.add(tmp_path / "source" / "prebuilt-cross", arcname="prebuilt-cross")
+        tar.add(source_root, arcname=source_root.name)
 
     download_count = 0
 

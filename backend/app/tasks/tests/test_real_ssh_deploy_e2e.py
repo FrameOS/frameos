@@ -333,7 +333,8 @@ def _build_precompiled_release_archive(binary_path: Path, release_root: Path) ->
     version = release_version()
     assert version
     release_dir = release_root / f"v{version}"
-    artifact_root = release_root / "payload" / "prebuilt-cross" / PRECOMPILED_TARGET
+    archive_root_name = f"frameos-{version}-{PRECOMPILED_TARGET}"
+    artifact_root = release_root / "payload" / archive_root_name
     release_dir.mkdir(parents=True, exist_ok=True)
     artifact_root.mkdir(parents=True, exist_ok=True)
 
@@ -356,7 +357,7 @@ def _build_precompiled_release_archive(binary_path: Path, release_root: Path) ->
 
     archive_path = release_dir / f"frameos-{version}-{PRECOMPILED_TARGET}.tar.gz"
     with tarfile.open(archive_path, "w:gz") as archive:
-        archive.add(release_root / "payload" / "prebuilt-cross", arcname="prebuilt-cross")
+        archive.add(artifact_root, arcname=archive_root_name)
     _say(f"packaged local precompiled release archive {archive_path}")
     return archive_path
 

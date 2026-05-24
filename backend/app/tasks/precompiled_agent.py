@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import shutil
 import tarfile
@@ -11,6 +10,7 @@ from pathlib import Path
 from app.tasks.precompiled_frameos import (
     RELEASE_TIMEOUT,
     _cached_release_archive,
+    _find_release_artifact_root,
     _safe_extract,
     precompiled_frameos_release_url,
 )
@@ -79,22 +79,4 @@ async def download_precompiled_agent_release(
 
 
 def _find_agent_artifact_root(extract_dir: Path, target: str) -> Path | None:
-    expected = extract_dir / "prebuilt-cross" / target
-    if (expected / "frameos_agent").is_file():
-        return expected
-
-    candidates = []
-    for metadata_path in extract_dir.rglob("metadata.json"):
-        root = metadata_path.parent
-        if not (root / "frameos_agent").is_file():
-            continue
-        try:
-            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            metadata = {}
-        if metadata.get("slug") == target:
-            return root
-        candidates.append(root)
-    if len(candidates) == 1:
-        return candidates[0]
-    return None
+    return _find_release_artifact_root(extract_dir, target, "frameos_agent")
