@@ -20,7 +20,7 @@ def test_precompiled_agent_release_url_uses_release_version():
     url = precompiled_agent_release_url("debian-trixie-arm64")
 
     assert url is not None
-    assert url.endswith(f"/v{version}/frameos-agent-{version}-debian-trixie-arm64.tar.gz")
+    assert url.endswith(f"/v{version}/frameos-{version}-debian-trixie-arm64.tar.gz")
 
 
 @pytest.mark.asyncio
@@ -61,4 +61,4 @@ async def test_download_precompiled_agent_release_extracts_binary(
     assert Path(result.binary_path).read_bytes() == b"agent"
     assert Path(result.archive_path).is_file()
     assert result.cache_hit is False
-    assert any("Downloading precompiled FrameOS agent release" in message for _level, message in logs)
+    assert any("Downloading precompiled FrameOS release" in message for _level, message in logs)

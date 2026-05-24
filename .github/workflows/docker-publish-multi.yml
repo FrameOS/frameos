@@ -140,10 +140,6 @@ jobs:
           tar -czf "release-assets/frameos-${DOCKER_VERSION}-${TARGET_SLUG}.tar.gz" \
             -C frameos/build \
             "prebuilt-cross/${TARGET_SLUG}"
-          tar -czf "release-assets/frameos-agent-${DOCKER_VERSION}-${TARGET_SLUG}.tar.gz" \
-            -C frameos/build \
-            "prebuilt-cross/${TARGET_SLUG}/frameos_agent" \
-            "prebuilt-cross/${TARGET_SLUG}/metadata.json"
 
       - name: Upload release artifact
         uses: actions/upload-artifact@v4

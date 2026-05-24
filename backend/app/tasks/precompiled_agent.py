@@ -7,15 +7,12 @@ import tarfile
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import urljoin
 
 from app.tasks.precompiled_frameos import (
-    RELEASE_BASE_URL,
     RELEASE_TIMEOUT,
-    SAFE_RELEASE_SEGMENT,
     _cached_release_archive,
     _safe_extract,
-    release_version,
+    precompiled_frameos_release_url,
 )
 
 
@@ -28,13 +25,7 @@ class PrecompiledAgentResult:
 
 
 def precompiled_agent_release_url(target: str, version: str | None = None) -> str | None:
-    resolved_version = version or release_version()
-    if not resolved_version or not target:
-        return None
-    if not SAFE_RELEASE_SEGMENT.fullmatch(resolved_version) or not SAFE_RELEASE_SEGMENT.fullmatch(target):
-        return None
-    base = RELEASE_BASE_URL if RELEASE_BASE_URL.endswith("/") else f"{RELEASE_BASE_URL}/"
-    return urljoin(base, f"v{resolved_version}/frameos-agent-{resolved_version}-{target}.tar.gz")
+    return precompiled_frameos_release_url(target, version)
 
 
 async def download_precompiled_agent_release(
@@ -48,14 +39,14 @@ async def download_precompiled_agent_release(
 ) -> PrecompiledAgentResult:
     url = precompiled_agent_release_url(target)
     if not url:
-        raise RuntimeError("Unable to construct precompiled FrameOS agent release URL")
+        raise RuntimeError("Unable to construct precompiled FrameOS release URL for agent")
 
     release_archive_path, cache_hit = await _cached_release_archive(
         url,
         target,
         timeout,
         logger,
-        label="FrameOS agent",
+        label="FrameOS",
     )
     build_path = Path(build_dir)
     build_path.mkdir(parents=True, exist_ok=True)
@@ -68,11 +59,11 @@ async def download_precompiled_agent_release(
 
         artifact_root = _find_agent_artifact_root(extract_dir, target)
         if not artifact_root:
-            raise RuntimeError(f"Precompiled FrameOS agent archive did not contain target {target}")
+            raise RuntimeError(f"Precompiled FrameOS archive did not contain agent for target {target}")
 
         binary_src = artifact_root / "frameos_agent"
         if not binary_src.is_file():
-            raise RuntimeError("Precompiled FrameOS agent archive is missing frameos_agent binary")
+            raise RuntimeError("Precompiled FrameOS archive is missing frameos_agent binary")
         binary_dest = build_path / "frameos_agent"
         shutil.copy2(binary_src, binary_dest)
         os.chmod(binary_dest, 0o755)
@@ -88,10 +79,9 @@ async def download_precompiled_agent_release(
 
 
 def _find_agent_artifact_root(extract_dir: Path, target: str) -> Path | None:
-    for base in ("prebuilt-agent", "prebuilt-cross"):
-        expected = extract_dir / base / target
-        if (expected / "frameos_agent").is_file():
-            return expected
+    expected = extract_dir / "prebuilt-cross" / target
+    if (expected / "frameos_agent").is_file():
+        return expected
 
     candidates = []
     for metadata_path in extract_dir.rglob("metadata.json"):

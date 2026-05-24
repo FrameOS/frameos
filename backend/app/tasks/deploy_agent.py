@@ -203,7 +203,7 @@ class AgentDeployer(FrameDeployer):
             prebuilt_target = resolve_prebuilt_target(distro, distro_version, arch)
             if prebuilt_target:
                 try:
-                    await self.log("stdout", f"- Trying precompiled agent release for {prebuilt_target}")
+                    await self.log("stdout", f"- Trying precompiled FrameOS release for agent on {prebuilt_target}")
                     build_dir = os.path.join(self.temp_dir, f"agent_{self.build_id}")
                     result = await download_precompiled_agent_release(
                         target=prebuilt_target,
@@ -213,7 +213,7 @@ class AgentDeployer(FrameDeployer):
                         logger=self.log,
                     )
                     action = "Using cached" if result.cache_hit else "Downloaded"
-                    await self.log("stdout", f"- {action} precompiled agent release: {result.release_url}")
+                    await self.log("stdout", f"- {action} precompiled FrameOS release for agent: {result.release_url}")
                     await self._stage_agent_binary(result.binary_path)
                     return
                 except Exception as exc:

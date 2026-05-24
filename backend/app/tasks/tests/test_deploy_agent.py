@@ -42,10 +42,10 @@ async def test_deploy_agent_prefers_precompiled_binary(
         binary_path = tmp_path / "frameos_agent"
         binary_path.write_bytes(b"agent")
         return PrecompiledAgentResult(
-            release_url="https://example.test/frameos-agent.tar.gz",
+            release_url="https://example.test/frameos.tar.gz",
             binary_path=str(binary_path),
             archive_path=str(tmp_path / "archive.tar.gz"),
-    )
+        )
 
     deploy_agent_module = importlib.import_module("app.tasks.deploy_agent")
     monkeypatch.setattr(
@@ -64,7 +64,7 @@ async def test_deploy_agent_prefers_precompiled_binary(
 
     assert deployer.staged_binary == str(tmp_path / "frameos_agent")
     assert deployer.source_arch is None
-    assert any("precompiled agent release" in message for _level, message in deployer.logs)
+    assert any("precompiled FrameOS release for agent" in message for _level, message in deployer.logs)
 
 
 @pytest.mark.asyncio
