@@ -19,15 +19,7 @@ export interface MetricChartTheme {
   seriesColors: Record<string, string>
 }
 
-const lightSeriesColors: Record<string, string> = {
-  '#2dd4bf': '#0f766e',
-  '#f59e0b': '#b45309',
-  '#38bdf8': '#0369a1',
-  '#a78bfa': '#6d28d9',
-  '#34d399': '#047857',
-  '#fb7185': '#be123c',
-  '#f472b6': '#be185d',
-}
+const lightSeriesColors: Record<string, string> = {}
 
 export const metricChartThemes: Record<MetricChartThemeName, MetricChartTheme> = {
   light: {
@@ -40,15 +32,15 @@ export const metricChartThemes: Record<MetricChartThemeName, MetricChartTheme> =
     tooltipText: 'rgba(15,23,42,0.92)',
     tooltipMutedText: 'rgba(71,85,105,0.72)',
     tooltipShadow: 'rgba(100,116,139,0.18)',
-    brushAccent: '#4a4b8c',
-    brushSelectionStroke: 'rgba(74,75,140,0.72)',
+    brushAccent: 'var(--frameos-primary)',
+    brushSelectionStroke: 'var(--frameos-primary-ring)',
     brushHandleFill: '#ffffff',
     brushHandleStroke: '#64748b',
     seriesColors: lightSeriesColors,
   },
   dark: {
     name: 'dark',
-    background: '#18181b',
+    background: 'var(--frameos-color-graphite)',
     grid: 'rgba(244,244,245,0.1)',
     axis: 'rgba(244,244,245,0.78)',
     tooltipBackground: 'rgba(24,24,27,0.96)',
@@ -56,10 +48,10 @@ export const metricChartThemes: Record<MetricChartThemeName, MetricChartTheme> =
     tooltipText: 'rgba(244,244,245,0.92)',
     tooltipMutedText: 'rgba(244,244,245,0.62)',
     tooltipShadow: 'rgba(0,0,0,0.24)',
-    brushAccent: '#f6acc8',
-    brushSelectionStroke: '#ffffff',
+    brushAccent: 'var(--frameos-primary-text)',
+    brushSelectionStroke: 'var(--frameos-primary-ring)',
     brushHandleFill: '#f2f2f2',
-    brushHandleStroke: '#999999',
+    brushHandleStroke: 'var(--frameos-primary-border-strong)',
     seriesColors: {},
   },
 }

@@ -83,7 +83,7 @@ function SceneScheduleCard({
       }}
       onDragEnd={hideDropZone}
       onClick={() => addEventForScene(scene.id)}
-      className="group relative flex min-w-[8.5rem] max-w-[9.5rem] flex-1 overflow-hidden rounded-2xl border border-[var(--tool-border)] bg-[var(--tool-bg-strong)] text-left shadow-sm transition hover:-translate-y-0.5 hover:border-[#4a4b8c]/45 hover:shadow-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+      className="frameos-primary-hover-border group relative flex min-w-[8.5rem] max-w-[9.5rem] flex-1 overflow-hidden rounded-2xl border border-[var(--tool-border)] bg-[var(--tool-bg-strong)] text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
       title={`Add ${sceneName(scene)} to the schedule`}
     >
       <div className="flex w-full flex-col">
@@ -96,7 +96,7 @@ function SceneScheduleCard({
             objectFit="cover"
             className="h-full w-full rounded-none transition duration-200 group-hover:scale-[1.03]"
           />
-          <span className="absolute right-2 top-2 inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/90 text-[#4a4b8c] shadow-sm">
+          <span className="frameos-primary-text absolute right-2 top-2 inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/90 shadow-sm">
             <PlusIcon className="h-4 w-4" />
           </span>
         </div>
@@ -165,9 +165,7 @@ function ScheduleDropSlot({
       <div
         className={clsx(
           'w-full rounded-full border-2 border-dashed transition-all',
-          active
-            ? 'h-8 border-[#4a4b8c] bg-[#4a4b8c]/15 shadow-[0_0_0_4px_rgba(74,75,140,0.10)]'
-            : 'h-2 border-[#4a4b8c]/45 bg-white/55'
+          active ? 'frameos-primary-drop-target h-8' : 'frameos-primary-drop-placeholder h-2 bg-white/55'
         )}
       />
     </div>
@@ -236,7 +234,7 @@ function EditRow({ frameId, event, scene, eventFields, closeEvent, deleteEvent }
           frameId={frameId}
           event={event}
           scene={scene}
-          className="transition group-hover:border-[#4a4b8c]/45 group-hover:shadow-lg"
+          className="frameos-primary-group-hover-border transition group-hover:shadow-lg"
         />
       </button>
       <div className="grid grid-cols-[minmax(6rem,1fr)_4rem_4rem] gap-2">
@@ -527,7 +525,7 @@ export function Schedule({ scrollContainer = true }: ScheduleProps = {}) {
                       frameId={frameId}
                       event={event}
                       scene={scene}
-                      className="transition group-hover:border-[#4a4b8c]/45 group-hover:shadow-lg"
+                      className="frameos-primary-group-hover-border transition group-hover:shadow-lg"
                     />
                   </button>
                 )}

@@ -82,7 +82,7 @@ export function TemplateRow({
     <div
       className={clsx(
         'frame-tool-card @container break-inside-avoid space-y-2 rounded-[18px] p-3 transition',
-        installedTemplatesByName[template.name] ? 'border-[#4a4b8c]/50' : ''
+        installedTemplatesByName[template.name] ? 'frameos-primary-border-strong' : ''
       )}
     >
       <div className="flex items-start justify-between gap-2">

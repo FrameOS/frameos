@@ -52,7 +52,7 @@ const isInThumbsFolder = (path: string): boolean => {
   )
 }
 const playSceneButtonClassName =
-  'frameos-primary-text shrink-0 rounded-lg border border-[#4a4b8c]/35 bg-[#4a4b8c]/10 p-1.5 transition hover:bg-[#4a4b8c]/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400'
+  'frameos-primary-outline-action shrink-0 rounded-lg border p-1.5 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400'
 const assetRowActionsClassName = 'ml-auto flex w-[5.25rem] shrink-0 items-center justify-end gap-2'
 
 interface AssetStats {
@@ -183,7 +183,7 @@ function TreeNode({
   setFrameAssetFolderExpanded: (frameId: number, path: string, expanded: boolean) => void
 }): JSX.Element {
   const expansionKey = frameAssetFolderExpansionKey(frameId, node.path)
-  const expanded = frameAssetFolderExpansion[expansionKey] ?? (node.path === '')
+  const expanded = frameAssetFolderExpansion[expansionKey] ?? node.path === ''
   const [isDownloading, setIsDownloading] = useState(false)
   const [isDragOver, setIsDragOver] = useState(false)
 
@@ -223,7 +223,7 @@ function TreeNode({
         <div
           className={clsx(
             'frame-tool-row mb-1 flex items-center gap-2 rounded-xl px-3 py-2 transition',
-            isDragOver && 'border-[#4a4b8c] bg-[#4a4b8c]/10'
+            isDragOver && 'frameos-primary-drop-target'
           )}
           onDragOver={onDragOver}
           onDragLeave={onDragLeave}
@@ -235,9 +235,9 @@ function TreeNode({
             onClick={() => setFrameAssetFolderExpanded(frameId, node.path, !expanded)}
           >
             {expanded ? (
-              <FolderOpenIcon className="h-5 w-5 shrink-0 text-blue-400" />
+              <FolderOpenIcon className="frameos-folder-icon h-5 w-5 shrink-0" />
             ) : (
-              <FolderIcon className="h-5 w-5 shrink-0 text-blue-400" />
+              <FolderIcon className="frameos-folder-icon h-5 w-5 shrink-0" />
             )}
             <span className="truncate font-medium">{node.name || '/'}</span>
             <span className="frame-tool-muted shrink-0 text-xs">{Object.keys(node.children).length} items</span>
@@ -311,7 +311,7 @@ function TreeNode({
         </div>
         {expanded && (
           <div
-            className={clsx('ml-4 border-l pl-3', isDragOver ? 'border-[#4a4b8c]' : 'border-slate-300/70')}
+            className={clsx('ml-4 border-l pl-3', isDragOver ? 'frameos-primary-border' : 'border-slate-300/70')}
             onDragOver={onDragOver}
             onDragLeave={onDragLeave}
             onDrop={onDropFiles}
@@ -346,7 +346,7 @@ function TreeNode({
       <div
         className={clsx(
           'frame-tool-row mb-1 ml-1 flex items-center gap-3 rounded-xl px-3 py-2 transition',
-          isDragOver && 'border-[#4a4b8c] bg-[#4a4b8c]/10'
+          isDragOver && 'frameos-primary-drop-target'
         )}
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
@@ -603,7 +603,10 @@ function AssetsSummaryHeader({
                 {Math.round(diskUsedPercent ?? 0)}% used
               </div>
               <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-400/20">
-                <div className="h-full rounded-full bg-[#4a4b8c]" style={{ width: `${diskUsedPercent ?? 0}%` }} />
+                <div
+                  className="frameos-primary-fill h-full rounded-full"
+                  style={{ width: `${diskUsedPercent ?? 0}%` }}
+                />
               </div>
               <div className="frame-tool-muted mt-1 truncate text-xs">
                 {humaniseSize(diskStats.availableBytes)} free / {humaniseSize(diskStats.totalBytes)}

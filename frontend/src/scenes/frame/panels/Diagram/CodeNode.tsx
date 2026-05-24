@@ -150,7 +150,7 @@ declare const context: {
     updateCodeArgGlobals(monaco, data.codeArgs ?? [])
   }
 
-  const titleBackground = isSelected ? 'bg-fuchsia-900' : 'bg-green-900'
+  const titleBackground = isSelected ? 'frameos-diagram-title-selected' : 'bg-green-900'
   const outputLabel = data.codeOutputs?.find((output) => output.name.trim())?.name ?? 'output'
 
   return (
@@ -160,7 +160,7 @@ declare const context: {
         className={clsx(
           'shadow-lg border-2 h-full flex flex-col relative',
           isSelected
-            ? 'frameos-diagram-node border-fuchsia-900 shadow-fuchsia-700/50'
+            ? 'frameos-diagram-node frameos-diagram-node-selected'
             : 'frameos-diagram-node border-green-900 shadow-green-700/50 '
         )}
       >
@@ -324,7 +324,7 @@ declare const context: {
         <div
           className={clsx(
             'frameos-node-title text-xl px-1 gap-1',
-            isSelected ? 'bg-fuchsia-900' : 'bg-green-900',
+            isSelected ? 'frameos-diagram-title-selected' : 'bg-green-900',
             'flex w-full justify-between items-center'
           )}
         >

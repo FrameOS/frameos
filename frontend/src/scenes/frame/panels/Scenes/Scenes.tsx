@@ -413,7 +413,7 @@ export function Scenes() {
           <p className="frame-tool-muted">
             {frame.last_successful_deploy_at
               ? 'Scenes are the building blocks of your frame. They can be anything from a simple clock to a complex interactive thermostat.'
-              : 'Press the purple "First deploy" button to deploy FrameOS for the first time.'}
+              : 'Press the "First deploy" button to deploy FrameOS for the first time.'}
           </p>
           {renderShortcuts('empty', 'justify-center', createNewScene)}
         </div>
@@ -525,7 +525,7 @@ export function Scenes() {
           <div
             className={clsx(
               'frame-tool-row border rounded-lg shadow break-inside-avoid p-2 space-y-1 border-blue-700/60',
-              missingActiveExpanded ? 'shadow-[0_0_3px_3px_rgba(128,0,255,0.3)]' : null
+              missingActiveExpanded ? 'frameos-active-surface' : null
             )}
           >
             <div className="flex items-start justify-between gap-1">
@@ -597,7 +597,7 @@ export function Scenes() {
           </div>
         ) : null}
         {filteredScenes.map((scene) => {
-          const secretSettings = inFrameAdminMode ? [] : (sceneSecretSettings.get(scene.id) ?? [])
+          const secretSettings = inFrameAdminMode ? [] : sceneSecretSettings.get(scene.id) ?? []
           const missingSecretSettings = inFrameAdminMode
             ? new Set<string>()
             : getMissingSecretSettingKeys(secretSettings, savedSettings)
@@ -616,9 +616,7 @@ export function Scenes() {
                 data-scene-id={scene.id}
                 className={clsx(
                   'frame-tool-row border rounded-lg shadow break-inside-avoid p-2 space-y-1 transition',
-                  linkedActiveSceneId === scene.id
-                    ? 'border border-[#4a4b8c] shadow-[0_0_3px_3px_rgba(128,0,255,0.5)]'
-                    : 'border-transparent',
+                  linkedActiveSceneId === scene.id ? 'frameos-active-surface border' : 'border-transparent',
                   multiSelectEnabled && isSelected ? 'border-blue-400 shadow-[0_0_4px_2px_rgba(96,165,250,0.4)]' : null,
                   focusedSceneId === scene.id
                     ? 'border-sky-300 shadow-[0_0_6px_2px_rgba(56,189,248,0.45)] ring-1 ring-sky-300/70'
@@ -676,9 +674,7 @@ export function Scenes() {
                               </Tag>
                             </Tooltip>
                           ) : null}
-                          {scene.settings?.execution !== 'interpreted' ? (
-                            <CompiledSceneTag className="ml-2" />
-                          ) : null}
+                          {scene.settings?.execution !== 'interpreted' ? <CompiledSceneTag className="ml-2" /> : null}
                           {scene.default ? (
                             <Tag className="ml-2" color="primary">
                               start on boot

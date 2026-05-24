@@ -2,25 +2,73 @@
 @tailwind components;
 @tailwind utilities;
 
+:root,
+.frameos-app-shell,
+.frameos-auth-screen {
+  --frameos-color-graphite: #111418;
+  --frameos-color-evergreen: #1c7c66;
+  --frameos-color-moss: #8baa3a;
+  --frameos-color-brass: #c8a247;
+  --frameos-color-mist: #e7ece9;
+  --frameos-color-graphite-rgb: 17 20 24;
+  --frameos-color-evergreen-rgb: 28 124 102;
+  --frameos-color-moss-rgb: 139 170 58;
+  --frameos-color-brass-rgb: 200 162 71;
+  --frameos-color-mist-rgb: 231 236 233;
+  --frameos-page-bg: var(--frameos-color-mist);
+  --frameos-primary: var(--frameos-color-evergreen);
+  --frameos-primary-hover: color-mix(in srgb, var(--frameos-color-evergreen) 84%, var(--frameos-color-graphite));
+  --frameos-primary-soft: rgb(var(--frameos-color-evergreen-rgb) / 0.12);
+  --frameos-primary-soft-hover: rgb(var(--frameos-color-evergreen-rgb) / 0.2);
+  --frameos-primary-text: color-mix(in srgb, var(--frameos-color-evergreen) 76%, var(--frameos-color-graphite));
+  --frameos-primary-border: rgb(var(--frameos-color-evergreen-rgb) / 0.28);
+  --frameos-primary-border-strong: rgb(var(--frameos-color-evergreen-rgb) / 0.45);
+  --frameos-primary-ring: rgb(var(--frameos-color-evergreen-rgb) / 0.42);
+  --frameos-primary-ring-soft: rgb(var(--frameos-color-evergreen-rgb) / 0.12);
+  --frameos-primary-shadow: rgb(var(--frameos-color-evergreen-rgb) / 0.28);
+  --frameos-success-bg: rgb(var(--frameos-color-moss-rgb) / 0.15);
+  --frameos-success-bg-hover: rgb(var(--frameos-color-moss-rgb) / 0.22);
+  --frameos-success-border: rgb(var(--frameos-color-moss-rgb) / 0.32);
+  --frameos-success-border-hover: rgb(var(--frameos-color-moss-rgb) / 0.44);
+  --frameos-success-text: color-mix(in srgb, var(--frameos-color-moss) 60%, var(--frameos-color-graphite));
+  --frameos-warning-bg: rgb(var(--frameos-color-brass-rgb) / 0.16);
+  --frameos-warning-bg-hover: rgb(var(--frameos-color-brass-rgb) / 0.24);
+  --frameos-warning-border: rgb(var(--frameos-color-brass-rgb) / 0.34);
+  --frameos-warning-border-hover: rgb(var(--frameos-color-brass-rgb) / 0.46);
+  --frameos-warning-text: color-mix(in srgb, var(--frameos-color-brass) 58%, var(--frameos-color-graphite));
+}
+
 :root {
-  --frameos-page-bg: #eef0f7;
-  --frameos-primary: #4a4b8c;
-  --frameos-primary-hover: #484984;
-  --frameos-primary-soft: rgba(74, 75, 140, 0.12);
-  --frameos-primary-text: #4a4b8c;
-  --frameos-primary-ring: rgba(74, 75, 140, 0.42);
-  --frameos-primary-shadow: rgba(74, 75, 140, 0.28);
   font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
   color-scheme: light;
   background: var(--frameos-page-bg);
 }
 
+html[data-frameos-theme='dark'],
+.frameos-app-shell.frameos-theme-dark,
+.frameos-auth-screen.frameos-theme-dark {
+  --frameos-page-bg: var(--frameos-color-graphite);
+  --frameos-primary-soft: rgb(var(--frameos-color-evergreen-rgb) / 0.3);
+  --frameos-primary-soft-hover: rgb(var(--frameos-color-evergreen-rgb) / 0.38);
+  --frameos-primary-text: color-mix(in srgb, var(--frameos-color-evergreen) 48%, var(--frameos-color-mist));
+  --frameos-primary-border: rgb(var(--frameos-color-evergreen-rgb) / 0.3);
+  --frameos-primary-border-strong: rgb(var(--frameos-color-evergreen-rgb) / 0.44);
+  --frameos-primary-ring: rgb(var(--frameos-color-evergreen-rgb) / 0.55);
+  --frameos-primary-ring-soft: rgb(var(--frameos-color-evergreen-rgb) / 0.18);
+  --frameos-primary-shadow: rgb(var(--frameos-color-evergreen-rgb) / 0.34);
+  --frameos-success-bg: rgb(var(--frameos-color-moss-rgb) / 0.16);
+  --frameos-success-bg-hover: rgb(var(--frameos-color-moss-rgb) / 0.24);
+  --frameos-success-border: rgb(var(--frameos-color-moss-rgb) / 0.3);
+  --frameos-success-border-hover: rgb(var(--frameos-color-moss-rgb) / 0.42);
+  --frameos-success-text: color-mix(in srgb, var(--frameos-color-moss) 58%, var(--frameos-color-mist));
+  --frameos-warning-bg: rgb(var(--frameos-color-brass-rgb) / 0.14);
+  --frameos-warning-bg-hover: rgb(var(--frameos-color-brass-rgb) / 0.22);
+  --frameos-warning-border: rgb(var(--frameos-color-brass-rgb) / 0.28);
+  --frameos-warning-border-hover: rgb(var(--frameos-color-brass-rgb) / 0.4);
+  --frameos-warning-text: color-mix(in srgb, var(--frameos-color-brass) 62%, var(--frameos-color-mist));
+}
+
 html[data-frameos-theme='dark'] {
-  --frameos-page-bg: #1b1c22;
-  --frameos-primary-soft: rgba(74, 75, 140, 0.32);
-  --frameos-primary-text: #d8d5ff;
-  --frameos-primary-ring: rgba(132, 123, 207, 0.55);
-  --frameos-primary-shadow: rgba(74, 75, 140, 0.34);
   background: var(--frameos-page-bg);
   color-scheme: dark;
 }
@@ -37,24 +85,6 @@ body {
   height: 100%;
   margin: 0;
   background: var(--frameos-page-bg);
-}
-
-.frameos-app-shell,
-.frameos-auth-screen {
-  --frameos-primary: #4a4b8c;
-  --frameos-primary-hover: #484984;
-  --frameos-primary-soft: rgba(74, 75, 140, 0.12);
-  --frameos-primary-text: #4a4b8c;
-  --frameos-primary-ring: rgba(74, 75, 140, 0.42);
-  --frameos-primary-shadow: rgba(74, 75, 140, 0.28);
-}
-
-.frameos-app-shell.frameos-theme-dark,
-.frameos-auth-screen.frameos-theme-dark {
-  --frameos-primary-soft: rgba(74, 75, 140, 0.32);
-  --frameos-primary-text: #d8d5ff;
-  --frameos-primary-ring: rgba(132, 123, 207, 0.55);
-  --frameos-primary-shadow: rgba(74, 75, 140, 0.34);
 }
 
 .frameos-primary-active,
@@ -111,27 +141,27 @@ body {
 }
 
 .frameos-success-button {
-  background: rgba(20, 184, 166, 0.13);
-  border-color: rgba(20, 184, 166, 0.26);
-  color: #0f766e;
+  background: var(--frameos-success-bg);
+  border-color: var(--frameos-success-border);
+  color: var(--frameos-success-text);
 }
 
 .frameos-success-button:hover {
-  background: rgba(20, 184, 166, 0.18);
-  border-color: rgba(20, 184, 166, 0.36);
-  color: #115e59;
+  background: var(--frameos-success-bg-hover);
+  border-color: var(--frameos-success-border-hover);
+  color: var(--frameos-success-text);
 }
 
 .frameos-warning-button {
-  background: rgba(245, 158, 11, 0.16);
-  border-color: rgba(245, 158, 11, 0.3);
-  color: #92400e;
+  background: var(--frameos-warning-bg);
+  border-color: var(--frameos-warning-border);
+  color: var(--frameos-warning-text);
 }
 
 .frameos-warning-button:hover {
-  background: rgba(245, 158, 11, 0.24);
-  border-color: rgba(245, 158, 11, 0.42);
-  color: #78350f;
+  background: var(--frameos-warning-bg-hover);
+  border-color: var(--frameos-warning-border-hover);
+  color: var(--frameos-warning-text);
 }
 
 .frameos-app-shell .frameos-primary-soft-active,
@@ -149,7 +179,7 @@ body {
 }
 
 .frameos-app-shell .frameos-frame-tool-row-selected .frameos-frame-tool-description {
-  color: var(--frameos-primary-text);
+  color: color-mix(in srgb, var(--frameos-color-graphite) 68%, var(--frameos-color-mist));
 }
 
 .frameos-app-shell .frameos-primary-text,
@@ -176,6 +206,76 @@ body {
   background: var(--frameos-primary-soft);
 }
 
+.frameos-primary-outline-action {
+  background: var(--frameos-primary-soft);
+  border-color: var(--frameos-primary-border);
+  color: var(--frameos-primary-text);
+}
+
+.frameos-primary-outline-action:hover {
+  background: var(--frameos-primary-soft-hover);
+}
+
+.frameos-primary-border-strong {
+  border-color: var(--frameos-primary-border-strong);
+}
+
+.frameos-primary-border {
+  border-color: var(--frameos-primary);
+}
+
+.frameos-primary-hover-border:hover,
+.group:hover .frameos-primary-group-hover-border {
+  border-color: var(--frameos-primary-border-strong);
+}
+
+.frameos-active-surface {
+  border-color: var(--frameos-primary);
+  box-shadow: 0 0 3px 3px var(--frameos-primary-ring);
+}
+
+.frameos-active-surface:hover {
+  box-shadow: 0 0 4px 4px var(--frameos-primary-ring);
+}
+
+.frameos-primary-drop-target {
+  border-color: var(--frameos-primary);
+  background: var(--frameos-primary-soft);
+  box-shadow: 0 0 0 4px var(--frameos-primary-ring-soft);
+}
+
+.frameos-primary-drop-placeholder {
+  border-color: var(--frameos-primary-border-strong);
+}
+
+.frameos-log-webhook-dot {
+  background: var(--frameos-color-brass);
+}
+
+.frameos-log-webhook-timestamp {
+  color: var(--frameos-warning-text);
+}
+
+.frameos-spinner {
+  --frameos-spinner-track: rgb(var(--frameos-color-graphite-rgb) / 0.12);
+  --frameos-spinner-accent: var(--frameos-primary);
+}
+
+html[data-frameos-theme='dark'] .frameos-spinner,
+.frameos-theme-dark .frameos-spinner {
+  --frameos-spinner-track: rgb(var(--frameos-color-mist-rgb) / 0.16);
+  --frameos-spinner-accent: var(--frameos-primary-text);
+}
+
+.frameos-spinner-white {
+  --frameos-spinner-track: rgb(var(--frameos-color-graphite-rgb) / 0.42);
+  --frameos-spinner-accent: #ffffff;
+}
+
+.frameos-folder-icon {
+  color: var(--frameos-color-brass);
+}
+
 .frameos-app-shell .focus-visible\:ring-blue-400:focus-visible,
 .frameos-auth-screen .focus-visible\:ring-blue-400:focus-visible,
 .frameos-app-shell .focus\:ring-blue-400:focus,
@@ -196,10 +296,10 @@ body {
   background: linear-gradient(
       135deg,
       rgba(255, 255, 255, 0.68),
-      rgba(238, 240, 247, 0.9) 44%,
-      rgba(245, 243, 238, 0.82)
+      rgb(var(--frameos-color-mist-rgb) / 0.9) 44%,
+      rgb(var(--frameos-color-brass-rgb) / 0.12)
     ),
-    #eef0f7;
+    var(--frameos-page-bg);
   background-attachment: fixed;
   background-position: center top;
   background-repeat: no-repeat;
@@ -207,8 +307,13 @@ body {
 }
 
 .frameos-app-shell.frameos-theme-dark {
-  background: linear-gradient(135deg, rgba(26, 27, 32, 0.96), rgba(35, 37, 43, 0.95) 48%, rgba(22, 24, 29, 0.98)),
-    #1b1c22;
+  background: linear-gradient(
+      135deg,
+      var(--frameos-color-graphite),
+      color-mix(in srgb, var(--frameos-color-graphite) 94%, var(--frameos-color-mist)) 48%,
+      color-mix(in srgb, var(--frameos-color-graphite) 98%, #000000)
+    ),
+    var(--frameos-page-bg);
   background-attachment: fixed;
   background-position: center top;
   background-repeat: no-repeat;
@@ -293,7 +398,7 @@ body {
 }
 
 .frameos-control:hover {
-  border-color: rgba(74, 75, 140, 0.36);
+  border-color: var(--frameos-primary-border-strong);
 }
 
 .frameos-control:focus {
@@ -312,7 +417,7 @@ body {
 .frameos-node-control:hover,
 .frameos-node-control:focus {
   background: rgba(255, 255, 255, 0.95);
-  border-color: rgba(74, 75, 140, 0.44);
+  border-color: var(--frameos-primary-border-strong);
   --tw-ring-color: var(--frameos-primary-ring);
 }
 
@@ -359,23 +464,23 @@ body {
 }
 
 .frameos-tag[data-tag-color='teal'] {
-  background: rgba(20, 184, 166, 0.12);
-  border-color: rgba(20, 184, 166, 0.28);
-  color: #0f766e;
+  background: var(--frameos-success-bg);
+  border-color: var(--frameos-success-border);
+  color: var(--frameos-success-text);
 }
 
 .frameos-tag[data-tag-color='blue'],
 .frameos-tag[data-tag-color='primary'] {
   background: var(--frameos-primary-soft);
-  border-color: rgba(74, 75, 140, 0.28);
+  border-color: var(--frameos-primary-border);
   color: var(--frameos-primary-text);
 }
 
 .frameos-tag[data-tag-color='yellow'],
 .frameos-tag[data-tag-color='orange'] {
-  background: rgba(245, 158, 11, 0.14);
-  border-color: rgba(245, 158, 11, 0.3);
-  color: #b45309;
+  background: var(--frameos-warning-bg);
+  border-color: var(--frameos-warning-border);
+  color: var(--frameos-warning-text);
 }
 
 .frameos-tag[data-tag-color='red'] {
@@ -400,6 +505,28 @@ body {
   backdrop-filter: blur(14px);
 }
 
+.frameos-diagram-node-selected {
+  border-color: var(--frameos-color-brass);
+  box-shadow: 0 16px 34px rgb(var(--frameos-color-brass-rgb) / 0.22);
+}
+
+.frameos-diagram-title-selected {
+  background: var(--frameos-color-brass);
+}
+
+.frameos-diagram-node-scene {
+  border-color: var(--frameos-primary);
+  box-shadow: 0 16px 34px var(--frameos-primary-shadow);
+}
+
+.frameos-diagram-title-scene {
+  background: var(--frameos-primary);
+}
+
+.frameos-node-muted-text {
+  color: rgb(var(--frameos-color-mist-rgb) / 0.88);
+}
+
 .frameos-chat-bubble {
   background: rgba(255, 255, 255, 0.78);
   border-color: rgba(203, 213, 225, 0.72);
@@ -408,8 +535,8 @@ body {
 
 .frameos-chat-bubble-user {
   background: var(--frameos-primary-soft);
-  border-color: rgba(74, 75, 140, 0.28);
-  color: #1e1b4b;
+  border-color: var(--frameos-primary-border);
+  color: var(--frameos-primary-text);
 }
 
 .frameos-chat-bubble-log {
@@ -485,7 +612,7 @@ html[data-frameos-theme='dark'] .frameos-control {
 
 .frameos-theme-dark .frameos-control:hover,
 html[data-frameos-theme='dark'] .frameos-control:hover {
-  border-color: rgba(132, 123, 207, 0.42);
+  border-color: var(--frameos-primary-border-strong);
 }
 
 .frameos-theme-dark .frameos-control:focus,
@@ -506,7 +633,7 @@ html[data-frameos-theme='dark'] .frameos-node-control {
 html[data-frameos-theme='dark'] .frameos-node-control:hover,
 html[data-frameos-theme='dark'] .frameos-node-control:focus {
   background: rgba(30, 41, 59, 0.78);
-  border-color: rgba(132, 123, 207, 0.42);
+  border-color: var(--frameos-primary-border-strong);
 }
 
 .frameos-theme-dark .frameos-checkbox,
@@ -529,7 +656,7 @@ html[data-frameos-theme='dark'] .frameos-checkbox {
 .frameos-app-shell .frameos-secondary-button:hover,
 .frameos-auth-screen .frameos-secondary-button:hover {
   background: #ffffff;
-  border-color: rgba(74, 75, 140, 0.34);
+  border-color: var(--frameos-primary-border-strong);
   color: #111827;
 }
 
@@ -611,30 +738,30 @@ html[data-frameos-theme='dark'] .frameos-danger-button:hover {
 
 .frameos-theme-dark .frameos-success-button,
 html[data-frameos-theme='dark'] .frameos-success-button {
-  background: rgba(45, 212, 191, 0.14);
-  border-color: rgba(45, 212, 191, 0.24);
-  color: #5eead4;
+  background: var(--frameos-success-bg);
+  border-color: var(--frameos-success-border);
+  color: var(--frameos-success-text);
 }
 
 .frameos-theme-dark .frameos-success-button:hover,
 html[data-frameos-theme='dark'] .frameos-success-button:hover {
-  background: rgba(45, 212, 191, 0.2);
-  border-color: rgba(45, 212, 191, 0.36);
-  color: #99f6e4;
+  background: var(--frameos-success-bg-hover);
+  border-color: var(--frameos-success-border-hover);
+  color: var(--frameos-success-text);
 }
 
 .frameos-theme-dark .frameos-warning-button,
 html[data-frameos-theme='dark'] .frameos-warning-button {
-  background: rgba(251, 191, 36, 0.14);
-  border-color: rgba(251, 191, 36, 0.26);
-  color: #fcd34d;
+  background: var(--frameos-warning-bg);
+  border-color: var(--frameos-warning-border);
+  color: var(--frameos-warning-text);
 }
 
 .frameos-theme-dark .frameos-warning-button:hover,
 html[data-frameos-theme='dark'] .frameos-warning-button:hover {
-  background: rgba(251, 191, 36, 0.2);
-  border-color: rgba(251, 191, 36, 0.38);
-  color: #fde68a;
+  background: var(--frameos-warning-bg-hover);
+  border-color: var(--frameos-warning-border-hover);
+  color: var(--frameos-warning-text);
 }
 
 .frameos-theme-dark .frameos-dropdown-menu,
@@ -669,9 +796,9 @@ html[data-frameos-theme='dark'] .frameos-tag {
 
 .frameos-theme-dark .frameos-tag[data-tag-color='teal'],
 html[data-frameos-theme='dark'] .frameos-tag[data-tag-color='teal'] {
-  background: rgba(45, 212, 191, 0.14);
-  border-color: rgba(45, 212, 191, 0.26);
-  color: #5eead4;
+  background: var(--frameos-success-bg);
+  border-color: var(--frameos-success-border);
+  color: var(--frameos-success-text);
 }
 
 .frameos-theme-dark .frameos-tag[data-tag-color='blue'],
@@ -679,7 +806,7 @@ html[data-frameos-theme='dark'] .frameos-tag[data-tag-color='teal'] {
 html[data-frameos-theme='dark'] .frameos-tag[data-tag-color='blue'],
 html[data-frameos-theme='dark'] .frameos-tag[data-tag-color='primary'] {
   background: var(--frameos-primary-soft);
-  border-color: rgba(132, 123, 207, 0.28);
+  border-color: var(--frameos-primary-border);
   color: var(--frameos-primary-text);
 }
 
@@ -687,9 +814,9 @@ html[data-frameos-theme='dark'] .frameos-tag[data-tag-color='primary'] {
 .frameos-theme-dark .frameos-tag[data-tag-color='orange'],
 html[data-frameos-theme='dark'] .frameos-tag[data-tag-color='yellow'],
 html[data-frameos-theme='dark'] .frameos-tag[data-tag-color='orange'] {
-  background: rgba(251, 191, 36, 0.14);
-  border-color: rgba(251, 191, 36, 0.28);
-  color: #fcd34d;
+  background: var(--frameos-warning-bg);
+  border-color: var(--frameos-warning-border);
+  color: var(--frameos-warning-text);
 }
 
 .frameos-theme-dark .frameos-tag[data-tag-color='red'],
@@ -726,9 +853,9 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble {
 
 .frameos-theme-dark .frameos-chat-bubble-user,
 html[data-frameos-theme='dark'] .frameos-chat-bubble-user {
-  background: rgba(74, 75, 140, 0.26);
-  border-color: rgba(132, 123, 207, 0.3);
-  color: #e9e7ff;
+  background: var(--frameos-primary-soft);
+  border-color: var(--frameos-primary-border);
+  color: var(--frameos-primary-text);
 }
 
 .frameos-theme-dark .frameos-chat-bubble-log,
@@ -790,7 +917,7 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
 }
 
 .frameos-theme-dark .frameos-frame-tool-row-selected .frameos-frame-tool-description {
-  color: #c9c4ff;
+  color: rgb(var(--frameos-color-mist-rgb) / 0.74);
 }
 
 .frameos-theme-dark .frameos-frame-tool-subnav {
@@ -1249,7 +1376,7 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
 
 .ping-stop-button:hover {
   background: #ffffff;
-  border-color: rgba(74, 75, 140, 0.38);
+  border-color: var(--frameos-primary-border-strong);
   color: #0f172a;
 }
 
@@ -1321,9 +1448,9 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
 }
 
 .frame-tool-panel .frameos-switch-track-on {
-  background: var(--frameos-primary, #4a4b8c);
-  border-color: var(--frameos-primary, #4a4b8c);
-  box-shadow: 0 8px 18px rgba(74, 75, 140, 0.25);
+  background: var(--frameos-primary);
+  border-color: var(--frameos-primary);
+  box-shadow: 0 8px 18px var(--frameos-primary-shadow);
 }
 
 .frame-tool-panel .frameos-switch-thumb {
@@ -1342,23 +1469,23 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
 }
 
 .frame-tool-panel .frameos-tag[data-tag-color='teal'] {
-  background: rgba(20, 184, 166, 0.12);
-  border-color: rgba(20, 184, 166, 0.28);
-  color: #0f766e;
+  background: var(--frameos-success-bg);
+  border-color: var(--frameos-success-border);
+  color: var(--frameos-success-text);
 }
 
 .frame-tool-panel .frameos-tag[data-tag-color='blue'],
 .frame-tool-panel .frameos-tag[data-tag-color='primary'] {
   background: var(--frameos-primary-soft);
-  border-color: rgba(74, 75, 140, 0.28);
+  border-color: var(--frameos-primary-border);
   color: var(--frameos-primary-text);
 }
 
 .frame-tool-panel .frameos-tag[data-tag-color='yellow'],
 .frame-tool-panel .frameos-tag[data-tag-color='orange'] {
-  background: rgba(245, 158, 11, 0.14);
-  border-color: rgba(245, 158, 11, 0.3);
-  color: #b45309;
+  background: var(--frameos-warning-bg);
+  border-color: var(--frameos-warning-border);
+  color: var(--frameos-warning-text);
 }
 
 .frame-tool-panel .frameos-tag[data-tag-color='red'] {
@@ -1374,9 +1501,9 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
 }
 
 .frameos-theme-dark .frame-tool-panel .frameos-switch-track-on {
-  background: var(--frameos-primary, #4a4b8c);
-  border-color: var(--frameos-primary, #4a4b8c);
-  box-shadow: 0 8px 18px rgba(74, 75, 140, 0.28);
+  background: var(--frameos-primary);
+  border-color: var(--frameos-primary);
+  box-shadow: 0 8px 18px var(--frameos-primary-shadow);
 }
 
 .frameos-theme-dark .frame-tool-panel .frameos-switch-thumb {
@@ -1390,23 +1517,23 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
 }
 
 .frameos-theme-dark .frame-tool-panel .frameos-tag[data-tag-color='teal'] {
-  background: rgba(45, 212, 191, 0.14);
-  border-color: rgba(45, 212, 191, 0.26);
-  color: #5eead4;
+  background: var(--frameos-success-bg);
+  border-color: var(--frameos-success-border);
+  color: var(--frameos-success-text);
 }
 
 .frameos-theme-dark .frame-tool-panel .frameos-tag[data-tag-color='blue'],
 .frameos-theme-dark .frame-tool-panel .frameos-tag[data-tag-color='primary'] {
   background: var(--frameos-primary-soft);
-  border-color: rgba(132, 123, 207, 0.28);
+  border-color: var(--frameos-primary-border);
   color: var(--frameos-primary-text);
 }
 
 .frameos-theme-dark .frame-tool-panel .frameos-tag[data-tag-color='yellow'],
 .frameos-theme-dark .frame-tool-panel .frameos-tag[data-tag-color='orange'] {
-  background: rgba(251, 191, 36, 0.14);
-  border-color: rgba(251, 191, 36, 0.28);
-  color: #fcd34d;
+  background: var(--frameos-warning-bg);
+  border-color: var(--frameos-warning-border);
+  color: var(--frameos-warning-text);
 }
 
 .frameos-theme-dark .frame-tool-panel .frameos-tag[data-tag-color='red'] {
@@ -1538,14 +1665,19 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
   color: #0f172a;
 }
 
+.frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .frameos-diagram-node.frameos-diagram-node-selected {
+  border-color: var(--frameos-color-brass);
+  box-shadow: 0 16px 34px rgb(var(--frameos-color-brass-rgb) / 0.22);
+}
+
+.frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .frameos-diagram-node.frameos-diagram-node-scene {
+  border-color: var(--frameos-primary);
+  box-shadow: 0 16px 34px var(--frameos-primary-shadow);
+}
+
 .frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .frameos-diagram-node.border-sky-900 {
   border-color: rgba(14, 116, 144, 0.42);
   box-shadow: 0 16px 34px rgba(14, 116, 144, 0.16);
-}
-
-.frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .frameos-diagram-node.border-indigo-900 {
-  border-color: rgba(79, 70, 229, 0.38);
-  box-shadow: 0 16px 34px rgba(79, 70, 229, 0.14);
 }
 
 .frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .frameos-diagram-node.border-green-700,
@@ -1569,11 +1701,6 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
   box-shadow: 0 16px 34px rgba(220, 38, 38, 0.14);
 }
 
-.frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .frameos-diagram-node.border-fuchsia-900 {
-  border-color: rgba(192, 38, 211, 0.48);
-  box-shadow: 0 18px 38px rgba(192, 38, 211, 0.16);
-}
-
 .frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .frameos-diagram-node.bg-\[\#7f6e1d\],
 .frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .frameos-diagram-node.border-\[\#81701d\] {
   border-color: rgba(161, 98, 7, 0.42);
@@ -1583,11 +1710,6 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
 .frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .bg-sky-900,
 .frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .frameos-node-title.bg-sky-900 {
   background: #0e7490;
-}
-
-.frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .bg-indigo-900,
-.frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .frameos-node-title.bg-indigo-900 {
-  background: #4f46e5;
 }
 
 .frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .bg-green-700,
@@ -1612,18 +1734,12 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
   background: #be123c;
 }
 
-.frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .bg-fuchsia-900,
-.frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .frameos-node-title.bg-fuchsia-900 {
-  background: #a21caf;
-}
-
 .frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .bg-\[\#7f6e1d\],
 .frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .frameos-node-title.bg-\[\#7f6e1d\] {
   background: #a16207;
 }
 
-.frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .frameos-diagram-node .text-indigo-200,
-.frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .frameos-diagram-node .text-indigo-100 {
+.frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .frameos-diagram-node .frameos-node-muted-text {
   color: #475569;
 }
 
@@ -1637,7 +1753,11 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
   color: #ffffff;
 }
 
-.frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .frameos-diagram-node .frameos-node-title .frameos-tag {
+.frameos-app-shell:not(.frameos-theme-dark)
+  .scene-editor-canvas
+  .frameos-diagram-node
+  .frameos-node-title
+  .frameos-tag {
   background: rgba(255, 255, 255, 0.94);
   border-color: rgba(255, 255, 255, 0.72);
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.18);

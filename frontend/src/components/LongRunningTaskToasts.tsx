@@ -250,7 +250,7 @@ function taskStatusIcon(task: LongRunningTask, theme: WorkspaceTheme): JSX.Eleme
   if (task.status === 'error') {
     return <ExclamationTriangleIcon className={clsx('h-5 w-5', theme === 'dark' ? 'text-red-300' : 'text-red-600')} />
   }
-  return <Spinner className="h-4 w-4" color="blue" />
+  return <Spinner className="h-4 w-4" />
 }
 
 function formatTaskLogLine(log: LongRunningTaskLog): string {
@@ -318,9 +318,7 @@ function taskLogTone(
   }
 
   if (log.type === 'webhook') {
-    return theme === 'dark'
-      ? { dot: 'bg-fuchsia-300', timestamp: 'text-fuchsia-200/80' }
-      : { dot: 'bg-fuchsia-500', timestamp: 'text-fuchsia-600/80' }
+    return { dot: 'frameos-log-webhook-dot', timestamp: 'frameos-log-webhook-timestamp' }
   }
 
   return theme === 'dark'

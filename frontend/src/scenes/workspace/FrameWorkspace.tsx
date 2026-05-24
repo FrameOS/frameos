@@ -57,7 +57,7 @@ interface FrameToolDefinition {
 }
 
 const uploadedScenePrefix = 'uploaded/'
-const activeSurfaceClassName = 'border-[#4a4b8c] shadow-[0_0_3px_3px_rgba(128,0,255,0.5)]'
+const activeSurfaceClassName = 'frameos-active-surface'
 const scrollRestoreMaxDurationMs = 1500
 const scrollRestoreRetryMs = 50
 const scrollRestoreTolerance = 2
@@ -411,7 +411,7 @@ function SceneTile({ frame, scene, active }: { frame: FrameType; scene: FrameSce
       className={clsx(
         'frameos-card group relative h-36 w-36 shrink-0 overflow-hidden rounded-2xl border bg-white text-left transition hover:-translate-y-0.5 focus-within:ring-2 focus-within:ring-blue-400',
         active
-          ? `${activeSurfaceClassName} hover:shadow-[0_0_4px_4px_rgba(128,0,255,0.55)]`
+          ? activeSurfaceClassName
           : 'border-white/90 shadow-lg shadow-slate-300/35 hover:shadow-xl hover:shadow-slate-300/50'
       )}
     >
@@ -430,7 +430,7 @@ function SceneTile({ frame, scene, active }: { frame: FrameType; scene: FrameSce
             className="h-full w-full rounded-none"
           />
           {active ? (
-            <div className="absolute left-2 top-2 rounded-full bg-[#4a4b8c] px-2 py-0.5 text-[11px] font-semibold text-white shadow-sm">
+            <div className="frameos-primary-fill absolute left-2 top-2 rounded-full px-2 py-0.5 text-[11px] font-semibold text-white shadow-sm">
               Active
             </div>
           ) : null}

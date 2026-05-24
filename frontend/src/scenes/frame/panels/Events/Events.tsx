@@ -30,10 +30,20 @@ export function Events() {
         </div>
       ) : null}
       <Tabs className="frameos-divider border border-t-0 border-l-0 border-r-0 border-b-1 pl-2">
-        <Tab onClick={showListen} active={tab === 'listen'} activeColorClass="bg-[#4a4b8c]" className="mb-[-1px]">
+        <Tab
+          onClick={showListen}
+          active={tab === 'listen'}
+          activeColorClass="frameos-primary-active"
+          className="mb-[-1px]"
+        >
           Listen ({tabCounts.listen})
         </Tab>
-        <Tab onClick={showDispatch} active={tab === 'dispatch'} activeColorClass="bg-[#4a4b8c]" className="mb-[-1px]">
+        <Tab
+          onClick={showDispatch}
+          active={tab === 'dispatch'}
+          activeColorClass="frameos-primary-active"
+          className="mb-[-1px]"
+        >
           Dispatch ({tabCounts.dispatch})
         </Tab>
       </Tabs>

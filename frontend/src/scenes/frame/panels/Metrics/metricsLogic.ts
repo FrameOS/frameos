@@ -59,20 +59,27 @@ const METRICS_TIME_RANGE_MS: Partial<Record<MetricsTimeRangePreset, number>> = {
   '24h': 24 * 60 * 60 * 1000,
   '7d': 7 * 24 * 60 * 60 * 1000,
 }
-const SINGLE_SERIES_COLOR = '#2dd4bf'
-const METRIC_SERIES_COLORS = ['#f59e0b', '#38bdf8', '#a78bfa', '#34d399', '#fb7185', '#f472b6']
+const SINGLE_SERIES_COLOR = 'var(--frameos-color-evergreen)'
+const METRIC_SERIES_COLORS = [
+  'var(--frameos-color-brass)',
+  'var(--frameos-color-evergreen)',
+  'var(--frameos-color-moss)',
+  'color-mix(in srgb, var(--frameos-color-evergreen) 72%, var(--frameos-color-mist))',
+  'color-mix(in srgb, var(--frameos-color-brass) 82%, var(--frameos-color-graphite))',
+  'color-mix(in srgb, var(--frameos-color-moss) 74%, var(--frameos-color-graphite))',
+]
 const MEMORY_USAGE_COLORS: Record<string, string> = {
-  total: '#38bdf8',
-  used: '#fb7185',
+  total: 'var(--frameos-color-evergreen)',
+  used: 'var(--frameos-color-brass)',
 }
 const DISK_USAGE_COLORS: Record<string, string> = {
-  total: '#38bdf8',
-  used: '#fb7185',
-  available: '#34d399',
+  total: 'var(--frameos-color-evergreen)',
+  used: 'var(--frameos-color-brass)',
+  available: 'var(--frameos-color-moss)',
 }
 const RUNTIME_DIMENSION_COLORS: Record<string, string> = {
-  width: '#38bdf8',
-  height: '#34d399',
+  width: 'var(--frameos-color-evergreen)',
+  height: 'var(--frameos-color-moss)',
 }
 
 function parseMetricTimestamp(timestamp: string): number {

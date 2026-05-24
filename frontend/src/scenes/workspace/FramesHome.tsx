@@ -39,7 +39,7 @@ import { FrameLiveBadge } from './FrameLiveBadge'
 import { framesHomeLogic } from './framesHomeLogic'
 
 const uploadedScenePrefix = 'uploaded/'
-const activeSurfaceClassName = 'border-[#4a4b8c] shadow-[0_0_3px_3px_rgba(128,0,255,0.5)]'
+const activeSurfaceClassName = 'frameos-active-surface'
 
 const frameSectionToolLinks = [
   { label: 'Overview', panel: 'overview' },
@@ -260,7 +260,7 @@ function SceneTile({ frame, scene, active }: { frame: FrameType; scene: FrameSce
       className={clsx(
         'frameos-card group flex min-h-36 w-full max-w-40 min-w-0 flex-col overflow-hidden rounded-2xl border bg-white text-left transition hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
         active
-          ? `${activeSurfaceClassName} hover:shadow-[0_0_4px_4px_rgba(128,0,255,0.55)]`
+          ? activeSurfaceClassName
           : 'border-white/90 shadow-lg shadow-slate-300/35 hover:shadow-xl hover:shadow-slate-300/50'
       )}
     >
@@ -274,7 +274,7 @@ function SceneTile({ frame, scene, active }: { frame: FrameType; scene: FrameSce
           className="h-full w-full rounded-none"
         />
         {active ? (
-          <div className="absolute left-2 top-2 rounded-full bg-[#4a4b8c] px-2 py-0.5 text-[11px] font-semibold text-white shadow-sm">
+          <div className="frameos-primary-fill absolute left-2 top-2 rounded-full px-2 py-0.5 text-[11px] font-semibold text-white shadow-sm">
             Active
           </div>
         ) : null}
@@ -311,9 +311,7 @@ export function AddSceneTile({ frame, compact = false }: { frame: FrameType; com
       }}
       className={clsx(
         'frameos-primary-hover-text frameos-card group flex shrink-0 flex-col items-center justify-center gap-3 rounded-2xl border border-dashed bg-white/55 text-center text-slate-500 shadow-sm transition hover:-translate-y-0.5 hover:bg-white/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-        active
-          ? `${activeSurfaceClassName} hover:shadow-[0_0_4px_4px_rgba(128,0,255,0.55)]`
-          : 'border-slate-300 hover:shadow-lg hover:shadow-slate-300/35',
+        active ? activeSurfaceClassName : 'border-slate-300 hover:shadow-lg hover:shadow-slate-300/35',
         compact ? 'h-36 w-36' : 'min-h-36 w-full max-w-40 min-w-0'
       )}
     >
@@ -428,7 +426,7 @@ function CurrentSnapshotCard({ frame, active }: { frame: FrameType; active: bool
       className={clsx(
         'frameos-card group flex w-80 max-w-full shrink-0 flex-col overflow-hidden rounded-[22px] border bg-white text-left transition hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
         active
-          ? `${activeSurfaceClassName} hover:shadow-[0_0_4px_4px_rgba(128,0,255,0.55)]`
+          ? activeSurfaceClassName
           : 'border-white/90 shadow-xl shadow-slate-300/35 hover:shadow-2xl hover:shadow-slate-300/45'
       )}
     >

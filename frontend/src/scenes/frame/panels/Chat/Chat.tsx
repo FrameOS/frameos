@@ -414,11 +414,7 @@ export function Chat() {
               <span>
                 Chat about{' '}
                 {chatAppContext?.nodeData ? (
-                  <a
-                    href="#"
-                    onClick={handleOpenApp}
-                    className="frameos-link underline underline-offset-2 inline"
-                  >
+                  <a href="#" onClick={handleOpenApp} className="frameos-link underline underline-offset-2 inline">
                     &quot;{appLabel}&quot;
                   </a>
                 ) : (
@@ -517,7 +513,11 @@ export function Chat() {
                       <div
                         className={clsx(
                           'mb-3 max-w-[90%] rounded-2xl border px-4 py-3 text-sm shadow-sm @md:max-w-[75%]',
-                          isUser ? 'frameos-chat-bubble-user' : isLog ? 'frameos-chat-bubble-log' : 'frameos-chat-bubble'
+                          isUser
+                            ? 'frameos-chat-bubble-user'
+                            : isLog
+                            ? 'frameos-chat-bubble-log'
+                            : 'frameos-chat-bubble'
                         )}
                       >
                         <div className="frame-tool-muted flex items-center justify-between text-[11px] mb-2">
@@ -587,7 +587,9 @@ export function Chat() {
                     type="button"
                     className={clsx(
                       'w-full text-left rounded-xl border px-4 py-3 transition',
-                      isActive ? 'frameos-primary-soft-active border-[#4a4b8c]/40' : 'frameos-chat-bubble hover:bg-white/70'
+                      isActive
+                        ? 'frameos-primary-soft-active frameos-primary-border-strong'
+                        : 'frameos-chat-bubble hover:bg-white/70'
                     )}
                     onClick={() => selectChat(chat.id)}
                   >

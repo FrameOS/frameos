@@ -186,7 +186,7 @@ function SceneSelector({
                       <span
                         className={clsx(
                           'absolute bottom-1 right-1 h-2.5 w-2.5 rounded-full ring-2 ring-white',
-                          active ? 'bg-[#4a4b8c]' : changed ? 'bg-amber-400' : 'bg-slate-300'
+                          active ? 'frameos-primary-fill' : changed ? 'bg-amber-400' : 'bg-slate-300'
                         )}
                       />
                     </span>

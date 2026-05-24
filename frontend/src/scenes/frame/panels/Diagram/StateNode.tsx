@@ -18,26 +18,18 @@ export function StateNode({ id, isConnectable }: NodeProps<StateNodeData>): JSX.
   const data: StateNodeData = (node?.data as StateNodeData) ?? ({ keyword: '' } satisfies StateNodeData)
   const { select } = useActions(appNodeLogic(appNodeLogicProps))
   const { openNewNodePicker } = useActions(newNodePickerLogic({ sceneId, frameId }))
-  const titleBackground = isSelected ? 'bg-fuchsia-900' : 'bg-[#7f6e1d]'
+  const titleBackground = isSelected ? 'frameos-diagram-title-selected' : 'bg-[#7f6e1d]'
 
   return (
     <BindLogic logic={appNodeLogic} props={appNodeLogicProps}>
       <div
         onClick={select}
-          className={clsx(
-            'frameos-diagram-node shadow-lg border-2 h-full flex flex-col relative',
-            isSelected
-              ? 'border-fuchsia-900 shadow-fuchsia-700/50'
-              : 'border-[#81701d] shadow-[#81701d]/50'
-          )}
+        className={clsx(
+          'frameos-diagram-node shadow-lg border-2 h-full flex flex-col relative',
+          isSelected ? 'frameos-diagram-node-selected' : 'border-[#81701d] shadow-[#81701d]/50'
+        )}
       >
-        <div
-          className={clsx(
-            'frameos-node-title text-xl p-2 gap-2',
-            titleBackground,
-            'flex w-full items-center'
-          )}
-        >
+        <div className={clsx('frameos-node-title text-xl p-2 gap-2', titleBackground, 'flex w-full items-center')}>
           <Handle
             // StateOutputHandle
             type="source"

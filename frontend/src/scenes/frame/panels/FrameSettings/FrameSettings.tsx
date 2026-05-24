@@ -328,14 +328,14 @@ export function FrameSettings({
                   tooltip={`Open URLs for this frame directly in the browser. Loads ${frameRootUrl(frame)}`}
                 >
                   <div className="w-full flex flex-wrap gap-2 items-center">
-                    <A href={url} target="_blank" rel="noreferrer noopener" className="text-blue-400 hover:underline">
+                    <A href={url} target="_blank" rel="noreferrer noopener" className="frameos-link hover:underline">
                       Frame URL
                     </A>
                     <A
                       href={controlUrl}
                       target="_blank"
                       rel="noreferrer noopener"
-                      className="text-blue-400 hover:underline"
+                      className="frameos-link hover:underline"
                     >
                       Control URL
                     </A>
@@ -344,7 +344,7 @@ export function FrameSettings({
                         href={adminUrl}
                         target="_blank"
                         rel="noreferrer noopener"
-                        className="text-blue-400 hover:underline"
+                        className="frameos-link hover:underline"
                       >
                         Admin URL
                       </A>
@@ -353,7 +353,7 @@ export function FrameSettings({
                       href={imageUrl}
                       target="_blank"
                       rel="noreferrer noopener"
-                      className="text-blue-400 hover:underline"
+                      className="frameos-link hover:underline"
                     >
                       Image URL
                     </A>
@@ -363,7 +363,7 @@ export function FrameSettings({
                       className="cursor-pointer"
                       aria-label="Jump to HTTP API on frame settings"
                     >
-                      <Tag color={tlsEnabled ? 'teal' : 'gray'} className="flex gap-1">
+                      <Tag color={tlsEnabled ? 'primary' : 'gray'} className="flex gap-1">
                         {tlsEnabled ? 'HTTPS enabled' : 'HTTPS disabled'}
                         <CertificateTriangle frame={frame} frameForm={frameForm} />
                       </Tag>
@@ -606,7 +606,7 @@ export function FrameSettings({
                 tooltip={
                   <p>
                     Leave empty to use a SSH key. Configure it under{' '}
-                    <A href="/settings" className="text-blue-400 hover:underline">
+                    <A href="/settings" className="frameos-link hover:underline">
                       global settings.
                     </A>
                   </p>
@@ -910,7 +910,7 @@ export function FrameSettings({
                   href={adminUrl}
                   target="_blank"
                   rel="noreferrer noopener"
-                  className="text-blue-400 hover:underline text-sm"
+                  className="frameos-link text-sm hover:underline"
                 >
                   Open
                 </A>

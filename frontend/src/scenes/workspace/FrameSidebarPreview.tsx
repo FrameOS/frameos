@@ -6,7 +6,7 @@ import type { FrameType } from '../../types'
 import { urls } from '../../urls'
 import { FrameLiveBadge } from './FrameLiveBadge'
 
-const activeSurfaceClassName = 'border-[#4a4b8c] shadow-[0_0_3px_3px_rgba(128,0,255,0.5)]'
+const activeSurfaceClassName = 'frameos-active-surface'
 
 export function FrameSidebarPreview({
   frame,

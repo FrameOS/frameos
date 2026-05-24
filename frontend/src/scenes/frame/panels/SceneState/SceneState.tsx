@@ -221,7 +221,7 @@ export function SceneState({ sceneId: sceneIdOverride }: { sceneId?: string | nu
                   </div>
                 ) : (
                   <div
-                    className="frame-tool-row dndnode cursor-move rounded-2xl p-3 transition hover:border-[#4a4b8c]/35"
+                    className="frame-tool-row frameos-primary-hover-border dndnode cursor-move rounded-2xl p-3 transition"
                     draggable
                     onDragStart={(event) => onDragStart(event, 'state', field.name, index)}
                     onDragOver={onDragOverField}

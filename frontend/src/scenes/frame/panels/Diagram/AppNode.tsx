@@ -66,20 +66,20 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
   const backgroundClassName = clsx(
     'frameos-diagram-node shadow-lg border-2',
     isSelected
-      ? 'border-fuchsia-900 shadow-fuchsia-700/50'
-    : isDispatch
-    ? 'border-orange-900 shadow-orange-700/50 '
-    : isCustomApp || isSceneApp
-    ? 'border-teal-900 shadow-teal-700/50 '
-    : isDataApp
-    ? 'border-green-700 shadow-green-500/50 '
-    : isScene
-    ? 'border-indigo-900 shadow-indigo-700/50 '
-    : 'border-sky-900 shadow-sky-700/50 '
+      ? 'frameos-diagram-node-selected'
+      : isDispatch
+      ? 'border-orange-900 shadow-orange-700/50 '
+      : isCustomApp || isSceneApp
+      ? 'border-teal-900 shadow-teal-700/50 '
+      : isDataApp
+      ? 'border-green-700 shadow-green-500/50 '
+      : isScene
+      ? 'frameos-diagram-node-scene '
+      : 'border-sky-900 shadow-sky-700/50 '
   )
 
   const titleBackground = isSelected
-    ? 'bg-fuchsia-900'
+    ? 'frameos-diagram-title-selected'
     : isDispatch
     ? 'bg-orange-900'
     : isCustomApp || isSceneApp
@@ -87,7 +87,7 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
     : isDataApp
     ? 'bg-green-700'
     : isScene
-    ? 'bg-indigo-900'
+    ? 'frameos-diagram-title-scene'
     : 'bg-sky-900'
 
   const titleClassName = clsx(
@@ -245,7 +245,7 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
                       <React.Fragment key={i}>
                         {'markdown' in field ? (
                           <tr>
-                            <td className="font-sm text-indigo-200" colSpan={4}>
+                            <td className="font-sm frameos-node-muted-text" colSpan={4}>
                               <Markdown value={field.markdown} />
                             </td>
                           </tr>
@@ -287,7 +287,7 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
                             </td>
                             <td
                               className={clsx(
-                                'font-sm text-indigo-200',
+                                'font-sm frameos-node-muted-text',
                                 field.type === 'node' ||
                                   codeArgs.includes(field.name) ||
                                   fieldInputFields.includes(field.name) ||
@@ -326,7 +326,10 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
                                       title={<Markdown value={field.hint} />}
                                       containerClassName="ml-1 inline-block align-sub"
                                     >
-                                      <InformationCircleIcon className="w-4 h-4 text-indigo-200" aria-label="Info" />
+                                      <InformationCircleIcon
+                                        className="frameos-node-muted-text h-4 w-4"
+                                        aria-label="Info"
+                                      />
                                     </Tooltip>
                                   ) : null}
                                 </div>
@@ -531,7 +534,7 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
                                 </div>
                               }
                               containerClassName="flex"
-                              className="ml-1 inline-flex rounded-full p-0.5 text-indigo-100 hover:text-white"
+                              className="frameos-node-muted-text ml-1 inline-flex rounded-full p-0.5 hover:text-white"
                               tooltipColor="gray"
                               noPadding
                             >
