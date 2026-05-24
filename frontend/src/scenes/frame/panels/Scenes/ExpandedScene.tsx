@@ -11,6 +11,7 @@ import { scenesLogic } from './scenesLogic'
 import { frameLogic } from '../../frameLogic'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
+import { PlayIcon } from '@heroicons/react/24/solid'
 
 export interface ExpandedSceneProps {
   sceneId: string
@@ -133,7 +134,9 @@ export function ExpandedScene({
               <Button
                 onClick={handleActivate}
                 color={sceneId !== currentSceneId && !canPreviewUnsavedChanges ? 'primary' : 'secondary'}
+                className="inline-flex items-center gap-2"
               >
+                <PlayIcon className="h-5 w-5" />
                 {activateLabel}
               </Button>
             )}
@@ -182,7 +185,9 @@ export function ExpandedScene({
                   <Button
                     onClick={handleActivate}
                     color={sceneId !== currentSceneId || hasStateChanges ? 'primary' : 'secondary'}
+                    className="inline-flex items-center gap-2"
                   >
+                    <PlayIcon className="h-5 w-5" />
                     {activateLabel}
                   </Button>
                 )}

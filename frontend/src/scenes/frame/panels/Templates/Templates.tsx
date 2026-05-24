@@ -160,6 +160,7 @@ export function Templates({ persistOnInstall = false }: TemplatesProps = {}) {
                   }}
                   editTemplate={editLocalTemplate}
                   installedTemplatesByName={installedTemplatesByName}
+                  templateDragData={{ template }}
                 />
               ))}
             </div>
@@ -226,6 +227,14 @@ export function Templates({ persistOnInstall = false }: TemplatesProps = {}) {
                         disableFullscreenPanel()
                       }}
                       installedTemplatesByName={installedTemplatesByName}
+                      templateDragData={{
+                        template,
+                        repository: {
+                          id: repository.id,
+                          name: repository.name,
+                          url: repository.url,
+                        },
+                      }}
                     />
                   ))}
                 </div>

@@ -543,30 +543,28 @@ export function Chat() {
             ) : null}
           </div>
           {error ? <div className="text-xs text-red-400 pt-2">{error}</div> : null}
-          <div className="frameos-inset rounded-2xl border p-2 space-y-2 shadow-inner">
-            <TextArea
-              value={input}
-              placeholder={
-                chatContextType === 'app'
-                  ? 'Describe a change to this app, or ask about it...'
-                  : 'Describe a new scene, request a change, or ask a question...'
-              }
-              onChange={(value) => setInput(value)}
-              onKeyDown={handleKeyDown}
-              rows={3}
-              className="min-h-24"
-            />
-            <div className="frame-tool-muted flex items-center justify-between text-xs">
-              <span>{contextSelectionSummary ?? 'Press Ctrl/Cmd + Enter to send'}</span>
-              <Button
-                color={sendButtonColor}
-                size="tiny"
-                onClick={handleSubmit}
-                disabled={isSubmitting || !input.trim() || missingBackendApiKey}
-              >
-                {isSubmitting ? 'Sending…' : 'Send'}
-              </Button>
-            </div>
+          <TextArea
+            value={input}
+            placeholder={
+              chatContextType === 'app'
+                ? 'Describe a change to this app, or ask about it...'
+                : 'Describe a new scene, request a change, or ask a question...'
+            }
+            onChange={(value) => setInput(value)}
+            onKeyDown={handleKeyDown}
+            rows={3}
+            className="min-h-24"
+          />
+          <div className="frame-tool-muted flex items-center justify-between text-xs">
+            <span>{contextSelectionSummary ?? 'Press Ctrl/Cmd + Enter to send'}</span>
+            <Button
+              color={sendButtonColor}
+              size="tiny"
+              onClick={handleSubmit}
+              disabled={isSubmitting || !input.trim() || missingBackendApiKey}
+            >
+              {isSubmitting ? 'Sending…' : 'Send'}
+            </Button>
           </div>
         </>
       ) : (

@@ -30,6 +30,7 @@ export type WorkspaceUtilityPanel =
 const frameToolPanels = [
   'overview',
   'preview',
+  'schedule',
   'logs',
   'metrics',
   'assets',
@@ -89,9 +90,6 @@ function clearDrawerSearchParams(search: Record<string, unknown>): Record<string
   delete nextSearch.drawer
   delete nextSearch.frameId
   delete nextSearch.sceneId
-  if (nextSearch.tool === 'schedule') {
-    delete nextSearch.tool
-  }
   return nextSearch
 }
 
@@ -588,7 +586,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
     scheduleDrawerFrameId: [
       null as number | null,
       {
-        openScheduleDrawer: (_, { frameId }) => frameId,
+        openScheduleDrawer: () => null,
         closeScheduleDrawer: () => null,
         setSearch: () => null,
         navigateToFrame: () => null,
@@ -916,8 +914,8 @@ export const workspaceLogic = kea<workspaceLogicType>([
         actions.openSceneControl(frameId, sceneId)
       } else if (drawer === 'templates') {
         actions.openTemplateDrawer(frameId)
-      } else if (drawer === 'schedule' || searchValue(search, 'tool') === 'schedule') {
-        actions.openScheduleDrawer(frameId)
+      } else if (drawer === 'schedule') {
+        actions.openFrameTool(frameId, 'schedule')
       } else if (drawer === 'chat') {
         actions.openChatDrawer(frameId, sceneId)
       } else {
@@ -956,11 +954,6 @@ export const workspaceLogic = kea<workspaceLogicType>([
         if (validFrameId) {
           actions.selectFrame(validFrameId)
         }
-        if (validFrameId && searchValue(search, 'tool') === 'schedule') {
-          actions.openUtilityPanel('scenes')
-          applyDrawerFromSearch(validFrameId, search)
-          return
-        }
         actions.openUtilityPanel(frameToolFromSearch(search))
         applyDrawerFromSearch(validFrameId, search)
       },
@@ -977,7 +970,11 @@ export const workspaceLogic = kea<workspaceLogicType>([
     closeSceneControl: clearDrawerUrl,
     openTemplateDrawer: (payload: Record<string, any>) => drawerUrlForFrame(Number(payload.frameId), 'templates'),
     closeTemplateDrawer: clearDrawerUrl,
-    openScheduleDrawer: (payload: Record<string, any>) => drawerUrlForFrame(Number(payload.frameId), 'schedule'),
+    openScheduleDrawer: (payload: Record<string, any>) => [
+      urls.frame(Number(payload.frameId)),
+      { ...clearDrawerSearchParams(router.values.searchParams), tool: 'schedule' },
+      router.values.hashParams,
+    ],
     closeScheduleDrawer: clearDrawerUrl,
     openChatDrawer: (payload: Record<string, any>) =>
       drawerUrlForFrame(Number(payload.frameId), 'chat', payload.sceneId ? { sceneId: String(payload.sceneId) } : {}),

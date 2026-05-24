@@ -1,4 +1,4 @@
-import { BindLogic, useActions, useValues } from 'kea'
+import { useActions, useValues } from 'kea'
 import { A } from 'kea-router'
 import clsx from 'clsx'
 import type { CSSProperties, DragEvent } from 'react'
@@ -12,14 +12,12 @@ import {
   CommandLineIcon,
   ComputerDesktopIcon,
   DocumentTextIcon,
-  EyeIcon,
   PencilSquareIcon,
   PlusIcon,
   RocketLaunchIcon,
   SignalIcon,
   SparklesIcon,
   TrashIcon,
-  XMarkIcon,
 } from '@heroicons/react/24/outline'
 import { PlayIcon } from '@heroicons/react/24/solid'
 
@@ -31,12 +29,17 @@ import { urls } from '../../urls'
 import type { FrameScene, FrameType, ScheduledEvent } from '../../types'
 import { frameLogic } from '../frame/frameLogic'
 import { HeaderMetrics } from '../frame/panels/Metrics/HeaderMetrics'
-import { Schedule } from '../frame/panels/Schedule/Schedule'
 import { controlLogic } from '../frame/panels/Scenes/controlLogic'
 import { SceneDropDown } from '../frame/panels/Scenes/SceneDropDown'
+import { templatesLogic } from '../frame/panels/Templates/templatesLogic'
 import { newFrameForm } from '../frames/newFrameForm'
 import { FrameLiveBadge } from './FrameLiveBadge'
-import { getFrameosSceneDragData, hasFrameosSceneDragData, setFrameosSceneDragData } from './sceneDrag'
+import {
+  getFrameosSceneDragData,
+  getFrameosTemplateDragData,
+  hasFrameosSceneListDragData,
+  setFrameosSceneDragData,
+} from './sceneDrag'
 import { workspaceLogic } from './workspaceLogic'
 
 const uploadedScenePrefix = 'uploaded/'
@@ -46,6 +49,7 @@ const sceneTileGapRem = 1
 const framePreviewMaxHeightRem = 32
 const framePreviewMaxWidthRem = sceneTileWidthRem * 2 + sceneTileGapRem
 const sceneToolButtons = [
+  { label: 'Schedule', panel: 'schedule', icon: CalendarDaysIcon },
   { label: 'Logs', panel: 'logs', icon: DocumentTextIcon },
   { label: 'Metrics', panel: 'metrics', icon: ChartBarIcon },
   { label: 'Assets', panel: 'assets', icon: CircleStackIcon },
@@ -176,7 +180,6 @@ function scheduleDatePrefix(date: Date, now = new Date()): string {
 
 function FramePreviewPanel({ frame, scenes }: { frame: FrameType; scenes: FrameScene[] }): JSX.Element {
   const previewSizing = framePreviewSizing(frame)
-  const { openScheduleDrawer } = useActions(workspaceLogic)
   const { hideForm } = useActions(newFrameForm)
   const { sceneId: currentSceneId } = useValues(controlLogic({ frameId: frame.id }))
   const activeScene = scenes.find((scene) => sceneIsActive(scene, currentSceneId))
@@ -222,18 +225,15 @@ function FramePreviewPanel({ frame, scenes }: { frame: FrameType; scenes: FrameS
               : 'nothing scheduled'}
           </div>
         </div>
-        <button
-          type="button"
+        <A
+          href={urls.frame(frame.id, 'schedule')}
           title="Edit schedule"
           aria-label="Edit schedule"
-          onClick={() => {
-            hideForm()
-            openScheduleDrawer(frame.id)
-          }}
+          onClick={() => hideForm()}
           className="frameos-secondary-button inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/80 text-slate-700 shadow-sm transition hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
         >
           <CalendarDaysIcon className="h-4 w-4" />
-        </button>
+        </A>
       </div>
     </div>
   )
@@ -241,7 +241,7 @@ function FramePreviewPanel({ frame, scenes }: { frame: FrameType; scenes: FrameS
 
 function FrameHeaderActions({ frame, archived }: { frame: FrameType; archived?: boolean }): JSX.Element {
   const { deleteFrame, deployFrame, renderFrame, renameFrame, setFrameArchived } = useActions(framesModel)
-  const { openChatDrawer, openScheduleDrawer } = useActions(workspaceLogic)
+  const { openChatDrawer } = useActions(workspaceLogic)
   const { hideForm } = useActions(newFrameForm)
   const frameName = frame.name || frameHost(frame)
 
@@ -256,17 +256,14 @@ function FrameHeaderActions({ frame, archived }: { frame: FrameType; archived?: 
   return (
     <div className="flex w-full shrink-0 flex-wrap items-center justify-start gap-2 @4xl:w-auto @4xl:justify-end">
       <HeaderMetrics frameId={frame.id} />
-      <button
-        type="button"
-        onClick={() => {
-          hideForm()
-          openScheduleDrawer(frame.id)
-        }}
+      <A
+        href={urls.frame(frame.id, 'schedule')}
+        onClick={() => hideForm()}
         className="frameos-primary-action inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
       >
         <CalendarDaysIcon className="h-5 w-5" />
         Schedule
-      </button>
+      </A>
       <button
         type="button"
         title="Open AI chat"
@@ -406,9 +403,6 @@ function FrameSceneTile({
               Active
             </div>
           ) : null}
-          <div className="frameos-primary-hover-text absolute right-2 top-2 rounded-full bg-white/90 p-1 text-slate-400 shadow-sm transition">
-            <EyeIcon className="h-4 w-4" />
-          </div>
         </div>
         <div className="w-full px-3 py-2">
           <div className="frameos-strong truncate text-sm font-semibold text-slate-900">
@@ -476,17 +470,30 @@ function FrameScenesBlock({
 }): JSX.Element {
   const { search } = useValues(workspaceLogic)
   const { openSceneControl } = useActions(workspaceLogic)
+  const { applyTemplateAndSave } = useActions(frameLogic({ frameId: frame.id }))
+  const { applyRemoteToFrame } = useActions(templatesLogic({ frameId: frame.id }))
   const { sceneId: currentSceneId } = useValues(controlLogic({ frameId: frame.id }))
 
   const handleScenesDragOver = (event: DragEvent<HTMLDivElement>) => {
-    if (!hasFrameosSceneDragData(event.dataTransfer)) {
+    if (!hasFrameosSceneListDragData(event.dataTransfer)) {
       return
     }
     event.preventDefault()
-    event.dataTransfer.dropEffect = 'move'
+    event.dataTransfer.dropEffect = getFrameosTemplateDragData(event.dataTransfer) ? 'copy' : 'move'
   }
 
   const handleScenesDrop = (event: DragEvent<HTMLDivElement>) => {
+    const templateDragData = getFrameosTemplateDragData(event.dataTransfer)
+    if (templateDragData) {
+      event.preventDefault()
+      if (templateDragData.repository) {
+        applyRemoteToFrame(templateDragData.repository, templateDragData.template, true)
+      } else {
+        applyTemplateAndSave(templateDragData.template)
+      }
+      return
+    }
+
     const sceneId = getFrameosSceneDragData(event.dataTransfer)
     if (!sceneId || !frame.scenes?.some((scene) => scene.id === sceneId)) {
       return
@@ -566,37 +573,5 @@ export function FrameDashboardSurface({
         />
       </div>
     </section>
-  )
-}
-
-export function FrameScheduleDrawer({ frame }: { frame: FrameType }): JSX.Element {
-  const { closeScheduleDrawer } = useActions(workspaceLogic)
-  const frameLogicProps = { frameId: frame.id }
-
-  return (
-    <div className="workspace-drawer frameos-drawer fixed bottom-5 right-5 top-5 z-40 w-[430px] overflow-hidden rounded-[24px] border border-white/80 bg-white/95 shadow-2xl shadow-slate-500/30 backdrop-blur-xl">
-      <div className="flex h-full flex-col">
-        <div className="frameos-divider flex items-start justify-between gap-3 border-b border-slate-200/80 px-5 py-4">
-          <div className="min-w-0">
-            <div className="frameos-muted text-xs font-semibold uppercase tracking-wide text-slate-400">
-              {frame.name || frameHost(frame)}
-            </div>
-            <h2 className="frameos-strong truncate text-xl font-bold tracking-normal text-slate-950">Schedule</h2>
-          </div>
-          <button
-            type="button"
-            onClick={closeScheduleDrawer}
-            className="frameos-icon-button flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-          >
-            <XMarkIcon className="h-6 w-6" />
-          </button>
-        </div>
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-          <BindLogic logic={frameLogic} props={frameLogicProps}>
-            <Schedule scrollContainer={false} drawerMode />
-          </BindLogic>
-        </div>
-      </div>
-    </div>
   )
 }

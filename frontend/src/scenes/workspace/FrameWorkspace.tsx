@@ -5,6 +5,7 @@ import { useCallback, useLayoutEffect, useRef, type DragEvent } from 'react'
 import {
   AdjustmentsHorizontalIcon,
   BoltIcon,
+  CalendarDaysIcon,
   ChartBarIcon,
   CircleStackIcon,
   CommandLineIcon,
@@ -12,7 +13,6 @@ import {
   EyeIcon,
   SignalIcon,
   Squares2X2Icon,
-  XMarkIcon,
 } from '@heroicons/react/24/outline'
 import { frameHost, frameIsHealthy, frameIsStale, logUpdatesFrameActivity } from '../../decorators/frame'
 import { FrameImage } from '../../components/FrameImage'
@@ -20,7 +20,9 @@ import { FrameScene, FrameType, LogType, MetricsType, ScheduledEvent } from '../
 import { framesModel } from '../../models/framesModel'
 import { FrameosShell } from './FrameosShell'
 import { AddSceneTile, SceneControlPanel, TemplateDrawer } from './FramesHome'
-import { FrameDashboardSurface, FrameScheduleDrawer } from './FrameDashboardSurface'
+import { FrameDashboardSurface } from './FrameDashboardSurface'
+import { FrameDeployPlanDrawer } from './FrameDeployPlanDrawer'
+import { FrameSceneSidebarCard } from './FrameSceneSidebarCard'
 import { FrameSidebarPreview } from './FrameSidebarPreview'
 import { sceneWorkspaceLogic } from './sceneWorkspaceLogic'
 import { frameToolScrollKey, workspaceLogic, WorkspaceUtilityPanel } from './workspaceLogic'
@@ -32,6 +34,7 @@ import { frameSettingsLogic } from '../frame/panels/FrameSettings/frameSettingsL
 import { logsLogic } from '../frame/panels/Logs/logsLogic'
 import { metricsLogic } from '../frame/panels/Metrics/metricsLogic'
 import { controlLogic } from '../frame/panels/Scenes/controlLogic'
+import { templatesLogic } from '../frame/panels/Templates/templatesLogic'
 import { SceneDropDown } from '../frame/panels/Scenes/SceneDropDown'
 import { Assets } from '../frame/panels/Assets/Assets'
 import { Debug } from '../frame/panels/Debug/Debug'
@@ -42,7 +45,12 @@ import { Metrics } from '../frame/panels/Metrics/Metrics'
 import { Ping } from '../frame/panels/Ping/Ping'
 import { Schedule } from '../frame/panels/Schedule/Schedule'
 import { Terminal } from '../frame/panels/Terminal/Terminal'
-import { getFrameosSceneDragData, hasFrameosSceneDragData, setFrameosSceneDragData } from './sceneDrag'
+import {
+  getFrameosSceneDragData,
+  getFrameosTemplateDragData,
+  hasFrameosSceneListDragData,
+  setFrameosSceneDragData,
+} from './sceneDrag'
 import { groupFramesByStatus } from './frameStatusGroups'
 
 interface FrameWorkspaceProps {
@@ -215,6 +223,12 @@ const frameToolDefinitions: FrameToolDefinition[] = [
     icon: <Squares2X2Icon className="h-5 w-5" />,
   },
   { panel: 'preview', label: 'Preview', description: 'Current image', icon: <EyeIcon className="h-5 w-5" /> },
+  {
+    panel: 'schedule',
+    label: 'Schedule',
+    description: 'Scene timing',
+    icon: <CalendarDaysIcon className="h-5 w-5" />,
+  },
   { panel: 'logs', label: 'Logs', description: 'Runtime output', icon: <DocumentTextIcon className="h-5 w-5" /> },
   { panel: 'metrics', label: 'Metrics', description: 'Health charts', icon: <ChartBarIcon className="h-5 w-5" /> },
   { panel: 'assets', label: 'Assets', description: 'Files on frame', icon: <CircleStackIcon className="h-5 w-5" /> },
@@ -367,15 +381,27 @@ function FrameTree({
   frame,
   frames,
   activeTool,
+  unsavedChanges,
+  undeployedChanges,
 }: {
   frame: FrameType
   frames: FrameType[]
   activeTool: WorkspaceUtilityPanel
+  unsavedChanges: boolean
+  undeployedChanges: boolean
 }): JSX.Element {
   return (
-    <div className="space-y-5">
-      <FrameSelector frame={frame} frames={frames} />
-      <FrameSidebarPreview frame={frame} active={activeTool === 'preview'} className="mx-2" />
+    <div className="space-y-4">
+      <div className="space-y-2">
+        <FrameSelector frame={frame} frames={frames} />
+        <FrameSceneSidebarCard
+          frame={frame}
+          unsavedChanges={unsavedChanges}
+          undeployedChanges={undeployedChanges}
+          className="mx-2"
+        />
+        <FrameSidebarPreview frame={frame} active={activeTool === 'preview'} className="mx-2" />
+      </div>
       <div>
         <div className="frameos-muted mb-2 px-2 text-xs font-semibold uppercase tracking-wide">Frame Tools</div>
         <div className="space-y-1">
@@ -434,9 +460,6 @@ function SceneTile({ frame, scene, active }: { frame: FrameType; scene: FrameSce
               Active
             </div>
           ) : null}
-          <div className="frameos-primary-hover-text absolute right-2 top-2 rounded-full bg-white/90 p-1 text-slate-400 shadow-sm transition">
-            <EyeIcon className="h-4 w-4" />
-          </div>
         </div>
         <div className="w-full px-3 py-2">
           <div className="frameos-strong truncate text-sm font-semibold text-slate-900">
@@ -470,17 +493,30 @@ function FrameScenesSurface({
 }): JSX.Element {
   const { search } = useValues(workspaceLogic)
   const { openScheduleDrawer, openSceneControl } = useActions(workspaceLogic)
+  const { applyTemplateAndSave } = useActions(frameLogic({ frameId: frame.id }))
+  const { applyRemoteToFrame } = useActions(templatesLogic({ frameId: frame.id }))
   const { sceneId: currentSceneId } = useValues(controlLogic({ frameId: frame.id }))
 
   const handleScenesDragOver = (event: DragEvent<HTMLDivElement>) => {
-    if (!hasFrameosSceneDragData(event.dataTransfer)) {
+    if (!hasFrameosSceneListDragData(event.dataTransfer)) {
       return
     }
     event.preventDefault()
-    event.dataTransfer.dropEffect = 'move'
+    event.dataTransfer.dropEffect = getFrameosTemplateDragData(event.dataTransfer) ? 'copy' : 'move'
   }
 
   const handleScenesDrop = (event: DragEvent<HTMLDivElement>) => {
+    const templateDragData = getFrameosTemplateDragData(event.dataTransfer)
+    if (templateDragData) {
+      event.preventDefault()
+      if (templateDragData.repository) {
+        applyRemoteToFrame(templateDragData.repository, templateDragData.template, true)
+      } else {
+        applyTemplateAndSave(templateDragData.template)
+      }
+      return
+    }
+
     const sceneId = getFrameosSceneDragData(event.dataTransfer)
     if (!sceneId || !frame.scenes?.some((scene) => scene.id === sceneId)) {
       return
@@ -1081,38 +1117,6 @@ function frameToolUsesPageScroll(activeTool: WorkspaceUtilityPanel): boolean {
   return activeTool !== 'preview'
 }
 
-function ScheduleDrawer({ frame }: { frame: FrameType }): JSX.Element {
-  const { closeScheduleDrawer } = useActions(workspaceLogic)
-  const frameLogicProps = { frameId: frame.id }
-
-  return (
-    <div className="workspace-drawer frameos-drawer fixed bottom-5 right-5 top-5 z-40 w-[430px] overflow-hidden rounded-[24px] border border-white/80 bg-white/95 shadow-2xl shadow-slate-500/30 backdrop-blur-xl">
-      <BindLogic logic={frameLogic} props={frameLogicProps}>
-        <div className="flex h-full flex-col">
-          <div className="frameos-divider flex items-start justify-between gap-3 border-b border-slate-200/80 px-5 py-4">
-            <div className="min-w-0">
-              <div className="frameos-muted text-xs font-semibold uppercase tracking-wide text-slate-400">
-                {frame.name || frameHost(frame)}
-              </div>
-              <h2 className="frameos-strong truncate text-xl font-bold tracking-normal text-slate-950">Schedule</h2>
-            </div>
-            <button
-              type="button"
-              onClick={closeScheduleDrawer}
-              className="frameos-icon-button flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-            >
-              <XMarkIcon className="h-6 w-6" />
-            </button>
-          </div>
-          <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-            <Schedule scrollContainer={false} drawerMode />
-          </div>
-        </div>
-      </BindLogic>
-    </div>
-  )
-}
-
 function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
   const frameLogicProps = { frameId }
   useMountedLogic(terminalLogic(frameLogicProps))
@@ -1121,14 +1125,11 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
   useMountedLogic(metricsLogic(frameLogicProps))
 
   const { framesList } = useValues(framesModel)
-  const { frame, scenes } = useValues(frameLogic(frameLogicProps))
-  const {
-    sceneControlSelection,
-    scheduleDrawerFrameId,
-    templateDrawerFrameId,
-    utilityPanel,
-    frameToolScrollPositions,
-  } = useValues(workspaceLogic)
+  const { frame, scenes, deployPlanModalOpen, undeployedChanges, unsavedChanges } = useValues(
+    frameLogic(frameLogicProps)
+  )
+  const { sceneControlSelection, templateDrawerFrameId, utilityPanel, frameToolScrollPositions } =
+    useValues(workspaceLogic)
   const { rememberFrameToolScroll } = useActions(workspaceLogic)
   const activeTool =
     frameToolDefinitions.find((definition) => definition.panel === utilityPanel) ?? frameToolDefinitions[0]
@@ -1216,7 +1217,15 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
         <FrameosShell
           mode="frame"
           title="Frame"
-          tree={<FrameTree frame={frame} frames={framesList} activeTool={activeToolPanel} />}
+          tree={
+            <FrameTree
+              frame={frame}
+              frames={framesList}
+              activeTool={activeToolPanel}
+              unsavedChanges={unsavedChanges}
+              undeployedChanges={undeployedChanges}
+            />
+          }
           topBar={toolUsesSearch ? undefined : null}
           showAiButton={false}
           mainClassName={clsx(
@@ -1224,10 +1233,10 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
             'frame-workspace-main py-6 pr-8 max-lg:h-auto max-lg:overflow-visible max-lg:px-4 max-lg:pb-6 max-lg:pt-0'
           )}
           rightPanel={
-            templateDrawerFrameId ? (
+            deployPlanModalOpen ? (
+              <FrameDeployPlanDrawer frame={frame} />
+            ) : templateDrawerFrameId ? (
               <TemplateDrawer />
-            ) : scheduleDrawerFrameId === frame.id ? (
-              <FrameScheduleDrawer frame={frame} />
             ) : sceneControlSelection ? (
               <SceneControlPanel />
             ) : null

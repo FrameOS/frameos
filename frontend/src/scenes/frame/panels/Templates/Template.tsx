@@ -18,6 +18,7 @@ import { Modal } from '../../../../components/Modal'
 import { Form } from 'kea-forms'
 import { Field } from '../../../../components/Field'
 import { StateFieldEdit } from '../Scenes/StateFieldEdit'
+import { type FrameosTemplateDragData, setFrameosTemplateDragData } from '../../../workspace/sceneDrag'
 
 interface TemplateProps {
   template: TemplateType
@@ -28,6 +29,7 @@ interface TemplateProps {
   removeTemplate?: (id: string) => void
   editTemplate?: (template: TemplateType) => void
   installedTemplatesByName: Record<string, boolean>
+  templateDragData?: FrameosTemplateDragData
 }
 
 export function TemplateRow({
@@ -39,6 +41,7 @@ export function TemplateRow({
   editTemplate,
   saveRemoteAsLocal,
   installedTemplatesByName,
+  templateDragData,
 }: TemplateProps): JSX.Element {
   const { apps } = useValues(appsModel)
   const { settings, savedSettings, settingsChanged } = useValues(settingsLogic)
@@ -80,8 +83,15 @@ export function TemplateRow({
 
   return (
     <div
+      draggable={Boolean(templateDragData)}
+      onDragStart={(event) => {
+        if (templateDragData) {
+          setFrameosTemplateDragData(event.dataTransfer, templateDragData)
+        }
+      }}
       className={clsx(
         'frame-tool-card @container break-inside-avoid space-y-2 rounded-[18px] p-3 transition',
+        templateDragData && 'cursor-grab active:cursor-grabbing',
         installedTemplatesByName[template.name] ? 'frameos-primary-border-strong' : ''
       )}
     >

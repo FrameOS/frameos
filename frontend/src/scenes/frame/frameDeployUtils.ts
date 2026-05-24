@@ -106,6 +106,16 @@ function previousFrameosVersion(plan?: DeployPlanResponse | null): string {
   return plan?.previous_frameos_version ? String(plan.previous_frameos_version).split('+')[0] : 'Not deployed'
 }
 
+function usesPrecompiledFrameosArtifacts(plan: DeployPlanResponse): boolean {
+  const binaryPlan = plan.full_deploy?.binary
+
+  return (
+    binaryPlan?.requested_compilation_mode === 'precompiled' ||
+    binaryPlan?.compilation_mode === 'precompiled' ||
+    binaryPlan?.will_attempt_precompiled === true
+  )
+}
+
 export function buildDeployPlanRequestBody(
   frame: Partial<FrameType>,
   frameKeys: readonly (keyof FrameType)[]
@@ -140,7 +150,10 @@ export function buildFullDeployPlanSummary(
   const items: SummaryItem[] = [
     {
       label: 'FrameOS version',
-      value: previousVersion === CURRENT_FRAMEOS_VERSION ? CURRENT_FRAMEOS_VERSION : `${previousVersion} -> ${CURRENT_FRAMEOS_VERSION}`,
+      value:
+        previousVersion === CURRENT_FRAMEOS_VERSION
+          ? CURRENT_FRAMEOS_VERSION
+          : `${previousVersion} -> ${CURRENT_FRAMEOS_VERSION}`,
     },
     ...(frame?.device ? [{ label: 'Device', value: String(frame.device) }] : []),
     {
@@ -225,11 +238,7 @@ export function buildFullDeployPlanSummary(
   if (fullPlan.post_deploy?.reboot_schedule?.needs_remove) {
     items.push({ label: 'Reboot schedule', value: 'Old scheduled reboot config will be removed' })
   }
-  if (
-    fullPlan.low_memory &&
-    !fullPlan.binary.will_attempt_precompiled &&
-    !fullPlan.binary.will_attempt_cross_compile
-  ) {
+  if (fullPlan.low_memory && !fullPlan.binary.will_attempt_precompiled && !fullPlan.binary.will_attempt_cross_compile) {
     items.push({ label: 'Low memory', value: 'FrameOS will be stopped before the on-device build' })
   }
   if (fullPlan.post_deploy?.final_action === 'reboot') {
@@ -258,7 +267,8 @@ export function buildDeployRecommendation(
     return {
       mode: 'full',
       title: 'Suggested: full deploy',
-      description: 'This frame has not been deployed yet, so FrameOS, dependencies, and system changes need a full deploy.',
+      description:
+        'This frame has not been deployed yet, so FrameOS, dependencies, and system changes need a full deploy.',
     }
   }
 
@@ -271,16 +281,29 @@ export function buildDeployRecommendation(
   }
 
   if (versionChanged) {
+    if (usesPrecompiledFrameosArtifacts(plan)) {
+      return {
+        mode: 'full',
+        title: 'Suggested: full deploy',
+        description: `This frame is configured to use precompiled FrameOS binaries and assets, so updating FrameOS from ${
+          previousVersion ?? 'unknown'
+        } to ${CURRENT_FRAMEOS_VERSION} requires a full deploy.`,
+      }
+    }
+
     return {
       mode: 'fast',
       title: 'Suggested: fast deploy',
-      description: `Fast deploy is enough to push the latest frame config and interpreted scenes. Use full deploy only if you also want to update the FrameOS runtime from ${previousVersion ?? 'unknown'} to ${CURRENT_FRAMEOS_VERSION}.`,
+      description: `Fast deploy is enough to push the latest frame config and interpreted scenes. Use full deploy only if you also want to update the FrameOS runtime from ${
+        previousVersion ?? 'unknown'
+      } to ${CURRENT_FRAMEOS_VERSION}.`,
     }
   }
 
   return {
     mode: 'fast',
     title: 'Suggested: fast deploy',
-    description: 'No pending changes require rebuilding FrameOS, so a fast deploy (reload) is enough to bring the frame up to date.',
+    description:
+      'No pending changes require rebuilding FrameOS, so a fast deploy (reload) is enough to bring the frame up to date.',
   }
 }

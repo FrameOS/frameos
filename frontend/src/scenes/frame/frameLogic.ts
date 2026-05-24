@@ -945,9 +945,7 @@ export const frameLogic = kea<frameLogicType>([
       actions.loadDeployPlansSuccess(payload.plan)
     },
     showDeployPlanModal: async () => {
-      if (!values.deployPlans) {
-        actions.loadDeployPlans()
-      }
+      actions.loadDeployPlans()
     },
   })),
   selectors(() => ({

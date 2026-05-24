@@ -219,14 +219,13 @@ export function FrameosShell({
             secondarySidebarOpen ? 'border-r border-slate-200/80' : 'max-lg:border-r max-lg:border-slate-200/80'
           )}
         >
-          <button
-            type="button"
-            title={secondarySidebarOpen ? 'Hide panel' : 'Show panel'}
-            onClick={toggleSecondarySidebar}
+          <A
+            href={urls.frames()}
+            title="Frames home"
             className="workspace-logo-button frameos-icon-button mb-8 flex h-12 w-12 items-center justify-center rounded-xl transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
           >
             <FrameosLogo variant={theme === 'dark' ? 'white-colors' : 'color'} className="h-10 w-10" />
-          </button>
+          </A>
           <nav className="flex flex-1 flex-col items-center gap-4">
             <NavButton
               active={mode === 'frames'}

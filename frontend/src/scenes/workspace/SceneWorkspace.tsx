@@ -19,6 +19,8 @@ import { framesModel } from '../../models/framesModel'
 import { frameHost } from '../../decorators/frame'
 import { FrameScene, FrameType, NodeData } from '../../types'
 import { FrameosShell } from './FrameosShell'
+import { FrameDeployPlanDrawer } from './FrameDeployPlanDrawer'
+import { FrameSceneSidebarCard } from './FrameSceneSidebarCard'
 import { FrameSidebarPreview } from './FrameSidebarPreview'
 import { sceneWorkspaceLogic } from './sceneWorkspaceLogic'
 import { workspaceLogic, WorkspaceUtilityPanel } from './workspaceLogic'
@@ -63,8 +65,19 @@ const utilityDefinitions: UtilityDefinition[] = [
   { panel: 'json', label: 'JSON', icon: <ServerStackIcon className="h-5 w-5" /> },
 ]
 
-function sceneUtilityDefinition(panel: WorkspaceUtilityPanel | null): UtilityDefinition | null {
-  return utilityDefinitions.find((definition) => definition.panel === panel) ?? null
+function sceneIsCompiled(scene: FrameScene | null): boolean {
+  return !!scene && scene.settings?.execution !== 'interpreted'
+}
+
+function sceneUtilityDefinitions(scene: FrameScene | null): UtilityDefinition[] {
+  return utilityDefinitions.filter((definition) => definition.panel !== 'source' || sceneIsCompiled(scene))
+}
+
+function sceneUtilityDefinition(
+  panel: WorkspaceUtilityPanel | null,
+  scene: FrameScene | null
+): UtilityDefinition | null {
+  return sceneUtilityDefinitions(scene).find((definition) => definition.panel === panel) ?? null
 }
 
 function nodeLabel(nodeData: NodeData | undefined, fallback: string): string {
@@ -95,11 +108,13 @@ function SceneSelector({
   frames,
   scenes,
   selectedSceneId,
+  sidebarActions,
 }: {
   frame: FrameType
   frames: FrameType[]
   scenes: FrameScene[]
   selectedSceneId: string | null
+  sidebarActions?: JSX.Element
 }): JSX.Element {
   const { navigateToScene, navigateToSceneFrame } = useActions(workspaceLogic)
   const { linkedActiveSceneId, undeployedSceneIds, unsavedSceneIds } = useValues(scenesLogic({ frameId: frame.id }))
@@ -123,7 +138,7 @@ function SceneSelector({
   }
 
   return (
-    <div className="space-y-3 px-2">
+    <div className="space-y-2 px-2">
       <div>
         <label className="frameos-muted mb-2 block text-xs font-semibold uppercase tracking-wide">Frame</label>
         <select
@@ -142,6 +157,7 @@ function SceneSelector({
           ))}
         </select>
       </div>
+      {sidebarActions}
       <FrameSidebarPreview frame={frame} />
       <div onDragOver={handleSceneListDragOver} onDrop={handleSceneListDrop}>
         <div className="mb-2 flex items-center justify-between gap-2">
@@ -230,78 +246,20 @@ function SceneTree({
   undeployedChanges: boolean
 }): JSX.Element {
   const { sceneNodesOpen } = useValues(workspaceLogic)
-  const { openUtilityPanel, toggleSceneNodesOpen } = useActions(workspaceLogic)
-  const { saveFrame, saveAndDeployFrame } = useActions(frameLogic({ frameId: frame.id }))
-  const { linkedActiveSceneId } = useValues(scenesLogic({ frameId: frame.id }))
+  const { toggleSceneNodesOpen } = useActions(workspaceLogic)
   const sceneNodes = selectedScene?.nodes ?? []
-  const execution = selectedScene?.settings?.execution === 'interpreted' ? 'Interpreted' : 'Compiled'
-  const selectedSceneIsActive = selectedSceneId !== null && linkedActiveSceneId === selectedSceneId
 
   return (
     <div className="space-y-4">
-      <SceneSelector frame={frame} frames={frames} scenes={scenes} selectedSceneId={selectedSceneId} />
-      <div className="frameos-inset mx-2 rounded-2xl border border-slate-200 bg-white/55 p-3">
-        <div className="frameos-muted text-xs font-semibold uppercase tracking-wide text-slate-400">
-          {frame.name || frameHost(frame)}
-        </div>
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-500">
-            {sceneNodes.length} nodes
-          </span>
-          <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-500">{execution}</span>
-          {unsavedChanges ? (
-            <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-700">Unsaved</span>
-          ) : null}
-          {!unsavedChanges && undeployedChanges ? (
-            <span className="rounded-full bg-blue-100 px-2 py-1 text-xs font-semibold text-blue-700">Undeployed</span>
-          ) : null}
-        </div>
-        <div className="mt-3 grid grid-cols-3 gap-2">
-          <button
-            type="button"
-            onClick={() => openUtilityPanel('state')}
-            className="frameos-secondary-button rounded-lg px-3 py-2 text-xs font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-          >
-            Run
-          </button>
-          <button
-            type="button"
-            onClick={() => saveFrame()}
-            className={clsx(
-              'rounded-lg px-3 py-2 text-xs font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-              unsavedChanges ? 'frameos-primary-action' : 'frameos-secondary-button'
-            )}
-          >
-            Save
-          </button>
-          <button
-            type="button"
-            onClick={() => saveAndDeployFrame()}
-            className={clsx(
-              'rounded-lg px-3 py-2 text-xs font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-              unsavedChanges || undeployedChanges ? 'frameos-primary-action' : 'frameos-secondary-button'
-            )}
-          >
-            Deploy
-          </button>
-        </div>
-      </div>
-      {selectedScene ? (
-        <div className="frameos-card mx-2 overflow-hidden rounded-2xl border border-white/80 bg-white/65 shadow-sm">
-          <div className="frameos-card-media relative h-32 bg-slate-100">
-            <FrameImage
-              frameId={frame.id}
-              sceneId={selectedSceneIsActive ? undefined : selectedScene.id}
-              refreshable
-              objectFit="contain"
-              className="h-full w-full"
-            />
-            <div className="absolute right-2 top-2 rounded-full bg-white/90 px-2 py-0.5 text-[11px] font-semibold text-slate-500 shadow-sm">
-              {selectedSceneIsActive ? 'Current' : 'Scene'}
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <SceneSelector
+        frame={frame}
+        frames={frames}
+        scenes={scenes}
+        selectedSceneId={selectedSceneId}
+        sidebarActions={
+          <FrameSceneSidebarCard frame={frame} unsavedChanges={unsavedChanges} undeployedChanges={undeployedChanges} />
+        }
+      />
       {selectedScene ? (
         <div>
           <button
@@ -395,14 +353,15 @@ function SceneNodeTreeButton({
   )
 }
 
-function UtilityToolbar(): JSX.Element {
+function UtilityToolbar({ scene }: { scene: FrameScene | null }): JSX.Element {
   const { chatDrawerSelection, utilityPanel } = useValues(workspaceLogic)
   const { closeChatDrawer, openUtilityPanel } = useActions(workspaceLogic)
   const utilityPanelIsVisible = !chatDrawerSelection
+  const definitions = sceneUtilityDefinitions(scene)
 
   return (
     <div className="scene-diagram-utility-toolbar flex shrink-0 flex-col items-center gap-2">
-      {utilityDefinitions.slice(0, 6).map((definition) => (
+      {definitions.map((definition) => (
         <button
           key={definition.panel}
           type="button"
@@ -425,7 +384,15 @@ function UtilityToolbar(): JSX.Element {
   )
 }
 
-function SceneDiagramOverlay({ frameId, sceneId }: { frameId: number; sceneId: string | null }): JSX.Element {
+function SceneDiagramOverlay({
+  frameId,
+  scene,
+  sceneId,
+}: {
+  frameId: number
+  scene: FrameScene | null
+  sceneId: string | null
+}): JSX.Element {
   const { chatDrawerSelection } = useValues(workspaceLogic)
   const { closeUtilityPanel, openChatDrawer } = useActions(workspaceLogic)
   const chatDrawerIsOpen = chatDrawerSelection?.frameId === frameId && chatDrawerSelection.sceneId === sceneId
@@ -447,7 +414,7 @@ function SceneDiagramOverlay({ frameId, sceneId }: { frameId: number; sceneId: s
         >
           <SparklesIcon className="h-5 w-5" />
         </button>
-        <UtilityToolbar />
+        <UtilityToolbar scene={scene} />
       </div>
       <div className="scene-diagram-node-toolbar pointer-events-auto absolute left-2 top-5 flex min-w-0 flex-wrap items-center gap-2">
         {sceneId ? <DiagramToolbar sceneId={sceneId} /> : null}
@@ -462,6 +429,19 @@ function SceneTreeLoadingPlaceholder(): JSX.Element {
       <div>
         <div className="frameos-muted mb-2 text-xs font-semibold uppercase tracking-wide">Frame</div>
         <div className="frameos-skeleton-surface h-12 animate-pulse rounded-xl" />
+      </div>
+      <div className="frameos-inset rounded-2xl border border-slate-200 bg-white/55 p-3">
+        <div className="frameos-skeleton-line h-3 w-28 animate-pulse rounded-full" />
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {[0, 1, 2].map((index) => (
+            <div key={index} className="frameos-skeleton-line h-6 w-16 animate-pulse rounded-full" />
+          ))}
+        </div>
+        <div className="mt-3 grid grid-cols-3 gap-2">
+          {[0, 1, 2].map((index) => (
+            <div key={index} className="frameos-skeleton-surface h-8 animate-pulse rounded-full" />
+          ))}
+        </div>
       </div>
       <div className="frameos-skeleton-surface h-32 overflow-hidden rounded-2xl">
         <div className="frameos-skeleton-media h-full animate-pulse" />
@@ -483,22 +463,6 @@ function SceneTreeLoadingPlaceholder(): JSX.Element {
             </div>
           ))}
         </div>
-      </div>
-      <div className="frameos-inset rounded-2xl border border-slate-200 bg-white/55 p-3">
-        <div className="frameos-skeleton-line h-3 w-28 animate-pulse rounded-full" />
-        <div className="mt-3 flex flex-wrap gap-1.5">
-          {[0, 1, 2].map((index) => (
-            <div key={index} className="frameos-skeleton-line h-6 w-16 animate-pulse rounded-full" />
-          ))}
-        </div>
-        <div className="mt-3 grid grid-cols-3 gap-2">
-          {[0, 1, 2].map((index) => (
-            <div key={index} className="frameos-skeleton-surface h-8 animate-pulse rounded-full" />
-          ))}
-        </div>
-      </div>
-      <div className="frameos-skeleton-surface mx-2 h-32 overflow-hidden rounded-2xl">
-        <div className="frameos-skeleton-media h-full animate-pulse" />
       </div>
       <div>
         <div className="mb-2 flex items-center gap-2 px-2">
@@ -561,7 +525,7 @@ function ScenePreviewPanel({ frameId, scene }: { frameId: number; scene: FrameSc
 function UtilityDrawer({ frameId, scene }: { frameId: number; scene: FrameScene | null }): JSX.Element | null {
   const { utilityPanel } = useValues(workspaceLogic)
   const { closeUtilityPanel } = useActions(workspaceLogic)
-  const activeDefinition = sceneUtilityDefinition(utilityPanel)
+  const activeDefinition = sceneUtilityDefinition(utilityPanel, scene)
 
   if (!utilityPanel || !activeDefinition) {
     return null
@@ -607,7 +571,15 @@ function UtilityDrawer({ frameId, scene }: { frameId: number; scene: FrameScene 
   )
 }
 
-function SceneCanvas({ frameId, selectedSceneId }: { frameId: number; selectedSceneId: string | null }): JSX.Element {
+function SceneCanvas({
+  frameId,
+  selectedScene,
+  selectedSceneId,
+}: {
+  frameId: number
+  selectedScene: FrameScene | null
+  selectedSceneId: string | null
+}): JSX.Element {
   const { openUtilityPanel, navigateToScene } = useActions(workspaceLogic)
 
   const handleSceneDragOver = (event: DragEvent<HTMLDivElement>) => {
@@ -651,7 +623,7 @@ function SceneCanvas({ frameId, selectedSceneId }: { frameId: number; selectedSc
       onDropCapture={handleSceneDrop}
     >
       <Diagram sceneId={selectedSceneId} showToolbar={false} />
-      <SceneDiagramOverlay frameId={frameId} sceneId={selectedSceneId} />
+      <SceneDiagramOverlay frameId={frameId} scene={selectedScene} sceneId={selectedSceneId} />
       <button
         type="button"
         onClick={() => openUtilityPanel('apps')}
@@ -665,10 +637,11 @@ function SceneCanvas({ frameId, selectedSceneId }: { frameId: number; selectedSc
 
 function SceneWorkspaceFrame({ frameId }: SceneWorkspaceFrameProps): JSX.Element {
   const frameLogicProps = { frameId }
-  const { frame, scenes, unsavedChanges, undeployedChanges } = useValues(frameLogic(frameLogicProps))
+  const { frame, scenes, unsavedChanges, undeployedChanges, deployPlanModalOpen } = useValues(
+    frameLogic(frameLogicProps)
+  )
   const { framesList } = useValues(framesModel)
   const { selectedSceneId, utilityPanel } = useValues(workspaceLogic)
-  const activeUtilityDefinition = sceneUtilityDefinition(utilityPanel)
 
   if (!frame) {
     return (
@@ -688,6 +661,7 @@ function SceneWorkspaceFrame({ frameId }: SceneWorkspaceFrameProps): JSX.Element
   const resolvedSceneId =
     selectedSceneId && scenes.some((scene) => scene.id === selectedSceneId) ? selectedSceneId : scenes[0]?.id ?? null
   const selectedScene = scenes.find((scene) => scene.id === resolvedSceneId) ?? null
+  const activeUtilityDefinition = sceneUtilityDefinition(utilityPanel, selectedScene)
 
   return (
     <BindLogic logic={frameLogic} props={frameLogicProps}>
@@ -709,9 +683,15 @@ function SceneWorkspaceFrame({ frameId }: SceneWorkspaceFrameProps): JSX.Element
           topBar={null}
           showAiButton={false}
           mainClassName="scene-workspace-main h-screen overflow-hidden p-0"
-          rightPanel={activeUtilityDefinition ? <UtilityDrawer frameId={frameId} scene={selectedScene} /> : null}
+          rightPanel={
+            deployPlanModalOpen ? (
+              <FrameDeployPlanDrawer frame={frame} />
+            ) : activeUtilityDefinition ? (
+              <UtilityDrawer frameId={frameId} scene={selectedScene} />
+            ) : null
+          }
         >
-          <SceneCanvas frameId={frame.id} selectedSceneId={resolvedSceneId} />
+          <SceneCanvas frameId={frame.id} selectedScene={selectedScene} selectedSceneId={resolvedSceneId} />
         </FrameosShell>
         <EditTemplateModal />
       </BindLogic>

@@ -7,7 +7,6 @@ import {
   ChevronDownIcon,
   ChevronRightIcon,
   ComputerDesktopIcon,
-  EyeIcon,
   PhotoIcon,
   PencilSquareIcon,
   PlusIcon,
@@ -34,7 +33,7 @@ import { controlLogic } from '../frame/panels/Scenes/controlLogic'
 import { ExpandedScene } from '../frame/panels/Scenes/ExpandedScene'
 import { EditTemplateModal } from '../frame/panels/Templates/EditTemplateModal'
 import { Templates } from '../frame/panels/Templates/Templates'
-import { FrameDashboardSurface, FrameScheduleDrawer } from './FrameDashboardSurface'
+import { FrameDashboardSurface } from './FrameDashboardSurface'
 import { FrameLiveBadge } from './FrameLiveBadge'
 import { framesHomeLogic } from './framesHomeLogic'
 
@@ -278,9 +277,6 @@ function SceneTile({ frame, scene, active }: { frame: FrameType; scene: FrameSce
             Active
           </div>
         ) : null}
-        <div className="frameos-primary-hover-text absolute right-2 top-2 rounded-full bg-white/90 p-1 text-slate-400 shadow-sm transition">
-          <EyeIcon className="h-4 w-4" />
-        </div>
       </div>
       <div className="w-full px-3 py-2">
         <div className="frameos-strong truncate text-sm font-semibold text-slate-900">
@@ -566,8 +562,9 @@ export function SceneControlPanel(): JSX.Element | null {
               <div className="mb-4 flex flex-wrap gap-2">
                 <A
                   href={urls.scenes(frame.id, scene.id)}
-                  className="frameos-primary-action flex flex-1 items-center justify-center rounded-lg px-4 py-2.5 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                  className="frameos-secondary-button flex flex-1 items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
                 >
+                  <PencilSquareIcon className="h-5 w-5" />
                   Open editor
                 </A>
                 <DeleteInstalledSceneButton frame={frame} scene={scene} />
@@ -604,7 +601,7 @@ function DeleteInstalledSceneButton({ frame, scene }: { frame: FrameType; scene:
         deleteSceneAndSave(scene.id)
         closeSceneControl()
       }}
-      className="frameos-danger-button flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg px-4 text-sm font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
+      className="frameos-secondary-button flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg px-4 text-sm font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
       title="Delete scene"
     >
       <TrashIcon className="h-5 w-5" />
@@ -684,13 +681,12 @@ export function FramesHome(): JSX.Element {
     useValues(workspaceLogic)
   const { showForm } = useActions(newFrameForm)
   const { formVisible } = useValues(newFrameForm)
-  const { closeSceneControl, closeScheduleDrawer, closeTemplateDrawer } = useActions(workspaceLogic)
-  const { sceneControlSelection, scheduleDrawerFrameId, templateDrawerFrameId } = useValues(workspaceLogic)
-  const { archivedFramesExpanded, inactiveFramesExpanded, frames, framesLoading } = useValues(framesModel)
+  const { closeSceneControl, closeTemplateDrawer } = useActions(workspaceLogic)
+  const { sceneControlSelection, templateDrawerFrameId } = useValues(workspaceLogic)
+  const { archivedFramesExpanded, inactiveFramesExpanded, framesLoading } = useValues(framesModel)
   const { toggleArchivedFramesExpanded, toggleInactiveFramesExpanded } = useActions(framesModel)
   const hasFrameSections =
     overviewActiveFrameSections.length + overviewInactiveFrameSections.length + overviewArchivedFrameSections.length > 0
-  const scheduleDrawerFrame = scheduleDrawerFrameId ? frames[scheduleDrawerFrameId] : null
 
   return (
     <FrameosShell
@@ -700,7 +696,6 @@ export function FramesHome(): JSX.Element {
       primaryActionLabel="Add frame"
       onPrimaryAction={() => {
         closeSceneControl()
-        closeScheduleDrawer()
         closeTemplateDrawer()
         showForm()
       }}
@@ -709,8 +704,6 @@ export function FramesHome(): JSX.Element {
           <AddFramePanel />
         ) : templateDrawerFrameId ? (
           <TemplateDrawer />
-        ) : scheduleDrawerFrame ? (
-          <FrameScheduleDrawer frame={scheduleDrawerFrame} />
         ) : sceneControlSelection ? (
           <SceneControlPanel />
         ) : null
