@@ -185,6 +185,10 @@ async def test_build_release_target_uses_runtime_filtered_driver_catalog(
                 "import drivers/waveshare/driver as waveshareDriver\n",
                 encoding="utf-8",
             )
+            shutil.copy2(
+                Path(source_root).parent / "versions.json",
+                Path(temp_dir) / "versions.json",
+            )
             return str(source_dir)
 
         async def make_local_modifications(self, source_dir, **kwargs):
@@ -263,6 +267,12 @@ async def test_build_release_target_uses_runtime_filtered_driver_catalog(
     frameos_root = tmp_path / "frameos"
     artifacts_dir = tmp_path / "artifacts"
     frameos_root.mkdir()
+    expected_versions = {
+        "frameos": "2026.5.15+frameos",
+        "agent": "2026.5.16+agent",
+        "docker": "2026.5.16+docker",
+    }
+    (tmp_path / "versions.json").write_text(json.dumps(expected_versions) + "\n", encoding="utf-8")
 
     destination = await cross_module.build_release_target("debian-trixie-amd64", frameos_root, artifacts_dir)
 
@@ -280,6 +290,8 @@ async def test_build_release_target_uses_runtime_filtered_driver_catalog(
     assert metadata["driver_libraries"] == ["httpUpload.so"]
     assert metadata["agent_binary"] == "frameos_agent"
     assert metadata["input_hash"]
+    versions = json.loads((artifacts_dir / "debian-trixie-amd64" / "versions.json").read_text(encoding="utf-8"))
+    assert versions == expected_versions
     assert FakeFrameDeployer.archive_calls == 1
     assert FakeCrossCompiler.build_calls == 2
 
@@ -291,6 +303,7 @@ async def test_build_release_target_uses_runtime_filtered_driver_catalog(
     )
 
     assert restored_destination.read_bytes() == b"release-frameos"
+    assert (artifacts_dir / "debian-trixie-amd64" / "versions.json").is_file()
     assert FakeFrameDeployer.archive_calls == 1
     assert FakeCrossCompiler.build_calls == 2
 

@@ -245,6 +245,8 @@ def release_artifact_complete(
         return False
     if not (artifact_dir / AGENT_BINARY).is_file():
         return False
+    if not (artifact_dir / "versions.json").is_file():
+        return False
     metadata = _read_json(artifact_dir / "metadata.json")
     if metadata.get("release_artifact") is not True:
         return False
@@ -528,6 +530,10 @@ async def build_release_target(
     frameos_root = frameos_root.resolve()
     artifacts_dir = artifacts_dir.resolve()
     artifacts_dir.mkdir(parents=True, exist_ok=True)
+    repo_root = frameos_root.parent
+    versions_path = repo_root / "versions.json"
+    if not versions_path.is_file():
+        raise RuntimeError(f"Release versions file is missing: {versions_path}")
 
     from backend.app.tasks._frame_deployer import FrameDeployer  # type: ignore  # noqa: E402
     from backend.app.tasks.binary_builder import resolve_prebuilt_entry  # type: ignore  # noqa: E402
@@ -740,6 +746,7 @@ async def build_release_target(
         tmp_agent_destination = target_tmp / AGENT_BINARY
         shutil.copy2(agent_binary_path, tmp_agent_destination)
         os.chmod(tmp_agent_destination, 0o755)
+        shutil.copy2(versions_path, target_tmp / "versions.json")
 
         driver_dir = target_tmp / "drivers"
         driver_dir.mkdir(parents=True, exist_ok=True)
