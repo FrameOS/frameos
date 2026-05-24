@@ -1,10 +1,12 @@
 import { useActions, useValues } from 'kea'
+import { A } from 'kea-router'
 import clsx from 'clsx'
 import { useEffect, useRef, type ReactNode } from 'react'
 import {
   CheckCircleIcon,
   ChevronDownIcon,
   ChevronUpIcon,
+  DocumentTextIcon,
   DocumentArrowUpIcon,
   ExclamationTriangleIcon,
   EyeIcon,
@@ -24,6 +26,7 @@ import { frameHost } from '../decorators/frame'
 import { Spinner } from './Spinner'
 import { workspaceLogic, type WorkspaceTheme } from '../scenes/workspace/workspaceLogic'
 import { insertBreaks } from '../utils/insertBreaks'
+import { urls } from '../urls'
 
 function taskIcon(kind: LongRunningTaskKind): JSX.Element {
   if (kind === 'deploy' || kind === 'agentDeploy') {
@@ -54,6 +57,150 @@ function formatTaskBytes(value: number): string {
   }
   const rounded = scaled >= 10 || unitIndex === 0 ? Math.round(scaled) : Math.round(scaled * 10) / 10
   return `${String(rounded).replace(/\.0$/, '')}${units[unitIndex]}`
+}
+
+function terminalTextColor(theme: WorkspaceTheme): string {
+  return theme === 'dark' ? 'text-slate-100' : 'text-slate-900'
+}
+
+function metricNumberColor(
+  value: number,
+  warning: number,
+  critical: number,
+  lowerIsWorse = false,
+  theme: WorkspaceTheme
+): string {
+  if (lowerIsWorse) {
+    if (value <= critical) {
+      return theme === 'dark' ? 'text-red-400' : 'text-red-700'
+    }
+    if (value <= warning) {
+      return theme === 'dark' ? 'text-yellow-300' : 'text-amber-700'
+    }
+    return terminalTextColor(theme)
+  }
+
+  if (value >= critical) {
+    return theme === 'dark' ? 'text-red-400' : 'text-red-700'
+  }
+  if (value >= warning) {
+    return theme === 'dark' ? 'text-yellow-300' : 'text-amber-700'
+  }
+  return terminalTextColor(theme)
+}
+
+function formatNumber(value: number): string {
+  if (!Number.isFinite(value)) {
+    return String(value)
+  }
+  if (Number.isInteger(value)) {
+    return String(value)
+  }
+  return value.toFixed(2).replace(/\.?0+$/, '')
+}
+
+function formatBytesInUnit(bytes: number, unitIndex: number): string {
+  return formatNumber(bytes / 1024 ** unitIndex)
+}
+
+function byteUnitIndex(bytes: number): number {
+  const absBytes = Math.abs(bytes)
+  if (absBytes >= 1024 * 1024 * 1024) {
+    return 3
+  }
+  if (absBytes >= 1024 * 1024) {
+    return 2
+  }
+  if (absBytes >= 1024) {
+    return 1
+  }
+  return 0
+}
+
+function toMb(bytes: number): number {
+  return Math.round(bytes / 1024 / 1024)
+}
+
+function compactMetrics(rest: Record<string, any>): {
+  load: unknown[]
+  cpuTemperature: number
+  ramTotalMb: number
+  ramUsedMb: number
+  ramAvailablePercent: number
+  diskTotalBytes: number
+  diskUsedBytes: number
+  diskAvailablePercent: number
+  diskUnitIndex: number
+  diskUnit: string
+  metricState: string | null
+  hasStandardMetrics: boolean
+} {
+  const load = Array.isArray(rest.load) ? rest.load : [0, 0, 0]
+  const cpuTemperature = Number(rest.cpuTemperature ?? 0)
+  const memoryUsage = rest.memoryUsage ?? {}
+  const diskUsage = rest.diskUsage ?? {}
+
+  const ramTotalMb = toMb(Number(memoryUsage.total ?? 0))
+  const ramAvailableBytes = Number(memoryUsage.available ?? memoryUsage.free ?? 0)
+  const ramUsedBytes = Number(memoryUsage.used ?? Number(memoryUsage.total ?? 0) - ramAvailableBytes)
+  const ramUsedMb = toMb(ramUsedBytes)
+  const ramAvailableMb = Math.max(0, ramTotalMb - ramUsedMb)
+  const ramAvailablePercent = ramTotalMb > 0 ? (ramAvailableMb / ramTotalMb) * 100 : 0
+  const diskTotalBytes = Number(diskUsage.total ?? 0)
+  const diskAvailableBytes = Number(diskUsage.available ?? diskUsage.free ?? 0)
+  const diskUsedBytes = Number(diskUsage.used ?? diskTotalBytes - diskAvailableBytes)
+  const diskUnitIndex = byteUnitIndex(diskTotalBytes)
+  const diskUnit = ['B', 'KB', 'MB', 'GB'][diskUnitIndex]
+  const diskAvailablePercent = diskTotalBytes > 0 ? ((diskTotalBytes - diskUsedBytes) / diskTotalBytes) * 100 : 0
+  const metricState = typeof rest.state === 'string' ? rest.state : null
+  const hasStandardMetrics = 'load' in rest || 'cpuTemperature' in rest || 'memoryUsage' in rest || 'diskUsage' in rest
+
+  return {
+    load,
+    cpuTemperature,
+    ramTotalMb,
+    ramUsedMb,
+    ramAvailablePercent,
+    diskTotalBytes,
+    diskUsedBytes,
+    diskAvailablePercent,
+    diskUnitIndex,
+    diskUnit,
+    metricState,
+    hasStandardMetrics,
+  }
+}
+
+function formatCompactMetricsLine(rest: Record<string, any>): string {
+  const metrics = compactMetrics(rest)
+
+  if (metrics.metricState && !metrics.hasStandardMetrics) {
+    return typeof rest.error === 'string'
+      ? `metrics ${metrics.metricState} ${rest.error}`
+      : `metrics ${metrics.metricState}`
+  }
+
+  const parts = [
+    'metrics',
+    'load',
+    ...metrics.load.map(String),
+    'cpu',
+    `${metrics.cpuTemperature.toFixed(2)}°C`,
+    'ram',
+    `${metrics.ramUsedMb} / ${metrics.ramTotalMb} MB`,
+  ]
+
+  if (metrics.diskTotalBytes > 0) {
+    parts.push(
+      'disk',
+      `${formatBytesInUnit(metrics.diskUsedBytes, metrics.diskUnitIndex)} / ${formatBytesInUnit(
+        metrics.diskTotalBytes,
+        metrics.diskUnitIndex
+      )} ${metrics.diskUnit}`
+    )
+  }
+
+  return parts.join(' ')
 }
 
 function taskTone(task: LongRunningTask, theme: WorkspaceTheme): string {
@@ -110,6 +257,9 @@ function formatTaskLogLine(log: LongRunningTaskLog): string {
   if (log.type === 'webhook') {
     try {
       const { event, timestamp, ...rest } = JSON.parse(log.line)
+      if (event === 'metrics') {
+        return formatCompactMetricsLine(rest)
+      }
       const details = Object.entries(rest)
         .map(([key, value]) => `${key}=${JSON.stringify(value)}`)
         .join(' ')
@@ -205,6 +355,65 @@ function renderTaskLogLine(log: LongRunningTaskLog, formattedLine: string, theme
   if (log.type === 'webhook') {
     try {
       const { event, timestamp, ...rest } = JSON.parse(log.line)
+      if (event === 'metrics') {
+        const metrics = compactMetrics(rest)
+        return (
+          <span className={theme === 'dark' ? 'text-gray-400' : 'text-slate-600'}>
+            <span className={theme === 'dark' ? 'text-yellow-600' : 'text-amber-700'}>metrics</span>{' '}
+            {metrics.metricState && !metrics.hasStandardMetrics ? (
+              <>
+                <span
+                  className={
+                    metrics.metricState === 'error'
+                      ? theme === 'dark'
+                        ? 'text-red-300'
+                        : 'text-red-700'
+                      : terminalTextColor(theme)
+                  }
+                >
+                  {metrics.metricState}
+                </span>
+                {typeof rest.error === 'string' ? (
+                  <span className={clsx('ml-2', theme === 'dark' ? 'text-red-200' : 'text-red-700')}>
+                    {insertBreaks(rest.error)}
+                  </span>
+                ) : null}
+              </>
+            ) : (
+              <>
+                load{' '}
+                {metrics.load.map((value, index) => (
+                  <span key={index} className={clsx(metricNumberColor(Number(value), 1, 2, false, theme), 'mr-2')}>
+                    {String(value)}
+                  </span>
+                ))}
+                cpu{' '}
+                <span className={metricNumberColor(metrics.cpuTemperature, 60, 75, false, theme)}>
+                  {metrics.cpuTemperature.toFixed(2)}°C
+                </span>{' '}
+                ram{' '}
+                <span className={metricNumberColor(metrics.ramAvailablePercent, 15, 5, true, theme)}>
+                  {metrics.ramUsedMb}
+                </span>{' '}
+                / <span className={terminalTextColor(theme)}>{metrics.ramTotalMb} MB</span>
+                {metrics.diskTotalBytes > 0 ? (
+                  <>
+                    {' '}
+                    disk{' '}
+                    <span className={metricNumberColor(metrics.diskAvailablePercent, 15, 5, true, theme)}>
+                      {formatBytesInUnit(metrics.diskUsedBytes, metrics.diskUnitIndex)}
+                    </span>{' '}
+                    /{' '}
+                    <span className={terminalTextColor(theme)}>
+                      {formatBytesInUnit(metrics.diskTotalBytes, metrics.diskUnitIndex)} {metrics.diskUnit}
+                    </span>
+                  </>
+                ) : null}
+              </>
+            )}
+          </span>
+        )
+      }
       return (
         <>
           <span className={clsx('mr-2', theme === 'dark' ? 'text-yellow-600' : 'text-amber-700')}>{event}</span>
@@ -327,6 +536,19 @@ function TaskToast({ task }: { task: LongRunningTask }): JSX.Element {
           ) : null}
         </div>
         <div className="flex shrink-0 items-center gap-1">
+          <A
+            href={urls.frame(task.frameId, 'logs')}
+            title="All logs"
+            aria-label="All logs"
+            className={clsx(
+              'flex h-8 w-8 items-center justify-center rounded-lg transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+              theme === 'dark'
+                ? 'text-slate-400 hover:bg-white/10 hover:text-blue-200'
+                : 'text-slate-500 hover:bg-slate-100 hover:text-blue-700'
+            )}
+          >
+            <DocumentTextIcon className="h-4 w-4" />
+          </A>
           <button
             type="button"
             title={task.expanded ? 'Hide logs' : 'Show logs'}

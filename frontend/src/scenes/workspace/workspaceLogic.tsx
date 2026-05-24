@@ -233,6 +233,33 @@ function frameTitleElement(frameId: string): HTMLElement | null {
   )
 }
 
+function sceneTileElement(frameId: number | string, sceneId: string): HTMLElement | null {
+  if (typeof document === 'undefined') {
+    return null
+  }
+
+  const frameIdString = String(frameId)
+  const candidates = Array.from(document.querySelectorAll<HTMLElement>('[data-workspace-scene-tile]')).filter(
+    (tile) => tile.dataset.workspaceSceneTileFrame === frameIdString && tile.dataset.workspaceSceneTile === sceneId
+  )
+  if (candidates.length === 0) {
+    return null
+  }
+
+  const main = framesMainElement()
+  if (!main) {
+    return candidates[0]
+  }
+
+  const mainRect = main.getBoundingClientRect()
+  return (
+    candidates.find((tile) => {
+      const rect = tile.getBoundingClientRect()
+      return rect.bottom >= mainRect.top && rect.top <= mainRect.bottom
+    }) ?? candidates[0]
+  )
+}
+
 function captureFramesScrollAnchor(): FramesScrollAnchor | null {
   const main = framesMainElement()
   if (!main) {
@@ -320,6 +347,53 @@ function preserveFramesScrollAfterLayoutChange(cache: Record<string, any>): void
       restoreFramesScrollAnchor(anchor)
       cache.framesScrollAnchorFrame = null
       cache.framesScrollAnchorNestedFrame = null
+    })
+  })
+}
+
+function scrollSceneTileIntoView(frameId: number, sceneId: string): void {
+  const main = framesMainElement()
+  const tile = sceneTileElement(frameId, sceneId)
+  if (!tile) {
+    return
+  }
+
+  if (!main || main.scrollHeight <= main.clientHeight) {
+    tile.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' })
+    return
+  }
+
+  const margin = 16
+  const bottomMargin = 46
+  const mainRect = main.getBoundingClientRect()
+  const tileRect = tile.getBoundingClientRect()
+  const topOverflow = tileRect.top - mainRect.top - margin
+  const bottomOverflow = tileRect.bottom - mainRect.bottom + bottomMargin
+
+  if (topOverflow < 0) {
+    main.scrollTo({ top: main.scrollTop + topOverflow, behavior: 'smooth' })
+  } else if (bottomOverflow > 0) {
+    main.scrollTo({ top: main.scrollTop + bottomOverflow, behavior: 'smooth' })
+  }
+}
+
+function ensureSceneTileVisibleAfterLayoutChange(frameId: number, sceneId: string, cache: Record<string, any>): void {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  if (cache.sceneTileScrollFrame) {
+    window.cancelAnimationFrame(cache.sceneTileScrollFrame)
+  }
+  if (cache.sceneTileScrollNestedFrame) {
+    window.cancelAnimationFrame(cache.sceneTileScrollNestedFrame)
+  }
+
+  cache.sceneTileScrollFrame = window.requestAnimationFrame(() => {
+    cache.sceneTileScrollNestedFrame = window.requestAnimationFrame(() => {
+      scrollSceneTileIntoView(frameId, sceneId)
+      cache.sceneTileScrollFrame = null
+      cache.sceneTileScrollNestedFrame = null
     })
   })
 }
@@ -630,7 +704,10 @@ export const workspaceLogic = kea<workspaceLogicType>([
     const preserveFramesScroll = () => preserveFramesScrollAfterLayoutChange(cache)
 
     return {
-      openSceneControl: preserveFramesScroll,
+      openSceneControl: ({ frameId, sceneId }) => {
+        preserveFramesScroll()
+        ensureSceneTileVisibleAfterLayoutChange(frameId, sceneId, cache)
+      },
       closeSceneControl: preserveFramesScroll,
       openTemplateDrawer: preserveFramesScroll,
       closeTemplateDrawer: preserveFramesScroll,

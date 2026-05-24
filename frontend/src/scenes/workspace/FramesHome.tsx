@@ -258,6 +258,8 @@ function SceneTile({ frame, scene, active }: { frame: FrameType; scene: FrameSce
   return (
     <button
       type="button"
+      data-workspace-scene-tile={scene.id}
+      data-workspace-scene-tile-frame={frame.id}
       onClick={() => {
         hideForm()
         openSceneControl(frame.id, scene.id)

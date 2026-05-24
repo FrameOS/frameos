@@ -366,6 +366,8 @@ function FrameSceneTile({
   return (
     <div
       draggable
+      data-workspace-scene-tile={scene.id}
+      data-workspace-scene-tile-frame={frame.id}
       onDragStart={(event) => setFrameosSceneDragData(event.dataTransfer, scene.id)}
       className={clsx(
         'frameos-card group relative h-36 w-36 shrink-0 overflow-hidden rounded-lg border bg-white text-left transition hover:-translate-y-0.5 focus-within:ring-2 focus-within:ring-blue-400',
