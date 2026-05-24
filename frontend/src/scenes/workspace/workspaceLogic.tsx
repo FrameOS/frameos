@@ -88,9 +88,24 @@ function isFrameRoutePathForFrame(pathname: string, frameId: number): boolean {
   return pathname === urls.frame(frameId)
 }
 
+function isWorkspaceRoutePathForFrame(pathname: string, frameId: number): boolean {
+  const scenePath = urls.scenes(frameId)
+  const appPath = urls.apps(frameId)
+  return (
+    pathname === scenePath ||
+    pathname.startsWith(`${scenePath}/`) ||
+    pathname === appPath ||
+    pathname.startsWith(`${appPath}/`)
+  )
+}
+
 function drawerPathForFrame(frameId: number): string {
   const pathname = router.values.location.pathname
-  if (isFramesRoutePath(pathname) || isFrameRoutePathForFrame(pathname, frameId)) {
+  if (
+    isFramesRoutePath(pathname) ||
+    isFrameRoutePathForFrame(pathname, frameId) ||
+    isWorkspaceRoutePathForFrame(pathname, frameId)
+  ) {
     return pathname
   }
   return urls.frame(frameId)
@@ -869,6 +884,20 @@ export const workspaceLogic = kea<workspaceLogicType>([
     const applyFramesRoute = (_: Record<string, unknown>, search: Record<string, unknown>) => {
       applyDrawerFromSearch(drawerFrameIdFromSearch(search), search)
     }
+    const applySceneOrAppRoute = ({ frameId, sceneId }: Record<string, unknown>, search: Record<string, unknown>) => {
+      const validFrameId = Number(frameId)
+      const validSceneId = typeof sceneId === 'string' ? sceneId : null
+
+      if (Number.isFinite(validFrameId)) {
+        actions.setRouteSelection(validFrameId, validSceneId)
+        applyDrawerFromSearch(validFrameId, {
+          ...search,
+          sceneId: searchValue(search, 'sceneId') ?? validSceneId ?? undefined,
+        })
+      } else {
+        closeDrawersFromUrl()
+      }
+    }
     const framesPath = framesRoutePath()
 
     return {
@@ -888,6 +917,11 @@ export const workspaceLogic = kea<workspaceLogicType>([
         actions.openUtilityPanel(frameToolFromSearch(search))
         applyDrawerFromSearch(validFrameId, search)
       },
+      [urls.scenes(':frameId')]: applySceneOrAppRoute,
+      [urls.scenes(':frameId', ':sceneId')]: applySceneOrAppRoute,
+      [urls.apps(':frameId')]: applySceneOrAppRoute,
+      [urls.apps(':frameId', ':sceneId')]: applySceneOrAppRoute,
+      [urls.apps(':frameId', ':sceneId', ':nodeId')]: applySceneOrAppRoute,
     }
   }),
   actionToUrl(() => ({

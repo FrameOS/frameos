@@ -1165,7 +1165,7 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
 }
 
 .scene-workspace-main.workspace-main-with-right-panel {
-  padding-right: 490px;
+  padding-right: calc(430px + 1.25rem);
 }
 
 .scene-editor-canvas.scene-editor-canvas-full {
@@ -1178,18 +1178,14 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
 }
 
 .scene-diagram-utility-buttons,
-.scene-diagram-ai-control,
 .scene-diagram-node-toolbar {
   max-width: calc(100% - 1rem);
 }
 
 .scene-diagram-utility-buttons {
-  right: 3.375rem;
-  top: 1.25rem;
-}
-
-.scene-diagram-ai-control {
-  right: 0.5rem;
+  max-height: calc(100% - 2.5rem);
+  overflow-y: auto;
+  right: 0.75rem;
   top: 1.25rem;
 }
 
@@ -1230,11 +1226,6 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
 
 @container (max-width: 36rem) {
   .scene-diagram-utility-buttons {
-    right: 3.375rem;
-    top: 0.75rem;
-  }
-
-  .scene-diagram-ai-control {
     right: 0.5rem;
     top: 0.75rem;
   }

@@ -17,6 +17,11 @@ const metricLabels: Record<string, string> = {
   memoryUsage: 'Mem',
   diskUsage: 'Disk',
 }
+const compactMetricLabels: Record<string, string> = {
+  load: 'L',
+  memoryUsage: 'M',
+  diskUsage: 'D',
+}
 
 const getValue = (point: MetricPoint) => point.y
 
@@ -32,10 +37,12 @@ function HeaderMetricChart({
   series,
   timeRange,
   chartTheme,
+  className,
 }: {
   series: MetricSeries[]
   timeRange: TimeRange
   chartTheme: MetricChartTheme
+  className?: string
 }) {
   const allData = useMemo(() => flattenSeriesData(series), [series])
 
@@ -44,7 +51,7 @@ function HeaderMetricChart({
   }
 
   return (
-    <div className="h-7 w-[104px] overflow-visible">
+    <div className={clsx('h-7 overflow-visible', className ?? 'w-[104px]')}>
       <ParentSize>
         {({ width }) => {
           if (width < 10) {
@@ -103,31 +110,32 @@ export function HeaderMetrics({ frameId }: { frameId: number }) {
   }
 
   return (
-    <div className="relative z-50 flex max-w-full flex-wrap items-center gap-1.5 overflow-visible pl-1.5 pr-2 @5xl:w-auto @5xl:flex-nowrap">
+    <div className="relative z-50 flex w-full max-w-full flex-nowrap items-center gap-1 overflow-visible pr-1 @4xl:w-auto @4xl:gap-1.5 @5xl:pr-2">
       {metricEntries.map(([key, series]) => (
         <div
           key={key}
           className={clsx(
-            'relative z-0 flex h-9 items-center gap-2 overflow-visible rounded-lg border px-2.5 shadow-sm backdrop-blur-sm transition-colors hover:z-[80] focus-within:z-[80]',
+            'relative z-0 flex h-8 shrink-0 items-center gap-1.5 overflow-visible rounded-lg border px-2 shadow-sm backdrop-blur-sm transition-colors hover:z-[80] focus-within:z-[80] @4xl:h-9 @4xl:gap-2 @4xl:px-2.5',
             theme === 'dark'
               ? 'border-white/10 bg-white/[0.06] shadow-black/10 hover:bg-white/[0.09]'
               : 'border-slate-200/70 bg-white/70 shadow-slate-950/5 hover:bg-white/90'
           )}
+          title={`${metricLabels[key] ?? key}${
+            latestMetricSummariesByCategory[key] ? ` ${latestMetricSummariesByCategory[key]}` : ''
+          }`}
         >
           <span
             className={clsx(
-              'flex min-w-[2.35rem] flex-none flex-col justify-center whitespace-nowrap leading-none',
+              'flex min-w-0 flex-none items-baseline gap-1 whitespace-nowrap leading-none',
               theme === 'dark' ? 'text-gray-300' : 'text-slate-700'
             )}
           >
-            <span className="text-[10px] font-semibold uppercase">{metricLabels[key] ?? key}</span>
+            <span className="text-[10px] font-semibold uppercase">
+              <span className="@4xl:hidden">{compactMetricLabels[key] ?? metricLabels[key] ?? key}</span>
+              <span className="hidden @4xl:inline">{metricLabels[key] ?? key}</span>
+            </span>
             {latestMetricSummariesByCategory[key] ? (
-              <span
-                className={clsx(
-                  'mt-0.5 text-[11px] font-medium',
-                  theme === 'dark' ? 'text-gray-400' : 'text-slate-500'
-                )}
-              >
+              <span className={clsx('text-[11px] font-medium', theme === 'dark' ? 'text-gray-400' : 'text-slate-500')}>
                 {latestMetricSummariesByCategory[key]}
               </span>
             ) : null}
@@ -137,6 +145,7 @@ export function HeaderMetrics({ frameId }: { frameId: number }) {
               series={themeMetricSeries(series, chartTheme)}
               timeRange={headerMetricsTimeRange}
               chartTheme={chartTheme}
+              className="hidden @5xl:block @5xl:w-20 @7xl:w-[104px]"
             />
           ) : null}
         </div>

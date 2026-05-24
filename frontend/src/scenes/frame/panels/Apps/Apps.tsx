@@ -75,11 +75,6 @@ export function Apps() {
   return (
     <div className="space-y-4">
       <TextInput placeholder="Search apps..." onChange={setSearch} value={search} />
-      {scenesOpen ? (
-        <div className="frame-tool-muted text-xs">
-          Apps can only be dragged onto the scene editor or into AI generation prompts.
-        </div>
-      ) : null}
       {!scenesOpen && Object.keys(visibleSceneApps).length > 0 ? (
         <div className="space-y-2">
           <div className="flex items-center gap-1.5">

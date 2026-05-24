@@ -396,20 +396,24 @@ function SceneNodeTreeButton({
 }
 
 function UtilityToolbar(): JSX.Element {
-  const { utilityPanel } = useValues(workspaceLogic)
-  const { openUtilityPanel } = useActions(workspaceLogic)
+  const { chatDrawerSelection, utilityPanel } = useValues(workspaceLogic)
+  const { closeChatDrawer, openUtilityPanel } = useActions(workspaceLogic)
+  const utilityPanelIsVisible = !chatDrawerSelection
 
   return (
-    <div className="scene-diagram-utility-toolbar flex shrink-0 flex-nowrap justify-end gap-1.5">
+    <div className="scene-diagram-utility-toolbar flex shrink-0 flex-col items-center gap-2">
       {utilityDefinitions.slice(0, 6).map((definition) => (
         <button
           key={definition.panel}
           type="button"
           title={definition.label}
-          onClick={() => openUtilityPanel(definition.panel)}
+          onClick={() => {
+            closeChatDrawer()
+            openUtilityPanel(definition.panel)
+          }}
           className={clsx(
             'frameos-icon-button flex h-10 w-10 items-center justify-center rounded-xl border border-white/90 bg-white/90 text-slate-500 shadow-lg shadow-slate-300/25 backdrop-blur-xl transition hover:bg-white hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-            utilityPanel === definition.panel
+            utilityPanelIsVisible && utilityPanel === definition.panel
               ? 'frameos-primary-active text-white'
               : 'bg-white/90 text-slate-500 hover:bg-white hover:text-slate-900'
           )}
@@ -423,25 +427,28 @@ function UtilityToolbar(): JSX.Element {
 
 function SceneDiagramOverlay({ frameId, sceneId }: { frameId: number; sceneId: string | null }): JSX.Element {
   const { chatDrawerSelection } = useValues(workspaceLogic)
-  const { openChatDrawer } = useActions(workspaceLogic)
-  const chatDrawerIsOpen = !!chatDrawerSelection
+  const { closeUtilityPanel, openChatDrawer } = useActions(workspaceLogic)
+  const chatDrawerIsOpen = chatDrawerSelection?.frameId === frameId && chatDrawerSelection.sceneId === sceneId
 
   return (
     <div className="scene-diagram-overlay pointer-events-none absolute inset-0 z-20">
-      <div className="scene-diagram-utility-buttons pointer-events-auto absolute flex shrink-0 flex-nowrap items-center justify-end">
+      <div className="scene-diagram-utility-buttons pointer-events-auto absolute flex shrink-0 flex-col items-center gap-2">
+        <button
+          type="button"
+          title="Open AI chat"
+          onClick={() => {
+            closeUtilityPanel()
+            openChatDrawer(frameId, sceneId)
+          }}
+          className={clsx(
+            'frameos-ai-button flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-fuchsia-500 via-blue-500 to-cyan-400 text-white shadow-lg shadow-blue-500/30 transition hover:-translate-y-0.5 hover:shadow-xl hover:shadow-blue-500/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+            chatDrawerIsOpen && 'ring-2 ring-blue-300'
+          )}
+        >
+          <SparklesIcon className="h-5 w-5" />
+        </button>
         <UtilityToolbar />
       </div>
-      <button
-        type="button"
-        title="Open AI chat"
-        onClick={() => openChatDrawer(frameId, sceneId)}
-        className={clsx(
-          'scene-diagram-ai-control frameos-ai-button pointer-events-auto absolute flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-fuchsia-500 via-blue-500 to-cyan-400 text-white shadow-lg shadow-blue-500/30 transition hover:-translate-y-0.5 hover:shadow-xl hover:shadow-blue-500/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-          chatDrawerIsOpen && 'ring-2 ring-blue-300'
-        )}
-      >
-        <SparklesIcon className="h-5 w-5" />
-      </button>
       <div className="scene-diagram-node-toolbar pointer-events-auto absolute left-2 top-5 flex min-w-0 flex-wrap items-center gap-2">
         {sceneId ? <DiagramToolbar sceneId={sceneId} /> : null}
       </div>
@@ -553,7 +560,7 @@ function ScenePreviewPanel({ frameId, scene }: { frameId: number; scene: FrameSc
 
 function UtilityDrawer({ frameId, scene }: { frameId: number; scene: FrameScene | null }): JSX.Element | null {
   const { utilityPanel } = useValues(workspaceLogic)
-  const { closeUtilityPanel, openUtilityPanel } = useActions(workspaceLogic)
+  const { closeUtilityPanel } = useActions(workspaceLogic)
   const activeDefinition = sceneUtilityDefinition(utilityPanel)
 
   if (!utilityPanel || !activeDefinition) {
@@ -576,24 +583,6 @@ function UtilityDrawer({ frameId, scene }: { frameId: number; scene: FrameScene 
 
   return (
     <div className="workspace-drawer frameos-drawer fixed bottom-5 right-5 top-5 z-40 flex w-[430px] overflow-hidden rounded-[24px] border border-white/80 bg-white/95 text-slate-900 shadow-2xl shadow-slate-500/30 backdrop-blur-xl">
-      <div className="frameos-divider flex w-[72px] shrink-0 flex-col items-center gap-2 border-r border-slate-200/80 py-4">
-        {utilityDefinitions.map((definition) => (
-          <button
-            key={definition.panel}
-            type="button"
-            title={definition.label}
-            onClick={() => openUtilityPanel(definition.panel)}
-            className={clsx(
-              'frameos-icon-button flex h-11 w-11 items-center justify-center rounded-xl transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-              utilityPanel === definition.panel
-                ? 'frameos-primary-active text-white'
-                : 'text-slate-400 hover:bg-slate-100 hover:text-slate-700'
-            )}
-          >
-            {definition.icon}
-          </button>
-        ))}
-      </div>
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="frameos-divider flex items-center justify-between gap-3 border-b border-slate-200/80 px-5 py-4">
           <div className="min-w-0">
