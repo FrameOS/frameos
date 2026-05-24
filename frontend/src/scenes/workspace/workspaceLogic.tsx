@@ -1,5 +1,5 @@
 import { actions, afterMount, beforeUnmount, connect, kea, listeners, path, reducers, selectors } from 'kea'
-import { router, urlToAction } from 'kea-router'
+import { actionToUrl, router, urlToAction } from 'kea-router'
 import { framesModel } from '../../models/framesModel'
 import { frameHost, frameIsStale } from '../../decorators/frame'
 import { FrameScene, FrameType } from '../../types'
@@ -57,6 +57,68 @@ function searchValue(search: Record<string, unknown>, key: string): string | nul
 function frameToolFromSearch(search: Record<string, unknown>): WorkspaceUtilityPanel {
   const tool = searchValue(search, 'tool')
   return isFrameToolPanel(tool) ? tool : 'overview'
+}
+
+function drawerFrameIdFromSearch(search: Record<string, unknown>): number | null {
+  const frameId = Number(searchValue(search, 'frameId'))
+  return Number.isFinite(frameId) ? frameId : null
+}
+
+function clearDrawerSearchParams(search: Record<string, unknown>): Record<string, unknown> {
+  const nextSearch = { ...search }
+  delete nextSearch.drawer
+  delete nextSearch.frameId
+  delete nextSearch.sceneId
+  if (nextSearch.tool === 'schedule') {
+    delete nextSearch.tool
+  }
+  return nextSearch
+}
+
+function framesRoutePath(): string {
+  return urls.frames() || '/'
+}
+
+function isFramesRoutePath(pathname: string): boolean {
+  const framesPath = framesRoutePath()
+  return pathname === framesPath || pathname === `${framesPath}/`
+}
+
+function isFrameRoutePathForFrame(pathname: string, frameId: number): boolean {
+  return pathname === urls.frame(frameId)
+}
+
+function drawerPathForFrame(frameId: number): string {
+  const pathname = router.values.location.pathname
+  if (isFramesRoutePath(pathname) || isFrameRoutePathForFrame(pathname, frameId)) {
+    return pathname
+  }
+  return urls.frame(frameId)
+}
+
+function drawerUrlForFrame(
+  frameId: number,
+  drawer: string,
+  extraSearch: Record<string, unknown> = {}
+): [string, Record<string, unknown>, Record<string, unknown>] {
+  const pathname = drawerPathForFrame(frameId)
+  const search: Record<string, unknown> = {
+    ...clearDrawerSearchParams(router.values.searchParams),
+    drawer,
+    ...extraSearch,
+  }
+  if (!isFrameRoutePathForFrame(pathname, frameId)) {
+    search.frameId = String(frameId)
+  }
+  return [pathname, search, router.values.hashParams]
+}
+
+function clearDrawerUrl(): [string, Record<string, unknown>, Record<string, unknown>] {
+  return [
+    router.values.location.pathname,
+    clearDrawerSearchParams(router.values.searchParams),
+    router.values.hashParams,
+  ]
 }
 
 export interface SceneSelection {
@@ -767,19 +829,78 @@ export const workspaceLogic = kea<workspaceLogicType>([
       },
     }
   }),
-  urlToAction(({ actions }) => ({
-    [urls.frame(':id')]: ({ id }, search) => {
-      const frameId = parseInt(String(id), 10)
-      if (Number.isFinite(frameId)) {
-        actions.selectFrame(frameId)
+  urlToAction(({ actions, values }) => {
+    const closeDrawersFromUrl = () => {
+      if (values.sceneControlSelection) {
+        actions.closeSceneControl()
       }
-      if (Number.isFinite(frameId) && searchValue(search, 'tool') === 'schedule') {
-        actions.openUtilityPanel('scenes')
-        actions.openScheduleDrawer(frameId)
+      if (values.templateDrawerFrameId) {
+        actions.closeTemplateDrawer()
+      }
+      if (values.scheduleDrawerFrameId) {
+        actions.closeScheduleDrawer()
+      }
+      if (values.chatDrawerSelection) {
+        actions.closeChatDrawer()
+      }
+    }
+    const applyDrawerFromSearch = (frameId: number | null, search: Record<string, unknown>) => {
+      const drawer = searchValue(search, 'drawer')
+      const sceneId = searchValue(search, 'sceneId')
+
+      if (!frameId) {
+        closeDrawersFromUrl()
         return
       }
-      actions.openUtilityPanel(frameToolFromSearch(search))
-    },
+
+      if (drawer === 'scene' && sceneId) {
+        actions.openSceneControl(frameId, sceneId)
+      } else if (drawer === 'templates') {
+        actions.openTemplateDrawer(frameId)
+      } else if (drawer === 'schedule' || searchValue(search, 'tool') === 'schedule') {
+        actions.openScheduleDrawer(frameId)
+      } else if (drawer === 'chat') {
+        actions.openChatDrawer(frameId, sceneId)
+      } else {
+        closeDrawersFromUrl()
+      }
+    }
+
+    const applyFramesRoute = (_: Record<string, unknown>, search: Record<string, unknown>) => {
+      applyDrawerFromSearch(drawerFrameIdFromSearch(search), search)
+    }
+    const framesPath = framesRoutePath()
+
+    return {
+      [framesPath]: applyFramesRoute,
+      [`${framesPath.replace(/\/$/, '')}/`]: applyFramesRoute,
+      [urls.frame(':id')]: ({ id }, search) => {
+        const frameId = parseInt(String(id), 10)
+        const validFrameId = Number.isFinite(frameId) ? frameId : null
+        if (validFrameId) {
+          actions.selectFrame(validFrameId)
+        }
+        if (validFrameId && searchValue(search, 'tool') === 'schedule') {
+          actions.openUtilityPanel('scenes')
+          applyDrawerFromSearch(validFrameId, search)
+          return
+        }
+        actions.openUtilityPanel(frameToolFromSearch(search))
+        applyDrawerFromSearch(validFrameId, search)
+      },
+    }
+  }),
+  actionToUrl(() => ({
+    openSceneControl: (payload: Record<string, any>) =>
+      drawerUrlForFrame(Number(payload.frameId), 'scene', { sceneId: String(payload.sceneId) }),
+    closeSceneControl: clearDrawerUrl,
+    openTemplateDrawer: (payload: Record<string, any>) => drawerUrlForFrame(Number(payload.frameId), 'templates'),
+    closeTemplateDrawer: clearDrawerUrl,
+    openScheduleDrawer: (payload: Record<string, any>) => drawerUrlForFrame(Number(payload.frameId), 'schedule'),
+    closeScheduleDrawer: clearDrawerUrl,
+    openChatDrawer: (payload: Record<string, any>) =>
+      drawerUrlForFrame(Number(payload.frameId), 'chat', payload.sceneId ? { sceneId: String(payload.sceneId) } : {}),
+    closeChatDrawer: clearDrawerUrl,
   })),
   afterMount(({ actions, cache, values }) => {
     applyWorkspaceTheme(values.theme)
