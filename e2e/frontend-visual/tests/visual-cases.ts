@@ -37,18 +37,37 @@ export const visualViewports: VisualViewport[] = [
 ]
 
 async function openScheduleDrawer(page: Page): Promise<void> {
-  await page.getByRole('button', { name: /^Schedule$/ }).first().click()
-  await page.getByRole('heading', { name: /Schedule|Scene schedule/ }).last().waitFor()
+  await page
+    .getByRole('button', { name: /^Schedule$/ })
+    .first()
+    .click()
+  await page
+    .getByRole('heading', { name: /Schedule|Scene schedule/ })
+    .last()
+    .waitFor()
 }
 
 async function openOverviewScheduleDrawer(page: Page): Promise<void> {
+  const headerScheduleButton = page.getByRole('button', { name: /^Schedule$/ }).first()
+  if (await headerScheduleButton.isVisible().catch(() => false)) {
+    await headerScheduleButton.click()
+    await page
+      .getByRole('heading', { name: /Schedule|Scene schedule/ })
+      .last()
+      .waitFor()
+    return
+  }
+
   const scheduleCard = page
     .locator('div')
     .filter({ has: page.getByText(/^Schedule$/) })
     .filter({ has: page.getByRole('button', { name: /^Open$/ }) })
     .first()
   await scheduleCard.getByRole('button', { name: /^Open$/ }).click()
-  await page.getByRole('heading', { name: /Schedule|Scene schedule/ }).last().waitFor()
+  await page
+    .getByRole('heading', { name: /Schedule|Scene schedule/ })
+    .last()
+    .waitFor()
 }
 
 async function openSceneWorkspaceUtilityDrawer(page: Page, label: string): Promise<void> {
@@ -87,8 +106,14 @@ async function openSceneWorkspaceJsonDrawer(page: Page): Promise<void> {
 }
 
 async function openAddSceneDrawer(page: Page): Promise<void> {
-  await page.getByRole('button', { name: /Add scene/i }).first().click()
-  await page.getByRole('heading', { name: /Add scene/i }).last().waitFor()
+  await page
+    .getByRole('button', { name: /Add scene/i })
+    .first()
+    .click()
+  await page
+    .getByRole('heading', { name: /Add scene/i })
+    .last()
+    .waitFor()
 }
 
 async function expandDashboardScene(page: Page): Promise<void> {
@@ -98,7 +123,10 @@ async function expandDashboardScene(page: Page): Promise<void> {
 
     const openEditorButton = legacySceneRow.getByRole('button', { name: /^Open editor$/ })
     if (!(await openEditorButton.isVisible().catch(() => false))) {
-      await legacySceneRow.getByText(/^Dashboard$/).first().click()
+      await legacySceneRow
+        .getByText(/^Dashboard$/)
+        .first()
+        .click()
     }
 
     await openEditorButton.waitFor()
@@ -110,7 +138,10 @@ async function expandDashboardScene(page: Page): Promise<void> {
   await sceneButton.scrollIntoViewIfNeeded()
   await sceneButton.click()
 
-  const sceneDrawer = page.locator('.workspace-drawer').filter({ has: page.getByRole('heading', { name: /^Dashboard$/ }) }).last()
+  const sceneDrawer = page
+    .locator('.workspace-drawer')
+    .filter({ has: page.getByRole('heading', { name: /^Dashboard$/ }) })
+    .last()
   await sceneDrawer.getByRole('link', { name: /^Open editor$/ }).waitFor()
   await sceneDrawer.getByRole('button', { name: /^Delete$/ }).waitFor()
 }
@@ -127,8 +158,14 @@ async function collapsePrimarySidebar(page: Page): Promise<void> {
 }
 
 async function openAddFrameDrawer(page: Page): Promise<void> {
-  await page.getByRole('button', { name: /Add frame/i }).first().click()
-  await page.getByRole('heading', { name: /Add frame/i }).last().waitFor()
+  await page
+    .getByRole('button', { name: /Add frame/i })
+    .first()
+    .click()
+  await page
+    .getByRole('heading', { name: /Add frame/i })
+    .last()
+    .waitFor()
 }
 
 async function openSettingsNetworkSection(page: Page): Promise<void> {
@@ -143,7 +180,10 @@ async function openSettingsNetworkSection(page: Page): Promise<void> {
 }
 
 async function stabilizeTerminal(page: Page): Promise<void> {
-  await page.getByText('*** connection closed ***').waitFor({ timeout: 10_000 }).catch(() => undefined)
+  await page
+    .getByText('*** connection closed ***')
+    .waitFor({ timeout: 10_000 })
+    .catch(() => undefined)
   await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
   await page.waitForTimeout(250)
 }
@@ -186,10 +226,7 @@ export const visualCases: VisualCase[] = [
     title: 'Frame overview',
     path: '/frames/1?tool=overview',
     fullPage: true,
-    variants: [
-      { id: 'default' },
-      { id: 'schedule-drawer', prepare: openOverviewScheduleDrawer },
-    ],
+    variants: [{ id: 'default' }, { id: 'schedule-drawer', prepare: openOverviewScheduleDrawer }],
   },
   {
     id: 'frame-scenes',
@@ -220,10 +257,7 @@ export const visualCases: VisualCase[] = [
     id: 'frame-logs',
     title: 'Frame logs',
     path: '/frames/1?tool=logs',
-    variants: [
-      { id: 'default' },
-      { id: 'filtered-render', prepare: fillLogsSearch },
-    ],
+    variants: [{ id: 'default' }, { id: 'filtered-render', prepare: fillLogsSearch }],
   },
   {
     id: 'frame-metrics',
@@ -264,10 +298,7 @@ export const visualCases: VisualCase[] = [
     title: 'Frame settings',
     path: '/frames/1?tool=settings',
     fullPage: true,
-    variants: [
-      { id: 'default' },
-      { id: 'network', prepare: openSettingsNetworkSection },
-    ],
+    variants: [{ id: 'default' }, { id: 'network', prepare: openSettingsNetworkSection }],
   },
   {
     id: 'scene-workspace-root',
