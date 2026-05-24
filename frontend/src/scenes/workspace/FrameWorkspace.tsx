@@ -10,7 +10,6 @@ import {
   CommandLineIcon,
   DocumentTextIcon,
   EyeIcon,
-  PhotoIcon,
   SignalIcon,
   Squares2X2Icon,
   XMarkIcon,
@@ -67,7 +66,6 @@ const frameToolDefinitions: FrameToolDefinition[] = [
     description: 'Preview and scenes',
     icon: <Squares2X2Icon className="h-5 w-5" />,
   },
-  { panel: 'scenes', label: 'Scenes', description: 'Frame scenes', icon: <PhotoIcon className="h-5 w-5" /> },
   { panel: 'preview', label: 'Preview', description: 'Current image', icon: <EyeIcon className="h-5 w-5" /> },
   { panel: 'logs', label: 'Logs', description: 'Runtime output', icon: <DocumentTextIcon className="h-5 w-5" /> },
   { panel: 'metrics', label: 'Metrics', description: 'Health charts', icon: <ChartBarIcon className="h-5 w-5" /> },
@@ -922,15 +920,8 @@ function FrameToolSurface({
   totalScenes: number
   pageScroll: boolean
 }): JSX.Element {
-  if (activeTool === 'overview' || activeTool === 'scenes') {
-    return (
-      <FrameDashboardSurface
-        frame={frame}
-        scenes={scenes}
-        totalScenes={totalScenes}
-        showSceneMenus={activeTool === 'scenes'}
-      />
-    )
+  if (activeTool === 'overview') {
+    return <FrameDashboardSurface frame={frame} scenes={scenes} totalScenes={totalScenes} />
   }
   if (activeTool === 'logs') return <Logs fullScreen />
   if (activeTool === 'metrics') return <Metrics scrollContainer={!pageScroll} />
@@ -945,10 +936,6 @@ function FrameToolSurface({
 
 function frameToolIsFullBleed(activeTool: WorkspaceUtilityPanel): boolean {
   return activeTool === 'overview' || activeTool === 'preview' || activeTool === 'logs' || activeTool === 'terminal'
-}
-
-function frameToolUsesWorkspaceSearch(activeTool: WorkspaceUtilityPanel): boolean {
-  return activeTool === 'scenes'
 }
 
 function frameToolUsesPageScroll(activeTool: WorkspaceUtilityPanel): boolean {
@@ -998,7 +985,6 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
   const { framesList } = useValues(framesModel)
   const { frame, scenes } = useValues(frameLogic(frameLogicProps))
   const {
-    filteredSelectedFrameScenes,
     sceneControlSelection,
     scheduleDrawerFrameId,
     templateDrawerFrameId,
@@ -1006,8 +992,8 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
   } = useValues(workspaceLogic)
   const activeTool =
     frameToolDefinitions.find((definition) => definition.panel === utilityPanel) ?? frameToolDefinitions[0]
-  const visibleScenes = activeTool.panel === 'scenes' ? filteredSelectedFrameScenes : scenes
-  const toolUsesSearch = frameToolUsesWorkspaceSearch(activeTool.panel)
+  const visibleScenes = scenes
+  const toolUsesSearch = false
   const toolUsesPageScroll = frameToolUsesPageScroll(activeTool.panel)
 
   if (!frame) {
@@ -1026,7 +1012,7 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
           title="Frame"
           tree={<FrameTree frame={frame} frames={framesList} activeTool={activeTool.panel} />}
           topBar={toolUsesSearch ? undefined : null}
-          showAiButton={activeTool.panel === 'overview'}
+          showAiButton={false}
           mainClassName={clsx(
             toolUsesPageScroll ? 'min-h-screen overflow-visible' : 'h-screen overflow-hidden',
             'frame-workspace-main py-6 pr-8 max-lg:h-auto max-lg:overflow-visible max-lg:px-4 max-lg:pb-6 max-lg:pt-0'

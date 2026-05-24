@@ -8,6 +8,9 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
 jobs:
   nim:
     name: FrameOS Nim Tests (${{ matrix.shard_name }})
@@ -87,6 +90,8 @@ jobs:
   visual-regression:
     name: Visual Regression Tests
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -162,6 +167,8 @@ jobs:
   frontend-visual-regression:
     name: Frontend E2E + Visual Regression Tests
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v4

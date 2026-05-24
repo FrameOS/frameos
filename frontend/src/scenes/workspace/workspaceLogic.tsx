@@ -30,7 +30,6 @@ export type WorkspaceUtilityPanel =
 const frameToolPanels = [
   'overview',
   'preview',
-  'scenes',
   'logs',
   'metrics',
   'assets',

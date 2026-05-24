@@ -42,7 +42,6 @@ const activeSurfaceClassName = 'border-[#4a4b8c] shadow-[0_0_3px_3px_rgba(128,0,
 
 const frameSectionToolLinks = [
   { label: 'Overview', panel: 'overview' },
-  { label: 'Scenes', panel: 'scenes' },
   { label: 'Logs', panel: 'logs' },
   { label: 'Metrics', panel: 'metrics' },
   { label: 'Settings', panel: 'settings' },

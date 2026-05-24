@@ -1,7 +1,7 @@
 import { BindLogic, useActions, useValues } from 'kea'
 import { A } from 'kea-router'
 import clsx from 'clsx'
-import type { DragEvent } from 'react'
+import type { CSSProperties, DragEvent } from 'react'
 import {
   ArchiveBoxIcon,
   ArrowUturnLeftIcon,
@@ -37,6 +37,8 @@ import { workspaceLogic } from './workspaceLogic'
 const uploadedScenePrefix = 'uploaded/'
 const activeSurfaceClassName = 'border-[#4a4b8c] shadow-[0_0_3px_3px_rgba(128,0,255,0.5)]'
 const statsTimeRangeMs = 4 * 60 * 60 * 1000
+const framePreviewMaxHeightRem = 36
+const framePreviewMaxWidthRem = 52
 
 interface UsageSummary {
   total: number | null
@@ -339,7 +341,7 @@ function FrameMetricStat({
   const toneClasses = metricToneClasses(tone)
 
   return (
-    <div className="frame-tool-card min-w-0 rounded-2xl p-3">
+    <div className="frame-tool-card min-w-0 rounded-lg p-3">
       <div className="frame-tool-muted text-[11px] font-semibold uppercase tracking-wide">{label}</div>
       <div className={clsx('mt-1 truncate text-xl font-bold tracking-normal', toneClasses.text)}>{value}</div>
       <div className="frame-tool-muted mt-0.5 truncate text-xs">{detail}</div>
@@ -369,54 +371,94 @@ function scheduleTimeLabel(event: ScheduledEvent): string {
   return `${String(event.hour).padStart(2, '0')}:${String(event.minute).padStart(2, '0')}`
 }
 
-function FrameScheduleSummary({ frame, scenes }: { frame: FrameType; scenes: FrameScene[] }): JSX.Element {
-  const { openScheduleDrawer } = useActions(workspaceLogic)
+function frameWeekdayFromDate(date: Date): number {
+  const weekday = date.getDay()
+  return weekday === 0 ? 7 : weekday
+}
+
+function scheduledEventAppliesToWeekday(event: ScheduledEvent, weekday: number): boolean {
+  if (!event.weekday) {
+    return true
+  }
+  if (event.weekday === 8) {
+    return weekday >= 1 && weekday <= 5
+  }
+  if (event.weekday === 9) {
+    return weekday === 6 || weekday === 7
+  }
+  return event.weekday === weekday
+}
+
+function scheduledEventDayLabel(dayOffset: number, weekday: number): string {
+  if (dayOffset === 0) {
+    return 'Today'
+  }
+  if (dayOffset === 1) {
+    return 'Tomorrow'
+  }
+  return scheduleWeekdayLabel(weekday)
+}
+
+function nextScheduledEvent(
+  events: ScheduledEvent[],
+  now = new Date()
+): { event: ScheduledEvent; dayLabel: string } | null {
+  const currentMinutes = now.getHours() * 60 + now.getMinutes()
+  let next: { event: ScheduledEvent; dayOffset: number; weekday: number; sortMinutes: number } | null = null
+
+  for (const event of events) {
+    if (event.disabled) {
+      continue
+    }
+
+    const eventMinutes = event.hour * 60 + event.minute
+    for (let dayOffset = 0; dayOffset <= 7; dayOffset += 1) {
+      const date = new Date(now)
+      date.setDate(now.getDate() + dayOffset)
+      const weekday = frameWeekdayFromDate(date)
+      if (!scheduledEventAppliesToWeekday(event, weekday)) {
+        continue
+      }
+      if (dayOffset === 0 && eventMinutes < currentMinutes) {
+        continue
+      }
+
+      const sortMinutes = dayOffset * 24 * 60 + eventMinutes
+      if (!next || sortMinutes < next.sortMinutes) {
+        next = { event, dayOffset, weekday, sortMinutes }
+      }
+      break
+    }
+  }
+
+  return next ? { event: next.event, dayLabel: scheduledEventDayLabel(next.dayOffset, next.weekday) } : null
+}
+
+function FrameScheduleSummary({ frame, scenes }: { frame: FrameType; scenes: FrameScene[] }): JSX.Element | null {
   const schedule = frame.schedule
   const events = schedule?.events ?? []
-  const enabledEvents = events.filter((event) => !event.disabled)
-  const disabled = !!schedule?.disabled
-  const nextEvent = enabledEvents[0]
+  if (!schedule || events.length === 0) {
+    return null
+  }
+
   const sceneNameById = new Map(scenes.map((scene) => [scene.id, scene.name || 'Untitled scene']))
-  const summary = disabled
-    ? 'Paused'
-    : enabledEvents.length === 0
-    ? 'No active entries'
-    : `${enabledEvents.length} active ${enabledEvents.length === 1 ? 'entry' : 'entries'}`
+  const nextEvent = schedule.disabled ? null : nextScheduledEvent(events)
+
+  if (schedule.disabled) {
+    return <FrameMetricStat label="Next event" value="Paused" detail="Schedule disabled" tone="warning" />
+  }
 
   return (
-    <div className="frame-tool-card rounded-2xl p-3">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="frame-tool-muted text-[11px] font-semibold uppercase tracking-wide">Schedule</div>
-          <div
-            className={clsx(
-              'mt-1 truncate text-xl font-bold tracking-normal',
-              disabled || enabledEvents.length === 0 ? 'text-amber-500' : 'text-emerald-500'
-            )}
-          >
-            {summary}
-          </div>
-          <div className="frame-tool-muted mt-0.5 truncate text-xs">
-            {nextEvent
-              ? `${scheduleTimeLabel(nextEvent)} · ${sceneNameById.get(nextEvent.payload.sceneId) ?? 'Unknown scene'}`
-              : 'Edit automatic scene changes'}
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={() => openScheduleDrawer(frame.id)}
-          className="frameos-primary-action inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-        >
-          <CalendarDaysIcon className="h-4 w-4" />
-          Edit
-        </button>
-      </div>
-      {nextEvent ? (
-        <div className="frame-tool-muted mt-2 truncate text-xs">
-          {scheduleWeekdayLabel(nextEvent.weekday)} · {events.length} total {events.length === 1 ? 'entry' : 'entries'}
-        </div>
-      ) : null}
-    </div>
+    <FrameMetricStat
+      label="Next event"
+      value={nextEvent ? scheduleTimeLabel(nextEvent.event) : 'None'}
+      detail={
+        nextEvent
+          ? `${nextEvent.dayLabel} · ${sceneNameById.get(nextEvent.event.payload.sceneId) ?? 'Unknown scene'}`
+          : 'No active entries'
+      }
+      tone={nextEvent ? 'good' : 'warning'}
+    />
   )
 }
 
@@ -441,7 +483,7 @@ function FramePreviewStats({ frame, scenes }: { frame: FrameType; scenes: FrameS
   const diskSamples = metricSamples(metrics, 'disk')
 
   return (
-    <div className="grid min-w-0 content-start gap-3 @md:grid-cols-2 @5xl:grid-cols-1">
+    <div className="grid min-w-0 content-start gap-3 @md:grid-cols-2 @5xl:grid-cols-1 @7xl:grid-cols-3">
       <FrameMetricStat
         label="Last render"
         value={formatRelativeTime(latestRenderAt)}
@@ -484,30 +526,46 @@ function FramePreviewStats({ frame, scenes }: { frame: FrameType; scenes: FrameS
   )
 }
 
-function frameAspectRatio(frame: FrameType): string | undefined {
+function frameDisplayDimensions(frame: FrameType): { width: number; height: number } | null {
   if (!frame.width || !frame.height) {
-    return undefined
+    return null
   }
   return frame.rotate === 90 || frame.rotate === 270
-    ? `${frame.height} / ${frame.width}`
-    : `${frame.width} / ${frame.height}`
+    ? { width: frame.height, height: frame.width }
+    : { width: frame.width, height: frame.height }
+}
+
+function framePreviewSizing(frame: FrameType): { imageStyle: CSSProperties; cardStyle: CSSProperties } | null {
+  const dimensions = frameDisplayDimensions(frame)
+  if (!dimensions || dimensions.width <= 0 || dimensions.height <= 0) {
+    return null
+  }
+
+  const ratio = dimensions.width / dimensions.height
+  const maxWidth = Math.min(framePreviewMaxWidthRem, framePreviewMaxHeightRem * ratio)
+
+  return {
+    imageStyle: { aspectRatio: `${dimensions.width} / ${dimensions.height}` },
+    cardStyle: { maxWidth: `${maxWidth.toFixed(3)}rem` },
+  }
 }
 
 function FramePreviewPanel({ frame, scenes }: { frame: FrameType; scenes: FrameScene[] }): JSX.Element {
-  const aspectRatio = frameAspectRatio(frame)
+  const previewSizing = framePreviewSizing(frame)
 
   return (
-    <div className="grid gap-4 @5xl:grid-cols-[minmax(18rem,28rem)_minmax(0,1fr)]">
+    <div className="grid gap-4 @5xl:grid-cols-[minmax(18rem,52rem)_minmax(15rem,20rem)] @7xl:grid-cols-1">
       <A
         href={urls.frame(frame.id, 'preview')}
-        className="frameos-card group min-w-0 overflow-hidden rounded-[24px] border border-white/90 bg-white text-left shadow-xl shadow-slate-300/35 transition hover:-translate-y-0.5 hover:shadow-2xl hover:shadow-slate-300/45 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+        className="frameos-card group w-full min-w-0 justify-self-start overflow-hidden rounded-lg border border-white/90 bg-white text-left shadow-xl shadow-slate-300/35 transition hover:-translate-y-0.5 hover:shadow-2xl hover:shadow-slate-300/45 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+        style={previewSizing?.cardStyle}
       >
         <div
           className={clsx(
-            'frameos-card-media relative flex min-h-[22rem] items-center justify-center bg-slate-100',
-            !aspectRatio && 'h-[32rem] max-h-[75vh]'
+            'frameos-card-media relative flex w-full min-h-0 items-center justify-center bg-slate-100',
+            !previewSizing && 'h-[32rem] max-h-[70vh]'
           )}
-          style={aspectRatio ? { aspectRatio } : undefined}
+          style={previewSizing?.imageStyle}
         >
           <FrameImage
             frameId={frame.id}
@@ -683,7 +741,7 @@ function FrameSceneTile({
       draggable
       onDragStart={(event) => setFrameosSceneDragData(event.dataTransfer, scene.id)}
       className={clsx(
-        'frameos-card group relative h-36 w-36 shrink-0 overflow-hidden rounded-2xl border bg-white text-left transition hover:-translate-y-0.5 focus-within:ring-2 focus-within:ring-blue-400',
+        'frameos-card group relative h-36 w-36 shrink-0 overflow-hidden rounded-lg border bg-white text-left transition hover:-translate-y-0.5 focus-within:ring-2 focus-within:ring-blue-400',
         active
           ? `${activeSurfaceClassName} hover:shadow-[0_0_4px_4px_rgba(128,0,255,0.55)]`
           : 'border-white/90 shadow-lg shadow-slate-300/35 hover:shadow-xl hover:shadow-slate-300/50'
@@ -751,7 +809,7 @@ export function FrameAddSceneTile({ frame, compact = false }: { frame: FrameType
         openTemplateDrawer(frame.id)
       }}
       className={clsx(
-        'frameos-primary-hover-text frameos-card group flex shrink-0 flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-slate-300 bg-white/55 text-center text-slate-500 shadow-sm transition hover:-translate-y-0.5 hover:bg-white/80 hover:shadow-lg hover:shadow-slate-300/35 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+        'frameos-primary-hover-text frameos-card group flex shrink-0 flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-slate-300 bg-white/55 text-center text-slate-500 shadow-sm transition hover:-translate-y-0.5 hover:bg-white/80 hover:shadow-lg hover:shadow-slate-300/35 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
         compact ? 'h-36 w-36' : 'min-h-36 w-full max-w-40 min-w-0'
       )}
     >
@@ -821,11 +879,11 @@ function FrameScenesBlock({
           <FrameAddSceneTile frame={frame} compact />
         </div>
       ) : search.trim() && frameMatchesSearch ? (
-        <div className="frameos-empty flex h-40 min-w-64 items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white/45 px-6 text-center text-sm font-medium text-slate-500">
+        <div className="frameos-empty flex h-40 min-w-64 items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white/45 px-6 text-center text-sm font-medium text-slate-500">
           Frame matched. No scenes match this search.
         </div>
       ) : search.trim() && totalScenes > 0 ? (
-        <div className="frameos-empty flex h-40 min-w-64 items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white/45 px-6 text-center text-sm font-medium text-slate-500">
+        <div className="frameos-empty flex h-40 min-w-64 items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white/45 px-6 text-center text-sm font-medium text-slate-500">
           No scenes match this search.
         </div>
       ) : (
@@ -854,7 +912,7 @@ export function FrameDashboardSurface({
       className={clsx('group @container scroll-mt-6', archived && 'opacity-80')}
     >
       <FrameDashboardHeader frame={frame} archived={archived} showOpenFrameAction={showOpenFrameAction} />
-      <div className="space-y-6">
+      <div className="grid gap-6 @7xl:grid-cols-[minmax(0,52rem)_minmax(18rem,1fr)] @7xl:items-start">
         <FramePreviewPanel frame={frame} scenes={frame.scenes ?? scenes} />
         <FrameScenesBlock
           frame={frame}
