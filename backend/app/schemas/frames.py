@@ -172,8 +172,18 @@ class FrameStateResponse(RootModel):
 class FrameUploadedScenesResponse(BaseModel):
     scenes: List[Dict[str, Any]]
 
+
+class FrameAssetsCacheResponse(BaseModel):
+    cached: bool = False
+    refreshing: bool = False
+    fetched_at: Optional[float] = None
+    refresh_after: Optional[int] = None
+    retry_after: Optional[int] = None
+
+
 class FrameAssetsResponse(BaseModel):
     assets: List[Dict[str, Any]]
+    cache: Optional[FrameAssetsCacheResponse] = None
 
 
 class FramePingResponse(BaseModel):

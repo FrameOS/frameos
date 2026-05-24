@@ -1,4 +1,4 @@
-import { actions, afterMount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
+import { actions, afterMount, beforeUnmount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 
 import { AssetType } from '../../../../types'
 import { loaders } from 'kea-loaders'
@@ -24,6 +24,14 @@ export interface AssetNode {
   size?: number
   mtime?: number
   children: Record<string, AssetNode>
+}
+
+interface FrameAssetsResponse {
+  assets: AssetType[]
+  cache?: {
+    refreshing?: boolean
+    retry_after?: number
+  }
 }
 
 function buildAssetTree(assets: AssetType[], rootName: string): AssetNode {
@@ -106,6 +114,7 @@ export const assetsLogic = kea<assetsLogicType>([
     filesToUpload: (files: string[]) => ({ files }),
     uploadProgress: (path: string, size: number) => ({ path, size }),
     uploadFailure: (path: string) => ({ path }),
+    setAssetsRefreshing: (assetsRefreshing: boolean) => ({ assetsRefreshing }),
     syncAssets: true,
     deleteAsset: (path: string) => ({ path }),
     assetDeleted: (path: string) => ({ path }),
@@ -113,7 +122,7 @@ export const assetsLogic = kea<assetsLogicType>([
     assetRenamed: (oldPath: string, newPath: string) => ({ oldPath, newPath }),
     createFolder: (path: string) => ({ path }),
   }),
-  loaders(({ props }) => ({
+  loaders(({ actions, cache, props }) => ({
     assets: [
       [] as AssetType[],
       {
@@ -123,9 +132,33 @@ export const assetsLogic = kea<assetsLogicType>([
             if (!response.ok) {
               throw new Error('Failed to fetch assets')
             }
-            const data = await response.json()
+            const data = (await response.json()) as FrameAssetsResponse
+            window.clearTimeout(cache.reloadTimer)
+            if (data.cache?.refreshing) {
+              const retryDelay = Math.max(1, data.cache.retry_after ?? 2) * 1000
+              cache.reloadTimer = window.setTimeout(() => actions.loadAssets(), retryDelay)
+            }
+            actions.setAssetsRefreshing(Boolean(data.cache?.refreshing))
             return data.assets as AssetType[]
           } catch (error) {
+            actions.setAssetsRefreshing(false)
+            console.error(error)
+            return []
+          }
+        },
+        refreshAssets: async () => {
+          try {
+            window.clearTimeout(cache.reloadTimer)
+            actions.setAssetsRefreshing(true)
+            const response = await apiFetch(`${frameAssetsApiPath(props.frameId)}?refresh=1`)
+            if (!response.ok) {
+              throw new Error('Failed to refresh assets')
+            }
+            const data = (await response.json()) as FrameAssetsResponse
+            actions.setAssetsRefreshing(Boolean(data.cache?.refreshing))
+            return data.assets as AssetType[]
+          } catch (error) {
+            actions.setAssetsRefreshing(false)
             console.error(error)
             return []
           }
@@ -340,6 +373,12 @@ export const assetsLogic = kea<assetsLogicType>([
     },
   })),
   reducers({
+    assetsRefreshing: [
+      false,
+      {
+        setAssetsRefreshing: (_, { assetsRefreshing }) => assetsRefreshing,
+      },
+    ],
     assets: {
       assetUploaded: (state, { asset }) =>
         state.find((a) => a.path === asset.path)
@@ -381,5 +420,11 @@ export const assetsLogic = kea<assetsLogicType>([
         )
       },
     },
+  }),
+  afterMount(({ actions }) => {
+    actions.loadAssets()
+  }),
+  beforeUnmount(({ cache }) => {
+    window.clearTimeout(cache.reloadTimer)
   }),
 ])

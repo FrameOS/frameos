@@ -1,9 +1,12 @@
+import asyncio
 import json
 import pytest
-from unittest.mock import patch
+import time
+from unittest.mock import AsyncMock, patch
 import httpx
 from datetime import datetime, timedelta, timezone
 
+from app.api import frames as frames_api
 from app.api.auth import get_current_user
 from app.fastapi import app
 from app.models import new_frame
@@ -148,6 +151,94 @@ async def test_api_frame_get_image_cached(async_client, db, redis):
     response = await async_client.get(image_url)
     assert response.status_code == 200
     assert response.content == b'cached_image_data'
+
+
+@pytest.mark.asyncio
+async def test_api_frame_assets_returns_fresh_cache_without_reloading(async_client, db, redis):
+    frame = await new_frame(db, redis, 'CachedAssetsFrame', 'localhost', 'localhost')
+    assets_path = frame.assets_path or "/srv/assets"
+    cache_key = frames_api._frame_assets_cache_key(frame.id, assets_path)
+    lock_key = frames_api._frame_assets_cache_lock_key(frame.id, assets_path)
+    cached_assets = [
+        {"path": "/srv/assets/photo.png", "size": 123, "mtime": 1000, "is_dir": False},
+    ]
+    await redis.delete(cache_key, lock_key)
+    await frames_api._write_frame_assets_cache(redis, cache_key, cached_assets, fetched_at=time.time())
+
+    with patch("app.api.frames._load_frame_assets", new=AsyncMock()) as load_assets:
+        response = await async_client.get(f'/api/frames/{frame.id}/assets')
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["assets"] == cached_assets
+    assert payload["cache"]["cached"] is True
+    assert payload["cache"]["refreshing"] is False
+    load_assets.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_api_frame_assets_refresh_bypasses_cache(async_client, db, redis):
+    frame = await new_frame(db, redis, 'RefreshAssetsFrame', 'localhost', 'localhost')
+    assets_path = frame.assets_path or "/srv/assets"
+    cache_key = frames_api._frame_assets_cache_key(frame.id, assets_path)
+    lock_key = frames_api._frame_assets_cache_lock_key(frame.id, assets_path)
+    cached_assets = [
+        {"path": "/srv/assets/old.png", "size": 123, "mtime": 1000, "is_dir": False},
+    ]
+    fresh_assets = [
+        {"path": "/srv/assets/fresh.png", "size": 456, "mtime": 2000, "is_dir": False},
+    ]
+    await redis.delete(cache_key, lock_key)
+    await frames_api._write_frame_assets_cache(redis, cache_key, cached_assets, fetched_at=time.time())
+
+    with patch("app.api.frames._load_frame_assets", new=AsyncMock(return_value=fresh_assets)) as load_assets:
+        response = await async_client.get(f'/api/frames/{frame.id}/assets?refresh=1')
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["assets"] == fresh_assets
+    assert payload["cache"]["cached"] is False
+    load_assets.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_api_frame_assets_returns_stale_cache_and_refreshes(async_client, db, redis):
+    frame = await new_frame(db, redis, 'StaleAssetsFrame', 'localhost', 'localhost')
+    assets_path = frame.assets_path or "/srv/assets"
+    cache_key = frames_api._frame_assets_cache_key(frame.id, assets_path)
+    lock_key = frames_api._frame_assets_cache_lock_key(frame.id, assets_path)
+    cached_assets = [
+        {"path": "/srv/assets/old.png", "size": 123, "mtime": 1000, "is_dir": False},
+    ]
+    fresh_assets = [
+        {"path": "/srv/assets/new.png", "size": 456, "mtime": 2000, "is_dir": False},
+    ]
+    await redis.delete(cache_key, lock_key)
+    await frames_api._write_frame_assets_cache(
+        redis,
+        cache_key,
+        cached_assets,
+        fetched_at=time.time() - frames_api.FRAME_ASSETS_CACHE_REFRESH_AFTER_SECONDS - 1,
+    )
+
+    with patch("app.api.frames._load_frame_assets", new=AsyncMock(return_value=fresh_assets)) as load_assets:
+        response = await async_client.get(f'/api/frames/{frame.id}/assets')
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["assets"] == cached_assets
+    assert payload["cache"]["cached"] is True
+    assert payload["cache"]["refreshing"] is True
+
+    for _ in range(10):
+        refreshed = await frames_api._read_frame_assets_cache(redis, cache_key)
+        if refreshed and refreshed["assets"] == fresh_assets:
+            break
+        await asyncio.sleep(0.05)
+    else:
+        pytest.fail("assets cache was not refreshed in the background")
+
+    load_assets.assert_awaited_once()
 
 @pytest.mark.asyncio
 async def test_api_frame_event_render(async_client, db, redis):

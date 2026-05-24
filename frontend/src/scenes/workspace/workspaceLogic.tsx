@@ -1,4 +1,4 @@
-import { actions, afterMount, beforeUnmount, connect, kea, listeners, path, reducers, selectors } from 'kea'
+import { actions, afterMount, connect, kea, listeners, path, reducers, selectors } from 'kea'
 import { actionToUrl, router, urlToAction } from 'kea-router'
 import { framesModel } from '../../models/framesModel'
 import { frameHost, frameIsStale } from '../../decorators/frame'
@@ -186,41 +186,10 @@ function applyWorkspaceTheme(theme: WorkspaceTheme): void {
   document.documentElement.style.colorScheme = theme
 }
 
-const MOBILE_SIDEBAR_MEDIA_QUERY = '(max-width: 1023px)'
-const MOBILE_SIDEBAR_HISTORY_KEY = '__frameosMobileSidebar'
+const MOBILE_WORKSPACE_MEDIA_QUERY = '(max-width: 1023px)'
 
-function isMobileSidebarViewport(): boolean {
-  return typeof window !== 'undefined' && window.matchMedia?.(MOBILE_SIDEBAR_MEDIA_QUERY).matches
-}
-
-function getInitialPrimarySidebarOpen(): boolean {
-  return !isMobileSidebarViewport()
-}
-
-function historyStateWithoutMobileSidebarMarker(): Record<string, unknown> {
-  const currentState = typeof window !== 'undefined' && window.history.state ? window.history.state : {}
-  const { [MOBILE_SIDEBAR_HISTORY_KEY]: _mobileSidebar, ...state } = currentState
-  return state
-}
-
-function pushMobileSidebarHistory(cache: Record<string, any>): void {
-  if (!isMobileSidebarViewport() || cache.mobileSidebarHistoryActive || typeof window === 'undefined') {
-    return
-  }
-  window.history.pushState(
-    { ...historyStateWithoutMobileSidebarMarker(), [MOBILE_SIDEBAR_HISTORY_KEY]: true },
-    '',
-    window.location.href
-  )
-  cache.mobileSidebarHistoryActive = true
-}
-
-function replaceMobileSidebarHistory(cache: Record<string, any>): void {
-  if (!cache.mobileSidebarHistoryActive || typeof window === 'undefined') {
-    return
-  }
-  window.history.replaceState(historyStateWithoutMobileSidebarMarker(), '', window.location.href)
-  cache.mobileSidebarHistoryActive = false
+function isMobileWorkspaceViewport(): boolean {
+  return typeof window !== 'undefined' && window.matchMedia?.(MOBILE_WORKSPACE_MEDIA_QUERY).matches
 }
 
 function sceneMatchesSearch(scene: FrameScene, search: string): boolean {
@@ -484,12 +453,8 @@ export const workspaceLogic = kea<workspaceLogicType>([
     setSearch: (search: string) => ({ search }),
     setTheme: (theme: WorkspaceTheme) => ({ theme }),
     toggleTheme: true,
-    openPrimarySidebar: true,
-    collapsePrimarySidebar: true,
-    openMobileSidebar: true,
-    closeMobileSidebar: true,
-    closeMobileSidebarAfterNavigation: true,
     openSecondarySidebar: true,
+    closeSecondarySidebar: true,
     toggleSecondarySidebar: true,
     toggleSceneNodesOpen: true,
     selectFrame: (frameId: number | null) => ({ frameId }),
@@ -527,21 +492,11 @@ export const workspaceLogic = kea<workspaceLogicType>([
         toggleTheme: (theme) => (theme === 'dark' ? 'light' : 'dark'),
       },
     ],
-    primarySidebarOpen: [
-      getInitialPrimarySidebarOpen(),
-      {
-        openPrimarySidebar: () => true,
-        openMobileSidebar: () => true,
-        collapsePrimarySidebar: () => false,
-        closeMobileSidebar: () => false,
-        closeMobileSidebarAfterNavigation: () => false,
-      },
-    ],
     secondarySidebarOpen: [
       true,
       {
         openSecondarySidebar: () => true,
-        openMobileSidebar: () => true,
+        closeSecondarySidebar: () => false,
         toggleSecondarySidebar: (open) => !open,
       },
     ],
@@ -578,6 +533,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
         openFrameTool: () => null,
         navigateToSceneFrame: () => null,
         navigateToScene: () => null,
+        openChatDrawer: () => null,
         openUtilityPanel: () => null,
         openTemplateDrawer: () => null,
         openScheduleDrawer: () => null,
@@ -595,6 +551,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
         navigateToScene: () => null,
         openSceneControl: () => null,
         openScheduleDrawer: () => null,
+        openChatDrawer: () => null,
         openUtilityPanel: (state, { panel }) => (panel === 'scenes' ? state : null),
       },
     ],
@@ -610,6 +567,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
         navigateToScene: () => null,
         openTemplateDrawer: () => null,
         openSceneControl: () => null,
+        openChatDrawer: () => null,
       },
     ],
     chatDrawerSelection: [
@@ -617,6 +575,15 @@ export const workspaceLogic = kea<workspaceLogicType>([
       {
         openChatDrawer: (_, { frameId, sceneId }) => ({ frameId, sceneId }),
         closeChatDrawer: () => null,
+        setSearch: () => null,
+        navigateToFrame: () => null,
+        openFrameTool: () => null,
+        navigateToSceneFrame: () => null,
+        navigateToScene: () => null,
+        openSceneControl: () => null,
+        openTemplateDrawer: () => null,
+        openScheduleDrawer: () => null,
+        openUtilityPanel: () => null,
       },
     ],
     utilityPanel: [
@@ -779,33 +746,32 @@ export const workspaceLogic = kea<workspaceLogicType>([
   }),
   listeners(({ actions, cache, values }) => {
     const preserveFramesScroll = () => preserveFramesScrollAfterLayoutChange(cache)
+    const hideNewFrameFormAndPreserveScroll = () => {
+      newFrameForm.actions.hideForm()
+      if (isMobileWorkspaceViewport()) {
+        actions.closeSecondarySidebar()
+      }
+      preserveFramesScroll()
+    }
 
     return {
       openSceneControl: ({ frameId, sceneId }) => {
+        newFrameForm.actions.hideForm()
+        if (isMobileWorkspaceViewport()) {
+          actions.closeSecondarySidebar()
+        }
         preserveFramesScroll()
         ensureSceneTileVisibleAfterLayoutChange(frameId, sceneId, cache)
       },
       closeSceneControl: preserveFramesScroll,
-      openTemplateDrawer: preserveFramesScroll,
+      openTemplateDrawer: hideNewFrameFormAndPreserveScroll,
       closeTemplateDrawer: preserveFramesScroll,
-      openScheduleDrawer: preserveFramesScroll,
+      openScheduleDrawer: hideNewFrameFormAndPreserveScroll,
       closeScheduleDrawer: preserveFramesScroll,
-      openChatDrawer: preserveFramesScroll,
+      openChatDrawer: hideNewFrameFormAndPreserveScroll,
       closeChatDrawer: preserveFramesScroll,
       [newFrameForm.actionTypes.showForm]: preserveFramesScroll,
       [newFrameForm.actionTypes.hideForm]: preserveFramesScroll,
-      openMobileSidebar: () => {
-        pushMobileSidebarHistory(cache)
-      },
-      closeMobileSidebar: () => {
-        if (cache.mobileSidebarHistoryActive && typeof window !== 'undefined') {
-          cache.mobileSidebarHistoryActive = false
-          window.history.back()
-        }
-      },
-      closeMobileSidebarAfterNavigation: () => {
-        replaceMobileSidebarHistory(cache)
-      },
       setTheme: ({ theme }) => {
         window.localStorage.setItem('frameos.workspaceTheme', theme)
         applyWorkspaceTheme(theme)
@@ -936,56 +902,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
       drawerUrlForFrame(Number(payload.frameId), 'chat', payload.sceneId ? { sceneId: String(payload.sceneId) } : {}),
     closeChatDrawer: clearDrawerUrl,
   })),
-  afterMount(({ actions, cache, values }) => {
+  afterMount(({ values }) => {
     applyWorkspaceTheme(values.theme)
-    cache.mobileSidebarHistoryActive = Boolean(window.history.state?.[MOBILE_SIDEBAR_HISTORY_KEY])
-    const mobileSidebarMedia = window.matchMedia?.(MOBILE_SIDEBAR_MEDIA_QUERY)
-    cache.mobileSidebarMedia = mobileSidebarMedia
-    cache.mobileSidebarMediaChangeHandler = () => {
-      if (!mobileSidebarMedia?.matches) {
-        replaceMobileSidebarHistory(cache)
-        actions.openPrimarySidebar()
-        actions.openSecondarySidebar()
-        return
-      }
-      if (!cache.mobileSidebarHistoryActive) {
-        actions.collapsePrimarySidebar()
-      }
-    }
-    if (mobileSidebarMedia) {
-      mobileSidebarMedia.addEventListener('change', cache.mobileSidebarMediaChangeHandler)
-    }
-    if (cache.mobileSidebarHistoryActive && isMobileSidebarViewport()) {
-      actions.openPrimarySidebar()
-      actions.openSecondarySidebar()
-    } else if (cache.mobileSidebarHistoryActive) {
-      replaceMobileSidebarHistory(cache)
-    } else if (mobileSidebarMedia?.matches) {
-      actions.collapsePrimarySidebar()
-    }
-    cache.mobileSidebarPopstateHandler = () => {
-      const markerActive = Boolean(window.history.state?.[MOBILE_SIDEBAR_HISTORY_KEY])
-      if (!markerActive && cache.mobileSidebarHistoryActive) {
-        cache.mobileSidebarHistoryActive = false
-        actions.collapsePrimarySidebar()
-      } else if (markerActive && isMobileSidebarViewport()) {
-        cache.mobileSidebarHistoryActive = true
-        actions.openPrimarySidebar()
-        actions.openSecondarySidebar()
-      }
-    }
-    window.addEventListener('popstate', cache.mobileSidebarPopstateHandler)
-  }),
-  beforeUnmount(({ cache }) => {
-    if (cache.mobileSidebarPopstateHandler) {
-      window.removeEventListener('popstate', cache.mobileSidebarPopstateHandler)
-      cache.mobileSidebarPopstateHandler = null
-    }
-    const mobileSidebarMedia = cache.mobileSidebarMedia
-    if (mobileSidebarMedia && cache.mobileSidebarMediaChangeHandler) {
-      mobileSidebarMedia.removeEventListener('change', cache.mobileSidebarMediaChangeHandler)
-      cache.mobileSidebarMediaChangeHandler = null
-      cache.mobileSidebarMedia = null
-    }
   }),
 ])

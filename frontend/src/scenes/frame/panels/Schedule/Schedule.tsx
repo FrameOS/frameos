@@ -1,15 +1,17 @@
-import type { DragEvent } from 'react'
+import { Fragment, type DragEvent } from 'react'
 import { Form, Group } from 'kea-forms'
 import { frameLogic } from '../../frameLogic'
 import { Field } from '../../../../components/Field'
 import { Button } from '../../../../components/Button'
 import { Select } from '../../../../components/Select'
+import { TextInput } from '../../../../components/TextInput'
+import { FrameImage } from '../../../../components/FrameImage'
 import { useActions, useValues } from 'kea'
 import { scheduleLogic } from './scheduleLogic'
-import { EyeIcon, PencilSquareIcon } from '@heroicons/react/24/outline'
+import { CalendarDaysIcon } from '@heroicons/react/24/outline'
 import { PlusIcon } from '@heroicons/react/24/solid'
 import { StateFieldEdit } from '../Scenes/StateFieldEdit'
-import { ScheduledEvent, StateField } from '../../../../types'
+import { FrameScene, ScheduledEvent, StateField } from '../../../../types'
 import { Switch } from '../../../../components/Switch'
 import clsx from 'clsx'
 import { getFrameosSceneDragData, hasFrameosSceneDragData, setFrameosSceneDragData } from '../../../workspace/sceneDrag'
@@ -41,127 +43,202 @@ function timeLabel(event: ScheduledEvent): string {
   return `${event.hour < 10 ? '0' : ''}${event.hour}:${event.minute < 10 ? '0' : ''}${event.minute}`
 }
 
-interface ViewRowProps {
-  event: ScheduledEvent
-  disabled: boolean
-  sceneLabel: string
-  eventFields: StateField[]
-  expandedDescription: boolean
-  toggleDescription: (id: string) => void
-  editEvent: (id: string) => void
-  sendEvent: (event: string, payload: any) => void
+function sceneName(scene: FrameScene | null | undefined, fallback = 'Unspecified scene'): string {
+  return scene?.name || scene?.id || fallback
 }
 
-function ViewRow({
-  event,
-  disabled,
-  sceneLabel,
-  eventFields,
-  expandedDescription,
-  editEvent,
-  toggleDescription,
-  sendEvent,
-}: ViewRowProps) {
-  const publicFields = eventFields.filter((field) => field.access === 'public')
-  const modifiedFields = publicFields.filter(
-    (field) => field.name in event.payload.state && event.payload.state[field.name] !== field.value
+function entryCountLabel(count: number): string {
+  if (count === 0) {
+    return 'Not scheduled'
+  }
+  return `${count} ${count === 1 ? 'entry' : 'entries'}`
+}
+
+interface SceneScheduleCardProps {
+  frameId: number
+  scene: FrameScene
+  eventCount: number
+  addEventForScene: (sceneId: string) => void
+  showDropZone: () => void
+  hideDropZone: () => void
+}
+
+function SceneScheduleCard({
+  frameId,
+  scene,
+  eventCount,
+  addEventForScene,
+  showDropZone,
+  hideDropZone,
+}: SceneScheduleCardProps): JSX.Element {
+  return (
+    <button
+      type="button"
+      draggable={Boolean(scene.id)}
+      onDragStart={(dragEvent) => {
+        if (scene.id) {
+          setFrameosSceneDragData(dragEvent.dataTransfer, scene.id)
+          showDropZone()
+        }
+      }}
+      onDragEnd={hideDropZone}
+      onClick={() => addEventForScene(scene.id)}
+      className="group relative flex min-w-[8.5rem] max-w-[9.5rem] flex-1 overflow-hidden rounded-2xl border border-[var(--tool-border)] bg-[var(--tool-bg-strong)] text-left shadow-sm transition hover:-translate-y-0.5 hover:border-[#4a4b8c]/45 hover:shadow-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+      title={`Add ${sceneName(scene)} to the schedule`}
+    >
+      <div className="flex w-full flex-col">
+        <div className="relative aspect-[4/3] overflow-hidden bg-slate-200/60">
+          <FrameImage
+            frameId={frameId}
+            sceneId={scene.id}
+            thumb
+            refreshable={false}
+            objectFit="cover"
+            className="h-full w-full rounded-none transition duration-200 group-hover:scale-[1.03]"
+          />
+          <span className="absolute right-2 top-2 inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/90 text-[#4a4b8c] shadow-sm">
+            <PlusIcon className="h-4 w-4" />
+          </span>
+        </div>
+        <div className="min-w-0 px-3 py-2">
+          <div className="truncate text-sm font-semibold">{sceneName(scene)}</div>
+          <div className="frame-tool-muted mt-0.5 text-xs">{entryCountLabel(eventCount)}</div>
+        </div>
+      </div>
+    </button>
   )
-  const shownFields = expandedDescription ? publicFields : modifiedFields
-  const showToggle = publicFields.length !== modifiedFields.length
-  const inactive = event.disabled || disabled
+}
+
+interface ScheduleEntryCardProps {
+  frameId: number
+  event: ScheduledEvent
+  scene: FrameScene | null
+  className?: string
+}
+
+interface ScheduleDropSlotProps {
+  index: number
+  active: boolean
+  addEventForScene: (sceneId: string, insertIndex?: number | null) => void
+  hideDropZone: () => void
+  setDropIndex: (dropIndex: number | null) => void
+  showDropZone: () => void
+}
+
+function ScheduleDropSlot({
+  index,
+  active,
+  addEventForScene,
+  hideDropZone,
+  setDropIndex,
+  showDropZone,
+}: ScheduleDropSlotProps): JSX.Element {
+  const handleDragOver = (event: DragEvent<HTMLDivElement>) => {
+    if (!hasFrameosSceneDragData(event.dataTransfer)) {
+      return
+    }
+    event.preventDefault()
+    event.stopPropagation()
+    event.dataTransfer.dropEffect = 'copy'
+    showDropZone()
+    setDropIndex(index)
+  }
+
+  const handleDrop = (event: DragEvent<HTMLDivElement>) => {
+    const sceneId = getFrameosSceneDragData(event.dataTransfer)
+    if (!sceneId) {
+      hideDropZone()
+      return
+    }
+    event.preventDefault()
+    event.stopPropagation()
+    addEventForScene(sceneId, index)
+  }
 
   return (
     <div
-      draggable={Boolean(event.payload.sceneId)}
-      onDragStart={(dragEvent) => {
-        if (event.payload.sceneId) {
-          setFrameosSceneDragData(dragEvent.dataTransfer, event.payload.sceneId)
-        }
-      }}
-      className={clsx('space-y-3', inactive && 'opacity-55')}
+      onDragEnter={handleDragOver}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+      className={clsx('relative z-30 flex h-6 items-center transition-all', active ? 'h-10' : '')}
     >
-      <div className="flex items-start gap-3">
-        <div
-          className={clsx(
-            'flex h-14 w-16 shrink-0 flex-col items-center justify-center rounded-2xl border text-center',
-            inactive ? 'border-slate-300/60 bg-slate-100/60' : 'border-[#4a4b8c]/20 bg-[#4a4b8c]/10'
-          )}
-        >
-          <div className="text-base font-bold leading-none">{timeLabel(event)}</div>
-          <div className="frame-tool-muted mt-1 text-[10px] font-semibold uppercase leading-none">
-            {weekDays[String(event.weekday || 0)]}
+      <div
+        className={clsx(
+          'w-full rounded-full border-2 border-dashed transition-all',
+          active
+            ? 'h-8 border-[#4a4b8c] bg-[#4a4b8c]/15 shadow-[0_0_0_4px_rgba(74,75,140,0.10)]'
+            : 'h-2 border-[#4a4b8c]/45 bg-white/55'
+        )}
+      />
+    </div>
+  )
+}
+
+function ScheduleEntryCard({ frameId, event, scene, className }: ScheduleEntryCardProps): JSX.Element {
+  return (
+    <div
+      className={clsx(
+        'flex items-center gap-3 rounded-2xl border border-[var(--tool-border)] bg-[var(--tool-bg-strong)] p-2',
+        className
+      )}
+    >
+      <div className="h-16 w-20 shrink-0 overflow-hidden rounded-xl bg-slate-200/60">
+        {scene ? (
+          <FrameImage
+            frameId={frameId}
+            sceneId={scene.id}
+            thumb
+            refreshable={false}
+            objectFit="cover"
+            className="h-full w-full rounded-none"
+          />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center">
+            <CalendarDaysIcon className="h-6 w-6 text-slate-400" />
           </div>
+        )}
+      </div>
+      <div className="min-w-0">
+        <div className="flex min-w-0 items-center gap-2">
+          <div className="truncate text-sm font-semibold">{sceneName(scene)}</div>
+          {event.disabled ? (
+            <span className="shrink-0 rounded-full bg-slate-500/12 px-2 py-0.5 text-[10px] font-semibold uppercase text-slate-500">
+              Disabled
+            </span>
+          ) : null}
         </div>
-        <button
-          type="button"
-          onClick={() => (showToggle ? toggleDescription(event.id) : undefined)}
-          className="min-w-0 flex-1 rounded-xl px-1 py-0.5 text-left transition hover:bg-white/35 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-        >
-          <div className="truncate text-sm font-semibold">{sceneLabel}</div>
-          <div className="frame-tool-muted mt-1 flex flex-wrap gap-1 text-xs">
-            {modifiedFields.length ? (
-              modifiedFields.map((field) => (
-                <span key={field.name} className="rounded-full bg-slate-500/10 px-2 py-0.5">
-                  {field.label || field.name}
-                </span>
-              ))
-            ) : (
-              <span>No state overrides</span>
-            )}
-          </div>
-        </button>
-        <div className="flex shrink-0 gap-1">
-          <Button
-            size="small"
-            className="!px-1"
-            color="secondary"
-            onClick={(event_) => {
-              event_.stopPropagation()
-              sendEvent(event.event, event.payload)
-            }}
-            title="Preview scheduled scene"
-          >
-            <EyeIcon className="w-5 h-5" />
-          </Button>
-          <Button
-            size="small"
-            className="!px-1"
-            color="secondary"
-            onClick={(event_) => {
-              event_.stopPropagation()
-              editEvent(event.id)
-            }}
-            title="Edit"
-          >
-            <PencilSquareIcon className="w-5 h-5" />
-          </Button>
+        <div className="frame-tool-muted mt-0.5 text-xs">
+          {weekDays[String(event.weekday || 0)]} at {timeLabel(event)}
         </div>
       </div>
-      {shownFields.length ? (
-        <div className="grid gap-2 pl-0 text-sm @md:pl-[4.75rem]">
-          {shownFields.map((field) => (
-            <div key={field.name} className="grid gap-1 rounded-xl bg-slate-500/10 px-3 py-2 @md:grid-cols-3">
-              <div className="frame-tool-muted text-xs font-semibold uppercase">{field.label || field.name}</div>
-              <div className="min-w-0 truncate @md:col-span-2">{event.payload.state[field.name] ?? field.value}</div>
-            </div>
-          ))}
-        </div>
-      ) : null}
     </div>
   )
 }
 
 interface EditRowProps {
+  frameId: number
   event: ScheduledEvent
-  scenesAsOptions: { label: string; value: string }[]
+  scene: FrameScene | null
   eventFields: StateField[]
   closeEvent: (id: string) => void
   deleteEvent: (id: string) => void
 }
 
-function EditRow({ event, scenesAsOptions, eventFields, closeEvent, deleteEvent }: EditRowProps) {
+function EditRow({ frameId, event, scene, eventFields, closeEvent, deleteEvent }: EditRowProps) {
   return (
     <div className="space-y-4">
+      <button
+        type="button"
+        onClick={() => closeEvent(event.id)}
+        className="group w-full rounded-2xl text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+      >
+        <ScheduleEntryCard
+          frameId={frameId}
+          event={event}
+          scene={scene}
+          className="transition group-hover:border-[#4a4b8c]/45 group-hover:shadow-lg"
+        />
+      </button>
       <div className="grid grid-cols-[minmax(6rem,1fr)_4rem_4rem] gap-2">
         <Field name="weekday" label="Repeats" className="min-w-0">
           {({ value, onChange }) => (
@@ -190,9 +267,6 @@ function EditRow({ event, scenesAsOptions, eventFields, closeEvent, deleteEvent 
         </Field>
       </div>
       <Group name="payload">
-        <Field name="sceneId" label="Scene">
-          <Select options={scenesAsOptions} />
-        </Field>
         {event.payload.sceneId ? (
           <Group name="state">
             <div className="mt-3 space-y-3">
@@ -251,14 +325,50 @@ interface ScheduleProps {
   drawerMode?: boolean
 }
 
-export function Schedule({ scrollContainer = true, drawerMode = false }: ScheduleProps = {}) {
+export function Schedule({ scrollContainer = true }: ScheduleProps = {}) {
   const { frameId } = useValues(frameLogic)
-  const { sendEvent } = useActions(frameLogic)
-  const { editingEvents, events, sortedEvents, scenesAsOptions, fieldsForScene, expandedDescriptions, sort, disabled } =
-    useValues(scheduleLogic({ frameId }))
-  const { editEvent, addEvent, addEventForScene, closeEvent, deleteEvent, toggleDescription, setSort } = useActions(
-    scheduleLogic({ frameId })
-  )
+  const {
+    dropIndex,
+    dropZoneVisible,
+    editingEvents,
+    events,
+    filteredScenes,
+    sceneSearch,
+    sortedEvents,
+    sortedScenes,
+    fieldsForScene,
+    disabled,
+    eventCountsByScene,
+  } = useValues(scheduleLogic({ frameId }))
+  const {
+    editEvent,
+    addEventForScene,
+    closeEvent,
+    deleteEvent,
+    hideDropZone,
+    setDropIndex,
+    setSceneSearch,
+    showDropZone,
+  } = useActions(scheduleLogic({ frameId }))
+  const scenesById = Object.fromEntries(sortedScenes.map((scene) => [scene.id, scene]))
+
+  const dragIsInsidePanel = (event: DragEvent<HTMLDivElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect()
+    return (
+      event.clientX >= rect.left &&
+      event.clientX <= rect.right &&
+      event.clientY >= rect.top &&
+      event.clientY <= rect.bottom
+    )
+  }
+
+  const handleDragEnter = (event: DragEvent<HTMLDivElement>) => {
+    if (!hasFrameosSceneDragData(event.dataTransfer)) {
+      return
+    }
+    event.preventDefault()
+    showDropZone()
+  }
 
   const handleDragOver = (event: DragEvent<HTMLDivElement>) => {
     if (!hasFrameosSceneDragData(event.dataTransfer)) {
@@ -266,103 +376,175 @@ export function Schedule({ scrollContainer = true, drawerMode = false }: Schedul
     }
     event.preventDefault()
     event.dataTransfer.dropEffect = 'copy'
+    showDropZone()
+    setDropIndex(null)
+  }
+
+  const handleDragLeave = (event: DragEvent<HTMLDivElement>) => {
+    if (!hasFrameosSceneDragData(event.dataTransfer) || dragIsInsidePanel(event)) {
+      return
+    }
+    hideDropZone()
   }
 
   const handleDrop = (event: DragEvent<HTMLDivElement>) => {
     const sceneId = getFrameosSceneDragData(event.dataTransfer)
     if (!sceneId) {
+      hideDropZone()
       return
     }
     event.preventDefault()
-    addEventForScene(sceneId)
+    addEventForScene(sceneId, sortedEvents.length)
   }
 
   return (
     <div
-      className={clsx('frame-tool-panel @container', scrollContainer ? 'h-full overflow-y-auto pr-2' : 'overflow-visible')}
+      className={clsx(
+        'frame-tool-panel @container relative min-h-full',
+        scrollContainer ? 'h-full overflow-y-auto pr-2' : 'overflow-visible'
+      )}
+      onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      <Form logic={frameLogic} formKey="frameForm" className="space-y-4">
-        <div className="frame-tool-card rounded-[22px] p-4">
-          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-            <div className="min-w-0">
-              <h3 className="frame-tool-heading text-base font-semibold">
-                {drawerMode ? 'Scene schedule' : 'Schedule'}
-              </h3>
-              <div className="frame-tool-muted mt-1 text-sm">
-                {events.length} {events.length === 1 ? 'entry' : 'entries'} · {disabled ? 'Paused' : 'Enabled'}
-              </div>
-            </div>
-            <Field name={['schedule', 'disabled']}>
-              {({ value, onChange }) => (
-                <Switch label="Enabled" value={!value} onChange={(enabled) => onChange(!enabled)} />
-              )}
-            </Field>
-          </div>
-          <div className="grid gap-2 @md:grid-cols-[1fr_auto]">
-            <Select
-              options={[
-                { label: 'Sort by hour', value: 'hour' },
-                { label: 'Sort by day', value: 'day' },
-                { label: 'Sort by scene', value: 'scene' },
-              ]}
-              value={sort}
-              onChange={setSort}
-            />
-            <Button onClick={() => addEvent()} size="small" className="flex items-center justify-center gap-1">
-              <PlusIcon className="w-5 h-5" />
-              Add entry
-            </Button>
+      {dropZoneVisible ? (
+        <div className="pointer-events-none absolute inset-0 z-20 flex min-h-full rounded-[24px] border-2 border-dashed border-[#4a4b8c]/55 bg-[#4a4b8c]/10 p-4 backdrop-blur-[1px]">
+          <div className="flex min-h-full flex-1 items-center justify-center rounded-[20px] bg-white/50 text-center text-sm font-semibold text-[#4a4b8c]">
+            Drop scene to schedule
           </div>
         </div>
-        {sortedEvents.length === 0 ? (
-          <div className="frame-tool-card rounded-[22px] border-dashed p-5 text-center">
-            <div className="text-sm font-semibold">No scheduled scenes</div>
-            <div className="frame-tool-muted mt-1 text-xs">Schedule entries appear here.</div>
-          </div>
-        ) : null}
-        {sortedEvents.map((event) => {
-          const eventIndex = events.findIndex((candidate) => candidate.id === event.id)
-          if (eventIndex === -1) {
-            return null
-          }
-          const sceneLabel =
-            scenesAsOptions.find((scene) => scene.value === event.payload.sceneId)?.label || 'Unspecified scene'
-
-          return (
-            <div
-              className={clsx(
-                'frame-tool-card @container rounded-[22px] p-4 transition',
-                !editingEvents[event.id] && (event.disabled || disabled) ? 'opacity-70' : ''
-              )}
-              key={event.id}
-            >
-              {editingEvents[event.id] ? (
-                <Group name={['schedule', 'events', eventIndex]}>
-                  <EditRow
-                    event={event}
-                    scenesAsOptions={scenesAsOptions}
-                    eventFields={fieldsForScene[event.payload.sceneId] ?? []}
-                    closeEvent={closeEvent}
-                    deleteEvent={deleteEvent}
-                  />
-                </Group>
-              ) : (
-                <ViewRow
-                  disabled={disabled}
-                  event={event}
-                  sceneLabel={sceneLabel}
-                  eventFields={fieldsForScene[event.payload.sceneId] ?? []}
-                  expandedDescription={expandedDescriptions[event.id] ?? false}
-                  toggleDescription={toggleDescription}
-                  editEvent={editEvent}
-                  sendEvent={sendEvent}
-                />
-              )}
+      ) : null}
+      <Form logic={frameLogic} formKey="frameForm" className="space-y-4">
+        <div className="flex justify-end px-1">
+          <Field name={['schedule', 'disabled']}>
+            {({ value, onChange }) => (
+              <Switch label="Enabled" value={!value} onChange={(enabled) => onChange(!enabled)} />
+            )}
+          </Field>
+        </div>
+        <div className="frame-tool-card overflow-hidden rounded-[22px]">
+          <div className="p-4">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <TextInput
+                value={sceneSearch}
+                onChange={setSceneSearch}
+                placeholder="Find scenes..."
+                className="h-9 rounded-xl"
+              />
+              <div className="frame-tool-muted shrink-0 text-xs">
+                {filteredScenes.length}/{sortedScenes.length}
+              </div>
             </div>
-          )
-        })}
+            {filteredScenes.length ? (
+              <div className="-mx-1 flex gap-3 overflow-x-auto px-1 pb-1">
+                {filteredScenes.map((scene) => (
+                  <SceneScheduleCard
+                    key={scene.id}
+                    frameId={frameId}
+                    scene={scene}
+                    eventCount={eventCountsByScene[scene.id] ?? 0}
+                    addEventForScene={addEventForScene}
+                    showDropZone={showDropZone}
+                    hideDropZone={hideDropZone}
+                  />
+                ))}
+              </div>
+            ) : sortedScenes.length ? (
+              <div className="rounded-2xl border border-dashed border-[var(--tool-border)] px-4 py-5 text-center">
+                <div className="text-sm font-semibold">No matching scenes</div>
+              </div>
+            ) : (
+              <div className="rounded-2xl border border-dashed border-[var(--tool-border)] px-4 py-5 text-center">
+                <div className="text-sm font-semibold">No scenes yet</div>
+                <div className="frame-tool-muted mt-1 text-xs">Create scenes before scheduling them.</div>
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="space-y-2">
+          {dropZoneVisible ? (
+            <ScheduleDropSlot
+              index={0}
+              active={dropIndex === 0}
+              addEventForScene={addEventForScene}
+              hideDropZone={hideDropZone}
+              setDropIndex={setDropIndex}
+              showDropZone={showDropZone}
+            />
+          ) : null}
+          {sortedEvents.length === 0 ? (
+            <div className="frame-tool-card rounded-[22px] border-dashed p-5 text-center">
+              <div className="text-sm font-semibold">No scheduled scenes</div>
+            </div>
+          ) : null}
+          {sortedEvents.map((event, sortedIndex) => {
+            const eventIndex = events.findIndex((candidate) => candidate.id === event.id)
+            if (eventIndex === -1) {
+              return null
+            }
+            const scene = scenesById[event.payload.sceneId] ?? null
+            const inactive = event.disabled || disabled
+
+            return (
+              <Fragment key={event.id}>
+                {editingEvents[event.id] ? (
+                  <div
+                    className={clsx(
+                      'frame-tool-card @container rounded-[22px] p-4 transition',
+                      inactive ? 'opacity-70' : ''
+                    )}
+                  >
+                    <Group name={['schedule', 'events', eventIndex]}>
+                      <EditRow
+                        frameId={frameId}
+                        event={event}
+                        scene={scene}
+                        eventFields={fieldsForScene[event.payload.sceneId] ?? []}
+                        closeEvent={closeEvent}
+                        deleteEvent={deleteEvent}
+                      />
+                    </Group>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    draggable={Boolean(event.payload.sceneId)}
+                    onDragStart={(dragEvent) => {
+                      if (event.payload.sceneId) {
+                        setFrameosSceneDragData(dragEvent.dataTransfer, event.payload.sceneId)
+                        showDropZone()
+                      }
+                    }}
+                    onDragEnd={hideDropZone}
+                    onClick={() => editEvent(event.id)}
+                    className={clsx(
+                      'group @container w-full rounded-2xl text-left transition hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+                      inactive ? 'opacity-70' : ''
+                    )}
+                  >
+                    <ScheduleEntryCard
+                      frameId={frameId}
+                      event={event}
+                      scene={scene}
+                      className="transition group-hover:border-[#4a4b8c]/45 group-hover:shadow-lg"
+                    />
+                  </button>
+                )}
+                {dropZoneVisible ? (
+                  <ScheduleDropSlot
+                    index={sortedIndex + 1}
+                    active={dropIndex === sortedIndex + 1}
+                    addEventForScene={addEventForScene}
+                    hideDropZone={hideDropZone}
+                    setDropIndex={setDropIndex}
+                    showDropZone={showDropZone}
+                  />
+                ) : null}
+              </Fragment>
+            )
+          })}
+        </div>
       </Form>
     </div>
   )

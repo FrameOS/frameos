@@ -177,6 +177,7 @@ function scheduleDatePrefix(date: Date, now = new Date()): string {
 function FramePreviewPanel({ frame, scenes }: { frame: FrameType; scenes: FrameScene[] }): JSX.Element {
   const previewSizing = framePreviewSizing(frame)
   const { openScheduleDrawer } = useActions(workspaceLogic)
+  const { hideForm } = useActions(newFrameForm)
   const { sceneId: currentSceneId } = useValues(controlLogic({ frameId: frame.id }))
   const activeScene = scenes.find((scene) => sceneIsActive(scene, currentSceneId))
   const nextSchedule = nextScheduledEvent(frame.schedule)
@@ -225,7 +226,10 @@ function FramePreviewPanel({ frame, scenes }: { frame: FrameType; scenes: FrameS
           type="button"
           title="Edit schedule"
           aria-label="Edit schedule"
-          onClick={() => openScheduleDrawer(frame.id)}
+          onClick={() => {
+            hideForm()
+            openScheduleDrawer(frame.id)
+          }}
           className="frameos-secondary-button inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/80 text-slate-700 shadow-sm transition hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
         >
           <CalendarDaysIcon className="h-4 w-4" />
@@ -238,6 +242,7 @@ function FramePreviewPanel({ frame, scenes }: { frame: FrameType; scenes: FrameS
 function FrameHeaderActions({ frame, archived }: { frame: FrameType; archived?: boolean }): JSX.Element {
   const { deleteFrame, deployFrame, renderFrame, renameFrame, setFrameArchived } = useActions(framesModel)
   const { openChatDrawer, openScheduleDrawer } = useActions(workspaceLogic)
+  const { hideForm } = useActions(newFrameForm)
   const frameName = frame.name || frameHost(frame)
 
   const promptRenameFrame = (): void => {
@@ -253,7 +258,10 @@ function FrameHeaderActions({ frame, archived }: { frame: FrameType; archived?: 
       <HeaderMetrics frameId={frame.id} />
       <button
         type="button"
-        onClick={() => openScheduleDrawer(frame.id)}
+        onClick={() => {
+          hideForm()
+          openScheduleDrawer(frame.id)
+        }}
         className="frameos-primary-action inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
       >
         <CalendarDaysIcon className="h-5 w-5" />

@@ -7,12 +7,13 @@ import { DocumentIcon, FolderIcon, FolderOpenIcon } from '@heroicons/react/24/ou
 import {
   CloudArrowDownIcon,
   DocumentArrowUpIcon,
+  ArrowPathIcon,
   PlayIcon,
   PencilSquareIcon,
   TrashIcon,
   FolderPlusIcon,
 } from '@heroicons/react/24/solid'
-import { useEffect, useState, type DragEvent } from 'react'
+import { useState, type DragEvent } from 'react'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { Spinner } from '../../../../components/Spinner'
 import { DropdownMenu, DropdownMenuItem } from '../../../../components/DropdownMenu'
@@ -521,12 +522,16 @@ function AssetsSummaryHeader({
   stats,
   diskStats,
   showSyncAction,
+  isReloading,
+  onRefresh,
   onSync,
 }: {
   rootName: string
   stats: AssetStats
   diskStats: DiskStats | null
   showSyncAction: boolean
+  isReloading: boolean
+  onRefresh: () => void
   onSync: () => void
 }): JSX.Element {
   const diskUsedPercent = diskStats ? Math.min(Math.max(diskStats.usedPercent, 0), 100) : null
@@ -545,23 +550,34 @@ function AssetsSummaryHeader({
       <div className="flex flex-wrap items-start justify-between gap-3 px-4 py-4">
         <div className="min-w-0">
           <div className="frame-tool-muted text-xs font-semibold uppercase tracking-wide">Assets</div>
-          <div className="mt-1 truncate text-xl font-bold tracking-normal text-[color:var(--tool-strong)]">
-            {rootName || '/srv/assets'}
+          <div className="mt-1 flex min-w-0 items-center gap-2">
+            <div className="truncate text-xl font-bold tracking-normal text-[color:var(--tool-strong)]">
+              {rootName || '/srv/assets'}
+            </div>
+            {isReloading ? <Spinner className="h-4 w-4 shrink-0" /> : null}
           </div>
         </div>
-        {showSyncAction ? (
-          <DropdownMenu
-            className="w-fit"
-            buttonColor="secondary"
-            items={[
+        <DropdownMenu
+          className="w-fit"
+          buttonColor="secondary"
+          items={
+            [
               {
-                label: 'Sync fonts',
-                onClick: onSync,
-                icon: <DocumentArrowUpIcon className="w-5 h-5" />,
+                label: isReloading ? 'Refreshing' : 'Refresh',
+                onClick: onRefresh,
+                icon: <ArrowPathIcon className="w-5 h-5" />,
+                loading: isReloading,
               },
-            ]}
-          />
-        ) : null}
+              showSyncAction
+                ? {
+                    label: 'Sync fonts',
+                    onClick: onSync,
+                    icon: <DocumentArrowUpIcon className="w-5 h-5" />,
+                  }
+                : null,
+            ].filter(Boolean) as DropdownMenuItem[]
+          }
+        />
       </div>
       <div className="grid gap-px border-t border-[color:var(--tool-border)] bg-[var(--tool-border)] @3xl:grid-cols-4">
         {statItems.map((item) => (
@@ -605,9 +621,9 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
   const { frame, frameForm } = useValues(frameLogic)
   const { sendEvent } = useActions(frameLogic)
   const { openLogs } = useActions(panelsLogic)
-  const { assetsLoading, assetTree } = useValues(assetsLogic({ frameId: frame.id }))
+  const { assetsLoading, assetsRefreshing, assetTree } = useValues(assetsLogic({ frameId: frame.id }))
   const { sortedMetrics } = useValues(metricsLogic({ frameId: frame.id }))
-  const { loadAssets, syncAssets, uploadAssets, uploadDroppedFiles, deleteAsset, renameAsset, createFolder } =
+  const { refreshAssets, syncAssets, uploadAssets, uploadDroppedFiles, deleteAsset, renameAsset, createFolder } =
     useActions(assetsLogic({ frameId: frame.id }))
   const { openAsset } = useActions(panelsLogic({ frameId: frame.id }))
   const assetStats = collectAssetStats(assetTree)
@@ -652,10 +668,6 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
     }
   }
 
-  useEffect(() => {
-    loadAssets()
-  }, [])
-
   return (
     <div
       className={clsx(
@@ -672,6 +684,8 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
             stats={assetStats}
             diskStats={diskStats}
             showSyncAction={showSyncAction}
+            isReloading={assetsLoading || assetsRefreshing}
+            onRefresh={refreshAssets}
             onSync={handleSyncAssets}
           />
           <TreeNode

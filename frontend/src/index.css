@@ -870,54 +870,6 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
   padding-right: 490px;
 }
 
-.workspace-main-primary-collapsed {
-  padding-left: 1.5rem;
-}
-
-.workspace-header-with-floating-sidebar {
-  padding-left: 4.75rem;
-}
-
-.workspace-main-floating-sidebar-clearance {
-  padding-top: 5.5rem;
-}
-
-.workspace-sidebar-open-button {
-  background: linear-gradient(145deg, rgba(255, 255, 255, 0.98), rgba(244, 247, 252, 0.92));
-  border-color: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 18px 36px rgba(71, 85, 105, 0.26), 0 4px 10px rgba(71, 85, 105, 0.16),
-    inset 0 1px 0 rgba(255, 255, 255, 0.9);
-}
-
-.workspace-sidebar-open-button::after {
-  border: 1px solid rgba(74, 75, 140, 0.18);
-  border-radius: 1.125rem;
-  content: '';
-  inset: 0.25rem;
-  pointer-events: none;
-  position: absolute;
-}
-
-.workspace-sidebar-open-button:hover {
-  box-shadow: 0 22px 44px rgba(71, 85, 105, 0.32), 0 7px 16px rgba(71, 85, 105, 0.2),
-    inset 0 1px 0 rgba(255, 255, 255, 0.92);
-}
-
-.workspace-sidebar-open-button img {
-  filter: drop-shadow(0 1px 1px rgba(15, 23, 42, 0.18));
-}
-
-.frameos-theme-dark .workspace-sidebar-open-button {
-  background: linear-gradient(145deg, rgba(45, 48, 57, 0.98), rgba(27, 29, 36, 0.94));
-  border-color: rgba(255, 255, 255, 0.14);
-  box-shadow: 0 20px 42px rgba(0, 0, 0, 0.46), 0 0 0 1px rgba(255, 255, 255, 0.06),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08);
-}
-
-.frameos-theme-dark .workspace-sidebar-open-button::after {
-  border-color: rgba(216, 213, 255, 0.2);
-}
-
 .workspace-sidebar {
   width: 420px;
 }
@@ -1037,15 +989,19 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
 @media (max-width: 1023px) {
   .workspace-sidebar,
   .workspace-sidebar-collapsed {
-    position: fixed;
-    inset: 0;
+    position: sticky;
+    top: 0;
+    right: 0;
+    bottom: auto;
+    left: 0;
     z-index: 60;
     width: 100vw;
     max-width: none;
-    height: 100dvh;
-    max-height: none;
+    height: auto;
+    max-height: 100dvh;
     margin: 0;
     border-radius: 0;
+    flex-direction: column;
   }
 
   .workspace-main {
@@ -1053,26 +1009,51 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
     --workspace-terminal-left-narrow: 1rem;
     --workspace-terminal-left-compact: 0.75rem;
     padding-left: 1rem;
-  }
-
-  .workspace-main-primary-collapsed {
-    padding-left: 1rem;
-  }
-
-  .workspace-header-with-floating-sidebar {
-    padding-left: 4.5rem;
-  }
-
-  .workspace-main-floating-sidebar-clearance {
-    padding-top: 5rem;
+    padding-top: 1rem;
   }
 
   .workspace-main-with-right-panel {
     padding-right: 1rem;
   }
 
+  .workspace-sidebar .frameos-rail {
+    width: 100%;
+    height: 4.5rem;
+    flex-direction: row;
+    gap: 0.75rem;
+    overflow-x: auto;
+    overflow-y: hidden;
+    border-right: 0;
+    border-bottom: 1px solid rgba(226, 232, 240, 0.8);
+    padding: 0.75rem;
+  }
+
+  .frameos-theme-dark .workspace-sidebar .frameos-rail {
+    border-bottom-color: rgba(255, 255, 255, 0.09);
+  }
+
+  .workspace-sidebar .workspace-logo-button,
+  .workspace-sidebar .workspace-theme-button {
+    margin-bottom: 0;
+    flex-shrink: 0;
+  }
+
+  .workspace-sidebar nav {
+    flex: 1 0 auto;
+    flex-direction: row;
+    gap: 0.5rem;
+  }
+
+  .workspace-secondary-panel {
+    width: 100%;
+    max-height: min(72dvh, calc(100dvh - 4.5rem));
+    flex: none;
+    overflow: hidden;
+  }
+
   .workspace-drawer {
-    top: 1rem;
+    top: 5.25rem;
+    z-index: 70;
     right: 1rem;
     bottom: 1rem;
     width: min(430px, calc(100vw - 2rem));
@@ -1088,19 +1069,7 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
     --workspace-terminal-left-compact: 0.75rem;
     padding-left: 0.75rem;
     padding-right: 0.75rem;
-  }
-
-  .workspace-main-primary-collapsed {
-    padding-left: 0.75rem;
-  }
-
-  .workspace-header-with-floating-sidebar {
-    padding-left: 0;
-    padding-top: 4rem;
-  }
-
-  .workspace-main-floating-sidebar-clearance {
-    padding-top: 5rem;
+    padding-top: 0.75rem;
   }
 
   .workspace-sidebar,
@@ -1112,10 +1081,9 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
   }
 
   .workspace-sidebar .frameos-rail {
-    width: 4.25rem;
-    overflow-y: auto;
-    padding-top: 1rem;
-    padding-bottom: 1rem;
+    height: 4rem;
+    width: 100%;
+    padding: 0.625rem;
   }
 
   .workspace-sidebar .frameos-nav-button,
@@ -1130,11 +1098,11 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
   }
 
   .workspace-sidebar nav {
-    gap: 0.5rem;
+    gap: 0.375rem;
   }
 
   .workspace-drawer {
-    top: 0.5rem;
+    top: 4.75rem;
     right: 0.5rem;
     bottom: 0.5rem;
     left: 0.5rem;
@@ -1150,14 +1118,6 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
 
 .scene-workspace-main {
   padding-left: var(--workspace-sidebar-edge, var(--workspace-main-offset, 0px));
-}
-
-.scene-workspace-main.workspace-main-primary-collapsed {
-  padding-left: 0;
-}
-
-.scene-workspace-main.workspace-main-floating-sidebar-clearance {
-  padding-top: 0;
 }
 
 .scene-workspace-main.scene-workspace-main {
