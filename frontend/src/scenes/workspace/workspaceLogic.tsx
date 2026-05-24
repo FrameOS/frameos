@@ -206,7 +206,7 @@ function applyWorkspaceTheme(theme: WorkspaceTheme): void {
 
 const MOBILE_WORKSPACE_MEDIA_QUERY = '(max-width: 1023px)'
 
-function isMobileWorkspaceViewport(): boolean {
+export function isMobileWorkspaceViewport(): boolean {
   return typeof window !== 'undefined' && window.matchMedia?.(MOBILE_WORKSPACE_MEDIA_QUERY).matches
 }
 

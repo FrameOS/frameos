@@ -999,10 +999,12 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
 
 .workspace-sidebar {
   width: 420px;
+  z-index: 80;
 }
 
 .workspace-sidebar-collapsed {
   width: 88px;
+  z-index: 80;
 }
 
 .workspace-drawer {
@@ -1116,19 +1118,25 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
 @media (max-width: 1023px) {
   .workspace-sidebar,
   .workspace-sidebar-collapsed {
-    position: sticky;
+    position: fixed;
     top: 0;
     right: 0;
     bottom: auto;
     left: 0;
-    z-index: 60;
+    z-index: 80;
     width: 100vw;
     max-width: none;
-    height: auto;
+    height: 100dvh;
     max-height: 100dvh;
     margin: 0;
     border-radius: 0;
     flex-direction: column;
+    transition: width 0.2s ease, height 0.2s ease;
+  }
+
+  .workspace-sidebar-collapsed {
+    height: 4.5rem;
+    max-height: 4.5rem;
   }
 
   .workspace-main {
@@ -1136,7 +1144,7 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
     --workspace-terminal-left-narrow: 1rem;
     --workspace-terminal-left-compact: 0.75rem;
     padding-left: 1rem;
-    padding-top: 1rem;
+    padding-top: 5.5rem;
   }
 
   .workspace-main-with-right-panel {
@@ -1173,14 +1181,14 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
 
   .workspace-secondary-panel {
     width: 100%;
-    max-height: min(72dvh, calc(100dvh - 4.5rem));
-    flex: none;
+    min-height: 0;
+    max-height: none;
+    flex: 1 1 auto;
     overflow: hidden;
   }
 
   .workspace-drawer {
     top: 5.25rem;
-    z-index: 70;
     right: 1rem;
     bottom: 1rem;
     width: min(430px, calc(100vw - 2rem));
@@ -1196,15 +1204,19 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
     --workspace-terminal-left-compact: 0.75rem;
     padding-left: 0.75rem;
     padding-right: 0.75rem;
-    padding-top: 0.75rem;
+    padding-top: 4.75rem;
   }
 
   .workspace-sidebar,
   .workspace-sidebar-collapsed {
     width: 100vw;
-    max-height: none;
     margin: 0;
     border-radius: 0;
+  }
+
+  .workspace-sidebar-collapsed {
+    height: 4rem;
+    max-height: 4rem;
   }
 
   .workspace-sidebar .frameos-rail {

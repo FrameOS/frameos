@@ -294,7 +294,7 @@ function EditRow({ frameId, event, scene, eventFields, closeEvent, deleteEvent }
           className="frameos-primary-group-hover-border transition group-hover:shadow-lg"
         />
       </button>
-      <div className="grid grid-cols-[minmax(6rem,1fr)_4rem_4rem] gap-2">
+      <div className="grid grid-cols-[minmax(0,1fr)_5rem_5rem] gap-2">
         <Field name="weekday" label="Repeats" className="min-w-0">
           {({ value, onChange }) => (
             <Select options={weekDayOptions} value={value} onChange={(value_) => onChange(parseInt(value_))} />
@@ -347,7 +347,7 @@ function EditRow({ frameId, event, scene, eventFields, closeEvent, deleteEvent }
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-500/20 pt-4">
         <Field name="disabled">
           {({ value, onChange }) => (
-            <Switch label="Enabled" value={!value} onChange={(enabled) => onChange(!enabled)} />
+            <Switch label="Entry enabled" value={!value} onChange={(enabled) => onChange(!enabled)} />
           )}
         </Field>
         <div className="flex gap-2">
@@ -616,17 +616,15 @@ export function Schedule({ scrollContainer = true, drawerMode = false }: Schedul
       onDrop={handleDrop}
     >
       {dropZoneVisible ? (
-        <div className="pointer-events-none absolute inset-0 z-20 flex min-h-full rounded-[24px] border-2 border-dashed border-[color:var(--tool-border)] bg-[var(--tool-control-bg)] p-4 backdrop-blur-[1px]">
-          <div className="flex min-h-full flex-1 items-center justify-center rounded-[20px] border border-[color:var(--tool-border)] bg-[var(--tool-bg-strong)] text-center text-sm font-semibold text-[color:var(--tool-strong)] shadow-sm">
-            Drop scene to schedule
-          </div>
+        <div className="pointer-events-none absolute right-3 top-3 z-20 rounded-full border border-[color:var(--tool-border)] bg-[var(--tool-bg-strong)] px-3 py-1.5 text-xs font-semibold text-[color:var(--tool-strong)] shadow-sm">
+          Drop into schedule
         </div>
       ) : null}
       <Form logic={frameLogic} formKey="frameForm" className="space-y-4">
         <div className="flex justify-end px-1">
           <Field name={['schedule', 'disabled']}>
             {({ value, onChange }) => (
-              <Switch label="Enabled" value={!value} onChange={(enabled) => onChange(!enabled)} />
+              <Switch label="Schedule enabled" value={!value} onChange={(enabled) => onChange(!enabled)} />
             )}
           </Field>
         </div>

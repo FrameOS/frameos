@@ -28,6 +28,19 @@ import { workspaceChatDrawerLogic } from './workspaceChatDrawerLogic'
 
 type WorkspaceMode = 'frames' | 'frame' | 'scenes' | 'apps' | 'settings'
 
+const frameShellToolPanels = new Set([
+  'overview',
+  'preview',
+  'schedule',
+  'logs',
+  'metrics',
+  'assets',
+  'terminal',
+  'ping',
+  'debug',
+  'settings',
+])
+
 interface FrameosShellProps {
   mode: WorkspaceMode
   title: string
@@ -165,7 +178,7 @@ export function FrameosShell({
   onPrimaryAction,
   showAiButton: showAiButtonProp,
 }: FrameosShellProps): JSX.Element {
-  const { chatDrawerSelection, search, secondarySidebarOpen, selectedFrame, selectedSceneId, theme } =
+  const { chatDrawerSelection, search, secondarySidebarOpen, selectedFrame, selectedSceneId, theme, utilityPanel } =
     useValues(workspaceLogic)
   const {
     closeScheduleDrawer,
@@ -176,7 +189,8 @@ export function FrameosShell({
     toggleSecondarySidebar,
     toggleTheme,
   } = useActions(workspaceLogic)
-  const frameHref = selectedFrame ? urls.frame(selectedFrame.id) : urls.frames()
+  const activeFrameTool = frameShellToolPanels.has(String(utilityPanel)) ? String(utilityPanel) : undefined
+  const frameHref = selectedFrame ? urls.frame(selectedFrame.id, activeFrameTool) : urls.frames()
   const scenesHref = selectedFrame ? urls.scenes(selectedFrame.id, selectedSceneId ?? undefined) : urls.scenes()
   const appsHref = selectedFrame ? urls.apps(selectedFrame.id, selectedSceneId ?? undefined) : urls.apps()
   const showAiButton = showAiButtonProp ?? (mode !== 'frames' && mode !== 'settings' && !!selectedFrame)

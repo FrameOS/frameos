@@ -1,7 +1,7 @@
 import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
 import { A } from 'kea-router'
 import clsx from 'clsx'
-import { useCallback, useLayoutEffect, useRef, type DragEvent } from 'react'
+import { useCallback, useLayoutEffect, useRef, type DragEvent, type MouseEvent } from 'react'
 import {
   AdjustmentsHorizontalIcon,
   BoltIcon,
@@ -25,7 +25,7 @@ import { FrameDeployPlanDrawer } from './FrameDeployPlanDrawer'
 import { FrameSceneSidebarCard } from './FrameSceneSidebarCard'
 import { FrameSidebarPreview } from './FrameSidebarPreview'
 import { sceneWorkspaceLogic } from './sceneWorkspaceLogic'
-import { frameToolScrollKey, workspaceLogic, WorkspaceUtilityPanel } from './workspaceLogic'
+import { frameToolScrollKey, isMobileWorkspaceViewport, workspaceLogic, WorkspaceUtilityPanel } from './workspaceLogic'
 import { urls } from '../../urls'
 import { frameLogic } from '../frame/frameLogic'
 import { panelsLogic } from '../frame/panels/panelsLogic'
@@ -243,6 +243,19 @@ const frameToolDefinitions: FrameToolDefinition[] = [
   },
 ]
 
+function frameToolPanelFromCurrentLocation(): WorkspaceUtilityPanel | null {
+  if (typeof window === 'undefined') {
+    return null
+  }
+  const tool = new URLSearchParams(window.location.search).get('tool')
+  if (!tool) {
+    return 'overview'
+  }
+  return frameToolDefinitions.some((definition) => definition.panel === tool)
+    ? (tool as WorkspaceUtilityPanel)
+    : 'overview'
+}
+
 const frameSettingsSections = [
   { id: 'frame-settings-info', label: 'Info' },
   { id: 'frame-settings-device', label: 'Device' },
@@ -351,9 +364,17 @@ function FrameToolRow({
   active: boolean
   frameId: number
 }): JSX.Element {
+  const { closeSecondarySidebar } = useActions(workspaceLogic)
+
   return (
     <A
       href={urls.frame(frameId, definition.panel)}
+      onClick={(event: MouseEvent<HTMLAnchorElement>) => {
+        if (active && isMobileWorkspaceViewport()) {
+          event.preventDefault()
+          closeSecondarySidebar()
+        }
+      }}
       className={clsx(
         'frameos-frame-tool-row flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
         active ? 'frameos-frame-tool-row-selected' : 'text-slate-700 hover:bg-slate-100'
@@ -1132,7 +1153,9 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
     useValues(workspaceLogic)
   const { rememberFrameToolScroll } = useActions(workspaceLogic)
   const activeTool =
-    frameToolDefinitions.find((definition) => definition.panel === utilityPanel) ?? frameToolDefinitions[0]
+    frameToolDefinitions.find(
+      (definition) => definition.panel === (frameToolPanelFromCurrentLocation() ?? utilityPanel)
+    ) ?? frameToolDefinitions[0]
   const activeToolPanel = activeTool.panel
   const activeToolScrollKey = frameToolScrollKey(frameId, activeToolPanel)
   const frameToolScrollPositionsRef = useRef(frameToolScrollPositions)

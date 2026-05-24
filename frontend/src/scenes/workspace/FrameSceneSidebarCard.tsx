@@ -21,26 +21,29 @@ export function FrameSceneSidebarCard({
   const { saveAndDeployFrame, saveFrame, showDeployPlanModal } = useActions(frameLogic({ frameId: frame.id }))
   const { closeChatDrawer } = useActions(workspaceLogic)
   const statusLabel = unsavedChanges ? 'Unsaved' : undeployedChanges ? 'Undeployed' : 'Saved'
+  const statusIsActionable = unsavedChanges || undeployedChanges
 
   return (
     <div className={clsx('grid grid-cols-3 gap-2', className)}>
-      <button
-        type="button"
-        onClick={() => {
-          closeChatDrawer()
-          showDeployPlanModal()
-        }}
-        className={clsx(
-          'rounded-lg px-3 py-2 text-xs font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-          unsavedChanges
-            ? 'frameos-warning-button'
-            : undeployedChanges
-            ? 'frameos-primary-outline-action'
-            : 'frameos-secondary-button'
-        )}
-      >
-        {statusLabel}
-      </button>
+      {statusIsActionable ? (
+        <button
+          type="button"
+          onClick={() => {
+            closeChatDrawer()
+            showDeployPlanModal()
+          }}
+          className={clsx(
+            'rounded-lg px-3 py-2 text-xs font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+            unsavedChanges ? 'frameos-warning-button' : 'frameos-primary-outline-action'
+          )}
+        >
+          {statusLabel}
+        </button>
+      ) : (
+        <span className="frameos-inset frameos-muted inline-flex items-center justify-center rounded-full border px-3 py-2 text-xs font-semibold">
+          {statusLabel}
+        </span>
+      )}
       <button
         type="button"
         onClick={() => saveFrame()}
