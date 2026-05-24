@@ -10,7 +10,7 @@ from app.models.log import new_log as log
 from app.tasks._frame_deployer import FrameDeployer
 from app.tasks.frame_deploy_workflow import FrameDeployWorkflow
 
-from .utils import find_nim_v2, get_fresh_frame
+from .utils import get_fresh_frame
 
 
 async def deploy_frame(id: int, redis: Redis) -> None:
@@ -26,13 +26,12 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int) -> None:
         raise Exception("Frame not found")
 
     try:
-        nim_path = find_nim_v2()
         with tempfile.TemporaryDirectory() as temp_dir:
             deployer = FrameDeployer(
                 db=db,
                 redis=redis,
                 frame=frame,
-                nim_path=nim_path,
+                nim_path="",
                 temp_dir=temp_dir,
             )
             workflow = FrameDeployWorkflow(

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import shlex
 import shutil
 import sys
 from importlib.machinery import SourceFileLoader
@@ -22,6 +23,75 @@ def load_cross_module():
     sys.modules[loader.name] = module
     loader.exec_module(module)
     return module
+
+
+@pytest.mark.asyncio
+async def test_generate_agent_build_dir_constructs_versioned_command(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    cross_module = load_cross_module()
+    repo_root = tmp_path / "repo"
+    agent_source_dir = repo_root / "frameos" / "agent source"
+    build_dir = tmp_path / "agent-build"
+    nimbase = tmp_path / "nimbase.h"
+    repo_root.mkdir()
+    agent_source_dir.mkdir(parents=True)
+    nimbase.write_text("// nimbase\n", encoding="utf-8")
+    (repo_root / "versions.json").write_text('{"agent":"2026.5.14"}\n', encoding="utf-8")
+
+    captured: dict[str, str] = {}
+
+    class FakeDeployer:
+        frame = SimpleNamespace(id=1)
+
+        async def arch_to_nim_cpu(self, arch):
+            assert arch == "aarch64"
+            return "arm64"
+
+    async def fake_exec_local_command(_db, _redis, _frame, command):
+        captured["command"] = command
+        (build_dir / "compile_frameos_agent.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        return 0, "", ""
+
+    monkeypatch.setattr(
+        "backend.app.utils.local_exec.exec_local_command",
+        fake_exec_local_command,
+    )
+    monkeypatch.setattr("backend.app.tasks.utils.find_nimbase_file", lambda _nim_path: str(nimbase))
+    monkeypatch.setattr(
+        "backend.app.tasks._frame_deployer.FrameDeployer._find_compile_script",
+        staticmethod(
+            lambda build_dir_arg, _name: str(Path(build_dir_arg) / "compile_frameos_agent.sh")
+        ),
+    )
+    monkeypatch.setattr(
+        "backend.app.tasks._frame_deployer.FrameDeployer._extract_compile_flags",
+        staticmethod(lambda _script_path, _output_name: ("", "")),
+    )
+    monkeypatch.setattr(
+        "backend.app.tasks._frame_deployer.FrameDeployer._write_c_makefile",
+        staticmethod(
+            lambda makefile_path, **_kwargs: Path(makefile_path).write_text(
+                "all:\n",
+                encoding="utf-8",
+            )
+        ),
+    )
+
+    await cross_module.generate_agent_build_dir(
+        deployer=FakeDeployer(),
+        agent_source_dir=agent_source_dir,
+        build_dir=build_dir,
+        arch="aarch64",
+        nim_path="/opt/nim/bin/nim",
+        repo_root=repo_root,
+    )
+
+    assert "--define:frameosAgentVersion:2026.5.14" in captured["command"]
+    assert shlex.quote(str(agent_source_dir)) in captured["command"]
+    assert (build_dir / "nimbase.h").read_text(encoding="utf-8") == "// nimbase\n"
+    assert (build_dir / "Makefile").exists()
 
 
 @pytest.mark.asyncio
@@ -108,6 +178,7 @@ async def test_build_release_target_uses_runtime_filtered_driver_catalog(
 
         def create_local_source_folder(self, temp_dir, source_root=None):
             source_dir = Path(temp_dir) / "frameos"
+            (source_dir / "agent").mkdir(parents=True)
             (source_dir / "src" / "drivers" / "waveshare").mkdir(parents=True)
             (source_dir / "src" / "drivers" / "shared").mkdir(parents=True)
             (source_dir / "src" / "drivers" / "waveshare" / "waveshare.nim").write_text(
@@ -147,20 +218,29 @@ async def test_build_release_target_uses_runtime_filtered_driver_catalog(
         async def build(self, _source_dir):
             FakeCrossCompiler.build_calls += 1
             build_dir = Path(self.kwargs["build_dir"])
-            binary_path = build_dir / "frameos"
-            binary_path.write_bytes(b"release-frameos")
-            driver_path = build_dir / "drivers" / "httpUpload" / "httpUpload.so"
-            driver_path.parent.mkdir(parents=True, exist_ok=True)
-            driver_path.write_bytes(b"driver")
+            output_name = self.kwargs.get("output_name", "frameos")
+            binary_path = build_dir / output_name
+            binary_path.write_bytes(b"release-agent" if output_name == "frameos_agent" else b"release-frameos")
+            if output_name == "frameos":
+                driver_path = build_dir / "drivers" / "httpUpload" / "httpUpload.so"
+                driver_path.parent.mkdir(parents=True, exist_ok=True)
+                driver_path.write_bytes(b"driver")
             return str(binary_path)
 
     async def fake_resolve_prebuilt_entry(**_kwargs):
         return None, None
 
+    async def fake_generate_agent_build_dir(**kwargs):
+        build_dir = Path(kwargs["build_dir"])
+        build_dir.mkdir(parents=True, exist_ok=True)
+        (build_dir / "compile_frameos_agent.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        (build_dir / "Makefile").write_text("all:\n", encoding="utf-8")
+
     monkeypatch.setattr("backend.app.tasks._frame_deployer.FrameDeployer", FakeFrameDeployer)
     monkeypatch.setattr("backend.app.tasks.utils.find_nim_v2", lambda: "/tmp/nim")
     monkeypatch.setattr("backend.app.tasks.binary_builder.resolve_prebuilt_entry", fake_resolve_prebuilt_entry)
     monkeypatch.setattr("backend.app.utils.cross_compile.CrossCompiler", FakeCrossCompiler)
+    monkeypatch.setattr(cross_module, "generate_agent_build_dir", fake_generate_agent_build_dir)
     monkeypatch.setattr(
         "app.codegen.release_drivers_nim.release_driver_specs",
         lambda: {
@@ -193,13 +273,15 @@ async def test_build_release_target_uses_runtime_filtered_driver_catalog(
         / "drivers"
         / "httpUpload.so"
     ).read_bytes() == b"driver"
+    assert (artifacts_dir / "debian-trixie-amd64" / "frameos_agent").read_bytes() == b"release-agent"
     metadata = json.loads((artifacts_dir / "debian-trixie-amd64" / "metadata.json").read_text(encoding="utf-8"))
     assert metadata["release_artifact"] is True
     assert metadata["driver_registry"] == "runtime-filtered"
     assert metadata["driver_libraries"] == ["httpUpload.so"]
+    assert metadata["agent_binary"] == "frameos_agent"
     assert metadata["input_hash"]
     assert FakeFrameDeployer.archive_calls == 1
-    assert FakeCrossCompiler.build_calls == 1
+    assert FakeCrossCompiler.build_calls == 2
 
     shutil.rmtree(artifacts_dir / "debian-trixie-amd64")
     restored_destination = await cross_module.build_release_target(
@@ -210,7 +292,7 @@ async def test_build_release_target_uses_runtime_filtered_driver_catalog(
 
     assert restored_destination.read_bytes() == b"release-frameos"
     assert FakeFrameDeployer.archive_calls == 1
-    assert FakeCrossCompiler.build_calls == 1
+    assert FakeCrossCompiler.build_calls == 2
 
 
 def test_compute_release_input_hash_tracks_source_and_target(tmp_path: Path):

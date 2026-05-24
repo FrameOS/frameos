@@ -26,7 +26,7 @@ jobs:
           python-version: '3.12'
 
       - name: Recompute component versions
-        run: python3 tools/update_versions.py --force-project docker
+        run: python3 tools/update_versions.py --force-project docker --force-project agent
 
       - name: Verify version changes
         run: |
@@ -137,9 +137,13 @@ jobs:
           TARGET_SLUG: ${{ matrix.slug }}
         run: |
           mkdir -p release-assets
-          tar -czf "release-assets/frameos-${DOCKER_VERSION}-${TARGET_SLUG}.tar.gz" \
-            -C frameos/build \
-            "prebuilt-cross/${TARGET_SLUG}"
+          archive_root="frameos-${DOCKER_VERSION}-${TARGET_SLUG}"
+          mkdir -p "release-assets/${archive_root}"
+          cp -a "frameos/build/prebuilt-cross/${TARGET_SLUG}/." "release-assets/${archive_root}/"
+          tar -czf "release-assets/${archive_root}.tar.gz" \
+            -C release-assets \
+            "${archive_root}"
+          rm -rf "release-assets/${archive_root}"
 
       - name: Upload release artifact
         uses: actions/upload-artifact@v4

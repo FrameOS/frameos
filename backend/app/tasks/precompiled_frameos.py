@@ -150,16 +150,22 @@ def precompiled_frameos_cache_path(url: str) -> Path:
     return precompiled_frameos_cache_dir() / f"{digest}-{safe_filename}"
 
 
-async def _cached_release_archive(url: str, target: str, timeout: float, logger) -> tuple[Path, bool]:
+async def _cached_release_archive(
+    url: str,
+    target: str,
+    timeout: float,
+    logger,
+    label: str = "FrameOS",
+) -> tuple[Path, bool]:
     cache_path = precompiled_frameos_cache_path(url)
     if _has_cached_archive(cache_path):
-        await logger("stdout", f"Using cached precompiled FrameOS release for {target}")
+        await logger("stdout", f"Using cached precompiled {label} release for {target}")
         return cache_path, True
 
-    await logger("stdout", f"Downloading precompiled FrameOS release for {target}")
+    await logger("stdout", f"Downloading precompiled {label} release for {target}")
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     if _has_cached_archive(cache_path):
-        await logger("stdout", f"Using cached precompiled FrameOS release for {target}")
+        await logger("stdout", f"Using cached precompiled {label} release for {target}")
         return cache_path, True
 
     temp_path: Path | None = None
@@ -206,15 +212,11 @@ def _safe_extract(tar: tarfile.TarFile, path: Path) -> None:
     tar.extractall(path=path, filter="data")
 
 
-def _find_artifact_root(extract_dir: Path, target: str) -> Path | None:
-    expected = extract_dir / "prebuilt-cross" / target
-    if (expected / "frameos").is_file():
-        return expected
-
+def _find_release_artifact_root(extract_dir: Path, target: str, binary_name: str) -> Path | None:
     candidates = []
     for metadata_path in extract_dir.rglob("metadata.json"):
         root = metadata_path.parent
-        if not (root / "frameos").is_file():
+        if not (root / binary_name).is_file():
             continue
         try:
             metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
@@ -223,9 +225,18 @@ def _find_artifact_root(extract_dir: Path, target: str) -> Path | None:
         if metadata.get("slug") == target:
             return root
         candidates.append(root)
+
+    legacy = extract_dir / "prebuilt-cross" / target
+    if (legacy / binary_name).is_file():
+        return legacy
+
     if len(candidates) == 1:
         return candidates[0]
     return None
+
+
+def _find_artifact_root(extract_dir: Path, target: str) -> Path | None:
+    return _find_release_artifact_root(extract_dir, target, "frameos")
 
 
 def _copy_required_drivers(

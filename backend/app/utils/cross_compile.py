@@ -105,6 +105,10 @@ class CrossCompiler:
         logger: LogFunc | None = None,
         build_dir: str | Path | None = None,
         build_host: BuildHostConfig | None = None,
+        output_name: str = "frameos",
+        compile_script_name: str = "compile_frameos.sh",
+        needs_quickjs: bool = True,
+        needs_lgpio: bool = True,
     ) -> None:
         self.db = db
         self.redis = redis
@@ -130,6 +134,10 @@ class CrossCompiler:
         self.build_host = build_host
         self._build_host_session: BuildHostSession | None = None
         self._remote_root: Path | None = None
+        self.output_name = output_name
+        self.compile_script_name = compile_script_name
+        self.needs_quickjs = needs_quickjs
+        self.needs_lgpio = needs_lgpio
         self._sysroot_include_dirs: set[str] = set()
         self._sysroot_lib_dirs: set[str] = set()
         self._build_lgpio_from_source = False
@@ -162,24 +170,33 @@ class CrossCompiler:
             f"{icon} Cross compiling for {self.target.arch} on {self._docker_image()} via {self._platform()}",
         )
         await self._prepare_prebuilt_components()
-        await self._ensure_quickjs_sources(source_dir)
+        if self.needs_quickjs:
+            await self._ensure_quickjs_sources(source_dir)
         build_dir = self.build_dir_override
         if build_dir:
             build_dir = Path(build_dir)
-            if not (build_dir / "compile_frameos.sh").exists():
+            if self.compile_script_name and not (build_dir / self.compile_script_name).exists():
+                if self.output_name != "frameos":
+                    raise RuntimeError(
+                        f"Provided build directory {build_dir} is missing {self.compile_script_name}"
+                    )
                 await self._log(
                     "stderr",
                     f"{icon} Provided build directory {build_dir} is missing generated sources; regenerating",
                 )
                 build_dir = await self._generate_c_sources(source_dir)
         else:
+            if self.output_name != "frameos":
+                raise RuntimeError("A generated build directory is required for non-FrameOS cross compilation")
             build_dir = await self._generate_c_sources(source_dir)
         await self._prepare_sysroot()
-        await self._ensure_lgpio_in_sysroot()
-        await self._ensure_quickjs_in_build_dir(source_dir, build_dir)
+        if self.needs_lgpio:
+            await self._ensure_lgpio_in_sysroot()
+        if self.needs_quickjs:
+            await self._ensure_quickjs_in_build_dir(source_dir, build_dir)
         binary_path = await self._run_docker_build(str(build_dir))
         if not os.path.exists(binary_path):
-            raise RuntimeError("Cross compilation completed but frameos binary is missing")
+            raise RuntimeError(f"Cross compilation completed but {self.output_name} binary is missing")
         return binary_path
 
     async def _prepare_sysroot(self) -> None:
@@ -303,7 +320,7 @@ class CrossCompiler:
         )
         if status != 0:
             raise RuntimeError(f"Cross compilation failed: {err or 'see logs'}")
-        return os.path.join(build_dir, "frameos")
+        return os.path.join(build_dir, self.output_name)
 
     async def _run_remote_docker_build(
         self, build_dir: str, script_content: str, image: str
@@ -350,8 +367,8 @@ class CrossCompiler:
         if status != 0:
             raise RuntimeError(f"Cross compilation failed: {err or 'see logs'}")
 
-        local_binary = os.path.join(build_dir, "frameos")
-        await host.download_file(f"{remote_build_dir}/frameos", local_binary)
+        local_binary = os.path.join(build_dir, self.output_name)
+        await host.download_file(f"{remote_build_dir}/{self.output_name}", local_binary)
         status, stdout, _err = await host.run(
             f"cd {shlex.quote(remote_build_dir)} && find drivers scenes -type f -name '*.so' 2>/dev/null || true",
             log_command=False,
@@ -481,7 +498,13 @@ class CrossCompiler:
                 f"{icon} Attempting to use prebuilt components for {self.prebuilt_target}",
             )
 
-        for component in ("quickjs", "lgpio"):
+        components: list[str] = []
+        if self.needs_quickjs:
+            components.append("quickjs")
+        if self.needs_lgpio:
+            components.append("lgpio")
+
+        for component in components:
             path = await self._ensure_prebuilt_component(component)
             if path:
                 self.prebuilt_components[component] = path
