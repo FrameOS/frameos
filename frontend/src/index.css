@@ -387,6 +387,15 @@ html[data-frameos-theme='dark'] .frameos-spinner,
   border-color: rgba(203, 213, 225, 0.72);
 }
 
+.frameos-add-scene-hover:hover {
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.frameos-theme-dark .frameos-add-scene-hover:hover {
+  background: rgba(52, 55, 64, 0.92);
+  border-color: var(--frameos-primary-border-strong);
+}
+
 .frameos-theme-dark .frameos-card,
 .frameos-theme-dark .frameos-inset,
 .frameos-theme-dark .frameos-form-control,
@@ -1674,41 +1683,30 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
   color: var(--tool-muted);
 }
 
-.frame-header-action-tray {
-  background: rgba(255, 255, 255, 0.72);
-  border-color: rgba(148, 163, 184, 0.38);
-  box-shadow: 0 10px 24px rgba(100, 116, 139, 0.14);
-}
-
-.frameos-theme-dark .frame-header-action-tray {
-  background: rgba(29, 31, 37, 0.78);
-  border-color: rgba(255, 255, 255, 0.12);
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
-}
-
-.frame-header-action-buttons {
-  border-color: rgba(148, 163, 184, 0.3);
-}
-
-.frameos-theme-dark .frame-header-action-buttons {
-  border-color: rgba(255, 255, 255, 0.12);
-}
-
 .frame-header-icon-button {
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgba(148, 163, 184, 0.38);
   color: #475569;
+  box-shadow: 0 8px 18px rgba(100, 116, 139, 0.14);
 }
 
 .frame-header-icon-button:hover {
-  background: rgba(255, 255, 255, 0.86);
+  background: #ffffff;
+  border-color: var(--frameos-primary-border-strong);
   color: #0f172a;
+  box-shadow: 0 10px 22px rgba(100, 116, 139, 0.2);
 }
 
 .frameos-theme-dark .frame-header-icon-button {
+  background: rgba(38, 40, 47, 0.9);
+  border-color: rgba(255, 255, 255, 0.12);
   color: #cbd5e1;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.22);
 }
 
 .frameos-theme-dark .frame-header-icon-button:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(52, 55, 64, 0.96);
+  border-color: var(--frameos-primary-border-strong);
   color: #f8fafc;
 }
 
@@ -1735,9 +1733,6 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
 
   .frame-dashboard-header .frame-header-actions {
     flex-basis: 100%;
-  }
-
-  .frame-dashboard-header .frame-header-action-tray {
     width: 100%;
   }
 

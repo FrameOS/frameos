@@ -112,7 +112,7 @@ export function HeaderMetrics({ frameId }: { frameId: number }) {
   }
 
   return (
-    <div className="frame-header-metrics flex min-w-0 flex-1 flex-nowrap items-center gap-1 overflow-x-auto overflow-y-hidden @4xl:flex-none @4xl:overflow-visible @4xl:gap-1.5">
+    <div className="frame-header-metrics flex max-w-[calc(100%-5rem)] flex-none flex-nowrap items-center gap-1 overflow-x-auto overflow-y-hidden @4xl:overflow-visible @4xl:gap-1.5">
       {metricEntries.map(([key, series]) => (
         <A
           key={key}

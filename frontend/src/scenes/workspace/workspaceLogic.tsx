@@ -489,6 +489,22 @@ function sceneTileElement(frameId: number | string, sceneId: string): HTMLElemen
   const candidates = Array.from(document.querySelectorAll<HTMLElement>('[data-workspace-scene-tile]')).filter(
     (tile) => tile.dataset.workspaceSceneTileFrame === frameIdString && tile.dataset.workspaceSceneTile === sceneId
   )
+  return visibleWorkspaceTile(candidates)
+}
+
+function addSceneTileElement(frameId: number | string): HTMLElement | null {
+  if (typeof document === 'undefined') {
+    return null
+  }
+
+  const frameIdString = String(frameId)
+  const candidates = Array.from(document.querySelectorAll<HTMLElement>('[data-workspace-add-scene-tile]')).filter(
+    (tile) => tile.dataset.workspaceAddSceneTileFrame === frameIdString
+  )
+  return visibleWorkspaceTile(candidates)
+}
+
+function visibleWorkspaceTile(candidates: HTMLElement[]): HTMLElement | null {
   if (candidates.length === 0) {
     return null
   }
@@ -599,8 +615,17 @@ function preserveFramesScrollAfterLayoutChange(cache: Record<string, any>): void
 }
 
 function scrollSceneTileIntoView(frameId: number, sceneId: string): boolean {
-  const main = framesMainElement()
   const tile = sceneTileElement(frameId, sceneId)
+  return scrollWorkspaceTileIntoView(tile)
+}
+
+function scrollAddSceneTileIntoView(frameId: number): boolean {
+  const tile = addSceneTileElement(frameId)
+  return scrollWorkspaceTileIntoView(tile)
+}
+
+function scrollWorkspaceTileIntoView(tile: HTMLElement | null): boolean {
+  const main = framesMainElement()
   if (!tile) {
     return false
   }
@@ -625,7 +650,15 @@ function scrollSceneTileIntoView(frameId: number, sceneId: string): boolean {
   return true
 }
 
+function ensureAddSceneTileVisibleAfterLayoutChange(frameId: number, cache: Record<string, any>): void {
+  ensureWorkspaceTileVisibleAfterLayoutChange(() => scrollAddSceneTileIntoView(frameId), cache)
+}
+
 function ensureSceneTileVisibleAfterLayoutChange(frameId: number, sceneId: string, cache: Record<string, any>): void {
+  ensureWorkspaceTileVisibleAfterLayoutChange(() => scrollSceneTileIntoView(frameId, sceneId), cache)
+}
+
+function ensureWorkspaceTileVisibleAfterLayoutChange(didScroll: () => boolean, cache: Record<string, any>): void {
   if (typeof window === 'undefined') {
     return
   }
@@ -644,10 +677,10 @@ function ensureSceneTileVisibleAfterLayoutChange(frameId: number, sceneId: strin
   const scheduleScroll = (attempt = 0) => {
     cache.sceneTileScrollFrame = window.requestAnimationFrame(() => {
       cache.sceneTileScrollNestedFrame = window.requestAnimationFrame(() => {
-        const didScroll = scrollSceneTileIntoView(frameId, sceneId)
+        const scrolled = didScroll()
         cache.sceneTileScrollFrame = null
         cache.sceneTileScrollNestedFrame = null
-        if (!didScroll && attempt < 20) {
+        if (!scrolled && attempt < 20) {
           cache.sceneTileScrollRetryTimer = window.setTimeout(() => scheduleScroll(attempt + 1), 50)
         }
       })
@@ -1046,7 +1079,10 @@ export const workspaceLogic = kea<workspaceLogicType>([
         ensureSceneTileVisibleAfterLayoutChange(frameId, sceneId, cache)
       },
       closeSceneControl: preserveFramesScroll,
-      openTemplateDrawer: hideNewFrameFormAndPreserveScroll,
+      openTemplateDrawer: ({ frameId }) => {
+        hideNewFrameFormAndPreserveScroll()
+        ensureAddSceneTileVisibleAfterLayoutChange(frameId, cache)
+      },
       closeTemplateDrawer: preserveFramesScroll,
       openScheduleDrawer: hideNewFrameFormAndPreserveScroll,
       closeScheduleDrawer: preserveFramesScroll,

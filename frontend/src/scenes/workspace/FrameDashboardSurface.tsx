@@ -238,57 +238,55 @@ function FrameHeaderActions({ frame, archived }: { frame: FrameType; archived?: 
   const frameName = frame.name || frameHost(frame)
 
   return (
-    <div className="frame-header-actions flex min-w-0 flex-1 justify-end">
-      <div className="frame-header-action-tray flex min-w-0 max-w-full items-center gap-1 rounded-xl border p-1 shadow-sm backdrop-blur-xl">
-        <HeaderMetrics frameId={frame.id} />
-        <div className="frame-header-action-buttons flex shrink-0 items-center gap-1 border-l pl-1">
-          <button
-            type="button"
-            title="Open AI chat"
-            onClick={() => openChatDrawer(frame.id, null)}
-            className="frame-header-icon-button flex h-9 w-9 shrink-0 items-center justify-center rounded-lg !px-0 !py-0 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-          >
-            <SparklesIcon className="h-5 w-5" />
-          </button>
-          <DropdownMenu
-            buttonColor="none"
-            horizontal
-            className="frame-header-icon-button flex h-9 w-9 shrink-0 items-center justify-center rounded-lg !px-0 !py-0 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-            items={[
-              {
-                label: 'Rename',
-                title: 'Rename frame',
-                onClick: () => openRenameFrameDialog(frame.id, frameName),
-                icon: <PencilSquareIcon className="h-5 w-5" />,
-              },
-              {
-                label: 'Render now',
-                title: 'Render frame now',
-                onClick: () => renderFrame(frame.id),
-                icon: <PlayIcon className="h-5 w-5" />,
-              },
-              {
-                label: 'Deploy',
-                title: 'Deploy frame',
-                onClick: () => deployFrame(frame.id),
-                icon: <RocketLaunchIcon className="h-5 w-5" />,
-              },
-              {
-                label: archived ? 'Restore' : 'Archive',
-                title: archived ? 'Restore frame' : 'Archive frame',
-                onClick: () => setFrameArchived(frame.id, !archived),
-                icon: archived ? <ArrowUturnLeftIcon className="h-5 w-5" /> : <ArchiveBoxIcon className="h-5 w-5" />,
-              },
-              {
-                label: 'Delete',
-                title: 'Delete frame',
-                confirm: `Delete "${frameName}"? This cannot be undone.`,
-                onClick: () => deleteFrame(frame.id),
-                icon: <TrashIcon className="h-5 w-5" />,
-              },
-            ]}
-          />
-        </div>
+    <div className="frame-header-actions flex min-w-0 flex-1 items-center justify-end gap-1">
+      <HeaderMetrics frameId={frame.id} />
+      <div className="frame-header-action-buttons flex shrink-0 items-center gap-1">
+        <button
+          type="button"
+          title="Open AI chat"
+          onClick={() => openChatDrawer(frame.id, null)}
+          className="frame-header-icon-button flex h-9 w-9 shrink-0 items-center justify-center rounded-lg !px-0 !py-0 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+        >
+          <SparklesIcon className="h-5 w-5" />
+        </button>
+        <DropdownMenu
+          buttonColor="none"
+          horizontal
+          className="frame-header-icon-button flex h-9 w-9 shrink-0 items-center justify-center rounded-lg !px-0 !py-0 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          items={[
+            {
+              label: 'Rename',
+              title: 'Rename frame',
+              onClick: () => openRenameFrameDialog(frame.id, frameName),
+              icon: <PencilSquareIcon className="h-5 w-5" />,
+            },
+            {
+              label: 'Render now',
+              title: 'Render frame now',
+              onClick: () => renderFrame(frame.id),
+              icon: <PlayIcon className="h-5 w-5" />,
+            },
+            {
+              label: 'Deploy',
+              title: 'Deploy frame',
+              onClick: () => deployFrame(frame.id),
+              icon: <RocketLaunchIcon className="h-5 w-5" />,
+            },
+            {
+              label: archived ? 'Restore' : 'Archive',
+              title: archived ? 'Restore frame' : 'Archive frame',
+              onClick: () => setFrameArchived(frame.id, !archived),
+              icon: archived ? <ArrowUturnLeftIcon className="h-5 w-5" /> : <ArchiveBoxIcon className="h-5 w-5" />,
+            },
+            {
+              label: 'Delete',
+              title: 'Delete frame',
+              confirm: `Delete "${frameName}"? This cannot be undone.`,
+              onClick: () => deleteFrame(frame.id),
+              icon: <TrashIcon className="h-5 w-5" />,
+            },
+          ]}
+        />
       </div>
     </div>
   )
@@ -468,13 +466,15 @@ export function FrameAddSceneTile({ frame, compact = false }: { frame: FrameType
   return (
     <button
       type="button"
+      data-workspace-add-scene-tile={frame.id}
+      data-workspace-add-scene-tile-frame={frame.id}
       onClick={() => {
         hideForm()
         closeSceneControl()
         openTemplateDrawer(frame.id)
       }}
       className={clsx(
-        'frameos-primary-hover-text frameos-card group flex shrink-0 flex-col items-center justify-center gap-3 rounded-lg border border-dashed bg-white/55 text-center text-slate-500 shadow-sm transition hover:-translate-y-0.5 hover:bg-white/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+        'frameos-primary-hover-text frameos-add-scene-hover frameos-card group flex shrink-0 flex-col items-center justify-center gap-3 rounded-lg border border-dashed bg-white/55 text-center text-slate-500 shadow-sm transition hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
         'frameos-add-scene-tile',
         active ? activeSurfaceClassName : 'border-slate-300 hover:shadow-lg hover:shadow-slate-300/35',
         compact ? 'h-36 w-36' : 'min-h-36 w-full max-w-40 min-w-0'

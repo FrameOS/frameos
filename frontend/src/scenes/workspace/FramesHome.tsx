@@ -332,13 +332,15 @@ export function AddSceneTile({ frame, compact = false }: { frame: FrameType; com
   return (
     <button
       type="button"
+      data-workspace-add-scene-tile={frame.id}
+      data-workspace-add-scene-tile-frame={frame.id}
       onClick={() => {
         hideForm()
         closeSceneControl()
         openTemplateDrawer(frame.id)
       }}
       className={clsx(
-        'frameos-primary-hover-text frameos-card group flex shrink-0 flex-col items-center justify-center gap-3 rounded-2xl border border-dashed bg-white/55 text-center text-slate-500 shadow-sm transition hover:-translate-y-0.5 hover:bg-white/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+        'frameos-primary-hover-text frameos-add-scene-hover frameos-card group flex shrink-0 flex-col items-center justify-center gap-3 rounded-2xl border border-dashed bg-white/55 text-center text-slate-500 shadow-sm transition hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
         'frameos-add-scene-tile',
         active ? activeSurfaceClassName : 'border-slate-300 hover:shadow-lg hover:shadow-slate-300/35',
         compact ? 'h-36 w-36' : 'min-h-36 w-full max-w-40 min-w-0'
