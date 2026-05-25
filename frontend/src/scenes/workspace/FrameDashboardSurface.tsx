@@ -634,7 +634,7 @@ export function FrameDashboardSurface({
       className={clsx('group @container scroll-mt-6', archived && 'opacity-80')}
     >
       <RenameFrameModal frame={frame} />
-      <RenameSceneModal frameId={frame.id} />
+      {showSceneMenus ? <RenameSceneModal frameId={frame.id} /> : null}
       <FrameDashboardHeader frame={frame} archived={archived} />
       <div className="grid gap-5 @2xl:grid-cols-[minmax(0,19rem)_minmax(19rem,1fr)] @2xl:items-start">
         <FramePreviewPanel frame={frame} scenes={scenes} />

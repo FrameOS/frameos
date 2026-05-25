@@ -161,7 +161,9 @@ export const controlLogic = kea<controlLogicType>([
       if (stateRecord?.cache?.refreshing && !stateRecord.cache.cached) {
         const retryAfterSeconds = Math.max(1, Number(stateRecord.cache.retry_after) || 5)
         await breakpoint(retryAfterSeconds * 1000)
-        actions.sync()
+        if (!values.stateRecordLoading) {
+          actions.sync()
+        }
       }
     },
     [socketLogic.actionTypes.newLog]: ({ log }) => {
@@ -170,7 +172,9 @@ export const controlLogic = kea<controlLogicType>([
         if (event === 'render:sceneChange') {
           if (sceneId !== values.sceneId) {
             actions.currentSceneChanged(sceneId)
-            actions.sync()
+            if (!values.stateRecordLoading) {
+              actions.sync()
+            }
           } else {
             actions.currentSceneChanged(sceneId)
           }
@@ -179,7 +183,9 @@ export const controlLogic = kea<controlLogicType>([
           event === 'event:setCurrentScene' ||
           event === 'event:uploadScenes'
         ) {
-          actions.sync()
+          if (!values.stateRecordLoading) {
+            actions.sync()
+          }
         }
       } catch (error) {}
     },
