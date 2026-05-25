@@ -158,7 +158,7 @@ export const controlLogic = kea<controlLogicType>([
       if (stateRecord?.sceneId?.startsWith(UPLOADED_SCENE_PREFIX)) {
         actions.loadUploadedScenes()
       }
-      if (stateRecord?.cache?.refreshing) {
+      if (stateRecord?.cache?.refreshing && !stateRecord.cache.cached) {
         const retryAfterSeconds = Math.max(1, Number(stateRecord.cache.retry_after) || 5)
         await breakpoint(retryAfterSeconds * 1000)
         actions.sync()

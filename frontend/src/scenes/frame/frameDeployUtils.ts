@@ -106,16 +106,6 @@ function previousFrameosVersion(plan?: DeployPlanResponse | null): string {
   return plan?.previous_frameos_version ? String(plan.previous_frameos_version).split('+')[0] : 'Not deployed'
 }
 
-function usesPrecompiledFrameosArtifacts(plan: DeployPlanResponse): boolean {
-  const binaryPlan = plan.full_deploy?.binary
-
-  return (
-    binaryPlan?.requested_compilation_mode === 'precompiled' ||
-    binaryPlan?.compilation_mode === 'precompiled' ||
-    binaryPlan?.will_attempt_precompiled === true
-  )
-}
-
 export function buildDeployPlanRequestBody(
   frame: Partial<FrameType>,
   frameKeys: readonly (keyof FrameType)[]
@@ -281,22 +271,12 @@ export function buildDeployRecommendation(
   }
 
   if (versionChanged) {
-    if (usesPrecompiledFrameosArtifacts(plan)) {
-      return {
-        mode: 'full',
-        title: 'Suggested: full deploy',
-        description: `This frame is configured to use precompiled FrameOS binaries and assets, so updating FrameOS from ${
-          previousVersion ?? 'unknown'
-        } to ${CURRENT_FRAMEOS_VERSION} requires a full deploy.`,
-      }
-    }
-
     return {
-      mode: 'fast',
-      title: 'Suggested: fast deploy',
-      description: `Fast deploy is enough to push the latest frame config and interpreted scenes. Use full deploy only if you also want to update the FrameOS runtime from ${
+      mode: 'full',
+      title: 'Suggested: full deploy',
+      description: `Updating FrameOS from ${
         previousVersion ?? 'unknown'
-      } to ${CURRENT_FRAMEOS_VERSION}.`,
+      } to ${CURRENT_FRAMEOS_VERSION} requires a full deploy.`,
     }
   }
 

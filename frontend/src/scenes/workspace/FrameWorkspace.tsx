@@ -21,6 +21,7 @@ import { framesModel } from '../../models/framesModel'
 import { FrameosShell } from './FrameosShell'
 import { AddSceneTile, SceneControlPanel, TemplateDrawer } from './FramesHome'
 import { FrameDashboardSurface } from './FrameDashboardSurface'
+import { FrameDashboardLoadingSkeleton } from './FrameDashboardLoadingSkeleton'
 import { FrameDeployPlanDrawer } from './FrameDeployPlanDrawer'
 import { FrameUnsavedChangesDrawer } from './FrameUnsavedChangesDrawer'
 import { FrameSceneSidebarCard } from './FrameSceneSidebarCard'
@@ -453,6 +454,76 @@ function FrameTree({
       </div>
     </div>
   )
+}
+
+function FrameWorkspaceLoadingTree(): JSX.Element {
+  return (
+    <div className="@container space-y-4">
+      <div className="grid gap-2 @xs:grid-cols-[6.5rem_minmax(0,1fr)] @xs:items-stretch">
+        <div className="frameos-skeleton-surface order-3 min-h-[6.75rem] rounded-xl @xs:order-1">
+          <div className="frameos-skeleton-media h-full min-h-[6.75rem] animate-pulse rounded-xl" />
+        </div>
+        <div className="order-1 min-w-0 space-y-2 @xs:order-2">
+          <div>
+            <div className="frameos-skeleton-line mb-2 h-3 w-14 animate-pulse rounded-full" />
+            <div className="frameos-skeleton-line h-10 w-full animate-pulse rounded-xl" />
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            {[0, 1, 2].map((index) => (
+              <div key={index} className="frameos-skeleton-line h-9 animate-pulse rounded-lg" />
+            ))}
+          </div>
+        </div>
+      </div>
+      <div>
+        <div className="frameos-skeleton-line mb-2 h-3 w-24 animate-pulse rounded-full" />
+        <div className="space-y-1">
+          {[0, 1, 2, 3, 4, 5].map((index) => (
+            <div key={index} className="flex items-center gap-3 rounded-xl px-3 py-2.5">
+              <div className="frameos-skeleton-media h-9 w-9 shrink-0 animate-pulse rounded-xl" />
+              <div className="min-w-0 flex-1 space-y-2">
+                <div className="frameos-skeleton-line h-3 w-24 animate-pulse rounded-full" />
+                <div className="frameos-skeleton-line h-2 w-32 max-w-full animate-pulse rounded-full opacity-70" />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function FrameLogsLoadingSkeleton(): JSX.Element {
+  return (
+    <div className="flex h-full min-h-[32rem] flex-col">
+      <div className="logs-filter-toolbar logs-filter-toolbar-floating z-20 mb-4 flex items-center gap-2">
+        <div className="frameos-skeleton-line h-10 w-64 max-w-full animate-pulse rounded-lg" />
+        <div className="frameos-skeleton-line h-10 w-10 animate-pulse rounded-lg" />
+      </div>
+      <div className="frameos-skeleton-surface min-h-0 flex-1 rounded-2xl p-4">
+        <div className="space-y-3 pt-10">
+          {[0, 1, 2, 3, 4, 5, 6, 7, 8].map((index) => (
+            <div key={index} className="grid grid-cols-[7rem_minmax(0,1fr)] gap-3">
+              <div className="frameos-skeleton-line h-3 animate-pulse rounded-full opacity-70" />
+              <div
+                className={clsx(
+                  'frameos-skeleton-line h-3 animate-pulse rounded-full',
+                  index % 3 === 0 ? 'w-4/5' : index % 3 === 1 ? 'w-2/3' : 'w-full'
+                )}
+              />
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function FrameToolLoadingSkeleton({ activeTool }: { activeTool: WorkspaceUtilityPanel }): JSX.Element {
+  if (activeTool === 'logs') {
+    return <FrameLogsLoadingSkeleton />
+  }
+  return <FrameDashboardLoadingSkeleton />
 }
 
 function sceneIsActive(scene: FrameScene, currentSceneId: string | null | undefined): boolean {
@@ -1242,8 +1313,27 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
 
   if (!frame) {
     return (
-      <FrameosShell mode="frame" title="Frame" tree={<div className="px-3 py-2 text-slate-400">Loading...</div>}>
-        <div className="flex h-[60vh] items-center justify-center text-slate-500">Loading frame...</div>
+      <FrameosShell
+        mode="frame"
+        title="Frame"
+        tree={<FrameWorkspaceLoadingTree />}
+        topBar={null}
+        showAiButton={false}
+        mainClassName={clsx(
+          toolUsesPageScroll ? 'min-h-screen overflow-visible' : 'h-screen overflow-hidden',
+          'frame-workspace-main py-6 pr-8 max-lg:h-auto max-lg:overflow-visible max-lg:px-4 max-lg:pb-6'
+        )}
+      >
+        <div className={toolUsesPageScroll ? undefined : 'h-full'}>
+          <div
+            className={clsx(
+              toolUsesPageScroll ? 'min-h-[32rem]' : ['h-[calc(100vh-3rem)]', 'max-lg:h-auto'],
+              toolUsesPageScroll ? 'overflow-visible' : 'overflow-hidden'
+            )}
+          >
+            <FrameToolLoadingSkeleton activeTool={activeToolPanel} />
+          </div>
+        </div>
       </FrameosShell>
     )
   }
@@ -1313,7 +1403,7 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
 export function FrameWorkspace({ id }: FrameWorkspaceProps): JSX.Element {
   useMountedLogic(sceneWorkspaceLogic({ routeFrameId: id ?? null, routeSceneId: null }))
   const { selectedFrame } = useValues(workspaceLogic)
-  const { activeFramesList, framesList } = useValues(framesModel)
+  const { activeFramesList, framesList, framesLoading } = useValues(framesModel)
   const routeFrameId = parseFrameId(id)
   const firstFrame =
     (routeFrameId ? framesList.find((frame) => frame.id === routeFrameId) : null) ??
@@ -1321,6 +1411,38 @@ export function FrameWorkspace({ id }: FrameWorkspaceProps): JSX.Element {
     activeFramesList[0] ??
     framesList[0] ??
     null
+
+  if (!firstFrame && framesLoading) {
+    const loadingTool = frameToolPanelFromCurrentLocation() ?? 'overview'
+    const loadingToolUsesPageScroll = frameToolUsesPageScroll(loadingTool)
+
+    return (
+      <FrameosShell
+        mode="frame"
+        title="Frame"
+        tree={<FrameWorkspaceLoadingTree />}
+        topBar={null}
+        showAiButton={false}
+        mainClassName={clsx(
+          loadingToolUsesPageScroll ? 'min-h-screen overflow-visible' : 'h-screen overflow-hidden',
+          'frame-workspace-main py-6 pr-8 max-lg:h-auto max-lg:overflow-visible max-lg:px-4 max-lg:pb-6'
+        )}
+      >
+        <div className={loadingToolUsesPageScroll ? undefined : 'h-full'}>
+          <div
+            className={clsx(
+              loadingToolUsesPageScroll
+                ? 'min-h-[32rem]'
+                : ['h-[calc(100vh-3rem)]', 'max-lg:h-auto'],
+              loadingToolUsesPageScroll ? 'overflow-visible' : 'overflow-hidden'
+            )}
+          >
+            <FrameToolLoadingSkeleton activeTool={loadingTool} />
+          </div>
+        </div>
+      </FrameosShell>
+    )
+  }
 
   if (!firstFrame) {
     return (

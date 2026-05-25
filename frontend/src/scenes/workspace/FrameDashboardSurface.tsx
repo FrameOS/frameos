@@ -30,7 +30,6 @@ import { urls } from '../../urls'
 import type { FrameScene, FrameType, ScheduledEvent } from '../../types'
 import { frameLogic } from '../frame/frameLogic'
 import { HeaderMetrics } from '../frame/panels/Metrics/HeaderMetrics'
-import { controlLogic } from '../frame/panels/Scenes/controlLogic'
 import { RenameSceneModal } from '../frame/panels/Scenes/RenameSceneModal'
 import { SceneDropDown } from '../frame/panels/Scenes/SceneDropDown'
 import { templatesLogic } from '../frame/panels/Templates/templatesLogic'
@@ -184,8 +183,7 @@ function scheduleDatePrefix(date: Date, now = new Date()): string {
 
 function FramePreviewPanel({ frame, scenes }: { frame: FrameType; scenes: FrameScene[] }): JSX.Element {
   const previewSizing = framePreviewSizing(frame)
-  const { sceneId: currentSceneId } = useValues(controlLogic({ frameId: frame.id }))
-  const activeScene = scenes.find((scene) => sceneIsActive(scene, currentSceneId))
+  const activeScene = scenes.find((scene) => sceneIsActive(scene, frame.active_scene_id))
   const nextSchedule = nextScheduledEvent(frame.schedule)
   const scheduledScene = nextSchedule ? scenes.find((scene) => scene.id === nextSchedule.event.payload.sceneId) : null
 
@@ -239,7 +237,7 @@ function FrameHeaderActions({ frame, archived }: { frame: FrameType; archived?: 
   const frameName = frame.name || frameHost(frame)
 
   return (
-    <div className="frame-header-actions flex min-w-0 flex-1 items-center justify-end gap-1">
+    <div className="frame-header-actions flex min-w-0 shrink-0 items-center justify-start gap-1">
       <HeaderMetrics frameId={frame.id} />
       <div className="frame-header-action-buttons flex shrink-0 items-center gap-1">
         <button
@@ -315,7 +313,7 @@ function FrameDashboardHeader({ frame, archived }: { frame: FrameType; archived?
             <div className="flex min-w-0 items-center gap-2">
               <h2
                 data-workspace-frame-title={frame.id}
-                className="frameos-strong truncate text-xl font-bold tracking-normal text-slate-950 @4xl:text-2xl"
+                className="frameos-strong truncate text-2xl font-bold tracking-normal text-slate-950"
               >
                 {frame.name || frameHost(frame)}
               </h2>
@@ -330,7 +328,7 @@ function FrameDashboardHeader({ frame, archived }: { frame: FrameType; archived?
               ) : null}
             </div>
           </A>
-          <div className="frameos-muted truncate text-xs text-slate-500 @4xl:text-sm">{frameStatus(frame)}</div>
+          <div className="frameos-muted truncate text-sm text-slate-500">{frameStatus(frame)}</div>
         </div>
       </div>
       <FrameHeaderActions frame={frame} archived={archived} />
@@ -512,7 +510,6 @@ function FrameScenesBlock({
   const { openSceneControl } = useActions(workspaceLogic)
   const { applyTemplateAndSave } = useActions(frameLogic({ frameId: frame.id }))
   const { applyRemoteToFrame } = useActions(templatesLogic({ frameId: frame.id }))
-  const { sceneId: currentSceneId } = useValues(controlLogic({ frameId: frame.id }))
 
   const handleScenesDragOver = (event: DragEvent<HTMLDivElement>) => {
     if (!hasFrameosSceneListDragData(event.dataTransfer)) {
@@ -561,7 +558,7 @@ function FrameScenesBlock({
       {scenes.length > 0 ? (
         <div className="flex flex-wrap gap-4">
           {scenes.map((scene) => {
-            const active = sceneIsActive(scene, currentSceneId)
+            const active = sceneIsActive(scene, frame.active_scene_id)
             const selected = sceneControlSelection?.frameId === frame.id && sceneControlSelection.sceneId === scene.id
             return (
               <FrameSceneTile

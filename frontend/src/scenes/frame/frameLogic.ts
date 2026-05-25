@@ -772,7 +772,7 @@ export const frameLogic = kea<frameLogicType>([
     hideDeployPlanModal: true,
     showUnsavedChangesModal: true,
     hideUnsavedChangesModal: true,
-    loadDeployPlans: true,
+    loadDeployPlans: () => ({ startedAt: new Date().toISOString() }),
     loadDeployPlansSuccess: (plan: DeployPlanResponse | null) => ({ plan }),
     loadDeployPlansFailure: (error: string) => ({ error }),
   }),
@@ -841,6 +841,12 @@ export const frameLogic = kea<frameLogicType>([
         loadDeployPlans: () => true,
         loadDeployPlansSuccess: () => false,
         loadDeployPlansFailure: () => false,
+      },
+    ],
+    deployPlansLoadingStartedAt: [
+      null as string | null,
+      {
+        loadDeployPlans: (_, { startedAt }) => startedAt,
       },
     ],
     deployPlansError: [

@@ -60,6 +60,7 @@ export interface FrameType {
   upload_fonts?: string
   last_successful_deploy?: Record<string, any>
   last_successful_deploy_at?: string
+  active_scene_id?: string
   reboot?: {
     enabled?: 'true' | 'false'
     crontab?: string

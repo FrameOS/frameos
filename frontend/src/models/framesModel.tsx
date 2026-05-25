@@ -34,6 +34,19 @@ function sortFrames(frames: FrameType[]): FrameType[] {
   )
 }
 
+function activeSceneIdFromLogLine(line: string): string | null {
+  try {
+    const payload = JSON.parse(line)
+    if (
+      ['render:sceneChange', 'event:setCurrentScene', 'event:uploadScenes'].includes(payload?.event) &&
+      typeof payload.sceneId === 'string'
+    ) {
+      return payload.sceneId
+    }
+  } catch (error) {}
+  return null
+}
+
 export const framesModel = kea<framesModelType>([
   connect(() => ({ logic: [socketLogic, entityImagesModel] })),
   path(['src', 'models', 'framesModel']),
@@ -148,22 +161,24 @@ export const framesModel = kea<framesModelType>([
           if (!frame) {
             return state
           }
-          if (!logUpdatesFrameActivity(log)) {
+          const activeSceneId = activeSceneIdFromLogLine(log.line)
+          if (!logUpdatesFrameActivity(log) && !activeSceneId) {
             return state
           }
           const currentLastLogAt = frame.last_log_at ? Date.parse(frame.last_log_at) : NaN
           const nextLastLogAt = Date.parse(log.timestamp)
-          if (
-            !Number.isFinite(nextLastLogAt) ||
-            (Number.isFinite(currentLastLogAt) && currentLastLogAt >= nextLastLogAt)
-          ) {
+          const shouldUpdateLastLogAt =
+            Number.isFinite(nextLastLogAt) &&
+            (!Number.isFinite(currentLastLogAt) || currentLastLogAt < nextLastLogAt)
+          if (!shouldUpdateLastLogAt && !activeSceneId) {
             return state
           }
           return {
             ...state,
             [log.frame_id]: {
               ...frame,
-              last_log_at: log.timestamp,
+              ...(shouldUpdateLastLogAt ? { last_log_at: log.timestamp } : {}),
+              ...(activeSceneId ? { active_scene_id: activeSceneId } : {}),
             },
           }
         },

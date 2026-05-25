@@ -75,6 +75,7 @@ class FrameBase(BaseModel):
     last_successful_deploy: Optional[Dict[str, Any]]
     last_successful_deploy_at: Optional[datetime]
     active_connections: Optional[int] = None
+    active_scene_id: Optional[str] = None
 
 class FrameResponse(BaseModel):
     frame: FrameBase

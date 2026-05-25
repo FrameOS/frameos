@@ -35,7 +35,7 @@ export function FrameChangeStatusIcon({
   const StatusIcon = unsavedChanges ? CloudArrowUpIcon : DeployToFrameIcon
   const isDashboard = variant === 'dashboard'
   const wrapperClassName = isDashboard
-    ? 'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition @4xl:h-12 @4xl:w-12 @4xl:rounded-2xl'
+    ? 'flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl transition'
     : 'flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition'
   const idleClassName = isDashboard
     ? 'frameos-icon-tile bg-white/70 text-slate-700 shadow-sm'

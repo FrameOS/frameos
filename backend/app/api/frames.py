@@ -826,6 +826,7 @@ async def api_frames_list(
         "frames": [
             {
                 **_frame_to_response_dict(f, latest_logs.get(f.id)),
+                "active_scene_id": await _active_scene_id_from_cache(redis, f.id),
                 "active_connections": await number_of_connections_for_frame(
                     redis, f.id
                 ),
@@ -1422,6 +1423,7 @@ async def api_frame_get(
     data = _frame_to_response_dict(frame, latest_log_at)
     active = await redis.get(f"frame:{frame.id}:active_connections")
     data["active_connections"] = int(active or 0)
+    data["active_scene_id"] = await _active_scene_id_from_cache(redis, frame.id)
     return {"frame": data}
 
 
