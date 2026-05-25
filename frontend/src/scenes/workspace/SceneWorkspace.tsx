@@ -81,17 +81,6 @@ function sceneUtilityDefinition(
   return sceneUtilityDefinitions(scene).find((definition) => definition.panel === panel) ?? null
 }
 
-function selectedSceneFirst(scenes: FrameScene[], selectedSceneId: string | null): FrameScene[] {
-  if (!selectedSceneId) {
-    return scenes
-  }
-  const selectedScene = scenes.find((scene) => scene.id === selectedSceneId)
-  if (!selectedScene) {
-    return scenes
-  }
-  return [selectedScene, ...scenes.filter((scene) => scene.id !== selectedSceneId)]
-}
-
 function nodeLabel(nodeData: NodeData | undefined, fallback: string): string {
   if (!nodeData) {
     return fallback
@@ -677,7 +666,6 @@ function SceneWorkspaceFrame({ frameId }: SceneWorkspaceFrameProps): JSX.Element
   const resolvedSceneId =
     selectedSceneId && scenes.some((scene) => scene.id === selectedSceneId) ? selectedSceneId : scenes[0]?.id ?? null
   const selectedScene = scenes.find((scene) => scene.id === resolvedSceneId) ?? null
-  const sidebarScenes = selectedSceneFirst(scenes, resolvedSceneId)
   const activeUtilityDefinition = sceneUtilityDefinition(utilityPanel, selectedScene)
 
   return (
@@ -690,7 +678,7 @@ function SceneWorkspaceFrame({ frameId }: SceneWorkspaceFrameProps): JSX.Element
             <SceneTree
               frame={frame}
               frames={framesList}
-              scenes={sidebarScenes}
+              scenes={scenes}
               selectedSceneId={resolvedSceneId}
               unsavedChanges={unsavedChanges}
               undeployedChanges={undeployedChanges}
