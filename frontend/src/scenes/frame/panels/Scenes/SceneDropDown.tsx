@@ -12,13 +12,10 @@ import {
   EyeIcon,
   FolderPlusIcon,
   TagIcon,
-  ArrowsPointingInIcon,
-  ArrowsPointingOutIcon,
 } from '@heroicons/react/24/outline'
 import { templatesLogic } from '../Templates/templatesLogic'
 import { controlLogic } from './controlLogic'
 import { findConnectedScenes } from './utils'
-import { Panel } from '../../../../types'
 
 interface SceneDropDownProps {
   sceneId: string
@@ -34,15 +31,13 @@ function isNotNull<T>(value: T | null): value is T {
 
 export function SceneDropDown({ sceneId, context, className, horizontal, buttonColor }: SceneDropDownProps) {
   const { frameId } = useValues(frameLogic)
-  const { editScene, editSceneJSON, toggleFullScreenPanel } = useActions(panelsLogic)
-  const { fullScreenPanel } = useValues(panelsLogic)
+  const { editScene, editSceneJSON } = useActions(panelsLogic)
   const { sceneId: currentSceneId } = useValues(controlLogic({ frameId }))
   const { scenes, undeployedSceneIds, unsavedSceneIds, previewingSceneId } = useValues(scenesLogic({ frameId }))
   const { renameScene, duplicateScene, deleteScene, setAsDefault, removeDefault, copySceneJSON, previewScene } =
     useActions(scenesLogic({ frameId }))
   const { saveAsTemplate, saveAsZip } = useActions(templatesLogic({ frameId }))
   const { setCurrentScene } = useActions(controlLogic({ frameId }))
-  const isFullScreen = fullScreenPanel?.panel === Panel.Diagram && fullScreenPanel?.key === sceneId
   const scene = scenes.find((s) => s.id === sceneId)
   if (!scene) {
     return null
@@ -55,17 +50,6 @@ export function SceneDropDown({ sceneId, context, className, horizontal, buttonC
       className={className}
       horizontal={horizontal}
       items={[
-        context === 'editDiagram'
-          ? {
-              label: isFullScreen ? 'Collapse panel' : 'Expand panel',
-              onClick: () => toggleFullScreenPanel({ panel: Panel.Diagram, key: scene.id }),
-              icon: isFullScreen ? (
-                <ArrowsPointingInIcon className="w-5 h-5" />
-              ) : (
-                <ArrowsPointingOutIcon className="w-5 h-5" />
-              ),
-            }
-          : null,
         {
           label: 'Activate',
           onClick: () => setCurrentScene(scene.id),

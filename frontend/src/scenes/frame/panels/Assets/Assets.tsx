@@ -52,8 +52,8 @@ const isInThumbsFolder = (path: string): boolean => {
   )
 }
 const playSceneButtonClassName =
-  'frameos-primary-outline-action shrink-0 rounded-lg border p-1.5 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400'
-const assetRowActionsClassName = 'ml-auto flex w-[5.25rem] shrink-0 items-center justify-end gap-2'
+  'asset-play-button frameos-primary-outline-action shrink-0 rounded-lg border p-1.5 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400'
+const assetRowActionsClassName = 'asset-row-actions ml-auto flex w-[5.25rem] shrink-0 items-center justify-end gap-2'
 
 interface AssetStats {
   files: number
@@ -222,7 +222,7 @@ function TreeNode({
       <div className="ml-1">
         <div
           className={clsx(
-            'frame-tool-row mb-1 flex items-center gap-2 rounded-xl px-3 py-2 transition',
+            'asset-tree-row frame-tool-row mb-1 flex items-center gap-2 rounded-xl px-3 py-2 transition',
             isDragOver && 'frameos-primary-drop-target'
           )}
           onDragOver={onDragOver}
@@ -235,12 +235,14 @@ function TreeNode({
             onClick={() => setFrameAssetFolderExpanded(frameId, node.path, !expanded)}
           >
             {expanded ? (
-              <FolderOpenIcon className="frameos-folder-icon h-5 w-5 shrink-0" />
+              <FolderOpenIcon className="asset-row-icon frameos-folder-icon h-5 w-5 shrink-0" />
             ) : (
-              <FolderIcon className="frameos-folder-icon h-5 w-5 shrink-0" />
+              <FolderIcon className="asset-row-icon frameos-folder-icon h-5 w-5 shrink-0" />
             )}
             <span className="truncate font-medium">{node.name || '/'}</span>
-            <span className="frame-tool-muted shrink-0 text-xs">{Object.keys(node.children).length} items</span>
+            <span className="asset-folder-count frame-tool-muted shrink-0 text-xs">
+              {Object.keys(node.children).length} items
+            </span>
           </button>
           <div className={assetRowActionsClassName}>
             {hasPlayableImages ? (
@@ -311,7 +313,10 @@ function TreeNode({
         </div>
         {expanded && (
           <div
-            className={clsx('ml-4 border-l pl-3', isDragOver ? 'frameos-primary-border' : 'border-slate-300/70')}
+            className={clsx(
+              'asset-tree-children ml-4 border-l pl-3',
+              isDragOver ? 'frameos-primary-border' : 'border-slate-300/70'
+            )}
             onDragOver={onDragOver}
             onDragLeave={onDragLeave}
             onDrop={onDropFiles}
@@ -345,7 +350,7 @@ function TreeNode({
     return (
       <div
         className={clsx(
-          'frame-tool-row mb-1 ml-1 flex items-center gap-3 rounded-xl px-3 py-2 transition',
+          'asset-tree-row frame-tool-row mb-1 ml-1 flex items-center gap-3 rounded-xl px-3 py-2 transition',
           isDragOver && 'frameos-primary-drop-target'
         )}
         onDragOver={onDragOver}
@@ -358,7 +363,7 @@ function TreeNode({
           node.size >= 0 &&
           node.mtime >= 0 &&
           !isInThumbsFolder(node.path) && (
-            <div className="w-8 h-8">
+            <div className="asset-file-thumb w-8 h-8">
               <DeferredImage
                 url={frameAssetUrl(frameId, node.path, true)}
                 className="frameos-card-media w-8 h-8 object-cover border rounded"
@@ -366,7 +371,7 @@ function TreeNode({
               />
             </div>
           )}
-        {!isImage ? <DocumentIcon className="h-5 w-5 shrink-0 frame-tool-muted" /> : null}
+        {!isImage ? <DocumentIcon className="asset-row-icon h-5 w-5 shrink-0 frame-tool-muted" /> : null}
         <div className="min-w-0 flex-1">
           <span
             className="block truncate cursor-pointer font-medium hover:underline"
@@ -376,7 +381,7 @@ function TreeNode({
           </span>
         </div>
         {typeof node.size === 'number' && node.size >= 0 && (node.size > 0 || isUploading) ? (
-          <span className="frame-tool-muted shrink-0 text-xs">{humaniseSize(node.size)}</span>
+          <span className="asset-file-size frame-tool-muted shrink-0 text-xs">{humaniseSize(node.size)}</span>
         ) : null}
         {node.mtime && node.mtime > 0 && (
           <span
@@ -406,50 +411,59 @@ function TreeNode({
             horizontal
             className="w-fit"
             buttonColor="tertiary"
-            items={[
-              {
-                label: 'Download',
-                icon: isDownloading ? (
-                  <Spinner className="w-4 h-4 inline-block" />
-                ) : (
-                  <CloudArrowDownIcon className="w-4 h-4 inline-block" />
-                ),
-                onClick: async () => {
-                  setIsDownloading(true)
-                  const resource = await apiFetch(frameAssetUrl(frameId, node.path))
-                  if (!resource.ok) {
+            items={
+              [
+                isPlayableImage
+                  ? {
+                      label: 'Run image scene',
+                      icon: <PlayIcon className="w-4 h-4" />,
+                      onClick: () => createImageScene(node.path),
+                    }
+                  : null,
+                {
+                  label: 'Download',
+                  icon: isDownloading ? (
+                    <Spinner className="w-4 h-4 inline-block" />
+                  ) : (
+                    <CloudArrowDownIcon className="w-4 h-4 inline-block" />
+                  ),
+                  onClick: async () => {
+                    setIsDownloading(true)
+                    const resource = await apiFetch(frameAssetUrl(frameId, node.path))
+                    if (!resource.ok) {
+                      setIsDownloading(false)
+                      throw new Error('Failed to download asset')
+                    }
+                    const blob = await resource.blob()
+                    const url = URL.createObjectURL(blob)
+                    const a = document.createElement('a')
+                    a.href = url
+                    a.download = node.name
+                    a.click()
+                    URL.revokeObjectURL(url)
                     setIsDownloading(false)
-                    throw new Error('Failed to download asset')
-                  }
-                  const blob = await resource.blob()
-                  const url = URL.createObjectURL(blob)
-                  const a = document.createElement('a')
-                  a.href = url
-                  a.download = node.name
-                  a.click()
-                  URL.revokeObjectURL(url)
-                  setIsDownloading(false)
+                  },
                 },
-              },
-              {
-                label: 'Rename',
-                icon: <PencilSquareIcon className="w-4 h-4" />,
-                onClick: () => {
-                  const base = node.path.split('/').slice(0, -1).join('/')
-                  const newName = window.prompt('New name', node.name)
-                  if (newName) {
-                    const newPath = (base ? base + '/' : '') + newName
-                    renameAsset(node.path, newPath)
-                  }
+                {
+                  label: 'Rename',
+                  icon: <PencilSquareIcon className="w-4 h-4" />,
+                  onClick: () => {
+                    const base = node.path.split('/').slice(0, -1).join('/')
+                    const newName = window.prompt('New name', node.name)
+                    if (newName) {
+                      const newPath = (base ? base + '/' : '') + newName
+                      renameAsset(node.path, newPath)
+                    }
+                  },
                 },
-              },
-              {
-                label: 'Delete',
-                confirm: 'Are you sure?',
-                icon: <TrashIcon className="w-4 h-4" />,
-                onClick: () => deleteAsset(node.path),
-              },
-            ]}
+                {
+                  label: 'Delete',
+                  confirm: 'Are you sure?',
+                  icon: <TrashIcon className="w-4 h-4" />,
+                  onClick: () => deleteAsset(node.path),
+                },
+              ].filter(Boolean) as DropdownMenuItem[]
+            }
           />
         </div>
       </div>
@@ -690,7 +704,7 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
   return (
     <div
       className={clsx(
-        'frame-tool-panel @container',
+        'assets-panel frame-tool-panel @container',
         scrollContainer ? 'h-full overflow-y-auto pr-2' : 'overflow-visible'
       )}
     >

@@ -1,11 +1,10 @@
 import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
 import clsx from 'clsx'
 import {
-  ChevronDownIcon,
-  ChevronRightIcon,
   CodeBracketIcon,
   CodeBracketSquareIcon,
   EyeIcon,
+  InformationCircleIcon,
   ListBulletIcon,
   PhotoIcon,
   ServerStackIcon,
@@ -34,6 +33,7 @@ import { Events } from '../frame/panels/Events/Events'
 import { SceneJSON } from '../frame/panels/SceneJSON/SceneJSON'
 import { SceneSource } from '../frame/panels/SceneSource/SceneSource'
 import { SceneState } from '../frame/panels/SceneState/SceneState'
+import { SceneSettings } from '../frame/panels/Scenes/SceneSettings'
 import { scenesLogic } from '../frame/panels/Scenes/scenesLogic'
 import { EditTemplateModal } from '../frame/panels/Templates/EditTemplateModal'
 import { ExpandedScene } from '../frame/panels/Scenes/ExpandedScene'
@@ -63,6 +63,7 @@ const utilityDefinitions: UtilityDefinition[] = [
   { panel: 'events', label: 'Events', icon: <ListBulletIcon className="h-5 w-5" /> },
   { panel: 'source', label: 'Source', icon: <CodeBracketIcon className="h-5 w-5" /> },
   { panel: 'json', label: 'JSON', icon: <ServerStackIcon className="h-5 w-5" /> },
+  { panel: 'info', label: 'Scene info', icon: <InformationCircleIcon className="h-5 w-5" /> },
 ]
 
 function sceneIsCompiled(scene: FrameScene | null): boolean {
@@ -251,7 +252,6 @@ function SceneTree({
   frame,
   frames,
   scenes,
-  selectedScene,
   selectedSceneId,
   unsavedChanges,
   undeployedChanges,
@@ -259,15 +259,10 @@ function SceneTree({
   frame: FrameType
   frames: FrameType[]
   scenes: FrameScene[]
-  selectedScene: FrameScene | null
   selectedSceneId: string | null
   unsavedChanges: boolean
   undeployedChanges: boolean
 }): JSX.Element {
-  const { sceneNodesOpen } = useValues(workspaceLogic)
-  const { toggleSceneNodesOpen } = useActions(workspaceLogic)
-  const sceneNodes = selectedScene?.nodes ?? []
-
   return (
     <div className="space-y-4">
       <SceneSelector
@@ -279,23 +274,6 @@ function SceneTree({
           <FrameSceneSidebarCard frame={frame} unsavedChanges={unsavedChanges} undeployedChanges={undeployedChanges} />
         }
       />
-      {selectedScene ? (
-        <div>
-          <button
-            type="button"
-            onClick={toggleSceneNodesOpen}
-            className="frameos-icon-button mb-1 flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-            aria-expanded={sceneNodesOpen}
-          >
-            {sceneNodesOpen ? <ChevronDownIcon className="h-4 w-4" /> : <ChevronRightIcon className="h-4 w-4" />}
-            <span className="flex-1">Nodes</span>
-            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
-              {sceneNodes.length}
-            </span>
-          </button>
-          {sceneNodesOpen ? selectedSceneId ? <SceneNodesList frameId={frame.id} scene={selectedScene} /> : null : null}
-        </div>
-      ) : null}
     </div>
   )
 }
@@ -390,10 +368,10 @@ function UtilityToolbar({ scene }: { scene: FrameScene | null }): JSX.Element {
             openUtilityPanel(definition.panel)
           }}
           className={clsx(
-            'frameos-icon-button flex h-10 w-10 items-center justify-center rounded-xl border border-white/90 bg-white/90 text-slate-500 shadow-lg shadow-slate-300/25 backdrop-blur-xl transition hover:bg-white hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+            'frameos-icon-button flex h-10 w-10 items-center justify-center rounded-xl border border-white/90 bg-white/90 text-slate-500 shadow-lg shadow-slate-300/25 backdrop-blur-xl transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
             utilityPanelIsVisible && utilityPanel === definition.panel
               ? 'frameos-primary-active text-white'
-              : 'bg-white/90 text-slate-500 hover:bg-white hover:text-slate-900'
+              : 'bg-white/90 text-slate-500'
           )}
         >
           {definition.icon}
@@ -418,7 +396,7 @@ function SceneDiagramOverlay({
 
   return (
     <div className="scene-diagram-overlay pointer-events-none absolute inset-0 z-20">
-      <div className="scene-diagram-utility-buttons pointer-events-auto absolute flex shrink-0 flex-col items-center gap-2">
+      <div className="scene-diagram-utility-buttons scene-diagram-utility-toolbar pointer-events-auto absolute flex shrink-0 flex-col items-center gap-2">
         <button
           type="button"
           title="Open AI chat"
@@ -427,8 +405,8 @@ function SceneDiagramOverlay({
             openChatDrawer(frameId, sceneId)
           }}
           className={clsx(
-            'frameos-icon-button flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/90 bg-white/90 text-slate-500 shadow-lg shadow-slate-300/25 backdrop-blur-xl transition hover:bg-white hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-            chatDrawerIsOpen && 'frameos-primary-active text-white'
+            'frameos-icon-button flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/90 bg-white/90 text-slate-500 shadow-lg shadow-slate-300/25 backdrop-blur-xl transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+            chatDrawerIsOpen ? 'frameos-primary-active text-white' : 'bg-white/90 text-slate-500'
           )}
         >
           <SparklesIcon className="h-5 w-5" />
@@ -436,7 +414,7 @@ function SceneDiagramOverlay({
         <UtilityToolbar scene={scene} />
       </div>
       <div className="scene-diagram-node-toolbar pointer-events-auto absolute left-2 top-5 flex min-w-0 flex-wrap items-center gap-2">
-        {sceneId ? <DiagramToolbar sceneId={sceneId} /> : null}
+        {sceneId ? <DiagramToolbar sceneId={sceneId} showSceneAction={false} /> : null}
       </div>
     </div>
   )
@@ -444,7 +422,7 @@ function SceneDiagramOverlay({
 
 function SceneTreeLoadingPlaceholder(): JSX.Element {
   return (
-    <div className="space-y-4 px-2">
+    <div className="space-y-4">
       <div>
         <div className="frameos-muted mb-2 text-xs font-semibold uppercase tracking-wide">Frame</div>
         <div className="frameos-skeleton-surface h-12 animate-pulse rounded-xl" />
@@ -483,23 +461,6 @@ function SceneTreeLoadingPlaceholder(): JSX.Element {
           ))}
         </div>
       </div>
-      <div>
-        <div className="mb-2 flex items-center gap-2 px-2">
-          <div className="frameos-skeleton-media h-4 w-4 animate-pulse rounded" />
-          <div className="frameos-skeleton-line h-3 w-20 animate-pulse rounded-full" />
-        </div>
-        <div className="space-y-1">
-          {[0, 1, 2].map((index) => (
-            <div key={index} className="flex items-center gap-2 rounded-xl px-3 py-1.5">
-              <div className="frameos-skeleton-surface h-8 w-8 shrink-0 animate-pulse rounded-lg" />
-              <div className="min-w-0 flex-1 space-y-2">
-                <div className="frameos-skeleton-line h-3 w-28 max-w-full animate-pulse rounded-full" />
-                <div className="frameos-skeleton-line h-2 w-16 max-w-full animate-pulse rounded-full opacity-70" />
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
     </div>
   )
 }
@@ -523,6 +484,66 @@ function ScenePreviewPanel({ frameId, scene }: { frameId: number; scene: FrameSc
   return <ExpandedScene frameId={frameId} sceneId={scene.id} scene={scene} showEditButton={false} />
 }
 
+function SceneInfoPanel({ frameId, scene }: { frameId: number; scene: FrameScene }): JSX.Element {
+  const nodes = scene.nodes ?? []
+  const edges = scene.edges ?? []
+  const sceneApps = scene.apps ?? {}
+  const connectedNodeIds = new Set<string>()
+  edges.forEach((edge) => {
+    if (edge.source) {
+      connectedNodeIds.add(edge.source)
+    }
+    if (edge.target) {
+      connectedNodeIds.add(edge.target)
+    }
+  })
+  const disconnectedNodes = nodes.filter((node) => !connectedNodeIds.has(node.id)).length
+  const stats = [
+    { label: 'Nodes', value: nodes.length },
+    { label: 'Edges', value: edges.length },
+    { label: 'Scene apps', value: Object.keys(sceneApps).length },
+    { label: 'Fields', value: scene.fields?.length ?? 0 },
+    { label: 'Disconnected', value: disconnectedNodes },
+  ]
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <div className="frameos-muted text-xs font-semibold uppercase tracking-wide text-slate-500">Scene</div>
+        <div className="frameos-strong mt-1 truncate text-lg font-bold text-slate-900">
+          {scene.name || 'Untitled scene'}
+        </div>
+        <div className="frameos-muted mt-1 truncate font-mono text-xs text-slate-400">{scene.id}</div>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        {stats.map((stat) => (
+          <div key={stat.label} className="rounded-xl border border-slate-200 bg-white/60 px-3 py-2">
+            <div className="frameos-muted text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+              {stat.label}
+            </div>
+            <div className="frameos-strong mt-0.5 truncate text-sm font-semibold text-slate-800">{stat.value}</div>
+          </div>
+        ))}
+      </div>
+      <div>
+        <div className="mb-2 frameos-muted text-xs font-semibold uppercase tracking-wide text-slate-500">Settings</div>
+        <div className="rounded-xl border border-slate-200 bg-white/60 p-3">
+          <SceneSettings sceneId={scene.id} />
+        </div>
+      </div>
+      <div>
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <div className="frameos-muted text-xs font-semibold uppercase tracking-wide text-slate-500">Nodes</div>
+          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
+            {nodes.length}
+          </span>
+        </div>
+        <SceneNodesList frameId={frameId} scene={scene} />
+      </div>
+    </div>
+  )
+}
+
 function UtilityDrawer({ frameId, scene }: { frameId: number; scene: FrameScene | null }): JSX.Element | null {
   const { utilityPanel } = useValues(workspaceLogic)
   const { closeUtilityPanel } = useActions(workspaceLogic)
@@ -533,6 +554,9 @@ function UtilityDrawer({ frameId, scene }: { frameId: number; scene: FrameScene 
   }
 
   const renderPanel = () => {
+    if (utilityPanel === 'info') {
+      return scene ? <SceneInfoPanel frameId={frameId} scene={scene} /> : <div>Select a scene first.</div>
+    }
     if (utilityPanel === 'state') {
       return scene ? <ScenePreviewPanel frameId={frameId} scene={scene} /> : <div>Select a scene first.</div>
     }
@@ -667,7 +691,6 @@ function SceneWorkspaceFrame({ frameId }: SceneWorkspaceFrameProps): JSX.Element
               frame={frame}
               frames={framesList}
               scenes={sidebarScenes}
-              selectedScene={selectedScene}
               selectedSceneId={resolvedSceneId}
               unsavedChanges={unsavedChanges}
               undeployedChanges={undeployedChanges}

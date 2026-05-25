@@ -190,14 +190,21 @@ function WorkspaceChatDrawer({ frameId, sceneId }: { frameId: number; sceneId: s
 function DeployToFrameIcon(props: SVGProps<SVGSVGElement>): JSX.Element {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} aria-hidden="true" {...props}>
+      <defs>
+        <clipPath id="deploy-to-frame-arrow-clip">
+          <rect x="0" y="6.5" width="9.4" height="9" />
+        </clipPath>
+      </defs>
       <path
         strokeLinecap="round"
         strokeLinejoin="round"
         d="M13.75 5.75h5.5a1.5 1.5 0 0 1 1.5 1.5v7.5a1.5 1.5 0 0 1-1.5 1.5h-5.5a1.5 1.5 0 0 1-1.5-1.5v-7.5a1.5 1.5 0 0 1 1.5-1.5Z"
       />
       <path strokeLinecap="round" strokeLinejoin="round" d="M15.5 18.75h3" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M3.25 11h10.5" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="m10.75 8 3 3-3 3" />
+      <g clipPath="url(#deploy-to-frame-arrow-clip)">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M1.25 11h8.25" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="m6.5 8 3 3-3 3" />
+      </g>
     </svg>
   )
 }
@@ -256,8 +263,14 @@ export function FrameosShell({
 }: FrameosShellProps): JSX.Element {
   const { chatDrawerSelection, search, secondarySidebarOpen, selectedFrame, selectedSceneId, theme, utilityPanel } =
     useValues(workspaceLogic)
-  const { closeScheduleDrawer, closeTemplateDrawer, openChatDrawer, setSearch, toggleSecondarySidebar, toggleTheme } =
-    useActions(workspaceLogic)
+  const {
+    closeScheduleDrawer,
+    closeTemplateDrawer,
+    openChatDrawer,
+    setSearch,
+    toggleSecondarySidebar,
+    toggleTheme,
+  } = useActions(workspaceLogic)
   const activeFrameTool = frameShellToolPanels.has(String(utilityPanel)) ? String(utilityPanel) : undefined
   const frameHref = selectedFrame ? urls.frame(selectedFrame.id, activeFrameTool) : urls.frames()
   const scenesHref = selectedFrame ? urls.scenes(selectedFrame.id, selectedSceneId ?? undefined) : urls.scenes()

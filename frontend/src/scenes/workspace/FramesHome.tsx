@@ -78,9 +78,9 @@ function FrameTree(): JSX.Element {
     orderedArchivedFramesList: archivedFramesList,
     selectedFrameId,
   } = useValues(workspaceLogic)
-  const { closeSecondarySidebar, focusFrame, selectFrame } = useActions(workspaceLogic)
+  const { closeSecondarySidebar, focusFrame, openFrameTool, selectFrame } = useActions(workspaceLogic)
 
-  const handleFrameClick = (event: MouseEvent<HTMLAnchorElement>, frameId: number): void => {
+  const handleFrameClick = (event: MouseEvent<HTMLButtonElement>, frameId: number): void => {
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
       return
     }
@@ -91,6 +91,18 @@ function FrameTree(): JSX.Element {
       closeSecondarySidebar()
     }
     focusFrame(frameId)
+  }
+
+  const handleFrameDoubleClick = (event: MouseEvent<HTMLButtonElement>, frameId: number): void => {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+      return
+    }
+
+    event.preventDefault()
+    if (isMobileWorkspaceViewport()) {
+      closeSecondarySidebar()
+    }
+    openFrameTool(frameId, 'overview')
   }
 
   return (
@@ -104,12 +116,14 @@ function FrameTree(): JSX.Element {
             frames={activeFramesList}
             selectedFrameId={selectedFrameId}
             onSelect={handleFrameClick}
+            onOpen={handleFrameDoubleClick}
           />
           <FrameTreeGroup
             title="Inactive"
             frames={inactiveFramesList}
             selectedFrameId={selectedFrameId}
             onSelect={handleFrameClick}
+            onOpen={handleFrameDoubleClick}
             expanded={inactiveFramesExpanded}
             onToggle={toggleInactiveFramesExpanded}
           />
@@ -137,11 +151,12 @@ function FrameTree(): JSX.Element {
           {archivedFramesExpanded ? (
             <div className="space-y-1">
               {archivedFramesList.map((frame) => (
-                <A
+                <button
                   key={frame.id}
-                  href={urls.frame(frame.id, 'overview')}
-                  title={`Open ${frame.name || frameHost(frame)} overview`}
-                  onClick={(event: MouseEvent<HTMLAnchorElement>) => handleFrameClick(event, frame.id)}
+                  type="button"
+                  title={`Scroll to ${frame.name || frameHost(frame)}. Double-click to open overview.`}
+                  onClick={(event: MouseEvent<HTMLButtonElement>) => handleFrameClick(event, frame.id)}
+                  onDoubleClick={(event: MouseEvent<HTMLButtonElement>) => handleFrameDoubleClick(event, frame.id)}
                   className={clsx(
                     'frameos-frame-row frameos-frame-row-archived flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
                     selectedFrameId === frame.id ? 'frameos-frame-row-selected' : 'text-slate-500 hover:bg-slate-100'
@@ -153,7 +168,7 @@ function FrameTree(): JSX.Element {
                     <span className="block truncate text-xs text-slate-400">{frameStatusDescription(frame)}</span>
                   </span>
                   <SidebarStatusDots frame={frame} />
-                </A>
+                </button>
               ))}
             </div>
           ) : null}
@@ -190,13 +205,15 @@ function FrameTreeGroup({
   frames,
   selectedFrameId,
   onSelect,
+  onOpen,
   expanded,
   onToggle,
 }: {
   title: string
   frames: FrameType[]
   selectedFrameId: number | null
-  onSelect: (event: MouseEvent<HTMLAnchorElement>, frameId: number) => void
+  onSelect: (event: MouseEvent<HTMLButtonElement>, frameId: number) => void
+  onOpen: (event: MouseEvent<HTMLButtonElement>, frameId: number) => void
   expanded?: boolean
   onToggle?: () => void
 }): JSX.Element | null {
@@ -231,11 +248,12 @@ function FrameTreeGroup({
           {frames.map((frame) => {
             const frameName = frame.name || frameHost(frame)
             return (
-              <A
+              <button
                 key={frame.id}
-                href={urls.frame(frame.id, 'overview')}
-                title={`Open ${frameName} overview`}
-                onClick={(event: MouseEvent<HTMLAnchorElement>) => onSelect(event, frame.id)}
+                type="button"
+                title={`Scroll to ${frameName}. Double-click to open overview.`}
+                onClick={(event: MouseEvent<HTMLButtonElement>) => onSelect(event, frame.id)}
+                onDoubleClick={(event: MouseEvent<HTMLButtonElement>) => onOpen(event, frame.id)}
                 className={clsx(
                   'frameos-frame-row flex w-full min-w-0 items-center gap-3 rounded-xl px-3 py-2.5 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
                   selectedFrameId === frame.id ? 'frameos-frame-row-selected' : 'text-slate-700 hover:bg-slate-100'
@@ -247,7 +265,7 @@ function FrameTreeGroup({
                   <span className="block truncate text-xs text-slate-400">{frameStatusDescription(frame)}</span>
                 </span>
                 <SidebarStatusDots frame={frame} />
-              </A>
+              </button>
             )
           })}
         </div>

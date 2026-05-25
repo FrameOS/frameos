@@ -9,6 +9,7 @@ import type { workspaceLogicType } from './workspaceLogicType'
 
 export type WorkspaceUtilityPanel =
   | 'overview'
+  | 'info'
   | 'state'
   | 'stateVariables'
   | 'apps'
@@ -243,6 +244,7 @@ const sceneUtilityPanels = [
   'events',
   'source',
   'json',
+  'info',
 ] as const satisfies readonly WorkspaceUtilityPanel[]
 
 type SceneUtilityPanel = (typeof sceneUtilityPanels)[number]
@@ -254,6 +256,7 @@ const sceneUtilityPanelHashValues: Record<SceneUtilityPanel, string> = {
   events: 'events',
   source: 'source',
   json: 'json',
+  info: 'info',
 }
 
 export function isMobileWorkspaceViewport(): boolean {
@@ -666,7 +669,6 @@ export const workspaceLogic = kea<workspaceLogicType>([
     openSecondarySidebar: true,
     closeSecondarySidebar: true,
     toggleSecondarySidebar: true,
-    toggleSceneNodesOpen: true,
     selectFrame: (frameId: number | null) => ({ frameId }),
     focusFrame: (frameId: number) => ({ frameId }),
     setRouteSelection: (frameId: number | null, sceneId: string | null = null) => ({ frameId, sceneId }),
@@ -721,12 +723,6 @@ export const workspaceLogic = kea<workspaceLogicType>([
         openSecondarySidebar: () => true,
         closeSecondarySidebar: () => false,
         toggleSecondarySidebar: (open) => !open,
-      },
-    ],
-    sceneNodesOpen: [
-      false,
-      {
-        toggleSceneNodesOpen: (open) => !open,
       },
     ],
     renameFrameDialog: [

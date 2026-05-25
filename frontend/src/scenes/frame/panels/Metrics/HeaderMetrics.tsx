@@ -112,13 +112,13 @@ export function HeaderMetrics({ frameId }: { frameId: number }) {
   }
 
   return (
-    <div className="relative z-10 flex min-w-0 flex-1 flex-nowrap items-center gap-1 overflow-x-auto overflow-y-visible pr-1 @4xl:flex-none @4xl:overflow-visible @4xl:gap-1.5 @5xl:pr-2">
+    <div className="frame-header-metrics flex min-w-0 flex-1 flex-nowrap items-center gap-1 overflow-x-auto overflow-y-hidden @4xl:flex-none @4xl:overflow-visible @4xl:gap-1.5">
       {metricEntries.map(([key, series]) => (
         <A
           key={key}
           href={urls.frame(frameId, 'metrics')}
           className={clsx(
-            'relative z-0 flex h-8 shrink-0 items-center gap-1 overflow-visible rounded-lg border px-2 shadow-sm backdrop-blur-sm transition-colors hover:z-20 focus-within:z-20 @4xl:h-9 @4xl:gap-2 @4xl:px-2.5',
+            'frame-header-metric-chip relative flex h-9 shrink-0 items-center gap-1 overflow-hidden rounded-lg border px-2 shadow-sm backdrop-blur-sm transition-colors @4xl:gap-2 @4xl:px-2.5',
             theme === 'dark'
               ? 'border-white/10 bg-white/[0.06] shadow-black/10 hover:bg-white/[0.09]'
               : 'border-slate-200/70 bg-white/70 shadow-slate-950/5 hover:bg-white/90'
@@ -129,16 +129,21 @@ export function HeaderMetrics({ frameId }: { frameId: number }) {
         >
           <span
             className={clsx(
-              'flex min-w-0 flex-none items-baseline gap-1 whitespace-nowrap leading-none',
+              'flex min-w-0 items-baseline gap-1 whitespace-nowrap leading-none',
               theme === 'dark' ? 'text-gray-300' : 'text-slate-700'
             )}
           >
-            <span className="text-[10px] font-semibold uppercase">
+            <span className="shrink-0 text-[10px] font-semibold uppercase">
               <span className="@4xl:hidden">{compactMetricLabels[key] ?? metricLabels[key] ?? key}</span>
               <span className="hidden @4xl:inline">{metricLabels[key] ?? key}</span>
             </span>
             {latestMetricSummariesByCategory[key] ? (
-              <span className={clsx('text-[11px] font-medium', theme === 'dark' ? 'text-gray-400' : 'text-slate-500')}>
+              <span
+                className={clsx(
+                  'min-w-0 truncate text-[11px] font-medium',
+                  theme === 'dark' ? 'text-gray-400' : 'text-slate-500'
+                )}
+              >
                 {latestMetricSummariesByCategory[key]}
               </span>
             ) : null}

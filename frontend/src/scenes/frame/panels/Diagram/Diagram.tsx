@@ -27,14 +27,11 @@ import { AppNode } from './AppNode'
 import { CodeNode } from './CodeNode'
 import { EventNode } from './EventNode'
 import { StateNode } from './StateNode'
-import { Button, buttonColor, buttonSize } from '../../../../components/Button'
+import { Button } from '../../../../components/Button'
 import { diagramLogic, DiagramLogicProps } from './diagramLogic'
 import { NodeType, EdgeType, CodeNodeData } from '../../../../types'
-import { AdjustmentsHorizontalIcon, ArrowsPointingInIcon, EyeIcon } from '@heroicons/react/24/outline'
-import { Tooltip } from '../../../../components/Tooltip'
-import { SceneSettings } from '../Scenes/SceneSettings'
+import { ArrowsPointingInIcon, EyeIcon } from '@heroicons/react/24/outline'
 import { ZoomOutArea } from '../../../../icons/ZoomOutArea'
-import clsx from 'clsx'
 import { CodeNodeEdge } from './CodeNodeEdge'
 import { SceneDropDown } from '../Scenes/SceneDropDown'
 import { AppNodeEdge } from './AppNodeEdge'
@@ -73,7 +70,7 @@ interface ConnectingNode {
   handleId: string | null
 }
 
-export function DiagramToolbar({ sceneId }: { sceneId: string }) {
+export function DiagramToolbar({ sceneId, showSceneAction = true }: { sceneId: string; showSceneAction?: boolean }) {
   const { frameId } = useValues(frameLogic)
   const diagramLogicProps: DiagramLogicProps = { frameId, sceneId }
   const { fitDiagramView, rearrangeCurrentScene } = useActions(diagramLogic(diagramLogicProps))
@@ -95,44 +92,39 @@ export function DiagramToolbar({ sceneId }: { sceneId: string }) {
 
   return (
     <div className="flex items-center gap-2">
-      {sceneHasChanges ? (
-        <Button
-          size="tiny"
-          onClick={() => previewScene(sceneId)}
-          title={previewTitle}
-          color="secondary"
-          disabled={isPreviewing}
-        >
-          <EyeIcon className="w-5 h-5" />
-        </Button>
-      ) : (
-        <Button
-          size="tiny"
-          onClick={() => setCurrentScene(sceneId)}
-          title={isActiveScene ? 'This scene is already active' : 'Activate'}
-          color="primary"
-          disabled={isActiveScene || isActivatingScene}
-        >
-          {isActivatingScene ? (
-            <Spinner color="white" className="w-5 h-5 flex items-center justify-center" />
-          ) : (
-            <PlayIcon className="w-5 h-5" />
-          )}
-        </Button>
-      )}
+      {showSceneAction ? (
+        sceneHasChanges ? (
+          <Button
+            size="tiny"
+            onClick={() => previewScene(sceneId)}
+            title={previewTitle}
+            color="secondary"
+            disabled={isPreviewing}
+          >
+            <EyeIcon className="w-5 h-5" />
+          </Button>
+        ) : (
+          <Button
+            size="tiny"
+            onClick={() => setCurrentScene(sceneId)}
+            title={isActiveScene ? 'This scene is already active' : 'Activate'}
+            color="primary"
+            disabled={isActiveScene || isActivatingScene}
+          >
+            {isActivatingScene ? (
+              <Spinner color="white" className="w-5 h-5 flex items-center justify-center" />
+            ) : (
+              <PlayIcon className="w-5 h-5" />
+            )}
+          </Button>
+        )
+      ) : null}
       <Button size="tiny" onClick={fitDiagramView} title="Fit to View" color="secondary">
         <ZoomOutArea className="w-5 h-5" />
       </Button>
       <Button size="tiny" onClick={rearrangeCurrentScene} title="Realign nodes" color="secondary">
         <ArrowsPointingInIcon className="w-5 h-5" />
       </Button>
-      <Tooltip
-        tooltipColor="gray"
-        className={clsx(buttonSize('tiny'), buttonColor('secondary'))}
-        title={<SceneSettings sceneId={sceneId} />}
-      >
-        <AdjustmentsHorizontalIcon className="w-5 h-5" />
-      </Tooltip>
       <SceneDropDown sceneId={sceneId} context="editDiagram" />
     </div>
   )

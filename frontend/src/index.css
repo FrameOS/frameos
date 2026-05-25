@@ -1527,9 +1527,16 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
 
 .scene-diagram-utility-buttons {
   max-height: calc(100% - 2.5rem);
-  overflow-y: auto;
+  overflow: visible;
   right: 0.75rem;
   top: 1.25rem;
+}
+
+.scene-diagram-utility-toolbar .frameos-icon-button.frameos-primary-active:hover {
+  background: var(--frameos-primary-hover);
+  border-color: rgb(255 255 255 / 0.68);
+  color: #ffffff;
+  box-shadow: 0 14px 30px var(--frameos-primary-shadow);
 }
 
 .frameos-theme-dark .scene-diagram-utility-toolbar .frameos-icon-button:not(.frameos-primary-active) {
@@ -1539,8 +1546,11 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
 }
 
 .frameos-theme-dark .scene-diagram-utility-toolbar .frameos-icon-button:not(.frameos-primary-active):hover {
-  background: rgba(38, 40, 47, 0.96);
+  background: var(--frameos-primary-soft);
+  border-color: var(--frameos-primary-border-strong);
   color: #ffffff;
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.34), 0 0 0 1px var(--frameos-primary-border);
+  transform: translateY(-1px);
 }
 
 .frameos-app-shell:not(.frameos-theme-dark)
@@ -1555,8 +1565,11 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
 .frameos-app-shell:not(.frameos-theme-dark)
   .scene-diagram-utility-toolbar
   .frameos-icon-button:not(.frameos-primary-active):hover {
-  background: #ffffff;
-  color: #0f172a;
+  background: var(--frameos-primary-soft);
+  border-color: var(--frameos-primary-border-strong);
+  color: var(--frameos-primary-text);
+  box-shadow: 0 14px 30px rgba(100, 116, 139, 0.22), 0 0 0 1px var(--frameos-primary-border);
+  transform: translateY(-1px);
 }
 
 @media (max-width: 1023px) {
@@ -1659,6 +1672,119 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
 
 .frame-tool-muted {
   color: var(--tool-muted);
+}
+
+.frame-header-action-tray {
+  background: rgba(255, 255, 255, 0.72);
+  border-color: rgba(148, 163, 184, 0.38);
+  box-shadow: 0 10px 24px rgba(100, 116, 139, 0.14);
+}
+
+.frameos-theme-dark .frame-header-action-tray {
+  background: rgba(29, 31, 37, 0.78);
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
+}
+
+.frame-header-action-buttons {
+  border-color: rgba(148, 163, 184, 0.3);
+}
+
+.frameos-theme-dark .frame-header-action-buttons {
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.frame-header-icon-button {
+  color: #475569;
+}
+
+.frame-header-icon-button:hover {
+  background: rgba(255, 255, 255, 0.86);
+  color: #0f172a;
+}
+
+.frameos-theme-dark .frame-header-icon-button {
+  color: #cbd5e1;
+}
+
+.frameos-theme-dark .frame-header-icon-button:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #f8fafc;
+}
+
+.frame-header-metrics {
+  scrollbar-width: none;
+}
+
+.frame-header-metrics::-webkit-scrollbar {
+  display: none;
+}
+
+.frame-header-metric-chip {
+  max-width: 12rem;
+}
+
+.frameos-theme-dark .frame-header-metric-chip {
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+@container (max-width: 640px) {
+  .frame-dashboard-header {
+    align-items: stretch;
+  }
+
+  .frame-dashboard-header .frame-header-actions {
+    flex-basis: 100%;
+  }
+
+  .frame-dashboard-header .frame-header-action-tray {
+    width: 100%;
+  }
+
+  .frame-dashboard-header .frame-header-metric-chip {
+    max-width: 8.5rem;
+  }
+}
+
+.assets-panel {
+  container-type: inline-size;
+}
+
+@container (max-width: 700px) {
+  .assets-panel .asset-tree-row {
+    gap: 0.375rem;
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+  }
+
+  .assets-panel .asset-tree-children {
+    margin-left: 0.5rem;
+    padding-left: 0.5rem;
+  }
+
+  .assets-panel .asset-row-actions {
+    width: auto;
+    gap: 0.25rem;
+  }
+}
+
+@container (max-width: 560px) {
+  .assets-panel .asset-file-size,
+  .assets-panel .asset-folder-count,
+  .assets-panel .asset-play-button {
+    display: none;
+  }
+
+  .assets-panel .asset-file-thumb,
+  .assets-panel .asset-file-thumb .frameos-card-media {
+    width: 1.5rem;
+    height: 1.5rem;
+  }
+
+  .assets-panel .asset-row-icon {
+    width: 1rem;
+    height: 1rem;
+  }
 }
 
 .ping-stop-button {
