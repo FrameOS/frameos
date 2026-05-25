@@ -195,7 +195,9 @@ function DeployToFrameIcon(props: SVGProps<SVGSVGElement>): JSX.Element {
         strokeLinejoin="round"
         d="M5.75 3.75h12.5a1.5 1.5 0 0 1 1.5 1.5v6.5a1.5 1.5 0 0 1-1.5 1.5H5.75a1.5 1.5 0 0 1-1.5-1.5v-6.5a1.5 1.5 0 0 1 1.5-1.5Z"
       />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9.5 10.25h5" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M7 10.25h10" />
+      {/* <path strokeLinecap="round" strokeLinejoin="round" d="M7 7.25h10" /> */}
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 7h5" />
       <path strokeLinecap="round" strokeLinejoin="round" d="M12 21.25v-5" />
       <path strokeLinecap="round" strokeLinejoin="round" d="m9.25 18.5 2.75-2.75 2.75 2.75" />
     </svg>
