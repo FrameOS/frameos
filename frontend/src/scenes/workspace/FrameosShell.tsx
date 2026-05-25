@@ -133,9 +133,7 @@ function NavButton({
           ) : (
             <ChevronDownIcon className="h-7 w-7 lg:hidden" />
           )}
-          <span className="hidden lg:flex">
-            {sidebarOpen ? children : <ChevronRightIcon className="h-7 w-7" />}
-          </span>
+          <span className="hidden lg:flex">{sidebarOpen ? children : <ChevronRightIcon className="h-7 w-7" />}</span>
         </>
       ) : (
         children
@@ -238,9 +236,13 @@ function WorkspaceChatDrawer({ frameId, sceneId }: { frameId: number; sceneId: s
 
 function FrameStatusHeaderButton({ frameId }: { frameId: number }): JSX.Element | null {
   const { undeployedChanges, unsavedChanges } = useValues(frameLogic({ frameId }))
-  const { openFrameChangeDrawer } = useActions(workspaceLogic)
+  const { hideUnsavedChangesModal } = useActions(frameLogic({ frameId }))
+  const { frameChangeDrawerSelection } = useValues(workspaceLogic)
+  const { closeFrameChangeDrawer, openFrameChangeDrawer } = useActions(workspaceLogic)
   const statusLabel = unsavedChanges ? 'Unsaved' : undeployedChanges ? 'Undeployed' : null
   const StatusIcon = unsavedChanges ? CloudArrowUpIcon : DeployToFrameIcon
+  const unsavedDrawerIsOpen =
+    unsavedChanges && frameChangeDrawerSelection?.frameId === frameId && frameChangeDrawerSelection.kind === 'unsaved'
 
   if (!statusLabel) {
     return null
@@ -250,8 +252,15 @@ function FrameStatusHeaderButton({ frameId }: { frameId: number }): JSX.Element 
     <button
       type="button"
       title={`${statusLabel} changes`}
-      aria-label={unsavedChanges ? 'Open unsaved changes' : 'Open deploy plan for undeployed changes'}
+      aria-label={
+        unsavedDrawerIsOpen ? 'Close unsaved changes' : unsavedChanges ? 'Open unsaved changes' : 'Open deploy plan'
+      }
       onClick={() => {
+        if (unsavedDrawerIsOpen) {
+          hideUnsavedChangesModal()
+          closeFrameChangeDrawer()
+          return
+        }
         openFrameChangeDrawer(frameId, unsavedChanges ? 'unsaved' : 'deploy')
       }}
       className={clsx(

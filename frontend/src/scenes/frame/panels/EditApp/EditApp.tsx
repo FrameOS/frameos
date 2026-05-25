@@ -281,7 +281,7 @@ export function EditApp({ panel, sceneId, nodeId, onOpenChat, showFileList = tru
             )}
           </div>
         ) : null}
-        <div className="frameos-inset overflow-hidden rounded-2xl border font-mono text-sm w-full flex-1">
+        <div className="frameos-inset overflow-hidden rounded-md border font-mono text-sm w-full flex-1">
           <Editor
             height="100%"
             path={`inmemory://app-editor/${nodeId}/${activeFile}`}

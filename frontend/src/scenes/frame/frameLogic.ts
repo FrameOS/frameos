@@ -236,7 +236,7 @@ function sceneChangeDetails(currentScenes: FrameScene[], deployedScenes: FrameSc
 
     if (!deployed) {
       details.push({
-        label: `Scene added: ${scene.name || scene.id}`,
+        label: `${mode === 'interpreted' ? 'Scene' : 'Compiled scene'} added: ${scene.name || scene.id}`,
         requiresFullDeploy: mode !== 'interpreted',
       })
       continue
@@ -1183,12 +1183,14 @@ export const frameLogic = kea<frameLogicType>([
       },
     ],
     deployRecommendation: [
-      (s) => [s.deployPlan, s.lastDeploy, s.deployChangeDetails],
-      (deployPlan, lastDeploy, deployChangeDetails): DeployRecommendation | null =>
+      (s) => [s.deployPlan, s.lastDeploy, s.deployChangeDetails, s.frameForm],
+      (deployPlan, lastDeploy, deployChangeDetails, frameForm): DeployRecommendation | null =>
         buildDeployRecommendation(
           deployPlanPreviousFrameosVersion(deployPlan) ?? deployedFrameosVersion(lastDeploy),
           Boolean(lastDeploy),
-          deployChangeDetails
+          deployChangeDetails,
+          frameForm,
+          deployPlan
         ),
     ],
     hasPendingFrameosUpgrade: [

@@ -29,7 +29,7 @@ export function FrameSidebarPreview({
       )}
     >
       <div className={clsx('frameos-card-media relative h-32 bg-slate-100', mediaClassName)}>
-        <FrameImage frameId={frame.id} refreshable objectFit="contain" className="h-full w-full" />
+        <FrameImage frameId={frame.id} refreshable={false} objectFit="contain" className="h-full w-full" />
         <FrameLiveBadge frame={frame} />
       </div>
     </A>

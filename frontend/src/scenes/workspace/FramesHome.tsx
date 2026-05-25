@@ -44,6 +44,7 @@ import { FrameDashboardLoadingSkeleton } from './FrameDashboardLoadingSkeleton'
 import { FrameLiveBadge } from './FrameLiveBadge'
 import { framesHomeLogic } from './framesHomeLogic'
 import { FrameChangeStatusIcon } from './FrameChangeStatusIcon'
+import { sceneTileSummaryLabel } from './sceneTileLabels'
 
 const uploadedScenePrefix = 'uploaded/'
 const activeSurfaceClassName = 'frameos-active-surface'
@@ -93,12 +94,26 @@ function FrameTree(): JSX.Element {
   const { archivedFramesExpanded, inactiveFramesExpanded, framesLoading } = useValues(framesModel)
   const { toggleArchivedFramesExpanded, toggleInactiveFramesExpanded } = useActions(framesModel)
   const {
+    frameChangeDrawerSelection,
     homeActiveFramesList: activeFramesList,
     homeInactiveFramesList: inactiveFramesList,
     orderedArchivedFramesList: archivedFramesList,
     selectedFrameId,
   } = useValues(workspaceLogic)
-  const { closeSecondarySidebar, focusFrame, openFrameTool, selectFrame } = useActions(workspaceLogic)
+  const { closeSecondarySidebar, focusFrame, openFrameChangeDrawer, openFrameTool, selectFrame } =
+    useActions(workspaceLogic)
+
+  const focusFrameAfterDrawerUpdate = (frameId: number): void => {
+    focusFrame(frameId)
+    if (typeof window === 'undefined') {
+      return
+    }
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => focusFrame(frameId))
+      })
+    })
+  }
 
   const handleFrameClick = (event: MouseEvent<HTMLButtonElement>, frameId: number): void => {
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
@@ -110,7 +125,12 @@ function FrameTree(): JSX.Element {
     if (isMobileWorkspaceViewport()) {
       closeSecondarySidebar()
     }
-    focusFrame(frameId)
+    if (frameChangeDrawerSelection?.kind === 'deploy' && frameChangeDrawerSelection.frameId !== frameId) {
+      openFrameChangeDrawer(frameId, 'deploy')
+      focusFrameAfterDrawerUpdate(frameId)
+    } else {
+      focusFrame(frameId)
+    }
   }
 
   const handleFrameDoubleClick = (event: MouseEvent<HTMLButtonElement>, frameId: number): void => {
@@ -211,8 +231,8 @@ function FrameTreeRow({
         selected
           ? 'frameos-frame-row-selected'
           : archived
-            ? 'text-slate-500 hover:bg-slate-100'
-            : 'text-slate-700 hover:bg-slate-100'
+          ? 'text-slate-500 hover:bg-slate-100'
+          : 'text-slate-700 hover:bg-slate-100'
       )}
     >
       <FrameChangeStatusIcon frameId={frame.id} />
@@ -318,7 +338,6 @@ function FrameTreeGroup({
 function SceneTile({ frame, scene, active }: { frame: FrameType; scene: FrameScene; active: boolean }): JSX.Element {
   const { openSceneControl } = useActions(workspaceLogic)
   const { hideForm } = useActions(newFrameForm)
-  const fieldCount = scene.fields?.filter((field) => field.access === 'public').length ?? 0
 
   return (
     <button
@@ -355,10 +374,7 @@ function SceneTile({ frame, scene, active }: { frame: FrameType; scene: FrameSce
         <div className="frameos-strong truncate text-sm font-semibold text-slate-900">
           {scene.name || 'Untitled scene'}
         </div>
-        <div className="frameos-muted mt-0.5 truncate text-xs text-slate-500">
-          {scene.nodes?.length ?? 0} nodes
-          {fieldCount > 0 ? ` · ${fieldCount} controls` : ''}
-        </div>
+        <div className="frameos-muted mt-0.5 truncate text-xs text-slate-500">{sceneTileSummaryLabel(scene)}</div>
       </div>
     </button>
   )
@@ -454,7 +470,7 @@ function AddSceneDrawerActions({ frame }: { frame: FrameType }): JSX.Element {
         onClick={() => {
           createBlankSceneAndSave(undefined, false, true)
         }}
-        className="frameos-card group flex items-center gap-3 rounded-2xl border border-white/90 bg-white/80 px-4 py-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:bg-white hover:shadow-lg hover:shadow-slate-300/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+        className="frameos-template-action-button frameos-card group flex items-center gap-3 rounded-2xl border border-white/90 bg-white/80 px-4 py-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:bg-white hover:shadow-lg hover:shadow-slate-300/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
       >
         <span className="frameos-primary-hover-bg frameos-primary-hover-text frameos-icon-tile flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition">
           <PlusIcon className="h-6 w-6" />
@@ -469,7 +485,7 @@ function AddSceneDrawerActions({ frame }: { frame: FrameType }): JSX.Element {
         onClick={() => {
           openChatDrawer(frame.id, null)
         }}
-        className="frameos-card group flex items-center gap-3 rounded-2xl border border-white/90 bg-white/80 px-4 py-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:bg-white hover:shadow-lg hover:shadow-slate-300/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+        className="frameos-template-action-button frameos-card group flex items-center gap-3 rounded-2xl border border-white/90 bg-white/80 px-4 py-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:bg-white hover:shadow-lg hover:shadow-slate-300/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
       >
         <span className="frameos-primary-hover-bg frameos-primary-hover-text frameos-icon-tile flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition">
           <SparklesIcon className="h-6 w-6" />
@@ -613,9 +629,7 @@ export function SceneControlPanel(): JSX.Element | null {
         ? { width: frame.height, height: frame.width }
         : { width: frame.width, height: frame.height }
       : null
-  const previewAspectRatio = previewDimensions
-    ? `${previewDimensions.width} / ${previewDimensions.height}`
-    : '4 / 3'
+  const previewAspectRatio = previewDimensions ? `${previewDimensions.width} / ${previewDimensions.height}` : '4 / 3'
   const previewMaxWidth = previewDimensions
     ? `min(100%, ${((sceneControlPreviewMaxHeightRem * previewDimensions.width) / previewDimensions.height).toFixed(
         3

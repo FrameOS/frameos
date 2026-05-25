@@ -1,6 +1,8 @@
 import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
 import clsx from 'clsx'
+import copy from 'copy-to-clipboard'
 import {
+  ClipboardDocumentIcon,
   CodeBracketIcon,
   CodeBracketSquareIcon,
   InformationCircleIcon,
@@ -14,6 +16,7 @@ import {
 import { PencilSquareIcon, PlayIcon } from '@heroicons/react/24/solid'
 import type { DragEvent } from 'react'
 import { FrameImage } from '../../components/FrameImage'
+import { Tag } from '../../components/Tag'
 import { framesModel } from '../../models/framesModel'
 import { frameHost } from '../../decorators/frame'
 import { FrameScene, FrameType, NodeData } from '../../types'
@@ -183,7 +186,11 @@ function SceneSelector({
             {scenes.map((scene) => {
               const selected = scene.id === selectedSceneId
               const active = scene.id === linkedActiveSceneId
-              const changed = unsavedSceneIds.has(scene.id) || undeployedSceneIds.has(scene.id)
+              const unsaved = unsavedSceneIds.has(scene.id)
+              const undeployed = undeployedSceneIds.has(scene.id)
+              const changeStatusLabel = unsaved ? 'Unsaved changes' : undeployed ? 'Undeployed changes' : null
+              const sceneStatusTitle = [active ? 'Active scene' : null, changeStatusLabel].filter(Boolean).join(' · ')
+              const compiled = sceneIsCompiled(scene)
 
               return (
                 <div
@@ -197,6 +204,7 @@ function SceneSelector({
                 >
                   <button
                     type="button"
+                    title={sceneStatusTitle || undefined}
                     onClick={() => navigateToScene(frame.id, scene.id)}
                     className="flex min-w-0 flex-1 items-center gap-2 rounded-xl px-3 py-2 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
                   >
@@ -209,19 +217,46 @@ function SceneSelector({
                         objectFit="cover"
                         className="h-full w-full rounded-none"
                       />
-                      <span
-                        className={clsx(
-                          'absolute bottom-1 right-1 h-2.5 w-2.5 rounded-full ring-2 ring-white',
-                          active ? 'frameos-primary-fill' : changed ? 'bg-amber-400' : 'bg-slate-300'
-                        )}
-                      />
+                      {active || changeStatusLabel ? (
+                        <span
+                          title={active ? 'Active scene' : changeStatusLabel ?? undefined}
+                          aria-label={active ? 'Active scene' : changeStatusLabel ?? undefined}
+                          className={clsx(
+                            'absolute bottom-1 right-1 h-2.5 w-2.5 rounded-full ring-2 ring-white',
+                            active ? 'bg-emerald-500' : 'bg-amber-400'
+                          )}
+                        />
+                      ) : null}
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="frameos-strong block truncate text-sm font-semibold text-slate-700">
                         {scene.name || 'Untitled scene'}
                       </span>
-                      <span className="frameos-muted block truncate text-xs text-slate-400">
-                        {scene.nodes?.length ?? 0} nodes{active ? ' · active' : ''}
+                      <span className="frameos-muted mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-slate-400">
+                        <span className="truncate">{scene.nodes?.length ?? 0} nodes</span>
+                        {compiled ? (
+                          <Tag color="none" className="shrink-0 px-1.5 py-0 text-[10px] font-semibold normal-case">
+                            compiled
+                          </Tag>
+                        ) : null}
+                        {active ? (
+                          <Tag
+                            color="teal"
+                            title="Active scene"
+                            className="shrink-0 px-1.5 py-0 text-[10px] font-semibold normal-case"
+                          >
+                            active
+                          </Tag>
+                        ) : null}
+                        {changeStatusLabel ? (
+                          <Tag
+                            color="yellow"
+                            title={changeStatusLabel}
+                            className="shrink-0 px-1.5 py-0 text-[10px] font-semibold normal-case"
+                          >
+                            {unsaved ? 'unsaved' : 'undeployed'}
+                          </Tag>
+                        ) : null}
                       </span>
                     </span>
                   </button>
@@ -287,10 +322,12 @@ function SceneNodesList({ frameId, scene }: { frameId: number; scene: FrameScene
 
   return (
     <div className="space-y-0.5">
-      {nodeTreeItems.map((item) => (
+      {nodeTreeItems.map((item, index) => (
         <SceneNodeTreeButton
           key={item.node.id}
           item={item}
+          itemIndex={index}
+          items={nodeTreeItems}
           highlighted={highlightedNodeIds.has(item.node.id)}
           onClick={() => {
             selectNode(item.node.id)
@@ -304,10 +341,14 @@ function SceneNodesList({ frameId, scene }: { frameId: number; scene: FrameScene
 
 function SceneNodeTreeButton({
   item,
+  itemIndex,
+  items,
   highlighted,
   onClick,
 }: {
   item: DiagramNodeTreeItem
+  itemIndex: number
+  items: DiagramNodeTreeItem[]
   highlighted: boolean
   onClick: () => void
 }): JSX.Element {
@@ -316,15 +357,14 @@ function SceneNodeTreeButton({
       type="button"
       onClick={onClick}
       className={clsx(
-        'flex w-full items-center gap-2 rounded-xl py-1.5 pr-3 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+        'relative flex w-full items-center gap-2 rounded-xl py-1.5 pr-3 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
         highlighted ? 'frameos-primary-active' : 'frameos-strong hover:bg-white/55',
         item.kind === 'disconnected' && !highlighted && 'opacity-70'
       )}
       style={{ paddingLeft: `${12 + item.depth * 14}px` }}
     >
-      {item.depth > 0 ? (
-        <span className={clsx('h-px w-3 shrink-0', highlighted ? 'bg-slate-500' : 'frameos-divider bg-slate-300')} />
-      ) : null}
+      <SceneNodeTreeConnectors item={item} itemIndex={itemIndex} items={items} highlighted={highlighted} />
+      {item.depth > 0 ? <span className="h-px w-3 shrink-0 opacity-0" /> : null}
       <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/80 text-xs font-bold uppercase text-slate-500">
         {item.node.type?.slice(0, 2) ?? 'no'}
       </span>
@@ -337,6 +377,56 @@ function SceneNodeTreeButton({
         </span>
       </span>
     </button>
+  )
+}
+
+function SceneNodeTreeConnectors({
+  item,
+  itemIndex,
+  items,
+  highlighted,
+}: {
+  item: DiagramNodeTreeItem
+  itemIndex: number
+  items: DiagramNodeTreeItem[]
+  highlighted: boolean
+}): JSX.Element | null {
+  if (item.depth <= 0) {
+    return null
+  }
+
+  const previousDepth = itemIndex > 0 ? items[itemIndex - 1].depth : -1
+  const nextDepth = itemIndex < items.length - 1 ? items[itemIndex + 1].depth : -1
+  const lineClassName = clsx(highlighted ? 'bg-white/45' : 'frameos-divider bg-slate-300')
+
+  return (
+    <span aria-hidden className="pointer-events-none absolute inset-y-0 left-0">
+      {Array.from({ length: item.depth }, (_, offset) => {
+        const depth = offset + 1
+        const left = 12 + depth * 14
+        const isCurrentDepth = depth === item.depth
+        const hasTopSegment = isCurrentDepth || previousDepth >= depth || previousDepth === depth - 1
+        const hasBottomSegment = nextDepth >= depth
+
+        if (!hasTopSegment && !hasBottomSegment && !isCurrentDepth) {
+          return null
+        }
+
+        return (
+          <span key={depth}>
+            {hasTopSegment ? (
+              <span className={clsx('absolute top-0 h-1/2 w-px', lineClassName)} style={{ left }} />
+            ) : null}
+            {hasBottomSegment ? (
+              <span className={clsx('absolute bottom-0 h-1/2 w-px', lineClassName)} style={{ left }} />
+            ) : null}
+            {isCurrentDepth ? (
+              <span className={clsx('absolute top-1/2 h-px w-3', lineClassName)} style={{ left }} />
+            ) : null}
+          </span>
+        )
+      })}
+    </span>
   )
 }
 
@@ -504,7 +594,17 @@ function SceneInfoPanel({ frameId, scene }: { frameId: number; scene: FrameScene
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <div className="frameos-strong truncate text-lg font-bold">{scene.name || 'Untitled scene'}</div>
-          <div className="frameos-muted mt-1 truncate font-mono text-xs text-slate-400">{scene.id}</div>
+          <div className="mt-1 flex min-w-0 items-center gap-1.5">
+            <div className="frameos-muted truncate font-mono text-xs text-slate-400">{scene.id}</div>
+            <button
+              type="button"
+              title="Copy scene id"
+              onClick={() => copy(scene.id)}
+              className="frameos-icon-button flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            >
+              <ClipboardDocumentIcon className="h-4 w-4" />
+            </button>
+          </div>
         </div>
         <button
           type="button"
@@ -515,20 +615,15 @@ function SceneInfoPanel({ frameId, scene }: { frameId: number; scene: FrameScene
           <span>Rename</span>
         </button>
       </div>
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-3 gap-2">
         {stats.map((stat) => (
           <div key={stat.label} className="frame-tool-row rounded-xl px-3 py-2">
-            <div className="frame-tool-muted text-[11px] font-semibold uppercase tracking-wide">
-              {stat.label}
-            </div>
+            <div className="frame-tool-muted text-[11px] font-semibold uppercase tracking-wide">{stat.label}</div>
             <div className="frameos-strong mt-0.5 truncate text-sm font-semibold">{stat.value}</div>
           </div>
         ))}
       </div>
-      <div>
-        <div className="mb-2 frameos-muted text-xs font-semibold uppercase tracking-wide text-slate-500">Settings</div>
-        <SceneSettings sceneId={scene.id} />
-      </div>
+      <SceneSettings sceneId={scene.id} embedded />
       <div>
         <div className="mb-2 flex items-center justify-between gap-2">
           <div className="frameos-muted text-xs font-semibold uppercase tracking-wide text-slate-500">Nodes</div>

@@ -55,6 +55,7 @@ import {
   setFrameosSceneDragData,
 } from './sceneDrag'
 import { groupFramesByStatus } from './frameStatusGroups'
+import { sceneTileSummaryLabel } from './sceneTileLabels'
 
 interface FrameWorkspaceProps {
   id?: string
@@ -532,7 +533,6 @@ function sceneIsActive(scene: FrameScene, currentSceneId: string | null | undefi
 
 function SceneTile({ frame, scene, active }: { frame: FrameType; scene: FrameScene; active: boolean }): JSX.Element {
   const { openSceneControl } = useActions(workspaceLogic)
-  const fieldCount = scene.fields?.filter((field) => field.access === 'public').length ?? 0
 
   return (
     <div
@@ -571,10 +571,7 @@ function SceneTile({ frame, scene, active }: { frame: FrameType; scene: FrameSce
           <div className="frameos-strong truncate text-sm font-semibold text-slate-900">
             {scene.name || 'Untitled scene'}
           </div>
-          <div className="frameos-muted mt-0.5 truncate text-xs text-slate-500">
-            {scene.nodes?.length ?? 0} nodes
-            {fieldCount > 0 ? ` · ${fieldCount} controls` : ''}
-          </div>
+          <div className="frameos-muted mt-0.5 truncate text-xs text-slate-500">{sceneTileSummaryLabel(scene)}</div>
         </div>
       </button>
       <SceneDropDown
@@ -1431,9 +1428,7 @@ export function FrameWorkspace({ id }: FrameWorkspaceProps): JSX.Element {
         <div className={loadingToolUsesPageScroll ? undefined : 'h-full'}>
           <div
             className={clsx(
-              loadingToolUsesPageScroll
-                ? 'min-h-[32rem]'
-                : ['h-[calc(100vh-3rem)]', 'max-lg:h-auto'],
+              loadingToolUsesPageScroll ? 'min-h-[32rem]' : ['h-[calc(100vh-3rem)]', 'max-lg:h-auto'],
               loadingToolUsesPageScroll ? 'overflow-visible' : 'overflow-hidden'
             )}
           >

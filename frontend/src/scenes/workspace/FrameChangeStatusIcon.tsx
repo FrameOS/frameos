@@ -30,8 +30,15 @@ export function FrameChangeStatusIcon({
   variant?: 'sidebar' | 'dashboard'
 }): JSX.Element {
   const { undeployedChanges, unsavedChanges } = useValues(frameLogic({ frameId }))
-  const { openFrameChangeDrawer } = useActions(workspaceLogic)
+  const { hideDeployPlanModal } = useActions(frameLogic({ frameId }))
+  const { frameChangeDrawerSelection } = useValues(workspaceLogic)
+  const { closeFrameChangeDrawer, focusFrame, openFrameChangeDrawer } = useActions(workspaceLogic)
   const statusLabel = unsavedChanges ? 'Unsaved' : undeployedChanges ? 'Undeployed' : null
+  const targetDrawerKind = unsavedChanges ? 'unsaved' : 'deploy'
+  const deployDrawerIsOpen =
+    targetDrawerKind === 'deploy' &&
+    frameChangeDrawerSelection?.frameId === frameId &&
+    frameChangeDrawerSelection.kind === 'deploy'
   const StatusIcon = unsavedChanges ? CloudArrowUpIcon : DeployToFrameIcon
   const isDashboard = variant === 'dashboard'
   const wrapperClassName = isDashboard
@@ -40,25 +47,62 @@ export function FrameChangeStatusIcon({
   const idleClassName = isDashboard ? 'frameos-icon-tile bg-white/70 text-slate-700 shadow-sm' : 'text-current'
   const iconClassName = isDashboard ? 'h-7 w-7' : 'h-5 w-5'
 
-  if (!statusLabel) {
-    return (
-      <span className={clsx(wrapperClassName, idleClassName)}>
-        <ComputerDesktopIcon className={iconClassName} />
-      </span>
-    )
+  const focusFrameAfterDrawerUpdate = (): void => {
+    if (isDashboard) {
+      return
+    }
+    focusFrame(frameId)
+    if (typeof window === 'undefined') {
+      return
+    }
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => focusFrame(frameId))
+      })
+    })
   }
 
   const openDrawer = (event: MouseEvent<HTMLButtonElement>): void => {
     event.preventDefault()
     event.stopPropagation()
-    openFrameChangeDrawer(frameId, unsavedChanges ? 'unsaved' : 'deploy')
+    if (deployDrawerIsOpen) {
+      hideDeployPlanModal()
+      closeFrameChangeDrawer()
+      return
+    }
+    openFrameChangeDrawer(frameId, targetDrawerKind)
+    focusFrameAfterDrawerUpdate()
+  }
+
+  if (!statusLabel) {
+    return (
+      <button
+        type="button"
+        title={deployDrawerIsOpen ? 'Close deploy plan' : 'Open deploy plan'}
+        aria-label={deployDrawerIsOpen ? 'Close deploy plan' : 'Open deploy plan'}
+        onClick={openDrawer}
+        className={clsx(
+          wrapperClassName,
+          idleClassName,
+          'focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400'
+        )}
+      >
+        <ComputerDesktopIcon className={iconClassName} />
+      </button>
+    )
   }
 
   return (
     <button
       type="button"
       title={`${statusLabel} changes`}
-      aria-label={unsavedChanges ? 'Open unsaved changes' : 'Open deploy plan for undeployed changes'}
+      aria-label={
+        deployDrawerIsOpen
+          ? 'Close deploy plan'
+          : unsavedChanges
+          ? 'Open unsaved changes'
+          : 'Open deploy plan for undeployed changes'
+      }
       onClick={openDrawer}
       className={clsx(
         wrapperClassName,

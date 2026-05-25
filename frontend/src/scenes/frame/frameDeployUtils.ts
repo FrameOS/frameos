@@ -92,9 +92,10 @@ export interface DeployPlanResponse {
 }
 
 export interface DeployRecommendation {
-  mode: 'fast' | 'full'
+  mode: 'none' | 'fast' | 'full'
   title: string
   description: string
+  descriptionEmphasis?: string
 }
 
 type PlannedRebootSchedule = NonNullable<NonNullable<FullDeployPlanResponse['post_deploy']>['reboot_schedule']>
@@ -183,6 +184,22 @@ function inferFrameDriverNames(frame?: Partial<FrameType> | null): string[] {
 function precompiledSkipReason(frame?: Partial<FrameType> | null): string | null {
   const compiledSceneCount = frameCompiledSceneCount(frame)
   return compiledSceneCount > 0 ? `${pluralize(compiledSceneCount, 'compiled scene')} configured` : null
+}
+
+function canUsePrecompiledFrameos(frame?: Partial<FrameType> | null, plan?: DeployPlanResponse | null): boolean {
+  if (frameCompiledSceneCount(frame) > 0) {
+    return false
+  }
+  if (plan?.full_deploy?.binary?.will_attempt_precompiled !== undefined) {
+    return plan.full_deploy.binary.will_attempt_precompiled === true
+  }
+  if (frame?.mode === 'buildroot') {
+    return false
+  }
+
+  const compilationMode = normalizeCompilationMode(frame?.rpios?.compilationMode)
+  const crossCompilation = normalizeCrossCompilation(frame?.rpios?.crossCompilation)
+  return compilationMode === 'precompiled' && crossCompilation !== 'always' && !precompiledSkipReason(frame)
 }
 
 function inferBuildStrategy(frame?: Partial<FrameType> | null): string {
@@ -452,7 +469,9 @@ export function buildInferredFullDeployPlanSummary(
 export function buildDeployRecommendation(
   previousVersion: string | null,
   hasPreviousDeploy: boolean,
-  deployChangeDetails: ChangeDetail[]
+  deployChangeDetails: ChangeDetail[],
+  frame?: Partial<FrameType> | null,
+  plan?: DeployPlanResponse | null
 ): DeployRecommendation {
   const versionChanged = previousVersion !== CURRENT_FRAMEOS_VERSION
   const fullDeployChanges = deployChangeDetails
@@ -469,10 +488,14 @@ export function buildDeployRecommendation(
   }
 
   if (fullDeployChanges.length > 0) {
+    const usesPrecompiledFrameos = canUsePrecompiledFrameos(frame, plan)
     return {
       mode: 'full',
       title: 'Suggested: full deploy',
-      description: 'You have changes that require rebuilding or reinstalling FrameOS.',
+      description: usesPrecompiledFrameos
+        ? 'You have changes that require reinstalling FrameOS.'
+        : 'You have changes that require rebuilding FrameOS.',
+      descriptionEmphasis: usesPrecompiledFrameos ? undefined : 'rebuilding',
     }
   }
 
@@ -483,6 +506,14 @@ export function buildDeployRecommendation(
       description: `Updating FrameOS from ${
         previousVersion ?? 'unknown'
       } to ${CURRENT_FRAMEOS_VERSION} requires a full deploy.`,
+    }
+  }
+
+  if (deployChangeDetails.length === 0) {
+    return {
+      mode: 'none',
+      title: 'Up to date',
+      description: 'This frame is already up to date. Refresh the plan if you want to re-check the target details.',
     }
   }
 

@@ -52,12 +52,16 @@ export function CodeNodeEdge({
       <EdgeLabelRenderer>
         {selected ? (
           <button
+            type="button"
+            aria-label="Remove edge"
+            title="Remove edge"
             style={{
               position: 'absolute',
               transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
               pointerEvents: 'all',
+              color: selectedStroke,
             }}
-            className="frameos-secondary-button nodrag nopan rounded-lg"
+            className="frameos-edge-delete-button nodrag nopan"
             onClick={() => {
               setEdges((es) => es.filter((e) => e.id !== id))
             }}

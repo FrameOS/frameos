@@ -117,7 +117,7 @@ export function NodeCache({ nodeType }: NodeCacheProps): JSX.Element {
       }
     >
       {!data.cache?.enabled ? (
-        <Tag color="teal" className="cursor-pointer">
+        <Tag color="teal" className="frameos-node-cache-tag-empty cursor-pointer">
           No cache
         </Tag>
       ) : (

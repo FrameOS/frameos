@@ -323,7 +323,7 @@ declare const context: {
         </div>
         <div
           className={clsx(
-            'frameos-node-title text-xl px-1 gap-1',
+            'frameos-node-title text-xl px-1 py-0.5 gap-1',
             isSelected ? 'frameos-diagram-title-selected' : 'bg-green-900',
             'flex w-full justify-between items-center'
           )}

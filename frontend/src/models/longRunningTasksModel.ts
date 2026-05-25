@@ -70,6 +70,7 @@ const SOCKET_NEW_LOG = 'new log (src.scenes.socketLogic)'
 const SOCKET_NEW_SCENE_IMAGE = 'new scene image (src.scenes.socketLogic)'
 const SOCKET_FRAME_RENDERED = 'frame rendered (src.scenes.socketLogic)'
 const SOCKET_UPDATE_FRAME = 'update frame (src.scenes.socketLogic)'
+const UPLOADED_SCENE_PREFIX = 'uploaded/'
 
 let nextTaskCounter = 0
 
@@ -90,12 +91,25 @@ function latestRunningTaskIndex(tasks: LongRunningTask[], payload: FinishTaskPay
     if (payload.kind && task.kind !== payload.kind) {
       continue
     }
-    if (payload.sceneId && task.sceneId && task.sceneId !== payload.sceneId) {
+    if (payload.sceneId && task.sceneId && !sceneIdsMatch(task.sceneId, payload.sceneId)) {
       continue
     }
     return index
   }
   return -1
+}
+
+function normalizeTaskSceneId(sceneId?: string | null): string | null {
+  if (!sceneId) {
+    return null
+  }
+  return sceneId.startsWith(UPLOADED_SCENE_PREFIX) ? sceneId.slice(UPLOADED_SCENE_PREFIX.length) : sceneId
+}
+
+function sceneIdsMatch(first?: string | null, second?: string | null): boolean {
+  const normalizedFirst = normalizeTaskSceneId(first)
+  const normalizedSecond = normalizeTaskSceneId(second)
+  return !!normalizedFirst && !!normalizedSecond && normalizedFirst === normalizedSecond
 }
 
 function updateLatestTaskProgress(tasks: LongRunningTask[], payload: UpdateTaskProgressPayload): LongRunningTask[] {
@@ -220,7 +234,7 @@ export const longRunningTasksModel = kea<longRunningTasksModelType>([
             if (task.kind && candidate.kind !== task.kind) {
               return true
             }
-            if (task.sceneId && candidate.sceneId && candidate.sceneId !== task.sceneId) {
+            if (task.sceneId && candidate.sceneId && !sceneIdsMatch(candidate.sceneId, task.sceneId)) {
               return true
             }
             return false

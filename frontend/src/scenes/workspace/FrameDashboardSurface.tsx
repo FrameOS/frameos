@@ -43,6 +43,7 @@ import {
   hasFrameosSceneListDragData,
   setFrameosSceneDragData,
 } from './sceneDrag'
+import { sceneTileSummaryLabel } from './sceneTileLabels'
 import { workspaceLogic } from './workspaceLogic'
 
 const uploadedScenePrefix = 'uploaded/'
@@ -337,9 +338,19 @@ function FrameDashboardHeader({ frame, archived }: { frame: FrameType; archived?
 }
 
 function FrameDashboardStatusLine({ frame }: { frame: FrameType }): JSX.Element {
-  const { undeployedChanges, unsavedChanges } = useValues(frameLogic({ frameId: frame.id }))
+  const { undeployedChangeDetails, undeployedChanges, unsavedChanges } = useValues(frameLogic({ frameId: frame.id }))
   const { openFrameChangeDrawer } = useActions(workspaceLogic)
-  const changeLabel = unsavedChanges ? 'unsaved' : undeployedChanges ? 'undeployed' : null
+  const onlyFrameosUpgrade =
+    !unsavedChanges &&
+    undeployedChangeDetails.length > 0 &&
+    undeployedChangeDetails.every((change) => change.label.startsWith('FrameOS upgrade'))
+  const changeLabel = unsavedChanges
+    ? 'unsaved'
+    : onlyFrameosUpgrade
+    ? 'upgrade'
+    : undeployedChanges
+    ? 'undeployed'
+    : null
   const changeKind = unsavedChanges ? 'unsaved' : 'deploy'
 
   return (
@@ -426,7 +437,6 @@ function FrameSceneTile({
 }): JSX.Element {
   const { openSceneControl } = useActions(workspaceLogic)
   const { hideForm } = useActions(newFrameForm)
-  const fieldCount = scene.fields?.filter((field) => field.access === 'public').length ?? 0
 
   return (
     <div
@@ -468,10 +478,7 @@ function FrameSceneTile({
           <div className="frameos-strong truncate text-sm font-semibold text-slate-900">
             {scene.name || 'Untitled scene'}
           </div>
-          <div className="frameos-muted mt-0.5 truncate text-xs text-slate-500">
-            {scene.nodes?.length ?? 0} nodes
-            {fieldCount > 0 ? ` · ${fieldCount} controls` : ''}
-          </div>
+          <div className="frameos-muted mt-0.5 truncate text-xs text-slate-500">{sceneTileSummaryLabel(scene)}</div>
         </div>
       </button>
       {showMenu ? (

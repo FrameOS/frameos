@@ -5,7 +5,7 @@ import { ChevronRightIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import { Spinner } from '../../components/Spinner'
 import { frameHost } from '../../decorators/frame'
 import type { FrameType, LogType } from '../../types'
-import { frameLogic, type ChangeDetail, type SummaryItem } from '../frame/frameLogic'
+import { frameLogic, type ChangeDetail, type DeployRecommendation, type SummaryItem } from '../frame/frameLogic'
 import { logsLogic } from '../frame/panels/Logs/logsLogic'
 import { workspaceLogic } from './workspaceLogic'
 
@@ -106,7 +106,11 @@ function formatDeployPlanLogTimestamp(timestamp: string): string {
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
 
-function deployPlanLogTone(log: LogType, line: string, theme: 'light' | 'dark'): { dot: string; timestamp: string; text: string } {
+function deployPlanLogTone(
+  log: LogType,
+  line: string,
+  theme: 'light' | 'dark'
+): { dot: string; timestamp: string; text: string } {
   const lowerLine = line.toLowerCase()
 
   if (
@@ -200,17 +204,15 @@ function DeployPlanProgress({
               <span
                 className={clsx(
                   'mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full',
-                  step.state === 'done'
-                    ? 'bg-emerald-400'
-                    : step.state === 'error'
-                      ? 'bg-red-400'
-                      : 'bg-slate-300/70'
+                  step.state === 'done' ? 'bg-emerald-400' : step.state === 'error' ? 'bg-red-400' : 'bg-slate-300/70'
                 )}
               />
             )}
             <span className="min-w-0 flex-1">
               <span className="block font-semibold text-[color:var(--tool-strong)]">{step.label}</span>
-              {step.detail ? <span className="frame-tool-muted mt-0.5 block truncate text-xs">{step.detail}</span> : null}
+              {step.detail ? (
+                <span className="frame-tool-muted mt-0.5 block truncate text-xs">{step.detail}</span>
+              ) : null}
             </span>
           </div>
         ))}
@@ -262,13 +264,7 @@ function ChangeRows({ changes }: { changes: ChangeDetail[] }): JSX.Element | nul
   )
 }
 
-function DrawerHeading({
-  action,
-  children,
-}: {
-  action?: JSX.Element
-  children: string
-}): JSX.Element {
+function DrawerHeading({ action, children }: { action?: JSX.Element; children: string }): JSX.Element {
   return (
     <div className="flex items-center justify-between gap-3">
       <div className="frame-tool-heading text-sm font-semibold">{children}</div>
@@ -277,11 +273,26 @@ function DrawerHeading({
   )
 }
 
+function RecommendationDescription({ recommendation }: { recommendation: DeployRecommendation }): JSX.Element {
+  const emphasis = recommendation.descriptionEmphasis
+  if (!emphasis || !recommendation.description.includes(emphasis)) {
+    return <>{recommendation.description}</>
+  }
+
+  const [before, after] = recommendation.description.split(emphasis)
+  return (
+    <>
+      {before}
+      <strong className="font-semibold text-[color:var(--tool-strong)]">{emphasis}</strong>
+      {after}
+    </>
+  )
+}
+
 export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Element | null {
   useMountedLogic(logsLogic({ frameId: frame.id }))
   const {
     deployChangeDetails,
-    deployPlanModalOpen,
     deployPlansError,
     deployPlansLoading,
     deployPlansLoadingStartedAt,
@@ -292,10 +303,6 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
     useActions(frameLogic({ frameId: frame.id }))
   const { closeFrameChangeDrawer } = useActions(workspaceLogic)
   const { logs } = useValues(logsLogic({ frameId: frame.id }))
-
-  if (!deployPlanModalOpen) {
-    return null
-  }
 
   const deployPlanLogs = deployPlanLogsSince(logs, deployPlansLoadingStartedAt)
   const closeAndRun = (action: () => void): void => {
@@ -361,7 +368,9 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
                     {deployRecommendation.title}
                   </DrawerHeading>
                   <div className="frame-tool-card rounded-[22px] p-4">
-                    <div className="frame-tool-muted text-sm leading-5">{deployRecommendation.description}</div>
+                    <div className="frame-tool-muted text-sm leading-5">
+                      <RecommendationDescription recommendation={deployRecommendation} />
+                    </div>
                   </div>
                 </section>
               ) : null}
@@ -404,7 +413,10 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
             onClick={() =>
               closeAndRun(deployRecommendation?.mode === 'full' ? saveAndFullDeployFrame : saveAndDeployFrame)
             }
-            className="frameos-primary-action rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            className={clsx(
+              'rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+              deployRecommendation?.mode === 'full' ? 'frameos-primary-action' : 'frameos-secondary-button'
+            )}
           >
             Full deploy
           </button>

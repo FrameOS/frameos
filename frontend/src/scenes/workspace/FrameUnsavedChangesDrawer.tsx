@@ -11,7 +11,7 @@ export function FrameUnsavedChangesDrawer({ frame }: { frame: FrameType }): JSX.
   const { isFrameFormSubmitting, unsavedChangeDetails, unsavedChanges, unsavedChangesModalOpen } = useValues(
     frameLogic({ frameId: frame.id })
   )
-  const { hideUnsavedChangesModal, saveFrame } = useActions(frameLogic({ frameId: frame.id }))
+  const { hideUnsavedChangesModal, resetUnsavedChanges, saveFrame } = useActions(frameLogic({ frameId: frame.id }))
   const { closeFrameChangeDrawer } = useActions(workspaceLogic)
 
   if (!unsavedChangesModalOpen || !unsavedChanges) {
@@ -26,6 +26,12 @@ export function FrameUnsavedChangesDrawer({ frame }: { frame: FrameType }): JSX.
   }
 
   const closeDrawer = (): void => {
+    hideUnsavedChangesModal()
+    closeFrameChangeDrawer()
+  }
+
+  const discardAndClose = (): void => {
+    resetUnsavedChanges()
     hideUnsavedChangesModal()
     closeFrameChangeDrawer()
   }
@@ -65,6 +71,7 @@ export function FrameUnsavedChangesDrawer({ frame }: { frame: FrameType }): JSX.
             ) : (
               <div className="frame-tool-muted text-sm">There are unsaved frame changes.</div>
             )}
+            <p className="frame-tool-muted text-sm">Save or discard these changes before deploying this frame.</p>
           </section>
         </div>
         <div className="frameos-divider flex flex-wrap justify-end gap-2 border-t border-slate-200/80 px-5 py-4">
@@ -73,7 +80,15 @@ export function FrameUnsavedChangesDrawer({ frame }: { frame: FrameType }): JSX.
             onClick={closeDrawer}
             className="frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
           >
-            Close
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={discardAndClose}
+            disabled={isFrameFormSubmitting}
+            className="frameos-danger-button rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400 disabled:opacity-40"
+          >
+            Discard changes
           </button>
           <button
             type="button"

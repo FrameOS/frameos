@@ -44,6 +44,12 @@
   background: var(--frameos-page-bg);
 }
 
+.frameos-diagram-selection-dragging,
+.frameos-diagram-selection-dragging * {
+  -webkit-user-select: none !important;
+  user-select: none !important;
+}
+
 html[data-frameos-theme='dark'],
 .frameos-app-shell.frameos-theme-dark,
 .frameos-auth-screen.frameos-theme-dark {
@@ -447,6 +453,13 @@ html[data-frameos-theme='dark'] .frameos-divider {
 .frameos-theme-dark .frameos-add-scene-hover:hover {
   background: rgba(52, 55, 64, 0.92);
   border-color: var(--frameos-primary-border-strong);
+}
+
+.frameos-theme-dark .frameos-template-action-button:hover,
+html[data-frameos-theme='dark'] .frameos-template-action-button:hover {
+  background: rgba(52, 55, 64, 0.92);
+  border-color: rgba(255, 255, 255, 0.16);
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.24);
 }
 
 .frameos-theme-dark .frameos-card,
@@ -950,6 +963,45 @@ html[data-frameos-theme='dark'] .frameos-tag[data-tag-color='red'] {
   background: rgba(248, 113, 113, 0.13);
   border-color: rgba(248, 113, 113, 0.28);
   color: #fca5a5;
+}
+
+.frameos-theme-dark .scene-editor-canvas .frameos-diagram-node .frameos-tag,
+html[data-frameos-theme='dark'] .scene-editor-canvas .frameos-diagram-node .frameos-tag {
+  background: rgba(100, 116, 139, 0.12);
+  border-color: rgba(100, 116, 139, 0.22);
+  color: #334155;
+}
+
+.frameos-theme-dark .scene-editor-canvas .frameos-diagram-node .frameos-tag[data-tag-color='teal'],
+html[data-frameos-theme='dark'] .scene-editor-canvas .frameos-diagram-node .frameos-tag[data-tag-color='teal'] {
+  background: rgb(var(--frameos-color-moss-rgb) / 0.15);
+  border-color: rgb(var(--frameos-color-moss-rgb) / 0.32);
+  color: color-mix(in srgb, var(--frameos-color-moss) 60%, var(--frameos-color-graphite));
+}
+
+.frameos-theme-dark .scene-editor-canvas .frameos-diagram-node .frameos-tag[data-tag-color='blue'],
+.frameos-theme-dark .scene-editor-canvas .frameos-diagram-node .frameos-tag[data-tag-color='primary'],
+html[data-frameos-theme='dark'] .scene-editor-canvas .frameos-diagram-node .frameos-tag[data-tag-color='blue'],
+html[data-frameos-theme='dark'] .scene-editor-canvas .frameos-diagram-node .frameos-tag[data-tag-color='primary'] {
+  background: rgb(var(--frameos-color-evergreen-rgb) / 0.12);
+  border-color: rgb(var(--frameos-color-evergreen-rgb) / 0.28);
+  color: color-mix(in srgb, var(--frameos-color-evergreen) 76%, var(--frameos-color-graphite));
+}
+
+.frameos-theme-dark .scene-editor-canvas .frameos-diagram-node .frameos-tag[data-tag-color='yellow'],
+.frameos-theme-dark .scene-editor-canvas .frameos-diagram-node .frameos-tag[data-tag-color='orange'],
+html[data-frameos-theme='dark'] .scene-editor-canvas .frameos-diagram-node .frameos-tag[data-tag-color='yellow'],
+html[data-frameos-theme='dark'] .scene-editor-canvas .frameos-diagram-node .frameos-tag[data-tag-color='orange'] {
+  background: rgb(var(--frameos-color-brass-rgb) / 0.16);
+  border-color: rgb(var(--frameos-color-brass-rgb) / 0.34);
+  color: color-mix(in srgb, var(--frameos-color-brass) 58%, var(--frameos-color-graphite));
+}
+
+.frameos-theme-dark .scene-editor-canvas .frameos-diagram-node .frameos-tag[data-tag-color='red'],
+html[data-frameos-theme='dark'] .scene-editor-canvas .frameos-diagram-node .frameos-tag[data-tag-color='red'] {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.28);
+  color: #b91c1c;
 }
 
 .frameos-theme-dark .frameos-resize-handle,
@@ -1869,6 +1921,27 @@ html[data-frameos-theme='dark'] .workspace-logo-button:hover {
   color: var(--tool-strong);
 }
 
+.frame-tool-drag-handle {
+  align-self: stretch;
+  background-image: radial-gradient(circle, rgba(100, 116, 139, 0.64) 1.15px, transparent 1.35px),
+    radial-gradient(circle, rgba(100, 116, 139, 0.64) 1.15px, transparent 1.35px);
+  background-position: 2px 4px, 7px 4px;
+  background-repeat: repeat-y;
+  background-size: 8px 8px;
+  flex: 0 0 0.75rem;
+  min-height: 2.6rem;
+  opacity: 0.72;
+}
+
+.frame-tool-row:hover .frame-tool-drag-handle {
+  opacity: 1;
+}
+
+.frameos-theme-dark .frame-tool-drag-handle {
+  background-image: radial-gradient(circle, rgba(219, 227, 238, 0.58) 1.15px, transparent 1.35px),
+    radial-gradient(circle, rgba(219, 227, 238, 0.58) 1.15px, transparent 1.35px);
+}
+
 .frame-tool-muted {
   color: var(--tool-muted);
 }
@@ -2284,6 +2357,30 @@ html[data-frameos-theme='dark'] .workspace-logo-button:hover {
   background: transparent;
 }
 
+.frameos-edge-delete-button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  cursor: pointer;
+  display: inline-flex;
+  justify-content: center;
+  line-height: 1;
+  padding: 0;
+}
+
+.frameos-edge-delete-button:hover {
+  background: transparent;
+  border: 0;
+  filter: drop-shadow(0 2px 5px rgba(15, 23, 42, 0.22)) brightness(1.04);
+}
+
+.frameos-edge-delete-button:focus-visible {
+  border: 0;
+  box-shadow: 0 0 0 3px rgba(192, 38, 211, 0.24);
+  outline: none;
+}
+
 .frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .frameos-diagram-node {
   background: rgba(255, 255, 255, 0.96);
   border-radius: 0.75rem;
@@ -2384,53 +2481,33 @@ html[data-frameos-theme='dark'] .workspace-logo-button:hover {
   .scene-editor-canvas
   .frameos-diagram-node
   .frameos-node-title
-  .frameos-tag {
+  .frameos-clear-button {
+  color: #ffffff;
+}
+
+.frameos-app-shell:not(.frameos-theme-dark)
+  .scene-editor-canvas
+  .frameos-diagram-node
+  .frameos-node-title
+  .frameos-clear-button:hover {
+  background: rgba(255, 255, 255, 0.16);
+  color: #ffffff;
+}
+
+.scene-editor-canvas .frameos-diagram-node .frameos-node-title .frameos-node-cache-tag-empty {
   background: rgba(255, 255, 255, 0.94);
   border-color: rgba(255, 255, 255, 0.72);
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.18);
-  color: #334155;
-}
-
-.frameos-app-shell:not(.frameos-theme-dark)
-  .scene-editor-canvas
-  .frameos-diagram-node
-  .frameos-node-title
-  .frameos-tag[data-tag-color='teal'] {
   color: #0f766e;
 }
 
-.frameos-app-shell:not(.frameos-theme-dark)
-  .scene-editor-canvas
-  .frameos-diagram-node
-  .frameos-node-title
-  .frameos-tag[data-tag-color='blue'],
-.frameos-app-shell:not(.frameos-theme-dark)
-  .scene-editor-canvas
-  .frameos-diagram-node
-  .frameos-node-title
-  .frameos-tag[data-tag-color='primary'] {
-  color: #3730a3;
+.scene-editor-canvas .frameos-diagram-node .frameos-node-title .frameos-tag {
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.84), 0 1px 3px rgba(15, 23, 42, 0.16);
 }
 
-.frameos-app-shell:not(.frameos-theme-dark)
-  .scene-editor-canvas
-  .frameos-diagram-node
-  .frameos-node-title
-  .frameos-tag[data-tag-color='yellow'],
-.frameos-app-shell:not(.frameos-theme-dark)
-  .scene-editor-canvas
-  .frameos-diagram-node
-  .frameos-node-title
-  .frameos-tag[data-tag-color='orange'] {
-  color: #92400e;
-}
-
-.frameos-app-shell:not(.frameos-theme-dark)
-  .scene-editor-canvas
-  .frameos-diagram-node
-  .frameos-node-title
-  .frameos-tag[data-tag-color='red'] {
-  color: #991b1b;
+.frameos-theme-dark .scene-editor-canvas .frameos-diagram-node .frameos-node-title .frameos-tag,
+html[data-frameos-theme='dark'] .scene-editor-canvas .frameos-diagram-node .frameos-node-title .frameos-tag {
+  box-shadow: 0 0 0 2px rgba(15, 23, 42, 0.72), 0 1px 3px rgba(0, 0, 0, 0.28);
 }
 
 .frameos-app-shell:not(.frameos-theme-dark) .scene-editor-canvas .react-flow__edge-path {

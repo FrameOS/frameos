@@ -727,6 +727,10 @@ export const workspaceLogic = kea<workspaceLogicType>([
     closeChatDrawer: true,
     openFrameChangeDrawer: (frameId: number, kind: FrameChangeDrawerKind) => ({ frameId, kind }),
     closeFrameChangeDrawer: true,
+    retargetOpenFrameDrawers: (
+      frameId: number,
+      previousFrameChangeDrawerSelection: FrameChangeDrawerSelection | null
+    ) => ({ frameId, previousFrameChangeDrawerSelection }),
     openUtilityPanel: (panel: WorkspaceUtilityPanel) => ({ panel }),
     closeUtilityPanel: true,
     selectNode: (nodeId: string | null) => ({ nodeId }),
@@ -824,6 +828,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
         openScheduleDrawer: () => null,
         openChatDrawer: () => null,
         openFrameChangeDrawer: () => null,
+        retargetOpenFrameDrawers: (state, { frameId }) => (state === null ? state : frameId),
         openUtilityPanel: (state, { panel }) => (panel === 'scenes' ? state : null),
       },
     ],
@@ -875,6 +880,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
         openScheduleDrawer: () => null,
         openChatDrawer: () => null,
         openUtilityPanel: () => null,
+        retargetOpenFrameDrawers: (state, { frameId }) => (state ? { ...state, frameId } : state),
       },
     ],
     utilityPanel: [
@@ -1128,6 +1134,26 @@ export const workspaceLogic = kea<workspaceLogicType>([
         }
       },
       closeFrameChangeDrawer: preserveFramesScroll,
+      retargetOpenFrameDrawers: ({ frameId, previousFrameChangeDrawerSelection }) => {
+        if (
+          !previousFrameChangeDrawerSelection ||
+          previousFrameChangeDrawerSelection.frameId === frameId ||
+          previousFrameChangeDrawerSelection.kind !== values.frameChangeDrawerSelection?.kind
+        ) {
+          return
+        }
+
+        const previousFrameActions = frameLogic({ frameId: previousFrameChangeDrawerSelection.frameId }).actions
+        previousFrameActions.hideDeployPlanModal()
+        previousFrameActions.hideUnsavedChangesModal()
+
+        const nextFrameActions = frameLogic({ frameId }).actions
+        if (previousFrameChangeDrawerSelection.kind === 'unsaved') {
+          nextFrameActions.showUnsavedChangesModal()
+        } else {
+          nextFrameActions.showDeployPlanModal()
+        }
+      },
       [newFrameForm.actionTypes.showForm]: preserveFramesScroll,
       [newFrameForm.actionTypes.hideForm]: preserveFramesScroll,
       setTheme: ({ theme }) => {
@@ -1221,6 +1247,9 @@ export const workspaceLogic = kea<workspaceLogicType>([
         actions.closeChatDrawer()
       }
       if (values.frameChangeDrawerSelection) {
+        const frameActions = frameLogic({ frameId: values.frameChangeDrawerSelection.frameId }).actions
+        frameActions.hideDeployPlanModal()
+        frameActions.hideUnsavedChangesModal()
         actions.closeFrameChangeDrawer()
       }
     }

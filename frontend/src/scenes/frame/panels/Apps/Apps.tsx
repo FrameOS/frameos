@@ -31,11 +31,12 @@ export function Apps() {
     return (
       <Box
         key={keyword}
-        className="frame-tool-row px-3 py-2 dndnode flex items-center justify-between space-x-2 cursor-move w-full"
+        className="frame-tool-row dndnode flex w-full cursor-move items-stretch gap-3 py-2 pl-0.5 pr-3"
         draggable
         onDragStart={(event) => onDragStart(event, keyword)}
       >
-        <div className="w-full">
+        <div className="frame-tool-drag-handle" aria-hidden="true" />
+        <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-2">
             <H6 className="min-w-0 flex-1 break-words">
               {app.name}

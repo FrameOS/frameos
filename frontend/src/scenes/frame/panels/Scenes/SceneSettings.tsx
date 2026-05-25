@@ -12,29 +12,39 @@ import { TextArea } from '../../../../components/TextArea'
 export interface SceneSettingsProps {
   sceneId: string
   onClose?: () => void
+  embedded?: boolean
 }
 
 const sceneSettingsFieldClass = 'scene-settings-field frame-tool-row rounded-xl p-3 @md:items-center @md:gap-4'
 const sceneSettingsPromptFieldClass = 'scene-settings-field frame-tool-row rounded-xl p-3 @md:items-start @md:gap-4'
+const sceneSettingsEmbeddedFieldClass = 'scene-settings-field @md:items-center @md:gap-4'
+const sceneSettingsEmbeddedPromptFieldClass = 'scene-settings-field @md:items-start @md:gap-4'
 
 function SceneSettingsLabel({ children }: { children: string }): JSX.Element {
   return <span className="frame-tool-control-label text-xs font-semibold uppercase tracking-wide">{children}</span>
 }
 
-export function SceneSettings({ sceneId, onClose }: SceneSettingsProps): JSX.Element {
+export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSettingsProps): JSX.Element {
   const { frameId, frameForm } = useValues(frameLogic)
   const { sceneIndex, scene } = useValues(sceneSettingsLogic({ frameId, sceneId }))
   if (!scene || !sceneId) {
     return <></>
   }
+  const fieldClassName = embedded ? sceneSettingsEmbeddedFieldClass : sceneSettingsFieldClass
+  const promptFieldClassName = embedded ? sceneSettingsEmbeddedPromptFieldClass : sceneSettingsPromptFieldClass
 
   return (
-    <Form logic={frameLogic} props={{ frameId }} formKey="frameForm" className="scene-settings-form frame-tool-panel">
+    <Form
+      logic={frameLogic}
+      props={{ frameId }}
+      formKey="frameForm"
+      className={embedded ? 'scene-settings-form' : 'scene-settings-form frame-tool-panel'}
+    >
       <Group name={['scenes', sceneIndex]}>
         <div className="w-full space-y-3 @container">
           <Group name={['settings']}>
             <Field
-              className={sceneSettingsFieldClass}
+              className={fieldClassName}
               name="refreshInterval"
               label={<SceneSettingsLabel>Refresh interval</SceneSettingsLabel>}
               tooltip={
@@ -52,14 +62,14 @@ export function SceneSettings({ sceneId, onClose }: SceneSettingsProps): JSX.Ele
               />
             </Field>
             <Field
-              className={sceneSettingsFieldClass}
+              className={fieldClassName}
               name="backgroundColor"
               label={<SceneSettingsLabel>Background color</SceneSettingsLabel>}
             >
-              <ColorInput name="backgroundColor" className="!h-10 !min-w-0 @md:max-w-[12rem]" placeholder="#ffffff" />
+              <ColorInput name="backgroundColor" className="!h-10 !min-w-0" placeholder="#ffffff" />
             </Field>
             <Field
-              className={sceneSettingsFieldClass}
+              className={fieldClassName}
               name="execution"
               label={<SceneSettingsLabel>Execution</SceneSettingsLabel>}
               tooltip={
@@ -73,8 +83,8 @@ export function SceneSettings({ sceneId, onClose }: SceneSettingsProps): JSX.Ele
                   <p>
                     <strong>Interpreted</strong> scenes are executed as-is, allowing for fast deploys without the need
                     for recompilation. This mode is slower, but when your frame takes 20 seconds to render, it doesn't
-                    matter much. Inline code nodes can use JavaScript, TypeScript, or JSX. You can't edit the nim
-                    source of apps in this mode.
+                    matter much. Inline code nodes can use JavaScript, TypeScript, or JSX. You can't edit the nim source
+                    of apps in this mode.
                   </p>
                   <p>A full deploy is needed if switching between modes.</p>
                 </div>
@@ -90,7 +100,7 @@ export function SceneSettings({ sceneId, onClose }: SceneSettingsProps): JSX.Ele
               />
             </Field>
             {scene.settings?.prompt ? (
-              <div className={`space-y-1 @md:flex ${sceneSettingsPromptFieldClass}`}>
+              <div className={`space-y-1 @md:flex ${promptFieldClassName}`}>
                 <label className="frameos-form-label flex items-center gap-1 text-sm font-medium @md:w-1/3">
                   <SceneSettingsLabel>Prompt</SceneSettingsLabel>
                 </label>
