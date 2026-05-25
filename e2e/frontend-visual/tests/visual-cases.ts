@@ -112,11 +112,12 @@ async function fillLogsSearch(page: Page): Promise<void> {
   await page.getByPlaceholder(/Search logs/i).fill('render')
 }
 
-async function collapsePrimarySidebar(page: Page): Promise<void> {
-  const collapseButton = page.locator('button[title="Close menu"], button[title="Collapse sidebars"]').first()
-  if (await collapseButton.isVisible().catch(() => false)) {
-    await collapseButton.click()
+async function closeSecondaryPanel(page: Page): Promise<void> {
+  const activeNavigationButton = page.locator('.frameos-nav-button[title^="Hide "]').first()
+  if (await activeNavigationButton.isVisible().catch(() => false)) {
+    await activeNavigationButton.click()
   }
+  await page.locator('.workspace-sidebar-collapsed').first().waitFor()
 }
 
 async function openAddFrameDrawer(page: Page): Promise<void> {
@@ -172,7 +173,7 @@ export const visualCases: VisualCase[] = [
     fullPage: true,
     variants: [
       { id: 'default' },
-      { id: 'collapsed-sidebar', prepare: collapsePrimarySidebar },
+      { id: 'secondary-panel-closed', prepare: closeSecondaryPanel },
       { id: 'add-frame', prepare: openAddFrameDrawer },
     ],
   },
