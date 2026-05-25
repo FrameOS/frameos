@@ -156,12 +156,7 @@ function SystemLogsDisclosure({ logs }: { logs: LogType[] }): JSX.Element {
           {visibleLogs.length} lines
         </span>
       </summary>
-      <div
-        className={clsx(
-          'mt-2 max-h-72 overflow-y-auto rounded-xl border px-3 py-2 font-mono text-xs leading-5',
-          theme === 'dark' ? 'border-white/10 bg-slate-950/80' : 'border-slate-200 bg-slate-50'
-        )}
-      >
+      <div className="mt-2 max-h-72 overflow-y-auto font-mono text-xs leading-5">
         {visibleLogs.length === 0 ? (
           <div className="py-6 text-center text-slate-500">Waiting for logs...</div>
         ) : (
@@ -291,7 +286,6 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
     deployPlansLoading,
     deployPlansLoadingStartedAt,
     deployRecommendation,
-    fastDeployPlanSummary,
     fullDeployPlanSummary,
   } = useValues(frameLogic({ frameId: frame.id }))
   const { hideDeployPlanModal, loadDeployPlans, saveAndDeployFrame, saveAndFastDeployFrame, saveAndFullDeployFrame } =
@@ -379,16 +373,6 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
                   </div>
                 </section>
               ) : null}
-              <section className="space-y-2">
-                <DrawerHeading>Fast deploy</DrawerHeading>
-                <SummaryRows
-                  items={
-                    fastDeployPlanSummary.length > 0
-                      ? fastDeployPlanSummary
-                      : [{ label: 'Behavior', value: 'Reload FrameOS with the current frame configuration' }]
-                  }
-                />
-              </section>
               {fullDeployPlanSummary.length > 0 ? (
                 <section className="space-y-2">
                   <DrawerHeading>Full deploy</DrawerHeading>

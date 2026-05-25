@@ -20,10 +20,13 @@ import { frameHost } from '../../decorators/frame'
 import { A } from 'kea-router'
 import { urls } from '../../urls'
 import { Tag } from '../../components/Tag'
+import { Label } from '../../components/Label'
 import { FrameosShell } from '../workspace/FrameosShell'
 import { isMobileWorkspaceViewport, workspaceLogic } from '../workspace/workspaceLogic'
+import { accountLogic } from './accountLogic'
 
 const settingsNavItems = [
+  ['Account', '#settings-account'],
   ['SSH Keys', '#settings-ssh'],
   ['FrameOS Gallery', '#settings-gallery'],
   ['OpenAI', '#settings-openai'],
@@ -65,6 +68,101 @@ function scrollToSettingsSection(sectionId: string, attempt = 0): void {
       window.setTimeout(() => scrollToSettingsSection(sectionId, attempt + 1), 50)
     }
   })
+}
+
+function AccountSettingsSection(): JSX.Element {
+  const {
+    account,
+    accountLoading,
+    accountPasswordChanged,
+    isAccountPasswordSubmitting,
+    passwordChanged,
+    passwordEditorOpen,
+  } = useValues(accountLogic)
+  const { resetAccountPassword, setPasswordEditorOpen } = useActions(accountLogic)
+
+  return (
+    <div className="space-y-4">
+      <H6 id="settings-account" className="pt-4">
+        Account
+      </H6>
+      <Box className="settings-account-card space-y-4">
+        <div className="space-y-1 @md:flex @md:gap-2">
+          <div className="@md:w-1/3">
+            <Label>Email</Label>
+          </div>
+          <div className="w-full text-sm">
+            {accountLoading ? <Spinner /> : <span className="frameos-strong font-medium">{account?.email}</span>}
+          </div>
+        </div>
+        {passwordEditorOpen ? (
+          <Form logic={accountLogic} formKey="accountPassword" enableFormOnSubmit className="space-y-3">
+            <Field name="current_password" label="Current password">
+              <TextInput type="password" autoComplete="current-password" />
+            </Field>
+            <Field name="password" label="New password">
+              <TextInput type="password" autoComplete="new-password" />
+            </Field>
+            <Field name="password2" label="Confirm password">
+              <TextInput type="password" autoComplete="new-password" />
+            </Field>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <Button
+                color="secondary"
+                size="small"
+                onClick={() => {
+                  resetAccountPassword()
+                  setPasswordEditorOpen(false)
+                }}
+                disabled={isAccountPasswordSubmitting}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                color={accountPasswordChanged ? 'primary' : 'secondary'}
+                size="small"
+                disabled={!accountPasswordChanged || isAccountPasswordSubmitting}
+                className="inline-flex items-center gap-2"
+              >
+                {isAccountPasswordSubmitting ? <Spinner color="white" /> : null}
+                Change password
+              </Button>
+            </div>
+          </Form>
+        ) : (
+          <div className="space-y-1 @md:flex @md:gap-2">
+            <div className="@md:w-1/3">
+              <Label>Password</Label>
+            </div>
+            <div className="flex w-full flex-wrap items-center gap-2 text-sm">
+              <button
+                type="button"
+                onClick={() => setPasswordEditorOpen(true)}
+                className="frameos-link font-semibold hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+              >
+                Change password
+              </button>
+              {passwordChanged ? <span className="text-emerald-500">Password updated.</span> : null}
+            </div>
+          </div>
+        )}
+      </Box>
+    </div>
+  )
+}
+
+function IngressAccountSettingsSection(): JSX.Element {
+  return (
+    <div className="space-y-4">
+      <H6 id="settings-account" className="pt-4">
+        Account
+      </H6>
+      <Box className="settings-account-card">
+        <div className="frameos-muted text-sm">Account access is managed by Home Assistant ingress.</div>
+      </Box>
+    </div>
+  )
 }
 
 export function Settings() {
@@ -168,6 +266,7 @@ export function Settings() {
       topBar={settingsActions}
     >
       <div className="frame-tool-panel frame-settings-panel settings-panel mx-auto max-w-5xl @container">
+        {isHassioIngress ? <IngressAccountSettingsSection /> : <AccountSettingsSection />}
         {savedSettingsLoading ? (
           <Spinner />
         ) : (

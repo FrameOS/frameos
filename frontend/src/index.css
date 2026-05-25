@@ -2119,6 +2119,14 @@ html[data-frameos-theme='dark'] .workspace-logo-button:hover {
   padding: 1rem;
 }
 
+.frame-settings-panel .settings-account-card {
+  background: var(--tool-bg);
+  border: 1px solid var(--tool-border);
+  border-radius: 22px;
+  margin-top: 0.75rem;
+  padding: 1rem;
+}
+
 .frame-settings-panel form > h6 + p {
   color: var(--tool-muted);
   margin-top: 0.5rem;

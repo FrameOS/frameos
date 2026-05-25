@@ -126,5 +126,20 @@ async def test_hassio_run_mode_ingress(clear_env, monkeypatch):
     resp_frames = client.get("/api/frames")
     assert resp_frames.status_code == 200
 
+    resp_user = client.get("/api/user")
+    assert resp_user.status_code == 401
+    assert resp_user.json()["detail"] == "Account management is not available with HASSIO_RUN_MODE."
+
+    resp_password = client.post(
+        "/api/user/password",
+        json={
+            "current_password": "testpassword",
+            "password": "newpassword",
+            "password2": "newpassword",
+        },
+    )
+    assert resp_password.status_code == 401
+    assert resp_password.json()["detail"] == "Account management is not available with HASSIO_RUN_MODE."
+
     resp_root = client.get("/")
     assert resp_root.status_code == 200
