@@ -1,10 +1,13 @@
-from fastapi import Depends, Header, HTTPException, Request, status
+import datetime
+
+from fastapi import Depends, Header, HTTPException, Request, Response, status
 from sqlalchemy.orm import Session
 from app import config as app_config
-from app.api.auth import get_current_user_from_request
+from app.api.auth import ACCESS_TOKEN_EXPIRE_MINUTES, _should_use_secure_cookie, get_current_user_from_request
 from app.database import get_db
 from app.models.user import User
-from app.schemas.users import HasFirstUserResponse, UserPasswordUpdate, UserResponse
+from app.schemas.users import HasFirstUserResponse, UserEmailUpdate, UserPasswordUpdate, UserResponse
+from app.utils.session_cookie import SESSION_COOKIE_NAME, create_session_cookie_value
 from . import api_no_auth, api_with_auth
 
 @api_no_auth.get("/has_first_user", response_model=HasFirstUserResponse)
@@ -32,6 +35,37 @@ async def get_current_local_user(
 
 @api_with_auth.get("/user", response_model=UserResponse)
 def api_user_get(current_user: User = Depends(get_current_local_user)):
+    return {"email": current_user.email}
+
+
+@api_with_auth.post("/user/email", response_model=UserResponse)
+def api_user_update_email(
+    data: UserEmailUpdate,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_local_user),
+):
+    if data.email == current_user.email:
+        return {"email": current_user.email}
+    if db.query(User).filter(User.email == data.email, User.id != current_user.id).first() is not None:
+        raise HTTPException(status_code=400, detail="Email already in use.")
+
+    current_user.email = data.email
+    db.add(current_user)
+    db.commit()
+
+    access_token_expires = datetime.timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    session_value, max_age = create_session_cookie_value(email=current_user.email, expires_delta=access_token_expires)
+    response.set_cookie(
+        key=SESSION_COOKIE_NAME,
+        value=session_value,
+        max_age=max_age,
+        httponly=True,
+        samesite="lax",
+        secure=_should_use_secure_cookie(request),
+    )
+
     return {"email": current_user.email}
 
 

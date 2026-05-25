@@ -266,11 +266,11 @@ export function buildInferredFullDeployPlanSummary(
     ...(frame?.device ? [{ label: 'Device', value: String(frame.device) }] : []),
     {
       label: 'Plan source',
-      value: 'Inferred from the last successful deploy. Reload to inspect the frame.',
+      value: 'Refresh the plan to see more details.',
     },
     {
       label: 'Target details',
-      value: 'Reload to check architecture, packages, and build strategy.',
+      value: 'Refresh the plan to check architecture, packages, and build strategy.',
     },
   ]
 

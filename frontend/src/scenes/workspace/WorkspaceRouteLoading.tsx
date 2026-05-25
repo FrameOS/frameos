@@ -4,6 +4,7 @@ import clsx from 'clsx'
 import { useEffect, useState, type CSSProperties, type MouseEvent } from 'react'
 import {
   ChevronDownIcon,
+  ChevronRightIcon,
   ChevronUpIcon,
   Cog6ToothIcon,
   CodeBracketIcon,
@@ -81,7 +82,9 @@ function LoadingNavButton({
           ) : (
             <ChevronDownIcon className="h-7 w-7 lg:hidden" />
           )}
-          <span className="hidden lg:flex">{children}</span>
+          <span className="hidden lg:flex">
+            {sidebarOpen ? children : <ChevronRightIcon className="h-7 w-7" />}
+          </span>
         </>
       ) : (
         children

@@ -1,4 +1,4 @@
-import { actions, afterMount, kea, path, reducers } from 'kea'
+import { actions, afterMount, kea, listeners, path, reducers } from 'kea'
 import { forms } from 'kea-forms'
 import { loaders } from 'kea-loaders'
 
@@ -17,10 +17,18 @@ export interface AccountPasswordForm {
   password2: string
 }
 
+export interface AccountEmailForm {
+  email: string
+}
+
 const defaultPasswordForm: AccountPasswordForm = {
   current_password: '',
   password: '',
   password2: '',
+}
+
+const defaultEmailForm: AccountEmailForm = {
+  email: '',
 }
 
 async function responseErrorMessage(response: Response, fallback: string): Promise<string> {
@@ -47,10 +55,18 @@ async function responseErrorMessage(response: Response, fallback: string): Promi
 export const accountLogic = kea<accountLogicType>([
   path(['src', 'scenes', 'settings', 'accountLogic']),
   actions({
+    beginEmailChange: true,
+    setEmailEditorOpen: (open: boolean) => ({ open }),
     setPasswordChanged: (changed: boolean) => ({ changed }),
     setPasswordEditorOpen: (open: boolean) => ({ open }),
   }),
   reducers({
+    emailEditorOpen: [
+      false,
+      {
+        setEmailEditorOpen: (_, { open }) => open,
+      },
+    ],
     passwordEditorOpen: [
       false,
       {
@@ -82,7 +98,48 @@ export const accountLogic = kea<accountLogicType>([
       },
     ],
   })),
-  forms(({ actions }) => ({
+  forms(({ actions, values }) => ({
+    accountEmail: {
+      defaults: defaultEmailForm,
+      options: {
+        showErrorsOnTouch: true,
+      },
+      errors: (form: Partial<AccountEmailForm>) => {
+        const email = form.email?.trim() ?? ''
+        return {
+          email: !email
+            ? 'Enter an email address'
+            : !email.includes('@') || email.startsWith('@') || email.endsWith('@')
+            ? 'Enter a valid email address'
+            : null,
+        }
+      },
+      submit: async (form) => {
+        const email = form.email.trim()
+        if (email === values.account?.email) {
+          actions.resetAccountEmail(defaultEmailForm)
+          actions.setEmailEditorOpen(false)
+          return
+        }
+
+        const response = await apiFetch('/api/user/email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email }),
+        })
+
+        if (!response.ok) {
+          actions.setAccountEmailManualErrors({ email: await responseErrorMessage(response, 'Failed to update email') })
+          return
+        }
+
+        const account = (await response.json()) as AccountUser
+        actions.loadAccountSuccess(account)
+        actions.resetAccountEmail(defaultEmailForm)
+        actions.setEmailEditorOpen(false)
+        showSuccessMessage('Email changed')
+      },
+    },
     accountPassword: {
       defaults: defaultPasswordForm,
       options: {
@@ -121,4 +178,10 @@ export const accountLogic = kea<accountLogicType>([
   afterMount(({ actions }) => {
     actions.loadAccount()
   }),
+  listeners(({ actions, values }) => ({
+    beginEmailChange: () => {
+      actions.setAccountEmailValues({ email: values.account?.email ?? '' })
+      actions.setEmailEditorOpen(true)
+    },
+  })),
 ])

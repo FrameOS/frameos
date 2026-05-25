@@ -354,7 +354,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
                         disabled={deployPlansLoading}
                         className="frameos-secondary-button rounded-lg px-2.5 py-1 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
                       >
-                        Reload
+                        Refresh
                       </button>
                     }
                   >
@@ -374,8 +374,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
                 </section>
               ) : null}
               {fullDeployPlanSummary.length > 0 ? (
-                <section className="space-y-2">
-                  <DrawerHeading>Full deploy</DrawerHeading>
+                <section>
                   <SummaryRows items={fullDeployPlanSummary} />
                 </section>
               ) : null}

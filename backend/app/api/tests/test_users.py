@@ -14,6 +14,14 @@ def assert_stored_password(db: Session, email: str, password: str, expected: boo
     user = db.query(User).filter_by(email=email).one()
     assert user.check_password(password) is expected
 
+
+def create_user(db: Session, email: str, password: str = "testpassword") -> User:
+    user = User(email=email)
+    user.set_password(password)
+    db.add(user)
+    db.commit()
+    return user
+
 @pytest.mark.asyncio
 async def test_has_first_user_no_users(async_client, db: Session):
     """
@@ -68,11 +76,82 @@ async def test_get_current_user_requires_auth(no_auth_client):
 
 
 @pytest.mark.asyncio
+async def test_change_current_user_email_requires_auth(no_auth_client, db: Session):
+    create_user(db, "emailauth@example.com")
+
+    response = await no_auth_client.post("/api/user/email", json={"email": "new@example.com"})
+
+    assert response.status_code == HTTP_401_UNAUTHORIZED
+    db.expire_all()
+    assert db.query(User).filter_by(email="emailauth@example.com").one()
+    assert db.query(User).filter_by(email="new@example.com").first() is None
+
+
+@pytest.mark.asyncio
+async def test_change_current_user_email_updates_cookie_session(no_auth_client, db: Session):
+    create_user(db, "old@example.com")
+    login_response = await no_auth_client.post(
+        "/api/login",
+        data={"username": "old@example.com", "password": "testpassword"},
+    )
+    assert login_response.status_code == HTTP_200_OK
+
+    response = await no_auth_client.post("/api/user/email", json={"email": "new@example.com"})
+
+    assert response.status_code == HTTP_200_OK
+    assert response.json() == {"email": "new@example.com"}
+    assert "password" not in response.json()
+    assert "frameos_session" in response.headers.get("set-cookie", "")
+
+    db.expire_all()
+    assert db.query(User).filter_by(email="old@example.com").first() is None
+    assert_stored_password(db, "new@example.com", "testpassword", True)
+
+    current_user_response = await no_auth_client.get("/api/user")
+    assert current_user_response.status_code == HTTP_200_OK
+    assert current_user_response.json() == {"email": "new@example.com"}
+
+    await assert_password_login_status(no_auth_client, "old@example.com", "testpassword", HTTP_401_UNAUTHORIZED)
+    await assert_password_login_status(no_auth_client, "new@example.com", "testpassword", HTTP_200_OK)
+
+
+@pytest.mark.asyncio
+async def test_change_current_user_email_trims_email(async_client, db: Session):
+    response = await async_client.post("/api/user/email", json={"email": "  renamed@example.com  "})
+
+    assert response.status_code == HTTP_200_OK
+    assert response.json() == {"email": "renamed@example.com"}
+    db.expire_all()
+    assert db.query(User).filter_by(email="test@example.com").first() is None
+    assert db.query(User).filter_by(email="renamed@example.com").one()
+
+
+@pytest.mark.asyncio
+async def test_change_current_user_email_rejects_duplicate(async_client, db: Session):
+    create_user(db, "other@example.com", "otherpassword")
+
+    response = await async_client.post("/api/user/email", json={"email": "other@example.com"})
+
+    assert response.status_code == HTTP_400_BAD_REQUEST
+    assert response.json()["detail"] == "Email already in use."
+    db.expire_all()
+    assert_stored_password(db, "test@example.com", "testpassword", True)
+    assert_stored_password(db, "other@example.com", "otherpassword", True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("email", ["not-an-email", "missing-local@", "@missing-domain", "has space@example.com"])
+async def test_change_current_user_email_rejects_invalid_email(async_client, db: Session, email):
+    response = await async_client.post("/api/user/email", json={"email": email})
+
+    assert response.status_code == HTTP_422_UNPROCESSABLE_ENTITY
+    db.expire_all()
+    assert_stored_password(db, "test@example.com", "testpassword", True)
+
+
+@pytest.mark.asyncio
 async def test_change_current_user_password_requires_auth(no_auth_client, db: Session):
-    user = User(email="passwordauth@example.com")
-    user.set_password("testpassword")
-    db.add(user)
-    db.commit()
+    create_user(db, "passwordauth@example.com")
 
     response = await no_auth_client.post(
         "/api/user/password",
@@ -231,6 +310,21 @@ async def test_get_current_user_disabled_with_hassio_run_mode(async_client, monk
 
     assert response.status_code == HTTP_401_UNAUTHORIZED
     assert response.json()["detail"] == "Account management is not available with HASSIO_RUN_MODE."
+
+
+@pytest.mark.asyncio
+async def test_change_current_user_email_disabled_with_hassio_run_mode(async_client, db: Session, monkeypatch):
+    from app import config as app_config
+
+    monkeypatch.setattr(app_config.config, "HASSIO_RUN_MODE", "ingress")
+
+    response = await async_client.post("/api/user/email", json={"email": "new@example.com"})
+
+    assert response.status_code == HTTP_401_UNAUTHORIZED
+    assert response.json()["detail"] == "Account management is not available with HASSIO_RUN_MODE."
+    db.expire_all()
+    assert_stored_password(db, "test@example.com", "testpassword", True)
+    assert db.query(User).filter_by(email="new@example.com").first() is None
 
 
 @pytest.mark.asyncio

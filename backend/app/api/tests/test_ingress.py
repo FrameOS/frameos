@@ -130,6 +130,10 @@ async def test_hassio_run_mode_ingress(clear_env, monkeypatch):
     assert resp_user.status_code == 401
     assert resp_user.json()["detail"] == "Account management is not available with HASSIO_RUN_MODE."
 
+    resp_email = client.post("/api/user/email", json={"email": "new@example.com"})
+    assert resp_email.status_code == 401
+    assert resp_email.json()["detail"] == "Account management is not available with HASSIO_RUN_MODE."
+
     resp_password = client.post(
         "/api/user/password",
         json={
