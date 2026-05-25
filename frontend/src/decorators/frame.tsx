@@ -104,7 +104,7 @@ export function frameNeedsInitialDeploy(frame: FrameType): boolean {
 
 export function frameStatusDescription(frame: FrameType): string {
   if (frameNeedsInitialDeploy(frame)) {
-    return 'new frame - press "Full deploy" to set up'
+    return 'new frame - press the deploy icon to set up'
   }
 
   const status = frameStatusLabel(frame)

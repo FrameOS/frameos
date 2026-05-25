@@ -102,8 +102,20 @@ function stringifyList(values: unknown[]): string {
   return values.map((value) => String(value)).join(', ')
 }
 
+export function normalizeFrameosVersion(version: unknown): string | null {
+  return typeof version === 'string' && version.trim() ? version.split('+')[0] : null
+}
+
+export function deployedFrameosVersion(deploy?: Partial<FrameType> | Record<string, unknown> | null): string | null {
+  return normalizeFrameosVersion((deploy as Record<string, unknown> | null | undefined)?.frameos_version)
+}
+
+export function deployPlanPreviousFrameosVersion(plan?: DeployPlanResponse | null): string | null {
+  return normalizeFrameosVersion(plan?.previous_frameos_version)
+}
+
 function previousFrameosVersion(plan?: DeployPlanResponse | null): string {
-  return plan?.previous_frameos_version ? String(plan.previous_frameos_version).split('+')[0] : 'Not deployed'
+  return deployPlanPreviousFrameosVersion(plan) ?? 'Not deployed'
 }
 
 export function buildDeployPlanRequestBody(
@@ -238,16 +250,38 @@ export function buildFullDeployPlanSummary(
   return items
 }
 
+export function buildInferredFullDeployPlanSummary(
+  lastDeploy: Partial<FrameType> | Record<string, unknown> | null,
+  frame?: Partial<FrameType> | null
+): SummaryItem[] {
+  const previousVersion = deployedFrameosVersion(lastDeploy)
+  const items: SummaryItem[] = [
+    {
+      label: 'FrameOS version',
+      value:
+        previousVersion && previousVersion === CURRENT_FRAMEOS_VERSION
+          ? CURRENT_FRAMEOS_VERSION
+          : `${previousVersion ?? 'Not deployed'} -> ${CURRENT_FRAMEOS_VERSION}`,
+    },
+    ...(frame?.device ? [{ label: 'Device', value: String(frame.device) }] : []),
+    {
+      label: 'Plan source',
+      value: 'Inferred from the last successful deploy. Reload to inspect the frame.',
+    },
+    {
+      label: 'Target details',
+      value: 'Reload to check architecture, packages, and build strategy.',
+    },
+  ]
+
+  return items
+}
+
 export function buildDeployRecommendation(
-  plan: DeployPlanResponse | null,
+  previousVersion: string | null,
   hasPreviousDeploy: boolean,
   deployChangeDetails: ChangeDetail[]
-): DeployRecommendation | null {
-  if (!plan) {
-    return null
-  }
-
-  const previousVersion = plan.previous_frameos_version ? String(plan.previous_frameos_version).split('+')[0] : null
+): DeployRecommendation {
   const versionChanged = previousVersion !== CURRENT_FRAMEOS_VERSION
   const fullDeployChanges = deployChangeDetails
     .filter((change) => change.requiresFullDeploy && !change.label.startsWith('FrameOS upgrade'))
@@ -266,7 +300,7 @@ export function buildDeployRecommendation(
     return {
       mode: 'full',
       title: 'Suggested: full deploy',
-      description: `These changes require rebuilding or reinstalling FrameOS: ${fullDeployChanges.join(', ')}.`,
+      description: 'You have changes that require rebuilding or reinstalling FrameOS.',
     }
   }
 

@@ -25,6 +25,9 @@ import {
   buildDeployRecommendation,
   buildFastDeployPlanSummary,
   buildFullDeployPlanSummary,
+  buildInferredFullDeployPlanSummary,
+  deployedFrameosVersion,
+  deployPlanPreviousFrameosVersion,
 } from './frameDeployUtils'
 import { getDeployPlanErrorMessage } from './frameDeployErrors'
 import { urls } from '../../urls'
@@ -287,10 +290,7 @@ function computeChangeDetails(
 
   const sceneDetails = sceneChangeDetails(next?.scenes ?? [], previous?.scenes ?? [])
 
-  const previousFrameosVersion =
-    typeof (previous as Record<string, unknown> | null | undefined)?.frameos_version === 'string'
-      ? String((previous as Record<string, unknown>).frameos_version).split('+')[0]
-      : null
+  const previousFrameosVersion = deployedFrameosVersion(previous)
 
   if (!previousFrameosVersion || previousFrameosVersion !== CURRENT_FRAMEOS_VERSION) {
     details.push({
@@ -300,6 +300,22 @@ function computeChangeDetails(
   }
 
   return [...details, ...sceneDetails]
+}
+
+function sortDeployChangeDetails(changes: ChangeDetail[]): ChangeDetail[] {
+  return changes
+    .map((change, index) => ({ change, index }))
+    .sort((first, second) => {
+      const firstPriority = first.change.label.startsWith('FrameOS upgrade') ? 0 : first.change.requiresFullDeploy ? 1 : 2
+      const secondPriority = second.change.label.startsWith('FrameOS upgrade')
+        ? 0
+        : second.change.requiresFullDeploy
+          ? 1
+          : 2
+
+      return firstPriority - secondPriority || first.index - second.index
+    })
+    .map(({ change }) => change)
 }
 
 function normalizeFrameKeyValueForComparison(key: keyof FrameType, value: unknown): unknown {
@@ -833,6 +849,9 @@ export const frameLogic = kea<frameLogicType>([
       {
         loadDeployPlans: () => null,
         loadDeployPlansSuccess: (_, { plan }) => plan,
+        resetFrameForm: () => null,
+        setFrameFormValue: () => null,
+        setFrameFormValues: () => null,
       },
     ],
     deployPlansLoading: [
@@ -855,6 +874,11 @@ export const frameLogic = kea<frameLogicType>([
         loadDeployPlans: () => null,
         loadDeployPlansSuccess: () => null,
         loadDeployPlansFailure: (_, { error }) => error,
+        resetFrameForm: () => null,
+        setFrameFormValue: () => null,
+        setFrameFormValues: () => null,
+        showDeployPlanModal: () => null,
+        hideDeployPlanModal: () => null,
       },
     ],
     deployPlanModalOpen: [
@@ -977,9 +1001,6 @@ export const frameLogic = kea<frameLogicType>([
       const payload = (await response.json()) as DeployPlanApiResponse
       actions.loadDeployPlansSuccess(payload.plan)
     },
-    showDeployPlanModal: async () => {
-      actions.loadDeployPlans()
-    },
   })),
   selectors(() => ({
     frameId: [() => [(_, props) => props.frameId], (frameId) => frameId],
@@ -1022,7 +1043,7 @@ export const frameLogic = kea<frameLogicType>([
     undeployedChanges: [
       (s) => [s.frame, s.lastDeploy, s.mode, s.isFrameAdminMode],
       (frame: FrameType, lastDeploy: Partial<FrameType> | null, mode: FrameType['mode'], isFrameAdminMode: boolean) =>
-        !isFrameAdminMode && computeChangeDetails(lastDeploy, frame, mode).length > 0,
+        !isFrameAdminMode && !frame?.archived && computeChangeDetails(lastDeploy, frame, mode).length > 0,
     ],
     unsavedChangeDetails: [
       (s) => [s.frame, s.frameForm, s.mode],
@@ -1031,7 +1052,7 @@ export const frameLogic = kea<frameLogicType>([
     undeployedChangeDetails: [
       (s) => [s.lastDeploy, s.frame, s.mode, s.isFrameAdminMode],
       (lastDeploy, frame, mode, isFrameAdminMode): ChangeDetail[] =>
-        isFrameAdminMode ? [] : computeChangeDetails(lastDeploy, frame, mode),
+        isFrameAdminMode || frame?.archived ? [] : computeChangeDetails(lastDeploy, frame, mode),
     ],
     requiresRecompilation: [
       (s) => [s.lastDeploy, s.frame, s.frameForm, s.mode, s.isFrameAdminMode],
@@ -1042,7 +1063,7 @@ export const frameLogic = kea<frameLogicType>([
         mode: FrameType['mode'],
         isFrameAdminMode: boolean
       ): boolean => {
-        if (isFrameAdminMode) {
+        if (isFrameAdminMode || frame?.archived) {
           return false
         }
         const pendingFrame = Object.keys(frameForm ?? {}).length > 0 ? frameForm : frame
@@ -1052,7 +1073,7 @@ export const frameLogic = kea<frameLogicType>([
     deployChangeDetails: [
       (s) => [s.lastDeploy, s.frameForm, s.mode, s.isFrameAdminMode],
       (lastDeploy, frameForm, mode, isFrameAdminMode): ChangeDetail[] =>
-        isFrameAdminMode ? [] : computeChangeDetails(lastDeploy, frameForm, mode),
+        isFrameAdminMode ? [] : sortDeployChangeDetails(computeChangeDetails(lastDeploy, frameForm, mode)),
     ],
     undeployedSummaryItems: [
       (s) => [s.lastDeploy, s.frame, s.frameForm, s.requiresRecompilation, s.isFrameAdminMode],
@@ -1075,22 +1096,29 @@ export const frameLogic = kea<frameLogicType>([
       (fastDeployPlan): SummaryItem[] => buildFastDeployPlanSummary(fastDeployPlan),
     ],
     fullDeployPlanSummary: [
-      (s) => [s.fullDeployPlan, s.frameForm],
-      (fullDeployPlan: DeployPlanResponse | null, frameForm: Partial<FrameType>): SummaryItem[] =>
-        buildFullDeployPlanSummary(fullDeployPlan, frameForm),
+      (s) => [s.fullDeployPlan, s.frameForm, s.lastDeploy],
+      (
+        fullDeployPlan: DeployPlanResponse | null,
+        frameForm: Partial<FrameType>,
+        lastDeploy: Partial<FrameType> | null
+      ): SummaryItem[] => {
+        const probedSummary = buildFullDeployPlanSummary(fullDeployPlan, frameForm)
+        return probedSummary.length > 0 ? probedSummary : buildInferredFullDeployPlanSummary(lastDeploy, frameForm)
+      },
     ],
     deployRecommendation: [
       (s) => [s.deployPlan, s.lastDeploy, s.deployChangeDetails],
       (deployPlan, lastDeploy, deployChangeDetails): DeployRecommendation | null =>
-        buildDeployRecommendation(deployPlan, Boolean(lastDeploy), deployChangeDetails),
+        buildDeployRecommendation(
+          deployPlanPreviousFrameosVersion(deployPlan) ?? deployedFrameosVersion(lastDeploy),
+          Boolean(lastDeploy),
+          deployChangeDetails
+        ),
     ],
     hasPendingFrameosUpgrade: [
       (s) => [s.lastDeploy],
       (lastDeploy: Partial<FrameType> | null): boolean => {
-        const previousVersion =
-          typeof (lastDeploy as Record<string, unknown> | null | undefined)?.frameos_version === 'string'
-            ? String((lastDeploy as Record<string, unknown>).frameos_version).split('+')[0]
-            : null
+        const previousVersion = deployedFrameosVersion(lastDeploy)
         return Boolean(previousVersion && previousVersion !== CURRENT_FRAMEOS_VERSION)
       },
     ],
