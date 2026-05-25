@@ -331,6 +331,46 @@ async def test_api_frame_states_returns_empty_shell_and_refreshes(async_client, 
 
 
 @pytest.mark.asyncio
+async def test_api_frame_states_response_does_not_wait_for_refresh(async_client, db, redis):
+    frame = await new_frame(db, redis, 'SlowStatesFrame', 'localhost', 'localhost')
+    cache_key = frames_api._frame_states_cache_key(frame.id)
+    lock_key = frames_api._frame_states_cache_lock_key(frame.id)
+    fresh_state = {"sceneId": "fresh-scene", "states": {"fresh-scene": {"count": 3}}}
+    await redis.delete(cache_key, lock_key)
+    await redis.set(f"frame:{frame.id}:active_scene", "last-scene")
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def slow_load_states(_redis, _frame):
+        started.set()
+        await release.wait()
+        return fresh_state
+
+    with patch("app.api.frames._load_frame_states", new=AsyncMock(side_effect=slow_load_states)) as load_states:
+        response = await asyncio.wait_for(async_client.get(f'/api/frames/{frame.id}/states'), timeout=0.5)
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["sceneId"] == "last-scene"
+        assert payload["states"] == {}
+        assert payload["cache"]["cached"] is False
+        assert payload["cache"]["refreshing"] is True
+
+        await asyncio.wait_for(started.wait(), timeout=0.5)
+        load_states.assert_awaited_once()
+        release.set()
+
+        for _ in range(10):
+            refreshed = await frames_api._read_frame_states_cache(redis, cache_key)
+            if refreshed and refreshed["states"] == fresh_state["states"]:
+                break
+            await asyncio.sleep(0.05)
+        else:
+            pytest.fail("states cache was not refreshed after the response returned")
+
+
+@pytest.mark.asyncio
 async def test_api_frame_states_returns_stale_cache_and_refreshes(async_client, db, redis):
     frame = await new_frame(db, redis, 'StaleStatesFrame', 'localhost', 'localhost')
     cache_key = frames_api._frame_states_cache_key(frame.id)
@@ -558,6 +598,7 @@ async def test_api_frame_get_image_no_scene_id(async_client, db, redis):
     cached active scene, the endpoint should still return the image without
     crashing (no NameError on `now`/`width`/`height`)."""
     frame = await new_frame(db, redis, 'NoSceneFrame', 'example.com', 'localhost')
+    await redis.delete(f"frame:{frame.id}:active_scene")
 
     fake_png = b'\x89PNG\r\n\x1a\n' + b'\x00' * 100
 

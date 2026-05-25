@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import { useValues } from 'kea'
+import { A } from 'kea-router'
 import clsx from 'clsx'
 import { ParentSize } from '@visx/responsive'
 import { scaleLinear, scaleTime } from '@visx/scale'
@@ -9,6 +10,7 @@ import { AreaChart } from './AreaChart'
 import { metricsLogic, type MetricPoint, type MetricSeries, type TimeRange } from './metricsLogic'
 import { workspaceLogic } from '../../../workspace/workspaceLogic'
 import { metricChartThemes, themeMetricSeries, type MetricChartTheme } from './chartTheme'
+import { urls } from '../../../../urls'
 
 const chartHeight = 28
 const chartMargin = { top: 3, right: 1, bottom: 3, left: 1 }
@@ -112,8 +114,9 @@ export function HeaderMetrics({ frameId }: { frameId: number }) {
   return (
     <div className="relative z-10 flex min-w-0 flex-1 flex-nowrap items-center gap-1 overflow-x-auto overflow-y-visible pr-1 @4xl:flex-none @4xl:overflow-visible @4xl:gap-1.5 @5xl:pr-2">
       {metricEntries.map(([key, series]) => (
-        <div
+        <A
           key={key}
+          href={urls.frame(frameId, 'metrics')}
           className={clsx(
             'relative z-0 flex h-8 shrink-0 items-center gap-1 overflow-visible rounded-lg border px-2 shadow-sm backdrop-blur-sm transition-colors hover:z-20 focus-within:z-20 @4xl:h-9 @4xl:gap-2 @4xl:px-2.5',
             theme === 'dark'
@@ -148,7 +151,7 @@ export function HeaderMetrics({ frameId }: { frameId: number }) {
               className="hidden @5xl:block @5xl:w-20 @7xl:w-[104px]"
             />
           ) : null}
-        </div>
+        </A>
       ))}
     </div>
   )

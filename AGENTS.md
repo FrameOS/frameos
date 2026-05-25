@@ -46,6 +46,7 @@
 ## End-to-end tooling
 - `e2e/` directory contains scripts (`run`, `makescenes.py`, `makesnapshots.py`) to render scenes and compare against stored snapshots in `e2e/snapshots`. Run all tests with `./run` from that directory, or specify individual scenes like `./run dataGradient`. 【F:e2e/README.md†L1-L6】
 - Do not run frontend visual regression tests (`e2e/frontend-visual`, Playwright screenshots, or snapshot updates) during normal iteration. Only run them when the user explicitly asks for visual tests or asks to commit changes.
+- Never commit visual regression snapshot updates produced by a backend/frontend stack running locally. Local macOS font rendering and browser rasterization differ from CI's Linux environment, so CI should be the source of truth for Playwright visual baselines.
 
 ## Deployment & operations
 - Docker support: top-level `docker-compose.yml` builds the full stack (backend plus dependencies) exposing port 8989 and persisting SQLite DB under a named volume.

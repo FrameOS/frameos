@@ -102,6 +102,31 @@ function normalizeAssetPath(path: string, assetsPath?: string): string {
   return normalizedPath ? `${normalizedAssetsPath}/${normalizedPath}` : normalizedAssetsPath
 }
 
+async function responseErrorMessage(response: Response, fallback: string): Promise<string> {
+  try {
+    const text = await response.text()
+    if (!text) {
+      return fallback
+    }
+    try {
+      const payload = JSON.parse(text) as { detail?: unknown; message?: unknown }
+      return typeof payload.detail === 'string'
+        ? payload.detail
+        : typeof payload.message === 'string'
+        ? payload.message
+        : fallback
+    } catch {
+      return text
+    }
+  } catch {
+    return fallback
+  }
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback
+}
+
 export const assetsLogic = kea<assetsLogicType>([
   path(['src', 'scenes', 'frame', 'assetsLogic']),
   props({} as AssetsLogicProps),
@@ -172,16 +197,37 @@ export const assetsLogic = kea<assetsLogicType>([
           if (isInFrameAdminMode()) {
             return true
           }
+          const taskId = `asset-sync:${props.frameId}:${Date.now()}`
+          longRunningTasksModel.actions.startTask({
+            id: taskId,
+            frameId: props.frameId,
+            kind: 'upload',
+            title: 'Syncing fonts',
+            detail: 'Preparing font sync',
+          })
           try {
             const response = await apiFetch(frameAssetsApiPath(props.frameId, 'assets/sync'), {
               method: 'POST',
             })
             if (!response.ok) {
-              throw new Error('Failed to upload fonts')
+              throw new Error(await responseErrorMessage(response, 'Failed to sync fonts'))
             }
+            longRunningTasksModel.actions.finishTask({
+              taskId,
+              frameId: props.frameId,
+              kind: 'upload',
+              detail: 'Fonts synced',
+            })
+            actions.loadAssets()
             return true
           } catch (error) {
             console.error(error)
+            longRunningTasksModel.actions.taskFailed({
+              taskId,
+              frameId: props.frameId,
+              kind: 'upload',
+              detail: errorMessage(error, 'Failed to sync fonts'),
+            })
             return false
           }
         },

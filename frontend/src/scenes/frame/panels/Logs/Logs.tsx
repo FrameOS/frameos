@@ -411,15 +411,21 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
       {compact ? null : (
         <div
           className={clsx(
-            'logs-filter-toolbar z-20 mb-4 flex flex-wrap items-center gap-3',
-            fullScreen ? 'logs-filter-toolbar-floating pr-14' : 'px-1 pb-2 pr-12'
+            'logs-filter-toolbar z-20 mb-4 flex items-center',
+            fullScreen ? 'logs-filter-toolbar-floating gap-2' : 'flex-wrap gap-3 px-1 pb-2 pr-12'
           )}
         >
-          <label className="relative block min-w-0 flex-[1_1_14rem] @md:max-w-2xl">
+          <label
+            className={clsx(
+              'relative block min-w-0',
+              fullScreen ? 'flex-1' : 'flex-[1_1_14rem] @md:max-w-2xl'
+            )}
+          >
             <span className="sr-only">Search logs</span>
             <MagnifyingGlassIcon
               className={clsx(
-                'pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2',
+                'pointer-events-none absolute top-1/2 h-4 w-4 -translate-y-1/2',
+                fullScreen ? 'left-2.5' : 'left-3',
                 renderTheme === 'dark' ? 'text-slate-500' : 'text-slate-400'
               )}
             />
@@ -428,7 +434,8 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
               onChange={(event) => setLogSearch(event.target.value)}
               placeholder="Search logs..."
               className={clsx(
-                'h-10 w-full rounded-full border py-2 pl-9 pr-10 font-sans text-sm shadow-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-400',
+                'w-full rounded-full border font-sans text-sm shadow-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-400',
+                fullScreen ? 'h-8 py-1.5 pl-8 pr-8' : 'h-10 py-2 pl-9 pr-10',
                 renderTheme === 'dark'
                   ? 'border-white/10 bg-white/[0.04] text-slate-100 placeholder:text-slate-500'
                   : 'border-slate-200/80 bg-white/80 text-slate-950 placeholder:text-slate-400'
@@ -439,7 +446,8 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
                 type="button"
                 onClick={() => setLogSearch('')}
                 className={clsx(
-                  'absolute right-1.5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-lg transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+                  'absolute top-1/2 flex -translate-y-1/2 items-center justify-center rounded-lg transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+                  fullScreen ? 'right-1 h-6 w-6' : 'right-1.5 h-7 w-7',
                   renderTheme === 'dark'
                     ? 'text-slate-400 hover:bg-white/10 hover:text-slate-100'
                     : 'text-slate-400 hover:bg-slate-100 hover:text-slate-700'
@@ -452,7 +460,7 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
           </label>
           <div
             className={clsx(
-              'whitespace-nowrap font-sans text-xs font-semibold',
+              'shrink-0 whitespace-nowrap font-sans text-xs font-semibold',
               renderTheme === 'dark' ? 'text-slate-400' : 'text-slate-500'
             )}
           >
@@ -465,7 +473,7 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
         className={clsx(
           'overflow-x-hidden bg-transparent font-mono text-sm leading-5',
           fullScreen
-            ? 'min-h-[calc(100vh-6rem)] w-full pt-28 pr-14'
+            ? 'min-h-[calc(100vh-6rem)] w-full pr-14'
             : compact
             ? 'h-full min-h-0 pr-2'
             : 'h-full overflow-y-auto pr-2'
@@ -474,6 +482,7 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
         initialTopMostItemIndex={Math.max(visibleLogs.length - 1, 0)}
         data={visibleLogs}
         components={{
+          Header: () => (fullScreen ? <div aria-hidden="true" className="logs-list-top-spacer" /> : null),
           EmptyPlaceholder: () => (
             <div
               className={clsx(
@@ -552,7 +561,7 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
           type="button"
           onClick={() => scrollToLatest()}
           className={clsx(
-            'frameos-secondary-button z-10 rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+            'frameos-secondary-button z-40 rounded-lg px-4 py-2 text-sm font-semibold shadow-lg transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
             fullScreen ? 'fixed bottom-6 right-4 @4xl:right-8' : 'absolute bottom-5 right-6'
           )}
         >

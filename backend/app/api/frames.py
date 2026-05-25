@@ -20,14 +20,13 @@ import tempfile
 import time
 import zipfile
 from tempfile import NamedTemporaryFile
-from typing import Any, Optional, Tuple
+from typing import Any, Awaitable, Optional, Tuple
 from types import SimpleNamespace
 from urllib.parse import quote
 
 # third-party ---------------------------------------------------------------
 import httpx
 from fastapi import (
-    BackgroundTasks,
     Depends,
     File,
     Form,
@@ -339,6 +338,19 @@ def _frame_state_dir(frame: Frame) -> str:
 
 _ascii_re = re.compile(r"[^A-Za-z0-9._-]")
 _frame_image_locks: dict[int, asyncio.Lock] = {}
+_detached_refresh_tasks: set[asyncio.Task[Any]] = set()
+
+
+def _schedule_detached_refresh(coro: Awaitable[Any]) -> None:
+    task = asyncio.create_task(coro)
+    _detached_refresh_tasks.add(task)
+
+    def _cleanup(completed_task: asyncio.Task[Any]) -> None:
+        _detached_refresh_tasks.discard(completed_task)
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            completed_task.result()
+
+    task.add_done_callback(_cleanup)
 
 
 def _get_frame_image_lock(frame_id: int) -> asyncio.Lock:
@@ -667,7 +679,6 @@ async def _refresh_frame_states_cache(
 
 
 async def _schedule_frame_states_cache_refresh(
-    background_tasks: BackgroundTasks,
     redis: Redis,
     frame_id: int,
     cache_key: str,
@@ -682,13 +693,14 @@ async def _schedule_frame_states_cache_refresh(
         nx=True,
     )
     if acquired:
-        background_tasks.add_task(
-            _refresh_frame_states_cache,
-            frame_id,
-            cache_key,
-            lock_key,
-            invalidated_key,
-            started_at,
+        _schedule_detached_refresh(
+            _refresh_frame_states_cache(
+                frame_id,
+                cache_key,
+                lock_key,
+                invalidated_key,
+                started_at,
+            )
         )
     return True
 
@@ -842,7 +854,6 @@ async def api_frame_get_state(
 @api_with_auth.get("/frames/{id:int}/states", response_model=FrameStateResponse)
 async def api_frame_get_states(
     id: int,
-    background_tasks: BackgroundTasks,
     refresh: bool = Query(False),
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
@@ -857,7 +868,6 @@ async def api_frame_get_states(
         refreshing = refresh or time.time() - fetched_at >= FRAME_STATES_CACHE_REFRESH_AFTER_SECONDS
         if refreshing:
             refreshing = await _schedule_frame_states_cache_refresh(
-                background_tasks,
                 redis,
                 frame.id,
                 cache_key,
@@ -876,7 +886,6 @@ async def api_frame_get_states(
         }
 
     refreshing = await _schedule_frame_states_cache_refresh(
-        background_tasks,
         redis,
         frame.id,
         cache_key,
@@ -1710,7 +1719,6 @@ async def _refresh_frame_assets_cache(
 
 
 async def _schedule_frame_assets_cache_refresh(
-    background_tasks: BackgroundTasks,
     redis: Redis,
     frame_id: int,
     assets_path: str,
@@ -1726,14 +1734,15 @@ async def _schedule_frame_assets_cache_refresh(
         nx=True,
     )
     if acquired:
-        background_tasks.add_task(
-            _refresh_frame_assets_cache,
-            frame_id,
-            assets_path,
-            cache_key,
-            lock_key,
-            invalidated_key,
-            started_at,
+        _schedule_detached_refresh(
+            _refresh_frame_assets_cache(
+                frame_id,
+                assets_path,
+                cache_key,
+                lock_key,
+                invalidated_key,
+                started_at,
+            )
         )
     return True
 
@@ -1756,7 +1765,6 @@ def _frame_assets_cache_meta(
 @api_with_auth.get("/frames/{id:int}/assets", response_model=FrameAssetsResponse)
 async def api_frame_get_assets(
     id: int,
-    background_tasks: BackgroundTasks,
     refresh: bool = Query(False),
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
@@ -1775,7 +1783,6 @@ async def api_frame_get_assets(
         refreshing = False
         if time.time() - fetched_at >= FRAME_ASSETS_CACHE_REFRESH_AFTER_SECONDS:
             refreshing = await _schedule_frame_assets_cache_refresh(
-                background_tasks,
                 redis,
                 frame.id,
                 assets_path,

@@ -383,11 +383,13 @@ function FrameSceneTile({
   frame,
   scene,
   active,
+  highlighted,
   showMenu,
 }: {
   frame: FrameType
   scene: FrameScene
   active: boolean
+  highlighted: boolean
   showMenu?: boolean
 }): JSX.Element {
   const { openSceneControl } = useActions(workspaceLogic)
@@ -402,7 +404,7 @@ function FrameSceneTile({
       onDragStart={(event) => setFrameosSceneDragData(event.dataTransfer, scene.id)}
       className={clsx(
         'frameos-card group relative h-36 w-36 shrink-0 overflow-hidden rounded-lg border bg-white text-left transition hover:-translate-y-0.5 focus-within:ring-2 focus-within:ring-blue-400',
-        active
+        highlighted
           ? activeSurfaceClassName
           : 'border-white/90 shadow-lg shadow-slate-300/35 hover:shadow-xl hover:shadow-slate-300/50'
       )}
@@ -495,7 +497,7 @@ function FrameScenesBlock({
   frameMatchesSearch?: boolean
   showSceneMenus?: boolean
 }): JSX.Element {
-  const { search } = useValues(workspaceLogic)
+  const { sceneControlSelection, search } = useValues(workspaceLogic)
   const { openSceneControl } = useActions(workspaceLogic)
   const { applyTemplateAndSave } = useActions(frameLogic({ frameId: frame.id }))
   const { applyRemoteToFrame } = useActions(templatesLogic({ frameId: frame.id }))
@@ -547,15 +549,20 @@ function FrameScenesBlock({
       </div>
       {scenes.length > 0 ? (
         <div className="flex flex-wrap gap-4">
-          {scenes.map((scene) => (
-            <FrameSceneTile
-              key={scene.id}
-              frame={frame}
-              scene={scene}
-              active={sceneIsActive(scene, currentSceneId)}
-              showMenu={showSceneMenus}
-            />
-          ))}
+          {scenes.map((scene) => {
+            const active = sceneIsActive(scene, currentSceneId)
+            const selected = sceneControlSelection?.frameId === frame.id && sceneControlSelection.sceneId === scene.id
+            return (
+              <FrameSceneTile
+                key={scene.id}
+                frame={frame}
+                scene={scene}
+                active={active}
+                highlighted={active || selected}
+                showMenu={showSceneMenus}
+              />
+            )
+          })}
           <FrameAddSceneTile frame={frame} compact />
         </div>
       ) : search.trim() && frameMatchesSearch ? (

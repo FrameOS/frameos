@@ -1,14 +1,14 @@
 import { A, router } from 'kea-router'
 import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
 import clsx from 'clsx'
-import type { CSSProperties, MouseEvent } from 'react'
+import type { CSSProperties, MouseEvent, SVGProps } from 'react'
 import {
   ChevronDownIcon,
   ChevronUpIcon,
   Cog6ToothIcon,
   CodeBracketIcon,
   ComputerDesktopIcon,
-  ExclamationTriangleIcon,
+  CloudArrowUpIcon,
   MagnifyingGlassIcon,
   MoonIcon,
   PlusIcon,
@@ -187,11 +187,27 @@ function WorkspaceChatDrawer({ frameId, sceneId }: { frameId: number; sceneId: s
   )
 }
 
+function DeployToFrameIcon(props: SVGProps<SVGSVGElement>): JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} aria-hidden="true" {...props}>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M13.75 5.75h5.5a1.5 1.5 0 0 1 1.5 1.5v7.5a1.5 1.5 0 0 1-1.5 1.5h-5.5a1.5 1.5 0 0 1-1.5-1.5v-7.5a1.5 1.5 0 0 1 1.5-1.5Z"
+      />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M15.5 18.75h3" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3.25 11h10.5" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="m10.75 8 3 3-3 3" />
+    </svg>
+  )
+}
+
 function FrameStatusHeaderButton({ frameId }: { frameId: number }): JSX.Element | null {
   const { undeployedChanges, unsavedChanges } = useValues(frameLogic({ frameId }))
   const { showDeployPlanModal, showUnsavedChangesModal } = useActions(frameLogic({ frameId }))
-  const { closeChatDrawer } = useActions(workspaceLogic)
+  const { closeChatDrawer, closeSecondarySidebar } = useActions(workspaceLogic)
   const statusLabel = unsavedChanges ? 'Unsaved' : undeployedChanges ? 'Undeployed' : null
+  const StatusIcon = unsavedChanges ? CloudArrowUpIcon : DeployToFrameIcon
 
   if (!statusLabel) {
     return null
@@ -204,6 +220,9 @@ function FrameStatusHeaderButton({ frameId }: { frameId: number }): JSX.Element 
       aria-label={unsavedChanges ? 'Open unsaved changes' : 'Open deploy plan for undeployed changes'}
       onClick={() => {
         closeChatDrawer()
+        if (isMobileWorkspaceViewport()) {
+          closeSecondarySidebar()
+        }
         if (unsavedChanges) {
           showUnsavedChangesModal()
         } else {
@@ -215,7 +234,7 @@ function FrameStatusHeaderButton({ frameId }: { frameId: number }): JSX.Element 
         'frameos-warning-button'
       )}
     >
-      <ExclamationTriangleIcon className="h-5 w-5 shrink-0" />
+      <StatusIcon className="h-5 w-5 shrink-0" />
       <span className="workspace-unsaved-header-label">{statusLabel}</span>
     </button>
   )

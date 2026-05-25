@@ -149,7 +149,7 @@ function SceneSelector({
   }
 
   return (
-    <div className="@container space-y-2 px-2">
+    <div className="@container space-y-2">
       <div className="grid gap-2 @xs:grid-cols-[6.5rem_minmax(0,1fr)] @xs:items-stretch">
         <FrameSidebarPreview
           frame={frame}
@@ -162,7 +162,7 @@ function SceneSelector({
             <select
               value={frame.id}
               onChange={(event) => navigateToSceneFrame(parseInt(event.target.value, 10))}
-              className="frameos-form-control min-h-12 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-blue-400"
+              className="frameos-form-control w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-blue-400"
             >
               {frameGroups.map((group) => (
                 <optgroup key={group.key} label={group.label}>
@@ -729,7 +729,7 @@ export function SceneWorkspace({ frameId, sceneId }: SceneWorkspaceProps): JSX.E
         subtitle="No frames"
         tree={<div className="px-3 py-2 text-slate-400">Add a frame before editing scenes.</div>}
       >
-        <div className="flex h-[60vh] items-center justify-center rounded-[24px] border border-white/80 bg-white/55 text-slate-500 shadow-lg shadow-slate-300/25">
+        <div className="frameos-muted flex h-[60vh] items-center justify-center text-sm font-medium">
           No frames available.
         </div>
       </FrameosShell>

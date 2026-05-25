@@ -92,7 +92,7 @@ function SelectionSelect({
         value={value}
         disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
-        className="frameos-form-control min-h-12 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 outline-none transition disabled:cursor-not-allowed disabled:opacity-50 focus:ring-2 focus:ring-blue-400"
+        className="frameos-form-control w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 outline-none transition disabled:cursor-not-allowed disabled:opacity-50 focus:ring-2 focus:ring-blue-400"
       >
         {children}
       </select>
@@ -119,7 +119,7 @@ function AppsSelector({
   const frameGroups = groupFramesByStatus(frames)
 
   return (
-    <div className="space-y-4 px-2">
+    <div className="space-y-4">
       <SelectionSelect
         label="Frame"
         value={frame.id}
@@ -309,7 +309,7 @@ function AppsEditorSurface({
 
 function AppsEmptyState({ title, detail }: { title: string; detail: string }): JSX.Element {
   return (
-    <div className="flex min-h-0 flex-1 items-center justify-center rounded-[24px] border border-white/80 bg-white/55 text-slate-500 shadow-lg shadow-slate-300/25">
+    <div className="frameos-muted flex min-h-0 flex-1 items-center justify-center text-slate-500">
       <div className="text-center">
         <CubeTransparentIcon className="mx-auto mb-3 h-10 w-10 text-slate-300" />
         <div className="text-lg font-semibold text-slate-700">{title}</div>
@@ -407,7 +407,7 @@ export function AppsWorkspace({ frameId, sceneId, nodeId }: AppsWorkspaceProps):
         subtitle="No frames"
         tree={<div className="px-3 py-2 text-slate-400">Add a frame before editing apps.</div>}
       >
-        <div className="flex h-[60vh] items-center justify-center rounded-[24px] border border-white/80 bg-white/55 text-slate-500 shadow-lg shadow-slate-300/25">
+        <div className="frameos-muted flex h-[60vh] items-center justify-center text-sm font-medium">
           No frames available.
         </div>
       </FrameosShell>

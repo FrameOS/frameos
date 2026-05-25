@@ -317,7 +317,7 @@ function FrameSelector({
   const frameGroups = groupFramesByStatus(frames)
 
   return (
-    <div className={clsx('px-2', className)}>
+    <div className={className}>
       <label className="frameos-muted mb-2 block text-xs font-semibold uppercase tracking-wide">Frame</label>
       <select
         value={frame.id}
@@ -424,7 +424,7 @@ function FrameTree({
 }): JSX.Element {
   return (
     <div className="@container space-y-4">
-      <div className="grid gap-2 px-2 @xs:grid-cols-[6.5rem_minmax(0,1fr)] @xs:items-stretch">
+      <div className="grid gap-2 @xs:grid-cols-[6.5rem_minmax(0,1fr)] @xs:items-stretch">
         <FrameSidebarPreview
           frame={frame}
           active={activeTool === 'preview'}
@@ -432,7 +432,7 @@ function FrameTree({
           mediaClassName="@xs:h-full @xs:min-h-[6.75rem]"
         />
         <div className="order-1 min-w-0 space-y-2 @xs:order-2">
-          <FrameSelector frame={frame} frames={frames} className="px-0" />
+          <FrameSelector frame={frame} frames={frames} />
           <FrameSceneSidebarCard frame={frame} unsavedChanges={unsavedChanges} undeployedChanges={undeployedChanges} />
         </div>
       </div>
@@ -1328,7 +1328,7 @@ export function FrameWorkspace({ id }: FrameWorkspaceProps): JSX.Element {
         subtitle="No frames"
         tree={<div className="px-3 py-2 text-slate-400">Add a frame before opening frame tools.</div>}
       >
-        <div className="flex h-[60vh] items-center justify-center rounded-[24px] border border-white/80 bg-white/55 text-slate-500 shadow-lg shadow-slate-300/25">
+        <div className="frameos-muted flex h-[60vh] items-center justify-center text-sm font-medium">
           No frames available.
         </div>
       </FrameosShell>

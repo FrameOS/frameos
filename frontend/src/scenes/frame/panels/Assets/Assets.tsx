@@ -555,11 +555,11 @@ function AssetsSummaryHeader({
 
   return (
     <div className="frame-tool-card mb-4 overflow-hidden rounded-[22px]">
-      <div className="flex flex-wrap items-start justify-between gap-3 px-4 py-4">
+      <div className="flex flex-wrap items-start justify-between gap-2 px-3 py-3 @3xl:gap-3 @3xl:px-4 @3xl:py-4">
         <div className="min-w-0">
           <div className="frame-tool-muted text-xs font-semibold uppercase tracking-wide">Assets</div>
           <div className="mt-1 flex min-w-0 items-center gap-2">
-            <div className="truncate text-xl font-bold tracking-normal text-[color:var(--tool-strong)]">
+            <div className="truncate text-lg font-bold tracking-normal text-[color:var(--tool-strong)] @3xl:text-xl">
               {rootName || '/srv/assets'}
             </div>
             {isReloading ? <Spinner className="h-4 w-4 shrink-0" /> : null}
@@ -587,22 +587,24 @@ function AssetsSummaryHeader({
           }
         />
       </div>
-      <div className="grid gap-px border-t border-[color:var(--tool-border)] bg-[var(--tool-border)] @3xl:grid-cols-4">
+      <div className="grid grid-cols-2 gap-px border-t border-[color:var(--tool-border)] bg-[var(--tool-border)] @3xl:grid-cols-4">
         {statItems.map((item) => (
-          <div key={item.label} className="bg-[var(--tool-bg)] px-4 py-3">
+          <div key={item.label} className="bg-[var(--tool-bg)] px-3 py-2 @3xl:px-4 @3xl:py-3">
             <div className="frame-tool-muted text-xs font-semibold uppercase tracking-wide">{item.label}</div>
-            <div className="mt-1 truncate text-lg font-semibold text-[color:var(--tool-strong)]">{item.value}</div>
+            <div className="mt-0.5 truncate text-base font-semibold text-[color:var(--tool-strong)] @3xl:mt-1 @3xl:text-lg">
+              {item.value}
+            </div>
             <div className="frame-tool-muted mt-0.5 truncate text-xs">{item.detail}</div>
           </div>
         ))}
-        <div className="bg-[var(--tool-bg)] px-4 py-3">
+        <div className="bg-[var(--tool-bg)] px-3 py-2 @3xl:px-4 @3xl:py-3">
           <div className="frame-tool-muted text-xs font-semibold uppercase tracking-wide">Disk</div>
           {diskStats ? (
             <>
-              <div className="mt-1 text-lg font-semibold text-[color:var(--tool-strong)]">
+              <div className="mt-0.5 text-base font-semibold text-[color:var(--tool-strong)] @3xl:mt-1 @3xl:text-lg">
                 {Math.round(diskUsedPercent ?? 0)}% used
               </div>
-              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-400/20">
+              <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-slate-400/20 @3xl:mt-2">
                 <div
                   className="frameos-primary-fill h-full rounded-full"
                   style={{ width: `${diskUsedPercent ?? 0}%` }}
@@ -614,7 +616,9 @@ function AssetsSummaryHeader({
             </>
           ) : (
             <>
-              <div className="mt-1 text-lg font-semibold text-[color:var(--tool-strong)]">No sample</div>
+              <div className="mt-0.5 text-base font-semibold text-[color:var(--tool-strong)] @3xl:mt-1 @3xl:text-lg">
+                No sample
+              </div>
               <div className="frame-tool-muted mt-0.5 text-xs">Waiting for metrics</div>
             </>
           )}

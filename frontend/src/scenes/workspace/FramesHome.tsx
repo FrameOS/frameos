@@ -734,7 +734,7 @@ export function FramesHome(): JSX.Element {
               onToggle={toggleInactiveFramesExpanded}
             />
             {overviewArchivedFrameSections.length > 0 ? (
-              <div className="space-y-8 border-t border-slate-300/70 pt-8">
+              <div className="space-y-8 pt-2">
                 <button
                   type="button"
                   onClick={toggleArchivedFramesExpanded}
@@ -763,11 +763,11 @@ export function FramesHome(): JSX.Element {
         ) : framesLoading ? (
           <FramesLoadingPlaceholder />
         ) : (
-          <div className="flex h-[50vh] items-center justify-center rounded-[24px] border border-white/80 bg-white/55 text-slate-500 shadow-lg shadow-slate-300/25">
+          <div className="frameos-muted flex h-[50vh] items-center justify-center">
             <div className="text-center">
               <PhotoIcon className="mx-auto mb-3 h-10 w-10 text-slate-300" />
-              <div className="text-lg font-semibold text-slate-700">No frames found</div>
-              <div className="text-sm text-slate-500">Add a frame or clear the search.</div>
+              <div className="text-base font-semibold">No frames found</div>
+              <div className="mt-1 text-sm">Add a frame or clear the search.</div>
             </div>
           </div>
         )}
