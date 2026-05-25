@@ -79,7 +79,7 @@ function SidebarStatusDots({ frame }: { frame: FrameType }): JSX.Element {
 
 function sidebarFrameActivityDescription(frame: FrameType): string {
   if (frameNeedsInitialDeploy(frame)) {
-    return 'new frame - press the deploy icon to set up'
+    return 'waiting for first deploy'
   }
 
   const relativeTime = formatFrameRelativeTime(frame.last_log_at)

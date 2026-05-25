@@ -328,10 +328,35 @@ function FrameDashboardHeader({ frame, archived }: { frame: FrameType; archived?
               ) : null}
             </div>
           </A>
-          <div className="frameos-muted truncate text-sm text-slate-500">{frameStatus(frame)}</div>
+          <FrameDashboardStatusLine frame={frame} />
         </div>
       </div>
       <FrameHeaderActions frame={frame} archived={archived} />
+    </div>
+  )
+}
+
+function FrameDashboardStatusLine({ frame }: { frame: FrameType }): JSX.Element {
+  const { undeployedChanges, unsavedChanges } = useValues(frameLogic({ frameId: frame.id }))
+  const { openFrameChangeDrawer } = useActions(workspaceLogic)
+  const changeLabel = unsavedChanges ? 'unsaved' : undeployedChanges ? 'undeployed' : null
+  const changeKind = unsavedChanges ? 'unsaved' : 'deploy'
+
+  return (
+    <div className="frameos-muted truncate text-sm text-slate-500">
+      {changeLabel ? (
+        <>
+          <button
+            type="button"
+            onClick={() => openFrameChangeDrawer(frame.id, changeKind)}
+            className="frameos-change-status-link rounded font-medium hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          >
+            {changeLabel}
+          </button>
+          <span> - </span>
+        </>
+      ) : null}
+      {frameStatus(frame)}
     </div>
   )
 }

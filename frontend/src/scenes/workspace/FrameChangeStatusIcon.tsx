@@ -37,9 +37,7 @@ export function FrameChangeStatusIcon({
   const wrapperClassName = isDashboard
     ? 'flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl transition'
     : 'flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition'
-  const idleClassName = isDashboard
-    ? 'frameos-icon-tile bg-white/70 text-slate-700 shadow-sm'
-    : 'text-current'
+  const idleClassName = isDashboard ? 'frameos-icon-tile bg-white/70 text-slate-700 shadow-sm' : 'text-current'
   const iconClassName = isDashboard ? 'h-7 w-7' : 'h-5 w-5'
 
   if (!statusLabel) {
@@ -64,7 +62,9 @@ export function FrameChangeStatusIcon({
       onClick={openDrawer}
       className={clsx(
         wrapperClassName,
-        'frameos-warning-button shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400'
+        'frameos-change-status-button focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+        isDashboard ? 'frameos-change-status-button--dashboard' : 'frameos-change-status-button--sidebar',
+        unsavedChanges ? 'frameos-change-status-button--unsaved' : 'frameos-change-status-button--undeployed'
       )}
     >
       <StatusIcon className={iconClassName} />

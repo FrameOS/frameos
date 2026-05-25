@@ -302,23 +302,95 @@ function computeChangeDetails(
   return [...details, ...sceneDetails]
 }
 
+function firstDeploySceneLabel(scenes?: FrameScene[] | null): string | null {
+  const sceneCount = scenes?.length ?? 0
+  if (sceneCount === 0) {
+    return null
+  }
+  return `Deploy ${sceneCount} scene${sceneCount === 1 ? '' : 's'}`
+}
+
+function firstDeployChangeDetails(
+  frame: Partial<FrameType> | null | undefined,
+  mode: FrameType['mode']
+): ChangeDetail[] {
+  const details: ChangeDetail[] = [
+    {
+      label: 'Initial full deploy',
+      requiresFullDeploy: true,
+    },
+    {
+      label: `Install FrameOS ${CURRENT_FRAMEOS_VERSION}`,
+      requiresFullDeploy: true,
+    },
+  ]
+  const device = frame?.device
+  if (device) {
+    details.push({
+      label: `Install device support: ${device}`,
+      requiresFullDeploy: true,
+    })
+  }
+  const sceneLabel = firstDeploySceneLabel(frame?.scenes)
+  if (sceneLabel) {
+    details.push({
+      label: sceneLabel,
+      requiresFullDeploy: true,
+    })
+  }
+  details.push({
+    label:
+      mode === 'buildroot' ? 'Install Buildroot target and frame services' : 'Install Raspberry Pi OS frame services',
+    requiresFullDeploy: true,
+  })
+
+  return details
+}
+
 function sortDeployChangeDetails(changes: ChangeDetail[]): ChangeDetail[] {
   return changes
     .map((change, index) => ({ change, index }))
     .sort((first, second) => {
-      const firstPriority = first.change.label.startsWith('FrameOS upgrade') ? 0 : first.change.requiresFullDeploy ? 1 : 2
+      const firstPriority = first.change.label.startsWith('FrameOS upgrade')
+        ? 0
+        : first.change.requiresFullDeploy
+        ? 1
+        : 2
       const secondPriority = second.change.label.startsWith('FrameOS upgrade')
         ? 0
         : second.change.requiresFullDeploy
-          ? 1
-          : 2
+        ? 1
+        : 2
 
       return firstPriority - secondPriority || first.index - second.index
     })
     .map(({ change }) => change)
 }
 
+function normalizeRpiosCompilationMode(value: unknown): 'static' | 'shared' | 'precompiled' {
+  return value === 'static' || value === 'shared' || value === 'precompiled' ? value : 'precompiled'
+}
+
+function normalizeRpiosCrossCompilation(value: unknown): 'auto' | 'always' | 'never' {
+  return value === 'always' || value === 'never' ? value : 'auto'
+}
+
+function normalizeRpiosForComparison(value: unknown): Record<string, unknown> {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
+  const { platform: _platform, compilationMode, crossCompilation, ...rest } = source
+
+  return {
+    ...rest,
+    compilationMode: normalizeRpiosCompilationMode(compilationMode),
+    crossCompilation: normalizeRpiosCrossCompilation(crossCompilation),
+  }
+}
+
 function normalizeFrameKeyValueForComparison(key: keyof FrameType, value: unknown): unknown {
+  if (key === 'rpios') {
+    return normalizeRpiosForComparison(value)
+  }
+
   if (key !== 'https_proxy' || !value || typeof value !== 'object') {
     return value
   }
@@ -1073,7 +1145,11 @@ export const frameLogic = kea<frameLogicType>([
     deployChangeDetails: [
       (s) => [s.lastDeploy, s.frameForm, s.mode, s.isFrameAdminMode],
       (lastDeploy, frameForm, mode, isFrameAdminMode): ChangeDetail[] =>
-        isFrameAdminMode ? [] : sortDeployChangeDetails(computeChangeDetails(lastDeploy, frameForm, mode)),
+        isFrameAdminMode
+          ? []
+          : lastDeploy
+          ? sortDeployChangeDetails(computeChangeDetails(lastDeploy, frameForm, mode))
+          : firstDeployChangeDetails(frameForm, mode),
     ],
     undeployedSummaryItems: [
       (s) => [s.lastDeploy, s.frame, s.frameForm, s.requiresRecompilation, s.isFrameAdminMode],
