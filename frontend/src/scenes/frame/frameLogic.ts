@@ -677,6 +677,16 @@ async function saveFrameForm(frame: Partial<FrameType>, frameId: number, nextAct
   }
 }
 
+function openSceneControlDrawer(frameId: number, sceneId: string): void {
+  const searchParams = {
+    ...router.values.searchParams,
+    drawer: 'scene',
+    sceneId,
+    frameId: String(frameId),
+  }
+  router.actions.push(router.values.location.pathname, searchParams, router.values.hashParams)
+}
+
 export function sanitizeScene(scene: Partial<FrameScene>, frame: Partial<FrameType>): FrameScene {
   const settings = scene.settings ?? {}
   const normalizedRawNodes = (scene.nodes ?? []).map((node) => normalizeNode(node as DiagramNode))
@@ -742,7 +752,8 @@ export const frameLogic = kea<frameLogicType>([
     applyTemplate: (template: Partial<TemplateType>) => ({
       template,
     }),
-    applyTemplateAndSave: (template: Partial<TemplateType>) => ({
+    applyTemplateAndSave: (template: Partial<TemplateType>, openDrawer?: boolean) => ({
+      openDrawer: openDrawer ?? false,
       template,
     }),
     createBlankSceneAndSave: (name?: string, openEditor?: boolean, openDrawer?: boolean) => ({
@@ -1187,7 +1198,7 @@ export const frameLogic = kea<frameLogicType>([
         await saveTemplateSceneImages(props.frameId, template, newScenes)
       }
     },
-    applyTemplateAndSave: async ({ template }) => {
+    applyTemplateAndSave: async ({ template, openDrawer }) => {
       const frameForm = getCurrentFrameForm(values.frame, values.frameForm)
       const oldScenes = frameForm.scenes || []
       const newScenes = buildScenesFromTemplate(template, frameForm)
@@ -1200,6 +1211,9 @@ export const frameLogic = kea<frameLogicType>([
       actions.setFrameFormValues({ scenes })
       await saveFrameForm(nextFrameForm, props.frameId, values.nextAction)
       framesModel.actions.loadFrame(props.frameId)
+      if (openDrawer) {
+        openSceneControlDrawer(props.frameId, newScenes[0].id)
+      }
       await saveTemplateSceneImages(props.frameId, template, newScenes)
     },
     createBlankSceneAndSave: async ({ name, openEditor, openDrawer }) => {
@@ -1213,13 +1227,7 @@ export const frameLogic = kea<frameLogicType>([
       if (openEditor) {
         router.actions.push(urls.scenes(props.frameId, scene.id))
       } else if (openDrawer) {
-        const searchParams = {
-          ...router.values.searchParams,
-          drawer: 'scene',
-          sceneId: scene.id,
-          frameId: String(props.frameId),
-        }
-        router.actions.push(router.values.location.pathname, searchParams, router.values.hashParams)
+        openSceneControlDrawer(props.frameId, scene.id)
       }
     },
     deleteSceneAndSave: async ({ sceneId }) => {

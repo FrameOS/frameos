@@ -84,7 +84,7 @@ function setModeValues(mode: NewFrameFormType['mode']): Partial<NewFrameFormType
   return { mode, platform: null }
 }
 
-export function NewFrame(): JSX.Element {
+export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.Element {
   const { hideForm, resetNewFrame, setNewFrameValue, setNewFrameValues, setFile, importFrame } =
     useActions(newFrameForm)
   const { newFrame, newFrameErrors, file, importingFrameLoading } = useValues(newFrameForm)
@@ -98,9 +98,12 @@ export function NewFrame(): JSX.Element {
 
   return (
     <div className="frameos-form-surface space-y-5 text-slate-900">
-      <div>
-        <div className="frameos-muted text-xs font-semibold uppercase tracking-wide text-slate-400">FrameOS</div>
-        <h2 className="frameos-strong mt-1 text-2xl font-bold tracking-normal text-slate-950">Add frame</h2>
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <div className="frameos-muted text-xs font-semibold uppercase tracking-wide text-slate-400">FrameOS</div>
+          <h2 className="frameos-strong mt-1 text-2xl font-bold tracking-normal text-slate-950">Add frame</h2>
+        </div>
+        {headerAction ? <div className="shrink-0">{headerAction}</div> : null}
       </div>
 
       <div className="frameos-segment-group flex rounded-2xl bg-slate-100 p-1">

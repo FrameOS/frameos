@@ -40,7 +40,13 @@ export const templatesLogic = kea<templatesLogicType>([
     editLocalTemplate: (template: TemplateType) => ({ template }),
     hideModal: true,
     saveRemoteAsLocal: (repository: RepositoryType, template: TemplateType) => ({ repository, template }),
-    applyRemoteToFrame: (repository: RepositoryType, template: TemplateType, persistOnInstall?: boolean) => ({
+    applyRemoteToFrame: (
+      repository: RepositoryType,
+      template: TemplateType,
+      persistOnInstall?: boolean,
+      openDrawer?: boolean
+    ) => ({
+      openDrawer: openDrawer ?? false,
       persistOnInstall: persistOnInstall ?? false,
       repository,
       template,
@@ -308,10 +314,10 @@ export const templatesLogic = kea<templatesLogicType>([
         actions.submitAddTemplateUrlForm()
       }
     },
-    applyRemoteToFrame: async ({ template, repository, persistOnInstall }) => {
+    applyRemoteToFrame: async ({ template, repository, persistOnInstall, openDrawer }) => {
       if (template.scenes?.length) {
         if (persistOnInstall) {
-          actions.applyTemplateAndSave(template)
+          actions.applyTemplateAndSave(template, openDrawer)
         } else {
           actions.applyTemplate(template)
         }
@@ -345,7 +351,7 @@ export const templatesLogic = kea<templatesLogicType>([
       }
       const scenes = await response.json()
       if (persistOnInstall) {
-        actions.applyTemplateAndSave({ scenes })
+        actions.applyTemplateAndSave({ scenes }, openDrawer)
       } else {
         actions.applyTemplate({ scenes })
       }

@@ -101,9 +101,7 @@ export function frameStatusLabel(frame: FrameType): string {
 export function frameStatusDescription(frame: FrameType): string {
   const status = frameStatusLabel(frame)
   const relativeTime = formatFrameRelativeTime(frame.last_log_at)
-  const logDescription = relativeTime
-    ? `${status === 'stale' ? 'last seen' : 'last log'} ${relativeTime}`
-    : 'no logs yet'
+  const logDescription = relativeTime ? `last seen ${relativeTime}` : 'no logs yet'
 
   return `${status} - ${logDescription}`
 }

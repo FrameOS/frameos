@@ -56,6 +56,13 @@ function escapeRegex(value: string): string {
 async function prepareAuthenticatedPage(page: Page): Promise<() => string[]> {
   const readErrors = attachFrontendErrorCollector(page)
   await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.route('**/api/repositories/system', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: '[]',
+    })
+  )
   await prepareStablePage(page, 'light')
   await login(page)
   return readErrors

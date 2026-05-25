@@ -1,7 +1,7 @@
 import { A, router } from 'kea-router'
 import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
 import clsx from 'clsx'
-import type { CSSProperties, MouseEvent, SVGProps } from 'react'
+import { useEffect, useState, type CSSProperties, type MouseEvent, type SVGProps } from 'react'
 import {
   ChevronDownIcon,
   ChevronUpIcon,
@@ -20,7 +20,11 @@ import {
 } from '@heroicons/react/24/outline'
 import { urls } from '../../urls'
 import { FrameosLogo } from '../../components/FrameosLogo'
+import { Spinner } from '../../components/Spinner'
+import { preloadSceneComponent, type LoadableSceneKey } from '../scenes'
+import { sceneLogic } from '../sceneLogic'
 import { isMobileWorkspaceViewport, workspaceLogic } from './workspaceLogic'
+import { workspaceModeForScene, type WorkspaceMode } from './workspaceModes'
 import { framesModel } from '../../models/framesModel'
 import { frameHost } from '../../decorators/frame'
 import { frameLogic } from '../frame/frameLogic'
@@ -28,8 +32,6 @@ import { panelsLogic } from '../frame/panels/panelsLogic'
 import { Chat } from '../frame/panels/Chat/Chat'
 import { chatLogic } from '../frame/panels/Chat/chatLogic'
 import { workspaceChatDrawerLogic } from './workspaceChatDrawerLogic'
-
-type WorkspaceMode = 'frames' | 'frame' | 'scenes' | 'apps' | 'settings'
 
 const frameShellToolPanels = new Set([
   'overview',
@@ -63,7 +65,10 @@ interface FrameosShellProps {
 
 function NavButton({
   active,
+  current,
   href,
+  pending,
+  preloadScene,
   sidebarOpen,
   title,
   onActiveClick,
@@ -71,7 +76,10 @@ function NavButton({
   children,
 }: {
   active: boolean
+  current: boolean
   href: string
+  pending: boolean
+  preloadScene: LoadableSceneKey
   sidebarOpen: boolean
   title: string
   onActiveClick: () => void
@@ -80,17 +88,21 @@ function NavButton({
 }): JSX.Element {
   const resolvedHref =
     sidebarOpen && isMobileWorkspaceViewport() ? `${href.split('#')[0]}#workspaceSidebar=open` : href.split('#')[0]
+  const preload = () => preloadSceneComponent(preloadScene)
 
   return (
     <a
       href={resolvedHref}
       title={title}
+      onPointerEnter={preload}
+      onFocus={preload}
+      onMouseDown={preload}
       onClick={(event: MouseEvent<HTMLAnchorElement>) => {
         if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
           return
         }
         event.preventDefault()
-        if (active) {
+        if (current) {
           onActiveClick()
         } else {
           onInactiveClick()
@@ -104,7 +116,12 @@ function NavButton({
           : 'text-slate-400 hover:bg-slate-100 hover:text-slate-700'
       )}
     >
-      {active ? (
+      {pending ? (
+        <Spinner
+          className="workspace-nav-spinner flex h-7 w-7 items-center justify-center"
+          color={active ? 'white' : undefined}
+        />
+      ) : active ? (
         <>
           {sidebarOpen ? (
             <ChevronUpIcon className="h-7 w-7 lg:hidden" />
@@ -118,6 +135,31 @@ function NavButton({
       )}
     </a>
   )
+}
+
+function useDelayedPendingMode(currentMode: WorkspaceMode): {
+  activeMode: WorkspaceMode
+  pendingMode: WorkspaceMode | null
+} {
+  const { scene } = useValues(sceneLogic)
+  const routeMode = workspaceModeForScene(scene)
+  const nextPendingMode = routeMode && routeMode !== currentMode ? routeMode : null
+  const [pendingMode, setPendingMode] = useState<WorkspaceMode | null>(null)
+
+  useEffect(() => {
+    if (!nextPendingMode) {
+      setPendingMode(null)
+      return
+    }
+    setPendingMode(null)
+    const timeout = window.setTimeout(() => setPendingMode(nextPendingMode), 100)
+    return () => window.clearTimeout(timeout)
+  }, [nextPendingMode])
+
+  return {
+    activeMode: routeMode ?? currentMode,
+    pendingMode,
+  }
 }
 
 function AiMagicButton({
@@ -258,14 +300,8 @@ export function FrameosShell({
 }: FrameosShellProps): JSX.Element {
   const { chatDrawerSelection, search, secondarySidebarOpen, selectedFrame, selectedSceneId, theme, utilityPanel } =
     useValues(workspaceLogic)
-  const {
-    closeScheduleDrawer,
-    closeTemplateDrawer,
-    openChatDrawer,
-    setSearch,
-    toggleSecondarySidebar,
-    toggleTheme,
-  } = useActions(workspaceLogic)
+  const { closeScheduleDrawer, closeTemplateDrawer, openChatDrawer, setSearch, toggleSecondarySidebar, toggleTheme } =
+    useActions(workspaceLogic)
   const activeFrameTool = frameShellToolPanels.has(String(utilityPanel)) ? String(utilityPanel) : undefined
   const frameHref = selectedFrame ? urls.frame(selectedFrame.id, activeFrameTool) : urls.frames()
   const scenesHref = selectedFrame ? urls.scenes(selectedFrame.id, selectedSceneId ?? undefined) : urls.scenes()
@@ -294,6 +330,8 @@ export function FrameosShell({
     '--workspace-main-offset': secondarySidebarOpen ? '480px' : '128px',
     '--workspace-sidebar-edge': secondarySidebarOpen ? '440px' : '108px',
   } as CSSProperties
+  const { activeMode, pendingMode } = useDelayedPendingMode(mode)
+  const preloadFrames = () => preloadSceneComponent('frames')
   const prepareFirstLevelNavigation = () => {
     closeTemplateDrawer()
     closeScheduleDrawer()
@@ -316,14 +354,20 @@ export function FrameosShell({
           <A
             href={urls.frames()}
             title="Frames home"
+            onPointerEnter={preloadFrames}
+            onFocus={preloadFrames}
+            onMouseDown={preloadFrames}
             className="workspace-logo-button frameos-icon-button mb-8 flex h-12 w-12 items-center justify-center rounded-xl transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
           >
             <FrameosLogo variant={theme === 'dark' ? 'white-colors' : 'color'} className="h-10 w-10" />
           </A>
           <nav className="flex flex-1 flex-col items-center gap-4">
             <NavButton
-              active={mode === 'frames'}
+              active={activeMode === 'frames'}
+              current={mode === 'frames'}
               href={urls.frames()}
+              pending={pendingMode === 'frames'}
+              preloadScene="frames"
               sidebarOpen={secondarySidebarOpen}
               title={secondarySidebarOpen && mode === 'frames' ? 'Hide frames panel' : 'Frames'}
               onActiveClick={toggleSecondarySidebar}
@@ -332,8 +376,11 @@ export function FrameosShell({
               <Squares2X2Icon className="h-7 w-7" />
             </NavButton>
             <NavButton
-              active={mode === 'frame'}
+              active={activeMode === 'frame'}
+              current={mode === 'frame'}
               href={frameHref}
+              pending={pendingMode === 'frame'}
+              preloadScene="frame"
               sidebarOpen={secondarySidebarOpen}
               title={secondarySidebarOpen && mode === 'frame' ? 'Hide frame panel' : 'Frame'}
               onActiveClick={toggleSecondarySidebar}
@@ -342,8 +389,11 @@ export function FrameosShell({
               <ComputerDesktopIcon className="h-7 w-7" />
             </NavButton>
             <NavButton
-              active={mode === 'scenes'}
+              active={activeMode === 'scenes'}
+              current={mode === 'scenes'}
               href={scenesHref}
+              pending={pendingMode === 'scenes'}
+              preloadScene="sceneWorkspace"
               sidebarOpen={secondarySidebarOpen}
               title={secondarySidebarOpen && mode === 'scenes' ? 'Hide scenes panel' : 'Scenes'}
               onActiveClick={toggleSecondarySidebar}
@@ -352,8 +402,11 @@ export function FrameosShell({
               <RectangleGroupIcon className="h-7 w-7" />
             </NavButton>
             <NavButton
-              active={mode === 'apps'}
+              active={activeMode === 'apps'}
+              current={mode === 'apps'}
               href={appsHref}
+              pending={pendingMode === 'apps'}
+              preloadScene="appsWorkspace"
               sidebarOpen={secondarySidebarOpen}
               title={secondarySidebarOpen && mode === 'apps' ? 'Hide apps panel' : 'Apps'}
               onActiveClick={toggleSecondarySidebar}
@@ -372,8 +425,11 @@ export function FrameosShell({
             {theme === 'dark' ? <SunIcon className="h-7 w-7" /> : <MoonIcon className="h-7 w-7" />}
           </button>
           <NavButton
-            active={mode === 'settings'}
+            active={activeMode === 'settings'}
+            current={mode === 'settings'}
             href={urls.settings()}
+            pending={pendingMode === 'settings'}
+            preloadScene="settings"
             sidebarOpen={secondarySidebarOpen}
             title={secondarySidebarOpen && mode === 'settings' ? 'Hide settings panel' : 'Settings'}
             onActiveClick={toggleSecondarySidebar}

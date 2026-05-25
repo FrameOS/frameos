@@ -20,7 +20,13 @@ import { PlayIcon } from '@heroicons/react/24/solid'
 import { framesModel } from '../../models/framesModel'
 import { DropdownMenu } from '../../components/DropdownMenu'
 import { FrameImage } from '../../components/FrameImage'
-import { frameHost, frameIsHealthy, frameIsStale, frameStatusDescription } from '../../decorators/frame'
+import {
+  formatFrameRelativeTime,
+  frameHost,
+  frameIsHealthy,
+  frameIsStale,
+  frameStatusDescription,
+} from '../../decorators/frame'
 import { urls } from '../../urls'
 import { FrameScene, FrameType } from '../../types'
 import { FrameosShell } from './FrameosShell'
@@ -35,6 +41,7 @@ import { ExpandedScene } from '../frame/panels/Scenes/ExpandedScene'
 import { EditTemplateModal } from '../frame/panels/Templates/EditTemplateModal'
 import { Templates } from '../frame/panels/Templates/Templates'
 import { FrameDashboardSurface } from './FrameDashboardSurface'
+import { FrameDashboardLoadingSkeleton } from './FrameDashboardLoadingSkeleton'
 import { FrameLiveBadge } from './FrameLiveBadge'
 import { framesHomeLogic } from './framesHomeLogic'
 
@@ -67,6 +74,14 @@ function SidebarStatusDots({ frame }: { frame: FrameType }): JSX.Element {
       {connected ? <span title={statusDescription} className="h-2.5 w-2.5 rounded-full bg-blue-400" /> : null}
     </span>
   )
+}
+
+function sidebarFrameActivityDescription(frame: FrameType): string {
+  const relativeTime = formatFrameRelativeTime(frame.last_log_at)
+  if (!relativeTime) {
+    return 'no logs yet'
+  }
+  return `last seen ${relativeTime}`
 }
 
 function FrameTree(): JSX.Element {
@@ -165,7 +180,9 @@ function FrameTree(): JSX.Element {
                   <ComputerDesktopIcon className="h-5 w-5 shrink-0" />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate">{frame.name || frameHost(frame)}</span>
-                    <span className="block truncate text-xs text-slate-400">{frameStatusDescription(frame)}</span>
+                    <span className="block truncate text-xs text-slate-400">
+                      {sidebarFrameActivityDescription(frame)}
+                    </span>
                   </span>
                   <SidebarStatusDots frame={frame} />
                 </button>
@@ -262,7 +279,9 @@ function FrameTreeGroup({
                 <ComputerDesktopIcon className="h-5 w-5 shrink-0" />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-base font-medium">{frameName}</span>
-                  <span className="block truncate text-xs text-slate-400">{frameStatusDescription(frame)}</span>
+                  <span className="block truncate text-xs text-slate-400">
+                    {sidebarFrameActivityDescription(frame)}
+                  </span>
                 </span>
                 <SidebarStatusDots frame={frame} />
               </button>
@@ -392,7 +411,7 @@ export function TemplateDrawer(): JSX.Element | null {
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
               <AddSceneDrawerActions frame={frame} />
-              <Templates persistOnInstall />
+              <Templates persistOnInstall openInstalledSceneDrawer />
             </div>
             <EditTemplateModal />
           </div>
@@ -654,58 +673,23 @@ function AddFramePanel(): JSX.Element | null {
 
   return (
     <div className="workspace-drawer frameos-drawer fixed bottom-5 right-5 top-5 z-40 w-[390px] overflow-y-auto rounded-[24px] border border-white/80 bg-white/95 p-5 text-slate-900 shadow-2xl shadow-slate-500/30 backdrop-blur-xl">
-      <div className="mb-4 flex justify-end">
-        <button
-          type="button"
-          onClick={hideForm}
-          className="frameos-icon-button flex h-10 w-10 items-center justify-center rounded-xl text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-        >
-          <XMarkIcon className="h-6 w-6" />
-        </button>
-      </div>
-      <NewFrame />
+      <NewFrame
+        headerAction={
+          <button
+            type="button"
+            onClick={hideForm}
+            className="frameos-icon-button flex h-10 w-10 items-center justify-center rounded-xl text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          >
+            <XMarkIcon className="h-6 w-6" />
+          </button>
+        }
+      />
     </div>
   )
 }
 
 function FramesLoadingPlaceholder(): JSX.Element {
-  return (
-    <div className="space-y-8 pb-12">
-      <div className="frameos-muted flex items-center gap-3 text-sm font-semibold uppercase tracking-wide text-slate-500">
-        <span>Loading frames</span>
-        <span className="frameos-skeleton-line h-5 w-10 animate-pulse rounded-full" />
-      </div>
-      {[0, 1, 2].map((index) => (
-        <section
-          key={index}
-          className="frameos-card overflow-hidden rounded-[24px] border border-white/80 bg-white/55 p-5 shadow-lg shadow-slate-300/25"
-        >
-          <div className="mb-5 flex items-center gap-3">
-            <div className="frameos-skeleton-media h-11 w-11 animate-pulse rounded-2xl" />
-            <div className="min-w-0 flex-1 space-y-2">
-              <div className="frameos-skeleton-line h-5 w-44 max-w-full animate-pulse rounded-full" />
-              <div className="frameos-skeleton-line h-3 w-64 max-w-full animate-pulse rounded-full opacity-75" />
-            </div>
-            <div className="frameos-skeleton-line h-9 w-24 animate-pulse rounded-full opacity-80" />
-          </div>
-          <div className="flex gap-4 overflow-hidden">
-            {[0, 1, 2, 3].map((tile) => (
-              <div
-                key={tile}
-                className="frameos-skeleton-surface h-36 w-36 shrink-0 overflow-hidden rounded-2xl shadow-sm"
-              >
-                <div className="frameos-skeleton-media h-24 animate-pulse" />
-                <div className="space-y-2 p-3">
-                  <div className="frameos-skeleton-line h-3 animate-pulse rounded-full" />
-                  <div className="frameos-skeleton-line h-3 w-2/3 animate-pulse rounded-full opacity-75" />
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-      ))}
-    </div>
-  )
+  return <FrameDashboardLoadingSkeleton />
 }
 
 export function FramesHome(): JSX.Element {

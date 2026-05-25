@@ -283,6 +283,23 @@ interface EditRowProps {
   deleteEvent: (id: string) => void
 }
 
+function CompactScheduleField({
+  label,
+  children,
+  className,
+}: {
+  label: string
+  children: JSX.Element
+  className?: string
+}): JSX.Element {
+  return (
+    <div className={clsx('min-w-0 space-y-1', className)}>
+      <div className="frame-tool-muted text-xs font-semibold uppercase tracking-wide">{label}</div>
+      {children}
+    </div>
+  )
+}
+
 function EditRow({ frameId, event, scene, eventFields, closeEvent, deleteEvent }: EditRowProps) {
   return (
     <div className="space-y-4">
@@ -298,32 +315,43 @@ function EditRow({ frameId, event, scene, eventFields, closeEvent, deleteEvent }
           className="frameos-primary-group-hover-border transition group-hover:shadow-lg"
         />
       </button>
-      <div className="grid grid-cols-[minmax(0,1fr)_5rem_5rem] gap-2">
-        <Field name="weekday" label="Repeats" className="min-w-0">
-          {({ value, onChange }) => (
-            <Select options={weekDayOptions} value={value} onChange={(value_) => onChange(parseInt(value_))} />
-          )}
-        </Field>
-        <Field name="hour" label="Hour" className="min-w-0">
-          {({ value, onChange }) => (
-            <Select
-              value={value}
-              onChange={(value_) => onChange(parseInt(value_))}
-              options={hourOptions}
-              className="px-2"
-            />
-          )}
-        </Field>
-        <Field name="minute" label="Minute" className="min-w-0">
-          {({ value, onChange }) => (
-            <Select
-              value={value}
-              onChange={(value_) => onChange(parseInt(value_))}
-              options={minuteOptions}
-              className="px-2"
-            />
-          )}
-        </Field>
+      <div className="grid grid-cols-2 gap-3 @md:grid-cols-[minmax(8rem,1fr)_minmax(4.5rem,5rem)_minmax(4.5rem,5rem)]">
+        <CompactScheduleField label="Repeats" className="col-span-2 @md:col-span-1">
+          <Field name="weekday" className="@md:!block">
+            {({ value, onChange }) => (
+              <Select
+                options={weekDayOptions}
+                value={value}
+                onChange={(value_) => onChange(parseInt(value_))}
+                className="h-9 min-w-0"
+              />
+            )}
+          </Field>
+        </CompactScheduleField>
+        <CompactScheduleField label="Hour">
+          <Field name="hour" className="@md:!block">
+            {({ value, onChange }) => (
+              <Select
+                value={value}
+                onChange={(value_) => onChange(parseInt(value_))}
+                options={hourOptions}
+                className="h-9 min-w-0 px-2"
+              />
+            )}
+          </Field>
+        </CompactScheduleField>
+        <CompactScheduleField label="Minute">
+          <Field name="minute" className="@md:!block">
+            {({ value, onChange }) => (
+              <Select
+                value={value}
+                onChange={(value_) => onChange(parseInt(value_))}
+                options={minuteOptions}
+                className="h-9 min-w-0 px-2"
+              />
+            )}
+          </Field>
+        </CompactScheduleField>
       </div>
       <Group name="payload">
         {event.payload.sceneId ? (

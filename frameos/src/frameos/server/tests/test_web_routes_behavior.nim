@@ -6,6 +6,8 @@ import ../[auth, state]
 
 var server = startRouterServer(19331)
 
+const stableStaticAssetPath = "/static/main.js"
+
 suite "web route behavior":
   setup:
     drainEventChannel()
@@ -174,40 +176,37 @@ suite "web route behavior":
     let loginPage = httpRequest(server.port, "GET", "/login")
     check loginPage.status == 200
 
-    let loginJs = httpRequest(server.port, "GET", "/static/main.js")
+    let loginJs = httpRequest(server.port, "GET", stableStaticAssetPath)
     check loginJs.status == 200
 
     let loginCss = httpRequest(server.port, "GET", "/static/main.css")
     check loginCss.status == 200
-
-    let emittedAsset = httpRequest(server.port, "GET", "/static/asset-4X3RUWXO.png")
-    check emittedAsset.status == 200
 
   test "static assets load without auth for public and protected frame access":
     var config = defaultFrameConfig()
     config.frameAccess = "public"
     configureServerState(config)
 
-    let publicAsset = httpRequest(server.port, "GET", "/static/asset-4X3RUWXO.png")
+    let publicAsset = httpRequest(server.port, "GET", stableStaticAssetPath)
     check publicAsset.status == 200
 
     config.frameAccess = "protected"
     configureServerState(config)
 
-    let protectedAsset = httpRequest(server.port, "GET", "/static/asset-4X3RUWXO.png")
+    let protectedAsset = httpRequest(server.port, "GET", stableStaticAssetPath)
     check protectedAsset.status == 200
 
   test "private frames without admin auth require frame authentication for static assets":
     let config = defaultFrameConfig()
     configureServerState(config)
 
-    let privateAsset = httpRequest(server.port, "GET", "/static/asset-4X3RUWXO.png")
+    let privateAsset = httpRequest(server.port, "GET", stableStaticAssetPath)
     check privateAsset.status == 401
 
     let authedPrivateAsset = httpRequest(
       server.port,
       "GET",
-      "/static/asset-4X3RUWXO.png",
+      stableStaticAssetPath,
       headers = [("Cookie", ACCESS_COOKIE & "=test-key")],
     )
     check authedPrivateAsset.status == 200

@@ -288,6 +288,11 @@ html[data-frameos-theme='dark'] .frameos-spinner,
   --frameos-spinner-accent: #ffffff;
 }
 
+.workspace-nav-spinner svg {
+  height: 1.5rem;
+  width: 1.5rem;
+}
+
 .frameos-folder-icon {
   color: var(--frameos-color-brass);
 }
@@ -345,7 +350,9 @@ html[data-frameos-theme='dark'] .frameos-spinner,
 }
 
 .frameos-theme-dark .frameos-panel,
-.frameos-theme-dark .frameos-drawer {
+.frameos-theme-dark .frameos-drawer,
+html[data-frameos-theme='dark'] .frameos-panel,
+html[data-frameos-theme='dark'] .frameos-drawer {
   background: rgba(29, 31, 37, 0.94);
   border-color: rgba(255, 255, 255, 0.11);
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.36);
@@ -353,7 +360,9 @@ html[data-frameos-theme='dark'] .frameos-spinner,
 }
 
 .frameos-theme-dark .frameos-rail,
-.frameos-theme-dark .frameos-divider {
+.frameos-theme-dark .frameos-divider,
+html[data-frameos-theme='dark'] .frameos-rail,
+html[data-frameos-theme='dark'] .frameos-divider {
   border-color: rgba(255, 255, 255, 0.09);
 }
 
@@ -596,12 +605,17 @@ html[data-frameos-theme='dark'] .frameos-spinner,
 
 .frameos-theme-dark .frameos-strong,
 .frameos-theme-dark .frameos-form-label,
-.frameos-theme-dark .frameos-heading {
+.frameos-theme-dark .frameos-heading,
+html[data-frameos-theme='dark'] .frameos-strong,
+html[data-frameos-theme='dark'] .frameos-form-label,
+html[data-frameos-theme='dark'] .frameos-heading {
   color: #f8fafc;
 }
 
 .frameos-theme-dark .frameos-muted,
-.frameos-theme-dark .frameos-form-hint {
+.frameos-theme-dark .frameos-form-hint,
+html[data-frameos-theme='dark'] .frameos-muted,
+html[data-frameos-theme='dark'] .frameos-form-hint {
   color: #aeb6c3;
 }
 
@@ -614,7 +628,8 @@ html[data-frameos-theme='dark'] .frameos-spinner,
   color: #f8fafc;
 }
 
-.frameos-theme-dark .frameos-input {
+.frameos-theme-dark .frameos-input,
+html[data-frameos-theme='dark'] .frameos-input {
   background: rgba(38, 40, 47, 0.94);
   border-color: rgba(255, 255, 255, 0.1);
   color: #f3f4f6;
@@ -623,7 +638,10 @@ html[data-frameos-theme='dark'] .frameos-spinner,
 
 .frameos-theme-dark .frameos-input::placeholder,
 .frameos-theme-dark .frameos-form-control::placeholder,
-.frameos-theme-dark .frameos-control::placeholder {
+.frameos-theme-dark .frameos-control::placeholder,
+html[data-frameos-theme='dark'] .frameos-input::placeholder,
+html[data-frameos-theme='dark'] .frameos-form-control::placeholder,
+html[data-frameos-theme='dark'] .frameos-control::placeholder {
   color: #7d8593;
 }
 
@@ -702,6 +720,7 @@ html[data-frameos-theme='dark'] .frameos-checkbox {
 .frameos-theme-dark .frameos-nav-button:not(.frameos-primary-active),
 html[data-frameos-theme='dark'] .frameos-secondary-button,
 .frameos-theme-dark .frameos-icon-button,
+html[data-frameos-theme='dark'] .frameos-icon-button,
 .frameos-theme-dark .frameos-secondary-button,
 .frameos-theme-dark .frameos-segment:not(.frameos-primary-active),
 .frameos-theme-dark .frameos-icon-tile {
@@ -712,6 +731,7 @@ html[data-frameos-theme='dark'] .frameos-secondary-button,
 .frameos-theme-dark .frameos-nav-button:not(.frameos-primary-active):hover,
 html[data-frameos-theme='dark'] .frameos-secondary-button:hover,
 .frameos-theme-dark .frameos-icon-button:hover,
+html[data-frameos-theme='dark'] .frameos-icon-button:hover,
 .frameos-theme-dark .frameos-secondary-button:hover,
 .frameos-theme-dark .frameos-segment:not(.frameos-primary-active):hover {
   background: rgba(255, 255, 255, 0.08);
