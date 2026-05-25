@@ -1,4 +1,4 @@
-import { actions, afterMount, connect, kea, listeners, path, reducers, selectors } from 'kea'
+import { actions, afterMount, connect, events, kea, listeners, path, reducers, selectors } from 'kea'
 import { actionToUrl, router, urlToAction } from 'kea-router'
 import { framesModel } from '../../models/framesModel'
 import { frameHost, frameIsStale } from '../../decorators/frame'
@@ -230,6 +230,7 @@ const MOBILE_WORKSPACE_MEDIA_QUERY = '(max-width: 1023px)'
 const SECONDARY_SIDEBAR_HASH_KEY = 'workspaceSidebar'
 const SECONDARY_SIDEBAR_HASH_VALUE = 'open'
 const UTILITY_DRAWER_HASH_KEY = 'workspaceDrawer'
+const WORKSPACE_SCROLL_LOCK_CLASS = 'frameos-workspace-scroll-locked'
 const sceneUtilityPanels = [
   'state',
   'stateVariables',
@@ -252,6 +253,70 @@ const sceneUtilityPanelHashValues: Record<SceneUtilityPanel, string> = {
 
 export function isMobileWorkspaceViewport(): boolean {
   return typeof window !== 'undefined' && window.matchMedia?.(MOBILE_WORKSPACE_MEDIA_QUERY).matches
+}
+
+function applyWorkspaceScrollGuard(locked: boolean): void {
+  if (typeof document === 'undefined' || typeof window === 'undefined') {
+    return
+  }
+
+  const body = document.body
+  const root = document.documentElement
+  const shouldLock = locked && isMobileWorkspaceViewport()
+
+  if (shouldLock) {
+    if (body.dataset.frameosWorkspaceScrollLocked === 'true') {
+      return
+    }
+
+    body.dataset.frameosWorkspaceScrollLocked = 'true'
+    body.dataset.frameosWorkspaceScrollX = String(window.scrollX)
+    body.dataset.frameosWorkspaceScrollY = String(window.scrollY)
+    body.dataset.frameosWorkspaceBodyPosition = body.style.position
+    body.dataset.frameosWorkspaceBodyTop = body.style.top
+    body.dataset.frameosWorkspaceBodyLeft = body.style.left
+    body.dataset.frameosWorkspaceBodyRight = body.style.right
+    body.dataset.frameosWorkspaceBodyWidth = body.style.width
+    body.dataset.frameosWorkspaceBodyOverflow = body.style.overflow
+
+    root.classList.add(WORKSPACE_SCROLL_LOCK_CLASS)
+    body.classList.add(WORKSPACE_SCROLL_LOCK_CLASS)
+    body.style.position = 'fixed'
+    body.style.top = `-${window.scrollY}px`
+    body.style.left = '0'
+    body.style.right = '0'
+    body.style.width = '100%'
+    body.style.overflow = 'hidden'
+    return
+  }
+
+  root.classList.remove(WORKSPACE_SCROLL_LOCK_CLASS)
+  body.classList.remove(WORKSPACE_SCROLL_LOCK_CLASS)
+
+  if (body.dataset.frameosWorkspaceScrollLocked !== 'true') {
+    return
+  }
+
+  const scrollX = Number(body.dataset.frameosWorkspaceScrollX ?? '0')
+  const scrollY = Number(body.dataset.frameosWorkspaceScrollY ?? '0')
+  body.style.position = body.dataset.frameosWorkspaceBodyPosition ?? ''
+  body.style.top = body.dataset.frameosWorkspaceBodyTop ?? ''
+  body.style.left = body.dataset.frameosWorkspaceBodyLeft ?? ''
+  body.style.right = body.dataset.frameosWorkspaceBodyRight ?? ''
+  body.style.width = body.dataset.frameosWorkspaceBodyWidth ?? ''
+  body.style.overflow = body.dataset.frameosWorkspaceBodyOverflow ?? ''
+
+  delete body.dataset.frameosWorkspaceScrollLocked
+  delete body.dataset.frameosWorkspaceScrollX
+  delete body.dataset.frameosWorkspaceScrollY
+  delete body.dataset.frameosWorkspaceBodyPosition
+  delete body.dataset.frameosWorkspaceBodyTop
+  delete body.dataset.frameosWorkspaceBodyLeft
+  delete body.dataset.frameosWorkspaceBodyRight
+  delete body.dataset.frameosWorkspaceBodyWidth
+  delete body.dataset.frameosWorkspaceBodyOverflow
+
+  window.scrollTo(Number.isFinite(scrollX) ? scrollX : 0, Number.isFinite(scrollY) ? scrollY : 0)
 }
 
 function secondarySidebarHashIsOpen(hash: Record<string, unknown> = router.values.hashParams): boolean {
@@ -938,12 +1003,15 @@ export const workspaceLogic = kea<workspaceLogicType>([
     return {
       openSecondarySidebar: () => {
         syncSecondarySidebarHash(true)
+        applyWorkspaceScrollGuard(true)
       },
       closeSecondarySidebar: () => {
         syncSecondarySidebarHash(false)
+        applyWorkspaceScrollGuard(false)
       },
       toggleSecondarySidebar: () => {
         syncSecondarySidebarHash(values.secondarySidebarOpen)
+        applyWorkspaceScrollGuard(values.secondarySidebarOpen)
       },
       openSceneControl: ({ frameId, sceneId }) => {
         newFrameForm.actions.hideForm()
@@ -974,6 +1042,12 @@ export const workspaceLogic = kea<workspaceLogicType>([
         const scrollToFrame = (attempt = 0) => {
           const frameElement = document.getElementById(`workspace-frame-${frameId}`)
           if (frameElement) {
+            if (isMobileWorkspaceViewport()) {
+              const headerOffset = window.matchMedia?.('(max-width: 639px)').matches ? 96 : 104
+              const top = frameElement.getBoundingClientRect().top + window.scrollY - headerOffset
+              window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' })
+              return
+            }
             frameElement.scrollIntoView({ behavior: 'smooth', block: 'start' })
             return
           }
@@ -1164,10 +1238,39 @@ export const workspaceLogic = kea<workspaceLogicType>([
       return [router.values.location.pathname, router.values.searchParams, utilityDrawerClosedHash(), { replace: true }]
     },
   })),
-  afterMount(({ actions, values }) => {
+  afterMount(({ actions, cache, values }) => {
     applyWorkspaceTheme(values.theme)
-    if (isMobileWorkspaceViewport() && secondarySidebarHashIsOpen()) {
-      actions.openSecondarySidebar()
+    if (typeof window !== 'undefined') {
+      const mobileWorkspaceQuery = window.matchMedia?.(MOBILE_WORKSPACE_MEDIA_QUERY)
+      const syncScrollGuardForViewport = () => applyWorkspaceScrollGuard(workspaceLogic.values.secondarySidebarOpen)
+      if (mobileWorkspaceQuery) {
+        cache.mobileWorkspaceQuery = mobileWorkspaceQuery
+        cache.syncScrollGuardForViewport = syncScrollGuardForViewport
+        if (mobileWorkspaceQuery.addEventListener) {
+          mobileWorkspaceQuery.addEventListener('change', syncScrollGuardForViewport)
+        } else {
+          mobileWorkspaceQuery.addListener?.(syncScrollGuardForViewport)
+        }
+      }
+    }
+    if (isMobileWorkspaceViewport()) {
+      if (secondarySidebarHashIsOpen()) {
+        actions.openSecondarySidebar()
+      } else {
+        actions.closeSecondarySidebar()
+      }
+    } else {
+      applyWorkspaceScrollGuard(false)
     }
   }),
+  events(({ cache }) => ({
+    beforeUnmount: () => {
+      if (cache.mobileWorkspaceQuery?.removeEventListener) {
+        cache.mobileWorkspaceQuery.removeEventListener('change', cache.syncScrollGuardForViewport)
+      } else {
+        cache.mobileWorkspaceQuery?.removeListener?.(cache.syncScrollGuardForViewport)
+      }
+      applyWorkspaceScrollGuard(false)
+    },
+  })),
 ])

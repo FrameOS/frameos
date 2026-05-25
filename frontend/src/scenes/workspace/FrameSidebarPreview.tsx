@@ -12,10 +12,12 @@ export function FrameSidebarPreview({
   frame,
   active = false,
   className,
+  mediaClassName,
 }: {
   frame: FrameType
   active?: boolean
   className?: string
+  mediaClassName?: string
 }): JSX.Element {
   return (
     <A
@@ -26,7 +28,7 @@ export function FrameSidebarPreview({
         className
       )}
     >
-      <div className="frameos-card-media relative h-32 bg-slate-100">
+      <div className={clsx('frameos-card-media relative h-32 bg-slate-100', mediaClassName)}>
         <FrameImage frameId={frame.id} refreshable objectFit="contain" className="h-full w-full" />
         <FrameLiveBadge frame={frame} />
       </div>

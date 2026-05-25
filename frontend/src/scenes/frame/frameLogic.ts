@@ -755,6 +755,8 @@ export const frameLogic = kea<frameLogicType>([
     verifyTlsCertificates: true,
     showDeployPlanModal: true,
     hideDeployPlanModal: true,
+    showUnsavedChangesModal: true,
+    hideUnsavedChangesModal: true,
     loadDeployPlans: true,
     loadDeployPlansSuccess: (plan: DeployPlanResponse | null) => ({ plan }),
     loadDeployPlansFailure: (error: string) => ({ error }),
@@ -839,6 +841,16 @@ export const frameLogic = kea<frameLogicType>([
       {
         showDeployPlanModal: () => true,
         hideDeployPlanModal: () => false,
+        showUnsavedChangesModal: () => false,
+      },
+    ],
+    unsavedChangesModalOpen: [
+      false,
+      {
+        showUnsavedChangesModal: () => true,
+        hideUnsavedChangesModal: () => false,
+        showDeployPlanModal: () => false,
+        submitFrameFormSuccess: () => false,
       },
     ],
   }),

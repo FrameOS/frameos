@@ -3,6 +3,10 @@ import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
 import clsx from 'clsx'
 import type { CSSProperties, MouseEvent } from 'react'
 import {
+  ChevronDownIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  ChevronUpIcon,
   Cog6ToothIcon,
   CodeBracketIcon,
   ComputerDesktopIcon,
@@ -102,7 +106,22 @@ function NavButton({
           : 'text-slate-400 hover:bg-slate-100 hover:text-slate-700'
       )}
     >
-      {children}
+      {active ? (
+        <>
+          {sidebarOpen ? (
+            <ChevronUpIcon className="h-7 w-7 lg:hidden" />
+          ) : (
+            <ChevronDownIcon className="h-7 w-7 lg:hidden" />
+          )}
+          {sidebarOpen ? (
+            <ChevronLeftIcon className="hidden h-7 w-7 lg:block" />
+          ) : (
+            <ChevronRightIcon className="hidden h-7 w-7 lg:block" />
+          )}
+        </>
+      ) : (
+        children
+      )}
     </a>
   )
 }
@@ -174,28 +193,36 @@ function WorkspaceChatDrawer({ frameId, sceneId }: { frameId: number; sceneId: s
   )
 }
 
-function FrameUnsavedHeaderButton({ frameId }: { frameId: number }): JSX.Element | null {
-  const { unsavedChanges } = useValues(frameLogic({ frameId }))
-  const { showDeployPlanModal } = useActions(frameLogic({ frameId }))
+function FrameStatusHeaderButton({ frameId }: { frameId: number }): JSX.Element | null {
+  const { undeployedChanges, unsavedChanges } = useValues(frameLogic({ frameId }))
+  const { showDeployPlanModal, showUnsavedChangesModal } = useActions(frameLogic({ frameId }))
   const { closeChatDrawer } = useActions(workspaceLogic)
+  const statusLabel = unsavedChanges ? 'Unsaved' : undeployedChanges ? 'Undeployed' : null
 
-  if (!unsavedChanges) {
+  if (!statusLabel) {
     return null
   }
 
   return (
     <button
       type="button"
-      title="Unsaved changes"
-      aria-label="Open deploy plan for unsaved changes"
+      title={`${statusLabel} changes`}
+      aria-label={unsavedChanges ? 'Open unsaved changes' : 'Open deploy plan for undeployed changes'}
       onClick={() => {
         closeChatDrawer()
-        showDeployPlanModal()
+        if (unsavedChanges) {
+          showUnsavedChangesModal()
+        } else {
+          showDeployPlanModal()
+        }
       }}
-      className="workspace-unsaved-header-button frameos-warning-button flex h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+      className={clsx(
+        'workspace-unsaved-header-button flex h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+        unsavedChanges ? 'frameos-warning-button' : 'frameos-primary-outline-action'
+      )}
     >
       <ExclamationTriangleIcon className="h-5 w-5 shrink-0" />
-      <span className="workspace-unsaved-header-label">Unsaved</span>
+      <span className="workspace-unsaved-header-label">{statusLabel}</span>
     </button>
   )
 }
@@ -240,7 +267,7 @@ export function FrameosShell({
     ) : null
   const unsavedHeaderButton =
     selectedFrame && mode !== 'frames' && mode !== 'settings' ? (
-      <FrameUnsavedHeaderButton frameId={selectedFrame.id} />
+      <FrameStatusHeaderButton frameId={selectedFrame.id} />
     ) : null
   const workspaceMainStyle = {
     '--workspace-main-offset': secondarySidebarOpen ? '480px' : '128px',

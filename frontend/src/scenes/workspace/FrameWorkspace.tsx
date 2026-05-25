@@ -22,6 +22,7 @@ import { FrameosShell } from './FrameosShell'
 import { AddSceneTile, SceneControlPanel, TemplateDrawer } from './FramesHome'
 import { FrameDashboardSurface } from './FrameDashboardSurface'
 import { FrameDeployPlanDrawer } from './FrameDeployPlanDrawer'
+import { FrameUnsavedChangesDrawer } from './FrameUnsavedChangesDrawer'
 import { FrameSceneSidebarCard } from './FrameSceneSidebarCard'
 import { FrameSidebarPreview } from './FrameSidebarPreview'
 import { sceneWorkspaceLogic } from './sceneWorkspaceLogic'
@@ -222,6 +223,12 @@ const frameToolDefinitions: FrameToolDefinition[] = [
     description: 'Preview and scenes',
     icon: <Squares2X2Icon className="h-5 w-5" />,
   },
+  {
+    panel: 'settings',
+    label: 'Settings',
+    description: 'Frame config',
+    icon: <AdjustmentsHorizontalIcon className="h-5 w-5" />,
+  },
   { panel: 'preview', label: 'Preview', description: 'Current image', icon: <EyeIcon className="h-5 w-5" /> },
   {
     panel: 'schedule',
@@ -235,12 +242,6 @@ const frameToolDefinitions: FrameToolDefinition[] = [
   { panel: 'terminal', label: 'Terminal', description: 'Shell access', icon: <CommandLineIcon className="h-5 w-5" /> },
   { panel: 'ping', label: 'Ping', description: 'Connectivity', icon: <SignalIcon className="h-5 w-5" /> },
   { panel: 'debug', label: 'Debug', description: 'Diagnostics', icon: <BoltIcon className="h-5 w-5" /> },
-  {
-    panel: 'settings',
-    label: 'Settings',
-    description: 'Frame config',
-    icon: <AdjustmentsHorizontalIcon className="h-5 w-5" />,
-  },
 ]
 
 function frameToolPanelFromCurrentLocation(): WorkspaceUtilityPanel | null {
@@ -283,7 +284,9 @@ function scrollToFrameSettingsSection(sectionId: string, attempt = 0): void {
   window.requestAnimationFrame(() => {
     const section = document.getElementById(sectionId)
     if (section) {
-      section.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      const offset = isMobileWorkspaceViewport() ? (window.matchMedia?.('(max-width: 639px)').matches ? 112 : 128) : 24
+      const top = section.getBoundingClientRect().top + window.scrollY - offset
+      window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' })
       return
     }
 
@@ -301,12 +304,20 @@ function parseFrameId(frameId?: string): number | null {
   return Number.isFinite(parsed) ? parsed : null
 }
 
-function FrameSelector({ frame, frames }: { frame: FrameType; frames: FrameType[] }): JSX.Element {
+function FrameSelector({
+  frame,
+  frames,
+  className,
+}: {
+  frame: FrameType
+  frames: FrameType[]
+  className?: string
+}): JSX.Element {
   const { navigateToFrame } = useActions(workspaceLogic)
   const frameGroups = groupFramesByStatus(frames)
 
   return (
-    <div className="px-2">
+    <div className={clsx('px-2', className)}>
       <label className="frameos-muted mb-2 block text-xs font-semibold uppercase tracking-wide">Frame</label>
       <select
         value={frame.id}
@@ -412,16 +423,18 @@ function FrameTree({
   undeployedChanges: boolean
 }): JSX.Element {
   return (
-    <div className="space-y-4">
-      <div className="space-y-2">
-        <FrameSelector frame={frame} frames={frames} />
-        <FrameSceneSidebarCard
+    <div className="@container space-y-4">
+      <div className="grid gap-2 px-2 @xs:grid-cols-[6.5rem_minmax(0,1fr)] @xs:items-stretch">
+        <FrameSidebarPreview
           frame={frame}
-          unsavedChanges={unsavedChanges}
-          undeployedChanges={undeployedChanges}
-          className="mx-2"
+          active={activeTool === 'preview'}
+          className="order-3 @xs:order-1 @xs:h-full"
+          mediaClassName="@xs:h-full @xs:min-h-[6.75rem]"
         />
-        <FrameSidebarPreview frame={frame} active={activeTool === 'preview'} className="mx-2" />
+        <div className="order-1 min-w-0 space-y-2 @xs:order-2">
+          <FrameSelector frame={frame} frames={frames} className="px-0" />
+          <FrameSceneSidebarCard frame={frame} unsavedChanges={unsavedChanges} undeployedChanges={undeployedChanges} />
+        </div>
       </div>
       <div>
         <div className="frameos-muted mb-2 px-2 text-xs font-semibold uppercase tracking-wide">Frame Tools</div>
@@ -1146,7 +1159,7 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
   useMountedLogic(metricsLogic(frameLogicProps))
 
   const { framesList } = useValues(framesModel)
-  const { frame, scenes, deployPlanModalOpen, undeployedChanges, unsavedChanges } = useValues(
+  const { frame, scenes, deployPlanModalOpen, undeployedChanges, unsavedChanges, unsavedChangesModalOpen } = useValues(
     frameLogic(frameLogicProps)
   )
   const { sceneControlSelection, templateDrawerFrameId, utilityPanel, frameToolScrollPositions } =
@@ -1256,7 +1269,9 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
             'frame-workspace-main py-6 pr-8 max-lg:h-auto max-lg:overflow-visible max-lg:px-4 max-lg:pb-6'
           )}
           rightPanel={
-            deployPlanModalOpen ? (
+            unsavedChangesModalOpen ? (
+              <FrameUnsavedChangesDrawer frame={frame} />
+            ) : deployPlanModalOpen ? (
               <FrameDeployPlanDrawer frame={frame} />
             ) : templateDrawerFrameId ? (
               <TemplateDrawer />

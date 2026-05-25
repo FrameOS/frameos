@@ -1,7 +1,7 @@
 import { actions, afterMount, beforeUnmount, connect, kea, listeners, path, reducers } from 'kea'
 import { subscriptions } from 'kea-subscriptions'
 import { framesModel } from '../../models/framesModel'
-import { workspaceLogic } from './workspaceLogic'
+import { isMobileWorkspaceViewport, workspaceLogic } from './workspaceLogic'
 import type { framesHomeLogicType } from './framesHomeLogicType'
 
 function framesMainElement(): HTMLElement | null {
@@ -9,6 +9,31 @@ function framesMainElement(): HTMLElement | null {
     return null
   }
   return document.querySelector<HTMLElement>('[data-workspace-main="frames"]')
+}
+
+function mobileWorkspaceHeaderOffset(): number {
+  if (typeof window === 'undefined') {
+    return 0
+  }
+
+  return window.matchMedia?.('(max-width: 639px)').matches ? 72 : 84
+}
+
+function removeFrameScrollSpy(cache: Record<string, any>): void {
+  if (cache.frameScrollElement && cache.frameScrollListener) {
+    cache.frameScrollElement.removeEventListener('scroll', cache.frameScrollListener)
+  }
+  if (cache.documentScrollElement && cache.frameScrollListener) {
+    cache.documentScrollElement.removeEventListener('scroll', cache.frameScrollListener)
+  }
+  if (cache.frameScrollListener && typeof window !== 'undefined') {
+    window.removeEventListener('scroll', cache.frameScrollListener)
+    window.removeEventListener('resize', cache.frameScrollListener)
+    document.removeEventListener('scroll', cache.frameScrollListener)
+  }
+
+  cache.frameScrollElement = null
+  cache.documentScrollElement = null
 }
 
 function currentFrameInView(): number | null {
@@ -24,10 +49,10 @@ function currentFrameInView(): number | null {
   const mainStyle = window.getComputedStyle(main)
   const mainRect = main.getBoundingClientRect()
   const mainScrolls = main.scrollHeight > main.clientHeight + 1 && mainStyle.overflowY !== 'visible'
-  const viewportTop = mainScrolls ? mainRect.top : 0
+  const viewportTop = mainScrolls ? mainRect.top : isMobileWorkspaceViewport() ? mobileWorkspaceHeaderOffset() : 0
   const viewportBottom = mainScrolls ? mainRect.bottom : window.innerHeight
   const viewportHeight = Math.max(1, viewportBottom - viewportTop)
-  const readingLine = viewportTop + Math.min(220, viewportHeight * 0.35)
+  const readingLine = viewportTop + Math.min(isMobileWorkspaceViewport() ? 96 : 220, viewportHeight * 0.35)
 
   const sections = Array.from(document.querySelectorAll<HTMLElement>('[data-workspace-frame-section]'))
     .map((section) => {
@@ -89,13 +114,7 @@ export const framesHomeLogic = kea<framesHomeLogicType>([
         window.clearTimeout(cache.frameScrollAttachTimer)
         cache.frameScrollAttachTimer = null
       }
-      if (cache.frameScrollElement && cache.frameScrollListener) {
-        cache.frameScrollElement.removeEventListener('scroll', cache.frameScrollListener)
-      }
-      if (cache.frameScrollListener) {
-        window.removeEventListener('scroll', cache.frameScrollListener)
-        window.removeEventListener('resize', cache.frameScrollListener)
-      }
+      removeFrameScrollSpy(cache)
 
       window.requestAnimationFrame(() => {
         const main = framesMainElement()
@@ -105,9 +124,13 @@ export const framesHomeLogic = kea<framesHomeLogicType>([
         }
 
         const listener = () => actions.syncFrameFromScroll()
+        const documentScrollElement = document.scrollingElement
         cache.frameScrollElement = main
+        cache.documentScrollElement = documentScrollElement
         cache.frameScrollListener = listener
         main.addEventListener('scroll', listener, { passive: true })
+        documentScrollElement?.addEventListener('scroll', listener, { passive: true })
+        document.addEventListener('scroll', listener, { passive: true })
         window.addEventListener('scroll', listener, { passive: true })
         window.addEventListener('resize', listener)
         actions.syncFrameFromScroll()
@@ -128,6 +151,12 @@ export const framesHomeLogic = kea<framesHomeLogicType>([
         }
       })
     },
+    [workspaceLogic.actionTypes.openSecondarySidebar]: () => {
+      actions.syncFrameFromScroll()
+    },
+    [workspaceLogic.actionTypes.toggleSecondarySidebar]: () => {
+      actions.syncFrameFromScroll()
+    },
   })),
   subscriptions(({ actions, values }) => ({
     framesList: () => {
@@ -146,13 +175,7 @@ export const framesHomeLogic = kea<framesHomeLogicType>([
     if (typeof window === 'undefined') {
       return
     }
-    if (cache.frameScrollElement && cache.frameScrollListener) {
-      cache.frameScrollElement.removeEventListener('scroll', cache.frameScrollListener)
-    }
-    if (cache.frameScrollListener) {
-      window.removeEventListener('scroll', cache.frameScrollListener)
-      window.removeEventListener('resize', cache.frameScrollListener)
-    }
+    removeFrameScrollSpy(cache)
     if (cache.frameScrollAnimationFrame) {
       window.cancelAnimationFrame(cache.frameScrollAnimationFrame)
     }

@@ -184,6 +184,118 @@ export function FrameSettings({
   const controlUrl = frameControlUrl(linkFrame)
   const adminUrl = frameAdminUrl(linkFrame)
   const imageUrl = frameImageUrl(linkFrame)
+  const frameActionsMenu = hideDropdown ? null : (
+    <DropdownMenu
+      className="w-fit"
+      buttonColor="tertiary"
+      items={[
+        ...(mode === 'rpios' && !inFrameAdminMode
+          ? [
+              {
+                label: 'Clear build cache on frame',
+                onClick: () => {
+                  clearBuildCache()
+                  openLogs()
+                },
+                icon: <ArrowPathIcon className="w-5 h-5" />,
+                loading: buildCacheLoading,
+              },
+            ]
+          : []),
+        {
+          label: 'Import frame .json',
+          onClick: () => {
+            function handleFileSelect(event: Event): void {
+              const inputElement = event.target as HTMLInputElement
+              const file = inputElement.files?.[0]
+
+              if (!file) {
+                console.error('No file selected')
+                return
+              }
+
+              const reader = new FileReader()
+
+              reader.onload = (loadEvent: ProgressEvent<FileReader>) => {
+                try {
+                  const jsonData = JSON.parse(loadEvent.target?.result as string)
+                  const { id, ...rest } = jsonData
+                  setFrameFormValues(rest)
+                  console.log('Imported frame:', jsonData)
+                  console.log('Press SAVE now to save the imported frame')
+                } catch (error) {
+                  console.error('Error parsing JSON:', error)
+                }
+              }
+
+              reader.onerror = () => {
+                console.error('Error reading file:', reader.error)
+              }
+
+              reader.readAsText(file)
+            }
+
+            const fileInput = document.createElement('input')
+            fileInput.type = 'file'
+            fileInput.accept = '.json'
+            fileInput.addEventListener('change', handleFileSelect)
+            fileInput.click()
+          },
+          icon: <ArrowDownTrayIcon className="w-5 h-5" />,
+          loading: false,
+        },
+        {
+          label: 'Export frame .json',
+          onClick: () => {
+            downloadJson(frame, `${frame.name || `frame${frame.id}`}.json`)
+          },
+          icon: <ArrowUpTrayIcon className="w-5 h-5" />,
+          loading: false,
+        },
+        ...(!inFrameAdminMode
+          ? [
+              {
+                label: 'Download Nim build .zip',
+                onClick: () => {
+                  downloadBuildZip()
+                  openLogs()
+                },
+                icon: <ArrowUpTrayIcon className="w-5 h-5" />,
+                loading: buildZipLoading,
+              },
+              {
+                label: 'Generate C sources .zip',
+                onClick: () => {
+                  downloadCSourceZip()
+                  openLogs()
+                },
+                icon: <ArrowUpTrayIcon className="w-5 h-5" />,
+                loading: cSourceZipLoading,
+              },
+              {
+                label: 'Download built binary .zip',
+                onClick: () => {
+                  downloadBinaryZip()
+                  openLogs()
+                },
+                icon: <ArrowUpTrayIcon className="w-5 h-5" />,
+                loading: binaryZipLoading,
+              },
+              {
+                label: 'Delete frame',
+                onClick: () => {
+                  if (confirm('Are you sure you want to DELETE this frame?')) {
+                    deleteFrame(frame.id)
+                  }
+                },
+                icon: <TrashIcon className="w-5 h-5" />,
+                loading: false,
+              },
+            ]
+          : []),
+      ]}
+    />
+  )
 
   return (
     <div
@@ -194,120 +306,6 @@ export function FrameSettings({
       )}
       id="panel-settings-div"
     >
-      {!hideDropdown ? (
-        <div className="sticky top-0 z-10 mb-3 flex justify-end">
-          <DropdownMenu
-            className="w-fit"
-            buttonColor="tertiary"
-            items={[
-              ...(mode === 'rpios' && !inFrameAdminMode
-                ? [
-                    {
-                      label: 'Clear build cache on frame',
-                      onClick: () => {
-                        clearBuildCache()
-                        openLogs()
-                      },
-                      icon: <ArrowPathIcon className="w-5 h-5" />,
-                      loading: buildCacheLoading,
-                    },
-                  ]
-                : []),
-              {
-                label: 'Import frame .json',
-                onClick: () => {
-                  function handleFileSelect(event: Event): void {
-                    const inputElement = event.target as HTMLInputElement
-                    const file = inputElement.files?.[0]
-
-                    if (!file) {
-                      console.error('No file selected')
-                      return
-                    }
-
-                    const reader = new FileReader()
-
-                    reader.onload = (loadEvent: ProgressEvent<FileReader>) => {
-                      try {
-                        const jsonData = JSON.parse(loadEvent.target?.result as string)
-                        const { id, ...rest } = jsonData
-                        setFrameFormValues(rest)
-                        console.log('Imported frame:', jsonData)
-                        console.log('Press SAVE now to save the imported frame')
-                      } catch (error) {
-                        console.error('Error parsing JSON:', error)
-                      }
-                    }
-
-                    reader.onerror = () => {
-                      console.error('Error reading file:', reader.error)
-                    }
-
-                    reader.readAsText(file)
-                  }
-
-                  const fileInput = document.createElement('input')
-                  fileInput.type = 'file'
-                  fileInput.accept = '.json'
-                  fileInput.addEventListener('change', handleFileSelect)
-                  fileInput.click()
-                },
-                icon: <ArrowDownTrayIcon className="w-5 h-5" />,
-                loading: false,
-              },
-              {
-                label: 'Export frame .json',
-                onClick: () => {
-                  downloadJson(frame, `${frame.name || `frame${frame.id}`}.json`)
-                },
-                icon: <ArrowUpTrayIcon className="w-5 h-5" />,
-                loading: false,
-              },
-              ...(!inFrameAdminMode
-                ? [
-                    {
-                      label: 'Download Nim build .zip',
-                      onClick: () => {
-                        downloadBuildZip()
-                        openLogs()
-                      },
-                      icon: <ArrowUpTrayIcon className="w-5 h-5" />,
-                      loading: buildZipLoading,
-                    },
-                    {
-                      label: 'Generate C sources .zip',
-                      onClick: () => {
-                        downloadCSourceZip()
-                        openLogs()
-                      },
-                      icon: <ArrowUpTrayIcon className="w-5 h-5" />,
-                      loading: cSourceZipLoading,
-                    },
-                    {
-                      label: 'Download built binary .zip',
-                      onClick: () => {
-                        downloadBinaryZip()
-                        openLogs()
-                      },
-                      icon: <ArrowUpTrayIcon className="w-5 h-5" />,
-                      loading: binaryZipLoading,
-                    },
-                    {
-                      label: 'Delete frame',
-                      onClick: () => {
-                        if (confirm('Are you sure you want to DELETE this frame?')) {
-                          deleteFrame(frame.id)
-                        }
-                      },
-                      icon: <TrashIcon className="w-5 h-5" />,
-                      loading: false,
-                    },
-                  ]
-                : []),
-            ]}
-          />
-        </div>
-      ) : null}
       <Form
         formKey="frameForm"
         logic={frameLogic}
@@ -317,9 +315,10 @@ export function FrameSettings({
       >
         {showFrameInfo ? (
           <>
-            <H6 id="frame-settings-info" className="mt-2">
-              Frame info
-            </H6>
+            <div className="frame-settings-heading-row mt-2 flex items-center justify-between gap-3">
+              <H6 id="frame-settings-info">Frame info</H6>
+              {frameActionsMenu}
+            </div>
             <div className="pl-2 @md:pl-8 space-y-2">
               {frame.frame_host ? (
                 <Field
@@ -381,9 +380,16 @@ export function FrameSettings({
             </div>
           </>
         ) : null}
-        <H6 id="frame-settings-device" className="mt-2">
-          Device settings
-        </H6>
+        {showFrameInfo ? (
+          <H6 id="frame-settings-device" className="mt-2">
+            Device settings
+          </H6>
+        ) : (
+          <div className="frame-settings-heading-row mt-2 flex items-center justify-between gap-3">
+            <H6 id="frame-settings-device">Device settings</H6>
+            {frameActionsMenu}
+          </div>
+        )}
         <div className="pl-2 @md:pl-8 space-y-2">
           <Field name="name" label="Name">
             <TextInput name="name" placeholder="Hallway frame" required />

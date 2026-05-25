@@ -21,6 +21,51 @@ import { A } from 'kea-router'
 import { urls } from '../../urls'
 import { Tag } from '../../components/Tag'
 import { FrameosShell } from '../workspace/FrameosShell'
+import { isMobileWorkspaceViewport, workspaceLogic } from '../workspace/workspaceLogic'
+
+const settingsNavItems = [
+  ['SSH Keys', '#settings-ssh'],
+  ['FrameOS Gallery', '#settings-gallery'],
+  ['OpenAI', '#settings-openai'],
+  ['PostHog', '#settings-posthog'],
+  ['Home Assistant', '#settings-home-assistant'],
+  ['GitHub', '#settings-github'],
+  ['Unsplash API', '#settings-unsplash'],
+  ['Cross-compilation build host', '#settings-build-host'],
+  ['System information', '#settings-system'],
+  ['Custom fonts', '#settings-fonts'],
+] as const
+
+function settingsHeaderOffset(): number {
+  if (typeof window === 'undefined') {
+    return 0
+  }
+
+  return window.matchMedia?.('(max-width: 639px)').matches ? 96 : 104
+}
+
+function scrollToSettingsSection(sectionId: string, attempt = 0): void {
+  if (typeof document === 'undefined' || typeof window === 'undefined') {
+    return
+  }
+
+  window.requestAnimationFrame(() => {
+    const section = document.getElementById(sectionId)
+    if (section) {
+      if (isMobileWorkspaceViewport()) {
+        const top = section.getBoundingClientRect().top + window.scrollY - settingsHeaderOffset()
+        window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' })
+      } else {
+        section.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }
+      return
+    }
+
+    if (attempt < 8) {
+      window.setTimeout(() => scrollToSettingsSection(sectionId, attempt + 1), 50)
+    }
+  })
+}
 
 export function Settings() {
   const {
@@ -28,6 +73,7 @@ export function Settings() {
     savedSettings,
     savedSettingsLoading,
     settingsChanged,
+    isSettingsSubmitting,
     embeddingsCount,
     embeddingsTotal,
     embeddingsMissing,
@@ -43,6 +89,7 @@ export function Settings() {
   const { framesList } = useValues(framesModel)
   const {
     submitSettings,
+    resetSettings,
     addSshKey,
     generateSshKey,
     removeSshKey,
@@ -56,28 +103,58 @@ export function Settings() {
   } = useActions(settingsLogic)
   const { isHassioIngress } = useValues(sceneLogic)
   const { logout } = useActions(sceneLogic)
+  const { closeSecondarySidebar } = useActions(workspaceLogic)
   const defaultSshKeyIds = getDefaultSshKeyIds(settings?.ssh_keys)
   const framesUsingKey = (keyId: string) =>
     framesList.filter((frame) => (frame.ssh_keys ?? defaultSshKeyIds).includes(keyId))
   const settingsTree = (
     <div className="space-y-1">
-      {[
-        ['SSH Keys', '#settings-ssh'],
-        ['FrameOS Gallery', '#settings-gallery'],
-        ['OpenAI', '#settings-openai'],
-        ['Integrations', '#settings-integrations'],
-        ['Build Host', '#settings-build-host'],
-        ['System Info', '#settings-system'],
-        ['Fonts', '#settings-fonts'],
-      ].map(([label, href]) => (
+      {settingsNavItems.map(([label, href]) => (
         <a
           key={href}
           href={href}
+          onClick={(event) => {
+            if (!isMobileWorkspaceViewport()) {
+              return
+            }
+
+            event.preventDefault()
+            closeSecondarySidebar()
+            window.history.pushState(null, '', `${window.location.pathname}${window.location.search}${href}`)
+            scrollToSettingsSection(href.slice(1))
+          }}
           className="frameos-settings-nav-link block rounded-xl px-3 py-2.5 text-base font-medium text-slate-700 transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
         >
           {label}
         </a>
       ))}
+    </div>
+  )
+  const settingsActions = (
+    <div className="settings-action-toolbar-floating flex items-center justify-end gap-2">
+      {!isHassioIngress ? (
+        <Button size="small" color="secondary" onClick={logout} className="rounded-lg px-4 py-2">
+          Logout
+        </Button>
+      ) : null}
+      <Button
+        size="small"
+        color="secondary"
+        onClick={() => resetSettings(savedSettings)}
+        disabled={!settingsChanged || isSettingsSubmitting}
+        className="rounded-lg px-4 py-2"
+      >
+        Reset
+      </Button>
+      <Button
+        size="small"
+        color={settingsChanged ? 'primary' : 'secondary'}
+        onClick={submitSettings}
+        disabled={!settingsChanged || isSettingsSubmitting}
+        className="rounded-lg px-4 py-2"
+      >
+        Save
+      </Button>
     </div>
   )
 
@@ -88,23 +165,7 @@ export function Settings() {
       subtitle="System configuration"
       tree={settingsTree}
       mainClassName="settings-workspace-main min-h-screen overflow-visible py-6 pr-8 max-lg:min-h-0 max-lg:px-4 max-lg:pb-6 max-lg:pt-0"
-      toolbar={
-        <div className="flex gap-2">
-          {!isHassioIngress ? (
-            <Button size="small" color="secondary" onClick={logout} className="rounded-lg px-4 py-2">
-              Logout
-            </Button>
-          ) : null}
-          <Button
-            size="small"
-            color={settingsChanged ? 'primary' : 'secondary'}
-            onClick={submitSettings}
-            className="rounded-lg px-4 py-2"
-          >
-            Save
-          </Button>
-        </div>
-      }
+      topBar={settingsActions}
     >
       <div className="frame-tool-panel frame-settings-panel settings-panel mx-auto max-w-5xl @container">
         {savedSettingsLoading ? (
@@ -320,7 +381,7 @@ export function Settings() {
                 </Box>
               </Group>
               <Group name="posthog">
-                <H6 id="settings-integrations" className="pt-4">
+                <H6 id="settings-posthog" className="pt-4">
                   PostHog
                 </H6>
                 <Box className="p-2 space-y-2">
@@ -339,7 +400,9 @@ export function Settings() {
                 </Box>
               </Group>
               <Group name="homeAssistant">
-                <H6 className="pt-4">Home Assistant</H6>
+                <H6 id="settings-home-assistant" className="pt-4">
+                  Home Assistant
+                </H6>
                 <Box className="p-2 space-y-2">
                   <Field name="url" label="Home assistant URL">
                     <TextInput placeholder="http://homeassistant.local:8123" />
@@ -354,7 +417,9 @@ export function Settings() {
                 </Box>
               </Group>
               <Group name="github">
-                <H6 className="pt-4">Github</H6>
+                <H6 id="settings-github" className="pt-4">
+                  GitHub
+                </H6>
                 <Box className="p-2 space-y-2">
                   <Field name="api_key" label="API key" secret={!!savedSettings?.github?.api_key}>
                     <TextInput />
@@ -362,7 +427,9 @@ export function Settings() {
                 </Box>
               </Group>
               <Group name="unsplash">
-                <H6 className="pt-4">Unsplash API</H6>
+                <H6 id="settings-unsplash" className="pt-4">
+                  Unsplash API
+                </H6>
                 <Box className="p-2 space-y-2">
                   <Field name="accessKey" label="Access key" secret={!!savedSettings?.unsplash?.accessKey}>
                     <TextInput />

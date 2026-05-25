@@ -20,6 +20,7 @@ import { frameHost } from '../../decorators/frame'
 import { FrameScene, FrameType, NodeData } from '../../types'
 import { FrameosShell } from './FrameosShell'
 import { FrameDeployPlanDrawer } from './FrameDeployPlanDrawer'
+import { FrameUnsavedChangesDrawer } from './FrameUnsavedChangesDrawer'
 import { FrameSceneSidebarCard } from './FrameSceneSidebarCard'
 import { FrameSidebarPreview } from './FrameSidebarPreview'
 import { sceneWorkspaceLogic } from './sceneWorkspaceLogic'
@@ -137,27 +138,35 @@ function SceneSelector({
   }
 
   return (
-    <div className="space-y-2 px-2">
-      <div>
-        <label className="frameos-muted mb-2 block text-xs font-semibold uppercase tracking-wide">Frame</label>
-        <select
-          value={frame.id}
-          onChange={(event) => navigateToSceneFrame(parseInt(event.target.value, 10))}
-          className="frameos-form-control min-h-12 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-blue-400"
-        >
-          {frameGroups.map((group) => (
-            <optgroup key={group.key} label={group.label}>
-              {group.frames.map((candidate) => (
-                <option key={candidate.id} value={candidate.id}>
-                  {candidate.name || frameHost(candidate)}
-                </option>
+    <div className="@container space-y-2 px-2">
+      <div className="grid gap-2 @xs:grid-cols-[6.5rem_minmax(0,1fr)] @xs:items-stretch">
+        <FrameSidebarPreview
+          frame={frame}
+          className="order-3 @xs:order-1 @xs:h-full"
+          mediaClassName="@xs:h-full @xs:min-h-[6.75rem]"
+        />
+        <div className="order-1 min-w-0 space-y-2 @xs:order-2">
+          <div>
+            <label className="frameos-muted mb-2 block text-xs font-semibold uppercase tracking-wide">Frame</label>
+            <select
+              value={frame.id}
+              onChange={(event) => navigateToSceneFrame(parseInt(event.target.value, 10))}
+              className="frameos-form-control min-h-12 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-blue-400"
+            >
+              {frameGroups.map((group) => (
+                <optgroup key={group.key} label={group.label}>
+                  {group.frames.map((candidate) => (
+                    <option key={candidate.id} value={candidate.id}>
+                      {candidate.name || frameHost(candidate)}
+                    </option>
+                  ))}
+                </optgroup>
               ))}
-            </optgroup>
-          ))}
-        </select>
+            </select>
+          </div>
+          {sidebarActions}
+        </div>
       </div>
-      {sidebarActions}
-      <FrameSidebarPreview frame={frame} />
       <div onDragOver={handleSceneListDragOver} onDrop={handleSceneListDrop}>
         <div className="mb-2 flex items-center justify-between gap-2">
           <label className="frameos-muted block text-xs font-semibold uppercase tracking-wide">Scenes</label>
@@ -616,7 +625,7 @@ function SceneCanvas({
 
 function SceneWorkspaceFrame({ frameId }: SceneWorkspaceFrameProps): JSX.Element {
   const frameLogicProps = { frameId }
-  const { frame, scenes, unsavedChanges, undeployedChanges, deployPlanModalOpen } = useValues(
+  const { frame, scenes, unsavedChanges, undeployedChanges, deployPlanModalOpen, unsavedChangesModalOpen } = useValues(
     frameLogic(frameLogicProps)
   )
   const { framesList } = useValues(framesModel)
@@ -663,7 +672,9 @@ function SceneWorkspaceFrame({ frameId }: SceneWorkspaceFrameProps): JSX.Element
           showAiButton={false}
           mainClassName="scene-workspace-main h-screen overflow-hidden p-0"
           rightPanel={
-            deployPlanModalOpen ? (
+            unsavedChangesModalOpen ? (
+              <FrameUnsavedChangesDrawer frame={frame} />
+            ) : deployPlanModalOpen ? (
               <FrameDeployPlanDrawer frame={frame} />
             ) : activeUtilityDefinition ? (
               <UtilityDrawer frameId={frameId} scene={selectedScene} />

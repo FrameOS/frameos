@@ -18,7 +18,9 @@ export function FrameSceneSidebarCard({
   undeployedChanges,
   className,
 }: FrameSceneSidebarCardProps): JSX.Element {
-  const { saveAndDeployFrame, saveFrame, showDeployPlanModal } = useActions(frameLogic({ frameId: frame.id }))
+  const { saveAndDeployFrame, saveFrame, showDeployPlanModal, showUnsavedChangesModal } = useActions(
+    frameLogic({ frameId: frame.id })
+  )
   const { closeChatDrawer } = useActions(workspaceLogic)
   const statusLabel = unsavedChanges ? 'Unsaved' : undeployedChanges ? 'Undeployed' : 'Saved'
   const statusIsActionable = unsavedChanges || undeployedChanges
@@ -30,7 +32,11 @@ export function FrameSceneSidebarCard({
           type="button"
           onClick={() => {
             closeChatDrawer()
-            showDeployPlanModal()
+            if (unsavedChanges) {
+              showUnsavedChangesModal()
+            } else {
+              showDeployPlanModal()
+            }
           }}
           className={clsx(
             'rounded-lg px-3 py-2 text-xs font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',

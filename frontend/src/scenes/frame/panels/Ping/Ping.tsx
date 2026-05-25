@@ -28,7 +28,7 @@ function latencyDetail(result: PingResult | null | undefined): string {
     return 'Waiting for first check'
   }
   if (result.mode === 'icmp' && result.icmpTimeMs !== null && result.clientElapsedMs !== null) {
-    return `${formatMs(result.clientElapsedMs, 0)} ms browser round trip`
+    return `+${formatMs(result.clientElapsedMs, 0)} ms browser round trip`
   }
   if (result.serverElapsedMs !== null && result.clientElapsedMs !== null) {
     return `${formatMs(result.serverElapsedMs, 0)} ms server measured`
@@ -220,14 +220,22 @@ export function Ping({ scrollContainer = true }: PingProps = {}) {
                 <ModeButton
                   active={activeMode === 'icmp'}
                   disabled={isFrameAdminMode}
-                  onClick={() => setPingMode('icmp')}
+                  onClick={() => {
+                    if (activeMode !== 'icmp') {
+                      setPingMode('icmp')
+                    }
+                  }}
                 >
                   ICMP
                 </ModeButton>
                 <ModeButton
                   active={activeMode === 'http'}
                   disabled={isFrameAdminMode}
-                  onClick={() => setPingMode('http')}
+                  onClick={() => {
+                    if (activeMode !== 'http') {
+                      setPingMode('http')
+                    }
+                  }}
                 >
                   HTTP
                 </ModeButton>

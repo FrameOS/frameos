@@ -91,8 +91,7 @@ export function TemplateRow({
       }}
       className={clsx(
         'frame-tool-card @container break-inside-avoid space-y-2 rounded-[18px] p-3 transition',
-        templateDragData && 'cursor-grab active:cursor-grabbing',
-        installedTemplatesByName[template.name] ? 'frameos-primary-border-strong' : ''
+        templateDragData && 'cursor-grab active:cursor-grabbing'
       )}
     >
       <div className="flex items-start justify-between gap-2">
@@ -116,30 +115,11 @@ export function TemplateRow({
               <H6>{template.name}</H6>
             </div>
             <div className="flex gap-1">
-              {trySceneConfig ? (
-                <Button
-                  className="!px-2 flex gap-1"
-                  size="small"
-                  color="primary"
-                  onClick={() => {
-                    if (trySceneFields.length === 0) {
-                      resetTrySceneState({})
-                      submitTrySceneState()
-                      return
-                    }
-                    openTrySceneModal()
-                  }}
-                  disabled={tryLoading || !frameId}
-                  title="Preview this interpreted scene on the frame"
-                >
-                  <EyeIcon className="w-5 h-5" />
-                </Button>
-              ) : null}
               {applyTemplate ? (
                 <Button
                   className="!px-2 flex gap-1"
                   size="small"
-                  color={installedTemplatesByName[template.name] ? 'tertiary' : 'secondary'}
+                  color={installedTemplatesByName[template.name] ? 'secondary' : 'primary'}
                   onClick={() => applyTemplate(template)}
                   title="Add scene"
                 >
@@ -155,6 +135,25 @@ export function TemplateRow({
                       <>Add{(template.scenes || []).length > 1 ? ` (${(template.scenes || []).length})` : ''}</>
                     )}
                   </span>
+                </Button>
+              ) : null}
+              {trySceneConfig ? (
+                <Button
+                  className="!px-2 flex gap-1"
+                  size="small"
+                  color="secondary"
+                  onClick={() => {
+                    if (trySceneFields.length === 0) {
+                      resetTrySceneState({})
+                      submitTrySceneState()
+                      return
+                    }
+                    openTrySceneModal()
+                  }}
+                  disabled={tryLoading || !frameId}
+                  title="Preview this interpreted scene on the frame"
+                >
+                  <EyeIcon className="w-5 h-5" />
                 </Button>
               ) : null}
               <DropdownMenu

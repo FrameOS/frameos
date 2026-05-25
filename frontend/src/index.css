@@ -87,6 +87,12 @@ body {
   background: var(--frameos-page-bg);
 }
 
+html.frameos-workspace-scroll-locked,
+body.frameos-workspace-scroll-locked {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
 .frameos-primary-active,
 .frameos-primary-action,
 .frameos-app-shell .frameos-primary-active,
@@ -1063,6 +1069,29 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
   z-index: 30;
 }
 
+.settings-action-toolbar-floating {
+  position: fixed;
+  top: 1.5rem;
+  right: 2rem;
+  z-index: 30;
+  padding: 0.5rem;
+  border: 1px solid var(--tool-border, rgba(203, 213, 225, 0.72));
+  border-radius: 1rem;
+  background: var(--tool-bg-strong, rgba(255, 255, 255, 0.9));
+  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.14);
+  backdrop-filter: blur(16px);
+}
+
+.frameos-theme-dark .settings-action-toolbar-floating {
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(29, 31, 37, 0.92);
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.28);
+}
+
+.settings-workspace-main.settings-workspace-main {
+  padding-top: 5.75rem;
+}
+
 .workspace-main-with-right-panel .terminal-command-bar {
   right: 520px;
 }
@@ -1230,6 +1259,15 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
     right: 1rem;
   }
 
+  .settings-action-toolbar-floating {
+    top: 5rem;
+    right: 1rem;
+  }
+
+  .settings-workspace-main.settings-workspace-main {
+    padding-top: 8.75rem !important;
+  }
+
   .workspace-sidebar .frameos-rail {
     width: 100%;
     height: 4.5rem;
@@ -1361,6 +1399,16 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
   .logs-menu-button-floating {
     top: 4.5rem;
     right: 0.75rem;
+  }
+
+  .settings-action-toolbar-floating {
+    top: 4.5rem;
+    right: 0.75rem;
+    padding: 0.375rem;
+  }
+
+  .settings-workspace-main.settings-workspace-main {
+    padding-top: 8rem !important;
   }
 }
 
@@ -1664,17 +1712,20 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
   color: #fca5a5;
 }
 
-.frame-settings-panel form > h6 {
+.frame-settings-panel form > h6,
+.frame-settings-panel form > .frame-settings-heading-row {
   margin-top: 2rem;
   scroll-margin-top: 1rem;
 }
 
-.frame-settings-panel form > h6:first-child {
+.frame-settings-panel form > h6:first-child,
+.frame-settings-panel form > .frame-settings-heading-row:first-child {
   margin-top: 0;
 }
 
 .frame-settings-panel form > h6 + div,
-.frame-settings-panel form > h6 + p + div {
+.frame-settings-panel form > h6 + p + div,
+.frame-settings-panel form > .frame-settings-heading-row + div {
   background: var(--tool-bg);
   border: 1px solid var(--tool-border);
   border-radius: 22px;
