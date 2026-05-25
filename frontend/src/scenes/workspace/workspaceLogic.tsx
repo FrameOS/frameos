@@ -4,6 +4,7 @@ import { framesModel } from '../../models/framesModel'
 import { frameHost, frameIsStale } from '../../decorators/frame'
 import { FrameScene, FrameType } from '../../types'
 import { urls } from '../../urls'
+import { frameLogic } from '../frame/frameLogic'
 import { newFrameForm } from '../frames/newFrameForm'
 import type { workspaceLogicType } from './workspaceLogicType'
 
@@ -190,6 +191,13 @@ export interface ChatDrawerSelection {
 export interface FrameRenameDialog {
   frameId: number
   name: string
+}
+
+export type FrameChangeDrawerKind = 'unsaved' | 'deploy'
+
+export interface FrameChangeDrawerSelection {
+  frameId: number
+  kind: FrameChangeDrawerKind
 }
 
 export interface OverviewFrameSection {
@@ -717,6 +725,8 @@ export const workspaceLogic = kea<workspaceLogicType>([
     closeScheduleDrawer: true,
     openChatDrawer: (frameId: number, sceneId: string | null = null) => ({ frameId, sceneId }),
     closeChatDrawer: true,
+    openFrameChangeDrawer: (frameId: number, kind: FrameChangeDrawerKind) => ({ frameId, kind }),
+    closeFrameChangeDrawer: true,
     openUtilityPanel: (panel: WorkspaceUtilityPanel) => ({ panel }),
     closeUtilityPanel: true,
     selectNode: (nodeId: string | null) => ({ nodeId }),
@@ -797,6 +807,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
         openUtilityPanel: () => null,
         openTemplateDrawer: () => null,
         openScheduleDrawer: () => null,
+        openFrameChangeDrawer: () => null,
       },
     ],
     templateDrawerFrameId: [
@@ -812,6 +823,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
         openSceneControl: () => null,
         openScheduleDrawer: () => null,
         openChatDrawer: () => null,
+        openFrameChangeDrawer: () => null,
         openUtilityPanel: (state, { panel }) => (panel === 'scenes' ? state : null),
       },
     ],
@@ -828,6 +840,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
         openTemplateDrawer: () => null,
         openSceneControl: () => null,
         openChatDrawer: () => null,
+        openFrameChangeDrawer: () => null,
       },
     ],
     chatDrawerSelection: [
@@ -843,6 +856,24 @@ export const workspaceLogic = kea<workspaceLogicType>([
         openSceneControl: () => null,
         openTemplateDrawer: () => null,
         openScheduleDrawer: () => null,
+        openFrameChangeDrawer: () => null,
+        openUtilityPanel: () => null,
+      },
+    ],
+    frameChangeDrawerSelection: [
+      null as FrameChangeDrawerSelection | null,
+      {
+        openFrameChangeDrawer: (_, { frameId, kind }) => ({ frameId, kind }),
+        closeFrameChangeDrawer: () => null,
+        setSearch: () => null,
+        navigateToFrame: () => null,
+        openFrameTool: () => null,
+        navigateToSceneFrame: () => null,
+        navigateToScene: () => null,
+        openSceneControl: () => null,
+        openTemplateDrawer: () => null,
+        openScheduleDrawer: () => null,
+        openChatDrawer: () => null,
         openUtilityPanel: () => null,
       },
     ],
@@ -1088,6 +1119,15 @@ export const workspaceLogic = kea<workspaceLogicType>([
       closeScheduleDrawer: preserveFramesScroll,
       openChatDrawer: hideNewFrameFormAndPreserveScroll,
       closeChatDrawer: preserveFramesScroll,
+      openFrameChangeDrawer: ({ frameId, kind }) => {
+        hideNewFrameFormAndPreserveScroll()
+        if (kind === 'unsaved') {
+          frameLogic({ frameId }).actions.showUnsavedChangesModal()
+        } else {
+          frameLogic({ frameId }).actions.showDeployPlanModal()
+        }
+      },
+      closeFrameChangeDrawer: preserveFramesScroll,
       [newFrameForm.actionTypes.showForm]: preserveFramesScroll,
       [newFrameForm.actionTypes.hideForm]: preserveFramesScroll,
       setTheme: ({ theme }) => {
@@ -1180,6 +1220,9 @@ export const workspaceLogic = kea<workspaceLogicType>([
       if (values.chatDrawerSelection) {
         actions.closeChatDrawer()
       }
+      if (values.frameChangeDrawerSelection) {
+        actions.closeFrameChangeDrawer()
+      }
     }
     const applyDrawerFromSearch = (frameId: number | null, search: Record<string, unknown>) => {
       const drawer = searchValue(search, 'drawer')
@@ -1198,6 +1241,10 @@ export const workspaceLogic = kea<workspaceLogicType>([
         actions.openFrameTool(frameId, 'schedule')
       } else if (drawer === 'chat') {
         actions.openChatDrawer(frameId, sceneId)
+      } else if (drawer === 'unsavedChanges') {
+        actions.openFrameChangeDrawer(frameId, 'unsaved')
+      } else if (drawer === 'deployPlan') {
+        actions.openFrameChangeDrawer(frameId, 'deploy')
       } else {
         closeDrawersFromUrl()
       }
@@ -1280,6 +1327,9 @@ export const workspaceLogic = kea<workspaceLogicType>([
     openChatDrawer: (payload: Record<string, any>) =>
       drawerUrlForFrame(Number(payload.frameId), 'chat', payload.sceneId ? { sceneId: String(payload.sceneId) } : {}),
     closeChatDrawer: clearDrawerUrl,
+    openFrameChangeDrawer: (payload: Record<string, any>) =>
+      drawerUrlForFrame(Number(payload.frameId), payload.kind === 'unsaved' ? 'unsavedChanges' : 'deployPlan'),
+    closeFrameChangeDrawer: clearDrawerUrl,
     openUtilityPanel: (payload: Record<string, any>) => {
       const panel = payload.panel
       if (!isSceneRoutePath() || !isSceneUtilityPanel(panel)) {

@@ -1,7 +1,7 @@
 import { A, router } from 'kea-router'
 import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
 import clsx from 'clsx'
-import { useEffect, useState, type CSSProperties, type MouseEvent, type SVGProps } from 'react'
+import { useEffect, useState, type CSSProperties, type MouseEvent } from 'react'
 import {
   ChevronDownIcon,
   ChevronUpIcon,
@@ -32,6 +32,9 @@ import { panelsLogic } from '../frame/panels/panelsLogic'
 import { Chat } from '../frame/panels/Chat/Chat'
 import { chatLogic } from '../frame/panels/Chat/chatLogic'
 import { workspaceChatDrawerLogic } from './workspaceChatDrawerLogic'
+import { FrameDeployPlanDrawer } from './FrameDeployPlanDrawer'
+import { FrameUnsavedChangesDrawer } from './FrameUnsavedChangesDrawer'
+import { DeployToFrameIcon } from './FrameChangeStatusIcon'
 
 const frameShellToolPanels = new Set([
   'overview',
@@ -57,6 +60,7 @@ interface FrameosShellProps {
   topBar?: JSX.Element | null
   topBarClassName?: string
   rightPanel?: JSX.Element | null
+  rightPanelSize?: 'normal' | 'compact'
   toolbar?: JSX.Element | null
   primaryActionLabel?: string
   onPrimaryAction?: () => void
@@ -229,27 +233,9 @@ function WorkspaceChatDrawer({ frameId, sceneId }: { frameId: number; sceneId: s
   )
 }
 
-function DeployToFrameIcon(props: SVGProps<SVGSVGElement>): JSX.Element {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} aria-hidden="true" {...props}>
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M5.75 3.75h12.5a1.5 1.5 0 0 1 1.5 1.5v6.5a1.5 1.5 0 0 1-1.5 1.5H5.75a1.5 1.5 0 0 1-1.5-1.5v-6.5a1.5 1.5 0 0 1 1.5-1.5Z"
-      />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M7 10.25h10" />
-      {/* <path strokeLinecap="round" strokeLinejoin="round" d="M7 7.25h10" /> */}
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 7h5" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 21.25v-5" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="m9.25 18.5 2.75-2.75 2.75 2.75" />
-    </svg>
-  )
-}
-
 function FrameStatusHeaderButton({ frameId }: { frameId: number }): JSX.Element | null {
   const { undeployedChanges, unsavedChanges } = useValues(frameLogic({ frameId }))
-  const { showDeployPlanModal, showUnsavedChangesModal } = useActions(frameLogic({ frameId }))
-  const { closeChatDrawer, closeSecondarySidebar } = useActions(workspaceLogic)
+  const { openFrameChangeDrawer } = useActions(workspaceLogic)
   const statusLabel = unsavedChanges ? 'Unsaved' : undeployedChanges ? 'Undeployed' : null
   const StatusIcon = unsavedChanges ? CloudArrowUpIcon : DeployToFrameIcon
 
@@ -263,15 +249,7 @@ function FrameStatusHeaderButton({ frameId }: { frameId: number }): JSX.Element 
       title={`${statusLabel} changes`}
       aria-label={unsavedChanges ? 'Open unsaved changes' : 'Open deploy plan for undeployed changes'}
       onClick={() => {
-        closeChatDrawer()
-        if (isMobileWorkspaceViewport()) {
-          closeSecondarySidebar()
-        }
-        if (unsavedChanges) {
-          showUnsavedChangesModal()
-        } else {
-          showDeployPlanModal()
-        }
+        openFrameChangeDrawer(frameId, unsavedChanges ? 'unsaved' : 'deploy')
       }}
       className={clsx(
         'workspace-unsaved-header-button flex h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
@@ -293,15 +271,25 @@ export function FrameosShell({
   topBar,
   topBarClassName,
   rightPanel,
+  rightPanelSize = 'normal',
   toolbar,
   primaryActionLabel,
   onPrimaryAction,
   showAiButton: showAiButtonProp,
 }: FrameosShellProps): JSX.Element {
-  const { chatDrawerSelection, search, secondarySidebarOpen, selectedFrame, selectedSceneId, theme, utilityPanel } =
-    useValues(workspaceLogic)
+  const {
+    chatDrawerSelection,
+    frameChangeDrawerSelection,
+    search,
+    secondarySidebarOpen,
+    selectedFrame,
+    selectedSceneId,
+    theme,
+    utilityPanel,
+  } = useValues(workspaceLogic)
   const { closeScheduleDrawer, closeTemplateDrawer, openChatDrawer, setSearch, toggleSecondarySidebar, toggleTheme } =
     useActions(workspaceLogic)
+  const { frames } = useValues(framesModel)
   const activeFrameTool = frameShellToolPanels.has(String(utilityPanel)) ? String(utilityPanel) : undefined
   const frameHref = selectedFrame ? urls.frame(selectedFrame.id, activeFrameTool) : urls.frames()
   const scenesHref = selectedFrame ? urls.scenes(selectedFrame.id, selectedSceneId ?? undefined) : urls.scenes()
@@ -309,8 +297,19 @@ export function FrameosShell({
   const showAiButton = showAiButtonProp ?? (mode !== 'frames' && mode !== 'settings' && !!selectedFrame)
   const chatSceneId = mode === 'scenes' || mode === 'apps' ? selectedSceneId : null
   const chatDrawerIsOpen = !!chatDrawerSelection
+  const frameChangeDrawerFrame = frameChangeDrawerSelection ? frames[frameChangeDrawerSelection.frameId] : null
+  const frameChangeDrawer =
+    frameChangeDrawerSelection && frameChangeDrawerFrame ? (
+      frameChangeDrawerSelection.kind === 'unsaved' ? (
+        <FrameUnsavedChangesDrawer frame={frameChangeDrawerFrame} />
+      ) : (
+        <FrameDeployPlanDrawer frame={frameChangeDrawerFrame} />
+      )
+    ) : null
   const workspaceRightPanel = chatDrawerSelection ? (
     <WorkspaceChatDrawer frameId={chatDrawerSelection.frameId} sceneId={chatDrawerSelection.sceneId} />
+  ) : frameChangeDrawer ? (
+    frameChangeDrawer
   ) : (
     rightPanel
   )
@@ -454,6 +453,7 @@ export function FrameosShell({
         className={clsx(
           'workspace-main @container',
           workspaceRightPanel && 'workspace-main-with-right-panel',
+          workspaceRightPanel && rightPanelSize === 'compact' && 'workspace-main-with-compact-right-panel',
           mainClassName ??
             'h-screen overflow-y-auto py-6 pr-8 max-lg:h-auto max-lg:overflow-visible max-lg:px-4 max-lg:pb-6'
         )}

@@ -7,7 +7,6 @@ import { Button } from '../../../../components/Button'
 import { useEntityImage } from '../../../../models/entityImagesModel'
 import { useMemo, useState } from 'react'
 import clsx from 'clsx'
-import { Tooltip } from '../../../../components/Tooltip'
 import { appsModel } from '../../../../models/appsModel'
 import { useActions, useValues } from 'kea'
 import { settingsLogic } from '../../../settings/settingsLogic'
@@ -47,7 +46,7 @@ export function TemplateRow({
   const { settings, savedSettings, settingsChanged } = useValues(settingsLogic)
   const { setSettingsValue, submitSettings } = useActions(settingsLogic)
   const [activeSettingsKey, setActiveSettingsKey] = useState<string | null>(null)
-  const { trySceneConfig, tryLoading, trySceneModalOpen, trySceneFields, trySceneState } = useValues(
+  const { trySceneConfig, trySceneModalOpen, trySceneFields, trySceneState } = useValues(
     templateRowLogic({ frameId, template })
   )
   const { openTrySceneModal, closeTrySceneModal, submitTrySceneState, resetTrySceneState } = useActions(
@@ -96,18 +95,13 @@ export function TemplateRow({
     >
       <div className="flex items-start justify-between gap-2">
         {imageUrl ? (
-          <Tooltip
-            title={
-              <a href={imageUrl} target="_blank" rel="noopener noreferrer">
-                <img src={imageUrl} alt={template.name} />
-              </a>
-            }
-          >
-            <div
-              className="h-[90px] w-[90px] flex-shrink-0 cursor-zoom-in rounded-2xl border border-slate-500/20 bg-cover bg-center"
-              style={{ backgroundImage: `url(${JSON.stringify(imageUrl)})` }}
-            />
-          </Tooltip>
+          <div
+            className={clsx(
+              'h-[90px] w-[90px] flex-shrink-0 rounded-2xl border border-slate-500/20 bg-cover bg-center',
+              templateDragData && 'cursor-grab active:cursor-grabbing'
+            )}
+            style={{ backgroundImage: `url(${JSON.stringify(imageUrl)})` }}
+          />
         ) : null}
         <div className="break-inside-avoid space-y-1 w-full">
           <div className="flex flex-col items-start justify-between gap-1 @md:flex-row">
@@ -150,7 +144,7 @@ export function TemplateRow({
                     }
                     openTrySceneModal()
                   }}
-                  disabled={tryLoading || !frameId}
+                  disabled={!frameId}
                   title="Preview this interpreted scene on the frame"
                 >
                   <EyeIcon className="w-5 h-5" />
@@ -281,8 +275,8 @@ export function TemplateRow({
               <Button onClick={closeTrySceneModal} color="secondary">
                 Cancel
               </Button>
-              <Button onClick={submitTrySceneState} color="primary" disabled={tryLoading}>
-                {tryLoading ? 'Previewing…' : 'Preview scene'}
+              <Button onClick={submitTrySceneState} color="primary" disabled={!frameId}>
+                Preview scene
               </Button>
             </div>
           </Form>

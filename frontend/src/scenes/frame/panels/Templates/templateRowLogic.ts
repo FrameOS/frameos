@@ -3,6 +3,7 @@ import { forms } from 'kea-forms'
 import { SceneNodeData, TemplateType } from '../../../../types'
 import { findConnectedScenes } from '../Scenes/utils'
 import { apiFetch } from '../../../../utils/apiFetch'
+import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
 
 import type { templateRowLogicType } from './templateRowLogicType'
 
@@ -17,17 +18,10 @@ export const templateRowLogic = kea<templateRowLogicType>([
   key((props: TemplateRowLogicProps) => `${props.frameId ?? 'no-frame'}-${props.template.id ?? props.template.name}`),
   actions({
     tryScene: (state?: Record<string, any>) => ({ state }),
-    setTryLoading: (tryLoading: boolean) => ({ tryLoading }),
     openTrySceneModal: true,
     closeTrySceneModal: true,
   }),
   reducers({
-    tryLoading: [
-      false,
-      {
-        setTryLoading: (_, { tryLoading }) => tryLoading,
-      },
-    ],
     trySceneModalOpen: [
       false,
       {
@@ -115,14 +109,23 @@ export const templateRowLogic = kea<templateRowLogicType>([
       if (!props.frameId || !values.trySceneConfig) {
         return
       }
+      const sceneId =
+        values.trySceneConfig.payloadScenes.length > 1
+          ? values.trySceneConfig.mainScene.id
+          : values.trySceneConfig.payloadScenes[0]?.id
+      const detail = values.trySceneConfig.mainScene.name || props.template.name
+      actions.closeTrySceneModal()
+      longRunningTasksModel.actions.startTask({
+        frameId: props.frameId,
+        kind: 'preview',
+        sceneId,
+        title: 'Previewing scene',
+        detail,
+      })
       try {
-        actions.setTryLoading(true)
         const payload: Record<string, any> = {
           scenes: values.trySceneConfig.payloadScenes,
-          sceneId:
-            values.trySceneConfig.payloadScenes.length > 1
-              ? values.trySceneConfig.mainScene.id
-              : values.trySceneConfig.payloadScenes[0]?.id,
+          sceneId,
         }
         if (state && Object.keys(state).length > 0) {
           payload.state = state
@@ -134,15 +137,16 @@ export const templateRowLogic = kea<templateRowLogicType>([
         })
         if (!response.ok) {
           const message = await response.text()
-          alert(message || 'Failed to send scene to frame')
-          return
+          throw new Error(message || 'Failed to send scene to frame')
         }
-        actions.closeTrySceneModal()
       } catch (error) {
         console.error('Failed to send scene to frame', error)
-        alert('Failed to send scene to frame')
-      } finally {
-        actions.setTryLoading(false)
+        longRunningTasksModel.actions.taskFailed({
+          frameId: props.frameId,
+          kind: 'preview',
+          sceneId,
+          detail: error instanceof Error ? error.message : 'Failed to send scene to frame',
+        })
       }
     },
   })),

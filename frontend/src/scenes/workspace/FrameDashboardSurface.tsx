@@ -10,7 +10,6 @@ import {
   ChartBarIcon,
   CircleStackIcon,
   CommandLineIcon,
-  ComputerDesktopIcon,
   DocumentTextIcon,
   PencilSquareIcon,
   PlusIcon,
@@ -37,6 +36,7 @@ import { SceneDropDown } from '../frame/panels/Scenes/SceneDropDown'
 import { templatesLogic } from '../frame/panels/Templates/templatesLogic'
 import { newFrameForm } from '../frames/newFrameForm'
 import { FrameLiveBadge } from './FrameLiveBadge'
+import { FrameChangeStatusIcon } from './FrameChangeStatusIcon'
 import {
   FRAMEOS_TEMPLATE_DRAG_TYPE,
   getFrameosSceneDragData,
@@ -305,34 +305,34 @@ function FrameDashboardHeader({ frame, archived }: { frame: FrameType; archived?
 
   return (
     <div className="frame-dashboard-header mb-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-      <A
-        href={urls.frame(frame.id, 'overview')}
-        className="group flex min-w-[14rem] flex-1 items-center gap-3 rounded-2xl transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-      >
-        <div className="frameos-icon-tile flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/70 text-slate-700 shadow-sm @4xl:h-12 @4xl:w-12 @4xl:rounded-2xl">
-          <ComputerDesktopIcon className="h-7 w-7" />
-        </div>
+      <div className="group flex min-w-[14rem] flex-1 items-center gap-3">
+        <FrameChangeStatusIcon frameId={frame.id} variant="dashboard" />
         <div className="min-w-0">
-          <div className="flex min-w-0 items-center gap-2">
-            <h2
-              data-workspace-frame-title={frame.id}
-              className="frameos-strong truncate text-xl font-bold tracking-normal text-slate-950 @4xl:text-2xl"
-            >
-              {frame.name || frameHost(frame)}
-            </h2>
-            {archived ? (
-              <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-semibold text-slate-500">
-                Archived
-              </span>
-            ) : null}
-            {healthy ? <span title="Frame is healthy" className="h-2.5 w-2.5 rounded-full bg-emerald-400" /> : null}
-            {connected ? (
-              <span title="FrameOS agent connected" className="h-2.5 w-2.5 rounded-full bg-blue-400" />
-            ) : null}
-          </div>
+          <A
+            href={urls.frame(frame.id, 'overview')}
+            className="rounded-xl transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          >
+            <div className="flex min-w-0 items-center gap-2">
+              <h2
+                data-workspace-frame-title={frame.id}
+                className="frameos-strong truncate text-xl font-bold tracking-normal text-slate-950 @4xl:text-2xl"
+              >
+                {frame.name || frameHost(frame)}
+              </h2>
+              {archived ? (
+                <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-semibold text-slate-500">
+                  Archived
+                </span>
+              ) : null}
+              {healthy ? <span title="Frame is healthy" className="h-2.5 w-2.5 rounded-full bg-emerald-400" /> : null}
+              {connected ? (
+                <span title="FrameOS agent connected" className="h-2.5 w-2.5 rounded-full bg-blue-400" />
+              ) : null}
+            </div>
+          </A>
           <div className="frameos-muted truncate text-xs text-slate-500 @4xl:text-sm">{frameStatus(frame)}</div>
         </div>
-      </A>
+      </div>
       <FrameHeaderActions frame={frame} archived={archived} />
     </div>
   )

@@ -6,6 +6,7 @@ import { Spinner } from '../../components/Spinner'
 import { frameHost } from '../../decorators/frame'
 import type { FrameType } from '../../types'
 import { frameLogic, type ChangeDetail, type SummaryItem } from '../frame/frameLogic'
+import { workspaceLogic } from './workspaceLogic'
 
 function SummaryRows({ items }: { items: SummaryItem[] }): JSX.Element | null {
   if (items.length === 0) {
@@ -63,6 +64,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
   } = useValues(frameLogic({ frameId: frame.id }))
   const { hideDeployPlanModal, loadDeployPlans, saveAndDeployFrame, saveAndFastDeployFrame, saveAndFullDeployFrame } =
     useActions(frameLogic({ frameId: frame.id }))
+  const { closeFrameChangeDrawer } = useActions(workspaceLogic)
 
   if (!deployPlanModalOpen) {
     return null
@@ -71,6 +73,12 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
   const closeAndRun = (action: () => void): void => {
     action()
     hideDeployPlanModal()
+    closeFrameChangeDrawer()
+  }
+
+  const closeDrawer = (): void => {
+    hideDeployPlanModal()
+    closeFrameChangeDrawer()
   }
 
   return (
@@ -85,7 +93,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
           </div>
           <button
             type="button"
-            onClick={hideDeployPlanModal}
+            onClick={closeDrawer}
             className="frameos-icon-button flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
           >
             <XMarkIcon className="h-6 w-6" />
@@ -98,12 +106,12 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
               <span className="frame-tool-muted">Loading deploy plan...</span>
             </div>
           ) : deployPlansError ? (
-            <div className="frame-tool-card rounded-[22px] p-4">
+            <div className="space-y-3">
               <div className="text-sm font-semibold text-red-500">{deployPlansError}</div>
               <button
                 type="button"
                 onClick={() => loadDeployPlans()}
-                className="frameos-secondary-button mt-3 rounded-lg px-3 py-2 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                className="frameos-secondary-button rounded-lg px-3 py-2 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
               >
                 Retry
               </button>
@@ -148,7 +156,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
         <div className="frameos-divider flex flex-wrap justify-end gap-2 border-t border-slate-200/80 px-5 py-4">
           <button
             type="button"
-            onClick={() => hideDeployPlanModal()}
+            onClick={closeDrawer}
             className="frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
           >
             Close

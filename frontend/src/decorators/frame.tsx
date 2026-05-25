@@ -98,7 +98,15 @@ export function frameStatusLabel(frame: FrameType): string {
   return status
 }
 
+export function frameNeedsInitialDeploy(frame: FrameType): boolean {
+  return !frame.last_successful_deploy_at
+}
+
 export function frameStatusDescription(frame: FrameType): string {
+  if (frameNeedsInitialDeploy(frame)) {
+    return 'new frame - press "Full deploy" to set up'
+  }
+
   const status = frameStatusLabel(frame)
   const relativeTime = formatFrameRelativeTime(frame.last_log_at)
   const logDescription = relativeTime ? `last seen ${relativeTime}` : 'no logs yet'

@@ -7,7 +7,6 @@ import {
   ArrowUturnLeftIcon,
   ChevronDownIcon,
   ChevronRightIcon,
-  ComputerDesktopIcon,
   PhotoIcon,
   PencilSquareIcon,
   PlusIcon,
@@ -25,6 +24,7 @@ import {
   frameHost,
   frameIsHealthy,
   frameIsStale,
+  frameNeedsInitialDeploy,
   frameStatusDescription,
 } from '../../decorators/frame'
 import { urls } from '../../urls'
@@ -44,6 +44,7 @@ import { FrameDashboardSurface } from './FrameDashboardSurface'
 import { FrameDashboardLoadingSkeleton } from './FrameDashboardLoadingSkeleton'
 import { FrameLiveBadge } from './FrameLiveBadge'
 import { framesHomeLogic } from './framesHomeLogic'
+import { FrameChangeStatusIcon } from './FrameChangeStatusIcon'
 
 const uploadedScenePrefix = 'uploaded/'
 const activeSurfaceClassName = 'frameos-active-surface'
@@ -78,6 +79,10 @@ function SidebarStatusDots({ frame }: { frame: FrameType }): JSX.Element {
 }
 
 function sidebarFrameActivityDescription(frame: FrameType): string {
+  if (frameNeedsInitialDeploy(frame)) {
+    return 'new frame - press "Full deploy" to set up'
+  }
+
   const relativeTime = formatFrameRelativeTime(frame.last_log_at)
   if (!relativeTime) {
     return 'no logs yet'
@@ -167,31 +172,64 @@ function FrameTree(): JSX.Element {
           {archivedFramesExpanded ? (
             <div className="space-y-1">
               {archivedFramesList.map((frame) => (
-                <button
+                <FrameTreeRow
                   key={frame.id}
-                  type="button"
-                  title={`Scroll to ${frame.name || frameHost(frame)}. Double-click to open overview.`}
-                  onClick={(event: MouseEvent<HTMLButtonElement>) => handleFrameClick(event, frame.id)}
-                  onDoubleClick={(event: MouseEvent<HTMLButtonElement>) => handleFrameDoubleClick(event, frame.id)}
-                  className={clsx(
-                    'frameos-frame-row frameos-frame-row-archived flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-                    selectedFrameId === frame.id ? 'frameos-frame-row-selected' : 'text-slate-500 hover:bg-slate-100'
-                  )}
-                >
-                  <ComputerDesktopIcon className="h-5 w-5 shrink-0" />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate">{frame.name || frameHost(frame)}</span>
-                    <span className="block truncate text-xs text-slate-400">
-                      {sidebarFrameActivityDescription(frame)}
-                    </span>
-                  </span>
-                  <SidebarStatusDots frame={frame} />
-                </button>
+                  frame={frame}
+                  selected={selectedFrameId === frame.id}
+                  archived
+                  onSelect={handleFrameClick}
+                  onOpen={handleFrameDoubleClick}
+                />
               ))}
             </div>
           ) : null}
         </div>
       ) : null}
+    </div>
+  )
+}
+
+function FrameTreeRow({
+  frame,
+  selected,
+  archived = false,
+  onSelect,
+  onOpen,
+}: {
+  frame: FrameType
+  selected: boolean
+  archived?: boolean
+  onSelect: (event: MouseEvent<HTMLButtonElement>, frameId: number) => void
+  onOpen: (event: MouseEvent<HTMLButtonElement>, frameId: number) => void
+}): JSX.Element {
+  const frameName = frame.name || frameHost(frame)
+
+  return (
+    <div
+      className={clsx(
+        'frameos-frame-row flex w-full min-w-0 items-center gap-2 rounded-xl px-2.5 py-2 text-left transition',
+        archived && 'frameos-frame-row-archived',
+        selected
+          ? 'frameos-frame-row-selected'
+          : archived
+            ? 'text-slate-500 hover:bg-slate-100'
+            : 'text-slate-700 hover:bg-slate-100'
+      )}
+    >
+      <FrameChangeStatusIcon frameId={frame.id} />
+      <button
+        type="button"
+        title={`Scroll to ${frameName}. Double-click to open overview.`}
+        onClick={(event: MouseEvent<HTMLButtonElement>) => onSelect(event, frame.id)}
+        onDoubleClick={(event: MouseEvent<HTMLButtonElement>) => onOpen(event, frame.id)}
+        className="flex min-w-0 flex-1 items-center gap-3 rounded-lg text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+      >
+        <span className="min-w-0 flex-1">
+          <span className={clsx('block truncate', !archived && 'text-base font-medium')}>{frameName}</span>
+          <span className="block truncate text-xs text-slate-400">{sidebarFrameActivityDescription(frame)}</span>
+        </span>
+        <SidebarStatusDots frame={frame} />
+      </button>
     </div>
   )
 }
@@ -263,31 +301,15 @@ function FrameTreeGroup({
       )}
       {isExpanded ? (
         <div className="space-y-1">
-          {frames.map((frame) => {
-            const frameName = frame.name || frameHost(frame)
-            return (
-              <button
-                key={frame.id}
-                type="button"
-                title={`Scroll to ${frameName}. Double-click to open overview.`}
-                onClick={(event: MouseEvent<HTMLButtonElement>) => onSelect(event, frame.id)}
-                onDoubleClick={(event: MouseEvent<HTMLButtonElement>) => onOpen(event, frame.id)}
-                className={clsx(
-                  'frameos-frame-row flex w-full min-w-0 items-center gap-3 rounded-xl px-3 py-2.5 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-                  selectedFrameId === frame.id ? 'frameos-frame-row-selected' : 'text-slate-700 hover:bg-slate-100'
-                )}
-              >
-                <ComputerDesktopIcon className="h-5 w-5 shrink-0" />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-base font-medium">{frameName}</span>
-                  <span className="block truncate text-xs text-slate-400">
-                    {sidebarFrameActivityDescription(frame)}
-                  </span>
-                </span>
-                <SidebarStatusDots frame={frame} />
-              </button>
-            )
-          })}
+          {frames.map((frame) => (
+            <FrameTreeRow
+              key={frame.id}
+              frame={frame}
+              selected={selectedFrameId === frame.id}
+              onSelect={onSelect}
+              onOpen={onOpen}
+            />
+          ))}
         </div>
       ) : null}
     </div>
@@ -625,17 +647,18 @@ export function SceneControlPanel(): JSX.Element | null {
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
               <div
-                className="frameos-card-media frameos-skeleton-surface mx-auto mb-4 flex max-h-56 w-full items-center justify-center overflow-hidden rounded-2xl bg-slate-100"
+                className="frameos-card-media frameos-skeleton-surface mx-auto mb-4 flex max-h-56 w-full items-center justify-center overflow-hidden rounded-lg bg-slate-100"
                 style={{ aspectRatio: previewAspectRatio, maxWidth: previewMaxWidth }}
               >
                 <FrameImage
                   frameId={frame.id}
                   sceneId={scene.id}
+                  thumb
                   refreshable={false}
                   objectFit="contain"
                   hideWhileLoading
                   className="h-full max-h-56 w-full"
-                  imageClassName="h-auto max-h-56 max-w-full w-auto rounded-lg object-contain"
+                  imageClassName="h-full w-full rounded-md object-contain"
                 />
               </div>
               <div className="mb-4 flex flex-wrap gap-2">
@@ -752,6 +775,7 @@ export function FramesHome(): JSX.Element {
           <SceneControlPanel />
         ) : null
       }
+      rightPanelSize={formVisible ? 'compact' : 'normal'}
     >
       <div className="space-y-12 pb-12">
         {hasFrameSections ? (

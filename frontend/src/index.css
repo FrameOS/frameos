@@ -1042,6 +1042,10 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
   padding-right: 490px;
 }
 
+.workspace-main-with-compact-right-panel {
+  padding-right: 430px;
+}
+
 .workspace-sidebar {
   width: 420px;
   z-index: 80;
