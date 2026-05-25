@@ -27,6 +27,7 @@ import { templatesLogic } from '../Templates/templatesLogic'
 import { SceneSettings } from './SceneSettings'
 import React, { useEffect, useRef } from 'react'
 import { SceneDropDown } from './SceneDropDown'
+import { RenameSceneModal } from './RenameSceneModal'
 import { showAsFps } from '../../../../decorators/refreshInterval'
 import clsx from 'clsx'
 import { ChevronDownIcon, ChevronRightIcon, PlayIcon } from '@heroicons/react/24/solid'
@@ -894,6 +895,7 @@ export function Scenes() {
         setSettingsValue={setSettingsValue}
         submitSettings={submitSettings}
       />
+      <RenameSceneModal frameId={frameId} />
     </div>
   )
 }

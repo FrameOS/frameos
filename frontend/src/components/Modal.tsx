@@ -11,8 +11,9 @@ export interface ModalProps {
 export function Modal({ open, children, title, footer, onClose }: ModalProps): JSX.Element {
   const isOpen = open === undefined || open
   return (
-    <Dialog open={isOpen} onClose={onClose} className="relative z-50">
-      <div className="justify-center items-center flex overflow-x-hidden overflow-y-auto fixed inset-0 z-50 outline-none focus:outline-none">
+    <Dialog open={isOpen} onClose={onClose} className="relative z-[120]">
+      <div className="fixed inset-0 z-[120] bg-slate-950/35 backdrop-blur-sm" />
+      <div className="justify-center items-center flex overflow-x-hidden overflow-y-auto fixed inset-0 z-[130] outline-none focus:outline-none">
         <Dialog.Panel className="relative w-auto my-6 mx-auto max-w-[767px] w-full">
           <div className="frameos-panel border border-white/80 rounded-[24px] shadow-2xl relative flex flex-col bg-white/95 outline-none focus:outline-none backdrop-blur-xl">
             <>
@@ -31,13 +32,12 @@ export function Modal({ open, children, title, footer, onClose }: ModalProps): J
                   ) : null}
                 </div>
               ) : null}
-              <div className="overflow-y-scroll max-h-[70vh]">{children}</div>
+              <div className="max-h-[70vh] overflow-y-auto">{children}</div>
               {footer}
             </>
           </div>
         </Dialog.Panel>
       </div>
-      <div className="fixed inset-0 z-40 bg-slate-950/35 backdrop-blur-sm" />
     </Dialog>
   )
 }

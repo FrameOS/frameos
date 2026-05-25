@@ -1,6 +1,7 @@
 import { actions, afterMount, beforeUnmount, connect, kea, listeners, path, reducers } from 'kea'
 import { subscriptions } from 'kea-subscriptions'
 import { framesModel } from '../../models/framesModel'
+import { newFrameForm } from '../frames/newFrameForm'
 import { isMobileWorkspaceViewport, workspaceLogic } from './workspaceLogic'
 import type { framesHomeLogicType } from './framesHomeLogicType'
 
@@ -79,7 +80,7 @@ export const framesHomeLogic = kea<framesHomeLogicType>([
   path(['src', 'scenes', 'workspace', 'framesHomeLogic']),
   connect(() => ({
     values: [framesModel, ['framesList']],
-    actions: [workspaceLogic, ['selectFrame']],
+    actions: [workspaceLogic, ['focusFrame', 'selectFrame', 'setSearch']],
   })),
   actions({
     startFrameOrderSnapshot: true,
@@ -156,6 +157,10 @@ export const framesHomeLogic = kea<framesHomeLogicType>([
     },
     [workspaceLogic.actionTypes.toggleSecondarySidebar]: () => {
       actions.syncFrameFromScroll()
+    },
+    [newFrameForm.actionTypes.frameCreated]: ({ frameId }) => {
+      actions.setSearch('')
+      actions.focusFrame(frameId)
     },
   })),
   subscriptions(({ actions, values }) => ({

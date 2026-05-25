@@ -100,19 +100,19 @@ export function SceneState({ sceneId: sceneIdOverride }: { sceneId?: string | nu
                 Add variable
               </Button>
             </div>
-            <div className="mt-4 grid grid-cols-3 gap-2">
-              <div className="frame-tool-row rounded-xl px-3 py-2">
-                <div className="frame-tool-muted text-[11px] font-semibold uppercase tracking-wide">Total</div>
-                <div className="text-lg font-bold">{stateFields.length}</div>
-              </div>
-              <div className="frame-tool-row rounded-xl px-3 py-2">
-                <div className="frame-tool-muted text-[11px] font-semibold uppercase tracking-wide">Public</div>
-                <div className="text-lg font-bold">{publicFieldCount}</div>
-              </div>
-              <div className="frame-tool-row rounded-xl px-3 py-2">
-                <div className="frame-tool-muted text-[11px] font-semibold uppercase tracking-wide">Persisted</div>
-                <div className="text-lg font-bold">{persistedFieldCount}</div>
-              </div>
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            <div className="frame-tool-row rounded-xl px-3 py-2">
+              <div className="frame-tool-muted text-[11px] font-semibold uppercase tracking-wide">Total</div>
+              <div className="text-lg font-bold">{stateFields.length}</div>
+            </div>
+            <div className="frame-tool-row rounded-xl px-3 py-2">
+              <div className="frame-tool-muted text-[11px] font-semibold uppercase tracking-wide">Public</div>
+              <div className="text-lg font-bold">{publicFieldCount}</div>
+            </div>
+            <div className="frame-tool-row rounded-xl px-3 py-2">
+              <div className="frame-tool-muted text-[11px] font-semibold uppercase tracking-wide">Persisted</div>
+              <div className="text-lg font-bold">{persistedFieldCount}</div>
             </div>
           </div>
           <div className="space-y-3">

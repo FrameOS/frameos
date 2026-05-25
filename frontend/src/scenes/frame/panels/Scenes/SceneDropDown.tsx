@@ -2,19 +2,17 @@ import { useActions, useValues } from 'kea'
 import { frameLogic } from '../../frameLogic'
 import { scenesLogic } from './scenesLogic'
 import { DropdownMenu, DropdownMenuProps } from '../../../../components/DropdownMenu'
-import { PencilSquareIcon, TrashIcon, FlagIcon, PlayIcon } from '@heroicons/react/24/solid'
+import { PencilSquareIcon, TrashIcon, FlagIcon } from '@heroicons/react/24/solid'
 import { panelsLogic } from '../panelsLogic'
 import {
   ClipboardDocumentIcon,
   CloudArrowDownIcon,
   DocumentDuplicateIcon,
   DocumentMagnifyingGlassIcon,
-  EyeIcon,
   FolderPlusIcon,
   TagIcon,
 } from '@heroicons/react/24/outline'
 import { templatesLogic } from '../Templates/templatesLogic'
-import { controlLogic } from './controlLogic'
 import { findConnectedScenes } from './utils'
 
 interface SceneDropDownProps {
@@ -32,38 +30,21 @@ function isNotNull<T>(value: T | null): value is T {
 export function SceneDropDown({ sceneId, context, className, horizontal, buttonColor }: SceneDropDownProps) {
   const { frameId } = useValues(frameLogic)
   const { editScene, editSceneJSON } = useActions(panelsLogic)
-  const { sceneId: currentSceneId } = useValues(controlLogic({ frameId }))
-  const { scenes, undeployedSceneIds, unsavedSceneIds, previewingSceneId } = useValues(scenesLogic({ frameId }))
-  const { renameScene, duplicateScene, deleteScene, setAsDefault, removeDefault, copySceneJSON, previewScene } =
-    useActions(scenesLogic({ frameId }))
+  const { scenes } = useValues(scenesLogic({ frameId }))
+  const { renameScene, duplicateScene, deleteScene, setAsDefault, removeDefault, copySceneJSON } = useActions(
+    scenesLogic({ frameId })
+  )
   const { saveAsTemplate, saveAsZip } = useActions(templatesLogic({ frameId }))
-  const { setCurrentScene } = useActions(controlLogic({ frameId }))
   const scene = scenes.find((s) => s.id === sceneId)
   if (!scene) {
     return null
   }
-  const sceneHasChanges = unsavedSceneIds.has(scene.id) || undeployedSceneIds.has(scene.id)
-  const isPreviewing = previewingSceneId === scene.id
   return (
     <DropdownMenu
       buttonColor={buttonColor ?? 'secondary'}
       className={className}
       horizontal={horizontal}
       items={[
-        {
-          label: 'Activate',
-          onClick: () => setCurrentScene(scene.id),
-          icon: <PlayIcon className="w-5 h-5" />,
-        },
-        scene.id !== currentSceneId && sceneHasChanges
-          ? {
-              label: 'Preview',
-              onClick: () => previewScene(scene.id),
-              icon: <EyeIcon className="w-5 h-5" />,
-              title: 'Preview unsaved changes on the frame',
-              loading: isPreviewing,
-            }
-          : null,
         context === 'scenes'
           ? {
               label: 'Edit scene',
@@ -71,11 +52,13 @@ export function SceneDropDown({ sceneId, context, className, horizontal, buttonC
               icon: <PencilSquareIcon className="w-5 h-5" />,
             }
           : null,
-        {
-          label: 'Edit scene JSON',
-          onClick: () => editSceneJSON(scene.id),
-          icon: <DocumentMagnifyingGlassIcon className="w-5 h-5" />,
-        },
+        context === 'scenes'
+          ? {
+              label: 'Edit scene JSON',
+              onClick: () => editSceneJSON(scene.id),
+              icon: <DocumentMagnifyingGlassIcon className="w-5 h-5" />,
+            }
+          : null,
         {
           label: 'Copy scene JSON',
           onClick: () => copySceneJSON(scene.id),

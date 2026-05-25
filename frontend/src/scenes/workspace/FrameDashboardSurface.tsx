@@ -32,6 +32,7 @@ import type { FrameScene, FrameType, ScheduledEvent } from '../../types'
 import { frameLogic } from '../frame/frameLogic'
 import { HeaderMetrics } from '../frame/panels/Metrics/HeaderMetrics'
 import { controlLogic } from '../frame/panels/Scenes/controlLogic'
+import { RenameSceneModal } from '../frame/panels/Scenes/RenameSceneModal'
 import { SceneDropDown } from '../frame/panels/Scenes/SceneDropDown'
 import { templatesLogic } from '../frame/panels/Templates/templatesLogic'
 import { newFrameForm } from '../frames/newFrameForm'
@@ -267,9 +268,15 @@ function FrameHeaderActions({ frame, archived }: { frame: FrameType; archived?: 
               icon: <PlayIcon className="h-5 w-5" />,
             },
             {
-              label: 'Deploy',
-              title: 'Deploy frame',
-              onClick: () => deployFrame(frame.id),
+              label: 'Fast deploy',
+              title: 'Fast deploy frame',
+              onClick: () => deployFrame(frame.id, true),
+              icon: <RocketLaunchIcon className="h-5 w-5" />,
+            },
+            {
+              label: 'Full deploy',
+              title: 'Full deploy frame',
+              onClick: () => deployFrame(frame.id, false),
               icon: <RocketLaunchIcon className="h-5 w-5" />,
             },
             {
@@ -630,6 +637,7 @@ export function FrameDashboardSurface({
       className={clsx('group @container scroll-mt-6', archived && 'opacity-80')}
     >
       <RenameFrameModal frame={frame} />
+      <RenameSceneModal frameId={frame.id} />
       <FrameDashboardHeader frame={frame} archived={archived} />
       <div className="grid gap-5 @2xl:grid-cols-[minmax(0,19rem)_minmax(19rem,1fr)] @2xl:items-start">
         <FramePreviewPanel frame={frame} scenes={scenes} />

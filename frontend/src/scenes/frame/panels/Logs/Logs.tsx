@@ -320,6 +320,23 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
   const searchActive = !compact && logSearch.trim().length > 0
   const visibleLogs = compact ? logs : filteredLogs
 
+  const scrollFullScreenToPageEnd = (behavior: ScrollBehavior = 'auto') => {
+    if (!fullScreen || typeof window === 'undefined') {
+      return
+    }
+    const scrollElement = document.scrollingElement ?? document.documentElement
+    window.scrollTo({ top: scrollElement.scrollHeight, behavior })
+  }
+
+  const scrollFullScreenToPageEndAfterLayout = (behavior: ScrollBehavior = 'auto') => {
+    if (!fullScreen || typeof window === 'undefined') {
+      return
+    }
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => scrollFullScreenToPageEnd(behavior))
+    })
+  }
+
   useEffect(() => {
     if (!shouldStickToBottomRef.current) {
       return
@@ -335,6 +352,7 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
           align: 'end',
           behavior: 'auto',
         })
+        scrollFullScreenToPageEndAfterLayout('auto')
       })
     })
   }, [visibleLogs.length, logSearch])
@@ -343,7 +361,8 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
     if (visibleLogs.length === 0) {
       return
     }
-    virtuosoRef.current?.scrollToIndex({ index: visibleLogs.length - 1, behavior })
+    virtuosoRef.current?.scrollToIndex({ index: visibleLogs.length - 1, align: 'end', behavior })
+    scrollFullScreenToPageEndAfterLayout(behavior)
   }
 
   const toggleMetricLogExpanded = (logId: number) => {
@@ -384,7 +403,7 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
         'frame-tool-panel @container relative',
         className,
         fullScreen
-          ? ['min-h-[calc(100vh-3rem)] w-full pb-12', renderTheme === 'dark' ? 'text-slate-100' : 'text-slate-950']
+          ? ['min-h-[calc(100vh-3rem)] w-full pb-6', renderTheme === 'dark' ? 'text-slate-100' : 'text-slate-950']
           : compact
           ? [
               'h-full min-h-0 overflow-hidden bg-transparent',

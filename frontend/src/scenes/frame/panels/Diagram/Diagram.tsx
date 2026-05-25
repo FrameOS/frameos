@@ -43,6 +43,7 @@ import { controlLogic } from '../Scenes/controlLogic'
 import { PlayIcon } from '@heroicons/react/24/solid'
 import { Spinner } from '../../../../components/Spinner'
 import { workspaceLogic } from '../../../workspace/workspaceLogic'
+import clsx from 'clsx'
 
 const nodeTypes: Record<NodeType, (props: NodeProps) => JSX.Element> = {
   app: AppNode,
@@ -64,13 +65,56 @@ interface DiagramProps {
   showToolbar?: boolean
 }
 
+type DiagramToolbarVariant = 'inline' | 'floating'
+
 interface ConnectingNode {
   nodeId: string | null
   handleType: string | null
   handleId: string | null
 }
 
-export function DiagramToolbar({ sceneId, showSceneAction = true }: { sceneId: string; showSceneAction?: boolean }) {
+const floatingToolbarButtonClassName =
+  'frameos-icon-button scene-diagram-floating-button flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/90 bg-white/90 text-slate-500 shadow-lg shadow-slate-300/25 backdrop-blur-xl transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400'
+
+function FloatingDiagramButton({
+  active,
+  children,
+  disabled,
+  onClick,
+  title,
+}: {
+  active?: boolean
+  children: JSX.Element
+  disabled?: boolean
+  onClick: () => void
+  title: string
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      title={title}
+      onClick={onClick}
+      disabled={disabled}
+      className={clsx(
+        floatingToolbarButtonClassName,
+        active ? 'frameos-primary-active text-white' : 'bg-white/90 text-slate-500',
+        disabled && 'opacity-30'
+      )}
+    >
+      {children}
+    </button>
+  )
+}
+
+export function DiagramToolbar({
+  sceneId,
+  showSceneAction = true,
+  variant = 'inline',
+}: {
+  sceneId: string
+  showSceneAction?: boolean
+  variant?: DiagramToolbarVariant
+}) {
   const { frameId } = useValues(frameLogic)
   const diagramLogicProps: DiagramLogicProps = { frameId, sceneId }
   const { fitDiagramView, rearrangeCurrentScene } = useActions(diagramLogic(diagramLogicProps))
@@ -89,43 +133,89 @@ export function DiagramToolbar({ sceneId, showSceneAction = true }: { sceneId: s
     : sceneHasChanges
     ? 'Preview unsaved changes on the frame'
     : 'No unsaved changes to preview'
+  const floating = variant === 'floating'
 
   return (
-    <div className="flex items-center gap-2">
+    <div className={clsx('flex items-center gap-2', floating && 'scene-diagram-floating-toolbar')}>
       {showSceneAction ? (
         sceneHasChanges ? (
-          <Button
-            size="tiny"
-            onClick={() => previewScene(sceneId)}
-            title={previewTitle}
-            color="secondary"
-            disabled={isPreviewing}
-          >
-            <EyeIcon className="w-5 h-5" />
-          </Button>
+          floating ? (
+            <FloatingDiagramButton
+              onClick={() => previewScene(sceneId)}
+              title={previewTitle}
+              disabled={isPreviewing}
+              active={isPreviewing}
+            >
+              <EyeIcon className="h-5 w-5" />
+            </FloatingDiagramButton>
+          ) : (
+            <Button
+              size="tiny"
+              onClick={() => previewScene(sceneId)}
+              title={previewTitle}
+              color="secondary"
+              disabled={isPreviewing}
+            >
+              <EyeIcon className="w-5 h-5" />
+            </Button>
+          )
         ) : (
-          <Button
-            size="tiny"
-            onClick={() => setCurrentScene(sceneId)}
-            title={isActiveScene ? 'This scene is already active' : 'Activate'}
-            color="primary"
-            disabled={isActiveScene || isActivatingScene}
-          >
-            {isActivatingScene ? (
-              <Spinner color="white" className="w-5 h-5 flex items-center justify-center" />
-            ) : (
-              <PlayIcon className="w-5 h-5" />
-            )}
-          </Button>
+          floating ? (
+            <FloatingDiagramButton
+              onClick={() => setCurrentScene(sceneId)}
+              title={isActiveScene ? 'This scene is already active' : 'Activate'}
+              disabled={isActiveScene || isActivatingScene}
+              active={isActiveScene || isActivatingScene}
+            >
+              {isActivatingScene ? (
+                <Spinner color="white" className="flex h-5 w-5 items-center justify-center" />
+              ) : (
+                <PlayIcon className="h-5 w-5" />
+              )}
+            </FloatingDiagramButton>
+          ) : (
+            <Button
+              size="tiny"
+              onClick={() => setCurrentScene(sceneId)}
+              title={isActiveScene ? 'This scene is already active' : 'Activate'}
+              color="primary"
+              disabled={isActiveScene || isActivatingScene}
+            >
+              {isActivatingScene ? (
+                <Spinner color="white" className="w-5 h-5 flex items-center justify-center" />
+              ) : (
+                <PlayIcon className="w-5 h-5" />
+              )}
+            </Button>
+          )
         )
       ) : null}
-      <Button size="tiny" onClick={fitDiagramView} title="Fit to View" color="secondary">
-        <ZoomOutArea className="w-5 h-5" />
-      </Button>
-      <Button size="tiny" onClick={rearrangeCurrentScene} title="Realign nodes" color="secondary">
-        <ArrowsPointingInIcon className="w-5 h-5" />
-      </Button>
-      <SceneDropDown sceneId={sceneId} context="editDiagram" />
+      {floating ? (
+        <>
+          <FloatingDiagramButton onClick={fitDiagramView} title="Fit to View">
+            <ZoomOutArea className="h-5 w-5" />
+          </FloatingDiagramButton>
+          <FloatingDiagramButton onClick={rearrangeCurrentScene} title="Realign nodes">
+            <ArrowsPointingInIcon className="h-5 w-5" />
+          </FloatingDiagramButton>
+          <SceneDropDown
+            sceneId={sceneId}
+            context="editDiagram"
+            className={floatingToolbarButtonClassName}
+            buttonColor="secondary"
+          />
+        </>
+      ) : (
+        <>
+          <Button size="tiny" onClick={fitDiagramView} title="Fit to View" color="secondary">
+            <ZoomOutArea className="w-5 h-5" />
+          </Button>
+          <Button size="tiny" onClick={rearrangeCurrentScene} title="Realign nodes" color="secondary">
+            <ArrowsPointingInIcon className="w-5 h-5" />
+          </Button>
+          <SceneDropDown sceneId={sceneId} context="editDiagram" />
+        </>
+      )}
     </div>
   )
 }

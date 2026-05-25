@@ -5,9 +5,7 @@ import { NewFrameFormType } from '../../types'
 
 import type { newFrameFormType } from './newFrameFormType'
 import { framesModel } from '../../models/framesModel'
-import { router } from 'kea-router'
 import { apiFetch } from '../../utils/apiFetch'
-import { urls } from '../../urls'
 import { loaders } from 'kea-loaders'
 
 export const newFrameForm = kea<newFrameFormType>([
@@ -17,6 +15,7 @@ export const newFrameForm = kea<newFrameFormType>([
     hideForm: true,
     setFile: (file: File | null) => ({ file }),
     importFrame: true,
+    frameCreated: (frameId: number) => ({ frameId }),
   }),
   reducers({
     file: [
@@ -78,7 +77,7 @@ export const newFrameForm = kea<newFrameFormType>([
           const result = await response.json()
           if (result?.frame?.id) {
             framesModel.actions.addFrame(result.frame)
-            router.actions.push(urls.frame(result.frame.id))
+            actions.frameCreated(result.frame.id)
           }
         } catch (error) {
           console.error(error)
@@ -111,7 +110,9 @@ export const newFrameForm = kea<newFrameFormType>([
             actions.setFile(null)
             const result = await response.json()
             if (result?.frame?.id) {
-              router.actions.push(urls.frame(result.frame.id))
+              framesModel.actions.addFrame(result.frame)
+              actions.hideForm()
+              actions.frameCreated(result.frame.id)
             }
           } catch (error) {
             console.error(error)

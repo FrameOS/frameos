@@ -3,7 +3,6 @@ import clsx from 'clsx'
 import {
   CodeBracketIcon,
   CodeBracketSquareIcon,
-  EyeIcon,
   InformationCircleIcon,
   ListBulletIcon,
   PhotoIcon,
@@ -12,6 +11,7 @@ import {
   VariableIcon,
   XMarkIcon,
 } from '@heroicons/react/24/outline'
+import { PencilSquareIcon, PlayIcon } from '@heroicons/react/24/solid'
 import type { DragEvent } from 'react'
 import { FrameImage } from '../../components/FrameImage'
 import { framesModel } from '../../models/framesModel'
@@ -33,6 +33,7 @@ import { Events } from '../frame/panels/Events/Events'
 import { SceneJSON } from '../frame/panels/SceneJSON/SceneJSON'
 import { SceneSource } from '../frame/panels/SceneSource/SceneSource'
 import { SceneState } from '../frame/panels/SceneState/SceneState'
+import { RenameSceneModal } from '../frame/panels/Scenes/RenameSceneModal'
 import { SceneSettings } from '../frame/panels/Scenes/SceneSettings'
 import { scenesLogic } from '../frame/panels/Scenes/scenesLogic'
 import { EditTemplateModal } from '../frame/panels/Templates/EditTemplateModal'
@@ -57,7 +58,7 @@ interface UtilityDefinition {
 }
 
 const utilityDefinitions: UtilityDefinition[] = [
-  { panel: 'state', label: 'Preview', icon: <EyeIcon className="h-5 w-5" /> },
+  { panel: 'state', label: 'Preview', icon: <PlayIcon className="h-5 w-5" /> },
   { panel: 'stateVariables', label: 'State variables', icon: <VariableIcon className="h-5 w-5" /> },
   { panel: 'apps', label: 'Apps', icon: <CodeBracketSquareIcon className="h-5 w-5" /> },
   { panel: 'events', label: 'Events', icon: <ListBulletIcon className="h-5 w-5" /> },
@@ -385,25 +386,27 @@ function SceneDiagramOverlay({
 
   return (
     <div className="scene-diagram-overlay pointer-events-none absolute inset-0 z-20">
-      <div className="scene-diagram-utility-buttons scene-diagram-utility-toolbar pointer-events-auto absolute flex shrink-0 flex-col items-center gap-2">
-        <button
-          type="button"
-          title="Open AI chat"
-          onClick={() => {
-            closeUtilityPanel()
-            openChatDrawer(frameId, sceneId)
-          }}
-          className={clsx(
-            'frameos-icon-button flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/90 bg-white/90 text-slate-500 shadow-lg shadow-slate-300/25 backdrop-blur-xl transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-            chatDrawerIsOpen ? 'frameos-primary-active text-white' : 'bg-white/90 text-slate-500'
-          )}
-        >
-          <SparklesIcon className="h-5 w-5" />
-        </button>
-        <UtilityToolbar scene={scene} />
-      </div>
-      <div className="scene-diagram-node-toolbar pointer-events-auto absolute left-2 top-5 flex min-w-0 flex-wrap items-center gap-2">
-        {sceneId ? <DiagramToolbar sceneId={sceneId} showSceneAction={false} /> : null}
+      <div className="scene-diagram-corner-toolbar pointer-events-auto absolute flex min-w-0 items-start gap-2">
+        <div className="scene-diagram-node-toolbar scene-diagram-utility-toolbar flex min-w-0 flex-wrap items-center justify-end gap-2">
+          {sceneId ? <DiagramToolbar sceneId={sceneId} showSceneAction={false} variant="floating" /> : null}
+        </div>
+        <div className="scene-diagram-utility-buttons scene-diagram-utility-toolbar flex shrink-0 flex-col items-center gap-2">
+          <button
+            type="button"
+            title="Open AI chat"
+            onClick={() => {
+              closeUtilityPanel()
+              openChatDrawer(frameId, sceneId)
+            }}
+            className={clsx(
+              'frameos-icon-button flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/90 bg-white/90 text-slate-500 shadow-lg shadow-slate-300/25 backdrop-blur-xl transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+              chatDrawerIsOpen ? 'frameos-primary-active text-white' : 'bg-white/90 text-slate-500'
+            )}
+          >
+            <SparklesIcon className="h-5 w-5" />
+          </button>
+          <UtilityToolbar scene={scene} />
+        </div>
       </div>
     </div>
   )
@@ -456,7 +459,7 @@ function SceneTreeLoadingPlaceholder(): JSX.Element {
 
 function SceneCanvasLoadingPlaceholder(): JSX.Element {
   return (
-    <div className="scene-editor-canvas scene-editor-canvas-full h-screen min-h-screen overflow-hidden bg-white/35 p-5">
+    <div className="scene-editor-canvas scene-editor-canvas-full h-screen min-h-screen overflow-hidden p-5">
       <div className="relative h-full overflow-hidden">
         <div className="frameos-skeleton-surface absolute left-[8%] top-[12%] h-20 w-52 animate-pulse rounded-2xl" />
         <div className="frameos-skeleton-surface absolute right-[10%] top-[18%] h-20 w-52 animate-pulse rounded-2xl" />
@@ -474,6 +477,7 @@ function ScenePreviewPanel({ frameId, scene }: { frameId: number; scene: FrameSc
 }
 
 function SceneInfoPanel({ frameId, scene }: { frameId: number; scene: FrameScene }): JSX.Element {
+  const { renameScene } = useActions(scenesLogic({ frameId }))
   const nodes = scene.nodes ?? []
   const edges = scene.edges ?? []
   const sceneApps = scene.apps ?? {}
@@ -496,34 +500,39 @@ function SceneInfoPanel({ frameId, scene }: { frameId: number; scene: FrameScene
   ]
 
   return (
-    <div className="space-y-5">
-      <div>
-        <div className="frameos-muted text-xs font-semibold uppercase tracking-wide text-slate-500">Scene</div>
-        <div className="frameos-strong mt-1 truncate text-lg font-bold text-slate-900">
-          {scene.name || 'Untitled scene'}
+    <div className="frame-tool-panel space-y-5 @container">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="frameos-strong truncate text-lg font-bold">{scene.name || 'Untitled scene'}</div>
+          <div className="frameos-muted mt-1 truncate font-mono text-xs text-slate-400">{scene.id}</div>
         </div>
-        <div className="frameos-muted mt-1 truncate font-mono text-xs text-slate-400">{scene.id}</div>
+        <button
+          type="button"
+          onClick={() => renameScene(scene.id)}
+          className="frameos-secondary-button inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+        >
+          <PencilSquareIcon className="h-4 w-4" />
+          <span>Rename</span>
+        </button>
       </div>
       <div className="grid grid-cols-2 gap-2">
         {stats.map((stat) => (
-          <div key={stat.label} className="rounded-xl border border-slate-200 bg-white/60 px-3 py-2">
-            <div className="frameos-muted text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+          <div key={stat.label} className="frame-tool-row rounded-xl px-3 py-2">
+            <div className="frame-tool-muted text-[11px] font-semibold uppercase tracking-wide">
               {stat.label}
             </div>
-            <div className="frameos-strong mt-0.5 truncate text-sm font-semibold text-slate-800">{stat.value}</div>
+            <div className="frameos-strong mt-0.5 truncate text-sm font-semibold">{stat.value}</div>
           </div>
         ))}
       </div>
       <div>
         <div className="mb-2 frameos-muted text-xs font-semibold uppercase tracking-wide text-slate-500">Settings</div>
-        <div className="rounded-xl border border-slate-200 bg-white/60 p-3">
-          <SceneSettings sceneId={scene.id} />
-        </div>
+        <SceneSettings sceneId={scene.id} />
       </div>
       <div>
         <div className="mb-2 flex items-center justify-between gap-2">
           <div className="frameos-muted text-xs font-semibold uppercase tracking-wide text-slate-500">Nodes</div>
-          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
+          <span className="frameos-muted rounded-full bg-slate-500/10 px-2 py-0.5 text-[11px] font-semibold">
             {nodes.length}
           </span>
         </div>
@@ -700,6 +709,7 @@ function SceneWorkspaceFrame({ frameId }: SceneWorkspaceFrameProps): JSX.Element
           <SceneCanvas frameId={frame.id} selectedScene={selectedScene} selectedSceneId={resolvedSceneId} />
         </FrameosShell>
         <EditTemplateModal />
+        <RenameSceneModal frameId={frameId} />
       </BindLogic>
     </BindLogic>
   )

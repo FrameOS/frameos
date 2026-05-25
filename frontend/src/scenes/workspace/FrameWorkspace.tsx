@@ -35,6 +35,7 @@ import { frameSettingsLogic } from '../frame/panels/FrameSettings/frameSettingsL
 import { logsLogic } from '../frame/panels/Logs/logsLogic'
 import { metricsLogic } from '../frame/panels/Metrics/metricsLogic'
 import { controlLogic } from '../frame/panels/Scenes/controlLogic'
+import { RenameSceneModal } from '../frame/panels/Scenes/RenameSceneModal'
 import { templatesLogic } from '../frame/panels/Templates/templatesLogic'
 import { SceneDropDown } from '../frame/panels/Scenes/SceneDropDown'
 import { Assets } from '../frame/panels/Assets/Assets'
@@ -1303,6 +1304,7 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
             </div>
           </div>
         </FrameosShell>
+        <RenameSceneModal frameId={frameId} />
       </BindLogic>
     </BindLogic>
   )

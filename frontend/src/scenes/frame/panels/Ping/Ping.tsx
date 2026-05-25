@@ -76,13 +76,15 @@ function MetricCard({
   const colors = toneClasses(tone)
 
   return (
-    <div className="frame-tool-card rounded-[22px] p-4">
-      <div className="flex items-center justify-between gap-3">
+    <div className="frame-tool-card rounded-2xl p-3 @3xl:rounded-[22px] @3xl:p-4">
+      <div className="flex items-center justify-between gap-2 @3xl:gap-3">
         <div className="frame-tool-muted text-xs font-semibold uppercase tracking-wide">{label}</div>
-        <span className={clsx('h-2.5 w-2.5 rounded-full', colors.dot)} />
+        <span className={clsx('h-2 w-2 rounded-full @3xl:h-2.5 @3xl:w-2.5', colors.dot)} />
       </div>
-      <div className={clsx('mt-3 truncate text-2xl font-bold tracking-normal', colors.text)}>{value}</div>
-      <div className="frame-tool-muted mt-1 truncate text-sm">{detail}</div>
+      <div className={clsx('mt-1.5 truncate text-lg font-bold tracking-normal @3xl:mt-3 @3xl:text-2xl', colors.text)}>
+        {value}
+      </div>
+      <div className="frame-tool-muted truncate text-xs @3xl:mt-1 @3xl:text-sm">{detail}</div>
     </div>
   )
 }
@@ -173,49 +175,29 @@ export function Ping({ scrollContainer = true }: PingProps = {}) {
   return (
     <div className={clsx('frame-tool-panel @container flex flex-col gap-5', scrollContainer && 'h-full min-h-0')}>
       <section className="frame-tool-card overflow-hidden rounded-[28px]">
-        <div className="flex flex-col gap-5 p-5 @3xl:flex-row @3xl:items-center @3xl:justify-between">
-          <div className="min-w-0">
-            <div className="frame-tool-muted text-xs font-semibold uppercase tracking-wide">Connectivity</div>
-            <div className="mt-2 flex flex-wrap items-center gap-3">
-              <h2 className="truncate text-2xl font-bold tracking-normal">Ping monitor</h2>
+        <div className="space-y-4 p-5">
+          <div className="min-w-0 flex flex-wrap items-center gap-2.5">
+            <h2 className="min-w-0 break-all text-base font-semibold tracking-normal @3xl:text-lg">
+              Ping: {targetLabel}
+            </h2>
+            <span
+              className={clsx(
+                'inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-semibold',
+                isRunning ? 'bg-emerald-500/10 text-emerald-500' : 'bg-slate-500/10 frame-tool-muted'
+              )}
+            >
               <span
                 className={clsx(
-                  'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold',
-                  isRunning ? 'bg-emerald-500/10 text-emerald-500' : 'bg-slate-500/10 frame-tool-muted'
+                  'h-2 w-2 rounded-full',
+                  isRunning ? (isPinging ? 'animate-pulse bg-emerald-400' : 'bg-emerald-500') : 'bg-slate-400'
                 )}
-              >
-                <span
-                  className={clsx(
-                    'h-2 w-2 rounded-full',
-                    isRunning ? (isPinging ? 'animate-pulse bg-emerald-400' : 'bg-emerald-500') : 'bg-slate-400'
-                  )}
-                />
-                {statusLabel}
-              </span>
-            </div>
-            <div className="frame-tool-muted mt-2 break-all text-sm">
-              {activeMode === 'http' ? 'Request target' : 'Host target'}: {targetLabel}
-            </div>
+              />
+              {statusLabel}
+            </span>
           </div>
-          <button
-            type="button"
-            onClick={() => toggleRunning()}
-            className={clsx(
-              'inline-flex h-12 shrink-0 items-center justify-center gap-2 rounded-lg px-5 text-sm font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-              isRunning
-                ? 'ping-stop-button frameos-secondary-button'
-                : 'frameos-primary-action text-white hover:shadow-lg'
-            )}
-          >
-            {isRunning ? <PauseIcon className="h-5 w-5" /> : <PlayIcon className="h-5 w-5" />}
-            {isRunning ? 'Stop monitor' : 'Start monitor'}
-          </button>
-        </div>
-
-        <div className="border-t border-slate-500/20 px-5 py-4">
-          <div className="grid gap-3 @3xl:grid-cols-[auto_1fr_auto] @3xl:items-end">
+          <div className="grid gap-3 @3xl:grid-cols-[auto_minmax(10rem,1fr)_auto_auto] @3xl:items-end">
             <div>
-              <div className="frame-tool-muted mb-2 text-xs font-semibold uppercase tracking-wide">Mode</div>
+              <div className="frame-tool-control-label mb-2 text-xs font-semibold uppercase tracking-wide">Mode</div>
               <div className="flex flex-wrap gap-2">
                 <ModeButton
                   active={activeMode === 'icmp'}
@@ -243,7 +225,7 @@ export function Ping({ scrollContainer = true }: PingProps = {}) {
             </div>
             <div className={clsx(activeMode === 'http' ? 'block' : 'hidden @3xl:block')}>
               <label
-                className="frame-tool-muted mb-2 block text-xs font-semibold uppercase tracking-wide"
+                className="frame-tool-control-label mb-2 block text-xs font-semibold uppercase tracking-wide"
                 htmlFor="ping-path"
               >
                 Path
@@ -259,7 +241,7 @@ export function Ping({ scrollContainer = true }: PingProps = {}) {
             </div>
             <div>
               <label
-                className="frame-tool-muted mb-2 block text-xs font-semibold uppercase tracking-wide"
+                className="frame-tool-control-label mb-2 block text-xs font-semibold uppercase tracking-wide"
                 htmlFor="ping-interval"
               >
                 Interval
@@ -278,11 +260,24 @@ export function Ping({ scrollContainer = true }: PingProps = {}) {
                 <span className="frame-tool-muted text-sm">sec</span>
               </div>
             </div>
+            <button
+              type="button"
+              onClick={() => toggleRunning()}
+              className={clsx(
+                'inline-flex h-10 w-full shrink-0 items-center justify-center gap-2 rounded-lg px-4 text-sm font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 @3xl:w-auto',
+                isRunning
+                  ? 'ping-stop-button frameos-secondary-button'
+                  : 'frameos-primary-action text-white hover:shadow-lg'
+              )}
+            >
+              {isRunning ? <PauseIcon className="h-5 w-5" /> : <PlayIcon className="h-5 w-5" />}
+              {isRunning ? 'Stop' : 'Start'}
+            </button>
           </div>
         </div>
       </section>
 
-      <section className="grid gap-3 @3xl:grid-cols-4">
+      <section className="grid grid-cols-2 gap-2 @3xl:grid-cols-4 @3xl:gap-3">
         <MetricCard
           label="Latest"
           value={latencyLabel(latestResult)}

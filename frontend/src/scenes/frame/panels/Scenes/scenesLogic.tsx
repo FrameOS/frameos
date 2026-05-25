@@ -20,6 +20,11 @@ export interface ScenesLogicProps {
   frameId: number
 }
 
+export interface SceneRenameDialog {
+  sceneId: string
+  name: string
+}
+
 const UPLOADED_SCENE_PREFIX = 'uploaded/'
 
 const applyStateToSceneFields = (scene: FrameScene, state: Record<string, any> | null): FrameScene => {
@@ -68,6 +73,10 @@ export const scenesLogic = kea<scenesLogicType>([
     deleteScene: (sceneId: string) => ({ sceneId }),
     deleteSelectedScenes: true,
     renameScene: (sceneId: string) => ({ sceneId }),
+    openRenameSceneDialog: (sceneId: string, name: string) => ({ sceneId, name }),
+    setRenameSceneName: (name: string) => ({ name }),
+    closeRenameSceneDialog: true,
+    submitRenameScene: true,
     duplicateScene: (sceneId: string) => ({ sceneId }),
     openNewScene: (location: string) => ({ location }),
     closeNewScene: true,
@@ -179,6 +188,15 @@ export const scenesLogic = kea<scenesLogicType>([
       {
         openAiScene: (_, { location }) => location,
         closeAiScene: () => null,
+      },
+    ],
+    renameSceneDialog: [
+      null as SceneRenameDialog | null,
+      {
+        openRenameSceneDialog: (_, { sceneId, name }) => ({ sceneId, name }),
+        setRenameSceneName: (state, { name }) => (state ? { ...state, name } : state),
+        closeRenameSceneDialog: () => null,
+        deleteScene: (state, { sceneId }) => (state?.sceneId === sceneId ? null : state),
       },
     ],
     showingSettings: [
@@ -725,13 +743,29 @@ export const scenesLogic = kea<scenesLogicType>([
       })
     },
     renameScene: ({ sceneId }) => {
-      const sceneName = window.prompt('New name', values.scenes.find((s) => s.id === sceneId)?.name)
+      const scene = values.scenes.find((s) => s.id === sceneId)
+      if (!scene) {
+        return
+      }
+      actions.openRenameSceneDialog(sceneId, scene.name ?? '')
+    },
+    submitRenameScene: () => {
+      const dialog = values.renameSceneDialog
+      if (!dialog) {
+        return
+      }
+      const sceneName = dialog.name.trim()
       if (!sceneName) {
         return
       }
+      const scene = values.scenes.find((s) => s.id === dialog.sceneId)
+      if (!scene || scene.name === sceneName) {
+        return
+      }
       frameLogic({ frameId: props.frameId }).actions.setFrameFormValues({
-        scenes: values.scenes.map((s) => (s.id === sceneId ? { ...s, name: sceneName } : s)),
+        scenes: values.scenes.map((s) => (s.id === dialog.sceneId ? { ...s, name: sceneName } : s)),
       })
+      actions.closeRenameSceneDialog()
     },
     deleteScene: ({ sceneId }) => {
       frameLogic({ frameId: props.frameId }).actions.setFrameFormValues({

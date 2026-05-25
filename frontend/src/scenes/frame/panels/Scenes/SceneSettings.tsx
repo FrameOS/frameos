@@ -7,12 +7,18 @@ import { NumberTextInput } from '../../../../components/NumberTextInput'
 import { Button } from '../../../../components/Button'
 import { ColorInput } from '../../../../components/ColorInput'
 import { Select } from '../../../../components/Select'
-import { Label } from '../../../../components/Label'
 import { TextArea } from '../../../../components/TextArea'
 
 export interface SceneSettingsProps {
   sceneId: string
   onClose?: () => void
+}
+
+const sceneSettingsFieldClass = 'scene-settings-field frame-tool-row rounded-xl p-3 @md:items-center @md:gap-4'
+const sceneSettingsPromptFieldClass = 'scene-settings-field frame-tool-row rounded-xl p-3 @md:items-start @md:gap-4'
+
+function SceneSettingsLabel({ children }: { children: string }): JSX.Element {
+  return <span className="frame-tool-control-label text-xs font-semibold uppercase tracking-wide">{children}</span>
 }
 
 export function SceneSettings({ sceneId, onClose }: SceneSettingsProps): JSX.Element {
@@ -23,14 +29,14 @@ export function SceneSettings({ sceneId, onClose }: SceneSettingsProps): JSX.Ele
   }
 
   return (
-    <Form logic={frameLogic} props={{ frameId }} formKey="frameForm">
+    <Form logic={frameLogic} props={{ frameId }} formKey="frameForm" className="scene-settings-form frame-tool-panel">
       <Group name={['scenes', sceneIndex]}>
-        <div className="w-full space-y-1">
+        <div className="w-full space-y-3 @container">
           <Group name={['settings']}>
             <Field
-              className="flex flex-row gap-2 w-full justify-between"
+              className={sceneSettingsFieldClass}
               name="refreshInterval"
-              label="Refresh interval in seconds"
+              label={<SceneSettingsLabel>Refresh interval</SceneSettingsLabel>}
               tooltip={
                 <>
                   How often do we trigger a refresh, in seconds. Pass a large number like "60" or even more for e-ink
@@ -42,20 +48,20 @@ export function SceneSettings({ sceneId, onClose }: SceneSettingsProps): JSX.Ele
               <NumberTextInput
                 name="refreshInterval"
                 placeholder={String(frameForm.interval || 300)}
-                style={{ width: 70 }}
+                className="h-10 @md:max-w-[9rem]"
               />
             </Field>
             <Field
-              className="flex flex-row gap-2 w-full justify-between"
+              className={sceneSettingsFieldClass}
               name="backgroundColor"
-              label="Background color"
+              label={<SceneSettingsLabel>Background color</SceneSettingsLabel>}
             >
-              <ColorInput name="backgroundColor" className="!p-0" style={{ width: 70 }} placeholder="#ffffff" />
+              <ColorInput name="backgroundColor" className="!h-10 !min-w-0 @md:max-w-[12rem]" placeholder="#ffffff" />
             </Field>
             <Field
-              className="flex flex-row gap-2 w-full justify-between"
+              className={sceneSettingsFieldClass}
               name="execution"
-              label="Execution"
+              label={<SceneSettingsLabel>Execution</SceneSettingsLabel>}
               tooltip={
                 <div className="space-y-2">
                   <p>Choose between compiled and interpreted execution modes.</p>
@@ -76,7 +82,7 @@ export function SceneSettings({ sceneId, onClose }: SceneSettingsProps): JSX.Ele
             >
               <Select
                 name="execution"
-                className="border rounded px-1 py-0.5"
+                className="h-10"
                 options={[
                   { value: 'compiled', label: 'compiled' },
                   { value: 'interpreted', label: 'interpreted' },
@@ -84,18 +90,22 @@ export function SceneSettings({ sceneId, onClose }: SceneSettingsProps): JSX.Ele
               />
             </Field>
             {scene.settings?.prompt ? (
-              <div className="space-y-1 @md:flex @md:gap-2">
-                <Label className="@md:w-1/3">Prompt</Label>
-                <div className="flex-1">
+              <div className={`space-y-1 @md:flex ${sceneSettingsPromptFieldClass}`}>
+                <label className="frameos-form-label flex items-center gap-1 text-sm font-medium @md:w-1/3">
+                  <SceneSettingsLabel>Prompt</SceneSettingsLabel>
+                </label>
+                <div className="w-full">
                   <TextArea readOnly value={scene.settings.prompt} rows={4} />
                 </div>
               </div>
             ) : null}
           </Group>
           {onClose ? (
-            <Button size="small" onClick={onClose}>
-              Close
-            </Button>
+            <div className="flex justify-end">
+              <Button size="small" onClick={onClose}>
+                Close
+              </Button>
+            </div>
           ) : null}
         </div>
       </Group>

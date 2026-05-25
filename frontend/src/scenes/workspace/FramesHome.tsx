@@ -47,6 +47,7 @@ import { framesHomeLogic } from './framesHomeLogic'
 
 const uploadedScenePrefix = 'uploaded/'
 const activeSurfaceClassName = 'frameos-active-surface'
+const sceneControlPreviewMaxHeightRem = 14
 
 const frameSectionToolLinks = [
   { label: 'Overview', panel: 'overview' },
@@ -585,6 +586,20 @@ export function SceneControlPanel(): JSX.Element | null {
   }
 
   const frameLogicProps = { frameId: frame.id }
+  const previewDimensions =
+    frame.width && frame.height
+      ? frame.rotate === 90 || frame.rotate === 270
+        ? { width: frame.height, height: frame.width }
+        : { width: frame.width, height: frame.height }
+      : null
+  const previewAspectRatio = previewDimensions
+    ? `${previewDimensions.width} / ${previewDimensions.height}`
+    : '4 / 3'
+  const previewMaxWidth = previewDimensions
+    ? `min(100%, ${((sceneControlPreviewMaxHeightRem * previewDimensions.width) / previewDimensions.height).toFixed(
+        3
+      )}rem)`
+    : '100%'
 
   return (
     <div className="workspace-drawer frameos-drawer fixed bottom-5 right-5 top-5 z-40 w-[390px] overflow-hidden rounded-[24px] border border-white/80 bg-white/95 shadow-2xl shadow-slate-500/30 backdrop-blur-xl">
@@ -609,8 +624,19 @@ export function SceneControlPanel(): JSX.Element | null {
               </button>
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-              <div className="mb-4 overflow-hidden rounded-2xl bg-slate-100">
-                <FrameImage frameId={frame.id} sceneId={scene.id} refreshable={false} className="max-h-52 w-full" />
+              <div
+                className="frameos-card-media frameos-skeleton-surface mx-auto mb-4 flex max-h-56 w-full items-center justify-center overflow-hidden rounded-2xl bg-slate-100"
+                style={{ aspectRatio: previewAspectRatio, maxWidth: previewMaxWidth }}
+              >
+                <FrameImage
+                  frameId={frame.id}
+                  sceneId={scene.id}
+                  refreshable={false}
+                  objectFit="contain"
+                  hideWhileLoading
+                  className="h-full max-h-56 w-full"
+                  imageClassName="h-auto max-h-56 max-w-full w-auto rounded-lg object-contain"
+                />
               </div>
               <div className="mb-4 flex flex-wrap gap-2">
                 <A

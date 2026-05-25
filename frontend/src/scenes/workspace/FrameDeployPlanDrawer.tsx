@@ -47,23 +47,8 @@ function ChangeRows({ changes }: { changes: ChangeDetail[] }): JSX.Element | nul
   )
 }
 
-function DrawerSection({
-  title,
-  children,
-}: {
-  title: string
-  children: JSX.Element | JSX.Element[] | null
-}): JSX.Element | null {
-  if (!children) {
-    return null
-  }
-
-  return (
-    <section className="frame-tool-card rounded-[22px] p-4">
-      <div className="frame-tool-heading mb-3 text-sm font-semibold">{title}</div>
-      {children}
-    </section>
-  )
+function DrawerHeading({ children }: { children: string }): JSX.Element {
+  return <div className="frame-tool-heading text-sm font-semibold">{children}</div>
 }
 
 export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Element | null {
@@ -108,7 +93,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
           {deployPlansLoading ? (
-            <div className="frame-tool-card flex items-center gap-3 rounded-[22px] p-4 text-sm">
+            <div className="flex items-center gap-3 text-sm">
               <Spinner />
               <span className="frame-tool-muted">Loading deploy plan...</span>
             </div>
@@ -124,19 +109,25 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
               </button>
             </div>
           ) : (
-            <div className="space-y-4">
+            <div className="space-y-5">
               {deployRecommendation ? (
-                <section className="frame-tool-card rounded-[22px] p-4">
-                  <div className="frame-tool-heading text-sm font-semibold">{deployRecommendation.title}</div>
-                  <div className="frame-tool-muted mt-2 text-sm leading-5">{deployRecommendation.description}</div>
+                <section className="space-y-2">
+                  <DrawerHeading>{deployRecommendation.title}</DrawerHeading>
+                  <div className="frame-tool-card rounded-[22px] p-4">
+                    <div className="frame-tool-muted text-sm leading-5">{deployRecommendation.description}</div>
+                  </div>
                 </section>
               ) : null}
               {deployChangeDetails.length > 0 ? (
-                <DrawerSection title="Pending changes">
-                  <ChangeRows changes={deployChangeDetails} />
-                </DrawerSection>
+                <section className="space-y-2">
+                  <DrawerHeading>Pending changes</DrawerHeading>
+                  <div className="frame-tool-card rounded-[22px] p-4">
+                    <ChangeRows changes={deployChangeDetails} />
+                  </div>
+                </section>
               ) : null}
-              <DrawerSection title="Fast deploy">
+              <section className="space-y-2">
+                <DrawerHeading>Fast deploy</DrawerHeading>
                 <SummaryRows
                   items={
                     fastDeployPlanSummary.length > 0
@@ -144,11 +135,12 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
                       : [{ label: 'Behavior', value: 'Reload FrameOS with the current frame configuration' }]
                   }
                 />
-              </DrawerSection>
+              </section>
               {fullDeployPlanSummary.length > 0 ? (
-                <DrawerSection title="Full deploy">
+                <section className="space-y-2">
+                  <DrawerHeading>Full deploy</DrawerHeading>
                   <SummaryRows items={fullDeployPlanSummary} />
-                </DrawerSection>
+                </section>
               ) : null}
             </div>
           )}

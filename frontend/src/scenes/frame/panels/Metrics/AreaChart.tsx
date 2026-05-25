@@ -208,11 +208,13 @@ function ChartTooltip({
   xMax,
   yMax,
   chartTheme,
+  compact = false,
 }: {
   tooltip: ChartTooltipState
   xMax: number
   yMax: number
   chartTheme: MetricChartTheme
+  compact?: boolean
 }) {
   const timeLabel = formatTooltipTimestamp(tooltip.timestamp)
   const widestRowLength = tooltip.rows.reduce(
@@ -223,7 +225,9 @@ function ChartTooltip({
   const tooltipHeight = 32 + tooltip.rows.length * 18
   const rawLeft = tooltip.x + tooltipWidth + 12 <= xMax ? tooltip.x + 12 : tooltip.x - tooltipWidth - 12
   const left = Math.min(Math.max(rawLeft, 0), Math.max(xMax - tooltipWidth, 0))
-  const top = Math.min(Math.max(tooltip.pointerY - tooltipHeight / 2, 0), Math.max(yMax - tooltipHeight, 0))
+  const top = compact
+    ? yMax + 8
+    : Math.min(Math.max(tooltip.pointerY - tooltipHeight / 2, 0), Math.max(yMax - tooltipHeight, 0))
 
   return (
     <g pointerEvents="none">
@@ -537,7 +541,9 @@ export function AreaChart({
           style={{ cursor: compact ? 'default' : 'crosshair' }}
         />
       )}
-      {showTooltip && tooltip && <ChartTooltip tooltip={tooltip} xMax={xMax} yMax={yMax} chartTheme={chartTheme} />}
+      {showTooltip && tooltip && (
+        <ChartTooltip tooltip={tooltip} xMax={xMax} yMax={yMax} chartTheme={chartTheme} compact={compact} />
+      )}
     </Group>
   )
 }

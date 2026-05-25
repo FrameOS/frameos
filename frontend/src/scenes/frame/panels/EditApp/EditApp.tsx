@@ -45,12 +45,20 @@ export function EditAppFileList({ sceneId, nodeId, onOpenChat, className }: Edit
   const { setActiveFile, addFile, deleteFile } = useActions(logic)
 
   if (sourcesLoading) {
-    return <div className="frameos-muted rounded-2xl bg-white/55 p-3 text-sm text-slate-400">Loading files...</div>
+    return (
+      <div className={clsx('app-file-list frameos-inset rounded-2xl border p-3', className)}>
+        <div className="frameos-muted mb-2 text-xs font-semibold uppercase tracking-wide">Files</div>
+        <div className="app-file-row flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-semibold">
+          <span className="frameos-skeleton-media h-7 w-7 shrink-0 animate-pulse rounded-lg" />
+          <span className="frameos-skeleton-line h-3 w-24 animate-pulse rounded-full" />
+        </div>
+      </div>
+    )
   }
 
   return (
-    <div className={clsx('frameos-inset rounded-2xl border border-slate-200 bg-white/55 p-3', className)}>
-      <div className="frameos-muted mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Files</div>
+    <div className={clsx('app-file-list frameos-inset rounded-2xl border p-3', className)}>
+      <div className="frameos-muted mb-2 text-xs font-semibold uppercase tracking-wide">Files</div>
       <div className="space-y-1">
         {filenames.map((file) => (
           <div key={file} className="flex w-full items-center justify-between gap-2">
@@ -58,14 +66,14 @@ export function EditAppFileList({ sceneId, nodeId, onOpenChat, className }: Edit
               type="button"
               onClick={() => setActiveFile(file)}
               className={clsx(
-                'min-w-0 flex-1 truncate rounded-xl px-3 py-2 text-left text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-                  activeFile === file
-                    ? modelMarkers[file]?.length
-                      ? 'bg-red-500 text-white'
-                      : 'frameos-primary-active'
+                'app-file-row min-w-0 flex-1 truncate rounded-xl px-3 py-2 text-left text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+                activeFile === file
+                  ? modelMarkers[file]?.length
+                    ? 'app-file-row-error-active'
+                    : 'app-file-row-active'
                   : modelMarkers[file]?.length
-                  ? 'text-red-500 hover:bg-red-50'
-                  : 'frameos-strong text-slate-700 hover:bg-white'
+                  ? 'app-file-row-error'
+                  : null
               )}
               title={
                 modelMarkers[file]?.length
@@ -80,7 +88,7 @@ export function EditAppFileList({ sceneId, nodeId, onOpenChat, className }: Edit
               <DropdownMenu
                 buttonColor="none"
                 horizontal
-                className="frameos-icon-button flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/70 !px-0 !py-0 text-slate-500 shadow-sm transition hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                className="app-file-action frameos-icon-button flex h-8 w-8 shrink-0 items-center justify-center rounded-lg !px-0 !py-0 shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
                 items={[
                   {
                     label: 'Delete file',

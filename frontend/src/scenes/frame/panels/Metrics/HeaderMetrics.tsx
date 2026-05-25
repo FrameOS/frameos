@@ -118,7 +118,7 @@ export function HeaderMetrics({ frameId }: { frameId: number }) {
           key={key}
           href={urls.frame(frameId, 'metrics')}
           className={clsx(
-            'frame-header-metric-chip relative flex h-9 shrink-0 items-center gap-1 overflow-hidden rounded-lg border px-2 shadow-sm backdrop-blur-sm transition-colors @4xl:gap-2 @4xl:px-2.5',
+            'frame-header-metric-chip relative flex h-9 shrink-0 items-center gap-1 overflow-visible rounded-lg border px-2 shadow-sm backdrop-blur-sm transition-colors @4xl:gap-2 @4xl:px-2.5',
             theme === 'dark'
               ? 'border-white/10 bg-white/[0.06] shadow-black/10 hover:bg-white/[0.09]'
               : 'border-slate-200/70 bg-white/70 shadow-slate-950/5 hover:bg-white/90'
