@@ -33,7 +33,6 @@ import { Events } from '../frame/panels/Events/Events'
 import { SceneJSON } from '../frame/panels/SceneJSON/SceneJSON'
 import { SceneSource } from '../frame/panels/SceneSource/SceneSource'
 import { SceneState } from '../frame/panels/SceneState/SceneState'
-import { Logs } from '../frame/panels/Logs/Logs'
 import { scenesLogic } from '../frame/panels/Scenes/scenesLogic'
 import { EditTemplateModal } from '../frame/panels/Templates/EditTemplateModal'
 import { ExpandedScene } from '../frame/panels/Scenes/ExpandedScene'
@@ -501,25 +500,7 @@ function SceneCanvasLoadingPlaceholder(): JSX.Element {
 }
 
 function ScenePreviewPanel({ frameId, scene }: { frameId: number; scene: FrameScene }): JSX.Element {
-  return (
-    <div className="flex h-full min-h-0 flex-col gap-5">
-      <div className="shrink-0">
-        <ExpandedScene frameId={frameId} sceneId={scene.id} scene={scene} showEditButton={false} />
-      </div>
-      <section className="frame-tool-panel frame-tool-card flex min-h-[33vh] flex-1 flex-col overflow-hidden rounded-2xl">
-        <div className="frameos-divider flex items-center justify-between gap-3 border-b px-4 py-3">
-          <div className="min-w-0">
-            <div className="frame-tool-muted text-xs font-semibold uppercase tracking-wide">Live logs</div>
-            <div className="frame-tool-heading truncate text-sm font-semibold">{scene.name || 'Untitled scene'}</div>
-          </div>
-          <div className="frame-tool-muted whitespace-nowrap text-xs font-semibold">Frame output</div>
-        </div>
-        <div className="min-h-0 flex-1 px-3 py-3">
-          <Logs compact className="h-full" />
-        </div>
-      </section>
-    </div>
-  )
+  return <ExpandedScene frameId={frameId} sceneId={scene.id} scene={scene} showEditButton={false} />
 }
 
 function UtilityDrawer({ frameId, scene }: { frameId: number; scene: FrameScene | null }): JSX.Element | null {
@@ -563,9 +544,7 @@ function UtilityDrawer({ frameId, scene }: { frameId: number; scene: FrameScene 
             <XMarkIcon className="h-6 w-6" />
           </button>
         </div>
-        <div className={clsx('min-h-0 flex-1 p-5', utilityPanel === 'state' ? 'overflow-hidden' : 'overflow-y-auto')}>
-          {renderPanel()}
-        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto p-5">{renderPanel()}</div>
       </div>
     </div>
   )

@@ -16,6 +16,18 @@ export interface ControlLogicProps {
 }
 
 const UPLOADED_SCENE_PREFIX = 'uploaded/'
+const emptyFrameStateRecord: FrameStateRecord = { sceneId: '', states: {} }
+
+function normaliseFrameStateRecord(payload: any): FrameStateRecord {
+  const sceneId = typeof payload?.sceneId === 'string' ? payload.sceneId : ''
+  const states =
+    payload?.states && typeof payload.states === 'object' && !Array.isArray(payload.states) ? payload.states : {}
+  return {
+    sceneId,
+    states,
+    ...(payload?.cache && typeof payload.cache === 'object' ? { cache: payload.cache } : {}),
+  }
+}
 
 export const controlLogic = kea<controlLogicType>([
   path(['src', 'scenes', 'frame', 'panels', 'Scenes', 'controlLogic']),
@@ -32,7 +44,7 @@ export const controlLogic = kea<controlLogicType>([
   }),
   loaders(({ props, values }) => ({
     stateRecord: [
-      {} as FrameStateRecord,
+      emptyFrameStateRecord,
       {
         sync: async (_, breakpoint) => {
           await breakpoint(100)
@@ -40,7 +52,7 @@ export const controlLogic = kea<controlLogicType>([
           try {
             const statesResponse = await apiFetch(`/api/frames/${props.frameId}/states`)
             if (statesResponse.ok) {
-              return await statesResponse.json()
+              return normaliseFrameStateRecord(await statesResponse.json())
             }
           } catch (error) {
             console.error(error)
@@ -52,7 +64,7 @@ export const controlLogic = kea<controlLogicType>([
           }
           console.error('Failed to fetch frame states, but could load one state. You might need to redeploy the frame.')
           const resp = await response.json()
-          return { states: { [resp.sceneId]: resp.state }, sceneId: resp.sceneId }
+          return normaliseFrameStateRecord({ states: { [resp.sceneId]: resp.state }, sceneId: resp.sceneId })
         },
       },
     ],
@@ -72,7 +84,7 @@ export const controlLogic = kea<controlLogicType>([
   })),
   reducers({
     stateRecord: [
-      {} as FrameStateRecord,
+      emptyFrameStateRecord,
       {
         currentSceneChanged: (state, { sceneId }) => ({ ...state, sceneId }),
       },
@@ -142,9 +154,14 @@ export const controlLogic = kea<controlLogicType>([
         throw error
       }
     },
-    syncSuccess: ({ stateRecord }) => {
+    syncSuccess: async ({ stateRecord }, breakpoint) => {
       if (stateRecord?.sceneId?.startsWith(UPLOADED_SCENE_PREFIX)) {
         actions.loadUploadedScenes()
+      }
+      if (stateRecord?.cache?.refreshing) {
+        const retryAfterSeconds = Math.max(1, Number(stateRecord.cache.retry_after) || 5)
+        await breakpoint(retryAfterSeconds * 1000)
+        actions.sync()
       }
     },
     [socketLogic.actionTypes.newLog]: ({ log }) => {

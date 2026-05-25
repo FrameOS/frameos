@@ -8,6 +8,7 @@ import { frameHost } from '../../decorators/frame'
 import { urls } from '../../urls'
 import type { AppNodeData, DiagramNode, FrameScene, FrameType } from '../../types'
 import { FrameosShell } from './FrameosShell'
+import { FrameDeployPlanDrawer } from './FrameDeployPlanDrawer'
 import { activeAppSelectionLogic } from './activeAppSelectionLogic'
 import { appsWorkspaceLogic } from './appsWorkspaceLogic'
 import { workspaceLogic } from './workspaceLogic'
@@ -319,7 +320,9 @@ function AppsEmptyState({ title, detail }: { title: string; detail: string }): J
 
 function AppsWorkspaceFrame({ frameId, routeSceneId, routeNodeId }: AppsWorkspaceFrameProps): JSX.Element {
   const frameLogicProps = { frameId }
-  const { frame, scenes, unsavedChanges, undeployedChanges } = useValues(frameLogic(frameLogicProps))
+  const { frame, scenes, unsavedChanges, undeployedChanges, deployPlanModalOpen } = useValues(
+    frameLogic(frameLogicProps)
+  )
   const { framesList } = useValues(framesModel)
 
   if (!frame) {
@@ -366,6 +369,7 @@ function AppsWorkspaceFrame({ frameId, routeSceneId, routeNodeId }: AppsWorkspac
             />
           }
           mainClassName="apps-workspace-main flex h-screen flex-col overflow-hidden pb-5 pr-5 pt-5 max-lg:h-auto max-lg:overflow-visible max-lg:px-4"
+          rightPanel={deployPlanModalOpen ? <FrameDeployPlanDrawer frame={frame} /> : null}
         >
           <AppsEditorSurface frame={frame} scene={selectedSceneId ? selectedScene : null} app={selectedApp} />
         </FrameosShell>

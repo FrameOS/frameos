@@ -242,7 +242,6 @@ function FramePreviewPanel({ frame, scenes }: { frame: FrameType; scenes: FrameS
 function FrameHeaderActions({ frame, archived }: { frame: FrameType; archived?: boolean }): JSX.Element {
   const { deleteFrame, deployFrame, renderFrame, renameFrame, setFrameArchived } = useActions(framesModel)
   const { openChatDrawer } = useActions(workspaceLogic)
-  const { hideForm } = useActions(newFrameForm)
   const frameName = frame.name || frameHost(frame)
 
   const promptRenameFrame = (): void => {
@@ -254,16 +253,8 @@ function FrameHeaderActions({ frame, archived }: { frame: FrameType; archived?: 
   }
 
   return (
-    <div className="flex w-full shrink-0 flex-wrap items-center justify-start gap-2 @4xl:w-auto @4xl:justify-end">
+    <div className="flex min-w-0 flex-1 flex-nowrap items-center justify-end gap-2">
       <HeaderMetrics frameId={frame.id} />
-      <A
-        href={urls.frame(frame.id, 'schedule')}
-        onClick={() => hideForm()}
-        className="frameos-primary-action inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-      >
-        <CalendarDaysIcon className="h-5 w-5" />
-        Schedule
-      </A>
       <button
         type="button"
         title="Open AI chat"
@@ -319,19 +310,19 @@ function FrameDashboardHeader({ frame, archived }: { frame: FrameType; archived?
   const connected = (frame.active_connections ?? 0) > 0
 
   return (
-    <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
+    <div className="mb-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
       <A
         href={urls.frame(frame.id, 'overview')}
-        className="group flex min-w-0 items-center gap-3 rounded-2xl transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+        className="group flex min-w-[14rem] flex-1 items-center gap-3 rounded-2xl transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
       >
-        <div className="frameos-icon-tile flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white/70 text-slate-700 shadow-sm">
+        <div className="frameos-icon-tile flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/70 text-slate-700 shadow-sm @4xl:h-12 @4xl:w-12 @4xl:rounded-2xl">
           <ComputerDesktopIcon className="h-7 w-7" />
         </div>
         <div className="min-w-0">
           <div className="flex min-w-0 items-center gap-2">
             <h2
               data-workspace-frame-title={frame.id}
-              className="frameos-strong truncate text-2xl font-bold tracking-normal text-slate-950"
+              className="frameos-strong truncate text-xl font-bold tracking-normal text-slate-950 @4xl:text-2xl"
             >
               {frame.name || frameHost(frame)}
             </h2>
@@ -345,7 +336,7 @@ function FrameDashboardHeader({ frame, archived }: { frame: FrameType; archived?
               <span title="FrameOS agent connected" className="h-2.5 w-2.5 rounded-full bg-blue-400" />
             ) : null}
           </div>
-          <div className="frameos-muted truncate text-sm text-slate-500">{frameStatus(frame)}</div>
+          <div className="frameos-muted truncate text-xs text-slate-500 @4xl:text-sm">{frameStatus(frame)}</div>
         </div>
       </A>
       <FrameHeaderActions frame={frame} archived={archived} />

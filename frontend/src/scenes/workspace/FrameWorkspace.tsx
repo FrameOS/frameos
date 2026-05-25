@@ -1253,7 +1253,7 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
           showAiButton={false}
           mainClassName={clsx(
             toolUsesPageScroll ? 'min-h-screen overflow-visible' : 'h-screen overflow-hidden',
-            'frame-workspace-main py-6 pr-8 max-lg:h-auto max-lg:overflow-visible max-lg:px-4 max-lg:pb-6 max-lg:pt-0'
+            'frame-workspace-main py-6 pr-8 max-lg:h-auto max-lg:overflow-visible max-lg:px-4 max-lg:pb-6'
           )}
           rightPanel={
             deployPlanModalOpen ? (

@@ -58,7 +58,7 @@ interface SceneScheduleCardProps {
   frameId: number
   scene: FrameScene
   eventCount: number
-  layout: 'strip' | 'grid'
+  layout: 'strip' | 'grid' | 'responsive'
   addEventForScene: (sceneId: string) => void
   showDropZone: () => void
   hideDropZone: () => void
@@ -87,7 +87,11 @@ function SceneScheduleCard({
       onClick={() => addEventForScene(scene.id)}
       className={clsx(
         'frameos-primary-hover-border group relative flex overflow-hidden rounded-2xl border border-[var(--tool-border)] bg-[var(--tool-bg-strong)] text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-        layout === 'grid' ? 'min-w-0' : 'min-w-[8.5rem] max-w-[9.5rem] flex-1'
+        layout === 'grid'
+          ? 'min-w-0'
+          : layout === 'responsive'
+          ? 'min-w-[8.5rem] max-w-[9.5rem] flex-none @5xl:min-w-0 @5xl:max-w-none @5xl:flex-1'
+          : 'min-w-[8.5rem] max-w-[9.5rem] flex-none'
       )}
       title={`Add ${sceneName(scene)} to the schedule`}
     >
@@ -452,7 +456,7 @@ export function Schedule({ scrollContainer = true, drawerMode = false }: Schedul
     addEventForScene(sceneId, dropIndex ?? sortedEvents.length)
   }
 
-  const sceneCardLayout = drawerMode ? 'strip' : 'grid'
+  const sceneCardLayout = drawerMode ? 'strip' : 'responsive'
   const scenePicker = (
     <div className="frame-tool-card overflow-hidden rounded-[22px]">
       <div className="p-4">
@@ -472,7 +476,7 @@ export function Schedule({ scrollContainer = true, drawerMode = false }: Schedul
             className={clsx(
               drawerMode
                 ? '-mx-1 flex gap-3 overflow-x-auto px-1 pb-1'
-                : 'grid grid-cols-[repeat(auto-fill,minmax(9rem,1fr))] gap-3'
+                : '-mx-1 flex gap-3 overflow-x-auto px-1 pb-1 @5xl:mx-0 @5xl:grid @5xl:grid-cols-[repeat(auto-fill,minmax(9rem,1fr))] @5xl:overflow-visible @5xl:px-0 @5xl:pb-0'
             )}
           >
             {filteredScenes.map((scene) => (
@@ -604,6 +608,19 @@ export function Schedule({ scrollContainer = true, drawerMode = false }: Schedul
     </div>
   )
 
+  const scheduleColumn = (
+    <div className="space-y-3">
+      <div className="flex justify-start px-1">
+        <Field name={['schedule', 'disabled']}>
+          {({ value, onChange }) => (
+            <Switch label="Enable schedule" value={!value} onChange={(enabled) => onChange(!enabled)} />
+          )}
+        </Field>
+      </div>
+      {scheduleEntries}
+    </div>
+  )
+
   return (
     <div
       className={clsx(
@@ -621,13 +638,6 @@ export function Schedule({ scrollContainer = true, drawerMode = false }: Schedul
         </div>
       ) : null}
       <Form logic={frameLogic} formKey="frameForm" className="space-y-4">
-        <div className="flex justify-end px-1">
-          <Field name={['schedule', 'disabled']}>
-            {({ value, onChange }) => (
-              <Switch label="Schedule enabled" value={!value} onChange={(enabled) => onChange(!enabled)} />
-            )}
-          </Field>
-        </div>
         <div
           className={clsx(
             drawerMode
@@ -636,7 +646,7 @@ export function Schedule({ scrollContainer = true, drawerMode = false }: Schedul
           )}
         >
           {scenePicker}
-          {scheduleEntries}
+          {scheduleColumn}
         </div>
       </Form>
     </div>

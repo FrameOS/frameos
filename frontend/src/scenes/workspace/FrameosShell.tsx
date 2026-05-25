@@ -1,4 +1,4 @@
-import { A } from 'kea-router'
+import { A, router } from 'kea-router'
 import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
 import clsx from 'clsx'
 import type { CSSProperties, MouseEvent } from 'react'
@@ -6,6 +6,7 @@ import {
   Cog6ToothIcon,
   CodeBracketIcon,
   ComputerDesktopIcon,
+  ExclamationTriangleIcon,
   MagnifyingGlassIcon,
   MoonIcon,
   PlusIcon,
@@ -17,7 +18,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { urls } from '../../urls'
 import { FrameosLogo } from '../../components/FrameosLogo'
-import { workspaceLogic } from './workspaceLogic'
+import { isMobileWorkspaceViewport, workspaceLogic } from './workspaceLogic'
 import { framesModel } from '../../models/framesModel'
 import { frameHost } from '../../decorators/frame'
 import { frameLogic } from '../frame/frameLogic'
@@ -61,6 +62,7 @@ interface FrameosShellProps {
 function NavButton({
   active,
   href,
+  sidebarOpen,
   title,
   onActiveClick,
   onInactiveClick,
@@ -68,21 +70,29 @@ function NavButton({
 }: {
   active: boolean
   href: string
+  sidebarOpen: boolean
   title: string
   onActiveClick: () => void
   onInactiveClick: () => void
   children: JSX.Element
 }): JSX.Element {
+  const resolvedHref =
+    sidebarOpen && isMobileWorkspaceViewport() ? `${href.split('#')[0]}#workspaceSidebar=open` : href.split('#')[0]
+
   return (
-    <A
-      href={href}
+    <a
+      href={resolvedHref}
       title={title}
       onClick={(event: MouseEvent<HTMLAnchorElement>) => {
+        if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+          return
+        }
+        event.preventDefault()
         if (active) {
-          event.preventDefault()
           onActiveClick()
         } else {
           onInactiveClick()
+          router.actions.push(resolvedHref)
         }
       }}
       className={clsx(
@@ -93,7 +103,7 @@ function NavButton({
       )}
     >
       {children}
-    </A>
+    </a>
   )
 }
 
@@ -164,6 +174,32 @@ function WorkspaceChatDrawer({ frameId, sceneId }: { frameId: number; sceneId: s
   )
 }
 
+function FrameUnsavedHeaderButton({ frameId }: { frameId: number }): JSX.Element | null {
+  const { unsavedChanges } = useValues(frameLogic({ frameId }))
+  const { showDeployPlanModal } = useActions(frameLogic({ frameId }))
+  const { closeChatDrawer } = useActions(workspaceLogic)
+
+  if (!unsavedChanges) {
+    return null
+  }
+
+  return (
+    <button
+      type="button"
+      title="Unsaved changes"
+      aria-label="Open deploy plan for unsaved changes"
+      onClick={() => {
+        closeChatDrawer()
+        showDeployPlanModal()
+      }}
+      className="workspace-unsaved-header-button frameos-warning-button flex h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+    >
+      <ExclamationTriangleIcon className="h-5 w-5 shrink-0" />
+      <span className="workspace-unsaved-header-label">Unsaved</span>
+    </button>
+  )
+}
+
 export function FrameosShell({
   mode,
   tree,
@@ -180,15 +216,8 @@ export function FrameosShell({
 }: FrameosShellProps): JSX.Element {
   const { chatDrawerSelection, search, secondarySidebarOpen, selectedFrame, selectedSceneId, theme, utilityPanel } =
     useValues(workspaceLogic)
-  const {
-    closeScheduleDrawer,
-    closeTemplateDrawer,
-    openChatDrawer,
-    openSecondarySidebar,
-    setSearch,
-    toggleSecondarySidebar,
-    toggleTheme,
-  } = useActions(workspaceLogic)
+  const { closeScheduleDrawer, closeTemplateDrawer, openChatDrawer, setSearch, toggleSecondarySidebar, toggleTheme } =
+    useActions(workspaceLogic)
   const activeFrameTool = frameShellToolPanels.has(String(utilityPanel)) ? String(utilityPanel) : undefined
   const frameHref = selectedFrame ? urls.frame(selectedFrame.id, activeFrameTool) : urls.frames()
   const scenesHref = selectedFrame ? urls.scenes(selectedFrame.id, selectedSceneId ?? undefined) : urls.scenes()
@@ -209,14 +238,17 @@ export function FrameosShell({
         floating={topBar === null}
       />
     ) : null
+  const unsavedHeaderButton =
+    selectedFrame && mode !== 'frames' && mode !== 'settings' ? (
+      <FrameUnsavedHeaderButton frameId={selectedFrame.id} />
+    ) : null
   const workspaceMainStyle = {
     '--workspace-main-offset': secondarySidebarOpen ? '480px' : '128px',
     '--workspace-sidebar-edge': secondarySidebarOpen ? '440px' : '108px',
   } as CSSProperties
-  const leaveSceneWorkspace = () => {
+  const prepareFirstLevelNavigation = () => {
     closeTemplateDrawer()
     closeScheduleDrawer()
-    openSecondarySidebar()
   }
 
   return (
@@ -244,40 +276,45 @@ export function FrameosShell({
             <NavButton
               active={mode === 'frames'}
               href={urls.frames()}
+              sidebarOpen={secondarySidebarOpen}
               title={secondarySidebarOpen && mode === 'frames' ? 'Hide frames panel' : 'Frames'}
               onActiveClick={toggleSecondarySidebar}
-              onInactiveClick={leaveSceneWorkspace}
+              onInactiveClick={prepareFirstLevelNavigation}
             >
               <Squares2X2Icon className="h-7 w-7" />
             </NavButton>
             <NavButton
               active={mode === 'frame'}
               href={frameHref}
+              sidebarOpen={secondarySidebarOpen}
               title={secondarySidebarOpen && mode === 'frame' ? 'Hide frame panel' : 'Frame'}
               onActiveClick={toggleSecondarySidebar}
-              onInactiveClick={mode === 'scenes' ? leaveSceneWorkspace : openSecondarySidebar}
+              onInactiveClick={prepareFirstLevelNavigation}
             >
               <ComputerDesktopIcon className="h-7 w-7" />
             </NavButton>
             <NavButton
               active={mode === 'scenes'}
               href={scenesHref}
+              sidebarOpen={secondarySidebarOpen}
               title={secondarySidebarOpen && mode === 'scenes' ? 'Hide scenes panel' : 'Scenes'}
               onActiveClick={toggleSecondarySidebar}
-              onInactiveClick={openSecondarySidebar}
+              onInactiveClick={prepareFirstLevelNavigation}
             >
               <RectangleGroupIcon className="h-7 w-7" />
             </NavButton>
             <NavButton
               active={mode === 'apps'}
               href={appsHref}
+              sidebarOpen={secondarySidebarOpen}
               title={secondarySidebarOpen && mode === 'apps' ? 'Hide apps panel' : 'Apps'}
               onActiveClick={toggleSecondarySidebar}
-              onInactiveClick={mode === 'scenes' ? leaveSceneWorkspace : openSecondarySidebar}
+              onInactiveClick={prepareFirstLevelNavigation}
             >
               <CodeBracketIcon className="h-7 w-7" />
             </NavButton>
           </nav>
+          {unsavedHeaderButton}
           <button
             type="button"
             title={theme === 'dark' ? 'Use light mode' : 'Use dark mode'}
@@ -289,9 +326,10 @@ export function FrameosShell({
           <NavButton
             active={mode === 'settings'}
             href={urls.settings()}
+            sidebarOpen={secondarySidebarOpen}
             title={secondarySidebarOpen && mode === 'settings' ? 'Hide settings panel' : 'Settings'}
             onActiveClick={toggleSecondarySidebar}
-            onInactiveClick={leaveSceneWorkspace}
+            onInactiveClick={prepareFirstLevelNavigation}
           >
             <Cog6ToothIcon className="h-8 w-8" />
           </NavButton>
@@ -313,7 +351,7 @@ export function FrameosShell({
           'workspace-main @container',
           workspaceRightPanel && 'workspace-main-with-right-panel',
           mainClassName ??
-            'h-screen overflow-y-auto py-6 pr-8 max-lg:h-auto max-lg:overflow-visible max-lg:px-4 max-lg:pb-6 max-lg:pt-0'
+            'h-screen overflow-y-auto py-6 pr-8 max-lg:h-auto max-lg:overflow-visible max-lg:px-4 max-lg:pb-6'
         )}
       >
         {topBar !== undefined ? (

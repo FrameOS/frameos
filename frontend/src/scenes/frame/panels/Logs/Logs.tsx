@@ -397,7 +397,7 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
         <DropdownMenu
           horizontal
           buttonColor="none"
-          className="frameos-secondary-button fixed right-4 top-4 z-30 flex h-10 w-10 items-center justify-center rounded-lg !px-0 !py-0 @4xl:right-8 @4xl:top-6"
+          className="logs-menu-button-floating frameos-secondary-button flex h-10 w-10 items-center justify-center rounded-lg !px-0 !py-0"
           items={menuItems}
         />
       ) : (
@@ -412,7 +412,7 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
         <div
           className={clsx(
             'logs-filter-toolbar z-20 mb-4 flex flex-wrap items-center gap-3',
-            fullScreen ? 'sticky top-0 py-3 pr-14 backdrop-blur-sm @4xl:pr-16' : 'px-1 pb-2 pr-12'
+            fullScreen ? 'logs-filter-toolbar-floating pr-14' : 'px-1 pb-2 pr-12'
           )}
         >
           <label className="relative block min-w-0 flex-[1_1_14rem] @md:max-w-2xl">
@@ -465,7 +465,7 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
         className={clsx(
           'overflow-x-hidden bg-transparent font-mono text-sm leading-5',
           fullScreen
-            ? 'min-h-[calc(100vh-6rem)] w-full pr-14'
+            ? 'min-h-[calc(100vh-6rem)] w-full pt-28 pr-14'
             : compact
             ? 'h-full min-h-0 pr-2'
             : 'h-full overflow-y-auto pr-2'

@@ -278,6 +278,94 @@ async def test_api_frame_assets_returns_stale_cache_and_refreshes(async_client, 
 
     load_assets.assert_awaited_once()
 
+
+@pytest.mark.asyncio
+async def test_api_frame_states_returns_fresh_cache_without_reloading(async_client, db, redis):
+    frame = await new_frame(db, redis, 'CachedStatesFrame', 'localhost', 'localhost')
+    cache_key = frames_api._frame_states_cache_key(frame.id)
+    lock_key = frames_api._frame_states_cache_lock_key(frame.id)
+    cached_state = {"sceneId": "scene-1", "states": {"scene-1": {"temperature": 21}}}
+    await redis.delete(cache_key, lock_key)
+    await frames_api._write_frame_states_cache(redis, cache_key, cached_state, fetched_at=time.time())
+
+    with patch("app.api.frames._load_frame_states", new=AsyncMock()) as load_states:
+        response = await async_client.get(f'/api/frames/{frame.id}/states')
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["sceneId"] == "scene-1"
+    assert payload["states"] == cached_state["states"]
+    assert payload["cache"]["cached"] is True
+    assert payload["cache"]["refreshing"] is False
+    load_states.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_api_frame_states_returns_empty_shell_and_refreshes(async_client, db, redis):
+    frame = await new_frame(db, redis, 'EmptyStatesFrame', 'localhost', 'localhost')
+    cache_key = frames_api._frame_states_cache_key(frame.id)
+    lock_key = frames_api._frame_states_cache_lock_key(frame.id)
+    fresh_state = {"sceneId": "fresh-scene", "states": {"fresh-scene": {"count": 2}}}
+    await redis.delete(cache_key, lock_key)
+    await redis.set(f"frame:{frame.id}:active_scene", "last-scene")
+
+    with patch("app.api.frames._load_frame_states", new=AsyncMock(return_value=fresh_state)) as load_states:
+        response = await async_client.get(f'/api/frames/{frame.id}/states')
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["sceneId"] == "last-scene"
+    assert payload["states"] == {}
+    assert payload["cache"]["cached"] is False
+    assert payload["cache"]["refreshing"] is True
+
+    for _ in range(10):
+        refreshed = await frames_api._read_frame_states_cache(redis, cache_key)
+        if refreshed and refreshed["states"] == fresh_state["states"]:
+            break
+        await asyncio.sleep(0.05)
+    else:
+        pytest.fail("states cache was not refreshed in the background")
+
+    load_states.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_api_frame_states_returns_stale_cache_and_refreshes(async_client, db, redis):
+    frame = await new_frame(db, redis, 'StaleStatesFrame', 'localhost', 'localhost')
+    cache_key = frames_api._frame_states_cache_key(frame.id)
+    lock_key = frames_api._frame_states_cache_lock_key(frame.id)
+    cached_state = {"sceneId": "old-scene", "states": {"old-scene": {"count": 1}}}
+    fresh_state = {"sceneId": "new-scene", "states": {"new-scene": {"count": 2}}}
+    await redis.delete(cache_key, lock_key)
+    await frames_api._write_frame_states_cache(
+        redis,
+        cache_key,
+        cached_state,
+        fetched_at=time.time() - frames_api.FRAME_STATES_CACHE_REFRESH_AFTER_SECONDS - 1,
+    )
+
+    with patch("app.api.frames._load_frame_states", new=AsyncMock(return_value=fresh_state)) as load_states:
+        response = await async_client.get(f'/api/frames/{frame.id}/states')
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["sceneId"] == "old-scene"
+    assert payload["states"] == cached_state["states"]
+    assert payload["cache"]["cached"] is True
+    assert payload["cache"]["refreshing"] is True
+
+    for _ in range(10):
+        refreshed = await frames_api._read_frame_states_cache(redis, cache_key)
+        if refreshed and refreshed["states"] == fresh_state["states"]:
+            break
+        await asyncio.sleep(0.05)
+    else:
+        pytest.fail("states cache was not refreshed in the background")
+
+    load_states.assert_awaited_once()
+
+
 @pytest.mark.asyncio
 async def test_api_frame_event_render(async_client, db, redis):
     """

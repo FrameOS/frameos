@@ -110,12 +110,12 @@ export function HeaderMetrics({ frameId }: { frameId: number }) {
   }
 
   return (
-    <div className="relative z-50 flex w-full max-w-full flex-nowrap items-center gap-1 overflow-visible pr-1 @4xl:w-auto @4xl:gap-1.5 @5xl:pr-2">
+    <div className="relative z-50 flex min-w-0 flex-1 flex-nowrap items-center gap-1 overflow-x-auto overflow-y-visible pr-1 @4xl:flex-none @4xl:overflow-visible @4xl:gap-1.5 @5xl:pr-2">
       {metricEntries.map(([key, series]) => (
         <div
           key={key}
           className={clsx(
-            'relative z-0 flex h-8 shrink-0 items-center gap-1.5 overflow-visible rounded-lg border px-2 shadow-sm backdrop-blur-sm transition-colors hover:z-[80] focus-within:z-[80] @4xl:h-9 @4xl:gap-2 @4xl:px-2.5',
+            'relative z-0 flex h-8 shrink-0 items-center gap-1 overflow-visible rounded-lg border px-2 shadow-sm backdrop-blur-sm transition-colors hover:z-[80] focus-within:z-[80] @4xl:h-9 @4xl:gap-2 @4xl:px-2.5',
             theme === 'dark'
               ? 'border-white/10 bg-white/[0.06] shadow-black/10 hover:bg-white/[0.09]'
               : 'border-slate-200/70 bg-white/70 shadow-slate-950/5 hover:bg-white/90'

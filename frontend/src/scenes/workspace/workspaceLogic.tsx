@@ -117,6 +117,28 @@ function isWorkspaceRoutePathForFrame(pathname: string, frameId: number): boolea
   )
 }
 
+function pathNumberAfterToken(pathname: string, tokenizedPath: string, token: string): number | null {
+  const tokenIndex = tokenizedPath.indexOf(token)
+  if (tokenIndex === -1) {
+    return null
+  }
+  const prefix = tokenizedPath.slice(0, tokenIndex)
+  if (!pathname.startsWith(prefix)) {
+    return null
+  }
+  const rawValue = pathname.slice(prefix.length).split('/')[0]
+  const parsedValue = Number(rawValue)
+  return Number.isFinite(parsedValue) ? parsedValue : null
+}
+
+function frameIdFromWorkspacePath(pathname: string): number | null {
+  return (
+    pathNumberAfterToken(pathname, urls.frame(':frameId'), ':frameId') ??
+    pathNumberAfterToken(pathname, urls.scenes(':frameId'), ':frameId') ??
+    pathNumberAfterToken(pathname, urls.apps(':frameId'), ':frameId')
+  )
+}
+
 function drawerPathForFrame(frameId: number): string {
   const pathname = router.values.location.pathname
   if (
@@ -143,7 +165,7 @@ function drawerUrlForFrame(
   if (!isFrameRoutePathForFrame(pathname, frameId)) {
     search.frameId = String(frameId)
   }
-  return [pathname, search, router.values.hashParams]
+  return [pathname, search, utilityDrawerClosedHash()]
 }
 
 function clearDrawerUrl(): [string, Record<string, unknown>, Record<string, unknown>] {
@@ -205,9 +227,97 @@ function applyWorkspaceTheme(theme: WorkspaceTheme): void {
 }
 
 const MOBILE_WORKSPACE_MEDIA_QUERY = '(max-width: 1023px)'
+const SECONDARY_SIDEBAR_HASH_KEY = 'workspaceSidebar'
+const SECONDARY_SIDEBAR_HASH_VALUE = 'open'
+const UTILITY_DRAWER_HASH_KEY = 'workspaceDrawer'
+const sceneUtilityPanels = [
+  'state',
+  'stateVariables',
+  'apps',
+  'events',
+  'source',
+  'json',
+] as const satisfies readonly WorkspaceUtilityPanel[]
+
+type SceneUtilityPanel = (typeof sceneUtilityPanels)[number]
+
+const sceneUtilityPanelHashValues: Record<SceneUtilityPanel, string> = {
+  state: 'preview',
+  stateVariables: 'stateVariables',
+  apps: 'apps',
+  events: 'events',
+  source: 'source',
+  json: 'json',
+}
 
 export function isMobileWorkspaceViewport(): boolean {
   return typeof window !== 'undefined' && window.matchMedia?.(MOBILE_WORKSPACE_MEDIA_QUERY).matches
+}
+
+function secondarySidebarHashIsOpen(hash: Record<string, unknown> = router.values.hashParams): boolean {
+  return searchValue(hash, SECONDARY_SIDEBAR_HASH_KEY) === SECONDARY_SIDEBAR_HASH_VALUE
+}
+
+function secondarySidebarOpenHash(hash: Record<string, unknown> = router.values.hashParams): Record<string, unknown> {
+  return { ...hash, [SECONDARY_SIDEBAR_HASH_KEY]: SECONDARY_SIDEBAR_HASH_VALUE }
+}
+
+function secondarySidebarClosedHash(hash: Record<string, unknown> = router.values.hashParams): Record<string, unknown> {
+  const nextHash = { ...hash }
+  delete nextHash[SECONDARY_SIDEBAR_HASH_KEY]
+  return nextHash
+}
+
+function syncSecondarySidebarHash(open: boolean): void {
+  if (!isMobileWorkspaceViewport()) {
+    return
+  }
+
+  const hashOpen = secondarySidebarHashIsOpen()
+  if (open && !hashOpen) {
+    router.actions.push(router.values.location.pathname, router.values.searchParams, secondarySidebarOpenHash())
+  } else if (!open && hashOpen) {
+    router.actions.replace(router.values.location.pathname, router.values.searchParams, secondarySidebarClosedHash())
+  }
+}
+
+function isSceneUtilityPanel(panel: unknown): panel is SceneUtilityPanel {
+  return typeof panel === 'string' && (sceneUtilityPanels as readonly string[]).includes(panel)
+}
+
+function sceneUtilityPanelFromHashValue(value: string | null): SceneUtilityPanel | null {
+  if (value === 'preview') {
+    return 'state'
+  }
+  return isSceneUtilityPanel(value) ? value : null
+}
+
+function utilityDrawerHashPanel(hash: Record<string, unknown> = router.values.hashParams): SceneUtilityPanel | null {
+  return sceneUtilityPanelFromHashValue(searchValue(hash, UTILITY_DRAWER_HASH_KEY))
+}
+
+function utilityDrawerOpenHash(
+  panel: SceneUtilityPanel,
+  hash: Record<string, unknown> = router.values.hashParams
+): Record<string, unknown> {
+  return { ...hash, [UTILITY_DRAWER_HASH_KEY]: sceneUtilityPanelHashValues[panel] }
+}
+
+function utilityDrawerClosedHash(hash: Record<string, unknown> = router.values.hashParams): Record<string, unknown> {
+  const nextHash = { ...hash }
+  delete nextHash[UTILITY_DRAWER_HASH_KEY]
+  return nextHash
+}
+
+function workspaceContentNavigationHash(
+  hash: Record<string, unknown> = router.values.hashParams
+): Record<string, unknown> {
+  return secondarySidebarClosedHash(hash)
+}
+
+function isSceneRoutePath(pathname: string = router.values.location.pathname): boolean {
+  const scenesPath = urls.scenes()
+  return pathname === scenesPath || pathname.startsWith(`${scenesPath}/`)
 }
 
 function sceneMatchesSearch(scene: FrameScene, search: string): boolean {
@@ -826,6 +936,15 @@ export const workspaceLogic = kea<workspaceLogicType>([
     }
 
     return {
+      openSecondarySidebar: () => {
+        syncSecondarySidebarHash(true)
+      },
+      closeSecondarySidebar: () => {
+        syncSecondarySidebarHash(false)
+      },
+      toggleSecondarySidebar: () => {
+        syncSecondarySidebarHash(values.secondarySidebarOpen)
+      },
       openSceneControl: ({ frameId, sceneId }) => {
         newFrameForm.actions.hideForm()
         if (isMobileWorkspaceViewport()) {
@@ -852,9 +971,17 @@ export const workspaceLogic = kea<workspaceLogicType>([
         applyWorkspaceTheme(values.theme)
       },
       focusFrame: ({ frameId }) => {
-        window.requestAnimationFrame(() => {
-          document.getElementById(`workspace-frame-${frameId}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-        })
+        const scrollToFrame = (attempt = 0) => {
+          const frameElement = document.getElementById(`workspace-frame-${frameId}`)
+          if (frameElement) {
+            frameElement.scrollIntoView({ behavior: 'smooth', block: 'start' })
+            return
+          }
+          if (attempt < 20) {
+            window.setTimeout(() => scrollToFrame(attempt + 1), 50)
+          }
+        }
+        window.requestAnimationFrame(() => scrollToFrame())
       },
       navigateToFrame: ({ frameId }) => {
         actions.selectFrame(frameId)
@@ -866,11 +993,11 @@ export const workspaceLogic = kea<workspaceLogicType>([
       },
       navigateToSceneFrame: ({ frameId }) => {
         actions.selectFrame(frameId)
-        router.actions.push(urls.scenes(frameId))
+        router.actions.push(urls.scenes(frameId), undefined, workspaceContentNavigationHash())
       },
       navigateToScene: ({ frameId, sceneId }) => {
         actions.setRouteSelection(frameId, sceneId)
-        router.actions.push(urls.scenes(frameId, sceneId))
+        router.actions.push(urls.scenes(frameId, sceneId), undefined, workspaceContentNavigationHash())
       },
       snapshotFrameOrder: () => {
         const rankedFrames = rankFramesForSnapshot(values.framesList)
@@ -882,9 +1009,28 @@ export const workspaceLogic = kea<workspaceLogicType>([
     }
   }),
   urlToAction(({ actions, values }) => {
-    const closeSecondarySidebarForMobile = () => {
-      if (isMobileWorkspaceViewport()) {
+    const syncSecondarySidebarFromHashForMobile = (hash: Record<string, unknown> = router.values.hashParams) => {
+      if (!isMobileWorkspaceViewport()) {
+        return
+      }
+      if (secondarySidebarHashIsOpen(hash)) {
+        actions.openSecondarySidebar()
+      } else {
         actions.closeSecondarySidebar()
+      }
+    }
+    const applyUtilityDrawerFromHash = (
+      hash: Record<string, unknown>,
+      payload: { initial?: boolean },
+      previousLocation: { hashParams?: Record<string, unknown> }
+    ) => {
+      const panel = utilityDrawerHashPanel(hash)
+      if (panel) {
+        actions.openUtilityPanel(panel)
+        return
+      }
+      if (!payload.initial && utilityDrawerHashPanel(previousLocation.hashParams ?? {})) {
+        actions.closeUtilityPanel()
       }
     }
     const closeDrawersFromUrl = () => {
@@ -923,21 +1069,42 @@ export const workspaceLogic = kea<workspaceLogicType>([
       }
     }
 
-    const applyFramesRoute = (_: Record<string, unknown>, search: Record<string, unknown>) => {
-      closeSecondarySidebarForMobile()
-      applyDrawerFromSearch(drawerFrameIdFromSearch(search), search)
+    const applyFramesRoute = (
+      _: Record<string, unknown>,
+      search: Record<string, unknown>,
+      hash: Record<string, unknown>,
+      payload: { initial?: boolean },
+      previousLocation: { pathname: string }
+    ) => {
+      syncSecondarySidebarFromHashForMobile(hash)
+      const drawerFrameId = drawerFrameIdFromSearch(search)
+      applyDrawerFromSearch(drawerFrameId, search)
+      const previousFrameId = frameIdFromWorkspacePath(previousLocation.pathname)
+      if (!payload.initial && !drawerFrameId && previousFrameId) {
+        actions.focusFrame(previousFrameId)
+      }
     }
-    const applySceneOrAppRoute = ({ frameId, sceneId }: Record<string, unknown>, search: Record<string, unknown>) => {
-      closeSecondarySidebarForMobile()
+    const applySceneOrAppRoute = (
+      { frameId, sceneId }: Record<string, unknown>,
+      search: Record<string, unknown>,
+      hash: Record<string, unknown>,
+      payload: { pathname: string; initial?: boolean },
+      previousLocation: { hashParams?: Record<string, unknown> }
+    ) => {
+      syncSecondarySidebarFromHashForMobile(hash)
       const validFrameId = Number(frameId)
       const validSceneId = typeof sceneId === 'string' ? sceneId : null
 
       if (Number.isFinite(validFrameId)) {
         actions.setRouteSelection(validFrameId, validSceneId)
+        const drawer = searchValue(search, 'drawer')
         applyDrawerFromSearch(validFrameId, {
           ...search,
           sceneId: searchValue(search, 'sceneId') ?? validSceneId ?? undefined,
         })
+        if (!drawer && isSceneRoutePath(payload.pathname)) {
+          applyUtilityDrawerFromHash(hash, payload, previousLocation)
+        }
       } else {
         closeDrawersFromUrl()
       }
@@ -947,8 +1114,8 @@ export const workspaceLogic = kea<workspaceLogicType>([
     return {
       [framesPath]: applyFramesRoute,
       [`${framesPath.replace(/\/$/, '')}/`]: applyFramesRoute,
-      [urls.frame(':id')]: ({ id }, search) => {
-        closeSecondarySidebarForMobile()
+      [urls.frame(':id')]: ({ id }, search, hash) => {
+        syncSecondarySidebarFromHashForMobile(hash)
         const frameId = parseInt(String(id), 10)
         const validFrameId = Number.isFinite(frameId) ? frameId : null
         if (validFrameId) {
@@ -973,14 +1140,34 @@ export const workspaceLogic = kea<workspaceLogicType>([
     openScheduleDrawer: (payload: Record<string, any>) => [
       urls.frame(Number(payload.frameId)),
       { ...clearDrawerSearchParams(router.values.searchParams), tool: 'schedule' },
-      router.values.hashParams,
+      utilityDrawerClosedHash(),
     ],
     closeScheduleDrawer: clearDrawerUrl,
     openChatDrawer: (payload: Record<string, any>) =>
       drawerUrlForFrame(Number(payload.frameId), 'chat', payload.sceneId ? { sceneId: String(payload.sceneId) } : {}),
     closeChatDrawer: clearDrawerUrl,
+    openUtilityPanel: (payload: Record<string, any>) => {
+      const panel = payload.panel
+      if (!isSceneRoutePath() || !isSceneUtilityPanel(panel)) {
+        return undefined
+      }
+      return [
+        router.values.location.pathname,
+        clearDrawerSearchParams(router.values.searchParams),
+        utilityDrawerOpenHash(panel),
+      ]
+    },
+    closeUtilityPanel: () => {
+      if (!isSceneRoutePath() || !utilityDrawerHashPanel()) {
+        return undefined
+      }
+      return [router.values.location.pathname, router.values.searchParams, utilityDrawerClosedHash(), { replace: true }]
+    },
   })),
-  afterMount(({ values }) => {
+  afterMount(({ actions, values }) => {
     applyWorkspaceTheme(values.theme)
+    if (isMobileWorkspaceViewport() && secondarySidebarHashIsOpen()) {
+      actions.openSecondarySidebar()
+    }
   }),
 ])

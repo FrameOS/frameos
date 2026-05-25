@@ -645,9 +645,18 @@ export interface SSHKeyEntry {
   use_for_new_frames?: boolean
 }
 
+export interface FrameStateCacheInfo {
+  cached: boolean
+  refreshing: boolean
+  fetched_at?: number | null
+  refresh_after?: number | null
+  retry_after?: number | null
+}
+
 export interface FrameStateRecord {
   sceneId: string
   states: Record<string, Record<string, any>>
+  cache?: FrameStateCacheInfo
 }
 
 export interface FrameUploadedScenesRecord {

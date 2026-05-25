@@ -1011,6 +1011,14 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
   max-width: calc(100vw - 40px);
 }
 
+.workspace-unsaved-header-button {
+  margin-bottom: 1rem;
+}
+
+.workspace-unsaved-header-label {
+  display: none;
+}
+
 .scene-add-nodes-button {
   left: calc(var(--workspace-main-offset, 0px) + 1.5rem);
 }
@@ -1033,6 +1041,28 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
   z-index: 20;
 }
 
+.logs-filter-toolbar-floating {
+  position: fixed;
+  top: 1.5rem;
+  right: 5.5rem;
+  left: var(--workspace-terminal-left);
+  z-index: 30;
+  margin-bottom: 0;
+  padding: 0.75rem;
+  border: 1px solid var(--tool-border);
+  border-radius: 1rem;
+  background: var(--tool-bg-strong);
+  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.14);
+  backdrop-filter: blur(16px);
+}
+
+.logs-menu-button-floating {
+  position: fixed;
+  top: 1.5rem;
+  right: 2rem;
+  z-index: 30;
+}
+
 .workspace-main-with-right-panel .terminal-command-bar {
   right: 520px;
 }
@@ -1041,9 +1071,20 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
   right: 520px;
 }
 
+.workspace-main-with-right-panel .logs-filter-toolbar-floating {
+  right: calc(520px + 3.5rem);
+}
+
+.workspace-main-with-right-panel .logs-menu-button-floating {
+  right: 520px;
+}
+
 @container workspace-main (max-width: 89.9375rem) {
-  .workspace-main-with-right-panel .terminal-command-bar,
-  .workspace-main-with-right-panel .terminal-scroll-latest-button {
+  .workspace-main-with-right-panel .logs-filter-toolbar-floating {
+    right: 5rem;
+  }
+
+  .workspace-main-with-right-panel .logs-menu-button-floating {
     right: 1.5rem;
   }
 
@@ -1073,8 +1114,20 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
     bottom: 10rem;
   }
 
-  .workspace-main-with-right-panel .terminal-command-bar,
-  .workspace-main-with-right-panel .terminal-scroll-latest-button {
+  .logs-filter-toolbar-floating {
+    right: 4.5rem;
+    left: var(--workspace-terminal-left-narrow);
+  }
+
+  .logs-menu-button-floating {
+    right: 1rem;
+  }
+
+  .workspace-main-with-right-panel .logs-filter-toolbar-floating {
+    right: 4.5rem;
+  }
+
+  .workspace-main-with-right-panel .logs-menu-button-floating {
     right: 1rem;
   }
 
@@ -1101,6 +1154,16 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
   }
 
   .terminal-scroll-latest-button {
+    right: 0.75rem;
+  }
+
+  .logs-filter-toolbar-floating {
+    right: 4.25rem;
+    left: var(--workspace-terminal-left-compact);
+    border-radius: 0.875rem;
+  }
+
+  .logs-menu-button-floating {
     right: 0.75rem;
   }
 
@@ -1144,11 +1207,27 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
     --workspace-terminal-left-narrow: 1rem;
     --workspace-terminal-left-compact: 0.75rem;
     padding-left: 1rem;
-    padding-top: 5.5rem;
+    padding-top: 5.75rem !important;
   }
 
   .workspace-main-with-right-panel {
     padding-right: 1rem;
+  }
+
+  .workspace-main-with-right-panel .terminal-command-bar,
+  .workspace-main-with-right-panel .terminal-scroll-latest-button {
+    right: 1rem;
+  }
+
+  .logs-filter-toolbar-floating {
+    top: 5rem;
+    left: 1rem;
+    right: 4.5rem;
+  }
+
+  .logs-menu-button-floating {
+    top: 5rem;
+    right: 1rem;
   }
 
   .workspace-sidebar .frameos-rail {
@@ -1171,6 +1250,14 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
   .workspace-sidebar .workspace-theme-button {
     margin-bottom: 0;
     flex-shrink: 0;
+  }
+
+  .workspace-unsaved-header-button {
+    margin-bottom: 0;
+  }
+
+  .workspace-unsaved-header-label {
+    display: inline;
   }
 
   .workspace-sidebar nav {
@@ -1204,7 +1291,7 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
     --workspace-terminal-left-compact: 0.75rem;
     padding-left: 0.75rem;
     padding-right: 0.75rem;
-    padding-top: 4.75rem;
+    padding-top: 5.25rem !important;
   }
 
   .workspace-sidebar,
@@ -1240,6 +1327,16 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
     gap: 0.375rem;
   }
 
+  .workspace-unsaved-header-button {
+    width: 2.75rem;
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  .workspace-unsaved-header-label {
+    display: none;
+  }
+
   .workspace-drawer {
     top: 4.75rem;
     right: 0.5rem;
@@ -1252,6 +1349,18 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
 
   .workspace-drawer .frameos-divider.w-\[72px\] {
     width: 3.75rem;
+  }
+
+  .logs-filter-toolbar-floating {
+    top: 4.5rem;
+    left: 0.75rem;
+    right: 4.25rem;
+    padding: 0.625rem;
+  }
+
+  .logs-menu-button-floating {
+    top: 4.5rem;
+    right: 0.75rem;
   }
 }
 
@@ -1320,6 +1429,7 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
   .scene-workspace-main.workspace-main-with-right-panel {
     padding-left: 0;
     padding-right: 0;
+    padding-top: 0 !important;
   }
 }
 

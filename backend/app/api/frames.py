@@ -115,6 +115,10 @@ FRAME_ASSETS_CACHE_REFRESH_AFTER_SECONDS = 20
 FRAME_ASSETS_CACHE_RETRY_AFTER_SECONDS = 2
 FRAME_ASSETS_CACHE_LOCK_SECONDS = 60
 FRAME_ASSETS_CACHE_TTL_SECONDS = 86400 * 30
+FRAME_STATES_CACHE_REFRESH_AFTER_SECONDS = 5
+FRAME_STATES_CACHE_RETRY_AFTER_SECONDS = 5
+FRAME_STATES_CACHE_LOCK_SECONDS = 30
+FRAME_STATES_CACHE_TTL_SECONDS = 86400 * 30
 
 
 def _not_found():
@@ -138,6 +142,18 @@ def _frame_assets_cache_lock_key(frame_id: int, assets_path: str) -> str:
 def _frame_assets_cache_invalidated_key(frame_id: int, assets_path: str) -> str:
     path_hash = hashlib.sha1(assets_path.encode()).hexdigest()
     return f"frame:{frame_id}:assets:list:{path_hash}:invalidated"
+
+
+def _frame_states_cache_key(frame_id: int) -> str:
+    return f"frame:{frame_id}:states"
+
+
+def _frame_states_cache_lock_key(frame_id: int) -> str:
+    return f"frame:{frame_id}:states:refreshing"
+
+
+def _frame_states_cache_invalidated_key(frame_id: int) -> str:
+    return f"frame:{frame_id}:states:invalidated"
 
 
 async def _read_frame_assets_cache(redis: Redis, cache_key: str) -> dict[str, Any] | None:
@@ -178,6 +194,72 @@ async def _invalidate_frame_assets_cache(redis: Redis, frame: Frame, assets_path
     await redis.delete(
         _frame_assets_cache_key(frame.id, assets_path),
         _frame_assets_cache_lock_key(frame.id, assets_path),
+    )
+
+
+def _normalise_frame_states_payload(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        return {"sceneId": "", "states": {}}
+
+    scene_id = payload.get("sceneId")
+    if scene_id is None:
+        scene_id = ""
+    elif not isinstance(scene_id, str):
+        scene_id = str(scene_id)
+
+    states = payload.get("states")
+    if not isinstance(states, dict):
+        state = payload.get("state")
+        states = {scene_id: state} if scene_id and isinstance(state, dict) else {}
+
+    return {"sceneId": scene_id, "states": states}
+
+
+async def _read_frame_states_cache(redis: Redis, cache_key: str) -> dict[str, Any] | None:
+    cached = await redis.get(cache_key)
+    if not cached:
+        return None
+    try:
+        payload = json.loads(cached.decode() if isinstance(cached, bytes) else cached)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict) or not isinstance(payload.get("states"), dict):
+        return None
+    return payload
+
+
+async def _write_frame_states_cache(
+    redis: Redis,
+    cache_key: str,
+    state_record: dict[str, Any],
+    *,
+    fetched_at: float | None = None,
+) -> float:
+    cache_time = fetched_at if fetched_at is not None else time.time()
+    payload = {**_normalise_frame_states_payload(state_record), "fetched_at": cache_time}
+    await redis.set(cache_key, json.dumps(payload).encode(), ex=FRAME_STATES_CACHE_TTL_SECONDS)
+    return cache_time
+
+
+async def _mark_frame_states_cache_stale(
+    redis: Redis,
+    frame: Frame,
+    *,
+    scene_id: str | None = None,
+) -> None:
+    cache_key = _frame_states_cache_key(frame.id)
+    if scene_id:
+        await redis.set(f"frame:{frame.id}:active_scene", scene_id)
+    cached = await _read_frame_states_cache(redis, cache_key)
+    if cached is not None:
+        payload = _normalise_frame_states_payload(cached)
+        if scene_id:
+            payload["sceneId"] = scene_id
+        await _write_frame_states_cache(redis, cache_key, payload, fetched_at=0)
+    await redis.set(
+        _frame_states_cache_invalidated_key(frame.id),
+        str(time.time()),
+        ex=FRAME_STATES_CACHE_TTL_SECONDS,
     )
 
 
@@ -533,6 +615,106 @@ async def _forward_frame_request(
     )
 
 
+async def _load_frame_states(redis: Redis, frame: Frame) -> dict[str, Any]:
+    try:
+        return _normalise_frame_states_payload(
+            await _forward_frame_request(frame, redis, path="/states")
+        )
+    except HTTPException:
+        state = await _forward_frame_request(frame, redis, path="/state")
+        return _normalise_frame_states_payload(state)
+
+
+async def _refresh_frame_states_cache(
+    frame_id: int,
+    cache_key: str,
+    lock_key: str,
+    invalidated_key: str,
+    started_at: float,
+) -> None:
+    redis = create_redis_connection()
+    db = SessionLocal()
+    completed = False
+    try:
+        frame = db.get(Frame, frame_id)
+        if frame is None:
+            return
+        state_record = await _load_frame_states(redis, frame)
+        invalidated_at = await redis.get(invalidated_key)
+        if invalidated_at:
+            invalidated_at = (
+                invalidated_at.decode()
+                if isinstance(invalidated_at, bytes)
+                else invalidated_at
+            )
+            with contextlib.suppress(TypeError, ValueError):
+                if float(invalidated_at) > started_at:
+                    completed = True
+                    return
+        await _write_frame_states_cache(redis, cache_key, state_record)
+        if state_record.get("sceneId"):
+            await redis.set(f"frame:{frame.id}:active_scene", state_record["sceneId"])
+        completed = True
+    except Exception:
+        # Keep serving the previous cached state. The lock TTL throttles retries.
+        pass
+    finally:
+        if completed:
+            with contextlib.suppress(Exception):
+                await redis.delete(lock_key)
+        db.close()
+        await close_redis_connection(redis)
+
+
+async def _schedule_frame_states_cache_refresh(
+    background_tasks: BackgroundTasks,
+    redis: Redis,
+    frame_id: int,
+    cache_key: str,
+    lock_key: str,
+) -> bool:
+    invalidated_key = _frame_states_cache_invalidated_key(frame_id)
+    started_at = time.time()
+    acquired = await redis.set(
+        lock_key,
+        "1",
+        ex=FRAME_STATES_CACHE_LOCK_SECONDS,
+        nx=True,
+    )
+    if acquired:
+        background_tasks.add_task(
+            _refresh_frame_states_cache,
+            frame_id,
+            cache_key,
+            lock_key,
+            invalidated_key,
+            started_at,
+        )
+    return True
+
+
+def _frame_states_cache_meta(
+    *,
+    cached: bool,
+    refreshing: bool,
+    fetched_at: float | None,
+) -> dict[str, Any]:
+    return {
+        "cached": cached,
+        "refreshing": refreshing,
+        "fetched_at": fetched_at,
+        "refresh_after": FRAME_STATES_CACHE_REFRESH_AFTER_SECONDS,
+        "retry_after": FRAME_STATES_CACHE_RETRY_AFTER_SECONDS,
+    }
+
+
+async def _active_scene_id_from_cache(redis: Redis, frame_id: int) -> str:
+    active_scene = await redis.get(f"frame:{frame_id}:active_scene")
+    if not active_scene:
+        return ""
+    return active_scene.decode() if isinstance(active_scene, bytes) else str(active_scene)
+
+
 async def _remote_file_md5(
     db: Session,
     redis: Redis,
@@ -659,18 +841,56 @@ async def api_frame_get_state(
 
 @api_with_auth.get("/frames/{id:int}/states", response_model=FrameStateResponse)
 async def api_frame_get_states(
-    id: int, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)
+    id: int,
+    background_tasks: BackgroundTasks,
+    refresh: bool = Query(False),
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
 ):
     frame = db.get(Frame, id) or _not_found()
-    states = await _forward_frame_request(
-        frame,
+    cache_key = _frame_states_cache_key(frame.id)
+    lock_key = _frame_states_cache_lock_key(frame.id)
+    cached = await _read_frame_states_cache(redis, cache_key)
+
+    if cached is not None:
+        fetched_at = float(cached.get("fetched_at") or 0)
+        refreshing = refresh or time.time() - fetched_at >= FRAME_STATES_CACHE_REFRESH_AFTER_SECONDS
+        if refreshing:
+            refreshing = await _schedule_frame_states_cache_refresh(
+                background_tasks,
+                redis,
+                frame.id,
+                cache_key,
+                lock_key,
+            )
+        state_record = _normalise_frame_states_payload(cached)
+        if state_record.get("sceneId"):
+            await redis.set(f"frame:{frame.id}:active_scene", state_record["sceneId"])
+        return {
+            **state_record,
+            "cache": _frame_states_cache_meta(
+                cached=True,
+                refreshing=refreshing,
+                fetched_at=fetched_at,
+            ),
+        }
+
+    refreshing = await _schedule_frame_states_cache_refresh(
+        background_tasks,
         redis,
-        path="/states",
-        cache_key=f"frame:{frame.frame_host}:{frame.frame_port}:states",
+        frame.id,
+        cache_key,
+        lock_key,
     )
-    if isinstance(states, dict) and states.get("sceneId"):
-        await redis.set(f"frame:{frame.id}:active_scene", states["sceneId"])
-    return states
+    return {
+        "sceneId": await _active_scene_id_from_cache(redis, frame.id),
+        "states": {},
+        "cache": _frame_states_cache_meta(
+            cached=False,
+            refreshing=refreshing,
+            fetched_at=None,
+        ),
+    }
 
 
 @api_with_auth.get(
@@ -788,6 +1008,13 @@ async def api_frame_event(
         await _forward_frame_request(
             frame, redis, path=f"/event/{event}", method="POST", json_body=body
         )
+        if event in {"setCurrentScene", "setSceneState", "uploadScenes"}:
+            scene_id = body.get("sceneId") if isinstance(body, dict) else None
+            await _mark_frame_states_cache_stale(
+                redis,
+                frame,
+                scene_id=scene_id if isinstance(scene_id, str) else None,
+            )
         return "OK"
     except HTTPException as exc:
         await log(
@@ -818,6 +1045,11 @@ async def api_frame_upload_scenes(
     try:
         await _forward_frame_request(
             frame, redis, path="/uploadScenes", method="POST", json_body=body
+        )
+        await _mark_frame_states_cache_stale(
+            redis,
+            frame,
+            scene_id=scene_id if isinstance(scene_id, str) else None,
         )
         return "OK"
     except HTTPException as exc:
