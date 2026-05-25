@@ -15,7 +15,7 @@ const frameTools = [
   { label: 'Schedule redirect', path: '/frames/1?tool=schedule', text: /Schedule/i },
 ] as const
 
-const sceneUtilityDrawers = ['Preview', 'Apps', 'Events', 'Source', 'JSON'] as const
+const sceneUtilityDrawers = ['Preview', 'State variables', 'Apps', 'Events', 'JSON'] as const
 
 const frameSettingsSections = [
   ['Info', 'frame-settings-info'],
@@ -40,10 +40,13 @@ const globalSettingsSections = [
   ['SSH Keys', 'settings-ssh'],
   ['FrameOS Gallery', 'settings-gallery'],
   ['OpenAI', 'settings-openai'],
-  ['Integrations', 'settings-integrations'],
-  ['Build Host', 'settings-build-host'],
-  ['System Info', 'settings-system'],
-  ['Fonts', 'settings-fonts'],
+  ['PostHog', 'settings-posthog'],
+  ['Home Assistant', 'settings-home-assistant'],
+  ['GitHub', 'settings-github'],
+  ['Unsplash API', 'settings-unsplash'],
+  ['Cross-compilation build host', 'settings-build-host'],
+  ['System information', 'settings-system'],
+  ['Custom fonts', 'settings-fonts'],
 ] as const
 
 function escapeRegex(value: string): string {
@@ -121,12 +124,15 @@ test.describe('backend frontend e2e coverage @e2e', () => {
     await page.goto('/frames/1?tool=scenes', { waitUntil: 'domcontentloaded' })
     await settleForScreenshot(page)
 
-    await expect(page.locator('.workspace-sidebar')).toHaveCount(0)
-    await expect(page.getByRole('button', { name: /Open menu/i })).toBeVisible()
-
-    await page.getByRole('button', { name: /Open menu/i }).click()
     const sidebar = page.locator('.workspace-sidebar').first()
     await expect(sidebar).toBeVisible()
+    await expect(sidebar).toHaveClass(/workspace-sidebar-collapsed/)
+
+    const activeFrameNav = page.locator('.frameos-nav-button[title="Frame"]')
+    await expect(activeFrameNav).toBeVisible()
+    await activeFrameNav.click()
+    await expect(sidebar).toBeVisible()
+    await expect(sidebar).not.toHaveClass(/workspace-sidebar-collapsed/)
     await expect(sidebar).toHaveCSS('position', 'fixed')
 
     const sidebarBox = await sidebar.boundingBox()
@@ -136,13 +142,13 @@ test.describe('backend frontend e2e coverage @e2e', () => {
     expect(Math.round(sidebarBox?.height ?? 0)).toBe(844)
 
     await page.goBack()
-    await expect(page.locator('.workspace-sidebar')).toHaveCount(0)
+    await expect(sidebar).toHaveClass(/workspace-sidebar-collapsed/)
     await expect(page).toHaveURL(/\/frames\/1\?tool=scenes$/)
 
-    await page.getByRole('button', { name: /Open menu/i }).click()
+    await activeFrameNav.click()
     await expect(sidebar).toBeVisible()
-    await page.locator('button[title="Close menu"]').click()
-    await expect(page.locator('.workspace-sidebar')).toHaveCount(0)
+    await page.locator('.frameos-nav-button[title="Hide frame panel"]').click()
+    await expect(sidebar).toHaveClass(/workspace-sidebar-collapsed/)
     await expect(page).toHaveURL(/\/frames\/1\?tool=scenes$/)
 
     expectNoFrontendErrors(readErrors)

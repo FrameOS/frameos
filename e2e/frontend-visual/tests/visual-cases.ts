@@ -36,40 +36,6 @@ export const visualViewports: VisualViewport[] = [
   { name: 'full', width: 1440, height: 1000 },
 ]
 
-async function openScheduleDrawer(page: Page): Promise<void> {
-  await page
-    .getByRole('button', { name: /^Schedule$/ })
-    .first()
-    .click()
-  await page
-    .getByRole('heading', { name: /Schedule|Scene schedule/ })
-    .last()
-    .waitFor()
-}
-
-async function openOverviewScheduleDrawer(page: Page): Promise<void> {
-  const headerScheduleButton = page.getByRole('button', { name: /^Schedule$/ }).first()
-  if (await headerScheduleButton.isVisible().catch(() => false)) {
-    await headerScheduleButton.click()
-    await page
-      .getByRole('heading', { name: /Schedule|Scene schedule/ })
-      .last()
-      .waitFor()
-    return
-  }
-
-  const scheduleCard = page
-    .locator('div')
-    .filter({ has: page.getByText(/^Schedule$/) })
-    .filter({ has: page.getByRole('button', { name: /^Open$/ }) })
-    .first()
-  await scheduleCard.getByRole('button', { name: /^Open$/ }).click()
-  await page
-    .getByRole('heading', { name: /Schedule|Scene schedule/ })
-    .last()
-    .waitFor()
-}
-
 async function openSceneWorkspaceUtilityDrawer(page: Page, label: string): Promise<void> {
   const heading = page.getByRole('heading', { name: new RegExp(`^${label}$`, 'i') }).last()
   if (await heading.isVisible().catch(() => false)) {
@@ -95,10 +61,6 @@ async function openSceneWorkspaceAppsDrawer(page: Page): Promise<void> {
 
 async function openSceneWorkspaceEventsDrawer(page: Page): Promise<void> {
   await openSceneWorkspaceUtilityDrawer(page, 'Events')
-}
-
-async function openSceneWorkspaceSourceDrawer(page: Page): Promise<void> {
-  await openSceneWorkspaceUtilityDrawer(page, 'Source')
 }
 
 async function openSceneWorkspaceJsonDrawer(page: Page): Promise<void> {
@@ -226,7 +188,7 @@ export const visualCases: VisualCase[] = [
     title: 'Frame overview',
     path: '/frames/1?tool=overview',
     fullPage: true,
-    variants: [{ id: 'default' }, { id: 'schedule-drawer', prepare: openOverviewScheduleDrawer }],
+    variants: [{ id: 'default' }],
   },
   {
     id: 'frame-scenes',
@@ -237,7 +199,6 @@ export const visualCases: VisualCase[] = [
       { id: 'default' },
       { id: 'expanded-scene', prepare: expandDashboardScene },
       { id: 'add-scene', prepare: openAddSceneDrawer },
-      { id: 'schedule-drawer', prepare: openScheduleDrawer },
     ],
   },
   {
@@ -324,7 +285,6 @@ export const visualCases: VisualCase[] = [
       { id: 'preview-drawer', prepare: openSceneWorkspacePreviewDrawer },
       { id: 'apps-drawer', prepare: openSceneWorkspaceAppsDrawer },
       { id: 'events-drawer', prepare: openSceneWorkspaceEventsDrawer },
-      { id: 'source-drawer', prepare: openSceneWorkspaceSourceDrawer },
       { id: 'json-drawer', prepare: openSceneWorkspaceJsonDrawer },
     ],
   },
