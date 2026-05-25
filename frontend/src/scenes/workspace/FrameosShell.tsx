@@ -190,21 +190,14 @@ function WorkspaceChatDrawer({ frameId, sceneId }: { frameId: number; sceneId: s
 function DeployToFrameIcon(props: SVGProps<SVGSVGElement>): JSX.Element {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} aria-hidden="true" {...props}>
-      <defs>
-        <clipPath id="deploy-to-frame-arrow-clip">
-          <rect x="0" y="6.5" width="9.4" height="9" />
-        </clipPath>
-      </defs>
       <path
         strokeLinecap="round"
         strokeLinejoin="round"
-        d="M13.75 5.75h5.5a1.5 1.5 0 0 1 1.5 1.5v7.5a1.5 1.5 0 0 1-1.5 1.5h-5.5a1.5 1.5 0 0 1-1.5-1.5v-7.5a1.5 1.5 0 0 1 1.5-1.5Z"
+        d="M5.75 3.75h12.5a1.5 1.5 0 0 1 1.5 1.5v6.5a1.5 1.5 0 0 1-1.5 1.5H5.75a1.5 1.5 0 0 1-1.5-1.5v-6.5a1.5 1.5 0 0 1 1.5-1.5Z"
       />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M15.5 18.75h3" />
-      <g clipPath="url(#deploy-to-frame-arrow-clip)">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M1.25 11h8.25" />
-        <path strokeLinecap="round" strokeLinejoin="round" d="m6.5 8 3 3-3 3" />
-      </g>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9.5 10.25h5" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 21.25v-5" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="m9.25 18.5 2.75-2.75 2.75 2.75" />
     </svg>
   )
 }
