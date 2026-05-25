@@ -80,6 +80,17 @@ function sceneUtilityDefinition(
   return sceneUtilityDefinitions(scene).find((definition) => definition.panel === panel) ?? null
 }
 
+function selectedSceneFirst(scenes: FrameScene[], selectedSceneId: string | null): FrameScene[] {
+  if (!selectedSceneId) {
+    return scenes
+  }
+  const selectedScene = scenes.find((scene) => scene.id === selectedSceneId)
+  if (!selectedScene) {
+    return scenes
+  }
+  return [selectedScene, ...scenes.filter((scene) => scene.id !== selectedSceneId)]
+}
+
 function nodeLabel(nodeData: NodeData | undefined, fallback: string): string {
   if (!nodeData) {
     return fallback
@@ -568,7 +579,7 @@ function SceneCanvas({
   selectedScene: FrameScene | null
   selectedSceneId: string | null
 }): JSX.Element {
-  const { openUtilityPanel, navigateToScene } = useActions(workspaceLogic)
+  const { navigateToScene } = useActions(workspaceLogic)
 
   const handleSceneDragOver = (event: DragEvent<HTMLDivElement>) => {
     if (!hasFrameosSceneDragData(event.dataTransfer)) {
@@ -612,13 +623,6 @@ function SceneCanvas({
     >
       <Diagram sceneId={selectedSceneId} showToolbar={false} />
       <SceneDiagramOverlay frameId={frameId} scene={selectedScene} sceneId={selectedSceneId} />
-      <button
-        type="button"
-        onClick={() => openUtilityPanel('apps')}
-        className="scene-add-nodes-button frameos-primary-action fixed bottom-9 z-20 hidden rounded-lg px-4 py-2 text-sm font-semibold shadow-lg transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 @3xl:block"
-      >
-        Add nodes
-      </button>
     </div>
   )
 }
@@ -649,6 +653,7 @@ function SceneWorkspaceFrame({ frameId }: SceneWorkspaceFrameProps): JSX.Element
   const resolvedSceneId =
     selectedSceneId && scenes.some((scene) => scene.id === selectedSceneId) ? selectedSceneId : scenes[0]?.id ?? null
   const selectedScene = scenes.find((scene) => scene.id === resolvedSceneId) ?? null
+  const sidebarScenes = selectedSceneFirst(scenes, resolvedSceneId)
   const activeUtilityDefinition = sceneUtilityDefinition(utilityPanel, selectedScene)
 
   return (
@@ -661,7 +666,7 @@ function SceneWorkspaceFrame({ frameId }: SceneWorkspaceFrameProps): JSX.Element
             <SceneTree
               frame={frame}
               frames={framesList}
-              scenes={scenes}
+              scenes={sidebarScenes}
               selectedScene={selectedScene}
               selectedSceneId={resolvedSceneId}
               unsavedChanges={unsavedChanges}

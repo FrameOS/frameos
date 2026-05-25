@@ -1,6 +1,7 @@
 import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
 import { A } from 'kea-router'
 import clsx from 'clsx'
+import type { MouseEvent } from 'react'
 import {
   ArchiveBoxIcon,
   ArrowUturnLeftIcon,
@@ -23,7 +24,7 @@ import { frameHost, frameIsHealthy, frameIsStale, frameStatusDescription } from 
 import { urls } from '../../urls'
 import { FrameScene, FrameType } from '../../types'
 import { FrameosShell } from './FrameosShell'
-import { workspaceLogic } from './workspaceLogic'
+import { isMobileWorkspaceViewport, workspaceLogic } from './workspaceLogic'
 import type { OverviewFrameSection, WorkspaceUtilityPanel } from './workspaceLogic'
 import { NewFrame } from '../frames/NewFrame'
 import { newFrameForm } from '../frames/newFrameForm'
@@ -77,7 +78,20 @@ function FrameTree(): JSX.Element {
     orderedArchivedFramesList: archivedFramesList,
     selectedFrameId,
   } = useValues(workspaceLogic)
-  const { selectFrame } = useActions(workspaceLogic)
+  const { closeSecondarySidebar, focusFrame, selectFrame } = useActions(workspaceLogic)
+
+  const handleFrameClick = (event: MouseEvent<HTMLAnchorElement>, frameId: number): void => {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+      return
+    }
+
+    event.preventDefault()
+    selectFrame(frameId)
+    if (isMobileWorkspaceViewport()) {
+      closeSecondarySidebar()
+    }
+    focusFrame(frameId)
+  }
 
   return (
     <div className="space-y-5">
@@ -89,13 +103,13 @@ function FrameTree(): JSX.Element {
             title="Active"
             frames={activeFramesList}
             selectedFrameId={selectedFrameId}
-            onSelect={selectFrame}
+            onSelect={handleFrameClick}
           />
           <FrameTreeGroup
             title="Inactive"
             frames={inactiveFramesList}
             selectedFrameId={selectedFrameId}
-            onSelect={selectFrame}
+            onSelect={handleFrameClick}
             expanded={inactiveFramesExpanded}
             onToggle={toggleInactiveFramesExpanded}
           />
@@ -127,7 +141,7 @@ function FrameTree(): JSX.Element {
                   key={frame.id}
                   href={urls.frame(frame.id, 'overview')}
                   title={`Open ${frame.name || frameHost(frame)} overview`}
-                  onClick={() => selectFrame(frame.id)}
+                  onClick={(event: MouseEvent<HTMLAnchorElement>) => handleFrameClick(event, frame.id)}
                   className={clsx(
                     'frameos-frame-row frameos-frame-row-archived flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
                     selectedFrameId === frame.id ? 'frameos-frame-row-selected' : 'text-slate-500 hover:bg-slate-100'
@@ -182,7 +196,7 @@ function FrameTreeGroup({
   title: string
   frames: FrameType[]
   selectedFrameId: number | null
-  onSelect: (frameId: number | null) => void
+  onSelect: (event: MouseEvent<HTMLAnchorElement>, frameId: number) => void
   expanded?: boolean
   onToggle?: () => void
 }): JSX.Element | null {
@@ -221,7 +235,7 @@ function FrameTreeGroup({
                 key={frame.id}
                 href={urls.frame(frame.id, 'overview')}
                 title={`Open ${frameName} overview`}
-                onClick={() => onSelect(frame.id)}
+                onClick={(event: MouseEvent<HTMLAnchorElement>) => onSelect(event, frame.id)}
                 className={clsx(
                   'frameos-frame-row flex w-full min-w-0 items-center gap-3 rounded-xl px-3 py-2.5 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
                   selectedFrameId === frame.id ? 'frameos-frame-row-selected' : 'text-slate-700 hover:bg-slate-100'
@@ -307,6 +321,7 @@ export function AddSceneTile({ frame, compact = false }: { frame: FrameType; com
       }}
       className={clsx(
         'frameos-primary-hover-text frameos-card group flex shrink-0 flex-col items-center justify-center gap-3 rounded-2xl border border-dashed bg-white/55 text-center text-slate-500 shadow-sm transition hover:-translate-y-0.5 hover:bg-white/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+        'frameos-add-scene-tile',
         active ? activeSurfaceClassName : 'border-slate-300 hover:shadow-lg hover:shadow-slate-300/35',
         compact ? 'h-36 w-36' : 'min-h-36 w-full max-w-40 min-w-0'
       )}
@@ -369,15 +384,14 @@ export function TemplateDrawer(): JSX.Element | null {
 
 function AddSceneDrawerActions({ frame }: { frame: FrameType }): JSX.Element {
   const { createBlankSceneAndSave } = useActions(frameLogic({ frameId: frame.id }))
-  const { closeTemplateDrawer, openChatDrawer } = useActions(workspaceLogic)
+  const { openChatDrawer } = useActions(workspaceLogic)
 
   return (
     <div className="mb-4 grid gap-3">
       <button
         type="button"
         onClick={() => {
-          createBlankSceneAndSave(undefined, true)
-          closeTemplateDrawer()
+          createBlankSceneAndSave(undefined, false, true)
         }}
         className="frameos-card group flex items-center gap-3 rounded-2xl border border-white/90 bg-white/80 px-4 py-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:bg-white hover:shadow-lg hover:shadow-slate-300/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
       >

@@ -186,6 +186,11 @@ export interface ChatDrawerSelection {
   sceneId: string | null
 }
 
+export interface FrameRenameDialog {
+  frameId: number
+  name: string
+}
+
 export interface OverviewFrameSection {
   frame: FrameType
   scenes: FrameScene[]
@@ -590,16 +595,16 @@ function preserveFramesScrollAfterLayoutChange(cache: Record<string, any>): void
   })
 }
 
-function scrollSceneTileIntoView(frameId: number, sceneId: string): void {
+function scrollSceneTileIntoView(frameId: number, sceneId: string): boolean {
   const main = framesMainElement()
   const tile = sceneTileElement(frameId, sceneId)
   if (!tile) {
-    return
+    return false
   }
 
   if (!main || main.scrollHeight <= main.clientHeight) {
     tile.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' })
-    return
+    return true
   }
 
   const margin = 16
@@ -614,6 +619,7 @@ function scrollSceneTileIntoView(frameId: number, sceneId: string): void {
   } else if (bottomOverflow > 0) {
     main.scrollTo({ top: main.scrollTop + bottomOverflow, behavior: 'smooth' })
   }
+  return true
 }
 
 function ensureSceneTileVisibleAfterLayoutChange(frameId: number, sceneId: string, cache: Record<string, any>): void {
@@ -627,14 +633,25 @@ function ensureSceneTileVisibleAfterLayoutChange(frameId: number, sceneId: strin
   if (cache.sceneTileScrollNestedFrame) {
     window.cancelAnimationFrame(cache.sceneTileScrollNestedFrame)
   }
+  if (cache.sceneTileScrollRetryTimer) {
+    window.clearTimeout(cache.sceneTileScrollRetryTimer)
+    cache.sceneTileScrollRetryTimer = null
+  }
 
-  cache.sceneTileScrollFrame = window.requestAnimationFrame(() => {
-    cache.sceneTileScrollNestedFrame = window.requestAnimationFrame(() => {
-      scrollSceneTileIntoView(frameId, sceneId)
-      cache.sceneTileScrollFrame = null
-      cache.sceneTileScrollNestedFrame = null
+  const scheduleScroll = (attempt = 0) => {
+    cache.sceneTileScrollFrame = window.requestAnimationFrame(() => {
+      cache.sceneTileScrollNestedFrame = window.requestAnimationFrame(() => {
+        const didScroll = scrollSceneTileIntoView(frameId, sceneId)
+        cache.sceneTileScrollFrame = null
+        cache.sceneTileScrollNestedFrame = null
+        if (!didScroll && attempt < 20) {
+          cache.sceneTileScrollRetryTimer = window.setTimeout(() => scheduleScroll(attempt + 1), 50)
+        }
+      })
     })
-  })
+  }
+
+  scheduleScroll()
 }
 
 export const workspaceLogic = kea<workspaceLogicType>([
@@ -668,6 +685,9 @@ export const workspaceLogic = kea<workspaceLogicType>([
     openUtilityPanel: (panel: WorkspaceUtilityPanel) => ({ panel }),
     closeUtilityPanel: true,
     selectNode: (nodeId: string | null) => ({ nodeId }),
+    openRenameFrameDialog: (frameId: number, name: string) => ({ frameId, name }),
+    setRenameFrameName: (name: string) => ({ name }),
+    closeRenameFrameDialog: true,
     snapshotFrameOrder: true,
     setFrameOrderSnapshot: (frameIds: number[], activeFrameIds: number[]) => ({ frameIds, activeFrameIds }),
     rememberFrameToolScroll: (frameId: number, panel: WorkspaceUtilityPanel, scrollTop: number) => ({
@@ -707,6 +727,14 @@ export const workspaceLogic = kea<workspaceLogicType>([
       false,
       {
         toggleSceneNodesOpen: (open) => !open,
+      },
+    ],
+    renameFrameDialog: [
+      null as FrameRenameDialog | null,
+      {
+        openRenameFrameDialog: (_, { frameId, name }) => ({ frameId, name }),
+        setRenameFrameName: (state, { name }) => (state ? { ...state, name } : state),
+        closeRenameFrameDialog: () => null,
       },
     ],
     selectedFrameId: [
@@ -1269,6 +1297,17 @@ export const workspaceLogic = kea<workspaceLogicType>([
         cache.mobileWorkspaceQuery.removeEventListener('change', cache.syncScrollGuardForViewport)
       } else {
         cache.mobileWorkspaceQuery?.removeListener?.(cache.syncScrollGuardForViewport)
+      }
+      if (typeof window !== 'undefined') {
+        if (cache.sceneTileScrollFrame) {
+          window.cancelAnimationFrame(cache.sceneTileScrollFrame)
+        }
+        if (cache.sceneTileScrollNestedFrame) {
+          window.cancelAnimationFrame(cache.sceneTileScrollNestedFrame)
+        }
+        if (cache.sceneTileScrollRetryTimer) {
+          window.clearTimeout(cache.sceneTileScrollRetryTimer)
+        }
       }
       applyWorkspaceScrollGuard(false)
     },

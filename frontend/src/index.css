@@ -244,6 +244,16 @@ body.frameos-workspace-scroll-locked {
   box-shadow: 0 0 4px 4px var(--frameos-primary-ring);
 }
 
+.frameos-theme-dark .frameos-add-scene-tile.frameos-active-surface {
+  background: var(--frameos-primary-soft);
+  border-color: var(--frameos-primary-border-strong);
+  box-shadow: 0 0 0 1px var(--frameos-primary-border-strong);
+}
+
+.frameos-theme-dark .frameos-add-scene-tile.frameos-active-surface:hover {
+  box-shadow: 0 0 0 1px var(--frameos-primary-border-strong);
+}
+
 .frameos-primary-drop-target {
   border-color: var(--frameos-primary);
   background: var(--frameos-primary-soft);
@@ -1490,6 +1500,43 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
   .scene-diagram-node-toolbar {
     left: 0.5rem;
     top: 4.25rem;
+  }
+}
+
+@media (max-width: 1023px) {
+  .scene-diagram-utility-buttons {
+    right: 1rem;
+    top: 5.25rem;
+    max-height: calc(100% - 6rem);
+  }
+
+  .scene-diagram-node-toolbar {
+    left: 1rem;
+    top: 5.25rem;
+  }
+
+  .scene-workspace-main.workspace-main-with-right-panel + .workspace-drawer {
+    right: 4.75rem;
+    width: min(430px, calc(100vw - 5.75rem));
+  }
+}
+
+@media (max-width: 639px) {
+  .scene-diagram-utility-buttons {
+    right: 0.5rem;
+    top: 4.75rem;
+    max-height: calc(100% - 5.25rem);
+  }
+
+  .scene-diagram-node-toolbar {
+    left: 0.5rem;
+    top: 8rem;
+  }
+
+  .scene-workspace-main.workspace-main-with-right-panel + .workspace-drawer {
+    left: 0.5rem;
+    right: 3.75rem;
+    width: auto;
   }
 }
 

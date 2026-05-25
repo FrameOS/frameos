@@ -4,8 +4,6 @@ import clsx from 'clsx'
 import type { CSSProperties, MouseEvent } from 'react'
 import {
   ChevronDownIcon,
-  ChevronLeftIcon,
-  ChevronRightIcon,
   ChevronUpIcon,
   Cog6ToothIcon,
   CodeBracketIcon,
@@ -113,11 +111,7 @@ function NavButton({
           ) : (
             <ChevronDownIcon className="h-7 w-7 lg:hidden" />
           )}
-          {sidebarOpen ? (
-            <ChevronLeftIcon className="hidden h-7 w-7 lg:block" />
-          ) : (
-            <ChevronRightIcon className="hidden h-7 w-7 lg:block" />
-          )}
+          <span className="hidden lg:flex">{children}</span>
         </>
       ) : (
         children
@@ -218,7 +212,7 @@ function FrameStatusHeaderButton({ frameId }: { frameId: number }): JSX.Element 
       }}
       className={clsx(
         'workspace-unsaved-header-button flex h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-        unsavedChanges ? 'frameos-warning-button' : 'frameos-primary-outline-action'
+        'frameos-warning-button'
       )}
     >
       <ExclamationTriangleIcon className="h-5 w-5 shrink-0" />

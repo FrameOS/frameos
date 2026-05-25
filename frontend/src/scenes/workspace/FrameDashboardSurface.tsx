@@ -1,7 +1,7 @@
 import { useActions, useValues } from 'kea'
 import { A } from 'kea-router'
 import clsx from 'clsx'
-import type { CSSProperties, DragEvent } from 'react'
+import type { CSSProperties, DragEvent, FormEvent } from 'react'
 import {
   AdjustmentsHorizontalIcon,
   ArchiveBoxIcon,
@@ -23,6 +23,8 @@ import { PlayIcon } from '@heroicons/react/24/solid'
 
 import { DropdownMenu } from '../../components/DropdownMenu'
 import { FrameImage } from '../../components/FrameImage'
+import { Modal } from '../../components/Modal'
+import { TextInput } from '../../components/TextInput'
 import { frameHost, frameIsHealthy, frameStatus } from '../../decorators/frame'
 import { framesModel } from '../../models/framesModel'
 import { urls } from '../../urls'
@@ -35,6 +37,7 @@ import { templatesLogic } from '../frame/panels/Templates/templatesLogic'
 import { newFrameForm } from '../frames/newFrameForm'
 import { FrameLiveBadge } from './FrameLiveBadge'
 import {
+  FRAMEOS_TEMPLATE_DRAG_TYPE,
   getFrameosSceneDragData,
   getFrameosTemplateDragData,
   hasFrameosSceneListDragData,
@@ -180,7 +183,6 @@ function scheduleDatePrefix(date: Date, now = new Date()): string {
 
 function FramePreviewPanel({ frame, scenes }: { frame: FrameType; scenes: FrameScene[] }): JSX.Element {
   const previewSizing = framePreviewSizing(frame)
-  const { hideForm } = useActions(newFrameForm)
   const { sceneId: currentSceneId } = useValues(controlLogic({ frameId: frame.id }))
   const activeScene = scenes.find((scene) => sceneIsActive(scene, currentSceneId))
   const nextSchedule = nextScheduledEvent(frame.schedule)
@@ -211,46 +213,29 @@ function FramePreviewPanel({ frame, scenes }: { frame: FrameType; scenes: FrameS
           <FrameLiveBadge frame={frame} className="right-3 top-3" />
         </div>
       </A>
-      <div className="frameos-divider flex items-start justify-between gap-3 border-t border-slate-200/80 px-3 py-3">
+      <div className="frameos-divider border-t border-slate-200/80 px-3 py-3">
         <div className="min-w-0 text-sm">
           <div className="frameos-strong truncate font-semibold text-slate-800">
             {activeScene ? sceneDisplayName(activeScene) : 'current image'}
           </div>
-          <div className="frameos-muted mt-1 truncate text-xs text-slate-500">
-            {nextSchedule
-              ? `${scheduleDatePrefix(nextSchedule.date)} ${scheduleTimeLabel(nextSchedule.event)}: ${sceneDisplayName(
-                  scheduledScene,
-                  'Unknown scene'
-                )}`
-              : 'nothing scheduled'}
-          </div>
+          {nextSchedule ? (
+            <div className="frameos-muted mt-1 truncate text-xs text-slate-500">
+              {`${scheduleDatePrefix(nextSchedule.date)} ${scheduleTimeLabel(nextSchedule.event)}: ${sceneDisplayName(
+                scheduledScene,
+                'Unknown scene'
+              )}`}
+            </div>
+          ) : null}
         </div>
-        <A
-          href={urls.frame(frame.id, 'schedule')}
-          title="Edit schedule"
-          aria-label="Edit schedule"
-          onClick={() => hideForm()}
-          className="frameos-secondary-button inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/80 text-slate-700 shadow-sm transition hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-        >
-          <CalendarDaysIcon className="h-4 w-4" />
-        </A>
       </div>
     </div>
   )
 }
 
 function FrameHeaderActions({ frame, archived }: { frame: FrameType; archived?: boolean }): JSX.Element {
-  const { deleteFrame, deployFrame, renderFrame, renameFrame, setFrameArchived } = useActions(framesModel)
-  const { openChatDrawer } = useActions(workspaceLogic)
+  const { deleteFrame, deployFrame, renderFrame, setFrameArchived } = useActions(framesModel)
+  const { openChatDrawer, openRenameFrameDialog } = useActions(workspaceLogic)
   const frameName = frame.name || frameHost(frame)
-
-  const promptRenameFrame = (): void => {
-    const nextName = window.prompt('Rename frame', frameName)?.trim()
-    if (!nextName || nextName === frameName) {
-      return
-    }
-    renameFrame(frame.id, nextName)
-  }
 
   return (
     <div className="flex min-w-0 flex-1 flex-nowrap items-center justify-end gap-2">
@@ -271,7 +256,7 @@ function FrameHeaderActions({ frame, archived }: { frame: FrameType; archived?: 
           {
             label: 'Rename',
             title: 'Rename frame',
-            onClick: promptRenameFrame,
+            onClick: () => openRenameFrameDialog(frame.id, frameName),
             icon: <PencilSquareIcon className="h-5 w-5" />,
           },
           {
@@ -341,6 +326,56 @@ function FrameDashboardHeader({ frame, archived }: { frame: FrameType; archived?
       </A>
       <FrameHeaderActions frame={frame} archived={archived} />
     </div>
+  )
+}
+
+function RenameFrameModal({ frame }: { frame: FrameType }): JSX.Element | null {
+  const { renameFrameDialog } = useValues(workspaceLogic)
+  const { closeRenameFrameDialog, setRenameFrameName } = useActions(workspaceLogic)
+  const { renameFrame } = useActions(framesModel)
+
+  if (!renameFrameDialog || renameFrameDialog.frameId !== frame.id) {
+    return null
+  }
+
+  const frameName = frame.name || frameHost(frame)
+  const nextName = renameFrameDialog.name.trim()
+  const canSave = nextName.length > 0 && nextName !== frameName
+
+  const submitRename = (event: FormEvent<HTMLFormElement>): void => {
+    event.preventDefault()
+    if (!canSave) {
+      return
+    }
+    renameFrame(frame.id, nextName)
+    closeRenameFrameDialog()
+  }
+
+  return (
+    <Modal open onClose={closeRenameFrameDialog} title="Rename frame">
+      <form onSubmit={submitRename} className="space-y-4 p-5">
+        <label className="block">
+          <span className="frameos-muted mb-2 block text-sm font-semibold">Frame name</span>
+          <TextInput autoFocus value={renameFrameDialog.name} onChange={setRenameFrameName} />
+        </label>
+        <div className="flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={closeRenameFrameDialog}
+            className="frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={!canSave}
+            className="frameos-primary-action rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Rename
+          </button>
+        </div>
+      </form>
+    </Modal>
   )
 }
 
@@ -434,6 +469,7 @@ export function FrameAddSceneTile({ frame, compact = false }: { frame: FrameType
       }}
       className={clsx(
         'frameos-primary-hover-text frameos-card group flex shrink-0 flex-col items-center justify-center gap-3 rounded-lg border border-dashed bg-white/55 text-center text-slate-500 shadow-sm transition hover:-translate-y-0.5 hover:bg-white/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+        'frameos-add-scene-tile',
         active ? activeSurfaceClassName : 'border-slate-300 hover:shadow-lg hover:shadow-slate-300/35',
         compact ? 'h-36 w-36' : 'min-h-36 w-full max-w-40 min-w-0'
       )}
@@ -477,6 +513,7 @@ function FrameScenesBlock({
     const templateDragData = getFrameosTemplateDragData(event.dataTransfer)
     if (templateDragData) {
       event.preventDefault()
+      event.stopPropagation()
       if (templateDragData.repository) {
         applyRemoteToFrame(templateDragData.repository, templateDragData.template, true)
       } else {
@@ -490,6 +527,7 @@ function FrameScenesBlock({
       return
     }
     event.preventDefault()
+    event.stopPropagation()
     openSceneControl(frame.id, sceneId)
   }
 
@@ -546,12 +584,41 @@ export function FrameDashboardSurface({
   sectionId,
   showSceneMenus = false,
 }: FrameDashboardSurfaceProps): JSX.Element {
+  const { applyTemplateAndSave } = useActions(frameLogic({ frameId: frame.id }))
+  const { applyRemoteToFrame } = useActions(templatesLogic({ frameId: frame.id }))
+
+  const handleFrameDragOver = (event: DragEvent<HTMLElement>) => {
+    if (!Array.from(event.dataTransfer.types).includes(FRAMEOS_TEMPLATE_DRAG_TYPE)) {
+      return
+    }
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'copy'
+  }
+
+  const handleFrameDrop = (event: DragEvent<HTMLElement>) => {
+    const templateDragData = getFrameosTemplateDragData(event.dataTransfer)
+    if (!templateDragData) {
+      return
+    }
+
+    event.preventDefault()
+    event.stopPropagation()
+    if (templateDragData.repository) {
+      applyRemoteToFrame(templateDragData.repository, templateDragData.template, true)
+    } else {
+      applyTemplateAndSave(templateDragData.template)
+    }
+  }
+
   return (
     <section
       id={sectionId}
       data-workspace-frame-section={frame.id}
+      onDragOver={handleFrameDragOver}
+      onDrop={handleFrameDrop}
       className={clsx('group @container scroll-mt-6', archived && 'opacity-80')}
     >
+      <RenameFrameModal frame={frame} />
       <FrameDashboardHeader frame={frame} archived={archived} />
       <div className="grid gap-5 @2xl:grid-cols-[minmax(0,19rem)_minmax(19rem,1fr)] @2xl:items-start">
         <FramePreviewPanel frame={frame} scenes={scenes} />

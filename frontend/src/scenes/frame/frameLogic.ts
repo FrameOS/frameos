@@ -745,7 +745,11 @@ export const frameLogic = kea<frameLogicType>([
     applyTemplateAndSave: (template: Partial<TemplateType>) => ({
       template,
     }),
-    createBlankSceneAndSave: (name?: string, openEditor?: boolean) => ({ name, openEditor: openEditor ?? false }),
+    createBlankSceneAndSave: (name?: string, openEditor?: boolean, openDrawer?: boolean) => ({
+      name,
+      openEditor: openEditor ?? false,
+      openDrawer: openDrawer ?? false,
+    }),
     deleteSceneAndSave: (sceneId: string) => ({ sceneId }),
     closeScenePanels: (sceneIds: string[]) => ({ sceneIds }),
     sendEvent: (event: string, payload: Record<string, any>) => ({ event, payload }),
@@ -1198,7 +1202,7 @@ export const frameLogic = kea<frameLogicType>([
       framesModel.actions.loadFrame(props.frameId)
       await saveTemplateSceneImages(props.frameId, template, newScenes)
     },
-    createBlankSceneAndSave: async ({ name, openEditor }) => {
+    createBlankSceneAndSave: async ({ name, openEditor, openDrawer }) => {
       const frameForm = getCurrentFrameForm(values.frame, values.frameForm)
       const scene = buildBlankScene(frameForm, name)
       const scenes = [...(frameForm.scenes ?? []), scene]
@@ -1208,6 +1212,14 @@ export const frameLogic = kea<frameLogicType>([
       framesModel.actions.loadFrame(props.frameId)
       if (openEditor) {
         router.actions.push(urls.scenes(props.frameId, scene.id))
+      } else if (openDrawer) {
+        const searchParams = {
+          ...router.values.searchParams,
+          drawer: 'scene',
+          sceneId: scene.id,
+          frameId: String(props.frameId),
+        }
+        router.actions.push(router.values.location.pathname, searchParams, router.values.hashParams)
       }
     },
     deleteSceneAndSave: async ({ sceneId }) => {

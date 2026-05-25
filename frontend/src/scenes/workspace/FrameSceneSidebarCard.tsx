@@ -1,4 +1,4 @@
-import { useActions } from 'kea'
+import { useActions, useValues } from 'kea'
 import clsx from 'clsx'
 
 import type { FrameType } from '../../types'
@@ -21,9 +21,11 @@ export function FrameSceneSidebarCard({
   const { saveAndDeployFrame, saveFrame, showDeployPlanModal, showUnsavedChangesModal } = useActions(
     frameLogic({ frameId: frame.id })
   )
+  const { requiresRecompilation } = useValues(frameLogic({ frameId: frame.id }))
   const { closeChatDrawer } = useActions(workspaceLogic)
   const statusLabel = unsavedChanges ? 'Unsaved' : undeployedChanges ? 'Undeployed' : 'Saved'
   const statusIsActionable = unsavedChanges || undeployedChanges
+  const deployLabel = frame.last_successful_deploy_at && !requiresRecompilation ? 'Fast deploy' : 'Full deploy'
 
   return (
     <div className={clsx('grid grid-cols-3 gap-2', className)}>
@@ -40,7 +42,7 @@ export function FrameSceneSidebarCard({
           }}
           className={clsx(
             'rounded-lg px-3 py-2 text-xs font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-            unsavedChanges ? 'frameos-warning-button' : 'frameos-primary-outline-action'
+            'frameos-warning-button'
           )}
         >
           {statusLabel}
@@ -68,7 +70,7 @@ export function FrameSceneSidebarCard({
           unsavedChanges || undeployedChanges ? 'frameos-primary-action' : 'frameos-secondary-button'
         )}
       >
-        Deploy
+        {deployLabel}
       </button>
     </div>
   )
