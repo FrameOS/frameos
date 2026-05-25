@@ -22,14 +22,7 @@ export interface ExpandedSceneProps {
   isUndeployed?: boolean
 }
 
-export function ExpandedScene({
-  frameId,
-  sceneId,
-  scene,
-  showEditButton = true,
-  isUnsaved,
-  isUndeployed,
-}: ExpandedSceneProps) {
+export function ExpandedScene({ frameId, sceneId, scene, showEditButton = true, isUndeployed }: ExpandedSceneProps) {
   const { stateChanges, hasStateChanges, fields } = useValues(expandedSceneLogic({ frameId, sceneId, scene }))
   const { states, sceneId: currentSceneId } = useValues(controlLogic({ frameId }))
   const { requiresRecompilation, changedScenes } = useValues(frameLogic({ frameId }))
@@ -47,6 +40,7 @@ export function ExpandedScene({
       : sceneId === currentSceneId
       ? 'Update active scene'
       : 'Activate scene'
+  const previewLabel = isUndeployed ? 'Preview undeployed scene' : 'Preview unsaved scene'
 
   const buildNextState = (): Record<string, any> => {
     const desiredState = { ...currentState, ...stateChanges }
@@ -124,11 +118,10 @@ export function ExpandedScene({
       ) : null}
       {fieldCount === 0 ? (
         <div className="space-y-2">
-          <div>This scene does not export publicly controllable state.</div>
           <div className="flex items-center gap-2">
             {canPreviewUnsavedChanges ? (
               <Button onClick={handlePreview} color="primary">
-                Preview {isUnsaved ? 'unsaved' : isUndeployed ? 'undeployed' : ''} scene
+                {previewLabel}
               </Button>
             ) : (
               <Button
@@ -179,7 +172,7 @@ export function ExpandedScene({
               <div className="flex w-full items-center gap-2">
                 {canPreviewUnsavedChanges ? (
                   <Button onClick={handlePreview} color="primary">
-                    Preview {isUnsaved ? 'unsaved' : isUndeployed ? 'undeployed' : ''} scene
+                    {previewLabel}
                   </Button>
                 ) : (
                   <Button

@@ -1862,8 +1862,8 @@ html[data-frameos-theme='dark'] .workspace-logo-button:hover {
   }
 
   .scene-workspace-main.workspace-main-with-right-panel + .workspace-drawer {
-    right: 4.75rem;
-    width: min(430px, calc(100vw - 5.75rem));
+    right: 4rem;
+    width: min(430px, calc(100vw - 5rem));
   }
 }
 
@@ -1876,7 +1876,7 @@ html[data-frameos-theme='dark'] .workspace-logo-button:hover {
 
   .scene-workspace-main.workspace-main-with-right-panel + .workspace-drawer {
     left: 0.5rem;
-    right: 3.75rem;
+    right: 3.25rem;
     width: auto;
   }
 }

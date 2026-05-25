@@ -1354,7 +1354,8 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
           showAiButton={false}
           mainClassName={clsx(
             toolUsesPageScroll ? 'min-h-screen overflow-visible' : 'h-screen overflow-hidden',
-            'frame-workspace-main py-6 pr-8 max-lg:h-auto max-lg:overflow-visible max-lg:px-4 max-lg:pb-6'
+            'frame-workspace-main pr-8 max-lg:h-auto max-lg:overflow-visible max-lg:px-4',
+            activeToolPanel === 'logs' ? 'pb-0 pt-6 max-lg:pb-0' : 'py-6 max-lg:pb-6'
           )}
           rightPanel={
             unsavedChangesModalOpen ? (

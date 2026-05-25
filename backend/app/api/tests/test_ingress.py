@@ -1,19 +1,31 @@
 import pytest
 import importlib
+import os
 from starlette.testclient import TestClient
 from unittest.mock import patch
 
 from app.conftest import MockResponse
 
+HASSIO_ENV_KEYS = ("HASSIO_RUN_MODE", "HASSIO_TOKEN", "SUPERVISOR_TOKEN")
+
+
 @pytest.fixture
-def clear_env(monkeypatch):
+def clear_env():
     """
     A helper fixture to remove/clear environment variables before each test
     so each test starts from a known baseline.
     """
-    monkeypatch.delenv("HASSIO_RUN_MODE", raising=False)
-    monkeypatch.delenv("HASSIO_TOKEN", raising=False)
-    monkeypatch.delenv("SUPERVISOR_TOKEN", raising=False)
+    original_env = {key: os.environ.get(key) for key in HASSIO_ENV_KEYS}
+    for key in HASSIO_ENV_KEYS:
+        os.environ.pop(key, None)
+    _reload_app_and_config()
+    yield
+    for key, value in original_env.items():
+        if value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = value
+    _reload_app_and_config()
 
 def _reload_app_and_config():
     """

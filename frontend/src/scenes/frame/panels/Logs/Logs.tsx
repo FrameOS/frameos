@@ -320,20 +320,20 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
   const searchActive = !compact && logSearch.trim().length > 0
   const visibleLogs = compact ? logs : filteredLogs
 
-  const scrollFullScreenToPageEnd = (behavior: ScrollBehavior = 'auto') => {
-    if (!fullScreen || typeof window === 'undefined') {
-      return
+  const scrollListToAbsoluteEnd = (behavior: ScrollBehavior = 'auto') => {
+    virtuosoRef.current?.scrollTo({ top: Number.MAX_SAFE_INTEGER, behavior })
+    if (fullScreen && typeof window !== 'undefined') {
+      const scrollElement = document.scrollingElement ?? document.documentElement
+      window.scrollTo({ top: scrollElement.scrollHeight, behavior })
     }
-    const scrollElement = document.scrollingElement ?? document.documentElement
-    window.scrollTo({ top: scrollElement.scrollHeight, behavior })
   }
 
-  const scrollFullScreenToPageEndAfterLayout = (behavior: ScrollBehavior = 'auto') => {
-    if (!fullScreen || typeof window === 'undefined') {
+  const scrollListToAbsoluteEndAfterLayout = (behavior: ScrollBehavior = 'auto') => {
+    if (typeof window === 'undefined') {
       return
     }
     requestAnimationFrame(() => {
-      requestAnimationFrame(() => scrollFullScreenToPageEnd(behavior))
+      requestAnimationFrame(() => scrollListToAbsoluteEnd(behavior))
     })
   }
 
@@ -352,7 +352,7 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
           align: 'end',
           behavior: 'auto',
         })
-        scrollFullScreenToPageEndAfterLayout('auto')
+        scrollListToAbsoluteEndAfterLayout('auto')
       })
     })
   }, [visibleLogs.length, logSearch])
@@ -362,7 +362,7 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
       return
     }
     virtuosoRef.current?.scrollToIndex({ index: visibleLogs.length - 1, align: 'end', behavior })
-    scrollFullScreenToPageEndAfterLayout(behavior)
+    scrollListToAbsoluteEndAfterLayout(behavior)
   }
 
   const toggleMetricLogExpanded = (logId: number) => {
@@ -403,7 +403,7 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
         'frame-tool-panel @container relative',
         className,
         fullScreen
-          ? ['min-h-[calc(100vh-3rem)] w-full pb-6', renderTheme === 'dark' ? 'text-slate-100' : 'text-slate-950']
+          ? ['min-h-[calc(100vh-3rem)] w-full', renderTheme === 'dark' ? 'text-slate-100' : 'text-slate-950']
           : compact
           ? [
               'h-full min-h-0 overflow-hidden bg-transparent',
@@ -502,6 +502,7 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
         data={visibleLogs}
         components={{
           Header: () => (fullScreen ? <div aria-hidden="true" className="logs-list-top-spacer" /> : null),
+          Footer: () => (visibleLogs.length > 0 ? <div aria-hidden="true" className="h-5" /> : null),
           EmptyPlaceholder: () => (
             <div
               className={clsx(

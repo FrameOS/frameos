@@ -432,7 +432,7 @@ function SceneNodeTreeConnectors({
 
 function UtilityToolbar({ scene }: { scene: FrameScene | null }): JSX.Element {
   const { chatDrawerSelection, utilityPanel } = useValues(workspaceLogic)
-  const { closeChatDrawer, openUtilityPanel } = useActions(workspaceLogic)
+  const { closeChatDrawer, closeUtilityPanel, openUtilityPanel } = useActions(workspaceLogic)
   const utilityPanelIsVisible = !chatDrawerSelection
   const definitions = sceneUtilityDefinitions(scene)
 
@@ -444,6 +444,10 @@ function UtilityToolbar({ scene }: { scene: FrameScene | null }): JSX.Element {
           type="button"
           title={definition.label}
           onClick={() => {
+            if (utilityPanelIsVisible && utilityPanel === definition.panel) {
+              closeUtilityPanel()
+              return
+            }
             closeChatDrawer()
             openUtilityPanel(definition.panel)
           }}
@@ -471,7 +475,7 @@ function SceneDiagramOverlay({
   sceneId: string | null
 }): JSX.Element {
   const { chatDrawerSelection } = useValues(workspaceLogic)
-  const { closeUtilityPanel, openChatDrawer } = useActions(workspaceLogic)
+  const { closeChatDrawer, closeUtilityPanel, openChatDrawer } = useActions(workspaceLogic)
   const chatDrawerIsOpen = chatDrawerSelection?.frameId === frameId && chatDrawerSelection.sceneId === sceneId
 
   return (
@@ -485,6 +489,10 @@ function SceneDiagramOverlay({
             type="button"
             title="Open AI chat"
             onClick={() => {
+              if (chatDrawerIsOpen) {
+                closeChatDrawer()
+                return
+              }
               closeUtilityPanel()
               openChatDrawer(frameId, sceneId)
             }}
@@ -641,6 +649,7 @@ function UtilityDrawer({ frameId, scene }: { frameId: number; scene: FrameScene 
   const { utilityPanel } = useValues(workspaceLogic)
   const { closeUtilityPanel } = useActions(workspaceLogic)
   const activeDefinition = sceneUtilityDefinition(utilityPanel, scene)
+  const drawerContextLabel = scene?.name || 'Untitled scene'
 
   if (!utilityPanel || !activeDefinition) {
     return null
@@ -668,7 +677,9 @@ function UtilityDrawer({ frameId, scene }: { frameId: number; scene: FrameScene 
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="frameos-divider flex items-center justify-between gap-3 border-b border-slate-200/80 px-5 py-4">
           <div className="min-w-0">
-            <div className="frameos-muted text-xs font-semibold uppercase tracking-wide text-slate-500">Tools</div>
+            <div className="frameos-muted truncate text-xs font-semibold text-slate-500" title={drawerContextLabel}>
+              {drawerContextLabel}
+            </div>
             <h2 className="frameos-strong truncate text-xl font-bold tracking-normal text-slate-950">
               {activeDefinition.label}
             </h2>
