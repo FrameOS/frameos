@@ -66,6 +66,7 @@ interface FrameosShellProps {
   primaryActionLabel?: string
   onPrimaryAction?: () => void
   showAiButton?: boolean
+  chatNodeId?: string | null
 }
 
 function NavButton({
@@ -192,9 +193,17 @@ function AiMagicButton({
   )
 }
 
-function WorkspaceChatDrawer({ frameId, sceneId }: { frameId: number; sceneId: string | null }): JSX.Element | null {
+function WorkspaceChatDrawer({
+  frameId,
+  nodeId,
+  sceneId,
+}: {
+  frameId: number
+  nodeId?: string | null
+  sceneId: string | null
+}): JSX.Element | null {
   useMountedLogic(chatLogic({ frameId, sceneId }))
-  useMountedLogic(workspaceChatDrawerLogic({ frameId, sceneId }))
+  useMountedLogic(workspaceChatDrawerLogic({ frameId, nodeId, sceneId }))
   const { frames } = useValues(framesModel)
   const { closeChatDrawer } = useActions(workspaceLogic)
   const frame = frames[frameId]
@@ -288,6 +297,7 @@ export function FrameosShell({
   primaryActionLabel,
   onPrimaryAction,
   showAiButton: showAiButtonProp,
+  chatNodeId,
 }: FrameosShellProps): JSX.Element {
   const {
     chatDrawerSelection,
@@ -319,7 +329,11 @@ export function FrameosShell({
       )
     ) : null
   const workspaceRightPanel = chatDrawerSelection ? (
-    <WorkspaceChatDrawer frameId={chatDrawerSelection.frameId} sceneId={chatDrawerSelection.sceneId} />
+    <WorkspaceChatDrawer
+      frameId={chatDrawerSelection.frameId}
+      nodeId={chatDrawerSelection.nodeId}
+      sceneId={chatDrawerSelection.sceneId}
+    />
   ) : frameChangeDrawer ? (
     frameChangeDrawer
   ) : (
@@ -329,7 +343,7 @@ export function FrameosShell({
     showAiButton && selectedFrame ? (
       <AiMagicButton
         active={chatDrawerIsOpen}
-        onClick={() => openChatDrawer(selectedFrame.id, chatSceneId)}
+        onClick={() => openChatDrawer(selectedFrame.id, chatSceneId, chatNodeId ?? null)}
         floating={topBar === null}
       />
     ) : null

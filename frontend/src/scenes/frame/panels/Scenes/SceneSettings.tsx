@@ -8,6 +8,9 @@ import { Button } from '../../../../components/Button'
 import { ColorInput } from '../../../../components/ColorInput'
 import { Select } from '../../../../components/Select'
 import { TextArea } from '../../../../components/TextArea'
+import { Tooltip } from '../../../../components/Tooltip'
+import type { AppNodeData, CodeNodeData, FrameScene } from '../../../../types'
+import { hasCompiledAppSource, hasJavaScriptAppSource } from '../../../../utils/sceneApps'
 
 export interface SceneSettingsProps {
   sceneId: string
@@ -24,6 +27,30 @@ function SceneSettingsLabel({ children }: { children: string }): JSX.Element {
   return <span className="frame-tool-control-label text-xs font-semibold uppercase tracking-wide">{children}</span>
 }
 
+function hasCompiledNimAppSource(sources?: Record<string, string> | null): boolean {
+  return hasCompiledAppSource(sources) && !hasJavaScriptAppSource(sources)
+}
+
+function sceneHasCompiledOnlyContent(scene: FrameScene): boolean {
+  if (Object.values(scene.apps ?? {}).some((app) => hasCompiledNimAppSource(app.sources))) {
+    return true
+  }
+
+  return (scene.nodes ?? []).some((node) => {
+    if (node.type === 'app') {
+      const data = node.data as AppNodeData | undefined
+      return (
+        hasCompiledNimAppSource(data?.sources) || hasCompiledNimAppSource(scene.apps?.[data?.keyword ?? '']?.sources)
+      )
+    }
+    if (node.type === 'code') {
+      const data = node.data as CodeNodeData | undefined
+      return !!data?.code?.trim() && !data?.codeJS?.trim()
+    }
+    return node.type === 'source'
+  })
+}
+
 export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSettingsProps): JSX.Element {
   const { frameId, frameForm } = useValues(frameLogic)
   const { sceneIndex, scene } = useValues(sceneSettingsLogic({ frameId, sceneId }))
@@ -32,6 +59,8 @@ export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSetti
   }
   const fieldClassName = embedded ? sceneSettingsEmbeddedFieldClass : sceneSettingsFieldClass
   const promptFieldClassName = embedded ? sceneSettingsEmbeddedPromptFieldClass : sceneSettingsPromptFieldClass
+  const hasInterpretedCompiledOnlyContent =
+    scene.settings?.execution === 'interpreted' && sceneHasCompiledOnlyContent(scene)
 
   return (
     <Form
@@ -90,19 +119,32 @@ export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSetti
                 </div>
               }
             >
-              <Select
-                name="execution"
-                className="h-10"
-                options={[
-                  { value: 'compiled', label: 'compiled' },
-                  { value: 'interpreted', label: 'interpreted' },
-                ]}
-              />
+              <>
+                <Select
+                  name="execution"
+                  className="h-10"
+                  options={[
+                    { value: 'compiled', label: 'compiled' },
+                    { value: 'interpreted', label: 'interpreted' },
+                  ]}
+                />
+                {hasInterpretedCompiledOnlyContent ? (
+                  <div className="app-compiled-warning mt-2 rounded-xl p-3 text-sm">
+                    <div className="font-semibold">This compiled scene will not work in interpreted mode.</div>
+                    <div>
+                      It still contains Nim app source, Nim code nodes, or source nodes that interpreted mode cannot
+                      run. Keep execution set to compiled, or move the customization into JavaScript apps or inline code
+                      nodes.
+                    </div>
+                  </div>
+                ) : null}
+              </>
             </Field>
             {scene.settings?.prompt ? (
               <div className={`space-y-1 @md:flex ${promptFieldClassName}`}>
                 <label className="frameos-form-label flex items-center gap-1 text-sm font-medium @md:w-1/3">
                   <SceneSettingsLabel>Prompt</SceneSettingsLabel>
+                  <Tooltip title="Prompt given to AI to generate this scene" />
                 </label>
                 <div className="w-full">
                   <TextArea readOnly value={scene.settings.prompt} rows={4} />

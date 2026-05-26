@@ -2,7 +2,7 @@ import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
 import { router } from 'kea-router'
 import clsx from 'clsx'
 import type { ReactNode } from 'react'
-import { CodeBracketIcon, CubeTransparentIcon } from '@heroicons/react/24/outline'
+import { ArrowLeftIcon, CodeBracketIcon, CubeTransparentIcon } from '@heroicons/react/24/outline'
 import { framesModel } from '../../models/framesModel'
 import { frameHost } from '../../decorators/frame'
 import { urls } from '../../urls'
@@ -16,7 +16,9 @@ import { workspaceLogic } from './workspaceLogic'
 import { frameLogic } from '../frame/frameLogic'
 import { panelsLogic } from '../frame/panels/panelsLogic'
 import { EditApp, EditAppFileList } from '../frame/panels/EditApp/EditApp'
+import { editAppLogic } from '../frame/panels/EditApp/editAppLogic'
 import { groupFramesByStatus } from './frameStatusGroups'
+import { hasJavaScriptAppSource, isJavaScriptCatalogApp, normalizeSceneApps } from '../../utils/sceneApps'
 
 interface AppsWorkspaceProps {
   frameId?: string
@@ -35,6 +37,25 @@ interface AppNodeOption {
   label: string
   keyword: string
   nodeData: AppNodeData
+  language: AppNodeLanguage
+}
+
+type AppNodeLanguage = 'nim' | 'javascript'
+
+interface AppNodeOptionGroup {
+  key: AppNodeLanguage
+  label: string
+  options: AppNodeOption[]
+}
+
+function appNodeLanguage(
+  keyword: string,
+  sources?: Record<string, string> | null,
+  origin?: string | null
+): AppNodeLanguage {
+  return hasJavaScriptAppSource(sources) || isJavaScriptCatalogApp(keyword) || isJavaScriptCatalogApp(origin)
+    ? 'javascript'
+    : 'nim'
 }
 
 function parseRouteFrameId(frameId?: string | null): number | null {
@@ -46,18 +67,34 @@ function parseRouteFrameId(frameId?: string | null): number | null {
 }
 
 function appNodeOptions(scene: FrameScene | null | undefined): AppNodeOption[] {
+  const sceneApps = normalizeSceneApps(scene?.apps)
   return (scene?.nodes ?? [])
     .filter((node): node is DiagramNode => node.type === 'app')
     .map((node) => {
       const nodeData = node.data as AppNodeData
       const keyword = nodeData.keyword ?? ''
+      const sceneApp = sceneApps[keyword]
+      const sources = nodeData.sources || sceneApp?.sources || null
       return {
         nodeId: node.id,
         label: nodeData.name || keyword || node.id,
         keyword,
         nodeData,
+        language: appNodeLanguage(keyword, sources, sceneApp?.origin),
       }
     })
+}
+
+function appNodeOptionGroups(appOptions: AppNodeOption[]): AppNodeOptionGroup[] {
+  const groups: AppNodeOptionGroup[] = [
+    { key: 'nim', label: 'Nim apps', options: appOptions.filter((app) => app.language === 'nim') },
+    {
+      key: 'javascript',
+      label: 'JavaScript apps',
+      options: appOptions.filter((app) => app.language === 'javascript'),
+    },
+  ]
+  return groups.filter((group) => group.options.length > 0)
 }
 
 function defaultScene(frame: FrameType): FrameScene | null {
@@ -115,7 +152,6 @@ function AppsSelector({
   selectedApp: AppNodeOption | null
   appOptions: AppNodeOption[]
 }): JSX.Element {
-  const { openChatDrawer } = useActions(workspaceLogic)
   const frameGroups = groupFramesByStatus(frames)
 
   return (
@@ -173,19 +209,19 @@ function AppsSelector({
         {appOptions.length === 0 ? (
           <option value="">No apps</option>
         ) : (
-          appOptions.map((app) => (
-            <option key={app.nodeId} value={app.nodeId}>
-              {app.label}
-            </option>
+          appNodeOptionGroups(appOptions).map((group) => (
+            <optgroup key={group.key} label={group.label}>
+              {group.options.map((app) => (
+                <option key={app.nodeId} value={app.nodeId}>
+                  {app.label}
+                </option>
+              ))}
+            </optgroup>
           ))
         )}
       </SelectionSelect>
       {selectedScene && selectedApp ? (
-        <EditAppFileList
-          sceneId={selectedScene.id}
-          nodeId={selectedApp.nodeId}
-          onOpenChat={() => openChatDrawer(frame.id, selectedScene.id)}
-        />
+        <EditAppFileList sceneId={selectedScene.id} nodeId={selectedApp.nodeId} />
       ) : (
         <div className="frameos-inset rounded-2xl border border-slate-200 bg-white/55 p-3">
           <div className="frameos-muted text-xs font-semibold uppercase tracking-wide text-slate-400">Files</div>
@@ -206,15 +242,12 @@ function AppsTopBar({
   scene,
   app,
   unsavedChanges,
-  undeployedChanges,
 }: {
   frame: FrameType
   scene: FrameScene | null
   app: AppNodeOption | null
   unsavedChanges: boolean
-  undeployedChanges: boolean
 }): JSX.Element {
-  const { saveAndDeployFrame, saveFrame } = useActions(frameLogic({ frameId: frame.id }))
   return (
     <div className="mb-4 flex flex-col items-stretch justify-between gap-4 @md:flex-row @md:items-center">
       <div className="min-w-0">
@@ -228,28 +261,112 @@ function AppsTopBar({
         </h1>
       </div>
       <div className="flex flex-wrap items-center justify-end gap-2">
-        <button
-          type="button"
-          onClick={() => saveFrame()}
-          className={clsx(
-            'rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-            unsavedChanges ? 'frameos-primary-action' : 'frameos-secondary-button'
-          )}
-        >
-          Save
-        </button>
-        <button
-          type="button"
-          onClick={() => saveAndDeployFrame()}
-          className={clsx(
-            'rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-            unsavedChanges || undeployedChanges ? 'frameos-primary-action' : 'frameos-secondary-button'
-          )}
-        >
-          Deploy
-        </button>
+        {scene && app ? (
+          <>
+            <BackToSceneButton frameId={frame.id} sceneId={scene.id} />
+            <ActiveAppDiscardButton frameId={frame.id} sceneId={scene.id} nodeId={app.nodeId} />
+            <ActiveAppSaveButton
+              frameId={frame.id}
+              sceneId={scene.id}
+              nodeId={app.nodeId}
+              frameUnsavedChanges={unsavedChanges}
+            />
+          </>
+        ) : (
+          <FrameSaveButton frameId={frame.id} disabled={!unsavedChanges} />
+        )}
       </div>
     </div>
+  )
+}
+
+function BackToSceneButton({ frameId, sceneId }: { frameId: number; sceneId: string }): JSX.Element {
+  return (
+    <button
+      type="button"
+      onClick={() => router.actions.push(urls.scenes(frameId, sceneId))}
+      className="frameos-secondary-button inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+    >
+      <ArrowLeftIcon className="h-4 w-4" />
+      <span>Back to scene</span>
+    </button>
+  )
+}
+
+function ActiveAppDiscardButton({
+  frameId,
+  sceneId,
+  nodeId,
+}: {
+  frameId: number
+  sceneId: string
+  nodeId: string
+}): JSX.Element {
+  const logic = editAppLogic({ frameId, sceneId, nodeId })
+  const { hasChanges } = useValues(logic)
+  const { discardChanges } = useActions(logic)
+
+  return (
+    <button
+      type="button"
+      onClick={() => discardChanges()}
+      disabled={!hasChanges}
+      className="frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-40"
+    >
+      Discard changes
+    </button>
+  )
+}
+
+function FrameSaveButton({ frameId, disabled }: { frameId: number; disabled: boolean }): JSX.Element {
+  const { saveFrame } = useActions(frameLogic({ frameId }))
+
+  return (
+    <button
+      type="button"
+      onClick={() => saveFrame()}
+      disabled={disabled}
+      className="frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-40"
+    >
+      Save
+    </button>
+  )
+}
+
+function ActiveAppSaveButton({
+  frameId,
+  sceneId,
+  nodeId,
+  frameUnsavedChanges,
+}: {
+  frameId: number
+  sceneId: string
+  nodeId: string
+  frameUnsavedChanges: boolean
+}): JSX.Element {
+  const logic = editAppLogic({ frameId, sceneId, nodeId })
+  const { hasChanges } = useValues(logic)
+  const { saveChanges } = useActions(logic)
+  const { saveFrame } = useActions(frameLogic({ frameId }))
+  const disabled = !hasChanges && !frameUnsavedChanges
+
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        if (hasChanges) {
+          saveChanges()
+        }
+        saveFrame()
+      }}
+      disabled={disabled}
+      className={clsx(
+        'rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-40',
+        hasChanges ? 'frameos-primary-action' : 'frameos-secondary-button'
+      )}
+    >
+      Save
+    </button>
   )
 }
 
@@ -282,8 +399,6 @@ function AppsEditorSurface({
   scene: FrameScene | null
   app: AppNodeOption | null
 }): JSX.Element {
-  const { openChatDrawer } = useActions(workspaceLogic)
-
   if (!scene) {
     return <AppsEmptyState title="No scene selected" detail="Choose a scene from the left panel." />
   }
@@ -296,12 +411,7 @@ function AppsEditorSurface({
     <>
       <ActiveAppSelectionMount frameId={frame.id} sceneId={scene.id} app={app} />
       <div className="apps-editor-surface min-h-0 flex-1 overflow-hidden">
-        <EditApp
-          sceneId={scene.id}
-          nodeId={app.nodeId}
-          onOpenChat={() => openChatDrawer(frame.id, scene.id)}
-          showFileList={false}
-        />
+        <EditApp sceneId={scene.id} nodeId={app.nodeId} showFileList={false} />
       </div>
     </>
   )
@@ -321,7 +431,7 @@ function AppsEmptyState({ title, detail }: { title: string; detail: string }): J
 
 function AppsWorkspaceFrame({ frameId, routeSceneId, routeNodeId }: AppsWorkspaceFrameProps): JSX.Element {
   const frameLogicProps = { frameId }
-  const { frame, scenes, unsavedChanges, undeployedChanges, deployPlanModalOpen, unsavedChangesModalOpen } = useValues(
+  const { frame, scenes, unsavedChanges, deployPlanModalOpen, unsavedChangesModalOpen } = useValues(
     frameLogic(frameLogicProps)
   )
   const { framesList } = useValues(framesModel)
@@ -360,15 +470,8 @@ function AppsWorkspaceFrame({ frameId, routeSceneId, routeNodeId }: AppsWorkspac
               appOptions={appOptions}
             />
           }
-          topBar={
-            <AppsTopBar
-              frame={frame}
-              scene={selectedScene}
-              app={selectedApp}
-              unsavedChanges={unsavedChanges}
-              undeployedChanges={undeployedChanges}
-            />
-          }
+          topBar={<AppsTopBar frame={frame} scene={selectedScene} app={selectedApp} unsavedChanges={unsavedChanges} />}
+          chatNodeId={selectedApp?.nodeId ?? null}
           mainClassName="apps-workspace-main flex h-screen flex-col overflow-hidden pb-5 pr-5 pt-5 max-lg:h-auto max-lg:overflow-visible max-lg:px-4"
           rightPanel={
             unsavedChangesModalOpen ? (

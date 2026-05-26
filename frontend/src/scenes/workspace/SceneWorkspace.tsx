@@ -397,7 +397,10 @@ function SceneNodeTreeConnectors({
 
   const previousDepth = itemIndex > 0 ? items[itemIndex - 1].depth : -1
   const nextDepth = itemIndex < items.length - 1 ? items[itemIndex + 1].depth : -1
-  const lineClassName = clsx(highlighted ? 'bg-white/45' : 'frameos-divider bg-slate-300')
+  const lineClassName = clsx(
+    'scene-node-tree-line',
+    highlighted ? 'scene-node-tree-line-highlighted bg-white/45' : 'frameos-divider bg-slate-300'
+  )
 
   return (
     <span aria-hidden className="pointer-events-none absolute inset-y-0 left-0">
@@ -415,13 +418,22 @@ function SceneNodeTreeConnectors({
         return (
           <span key={depth}>
             {hasTopSegment ? (
-              <span className={clsx('absolute top-0 h-1/2 w-px', lineClassName)} style={{ left }} />
+              <span
+                className={clsx('scene-node-tree-line-vertical absolute top-0 h-1/2 w-px', lineClassName)}
+                style={{ left }}
+              />
             ) : null}
             {hasBottomSegment ? (
-              <span className={clsx('absolute bottom-0 h-1/2 w-px', lineClassName)} style={{ left }} />
+              <span
+                className={clsx('scene-node-tree-line-vertical absolute bottom-0 h-1/2 w-px', lineClassName)}
+                style={{ left }}
+              />
             ) : null}
             {isCurrentDepth ? (
-              <span className={clsx('absolute top-1/2 h-px w-3', lineClassName)} style={{ left }} />
+              <span
+                className={clsx('scene-node-tree-line-horizontal absolute top-1/2 h-px w-3', lineClassName)}
+                style={{ left }}
+              />
             ) : null}
           </span>
         )

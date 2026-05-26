@@ -36,6 +36,7 @@ import { NewFrame } from '../frames/NewFrame'
 import { newFrameForm } from '../frames/newFrameForm'
 import { frameLogic } from '../frame/frameLogic'
 import { panelsLogic } from '../frame/panels/panelsLogic'
+import { CompiledSceneTag } from '../frame/panels/Scenes/CompiledSceneTag'
 import { ExpandedScene } from '../frame/panels/Scenes/ExpandedScene'
 import { EditTemplateModal } from '../frame/panels/Templates/EditTemplateModal'
 import { Templates } from '../frame/panels/Templates/Templates'
@@ -660,7 +661,7 @@ export function SceneControlPanel(): JSX.Element | null {
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
               <div
-                className="frameos-card-media frameos-skeleton-surface mx-auto mb-4 flex max-h-56 w-full items-center justify-center overflow-hidden rounded-lg bg-slate-100"
+                className="frameos-card-media frameos-skeleton-surface relative mx-auto mb-4 flex max-h-56 w-full items-center justify-center overflow-hidden rounded-lg bg-slate-100"
                 style={{ aspectRatio: previewAspectRatio, maxWidth: previewMaxWidth }}
               >
                 <FrameImage
@@ -673,6 +674,11 @@ export function SceneControlPanel(): JSX.Element | null {
                   className="h-full max-h-56 w-full"
                   imageClassName="h-full w-full rounded-md object-contain"
                 />
+                {scene.settings?.execution !== 'interpreted' ? (
+                  <div className="absolute left-2 top-2 z-10">
+                    <CompiledSceneTag className="shadow-sm" />
+                  </div>
+                ) : null}
               </div>
               <div className="mb-4 flex flex-wrap gap-2">
                 <A

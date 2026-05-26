@@ -92,6 +92,7 @@ function clearDrawerSearchParams(search: Record<string, unknown>): Record<string
   delete nextSearch.drawer
   delete nextSearch.frameId
   delete nextSearch.sceneId
+  delete nextSearch.nodeId
   return nextSearch
 }
 
@@ -186,6 +187,7 @@ export interface SceneSelection {
 export interface ChatDrawerSelection {
   frameId: number
   sceneId: string | null
+  nodeId?: string | null
 }
 
 export interface FrameRenameDialog {
@@ -723,7 +725,11 @@ export const workspaceLogic = kea<workspaceLogicType>([
     closeTemplateDrawer: true,
     openScheduleDrawer: (frameId: number) => ({ frameId }),
     closeScheduleDrawer: true,
-    openChatDrawer: (frameId: number, sceneId: string | null = null) => ({ frameId, sceneId }),
+    openChatDrawer: (frameId: number, sceneId: string | null = null, nodeId: string | null = null) => ({
+      frameId,
+      nodeId,
+      sceneId,
+    }),
     closeChatDrawer: true,
     openFrameChangeDrawer: (frameId: number, kind: FrameChangeDrawerKind) => ({ frameId, kind }),
     closeFrameChangeDrawer: true,
@@ -851,7 +857,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
     chatDrawerSelection: [
       null as ChatDrawerSelection | null,
       {
-        openChatDrawer: (_, { frameId, sceneId }) => ({ frameId, sceneId }),
+        openChatDrawer: (_, { frameId, sceneId, nodeId }) => ({ frameId, nodeId, sceneId }),
         closeChatDrawer: () => null,
         setSearch: () => null,
         navigateToFrame: () => null,
@@ -1256,6 +1262,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
     const applyDrawerFromSearch = (frameId: number | null, search: Record<string, unknown>) => {
       const drawer = searchValue(search, 'drawer')
       const sceneId = searchValue(search, 'sceneId')
+      const nodeId = searchValue(search, 'nodeId')
 
       if (!frameId) {
         closeDrawersFromUrl()
@@ -1269,7 +1276,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
       } else if (drawer === 'schedule') {
         actions.openFrameTool(frameId, 'schedule')
       } else if (drawer === 'chat') {
-        actions.openChatDrawer(frameId, sceneId)
+        actions.openChatDrawer(frameId, sceneId, nodeId)
       } else if (drawer === 'unsavedChanges') {
         actions.openFrameChangeDrawer(frameId, 'unsaved')
       } else if (drawer === 'deployPlan') {
@@ -1295,7 +1302,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
       }
     }
     const applySceneOrAppRoute = (
-      { frameId, sceneId }: Record<string, unknown>,
+      { frameId, sceneId, nodeId }: Record<string, unknown>,
       search: Record<string, unknown>,
       hash: Record<string, unknown>,
       payload: { pathname: string; initial?: boolean },
@@ -1310,6 +1317,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
         const drawer = searchValue(search, 'drawer')
         applyDrawerFromSearch(validFrameId, {
           ...search,
+          nodeId: searchValue(search, 'nodeId') ?? (typeof nodeId === 'string' ? nodeId : undefined),
           sceneId: searchValue(search, 'sceneId') ?? validSceneId ?? undefined,
         })
         if (!drawer && isSceneRoutePath(payload.pathname)) {
@@ -1354,7 +1362,10 @@ export const workspaceLogic = kea<workspaceLogicType>([
     ],
     closeScheduleDrawer: clearDrawerUrl,
     openChatDrawer: (payload: Record<string, any>) =>
-      drawerUrlForFrame(Number(payload.frameId), 'chat', payload.sceneId ? { sceneId: String(payload.sceneId) } : {}),
+      drawerUrlForFrame(Number(payload.frameId), 'chat', {
+        ...(payload.sceneId ? { sceneId: String(payload.sceneId) } : {}),
+        ...(payload.nodeId ? { nodeId: String(payload.nodeId) } : {}),
+      }),
     closeChatDrawer: clearDrawerUrl,
     openFrameChangeDrawer: (payload: Record<string, any>) =>
       drawerUrlForFrame(Number(payload.frameId), payload.kind === 'unsaved' ? 'unsavedChanges' : 'deployPlan'),

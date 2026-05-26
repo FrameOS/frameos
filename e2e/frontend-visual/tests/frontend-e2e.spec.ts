@@ -191,6 +191,49 @@ test.describe('backend frontend e2e coverage @e2e', () => {
     expectNoFrontendErrors(readErrors)
   })
 
+  test('apps workspace AI chat opens app context', async ({ page }) => {
+    const readErrors = await prepareAuthenticatedPage(page)
+    await page.goto(
+      '/apps/1/scene-dashboard/c3bbaf66-f11d-45d2-9bed-5395ac0c01b2?drawer=chat&sceneId=scene-dashboard&frameId=1',
+      { waitUntil: 'domcontentloaded' }
+    )
+    await settleForScreenshot(page)
+
+    await expect(page.locator('.workspace-drawer')).toContainText('Chat about "render/text"')
+    await expect(page.locator('.workspace-drawer')).toContainText('Ask for edits to this app')
+
+    await page.goto('/apps/1/scene-dashboard/c3bbaf66-f11d-45d2-9bed-5395ac0c01b2', {
+      waitUntil: 'domcontentloaded',
+    })
+    await settleForScreenshot(page)
+
+    await page.getByTitle('Open AI chat').click()
+
+    await expect(page.locator('.workspace-drawer')).toContainText('Chat about "render/text"')
+    await expect(page.locator('.workspace-drawer')).toContainText('Ask for edits to this app')
+    await expect(page).toHaveURL(/drawer=chat/)
+    await expect(page).toHaveURL(/nodeId=c3bbaf66-f11d-45d2-9bed-5395ac0c01b2/)
+
+    expectNoFrontendErrors(readErrors)
+  })
+
+  test('apps workspace app header has scene navigation and discard controls', async ({ page }) => {
+    const readErrors = await prepareAuthenticatedPage(page)
+    await page.goto('/apps/1/scene-dashboard/c3bbaf66-f11d-45d2-9bed-5395ac0c01b2', {
+      waitUntil: 'domcontentloaded',
+    })
+    await settleForScreenshot(page)
+
+    await expect(page.getByRole('button', { name: 'Back to scene' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Discard changes' })).toBeDisabled()
+    await expect(page.getByRole('button', { name: 'Save' })).toBeDisabled()
+
+    await page.getByRole('button', { name: 'Back to scene' }).click()
+    await expect(page).toHaveURL(/\/scenes\/1\/scene-dashboard$/)
+
+    expectNoFrontendErrors(readErrors)
+  })
+
   test('frame settings subsection shortcuts target every section', async ({ page }) => {
     const readErrors = await prepareAuthenticatedPage(page)
     await page.goto('/frames/1?tool=settings', { waitUntil: 'domcontentloaded' })

@@ -5,7 +5,6 @@ import Editor from '@monaco-editor/react'
 import { PanelWithMetadata } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
 import { panelsLogic } from '../panelsLogic'
-import { chatLogic } from '../Chat/chatLogic'
 import { useEffect, useRef, useState } from 'react'
 import schema from '../../../../../schema/config_json.json'
 import type { editor as importedEditor } from 'monaco-editor'
@@ -20,21 +19,17 @@ interface EditAppProps {
   panel?: PanelWithMetadata
   sceneId: string
   nodeId: string
-  onOpenChat?: () => void
   showFileList?: boolean
 }
 
 interface EditAppFileListProps {
   sceneId: string
   nodeId: string
-  onOpenChat?: () => void
   className?: string
 }
 
-export function EditAppFileList({ sceneId, nodeId, onOpenChat, className }: EditAppFileListProps) {
+export function EditAppFileList({ sceneId, nodeId, className }: EditAppFileListProps) {
   const { frameId } = useValues(frameLogic)
-  const { openChat } = useActions(panelsLogic)
-  const { ensureChatForApp } = useActions(chatLogic({ frameId, sceneId }))
   const logicProps: EditAppLogicProps = {
     frameId,
     sceneId,
@@ -106,26 +101,12 @@ export function EditAppFileList({ sceneId, nodeId, onOpenChat, className }: Edit
         <Button color="none" size="small" onClick={() => addFile()} title="Add file">
           + Add file
         </Button>
-        <Button
-          color="none"
-          size="small"
-          onClick={() => {
-            ensureChatForApp(sceneId, nodeId)
-            if (onOpenChat) {
-              onOpenChat()
-            } else {
-              openChat()
-            }
-          }}
-        >
-          Chat about this app
-        </Button>
       </div>
     </div>
   )
 }
 
-export function EditApp({ panel, sceneId, nodeId, onOpenChat, showFileList = true }: EditAppProps) {
+export function EditApp({ panel, sceneId, nodeId, showFileList = true }: EditAppProps) {
   const { frameId } = useValues(frameLogic)
   const { theme } = useValues(workspaceLogic)
   const { persistUntilClosed } = useActions(panelsLogic)
@@ -145,6 +126,7 @@ export function EditApp({ panel, sceneId, nodeId, onOpenChat, showFileList = tru
     appUsageCount,
     hasMultipleAppUsages,
     appTypeDeclarations,
+    scene,
   } = useValues(logic)
   const { saveChanges, forkAndSaveChanges, updateFile } = useActions(logic)
   const [[monaco, editor], setMonacoAndEditor] = useState<[Monaco | null, importedEditor.IStandaloneCodeEditor | null]>(
@@ -234,6 +216,7 @@ export function EditApp({ panel, sceneId, nodeId, onOpenChat, showFileList = tru
     : activeFile.endsWith('.js') || activeFile.endsWith('.jsx')
     ? 'javascript'
     : 'python'
+  const sceneName = scene?.name || 'Untitled scene'
 
   return (
     <div className="flex flex-row gap-2 max-h-full h-full max-w-full w-full">
@@ -241,25 +224,27 @@ export function EditApp({ panel, sceneId, nodeId, onOpenChat, showFileList = tru
         <EditAppFileList
           sceneId={sceneId}
           nodeId={nodeId}
-          onOpenChat={onOpenChat}
           className="h-full max-h-full w-auto max-w-60 overflow-x-auto"
         />
       ) : null}
 
       <div className="overflow-y-auto overflow-x-auto w-full h-full max-h-full max-w-full gap-2 flex-1 flex flex-col">
-        {hasChanges ? (
-          <div className="frame-tool-card rounded-2xl p-3">
-            {requiresCompiledOnSave ? (
-              <>
-                You have made changes to this app. If you save them, we will have to change the scene's execution model
-                from "interpreted" to "compiled". Thereafter, any changes to the scene will require a full frame
-                recompilation. If you have used any inline code nodes, you will also have to rewrite them from
-                JavaScript to Nim.
-                <Button size="small" onClick={saveChanges}>
-                  I understand. Save the changes
-                </Button>
-              </>
-            ) : hasMultipleAppUsages ? (
+        {requiresCompiledOnSave ? (
+          <div className="app-compiled-warning rounded-2xl p-3 text-sm">
+            <div className="space-y-3">
+              <div className="font-semibold">Compiled Nim app in an interpreted scene</div>
+              <div>
+                This is a compiled Nim app, but the scene &quot;{sceneName}&quot; is currently running in interpreted
+                mode. If you edit and save it, the scene will switch to compiled mode. After that, future scene changes
+                will require a full frame recompilation. Inline JavaScript code nodes would also need to be rewritten in
+                Nim. If you need customization without compilation, consider using JavaScript apps or inline code nodes
+                instead.
+              </div>
+            </div>
+          </div>
+        ) : hasChanges ? (
+          hasMultipleAppUsages ? (
+            <div className="frame-tool-card rounded-2xl p-3">
               <div className="space-y-2">
                 <div>You are editing all {appUsageCount} uses of this app in this scene.</div>
                 <div className="flex flex-wrap gap-2">
@@ -271,15 +256,8 @@ export function EditApp({ panel, sceneId, nodeId, onOpenChat, showFileList = tru
                   </Button>
                 </div>
               </div>
-            ) : (
-              <>
-                You have changes.{' '}
-                <Button size="small" onClick={saveChanges}>
-                  Save changes
-                </Button>
-              </>
-            )}
-          </div>
+            </div>
+          ) : null
         ) : null}
         <div className="frameos-inset overflow-hidden rounded-md border font-mono text-sm w-full flex-1">
           <Editor
