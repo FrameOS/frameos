@@ -28,79 +28,165 @@ export async function prepareStablePage(page: Page, theme: 'light' | 'dark'): Pr
     { fixedNow, theme }
   )
 
-  await page.route('**/api/system/metrics', fulfillJson({
-    disk: { totalBytes: 58_000_000_000, usedBytes: 4_100_000_000, freeBytes: 53_900_000_000 },
-    memory: { totalBytes: 512_000_000, availableBytes: 302_000_000 },
-    load: { one: 0.14, five: 0.1, fifteen: 0.08 },
-  }))
+  await page.route(
+    '**/api/system/metrics',
+    fulfillJson({
+      disk: { totalBytes: 58_000_000_000, usedBytes: 4_100_000_000, freeBytes: 53_900_000_000 },
+      memory: { totalBytes: 512_000_000, availableBytes: 302_000_000 },
+      load: { one: 0.14, five: 0.1, fifteen: 0.08 },
+    })
+  )
 
-  await page.route('**/api/system/info', fulfillJson({
-    disk: { totalBytes: 58_000_000_000, usedBytes: 4_100_000_000, freeBytes: 53_900_000_000 },
-    memory: { totalBytes: 512_000_000, availableBytes: 302_000_000 },
-    load: { one: 0.14, five: 0.1, fifteen: 0.08 },
-    caches: [
-      { name: 'Build cache', path: '.tmp/build-cache', sizeBytes: 42_000_000, exists: true },
-      { name: 'Frontend assets', path: 'frontend/dist', sizeBytes: 18_000_000, exists: true },
-    ],
-    database: { path: '.tmp/frontend-visual.db', sizeBytes: 2_400_000, exists: true },
-  }))
+  await page.route(
+    '**/api/frames/1/metrics',
+    fulfillJson({
+      metrics: [
+        {
+          id: 'visual-metrics-1',
+          frame_id: 1,
+          timestamp: '2026-05-23T11:55:00Z',
+          metrics: {
+            intervalMs: 60_000,
+            load: [0.14, 0.1, 0.08],
+            memoryUsage: {
+              total: 512_000_000,
+              available: 302_000_000,
+              used: 210_000_000,
+              percentage: 41,
+            },
+            diskUsage: {
+              total: 58_000_000_000,
+              available: 53_900_000_000,
+              free: 53_900_000_000,
+              used: 4_100_000_000,
+              percentage: 7,
+            },
+            runtime: { width: 800, height: 480, fps: 1 },
+          },
+        },
+        {
+          id: 'visual-metrics-2',
+          frame_id: 1,
+          timestamp: fixedNow,
+          metrics: {
+            intervalMs: 60_000,
+            load: [0.12, 0.1, 0.08],
+            memoryUsage: {
+              total: 512_000_000,
+              available: 302_000_000,
+              used: 210_000_000,
+              percentage: 41,
+            },
+            diskUsage: {
+              total: 58_000_000_000,
+              available: 53_900_000_000,
+              free: 53_900_000_000,
+              used: 4_100_000_000,
+              percentage: 7,
+            },
+            runtime: { width: 800, height: 480, fps: 1 },
+          },
+        },
+      ],
+    })
+  )
+
+  await page.route(
+    '**/api/ai/embeddings/status',
+    fulfillJson({
+      count: 0,
+      total: 0,
+    })
+  )
+
+  await page.route(
+    '**/api/system/info',
+    fulfillJson({
+      disk: { totalBytes: 58_000_000_000, usedBytes: 4_100_000_000, freeBytes: 53_900_000_000 },
+      memory: { totalBytes: 512_000_000, availableBytes: 302_000_000 },
+      load: { one: 0.14, five: 0.1, fifteen: 0.08 },
+      caches: [
+        { name: 'Build cache', path: '.tmp/build-cache', sizeBytes: 42_000_000, exists: true },
+        { name: 'Frontend assets', path: 'frontend/dist', sizeBytes: 18_000_000, exists: true },
+      ],
+      database: { path: '.tmp/frontend-visual.db', sizeBytes: 2_400_000, exists: true },
+    })
+  )
 
   await page.route('**/api/repositories', fulfillJson([]))
 
-  await page.route('**/api/frames/1/assets', fulfillJson({
-    assets: [
-      { path: '/srv/assets', size: 4096, mtime: 1_779_535_200, is_dir: true },
-      { path: '/srv/assets/fonts', size: 4096, mtime: 1_779_535_200, is_dir: true },
-      { path: '/srv/assets/fonts/Ubuntu-Regular.ttf', size: 297_884, mtime: 1_779_535_200, is_dir: false },
-      { path: '/srv/assets/images', size: 4096, mtime: 1_779_535_200, is_dir: true },
-      { path: '/srv/assets/images/dashboard.png', size: 482_400, mtime: 1_779_535_200, is_dir: false },
-      { path: '/srv/assets/videos', size: 4096, mtime: 1_779_535_200, is_dir: true },
-      { path: '/srv/assets/videos/status-loop.mp4', size: 2_340_000, mtime: 1_779_535_200, is_dir: false },
-    ],
-  }))
+  await page.route(
+    '**/api/frames/1/assets',
+    fulfillJson({
+      assets: [
+        { path: '/srv/assets', size: 4096, mtime: 1_779_535_200, is_dir: true },
+        { path: '/srv/assets/fonts', size: 4096, mtime: 1_779_535_200, is_dir: true },
+        { path: '/srv/assets/fonts/Ubuntu-Regular.ttf', size: 297_884, mtime: 1_779_535_200, is_dir: false },
+        { path: '/srv/assets/images', size: 4096, mtime: 1_779_535_200, is_dir: true },
+        { path: '/srv/assets/images/dashboard.png', size: 482_400, mtime: 1_779_535_200, is_dir: false },
+        { path: '/srv/assets/videos', size: 4096, mtime: 1_779_535_200, is_dir: true },
+        { path: '/srv/assets/videos/status-loop.mp4', size: 2_340_000, mtime: 1_779_535_200, is_dir: false },
+      ],
+    })
+  )
 
-  await page.route('**/api/frames/1/ping**', fulfillJson({
-    ok: true,
-    mode: 'icmp',
-    target: '127.0.0.1',
-    elapsed_ms: 3.7,
-    status: null,
-    message: 'Reply from 127.0.0.1',
-  }))
+  await page.route(
+    '**/api/frames/1/ping**',
+    fulfillJson({
+      ok: true,
+      mode: 'icmp',
+      target: '127.0.0.1',
+      elapsed_ms: 3.7,
+      status: null,
+      message: 'Reply from 127.0.0.1',
+    })
+  )
 
-  await page.route('**/api/frames/1/states', fulfillJson({
-    sceneId: 'scene-dashboard',
-    states: {
-      'scene-dashboard': { headline: 'Morning', accent: '#6f42c1' },
-      'scene-gradient': {},
-    },
-  }))
-  await page.route('**/api/frames/1/state', fulfillJson({
-    sceneId: 'scene-dashboard',
-    state: { headline: 'Morning', accent: '#6f42c1' },
-  }))
-  await page.route('**/api/frames/1/uploaded_scenes', fulfillJson({
-    sceneId: 'scene-dashboard',
-    scenes: [
-      { id: 'scene-dashboard', name: 'Dashboard' },
-      { id: 'scene-gradient', name: 'Gradient status' },
-      { id: 'scene-gallery', name: 'Gallery' },
-    ],
-  }))
+  await page.route(
+    '**/api/frames/1/states',
+    fulfillJson({
+      sceneId: 'scene-dashboard',
+      states: {
+        'scene-dashboard': { headline: 'Morning', accent: '#6f42c1' },
+        'scene-gradient': {},
+      },
+    })
+  )
+  await page.route(
+    '**/api/frames/1/state',
+    fulfillJson({
+      sceneId: 'scene-dashboard',
+      state: { headline: 'Morning', accent: '#6f42c1' },
+    })
+  )
+  await page.route(
+    '**/api/frames/1/uploaded_scenes',
+    fulfillJson({
+      sceneId: 'scene-dashboard',
+      scenes: [
+        { id: 'scene-dashboard', name: 'Dashboard' },
+        { id: 'scene-gradient', name: 'Gradient status' },
+        { id: 'scene-gallery', name: 'Gallery' },
+      ],
+    })
+  )
   await page.route('**/api/frames/1/event/**', fulfillText('OK'))
   await page.route('**/api/frames/1/fast_deploy', fulfillJson({ message: 'Deployment queued' }))
   await page.route('**/api/frames/1/deploy', fulfillJson({ message: 'Deployment queued' }))
   await page.route('**/api/frames/1/assets/sync', fulfillJson({ message: 'Assets synced successfully' }))
-  await page.route('**/api/frames/1/scene_source/**', fulfillJson({
-    source: [
-      'import frameos/apps',
-      '',
-      'proc renderScene*() =',
-      '  let title = state{"headline"}.getStr("Morning")',
-      '  renderText(title)',
-      '',
-    ].join('\n'),
-  }))
+  await page.route(
+    '**/api/frames/1/scene_source/**',
+    fulfillJson({
+      source: [
+        'import frameos/apps',
+        '',
+        'proc renderScene*() =',
+        '  let title = state{"headline"}.getStr("Morning")',
+        '  renderText(title)',
+        '',
+      ].join('\n'),
+    })
+  )
   await page.route('**/api/apps/validate_source', fulfillJson({ errors: [] }))
   await page.routeWebSocket('**/ws', (ws) => {
     ws.onMessage((message) => {
