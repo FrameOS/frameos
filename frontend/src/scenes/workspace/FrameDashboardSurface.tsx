@@ -30,6 +30,7 @@ import { urls } from '../../urls'
 import type { FrameScene, FrameType, ScheduledEvent } from '../../types'
 import { frameLogic } from '../frame/frameLogic'
 import { HeaderMetrics } from '../frame/panels/Metrics/HeaderMetrics'
+import { CompiledSceneTag } from '../frame/panels/Scenes/CompiledSceneTag'
 import { RenameSceneModal } from '../frame/panels/Scenes/RenameSceneModal'
 import { SceneDropDown } from '../frame/panels/Scenes/SceneDropDown'
 import { templatesLogic } from '../frame/panels/Templates/templatesLogic'
@@ -102,6 +103,10 @@ function framePreviewSizing(frame: FrameType): { imageStyle: CSSProperties; card
 
 function sceneDisplayName(scene: FrameScene | null | undefined, fallback = 'Untitled scene'): string {
   return scene?.name || fallback
+}
+
+function sceneIsCompiled(scene: FrameScene): boolean {
+  return scene.settings?.execution !== 'interpreted'
 }
 
 function scheduleTimeLabel(event: ScheduledEvent): string {
@@ -437,6 +442,7 @@ function FrameSceneTile({
 }): JSX.Element {
   const { openSceneControl } = useActions(workspaceLogic)
   const { hideForm } = useActions(newFrameForm)
+  const compiled = sceneIsCompiled(scene)
 
   return (
     <div
@@ -468,11 +474,6 @@ function FrameSceneTile({
             objectFit="cover"
             className="h-full w-full rounded-none"
           />
-          {active ? (
-            <div className="frameos-primary-fill absolute left-2 top-2 rounded-full px-2 py-0.5 text-[11px] font-semibold text-white shadow-sm">
-              Active
-            </div>
-          ) : null}
         </div>
         <div className="w-full px-3 py-2">
           <div className="frameos-strong truncate text-sm font-semibold text-slate-900">
@@ -481,6 +482,20 @@ function FrameSceneTile({
           <div className="frameos-muted mt-0.5 truncate text-xs text-slate-500">{sceneTileSummaryLabel(scene)}</div>
         </div>
       </button>
+      {compiled || active ? (
+        <div className="pointer-events-none absolute left-1 top-1 z-10 flex flex-col items-start gap-1">
+          {compiled ? (
+            <div className="pointer-events-auto">
+              <CompiledSceneTag className="!bg-white/95 !border-slate-500/45 !px-1.5 !py-0 !text-[9px] !font-semibold !leading-4 !text-slate-700 shadow-sm backdrop-blur-sm" />
+            </div>
+          ) : null}
+          {active ? (
+            <div className="frameos-primary-fill rounded-full px-2 py-0.5 text-[11px] font-semibold text-white shadow-sm">
+              Active
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       {showMenu ? (
         <SceneDropDown
           context="scenes"

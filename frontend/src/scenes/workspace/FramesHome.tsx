@@ -676,7 +676,7 @@ export function SceneControlPanel(): JSX.Element | null {
                 />
                 {scene.settings?.execution !== 'interpreted' ? (
                   <div className="absolute left-2 top-2 z-10">
-                    <CompiledSceneTag className="shadow-sm" />
+                    <CompiledSceneTag className="!bg-white/95 !border-slate-500/45 !text-slate-700 shadow-sm backdrop-blur-sm" />
                   </div>
                 ) : null}
               </div>
