@@ -53,6 +53,20 @@ function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
+async function openSceneWorkspaceUtilityDrawer(page: Page, label: string): Promise<void> {
+  const heading = page.getByRole('heading', { name: new RegExp(`^${escapeRegex(label)}$`, 'i') }).last()
+  if (await heading.isVisible().catch(() => false)) {
+    return
+  }
+
+  await page
+    .locator('.scene-diagram-utility-buttons')
+    .getByRole('button', { name: new RegExp(`^${escapeRegex(label)}$`, 'i') })
+    .first()
+    .click()
+  await expect(heading).toBeVisible()
+}
+
 async function prepareAuthenticatedPage(page: Page): Promise<() => string[]> {
   const readErrors = attachFrontendErrorCollector(page)
   await page.setViewportSize({ width: 1440, height: 1000 })
@@ -183,8 +197,7 @@ test.describe('backend frontend e2e coverage @e2e', () => {
 
     for (const drawer of sceneUtilityDrawers) {
       await test.step(drawer, async () => {
-        await page.locator(`button[title="${drawer}"]`).first().click()
-        await expect(page.getByRole('heading', { name: new RegExp(`^${drawer}$`, 'i') }).last()).toBeVisible()
+        await openSceneWorkspaceUtilityDrawer(page, drawer)
       })
     }
 

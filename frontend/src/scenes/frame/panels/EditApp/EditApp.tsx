@@ -120,7 +120,6 @@ export function EditApp({ panel, sceneId, nodeId, showFileList = true }: EditApp
     sources,
     sourcesLoading,
     activeFile,
-    hasChanges,
     modelMarkers,
     requiresCompiledOnSave,
     appUsageCount,
@@ -128,7 +127,7 @@ export function EditApp({ panel, sceneId, nodeId, showFileList = true }: EditApp
     appTypeDeclarations,
     scene,
   } = useValues(logic)
-  const { saveChanges, forkAndSaveChanges, updateFile } = useActions(logic)
+  const { forkAndSaveChanges, updateFile } = useActions(logic)
   const [[monaco, editor], setMonacoAndEditor] = useState<[Monaco | null, importedEditor.IStandaloneCodeEditor | null]>(
     [null, null]
   )
@@ -242,22 +241,16 @@ export function EditApp({ panel, sceneId, nodeId, showFileList = true }: EditApp
               </div>
             </div>
           </div>
-        ) : hasChanges ? (
-          hasMultipleAppUsages ? (
-            <div className="frame-tool-card rounded-2xl p-3">
-              <div className="space-y-2">
-                <div>You are editing all {appUsageCount} uses of this app in this scene.</div>
-                <div className="flex flex-wrap gap-2">
-                  <Button size="small" onClick={saveChanges}>
-                    Save for all usages
-                  </Button>
-                  <Button size="small" color="secondary" onClick={forkAndSaveChanges}>
-                    Fork and save this copy
-                  </Button>
-                </div>
-              </div>
+        ) : null}
+        {hasMultipleAppUsages ? (
+          <div className="frame-tool-card flex flex-col gap-3 rounded-2xl p-3 text-sm @md:flex-row @md:items-center">
+            <div className="min-w-0 font-medium">
+              You are editing all {appUsageCount} uses of this app in this scene.
             </div>
-          ) : null
+            <Button size="small" color="secondary" onClick={forkAndSaveChanges} className="shrink-0">
+              Fork and save this copy
+            </Button>
+          </div>
         ) : null}
         <div className="frameos-inset overflow-hidden rounded-md border font-mono text-sm w-full flex-1">
           <Editor

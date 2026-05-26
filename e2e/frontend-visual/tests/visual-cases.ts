@@ -28,6 +28,10 @@ export interface VisualCase {
   variants?: VisualVariant[]
 }
 
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
 export const visualThemes: VisualTheme[] = ['light', 'dark']
 
 export const visualViewports: VisualViewport[] = [
@@ -37,17 +41,16 @@ export const visualViewports: VisualViewport[] = [
 ]
 
 async function openSceneWorkspaceUtilityDrawer(page: Page, label: string): Promise<void> {
-  const heading = page.getByRole('heading', { name: new RegExp(`^${label}$`, 'i') }).last()
+  const heading = page.getByRole('heading', { name: new RegExp(`^${escapeRegex(label)}$`, 'i') }).last()
   if (await heading.isVisible().catch(() => false)) {
     return
   }
 
-  const drawerButton = page.locator(`.workspace-drawer button[title="${label}"]`).first()
-  if (await drawerButton.count()) {
-    await drawerButton.click()
-  } else {
-    await page.locator(`button[title="${label}"]`).first().click()
-  }
+  await page
+    .locator('.scene-diagram-utility-buttons')
+    .getByRole('button', { name: new RegExp(`^${escapeRegex(label)}$`, 'i') })
+    .first()
+    .click()
   await heading.waitFor()
 }
 
