@@ -883,7 +883,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
       },
     ],
     utilityPanel: [
-      'state' as WorkspaceUtilityPanel | null,
+      null as WorkspaceUtilityPanel | null,
       {
         openUtilityPanel: (_, { panel }) => panel,
         openFrameTool: (_, { panel }) => panel,
