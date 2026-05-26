@@ -97,6 +97,7 @@ export function Terminal() {
   const { frameId } = useValues(frameLogic)
   const { theme } = useValues(workspaceLogic)
   const { lines, commandInput, connectionState } = useValues(terminalLogic({ frameId }))
+  const { rememberTerminalSessionFrame } = useActions(workspaceLogic)
   const { connect, sendCommand, sendKeys, setCommandInput, historyPrev, historyNext } = useActions(
     terminalLogic({ frameId })
   )
@@ -106,8 +107,9 @@ export function Terminal() {
   const shouldStickToBottomRef = useRef(true)
 
   useEffect(() => {
+    rememberTerminalSessionFrame(frameId)
     connect()
-  }, [])
+  }, [connect, frameId, rememberTerminalSessionFrame])
 
   useEffect(() => {
     if (!shouldStickToBottomRef.current) {
@@ -209,13 +211,13 @@ export function Terminal() {
   return (
     <div
       className={clsx(
-        'frame-tool-panel @container relative min-h-[calc(100vh-3rem)] w-full pb-44 @4xl:pb-28',
+        'terminal-panel frame-tool-panel @container relative w-full pb-44 @4xl:pb-28',
         theme === 'dark' ? 'text-slate-100' : 'text-slate-950'
       )}
     >
       <Virtuoso
         useWindowScroll
-        className="min-h-[calc(100vh-13rem)] overflow-x-hidden font-mono text-sm leading-6"
+        className="terminal-log-viewport overflow-x-hidden font-mono text-sm leading-6"
         data={lines}
         ref={virtuosoRef}
         followOutput={(isBottom) => (isBottom ? 'auto' : false)}

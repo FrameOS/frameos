@@ -52,8 +52,8 @@ export const terminalLogic = kea<terminalLogicType>([
   path(['src', 'scenes', 'frame', 'panels', 'Terminal', 'terminalLogic']),
   props({} as TerminalLogicProps),
   key((props) => props.frameId),
-  connect(() => ({
-    values: [frameLogic, ['frame']],
+  connect(({ frameId }: TerminalLogicProps) => ({
+    values: [frameLogic({ frameId }), ['frame']],
   })),
   actions({
     connect: true,
@@ -131,6 +131,9 @@ export const terminalLogic = kea<terminalLogicType>([
       }
       cache.ws = null
       const { frame } = values
+      if (!frame) {
+        return
+      }
       const hasAgentConnection = hasActiveAgentConnection(frame)
       const hasSshConfig = hasDirectSshConfig(frame)
       cache.manualDisconnect = false

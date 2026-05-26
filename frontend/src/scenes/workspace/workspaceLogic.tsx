@@ -744,6 +744,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
       panel,
       scrollTop,
     }),
+    rememberTerminalSessionFrame: (frameId: number) => ({ frameId }),
     setFrameAssetFolderExpanded: (frameId: number, path: string, expanded: boolean) => ({
       frameId,
       path,
@@ -933,6 +934,13 @@ export const workspaceLogic = kea<workspaceLogicType>([
             [key]: nextScrollTop,
           }
         },
+      },
+    ],
+    terminalSessionFrameIds: [
+      [] as number[],
+      {
+        rememberTerminalSessionFrame: (state, { frameId }) =>
+          state.includes(frameId) ? state : [...state, frameId],
       },
     ],
     frameAssetFolderExpansion: [

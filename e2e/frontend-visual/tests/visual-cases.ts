@@ -266,20 +266,6 @@ export const visualCases: VisualCase[] = [
     variants: [{ id: 'default' }, { id: 'network', prepare: openSettingsNetworkSection }],
   },
   {
-    id: 'scene-workspace-root',
-    title: 'Scene workspace root',
-    path: '/scenes',
-    fullPage: true,
-    variants: [{ id: 'default' }],
-  },
-  {
-    id: 'scene-workspace-frame',
-    title: 'Scene workspace frame',
-    path: '/scenes/1',
-    fullPage: true,
-    variants: [{ id: 'default' }],
-  },
-  {
     id: 'scene-workspace',
     title: 'Scene workspace',
     path: '/scenes/1/scene-dashboard',

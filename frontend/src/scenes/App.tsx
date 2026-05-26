@@ -18,6 +18,7 @@ import { longRunningTasksModel } from '../models/longRunningTasksModel'
 import { LongRunningTaskToasts } from '../components/LongRunningTaskToasts'
 import { inHassioIngress } from '../utils/inHassioIngress'
 import { WorkspaceRouteLoading } from './workspace/WorkspaceRouteLoading'
+import { PersistentTerminalSessions } from './frame/panels/Terminal/PersistentTerminalSessions'
 
 interface DisplayedScene {
   scene: SceneKey
@@ -122,6 +123,7 @@ export function LoggedInApp() {
 
   return (
     <>
+      <PersistentTerminalSessions />
       <SceneRoute scene={scene} params={params} fallback={<WorkspaceRouteLoading scene={scene} />} />
       <LongRunningTaskToasts />
     </>

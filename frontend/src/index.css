@@ -1186,6 +1186,9 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
   --workspace-terminal-left: calc(var(--workspace-main-offset, 0px) + 1.25rem);
   --workspace-terminal-left-narrow: calc(var(--workspace-main-offset, 0px) + 1rem);
   --workspace-terminal-left-compact: calc(var(--workspace-main-offset, 0px) + 0.75rem);
+  --workspace-main-top-padding: 1.5rem;
+  --workspace-main-bottom-padding: 1.5rem;
+  --terminal-command-reserve: 10rem;
   container-name: workspace-main;
   container-type: inline-size;
   padding-left: var(--workspace-main-offset);
@@ -1386,6 +1389,17 @@ html[data-frameos-theme='dark'] .app-compiled-warning {
   z-index: 20;
 }
 
+.terminal-panel {
+  min-height: calc(100dvh - var(--workspace-main-top-padding, 1.5rem) - var(--workspace-main-bottom-padding, 1.5rem));
+}
+
+.terminal-log-viewport {
+  min-height: calc(
+    100dvh - var(--workspace-main-top-padding, 1.5rem) - var(--workspace-main-bottom-padding, 1.5rem) -
+      var(--terminal-command-reserve, 10rem)
+  );
+}
+
 .logs-filter-toolbar-floating {
   --logs-toolbar-left: var(--workspace-main-offset, 0px);
   --logs-toolbar-right: 5.5rem;
@@ -1484,6 +1498,10 @@ html[data-frameos-theme='dark'] .app-compiled-warning {
     left: var(--workspace-terminal-left-narrow);
   }
 
+  .terminal-panel {
+    --terminal-command-reserve: 11rem;
+  }
+
   .terminal-scroll-latest-button {
     right: 1rem;
     bottom: 10rem;
@@ -1527,6 +1545,10 @@ html[data-frameos-theme='dark'] .app-compiled-warning {
     bottom: 0.75rem;
     left: var(--workspace-terminal-left-compact);
     border-radius: 1rem;
+  }
+
+  .terminal-panel {
+    --terminal-command-reserve: 13rem;
   }
 
   .terminal-scroll-latest-button {
@@ -1583,6 +1605,7 @@ html[data-frameos-theme='dark'] .app-compiled-warning {
     --workspace-terminal-left: 1rem;
     --workspace-terminal-left-narrow: 1rem;
     --workspace-terminal-left-compact: 0.75rem;
+    --workspace-main-top-padding: 5.75rem;
     padding-left: 1rem;
     padding-top: 5.75rem !important;
   }
@@ -1667,6 +1690,7 @@ html[data-frameos-theme='dark'] .app-compiled-warning {
     --workspace-terminal-left: 0.75rem;
     --workspace-terminal-left-narrow: 0.75rem;
     --workspace-terminal-left-compact: 0.75rem;
+    --workspace-main-top-padding: 5.25rem;
     padding-left: 0.75rem;
     padding-right: 0.75rem;
     padding-top: 5.25rem !important;
