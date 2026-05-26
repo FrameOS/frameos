@@ -3,6 +3,7 @@ import path from 'path'
 
 const baseURL = process.env.FRONTEND_VISUAL_BASE_URL ?? 'http://127.0.0.1:8989'
 const testDir = path.join(__dirname, 'tests')
+const maxDiffPixelRatio = Number(process.env.FRONTEND_VISUAL_MAX_DIFF ?? '0.001')
 
 export default defineConfig({
   testDir,
@@ -12,16 +13,13 @@ export default defineConfig({
     toHaveScreenshot: {
       animations: 'disabled',
       caret: 'hide',
-      maxDiffPixelRatio: Number(process.env.FRONTEND_VISUAL_MAX_DIFF ?? '0.01'),
+      maxDiffPixelRatio,
       threshold: 0.2,
     },
   },
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
-  reporter: [
-    ['list'],
-    ['html', { open: 'never', outputFolder: path.join(__dirname, 'playwright-report') }],
-  ],
+  reporter: [['list'], ['html', { open: 'never', outputFolder: path.join(__dirname, 'playwright-report') }]],
   outputDir: path.join(__dirname, 'test-results'),
   snapshotPathTemplate: '{testDir}/../snapshots/{projectName}/{testFilePath}/{arg}{ext}',
   use: {
