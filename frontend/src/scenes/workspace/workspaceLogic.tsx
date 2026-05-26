@@ -429,15 +429,8 @@ function frameIsActiveForHome(frame: FrameType): boolean {
   return frameIsActive(frame)
 }
 
-function frameIsActiveInSnapshot(
-  frame: FrameType,
-  frameActiveSnapshot: Record<number, boolean>,
-  hasFrameOrderSnapshot: boolean
-): boolean {
-  if (!hasFrameOrderSnapshot) {
-    return frameIsActiveForHome(frame)
-  }
-  return frameActiveSnapshot[frame.id] === true
+function frameIsActiveInCurrentState(frame: FrameType): boolean {
+  return frameIsActiveForHome(frame)
 }
 
 function frameSortName(frame: FrameType): string {
@@ -1001,18 +994,13 @@ export const workspaceLogic = kea<workspaceLogicType>([
         applyFrameOrderSnapshot(archivedFramesList, frameOrderSnapshot),
     ],
     homeActiveFramesList: [
-      (s) => [s.orderedActiveFramesList, s.frameActiveSnapshot, s.frameOrderSnapshot],
-      (orderedActiveFramesList, frameActiveSnapshot, frameOrderSnapshot): FrameType[] =>
-        orderedActiveFramesList.filter((frame) =>
-          frameIsActiveInSnapshot(frame, frameActiveSnapshot, frameOrderSnapshot.length > 0)
-        ),
+      (s) => [s.orderedActiveFramesList],
+      (orderedActiveFramesList): FrameType[] => orderedActiveFramesList.filter(frameIsActiveInCurrentState),
     ],
     homeInactiveFramesList: [
-      (s) => [s.orderedActiveFramesList, s.frameActiveSnapshot, s.frameOrderSnapshot],
-      (orderedActiveFramesList, frameActiveSnapshot, frameOrderSnapshot): FrameType[] =>
-        orderedActiveFramesList.filter(
-          (frame) => !frameIsActiveInSnapshot(frame, frameActiveSnapshot, frameOrderSnapshot.length > 0)
-        ),
+      (s) => [s.orderedActiveFramesList],
+      (orderedActiveFramesList): FrameType[] =>
+        orderedActiveFramesList.filter((frame) => !frameIsActiveInCurrentState(frame)),
     ],
     filteredOverviewFrames: [
       (s) => [s.orderedActiveFramesList, s.search],
@@ -1049,22 +1037,14 @@ export const workspaceLogic = kea<workspaceLogicType>([
       },
     ],
     overviewActiveFrameSections: [
-      (s) => [s.overviewFrameSections, s.frameActiveSnapshot, s.frameOrderSnapshot],
-      (overviewFrameSections, frameActiveSnapshot, frameOrderSnapshot): OverviewFrameSection[] =>
-        overviewFrameSections.filter(
-          (section) =>
-            !section.archived &&
-            frameIsActiveInSnapshot(section.frame, frameActiveSnapshot, frameOrderSnapshot.length > 0)
-        ),
+      (s) => [s.overviewFrameSections],
+      (overviewFrameSections): OverviewFrameSection[] =>
+        overviewFrameSections.filter((section) => !section.archived && frameIsActiveInCurrentState(section.frame)),
     ],
     overviewInactiveFrameSections: [
-      (s) => [s.overviewFrameSections, s.frameActiveSnapshot, s.frameOrderSnapshot],
-      (overviewFrameSections, frameActiveSnapshot, frameOrderSnapshot): OverviewFrameSection[] =>
-        overviewFrameSections.filter(
-          (section) =>
-            !section.archived &&
-            !frameIsActiveInSnapshot(section.frame, frameActiveSnapshot, frameOrderSnapshot.length > 0)
-        ),
+      (s) => [s.overviewFrameSections],
+      (overviewFrameSections): OverviewFrameSection[] =>
+        overviewFrameSections.filter((section) => !section.archived && !frameIsActiveInCurrentState(section.frame)),
     ],
     overviewArchivedFrameSections: [
       (s) => [s.overviewFrameSections],

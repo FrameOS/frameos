@@ -70,6 +70,10 @@ export function frameIsStale(frame: FrameType): boolean {
   return Number.isFinite(lastLogAt) && Date.now() - lastLogAt > 1000 * 60 * 60
 }
 
+function frameHasActivityLog(frame: FrameType): boolean {
+  return Number.isFinite(parseFrameTimestamp(frame.last_log_at))
+}
+
 export function frameIsHealthy(frame: FrameType): boolean {
   return frame.status === 'ready' && !frameIsStale(frame)
 }
@@ -81,7 +85,7 @@ export function frameIsActive(frame: FrameType): boolean {
   if (frameIsStale(frame)) {
     return false
   }
-  if (frame.last_log_at) {
+  if (frameHasActivityLog(frame)) {
     return true
   }
   return frame.status === 'ready' || frameStatusWithSpinner.includes(frame.status)
