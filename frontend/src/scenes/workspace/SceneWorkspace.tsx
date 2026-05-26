@@ -449,7 +449,7 @@ function UtilityToolbar({ scene }: { scene: FrameScene | null }): JSX.Element {
   const definitions = sceneUtilityDefinitions(scene)
 
   return (
-    <div className="scene-diagram-utility-toolbar flex shrink-0 flex-col items-center gap-2">
+    <div className="scene-diagram-utility-toolbar pointer-events-none flex shrink-0 flex-col items-center gap-2">
       {definitions.map((definition) => (
         <button
           key={definition.panel}
@@ -464,7 +464,7 @@ function UtilityToolbar({ scene }: { scene: FrameScene | null }): JSX.Element {
             openUtilityPanel(definition.panel)
           }}
           className={clsx(
-            'frameos-icon-button flex h-10 w-10 items-center justify-center rounded-xl border border-white/90 bg-white/90 text-slate-500 shadow-lg shadow-slate-300/25 backdrop-blur-xl transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+            'frameos-icon-button pointer-events-auto flex h-10 w-10 items-center justify-center rounded-xl border border-white/90 bg-white/90 text-slate-500 shadow-lg shadow-slate-300/25 backdrop-blur-xl transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
             utilityPanelIsVisible && utilityPanel === definition.panel
               ? 'frameos-primary-active text-white'
               : 'bg-white/90 text-slate-500'
@@ -492,11 +492,11 @@ function SceneDiagramOverlay({
 
   return (
     <div className="scene-diagram-overlay pointer-events-none absolute inset-0 z-20">
-      <div className="scene-diagram-corner-toolbar pointer-events-auto absolute flex min-w-0 items-start gap-2">
-        <div className="scene-diagram-node-toolbar scene-diagram-utility-toolbar flex min-w-0 flex-wrap items-center justify-end gap-2">
+      <div className="scene-diagram-corner-toolbar pointer-events-none absolute flex min-w-0 items-start gap-2">
+        <div className="scene-diagram-node-toolbar scene-diagram-utility-toolbar pointer-events-none flex min-w-0 flex-wrap items-center justify-end gap-2">
           {sceneId ? <DiagramToolbar sceneId={sceneId} showSceneAction={false} variant="floating" /> : null}
         </div>
-        <div className="scene-diagram-utility-buttons scene-diagram-utility-toolbar flex shrink-0 flex-col items-center gap-2">
+        <div className="scene-diagram-utility-buttons scene-diagram-utility-toolbar pointer-events-none flex shrink-0 flex-col items-center gap-2">
           <button
             type="button"
             title="Open AI chat"
@@ -509,7 +509,7 @@ function SceneDiagramOverlay({
               openChatDrawer(frameId, sceneId)
             }}
             className={clsx(
-              'frameos-icon-button flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/90 bg-white/90 text-slate-500 shadow-lg shadow-slate-300/25 backdrop-blur-xl transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+              'frameos-icon-button pointer-events-auto flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/90 bg-white/90 text-slate-500 shadow-lg shadow-slate-300/25 backdrop-blur-xl transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
               chatDrawerIsOpen ? 'frameos-primary-active text-white' : 'bg-white/90 text-slate-500'
             )}
           >

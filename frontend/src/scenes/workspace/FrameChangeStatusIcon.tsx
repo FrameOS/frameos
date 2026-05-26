@@ -84,6 +84,10 @@ export function FrameChangeStatusIcon({
         className={clsx(
           wrapperClassName,
           idleClassName,
+          'frameos-change-status-button--idle',
+          isDashboard
+            ? 'frameos-change-status-button--idle-dashboard'
+            : 'frameos-change-status-button--idle-sidebar',
           'focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400'
         )}
       >

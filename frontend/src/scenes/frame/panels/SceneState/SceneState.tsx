@@ -9,24 +9,39 @@ import { Select } from '../../../../components/Select'
 import { appConfigFieldTypes } from '../../../../types'
 import { Button } from '../../../../components/Button'
 import { Tooltip } from '../../../../components/Tooltip'
+import { Switch } from '../../../../components/Switch'
 import { stateFieldAccess } from '../../../../utils/fieldTypes'
 import { ClipboardDocumentIcon } from '@heroicons/react/24/outline'
 import copy from 'copy-to-clipboard'
 import { TextArea } from '../../../../components/TextArea'
 import { panelsLogic } from '../panelsLogic'
 import { H6 } from '../../../../components/H6'
-import { camelize } from '../../../../utils/camelize'
 import { Tag } from '../../../../components/Tag'
 
-const PERSIST_OPTIONS = [
-  { label: 'memory (reset on boot)', value: 'memory' },
-  { label: 'disk (or sd card)', value: 'disk' },
-]
+function codenameToLabel(codename: string): string {
+  const label = codename
+    .replace(/[_-]+/g, ' ')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLowerCase()
+  return label ? label.charAt(0).toUpperCase() + label.slice(1) : ''
+}
 
-const ACCESS_OPTIONS = [
-  { label: 'private (use in the scene)', value: 'private' },
-  { label: 'public (controllable externally)', value: 'public' },
-]
+function JavaScriptStateHelp({ codeClassName }: { codeClassName?: string }): JSX.Element {
+  return (
+    <div className="space-y-2">
+      <div>
+        In inline JavaScript code nodes, read values with <code className={codeClassName}>state.variableName</code>.
+      </div>
+      <div>
+        In JavaScript apps, read from <code className={codeClassName}>app.state.variableName</code> and write shared
+        values with <code className={codeClassName}>{"frameos.setState('variableName', value)"}</code>.
+      </div>
+    </div>
+  )
+}
 
 export function SceneState({ sceneId: sceneIdOverride }: { sceneId?: string | null } = {}): JSX.Element {
   const { frameId } = useValues(frameLogic)
@@ -43,6 +58,7 @@ export function SceneState({ sceneId: sceneIdOverride }: { sceneId?: string | nu
   const stateFields = scene.fields ?? []
   const publicFieldCount = stateFields.filter((field) => field.access === 'public').length
   const persistedFieldCount = stateFields.filter((field) => field.persist === 'disk').length
+  const isInterpreted = scene.settings?.execution === 'interpreted'
 
   const onDragStart = (event: any, type: 'state', keyword: string, index: number) => {
     setDraggedField(index)
@@ -83,14 +99,18 @@ export function SceneState({ sceneId: sceneIdOverride }: { sceneId?: string | nu
                           Fields defined here are accessible in your scene via the{' '}
                           <code className="text-xs">{'state'}</code> object.
                         </div>
-                        <div>
-                          The state is Nim's{' '}
-                          <a href="https://nim-lang.org/docs/json.html" target="_blank" rel="noreferer">
-                            <code className="text-xs underline">JsonNode</code>
-                          </a>
-                          . Use <code className="text-xs">{'state{"field"}.getStr()'}</code> to read values and{' '}
-                          <pre className="text-xs">{'state{"field"} = %*("str")'}</pre> to store them.
-                        </div>
+                        {isInterpreted ? (
+                          <JavaScriptStateHelp codeClassName="text-xs" />
+                        ) : (
+                          <div>
+                            The state is Nim's{' '}
+                            <a href="https://nim-lang.org/docs/json.html" target="_blank" rel="noreferer">
+                              <code className="text-xs underline">JsonNode</code>
+                            </a>
+                            . Use <code className="text-xs">{'state{"field"}.getStr()'}</code> to read values and{' '}
+                            <pre className="text-xs">{'state{"field"} = %*("str")'}</pre> to store them.
+                          </div>
+                        )}
                       </div>
                     }
                   />
@@ -118,34 +138,39 @@ export function SceneState({ sceneId: sceneIdOverride }: { sceneId?: string | nu
           <div className="space-y-3">
             {scene?.fields?.map((field, index) => (
               <Group name={['fields', index]} key={index}>
-                {fieldsWithErrors[field.name] ? (
+                {fieldsWithErrors[index] ? (
                   <div className="rounded-xl bg-red-500/10 px-3 py-2 text-sm text-red-400">
                     <p>There are errors with this field. Please fix them to save.</p>
                   </div>
                 ) : null}
                 {editingFields[index] ? (
                   <div className="frame-tool-card space-y-4 rounded-2xl p-4">
-                    <Field name="label" label="Field label (human readable)">
-                      {({ value, onChange }) => (
+                    <Field name="name" label="Codename">
+                      {({ value }) => (
                         <TextInput
-                          placeholder="e.g. Search Term"
+                          placeholder="e.g. searchTerm"
                           value={value}
                           onChange={(value) => {
-                            if (!field.name || field.name === camelize(field.label)) {
-                              setFields([
-                                ...(scene?.fields ?? []).map((f, i) =>
-                                  i === index ? { ...f, name: camelize(value), label: value } : f
-                                ),
-                              ])
-                            } else {
-                              onChange(value)
-                            }
+                            setFields(
+                              (scene?.fields ?? []).map((field, i) => {
+                                if (i !== index) {
+                                  return field
+                                }
+                                const currentGeneratedLabel = codenameToLabel(field.name ?? '')
+                                const labelWasGenerated = field.label === currentGeneratedLabel
+                                return {
+                                  ...field,
+                                  name: value,
+                                  label: labelWasGenerated ? codenameToLabel(value) : field.label,
+                                }
+                              })
+                            )
                           }}
                         />
                       )}
                     </Field>
-                    <Field name="name" label="Field name (for use in code)">
-                      <TextInput placeholder="e.g. search" />
+                    <Field name="label" label="Label">
+                      <TextInput placeholder="e.g. Search Term" />
                     </Field>
                     <Field name="type" label="Field type">
                       <Select
@@ -175,7 +200,7 @@ export function SceneState({ sceneId: sceneIdOverride }: { sceneId?: string | nu
                     </Field>
                     <Field
                       name="persist"
-                      label="Persist"
+                      label="Persist on disk"
                       tooltip={
                         <>
                           Do not persist to disk values that change rapidly, as this will noticably impact the lifetime
@@ -183,26 +208,38 @@ export function SceneState({ sceneId: sceneIdOverride }: { sceneId?: string | nu
                         </>
                       }
                     >
-                      <Select options={PERSIST_OPTIONS} />
+                      {({ value, onChange }) => (
+                        <Switch
+                          aria-label="Persist on disk"
+                          value={value === 'disk'}
+                          onChange={(enabled) => onChange(enabled ? 'disk' : 'memory')}
+                        />
+                      )}
                     </Field>
                     <Field
                       name="access"
-                      label="Access"
+                      label="Can be set by user"
                       tooltip={
                         <>
-                          Private: The field is only accessible within the scene.
-                          <br />
-                          Public: The field becomes part of the scene's options that can be controlled externally.
+                          When enabled, this field becomes part of the scene options that can be controlled externally.
+                          When disabled, it is only accessible inside the scene.
                         </>
                       }
                     >
-                      <Select options={ACCESS_OPTIONS} />
+                      {({ value, onChange }) => (
+                        <Switch
+                          aria-label="Can be set by user"
+                          value={value === 'public'}
+                          onChange={(enabled) => onChange(enabled ? 'public' : 'private')}
+                        />
+                      )}
                     </Field>
                     <div className="flex w-full items-center justify-between gap-2">
                       <Button
                         onClick={() => {
                           closeField(index)
                         }}
+                        disabled={!field.name?.trim()}
                         color="secondary"
                         size="small"
                       >
@@ -284,11 +321,22 @@ export function SceneState({ sceneId: sceneIdOverride }: { sceneId?: string | nu
             ))}
             {(scene.fields ?? []).length === 0 ? (
               <div className="frame-tool-card rounded-2xl p-4 frame-tool-muted">
-                Use the <code>state</code> object of type{' '}
-                <a href="https://nim-lang.org/docs/json.html" className="underline" target="_blank" rel="noreferer">
-                  <code>JsonNode</code>
-                </a>{' '}
-                to share data between nodes.
+                {isInterpreted ? (
+                  <JavaScriptStateHelp />
+                ) : (
+                  <>
+                    Use the <code>state</code> object of type{' '}
+                    <a
+                      href="https://nim-lang.org/docs/json.html"
+                      className="underline"
+                      target="_blank"
+                      rel="noreferer"
+                    >
+                      <code>JsonNode</code>
+                    </a>{' '}
+                    to share data between nodes.
+                  </>
+                )}
               </div>
             ) : null}
           </div>

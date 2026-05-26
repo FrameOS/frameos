@@ -75,7 +75,7 @@ interface ConnectingNode {
 }
 
 const floatingToolbarButtonClassName =
-  'frameos-icon-button scene-diagram-floating-button flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/90 bg-white/90 text-slate-500 shadow-lg shadow-slate-300/25 backdrop-blur-xl transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400'
+  'frameos-icon-button scene-diagram-floating-button pointer-events-auto flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/90 bg-white/90 text-slate-500 shadow-lg shadow-slate-300/25 backdrop-blur-xl transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400'
 const diagramSelectionDragClassName = 'frameos-diagram-selection-dragging'
 const diagramSelectionDragIgnoredSelector =
   'a, button, input, select, textarea, [contenteditable="true"], [contenteditable=""], .monaco-editor'
@@ -158,7 +158,7 @@ export function DiagramToolbar({
   const floating = variant === 'floating'
 
   return (
-    <div className={clsx('flex items-center gap-2', floating && 'scene-diagram-floating-toolbar')}>
+    <div className={clsx('flex items-center gap-2', floating && 'scene-diagram-floating-toolbar pointer-events-none')}>
       {showSceneAction ? (
         sceneHasChanges ? (
           floating ? (

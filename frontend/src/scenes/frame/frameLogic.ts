@@ -879,8 +879,7 @@ export const frameLogic = kea<frameLogicType>([
           : undefined,
         scenes: (state.scenes ?? []).map((scene: Record<string, any>) => ({
           fields: (scene.fields ?? []).map((field: Record<string, any>) => ({
-            name: field.name ? '' : 'Name is required',
-            label: field.label ? '' : 'Label is required',
+            name: String(field.name ?? '').trim() ? '' : 'Codename is required',
             type: field.type ? '' : 'Type is required',
           })),
         })),

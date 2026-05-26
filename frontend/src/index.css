@@ -204,6 +204,21 @@ body.frameos-workspace-scroll-locked {
     0 0 0 3px rgb(var(--frameos-color-brass-rgb) / 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.7);
 }
 
+.frameos-change-status-button--idle:hover {
+  transform: translateY(-1px);
+  color: #111827;
+}
+
+.frameos-change-status-button--idle-sidebar:hover {
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 6px 14px rgba(100, 116, 139, 0.14);
+}
+
+.frameos-change-status-button--idle-dashboard:hover {
+  background: #ffffff;
+  box-shadow: 0 10px 22px rgba(100, 116, 139, 0.18);
+}
+
 .frameos-change-status-link {
   color: color-mix(in srgb, var(--frameos-color-brass) 78%, var(--frameos-color-graphite));
 }
@@ -891,6 +906,13 @@ html[data-frameos-theme='dark'] .frameos-change-status-button:hover {
   color: color-mix(in srgb, var(--frameos-color-brass) 84%, var(--frameos-color-mist));
   box-shadow: 0 12px 28px rgb(var(--frameos-color-brass-rgb) / 0.14),
     0 0 0 3px rgb(var(--frameos-color-brass-rgb) / 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+
+.frameos-theme-dark .frameos-change-status-button--idle:hover,
+html[data-frameos-theme='dark'] .frameos-change-status-button--idle:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #f8fafc;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.16);
 }
 
 .frameos-theme-dark .frameos-change-status-link,
