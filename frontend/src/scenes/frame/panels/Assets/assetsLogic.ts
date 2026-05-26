@@ -1,11 +1,12 @@
 import { actions, afterMount, beforeUnmount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 
-import { AssetType } from '../../../../types'
+import { AssetType, MetricsType } from '../../../../types'
 import { loaders } from 'kea-loaders'
 import { socketLogic } from '../../../socketLogic'
 
 import type { assetsLogicType } from './assetsLogicType'
 import { frameLogic } from '../../frameLogic'
+import { metricsLogic } from '../Metrics/metricsLogic'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
 import { frameAssetsApiPath } from '../../../../utils/frameAssetsApi'
@@ -24,6 +25,21 @@ export interface AssetNode {
   size?: number
   mtime?: number
   children: Record<string, AssetNode>
+}
+
+export interface AssetStats {
+  files: number
+  folders: number
+  images: number
+  totalBytes: number
+  latestMtime: number | null
+}
+
+export interface DiskStats {
+  totalBytes: number
+  usedBytes: number
+  availableBytes: number
+  usedPercent: number
 }
 
 interface FrameAssetsResponse {
@@ -71,6 +87,91 @@ function buildAssetTree(assets: AssetType[], rootName: string): AssetNode {
     currentNode.mtime = asset.mtime
   }
   return root
+}
+
+const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '*.qoi', '.ppm', '.svg']
+const normalizedImageExtensions = imageExtensions.map((extension) => extension.replace('*', '').toLowerCase())
+
+function hasImageExtension(fileName: string): boolean {
+  const normalizedName = fileName.toLowerCase()
+  return normalizedImageExtensions.some((extension) => normalizedName.endsWith(extension))
+}
+
+export function isInThumbsFolder(path: string): boolean {
+  const normalizedPath = path.replace(/\\/g, '/')
+  return (
+    normalizedPath === '.thumbs' ||
+    normalizedPath.endsWith('/.thumbs') ||
+    normalizedPath.startsWith('.thumbs/') ||
+    normalizedPath.includes('/.thumbs/')
+  )
+}
+
+function collectAssetStats(node: AssetNode, isRoot = true): AssetStats {
+  const stats: AssetStats = {
+    files: 0,
+    folders: isRoot ? 0 : 1,
+    images: 0,
+    totalBytes: 0,
+    latestMtime: node.mtime && node.mtime > 0 ? node.mtime : null,
+  }
+
+  if (!node.isFolder) {
+    stats.files = 1
+    stats.folders = 0
+    stats.images = hasImageExtension(node.name) && !isInThumbsFolder(node.path) ? 1 : 0
+    stats.totalBytes = typeof node.size === 'number' && node.size > 0 ? node.size : 0
+  }
+
+  Object.values(node.children).forEach((child) => {
+    const childStats = collectAssetStats(child, false)
+    stats.files += childStats.files
+    stats.folders += childStats.folders
+    stats.images += childStats.images
+    stats.totalBytes += childStats.totalBytes
+    stats.latestMtime =
+      stats.latestMtime && childStats.latestMtime
+        ? Math.max(stats.latestMtime, childStats.latestMtime)
+        : stats.latestMtime ?? childStats.latestMtime
+  })
+
+  return stats
+}
+
+export function nodeHasPlayableImages(node: AssetNode): boolean {
+  if (isInThumbsFolder(node.path)) {
+    return false
+  }
+
+  if (!node.isFolder) {
+    return hasImageExtension(node.name)
+  }
+
+  return Object.values(node.children).some(nodeHasPlayableImages)
+}
+
+function latestDiskStats(metrics: MetricsType[]): DiskStats | null {
+  for (let index = metrics.length - 1; index >= 0; index--) {
+    const diskUsage = metrics[index].metrics?.diskUsage
+    if (!diskUsage || typeof diskUsage !== 'object') {
+      continue
+    }
+
+    const totalBytes = Number(diskUsage.total ?? 0)
+    const availableBytes = Number(diskUsage.available ?? diskUsage.free ?? 0)
+    const usedBytes = Number(diskUsage.used ?? totalBytes - availableBytes)
+    const percentage = Number(diskUsage.percentage)
+    if (totalBytes > 0 && Number.isFinite(usedBytes) && Number.isFinite(availableBytes)) {
+      return {
+        totalBytes,
+        usedBytes,
+        availableBytes,
+        usedPercent: Number.isFinite(percentage) ? percentage : (usedBytes / totalBytes) * 100,
+      }
+    }
+  }
+
+  return null
 }
 
 function normalizeAssetsPath(assetsPath?: string): string {
@@ -130,7 +231,10 @@ function errorMessage(error: unknown, fallback: string): string {
 export const assetsLogic = kea<assetsLogicType>([
   path(['src', 'scenes', 'frame', 'assetsLogic']),
   props({} as AssetsLogicProps),
-  connect(({ frameId }: AssetsLogicProps) => ({ logic: [socketLogic], values: [frameLogic({ frameId }), ['frame']] })),
+  connect(({ frameId }: AssetsLogicProps) => ({
+    logic: [socketLogic],
+    values: [frameLogic({ frameId }), ['frame'], metricsLogic({ frameId }), ['sortedMetrics']],
+  })),
   key((props) => props.frameId),
   actions({
     uploadAssets: (path: string) => ({ path }),
@@ -260,6 +364,8 @@ export const assetsLogic = kea<assetsLogicType>([
         return buildAssetTree(cleanedAssets, frame.assets_path ?? '/srv/assets')
       },
     ],
+    assetStats: [(s) => [s.assetTree], (assetTree) => collectAssetStats(assetTree)],
+    diskStats: [(s) => [s.sortedMetrics], (sortedMetrics): DiskStats | null => latestDiskStats(sortedMetrics)],
   }),
   listeners(({ actions, props, values }) => ({
     uploadDroppedFiles: async ({ path, files }) => {

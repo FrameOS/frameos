@@ -1,7 +1,14 @@
 import { useActions, useMountedLogic, useValues } from 'kea'
 import clsx from 'clsx'
 import { frameLogic } from '../../frameLogic'
-import { assetsLogic } from './assetsLogic'
+import {
+  assetsLogic,
+  isInThumbsFolder,
+  nodeHasPlayableImages,
+  type AssetNode,
+  type AssetStats,
+  type DiskStats,
+} from './assetsLogic'
 import { panelsLogic } from '../panelsLogic'
 import { DocumentIcon, FolderIcon, FolderOpenIcon } from '@heroicons/react/24/outline'
 import {
@@ -22,9 +29,7 @@ import { buildLocalImageFolderScene, buildLocalImageScene } from '../Scenes/scen
 import { v4 as uuidv4 } from 'uuid'
 import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
 import { frameAssetUrl } from '../../../../utils/frameAssetsApi'
-import { metricsLogic } from '../Metrics/metricsLogic'
 import { frameAssetFolderExpansionKey, workspaceLogic } from '../../../workspace/workspaceLogic'
-import type { MetricsType } from '../../../../types'
 
 function humaniseSize(size: number) {
   const units = ['B', 'KB', 'MB', 'GB', 'TB']
@@ -36,116 +41,9 @@ function humaniseSize(size: number) {
   return `${size.toFixed(2)} ${units[unitIndex]}`
 }
 
-const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '*.qoi', '.ppm', '.svg']
-const normalizedImageExtensions = imageExtensions.map((extension) => extension.replace('*', '').toLowerCase())
-const hasImageExtension = (fileName: string): boolean => {
-  const normalizedName = fileName.toLowerCase()
-  return normalizedImageExtensions.some((extension) => normalizedName.endsWith(extension))
-}
-const isInThumbsFolder = (path: string): boolean => {
-  const normalizedPath = path.replace(/\\/g, '/')
-  return (
-    normalizedPath === '.thumbs' ||
-    normalizedPath.endsWith('/.thumbs') ||
-    normalizedPath.startsWith('.thumbs/') ||
-    normalizedPath.includes('/.thumbs/')
-  )
-}
 const playSceneButtonClassName =
   'asset-play-button frameos-primary-outline-action shrink-0 rounded-lg border p-1.5 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400'
 const assetRowActionsClassName = 'asset-row-actions ml-auto flex w-[5.25rem] shrink-0 items-center justify-end gap-2'
-
-interface AssetStats {
-  files: number
-  folders: number
-  images: number
-  totalBytes: number
-  latestMtime: number | null
-}
-
-interface DiskStats {
-  totalBytes: number
-  usedBytes: number
-  availableBytes: number
-  usedPercent: number
-}
-
-// Define the shape of the node we get back from buildAssetTree
-interface AssetNode {
-  name: string
-  path: string
-  isFolder: boolean
-  size?: number
-  mtime?: number
-  children: Record<string, AssetNode>
-}
-
-function collectAssetStats(node: AssetNode, isRoot = true): AssetStats {
-  const stats: AssetStats = {
-    files: 0,
-    folders: isRoot ? 0 : 1,
-    images: 0,
-    totalBytes: 0,
-    latestMtime: node.mtime && node.mtime > 0 ? node.mtime : null,
-  }
-
-  if (!node.isFolder) {
-    stats.files = 1
-    stats.folders = 0
-    stats.images = hasImageExtension(node.name) && !isInThumbsFolder(node.path) ? 1 : 0
-    stats.totalBytes = typeof node.size === 'number' && node.size > 0 ? node.size : 0
-  }
-
-  Object.values(node.children).forEach((child) => {
-    const childStats = collectAssetStats(child, false)
-    stats.files += childStats.files
-    stats.folders += childStats.folders
-    stats.images += childStats.images
-    stats.totalBytes += childStats.totalBytes
-    stats.latestMtime =
-      stats.latestMtime && childStats.latestMtime
-        ? Math.max(stats.latestMtime, childStats.latestMtime)
-        : stats.latestMtime ?? childStats.latestMtime
-  })
-
-  return stats
-}
-
-function nodeHasPlayableImages(node: AssetNode): boolean {
-  if (isInThumbsFolder(node.path)) {
-    return false
-  }
-
-  if (!node.isFolder) {
-    return hasImageExtension(node.name)
-  }
-
-  return Object.values(node.children).some(nodeHasPlayableImages)
-}
-
-function latestDiskStats(metrics: MetricsType[]): DiskStats | null {
-  for (let index = metrics.length - 1; index >= 0; index--) {
-    const diskUsage = metrics[index].metrics?.diskUsage
-    if (!diskUsage || typeof diskUsage !== 'object') {
-      continue
-    }
-
-    const totalBytes = Number(diskUsage.total ?? 0)
-    const availableBytes = Number(diskUsage.available ?? diskUsage.free ?? 0)
-    const usedBytes = Number(diskUsage.used ?? totalBytes - availableBytes)
-    const percentage = Number(diskUsage.percentage)
-    if (totalBytes > 0 && Number.isFinite(usedBytes) && Number.isFinite(availableBytes)) {
-      return {
-        totalBytes,
-        usedBytes,
-        availableBytes,
-        usedPercent: Number.isFinite(percentage) ? percentage : (usedBytes / totalBytes) * 100,
-      }
-    }
-  }
-
-  return null
-}
 
 function formatDateFromSeconds(timestamp: number | null): string {
   if (!timestamp) {
@@ -652,15 +550,12 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
   useMountedLogic(assetsLogic(assetsLogicProps))
   const { sendEvent } = useActions(frameLogic)
   const { openLogs } = useActions(panelsLogic)
-  const { assetsLoading, assetsRefreshing, assetTree } = useValues(assetsLogic(assetsLogicProps))
-  const { sortedMetrics } = useValues(metricsLogic({ frameId: frame.id }))
+  const { assetsLoading, assetsRefreshing, assetStats, assetTree, diskStats } = useValues(assetsLogic(assetsLogicProps))
   const { frameAssetFolderExpansion } = useValues(workspaceLogic)
   const { refreshAssets, syncAssets, uploadAssets, uploadDroppedFiles, deleteAsset, renameAsset, createFolder } =
     useActions(assetsLogic(assetsLogicProps))
   const { setFrameAssetFolderExpanded } = useActions(workspaceLogic)
   const { openAsset } = useActions(panelsLogic({ frameId: frame.id }))
-  const assetStats = collectAssetStats(assetTree)
-  const diskStats = latestDiskStats(sortedMetrics)
   const showSyncAction = !isInFrameAdminMode()
 
   const handleSyncAssets = () => {
