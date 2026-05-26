@@ -410,7 +410,7 @@ function AppsTopBar({
           <span className="truncate">{app?.label ?? 'Apps'}</span>
         </h1>
       </div>
-      <div className="flex flex-wrap items-center justify-end gap-2">
+      <div className="apps-topbar-actions flex flex-nowrap items-center justify-center gap-2 @md:justify-end">
         {scene && app ? (
           <>
             <BackToSceneButton frameId={frame.id} sceneId={scene.id} nodeId={app.nodeId} />
@@ -457,7 +457,7 @@ function BackToSceneButton({
     <button
       type="button"
       onClick={() => router.actions.push(urls.scenes(frameId, sceneId), { nodeId })}
-      className="frameos-secondary-button inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+      className="apps-topbar-action frameos-secondary-button inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
     >
       <ArrowLeftIcon className="h-4 w-4" />
       <span>Back to scene</span>
@@ -483,7 +483,7 @@ function ActiveAppDiscardButton({
       type="button"
       onClick={() => discardChanges()}
       disabled={!hasChanges}
-      className="frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-40"
+      className="apps-topbar-action frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-40"
     >
       Discard changes
     </button>
@@ -498,7 +498,7 @@ function FrameSaveButton({ frameId, disabled }: { frameId: number; disabled: boo
       type="button"
       onClick={() => saveFrame()}
       disabled={disabled}
-      className="frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-40"
+      className="apps-topbar-action frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-40"
     >
       Save
     </button>
@@ -533,7 +533,7 @@ function ActiveAppSaveButton({
       }}
       disabled={disabled}
       className={clsx(
-        'rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-40',
+        'apps-topbar-action rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-40',
         hasChanges ? 'frameos-primary-action' : 'frameos-secondary-button'
       )}
     >
@@ -712,7 +712,7 @@ function AppsEditorSurface({
     <>
       <ActiveAppSelectionMount frameId={frame.id} sceneId={scene.id} app={app} />
       <div className="apps-editor-surface min-h-0 flex-1 overflow-hidden">
-        <EditApp panel={appPanel} sceneId={scene.id} nodeId={app.nodeId} showFileList={false} />
+        <EditApp panel={appPanel} sceneId={scene.id} nodeId={app.nodeId} showFileList={false} compactWarnings />
       </div>
     </>
   )

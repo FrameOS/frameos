@@ -20,6 +20,7 @@ interface EditAppProps {
   sceneId: string
   nodeId: string
   showFileList?: boolean
+  compactWarnings?: boolean
 }
 
 interface EditAppFileListProps {
@@ -69,6 +70,35 @@ export function configureAppSourceEditor(monaco: Monaco) {
       },
     ],
   })
+}
+
+function CompiledAppWarning({ sceneName, compact }: { sceneName: string; compact?: boolean }): JSX.Element {
+  const body = (
+    <div>
+      This is a compiled Nim app, but the scene &quot;{sceneName}&quot; is currently running in interpreted mode. If you
+      edit and save it, the scene will switch to compiled mode. After that, future scene changes will require a full
+      frame recompilation. Inline JavaScript code nodes would also need to be rewritten in Nim. If you need
+      customization without compilation, consider using JavaScript apps or inline JavaScript code nodes instead.
+    </div>
+  )
+
+  if (compact) {
+    return (
+      <details className="app-compiled-warning app-compiled-warning-collapsible rounded-2xl p-3 text-sm">
+        <summary className="cursor-pointer font-semibold">Compiled Nim app in an interpreted scene</summary>
+        <div className="mt-3">{body}</div>
+      </details>
+    )
+  }
+
+  return (
+    <div className="app-compiled-warning rounded-2xl p-3 text-sm">
+      <div className="space-y-3">
+        <div className="font-semibold">Compiled Nim app in an interpreted scene</div>
+        {body}
+      </div>
+    </div>
+  )
 }
 
 export function EditAppFileList({ sceneId, nodeId, className }: EditAppFileListProps) {
@@ -149,7 +179,7 @@ export function EditAppFileList({ sceneId, nodeId, className }: EditAppFileListP
   )
 }
 
-export function EditApp({ panel, sceneId, nodeId, showFileList = true }: EditAppProps) {
+export function EditApp({ panel, sceneId, nodeId, showFileList = true, compactWarnings = false }: EditAppProps) {
   const { frameId } = useValues(frameLogic)
   const { theme } = useValues(workspaceLogic)
   const { persistUntilClosed } = useActions(panelsLogic)
@@ -232,20 +262,7 @@ export function EditApp({ panel, sceneId, nodeId, showFileList = true }: EditApp
       ) : null}
 
       <div className="overflow-y-auto overflow-x-auto w-full h-full max-h-full max-w-full gap-2 flex-1 flex flex-col">
-        {requiresCompiledOnSave ? (
-          <div className="app-compiled-warning rounded-2xl p-3 text-sm">
-            <div className="space-y-3">
-              <div className="font-semibold">Compiled Nim app in an interpreted scene</div>
-              <div>
-                This is a compiled Nim app, but the scene &quot;{sceneName}&quot; is currently running in interpreted
-                mode. If you edit and save it, the scene will switch to compiled mode. After that, future scene changes
-                will require a full frame recompilation. Inline JavaScript code nodes would also need to be rewritten in
-                Nim. If you need customization without compilation, consider using JavaScript apps or inline JavaScript code nodes
-                instead.
-              </div>
-            </div>
-          </div>
-        ) : null}
+        {requiresCompiledOnSave ? <CompiledAppWarning sceneName={sceneName} compact={compactWarnings} /> : null}
         {hasMultipleAppUsages ? (
           <div className="frame-tool-card flex flex-col gap-3 rounded-2xl p-3 text-sm @md:flex-row @md:items-center">
             <div className="min-w-0 font-medium">
