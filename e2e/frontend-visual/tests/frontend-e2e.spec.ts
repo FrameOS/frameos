@@ -242,7 +242,11 @@ test.describe('backend frontend e2e coverage @e2e', () => {
     await expect(page.getByRole('button', { name: 'Save' })).toBeDisabled()
 
     await page.getByRole('button', { name: 'Back to scene' }).click()
-    await expect(page).toHaveURL(/\/scenes\/1\/scene-dashboard$/)
+    await expect(page).toHaveURL(
+      (url) =>
+        url.pathname === '/scenes/1/scene-dashboard' &&
+        url.searchParams.get('nodeId') === 'c3bbaf66-f11d-45d2-9bed-5395ac0c01b2'
+    )
 
     expectNoFrontendErrors(readErrors)
   })
