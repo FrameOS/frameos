@@ -708,6 +708,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
     selectFrame: (frameId: number | null) => ({ frameId }),
     focusFrame: (frameId: number) => ({ frameId }),
     setRouteSelection: (frameId: number | null, sceneId: string | null = null) => ({ frameId, sceneId }),
+    rememberAppsHref: (href: string) => ({ href }),
     navigateToFrame: (frameId: number) => ({ frameId }),
     openFrameTool: (frameId: number, panel: WorkspaceUtilityPanel) => ({ frameId, panel }),
     navigateToSceneFrame: (frameId: number) => ({ frameId }),
@@ -896,6 +897,13 @@ export const workspaceLogic = kea<workspaceLogicType>([
         selectNode: (_, { nodeId }) => nodeId,
         navigateToScene: () => null,
         setRouteSelection: () => null,
+      },
+    ],
+    lastAppsHref: [
+      null as string | null,
+      { persist: true, storageKey: 'workspaceLogic.lastAppsHref' },
+      {
+        rememberAppsHref: (_, { href }) => href,
       },
     ],
     frameOrderSnapshot: [
@@ -1291,13 +1299,17 @@ export const workspaceLogic = kea<workspaceLogicType>([
       syncSecondarySidebarFromHashForMobile(hash)
       const validFrameId = Number(frameId)
       const validSceneId = typeof sceneId === 'string' ? sceneId : null
+      const routeNodeId = searchValue(search, 'nodeId') ?? (typeof nodeId === 'string' ? nodeId : null)
 
       if (Number.isFinite(validFrameId)) {
         actions.setRouteSelection(validFrameId, validSceneId)
+        if (routeNodeId) {
+          actions.selectNode(routeNodeId)
+        }
         const drawer = searchValue(search, 'drawer')
         applyDrawerFromSearch(validFrameId, {
           ...search,
-          nodeId: searchValue(search, 'nodeId') ?? (typeof nodeId === 'string' ? nodeId : undefined),
+          nodeId: routeNodeId ?? undefined,
           sceneId: searchValue(search, 'sceneId') ?? validSceneId ?? undefined,
         })
         if (!drawer && isSceneRoutePath(payload.pathname)) {

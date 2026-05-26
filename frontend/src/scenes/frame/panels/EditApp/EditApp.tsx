@@ -28,6 +28,49 @@ interface EditAppFileListProps {
   className?: string
 }
 
+export function appSourceEditorLanguage(file: string): string {
+  return file.endsWith('.json')
+    ? 'json'
+    : file.endsWith('.ts') || file.endsWith('.tsx')
+    ? 'typescript'
+    : file.endsWith('.js') || file.endsWith('.jsx')
+    ? 'javascript'
+    : 'python'
+}
+
+export function configureAppSourceEditor(monaco: Monaco) {
+  const compilerOptions = {
+    allowJs: true,
+    allowNonTsExtensions: true,
+    target: monaco.languages.typescript.ScriptTarget.ES2020,
+    jsx: monaco.languages.typescript.JsxEmit.Preserve,
+  }
+  monaco.languages.typescript.typescriptDefaults.setCompilerOptions(compilerOptions)
+  monaco.languages.typescript.javascriptDefaults.setCompilerOptions({ ...compilerOptions, checkJs: true })
+  monaco.editor.defineTheme('darkframe', {
+    base: 'vs-dark',
+    inherit: true,
+    rules: [],
+    colors: { 'editor.background': '#111827' },
+  })
+  monaco.editor.defineTheme('lightframe', {
+    base: 'vs',
+    inherit: true,
+    rules: [],
+    colors: { 'editor.background': '#f8fafc' },
+  })
+  monaco.languages.json.jsonDefaults.setDiagnosticsOptions({
+    validate: true,
+    schemas: [
+      {
+        uri: 'http://internal/node-schema.json',
+        fileMatch: ['config.json'],
+        schema: schema,
+      },
+    ],
+  })
+}
+
 export function EditAppFileList({ sceneId, nodeId, className }: EditAppFileListProps) {
   const { frameId } = useValues(frameLogic)
   const logicProps: EditAppLogicProps = {
@@ -171,50 +214,11 @@ export function EditApp({ panel, sceneId, nodeId, showFileList = true }: EditApp
     }
   }, [monaco, appTypeDeclarations, nodeId])
 
-  function beforeMount(monaco: Monaco) {
-    const compilerOptions = {
-      allowJs: true,
-      allowNonTsExtensions: true,
-      target: monaco.languages.typescript.ScriptTarget.ES2020,
-      jsx: monaco.languages.typescript.JsxEmit.Preserve,
-    }
-    monaco.languages.typescript.typescriptDefaults.setCompilerOptions(compilerOptions)
-    monaco.languages.typescript.javascriptDefaults.setCompilerOptions({ ...compilerOptions, checkJs: true })
-    monaco.editor.defineTheme('darkframe', {
-      base: 'vs-dark',
-      inherit: true,
-      rules: [],
-      colors: { 'editor.background': '#111827' },
-    })
-    monaco.editor.defineTheme('lightframe', {
-      base: 'vs',
-      inherit: true,
-      rules: [],
-      colors: { 'editor.background': '#f8fafc' },
-    })
-    monaco.languages.json.jsonDefaults.setDiagnosticsOptions({
-      validate: true,
-      schemas: [
-        {
-          uri: 'http://internal/node-schema.json',
-          fileMatch: ['config.json'], // associate with our model
-          schema: schema,
-        },
-      ],
-    })
-  }
-
   if (sourcesLoading) {
     return <div>Loading...</div>
   }
 
-  const editorLanguage = activeFile.endsWith('.json')
-    ? 'json'
-    : activeFile.endsWith('.ts') || activeFile.endsWith('.tsx')
-    ? 'typescript'
-    : activeFile.endsWith('.js') || activeFile.endsWith('.jsx')
-    ? 'javascript'
-    : 'python'
+  const editorLanguage = appSourceEditorLanguage(activeFile)
   const sceneName = scene?.name || 'Untitled scene'
 
   return (
@@ -236,7 +240,7 @@ export function EditApp({ panel, sceneId, nodeId, showFileList = true }: EditApp
                 This is a compiled Nim app, but the scene &quot;{sceneName}&quot; is currently running in interpreted
                 mode. If you edit and save it, the scene will switch to compiled mode. After that, future scene changes
                 will require a full frame recompilation. Inline JavaScript code nodes would also need to be rewritten in
-                Nim. If you need customization without compilation, consider using JavaScript apps or inline code nodes
+                Nim. If you need customization without compilation, consider using JavaScript apps or inline JavaScript code nodes
                 instead.
               </div>
             </div>
@@ -259,7 +263,7 @@ export function EditApp({ panel, sceneId, nodeId, showFileList = true }: EditApp
             language={editorLanguage}
             value={sources[activeFile] ?? sources[Object.keys(sources)[0]] ?? ''}
             theme={theme === 'dark' ? 'darkframe' : 'lightframe'}
-            beforeMount={beforeMount}
+            beforeMount={configureAppSourceEditor}
             onMount={(editor, monaco) => setMonacoAndEditor([monaco, editor])}
             onChange={(value) => updateFile(activeFile, value ?? '')}
             options={{ minimap: { enabled: false } }}

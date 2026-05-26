@@ -14,7 +14,7 @@ import {
   XMarkIcon,
 } from '@heroicons/react/24/outline'
 import { PencilSquareIcon, PlayIcon } from '@heroicons/react/24/solid'
-import type { DragEvent } from 'react'
+import { useEffect, type DragEvent } from 'react'
 import { FrameImage } from '../../components/FrameImage'
 import { Tag } from '../../components/Tag'
 import { framesModel } from '../../models/framesModel'
@@ -761,10 +761,34 @@ function SceneCanvas({
       onDragOverCapture={handleSceneDragOver}
       onDropCapture={handleSceneDrop}
     >
+      <SceneSelectedNodeSync frameId={frameId} sceneId={selectedSceneId} />
       <Diagram sceneId={selectedSceneId} showToolbar={false} />
       <SceneDiagramOverlay frameId={frameId} scene={selectedScene} sceneId={selectedSceneId} />
     </div>
   )
+}
+
+function SceneSelectedNodeSync({ frameId, sceneId }: { frameId: number; sceneId: string }): null {
+  const { selectedNodeId } = useValues(workspaceLogic)
+  const diagram = diagramLogic({ frameId, sceneId })
+  const { nodes } = useValues(diagram)
+  const { selectNode } = useActions(diagram)
+
+  useEffect(() => {
+    if (!selectedNodeId) {
+      return
+    }
+    const target = nodes.find((node) => node.id === selectedNodeId)
+    if (!target) {
+      return
+    }
+    const onlyTargetSelected = target.selected && nodes.every((node) => node.id === selectedNodeId || !node.selected)
+    if (!onlyTargetSelected) {
+      selectNode(selectedNodeId)
+    }
+  }, [nodes, selectNode, selectedNodeId])
+
+  return null
 }
 
 function SceneWorkspaceFrame({ frameId }: SceneWorkspaceFrameProps): JSX.Element {

@@ -12,6 +12,8 @@ export const urls = {
     (frameId ? '/' + frameId : '') +
     (frameId && sceneId ? '/' + sceneId : '') +
     (frameId && sceneId && nodeId ? '/' + nodeId : ''),
+  systemApps: (keyword?: string | null) =>
+    getBasePath() + '/apps/system' + (keyword ? '/' + encodeURIComponent(keyword) : ''),
   settings: () => getBasePath() + '/settings',
   login: () => getBasePath() + '/login',
   logout: () => getBasePath() + '/logout',

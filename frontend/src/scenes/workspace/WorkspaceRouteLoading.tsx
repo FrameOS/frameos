@@ -82,9 +82,7 @@ function LoadingNavButton({
           ) : (
             <ChevronDownIcon className="h-7 w-7 lg:hidden" />
           )}
-          <span className="hidden lg:flex">
-            {sidebarOpen ? children : <ChevronRightIcon className="h-7 w-7" />}
-          </span>
+          <span className="hidden lg:flex">{sidebarOpen ? children : <ChevronRightIcon className="h-7 w-7" />}</span>
         </>
       ) : (
         children
@@ -175,13 +173,13 @@ function MainLoadingPlaceholder({ mode }: { mode: WorkspaceMode }): JSX.Element 
 
 export function WorkspaceRouteLoading({ scene }: { scene: string | null }): JSX.Element {
   useMountedLogic(workspaceLogic)
-  const { secondarySidebarOpen, selectedFrame, selectedSceneId, theme } = useValues(workspaceLogic)
+  const { lastAppsHref, secondarySidebarOpen, selectedFrame, selectedSceneId, theme } = useValues(workspaceLogic)
   const { toggleSecondarySidebar, toggleTheme } = useActions(workspaceLogic)
   const mode = workspaceModeForSceneOrFrames(scene)
   const spinnerMode = useDelayedInitialSpinnerMode(mode)
   const frameHref = selectedFrame ? urls.frame(selectedFrame.id) : urls.frames()
   const scenesHref = selectedFrame ? urls.scenes(selectedFrame.id, selectedSceneId ?? undefined) : urls.scenes()
-  const appsHref = selectedFrame ? urls.apps(selectedFrame.id, selectedSceneId ?? undefined) : urls.apps()
+  const appsHref = lastAppsHref ?? urls.systemApps()
   const workspaceMainStyle = {
     '--workspace-main-offset': secondarySidebarOpen ? '480px' : '128px',
     '--workspace-sidebar-edge': secondarySidebarOpen ? '440px' : '108px',

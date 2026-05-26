@@ -1,24 +1,39 @@
 import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
 import { router } from 'kea-router'
 import clsx from 'clsx'
-import type { ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { ArrowLeftIcon, CodeBracketIcon, CubeTransparentIcon } from '@heroicons/react/24/outline'
+import Editor from '@monaco-editor/react'
+import type { editor as importedEditor } from 'monaco-editor'
+import type { Monaco } from '@monaco-editor/react'
+import { appsModel, categoryLabels } from '../../models/appsModel'
 import { framesModel } from '../../models/framesModel'
 import { frameHost } from '../../decorators/frame'
 import { urls } from '../../urls'
-import type { AppNodeData, DiagramNode, FrameScene, FrameType } from '../../types'
+import { Panel, type AppConfig, type AppNodeData, type DiagramNode, type FrameScene, type FrameType } from '../../types'
 import { FrameosShell } from './FrameosShell'
 import { FrameDeployPlanDrawer } from './FrameDeployPlanDrawer'
 import { FrameUnsavedChangesDrawer } from './FrameUnsavedChangesDrawer'
 import { activeAppSelectionLogic } from './activeAppSelectionLogic'
-import { appsWorkspaceLogic } from './appsWorkspaceLogic'
+import { appsWorkspaceLogic, SYSTEM_APPS_ROUTE_TOKEN } from './appsWorkspaceLogic'
 import { workspaceLogic } from './workspaceLogic'
 import { frameLogic } from '../frame/frameLogic'
 import { panelsLogic } from '../frame/panels/panelsLogic'
-import { EditApp, EditAppFileList } from '../frame/panels/EditApp/EditApp'
+import {
+  appSourceEditorLanguage,
+  configureAppSourceEditor,
+  EditApp,
+  EditAppFileList,
+} from '../frame/panels/EditApp/EditApp'
 import { editAppLogic } from '../frame/panels/EditApp/editAppLogic'
 import { groupFramesByStatus } from './frameStatusGroups'
-import { hasJavaScriptAppSource, isJavaScriptCatalogApp, normalizeSceneApps } from '../../utils/sceneApps'
+import {
+  hasJavaScriptAppSource,
+  isJavaScriptCatalogApp,
+  isRepoAppKeyword,
+  normalizeSceneApps,
+} from '../../utils/sceneApps'
+import { systemAppSourceLogic } from './systemAppSourceLogic'
 
 interface AppsWorkspaceProps {
   frameId?: string
@@ -26,13 +41,19 @@ interface AppsWorkspaceProps {
   nodeId?: string
 }
 
+type AppsSourceMode = 'system' | 'frames'
+
 interface AppsWorkspaceFrameProps {
   frameId: number
+  sourceMode: AppsSourceMode
   routeSceneId?: string | null
   routeNodeId?: string | null
+  routeSystemAppKeyword?: string | null
 }
 
 interface AppNodeOption {
+  sceneId: string
+  sceneName: string
   nodeId: string
   label: string
   keyword: string
@@ -42,10 +63,16 @@ interface AppNodeOption {
 
 type AppNodeLanguage = 'nim' | 'javascript'
 
-interface AppNodeOptionGroup {
-  key: AppNodeLanguage
+interface AppNodeSceneGroup {
+  key: string
   label: string
   options: AppNodeOption[]
+}
+
+interface SystemAppOption {
+  keyword: string
+  label: string
+  category: string
 }
 
 function appNodeLanguage(
@@ -66,6 +93,17 @@ function parseRouteFrameId(frameId?: string | null): number | null {
   return Number.isFinite(parsed) ? parsed : null
 }
 
+function decodeRouteKeyword(value?: string | null): string | null {
+  if (!value) {
+    return null
+  }
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return value
+  }
+}
+
 function appNodeOptions(scene: FrameScene | null | undefined): AppNodeOption[] {
   const sceneApps = normalizeSceneApps(scene?.apps)
   return (scene?.nodes ?? [])
@@ -76,6 +114,8 @@ function appNodeOptions(scene: FrameScene | null | undefined): AppNodeOption[] {
       const sceneApp = sceneApps[keyword]
       const sources = nodeData.sources || sceneApp?.sources || null
       return {
+        sceneId: scene?.id ?? '',
+        sceneName: scene?.name || 'Untitled scene',
         nodeId: node.id,
         label: nodeData.name || keyword || node.id,
         keyword,
@@ -85,28 +125,68 @@ function appNodeOptions(scene: FrameScene | null | undefined): AppNodeOption[] {
     })
 }
 
-function appNodeOptionGroups(appOptions: AppNodeOption[]): AppNodeOptionGroup[] {
-  const groups: AppNodeOptionGroup[] = [
-    { key: 'nim', label: 'Nim apps', options: appOptions.filter((app) => app.language === 'nim') },
-    {
-      key: 'javascript',
-      label: 'JavaScript apps',
-      options: appOptions.filter((app) => app.language === 'javascript'),
-    },
-  ]
-  return groups.filter((group) => group.options.length > 0)
+function appNodeOptionsForScenes(scenes: FrameScene[]): AppNodeOption[] {
+  return scenes.flatMap((scene) => appNodeOptions(scene))
 }
 
-function defaultScene(frame: FrameType): FrameScene | null {
-  return frame.scenes?.find((scene) => scene.default) ?? frame.scenes?.[0] ?? null
+function appOptionKey(app: AppNodeOption): string {
+  return `${app.sceneId}::${app.nodeId}`
 }
 
-function defaultApp(scene: FrameScene | null | undefined): AppNodeOption | null {
-  return appNodeOptions(scene)[0] ?? null
+function appNodeSceneGroups(appOptions: AppNodeOption[]): AppNodeSceneGroup[] {
+  const groups: AppNodeSceneGroup[] = []
+  for (const option of appOptions) {
+    let group = groups.find((candidate) => candidate.key === option.sceneId)
+    if (!group) {
+      group = { key: option.sceneId, label: option.sceneName, options: [] }
+      groups.push(group)
+    }
+    group.options.push(option)
+  }
+  return groups
 }
 
-function pushAppsUrl(frame: FrameType, scene: FrameScene | null, app: AppNodeOption | null): void {
-  router.actions.push(urls.apps(frame.id, scene?.id, app?.nodeId))
+function defaultApp(frame: FrameType | null): AppNodeOption | null {
+  const scenes = frame?.scenes ?? []
+  const defaultScene = scenes.find((scene) => scene.default) ?? scenes[0] ?? null
+  return appNodeOptions(defaultScene)[0] ?? appNodeOptionsForScenes(scenes)[0] ?? null
+}
+
+function systemAppOptions(apps: Record<string, AppConfig>): SystemAppOption[] {
+  return Object.entries(apps)
+    .filter(([keyword, app]) => !isRepoAppKeyword(keyword) && app.category !== 'legacy')
+    .map(([keyword, app]) => ({
+      keyword,
+      label: app.name || keyword,
+      category: (app.category || 'other').toLowerCase(),
+    }))
+    .toSorted((a, b) => {
+      const categoryComparison = a.category.localeCompare(b.category)
+      return categoryComparison || a.label.localeCompare(b.label)
+    })
+}
+
+function systemAppOptionGroups(
+  options: SystemAppOption[]
+): { key: string; label: string; options: SystemAppOption[] }[] {
+  const groups: { key: string; label: string; options: SystemAppOption[] }[] = []
+  for (const option of options) {
+    let group = groups.find((candidate) => candidate.key === option.category)
+    if (!group) {
+      group = { key: option.category, label: categoryLabels[option.category] ?? option.category, options: [] }
+      groups.push(group)
+    }
+    group.options.push(option)
+  }
+  return groups
+}
+
+function pushFrameAppsUrl(frame: FrameType, app: AppNodeOption | null): void {
+  router.actions.push(urls.apps(frame.id, app?.sceneId, app?.nodeId))
+}
+
+function pushSystemAppsUrl(keyword?: string | null): void {
+  router.actions.push(urls.systemApps(keyword))
 }
 
 function SelectionSelect({
@@ -137,101 +217,171 @@ function SelectionSelect({
   )
 }
 
+function SourceModeToggle({
+  mode,
+  onChange,
+}: {
+  mode: AppsSourceMode
+  onChange: (mode: AppsSourceMode) => void
+}): JSX.Element {
+  return (
+    <div className="grid grid-cols-2 rounded-xl border border-slate-200 bg-white/70 p-1 shadow-sm">
+      {(['system', 'frames'] as AppsSourceMode[]).map((candidate) => {
+        const active = mode === candidate
+        return (
+          <button
+            key={candidate}
+            type="button"
+            aria-pressed={active}
+            onClick={() => onChange(candidate)}
+            className={clsx(
+              'h-9 rounded-lg px-3 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+              active
+                ? 'frameos-primary-active text-white shadow-sm'
+                : 'text-slate-500 hover:bg-white hover:text-slate-800'
+            )}
+          >
+            {candidate === 'system' ? 'System apps' : 'Frames'}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+function EmptyFileList({ label = 'No app selected' }: { label?: string }): JSX.Element {
+  return (
+    <div className="frameos-inset rounded-2xl border border-slate-200 bg-white/55 p-3">
+      <div className="frameos-muted text-xs font-semibold uppercase tracking-wide text-slate-400">Files</div>
+      <div className="mt-3 flex items-center gap-2 text-sm font-semibold text-slate-500">
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-white text-slate-400 shadow-sm">
+          <CubeTransparentIcon className="h-4 w-4" />
+        </span>
+        <span className="truncate">{label}</span>
+      </div>
+    </div>
+  )
+}
+
 function AppsSelector({
+  sourceMode,
   frame,
   frames,
-  scenes,
   selectedScene,
   selectedApp,
   appOptions,
+  selectedSystemApp,
+  systemApps,
 }: {
-  frame: FrameType
+  sourceMode: AppsSourceMode
+  frame: FrameType | null
   frames: FrameType[]
-  scenes: FrameScene[]
   selectedScene: FrameScene | null
   selectedApp: AppNodeOption | null
   appOptions: AppNodeOption[]
+  selectedSystemApp: SystemAppOption | null
+  systemApps: SystemAppOption[]
 }): JSX.Element {
   const frameGroups = groupFramesByStatus(frames)
 
   return (
     <div className="space-y-4">
-      <SelectionSelect
-        label="Frame"
-        value={frame.id}
-        onChange={(value) => {
-          const nextFrame = frames.find((candidate) => candidate.id === parseInt(value, 10))
-          if (!nextFrame) {
+      <SourceModeToggle
+        mode={sourceMode}
+        onChange={(nextMode) => {
+          if (nextMode === sourceMode) {
             return
           }
-          const nextScene = defaultScene(nextFrame)
-          pushAppsUrl(nextFrame, nextScene, defaultApp(nextScene))
+          if (nextMode === 'system') {
+            pushSystemAppsUrl(selectedSystemApp?.keyword ?? systemApps[0]?.keyword ?? null)
+          } else if (frame) {
+            pushFrameAppsUrl(frame, selectedApp ?? defaultApp(frame))
+          } else {
+            router.actions.push(urls.apps())
+          }
         }}
-      >
-        {frameGroups.map((group) => (
-          <optgroup key={group.key} label={group.label}>
-            {group.frames.map((candidate) => (
-              <option key={candidate.id} value={candidate.id}>
-                {candidate.name || frameHost(candidate)}
-              </option>
-            ))}
-          </optgroup>
-        ))}
-      </SelectionSelect>
-      <SelectionSelect
-        label="Scene"
-        value={selectedScene?.id ?? ''}
-        disabled={scenes.length === 0}
-        onChange={(value) => {
-          const nextScene = scenes.find((scene) => scene.id === value) ?? null
-          pushAppsUrl(frame, nextScene, defaultApp(nextScene))
-        }}
-      >
-        {scenes.length === 0 ? (
-          <option value="">No scenes</option>
-        ) : (
-          scenes.map((scene) => (
-            <option key={scene.id} value={scene.id}>
-              {scene.name || 'Untitled scene'}
-            </option>
-          ))
-        )}
-      </SelectionSelect>
-      <SelectionSelect
-        label="App"
-        value={selectedApp?.nodeId ?? ''}
-        disabled={!selectedScene || appOptions.length === 0}
-        onChange={(value) => {
-          const nextApp = appOptions.find((app) => app.nodeId === value) ?? null
-          pushAppsUrl(frame, selectedScene, nextApp)
-        }}
-      >
-        {appOptions.length === 0 ? (
-          <option value="">No apps</option>
-        ) : (
-          appNodeOptionGroups(appOptions).map((group) => (
+      />
+      {sourceMode === 'frames' && frame ? (
+        <SelectionSelect
+          label="Frame"
+          value={frame.id}
+          onChange={(value) => {
+            const nextFrame = frames.find((candidate) => candidate.id === parseInt(value, 10))
+            if (!nextFrame) {
+              return
+            }
+            pushFrameAppsUrl(nextFrame, defaultApp(nextFrame))
+          }}
+        >
+          {frameGroups.map((group) => (
             <optgroup key={group.key} label={group.label}>
-              {group.options.map((app) => (
-                <option key={app.nodeId} value={app.nodeId}>
-                  {app.label}
+              {group.frames.map((candidate) => (
+                <option key={candidate.id} value={candidate.id}>
+                  {candidate.name || frameHost(candidate)}
                 </option>
               ))}
             </optgroup>
-          ))
-        )}
-      </SelectionSelect>
-      {selectedScene && selectedApp ? (
-        <EditAppFileList sceneId={selectedScene.id} nodeId={selectedApp.nodeId} />
+          ))}
+        </SelectionSelect>
+      ) : null}
+      {sourceMode === 'system' ? (
+        <>
+          <SelectionSelect
+            label="App"
+            value={selectedSystemApp?.keyword ?? ''}
+            disabled={systemApps.length === 0}
+            onChange={(value) => pushSystemAppsUrl(value)}
+          >
+            {systemApps.length === 0 ? (
+              <option value="">No system apps</option>
+            ) : (
+              systemAppOptionGroups(systemApps).map((group) => (
+                <optgroup key={group.key} label={group.label}>
+                  {group.options.map((option) => (
+                    <option key={option.keyword} value={option.keyword}>
+                      {option.label}
+                    </option>
+                  ))}
+                </optgroup>
+              ))
+            )}
+          </SelectionSelect>
+          {selectedSystemApp ? <SystemAppFileList keyword={selectedSystemApp.keyword} /> : <EmptyFileList />}
+        </>
       ) : (
-        <div className="frameos-inset rounded-2xl border border-slate-200 bg-white/55 p-3">
-          <div className="frameos-muted text-xs font-semibold uppercase tracking-wide text-slate-400">Files</div>
-          <div className="mt-3 flex items-center gap-2 text-sm font-semibold text-slate-500">
-            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-white text-slate-400 shadow-sm">
-              <CubeTransparentIcon className="h-4 w-4" />
-            </span>
-            <span className="truncate">No app selected</span>
-          </div>
-        </div>
+        <>
+          <SelectionSelect
+            label="App"
+            value={selectedApp ? appOptionKey(selectedApp) : ''}
+            disabled={!frame || appOptions.length === 0}
+            onChange={(value) => {
+              const nextApp = appOptions.find((app) => appOptionKey(app) === value) ?? null
+              if (frame) {
+                pushFrameAppsUrl(frame, nextApp)
+              }
+            }}
+          >
+            {appOptions.length === 0 ? (
+              <option value="">No apps</option>
+            ) : (
+              appNodeSceneGroups(appOptions).map((group) => (
+                <optgroup key={group.key} label={group.label}>
+                  {group.options.map((app) => (
+                    <option key={appOptionKey(app)} value={appOptionKey(app)}>
+                      {app.label}
+                      {app.language === 'javascript' ? ' [JS]' : ''}
+                    </option>
+                  ))}
+                </optgroup>
+              ))
+            )}
+          </SelectionSelect>
+          {selectedScene && selectedApp ? (
+            <EditAppFileList sceneId={selectedScene.id} nodeId={selectedApp.nodeId} />
+          ) : (
+            <EmptyFileList />
+          )}
+        </>
       )}
     </div>
   )
@@ -263,7 +413,7 @@ function AppsTopBar({
       <div className="flex flex-wrap items-center justify-end gap-2">
         {scene && app ? (
           <>
-            <BackToSceneButton frameId={frame.id} sceneId={scene.id} />
+            <BackToSceneButton frameId={frame.id} sceneId={scene.id} nodeId={app.nodeId} />
             <ActiveAppDiscardButton frameId={frame.id} sceneId={scene.id} nodeId={app.nodeId} />
             <ActiveAppSaveButton
               frameId={frame.id}
@@ -280,11 +430,33 @@ function AppsTopBar({
   )
 }
 
-function BackToSceneButton({ frameId, sceneId }: { frameId: number; sceneId: string }): JSX.Element {
+function SystemAppsTopBar({ app }: { app: SystemAppOption | null }): JSX.Element {
+  return (
+    <div className="mb-4 flex flex-col items-stretch justify-between gap-4 @md:flex-row @md:items-center">
+      <div className="min-w-0">
+        <div className="frameos-muted text-xs font-semibold uppercase tracking-wide text-slate-400">System apps</div>
+        <h1 className="frameos-strong flex min-w-0 items-center gap-2 truncate text-2xl font-bold tracking-normal text-slate-950">
+          <CodeBracketIcon className="h-7 w-7 shrink-0 text-slate-400" />
+          <span className="truncate">{app?.label ?? 'Apps'}</span>
+        </h1>
+      </div>
+    </div>
+  )
+}
+
+function BackToSceneButton({
+  frameId,
+  sceneId,
+  nodeId,
+}: {
+  frameId: number
+  sceneId: string
+  nodeId: string
+}): JSX.Element {
   return (
     <button
       type="button"
-      onClick={() => router.actions.push(urls.scenes(frameId, sceneId))}
+      onClick={() => router.actions.push(urls.scenes(frameId, sceneId), { nodeId })}
       className="frameos-secondary-button inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
     >
       <ArrowLeftIcon className="h-4 w-4" />
@@ -370,6 +542,121 @@ function ActiveAppSaveButton({
   )
 }
 
+function SystemAppFileList({ keyword }: { keyword: string }): JSX.Element {
+  const logic = systemAppSourceLogic({ keyword })
+  const { filenames, sourcesLoading, activeFile } = useValues(logic)
+  const { setActiveFile } = useActions(logic)
+
+  if (sourcesLoading) {
+    return (
+      <div className="app-file-list frameos-inset rounded-2xl border p-3">
+        <div className="frameos-muted mb-2 text-xs font-semibold uppercase tracking-wide">Files</div>
+        <div className="app-file-row flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-semibold">
+          <span className="frameos-skeleton-media h-7 w-7 shrink-0 animate-pulse rounded-lg" />
+          <span className="frameos-skeleton-line h-3 w-24 animate-pulse rounded-full" />
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="app-file-list frameos-inset rounded-2xl border p-3">
+      <div className="frameos-muted mb-2 text-xs font-semibold uppercase tracking-wide">Files</div>
+      {filenames.length === 0 ? (
+        <div className="px-3 py-2 text-sm font-semibold text-slate-500">No files</div>
+      ) : (
+        <div className="space-y-1">
+          {filenames.map((file) => (
+            <button
+              key={file}
+              type="button"
+              onClick={() => setActiveFile(file)}
+              className={clsx(
+                'app-file-row min-w-0 w-full truncate rounded-xl px-3 py-2 text-left text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+                activeFile === file ? 'app-file-row-active' : null
+              )}
+              title={file}
+            >
+              {file}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function SystemAppEditorSurface({ app }: { app: SystemAppOption | null }): JSX.Element {
+  if (!app) {
+    return <AppsEmptyState title="No system app selected" detail="Choose a system app from the left panel." />
+  }
+
+  return (
+    <div className="apps-editor-surface min-h-0 flex-1 overflow-hidden">
+      <SystemAppSourceEditor keyword={app.keyword} />
+    </div>
+  )
+}
+
+function SystemAppSourceEditor({ keyword }: { keyword: string }): JSX.Element {
+  const { theme } = useValues(workspaceLogic)
+  const logic = systemAppSourceLogic({ keyword })
+  const { sources, sourcesLoading, activeFile, appTypeDeclarations } = useValues(logic)
+  const [[monaco, editor], setMonacoAndEditor] = useState<[Monaco | null, importedEditor.IStandaloneCodeEditor | null]>(
+    [null, null]
+  )
+  const appTypesLibsRef = useRef<{ dispose: () => void }[]>([])
+
+  useEffect(() => {
+    if (!monaco) {
+      return
+    }
+
+    appTypesLibsRef.current.forEach((lib) => lib.dispose())
+    appTypesLibsRef.current = [
+      monaco.languages.typescript.typescriptDefaults.addExtraLib(
+        appTypeDeclarations,
+        `inmemory://system-app-editor/${keyword}/frameos-app-typescript.d.ts`
+      ),
+      monaco.languages.typescript.javascriptDefaults.addExtraLib(
+        appTypeDeclarations,
+        `inmemory://system-app-editor/${keyword}/frameos-app-javascript.d.ts`
+      ),
+    ]
+
+    return () => {
+      appTypesLibsRef.current.forEach((lib) => lib.dispose())
+      appTypesLibsRef.current = []
+    }
+  }, [monaco, appTypeDeclarations, keyword])
+
+  if (sourcesLoading) {
+    return <div>Loading...</div>
+  }
+
+  const editorLanguage = appSourceEditorLanguage(activeFile)
+
+  return (
+    <div className="overflow-y-auto overflow-x-auto w-full h-full max-h-full max-w-full gap-2 flex-1 flex flex-col">
+      <div className="app-compiled-warning rounded-2xl p-3 text-sm">
+        <div className="space-y-3">To edit this app, first add it to a scene on a frame.</div>
+      </div>
+      <div className="frameos-inset overflow-hidden rounded-md border font-mono text-sm w-full flex-1">
+        <Editor
+          height="100%"
+          path={`inmemory://system-app-editor/${keyword}/${activeFile}`}
+          language={editorLanguage}
+          value={sources[activeFile] ?? sources[Object.keys(sources)[0]] ?? ''}
+          theme={theme === 'dark' ? 'darkframe' : 'lightframe'}
+          beforeMount={configureAppSourceEditor}
+          onMount={(editor, monaco) => setMonacoAndEditor([monaco, editor])}
+          options={{ minimap: { enabled: false }, readOnly: true, domReadOnly: true }}
+        />
+      </div>
+    </div>
+  )
+}
+
 function ActiveAppSelectionMount({
   frameId,
   sceneId,
@@ -407,11 +694,25 @@ function AppsEditorSurface({
     return <AppsEmptyState title="No app selected" detail="Choose an app from the left panel." />
   }
 
+  const appPanel = {
+    panel: Panel.EditApp,
+    key: `${scene.id}.${app.nodeId}`,
+    title: app.nodeData.name || app.nodeData.keyword || app.nodeId,
+    active: true,
+    hidden: false,
+    closable: true,
+    metadata: {
+      sceneId: scene.id,
+      nodeId: app.nodeId,
+      nodeData: app.nodeData,
+    },
+  }
+
   return (
     <>
       <ActiveAppSelectionMount frameId={frame.id} sceneId={scene.id} app={app} />
       <div className="apps-editor-surface min-h-0 flex-1 overflow-hidden">
-        <EditApp sceneId={scene.id} nodeId={app.nodeId} showFileList={false} />
+        <EditApp panel={appPanel} sceneId={scene.id} nodeId={app.nodeId} showFileList={false} />
       </div>
     </>
   )
@@ -429,12 +730,20 @@ function AppsEmptyState({ title, detail }: { title: string; detail: string }): J
   )
 }
 
-function AppsWorkspaceFrame({ frameId, routeSceneId, routeNodeId }: AppsWorkspaceFrameProps): JSX.Element {
+function AppsWorkspaceFrame({
+  frameId,
+  sourceMode,
+  routeSceneId,
+  routeNodeId,
+  routeSystemAppKeyword,
+}: AppsWorkspaceFrameProps): JSX.Element {
   const frameLogicProps = { frameId }
   const { frame, scenes, unsavedChanges, deployPlanModalOpen, unsavedChangesModalOpen } = useValues(
     frameLogic(frameLogicProps)
   )
   const { framesList } = useValues(framesModel)
+  const { apps } = useValues(appsModel)
+  const installedSystemApps = systemAppOptions(apps)
 
   if (!frame) {
     return (
@@ -444,15 +753,26 @@ function AppsWorkspaceFrame({ frameId, routeSceneId, routeNodeId }: AppsWorkspac
     )
   }
 
-  const selectedScene =
-    (routeSceneId ? scenes.find((scene) => scene.id === routeSceneId) : null) ??
-    scenes.find((scene) => scene.default) ??
-    scenes[0] ??
-    null
-  const selectedSceneId = selectedScene?.id ?? null
-  const appOptions = appNodeOptions(selectedScene)
+  const appOptions = appNodeOptionsForScenes(scenes)
+  const routeSceneApps = routeSceneId ? appOptions.filter((app) => app.sceneId === routeSceneId) : []
+  const fallbackApp = defaultApp(frame)
   const selectedApp =
-    (routeNodeId ? appOptions.find((app) => app.nodeId === routeNodeId) : null) ?? appOptions[0] ?? null
+    (routeSceneId && routeNodeId
+      ? appOptions.find((app) => app.sceneId === routeSceneId && app.nodeId === routeNodeId)
+      : null) ??
+    (routeNodeId ? appOptions.find((app) => app.nodeId === routeNodeId) : null) ??
+    routeSceneApps[0] ??
+    fallbackApp ??
+    null
+  const selectedScene = selectedApp
+    ? scenes.find((scene) => scene.id === selectedApp.sceneId) ?? null
+    : routeSceneId
+    ? scenes.find((scene) => scene.id === routeSceneId) ?? null
+    : null
+  const selectedSystemApp =
+    (routeSystemAppKeyword ? installedSystemApps.find((option) => option.keyword === routeSystemAppKeyword) : null) ??
+    installedSystemApps[0] ??
+    null
 
   return (
     <BindLogic logic={frameLogic} props={frameLogicProps}>
@@ -462,16 +782,25 @@ function AppsWorkspaceFrame({ frameId, routeSceneId, routeNodeId }: AppsWorkspac
           title="Apps"
           tree={
             <AppsSelector
+              sourceMode={sourceMode}
               frame={frame}
               frames={framesList}
-              scenes={scenes}
               selectedScene={selectedScene}
               selectedApp={selectedApp}
               appOptions={appOptions}
+              selectedSystemApp={selectedSystemApp}
+              systemApps={installedSystemApps}
             />
           }
-          topBar={<AppsTopBar frame={frame} scene={selectedScene} app={selectedApp} unsavedChanges={unsavedChanges} />}
-          chatNodeId={selectedApp?.nodeId ?? null}
+          topBar={
+            sourceMode === 'system' ? (
+              <SystemAppsTopBar app={selectedSystemApp} />
+            ) : (
+              <AppsTopBar frame={frame} scene={selectedScene} app={selectedApp} unsavedChanges={unsavedChanges} />
+            )
+          }
+          chatNodeId={sourceMode === 'frames' ? selectedApp?.nodeId ?? null : null}
+          showAiButton={sourceMode === 'frames'}
           mainClassName="apps-workspace-main flex h-screen flex-col overflow-hidden pb-5 pr-5 pt-5 max-lg:h-auto max-lg:overflow-visible max-lg:px-4"
           rightPanel={
             unsavedChangesModalOpen ? (
@@ -481,28 +810,72 @@ function AppsWorkspaceFrame({ frameId, routeSceneId, routeNodeId }: AppsWorkspac
             ) : null
           }
         >
-          <AppsEditorSurface frame={frame} scene={selectedSceneId ? selectedScene : null} app={selectedApp} />
+          {sourceMode === 'system' ? (
+            <SystemAppEditorSurface app={selectedSystemApp} />
+          ) : (
+            <AppsEditorSurface frame={frame} scene={selectedScene} app={selectedApp} />
+          )}
         </FrameosShell>
       </BindLogic>
     </BindLogic>
   )
 }
 
+function AppsWorkspaceSystemOnly({ routeSystemAppKeyword }: { routeSystemAppKeyword?: string | null }): JSX.Element {
+  const { apps } = useValues(appsModel)
+  const installedSystemApps = systemAppOptions(apps)
+  const selectedSystemApp =
+    (routeSystemAppKeyword ? installedSystemApps.find((option) => option.keyword === routeSystemAppKeyword) : null) ??
+    installedSystemApps[0] ??
+    null
+
+  return (
+    <FrameosShell
+      mode="apps"
+      title="Apps"
+      tree={
+        <AppsSelector
+          sourceMode="system"
+          frame={null}
+          frames={[]}
+          selectedScene={null}
+          selectedApp={null}
+          appOptions={[]}
+          selectedSystemApp={selectedSystemApp}
+          systemApps={installedSystemApps}
+        />
+      }
+      topBar={<SystemAppsTopBar app={selectedSystemApp} />}
+      showAiButton={false}
+      mainClassName="apps-workspace-main flex h-screen flex-col overflow-hidden pb-5 pr-5 pt-5 max-lg:h-auto max-lg:overflow-visible max-lg:px-4"
+    >
+      <SystemAppEditorSurface app={selectedSystemApp} />
+    </FrameosShell>
+  )
+}
+
 export function AppsWorkspace({ frameId, sceneId, nodeId }: AppsWorkspaceProps): JSX.Element {
+  const sourceMode: AppsSourceMode = frameId === SYSTEM_APPS_ROUTE_TOKEN ? 'system' : 'frames'
+  const routeSystemAppKeyword = sourceMode === 'system' ? decodeRouteKeyword(sceneId) : null
+
   useMountedLogic(
     appsWorkspaceLogic({
       routeFrameId: frameId ?? null,
-      routeSceneId: sceneId ?? null,
-      routeNodeId: nodeId ?? null,
+      routeSceneId: sourceMode === 'frames' ? sceneId ?? null : null,
+      routeNodeId: sourceMode === 'frames' ? nodeId ?? null : null,
     })
   )
   const { selectedFrame } = useValues(workspaceLogic)
   const { activeFramesList, frames, framesList } = useValues(framesModel)
-  const routeFrameId = parseRouteFrameId(frameId)
+  const routeFrameId = sourceMode === 'frames' ? parseRouteFrameId(frameId) : null
   const routeFrame = routeFrameId ? frames[routeFrameId] ?? null : null
   const firstFrame = routeFrame ?? selectedFrame ?? activeFramesList[0] ?? framesList[0] ?? null
 
   if (!firstFrame) {
+    if (sourceMode === 'system') {
+      return <AppsWorkspaceSystemOnly routeSystemAppKeyword={routeSystemAppKeyword} />
+    }
+
     return (
       <FrameosShell
         mode="apps"
@@ -517,7 +890,15 @@ export function AppsWorkspace({ frameId, sceneId, nodeId }: AppsWorkspaceProps):
     )
   }
 
-  return <AppsWorkspaceFrame frameId={firstFrame.id} routeSceneId={sceneId ?? null} routeNodeId={nodeId ?? null} />
+  return (
+    <AppsWorkspaceFrame
+      frameId={firstFrame.id}
+      sourceMode={sourceMode}
+      routeSceneId={sourceMode === 'frames' ? sceneId ?? null : null}
+      routeNodeId={sourceMode === 'frames' ? nodeId ?? null : null}
+      routeSystemAppKeyword={routeSystemAppKeyword}
+    />
+  )
 }
 
 export default AppsWorkspace
