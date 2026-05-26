@@ -119,27 +119,24 @@ export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSetti
                 </div>
               }
             >
-              <>
-                <Select
-                  name="execution"
-                  className="h-10"
-                  options={[
-                    { value: 'compiled', label: 'compiled' },
-                    { value: 'interpreted', label: 'interpreted' },
-                  ]}
-                />
-                {hasInterpretedCompiledOnlyContent ? (
-                  <div className="app-compiled-warning mt-2 rounded-xl p-3 text-sm">
-                    <div className="font-semibold">This compiled scene will not work in interpreted mode.</div>
-                    <div>
-                      It still contains Nim app source, Nim code nodes, or source nodes that interpreted mode cannot
-                      run. Keep execution set to compiled, or move the customization into JavaScript apps or inline code
-                      nodes.
-                    </div>
-                  </div>
-                ) : null}
-              </>
+              <Select
+                name="execution"
+                className="h-10"
+                options={[
+                  { value: 'compiled', label: 'compiled' },
+                  { value: 'interpreted', label: 'interpreted' },
+                ]}
+              />
             </Field>
+            {hasInterpretedCompiledOnlyContent ? (
+              <div className="app-compiled-warning rounded-xl p-3 text-sm">
+                <div className="font-semibold">This compiled scene will not work in interpreted mode.</div>
+                <div>
+                  It still contains Nim app source, Nim code nodes, or source nodes that interpreted mode cannot run.
+                  Keep execution set to compiled, or move the customization into JavaScript apps or inline code nodes.
+                </div>
+              </div>
+            ) : null}
             {scene.settings?.prompt ? (
               <div className={`space-y-1 @md:flex ${promptFieldClassName}`}>
                 <label className="frameos-form-label flex items-center gap-1 text-sm font-medium @md:w-1/3">
