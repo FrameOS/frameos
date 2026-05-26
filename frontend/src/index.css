@@ -492,6 +492,24 @@ html[data-frameos-theme='dark'] .frameos-template-action-button:hover {
   border-color: rgba(255, 255, 255, 0.1);
 }
 
+.frameos-theme-dark .apps-source-mode-toggle,
+html[data-frameos-theme='dark'] .apps-source-mode-toggle {
+  background: rgba(8, 10, 14, 0.72);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.frameos-theme-dark .apps-source-mode-toggle-button:not(.frameos-primary-active),
+html[data-frameos-theme='dark'] .apps-source-mode-toggle-button:not(.frameos-primary-active) {
+  background: rgba(8, 10, 14, 0.88);
+  color: #8b95a5;
+}
+
+.frameos-theme-dark .apps-source-mode-toggle-button:not(.frameos-primary-active):hover,
+html[data-frameos-theme='dark'] .apps-source-mode-toggle-button:not(.frameos-primary-active):hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #e5e7eb;
+}
+
 .frameos-control {
   background: rgba(255, 255, 255, 0.86);
   border-color: rgba(148, 163, 184, 0.5);

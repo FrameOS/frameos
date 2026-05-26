@@ -225,7 +225,7 @@ function SourceModeToggle({
   onChange: (mode: AppsSourceMode) => void
 }): JSX.Element {
   return (
-    <div className="grid grid-cols-2 rounded-xl border border-slate-200 bg-white/70 p-1 shadow-sm">
+    <div className="apps-source-mode-toggle grid grid-cols-2 rounded-xl border border-slate-200 bg-white/70 p-1 shadow-sm">
       {(['system', 'frames'] as AppsSourceMode[]).map((candidate) => {
         const active = mode === candidate
         return (
@@ -235,7 +235,7 @@ function SourceModeToggle({
             aria-pressed={active}
             onClick={() => onChange(candidate)}
             className={clsx(
-              'h-9 rounded-lg px-3 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+              'apps-source-mode-toggle-button h-9 rounded-lg px-3 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
               active
                 ? 'frameos-primary-active text-white shadow-sm'
                 : 'text-slate-500 hover:bg-white hover:text-slate-800'
