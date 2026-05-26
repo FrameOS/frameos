@@ -1,14 +1,10 @@
-import { frameIsStale } from '../../decorators/frame'
+import { frameIsActive } from '../../decorators/frame'
 import type { FrameType } from '../../types'
 
 export interface FrameStatusGroup {
   key: 'active' | 'inactive' | 'archived'
   label: string
   frames: FrameType[]
-}
-
-function frameIsActive(frame: FrameType): boolean {
-  return frame.status === 'ready' && !frameIsStale(frame)
 }
 
 export function groupFramesByStatus(frames: FrameType[]): FrameStatusGroup[] {

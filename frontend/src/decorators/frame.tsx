@@ -74,6 +74,19 @@ export function frameIsHealthy(frame: FrameType): boolean {
   return frame.status === 'ready' && !frameIsStale(frame)
 }
 
+export function frameIsActive(frame: FrameType): boolean {
+  if ((frame.active_connections ?? 0) > 0) {
+    return true
+  }
+  if (frameIsStale(frame)) {
+    return false
+  }
+  if (frame.last_log_at) {
+    return true
+  }
+  return frame.status === 'ready' || frameStatusWithSpinner.includes(frame.status)
+}
+
 function frameSchemeAndPort(frame: FrameType): { scheme: string; port: number } {
   if (frame.https_proxy?.enable) {
     const tlsPort = frame.https_proxy?.port ?? 0

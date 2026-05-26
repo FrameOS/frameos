@@ -620,7 +620,7 @@ export function LongRunningTaskToasts(): JSX.Element | null {
   }
 
   return (
-    <div className="pointer-events-none fixed bottom-4 right-4 z-50 flex w-[calc(100vw-2rem)] max-w-[28rem] flex-col gap-3 sm:bottom-6 sm:right-6">
+    <div className="pointer-events-none fixed bottom-4 left-1/2 z-50 flex w-[calc(100vw-2rem)] max-w-[28rem] -translate-x-1/2 flex-col gap-3 sm:bottom-6">
       {visibleTasks.map((task) => (
         <div key={task.id} className="pointer-events-auto">
           <TaskToast task={task} />

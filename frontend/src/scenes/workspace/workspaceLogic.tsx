@@ -1,7 +1,7 @@
 import { actions, afterMount, connect, events, kea, listeners, path, reducers, selectors } from 'kea'
 import { actionToUrl, router, urlToAction } from 'kea-router'
 import { framesModel } from '../../models/framesModel'
-import { frameHost, frameIsStale } from '../../decorators/frame'
+import { frameHost, frameIsActive } from '../../decorators/frame'
 import { FrameScene, FrameType } from '../../types'
 import { urls } from '../../urls'
 import { frameLogic } from '../frame/frameLogic'
@@ -426,7 +426,7 @@ function defaultSceneId(frame: FrameType | null | undefined): string | null {
 }
 
 function frameIsActiveForHome(frame: FrameType): boolean {
-  return frame.status === 'ready' && !frameIsStale(frame)
+  return frameIsActive(frame)
 }
 
 function frameIsActiveInSnapshot(
