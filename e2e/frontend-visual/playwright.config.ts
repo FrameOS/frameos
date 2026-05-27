@@ -28,6 +28,7 @@ export default defineConfig({
     video: 'retain-on-failure',
     screenshot: 'only-on-failure',
     colorScheme: 'light',
+    timezoneId: 'UTC',
     actionTimeout: 10_000,
     navigationTimeout: 30_000,
   },

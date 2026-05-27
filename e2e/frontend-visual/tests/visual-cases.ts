@@ -113,6 +113,7 @@ async function expandDashboardScene(page: Page): Promise<void> {
 
 async function fillLogsSearch(page: Page): Promise<void> {
   await page.getByPlaceholder(/Search logs/i).fill('render')
+  await page.getByText('18 of 45 lines').waitFor()
 }
 
 async function closeSecondaryPanel(page: Page): Promise<void> {

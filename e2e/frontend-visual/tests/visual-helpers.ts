@@ -240,6 +240,22 @@ export async function settleForScreenshot(page: Page): Promise<void> {
   })
   await page.waitForLoadState('domcontentloaded')
   await page.waitForTimeout(500)
+  await stabilizeActiveLogsSearchScroll(page)
+}
+
+async function stabilizeActiveLogsSearchScroll(page: Page): Promise<void> {
+  const searchInput = page.getByPlaceholder(/Search logs/i).first()
+  const searchActive = await searchInput
+    .evaluate((element) => element instanceof HTMLInputElement && element.value.trim().length > 0)
+    .catch(() => false)
+
+  if (!searchActive) {
+    return
+  }
+
+  await page.evaluate(() => window.scrollTo(0, 0))
+  await page.waitForFunction(() => window.scrollY === 0)
+  await page.waitForTimeout(100)
 }
 
 export function attachFrontendErrorCollector(page: Page): () => string[] {
