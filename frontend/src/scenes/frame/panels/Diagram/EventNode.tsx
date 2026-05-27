@@ -67,13 +67,11 @@ export function EventNode({ id, isConnectable }: NodeProps): JSX.Element {
   })
 
   const backgroundClassName = clsx(
-    'shadow-lg border-2',
-    isSelected
-      ? 'bg-black bg-opacity-70 border-fuchsia-900 shadow-fuchsia-700/50'
-      : 'bg-black bg-opacity-70 border-red-900 shadow-red-700/50 '
+    'frameos-diagram-node shadow-lg border-2',
+    isSelected ? 'frameos-diagram-node-selected' : 'border-red-900 shadow-red-700/50 '
   )
 
-  const titleBackground = isSelected ? 'bg-fuchsia-900' : 'bg-red-900'
+  const titleBackground = isSelected ? 'frameos-diagram-title-selected' : 'bg-red-900'
 
   const titleClassName = clsx(
     'frameos-node-title text-xl p-1 px-2 gap-2',
@@ -87,7 +85,7 @@ export function EventNode({ id, isConnectable }: NodeProps): JSX.Element {
   if (keyword === 'button') {
     configRows.push(
       <tr key="button-label">
-        <td className="font-sm text-indigo-200 w-full">
+        <td className="font-sm frameos-node-muted-text w-full">
           <div className="flex items-center gap-2">
             <div className="flex-1">Label</div>
             <TextInput
@@ -97,7 +95,7 @@ export function EventNode({ id, isConnectable }: NodeProps): JSX.Element {
               theme="node"
             />
           </div>
-          <div className="text-xs text-indigo-200 mt-1">Leave empty to match all buttons.</div>
+          <div className="frameos-node-muted-text mt-1 text-xs">Leave empty to match all buttons.</div>
         </td>
       </tr>
     )
@@ -106,7 +104,7 @@ export function EventNode({ id, isConnectable }: NodeProps): JSX.Element {
   if (keyword === 'render') {
     configRows.push(
       <tr key="render-dimensions">
-        <td className="font-sm text-indigo-200 w-full">
+        <td className="font-sm frameos-node-muted-text w-full">
           <div className="flex items-center gap-2">
             <div className="flex-1">Dimensions</div>
             <div className="text-white text-sm">{width && height ? `${width}×${height}` : 'Unknown'}</div>
@@ -116,14 +114,14 @@ export function EventNode({ id, isConnectable }: NodeProps): JSX.Element {
     )
     configRows.push(
       <tr key="render-refresh">
-        <td className="font-sm text-indigo-200 w-full">
+        <td className="font-sm frameos-node-muted-text w-full">
           <div className="flex items-center gap-2">
             <div className="flex-1">Refresh interval</div>
             <Tooltip
               title="Seconds between automatic re-renders of this scene. Can be a large number (3600 seconds = 1 hour), or a very small number for real-time rendering (0.04s = 25fps)."
               containerClassName="ml-1 inline-block align-sub"
             >
-              <InformationCircleIcon className="w-4 h-4 text-indigo-200" aria-label="Info" />
+              <InformationCircleIcon className="frameos-node-muted-text h-4 w-4" aria-label="Info" />
             </Tooltip>
             <NumberTextInput
               theme="node"
@@ -138,7 +136,7 @@ export function EventNode({ id, isConnectable }: NodeProps): JSX.Element {
     )
     configRows.push(
       <tr key="render-background">
-        <td className="font-sm text-indigo-200 w-full">
+        <td className="font-sm frameos-node-muted-text w-full">
           <div className="flex items-center gap-2">
             <div className="flex-1">Background color</div>
             <ColorInput
@@ -237,7 +235,7 @@ export function EventNode({ id, isConnectable }: NodeProps): JSX.Element {
                     : stateFieldAccess(scene, field, 'context.payload')
                   return (
                     <tr key={i}>
-                      <td className="font-sm text-indigo-200 w-full" colSpan={3}>
+                      <td className="font-sm frameos-node-muted-text w-full" colSpan={3}>
                         <div className="flex items-center gap-2">
                           {field.type ? <FieldTypeTag type={field.type} /> : null}
                           <div className="flex-1" title={field.label}>

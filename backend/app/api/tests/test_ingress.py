@@ -1,19 +1,32 @@
 import pytest
 import importlib
+import os
 from starlette.testclient import TestClient
 from unittest.mock import patch
 
 from app.conftest import MockResponse
+from app.config import normalize_ingress_path
+
+HASSIO_ENV_KEYS = ("HASSIO_RUN_MODE", "HASSIO_TOKEN", "SUPERVISOR_TOKEN")
+
 
 @pytest.fixture
-def clear_env(monkeypatch):
+def clear_env():
     """
     A helper fixture to remove/clear environment variables before each test
     so each test starts from a known baseline.
     """
-    monkeypatch.delenv("HASSIO_RUN_MODE", raising=False)
-    monkeypatch.delenv("HASSIO_TOKEN", raising=False)
-    monkeypatch.delenv("SUPERVISOR_TOKEN", raising=False)
+    original_env = {key: os.environ.get(key) for key in HASSIO_ENV_KEYS}
+    for key in HASSIO_ENV_KEYS:
+        os.environ.pop(key, None)
+    _reload_app_and_config()
+    yield
+    for key, value in original_env.items():
+        if value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = value
+    _reload_app_and_config()
 
 def _reload_app_and_config():
     """
@@ -32,6 +45,14 @@ def _reload_app_and_config():
 
     # Return the reloaded references
     return fastapi.app, config.config
+
+
+def test_normalize_ingress_path():
+    assert normalize_ingress_path(None) == ""
+    assert normalize_ingress_path("") == ""
+    assert normalize_ingress_path("hostname/ingress/") == "/hostname/ingress"
+    assert normalize_ingress_path("/hostname/ingress/") == "/hostname/ingress"
+    assert normalize_ingress_path("https://homeassistant.local:8123/api/hassio_ingress/abc/") == "/api/hassio_ingress/abc"
 
 
 @pytest.mark.asyncio
@@ -126,5 +147,29 @@ async def test_hassio_run_mode_ingress(clear_env, monkeypatch):
     resp_frames = client.get("/api/frames")
     assert resp_frames.status_code == 200
 
+    resp_user = client.get("/api/user")
+    assert resp_user.status_code == 401
+    assert resp_user.json()["detail"] == "Account management is not available with HASSIO_RUN_MODE."
+
+    resp_email = client.post("/api/user/email", json={"email": "new@example.com"})
+    assert resp_email.status_code == 401
+    assert resp_email.json()["detail"] == "Account management is not available with HASSIO_RUN_MODE."
+
+    resp_password = client.post(
+        "/api/user/password",
+        json={
+            "current_password": "testpassword",
+            "password": "newpassword",
+            "password2": "newpassword",
+        },
+    )
+    assert resp_password.status_code == 401
+    assert resp_password.json()["detail"] == "Account management is not available with HASSIO_RUN_MODE."
+
     resp_root = client.get("/")
     assert resp_root.status_code == 200
+    assert '"ingress_path": "/hostname/ingress"' in resp_root.text
+
+    resp_root_with_header = client.get("/", headers={"x-ingress-path": "/api/hassio_ingress/runtime/"})
+    assert resp_root_with_header.status_code == 200
+    assert '"ingress_path": "/api/hassio_ingress/runtime"' in resp_root_with_header.text

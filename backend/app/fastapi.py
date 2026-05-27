@@ -16,7 +16,7 @@ from app.middleware import GzipRequestMiddleware
 from app.ws.agent_ws import router as agent_ws_router
 from app.ws.terminal_ws import router as terminal_ws_router
 from app.websockets import register_ws_routes, redis_listener
-from app.config import config
+from app.config import config, normalize_ingress_path
 from app.utils.posthog import initialize_posthog, capture_exception as posthog_capture_exception
 from app.database import SessionLocal
 from app.models.settings import get_settings_dict
@@ -67,32 +67,46 @@ if serve_html:
         app.mount("/img", StaticFiles(directory="../frontend/dist/img"), name="img")
         app.mount("/static", StaticFiles(directory="../frontend/dist/static"), name="static")
 
-        # Public config for the frontend
-        frameos_app_config = {}
         try:
-            index_html = open("../frontend/dist/index.html").read()
+            index_html_template = open("../frontend/dist/index.html").read()
         except FileNotFoundError:
             if config.TEST:
                 # don't need the compiled frontend when testing
-                index_html = open("../frontend/src/index.html").read()
+                index_html_template = open("../frontend/src/index.html").read()
             else:
                 raise
 
-        if config.HASSIO_RUN_MODE:
-            frameos_app_config["HASSIO_RUN_MODE"] = config.HASSIO_RUN_MODE
-        if config.ingress_path:
-            frameos_app_config["ingress_path"] = config.ingress_path
+        def frameos_app_config(request: Request | None = None) -> dict:
+            app_config = {}
+            if config.HASSIO_RUN_MODE:
+                app_config["HASSIO_RUN_MODE"] = config.HASSIO_RUN_MODE
+            header_ingress_path = (
+                normalize_ingress_path(request.headers.get("x-ingress-path"))
+                if request is not None and config.HASSIO_RUN_MODE == "ingress"
+                else ""
+            )
+            ingress_path = header_ingress_path or config.ingress_path
+            if ingress_path:
+                app_config["ingress_path"] = ingress_path
+            return app_config
 
-        index_html = index_html.replace('<head>', f'<head><script>window.FRAMEOS_APP_CONFIG={json.dumps(frameos_app_config)}</script>')
+        def index_html(request: Request | None = None) -> str:
+            return index_html_template.replace(
+                '<head>',
+                f'<head><script>window.FRAMEOS_APP_CONFIG={json.dumps(frameos_app_config(request))}</script>',
+            )
     else:
         dev_url = "http://localhost:8616"
-        index_html = "<html><body><h1>Frontend not built</h1>"
-        index_html += f'<p>Please run the frontend dev server: <a href="{dev_url}">{dev_url}</a></p>'
-        index_html += "</body></html>"
+        index_html_template = "<html><body><h1>Frontend not built</h1>"
+        index_html_template += f'<p>Please run the frontend dev server: <a href="{dev_url}">{dev_url}</a></p>'
+        index_html_template += "</body></html>"
+
+        def index_html(request: Request | None = None) -> str:
+            return index_html_template
 
     @app.get("/")
-    async def read_index():
-        return HTMLResponse(index_html)
+    async def read_index(request: Request):
+        return HTMLResponse(index_html(request))
 
     @app.exception_handler(StarletteHTTPException)
     async def custom_404_handler(request: Request, exc: StarletteHTTPException):
@@ -101,13 +115,13 @@ if serve_html:
                 status_code=exc.status_code,
                 content={"detail": exc.detail or f"Error {exc.status_code}"}
             )
-        return HTMLResponse(index_html)
+        return HTMLResponse(index_html(request))
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(request: Request, exc: RequestValidationError):
         if os.environ.get("TEST") == "1" or request.url.path.startswith("/api"):
             return await request_validation_exception_handler(request, exc)
-        return HTMLResponse(index_html)
+        return HTMLResponse(index_html(request))
 
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception):

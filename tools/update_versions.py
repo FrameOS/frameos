@@ -5,6 +5,7 @@ import argparse
 import datetime as dt
 import hashlib
 import json
+import re
 import subprocess
 from pathlib import Path, PurePosixPath
 from typing import Dict, List
@@ -13,6 +14,7 @@ ROOT = Path(__file__).resolve().parent.parent
 PROJECTS_FILE = ROOT / "project-folders.json"
 VERSIONS_FILE = ROOT / "versions.json"
 DOCKERIGNORE_FILE = ROOT / ".dockerignore"
+BASE_VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
 
 
 def _git_tracked_files() -> List[str]:
@@ -98,6 +100,18 @@ def _parse_version(value: str):
     return int(year_s), int(month_s), int(patch_s)
 
 
+def _validate_base_version(value: str) -> str:
+    version = value.strip()
+    if not BASE_VERSION_RE.fullmatch(version):
+        raise SystemExit(
+            f"--next-version must use numeric CalVer format like 2026.6.0, got: {value!r}"
+        )
+    _, month, _ = _parse_version(version)
+    if month < 1 or month > 12:
+        raise SystemExit(f"--next-version month must be between 1 and 12, got: {version}")
+    return version
+
+
 def _next_calver(previous: str | None, today: dt.date) -> str:
     if previous:
         prev_year, prev_month, prev_patch = _parse_version(previous)
@@ -115,6 +129,16 @@ def _max_base_version(versions: Dict[str, str]) -> str | None:
     return max(bases, key=_parse_version)
 
 
+def _validate_next_version(value: str, existing_versions: Dict[str, str]) -> str:
+    version = _validate_base_version(value)
+    max_existing_base = _max_base_version(existing_versions)
+    if max_existing_base and _parse_version(version) <= _parse_version(max_existing_base):
+        raise SystemExit(
+            f"--next-version must be newer than existing version {max_existing_base}, got: {version}"
+        )
+    return version
+
+
 def _increment_base_version(version: str) -> str:
     year, month, patch = _parse_version(version)
     return f"{year}.{month}.{patch + 1}"
@@ -127,6 +151,10 @@ def _parse_args(argv: List[str] | None) -> argparse.Namespace:
         action="append",
         default=[],
         help="Force the named project to receive the next release version even if its file hash is unchanged.",
+    )
+    parser.add_argument(
+        "--next-version",
+        help="Use this base release version for changed projects instead of deriving the next CalVer from today's date.",
     )
     return parser.parse_args(argv)
 
@@ -145,6 +173,9 @@ def main(argv: List[str] | None = None) -> int:
     existing_versions: Dict[str, str] = {}
     if VERSIONS_FILE.exists():
         existing_versions = json.loads(VERSIONS_FILE.read_text(encoding="utf-8"))
+    explicit_next_version = (
+        _validate_next_version(args.next_version, existing_versions) if args.next_version else None
+    )
 
     updated_versions: Dict[str, str] = dict(existing_versions)
     today = dt.datetime.utcnow().date()
@@ -176,7 +207,7 @@ def main(argv: List[str] | None = None) -> int:
 
     if changed_projects:
         max_existing_base = _max_base_version(existing_versions)
-        next_version = _next_calver(max_existing_base, today)
+        next_version = explicit_next_version or _next_calver(max_existing_base, today)
 
         for project_name in changed_projects:
             updated_versions[project_name] = f"{next_version}+{project_hashes[project_name]}"

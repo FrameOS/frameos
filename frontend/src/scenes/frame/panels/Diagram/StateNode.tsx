@@ -4,12 +4,11 @@ import { StateNodeData } from '../../../../types'
 import clsx from 'clsx'
 import { diagramLogic } from './diagramLogic'
 import { appNodeLogic } from './appNodeLogic'
-import { NodeCache } from './NodeCache'
-import { CodeArg } from './CodeArg'
 import { newNodePickerLogic } from './newNodePickerLogic'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
 import { ClipboardDocumentIcon, DocumentDuplicateIcon, TrashIcon } from '@heroicons/react/24/solid'
 import { NodeZoomLabel } from './NodeZoomLabel'
+import { FieldTypeTag } from '../../../../components/FieldTypeTag'
 
 export function StateNode({ id, isConnectable }: NodeProps<StateNodeData>): JSX.Element {
   const { frameId, sceneId } = useValues(diagramLogic)
@@ -19,26 +18,18 @@ export function StateNode({ id, isConnectable }: NodeProps<StateNodeData>): JSX.
   const data: StateNodeData = (node?.data as StateNodeData) ?? ({ keyword: '' } satisfies StateNodeData)
   const { select } = useActions(appNodeLogic(appNodeLogicProps))
   const { openNewNodePicker } = useActions(newNodePickerLogic({ sceneId, frameId }))
-  const titleBackground = isSelected ? 'bg-fuchsia-900' : 'bg-[#7f6e1d]'
+  const titleBackground = isSelected ? 'frameos-diagram-title-selected' : 'bg-[#7f6e1d]'
 
   return (
     <BindLogic logic={appNodeLogic} props={appNodeLogicProps}>
       <div
         onClick={select}
         className={clsx(
-          'shadow-lg border-2 h-full flex flex-col relative',
-          isSelected
-            ? 'bg-black bg-opacity-70 border-fuchsia-900 shadow-fuchsia-700/50'
-            : 'bg-black bg-opacity-70 border-[#81701d] shadow-[#81701d]/50'
+          'frameos-diagram-node shadow-lg border-2 h-full flex flex-col relative',
+          isSelected ? 'frameos-diagram-node-selected' : 'border-[#81701d] shadow-[#81701d]/50'
         )}
       >
-        <div
-          className={clsx(
-            'frameos-node-title text-xl p-2',
-            titleBackground,
-            'flex w-full justify-between items-center gap-1'
-          )}
-        >
+        <div className={clsx('frameos-node-title text-xl p-2 gap-2', titleBackground, 'flex w-full items-center')}>
           <Handle
             // StateOutputHandle
             type="source"
@@ -66,7 +57,10 @@ export function StateNode({ id, isConnectable }: NodeProps<StateNodeData>): JSX.
               )
             }}
           />
-          <CodeArg codeArg={{ name: stateFieldTitle ?? data.keyword, type: stateFieldType }} />
+          <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
+            <div className="min-w-0 truncate text-left">{stateFieldTitle ?? data.keyword}</div>
+            <FieldTypeTag type={stateFieldType} className="shrink-0" />
+          </div>
           <DropdownMenu
             className="w-fit"
             buttonColor="none"

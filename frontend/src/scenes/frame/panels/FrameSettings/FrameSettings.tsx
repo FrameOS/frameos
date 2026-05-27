@@ -1,4 +1,5 @@
 import { useActions, useValues } from 'kea'
+import clsx from 'clsx'
 import equal from 'fast-deep-equal'
 import { Button } from '../../../../components/Button'
 import { framesModel } from '../../../../models/framesModel'
@@ -9,13 +10,7 @@ import { frameAdminUrl, frameControlUrl, frameImageUrl, frameRootUrl, frameUrl }
 import { frameLogic } from '../../frameLogic'
 import { downloadJson } from '../../../../utils/downloadJson'
 import { Field } from '../../../../components/Field'
-import {
-  devices,
-  spectraPalettes,
-  withCustomPalette,
-  buildrootPlatforms,
-  modes,
-} from '../../../../devices'
+import { devices, spectraPalettes, withCustomPalette, buildrootPlatforms, modes } from '../../../../devices'
 import { secureToken } from '../../../../utils/secureToken'
 import { appsLogic } from '../Apps/appsLogic'
 import { frameSettingsLogic } from './frameSettingsLogic'
@@ -43,6 +38,7 @@ export interface FrameSettingsProps {
   className?: string
   hideDropdown?: boolean
   hideDeploymentMode?: boolean
+  scrollContainer?: boolean
 }
 
 function getCertificateHint(certificateName: string, value?: string): JSX.Element | undefined {
@@ -57,7 +53,7 @@ function getCertificateHint(certificateName: string, value?: string): JSX.Elemen
       ? 'text-red-300'
       : validityInfo.severity === 'expiring'
       ? 'text-yellow-300'
-      : 'text-gray-300'
+      : 'frame-tool-muted'
 
   return (
     <div className={colorClass} title={validityInfo.exactDateTime}>
@@ -127,7 +123,12 @@ function scrollToFrameHttpApiSection(e: React.MouseEvent): void {
   }
 }
 
-export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: FrameSettingsProps) {
+export function FrameSettings({
+  className,
+  hideDropdown,
+  hideDeploymentMode,
+  scrollContainer = true,
+}: FrameSettingsProps) {
   const { mode, frameId, frame, frameForm, frameFormTouches } = useValues(frameLogic)
   const {
     touchFrameFormField,
@@ -139,18 +140,12 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
   } = useActions(frameLogic)
   const { deleteFrame } = useActions(framesModel)
   const { appsWithSaveAssets } = useValues(appsLogic({ frameId }))
-  const {
-    clearBuildCache,
-    downloadBuildZip,
-    downloadCSourceZip,
-    downloadBinaryZip,
-  } = useActions(frameSettingsLogic({ frameId }))
-  const {
-    buildCacheLoading,
-    buildZipLoading,
-    cSourceZipLoading,
-    binaryZipLoading,
-  } = useValues(frameSettingsLogic({ frameId }))
+  const { clearBuildCache, downloadBuildZip, downloadCSourceZip, downloadBinaryZip } = useActions(
+    frameSettingsLogic({ frameId })
+  )
+  const { buildCacheLoading, buildZipLoading, cSourceZipLoading, binaryZipLoading } = useValues(
+    frameSettingsLogic({ frameId })
+  )
   const { openLogs } = useActions(panelsLogic({ frameId }))
   const { logs, ipAddresses } = useValues(logsLogic({ frameId }))
   const { savedSettings } = useValues(settingsLogic)
@@ -189,123 +184,128 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
   const controlUrl = frameControlUrl(linkFrame)
   const adminUrl = frameAdminUrl(linkFrame)
   const imageUrl = frameImageUrl(linkFrame)
-
-  return (
-    <div className={className} id="panel-settings-div">
-      {!hideDropdown ? (
-        <div className="float-right">
-          <DropdownMenu
-            className="w-fit"
-            buttonColor="secondary"
-            items={[
-              ...(mode === 'rpios' && !inFrameAdminMode
-                ? [
-                    {
-                      label: 'Clear build cache on frame',
-                      onClick: () => {
-                        clearBuildCache()
-                        openLogs()
-                      },
-                      icon: <ArrowPathIcon className="w-5 h-5" />,
-                      loading: buildCacheLoading,
-                    },
-                  ]
-                : []),
+  const frameActionsMenu = hideDropdown ? null : (
+    <DropdownMenu
+      className="w-fit"
+      buttonColor="tertiary"
+      items={[
+        ...(mode === 'rpios' && !inFrameAdminMode
+          ? [
               {
-                label: 'Import frame .json',
+                label: 'Clear build cache on frame',
                 onClick: () => {
-                  function handleFileSelect(event: Event): void {
-                    const inputElement = event.target as HTMLInputElement
-                    const file = inputElement.files?.[0]
-
-                    if (!file) {
-                      console.error('No file selected')
-                      return
-                    }
-
-                    const reader = new FileReader()
-
-                    reader.onload = (loadEvent: ProgressEvent<FileReader>) => {
-                      try {
-                        const jsonData = JSON.parse(loadEvent.target?.result as string)
-                        const { id, ...rest } = jsonData
-                        setFrameFormValues(rest)
-                        console.log('Imported frame:', jsonData)
-                        console.log('Press SAVE now to save the imported frame')
-                      } catch (error) {
-                        console.error('Error parsing JSON:', error)
-                      }
-                    }
-
-                    reader.onerror = () => {
-                      console.error('Error reading file:', reader.error)
-                    }
-
-                    reader.readAsText(file)
-                  }
-
-                  const fileInput = document.createElement('input')
-                  fileInput.type = 'file'
-                  fileInput.accept = '.json'
-                  fileInput.addEventListener('change', handleFileSelect)
-                  fileInput.click()
+                  clearBuildCache()
+                  openLogs()
                 },
-                icon: <ArrowDownTrayIcon className="w-5 h-5" />,
-                loading: false,
+                icon: <ArrowPathIcon className="w-5 h-5" />,
+                loading: buildCacheLoading,
               },
+            ]
+          : []),
+        {
+          label: 'Import frame .json',
+          onClick: () => {
+            function handleFileSelect(event: Event): void {
+              const inputElement = event.target as HTMLInputElement
+              const file = inputElement.files?.[0]
+
+              if (!file) {
+                console.error('No file selected')
+                return
+              }
+
+              const reader = new FileReader()
+
+              reader.onload = (loadEvent: ProgressEvent<FileReader>) => {
+                try {
+                  const jsonData = JSON.parse(loadEvent.target?.result as string)
+                  const { id, ...rest } = jsonData
+                  setFrameFormValues(rest)
+                  console.log('Imported frame:', jsonData)
+                  console.log('Press SAVE now to save the imported frame')
+                } catch (error) {
+                  console.error('Error parsing JSON:', error)
+                }
+              }
+
+              reader.onerror = () => {
+                console.error('Error reading file:', reader.error)
+              }
+
+              reader.readAsText(file)
+            }
+
+            const fileInput = document.createElement('input')
+            fileInput.type = 'file'
+            fileInput.accept = '.json'
+            fileInput.addEventListener('change', handleFileSelect)
+            fileInput.click()
+          },
+          icon: <ArrowDownTrayIcon className="w-5 h-5" />,
+          loading: false,
+        },
+        {
+          label: 'Export frame .json',
+          onClick: () => {
+            downloadJson(frame, `${frame.name || `frame${frame.id}`}.json`)
+          },
+          icon: <ArrowUpTrayIcon className="w-5 h-5" />,
+          loading: false,
+        },
+        ...(!inFrameAdminMode
+          ? [
               {
-                label: 'Export frame .json',
+                label: 'Download Nim build .zip',
                 onClick: () => {
-                  downloadJson(frame, `${frame.name || `frame${frame.id}`}.json`)
+                  downloadBuildZip()
+                  openLogs()
                 },
                 icon: <ArrowUpTrayIcon className="w-5 h-5" />,
+                loading: buildZipLoading,
+              },
+              {
+                label: 'Generate C sources .zip',
+                onClick: () => {
+                  downloadCSourceZip()
+                  openLogs()
+                },
+                icon: <ArrowUpTrayIcon className="w-5 h-5" />,
+                loading: cSourceZipLoading,
+              },
+              {
+                label: 'Download built binary .zip',
+                onClick: () => {
+                  downloadBinaryZip()
+                  openLogs()
+                },
+                icon: <ArrowUpTrayIcon className="w-5 h-5" />,
+                loading: binaryZipLoading,
+              },
+              {
+                label: 'Delete frame',
+                onClick: () => {
+                  if (confirm('Are you sure you want to DELETE this frame?')) {
+                    deleteFrame(frame.id)
+                  }
+                },
+                icon: <TrashIcon className="w-5 h-5" />,
                 loading: false,
               },
-              ...(!inFrameAdminMode
-                ? [
-                    {
-                      label: 'Download Nim build .zip',
-                      onClick: () => {
-                        downloadBuildZip()
-                        openLogs()
-                      },
-                      icon: <ArrowUpTrayIcon className="w-5 h-5" />,
-                      loading: buildZipLoading,
-                    },
-                    {
-                      label: 'Generate C sources .zip',
-                      onClick: () => {
-                        downloadCSourceZip()
-                        openLogs()
-                      },
-                      icon: <ArrowUpTrayIcon className="w-5 h-5" />,
-                      loading: cSourceZipLoading,
-                    },
-                    {
-                      label: 'Download built binary .zip',
-                      onClick: () => {
-                        downloadBinaryZip()
-                        openLogs()
-                      },
-                      icon: <ArrowUpTrayIcon className="w-5 h-5" />,
-                      loading: binaryZipLoading,
-                    },
-                    {
-                      label: 'Delete frame',
-                      onClick: () => {
-                        if (confirm('Are you sure you want to DELETE this frame?')) {
-                          deleteFrame(frame.id)
-                        }
-                      },
-                      icon: <TrashIcon className="w-5 h-5" />,
-                      loading: false,
-                    },
-                  ]
-                : []),
-            ]}
-          />
-        </div>
-      ) : null}
+            ]
+          : []),
+      ]}
+    />
+  )
+
+  return (
+    <div
+      className={clsx(
+        'frame-tool-panel frame-settings-panel',
+        scrollContainer ? 'h-full overflow-y-auto pr-2' : 'overflow-visible',
+        className
+      )}
+      id="panel-settings-div"
+    >
       <Form
         formKey="frameForm"
         logic={frameLogic}
@@ -315,7 +315,10 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
       >
         {showFrameInfo ? (
           <>
-            <H6 className="mt-2">Frame info</H6>
+            <div className="frame-settings-heading-row mt-2 flex items-center justify-between gap-3">
+              <H6 id="frame-settings-info">Frame info</H6>
+              {frameActionsMenu}
+            </div>
             <div className="pl-2 @md:pl-8 space-y-2">
               {frame.frame_host ? (
                 <Field
@@ -324,14 +327,14 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                   tooltip={`Open URLs for this frame directly in the browser. Loads ${frameRootUrl(frame)}`}
                 >
                   <div className="w-full flex flex-wrap gap-2 items-center">
-                    <A href={url} target="_blank" rel="noreferrer noopener" className="text-blue-400 hover:underline">
+                    <A href={url} target="_blank" rel="noreferrer noopener" className="frameos-link hover:underline">
                       Frame URL
                     </A>
                     <A
                       href={controlUrl}
                       target="_blank"
                       rel="noreferrer noopener"
-                      className="text-blue-400 hover:underline"
+                      className="frameos-link hover:underline"
                     >
                       Control URL
                     </A>
@@ -340,7 +343,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                         href={adminUrl}
                         target="_blank"
                         rel="noreferrer noopener"
-                        className="text-blue-400 hover:underline"
+                        className="frameos-link hover:underline"
                       >
                         Admin URL
                       </A>
@@ -349,7 +352,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                       href={imageUrl}
                       target="_blank"
                       rel="noreferrer noopener"
-                      className="text-blue-400 hover:underline"
+                      className="frameos-link hover:underline"
                     >
                       Image URL
                     </A>
@@ -359,7 +362,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                       className="cursor-pointer"
                       aria-label="Jump to HTTP API on frame settings"
                     >
-                      <Tag color={tlsEnabled ? 'teal' : 'gray'} className="flex gap-1">
+                      <Tag color={tlsEnabled ? 'primary' : 'gray'} className="flex gap-1">
                         {tlsEnabled ? 'HTTPS enabled' : 'HTTPS disabled'}
                         <CertificateTriangle frame={frame} frameForm={frameForm} />
                       </Tag>
@@ -369,7 +372,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
               ) : null}
               {!inFrameAdminMode && logs.length > 0 ? (
                 <Field name="_noop" label="Last seen IPs">
-                  <div className="text-sm text-gray-200 break-words w-full">
+                  <div className="frameos-strong text-sm break-words w-full">
                     {ipAddresses.length > 0 ? ipAddresses.join(', ') : 'No logs have been sent for the frame yet.'}
                   </div>
                 </Field>
@@ -377,7 +380,16 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
             </div>
           </>
         ) : null}
-        <H6 className="mt-2">Device settings</H6>
+        {showFrameInfo ? (
+          <H6 id="frame-settings-device" className="mt-2">
+            Device settings
+          </H6>
+        ) : (
+          <div className="frame-settings-heading-row mt-2 flex items-center justify-between gap-3">
+            <H6 id="frame-settings-device">Device settings</H6>
+            {frameActionsMenu}
+          </div>
+        )}
         <div className="pl-2 @md:pl-8 space-y-2">
           <Field name="name" label="Name">
             <TextInput name="name" placeholder="Hallway frame" required />
@@ -387,10 +399,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
               <Select name="mode" options={modes} disabled={inFrameAdminMode} />
             </Field>
           ) : null}
-          <Field
-            name="device"
-            label="Display driver"
-          >
+          <Field name="device" label="Display driver">
             <Select name="device" options={devices} />
           </Field>
           {frameForm.device === 'waveshare.EPD_10in3' ? (
@@ -578,7 +587,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
 
         {!inFrameAdminMode ? (
           <>
-            <H6 className="mt-2">
+            <H6 id="frame-settings-ssh" className="mt-2">
               SSH <span className="text-gray-500">(backend &#8594; frame)</span>
             </H6>
             <div className="pl-2 @md:pl-8 space-y-2">
@@ -603,7 +612,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                 tooltip={
                   <p>
                     Leave empty to use a SSH key. Configure it under{' '}
-                    <A href="/settings" className="text-blue-400 hover:underline">
+                    <A href="/settings" className="frameos-link hover:underline">
                       global settings.
                     </A>
                   </p>
@@ -673,7 +682,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
               </div>
             </div>
 
-            <H6>
+            <H6 id="frame-settings-agent">
               Agent (beta) <span className="text-gray-500">(frame &#8594; backend &#8594; frame)</span>
             </H6>
             <div className="pl-2 @md:pl-8 space-y-2">
@@ -693,8 +702,8 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                         connect to the backend to await further commands.
                       </p>
                       <p>
-                        Note: after enabling the agent, you must manually deploy it from the "..." -&gt; "Deploy
-                        Agent" menu in the top.
+                        Note: after enabling the agent, you must manually deploy it from the "..." -&gt; "Deploy Agent"
+                        menu in the top.
                       </p>
                     </div>
                   }
@@ -760,7 +769,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
           </>
         ) : null}
 
-        <H6 className="mt-2">
+        <H6 id="frame-settings-backend" className="mt-2">
           Backend access <span className="text-gray-500">(frame &#8594; backend)</span>
         </H6>
         <div className="pl-2 @md:pl-8 space-y-2">
@@ -892,7 +901,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
           </Field>
         </div>
 
-        <H6>Frame admin panel (BETA)</H6>
+        <H6 id="frame-settings-admin">Frame admin panel (BETA)</H6>
         <p className="pl-2 @md:pl-8 text-sm text-gray-500">
           Hosted on the frame at <code>/admin</code>, similar to the interface you&apos;re using now. This is still in
           beta: you can't save any changes.{' '}
@@ -907,7 +916,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
                   href={adminUrl}
                   target="_blank"
                   rel="noreferrer noopener"
-                  className="text-blue-400 hover:underline text-sm"
+                  className="frameos-link text-sm hover:underline"
                 >
                   Open
                 </A>
@@ -1029,7 +1038,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
           ) : null}
         </div>
 
-        <H6>Network</H6>
+        <H6 id="frame-settings-network">Network</H6>
         <div className="pl-2 @md:pl-8 space-y-2">
           <Group name="network">
             <Field name="networkCheck" label="Wait for network before rendering">
@@ -1123,7 +1132,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
           </Group>
         </div>
 
-        <H6>Defaults</H6>
+        <H6 id="frame-settings-defaults">Defaults</H6>
         <div className="pl-2 @md:pl-8 space-y-2">
           <Field name="width" label="Width">
             <TextInput name="width" placeholder="1920" />
@@ -1160,7 +1169,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
           </Field>
         </div>
 
-        <H6>Palette</H6>
+        <H6 id="frame-settings-palette">Palette</H6>
         {frame.device && withCustomPalette[frame.device] ? (
           <div className="pl-2 @md:pl-8 space-y-2">
             <Field name="palette" label="Color palette">
@@ -1222,7 +1231,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
           <div>This frame does not support changing the palette</div>
         )}
 
-        <H6>QR Control Code</H6>
+        <H6 id="frame-settings-qr">QR Control Code</H6>
         <div className="pl-2 @md:pl-8 space-y-2">
           <Group name="control_code">
             <Field name="enabled" label="QR Control Code">
@@ -1282,7 +1291,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
             )}
           </Group>
         </div>
-        <H6>Assets</H6>
+        <H6 id="frame-settings-assets">Assets</H6>
         <div className="pl-2 @md:pl-8 space-y-2">
           <Field
             name="assets_path"
@@ -1372,7 +1381,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
             </Field>
           ) : null}
         </div>
-        <H6 className="flex items-center gap-2">
+        <H6 id="frame-settings-gpio" className="flex items-center gap-2">
           GPIO buttons
           {frameForm.device !== 'pimoroni.inky_impression' &&
           frameForm.device !== 'pimoroni.inky_impression_7' &&
@@ -1429,7 +1438,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
             ))
           )}
         </div>
-        <H6>Logs</H6>
+        <H6 id="frame-settings-logs">Logs</H6>
         <div className="pl-2 @md:pl-8 space-y-2">
           <Field
             name="log_to_file"
@@ -1457,7 +1466,7 @@ export function FrameSettings({ className, hideDropdown, hideDeploymentMode }: F
             />
           </Field>
         </div>
-        <H6>Reboot</H6>
+        <H6 id="frame-settings-reboot">Reboot</H6>
         <div className="pl-2 @md:pl-8 space-y-2">
           <Group name="reboot">
             <Field name="enabled" label="Automatic reboot">

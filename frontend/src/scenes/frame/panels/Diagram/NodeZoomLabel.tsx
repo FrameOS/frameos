@@ -2,8 +2,8 @@ import clsx from 'clsx'
 import { CSSProperties } from 'react'
 import { useStore } from 'reactflow'
 
-const OVERVIEW_FADE_START_ZOOM = 1 / 2
-const OVERVIEW_FADE_END_ZOOM = 1 / 3
+const OVERVIEW_FADE_START_ZOOM = 1 / 3
+const OVERVIEW_FADE_END_ZOOM = 1 / 4
 const POINTER_OPACITY_THRESHOLD = 0.5
 
 const zoomSelector = (state: { transform: [number, number, number] }): number => state.transform[2]

@@ -7,14 +7,10 @@ import { Tabs } from '../../../../components/panels/Tabs'
 import { Tab } from '../../../../components/panels/Tab'
 import { TextInput } from '../../../../components/TextInput'
 import React from 'react'
-import { frameLogic } from '../../frameLogic'
-import { panelsLogic } from '../panelsLogic'
 
 export function Events() {
   const { tab, events, search, tabCounts } = useValues(eventsLogic)
   const { showDispatch, showListen, setSearch } = useActions(eventsLogic)
-  const { frameId } = useValues(frameLogic)
-  const { scenesOpen } = useValues(panelsLogic({ frameId }))
 
   const onDragStart = (event: any, type: 'event' | 'dispatch', keyword: string) => {
     event.dataTransfer.setData('application/reactflow', JSON.stringify({ type, keyword }))
@@ -24,16 +20,21 @@ export function Events() {
   return (
     <div className="space-y-2">
       <TextInput placeholder="Search events..." onChange={setSearch} value={search} />
-      {scenesOpen ? (
-        <div className="text-xs text-gray-400">
-          Events can only be dragged onto the scene editor or into AI generation prompts.
-        </div>
-      ) : null}
-      <Tabs className="border border-t-0 border-l-0 border-r-0 border-b-1 border-gray-700 pl-2">
-        <Tab onClick={showListen} active={tab === 'listen'} activeColorClass="bg-[#4a4b8c]" className="mb-[-1px]">
+      <Tabs className="frameos-divider border border-t-0 border-l-0 border-r-0 border-b-1 pl-2">
+        <Tab
+          onClick={showListen}
+          active={tab === 'listen'}
+          activeColorClass="frameos-primary-active"
+          className="mb-[-1px]"
+        >
           Listen ({tabCounts.listen})
         </Tab>
-        <Tab onClick={showDispatch} active={tab === 'dispatch'} activeColorClass="bg-[#4a4b8c]" className="mb-[-1px]">
+        <Tab
+          onClick={showDispatch}
+          active={tab === 'dispatch'}
+          activeColorClass="frameos-primary-active"
+          className="mb-[-1px]"
+        >
           Dispatch ({tabCounts.dispatch})
         </Tab>
       </Tabs>
@@ -43,16 +44,19 @@ export function Events() {
         .map(({ name, description, fields }) => (
           <Box
             key={name}
-            className="bg-gray-900 px-3 py-2 dndnode cursor-move"
+            className="frame-tool-row dndnode flex cursor-move items-stretch gap-3 py-2 pl-0.5 pr-3"
             draggable
             onDragStart={(event) => onDragStart(event, tab === 'listen' ? 'event' : 'dispatch', name)}
           >
-            <div className="flex items-center justify-between w-full">
-              <H6>{name}</H6>
-            </div>
-            <div className="text-sm">
-              {description}
-              {fields && fields.length > 0 ? ' (' + fields.map((f) => `${f.name}: ${f.type}`).join(', ') + ')' : ''}
+            <div className="frame-tool-drag-handle" aria-hidden="true" />
+            <div className="min-w-0 flex-1">
+              <div className="flex w-full items-center justify-between">
+                <H6>{name}</H6>
+              </div>
+              <div className="text-sm">
+                {description}
+                {fields && fields.length > 0 ? ' (' + fields.map((f) => `${f.name}: ${f.type}`).join(', ') + ')' : ''}
+              </div>
             </div>
           </Box>
         ))}

@@ -1,7 +1,11 @@
 import { Spinner } from '../components/Spinner'
-import { FrameType } from '../types'
+import { FrameType, LogType } from '../types'
 import { frameAdminPath } from '../utils/frameAdmin'
 import { withFrameAdminLoginParams } from '../utils/frameAdminLoginParams'
+
+export function logUpdatesFrameActivity(log: Pick<LogType, 'type' | 'line'>): boolean {
+  return log.type === 'webhook'
+}
 
 export function frameHost(frame: FrameType): string {
   if (!frame.ssh_user || frame.ssh_user === 'pi') {
@@ -12,17 +16,79 @@ export function frameHost(frame: FrameType): string {
 
 export const frameStatusWithSpinner = ['deploying', 'preparing', 'rendering', 'restarting', 'starting']
 
+function parseFrameTimestamp(timestamp?: string | null): number {
+  if (!timestamp) {
+    return NaN
+  }
+  const hasTimeZone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(timestamp)
+  return Date.parse(hasTimeZone ? timestamp : `${timestamp}Z`)
+}
+
+function pluralize(value: number, unit: string): string {
+  return `${value} ${unit}${value === 1 ? '' : 's'} ago`
+}
+
+export function formatFrameRelativeTime(timestamp?: string | null): string | null {
+  const time = parseFrameTimestamp(timestamp)
+  if (!Number.isFinite(time)) {
+    return null
+  }
+
+  const seconds = Math.max(0, Math.round((Date.now() - time) / 1000))
+  if (seconds < 45) {
+    return 'just now'
+  }
+  if (seconds < 90) {
+    return '1 minute ago'
+  }
+
+  const minutes = Math.round(seconds / 60)
+  if (minutes < 60) {
+    return pluralize(minutes, 'minute')
+  }
+  if (minutes < 90) {
+    return '1 hour ago'
+  }
+
+  const hours = Math.round(minutes / 60)
+  if (hours < 24) {
+    return pluralize(hours, 'hour')
+  }
+  if (hours < 36) {
+    return '1 day ago'
+  }
+
+  const days = Math.round(hours / 24)
+  return pluralize(days, 'day')
+}
+
 export function frameIsStale(frame: FrameType): boolean {
   if (!frame.last_log_at) {
     return false
   }
-  const lastLogAt = new Date(frame.last_log_at)
-  const now = new Date()
-  return now.getTime() - lastLogAt.getTime() > 1000 * 60 * 60
+  const lastLogAt = parseFrameTimestamp(frame.last_log_at)
+  return Number.isFinite(lastLogAt) && Date.now() - lastLogAt > 1000 * 60 * 60
+}
+
+function frameHasActivityLog(frame: FrameType): boolean {
+  return Number.isFinite(parseFrameTimestamp(frame.last_log_at))
 }
 
 export function frameIsHealthy(frame: FrameType): boolean {
   return frame.status === 'ready' && !frameIsStale(frame)
+}
+
+export function frameIsActive(frame: FrameType): boolean {
+  if ((frame.active_connections ?? 0) > 0) {
+    return true
+  }
+  if (frameIsStale(frame)) {
+    return false
+  }
+  if (frameHasActivityLog(frame)) {
+    return true
+  }
+  return frame.status === 'ready' || frameStatusWithSpinner.includes(frame.status)
 }
 
 function frameSchemeAndPort(frame: FrameType): { scheme: string; port: number } {
@@ -36,7 +102,7 @@ function frameSchemeAndPort(frame: FrameType): { scheme: string; port: number } 
   return { scheme: 'http', port: frame.frame_port }
 }
 
-export function frameStatus(frame: FrameType): JSX.Element {
+export function frameStatusLabel(frame: FrameType): string {
   let status = frame.status
   if (frameIsStale(frame)) {
     status = 'stale'
@@ -46,11 +112,33 @@ export function frameStatus(frame: FrameType): JSX.Element {
     status = 'connected'
   }
 
+  return status
+}
+
+export function frameNeedsInitialDeploy(frame: FrameType): boolean {
+  return !frame.last_successful_deploy_at
+}
+
+export function frameStatusDescription(frame: FrameType): string {
+  if (frameNeedsInitialDeploy(frame)) {
+    return 'waiting for first deploy'
+  }
+
+  const status = frameStatusLabel(frame)
+  const relativeTime = formatFrameRelativeTime(frame.last_log_at)
+  const logDescription = relativeTime ? `last seen ${relativeTime}` : 'no logs yet'
+
+  return `${status} - ${logDescription}`
+}
+
+export function frameStatus(frame: FrameType): JSX.Element {
+  const status = frameStatusLabel(frame)
+
   return (
-    <div className="flex gap-2 items-center">
-      {status}
+    <span className="inline-flex items-center gap-2">
+      {frameStatusDescription(frame)}
       {frameStatusWithSpinner.includes(status) ? <Spinner /> : null}
-    </div>
+    </span>
   )
 }
 

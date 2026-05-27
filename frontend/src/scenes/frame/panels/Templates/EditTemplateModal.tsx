@@ -11,7 +11,7 @@ import { Image } from '../Image/Image'
 import { Box } from '../../../../components/Box'
 import { H6 } from '../../../../components/H6'
 import { Tag } from '../../../../components/Tag'
-import { CheckIcon, NoSymbolIcon } from '@heroicons/react/24/solid'
+import { CheckIcon } from '@heroicons/react/24/solid'
 import clsx from 'clsx'
 import { Spinner } from '../../../../components/Spinner'
 import React from 'react'
@@ -39,7 +39,7 @@ export function EditTemplateModal() {
             onClose={hideModal}
             open={showingModal}
             footer={
-              <div className="flex items-top justify-end gap-2 p-6 border-t border-solid border-blueGray-200 rounded-b">
+              <div className="flex items-top justify-end gap-2 rounded-b border-t border-solid border-slate-500/20 p-6">
                 <Button color="none" onClick={hideModal}>
                   Close
                 </Button>
@@ -56,7 +56,7 @@ export function EditTemplateModal() {
               </div>
             }
           >
-            <div className="relative p-6 flex-auto space-y-4">
+            <div className="frame-tool-panel relative flex-auto space-y-4 p-6">
               <Field name="name" label="Template name">
                 <TextInput placeholder="Template name" required />
               </Field>
@@ -93,8 +93,8 @@ export function EditTemplateModal() {
                             <Box
                               key={scene.id}
                               className={clsx(
-                                'p-2 flex flex-row gap-2 cursor-pointer items-center',
-                                included ? '!bg-[#4a4b8c] !hover:bg-[#484984]' : 'bg-gray-900'
+                                'frame-tool-card flex cursor-pointer flex-row items-center gap-3 rounded-[18px] p-2 transition',
+                                included ? 'frameos-primary-active text-white' : 'hover:bg-slate-500/10'
                               )}
                               onClick={(e) => {
                                 e.preventDefault()
@@ -108,7 +108,7 @@ export function EditTemplateModal() {
                               <FrameImage
                                 frameId={frameId}
                                 sceneId={scene.id}
-                                className="cursor-pointer max-w-[120px] max-h-[120px]"
+                                className="max-h-[120px] max-w-[120px] cursor-pointer rounded-xl"
                                 refreshable={false}
                                 thumb
                               />
@@ -122,7 +122,9 @@ export function EditTemplateModal() {
                                       </Tag>
                                     ) : null}
                                   </H6>
-                                  <div className="text-xs text-gray-400">id: {scene.id}</div>
+                                  <div className={clsx('text-xs', included ? 'text-white/70' : 'frame-tool-muted')}>
+                                    id: {scene.id}
+                                  </div>
                                 </div>
                               </div>
                               {included ? <CheckIcon className="w-5 h-5" /> : null}

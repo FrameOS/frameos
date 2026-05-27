@@ -14,10 +14,12 @@ import { NodeCache } from './NodeCache'
 import { CodeArg } from './CodeArg'
 import { newNodePickerLogic } from './newNodePickerLogic'
 import { NodeZoomLabel } from './NodeZoomLabel'
+import { workspaceLogic } from '../../../workspace/workspaceLogic'
 
 export function CodeNode({ id, isConnectable }: NodeProps<CodeNodeData>): JSX.Element {
   const updateNodeInternals = useUpdateNodeInternals()
   const { frameId, sceneId } = useValues(diagramLogic)
+  const { theme } = useValues(workspaceLogic)
   const { updateNodeData, updateEdge, copyAppJSON, duplicateNode, deleteApp } = useActions(diagramLogic)
   const appNodeLogicProps = { frameId, sceneId, nodeId: id }
   const { isSelected, node, nodeEdges, codeNodeLanguage } = useValues(appNodeLogic(appNodeLogicProps))
@@ -114,6 +116,12 @@ declare const context: {
       rules: [],
       colors: { 'editor.background': '#18181b' },
     })
+    monaco.editor.defineTheme('lightframe-node', {
+      base: 'vs',
+      inherit: true,
+      rules: [],
+      colors: { 'editor.background': '#f8fafc' },
+    })
   }
 
   const baseScrollbarOptions = {
@@ -142,7 +150,7 @@ declare const context: {
     updateCodeArgGlobals(monaco, data.codeArgs ?? [])
   }
 
-  const titleBackground = isSelected ? 'bg-fuchsia-900' : 'bg-green-900'
+  const titleBackground = isSelected ? 'frameos-diagram-title-selected' : 'bg-green-900'
   const outputLabel = data.codeOutputs?.find((output) => output.name.trim())?.name ?? 'output'
 
   return (
@@ -152,8 +160,8 @@ declare const context: {
         className={clsx(
           'shadow-lg border-2 h-full flex flex-col relative',
           isSelected
-            ? 'bg-black bg-opacity-70 border-fuchsia-900 shadow-fuchsia-700/50'
-            : 'bg-black bg-opacity-70 border-green-900 shadow-green-700/50 '
+            ? 'frameos-diagram-node frameos-diagram-node-selected'
+            : 'frameos-diagram-node border-green-900 shadow-green-700/50 '
         )}
       >
         <NodeResizer minWidth={200} minHeight={119} />
@@ -277,7 +285,7 @@ declare const context: {
               language="typescript"
               path={`inmemory://code-node/${id}.tsx`}
               value={data.codeJS ?? ''}
-              theme="darkframe-node"
+              theme={theme === 'dark' ? 'darkframe-node' : 'lightframe-node'}
               beforeMount={beforeMount}
               options={{
                 minimap: { enabled: false },
@@ -315,8 +323,8 @@ declare const context: {
         </div>
         <div
           className={clsx(
-            'frameos-node-title text-xl px-1 gap-1',
-            isSelected ? 'bg-fuchsia-900' : 'bg-green-900',
+            'frameos-node-title text-xl px-1 py-0.5 gap-1',
+            isSelected ? 'frameos-diagram-title-selected' : 'bg-green-900',
             'flex w-full justify-between items-center'
           )}
         >

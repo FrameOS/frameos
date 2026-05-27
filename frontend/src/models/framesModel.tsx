@@ -8,6 +8,8 @@ import { sanitizeScene } from '../scenes/frame/frameLogic'
 import { apiFetch } from '../utils/apiFetch'
 import { entityImagesModel } from './entityImagesModel'
 import { urls } from '../urls'
+import { logUpdatesFrameActivity } from '../decorators/frame'
+import { longRunningTasksModel } from './longRunningTasksModel'
 
 function sanitizeFrameForStore(frame: FrameType): FrameType {
   const lastSuccessfulDeploy = frame.last_successful_deploy
@@ -32,6 +34,19 @@ function sortFrames(frames: FrameType[]): FrameType[] {
   )
 }
 
+function activeSceneIdFromLogLine(line: string): string | null {
+  try {
+    const payload = JSON.parse(line)
+    if (
+      ['render:sceneChange', 'event:setCurrentScene', 'event:uploadScenes'].includes(payload?.event) &&
+      typeof payload.sceneId === 'string'
+    ) {
+      return payload.sceneId
+    }
+  } catch (error) {}
+  return null
+}
+
 export const framesModel = kea<framesModelType>([
   connect(() => ({ logic: [socketLogic, entityImagesModel] })),
   path(['src', 'models', 'framesModel']),
@@ -44,11 +59,13 @@ export const framesModel = kea<framesModelType>([
     rebootFrame: (id: number) => ({ id }),
     renderFrame: (id: number) => ({ id }),
     deleteFrame: (id: number) => ({ id }),
+    renameFrame: (id: number, name: string) => ({ id, name }),
     deployAgent: (id: number) => ({ id }),
     restartAgent: (id: number) => ({ id }),
     setDeployWithAgent: (id: number, deployWithAgent: boolean) => ({ id, deployWithAgent }),
     setFrameArchived: (id: number, archived: boolean) => ({ id, archived }),
     toggleArchivedFramesExpanded: true,
+    toggleInactiveFramesExpanded: true,
   }),
   loaders(({ values }) => ({
     frames: [
@@ -120,6 +137,17 @@ export const framesModel = kea<framesModelType>([
             },
           }
         },
+        renameFrame: (state, { id, name }) => {
+          const frame = state[id]
+          if (!frame) return state
+          return {
+            ...state,
+            [id]: {
+              ...frame,
+              name,
+            },
+          }
+        },
         [socketLogic.actionTypes.newFrame]: (state, { frame }) => ({
           ...state,
           [frame.id]: sanitizeFrameForStore(frame),
@@ -128,6 +156,31 @@ export const framesModel = kea<framesModelType>([
           ...state,
           [frame.id]: sanitizeFrameForStore({ ...(state[frame.id] ?? {}), ...frame }),
         }),
+        [socketLogic.actionTypes.newLog]: (state, { log }) => {
+          const frame = state[log.frame_id]
+          if (!frame) {
+            return state
+          }
+          const activeSceneId = activeSceneIdFromLogLine(log.line)
+          if (!logUpdatesFrameActivity(log) && !activeSceneId) {
+            return state
+          }
+          const currentLastLogAt = frame.last_log_at ? Date.parse(frame.last_log_at) : NaN
+          const nextLastLogAt = Date.parse(log.timestamp)
+          const shouldUpdateLastLogAt =
+            Number.isFinite(nextLastLogAt) && (!Number.isFinite(currentLastLogAt) || currentLastLogAt < nextLastLogAt)
+          if (!shouldUpdateLastLogAt && !activeSceneId) {
+            return state
+          }
+          return {
+            ...state,
+            [log.frame_id]: {
+              ...frame,
+              ...(shouldUpdateLastLogAt ? { last_log_at: log.timestamp } : {}),
+              ...(activeSceneId ? { active_scene_id: activeSceneId } : {}),
+            },
+          }
+        },
         [socketLogic.actionTypes.deleteFrame]: (state, { id }) => {
           const newState = { ...state }
           delete newState[id]
@@ -140,6 +193,13 @@ export const framesModel = kea<framesModelType>([
       { persist: true, storageKey: 'framesModel.archivedFramesExpanded' },
       {
         toggleArchivedFramesExpanded: (state) => !state,
+      },
+    ],
+    inactiveFramesExpanded: [
+      true,
+      { persist: true, storageKey: 'framesModel.inactiveFramesExpanded' },
+      {
+        toggleInactiveFramesExpanded: (state) => !state,
       },
     ],
   })),
@@ -160,13 +220,47 @@ export const framesModel = kea<framesModelType>([
   }),
   listeners(({ actions, values }) => ({
     renderFrame: async ({ id }) => {
-      await apiFetch(`/api/frames/${id}/event/render`, { method: 'POST' })
+      longRunningTasksModel.actions.startTask({
+        frameId: id,
+        kind: 'render',
+        title: 'Rendering frame',
+        detail: 'Render request sent',
+      })
+      try {
+        const response = await apiFetch(`/api/frames/${id}/event/render`, { method: 'POST' })
+        if (!response.ok) {
+          throw new Error('Failed to send render event')
+        }
+      } catch (error) {
+        longRunningTasksModel.actions.taskFailed({
+          frameId: id,
+          kind: 'render',
+          detail: error instanceof Error ? error.message : 'Failed to render frame',
+        })
+        throw error
+      }
     },
     deployFrame: async ({ id, fastDeploy }) => {
-      if (fastDeploy) {
-        await apiFetch(`/api/frames/${id}/fast_deploy`, { method: 'POST' })
-      } else {
-        await apiFetch(`/api/frames/${id}/deploy`, { method: 'POST' })
+      longRunningTasksModel.actions.startTask({
+        frameId: id,
+        kind: 'deploy',
+        title: fastDeploy ? 'Fast deploying frame' : 'Deploying frame',
+        detail: 'Deploy request sent',
+      })
+      try {
+        const response = fastDeploy
+          ? await apiFetch(`/api/frames/${id}/fast_deploy`, { method: 'POST' })
+          : await apiFetch(`/api/frames/${id}/deploy`, { method: 'POST' })
+        if (!response.ok) {
+          throw new Error(fastDeploy ? 'Failed to start fast deploy' : 'Failed to start deploy')
+        }
+      } catch (error) {
+        longRunningTasksModel.actions.taskFailed({
+          frameId: id,
+          kind: 'deploy',
+          detail: error instanceof Error ? error.message : 'Failed to deploy frame',
+        })
+        throw error
       }
     },
     stopFrame: async ({ id }) => {
@@ -179,10 +273,46 @@ export const framesModel = kea<framesModelType>([
       await apiFetch(`/api/frames/${id}/reboot`, { method: 'POST' })
     },
     deployAgent: async ({ id }) => {
-      await apiFetch(`/api/frames/${id}/deploy_agent`, { method: 'POST' })
+      longRunningTasksModel.actions.startTask({
+        frameId: id,
+        kind: 'agentDeploy',
+        title: 'Deploying FrameOS agent',
+        detail: 'Agent deploy request sent',
+      })
+      try {
+        const response = await apiFetch(`/api/frames/${id}/deploy_agent`, { method: 'POST' })
+        if (!response.ok) {
+          throw new Error('Failed to start agent deploy')
+        }
+      } catch (error) {
+        longRunningTasksModel.actions.taskFailed({
+          frameId: id,
+          kind: 'agentDeploy',
+          detail: error instanceof Error ? error.message : 'Failed to deploy agent',
+        })
+        throw error
+      }
     },
     restartAgent: async ({ id }) => {
-      await apiFetch(`/api/frames/${id}/restart_agent`, { method: 'POST' })
+      longRunningTasksModel.actions.startTask({
+        frameId: id,
+        kind: 'agentRestart',
+        title: 'Restarting FrameOS agent',
+        detail: 'Agent restart request sent',
+      })
+      try {
+        const response = await apiFetch(`/api/frames/${id}/restart_agent`, { method: 'POST' })
+        if (!response.ok) {
+          throw new Error('Failed to start agent restart')
+        }
+      } catch (error) {
+        longRunningTasksModel.actions.taskFailed({
+          frameId: id,
+          kind: 'agentRestart',
+          detail: error instanceof Error ? error.message : 'Failed to restart agent',
+        })
+        throw error
+      }
     },
     setDeployWithAgent: async ({ id, deployWithAgent }) => {
       const frame = values.frames[id]
@@ -212,6 +342,21 @@ export const framesModel = kea<framesModelType>([
       await apiFetch(`/api/frames/${id}`, { method: 'DELETE' })
       if (router.values.location.pathname.includes('/frames/' + id)) {
         router.actions.push(urls.frames())
+      }
+    },
+    renameFrame: async ({ id, name }) => {
+      try {
+        const response = await apiFetch(`/api/frames/${id}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name }),
+        })
+        if (!response.ok) {
+          throw new Error('Failed to rename frame')
+        }
+      } catch (error) {
+        console.error(error)
+        actions.loadFrame(id)
       }
     },
     [socketLogic.actionTypes.newLog]: ({ log }) => {

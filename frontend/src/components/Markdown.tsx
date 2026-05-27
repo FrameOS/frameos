@@ -32,7 +32,7 @@ export function Markdown({ value }: MarkdownProps) {
               PreTag="div"
             />
           ) : (
-            <code {...rest} className={clsx('bg-black', className)}>
+            <code {...rest} className={clsx('frameos-inset rounded px-1 py-0.5', className)}>
               {children}
             </code>
           )

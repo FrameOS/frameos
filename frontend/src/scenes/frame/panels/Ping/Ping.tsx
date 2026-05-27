@@ -1,128 +1,335 @@
 import { useActions, useValues } from 'kea'
+import clsx from 'clsx'
+import type { ReactNode } from 'react'
+import { CheckCircleIcon, PauseIcon, PlayIcon, SignalIcon, XCircleIcon } from '@heroicons/react/24/outline'
 import { frameLogic } from '../../frameLogic'
-import { Button } from '../../../../components/Button'
 import { NumberTextInput } from '../../../../components/NumberTextInput'
-import { Select } from '../../../../components/Select'
 import { TextInput } from '../../../../components/TextInput'
-import { formatMs, pingLogic, PingMode } from './pingLogic'
+import { formatMs, pingLogic, PingMode, PingResult } from './pingLogic'
 
-export function Ping() {
+interface PingProps {
+  scrollContainer?: boolean
+}
+
+function primaryLatency(result: PingResult | null | undefined): number | null {
+  if (!result) {
+    return null
+  }
+  return result.icmpTimeMs ?? result.clientElapsedMs ?? result.serverElapsedMs ?? null
+}
+
+function latencyLabel(result: PingResult | null | undefined): string {
+  const latency = primaryLatency(result)
+  return latency === null ? 'No sample' : `${formatMs(latency, latency < 10 ? 1 : 0)} ms`
+}
+
+function latencyDetail(result: PingResult | null | undefined): string {
+  if (!result) {
+    return 'Waiting for first check'
+  }
+  if (result.mode === 'icmp' && result.icmpTimeMs !== null && result.clientElapsedMs !== null) {
+    return `+${formatMs(result.clientElapsedMs, 0)} ms browser round trip`
+  }
+  if (result.serverElapsedMs !== null && result.clientElapsedMs !== null) {
+    return `${formatMs(result.serverElapsedMs, 0)} ms server measured`
+  }
+  return result.mode === 'http' ? 'HTTP round trip' : 'Host reply time'
+}
+
+function latencyTone(value: number | null): 'good' | 'warning' | 'danger' | 'neutral' {
+  if (value === null) {
+    return 'neutral'
+  }
+  if (value >= 1000) {
+    return 'danger'
+  }
+  if (value >= 250) {
+    return 'warning'
+  }
+  return 'good'
+}
+
+function toneClasses(tone: 'good' | 'warning' | 'danger' | 'neutral'): { text: string; dot: string; bg: string } {
+  if (tone === 'good') {
+    return { text: 'text-emerald-500', dot: 'bg-emerald-500', bg: 'bg-emerald-500/10' }
+  }
+  if (tone === 'warning') {
+    return { text: 'text-amber-500', dot: 'bg-amber-500', bg: 'bg-amber-500/10' }
+  }
+  if (tone === 'danger') {
+    return { text: 'text-red-500', dot: 'bg-red-500', bg: 'bg-red-500/10' }
+  }
+  return { text: 'frameos-primary-text', dot: 'frameos-primary-fill', bg: 'bg-slate-500/10' }
+}
+
+function MetricCard({
+  label,
+  value,
+  detail,
+  tone = 'neutral',
+}: {
+  label: string
+  value: string
+  detail: string
+  tone?: 'good' | 'warning' | 'danger' | 'neutral'
+}): JSX.Element {
+  const colors = toneClasses(tone)
+
+  return (
+    <div className="frame-tool-card rounded-2xl p-3 @3xl:rounded-[22px] @3xl:p-4">
+      <div className="flex items-center justify-between gap-2 @3xl:gap-3">
+        <div className="frame-tool-muted text-xs font-semibold uppercase tracking-wide">{label}</div>
+        <span className={clsx('h-2 w-2 rounded-full @3xl:h-2.5 @3xl:w-2.5', colors.dot)} />
+      </div>
+      <div className={clsx('mt-1.5 truncate text-lg font-bold tracking-normal @3xl:mt-3 @3xl:text-2xl', colors.text)}>
+        {value}
+      </div>
+      <div className="frame-tool-muted truncate text-xs @3xl:mt-1 @3xl:text-sm">{detail}</div>
+    </div>
+  )
+}
+
+function ModeButton({
+  active,
+  disabled,
+  children,
+  onClick,
+}: {
+  active: boolean
+  disabled?: boolean
+  children: ReactNode
+  onClick: () => void
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className={clsx(
+        'rounded-lg px-3 py-1.5 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-50',
+        active ? 'frameos-primary-active text-white' : 'frameos-secondary-button bg-white/75 text-slate-700'
+      )}
+    >
+      {children}
+    </button>
+  )
+}
+
+function ResultRow({ result }: { result: PingResult }): JSX.Element {
+  const tone = result.ok ? latencyTone(primaryLatency(result)) : 'danger'
+  const colors = toneClasses(tone)
+  const Icon = result.ok ? CheckCircleIcon : XCircleIcon
+
+  return (
+    <li className="frame-tool-row rounded-[20px] p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 flex items-start gap-3">
+          <span className={clsx('mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full', colors.bg)}>
+            <Icon className={clsx('h-5 w-5', colors.text)} />
+          </span>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm font-semibold">{result.ok ? 'Reply' : 'Error'}</span>
+              <span className="frame-tool-muted rounded-full bg-slate-500/10 px-2 py-0.5 text-xs font-semibold">
+                {result.mode === 'http' ? 'HTTP' : 'ICMP'}
+              </span>
+              {result.status ? (
+                <span className="frame-tool-muted rounded-full bg-slate-500/10 px-2 py-0.5 text-xs font-semibold">
+                  {result.status}
+                </span>
+              ) : null}
+            </div>
+            <div className="frame-tool-muted mt-1 break-all text-xs">{result.target}</div>
+          </div>
+        </div>
+        <div className="text-right">
+          <div className={clsx('text-lg font-bold tracking-normal', colors.text)}>{latencyLabel(result)}</div>
+          <div className="frame-tool-muted text-xs">{result.timestamp}</div>
+        </div>
+      </div>
+      <div className="mt-3 rounded-2xl bg-slate-500/10 px-3 py-2 text-sm">{result.message || 'No response body'}</div>
+    </li>
+  )
+}
+
+export function Ping({ scrollContainer = true }: PingProps = {}) {
   const { frameId } = useValues(frameLogic)
   const { intervalSeconds, pingMode, httpPath, isFrameAdminMode, isRunning, isPinging, results, targetLabel } =
     useValues(pingLogic({ frameId }))
   const { setIntervalSeconds, setPingMode, setHttpPath, toggleRunning } = useActions(pingLogic({ frameId }))
   const activeMode: PingMode = isFrameAdminMode ? 'http' : pingMode
+  const latestResult = results[0] ?? null
+  const successfulResults = results.filter((result) => result.ok)
+  const successRate = results.length ? Math.round((successfulResults.length / results.length) * 100) : null
+  const latencySamples = results.map(primaryLatency).filter((value): value is number => value !== null)
+  const averageLatency = latencySamples.length
+    ? latencySamples.reduce((total, value) => total + value, 0) / latencySamples.length
+    : null
+  const currentTone = latestResult
+    ? latestResult.ok
+      ? latencyTone(primaryLatency(latestResult))
+      : 'danger'
+    : 'neutral'
+  const statusLabel = isRunning ? (isPinging ? 'Checking' : 'Monitoring') : results.length ? 'Paused' : 'Idle'
 
   return (
-    <div className="flex flex-col h-full space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div className="flex items-center gap-2">
-          <Button color={isRunning ? 'secondary' : 'primary'} size="small" onClick={() => toggleRunning()}>
-            {isRunning ? 'Stop' : 'Start'}
-          </Button>
-          {isPinging ? (
-            <span className="text-sm text-gray-400 break-all">
-              {activeMode === 'http' ? 'Requesting' : 'Pinging'} {targetLabel}...
+    <div className={clsx('frame-tool-panel @container flex flex-col gap-5', scrollContainer && 'h-full min-h-0')}>
+      <section className="frame-tool-card overflow-hidden rounded-[28px]">
+        <div className="space-y-4 p-5">
+          <div className="min-w-0 flex flex-wrap items-center gap-2.5">
+            <h2 className="min-w-0 break-all text-base font-semibold tracking-normal @3xl:text-lg">
+              Ping: {targetLabel}
+            </h2>
+            <span
+              className={clsx(
+                'inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-semibold',
+                isRunning ? 'bg-emerald-500/10 text-emerald-500' : 'bg-slate-500/10 frame-tool-muted'
+              )}
+            >
+              <span
+                className={clsx(
+                  'h-2 w-2 rounded-full',
+                  isRunning ? (isPinging ? 'animate-pulse bg-emerald-400' : 'bg-emerald-500') : 'bg-slate-400'
+                )}
+              />
+              {statusLabel}
             </span>
-          ) : null}
-        </div>
-        <div className="flex flex-wrap gap-3 items-center">
-          {!isFrameAdminMode ? (
-            <>
-              <div className="flex items-center gap-2">
-                <label className="text-sm font-medium text-gray-300" htmlFor="ping-mode">
-                  Mode:
-                </label>
-                <Select
-                  id="ping-mode"
-                  className="w-44"
-                  value={pingMode}
-                  onChange={(value) => setPingMode((value as PingMode) || 'icmp')}
-                  options={[
-                    { value: 'icmp', label: 'Host ping (ICMP)' },
-                    { value: 'http', label: 'HTTP ping (/ping)' },
-                  ]}
-                />
+          </div>
+          <div className="grid gap-3 @3xl:grid-cols-[auto_minmax(10rem,1fr)_auto_auto] @3xl:items-end">
+            <div>
+              <div className="frame-tool-control-label mb-2 text-xs font-semibold uppercase tracking-wide">Mode</div>
+              <div className="flex flex-wrap gap-2">
+                <ModeButton
+                  active={activeMode === 'icmp'}
+                  disabled={isFrameAdminMode}
+                  onClick={() => {
+                    if (activeMode !== 'icmp') {
+                      setPingMode('icmp')
+                    }
+                  }}
+                >
+                  ICMP
+                </ModeButton>
+                <ModeButton
+                  active={activeMode === 'http'}
+                  disabled={isFrameAdminMode}
+                  onClick={() => {
+                    if (activeMode !== 'http') {
+                      setPingMode('http')
+                    }
+                  }}
+                >
+                  HTTP
+                </ModeButton>
               </div>
-              {pingMode === 'http' ? (
-                <div className="flex items-center gap-2">
-                  <label className="text-sm font-medium text-gray-300" htmlFor="ping-path">
-                    Path:
-                  </label>
-                  <TextInput
-                    id="ping-path"
-                    className="!w-36"
-                    placeholder="/ping"
-                    value={httpPath}
-                    onChange={(value) => setHttpPath(value)}
-                  />
-                </div>
-              ) : null}
-            </>
-          ) : null}
-          <div className="flex flex-row gap-2 items-center">
-            <label className="text-sm font-medium text-gray-300" htmlFor="ping-interval">
-              Interval:
-            </label>
-            <NumberTextInput
-              id="ping-interval"
-              min={1}
-              step={1}
-              className="!w-14 rounded bg-black text-white p-2 focus:outline-none"
-              value={intervalSeconds}
-              onChange={(value) => {
-                setIntervalSeconds(Number.isFinite(value) ? Math.max(1, value ?? 1) : 1)
-              }}
-            />
-            <label className="text-sm font-medium text-gray-300" htmlFor="ping-interval">
-              seconds
-            </label>
+            </div>
+            <div className={clsx(activeMode === 'http' ? 'block' : 'hidden @3xl:block')}>
+              <label
+                className="frame-tool-control-label mb-2 block text-xs font-semibold uppercase tracking-wide"
+                htmlFor="ping-path"
+              >
+                Path
+              </label>
+              <TextInput
+                id="ping-path"
+                className="min-h-10"
+                placeholder="/ping"
+                value={httpPath}
+                onChange={(value) => setHttpPath(value)}
+                disabled={activeMode !== 'http'}
+              />
+            </div>
+            <div>
+              <label
+                className="frame-tool-control-label mb-2 block text-xs font-semibold uppercase tracking-wide"
+                htmlFor="ping-interval"
+              >
+                Interval
+              </label>
+              <div className="flex items-center gap-2">
+                <NumberTextInput
+                  id="ping-interval"
+                  min={1}
+                  step={1}
+                  className="min-h-10 !w-20"
+                  value={intervalSeconds}
+                  onChange={(value) => {
+                    setIntervalSeconds(Number.isFinite(value) ? Math.max(1, value ?? 1) : 1)
+                  }}
+                />
+                <span className="frame-tool-muted text-sm">sec</span>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => toggleRunning()}
+              className={clsx(
+                'inline-flex h-10 w-full shrink-0 items-center justify-center gap-2 rounded-lg px-4 text-sm font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 @3xl:w-auto',
+                isRunning
+                  ? 'ping-stop-button frameos-secondary-button'
+                  : 'frameos-primary-action text-white hover:shadow-lg'
+              )}
+            >
+              {isRunning ? <PauseIcon className="h-5 w-5" /> : <PlayIcon className="h-5 w-5" />}
+              {isRunning ? 'Stop' : 'Start'}
+            </button>
           </div>
         </div>
-      </div>
+      </section>
 
-      <div className="flex-1 overflow-y-auto rounded border border-gray-800 bg-black/60 p-3 text-sm">
+      <section className="grid grid-cols-2 gap-2 @3xl:grid-cols-4 @3xl:gap-3">
+        <MetricCard
+          label="Latest"
+          value={latencyLabel(latestResult)}
+          detail={latestResult ? latencyDetail(latestResult) : 'No sample yet'}
+          tone={currentTone}
+        />
+        <MetricCard
+          label="Average"
+          value={averageLatency === null ? 'No sample' : `${formatMs(averageLatency, averageLatency < 10 ? 1 : 0)} ms`}
+          detail={`${latencySamples.length} latency ${latencySamples.length === 1 ? 'sample' : 'samples'}`}
+          tone={latencyTone(averageLatency)}
+        />
+        <MetricCard
+          label="Success"
+          value={successRate === null ? 'No sample' : `${successRate}%`}
+          detail={`${successfulResults.length} of ${results.length} replies`}
+          tone={
+            successRate === null ? 'neutral' : successRate >= 95 ? 'good' : successRate >= 75 ? 'warning' : 'danger'
+          }
+        />
+        <MetricCard
+          label="History"
+          value={String(results.length)}
+          detail={activeMode === 'http' ? 'HTTP checks' : 'ICMP checks'}
+          tone="neutral"
+        />
+      </section>
+
+      <section
+        className={clsx('min-h-0 rounded-[24px]', scrollContainer ? 'flex-1 overflow-y-auto pr-1' : 'overflow-visible')}
+      >
         {results.length === 0 ? (
-          <div className="text-gray-400">No pings yet.</div>
+          <div
+            className={clsx(
+              'frame-tool-card flex min-h-56 items-center justify-center rounded-[24px] px-6 text-center',
+              scrollContainer && 'h-full'
+            )}
+          >
+            <div>
+              <SignalIcon className="frame-tool-muted mx-auto mb-4 h-10 w-10" />
+              <div className="text-lg font-semibold">No checks yet</div>
+              <div className="frame-tool-muted mt-1 text-sm">Start the monitor to collect connectivity samples.</div>
+            </div>
+          </div>
         ) : (
-          <ul className="space-y-2">
+          <ol className="space-y-3">
             {results.map((result) => (
-              <li key={result.id} className="flex flex-col gap-1 rounded border border-gray-800 bg-black/80 p-2">
-                <div className="flex items-center justify-between text-xs text-gray-400">
-                  <span>
-                    {result.timestamp} · {result.mode === 'http' ? 'HTTP' : 'ICMP'} · {result.target}
-                    {result.status ? ` (status ${result.status})` : ''}
-                  </span>
-                  <span className="text-right">
-                    {result.mode === 'icmp' && result.icmpTimeMs != null && result.clientElapsedMs != null ? (
-                      <span className="inline-flex items-center gap-1">
-                        <span className="font-semibold text-emerald-300" title="ICMP reply time reported by the host">
-                          {formatMs(result.icmpTimeMs, 3)} ms
-                        </span>
-                        <span className="text-gray-500">/</span>
-                        <span className="text-sky-300" title="Browser round-trip time (request/response)">
-                          {formatMs(result.clientElapsedMs, 0)} ms
-                        </span>
-                      </span>
-                    ) : result.clientElapsedMs != null ? (
-                      <span title="Browser round-trip time (request/response)">
-                        {formatMs(result.clientElapsedMs, 0)} ms
-                      </span>
-                    ) : result.serverElapsedMs != null ? (
-                      <span title="Server-measured round-trip time">{formatMs(result.serverElapsedMs, 0)} ms</span>
-                    ) : (
-                      '—'
-                    )}
-                  </span>
-                </div>
-                <div className={result.ok ? 'text-green-300' : 'text-red-300'}>
-                  {result.ok ? 'reply' : 'error'}: {result.message || 'No response body'}
-                </div>
-              </li>
+              <ResultRow key={result.id} result={result} />
             ))}
-          </ul>
+          </ol>
         )}
-      </div>
+      </section>
     </div>
   )
 }

@@ -12,6 +12,11 @@ from sqlalchemy.orm import relationship, backref, Session, mapped_column
 from app.websockets import publish_message
 
 LOG_LIMIT_PER_FRAME = 10000
+FRAME_ACTIVITY_LOG_TYPES = ("webhook",)
+
+
+def is_frame_activity_log(type: str, _line: str) -> bool:
+    return type in FRAME_ACTIVITY_LOG_TYPES
 
 class Log(Base):
     __tablename__ = 'log'
@@ -44,14 +49,18 @@ async def new_log(
     timestamp: Optional[datetime] = None,
     ip: Optional[str] = None,
 ) -> Log:
+    timestamp = timestamp or datetime.utcnow()
     log = Log(
         frame_id=frame_id,
         type=type,
         line=line,
-        timestamp=timestamp or datetime.utcnow(),
+        timestamp=timestamp,
         ip=ip,
     )
     db.add(log)
+    if frame := db.get(Frame, frame_id):
+        if is_frame_activity_log(type, line) and (frame.last_log_at is None or timestamp > frame.last_log_at):
+            frame.last_log_at = timestamp
     db.commit()
     frame_logs_count = db.query(Log).filter_by(frame_id=frame_id).count()
     payload = {**log.to_dict(), "timestamp": log.timestamp.replace(tzinfo=timezone.utc).isoformat()}

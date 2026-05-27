@@ -5,10 +5,9 @@ import { NewFrameFormType } from '../../types'
 
 import type { newFrameFormType } from './newFrameFormType'
 import { framesModel } from '../../models/framesModel'
-import { router } from 'kea-router'
 import { apiFetch } from '../../utils/apiFetch'
-import { urls } from '../../urls'
 import { loaders } from 'kea-loaders'
+import { inHassioIngress } from '../../utils/inHassioIngress'
 
 export const newFrameForm = kea<newFrameFormType>([
   path(['src', 'scenes', 'frames', 'newFrameForm']),
@@ -17,6 +16,7 @@ export const newFrameForm = kea<newFrameFormType>([
     hideForm: true,
     setFile: (file: File | null) => ({ file }),
     importFrame: true,
+    frameCreated: (frameId: number) => ({ frameId }),
   }),
   reducers({
     file: [
@@ -44,8 +44,8 @@ export const newFrameForm = kea<newFrameFormType>([
         server_host:
           typeof window !== 'undefined'
             ? `${window.location.hostname}:${
-                window.location.port === '8123'
-                  ? '8989' // using ingress with home assistant
+                inHassioIngress()
+                  ? '8989'
                   : window.location.port || (window.location.protocol === 'https:' ? '443' : '80')
               }`
             : undefined,
@@ -78,7 +78,7 @@ export const newFrameForm = kea<newFrameFormType>([
           const result = await response.json()
           if (result?.frame?.id) {
             framesModel.actions.addFrame(result.frame)
-            router.actions.push(urls.frame(result.frame.id))
+            actions.frameCreated(result.frame.id)
           }
         } catch (error) {
           console.error(error)
@@ -111,7 +111,9 @@ export const newFrameForm = kea<newFrameFormType>([
             actions.setFile(null)
             const result = await response.json()
             if (result?.frame?.id) {
-              router.actions.push(urls.frame(result.frame.id))
+              framesModel.actions.addFrame(result.frame)
+              actions.hideForm()
+              actions.frameCreated(result.frame.id)
             }
           } catch (error) {
             console.error(error)

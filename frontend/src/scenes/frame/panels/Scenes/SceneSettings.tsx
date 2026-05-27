@@ -7,30 +7,75 @@ import { NumberTextInput } from '../../../../components/NumberTextInput'
 import { Button } from '../../../../components/Button'
 import { ColorInput } from '../../../../components/ColorInput'
 import { Select } from '../../../../components/Select'
-import { Label } from '../../../../components/Label'
 import { TextArea } from '../../../../components/TextArea'
+import { Tooltip } from '../../../../components/Tooltip'
+import type { AppNodeData, CodeNodeData, FrameScene } from '../../../../types'
+import { hasCompiledAppSource, hasJavaScriptAppSource } from '../../../../utils/sceneApps'
 
 export interface SceneSettingsProps {
   sceneId: string
   onClose?: () => void
+  embedded?: boolean
 }
 
-export function SceneSettings({ sceneId, onClose }: SceneSettingsProps): JSX.Element {
+const sceneSettingsFieldClass = 'scene-settings-field frame-tool-row rounded-xl p-3 @md:items-center @md:gap-4'
+const sceneSettingsPromptFieldClass = 'scene-settings-field frame-tool-row rounded-xl p-3 @md:items-start @md:gap-4'
+const sceneSettingsEmbeddedFieldClass = 'scene-settings-field @md:items-center @md:gap-4'
+const sceneSettingsEmbeddedPromptFieldClass = 'scene-settings-field @md:items-start @md:gap-4'
+
+function SceneSettingsLabel({ children }: { children: string }): JSX.Element {
+  return <span className="frame-tool-control-label text-xs font-semibold uppercase tracking-wide">{children}</span>
+}
+
+function hasCompiledNimAppSource(sources?: Record<string, string> | null): boolean {
+  return hasCompiledAppSource(sources) && !hasJavaScriptAppSource(sources)
+}
+
+function sceneHasCompiledOnlyContent(scene: FrameScene): boolean {
+  if (Object.values(scene.apps ?? {}).some((app) => hasCompiledNimAppSource(app.sources))) {
+    return true
+  }
+
+  return (scene.nodes ?? []).some((node) => {
+    if (node.type === 'app') {
+      const data = node.data as AppNodeData | undefined
+      return (
+        hasCompiledNimAppSource(data?.sources) || hasCompiledNimAppSource(scene.apps?.[data?.keyword ?? '']?.sources)
+      )
+    }
+    if (node.type === 'code') {
+      const data = node.data as CodeNodeData | undefined
+      return !!data?.code?.trim() && !data?.codeJS?.trim()
+    }
+    return node.type === 'source'
+  })
+}
+
+export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSettingsProps): JSX.Element {
   const { frameId, frameForm } = useValues(frameLogic)
   const { sceneIndex, scene } = useValues(sceneSettingsLogic({ frameId, sceneId }))
   if (!scene || !sceneId) {
     return <></>
   }
+  const fieldClassName = embedded ? sceneSettingsEmbeddedFieldClass : sceneSettingsFieldClass
+  const promptFieldClassName = embedded ? sceneSettingsEmbeddedPromptFieldClass : sceneSettingsPromptFieldClass
+  const hasInterpretedCompiledOnlyContent =
+    scene.settings?.execution === 'interpreted' && sceneHasCompiledOnlyContent(scene)
 
   return (
-    <Form logic={frameLogic} props={{ frameId }} formKey="frameForm">
+    <Form
+      logic={frameLogic}
+      props={{ frameId }}
+      formKey="frameForm"
+      className={embedded ? 'scene-settings-form' : 'scene-settings-form frame-tool-panel'}
+    >
       <Group name={['scenes', sceneIndex]}>
-        <div className="w-full space-y-1">
+        <div className="w-full space-y-3 @container">
           <Group name={['settings']}>
             <Field
-              className="flex flex-row gap-2 w-full justify-between"
+              className={fieldClassName}
               name="refreshInterval"
-              label="Refresh interval in seconds"
+              label={<SceneSettingsLabel>Refresh interval</SceneSettingsLabel>}
               tooltip={
                 <>
                   How often do we trigger a refresh, in seconds. Pass a large number like "60" or even more for e-ink
@@ -42,20 +87,20 @@ export function SceneSettings({ sceneId, onClose }: SceneSettingsProps): JSX.Ele
               <NumberTextInput
                 name="refreshInterval"
                 placeholder={String(frameForm.interval || 300)}
-                style={{ width: 70 }}
+                className="h-10 @md:max-w-[9rem]"
               />
             </Field>
             <Field
-              className="flex flex-row gap-2 w-full justify-between"
+              className={fieldClassName}
               name="backgroundColor"
-              label="Background color"
+              label={<SceneSettingsLabel>Background color</SceneSettingsLabel>}
             >
-              <ColorInput name="backgroundColor" className="!p-0" style={{ width: 70 }} placeholder="#ffffff" />
+              <ColorInput name="backgroundColor" className="!h-10 !min-w-0" placeholder="#ffffff" />
             </Field>
             <Field
-              className="flex flex-row gap-2 w-full justify-between"
+              className={fieldClassName}
               name="execution"
-              label="Execution"
+              label={<SceneSettingsLabel>Execution</SceneSettingsLabel>}
               tooltip={
                 <div className="space-y-2">
                   <p>Choose between compiled and interpreted execution modes.</p>
@@ -67,8 +112,8 @@ export function SceneSettings({ sceneId, onClose }: SceneSettingsProps): JSX.Ele
                   <p>
                     <strong>Interpreted</strong> scenes are executed as-is, allowing for fast deploys without the need
                     for recompilation. This mode is slower, but when your frame takes 20 seconds to render, it doesn't
-                    matter much. Inline code nodes can use JavaScript, TypeScript, or JSX. You can't edit the nim
-                    source of apps in this mode.
+                    matter much. Inline code nodes can use JavaScript, TypeScript, or JSX. You can't edit the nim source
+                    of apps in this mode.
                   </p>
                   <p>A full deploy is needed if switching between modes.</p>
                 </div>
@@ -76,26 +121,40 @@ export function SceneSettings({ sceneId, onClose }: SceneSettingsProps): JSX.Ele
             >
               <Select
                 name="execution"
-                className="border rounded px-1 py-0.5"
+                className="h-10"
                 options={[
                   { value: 'compiled', label: 'compiled' },
                   { value: 'interpreted', label: 'interpreted' },
                 ]}
               />
             </Field>
+            {hasInterpretedCompiledOnlyContent ? (
+              <div className="app-compiled-warning rounded-xl p-3 text-sm">
+                <div className="font-semibold">This compiled scene will not work in interpreted mode.</div>
+                <div>
+                  It still contains Nim app source, Nim code nodes, or source nodes that interpreted mode cannot run.
+                  Keep execution set to compiled, or move the customization into JavaScript apps or inline code nodes.
+                </div>
+              </div>
+            ) : null}
             {scene.settings?.prompt ? (
-              <div className="space-y-1 @md:flex @md:gap-2">
-                <Label className="@md:w-1/3">Prompt</Label>
-                <div className="flex-1">
+              <div className={`space-y-1 @md:flex ${promptFieldClassName}`}>
+                <label className="frameos-form-label flex items-center gap-1 text-sm font-medium @md:w-1/3">
+                  <SceneSettingsLabel>Prompt</SceneSettingsLabel>
+                  <Tooltip title="Prompt given to AI to generate this scene" />
+                </label>
+                <div className="w-full">
                   <TextArea readOnly value={scene.settings.prompt} rows={4} />
                 </div>
               </div>
             ) : null}
           </Group>
           {onClose ? (
-            <Button size="small" onClick={onClose}>
-              Close
-            </Button>
+            <div className="flex justify-end">
+              <Button size="small" onClick={onClose}>
+                Close
+              </Button>
+            </div>
           ) : null}
         </div>
       </Group>

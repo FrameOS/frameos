@@ -31,19 +31,20 @@ export function Apps() {
     return (
       <Box
         key={keyword}
-        className="bg-gray-900 px-3 py-2 dndnode flex items-center justify-between space-x-2 cursor-move w-full"
+        className="frame-tool-row dndnode flex w-full cursor-move items-stretch gap-3 py-2 pl-0.5 pr-3"
         draggable
         onDragStart={(event) => onDragStart(event, keyword)}
       >
-        <div className="w-full">
+        <div className="frame-tool-drag-handle" aria-hidden="true" />
+        <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-2">
             <H6 className="min-w-0 flex-1 break-words">
               {app.name}
-              {tag ? <span className="ml-2 text-xs font-normal text-gray-400">[{tag}]</span> : null}
+              {tag ? <span className="frame-tool-muted ml-2 text-xs font-normal">[{tag}]</span> : null}
             </H6>
             <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
               {typeof usageCount === 'number' ? (
-                <span className="mt-1 whitespace-nowrap rounded bg-gray-700 px-1.5 py-0.5 text-xs text-gray-200">
+                <span className="frameos-tag mt-1 whitespace-nowrap rounded px-1.5 py-0.5 text-xs">
                   {usageCount} use{usageCount === 1 ? '' : 's'}
                 </span>
               ) : null}
@@ -75,17 +76,12 @@ export function Apps() {
   return (
     <div className="space-y-4">
       <TextInput placeholder="Search apps..." onChange={setSearch} value={search} />
-      {scenesOpen ? (
-        <div className="text-xs text-gray-400">
-          Apps can only be dragged onto the scene editor or into AI generation prompts.
-        </div>
-      ) : null}
       {!scenesOpen && Object.keys(visibleSceneApps).length > 0 ? (
         <div className="space-y-2">
           <div className="flex items-center gap-1.5">
             <H6>Scene apps</H6>
             <Tooltip
-              className="cursor-help text-gray-400 hover:text-gray-200"
+              className="frameos-tooltip-button cursor-help"
               title="Scene apps are saved with this scene. Their source files are included in the scene data and inlined when the scene runs, exports, or deploys, so edits here do not change the global app catalog."
               titleClassName="w-72"
             />

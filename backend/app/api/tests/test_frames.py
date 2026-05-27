@@ -1,9 +1,12 @@
+import asyncio
 import json
 import pytest
-from unittest.mock import patch
+import time
+from unittest.mock import AsyncMock, patch
 import httpx
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
+from app.api import frames as frames_api
 from app.api.auth import get_current_user
 from app.fastapi import app
 from app.models import new_frame
@@ -32,6 +35,78 @@ async def test_api_frame_get_found(async_client, db, redis):
     data = response.json()
     assert 'frame' in data
     assert data['frame']['name'] == 'FoundFrame'
+
+
+@pytest.mark.asyncio
+async def test_api_frame_uses_latest_activity_log_timestamp(async_client, db, redis):
+    frame = await new_frame(db, redis, 'LatestLogFrame', 'localhost', 'localhost')
+    frame.last_log_at = datetime(2026, 1, 1, 0, 0, 0)
+    latest_timestamp = datetime(2026, 6, 1, 12, 0, 0)
+    ignored_timestamp = datetime(2026, 6, 1, 12, 5, 0)
+    db.add(
+        Log(
+            frame_id=frame.id,
+            type='webhook',
+            line='{"event":"metrics"}',
+            timestamp=latest_timestamp,
+        )
+    )
+    db.add(
+        Log(
+            frame_id=frame.id,
+            type='info',
+            line=f'Error fetching image from frame {frame.id}: 502: All connection attempts failed',
+            timestamp=ignored_timestamp,
+        )
+    )
+    db.add(
+        Log(
+            frame_id=frame.id,
+            type='stdinfo',
+            line='Connecting via SSH to pi@10.8.0.62 (keypair: Default)',
+            timestamp=datetime(2026, 6, 1, 12, 6, 0),
+        )
+    )
+    db.add(
+        Log(
+            frame_id=frame.id,
+            type='stderr',
+            line="Unable to connect to 10.8.0.62:22 via SSH: [Errno 51] Connect call failed ('10.8.0.62', 22)",
+            timestamp=datetime(2026, 6, 1, 12, 7, 0),
+        )
+    )
+    db.commit()
+
+    detail_response = await async_client.get(f'/api/frames/{frame.id}')
+    list_response = await async_client.get('/api/frames')
+
+    expected_timestamp = latest_timestamp.replace(tzinfo=timezone.utc).isoformat().replace("+00:00", "Z")
+    assert detail_response.json()['frame']['last_log_at'] == expected_timestamp
+    latest_frame = next(item for item in list_response.json()['frames'] if item['id'] == frame.id)
+    assert latest_frame['last_log_at'] == expected_timestamp
+
+
+@pytest.mark.asyncio
+async def test_api_frame_clears_last_log_at_without_frame_activity_logs(async_client, db, redis):
+    frame = await new_frame(db, redis, 'NoActivityFrame', 'localhost', 'localhost')
+    frame.last_log_at = datetime(2026, 1, 1, 0, 0, 0)
+    db.add(
+        Log(
+            frame_id=frame.id,
+            type='stdinfo',
+            line='Connecting via SSH to pi@10.8.0.62 (keypair: Default)',
+            timestamp=datetime(2026, 6, 1, 12, 0, 0),
+        )
+    )
+    db.commit()
+
+    detail_response = await async_client.get(f'/api/frames/{frame.id}')
+    list_response = await async_client.get('/api/frames')
+
+    assert detail_response.json()['frame']['last_log_at'] is None
+    latest_frame = next(item for item in list_response.json()['frames'] if item['id'] == frame.id)
+    assert latest_frame['last_log_at'] is None
+
 
 @pytest.mark.asyncio
 async def test_api_frame_get_not_found(async_client):
@@ -114,6 +189,222 @@ async def test_api_frame_get_image_cached(async_client, db, redis):
     response = await async_client.get(image_url)
     assert response.status_code == 200
     assert response.content == b'cached_image_data'
+
+
+@pytest.mark.asyncio
+async def test_api_frame_assets_returns_fresh_cache_without_reloading(async_client, db, redis):
+    frame = await new_frame(db, redis, 'CachedAssetsFrame', 'localhost', 'localhost')
+    assets_path = frame.assets_path or "/srv/assets"
+    cache_key = frames_api._frame_assets_cache_key(frame.id, assets_path)
+    lock_key = frames_api._frame_assets_cache_lock_key(frame.id, assets_path)
+    cached_assets = [
+        {"path": "/srv/assets/photo.png", "size": 123, "mtime": 1000, "is_dir": False},
+    ]
+    await redis.delete(cache_key, lock_key)
+    await frames_api._write_frame_assets_cache(redis, cache_key, cached_assets, fetched_at=time.time())
+
+    with patch("app.api.frames._load_frame_assets", new=AsyncMock()) as load_assets:
+        response = await async_client.get(f'/api/frames/{frame.id}/assets')
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["assets"] == cached_assets
+    assert payload["cache"]["cached"] is True
+    assert payload["cache"]["refreshing"] is False
+    load_assets.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_api_frame_assets_refresh_bypasses_cache(async_client, db, redis):
+    frame = await new_frame(db, redis, 'RefreshAssetsFrame', 'localhost', 'localhost')
+    assets_path = frame.assets_path or "/srv/assets"
+    cache_key = frames_api._frame_assets_cache_key(frame.id, assets_path)
+    lock_key = frames_api._frame_assets_cache_lock_key(frame.id, assets_path)
+    cached_assets = [
+        {"path": "/srv/assets/old.png", "size": 123, "mtime": 1000, "is_dir": False},
+    ]
+    fresh_assets = [
+        {"path": "/srv/assets/fresh.png", "size": 456, "mtime": 2000, "is_dir": False},
+    ]
+    await redis.delete(cache_key, lock_key)
+    await frames_api._write_frame_assets_cache(redis, cache_key, cached_assets, fetched_at=time.time())
+
+    with patch("app.api.frames._load_frame_assets", new=AsyncMock(return_value=fresh_assets)) as load_assets:
+        response = await async_client.get(f'/api/frames/{frame.id}/assets?refresh=1')
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["assets"] == fresh_assets
+    assert payload["cache"]["cached"] is False
+    load_assets.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_api_frame_assets_returns_stale_cache_and_refreshes(async_client, db, redis):
+    frame = await new_frame(db, redis, 'StaleAssetsFrame', 'localhost', 'localhost')
+    assets_path = frame.assets_path or "/srv/assets"
+    cache_key = frames_api._frame_assets_cache_key(frame.id, assets_path)
+    lock_key = frames_api._frame_assets_cache_lock_key(frame.id, assets_path)
+    cached_assets = [
+        {"path": "/srv/assets/old.png", "size": 123, "mtime": 1000, "is_dir": False},
+    ]
+    fresh_assets = [
+        {"path": "/srv/assets/new.png", "size": 456, "mtime": 2000, "is_dir": False},
+    ]
+    await redis.delete(cache_key, lock_key)
+    await frames_api._write_frame_assets_cache(
+        redis,
+        cache_key,
+        cached_assets,
+        fetched_at=time.time() - frames_api.FRAME_ASSETS_CACHE_REFRESH_AFTER_SECONDS - 1,
+    )
+
+    with patch("app.api.frames._load_frame_assets", new=AsyncMock(return_value=fresh_assets)) as load_assets:
+        response = await async_client.get(f'/api/frames/{frame.id}/assets')
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["assets"] == cached_assets
+    assert payload["cache"]["cached"] is True
+    assert payload["cache"]["refreshing"] is True
+
+    for _ in range(10):
+        refreshed = await frames_api._read_frame_assets_cache(redis, cache_key)
+        if refreshed and refreshed["assets"] == fresh_assets:
+            break
+        await asyncio.sleep(0.05)
+    else:
+        pytest.fail("assets cache was not refreshed in the background")
+
+    load_assets.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_api_frame_states_returns_fresh_cache_without_reloading(async_client, db, redis):
+    frame = await new_frame(db, redis, 'CachedStatesFrame', 'localhost', 'localhost')
+    cache_key = frames_api._frame_states_cache_key(frame.id)
+    lock_key = frames_api._frame_states_cache_lock_key(frame.id)
+    cached_state = {"sceneId": "scene-1", "states": {"scene-1": {"temperature": 21}}}
+    await redis.delete(cache_key, lock_key)
+    await frames_api._write_frame_states_cache(redis, cache_key, cached_state, fetched_at=time.time())
+
+    with patch("app.api.frames._load_frame_states", new=AsyncMock()) as load_states:
+        response = await async_client.get(f'/api/frames/{frame.id}/states')
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["sceneId"] == "scene-1"
+    assert payload["states"] == cached_state["states"]
+    assert payload["cache"]["cached"] is True
+    assert payload["cache"]["refreshing"] is False
+    load_states.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_api_frame_states_returns_empty_shell_and_refreshes(async_client, db, redis):
+    frame = await new_frame(db, redis, 'EmptyStatesFrame', 'localhost', 'localhost')
+    cache_key = frames_api._frame_states_cache_key(frame.id)
+    lock_key = frames_api._frame_states_cache_lock_key(frame.id)
+    fresh_state = {"sceneId": "fresh-scene", "states": {"fresh-scene": {"count": 2}}}
+    await redis.delete(cache_key, lock_key)
+    await redis.set(f"frame:{frame.id}:active_scene", "last-scene")
+
+    with patch("app.api.frames._load_frame_states", new=AsyncMock(return_value=fresh_state)) as load_states:
+        response = await async_client.get(f'/api/frames/{frame.id}/states')
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["sceneId"] == "last-scene"
+    assert payload["states"] == {}
+    assert payload["cache"]["cached"] is False
+    assert payload["cache"]["refreshing"] is True
+
+    for _ in range(10):
+        refreshed = await frames_api._read_frame_states_cache(redis, cache_key)
+        if refreshed and refreshed["states"] == fresh_state["states"]:
+            break
+        await asyncio.sleep(0.05)
+    else:
+        pytest.fail("states cache was not refreshed in the background")
+
+    load_states.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_api_frame_states_response_does_not_wait_for_refresh(async_client, db, redis):
+    frame = await new_frame(db, redis, 'SlowStatesFrame', 'localhost', 'localhost')
+    cache_key = frames_api._frame_states_cache_key(frame.id)
+    lock_key = frames_api._frame_states_cache_lock_key(frame.id)
+    fresh_state = {"sceneId": "fresh-scene", "states": {"fresh-scene": {"count": 3}}}
+    await redis.delete(cache_key, lock_key)
+    await redis.set(f"frame:{frame.id}:active_scene", "last-scene")
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def slow_load_states(_redis, _frame):
+        started.set()
+        await release.wait()
+        return fresh_state
+
+    with patch("app.api.frames._load_frame_states", new=AsyncMock(side_effect=slow_load_states)) as load_states:
+        response = await asyncio.wait_for(async_client.get(f'/api/frames/{frame.id}/states'), timeout=0.5)
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["sceneId"] == "last-scene"
+        assert payload["states"] == {}
+        assert payload["cache"]["cached"] is False
+        assert payload["cache"]["refreshing"] is True
+
+        await asyncio.wait_for(started.wait(), timeout=0.5)
+        load_states.assert_awaited_once()
+        release.set()
+
+        for _ in range(10):
+            refreshed = await frames_api._read_frame_states_cache(redis, cache_key)
+            if refreshed and refreshed["states"] == fresh_state["states"]:
+                break
+            await asyncio.sleep(0.05)
+        else:
+            pytest.fail("states cache was not refreshed after the response returned")
+
+
+@pytest.mark.asyncio
+async def test_api_frame_states_returns_stale_cache_and_refreshes(async_client, db, redis):
+    frame = await new_frame(db, redis, 'StaleStatesFrame', 'localhost', 'localhost')
+    cache_key = frames_api._frame_states_cache_key(frame.id)
+    lock_key = frames_api._frame_states_cache_lock_key(frame.id)
+    cached_state = {"sceneId": "old-scene", "states": {"old-scene": {"count": 1}}}
+    fresh_state = {"sceneId": "new-scene", "states": {"new-scene": {"count": 2}}}
+    await redis.delete(cache_key, lock_key)
+    await frames_api._write_frame_states_cache(
+        redis,
+        cache_key,
+        cached_state,
+        fetched_at=time.time() - frames_api.FRAME_STATES_CACHE_REFRESH_AFTER_SECONDS - 1,
+    )
+
+    with patch("app.api.frames._load_frame_states", new=AsyncMock(return_value=fresh_state)) as load_states:
+        response = await async_client.get(f'/api/frames/{frame.id}/states')
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["sceneId"] == "old-scene"
+    assert payload["states"] == cached_state["states"]
+    assert payload["cache"]["cached"] is True
+    assert payload["cache"]["refreshing"] is True
+
+    for _ in range(10):
+        refreshed = await frames_api._read_frame_states_cache(redis, cache_key)
+        if refreshed and refreshed["states"] == fresh_state["states"]:
+            break
+        await asyncio.sleep(0.05)
+    else:
+        pytest.fail("states cache was not refreshed in the background")
+
+    load_states.assert_awaited_once()
+
 
 @pytest.mark.asyncio
 async def test_api_frame_event_render(async_client, db, redis):
@@ -307,6 +598,7 @@ async def test_api_frame_get_image_no_scene_id(async_client, db, redis):
     cached active scene, the endpoint should still return the image without
     crashing (no NameError on `now`/`width`/`height`)."""
     frame = await new_frame(db, redis, 'NoSceneFrame', 'example.com', 'localhost')
+    await redis.delete(f"frame:{frame.id}:active_scene")
 
     fake_png = b'\x89PNG\r\n\x1a\n' + b'\x00' * 100
 

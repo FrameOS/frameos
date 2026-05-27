@@ -9,7 +9,11 @@
     "dev:worker": "DEBUG=1 ./backend/bin/dev-worker",
     "dev:frontend": "pnpm --dir frontend run dev",
     "dev:frame-frontend": "pnpm --dir frameos/frontend run dev",
-    "dev:redis": "sh -c 'mkdir -p .local/redis && exec redis-server --dir .local/redis'"
+    "dev:redis": "sh -c 'mkdir -p .local/redis && exec redis-server --dir .local/redis'",
+    "test:frontend-e2e": "playwright test -c e2e/frontend-visual/playwright.config.ts --grep @e2e",
+    "test:frontend-visual": "playwright test -c e2e/frontend-visual/playwright.config.ts",
+    "test:frontend-visual:update": "playwright test -c e2e/frontend-visual/playwright.config.ts --update-snapshots",
+    "test:frontend-visual:ui": "playwright test -c e2e/frontend-visual/playwright.config.ts --ui"
   },
   "pnpm": {
     "overrides": {
@@ -19,6 +23,7 @@
     }
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "mprocs": "^0.8.3"
   }
 }

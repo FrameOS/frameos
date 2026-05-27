@@ -11,6 +11,7 @@ from arq import ArqRedis as Redis
 from sqlalchemy.orm import Session
 
 from app.models.frame import Frame
+from app.models.log import new_log as log
 from app.utils.ssh_utils import (
     get_ssh_connection,
     remove_ssh_connection,
@@ -53,12 +54,17 @@ async def deploy_agent_task(ctx: dict[str, Any], id: int):  # noqa: N802
 
     frame: Optional[Frame] = get_fresh_frame(db, id)
     if frame is None:  # keep the early-exit guard
+        await log(db, redis, id, "stderr", "Frame not found")
         raise Exception("Frame not found")
 
     # Workspace ────────────────────────────────────────────────────────────
-    with tempfile.TemporaryDirectory() as tmp:
-        deployer = AgentDeployer(db, redis, frame, "", tmp)
-        await deployer.run()
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            deployer = AgentDeployer(db, redis, frame, "", tmp)
+            await deployer.run()
+    except Exception as e:
+        await log(db, redis, id, "stderr", str(e))
+        raise
 
 class AgentDeployer(FrameDeployer):
     ssh: Optional[asyncssh.SSHClientConnection] = None

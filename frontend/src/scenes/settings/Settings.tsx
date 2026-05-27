@@ -1,6 +1,5 @@
 import { useActions, useValues } from 'kea'
 import { Form, Group } from 'kea-forms'
-import { Header } from '../../components/Header'
 import { Box } from '../../components/Box'
 import { settingsLogic } from './settingsLogic'
 import { Spinner } from '../../components/Spinner'
@@ -10,7 +9,7 @@ import { Button } from '../../components/Button'
 import { Field } from '../../components/Field'
 import { TextArea } from '../../components/TextArea'
 import { sceneLogic } from '../sceneLogic'
-import { ArrowPathIcon, PlusIcon, TrashIcon } from '@heroicons/react/24/solid'
+import { ArrowPathIcon, PencilSquareIcon, PlusIcon, TrashIcon } from '@heroicons/react/24/solid'
 import { NumberTextInput } from '../../components/NumberTextInput'
 import { Switch } from '../../components/Switch'
 import { Select } from '../../components/Select'
@@ -21,6 +20,203 @@ import { frameHost } from '../../decorators/frame'
 import { A } from 'kea-router'
 import { urls } from '../../urls'
 import { Tag } from '../../components/Tag'
+import { Label } from '../../components/Label'
+import { FrameosShell } from '../workspace/FrameosShell'
+import { isMobileWorkspaceViewport, workspaceLogic } from '../workspace/workspaceLogic'
+import { accountLogic } from './accountLogic'
+
+const settingsNavItems = [
+  ['Account', '#settings-account'],
+  ['SSH Keys', '#settings-ssh'],
+  ['FrameOS Gallery', '#settings-gallery'],
+  ['OpenAI', '#settings-openai'],
+  ['PostHog', '#settings-posthog'],
+  ['Home Assistant', '#settings-home-assistant'],
+  ['GitHub', '#settings-github'],
+  ['Unsplash API', '#settings-unsplash'],
+  ['Cross-compilation build host', '#settings-build-host'],
+  ['System information', '#settings-system'],
+  ['Custom fonts', '#settings-fonts'],
+] as const
+
+function settingsHeaderOffset(): number {
+  if (typeof window === 'undefined') {
+    return 0
+  }
+
+  return window.matchMedia?.('(max-width: 639px)').matches ? 96 : 104
+}
+
+function scrollToSettingsSection(sectionId: string, attempt = 0): void {
+  if (typeof document === 'undefined' || typeof window === 'undefined') {
+    return
+  }
+
+  window.requestAnimationFrame(() => {
+    const section = document.getElementById(sectionId)
+    if (section) {
+      if (isMobileWorkspaceViewport()) {
+        const top = section.getBoundingClientRect().top + window.scrollY - settingsHeaderOffset()
+        window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' })
+      } else {
+        section.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }
+      return
+    }
+
+    if (attempt < 8) {
+      window.setTimeout(() => scrollToSettingsSection(sectionId, attempt + 1), 50)
+    }
+  })
+}
+
+function AccountSettingsSection(): JSX.Element {
+  const {
+    account,
+    accountEmail,
+    accountLoading,
+    accountPasswordChanged,
+    emailEditorOpen,
+    isAccountEmailSubmitting,
+    isAccountPasswordSubmitting,
+    passwordChanged,
+    passwordEditorOpen,
+  } = useValues(accountLogic)
+  const { beginEmailChange, resetAccountEmail, resetAccountPassword, setEmailEditorOpen, setPasswordEditorOpen } =
+    useActions(accountLogic)
+  const currentEmail = account?.email ?? ''
+  const editedEmail = accountEmail.email.trim()
+  const emailSubmitDisabled = !editedEmail || editedEmail === currentEmail || isAccountEmailSubmitting
+
+  return (
+    <div className="space-y-4">
+      <H6 id="settings-account" className="pt-4">
+        Account
+      </H6>
+      <Box className="settings-account-card space-y-4">
+        <div className="space-y-1 @md:flex @md:gap-2">
+          <div className="@md:w-1/3">
+            <Label>Email</Label>
+          </div>
+          {emailEditorOpen ? (
+            <Form
+              logic={accountLogic}
+              formKey="accountEmail"
+              enableFormOnSubmit
+              className="flex w-full min-w-0 flex-wrap items-start gap-2"
+            >
+              <Field name="email" className="min-w-[14rem] flex-1">
+                <TextInput type="email" autoComplete="email" autoFocus />
+              </Field>
+              <div className="flex shrink-0 flex-wrap items-center gap-2">
+                <Button
+                  color="secondary"
+                  size="small"
+                  onClick={() => {
+                    resetAccountEmail()
+                    setEmailEditorOpen(false)
+                  }}
+                  disabled={isAccountEmailSubmitting}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  color={!emailSubmitDisabled ? 'primary' : 'secondary'}
+                  size="small"
+                  disabled={emailSubmitDisabled}
+                  className="inline-flex items-center gap-2"
+                >
+                  {isAccountEmailSubmitting ? <Spinner color="white" /> : null}
+                  Change email
+                </Button>
+              </div>
+            </Form>
+          ) : (
+            <div className="flex w-full flex-wrap items-center gap-2 text-sm">
+              {accountLoading ? <Spinner /> : <span className="frameos-strong font-medium">{currentEmail}</span>}
+              <button
+                type="button"
+                onClick={() => beginEmailChange()}
+                disabled={accountLoading}
+                title="Change email"
+                aria-label="Change email"
+                className="frameos-muted inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border-0 bg-transparent !px-0 !py-0 transition hover:bg-slate-500/10 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
+              >
+                <PencilSquareIcon className="h-4 w-4" />
+              </button>
+            </div>
+          )}
+        </div>
+        {passwordEditorOpen ? (
+          <Form logic={accountLogic} formKey="accountPassword" enableFormOnSubmit className="space-y-3">
+            <Field name="current_password" label="Current password">
+              <TextInput type="password" autoComplete="current-password" />
+            </Field>
+            <Field name="password" label="New password">
+              <TextInput type="password" autoComplete="new-password" />
+            </Field>
+            <Field name="password2" label="Confirm password">
+              <TextInput type="password" autoComplete="new-password" />
+            </Field>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <Button
+                color="secondary"
+                size="small"
+                onClick={() => {
+                  resetAccountPassword()
+                  setPasswordEditorOpen(false)
+                }}
+                disabled={isAccountPasswordSubmitting}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                color={accountPasswordChanged ? 'primary' : 'secondary'}
+                size="small"
+                disabled={!accountPasswordChanged || isAccountPasswordSubmitting}
+                className="inline-flex items-center gap-2"
+              >
+                {isAccountPasswordSubmitting ? <Spinner color="white" /> : null}
+                Change password
+              </Button>
+            </div>
+          </Form>
+        ) : (
+          <div className="space-y-1 @md:flex @md:gap-2">
+            <div className="@md:w-1/3">
+              <Label>Password</Label>
+            </div>
+            <div className="flex w-full flex-wrap items-center gap-2 text-sm">
+              <button
+                type="button"
+                onClick={() => setPasswordEditorOpen(true)}
+                className="frameos-link font-semibold hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+              >
+                Change password
+              </button>
+              {passwordChanged ? <span className="text-emerald-500">Password updated.</span> : null}
+            </div>
+          </div>
+        )}
+      </Box>
+    </div>
+  )
+}
+
+function IngressAccountSettingsSection(): JSX.Element {
+  return (
+    <div className="space-y-4">
+      <H6 id="settings-account" className="pt-4">
+        Account
+      </H6>
+      <Box className="settings-account-card">
+        <div className="frameos-muted text-sm">Account access is managed by Home Assistant ingress.</div>
+      </Box>
+    </div>
+  )
+}
 
 export function Settings() {
   const {
@@ -28,6 +224,7 @@ export function Settings() {
     savedSettings,
     savedSettingsLoading,
     settingsChanged,
+    isSettingsSubmitting,
     embeddingsCount,
     embeddingsTotal,
     embeddingsMissing,
@@ -43,6 +240,7 @@ export function Settings() {
   const { framesList } = useValues(framesModel)
   const {
     submitSettings,
+    resetSettings,
     addSshKey,
     generateSshKey,
     removeSshKey,
@@ -56,34 +254,86 @@ export function Settings() {
   } = useActions(settingsLogic)
   const { isHassioIngress } = useValues(sceneLogic)
   const { logout } = useActions(sceneLogic)
+  const { closeSecondarySidebar } = useActions(workspaceLogic)
   const defaultSshKeyIds = getDefaultSshKeyIds(settings?.ssh_keys)
   const framesUsingKey = (keyId: string) =>
     framesList.filter((frame) => (frame.ssh_keys ?? defaultSshKeyIds).includes(keyId))
+  const settingsTree = (
+    <div className="space-y-1">
+      {settingsNavItems.map(([label, href]) => (
+        <a
+          key={href}
+          href={href}
+          onClick={(event) => {
+            if (!isMobileWorkspaceViewport()) {
+              return
+            }
+
+            event.preventDefault()
+            closeSecondarySidebar()
+            window.history.pushState(null, '', `${window.location.pathname}${window.location.search}${href}`)
+            scrollToSettingsSection(href.slice(1))
+          }}
+          className="frameos-settings-nav-link block rounded-xl px-3 py-2.5 text-base font-medium text-slate-700 transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+        >
+          {label}
+        </a>
+      ))}
+    </div>
+  )
+  const settingsActions = (
+    <div className="settings-page-actions flex items-center gap-2">
+      {!isHassioIngress ? (
+        <Button size="small" color="secondary" onClick={logout} className="rounded-lg px-4 py-2">
+          Logout
+        </Button>
+      ) : null}
+      <Button
+        size="small"
+        color="secondary"
+        onClick={() => resetSettings(savedSettings)}
+        disabled={!settingsChanged || isSettingsSubmitting}
+        className="rounded-lg px-4 py-2"
+      >
+        Reset
+      </Button>
+      <Button
+        size="small"
+        color={settingsChanged ? 'primary' : 'secondary'}
+        onClick={submitSettings}
+        disabled={!settingsChanged || isSettingsSubmitting}
+        className="rounded-lg px-4 py-2"
+      >
+        Save
+      </Button>
+    </div>
+  )
 
   return (
-    <div className="h-full w-full overflow-hidden max-w-screen max-h-screen left-0 top-0 absolute">
-      <div className="flex flex-col h-full max-h-full">
-        <div className="h-[60px]">
-          <Header
-            title="Settings"
-            right={
-              <div className="flex gap-2">
-                {!isHassioIngress ? <Button onClick={logout}>Logout</Button> : null}
-                <Button color={settingsChanged ? 'primary' : 'secondary'} onClick={submitSettings}>
-                  Save
-                </Button>
-              </div>
-            }
-          />
+    <FrameosShell
+      mode="settings"
+      title="Settings"
+      subtitle="System configuration"
+      tree={settingsTree}
+      mainClassName="settings-workspace-main min-h-screen overflow-visible py-6 pr-8 max-lg:min-h-0 max-lg:px-4 max-lg:pb-6 max-lg:pt-0"
+      topBar={null}
+    >
+      <div>
+        <div className="settings-page-header mx-auto mb-6 max-w-5xl">
+          <h1 className="frameos-strong text-3xl font-bold tracking-normal text-slate-950">Global settings</h1>
+          {settingsActions}
         </div>
-        <div className="h-full w-full overflow-y-auto p-4 @container">
+        <div className="frame-tool-panel frame-settings-panel settings-panel mx-auto max-w-5xl @container">
+          {isHassioIngress ? <IngressAccountSettingsSection /> : <AccountSettingsSection />}
           {savedSettingsLoading ? (
             <Spinner />
           ) : (
             <>
               <Form logic={settingsLogic} formKey="settings" props={{}} onSubmit={submitSettings} className="space-y-4">
                 <Group name="ssh_keys">
-                  <H6 className="pt-4">SSH Keys</H6>
+                  <H6 id="settings-ssh" className="pt-4">
+                    SSH Keys
+                  </H6>
                   <Box className="p-2 space-y-2">
                     <p className="text-sm leading-loose">
                       These SSH keys are available for frame access. Choose which ones should be installed on new
@@ -103,7 +353,7 @@ export function Settings() {
                         return (
                           <Box key={key.id} className="border border-white/10 p-3 space-y-2">
                             <div className="flex items-center justify-between">
-                              <div className="text-sm font-semibold text-gray-200">
+                              <div className="frameos-strong text-sm font-semibold">
                                 {key.name || `Key ${index + 1}`}
                                 {isUsedForNewFrames ? (
                                   <Tag color="primary" className="ml-2">
@@ -146,8 +396,8 @@ export function Settings() {
                                 >
                                   <TextArea />
                                 </Field>
-                                <div className="text-xs text-gray-400 space-y-1">
-                                  <span className="font-semibold text-gray-300">Frames using this key:</span>
+                                <div className="frameos-muted text-xs space-y-1">
+                                  <span className="frameos-strong font-semibold">Frames using this key:</span>
                                   {matchingFrames.length === 0 ? (
                                     <div>None.</div>
                                   ) : (
@@ -156,7 +406,7 @@ export function Settings() {
                                         <A
                                           key={frame.id}
                                           href={urls.frame(frame.id)}
-                                          className="text-blue-400 hover:underline"
+                                          className="frameos-link hover:underline"
                                         >
                                           {frame.name || frameHost(frame)}
                                         </A>
@@ -202,10 +452,12 @@ export function Settings() {
                   </Box>
                 </Group>
                 <Group name="frameOS">
-                  <H6 className="pt-4">FrameOS Gallery</H6>
+                  <H6 id="settings-gallery" className="pt-4">
+                    FrameOS Gallery
+                  </H6>
                   <Box className="p-2 space-y-2">
                     <p className="text-sm leading-loose">
-                      <a className="text-blue-400 hover:underline" target="_blank" href="https://gallery.frameos.net/">
+                      <a className="frameos-link hover:underline" target="_blank" href="https://gallery.frameos.net/">
                         Premium AI slop
                       </a>{' '}
                       to get you started.
@@ -221,7 +473,9 @@ export function Settings() {
                   </Box>
                 </Group>
                 <Group name="openAI">
-                  <H6 className="pt-4">OpenAI</H6>
+                  <H6 id="settings-openai" className="pt-4">
+                    OpenAI
+                  </H6>
                   <Box className="p-2 space-y-2">
                     <p className="text-sm leading-loose">
                       The OpenAI API key is used within OpenAI apps on frames. The backend key powers AI features in the
@@ -249,7 +503,7 @@ export function Settings() {
                     <Field name="appEnhanceModel" label="App edit model">
                       <TextInput name="appEnhanceModel" placeholder="gpt-5.5" />
                     </Field>
-                    <div className="flex flex-wrap items-center gap-2 text-sm text-gray-300">
+                    <div className="frameos-muted flex flex-wrap items-center gap-2 text-sm">
                       <span>
                         Embeddings: {embeddingsCount}/{embeddingsTotal}
                       </span>
@@ -285,7 +539,9 @@ export function Settings() {
                   </Box>
                 </Group>
                 <Group name="posthog">
-                  <H6 className="pt-4">PostHog</H6>
+                  <H6 id="settings-posthog" className="pt-4">
+                    PostHog
+                  </H6>
                   <Box className="p-2 space-y-2">
                     <Field
                       name="backendApiKey"
@@ -306,7 +562,9 @@ export function Settings() {
                   </Box>
                 </Group>
                 <Group name="homeAssistant">
-                  <H6 className="pt-4">Home Assistant</H6>
+                  <H6 id="settings-home-assistant" className="pt-4">
+                    Home Assistant
+                  </H6>
                   <Box className="p-2 space-y-2">
                     <Field name="url" label="Home assistant URL">
                       <TextInput placeholder="http://homeassistant.local:8123" />
@@ -321,7 +579,9 @@ export function Settings() {
                   </Box>
                 </Group>
                 <Group name="github">
-                  <H6 className="pt-4">Github</H6>
+                  <H6 id="settings-github" className="pt-4">
+                    GitHub
+                  </H6>
                   <Box className="p-2 space-y-2">
                     <Field name="api_key" label="API key" secret={!!savedSettings?.github?.api_key}>
                       <TextInput />
@@ -329,7 +589,9 @@ export function Settings() {
                   </Box>
                 </Group>
                 <Group name="unsplash">
-                  <H6 className="pt-4">Unsplash API</H6>
+                  <H6 id="settings-unsplash" className="pt-4">
+                    Unsplash API
+                  </H6>
                   <Box className="p-2 space-y-2">
                     <Field name="accessKey" label="Access key" secret={!!savedSettings?.unsplash?.accessKey}>
                       <TextInput />
@@ -337,7 +599,9 @@ export function Settings() {
                   </Box>
                 </Group>
                 <Group name="buildHost">
-                  <H6 className="pt-4">Cross-compilation build host</H6>
+                  <H6 id="settings-build-host" className="pt-4">
+                    Cross-compilation build host
+                  </H6>
                   <Box className="p-2 space-y-2">
                     <p className="text-sm leading-loose">
                       When deploying FrameOS, we compile it from source. We can compile on-device for maximal
@@ -395,12 +659,15 @@ export function Settings() {
                     ) : null}
                   </Box>
                 </Group>
-
               </Form>
-              <H6 className="pt-4">System information</H6>
+              <H6 id="settings-system" className="pt-4">
+                System information
+              </H6>
               <SystemInfo />
               <div className="space-y-4 mt-4">
-                <H6 className="pt-4">Custom fonts</H6>
+                <H6 id="settings-fonts" className="pt-4">
+                  Custom fonts
+                </H6>
                 <Box className="p-2 space-y-2">
                   <p className="text-sm leading-loose">
                     These fonts will be uploaded to all frames and can be used in the FrameOS editor.
@@ -445,7 +712,7 @@ export function Settings() {
           )}
         </div>
       </div>
-    </div>
+    </FrameosShell>
   )
 }
 

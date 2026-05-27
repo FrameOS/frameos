@@ -2,6 +2,11 @@ name: Release FrameOS
 
 on:
   workflow_dispatch:
+    inputs:
+      next_version:
+        description: 'Optional release version override, for example 2026.6.0'
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -26,7 +31,14 @@ jobs:
           python-version: '3.12'
 
       - name: Recompute component versions
-        run: python3 tools/update_versions.py --force-project docker --force-project agent
+        env:
+          NEXT_VERSION: ${{ inputs.next_version }}
+        run: |
+          args=(--force-project docker --force-project agent)
+          if [ -n "$NEXT_VERSION" ]; then
+            args+=(--force-project frameos --next-version "$NEXT_VERSION")
+          fi
+          python3 tools/update_versions.py "${args[@]}"
 
       - name: Verify version changes
         run: |
@@ -313,8 +325,8 @@ jobs:
       - name: Commit changes
         uses: EndBug/add-and-commit@v9
         with:
-          message: "Update FrameOS version to ${{ env.DOCKER_VERSION }}"
-          add: "."
+          message: 'Update FrameOS version to ${{ env.DOCKER_VERSION }}'
+          add: '.'
           cwd: home-assistant-addon
           push: true
           author_name: FrameOS Bot

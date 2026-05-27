@@ -67,6 +67,10 @@ export interface FullDeployPlanResponse {
     }
     spi_action?: 'enable' | 'disable' | 'unchanged'
     reboot_schedule?: {
+      enabled?: boolean
+      crontab?: string
+      type?: 'frameos' | 'raspberry' | string | null
+      command?: string
       needs_update?: boolean
       needs_remove?: boolean
     }
@@ -88,12 +92,25 @@ export interface DeployPlanResponse {
 }
 
 export interface DeployRecommendation {
-  mode: 'fast' | 'full'
+  mode: 'none' | 'fast' | 'full'
   title: string
   description: string
+  descriptionEmphasis?: string
 }
 
+type PlannedRebootSchedule = NonNullable<NonNullable<FullDeployPlanResponse['post_deploy']>['reboot_schedule']>
+
 export const CURRENT_FRAMEOS_VERSION = (versions.frameos || 'dev').split('+')[0]
+
+const INKY_BUTTON_DEVICES = new Set([
+  'pimoroni.inky_impression',
+  'pimoroni.inky_impression_7',
+  'pimoroni.inky_impression_13',
+])
+const VIRTUAL_OUTPUT_DEVICES = new Set(['http.upload', 'web_only'])
+const WAVESHARE_NO_SPI_VARIANTS = new Set(['EPD_12in48', 'EPD_12in48b', 'EPD_12in48b_V2', 'EPD_13in3e'])
+const WAVESHARE_BOOT_CONFIG_SPI_VARIANTS = new Set(['EPD_10in3'])
+const WAVESHARE_BOOT_CONFIG_VARIANTS = new Set(['EPD_10in3', 'EPD_13in3e'])
 
 function stringifyList(values: unknown[]): string {
   if (values.length === 0) {
@@ -102,8 +119,181 @@ function stringifyList(values: unknown[]): string {
   return values.map((value) => String(value)).join(', ')
 }
 
+function pluralize(count: number, singular: string): string {
+  return `${count} ${singular}${count === 1 ? '' : 's'}`
+}
+
+function normalizeCompilationMode(value: unknown): 'static' | 'shared' | 'precompiled' {
+  return value === 'static' || value === 'shared' || value === 'precompiled' ? value : 'precompiled'
+}
+
+function normalizeCrossCompilation(value: unknown): 'auto' | 'always' | 'never' {
+  return value === 'always' || value === 'never' ? value : 'auto'
+}
+
+function frameCompiledSceneCount(frame?: Partial<FrameType> | null): number {
+  return (frame?.scenes ?? []).filter((scene) => (scene.settings?.execution ?? 'compiled') !== 'interpreted').length
+}
+
+function inferFrameDriverNames(frame?: Partial<FrameType> | null): string[] {
+  const device = frame?.device
+  if (!device) {
+    return []
+  }
+
+  const drivers = new Set<string>()
+  if (INKY_BUTTON_DEVICES.has(device) || device === 'pimoroni.inky_python') {
+    drivers.add('i2c')
+    drivers.add('inkyPython')
+    drivers.add('spi')
+    if (INKY_BUTTON_DEVICES.has(device)) {
+      drivers.add('gpioButton')
+      drivers.add('bootconfig')
+    }
+  } else if (device === 'pimoroni.hyperpixel2r') {
+    drivers.add('inkyHyperPixel2r')
+  } else if (device === 'framebuffer') {
+    drivers.add('frameBuffer')
+  } else if (device === 'http.upload') {
+    drivers.add('httpUpload')
+  } else if (device.startsWith('waveshare.')) {
+    const variant = device.split('.')[1]
+    drivers.add('waveshare')
+    if (WAVESHARE_BOOT_CONFIG_SPI_VARIANTS.has(variant)) {
+      drivers.add('bootconfig')
+    } else if (WAVESHARE_NO_SPI_VARIANTS.has(variant)) {
+      drivers.add('noSpi')
+    } else {
+      drivers.add('spi')
+    }
+    if (WAVESHARE_BOOT_CONFIG_VARIANTS.has(variant)) {
+      drivers.add('bootconfig')
+    }
+  }
+
+  if (!INKY_BUTTON_DEVICES.has(device) && !device.startsWith('waveshare.') && !VIRTUAL_OUTPUT_DEVICES.has(device)) {
+    drivers.add('evdev')
+  }
+  if (!drivers.has('gpioButton') && (frame?.gpio_buttons ?? []).length > 0) {
+    drivers.add('gpioButton')
+  }
+
+  return [...drivers].sort()
+}
+
+function precompiledSkipReason(frame?: Partial<FrameType> | null): string | null {
+  const compiledSceneCount = frameCompiledSceneCount(frame)
+  return compiledSceneCount > 0 ? `${pluralize(compiledSceneCount, 'compiled scene')} configured` : null
+}
+
+function canUsePrecompiledFrameos(frame?: Partial<FrameType> | null, plan?: DeployPlanResponse | null): boolean {
+  if (frameCompiledSceneCount(frame) > 0) {
+    return false
+  }
+  if (plan?.full_deploy?.binary?.will_attempt_precompiled !== undefined) {
+    return plan.full_deploy.binary.will_attempt_precompiled === true
+  }
+  if (frame?.mode === 'buildroot') {
+    return false
+  }
+
+  const compilationMode = normalizeCompilationMode(frame?.rpios?.compilationMode)
+  const crossCompilation = normalizeCrossCompilation(frame?.rpios?.crossCompilation)
+  return compilationMode === 'precompiled' && crossCompilation !== 'always' && !precompiledSkipReason(frame)
+}
+
+function inferBuildStrategy(frame?: Partial<FrameType> | null): string {
+  if (frame?.mode === 'buildroot') {
+    return 'Build the configured Buildroot target'
+  }
+
+  const compilationMode = normalizeCompilationMode(frame?.rpios?.compilationMode)
+  const crossCompilation = normalizeCrossCompilation(frame?.rpios?.crossCompilation)
+  const skipReason = precompiledSkipReason(frame)
+  const crossCompileText =
+    crossCompilation === 'never'
+      ? 'Build on device'
+      : crossCompilation === 'always'
+      ? 'Cross-compile'
+      : 'Cross-compile if the detected target supports it, otherwise build on device'
+
+  if (compilationMode === 'precompiled') {
+    if (crossCompilation === 'always') {
+      return 'Cross-compile because cross-compilation is required'
+    }
+    if (!skipReason) {
+      return 'Download and install the precompiled FrameOS release'
+    }
+    return `${crossCompileText} as a single executable; precompiled release skipped (${skipReason})`
+  }
+
+  return crossCompileText
+}
+
+function inferCompilationSummary(frame?: Partial<FrameType> | null): string {
+  const compilationMode = normalizeCompilationMode(frame?.rpios?.compilationMode)
+  const crossCompilation = normalizeCrossCompilation(frame?.rpios?.crossCompilation)
+  if (compilationMode === 'shared') {
+    return 'Shared libraries deployed next to the FrameOS binary'
+  }
+  if (compilationMode === 'precompiled' && crossCompilation !== 'always' && !precompiledSkipReason(frame)) {
+    return 'Precompiled FrameOS binary and shared driver libraries'
+  }
+  return 'Single FrameOS executable'
+}
+
+function formatCronSchedule(crontab?: string | null): string {
+  const cron = crontab?.trim() || '0 0 * * *'
+  const [minute, hour, dayOfMonth, month, dayOfWeek] = cron.split(/\s+/)
+  if (
+    Number.isInteger(Number(minute)) &&
+    Number.isInteger(Number(hour)) &&
+    dayOfMonth === '*' &&
+    month === '*' &&
+    dayOfWeek === '*'
+  ) {
+    return `${String(Number(hour)).padStart(2, '0')}:${String(Number(minute)).padStart(2, '0')}`
+  }
+  return cron
+}
+
+function rebootScheduleTarget(type?: string | null): string {
+  return type === 'raspberry' ? 'system reboot' : 'FrameOS restart'
+}
+
+function rebootScheduleSummary(reboot?: Partial<FrameType>['reboot'] | PlannedRebootSchedule): string | null {
+  if (!reboot) {
+    return null
+  }
+  if ('needs_remove' in reboot && reboot.needs_remove) {
+    return 'Remove the existing automatic reboot schedule'
+  }
+  const plannedSchedule = 'needs_update' in reboot || 'needs_remove' in reboot
+  if (!plannedSchedule && reboot.enabled !== true && reboot.enabled !== 'true') {
+    return null
+  }
+  if (reboot.enabled === false || reboot.enabled === 'false') {
+    return null
+  }
+
+  const target = rebootScheduleTarget(reboot.type)
+  return `${target} at ${formatCronSchedule(reboot.crontab)}`
+}
+
+export function normalizeFrameosVersion(version: unknown): string | null {
+  return typeof version === 'string' && version.trim() ? version.split('+')[0] : null
+}
+
+export function deployedFrameosVersion(deploy?: Partial<FrameType> | Record<string, unknown> | null): string | null {
+  return normalizeFrameosVersion((deploy as Record<string, unknown> | null | undefined)?.frameos_version)
+}
+
+export function deployPlanPreviousFrameosVersion(plan?: DeployPlanResponse | null): string | null {
+  return normalizeFrameosVersion(plan?.previous_frameos_version)
+}
+
 function previousFrameosVersion(plan?: DeployPlanResponse | null): string {
-  return plan?.previous_frameos_version ? String(plan.previous_frameos_version).split('+')[0] : 'Not deployed'
+  return deployPlanPreviousFrameosVersion(plan) ?? 'Not deployed'
 }
 
 export function buildDeployPlanRequestBody(
@@ -140,7 +330,10 @@ export function buildFullDeployPlanSummary(
   const items: SummaryItem[] = [
     {
       label: 'FrameOS version',
-      value: previousVersion === CURRENT_FRAMEOS_VERSION ? CURRENT_FRAMEOS_VERSION : `${previousVersion} -> ${CURRENT_FRAMEOS_VERSION}`,
+      value:
+        previousVersion === CURRENT_FRAMEOS_VERSION
+          ? CURRENT_FRAMEOS_VERSION
+          : `${previousVersion} -> ${CURRENT_FRAMEOS_VERSION}`,
     },
     ...(frame?.device ? [{ label: 'Device', value: String(frame.device) }] : []),
     {
@@ -150,7 +343,7 @@ export function buildFullDeployPlanSummary(
     {
       label: 'Build strategy',
       value: fullPlan.binary.will_attempt_precompiled
-        ? 'Download the precompiled FrameOS release'
+        ? 'Download and install the precompiled FrameOS release'
         : fullPlan.binary.will_attempt_cross_compile
         ? fullPlan.binary.build_host_configured
           ? 'Cross-compile on the configured build host'
@@ -220,16 +413,18 @@ export function buildFullDeployPlanSummary(
     items.push({ label: 'User config', value: 'First-deploy setup will disable the system userconfig service' })
   }
   if (fullPlan.post_deploy?.reboot_schedule?.needs_update) {
-    items.push({ label: 'Reboot schedule', value: 'Scheduled reboot config will be installed or updated' })
+    const schedule = rebootScheduleSummary(fullPlan.post_deploy.reboot_schedule)
+    if (schedule) {
+      items.push({ label: 'Reboot schedule', value: `Install automatic ${schedule}` })
+    }
   }
   if (fullPlan.post_deploy?.reboot_schedule?.needs_remove) {
-    items.push({ label: 'Reboot schedule', value: 'Old scheduled reboot config will be removed' })
+    const schedule = rebootScheduleSummary(fullPlan.post_deploy.reboot_schedule)
+    if (schedule) {
+      items.push({ label: 'Reboot schedule', value: schedule })
+    }
   }
-  if (
-    fullPlan.low_memory &&
-    !fullPlan.binary.will_attempt_precompiled &&
-    !fullPlan.binary.will_attempt_cross_compile
-  ) {
+  if (fullPlan.low_memory && !fullPlan.binary.will_attempt_precompiled && !fullPlan.binary.will_attempt_cross_compile) {
     items.push({ label: 'Low memory', value: 'FrameOS will be stopped before the on-device build' })
   }
   if (fullPlan.post_deploy?.final_action === 'reboot') {
@@ -239,16 +434,45 @@ export function buildFullDeployPlanSummary(
   return items
 }
 
-export function buildDeployRecommendation(
-  plan: DeployPlanResponse | null,
-  hasPreviousDeploy: boolean,
-  deployChangeDetails: ChangeDetail[]
-): DeployRecommendation | null {
-  if (!plan) {
-    return null
+export function buildInferredFullDeployPlanSummary(
+  lastDeploy: Partial<FrameType> | Record<string, unknown> | null,
+  frame?: Partial<FrameType> | null
+): SummaryItem[] {
+  const previousVersion = deployedFrameosVersion(lastDeploy)
+  const items: SummaryItem[] = [
+    {
+      label: 'FrameOS version',
+      value:
+        previousVersion && previousVersion === CURRENT_FRAMEOS_VERSION
+          ? CURRENT_FRAMEOS_VERSION
+          : `${previousVersion ?? 'Not deployed'} -> ${CURRENT_FRAMEOS_VERSION}`,
+    },
+    ...(frame?.device ? [{ label: 'Device', value: String(frame.device) }] : []),
+    {
+      label: 'Build strategy',
+      value: inferBuildStrategy(frame),
+    },
+  ]
+  const drivers = inferFrameDriverNames(frame)
+  if (drivers.length > 0) {
+    items.push({ label: 'Drivers', value: stringifyList(drivers) })
+  }
+  items.push({ label: 'Compilation', value: inferCompilationSummary(frame) })
+  const rebootSchedule = rebootScheduleSummary(frame?.reboot)
+  if (rebootSchedule) {
+    items.push({ label: 'Reboot schedule', value: `Automatic ${rebootSchedule}` })
   }
 
-  const previousVersion = plan.previous_frameos_version ? String(plan.previous_frameos_version).split('+')[0] : null
+  return items
+}
+
+export function buildDeployRecommendation(
+  previousVersion: string | null,
+  hasPreviousDeploy: boolean,
+  deployChangeDetails: ChangeDetail[],
+  frame?: Partial<FrameType> | null,
+  plan?: DeployPlanResponse | null
+): DeployRecommendation {
   const versionChanged = previousVersion !== CURRENT_FRAMEOS_VERSION
   const fullDeployChanges = deployChangeDetails
     .filter((change) => change.requiresFullDeploy && !change.label.startsWith('FrameOS upgrade'))
@@ -258,29 +482,45 @@ export function buildDeployRecommendation(
     return {
       mode: 'full',
       title: 'Suggested: full deploy',
-      description: 'This frame has not been deployed yet, so FrameOS, dependencies, and system changes need a full deploy.',
+      description:
+        'This frame has not been deployed yet, so FrameOS, dependencies, and system changes need a full deploy.',
     }
   }
 
   if (fullDeployChanges.length > 0) {
+    const usesPrecompiledFrameos = canUsePrecompiledFrameos(frame, plan)
     return {
       mode: 'full',
       title: 'Suggested: full deploy',
-      description: `These changes require rebuilding or reinstalling FrameOS: ${fullDeployChanges.join(', ')}.`,
+      description: usesPrecompiledFrameos
+        ? 'You have changes that require reinstalling FrameOS.'
+        : 'You have changes that require rebuilding FrameOS.',
+      descriptionEmphasis: usesPrecompiledFrameos ? undefined : 'rebuilding',
     }
   }
 
   if (versionChanged) {
     return {
-      mode: 'fast',
-      title: 'Suggested: fast deploy',
-      description: `Fast deploy is enough to push the latest frame config and interpreted scenes. Use full deploy only if you also want to update the FrameOS runtime from ${previousVersion ?? 'unknown'} to ${CURRENT_FRAMEOS_VERSION}.`,
+      mode: 'full',
+      title: 'Suggested: full deploy',
+      description: `Updating FrameOS from ${
+        previousVersion ?? 'unknown'
+      } to ${CURRENT_FRAMEOS_VERSION} requires a full deploy.`,
+    }
+  }
+
+  if (deployChangeDetails.length === 0) {
+    return {
+      mode: 'none',
+      title: 'Up to date',
+      description: 'This frame is already up to date. Refresh the plan if you want to re-check the target details.',
     }
   }
 
   return {
     mode: 'fast',
     title: 'Suggested: fast deploy',
-    description: 'No pending changes require rebuilding FrameOS, so a fast deploy (reload) is enough to bring the frame up to date.',
+    description:
+      'No pending changes require rebuilding FrameOS, so a fast deploy (reload) is enough to bring the frame up to date.',
   }
 }

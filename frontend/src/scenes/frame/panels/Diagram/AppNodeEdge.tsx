@@ -1,7 +1,10 @@
 import { BaseEdge, EdgeLabelRenderer, EdgeProps, getSimpleBezierPath, useReactFlow } from 'reactflow'
 import { XCircleIcon } from '@heroicons/react/24/solid'
+import { useValues } from 'kea'
+import { workspaceLogic } from '../../../workspace/workspaceLogic'
 
 const CONNECTED_TO_SELECTED_NODE_STROKE = '#facc15'
+const LIGHT_CONNECTED_TO_SELECTED_NODE_STROKE = '#b7791f'
 
 export function AppNodeEdge({
   id,
@@ -17,6 +20,8 @@ export function AppNodeEdge({
   data,
 }: EdgeProps) {
   const { setEdges } = useReactFlow()
+  const { theme } = useValues(workspaceLogic)
+  const lightMode = theme !== 'dark'
   const [edgePath, labelX, labelY] = getSimpleBezierPath({
     sourceX,
     sourceY,
@@ -27,29 +32,38 @@ export function AppNodeEdge({
   })
   const isNodeConnection = sourceHandleId === 'next' || targetHandleId === 'prev'
   const connectedToSelectedNode = Boolean(data?.connectedToSelectedNode)
+  const selectedStroke = lightMode ? '#c026d3' : '#f29cf6'
+  const connectedStroke = lightMode ? LIGHT_CONNECTED_TO_SELECTED_NODE_STROKE : CONNECTED_TO_SELECTED_NODE_STROKE
+  const defaultNodeStroke = lightMode ? '#c7a84d' : 'hsl(56 60% 70% / 1)'
+  const defaultFieldStroke = lightMode ? '#94a3b8' : '#c5c5c5'
+  const roundedStroke = { strokeLinecap: 'round' as const }
   const edgeStyle = isNodeConnection
     ? selected
-      ? { strokeWidth: 8, stroke: '#f29cf6' }
+      ? { strokeWidth: 8, stroke: selectedStroke, ...roundedStroke }
       : connectedToSelectedNode
-      ? { strokeWidth: 8, stroke: CONNECTED_TO_SELECTED_NODE_STROKE }
-      : { strokeWidth: 6, stroke: 'hsl(56 60% 70% / 1)' }
+      ? { strokeWidth: 8, stroke: connectedStroke, ...roundedStroke }
+      : { strokeWidth: 6, stroke: defaultNodeStroke, ...roundedStroke }
     : selected
-    ? { strokeWidth: 4, stroke: '#f29cf6' }
+    ? { strokeWidth: 4, stroke: selectedStroke, ...roundedStroke }
     : connectedToSelectedNode
-    ? { strokeWidth: 5, stroke: CONNECTED_TO_SELECTED_NODE_STROKE }
-    : { strokeWidth: 2, stroke: '#c5c5c5' }
+    ? { strokeWidth: 5, stroke: connectedStroke, ...roundedStroke }
+    : { strokeWidth: 2.5, stroke: defaultFieldStroke, ...roundedStroke }
   return (
     <>
       <BaseEdge id={id} path={edgePath} style={edgeStyle} />
       <EdgeLabelRenderer>
         {selected ? (
           <button
+            type="button"
+            aria-label="Remove edge"
+            title="Remove edge"
             style={{
               position: 'absolute',
               transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
               pointerEvents: 'all',
+              color: selectedStroke,
             }}
-            className="nodrag nopan bg-black rounded-full text-white hover:text-gray-200"
+            className="frameos-edge-delete-button nodrag nopan"
             onClick={() => {
               setEdges((es) => es.filter((e) => e.id !== id))
             }}

@@ -35,7 +35,17 @@ export interface SourceError {
   error: string
 }
 
+const sourceLoadOrder = ['README.md', ...javascriptAppSourceFiles, 'app.nim', 'config.nim']
 const primaryFiles = ['config.json', ...javascriptAppSourceFiles, 'app.nim']
+
+function firstSourceFile(sources: Record<string, string>): string {
+  for (const file of sourceLoadOrder) {
+    if (file in sources) {
+      return file
+    }
+  }
+  return Object.keys(sources)[0] ?? ''
+}
 
 export const editAppLogic = kea<editAppLogicType>([
   path(['src', 'scenes', 'frame', 'panels', 'EditApp', 'editAppLogic']),
@@ -57,6 +67,8 @@ export const editAppLogic = kea<editAppLogicType>([
     updateFile: (file: string, source: string) => ({ file, source }),
     saveChanges: true,
     forkAndSaveChanges: true,
+    discardChanges: true,
+    replaceSources: (sources: Record<string, string>) => ({ sources }),
     setInitialSources: (sources: Record<string, string>) => ({ sources }),
     validateSource: (file: string, source: string, initial: boolean = false) => ({ file, source, initial }),
     setSourceErrors: (file: string, errors: SourceError[]) => ({ file, errors }),
@@ -77,8 +89,7 @@ export const editAppLogic = kea<editAppLogicType>([
     savedKeyword: [(s) => [s.appData], (appData): string | null => appData?.keyword || null],
     sceneAppKey: [
       (s) => [s.scene, s.savedKeyword],
-      (scene, savedKeyword): string | null =>
-        savedKeyword && scene?.apps?.[savedKeyword] ? savedKeyword : null,
+      (scene, savedKeyword): string | null => (savedKeyword && scene?.apps?.[savedKeyword] ? savedKeyword : null),
     ],
     sceneApp: [
       (s) => [s.scene, s.sceneAppKey],
@@ -105,7 +116,6 @@ export const editAppLogic = kea<editAppLogicType>([
       {} as Record<string, string>,
       {
         loadSources: async () => {
-          const files = ['README.md', ...javascriptAppSourceFiles, 'app.nim', 'config.nim']
           let sources: Record<string, string> = {}
           if (values.savedSources) {
             sources = values.savedSources
@@ -116,12 +126,7 @@ export const editAppLogic = kea<editAppLogicType>([
             const { ['app_loader.nim']: _ignored, ...filteredSources } = sources
             sources = filteredSources
           }
-          for (const file of files) {
-            if (file in sources) {
-              actions.setActiveFile(file)
-              break
-            }
-          }
+          actions.setActiveFile(firstSourceFile(sources))
           return sources
         },
       },
@@ -138,6 +143,7 @@ export const editAppLogic = kea<editAppLogicType>([
     ],
     sources: {
       updateFile: (state, { file, source }) => ({ ...state, [file]: source }),
+      replaceSources: (_, { sources }) => sources,
       deleteFile: (state, { file }) => {
         const newState = { ...state }
         delete newState[file]
@@ -249,6 +255,20 @@ export const editAppLogic = kea<editAppLogicType>([
         actions.updateNodeData(props.sceneId, props.nodeId, { sources: values.sources })
       }
       actions.setInitialSources(values.sources)
+    },
+    discardChanges: () => {
+      const nextSources = values.initialSources
+      const discardedFiles = Object.keys(values.sources).filter((file) => !(file in nextSources))
+      actions.replaceSources(nextSources)
+      if (!(values.activeFile in nextSources)) {
+        actions.setActiveFile(firstSourceFile(nextSources))
+      }
+      for (const [file, source] of Object.entries(nextSources)) {
+        actions.validateSource(file, source, true)
+      }
+      for (const file of discardedFiles) {
+        actions.setSourceErrors(file, [])
+      }
     },
     forkAndSaveChanges: () => {
       const keyword = values.sceneAppKey

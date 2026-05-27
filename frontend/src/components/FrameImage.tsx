@@ -12,6 +12,8 @@ export interface FrameImageProps extends React.HTMLAttributes<HTMLDivElement> {
   refreshable?: boolean
   thumb?: boolean
   objectFit?: React.CSSProperties['objectFit']
+  imageClassName?: string
+  hideWhileLoading?: boolean
 }
 
 /**
@@ -29,16 +31,25 @@ export function FrameImage({
   refreshable = true,
   onClick,
   objectFit,
+  imageClassName,
+  hideWhileLoading = false,
   ...props
 }: FrameImageProps) {
   const { frames } = useValues(framesModel)
   const { updateEntityImage } = useActions(entityImagesModel)
   const frame = frames[frameId]
+  const frameAspectRatio =
+    frame?.width && frame.height
+      ? frame.rotate === 90 || frame.rotate === 270
+        ? `${frame.height} / ${frame.width}`
+        : `${frame.width} / ${frame.height}`
+      : undefined
 
   const entityId = `frames/${frameId}`
   const subEntityId = sceneId ? `scene_images/${sceneId}` : 'image'
 
   const { imageUrl, isLoading, setIsLoading } = useEntityImage(entityId, subEntityId)
+  const imageSrc = imageUrl ? imageUrl + (thumb ? (imageUrl.includes('?') ? '&thumb=1' : '?thumb=1') : '') : undefined
 
   // Determine if we should show the fade-in-out or loading cursor
   const visiblyLoading = !sceneId && (isLoading || frame?.status !== 'ready') && frame?.interval > 5
@@ -68,25 +79,22 @@ export function FrameImage({
         <img
           className={clsx(
             thumb ? 'rounded-sm' : 'rounded-lg',
-            refreshable ? 'rounded-tl-none max-w-full max-h-full' : 'w-full',
-            className /* duplicated for inner image */
+            refreshable ? 'rounded-tl-none max-w-full max-h-full' : imageClassName ? 'max-w-full max-h-full' : 'w-full',
+            hideWhileLoading && isLoading ? 'opacity-0' : null,
+            hideWhileLoading ? 'transition-opacity duration-150' : null,
+            imageClassName ?? className /* duplicated for inner image by default */
           )}
-          src={imageUrl ? imageUrl + (thumb ? (imageUrl.includes('?') ? '&thumb=1' : '?thumb=1') : '') : undefined}
-          onLoad={() => setIsLoading(false)}
+          src={imageSrc}
+          onLoad={() => {
+            setIsLoading(false)
+          }}
           onError={() => setIsLoading(false)}
-          style={
-            frame.width && frame.height
-              ? {
-                  aspectRatio:
-                frame.rotate === 90 || frame.rotate === 270
-                  ? `${frame.height} / ${frame.width}`
-                  : `${frame.width} / ${frame.height}`,
-                objectFit,
-                maxWidth: 'inherit',
-                maxHeight: 'inherit',
-              }
-            : {}
-          }
+          style={{
+            aspectRatio: frameAspectRatio,
+            objectFit,
+            maxWidth: 'inherit',
+            maxHeight: 'inherit',
+          }}
           alt=""
         />
       )}

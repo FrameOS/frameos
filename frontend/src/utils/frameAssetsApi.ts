@@ -9,10 +9,27 @@ export function frameAssetsApiPath(frameId: number, suffix = 'assets'): string {
   return `${frameAssetApiPrefix(frameId)}/${suffix}`
 }
 
-export function frameAssetUrl(frameId: number, path: string, thumb = false): string {
+interface FrameAssetUrlOptions {
+  thumb?: boolean
+  mode?: 'download' | 'image'
+  filename?: string
+}
+
+export function frameAssetUrl(
+  frameId: number,
+  path: string,
+  thumbOrOptions: boolean | FrameAssetUrlOptions = false
+): string {
+  const options = typeof thumbOrOptions === 'boolean' ? { thumb: thumbOrOptions } : thumbOrOptions
   const params = new URLSearchParams({ path })
-  if (thumb) {
+  if (options.thumb) {
     params.set('thumb', '1')
+  }
+  if (options.mode) {
+    params.set('mode', options.mode)
+  }
+  if (options.filename) {
+    params.set('filename', options.filename)
   }
   return `${frameAssetApiPrefix(frameId)}/asset?${params.toString()}`
 }

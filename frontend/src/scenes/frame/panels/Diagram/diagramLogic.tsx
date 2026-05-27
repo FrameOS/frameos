@@ -24,6 +24,7 @@ import type { EdgeChange, NodeChange } from '@reactflow/core/dist/esm/types/chan
 import equal from 'fast-deep-equal'
 import type { diagramLogicType } from './diagramLogicType'
 import { subscriptions } from 'kea-subscriptions'
+import type { CSSProperties } from 'react'
 import {
   AppConfig,
   AppConfigField,
@@ -77,6 +78,14 @@ export interface NewNodePicker {
   nodeId: string
 }
 
+export type DiagramNodeTreeItemKind = 'root' | 'flow' | 'data' | 'connected' | 'disconnected'
+
+export interface DiagramNodeTreeItem {
+  node: DiagramNode
+  depth: number
+  kind: DiagramNodeTreeItemKind
+}
+
 export type CodeNodeLanguage = 'js' | 'nim'
 
 export type DiagramHistorySnapshot = {
@@ -99,6 +108,24 @@ type ClipboardDiagramPayload = {
 const MAX_HISTORY_LENGTH = 100
 const HISTORY_DEBOUNCE_MS = 300
 const DELETE_HISTORY_DEBOUNCE_MS = 50
+const DEFAULT_NODE_STYLES: Record<string, CSSProperties> = {
+  app: { width: 300 },
+  source: { width: 300 },
+  dispatch: { width: 300 },
+  scene: { width: 300 },
+  event: { width: 300 },
+  state: { width: 300 },
+  code: { width: 300, height: 119 },
+}
+
+const renderNodeWithStyle = (node: DiagramNode): DiagramNode => {
+  const defaultStyle = node.type ? DEFAULT_NODE_STYLES[node.type] : undefined
+  return {
+    ...node,
+    dragHandle: '.frameos-node-title',
+    style: defaultStyle ? { ...defaultStyle, ...(node.style ?? {}) } : node.style,
+  }
+}
 
 const normalizeNodes = (nodes: DiagramNode[]): DiagramNode[] =>
   nodes.map((node) => {
@@ -115,7 +142,7 @@ const normalizeNodes = (nodes: DiagramNode[]): DiagramNode[] =>
     return rest as DiagramNode
   })
 
-const normalizeEdges = (edges: Edge[]): Edge[] =>
+const normalizeEdges = (edges: Edge[] = []): Edge[] =>
   edges.map((edge) => {
     const { selected, ...rest } = edge
     return rest as Edge
@@ -134,12 +161,16 @@ const makeHistorySnapshot = (
   apps,
 })
 
-const sortById = <T extends { id: string }>(items: T[]): T[] => [...items].sort((a, b) => a.id.localeCompare(b.id))
+const sortById = <T extends { id?: string | null }>(items: T[]): T[] =>
+  items
+    .map((item, index) => ({ item, index, id: item.id ?? '' }))
+    .sort((a, b) => a.id.localeCompare(b.id) || a.index - b.index)
+    .map(({ item }) => item)
 
 const comparableHistorySnapshot = (snapshot: DiagramHistorySnapshot): DiagramHistorySnapshot => ({
-  nodes: sortById(normalizeNodes(snapshot.nodes)),
+  nodes: sortById(normalizeNodes(snapshot.nodes ?? [])),
   edges: sortById(
-    normalizeEdges(snapshot.edges).map((edge) => {
+    normalizeEdges(snapshot.edges ?? []).map((edge) => {
       const { type, ...rest } = edge
       return rest as Edge
     })
@@ -363,6 +394,197 @@ const removeAutoArrangeMarker = (settings?: FrameSceneSettings): FrameSceneSetti
   return Object.keys(rest).length > 0 ? rest : undefined
 }
 
+function nodeSortLabel(node: DiagramNode): string {
+  const data = node.data
+  if (data && 'name' in data && data.name) {
+    return data.name
+  }
+  if (data && 'keyword' in data && data.keyword) {
+    return data.keyword
+  }
+  return node.id
+}
+
+function nodePositionCompare(first: DiagramNode, second: DiagramNode): number {
+  const firstY = first.position?.y ?? 0
+  const secondY = second.position?.y ?? 0
+  if (firstY !== secondY) {
+    return firstY - secondY
+  }
+  const firstX = first.position?.x ?? 0
+  const secondX = second.position?.x ?? 0
+  if (firstX !== secondX) {
+    return firstX - secondX
+  }
+  return nodeSortLabel(first).localeCompare(nodeSortLabel(second))
+}
+
+function eventRootCompare(first: DiagramNode, second: DiagramNode): number {
+  const firstKeyword = first.data && 'keyword' in first.data ? first.data.keyword : ''
+  const secondKeyword = second.data && 'keyword' in second.data ? second.data.keyword : ''
+  const firstRank = firstKeyword === 'render' ? 0 : firstKeyword === 'init' ? 1 : 2
+  const secondRank = secondKeyword === 'render' ? 0 : secondKeyword === 'init' ? 1 : 2
+  return firstRank - secondRank || nodePositionCompare(first, second)
+}
+
+function edgeHandleSortValue(handle?: string | null): string {
+  if (!handle) {
+    return ''
+  }
+  if (handle === 'next' || handle === 'prev') {
+    return `00/${handle}`
+  }
+  if (handle.startsWith('fieldInput/')) {
+    return `10/${handle.substring('fieldInput/'.length)}`
+  }
+  if (handle.startsWith('codeField/')) {
+    return `11/${handle.substring('codeField/'.length)}`
+  }
+  if (handle.startsWith('field/')) {
+    return `20/${handle.substring('field/'.length)}`
+  }
+  return `30/${handle}`
+}
+
+function isFlowEdge(edge: Edge): boolean {
+  return edge.sourceHandle === 'next' || edge.targetHandle === 'prev'
+}
+
+function isFlowLikeNode(node: DiagramNode): boolean {
+  return (
+    node.type === 'event' ||
+    node.type === 'app' ||
+    node.type === 'source' ||
+    node.type === 'dispatch' ||
+    node.type === 'scene'
+  )
+}
+
+function sortEdgesByTarget(edges: Edge[], nodesById: Record<string, DiagramNode>): Edge[] {
+  return edges.toSorted((first, second) => {
+    const handleCompare = edgeHandleSortValue(first.targetHandle).localeCompare(
+      edgeHandleSortValue(second.targetHandle)
+    )
+    if (handleCompare !== 0) {
+      return handleCompare
+    }
+    const firstSource = nodesById[first.source]
+    const secondSource = nodesById[second.source]
+    return firstSource && secondSource
+      ? nodePositionCompare(firstSource, secondSource)
+      : first.source.localeCompare(second.source)
+  })
+}
+
+function sortEdgesBySource(edges: Edge[], nodesById: Record<string, DiagramNode>): Edge[] {
+  return edges.toSorted((first, second) => {
+    const handleCompare = edgeHandleSortValue(first.sourceHandle).localeCompare(
+      edgeHandleSortValue(second.sourceHandle)
+    )
+    if (handleCompare !== 0) {
+      return handleCompare
+    }
+    const firstTarget = nodesById[first.target]
+    const secondTarget = nodesById[second.target]
+    return firstTarget && secondTarget
+      ? nodePositionCompare(firstTarget, secondTarget)
+      : first.target.localeCompare(second.target)
+  })
+}
+
+export function buildDiagramNodeTreeItems(nodes: DiagramNode[], edges: Edge[]): DiagramNodeTreeItem[] {
+  const nodesById = Object.fromEntries(nodes.map((node) => [node.id, node]))
+  const connectedNodeIds = new Set<string>()
+  const incomingFlowEdges: Record<string, Edge[]> = {}
+  const outgoingFlowEdges: Record<string, Edge[]> = {}
+  const incomingDataEdges: Record<string, Edge[]> = {}
+
+  for (const edge of edges) {
+    if (!nodesById[edge.source] || !nodesById[edge.target]) {
+      continue
+    }
+    connectedNodeIds.add(edge.source)
+    connectedNodeIds.add(edge.target)
+    if (isFlowEdge(edge)) {
+      outgoingFlowEdges[edge.source] = [...(outgoingFlowEdges[edge.source] ?? []), edge]
+      incomingFlowEdges[edge.target] = [...(incomingFlowEdges[edge.target] ?? []), edge]
+    } else {
+      incomingDataEdges[edge.target] = [...(incomingDataEdges[edge.target] ?? []), edge]
+    }
+  }
+
+  const items: DiagramNodeTreeItem[] = []
+  const visitedNodeIds = new Set<string>()
+
+  const appendNode = (node: DiagramNode, depth: number, kind: DiagramNodeTreeItemKind): boolean => {
+    if (visitedNodeIds.has(node.id)) {
+      return false
+    }
+    visitedNodeIds.add(node.id)
+    items.push({ node, depth: Math.min(depth, 5), kind })
+    return true
+  }
+
+  const appendDataDependencies = (nodeId: string, depth: number) => {
+    for (const edge of sortEdgesByTarget(incomingDataEdges[nodeId] ?? [], nodesById)) {
+      const sourceNode = nodesById[edge.source]
+      if (!sourceNode || visitedNodeIds.has(sourceNode.id)) {
+        continue
+      }
+      appendNode(sourceNode, depth, 'data')
+      appendDataDependencies(sourceNode.id, depth + 1)
+    }
+  }
+
+  const appendFlowBranch = (node: DiagramNode, depth: number, kind: DiagramNodeTreeItemKind) => {
+    if (!appendNode(node, depth, kind)) {
+      return
+    }
+    appendDataDependencies(node.id, depth + 1)
+    for (const edge of sortEdgesBySource(outgoingFlowEdges[node.id] ?? [], nodesById)) {
+      const targetNode = nodesById[edge.target]
+      if (targetNode) {
+        appendFlowBranch(targetNode, kind === 'root' ? depth + 1 : depth, 'flow')
+      }
+    }
+  }
+
+  const rootEvents = nodes
+    .filter((node) => node.type === 'event' && connectedNodeIds.has(node.id) && !incomingFlowEdges[node.id]?.length)
+    .toSorted(eventRootCompare)
+  for (const node of rootEvents) {
+    appendFlowBranch(node, 0, 'root')
+  }
+
+  const flowRoots = nodes
+    .filter(
+      (node) =>
+        !visitedNodeIds.has(node.id) &&
+        isFlowLikeNode(node) &&
+        connectedNodeIds.has(node.id) &&
+        !incomingFlowEdges[node.id]?.length
+    )
+    .toSorted(nodePositionCompare)
+  for (const node of flowRoots) {
+    appendFlowBranch(node, 0, 'flow')
+  }
+
+  const connectedLeftovers = nodes
+    .filter((node) => !visitedNodeIds.has(node.id) && connectedNodeIds.has(node.id))
+    .toSorted(nodePositionCompare)
+  for (const node of connectedLeftovers) {
+    appendNode(node, 0, 'connected')
+    appendDataDependencies(node.id, 1)
+  }
+
+  const disconnectedNodes = nodes.filter((node) => !visitedNodeIds.has(node.id)).toSorted(nodePositionCompare)
+  for (const node of disconnectedNodes) {
+    appendNode(node, 0, 'disconnected')
+  }
+
+  return items
+}
+
 export const diagramLogic = kea<diagramLogicType>([
   path(['src', 'scenes', 'frame', 'panels', 'Diagram', 'diagramLogic']),
   props({} as DiagramLogicProps),
@@ -452,7 +674,13 @@ export const diagramLogic = kea<diagramLogicType>([
           return equal(state, newEdges) ? state : newEdges
         },
         addEdge: (state, { edge }) => {
-          const newEdges = addEdge({ id: uuidv4(), ...edge }, state)
+          const newEdges = addEdge(
+            {
+              ...edge,
+              id: 'id' in edge && typeof edge.id === 'string' && edge.id ? edge.id : uuidv4(),
+            },
+            state
+          )
           return equal(state, newEdges) ? state : newEdges
         },
         deleteApp: (state, { id }) => {
@@ -574,10 +802,7 @@ export const diagramLogic = kea<diagramLogicType>([
       (nodes, edges, sceneApps, sceneId, originalFrame) => {
         const scene = originalFrame?.scenes?.find((s) => s.id === sceneId)
         return (
-          !equal(
-            deselectNodes(nodes),
-            scene?.nodes
-          ) ||
+          !equal(normalizeNodes(nodes), scene?.nodes) ||
           !equal(
             edges?.map((e) => (e.selected ? { ...e, selected: false } : e)),
             scene?.edges
@@ -586,9 +811,11 @@ export const diagramLogic = kea<diagramLogicType>([
         )
       },
     ],
-    nodesWithStyle: [
-      (s) => [s.nodes],
-      (nodes: DiagramNode[]): DiagramNode[] => nodes.map((node) => ({ ...node, dragHandle: '.frameos-node-title' })),
+    nodesWithStyle: [(s) => [s.nodes], (nodes: DiagramNode[]): DiagramNode[] => nodes.map(renderNodeWithStyle)],
+    nodeTreeItems: [
+      (s) => [s.nodes, s.edges],
+      (nodes: DiagramNode[], edges: Edge[]): DiagramNodeTreeItem[] => buildDiagramNodeTreeItems(nodes, edges),
+      { resultEqualityCheck: equal },
     ],
     sceneOptions: [
       (s) => [s.editingFrame],
@@ -669,7 +896,7 @@ export const diagramLogic = kea<diagramLogicType>([
             if (scene.id !== props.sceneId) {
               return scene
             }
-            const sceneNodes = deselectNodes(nodes)
+            const sceneNodes = normalizeNodes(nodes)
             const nodesChanged = !equal(scene.nodes, sceneNodes)
             const sceneAppsChanged = !equal(normalizeSceneApps(scene.apps), sceneApps)
             return nodesChanged || sceneAppsChanged
@@ -778,7 +1005,7 @@ export const diagramLogic = kea<diagramLogicType>([
         scheduleHistorySnapshot(cache, actions, makeHistorySnapshot(values.nodes, values.rawEdges, values.sceneApps))
       },
       () => {
-        const sceneNodes = deselectNodes(values.nodes)
+        const sceneNodes = normalizeNodes(values.nodes)
         actions.setFrameFormValues({
           scenes: values.editingFrame.scenes?.map((scene) =>
             scene.id === props.sceneId && !equal(scene.nodes, sceneNodes)

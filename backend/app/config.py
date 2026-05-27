@@ -1,6 +1,7 @@
 import os
 import secrets
 import uuid
+from urllib.parse import urlparse
 from dotenv import load_dotenv
 import requests
 
@@ -19,6 +20,23 @@ if get_bool_env('DEBUG'):
 
 
 INSTANCE_ID = str(uuid.uuid4())
+
+def normalize_ingress_path(value: str | None) -> str:
+    if not value:
+        return ""
+
+    path = str(value).strip()
+    if "://" in path:
+        path = urlparse(path).path
+
+    path = path.strip()
+    if not path:
+        return ""
+    if not path.startswith("/"):
+        path = "/" + path
+    if len(path) > 1 and path.endswith("/"):
+        path = path.rstrip("/")
+    return path
 
 class Config:
     DEBUG = get_bool_env('DEBUG')
@@ -43,9 +61,7 @@ class Config:
                 response = requests.get("http://supervisor/addons/self/info", headers=headers)
                 info = response.json()
                 ingress_url = info.get("data", {}).get("ingress_url")
-                if ingress_url and ingress_url.endswith("/"):
-                    ingress_url = ingress_url[:-1]
-                self.ingress_path = ingress_url
+                self.ingress_path = normalize_ingress_path(ingress_url)
                 print(f"🟢 Fetched HA ingress URL: {self.ingress_path}")
             except Exception as e:
                 print(f"🔴 Failed to get HA ingress URL: {e}")

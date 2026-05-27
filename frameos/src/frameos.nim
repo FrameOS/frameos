@@ -34,6 +34,7 @@ when isMainModule:
       let setupResult = setupFrameOS()
       if setupResult.rebootRequired:
         quit(2)
+      quit(0)
     elif args.len == 0 or args[0] == "start" or args[0].startsWith("--"):
       waitFor startFrameOS() # blocks forever
     else:

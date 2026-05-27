@@ -121,7 +121,7 @@ export const chatLogic = kea<chatLogicType>([
       diagramLogic({ frameId: props.frameId, sceneId: props.sceneId ?? '' }),
       ['selectedNodes', 'selectedEdges'],
     ],
-    actions: [frameLogic(props), ['applyTemplate', 'updateScene'], panelsLogic(props), ['openChat']],
+    actions: [frameLogic(props), ['updateScene'], panelsLogic(props), ['openChat']],
   })),
   actions({
     setInput: (input: string) => ({ input }),
@@ -977,9 +977,10 @@ export const chatLogic = kea<chatLogicType>([
           if (!scenes.length) {
             throw new Error('No scenes returned from AI')
           }
-          const existingSceneIds = new Set(values.scenes.map((scene) => scene.id))
+          const frameStore = frameLogic({ frameId: props.frameId })
+          const existingSceneIds = new Set(frameStore.values.scenes.map((scene) => scene.id))
           const sanitizedScenes = scenes.map((scene: Partial<FrameScene>) => {
-            const sanitizedScene = sanitizeScene(scene, values.frameForm)
+            const sanitizedScene = sanitizeScene(scene, frameStore.values.frameForm)
             return {
               ...sanitizedScene,
               settings: {
@@ -988,9 +989,12 @@ export const chatLogic = kea<chatLogicType>([
               },
             }
           })
-          actions.applyTemplate({ scenes: sanitizedScenes, name: payload?.title || 'AI Generated Scene' })
+          await frameStore.asyncActions.applyTemplateAndSave({
+            scenes: sanitizedScenes,
+            name: payload?.title || 'AI Generated Scene',
+          })
           await new Promise((resolve) => setTimeout(resolve, 0))
-          const updatedScenes = values.frameForm?.scenes ?? values.scenes
+          const updatedScenes = frameStore.values.frameForm?.scenes ?? frameStore.values.scenes
           const newlyAddedScene = updatedScenes.find((scene) => !existingSceneIds.has(scene.id))
           if (newlyAddedScene) {
             scenesLogic({ frameId: props.frameId }).actions.focusScene(newlyAddedScene.id)

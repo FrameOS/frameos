@@ -15,6 +15,9 @@ from app.utils.jwt_tokens import validate_scoped_token
 from app.api.auth import get_current_user_from_request
 
 
+SCENE_IMAGE_CACHE_HEADERS = {"Cache-Control": "private, max-age=86400"}
+
+
 def _generate_placeholder(
     width: int | None = 320,
     height: int | None = 240,
@@ -109,9 +112,12 @@ async def get_scene_image(
         .first()
     )
 
+    wants_thumb = request.query_params.get("thumb") == "1"
+
     if img_row:
-        # fresh snapshot found, generate and save thumbnail if not present
-        if not getattr(img_row, 'thumb_image', None):
+        # Fresh snapshot found. Generate and save thumbnail only when a
+        # thumbnail is requested, so full-size image reads stay cheap.
+        if wants_thumb and not getattr(img_row, 'thumb_image', None):
             thumb, t_width, t_height = _generate_thumbnail(img_row.image)
             img_row.thumb_image = thumb
             img_row.thumb_width = t_width
@@ -119,17 +125,17 @@ async def get_scene_image(
             db.add(img_row)
             db.commit()
             db.refresh(img_row)
-        if request.query_params.get("thumb") == "1":
+        if wants_thumb:
             return StreamingResponse(
                 io.BytesIO(img_row.thumb_image),
                 media_type="image/jpeg",
-                headers={"Cache-Control": "no-cache"},
+                headers=SCENE_IMAGE_CACHE_HEADERS,
             )
         else:
             return StreamingResponse(
                 io.BytesIO(img_row.image),
                 media_type="image/png",
-                headers={"Cache-Control": "no-cache"},
+                headers=SCENE_IMAGE_CACHE_HEADERS,
             )
 
     frame: Frame | None = db.get(Frame, frame_id)
@@ -138,7 +144,7 @@ async def get_scene_image(
 
     if frame.width is None or frame.height is None:
         new_width, new_height = 320, 240
-    elif request.query_params.get("thumb") == "1":
+    elif wants_thumb:
         scale = min(320 / frame.width, 320 / frame.height, 1.0)
         new_width  = int(round(frame.width  * scale))
         new_height = int(round(frame.height * scale))
@@ -150,7 +156,7 @@ async def get_scene_image(
         new_width, new_height = new_height, new_width
 
     png = _generate_placeholder(new_width, new_height)
-    return StreamingResponse(io.BytesIO(png), media_type="image/png")
+    return StreamingResponse(io.BytesIO(png), media_type="image/png", headers=SCENE_IMAGE_CACHE_HEADERS)
 
 
 @api_with_auth.post("/frames/{frame_id}/scene_images/{scene_id}", status_code=201)

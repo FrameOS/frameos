@@ -10,6 +10,8 @@ import { frameLogic } from '../../frameLogic'
 import { ParentSize } from '@visx/responsive'
 import { BrushChart } from './BrushChart'
 import { Select } from '../../../../components/Select'
+import { workspaceLogic } from '../../../workspace/workspaceLogic'
+import { metricChartThemes, themeMetricSeries } from './chartTheme'
 
 const metricLabels: Record<string, string> = {
   load: 'Load',
@@ -19,8 +21,13 @@ const metricLabels: Record<string, string> = {
   runtimeDimensions: 'Runtime size',
 }
 
-export function Metrics() {
+interface MetricsProps {
+  scrollContainer?: boolean
+}
+
+export function Metrics({ scrollContainer = true }: MetricsProps = {}) {
   const { frameId } = useValues(frameLogic)
+  const { theme } = useValues(workspaceLogic)
   const {
     metrics,
     metricsByCategory,
@@ -40,75 +47,93 @@ export function Metrics() {
     selectedTimeRangePreset === 'custom'
       ? [...metricsTimeRangeOptions, { value: 'custom' as const, label: 'Custom' }]
       : metricsTimeRangeOptions
+  const chartTheme = metricChartThemes[theme]
 
   return metricsLoading ? (
-    <div>...</div>
+    <div className="frame-tool-panel frame-tool-card flex h-full items-center justify-center rounded-[22px] text-sm frame-tool-muted">
+      Loading metrics...
+    </div>
   ) : metrics.length === 0 ? (
-    <div>No Metrics yet</div>
+    <div className="frame-tool-panel frame-tool-card flex h-full items-center justify-center rounded-[22px] text-sm frame-tool-muted">
+      No metrics yet.
+    </div>
   ) : (
-    <div className="h-full p-2 relative select-none">
-      <div className="mb-2 flex items-center gap-3">
+    <div
+      className={clsx(
+        'frame-tool-panel relative select-none',
+        scrollContainer ? 'h-full overflow-y-auto pr-2' : 'overflow-visible'
+      )}
+    >
+      <div className="mb-4 flex flex-wrap items-center gap-3">
         <Select
           aria-label="Metrics time range"
-          className="!w-32 rounded border-gray-600 bg-gray-800 py-1 text-xs"
+          className="!w-36 rounded-xl py-2 text-xs"
           options={timeRangeOptions}
           value={selectedTimeRangePreset}
           onChange={(value) => setSelectedTimeRangePreset(value as MetricsTimeRangePreset)}
         />
-        <div className="text-sm text-gray-400">
-          {metrics.length} point{metrics.length === 1 ? '' : 's'}
+        <div className="frame-tool-muted text-sm">
+          {metrics.length} datapoint{metrics.length === 1 ? '' : 's'} loaded
         </div>
       </div>
-      <ParentSize>
-        {(parent) =>
-          Object.entries(metricsByCategory).map(([key, series]) => {
-            const visibleSeries = visibleMetricsByCategory[key] ?? []
-            return (
-              <div key={key}>
-                <div className="mb-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
-                  <strong>{metricLabels[key] ?? key}</strong>
-                  {latestMetricSummariesByCategory[key] ? (
-                    <span className="text-gray-400">{latestMetricSummariesByCategory[key]}</span>
-                  ) : null}
-                  {series.length > 1 &&
-                    series.map((chartSeries) => {
-                      const hidden = hiddenMetricSeries[metricSeriesVisibilityKey(key, chartSeries.key)]
-                      return (
-                        <button
-                          key={chartSeries.key}
-                          type="button"
-                          className={clsx(
-                            'inline-flex items-center gap-1 rounded-sm focus:outline-none focus:ring-1 focus:ring-blue-500',
-                            hidden ? 'text-gray-500 line-through' : 'text-gray-200 hover:text-white'
-                          )}
-                          onClick={() => toggleMetricSeries(key, chartSeries.key)}
-                        >
-                          <span
-                            className={clsx('inline-block h-2 w-3 rounded-sm', hidden ? 'opacity-30' : '')}
-                            style={{ backgroundColor: chartSeries.color }}
-                          />
-                          {chartSeries.label}
-                        </button>
-                      )
-                    })}
-                </div>
-                <div className="h-[200px] text-white">
+      {Object.entries(metricsByCategory).map(([key, series]) => {
+        const themedSeries = themeMetricSeries(series, chartTheme)
+        const visibleSeries = themeMetricSeries(visibleMetricsByCategory[key] ?? [], chartTheme)
+        return (
+          <div key={key} className="frame-tool-card mb-3 overflow-hidden rounded-[22px]">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 text-sm">
+              <strong className="frame-tool-heading">{metricLabels[key] ?? key}</strong>
+              {latestMetricSummariesByCategory[key] ? (
+                <span className="frame-tool-muted">{latestMetricSummariesByCategory[key]}</span>
+              ) : null}
+              {series.length > 1 &&
+                themedSeries.map((chartSeries) => {
+                  const hidden = hiddenMetricSeries[metricSeriesVisibilityKey(key, chartSeries.key)]
+                  return (
+                    <button
+                      key={chartSeries.key}
+                      type="button"
+                      className={clsx(
+                        'inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500',
+                        hidden ? 'frame-tool-muted line-through opacity-60' : 'frame-tool-row hover:bg-white/80'
+                      )}
+                      onClick={() => toggleMetricSeries(key, chartSeries.key)}
+                    >
+                      <span
+                        className={clsx('inline-block h-2 w-3 rounded-sm', hidden ? 'opacity-30' : '')}
+                        style={{ backgroundColor: chartSeries.color }}
+                      />
+                      {chartSeries.label}
+                    </button>
+                  )
+                })}
+            </div>
+            <div
+              className={clsx(
+                'h-[200px] p-0',
+                theme === 'dark' ? 'bg-[#18181b] text-white' : 'bg-white/70 text-slate-900'
+              )}
+            >
+              <ParentSize>
+                {(parent) => (
                   <BrushChart
                     width={parent.width}
                     height={200}
+                    margin={{ top: 20, left: 56, bottom: 12, right: 45 }}
                     series={visibleSeries}
                     totalTimeRange={metricsTimeRange}
                     visibleTimeRange={visibleTimeRange}
                     gapThresholdMs={metricGapThresholdMs}
                     onTimeRangeChange={setSelectedTimeRange}
                     onResetTimeRange={resetSelectedTimeRange}
+                    chartTheme={chartTheme}
                   />
-                </div>
-              </div>
-            )
-          })
-        }
-      </ParentSize>
+                )}
+              </ParentSize>
+            </div>
+          </div>
+        )
+      })}
     </div>
   )
 }

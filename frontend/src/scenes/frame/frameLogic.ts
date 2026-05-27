@@ -1,4 +1,5 @@
 import { actions, afterMount, beforeUnmount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
+import { router } from 'kea-router'
 import { framesModel } from '../../models/framesModel'
 import type { frameLogicType } from './frameLogicType'
 import { subscriptions } from 'kea-subscriptions'
@@ -24,8 +25,12 @@ import {
   buildDeployRecommendation,
   buildFastDeployPlanSummary,
   buildFullDeployPlanSummary,
+  buildInferredFullDeployPlanSummary,
+  deployedFrameosVersion,
+  deployPlanPreviousFrameosVersion,
 } from './frameDeployUtils'
 import { getDeployPlanErrorMessage } from './frameDeployErrors'
+import { urls } from '../../urls'
 
 export type { ChangeDetail, DeployPlanResponse, DeployRecommendation, SummaryItem } from './frameDeployUtils'
 
@@ -36,6 +41,8 @@ interface DeployPlanApiResponse {
 export interface FrameLogicProps {
   frameId: number
 }
+
+export type FrameNextAction = 'render' | 'restart' | 'reboot' | 'stop' | 'deploy' | null
 
 const DEFAULT_BROWSER_TITLE = 'FrameOS Backend'
 
@@ -229,7 +236,7 @@ function sceneChangeDetails(currentScenes: FrameScene[], deployedScenes: FrameSc
 
     if (!deployed) {
       details.push({
-        label: `Scene added: ${scene.name || scene.id}`,
+        label: `${mode === 'interpreted' ? 'Scene' : 'Compiled scene'} added: ${scene.name || scene.id}`,
         requiresFullDeploy: mode !== 'interpreted',
       })
       continue
@@ -283,10 +290,7 @@ function computeChangeDetails(
 
   const sceneDetails = sceneChangeDetails(next?.scenes ?? [], previous?.scenes ?? [])
 
-  const previousFrameosVersion =
-    typeof (previous as Record<string, unknown> | null | undefined)?.frameos_version === 'string'
-      ? String((previous as Record<string, unknown>).frameos_version).split('+')[0]
-      : null
+  const previousFrameosVersion = deployedFrameosVersion(previous)
 
   if (!previousFrameosVersion || previousFrameosVersion !== CURRENT_FRAMEOS_VERSION) {
     details.push({
@@ -298,7 +302,95 @@ function computeChangeDetails(
   return [...details, ...sceneDetails]
 }
 
+function firstDeploySceneLabel(scenes?: FrameScene[] | null): string | null {
+  const sceneCount = scenes?.length ?? 0
+  if (sceneCount === 0) {
+    return null
+  }
+  return `Deploy ${sceneCount} scene${sceneCount === 1 ? '' : 's'}`
+}
+
+function firstDeployChangeDetails(
+  frame: Partial<FrameType> | null | undefined,
+  mode: FrameType['mode']
+): ChangeDetail[] {
+  const details: ChangeDetail[] = [
+    {
+      label: 'Initial full deploy',
+      requiresFullDeploy: true,
+    },
+    {
+      label: `Install FrameOS ${CURRENT_FRAMEOS_VERSION}`,
+      requiresFullDeploy: true,
+    },
+  ]
+  const device = frame?.device
+  if (device) {
+    details.push({
+      label: `Install device support: ${device}`,
+      requiresFullDeploy: true,
+    })
+  }
+  const sceneLabel = firstDeploySceneLabel(frame?.scenes)
+  if (sceneLabel) {
+    details.push({
+      label: sceneLabel,
+      requiresFullDeploy: true,
+    })
+  }
+  details.push({
+    label:
+      mode === 'buildroot' ? 'Install Buildroot target and frame services' : 'Install Raspberry Pi OS frame services',
+    requiresFullDeploy: true,
+  })
+
+  return details
+}
+
+function sortDeployChangeDetails(changes: ChangeDetail[]): ChangeDetail[] {
+  return changes
+    .map((change, index) => ({ change, index }))
+    .sort((first, second) => {
+      const firstPriority = first.change.label.startsWith('FrameOS upgrade')
+        ? 0
+        : first.change.requiresFullDeploy
+        ? 1
+        : 2
+      const secondPriority = second.change.label.startsWith('FrameOS upgrade')
+        ? 0
+        : second.change.requiresFullDeploy
+        ? 1
+        : 2
+
+      return firstPriority - secondPriority || first.index - second.index
+    })
+    .map(({ change }) => change)
+}
+
+function normalizeRpiosCompilationMode(value: unknown): 'static' | 'shared' | 'precompiled' {
+  return value === 'static' || value === 'shared' || value === 'precompiled' ? value : 'precompiled'
+}
+
+function normalizeRpiosCrossCompilation(value: unknown): 'auto' | 'always' | 'never' {
+  return value === 'always' || value === 'never' ? value : 'auto'
+}
+
+function normalizeRpiosForComparison(value: unknown): Record<string, unknown> {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
+  const { platform: _platform, compilationMode, crossCompilation, ...rest } = source
+
+  return {
+    ...rest,
+    compilationMode: normalizeRpiosCompilationMode(compilationMode),
+    crossCompilation: normalizeRpiosCrossCompilation(crossCompilation),
+  }
+}
+
 function normalizeFrameKeyValueForComparison(key: keyof FrameType, value: unknown): unknown {
+  if (key === 'rpios') {
+    return normalizeRpiosForComparison(value)
+  }
+
   if (key !== 'https_proxy' || !value || typeof value !== 'object') {
     return value
   }
@@ -449,6 +541,59 @@ async function fetchTemplateImageBlob(template: Partial<TemplateType>): Promise<
   return await response.blob()
 }
 
+function buildScenesFromTemplate(template: Partial<TemplateType>, frame: Partial<FrameType>): FrameScene[] {
+  if (!('scenes' in template)) {
+    return []
+  }
+
+  const newScenes = duplicateScenes((template.scenes ?? []).map((scene) => sanitizeScene(scene, frame)))
+  if (newScenes.length === 1) {
+    newScenes[0].name = template?.name || newScenes[0].name || 'Untitled scene'
+  }
+  for (const scene of newScenes) {
+    if ('default' in scene) {
+      delete scene.default
+    }
+  }
+  return newScenes
+}
+
+async function saveTemplateSceneImages(
+  frameId: number,
+  template: Partial<TemplateType>,
+  newScenes: FrameScene[]
+): Promise<void> {
+  if (!newScenes.length) {
+    return
+  }
+
+  try {
+    const imageBlob = await fetchTemplateImageBlob(template)
+    if (!imageBlob) {
+      return
+    }
+
+    const targetScenes = getScenesWithoutParents(newScenes)
+    if (!targetScenes.length) {
+      return
+    }
+
+    await Promise.all(
+      targetScenes.map((scene) =>
+        apiFetch(`/api/frames/${frameId}/scene_images/${scene.id}`, {
+          method: 'POST',
+          body: imageBlob,
+        })
+      )
+    )
+    targetScenes.forEach((scene) =>
+      entityImagesModel.actions.updateEntityImage(`frames/${frameId}`, `scene_images/${scene.id}`)
+    )
+  } catch (error) {
+    console.error('Failed to save template image for scenes', error)
+  }
+}
+
 function getScenesWithoutParents(scenes: FrameScene[]): FrameScene[] {
   if (scenes.length <= 1) {
     return scenes
@@ -580,6 +725,56 @@ function sanitizeFrame(frame: Partial<FrameType>): Partial<FrameType> {
   }
 }
 
+function getCurrentFrameForm(frame: FrameType | null | undefined, frameForm: Partial<FrameType>): Partial<FrameType> {
+  return Object.keys(frameForm ?? {}).length > 0 ? frameForm : frame ? sanitizeFrame(frame) : frameForm
+}
+
+function buildBlankScene(frame: Partial<FrameType>, name: string = 'New blank scene'): FrameScene {
+  return sanitizeScene(
+    {
+      id: uuidv4(),
+      name,
+      nodes: [
+        {
+          id: uuidv4(),
+          type: 'event',
+          position: { x: 121, y: 113 },
+          data: { keyword: 'render' },
+        },
+      ],
+      edges: [],
+      fields: [],
+      settings: { execution: 'interpreted' },
+    },
+    frame
+  )
+}
+
+async function saveFrameForm(frame: Partial<FrameType>, frameId: number, nextAction: FrameNextAction): Promise<void> {
+  const json = buildDeployPlanRequestBody(frame, FRAME_KEYS)
+  if (nextAction) {
+    json['next_action'] = nextAction
+  }
+  const response = await apiFetch(`/api/frames/${frameId}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(json),
+  })
+  if (!response.ok) {
+    throw new Error('Failed to update frame')
+  }
+}
+
+function openSceneControlDrawer(frameId: number, sceneId: string): void {
+  const searchParams = {
+    ...router.values.searchParams,
+    drawer: 'scene',
+    sceneId,
+    frameId: String(frameId),
+  }
+  router.actions.push(router.values.location.pathname, searchParams, router.values.hashParams)
+}
+
 export function sanitizeScene(scene: Partial<FrameScene>, frame: Partial<FrameType>): FrameScene {
   const settings = scene.settings ?? {}
   const normalizedRawNodes = (scene.nodes ?? []).map((node) => normalizeNode(node as DiagramNode))
@@ -645,6 +840,16 @@ export const frameLogic = kea<frameLogicType>([
     applyTemplate: (template: Partial<TemplateType>) => ({
       template,
     }),
+    applyTemplateAndSave: (template: Partial<TemplateType>, openDrawer?: boolean) => ({
+      openDrawer: openDrawer ?? false,
+      template,
+    }),
+    createBlankSceneAndSave: (name?: string, openEditor?: boolean, openDrawer?: boolean) => ({
+      name,
+      openEditor: openEditor ?? false,
+      openDrawer: openDrawer ?? false,
+    }),
+    deleteSceneAndSave: (sceneId: string) => ({ sceneId }),
     closeScenePanels: (sceneIds: string[]) => ({ sceneIds }),
     sendEvent: (event: string, payload: Record<string, any>) => ({ event, payload }),
     setDeployWithAgent: (deployWithAgent: boolean) => ({ deployWithAgent }),
@@ -653,7 +858,9 @@ export const frameLogic = kea<frameLogicType>([
     verifyTlsCertificates: true,
     showDeployPlanModal: true,
     hideDeployPlanModal: true,
-    loadDeployPlans: true,
+    showUnsavedChangesModal: true,
+    hideUnsavedChangesModal: true,
+    loadDeployPlans: () => ({ startedAt: new Date().toISOString() }),
     loadDeployPlansSuccess: (plan: DeployPlanResponse | null) => ({ plan }),
     loadDeployPlansFailure: (error: string) => ({ error }),
   }),
@@ -672,31 +879,19 @@ export const frameLogic = kea<frameLogicType>([
           : undefined,
         scenes: (state.scenes ?? []).map((scene: Record<string, any>) => ({
           fields: (scene.fields ?? []).map((field: Record<string, any>) => ({
-            name: field.name ? '' : 'Name is required',
-            label: field.label ? '' : 'Label is required',
+            name: String(field.name ?? '').trim() ? '' : 'Codename is required',
             type: field.type ? '' : 'Type is required',
           })),
         })),
       }),
       submit: async (frame) => {
-        const json = buildDeployPlanRequestBody(frame, FRAME_KEYS)
-        if (values.nextAction) {
-          json['next_action'] = values.nextAction
-        }
-        const response = await apiFetch(`/api/frames/${values.frameId}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(json),
-        })
-        if (!response.ok) {
-          throw new Error('Failed to update frame')
-        }
+        await saveFrameForm(frame, values.frameId, values.nextAction)
       },
     },
   })),
   reducers({
     nextAction: [
-      null as 'render' | 'restart' | 'reboot' | 'stop' | 'deploy' | null,
+      null as FrameNextAction,
       {
         saveFrame: () => null,
         clearNextAction: () => null,
@@ -725,6 +920,10 @@ export const frameLogic = kea<frameLogicType>([
       {
         loadDeployPlans: () => null,
         loadDeployPlansSuccess: (_, { plan }) => plan,
+        resetFrameForm: () => null,
+        setFrameFormValue: () => null,
+        setFrameFormValues: () => null,
+        setDeployWithAgent: () => null,
       },
     ],
     deployPlansLoading: [
@@ -735,12 +934,23 @@ export const frameLogic = kea<frameLogicType>([
         loadDeployPlansFailure: () => false,
       },
     ],
+    deployPlansLoadingStartedAt: [
+      null as string | null,
+      {
+        loadDeployPlans: (_, { startedAt }) => startedAt,
+      },
+    ],
     deployPlansError: [
       null as string | null,
       {
         loadDeployPlans: () => null,
         loadDeployPlansSuccess: () => null,
         loadDeployPlansFailure: (_, { error }) => error,
+        resetFrameForm: () => null,
+        setFrameFormValue: () => null,
+        setFrameFormValues: () => null,
+        showDeployPlanModal: () => null,
+        hideDeployPlanModal: () => null,
       },
     ],
     deployPlanModalOpen: [
@@ -748,6 +958,16 @@ export const frameLogic = kea<frameLogicType>([
       {
         showDeployPlanModal: () => true,
         hideDeployPlanModal: () => false,
+        showUnsavedChangesModal: () => false,
+      },
+    ],
+    unsavedChangesModalOpen: [
+      false,
+      {
+        showUnsavedChangesModal: () => true,
+        hideUnsavedChangesModal: () => false,
+        showDeployPlanModal: () => false,
+        submitFrameFormSuccess: () => false,
       },
     ],
   }),
@@ -853,10 +1073,8 @@ export const frameLogic = kea<frameLogicType>([
       const payload = (await response.json()) as DeployPlanApiResponse
       actions.loadDeployPlansSuccess(payload.plan)
     },
-    showDeployPlanModal: async () => {
-      if (!values.deployPlans) {
-        actions.loadDeployPlans()
-      }
+    showDeployPlanModal: () => {
+      actions.loadDeployPlans()
     },
   })),
   selectors(() => ({
@@ -866,7 +1084,7 @@ export const frameLogic = kea<frameLogicType>([
     isFrameAdminMode: [() => [], () => isInFrameAdminMode()],
     scenes: [
       (s) => [s.frame, s.frameForm],
-      (frame, frameForm): FrameScene[] => frameForm?.scenes ?? frame.scenes ?? [],
+      (frame, frameForm): FrameScene[] => frameForm?.scenes ?? frame?.scenes ?? [],
     ],
     sortedScenes: [
       (s) => [s.scenes],
@@ -900,7 +1118,7 @@ export const frameLogic = kea<frameLogicType>([
     undeployedChanges: [
       (s) => [s.frame, s.lastDeploy, s.mode, s.isFrameAdminMode],
       (frame: FrameType, lastDeploy: Partial<FrameType> | null, mode: FrameType['mode'], isFrameAdminMode: boolean) =>
-        !isFrameAdminMode && computeChangeDetails(lastDeploy, frame, mode).length > 0,
+        !isFrameAdminMode && !frame?.archived && computeChangeDetails(lastDeploy, frame, mode).length > 0,
     ],
     unsavedChangeDetails: [
       (s) => [s.frame, s.frameForm, s.mode],
@@ -909,7 +1127,7 @@ export const frameLogic = kea<frameLogicType>([
     undeployedChangeDetails: [
       (s) => [s.lastDeploy, s.frame, s.mode, s.isFrameAdminMode],
       (lastDeploy, frame, mode, isFrameAdminMode): ChangeDetail[] =>
-        isFrameAdminMode ? [] : computeChangeDetails(lastDeploy, frame, mode),
+        isFrameAdminMode || frame?.archived ? [] : computeChangeDetails(lastDeploy, frame, mode),
     ],
     requiresRecompilation: [
       (s) => [s.lastDeploy, s.frame, s.frameForm, s.mode, s.isFrameAdminMode],
@@ -920,7 +1138,7 @@ export const frameLogic = kea<frameLogicType>([
         mode: FrameType['mode'],
         isFrameAdminMode: boolean
       ): boolean => {
-        if (isFrameAdminMode) {
+        if (isFrameAdminMode || frame?.archived) {
           return false
         }
         const pendingFrame = Object.keys(frameForm ?? {}).length > 0 ? frameForm : frame
@@ -930,7 +1148,11 @@ export const frameLogic = kea<frameLogicType>([
     deployChangeDetails: [
       (s) => [s.lastDeploy, s.frameForm, s.mode, s.isFrameAdminMode],
       (lastDeploy, frameForm, mode, isFrameAdminMode): ChangeDetail[] =>
-        isFrameAdminMode ? [] : computeChangeDetails(lastDeploy, frameForm, mode),
+        isFrameAdminMode
+          ? []
+          : lastDeploy
+          ? sortDeployChangeDetails(computeChangeDetails(lastDeploy, frameForm, mode))
+          : firstDeployChangeDetails(frameForm, mode),
     ],
     undeployedSummaryItems: [
       (s) => [s.lastDeploy, s.frame, s.frameForm, s.requiresRecompilation, s.isFrameAdminMode],
@@ -953,22 +1175,31 @@ export const frameLogic = kea<frameLogicType>([
       (fastDeployPlan): SummaryItem[] => buildFastDeployPlanSummary(fastDeployPlan),
     ],
     fullDeployPlanSummary: [
-      (s) => [s.fullDeployPlan, s.frameForm],
-      (fullDeployPlan: DeployPlanResponse | null, frameForm: Partial<FrameType>): SummaryItem[] =>
-        buildFullDeployPlanSummary(fullDeployPlan, frameForm),
+      (s) => [s.fullDeployPlan, s.frameForm, s.lastDeploy],
+      (
+        fullDeployPlan: DeployPlanResponse | null,
+        frameForm: Partial<FrameType>,
+        lastDeploy: Partial<FrameType> | null
+      ): SummaryItem[] => {
+        const probedSummary = buildFullDeployPlanSummary(fullDeployPlan, frameForm)
+        return probedSummary.length > 0 ? probedSummary : buildInferredFullDeployPlanSummary(lastDeploy, frameForm)
+      },
     ],
     deployRecommendation: [
-      (s) => [s.deployPlan, s.lastDeploy, s.deployChangeDetails],
-      (deployPlan, lastDeploy, deployChangeDetails): DeployRecommendation | null =>
-        buildDeployRecommendation(deployPlan, Boolean(lastDeploy), deployChangeDetails),
+      (s) => [s.deployPlan, s.lastDeploy, s.deployChangeDetails, s.frameForm],
+      (deployPlan, lastDeploy, deployChangeDetails, frameForm): DeployRecommendation | null =>
+        buildDeployRecommendation(
+          deployPlanPreviousFrameosVersion(deployPlan) ?? deployedFrameosVersion(lastDeploy),
+          Boolean(lastDeploy),
+          deployChangeDetails,
+          frameForm,
+          deployPlan
+        ),
     ],
     hasPendingFrameosUpgrade: [
       (s) => [s.lastDeploy],
       (lastDeploy: Partial<FrameType> | null): boolean => {
-        const previousVersion =
-          typeof (lastDeploy as Record<string, unknown> | null | undefined)?.frameos_version === 'string'
-            ? String((lastDeploy as Record<string, unknown>).frameos_version).split('+')[0]
-            : null
+        const previousVersion = deployedFrameosVersion(lastDeploy)
         return Boolean(previousVersion && previousVersion !== CURRENT_FRAMEOS_VERSION)
       },
     ],
@@ -995,6 +1226,14 @@ export const frameLogic = kea<frameLogicType>([
         return agent?.deployWithAgent ?? (agent?.agentEnabled && agent?.agentRunCommands) ?? false
       },
     ],
+    deployTransportToggleVisible: [
+      (s) => [s.frameForm, s.frame],
+      (frameForm, frame): boolean => {
+        const agent = frameForm?.agent ?? frame?.agent
+        return Boolean(agent?.agentEnabled && agent?.agentRunCommands && agent?.agentSharedSecret)
+      },
+    ],
+    agentDeployConnected: [(s) => [s.frame], (frame): boolean => (frame?.active_connections ?? 0) > 0],
   })),
   subscriptions(({ actions, values }) => ({
     frame: (frame?: FrameType, oldFrame?: FrameType) => {
@@ -1007,6 +1246,9 @@ export const frameLogic = kea<frameLogicType>([
   })),
   listeners(({ asyncActions, actions, values, props }) => ({
     saveFrame: () => actions.submitFrameForm(),
+    submitFrameFormSuccess: () => {
+      framesModel.actions.loadFrame(props.frameId)
+    },
     saveAndDeployFrame: async () => {
       await asyncActions.submitFrameForm()
       framesModel.actions.deployFrame(
@@ -1036,7 +1278,12 @@ export const frameLogic = kea<frameLogicType>([
     fullDeployFrame: () => framesModel.actions.deployFrame(props.frameId, false),
     deployAgent: () => framesModel.actions.deployAgent(props.frameId),
     restartAgent: () => framesModel.actions.restartAgent(props.frameId),
-    setDeployWithAgent: ({ deployWithAgent }) => framesModel.actions.setDeployWithAgent(props.frameId, deployWithAgent),
+    setDeployWithAgent: ({ deployWithAgent }) => {
+      framesModel.actions.setDeployWithAgent(props.frameId, deployWithAgent)
+      if (values.deployPlanModalOpen) {
+        actions.loadDeployPlans()
+      }
+    },
     updateScene: ({ sceneId, scene }) => {
       const { frameForm } = values
       const hasScene = frameForm.scenes?.some(({ id }) => id === sceneId)
@@ -1069,47 +1316,60 @@ export const frameLogic = kea<frameLogicType>([
     },
     applyTemplate: async ({ template }) => {
       if ('scenes' in template) {
-        const oldScenes = values.frameForm?.scenes || []
-        const newScenes = duplicateScenes(
-          (template.scenes ?? []).map((scene) => sanitizeScene(scene, values.frameForm))
-        )
-        if (newScenes.length === 1) {
-          newScenes[0].name = template?.name || newScenes[0].name || 'Untitled scene'
-        }
-        for (const scene of newScenes) {
-          if ('default' in scene) {
-            delete scene.default
-          }
-        }
+        const frameForm = getCurrentFrameForm(values.frame, values.frameForm)
+        const oldScenes = frameForm.scenes || []
+        const newScenes = buildScenesFromTemplate(template, frameForm)
         actions.setFrameFormValues({
           scenes: [...oldScenes, ...newScenes],
         })
 
-        if (newScenes.length) {
-          try {
-            const imageBlob = await fetchTemplateImageBlob(template)
-            if (imageBlob) {
-              const targetScenes = getScenesWithoutParents(newScenes)
-              if (!targetScenes.length) {
-                return
-              }
-              await Promise.all(
-                targetScenes.map((scene) =>
-                  apiFetch(`/api/frames/${props.frameId}/scene_images/${scene.id}`, {
-                    method: 'POST',
-                    body: imageBlob,
-                  })
-                )
-              )
-              targetScenes.forEach((scene) =>
-                entityImagesModel.actions.updateEntityImage(`frames/${props.frameId}`, `scene_images/${scene.id}`)
-              )
-            }
-          } catch (error) {
-            console.error('Failed to save template image for scenes', error)
-          }
-        }
+        await saveTemplateSceneImages(props.frameId, template, newScenes)
       }
+    },
+    applyTemplateAndSave: async ({ template, openDrawer }) => {
+      const frameForm = getCurrentFrameForm(values.frame, values.frameForm)
+      const oldScenes = frameForm.scenes || []
+      const newScenes = buildScenesFromTemplate(template, frameForm)
+      if (!newScenes.length) {
+        return
+      }
+
+      const scenes = [...oldScenes, ...newScenes]
+      const nextFrameForm = { ...frameForm, scenes }
+      actions.setFrameFormValues({ scenes })
+      await saveFrameForm(nextFrameForm, props.frameId, values.nextAction)
+      framesModel.actions.loadFrame(props.frameId)
+      if (openDrawer) {
+        openSceneControlDrawer(props.frameId, newScenes[0].id)
+      }
+      await saveTemplateSceneImages(props.frameId, template, newScenes)
+    },
+    createBlankSceneAndSave: async ({ name, openEditor, openDrawer }) => {
+      const frameForm = getCurrentFrameForm(values.frame, values.frameForm)
+      const scene = buildBlankScene(frameForm, name)
+      const scenes = [...(frameForm.scenes ?? []), scene]
+      const nextFrameForm = { ...frameForm, scenes }
+      actions.setFrameFormValues({ scenes })
+      await saveFrameForm(nextFrameForm, props.frameId, values.nextAction)
+      framesModel.actions.loadFrame(props.frameId)
+      if (openEditor) {
+        router.actions.push(urls.scenes(props.frameId, scene.id))
+      } else if (openDrawer) {
+        openSceneControlDrawer(props.frameId, scene.id)
+      }
+    },
+    deleteSceneAndSave: async ({ sceneId }) => {
+      const frameForm = getCurrentFrameForm(values.frame, values.frameForm)
+      const scenes = frameForm.scenes ?? []
+      if (!scenes.some((scene) => scene.id === sceneId)) {
+        return
+      }
+
+      const nextScenes = scenes.filter((scene) => scene.id !== sceneId)
+      const nextFrameForm = { ...frameForm, scenes: nextScenes }
+      actions.setFrameFormValues({ scenes: nextScenes })
+      await saveFrameForm(nextFrameForm, props.frameId, values.nextAction)
+      framesModel.actions.loadFrame(props.frameId)
     },
     sendEvent: async ({ event, payload }) => {
       await apiFetch(`/api/frames/${props.frameId}/event/${event}`, {

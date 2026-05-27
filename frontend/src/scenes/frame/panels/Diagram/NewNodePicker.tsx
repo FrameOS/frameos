@@ -54,7 +54,7 @@ export function NewNodePicker() {
               {open ? (
                 <Menu.Items
                   static
-                  className="absolute right-0 w-56 mt-2 origin-top-right bg-gray-600 divide-y divide-gray-100 rounded-md shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none"
+                  className="frameos-dropdown-menu absolute right-0 w-56 mt-2 origin-top-right rounded-md focus:outline-none"
                   ref={setPopperElement}
                   style={styles.popper}
                   {...attributes.popper}
@@ -90,8 +90,8 @@ export function NewNodePicker() {
                             key={option.value || option.label}
                             href="#"
                             className={clsx(
-                              active ? 'bg-[#4a4b8c] text-white' : 'text-white',
-                              'px-4 py-1 text-sm flex gap-2'
+                              'frameos-dropdown-item px-4 py-1 text-sm flex gap-2',
+                              active && 'frameos-dropdown-item-active'
                             )}
                             data-active-menu-selection={active ? true : undefined}
                             onClick={(e) => {

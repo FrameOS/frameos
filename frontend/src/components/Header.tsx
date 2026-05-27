@@ -2,10 +2,8 @@ import { A } from 'kea-router'
 import React from 'react'
 import { H5 } from './H5'
 import { urls } from '../urls'
-import { assetUrl } from '../utils/assetUrl'
 import { frameAdminPath, isInFrameAdminMode } from '../utils/frameAdmin'
-
-import darkMarkSmall from '../assets/logo/dark-mark-small.png'
+import { FrameosLogo } from './FrameosLogo'
 
 interface HeaderProps {
   title: React.ReactNode
@@ -20,12 +18,12 @@ export function Header({ title, version, right, buttons }: HeaderProps) {
 
   return (
     <span
-      className="relative z-30 overflow-visible bg-gray-800 text-white h-full w-full space-x-2 p-2 pt-3 px-4 flex justify-between items-center"
+      className="frameos-panel relative z-30 overflow-visible h-full w-full space-x-2 p-2 pt-3 px-4 flex justify-between items-center"
       style={{ height: 60 }}
     >
       <div className="min-w-0 flex flex-1 items-center justify-start gap-3">
         <A href={homeHref}>
-          <img src={assetUrl(darkMarkSmall)} className="w-[28px] h-[28px] inline-block align-center" alt="FrameOS" />
+          <FrameosLogo className="inline-block h-[28px] w-[28px] align-middle" />
         </A>
         {version ? (
           <H5 className="flex min-w-0 items-end gap-1">

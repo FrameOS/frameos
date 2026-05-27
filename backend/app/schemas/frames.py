@@ -75,6 +75,7 @@ class FrameBase(BaseModel):
     last_successful_deploy: Optional[Dict[str, Any]]
     last_successful_deploy_at: Optional[datetime]
     active_connections: Optional[int] = None
+    active_scene_id: Optional[str] = None
 
 class FrameResponse(BaseModel):
     frame: FrameBase
@@ -172,8 +173,18 @@ class FrameStateResponse(RootModel):
 class FrameUploadedScenesResponse(BaseModel):
     scenes: List[Dict[str, Any]]
 
+
+class FrameAssetsCacheResponse(BaseModel):
+    cached: bool = False
+    refreshing: bool = False
+    fetched_at: Optional[float] = None
+    refresh_after: Optional[int] = None
+    retry_after: Optional[int] = None
+
+
 class FrameAssetsResponse(BaseModel):
     assets: List[Dict[str, Any]]
+    cache: Optional[FrameAssetsCacheResponse] = None
 
 
 class FramePingResponse(BaseModel):

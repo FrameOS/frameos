@@ -4,6 +4,7 @@ import { SceneJSONLogicProps, sceneJSONLogic } from './sceneJSONLogic'
 import Editor, { Monaco } from '@monaco-editor/react'
 import { diagramLogic } from '../Diagram/diagramLogic'
 import { Button } from '../../../../components/Button'
+import { workspaceLogic } from '../../../workspace/workspaceLogic'
 
 interface SceneJSONProps {
   sceneId: string
@@ -11,6 +12,7 @@ interface SceneJSONProps {
 
 export function SceneJSON({ sceneId }: SceneJSONProps) {
   const { frame } = useValues(frameLogic)
+  const { theme } = useValues(workspaceLogic)
   const { sceneJSON, hasError, hasChanges } = useValues(sceneJSONLogic({ frameId: frame.id, sceneId: sceneId }))
   const { setEditedSceneJSON, saveChanges } = useActions(sceneJSONLogic({ frameId: frame.id, sceneId: sceneId }))
 
@@ -19,7 +21,13 @@ export function SceneJSON({ sceneId }: SceneJSONProps) {
       base: 'vs-dark',
       inherit: true,
       rules: [],
-      colors: { 'editor.background': '#000000' },
+      colors: { 'editor.background': '#111827' },
+    })
+    monaco.editor.defineTheme('lightframe', {
+      base: 'vs',
+      inherit: true,
+      rules: [],
+      colors: { 'editor.background': '#f8fafc' },
     })
   }
   return (
@@ -47,7 +55,7 @@ export function SceneJSON({ sceneId }: SceneJSONProps) {
         language="json"
         value={sceneJSON}
         onChange={(value) => setEditedSceneJSON(value ?? null)}
-        theme="darkframe"
+        theme={theme === 'dark' ? 'darkframe' : 'lightframe'}
         beforeMount={beforeMount}
         options={{ minimap: { enabled: false } }}
       />

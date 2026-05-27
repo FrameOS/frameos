@@ -14,9 +14,15 @@ import { frameAssetsApiPath } from '../../../../utils/frameAssetsApi'
 import { uploadFileInChunks } from '../../../../utils/uploadFileInChunks'
 import { buildSdCardImageScene } from './sceneShortcuts'
 import { socketLogic } from '../../../socketLogic'
+import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
 
 export interface ScenesLogicProps {
   frameId: number
+}
+
+export interface SceneRenameDialog {
+  sceneId: string
+  name: string
 }
 
 const UPLOADED_SCENE_PREFIX = 'uploaded/'
@@ -67,6 +73,10 @@ export const scenesLogic = kea<scenesLogicType>([
     deleteScene: (sceneId: string) => ({ sceneId }),
     deleteSelectedScenes: true,
     renameScene: (sceneId: string) => ({ sceneId }),
+    openRenameSceneDialog: (sceneId: string, name: string) => ({ sceneId, name }),
+    setRenameSceneName: (name: string) => ({ name }),
+    closeRenameSceneDialog: true,
+    submitRenameScene: true,
     duplicateScene: (sceneId: string) => ({ sceneId }),
     openNewScene: (location: string) => ({ location }),
     closeNewScene: true,
@@ -178,6 +188,15 @@ export const scenesLogic = kea<scenesLogicType>([
       {
         openAiScene: (_, { location }) => location,
         closeAiScene: () => null,
+      },
+    ],
+    renameSceneDialog: [
+      null as SceneRenameDialog | null,
+      {
+        openRenameSceneDialog: (_, { sceneId, name }) => ({ sceneId, name }),
+        setRenameSceneName: (state, { name }) => (state ? { ...state, name } : state),
+        closeRenameSceneDialog: () => null,
+        deleteScene: (state, { sceneId }) => (state?.sceneId === sceneId ? null : state),
       },
     ],
     showingSettings: [
@@ -612,6 +631,13 @@ export const scenesLogic = kea<scenesLogicType>([
         actions.previewSceneFailure()
         return
       }
+      longRunningTasksModel.actions.startTask({
+        frameId: props.frameId,
+        kind: 'preview',
+        sceneId,
+        title: 'Previewing scene',
+        detail: scene.name || scene.id,
+      })
       try {
         const resolvedState = state ?? values.states?.[scene.id] ?? values.states?.[`uploaded/${scene.id}`] ?? null
         const payloadScene = applyStateToSceneFields(scene, resolvedState)
@@ -620,11 +646,23 @@ export const scenesLogic = kea<scenesLogicType>([
           sceneId: scene.id,
           ...(resolvedState && Object.keys(resolvedState).length > 0 ? { state: resolvedState } : {}),
         }
-        await actions.sendEvent('uploadScenes', payload)
+        const response = await apiFetch(`/api/frames/${props.frameId}/event/uploadScenes`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+        if (!response.ok) {
+          throw new Error('Failed to send preview scene event')
+        }
         actions.previewSceneSuccess()
       } catch (error) {
         console.error(error)
-        alert('Failed to preview the scene')
+        longRunningTasksModel.actions.taskFailed({
+          frameId: props.frameId,
+          kind: 'preview',
+          sceneId,
+          detail: error instanceof Error ? error.message : 'Failed to preview the scene',
+        })
         actions.previewSceneFailure()
       }
     },
@@ -705,13 +743,29 @@ export const scenesLogic = kea<scenesLogicType>([
       })
     },
     renameScene: ({ sceneId }) => {
-      const sceneName = window.prompt('New name', values.scenes.find((s) => s.id === sceneId)?.name)
+      const scene = values.scenes.find((s) => s.id === sceneId)
+      if (!scene) {
+        return
+      }
+      actions.openRenameSceneDialog(sceneId, scene.name ?? '')
+    },
+    submitRenameScene: () => {
+      const dialog = values.renameSceneDialog
+      if (!dialog) {
+        return
+      }
+      const sceneName = dialog.name.trim()
       if (!sceneName) {
         return
       }
+      const scene = values.scenes.find((s) => s.id === dialog.sceneId)
+      if (!scene || scene.name === sceneName) {
+        return
+      }
       frameLogic({ frameId: props.frameId }).actions.setFrameFormValues({
-        scenes: values.scenes.map((s) => (s.id === sceneId ? { ...s, name: sceneName } : s)),
+        scenes: values.scenes.map((s) => (s.id === dialog.sceneId ? { ...s, name: sceneName } : s)),
       })
+      actions.closeRenameSceneDialog()
     },
     deleteScene: ({ sceneId }) => {
       frameLogic({ frameId: props.frameId }).actions.setFrameFormValues({

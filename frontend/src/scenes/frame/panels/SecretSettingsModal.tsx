@@ -36,14 +36,14 @@ export function SecretSettingsModal({
 
   return (
     <Modal title={`Global setting: ${activeSettings.title}`} onClose={onClose}>
-      <div className="space-y-4 p-5 text-gray-100">
-        <div className="rounded border border-orange-500/70 bg-gray-800 p-3">
-          <div className="text-xs font-semibold uppercase text-orange-300">Global setting</div>
-          <div className="text-sm text-orange-100">
+      <div className="space-y-4 p-5">
+        <div className="rounded-xl border border-orange-400/35 bg-orange-500/10 p-3">
+          <div className="text-xs font-semibold uppercase text-orange-500">Global setting</div>
+          <div className="frameos-strong text-sm">
             Changing this will affect all frames. Redeploy to update the persisted value.
           </div>
         </div>
-        {activeSettings.description ? <p className="text-sm text-gray-200">{activeSettings.description}</p> : null}
+        {activeSettings.description ? <p className="frameos-muted text-sm">{activeSettings.description}</p> : null}
         <div className="space-y-2">
           <H6 className="text-base">{activeSettings.title}</H6>
           <div className="space-y-3">
@@ -60,7 +60,7 @@ export function SecretSettingsModal({
               return (
                 <div
                   key={field.label}
-                  className="flex items-start gap-3 rounded border border-gray-600 px-3 py-3 text-sm"
+                  className="frameos-inset flex items-start gap-3 rounded-xl border px-3 py-3 text-sm"
                 >
                   <div
                     className={clsx(
@@ -76,19 +76,19 @@ export function SecretSettingsModal({
                   </div>
                   <div className="flex-1 space-y-2">
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span>{field.label}</span>
+                      <span className="frameos-strong">{field.label}</span>
                       <div className="flex items-center gap-2">
                         {!isSaved ? (
-                          <span className="rounded border border-yellow-400/80 bg-gray-900 px-2 py-0.5 text-xs font-semibold uppercase text-yellow-300">
+                          <span className="frameos-tag px-2 py-0.5 text-xs font-semibold uppercase" data-tag-color="yellow">
                             Missing
                           </span>
                         ) : (
-                          <span className="rounded border border-emerald-400/80 bg-gray-900 px-2 py-0.5 text-xs font-semibold uppercase text-emerald-300">
+                          <span className="frameos-tag px-2 py-0.5 text-xs font-semibold uppercase" data-tag-color="teal">
                             Saved
                           </span>
                         )}
                         {field.secret ? (
-                          <span className="rounded border border-orange-400/80 bg-gray-900 px-2 py-0.5 text-xs font-semibold uppercase text-orange-300">
+                          <span className="frameos-tag px-2 py-0.5 text-xs font-semibold uppercase" data-tag-color="orange">
                             Secret
                           </span>
                         ) : null}

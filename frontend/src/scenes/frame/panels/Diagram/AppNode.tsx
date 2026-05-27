@@ -1,4 +1,5 @@
 import { BindLogic, useActions, useValues } from 'kea'
+import { router } from 'kea-router'
 import { NodeProps, Handle, Position, NodeResizer } from 'reactflow'
 import { AppNodeData, DispatchNodeData } from '../../../../types'
 import clsx from 'clsx'
@@ -9,6 +10,7 @@ import { Select } from '../../../../components/Select'
 import React, { useState } from 'react'
 import { TextArea } from '../../../../components/TextArea'
 import { panelsLogic } from '../panelsLogic'
+import { urls } from '../../../../urls'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
 import { Markdown } from '../../../../components/Markdown'
 import {
@@ -62,22 +64,22 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
   const [secretRevealed, setSecretRevealed] = useState<Record<string, boolean>>({})
 
   const backgroundClassName = clsx(
-    'shadow-lg border-2',
+    'frameos-diagram-node shadow-lg border-2',
     isSelected
-      ? 'bg-black bg-opacity-70 border-fuchsia-900 shadow-fuchsia-700/50'
+      ? 'frameos-diagram-node-selected'
       : isDispatch
-      ? 'bg-black bg-opacity-70 border-orange-900 shadow-orange-700/50 '
+      ? 'border-orange-900 shadow-orange-700/50 '
       : isCustomApp || isSceneApp
-      ? 'bg-black bg-opacity-70 border-teal-900 shadow-teal-700/50 '
+      ? 'border-teal-900 shadow-teal-700/50 '
       : isDataApp
-      ? 'bg-black bg-opacity-70 border-green-700 shadow-green-500/50 '
+      ? 'border-green-700 shadow-green-500/50 '
       : isScene
-      ? 'bg-black bg-opacity-70 border-indigo-900 shadow-indigo-700/50 '
-      : 'bg-black bg-opacity-70 border-sky-900 shadow-sky-700/50 '
+      ? 'frameos-diagram-node-scene '
+      : 'border-sky-900 shadow-sky-700/50 '
   )
 
   const titleBackground = isSelected
-    ? 'bg-fuchsia-900'
+    ? 'frameos-diagram-title-selected'
     : isDispatch
     ? 'bg-orange-900'
     : isCustomApp || isSceneApp
@@ -85,7 +87,7 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
     : isDataApp
     ? 'bg-green-700'
     : isScene
-    ? 'bg-indigo-900'
+    ? 'frameos-diagram-title-scene'
     : 'bg-sky-900'
 
   const titleClassName = clsx(
@@ -146,7 +148,10 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
                 : [
                     {
                       label: appMenuEditLabel,
-                      onClick: () => editApp(sceneId, id, data),
+                      onClick: () => {
+                        editApp(sceneId, id, data)
+                        router.actions.push(urls.apps(frameId, sceneId, id))
+                      },
                       icon: <PencilSquareIcon className="w-5 h-5" />,
                     },
                     ...(isSceneApp && !isJavaScriptSceneApp
@@ -240,7 +245,7 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
                       <React.Fragment key={i}>
                         {'markdown' in field ? (
                           <tr>
-                            <td className="font-sm text-indigo-200" colSpan={4}>
+                            <td className="font-sm frameos-node-muted-text" colSpan={4}>
                               <Markdown value={field.markdown} />
                             </td>
                           </tr>
@@ -282,7 +287,7 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
                             </td>
                             <td
                               className={clsx(
-                                'font-sm text-indigo-200',
+                                'font-sm frameos-node-muted-text',
                                 field.type === 'node' ||
                                   codeArgs.includes(field.name) ||
                                   fieldInputFields.includes(field.name) ||
@@ -321,7 +326,10 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
                                       title={<Markdown value={field.hint} />}
                                       containerClassName="ml-1 inline-block align-sub"
                                     >
-                                      <InformationCircleIcon className="w-4 h-4 text-indigo-200" aria-label="Info" />
+                                      <InformationCircleIcon
+                                        className="frameos-node-muted-text h-4 w-4"
+                                        aria-label="Info"
+                                      />
                                     </Tooltip>
                                   ) : null}
                                 </div>
@@ -512,7 +520,7 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
                           return (
                             <Tooltip
                               title={
-                                <div className="p-2 bg-gray-700">
+                                <div className="frameos-inset p-2">
                                   <div className="min-w-[40vw] w-[500px] max-w-[90vw] max-h-[60vh] overflow-auto">
                                     <ReactJson
                                       collapsed={2}
@@ -526,7 +534,7 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
                                 </div>
                               }
                               containerClassName="flex"
-                              className="ml-1 inline-flex rounded-full p-0.5 text-indigo-100 hover:text-white"
+                              className="frameos-node-muted-text ml-1 inline-flex rounded-full p-0.5 hover:text-white"
                               tooltipColor="gray"
                               noPadding
                             >

@@ -15,6 +15,7 @@ import ReactFlow, {
 import { frameLogic } from '../../frameLogic'
 import {
   MouseEvent as ReactMouseEvent,
+  PointerEvent as ReactPointerEvent,
   TouchEvent as ReactTouchEvent,
   WheelEvent as ReactWheelEvent,
   useCallback,
@@ -27,14 +28,11 @@ import { AppNode } from './AppNode'
 import { CodeNode } from './CodeNode'
 import { EventNode } from './EventNode'
 import { StateNode } from './StateNode'
-import { Button, buttonColor, buttonSize } from '../../../../components/Button'
+import { Button } from '../../../../components/Button'
 import { diagramLogic, DiagramLogicProps } from './diagramLogic'
 import { NodeType, EdgeType, CodeNodeData } from '../../../../types'
-import { AdjustmentsHorizontalIcon, ArrowsPointingInIcon, EyeIcon } from '@heroicons/react/24/outline'
-import { Tooltip } from '../../../../components/Tooltip'
-import { SceneSettings } from '../Scenes/SceneSettings'
+import { ArrowsPointingInIcon, EyeIcon } from '@heroicons/react/24/outline'
 import { ZoomOutArea } from '../../../../icons/ZoomOutArea'
-import clsx from 'clsx'
 import { CodeNodeEdge } from './CodeNodeEdge'
 import { SceneDropDown } from '../Scenes/SceneDropDown'
 import { AppNodeEdge } from './AppNodeEdge'
@@ -45,6 +43,8 @@ import { CompiledSceneTag } from '../Scenes/CompiledSceneTag'
 import { controlLogic } from '../Scenes/controlLogic'
 import { PlayIcon } from '@heroicons/react/24/solid'
 import { Spinner } from '../../../../components/Spinner'
+import { workspaceLogic } from '../../../workspace/workspaceLogic'
+import clsx from 'clsx'
 
 const nodeTypes: Record<NodeType, (props: NodeProps) => JSX.Element> = {
   app: AppNode,
@@ -63,7 +63,10 @@ const edgeTypes: Record<EdgeType, (props: EdgeProps) => JSX.Element> = {
 
 interface DiagramProps {
   sceneId: string
+  showToolbar?: boolean
 }
+
+type DiagramToolbarVariant = 'inline' | 'floating'
 
 interface ConnectingNode {
   nodeId: string | null
@@ -71,33 +74,78 @@ interface ConnectingNode {
   handleId: string | null
 }
 
-function Diagram_({ sceneId }: DiagramProps) {
-  const reactFlowWrapper = useRef<HTMLDivElement>(null)
-  const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null)
-  const { frameId } = useValues(frameLogic)
-  const updateNodeInternals = useUpdateNodeInternals()
-  const diagramLogicProps: DiagramLogicProps = { frameId, sceneId, updateNodeInternals }
-  const { nodes, nodesWithStyle, edges, selectedNodeIds, fitViewCounter, isCompiledScene } = useValues(
-    diagramLogic(diagramLogicProps)
+const floatingToolbarButtonClassName =
+  'frameos-icon-button scene-diagram-floating-button pointer-events-auto flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/90 bg-white/90 text-slate-500 shadow-lg shadow-slate-300/25 backdrop-blur-xl transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400'
+const diagramSelectionDragClassName = 'frameos-diagram-selection-dragging'
+const diagramSelectionDragIgnoredSelector =
+  'a, button, input, select, textarea, [contenteditable="true"], [contenteditable=""], .monaco-editor'
+
+function setDiagramSelectionDragGuard(active: boolean): void {
+  if (typeof document === 'undefined') {
+    return
+  }
+  document.documentElement.classList.toggle(diagramSelectionDragClassName, active)
+  document.body.classList.toggle(diagramSelectionDragClassName, active)
+  if (active) {
+    window.getSelection()?.removeAllRanges()
+  }
+}
+
+function shouldGuardDiagramSelectionDrag(target: HTMLElement | null): boolean {
+  if (!target || target.closest(diagramSelectionDragIgnoredSelector)) {
+    return false
+  }
+  return Boolean(target.closest('.react-flow'))
+}
+
+function FloatingDiagramButton({
+  active,
+  children,
+  disabled,
+  onClick,
+  title,
+}: {
+  active?: boolean
+  children: JSX.Element
+  disabled?: boolean
+  onClick: () => void
+  title: string
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      title={title}
+      onClick={onClick}
+      disabled={disabled}
+      className={clsx(
+        floatingToolbarButtonClassName,
+        active ? 'frameos-primary-active text-white' : 'bg-white/90 text-slate-500',
+        disabled && 'opacity-30'
+      )}
+    >
+      {children}
+    </button>
   )
-  const {
-    onEdgesChange,
-    onNodesChange,
-    setNodes,
-    addEdge,
-    fitDiagramView,
-    keywordDropped,
-    rearrangeCurrentScene,
-    setCursorPosition,
-  } = useActions(diagramLogic(diagramLogicProps))
+}
+
+export function DiagramToolbar({
+  sceneId,
+  showSceneAction = true,
+  variant = 'inline',
+}: {
+  sceneId: string
+  showSceneAction?: boolean
+  variant?: DiagramToolbarVariant
+}) {
+  const { frameId } = useValues(frameLogic)
+  const diagramLogicProps: DiagramLogicProps = { frameId, sceneId }
+  const { fitDiagramView, rearrangeCurrentScene } = useActions(diagramLogic(diagramLogicProps))
   const { previewScene } = useActions(scenesLogic({ frameId }))
   const { setCurrentScene } = useActions(controlLogic({ frameId }))
   const { sceneChanging } = useValues(controlLogic({ frameId }))
   const { unsavedSceneIds, undeployedSceneIds, previewingSceneId, linkedActiveSceneId } = useValues(
     scenesLogic({ frameId })
   )
-  const { newNodePicker } = useValues(newNodePickerLogic(diagramLogicProps))
-  const { openNewNodePicker } = useActions(newNodePickerLogic(diagramLogicProps))
   const sceneHasChanges = unsavedSceneIds.has(sceneId) || undeployedSceneIds.has(sceneId)
   const isPreviewing = previewingSceneId === sceneId
   const isActiveScene = linkedActiveSceneId === sceneId
@@ -107,6 +155,107 @@ function Diagram_({ sceneId }: DiagramProps) {
     : sceneHasChanges
     ? 'Preview unsaved changes on the frame'
     : 'No unsaved changes to preview'
+  const floating = variant === 'floating'
+
+  return (
+    <div className={clsx('flex items-center gap-2', floating && 'scene-diagram-floating-toolbar pointer-events-none')}>
+      {showSceneAction ? (
+        sceneHasChanges ? (
+          floating ? (
+            <FloatingDiagramButton
+              onClick={() => previewScene(sceneId)}
+              title={previewTitle}
+              disabled={isPreviewing}
+              active={isPreviewing}
+            >
+              <EyeIcon className="h-5 w-5" />
+            </FloatingDiagramButton>
+          ) : (
+            <Button
+              size="tiny"
+              onClick={() => previewScene(sceneId)}
+              title={previewTitle}
+              color="secondary"
+              disabled={isPreviewing}
+            >
+              <EyeIcon className="w-5 h-5" />
+            </Button>
+          )
+        ) : floating ? (
+          <FloatingDiagramButton
+            onClick={() => setCurrentScene(sceneId)}
+            title={isActiveScene ? 'This scene is already active' : 'Activate'}
+            disabled={isActiveScene || isActivatingScene}
+            active={isActiveScene || isActivatingScene}
+          >
+            {isActivatingScene ? (
+              <Spinner color="white" className="flex h-5 w-5 items-center justify-center" />
+            ) : (
+              <PlayIcon className="h-5 w-5" />
+            )}
+          </FloatingDiagramButton>
+        ) : (
+          <Button
+            size="tiny"
+            onClick={() => setCurrentScene(sceneId)}
+            title={isActiveScene ? 'This scene is already active' : 'Activate'}
+            color="primary"
+            disabled={isActiveScene || isActivatingScene}
+          >
+            {isActivatingScene ? (
+              <Spinner color="white" className="w-5 h-5 flex items-center justify-center" />
+            ) : (
+              <PlayIcon className="w-5 h-5" />
+            )}
+          </Button>
+        )
+      ) : null}
+      {floating ? (
+        <>
+          <FloatingDiagramButton onClick={fitDiagramView} title="Fit to View">
+            <ZoomOutArea className="h-5 w-5" />
+          </FloatingDiagramButton>
+          <FloatingDiagramButton onClick={rearrangeCurrentScene} title="Realign nodes">
+            <ArrowsPointingInIcon className="h-5 w-5" />
+          </FloatingDiagramButton>
+          <SceneDropDown
+            sceneId={sceneId}
+            context="editDiagram"
+            className={floatingToolbarButtonClassName}
+            buttonColor="secondary"
+          />
+        </>
+      ) : (
+        <>
+          <Button size="tiny" onClick={fitDiagramView} title="Fit to View" color="secondary">
+            <ZoomOutArea className="w-5 h-5" />
+          </Button>
+          <Button size="tiny" onClick={rearrangeCurrentScene} title="Realign nodes" color="secondary">
+            <ArrowsPointingInIcon className="w-5 h-5" />
+          </Button>
+          <SceneDropDown sceneId={sceneId} context="editDiagram" />
+        </>
+      )}
+    </div>
+  )
+}
+
+function Diagram_({ sceneId, showToolbar = true }: DiagramProps) {
+  const reactFlowWrapper = useRef<HTMLDivElement>(null)
+  const selectionDragGuardActive = useRef(false)
+  const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null)
+  const { frameId } = useValues(frameLogic)
+  const { theme } = useValues(workspaceLogic)
+  const updateNodeInternals = useUpdateNodeInternals()
+  const diagramLogicProps: DiagramLogicProps = { frameId, sceneId, updateNodeInternals }
+  const { nodes, nodesWithStyle, edges, selectedNodeIds, fitViewCounter, isCompiledScene } = useValues(
+    diagramLogic(diagramLogicProps)
+  )
+  const { onEdgesChange, onNodesChange, setNodes, addEdge, keywordDropped, setCursorPosition } = useActions(
+    diagramLogic(diagramLogicProps)
+  )
+  const { newNodePicker } = useValues(newNodePickerLogic(diagramLogicProps))
+  const { openNewNodePicker } = useActions(newNodePickerLogic(diagramLogicProps))
   const highlightedEdges = useMemo(() => {
     if (selectedNodeIds.length === 0) {
       return edges
@@ -134,13 +283,25 @@ function Diagram_({ sceneId }: DiagramProps) {
     (event: any) => {
       event.preventDefault()
       const reactFlowBounds = reactFlowWrapper.current?.getBoundingClientRect()
-      const { keyword, type } = JSON.parse(event.dataTransfer.getData('application/reactflow') ?? '{}')
+      const reactFlowData = event.dataTransfer.getData('application/reactflow')
+      if (!reactFlowData) {
+        return
+      }
+      let keyword: string | undefined
+      let type: string | undefined
+      try {
+        const parsed = JSON.parse(reactFlowData)
+        keyword = parsed.keyword
+        type = parsed.type
+      } catch {
+        return
+      }
       if (typeof keyword === 'string') {
         const position = reactFlowInstance?.project({
           x: event.clientX - (reactFlowBounds?.left ?? 0),
           y: event.clientY - (reactFlowBounds?.top ?? 0),
         }) ?? { x: 0, y: 0 }
-        keywordDropped(keyword, type, position)
+        keywordDropped(keyword, typeof type === 'string' ? type : '', position)
       }
     },
     [reactFlowInstance, nodes]
@@ -266,6 +427,49 @@ function Diagram_({ sceneId }: DiagramProps) {
     [reactFlowInstance, setCursorPosition]
   )
 
+  const clearSelectionDragGuard = useCallback(() => {
+    if (!selectionDragGuardActive.current) {
+      return
+    }
+    selectionDragGuardActive.current = false
+    setDiagramSelectionDragGuard(false)
+  }, [])
+
+  const onPointerDownCapture = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || !event.shiftKey) {
+      return
+    }
+    const target = event.target as HTMLElement | null
+    if (!shouldGuardDiagramSelectionDrag(target)) {
+      return
+    }
+    selectionDragGuardActive.current = true
+    setDiagramSelectionDragGuard(true)
+  }, [])
+
+  useEffect(() => {
+    const clear = () => clearSelectionDragGuard()
+    const clearSelectedText = () => {
+      const selection = window.getSelection()
+      if (selectionDragGuardActive.current && selection && !selection.isCollapsed) {
+        selection.removeAllRanges()
+      }
+    }
+    window.addEventListener('pointerup', clear)
+    window.addEventListener('pointercancel', clear)
+    window.addEventListener('mouseup', clear)
+    window.addEventListener('blur', clear)
+    document.addEventListener('selectionchange', clearSelectedText)
+    return () => {
+      window.removeEventListener('pointerup', clear)
+      window.removeEventListener('pointercancel', clear)
+      window.removeEventListener('mouseup', clear)
+      window.removeEventListener('blur', clear)
+      document.removeEventListener('selectionchange', clearSelectedText)
+      setDiagramSelectionDragGuard(false)
+    }
+  }, [clearSelectionDragGuard])
+
   useEffect(() => {
     if (fitViewCounter > 0) {
       reactFlowInstance?.fitView({ maxZoom: 1, padding: 0.2 })
@@ -279,6 +483,7 @@ function Diagram_({ sceneId }: DiagramProps) {
         ref={reactFlowWrapper}
         onContextMenu={onContextMenu}
         onMouseMove={onMouseMove}
+        onPointerDownCapture={onPointerDownCapture}
       >
         <ReactFlow
           nodes={nodesWithStyle}
@@ -301,53 +506,23 @@ function Diagram_({ sceneId }: DiagramProps) {
           edgeTypes={edgeTypes}
           selectionMode={SelectionMode.Partial}
         >
-          <Background id="1" gap={24} color="#cccccc" variant={BackgroundVariant.Dots} />
+          <Background
+            id="1"
+            gap={28}
+            size={theme === 'dark' ? 1.1 : 1.35}
+            color={theme === 'dark' ? 'rgba(148, 163, 184, 0.18)' : 'rgba(100, 116, 139, 0.24)'}
+            variant={BackgroundVariant.Dots}
+          />
           {isCompiledScene ? (
-            <div className="absolute top-1 left-1 z-10">
+            <div className="absolute top-3 left-2 z-10">
               <CompiledSceneTag />
             </div>
           ) : null}
-          <div className="absolute top-1 right-1 z-10 flex gap-2">
-            {sceneHasChanges ? (
-              <Button
-                size="tiny"
-                onClick={() => previewScene(sceneId)}
-                title={previewTitle}
-                color="secondary"
-                disabled={isPreviewing}
-              >
-                <EyeIcon className="w-5 h-5" />
-              </Button>
-            ) : (
-              <Button
-                size="tiny"
-                onClick={() => setCurrentScene(sceneId)}
-                title={isActiveScene ? 'This scene is already active' : 'Activate'}
-                color="primary"
-                disabled={isActiveScene || isActivatingScene}
-              >
-                {isActivatingScene ? (
-                  <Spinner color="white" className="w-5 h-5 flex items-center justify-center" />
-                ) : (
-                  <PlayIcon className="w-5 h-5" />
-                )}
-              </Button>
-            )}
-            <Button size="tiny" onClick={fitDiagramView} title="Fit to View" color="secondary">
-              <ZoomOutArea className="w-5 h-5" />
-            </Button>
-            <Button size="tiny" onClick={rearrangeCurrentScene} title="Realign nodes" color="secondary">
-              <ArrowsPointingInIcon className="w-5 h-5" />
-            </Button>
-            <Tooltip
-              tooltipColor="gray"
-              className={clsx(buttonSize('tiny'), buttonColor('secondary'))}
-              title={<SceneSettings sceneId={sceneId} />}
-            >
-              <AdjustmentsHorizontalIcon className="w-5 h-5" />
-            </Tooltip>
-            <SceneDropDown sceneId={sceneId} context="editDiagram" />
-          </div>
+          {showToolbar ? (
+            <div className="absolute top-1 right-1 z-10">
+              <DiagramToolbar sceneId={sceneId} />
+            </div>
+          ) : null}
         </ReactFlow>
       </div>
       {newNodePicker && <NewNodePicker />}
@@ -355,10 +530,10 @@ function Diagram_({ sceneId }: DiagramProps) {
   )
 }
 
-export function Diagram({ sceneId }: DiagramProps) {
+export function Diagram({ sceneId, showToolbar }: DiagramProps) {
   return (
     <ReactFlowProvider>
-      <Diagram_ sceneId={sceneId} />
+      <Diagram_ sceneId={sceneId} showToolbar={showToolbar} />
     </ReactFlowProvider>
   )
 }

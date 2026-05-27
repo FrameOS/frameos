@@ -2,19 +2,11 @@ import { TemplateType } from '../../../../types'
 import { H6 } from '../../../../components/H6'
 import { ArrowDownTrayIcon, PencilSquareIcon, TrashIcon, ExclamationTriangleIcon } from '@heroicons/react/24/solid'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
-import {
-  FolderPlusIcon,
-  CloudArrowDownIcon,
-  DocumentPlusIcon,
-  DocumentIcon,
-  CheckIcon,
-} from '@heroicons/react/24/outline'
-import { PlayIcon } from '@heroicons/react/24/solid'
+import { FolderPlusIcon, CloudArrowDownIcon, DocumentPlusIcon, CheckIcon, EyeIcon } from '@heroicons/react/24/outline'
 import { Button } from '../../../../components/Button'
 import { useEntityImage } from '../../../../models/entityImagesModel'
 import { useMemo, useState } from 'react'
 import clsx from 'clsx'
-import { Tooltip } from '../../../../components/Tooltip'
 import { appsModel } from '../../../../models/appsModel'
 import { useActions, useValues } from 'kea'
 import { settingsLogic } from '../../../settings/settingsLogic'
@@ -25,6 +17,7 @@ import { Modal } from '../../../../components/Modal'
 import { Form } from 'kea-forms'
 import { Field } from '../../../../components/Field'
 import { StateFieldEdit } from '../Scenes/StateFieldEdit'
+import { type FrameosTemplateDragData, setFrameosTemplateDragData } from '../../../workspace/sceneDrag'
 
 interface TemplateProps {
   template: TemplateType
@@ -35,6 +28,7 @@ interface TemplateProps {
   removeTemplate?: (id: string) => void
   editTemplate?: (template: TemplateType) => void
   installedTemplatesByName: Record<string, boolean>
+  templateDragData?: FrameosTemplateDragData
 }
 
 export function TemplateRow({
@@ -46,12 +40,13 @@ export function TemplateRow({
   editTemplate,
   saveRemoteAsLocal,
   installedTemplatesByName,
+  templateDragData,
 }: TemplateProps): JSX.Element {
   const { apps } = useValues(appsModel)
   const { settings, savedSettings, settingsChanged } = useValues(settingsLogic)
   const { setSettingsValue, submitSettings } = useActions(settingsLogic)
   const [activeSettingsKey, setActiveSettingsKey] = useState<string | null>(null)
-  const { trySceneConfig, tryLoading, trySceneModalOpen, trySceneFields, trySceneState } = useValues(
+  const { trySceneConfig, trySceneModalOpen, trySceneFields, trySceneState } = useValues(
     templateRowLogic({ frameId, template })
   )
   const { openTrySceneModal, closeTrySceneModal, submitTrySceneState, resetTrySceneState } = useActions(
@@ -87,58 +82,40 @@ export function TemplateRow({
 
   return (
     <div
+      draggable={Boolean(templateDragData)}
+      onDragStart={(event) => {
+        if (templateDragData) {
+          setFrameosTemplateDragData(event.dataTransfer, templateDragData)
+        }
+      }}
       className={clsx(
-        '@container border rounded-lg shadow bg-gray-900 break-inside-avoid p-2 space-y-1',
-        'border-gray-700'
+        'frame-tool-card @container break-inside-avoid space-y-2 rounded-[18px] p-3 transition',
+        templateDragData && 'cursor-grab active:cursor-grabbing'
       )}
     >
       <div className="flex items-start justify-between gap-2">
         {imageUrl ? (
-          <Tooltip
-            title={
-              <a href={imageUrl} target="_blank" rel="noopener noreferrer">
-                <img src={imageUrl} alt={template.name} />
-              </a>
-            }
-          >
-            <div
-              className="w-[90px] h-[90px] border bg-cover bg-center flex-shrink-0 cursor-zoom-in"
-              style={{ backgroundImage: `url(${JSON.stringify(imageUrl)})` }}
-            />
-          </Tooltip>
+          <div
+            className={clsx(
+              'h-[90px] w-[90px] flex-shrink-0 rounded-2xl border border-slate-500/20 bg-cover bg-center',
+              templateDragData && 'cursor-grab active:cursor-grabbing'
+            )}
+            style={{ backgroundImage: `url(${JSON.stringify(imageUrl)})` }}
+          />
         ) : null}
         <div className="break-inside-avoid space-y-1 w-full">
-          <div className="flex items-start justify-between gap-1 @xm:flex-col @md:flex-row">
+          <div className="flex flex-col items-start justify-between gap-1 @md:flex-row">
             <div className="flex-1">
               <H6>{template.name}</H6>
             </div>
             <div className="flex gap-1">
-              {trySceneConfig ? (
-                <Button
-                  className="!px-2 flex gap-1"
-                  size="small"
-                  color="primary"
-                  onClick={() => {
-                    if (trySceneFields.length === 0) {
-                      resetTrySceneState({})
-                      submitTrySceneState()
-                      return
-                    }
-                    openTrySceneModal()
-                  }}
-                  disabled={tryLoading || !frameId}
-                  title="Run this interpreted scene on the frame"
-                >
-                  <PlayIcon className="w-5 h-5" />
-                </Button>
-              ) : null}
               {applyTemplate ? (
                 <Button
                   className="!px-2 flex gap-1"
                   size="small"
-                  color={installedTemplatesByName[template.name] ? 'tertiary' : 'secondary'}
+                  color={installedTemplatesByName[template.name] ? 'secondary' : 'primary'}
                   onClick={() => applyTemplate(template)}
-                  title="Install scene"
+                  title="Add scene"
                 >
                   {!installedTemplatesByName[template.name] ? (
                     <FolderPlusIcon className="w-5 h-5" />
@@ -147,11 +124,30 @@ export function TemplateRow({
                   )}
                   <span className="hidden @xs:inline">
                     {installedTemplatesByName[template.name] ? (
-                      'Installed'
+                      'Added'
                     ) : (
-                      <>Install{(template.scenes || []).length > 1 ? ` (${(template.scenes || []).length})` : ''}</>
+                      <>Add{(template.scenes || []).length > 1 ? ` (${(template.scenes || []).length})` : ''}</>
                     )}
                   </span>
+                </Button>
+              ) : null}
+              {trySceneConfig ? (
+                <Button
+                  className="!px-2 flex gap-1"
+                  size="small"
+                  color="secondary"
+                  onClick={() => {
+                    if (trySceneFields.length === 0) {
+                      resetTrySceneState({})
+                      submitTrySceneState()
+                      return
+                    }
+                    openTrySceneModal()
+                  }}
+                  disabled={!frameId}
+                  title="Preview this interpreted scene on the frame"
+                >
+                  <EyeIcon className="w-5 h-5" />
                 </Button>
               ) : null}
               <DropdownMenu
@@ -162,10 +158,10 @@ export function TemplateRow({
                         {
                           label:
                             'scenes' in template && Array.isArray(template.scenes)
-                              ? `Install ${(template.scenes || []).length} scene${
+                              ? `Add ${(template.scenes || []).length} scene${
                                   (template.scenes || []).length === 1 ? '' : 's'
                                 } onto frame`
-                              : 'Install onto frame',
+                              : 'Add onto frame',
                           onClick: () => applyTemplate(template),
                           icon: <DocumentPlusIcon className="w-5 h-5" />,
                         },
@@ -214,7 +210,7 @@ export function TemplateRow({
           </div>
 
           <div className="flex items-center gap-2 w-full justify-between">
-            {template.description && <div className="text-white text-sm">{template.description}</div>}
+            {template.description ? <div className="frame-tool-muted text-sm">{template.description}</div> : null}
           </div>
           {missingSecretSettings.size ? (
             <div className="flex flex-wrap gap-2 pt-1">
@@ -224,7 +220,7 @@ export function TemplateRow({
                   <button
                     key={settingKey}
                     type="button"
-                    className="inline-flex items-center rounded border border-gray-400/80 bg-gray-950 px-2 py-0.5 text-xs font-semibold uppercase text-gray-300 hover:bg-gray-900"
+                    className="inline-flex items-center rounded-full border border-amber-400/40 bg-amber-500/10 px-2 py-0.5 text-xs font-semibold uppercase text-amber-500 hover:bg-amber-500/15"
                     onClick={() => setActiveSettingsKey(settingKey)}
                   >
                     <ExclamationTriangleIcon className="mr-1 h-3 w-3 text-yellow-300" />
@@ -248,7 +244,7 @@ export function TemplateRow({
         <Modal
           open={trySceneModalOpen}
           onClose={closeTrySceneModal}
-          title={`Run "${trySceneConfig.mainScene.name || template.name}"`}
+          title={`Preview "${trySceneConfig.mainScene.name || template.name}"`}
         >
           <Form
             logic={templateRowLogic}
@@ -273,14 +269,14 @@ export function TemplateRow({
                 ))}
               </div>
             ) : (
-              <div>This scene does not export publicly controllable state.</div>
+              <div className="frame-tool-muted text-sm">This scene does not export publicly controllable state.</div>
             )}
-            <div className="flex justify-end gap-2 border-t border-gray-600 pt-4">
+            <div className="flex justify-end gap-2 border-t border-slate-500/20 pt-4">
               <Button onClick={closeTrySceneModal} color="secondary">
                 Cancel
               </Button>
-              <Button onClick={submitTrySceneState} color="primary" disabled={tryLoading}>
-                {tryLoading ? 'Running…' : 'Run scene'}
+              <Button onClick={submitTrySceneState} color="primary" disabled={!frameId}>
+                Preview scene
               </Button>
             </div>
           </Form>

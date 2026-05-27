@@ -41,6 +41,17 @@ const normalizePath = (value: string | null | undefined) => {
   return trimmed.startsWith('/') ? trimmed : `/${trimmed}`
 }
 
+const clearScheduledPing = (cache: Record<string, any>) => {
+  if (cache.timeoutId) {
+    window.clearTimeout(cache.timeoutId)
+    cache.timeoutId = null
+  }
+}
+
+const invalidatePendingPings = (cache: Record<string, any>) => {
+  cache.requestId = (cache.requestId ?? 0) + 1
+}
+
 const extractIcmpTime = (message: string) => {
   const match = message.match(ICMP_TIME_REGEX)
   if (!match) {
@@ -93,6 +104,7 @@ export const pingLogic = kea<pingLogicType>([
       {
         startRunning: () => true,
         stopRunning: () => false,
+        setPingMode: () => false,
       },
     ],
     isPinging: [
@@ -100,12 +112,17 @@ export const pingLogic = kea<pingLogicType>([
       {
         setIsPinging: (_, { isPinging }) => isPinging,
         stopRunning: () => false,
+        setPingMode: () => false,
       },
     ],
     results: [
       [] as PingResult[],
       {
         appendResult: (state, { result }) => [result, ...state].slice(0, MAX_RESULTS),
+        setPingMode: (state, { pingMode }) => {
+          const nextMode = normalizePingMode(pingMode)
+          return state.some((result) => result.mode !== nextMode) ? [] : state
+        },
       },
     ],
   }),
@@ -131,17 +148,11 @@ export const pingLogic = kea<pingLogicType>([
       }
     },
     startRunning: () => {
-      if (cache.timeoutId) {
-        window.clearTimeout(cache.timeoutId)
-        cache.timeoutId = null
-      }
+      clearScheduledPing(cache)
       actions.runPing()
     },
     stopRunning: () => {
-      if (cache.timeoutId) {
-        window.clearTimeout(cache.timeoutId)
-        cache.timeoutId = null
-      }
+      clearScheduledPing(cache)
     },
     setIntervalSeconds: () => {
       if (values.isRunning) {
@@ -150,10 +161,8 @@ export const pingLogic = kea<pingLogicType>([
       }
     },
     setPingMode: () => {
-      if (values.isRunning) {
-        actions.stopRunning()
-        actions.startRunning()
-      }
+      clearScheduledPing(cache)
+      invalidatePendingPings(cache)
     },
     setHttpPath: () => {
       if (values.isRunning) {
@@ -165,10 +174,7 @@ export const pingLogic = kea<pingLogicType>([
       if (!values.isRunning) {
         return
       }
-      if (cache.timeoutId) {
-        window.clearTimeout(cache.timeoutId)
-        cache.timeoutId = null
-      }
+      clearScheduledPing(cache)
       const delay = Math.max(values.intervalMs - elapsed, 0)
       cache.timeoutId = window.setTimeout(() => {
         actions.runPing()
@@ -227,6 +233,10 @@ export const pingLogic = kea<pingLogicType>([
         message = error instanceof Error ? error.message : String(error)
       }
 
+      if (id !== cache.requestId) {
+        return
+      }
+
       const elapsed = Date.now() - startedAt
       const clientElapsedMs = elapsed
       const serverElapsedMs = payload?.elapsed_ms ?? null
@@ -252,10 +262,8 @@ export const pingLogic = kea<pingLogicType>([
     cache.requestId = 0
   }),
   beforeUnmount(({ cache }) => {
-    if (cache.timeoutId) {
-      window.clearTimeout(cache.timeoutId)
-      cache.timeoutId = null
-    }
+    clearScheduledPing(cache)
+    invalidatePendingPings(cache)
   }),
 ])
 

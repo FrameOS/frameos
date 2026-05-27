@@ -1,15 +1,18 @@
-import { actions, afterMount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
+import { actions, afterMount, beforeUnmount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 
-import { AssetType } from '../../../../types'
+import { AssetType, MetricsType } from '../../../../types'
 import { loaders } from 'kea-loaders'
 import { socketLogic } from '../../../socketLogic'
 
 import type { assetsLogicType } from './assetsLogicType'
 import { frameLogic } from '../../frameLogic'
+import { metricsLogic } from '../Metrics/metricsLogic'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
 import { frameAssetsApiPath } from '../../../../utils/frameAssetsApi'
 import { uploadFileInChunks } from '../../../../utils/uploadFileInChunks'
+import { uploadFormDataWithProgress } from '../../../../utils/uploadFormDataWithProgress'
+import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
 
 export interface AssetsLogicProps {
   frameId: number
@@ -22,6 +25,29 @@ export interface AssetNode {
   size?: number
   mtime?: number
   children: Record<string, AssetNode>
+}
+
+export interface AssetStats {
+  files: number
+  folders: number
+  images: number
+  totalBytes: number
+  latestMtime: number | null
+}
+
+export interface DiskStats {
+  totalBytes: number
+  usedBytes: number
+  availableBytes: number
+  usedPercent: number
+}
+
+interface FrameAssetsResponse {
+  assets: AssetType[]
+  cache?: {
+    refreshing?: boolean
+    retry_after?: number
+  }
 }
 
 function buildAssetTree(assets: AssetType[], rootName: string): AssetNode {
@@ -63,6 +89,91 @@ function buildAssetTree(assets: AssetType[], rootName: string): AssetNode {
   return root
 }
 
+const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '*.qoi', '.ppm', '.svg']
+const normalizedImageExtensions = imageExtensions.map((extension) => extension.replace('*', '').toLowerCase())
+
+function hasImageExtension(fileName: string): boolean {
+  const normalizedName = fileName.toLowerCase()
+  return normalizedImageExtensions.some((extension) => normalizedName.endsWith(extension))
+}
+
+export function isInThumbsFolder(path: string): boolean {
+  const normalizedPath = path.replace(/\\/g, '/')
+  return (
+    normalizedPath === '.thumbs' ||
+    normalizedPath.endsWith('/.thumbs') ||
+    normalizedPath.startsWith('.thumbs/') ||
+    normalizedPath.includes('/.thumbs/')
+  )
+}
+
+function collectAssetStats(node: AssetNode, isRoot = true): AssetStats {
+  const stats: AssetStats = {
+    files: 0,
+    folders: isRoot ? 0 : 1,
+    images: 0,
+    totalBytes: 0,
+    latestMtime: node.mtime && node.mtime > 0 ? node.mtime : null,
+  }
+
+  if (!node.isFolder) {
+    stats.files = 1
+    stats.folders = 0
+    stats.images = hasImageExtension(node.name) && !isInThumbsFolder(node.path) ? 1 : 0
+    stats.totalBytes = typeof node.size === 'number' && node.size > 0 ? node.size : 0
+  }
+
+  Object.values(node.children).forEach((child) => {
+    const childStats = collectAssetStats(child, false)
+    stats.files += childStats.files
+    stats.folders += childStats.folders
+    stats.images += childStats.images
+    stats.totalBytes += childStats.totalBytes
+    stats.latestMtime =
+      stats.latestMtime && childStats.latestMtime
+        ? Math.max(stats.latestMtime, childStats.latestMtime)
+        : stats.latestMtime ?? childStats.latestMtime
+  })
+
+  return stats
+}
+
+export function nodeHasPlayableImages(node: AssetNode): boolean {
+  if (isInThumbsFolder(node.path)) {
+    return false
+  }
+
+  if (!node.isFolder) {
+    return hasImageExtension(node.name)
+  }
+
+  return Object.values(node.children).some(nodeHasPlayableImages)
+}
+
+function latestDiskStats(metrics: MetricsType[]): DiskStats | null {
+  for (let index = metrics.length - 1; index >= 0; index--) {
+    const diskUsage = metrics[index].metrics?.diskUsage
+    if (!diskUsage || typeof diskUsage !== 'object') {
+      continue
+    }
+
+    const totalBytes = Number(diskUsage.total ?? 0)
+    const availableBytes = Number(diskUsage.available ?? diskUsage.free ?? 0)
+    const usedBytes = Number(diskUsage.used ?? totalBytes - availableBytes)
+    const percentage = Number(diskUsage.percentage)
+    if (totalBytes > 0 && Number.isFinite(usedBytes) && Number.isFinite(availableBytes)) {
+      return {
+        totalBytes,
+        usedBytes,
+        availableBytes,
+        usedPercent: Number.isFinite(percentage) ? percentage : (usedBytes / totalBytes) * 100,
+      }
+    }
+  }
+
+  return null
+}
+
 function normalizeAssetsPath(assetsPath?: string): string {
   let normalizedPath = (assetsPath || '/srv/assets').replace(/\/+$/, '') || '/srv/assets'
   while (normalizedPath.startsWith('./')) {
@@ -92,10 +203,38 @@ function normalizeAssetPath(path: string, assetsPath?: string): string {
   return normalizedPath ? `${normalizedAssetsPath}/${normalizedPath}` : normalizedAssetsPath
 }
 
+async function responseErrorMessage(response: Response, fallback: string): Promise<string> {
+  try {
+    const text = await response.text()
+    if (!text) {
+      return fallback
+    }
+    try {
+      const payload = JSON.parse(text) as { detail?: unknown; message?: unknown }
+      return typeof payload.detail === 'string'
+        ? payload.detail
+        : typeof payload.message === 'string'
+        ? payload.message
+        : fallback
+    } catch {
+      return text
+    }
+  } catch {
+    return fallback
+  }
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback
+}
+
 export const assetsLogic = kea<assetsLogicType>([
   path(['src', 'scenes', 'frame', 'assetsLogic']),
   props({} as AssetsLogicProps),
-  connect(({ frameId }: AssetsLogicProps) => ({ logic: [socketLogic], values: [frameLogic({ frameId }), ['frame']] })),
+  connect(({ frameId }: AssetsLogicProps) => ({
+    logic: [socketLogic],
+    values: [frameLogic({ frameId }), ['frame'], metricsLogic({ frameId }), ['sortedMetrics']],
+  })),
   key((props) => props.frameId),
   actions({
     uploadAssets: (path: string) => ({ path }),
@@ -104,6 +243,7 @@ export const assetsLogic = kea<assetsLogicType>([
     filesToUpload: (files: string[]) => ({ files }),
     uploadProgress: (path: string, size: number) => ({ path, size }),
     uploadFailure: (path: string) => ({ path }),
+    setAssetsRefreshing: (assetsRefreshing: boolean) => ({ assetsRefreshing }),
     syncAssets: true,
     deleteAsset: (path: string) => ({ path }),
     assetDeleted: (path: string) => ({ path }),
@@ -111,7 +251,7 @@ export const assetsLogic = kea<assetsLogicType>([
     assetRenamed: (oldPath: string, newPath: string) => ({ oldPath, newPath }),
     createFolder: (path: string) => ({ path }),
   }),
-  loaders(({ props }) => ({
+  loaders(({ actions, cache, props }) => ({
     assets: [
       [] as AssetType[],
       {
@@ -121,9 +261,33 @@ export const assetsLogic = kea<assetsLogicType>([
             if (!response.ok) {
               throw new Error('Failed to fetch assets')
             }
-            const data = await response.json()
+            const data = (await response.json()) as FrameAssetsResponse
+            window.clearTimeout(cache.reloadTimer)
+            if (data.cache?.refreshing) {
+              const retryDelay = Math.max(1, data.cache.retry_after ?? 2) * 1000
+              cache.reloadTimer = window.setTimeout(() => actions.loadAssets(), retryDelay)
+            }
+            actions.setAssetsRefreshing(Boolean(data.cache?.refreshing))
             return data.assets as AssetType[]
           } catch (error) {
+            actions.setAssetsRefreshing(false)
+            console.error(error)
+            return []
+          }
+        },
+        refreshAssets: async () => {
+          try {
+            window.clearTimeout(cache.reloadTimer)
+            actions.setAssetsRefreshing(true)
+            const response = await apiFetch(`${frameAssetsApiPath(props.frameId)}?refresh=1`)
+            if (!response.ok) {
+              throw new Error('Failed to refresh assets')
+            }
+            const data = (await response.json()) as FrameAssetsResponse
+            actions.setAssetsRefreshing(Boolean(data.cache?.refreshing))
+            return data.assets as AssetType[]
+          } catch (error) {
+            actions.setAssetsRefreshing(false)
             console.error(error)
             return []
           }
@@ -137,16 +301,37 @@ export const assetsLogic = kea<assetsLogicType>([
           if (isInFrameAdminMode()) {
             return true
           }
+          const taskId = `asset-sync:${props.frameId}:${Date.now()}`
+          longRunningTasksModel.actions.startTask({
+            id: taskId,
+            frameId: props.frameId,
+            kind: 'upload',
+            title: 'Syncing fonts',
+            detail: 'Preparing font sync',
+          })
           try {
             const response = await apiFetch(frameAssetsApiPath(props.frameId, 'assets/sync'), {
               method: 'POST',
             })
             if (!response.ok) {
-              throw new Error('Failed to upload fonts')
+              throw new Error(await responseErrorMessage(response, 'Failed to sync fonts'))
             }
+            longRunningTasksModel.actions.finishTask({
+              taskId,
+              frameId: props.frameId,
+              kind: 'upload',
+              detail: 'Fonts synced',
+            })
+            actions.loadAssets()
             return true
           } catch (error) {
             console.error(error)
+            longRunningTasksModel.actions.taskFailed({
+              taskId,
+              frameId: props.frameId,
+              kind: 'upload',
+              detail: errorMessage(error, 'Failed to sync fonts'),
+            })
             return false
           }
         },
@@ -179,15 +364,48 @@ export const assetsLogic = kea<assetsLogicType>([
         return buildAssetTree(cleanedAssets, frame.assets_path ?? '/srv/assets')
       },
     ],
+    assetStats: [(s) => [s.assetTree], (assetTree) => collectAssetStats(assetTree)],
+    diskStats: [(s) => [s.sortedMetrics], (sortedMetrics): DiskStats | null => latestDiskStats(sortedMetrics)],
   }),
   listeners(({ actions, props, values }) => ({
     uploadDroppedFiles: async ({ path, files }) => {
+      if (files.length === 0) {
+        return
+      }
       const assetsPath = values.frame.assets_path ?? '/srv/assets'
       const uploadedFiles = files.map((file) => normalizeAssetPath(`${path ? path + '/' : ''}${file.name}`, assetsPath))
+      const taskId = `asset-upload:${props.frameId}:${Date.now()}:${files.length}`
+      const taskTotalBytes = files.reduce((total, file) => total + Math.max(file.size, 1), 0)
+      let completedTaskBytes = 0
+      let failures = 0
+
+      longRunningTasksModel.actions.startTask({
+        id: taskId,
+        frameId: props.frameId,
+        kind: 'upload',
+        title: files.length === 1 ? 'Uploading asset' : `Uploading ${files.length} assets`,
+        detail: files.length === 1 ? files[0].name : 'Preparing upload',
+        progressCurrent: 0,
+        progressTotal: taskTotalBytes,
+      })
+
       actions.filesToUpload(uploadedFiles)
       for (const file of files) {
         const uploadPath = frameAssetsApiPath(props.frameId, 'assets/upload')
         const normalizedPath = normalizeAssetPath(`${path ? path + '/' : ''}${file.name}`, assetsPath)
+        const fileTaskBytes = Math.max(file.size, 1)
+        const updateProgress = (fileUploadedBytes: number, detail = `Uploading ${file.name}`) => {
+          const safeFileUploadedBytes = Math.max(0, Math.min(fileTaskBytes, fileUploadedBytes || 0))
+          actions.uploadProgress(normalizedPath, Math.min(file.size, fileUploadedBytes || 0))
+          longRunningTasksModel.actions.updateTaskProgress({
+            taskId,
+            frameId: props.frameId,
+            kind: 'upload',
+            progressCurrent: Math.min(taskTotalBytes, completedTaskBytes + safeFileUploadedBytes),
+            progressTotal: taskTotalBytes,
+            detail,
+          })
+        }
         try {
           const asset = isInFrameAdminMode()
             ? await uploadFileInChunks({
@@ -196,28 +414,58 @@ export const assetsLogic = kea<assetsLogicType>([
                 file,
                 path,
                 filename: file.name,
-                onProgress: (size) => actions.uploadProgress(normalizedPath, size),
+                onProgress: (size) => updateProgress(size),
               })
             : await (async () => {
                 const formData = new FormData()
                 formData.append('file', file)
                 formData.append('path', path)
-                const response = await apiFetch(uploadPath, {
-                  method: 'POST',
-                  body: formData,
+                return await uploadFormDataWithProgress<AssetType>({
+                  url: uploadPath,
+                  formData,
+                  onProgress: (uploadedBytes, totalBytes) => {
+                    const fileUploadedBytes =
+                      totalBytes && totalBytes > 0
+                        ? Math.round((uploadedBytes / totalBytes) * fileTaskBytes)
+                        : uploadedBytes
+                    updateProgress(fileUploadedBytes)
+                  },
                 })
-                if (!response.ok) {
-                  throw new Error('Failed to upload asset')
-                }
-                return await response.json()
               })()
+          completedTaskBytes += fileTaskBytes
+          updateProgress(fileTaskBytes, `Uploaded ${file.name}`)
           actions.assetUploaded({
             ...asset,
             path: normalizeAssetPath(asset.path, assetsPath),
           })
         } catch (error) {
+          failures += 1
+          completedTaskBytes += fileTaskBytes
           actions.uploadFailure(normalizedPath)
+          longRunningTasksModel.actions.updateTaskProgress({
+            taskId,
+            frameId: props.frameId,
+            kind: 'upload',
+            progressCurrent: Math.min(taskTotalBytes, completedTaskBytes),
+            progressTotal: taskTotalBytes,
+            detail: `Failed ${file.name}`,
+          })
         }
+      }
+      if (failures > 0) {
+        longRunningTasksModel.actions.taskFailed({
+          taskId,
+          frameId: props.frameId,
+          kind: 'upload',
+          detail: failures === 1 ? '1 asset failed to upload' : `${failures} assets failed to upload`,
+        })
+      } else {
+        longRunningTasksModel.actions.finishTask({
+          taskId,
+          frameId: props.frameId,
+          kind: 'upload',
+          detail: files.length === 1 ? `Uploaded ${files[0].name}` : `Uploaded ${files.length} assets`,
+        })
       }
     },
     uploadAssets: async ({ path }) => {
@@ -277,6 +525,12 @@ export const assetsLogic = kea<assetsLogicType>([
     },
   })),
   reducers({
+    assetsRefreshing: [
+      false,
+      {
+        setAssetsRefreshing: (_, { assetsRefreshing }) => assetsRefreshing,
+      },
+    ],
     assets: {
       assetUploaded: (state, { asset }) =>
         state.find((a) => a.path === asset.path)
@@ -318,5 +572,11 @@ export const assetsLogic = kea<assetsLogicType>([
         )
       },
     },
+  }),
+  afterMount(({ actions }) => {
+    actions.loadAssets()
+  }),
+  beforeUnmount(({ cache }) => {
+    window.clearTimeout(cache.reloadTimer)
   }),
 ])

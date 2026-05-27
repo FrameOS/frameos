@@ -1,38 +1,47 @@
-import { H4 } from '../../components/H4'
-import { Box } from '../../components/Box'
 import { Form } from 'kea-forms'
 import { Field } from '../../components/Field'
 import { TextInput } from '../../components/TextInput'
-import { Button } from '../../components/Button'
 import { loginLogic } from './loginLogic'
 import { useValues } from 'kea'
-import { assetUrl } from '../../utils/assetUrl'
-import darkMarkSmall from '../../assets/logo/dark-mark-small.png'
+import { AuthScreen } from '../auth/AuthScreen'
+
+const authInputClassName =
+  'frameos-input auth-input h-12 rounded-2xl px-4 py-3 text-base shadow-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-400'
 
 export function Login() {
   const { isLoginFormSubmitting } = useValues(loginLogic)
   return (
-    <div className="h-full w-full min-h-screen max-w-screen flex flex-col items-center justify-center gap-8">
-      <div className="flex gap-4 justify-center items-center">
-        <img src={assetUrl(darkMarkSmall)} className="w-[48px] h-[48px] inline-block align-center" alt="FrameOS" />
-        <H4 className="tracking-wide text-[2.9rem]">FrameOS</H4>
-      </div>
-      <Box id="add-frame" className="p-4 mb-12 w-80 max-w-full">
-        <Form logic={loginLogic} formKey="loginForm" className="space-y-4" enableFormOnSubmit>
-          <Field name="email" label="E-mail">
-            <TextInput name="email" placeholder="email" required />
-          </Field>
-          <Field name="password" label="Password">
-            <TextInput name="password" placeholder="" type="password" required />
-          </Field>
-          <div className="flex gap-2">
-            <Button disabled={isLoginFormSubmitting} type="submit" className="w-full bg-[#5B5983] hover:bg-[#7A6D86]">
-              Login
-            </Button>
-          </div>
-        </Form>
-      </Box>
-    </div>
+    <AuthScreen title="Log in">
+      <Form logic={loginLogic} formKey="loginForm" className="space-y-4" enableFormOnSubmit>
+        <Field name="email" label="Email" className="auth-field">
+          <TextInput
+            name="email"
+            placeholder="email@example.com"
+            type="email"
+            autoComplete="email"
+            className={authInputClassName}
+            required
+          />
+        </Field>
+        <Field name="password" label="Password" className="auth-field">
+          <TextInput
+            name="password"
+            placeholder="Password"
+            type="password"
+            autoComplete="current-password"
+            className={authInputClassName}
+            required
+          />
+        </Field>
+        <button
+          disabled={isLoginFormSubmitting}
+          type="submit"
+          className="frameos-primary-action auth-button flex h-12 w-full items-center justify-center rounded-xl px-5 text-sm font-semibold text-white shadow-lg transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Log in
+        </button>
+      </Form>
+    </AuthScreen>
   )
 }
 

@@ -1,7 +1,7 @@
 import { useActions, useValues } from 'kea'
 import { frameLogic } from '../../frameLogic'
 import { scenesLogic } from './scenesLogic'
-import { DropdownMenu } from '../../../../components/DropdownMenu'
+import { DropdownMenu, DropdownMenuProps } from '../../../../components/DropdownMenu'
 import { PencilSquareIcon, TrashIcon, FlagIcon, PlayIcon } from '@heroicons/react/24/solid'
 import { panelsLogic } from '../panelsLogic'
 import {
@@ -9,70 +9,49 @@ import {
   CloudArrowDownIcon,
   DocumentDuplicateIcon,
   DocumentMagnifyingGlassIcon,
-  EyeIcon,
   FolderPlusIcon,
   TagIcon,
-  ArrowsPointingInIcon,
-  ArrowsPointingOutIcon,
 } from '@heroicons/react/24/outline'
 import { templatesLogic } from '../Templates/templatesLogic'
-import { controlLogic } from './controlLogic'
 import { findConnectedScenes } from './utils'
-import { Panel } from '../../../../types'
+import { workspaceLogic } from '../../../workspace/workspaceLogic'
 
 interface SceneDropDownProps {
   sceneId: string
   context: 'scenes' | 'editDiagram'
+  className?: string
+  horizontal?: boolean
+  buttonColor?: DropdownMenuProps['buttonColor']
 }
 
 function isNotNull<T>(value: T | null): value is T {
   return value !== null
 }
 
-export function SceneDropDown({ sceneId, context }: SceneDropDownProps) {
+export function SceneDropDown({ sceneId, context, className, horizontal, buttonColor }: SceneDropDownProps) {
   const { frameId } = useValues(frameLogic)
-  const { editScene, editSceneJSON, toggleFullScreenPanel } = useActions(panelsLogic)
-  const { fullScreenPanel } = useValues(panelsLogic)
-  const { sceneId: currentSceneId } = useValues(controlLogic({ frameId }))
-  const { scenes, undeployedSceneIds, unsavedSceneIds, previewingSceneId } = useValues(scenesLogic({ frameId }))
-  const { renameScene, duplicateScene, deleteScene, setAsDefault, removeDefault, copySceneJSON, previewScene } =
-    useActions(scenesLogic({ frameId }))
+  const { editScene, editSceneJSON } = useActions(panelsLogic)
+  const { openScenePreview } = useActions(workspaceLogic)
+  const { scenes } = useValues(scenesLogic({ frameId }))
+  const { renameScene, duplicateScene, deleteScene, setAsDefault, removeDefault, copySceneJSON } = useActions(
+    scenesLogic({ frameId })
+  )
   const { saveAsTemplate, saveAsZip } = useActions(templatesLogic({ frameId }))
-  const { setCurrentScene } = useActions(controlLogic({ frameId }))
-  const isFullScreen = fullScreenPanel?.panel === Panel.Diagram && fullScreenPanel?.key === sceneId
   const scene = scenes.find((s) => s.id === sceneId)
   if (!scene) {
     return null
   }
-  const sceneHasChanges = unsavedSceneIds.has(scene.id) || undeployedSceneIds.has(scene.id)
-  const isPreviewing = previewingSceneId === scene.id
   return (
     <DropdownMenu
-      buttonColor="secondary"
+      buttonColor={buttonColor ?? 'secondary'}
+      className={className}
+      horizontal={horizontal}
       items={[
-        context === 'editDiagram'
-          ? {
-              label: isFullScreen ? 'Collapse panel' : 'Expand panel',
-              onClick: () => toggleFullScreenPanel({ panel: Panel.Diagram, key: scene.id }),
-              icon: isFullScreen ? (
-                <ArrowsPointingInIcon className="w-5 h-5" />
-              ) : (
-                <ArrowsPointingOutIcon className="w-5 h-5" />
-              ),
-            }
-          : null,
-        {
-          label: 'Activate',
-          onClick: () => setCurrentScene(scene.id),
-          icon: <PlayIcon className="w-5 h-5" />,
-        },
-        scene.id !== currentSceneId && sceneHasChanges
+        context === 'scenes'
           ? {
               label: 'Preview',
-              onClick: () => previewScene(scene.id),
-              icon: <EyeIcon className="w-5 h-5" />,
-              title: 'Preview unsaved changes on the frame',
-              loading: isPreviewing,
+              onClick: () => openScenePreview(frameId, scene.id),
+              icon: <PlayIcon className="w-5 h-5" />,
             }
           : null,
         context === 'scenes'
@@ -82,11 +61,13 @@ export function SceneDropDown({ sceneId, context }: SceneDropDownProps) {
               icon: <PencilSquareIcon className="w-5 h-5" />,
             }
           : null,
-        {
-          label: 'Edit scene JSON',
-          onClick: () => editSceneJSON(scene.id),
-          icon: <DocumentMagnifyingGlassIcon className="w-5 h-5" />,
-        },
+        context === 'scenes'
+          ? {
+              label: 'Edit scene JSON',
+              onClick: () => editSceneJSON(scene.id),
+              icon: <DocumentMagnifyingGlassIcon className="w-5 h-5" />,
+            }
+          : null,
         {
           label: 'Copy scene JSON',
           onClick: () => copySceneJSON(scene.id),

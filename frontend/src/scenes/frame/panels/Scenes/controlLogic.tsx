@@ -9,12 +9,25 @@ import { loaders } from 'kea-loaders'
 import type { controlLogicType } from './controlLogicType'
 import { socketLogic } from '../../../socketLogic'
 import { apiFetch } from '../../../../utils/apiFetch'
+import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
 
 export interface ControlLogicProps {
   frameId: number
 }
 
 const UPLOADED_SCENE_PREFIX = 'uploaded/'
+const emptyFrameStateRecord: FrameStateRecord = { sceneId: '', states: {} }
+
+function normaliseFrameStateRecord(payload: any): FrameStateRecord {
+  const sceneId = typeof payload?.sceneId === 'string' ? payload.sceneId : ''
+  const states =
+    payload?.states && typeof payload.states === 'object' && !Array.isArray(payload.states) ? payload.states : {}
+  return {
+    sceneId,
+    states,
+    ...(payload?.cache && typeof payload.cache === 'object' ? { cache: payload.cache } : {}),
+  }
+}
 
 export const controlLogic = kea<controlLogicType>([
   path(['src', 'scenes', 'frame', 'panels', 'Scenes', 'controlLogic']),
@@ -31,7 +44,7 @@ export const controlLogic = kea<controlLogicType>([
   }),
   loaders(({ props, values }) => ({
     stateRecord: [
-      {} as FrameStateRecord,
+      emptyFrameStateRecord,
       {
         sync: async (_, breakpoint) => {
           await breakpoint(100)
@@ -39,7 +52,7 @@ export const controlLogic = kea<controlLogicType>([
           try {
             const statesResponse = await apiFetch(`/api/frames/${props.frameId}/states`)
             if (statesResponse.ok) {
-              return await statesResponse.json()
+              return normaliseFrameStateRecord(await statesResponse.json())
             }
           } catch (error) {
             console.error(error)
@@ -51,7 +64,7 @@ export const controlLogic = kea<controlLogicType>([
           }
           console.error('Failed to fetch frame states, but could load one state. You might need to redeploy the frame.')
           const resp = await response.json()
-          return { states: { [resp.sceneId]: resp.state }, sceneId: resp.sceneId }
+          return normaliseFrameStateRecord({ states: { [resp.sceneId]: resp.state }, sceneId: resp.sceneId })
         },
       },
     ],
@@ -71,7 +84,7 @@ export const controlLogic = kea<controlLogicType>([
   })),
   reducers({
     stateRecord: [
-      {} as FrameStateRecord,
+      emptyFrameStateRecord,
       {
         currentSceneChanged: (state, { sceneId }) => ({ ...state, sceneId }),
       },
@@ -111,16 +124,46 @@ export const controlLogic = kea<controlLogicType>([
   }),
   listeners(({ actions, props, values }) => ({
     setCurrentScene: async ({ sceneId }) => {
-      const response = await apiFetch(`/api/frames/${props.frameId}/event/setCurrentScene`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sceneId }),
+      const scene =
+        values.frameForm.scenes?.find((item) => item.id === sceneId) ??
+        values.frame?.scenes?.find((item) => item.id === sceneId)
+      longRunningTasksModel.actions.startTask({
+        frameId: props.frameId,
+        kind: 'activate',
+        sceneId,
+        title: 'Activating scene',
+        detail: scene?.name || sceneId,
       })
-      await response.text()
+      try {
+        const response = await apiFetch(`/api/frames/${props.frameId}/event/setCurrentScene`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sceneId }),
+        })
+        if (!response.ok) {
+          throw new Error('Failed to send scene activation event')
+        }
+        await response.text()
+      } catch (error) {
+        longRunningTasksModel.actions.taskFailed({
+          frameId: props.frameId,
+          kind: 'activate',
+          sceneId,
+          detail: error instanceof Error ? error.message : 'Failed to activate scene',
+        })
+        throw error
+      }
     },
-    syncSuccess: ({ stateRecord }) => {
+    syncSuccess: async ({ stateRecord }, breakpoint) => {
       if (stateRecord?.sceneId?.startsWith(UPLOADED_SCENE_PREFIX)) {
         actions.loadUploadedScenes()
+      }
+      if (stateRecord?.cache?.refreshing && !stateRecord.cache.cached) {
+        const retryAfterSeconds = Math.max(1, Number(stateRecord.cache.retry_after) || 5)
+        await breakpoint(retryAfterSeconds * 1000)
+        if (!values.stateRecordLoading) {
+          actions.sync()
+        }
       }
     },
     [socketLogic.actionTypes.newLog]: ({ log }) => {
@@ -129,7 +172,9 @@ export const controlLogic = kea<controlLogicType>([
         if (event === 'render:sceneChange') {
           if (sceneId !== values.sceneId) {
             actions.currentSceneChanged(sceneId)
-            actions.sync()
+            if (!values.stateRecordLoading) {
+              actions.sync()
+            }
           } else {
             actions.currentSceneChanged(sceneId)
           }
@@ -138,7 +183,9 @@ export const controlLogic = kea<controlLogicType>([
           event === 'event:setCurrentScene' ||
           event === 'event:uploadScenes'
         ) {
-          actions.sync()
+          if (!values.stateRecordLoading) {
+            actions.sync()
+          }
         }
       } catch (error) {}
     },

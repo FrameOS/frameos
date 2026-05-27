@@ -3,10 +3,7 @@ import { clsx } from 'clsx'
 
 export function Box({ children, className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
   return (
-    <div
-      className={clsx('border rounded-lg shadow bg-gray-800 border-gray-700 break-inside-avoid', className)}
-      {...props}
-    >
+    <div className={clsx('frameos-card border rounded-lg shadow break-inside-avoid', className)} {...props}>
       {children}
     </div>
   )

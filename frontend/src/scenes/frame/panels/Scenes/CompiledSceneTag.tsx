@@ -1,4 +1,3 @@
-import { AdjustmentsHorizontalIcon, PencilSquareIcon } from '@heroicons/react/24/outline'
 import { Tag } from '../../../../components/Tag'
 import { Tooltip } from '../../../../components/Tooltip'
 
@@ -11,11 +10,7 @@ export function CompiledSceneTag({ className }: CompiledSceneTagProps): JSX.Elem
     <Tooltip
       containerClassName="inline-block align-middle"
       title={
-        <>
-          This is a compiled scene. All changes require a full redeploy. Click{' '}
-          <PencilSquareIcon className="w-5 h-5 inline-block" /> and then
-          <AdjustmentsHorizontalIcon className="w-5 h-5 inline-block" /> in to change.
-        </>
+        <>This is a compiled scene. All changes require a full FrameOS recompilation. Change under the scene info.</>
       }
     >
       <Tag className={className} color="none">

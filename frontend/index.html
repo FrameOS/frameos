@@ -3,6 +3,29 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/img/logo-2/logo.svg" data-frameos-favicon />
+    <script>
+      try {
+        const storedTheme = window.localStorage.getItem('frameos.workspaceTheme')
+        const theme =
+          storedTheme === 'light' || storedTheme === 'dark'
+            ? storedTheme
+            : window.matchMedia?.('(prefers-color-scheme: dark)').matches
+            ? 'dark'
+            : 'light'
+        document.documentElement.dataset.frameosTheme = theme
+        document.documentElement.style.colorScheme = theme
+
+        const favicon = document.querySelector('link[data-frameos-favicon]')
+        if (favicon) {
+          const basePath = ((window.FRAMEOS_APP_CONFIG && window.FRAMEOS_APP_CONFIG.ingress_path) || '').replace(
+            /\/$/,
+            ''
+          )
+          favicon.href = basePath + (theme === 'dark' ? '/img/logo-2/logo-white-colors.svg' : '/img/logo-2/logo.svg')
+        }
+      } catch (error) {}
+    </script>
     <title>FrameOS Backend</title>
   </head>
   <body class="text-white">

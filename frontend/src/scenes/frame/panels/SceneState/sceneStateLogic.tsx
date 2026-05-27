@@ -62,7 +62,7 @@ export const sceneStateLogic = kea<sceneStateLogicType>([
         return Object.fromEntries(
           fields.map((field, index) => {
             const fieldErrors = errors.fields?.[index] ?? {}
-            return [field.name, Object.values(fieldErrors).some(Boolean)]
+            return [String(index), Object.values(fieldErrors).some(Boolean)]
           })
         )
       },

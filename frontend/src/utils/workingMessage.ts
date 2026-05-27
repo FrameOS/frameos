@@ -32,3 +32,13 @@ export function showWorkingMessage(text: string): { success: (message: string) =
     },
   }
 }
+
+export function showSuccessMessage(text: string): void {
+  configureMessg()
+  success(text, 3500)
+}
+
+export function showErrorMessage(text: string): void {
+  configureMessg()
+  error(text, 4500)
+}
