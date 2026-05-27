@@ -18,12 +18,41 @@ import drivers/drivers as drivers
 # How fast must a scene render to be condidered fast. Two in a row pauses logging for 10s.
 const FAST_SCENE_CUTOFF_SECONDS = 0.5
 const INKY_FAST_RENDER_THRESHOLD_MS = 2.0
+const SCENE_INIT_ERROR_REFRESH_SECONDS = 60.0
+const SCENE_INIT_ERROR_STATE_KEY = "__frameosSceneInitError"
 
 # How frequently we announce a new render via websockets
 const SERVER_RENDER_DELAY_SECONDS = 1.0
 const RENDER_SLEEP_SLICE_MS = 100.0
 
 var thread: Thread[(FrameConfig, Logger, Option[SceneId])]
+
+proc renderSceneInitError(scene: FrameScene, context: ExecutionContext): Image =
+  let message = scene.state{SCENE_INIT_ERROR_STATE_KEY}.getStr("Scene failed to start.")
+  context.image = renderError(context.image.width, context.image.height, message)
+  context.image
+
+proc initSceneInitErrorScene(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, error: string): FrameScene =
+  let sceneName = getSceneDisplayName(sceneId)
+  let label = if sceneName.isSome: sceneName.get() else: sceneId.string
+  FrameScene(
+    id: sceneId,
+    frameConfig: frameConfig,
+    logger: logger,
+    state: %*{SCENE_INIT_ERROR_STATE_KEY: &"Scene \"{label}\" failed to start.\n\n{error}"},
+    refreshInterval: SCENE_INIT_ERROR_REFRESH_SECONDS,
+    backgroundColor: parseHtmlColor("#ffffff")
+  )
+
+proc sceneInitErrorExport(): ExportedScene =
+  ExportedScene(
+    publicStateFields: @[],
+    persistedStateKeys: @[],
+    render: renderSceneInitError,
+    runEvent: proc (self: FrameScene, context: ExecutionContext): void = discard,
+    init: proc (sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persistedState: JsonNode): FrameScene =
+      initSceneInitErrorScene(sceneId, frameConfig, logger, "Scene failed to start.")
+  )
 
 proc configureControlCode(self: RunnerThread) =
   if self.frameConfig.controlCode.enabled:
@@ -99,8 +128,9 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
       discard
     result = (outImage.rotateDegrees(self.frameConfig.rotate), context.nextSleep)
   except Exception as e:
-    updateBootGuardFailureDetails(some(scene.id.string), getSceneDisplayName(scene.id), some($e.msg))
-    result = (renderError(requiredWidth, requiredHeight, &"Error: {$e.msg}\n{$e.getStackTrace()}"), context.nextSleep)
+    let errorImage = renderError(requiredWidth, requiredHeight, &"Error: {$e.msg}\n{$e.getStackTrace()}")
+    setLastImage(errorImage)
+    result = (errorImage, context.nextSleep)
     self.logger.log(%*{"event": "render:error", "error": $e.msg, "stacktrace": e.getStackTrace()})
 
   self.lastRenderAt = epochTime()
@@ -141,6 +171,7 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
     if sceneId != self.currentSceneId:
       self.currentSceneId = sceneId
     if lastSceneId != sceneId:
+      var sceneInitialized = true
       self.logger.log(%*{"event": "render:sceneChange", "sceneId": sceneId.string})
       # Persist the active scene context early in boot, then stop writing it
       # after a few successful renders to reduce SD card writes.
@@ -154,10 +185,15 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
           self.scenes[sceneId] = currentScene
           currentScene.updateLastPublicState()
         except Exception as e:
-          updateBootGuardFailureDetails(some(sceneId.string), getSceneDisplayName(sceneId), some($e.msg))
+          sceneInitialized = false
+          currentScene = initSceneInitErrorScene(sceneId, self.frameConfig, self.logger, $e.msg)
+          exportedScene = some(sceneInitErrorExport())
           self.logger.log(%*{"event": "render:error:scene:init", "error": $e.msg, "stacktrace": e.getStackTrace()})
 
-      lastSceneId = sceneId
+      if sceneInitialized:
+        lastSceneId = sceneId
+      else:
+        lastSceneId = "".SceneId
       setLastPublicSceneId(sceneId)
 
     currentScene.isRendering = true
