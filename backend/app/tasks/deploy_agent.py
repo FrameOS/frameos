@@ -6,6 +6,7 @@ import os
 import shlex
 import shutil
 import tempfile
+from pathlib import Path
 from typing import Any, Optional
 
 from arq import ArqRedis as Redis
@@ -19,12 +20,16 @@ from app.tasks._frame_deployer import FrameDeployer
 from app.tasks.frame_deploy_helpers import sanitize_apt_package_name
 from app.tasks.prebuilt_deps import resolve_prebuilt_target
 from app.tasks.precompiled_agent import download_precompiled_agent_release
+from app.utils.build_host import get_build_host_config
+from app.utils.cross_compile import CrossCompiler, TargetMetadata, can_cross_compile_target
 from app.utils.versions import current_agent_version, get_versions
 from .utils import find_nim_v2, find_nimbase_file, get_fresh_frame
 
 
 PRECOMPILED_AGENT_ENV = "FRAMEOS_AGENT_PRECOMPILED"
 AGENT_SOURCE_BUILD_APT_PACKAGES = ("build-essential", "libssl-dev")
+AGENT_BINARY = "frameos_agent"
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def precompiled_agent_enabled() -> bool:
@@ -160,6 +165,7 @@ class AgentDeployer(FrameDeployer):
                         await self._wait_for_agent_release()
                     else:
                         await self.restart_service("frameos_agent")
+                        await self._wait_for_agent_release()
 
                     await self._cleanup_old_builds()
                     await self.log(
@@ -201,7 +207,7 @@ class AgentDeployer(FrameDeployer):
         source_dir = os.path.join(self.temp_dir, "agent")
 
         os.makedirs(source_dir, exist_ok=True)
-        shutil.copytree("../frameos/agent", source_dir, dirs_exist_ok=True)  # idempotent copy
+        shutil.copytree(REPO_ROOT / "frameos" / "agent", source_dir, dirs_exist_ok=True)  # idempotent copy
         os.makedirs(build_dir, exist_ok=True)
 
         return build_dir, source_dir
@@ -235,6 +241,7 @@ class AgentDeployer(FrameDeployer):
         if not nimbase_path:
             raise Exception("nimbase.h not found")
         shutil.copy(nimbase_path, os.path.join(build_dir, "nimbase.h"))
+        self._write_agent_c_makefile(build_dir)
 
         archive_path = os.path.join(self.temp_dir, f"agent_{self.build_id}.tar.gz")
         shutil.make_archive(
@@ -244,6 +251,17 @@ class AgentDeployer(FrameDeployer):
             base_dir=f"agent_{self.build_id}",
         )
         return archive_path
+
+    def _write_agent_c_makefile(self, build_dir: str) -> None:
+        script_path = self._find_compile_script(build_dir, "compile_frameos_agent.sh")
+        linker_flags, compiler_flags = self._extract_compile_flags(script_path, AGENT_BINARY)
+        self._write_c_makefile(
+            makefile_path=os.path.join(build_dir, "Makefile"),
+            template_path=str(REPO_ROOT / "frameos" / "tools" / "nimc.Makefile"),
+            output_name=AGENT_BINARY,
+            linker_flags=linker_flags,
+            compiler_flags=compiler_flags,
+        )
 
     # --------------- DEPLOY ─────────────────────────────────────────--- #
 
@@ -281,20 +299,29 @@ class AgentDeployer(FrameDeployer):
                 )
         else:
             reason = "requested from local development" if self.force_source else f"{PRECOMPILED_AGENT_ENV}=source"
-            await self.log("stdout", f"- {reason}; building agent on the device")
+            await self.log("stdout", f"- {reason}; building agent from source")
 
-        await self._deploy_agent_from_source(arch, distro=distro)
+        await self._deploy_agent_from_source(arch, distro=distro, distro_version=distro_version)
 
-    async def _deploy_agent_from_source(self, arch: str, *, distro: str) -> None:
+    async def _deploy_agent_from_source(self, arch: str, *, distro: str, distro_version: str) -> None:
         """
-        Build the agent locally, upload the tarball to the device,
-        compile natively, and stage the binary in the new release folder.
+        Build generated agent sources locally, cross-compile them when possible,
+        and fall back to native compilation on the device when needed.
         """
-        await self._ensure_agent_source_build_dependencies(distro)
-
         build_dir, source_dir = self._create_agent_build_folders()
         archive_path = await self._create_local_build_archive(build_dir, source_dir, arch)
 
+        cross_compiled = await self._try_cross_compile_agent(
+            build_dir=build_dir,
+            source_dir=source_dir,
+            arch=arch,
+            distro=distro,
+            distro_version=distro_version,
+        )
+        if cross_compiled:
+            return
+
+        await self._ensure_agent_source_build_dependencies(distro)
         await self._ensure_agent_directories()
 
         with open(archive_path, "rb") as fh:
@@ -324,6 +351,52 @@ class AgentDeployer(FrameDeployer):
             f"{self._release_dir()}/frameos_agent"
         )
         await self.exec_command(f"chmod +x {self._release_dir()}/frameos_agent")
+
+    async def _try_cross_compile_agent(
+        self,
+        *,
+        build_dir: str,
+        source_dir: str,
+        arch: str,
+        distro: str,
+        distro_version: str,
+    ) -> bool:
+        if not can_cross_compile_target(arch):
+            await self.log(
+                "stdout",
+                f"- Agent target architecture {arch} does not support cross compilation; building on the device",
+            )
+            return False
+
+        build_host = get_build_host_config(self.db)
+        if build_host:
+            await self.log("stdout", "- Cross compiling agent via build host")
+        else:
+            await self.log("stdout", "- Cross compiling agent locally")
+
+        try:
+            binary_path = await CrossCompiler(
+                db=self.db,
+                redis=self.redis,
+                frame=self.frame,
+                deployer=self,
+                target=TargetMetadata(arch=arch, distro=distro, version=distro_version),
+                temp_dir=self.temp_dir,
+                build_dir=build_dir,
+                logger=self.log,
+                build_host=build_host,
+                output_name=AGENT_BINARY,
+                compile_script_name="compile_frameos_agent.sh",
+                needs_quickjs=False,
+                needs_lgpio=False,
+            ).build(source_dir)
+        except Exception as exc:  # noqa: BLE001
+            await self.log("stderr", f"- Agent cross compilation failed ({exc}); falling back to on-device build")
+            return False
+
+        await self.log("stdout", "- Agent cross compilation succeeded; skipping on-device compile")
+        await self._stage_agent_binary(binary_path)
+        return True
 
     async def _ensure_agent_source_build_dependencies(self, distro: str) -> None:
         gcc_check = "command -v gcc >/dev/null 2>&1"

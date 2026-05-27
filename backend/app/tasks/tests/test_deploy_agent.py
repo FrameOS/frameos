@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -25,6 +26,7 @@ class FakeAgentDeployer(AgentDeployer):
         self.staged_binary: str | None = None
         self.source_arch: str | None = None
         self.source_distro: str | None = None
+        self.source_distro_version: str | None = None
 
     async def log(self, type: str, line: str, timestamp=None):  # type: ignore[override]
         self.logs.append((type, line))
@@ -53,9 +55,16 @@ class FakeAgentDeployer(AgentDeployer):
     async def _stage_agent_binary(self, binary_path: str) -> None:  # type: ignore[override]
         self.staged_binary = binary_path
 
-    async def _deploy_agent_from_source(self, arch: str, *, distro: str) -> None:  # type: ignore[override]
+    async def _deploy_agent_from_source(  # type: ignore[override]
+        self,
+        arch: str,
+        *,
+        distro: str,
+        distro_version: str,
+    ) -> None:
         self.source_arch = arch
         self.source_distro = distro
+        self.source_distro_version = distro_version
 
 
 class FakeRedis:
@@ -64,6 +73,67 @@ class FakeRedis:
 
     async def enqueue_job(self, name: str, **kwargs):
         self.jobs.append((name, kwargs))
+
+
+class RunFlowAgentDeployer(AgentDeployer):
+    def __init__(self, tmp_path: Path, *, transport: str) -> None:
+        super().__init__(
+            db=None,
+            redis=None,
+            frame=SimpleNamespace(
+                id=1,
+                name="AgentFrame",
+                debug=False,
+                agent={"agentEnabled": True, "agentSharedSecret": "secret"},
+            ),
+            nim_path="",
+            temp_dir=str(tmp_path),
+            transport=transport,
+        )
+        self.events: list[str] = []
+        self.logs: list[tuple[str, str]] = []
+
+    async def log(self, type: str, line: str, timestamp=None):  # type: ignore[override]
+        self.logs.append((type, line))
+
+    async def get_cpu_architecture(self) -> str:  # type: ignore[override]
+        return "aarch64"
+
+    async def get_distro(self) -> str:  # type: ignore[override]
+        return "debian"
+
+    async def get_distro_version(self) -> str:  # type: ignore[override]
+        return "bookworm"
+
+    async def _deploy_agent(self, *, arch: str, distro: str, distro_version: str) -> None:  # type: ignore[override]
+        self.events.append(f"deploy:{arch}:{distro}:{distro_version}")
+
+    async def _setup_agent_service(self) -> None:  # type: ignore[override]
+        self.events.append("setup_service")
+
+    async def _upload_frame_json(self, path: str) -> None:  # type: ignore[override]
+        self.events.append(f"upload_frame_json:{path}")
+
+    async def _verify_staged_release(self) -> None:  # type: ignore[override]
+        self.events.append("verify_staged_release")
+
+    async def _verify_agent_transport(self, label: str) -> None:  # type: ignore[override]
+        self.events.append(f"verify_transport:{label}")
+
+    async def _switch_current_release(self) -> None:  # type: ignore[override]
+        self.events.append("switch_current_release")
+
+    async def _restart_agent_service_via_agent(self) -> None:  # type: ignore[override]
+        self.events.append("restart_via_agent")
+
+    async def restart_service(self, service_name: str) -> None:  # type: ignore[override]
+        self.events.append(f"restart_service:{service_name}")
+
+    async def _wait_for_agent_release(self) -> None:  # type: ignore[override]
+        self.events.append("wait_for_agent_release")
+
+    async def _cleanup_old_builds(self) -> None:  # type: ignore[override]
+        self.events.append("cleanup_old_builds")
 
 
 @pytest.mark.asyncio
@@ -152,6 +222,7 @@ async def test_deploy_agent_can_force_source_build(
     assert deployer.staged_binary is None
     assert deployer.source_arch == "aarch64"
     assert deployer.source_distro == "debian"
+    assert deployer.source_distro_version == "trixie"
     assert any("requested from local development" in message for _level, message in deployer.logs)
 
 
@@ -160,7 +231,7 @@ async def test_deploy_agent_task_does_not_require_nim_before_running_deployer(
     monkeypatch: pytest.MonkeyPatch,
 ):
     deploy_agent_module = importlib.import_module("app.tasks.deploy_agent")
-    captured: dict[str, object] = {}
+    captured: dict[str, Any] = {}
 
     async def fake_run(self):
         captured["ran"] = True
@@ -213,6 +284,30 @@ async def test_deploy_agent_task_keeps_explicit_ssh_transport(
 
 
 @pytest.mark.asyncio
+async def test_deploy_agent_ssh_restart_waits_for_staged_release(tmp_path: Path):
+    deployer = RunFlowAgentDeployer(tmp_path, transport="ssh")
+
+    await deployer.run()
+
+    assert "restart_service:frameos_agent" in deployer.events
+    assert "wait_for_agent_release" in deployer.events
+    assert deployer.events.index("restart_service:frameos_agent") < deployer.events.index("wait_for_agent_release")
+    assert deployer.events.index("wait_for_agent_release") < deployer.events.index("cleanup_old_builds")
+
+
+@pytest.mark.asyncio
+async def test_deploy_agent_agent_transport_restarts_and_waits_for_staged_release(tmp_path: Path):
+    deployer = RunFlowAgentDeployer(tmp_path, transport="agent")
+
+    await deployer.run()
+
+    assert "restart_via_agent" in deployer.events
+    assert "wait_for_agent_release" in deployer.events
+    assert deployer.events.index("restart_via_agent") < deployer.events.index("wait_for_agent_release")
+    assert deployer.events.index("wait_for_agent_release") < deployer.events.index("cleanup_old_builds")
+
+
+@pytest.mark.asyncio
 async def test_deploy_agent_falls_back_to_source_for_unsupported_target(tmp_path: Path):
     deployer = FakeAgentDeployer(tmp_path)
 
@@ -221,6 +316,98 @@ async def test_deploy_agent_falls_back_to_source_for_unsupported_target(tmp_path
     assert deployer.staged_binary is None
     assert deployer.source_arch == "mips64"
     assert deployer.source_distro == "debian"
+    assert deployer.source_distro_version == "trixie"
+
+
+@pytest.mark.asyncio
+async def test_agent_source_build_cross_compiles_before_remote_build(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    captured: dict[str, object] = {}
+
+    class FakeCrossCompiler:
+        def __init__(self, **kwargs):
+            captured["kwargs"] = kwargs
+
+        async def build(self, source_dir: str) -> str:
+            captured["source_dir"] = source_dir
+            binary_path = tmp_path / "cross-frameos-agent"
+            binary_path.write_bytes(b"agent")
+            return str(binary_path)
+
+    deploy_agent_module = importlib.import_module("app.tasks.deploy_agent")
+    monkeypatch.setattr(deploy_agent_module, "CrossCompiler", FakeCrossCompiler)
+    monkeypatch.setattr(deploy_agent_module, "get_build_host_config", lambda _db: None)
+
+    deployer = FakeAgentDeployer(tmp_path)
+    success = await deployer._try_cross_compile_agent(
+        build_dir=str(tmp_path / "build"),
+        source_dir=str(tmp_path / "source"),
+        arch="aarch64",
+        distro="ubuntu",
+        distro_version="noble",
+    )
+
+    assert success is True
+    assert deployer.staged_binary == str(tmp_path / "cross-frameos-agent")
+    assert captured["source_dir"] == str(tmp_path / "source")
+    kwargs = captured["kwargs"]
+    assert kwargs["build_dir"] == str(tmp_path / "build")
+    assert kwargs["output_name"] == "frameos_agent"
+    assert kwargs["compile_script_name"] == "compile_frameos_agent.sh"
+    assert kwargs["needs_quickjs"] is False
+    assert kwargs["needs_lgpio"] is False
+
+
+@pytest.mark.asyncio
+async def test_agent_source_build_does_not_touch_device_when_cross_compile_succeeds(tmp_path: Path):
+    calls: list[str] = []
+
+    class CrossCompileSuccessDeployer(FakeAgentDeployer):
+        def _create_agent_build_folders(self) -> tuple[str, str]:  # type: ignore[override]
+            calls.append("prepare")
+            build_dir = tmp_path / "build"
+            source_dir = tmp_path / "source"
+            build_dir.mkdir()
+            source_dir.mkdir()
+            return str(build_dir), str(source_dir)
+
+        async def _create_local_build_archive(  # type: ignore[override]
+            self,
+            build_dir: str,
+            source_dir: str,
+            arch: str,
+        ) -> str:
+            calls.append(f"archive:{arch}:{Path(build_dir).name}:{Path(source_dir).name}")
+            archive = tmp_path / "agent.tar.gz"
+            archive.write_bytes(b"archive")
+            return str(archive)
+
+        async def _try_cross_compile_agent(self, **kwargs) -> bool:  # type: ignore[override]
+            calls.append(f"cross:{kwargs['arch']}:{kwargs['distro']}:{kwargs['distro_version']}")
+            return True
+
+        async def _ensure_agent_source_build_dependencies(self, distro: str) -> None:  # type: ignore[override]
+            raise AssertionError(f"device dependency check should not run for {distro}")
+
+        async def _ensure_agent_directories(self) -> None:  # type: ignore[override]
+            raise AssertionError("device staging should not run after cross compile succeeds")
+
+    deployer = CrossCompileSuccessDeployer(tmp_path)
+
+    await AgentDeployer._deploy_agent_from_source(
+        deployer,
+        "aarch64",
+        distro="ubuntu",
+        distro_version="noble",
+    )
+
+    assert calls == [
+        "prepare",
+        "archive:aarch64:build:source",
+        "cross:aarch64:ubuntu:noble",
+    ]
 
 
 @pytest.mark.asyncio

@@ -209,6 +209,33 @@ function shouldAppendLogToTask(task: LongRunningTask, log: LogType): boolean {
   return !(isAgentTaskKind(task.kind) && log.type === 'webhook')
 }
 
+function agentTaskFailureDetail(log: LogType, lowerLine: string): string | null {
+  if (log.type !== 'stderr') {
+    return null
+  }
+  if (
+    lowerLine.includes('falling back') ||
+    lowerLine.includes('agent deployment completed') ||
+    lowerLine.includes('skipping agent deployment') ||
+    lowerLine.includes('[frameos-cross] container uname')
+  ) {
+    return null
+  }
+  if (
+    lowerLine.includes('failed') ||
+    lowerLine.includes('unable to') ||
+    lowerLine.includes('timed out') ||
+    lowerLine.includes('timeout') ||
+    lowerLine.includes('traceback') ||
+    lowerLine.includes('exception') ||
+    lowerLine.includes('error') ||
+    lowerLine.includes('not found')
+  ) {
+    return log.line || 'Agent task failed'
+  }
+  return null
+}
+
 export const longRunningTasksModel = kea<longRunningTasksModelType>([
   connect(() => ({ logic: [socketLogic] })),
   path(['src', 'models', 'longRunningTasksModel']),
@@ -364,19 +391,20 @@ export const longRunningTasksModel = kea<longRunningTasksModelType>([
     [SOCKET_NEW_LOG]: ({ log }) => {
       const lowerLine = log.line.toLowerCase()
 
-      if (log.type === 'stderr') {
+      const agentFailureDetail = agentTaskFailureDetail(log, lowerLine)
+      if (agentFailureDetail) {
         if (latestRunningTask(values.tasks, { frameId: log.frame_id, kind: 'agentDeploy' })) {
           actions.taskFailed({
             frameId: log.frame_id,
             kind: 'agentDeploy',
-            detail: log.line || 'Agent deploy failed',
+            detail: agentFailureDetail,
           })
         }
         if (latestRunningTask(values.tasks, { frameId: log.frame_id, kind: 'agentRestart' })) {
           actions.taskFailed({
             frameId: log.frame_id,
             kind: 'agentRestart',
-            detail: log.line || 'Agent restart failed',
+            detail: agentFailureDetail,
           })
         }
       }
@@ -386,7 +414,7 @@ export const longRunningTasksModel = kea<longRunningTasksModelType>([
           frameId: log.frame_id,
           kind: 'agentDeploy',
           status: 'success',
-          detail: 'Agent deployed',
+          detail: 'Agent deployed and restarted',
         })
       } else if (lowerLine.includes('skipping agent deployment')) {
         actions.finishTask({

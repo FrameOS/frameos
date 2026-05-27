@@ -385,7 +385,7 @@ async def _run_command_agent(
             "frame_id": frame.id,
             "payload":  payload,
             "timeout":  timeout,
-            # TODO: "log": bool(log_command),  # not used yet
+            "log": bool(log_output),
         }
         await redis.rpush(CMD_KEY.format(id=frame.id), json.dumps(job).encode())
 

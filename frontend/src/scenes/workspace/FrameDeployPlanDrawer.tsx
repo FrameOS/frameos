@@ -374,13 +374,21 @@ function DeployTransportToggle({
               <button
                 type="button"
                 aria-pressed={deployWithAgent}
+                title={agentConnected ? 'FrameOS agent connected' : 'FrameOS agent not connected'}
                 onClick={() => onChange(true)}
                 className={clsx(
-                  'rounded-l-lg px-3 py-1.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+                  'inline-flex items-center gap-1.5 rounded-l-lg px-3 py-1.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
                   !deployWithAgent && 'hover:text-[color:var(--tool-strong)]'
                 )}
               >
-                Agent
+                <span
+                  aria-hidden="true"
+                  className={clsx(
+                    'h-2 w-2 shrink-0 rounded-full ring-1 ring-inset',
+                    agentConnected ? 'bg-blue-400 ring-blue-300/80' : 'bg-slate-300 ring-slate-400/50'
+                  )}
+                />
+                <span>Agent</span>
               </button>
               <DropdownMenu
                 buttonColor="none"
@@ -426,8 +434,6 @@ function DeployTransportToggle({
                             ? 'Stage, verify, switch, and restart the FrameOS agent through the connected agent'
                             : 'The FrameOS agent is not connected',
                           disabled: !agentConnected,
-                          confirm:
-                            'Deploy the FrameOS agent through the currently connected agent? The backend will verify the staged release before switching and then confirm the restarted service is running the new binary.',
                           onClick: () => onDeployAgent(false, 'agent'),
                         },
                         ...(showRecompileAgent
@@ -438,13 +444,11 @@ function DeployTransportToggle({
                                 onClick: () => onDeployAgent(true, 'ssh'),
                               },
                               {
-                                label: 'Recompile and deploy via agent',
+                                label: 'Recompile and deploy agent via agent',
                                 title: agentConnected
                                   ? 'Recompile FrameOS agent from local source, then stage, verify, switch, and restart through the connected agent'
                                   : 'The FrameOS agent is not connected',
                                 disabled: !agentConnected,
-                                confirm:
-                                  'Recompile and deploy the FrameOS agent through the currently connected agent? The backend will compile first, verify the staged release before switching, and then confirm the restarted service is running the new binary.',
                                 onClick: () => onDeployAgent(true, 'agent'),
                               },
                             ]

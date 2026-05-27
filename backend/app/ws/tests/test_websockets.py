@@ -1,3 +1,5 @@
+import json
+from types import SimpleNamespace
 from typing import Generator
 
 import pytest
@@ -214,3 +216,77 @@ async def test_agent_command_slot_times_out_when_frame_busy() -> None:
         with pytest.raises(TimeoutError, match="agent command queue busy"):
             async with frame_command_slot(987654, queue_timeout=0.01):
                 pass
+
+
+@pytest.mark.asyncio
+async def test_agent_stream_chunk_can_skip_frame_logs(monkeypatch) -> None:
+    from app.ws import agent_ws
+
+    class FakeRedis:
+        def __init__(self) -> None:
+            self.pushed: list[tuple[str, bytes]] = []
+            self.expired: list[tuple[str, int]] = []
+
+        async def rpush(self, key: str, value: bytes) -> None:
+            self.pushed.append((key, value))
+
+        async def expire(self, key: str, seconds: int) -> None:
+            self.expired.append((key, seconds))
+
+    logged: list[tuple[int, str, str]] = []
+
+    async def fake_write_log(_redis, frame_id: int, type: str, line: str, ip: str | None = None):
+        logged.append((frame_id, type, line))
+
+    monkeypatch.setattr(agent_ws, "write_log", fake_write_log)
+
+    redis = FakeRedis()
+    frame = SimpleNamespace(id=77)
+    ws = SimpleNamespace(scope={"cmd_log_output": {"quiet-cmd": False}})
+
+    await agent_ws.handle_agent_stream_chunk(
+        ws,
+        redis,
+        frame,
+        {"id": "quiet-cmd", "type": "cmd/stream", "stream": "stdout", "data": "raspios\nbookworm"},
+        client_ip="127.0.0.1",
+    )
+
+    assert logged == []
+    assert [json.loads(raw) for _key, raw in redis.pushed] == [
+        {"stream": "stdout", "data": "raspios"},
+        {"stream": "stdout", "data": "bookworm"},
+    ]
+    assert redis.expired == [("agent:cmd:stream:quiet-cmd", 300)]
+
+
+@pytest.mark.asyncio
+async def test_agent_stream_chunk_logs_by_default(monkeypatch) -> None:
+    from app.ws import agent_ws
+
+    class FakeRedis:
+        async def rpush(self, _key: str, _value: bytes) -> None:
+            pass
+
+        async def expire(self, _key: str, _seconds: int) -> None:
+            pass
+
+    logged: list[tuple[int, str, str]] = []
+
+    async def fake_write_log(_redis, frame_id: int, type: str, line: str, ip: str | None = None):
+        logged.append((frame_id, type, line))
+
+    monkeypatch.setattr(agent_ws, "write_log", fake_write_log)
+
+    frame = SimpleNamespace(id=88)
+    ws = SimpleNamespace(scope={})
+
+    await agent_ws.handle_agent_stream_chunk(
+        ws,
+        FakeRedis(),
+        frame,
+        {"id": "normal-cmd", "type": "cmd/stream", "stream": "stdout", "data": "visible"},
+        client_ip=None,
+    )
+
+    assert logged == [(88, "stdout", "visible")]
