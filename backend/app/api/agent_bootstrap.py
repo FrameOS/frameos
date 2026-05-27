@@ -48,7 +48,7 @@ def _agent_bootstrap_token_valid(frame: Frame, token: str) -> bool:
     return secrets.compare_digest(_agent_bootstrap_token(frame), token)
 
 
-async def _ensure_agent_bootstrap_enabled(db: Session, redis: Redis, frame: Frame) -> None:
+async def _ensure_agent_bootstrap_enabled(db: Session, redis: Redis, frame: Frame, *, select_agent: bool = True) -> None:
     changed = False
     agent = dict(frame.agent or {}) if isinstance(frame.agent, dict) else {}
 
@@ -60,10 +60,14 @@ async def _ensure_agent_bootstrap_enabled(db: Session, redis: Redis, frame: Fram
         agent["agentSharedSecret"] = secure_token(32)
         changed = True
 
-    for key in ("agentEnabled", "agentRunCommands", "deployWithAgent"):
+    for key in ("agentEnabled", "agentRunCommands"):
         if agent.get(key) is not True:
             agent[key] = True
             changed = True
+
+    if select_agent and agent.get("deployWithAgent") is not True:
+        agent["deployWithAgent"] = True
+        changed = True
 
     if changed:
         frame.agent = agent
@@ -297,6 +301,7 @@ echo "FrameOS agent installed and started"
 async def api_frame_agent_bootstrap_command(
     id: int,
     request: Request,
+    select_agent: bool = True,
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
@@ -306,7 +311,7 @@ async def api_frame_agent_bootstrap_command(
     if (frame.mode or "rpios") != "rpios":
         _bad_request("Agent bootstrap is only supported for Raspberry Pi OS frames")
 
-    await _ensure_agent_bootstrap_enabled(db, redis, frame)
+    await _ensure_agent_bootstrap_enabled(db, redis, frame, select_agent=select_agent)
     script_url = _agent_bootstrap_script_url(request, frame)
     return {
         "script_url": script_url,

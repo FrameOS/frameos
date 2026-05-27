@@ -80,6 +80,22 @@ async def test_api_frame_agent_bootstrap_command_enables_agent_and_returns_scrip
 
 
 @pytest.mark.asyncio
+async def test_api_frame_agent_bootstrap_command_can_preserve_deploy_transport(async_client, db, redis):
+    frame = await new_frame(db, redis, 'BootstrapFrame', 'frame.local', 'backend.local')
+    frame.agent = {'deployWithAgent': False}
+    db.add(frame)
+    db.commit()
+
+    response = await async_client.post(f'/api/frames/{frame.id}/agent_bootstrap?select_agent=0')
+
+    assert response.status_code == 200
+    db.refresh(frame)
+    assert frame.agent['agentEnabled'] is True
+    assert frame.agent['agentRunCommands'] is True
+    assert frame.agent['deployWithAgent'] is False
+
+
+@pytest.mark.asyncio
 async def test_api_frame_uses_latest_activity_log_timestamp(async_client, db, redis):
     frame = await new_frame(db, redis, 'LatestLogFrame', 'localhost', 'localhost')
     frame.last_log_at = datetime(2026, 1, 1, 0, 0, 0)

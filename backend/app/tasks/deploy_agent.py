@@ -44,11 +44,11 @@ def agent_build_version() -> str:
     return current_agent_version() or "unknown"
 
 
-async def deploy_agent(id: int, redis: Redis) -> None:  # noqa: N802
-    await redis.enqueue_job("deploy_agent", id=id)
+async def deploy_agent(id: int, redis: Redis, *, recompile: bool = False) -> None:  # noqa: N802
+    await redis.enqueue_job("deploy_agent", id=id, recompile=recompile)
 
 
-async def deploy_agent_task(ctx: dict[str, Any], id: int):  # noqa: N802
+async def deploy_agent_task(ctx: dict[str, Any], id: int, recompile: bool = False):  # noqa: N802
     db: Session = ctx["db"]
     redis: Redis = ctx["redis"]
 
@@ -60,7 +60,7 @@ async def deploy_agent_task(ctx: dict[str, Any], id: int):  # noqa: N802
     # Workspace ────────────────────────────────────────────────────────────
     try:
         with tempfile.TemporaryDirectory() as tmp:
-            deployer = AgentDeployer(db, redis, frame, "", tmp)
+            deployer = AgentDeployer(db, redis, frame, "", tmp, force_source=recompile)
             await deployer.run()
     except Exception as e:
         await log(db, redis, id, "stderr", str(e))
@@ -68,6 +68,19 @@ async def deploy_agent_task(ctx: dict[str, Any], id: int):  # noqa: N802
 
 class AgentDeployer(FrameDeployer):
     ssh: Optional[asyncssh.SSHClientConnection] = None
+
+    def __init__(
+        self,
+        db: Session,
+        redis: Redis,
+        frame: Frame,
+        nim_path: str,
+        temp_dir: str,
+        *,
+        force_source: bool = False,
+    ):
+        super().__init__(db, redis, frame, nim_path, temp_dir)
+        self.force_source = force_source
 
     async def run(self) -> None:
         """Main orchestration coroutine (used by global ``deploy_agent_task``)."""
@@ -205,7 +218,7 @@ class AgentDeployer(FrameDeployer):
         Prefer the released binary for the target platform. Fall back to the
         source-generated native build path when no supported release exists.
         """
-        if precompiled_agent_enabled():
+        if not self.force_source and precompiled_agent_enabled():
             prebuilt_target = resolve_prebuilt_target(distro, distro_version, arch)
             if prebuilt_target:
                 try:
@@ -233,7 +246,8 @@ class AgentDeployer(FrameDeployer):
                     f"- No precompiled agent target for {distro} {distro_version} on {arch}; falling back to source build",
                 )
         else:
-            await self.log("stdout", f"- {PRECOMPILED_AGENT_ENV}=source; building agent on the device")
+            reason = "requested from local development" if self.force_source else f"{PRECOMPILED_AGENT_ENV}=source"
+            await self.log("stdout", f"- {reason}; building agent on the device")
 
         await self._deploy_agent_from_source(arch)
 

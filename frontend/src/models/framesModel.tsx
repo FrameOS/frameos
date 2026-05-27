@@ -60,7 +60,7 @@ export const framesModel = kea<framesModelType>([
     renderFrame: (id: number) => ({ id }),
     deleteFrame: (id: number) => ({ id }),
     renameFrame: (id: number, name: string) => ({ id, name }),
-    deployAgent: (id: number) => ({ id }),
+    deployAgent: (id: number, recompile?: boolean) => ({ id, recompile: recompile || false }),
     restartAgent: (id: number) => ({ id }),
     setDeployWithAgent: (id: number, deployWithAgent: boolean) => ({ id, deployWithAgent }),
     setFrameArchived: (id: number, archived: boolean) => ({ id, archived }),
@@ -272,15 +272,17 @@ export const framesModel = kea<framesModelType>([
     rebootFrame: async ({ id }) => {
       await apiFetch(`/api/frames/${id}/reboot`, { method: 'POST' })
     },
-    deployAgent: async ({ id }) => {
+    deployAgent: async ({ id, recompile }) => {
       longRunningTasksModel.actions.startTask({
         frameId: id,
         kind: 'agentDeploy',
-        title: 'Deploying FrameOS agent',
+        title: recompile ? 'Recompiling and deploying FrameOS agent' : 'Deploying FrameOS agent',
         detail: 'Agent deploy request sent',
       })
       try {
-        const response = await apiFetch(`/api/frames/${id}/deploy_agent`, { method: 'POST' })
+        const response = await apiFetch(`/api/frames/${id}/deploy_agent${recompile ? '?recompile=1' : ''}`, {
+          method: 'POST',
+        })
         if (!response.ok) {
           throw new Error('Failed to start agent deploy')
         }

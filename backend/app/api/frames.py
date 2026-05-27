@@ -2078,11 +2078,11 @@ async def api_frame_reboot_event(id: int, redis: Redis = Depends(get_redis)):
 
 
 @api_with_auth.post("/frames/{id:int}/deploy_agent")
-async def api_frame_deploy_agent_event(id: int, redis: Redis = Depends(get_redis)):
+async def api_frame_deploy_agent_event(id: int, recompile: bool = False, redis: Redis = Depends(get_redis)):
     try:
         from app.tasks import deploy_agent
 
-        await deploy_agent(id, redis)
+        await deploy_agent(id, redis, recompile=recompile)
         return "Success"
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))

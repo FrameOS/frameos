@@ -20,7 +20,7 @@ export const agentBootstrapLogic = kea<agentBootstrapLogicType>([
   props({} as AgentBootstrapLogicProps),
   key((props) => props.frameId),
   actions({
-    copyAgentBootstrapScript: true,
+    copyAgentBootstrapScript: (selectAgent = true) => ({ selectAgent }),
     copyAgentBootstrapScriptSuccess: true,
     copyAgentBootstrapScriptFailure: (error: string) => ({ error }),
     resetAgentBootstrapScriptState: true,
@@ -54,10 +54,13 @@ export const agentBootstrapLogic = kea<agentBootstrapLogicType>([
     ],
   }),
   listeners(({ actions, props }) => ({
-    copyAgentBootstrapScript: async () => {
-      const response = await apiFetch(`/api/frames/${props.frameId}/agent_bootstrap`, {
-        method: 'POST',
-      })
+    copyAgentBootstrapScript: async ({ selectAgent }) => {
+      const response = await apiFetch(
+        `/api/frames/${props.frameId}/agent_bootstrap?select_agent=${selectAgent ? 1 : 0}`,
+        {
+          method: 'POST',
+        }
+      )
       if (!response.ok) {
         const payload = await response.json().catch(() => ({}))
         actions.copyAgentBootstrapScriptFailure(

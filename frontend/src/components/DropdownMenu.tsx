@@ -60,6 +60,8 @@ export function DropdownMenu({ items, className, horizontal = true, buttonColor:
         <>
           <Menu.Button
             ref={setReferenceElement}
+            type="button"
+            onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => e.stopPropagation()}
             className={clsx(
               buttonColor(_buttonColor),
@@ -115,6 +117,7 @@ export function DropdownMenu({ items, className, horizontal = true, buttonColor:
                               active && !!item.onClick && 'frameos-dropdown-item-active'
                             )}
                             title={item.title}
+                            onMouseDown={(e) => e.stopPropagation()}
                             onClick={
                               item.onClick
                                 ? (e) => {

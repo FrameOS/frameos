@@ -1,13 +1,16 @@
 import { useActions, useMountedLogic, useValues } from 'kea'
+import { A as Link } from 'kea-router'
 import clsx from 'clsx'
 import { ChevronRightIcon, ClipboardDocumentIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import { ExclamationCircleIcon } from '@heroicons/react/24/solid'
 import type { ReactNode } from 'react'
 
+import { DropdownMenu } from '../../components/DropdownMenu'
 import { Spinner } from '../../components/Spinner'
 import { Tooltip } from '../../components/Tooltip'
 import { frameHost } from '../../decorators/frame'
 import type { FrameType, LogType } from '../../types'
+import { urls } from '../../urls'
 import { frameLogic, type ChangeDetail, type DeployRecommendation, type SummaryItem } from '../frame/frameLogic'
 import { logsLogic } from '../frame/panels/Logs/logsLogic'
 import { agentBootstrapLogic } from './agentBootstrapLogic'
@@ -294,54 +297,60 @@ function RecommendationDescription({ recommendation }: { recommendation: DeployR
 }
 
 function DeployTransportToggle({
-  agentConnected,
+  frameId,
   canDeployAgent,
+  canCopyBootstrapScript,
+  showRecompileAgent,
   onDeployAgent,
   onRestartAgent,
   deployWithAgent,
   onChange,
 }: {
-  agentConnected: boolean
+  frameId: number
   canDeployAgent: boolean
-  onDeployAgent: () => void
+  canCopyBootstrapScript: boolean
+  showRecompileAgent: boolean
+  onDeployAgent: (recompile?: boolean) => void
   onRestartAgent: () => void
   deployWithAgent: boolean
   onChange: (deployWithAgent: boolean) => void
 }): JSX.Element {
-  const agentDisabled = !agentConnected && !deployWithAgent
-  const agentDetail = agentConnected
-    ? 'The connected FrameOS agent can run deploy commands through the backend.'
-    : deployWithAgent
-    ? 'Agent deploy is selected, but the agent is currently disconnected.'
-    : 'The FrameOS agent is configured for remote control, but is currently disconnected.'
+  const bootstrapLogicProps = { frameId }
+  const { copied: bootstrapCopied, loading: bootstrapLoading } = useValues(agentBootstrapLogic(bootstrapLogicProps))
+  const { copyAgentBootstrapScript } = useActions(agentBootstrapLogic(bootstrapLogicProps))
 
   return (
-    <section className="mb-4 space-y-2">
-      <DrawerHeading>Deploy connection</DrawerHeading>
-      <div className="frame-tool-card rounded-[22px] p-4">
+    <section className="mb-4">
+      <div className="frame-tool-card rounded-[22px] p-3">
         <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <div className="frame-tool-muted text-sm leading-5">{agentDetail}</div>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={onRestartAgent}
-                className="frameos-secondary-button rounded-lg px-2.5 py-1 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-              >
-                Restart agent
-              </button>
-              {canDeployAgent ? (
-                <button
-                  type="button"
-                  onClick={onDeployAgent}
-                  className="frameos-secondary-button rounded-lg px-2.5 py-1 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-                >
-                  Deploy agent
-                </button>
-              ) : null}
-            </div>
+          <div className="flex min-w-0 items-center gap-1.5">
+            <div className="frame-tool-heading text-sm font-semibold">Connection</div>
+            <Tooltip
+              className="inline-flex h-5 w-5 items-center justify-center rounded-full"
+              titleClassName="w-72"
+              title={
+                <div className="space-y-1">
+                  <div>
+                    SSH needs direct network access from the backend to the frame.
+                    The agent runs on the frame, and keeps a connection open to the backend.
+                  </div>
+                  <div>
+                    To use the agent, enable it under{' '}
+                    <Link
+                      href={`${urls.frame(frameId, 'settings')}#frame-settings-agent`}
+                      className="frameos-link underline underline-offset-2 hover:no-underline"
+                    >
+                      Settings
+                    </Link>{', '}
+                    and either run the bootstrap script on the frame, or deploy it over SSH.
+                  </div>
+                </div>
+              }
+            >
+              <ExclamationCircleIcon className="h-4 w-4" aria-label="Connection options help" />
+            </Tooltip>
           </div>
-          <div className="frameos-inset inline-flex shrink-0 rounded-xl border p-1">
+          <div className="frameos-inset inline-flex shrink-0 items-center rounded-xl border p-1">
             <button
               type="button"
               aria-pressed={!deployWithAgent}
@@ -353,20 +362,67 @@ function DeployTransportToggle({
             >
               SSH
             </button>
-            <button
-              type="button"
-              aria-pressed={deployWithAgent}
-              disabled={agentDisabled}
-              title={agentDisabled ? 'The FrameOS agent is not connected.' : undefined}
-              onClick={() => onChange(true)}
+            <div
               className={clsx(
-                'rounded-lg px-3 py-1.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-                deployWithAgent ? 'frameos-primary-active' : 'frame-tool-muted hover:text-[color:var(--tool-strong)]',
-                agentDisabled && 'cursor-not-allowed opacity-45 hover:text-current'
+                'inline-flex items-center rounded-lg transition',
+                deployWithAgent ? 'frameos-primary-active' : 'frame-tool-muted'
               )}
             >
-              Agent
-            </button>
+              <button
+                type="button"
+                aria-pressed={deployWithAgent}
+                onClick={() => onChange(true)}
+                className={clsx(
+                  'rounded-l-lg px-3 py-1.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+                  !deployWithAgent && 'hover:text-[color:var(--tool-strong)]'
+                )}
+              >
+                Agent
+              </button>
+              <DropdownMenu
+                buttonColor="none"
+                horizontal
+                className={clsx(
+                  'flex h-7 w-7 items-center justify-center rounded-l-none rounded-r-lg !border-0 !bg-transparent !px-0 !py-0 !text-current !shadow-none transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+                  deployWithAgent ? 'hover:!bg-white/10' : 'hover:!bg-slate-500/10'
+                )}
+                items={[
+                  ...(canCopyBootstrapScript
+                    ? [
+                        {
+                          label: bootstrapCopied ? 'Bootstrap script copied' : 'Copy agent bootstrap (curl)',
+                          title: 'Copy agent bootstrap install command',
+                          loading: bootstrapLoading,
+                          onClick: () => copyAgentBootstrapScript(false),
+                        },
+                      ]
+                    : []),
+                  {
+                    label: 'Restart agent via SSH',
+                    title: 'Restart FrameOS agent via SSH',
+                    onClick: () => onRestartAgent(),
+                  },
+                  ...(canDeployAgent
+                    ? [
+                        {
+                          label: 'Deploy agent via SSH',
+                          title: 'Deploy FrameOS agent via SSH',
+                          onClick: () => onDeployAgent(),
+                        },
+                        ...(showRecompileAgent
+                          ? [
+                              {
+                                label: 'Recompile and deploy via SSH',
+                                title: 'Recompile FrameOS agent from local source and deploy via SSH',
+                                onClick: () => onDeployAgent(true),
+                              },
+                            ]
+                          : []),
+                      ]
+                    : []),
+                ]}
+              />
+            </div>
           </div>
         </div>
       </div>
@@ -379,7 +435,7 @@ function AgentBootstrapHelp(): JSX.Element {
     <Tooltip
       className="inline-flex h-5 w-5 items-center justify-center rounded-full text-amber-500 hover:text-amber-600"
       titleClassName="w-72"
-      title="Use this when the frame can reach this backend but you cannot SSH into it. Run the copied command on the target host as root; it installs the FrameOS agent so deployments can run commands through the agent instead of SSH."
+      title="Use this when the frame can reach this backend but SSH is unavailable. Run the command on the frame as root to install the agent, then deploy through the agent instead of SSH."
     >
       <ExclamationCircleIcon className="h-4 w-4" aria-label="Agent bootstrap help" />
     </Tooltip>
@@ -423,7 +479,6 @@ function AgentBootstrapAction({ frame }: { frame: FrameType }): JSX.Element | nu
 export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Element | null {
   useMountedLogic(logsLogic({ frameId: frame.id }))
   const {
-    agentDeployConnected,
     deployChangeDetails,
     deployPlansError,
     deployPlansLoading,
@@ -448,7 +503,9 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
 
   const deployPlanLogs = deployPlanLogsSince(logs, deployPlansLoadingStartedAt)
   const canDeployAgent = (frame.mode ?? 'rpios') === 'rpios'
+  const canCopyBootstrapScript = (frame.mode ?? 'rpios') === 'rpios'
   const canBootstrapAgent = !frame.last_successful_deploy_at && (frame.mode ?? 'rpios') === 'rpios'
+  const showRecompileAgent = import.meta.env?.DEV === true
   const closeAndRun = (action: () => void): void => {
     action()
     hideDeployPlanModal()
@@ -486,8 +543,10 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
           ) : null}
           {deployTransportToggleVisible ? (
             <DeployTransportToggle
-              agentConnected={agentDeployConnected}
+              frameId={frame.id}
               canDeployAgent={canDeployAgent}
+              canCopyBootstrapScript={canCopyBootstrapScript}
+              showRecompileAgent={showRecompileAgent}
               onDeployAgent={deployAgent}
               onRestartAgent={restartAgent}
               deployWithAgent={deployWithAgent}
@@ -569,9 +628,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
           </button>
           <button
             type="button"
-            onClick={() =>
-              closeAndRun(deployRecommendation?.mode === 'full' ? saveAndFullDeployFrame : saveAndDeployFrame)
-            }
+            onClick={() => closeAndRun(saveAndFullDeployFrame)}
             className={clsx(
               'rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
               deployRecommendation?.mode === 'full' ? 'frameos-primary-action' : 'frameos-secondary-button'

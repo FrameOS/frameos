@@ -449,7 +449,7 @@ export function TemplateDrawer(): JSX.Element | null {
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
               <AddSceneDrawerActions frame={frame} />
-              <Templates persistOnInstall openInstalledSceneDrawer />
+              <Templates persistOnInstall />
             </div>
             <EditTemplateModal />
           </div>
@@ -468,7 +468,7 @@ function AddSceneDrawerActions({ frame }: { frame: FrameType }): JSX.Element {
       <button
         type="button"
         onClick={() => {
-          createBlankSceneAndSave(undefined, false, true)
+          createBlankSceneAndSave()
         }}
         className="frameos-template-action-button frameos-card group flex items-center gap-3 rounded-2xl border border-white/90 bg-white/80 px-4 py-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:bg-white hover:shadow-lg hover:shadow-slate-300/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
       >

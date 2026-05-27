@@ -1273,6 +1273,11 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
       return
     }
 
+    if (activeToolPanel === 'settings' && window.location.hash === '#frame-settings-agent') {
+      scrollToFrameSettingsSection('frame-settings-agent')
+      return
+    }
+
     const restoredScrollTop = frameToolInitialScrollTop(frameToolScrollPositionsRef.current, frameId, activeToolPanel)
     if (restoredScrollTop === null) {
       return

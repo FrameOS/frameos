@@ -68,6 +68,30 @@ async def test_deploy_agent_prefers_precompiled_binary(
 
 
 @pytest.mark.asyncio
+async def test_deploy_agent_can_force_source_build(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    async def fake_download_precompiled_agent_release(**kwargs):
+        raise AssertionError("Precompiled agent should not be used when recompile is requested")
+
+    deploy_agent_module = importlib.import_module("app.tasks.deploy_agent")
+    monkeypatch.setattr(
+        deploy_agent_module,
+        "download_precompiled_agent_release",
+        fake_download_precompiled_agent_release,
+    )
+
+    deployer = FakeAgentDeployer(tmp_path)
+    deployer.force_source = True
+    await deployer._deploy_agent(arch="aarch64", distro="debian", distro_version="trixie")
+
+    assert deployer.staged_binary is None
+    assert deployer.source_arch == "aarch64"
+    assert any("requested from local development" in message for _level, message in deployer.logs)
+
+
+@pytest.mark.asyncio
 async def test_deploy_agent_task_does_not_require_nim_before_running_deployer(
     monkeypatch: pytest.MonkeyPatch,
 ):

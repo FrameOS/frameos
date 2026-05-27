@@ -60,6 +60,10 @@ function setBrowserTitle(frame?: FrameType | null): void {
   document.title = `${frameTitle} · ${DEFAULT_BROWSER_TITLE}`
 }
 
+function isAgentDeployConfigured(agent?: FrameType['agent']): boolean {
+  return Boolean(agent?.agentEnabled && agent?.agentRunCommands && agent?.agentSharedSecret)
+}
+
 const FRAME_KEYS: (keyof FrameType)[] = [
   'name',
   'mode',
@@ -873,7 +877,7 @@ export const frameLogic = kea<frameLogicType>([
     deployFrame: true,
     fastDeployFrame: true,
     fullDeployFrame: true,
-    deployAgent: true,
+    deployAgent: (recompile?: boolean) => ({ recompile: recompile || false }),
     restartAgent: true,
     updateDeployedSshKeys: true,
     clearNextAction: true,
@@ -1283,14 +1287,17 @@ export const frameLogic = kea<frameLogicType>([
       (s) => [s.frameForm, s.frame],
       (frameForm, frame) => {
         const agent = frameForm?.agent ?? frame?.agent
-        return agent?.deployWithAgent ?? (agent?.agentEnabled && agent?.agentRunCommands) ?? false
+        if (!isAgentDeployConfigured(agent)) {
+          return false
+        }
+        return agent?.deployWithAgent ?? true
       },
     ],
     deployTransportToggleVisible: [
       (s) => [s.frameForm, s.frame],
       (frameForm, frame): boolean => {
         const agent = frameForm?.agent ?? frame?.agent
-        return Boolean(agent?.agentEnabled && agent?.agentRunCommands && agent?.agentSharedSecret)
+        return isAgentDeployConfigured(agent)
       },
     ],
     agentDeployConnected: [(s) => [s.frame], (frame): boolean => (frame?.active_connections ?? 0) > 0],
@@ -1336,7 +1343,7 @@ export const frameLogic = kea<frameLogicType>([
     },
     fastDeployFrame: () => framesModel.actions.deployFrame(props.frameId, true),
     fullDeployFrame: () => framesModel.actions.deployFrame(props.frameId, false),
-    deployAgent: () => framesModel.actions.deployAgent(props.frameId),
+    deployAgent: ({ recompile }) => framesModel.actions.deployAgent(props.frameId, recompile),
     restartAgent: () => framesModel.actions.restartAgent(props.frameId),
     setDeployWithAgent: ({ deployWithAgent }) => {
       framesModel.actions.setDeployWithAgent(props.frameId, deployWithAgent)
