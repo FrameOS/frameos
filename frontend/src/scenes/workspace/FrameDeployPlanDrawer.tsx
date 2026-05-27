@@ -1,8 +1,11 @@
 import { useActions, useMountedLogic, useValues } from 'kea'
 import clsx from 'clsx'
 import { ChevronRightIcon, ClipboardDocumentIcon, XMarkIcon } from '@heroicons/react/24/outline'
+import { ExclamationCircleIcon } from '@heroicons/react/24/solid'
+import type { ReactNode } from 'react'
 
 import { Spinner } from '../../components/Spinner'
+import { Tooltip } from '../../components/Tooltip'
 import { frameHost } from '../../decorators/frame'
 import type { FrameType, LogType } from '../../types'
 import { frameLogic, type ChangeDetail, type DeployRecommendation, type SummaryItem } from '../frame/frameLogic'
@@ -265,7 +268,7 @@ function ChangeRows({ changes }: { changes: ChangeDetail[] }): JSX.Element | nul
   )
 }
 
-function DrawerHeading({ action, children }: { action?: JSX.Element; children: string }): JSX.Element {
+function DrawerHeading({ action, children }: { action?: JSX.Element; children: ReactNode }): JSX.Element {
   return (
     <div className="flex items-center justify-between gap-3">
       <div className="frame-tool-heading text-sm font-semibold">{children}</div>
@@ -371,6 +374,18 @@ function DeployTransportToggle({
   )
 }
 
+function AgentBootstrapHelp(): JSX.Element {
+  return (
+    <Tooltip
+      className="inline-flex h-5 w-5 items-center justify-center rounded-full text-amber-500 hover:text-amber-600"
+      titleClassName="w-72"
+      title="Use this when the frame can reach this backend but you cannot SSH into it. Run the copied command on the target host as root; it installs the FrameOS agent so deployments can run commands through the agent instead of SSH."
+    >
+      <ExclamationCircleIcon className="h-4 w-4" aria-label="Agent bootstrap help" />
+    </Tooltip>
+  )
+}
+
 function AgentBootstrapAction({ frame }: { frame: FrameType }): JSX.Element | null {
   const logicProps = { frameId: frame.id }
   const { copied, error, loading } = useValues(agentBootstrapLogic(logicProps))
@@ -382,7 +397,12 @@ function AgentBootstrapAction({ frame }: { frame: FrameType }): JSX.Element | nu
 
   return (
     <section className="space-y-2">
-      <DrawerHeading>Agent bootstrap</DrawerHeading>
+      <DrawerHeading>
+        <span className="inline-flex items-center gap-1.5">
+          <span>Agent bootstrap</span>
+          <AgentBootstrapHelp />
+        </span>
+      </DrawerHeading>
       <button
         type="button"
         onClick={() => copyAgentBootstrapScript()}
