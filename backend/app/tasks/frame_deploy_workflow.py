@@ -875,20 +875,37 @@ class FrameDeployWorkflow:
             f"cd {shlex.quote(path)} && sudo ./frameos setup",
             output=setup_output,
             raise_on_error=False,
+            log_output=False,
             log_command="sudo ./frameos setup",
         )
         if self._setup_completed_before_legacy_shared_driver_segfault(setup_status, setup_output):
-            await self.deployer.log(
-                "stderr",
-                "FrameOS setup completed, then exited during legacy shared-driver teardown; continuing deploy.",
-            )
+            await self._log_setup_output(setup_output, suppress_legacy_shared_driver_teardown=True)
             return False
+        await self._log_setup_output(setup_output)
         if setup_status == 2:
             return True
         if setup_status != 0:
             await self._log_setup_failure_diagnostics(setup_status)
             raise RuntimeError(f"FrameOS setup failed with exit code {setup_status}")
         return False
+
+    async def _log_setup_output(
+        self,
+        setup_output: list[str],
+        *,
+        suppress_legacy_shared_driver_teardown: bool = False,
+    ) -> None:
+        for line in setup_output:
+            if suppress_legacy_shared_driver_teardown and self._is_legacy_shared_driver_teardown_line(line):
+                continue
+            await self.deployer.log("stdout", line)
+
+    @staticmethod
+    def _is_legacy_shared_driver_teardown_line(line: str) -> bool:
+        normalized = line.strip()
+        return normalized.startswith("SIGSEGV: Illegal storage access.") or (
+            "Segmentation fault" in normalized and "./frameos setup" in normalized
+        )
 
     @staticmethod
     def _setup_completed_before_legacy_shared_driver_segfault(setup_status: int, setup_output: list[str]) -> bool:

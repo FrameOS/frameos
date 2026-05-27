@@ -1011,6 +1011,7 @@ async def test_full_deploy_continues_when_legacy_shared_driver_setup_segfaults_a
         "FrameOS setup: checking bootConfig",
         "FrameOS setup: bootConfig: complete",
         "FrameOS setup: shared driver inkyPython: setup complete",
+        "SIGSEGV: Illegal storage access. (Attempt to read from nil?)",
     ]
     workflow = FrameDeployWorkflow(
         db=None,
@@ -1062,7 +1063,9 @@ async def test_full_deploy_continues_when_legacy_shared_driver_setup_segfaults_a
     await workflow._execute_full(plan)
 
     assert "activate" in deployer.commands
-    assert ("stderr", "FrameOS setup completed, then exited during legacy shared-driver teardown; continuing deploy.") in deployer.logs
+    assert ("stdout", "FrameOS setup: shared driver inkyPython: setup complete") in deployer.logs
+    assert not any("SIGSEGV" in message for _log_type, message in deployer.logs)
+    assert not any(log_type == "stderr" for log_type, _message in deployer.logs)
     assert frame.status == "starting"
     assert updated_statuses == ["deploying", "starting"]
 
