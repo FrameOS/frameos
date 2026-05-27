@@ -71,6 +71,7 @@ async def test_run_agent_terminal_command_streams_output_and_exit_status():
     job = json.loads(raw_job)
     assert job["frame_id"] == frame.id
     assert job["payload"] == {"type": "cmd", "name": "shell", "args": {"cmd": "echo hello"}}
+    assert job["log"] is False
 
     assert websocket.sent == [
         "$ echo hello\n",
@@ -115,5 +116,6 @@ async def test_queue_agent_terminal_command_uses_terminal_payload():
             "name": "terminal_input",
             "args": {"terminal_id": "session-id", "data": "cd /srv\n"},
         },
+        "log": False,
         "timeout": 30,
     }

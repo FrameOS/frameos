@@ -56,6 +56,7 @@ async def _queue_agent_terminal_command(
                 "id": command_id,
                 "frame_id": frame.id,
                 "payload": {"type": "cmd", "name": name, "args": args},
+                "log": False,
                 "timeout": timeout,
             }
         ).encode(),
@@ -93,6 +94,7 @@ async def _run_agent_terminal_command(
                     "id": cmd_id,
                     "frame_id": frame.id,
                     "payload": {"type": "cmd", "name": "shell", "args": {"cmd": command}},
+                    "log": False,
                     "timeout": AGENT_TERMINAL_TIMEOUT_SECONDS,
                 }
             ).encode(),

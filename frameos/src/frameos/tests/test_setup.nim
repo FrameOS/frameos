@@ -147,3 +147,17 @@ block test_samba_mounts_replaces_and_removes_managed_fstab_block:
   let removed = applyFrameosFstabBlock(replaced.content, "")
   doAssert removed.changed
   doAssert not removed.content.contains(frameosFstabBegin)
+
+block test_samba_mount_failures_do_not_raise:
+  var commands: seq[string] = @[]
+  setSetupCommandRunnerForTest(proc(command: string): SetupCommandResult =
+    commands.add(command)
+    if command.contains("mount -a -t cifs"):
+      return ("mount error: could not resolve address for server", 32)
+    ("", 0)
+  )
+  try:
+    doAssert not mountSambaFstabEntries()
+    doAssert commands.anyIt(it.contains("mount -a -t cifs"))
+  finally:
+    resetSetupCommandRunnerForTest()

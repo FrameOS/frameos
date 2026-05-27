@@ -1,7 +1,7 @@
 import { useActions, useValues } from 'kea'
 import { A } from 'kea-router'
 import clsx from 'clsx'
-import { useEffect, useRef, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, type ReactNode } from 'react'
 import {
   CheckCircleIcon,
   ChevronDownIcon,
@@ -27,6 +27,9 @@ import { Spinner } from './Spinner'
 import { workspaceLogic, type WorkspaceTheme } from '../scenes/workspace/workspaceLogic'
 import { insertBreaks } from '../utils/insertBreaks'
 import { urls } from '../urls'
+
+const TASK_LOG_BOTTOM_THRESHOLD_PX = 24
+const TASK_LOG_SCROLL_SETTLE_FRAMES = 3
 
 function taskIcon(kind: LongRunningTaskKind): JSX.Element {
   if (kind === 'deploy' || kind === 'agentDeploy' || kind === 'agentRestart') {
@@ -446,6 +449,10 @@ function formatTaskLogTimestamp(timestamp: string): string {
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
 
+function taskLogIsNearBottom(element: HTMLElement): boolean {
+  return element.scrollHeight - element.scrollTop - element.clientHeight <= TASK_LOG_BOTTOM_THRESHOLD_PX
+}
+
 function TaskToast({ task }: { task: LongRunningTask }): JSX.Element {
   const { frames } = useValues(framesModel)
   const { theme } = useValues(workspaceLogic)
@@ -454,6 +461,10 @@ function TaskToast({ task }: { task: LongRunningTask }): JSX.Element {
   const frameName = frame ? frame.name || frameHost(frame) : `Frame ${task.frameId}`
   const latestLog = task.logs[task.logs.length - 1]
   const logScrollRef = useRef<HTMLDivElement>(null)
+  const logContentRef = useRef<HTMLDivElement>(null)
+  const logShouldStickToBottomRef = useRef(true)
+  const logScrollFrameRef = useRef<number | null>(null)
+  const latestLogKey = latestLog ? `${latestLog.id}:${latestLog.timestamp}:${latestLog.type}:${latestLog.line}` : ''
   const currentDetail =
     task.status === 'running' && latestLog
       ? formatTaskLogLine(latestLog)
@@ -464,17 +475,100 @@ function TaskToast({ task }: { task: LongRunningTask }): JSX.Element {
     ? Math.max(0, Math.min(100, Math.round((task.progressCurrent! / task.progressTotal!) * 100)))
     : null
 
+  const cancelPendingLogScroll = useCallback((): void => {
+    if (logScrollFrameRef.current === null || typeof window === 'undefined') {
+      return
+    }
+    window.cancelAnimationFrame(logScrollFrameRef.current)
+    logScrollFrameRef.current = null
+  }, [])
+
+  const scrollLogsToBottom = useCallback(
+    (settleFrames = TASK_LOG_SCROLL_SETTLE_FRAMES): void => {
+      if (typeof window === 'undefined') {
+        return
+      }
+
+      cancelPendingLogScroll()
+      let remainingFrames = settleFrames
+      const scroll = (): void => {
+        logScrollFrameRef.current = null
+        if (!task.expanded || !logShouldStickToBottomRef.current) {
+          return
+        }
+
+        const element = logScrollRef.current
+        if (!element) {
+          return
+        }
+
+        element.scrollTop = element.scrollHeight
+        remainingFrames -= 1
+        if (remainingFrames > 0) {
+          logScrollFrameRef.current = window.requestAnimationFrame(scroll)
+        }
+      }
+
+      logScrollFrameRef.current = window.requestAnimationFrame(scroll)
+    },
+    [cancelPendingLogScroll, task.expanded]
+  )
+
+  useEffect(() => cancelPendingLogScroll, [cancelPendingLogScroll])
+
+  useLayoutEffect(() => {
+    if (!task.expanded) {
+      return
+    }
+    logShouldStickToBottomRef.current = true
+    scrollLogsToBottom()
+  }, [scrollLogsToBottom, task.expanded])
+
+  useLayoutEffect(() => {
+    if (!task.expanded || !logShouldStickToBottomRef.current) {
+      return
+    }
+    scrollLogsToBottom()
+  }, [latestLogKey, scrollLogsToBottom, task.expanded])
+
   useEffect(() => {
-    if (!task.expanded || !logScrollRef.current) {
+    if (!task.expanded || typeof ResizeObserver === 'undefined') {
+      return
+    }
+
+    const contentElement = logContentRef.current
+    if (!contentElement) {
+      return
+    }
+
+    const observer = new ResizeObserver(() => {
+      if (logShouldStickToBottomRef.current) {
+        scrollLogsToBottom(2)
+      }
+    })
+    observer.observe(contentElement)
+    return () => observer.disconnect()
+  }, [scrollLogsToBottom, task.expanded])
+
+  const handleLogScroll = (): void => {
+    const element = logScrollRef.current
+    if (!element) {
+      return
+    }
+    logShouldStickToBottomRef.current = taskLogIsNearBottom(element)
+  }
+
+  useEffect(() => {
+    if (!task.expanded) {
       return
     }
     requestAnimationFrame(() => {
       const element = logScrollRef.current
       if (element) {
-        element.scrollTop = element.scrollHeight
+        logShouldStickToBottomRef.current = taskLogIsNearBottom(element)
       }
     })
-  }, [task.expanded, task.logs.length])
+  }, [task.expanded])
 
   return (
     <div
@@ -586,25 +680,32 @@ function TaskToast({ task }: { task: LongRunningTask }): JSX.Element {
               : 'border-slate-200 bg-slate-50 text-slate-900'
           )}
         >
-          <div ref={logScrollRef} className="max-h-72 overflow-y-auto font-mono text-xs leading-5">
-            {task.logs.length === 0 ? (
-              <div className="py-6 text-center text-slate-500">Waiting for logs...</div>
-            ) : (
-              task.logs.map((log) => {
-                const formattedLine = formatTaskLogLine(log)
-                const tone = taskLogTone(log, formattedLine, theme)
+          <div
+            ref={logScrollRef}
+            onScroll={handleLogScroll}
+            className="max-h-72 overflow-y-auto font-mono text-xs leading-5"
+            style={{ overflowAnchor: 'none' }}
+          >
+            <div ref={logContentRef}>
+              {task.logs.length === 0 ? (
+                <div className="py-6 text-center text-slate-500">Waiting for logs...</div>
+              ) : (
+                task.logs.map((log) => {
+                  const formattedLine = formatTaskLogLine(log)
+                  const tone = taskLogTone(log, formattedLine, theme)
 
-                return (
-                  <div key={`${task.id}-${log.id}-${log.timestamp}`} className="flex gap-2">
-                    <span className={clsx('mt-[0.45rem] h-1.5 w-1.5 shrink-0 rounded-full', tone.dot)} />
-                    <span className={clsx('shrink-0', tone.timestamp)}>{formatTaskLogTimestamp(log.timestamp)}</span>
-                    <span className={clsx('min-w-0 break-words', taskLogLineClassName(log, formattedLine, theme))}>
-                      {renderTaskLogLine(log, formattedLine, theme)}
-                    </span>
-                  </div>
-                )
-              })
-            )}
+                  return (
+                    <div key={`${task.id}-${log.id}-${log.timestamp}`} className="flex gap-2">
+                      <span className={clsx('mt-[0.45rem] h-1.5 w-1.5 shrink-0 rounded-full', tone.dot)} />
+                      <span className={clsx('shrink-0', tone.timestamp)}>{formatTaskLogTimestamp(log.timestamp)}</span>
+                      <span className={clsx('min-w-0 break-words', taskLogLineClassName(log, formattedLine, theme))}>
+                        {renderTaskLogLine(log, formattedLine, theme)}
+                      </span>
+                    </div>
+                  )
+                })
+              )}
+            </div>
           </div>
         </div>
       ) : null}

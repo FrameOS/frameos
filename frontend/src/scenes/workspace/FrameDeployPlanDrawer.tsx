@@ -321,13 +321,19 @@ function DeployTransportToggle({
   const bootstrapLogicProps = { frameId }
   const { copied: bootstrapCopied, loading: bootstrapLoading } = useValues(agentBootstrapLogic(bootstrapLogicProps))
   const { copyAgentBootstrapScript } = useActions(agentBootstrapLogic(bootstrapLogicProps))
+  const selectedTransport: AgentTaskTransport = deployWithAgent ? 'agent' : 'ssh'
+  const selectedConnectionLabel = deployWithAgent ? 'agent' : 'SSH'
+  const selectedAgentDisconnected = selectedTransport === 'agent' && !agentConnected
+  const selectedConnectionUnavailableTitle =
+    'The FrameOS agent is not connected. Select SSH or wait for the agent to connect.'
+  const selectedConnectionTitle = `Use the selected ${selectedConnectionLabel} connection`
 
   return (
     <section className="mb-4">
       <div className="frame-tool-card rounded-[22px] p-3">
         <div className="flex items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-1.5">
-            <div className="frame-tool-heading text-sm font-semibold">Connection</div>
+            <div className="frame-tool-heading text-sm font-semibold">Connect via</div>
             <Tooltip
               className="inline-flex h-5 w-5 items-center justify-center rounded-full"
               titleClassName="w-72"
@@ -345,7 +351,7 @@ function DeployTransportToggle({
                     >
                       Settings
                     </Link>{', '}
-                    and either run the bootstrap script on the frame, or deploy it over SSH.
+                    and either run the bootstrap script (curl) on the frame, or deploy it over SSH.
                   </div>
                 </div>
               }
@@ -353,32 +359,31 @@ function DeployTransportToggle({
               <ExclamationCircleIcon className="h-4 w-4" aria-label="Connection options help" />
             </Tooltip>
           </div>
-          <div className="frameos-inset inline-flex shrink-0 items-center rounded-xl border p-1">
-            <button
-              type="button"
-              aria-pressed={!deployWithAgent}
-              onClick={() => onChange(false)}
-              className={clsx(
-                'rounded-lg px-3 py-1.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-                !deployWithAgent ? 'frameos-primary-active' : 'frame-tool-muted hover:text-[color:var(--tool-strong)]'
-              )}
-            >
-              SSH
-            </button>
-            <div
-              className={clsx(
-                'inline-flex items-center rounded-lg transition',
-                deployWithAgent ? 'frameos-primary-active' : 'frame-tool-muted'
-              )}
-            >
+          <div className="flex shrink-0 items-center gap-2">
+            <div className="frameos-inset inline-flex items-center rounded-xl border p-1">
+              <button
+                type="button"
+                aria-pressed={!deployWithAgent}
+                onClick={() => onChange(false)}
+                className={clsx(
+                  'rounded-lg px-3 py-1.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+                  !deployWithAgent
+                    ? 'frameos-primary-active'
+                    : 'frame-tool-muted hover:text-[color:var(--tool-strong)]'
+                )}
+              >
+                SSH
+              </button>
               <button
                 type="button"
                 aria-pressed={deployWithAgent}
                 title={agentConnected ? 'FrameOS agent connected' : 'FrameOS agent not connected'}
                 onClick={() => onChange(true)}
                 className={clsx(
-                  'inline-flex items-center gap-1.5 rounded-l-lg px-3 py-1.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-                  !deployWithAgent && 'hover:text-[color:var(--tool-strong)]'
+                  'inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+                  deployWithAgent
+                    ? 'frameos-primary-active'
+                    : 'frame-tool-muted hover:text-[color:var(--tool-strong)]'
                 )}
               >
                 <span
@@ -390,74 +395,52 @@ function DeployTransportToggle({
                 />
                 <span>Agent</span>
               </button>
-              <DropdownMenu
-                buttonColor="none"
-                horizontal
-                className={clsx(
-                  'flex h-7 w-7 items-center justify-center rounded-l-none rounded-r-lg !border-0 !bg-transparent !px-0 !py-0 !text-current !shadow-none transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-                  deployWithAgent ? 'hover:!bg-white/10' : 'hover:!bg-slate-500/10'
-                )}
-                items={[
-                  ...(canCopyBootstrapScript
-                    ? [
-                        {
-                          label: bootstrapCopied ? 'Bootstrap script copied' : 'Copy agent bootstrap (shell command to run on frame)',
-                          title: 'Copy agent bootstrap install command',
-                          loading: bootstrapLoading,
-                          onClick: () => copyAgentBootstrapScript(false),
-                        },
-                      ]
-                    : []),
-                  {
-                    label: 'Restart agent via SSH',
-                    title: 'Restart FrameOS agent via SSH',
-                    onClick: () => onRestartAgent('ssh'),
-                  },
-                  {
-                    label: 'Restart agent via agent',
-                    title: agentConnected
-                      ? 'Ask the connected FrameOS agent to schedule its own restart'
-                      : 'The FrameOS agent is not connected',
-                    disabled: !agentConnected,
-                    onClick: () => onRestartAgent('agent'),
-                  },
-                  ...(canDeployAgent
-                    ? [
-                        {
-                          label: 'Deploy agent via SSH',
-                          title: 'Deploy FrameOS agent via SSH',
-                          onClick: () => onDeployAgent(false, 'ssh'),
-                        },
-                        {
-                          label: 'Deploy agent via agent',
-                          title: agentConnected
-                            ? 'Stage, verify, switch, and restart the FrameOS agent through the connected agent'
-                            : 'The FrameOS agent is not connected',
-                          disabled: !agentConnected,
-                          onClick: () => onDeployAgent(false, 'agent'),
-                        },
-                        ...(showRecompileAgent
-                          ? [
-                              {
-                                label: 'Recompile and deploy agent via SSH',
-                                title: 'Recompile FrameOS agent from local source and deploy via SSH',
-                                onClick: () => onDeployAgent(true, 'ssh'),
-                              },
-                              {
-                                label: 'Recompile and deploy agent via agent',
-                                title: agentConnected
-                                  ? 'Recompile FrameOS agent from local source, then stage, verify, switch, and restart through the connected agent'
-                                  : 'The FrameOS agent is not connected',
-                                disabled: !agentConnected,
-                                onClick: () => onDeployAgent(true, 'agent'),
-                              },
-                            ]
-                          : []),
-                      ]
-                    : []),
-                ]}
-              />
             </div>
+            <DropdownMenu
+              buttonColor="none"
+              horizontal
+              className="frameos-inset flex h-9 w-9 items-center justify-center rounded-xl border !px-0 !py-0 text-[color:var(--tool-strong)] !shadow-none transition hover:bg-slate-500/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+              items={[
+                ...(canCopyBootstrapScript
+                  ? [
+                      {
+                        label: bootstrapCopied ? 'Bootstrap copied' : 'Copy bootstrap command',
+                        title: 'Copy agent bootstrap install command',
+                        loading: bootstrapLoading,
+                        onClick: () => copyAgentBootstrapScript(false),
+                      },
+                    ]
+                  : []),
+                {
+                  label: 'Restart agent',
+                  title: selectedAgentDisconnected ? selectedConnectionUnavailableTitle : selectedConnectionTitle,
+                  disabled: selectedAgentDisconnected,
+                  onClick: () => onRestartAgent(selectedTransport),
+                },
+                ...(canDeployAgent
+                  ? [
+                      {
+                        label: 'Deploy agent',
+                        title: selectedAgentDisconnected ? selectedConnectionUnavailableTitle : selectedConnectionTitle,
+                        disabled: selectedAgentDisconnected,
+                        onClick: () => onDeployAgent(false, selectedTransport),
+                      },
+                      ...(showRecompileAgent
+                        ? [
+                            {
+                              label: 'Recompile and deploy agent',
+                              title: selectedAgentDisconnected
+                                ? selectedConnectionUnavailableTitle
+                                : selectedConnectionTitle,
+                              disabled: selectedAgentDisconnected,
+                              onClick: () => onDeployAgent(true, selectedTransport),
+                            },
+                          ]
+                        : []),
+                    ]
+                  : []),
+              ]}
+            />
           </div>
         </div>
       </div>

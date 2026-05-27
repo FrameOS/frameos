@@ -189,6 +189,15 @@ proc deleteCredentialFiles(credentialsDir: string) =
     raiseOnError = false,
   )
 
+proc mountSambaFstabEntries*(): bool =
+  let mountResult = runSetupCommand(privilegedCommand("mount -a -t cifs"), raiseOnError = false)
+  if mountResult.exitCode == 0:
+    return true
+
+  echo "FrameOS setup: samba mounts: warning: one or more Samba shares could not be mounted now; startup will continue"
+  echo "FrameOS setup: samba mounts: warning: systemd will retry automounts when the mount paths are accessed"
+  false
+
 proc setupSambaMounts*(mountpoints: MountpointsConfig): SetupResult =
   let fstabPath = "/etc/fstab"
   let currentFstab = if fileExists(fstabPath): readFile(fstabPath) else: ""
@@ -228,4 +237,4 @@ proc setupSambaMounts*(mountpoints: MountpointsConfig): SetupResult =
     echo "FrameOS setup: samba mounts: fstab already up to date"
 
   discard runSetupCommand(privilegedCommand("systemctl daemon-reload"), raiseOnError = false)
-  discard runSetupCommand(privilegedCommand("mount -a"))
+  discard mountSambaFstabEntries()
