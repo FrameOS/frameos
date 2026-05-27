@@ -21,6 +21,7 @@ from .ai_scenes import *  # noqa: E402, F403
 from .apps import *  # noqa: E402, F403
 from .assets import *  # noqa: E402, F403
 from .chats import *  # noqa: E402, F403
+from .agent_bootstrap import *  # noqa: E402, F403
 from .frames import *  # noqa: E402, F403
 from .fonts import *  # noqa: E402, F403
 from .log import *  # noqa: E402, F403

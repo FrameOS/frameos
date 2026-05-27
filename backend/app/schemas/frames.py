@@ -196,6 +196,11 @@ class FramePingResponse(BaseModel):
     message: str
 
 
+class FrameAgentBootstrapResponse(BaseModel):
+    script_url: str
+    command: str
+
+
 class FrameSetNextSceneRequest(BaseModel):
     sceneId: str
     state: Optional[Dict[str, Any]] = None

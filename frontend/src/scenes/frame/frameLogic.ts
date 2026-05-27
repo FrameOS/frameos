@@ -1074,7 +1074,13 @@ export const frameLogic = kea<frameLogicType>([
       actions.loadDeployPlansSuccess(payload.plan)
     },
     showDeployPlanModal: () => {
-      actions.loadDeployPlans()
+      const hasUsableLocalPlan =
+        Boolean(values.deployRecommendation) ||
+        values.fullDeployPlanSummary.length > 0 ||
+        values.deployChangeDetails.length > 0
+      if (!hasUsableLocalPlan && !values.deployPlansLoading && !values.deployPlans) {
+        actions.loadDeployPlans()
+      }
     },
   })),
   selectors(() => ({
@@ -1280,9 +1286,6 @@ export const frameLogic = kea<frameLogicType>([
     restartAgent: () => framesModel.actions.restartAgent(props.frameId),
     setDeployWithAgent: ({ deployWithAgent }) => {
       framesModel.actions.setDeployWithAgent(props.frameId, deployWithAgent)
-      if (values.deployPlanModalOpen) {
-        actions.loadDeployPlans()
-      }
     },
     updateScene: ({ sceneId, scene }) => {
       const { frameForm } = values

@@ -1,12 +1,13 @@
 import { useActions, useMountedLogic, useValues } from 'kea'
 import clsx from 'clsx'
-import { ChevronRightIcon, XMarkIcon } from '@heroicons/react/24/outline'
+import { ChevronRightIcon, ClipboardDocumentIcon, XMarkIcon } from '@heroicons/react/24/outline'
 
 import { Spinner } from '../../components/Spinner'
 import { frameHost } from '../../decorators/frame'
 import type { FrameType, LogType } from '../../types'
 import { frameLogic, type ChangeDetail, type DeployRecommendation, type SummaryItem } from '../frame/frameLogic'
 import { logsLogic } from '../frame/panels/Logs/logsLogic'
+import { agentBootstrapLogic } from './agentBootstrapLogic'
 import { workspaceLogic } from './workspaceLogic'
 
 interface DeployPlanProgressStep {
@@ -370,6 +371,35 @@ function DeployTransportToggle({
   )
 }
 
+function AgentBootstrapAction({ frame }: { frame: FrameType }): JSX.Element | null {
+  const logicProps = { frameId: frame.id }
+  const { copied, error, loading } = useValues(agentBootstrapLogic(logicProps))
+  const { copyAgentBootstrapScript } = useActions(agentBootstrapLogic(logicProps))
+
+  if (frame.last_successful_deploy_at || (frame.mode ?? 'rpios') !== 'rpios') {
+    return null
+  }
+
+  return (
+    <section className="space-y-2">
+      <DrawerHeading>Agent bootstrap</DrawerHeading>
+      <button
+        type="button"
+        onClick={() => copyAgentBootstrapScript()}
+        disabled={loading}
+        className="frameos-secondary-button flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-50"
+      >
+        <span className="flex min-w-0 items-center gap-2">
+          <ClipboardDocumentIcon className="h-5 w-5 shrink-0" />
+          <span className="truncate">{copied ? 'Agent bootstrap script copied' : 'Copy agent bootstrap script'}</span>
+        </span>
+        {loading ? <Spinner className="shrink-0" /> : null}
+      </button>
+      {error ? <div className="text-sm font-semibold text-red-500">{error}</div> : null}
+    </section>
+  )
+}
+
 export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Element | null {
   useMountedLogic(logsLogic({ frameId: frame.id }))
   const {
@@ -398,6 +428,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
 
   const deployPlanLogs = deployPlanLogsSince(logs, deployPlansLoadingStartedAt)
   const canDeployAgent = (frame.mode ?? 'rpios') === 'rpios'
+  const canBootstrapAgent = !frame.last_successful_deploy_at && (frame.mode ?? 'rpios') === 'rpios'
   const closeAndRun = (action: () => void): void => {
     action()
     hideDeployPlanModal()
@@ -428,6 +459,11 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
           </button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+          {canBootstrapAgent ? (
+            <div className="mb-4">
+              <AgentBootstrapAction frame={frame} />
+            </div>
+          ) : null}
           {deployTransportToggleVisible ? (
             <DeployTransportToggle
               agentConnected={agentDeployConnected}
