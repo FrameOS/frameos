@@ -2,7 +2,7 @@ import { useActions, useValues } from 'kea'
 import { frameLogic } from '../../frameLogic'
 import { scenesLogic } from './scenesLogic'
 import { DropdownMenu, DropdownMenuProps } from '../../../../components/DropdownMenu'
-import { PencilSquareIcon, TrashIcon, FlagIcon } from '@heroicons/react/24/solid'
+import { PencilSquareIcon, TrashIcon, FlagIcon, PlayIcon } from '@heroicons/react/24/solid'
 import { panelsLogic } from '../panelsLogic'
 import {
   ClipboardDocumentIcon,
@@ -14,6 +14,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { templatesLogic } from '../Templates/templatesLogic'
 import { findConnectedScenes } from './utils'
+import { workspaceLogic } from '../../../workspace/workspaceLogic'
 
 interface SceneDropDownProps {
   sceneId: string
@@ -30,6 +31,7 @@ function isNotNull<T>(value: T | null): value is T {
 export function SceneDropDown({ sceneId, context, className, horizontal, buttonColor }: SceneDropDownProps) {
   const { frameId } = useValues(frameLogic)
   const { editScene, editSceneJSON } = useActions(panelsLogic)
+  const { openScenePreview } = useActions(workspaceLogic)
   const { scenes } = useValues(scenesLogic({ frameId }))
   const { renameScene, duplicateScene, deleteScene, setAsDefault, removeDefault, copySceneJSON } = useActions(
     scenesLogic({ frameId })
@@ -45,6 +47,13 @@ export function SceneDropDown({ sceneId, context, className, horizontal, buttonC
       className={className}
       horizontal={horizontal}
       items={[
+        context === 'scenes'
+          ? {
+              label: 'Preview',
+              onClick: () => openScenePreview(frameId, scene.id),
+              icon: <PlayIcon className="w-5 h-5" />,
+            }
+          : null,
         context === 'scenes'
           ? {
               label: 'Edit scene',

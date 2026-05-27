@@ -4,6 +4,7 @@ import { framesModel } from '../../models/framesModel'
 import { frameHost, frameIsActive } from '../../decorators/frame'
 import { FrameScene, FrameType } from '../../types'
 import { urls } from '../../urls'
+import { applyFrameosTheme } from '../../utils/frameosTheme'
 import { frameLogic } from '../frame/frameLogic'
 import { newFrameForm } from '../frames/newFrameForm'
 import type { workspaceLogicType } from './workspaceLogicType'
@@ -232,14 +233,6 @@ function getInitialWorkspaceTheme(): WorkspaceTheme {
     return storedTheme
   }
   return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-}
-
-function applyWorkspaceTheme(theme: WorkspaceTheme): void {
-  if (typeof document === 'undefined') {
-    return
-  }
-  document.documentElement.dataset.frameosTheme = theme
-  document.documentElement.style.colorScheme = theme
 }
 
 const MOBILE_WORKSPACE_MEDIA_QUERY = '(max-width: 1023px)'
@@ -713,6 +706,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
     openFrameTool: (frameId: number, panel: WorkspaceUtilityPanel) => ({ frameId, panel }),
     navigateToSceneFrame: (frameId: number) => ({ frameId }),
     navigateToScene: (frameId: number, sceneId: string) => ({ frameId, sceneId }),
+    openScenePreview: (frameId: number, sceneId: string) => ({ frameId, sceneId }),
     openSceneControl: (frameId: number, sceneId: string) => ({ frameId, sceneId }),
     closeSceneControl: true,
     openTemplateDrawer: (frameId: number) => ({ frameId }),
@@ -796,6 +790,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
         setRouteSelection: (state, { frameId, sceneId }) =>
           frameId && sceneId ? { ...state, [frameId]: sceneId } : state,
         navigateToScene: (state, { frameId, sceneId }) => ({ ...state, [frameId]: sceneId }),
+        openScenePreview: (state, { frameId, sceneId }) => ({ ...state, [frameId]: sceneId }),
       },
     ],
     sceneControlSelection: [
@@ -808,6 +803,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
         openFrameTool: () => null,
         navigateToSceneFrame: () => null,
         navigateToScene: () => null,
+        openScenePreview: () => null,
         openChatDrawer: () => null,
         openUtilityPanel: () => null,
         openTemplateDrawer: () => null,
@@ -825,6 +821,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
         openFrameTool: () => null,
         navigateToSceneFrame: () => null,
         navigateToScene: () => null,
+        openScenePreview: () => null,
         openSceneControl: () => null,
         openScheduleDrawer: () => null,
         openChatDrawer: () => null,
@@ -843,6 +840,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
         openFrameTool: () => null,
         navigateToSceneFrame: () => null,
         navigateToScene: () => null,
+        openScenePreview: () => null,
         openTemplateDrawer: () => null,
         openSceneControl: () => null,
         openChatDrawer: () => null,
@@ -859,6 +857,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
         openFrameTool: () => null,
         navigateToSceneFrame: () => null,
         navigateToScene: () => null,
+        openScenePreview: () => null,
         openSceneControl: () => null,
         openTemplateDrawer: () => null,
         openScheduleDrawer: () => null,
@@ -876,6 +875,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
         openFrameTool: () => null,
         navigateToSceneFrame: () => null,
         navigateToScene: () => null,
+        openScenePreview: () => null,
         openSceneControl: () => null,
         openTemplateDrawer: () => null,
         openScheduleDrawer: () => null,
@@ -889,6 +889,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
       {
         openUtilityPanel: (_, { panel }) => panel,
         openFrameTool: (_, { panel }) => panel,
+        openScenePreview: () => 'state',
         closeUtilityPanel: () => null,
       },
     ],
@@ -897,6 +898,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
       {
         selectNode: (_, { nodeId }) => nodeId,
         navigateToScene: () => null,
+        openScenePreview: () => null,
         setRouteSelection: () => null,
       },
     ],
@@ -939,8 +941,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
     terminalSessionFrameIds: [
       [] as number[],
       {
-        rememberTerminalSessionFrame: (state, { frameId }) =>
-          state.includes(frameId) ? state : [...state, frameId],
+        rememberTerminalSessionFrame: (state, { frameId }) => (state.includes(frameId) ? state : [...state, frameId]),
       },
     ],
     frameAssetFolderExpansion: [
@@ -1160,11 +1161,11 @@ export const workspaceLogic = kea<workspaceLogicType>([
       [newFrameForm.actionTypes.hideForm]: preserveFramesScroll,
       setTheme: ({ theme }) => {
         window.localStorage.setItem('frameos.workspaceTheme', theme)
-        applyWorkspaceTheme(theme)
+        applyFrameosTheme(theme)
       },
       toggleTheme: () => {
         window.localStorage.setItem('frameos.workspaceTheme', values.theme)
-        applyWorkspaceTheme(values.theme)
+        applyFrameosTheme(values.theme)
       },
       focusFrame: ({ frameId }) => {
         const scrollToFrame = (attempt = 0) => {
@@ -1200,6 +1201,14 @@ export const workspaceLogic = kea<workspaceLogicType>([
       navigateToScene: ({ frameId, sceneId }) => {
         actions.setRouteSelection(frameId, sceneId)
         router.actions.push(urls.scenes(frameId, sceneId), undefined, workspaceContentNavigationHash())
+      },
+      openScenePreview: ({ frameId, sceneId }) => {
+        actions.setRouteSelection(frameId, sceneId)
+        router.actions.push(
+          urls.scenes(frameId, sceneId),
+          {},
+          utilityDrawerOpenHash('state', workspaceContentNavigationHash())
+        )
       },
       snapshotFrameOrder: () => {
         const rankedFrames = rankFramesForSnapshot(values.framesList)
@@ -1389,7 +1398,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
     },
   })),
   afterMount(({ actions, cache, values }) => {
-    applyWorkspaceTheme(values.theme)
+    applyFrameosTheme(values.theme)
     if (typeof window !== 'undefined') {
       const mobileWorkspaceQuery = window.matchMedia?.(MOBILE_WORKSPACE_MEDIA_QUERY)
       const syncScrollGuardForViewport = () => applyWorkspaceScrollGuard(workspaceLogic.values.secondarySidebarOpen)

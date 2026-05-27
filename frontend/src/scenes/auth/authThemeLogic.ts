@@ -1,5 +1,6 @@
 import { actions, afterMount, kea, listeners, path, reducers } from 'kea'
 
+import { applyFrameosTheme } from '../../utils/frameosTheme'
 import type { authThemeLogicType } from './authThemeLogicType'
 
 export type AuthTheme = 'light' | 'dark'
@@ -13,14 +14,6 @@ function getInitialAuthTheme(): AuthTheme {
     return storedTheme
   }
   return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-}
-
-function applyAuthTheme(theme: AuthTheme): void {
-  if (typeof document === 'undefined') {
-    return
-  }
-  document.documentElement.dataset.frameosTheme = theme
-  document.documentElement.style.colorScheme = theme
 }
 
 export const authThemeLogic = kea<authThemeLogicType>([
@@ -39,10 +32,10 @@ export const authThemeLogic = kea<authThemeLogicType>([
   listeners(({ values }) => ({
     toggleTheme: () => {
       window.localStorage.setItem('frameos.workspaceTheme', values.theme)
-      applyAuthTheme(values.theme)
+      applyFrameosTheme(values.theme)
     },
   })),
   afterMount(({ values }) => {
-    applyAuthTheme(values.theme)
+    applyFrameosTheme(values.theme)
   }),
 ])
