@@ -453,6 +453,14 @@ async def ws_agent_endpoint(
             if pl.get("type") == "cmd/stream":
                 stream = pl.get("stream", "stdout")
                 data   = pl.get("data", "")
+                if pl.get("raw"):
+                    for line in str(data).splitlines():
+                        if line:
+                            await write_log(redis, frame.id, stream, line, ip=client_ip)
+                    await redis.rpush(STREAM_KEY.format(id=pl["id"]),
+                                      json.dumps({"stream": stream, "data": data, "raw": True}).encode())
+                    await redis.expire(STREAM_KEY.format(id=pl["id"]), 300)
+                    continue
 
                 for line in data.splitlines():
                     if line:
