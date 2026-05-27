@@ -245,13 +245,14 @@ function WorkspaceChatDrawer({
 
 function FrameStatusHeaderButton({ frameId }: { frameId: number }): JSX.Element | null {
   const { undeployedChanges, unsavedChanges } = useValues(frameLogic({ frameId }))
-  const { hideUnsavedChangesModal } = useActions(frameLogic({ frameId }))
+  const { hideDeployPlanModal, hideUnsavedChangesModal } = useActions(frameLogic({ frameId }))
   const { frameChangeDrawerSelection } = useValues(workspaceLogic)
   const { closeFrameChangeDrawer, openFrameChangeDrawer } = useActions(workspaceLogic)
   const statusLabel = unsavedChanges ? 'Unsaved' : undeployedChanges ? 'Undeployed' : null
+  const targetDrawerKind = unsavedChanges ? 'unsaved' : 'deploy'
   const StatusIcon = unsavedChanges ? CloudArrowUpIcon : DeployToFrameIcon
-  const unsavedDrawerIsOpen =
-    unsavedChanges && frameChangeDrawerSelection?.frameId === frameId && frameChangeDrawerSelection.kind === 'unsaved'
+  const drawerIsOpen =
+    frameChangeDrawerSelection?.frameId === frameId && frameChangeDrawerSelection.kind === targetDrawerKind
 
   if (!statusLabel) {
     return null
@@ -262,15 +263,25 @@ function FrameStatusHeaderButton({ frameId }: { frameId: number }): JSX.Element 
       type="button"
       title={`${statusLabel} changes`}
       aria-label={
-        unsavedDrawerIsOpen ? 'Close unsaved changes' : unsavedChanges ? 'Open unsaved changes' : 'Open deploy plan'
+        drawerIsOpen
+          ? unsavedChanges
+            ? 'Close unsaved changes'
+            : 'Close deploy plan'
+          : unsavedChanges
+          ? 'Open unsaved changes'
+          : 'Open deploy plan'
       }
       onClick={() => {
-        if (unsavedDrawerIsOpen) {
-          hideUnsavedChangesModal()
+        if (drawerIsOpen) {
+          if (targetDrawerKind === 'unsaved') {
+            hideUnsavedChangesModal()
+          } else {
+            hideDeployPlanModal()
+          }
           closeFrameChangeDrawer()
           return
         }
-        openFrameChangeDrawer(frameId, unsavedChanges ? 'unsaved' : 'deploy')
+        openFrameChangeDrawer(frameId, targetDrawerKind)
       }}
       className={clsx(
         'workspace-unsaved-header-button flex h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
