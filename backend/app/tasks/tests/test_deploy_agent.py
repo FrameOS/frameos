@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.tasks.deploy_agent import AgentDeployer, deploy_agent, deploy_agent_task
+from app.tasks.deploy_agent import AgentDeployer, deploy_agent, deploy_agent_task, resolve_agent_task_transport
 from app.tasks.precompiled_agent import PrecompiledAgentResult
 
 
@@ -48,6 +48,27 @@ async def test_deploy_agent_enqueues_transport():
     await deploy_agent(7, redis, recompile=True, transport="agent")
 
     assert redis.jobs == [("deploy_agent", {"id": 7, "recompile": True, "transport": "agent"})]
+
+
+@pytest.mark.asyncio
+async def test_deploy_agent_defaults_to_auto_transport():
+    redis = FakeRedis()
+
+    await deploy_agent(7, redis)
+
+    assert redis.jobs == [("deploy_agent", {"id": 7, "recompile": False, "transport": "auto"})]
+
+
+def test_resolve_agent_task_transport_uses_frame_agent_preference():
+    frame = SimpleNamespace(
+        agent={"agentEnabled": True, "agentRunCommands": True, "deployWithAgent": True}
+    )
+
+    assert resolve_agent_task_transport(frame, "auto") == "agent"
+    assert resolve_agent_task_transport(frame, "ssh") == "ssh"
+
+    frame.agent["deployWithAgent"] = False
+    assert resolve_agent_task_transport(frame, "auto") == "ssh"
 
 
 @pytest.mark.asyncio
@@ -125,12 +146,44 @@ async def test_deploy_agent_task_does_not_require_nim_before_running_deployer(
         "find_nim_v2",
         lambda: (_ for _ in ()).throw(RuntimeError("Nim should not be needed")),
     )
-    monkeypatch.setattr(deploy_agent_module, "get_fresh_frame", lambda _db, _id: SimpleNamespace(id=1))
+    monkeypatch.setattr(
+        deploy_agent_module,
+        "get_fresh_frame",
+        lambda _db, _id: SimpleNamespace(
+            id=1,
+            agent={"agentEnabled": True, "agentRunCommands": True, "deployWithAgent": True},
+        ),
+    )
     monkeypatch.setattr(AgentDeployer, "run", fake_run)
 
-    await deploy_agent_task({"db": object(), "redis": object()}, id=1, recompile=True, transport="agent")
+    await deploy_agent_task({"db": object(), "redis": object()}, id=1, recompile=True)
 
     assert captured == {"ran": True, "force_source": True, "transport": "agent"}
+
+
+@pytest.mark.asyncio
+async def test_deploy_agent_task_keeps_explicit_ssh_transport(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    deploy_agent_module = importlib.import_module("app.tasks.deploy_agent")
+    captured: dict[str, object] = {}
+
+    async def fake_run(self):
+        captured["transport"] = self.remote_transport
+
+    monkeypatch.setattr(
+        deploy_agent_module,
+        "get_fresh_frame",
+        lambda _db, _id: SimpleNamespace(
+            id=1,
+            agent={"agentEnabled": True, "agentRunCommands": True, "deployWithAgent": True},
+        ),
+    )
+    monkeypatch.setattr(AgentDeployer, "run", fake_run)
+
+    await deploy_agent_task({"db": object(), "redis": object()}, id=1, transport="ssh")
+
+    assert captured == {"transport": "ssh"}
 
 
 @pytest.mark.asyncio

@@ -96,6 +96,32 @@ async def test_api_frame_agent_bootstrap_command_can_preserve_deploy_transport(a
 
 
 @pytest.mark.asyncio
+async def test_api_frame_agent_tasks_default_to_auto_transport(async_client, monkeypatch):
+    import app.tasks as tasks_package
+
+    captured: list[tuple[str, int, dict]] = []
+
+    async def fake_deploy_agent(id, _redis, **kwargs):
+        captured.append(("deploy", id, kwargs))
+
+    async def fake_restart_agent(id, _redis, **kwargs):
+        captured.append(("restart", id, kwargs))
+
+    monkeypatch.setattr(tasks_package, "deploy_agent", fake_deploy_agent)
+    monkeypatch.setattr(tasks_package, "restart_agent", fake_restart_agent)
+
+    deploy_response = await async_client.post('/api/frames/123/deploy_agent?recompile=1')
+    restart_response = await async_client.post('/api/frames/123/restart_agent')
+
+    assert deploy_response.status_code == 200
+    assert restart_response.status_code == 200
+    assert captured == [
+        ("deploy", 123, {"recompile": True, "transport": "auto"}),
+        ("restart", 123, {"transport": "auto"}),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_api_frame_uses_latest_activity_log_timestamp(async_client, db, redis):
     frame = await new_frame(db, redis, 'LatestLogFrame', 'localhost', 'localhost')
     frame.last_log_at = datetime(2026, 1, 1, 0, 0, 0)

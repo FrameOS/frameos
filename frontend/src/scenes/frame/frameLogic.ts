@@ -877,11 +877,11 @@ export const frameLogic = kea<frameLogicType>([
     deployFrame: true,
     fastDeployFrame: true,
     fullDeployFrame: true,
-    deployAgent: (recompile?: boolean, transport: AgentTaskTransport = 'ssh') => ({
+    deployAgent: (recompile?: boolean, transport: AgentTaskTransport = 'auto') => ({
       recompile: recompile || false,
       transport,
     }),
-    restartAgent: (transport: AgentTaskTransport = 'ssh') => ({ transport }),
+    restartAgent: (transport: AgentTaskTransport = 'auto') => ({ transport }),
     updateDeployedSshKeys: true,
     clearNextAction: true,
     resetUnsavedChanges: true,

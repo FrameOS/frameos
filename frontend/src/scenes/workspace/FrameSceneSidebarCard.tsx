@@ -23,7 +23,7 @@ export function FrameSceneSidebarCard({
   )
   const { requiresRecompilation } = useValues(frameLogic({ frameId: frame.id }))
   const { closeChatDrawer } = useActions(workspaceLogic)
-  const statusLabel = unsavedChanges ? 'Unsaved' : undeployedChanges ? 'Undeployed' : 'Saved'
+  const statusLabel = unsavedChanges ? 'Unsaved' : undeployedChanges ? 'Undeployed' : 'Deploy plan'
   const statusIsActionable = unsavedChanges || undeployedChanges
   const deployLabel = frame.last_successful_deploy_at && !requiresRecompilation ? 'Fast deploy' : 'Full deploy'
 

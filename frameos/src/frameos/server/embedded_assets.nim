@@ -7,6 +7,9 @@ proc readFrameWebAsset(path: string): string =
   else:
     frameWebAssets.getAsset(path)
 
+proc readCompressedFrameWebAsset(path: string): string =
+  frameWebAssets.getCompressedAsset(path)
+
 proc readWebAsset(path: string): string =
   when compiles(webAssets.getAssetToStr(path)):
     webAssets.getAssetToStr(path)
@@ -18,6 +21,10 @@ proc getFrameWebAsset*(path: string): string {.gcsafe.} =
   # needs an explicit escape hatch at the boundary.
   {.cast(gcsafe).}:
     result = readFrameWebAsset(path)
+
+proc getCompressedFrameWebAsset*(path: string): string {.gcsafe.} =
+  {.cast(gcsafe).}:
+    result = readCompressedFrameWebAsset(path)
 
 proc getWebAsset*(path: string): string {.gcsafe.} =
   {.cast(gcsafe).}:

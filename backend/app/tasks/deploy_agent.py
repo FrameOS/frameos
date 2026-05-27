@@ -51,14 +51,28 @@ def delayed_agent_restart_command(suffix: str = "manual") -> str:
     )
 
 
+def resolve_agent_task_transport(frame: Frame, transport: RemoteTransport) -> RemoteTransport:
+    if transport != "auto":
+        return transport
+
+    agent = frame.agent or {}
+    if (
+        agent.get("agentEnabled")
+        and agent.get("agentRunCommands")
+        and agent.get("deployWithAgent") is not False
+    ):
+        return "agent"
+    return "ssh"
+
+
 async def deploy_agent(
-    id: int, redis: Redis, *, recompile: bool = False, transport: RemoteTransport = "ssh"
+    id: int, redis: Redis, *, recompile: bool = False, transport: RemoteTransport = "auto"
 ) -> None:  # noqa: N802
     await redis.enqueue_job("deploy_agent", id=id, recompile=recompile, transport=transport)
 
 
 async def deploy_agent_task(
-    ctx: dict[str, Any], id: int, recompile: bool = False, transport: RemoteTransport = "ssh"
+    ctx: dict[str, Any], id: int, recompile: bool = False, transport: RemoteTransport = "auto"
 ):  # noqa: N802
     db: Session = ctx["db"]
     redis: Redis = ctx["redis"]
@@ -71,7 +85,8 @@ async def deploy_agent_task(
     # Workspace ────────────────────────────────────────────────────────────
     try:
         with tempfile.TemporaryDirectory() as tmp:
-            deployer = AgentDeployer(db, redis, frame, "", tmp, force_source=recompile, transport=transport)
+            resolved_transport = resolve_agent_task_transport(frame, transport)
+            deployer = AgentDeployer(db, redis, frame, "", tmp, force_source=recompile, transport=resolved_transport)
             await deployer.run()
     except Exception as e:
         await log(db, redis, id, "stderr", str(e))

@@ -2090,7 +2090,7 @@ async def api_frame_reboot_event(id: int, redis: Redis = Depends(get_redis)):
 async def api_frame_deploy_agent_event(
     id: int,
     recompile: bool = False,
-    transport: str = "ssh",
+    transport: str = "auto",
     redis: Redis = Depends(get_redis),
 ):
     agent_transport = _agent_task_transport(transport)
@@ -2106,7 +2106,7 @@ async def api_frame_deploy_agent_event(
 @api_with_auth.post("/frames/{id:int}/restart_agent")
 async def api_frame_restart_agent_event(
     id: int,
-    transport: str = "ssh",
+    transport: str = "auto",
     redis: Redis = Depends(get_redis),
 ):
     agent_transport = _agent_task_transport(transport)

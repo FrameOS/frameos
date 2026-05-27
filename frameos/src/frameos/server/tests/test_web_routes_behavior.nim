@@ -1,5 +1,7 @@
 import std/[json, os, strutils, unittest]
 
+import zippy
+
 import ../../[channels, types]
 import ./helpers/http_harness
 import ../[auth, state]
@@ -195,6 +197,36 @@ suite "web route behavior":
 
     let protectedAsset = httpRequest(server.port, "GET", stableStaticAssetPath)
     check protectedAsset.status == 200
+
+  test "static assets reuse embedded gzip data when requested":
+    var config = defaultFrameConfig()
+    config.frameAccess = "public"
+    configureServerState(config)
+
+    let plainAsset = httpRequest(server.port, "GET", stableStaticAssetPath)
+    check plainAsset.status == 200
+    check plainAsset.header("content-encoding") == ""
+
+    let gzipAsset = httpRequest(
+      server.port,
+      "GET",
+      stableStaticAssetPath,
+      headers = [("Accept-Encoding", "br, gzip;q=1.0")],
+    )
+    check gzipAsset.status == 200
+    check gzipAsset.header("content-encoding") == "gzip"
+    check gzipAsset.header("vary") == "Accept-Encoding"
+    check uncompress(gzipAsset.body, dataFormat = dfGzip) == plainAsset.body
+
+    let gzipDisabled = httpRequest(
+      server.port,
+      "GET",
+      stableStaticAssetPath,
+      headers = [("Accept-Encoding", "gzip;q=0, *;q=0")],
+    )
+    check gzipDisabled.status == 200
+    check gzipDisabled.header("content-encoding") == ""
+    check gzipDisabled.body == plainAsset.body
 
   test "private frames without admin auth require frame authentication for static assets":
     let config = defaultFrameConfig()

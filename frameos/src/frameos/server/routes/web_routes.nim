@@ -1,4 +1,5 @@
 import json
+import strutils
 import tables
 import threadpool
 import mummy
@@ -14,6 +15,33 @@ import ../api
 import ../embedded_assets
 import ./admin_api_assets_routes
 import ./common
+
+proc clientAcceptsGzip(request: Request): bool =
+  if not request.headers.contains("Accept-Encoding"):
+    return false
+
+  var wildcardAllowed = false
+  for entry in request.headers["Accept-Encoding"].split(","):
+    let parts = entry.strip().split(";")
+    if parts.len == 0:
+      continue
+
+    let encoding = parts[0].strip().toLowerAscii()
+    var quality = 1.0
+    for i in 1 ..< parts.len:
+      let param = parts[i].strip()
+      if param.startsWith("q="):
+        try:
+          quality = parseFloat(param[2 .. param.high])
+        except ValueError:
+          quality = 0.0
+
+    if encoding == "gzip":
+      return quality > 0
+    if encoding == "*":
+      wildcardAllowed = quality > 0
+
+  wildcardAllowed
 
 proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, adminConnectionsState: ConnectionsState) =
   router.get("/", proc(request: Request) {.gcsafe.} =
@@ -85,9 +113,15 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
         return
       let assetPath = "assets/compiled/frame_web/static/" & request.pathParams["asset"]
       try:
-        let asset = getFrameWebAsset(assetPath)
         var headers: mummy.HttpHeaders
         headers["Content-Type"] = contentTypeForAsset(assetPath)
+        headers["Vary"] = "Accept-Encoding"
+        let asset =
+          if clientAcceptsGzip(request):
+            headers["Content-Encoding"] = "gzip"
+            getCompressedFrameWebAsset(assetPath)
+          else:
+            getFrameWebAsset(assetPath)
         request.respond(Http200, headers, asset)
       except KeyError:
         request.respond(Http404, body = "Not found!")

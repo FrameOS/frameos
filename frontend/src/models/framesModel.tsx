@@ -74,12 +74,12 @@ export const framesModel = kea<framesModelType>([
     renderFrame: (id: number) => ({ id }),
     deleteFrame: (id: number) => ({ id }),
     renameFrame: (id: number, name: string) => ({ id, name }),
-    deployAgent: (id: number, recompile?: boolean, transport: AgentTaskTransport = 'ssh') => ({
+    deployAgent: (id: number, recompile?: boolean, transport: AgentTaskTransport = 'auto') => ({
       id,
       recompile: recompile || false,
       transport,
     }),
-    restartAgent: (id: number, transport: AgentTaskTransport = 'ssh') => ({ id, transport }),
+    restartAgent: (id: number, transport: AgentTaskTransport = 'auto') => ({ id, transport }),
     setDeployWithAgent: (id: number, deployWithAgent: boolean) => ({ id, deployWithAgent }),
     setFrameArchived: (id: number, archived: boolean) => ({ id, archived }),
     toggleArchivedFramesExpanded: true,
