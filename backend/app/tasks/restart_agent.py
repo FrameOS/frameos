@@ -19,12 +19,14 @@ async def restart_agent_task(ctx: dict[str, Any], id: int):
         return
 
     try:
+        await log(db, redis, id, "stdout", "Restarting FrameOS agent")
         await run_commands(
             db,
             redis,
             frame,
             ["sudo systemctl restart frameos_agent.service"]
         )
+        await log(db, redis, id, "stdout", "FrameOS agent restart command completed")
 
     except Exception as e:
         await log(db, redis, id, "stderr", str(e))

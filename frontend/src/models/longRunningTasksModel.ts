@@ -3,7 +3,14 @@ import type { LogType, FrameType } from '../types'
 import { socketLogic } from '../scenes/socketLogic'
 import type { longRunningTasksModelType } from './longRunningTasksModelType'
 
-export type LongRunningTaskKind = 'deploy' | 'render' | 'preview' | 'activate' | 'upload' | 'agentDeploy'
+export type LongRunningTaskKind =
+  | 'deploy'
+  | 'render'
+  | 'preview'
+  | 'activate'
+  | 'upload'
+  | 'agentDeploy'
+  | 'agentRestart'
 export type LongRunningTaskStatus = 'running' | 'success' | 'error'
 
 export interface LongRunningTaskLog {
@@ -64,6 +71,8 @@ const MAX_TASK_LOGS = 200
 const COMPLETED_TASK_DISMISS_MS = 4000
 const ERRORED_TASK_DISMISS_MS = 12000
 const RENDER_SIGNAL_TIMEOUT_MS = 45000
+const AGENT_DEPLOY_SIGNAL_TIMEOUT_MS = 15 * 60 * 1000
+const AGENT_RESTART_SIGNAL_TIMEOUT_MS = 90 * 1000
 const DEPLOY_ACTIVE_STATUSES = new Set(['deploying', 'preparing', 'restarting', 'starting'])
 const DEPLOY_FAILED_STATUSES = new Set(['uninitialized'])
 const SOCKET_NEW_LOG = 'new log (src.scenes.socketLogic)'
@@ -154,7 +163,7 @@ function finishLatestTask(tasks: LongRunningTask[], payload: FinishTaskPayload):
 function appendLog(tasks: LongRunningTask[], log: LogType): LongRunningTask[] {
   let changed = false
   const nextTasks = tasks.map((task) => {
-    if (task.status !== 'running' || task.frameId !== log.frame_id) {
+    if (!shouldAppendLogToTask(task, log)) {
       return task
     }
     changed = true
@@ -187,6 +196,17 @@ function parseWebhookEvent(log: LogType): Record<string, any> | null {
 
 function frameStatus(frame: Partial<FrameType>): string | null {
   return typeof frame.status === 'string' ? frame.status : null
+}
+
+function isAgentTaskKind(kind?: LongRunningTaskKind): kind is 'agentDeploy' | 'agentRestart' {
+  return kind === 'agentDeploy' || kind === 'agentRestart'
+}
+
+function shouldAppendLogToTask(task: LongRunningTask, log: LogType): boolean {
+  if (task.status !== 'running' || task.frameId !== log.frame_id) {
+    return false
+  }
+  return !(isAgentTaskKind(task.kind) && log.type === 'webhook')
 }
 
 export const longRunningTasksModel = kea<longRunningTasksModelType>([
@@ -292,6 +312,23 @@ export const longRunningTasksModel = kea<longRunningTasksModelType>([
             })
           }
         }, RENDER_SIGNAL_TIMEOUT_MS)
+      } else if (isAgentTaskKind(task.kind)) {
+        window.setTimeout(
+          () => {
+            const stillRunning = values.tasks.some(
+              (runningTask) => runningTask.id === task.id && runningTask.status === 'running'
+            )
+            if (stillRunning) {
+              actions.taskFailed({
+                frameId: task.frameId,
+                kind: task.kind,
+                detail:
+                  task.kind === 'agentRestart' ? 'No agent restart signal received' : 'No agent deploy signal received',
+              })
+            }
+          },
+          task.kind === 'agentRestart' ? AGENT_RESTART_SIGNAL_TIMEOUT_MS : AGENT_DEPLOY_SIGNAL_TIMEOUT_MS
+        )
       }
     },
     finishTask: ({ task }) => {
@@ -325,6 +362,53 @@ export const longRunningTasksModel = kea<longRunningTasksModelType>([
       })
     },
     [SOCKET_NEW_LOG]: ({ log }) => {
+      const lowerLine = log.line.toLowerCase()
+
+      if (log.type === 'stderr') {
+        if (latestRunningTask(values.tasks, { frameId: log.frame_id, kind: 'agentDeploy' })) {
+          actions.taskFailed({
+            frameId: log.frame_id,
+            kind: 'agentDeploy',
+            detail: log.line || 'Agent deploy failed',
+          })
+        }
+        if (latestRunningTask(values.tasks, { frameId: log.frame_id, kind: 'agentRestart' })) {
+          actions.taskFailed({
+            frameId: log.frame_id,
+            kind: 'agentRestart',
+            detail: log.line || 'Agent restart failed',
+          })
+        }
+      }
+
+      if (lowerLine.includes('agent deployment completed')) {
+        actions.finishTask({
+          frameId: log.frame_id,
+          kind: 'agentDeploy',
+          status: 'success',
+          detail: 'Agent deployed',
+        })
+      } else if (lowerLine.includes('skipping agent deployment')) {
+        actions.finishTask({
+          frameId: log.frame_id,
+          kind: 'agentDeploy',
+          status: 'success',
+          detail: 'Agent deploy skipped',
+        })
+      }
+
+      if (
+        lowerLine.includes('frameos agent restart command completed') ||
+        (log.type === 'agent' && lowerLine.includes('connected'))
+      ) {
+        actions.finishTask({
+          frameId: log.frame_id,
+          kind: 'agentRestart',
+          status: 'success',
+          detail: 'Agent restarted',
+        })
+      }
+
       const payload = parseWebhookEvent(log)
       if (!payload) {
         return

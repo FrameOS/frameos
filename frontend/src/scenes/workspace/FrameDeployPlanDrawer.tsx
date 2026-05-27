@@ -289,18 +289,84 @@ function RecommendationDescription({ recommendation }: { recommendation: DeployR
   )
 }
 
+function DeployTransportToggle({
+  agentConnected,
+  deployWithAgent,
+  onChange,
+}: {
+  agentConnected: boolean
+  deployWithAgent: boolean
+  onChange: (deployWithAgent: boolean) => void
+}): JSX.Element {
+  const agentDisabled = !agentConnected && !deployWithAgent
+  const agentDetail = agentConnected
+    ? 'The connected FrameOS agent can run deploy commands through the backend.'
+    : deployWithAgent
+    ? 'Agent deploy is selected, but the agent is currently disconnected.'
+    : 'The FrameOS agent is configured for remote control, but is currently disconnected.'
+
+  return (
+    <section className="mb-4 space-y-2">
+      <DrawerHeading>Deploy connection</DrawerHeading>
+      <div className="frame-tool-card rounded-[22px] p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="frame-tool-muted text-sm leading-5">{agentDetail}</div>
+          </div>
+          <div className="frameos-inset inline-flex shrink-0 rounded-xl border p-1">
+            <button
+              type="button"
+              aria-pressed={!deployWithAgent}
+              onClick={() => onChange(false)}
+              className={clsx(
+                'rounded-lg px-3 py-1.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+                !deployWithAgent ? 'frameos-primary-active' : 'frame-tool-muted hover:text-[color:var(--tool-strong)]'
+              )}
+            >
+              SSH
+            </button>
+            <button
+              type="button"
+              aria-pressed={deployWithAgent}
+              disabled={agentDisabled}
+              title={agentDisabled ? 'The FrameOS agent is not connected.' : undefined}
+              onClick={() => onChange(true)}
+              className={clsx(
+                'rounded-lg px-3 py-1.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+                deployWithAgent ? 'frameos-primary-active' : 'frame-tool-muted hover:text-[color:var(--tool-strong)]',
+                agentDisabled && 'cursor-not-allowed opacity-45 hover:text-current'
+              )}
+            >
+              Agent
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
 export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Element | null {
   useMountedLogic(logsLogic({ frameId: frame.id }))
   const {
+    agentDeployConnected,
     deployChangeDetails,
     deployPlansError,
     deployPlansLoading,
     deployPlansLoadingStartedAt,
     deployRecommendation,
+    deployTransportToggleVisible,
+    deployWithAgent,
     fullDeployPlanSummary,
   } = useValues(frameLogic({ frameId: frame.id }))
-  const { hideDeployPlanModal, loadDeployPlans, saveAndDeployFrame, saveAndFastDeployFrame, saveAndFullDeployFrame } =
-    useActions(frameLogic({ frameId: frame.id }))
+  const {
+    hideDeployPlanModal,
+    loadDeployPlans,
+    saveAndDeployFrame,
+    saveAndFastDeployFrame,
+    saveAndFullDeployFrame,
+    setDeployWithAgent,
+  } = useActions(frameLogic({ frameId: frame.id }))
   const { closeFrameChangeDrawer } = useActions(workspaceLogic)
   const { logs } = useValues(logsLogic({ frameId: frame.id }))
 
@@ -335,6 +401,13 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
           </button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+          {deployTransportToggleVisible ? (
+            <DeployTransportToggle
+              agentConnected={agentDeployConnected}
+              deployWithAgent={deployWithAgent}
+              onChange={setDeployWithAgent}
+            />
+          ) : null}
           {deployPlansLoading ? (
             <DeployPlanProgress logs={deployPlanLogs} planReady={false} />
           ) : deployPlansError ? (

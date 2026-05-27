@@ -238,9 +238,11 @@ function FramePreviewPanel({ frame, scenes }: { frame: FrameType; scenes: FrameS
 }
 
 function FrameHeaderActions({ frame, archived }: { frame: FrameType; archived?: boolean }): JSX.Element {
-  const { deleteFrame, deployFrame, renderFrame, setFrameArchived } = useActions(framesModel)
-  const { openChatDrawer, openRenameFrameDialog } = useActions(workspaceLogic)
+  const { deleteFrame, deployAgent, renderFrame, restartAgent, setFrameArchived } = useActions(framesModel)
+  const { openChatDrawer, openFrameChangeDrawer, openRenameFrameDialog } = useActions(workspaceLogic)
   const frameName = frame.name || frameHost(frame)
+  const agentConfigured = Boolean(frame.agent?.agentEnabled && frame.agent.agentSharedSecret)
+  const canDeployAgent = agentConfigured && (frame.mode ?? 'rpios') === 'rpios'
 
   return (
     <div className="frame-header-actions flex min-w-0 shrink-0 items-center justify-start gap-1">
@@ -272,17 +274,31 @@ function FrameHeaderActions({ frame, archived }: { frame: FrameType; archived?: 
               icon: <PlayIcon className="h-5 w-5" />,
             },
             {
-              label: 'Fast deploy',
-              title: 'Fast deploy frame',
-              onClick: () => deployFrame(frame.id, true),
+              label: 'Deploy',
+              title: 'Open deploy plan',
+              onClick: () => openFrameChangeDrawer(frame.id, 'deploy'),
               icon: <RocketLaunchIcon className="h-5 w-5" />,
             },
-            {
-              label: 'Full deploy',
-              title: 'Full deploy frame',
-              onClick: () => deployFrame(frame.id, false),
-              icon: <RocketLaunchIcon className="h-5 w-5" />,
-            },
+            ...(agentConfigured
+              ? [
+                  {
+                    label: 'Restart agent',
+                    title: 'Restart FrameOS agent',
+                    onClick: () => restartAgent(frame.id),
+                    icon: <CommandLineIcon className="h-5 w-5" />,
+                  },
+                ]
+              : []),
+            ...(canDeployAgent
+              ? [
+                  {
+                    label: 'Deploy agent',
+                    title: 'Deploy FrameOS agent',
+                    onClick: () => deployAgent(frame.id),
+                    icon: <CommandLineIcon className="h-5 w-5" />,
+                  },
+                ]
+              : []),
             {
               label: archived ? 'Restore' : 'Archive',
               title: archived ? 'Restore frame' : 'Archive frame',

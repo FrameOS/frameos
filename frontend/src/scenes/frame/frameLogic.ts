@@ -923,6 +923,7 @@ export const frameLogic = kea<frameLogicType>([
         resetFrameForm: () => null,
         setFrameFormValue: () => null,
         setFrameFormValues: () => null,
+        setDeployWithAgent: () => null,
       },
     ],
     deployPlansLoading: [
@@ -1071,6 +1072,9 @@ export const frameLogic = kea<frameLogicType>([
 
       const payload = (await response.json()) as DeployPlanApiResponse
       actions.loadDeployPlansSuccess(payload.plan)
+    },
+    showDeployPlanModal: () => {
+      actions.loadDeployPlans()
     },
   })),
   selectors(() => ({
@@ -1222,6 +1226,14 @@ export const frameLogic = kea<frameLogicType>([
         return agent?.deployWithAgent ?? (agent?.agentEnabled && agent?.agentRunCommands) ?? false
       },
     ],
+    deployTransportToggleVisible: [
+      (s) => [s.frameForm, s.frame],
+      (frameForm, frame): boolean => {
+        const agent = frameForm?.agent ?? frame?.agent
+        return Boolean(agent?.agentEnabled && agent?.agentRunCommands && agent?.agentSharedSecret)
+      },
+    ],
+    agentDeployConnected: [(s) => [s.frame], (frame): boolean => (frame?.active_connections ?? 0) > 0],
   })),
   subscriptions(({ actions, values }) => ({
     frame: (frame?: FrameType, oldFrame?: FrameType) => {
@@ -1266,7 +1278,12 @@ export const frameLogic = kea<frameLogicType>([
     fullDeployFrame: () => framesModel.actions.deployFrame(props.frameId, false),
     deployAgent: () => framesModel.actions.deployAgent(props.frameId),
     restartAgent: () => framesModel.actions.restartAgent(props.frameId),
-    setDeployWithAgent: ({ deployWithAgent }) => framesModel.actions.setDeployWithAgent(props.frameId, deployWithAgent),
+    setDeployWithAgent: ({ deployWithAgent }) => {
+      framesModel.actions.setDeployWithAgent(props.frameId, deployWithAgent)
+      if (values.deployPlanModalOpen) {
+        actions.loadDeployPlans()
+      }
+    },
     updateScene: ({ sceneId, scene }) => {
       const { frameForm } = values
       const hasScene = frameForm.scenes?.some(({ id }) => id === sceneId)

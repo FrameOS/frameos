@@ -29,7 +29,7 @@ import { insertBreaks } from '../utils/insertBreaks'
 import { urls } from '../urls'
 
 function taskIcon(kind: LongRunningTaskKind): JSX.Element {
-  if (kind === 'deploy' || kind === 'agentDeploy') {
+  if (kind === 'deploy' || kind === 'agentDeploy' || kind === 'agentRestart') {
     return <RocketLaunchIcon className="h-5 w-5" />
   }
   if (kind === 'preview') {

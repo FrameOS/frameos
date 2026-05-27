@@ -21,7 +21,6 @@ import {
   FolderPlusIcon,
 } from '@heroicons/react/24/solid'
 import { useState, type DragEvent } from 'react'
-import { apiFetch } from '../../../../utils/apiFetch'
 import { Spinner } from '../../../../components/Spinner'
 import { DropdownMenu, DropdownMenuItem } from '../../../../components/DropdownMenu'
 import { DeferredImage } from '../../../../components/DeferredImage'
@@ -44,6 +43,8 @@ function humaniseSize(size: number) {
 const playSceneButtonClassName =
   'asset-play-button frameos-primary-outline-action shrink-0 rounded-lg border p-1.5 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400'
 const assetRowActionsClassName = 'asset-row-actions ml-auto flex w-[5.25rem] shrink-0 items-center justify-end gap-2'
+const thumbnailImagePattern = /\.(png|jpe?g|gif|bmp|webp)$/i
+const browserImagePattern = /\.(png|jpe?g|gif|bmp|webp|svg)$/i
 
 function formatDateFromSeconds(timestamp: number | null): string {
   if (!timestamp) {
@@ -52,11 +53,37 @@ function formatDateFromSeconds(timestamp: number | null): string {
   return new Date(timestamp * 1000).toLocaleString()
 }
 
+function hasAssetThumbnail(name: string): boolean {
+  return thumbnailImagePattern.test(name)
+}
+
+function opensAsBrowserImage(name: string): boolean {
+  return browserImagePattern.test(name)
+}
+
+function openFrameAsset(frameId: number, path: string, name: string): void {
+  const openInline = opensAsBrowserImage(name)
+  const url = frameAssetUrl(frameId, path, {
+    filename: name,
+    mode: openInline ? 'image' : 'download',
+  })
+
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.target = '_blank'
+  anchor.rel = 'noopener noreferrer'
+  if (!openInline) {
+    anchor.download = name
+  }
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+}
+
 /** A recursive component that renders a folder or a file */
 function TreeNode({
   node,
   frameId,
-  openAsset,
   uploadAssets,
   deleteAsset,
   renameAsset,
@@ -69,7 +96,6 @@ function TreeNode({
 }: {
   node: AssetNode
   frameId: number
-  openAsset: (path: string) => void
   uploadAssets: (path: string) => void
   deleteAsset: (path: string) => void
   renameAsset: (oldPath: string, newPath: string) => void
@@ -82,7 +108,6 @@ function TreeNode({
 }): JSX.Element {
   const expansionKey = frameAssetFolderExpansionKey(frameId, node.path)
   const expanded = frameAssetFolderExpansion[expansionKey] ?? node.path === ''
-  const [isDownloading, setIsDownloading] = useState(false)
   const [isDragOver, setIsDragOver] = useState(false)
 
   const uploadPath = node.isFolder ? node.path : node.path.split('/').slice(0, -1).join('/')
@@ -224,7 +249,6 @@ function TreeNode({
                 key={child.path}
                 node={child}
                 frameId={frameId}
-                openAsset={openAsset}
                 uploadAssets={uploadAssets}
                 deleteAsset={deleteAsset}
                 renameAsset={renameAsset}
@@ -242,7 +266,8 @@ function TreeNode({
     )
   } else {
     // This is a file
-    const isImage = node.name.match(/\.(png|jpe?g|gif|bmp|webp)$/i)
+    const hasThumbnail = hasAssetThumbnail(node.name)
+    const opensInline = opensAsBrowserImage(node.name)
     const isPlayableImage = nodeHasPlayableImages(node)
     const isUploading = node.mtime === -1
     return (
@@ -255,7 +280,7 @@ function TreeNode({
         onDragLeave={onDragLeave}
         onDrop={onDropFiles}
       >
-        {isImage &&
+        {hasThumbnail &&
           node.size !== undefined &&
           node.mtime !== undefined &&
           node.size >= 0 &&
@@ -269,14 +294,15 @@ function TreeNode({
               />
             </div>
           )}
-        {!isImage ? <DocumentIcon className="asset-row-icon h-5 w-5 shrink-0 frame-tool-muted" /> : null}
+        {!hasThumbnail ? <DocumentIcon className="asset-row-icon h-5 w-5 shrink-0 frame-tool-muted" /> : null}
         <div className="min-w-0 flex-1">
-          <span
-            className="block truncate cursor-pointer font-medium hover:underline"
-            onClick={() => openAsset(node.path)}
+          <button
+            type="button"
+            className="block max-w-full truncate text-left font-medium hover:underline"
+            onClick={() => openFrameAsset(frameId, node.path, node.name)}
           >
             {node.name}
-          </span>
+          </button>
         </div>
         {typeof node.size === 'number' && node.size >= 0 && (node.size > 0 || isUploading) ? (
           <span className="asset-file-size frame-tool-muted shrink-0 text-xs">{humaniseSize(node.size)}</span>
@@ -289,7 +315,7 @@ function TreeNode({
             {new Date(node.mtime * 1000).toLocaleString()}
           </span>
         )}
-        {isUploading || isDownloading ? (
+        {isUploading ? (
           <Spinner className="w-4 h-4" color="white" />
         ) : node.size === -2 && node.mtime === -2 ? (
           <span className="text-red-500">Upload error</span>
@@ -319,28 +345,9 @@ function TreeNode({
                     }
                   : null,
                 {
-                  label: 'Download',
-                  icon: isDownloading ? (
-                    <Spinner className="w-4 h-4 inline-block" />
-                  ) : (
-                    <CloudArrowDownIcon className="w-4 h-4 inline-block" />
-                  ),
-                  onClick: async () => {
-                    setIsDownloading(true)
-                    const resource = await apiFetch(frameAssetUrl(frameId, node.path))
-                    if (!resource.ok) {
-                      setIsDownloading(false)
-                      throw new Error('Failed to download asset')
-                    }
-                    const blob = await resource.blob()
-                    const url = URL.createObjectURL(blob)
-                    const a = document.createElement('a')
-                    a.href = url
-                    a.download = node.name
-                    a.click()
-                    URL.revokeObjectURL(url)
-                    setIsDownloading(false)
-                  },
+                  label: opensInline ? 'Open image' : 'Download',
+                  icon: <CloudArrowDownIcon className="w-4 h-4 inline-block" />,
+                  onClick: () => openFrameAsset(frameId, node.path, node.name),
                 },
                 {
                   label: 'Rename',
@@ -555,7 +562,6 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
   const { refreshAssets, syncAssets, uploadAssets, uploadDroppedFiles, deleteAsset, renameAsset, createFolder } =
     useActions(assetsLogic(assetsLogicProps))
   const { setFrameAssetFolderExpanded } = useActions(workspaceLogic)
-  const { openAsset } = useActions(panelsLogic({ frameId: frame.id }))
   const showSyncAction = !isInFrameAdminMode()
 
   const handleSyncAssets = () => {
@@ -619,7 +625,6 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
           <TreeNode
             node={assetTree}
             frameId={frame.id}
-            openAsset={openAsset}
             uploadAssets={uploadAssets}
             deleteAsset={deleteAsset}
             renameAsset={renameAsset}

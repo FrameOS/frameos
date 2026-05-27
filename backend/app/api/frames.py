@@ -1394,9 +1394,16 @@ async def api_frame_get_asset(
             data = await _remote_download_file(db, redis, frame, full_path)
             await redis.set(cache_key, data, ex=86400 * 30)
 
+    media_type = "application/octet-stream"
+    if mode == "image":
+        media_type = (
+            mimetypes.guess_type(filename or rel_path)[0]
+            or "application/octet-stream"
+        )
+
     return StreamingResponse(
         io.BytesIO(data),
-        media_type="image/png" if mode == "image" else "application/octet-stream",
+        media_type=media_type,
         headers={
             "Content-Disposition": (
                 f"{'attachment' if mode == 'download' else 'inline'}; "
