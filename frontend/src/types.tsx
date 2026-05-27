@@ -95,11 +95,27 @@ export interface FrameType {
     agentSharedSecret?: string
     deployWithAgent?: boolean
   }
+  mountpoints?: FrameMountpointsConfig
   palette?: Palette
   buildroot?: FrameBuildrootConfig
   rpios?: FrameRpiOSConfig
   terminal_history?: string[]
   active_connections?: number
+}
+
+export interface FrameMountpointConfig {
+  enabled?: boolean
+  source?: string
+  target?: string
+  username?: string
+  password?: string
+  domain?: string
+  options?: string
+}
+
+export interface FrameMountpointsConfig {
+  enabled?: boolean
+  items?: FrameMountpointConfig[]
 }
 
 export type FrameMode = 'rpios' | 'buildroot' | 'import'

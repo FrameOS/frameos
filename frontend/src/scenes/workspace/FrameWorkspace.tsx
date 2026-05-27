@@ -270,6 +270,7 @@ const frameSettingsSections = [
   { id: 'frame-settings-admin', label: 'Admin' },
   { id: 'frame-http-proxy-section', label: 'HTTPS' },
   { id: 'frame-settings-network', label: 'Network' },
+  { id: 'frame-settings-mountpoints', label: 'Mountpoints' },
   { id: 'frame-settings-defaults', label: 'Defaults' },
   { id: 'frame-settings-palette', label: 'Palette' },
   { id: 'frame-settings-qr', label: 'QR code' },

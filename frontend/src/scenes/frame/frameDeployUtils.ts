@@ -280,6 +280,19 @@ function rebootScheduleSummary(reboot?: Partial<FrameType>['reboot'] | PlannedRe
   return `${target} at ${formatCronSchedule(reboot.crontab)}`
 }
 
+function mountpointsSummary(frame?: Partial<FrameType> | null): string | null {
+  if (!frame?.mountpoints?.enabled) {
+    return null
+  }
+  const enabledItems = (frame.mountpoints.items ?? []).filter(
+    (item) => item.enabled !== false && item.source?.trim() && item.target?.trim()
+  )
+  if (enabledItems.length === 0) {
+    return null
+  }
+  return `${enabledItems.length} Samba mountpoint${enabledItems.length === 1 ? '' : 's'}`
+}
+
 export function normalizeFrameosVersion(version: unknown): string | null {
   return typeof version === 'string' && version.trim() ? version.split('+')[0] : null
 }
@@ -375,6 +388,10 @@ export function buildFullDeployPlanSummary(
   if (packagesToInstall.length > 0) {
     items.push({ label: 'Packages to install', value: stringifyList(packagesToInstall) })
   }
+  const mounts = mountpointsSummary(frame)
+  if (mounts) {
+    items.push({ label: 'Mountpoints', value: mounts })
+  }
   if (
     !fullPlan.binary.will_attempt_precompiled &&
     !fullPlan.binary.will_attempt_cross_compile &&
@@ -461,6 +478,10 @@ export function buildInferredFullDeployPlanSummary(
   const rebootSchedule = rebootScheduleSummary(frame?.reboot)
   if (rebootSchedule) {
     items.push({ label: 'Reboot schedule', value: `Automatic ${rebootSchedule}` })
+  }
+  const mounts = mountpointsSummary(frame)
+  if (mounts) {
+    items.push({ label: 'Mountpoints', value: mounts })
   }
 
   return items

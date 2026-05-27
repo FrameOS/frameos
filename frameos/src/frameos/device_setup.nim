@@ -150,7 +150,7 @@ proc applyBootConfigLines*(content: string, requestedLines: seq[string]): tuple[
 
   result = (normalizeBootConfig(lines.join("\n")), changed)
 
-proc writePrivilegedFile(path: string, content: string) =
+proc writePrivilegedFile*(path: string, content: string) =
   try:
     writeFile(path, content)
   except OSError:

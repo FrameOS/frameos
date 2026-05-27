@@ -17,6 +17,9 @@ proc setConfigDefaults*(config: var FrameConfig) =
   if config.httpsProxy.port == 0: config.httpsProxy.port = 8443
   if config.frameAccess == "": config.frameAccess = "private"
   if config.name == "": config.name = config.frameHost
+  if config.network == nil: config.network = NetworkConfig(networkCheck: false)
+  if config.agent == nil: config.agent = AgentConfig(agentEnabled: false)
+  if config.mountpoints == nil: config.mountpoints = MountpointsConfig(enabled: false, items: @[])
   if config.timeZone == "": config.timeZone = detectSystemTimeZone()
 
 proc loadSchedule*(data: JsonNode): FrameSchedule =
@@ -123,6 +126,29 @@ proc loadAgent*(data: JsonNode): AgentConfig =
       agentSharedSecret: data{"agentSharedSecret"}.getStr(""),
     )
 
+proc loadMountpoints*(data: JsonNode): MountpointsConfig =
+  result = MountpointsConfig(enabled: false, items: @[])
+  if data == nil or data.kind != JObject:
+    return
+
+  result.enabled = data{"enabled"}.getBool()
+  let items = data{"items"}
+  if items == nil or items.kind != JArray:
+    return
+
+  for item in items.items:
+    if item == nil or item.kind != JObject:
+      continue
+    result.items.add(MountpointConfig(
+      enabled: item{"enabled"}.getBool(true),
+      source: item{"source"}.getStr("").strip(),
+      target: item{"target"}.getStr("").strip(),
+      username: item{"username"}.getStr(""),
+      password: item{"password"}.getStr(""),
+      domain: item{"domain"}.getStr(""),
+      options: item{"options"}.getStr("").strip(),
+    ))
+
 proc getConfigFilename*(): string =
   result = getEnv("FRAMEOS_CONFIG")
   if result == "":
@@ -168,6 +194,8 @@ proc loadConfig*(): FrameConfig =
     gpioButtons: loadGPIOButtons(data{"gpioButtons"}),
     controlCode: loadControlCode(data{"controlCode"}),
     network: loadNetwork(data{"network"}),
+    agent: loadAgent(data{"agent"}),
+    mountpoints: loadMountpoints(data{"mountpoints"}),
     palette: loadPalette(data{"palette"}),
   )
   if result.assetsPath.endswith("/"):
@@ -213,5 +241,6 @@ proc updateFrameConfigFrom*(target: FrameConfig, source: FrameConfig) =
   target.controlCode = source.controlCode
   target.network = source.network
   target.agent = source.agent
+  target.mountpoints = source.mountpoints
   target.palette = source.palette
   updateSchedule(target.schedule, source.schedule)

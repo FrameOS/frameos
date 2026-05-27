@@ -58,6 +58,20 @@ def _deploy_uses_agent(frame: Frame) -> bool:
     )
 
 
+def _mountpoints_enabled(frame: Frame) -> bool:
+    raw_mountpoints = getattr(frame, "mountpoints", None)
+    mountpoints = raw_mountpoints if isinstance(raw_mountpoints, dict) else {}
+    if not mountpoints.get("enabled"):
+        return False
+
+    for item in mountpoints.get("items") or []:
+        if not isinstance(item, dict) or item.get("enabled") is False:
+            continue
+        if str(item.get("source") or "").strip() and str(item.get("target") or "").strip():
+            return True
+    return False
+
+
 @dataclass(slots=True)
 class PackagePlan:
     name: str
@@ -385,6 +399,9 @@ class FrameDeployWorkflow:
                 run_after_install="sudo systemctl disable --now caddy.service",
             )
         )
+
+        if _mountpoints_enabled(self.frame):
+            package_plans.append(await self._plan_package("cifs-utils", "Samba/CIFS mountpoint support"))
 
         if drivers.get("evdev"):
             package_plans.append(await self._plan_package("libevdev-dev", "evdev driver support"))

@@ -68,6 +68,7 @@ class FrameBase(BaseModel):
     gpio_buttons: Optional[List[Dict[str, Any]]]
     network: Optional[Dict[str, Any]]
     agent: Optional[Dict[str, Any]]
+    mountpoints: Optional[Dict[str, Any]]
     palette: Optional[Dict[str, Any]]
     buildroot: Optional[Dict[str, Any]] = None
     rpios: Optional[Dict[str, Any]] = None
@@ -132,6 +133,7 @@ class FrameUpdateRequest(BaseModel):
     gpio_buttons: Optional[List[Dict[str, Any]]] = None
     network: Optional[Dict[str, Any]] = None
     agent: Optional[Dict[str, Any]] = None
+    mountpoints: Optional[Dict[str, Any]] = None
     palette: Optional[Dict[str, Any]] = None
     buildroot: Optional[Dict[str, Any]] = None
     rpios: Optional[Dict[str, Any]] = None

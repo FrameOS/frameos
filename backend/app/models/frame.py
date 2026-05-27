@@ -107,6 +107,30 @@ def normalize_reboot_config(reboot: Any) -> Any:
     }
 
 
+def normalize_mountpoints(mountpoints: Any) -> dict:
+    config = mountpoints if isinstance(mountpoints, dict) else {}
+    raw_items = config.get("items") if isinstance(config.get("items"), list) else []
+    items = []
+
+    for raw_item in raw_items:
+        if not isinstance(raw_item, dict):
+            continue
+        items.append({
+            "enabled": bool(raw_item.get("enabled", True)),
+            "source": str(raw_item.get("source") or "").strip(),
+            "target": str(raw_item.get("target") or "").strip(),
+            "username": str(raw_item.get("username") or ""),
+            "password": str(raw_item.get("password") or ""),
+            "domain": str(raw_item.get("domain") or ""),
+            "options": str(raw_item.get("options") or "").strip(),
+        })
+
+    return {
+        "enabled": bool(config.get("enabled", False)),
+        "items": items,
+    }
+
+
 
 # NB! Update frontend/src/types.tsx if you change this
 class Frame(Base):
@@ -159,6 +183,7 @@ class Frame(Base):
     gpio_buttons = mapped_column(JSON, nullable=True)
     network = mapped_column(JSON, nullable=True)
     agent = mapped_column(JSON, nullable=True)
+    mountpoints = mapped_column(JSON, nullable=True)
     palette = mapped_column(JSON, nullable=True)
     buildroot = mapped_column(JSON, nullable=True)
     rpios = mapped_column(JSON, nullable=True)
@@ -215,6 +240,7 @@ class Frame(Base):
             'gpio_buttons': self.gpio_buttons,
             'network': self.network,
             'agent': self.agent,
+            'mountpoints': normalize_mountpoints(self.mountpoints),
             'palette': self.palette,
             'buildroot': self.buildroot,
             'rpios': self.rpios,
@@ -300,6 +326,7 @@ async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, serve
             "agentRunCommands": False,
             "agentSharedSecret": secure_token(32)
         },
+        mountpoints={"enabled": False, "items": []},
         control_code={"enabled": "false", "position": "top-right"},
         schedule={"events": []},
         reboot={"enabled": "true", "crontab": "0 4 * * *"}
@@ -362,6 +389,7 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
     https_proxy = normalize_https_proxy(frame.https_proxy)
     network = frame.network or {}
     agent = frame.agent or {}
+    mountpoints = normalize_mountpoints(frame.mountpoints)
     frameos_version = get_versions().get("frameos")
     frame_json: dict = {
         **({"frameosVersion": frameos_version} if isinstance(frameos_version, str) and frameos_version else {}),
@@ -436,7 +464,8 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
             "agentEnabled": bool(agent.get('agentEnabled', False)),
             "agentRunCommands": bool(agent.get('agentRunCommands', False)),
             "agentSharedSecret": agent.get('agentSharedSecret', secure_token(32)),
-        }
+        },
+        "mountpoints": mountpoints,
     }
 
     schedule = frame.schedule

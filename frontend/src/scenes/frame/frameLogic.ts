@@ -100,6 +100,7 @@ const FRAME_KEYS: (keyof FrameType)[] = [
   'gpio_buttons',
   'network',
   'agent',
+  'mountpoints',
   'palette',
   'buildroot',
   'rpios',
@@ -160,6 +161,7 @@ const FRAME_KEY_LABELS: Partial<Record<keyof FrameType, string>> = {
   gpio_buttons: 'GPIO buttons',
   network: 'Network settings',
   agent: 'Agent settings',
+  mountpoints: 'Mountpoints',
   palette: 'Palette',
   buildroot: 'Buildroot settings',
   rpios: 'Raspberry Pi OS settings',
@@ -197,6 +199,7 @@ const DEPLOYMENT_SUMMARY_KEYS: (keyof FrameType)[] = [
   'log_to_file',
   'assets_path',
   'save_assets',
+  'mountpoints',
 ]
 
 function keyLabel(key: keyof FrameType): string {
@@ -386,9 +389,36 @@ function normalizeRpiosForComparison(value: unknown): Record<string, unknown> {
   }
 }
 
+function normalizeMountpointsForComparison(value: unknown): Record<string, any> {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
+  const rawItems = Array.isArray(source.items) ? source.items : []
+  const items = rawItems
+    .filter(
+      (item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object' && !Array.isArray(item)
+    )
+    .map((item) => ({
+      enabled: item.enabled !== false,
+      source: String(item.source ?? '').trim(),
+      target: String(item.target ?? '').trim(),
+      username: String(item.username ?? ''),
+      password: String(item.password ?? ''),
+      domain: String(item.domain ?? ''),
+      options: String(item.options ?? '').trim(),
+    }))
+
+  return {
+    enabled: Boolean(source.enabled),
+    items,
+  }
+}
+
 function normalizeFrameKeyValueForComparison(key: keyof FrameType, value: unknown): unknown {
   if (key === 'rpios') {
     return normalizeRpiosForComparison(value)
+  }
+
+  if (key === 'mountpoints') {
+    return normalizeMountpointsForComparison(value)
   }
 
   if (key !== 'https_proxy' || !value || typeof value !== 'object') {
@@ -449,6 +479,16 @@ function summarizeFrameFieldValue(key: keyof FrameType, value: unknown): string 
         parts.push('port-only')
       }
       return parts.join(' · ')
+    }
+    case 'mountpoints': {
+      const mountpoints = normalizeMountpointsForComparison(value)
+      if (!mountpoints.enabled) {
+        return 'Disabled'
+      }
+      const enabledItems = mountpoints.items.filter(
+        (item: Record<string, unknown>) => item.enabled !== false && item.source && item.target
+      ).length
+      return enabledItems > 0 ? `${enabledItems} mountpoint${enabledItems === 1 ? '' : 's'}` : 'Enabled'
     }
     case 'ssh_keys': {
       const keys = Array.isArray(value) ? value : []
@@ -706,6 +746,7 @@ function hasValidPosition(node: DiagramNode): boolean {
 function sanitizeFrame(frame: Partial<FrameType>): Partial<FrameType> {
   const frameAdminAuthUser = frame.frame_admin_auth?.user ?? ''
   const frameAdminAuthPass = frame.frame_admin_auth?.pass ?? ''
+  const mountpoints = normalizeMountpointsForComparison(frame.mountpoints) as FrameType['mountpoints']
   const rpios = frame.rpios
     ? {
         ...frame.rpios,
@@ -721,6 +762,7 @@ function sanitizeFrame(frame: Partial<FrameType>): Partial<FrameType> {
       user: frameAdminAuthUser,
       pass: frameAdminAuthPass,
     },
+    mountpoints,
     scenes: frame.scenes?.map((scene) => sanitizeScene(scene, frame)) ?? [],
   }
 }
@@ -883,6 +925,18 @@ export const frameLogic = kea<frameLogicType>([
             type: field.type ? '' : 'Type is required',
           })),
         })),
+        mountpoints: state.mountpoints?.enabled
+          ? {
+              items: (state.mountpoints.items ?? []).map((item) =>
+                item.enabled === false
+                  ? undefined
+                  : {
+                      source: item.source?.trim() ? undefined : 'Source is required',
+                      target: item.target?.trim() ? undefined : 'Mount path is required',
+                    }
+              ),
+            }
+          : undefined,
       }),
       submit: async (frame) => {
         await saveFrameForm(frame, values.frameId, values.nextAction)

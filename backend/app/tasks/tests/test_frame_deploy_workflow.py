@@ -465,6 +465,47 @@ async def test_full_plan_skips_remote_build_dependencies_for_precompiled(monkeyp
     assert "libicu-dev" not in package_names
     assert "zlib1g-dev" not in package_names
 
+
+@pytest.mark.asyncio
+async def test_full_plan_includes_cifs_utils_for_enabled_mountpoints(monkeypatch: pytest.MonkeyPatch):
+    frame = SimpleNamespace(
+        id=18,
+        name="MountedFrame",
+        ssh_keys=[],
+        rpios={"crossCompilation": "auto", "compilationMode": "precompiled"},
+        reboot=None,
+        mountpoints={
+            "enabled": True,
+            "items": [{"enabled": True, "source": "//nas/photos", "target": "/mnt/photos"}],
+        },
+        last_successful_deploy={"frameos_version": "9.9.9"},
+        last_successful_deploy_at="2026-01-01T00:00:00+00:00",
+        to_dict=lambda: {"id": 18, "name": "MountedFrame"},
+    )
+    deployer = FakeDeployer()
+
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.drivers_for_frame", lambda _frame: {})
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.get_settings_dict", lambda _db: {})
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.select_ssh_keys_for_frame", lambda _frame, _settings: [])
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.normalize_ssh_keys", lambda _settings: [])
+
+    workflow = FrameDeployWorkflow(
+        db=None,
+        redis=None,
+        frame=frame,
+        deployer=deployer,
+        temp_dir="",
+        binary_builder=FakePrecompiledBinaryBuilder(),
+    )
+
+    plan = await workflow.plan("full")
+
+    assert plan.full_deploy is not None
+    package_map = {pkg.name: pkg for pkg in plan.full_deploy.package_plans}
+    assert package_map["cifs-utils"].reason == "Samba/CIFS mountpoint support"
+    assert package_map["cifs-utils"].installed is False
+
+
 @pytest.mark.asyncio
 async def test_full_plan_includes_post_deploy_driver_and_reboot_steps(monkeypatch: pytest.MonkeyPatch):
     frame = SimpleNamespace(
