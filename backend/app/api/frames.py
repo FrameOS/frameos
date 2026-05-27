@@ -20,7 +20,7 @@ import tempfile
 import time
 import zipfile
 from tempfile import NamedTemporaryFile
-from typing import Any, Awaitable, Optional, Tuple
+from typing import Any, Awaitable, Optional, Tuple, cast
 from types import SimpleNamespace
 from urllib.parse import quote
 
@@ -71,6 +71,7 @@ from app.api.auth import get_current_user_from_request
 from app.config import config
 from app.utils.network import is_safe_host
 from app.utils.remote_exec import (
+    RemoteTransport,
     upload_file,
     delete_path,
     rename_path,
@@ -109,6 +110,14 @@ from app.codegen.drivers_nim import frame_compilation_mode
 from app.utils.local_exec import exec_local_command
 from app.utils.jwt_tokens import validate_scoped_token
 from . import api_with_auth, api_no_auth
+
+AGENT_TASK_TRANSPORTS = {"auto", "agent", "ssh"}
+
+
+def _agent_task_transport(transport: str) -> RemoteTransport:
+    if transport not in AGENT_TASK_TRANSPORTS:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Invalid agent task transport")
+    return cast(RemoteTransport, transport)
 
 FRAME_ASSETS_CACHE_REFRESH_AFTER_SECONDS = 20
 FRAME_ASSETS_CACHE_RETRY_AFTER_SECONDS = 2
@@ -2078,22 +2087,33 @@ async def api_frame_reboot_event(id: int, redis: Redis = Depends(get_redis)):
 
 
 @api_with_auth.post("/frames/{id:int}/deploy_agent")
-async def api_frame_deploy_agent_event(id: int, recompile: bool = False, redis: Redis = Depends(get_redis)):
+async def api_frame_deploy_agent_event(
+    id: int,
+    recompile: bool = False,
+    transport: str = "ssh",
+    redis: Redis = Depends(get_redis),
+):
+    agent_transport = _agent_task_transport(transport)
     try:
         from app.tasks import deploy_agent
 
-        await deploy_agent(id, redis, recompile=recompile)
+        await deploy_agent(id, redis, recompile=recompile, transport=agent_transport)
         return "Success"
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @api_with_auth.post("/frames/{id:int}/restart_agent")
-async def api_frame_restart_agent_event(id: int, redis: Redis = Depends(get_redis)):
+async def api_frame_restart_agent_event(
+    id: int,
+    transport: str = "ssh",
+    redis: Redis = Depends(get_redis),
+):
+    agent_transport = _agent_task_transport(transport)
     try:
         from app.tasks import restart_agent
 
-        await restart_agent(id, redis)
+        await restart_agent(id, redis, transport=agent_transport)
         return "Success"
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))

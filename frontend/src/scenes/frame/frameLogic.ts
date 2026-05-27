@@ -1,6 +1,6 @@
 import { actions, afterMount, beforeUnmount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 import { router } from 'kea-router'
-import { framesModel } from '../../models/framesModel'
+import { framesModel, type AgentTaskTransport } from '../../models/framesModel'
 import type { frameLogicType } from './frameLogicType'
 import { subscriptions } from 'kea-subscriptions'
 import { AppNodeData, DiagramNode, FrameScene, FrameType, SceneNodeData, TemplateType } from '../../types'
@@ -877,8 +877,11 @@ export const frameLogic = kea<frameLogicType>([
     deployFrame: true,
     fastDeployFrame: true,
     fullDeployFrame: true,
-    deployAgent: (recompile?: boolean) => ({ recompile: recompile || false }),
-    restartAgent: true,
+    deployAgent: (recompile?: boolean, transport: AgentTaskTransport = 'ssh') => ({
+      recompile: recompile || false,
+      transport,
+    }),
+    restartAgent: (transport: AgentTaskTransport = 'ssh') => ({ transport }),
     updateDeployedSshKeys: true,
     clearNextAction: true,
     resetUnsavedChanges: true,
@@ -1343,8 +1346,8 @@ export const frameLogic = kea<frameLogicType>([
     },
     fastDeployFrame: () => framesModel.actions.deployFrame(props.frameId, true),
     fullDeployFrame: () => framesModel.actions.deployFrame(props.frameId, false),
-    deployAgent: ({ recompile }) => framesModel.actions.deployAgent(props.frameId, recompile),
-    restartAgent: () => framesModel.actions.restartAgent(props.frameId),
+    deployAgent: ({ recompile, transport }) => framesModel.actions.deployAgent(props.frameId, recompile, transport),
+    restartAgent: ({ transport }) => framesModel.actions.restartAgent(props.frameId, transport),
     setDeployWithAgent: ({ deployWithAgent }) => {
       framesModel.actions.setDeployWithAgent(props.frameId, deployWithAgent)
     },

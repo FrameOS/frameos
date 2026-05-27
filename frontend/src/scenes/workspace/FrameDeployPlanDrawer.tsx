@@ -9,6 +9,7 @@ import { DropdownMenu } from '../../components/DropdownMenu'
 import { Spinner } from '../../components/Spinner'
 import { Tooltip } from '../../components/Tooltip'
 import { frameHost } from '../../decorators/frame'
+import type { AgentTaskTransport } from '../../models/framesModel'
 import type { FrameType, LogType } from '../../types'
 import { urls } from '../../urls'
 import { frameLogic, type ChangeDetail, type DeployRecommendation, type SummaryItem } from '../frame/frameLogic'
@@ -298,6 +299,7 @@ function RecommendationDescription({ recommendation }: { recommendation: DeployR
 
 function DeployTransportToggle({
   frameId,
+  agentConnected,
   canDeployAgent,
   canCopyBootstrapScript,
   showRecompileAgent,
@@ -307,11 +309,12 @@ function DeployTransportToggle({
   onChange,
 }: {
   frameId: number
+  agentConnected: boolean
   canDeployAgent: boolean
   canCopyBootstrapScript: boolean
   showRecompileAgent: boolean
-  onDeployAgent: (recompile?: boolean) => void
-  onRestartAgent: () => void
+  onDeployAgent: (recompile?: boolean, transport?: AgentTaskTransport) => void
+  onRestartAgent: (transport?: AgentTaskTransport) => void
   deployWithAgent: boolean
   onChange: (deployWithAgent: boolean) => void
 }): JSX.Element {
@@ -390,7 +393,7 @@ function DeployTransportToggle({
                   ...(canCopyBootstrapScript
                     ? [
                         {
-                          label: bootstrapCopied ? 'Bootstrap script copied' : 'Copy agent bootstrap (curl)',
+                          label: bootstrapCopied ? 'Bootstrap script copied' : 'Copy agent bootstrap (shell command to run on frame)',
                           title: 'Copy agent bootstrap install command',
                           loading: bootstrapLoading,
                           onClick: () => copyAgentBootstrapScript(false),
@@ -400,21 +403,49 @@ function DeployTransportToggle({
                   {
                     label: 'Restart agent via SSH',
                     title: 'Restart FrameOS agent via SSH',
-                    onClick: () => onRestartAgent(),
+                    onClick: () => onRestartAgent('ssh'),
+                  },
+                  {
+                    label: 'Restart agent via agent',
+                    title: agentConnected
+                      ? 'Ask the connected FrameOS agent to schedule its own restart'
+                      : 'The FrameOS agent is not connected',
+                    disabled: !agentConnected,
+                    onClick: () => onRestartAgent('agent'),
                   },
                   ...(canDeployAgent
                     ? [
                         {
                           label: 'Deploy agent via SSH',
                           title: 'Deploy FrameOS agent via SSH',
-                          onClick: () => onDeployAgent(),
+                          onClick: () => onDeployAgent(false, 'ssh'),
+                        },
+                        {
+                          label: 'Deploy agent via agent',
+                          title: agentConnected
+                            ? 'Stage, verify, switch, and restart the FrameOS agent through the connected agent'
+                            : 'The FrameOS agent is not connected',
+                          disabled: !agentConnected,
+                          confirm:
+                            'Deploy the FrameOS agent through the currently connected agent? The backend will verify the staged release before switching and then confirm the restarted service is running the new binary.',
+                          onClick: () => onDeployAgent(false, 'agent'),
                         },
                         ...(showRecompileAgent
                           ? [
                               {
-                                label: 'Recompile and deploy via SSH',
+                                label: 'Recompile and deploy agent via SSH',
                                 title: 'Recompile FrameOS agent from local source and deploy via SSH',
-                                onClick: () => onDeployAgent(true),
+                                onClick: () => onDeployAgent(true, 'ssh'),
+                              },
+                              {
+                                label: 'Recompile and deploy via agent',
+                                title: agentConnected
+                                  ? 'Recompile FrameOS agent from local source, then stage, verify, switch, and restart through the connected agent'
+                                  : 'The FrameOS agent is not connected',
+                                disabled: !agentConnected,
+                                confirm:
+                                  'Recompile and deploy the FrameOS agent through the currently connected agent? The backend will compile first, verify the staged release before switching, and then confirm the restarted service is running the new binary.',
+                                onClick: () => onDeployAgent(true, 'agent'),
                               },
                             ]
                           : []),
@@ -479,6 +510,7 @@ function AgentBootstrapAction({ frame }: { frame: FrameType }): JSX.Element | nu
 export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Element | null {
   useMountedLogic(logsLogic({ frameId: frame.id }))
   const {
+    agentDeployConnected,
     deployChangeDetails,
     deployPlansError,
     deployPlansLoading,
@@ -544,6 +576,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
           {deployTransportToggleVisible ? (
             <DeployTransportToggle
               frameId={frame.id}
+              agentConnected={agentDeployConnected}
               canDeployAgent={canDeployAgent}
               canCopyBootstrapScript={canCopyBootstrapScript}
               showRecompileAgent={showRecompileAgent}

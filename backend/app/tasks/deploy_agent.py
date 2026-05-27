@@ -1,22 +1,20 @@
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import os
 import shlex
 import shutil
 import tempfile
 from typing import Any, Optional
 
-import asyncssh
 from arq import ArqRedis as Redis
 from sqlalchemy.orm import Session
 
 from app.models.frame import Frame
 from app.models.log import new_log as log
-from app.utils.ssh_utils import (
-    get_ssh_connection,
-    remove_ssh_connection,
-)
 from app.utils.local_exec import exec_local_command
+from app.utils.remote_exec import RemoteTransport, upload_file
 from app.tasks._frame_deployer import FrameDeployer
 from app.tasks.prebuilt_deps import resolve_prebuilt_target
 from app.tasks.precompiled_agent import download_precompiled_agent_release
@@ -42,13 +40,26 @@ def agent_build_version() -> str:
     if isinstance(version, str) and version:
         return version
     return current_agent_version() or "unknown"
+def delayed_agent_restart_command(suffix: str = "manual") -> str:
+    safe_suffix = "".join(ch for ch in suffix if ch.isalnum() or ch in {"-", "_"}) or "manual"
+    unit = f"frameos-agent-restart-{safe_suffix}"
+    fallback = "sudo sh -c 'nohup sh -c \"sleep 2; systemctl restart frameos_agent.service\" >/dev/null 2>&1 &'"
+    return (
+        f"(command -v systemd-run >/dev/null 2>&1 && "
+        f"sudo systemd-run --unit={shlex.quote(unit)} --collect --on-active=2 "
+        f"/bin/systemctl restart frameos_agent.service) || {fallback}"
+    )
 
 
-async def deploy_agent(id: int, redis: Redis, *, recompile: bool = False) -> None:  # noqa: N802
-    await redis.enqueue_job("deploy_agent", id=id, recompile=recompile)
+async def deploy_agent(
+    id: int, redis: Redis, *, recompile: bool = False, transport: RemoteTransport = "ssh"
+) -> None:  # noqa: N802
+    await redis.enqueue_job("deploy_agent", id=id, recompile=recompile, transport=transport)
 
 
-async def deploy_agent_task(ctx: dict[str, Any], id: int, recompile: bool = False):  # noqa: N802
+async def deploy_agent_task(
+    ctx: dict[str, Any], id: int, recompile: bool = False, transport: RemoteTransport = "ssh"
+):  # noqa: N802
     db: Session = ctx["db"]
     redis: Redis = ctx["redis"]
 
@@ -60,15 +71,13 @@ async def deploy_agent_task(ctx: dict[str, Any], id: int, recompile: bool = Fals
     # Workspace ────────────────────────────────────────────────────────────
     try:
         with tempfile.TemporaryDirectory() as tmp:
-            deployer = AgentDeployer(db, redis, frame, "", tmp, force_source=recompile)
+            deployer = AgentDeployer(db, redis, frame, "", tmp, force_source=recompile, transport=transport)
             await deployer.run()
     except Exception as e:
         await log(db, redis, id, "stderr", str(e))
         raise
 
 class AgentDeployer(FrameDeployer):
-    ssh: Optional[asyncssh.SSHClientConnection] = None
-
     def __init__(
         self,
         db: Session,
@@ -78,22 +87,26 @@ class AgentDeployer(FrameDeployer):
         temp_dir: str,
         *,
         force_source: bool = False,
+        transport: RemoteTransport = "ssh",
     ):
         super().__init__(db, redis, frame, nim_path, temp_dir)
         self.force_source = force_source
+        self.remote_transport = transport
+        self.staged_binary_sha256: str | None = None
 
     async def run(self) -> None:
         """Main orchestration coroutine (used by global ``deploy_agent_task``)."""
         try:
-            self.ssh = await get_ssh_connection(self.db, self.redis, self.frame)
-
             with tempfile.TemporaryDirectory() as temp_dir:
                 self.temp_dir = temp_dir
 
                 await self.log(
                     "stdout",
-                    f"Deploying agent {self.frame.name} with build id {self.build_id}",
+                    f"Deploying agent {self.frame.name} with build id {self.build_id} via {self.remote_transport}",
                 )
+
+                if self.remote_transport == "agent":
+                    await self._verify_agent_transport("before staging")
 
                 # 1. Detect CPU architecture on target
                 arch = await self.get_cpu_architecture()
@@ -115,17 +128,21 @@ class AgentDeployer(FrameDeployer):
                     await self._setup_agent_service()
 
                     # 3. Upload *frame.json* for this release
-                    await self._upload_frame_json(f"/srv/frameos/agent/releases/release_{self.build_id}/frame.json")
+                    await self._upload_frame_json(f"{self._release_dir()}/frame.json")
+                    await self._verify_staged_release()
+
+                    if self.remote_transport == "agent":
+                        await self._verify_agent_transport("before switching release")
 
                     # 4. Atomically switch *current* → new release + housekeeping
-                    await self.exec_command(
-                        "rm -rf /srv/frameos/agent/current && "
-                        f"ln -s /srv/frameos/agent/releases/release_{self.build_id} "
-                        "/srv/frameos/agent/current"
-                    )
+                    await self._switch_current_release()
 
                     # Enable + start service
-                    await self.restart_service("frameos_agent")
+                    if self.remote_transport == "agent":
+                        await self._restart_agent_service_via_agent()
+                        await self._wait_for_agent_release()
+                    else:
+                        await self.restart_service("frameos_agent")
 
                     await self._cleanup_old_builds()
                     await self.log(
@@ -145,9 +162,9 @@ class AgentDeployer(FrameDeployer):
         except Exception as exc:  # keep logging parity with legacy code
             await self.log("stderr", str(exc))
             raise
-        finally:
-            if self.ssh is not None:
-                await remove_ssh_connection(self.db, self.redis, self.ssh, self.frame)
+
+    def _release_dir(self) -> str:
+        return f"/srv/frameos/agent/releases/release_{self.build_id}"
 
     def _can_deploy_agent(self) -> bool:
         """Whether ``frame.network`` declares an agent link + shared secret."""
@@ -261,11 +278,16 @@ class AgentDeployer(FrameDeployer):
 
         await self._ensure_agent_directories()
 
-        # Upload archive
-        await asyncssh.scp(
-            archive_path,
-            (self.ssh, f"/srv/frameos/agent/build/agent_{self.build_id}.tar.gz"),
-            recurse=False,
+        with open(archive_path, "rb") as fh:
+            archive_data = fh.read()
+        await upload_file(
+            self.db,
+            self.redis,
+            self.frame,
+            f"/srv/frameos/agent/build/agent_{self.build_id}.tar.gz",
+            archive_data,
+            timeout=1800,
+            transport=self.remote_transport,
         )
 
         # Unpack & compile _on the device_
@@ -280,28 +302,34 @@ class AgentDeployer(FrameDeployer):
         # Stage binary into new release dir
         await self.exec_command(
             f"cp /srv/frameos/agent/build/agent_{self.build_id}/frameos_agent "
-            f"/srv/frameos/agent/releases/release_{self.build_id}/frameos_agent"
+            f"{self._release_dir()}/frameos_agent"
         )
+        await self.exec_command(f"chmod +x {self._release_dir()}/frameos_agent")
 
     async def _stage_agent_binary(self, binary_path: str) -> None:
-        if self.ssh is None:
-            raise RuntimeError("SSH connection missing while staging FrameOS agent binary")
-
         await self._ensure_agent_directories()
-        remote_binary = f"/srv/frameos/agent/releases/release_{self.build_id}/frameos_agent"
-        await asyncssh.scp(
-            binary_path,
-            (self.ssh, remote_binary),
-            recurse=False,
+        with open(binary_path, "rb") as fh:
+            data = fh.read()
+        self.staged_binary_sha256 = hashlib.sha256(data).hexdigest()
+        remote_binary = f"{self._release_dir()}/frameos_agent"
+        await upload_file(
+            self.db,
+            self.redis,
+            self.frame,
+            remote_binary,
+            data,
+            timeout=1800,
+            transport=self.remote_transport,
         )
         await self.exec_command(f"chmod +x {remote_binary}")
+        await self._verify_uploaded_binary(remote_binary)
 
     async def _ensure_agent_directories(self) -> None:
         await self.exec_command(
             "mkdir -p "
             "/srv/frameos/agent/build/ "
             "/srv/frameos/agent/logs/ "
-            f"/srv/frameos/agent/releases/release_{self.build_id}"
+            f"{self._release_dir()}"
         )
 
     # --------------- SYSTEMD SERVICE ----------------------------------- #
@@ -311,26 +339,117 @@ class AgentDeployer(FrameDeployer):
         with open("../frameos/agent/frameos_agent.service", "r", encoding="utf-8") as fh:
             service_contents = fh.read().replace("%I", self.frame.ssh_user)
 
-        # Local temp copy
-        with tempfile.NamedTemporaryFile("w+b", suffix=".service", delete=False) as tmp:
-            tmp_path = tmp.name
-            tmp.write(service_contents.encode())
-
         # Ship service file with the release
-        await asyncssh.scp(
-            tmp_path,
-            (self.ssh, f"/srv/frameos/agent/releases/release_{self.build_id}/frameos_agent.service"),
-            recurse=False,
+        await upload_file(
+            self.db,
+            self.redis,
+            self.frame,
+            f"{self._release_dir()}/frameos_agent.service",
+            service_contents.encode(),
+            transport=self.remote_transport,
         )
-        os.remove(tmp_path)
 
         # Activate system-wide
         await self.exec_command(
-            f"sudo cp /srv/frameos/agent/releases/release_{self.build_id}/frameos_agent.service "
+            f"sudo cp {self._release_dir()}/frameos_agent.service "
             "/etc/systemd/system/frameos_agent.service"
         )
         await self.exec_command("sudo chown root:root /etc/systemd/system/frameos_agent.service")
         await self.exec_command("sudo chmod 644 /etc/systemd/system/frameos_agent.service")
+
+    async def _verify_agent_transport(self, label: str) -> None:
+        output: list[str] = []
+        await self.log("stdout", f"- Verifying agent command transport ({label})")
+        await self.exec_command(
+            "printf frameos-agent-transport-ok",
+            output=output,
+            log_output=False,
+            log_command=False,
+            timeout=30,
+        )
+        if "frameos-agent-transport-ok" not in "\n".join(output):
+            raise RuntimeError(f"Agent command transport verification failed ({label})")
+
+    async def _verify_uploaded_binary(self, remote_binary: str) -> None:
+        if not self.staged_binary_sha256:
+            return
+        quoted_binary = shlex.quote(remote_binary)
+        quoted_sha = shlex.quote(self.staged_binary_sha256)
+        await self.exec_command(
+            "if command -v sha256sum >/dev/null 2>&1; then "
+            f"printf '%s  %s\\n' {quoted_sha} {quoted_binary} | sha256sum -c -; "
+            "else echo 'sha256sum unavailable; verified upload size and executable bit only'; fi",
+            timeout=120,
+        )
+
+    async def _verify_staged_release(self) -> None:
+        release_dir = shlex.quote(self._release_dir())
+        await self.log("stdout", "- Verifying staged agent release before switching")
+        await self.exec_command(
+            "set -eu; "
+            f"release={release_dir}; "
+            'test -d "$release"; '
+            'test -s "$release/frameos_agent"; '
+            'test -x "$release/frameos_agent"; '
+            'test -s "$release/frameos_agent.service"; '
+            'test -s "$release/frame.json"; '
+            "grep -q '^ExecStart=/srv/frameos/agent/current/frameos_agent$' "
+            '"$release/frameos_agent.service"; '
+            "echo staged-agent-release-ok",
+            timeout=120,
+        )
+
+    async def _switch_current_release(self) -> None:
+        release_dir = shlex.quote(self._release_dir())
+        await self.log("stdout", "- Switching current agent release")
+        await self.exec_command(
+            "set -eu; "
+            "cd /srv/frameos/agent; "
+            "rm -f current.next; "
+            f"ln -sfn {release_dir} current.next; "
+            "(mv -Tf current.next current 2>/dev/null || (rm -rf current && mv current.next current)); "
+            'test "$(readlink current)" = '
+            f"{release_dir}",
+            timeout=120,
+        )
+
+    async def _restart_agent_service_via_agent(self) -> None:
+        await self.log("stdout", "- Scheduling FrameOS agent restart through the current agent")
+        await self.exec_command(
+            delayed_agent_restart_command(self.build_id),
+            timeout=30,
+        )
+
+    async def _wait_for_agent_release(self) -> None:
+        expected_binary = f"{self._release_dir()}/frameos_agent"
+        quoted_expected = shlex.quote(expected_binary)
+        deadline = asyncio.get_event_loop().time() + 90
+        last_error: Exception | None = None
+        await self.log("stdout", "- Waiting for restarted agent to report the new release")
+
+        while asyncio.get_event_loop().time() < deadline:
+            output: list[str] = []
+            try:
+                await self.exec_command(
+                    "pid=$(systemctl show -p MainPID --value frameos_agent.service 2>/dev/null || true); "
+                    'test -n "$pid"; test "$pid" != "0"; '
+                    f'test "$(readlink -f /proc/$pid/exe 2>/dev/null)" = {quoted_expected}; '
+                    "systemctl is-active --quiet frameos_agent.service; "
+                    "echo restarted-agent-release-ok",
+                    output=output,
+                    log_output=False,
+                    log_command=False,
+                    timeout=15,
+                )
+                if "restarted-agent-release-ok" in "\n".join(output):
+                    await self.log("stdout", "- Restarted agent is running the staged release")
+                    return
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+
+            await asyncio.sleep(3)
+
+        raise RuntimeError(f"Restarted agent did not report the staged release: {last_error}")
 
     # --------------- MISC ------------------------------------------------ #
 

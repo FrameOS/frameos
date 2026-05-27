@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.tasks.deploy_agent import AgentDeployer, deploy_agent_task
+from app.tasks.deploy_agent import AgentDeployer, deploy_agent, deploy_agent_task
 from app.tasks.precompiled_agent import PrecompiledAgentResult
 
 
@@ -31,6 +31,23 @@ class FakeAgentDeployer(AgentDeployer):
 
     async def _deploy_agent_from_source(self, arch: str) -> None:  # type: ignore[override]
         self.source_arch = arch
+
+
+class FakeRedis:
+    def __init__(self) -> None:
+        self.jobs: list[tuple[str, dict]] = []
+
+    async def enqueue_job(self, name: str, **kwargs):
+        self.jobs.append((name, kwargs))
+
+
+@pytest.mark.asyncio
+async def test_deploy_agent_enqueues_transport():
+    redis = FakeRedis()
+
+    await deploy_agent(7, redis, recompile=True, transport="agent")
+
+    assert redis.jobs == [("deploy_agent", {"id": 7, "recompile": True, "transport": "agent"})]
 
 
 @pytest.mark.asyncio
@@ -96,11 +113,12 @@ async def test_deploy_agent_task_does_not_require_nim_before_running_deployer(
     monkeypatch: pytest.MonkeyPatch,
 ):
     deploy_agent_module = importlib.import_module("app.tasks.deploy_agent")
-    ran = False
+    captured: dict[str, object] = {}
 
     async def fake_run(self):
-        nonlocal ran
-        ran = True
+        captured["ran"] = True
+        captured["force_source"] = self.force_source
+        captured["transport"] = self.remote_transport
 
     monkeypatch.setattr(
         deploy_agent_module,
@@ -110,9 +128,9 @@ async def test_deploy_agent_task_does_not_require_nim_before_running_deployer(
     monkeypatch.setattr(deploy_agent_module, "get_fresh_frame", lambda _db, _id: SimpleNamespace(id=1))
     monkeypatch.setattr(AgentDeployer, "run", fake_run)
 
-    await deploy_agent_task({"db": object(), "redis": object()}, id=1)
+    await deploy_agent_task({"db": object(), "redis": object()}, id=1, recompile=True, transport="agent")
 
-    assert ran is True
+    assert captured == {"ran": True, "force_source": True, "transport": "agent"}
 
 
 @pytest.mark.asyncio

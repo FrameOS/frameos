@@ -21,7 +21,7 @@ from app.models.apps import get_scene_apps_from_scenes
 from app.models.frame import Frame, get_frame_json, get_interpreted_scenes_json
 from app.models.log import new_log as log
 from app.utils.local_exec import exec_local_command
-from app.utils.remote_exec import rename_path, upload_file, run_command
+from app.utils.remote_exec import RemoteTransport, rename_path, upload_file, run_command
 from app.drivers.drivers import Driver
 from app.drivers.waveshare import write_waveshare_driver_nim, get_variant_folder
 from app.drivers.devices import drivers_for_frame
@@ -148,6 +148,7 @@ class FrameDeployer:
         self.temp_dir = temp_dir
         self.build_id = ''.join(random.choice(string.ascii_lowercase) for _ in range(12))
         self.deploy_start: datetime = datetime.now()
+        self.remote_transport: RemoteTransport = "auto"
 
     async def exec_command(
         self,
@@ -159,7 +160,14 @@ class FrameDeployer:
         timeout: int = 1800 # 30 minutes default timeout. Some commands can be really slow...
     ) -> int:
         status, stdout, stderr = await run_command(
-            self.db, self.redis, self.frame, command, log_output=log_output, log_command=log_command, timeout=timeout
+            self.db,
+            self.redis,
+            self.frame,
+            command,
+            log_output=log_output,
+            log_command=log_command,
+            timeout=timeout,
+            transport=self.remote_transport,
         )
         if output is not None:
             lines = (stdout + "\n" + stderr).splitlines()
@@ -239,36 +247,36 @@ class FrameDeployer:
     async def _upload_frame_json(self, path: str) -> None:
         """Upload the release-specific `frame.json`."""
         json_data = json.dumps(get_frame_json(self.db, self.frame), indent=4).encode() + b"\n"
-        await upload_file(self.db, self.redis, self.frame, path, json_data)
+        await upload_file(self.db, self.redis, self.frame, path, json_data, transport=self.remote_transport)
 
     async def _upload_scenes_json(self, path: str, gzip: bool = False) -> None:
         """Upload the release-specific `scenes.json`."""
         json_data = json.dumps(get_interpreted_scenes_json(self.frame), indent=4).encode() + b"\n"
         if gzip:
             json_data = compress(json_data)
-        await upload_file(self.db, self.redis, self.frame, path, json_data)
+        await upload_file(self.db, self.redis, self.frame, path, json_data, transport=self.remote_transport)
 
     async def _upload_all_scenes_json(self, path: str, gzip: bool = False) -> None:
         """Upload the full scene payload for deploy-time metadata checks."""
         json_data = json.dumps(list(self.frame.scenes or []), indent=4).encode() + b"\n"
         if gzip:
             json_data = compress(json_data)
-        await upload_file(self.db, self.redis, self.frame, path, json_data)
+        await upload_file(self.db, self.redis, self.frame, path, json_data, transport=self.remote_transport)
 
     async def _upload_frame_json_atomically(self, path: str) -> None:
         temp_path = f"{path}.tmp-{self.build_id}"
         await self._upload_frame_json(temp_path)
-        await rename_path(self.db, self.redis, self.frame, temp_path, path)
+        await rename_path(self.db, self.redis, self.frame, temp_path, path, transport=self.remote_transport)
 
     async def _upload_scenes_json_atomically(self, path: str, gzip: bool = False) -> None:
         temp_path = f"{path}.tmp-{self.build_id}"
         await self._upload_scenes_json(temp_path, gzip=gzip)
-        await rename_path(self.db, self.redis, self.frame, temp_path, path)
+        await rename_path(self.db, self.redis, self.frame, temp_path, path, transport=self.remote_transport)
 
     async def _upload_all_scenes_json_atomically(self, path: str, gzip: bool = False) -> None:
         temp_path = f"{path}.tmp-{self.build_id}"
         await self._upload_all_scenes_json(temp_path, gzip=gzip)
-        await rename_path(self.db, self.redis, self.frame, temp_path, path)
+        await rename_path(self.db, self.redis, self.frame, temp_path, path, transport=self.remote_transport)
 
     async def get_hostname(self) -> str:
         hostname_out: list[str] = []
