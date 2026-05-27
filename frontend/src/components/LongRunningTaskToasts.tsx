@@ -1,7 +1,7 @@
 import { useActions, useValues } from 'kea'
 import { A } from 'kea-router'
 import clsx from 'clsx'
-import { useEffect, useRef, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, type PointerEvent, type ReactNode } from 'react'
 import {
   CheckCircleIcon,
   ChevronDownIcon,
@@ -27,6 +27,10 @@ import { Spinner } from './Spinner'
 import { workspaceLogic, type WorkspaceTheme } from '../scenes/workspace/workspaceLogic'
 import { insertBreaks } from '../utils/insertBreaks'
 import { urls } from '../urls'
+
+const TASK_LOG_BOTTOM_THRESHOLD_PX = 24
+const TASK_LOG_SCROLL_SETTLE_FRAMES = 3
+const TASK_TOAST_EDGE_PADDING_PX = 16
 
 function taskIcon(kind: LongRunningTaskKind): JSX.Element {
   if (kind === 'deploy' || kind === 'agentDeploy' || kind === 'agentRestart') {
@@ -446,6 +450,105 @@ function formatTaskLogTimestamp(timestamp: string): string {
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
 
+function taskLogIsNearBottom(element: HTMLElement): boolean {
+  return element.scrollHeight - element.scrollTop - element.clientHeight <= TASK_LOG_BOTTOM_THRESHOLD_PX
+}
+
+function visibleElementRect(element: Element): DOMRect | null {
+  if (!(element instanceof HTMLElement) || typeof window === 'undefined') {
+    return null
+  }
+
+  const style = window.getComputedStyle(element)
+  if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
+    return null
+  }
+
+  const rect = element.getBoundingClientRect()
+  if (rect.width <= 0 || rect.height <= 0) {
+    return null
+  }
+  return rect
+}
+
+function rectsOverlapVertically(first: DOMRect, second: DOMRect): boolean {
+  return first.top < second.bottom && first.bottom > second.top
+}
+
+function clampTaskToastOffsetX(offsetX: number, element: HTMLElement | null): number {
+  if (typeof window === 'undefined') {
+    return 0
+  }
+
+  const viewportWidth = window.innerWidth
+  const elementRect = element?.getBoundingClientRect()
+  const elementWidth = elementRect?.width || Math.min(Math.max(viewportWidth - 32, 0), 448)
+  const centeredLeft = (viewportWidth - elementWidth) / 2
+  const viewportMinOffset = TASK_TOAST_EDGE_PADDING_PX - centeredLeft
+  const viewportMaxOffset = viewportWidth - TASK_TOAST_EDGE_PADDING_PX - elementWidth - centeredLeft
+  let minLeft = TASK_TOAST_EDGE_PADDING_PX
+  let maxRight = viewportWidth - TASK_TOAST_EDGE_PADDING_PX
+
+  if (elementRect && typeof document !== 'undefined') {
+    const chromeRects = Array.from(
+      document.querySelectorAll('.workspace-sidebar, .workspace-sidebar-collapsed, .workspace-drawer')
+    )
+      .map(visibleElementRect)
+      .filter((rect): rect is DOMRect => rect !== null)
+
+    for (const rect of chromeRects) {
+      if (!rectsOverlapVertically(elementRect, rect) || rect.width >= viewportWidth - TASK_TOAST_EDGE_PADDING_PX * 2) {
+        continue
+      }
+
+      const rectCenterX = rect.left + rect.width / 2
+      if (rectCenterX < viewportWidth / 2) {
+        minLeft = Math.max(minLeft, rect.right + TASK_TOAST_EDGE_PADDING_PX)
+      } else {
+        maxRight = Math.min(maxRight, rect.left - TASK_TOAST_EDGE_PADDING_PX)
+      }
+    }
+  }
+
+  const minOffset = minLeft - centeredLeft
+  const maxOffset = maxRight - elementWidth - centeredLeft
+  if (minOffset <= maxOffset) {
+    return Math.round(Math.max(minOffset, Math.min(maxOffset, offsetX)))
+  }
+
+  const nearestPanelAwareOffset = Math.abs(offsetX - minOffset) < Math.abs(offsetX - maxOffset) ? minOffset : maxOffset
+  return Math.round(Math.max(viewportMinOffset, Math.min(viewportMaxOffset, nearestPanelAwareOffset)))
+}
+
+function isTaskToastDragTarget(target: EventTarget | null): boolean {
+  return (
+    target instanceof HTMLElement &&
+    !target.closest('a, button, input, textarea, select, [role="button"], [data-task-log-scroll]')
+  )
+}
+
+function suppressTaskToastDragSelection(): () => void {
+  if (typeof document === 'undefined') {
+    return () => {}
+  }
+
+  const body = document.body
+  const root = document.documentElement
+  const previousBodyUserSelect = body.style.userSelect
+  const previousRootUserSelect = root.style.userSelect
+  const previousBodyCursor = body.style.cursor
+  body.style.userSelect = 'none'
+  root.style.userSelect = 'none'
+  body.style.cursor = 'grabbing'
+  window.getSelection()?.removeAllRanges()
+
+  return () => {
+    body.style.userSelect = previousBodyUserSelect
+    root.style.userSelect = previousRootUserSelect
+    body.style.cursor = previousBodyCursor
+  }
+}
+
 function TaskToast({ task }: { task: LongRunningTask }): JSX.Element {
   const { frames } = useValues(framesModel)
   const { theme } = useValues(workspaceLogic)
@@ -454,6 +557,10 @@ function TaskToast({ task }: { task: LongRunningTask }): JSX.Element {
   const frameName = frame ? frame.name || frameHost(frame) : `Frame ${task.frameId}`
   const latestLog = task.logs[task.logs.length - 1]
   const logScrollRef = useRef<HTMLDivElement>(null)
+  const logContentRef = useRef<HTMLDivElement>(null)
+  const logShouldStickToBottomRef = useRef(true)
+  const logScrollFrameRef = useRef<number | null>(null)
+  const latestLogKey = latestLog ? `${latestLog.id}:${latestLog.timestamp}:${latestLog.type}:${latestLog.line}` : ''
   const currentDetail =
     task.status === 'running' && latestLog
       ? formatTaskLogLine(latestLog)
@@ -464,17 +571,100 @@ function TaskToast({ task }: { task: LongRunningTask }): JSX.Element {
     ? Math.max(0, Math.min(100, Math.round((task.progressCurrent! / task.progressTotal!) * 100)))
     : null
 
+  const cancelPendingLogScroll = useCallback((): void => {
+    if (logScrollFrameRef.current === null || typeof window === 'undefined') {
+      return
+    }
+    window.cancelAnimationFrame(logScrollFrameRef.current)
+    logScrollFrameRef.current = null
+  }, [])
+
+  const scrollLogsToBottom = useCallback(
+    (settleFrames = TASK_LOG_SCROLL_SETTLE_FRAMES): void => {
+      if (typeof window === 'undefined') {
+        return
+      }
+
+      cancelPendingLogScroll()
+      let remainingFrames = settleFrames
+      const scroll = (): void => {
+        logScrollFrameRef.current = null
+        if (!task.expanded || !logShouldStickToBottomRef.current) {
+          return
+        }
+
+        const element = logScrollRef.current
+        if (!element) {
+          return
+        }
+
+        element.scrollTop = element.scrollHeight
+        remainingFrames -= 1
+        if (remainingFrames > 0) {
+          logScrollFrameRef.current = window.requestAnimationFrame(scroll)
+        }
+      }
+
+      logScrollFrameRef.current = window.requestAnimationFrame(scroll)
+    },
+    [cancelPendingLogScroll, task.expanded]
+  )
+
+  useEffect(() => cancelPendingLogScroll, [cancelPendingLogScroll])
+
+  useLayoutEffect(() => {
+    if (!task.expanded) {
+      return
+    }
+    logShouldStickToBottomRef.current = true
+    scrollLogsToBottom()
+  }, [scrollLogsToBottom, task.expanded])
+
+  useLayoutEffect(() => {
+    if (!task.expanded || !logShouldStickToBottomRef.current) {
+      return
+    }
+    scrollLogsToBottom()
+  }, [latestLogKey, scrollLogsToBottom, task.expanded])
+
   useEffect(() => {
-    if (!task.expanded || !logScrollRef.current) {
+    if (!task.expanded || typeof ResizeObserver === 'undefined') {
+      return
+    }
+
+    const contentElement = logContentRef.current
+    if (!contentElement) {
+      return
+    }
+
+    const observer = new ResizeObserver(() => {
+      if (logShouldStickToBottomRef.current) {
+        scrollLogsToBottom(2)
+      }
+    })
+    observer.observe(contentElement)
+    return () => observer.disconnect()
+  }, [scrollLogsToBottom, task.expanded])
+
+  const handleLogScroll = (): void => {
+    const element = logScrollRef.current
+    if (!element) {
+      return
+    }
+    logShouldStickToBottomRef.current = taskLogIsNearBottom(element)
+  }
+
+  useEffect(() => {
+    if (!task.expanded) {
       return
     }
     requestAnimationFrame(() => {
       const element = logScrollRef.current
       if (element) {
-        element.scrollTop = element.scrollHeight
+        logShouldStickToBottomRef.current = taskLogIsNearBottom(element)
       }
     })
-  }, [task.expanded, task.logs.length])
+  }, [task.expanded])
 
   return (
     <div
@@ -586,25 +776,33 @@ function TaskToast({ task }: { task: LongRunningTask }): JSX.Element {
               : 'border-slate-200 bg-slate-50 text-slate-900'
           )}
         >
-          <div ref={logScrollRef} className="max-h-72 overflow-y-auto font-mono text-xs leading-5">
-            {task.logs.length === 0 ? (
-              <div className="py-6 text-center text-slate-500">Waiting for logs...</div>
-            ) : (
-              task.logs.map((log) => {
-                const formattedLine = formatTaskLogLine(log)
-                const tone = taskLogTone(log, formattedLine, theme)
+          <div
+            ref={logScrollRef}
+            data-task-log-scroll
+            onScroll={handleLogScroll}
+            className="max-h-72 overflow-y-auto font-mono text-xs leading-5"
+            style={{ overflowAnchor: 'none' }}
+          >
+            <div ref={logContentRef}>
+              {task.logs.length === 0 ? (
+                <div className="py-6 text-center text-slate-500">Waiting for logs...</div>
+              ) : (
+                task.logs.map((log) => {
+                  const formattedLine = formatTaskLogLine(log)
+                  const tone = taskLogTone(log, formattedLine, theme)
 
-                return (
-                  <div key={`${task.id}-${log.id}-${log.timestamp}`} className="flex gap-2">
-                    <span className={clsx('mt-[0.45rem] h-1.5 w-1.5 shrink-0 rounded-full', tone.dot)} />
-                    <span className={clsx('shrink-0', tone.timestamp)}>{formatTaskLogTimestamp(log.timestamp)}</span>
-                    <span className={clsx('min-w-0 break-words', taskLogLineClassName(log, formattedLine, theme))}>
-                      {renderTaskLogLine(log, formattedLine, theme)}
-                    </span>
-                  </div>
-                )
-              })
-            )}
+                  return (
+                    <div key={`${task.id}-${log.id}-${log.timestamp}`} className="flex gap-2">
+                      <span className={clsx('mt-[0.45rem] h-1.5 w-1.5 shrink-0 rounded-full', tone.dot)} />
+                      <span className={clsx('shrink-0', tone.timestamp)}>{formatTaskLogTimestamp(log.timestamp)}</span>
+                      <span className={clsx('min-w-0 break-words', taskLogLineClassName(log, formattedLine, theme))}>
+                        {renderTaskLogLine(log, formattedLine, theme)}
+                      </span>
+                    </div>
+                  )
+                })
+              )}
+            </div>
           </div>
         </div>
       ) : null}
@@ -613,16 +811,102 @@ function TaskToast({ task }: { task: LongRunningTask }): JSX.Element {
 }
 
 export function LongRunningTaskToasts(): JSX.Element | null {
-  const { visibleTasks } = useValues(longRunningTasksModel)
+  const { taskToastOffsetX, visibleTasks } = useValues(longRunningTasksModel)
+  const { setTaskToastOffset } = useActions(longRunningTasksModel)
+  const toastStackRef = useRef<HTMLDivElement>(null)
+  const dragStateRef = useRef<{
+    pointerId: number
+    startX: number
+    startOffsetX: number
+  } | null>(null)
+  const dragCleanupRef = useRef<(() => void) | null>(null)
+
+  const clampToastOffset = useCallback((offsetX: number): number => {
+    return clampTaskToastOffsetX(offsetX, toastStackRef.current)
+  }, [])
+
+  useEffect(() => {
+    const clampCurrentOffset = (): void => {
+      const nextOffsetX = clampToastOffset(taskToastOffsetX)
+      if (nextOffsetX !== taskToastOffsetX) {
+        setTaskToastOffset(nextOffsetX)
+      }
+    }
+
+    clampCurrentOffset()
+    window.addEventListener('resize', clampCurrentOffset)
+    return () => window.removeEventListener('resize', clampCurrentOffset)
+  }, [clampToastOffset, setTaskToastOffset, taskToastOffsetX])
+
+  useEffect(() => {
+    return () => {
+      dragCleanupRef.current?.()
+      dragCleanupRef.current = null
+    }
+  }, [])
+
+  const handlePointerDown = (event: PointerEvent<HTMLDivElement>): void => {
+    if (event.button !== 0 || !isTaskToastDragTarget(event.target)) {
+      return
+    }
+
+    event.preventDefault()
+    dragCleanupRef.current?.()
+    dragCleanupRef.current = suppressTaskToastDragSelection()
+    dragStateRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startOffsetX: taskToastOffsetX,
+    }
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+
+  const handlePointerMove = (event: PointerEvent<HTMLDivElement>): void => {
+    const dragState = dragStateRef.current
+    if (!dragState || dragState.pointerId !== event.pointerId) {
+      return
+    }
+
+    event.preventDefault()
+    window.getSelection()?.removeAllRanges()
+    setTaskToastOffset(clampToastOffset(dragState.startOffsetX + event.clientX - dragState.startX))
+  }
+
+  const handlePointerEnd = (event: PointerEvent<HTMLDivElement>): void => {
+    const dragState = dragStateRef.current
+    if (!dragState || dragState.pointerId !== event.pointerId) {
+      return
+    }
+
+    event.preventDefault()
+    dragStateRef.current = null
+    dragCleanupRef.current?.()
+    dragCleanupRef.current = null
+    window.getSelection()?.removeAllRanges()
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+  }
 
   if (visibleTasks.length === 0) {
     return null
   }
 
   return (
-    <div className="pointer-events-none fixed bottom-4 left-1/2 z-50 flex w-[calc(100vw-2rem)] max-w-[28rem] -translate-x-1/2 flex-col gap-3 sm:bottom-6">
+    <div
+      ref={toastStackRef}
+      className="pointer-events-none fixed bottom-4 left-1/2 z-50 flex w-[calc(100vw-2rem)] max-w-[28rem] -translate-x-1/2 flex-col gap-3 sm:bottom-6"
+      style={{ marginLeft: taskToastOffsetX }}
+    >
       {visibleTasks.map((task) => (
-        <div key={task.id} className="pointer-events-auto">
+        <div
+          key={task.id}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerEnd}
+          onPointerCancel={handlePointerEnd}
+          className="pointer-events-auto cursor-grab touch-pan-y active:cursor-grabbing"
+        >
           <TaskToast task={task} />
         </div>
       ))}

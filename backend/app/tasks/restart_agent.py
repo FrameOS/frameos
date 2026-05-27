@@ -3,13 +3,14 @@ from sqlalchemy.orm import Session
 from arq import ArqRedis as Redis
 
 from app.models.log import new_log as log
+from app.tasks.deploy_agent import delayed_agent_restart_command, resolve_agent_task_transport
 from app.tasks.utils import get_fresh_frame
-from app.utils.remote_exec import run_commands
+from app.utils.remote_exec import RemoteTransport, run_commands
 
-async def restart_agent(id: int, redis: Redis):
-    await redis.enqueue_job("restart_agent", id=id)
+async def restart_agent(id: int, redis: Redis, *, transport: RemoteTransport = "auto"):
+    await redis.enqueue_job("restart_agent", id=id, transport=transport)
 
-async def restart_agent_task(ctx: dict[str, Any], id: int):
+async def restart_agent_task(ctx: dict[str, Any], id: int, transport: RemoteTransport = "auto"):
     db: Session = ctx['db']
     redis: Redis = ctx['redis']
 
@@ -19,12 +20,19 @@ async def restart_agent_task(ctx: dict[str, Any], id: int):
         return
 
     try:
-        await log(db, redis, id, "stdout", "Restarting FrameOS agent")
+        resolved_transport = resolve_agent_task_transport(frame, transport)
+        await log(db, redis, id, "stdout", f"Restarting FrameOS agent via {resolved_transport}")
+        commands = (
+            [delayed_agent_restart_command("manual")]
+            if resolved_transport == "agent"
+            else ["sudo systemctl restart frameos_agent.service"]
+        )
         await run_commands(
             db,
             redis,
             frame,
-            ["sudo systemctl restart frameos_agent.service"]
+            commands,
+            transport=resolved_transport,
         )
         await log(db, redis, id, "stdout", "FrameOS agent restart command completed")
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import gzip
+import hashlib
 import os
 import re
 import shlex
@@ -171,8 +173,33 @@ async def upload_binary(deployer: FrameDeployer, local_path: str, remote_path: s
         raise FileNotFoundError(f"frameos binary missing at {normalized_local}")
     with open(normalized_local, "rb") as fh:
         data = fh.read()
-    await upload_file(deployer.db, deployer.redis, deployer.frame, remote_path, data)
-    await deployer.exec_command(f"chmod +x {shlex.quote(remote_path)}", raise_on_error=False)
+
+    compressed_data = gzip.compress(data, mtime=0)
+    digest = hashlib.sha256(data).hexdigest()
+    build_id = getattr(deployer, "build_id", "manual")
+    remote_parent = os.path.dirname(remote_path.rstrip("/")) or "/"
+    remote_staging = f"{remote_path}.{build_id}.upload"
+    remote_archive = f"{remote_staging}.gz"
+
+    await deployer.log(
+        "stdout",
+        f"{icon} Uploading compressed binary ({len(data)} bytes -> {len(compressed_data)} bytes)",
+    )
+    await deployer.exec_command(f"mkdir -p {shlex.quote(remote_parent)}")
+    await upload_file(deployer.db, deployer.redis, deployer.frame, remote_archive, compressed_data)
+    await deployer.exec_command(
+        "set -e; "
+        f"archive={shlex.quote(remote_archive)}; "
+        f"tmp={shlex.quote(remote_staging)}; "
+        f"target={shlex.quote(remote_path)}; "
+        'cleanup() { rm -f "$archive" "$tmp"; }; '
+        "trap cleanup EXIT; "
+        'gzip -dc "$archive" > "$tmp"; '
+        f"printf '%s  %s\\n' {shlex.quote(digest)} \"$tmp\" | sha256sum -c -; "
+        'chmod +x "$tmp"; '
+        'mv "$tmp" "$target"; '
+        'rm -f "$archive"',
+    )
 
 
 async def sync_vendor_dir(

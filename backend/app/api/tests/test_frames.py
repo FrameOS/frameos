@@ -5,6 +5,7 @@ import time
 from unittest.mock import AsyncMock, patch
 import httpx
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlparse
 
 from app.api import frames as frames_api
 from app.api.auth import get_current_user
@@ -35,6 +36,89 @@ async def test_api_frame_get_found(async_client, db, redis):
     data = response.json()
     assert 'frame' in data
     assert data['frame']['name'] == 'FoundFrame'
+
+
+@pytest.mark.asyncio
+async def test_api_frame_agent_bootstrap_command_enables_agent_and_returns_script(async_client, no_auth_client, db, redis):
+    frame = await new_frame(db, redis, 'BootstrapFrame', 'frame.local', 'backend.local')
+
+    command_response = await async_client.post(f'/api/frames/{frame.id}/agent_bootstrap')
+
+    assert command_response.status_code == 200
+    command_payload = command_response.json()
+    assert command_payload['script_url'].startswith(f'http://backend.local:8989/api/agent-bootstrap/{frame.id}/')
+    assert command_payload['command'] == f"curl -fsSL {command_payload['script_url']} | sudo sh"
+
+    db.refresh(frame)
+    assert frame.agent['agentEnabled'] is True
+    assert frame.agent['agentRunCommands'] is True
+    assert frame.agent['deployWithAgent'] is True
+
+    script_path = urlparse(command_payload['script_url']).path
+    script_response = await no_auth_client.get(script_path)
+
+    assert script_response.status_code == 200
+    assert script_response.headers['content-type'].startswith('text/x-shellscript')
+    script = script_response.text
+    assert 'frameos_agent' in script
+    assert 'compile_frameos_agent' not in script
+    assert 'sh compile' not in script
+
+    config_json = script.split("<<'FRAMEOS_AGENT_CONFIG_JSON'\n", 1)[1].split(
+        '\nFRAMEOS_AGENT_CONFIG_JSON',
+        1,
+    )[0]
+    config = json.loads(config_json)
+    assert config['serverHost'] == 'backend.local'
+    assert config['serverApiKey'] == frame.server_api_key
+    assert config['agent']['agentEnabled'] is True
+    assert config['agent']['agentRunCommands'] is True
+    assert config['agent']['agentSharedSecret'] == frame.agent['agentSharedSecret']
+
+    bad_response = await no_auth_client.get(f'/api/agent-bootstrap/{frame.id}/not-the-token')
+    assert bad_response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_api_frame_agent_bootstrap_command_can_preserve_deploy_transport(async_client, db, redis):
+    frame = await new_frame(db, redis, 'BootstrapFrame', 'frame.local', 'backend.local')
+    frame.agent = {'deployWithAgent': False}
+    db.add(frame)
+    db.commit()
+
+    response = await async_client.post(f'/api/frames/{frame.id}/agent_bootstrap?select_agent=0')
+
+    assert response.status_code == 200
+    db.refresh(frame)
+    assert frame.agent['agentEnabled'] is True
+    assert frame.agent['agentRunCommands'] is True
+    assert frame.agent['deployWithAgent'] is False
+
+
+@pytest.mark.asyncio
+async def test_api_frame_agent_tasks_default_to_auto_transport(async_client, monkeypatch):
+    import app.tasks as tasks_package
+
+    captured: list[tuple[str, int, dict]] = []
+
+    async def fake_deploy_agent(id, _redis, **kwargs):
+        captured.append(("deploy", id, kwargs))
+
+    async def fake_restart_agent(id, _redis, **kwargs):
+        captured.append(("restart", id, kwargs))
+
+    monkeypatch.setattr(tasks_package, "deploy_agent", fake_deploy_agent)
+    monkeypatch.setattr(tasks_package, "restart_agent", fake_restart_agent)
+
+    deploy_response = await async_client.post('/api/frames/123/deploy_agent?recompile=1')
+    restart_response = await async_client.post('/api/frames/123/restart_agent')
+
+    assert deploy_response.status_code == 200
+    assert restart_response.status_code == 200
+    assert captured == [
+        ("deploy", 123, {"recompile": True, "transport": "auto"}),
+        ("restart", 123, {"transport": "auto"}),
+    ]
 
 
 @pytest.mark.asyncio

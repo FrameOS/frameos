@@ -39,7 +39,26 @@ block test_load_config:
         "scalingMode": "cover",
         "timeZone": "UTC",
         "settings": {},
-        "schedule": {}
+        "schedule": {},
+        "agent": {
+            "agentEnabled": true,
+            "agentRunCommands": true,
+            "agentSharedSecret": "agent-secret"
+        },
+        "mountpoints": {
+            "enabled": true,
+            "items": [
+                {
+                    "enabled": true,
+                    "source": "//nas/photos",
+                    "target": "/mnt/photos",
+                    "username": "frame",
+                    "password": "secret",
+                    "domain": "workgroup",
+                    "options": "vers=3.0"
+                }
+            ]
+        }
     })) do ():
         let config = loadConfig()
         doAssert config.frameHost == "localhost"
@@ -62,3 +81,11 @@ block test_load_config:
         doAssert config.settings{"nothere"}{"neitherme"}{"orme"} == nil
         doAssert config.settings{"nothere"}{"neitherme"}{"orme"}.getStr() == ""
         doAssert config.settings{"nothere"}{"neitherme"}{"orme"}.isNil() == true
+        doAssert config.agent.agentEnabled == true
+        doAssert config.agent.agentRunCommands == true
+        doAssert config.agent.agentSharedSecret == "agent-secret"
+        doAssert config.mountpoints.enabled == true
+        doAssert config.mountpoints.items.len == 1
+        doAssert config.mountpoints.items[0].source == "//nas/photos"
+        doAssert config.mountpoints.items[0].target == "/mnt/photos"
+        doAssert config.mountpoints.items[0].username == "frame"

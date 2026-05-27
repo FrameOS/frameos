@@ -40,6 +40,7 @@ async def test_new_frame(mock_publish, db, redis):
     assert frame.https_proxy["certs"]["client_ca"] and "BEGIN CERTIFICATE" in frame.https_proxy["certs"]["client_ca"]
     assert frame.https_proxy["server_cert_not_valid_after"] is not None
     assert frame.https_proxy["client_ca_cert_not_valid_after"] is not None
+    assert frame.mountpoints == {"enabled": False, "items": []}
     mock_publish.assert_awaited_once()
 
 
@@ -91,6 +92,7 @@ async def test_frame_to_dict(mock_publish, db, redis):
     assert data["https_proxy"]["certs"]["client_ca"]
     assert data["https_proxy"]["server_cert_not_valid_after"] is not None
     assert data["https_proxy"]["client_ca_cert_not_valid_after"] is not None
+    assert data["mountpoints"] == {"enabled": False, "items": []}
     assert mock_publish.await_count == 1
 
 

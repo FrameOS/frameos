@@ -247,6 +247,7 @@ async def pump_commands(
     binary download that follows.
     """
     ws.scope.setdefault("cmd_buffers", {})          # cmd_id → bytearray
+    ws.scope.setdefault("cmd_log_output", {})       # cmd_id → bool
     try:
         while True:
             _key, raw = await redis.blpop(CMD_KEY.format(id=frame_id), timeout=0)
@@ -262,6 +263,7 @@ async def pump_commands(
 
             # store buffer for incoming Binary frames (if any)
             ws.scope["cmd_buffers"][cmd_id] = bytearray()
+            ws.scope["cmd_log_output"][cmd_id] = bool(job.get("log", True))
 
             # These two commands always stream binary data back first
             if payload.get("name") in ("file_read", "http"):
@@ -275,6 +277,40 @@ async def pump_commands(
 
     except (asyncio.CancelledError, RuntimeError, WebSocketDisconnect):
         pass    # let caller handle final cleanup
+
+
+async def handle_agent_stream_chunk(
+    ws: WebSocket,
+    redis: Redis,
+    frame: Frame,
+    payload: dict[str, Any],
+    client_ip: str | None,
+) -> None:
+    stream = payload.get("stream", "stdout")
+    data = payload.get("data", "")
+    command_id = payload["id"]
+    log_output = ws.scope.get("cmd_log_output", {}).get(command_id, True)
+
+    if payload.get("raw"):
+        for line in str(data).splitlines():
+            if line and log_output:
+                await write_log(redis, frame.id, stream, line, ip=client_ip)
+        await redis.rpush(
+            STREAM_KEY.format(id=command_id),
+            json.dumps({"stream": stream, "data": data, "raw": True}).encode(),
+        )
+        await redis.expire(STREAM_KEY.format(id=command_id), 300)
+        return
+
+    for line in data.splitlines():
+        if line:
+            if log_output:
+                await write_log(redis, frame.id, stream, line, ip=client_ip)
+            await redis.rpush(
+                STREAM_KEY.format(id=command_id),
+                json.dumps({"stream": stream, "data": line}).encode(),
+            )
+    await redis.expire(STREAM_KEY.format(id=command_id), 300)
 
 # ────────────────────────────────────────────────────────────────────────────
 # Main WebSocket endpoint
@@ -424,6 +460,7 @@ async def ws_agent_endpoint(
                 # remove marker so Binary frames won't be appended any more
                 if ws.scope.get("current_bin_cmd") == cmd_id:
                     ws.scope.pop("current_bin_cmd", None)          # type: ignore[arg-type]
+                ws.scope.get("cmd_log_output", {}).pop(cmd_id, None)
 
                 # ── make JSON-safe ────────────────────────────────────────────
                 payload: dict[str, Any] = {"ok": ok}
@@ -451,15 +488,7 @@ async def ws_agent_endpoint(
 
             # ② live stream chunk -------------------------------------------
             if pl.get("type") == "cmd/stream":
-                stream = pl.get("stream", "stdout")
-                data   = pl.get("data", "")
-
-                for line in data.splitlines():
-                    if line:
-                        await write_log(redis, frame.id, stream, line, ip=client_ip)
-                        await redis.rpush(STREAM_KEY.format(id=pl["id"]),
-                                          json.dumps({"stream": stream, "data": line}).encode())
-                await redis.expire(STREAM_KEY.format(id=pl["id"]), 300)
+                await handle_agent_stream_chunk(ws, redis, frame, pl, client_ip)
                 continue
 
     except WebSocketDisconnect:

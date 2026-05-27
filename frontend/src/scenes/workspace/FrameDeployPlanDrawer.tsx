@@ -1,12 +1,20 @@
 import { useActions, useMountedLogic, useValues } from 'kea'
+import { A as Link } from 'kea-router'
 import clsx from 'clsx'
-import { ChevronRightIcon, XMarkIcon } from '@heroicons/react/24/outline'
+import { ChevronRightIcon, ClipboardDocumentIcon, XMarkIcon } from '@heroicons/react/24/outline'
+import { ExclamationCircleIcon } from '@heroicons/react/24/solid'
+import type { ReactNode } from 'react'
 
+import { DropdownMenu } from '../../components/DropdownMenu'
 import { Spinner } from '../../components/Spinner'
+import { Tooltip } from '../../components/Tooltip'
 import { frameHost } from '../../decorators/frame'
+import type { AgentTaskTransport } from '../../models/framesModel'
 import type { FrameType, LogType } from '../../types'
+import { urls } from '../../urls'
 import { frameLogic, type ChangeDetail, type DeployRecommendation, type SummaryItem } from '../frame/frameLogic'
 import { logsLogic } from '../frame/panels/Logs/logsLogic'
+import { agentBootstrapLogic } from './agentBootstrapLogic'
 import { workspaceLogic } from './workspaceLogic'
 
 interface DeployPlanProgressStep {
@@ -264,7 +272,7 @@ function ChangeRows({ changes }: { changes: ChangeDetail[] }): JSX.Element | nul
   )
 }
 
-function DrawerHeading({ action, children }: { action?: JSX.Element; children: string }): JSX.Element {
+function DrawerHeading({ action, children }: { action?: JSX.Element; children: ReactNode }): JSX.Element {
   return (
     <div className="flex items-center justify-between gap-3">
       <div className="frame-tool-heading text-sm font-semibold">{children}</div>
@@ -290,82 +298,198 @@ function RecommendationDescription({ recommendation }: { recommendation: DeployR
 }
 
 function DeployTransportToggle({
+  frameId,
   agentConnected,
   canDeployAgent,
+  canCopyBootstrapScript,
+  showRecompileAgent,
   onDeployAgent,
   onRestartAgent,
   deployWithAgent,
   onChange,
 }: {
+  frameId: number
   agentConnected: boolean
   canDeployAgent: boolean
-  onDeployAgent: () => void
-  onRestartAgent: () => void
+  canCopyBootstrapScript: boolean
+  showRecompileAgent: boolean
+  onDeployAgent: (recompile?: boolean, transport?: AgentTaskTransport) => void
+  onRestartAgent: (transport?: AgentTaskTransport) => void
   deployWithAgent: boolean
   onChange: (deployWithAgent: boolean) => void
 }): JSX.Element {
-  const agentDisabled = !agentConnected && !deployWithAgent
-  const agentDetail = agentConnected
-    ? 'The connected FrameOS agent can run deploy commands through the backend.'
-    : deployWithAgent
-    ? 'Agent deploy is selected, but the agent is currently disconnected.'
-    : 'The FrameOS agent is configured for remote control, but is currently disconnected.'
+  const bootstrapLogicProps = { frameId }
+  const { copied: bootstrapCopied, loading: bootstrapLoading } = useValues(agentBootstrapLogic(bootstrapLogicProps))
+  const { copyAgentBootstrapScript } = useActions(agentBootstrapLogic(bootstrapLogicProps))
+  const selectedTransport: AgentTaskTransport = deployWithAgent ? 'agent' : 'ssh'
+  const selectedConnectionLabel = deployWithAgent ? 'agent' : 'SSH'
+  const selectedAgentDisconnected = selectedTransport === 'agent' && !agentConnected
+  const selectedConnectionUnavailableTitle =
+    'The FrameOS agent is not connected. Select SSH or wait for the agent to connect.'
+  const selectedConnectionTitle = `Use the selected ${selectedConnectionLabel} connection`
 
   return (
-    <section className="mb-4 space-y-2">
-      <DrawerHeading>Deploy connection</DrawerHeading>
-      <div className="frame-tool-card rounded-[22px] p-4">
+    <section className="mb-4">
+      <div className="frame-tool-card rounded-[22px] p-3">
         <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <div className="frame-tool-muted text-sm leading-5">{agentDetail}</div>
-            <div className="mt-3 flex flex-wrap gap-2">
+          <div className="flex min-w-0 items-center gap-1.5">
+            <div className="frame-tool-heading text-sm font-semibold">Connect via</div>
+            <Tooltip
+              className="inline-flex h-5 w-5 items-center justify-center rounded-full"
+              titleClassName="w-72"
+              title={
+                <div className="space-y-1">
+                  <div>
+                    SSH needs direct network access from the backend to the frame.
+                    The agent runs on the frame, and keeps a connection open to the backend.
+                  </div>
+                  <div>
+                    To use the agent, enable it under{' '}
+                    <Link
+                      href={`${urls.frame(frameId, 'settings')}#frame-settings-agent`}
+                      className="frameos-link underline underline-offset-2 hover:no-underline"
+                    >
+                      Settings
+                    </Link>{', '}
+                    and either run the bootstrap script (curl) on the frame, or deploy it over SSH.
+                  </div>
+                </div>
+              }
+            >
+              <ExclamationCircleIcon className="h-4 w-4" aria-label="Connection options help" />
+            </Tooltip>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <div className="frameos-inset inline-flex items-center rounded-xl border p-1">
               <button
                 type="button"
-                onClick={onRestartAgent}
-                className="frameos-secondary-button rounded-lg px-2.5 py-1 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                aria-pressed={!deployWithAgent}
+                onClick={() => onChange(false)}
+                className={clsx(
+                  'rounded-lg px-3 py-1.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+                  !deployWithAgent
+                    ? 'frameos-primary-active'
+                    : 'frame-tool-muted hover:text-[color:var(--tool-strong)]'
+                )}
               >
-                Restart agent
+                SSH
               </button>
-              {canDeployAgent ? (
-                <button
-                  type="button"
-                  onClick={onDeployAgent}
-                  className="frameos-secondary-button rounded-lg px-2.5 py-1 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-                >
-                  Deploy agent
-                </button>
-              ) : null}
+              <button
+                type="button"
+                aria-pressed={deployWithAgent}
+                title={agentConnected ? 'FrameOS agent connected' : 'FrameOS agent not connected'}
+                onClick={() => onChange(true)}
+                className={clsx(
+                  'inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+                  deployWithAgent
+                    ? 'frameos-primary-active'
+                    : 'frame-tool-muted hover:text-[color:var(--tool-strong)]'
+                )}
+              >
+                <span
+                  aria-hidden="true"
+                  className={clsx(
+                    'h-2 w-2 shrink-0 rounded-full ring-1 ring-inset',
+                    agentConnected ? 'bg-blue-400 ring-blue-300/80' : 'bg-slate-300 ring-slate-400/50'
+                  )}
+                />
+                <span>Agent</span>
+              </button>
             </div>
-          </div>
-          <div className="frameos-inset inline-flex shrink-0 rounded-xl border p-1">
-            <button
-              type="button"
-              aria-pressed={!deployWithAgent}
-              onClick={() => onChange(false)}
-              className={clsx(
-                'rounded-lg px-3 py-1.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-                !deployWithAgent ? 'frameos-primary-active' : 'frame-tool-muted hover:text-[color:var(--tool-strong)]'
-              )}
-            >
-              SSH
-            </button>
-            <button
-              type="button"
-              aria-pressed={deployWithAgent}
-              disabled={agentDisabled}
-              title={agentDisabled ? 'The FrameOS agent is not connected.' : undefined}
-              onClick={() => onChange(true)}
-              className={clsx(
-                'rounded-lg px-3 py-1.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-                deployWithAgent ? 'frameos-primary-active' : 'frame-tool-muted hover:text-[color:var(--tool-strong)]',
-                agentDisabled && 'cursor-not-allowed opacity-45 hover:text-current'
-              )}
-            >
-              Agent
-            </button>
+            <DropdownMenu
+              buttonColor="none"
+              horizontal
+              className="frameos-inset flex h-9 w-9 items-center justify-center rounded-xl border !px-0 !py-0 text-[color:var(--tool-strong)] !shadow-none transition hover:bg-slate-500/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+              items={[
+                ...(canCopyBootstrapScript
+                  ? [
+                      {
+                        label: bootstrapCopied ? 'Bootstrap copied' : 'Copy bootstrap command',
+                        title: 'Copy agent bootstrap install command',
+                        loading: bootstrapLoading,
+                        onClick: () => copyAgentBootstrapScript(false),
+                      },
+                    ]
+                  : []),
+                {
+                  label: 'Restart agent',
+                  title: selectedAgentDisconnected ? selectedConnectionUnavailableTitle : selectedConnectionTitle,
+                  disabled: selectedAgentDisconnected,
+                  onClick: () => onRestartAgent(selectedTransport),
+                },
+                ...(canDeployAgent
+                  ? [
+                      {
+                        label: 'Deploy agent',
+                        title: selectedAgentDisconnected ? selectedConnectionUnavailableTitle : selectedConnectionTitle,
+                        disabled: selectedAgentDisconnected,
+                        onClick: () => onDeployAgent(false, selectedTransport),
+                      },
+                      ...(showRecompileAgent
+                        ? [
+                            {
+                              label: 'Recompile and deploy agent',
+                              title: selectedAgentDisconnected
+                                ? selectedConnectionUnavailableTitle
+                                : selectedConnectionTitle,
+                              disabled: selectedAgentDisconnected,
+                              onClick: () => onDeployAgent(true, selectedTransport),
+                            },
+                          ]
+                        : []),
+                    ]
+                  : []),
+              ]}
+            />
           </div>
         </div>
       </div>
+    </section>
+  )
+}
+
+function AgentBootstrapHelp(): JSX.Element {
+  return (
+    <Tooltip
+      className="inline-flex h-5 w-5 items-center justify-center rounded-full text-amber-500 hover:text-amber-600"
+      titleClassName="w-72"
+      title="Use this when the frame can reach this backend but SSH is unavailable. Run the command on the frame as root to install the agent, then deploy through the agent instead of SSH."
+    >
+      <ExclamationCircleIcon className="h-4 w-4" aria-label="Agent bootstrap help" />
+    </Tooltip>
+  )
+}
+
+function AgentBootstrapAction({ frame }: { frame: FrameType }): JSX.Element | null {
+  const logicProps = { frameId: frame.id }
+  const { copied, error, loading } = useValues(agentBootstrapLogic(logicProps))
+  const { copyAgentBootstrapScript } = useActions(agentBootstrapLogic(logicProps))
+
+  if (frame.last_successful_deploy_at || (frame.mode ?? 'rpios') !== 'rpios') {
+    return null
+  }
+
+  return (
+    <section className="space-y-2">
+      <DrawerHeading>
+        <span className="inline-flex items-center gap-1.5">
+          <span>Agent bootstrap</span>
+          <AgentBootstrapHelp />
+        </span>
+      </DrawerHeading>
+      <button
+        type="button"
+        onClick={() => copyAgentBootstrapScript()}
+        disabled={loading}
+        className="frameos-secondary-button flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-50"
+      >
+        <span className="flex min-w-0 items-center gap-2">
+          <ClipboardDocumentIcon className="h-5 w-5 shrink-0" />
+          <span className="truncate">{copied ? 'Agent bootstrap script copied' : 'Copy agent bootstrap script'}</span>
+        </span>
+        {loading ? <Spinner className="shrink-0" /> : null}
+      </button>
+      {error ? <div className="text-sm font-semibold text-red-500">{error}</div> : null}
     </section>
   )
 }
@@ -398,6 +522,9 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
 
   const deployPlanLogs = deployPlanLogsSince(logs, deployPlansLoadingStartedAt)
   const canDeployAgent = (frame.mode ?? 'rpios') === 'rpios'
+  const canCopyBootstrapScript = (frame.mode ?? 'rpios') === 'rpios'
+  const canBootstrapAgent = !frame.last_successful_deploy_at && (frame.mode ?? 'rpios') === 'rpios'
+  const showRecompileAgent = import.meta.env?.DEV === true
   const closeAndRun = (action: () => void): void => {
     action()
     hideDeployPlanModal()
@@ -428,10 +555,18 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
           </button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+          {canBootstrapAgent ? (
+            <div className="mb-4">
+              <AgentBootstrapAction frame={frame} />
+            </div>
+          ) : null}
           {deployTransportToggleVisible ? (
             <DeployTransportToggle
+              frameId={frame.id}
               agentConnected={agentDeployConnected}
               canDeployAgent={canDeployAgent}
+              canCopyBootstrapScript={canCopyBootstrapScript}
+              showRecompileAgent={showRecompileAgent}
               onDeployAgent={deployAgent}
               onRestartAgent={restartAgent}
               deployWithAgent={deployWithAgent}
@@ -513,9 +648,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
           </button>
           <button
             type="button"
-            onClick={() =>
-              closeAndRun(deployRecommendation?.mode === 'full' ? saveAndFullDeployFrame : saveAndDeployFrame)
-            }
+            onClick={() => closeAndRun(saveAndFullDeployFrame)}
             className={clsx(
               'rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
               deployRecommendation?.mode === 'full' ? 'frameos-primary-action' : 'frameos-secondary-button'

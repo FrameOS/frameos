@@ -319,6 +319,7 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
   const renderTheme: WorkspaceTheme = fullScreen || compact ? workspaceTheme : 'dark'
   const searchActive = !compact && logSearch.trim().length > 0
   const visibleLogs = compact ? logs : filteredLogs
+  const virtuosoKey = searchActive ? `search:${logSearch.trim()}` : 'all'
 
   const scrollListToAbsoluteEnd = (behavior: ScrollBehavior = 'auto') => {
     virtuosoRef.current?.scrollTo({ top: Number.MAX_SAFE_INTEGER, behavior })
@@ -337,7 +338,31 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
     })
   }
 
+  const scrollListToStartAfterLayout = (behavior: 'auto' | 'smooth' = 'auto') => {
+    if (typeof window === 'undefined') {
+      return
+    }
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (fullScreen) {
+          window.scrollTo({ top: 0, behavior })
+        } else if (visibleLogs.length > 0) {
+          virtuosoRef.current?.scrollToIndex({
+            index: 0,
+            align: 'start',
+            behavior,
+          })
+        }
+      })
+    })
+  }
+
   useEffect(() => {
+    if (searchActive) {
+      shouldStickToBottomRef.current = false
+      scrollListToStartAfterLayout('auto')
+      return
+    }
     if (!shouldStickToBottomRef.current) {
       return
     }
@@ -488,6 +513,7 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
         </div>
       )}
       <Virtuoso
+        key={virtuosoKey}
         useWindowScroll={fullScreen}
         className={clsx(
           'overflow-x-hidden bg-transparent font-mono text-sm leading-5',
@@ -498,7 +524,7 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
             : 'h-full overflow-y-auto pr-2'
         )}
         ref={virtuosoRef}
-        initialTopMostItemIndex={Math.max(visibleLogs.length - 1, 0)}
+        initialTopMostItemIndex={searchActive ? 0 : Math.max(visibleLogs.length - 1, 0)}
         data={visibleLogs}
         components={{
           Header: () => (fullScreen ? <div aria-hidden="true" className="logs-list-top-spacer" /> : null),
@@ -514,7 +540,7 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
             </div>
           ),
         }}
-        followOutput={(isBottom) => (isBottom ? 'auto' : false)}
+        followOutput={(isBottom) => (searchActive ? false : isBottom ? 'auto' : false)}
         atBottomStateChange={(bottom) => {
           shouldStickToBottomRef.current = bottom
           setAtBottom(bottom)

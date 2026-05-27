@@ -11,6 +11,20 @@ import { urls } from '../urls'
 import { logUpdatesFrameActivity } from '../decorators/frame'
 import { longRunningTasksModel } from './longRunningTasksModel'
 
+export type AgentTaskTransport = 'auto' | 'agent' | 'ssh'
+
+function agentTaskQuery(params: { recompile?: boolean; transport?: AgentTaskTransport }): string {
+  const query = new URLSearchParams()
+  if (params.recompile) {
+    query.set('recompile', '1')
+  }
+  if (params.transport) {
+    query.set('transport', params.transport)
+  }
+  const queryString = query.toString()
+  return queryString ? `?${queryString}` : ''
+}
+
 function sanitizeFrameForStore(frame: FrameType): FrameType {
   const lastSuccessfulDeploy = frame.last_successful_deploy
   return {
@@ -60,8 +74,12 @@ export const framesModel = kea<framesModelType>([
     renderFrame: (id: number) => ({ id }),
     deleteFrame: (id: number) => ({ id }),
     renameFrame: (id: number, name: string) => ({ id, name }),
-    deployAgent: (id: number) => ({ id }),
-    restartAgent: (id: number) => ({ id }),
+    deployAgent: (id: number, recompile?: boolean, transport: AgentTaskTransport = 'auto') => ({
+      id,
+      recompile: recompile || false,
+      transport,
+    }),
+    restartAgent: (id: number, transport: AgentTaskTransport = 'auto') => ({ id, transport }),
     setDeployWithAgent: (id: number, deployWithAgent: boolean) => ({ id, deployWithAgent }),
     setFrameArchived: (id: number, archived: boolean) => ({ id, archived }),
     toggleArchivedFramesExpanded: true,
@@ -272,15 +290,17 @@ export const framesModel = kea<framesModelType>([
     rebootFrame: async ({ id }) => {
       await apiFetch(`/api/frames/${id}/reboot`, { method: 'POST' })
     },
-    deployAgent: async ({ id }) => {
+    deployAgent: async ({ id, recompile, transport }) => {
       longRunningTasksModel.actions.startTask({
         frameId: id,
         kind: 'agentDeploy',
-        title: 'Deploying FrameOS agent',
+        title: recompile ? 'Recompiling and deploying FrameOS agent' : 'Deploying FrameOS agent',
         detail: 'Agent deploy request sent',
       })
       try {
-        const response = await apiFetch(`/api/frames/${id}/deploy_agent`, { method: 'POST' })
+        const response = await apiFetch(`/api/frames/${id}/deploy_agent${agentTaskQuery({ recompile, transport })}`, {
+          method: 'POST',
+        })
         if (!response.ok) {
           throw new Error('Failed to start agent deploy')
         }
@@ -293,7 +313,7 @@ export const framesModel = kea<framesModelType>([
         throw error
       }
     },
-    restartAgent: async ({ id }) => {
+    restartAgent: async ({ id, transport }) => {
       longRunningTasksModel.actions.startTask({
         frameId: id,
         kind: 'agentRestart',
@@ -301,7 +321,9 @@ export const framesModel = kea<framesModelType>([
         detail: 'Agent restart request sent',
       })
       try {
-        const response = await apiFetch(`/api/frames/${id}/restart_agent`, { method: 'POST' })
+        const response = await apiFetch(`/api/frames/${id}/restart_agent${agentTaskQuery({ transport })}`, {
+          method: 'POST',
+        })
         if (!response.ok) {
           throw new Error('Failed to start agent restart')
         }

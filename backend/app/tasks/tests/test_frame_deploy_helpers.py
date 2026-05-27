@@ -1,3 +1,4 @@
+import gzip
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -7,6 +8,7 @@ from app.tasks import frame_deploy_helpers
 from app.tasks.frame_deploy_helpers import (
     RPIOS_SUDO_SECURITY_UPDATE_URL,
     ensure_sudo_available,
+    upload_binary,
     upload_directory_tree,
 )
 
@@ -105,6 +107,35 @@ async def test_upload_directory_tree_preserves_requested_remote_paths(
     assert extract_vendor < restore_env
     assert extract_vendor < restore_checksum
     assert deployer.commands[-1] == "rm -rf /tmp/inkyPython_build12345678_preserve"
+
+
+@pytest.mark.asyncio
+async def test_upload_binary_sends_gzip_archive_and_verifies_before_move(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    uploads: list[tuple[str, bytes]] = []
+
+    async def fake_upload_file(_db, _redis, _frame, remote_path: str, data: bytes):
+        uploads.append((remote_path, data))
+
+    monkeypatch.setattr(frame_deploy_helpers, "upload_file", fake_upload_file)
+
+    local_binary = tmp_path / "frameos"
+    local_binary.write_bytes(b"frameos-binary" * 1024)
+    deployer = RecordingDeployer()
+
+    await upload_binary(deployer, str(local_binary), "/srv/frameos/releases/release_1/frameos")
+
+    assert uploads
+    assert uploads[0][0] == "/srv/frameos/releases/release_1/frameos.manual.upload.gz"
+    assert gzip.decompress(uploads[0][1]) == local_binary.read_bytes()
+    assert deployer.commands[0] == "mkdir -p /srv/frameos/releases/release_1"
+    install_command = deployer.commands[1]
+    assert 'gzip -dc "$archive" > "$tmp"' in install_command
+    assert "sha256sum -c -" in install_command
+    assert 'mv "$tmp" "$target"' in install_command
+    assert any("Uploading compressed binary" in message for _log_type, message in deployer.logs)
 
 
 @pytest.mark.asyncio

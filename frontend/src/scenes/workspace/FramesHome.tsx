@@ -49,7 +49,6 @@ import { sceneTileSummaryLabel } from './sceneTileLabels'
 
 const uploadedScenePrefix = 'uploaded/'
 const activeSurfaceClassName = 'frameos-active-surface'
-const sceneControlPreviewMaxHeightRem = 14
 
 const frameSectionToolLinks = [
   { label: 'Overview', panel: 'overview' },
@@ -450,7 +449,7 @@ export function TemplateDrawer(): JSX.Element | null {
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
               <AddSceneDrawerActions frame={frame} />
-              <Templates persistOnInstall openInstalledSceneDrawer />
+              <Templates persistOnInstall />
             </div>
             <EditTemplateModal />
           </div>
@@ -469,7 +468,7 @@ function AddSceneDrawerActions({ frame }: { frame: FrameType }): JSX.Element {
       <button
         type="button"
         onClick={() => {
-          createBlankSceneAndSave(undefined, false, true)
+          createBlankSceneAndSave()
         }}
         className="frameos-template-action-button frameos-card group flex items-center gap-3 rounded-2xl border border-white/90 bg-white/80 px-4 py-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:bg-white hover:shadow-lg hover:shadow-slate-300/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
       >
@@ -624,19 +623,6 @@ export function SceneControlPanel(): JSX.Element | null {
   }
 
   const frameLogicProps = { frameId: frame.id }
-  const previewDimensions =
-    frame.width && frame.height
-      ? frame.rotate === 90 || frame.rotate === 270
-        ? { width: frame.height, height: frame.width }
-        : { width: frame.width, height: frame.height }
-      : null
-  const previewAspectRatio = previewDimensions ? `${previewDimensions.width} / ${previewDimensions.height}` : '4 / 3'
-  const previewMaxWidth = previewDimensions
-    ? `min(100%, ${((sceneControlPreviewMaxHeightRem * previewDimensions.width) / previewDimensions.height).toFixed(
-        3
-      )}rem)`
-    : '100%'
-
   return (
     <div className="workspace-drawer frameos-drawer fixed bottom-5 right-5 top-5 z-40 w-[390px] overflow-hidden rounded-[24px] border border-white/80 bg-white/95 shadow-2xl shadow-slate-500/30 backdrop-blur-xl">
       <BindLogic logic={frameLogic} props={frameLogicProps}>
@@ -661,8 +647,8 @@ export function SceneControlPanel(): JSX.Element | null {
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
               <div
-                className="frameos-card-media frameos-skeleton-surface relative mx-auto mb-4 flex max-h-56 w-full items-center justify-center overflow-hidden rounded-lg bg-slate-100"
-                style={{ aspectRatio: previewAspectRatio, maxWidth: previewMaxWidth }}
+                className="frameos-card-media frameos-skeleton-surface relative mb-4 flex w-full items-center justify-center overflow-hidden rounded-lg bg-slate-100"
+                style={{ aspectRatio: '16 / 9' }}
               >
                 <FrameImage
                   frameId={frame.id}
@@ -671,7 +657,8 @@ export function SceneControlPanel(): JSX.Element | null {
                   refreshable={false}
                   objectFit="contain"
                   hideWhileLoading
-                  className="h-full max-h-56 w-full"
+                  loadFullSizeAfterThumb
+                  className="h-full w-full"
                   imageClassName="h-full w-full rounded-md object-contain"
                 />
                 {scene.settings?.execution !== 'interpreted' ? (

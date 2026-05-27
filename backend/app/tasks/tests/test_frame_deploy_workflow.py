@@ -131,6 +131,91 @@ class FakePrecompiledBinaryBuilder:
 
 
 @pytest.mark.asyncio
+async def test_full_deploy_skips_authorized_keys_when_agent_is_transport(monkeypatch: pytest.MonkeyPatch):
+    frame = SimpleNamespace(
+        id=28,
+        name="AgentFrame",
+        agent={"agentEnabled": True, "agentRunCommands": True, "deployWithAgent": True},
+        to_dict=lambda: {"id": 28, "name": "AgentFrame"},
+    )
+    deployer = RecordingDeployer()
+    workflow = FrameDeployWorkflow(
+        db=None,
+        redis=None,
+        frame=frame,
+        deployer=deployer,
+        temp_dir="",
+        binary_builder=FakeBinaryBuilder(),
+    )
+    full_plan = FullDeployPlan(
+        target={},
+        low_memory=False,
+        drivers=[],
+        binary_plan=await FakeBinaryBuilder().plan_build(),
+        selected_public_keys=["ssh-ed25519 AAAA test"],
+        known_public_keys=[],
+        ssh_keys_need_install=True,
+    )
+
+    async def fail_install_authorized_keys(*_args, **_kwargs):
+        raise AssertionError("authorized_keys should not be installed during agent deploy")
+
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow._install_authorized_keys", fail_install_authorized_keys)
+
+    await workflow._install_authorized_keys_for_full_deploy(full_plan)
+
+    assert deployer.logs == [("stdout", "🔷 Agent deploy selected; skipping SSH authorized_keys install")]
+
+
+@pytest.mark.asyncio
+async def test_release_service_uses_agent_user_when_deploying_via_agent(monkeypatch: pytest.MonkeyPatch):
+    frame = SimpleNamespace(
+        id=29,
+        name="AgentUserFrame",
+        ssh_user="pi",
+        agent={"agentEnabled": True, "agentRunCommands": True, "deployWithAgent": True},
+        to_dict=lambda: {"id": 29, "name": "AgentUserFrame"},
+    )
+    deployer = RecordingDeployer()
+    deployer.db = None
+    deployer.redis = None
+    deployer.frame = frame
+    workflow = FrameDeployWorkflow(
+        db=None,
+        redis=None,
+        frame=frame,
+        deployer=deployer,
+        temp_dir="",
+        binary_builder=FakeBinaryBuilder(),
+    )
+    uploads: list[tuple[str, str]] = []
+
+    original_exec_command = deployer.exec_command
+
+    async def fake_exec_command(command: str, **kwargs):
+        if command == "id -un":
+            deployer.commands.append(command)
+            output = kwargs.get("output")
+            if output is not None:
+                output.append("marius")
+            return 0
+        return await original_exec_command(command, **kwargs)
+
+    async def fake_upload_file(_db, _redis, _frame, remote_path: str, data: bytes, **_kwargs):
+        uploads.append((remote_path, data.decode("utf-8")))
+
+    deployer.exec_command = fake_exec_command
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.upload_file", fake_upload_file)
+
+    await workflow._install_and_activate_release("build12345678")
+
+    assert uploads[0][0] == "/srv/frameos/releases/release_build12345678/frameos.service"
+    assert "User=marius" in uploads[0][1]
+    assert "User=pi" not in uploads[0][1]
+    assert deployer.commands[0] == "id -un"
+
+
+@pytest.mark.asyncio
 async def test_full_plan_defaults_to_precompiled(monkeypatch: pytest.MonkeyPatch):
     captured_modes: list[str] = []
 
@@ -379,6 +464,47 @@ async def test_full_plan_skips_remote_build_dependencies_for_precompiled(monkeyp
     assert "libatomic-ops-dev" not in package_names
     assert "libicu-dev" not in package_names
     assert "zlib1g-dev" not in package_names
+
+
+@pytest.mark.asyncio
+async def test_full_plan_includes_cifs_utils_for_enabled_mountpoints(monkeypatch: pytest.MonkeyPatch):
+    frame = SimpleNamespace(
+        id=18,
+        name="MountedFrame",
+        ssh_keys=[],
+        rpios={"crossCompilation": "auto", "compilationMode": "precompiled"},
+        reboot=None,
+        mountpoints={
+            "enabled": True,
+            "items": [{"enabled": True, "source": "//nas/photos", "target": "/mnt/photos"}],
+        },
+        last_successful_deploy={"frameos_version": "9.9.9"},
+        last_successful_deploy_at="2026-01-01T00:00:00+00:00",
+        to_dict=lambda: {"id": 18, "name": "MountedFrame"},
+    )
+    deployer = FakeDeployer()
+
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.drivers_for_frame", lambda _frame: {})
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.get_settings_dict", lambda _db: {})
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.select_ssh_keys_for_frame", lambda _frame, _settings: [])
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.normalize_ssh_keys", lambda _settings: [])
+
+    workflow = FrameDeployWorkflow(
+        db=None,
+        redis=None,
+        frame=frame,
+        deployer=deployer,
+        temp_dir="",
+        binary_builder=FakePrecompiledBinaryBuilder(),
+    )
+
+    plan = await workflow.plan("full")
+
+    assert plan.full_deploy is not None
+    package_map = {pkg.name: pkg for pkg in plan.full_deploy.package_plans}
+    assert package_map["cifs-utils"].reason == "Samba/CIFS mountpoint support"
+    assert package_map["cifs-utils"].installed is False
+
 
 @pytest.mark.asyncio
 async def test_full_plan_includes_post_deploy_driver_and_reboot_steps(monkeypatch: pytest.MonkeyPatch):

@@ -16,6 +16,7 @@ export interface DropdownMenuItem {
   keepOpen?: boolean
   onClick?: (e: React.MouseEvent) => void
   loading?: boolean
+  disabled?: boolean
 }
 
 export interface DropdownMenuProps {
@@ -60,6 +61,8 @@ export function DropdownMenu({ items, className, horizontal = true, buttonColor:
         <>
           <Menu.Button
             ref={setReferenceElement}
+            type="button"
+            onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => e.stopPropagation()}
             className={clsx(
               buttonColor(_buttonColor),
@@ -112,14 +115,19 @@ export function DropdownMenu({ items, className, horizontal = true, buttonColor:
                             href="#"
                             className={clsx(
                               'frameos-dropdown-item px-4 py-2 text-sm flex gap-2',
-                              active && !!item.onClick && 'frameos-dropdown-item-active'
+                              active && !!item.onClick && !item.disabled && 'frameos-dropdown-item-active',
+                              item.disabled && 'cursor-not-allowed opacity-50'
                             )}
                             title={item.title}
+                            onMouseDown={(e) => e.stopPropagation()}
                             onClick={
-                              item.onClick
+                              item.onClick || item.disabled
                                 ? (e) => {
                                     e.preventDefault()
                                     e.stopPropagation()
+                                    if (item.disabled) {
+                                      return
+                                    }
                                     if (item.confirm) {
                                       if (confirm(item.confirm)) {
                                         item.onClick?.(e)

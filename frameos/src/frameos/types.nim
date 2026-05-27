@@ -37,6 +37,7 @@ type
     controlCode*: ControlCode
     network*: NetworkConfig
     agent*: AgentConfig
+    mountpoints*: MountpointsConfig
     palette*: PaletteConfig
 
   # Part of FrameConfig
@@ -78,6 +79,21 @@ type
     agentEnabled*: bool
     agentRunCommands*: bool
     agentSharedSecret*: string
+
+  # Part of FrameConfig
+  MountpointConfig* = ref object
+    enabled*: bool
+    source*: string
+    target*: string
+    username*: string
+    password*: string
+    domain*: string
+    options*: string
+
+  # Part of FrameConfig
+  MountpointsConfig* = ref object
+    enabled*: bool
+    items*: seq[MountpointConfig]
 
   # Part of FrameConfig
   PaletteConfig* = ref object

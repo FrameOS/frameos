@@ -22,7 +22,7 @@ import { ExclamationTriangleIcon, PlusIcon, TrashIcon } from '@heroicons/react/2
 import { panelsLogic } from '../panelsLogic'
 import { Switch } from '../../../../components/Switch'
 import { NumberTextInput } from '../../../../components/NumberTextInput'
-import { FrameType, Palette } from '../../../../types'
+import { FrameMountpointConfig, FrameType, Palette } from '../../../../types'
 import { A } from 'kea-router'
 import { TextArea } from '../../../../components/TextArea'
 import { ColorInput } from '../../../../components/ColorInput'
@@ -106,6 +106,19 @@ function CertificateTriangle({
     </span>
   )
 }
+
+function newMountpoint(): FrameMountpointConfig {
+  return {
+    enabled: true,
+    source: '',
+    target: '',
+    username: '',
+    password: '',
+    domain: '',
+    options: 'vers=3.0',
+  }
+}
+
 function scrollToFrameHttpApiSection(e: React.MouseEvent): void {
   if (typeof document === 'undefined') {
     return
@@ -161,6 +174,25 @@ export function FrameSettings({
   const selectedSshKeyIds = normalizeKeyIds(frameForm.ssh_keys ?? frame.ssh_keys ?? [])
   const hasSshKeyChangesToDeploy = !equal(deployedSshKeyIds, selectedSshKeyIds)
   const showFrameInfo = !!frame.frame_host || (!inFrameAdminMode && logs.length > 0)
+  const mountpoints = frameForm.mountpoints ?? { enabled: false, items: [] }
+  const mountpointItems = mountpoints.items ?? []
+  const setMountpoints = (nextMountpoints: NonNullable<FrameType['mountpoints']>) => {
+    setFrameFormValues({ mountpoints: nextMountpoints })
+    touchFrameFormField('mountpoints')
+  }
+  const addMountpoint = () => {
+    setMountpoints({
+      ...mountpoints,
+      enabled: true,
+      items: [...mountpointItems, newMountpoint()],
+    })
+  }
+  const removeMountpoint = (index: number) => {
+    setMountpoints({
+      ...mountpoints,
+      items: mountpointItems.filter((_, itemIndex) => itemIndex !== index),
+    })
+  }
 
   if (!frame) {
     return (
@@ -1129,6 +1161,78 @@ export function FrameSettings({
                 )}
               </>
             )}
+          </Group>
+        </div>
+
+        <H6 id="frame-settings-mountpoints" className="flex items-center gap-2">
+          Mountpoints
+          <Button size="small" color="secondary" onClick={addMountpoint} className="flex items-center gap-1">
+            <PlusIcon className="w-4 h-4" />
+            Add mountpoint
+          </Button>
+        </H6>
+        <div className="pl-2 @md:pl-8 space-y-2">
+          <Group name="mountpoints">
+            <Field
+              name="enabled"
+              label="Samba mounts"
+              tooltip="FrameOS installs CIFS support, manages its fstab block, and mounts these shares during setup."
+            >
+              <Switch name="enabled" fullWidth />
+            </Field>
+            {frameForm.mountpoints?.enabled ? (
+              <div className="space-y-4">
+                {mountpointItems.length === 0 ? (
+                  <div className="text-sm text-gray-500">No mountpoints configured.</div>
+                ) : null}
+                {mountpointItems.map((mountpoint, index) => (
+                  <Group key={index} name={`items.${index}`}>
+                    <div className="space-y-2 border-l border-gray-700 pl-3">
+                      <Field
+                        name="source"
+                        label="SMB share"
+                        labelRight={
+                          <Button
+                            color="secondary"
+                            size="small"
+                            className="flex items-center gap-1"
+                            onClick={() => removeMountpoint(index)}
+                          >
+                            <TrashIcon className="w-4 h-4" />
+                            Remove
+                          </Button>
+                        }
+                      >
+                        <TextInput name="source" placeholder="//server/share" />
+                      </Field>
+                      <Field name="target" label="Mount path">
+                        <TextInput name="target" placeholder="/mnt/share" />
+                      </Field>
+                      <Field name="enabled" label="Enabled">
+                        {({ value, onChange }) => <Switch value={value !== false} onChange={onChange} fullWidth />}
+                      </Field>
+                      <Field name="username" label="Username">
+                        <TextInput name="username" placeholder="guest" />
+                      </Field>
+                      <Field name="password" label="Password">
+                        <TextInput
+                          name="password"
+                          onClick={() => touchFrameFormField(`mountpoints.items.${index}.password`)}
+                          type={frameFormTouches[`mountpoints.items.${index}.password`] ? 'text' : 'password'}
+                          placeholder="guest access if empty"
+                        />
+                      </Field>
+                      <Field name="domain" label="Domain">
+                        <TextInput name="domain" placeholder="optional" />
+                      </Field>
+                      <Field name="options" label="Options" tooltip="Additional comma-separated mount.cifs options.">
+                        <TextInput name="options" placeholder="vers=3.0,uid=pi,gid=pi" />
+                      </Field>
+                    </div>
+                  </Group>
+                ))}
+              </div>
+            ) : null}
           </Group>
         </div>
 

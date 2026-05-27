@@ -270,6 +270,7 @@ const frameSettingsSections = [
   { id: 'frame-settings-admin', label: 'Admin' },
   { id: 'frame-http-proxy-section', label: 'HTTPS' },
   { id: 'frame-settings-network', label: 'Network' },
+  { id: 'frame-settings-mountpoints', label: 'Mountpoints' },
   { id: 'frame-settings-defaults', label: 'Defaults' },
   { id: 'frame-settings-palette', label: 'Palette' },
   { id: 'frame-settings-qr', label: 'QR code' },
@@ -1269,6 +1270,11 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
 
   useLayoutEffect(() => {
     if (!frameLoaded || typeof window === 'undefined') {
+      return
+    }
+
+    if (activeToolPanel === 'settings' && window.location.hash === '#frame-settings-agent') {
+      scrollToFrameSettingsSection('frame-settings-agent')
       return
     }
 

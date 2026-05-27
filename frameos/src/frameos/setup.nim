@@ -3,6 +3,7 @@ import zippy
 import assets/apps as appsAsset
 import frameos/config
 import frameos/device_setup
+import frameos/samba_mounts
 import frameos/types
 import drivers/drivers as drivers
 
@@ -137,8 +138,10 @@ proc setupFrameOS*(): SetupResult =
   echo "FrameOS setup: target " & frameOS.frameConfig.device & " (" & frameOS.frameConfig.mode & ")"
   if frameOS.frameConfig.mode == "rpios":
     addSetupResult(result, runSetupStep("app apt packages", proc(): SetupResult = setupAppAptPackages()))
+    addSetupResult(result, runSetupStep("samba mounts", proc(): SetupResult = setupSambaMounts(frameOS.frameConfig.mountpoints)))
   else:
     echo "FrameOS setup: app apt packages: skipped for mode " & frameOS.frameConfig.mode
+    echo "FrameOS setup: samba mounts: skipped for mode " & frameOS.frameConfig.mode
   echo "FrameOS setup: driver setup: starting"
   addSetupResult(result, drivers.setup(frameOS))
   echo "FrameOS setup: driver setup: complete"

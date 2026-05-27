@@ -1,6 +1,6 @@
 import { actions, afterMount, beforeUnmount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 import { router } from 'kea-router'
-import { framesModel } from '../../models/framesModel'
+import { framesModel, type AgentTaskTransport } from '../../models/framesModel'
 import type { frameLogicType } from './frameLogicType'
 import { subscriptions } from 'kea-subscriptions'
 import { AppNodeData, DiagramNode, FrameScene, FrameType, SceneNodeData, TemplateType } from '../../types'
@@ -60,6 +60,10 @@ function setBrowserTitle(frame?: FrameType | null): void {
   document.title = `${frameTitle} · ${DEFAULT_BROWSER_TITLE}`
 }
 
+function isAgentDeployConfigured(agent?: FrameType['agent']): boolean {
+  return Boolean(agent?.agentEnabled && agent?.agentRunCommands && agent?.agentSharedSecret)
+}
+
 const FRAME_KEYS: (keyof FrameType)[] = [
   'name',
   'mode',
@@ -100,6 +104,7 @@ const FRAME_KEYS: (keyof FrameType)[] = [
   'gpio_buttons',
   'network',
   'agent',
+  'mountpoints',
   'palette',
   'buildroot',
   'rpios',
@@ -160,6 +165,7 @@ const FRAME_KEY_LABELS: Partial<Record<keyof FrameType, string>> = {
   gpio_buttons: 'GPIO buttons',
   network: 'Network settings',
   agent: 'Agent settings',
+  mountpoints: 'Mountpoints',
   palette: 'Palette',
   buildroot: 'Buildroot settings',
   rpios: 'Raspberry Pi OS settings',
@@ -197,6 +203,7 @@ const DEPLOYMENT_SUMMARY_KEYS: (keyof FrameType)[] = [
   'log_to_file',
   'assets_path',
   'save_assets',
+  'mountpoints',
 ]
 
 function keyLabel(key: keyof FrameType): string {
@@ -386,9 +393,36 @@ function normalizeRpiosForComparison(value: unknown): Record<string, unknown> {
   }
 }
 
+function normalizeMountpointsForComparison(value: unknown): Record<string, any> {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
+  const rawItems = Array.isArray(source.items) ? source.items : []
+  const items = rawItems
+    .filter(
+      (item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object' && !Array.isArray(item)
+    )
+    .map((item) => ({
+      enabled: item.enabled !== false,
+      source: String(item.source ?? '').trim(),
+      target: String(item.target ?? '').trim(),
+      username: String(item.username ?? ''),
+      password: String(item.password ?? ''),
+      domain: String(item.domain ?? ''),
+      options: String(item.options ?? '').trim(),
+    }))
+
+  return {
+    enabled: Boolean(source.enabled),
+    items,
+  }
+}
+
 function normalizeFrameKeyValueForComparison(key: keyof FrameType, value: unknown): unknown {
   if (key === 'rpios') {
     return normalizeRpiosForComparison(value)
+  }
+
+  if (key === 'mountpoints') {
+    return normalizeMountpointsForComparison(value)
   }
 
   if (key !== 'https_proxy' || !value || typeof value !== 'object') {
@@ -449,6 +483,16 @@ function summarizeFrameFieldValue(key: keyof FrameType, value: unknown): string 
         parts.push('port-only')
       }
       return parts.join(' · ')
+    }
+    case 'mountpoints': {
+      const mountpoints = normalizeMountpointsForComparison(value)
+      if (!mountpoints.enabled) {
+        return 'Disabled'
+      }
+      const enabledItems = mountpoints.items.filter(
+        (item: Record<string, unknown>) => item.enabled !== false && item.source && item.target
+      ).length
+      return enabledItems > 0 ? `${enabledItems} mountpoint${enabledItems === 1 ? '' : 's'}` : 'Enabled'
     }
     case 'ssh_keys': {
       const keys = Array.isArray(value) ? value : []
@@ -706,6 +750,7 @@ function hasValidPosition(node: DiagramNode): boolean {
 function sanitizeFrame(frame: Partial<FrameType>): Partial<FrameType> {
   const frameAdminAuthUser = frame.frame_admin_auth?.user ?? ''
   const frameAdminAuthPass = frame.frame_admin_auth?.pass ?? ''
+  const mountpoints = normalizeMountpointsForComparison(frame.mountpoints) as FrameType['mountpoints']
   const rpios = frame.rpios
     ? {
         ...frame.rpios,
@@ -721,6 +766,7 @@ function sanitizeFrame(frame: Partial<FrameType>): Partial<FrameType> {
       user: frameAdminAuthUser,
       pass: frameAdminAuthPass,
     },
+    mountpoints,
     scenes: frame.scenes?.map((scene) => sanitizeScene(scene, frame)) ?? [],
   }
 }
@@ -831,8 +877,11 @@ export const frameLogic = kea<frameLogicType>([
     deployFrame: true,
     fastDeployFrame: true,
     fullDeployFrame: true,
-    deployAgent: true,
-    restartAgent: true,
+    deployAgent: (recompile?: boolean, transport: AgentTaskTransport = 'auto') => ({
+      recompile: recompile || false,
+      transport,
+    }),
+    restartAgent: (transport: AgentTaskTransport = 'auto') => ({ transport }),
     updateDeployedSshKeys: true,
     clearNextAction: true,
     resetUnsavedChanges: true,
@@ -883,6 +932,18 @@ export const frameLogic = kea<frameLogicType>([
             type: field.type ? '' : 'Type is required',
           })),
         })),
+        mountpoints: state.mountpoints?.enabled
+          ? {
+              items: (state.mountpoints.items ?? []).map((item) =>
+                item.enabled === false
+                  ? undefined
+                  : {
+                      source: item.source?.trim() ? undefined : 'Source is required',
+                      target: item.target?.trim() ? undefined : 'Mount path is required',
+                    }
+              ),
+            }
+          : undefined,
       }),
       submit: async (frame) => {
         await saveFrameForm(frame, values.frameId, values.nextAction)
@@ -1074,7 +1135,13 @@ export const frameLogic = kea<frameLogicType>([
       actions.loadDeployPlansSuccess(payload.plan)
     },
     showDeployPlanModal: () => {
-      actions.loadDeployPlans()
+      const hasUsableLocalPlan =
+        Boolean(values.deployRecommendation) ||
+        values.fullDeployPlanSummary.length > 0 ||
+        values.deployChangeDetails.length > 0
+      if (!hasUsableLocalPlan && !values.deployPlansLoading && !values.deployPlans) {
+        actions.loadDeployPlans()
+      }
     },
   })),
   selectors(() => ({
@@ -1223,14 +1290,17 @@ export const frameLogic = kea<frameLogicType>([
       (s) => [s.frameForm, s.frame],
       (frameForm, frame) => {
         const agent = frameForm?.agent ?? frame?.agent
-        return agent?.deployWithAgent ?? (agent?.agentEnabled && agent?.agentRunCommands) ?? false
+        if (!isAgentDeployConfigured(agent)) {
+          return false
+        }
+        return agent?.deployWithAgent ?? true
       },
     ],
     deployTransportToggleVisible: [
       (s) => [s.frameForm, s.frame],
       (frameForm, frame): boolean => {
         const agent = frameForm?.agent ?? frame?.agent
-        return Boolean(agent?.agentEnabled && agent?.agentRunCommands && agent?.agentSharedSecret)
+        return isAgentDeployConfigured(agent)
       },
     ],
     agentDeployConnected: [(s) => [s.frame], (frame): boolean => (frame?.active_connections ?? 0) > 0],
@@ -1276,13 +1346,10 @@ export const frameLogic = kea<frameLogicType>([
     },
     fastDeployFrame: () => framesModel.actions.deployFrame(props.frameId, true),
     fullDeployFrame: () => framesModel.actions.deployFrame(props.frameId, false),
-    deployAgent: () => framesModel.actions.deployAgent(props.frameId),
-    restartAgent: () => framesModel.actions.restartAgent(props.frameId),
+    deployAgent: ({ recompile, transport }) => framesModel.actions.deployAgent(props.frameId, recompile, transport),
+    restartAgent: ({ transport }) => framesModel.actions.restartAgent(props.frameId, transport),
     setDeployWithAgent: ({ deployWithAgent }) => {
       framesModel.actions.setDeployWithAgent(props.frameId, deployWithAgent)
-      if (values.deployPlanModalOpen) {
-        actions.loadDeployPlans()
-      }
     },
     updateScene: ({ sceneId, scene }) => {
       const { frameForm } = values

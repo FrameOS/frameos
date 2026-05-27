@@ -33,6 +33,9 @@ proc baseConfig(assetsPath = ""): FrameConfig =
     assetsPath: assetsPath,
     saveAssets: %*(false),
     network: NetworkConfig(networkCheck: false),
+    mountpoints: MountpointsConfig(enabled: true, items: @[
+      MountpointConfig(enabled: true, source: "//nas/photos", target: "/mnt/photos", username: "frame", password: "secret")
+    ]),
   )
 
 suite "Server API helpers":
@@ -79,10 +82,13 @@ suite "Server API helpers":
     check payload{"frame_access_key"}.getStr() == ""
     check payload{"server_api_key"}.getStr() == ""
     check payload{"frame_admin_auth"}{"enabled"}.getBool() == false
+    check payload{"mountpoints"}{"enabled"}.getBool() == true
+    check payload{"mountpoints"}{"items"}[0]{"password"}.getStr() == ""
 
     let privilegedPayload = frameApiPayload(state, exposeSecrets = true)
     check privilegedPayload{"frame_access_key"}.getStr() == globalFrameConfig.frameAccessKey
     check privilegedPayload{"server_api_key"}.getStr() == globalFrameConfig.serverApiKey
+    check privilegedPayload{"mountpoints"}{"items"}[0]{"password"}.getStr() == "secret"
 
     putEnv("FRAMEOS_SCENES_JSON", tempRoot / "invalid-scenes.json")
     writeFile(tempRoot / "invalid-scenes.json", "{not-json")

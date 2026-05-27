@@ -1,7 +1,9 @@
 import std/[json, os, sequtils, strutils, times]
 import zippy
 import ../device_setup
+import ../samba_mounts
 import ../setup
+import ../types
 
 block test_app_apt_packages_from_scene_nodes:
   let scenes = parseJson("""[
@@ -91,5 +93,71 @@ block test_setup_apt_packages_installs_only_missing_packages:
     doAssert installCommands.len == 1
     doAssert installCommands[0].contains("'ffmpeg'")
     doAssert not installCommands[0].contains("'already-installed'")
+  finally:
+    resetSetupCommandRunnerForTest()
+
+block test_samba_mounts_fstab_block_uses_credentials_and_options:
+  let mountpoints = MountpointsConfig(enabled: true, items: @[
+    MountpointConfig(
+      enabled: true,
+      source: "//nas/photos",
+      target: "/mnt/frame photos",
+      username: "frame",
+      password: "secret",
+      options: "uid=pi,gid=pi,bad option,#ignored",
+    )
+  ])
+  let fstabBlock = frameosFstabBlock(mountpoints, "/tmp/frameos-samba")
+
+  doAssert fstabBlock.contains(frameosFstabBegin)
+  doAssert fstabBlock.contains("//nas/photos /mnt/frame\\040photos cifs")
+  doAssert fstabBlock.contains("credentials=/tmp/frameos-samba/mount-1.credentials")
+  doAssert fstabBlock.contains("iocharset=utf8")
+  doAssert fstabBlock.contains("x-systemd.automount")
+  doAssert fstabBlock.contains("uid=pi")
+  doAssert fstabBlock.contains("gid=pi")
+  doAssert not fstabBlock.contains("bad option")
+  doAssert not fstabBlock.contains("secret")
+
+block test_samba_mounts_fstab_block_uses_guest_without_credentials:
+  let mountpoints = MountpointsConfig(enabled: true, items: @[
+    MountpointConfig(enabled: true, source: "//nas/public", target: "/mnt/public"),
+  ])
+  let fstabBlock = frameosFstabBlock(mountpoints)
+
+  doAssert fstabBlock.contains("guest")
+  doAssert not fstabBlock.contains("credentials=")
+
+block test_samba_mounts_replaces_and_removes_managed_fstab_block:
+  let oldFstab = "rootfs / ext4 defaults 0 1\n\n" &
+    frameosFstabBegin & "\n" &
+    "//old/share /mnt/old\\040share cifs guest 0 0\n" &
+    frameosFstabEnd & "\n"
+  let mountpoints = MountpointsConfig(enabled: true, items: @[
+    MountpointConfig(enabled: true, source: "//new/share", target: "/mnt/new"),
+  ])
+  let replaced = applyFrameosFstabBlock(oldFstab, frameosFstabBlock(mountpoints))
+
+  doAssert replaced.changed
+  doAssert replaced.content.contains("rootfs / ext4 defaults 0 1")
+  doAssert replaced.content.contains("//new/share /mnt/new cifs")
+  doAssert not replaced.content.contains("//old/share")
+  doAssert extractFrameosMountTargets(oldFstab) == @["/mnt/old share"]
+
+  let removed = applyFrameosFstabBlock(replaced.content, "")
+  doAssert removed.changed
+  doAssert not removed.content.contains(frameosFstabBegin)
+
+block test_samba_mount_failures_do_not_raise:
+  var commands: seq[string] = @[]
+  setSetupCommandRunnerForTest(proc(command: string): SetupCommandResult =
+    commands.add(command)
+    if command.contains("mount -a -t cifs"):
+      return ("mount error: could not resolve address for server", 32)
+    ("", 0)
+  )
+  try:
+    doAssert not mountSambaFstabEntries()
+    doAssert commands.anyIt(it.contains("mount -a -t cifs"))
   finally:
     resetSetupCommandRunnerForTest()

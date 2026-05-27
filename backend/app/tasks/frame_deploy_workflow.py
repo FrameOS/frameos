@@ -49,6 +49,29 @@ REMOTE_BUILD_FEATURE_CFLAGS = {
 }
 
 
+def _deploy_uses_agent(frame: Frame) -> bool:
+    agent = frame.agent if isinstance(frame.agent, dict) else {}
+    return bool(
+        agent.get("agentEnabled")
+        and agent.get("agentRunCommands")
+        and agent.get("deployWithAgent") is not False
+    )
+
+
+def _mountpoints_enabled(frame: Frame) -> bool:
+    raw_mountpoints = getattr(frame, "mountpoints", None)
+    mountpoints = raw_mountpoints if isinstance(raw_mountpoints, dict) else {}
+    if not mountpoints.get("enabled"):
+        return False
+
+    for item in mountpoints.get("items") or []:
+        if not isinstance(item, dict) or item.get("enabled") is False:
+            continue
+        if str(item.get("source") or "").strip() and str(item.get("target") or "").strip():
+            return True
+    return False
+
+
 @dataclass(slots=True)
 class PackagePlan:
     name: str
@@ -377,6 +400,9 @@ class FrameDeployWorkflow:
             )
         )
 
+        if _mountpoints_enabled(self.frame):
+            package_plans.append(await self._plan_package("cifs-utils", "Samba/CIFS mountpoint support"))
+
         if drivers.get("evdev"):
             package_plans.append(await self._plan_package("libevdev-dev", "evdev driver support"))
 
@@ -626,6 +652,12 @@ class FrameDeployWorkflow:
 
     async def _install_authorized_keys_for_full_deploy(self, full_plan: FullDeployPlan) -> None:
         if full_plan.selected_public_keys and full_plan.ssh_keys_need_install:
+            if _deploy_uses_agent(self.frame):
+                await self.deployer.log(
+                    "stdout",
+                    f"{icon} Agent deploy selected; skipping SSH authorized_keys install",
+                )
+                return
             await self.deployer.log("stdout", f"{icon} Checking SSH keys on device")
             await _install_authorized_keys(
                 self.db,
@@ -920,9 +952,33 @@ class FrameDeployWorkflow:
                 log_command=f"diagnostics: {label}",
             )
 
+    async def _frameos_service_user(self) -> str:
+        fallback_user = str(self.frame.ssh_user or "pi")
+        if not _deploy_uses_agent(self.frame):
+            return fallback_user
+
+        output: list[str] = []
+        status = await self.deployer.exec_command(
+            "id -un",
+            output=output,
+            log_output=False,
+            log_command=False,
+            raise_on_error=False,
+        )
+        agent_user = output[0].strip() if status == 0 and output else ""
+        if agent_user:
+            return agent_user
+
+        await self.deployer.log(
+            "stderr",
+            f"{icon} Could not detect agent user; falling back to SSH user {fallback_user}",
+        )
+        return fallback_user
+
     async def _install_and_activate_release(self, build_id: str) -> None:
+        service_user = await self._frameos_service_user()
         with open("../frameos/frameos.service", "r", encoding="utf-8") as f:
-            service_contents = f.read().replace("%I", self.frame.ssh_user)
+            service_contents = f.read().replace("%I", service_user)
         await upload_file(
             self.deployer.db,
             self.deployer.redis,

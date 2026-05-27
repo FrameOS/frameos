@@ -162,6 +162,27 @@ proc frameAgentJson(agent: AgentConfig): JsonNode =
     "agentSharedSecret": agent.agentSharedSecret,
   }
 
+proc frameMountpointsJson(mountpoints: MountpointsConfig, exposeSecrets: bool): JsonNode =
+  if mountpoints == nil:
+    return %*{"enabled": false, "items": %*[]}
+  var items: seq[JsonNode] = @[]
+  for mountpoint in mountpoints.items:
+    if mountpoint == nil:
+      continue
+    items.add(%*{
+      "enabled": mountpoint.enabled,
+      "source": mountpoint.source,
+      "target": mountpoint.target,
+      "username": mountpoint.username,
+      "password": if exposeSecrets: mountpoint.password else: "",
+      "domain": mountpoint.domain,
+      "options": mountpoint.options,
+    })
+  result = %*{
+    "enabled": mountpoints.enabled,
+    "items": items,
+  }
+
 proc framePaletteJson(palette: PaletteConfig): JsonNode =
   if palette == nil:
     return %*{}
@@ -241,6 +262,7 @@ proc frameApiPayload*(connectionsState: ConnectionsState, exposeSecrets = false)
     "gpio_buttons": frameGpioButtonsJson(globalFrameConfig.gpioButtons),
     "network": frameNetworkJson(globalFrameConfig.network),
     "agent": frameAgentJson(globalFrameConfig.agent),
+    "mountpoints": frameMountpointsJson(globalFrameConfig.mountpoints, exposeSecrets),
     "palette": framePaletteJson(globalFrameConfig.palette),
     "active_connections": activeConnections,
   }

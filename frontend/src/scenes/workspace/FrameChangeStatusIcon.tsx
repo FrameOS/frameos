@@ -1,7 +1,7 @@
 import { useActions, useValues } from 'kea'
 import clsx from 'clsx'
 import type { MouseEvent, SVGProps } from 'react'
-import { CloudArrowUpIcon, ComputerDesktopIcon } from '@heroicons/react/24/outline'
+import { CloudArrowUpIcon } from '@heroicons/react/24/outline'
 
 import { frameLogic } from '../frame/frameLogic'
 import { workspaceLogic } from './workspaceLogic'
@@ -18,6 +18,21 @@ export function DeployToFrameIcon(props: SVGProps<SVGSVGElement>): JSX.Element {
       <path strokeLinecap="round" strokeLinejoin="round" d="M12 7h5" />
       <path strokeLinecap="round" strokeLinejoin="round" d="M12 21.25v-5" />
       <path strokeLinecap="round" strokeLinejoin="round" d="m9.25 18.5 2.75-2.75 2.75 2.75" />
+    </svg>
+  )
+}
+
+export function DeployPlanReadyIcon(props: SVGProps<SVGSVGElement>): JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} aria-hidden="true" {...props}>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M5.5 4.25h13a1.5 1.5 0 0 1 1.5 1.5v7.5a1.5 1.5 0 0 1-1.5 1.5h-13a1.5 1.5 0 0 1-1.5-1.5v-7.5a1.5 1.5 0 0 1 1.5-1.5Z"
+      />
+      <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 9.75 2.25 2.25 5.25-5.25" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 14.75v3.5" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M8.75 19.75h6.5" />
     </svg>
   )
 }
@@ -91,7 +106,7 @@ export function FrameChangeStatusIcon({
           'focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400'
         )}
       >
-        <ComputerDesktopIcon className={iconClassName} />
+        <DeployPlanReadyIcon className={iconClassName} />
       </button>
     )
   }

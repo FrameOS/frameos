@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Tuple
+from typing import Literal, Tuple
 
 import asyncio
 import base64
@@ -27,6 +27,7 @@ from app.utils.ssh_utils import (
 )
 
 __all__ = [
+    "RemoteTransport",
     "run_commands",
     "run_command",
     "upload_file",
@@ -38,22 +39,31 @@ __all__ = [
 CHUNK_SIZE   = 2* 1024 * 1024  # 2 Mib
 CHUNK_ZLEVEL = 6               # good compromise
 
+RemoteTransport = Literal["auto", "agent", "ssh"]
+
 # ---------------------------------------------------------------------------#
 # internal helpers                                                           #
 # ---------------------------------------------------------------------------#
 
 
-async def _use_agent(frame: Frame, redis: Redis) -> bool:
+async def _use_agent(frame: Frame, redis: Redis, transport: RemoteTransport = "auto") -> bool:
     """
     Returns True if we can use the WebSocket agent for this frame.
     """
+    if transport not in {"auto", "agent", "ssh"}:
+        raise ValueError(f"Invalid remote transport: {transport}")
+    if transport == "ssh":
+        return False
+
     agent = frame.agent or {}
     if agent.get("agentEnabled") and agent.get("agentRunCommands"):
-        if agent.get("deployWithAgent") is False:
+        if transport == "auto" and agent.get("deployWithAgent") is False:
             return False
         if (await number_of_connections_for_frame(redis, frame.id)) <= 0:
             raise RuntimeError(f"Frame {frame.id} agent disconnected, can't run commands. Try running over SSH instead.")
         return True
+    if transport == "agent":
+        raise RuntimeError(f"Frame {frame.id} agent command transport is not enabled")
     return False
 
 
@@ -156,12 +166,13 @@ async def run_commands(
     *,
     timeout: int = 120,
     log_output: bool = True,
+    transport: RemoteTransport = "auto",
 ) -> None:
     """
     Execute *commands* (in order) on the frame. Either via the WebSocket agent or via SSH.
     """
 
-    if await _use_agent(frame, redis):
+    if await _use_agent(frame, redis, transport):
         for cmd in commands:
             await log(db, redis, frame.id, "stdout", f"> {cmd}")
             try:
@@ -209,13 +220,14 @@ async def upload_file(
     data: bytes,
     *,
     timeout: int = 120,
+    transport: RemoteTransport = "auto",
 ) -> None:
     """
     Write *data* to *remote_path* on the device:
     """
     size = len(data)
 
-    if await _use_agent(frame, redis):
+    if await _use_agent(frame, redis, transport):
         try:
             await log(db, redis, frame.id, "stdout", f"> uploading {remote_path} ({print_size(size)} via agent)")
             await _stream_file_via_agent(db, redis, frame, remote_path, data)
@@ -258,10 +270,11 @@ async def delete_path(
     remote_path: str,
     *,
     timeout: int = 120,
+    transport: RemoteTransport = "auto",
 ) -> None:
     """Delete a file or directory on the device."""
 
-    if await _use_agent(frame, redis):
+    if await _use_agent(frame, redis, transport):
         from app.ws.agent_ws import file_delete_on_frame
 
         try:
@@ -288,10 +301,11 @@ async def rename_path(
     dst: str,
     *,
     timeout: int = 120,
+    transport: RemoteTransport = "auto",
 ) -> None:
     """Rename a file or directory on the device."""
 
-    if await _use_agent(frame, redis):
+    if await _use_agent(frame, redis, transport):
         from app.ws.agent_ws import file_rename_on_frame
 
         try:
@@ -317,10 +331,11 @@ async def make_dir(
     remote_path: str,
     *,
     timeout: int = 120,
+    transport: RemoteTransport = "auto",
 ) -> None:
     """Create a directory on the device."""
 
-    if await _use_agent(frame, redis):
+    if await _use_agent(frame, redis, transport):
         from app.ws.agent_ws import file_mkdir_on_frame
 
         try:
@@ -370,7 +385,7 @@ async def _run_command_agent(
             "frame_id": frame.id,
             "payload":  payload,
             "timeout":  timeout,
-            # TODO: "log": bool(log_command),  # not used yet
+            "log": bool(log_output),
         }
         await redis.rpush(CMD_KEY.format(id=frame.id), json.dumps(job).encode())
 
@@ -497,6 +512,7 @@ async def run_command(
     timeout: int = 120,
     log_output: bool = True,
     log_command: str | bool = True,
+    transport: RemoteTransport = "auto",
 ) -> Tuple[int, str, str]:
     """
     Run a single *command* on *frame* and capture its textual output.
@@ -506,6 +522,6 @@ async def run_command(
 
     Returns a tuple: **(exit_status, stdout, stderr)** – all text.
     """
-    if await _use_agent(frame, redis):
+    if await _use_agent(frame, redis, transport):
         return await _run_command_agent(db, redis, frame, command, timeout, log_output=log_output, log_command=log_command)
     return await _run_command_ssh(db, redis, frame, command, timeout, log_output=log_output, log_command=log_command)
