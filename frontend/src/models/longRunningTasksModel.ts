@@ -260,6 +260,7 @@ export const longRunningTasksModel = kea<longRunningTasksModelType>([
     dismissCompletedTasks: (task: FinishTaskPayload) => ({ task }),
     toggleTaskExpanded: (taskId: string) => ({ taskId }),
     appendTaskLog: (log: LogType) => ({ log }),
+    setTaskToastOffset: (offsetX: number) => ({ offsetX }),
   }),
   reducers({
     tasks: [
@@ -316,6 +317,12 @@ export const longRunningTasksModel = kea<longRunningTasksModelType>([
               : task
           )
         },
+      },
+    ],
+    taskToastOffsetX: [
+      0,
+      {
+        setTaskToastOffset: (_, { offsetX }) => offsetX,
       },
     ],
   }),

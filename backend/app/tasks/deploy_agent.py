@@ -47,14 +47,18 @@ def agent_build_version() -> str:
     if isinstance(version, str) and version:
         return version
     return current_agent_version() or "unknown"
+
+
 def delayed_agent_restart_command(suffix: str = "manual") -> str:
     safe_suffix = "".join(ch for ch in suffix if ch.isalnum() or ch in {"-", "_"}) or "manual"
     unit = f"frameos-agent-restart-{safe_suffix}"
-    fallback = "sudo sh -c 'nohup sh -c \"sleep 2; systemctl restart frameos_agent.service\" >/dev/null 2>&1 &'"
+    restart_script = "sleep 1; systemctl restart frameos_agent.service"
+    fallback_script = f"nohup sh -c {shlex.quote(restart_script)} >/dev/null 2>&1 &"
+    fallback = f"sudo sh -c {shlex.quote(fallback_script)}"
     return (
         f"(command -v systemd-run >/dev/null 2>&1 && "
-        f"sudo systemd-run --unit={shlex.quote(unit)} --collect --on-active=2 "
-        f"/bin/systemctl restart frameos_agent.service) || {fallback}"
+        f"sudo systemd-run --quiet --unit={shlex.quote(unit)} --collect /bin/sh -lc "
+        f"{shlex.quote(restart_script)}) || {fallback}"
     )
 
 
@@ -157,15 +161,16 @@ class AgentDeployer(FrameDeployer):
                         await self._verify_agent_transport("before switching release")
 
                     # 4. Atomically switch *current* → new release + housekeeping
+                    previous_agent_process = await self._agent_service_process_signature()
                     await self._switch_current_release()
 
                     # Enable + start service
                     if self.remote_transport == "agent":
                         await self._restart_agent_service_via_agent()
-                        await self._wait_for_agent_release()
+                        await self._wait_for_agent_release(previous_agent_process)
                     else:
                         await self.restart_service("frameos_agent")
-                        await self._wait_for_agent_release()
+                        await self._wait_for_agent_release(previous_agent_process)
 
                     await self._cleanup_old_builds()
                     await self.log(
@@ -609,9 +614,27 @@ class AgentDeployer(FrameDeployer):
             timeout=30,
         )
 
-    async def _wait_for_agent_release(self) -> None:
+    async def _agent_service_process_signature(self) -> str | None:
+        output: list[str] = []
+        await self.exec_command(
+            "pid=$(systemctl show -p MainPID --value frameos_agent.service 2>/dev/null || true); "
+            'if [ -n "$pid" ] && [ "$pid" != "0" ]; then '
+            'start=$(awk \'{print $22}\' "/proc/$pid/stat" 2>/dev/null || true); '
+            'printf "%s:%s" "$pid" "$start"; '
+            "fi",
+            output=output,
+            log_output=False,
+            log_command=False,
+            raise_on_error=False,
+            timeout=15,
+        )
+        signature = "\n".join(output).strip()
+        return signature or None
+
+    async def _wait_for_agent_release(self, previous_process_signature: str | None = None) -> None:
         expected_binary = f"{self._release_dir()}/frameos_agent"
         quoted_expected = shlex.quote(expected_binary)
+        quoted_previous_process = shlex.quote(previous_process_signature or "")
         deadline = asyncio.get_event_loop().time() + 90
         last_error: Exception | None = None
         await self.log("stdout", "- Waiting for restarted agent to report the new release")
@@ -622,6 +645,9 @@ class AgentDeployer(FrameDeployer):
                 await self.exec_command(
                     "pid=$(systemctl show -p MainPID --value frameos_agent.service 2>/dev/null || true); "
                     'test -n "$pid"; test "$pid" != "0"; '
+                    'start=$(awk \'{print $22}\' "/proc/$pid/stat" 2>/dev/null || true); '
+                    'signature="$pid:$start"; '
+                    f'[ -z {quoted_previous_process} ] || [ "$signature" != {quoted_previous_process} ]; '
                     f'test "$(readlink -f /proc/$pid/exe 2>/dev/null)" = {quoted_expected}; '
                     "systemctl is-active --quiet frameos_agent.service; "
                     "echo restarted-agent-release-ok",

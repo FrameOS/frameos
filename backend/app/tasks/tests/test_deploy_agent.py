@@ -7,7 +7,13 @@ from typing import Any
 
 import pytest
 
-from app.tasks.deploy_agent import AgentDeployer, deploy_agent, deploy_agent_task, resolve_agent_task_transport
+from app.tasks.deploy_agent import (
+    AgentDeployer,
+    delayed_agent_restart_command,
+    deploy_agent,
+    deploy_agent_task,
+    resolve_agent_task_transport,
+)
 from app.tasks.precompiled_agent import PrecompiledAgentResult
 
 
@@ -92,6 +98,7 @@ class RunFlowAgentDeployer(AgentDeployer):
         )
         self.events: list[str] = []
         self.logs: list[tuple[str, str]] = []
+        self.wait_previous_process_signature: str | None = None
 
     async def log(self, type: str, line: str, timestamp=None):  # type: ignore[override]
         self.logs.append((type, line))
@@ -123,13 +130,18 @@ class RunFlowAgentDeployer(AgentDeployer):
     async def _switch_current_release(self) -> None:  # type: ignore[override]
         self.events.append("switch_current_release")
 
+    async def _agent_service_process_signature(self) -> str | None:  # type: ignore[override]
+        self.events.append("capture_agent_process")
+        return "old-agent-process"
+
     async def _restart_agent_service_via_agent(self) -> None:  # type: ignore[override]
         self.events.append("restart_via_agent")
 
     async def restart_service(self, service_name: str) -> None:  # type: ignore[override]
         self.events.append(f"restart_service:{service_name}")
 
-    async def _wait_for_agent_release(self) -> None:  # type: ignore[override]
+    async def _wait_for_agent_release(self, previous_process_signature: str | None = None) -> None:  # type: ignore[override]
+        self.wait_previous_process_signature = previous_process_signature
         self.events.append("wait_for_agent_release")
 
     async def _cleanup_old_builds(self) -> None:  # type: ignore[override]
@@ -164,6 +176,16 @@ def test_resolve_agent_task_transport_uses_frame_agent_preference():
 
     frame.agent["deployWithAgent"] = False
     assert resolve_agent_task_transport(frame, "auto") == "ssh"
+
+
+def test_delayed_agent_restart_command_uses_immediate_transient_service():
+    command = delayed_agent_restart_command("build id!")
+
+    assert "frameos-agent-restart-buildid" in command
+    assert "systemd-run --quiet" in command
+    assert "--on-active" not in command
+    assert "/bin/sh -lc" in command
+    assert "sleep 1; systemctl restart frameos_agent.service" in command
 
 
 @pytest.mark.asyncio
@@ -291,6 +313,8 @@ async def test_deploy_agent_ssh_restart_waits_for_staged_release(tmp_path: Path)
 
     assert "restart_service:frameos_agent" in deployer.events
     assert "wait_for_agent_release" in deployer.events
+    assert deployer.wait_previous_process_signature == "old-agent-process"
+    assert deployer.events.index("capture_agent_process") < deployer.events.index("switch_current_release")
     assert deployer.events.index("restart_service:frameos_agent") < deployer.events.index("wait_for_agent_release")
     assert deployer.events.index("wait_for_agent_release") < deployer.events.index("cleanup_old_builds")
 
@@ -303,8 +327,53 @@ async def test_deploy_agent_agent_transport_restarts_and_waits_for_staged_releas
 
     assert "restart_via_agent" in deployer.events
     assert "wait_for_agent_release" in deployer.events
+    assert deployer.wait_previous_process_signature == "old-agent-process"
+    assert deployer.events.index("capture_agent_process") < deployer.events.index("switch_current_release")
     assert deployer.events.index("restart_via_agent") < deployer.events.index("wait_for_agent_release")
     assert deployer.events.index("wait_for_agent_release") < deployer.events.index("cleanup_old_builds")
+
+
+@pytest.mark.asyncio
+async def test_wait_for_agent_release_requires_new_running_process(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    async def no_sleep(_seconds: float) -> None:
+        return None
+
+    deploy_agent_module = importlib.import_module("app.tasks.deploy_agent")
+    monkeypatch.setattr(deploy_agent_module.asyncio, "sleep", no_sleep)
+
+    deployer = FakeAgentDeployer(tmp_path)
+    deployer.build_id = "newrelease"
+    attempts = 0
+
+    async def fake_exec_command(
+        command: str,
+        output=None,
+        log_output: bool = True,
+        log_command=True,
+        raise_on_error: bool = True,
+        timeout: int = 1800,
+    ) -> int:
+        nonlocal attempts
+        deployer.commands.append(command)
+        attempts += 1
+        if attempts == 1:
+            if raise_on_error:
+                raise RuntimeError("old process still running")
+            return 1
+        if output is not None:
+            output.append("restarted-agent-release-ok")
+        return 0
+
+    deployer.exec_command = fake_exec_command  # type: ignore[method-assign]
+
+    await deployer._wait_for_agent_release("123:456")
+
+    assert attempts == 2
+    assert "123:456" in deployer.commands[0]
+    assert any("Restarted agent is running the staged release" in message for _level, message in deployer.logs)
 
 
 @pytest.mark.asyncio
