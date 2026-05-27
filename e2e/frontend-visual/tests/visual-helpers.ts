@@ -244,10 +244,11 @@ export async function settleForScreenshot(page: Page): Promise<void> {
 }
 
 async function stabilizeActiveLogsSearchScroll(page: Page): Promise<void> {
-  const searchInput = page.getByPlaceholder(/Search logs/i).first()
-  const searchActive = await searchInput
-    .evaluate((element) => element instanceof HTMLInputElement && element.value.trim().length > 0)
-    .catch(() => false)
+  const searchActive = await page
+    .getByPlaceholder(/Search logs/i)
+    .evaluateAll((elements) =>
+      elements.some((element) => element instanceof HTMLInputElement && element.value.trim().length > 0)
+    )
 
   if (!searchActive) {
     return
