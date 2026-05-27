@@ -5,6 +5,7 @@ import type { CSSProperties, DragEvent, FormEvent } from 'react'
 import {
   AdjustmentsHorizontalIcon,
   ArchiveBoxIcon,
+  ArrowPathIcon,
   ArrowUturnLeftIcon,
   CalendarDaysIcon,
   ChartBarIcon,
@@ -15,6 +16,7 @@ import {
   PlusIcon,
   RocketLaunchIcon,
   SignalIcon,
+  StopCircleIcon,
   SparklesIcon,
   TrashIcon,
 } from '@heroicons/react/24/outline'
@@ -238,7 +240,8 @@ function FramePreviewPanel({ frame, scenes }: { frame: FrameType; scenes: FrameS
 }
 
 function FrameHeaderActions({ frame, archived }: { frame: FrameType; archived?: boolean }): JSX.Element {
-  const { deleteFrame, deployAgent, renderFrame, restartAgent, setFrameArchived } = useActions(framesModel)
+  const { deleteFrame, deployAgent, renderFrame, restartAgent, restartFrame, setFrameArchived, stopFrame } =
+    useActions(framesModel)
   const { openChatDrawer, openFrameChangeDrawer, openRenameFrameDialog } = useActions(workspaceLogic)
   const frameName = frame.name || frameHost(frame)
   const agentConfigured = Boolean(frame.agent?.agentEnabled && frame.agent.agentSharedSecret)
@@ -278,6 +281,18 @@ function FrameHeaderActions({ frame, archived }: { frame: FrameType; archived?: 
               title: 'Open deploy plan',
               onClick: () => openFrameChangeDrawer(frame.id, 'deploy'),
               icon: <RocketLaunchIcon className="h-5 w-5" />,
+            },
+            {
+              label: 'Stop FrameOS',
+              title: 'Stop FrameOS service',
+              onClick: () => stopFrame(frame.id),
+              icon: <StopCircleIcon className="h-5 w-5" />,
+            },
+            {
+              label: 'Restart FrameOS',
+              title: 'Restart FrameOS service',
+              onClick: () => restartFrame(frame.id),
+              icon: <ArrowPathIcon className="h-5 w-5" />,
             },
             ...(agentConfigured
               ? [
