@@ -20,17 +20,42 @@ class FakeAgentDeployer(AgentDeployer):
             temp_dir=str(tmp_path),
         )
         self.logs: list[tuple[str, str]] = []
+        self.commands: list[str] = []
+        self.command_statuses: list[tuple[str, int]] = []
         self.staged_binary: str | None = None
         self.source_arch: str | None = None
+        self.source_distro: str | None = None
 
     async def log(self, type: str, line: str, timestamp=None):  # type: ignore[override]
         self.logs.append((type, line))
 
+    async def exec_command(  # type: ignore[override]
+        self,
+        command: str,
+        output=None,
+        log_output: bool = True,
+        log_command=True,
+        raise_on_error: bool = True,
+        timeout: int = 1800,
+    ) -> int:
+        self.commands.append(command)
+        status = 0
+        for needle, configured_status in self.command_statuses:
+            if needle in command:
+                status = configured_status
+                break
+        if output is not None:
+            output.append("")
+        if status != 0 and raise_on_error:
+            raise RuntimeError(f"Command failed: {command}")
+        return status
+
     async def _stage_agent_binary(self, binary_path: str) -> None:  # type: ignore[override]
         self.staged_binary = binary_path
 
-    async def _deploy_agent_from_source(self, arch: str) -> None:  # type: ignore[override]
+    async def _deploy_agent_from_source(self, arch: str, *, distro: str) -> None:  # type: ignore[override]
         self.source_arch = arch
+        self.source_distro = distro
 
 
 class FakeRedis:
@@ -126,6 +151,7 @@ async def test_deploy_agent_can_force_source_build(
 
     assert deployer.staged_binary is None
     assert deployer.source_arch == "aarch64"
+    assert deployer.source_distro == "debian"
     assert any("requested from local development" in message for _level, message in deployer.logs)
 
 
@@ -194,3 +220,33 @@ async def test_deploy_agent_falls_back_to_source_for_unsupported_target(tmp_path
 
     assert deployer.staged_binary is None
     assert deployer.source_arch == "mips64"
+    assert deployer.source_distro == "debian"
+
+
+@pytest.mark.asyncio
+async def test_agent_source_build_installs_ubuntu_compiler_dependencies(tmp_path: Path):
+    deployer = FakeAgentDeployer(tmp_path)
+    deployer.remote_transport = "agent"
+    deployer.command_statuses = [
+        ("dpkg-query -W -f='${Status}' build-essential", 1),
+        ("dpkg-query -W -f='${Status}' libssl-dev", 1),
+    ]
+
+    await deployer._ensure_agent_source_build_dependencies("ubuntu")
+
+    install_commands = [command for command in deployer.commands if "apt-get install -y" in command]
+    assert len(install_commands) == 1
+    assert "systemd-run" in install_commands[0]
+    assert "build-essential" in install_commands[0]
+    assert "libssl-dev" in install_commands[0]
+    assert any("command -v gcc" in command for command in deployer.commands)
+    assert any("/usr/include/openssl/ssl.h" in command for command in deployer.commands)
+
+
+@pytest.mark.asyncio
+async def test_agent_source_build_requires_gcc_on_buildroot(tmp_path: Path):
+    deployer = FakeAgentDeployer(tmp_path)
+    deployer.command_statuses = [("command -v gcc", 1)]
+
+    with pytest.raises(RuntimeError, match="Cannot source-build the FrameOS agent on buildroot"):
+        await deployer._ensure_agent_source_build_dependencies("buildroot")

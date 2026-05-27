@@ -16,6 +16,7 @@ from app.models.log import new_log as log
 from app.utils.local_exec import exec_local_command
 from app.utils.remote_exec import RemoteTransport, upload_file
 from app.tasks._frame_deployer import FrameDeployer
+from app.tasks.frame_deploy_helpers import sanitize_apt_package_name
 from app.tasks.prebuilt_deps import resolve_prebuilt_target
 from app.tasks.precompiled_agent import download_precompiled_agent_release
 from app.utils.versions import current_agent_version, get_versions
@@ -23,6 +24,7 @@ from .utils import find_nim_v2, find_nimbase_file, get_fresh_frame
 
 
 PRECOMPILED_AGENT_ENV = "FRAMEOS_AGENT_PRECOMPILED"
+AGENT_SOURCE_BUILD_APT_PACKAGES = ("build-essential", "libssl-dev")
 
 
 def precompiled_agent_enabled() -> bool:
@@ -281,13 +283,15 @@ class AgentDeployer(FrameDeployer):
             reason = "requested from local development" if self.force_source else f"{PRECOMPILED_AGENT_ENV}=source"
             await self.log("stdout", f"- {reason}; building agent on the device")
 
-        await self._deploy_agent_from_source(arch)
+        await self._deploy_agent_from_source(arch, distro=distro)
 
-    async def _deploy_agent_from_source(self, arch: str) -> None:
+    async def _deploy_agent_from_source(self, arch: str, *, distro: str) -> None:
         """
         Build the agent locally, upload the tarball to the device,
         compile natively, and stage the binary in the new release folder.
         """
+        await self._ensure_agent_source_build_dependencies(distro)
+
         build_dir, source_dir = self._create_agent_build_folders()
         archive_path = await self._create_local_build_archive(build_dir, source_dir, arch)
 
@@ -320,6 +324,103 @@ class AgentDeployer(FrameDeployer):
             f"{self._release_dir()}/frameos_agent"
         )
         await self.exec_command(f"chmod +x {self._release_dir()}/frameos_agent")
+
+    async def _ensure_agent_source_build_dependencies(self, distro: str) -> None:
+        gcc_check = "command -v gcc >/dev/null 2>&1"
+        openssl_header_check = "test -e /usr/include/openssl/ssl.h"
+
+        if distro in {"raspios", "debian", "ubuntu"}:
+            await self.log("stdout", "- Ensuring agent source-build dependencies on device")
+            missing_packages = []
+            for pkg in AGENT_SOURCE_BUILD_APT_PACKAGES:
+                sanitized_pkg = sanitize_apt_package_name(pkg)
+                installed = (
+                    await self.exec_command(
+                        f"dpkg-query -W -f='${{Status}}' {shlex.quote(sanitized_pkg)} 2>/dev/null | "
+                        "grep -q '^install ok installed$'",
+                        raise_on_error=False,
+                        log_command=False,
+                        log_output=False,
+                    )
+                    == 0
+                )
+                if not installed:
+                    missing_packages.append(sanitized_pkg)
+
+            if missing_packages:
+                await self._install_agent_source_build_apt_packages(missing_packages)
+
+            if await self.exec_command(gcc_check, raise_on_error=False, log_command=False, log_output=False) != 0:
+                raise RuntimeError(
+                    "gcc is still unavailable after installing build-essential; "
+                    "install a C compiler on the device before source-building the FrameOS agent"
+                )
+            if (
+                await self.exec_command(
+                    openssl_header_check,
+                    raise_on_error=False,
+                    log_command=False,
+                    log_output=False,
+                )
+                != 0
+            ):
+                raise RuntimeError(
+                    "OpenSSL headers are still unavailable after installing libssl-dev; "
+                    "install libssl-dev on the device before source-building the FrameOS agent"
+                )
+            return
+
+        if await self.exec_command(gcc_check, raise_on_error=False, log_command=False, log_output=False) != 0:
+            raise RuntimeError(
+                f"Cannot source-build the FrameOS agent on {distro}: gcc is not installed and automatic "
+                "package installation is only supported on Debian, Ubuntu, and Raspberry Pi OS"
+            )
+
+    async def _install_agent_source_build_apt_packages(self, packages: list[str]) -> None:
+        if not packages:
+            return
+
+        quoted_packages = " ".join(shlex.quote(pkg) for pkg in packages)
+        install_command = f"apt-get install -y {quoted_packages}"
+        await self.log("stdout", f"- Installing agent source-build dependencies: {', '.join(packages)}")
+
+        output: list[str] = []
+        status = await self.exec_command(
+            self._sudo_system_command(install_command),
+            raise_on_error=False,
+            output=output,
+            timeout=1800,
+        )
+        if status != 0:
+            await self.log("stdout", "- Installing agent source-build dependencies failed. Updating apt and retrying.")
+            status = await self.exec_command(
+                self._sudo_system_command(f"apt-get update && {install_command}"),
+                raise_on_error=False,
+                timeout=1800,
+            )
+
+        if status != 0:
+            package_list = ", ".join(packages)
+            raise RuntimeError(
+                f"Could not install agent source-build dependencies ({package_list}). "
+                "Install them on the device or deploy a precompiled agent release instead."
+            )
+
+    def _sudo_system_command(self, command: str) -> str:
+        inner = f"set -eu; export DEBIAN_FRONTEND=noninteractive; {command}"
+        quoted_inner = shlex.quote(inner)
+
+        if self.remote_transport == "agent":
+            return (
+                "if command -v systemd-run >/dev/null 2>&1; then "
+                "sudo -n systemd-run --quiet --wait --pipe --collect /bin/sh -lc "
+                f"{quoted_inner}; "
+                "else "
+                f"sudo -n sh -lc {quoted_inner}; "
+                "fi"
+            )
+
+        return f"sudo -n sh -lc {quoted_inner}"
 
     async def _stage_agent_binary(self, binary_path: str) -> None:
         await self._ensure_agent_directories()
