@@ -24,6 +24,7 @@ import { Label } from '../../components/Label'
 import { FrameosShell } from '../workspace/FrameosShell'
 import { isMobileWorkspaceViewport, workspaceLogic } from '../workspace/workspaceLogic'
 import { accountLogic } from './accountLogic'
+import versions from '../../../../versions.json'
 
 const settingsNavItems = [
   ['Account', '#settings-account'],
@@ -38,6 +39,9 @@ const settingsNavItems = [
   ['System information', '#settings-system'],
   ['Custom fonts', '#settings-fonts'],
 ] as const
+
+const frameosVersion = typeof versions.frameos === 'string' ? versions.frameos.split('+')[0] : null
+const frameosVersionLabel = frameosVersion ? `FrameOS ${frameosVersion}` : 'FrameOS'
 
 function settingsHeaderOffset(): number {
   if (typeof window === 'undefined') {
@@ -282,30 +286,35 @@ export function Settings() {
     </div>
   )
   const settingsActions = (
-    <div className="settings-page-actions flex items-center gap-2">
-      {!isHassioIngress ? (
-        <Button size="small" color="secondary" onClick={logout} className="rounded-lg px-4 py-2">
-          Logout
+    <div className="settings-page-actions flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+      <div className="frameos-muted shrink-0 text-xs tracking-wide text-slate-400">
+        {frameosVersionLabel}
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        {!isHassioIngress ? (
+          <Button size="small" color="secondary" onClick={logout} className="rounded-lg px-4 py-2">
+            Logout
+          </Button>
+        ) : null}
+        <Button
+          size="small"
+          color="secondary"
+          onClick={() => resetSettings(savedSettings)}
+          disabled={!settingsChanged || isSettingsSubmitting}
+          className="rounded-lg px-4 py-2"
+        >
+          Reset
         </Button>
-      ) : null}
-      <Button
-        size="small"
-        color="secondary"
-        onClick={() => resetSettings(savedSettings)}
-        disabled={!settingsChanged || isSettingsSubmitting}
-        className="rounded-lg px-4 py-2"
-      >
-        Reset
-      </Button>
-      <Button
-        size="small"
-        color={settingsChanged ? 'primary' : 'secondary'}
-        onClick={submitSettings}
-        disabled={!settingsChanged || isSettingsSubmitting}
-        className="rounded-lg px-4 py-2"
-      >
-        Save
-      </Button>
+        <Button
+          size="small"
+          color={settingsChanged ? 'primary' : 'secondary'}
+          onClick={submitSettings}
+          disabled={!settingsChanged || isSettingsSubmitting}
+          className="rounded-lg px-4 py-2"
+        >
+          Save
+        </Button>
+      </div>
     </div>
   )
 

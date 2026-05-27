@@ -1,5 +1,6 @@
 import { useActions, useValues } from 'kea'
 import clsx from 'clsx'
+import { useEffect, useRef, useState } from 'react'
 import { framesModel } from '../models/framesModel'
 import { entityImagesModel, useEntityImage } from '../models/entityImagesModel'
 
@@ -14,6 +15,7 @@ export interface FrameImageProps extends React.HTMLAttributes<HTMLDivElement> {
   objectFit?: React.CSSProperties['objectFit']
   imageClassName?: string
   hideWhileLoading?: boolean
+  loadFullSizeAfterThumb?: boolean
 }
 
 /**
@@ -33,6 +35,7 @@ export function FrameImage({
   objectFit,
   imageClassName,
   hideWhileLoading = false,
+  loadFullSizeAfterThumb = false,
   ...props
 }: FrameImageProps) {
   const { frames } = useValues(framesModel)
@@ -49,10 +52,30 @@ export function FrameImage({
   const subEntityId = sceneId ? `scene_images/${sceneId}` : 'image'
 
   const { imageUrl, isLoading, setIsLoading } = useEntityImage(entityId, subEntityId)
-  const imageSrc = imageUrl ? imageUrl + (thumb ? (imageUrl.includes('?') ? '&thumb=1' : '?thumb=1') : '') : undefined
+  const thumbImageSrc = imageUrl ? imageUrl + (imageUrl.includes('?') ? '&thumb=1' : '?thumb=1') : undefined
+  const imageSrc = thumb ? thumbImageSrc : imageUrl ?? undefined
+  const shouldProgressivelyLoadFullSize = Boolean(loadFullSizeAfterThumb && thumb && imageUrl)
+  const [fullSizeLoadUrl, setFullSizeLoadUrl] = useState<string | null>(null)
+  const [fullSizeLoadedUrl, setFullSizeLoadedUrl] = useState<string | null>(null)
+  const fullSizeLoadFrames = useRef<number[]>([])
+  const shouldLoadFullSize = shouldProgressivelyLoadFullSize && fullSizeLoadUrl === imageUrl
+  const fullSizeLoaded = shouldProgressivelyLoadFullSize && fullSizeLoadedUrl === imageUrl
 
   // Determine if we should show the fade-in-out or loading cursor
   const visiblyLoading = !sceneId && (isLoading || frame?.status !== 'ready') && frame?.interval > 5
+
+  const cancelQueuedFullSizeLoad = () => {
+    if (typeof window !== 'undefined' && typeof window.cancelAnimationFrame === 'function') {
+      for (const frame of fullSizeLoadFrames.current) {
+        window.cancelAnimationFrame(frame)
+      }
+    }
+    fullSizeLoadFrames.current = []
+  }
+
+  useEffect(() => {
+    return cancelQueuedFullSizeLoad
+  }, [])
 
   const handleRefreshClick =
     onClick ||
@@ -62,11 +85,54 @@ export function FrameImage({
       }
     })
 
+  const imageStyle: React.CSSProperties = {
+    aspectRatio: frameAspectRatio,
+    objectFit,
+    maxWidth: 'inherit',
+    maxHeight: 'inherit',
+  }
+  const baseImageClassName = clsx(
+    thumb ? 'rounded-sm' : 'rounded-lg',
+    refreshable ? 'rounded-tl-none max-w-full max-h-full' : imageClassName ? 'max-w-full max-h-full' : 'w-full',
+    hideWhileLoading && isLoading ? 'opacity-0' : null,
+    hideWhileLoading ? 'transition-opacity duration-150' : null,
+    imageClassName ?? className /* duplicated for inner image by default */
+  )
+
+  const queueFullSizeLoad = () => {
+    if (!shouldProgressivelyLoadFullSize || shouldLoadFullSize || !imageUrl) {
+      return
+    }
+
+    const nextFullSizeUrl = imageUrl
+    cancelQueuedFullSizeLoad()
+    if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
+      setFullSizeLoadUrl(nextFullSizeUrl)
+      return
+    }
+
+    const firstFrame = window.requestAnimationFrame(() => {
+      fullSizeLoadFrames.current = fullSizeLoadFrames.current.filter((frame) => frame !== firstFrame)
+      const secondFrame = window.requestAnimationFrame(() => {
+        fullSizeLoadFrames.current = fullSizeLoadFrames.current.filter((frame) => frame !== secondFrame)
+        setFullSizeLoadUrl(nextFullSizeUrl)
+      })
+      fullSizeLoadFrames.current.push(secondFrame)
+    })
+    fullSizeLoadFrames.current.push(firstFrame)
+  }
+
+  const handleBaseImageLoad = () => {
+    setIsLoading(false)
+    queueFullSizeLoad()
+  }
+
   return (
     <div
       className={clsx(
         className?.includes('max-w-') || className?.includes('max-h-') ? '' : 'max-w-full max-h-full w-full h-full',
         'flex items-center justify-center',
+        shouldProgressivelyLoadFullSize ? 'relative overflow-hidden' : null,
         visiblyLoading ? 'continuous-fade-in-out' : null,
         visiblyLoading ? 'cursor-wait' : refreshable ? 'cursor-pointer' : 'cursor-default',
         className
@@ -76,27 +142,29 @@ export function FrameImage({
       {...props}
     >
       {frame && (
-        <img
-          className={clsx(
-            thumb ? 'rounded-sm' : 'rounded-lg',
-            refreshable ? 'rounded-tl-none max-w-full max-h-full' : imageClassName ? 'max-w-full max-h-full' : 'w-full',
-            hideWhileLoading && isLoading ? 'opacity-0' : null,
-            hideWhileLoading ? 'transition-opacity duration-150' : null,
-            imageClassName ?? className /* duplicated for inner image by default */
-          )}
-          src={imageSrc}
-          onLoad={() => {
-            setIsLoading(false)
-          }}
-          onError={() => setIsLoading(false)}
-          style={{
-            aspectRatio: frameAspectRatio,
-            objectFit,
-            maxWidth: 'inherit',
-            maxHeight: 'inherit',
-          }}
-          alt=""
-        />
+        <>
+          <img
+            className={baseImageClassName}
+            src={imageSrc}
+            onLoad={handleBaseImageLoad}
+            onError={() => setIsLoading(false)}
+            style={imageStyle}
+            alt=""
+          />
+          {shouldProgressivelyLoadFullSize && shouldLoadFullSize ? (
+            <img
+              className={clsx(
+                baseImageClassName,
+                'absolute inset-0 transition-opacity duration-200',
+                fullSizeLoaded ? 'opacity-100' : 'opacity-0'
+              )}
+              src={imageUrl ?? undefined}
+              onLoad={() => setFullSizeLoadedUrl(imageUrl ?? null)}
+              style={imageStyle}
+              alt=""
+            />
+          ) : null}
+        </>
       )}
     </div>
   )
