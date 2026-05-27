@@ -1289,6 +1289,23 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
         .values()
     )
 
+  const stateInputStackBottom = (targetNode: DiagramNode, stateInputEdges: Edge[]): number => {
+    // State inputs are moved next to the target later; reserve that vertical lane so larger data-input trees stay above it.
+    let stackBottom = targetNode.position.y
+    stateInputEdges.forEach((edge, index) => {
+      const sourceNode = positionedById[edge.source] ?? nodesById[edge.source]
+      if (!sourceNode) {
+        return
+      }
+
+      const size = getNodeSize(sourceNode)
+      const verticalGap = index === 0 ? localInputVerticalGap(sourceNode, targetNode) : 0
+      const stackTop = stackBottom - verticalGap - size.height
+      stackBottom = stackTop - STATE_INPUT_STACK_GAP
+    })
+    return stackBottom
+  }
+
   const placedLocalInputTreeBounds = (
     targetId: string,
     visited: Set<string> = new Set(),
@@ -1334,16 +1351,25 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
       return
     }
 
-    const inputEdges = sortedUniqueLocalInputEdges(targetId, allowedFlowIds).filter((edge) => {
+    const allInputEdges = sortedUniqueLocalInputEdges(targetId, allowedFlowIds)
+    const stackedStateInputEdges = allInputEdges.filter(
+      (edge) => stackedStateInputTargetByNodeId.get(edge.source) === targetId
+    )
+    const inputEdges = allInputEdges.filter((edge) => {
       const sourceNode = positionedById[edge.source] ?? nodesById[edge.source]
-      return sourceNode && !flowNodeIds.has(sourceNode.id)
+      return (
+        sourceNode && !flowNodeIds.has(sourceNode.id) && stackedStateInputTargetByNodeId.get(sourceNode.id) !== targetId
+      )
     })
 
     if (targetNode.type === 'code' && inputEdges.length > CODE_INPUTS_PER_ROW) {
       return
     }
 
-    let stackBottom = targetNode.position.y
+    let stackBottom =
+      stackedStateInputEdges.length > 0
+        ? stateInputStackBottom(targetNode, stackedStateInputEdges)
+        : targetNode.position.y
     let previousInputBounds: Bounds | null = null
 
     inputEdges.forEach((edge, index) => {
@@ -1693,6 +1719,7 @@ export function arrangeNodes(nodes: DiagramNode[], edges: Edge[], options: Arran
           isDataAppNode(sourceNode) &&
           targetNode.type === 'app' &&
           !isDataAppNode(targetNode) &&
+          reachableFlowTargetIds(sourceNode.id).size === 0 &&
           !flowNodeIds.has(sourceNode.id) &&
           !flowNodeIds.has(targetNode.id) &&
           edge.sourceHandle === 'fieldOutput' &&
