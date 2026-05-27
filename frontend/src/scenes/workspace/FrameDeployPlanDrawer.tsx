@@ -291,10 +291,16 @@ function RecommendationDescription({ recommendation }: { recommendation: DeployR
 
 function DeployTransportToggle({
   agentConnected,
+  canDeployAgent,
+  onDeployAgent,
+  onRestartAgent,
   deployWithAgent,
   onChange,
 }: {
   agentConnected: boolean
+  canDeployAgent: boolean
+  onDeployAgent: () => void
+  onRestartAgent: () => void
   deployWithAgent: boolean
   onChange: (deployWithAgent: boolean) => void
 }): JSX.Element {
@@ -312,6 +318,24 @@ function DeployTransportToggle({
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
             <div className="frame-tool-muted text-sm leading-5">{agentDetail}</div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={onRestartAgent}
+                className="frameos-secondary-button rounded-lg px-2.5 py-1 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+              >
+                Restart agent
+              </button>
+              {canDeployAgent ? (
+                <button
+                  type="button"
+                  onClick={onDeployAgent}
+                  className="frameos-secondary-button rounded-lg px-2.5 py-1 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                >
+                  Deploy agent
+                </button>
+              ) : null}
+            </div>
           </div>
           <div className="frameos-inset inline-flex shrink-0 rounded-xl border p-1">
             <button
@@ -361,7 +385,9 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
   } = useValues(frameLogic({ frameId: frame.id }))
   const {
     hideDeployPlanModal,
+    deployAgent,
     loadDeployPlans,
+    restartAgent,
     saveAndDeployFrame,
     saveAndFastDeployFrame,
     saveAndFullDeployFrame,
@@ -371,6 +397,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
   const { logs } = useValues(logsLogic({ frameId: frame.id }))
 
   const deployPlanLogs = deployPlanLogsSince(logs, deployPlansLoadingStartedAt)
+  const canDeployAgent = (frame.mode ?? 'rpios') === 'rpios'
   const closeAndRun = (action: () => void): void => {
     action()
     hideDeployPlanModal()
@@ -404,6 +431,9 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
           {deployTransportToggleVisible ? (
             <DeployTransportToggle
               agentConnected={agentDeployConnected}
+              canDeployAgent={canDeployAgent}
+              onDeployAgent={deployAgent}
+              onRestartAgent={restartAgent}
               deployWithAgent={deployWithAgent}
               onChange={setDeployWithAgent}
             />

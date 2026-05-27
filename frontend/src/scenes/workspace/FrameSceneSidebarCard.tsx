@@ -48,9 +48,16 @@ export function FrameSceneSidebarCard({
           {statusLabel}
         </button>
       ) : (
-        <span className="frameos-inset frameos-muted inline-flex items-center justify-center rounded-full border px-3 py-2 text-xs font-semibold">
+        <button
+          type="button"
+          onClick={() => {
+            closeChatDrawer()
+            showDeployPlanModal()
+          }}
+          className="frameos-inset frameos-muted inline-flex items-center justify-center rounded-full border px-3 py-2 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+        >
           {statusLabel}
-        </span>
+        </button>
       )}
       <button
         type="button"
