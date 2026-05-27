@@ -12,7 +12,10 @@ export async function userExists(): Promise<boolean> {
     return false
   }
   try {
-    const resp = await fetch('/api/has_first_user', { method: 'GET', headers: { Accept: 'application/json' } })
+    const resp = await fetch(`${getBasePath()}/api/has_first_user`, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    })
     if (!resp.ok) {
       return false
     }

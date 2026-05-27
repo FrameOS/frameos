@@ -5,6 +5,7 @@ from starlette.testclient import TestClient
 from unittest.mock import patch
 
 from app.conftest import MockResponse
+from app.config import normalize_ingress_path
 
 HASSIO_ENV_KEYS = ("HASSIO_RUN_MODE", "HASSIO_TOKEN", "SUPERVISOR_TOKEN")
 
@@ -44,6 +45,14 @@ def _reload_app_and_config():
 
     # Return the reloaded references
     return fastapi.app, config.config
+
+
+def test_normalize_ingress_path():
+    assert normalize_ingress_path(None) == ""
+    assert normalize_ingress_path("") == ""
+    assert normalize_ingress_path("hostname/ingress/") == "/hostname/ingress"
+    assert normalize_ingress_path("/hostname/ingress/") == "/hostname/ingress"
+    assert normalize_ingress_path("https://homeassistant.local:8123/api/hassio_ingress/abc/") == "/api/hassio_ingress/abc"
 
 
 @pytest.mark.asyncio
@@ -159,3 +168,8 @@ async def test_hassio_run_mode_ingress(clear_env, monkeypatch):
 
     resp_root = client.get("/")
     assert resp_root.status_code == 200
+    assert '"ingress_path": "/hostname/ingress"' in resp_root.text
+
+    resp_root_with_header = client.get("/", headers={"x-ingress-path": "/api/hassio_ingress/runtime/"})
+    assert resp_root_with_header.status_code == 200
+    assert '"ingress_path": "/api/hassio_ingress/runtime"' in resp_root_with_header.text

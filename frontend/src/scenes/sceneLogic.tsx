@@ -40,7 +40,7 @@ export const sceneLogic = kea<sceneLogicType>([
   listeners(({ actions }) => ({
     logout: async () => {
       try {
-        await fetch('/api/logout', { method: 'POST' })
+        await fetch(`${getBasePath()}/api/logout`, { method: 'POST' })
       } catch (error) {
         console.error('Logout failed', error)
       }

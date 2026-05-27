@@ -7,6 +7,7 @@ import type { newFrameFormType } from './newFrameFormType'
 import { framesModel } from '../../models/framesModel'
 import { apiFetch } from '../../utils/apiFetch'
 import { loaders } from 'kea-loaders'
+import { inHassioIngress } from '../../utils/inHassioIngress'
 
 export const newFrameForm = kea<newFrameFormType>([
   path(['src', 'scenes', 'frames', 'newFrameForm']),
@@ -43,8 +44,8 @@ export const newFrameForm = kea<newFrameFormType>([
         server_host:
           typeof window !== 'undefined'
             ? `${window.location.hostname}:${
-                window.location.port === '8123'
-                  ? '8989' // using ingress with home assistant
+                inHassioIngress()
+                  ? '8989'
                   : window.location.port || (window.location.protocol === 'https:' ? '443' : '80')
               }`
             : undefined,
