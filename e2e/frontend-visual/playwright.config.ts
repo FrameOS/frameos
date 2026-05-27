@@ -8,6 +8,8 @@ const maxDiffPixelRatio = Number(process.env.FRONTEND_VISUAL_MAX_DIFF ?? '0.001'
 export default defineConfig({
   testDir,
   timeout: 45_000,
+  fullyParallel: Boolean(process.env.CI || process.env.FRONTEND_VISUAL_FULLY_PARALLEL === '1'),
+  workers: process.env.CI ? 1 : undefined,
   expect: {
     timeout: 10_000,
     toHaveScreenshot: {
