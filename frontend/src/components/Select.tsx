@@ -38,7 +38,7 @@ function renderOption(option: SelectOption): JSX.Element {
   )
 }
 
-export function Select({ className, onChange, options, theme, ...props }: SelectProps) {
+export function Select({ className, onChange, options, theme, value, ...props }: SelectProps) {
   return (
     <select
       className={clsx(
@@ -49,6 +49,7 @@ export function Select({ className, onChange, options, theme, ...props }: Select
         className
       )}
       onChange={onChange ? (e) => onChange(e.target.value) : undefined}
+      {...(value === null ? { value: '' } : value !== undefined ? { value } : {})}
       {...props}
     >
       {options.map((option) =>

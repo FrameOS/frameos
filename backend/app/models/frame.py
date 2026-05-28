@@ -131,6 +131,52 @@ def normalize_mountpoints(mountpoints: Any) -> dict:
     }
 
 
+DEFAULT_ERROR_BEHAVIOR = {
+    "mode": "show_error_retry",
+    "retry_seconds": 60,
+    "silent_retry_seconds": 60,
+    "silent_retry_forever": False,
+    "silent_window_minutes": 10,
+    "show_error_retry_seconds": 60,
+}
+
+ERROR_BEHAVIOR_MODES = {"safe_mode", "show_error_retry", "silent_retry"}
+
+
+def _positive_number(value: Any, default: int) -> int:
+    try:
+        number = int(float(value))
+    except (TypeError, ValueError):
+        return default
+    return number if number > 0 else default
+
+
+def normalize_error_behavior(error_behavior: Any) -> dict:
+    config = error_behavior if isinstance(error_behavior, dict) else {}
+    mode = config.get("mode")
+    if mode not in ERROR_BEHAVIOR_MODES:
+        mode = DEFAULT_ERROR_BEHAVIOR["mode"]
+    silent_window_minutes = config.get("silent_window_minutes", config.get("silent_retry_minutes"))
+
+    return {
+        "mode": mode,
+        "retry_seconds": _positive_number(config.get("retry_seconds"), DEFAULT_ERROR_BEHAVIOR["retry_seconds"]),
+        "silent_retry_seconds": _positive_number(
+            config.get("silent_retry_seconds"),
+            DEFAULT_ERROR_BEHAVIOR["silent_retry_seconds"],
+        ),
+        "silent_retry_forever": bool(config.get("silent_retry_forever", DEFAULT_ERROR_BEHAVIOR["silent_retry_forever"])),
+        "silent_window_minutes": _positive_number(
+            silent_window_minutes,
+            DEFAULT_ERROR_BEHAVIOR["silent_window_minutes"],
+        ),
+        "show_error_retry_seconds": _positive_number(
+            config.get("show_error_retry_seconds"),
+            DEFAULT_ERROR_BEHAVIOR["show_error_retry_seconds"],
+        ),
+    }
+
+
 
 # NB! Update frontend/src/types.tsx if you change this
 class Frame(Base):
@@ -184,6 +230,7 @@ class Frame(Base):
     network = mapped_column(JSON, nullable=True)
     agent = mapped_column(JSON, nullable=True)
     mountpoints = mapped_column(JSON, nullable=True)
+    error_behavior = mapped_column(JSON, nullable=True)
     palette = mapped_column(JSON, nullable=True)
     buildroot = mapped_column(JSON, nullable=True)
     rpios = mapped_column(JSON, nullable=True)
@@ -241,6 +288,7 @@ class Frame(Base):
             'network': self.network,
             'agent': self.agent,
             'mountpoints': normalize_mountpoints(self.mountpoints),
+            'error_behavior': normalize_error_behavior(self.error_behavior),
             'palette': self.palette,
             'buildroot': self.buildroot,
             'rpios': self.rpios,
@@ -327,6 +375,7 @@ async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, serve
             "agentSharedSecret": secure_token(32)
         },
         mountpoints={"enabled": False, "items": []},
+        error_behavior=DEFAULT_ERROR_BEHAVIOR.copy(),
         control_code={"enabled": "false", "position": "top-right"},
         schedule={"events": []},
         reboot={"enabled": "true", "crontab": "0 4 * * *"}
@@ -390,6 +439,7 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
     network = frame.network or {}
     agent = frame.agent or {}
     mountpoints = normalize_mountpoints(frame.mountpoints)
+    error_behavior = normalize_error_behavior(frame.error_behavior)
     frameos_version = get_versions().get("frameos")
     frame_json: dict = {
         **({"frameosVersion": frameos_version} if isinstance(frameos_version, str) and frameos_version else {}),
@@ -466,6 +516,14 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
             "agentSharedSecret": agent.get('agentSharedSecret', secure_token(32)),
         },
         "mountpoints": mountpoints,
+        "errorBehavior": {
+            "mode": error_behavior["mode"],
+            "retrySeconds": error_behavior["retry_seconds"],
+            "silentRetrySeconds": error_behavior["silent_retry_seconds"],
+            "silentRetryForever": error_behavior["silent_retry_forever"],
+            "silentWindowMinutes": error_behavior["silent_window_minutes"],
+            "showErrorRetrySeconds": error_behavior["show_error_retry_seconds"],
+        },
     }
 
     schedule = frame.schedule
