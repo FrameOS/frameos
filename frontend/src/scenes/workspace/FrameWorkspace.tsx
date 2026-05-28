@@ -222,8 +222,8 @@ function frameToolInitialScrollTop(
 const frameToolDefinitions: FrameToolDefinition[] = [
   {
     panel: 'overview',
-    label: 'Overview',
-    description: 'Preview and scenes',
+    label: 'Scenes',
+    description: 'Frame overview',
     icon: <Squares2X2Icon className="h-5 w-5" />,
   },
   {

@@ -406,7 +406,7 @@ class FrameDeployWorkflow:
         if drivers.get("evdev"):
             package_plans.append(await self._plan_package("libevdev-dev", "evdev driver support"))
 
-        lgpio_required = bool(drivers.get("waveshare") or drivers.get("gpioButton"))
+        lgpio_required = bool(drivers.get("waveshare") or drivers.get("inky") or drivers.get("gpioButton"))
         lgpio_installed = False
         if lgpio_required:
             lgpio_installed = await self._path_exists("/usr/local/include/lgpio.h") or await self._path_exists("/usr/include/lgpio.h")

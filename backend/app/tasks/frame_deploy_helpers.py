@@ -27,7 +27,7 @@ RPIOS_SUDO_SECURITY_UPDATE_URL = "https://www.raspberrypi.com/news/a-security-up
 
 SUDO_UNAVAILABLE_MESSAGE = (
     "FrameOS deploy requires non-interactive sudo, but this Raspberry Pi OS image requires a sudo password. "
-    "Run `sudo raspi-config` on the device and disable the Admin Password requirement, then deploy again. "
+    "Run `sudo raspi-config` on the device and disable the Admin Password requirement (System options -> Admin password -> No), then deploy again. "
     f"More details: {RPIOS_SUDO_SECURITY_UPDATE_URL}"
 )
 

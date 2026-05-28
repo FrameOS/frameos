@@ -35,6 +35,99 @@ def test_waveshare_epd10in3_uses_boot_config_without_generic_spi_setup():
     assert drivers["bootconfig"].lines == ["dtoverlay=spi0-0cs", "#dtparam=spi=on"]
 
 
+def test_native_inky_2025_frame_uses_nim_driver_and_gpio_buttons():
+    test_frame = frame("pimoroni.inky_impression_4_2025")
+    drivers = drivers_for_frame(test_frame)
+
+    assert "inky" in drivers
+    assert "inkyPython" not in drivers
+    assert "spi" in drivers
+    assert "gpioButton" in drivers
+    assert drivers["bootconfig"].lines == ["dtoverlay=spi0-0cs"]
+    assert test_frame.gpio_buttons == [
+        {"pin": 5, "label": "A"},
+        {"pin": 6, "label": "B"},
+        {"pin": 16, "label": "C"},
+        {"pin": 24, "label": "D"},
+    ]
+
+
+def test_native_inky_legacy_impression_uses_nim_driver_and_gpio_buttons():
+    test_frame = frame("pimoroni.inky_impression_5_7")
+    drivers = drivers_for_frame(test_frame)
+
+    assert "inky" in drivers
+    assert "inkyPython" not in drivers
+    assert "gpioButton" in drivers
+    assert test_frame.gpio_buttons == [
+        {"pin": 5, "label": "A"},
+        {"pin": 6, "label": "B"},
+        {"pin": 16, "label": "C"},
+        {"pin": 24, "label": "D"},
+    ]
+
+
+def test_native_inky_phat_uses_nim_driver_without_gpio_buttons():
+    test_frame = frame("pimoroni.inky_phat_4")
+    drivers = drivers_for_frame(test_frame)
+
+    assert "inky" in drivers
+    assert "inkyPython" not in drivers
+    assert "spi" in drivers
+    assert "bootconfig" in drivers
+    assert "gpioButton" not in drivers
+    assert "evdev" in drivers
+    assert test_frame.gpio_buttons == []
+
+
+def test_native_inky_what_yellow_uses_nim_driver_without_gpio_buttons():
+    test_frame = frame("pimoroni.inky_what_yellow")
+    drivers = drivers_for_frame(test_frame)
+
+    assert "inky" in drivers
+    assert "inkyPython" not in drivers
+    assert "gpioButton" not in drivers
+    assert "evdev" in drivers
+    assert test_frame.gpio_buttons == []
+
+
+def test_native_inky_tricolor_variants_use_nim_driver_without_gpio_buttons():
+    for device in [
+        "pimoroni.inky_phat_red",
+        "pimoroni.inky_phat_ssd1608_yellow",
+        "pimoroni.inky_what_ssd1683_black",
+    ]:
+        test_frame = frame(device)
+        drivers = drivers_for_frame(test_frame)
+
+        assert "inky" in drivers
+        assert "inkyPython" not in drivers
+        assert "gpioButton" not in drivers
+        assert "evdev" in drivers
+        assert test_frame.gpio_buttons == []
+
+
+def test_native_inky_13_uses_its_button_c_pin():
+    test_frame = frame("pimoroni.inky_impression_13")
+    drivers = drivers_for_frame(test_frame)
+
+    assert "inky" in drivers
+    assert test_frame.gpio_buttons == [
+        {"pin": 5, "label": "A"},
+        {"pin": 6, "label": "B"},
+        {"pin": 25, "label": "C"},
+        {"pin": 24, "label": "D"},
+    ]
+
+
+def test_base_inky_impression_stays_on_python_driver():
+    drivers = drivers_for_frame(frame("pimoroni.inky_impression"))
+
+    assert "inkyPython" in drivers
+    assert "inky" not in drivers
+    assert "i2c" in drivers
+
+
 def test_boot_config_spi_variants_match_it8951_variants():
     assert BOOT_CONFIG_SPI_VARIANTS == set(get_variant_keys_for("it8951"))
 

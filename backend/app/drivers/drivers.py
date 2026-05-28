@@ -23,6 +23,14 @@ DRIVERS = {
         can_png=False, # will be set to true for the frames that support this
         can_render=True,
     ),
+    "inky": Driver(
+        name="inky",
+        import_path="inky/inky",
+        setup_import_path="inky/inky",
+        can_render=True,
+        can_png=True,
+        link_flags=("-llgpio",),
+    ),
     "gpioButton": Driver(
         name="gpioButton",
         import_path="gpioButton/gpioButton",

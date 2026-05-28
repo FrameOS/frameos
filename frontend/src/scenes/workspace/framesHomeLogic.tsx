@@ -79,8 +79,8 @@ function currentFrameInView(): number | null {
 export const framesHomeLogic = kea<framesHomeLogicType>([
   path(['src', 'scenes', 'workspace', 'framesHomeLogic']),
   connect(() => ({
-    values: [framesModel, ['framesList'], workspaceLogic, ['frameChangeDrawerSelection', 'templateDrawerFrameId']],
-    actions: [workspaceLogic, ['focusFrame', 'retargetOpenFrameDrawers', 'selectFrame', 'setSearch']],
+    values: [framesModel, ['framesList']],
+    actions: [workspaceLogic, ['focusFrame', 'selectFrame', 'setSearch']],
   })),
   actions({
     startFrameOrderSnapshot: true,
@@ -149,11 +149,6 @@ export const framesHomeLogic = kea<framesHomeLogicType>([
         const frameId = currentFrameInView()
         if (frameId !== null) {
           actions.selectFrame(frameId)
-
-          const openDrawerFrameId = values.frameChangeDrawerSelection?.frameId ?? values.templateDrawerFrameId
-          if (openDrawerFrameId !== null && openDrawerFrameId !== frameId) {
-            actions.retargetOpenFrameDrawers(frameId, values.frameChangeDrawerSelection)
-          }
         }
       })
     },

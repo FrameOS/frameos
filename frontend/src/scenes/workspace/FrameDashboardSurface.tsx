@@ -14,6 +14,7 @@ import {
   DocumentTextIcon,
   PencilSquareIcon,
   PlusIcon,
+  PowerIcon,
   RocketLaunchIcon,
   SignalIcon,
   StopCircleIcon,
@@ -240,7 +241,7 @@ function FramePreviewPanel({ frame, scenes }: { frame: FrameType; scenes: FrameS
 }
 
 function FrameHeaderActions({ frame, archived }: { frame: FrameType; archived?: boolean }): JSX.Element {
-  const { deleteFrame, deployAgent, renderFrame, restartAgent, restartFrame, setFrameArchived, stopFrame } =
+  const { deleteFrame, deployAgent, rebootFrame, renderFrame, restartAgent, restartFrame, setFrameArchived, stopFrame } =
     useActions(framesModel)
   const { openChatDrawer, openFrameChangeDrawer, openRenameFrameDialog } = useActions(workspaceLogic)
   const frameName = frame.name || frameHost(frame)
@@ -293,6 +294,12 @@ function FrameHeaderActions({ frame, archived }: { frame: FrameType; archived?: 
               title: 'Restart FrameOS service',
               onClick: () => restartFrame(frame.id),
               icon: <ArrowPathIcon className="h-5 w-5" />,
+            },
+            {
+              label: 'Reboot device',
+              title: 'Reboot device',
+              onClick: () => rebootFrame(frame.id),
+              icon: <PowerIcon className="h-5 w-5" />,
             },
             ...(agentConfigured
               ? [

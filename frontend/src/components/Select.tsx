@@ -11,10 +11,31 @@ export interface NumericOption {
   label: string
 }
 
+export type SelectOption = Option | NumericOption
+
+export interface OptionGroup<T extends SelectOption = SelectOption> {
+  label: string
+  options: T[]
+}
+
+export type SelectOptionEntry<T extends SelectOption = SelectOption> = T | OptionGroup<T>
+
 export interface SelectProps extends Omit<React.SelectHTMLAttributes<HTMLSelectElement>, 'onChange'> {
   onChange?: (value: string) => void
-  options: Option[] | NumericOption[]
+  options: SelectOptionEntry[]
   theme?: 'node' | 'full'
+}
+
+function isOptionGroup(option: SelectOptionEntry): option is OptionGroup {
+  return 'options' in option
+}
+
+function renderOption(option: SelectOption): JSX.Element {
+  return (
+    <option key={String(option.value)} value={option.value}>
+      {option.label}
+    </option>
+  )
 }
 
 export function Select({ className, onChange, options, theme, ...props }: SelectProps) {
@@ -30,11 +51,15 @@ export function Select({ className, onChange, options, theme, ...props }: Select
       onChange={onChange ? (e) => onChange(e.target.value) : undefined}
       {...props}
     >
-      {options.map((option) => (
-        <option key={option.value} value={option.value}>
-          {option.label}
-        </option>
-      ))}
+      {options.map((option) =>
+        isOptionGroup(option) ? (
+          <optgroup key={option.label} label={option.label}>
+            {option.options.map(renderOption)}
+          </optgroup>
+        ) : (
+          renderOption(option)
+        )
+      )}
     </select>
   )
 }

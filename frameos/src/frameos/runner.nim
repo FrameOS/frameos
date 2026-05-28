@@ -227,7 +227,7 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
         self.logger.log(%*{"event": "render:driver:warning",
           "device": self.frameConfig.device,
           "ms": driverElapsedMs,
-          "message": "Driver render finished suspiciously fast; check inkyPython logs for errors."})
+          "message": "Driver render finished suspiciously fast; check Inky driver logs for errors."})
     except Exception as e:
       self.logger.log(%*{"event": "render:driver:error", "error": $e.msg, "stacktrace": e.getStackTrace()})
     markRuntimeDone()

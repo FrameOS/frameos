@@ -18,6 +18,7 @@ BASE_RELEASE_DRIVER_KEYS = (
     "frameBuffer",
     "evdev",
     "gpioButton",
+    "inky",
     "httpUpload",
     "inkyHyperPixel2r",
     "inkyPython",
@@ -123,12 +124,62 @@ proc hostSendEvent(scene: Option[SceneId], event: string, payload: JsonNode) {{.
 proc isInkyButtonDevice(device: string): bool =
   device in [
     "pimoroni.inky_impression",
+    "pimoroni.inky_impression_7_3",
+    "pimoroni.inky_impression_7_color",
+    "pimoroni.inky_impression_5_7",
+    "pimoroni.inky_impression_5_7_color",
+    "pimoroni.inky_impression_4_7_color",
+    "pimoroni.inky_impression_4",
+    "pimoroni.inky_impression_4_2025",
+    "pimoroni.inky_impression_4_spectra6",
     "pimoroni.inky_impression_7",
+    "pimoroni.inky_impression_7_2025",
     "pimoroni.inky_impression_13",
+    "pimoroni.inky_impression_13_2025",
+  ]
+
+proc isNativeInkyDevice(device: string): bool =
+  device in [
+    "pimoroni.inky_impression_7_3",
+    "pimoroni.inky_impression_7_color",
+    "pimoroni.inky_impression_5_7",
+    "pimoroni.inky_impression_5_7_color",
+    "pimoroni.inky_impression_4_7_color",
+    "pimoroni.inky_impression_4",
+    "pimoroni.inky_impression_4_2025",
+    "pimoroni.inky_impression_4_spectra6",
+    "pimoroni.inky_impression_7",
+    "pimoroni.inky_impression_7_2025",
+    "pimoroni.inky_impression_13",
+    "pimoroni.inky_impression_13_2025",
+    "pimoroni.inky_phat_4",
+    "pimoroni.inky_phat_4_color",
+    "pimoroni.inky_phat_jd79661",
+    "pimoroni.inky_phat_black",
+    "pimoroni.inky_phat_red",
+    "pimoroni.inky_phat_red_ht",
+    "pimoroni.inky_phat_yellow",
+    "pimoroni.inky_phat_ssd1608",
+    "pimoroni.inky_phat_ssd1608_black",
+    "pimoroni.inky_phat_ssd1608_red",
+    "pimoroni.inky_phat_ssd1608_yellow",
+    "pimoroni.inky_what_4",
+    "pimoroni.inky_what_4_color",
+    "pimoroni.inky_what_jd79668",
+    "pimoroni.inky_what_black",
+    "pimoroni.inky_what_red",
+    "pimoroni.inky_what_red_ht",
+    "pimoroni.inky_what_yellow",
+    "pimoroni.inky_what_legacy_yellow",
+    "pimoroni.inky_what_ssd1683",
+    "pimoroni.inky_what_ssd1683_black",
+    "pimoroni.inky_what_ssd1683_red",
+    "pimoroni.inky_what_ssd1683_yellow",
   ]
 
 proc isInkyDriverDevice(device: string): bool =
-  isInkyButtonDevice(device) or device in [
+  device in [
+    "pimoroni.inky_impression",
     "pimoroni.inky_python",
   ]
 
@@ -161,6 +212,8 @@ proc shouldLoadDriver(spec: DriverSpec, frameOS: FrameOS): bool =
     return device == "http.upload"
   of "inkyHyperPixel2r":
     return device == "pimoroni.hyperpixel2r"
+  of "inky":
+    return isNativeInkyDevice(device)
   of "inkyPython":
     return isInkyDriverDevice(device)
   else:
