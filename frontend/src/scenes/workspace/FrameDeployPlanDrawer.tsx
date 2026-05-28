@@ -6,6 +6,7 @@ import { ExclamationCircleIcon } from '@heroicons/react/24/solid'
 import type { ReactNode } from 'react'
 
 import { DropdownMenu } from '../../components/DropdownMenu'
+import { FrameConnectionDot } from '../../components/FrameConnectionDot'
 import { Spinner } from '../../components/Spinner'
 import { Tooltip } from '../../components/Tooltip'
 import { frameHost } from '../../decorators/frame'
@@ -386,13 +387,14 @@ function DeployTransportToggle({
                     : 'frame-tool-muted hover:text-[color:var(--tool-strong)]'
                 )}
               >
-                <span
-                  aria-hidden="true"
-                  className={clsx(
-                    'h-2 w-2 shrink-0 rounded-full ring-1 ring-inset',
-                    agentConnected ? 'bg-blue-400 ring-blue-300/80' : 'bg-slate-300 ring-slate-400/50'
-                  )}
-                />
+                {agentConnected ? (
+                  <FrameConnectionDot size="sm" title="FrameOS agent connected" />
+                ) : (
+                  <span
+                    aria-hidden="true"
+                    className="h-2 w-2 shrink-0 rounded-full bg-slate-300 ring-1 ring-inset ring-slate-400/50"
+                  />
+                )}
                 <span>Agent</span>
               </button>
             </div>

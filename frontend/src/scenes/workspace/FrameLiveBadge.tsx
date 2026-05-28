@@ -1,5 +1,6 @@
 import clsx from 'clsx'
 
+import { FrameConnectionDot } from '../../components/FrameConnectionDot'
 import type { FrameType } from '../../types'
 
 export function FrameLiveBadge({ frame, className }: { frame: FrameType; className?: string }): JSX.Element | null {
@@ -14,7 +15,7 @@ export function FrameLiveBadge({ frame, className }: { frame: FrameType; classNa
         className
       )}
     >
-      <span className="h-2 w-2 rounded-full bg-emerald-500" />
+      <FrameConnectionDot size="sm" title="FrameOS agent connected" />
       Live
     </div>
   )

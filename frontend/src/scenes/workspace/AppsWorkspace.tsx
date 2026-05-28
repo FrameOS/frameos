@@ -780,6 +780,7 @@ function AppsWorkspaceFrame({
         <FrameosShell
           mode="apps"
           title="Apps"
+          browserTitle={sourceMode === 'frames' ? frame.name || frameHost(frame) : 'Apps'}
           tree={
             <AppsSelector
               sourceMode={sourceMode}

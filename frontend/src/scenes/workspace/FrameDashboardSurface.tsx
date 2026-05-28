@@ -24,6 +24,7 @@ import {
 import { PlayIcon } from '@heroicons/react/24/solid'
 
 import { DropdownMenu } from '../../components/DropdownMenu'
+import { FrameConnectionDot } from '../../components/FrameConnectionDot'
 import { FrameImage } from '../../components/FrameImage'
 import { Modal } from '../../components/Modal'
 import { TextInput } from '../../components/TextInput'
@@ -366,9 +367,12 @@ function FrameDashboardHeader({ frame, archived }: { frame: FrameType; archived?
                   Archived
                 </span>
               ) : null}
-              {healthy ? <span title="Frame is healthy" className="h-2.5 w-2.5 rounded-full bg-emerald-400" /> : null}
               {connected ? (
-                <span title="FrameOS agent connected" className="h-2.5 w-2.5 rounded-full bg-blue-400" />
+                <FrameConnectionDot
+                  title={healthy ? 'Frame is healthy and agent connected' : 'FrameOS agent connected'}
+                />
+              ) : healthy ? (
+                <span title="Frame is healthy" className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
               ) : null}
             </div>
           </A>
@@ -393,23 +397,23 @@ function FrameDashboardStatusLine({ frame }: { frame: FrameType }): JSX.Element 
     ? 'upgrade'
     : undeployedChanges
     ? 'undeployed'
-    : null
+    : 'up to date'
   const changeKind = unsavedChanges ? 'unsaved' : 'deploy'
+  const frameIsUpToDate = !unsavedChanges && !undeployedChanges
 
   return (
     <div className="frameos-muted truncate text-sm text-slate-500">
-      {changeLabel ? (
-        <>
-          <button
-            type="button"
-            onClick={() => openFrameChangeDrawer(frame.id, changeKind)}
-            className="frameos-change-status-link rounded font-medium hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-          >
-            {changeLabel}
-          </button>
-          <span> - </span>
-        </>
-      ) : null}
+      <button
+        type="button"
+        onClick={() => openFrameChangeDrawer(frame.id, changeKind)}
+        className={clsx(
+          'frameos-change-status-link rounded font-medium hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+          frameIsUpToDate ? 'frameos-change-status-link--up-to-date' : null
+        )}
+      >
+        {changeLabel}
+      </button>
+      <span> - </span>
       {frameStatus(frame)}
     </div>
   )

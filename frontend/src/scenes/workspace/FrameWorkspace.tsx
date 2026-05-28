@@ -1347,6 +1347,7 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
         <FrameosShell
           mode="frame"
           title="Frame"
+          browserTitle={frame.name || frameHost(frame)}
           tree={
             <FrameTree
               frame={frame}

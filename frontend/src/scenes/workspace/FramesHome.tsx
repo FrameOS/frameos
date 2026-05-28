@@ -18,6 +18,7 @@ import {
 import { PlayIcon } from '@heroicons/react/24/solid'
 import { framesModel } from '../../models/framesModel'
 import { DropdownMenu } from '../../components/DropdownMenu'
+import { FrameConnectionDot } from '../../components/FrameConnectionDot'
 import { FrameImage } from '../../components/FrameImage'
 import {
   formatFrameRelativeTime,
@@ -61,20 +62,30 @@ function sceneIsActive(scene: FrameScene, currentSceneId: string | null | undefi
   return currentSceneId === scene.id || currentSceneId === `${uploadedScenePrefix}${scene.id}`
 }
 
-function SidebarStatusDots({ frame }: { frame: FrameType }): JSX.Element {
+function SidebarStatusDots({ frame, inactive }: { frame: FrameType; inactive?: boolean }): JSX.Element {
   const stale = frameIsStale(frame)
   const ready = frame.status === 'ready' && !stale
   const connected = (frame.active_connections ?? 0) > 0
   const statusDescription = frameStatusDescription(frame)
 
+  if (connected) {
+    return <FrameConnectionDot title={statusDescription} />
+  }
+
   return (
-    <span className="flex shrink-0 items-center gap-1">
-      <span
-        title={statusDescription}
-        className={clsx('h-2.5 w-2.5 rounded-full', stale ? 'bg-amber-400' : ready ? 'bg-emerald-400' : 'bg-slate-300')}
-      />
-      {connected ? <span title={statusDescription} className="h-2.5 w-2.5 rounded-full bg-blue-400" /> : null}
-    </span>
+    <span
+      title={statusDescription}
+      className={clsx(
+        'h-2.5 w-2.5 shrink-0 rounded-full',
+        inactive
+          ? 'bg-white shadow-sm ring-1 ring-slate-300/80'
+          : stale
+          ? 'bg-amber-400'
+          : ready
+          ? 'bg-emerald-400'
+          : 'bg-slate-300'
+      )}
+    />
   )
 }
 
@@ -166,6 +177,7 @@ function FrameTree(): JSX.Element {
             onOpen={handleFrameDoubleClick}
             expanded={inactiveFramesExpanded}
             onToggle={toggleInactiveFramesExpanded}
+            inactive
           />
         </>
       )}
@@ -212,12 +224,14 @@ function FrameTreeRow({
   frame,
   selected,
   archived = false,
+  inactive = false,
   onSelect,
   onOpen,
 }: {
   frame: FrameType
   selected: boolean
   archived?: boolean
+  inactive?: boolean
   onSelect: (event: MouseEvent<HTMLButtonElement>, frameId: number) => void
   onOpen: (event: MouseEvent<HTMLButtonElement>, frameId: number) => void
 }): JSX.Element {
@@ -247,7 +261,7 @@ function FrameTreeRow({
           <span className={clsx('block truncate', !archived && 'text-base font-medium')}>{frameName}</span>
           <span className="block truncate text-xs text-slate-400">{sidebarFrameActivityDescription(frame)}</span>
         </span>
-        <SidebarStatusDots frame={frame} />
+        <SidebarStatusDots frame={frame} inactive={inactive} />
       </button>
     </div>
   )
@@ -283,6 +297,7 @@ function FrameTreeGroup({
   onOpen,
   expanded,
   onToggle,
+  inactive,
 }: {
   title: string
   frames: FrameType[]
@@ -291,6 +306,7 @@ function FrameTreeGroup({
   onOpen: (event: MouseEvent<HTMLButtonElement>, frameId: number) => void
   expanded?: boolean
   onToggle?: () => void
+  inactive?: boolean
 }): JSX.Element | null {
   if (frames.length === 0) {
     return null
@@ -325,6 +341,7 @@ function FrameTreeGroup({
               key={frame.id}
               frame={frame}
               selected={selectedFrameId === frame.id}
+              inactive={inactive}
               onSelect={onSelect}
               onOpen={onOpen}
             />
@@ -765,6 +782,7 @@ export function FramesHome(): JSX.Element {
     <FrameosShell
       mode="frames"
       title="Frames"
+      browserTitle={null}
       tree={<FrameTree />}
       primaryActionLabel="Add frame"
       onPrimaryAction={() => {

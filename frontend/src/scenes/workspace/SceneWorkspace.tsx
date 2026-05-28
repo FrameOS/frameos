@@ -189,7 +189,9 @@ function SceneSelector({
               const unsaved = unsavedSceneIds.has(scene.id)
               const undeployed = undeployedSceneIds.has(scene.id)
               const changeStatusLabel = unsaved ? 'Unsaved changes' : undeployed ? 'Undeployed changes' : null
-              const sceneStatusTitle = [active ? 'Active scene' : null, changeStatusLabel].filter(Boolean).join(' · ')
+              const sceneStatusTitle = [active ? 'Active scene' : 'Inactive scene', changeStatusLabel]
+                .filter(Boolean)
+                .join(' · ')
               const compiled = sceneIsCompiled(scene)
 
               return (
@@ -217,16 +219,14 @@ function SceneSelector({
                         objectFit="cover"
                         className="h-full w-full rounded-none"
                       />
-                      {active || changeStatusLabel ? (
-                        <span
-                          title={active ? 'Active scene' : changeStatusLabel ?? undefined}
-                          aria-label={active ? 'Active scene' : changeStatusLabel ?? undefined}
-                          className={clsx(
-                            'absolute bottom-1 right-1 h-2.5 w-2.5 rounded-full ring-2 ring-white',
-                            active ? 'bg-emerald-500' : 'bg-amber-400'
-                          )}
-                        />
-                      ) : null}
+                      <span
+                        title={active ? 'Active scene' : 'Inactive scene'}
+                        aria-label={active ? 'Active scene' : 'Inactive scene'}
+                        className={clsx(
+                          'absolute bottom-1 right-1 h-2.5 w-2.5 rounded-full shadow-sm ring-2',
+                          active ? 'bg-emerald-500 ring-white' : 'bg-white ring-slate-300/80'
+                        )}
+                      />
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="frameos-strong block truncate text-sm font-semibold text-slate-700">
@@ -825,6 +825,7 @@ function SceneWorkspaceFrame({ frameId }: SceneWorkspaceFrameProps): JSX.Element
         <FrameosShell
           mode="scenes"
           title="Scenes"
+          browserTitle={frame.name || frameHost(frame)}
           tree={
             <SceneTree
               frame={frame}

@@ -37,6 +37,8 @@ import { FrameDeployPlanDrawer } from './FrameDeployPlanDrawer'
 import { FrameUnsavedChangesDrawer } from './FrameUnsavedChangesDrawer'
 import { DeployToFrameIcon } from './FrameChangeStatusIcon'
 
+const DEFAULT_BROWSER_TITLE = 'FrameOS Backend'
+
 const frameShellToolPanels = new Set([
   'overview',
   'preview',
@@ -63,6 +65,7 @@ interface FrameosShellProps {
   rightPanel?: JSX.Element | null
   rightPanelSize?: 'normal' | 'compact'
   toolbar?: JSX.Element | null
+  browserTitle?: string | null
   primaryActionLabel?: string
   onPrimaryAction?: () => void
   showAiButton?: boolean
@@ -296,6 +299,7 @@ function FrameStatusHeaderButton({ frameId }: { frameId: number }): JSX.Element 
 
 export function FrameosShell({
   mode,
+  title,
   tree,
   children,
   mainClassName,
@@ -305,6 +309,7 @@ export function FrameosShell({
   rightPanel,
   rightPanelSize = 'normal',
   toolbar,
+  browserTitle,
   primaryActionLabel,
   onPrimaryAction,
   showAiButton: showAiButtonProp,
@@ -368,11 +373,23 @@ export function FrameosShell({
     '--workspace-sidebar-edge': secondarySidebarOpen ? '440px' : '108px',
   } as CSSProperties
   const { activeMode, pendingMode } = useDelayedPendingMode(mode)
+  const resolvedBrowserTitle =
+    browserTitle === null
+      ? DEFAULT_BROWSER_TITLE
+      : `${browserTitle ?? title} · ${DEFAULT_BROWSER_TITLE}`
   const preloadFrames = () => preloadSceneComponent('frames')
   const prepareFirstLevelNavigation = () => {
     closeTemplateDrawer()
     closeScheduleDrawer()
   }
+
+  useEffect(() => {
+    if (typeof document === 'undefined') {
+      return
+    }
+
+    document.title = resolvedBrowserTitle
+  }, [resolvedBrowserTitle])
 
   return (
     <div className={clsx('frameos-app-shell min-h-screen overflow-x-hidden text-slate-900', `frameos-theme-${theme}`)}>
