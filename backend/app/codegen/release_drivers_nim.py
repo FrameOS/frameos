@@ -212,9 +212,9 @@ proc shouldLoadDriver(spec: DriverSpec, frameOS: FrameOS): bool =
   of "httpUpload":
     return device == "http.upload"
   of "inkyHyperPixel2r":
-    return device == "pimoroni.hyperpixel2r"
+    return device == "pimoroni.hyperpixel2r_native"
   of "inkyHyperPixel2rLegacyFb":
-    return device == "pimoroni.hyperpixel2r_legacy_fb"
+    return device == "pimoroni.hyperpixel2r"
   of "inky":
     return isNativeInkyDevice(device)
   of "inkyPython":

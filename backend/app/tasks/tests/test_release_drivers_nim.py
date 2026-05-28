@@ -53,8 +53,9 @@ def test_release_shared_registry_filters_drivers_at_runtime():
     assert '"pimoroni.inky_what_ssd1683_red"' in source
     assert '"pimoroni.inky_what_ssd1683_yellow"' in source
     assert 'of "inkyHyperPixel2r":' in source
-    assert 'device == "pimoroni.hyperpixel2r_legacy_fb"' in source
+    assert 'device == "pimoroni.hyperpixel2r_native"' in source
     assert 'of "inkyHyperPixel2rLegacyFb":' in source
+    assert 'device == "pimoroni.hyperpixel2r"' in source
     assert 'of "inky":' in source
     assert "proc evdevEnabledDevice(device: string): bool" in source
     assert 'device != "web_only"' in source
