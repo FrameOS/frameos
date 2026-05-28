@@ -104,8 +104,55 @@ export const CURRENT_FRAMEOS_VERSION = (versions.frameos || 'dev').split('+')[0]
 
 const INKY_BUTTON_DEVICES = new Set([
   'pimoroni.inky_impression',
+  'pimoroni.inky_impression_7_3',
+  'pimoroni.inky_impression_7_color',
+  'pimoroni.inky_impression_5_7',
+  'pimoroni.inky_impression_5_7_color',
+  'pimoroni.inky_impression_4_7_color',
+  'pimoroni.inky_impression_4',
+  'pimoroni.inky_impression_4_2025',
+  'pimoroni.inky_impression_4_spectra6',
   'pimoroni.inky_impression_7',
+  'pimoroni.inky_impression_7_2025',
   'pimoroni.inky_impression_13',
+  'pimoroni.inky_impression_13_2025',
+])
+const INKY_NATIVE_DEVICES = new Set([
+  'pimoroni.inky_impression_7_3',
+  'pimoroni.inky_impression_7_color',
+  'pimoroni.inky_impression_5_7',
+  'pimoroni.inky_impression_5_7_color',
+  'pimoroni.inky_impression_4_7_color',
+  'pimoroni.inky_impression_4',
+  'pimoroni.inky_impression_4_2025',
+  'pimoroni.inky_impression_4_spectra6',
+  'pimoroni.inky_impression_7',
+  'pimoroni.inky_impression_7_2025',
+  'pimoroni.inky_impression_13',
+  'pimoroni.inky_impression_13_2025',
+  'pimoroni.inky_phat_4',
+  'pimoroni.inky_phat_4_color',
+  'pimoroni.inky_phat_jd79661',
+  'pimoroni.inky_phat_black',
+  'pimoroni.inky_phat_red',
+  'pimoroni.inky_phat_red_ht',
+  'pimoroni.inky_phat_yellow',
+  'pimoroni.inky_phat_ssd1608',
+  'pimoroni.inky_phat_ssd1608_black',
+  'pimoroni.inky_phat_ssd1608_red',
+  'pimoroni.inky_phat_ssd1608_yellow',
+  'pimoroni.inky_what_4',
+  'pimoroni.inky_what_4_color',
+  'pimoroni.inky_what_jd79668',
+  'pimoroni.inky_what_black',
+  'pimoroni.inky_what_red',
+  'pimoroni.inky_what_red_ht',
+  'pimoroni.inky_what_yellow',
+  'pimoroni.inky_what_legacy_yellow',
+  'pimoroni.inky_what_ssd1683',
+  'pimoroni.inky_what_ssd1683_black',
+  'pimoroni.inky_what_ssd1683_red',
+  'pimoroni.inky_what_ssd1683_yellow',
 ])
 const VIRTUAL_OUTPUT_DEVICES = new Set(['http.upload', 'web_only'])
 const WAVESHARE_NO_SPI_VARIANTS = new Set(['EPD_12in48', 'EPD_12in48b', 'EPD_12in48b_V2', 'EPD_13in3e'])
@@ -142,7 +189,14 @@ function inferFrameDriverNames(frame?: Partial<FrameType> | null): string[] {
   }
 
   const drivers = new Set<string>()
-  if (INKY_BUTTON_DEVICES.has(device) || device === 'pimoroni.inky_python') {
+  if (INKY_NATIVE_DEVICES.has(device)) {
+    drivers.add('bootconfig')
+    drivers.add('inky')
+    drivers.add('spi')
+    if (INKY_BUTTON_DEVICES.has(device)) {
+      drivers.add('gpioButton')
+    }
+  } else if (device === 'pimoroni.inky_impression' || device === 'pimoroni.inky_python') {
     drivers.add('i2c')
     drivers.add('inkyPython')
     drivers.add('spi')
@@ -151,6 +205,8 @@ function inferFrameDriverNames(frame?: Partial<FrameType> | null): string[] {
       drivers.add('bootconfig')
     }
   } else if (device === 'pimoroni.hyperpixel2r') {
+    drivers.add('inkyHyperPixel2rLegacyFb')
+  } else if (device === 'pimoroni.hyperpixel2r_native') {
     drivers.add('inkyHyperPixel2r')
   } else if (device === 'framebuffer') {
     drivers.add('frameBuffer')

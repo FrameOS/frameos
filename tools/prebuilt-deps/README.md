@@ -5,8 +5,8 @@ Ubuntu LTS variants we care about. They run each build inside a container
 matching one of the following releases and architectures:
 
 - Raspberry Pi OS (Debian **buster**, **bullseye**, **bookworm**, **trixie** preview)
-- Ubuntu **22.04** LTS (Jammy Jellyfish)
 - Ubuntu **24.04** LTS (Noble Numbat)
+- Ubuntu **26.04** LTS
 - **armhf** (32‑bit ARMv7), **arm64** (AArch64) and **amd64** (x86_64)
 
 ## Requirements
@@ -22,11 +22,11 @@ matching one of the following releases and architectures:
 # From the repository root
 ./tools/prebuilt-deps/build.sh          # builds every supported combo
 ./tools/prebuilt-deps/build.sh debian-bookworm-arm64  # Raspberry Pi OS example
-./tools/prebuilt-deps/build.sh ubuntu-24.04-amd64   # Ubuntu example
+./tools/prebuilt-deps/build.sh ubuntu-26.04-amd64   # Ubuntu example
 ```
 
 The script drops results under `build/prebuilt-deps/<target>/` where `<target>`
-looks like `debian-bookworm-armhf` or `ubuntu-24.04-amd64`. Each folder contains versioned component
+looks like `debian-bookworm-armhf` or `ubuntu-26.04-amd64`. Each folder contains versioned component
 directories so you can keep several revisions side-by-side, e.g.:
 
 ```
@@ -48,7 +48,7 @@ Each dependency (Nim, QuickJS, lgpio) is built by its own Dockerfile. When you
 rerun the builder it reuses any dependency whose `.build-info` marker matches
 the requested versions/platform so you only rebuild the missing pieces. Delete a
 component directory (e.g. `rm -rf build/prebuilt-deps/debian-bookworm-arm64/nim`
-or `build/prebuilt-deps/ubuntu-22.04-amd64/nim`) or the entire target folder to
+or `build/prebuilt-deps/ubuntu-26.04-amd64/nim`) or the entire target folder to
 force a rebuild.
 
 FrameOS local builds also use this manifest. `nimble build_quickjs` first tries

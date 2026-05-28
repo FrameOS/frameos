@@ -1,3 +1,4 @@
+import { FrameConnectionDot } from '../components/FrameConnectionDot'
 import { Spinner } from '../components/Spinner'
 import { FrameType, LogType } from '../types'
 import { frameAdminPath } from '../utils/frameAdmin'
@@ -200,6 +201,12 @@ interface FrameConnectionProps {
 
 export function FrameConnection({ frame }: FrameConnectionProps): JSX.Element | null {
   return (frame?.active_connections ?? 0) > 0 ? (
-    <span title="FrameOS Agent connected">{frame?.agent?.agentRunCommands ? '🟢' : '🟠'}</span>
+    <FrameConnectionDot
+      title={
+        frame?.agent?.agentRunCommands
+          ? 'FrameOS agent connected and ready to run commands'
+          : 'FrameOS agent connected'
+      }
+    />
   ) : null
 }

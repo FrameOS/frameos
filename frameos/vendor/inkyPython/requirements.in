@@ -3,7 +3,7 @@
 -i https://piwheels.org/simple
 --extra-index-url https://pypi.org/simple
 
-inky==2.2.1
+inky==2.4.0
 numpy==2.2.1
 pillow==11.0.0
 RPi.GPIO==0.7.1

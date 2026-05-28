@@ -44,22 +44,6 @@ export interface FrameLogicProps {
 
 export type FrameNextAction = 'render' | 'restart' | 'reboot' | 'stop' | 'deploy' | null
 
-const DEFAULT_BROWSER_TITLE = 'FrameOS Backend'
-
-function setBrowserTitle(frame?: FrameType | null): void {
-  if (typeof document === 'undefined') {
-    return
-  }
-
-  if (!frame) {
-    document.title = DEFAULT_BROWSER_TITLE
-    return
-  }
-
-  const frameTitle = frame.name || frame.frame_host || `Frame ${frame.id}`
-  document.title = `${frameTitle} · ${DEFAULT_BROWSER_TITLE}`
-}
-
 function isAgentDeployConfigured(agent?: FrameType['agent']): boolean {
   return Boolean(agent?.agentEnabled && agent?.agentRunCommands && agent?.agentSharedSecret)
 }
@@ -1307,7 +1291,6 @@ export const frameLogic = kea<frameLogicType>([
   })),
   subscriptions(({ actions, values }) => ({
     frame: (frame?: FrameType, oldFrame?: FrameType) => {
-      setBrowserTitle(frame)
       const frameFormMatchesPrevious = equal(oldFrame, values.frameForm)
       if (frame && (!oldFrame || frameFormMatchesPrevious)) {
         actions.resetFrameForm(sanitizeFrame(frame) as FrameType)
@@ -1464,7 +1447,6 @@ export const frameLogic = kea<frameLogicType>([
     window.addEventListener('keydown', cache.keydownHandler)
   }),
   beforeUnmount(({ cache }) => {
-    setBrowserTitle(null)
     if (cache.keydownHandler) {
       window.removeEventListener('keydown', cache.keydownHandler)
       cache.keydownHandler = null

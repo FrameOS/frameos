@@ -90,6 +90,8 @@ def normalize_ubuntu_release(version: str) -> str | None:
         return "22.04"
     if release.startswith("24.04") or release.startswith("noble"):
         return "24.04"
+    if release.startswith("26.04") or release.startswith("resolute"):
+        return "26.04"
     return None
 
 

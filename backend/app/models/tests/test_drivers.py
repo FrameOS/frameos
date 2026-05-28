@@ -21,3 +21,7 @@ async def test_waveshare_variants():
         assert variant.color_option != "Unknown"
 
     assert convert_waveshare_source("EPD_1in54").init_args == "0.uint8"
+    epd_5in83_v2 = convert_waveshare_source("EPD_5in83_V2")
+    assert epd_5in83_v2.color_option == "FourGray"
+    assert epd_5in83_v2.init_function == "EPD_5in83_V2_Init_4GRAY"
+    assert epd_5in83_v2.display_function == "EPD_5in83_V2_Display_4Gray"

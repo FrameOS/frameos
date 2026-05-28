@@ -166,6 +166,25 @@ export function FrameSettings({
   const inFrameAdminMode = isInFrameAdminMode()
 
   const palette = withCustomPalette[frame.device || '']
+  const inkyAutoButtonDevice = [
+    'pimoroni.inky_impression',
+    'pimoroni.inky_impression_7_3',
+    'pimoroni.inky_impression_7_color',
+    'pimoroni.inky_impression_5_7',
+    'pimoroni.inky_impression_5_7_color',
+    'pimoroni.inky_impression_4_7_color',
+    'pimoroni.inky_impression_4',
+    'pimoroni.inky_impression_4_2025',
+    'pimoroni.inky_impression_4_spectra6',
+    'pimoroni.inky_impression_7',
+    'pimoroni.inky_impression_7_2025',
+    'pimoroni.inky_impression_13',
+    'pimoroni.inky_impression_13_2025',
+  ].includes(frameForm.device || '')
+  const inkyThirteenDevice = [
+    'pimoroni.inky_impression_13',
+    'pimoroni.inky_impression_13_2025',
+  ].includes(frameForm.device || '')
   const sshKeyOptions = normalizeSshKeys(savedSettings?.ssh_keys).keys
   const normalizeKeyIds = (keys: string[]) => Array.from(new Set(keys)).sort()
   const deployedSshKeyIds = normalizeKeyIds(
@@ -1487,9 +1506,7 @@ export function FrameSettings({
         </div>
         <H6 id="frame-settings-gpio" className="flex items-center gap-2">
           GPIO buttons
-          {frameForm.device !== 'pimoroni.inky_impression' &&
-          frameForm.device !== 'pimoroni.inky_impression_7' &&
-          frameForm.device !== 'pimoroni.inky_impression_13' ? (
+          {!inkyAutoButtonDevice ? (
             <Button
               size="small"
               color="secondary"
@@ -1502,12 +1519,10 @@ export function FrameSettings({
           ) : null}
         </H6>
         <div className="pl-2 @md:pl-8 space-y-2">
-          {frameForm.device === 'pimoroni.inky_impression' ||
-          frameForm.device === 'pimoroni.inky_impression_7' ||
-          frameForm.device === 'pimoroni.inky_impression_13' ? (
+          {inkyAutoButtonDevice ? (
             <div>
               Inky Impression boards automatically configure pins 5, 6,{' '}
-              {frameForm.device === 'pimoroni.inky_impression_13' ? '25' : '16'} and 24 as buttons A, B, C and D
+              {inkyThirteenDevice ? '25' : '16'} and 24 as buttons A, B, C and D
             </div>
           ) : (
             frameForm.gpio_buttons?.map((_, index) => (

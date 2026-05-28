@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from app.drivers.drivers import Driver, DRIVERS
@@ -8,10 +9,61 @@ from app.drivers.waveshare import BOOT_CONFIG_LINES_BY_VARIANT, BOOT_CONFIG_SPI_
 if TYPE_CHECKING:
     from app.models.frame import Frame
 
+INKY_NATIVE_DEVICES = {
+    "pimoroni.inky_impression_7_3",
+    "pimoroni.inky_impression_7_color",
+    "pimoroni.inky_impression_5_7",
+    "pimoroni.inky_impression_5_7_color",
+    "pimoroni.inky_impression_4_7_color",
+    "pimoroni.inky_impression_4",
+    "pimoroni.inky_impression_4_2025",
+    "pimoroni.inky_impression_4_spectra6",
+    "pimoroni.inky_impression_7",
+    "pimoroni.inky_impression_7_2025",
+    "pimoroni.inky_impression_13",
+    "pimoroni.inky_impression_13_2025",
+    "pimoroni.inky_phat_4",
+    "pimoroni.inky_phat_4_color",
+    "pimoroni.inky_phat_jd79661",
+    "pimoroni.inky_phat_black",
+    "pimoroni.inky_phat_red",
+    "pimoroni.inky_phat_red_ht",
+    "pimoroni.inky_phat_yellow",
+    "pimoroni.inky_phat_ssd1608",
+    "pimoroni.inky_phat_ssd1608_black",
+    "pimoroni.inky_phat_ssd1608_red",
+    "pimoroni.inky_phat_ssd1608_yellow",
+    "pimoroni.inky_what_4",
+    "pimoroni.inky_what_4_color",
+    "pimoroni.inky_what_jd79668",
+    "pimoroni.inky_what_black",
+    "pimoroni.inky_what_red",
+    "pimoroni.inky_what_red_ht",
+    "pimoroni.inky_what_yellow",
+    "pimoroni.inky_what_legacy_yellow",
+    "pimoroni.inky_what_ssd1683",
+    "pimoroni.inky_what_ssd1683_black",
+    "pimoroni.inky_what_ssd1683_red",
+    "pimoroni.inky_what_ssd1683_yellow",
+}
+INKY_PYTHON_DEVICES = {
+    "pimoroni.inky_impression",
+    "pimoroni.inky_python",
+}
 INKY_BUTTON_DEVICES = {
     "pimoroni.inky_impression",
+    "pimoroni.inky_impression_7_3",
+    "pimoroni.inky_impression_7_color",
+    "pimoroni.inky_impression_5_7",
+    "pimoroni.inky_impression_5_7_color",
+    "pimoroni.inky_impression_4_7_color",
+    "pimoroni.inky_impression_4",
+    "pimoroni.inky_impression_4_2025",
+    "pimoroni.inky_impression_4_spectra6",
     "pimoroni.inky_impression_7",
+    "pimoroni.inky_impression_7_2025",
     "pimoroni.inky_impression_13",
+    "pimoroni.inky_impression_13_2025",
 }
 VIRTUAL_OUTPUT_DEVICES = {
     "http.upload",
@@ -22,7 +74,15 @@ VIRTUAL_OUTPUT_DEVICES = {
 def drivers_for_frame(frame: Frame) -> dict[str, Driver]:
     device = frame.device
     device_drivers: dict[str, Driver] = {}
-    if device in INKY_BUTTON_DEVICES or device == "pimoroni.inky_python":
+    if device in INKY_NATIVE_DEVICES:
+        device_drivers = {
+            "inky": replace(DRIVERS["inky"]),
+            "spi": DRIVERS["spi"],
+            "bootconfig": replace(DRIVERS["bootConfig"], lines=["dtoverlay=spi0-0cs"]),
+        }
+        if device in INKY_BUTTON_DEVICES:
+            device_drivers["gpioButton"] = DRIVERS["gpioButton"]
+    elif device in INKY_PYTHON_DEVICES:
         device_drivers = {
             "inkyPython": DRIVERS["inkyPython"],
             "spi": DRIVERS["spi"],
@@ -30,9 +90,9 @@ def drivers_for_frame(frame: Frame) -> dict[str, Driver]:
         }
         if device in INKY_BUTTON_DEVICES:
             device_drivers["gpioButton"] = DRIVERS["gpioButton"]
-        if device == "pimoroni.inky_impression_7" or device == "pimoroni.inky_impression_13":
-            device_drivers["inkyPython"].can_png = True
     elif device == "pimoroni.hyperpixel2r":
+        device_drivers = {"inkyHyperPixel2rLegacyFb": DRIVERS["inkyHyperPixel2rLegacyFb"]}
+    elif device == "pimoroni.hyperpixel2r_native":
         device_drivers = {"inkyHyperPixel2r": DRIVERS["inkyHyperPixel2r"]}
     elif device == "framebuffer":
         device_drivers = {"frameBuffer": DRIVERS["frameBuffer"]}
@@ -66,7 +126,10 @@ def drivers_for_frame(frame: Frame) -> dict[str, Driver]:
         device_drivers["evdev"] = DRIVERS["evdev"]
 
     if frame.device in INKY_BUTTON_DEVICES:
-        if frame.device == "pimoroni.inky_impression_13":
+        if frame.device in {
+            "pimoroni.inky_impression_13",
+            "pimoroni.inky_impression_13_2025",
+        }:
             frame.gpio_buttons = [
                 {"pin": 5, "label": "A"},
                 {"pin": 6, "label": "B"},
@@ -80,10 +143,8 @@ def drivers_for_frame(frame: Frame) -> dict[str, Driver]:
                 {"pin": 16, "label": "C"},
                 {"pin": 24, "label": "D"},
             ]
-        device_drivers["bootconfig"] = DRIVERS["bootConfig"]
-        device_drivers["bootconfig"].lines = [
-            "dtoverlay=spi0-0cs",
-        ]
+        if "bootconfig" not in device_drivers:
+            device_drivers["bootconfig"] = replace(DRIVERS["bootConfig"], lines=["dtoverlay=spi0-0cs"])
 
     if "gpioButton" not in device_drivers and len(frame.gpio_buttons or []) > 0:
         device_drivers["gpioButton"] = DRIVERS["gpioButton"]

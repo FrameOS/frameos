@@ -19,6 +19,10 @@ def test_release_driver_specs_include_base_drivers_and_waveshare_variants():
     assert "frameBuffer" in drivers
     assert "evdev" in drivers
     assert "gpioButton" in drivers
+    assert "inky" in drivers
+    assert drivers["inky"].can_png is True
+    assert "inkyHyperPixel2r" in drivers
+    assert "inkyHyperPixel2rLegacyFb" in drivers
     assert "inkyPython" in drivers
     assert drivers["inkyPython"].can_png is True
     assert "waveshare_EPD_7in3e" in drivers
@@ -38,6 +42,21 @@ def test_release_shared_registry_filters_drivers_at_runtime():
     assert 'return spec.name == ("waveshare_" & normalizedWaveshareVariant(device))' in source
     assert 'device == "framebuffer"' in source
     assert 'frameOS.frameConfig.gpioButtons.len > 0' in source
+    assert "proc isNativeInkyDevice(device: string): bool" in source
+    assert '"pimoroni.inky_impression_5_7"' in source
+    assert '"pimoroni.inky_phat_4"' in source
+    assert '"pimoroni.inky_phat_red"' in source
+    assert '"pimoroni.inky_phat_ssd1608_yellow"' in source
+    assert '"pimoroni.inky_what_4"' in source
+    assert '"pimoroni.inky_what_red_ht"' in source
+    assert '"pimoroni.inky_what_yellow"' in source
+    assert '"pimoroni.inky_what_ssd1683_red"' in source
+    assert '"pimoroni.inky_what_ssd1683_yellow"' in source
+    assert 'of "inkyHyperPixel2r":' in source
+    assert 'device == "pimoroni.hyperpixel2r_native"' in source
+    assert 'of "inkyHyperPixel2rLegacyFb":' in source
+    assert 'device == "pimoroni.hyperpixel2r"' in source
+    assert 'of "inky":' in source
     assert "proc evdevEnabledDevice(device: string): bool" in source
     assert 'device != "web_only"' in source
     assert 'not isInkyButtonDevice(device)' in source

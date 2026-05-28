@@ -99,6 +99,63 @@ body.frameos-workspace-scroll-locked {
   overscroll-behavior: none;
 }
 
+.frameos-connection-dot {
+  --frameos-connection-green-rgb: 16 185 129;
+  overflow: visible;
+}
+
+.frameos-connection-dot__flow {
+  position: absolute;
+  inset: 0;
+  border: 1px solid rgb(var(--frameos-connection-green-rgb) / 0.44);
+  border-radius: 9999px;
+  background: rgb(var(--frameos-connection-green-rgb) / 0.18);
+  box-shadow: 0 0 0 1px rgb(var(--frameos-connection-green-rgb) / 0.12);
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(0.9);
+  animation: frameosConnectionFlow 3.4s cubic-bezier(0.2, 0, 0.2, 1) infinite;
+}
+
+.frameos-connection-dot__flow--delayed {
+  animation-delay: 1.7s;
+}
+
+.frameos-connection-dot__core {
+  background: rgb(var(--frameos-connection-green-rgb));
+  box-shadow: 0 0 0 1px rgb(var(--frameos-connection-green-rgb) / 0.22),
+    0 0 8px rgb(var(--frameos-connection-green-rgb) / 0.2);
+}
+
+@keyframes frameosConnectionFlow {
+  0% {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  18% {
+    opacity: 0.38;
+  }
+  72% {
+    opacity: 0.14;
+  }
+  100% {
+    opacity: 0;
+    transform: scale(3.6);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .frameos-connection-dot__flow {
+    animation: none;
+    opacity: 0.24;
+    transform: scale(2.3);
+  }
+
+  .frameos-connection-dot__flow--delayed {
+    display: none;
+  }
+}
+
 .frameos-primary-active,
 .frameos-primary-action,
 .frameos-app-shell .frameos-primary-active,
@@ -233,6 +290,14 @@ body.frameos-workspace-scroll-locked {
 
 .frameos-change-status-link:hover {
   color: color-mix(in srgb, var(--frameos-color-brass) 88%, var(--frameos-color-graphite));
+}
+
+.frameos-change-status-link--up-to-date {
+  color: color-mix(in srgb, var(--frameos-color-evergreen) 78%, var(--frameos-color-graphite));
+}
+
+.frameos-change-status-link--up-to-date:hover {
+  color: color-mix(in srgb, var(--frameos-color-evergreen) 88%, var(--frameos-color-graphite));
 }
 
 .frameos-change-status-button--sidebar {
@@ -958,6 +1023,16 @@ html[data-frameos-theme='dark'] .frameos-change-status-link {
 .frameos-theme-dark .frameos-change-status-link:hover,
 html[data-frameos-theme='dark'] .frameos-change-status-link:hover {
   color: color-mix(in srgb, var(--frameos-color-brass) 92%, var(--frameos-color-mist));
+}
+
+.frameos-theme-dark .frameos-change-status-link--up-to-date,
+html[data-frameos-theme='dark'] .frameos-change-status-link--up-to-date {
+  color: color-mix(in srgb, var(--frameos-color-evergreen) 46%, var(--frameos-color-mist));
+}
+
+.frameos-theme-dark .frameos-change-status-link--up-to-date:hover,
+html[data-frameos-theme='dark'] .frameos-change-status-link--up-to-date:hover {
+  color: color-mix(in srgb, var(--frameos-color-evergreen) 56%, var(--frameos-color-mist));
 }
 
 .frameos-theme-dark .frameos-dropdown-menu,

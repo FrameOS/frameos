@@ -406,12 +406,17 @@ class FrameDeployWorkflow:
         if drivers.get("evdev"):
             package_plans.append(await self._plan_package("libevdev-dev", "evdev driver support"))
 
-        lgpio_required = bool(drivers.get("waveshare") or drivers.get("gpioButton"))
+        lgpio_required = bool(
+            drivers.get("waveshare")
+            or drivers.get("inky")
+            or drivers.get("gpioButton")
+            or drivers.get("inkyHyperPixel2r")
+        )
         lgpio_installed = False
         if lgpio_required:
             lgpio_installed = await self._path_exists("/usr/local/include/lgpio.h") or await self._path_exists("/usr/include/lgpio.h")
             if not lgpio_installed:
-                package_plans.append(await self._plan_package("liblgpio-dev", "GPIO/Waveshare driver support"))
+                package_plans.append(await self._plan_package("liblgpio-dev", "GPIO/Waveshare/HyperPixel driver support"))
 
         if drivers.get("inkyPython"):
             package_plans.extend(
@@ -420,12 +425,12 @@ class FrameDeployWorkflow:
                     await self._plan_package("python3-venv", "inkyPython vendor setup"),
                 ]
             )
-        if drivers.get("inkyHyperPixel2r"):
+        if drivers.get("inkyHyperPixel2rLegacyFb"):
             package_plans.extend(
                 [
-                    await self._plan_package("python3-dev", "inkyHyperPixel2r vendor setup"),
-                    await self._plan_package("python3-pip", "inkyHyperPixel2r vendor setup"),
-                    await self._plan_package("python3-venv", "inkyHyperPixel2r vendor setup"),
+                    await self._plan_package("python3-dev", "inkyHyperPixel2r legacy vendor setup"),
+                    await self._plan_package("python3-pip", "inkyHyperPixel2r legacy vendor setup"),
+                    await self._plan_package("python3-venv", "inkyHyperPixel2r legacy vendor setup"),
                 ]
             )
 
@@ -439,12 +444,12 @@ class FrameDeployWorkflow:
                     preserve_remote_paths=("env", "requirements.txt.sha256sum"),
                 )
             )
-        if inky_hyperpixel := drivers.get("inkyHyperPixel2r"):
+        if inky_hyperpixel := drivers.get("inkyHyperPixel2rLegacyFb"):
             vendor_sync_plans.append(
                 VendorSyncPlan(
-                    key="inkyHyperPixel2r",
+                    key="inkyHyperPixel2rLegacyFb",
                     vendor_folder=inky_hyperpixel.vendor_folder or "",
-                    label="inkyHyperPixel2r vendor files",
+                    label="inkyHyperPixel2r legacy vendor files",
                     preserve_remote_paths=("env", "requirements.txt.sha256sum"),
                 )
             )

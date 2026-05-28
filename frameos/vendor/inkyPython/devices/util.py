@@ -14,10 +14,23 @@ def init_inky(device: str = "") -> Optional[Any]:
     or by falling back to auto-detection.
     """
     try:
-        if device == "pimoroni.inky_impression_7":
+        if device in {
+            "pimoroni.inky_impression_4",
+            "pimoroni.inky_impression_4_2025",
+            "pimoroni.inky_impression_4_spectra6",
+        }:
+            from inky.inky_e640 import Inky
+            return Inky(resolution=(600, 400))
+        elif device in {
+            "pimoroni.inky_impression_7",
+            "pimoroni.inky_impression_7_2025",
+        }:
             from inky.inky_e673 import Inky
             return Inky(resolution=(800, 480))
-        elif device == "pimoroni.inky_impression_13":
+        elif device in {
+            "pimoroni.inky_impression_13",
+            "pimoroni.inky_impression_13_2025",
+        }:
             from inky.inky_el133uf1 import Inky
             return Inky(resolution=(1600, 1200))
         else:

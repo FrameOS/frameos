@@ -23,6 +23,14 @@ DRIVERS = {
         can_png=False, # will be set to true for the frames that support this
         can_render=True,
     ),
+    "inky": Driver(
+        name="inky",
+        import_path="inky/inky",
+        setup_import_path="inky/inky",
+        can_render=True,
+        can_png=True,
+        link_flags=("-llgpio",),
+    ),
     "gpioButton": Driver(
         name="gpioButton",
         import_path="gpioButton/gpioButton",
@@ -45,6 +53,14 @@ DRIVERS = {
         name="inkyHyperPixel2r",
         import_path="inkyHyperPixel2r/inkyHyperPixel2r",
         setup_import_path="inkyHyperPixel2r/inkyHyperPixel2r",
+        can_render=True,
+        can_turn_on_off=True,
+        link_flags=("-llgpio",),
+    ),
+    "inkyHyperPixel2rLegacyFb": Driver(
+        name="inkyHyperPixel2rLegacyFb",
+        import_path="inkyHyperPixel2rLegacyFb/inkyHyperPixel2rLegacyFb",
+        setup_import_path="inkyHyperPixel2rLegacyFb/inkyHyperPixel2rLegacyFb",
         vendor_folder="inkyHyperPixel2r",
         can_render=True,
         can_turn_on_off=True

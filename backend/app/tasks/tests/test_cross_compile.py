@@ -57,6 +57,10 @@ def test_resolve_prebuilt_target_maps_raspios_bullseye_arm64():
     assert resolve_prebuilt_target("raspios", "bullseye", "aarch64") == "debian-bullseye-arm64"
 
 
+def test_resolve_prebuilt_target_maps_ubuntu_26_04_arm64():
+    assert resolve_prebuilt_target("ubuntu", "26.04", "aarch64") == "ubuntu-26.04-arm64"
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("component", "version"),

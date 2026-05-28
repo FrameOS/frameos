@@ -64,7 +64,7 @@ async def test_upload_directory_tree_preserves_requested_remote_paths(
 
     local_dir = tmp_path / "inkyPython"
     local_dir.mkdir()
-    (local_dir / "requirements.txt").write_text("inky==2.2.1\n", encoding="utf-8")
+    (local_dir / "requirements.txt").write_text("inky==2.4.0\n", encoding="utf-8")
     deployer = RecordingDeployer()
 
     await upload_directory_tree(

@@ -15,6 +15,7 @@ import {
 import { useActions } from 'kea'
 import { framesModel } from '../../models/framesModel'
 import { FrameImage } from '../../components/FrameImage'
+import { FrameConnectionDot } from '../../components/FrameConnectionDot'
 import { urls } from '../../urls'
 import { Tooltip } from '../../components/Tooltip'
 import { getFrameCertificateStatus } from '../../utils/certificates'
@@ -24,39 +25,38 @@ interface FrameProps {
   frame: FrameType
 }
 
-function getTitleAndIcon(enabled: boolean, runCommands: boolean, activeConnections: number): [string, string] {
-  if (!enabled) {
-    if (activeConnections > 0) {
-      return ['FrameOS Agent not enabled, yet connected', '🔵']
-    }
-    return ['FrameOS Agent not enabled', '']
-  }
-  if (runCommands) {
-    if (activeConnections > 0) {
-      return ['FrameOS Agent connected and ready to run commands', '🟢']
-    }
-    return ['FrameOS Agent not connected', '']
-  }
-  if (activeConnections > 0) {
-    return ['FrameOS Agent connected, but not configured to run commands', '🟡']
-  }
-  return ['FrameOS Agent not connected', '']
+interface FrameConnectionProps extends FrameProps {
+  title?: string
 }
 
-export function FrameConnection({ frame }: FrameProps): JSX.Element | null {
-  const [title, icon] = getTitleAndIcon(
+function connectedFrameTitle(enabled: boolean, runCommands: boolean, activeConnections: number): string | null {
+  if (activeConnections <= 0) {
+    return null
+  }
+
+  if (!enabled) {
+    return 'FrameOS Agent not enabled, yet connected'
+  }
+  if (runCommands) {
+    return 'FrameOS Agent connected and ready to run commands'
+  }
+  return 'FrameOS Agent connected, but not configured to run commands'
+}
+
+export function FrameConnection({ frame, title: titleOverride }: FrameConnectionProps): JSX.Element | null {
+  const title = connectedFrameTitle(
     !!frame.agent?.agentEnabled,
     !!frame.agent?.agentRunCommands,
     frame?.active_connections ?? 0
   )
 
-  if (!icon) {
+  if (!title) {
     return null
   }
 
   return (
-    <Tooltip title={title} className="cursor-help">
-      {icon}
+    <Tooltip title={titleOverride ?? title} className="cursor-help">
+      <FrameConnectionDot title={titleOverride ?? title} />
     </Tooltip>
   )
 }
@@ -74,18 +74,16 @@ export function FrameHealth({ frame }: FrameProps): JSX.Element | null {
 }
 
 function FrameCardIndicators({ frame }: FrameProps): JSX.Element {
-  const [agentTitle, agentIcon] = getTitleAndIcon(
+  const agentTitle = connectedFrameTitle(
     !!frame.agent?.agentEnabled,
     !!frame.agent?.agentRunCommands,
     frame?.active_connections ?? 0
   )
   const healthy = frameIsHealthy(frame)
 
-  if (healthy && agentIcon === '🟢') {
+  if (agentTitle) {
     return (
-      <Tooltip title={`Frame is healthy. ${agentTitle}.`} className="cursor-help">
-        <span className="inline-block h-2.5 w-2.5 rounded-full bg-green-400 shadow-[0_0_8px_rgba(74,222,128,0.75)]" />
-      </Tooltip>
+      <FrameConnection frame={frame} title={healthy ? `Frame is healthy. ${agentTitle}.` : agentTitle} />
     )
   }
 

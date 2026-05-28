@@ -222,8 +222,8 @@ function frameToolInitialScrollTop(
 const frameToolDefinitions: FrameToolDefinition[] = [
   {
     panel: 'overview',
-    label: 'Overview',
-    description: 'Preview and scenes',
+    label: 'Scenes',
+    description: 'Frame overview',
     icon: <Squares2X2Icon className="h-5 w-5" />,
   },
   {
@@ -1347,6 +1347,7 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
         <FrameosShell
           mode="frame"
           title="Frame"
+          browserTitle={frame.name || frameHost(frame)}
           tree={
             <FrameTree
               frame={frame}

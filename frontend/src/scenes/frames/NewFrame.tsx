@@ -84,6 +84,18 @@ function setModeValues(mode: NewFrameFormType['mode']): Partial<NewFrameFormType
   return { mode, platform: null }
 }
 
+function renderDeviceOptions(): JSX.Element[] {
+  return devices.map((group) => (
+    <optgroup key={group.label} label={group.label}>
+      {group.options.map((device) => (
+        <option key={device.value} value={device.value}>
+          {device.label}
+        </option>
+      ))}
+    </optgroup>
+  ))
+}
+
 export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.Element {
   const { hideForm, resetNewFrame, setNewFrameValue, setNewFrameValues, setFile, importFrame } =
     useActions(newFrameForm)
@@ -185,11 +197,7 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
               value={newFrame.device ?? 'web_only'}
               onChange={(event) => setNewFrameValue('device', event.target.value)}
             >
-              {devices.map((device) => (
-                <option key={device.value} value={device.value}>
-                  {device.label}
-                </option>
-              ))}
+              {renderDeviceOptions()}
             </select>
           </FormField>
           <div className="flex gap-2 pt-2">
@@ -247,11 +255,7 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
               value={newFrame.device ?? 'web_only'}
               onChange={(event) => setNewFrameValue('device', event.target.value)}
             >
-              {devices.map((device) => (
-                <option key={device.value} value={device.value}>
-                  {device.label}
-                </option>
-              ))}
+              {renderDeviceOptions()}
             </select>
           </FormField>
           <FormField label="Platform" error={newFrameErrors.platform}>
