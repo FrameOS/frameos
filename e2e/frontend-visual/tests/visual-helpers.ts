@@ -228,6 +228,26 @@ export async function settleForScreenshot(page: Page): Promise<void> {
       }
       .continuous-fade-in-out { animation: none !important; opacity: 1 !important; }
       input, textarea { caret-color: transparent !important; }
+      html[data-frameos-theme='light'] *,
+      html[data-frameos-theme='light'] *::before,
+      html[data-frameos-theme='light'] *::after {
+        scrollbar-color: transparent transparent !important;
+      }
+      html[data-frameos-theme='light'] *::-webkit-scrollbar,
+      html[data-frameos-theme='light'] *::-webkit-scrollbar-track,
+      html[data-frameos-theme='light'] *::-webkit-scrollbar-thumb,
+      html[data-frameos-theme='light'] *::-webkit-scrollbar-corner {
+        background: transparent !important;
+        border-color: transparent !important;
+      }
+      html[data-frameos-theme='light'] .monaco-editor .scrollbar,
+      html[data-frameos-theme='light'] .monaco-editor .scrollbar .slider,
+      html[data-frameos-theme='light'] .monaco-scrollable-element > .scrollbar,
+      html[data-frameos-theme='light'] .monaco-scrollable-element > .scrollbar > .slider,
+      html[data-frameos-theme='light'] .monaco-scrollable-element > .shadow {
+        opacity: 0 !important;
+        visibility: hidden !important;
+      }
     `,
   })
   await page.locator('body').waitFor({ state: 'visible' })
