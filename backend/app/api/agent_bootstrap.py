@@ -209,11 +209,12 @@ detect_target() {{
     case "${{VERSION_ID:-$release}}" in
       22.04*|jammy*) release=22.04 ;;
       24.04*|noble*) release=24.04 ;;
+      26.04*|resolute*) release=26.04 ;;
     esac
   fi
 
   case "$release" in
-    buster|bullseye|bookworm|trixie|22.04|24.04) ;;
+    buster|bullseye|bookworm|trixie|22.04|24.04|26.04) ;;
     *) echo "Unsupported OS release: ${{release:-unknown}}" >&2; exit 1 ;;
   esac
 

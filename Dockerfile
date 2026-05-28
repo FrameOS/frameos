@@ -30,7 +30,7 @@ RUN set -eux; \
         esac ;; \
       ubuntu) \
         case "${VERSION_ID}" in \
-          22.04|24.04) release="${VERSION_ID}" ;; \
+          22.04|24.04|26.04) release="${VERSION_ID}" ;; \
           *) echo "Unsupported prebuilt Nim release: ${distro}-${VERSION_ID}" >&2; exit 1 ;; \
         esac ;; \
     esac; \

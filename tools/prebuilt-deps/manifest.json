@@ -69,24 +69,20 @@
       }
     },
     {
-      "target": "ubuntu-22.04-arm64",
+      "target": "ubuntu-26.04-arm64",
       "versions": {
         "nim": "2.2.4",
         "quickjs": "2025-04-26",
         "lgpio": "v0.2.2"
       },
       "object_key": null,
-      "updated_at": "2025-11-17T21:39:26.669545+00:00",
+      "updated_at": "",
       "component_keys": {
-        "nim": "prebuilt-deps/ubuntu-22.04-arm64/nim-2.2.4.tar.gz",
-        "quickjs": "prebuilt-deps/ubuntu-22.04-arm64/quickjs-2025-04-26.tar.gz",
-        "lgpio": "prebuilt-deps/ubuntu-22.04-arm64/lgpio-v0.2.2.tar.gz"
+        "nim": "prebuilt-deps/ubuntu-26.04-arm64/nim-2.2.4.tar.gz",
+        "quickjs": "prebuilt-deps/ubuntu-26.04-arm64/quickjs-2025-04-26.tar.gz",
+        "lgpio": "prebuilt-deps/ubuntu-26.04-arm64/lgpio-v0.2.2.tar.gz"
       },
-      "component_md5sums": {
-        "nim": "51a407214dc0bcdcf61e2b2f565aef8c-3",
-        "quickjs": "6d87c2076e3eaea00aa01a73f87095b5",
-        "lgpio": "e46b57abbbf4839949731adf31cfdcbb"
-      }
+      "component_md5sums": {}
     },
     {
       "target": "debian-bookworm-armhf",
@@ -169,24 +165,20 @@
       }
     },
     {
-      "target": "ubuntu-22.04-amd64",
+      "target": "ubuntu-26.04-amd64",
       "versions": {
         "nim": "2.2.4",
         "quickjs": "2025-04-26",
         "lgpio": "v0.2.2"
       },
       "object_key": null,
-      "updated_at": "2025-11-17T21:39:30.568729+00:00",
+      "updated_at": "",
       "component_keys": {
-        "nim": "prebuilt-deps/ubuntu-22.04-amd64/nim-2.2.4.tar.gz",
-        "quickjs": "prebuilt-deps/ubuntu-22.04-amd64/quickjs-2025-04-26.tar.gz",
-        "lgpio": "prebuilt-deps/ubuntu-22.04-amd64/lgpio-v0.2.2.tar.gz"
+        "nim": "prebuilt-deps/ubuntu-26.04-amd64/nim-2.2.4.tar.gz",
+        "quickjs": "prebuilt-deps/ubuntu-26.04-amd64/quickjs-2025-04-26.tar.gz",
+        "lgpio": "prebuilt-deps/ubuntu-26.04-amd64/lgpio-v0.2.2.tar.gz"
       },
-      "component_md5sums": {
-        "nim": "c6b68b3c4cd391664ea5ffc9da7e99ae-3",
-        "quickjs": "59a40c74cea17e28d3c129ec88434613",
-        "lgpio": "88ca23ad6587f5e6f50086502fcf8223"
-      }
+      "component_md5sums": {}
     },
     {
       "target": "ubuntu-24.04-amd64",

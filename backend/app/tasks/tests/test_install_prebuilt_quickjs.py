@@ -68,6 +68,9 @@ def test_resolve_prebuilt_target_matches_published_matrix():
     assert installer.resolve_prebuilt_target("ubuntu", "noble", "x86_64") == (
         "ubuntu-24.04-amd64"
     )
+    assert installer.resolve_prebuilt_target("ubuntu", "resolute", "aarch64") == (
+        "ubuntu-26.04-arm64"
+    )
 
 
 def test_installs_prebuilt_quickjs_archive_shape(tmp_path):

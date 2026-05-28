@@ -82,7 +82,7 @@ def can_cross_compile_target(arch: str | None) -> bool:
 DISTRO_DEFAULTS = {
     "raspios": ("debian", "bookworm"),
     "debian": ("debian", "bookworm"),
-    "ubuntu": ("ubuntu", "22.04"),
+    "ubuntu": ("ubuntu", "26.04"),
     "buildroot": ("ubuntu", "22.04"),
 }
 
@@ -570,7 +570,7 @@ class CrossCompiler:
                 echo {shlex.quote(checksum_line)} | sha256sum -c -
                 tar -xzf lgpio.tar.gz
                 cd {shlex.quote(source_dir)}
-                make
+                CFLAGS="-std=gnu17" make
                 mapfile -t LGPIO_OBJS < <(make -qp | awk '/^OBJ_LGPIO =/ {{for (i=3; i<=NF; ++i) print $i}}')
                 mapfile -t RGPIO_OBJS < <(make -qp | awk '/^OBJ_RGPIO =/ {{for (i=3; i<=NF; ++i) print $i}}')
                 ar rcs liblgpio.a "${{LGPIO_OBJS[@]}}"

@@ -56,11 +56,11 @@ TARGETS: tuple[TargetDefinition, ...] = (
     TargetDefinition("debian", "trixie", "armhf", "linux/arm/v7", "debian:trixie", runner="ubuntu-24.04-arm"),
     TargetDefinition("debian", "trixie", "arm64", "linux/arm64", "debian:trixie", runner="ubuntu-24.04-arm"),
     TargetDefinition("debian", "trixie", "amd64", "linux/amd64", "debian:trixie"),
-    TargetDefinition("ubuntu", "22.04", "arm64", "linux/arm64", "ubuntu:22.04", runner="ubuntu-24.04-arm"),
-    TargetDefinition("ubuntu", "22.04", "amd64", "linux/amd64", "ubuntu:22.04"),
     TargetDefinition("ubuntu", "24.04", "arm64", "linux/arm64", "ubuntu:24.04", runner="ubuntu-24.04-arm"),
     TargetDefinition("ubuntu", "24.04", "amd64", "linux/amd64", "ubuntu:24.04"),
-    # TargetDefinition("buildroot", "luckfox-pico-plus", "armv7l", "linux/amd64", "ubuntu:22.04"),
+    TargetDefinition("ubuntu", "26.04", "arm64", "linux/arm64", "ubuntu:26.04", runner="ubuntu-24.04-arm"),
+    TargetDefinition("ubuntu", "26.04", "amd64", "linux/amd64", "ubuntu:26.04"),
+    # TargetDefinition("buildroot", "luckfox-pico-plus", "armv7l", "linux/amd64", "ubuntu:26.04"),
 )
 
 TARGET_MAP = {target.slug: target for target in TARGETS}
