@@ -43,7 +43,15 @@ from sqlalchemy.orm import Session
 # local ---------------------------------------------------------------------
 from app.database import SessionLocal, get_db
 from arq import ArqRedis as Redis
-from app.models.frame import Frame, new_frame, delete_frame, normalize_https_proxy, refresh_tls_certificate_validity_dates, update_frame
+from app.models.frame import (
+    Frame,
+    new_frame,
+    delete_frame,
+    normalize_error_behavior,
+    normalize_https_proxy,
+    refresh_tls_certificate_validity_dates,
+    update_frame,
+)
 from app.models.log import FRAME_ACTIVITY_LOG_TYPES, Log, new_log as log
 from app.models.metrics import Metrics
 from app.codegen.scene_nim import write_scene_nim
@@ -300,6 +308,8 @@ def _apply_frame_preview_update(frame: Frame, data: FrameUpdateRequest) -> Any:
     if "https_proxy" in update_data:
         preview.https_proxy = normalize_https_proxy(preview.https_proxy)
         refresh_tls_certificate_validity_dates(preview)
+    if "error_behavior" in update_data:
+        preview.error_behavior = normalize_error_behavior(preview.error_behavior)
 
     old_mode = frame.mode
     if data.mode == "buildroot" and old_mode != "buildroot" and preview.ssh_user == "pi":
@@ -311,6 +321,7 @@ def _apply_frame_preview_update(frame: Frame, data: FrameUpdateRequest) -> Any:
         result = {**frame.to_dict(), **preview_data}
         result["mode"] = preview.mode
         result["https_proxy"] = normalize_https_proxy(preview.https_proxy)
+        result["error_behavior"] = normalize_error_behavior(preview.error_behavior)
         result["ssh_user"] = preview.ssh_user
         return result
 
@@ -2317,6 +2328,8 @@ async def api_frame_update_endpoint(
     if "https_proxy" in update_data:
         frame.https_proxy = normalize_https_proxy(frame.https_proxy)
         refresh_tls_certificate_validity_dates(frame)
+    if "error_behavior" in update_data:
+        frame.error_behavior = normalize_error_behavior(frame.error_behavior)
 
     if data.mode == "buildroot" and old_mode != "buildroot" and frame.ssh_user == "pi":
         frame.ssh_user = "root"

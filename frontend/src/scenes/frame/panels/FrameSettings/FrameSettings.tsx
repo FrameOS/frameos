@@ -7,7 +7,7 @@ import { Form, Group } from 'kea-forms'
 import { TextInput } from '../../../../components/TextInput'
 import { Select } from '../../../../components/Select'
 import { frameAdminUrl, frameControlUrl, frameImageUrl, frameRootUrl, frameUrl } from '../../../../decorators/frame'
-import { frameLogic } from '../../frameLogic'
+import { DEFAULT_FRAME_ERROR_BEHAVIOR, frameLogic, normalizeFrameErrorBehavior } from '../../frameLogic'
 import { downloadJson } from '../../../../utils/downloadJson'
 import { Field } from '../../../../components/Field'
 import { devices, spectraPalettes, withCustomPalette, buildrootPlatforms, modes } from '../../../../devices'
@@ -22,7 +22,7 @@ import { ExclamationTriangleIcon, PlusIcon, TrashIcon } from '@heroicons/react/2
 import { panelsLogic } from '../panelsLogic'
 import { Switch } from '../../../../components/Switch'
 import { NumberTextInput } from '../../../../components/NumberTextInput'
-import { FrameMountpointConfig, FrameType, Palette } from '../../../../types'
+import { FrameErrorBehaviorMode, FrameMountpointConfig, FrameType, Palette } from '../../../../types'
 import { A } from 'kea-router'
 import { TextArea } from '../../../../components/TextArea'
 import { ColorInput } from '../../../../components/ColorInput'
@@ -195,6 +195,32 @@ export function FrameSettings({
   const showFrameInfo = !!frame.frame_host || (!inFrameAdminMode && logs.length > 0)
   const mountpoints = frameForm.mountpoints ?? { enabled: false, items: [] }
   const mountpointItems = mountpoints.items ?? []
+  const errorBehavior = normalizeFrameErrorBehavior(frameForm.error_behavior ?? frame.error_behavior)
+  const setErrorBehavior = (patch: Partial<NonNullable<FrameType['error_behavior']>>) => {
+    setFrameFormValues({
+      error_behavior: normalizeFrameErrorBehavior({
+        ...errorBehavior,
+        ...patch,
+      }),
+    })
+  }
+  const errorBehaviorModes: { value: FrameErrorBehaviorMode; title: string; description: string }[] = [
+    {
+      value: 'safe_mode',
+      title: 'Fail hard',
+      description: 'Restart through the service manager and let Boot Guard enter safe mode after repeated crashes.',
+    },
+    {
+      value: 'show_error_retry',
+      title: 'Show error, then retry',
+      description: 'Render the fatal error on the frame, wait, then try to start FrameOS again.',
+    },
+    {
+      value: 'silent_retry',
+      title: 'Retry silently first',
+      description: 'Keep the current image while retrying, optionally switching to the visible error screen later.',
+    },
+  ]
   const setMountpoints = (nextMountpoints: NonNullable<FrameType['mountpoints']>) => {
     setFrameFormValues({ mountpoints: nextMountpoints })
     touchFrameFormField('mountpoints')
@@ -1290,6 +1316,100 @@ export function FrameSettings({
               ]}
             />
           </Field>
+        </div>
+
+        <H6 id="frame-settings-error-behavior">Global errors</H6>
+        <div className="pl-2 @md:pl-8 space-y-3">
+          <Field name="error_behavior.mode" label="Unrecoverable error behavior">
+            <div className="grid w-full gap-2 @xl:grid-cols-3">
+              {errorBehaviorModes.map((option) => {
+                const selected = errorBehavior.mode === option.value
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => setErrorBehavior({ mode: option.value })}
+                    className={clsx(
+                      'frame-tool-row min-h-28 rounded-lg p-3 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+                      selected ? 'border-blue-500 ring-2 ring-blue-500/30' : 'hover:border-slate-400'
+                    )}
+                    aria-pressed={selected}
+                  >
+                    <span className="frameos-strong block text-sm font-semibold">{option.title}</span>
+                    <span className="frame-tool-muted mt-1 block text-xs leading-5">{option.description}</span>
+                  </button>
+                )
+              })}
+            </div>
+          </Field>
+          {errorBehavior.mode === 'show_error_retry' ? (
+            <Field
+              name="error_behavior.retry_seconds"
+              label="Retry delay"
+              tooltip="After a fatal error, render the error screen and retry after this many seconds."
+            >
+              <NumberTextInput
+                value={errorBehavior.retry_seconds ?? DEFAULT_FRAME_ERROR_BEHAVIOR.retry_seconds}
+                onChange={(value) => setErrorBehavior({ retry_seconds: value })}
+                placeholder="60"
+              />
+            </Field>
+          ) : null}
+          {errorBehavior.mode === 'silent_retry' ? (
+            <>
+              <Field
+                name="error_behavior.silent_retry_seconds"
+                label="Silent retry delay"
+                tooltip="While retrying silently, keep the current frame image and retry after this many seconds."
+              >
+                <NumberTextInput
+                  value={errorBehavior.silent_retry_seconds ?? DEFAULT_FRAME_ERROR_BEHAVIOR.silent_retry_seconds}
+                  onChange={(value) => setErrorBehavior({ silent_retry_seconds: value })}
+                  placeholder="60"
+                />
+              </Field>
+              <Field
+                name="error_behavior.silent_retry_forever"
+                label="Retry silently forever"
+                tooltip="When enabled, the frame never replaces the current image with a fatal error screen."
+              >
+                <Switch
+                  value={!!errorBehavior.silent_retry_forever}
+                  onChange={(value) => setErrorBehavior({ silent_retry_forever: value })}
+                  fullWidth
+                />
+              </Field>
+              {!errorBehavior.silent_retry_forever ? (
+                <>
+                  <Field
+                    name="error_behavior.silent_window_minutes"
+                    label="Silent window"
+                    tooltip="Retry silently for this many minutes before switching to the visible error screen."
+                  >
+                    <NumberTextInput
+                      value={errorBehavior.silent_window_minutes ?? DEFAULT_FRAME_ERROR_BEHAVIOR.silent_window_minutes}
+                      onChange={(value) => setErrorBehavior({ silent_window_minutes: value })}
+                      placeholder="10"
+                    />
+                  </Field>
+                  <Field
+                    name="error_behavior.show_error_retry_seconds"
+                    label="Visible retry delay"
+                    tooltip="After the silent window expires, render the error screen and retry after this many seconds."
+                  >
+                    <NumberTextInput
+                      value={
+                        errorBehavior.show_error_retry_seconds ??
+                        DEFAULT_FRAME_ERROR_BEHAVIOR.show_error_retry_seconds
+                      }
+                      onChange={(value) => setErrorBehavior({ show_error_retry_seconds: value })}
+                      placeholder="60"
+                    />
+                  </Field>
+                </>
+              ) : null}
+            </>
+          ) : null}
         </div>
 
         <H6 id="frame-settings-palette">Palette</H6>

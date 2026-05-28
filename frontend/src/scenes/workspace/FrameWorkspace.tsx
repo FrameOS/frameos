@@ -272,6 +272,7 @@ const frameSettingsSections = [
   { id: 'frame-settings-network', label: 'Network' },
   { id: 'frame-settings-mountpoints', label: 'Mountpoints' },
   { id: 'frame-settings-defaults', label: 'Defaults' },
+  { id: 'frame-settings-error-behavior', label: 'Global errors' },
   { id: 'frame-settings-palette', label: 'Palette' },
   { id: 'frame-settings-qr', label: 'QR code' },
   { id: 'frame-settings-assets', label: 'Assets' },

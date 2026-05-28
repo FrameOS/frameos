@@ -45,6 +45,14 @@ block test_load_config:
             "agentRunCommands": true,
             "agentSharedSecret": "agent-secret"
         },
+        "errorBehavior": {
+            "mode": "silent_retry",
+            "retrySeconds": 45,
+            "silentRetrySeconds": 15,
+            "silentRetryForever": false,
+            "silentWindowMinutes": 4,
+            "showErrorRetrySeconds": 90
+        },
         "mountpoints": {
             "enabled": true,
             "items": [
@@ -84,8 +92,39 @@ block test_load_config:
         doAssert config.agent.agentEnabled == true
         doAssert config.agent.agentRunCommands == true
         doAssert config.agent.agentSharedSecret == "agent-secret"
+        doAssert config.errorBehavior.mode == "silent_retry"
+        doAssert config.errorBehavior.retrySeconds == 45
+        doAssert config.errorBehavior.silentRetrySeconds == 15
+        doAssert config.errorBehavior.silentRetryForever == false
+        doAssert config.errorBehavior.silentWindowMinutes == 4
+        doAssert config.errorBehavior.showErrorRetrySeconds == 90
         doAssert config.mountpoints.enabled == true
         doAssert config.mountpoints.items.len == 1
         doAssert config.mountpoints.items[0].source == "//nas/photos"
         doAssert config.mountpoints.items[0].target == "/mnt/photos"
         doAssert config.mountpoints.items[0].username == "frame"
+
+block test_error_behavior_defaults:
+    let config = loadErrorBehavior(%*{
+        "mode": "not-a-mode",
+        "retrySeconds": 0,
+        "silentRetrySeconds": -1,
+        "silentWindowMinutes": 0,
+        "showErrorRetrySeconds": -5
+    })
+
+    doAssert config.mode == "show_error_retry"
+    doAssert config.retrySeconds == 60
+    doAssert config.silentRetrySeconds == 60
+    doAssert config.silentRetryForever == false
+    doAssert config.silentWindowMinutes == 10
+    doAssert config.showErrorRetrySeconds == 60
+
+block test_error_behavior_legacy_silent_retry_minutes:
+    let config = loadErrorBehavior(%*{
+        "mode": "silent_retry",
+        "silentRetryMinutes": 7
+    })
+
+    doAssert config.mode == "silent_retry"
+    doAssert config.silentWindowMinutes == 7

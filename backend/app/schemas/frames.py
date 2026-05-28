@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, RootModel, field_validator
+from pydantic import BaseModel, ConfigDict, RootModel, field_validator, model_validator
 from typing import Any, Dict, List, Literal, Optional
 
 from .common import ImageTokenResponse
@@ -18,6 +18,22 @@ class FrameHttpsProxy(BaseModel):
     certs: Optional[FrameHttpsProxyCerts] = None
     server_cert_not_valid_after: Optional[datetime] = None
     client_ca_cert_not_valid_after: Optional[datetime] = None
+
+
+class FrameErrorBehavior(BaseModel):
+    mode: Optional[Literal["safe_mode", "show_error_retry", "silent_retry"]] = None
+    retry_seconds: Optional[int] = None
+    silent_retry_seconds: Optional[int] = None
+    silent_retry_forever: Optional[bool] = None
+    silent_window_minutes: Optional[int] = None
+    show_error_retry_seconds: Optional[int] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_legacy_silent_window(cls, value: Any) -> Any:
+        if isinstance(value, dict) and "silent_window_minutes" not in value and "silent_retry_minutes" in value:
+            return {**value, "silent_window_minutes": value.get("silent_retry_minutes")}
+        return value
 
 
 
@@ -69,6 +85,7 @@ class FrameBase(BaseModel):
     network: Optional[Dict[str, Any]]
     agent: Optional[Dict[str, Any]]
     mountpoints: Optional[Dict[str, Any]]
+    error_behavior: Optional[FrameErrorBehavior] = None
     palette: Optional[Dict[str, Any]]
     buildroot: Optional[Dict[str, Any]] = None
     rpios: Optional[Dict[str, Any]] = None
@@ -134,6 +151,7 @@ class FrameUpdateRequest(BaseModel):
     network: Optional[Dict[str, Any]] = None
     agent: Optional[Dict[str, Any]] = None
     mountpoints: Optional[Dict[str, Any]] = None
+    error_behavior: Optional[FrameErrorBehavior] = None
     palette: Optional[Dict[str, Any]] = None
     buildroot: Optional[Dict[str, Any]] = None
     rpios: Optional[Dict[str, Any]] = None

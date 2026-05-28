@@ -5,11 +5,14 @@ import pytest
 from app.models.frame import (
     Frame,
     delete_frame,
+    get_frame_json,
     new_frame,
+    normalize_error_behavior,
     normalize_frame_admin_auth,
     normalize_reboot_crontab,
     update_frame,
 )
+from app.schemas.frames import FrameErrorBehavior
 
 
 @pytest.mark.asyncio
@@ -41,6 +44,14 @@ async def test_new_frame(mock_publish, db, redis):
     assert frame.https_proxy["server_cert_not_valid_after"] is not None
     assert frame.https_proxy["client_ca_cert_not_valid_after"] is not None
     assert frame.mountpoints == {"enabled": False, "items": []}
+    assert frame.error_behavior == {
+        "mode": "show_error_retry",
+        "retry_seconds": 60,
+        "silent_retry_seconds": 60,
+        "silent_retry_forever": False,
+        "silent_window_minutes": 10,
+        "show_error_retry_seconds": 60,
+    }
     mock_publish.assert_awaited_once()
 
 
@@ -93,7 +104,70 @@ async def test_frame_to_dict(mock_publish, db, redis):
     assert data["https_proxy"]["server_cert_not_valid_after"] is not None
     assert data["https_proxy"]["client_ca_cert_not_valid_after"] is not None
     assert data["mountpoints"] == {"enabled": False, "items": []}
+    assert data["error_behavior"]["mode"] == "show_error_retry"
     assert mock_publish.await_count == 1
+
+
+def test_normalize_error_behavior_defaults_and_sanitizes_values():
+    assert normalize_error_behavior(None) == {
+        "mode": "show_error_retry",
+        "retry_seconds": 60,
+        "silent_retry_seconds": 60,
+        "silent_retry_forever": False,
+        "silent_window_minutes": 10,
+        "show_error_retry_seconds": 60,
+    }
+
+    assert normalize_error_behavior({
+        "mode": "silent_retry",
+        "retry_seconds": "0",
+        "silent_retry_seconds": "5",
+        "silent_retry_forever": True,
+        "silent_window_minutes": -1,
+        "show_error_retry_seconds": "120",
+    }) == {
+        "mode": "silent_retry",
+        "retry_seconds": 60,
+        "silent_retry_seconds": 5,
+        "silent_retry_forever": True,
+        "silent_window_minutes": 10,
+        "show_error_retry_seconds": 120,
+    }
+
+    assert normalize_error_behavior({
+        "mode": "silent_retry",
+        "silent_retry_minutes": 7,
+    })["silent_window_minutes"] == 7
+
+    assert FrameErrorBehavior.model_validate({
+        "mode": "silent_retry",
+        "silent_retry_minutes": 8,
+    }).silent_window_minutes == 8
+
+
+@pytest.mark.asyncio
+@patch("app.models.frame.publish_message", new_callable=AsyncMock)
+async def test_get_frame_json_includes_error_behavior(_mock_publish, db, redis):
+    frame = await new_frame(db, redis, "FrameJson", "host", "server_host.com")
+    frame.error_behavior = {
+        "mode": "silent_retry",
+        "retry_seconds": 15,
+        "silent_retry_seconds": 20,
+        "silent_retry_forever": False,
+        "silent_window_minutes": 3,
+        "show_error_retry_seconds": 90,
+    }
+
+    data = get_frame_json(db, frame)
+
+    assert data["errorBehavior"] == {
+        "mode": "silent_retry",
+        "retrySeconds": 15,
+        "silentRetrySeconds": 20,
+        "silentRetryForever": False,
+        "silentWindowMinutes": 3,
+        "showErrorRetrySeconds": 90,
+    }
 
 
 def test_normalize_frame_admin_auth_keeps_password_whitespace():

@@ -3,7 +3,15 @@ import { router } from 'kea-router'
 import { framesModel, type AgentTaskTransport } from '../../models/framesModel'
 import type { frameLogicType } from './frameLogicType'
 import { subscriptions } from 'kea-subscriptions'
-import { AppNodeData, DiagramNode, FrameScene, FrameType, SceneNodeData, TemplateType } from '../../types'
+import {
+  AppNodeData,
+  DiagramNode,
+  FrameErrorBehavior,
+  FrameScene,
+  FrameType,
+  SceneNodeData,
+  TemplateType,
+} from '../../types'
 import { forms } from 'kea-forms'
 import equal from 'fast-deep-equal'
 import { v4 as uuidv4 } from 'uuid'
@@ -89,6 +97,7 @@ const FRAME_KEYS: (keyof FrameType)[] = [
   'network',
   'agent',
   'mountpoints',
+  'error_behavior',
   'palette',
   'buildroot',
   'rpios',
@@ -150,6 +159,7 @@ const FRAME_KEY_LABELS: Partial<Record<keyof FrameType, string>> = {
   network: 'Network settings',
   agent: 'Agent settings',
   mountpoints: 'Mountpoints',
+  error_behavior: 'Global error handling',
   palette: 'Palette',
   buildroot: 'Buildroot settings',
   rpios: 'Raspberry Pi OS settings',
@@ -188,7 +198,52 @@ const DEPLOYMENT_SUMMARY_KEYS: (keyof FrameType)[] = [
   'assets_path',
   'save_assets',
   'mountpoints',
+  'error_behavior',
 ]
+
+export const DEFAULT_FRAME_ERROR_BEHAVIOR: Required<FrameErrorBehavior> = {
+  mode: 'show_error_retry',
+  retry_seconds: 60,
+  silent_retry_seconds: 60,
+  silent_retry_forever: false,
+  silent_window_minutes: 10,
+  show_error_retry_seconds: 60,
+}
+
+function positiveNumber(value: unknown, fallback: number): number {
+  const number = Number(value)
+  return Number.isFinite(number) && number > 0 ? number : fallback
+}
+
+export function normalizeFrameErrorBehavior(errorBehavior?: Partial<FrameErrorBehavior> | null): FrameErrorBehavior {
+  const rawMode = errorBehavior?.mode
+  const mode: FrameErrorBehavior['mode'] =
+    rawMode === 'safe_mode' || rawMode === 'show_error_retry' || rawMode === 'silent_retry'
+      ? rawMode
+      : DEFAULT_FRAME_ERROR_BEHAVIOR.mode
+  const silentWindowMinutes =
+    errorBehavior?.silent_window_minutes ??
+    (errorBehavior as (Partial<FrameErrorBehavior> & { silent_retry_minutes?: number }) | null | undefined)
+      ?.silent_retry_minutes
+
+  return {
+    mode,
+    retry_seconds: positiveNumber(errorBehavior?.retry_seconds, DEFAULT_FRAME_ERROR_BEHAVIOR.retry_seconds),
+    silent_retry_seconds: positiveNumber(
+      errorBehavior?.silent_retry_seconds,
+      DEFAULT_FRAME_ERROR_BEHAVIOR.silent_retry_seconds
+    ),
+    silent_retry_forever: errorBehavior?.silent_retry_forever ?? DEFAULT_FRAME_ERROR_BEHAVIOR.silent_retry_forever,
+    silent_window_minutes: positiveNumber(
+      silentWindowMinutes,
+      DEFAULT_FRAME_ERROR_BEHAVIOR.silent_window_minutes
+    ),
+    show_error_retry_seconds: positiveNumber(
+      errorBehavior?.show_error_retry_seconds,
+      DEFAULT_FRAME_ERROR_BEHAVIOR.show_error_retry_seconds
+    ),
+  }
+}
 
 function keyLabel(key: keyof FrameType): string {
   return FRAME_KEY_LABELS[key] ?? key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
@@ -478,6 +533,18 @@ function summarizeFrameFieldValue(key: keyof FrameType, value: unknown): string 
       ).length
       return enabledItems > 0 ? `${enabledItems} mountpoint${enabledItems === 1 ? '' : 's'}` : 'Enabled'
     }
+    case 'error_behavior': {
+      const behavior = normalizeFrameErrorBehavior(value as FrameErrorBehavior)
+      if (behavior.mode === 'show_error_retry') {
+        return `Show error, retry after ${behavior.retry_seconds}s`
+      }
+      if (behavior.mode === 'silent_retry') {
+        return behavior.silent_retry_forever
+          ? `Retry silently every ${behavior.silent_retry_seconds}s forever`
+          : `Retry silently for ${behavior.silent_window_minutes}m`
+      }
+      return 'Fail hard into safe mode'
+    }
     case 'ssh_keys': {
       const keys = Array.isArray(value) ? value : []
       return keys.length > 0 ? `${keys.length} selected` : 'None'
@@ -750,6 +817,7 @@ function sanitizeFrame(frame: Partial<FrameType>): Partial<FrameType> {
       user: frameAdminAuthUser,
       pass: frameAdminAuthPass,
     },
+    error_behavior: normalizeFrameErrorBehavior(frame.error_behavior),
     mountpoints,
     scenes: frame.scenes?.map((scene) => sanitizeScene(scene, frame)) ?? [],
   }
@@ -904,6 +972,7 @@ export const frameLogic = kea<frameLogicType>([
       },
       defaults: {} as FrameType,
       errors: (state: Partial<FrameType>) => ({
+        error_behavior: {},
         frame_admin_auth: state.frame_admin_auth?.enabled
           ? {
               user: state.frame_admin_auth?.user ? undefined : 'Username is required',

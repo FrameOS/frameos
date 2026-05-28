@@ -38,6 +38,7 @@ type
     network*: NetworkConfig
     agent*: AgentConfig
     mountpoints*: MountpointsConfig
+    errorBehavior*: ErrorBehaviorConfig
     palette*: PaletteConfig
 
   # Part of FrameConfig
@@ -94,6 +95,15 @@ type
   MountpointsConfig* = ref object
     enabled*: bool
     items*: seq[MountpointConfig]
+
+  # Part of FrameConfig
+  ErrorBehaviorConfig* = ref object
+    mode*: string
+    retrySeconds*: float
+    silentRetrySeconds*: float
+    silentRetryForever*: bool
+    silentWindowMinutes*: float
+    showErrorRetrySeconds*: float
 
   # Part of FrameConfig
   PaletteConfig* = ref object

@@ -20,6 +20,13 @@ proc setConfigDefaults*(config: var FrameConfig) =
   if config.network == nil: config.network = NetworkConfig(networkCheck: false)
   if config.agent == nil: config.agent = AgentConfig(agentEnabled: false)
   if config.mountpoints == nil: config.mountpoints = MountpointsConfig(enabled: false, items: @[])
+  if config.errorBehavior == nil: config.errorBehavior = ErrorBehaviorConfig(mode: "show_error_retry")
+  if config.errorBehavior.mode notin ["safe_mode", "show_error_retry", "silent_retry"]:
+    config.errorBehavior.mode = "show_error_retry"
+  if config.errorBehavior.retrySeconds <= 0: config.errorBehavior.retrySeconds = 60
+  if config.errorBehavior.silentRetrySeconds <= 0: config.errorBehavior.silentRetrySeconds = 60
+  if config.errorBehavior.silentWindowMinutes <= 0: config.errorBehavior.silentWindowMinutes = 10
+  if config.errorBehavior.showErrorRetrySeconds <= 0: config.errorBehavior.showErrorRetrySeconds = 60
   if config.timeZone == "": config.timeZone = detectSystemTimeZone()
 
 proc loadSchedule*(data: JsonNode): FrameSchedule =
@@ -149,6 +156,28 @@ proc loadMountpoints*(data: JsonNode): MountpointsConfig =
       options: item{"options"}.getStr("").strip(),
     ))
 
+proc loadErrorBehavior*(data: JsonNode): ErrorBehaviorConfig =
+  if data == nil or data.kind != JObject:
+    result = ErrorBehaviorConfig(mode: "show_error_retry")
+  else:
+    let silentWindowMinutes =
+      if data{"silentWindowMinutes"} != nil: data{"silentWindowMinutes"}.getFloat(10)
+      else: data{"silentRetryMinutes"}.getFloat(10)
+    result = ErrorBehaviorConfig(
+      mode: data{"mode"}.getStr("show_error_retry"),
+      retrySeconds: data{"retrySeconds"}.getFloat(60),
+      silentRetrySeconds: data{"silentRetrySeconds"}.getFloat(60),
+      silentRetryForever: data{"silentRetryForever"}.getBool(false),
+      silentWindowMinutes: silentWindowMinutes,
+      showErrorRetrySeconds: data{"showErrorRetrySeconds"}.getFloat(60),
+    )
+  if result.mode notin ["safe_mode", "show_error_retry", "silent_retry"]:
+    result.mode = "show_error_retry"
+  if result.retrySeconds <= 0: result.retrySeconds = 60
+  if result.silentRetrySeconds <= 0: result.silentRetrySeconds = 60
+  if result.silentWindowMinutes <= 0: result.silentWindowMinutes = 10
+  if result.showErrorRetrySeconds <= 0: result.showErrorRetrySeconds = 60
+
 proc getConfigFilename*(): string =
   result = getEnv("FRAMEOS_CONFIG")
   if result == "":
@@ -196,6 +225,7 @@ proc loadConfig*(): FrameConfig =
     network: loadNetwork(data{"network"}),
     agent: loadAgent(data{"agent"}),
     mountpoints: loadMountpoints(data{"mountpoints"}),
+    errorBehavior: loadErrorBehavior(data{"errorBehavior"}),
     palette: loadPalette(data{"palette"}),
   )
   if result.assetsPath.endswith("/"):
@@ -242,5 +272,6 @@ proc updateFrameConfigFrom*(target: FrameConfig, source: FrameConfig) =
   target.network = source.network
   target.agent = source.agent
   target.mountpoints = source.mountpoints
+  target.errorBehavior = source.errorBehavior
   target.palette = source.palette
   updateSchedule(target.schedule, source.schedule)

@@ -1,5 +1,16 @@
 import { Edge, Node } from 'reactflow'
 
+export type FrameErrorBehaviorMode = 'safe_mode' | 'show_error_retry' | 'silent_retry'
+
+export interface FrameErrorBehavior {
+  mode?: FrameErrorBehaviorMode
+  retry_seconds?: number
+  silent_retry_seconds?: number
+  silent_retry_forever?: boolean
+  silent_window_minutes?: number
+  show_error_retry_seconds?: number
+}
+
 export interface FrameType {
   id: number
   name: string
@@ -96,6 +107,7 @@ export interface FrameType {
     deployWithAgent?: boolean
   }
   mountpoints?: FrameMountpointsConfig
+  error_behavior?: FrameErrorBehavior
   palette?: Palette
   buildroot?: FrameBuildrootConfig
   rpios?: FrameRpiOSConfig

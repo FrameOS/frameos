@@ -1,5 +1,4 @@
 import std/[options, os, oserrors, strutils]
-import ../config
 import ../frameos
 import ../boot_guard
 import ../types
@@ -89,3 +88,49 @@ block test_startup_fallback_overrides_existing_scene:
   doAssert changed
   doAssert firstSceneId.isSome
   doAssert firstSceneId.get().string == bootGuardFallbackSceneId()
+
+block test_fatal_retry_action_safe_mode_quits:
+  let action = fatalStartupRetryAction(ErrorBehaviorConfig(mode: "safe_mode"), 100, 100)
+
+  doAssert action.quitProcess
+  doAssert not action.showError
+
+block test_fatal_retry_action_show_error_retries:
+  let action = fatalStartupRetryAction(ErrorBehaviorConfig(mode: "show_error_retry", retrySeconds: 42), 100, 100)
+
+  doAssert not action.quitProcess
+  doAssert action.showError
+  doAssert action.retrySeconds == 42
+
+block test_fatal_retry_action_silent_retry_window:
+  let behavior = ErrorBehaviorConfig(
+    mode: "silent_retry",
+    silentRetrySeconds: 7,
+    silentRetryForever: false,
+    silentWindowMinutes: 2,
+    showErrorRetrySeconds: 60,
+  )
+
+  let silentAction = fatalStartupRetryAction(behavior, 100, 219)
+  doAssert not silentAction.quitProcess
+  doAssert not silentAction.showError
+  doAssert silentAction.retrySeconds == 7
+
+  let visibleAction = fatalStartupRetryAction(behavior, 100, 220)
+  doAssert not visibleAction.quitProcess
+  doAssert visibleAction.showError
+  doAssert visibleAction.retrySeconds == 60
+
+block test_fatal_retry_action_silent_retry_forever:
+  let behavior = ErrorBehaviorConfig(
+    mode: "silent_retry",
+    silentRetrySeconds: 9,
+    silentRetryForever: true,
+    silentWindowMinutes: 1,
+    showErrorRetrySeconds: 60,
+  )
+
+  let action = fatalStartupRetryAction(behavior, 100, 10000)
+  doAssert not action.quitProcess
+  doAssert not action.showError
+  doAssert action.retrySeconds == 9
