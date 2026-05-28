@@ -37,6 +37,11 @@ const
   EPD_5in83_V2_HEIGHT* = 480
 
 proc EPD_5in83_V2_Init*() {.importc: "EPD_5in83_V2_Init".}
+proc EPD_5in83_V2_Init_Fast*() {.importc: "EPD_5in83_V2_Init_Fast".}
+proc EPD_5in83_V2_Init_Part*() {.importc: "EPD_5in83_V2_Init_Part".}
+proc EPD_5in83_V2_Init_4GRAY*() {.importc: "EPD_5in83_V2_Init_4GRAY".}
 proc EPD_5in83_V2_Clear*() {.importc: "EPD_5in83_V2_Clear".}
 proc EPD_5in83_V2_Display*(Image: ptr UBYTE) {.importc: "EPD_5in83_V2_Display".}
+proc EPD_5in83_V2_Display_Partial*(Image: ptr UBYTE; Xstart: UWORD; Ystart: UWORD; Xend: UWORD; Yend: UWORD) {.importc: "EPD_5in83_V2_Display_Partial".}
+proc EPD_5in83_V2_Display_4Gray*(Image: ptr UBYTE) {.importc: "EPD_5in83_V2_Display_4Gray".}
 proc EPD_5in83_V2_Sleep*() {.importc: "EPD_5in83_V2_Sleep".}

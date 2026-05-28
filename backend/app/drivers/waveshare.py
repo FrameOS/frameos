@@ -59,7 +59,7 @@ VARIANT_COLORS = {
     "EPD_2in66": "Black",
     "EPD_3in52": "Black",
     "EPD_5in83": "Black",
-    "EPD_5in83_V2": "Black",
+    "EPD_5in83_V2": "FourGray",
     "EPD_5in84": "Black",
     "EPD_7in5": "Black",
     "EPD_13in3k": "Black",
