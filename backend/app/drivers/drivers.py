@@ -53,6 +53,14 @@ DRIVERS = {
         name="inkyHyperPixel2r",
         import_path="inkyHyperPixel2r/inkyHyperPixel2r",
         setup_import_path="inkyHyperPixel2r/inkyHyperPixel2r",
+        can_render=True,
+        can_turn_on_off=True,
+        link_flags=("-llgpio",),
+    ),
+    "inkyHyperPixel2rLegacyFb": Driver(
+        name="inkyHyperPixel2rLegacyFb",
+        import_path="inkyHyperPixel2rLegacyFb/inkyHyperPixel2rLegacyFb",
+        setup_import_path="inkyHyperPixel2rLegacyFb/inkyHyperPixel2rLegacyFb",
         vendor_folder="inkyHyperPixel2r",
         can_render=True,
         can_turn_on_off=True

@@ -25,6 +25,25 @@ def test_framebuffer_frame_uses_evdev_for_local_input():
     assert "evdev" in drivers
 
 
+def test_hyperpixel_round_uses_native_lgpio_driver_by_default():
+    drivers = drivers_for_frame(frame("pimoroni.hyperpixel2r"))
+
+    assert "inkyHyperPixel2r" in drivers
+    assert "inkyHyperPixel2rLegacyFb" not in drivers
+    assert "evdev" in drivers
+    assert drivers["inkyHyperPixel2r"].vendor_folder is None
+    assert drivers["inkyHyperPixel2r"].link_flags == ("-llgpio",)
+
+
+def test_hyperpixel_round_legacy_fb_uses_vendor_driver():
+    drivers = drivers_for_frame(frame("pimoroni.hyperpixel2r_legacy_fb"))
+
+    assert "inkyHyperPixel2rLegacyFb" in drivers
+    assert "inkyHyperPixel2r" not in drivers
+    assert "evdev" in drivers
+    assert drivers["inkyHyperPixel2rLegacyFb"].vendor_folder == "inkyHyperPixel2r"
+
+
 def test_waveshare_epd10in3_uses_boot_config_without_generic_spi_setup():
     drivers = drivers_for_frame(frame("waveshare.EPD_10in3"))
 

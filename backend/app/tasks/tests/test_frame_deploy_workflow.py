@@ -420,6 +420,88 @@ async def test_full_plan_reports_installed_state_and_remote_build_dependencies(m
     assert plan.full_deploy.post_deploy["bootconfig_changes"] == []
     assert plan.full_deploy.post_deploy["final_action"] == "restart_frameos"
 
+
+@pytest.mark.asyncio
+async def test_full_plan_native_hyperpixel_uses_lgpio_without_vendor_sync(monkeypatch: pytest.MonkeyPatch):
+    frame = SimpleNamespace(
+        id=30,
+        name="NativeHyperPixel",
+        ssh_keys=[],
+        rpios={"crossCompilation": "auto", "compilationMode": "precompiled"},
+        reboot=None,
+        last_successful_deploy={"frameos_version": "9.9.9"},
+        last_successful_deploy_at="2026-01-01T00:00:00+00:00",
+        to_dict=lambda: {"id": 30, "name": "NativeHyperPixel"},
+    )
+
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.drivers_for_frame", lambda _frame: {"inkyHyperPixel2r": SimpleNamespace()})
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.get_settings_dict", lambda _db: {})
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.select_ssh_keys_for_frame", lambda _frame, _settings: [])
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.normalize_ssh_keys", lambda _settings: [])
+
+    workflow = FrameDeployWorkflow(
+        db=None,
+        redis=None,
+        frame=frame,
+        deployer=FakeDeployer(),
+        temp_dir="",
+        binary_builder=FakePrecompiledBinaryBuilder(),
+    )
+
+    plan = await workflow.plan("full")
+
+    assert plan.full_deploy is not None
+    package_names = {pkg.name for pkg in plan.full_deploy.package_plans}
+    assert "liblgpio-dev" in package_names
+    assert "python3-dev" not in package_names
+    assert "python3-pip" not in package_names
+    assert "python3-venv" not in package_names
+    assert plan.full_deploy.vendor_sync_plans == []
+
+
+@pytest.mark.asyncio
+async def test_full_plan_legacy_hyperpixel_keeps_python_vendor_setup(monkeypatch: pytest.MonkeyPatch):
+    frame = SimpleNamespace(
+        id=31,
+        name="LegacyHyperPixel",
+        ssh_keys=[],
+        rpios={"crossCompilation": "auto", "compilationMode": "precompiled"},
+        reboot=None,
+        last_successful_deploy={"frameos_version": "9.9.9"},
+        last_successful_deploy_at="2026-01-01T00:00:00+00:00",
+        to_dict=lambda: {"id": 31, "name": "LegacyHyperPixel"},
+    )
+
+    monkeypatch.setattr(
+        "app.tasks.frame_deploy_workflow.drivers_for_frame",
+        lambda _frame: {"inkyHyperPixel2rLegacyFb": SimpleNamespace(vendor_folder="inkyHyperPixel2r")},
+    )
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.get_settings_dict", lambda _db: {})
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.select_ssh_keys_for_frame", lambda _frame, _settings: [])
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.normalize_ssh_keys", lambda _settings: [])
+
+    workflow = FrameDeployWorkflow(
+        db=None,
+        redis=None,
+        frame=frame,
+        deployer=FakeDeployer(),
+        temp_dir="",
+        binary_builder=FakePrecompiledBinaryBuilder(),
+    )
+
+    plan = await workflow.plan("full")
+
+    assert plan.full_deploy is not None
+    package_names = {pkg.name for pkg in plan.full_deploy.package_plans}
+    assert "liblgpio-dev" not in package_names
+    assert "python3-dev" in package_names
+    assert "python3-pip" in package_names
+    assert "python3-venv" in package_names
+    assert [vendor.key for vendor in plan.full_deploy.vendor_sync_plans] == ["inkyHyperPixel2rLegacyFb"]
+    assert plan.full_deploy.vendor_sync_plans[0].vendor_folder == "inkyHyperPixel2r"
+    assert plan.full_deploy.vendor_sync_plans[0].preserve_remote_paths == ("env", "requirements.txt.sha256sum")
+
+
 @pytest.mark.asyncio
 async def test_full_plan_skips_remote_build_dependencies_for_precompiled(monkeypatch: pytest.MonkeyPatch):
     frame = SimpleNamespace(

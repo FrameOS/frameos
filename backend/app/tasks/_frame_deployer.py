@@ -749,7 +749,7 @@ $(OBJECTS): pre-build
             shutil.rmtree(os.path.join(build_dir, "vendor", vendor_folder, "env"), ignore_errors=True)
             shutil.rmtree(os.path.join(build_dir, "vendor", vendor_folder, "__pycache__"), ignore_errors=True)
 
-        if inkyHyperPixel2r := drivers.get('inkyHyperPixel2r'):
+        if inkyHyperPixel2r := drivers.get('inkyHyperPixel2rLegacyFb'):
             vendor_folder = inkyHyperPixel2r.vendor_folder or ""
             os.makedirs(os.path.join(build_dir, "vendor"), exist_ok=True)
             shutil.copytree(

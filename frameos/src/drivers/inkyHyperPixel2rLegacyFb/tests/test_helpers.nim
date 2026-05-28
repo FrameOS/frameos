@@ -1,18 +1,18 @@
 import std/unittest
 
-import ../inkyHyperPixel2r
+import ../inkyHyperPixel2rLegacyFb
 
-suite "inkyHyperPixel2r driver helpers":
+suite "inkyHyperPixel2r legacy framebuffer driver helpers":
   teardown:
     execCmdHook = nil
 
   test "turnOn and turnOff use python scripts":
     var commands: seq[string] = @[]
-    execCmdHook = proc(command: string): int {.nimcall.} =
+    execCmdHook = proc(command: string): int =
       commands.add(command)
       0
 
-    let driver = Driver(mode: "linux")
+    let driver = Driver()
     driver.turnOn()
     driver.turnOff()
 

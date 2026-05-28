@@ -21,6 +21,7 @@ BASE_RELEASE_DRIVER_KEYS = (
     "inky",
     "httpUpload",
     "inkyHyperPixel2r",
+    "inkyHyperPixel2rLegacyFb",
     "inkyPython",
 )
 
@@ -212,6 +213,8 @@ proc shouldLoadDriver(spec: DriverSpec, frameOS: FrameOS): bool =
     return device == "http.upload"
   of "inkyHyperPixel2r":
     return device == "pimoroni.hyperpixel2r"
+  of "inkyHyperPixel2rLegacyFb":
+    return device == "pimoroni.hyperpixel2r_legacy_fb"
   of "inky":
     return isNativeInkyDevice(device)
   of "inkyPython":
