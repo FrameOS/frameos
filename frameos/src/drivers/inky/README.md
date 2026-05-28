@@ -34,6 +34,23 @@ families and transfer paths as the tested devices above, so they are expected
 to work unless their board revision differs from Pimoroni's current Python
 driver behaviour.
 
+## Upstream Sync
+
+Synced against Pimoroni `inky` 2.4.0, released April 14, 2026. The 2.3.0 and
+2.4.0 upstream changes since the previous Python fallback pin are covered here:
+
+- 2.3.0 added Spectra 6 4.0" / E640 support. FrameOS maps that to
+  `pimoroni.inky_impression_4_2025`, with `_4` and `_4_spectra6` as aliases.
+- 2.4.0 added AC Waveform Spectra 6 EEPROM variants. Upstream maps those to
+  the existing E673 7.3" and EL133UF1 13.3" drivers. FrameOS uses the
+  product-level `pimoroni.inky_impression_7` and
+  `pimoroni.inky_impression_13` device names for these panels because the
+  transfer paths are identical.
+- The native E673 render path includes Pimoroni's post-refresh PSR reset, and
+  the native EL133UF1 init sequence matches the updated 2.4.0 values.
+- `frameos/vendor/inkyPython` is pinned to `inky==2.4.0` so the Python fallback
+  can auto-detect EEPROM variants 25, 26, and 27 as well.
+
 ## Current Pin Maps
 
 The native Inky panels use Pimoroni's HAT pinout rather than the Waveshare HAT

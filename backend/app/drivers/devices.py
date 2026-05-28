@@ -124,7 +124,10 @@ def drivers_for_frame(frame: Frame) -> dict[str, Driver]:
         device_drivers["evdev"] = DRIVERS["evdev"]
 
     if frame.device in INKY_BUTTON_DEVICES:
-        if frame.device in {"pimoroni.inky_impression_13", "pimoroni.inky_impression_13_2025"}:
+        if frame.device in {
+            "pimoroni.inky_impression_13",
+            "pimoroni.inky_impression_13_2025",
+        }:
             frame.gpio_buttons = [
                 {"pin": 5, "label": "A"},
                 {"pin": 6, "label": "B"},

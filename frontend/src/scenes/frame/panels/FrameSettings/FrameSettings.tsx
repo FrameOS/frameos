@@ -181,9 +181,10 @@ export function FrameSettings({
     'pimoroni.inky_impression_13',
     'pimoroni.inky_impression_13_2025',
   ].includes(frameForm.device || '')
-  const inkyThirteenDevice = ['pimoroni.inky_impression_13', 'pimoroni.inky_impression_13_2025'].includes(
-    frameForm.device || ''
-  )
+  const inkyThirteenDevice = [
+    'pimoroni.inky_impression_13',
+    'pimoroni.inky_impression_13_2025',
+  ].includes(frameForm.device || '')
   const sshKeyOptions = normalizeSshKeys(savedSettings?.ssh_keys).keys
   const normalizeKeyIds = (keys: string[]) => Array.from(new Set(keys)).sort()
   const deployedSshKeyIds = normalizeKeyIds(

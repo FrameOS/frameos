@@ -15,7 +15,7 @@ gpiodevice==0.0.5
     # via
     #   -r requirements.in
     #   inky
-inky==2.2.1
+inky==2.4.0
     # via -r requirements.in
 numpy==2.2.1
     # via

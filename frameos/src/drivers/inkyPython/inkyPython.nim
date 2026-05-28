@@ -67,12 +67,28 @@ proc deviceArgs*(dev: string): seq[string] =
 proc isInkyButtonDevice(device: string): bool =
   device in [
     "pimoroni.inky_impression",
+    "pimoroni.inky_impression_4",
+    "pimoroni.inky_impression_4_2025",
+    "pimoroni.inky_impression_4_spectra6",
     "pimoroni.inky_impression_7",
+    "pimoroni.inky_impression_7_2025",
     "pimoroni.inky_impression_13",
+    "pimoroni.inky_impression_13_2025",
   ]
 
 proc isInkyDriverDevice(device: string): bool =
   isInkyButtonDevice(device) or device == "pimoroni.inky_python"
+
+proc isSpectraPythonDevice(device: string): bool =
+  device in [
+    "pimoroni.inky_impression_4",
+    "pimoroni.inky_impression_4_2025",
+    "pimoroni.inky_impression_4_spectra6",
+    "pimoroni.inky_impression_7",
+    "pimoroni.inky_impression_7_2025",
+    "pimoroni.inky_impression_13",
+    "pimoroni.inky_impression_13_2025",
+  ]
 
 proc init*(frameOS: DriverContext): Driver =
   discard frameOS.logger.safeLog("Initializing Inky driver")
@@ -153,7 +169,7 @@ proc render*(self: Driver, image: Image) =
 
   var imageData: seq[uint8]
   var extraArgs: seq[string] = @[]
-  if self.device == "pimoroni.inky_impression_7" or self.device == "pimoroni.inky_impression_13":
+  if isSpectraPythonDevice(self.device):
     var palette: seq[(int, int, int)]
     if self.palette != nil and self.palette.colors.len > 0:
       let c = self.palette.colors
