@@ -20,6 +20,21 @@ The catch-all `pimoroni.inky_impression` and `pimoroni.inky_python` devices
 remain on `inkyPython` because they still rely on EEPROM auto-detection or
 unported panel protocols.
 
+## Attribution
+
+This native Nim driver is a FrameOS port of the panel knowledge maintained by
+Pimoroni in their open-source `pimoroni/inky` Python library:
+
+https://github.com/pimoroni/inky
+
+Pimoroni's driver code is the source of truth for the panel command sequences,
+GPIO/SPI pin mappings, display variant mappings, colour indices, busy-wait
+behaviour, and panel-specific transfer details used here. FrameOS keeps the
+runtime native so deployed frames do not need to carry a Python interpreter, but
+the low-level hardware behaviour mirrors Pimoroni's work. See the per-driver
+links in "Upstream References" below for the exact Python modules used while
+porting.
+
 ## Hardware Validation
 
 The following Pimoroni devices have been tested on hardware and confirmed
