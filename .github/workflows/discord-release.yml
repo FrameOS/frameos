@@ -1,0 +1,69 @@
+name: Notify Discord of Release
+
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+    inputs:
+      release_name:
+        description: Release display name
+        required: true
+        type: string
+      release_tag:
+        description: Release tag
+        required: true
+        type: string
+      release_url:
+        description: Release URL
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    name: Post release link
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post release link to Discord
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+            echo "DISCORD_RELEASE_WEBHOOK_URL is not configured." >&2
+            exit 1
+          fi
+
+          python3 - <<'PY'
+          import json
+          import os
+
+          with open(os.environ["GITHUB_EVENT_PATH"], encoding="utf-8") as event_file:
+              event = json.load(event_file)
+
+          if os.environ["GITHUB_EVENT_NAME"] == "release":
+              release = event["release"]
+              release_name = release.get("name") or release["tag_name"]
+              release_url = release["html_url"]
+          else:
+              inputs = event.get("inputs", {})
+              release_name = inputs.get("release_name") or inputs["release_tag"]
+              release_url = inputs["release_url"]
+
+          payload = {
+              "content": f"New FrameOS release: {release_name}\n{release_url}",
+              "allowed_mentions": {"parse": []},
+          }
+
+          with open("discord-payload.json", "w", encoding="utf-8") as payload_file:
+              json.dump(payload, payload_file)
+          PY
+
+          curl --fail-with-body --show-error --silent \
+            -H "Content-Type: application/json" \
+            --data @discord-payload.json \
+            "$DISCORD_WEBHOOK_URL"

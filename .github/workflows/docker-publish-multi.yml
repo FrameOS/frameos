@@ -9,6 +9,7 @@ on:
         type: string
 
 permissions:
+  actions: write
   contents: write
 
 jobs:
@@ -384,3 +385,16 @@ jobs:
               --title "FrameOS ${DOCKER_VERSION}" \
               --notes-file release-notes.md
           fi
+
+      - name: Dispatch Discord notification
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DOCKER_VERSION: ${{ needs.update-versions.outputs.docker_version }}
+          RELEASE_TAG: ${{ needs.update-versions.outputs.release_tag }}
+          RELEASE_URL: https://github.com/${{ github.repository }}/releases/tag/${{ needs.update-versions.outputs.release_tag }}
+        run: |
+          gh workflow run discord-release.yml \
+            --ref main \
+            -f release_name="FrameOS ${DOCKER_VERSION}" \
+            -f release_tag="$RELEASE_TAG" \
+            -f release_url="$RELEASE_URL"
