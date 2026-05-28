@@ -227,6 +227,11 @@ export async function settleForScreenshot(page: Page): Promise<void> {
         scroll-behavior: auto !important;
       }
       .continuous-fade-in-out { animation: none !important; opacity: 1 !important; }
+      .frameos-connection-dot__flow {
+        animation: none !important;
+        opacity: 0 !important;
+        transform: scale(1) !important;
+      }
       input, textarea { caret-color: transparent !important; }
       html[data-frameos-theme='light'] *,
       html[data-frameos-theme='light'] *::before,
