@@ -51,7 +51,7 @@ from app.utils.token import secure_token
 SUPPORTED_BUILDROOT_PLATFORM = "raspberry-pi-zero-2-w"
 BUILDROOT_HOST_CXXFLAGS = "-O2 -pipe -std=gnu++17"
 BUILDROOT_HOST_CFLAGS = "-O2 -pipe"
-BUILDROOT_BOOTSTRAP_SCRIPT_VERSION = "3"
+BUILDROOT_BOOTSTRAP_SCRIPT_VERSION = "4"
 BUILDROOT_FRAMEOS_PARTITION_SIZE = os.environ.get("FRAMEOS_BUILDROOT_FRAMEOS_PARTITION_SIZE", "512M")
 BUILDROOT_ASSETS_PARTITION_SIZE = os.environ.get("FRAMEOS_BUILDROOT_ASSETS_PARTITION_SIZE", "512M")
 BUILDROOT_DOCKER_NOFILE_LIMIT = int(os.environ.get("FRAMEOS_BUILDROOT_DOCKER_NOFILE_LIMIT", "65535"))
@@ -921,6 +921,7 @@ export HOSTFC="/usr/bin/gfortran"
 export CFLAGS="{BUILDROOT_HOST_CFLAGS}"
 export CXXFLAGS="{BUILDROOT_HOST_CXXFLAGS}"
 export HOSTCXXFLAGS="{BUILDROOT_HOST_CXXFLAGS}"
+unset TERMINFO TERMINFO_DIRS
 
 if [ "${{BUILDROOT_SKIP_APT_INSTALL:-0}}" != "1" ]; then
   apt-get update
@@ -953,6 +954,13 @@ for path in /build/output/build/host-cmake-*; do
     rm -rf "$path"
   fi
 done
+if compgen -G "/build/output/build/ncurses-*/.stamp_staging_installed" >/dev/null \\
+  && ! find /build/output/host -path "*/sysroot/usr/share/terminfo/a/ansi" -type f -print -quit | grep -q .; then
+  for stamp in /build/output/build/ncurses-*/.stamp_staging_installed; do
+    ncurses_dir="$(dirname "$stamp")"
+    rm -f "$ncurses_dir/.stamp_staging_installed" "$ncurses_dir/.stamp_target_installed"
+  done
+fi
 make -C /build/buildroot O=/build/output {BUILDROOT_DEFCONFIG}
 cat /work/frameos-buildroot.config >> /build/output/.config
 make -C /build/buildroot O=/build/output olddefconfig

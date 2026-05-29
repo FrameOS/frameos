@@ -82,7 +82,10 @@ def test_buildroot_script_builds_output_on_container_filesystem(tmp_path):
     assert "export HOSTFC=\"/usr/bin/gfortran\"" in script
     assert "CXXFLAGS=\"-O2 -pipe -std=gnu++17\"" in script
     assert "HOSTCXXFLAGS=\"-O2 -pipe -std=gnu++17\"" in script
+    assert "unset TERMINFO TERMINFO_DIRS" in script
     assert "for path in /build/output/build/host-cmake-*;" in script
+    assert ".stamp_staging_installed" in script
+    assert "usr/share/terminfo/a/ansi" in script
     assert "ulimit -n 65535" in script
     assert "dd if=/build/output/images/sdcard.img of=/artifacts/frameos-test.img" in script
     assert "O=/work/output" not in script
