@@ -1,6 +1,13 @@
 name: Publish FrameOS cross-toolchain images
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - backend/bin/cross
+      - backend/tools/cross-toolchain.Dockerfile
+      - .github/workflows/frameos-cross-toolchain.yml
   workflow_dispatch:
     inputs:
       image_tag:
@@ -10,7 +17,7 @@ on:
         type: string
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   determine-matrix:
@@ -27,9 +34,6 @@ jobs:
   publish:
     needs: determine-matrix
     runs-on: ubuntu-24.04
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJson(needs.determine-matrix.outputs.targets) }}
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-qemu-action@v3
@@ -39,21 +43,84 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: Build and push cross-toolchain image
+      - name: Build and push cross-toolchain images
         env:
-          TARGET_DISTRIBUTION: ${{ matrix.distro }}
-          TARGET_VERSION: ${{ matrix.version }}
-          TARGET_PLATFORM: ${{ matrix.platform }}
-          BASE_IMAGE: ${{ matrix.image }}
           IMAGE_TAG: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.image_tag || 'latest' }}
+          MATRIX: ${{ needs.determine-matrix.outputs.targets }}
         run: |
           set -euo pipefail
-          SAFE_PLATFORM="${TARGET_PLATFORM//\//_}"
-          IMAGE="frameos/frameos-cross-toolchain:${TARGET_DISTRIBUTION}_${TARGET_VERSION}-${SAFE_PLATFORM}-${IMAGE_TAG}"
-          docker buildx build \
-            --platform "$TARGET_PLATFORM" \
-            --build-arg BASE_IMAGE="$BASE_IMAGE" \
-            --tag "$IMAGE" \
-            --push \
-            -f backend/tools/cross-toolchain.Dockerfile \
-            .
+          python3 - <<'PY'
+          from __future__ import annotations
+
+          import json
+          import os
+          import re
+          import subprocess
+          from pathlib import Path
+
+          def sanitize(value: str) -> str:
+              return re.sub(r"[^A-Za-z0-9_.-]+", "_", value)
+
+          matrix = json.loads(os.environ["MATRIX"])
+          image_repo = "frameos/frameos-cross-toolchain"
+          image_tag = os.environ.get("IMAGE_TAG", "latest").strip() or "latest"
+          digest_data = {"images": {}}
+
+          for index, target in enumerate(matrix["include"]):
+              base_image = target["image"]
+              safe_base = sanitize(base_image.replace("/", "_"))
+              safe_platform = sanitize(target["platform"].replace("/", "_"))
+              image = f"{image_repo}:{safe_base}-{safe_platform}-{image_tag}"
+              metadata_file = Path(f"/tmp/toolchain-metadata-{index}.json")
+
+              subprocess.run(
+                  [
+                      "docker",
+                      "buildx",
+                      "build",
+                      "--platform",
+                      target["platform"],
+                      "--build-arg",
+                      f"BASE_IMAGE={base_image}",
+                      "--tag",
+                      image,
+                      "--push",
+                      "--metadata-file",
+                      str(metadata_file),
+                      "-f",
+                      "backend/tools/cross-toolchain.Dockerfile",
+                      ".",
+                  ],
+                  check=True,
+              )
+
+              metadata = json.loads(metadata_file.read_text(encoding="utf-8"))
+              digest = (metadata.get("containerimage") or {}).get("digest")
+              if not digest:
+                  raise RuntimeError(f"Missing container image digest for {image}")
+
+              digest_data["images"][image] = {
+                  "digest": digest,
+                  "platform": target["platform"],
+                  "base_image": base_image,
+                  "tag": image_tag,
+              }
+
+          Path("cross-toolchain-images.json").write_text(
+              json.dumps(digest_data, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+      - name: Commit updated cross-toolchain digests
+        if: github.event_name == 'push'
+        run: |
+          set -euo pipefail
+          git add cross-toolchain-images.json
+          if git diff --cached --quiet; then
+            echo "No cross-toolchain digest updates to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore: refresh cross-toolchain image digests [skip ci]"
+          git push
