@@ -814,7 +814,7 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get install -y --no-install-recommends \\
   bc bison build-essential ca-certificates cpio curl file flex git libncurses-dev \\
-  make patch perl python3 unzip wget xz-utils ccache
+  make patch perl python3 rsync unzip wget xz-utils ccache
 
 mkdir -p /cache /work /artifacts /build/buildroot /build/output
 if [ ! -f /build/buildroot/.frameos-buildroot-version ]; then

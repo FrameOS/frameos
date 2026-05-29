@@ -66,6 +66,7 @@ def test_buildroot_script_builds_output_on_container_filesystem(tmp_path):
     script = script_path.read_text(encoding="utf-8")
 
     assert "O=/build/output" in script
+    assert "rsync" in script
     assert "dd if=/build/output/images/sdcard.img of=/artifacts/frameos-test.img" in script
     assert "O=/work/output" not in script
     assert "cp /work/output/images/sdcard.img" not in script
