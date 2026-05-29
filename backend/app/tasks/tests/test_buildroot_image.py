@@ -4,6 +4,8 @@ import gzip
 import json
 from types import SimpleNamespace
 
+import pytest
+
 from app.tasks.buildroot_image import (
     FRAMEOS_BUILD_TARGET,
     BuildrootImageBuilder,
@@ -57,6 +59,7 @@ def test_buildroot_config_avoids_ncurses_selecting_packages(tmp_path):
     assert "BR2_PACKAGE_PROCPS_NG" not in config
     assert 'BR2_DL_DIR="/cache/dl"' in config
     assert "BR2_PACKAGE_DROPBEAR=y" in config
+    assert "# BR2_CCACHE is not set" in config
 
 
 def test_buildroot_script_builds_output_on_container_filesystem(tmp_path):
@@ -67,9 +70,49 @@ def test_buildroot_script_builds_output_on_container_filesystem(tmp_path):
 
     assert "O=/build/output" in script
     assert "rsync" in script
+    assert "gfortran" in script
+    assert "libssl-dev" in script
+    assert "export CC=\"/usr/bin/gcc\"" in script
+    assert "export CXX=\"/usr/bin/g++\"" in script
+    assert "export FC=\"/usr/bin/gfortran\"" in script
+    assert "export HOSTCC=\"/usr/bin/gcc\"" in script
+    assert "export HOSTCXX=\"/usr/bin/g++\"" in script
+    assert "export HOSTFC=\"/usr/bin/gfortran\"" in script
+    assert "CXXFLAGS=\"-O2 -pipe -std=gnu++17\"" in script
+    assert "HOSTCXXFLAGS=\"-O2 -pipe -std=gnu++17\"" in script
+    assert "for path in /build/output/build/host-cmake-*;" in script
+    assert "ulimit -n 65535" in script
     assert "dd if=/build/output/images/sdcard.img of=/artifacts/frameos-test.img" in script
     assert "O=/work/output" not in script
     assert "cp /work/output/images/sdcard.img" not in script
+
+
+@pytest.mark.asyncio
+async def test_buildroot_docker_run_raises_nofile_limit(tmp_path, monkeypatch):
+    temp_dir = tmp_path / "tmp"
+    artifact_dir = tmp_path / "artifacts"
+    cache_dir = tmp_path / "cache"
+    source_dir = tmp_path / "source"
+    output_dir = tmp_path / "output"
+    for path in (temp_dir, artifact_dir, cache_dir, source_dir, output_dir):
+        path.mkdir(parents=True)
+
+    builder = BuildrootImageBuilder(db=object(), redis=None, frame=SimpleNamespace(id=1))
+    captured = {}
+
+    async def fake_exec_local_command(*args, **kwargs):
+        captured["command"] = args[3]
+        return 0, "", ""
+
+    async def fake_log(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr("app.tasks.buildroot_image.exec_local_command", fake_exec_local_command)
+    monkeypatch.setattr(builder, "_log", fake_log)
+
+    await builder._run_buildroot(temp_dir, artifact_dir, cache_dir, source_dir, output_dir)
+
+    assert "--ulimit nofile=65535:65535" in captured["command"]
 
 
 def test_buildroot_service_writes_console_output_and_environment(tmp_path):
@@ -93,6 +136,24 @@ def test_buildroot_service_writes_console_output_and_environment(tmp_path):
     assert "Environment=LD_LIBRARY_PATH=/usr/lib" in service
     assert "StandardOutput=journal+console" in service
     assert "StandardError=journal+console" in service
+
+
+def test_buildroot_output_cache_key_tracks_bootstrap_inputs(tmp_path, monkeypatch):
+    overlay_dir = tmp_path / "overlay"
+    overlay_dir.mkdir(parents=True)
+    config_path = tmp_path / "frameos-buildroot.config"
+    post_build_path = tmp_path / "post-build.sh"
+
+    BuildrootImageBuilder._write_buildroot_config(config_path)
+    BuildrootImageBuilder._write_post_build_script(post_build_path)
+
+    builder = BuildrootImageBuilder(db=object(), redis=None, frame=SimpleNamespace(id=1))
+
+    key_base = builder._buildroot_output_cache_key("build-id", overlay_dir, config_path, post_build_path)
+    monkeypatch.setattr("app.tasks.buildroot_image.BUILDROOT_HOST_CXXFLAGS", "-std=gnu++20")
+    key_modified = builder._buildroot_output_cache_key("build-id", overlay_dir, config_path, post_build_path)
+
+    assert key_base != key_modified
 
 
 def test_buildroot_authorized_keys_enable_dropbear(tmp_path, monkeypatch):

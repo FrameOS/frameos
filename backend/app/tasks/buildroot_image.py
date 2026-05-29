@@ -47,6 +47,34 @@ from app.utils.local_exec import exec_local_command
 from app.utils.token import secure_token
 
 SUPPORTED_BUILDROOT_PLATFORM = "raspberry-pi-zero-2-w"
+BUILDROOT_HOST_CXXFLAGS = "-O2 -pipe -std=gnu++17"
+BUILDROOT_HOST_CFLAGS = "-O2 -pipe"
+BUILDROOT_BOOTSTRAP_SCRIPT_VERSION = "3"
+BUILDROOT_DOCKER_NOFILE_LIMIT = int(os.environ.get("FRAMEOS_BUILDROOT_DOCKER_NOFILE_LIMIT", "65535"))
+BUILDROOT_DOCKER_APT_DEPS = (
+    "bc",
+    "bison",
+    "build-essential",
+    "ca-certificates",
+    "cpio",
+    "curl",
+    "file",
+    "flex",
+    "g++",
+    "gfortran",
+    "git",
+    "libncurses-dev",
+    "libssl-dev",
+    "make",
+    "perl",
+    "python3",
+    "rsync",
+    "unzip",
+    "wget",
+    "xdg-utils",
+    "xz-utils",
+)
+BUILDROOT_DOCKER_APT_DEPS_LINE = " ".join(BUILDROOT_DOCKER_APT_DEPS)
 LEGACY_PLATFORM_ALIASES = {
     "",
     "pi-zero2",
@@ -106,10 +134,6 @@ def buildroot_source_dir() -> Path:
 
 def buildroot_output_cache_dir() -> Path:
     return Path(os.environ.get("FRAMEOS_BUILDROOT_OUTPUT_CACHE_DIR") or (buildroot_cache_dir() / "output"))
-
-
-def buildroot_ccache_dir() -> Path:
-    return Path(os.environ.get("FRAMEOS_BUILDROOT_CCACHE_DIR") or (buildroot_cache_dir() / "ccache"))
 
 
 def _lgpio_runtime_library_paths() -> list[Path]:
@@ -374,12 +398,10 @@ class BuildrootImageBuilder:
         cache_dir = buildroot_cache_dir()
         source_dir = buildroot_source_dir()
         output_cache_root = buildroot_output_cache_dir()
-        ccache_dir = buildroot_ccache_dir()
         artifact_dir.mkdir(parents=True, exist_ok=True)
         cache_dir.mkdir(parents=True, exist_ok=True)
         source_dir.mkdir(parents=True, exist_ok=True)
         output_cache_root.mkdir(parents=True, exist_ok=True)
-        ccache_dir.mkdir(parents=True, exist_ok=True)
 
         with tempfile.TemporaryDirectory(prefix=f"frameos-buildroot-{self.frame.id}-") as tmp:
             temp_dir = Path(tmp)
@@ -740,9 +762,7 @@ class BuildrootImageBuilder:
                     "BR2_PACKAGE_LINUX_FIRMWARE_BRCM_BCM43XXX=y",
                     "BR2_PACKAGE_BRCMFMAC_SDIO_FIRMWARE_RPI=y",
                     "BR2_PACKAGE_LIBEVDEV=y",
-                    "BR2_CCACHE=y",
-                    'BR2_CCACHE_DIR="/cache/ccache"',
-                    "BR2_CCACHE_USE_BASEDIR=y",
+                    "# BR2_CCACHE is not set",
                     'BR2_ROOTFS_OVERLAY="/work/overlay"',
                     'BR2_ROOTFS_POST_BUILD_SCRIPT="board/raspberrypizero2w-64/post-build.sh /work/post-build.sh"',
                     "",
@@ -810,11 +830,21 @@ class BuildrootImageBuilder:
             f"""#!/usr/bin/env bash
 set -euo pipefail
 
+ulimit -n {BUILDROOT_DOCKER_NOFILE_LIMIT} || true
+
 export DEBIAN_FRONTEND=noninteractive
+export CC="/usr/bin/gcc"
+export CXX="/usr/bin/g++"
+export FC="/usr/bin/gfortran"
+export HOSTCC="/usr/bin/gcc"
+export HOSTCXX="/usr/bin/g++"
+export HOSTFC="/usr/bin/gfortran"
+export CFLAGS="{BUILDROOT_HOST_CFLAGS}"
+export CXXFLAGS="{BUILDROOT_HOST_CXXFLAGS}"
+export HOSTCXXFLAGS="{BUILDROOT_HOST_CXXFLAGS}"
 apt-get update
 apt-get install -y --no-install-recommends \\
-  bc bison build-essential ca-certificates cpio curl file flex git libncurses-dev \\
-  make patch perl python3 rsync unzip wget xz-utils ccache
+  {BUILDROOT_DOCKER_APT_DEPS_LINE}
 
 mkdir -p /cache /work /artifacts /build/buildroot /build/output
 if [ ! -f /build/buildroot/.frameos-buildroot-version ]; then
@@ -827,6 +857,11 @@ if [ -s /build/output/images/sdcard.img ]; then
   chmod a+r /artifacts/{shlex.quote(output_filename)}
   exit 0
 fi
+for path in /build/output/build/host-cmake-*; do
+  if [ -e "$path" ]; then
+    rm -rf "$path"
+  fi
+done
 make -C /build/buildroot O=/build/output {BUILDROOT_DEFCONFIG}
 cat /work/frameos-buildroot.config >> /build/output/.config
 make -C /build/buildroot O=/build/output olddefconfig
@@ -850,6 +885,7 @@ chmod a+r /artifacts/{shlex.quote(output_filename)}
         docker_cmd = " ".join(
             [
                 "docker run --rm",
+                f"--ulimit nofile={BUILDROOT_DOCKER_NOFILE_LIMIT}:{BUILDROOT_DOCKER_NOFILE_LIMIT}",
                 f"-v {shlex.quote(str(temp_dir))}:/work",
                 f"-v {shlex.quote(str(source_dir))}:/build/buildroot",
                 f"-v {shlex.quote(str(output_dir))}:/build/output",
@@ -887,6 +923,9 @@ chmod a+r /artifacts/{shlex.quote(output_filename)}
         digest.update(f"buildroot-version={BUILDROOT_VERSION}\n".encode("utf-8"))
         digest.update(f"buildroot-defconfig={BUILDROOT_DEFCONFIG}\n".encode("utf-8"))
         digest.update(f"buildroot-docker-image={BUILDROOT_DOCKER_IMAGE}\n".encode("utf-8"))
+        digest.update(f"buildroot-bootstrap-script-version={BUILDROOT_BOOTSTRAP_SCRIPT_VERSION}\n".encode("utf-8"))
+        digest.update(f"buildroot-bootstrap-deps={BUILDROOT_DOCKER_APT_DEPS_LINE}\n".encode("utf-8"))
+        digest.update(f"buildroot-host-cxxflags={BUILDROOT_HOST_CXXFLAGS}\n".encode("utf-8"))
         for path in (config_path, post_build_path):
             digest.update(f"path={path.name}\n".encode("utf-8"))
             digest.update(path.read_bytes())

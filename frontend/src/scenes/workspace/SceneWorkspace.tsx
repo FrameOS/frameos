@@ -536,8 +536,8 @@ function SceneTreeLoadingPlaceholder(): JSX.Element {
             <div key={index} className="frameos-skeleton-line h-6 w-16 animate-pulse rounded-full" />
           ))}
         </div>
-        <div className="mt-3 grid grid-cols-3 gap-2">
-          {[0, 1, 2].map((index) => (
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          {[0, 1].map((index) => (
             <div key={index} className="frameos-skeleton-surface h-8 animate-pulse rounded-full" />
           ))}
         </div>

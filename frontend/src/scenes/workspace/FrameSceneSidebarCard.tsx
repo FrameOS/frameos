@@ -18,54 +18,27 @@ export function FrameSceneSidebarCard({
   undeployedChanges,
   className,
 }: FrameSceneSidebarCardProps): JSX.Element {
-  const { hideDeployPlanModal, hideUnsavedChangesModal, saveAndDeployFrame, saveFrame } = useActions(
-    frameLogic({ frameId: frame.id })
-  )
-  const { requiresRecompilation } = useValues(frameLogic({ frameId: frame.id }))
+  const { hideDeployPlanModal, hideUnsavedChangesModal, saveFrame } = useActions(frameLogic({ frameId: frame.id }))
   const { frameChangeDrawerSelection } = useValues(workspaceLogic)
   const { closeChatDrawer, closeFrameChangeDrawer, openFrameChangeDrawer } = useActions(workspaceLogic)
-  const statusLabel = unsavedChanges ? 'Unsaved' : undeployedChanges ? 'Undeployed' : 'Deploy plan'
-  const statusIsActionable = unsavedChanges || undeployedChanges
-  const targetDrawerKind = unsavedChanges ? 'unsaved' : 'deploy'
-  const drawerIsOpen =
-    frameChangeDrawerSelection?.frameId === frame.id && frameChangeDrawerSelection.kind === targetDrawerKind
-  const deployLabel = frame.last_successful_deploy_at && !requiresRecompilation ? 'Fast deploy' : 'Full deploy'
-  const toggleFrameChangeDrawer = (): void => {
+  const deployDrawerIsOpen =
+    frameChangeDrawerSelection?.frameId === frame.id && frameChangeDrawerSelection.kind === 'deploy'
+
+  const openDeployPlan = (): void => {
     closeChatDrawer()
-    if (drawerIsOpen) {
-      if (targetDrawerKind === 'unsaved') {
-        hideUnsavedChangesModal()
-      } else {
-        hideDeployPlanModal()
-      }
+    if (deployDrawerIsOpen) {
+      hideDeployPlanModal()
       closeFrameChangeDrawer()
       return
     }
-    openFrameChangeDrawer(frame.id, targetDrawerKind)
+    if (frameChangeDrawerSelection?.frameId === frame.id && frameChangeDrawerSelection.kind === 'unsaved') {
+      hideUnsavedChangesModal()
+    }
+    openFrameChangeDrawer(frame.id, 'deploy')
   }
 
   return (
-    <div className={clsx('grid grid-cols-3 gap-2', className)}>
-      {statusIsActionable ? (
-        <button
-          type="button"
-          onClick={toggleFrameChangeDrawer}
-          className={clsx(
-            'rounded-lg px-3 py-2 text-xs font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-            'frameos-warning-button'
-          )}
-        >
-          {statusLabel}
-        </button>
-      ) : (
-        <button
-          type="button"
-          onClick={toggleFrameChangeDrawer}
-          className="frameos-inset frameos-muted inline-flex items-center justify-center rounded-full border px-3 py-2 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-        >
-          {statusLabel}
-        </button>
-      )}
+    <div className={clsx('grid grid-cols-2 gap-2', className)}>
       <button
         type="button"
         onClick={() => saveFrame()}
@@ -78,13 +51,13 @@ export function FrameSceneSidebarCard({
       </button>
       <button
         type="button"
-        onClick={() => saveAndDeployFrame()}
+        onClick={() => openDeployPlan()}
         className={clsx(
           'rounded-lg px-3 py-2 text-xs font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
           unsavedChanges || undeployedChanges ? 'frameos-primary-action' : 'frameos-secondary-button'
         )}
       >
-        {deployLabel}
+        Deploy
       </button>
     </div>
   )

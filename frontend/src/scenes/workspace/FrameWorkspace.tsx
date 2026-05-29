@@ -471,8 +471,8 @@ function FrameWorkspaceLoadingTree(): JSX.Element {
             <div className="frameos-skeleton-line mb-2 h-3 w-14 animate-pulse rounded-full" />
             <div className="frameos-skeleton-line h-10 w-full animate-pulse rounded-xl" />
           </div>
-          <div className="grid grid-cols-3 gap-2">
-            {[0, 1, 2].map((index) => (
+          <div className="grid grid-cols-2 gap-2">
+            {[0, 1].map((index) => (
               <div key={index} className="frameos-skeleton-line h-9 animate-pulse rounded-lg" />
             ))}
           </div>
