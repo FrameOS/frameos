@@ -24,6 +24,7 @@ export function FrameSceneSidebarCard({
   const { closeChatDrawer, closeFrameChangeDrawer, openFrameChangeDrawer } = useActions(workspaceLogic)
   const deployDrawerIsOpen =
     frameChangeDrawerSelection?.frameId === frame.id && frameChangeDrawerSelection.kind === 'deploy'
+  const deployLabel = (frame.mode ?? 'rpios') === 'buildroot' ? 'Build SD card' : 'Deploy'
 
   const openDeployPlan = (): void => {
     closeChatDrawer()
@@ -59,7 +60,7 @@ export function FrameSceneSidebarCard({
         )}
       >
         <DeployToFrameIcon className="h-4 w-4 shrink-0" />
-        Deploy
+        {deployLabel}
       </button>
     </div>
   )

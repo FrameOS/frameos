@@ -1146,7 +1146,7 @@ chmod a+r /artifacts/{shlex.quote(output_filename)}
 		use-mke2fs = true
 		label = "FRAMEOS"
 	}}
-	srcpath = "{frameos_root}"
+	srcpath = "/tmp/frameos-compose-roots/frameos"
 	size = {BUILDROOT_FRAMEOS_PARTITION_SIZE}
 }}
 
@@ -1154,7 +1154,7 @@ image assets.vfat {{
 	vfat {{
 		label = "ASSETS"
 	}}
-	srcpath = "{assets_root}"
+	srcpath = "/tmp/frameos-compose-roots/assets"
 	size = {BUILDROOT_ASSETS_PARTITION_SIZE}
 }}
 """,
@@ -1169,6 +1169,9 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get install -y --no-install-recommends genimage dosfstools e2fsprogs mtools
 rm -rf /work/tmp
+rm -rf /tmp/frameos-compose-roots
+mkdir -p /tmp/frameos-compose-roots
+tar -C /work/roots -cf - frameos assets | tar -C /tmp/frameos-compose-roots -xf -
 genimage --rootpath /work/empty-root --tmppath /work/tmp --inputpath /work/images --outputpath /work/images --config /work/frameos-genimage.cfg
 """,
             encoding="utf-8",

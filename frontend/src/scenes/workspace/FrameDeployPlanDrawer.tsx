@@ -548,7 +548,9 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
             <div className="frameos-muted text-xs font-semibold uppercase tracking-wide text-slate-400">
               {frame.name || frameHost(frame)}
             </div>
-            <h2 className="frameos-strong truncate text-xl font-bold tracking-normal text-slate-950">Deploy plan</h2>
+            <h2 className="frameos-strong truncate text-xl font-bold tracking-normal text-slate-950">
+              {isBuildrootFrame ? 'Build SD card' : 'Deploy plan'}
+            </h2>
           </div>
           <button
             type="button"

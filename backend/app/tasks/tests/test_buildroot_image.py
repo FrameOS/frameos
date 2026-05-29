@@ -168,6 +168,59 @@ async def test_buildroot_docker_run_raises_nofile_limit(tmp_path, monkeypatch):
     assert "--ulimit nofile=65535:65535" in captured["command"]
 
 
+@pytest.mark.asyncio
+async def test_cached_base_composer_uses_container_visible_srcpaths(tmp_path, monkeypatch):
+    temp_dir = tmp_path / "tmp"
+    frameos_overlay = temp_dir / "overlay" / "srv" / "frameos"
+    assets_overlay = temp_dir / "overlay" / "srv" / "assets"
+    frameos_overlay.mkdir(parents=True)
+    assets_overlay.mkdir(parents=True)
+    (frameos_overlay / "frameos").write_bytes(b"binary")
+    base_image = tmp_path / "base.img"
+    output_image = tmp_path / "output.img"
+    base_image.write_bytes(b"base")
+    captured: dict[str, str] = {}
+    replaced: list[tuple[int, str]] = []
+    builder = BuildrootImageBuilder(db=object(), redis=None, frame=SimpleNamespace(id=1))
+
+    async def fake_exec_local_command(*args, **kwargs):
+        captured["command"] = args[3]
+        config = temp_dir / "compose" / "frameos-genimage.cfg"
+        captured["config"] = config.read_text(encoding="utf-8")
+        images_dir = temp_dir / "compose" / "images"
+        (images_dir / "frameos.ext4").write_bytes(b"frameos")
+        (images_dir / "assets.vfat").write_bytes(b"assets")
+        return 0, "", ""
+
+    async def fake_log(*args, **kwargs):
+        return None
+
+    def fake_replace_partition(_image_path, _partitions, partition_number, partition_image):
+        replaced.append((partition_number, partition_image.name))
+
+    monkeypatch.setattr("app.tasks.buildroot_image.exec_local_command", fake_exec_local_command)
+    monkeypatch.setattr("app.tasks.buildroot_image._mbr_partitions", lambda _path: {})
+    monkeypatch.setattr("app.tasks.buildroot_image._replace_partition", fake_replace_partition)
+    monkeypatch.setattr(builder, "_log", fake_log)
+
+    await builder._compose_sd_image_from_base(
+        temp_dir=temp_dir,
+        base_image_path=base_image,
+        output_path=output_image,
+    )
+
+    assert 'srcpath = "/tmp/frameos-compose-roots/frameos"' in captured["config"]
+    assert 'srcpath = "/tmp/frameos-compose-roots/assets"' in captured["config"]
+    assert str(temp_dir) not in captured["config"]
+    assert "bash /work/compose-partitions.sh" in captured["command"]
+    assert "tar -C /work/roots -cf - frameos assets | tar -C /tmp/frameos-compose-roots -xf -" in (
+        temp_dir / "compose" / "compose-partitions.sh"
+    ).read_text(encoding="utf-8")
+    assert (temp_dir / "compose" / "roots" / "assets" / "frameos-assets-placeholder").is_file()
+    assert output_image.read_bytes() == b"base"
+    assert replaced == [(3, "frameos.ext4"), (4, "assets.vfat")]
+
+
 def test_buildroot_service_writes_console_output_and_environment(tmp_path):
     service_path = tmp_path / "frameos.service"
     output_path = tmp_path / "rendered.service"

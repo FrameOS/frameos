@@ -387,12 +387,6 @@ export const framesModel = kea<framesModelType>([
           })
           return
         }
-        longRunningTasksModel.actions.startTask({
-          frameId: id,
-          kind: 'buildrootImage',
-          title: 'Preparing SD card image',
-          detail: data?.message || 'Image preparation started',
-        })
       } catch (error) {
         longRunningTasksModel.actions.taskFailed({
           frameId: id,
