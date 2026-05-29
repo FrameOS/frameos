@@ -68,6 +68,62 @@ block test_setup_nospi_disables_when_raspi_config_reports_enabled:
   finally:
     resetSetupCommandRunnerForTest()
 
+block test_setup_spi_uses_boot_config_fallback_when_raspi_config_missing:
+  let path = getTempDir() / ("frameos-test-spi-boot-config-" & $epochTime().int64 & ".txt")
+  let previousBootConfig = getEnv("FRAMEOS_BOOT_CONFIG")
+  putEnv("FRAMEOS_BOOT_CONFIG", path)
+  var commands: seq[string] = @[]
+  setSetupCommandRunnerForTest(proc(command: string): SetupCommandResult =
+    commands.add(command)
+    if command.contains("command -v"):
+      return ("", 1)
+    return ("", 0)
+  )
+  try:
+    let setupResult = spiDriver.setup()
+    let content = if fileExists(path): readFile(path) else: ""
+    doAssert setupResult.rebootRequired
+    doAssert content.contains("dtparam=spi=on\n")
+    doAssert commands.anyIt(it.contains("command -v"))
+    doAssert not commands.anyIt(it.contains("raspi-config nonint do_spi"))
+  finally:
+    resetSetupCommandRunnerForTest()
+    if previousBootConfig.len > 0:
+      putEnv("FRAMEOS_BOOT_CONFIG", previousBootConfig)
+    else:
+      delEnv("FRAMEOS_BOOT_CONFIG")
+    if fileExists(path):
+      removeFile(path)
+
+block test_setup_nospi_uses_boot_config_fallback_when_raspi_config_missing:
+  let path = getTempDir() / ("frameos-test-nospi-boot-config-" & $epochTime().int64 & ".txt")
+  let previousBootConfig = getEnv("FRAMEOS_BOOT_CONFIG")
+  putEnv("FRAMEOS_BOOT_CONFIG", path)
+  writeFile(path, "dtparam=spi=on\nkeep=1\n")
+  var commands: seq[string] = @[]
+  setSetupCommandRunnerForTest(proc(command: string): SetupCommandResult =
+    commands.add(command)
+    if command.contains("command -v"):
+      return ("", 1)
+    return ("", 0)
+  )
+  try:
+    let setupResult = noSpiDriver.setup()
+    let content = readFile(path)
+    doAssert setupResult.rebootRequired
+    doAssert not content.contains("dtparam=spi=on")
+    doAssert content.contains("keep=1\n")
+    doAssert commands.anyIt(it.contains("command -v"))
+    doAssert not commands.anyIt(it.contains("raspi-config nonint do_spi"))
+  finally:
+    resetSetupCommandRunnerForTest()
+    if previousBootConfig.len > 0:
+      putEnv("FRAMEOS_BOOT_CONFIG", previousBootConfig)
+    else:
+      delEnv("FRAMEOS_BOOT_CONFIG")
+    if fileExists(path):
+      removeFile(path)
+
 block test_setup_inky_python_vendor_driver:
   var commands: seq[string] = @[]
   setSetupCommandRunnerForTest(proc(command: string): SetupCommandResult =
