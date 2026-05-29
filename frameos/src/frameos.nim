@@ -23,7 +23,7 @@ proc printHelp() =
   echo "  start   Start FrameOS (default)"
   echo "  check   Verify the binary can start"
   echo "  setup   Run device setup for this build"
-  echo "         --from-file=/path/to/frame.json to use an alternate config source"
+  echo "         --from-file=/path/to/frame.json[.gz] to use an alternate config source"
   echo "  help    Show this help"
 
 when isMainModule:

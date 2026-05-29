@@ -14,6 +14,7 @@ from urllib.parse import urljoin
 import httpx
 
 from app.codegen.drivers_nim import COMPILATION_MODE_SHARED
+from app.codegen.release_drivers_nim import release_driver_specs
 from app.drivers.devices import drivers_for_frame
 from app.models.frame import Frame
 from app.tasks._frame_deployer import FrameDeployer
@@ -79,6 +80,7 @@ async def download_precompiled_frameos_release(
     temp_dir: str,
     build_id: str,
     logger,
+    install_all_drivers: bool = False,
     timeout: float = RELEASE_TIMEOUT,
 ) -> PrecompiledFrameOSResult:
     url = precompiled_frameos_release_url(target)
@@ -99,8 +101,9 @@ async def download_precompiled_frameos_release(
         if not artifact_root:
             raise RuntimeError(f"Precompiled FrameOS archive did not contain target {target}")
 
+        release_drivers = release_driver_specs() if install_all_drivers else drivers_for_frame(frame)
         required_driver_names = FrameDeployer.driver_library_names(
-            drivers_for_frame(frame),
+            release_drivers,
             COMPILATION_MODE_SHARED,
         )
         copied_driver_paths = _copy_required_drivers(
@@ -111,7 +114,7 @@ async def download_precompiled_frameos_release(
         vendor_folders = _copy_required_vendor_folders(
             artifact_root=artifact_root,
             build_dir=build_path,
-            frame=frame,
+            drivers=release_drivers,
         )
 
         binary_src = artifact_root / "frameos"
@@ -272,12 +275,12 @@ def _copy_required_vendor_folders(
     *,
     artifact_root: Path,
     build_dir: Path,
-    frame: Frame,
+    drivers,
 ) -> list[str]:
     required = sorted(
         {
             driver.vendor_folder
-            for driver in drivers_for_frame(frame).values()
+            for driver in drivers.values()
             if getattr(driver, "vendor_folder", None)
         }
     )

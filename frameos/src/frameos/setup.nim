@@ -167,7 +167,7 @@ proc writeSetupReleasePayload*(configPath: string) =
   if configPath.len == 0:
     return
 
-  let payload = parseFile(configPath)
+  let payload = readJsonFile(configPath)
   writeFile("/srv/frameos/current/frame.json", pretty(payload, indent = 4) & "\n")
 
   let allScenes = if payload{"scenes"} != nil and payload{"scenes"}.kind == JArray: payload{"scenes"} else: newJArray()

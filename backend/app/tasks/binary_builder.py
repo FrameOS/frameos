@@ -236,7 +236,12 @@ class FrameBinaryBuilder:
             precompiled_skip_reason=precompiled_skip_reason,
         )
 
-    async def build(self, plan: FrameBinaryPlan) -> FrameBinaryBuildResult:
+    async def build(
+        self,
+        plan: FrameBinaryPlan,
+        *,
+        precompiled_install_all_drivers: bool = False,
+    ) -> FrameBinaryBuildResult:
         build_host = get_build_host_config(self.db)
         await self._log(
             "stdout",
@@ -260,6 +265,7 @@ class FrameBinaryBuilder:
                 temp_dir=self.temp_dir,
                 build_id=self.deployer.build_id,
                 logger=self._log,
+                install_all_drivers=precompiled_install_all_drivers,
             )
             release_action = "Using cached" if precompiled_result.cache_hit else "Downloaded"
             await self._log(

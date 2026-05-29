@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import gzip
+import copy
 import hashlib
 import json
 import os
@@ -10,13 +11,14 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
+from types import SimpleNamespace
 
 from arq import ArqRedis as Redis
 from arq.jobs import Job, JobStatus
 from sqlalchemy.orm import Session
 
 from app.drivers.devices import drivers_for_frame
-from app.codegen.drivers_nim import COMPILATION_MODE_STATIC
+from app.codegen.drivers_nim import frame_compilation_mode
 from app.models.frame import (
     Frame,
     get_frame_json,
@@ -95,6 +97,21 @@ def buildroot_cache_dir() -> Path:
     return Path(os.environ.get("FRAMEOS_BUILDROOT_CACHE_DIR") or (buildroot_artifact_dir() / ".buildroot-cache"))
 
 
+def buildroot_source_dir() -> Path:
+    return Path(
+        os.environ.get("FRAMEOS_BUILDROOT_SOURCE_DIR")
+        or (buildroot_cache_dir() / f"buildroot-{BUILDROOT_VERSION}")
+    )
+
+
+def buildroot_output_cache_dir() -> Path:
+    return Path(os.environ.get("FRAMEOS_BUILDROOT_OUTPUT_CACHE_DIR") or (buildroot_cache_dir() / "output"))
+
+
+def buildroot_ccache_dir() -> Path:
+    return Path(os.environ.get("FRAMEOS_BUILDROOT_CCACHE_DIR") or (buildroot_cache_dir() / "ccache"))
+
+
 def _lgpio_runtime_library_paths() -> list[Path]:
     sysroot = cross_cache_root() / cross_cache_key(FRAMEOS_BUILD_TARGET) / "sysroot"
     libraries: list[Path] = []
@@ -160,6 +177,13 @@ def _frame_boot_config_lines(frame: Frame) -> list[str]:
             seen.add(normalized)
             lines.append(normalized)
     return lines
+
+
+def _buildroot_setup_payload_path(overlay_dir: Path, setup_file_path: str) -> Path:
+    relative_path = setup_file_path.lstrip("/")
+    if not relative_path:
+        raise ValueError("Setup JSON reset file path cannot be empty")
+    return overlay_dir / relative_path
 
 
 def ensure_buildroot_frame_defaults(frame: Frame, platform: str | None = None) -> None:
@@ -343,11 +367,19 @@ class BuildrootImageBuilder:
 
     async def run(self) -> dict[str, Any]:
         validate_buildroot_wifi_credentials(self.frame)
+        bootstrap_frame = self._buildroot_bootstrap_frame()
+        setup_payload = get_frame_json(self.db, self.frame)
 
         artifact_dir = buildroot_artifact_dir()
         cache_dir = buildroot_cache_dir()
+        source_dir = buildroot_source_dir()
+        output_cache_root = buildroot_output_cache_dir()
+        ccache_dir = buildroot_ccache_dir()
         artifact_dir.mkdir(parents=True, exist_ok=True)
         cache_dir.mkdir(parents=True, exist_ok=True)
+        source_dir.mkdir(parents=True, exist_ok=True)
+        output_cache_root.mkdir(parents=True, exist_ok=True)
+        ccache_dir.mkdir(parents=True, exist_ok=True)
 
         with tempfile.TemporaryDirectory(prefix=f"frameos-buildroot-{self.frame.id}-") as tmp:
             temp_dir = Path(tmp)
@@ -371,12 +403,14 @@ class BuildrootImageBuilder:
             )
             await self._log("stdout", f"Starting Buildroot SD image build {build_id}")
 
-            frameos_build = await self._build_frameos_binary(deployer, str(temp_dir))
-            agent_binary = await self._build_agent_binary(deployer, str(temp_dir))
+            frameos_build = await self._build_frameos_binary(deployer, str(temp_dir), self.frame)
+            agent_binary = await self._build_agent_binary(deployer, str(temp_dir), self.frame)
             overlay_dir = temp_dir / "overlay"
             self._stage_overlay(
                 overlay_dir=overlay_dir,
                 build_id=build_id,
+                bootstrap_frame=bootstrap_frame,
+                setup_payload=setup_payload,
                 frameos_build=frameos_build,
                 agent_binary=agent_binary,
             )
@@ -388,7 +422,11 @@ class BuildrootImageBuilder:
             self._write_post_build_script(post_build_path)
             self._write_build_script(script_path, output_path.name)
 
-            await self._run_buildroot(temp_dir, artifact_dir, cache_dir)
+            output_cache_key = self._buildroot_output_cache_key(build_id, overlay_dir, config_path, post_build_path)
+            output_dir = output_cache_root / output_cache_key
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+            await self._run_buildroot(temp_dir, artifact_dir, cache_dir, source_dir, output_dir)
 
             if not output_path.is_file():
                 raise RuntimeError(f"Buildroot completed without producing {output_path.name}")
@@ -411,32 +449,37 @@ class BuildrootImageBuilder:
             await self._log("stdout", f"Buildroot SD image ready: {filename}")
             return metadata
 
-    async def _build_frameos_binary(self, deployer: FrameDeployer, temp_dir: str) -> FrameBinaryBuildResult:
+    async def _build_frameos_binary(
+        self,
+        deployer: FrameDeployer,
+        temp_dir: str,
+        frame: Frame,
+    ) -> FrameBinaryBuildResult:
         await self._log("stdout", "Building FrameOS binary for Raspberry Pi Zero 2 W")
         builder = FrameBinaryBuilder(
             db=self.db,
             redis=self.redis,
-            frame=self.frame,
+            frame=frame,
             deployer=deployer,
             temp_dir=temp_dir,
         )
         plan = await builder.plan_build(
-            force_cross_compile=True,
+            force_cross_compile=False,
             target_override=FRAMEOS_BUILD_TARGET,
-            compilation_mode=COMPILATION_MODE_STATIC,
+            compilation_mode=frame_compilation_mode(frame),
         )
-        return await builder.build(plan)
+        return await builder.build(plan, precompiled_install_all_drivers=True)
 
-    async def _build_agent_binary(self, deployer: FrameDeployer, temp_dir: str) -> str:
+    async def _build_agent_binary(self, deployer: FrameDeployer, temp_dir: str, frame: Frame) -> str:
         await self._log("stdout", "Building FrameOS agent for Raspberry Pi Zero 2 W")
-        agent_deployer = AgentDeployer(self.db, self.redis, self.frame, "", temp_dir, force_source=True)
+        agent_deployer = AgentDeployer(self.db, self.redis, frame, "", temp_dir, force_source=True)
         agent_deployer.build_id = deployer.build_id
         build_dir, source_dir = agent_deployer._create_agent_build_folders()
         await agent_deployer._create_local_build_archive(build_dir, source_dir, FRAMEOS_BUILD_TARGET.arch)
         return await CrossCompiler(
             db=self.db,
             redis=self.redis,
-            frame=self.frame,
+            frame=frame,
             deployer=agent_deployer,
             target=FRAMEOS_BUILD_TARGET,
             temp_dir=temp_dir,
@@ -453,6 +496,8 @@ class BuildrootImageBuilder:
         *,
         overlay_dir: Path,
         build_id: str,
+        bootstrap_frame: Frame | Any,
+        setup_payload: dict[str, Any],
         frameos_build: FrameBinaryBuildResult,
         agent_binary: str,
     ) -> None:
@@ -475,14 +520,20 @@ class BuildrootImageBuilder:
         self._copy_runtime_libraries(overlay_dir)
 
         (release_dir / "frame.json").write_text(
-            json.dumps(get_frame_json(self.db, self.frame), indent=4) + "\n",
+            json.dumps(get_frame_json(self.db, bootstrap_frame), indent=4) + "\n",
             encoding="utf-8",
         )
         (release_dir / "scenes.json.gz").write_bytes(
-            gzip.compress(json.dumps(get_interpreted_scenes_json(self.frame), indent=4).encode("utf-8") + b"\n")
+            gzip.compress(
+                json.dumps(get_interpreted_scenes_json(bootstrap_frame), indent=4).encode("utf-8") + b"\n",
+                mtime=0,
+            )
         )
         (release_dir / "all_scenes.json.gz").write_bytes(
-            gzip.compress(json.dumps(list(self.frame.scenes or []), indent=4).encode("utf-8") + b"\n")
+            gzip.compress(
+                json.dumps(list(getattr(bootstrap_frame, "scenes", []) or []), indent=4).encode("utf-8") + b"\n",
+                mtime=0,
+            )
         )
         self._write_service(
             REPO_ROOT / "frameos" / "frameos.service",
@@ -498,7 +549,7 @@ class BuildrootImageBuilder:
         shutil.copy2(agent_binary, agent_release_dir / "frameos_agent")
         os.chmod(agent_release_dir / "frameos_agent", 0o755)
         (agent_release_dir / "frame.json").write_text(
-            json.dumps(get_frame_json(self.db, self.frame), indent=4) + "\n",
+            json.dumps(get_frame_json(self.db, bootstrap_frame), indent=4) + "\n",
             encoding="utf-8",
         )
         self._write_service(
@@ -534,6 +585,7 @@ class BuildrootImageBuilder:
             script_path.write_text(script_contents, encoding="utf-8")
             os.chmod(script_path, 0o755)
             (systemd_dir / SETUP_JSON_RESET_SERVICE_NAME).write_text(service_contents, encoding="utf-8")
+            self._write_setup_payload(_buildroot_setup_payload_path(overlay_dir, setup_file_path), setup_payload)
 
         services = ["frameos.service", "frameos_agent.service"]
         if setup_reset_enabled:
@@ -556,7 +608,7 @@ class BuildrootImageBuilder:
             encoding="utf-8",
         )
         self._write_wifi_connection(overlay_dir / "etc" / "NetworkManager" / "system-connections")
-        self._write_boot_config(overlay_dir, _frame_boot_config_lines(self.frame))
+        self._write_boot_config(overlay_dir, _frame_boot_config_lines(bootstrap_frame))
         self._write_authorized_keys(overlay_dir, wants_dir)
 
     @staticmethod
@@ -688,6 +740,9 @@ class BuildrootImageBuilder:
                     "BR2_PACKAGE_LINUX_FIRMWARE_BRCM_BCM43XXX=y",
                     "BR2_PACKAGE_BRCMFMAC_SDIO_FIRMWARE_RPI=y",
                     "BR2_PACKAGE_LIBEVDEV=y",
+                    "BR2_CCACHE=y",
+                    'BR2_CCACHE_DIR="/cache/ccache"',
+                    "BR2_CCACHE_USE_BASEDIR=y",
                     'BR2_ROOTFS_OVERLAY="/work/overlay"',
                     'BR2_ROOTFS_POST_BUILD_SCRIPT="board/raspberrypizero2w-64/post-build.sh /work/post-build.sh"',
                     "",
@@ -723,6 +778,32 @@ class BuildrootImageBuilder:
         os.chmod(path, 0o755)
 
     @staticmethod
+    def _write_setup_payload(path: Path, payload: dict[str, Any]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        encoded = (json.dumps(payload, indent=4) + "\n").encode("utf-8")
+        if path.name.endswith(".gz"):
+            path.write_bytes(gzip.compress(encoded, mtime=0))
+        else:
+            path.write_bytes(encoded)
+
+    def _buildroot_bootstrap_frame(self) -> Frame | Any:
+        bootstrap_data = copy.deepcopy(self.frame.to_dict())
+        bootstrap_data["mode"] = "buildroot"
+        bootstrap_data["device"] = "web_only"
+        bootstrap_data["scenes"] = []
+        bootstrap_data["gpio_buttons"] = []
+        bootstrap_data["schedule"] = None
+        buildroot = dict(bootstrap_data.get("buildroot") or {})
+        buildroot.pop("sdImage", None)
+        buildroot["platform"] = normalize_buildroot_platform(buildroot.get("platform"))
+        buildroot["setupJsonResetFilePath"] = normalize_buildroot_setup_json_reset_file_path(
+            buildroot.get("setupJsonResetFilePath"),
+            default_if_missing=True,
+        )
+        bootstrap_data["buildroot"] = buildroot
+        return SimpleNamespace(**bootstrap_data)
+
+    @staticmethod
     def _write_build_script(path: Path, output_filename: str) -> None:
         tarball = f"buildroot-{BUILDROOT_VERSION}.tar.gz"
         path.write_text(
@@ -733,15 +814,19 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get install -y --no-install-recommends \\
   bc bison build-essential ca-certificates cpio curl file flex git libncurses-dev \\
-  make patch perl python3 rsync unzip wget xz-utils
+  make patch perl python3 unzip wget xz-utils ccache
 
-mkdir -p /cache /work /artifacts
-if [ ! -d /cache/buildroot-{BUILDROOT_VERSION} ]; then
+mkdir -p /cache /work /artifacts /build/buildroot /build/output
+if [ ! -f /build/buildroot/.frameos-buildroot-version ]; then
   curl -fsSL -o /cache/{tarball} https://buildroot.org/downloads/{tarball}
-  tar -C /cache -xzf /cache/{tarball}
+  tar -C /build/buildroot --strip-components=1 -xzf /cache/{tarball}
+  printf '%s\\n' '{BUILDROOT_VERSION}' > /build/buildroot/.frameos-buildroot-version
 fi
-mkdir -p /build/buildroot /build/output
-rsync -a --delete /cache/buildroot-{BUILDROOT_VERSION}/ /build/buildroot/
+if [ -s /build/output/images/sdcard.img ]; then
+  cp /build/output/images/sdcard.img /artifacts/{shlex.quote(output_filename)}
+  chmod a+r /artifacts/{shlex.quote(output_filename)}
+  exit 0
+fi
 make -C /build/buildroot O=/build/output {BUILDROOT_DEFCONFIG}
 cat /work/frameos-buildroot.config >> /build/output/.config
 make -C /build/buildroot O=/build/output olddefconfig
@@ -758,12 +843,16 @@ chmod a+r /artifacts/{shlex.quote(output_filename)}
         temp_dir: Path,
         artifact_dir: Path,
         cache_dir: Path,
+        source_dir: Path,
+        output_dir: Path,
     ) -> None:
         await self._log("stdout", f"Running Buildroot {BUILDROOT_VERSION} for Raspberry Pi Zero 2 W")
         docker_cmd = " ".join(
             [
                 "docker run --rm",
                 f"-v {shlex.quote(str(temp_dir))}:/work",
+                f"-v {shlex.quote(str(source_dir))}:/build/buildroot",
+                f"-v {shlex.quote(str(output_dir))}:/build/output",
                 f"-v {shlex.quote(str(cache_dir))}:/cache",
                 f"-v {shlex.quote(str(artifact_dir))}:/artifacts",
                 "-e FORCE_UNSAFE_CONFIGURE=1",
@@ -783,6 +872,38 @@ chmod a+r /artifacts/{shlex.quote(output_filename)}
 
     async def _log(self, type: str, line: str) -> None:
         await log(self.db, self.redis, int(self.frame.id), type, line)
+
+    @staticmethod
+    def _buildroot_output_cache_key(
+        build_id: str,
+        overlay_dir: Path,
+        config_path: Path,
+        post_build_path: Path,
+    ) -> str:
+        def normalize_path(value: str) -> str:
+            return value.replace(f"release_{build_id}", "release_$BUILD_ID")
+
+        digest = hashlib.sha256()
+        digest.update(f"buildroot-version={BUILDROOT_VERSION}\n".encode("utf-8"))
+        digest.update(f"buildroot-defconfig={BUILDROOT_DEFCONFIG}\n".encode("utf-8"))
+        digest.update(f"buildroot-docker-image={BUILDROOT_DOCKER_IMAGE}\n".encode("utf-8"))
+        for path in (config_path, post_build_path):
+            digest.update(f"path={path.name}\n".encode("utf-8"))
+            digest.update(path.read_bytes())
+        for path in sorted(overlay_dir.rglob("*"), key=lambda candidate: candidate.relative_to(overlay_dir).as_posix()):
+            relpath = normalize_path(path.relative_to(overlay_dir).as_posix())
+            if path.is_symlink():
+                digest.update(f"symlink:{relpath} -> {normalize_path(os.readlink(path))}\n".encode("utf-8"))
+                continue
+            if path.is_dir():
+                digest.update(f"dir:{relpath}\n".encode("utf-8"))
+                continue
+            if path.is_file():
+                digest.update(f"file:{relpath}\n".encode("utf-8"))
+                with path.open("rb") as fh:
+                    for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+                        digest.update(chunk)
+        return digest.hexdigest()
 
 
 POST_BUILD_SCRIPT = """#!/usr/bin/env bash
