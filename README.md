@@ -150,3 +150,38 @@ Example for local iteration on a new toolchain image:
 export FRAMEOS_CROSS_TOOLCHAIN_IMAGE=frameos/frameos-cross-toolchain:debian_trixie-linux_arm_v7-my-wip
 export FRAMEOS_CROSS_TOOLCHAIN_FORCE_LOCAL_BUILD=1
 ```
+
+### Buildroot image cache
+
+Buildroot SD image generation supports a cached Buildroot image with dependency packages preinstalled and the Buildroot tarball preloaded at `/frameos-buildroot`.
+
+You can control the cached image with:
+
+- `FRAMEOS_BUILDROOT_IMAGE`: optional full image name override (supports `{slug}`, `{base}`, `{version}`, and `{tag}` placeholders)
+- `FRAMEOS_BUILDROOT_IMAGE_REPO`: image repository (default `frameos/frameos-buildroot`)
+- `FRAMEOS_BUILDROOT_IMAGE_TAG`: image tag (default `latest`)
+- `FRAMEOS_BUILDROOT_FORCE_LOCAL_BUILD=1`: force rebuilding the Buildroot image locally
+- `FRAMEOS_BUILDROOT_SKIP_PULL=1`: skip pulling cached images from the registry
+- `FRAMEOS_BUILDROOT_DOCKER_IMAGE`: base image used when building `frameos-buildroot` (default `debian:bookworm`)
+- `FRAMEOS_BUILDROOT_IMAGES_DIGESTS_PATH`: path to the digest manifest (default `buildroot-images.json` in repo root)
+- `FRAMEOS_BUILDROOT_FRAMEOS_PARTITION_SIZE`: `/srv/frameos` ext4 partition size (default `512M`)
+- `FRAMEOS_BUILDROOT_ASSETS_PARTITION_SIZE`: `/srv/assets` FAT32 partition size (default `512M`)
+
+Buildroot-specific output cache keys include the resolved cache image, so changing image configuration invalidates stale output directories automatically.
+
+Generated SD images use separate partitions for boot, root, FrameOS runtime data, and assets:
+
+- `p1`: FAT32 boot partition
+- `p2`: ext4 root filesystem
+- `p3`: ext4 `/srv/frameos`
+- `p4`: FAT32 `/srv/assets`
+
+Example:
+
+```bash
+export FRAMEOS_BUILDROOT_IMAGE_REPO=frameos/frameos-buildroot
+export FRAMEOS_BUILDROOT_IMAGE_TAG=latest
+export FRAMEOS_BUILDROOT_FORCE_LOCAL_BUILD=1
+```
+
+The corresponding GitHub workflow is `.github/workflows/frameos-buildroot.yml` and triggers on pushes to `main` when `backend/tools/buildroot.Dockerfile` changes. It writes `buildroot-images.json` with digest data used by runtime image resolution.

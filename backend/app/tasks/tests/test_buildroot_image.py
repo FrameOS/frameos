@@ -60,6 +60,8 @@ def test_buildroot_config_avoids_ncurses_selecting_packages(tmp_path):
     assert 'BR2_DL_DIR="/cache/dl"' in config
     assert "BR2_PACKAGE_DROPBEAR=y" in config
     assert "# BR2_CCACHE is not set" in config
+    assert 'BR2_ROOTFS_POST_IMAGE_SCRIPT="/work/post-image.sh"' in config
+    assert "/work/partition-post-build.sh" in config
 
 
 def test_buildroot_script_builds_output_on_container_filesystem(tmp_path):
@@ -87,6 +89,26 @@ def test_buildroot_script_builds_output_on_container_filesystem(tmp_path):
     assert "cp /work/output/images/sdcard.img" not in script
 
 
+def test_buildroot_partition_scripts_create_frameos_and_assets_partitions(tmp_path):
+    partition_post_build_path = tmp_path / "partition-post-build.sh"
+    post_image_path = tmp_path / "post-image.sh"
+
+    BuildrootImageBuilder._write_partition_post_build_script(partition_post_build_path)
+    BuildrootImageBuilder._write_post_image_script(post_image_path)
+
+    partition_post_build = partition_post_build_path.read_text(encoding="utf-8")
+    post_image = post_image_path.read_text(encoding="utf-8")
+
+    assert "LABEL=FRAMEOS /srv/frameos ext4" in partition_post_build
+    assert "LABEL=ASSETS /srv/assets vfat" in partition_post_build
+    assert "frameos-partition-root" in partition_post_build
+    assert "assets-partition-root" in partition_post_build
+    assert "image frameos.ext4" in post_image
+    assert "image assets.vfat" in post_image
+    assert "partition frameos" in post_image
+    assert "partition assets" in post_image
+
+
 @pytest.mark.asyncio
 async def test_buildroot_docker_run_raises_nofile_limit(tmp_path, monkeypatch):
     temp_dir = tmp_path / "tmp"
@@ -110,7 +132,15 @@ async def test_buildroot_docker_run_raises_nofile_limit(tmp_path, monkeypatch):
     monkeypatch.setattr("app.tasks.buildroot_image.exec_local_command", fake_exec_local_command)
     monkeypatch.setattr(builder, "_log", fake_log)
 
-    await builder._run_buildroot(temp_dir, artifact_dir, cache_dir, source_dir, output_dir)
+    await builder._run_buildroot(
+        temp_dir,
+        artifact_dir,
+        cache_dir,
+        source_dir,
+        output_dir,
+        image="frameos/frameos-buildroot:test",
+        skip_apt_install=True,
+    )
 
     assert "--ulimit nofile=65535:65535" in captured["command"]
 
@@ -143,15 +173,37 @@ def test_buildroot_output_cache_key_tracks_bootstrap_inputs(tmp_path, monkeypatc
     overlay_dir.mkdir(parents=True)
     config_path = tmp_path / "frameos-buildroot.config"
     post_build_path = tmp_path / "post-build.sh"
+    partition_post_build_path = tmp_path / "partition-post-build.sh"
+    post_image_path = tmp_path / "post-image.sh"
 
     BuildrootImageBuilder._write_buildroot_config(config_path)
     BuildrootImageBuilder._write_post_build_script(post_build_path)
+    BuildrootImageBuilder._write_partition_post_build_script(partition_post_build_path)
+    BuildrootImageBuilder._write_post_image_script(post_image_path)
 
     builder = BuildrootImageBuilder(db=object(), redis=None, frame=SimpleNamespace(id=1))
 
-    key_base = builder._buildroot_output_cache_key("build-id", overlay_dir, config_path, post_build_path)
+    key_base = builder._buildroot_output_cache_key(
+        "build-id",
+        overlay_dir,
+        config_path,
+        post_build_path,
+        partition_post_build_path,
+        post_image_path,
+        build_image="frameos/frameos-buildroot:test",
+        skip_apt_install=True,
+    )
     monkeypatch.setattr("app.tasks.buildroot_image.BUILDROOT_HOST_CXXFLAGS", "-std=gnu++20")
-    key_modified = builder._buildroot_output_cache_key("build-id", overlay_dir, config_path, post_build_path)
+    key_modified = builder._buildroot_output_cache_key(
+        "build-id",
+        overlay_dir,
+        config_path,
+        post_build_path,
+        partition_post_build_path,
+        post_image_path,
+        build_image="frameos/frameos-buildroot:test",
+        skip_apt_install=True,
+    )
 
     assert key_base != key_modified
 

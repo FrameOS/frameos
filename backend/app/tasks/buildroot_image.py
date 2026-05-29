@@ -5,10 +5,12 @@ import copy
 import hashlib
 import json
 import os
+import re
 import shlex
 import shutil
 import tempfile
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Optional
 from types import SimpleNamespace
@@ -50,6 +52,8 @@ SUPPORTED_BUILDROOT_PLATFORM = "raspberry-pi-zero-2-w"
 BUILDROOT_HOST_CXXFLAGS = "-O2 -pipe -std=gnu++17"
 BUILDROOT_HOST_CFLAGS = "-O2 -pipe"
 BUILDROOT_BOOTSTRAP_SCRIPT_VERSION = "3"
+BUILDROOT_FRAMEOS_PARTITION_SIZE = os.environ.get("FRAMEOS_BUILDROOT_FRAMEOS_PARTITION_SIZE", "512M")
+BUILDROOT_ASSETS_PARTITION_SIZE = os.environ.get("FRAMEOS_BUILDROOT_ASSETS_PARTITION_SIZE", "512M")
 BUILDROOT_DOCKER_NOFILE_LIMIT = int(os.environ.get("FRAMEOS_BUILDROOT_DOCKER_NOFILE_LIMIT", "65535"))
 BUILDROOT_DOCKER_APT_DEPS = (
     "bc",
@@ -75,6 +79,7 @@ BUILDROOT_DOCKER_APT_DEPS = (
     "xz-utils",
 )
 BUILDROOT_DOCKER_APT_DEPS_LINE = " ".join(BUILDROOT_DOCKER_APT_DEPS)
+SAFE_SEGMENT = re.compile(r"[^A-Za-z0-9_.-]+")
 LEGACY_PLATFORM_ALIASES = {
     "",
     "pi-zero2",
@@ -94,9 +99,26 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 BUILDROOT_VERSION = os.environ.get("FRAMEOS_BUILDROOT_VERSION", "2025.02.13")
 BUILDROOT_DEFCONFIG = "raspberrypizero2w_64_defconfig"
 BUILDROOT_DOCKER_IMAGE = os.environ.get("FRAMEOS_BUILDROOT_DOCKER_IMAGE", "debian:bookworm")
+BUILDROOT_IMAGE = os.environ.get("FRAMEOS_BUILDROOT_IMAGE")
+BUILDROOT_IMAGE_REPO = os.environ.get("FRAMEOS_BUILDROOT_IMAGE_REPO", "frameos/frameos-buildroot")
+BUILDROOT_IMAGE_TAG = os.environ.get("FRAMEOS_BUILDROOT_IMAGE_TAG", "latest")
+BUILDROOT_FORCE_LOCAL_BUILD = os.environ.get(
+    "FRAMEOS_BUILDROOT_FORCE_LOCAL_BUILD",
+    "0",
+).lower() in {"1", "true", "yes", "on"}
+BUILDROOT_SKIP_PULL = os.environ.get(
+    "FRAMEOS_BUILDROOT_SKIP_PULL",
+    "0",
+).lower() in {"1", "true", "yes", "on"}
 BUILDROOT_IMAGE_STALE_AFTER_SECONDS = int(
     os.environ.get("FRAMEOS_BUILDROOT_IMAGE_STALE_AFTER_SECONDS", str(6 * 60 * 60))
 )
+BUILDROOT_IMAGES_DIGESTS_PATH = os.environ.get(
+    "FRAMEOS_BUILDROOT_IMAGES_DIGESTS_PATH",
+    str(REPO_ROOT / "buildroot-images.json"),
+)
+BACKEND_ROOT = REPO_ROOT / "backend"
+BUILDROOT_DOCKERFILE = BACKEND_ROOT / "tools" / "buildroot.Dockerfile"
 FRAMEOS_BUILD_TARGET = TargetMetadata(
     arch="aarch64",
     distro="debian",
@@ -134,6 +156,30 @@ def buildroot_source_dir() -> Path:
 
 def buildroot_output_cache_dir() -> Path:
     return Path(os.environ.get("FRAMEOS_BUILDROOT_OUTPUT_CACHE_DIR") or (buildroot_cache_dir() / "output"))
+
+
+@lru_cache(maxsize=1)
+def _buildroot_digest_map() -> dict[str, str]:
+    path = Path(BUILDROOT_IMAGES_DIGESTS_PATH)
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+    raw_images = payload.get("images") if isinstance(payload, dict) else None
+    if not isinstance(raw_images, dict):
+        return {}
+
+    digests: dict[str, str] = {}
+    for image_name, image_data in raw_images.items():
+        if not isinstance(image_name, str) or not isinstance(image_data, dict):
+            continue
+        digest = image_data.get("digest")
+        if isinstance(digest, str) and digest:
+            digests[image_name] = digest
+    return digests
 
 
 def _lgpio_runtime_library_paths() -> list[Path]:
@@ -440,15 +486,37 @@ class BuildrootImageBuilder:
             script_path = temp_dir / "buildroot-build.sh"
             config_path = temp_dir / "frameos-buildroot.config"
             post_build_path = temp_dir / "post-build.sh"
+            partition_post_build_path = temp_dir / "partition-post-build.sh"
+            post_image_path = temp_dir / "post-image.sh"
             self._write_buildroot_config(config_path)
             self._write_post_build_script(post_build_path)
-            self._write_build_script(script_path, output_path.name)
-
-            output_cache_key = self._buildroot_output_cache_key(build_id, overlay_dir, config_path, post_build_path)
+            self._write_partition_post_build_script(partition_post_build_path)
+            self._write_post_image_script(post_image_path)
+            build_image = await self._ensure_buildroot_image()
+            skip_apt_install = build_image.split("@", 1)[0] == self._buildroot_image()
+            output_cache_key = self._buildroot_output_cache_key(
+                build_id,
+                overlay_dir,
+                config_path,
+                post_build_path,
+                partition_post_build_path,
+                post_image_path,
+                build_image=build_image,
+                skip_apt_install=skip_apt_install,
+            )
             output_dir = output_cache_root / output_cache_key
             output_dir.mkdir(parents=True, exist_ok=True)
 
-            await self._run_buildroot(temp_dir, artifact_dir, cache_dir, source_dir, output_dir)
+            self._write_build_script(script_path, output_path.name)
+            await self._run_buildroot(
+                temp_dir,
+                artifact_dir,
+                cache_dir,
+                source_dir,
+                output_dir,
+                image=build_image,
+                skip_apt_install=skip_apt_install,
+            )
 
             if not output_path.is_file():
                 raise RuntimeError(f"Buildroot completed without producing {output_path.name}")
@@ -764,7 +832,8 @@ class BuildrootImageBuilder:
                     "BR2_PACKAGE_LIBEVDEV=y",
                     "# BR2_CCACHE is not set",
                     'BR2_ROOTFS_OVERLAY="/work/overlay"',
-                    'BR2_ROOTFS_POST_BUILD_SCRIPT="board/raspberrypizero2w-64/post-build.sh /work/post-build.sh"',
+                    'BR2_ROOTFS_POST_BUILD_SCRIPT="board/raspberrypi/post-build.sh /work/post-build.sh /work/partition-post-build.sh"',
+                    'BR2_ROOTFS_POST_IMAGE_SCRIPT="/work/post-image.sh"',
                     "",
                 ]
             ),
@@ -795,6 +864,16 @@ class BuildrootImageBuilder:
     @staticmethod
     def _write_post_build_script(path: Path) -> None:
         path.write_text(POST_BUILD_SCRIPT, encoding="utf-8")
+        os.chmod(path, 0o755)
+
+    @staticmethod
+    def _write_partition_post_build_script(path: Path) -> None:
+        path.write_text(PARTITION_POST_BUILD_SCRIPT, encoding="utf-8")
+        os.chmod(path, 0o755)
+
+    @staticmethod
+    def _write_post_image_script(path: Path) -> None:
+        path.write_text(POST_IMAGE_SCRIPT, encoding="utf-8")
         os.chmod(path, 0o755)
 
     @staticmethod
@@ -842,14 +921,26 @@ export HOSTFC="/usr/bin/gfortran"
 export CFLAGS="{BUILDROOT_HOST_CFLAGS}"
 export CXXFLAGS="{BUILDROOT_HOST_CXXFLAGS}"
 export HOSTCXXFLAGS="{BUILDROOT_HOST_CXXFLAGS}"
-apt-get update
-apt-get install -y --no-install-recommends \\
-  {BUILDROOT_DOCKER_APT_DEPS_LINE}
+
+if [ "${{BUILDROOT_SKIP_APT_INSTALL:-0}}" != "1" ]; then
+  apt-get update
+  apt-get install -y --no-install-recommends \\
+    {BUILDROOT_DOCKER_APT_DEPS_LINE}
+fi
 
 mkdir -p /cache /work /artifacts /build/buildroot /build/output
+source_tarball="/frameos-buildroot/{tarball}"
+cache_tarball="/cache/{tarball}"
 if [ ! -f /build/buildroot/.frameos-buildroot-version ]; then
-  curl -fsSL -o /cache/{tarball} https://buildroot.org/downloads/{tarball}
-  tar -C /build/buildroot --strip-components=1 -xzf /cache/{tarball}
+  if [ -f "$source_tarball" ]; then
+    tarball_path="$source_tarball"
+  else
+    if [ ! -f "$cache_tarball" ]; then
+      curl -fsSL -o "$cache_tarball" https://buildroot.org/downloads/{tarball}
+    fi
+    tarball_path="$cache_tarball"
+  fi
+  tar -C /build/buildroot --strip-components=1 -xzf "$tarball_path"
   printf '%s\\n' '{BUILDROOT_VERSION}' > /build/buildroot/.frameos-buildroot-version
 fi
 if [ -s /build/output/images/sdcard.img ]; then
@@ -880,6 +971,8 @@ chmod a+r /artifacts/{shlex.quote(output_filename)}
         cache_dir: Path,
         source_dir: Path,
         output_dir: Path,
+        image: str,
+        skip_apt_install: bool,
     ) -> None:
         await self._log("stdout", f"Running Buildroot {BUILDROOT_VERSION} for Raspberry Pi Zero 2 W")
         docker_cmd = " ".join(
@@ -891,8 +984,9 @@ chmod a+r /artifacts/{shlex.quote(output_filename)}
                 f"-v {shlex.quote(str(output_dir))}:/build/output",
                 f"-v {shlex.quote(str(cache_dir))}:/cache",
                 f"-v {shlex.quote(str(artifact_dir))}:/artifacts",
+                *(["-e BUILDROOT_SKIP_APT_INSTALL=1"] if skip_apt_install else []),
                 "-e FORCE_UNSAFE_CONFIGURE=1",
-                shlex.quote(BUILDROOT_DOCKER_IMAGE),
+                shlex.quote(image),
                 "bash /work/buildroot-build.sh",
             ]
         )
@@ -910,11 +1004,147 @@ chmod a+r /artifacts/{shlex.quote(output_filename)}
         await log(self.db, self.redis, int(self.frame.id), type, line)
 
     @staticmethod
+    def _sanitize(value: str) -> str:
+        return SAFE_SEGMENT.sub("_", value or "unknown")
+
+    def _buildroot_image(self) -> str:
+        base = self._sanitize(BUILDROOT_DOCKER_IMAGE.replace("/", "_"))
+        version = self._sanitize(BUILDROOT_VERSION)
+        slug = f"{base}-{version}"
+        if BUILDROOT_IMAGE:
+            try:
+                return BUILDROOT_IMAGE.format(
+                    slug=slug,
+                    base=base,
+                    version=version,
+                    tag=BUILDROOT_IMAGE_TAG,
+                )
+            except (KeyError, ValueError):
+                return BUILDROOT_IMAGE
+        tag = f"{slug}-{BUILDROOT_IMAGE_TAG}" if BUILDROOT_IMAGE_TAG else slug
+        return f"{BUILDROOT_IMAGE_REPO}:{tag}"
+
+    def _legacy_buildroot_image(self) -> str:
+        base = self._sanitize(BUILDROOT_DOCKER_IMAGE.replace("/", "_"))
+        version = self._sanitize(BUILDROOT_VERSION)
+        return f"frameos-buildroot-{base}-{version}-v1"
+
+    def _resolved_buildroot_image(self) -> str:
+        image = self._buildroot_image()
+        if BUILDROOT_IMAGE:
+            return image
+        digest = _buildroot_digest_map().get(image)
+        if digest:
+            return f"{image}@{digest}"
+        return image
+
+    async def _ensure_buildroot_image(self) -> str:
+        image = self._buildroot_image()
+        resolved_image = self._resolved_buildroot_image()
+        if not BUILDROOT_FORCE_LOCAL_BUILD:
+            status, _out, _err = await exec_local_command(
+                self.db,
+                self.redis,
+                self.frame,
+                f"docker image inspect {shlex.quote(resolved_image)} >/dev/null 2>&1",
+                log_command=False,
+                log_output=False,
+            )
+            if status == 0:
+                return resolved_image
+
+            if resolved_image != image:
+                status, _out, _err = await exec_local_command(
+                    self.db,
+                    self.redis,
+                    self.frame,
+                    f"docker image inspect {shlex.quote(image)} >/dev/null 2>&1",
+                    log_command=False,
+                    log_output=False,
+                )
+                if status == 0:
+                    return image
+
+            legacy_image = self._legacy_buildroot_image()
+            status, _out, _err = await exec_local_command(
+                self.db,
+                self.redis,
+                self.frame,
+                f"docker image inspect {shlex.quote(legacy_image)} >/dev/null 2>&1",
+                log_command=False,
+                log_output=False,
+            )
+            if status == 0:
+                return legacy_image
+
+            if not BUILDROOT_SKIP_PULL:
+                pull_cmd = f"docker pull {shlex.quote(resolved_image)}"
+                status, _pull_out, pull_err = await exec_local_command(
+                    self.db,
+                    self.redis,
+                    self.frame,
+                    pull_cmd,
+                    log_command=f"docker pull {shlex.quote(resolved_image)}",
+                    log_output=False,
+                )
+                if status == 0:
+                    return resolved_image
+
+                if resolved_image != image:
+                    status, _pull_out, pull_err = await exec_local_command(
+                        self.db,
+                        self.redis,
+                        self.frame,
+                        f"docker pull {shlex.quote(image)}",
+                        log_command=f"docker pull {shlex.quote(image)}",
+                        log_output=False,
+                    )
+                    if status == 0:
+                        return image
+
+                await self._log(
+                    "stderr",
+                    f"Falling back to local Buildroot image build after pull failed for {resolved_image}: {pull_err or 'unknown error'}",
+                )
+
+        if not BUILDROOT_DOCKERFILE.exists():
+            raise RuntimeError(
+                "Buildroot Dockerfile is missing; expected at backend/tools/buildroot.Dockerfile",
+            )
+
+        build_cmd = " ".join(
+            [
+                "docker build --load",
+                f"--build-arg BASE_IMAGE={shlex.quote(BUILDROOT_DOCKER_IMAGE)}",
+                f"--build-arg BUILDROOT_VERSION={shlex.quote(BUILDROOT_VERSION)}",
+                f"--build-arg BUILDROOT_APT_DEPS={shlex.quote(BUILDROOT_DOCKER_APT_DEPS_LINE)}",
+                f"-t {shlex.quote(image)}",
+                f"-f {shlex.quote(str(BUILDROOT_DOCKERFILE))}",
+                shlex.quote(str(BUILDROOT_DOCKERFILE.parent)),
+            ]
+        )
+        status, _stdout, err = await exec_local_command(
+            self.db,
+            self.redis,
+            self.frame,
+            build_cmd,
+            log_command="docker build (buildroot image)",
+        )
+        if status != 0:
+            raise RuntimeError(f"Failed to build Buildroot image: {err or 'see logs'}")
+        return image
+
+    @staticmethod
     def _buildroot_output_cache_key(
         build_id: str,
         overlay_dir: Path,
         config_path: Path,
         post_build_path: Path,
+        partition_post_build_path: Path,
+        post_image_path: Path,
+        *,
+        build_image: str,
+        skip_apt_install: bool,
     ) -> str:
         def normalize_path(value: str) -> str:
             return value.replace(f"release_{build_id}", "release_$BUILD_ID")
@@ -922,11 +1152,14 @@ chmod a+r /artifacts/{shlex.quote(output_filename)}
         digest = hashlib.sha256()
         digest.update(f"buildroot-version={BUILDROOT_VERSION}\n".encode("utf-8"))
         digest.update(f"buildroot-defconfig={BUILDROOT_DEFCONFIG}\n".encode("utf-8"))
-        digest.update(f"buildroot-docker-image={BUILDROOT_DOCKER_IMAGE}\n".encode("utf-8"))
+        digest.update(f"buildroot-bootstrap-image={build_image}\n".encode("utf-8"))
+        digest.update(f"buildroot-skip-apt-install={skip_apt_install}\n".encode("utf-8"))
         digest.update(f"buildroot-bootstrap-script-version={BUILDROOT_BOOTSTRAP_SCRIPT_VERSION}\n".encode("utf-8"))
         digest.update(f"buildroot-bootstrap-deps={BUILDROOT_DOCKER_APT_DEPS_LINE}\n".encode("utf-8"))
+        digest.update(f"buildroot-frameos-partition-size={BUILDROOT_FRAMEOS_PARTITION_SIZE}\n".encode("utf-8"))
+        digest.update(f"buildroot-assets-partition-size={BUILDROOT_ASSETS_PARTITION_SIZE}\n".encode("utf-8"))
         digest.update(f"buildroot-host-cxxflags={BUILDROOT_HOST_CXXFLAGS}\n".encode("utf-8"))
-        for path in (config_path, post_build_path):
+        for path in (config_path, post_build_path, partition_post_build_path, post_image_path):
             digest.update(f"path={path.name}\n".encode("utf-8"))
             digest.update(path.read_bytes())
         for path in sorted(overlay_dir.rglob("*"), key=lambda candidate: candidate.relative_to(overlay_dir).as_posix()):
@@ -965,6 +1198,126 @@ if [ -d "$target_dir/lib/firmware/brcm" ]; then
     fi
   done
 fi
+"""
+
+
+PARTITION_POST_BUILD_SCRIPT = """#!/usr/bin/env bash
+set -euo pipefail
+
+target_dir="${TARGET_DIR:?TARGET_DIR is required}"
+base_dir="${BASE_DIR:?BASE_DIR is required}"
+frameos_root="${base_dir}/frameos-partition-root"
+assets_root="${base_dir}/assets-partition-root"
+
+rm -rf "$frameos_root" "$assets_root"
+mkdir -p "$frameos_root" "$assets_root" "$target_dir/srv"
+
+if [ -d "$target_dir/srv/frameos" ]; then
+  cp -a "$target_dir/srv/frameos/." "$frameos_root/" 2>/dev/null || true
+  rm -rf "$target_dir/srv/frameos"
+fi
+if [ -d "$target_dir/srv/assets" ]; then
+  cp -a "$target_dir/srv/assets/." "$assets_root/" 2>/dev/null || true
+  rm -rf "$target_dir/srv/assets"
+fi
+
+mkdir -p "$target_dir/srv/frameos" "$target_dir/srv/assets" "$target_dir/etc"
+fstab="$target_dir/etc/fstab"
+tmp_fstab="${fstab}.frameos"
+touch "$fstab"
+grep -vE '[[:space:]]/srv/(frameos|assets)[[:space:]]' "$fstab" > "$tmp_fstab" || true
+cat >> "$tmp_fstab" <<'EOF'
+LABEL=FRAMEOS /srv/frameos ext4 defaults,noatime 0 2
+LABEL=ASSETS /srv/assets vfat defaults,noatime,umask=000 0 0
+EOF
+mv "$tmp_fstab" "$fstab"
+"""
+
+
+POST_IMAGE_SCRIPT = f"""#!/usr/bin/env bash
+set -euo pipefail
+
+board_dir="/build/buildroot/board/raspberrypi"
+genimage_cfg="${{BINARIES_DIR:?BINARIES_DIR is required}}/frameos-genimage.cfg"
+genimage_tmp="${{BUILD_DIR:?BUILD_DIR is required}}/genimage.tmp"
+rootpath_tmp="$(mktemp -d)"
+trap 'rm -rf "$rootpath_tmp"' EXIT
+
+files=()
+for candidate in "${{BINARIES_DIR}}"/*.dtb "${{BINARIES_DIR}}"/rpi-firmware/*; do
+  if [ -e "$candidate" ]; then
+    files+=("${{candidate#${{BINARIES_DIR}}/}}")
+  fi
+done
+
+kernel="$(sed -n 's/^kernel=//p' "${{BINARIES_DIR}}/rpi-firmware/config.txt" || true)"
+if [ -n "$kernel" ]; then
+  files+=("$kernel")
+fi
+
+boot_files="$(printf '\\t\\t\\t"%s",\\n' "${{files[@]}}")"
+cat > "$genimage_cfg" <<EOF
+image boot.vfat {{
+	vfat {{
+		files = {{
+$boot_files
+		}}
+	}}
+
+	size = 32M
+}}
+
+image frameos.ext4 {{
+	ext4 {{
+		use-mke2fs = true
+		label = "FRAMEOS"
+	}}
+	srcpath = "${{BASE_DIR:?BASE_DIR is required}}/frameos-partition-root"
+	size = {BUILDROOT_FRAMEOS_PARTITION_SIZE}
+}}
+
+image assets.vfat {{
+	vfat {{
+		label = "ASSETS"
+	}}
+	srcpath = "${{BASE_DIR}}/assets-partition-root"
+	size = {BUILDROOT_ASSETS_PARTITION_SIZE}
+}}
+
+image sdcard.img {{
+	hdimage {{
+	}}
+
+	partition boot {{
+		partition-type = 0xC
+		bootable = "true"
+		image = "boot.vfat"
+	}}
+
+	partition rootfs {{
+		partition-type = 0x83
+		image = "rootfs.ext4"
+	}}
+
+	partition frameos {{
+		partition-type = 0x83
+		image = "frameos.ext4"
+	}}
+
+	partition assets {{
+		partition-type = 0xC
+		image = "assets.vfat"
+	}}
+}}
+EOF
+
+rm -rf "$genimage_tmp"
+genimage \\
+  --rootpath "$rootpath_tmp" \\
+  --tmppath "$genimage_tmp" \\
+  --inputpath "$BINARIES_DIR" \\
+  --outputpath "$BINARIES_DIR" \\
+  --config "$genimage_cfg"
 """
 
 
