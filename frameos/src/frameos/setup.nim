@@ -129,12 +129,26 @@ proc loadAppsPayload(): JsonNode =
   except CatchableError:
     result = %*{"apps": {}}
 
+proc setupExportScenes(data: JsonNode): JsonNode =
+  result = newJArray()
+  if data == nil or data.kind != JObject:
+    return
+  let scenes = data{"scenes"}
+  if scenes == nil or scenes.kind != JArray:
+    return
+  for scene in scenes.items:
+    if scene == nil or scene.kind != JObject:
+      continue
+    let execution = scene{"settings"}{"execution"}.getStr("compiled")
+    if execution == "interpreted":
+      result.add(scene)
+
 proc setupAppAptPackages*(): SetupResult =
   setupAptPackages(appAptPackagesFromScenes(loadAllScenesPayload(), loadAppsPayload()))
 
-proc setupFrameOS*(): SetupResult =
+proc setupFrameOS*(configPath = ""): SetupResult =
   echo "FrameOS setup: starting"
-  let frameOS = FrameOS(frameConfig: loadConfig())
+  let frameOS = FrameOS(frameConfig: loadConfig(configPath))
   echo "FrameOS setup: target " & frameOS.frameConfig.device & " (" & frameOS.frameConfig.mode & ")"
   if frameOS.frameConfig.mode == "rpios":
     addSetupResult(result, runSetupStep("app apt packages", proc(): SetupResult = setupAppAptPackages()))
@@ -148,3 +162,14 @@ proc setupFrameOS*(): SetupResult =
   if result.rebootRequired:
     echo "FrameOS setup: reboot required"
   echo "FrameOS setup: complete"
+
+proc writeSetupReleasePayload*(configPath: string) =
+  if configPath.len == 0:
+    return
+
+  let payload = parseFile(configPath)
+  writeFile("/srv/frameos/current/frame.json", pretty(payload, indent = 4) & "\n")
+
+  let allScenes = if payload{"scenes"} != nil and payload{"scenes"}.kind == JArray: payload{"scenes"} else: newJArray()
+  writeFile("/srv/frameos/current/all_scenes.json.gz", compress(pretty(allScenes, indent = 4) & "\n", dataFormat = dfGzip))
+  writeFile("/srv/frameos/current/scenes.json.gz", compress(pretty(setupExportScenes(payload), indent = 4) & "\n", dataFormat = dfGzip))
