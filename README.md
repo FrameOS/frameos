@@ -121,3 +121,32 @@ docker run -d -p 8989:8989 \
     -e TMPDIR=/tmp/frameos-cross \
     frameos
 ```
+
+### Cross-toolchain build container images
+
+Cross-compilation uses prebuilt toolchain containers from Docker Hub at `frameos/frameos-cross-toolchain` when possible, which avoids rebuilding the toolchain image for every target.
+
+The workflow `.github/workflows/frameos-cross-toolchain.yml` builds and publishes these images.
+
+The image name is resolved as:
+
+- `{repo}:{base}_{version}-{platform}-{tag}`
+- `base` is the Linux distro (`debian`, `ubuntu`, ...)
+- `version` is the distro version (for example `bookworm` or `26.04`)
+- `platform` is the docker platform with `/` replaced by `_` (for example `linux_amd64`, `linux_arm64`, `linux_arm_v7`)
+- `tag` defaults to `latest`
+
+You can override the default behavior with environment variables:
+
+- `FRAMEOS_CROSS_TOOLCHAIN_IMAGE`: full Docker image override (can be a Python format template using `slug`, `base`, `platform`, and `tag`)
+- `FRAMEOS_CROSS_TOOLCHAIN_IMAGE_REPO`: image repository (default `frameos/frameos-cross-toolchain`)
+- `FRAMEOS_CROSS_TOOLCHAIN_IMAGE_TAG`: image tag used by the default resolver (default `latest`)
+- `FRAMEOS_CROSS_TOOLCHAIN_FORCE_LOCAL_BUILD=1`: force rebuilding the toolchain image locally, even if a remote tag exists
+- `FRAMEOS_CROSS_TOOLCHAIN_SKIP_PULL=1`: skip pulling remote images and only use local/locally built images
+
+Example for local iteration on a new toolchain image:
+
+```bash
+export FRAMEOS_CROSS_TOOLCHAIN_IMAGE=frameos/frameos-cross-toolchain:debian_trixie-linux_arm_v7-my-wip
+export FRAMEOS_CROSS_TOOLCHAIN_FORCE_LOCAL_BUILD=1
+```

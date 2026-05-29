@@ -49,7 +49,20 @@ DEFAULT_FEATURE_CFLAGS = {
     "amd64": ["-mavx2", "-mavx", "-msse4.1", "-mssse3", "-mpclmul", "-mvpclmulqdq"],
     "x86_64": ["-mavx2", "-mavx", "-msse4.1", "-mssse3", "-mpclmul", "-mvpclmulqdq"],
 }
-TOOLCHAIN_IMAGE_VERSION = "1"
+CROSS_TOOLCHAIN_IMAGE = os.environ.get("FRAMEOS_CROSS_TOOLCHAIN_IMAGE")
+TOOLCHAIN_IMAGE_REPO = os.environ.get(
+    "FRAMEOS_CROSS_TOOLCHAIN_IMAGE_REPO",
+    "frameos/frameos-cross-toolchain",
+)
+TOOLCHAIN_IMAGE_TAG = os.environ.get("FRAMEOS_CROSS_TOOLCHAIN_IMAGE_TAG", "latest")
+TOOLCHAIN_FORCE_LOCAL_BUILD = os.environ.get(
+    "FRAMEOS_CROSS_TOOLCHAIN_FORCE_LOCAL_BUILD",
+    "0",
+).lower() in {"1", "true", "yes", "on"}
+TOOLCHAIN_SKIP_PULL = os.environ.get(
+    "FRAMEOS_CROSS_TOOLCHAIN_SKIP_PULL",
+    "0",
+).lower() in {"1", "true", "yes", "on"}
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 CROSS_TOOLCHAIN_DOCKERFILE = BACKEND_ROOT / "tools" / "cross-toolchain.Dockerfile"
 TOOLCHAIN_PACKAGES = (
@@ -908,18 +921,58 @@ class CrossCompiler:
     def _toolchain_image(self) -> str:
         base = self._sanitize(self._docker_image().replace("/", "_"))
         platform = self._sanitize(self._platform().replace("/", "_"))
-        return f"frameos-cross-{base}-{platform}-v{TOOLCHAIN_IMAGE_VERSION}"
+        slug = f"{base}-{platform}"
+        if CROSS_TOOLCHAIN_IMAGE:
+            try:
+                return CROSS_TOOLCHAIN_IMAGE.format(
+                    slug=slug,
+                    base=base,
+                    platform=platform,
+                    tag=TOOLCHAIN_IMAGE_TAG,
+                )
+            except (KeyError, ValueError):
+                return CROSS_TOOLCHAIN_IMAGE
+        tag = f"{slug}-{TOOLCHAIN_IMAGE_TAG}" if TOOLCHAIN_IMAGE_TAG else slug
+        return f"{TOOLCHAIN_IMAGE_REPO}:{tag}"
+
+    def _legacy_toolchain_image(self) -> str:
+        base = self._sanitize(self._docker_image().replace("/", "_"))
+        platform = self._sanitize(self._platform().replace("/", "_"))
+        return f"frameos-cross-{base}-{platform}-v1"
 
     async def _ensure_toolchain_image(self) -> str:
         image = self._toolchain_image()
-        inspect_cmd = f"docker image inspect {shlex.quote(image)} >/dev/null 2>&1"
-        status, _out, _err = await self._run_command(
-            inspect_cmd,
-            log_command=False,
-            log_output=False,
-        )
-        if status == 0:
-            return image
+        if not TOOLCHAIN_FORCE_LOCAL_BUILD:
+            status, _out, _err = await self._run_command(
+                f"docker image inspect {shlex.quote(image)} >/dev/null 2>&1",
+                log_command=False,
+                log_output=False,
+            )
+            if status == 0:
+                return image
+
+            legacy_image = self._legacy_toolchain_image()
+            status, _out, _err = await self._run_command(
+                f"docker image inspect {shlex.quote(legacy_image)} >/dev/null 2>&1",
+                log_command=False,
+                log_output=False,
+            )
+            if status == 0:
+                return legacy_image
+
+            if not TOOLCHAIN_SKIP_PULL:
+                pull_cmd = f"docker pull {shlex.quote(image)}"
+                status, _pull_out, pull_err = await self._run_command(
+                    pull_cmd,
+                    log_command=f"docker pull {shlex.quote(image)}",
+                    log_output=False,
+                )
+                if status == 0:
+                    return image
+                await self._log(
+                    "stderr",
+                    f"{icon} Falling back to local toolchain build after pull failed for {image}: {pull_err or 'unknown error'}",
+                )
 
         dockerfile = str(CROSS_TOOLCHAIN_DOCKERFILE)
         if not os.path.exists(dockerfile):
