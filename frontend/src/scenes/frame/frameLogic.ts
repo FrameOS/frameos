@@ -802,6 +802,12 @@ function sanitizeFrame(frame: Partial<FrameType>): Partial<FrameType> {
   const frameAdminAuthUser = frame.frame_admin_auth?.user ?? ''
   const frameAdminAuthPass = frame.frame_admin_auth?.pass ?? ''
   const mountpoints = normalizeMountpointsForComparison(frame.mountpoints) as FrameType['mountpoints']
+  const buildroot = frame.mode === 'buildroot' || frame.buildroot
+    ? {
+        ...(frame.buildroot ?? {}),
+        setupJsonResetFilePath: frame.buildroot?.setupJsonResetFilePath ?? '/boot/frameos-setup.json',
+      }
+    : frame.buildroot
   const rpios = frame.rpios
     ? {
         ...frame.rpios,
@@ -819,6 +825,7 @@ function sanitizeFrame(frame: Partial<FrameType>): Partial<FrameType> {
     },
     error_behavior: normalizeFrameErrorBehavior(frame.error_behavior),
     mountpoints,
+    buildroot,
     scenes: frame.scenes?.map((scene) => sanitizeScene(scene, frame)) ?? [],
   }
 }

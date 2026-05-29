@@ -704,6 +704,7 @@ export interface Palette {
 
 export interface FrameBuildrootConfig {
   platform?: string
+  setupJsonResetFilePath?: string
   sdImage?: {
     status?: 'idle' | 'queued' | 'building' | 'ready' | 'error' | 'missing'
     buildId?: string

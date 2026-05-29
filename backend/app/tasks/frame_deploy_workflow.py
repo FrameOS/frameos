@@ -29,6 +29,15 @@ from app.tasks.frame_deploy_helpers import (
     sync_vendor_dir,
     upload_binary,
 )
+from app.tasks.setup_json_reset import (
+    SETUP_JSON_RESET_SCRIPT_NAME,
+    SETUP_JSON_RESET_SCRIPT_PATH,
+    SETUP_JSON_RESET_SERVICE_NAME,
+    SETUP_JSON_RESET_SERVICE_PATH,
+    render_setup_json_reset_script,
+    render_setup_json_reset_service,
+    setup_json_reset_file_path,
+)
 from app.utils.frame_http import _fetch_frame_http_bytes
 from app.utils.remote_exec import upload_file
 from app.utils.ssh_authorized_keys import _install_authorized_keys
@@ -1084,6 +1093,12 @@ class FrameDeployWorkflow:
             await self.deployer.log("stdout", f"{icon} Disabling system-managed Caddy service (managed by FrameOS tls_proxy)")
             await self.deployer.exec_command("sudo systemctl disable --now caddy.service", raise_on_error=False)
 
+        setup_json_reset_path = setup_json_reset_file_path(self.frame)
+        if setup_json_reset_path:
+            await self._install_setup_json_reset_helper(setup_json_reset_path)
+        else:
+            await self._remove_setup_json_reset_helper()
+
         if post_deploy.get("final_action") == "reboot":
             await self.deployer.exec_command("sudo systemctl enable frameos.service")
             await self.deployer.log("stdinfo", f"{icon} Deployed! Rebooting device after boot config changes")
@@ -1092,6 +1107,48 @@ class FrameDeployWorkflow:
             await self.deployer.exec_command("sudo systemctl daemon-reload")
             await self.deployer.log("stdinfo", f"{icon} Deployed! Restarting FrameOS")
             await self.deployer.restart_service("frameos")
+
+    async def _install_setup_json_reset_helper(self, setup_json_reset_path: str) -> None:
+        await self.deployer.log("stdout", f"{icon} Installing setup JSON reset helper")
+        script_path = f"/srv/frameos/build/{SETUP_JSON_RESET_SCRIPT_NAME}"
+        service_path = f"/srv/frameos/build/{SETUP_JSON_RESET_SERVICE_NAME}"
+        await upload_file(
+            self.deployer.db,
+            self.deployer.redis,
+            self.deployer.frame,
+            script_path,
+            render_setup_json_reset_script(setup_json_reset_path).encode("utf-8"),
+        )
+        await upload_file(
+            self.deployer.db,
+            self.deployer.redis,
+            self.deployer.frame,
+            service_path,
+            render_setup_json_reset_service(
+                setup_json_reset_path,
+                script_path=SETUP_JSON_RESET_SCRIPT_PATH,
+            ).encode("utf-8"),
+        )
+        await self.deployer.exec_command(
+            f"sudo install -m 755 {shlex.quote(script_path)} {shlex.quote(SETUP_JSON_RESET_SCRIPT_PATH)}"
+        )
+        await self.deployer.exec_command(
+            f"sudo install -m 644 {shlex.quote(service_path)} {shlex.quote(SETUP_JSON_RESET_SERVICE_PATH)}"
+        )
+        await self.deployer.exec_command("sudo systemctl daemon-reload")
+        await self.deployer.exec_command(f"sudo systemctl enable {SETUP_JSON_RESET_SERVICE_NAME}", raise_on_error=False)
+
+    async def _remove_setup_json_reset_helper(self) -> None:
+        await self.deployer.log("stdout", f"{icon} Removing setup JSON reset helper")
+        await self.deployer.exec_command(f"sudo systemctl disable {SETUP_JSON_RESET_SERVICE_NAME}", raise_on_error=False)
+        await self.deployer.exec_command(
+            f"sudo rm -f {shlex.quote(SETUP_JSON_RESET_SERVICE_PATH)} {shlex.quote(SETUP_JSON_RESET_SCRIPT_PATH)}",
+            raise_on_error=False,
+        )
+        await self.deployer.exec_command(
+            f"rm -f /srv/frameos/build/{SETUP_JSON_RESET_SERVICE_NAME} /srv/frameos/build/{SETUP_JSON_RESET_SCRIPT_NAME}",
+            raise_on_error=False,
+        )
 
     async def _plan_post_deploy_cleanup(self, *, drivers: dict[str, Any], low_memory: bool) -> dict[str, Any]:
         boot_config = "/boot/config.txt"

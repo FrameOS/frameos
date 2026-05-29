@@ -17,12 +17,27 @@ from sqlalchemy.orm import Session
 
 from app.drivers.devices import drivers_for_frame
 from app.codegen.drivers_nim import COMPILATION_MODE_STATIC
-from app.models.frame import Frame, get_frame_json, get_interpreted_scenes_json, update_frame
+from app.models.frame import (
+    Frame,
+    get_frame_json,
+    get_interpreted_scenes_json,
+    normalize_buildroot_setup_json_reset_file_path,
+    update_frame,
+)
 from app.models.log import new_log as log
 from app.models.settings import get_settings_dict
 from app.tasks._frame_deployer import FrameDeployer
 from app.tasks.binary_builder import FrameBinaryBuilder, FrameBinaryBuildResult
 from app.tasks.deploy_agent import AgentDeployer
+from app.tasks.setup_json_reset import (
+    SETUP_JSON_RESET_SCRIPT_NAME,
+    SETUP_JSON_RESET_SCRIPT_PATH,
+    SETUP_JSON_RESET_SERVICE_NAME,
+    render_setup_json_reset_script,
+    render_setup_json_reset_service,
+    setup_json_reset_enabled,
+    setup_json_reset_file_path,
+)
 from app.tasks.utils import get_fresh_frame
 from app.utils.cross_compile import CrossCompiler, TargetMetadata, cross_cache_key, cross_cache_root
 from app.utils.ssh_key_utils import select_ssh_keys_for_frame
@@ -181,6 +196,10 @@ def ensure_buildroot_frame_defaults(frame: Frame, platform: str | None = None) -
 
     buildroot = dict(frame.buildroot or {})
     buildroot["platform"] = normalized_platform
+    buildroot["setupJsonResetFilePath"] = normalize_buildroot_setup_json_reset_file_path(
+        buildroot.get("setupJsonResetFilePath"),
+        default_if_missing=True,
+    )
     frame.buildroot = buildroot
 
 
@@ -502,8 +521,24 @@ class BuildrootImageBuilder:
 
         shutil.copy2(release_dir / "frameos.service", systemd_dir / "frameos.service")
         shutil.copy2(agent_release_dir / "frameos_agent.service", systemd_dir / "frameos_agent.service")
-        (systemd_dir / "frameos-firstboot-setup.service").write_text(FIRSTBOOT_SETUP_SERVICE, encoding="utf-8")
-        for service in ("frameos.service", "frameos_agent.service", "frameos-firstboot-setup.service"):
+        setup_reset_enabled = setup_json_reset_enabled(self.frame)
+        if setup_reset_enabled:
+            setup_file_path = setup_json_reset_file_path(self.frame, default_if_missing=True)
+            script_contents = render_setup_json_reset_script(setup_file_path)
+            service_contents = render_setup_json_reset_service(
+                setup_file_path,
+                script_path=SETUP_JSON_RESET_SCRIPT_PATH,
+            )
+            script_path = overlay_dir / "usr" / "local" / "bin" / SETUP_JSON_RESET_SCRIPT_NAME
+            script_path.parent.mkdir(parents=True, exist_ok=True)
+            script_path.write_text(script_contents, encoding="utf-8")
+            os.chmod(script_path, 0o755)
+            (systemd_dir / SETUP_JSON_RESET_SERVICE_NAME).write_text(service_contents, encoding="utf-8")
+
+        services = ["frameos.service", "frameos_agent.service"]
+        if setup_reset_enabled:
+            services.append(SETUP_JSON_RESET_SERVICE_NAME)
+        for service in services:
             self._relative_symlink(f"../{service}", wants_dir / service)
         self._relative_symlink("/usr/lib/systemd/system/NetworkManager.service", wants_dir / "NetworkManager.service")
 
@@ -748,26 +783,6 @@ chmod a+r /artifacts/{shlex.quote(output_filename)}
 
     async def _log(self, type: str, line: str) -> None:
         await log(self.db, self.redis, int(self.frame.id), type, line)
-
-
-FIRSTBOOT_SETUP_SERVICE = """[Unit]
-Description=FrameOS first boot setup
-DefaultDependencies=no
-After=local-fs.target systemd-sysusers.service
-Before=frameos.service frameos_agent.service
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-Environment=FRAMEOS_HOME=/srv/frameos/current
-Environment=LD_LIBRARY_PATH=/srv/frameos/current/drivers:/srv/frameos/current/scenes:/usr/lib:/usr/local/lib
-StandardOutput=journal+console
-StandardError=journal+console
-ExecStart=/bin/sh -c '/srv/frameos/current/frameos setup; code=$?; if [ "$code" = "0" ]; then systemctl disable frameos-firstboot-setup.service || true; exit 0; fi; if [ "$code" = "2" ]; then systemctl disable frameos-firstboot-setup.service || true; systemctl reboot; exit 0; fi; exit "$code"'
-
-[Install]
-WantedBy=multi-user.target
-"""
 
 
 POST_BUILD_SCRIPT = """#!/usr/bin/env bash

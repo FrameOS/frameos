@@ -178,13 +178,15 @@ proc loadErrorBehavior*(data: JsonNode): ErrorBehaviorConfig =
   if result.silentWindowMinutes <= 0: result.silentWindowMinutes = 10
   if result.showErrorRetrySeconds <= 0: result.showErrorRetrySeconds = 60
 
-proc getConfigFilename*(): string =
+proc getConfigFilename*(overridePath = ""): string =
+  if overridePath.len > 0:
+    return overridePath
   result = getEnv("FRAMEOS_CONFIG")
   if result == "":
     result = "./frame.json"
 
-proc loadConfig*(): FrameConfig =
-  let data = parseFile(getConfigFilename())
+proc loadConfig*(configPath = ""): FrameConfig =
+  let data = parseFile(getConfigFilename(configPath))
   # TODO: switch to jsony
   result = FrameConfig(
     name: data{"name"}.getStr(),
