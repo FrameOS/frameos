@@ -8,13 +8,6 @@ on:
         required: false
         default: latest
         type: string
-  push:
-    branches:
-      - main
-    paths:
-      - backend/bin/cross.py
-      - backend/tools/cross-toolchain.Dockerfile
-      - .github/workflows/frameos-cross-toolchain.yml
 
 permissions:
   contents: read
