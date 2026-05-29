@@ -8,6 +8,7 @@ import { framesModel } from '../../models/framesModel'
 import { apiFetch } from '../../utils/apiFetch'
 import { loaders } from 'kea-loaders'
 import { inHassioIngress } from '../../utils/inHassioIngress'
+import { BUILDROOT_RASPBERRY_PI_ZERO_2_W } from '../../devices'
 
 export const newFrameForm = kea<newFrameFormType>([
   path(['src', 'scenes', 'frames', 'newFrameForm']),
@@ -40,7 +41,11 @@ export const newFrameForm = kea<newFrameFormType>([
         name: '',
         frame_host: '',
         device: 'web_only',
-        platform: 'pi-zero2',
+        platform: BUILDROOT_RASPBERRY_PI_ZERO_2_W,
+        network: {
+          wifiSSID: '',
+          wifiPassword: '',
+        },
         server_host:
           typeof window !== 'undefined'
             ? `${window.location.hostname}:${
@@ -58,6 +63,13 @@ export const newFrameForm = kea<newFrameFormType>([
             ? 'Please pick a platform'
             : // no errors for RpiOS, support autodetection
               null,
+        network:
+          frame.mode === 'buildroot'
+            ? {
+                wifiSSID: !frame.network?.wifiSSID ? 'Please enter a WiFi network' : undefined,
+                wifiPassword: !frame.network?.wifiPassword ? 'Please enter the WiFi password' : undefined,
+              }
+            : undefined,
       }),
       submit: async (frame) => {
         try {

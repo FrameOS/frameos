@@ -151,7 +151,7 @@ export function FrameSettings({
     generateTlsCertificates,
     verifyTlsCertificates,
   } = useActions(frameLogic)
-  const { deleteFrame } = useActions(framesModel)
+  const { deleteFrame, downloadSdCardImage } = useActions(framesModel)
   const { appsWithSaveAssets } = useValues(appsLogic({ frameId }))
   const { clearBuildCache, downloadBuildZip, downloadCSourceZip, downloadBinaryZip } = useActions(
     frameSettingsLogic({ frameId })
@@ -276,6 +276,16 @@ export function FrameSettings({
                 },
                 icon: <ArrowPathIcon className="w-5 h-5" />,
                 loading: buildCacheLoading,
+              },
+            ]
+          : []),
+        ...(mode === 'buildroot' && !inFrameAdminMode
+          ? [
+              {
+                label: 'Download SD card image',
+                onClick: () => downloadSdCardImage(frame.id),
+                icon: <ArrowDownTrayIcon className="w-5 h-5" />,
+                loading: false,
               },
             ]
           : []),
@@ -1118,6 +1128,25 @@ export function FrameSettings({
         <H6 id="frame-settings-network">Network</H6>
         <div className="pl-2 @md:pl-8 space-y-2">
           <Group name="network">
+            {mode === 'buildroot' ? (
+              <>
+                <Field name="wifiSSID" label="WiFi network">
+                  <TextInput name="wifiSSID" placeholder="Home WiFi" autoComplete="off" />
+                </Field>
+                <Field
+                  name="wifiPassword"
+                  label="WiFi password"
+                  secret={!frameFormTouches['network.wifiPassword'] && !!frameForm.network?.wifiPassword}
+                >
+                  <TextInput
+                    name="wifiPassword"
+                    type={frameFormTouches['network.wifiPassword'] ? 'text' : 'password'}
+                    placeholder="Network password"
+                    autoComplete="new-password"
+                  />
+                </Field>
+              </>
+            ) : null}
             <Field name="networkCheck" label="Wait for network before rendering">
               <Switch name="networkCheck" fullWidth />
             </Field>

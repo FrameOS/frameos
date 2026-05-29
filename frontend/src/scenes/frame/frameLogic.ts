@@ -1173,6 +1173,10 @@ export const frameLogic = kea<frameLogicType>([
       }
     },
     loadDeployPlans: async () => {
+      if ((values.frameForm?.mode || values.frame?.mode || 'rpios') === 'buildroot') {
+        actions.loadDeployPlansSuccess(null)
+        return
+      }
       const response = await apiFetch(`/api/frames/${values.frameId}/deploy_plan`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1188,6 +1192,9 @@ export const frameLogic = kea<frameLogicType>([
       actions.loadDeployPlansSuccess(payload.plan)
     },
     showDeployPlanModal: () => {
+      if ((values.frameForm?.mode || values.frame?.mode || 'rpios') === 'buildroot') {
+        return
+      }
       const hasUsableLocalPlan =
         Boolean(values.deployRecommendation) ||
         values.fullDeployPlanSummary.length > 0 ||
@@ -1352,6 +1359,9 @@ export const frameLogic = kea<frameLogicType>([
     deployTransportToggleVisible: [
       (s) => [s.frameForm, s.frame],
       (frameForm, frame): boolean => {
+        if ((frameForm?.mode || frame?.mode || 'rpios') === 'buildroot') {
+          return false
+        }
         const agent = frameForm?.agent ?? frame?.agent
         return isAgentDeployConfigured(agent)
       },

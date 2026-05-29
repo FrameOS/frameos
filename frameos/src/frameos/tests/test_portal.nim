@@ -14,28 +14,34 @@ type HookMode = enum
 
 var hookMode {.global.}: HookMode
 var runWifiListCalls {.global.}: int
+var runWifiStatusCalls {.global.}: int
 var runShowActiveCalls {.global.}: int
 var runHotspotCalls {.global.}: int
 var runModifySharedCalls {.global.}: int
+var runManagedCalls {.global.}: int
 var runDownCalls {.global.}: int
 var runDeleteCalls {.global.}: int
 var runDeleteConnectionCalls {.global.}: int
 var nmcliConnectCalls {.global.}: int
 var sawExpectedNmcliArgs {.global.}: bool
+var sawFallbackNmcliArgs {.global.}: bool
 var sleepCallCount {.global.}: int
 var lastSleepMs {.global.}: int
 
 proc resetHookState() =
   hookMode = hmWifiList
   runWifiListCalls = 0
+  runWifiStatusCalls = 0
   runShowActiveCalls = 0
   runHotspotCalls = 0
   runModifySharedCalls = 0
+  runManagedCalls = 0
   runDownCalls = 0
   runDeleteCalls = 0
   runDeleteConnectionCalls = 0
   nmcliConnectCalls = 0
   sawExpectedNmcliArgs = false
+  sawFallbackNmcliArgs = false
   sleepCallCount = 0
   lastSleepMs = -1
 
@@ -43,6 +49,9 @@ proc runHook(cmd: string): (string, int) {.gcsafe, nimcall.} =
   if cmd.contains("nmcli --terse --fields SSID device wifi list"):
     inc runWifiListCalls
     return ("wifi-a\n\nwifi-b\nwifi-a\n", 0)
+  if cmd.contains("nmcli -t -f DEVICE,TYPE,STATE device status"):
+    inc runWifiStatusCalls
+    return ("wlan0:wifi:disconnected\n", 0)
   if cmd.contains("connection show --active"):
     inc runShowActiveCalls
     if hookMode == hmStopAp:
@@ -55,6 +64,9 @@ proc runHook(cmd: string): (string, int) {.gcsafe, nimcall.} =
     return ("ok", 0)
   if cmd.contains("connection modify 'frameos-hotspot' ipv4.method shared"):
     inc runModifySharedCalls
+    return ("", 0)
+  if cmd.contains("device set 'wlan0' managed yes || true"):
+    inc runManagedCalls
     return ("", 0)
   if cmd.contains("connection down 'frameos-hotspot'"):
     inc runDownCalls
@@ -75,6 +87,12 @@ proc nmcliHook(args: seq[string]): tuple[rc: int, output: string] {.gcsafe, nimc
     args[4] == "device" and args[5] == "wifi" and args[6] == "connect" and
     args[7] == "home-wifi" and args[8] == "password" and args[9] == "pw" and
     args[10] == "ifname" and args[11] == "wlan0" and args[12] == "name" and args[13] == "frameos-wifi"
+  sawFallbackNmcliArgs =
+    args.len == 12 and
+    args[0] == "-n" and args[1] == "nmcli" and args[2] == "--wait" and args[3] == "15" and
+    args[4] == "device" and args[5] == "wifi" and args[6] == "connect" and
+    args[7] == "home-wifi" and args[8] == "password" and args[9] == "pw" and
+    args[10] == "name" and args[11] == "frameos-wifi"
   if hookMode == hmAttemptSuccess:
     return (rc: 0, output: "connected")
   (rc: 7, output: "denied")
@@ -142,6 +160,8 @@ suite "portal network orchestration":
     check runShowActiveCalls == 1
     check runHotspotCalls == 1
     check runModifySharedCalls == 1
+    check runWifiStatusCalls == 1
+    check runManagedCalls == 1
 
     let (ok, ev) = eventChannel.tryRecv()
     check ok
@@ -177,12 +197,13 @@ suite "portal network orchestration":
     let ok = attemptConnect(frame, "home-wifi", "pw")
 
     check ok
-    check frame.network.status == NetworkStatus.connected
-    check runDeleteConnectionCalls == 1
-    check nmcliConnectCalls == 1
-    check sawExpectedNmcliArgs
-    check sleepCallCount == 1
-    check lastSleepMs == 5000
+  check frame.network.status == NetworkStatus.connected
+  check runDeleteConnectionCalls == 1
+  check nmcliConnectCalls == 1
+  check sawExpectedNmcliArgs
+  check not sawFallbackNmcliArgs
+  check sleepCallCount == 1
+  check lastSleepMs == 5000
 
     let (hasEvent, ev) = eventChannel.tryRecv()
     check hasEvent
@@ -194,8 +215,9 @@ suite "portal network orchestration":
     let frame = makeFrameOS()
     let ok = attemptConnect(frame, "home-wifi", "bad")
 
-    check not ok
-    check frame.network.status == NetworkStatus.error
-    check runDeleteConnectionCalls == 1
-    check nmcliConnectCalls == 1
-    check sleepCallCount == 0
+  check not ok
+  check frame.network.status == NetworkStatus.error
+  check runDeleteConnectionCalls == 1
+  check nmcliConnectCalls == 2
+  check sawFallbackNmcliArgs
+  check sleepCallCount == 0

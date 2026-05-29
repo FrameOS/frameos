@@ -5,3 +5,4 @@ from .restart_frame import restart_frame, reboot_frame # noqa
 from .restart_agent import restart_agent # noqa
 from .stop_frame import stop_frame # noqa
 from .deploy_agent import deploy_agent # noqa
+from .buildroot_image import buildroot_sd_image # noqa

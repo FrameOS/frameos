@@ -68,6 +68,37 @@ proc run(cmd: string): (string, int) {.gcsafe.} =
   pLog("portal:exec", %*{"cmd": cmd, "rc": rc, "output": output.strip()})
   (output, rc)
 
+proc parseWifiInterfaceFromNmcli(output: string): string =
+  for line in output.splitLines():
+    let parts = line.split(':')
+    if parts.len < 2:
+      continue
+    if parts[1] != "wifi":
+      continue
+    if parts.len >= 3 and parts[2] == "unavailable":
+      continue
+    if parts[0].len > 0:
+      return parts[0]
+  return ""
+
+proc getWifiDevice*(): string =
+  let (output, rc) = run("sudo nmcli -t -f DEVICE,TYPE,STATE device status 2>/dev/null || true")
+  if rc != 0:
+    return "wlan0"
+
+  let activeDevice = parseWifiInterfaceFromNmcli(output)
+  if activeDevice.len > 0:
+    return activeDevice
+
+  for line in output.splitLines():
+    let parts = line.split(':')
+    if parts.len < 2 or parts[1] != "wifi" or parts[0].len == 0:
+      continue
+    if parts.len >= 3 and parts[2] == "unavailable":
+      continue
+    return parts[0]
+  return "wlan0"
+
 proc availableNetworks*(frameOS: FrameOS): seq[string] =
   ## Return a list of nearby Wi-Fi SSIDs using nmcli
   let (output, rc) = run("sudo nmcli --terse --fields SSID device wifi list 2>/dev/null || true")
@@ -108,15 +139,29 @@ proc startAp*(frameOS: FrameOS) {.gcsafe.} =
     return
   pLog("portal:startAp")
   frameOS.network.hotspotStatus = HotspotStatus.starting
+  discard run("sudo rfkill unblock wifi || true")
+  discard run("sudo nmcli radio wifi on || true")
 
   discard run("sudo nmcli connection delete " & shQuote(nmHotspotName) & " 2>/dev/null || true")
+  let wifiDevice = getWifiDevice()
 
   let wifiHotspotSsid = frameOS.frameConfig.network.wifiHotspotSsid
   let wifiHotspotPassword = frameOS.frameConfig.network.wifiHotspotPassword
-  let rc = run(fmt"sudo nmcli device wifi hotspot ifname wlan0 con-name {shQuote(nmHotspotName)} " &
-               fmt"ssid {shQuote(wifiHotspotSsid)} password {shQuote(wifiHotspotPassword)}")[1]
-  if rc != 0:
+  let hotspotCommand = fmt"sudo nmcli device wifi hotspot ifname {shQuote(wifiDevice)} con-name " &
+                       shQuote(nmHotspotName) & " " &
+                       fmt"ssid {shQuote(wifiHotspotSsid)} password {shQuote(wifiHotspotPassword)}"
+  if run(hotspotCommand)[1] != 0:
+    pLog("portal:startAp:ifnameRetry", %*{"device": wifiDevice})
+    let fallbackCommand = fmt"sudo nmcli device wifi hotspot con-name {shQuote(nmHotspotName)} " &
+                         fmt"ssid {shQuote(wifiHotspotSsid)} password {shQuote(wifiHotspotPassword)}"
+    if run(fallbackCommand)[1] != 0:
+      frameOS.network.hotspotStatus = HotspotStatus.error
+      pLog("portal:startAp:error")
+      return
+
+  if run("sudo nmcli device set " & shQuote(wifiDevice) & " managed yes || true")[1] != 0:
     frameOS.network.hotspotStatus = HotspotStatus.error
+    pLog("portal:startAp:managedFailed", %*{"device": wifiDevice})
     pLog("portal:startAp:error")
     return
 
@@ -150,21 +195,37 @@ proc hotspotAutoTimeoutLoop(frameOS: FrameOS, startedAt: MonoTime) {.gcsafe, nim
 proc attemptConnect*(frameOS: FrameOS, ssid, password: string): bool {.gcsafe.} =
   frameOS.network.status = NetworkStatus.connecting
   discard run(fmt"sudo -n nmcli connection delete '{nmConnectionName}' 2>/dev/null || true")
+  let wifiDevice = getWifiDevice()
 
-  let nmcliArgs = @[
+  var rc = 1
+  var output = ""
+  var nmcliArgs = @[
     "--wait", "15", # abort if not connected in 15 s
     "device", "wifi", "connect", ssid,
     "password", password,
-    "ifname", "wlan0", "name", nmConnectionName
+    "ifname", wifiDevice, "name", nmConnectionName,
   ]
   let sudoArgs = @["-n", "nmcli"] & nmcliArgs # -n = never prompt for pwd
   let connectResult = portalNmcliConnectHook(sudoArgs)
-  let rc = connectResult.rc
-  let output = connectResult.output
+  rc = connectResult.rc
+  output = connectResult.output
+  var loggedCommand = "sudo " & $sudoArgs
+
+  if rc != 0:
+    nmcliArgs = @[
+      "--wait", "15",
+      "device", "wifi", "connect", ssid,
+      "password", password,
+      "name", nmConnectionName,
+    ]
+    let fallbackArgs = @["-n", "nmcli"] & nmcliArgs
+    let fallbackResult = portalNmcliConnectHook(fallbackArgs)
+    rc = fallbackResult.rc
+    output = fallbackResult.output
+    loggedCommand = "sudo " & $fallbackArgs
 
   pLog("portal:exec",
-       %*{"cmd": "sudo " & $sudoArgs,
-           "rc": rc, "output": output.strip()})
+       %*{"cmd": loggedCommand, "rc": rc, "output": output.strip()})
 
   result = (rc == 0)
   frameOS.network.status = if result: NetworkStatus.connected else: NetworkStatus.error
