@@ -364,11 +364,11 @@ export const framesModel = kea<framesModelType>([
       longRunningTasksModel.actions.startTask({
         frameId: id,
         kind: 'buildrootImage',
-        title: 'Building SD card image',
+        title: 'Preparing SD card image',
         detail:
           sdImage?.status === 'building' || sdImage?.status === 'queued'
             ? 'Checking image build status'
-            : 'Image generation started',
+            : 'Image preparation started',
       })
 
       try {
@@ -390,8 +390,8 @@ export const framesModel = kea<framesModelType>([
         longRunningTasksModel.actions.startTask({
           frameId: id,
           kind: 'buildrootImage',
-          title: 'Building SD card image',
-          detail: data?.message || 'Image generation started',
+          title: 'Preparing SD card image',
+          detail: data?.message || 'Image preparation started',
         })
       } catch (error) {
         longRunningTasksModel.actions.taskFailed({

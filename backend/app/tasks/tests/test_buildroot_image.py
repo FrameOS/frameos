@@ -58,10 +58,28 @@ def test_buildroot_config_avoids_ncurses_selecting_packages(tmp_path):
     assert "BR2_PACKAGE_BASH" not in config
     assert "BR2_PACKAGE_PROCPS_NG" not in config
     assert 'BR2_DL_DIR="/cache/dl"' in config
+    assert "BR2_JLEVEL=2" in config
+    assert 'BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES="/work/linux-fragment.config"' in config
     assert "BR2_PACKAGE_DROPBEAR=y" in config
     assert "# BR2_CCACHE is not set" in config
     assert 'BR2_ROOTFS_POST_IMAGE_SCRIPT="/work/post-image.sh"' in config
     assert "/work/partition-post-build.sh" in config
+
+
+def test_kernel_config_fragment_disables_case_colliding_xtables_targets(tmp_path):
+    fragment_path = tmp_path / "linux-fragment.config"
+
+    BuildrootImageBuilder._write_kernel_config_fragment(fragment_path)
+    fragment = fragment_path.read_text(encoding="utf-8")
+
+    assert "# CONFIG_NETFILTER_XT_TARGET_DSCP is not set" in fragment
+    assert "# CONFIG_NETFILTER_XT_TARGET_HL is not set" in fragment
+    assert "# CONFIG_NETFILTER_XT_TARGET_RATEEST is not set" in fragment
+    assert "# CONFIG_NETFILTER_XT_TARGET_TCPMSS is not set" in fragment
+    assert "# CONFIG_NETFILTER_XT_MATCH_RATEEST is not set" in fragment
+    assert "# CONFIG_IP_NF_TARGET_ECN is not set" in fragment
+    assert "# CONFIG_IP_NF_TARGET_TTL is not set" in fragment
+    assert "# CONFIG_IP6_NF_TARGET_HL is not set" in fragment
 
 
 def test_buildroot_script_builds_output_on_container_filesystem(tmp_path):
@@ -83,7 +101,9 @@ def test_buildroot_script_builds_output_on_container_filesystem(tmp_path):
     assert "CXXFLAGS=\"-O2 -pipe -std=gnu++17\"" in script
     assert "HOSTCXXFLAGS=\"-O2 -pipe -std=gnu++17\"" in script
     assert "unset TERMINFO TERMINFO_DIRS" in script
-    assert "for path in /build/output/build/host-cmake-*;" in script
+    assert "FRAMEOS_NCURSES_TERMINFO_LINKS" in script
+    assert "for dir in a d f l p s v x;" in script
+    assert "rm -f /build/output/build/linux-custom/.stamp_configured" in script
     assert ".stamp_staging_installed" in script
     assert "usr/share/terminfo/a/ansi" in script
     assert "ulimit -n 65535" in script
@@ -272,6 +292,8 @@ def test_buildroot_boot_config_merge_is_written_to_all_boot_locations(tmp_path):
     overlay_dir = tmp_path / "overlay"
     existing_config = overlay_dir / "boot" / "config.txt"
     existing_firmware_config = overlay_dir / "boot" / "firmware" / "config.txt"
+    existing_config.parent.mkdir(parents=True)
+    existing_firmware_config.parent.mkdir(parents=True)
     existing_config.write_text("dtoverlay=spi1-1cs\n#dtoverlay=spi0-0cs\n", encoding="utf-8")
     existing_firmware_config.write_text("disable_splash=1\n", encoding="utf-8")
 

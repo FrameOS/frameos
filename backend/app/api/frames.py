@@ -2202,11 +2202,11 @@ async def api_frame_buildroot_sd_image(
     try:
         started, sd_image = await start_buildroot_sd_image(db, redis, frame)
         if started:
-            message = "Buildroot SD card image generation started"
+            message = "Buildroot SD card image preparation started"
         elif sd_image.get("status") == "ready":
             message = "Buildroot SD card image already ready"
         else:
-            message = "Buildroot SD card image generation already running"
+            message = "Buildroot SD card image preparation already running"
         return {
             "message": message,
             "sdImage": sd_image,

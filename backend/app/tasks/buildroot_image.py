@@ -14,9 +14,11 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Optional
 from types import SimpleNamespace
+from urllib.parse import urljoin
 
 from arq import ArqRedis as Redis
 from arq.jobs import Job, JobStatus
+import httpx
 from sqlalchemy.orm import Session
 
 from app.drivers.devices import drivers_for_frame
@@ -48,12 +50,21 @@ from app.utils.ssh_key_utils import select_ssh_keys_for_frame
 from app.utils.local_exec import exec_local_command
 from app.utils.token import secure_token
 
+REPO_ROOT = Path(__file__).resolve().parents[3]
 SUPPORTED_BUILDROOT_PLATFORM = "raspberry-pi-zero-2-w"
 BUILDROOT_HOST_CXXFLAGS = "-O2 -pipe -std=gnu++17"
 BUILDROOT_HOST_CFLAGS = "-O2 -pipe"
 BUILDROOT_BOOTSTRAP_SCRIPT_VERSION = "4"
 BUILDROOT_FRAMEOS_PARTITION_SIZE = os.environ.get("FRAMEOS_BUILDROOT_FRAMEOS_PARTITION_SIZE", "512M")
 BUILDROOT_ASSETS_PARTITION_SIZE = os.environ.get("FRAMEOS_BUILDROOT_ASSETS_PARTITION_SIZE", "512M")
+BUILDROOT_ARCHIVE_BASE_URL = os.environ.get("FRAMEOS_ARCHIVE_BASE_URL", "https://archive.frameos.net/")
+BUILDROOT_BASE_MANIFEST_PATH = os.environ.get("FRAMEOS_BUILDROOT_BASE_MANIFEST_PATH", "buildroot-images/manifest.json")
+BUILDROOT_BASE_MANIFEST_FILE = os.environ.get(
+    "FRAMEOS_BUILDROOT_BASE_MANIFEST_FILE",
+    str(REPO_ROOT / "tools" / "buildroot-images" / "manifest.json"),
+)
+BUILDROOT_BASE_USE_REMOTE = os.environ.get("FRAMEOS_BUILDROOT_BASE_USE_REMOTE", "").lower() in {"1", "true", "yes"}
+BUILDROOT_BASE_TIMEOUT = float(os.environ.get("FRAMEOS_BUILDROOT_BASE_TIMEOUT", "60"))
 BUILDROOT_DOCKER_NOFILE_LIMIT = int(os.environ.get("FRAMEOS_BUILDROOT_DOCKER_NOFILE_LIMIT", "65535"))
 BUILDROOT_DOCKER_APT_DEPS = (
     "bc",
@@ -95,7 +106,6 @@ LEGACY_PLATFORM_ALIASES = {
     "raspberrypizero2w_64_defconfig",
 }
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
 BUILDROOT_VERSION = os.environ.get("FRAMEOS_BUILDROOT_VERSION", "2025.02.13")
 BUILDROOT_DEFCONFIG = "raspberrypizero2w_64_defconfig"
 BUILDROOT_DOCKER_IMAGE = os.environ.get("FRAMEOS_BUILDROOT_DOCKER_IMAGE", "debian:bookworm")
@@ -113,10 +123,7 @@ BUILDROOT_SKIP_PULL = os.environ.get(
 BUILDROOT_IMAGE_STALE_AFTER_SECONDS = int(
     os.environ.get("FRAMEOS_BUILDROOT_IMAGE_STALE_AFTER_SECONDS", str(6 * 60 * 60))
 )
-BUILDROOT_IMAGES_DIGESTS_PATH = os.environ.get(
-    "FRAMEOS_BUILDROOT_IMAGES_DIGESTS_PATH",
-    str(REPO_ROOT / "buildroot-images.json"),
-)
+BUILDROOT_IMAGES_DIGESTS_PATH = os.environ.get("FRAMEOS_BUILDROOT_IMAGES_DIGESTS_PATH", str(REPO_ROOT / "buildroot-images.json"))
 BACKEND_ROOT = REPO_ROOT / "backend"
 BUILDROOT_DOCKERFILE = BACKEND_ROOT / "tools" / "buildroot.Dockerfile"
 FRAMEOS_BUILD_TARGET = TargetMetadata(
@@ -158,6 +165,10 @@ def buildroot_output_cache_dir() -> Path:
     return Path(os.environ.get("FRAMEOS_BUILDROOT_OUTPUT_CACHE_DIR") or (buildroot_cache_dir() / "output"))
 
 
+def buildroot_base_cache_dir() -> Path:
+    return Path(os.environ.get("FRAMEOS_BUILDROOT_BASE_CACHE_DIR") or (buildroot_cache_dir() / "base-images"))
+
+
 @lru_cache(maxsize=1)
 def _buildroot_digest_map() -> dict[str, str]:
     path = Path(BUILDROOT_IMAGES_DIGESTS_PATH)
@@ -180,6 +191,81 @@ def _buildroot_digest_map() -> dict[str, str]:
         if isinstance(digest, str) and digest:
             digests[image_name] = digest
     return digests
+
+
+@lru_cache(maxsize=1)
+def _frameos_version() -> str:
+    path = REPO_ROOT / "versions.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ""
+    value = payload.get("frameos") if isinstance(payload, dict) else None
+    return value if isinstance(value, str) else ""
+
+
+async def _buildroot_base_manifest() -> dict[str, Any]:
+    manifest_file = Path(BUILDROOT_BASE_MANIFEST_FILE)
+    if manifest_file.is_file() and not BUILDROOT_BASE_USE_REMOTE:
+        return json.loads(manifest_file.read_text(encoding="utf-8"))
+
+    manifest_url = urljoin(_normalize_url_base(BUILDROOT_ARCHIVE_BASE_URL), BUILDROOT_BASE_MANIFEST_PATH)
+    async with httpx.AsyncClient(timeout=BUILDROOT_BASE_TIMEOUT) as client:
+        response = await client.get(manifest_url)
+        response.raise_for_status()
+        return response.json()
+
+
+def _normalize_url_base(url: str) -> str:
+    return url if url.endswith("/") else f"{url}/"
+
+
+async def resolve_buildroot_base_entry(platform: str, frameos_version: str | None = None) -> dict[str, Any]:
+    normalized_platform = normalize_buildroot_platform(platform)
+    wanted_version = frameos_version if frameos_version is not None else _frameos_version()
+    manifest = await _buildroot_base_manifest()
+    entries = [entry for entry in manifest.get("entries", []) if entry.get("platform") == normalized_platform]
+    if not entries:
+        raise RuntimeError(f"No cached Buildroot base image found for {normalized_platform}")
+
+    if wanted_version:
+        for entry in entries:
+            if entry.get("frameos_version") == wanted_version:
+                return entry
+
+    return max(entries, key=lambda entry: str(entry.get("updated_at") or ""))
+
+
+async def ensure_buildroot_base_image(entry: dict[str, Any], destination_dir: Path) -> Path:
+    object_key = entry.get("object_key")
+    sha256 = entry.get("sha256")
+    if not isinstance(object_key, str) or not object_key:
+        raise RuntimeError("Buildroot base manifest entry is missing object_key")
+    if not isinstance(sha256, str) or not sha256:
+        raise RuntimeError("Buildroot base manifest entry is missing sha256")
+
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    image_name = f"{entry.get('platform', 'buildroot')}-{sha256[:16]}.img"
+    image_path = destination_dir / image_name
+    if image_path.is_file() and _sha256(image_path) == sha256:
+        return image_path
+
+    archive_path = destination_dir / f"{image_name}.gz"
+    archive_url = urljoin(_normalize_url_base(BUILDROOT_ARCHIVE_BASE_URL), object_key)
+    async with httpx.AsyncClient(timeout=None) as client:
+        response = await client.get(archive_url)
+        response.raise_for_status()
+        archive_path.write_bytes(response.content)
+
+    with gzip.open(archive_path, "rb") as source, image_path.open("wb") as output:
+        shutil.copyfileobj(source, output)
+    archive_path.unlink(missing_ok=True)
+
+    actual = _sha256(image_path)
+    if actual != sha256:
+        image_path.unlink(missing_ok=True)
+        raise RuntimeError(f"Downloaded Buildroot base image checksum mismatch: expected {sha256}, got {actual}")
+    return image_path
 
 
 def _lgpio_runtime_library_paths() -> list[Path]:
@@ -224,6 +310,11 @@ def _apply_boot_config_lines(content: str, requested_lines: list[str]) -> tuple[
             if len(lines) != before:
                 changed = True
         elif not any(existing == line for existing in lines):
+            commented_line = f"#{line}"
+            before = len(lines)
+            lines = [existing for existing in lines if existing != commented_line]
+            if len(lines) != before:
+                changed = True
             lines.append(line)
             changed = True
     return ("\n".join(lines).strip() + "\n", changed)
@@ -488,38 +579,22 @@ class BuildrootImageBuilder:
             post_build_path = temp_dir / "post-build.sh"
             partition_post_build_path = temp_dir / "partition-post-build.sh"
             post_image_path = temp_dir / "post-image.sh"
+            kernel_fragment_path = temp_dir / "linux-fragment.config"
             self._write_buildroot_config(config_path)
+            self._write_kernel_config_fragment(kernel_fragment_path)
             self._write_post_build_script(post_build_path)
             self._write_partition_post_build_script(partition_post_build_path)
             self._write_post_image_script(post_image_path)
-            build_image = await self._ensure_buildroot_image()
-            skip_apt_install = build_image.split("@", 1)[0] == self._buildroot_image()
-            output_cache_key = self._buildroot_output_cache_key(
-                build_id,
-                overlay_dir,
-                config_path,
-                post_build_path,
-                partition_post_build_path,
-                post_image_path,
-                build_image=build_image,
-                skip_apt_install=skip_apt_install,
-            )
-            output_dir = output_cache_root / output_cache_key
-            output_dir.mkdir(parents=True, exist_ok=True)
-
-            self._write_build_script(script_path, output_path.name)
-            await self._run_buildroot(
-                temp_dir,
-                artifact_dir,
-                cache_dir,
-                source_dir,
-                output_dir,
-                image=build_image,
-                skip_apt_install=skip_apt_install,
+            base_entry = await resolve_buildroot_base_entry(SUPPORTED_BUILDROOT_PLATFORM)
+            base_image_path = await ensure_buildroot_base_image(base_entry, buildroot_base_cache_dir())
+            await self._compose_sd_image_from_base(
+                temp_dir=temp_dir,
+                base_image_path=base_image_path,
+                output_path=output_path,
             )
 
             if not output_path.is_file():
-                raise RuntimeError(f"Buildroot completed without producing {output_path.name}")
+                raise RuntimeError(f"SD image composer completed without producing {output_path.name}")
 
             metadata = {
                 **_preserved_queue_metadata(latest_buildroot_sd_image(self.frame) or {}),
@@ -527,6 +602,12 @@ class BuildrootImageBuilder:
                 "buildId": build_id,
                 "platform": SUPPORTED_BUILDROOT_PLATFORM,
                 "buildrootVersion": BUILDROOT_VERSION,
+                "baseImage": {
+                    "frameosVersion": base_entry.get("frameos_version"),
+                    "objectKey": base_entry.get("object_key"),
+                    "sha256": base_entry.get("sha256"),
+                    "updatedAt": base_entry.get("updated_at"),
+                },
                 "filename": filename,
                 "path": str(output_path),
                 "size": output_path.stat().st_size,
@@ -594,8 +675,9 @@ class BuildrootImageBuilder:
         release_dir = overlay_dir / "srv" / "frameos" / "releases" / f"release_{build_id}"
         agent_release_dir = overlay_dir / "srv" / "frameos" / "agent" / "releases" / f"release_{build_id}"
         state_dir = overlay_dir / "srv" / "frameos" / "state"
+        root_overlay_dir = overlay_dir / "srv" / "frameos" / "bootstrap" / "root"
         assets_dir = overlay_dir / "srv" / "assets"
-        systemd_dir = overlay_dir / "etc" / "systemd" / "system"
+        systemd_dir = root_overlay_dir / "etc" / "systemd" / "system"
         wants_dir = systemd_dir / "multi-user.target.wants"
 
         for directory in (release_dir, agent_release_dir, state_dir, assets_dir, wants_dir):
@@ -670,12 +752,12 @@ class BuildrootImageBuilder:
                 setup_file_path,
                 script_path=SETUP_JSON_RESET_SCRIPT_PATH,
             )
-            script_path = overlay_dir / "usr" / "local" / "bin" / SETUP_JSON_RESET_SCRIPT_NAME
+            script_path = root_overlay_dir / "usr" / "local" / "bin" / SETUP_JSON_RESET_SCRIPT_NAME
             script_path.parent.mkdir(parents=True, exist_ok=True)
             script_path.write_text(script_contents, encoding="utf-8")
             os.chmod(script_path, 0o755)
             (systemd_dir / SETUP_JSON_RESET_SERVICE_NAME).write_text(service_contents, encoding="utf-8")
-            self._write_setup_payload(_buildroot_setup_payload_path(overlay_dir, setup_file_path), setup_payload)
+            self._write_setup_payload(_buildroot_setup_payload_path(root_overlay_dir, setup_file_path), setup_payload)
 
         services = ["frameos.service", "frameos_agent.service"]
         if setup_reset_enabled:
@@ -684,22 +766,22 @@ class BuildrootImageBuilder:
             self._relative_symlink(f"../{service}", wants_dir / service)
         self._relative_symlink("/usr/lib/systemd/system/NetworkManager.service", wants_dir / "NetworkManager.service")
 
-        (overlay_dir / "etc").mkdir(parents=True, exist_ok=True)
-        (overlay_dir / "etc" / "hostname").write_text(_hostname_for_frame(self.frame) + "\n", encoding="utf-8")
-        (overlay_dir / "etc" / "profile.d").mkdir(parents=True, exist_ok=True)
-        (overlay_dir / "etc" / "profile.d" / "frameos.sh").write_text(
+        (root_overlay_dir / "etc").mkdir(parents=True, exist_ok=True)
+        (root_overlay_dir / "etc" / "hostname").write_text(_hostname_for_frame(self.frame) + "\n", encoding="utf-8")
+        (root_overlay_dir / "etc" / "profile.d").mkdir(parents=True, exist_ok=True)
+        (root_overlay_dir / "etc" / "profile.d" / "frameos.sh").write_text(
             "export FRAMEOS_HOME=/srv/frameos/current\n",
             encoding="utf-8",
         )
-        network_manager = overlay_dir / "etc" / "NetworkManager" / "conf.d"
+        network_manager = root_overlay_dir / "etc" / "NetworkManager" / "conf.d"
         network_manager.mkdir(parents=True, exist_ok=True)
         (network_manager / "frameos.conf").write_text(
             "[main]\nplugins=keyfile\n\n[device]\nwifi.scan-rand-mac-address=no\n",
             encoding="utf-8",
         )
-        self._write_wifi_connection(overlay_dir / "etc" / "NetworkManager" / "system-connections")
-        self._write_boot_config(overlay_dir, _frame_boot_config_lines(bootstrap_frame))
-        self._write_authorized_keys(overlay_dir, wants_dir)
+        self._write_wifi_connection(root_overlay_dir / "etc" / "NetworkManager" / "system-connections")
+        self._write_boot_config(root_overlay_dir, _frame_boot_config_lines(bootstrap_frame))
+        self._write_authorized_keys(root_overlay_dir, wants_dir)
 
     @staticmethod
     def _copy_libraries(paths: list[str], destination: Path) -> None:
@@ -801,7 +883,9 @@ class BuildrootImageBuilder:
                     "BR2_TARGET_GENERIC_HOSTNAME=\"frameos\"",
                     "BR2_TARGET_GENERIC_ISSUE=\"Welcome to FrameOS\"",
                     "BR2_TARGET_ROOTFS_EXT2_SIZE=\"768M\"",
+                    "BR2_JLEVEL=2",
                     'BR2_DL_DIR="/cache/dl"',
+                    'BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES="/work/linux-fragment.config"',
                     "BR2_PACKAGE_SYSTEMD=y",
                     "BR2_PACKAGE_SYSTEMD_TIMESYNCD=y",
                     "BR2_PACKAGE_DBUS=y",
@@ -834,6 +918,26 @@ class BuildrootImageBuilder:
                     'BR2_ROOTFS_OVERLAY="/work/overlay"',
                     'BR2_ROOTFS_POST_BUILD_SCRIPT="board/raspberrypi/post-build.sh /work/post-build.sh /work/partition-post-build.sh"',
                     'BR2_ROOTFS_POST_IMAGE_SCRIPT="/work/post-image.sh"',
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+    @staticmethod
+    def _write_kernel_config_fragment(path: Path) -> None:
+        path.write_text(
+            "\n".join(
+                [
+                    "# Avoid case-colliding xtables target/match objects on macOS bind mounts.",
+                    "# CONFIG_NETFILTER_XT_TARGET_DSCP is not set",
+                    "# CONFIG_NETFILTER_XT_TARGET_HL is not set",
+                    "# CONFIG_NETFILTER_XT_TARGET_RATEEST is not set",
+                    "# CONFIG_NETFILTER_XT_TARGET_TCPMSS is not set",
+                    "# CONFIG_NETFILTER_XT_MATCH_RATEEST is not set",
+                    "# CONFIG_IP_NF_TARGET_ECN is not set",
+                    "# CONFIG_IP_NF_TARGET_TTL is not set",
+                    "# CONFIG_IP6_NF_TARGET_HL is not set",
                     "",
                 ]
             ),
@@ -944,18 +1048,28 @@ if [ ! -f /build/buildroot/.frameos-buildroot-version ]; then
   tar -C /build/buildroot --strip-components=1 -xzf "$tarball_path"
   printf '%s\\n' '{BUILDROOT_VERSION}' > /build/buildroot/.frameos-buildroot-version
 fi
+ncurses_mk="/build/buildroot/package/ncurses/ncurses.mk"
+if [ -f "$ncurses_mk" ] && ! grep -q "FRAMEOS_NCURSES_TERMINFO_LINKS" "$ncurses_mk"; then
+  cat >> "$ncurses_mk" <<'EOF'
+
+define FRAMEOS_NCURSES_TERMINFO_LINKS
+	for dir in a d f l p s v x; do \
+		hex=$$(printf '%02x' "'$$dir"); \
+		if [ ! -e "$(STAGING_DIR)/usr/share/terminfo/$$dir" ] && [ -d "$(STAGING_DIR)/usr/share/terminfo/$$hex" ]; then \
+			ln -s "$$hex" "$(STAGING_DIR)/usr/share/terminfo/$$dir"; \
+		fi; \
+	done
+endef
+NCURSES_POST_INSTALL_STAGING_HOOKS += FRAMEOS_NCURSES_TERMINFO_LINKS
+EOF
+fi
 if [ -s /build/output/images/sdcard.img ]; then
   cp /build/output/images/sdcard.img /artifacts/{shlex.quote(output_filename)}
   chmod a+r /artifacts/{shlex.quote(output_filename)}
   exit 0
 fi
-for path in /build/output/build/host-cmake-*; do
-  if [ -e "$path" ]; then
-    rm -rf "$path"
-  fi
-done
 if compgen -G "/build/output/build/ncurses-*/.stamp_staging_installed" >/dev/null \\
-  && ! find /build/output/host -path "*/sysroot/usr/share/terminfo/a/ansi" -type f -print -quit | grep -q .; then
+  && ! find /build/output/host -path "*/sysroot/usr/share/terminfo/a/ansi" -print -quit | grep -q .; then
   for stamp in /build/output/build/ncurses-*/.stamp_staging_installed; do
     ncurses_dir="$(dirname "$stamp")"
     rm -f "$ncurses_dir/.stamp_staging_installed" "$ncurses_dir/.stamp_target_installed"
@@ -964,6 +1078,7 @@ fi
 make -C /build/buildroot O=/build/output {BUILDROOT_DEFCONFIG}
 cat /work/frameos-buildroot.config >> /build/output/.config
 make -C /build/buildroot O=/build/output olddefconfig
+rm -f /build/output/build/linux-custom/.stamp_configured
 make -C /build/buildroot O=/build/output
 dd if=/build/output/images/sdcard.img of=/artifacts/{shlex.quote(output_filename)} bs=4M conv=fsync status=none
 chmod a+r /artifacts/{shlex.quote(output_filename)}
@@ -1007,6 +1122,82 @@ chmod a+r /artifacts/{shlex.quote(output_filename)}
         )
         if status != 0:
             raise RuntimeError(f"Buildroot image build failed: {err or 'see logs'}")
+
+    async def _compose_sd_image_from_base(self, *, temp_dir: Path, base_image_path: Path, output_path: Path) -> None:
+        await self._log("stdout", f"Composing SD image from cached Buildroot base {base_image_path.name}")
+        compose_dir = temp_dir / "compose"
+        compose_dir.mkdir(parents=True, exist_ok=True)
+        images_dir = compose_dir / "images"
+        roots_dir = compose_dir / "roots"
+        images_dir.mkdir(parents=True, exist_ok=True)
+        roots_dir.mkdir(parents=True, exist_ok=True)
+
+        frameos_root = roots_dir / "frameos"
+        assets_root = roots_dir / "assets"
+        shutil.copytree(temp_dir / "overlay" / "srv" / "frameos", frameos_root, symlinks=True)
+        shutil.copytree(temp_dir / "overlay" / "srv" / "assets", assets_root, symlinks=True)
+        if not any(assets_root.iterdir()):
+            (assets_root / "frameos-assets-placeholder").write_text("", encoding="utf-8")
+
+        genimage_cfg = compose_dir / "frameos-genimage.cfg"
+        genimage_cfg.write_text(
+            f"""image frameos.ext4 {{
+	ext4 {{
+		use-mke2fs = true
+		label = "FRAMEOS"
+	}}
+	srcpath = "{frameos_root}"
+	size = {BUILDROOT_FRAMEOS_PARTITION_SIZE}
+}}
+
+image assets.vfat {{
+	vfat {{
+		label = "ASSETS"
+	}}
+	srcpath = "{assets_root}"
+	size = {BUILDROOT_ASSETS_PARTITION_SIZE}
+}}
+""",
+            encoding="utf-8",
+        )
+
+        script_path = compose_dir / "compose-partitions.sh"
+        script_path.write_text(
+            """#!/usr/bin/env bash
+set -euo pipefail
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+apt-get install -y --no-install-recommends genimage dosfstools e2fsprogs mtools
+rm -rf /work/tmp
+genimage --rootpath /work/empty-root --tmppath /work/tmp --inputpath /work/images --outputpath /work/images --config /work/frameos-genimage.cfg
+""",
+            encoding="utf-8",
+        )
+        os.chmod(script_path, 0o755)
+        (compose_dir / "empty-root").mkdir(exist_ok=True)
+
+        docker_cmd = " ".join(
+            [
+                "docker run --rm",
+                f"-v {shlex.quote(str(compose_dir))}:/work",
+                shlex.quote(BUILDROOT_DOCKER_IMAGE),
+                "bash /work/compose-partitions.sh",
+            ]
+        )
+        status, _, err = await exec_local_command(
+            self.db,
+            self.redis,
+            self.frame,
+            docker_cmd,
+            log_command="docker run (buildroot image composer)",
+        )
+        if status != 0:
+            raise RuntimeError(f"Buildroot image composition failed: {err or 'see logs'}")
+
+        shutil.copy2(base_image_path, output_path)
+        partitions = _mbr_partitions(output_path)
+        _replace_partition(output_path, partitions, 3, images_dir / "frameos.ext4")
+        _replace_partition(output_path, partitions, 4, images_dir / "assets.vfat")
 
     async def _log(self, type: str, line: str) -> None:
         await log(self.db, self.redis, int(self.frame.id), type, line)
@@ -1228,6 +1419,9 @@ if [ -d "$target_dir/srv/assets" ]; then
   cp -a "$target_dir/srv/assets/." "$assets_root/" 2>/dev/null || true
   rm -rf "$target_dir/srv/assets"
 fi
+if ! find "$assets_root" -mindepth 1 -maxdepth 1 | grep -q .; then
+  touch "$assets_root/frameos-assets-placeholder"
+fi
 
 mkdir -p "$target_dir/srv/frameos" "$target_dir/srv/assets" "$target_dir/etc"
 fstab="$target_dir/etc/fstab"
@@ -1438,6 +1632,34 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: fh.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _mbr_partitions(image_path: Path) -> list[dict[str, int]]:
+    with image_path.open("rb") as fh:
+        mbr = fh.read(512)
+    if len(mbr) != 512 or mbr[510:512] != b"\x55\xaa":
+        raise RuntimeError(f"{image_path} does not look like an MBR disk image")
+    partitions: list[dict[str, int]] = []
+    for index in range(4):
+        entry = mbr[446 + index * 16 : 446 + (index + 1) * 16]
+        start_lba = int.from_bytes(entry[8:12], "little")
+        sectors = int.from_bytes(entry[12:16], "little")
+        partitions.append({"start": start_lba * 512, "size": sectors * 512})
+    return partitions
+
+
+def _replace_partition(image_path: Path, partitions: list[dict[str, int]], partition_number: int, source_path: Path) -> None:
+    if partition_number < 1 or partition_number > len(partitions):
+        raise RuntimeError(f"Invalid partition number {partition_number}")
+    partition = partitions[partition_number - 1]
+    source_size = source_path.stat().st_size
+    if source_size > partition["size"]:
+        raise RuntimeError(
+            f"{source_path.name} is larger than partition {partition_number}: {source_size} > {partition['size']}"
+        )
+    with image_path.open("r+b") as image, source_path.open("rb") as source:
+        image.seek(partition["start"])
+        shutil.copyfileobj(source, image)
 
 
 def _hostname_for_frame(frame: Frame) -> str:

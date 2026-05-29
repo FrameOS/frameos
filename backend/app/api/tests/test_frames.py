@@ -755,7 +755,7 @@ async def test_api_frame_buildroot_sd_image_recovers_legacy_building_state(async
     response = await async_client.post(f'/api/frames/{frame.id}/buildroot/sd_image')
 
     assert response.status_code == 200
-    assert response.json()['message'] == 'Buildroot SD card image generation started'
+    assert response.json()['message'] == 'Buildroot SD card image preparation started'
     assert captured[0][0] == frame.id
     db.expire_all()
     frame = db.get(Frame, frame.id)
@@ -795,7 +795,7 @@ async def test_api_frame_buildroot_sd_image_keeps_active_build(async_client, db,
     response = await async_client.post(f'/api/frames/{frame.id}/buildroot/sd_image')
 
     assert response.status_code == 200
-    assert response.json()['message'] == 'Buildroot SD card image generation already running'
+    assert response.json()['message'] == 'Buildroot SD card image preparation already running'
     assert captured == []
 
 

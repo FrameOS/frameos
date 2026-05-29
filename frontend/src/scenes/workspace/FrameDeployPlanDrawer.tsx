@@ -583,8 +583,8 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
                 <DrawerHeading>SD card image</DrawerHeading>
                 <div className="frame-tool-card rounded-[22px] p-4">
                   <div className="frame-tool-muted text-sm leading-5">
-                    Build a flashable Raspberry Pi Zero 2 W image with the current FrameOS release, frame config, and
-                    agent credentials.
+                    Prepare a flashable Raspberry Pi Zero 2 W image from the cached Buildroot base and the current
+                    FrameOS release.
                   </div>
                   {frame.buildroot?.sdImage?.status ? (
                     <div className="mt-3 text-xs font-semibold uppercase tracking-wide text-[color:var(--tool-strong)]">
