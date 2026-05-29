@@ -11,6 +11,7 @@ export type LongRunningTaskKind =
   | 'upload'
   | 'agentDeploy'
   | 'agentRestart'
+  | 'buildrootImage'
 export type LongRunningTaskStatus = 'running' | 'success' | 'error'
 
 export interface LongRunningTaskLog {
@@ -512,6 +513,21 @@ export const longRunningTasksModel = kea<longRunningTasksModelType>([
     },
     [SOCKET_UPDATE_FRAME]: ({ frame }) => {
       const status = frameStatus(frame)
+      const sdImage = frame.buildroot?.sdImage
+      if (sdImage?.status === 'ready') {
+        actions.finishTask({
+          frameId: frame.id,
+          kind: 'buildrootImage',
+          status: 'success',
+          detail: 'SD card image ready',
+        })
+      } else if (sdImage?.status === 'error') {
+        actions.taskFailed({
+          frameId: frame.id,
+          kind: 'buildrootImage',
+          detail: sdImage.error || 'SD card image generation failed',
+        })
+      }
       if (!status) {
         return
       }

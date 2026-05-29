@@ -16,6 +16,7 @@ from app.tasks.restart_frame import restart_frame_task, reboot_frame_task
 from app.tasks.stop_frame import stop_frame_task
 from app.tasks.deploy_agent import deploy_agent_task
 from app.tasks.restart_agent import restart_agent_task
+from app.tasks.buildroot_image import buildroot_sd_image_task
 from app.config import config
 from app.redis import close_redis_connection, create_redis_connection
 from app.database import SessionLocal
@@ -55,6 +56,7 @@ class WorkerSettings:
         func(stop_frame_task,        name="stop_frame"),
         func(deploy_agent_task,      name="deploy_agent"),
         func(restart_agent_task,     name="restart_agent"),
+        func(buildroot_sd_image_task, name="buildroot_sd_image"),
     ]
     on_startup = startup
     on_shutdown = shutdown
@@ -62,5 +64,5 @@ class WorkerSettings:
     redis_settings = REDIS_SETTINGS
     keep_result = 3600  # Keep results for 1 hour
     max_jobs = 10
-    job_timeout = 7200
+    job_timeout = 21600
     allow_abort_jobs = True

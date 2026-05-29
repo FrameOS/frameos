@@ -210,27 +210,11 @@ export const withCustomPalette: Record<string, Palette> = {
   'pimoroni.inky_impression_13_2025': spectraPalettes[0],
 }
 
-export const luckfoxBuildrootPlatformValues = [
-  // 'RV1103_Luckfox_Pico',
-  // 'RV1103_Luckfox_Pico_Mini',
-  'RV1103_Luckfox_Pico_Plus',
-  // 'RV1103_Luckfox_Pico_WebBee',
-  'RV1106_Luckfox_Pico_Pro_Max',
-  // 'RV1106_Luckfox_Pico_Ultra',
-  // 'RV1106_Luckfox_Pico_Ultra_W',
-  // 'RV1106_Luckfox_Pico_Pi',
-  // 'RV1106_Luckfox_Pico_Pi_W',
-  // 'RV1106_Luckfox_Pico_86Panel',
-  // 'RV1106_Luckfox_Pico_86Panel_W',
-  // 'RV1106_Luckfox_Pico_Zero',
+export const BUILDROOT_RASPBERRY_PI_ZERO_2_W = 'raspberry-pi-zero-2-w'
+
+export const buildrootPlatforms: Option[] = [
+  { value: BUILDROOT_RASPBERRY_PI_ZERO_2_W, label: 'Raspberry Pi Zero 2 W' },
 ]
-
-export const luckfoxBuildrootPlatforms: Option[] = luckfoxBuildrootPlatformValues.map((platform) => ({
-  value: platform,
-  label: platform,
-}))
-
-export const buildrootPlatforms: Option[] = [{ value: '', label: '-- Please select --' }, ...luckfoxBuildrootPlatforms]
 
 export const rpiOSPlatforms: Option[] = [
   { value: '', label: 'Autodetect' },

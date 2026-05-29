@@ -36,7 +36,7 @@ from fastapi import (
     Request,
     UploadFile,
 )
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -114,6 +114,14 @@ from app.utils.ssh_key_utils import default_ssh_key_ids
 from app.utils.tls import generate_frame_tls_material, parse_certificate_not_valid_after
 from app.utils.ssh_authorized_keys import _install_authorized_keys, resolve_authorized_keys_update
 from app.tasks.binary_builder import FrameBinaryBuilder
+from app.tasks.buildroot_image import (
+    ensure_buildroot_frame_defaults,
+    latest_buildroot_sd_image,
+    normalize_buildroot_platform,
+    start_buildroot_sd_image,
+    validate_buildroot_network,
+    validate_buildroot_wifi_credentials,
+)
 from app.codegen.drivers_nim import frame_compilation_mode
 from app.utils.local_exec import exec_local_command
 from app.utils.jwt_tokens import validate_scoped_token
@@ -312,8 +320,8 @@ def _apply_frame_preview_update(frame: Frame, data: FrameUpdateRequest) -> Any:
         preview.error_behavior = normalize_error_behavior(preview.error_behavior)
 
     old_mode = frame.mode
-    if data.mode == "buildroot" and old_mode != "buildroot" and preview.ssh_user == "pi":
-        preview.ssh_user = "root"
+    if data.mode == "buildroot" or ((preview.mode or "rpios") == "buildroot" and "buildroot" in update_data):
+        ensure_buildroot_frame_defaults(preview, (preview.buildroot or {}).get("platform"))
     elif data.mode == "rpios" and old_mode == "buildroot" and preview.ssh_user == "root":
         preview.ssh_user = "pi"
 
@@ -2151,6 +2159,84 @@ async def api_frame_deploy_event(id: int, redis: Redis = Depends(get_redis)):
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 
+@api_with_auth.get("/frames/{id:int}/buildroot/sd_image")
+async def api_frame_buildroot_sd_image_status(id: int, db: Session = Depends(get_db)):
+    frame = db.get(Frame, id)
+    if not frame:
+        _not_found()
+    if (frame.mode or "rpios") != "buildroot":
+        _bad_request("SD card image generation is only available for Buildroot frames")
+
+    try:
+        platform = normalize_buildroot_platform((frame.buildroot or {}).get("platform"))
+    except ValueError as exc:
+        _bad_request(str(exc))
+    return {
+        "sdImage": latest_buildroot_sd_image(frame)
+        or {
+            "status": "idle",
+            "platform": platform,
+        }
+    }
+
+
+@api_with_auth.post("/frames/{id:int}/buildroot/sd_image")
+async def api_frame_buildroot_sd_image(
+    id: int,
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    frame = db.get(Frame, id)
+    if not frame:
+        _not_found()
+    if (frame.mode or "rpios") != "buildroot":
+        _bad_request("SD card image generation is only available for Buildroot frames")
+
+    try:
+        ensure_buildroot_frame_defaults(frame)
+    except ValueError as exc:
+        _bad_request(str(exc))
+
+    await update_frame(db, redis, frame)
+
+    try:
+        started, sd_image = await start_buildroot_sd_image(db, redis, frame)
+        if started:
+            message = "Buildroot SD card image generation started"
+        elif sd_image.get("status") == "ready":
+            message = "Buildroot SD card image already ready"
+        else:
+            message = "Buildroot SD card image generation already running"
+        return {
+            "message": message,
+            "sdImage": sd_image,
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@api_with_auth.get("/frames/{id:int}/buildroot/sd_image/download")
+async def api_frame_buildroot_sd_image_download(id: int, db: Session = Depends(get_db)):
+    frame = db.get(Frame, id)
+    if not frame:
+        _not_found()
+    if (frame.mode or "rpios") != "buildroot":
+        _bad_request("SD card image downloads are only available for Buildroot frames")
+
+    sd_image = latest_buildroot_sd_image(frame)
+    if not sd_image or sd_image.get("status") != "ready":
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="No ready SD card image for this frame")
+
+    path = sd_image.get("path")
+    if not isinstance(path, str) or not os.path.isfile(path):
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Generated SD card image file not found")
+
+    filename = str(sd_image.get("filename") or f"frameos-{id}.img")
+    return FileResponse(path, media_type="application/octet-stream", filename=filename)
+
+
 @api_with_auth.get("/frames/{id:int}/deploy_plan")
 async def api_frame_deploy_plan(
     id: int,
@@ -2331,8 +2417,11 @@ async def api_frame_update_endpoint(
     if "error_behavior" in update_data:
         frame.error_behavior = normalize_error_behavior(frame.error_behavior)
 
-    if data.mode == "buildroot" and old_mode != "buildroot" and frame.ssh_user == "pi":
-        frame.ssh_user = "root"
+    if data.mode == "buildroot" or ((frame.mode or "rpios") == "buildroot" and "buildroot" in update_data):
+        try:
+            ensure_buildroot_frame_defaults(frame, (frame.buildroot or {}).get("platform"))
+        except ValueError as exc:
+            _bad_request(str(exc))
     elif data.mode == "rpios" and old_mode == "buildroot" and frame.ssh_user == "root":
         frame.ssh_user = "pi"
 
@@ -2393,6 +2482,10 @@ async def api_frame_new(
 ):
     settings = get_settings_dict(db)
     try:
+        if data.mode == "buildroot":
+            normalize_buildroot_platform(data.platform)
+            validate_buildroot_network(data.network)
+
         frame = await new_frame(
             db,
             redis,
@@ -2407,16 +2500,12 @@ async def api_frame_new(
 
         frame.mode = data.mode or "rpios"
         if frame.mode == "buildroot":
-            frame.ssh_user = 'root'
-            selected_platform = (data.platform or (frame.buildroot or {}).get('platform') or '').strip()
-            buildroot_settings = {**(frame.buildroot or {})}
-            if selected_platform:
-                buildroot_settings['platform'] = selected_platform
-            else:
-                buildroot_settings.pop('platform', None)
-            frame.buildroot = buildroot_settings
-            if not frame.frame_host:
-                frame.frame_host = f'frame{frame.id}.local'
+            frame.network = {
+                **(frame.network or {}),
+                **(data.network or {}),
+            }
+            ensure_buildroot_frame_defaults(frame, data.platform)
+            validate_buildroot_wifi_credentials(frame)
             db.add(frame)
             db.commit()
             db.refresh(frame)
@@ -2429,6 +2518,10 @@ async def api_frame_new(
             db.refresh(frame)
 
         return {"frame": frame.to_dict()}
+    except ValueError as e:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 

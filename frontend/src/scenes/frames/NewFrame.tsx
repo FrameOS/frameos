@@ -2,7 +2,7 @@ import { Form } from 'kea-forms'
 import { useActions, useValues } from 'kea'
 import clsx from 'clsx'
 import { ArrowUpTrayIcon, CpuChipIcon, EllipsisHorizontalIcon } from '@heroicons/react/24/outline'
-import { devices, buildrootPlatforms } from '../../devices'
+import { BUILDROOT_RASPBERRY_PI_ZERO_2_W, devices, buildrootPlatforms } from '../../devices'
 import { A } from 'kea-router'
 import { urls } from '../../urls'
 import { Spinner } from '../../components/Spinner'
@@ -76,7 +76,7 @@ function selectClassName(): string {
 
 function setModeValues(mode: NewFrameFormType['mode']): Partial<NewFrameFormType> {
   if (mode === 'buildroot') {
-    return { mode, platform: '', frame_host: '' }
+    return { mode, platform: BUILDROOT_RASPBERRY_PI_ZERO_2_W, frame_host: '' }
   }
   if (mode === 'import') {
     return { mode }
@@ -270,6 +270,31 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
                 </option>
               ))}
             </select>
+          </FormField>
+          <FormField label="WiFi network" error={newFrameErrors.network?.wifiSSID}>
+            <input
+              className={textInputClassName()}
+              value={newFrame.network?.wifiSSID ?? ''}
+              onChange={(event) =>
+                setNewFrameValue('network', { ...(newFrame.network ?? {}), wifiSSID: event.target.value })
+              }
+              placeholder="Home WiFi"
+              autoComplete="off"
+              required
+            />
+          </FormField>
+          <FormField label="WiFi password" error={newFrameErrors.network?.wifiPassword}>
+            <input
+              className={textInputClassName()}
+              value={newFrame.network?.wifiPassword ?? ''}
+              onChange={(event) =>
+                setNewFrameValue('network', { ...(newFrame.network ?? {}), wifiPassword: event.target.value })
+              }
+              placeholder="Network password"
+              type="password"
+              autoComplete="new-password"
+              required
+            />
           </FormField>
           <div className="flex gap-2 pt-2">
             <button

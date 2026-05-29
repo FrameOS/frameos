@@ -138,6 +138,10 @@ export interface NewFrameFormType {
   device?: string | null
   server_host?: string | null
   platform?: string | null
+  network?: {
+    wifiSSID?: string
+    wifiPassword?: string
+  }
 }
 
 export interface GPIOButton {
@@ -700,6 +704,24 @@ export interface Palette {
 
 export interface FrameBuildrootConfig {
   platform?: string
+  sdImage?: {
+    status?: 'idle' | 'queued' | 'building' | 'ready' | 'error' | 'missing'
+    buildId?: string
+    requestId?: string
+    queueJobId?: string
+    platform?: string
+    buildrootVersion?: string
+    filename?: string
+    path?: string
+    size?: number
+    sha256?: string
+    downloadUrl?: string
+    queuedAt?: string
+    startedAt?: string
+    completedAt?: string
+    createdAt?: string
+    error?: string
+  }
 }
 
 export interface FrameRpiOSConfig {

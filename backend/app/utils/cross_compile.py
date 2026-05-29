@@ -79,6 +79,22 @@ def can_cross_compile_target(arch: str | None) -> bool:
     return (arch or "").lower() in PLATFORM_MAP
 
 
+def cross_cache_root() -> Path:
+    cache_root = os.environ.get(CACHE_ENV)
+    if cache_root:
+        return Path(cache_root)
+
+    tmpdir = os.environ.get("TMPDIR")
+    if tmpdir:
+        return Path(tmpdir) / "frameos-cross-cache"
+
+    return DEFAULT_CACHE
+
+
+def cross_cache_key(target: TargetMetadata) -> str:
+    return "-".join(SAFE_SEGMENT.sub("_", part or "unknown") for part in (target.distro, target.version, target.arch))
+
+
 DISTRO_DEFAULTS = {
     "raspios": ("debian", "bookworm"),
     "debian": ("debian", "bookworm"),
@@ -116,9 +132,9 @@ class CrossCompiler:
         self.deployer = deployer
         self.target = target
         self.temp_dir = Path(temp_dir)
-        cache_root = self._cache_root()
+        cache_root = cross_cache_root()
         cache_root.mkdir(parents=True, exist_ok=True)
-        key = "-".join(self._sanitize(part) for part in (target.distro, target.version, target.arch))
+        key = cross_cache_key(target)
         self.toolchain_dir = cache_root / key
         self.toolchain_dir.mkdir(parents=True, exist_ok=True)
         self.sysroot_dir = self.toolchain_dir / "sysroot"

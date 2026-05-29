@@ -10,6 +10,7 @@ import { entityImagesModel } from './entityImagesModel'
 import { urls } from '../urls'
 import { logUpdatesFrameActivity } from '../decorators/frame'
 import { longRunningTasksModel } from './longRunningTasksModel'
+import { getBasePath } from '../utils/getBasePath'
 
 export type AgentTaskTransport = 'auto' | 'agent' | 'ssh'
 
@@ -61,6 +62,19 @@ function activeSceneIdFromLogLine(line: string): string | null {
   return null
 }
 
+function apiDownloadUrl(path: string): string {
+  return `${getBasePath()}${path}`
+}
+
+function startBrowserDownload(path: string): void {
+  const anchor = document.createElement('a')
+  anchor.href = apiDownloadUrl(path)
+  anchor.download = ''
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+}
+
 export const framesModel = kea<framesModelType>([
   connect(() => ({ logic: [socketLogic, entityImagesModel] })),
   path(['src', 'models', 'framesModel']),
@@ -80,6 +94,7 @@ export const framesModel = kea<framesModelType>([
       transport,
     }),
     restartAgent: (id: number, transport: AgentTaskTransport = 'auto') => ({ id, transport }),
+    downloadSdCardImage: (id: number) => ({ id }),
     setDeployWithAgent: (id: number, deployWithAgent: boolean) => ({ id, deployWithAgent }),
     setFrameArchived: (id: number, archived: boolean) => ({ id, archived }),
     toggleArchivedFramesExpanded: true,
@@ -332,6 +347,57 @@ export const framesModel = kea<framesModelType>([
           frameId: id,
           kind: 'agentRestart',
           detail: error instanceof Error ? error.message : 'Failed to restart agent',
+        })
+        throw error
+      }
+    },
+    downloadSdCardImage: async ({ id }) => {
+      const frame = values.frames[id]
+      const sdImage = frame?.buildroot?.sdImage
+      const downloadUrl = sdImage?.downloadUrl || `/api/frames/${id}/buildroot/sd_image/download`
+
+      if (sdImage?.status === 'ready') {
+        startBrowserDownload(downloadUrl)
+        return
+      }
+
+      longRunningTasksModel.actions.startTask({
+        frameId: id,
+        kind: 'buildrootImage',
+        title: 'Building SD card image',
+        detail:
+          sdImage?.status === 'building' || sdImage?.status === 'queued'
+            ? 'Checking image build status'
+            : 'Image generation started',
+      })
+
+      try {
+        const response = await apiFetch(`/api/frames/${id}/buildroot/sd_image`, { method: 'POST' })
+        if (!response.ok) {
+          throw new Error('Failed to start SD card image generation')
+        }
+        const data = await response.json()
+        if (data?.sdImage?.status === 'ready') {
+          startBrowserDownload(data.sdImage.downloadUrl || downloadUrl)
+          longRunningTasksModel.actions.finishTask({
+            frameId: id,
+            kind: 'buildrootImage',
+            status: 'success',
+            detail: 'SD card image ready',
+          })
+          return
+        }
+        longRunningTasksModel.actions.startTask({
+          frameId: id,
+          kind: 'buildrootImage',
+          title: 'Building SD card image',
+          detail: data?.message || 'Image generation started',
+        })
+      } catch (error) {
+        longRunningTasksModel.actions.taskFailed({
+          frameId: id,
+          kind: 'buildrootImage',
+          detail: error instanceof Error ? error.message : 'Failed to build SD card image',
         })
         throw error
       }

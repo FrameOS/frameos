@@ -1,7 +1,7 @@
 import { useActions, useMountedLogic, useValues } from 'kea'
 import { A as Link } from 'kea-router'
 import clsx from 'clsx'
-import { ChevronRightIcon, ClipboardDocumentIcon, XMarkIcon } from '@heroicons/react/24/outline'
+import { ArrowDownTrayIcon, ChevronRightIcon, ClipboardDocumentIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import { ExclamationCircleIcon } from '@heroicons/react/24/solid'
 import type { ReactNode } from 'react'
 
@@ -10,7 +10,7 @@ import { FrameConnectionDot } from '../../components/FrameConnectionDot'
 import { Spinner } from '../../components/Spinner'
 import { Tooltip } from '../../components/Tooltip'
 import { frameHost } from '../../decorators/frame'
-import type { AgentTaskTransport } from '../../models/framesModel'
+import { framesModel, type AgentTaskTransport } from '../../models/framesModel'
 import type { FrameType, LogType } from '../../types'
 import { urls } from '../../urls'
 import { frameLogic, type ChangeDetail, type DeployRecommendation, type SummaryItem } from '../frame/frameLogic'
@@ -520,12 +520,14 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
     setDeployWithAgent,
   } = useActions(frameLogic({ frameId: frame.id }))
   const { closeFrameChangeDrawer } = useActions(workspaceLogic)
+  const { downloadSdCardImage } = useActions(framesModel)
   const { logs } = useValues(logsLogic({ frameId: frame.id }))
 
   const deployPlanLogs = deployPlanLogsSince(logs, deployPlansLoadingStartedAt)
-  const canDeployAgent = (frame.mode ?? 'rpios') === 'rpios'
-  const canCopyBootstrapScript = (frame.mode ?? 'rpios') === 'rpios'
-  const canBootstrapAgent = !frame.last_successful_deploy_at && (frame.mode ?? 'rpios') === 'rpios'
+  const isBuildrootFrame = (frame.mode ?? 'rpios') === 'buildroot'
+  const canDeployAgent = !isBuildrootFrame
+  const canCopyBootstrapScript = !isBuildrootFrame
+  const canBootstrapAgent = !frame.last_successful_deploy_at && !isBuildrootFrame
   const showRecompileAgent = import.meta.env?.DEV === true
   const closeAndRun = (action: () => void): void => {
     action()
@@ -575,7 +577,37 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
               onChange={setDeployWithAgent}
             />
           ) : null}
-          {deployPlansLoading ? (
+          {isBuildrootFrame ? (
+            <div className="space-y-5">
+              <section className="space-y-2">
+                <DrawerHeading>SD card image</DrawerHeading>
+                <div className="frame-tool-card rounded-[22px] p-4">
+                  <div className="frame-tool-muted text-sm leading-5">
+                    Build a flashable Raspberry Pi Zero 2 W image with the current FrameOS release, frame config, and
+                    agent credentials.
+                  </div>
+                  {frame.buildroot?.sdImage?.status ? (
+                    <div className="mt-3 text-xs font-semibold uppercase tracking-wide text-[color:var(--tool-strong)]">
+                      Status: {frame.buildroot.sdImage.status}
+                    </div>
+                  ) : null}
+                </div>
+              </section>
+              {deployChangeDetails.length > 0 ? (
+                <section className="space-y-2">
+                  <DrawerHeading>Included changes</DrawerHeading>
+                  <div className="frame-tool-card rounded-[22px] p-4">
+                    <ChangeRows changes={deployChangeDetails} />
+                  </div>
+                </section>
+              ) : null}
+              {fullDeployPlanSummary.length > 0 ? (
+                <section>
+                  <SummaryRows items={fullDeployPlanSummary} />
+                </section>
+              ) : null}
+            </div>
+          ) : deployPlansLoading ? (
             <DeployPlanProgress logs={deployPlanLogs} planReady={false} />
           ) : deployPlansError ? (
             <div className="space-y-3">
@@ -638,26 +670,39 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
           >
             Close
           </button>
-          <button
-            type="button"
-            onClick={() => closeAndRun(saveAndFastDeployFrame)}
-            className={clsx(
-              'rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-              deployRecommendation?.mode === 'fast' ? 'frameos-primary-action' : 'frameos-secondary-button'
-            )}
-          >
-            Fast deploy
-          </button>
-          <button
-            type="button"
-            onClick={() => closeAndRun(saveAndFullDeployFrame)}
-            className={clsx(
-              'rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-              deployRecommendation?.mode === 'full' ? 'frameos-primary-action' : 'frameos-secondary-button'
-            )}
-          >
-            Full deploy
-          </button>
+          {isBuildrootFrame ? (
+            <button
+              type="button"
+              onClick={() => closeAndRun(() => downloadSdCardImage(frame.id))}
+              className="frameos-primary-action inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            >
+              <ArrowDownTrayIcon className="h-5 w-5" />
+              Download SD card image
+            </button>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={() => closeAndRun(saveAndFastDeployFrame)}
+                className={clsx(
+                  'rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+                  deployRecommendation?.mode === 'fast' ? 'frameos-primary-action' : 'frameos-secondary-button'
+                )}
+              >
+                Fast deploy
+              </button>
+              <button
+                type="button"
+                onClick={() => closeAndRun(saveAndFullDeployFrame)}
+                className={clsx(
+                  'rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+                  deployRecommendation?.mode === 'full' ? 'frameos-primary-action' : 'frameos-secondary-button'
+                )}
+              >
+                Full deploy
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>

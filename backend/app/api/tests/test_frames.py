@@ -620,6 +620,244 @@ async def test_api_frame_new(async_client):
 
 
 @pytest.mark.asyncio
+async def test_api_frame_new_buildroot_defaults(async_client):
+    payload = {
+        "mode": "buildroot",
+        "name": "BuildrootFrame",
+        "frame_host": "",
+        "server_host": "backend.local",
+        "platform": "raspberry-pi-zero-2-w",
+        "network": {"wifiSSID": "Test WiFi", "wifiPassword": "secret1234"},
+    }
+
+    response = await async_client.post('/api/frames/new', json=payload)
+
+    assert response.status_code == 200
+    frame = response.json()['frame']
+    assert frame['mode'] == 'buildroot'
+    assert frame['frame_host'] == f"frame{frame['id']}.local"
+    assert frame['ssh_user'] == 'root'
+    assert frame['assets_path'] == '/srv/assets'
+    assert frame['https_proxy']['enable'] is False
+    assert frame['buildroot']['platform'] == 'raspberry-pi-zero-2-w'
+    assert frame['network']['wifiSSID'] == 'Test WiFi'
+    assert frame['network']['wifiPassword'] == 'secret1234'
+    assert frame['agent']['agentEnabled'] is True
+    assert frame['agent']['agentRunCommands'] is True
+    assert frame['agent']['deployWithAgent'] is True
+    assert frame['agent']['agentSharedSecret']
+    assert frame['network']['wifiHotspot'] == 'bootOnly'
+
+
+@pytest.mark.asyncio
+async def test_api_frame_new_buildroot_rejects_unsupported_platform(async_client):
+    payload = {
+        "mode": "buildroot",
+        "name": "BuildrootFrame",
+        "frame_host": "",
+        "server_host": "backend.local",
+        "platform": "luckfox-pico",
+    }
+
+    response = await async_client.post('/api/frames/new', json=payload)
+
+    assert response.status_code == 400
+    assert 'Unsupported Buildroot platform' in response.json()['detail']
+    frames_response = await async_client.get('/api/frames')
+    assert frames_response.json()['frames'] == []
+
+
+@pytest.mark.asyncio
+async def test_api_frame_new_buildroot_rejects_missing_wifi(async_client):
+    payload = {
+        "mode": "buildroot",
+        "name": "BuildrootFrame",
+        "frame_host": "",
+        "server_host": "backend.local",
+        "platform": "raspberry-pi-zero-2-w",
+        "network": {"wifiSSID": "", "wifiPassword": ""},
+    }
+
+    response = await async_client.post('/api/frames/new', json=payload)
+
+    assert response.status_code == 400
+    assert 'WiFi network is required' in response.json()['detail']
+    frames_response = await async_client.get('/api/frames')
+    assert frames_response.json()['frames'] == []
+
+
+@pytest.mark.asyncio
+async def test_api_frame_buildroot_sd_image_enqueue(async_client, db, monkeypatch):
+    import app.tasks.buildroot_image as buildroot_image_module
+
+    create_response = await async_client.post(
+        '/api/frames/new',
+        json={
+            "mode": "buildroot",
+            "name": "BuildrootFrame",
+            "frame_host": "",
+            "server_host": "backend.local",
+            "platform": "raspberry-pi-zero-2-w",
+            "network": {"wifiSSID": "Test WiFi", "wifiPassword": "secret1234"},
+        },
+    )
+    frame_id = create_response.json()['frame']['id']
+    captured: list[tuple[int, str | None, str | None]] = []
+
+    async def fake_buildroot_sd_image(id, _redis, *, request_id=None, queue_job_id=None):
+        captured.append((id, request_id, queue_job_id))
+
+    monkeypatch.setattr(buildroot_image_module, "buildroot_sd_image", fake_buildroot_sd_image)
+
+    response = await async_client.post(f'/api/frames/{frame_id}/buildroot/sd_image')
+
+    assert response.status_code == 200
+    assert captured[0][0] == frame_id
+    assert captured[0][1]
+    assert captured[0][2] == f"buildroot_sd_image:{frame_id}:{captured[0][1]}"
+    db.expire_all()
+    frame = db.get(Frame, frame_id)
+    assert frame.buildroot['platform'] == 'raspberry-pi-zero-2-w'
+    assert frame.buildroot['sdImage']['status'] == 'queued'
+    assert frame.buildroot['sdImage']['queueJobId'] == captured[0][2]
+    assert frame.agent['agentEnabled'] is True
+    assert frame.agent['agentRunCommands'] is True
+    assert frame.agent['deployWithAgent'] is True
+
+
+@pytest.mark.asyncio
+async def test_api_frame_buildroot_sd_image_recovers_legacy_building_state(async_client, db, redis, monkeypatch):
+    import app.tasks.buildroot_image as buildroot_image_module
+
+    frame = await new_frame(db, redis, 'BuildrootFrame', 'frame.local', 'backend.local')
+    frame.mode = 'buildroot'
+    frame.network = {
+        **(frame.network or {}),
+        'wifiSSID': 'Test WiFi',
+        'wifiPassword': 'secret1234',
+    }
+    frame.buildroot = {
+        'platform': 'raspberry-pi-zero-2-w',
+        'sdImage': {
+            'status': 'building',
+            'startedAt': datetime.now(timezone.utc).isoformat(),
+        },
+    }
+    db.add(frame)
+    db.commit()
+    captured: list[tuple[int, str | None, str | None]] = []
+
+    async def fake_buildroot_sd_image(id, _redis, *, request_id=None, queue_job_id=None):
+        captured.append((id, request_id, queue_job_id))
+
+    monkeypatch.setattr(buildroot_image_module, "buildroot_sd_image", fake_buildroot_sd_image)
+
+    response = await async_client.post(f'/api/frames/{frame.id}/buildroot/sd_image')
+
+    assert response.status_code == 200
+    assert response.json()['message'] == 'Buildroot SD card image generation started'
+    assert captured[0][0] == frame.id
+    db.expire_all()
+    frame = db.get(Frame, frame.id)
+    assert frame.buildroot['sdImage']['status'] == 'queued'
+    assert frame.buildroot['sdImage']['requestId'] == captured[0][1]
+    assert frame.buildroot['sdImage']['queueJobId'] == captured[0][2]
+
+
+@pytest.mark.asyncio
+async def test_api_frame_buildroot_sd_image_keeps_active_build(async_client, db, redis, monkeypatch):
+    import app.tasks.buildroot_image as buildroot_image_module
+
+    frame = await new_frame(db, redis, 'BuildrootFrame', 'frame.local', 'backend.local')
+    frame.mode = 'buildroot'
+    frame.buildroot = {
+        'platform': 'raspberry-pi-zero-2-w',
+        'sdImage': {
+            'status': 'building',
+            'requestId': 'request123',
+            'queueJobId': 'buildroot_sd_image:1:request123',
+            'startedAt': datetime.now(timezone.utc).isoformat(),
+        },
+    }
+    db.add(frame)
+    db.commit()
+    captured: list[int] = []
+
+    async def fake_queue_job_active(_redis, _sd_image):
+        return True
+
+    async def fake_buildroot_sd_image(id, _redis, *, request_id=None, queue_job_id=None):
+        captured.append(id)
+
+    monkeypatch.setattr(buildroot_image_module, "_buildroot_sd_image_queue_job_active", fake_queue_job_active)
+    monkeypatch.setattr(buildroot_image_module, "buildroot_sd_image", fake_buildroot_sd_image)
+
+    response = await async_client.post(f'/api/frames/{frame.id}/buildroot/sd_image')
+
+    assert response.status_code == 200
+    assert response.json()['message'] == 'Buildroot SD card image generation already running'
+    assert captured == []
+
+
+@pytest.mark.asyncio
+async def test_api_frame_buildroot_sd_image_post_returns_ready_image(async_client, db, redis, tmp_path, monkeypatch):
+    import app.tasks.buildroot_image as buildroot_image_module
+
+    frame = await new_frame(db, redis, 'BuildrootFrame', 'frame.local', 'backend.local')
+    image_path = tmp_path / 'frameos-test.img'
+    image_path.write_bytes(b'frameos image')
+    frame.mode = 'buildroot'
+    frame.buildroot = {
+        'platform': 'raspberry-pi-zero-2-w',
+        'sdImage': {
+            'status': 'ready',
+            'filename': 'frameos-test.img',
+            'path': str(image_path),
+            'downloadUrl': f'/api/frames/{frame.id}/buildroot/sd_image/download',
+        },
+    }
+    db.add(frame)
+    db.commit()
+    captured: list[int] = []
+
+    async def fake_buildroot_sd_image(id, _redis, *, request_id=None, queue_job_id=None):
+        captured.append(id)
+
+    monkeypatch.setattr(buildroot_image_module, "buildroot_sd_image", fake_buildroot_sd_image)
+
+    response = await async_client.post(f'/api/frames/{frame.id}/buildroot/sd_image')
+
+    assert response.status_code == 200
+    assert response.json()['message'] == 'Buildroot SD card image already ready'
+    assert response.json()['sdImage']['status'] == 'ready'
+    assert captured == []
+
+
+@pytest.mark.asyncio
+async def test_api_frame_buildroot_sd_image_download(async_client, db, redis, tmp_path):
+    frame = await new_frame(db, redis, 'BuildrootFrame', 'frame.local', 'backend.local')
+    image_path = tmp_path / 'frameos-test.img'
+    image_path.write_bytes(b'frameos image')
+    frame.mode = 'buildroot'
+    frame.buildroot = {
+        'platform': 'raspberry-pi-zero-2-w',
+        'sdImage': {
+            'status': 'ready',
+            'filename': 'frameos-test.img',
+            'path': str(image_path),
+        },
+    }
+    db.add(frame)
+    db.commit()
+
+    response = await async_client.get(f'/api/frames/{frame.id}/buildroot/sd_image/download')
+
+    assert response.status_code == 200
+    assert response.content == b'frameos image'
+    assert 'frameos-test.img' in response.headers['content-disposition']
+
+
+@pytest.mark.asyncio
 async def test_api_frame_new_missing_fields(async_client):
     # Missing frame_host
     payload = {
