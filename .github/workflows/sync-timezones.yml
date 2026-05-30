@@ -1,0 +1,171 @@
+name: Sync timezone data
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: timezone-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: github.repository == 'FrameOS/frameos'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout FrameOS
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 1
+
+      - name: Checkout tz source
+        uses: actions/checkout@v4
+        with:
+          repository: FrameOS/tz
+          path: tz
+          fetch-depth: 1
+
+      - name: Set up Nim
+        uses: jiro4989/setup-nim-action@v1
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate and validate timezone data
+        id: generate
+        env:
+          WORKSPACE: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          TZ_DIR="$WORKSPACE/tz"
+          STAGE_DIR="$WORKSPACE/tz-staging"
+          rm -rf "$STAGE_DIR"
+          mkdir -p "$STAGE_DIR"
+
+          cd "$TZ_DIR/tools"
+          nimble install chrono
+          nim c generate.nim
+          ./generate
+
+          if [ ! -f tzdata.json ]; then
+            echo "tzdata.json was not generated"
+            exit 1
+          fi
+          if [ ! -s tzdata.json ]; then
+            echo "Generated tzdata.json is empty"
+            exit 1
+          fi
+          if [ "$(stat -c %s tzdata.json)" -lt 1000000 ]; then
+            echo "Generated tzdata.json is unexpectedly small"
+            exit 1
+          fi
+
+          cp tzdata.json "$STAGE_DIR/tzdata.json"
+          cp tzdata/dstchanges.csv "$STAGE_DIR/dstchanges.csv"
+          cp tzdata/timezones.csv "$STAGE_DIR/timezones.csv"
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          workspace = Path("${WORKSPACE}")
+          source = Path("${WORKSPACE}/tz-staging/tzdata.json")
+          data = json.loads(source.read_text(encoding="utf-8"))
+
+          if not isinstance(data, dict):
+            raise SystemExit("tzdata.json is not a JSON object")
+          timezones = data.get("timezones")
+          if not isinstance(timezones, list) or not timezones:
+            raise SystemExit("tzdata.json missing or empty timezones list")
+          if not isinstance(data.get("dstChanges"), list):
+            raise SystemExit("tzdata.json missing or invalid dstChanges list")
+          if not all(isinstance(item, dict) and isinstance(item.get("name"), str) for item in timezones):
+            raise SystemExit("tzdata.json timezones entries are malformed")
+
+          timezone_names = [item["name"] for item in timezones]
+          if "UTC" not in timezone_names:
+            timezone_names.insert(0, "UTC")
+
+          (workspace / "frameos/assets/compiled/tz/tzdata.json").write_text(
+            source.read_text(encoding="utf-8"),
+            encoding="utf-8",
+          )
+          (workspace / "frontend/src/decorators/timezones.json").write_text(
+            json.dumps(timezone_names, separators=(",", ":")) + "\n",
+            encoding="utf-8",
+          )
+          print(f"Loaded {len(timezones)} timezones")
+          PY
+
+          mkdir -p "$TZ_DIR/dist"
+          if [ ! -f "$TZ_DIR/dist/tzdata.json" ] || \
+            ! cmp -s "$STAGE_DIR/tzdata.json" "$TZ_DIR/dist/tzdata.json" || \
+            ! cmp -s "$STAGE_DIR/dstchanges.csv" "$TZ_DIR/dist/dstchanges.csv" || \
+            ! cmp -s "$STAGE_DIR/timezones.csv" "$TZ_DIR/dist/timezones.csv"; then
+            cp "$STAGE_DIR/tzdata.json" "$TZ_DIR/dist/tzdata.json"
+            cp "$STAGE_DIR/dstchanges.csv" "$TZ_DIR/dist/dstchanges.csv"
+            cp "$STAGE_DIR/timezones.csv" "$TZ_DIR/dist/timezones.csv"
+            gzip -9 -f -k "$TZ_DIR/dist/tzdata.json"
+            gzip -9 -f -k "$TZ_DIR/dist/dstchanges.csv"
+            gzip -9 -f -k "$TZ_DIR/dist/timezones.csv"
+            date -u +"%Y-%m-%dT%H:%M:%SZ" > "$TZ_DIR/dist/updated.txt"
+            echo "tz_changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "tz_changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          TZ_BRANCH="$(git -C "$TZ_DIR" rev-parse --abbrev-ref HEAD)"
+          TZ_COMMIT="$(git -C "$TZ_DIR" rev-parse HEAD)"
+          echo "tz_branch=$TZ_BRANCH" >> "$GITHUB_OUTPUT"
+          echo "tz_commit=$TZ_COMMIT" >> "$GITHUB_OUTPUT"
+          rm -rf "$STAGE_DIR"
+
+      - name: Check for changed FrameOS timezone files
+        id: frameos_changes
+        run: |
+          if git diff --quiet -- frameos/assets/compiled/tz/tzdata.json frontend/src/decorators/timezones.json; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Push tz distribution artefacts
+        if: steps.generate.outputs.tz_changed == 'true'
+        env:
+          TZ_REPO_TOKEN: ${{ secrets.TZ_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TZ_REPO_TOKEN:-}" ]; then
+            echo "TZ_REPO_TOKEN is required to push timezone artefacts to FrameOS/tz"
+            exit 1
+          fi
+
+          TARGET_BRANCH="${{ steps.generate.outputs.tz_branch }}"
+          if [ -z "$TARGET_BRANCH" ] || [ "$TARGET_BRANCH" = "HEAD" ]; then
+            TARGET_BRANCH="main"
+          fi
+
+          git -C "$GITHUB_WORKSPACE/tz" config user.name "frameos-bot"
+          git -C "$GITHUB_WORKSPACE/tz" config user.email "git@frameos.net"
+          git -C "$GITHUB_WORKSPACE/tz" add dist/tzdata.json dist/timezones.csv dist/dstchanges.csv dist/tzdata.json.gz dist/timezones.csv.gz dist/dstchanges.csv.gz dist/updated.txt
+          git -C "$GITHUB_WORKSPACE/tz" commit -m "chore: update timezone artefacts from ${{ steps.generate.outputs.tz_commit }}"
+          git -C "$GITHUB_WORKSPACE/tz" remote set-url origin "https://x-access-token:${TZ_REPO_TOKEN}@github.com/FrameOS/tz.git"
+          git -C "$GITHUB_WORKSPACE/tz" push origin "HEAD:$TARGET_BRANCH"
+
+      - name: Commit and push FrameOS timezone updates
+        if: steps.frameos_changes.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          FRAMEOS_BRANCH="${GITHUB_REF_NAME:-main}"
+          if [ -z "$FRAMEOS_BRANCH" ] || [ "$FRAMEOS_BRANCH" = "HEAD" ]; then
+            FRAMEOS_BRANCH="main"
+          fi
+          git config user.name "frameos-bot"
+          git config user.email "git@frameos.net"
+          git add frameos/assets/compiled/tz/tzdata.json frontend/src/decorators/timezones.json
+          git commit -m "chore: sync timezone data from FrameOS/tz/${{ steps.generate.outputs.tz_commit }}"
+          git push origin "HEAD:$FRAMEOS_BRANCH"
