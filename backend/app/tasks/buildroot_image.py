@@ -931,6 +931,7 @@ class BuildrootImageBuilder:
                     "BR2_PACKAGE_NETWORK_MANAGER_CLI=y",
                     "BR2_PACKAGE_NETWORK_MANAGER_WIFI=y",
                     "BR2_PACKAGE_WPA_SUPPLICANT=y",
+                    "BR2_PACKAGE_WPA_SUPPLICANT_DBUS=y",
                     "BR2_PACKAGE_WPA_SUPPLICANT_NL80211=y",
                     "BR2_PACKAGE_IW=y",
                     "BR2_PACKAGE_WIRELESS_TOOLS=y",

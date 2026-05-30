@@ -70,6 +70,12 @@ def test_buildroot_config_avoids_ncurses_selecting_packages(tmp_path):
     assert "BR2_JLEVEL=2" in config
     assert 'BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES="/work/linux-fragment.config"' in config
     assert "BR2_PACKAGE_DROPBEAR=y" in config
+    assert "BR2_PACKAGE_DBUS=y" in config
+    assert "BR2_PACKAGE_NETWORK_MANAGER=y" in config
+    assert "BR2_PACKAGE_NETWORK_MANAGER_WIFI=y" in config
+    assert "BR2_PACKAGE_WPA_SUPPLICANT=y" in config
+    assert "BR2_PACKAGE_WPA_SUPPLICANT_DBUS=y" in config
+    assert "BR2_PACKAGE_WPA_SUPPLICANT_NL80211=y" in config
     assert "# BR2_CCACHE is not set" in config
     assert 'BR2_ROOTFS_POST_IMAGE_SCRIPT="/work/post-image.sh"' in config
     assert "/work/partition-post-build.sh" in config
