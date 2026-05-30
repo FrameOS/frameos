@@ -2201,7 +2201,8 @@ async def api_frame_buildroot_sd_image(
     except ValueError as exc:
         _bad_request(str(exc))
 
-    await update_frame(db, redis, frame)
+    db.add(frame)
+    db.commit()
 
     try:
         started, sd_image = await start_buildroot_sd_image(db, redis, frame, force=force)

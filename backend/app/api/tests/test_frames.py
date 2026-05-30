@@ -727,6 +727,48 @@ async def test_api_frame_buildroot_sd_image_enqueue(async_client, db, monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_api_frame_buildroot_sd_image_does_not_publish_previous_error(async_client, db, redis, monkeypatch):
+    import app.api.frames as frames_api_module
+    import app.tasks.buildroot_image as buildroot_image_module
+
+    frame = await new_frame(db, redis, 'BuildrootFrame', 'frame.local', 'backend.local')
+    frame.mode = 'buildroot'
+    frame.network = {
+        **(frame.network or {}),
+        'wifiSSID': 'Test WiFi',
+        'wifiPassword': 'secret1234',
+    }
+    frame.buildroot = {
+        'platform': 'raspberry-pi-zero-2-w',
+        'sdImage': {
+            'status': 'error',
+            'error': "name 'systemd_dir' is not defined",
+        },
+    }
+    db.add(frame)
+    db.commit()
+    pre_start_update_frame_calls: list[str | None] = []
+
+    async def fail_if_endpoint_publishes_before_start(_db, _redis, frame):
+        pre_start_update_frame_calls.append((frame.buildroot or {}).get('sdImage', {}).get('status'))
+        raise AssertionError('api_frame_buildroot_sd_image should not publish stale sdImage before queuing')
+
+    async def fake_buildroot_sd_image(id, _redis, *, request_id=None, queue_job_id=None):
+        pass
+
+    monkeypatch.setattr(frames_api_module, "update_frame", fail_if_endpoint_publishes_before_start)
+    monkeypatch.setattr(buildroot_image_module, "buildroot_sd_image", fake_buildroot_sd_image)
+
+    response = await async_client.post(f'/api/frames/{frame.id}/buildroot/sd_image')
+
+    assert response.status_code == 200
+    assert response.json()['sdImage']['status'] == 'queued'
+    assert pre_start_update_frame_calls == []
+    db.expire_all()
+    assert db.get(Frame, frame.id).buildroot['sdImage']['status'] == 'queued'
+
+
+@pytest.mark.asyncio
 async def test_api_frame_buildroot_sd_image_recovers_legacy_building_state(async_client, db, redis, monkeypatch):
     import app.tasks.buildroot_image as buildroot_image_module
 
