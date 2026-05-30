@@ -15,6 +15,18 @@ from app.models import new_frame
 from app.models.frame import Frame
 from app.models.log import Log
 from app.models.user import User
+from app.tasks.buildroot_image import buildroot_sd_image_config_fingerprint
+from app.codegen.drivers_nim import frame_compilation_mode
+
+
+def set_buildroot_sd_image_config_fingerprint(frame: Frame) -> None:
+    buildroot = dict(frame.buildroot or {})
+    sd_image = dict(buildroot.get('sdImage') or {})
+    sd_image['compilationMode'] = frame_compilation_mode(frame)
+    sd_image['configFingerprint'] = buildroot_sd_image_config_fingerprint(frame)
+    buildroot['sdImage'] = sd_image
+    frame.buildroot = buildroot
+
 
 @pytest.mark.asyncio
 async def test_api_frames(async_client, db, redis):
@@ -740,6 +752,7 @@ async def test_api_frame_buildroot_sd_image_does_not_publish_previous_error(asyn
     }
     frame.buildroot = {
         'platform': 'raspberry-pi-zero-2-w',
+        'setupJsonResetFilePath': '/boot/frameos-setup.json',
         'sdImage': {
             'status': 'error',
             'error': "name 'systemd_dir' is not defined",
@@ -781,6 +794,7 @@ async def test_api_frame_buildroot_sd_image_recovers_legacy_building_state(async
     }
     frame.buildroot = {
         'platform': 'raspberry-pi-zero-2-w',
+        'setupJsonResetFilePath': '/boot/frameos-setup.json',
         'sdImage': {
             'status': 'building',
             'startedAt': datetime.now(timezone.utc).isoformat(),
@@ -815,6 +829,7 @@ async def test_api_frame_buildroot_sd_image_keeps_active_build(async_client, db,
     frame.mode = 'buildroot'
     frame.buildroot = {
         'platform': 'raspberry-pi-zero-2-w',
+        'setupJsonResetFilePath': '/boot/frameos-setup.json',
         'sdImage': {
             'status': 'building',
             'requestId': 'request123',
@@ -856,6 +871,7 @@ async def test_api_frame_buildroot_sd_image_post_returns_ready_image(async_clien
     }
     frame.buildroot = {
         'platform': 'raspberry-pi-zero-2-w',
+        'setupJsonResetFilePath': '/boot/frameos-setup.json',
         'sdImage': {
             'status': 'ready',
             'filename': 'frameos-test.img',
@@ -868,6 +884,7 @@ async def test_api_frame_buildroot_sd_image_post_returns_ready_image(async_clien
             },
         },
     }
+    set_buildroot_sd_image_config_fingerprint(frame)
     db.add(frame)
     db.commit()
     captured: list[int] = []
@@ -959,6 +976,7 @@ async def test_api_frame_buildroot_sd_image_force_regenerates_ready_image(async_
     }
     frame.buildroot = {
         'platform': 'raspberry-pi-zero-2-w',
+        'setupJsonResetFilePath': '/boot/frameos-setup.json',
         'sdImage': {
             'status': 'ready',
             'filename': 'frameos-test.img',
@@ -1007,6 +1025,7 @@ async def test_api_frame_buildroot_sd_image_regenerates_stale_customization_vers
     }
     frame.buildroot = {
         'platform': 'raspberry-pi-zero-2-w',
+        'setupJsonResetFilePath': '/boot/frameos-setup.json',
         'sdImage': {
             'status': 'ready',
             'filename': 'frameos-test.img.gz',
@@ -1014,6 +1033,7 @@ async def test_api_frame_buildroot_sd_image_regenerates_stale_customization_vers
             'customizationVersion': 3,
         },
     }
+    set_buildroot_sd_image_config_fingerprint(frame)
     db.add(frame)
     db.commit()
     captured: list[tuple[int, str | None, str | None]] = []
@@ -1056,6 +1076,7 @@ async def test_api_frame_buildroot_sd_image_regenerates_stale_base_image(
     }
     frame.buildroot = {
         'platform': 'raspberry-pi-zero-2-w',
+        'setupJsonResetFilePath': '/boot/frameos-setup.json',
         'sdImage': {
             'status': 'ready',
             'filename': 'frameos-test.img.gz',
@@ -1067,6 +1088,7 @@ async def test_api_frame_buildroot_sd_image_regenerates_stale_base_image(
             },
         },
     }
+    set_buildroot_sd_image_config_fingerprint(frame)
     db.add(frame)
     db.commit()
     current_base_entry = {
@@ -1098,6 +1120,76 @@ async def test_api_frame_buildroot_sd_image_regenerates_stale_base_image(
 
 
 @pytest.mark.asyncio
+async def test_api_frame_buildroot_sd_image_regenerates_stale_config_fingerprint(
+    async_client,
+    db,
+    redis,
+    tmp_path,
+    monkeypatch,
+):
+    import app.api.frames as frames_api_module
+    import app.tasks.buildroot_image as buildroot_image_module
+
+    frame = await new_frame(db, redis, 'BuildrootFrame', 'frame.local', 'backend.local')
+    image_path = tmp_path / 'frameos-test.img.gz'
+    image_path.write_bytes(b'old image')
+    frame.mode = 'buildroot'
+    frame.network = {
+        **(frame.network or {}),
+        'wifiSSID': 'Test WiFi',
+        'wifiPassword': 'secret1234',
+    }
+    current_base_entry = {
+        'object_key': 'buildroot-images/current.img.gz',
+        'sha256': 'current-sha256',
+    }
+    frame.buildroot = {
+        'platform': 'raspberry-pi-zero-2-w',
+        'compilationMode': 'precompiled',
+        'setupJsonResetFilePath': '/boot/frameos-setup.json',
+        'sdImage': {
+            'status': 'ready',
+            'filename': 'frameos-test.img.gz',
+            'path': str(image_path),
+            'customizationVersion': 6,
+            'baseImage': {
+                'objectKey': current_base_entry['object_key'],
+                'sha256': current_base_entry['sha256'],
+            },
+        },
+    }
+    set_buildroot_sd_image_config_fingerprint(frame)
+    frame.buildroot = {
+        **frame.buildroot,
+        'compilationMode': 'static',
+    }
+    db.add(frame)
+    db.commit()
+    captured: list[tuple[int, str | None, str | None]] = []
+
+    async def fake_resolve_buildroot_base_entry(_platform, frameos_version=None):
+        return current_base_entry
+
+    async def fake_buildroot_sd_image(id, _redis, *, request_id=None, queue_job_id=None):
+        captured.append((id, request_id, queue_job_id))
+
+    monkeypatch.setattr(frames_api_module, "resolve_buildroot_base_entry", fake_resolve_buildroot_base_entry)
+    monkeypatch.setattr(buildroot_image_module, "resolve_buildroot_base_entry", fake_resolve_buildroot_base_entry)
+    monkeypatch.setattr(buildroot_image_module, "buildroot_sd_image", fake_buildroot_sd_image)
+
+    status_response = await async_client.get(f'/api/frames/{frame.id}/buildroot/sd_image')
+    assert status_response.status_code == 200
+    assert status_response.json()['sdImage']['status'] == 'stale'
+    assert status_response.json()['sdImage']['error'] == 'The generated image was built with a different compilation mode'
+
+    response = await async_client.post(f'/api/frames/{frame.id}/buildroot/sd_image')
+
+    assert response.status_code == 200
+    assert response.json()['message'] == 'Buildroot SD card image preparation started'
+    assert captured[0][0] == frame.id
+
+
+@pytest.mark.asyncio
 async def test_api_frame_buildroot_sd_image_download(async_client, db, redis, tmp_path):
     frame = await new_frame(db, redis, 'BuildrootFrame', 'frame.local', 'backend.local')
     image_path = tmp_path / 'frameos-test.img'
@@ -1105,6 +1197,7 @@ async def test_api_frame_buildroot_sd_image_download(async_client, db, redis, tm
     frame.mode = 'buildroot'
     frame.buildroot = {
         'platform': 'raspberry-pi-zero-2-w',
+        'setupJsonResetFilePath': '/boot/frameos-setup.json',
         'sdImage': {
             'status': 'ready',
             'filename': 'frameos-test.img',
@@ -1112,6 +1205,7 @@ async def test_api_frame_buildroot_sd_image_download(async_client, db, redis, tm
             'customizationVersion': 6,
         },
     }
+    set_buildroot_sd_image_config_fingerprint(frame)
     db.add(frame)
     db.commit()
 

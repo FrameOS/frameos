@@ -38,6 +38,19 @@ def test_compilation_mode_static_is_valid():
     assert frame_compilation_mode(SimpleNamespace(rpios={"compilationMode": "static"})) == COMPILATION_MODE_STATIC
 
 
+def test_buildroot_compilation_mode_uses_buildroot_settings():
+    assert (
+        frame_compilation_mode(
+            SimpleNamespace(
+                mode="buildroot",
+                buildroot={"compilationMode": "static"},
+                rpios={"compilationMode": "precompiled"},
+            )
+        )
+        == COMPILATION_MODE_STATIC
+    )
+
+
 def test_compilation_mode_precompiled_uses_shared_libraries():
     assert normalize_compilation_mode("precompiled") == COMPILATION_MODE_PRECOMPILED
     assert frame_compilation_mode(SimpleNamespace(rpios={"compilationMode": "precompiled"})) == COMPILATION_MODE_PRECOMPILED

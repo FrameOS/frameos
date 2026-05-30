@@ -26,6 +26,9 @@ def normalize_compilation_mode(value: str | None) -> str:
 
 
 def frame_compilation_mode(frame) -> str:
+    if getattr(frame, "mode", None) == "buildroot":
+        buildroot_settings = getattr(frame, "buildroot", None) or {}
+        return normalize_compilation_mode(buildroot_settings.get("compilationMode"))
     rpios_settings = getattr(frame, "rpios", None) or {}
     return normalize_compilation_mode(rpios_settings.get("compilationMode"))
 

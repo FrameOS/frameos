@@ -567,6 +567,35 @@ export function FrameSettings({
                 <Select name="buildroot.platform" options={buildrootPlatforms} />
               </Field>
               <Field
+                name="compilationMode"
+                label="Compilation mode"
+                tooltip={
+                  <div className="space-y-2">
+                    <p>
+                      Choose whether the SD image uses a published FrameOS release or compiles this checkout for the
+                      image.
+                    </p>
+                    <p>
+                      Use a build mode when testing local development changes that are not in a published release yet.
+                    </p>
+                  </div>
+                }
+              >
+                <Select
+                  name="buildroot.compilationMode"
+                  options={[
+                    { value: '', label: 'Default (Precompiled)' },
+                    { value: 'precompiled', label: 'Use precompiled binaries if possible' },
+                    { value: 'static', label: 'Build as a single executable' },
+                    { value: 'shared', label: 'Scenes and drivers as shared libraries' },
+                    {
+                      value: 'shared-scenes',
+                      label: 'Scenes bundled in one shared library (scenes.so)',
+                    },
+                  ]}
+                />
+              </Field>
+              <Field
                 name="setupJsonResetFilePath"
                 label="Setup JSON reset file path"
                 tooltip={

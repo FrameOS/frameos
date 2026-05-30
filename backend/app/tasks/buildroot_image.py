@@ -465,6 +465,13 @@ def latest_buildroot_sd_image(frame: Frame, current_base_entry: dict[str, Any] |
     if not isinstance(sd_image, dict):
         return None
     path = sd_image.get("path")
+    current_compilation_mode = frame_compilation_mode(frame)
+    if sd_image.get("status") == "ready" and sd_image.get("compilationMode") != current_compilation_mode:
+        return {
+            **sd_image,
+            "status": "stale",
+            "error": "The generated image was built with a different compilation mode",
+        }
     if sd_image.get("status") == "ready" and sd_image.get("customizationVersion") != BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION:
         return {
             **sd_image,
@@ -630,6 +637,8 @@ class BuildrootImageBuilder:
                     "platform": SUPPORTED_BUILDROOT_PLATFORM,
                     "filename": filename,
                     "rawFilename": raw_filename,
+                    "compilationMode": frame_compilation_mode(self.frame),
+                    "configFingerprint": buildroot_sd_image_config_fingerprint(self.frame),
                     "startedAt": _utc_now(),
                 }, self.request_id),
             )
@@ -691,6 +700,8 @@ class BuildrootImageBuilder:
                 "path": str(output_path),
                 "compressed": True,
                 "customizationVersion": BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION,
+                "compilationMode": frame_compilation_mode(self.frame),
+                "configFingerprint": buildroot_sd_image_config_fingerprint(self.frame),
                 "rawSize": raw_size,
                 "rawSha256": raw_sha256,
                 "size": output_path.stat().st_size,
@@ -988,7 +999,7 @@ class BuildrootImageBuilder:
                     "",
                     "# Trimmed for Raspberry Pi Zero 2 W use cases.",
                     "# Keep HID, HDMI, Wi-Fi, Bluetooth and USB storage; trim the rest.",
-                    "# Audio/telephony/streaming/media/input-complexity reducers.",
+                    "# Telephony/streaming/media/input-complexity reducers.",
                     "# CONFIG_AUXDISPLAY is not set",
                     "# CONFIG_CAN is not set",
                     "# CONFIG_DVB_CORE is not set",
@@ -998,11 +1009,7 @@ class BuildrootImageBuilder:
                     "# CONFIG_MEDIA_PCI_SUPPORT is not set",
                     "# CONFIG_MEDIA_PLATFORM_DRIVERS is not set",
                     "# CONFIG_MEDIA_USB_SUPPORT is not set",
-                    "# CONFIG_SCSI is not set",
-                    "# CONFIG_SOUND is not set",
                     "# CONFIG_STAGING is not set",
-                    "# CONFIG_SND is not set",
-                    "# CONFIG_SND_BCM2835 is not set",
                     "# CONFIG_VIDEO_DEV is not set",
                     "# CONFIG_VIDEO_HDPVR is not set",
                     "# CONFIG_VIDEO_OV2640 is not set",

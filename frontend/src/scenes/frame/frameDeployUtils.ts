@@ -176,6 +176,12 @@ function normalizeCompilationMode(value: unknown): 'static' | 'shared' | 'shared
     : 'precompiled'
 }
 
+function frameCompilationMode(frame?: Partial<FrameType> | null): 'static' | 'shared' | 'shared-scenes' | 'precompiled' {
+  return normalizeCompilationMode(
+    frame?.mode === 'buildroot' ? frame?.buildroot?.compilationMode : frame?.rpios?.compilationMode
+  )
+}
+
 function normalizeCrossCompilation(value: unknown): 'auto' | 'always' | 'never' {
   return value === 'always' || value === 'never' ? value : 'auto'
 }
@@ -255,7 +261,7 @@ function canUsePrecompiledFrameos(frame?: Partial<FrameType> | null, plan?: Depl
     return false
   }
 
-  const compilationMode = normalizeCompilationMode(frame?.rpios?.compilationMode)
+  const compilationMode = frameCompilationMode(frame)
   const crossCompilation = normalizeCrossCompilation(frame?.rpios?.crossCompilation)
   return compilationMode === 'precompiled' && crossCompilation !== 'always' && !precompiledSkipReason(frame)
 }
@@ -292,7 +298,7 @@ function inferBuildStrategy(frame?: Partial<FrameType> | null): string {
 }
 
 function inferCompilationSummary(frame?: Partial<FrameType> | null): string {
-  const compilationMode = normalizeCompilationMode(frame?.rpios?.compilationMode)
+  const compilationMode = frameCompilationMode(frame)
   const crossCompilation = normalizeCrossCompilation(frame?.rpios?.crossCompilation)
   if (compilationMode === 'shared') {
     return 'Shared libraries deployed next to the FrameOS binary'
