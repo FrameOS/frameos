@@ -1090,6 +1090,9 @@ endef
 NCURSES_POST_INSTALL_STAGING_HOOKS += FRAMEOS_NCURSES_TERMINFO_LINKS
 EOF
 fi
+if [ "${{FRAMEOS_BUILDROOT_CLEAN:-0}}" = "1" ] && [ -f /build/output/Makefile ]; then
+  make -C /build/buildroot O=/build/output clean
+fi
 if [ -s /build/output/images/sdcard.img ]; then
   cp /build/output/images/sdcard.img /artifacts/{shlex.quote(output_filename)}
   chmod a+r /artifacts/{shlex.quote(output_filename)}

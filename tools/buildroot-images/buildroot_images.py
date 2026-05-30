@@ -116,6 +116,28 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def build_inputs_digest(paths: list[Path]) -> str:
+    digest = hashlib.sha256()
+    for base_path in paths:
+        if base_path.is_dir():
+            entries = sorted(base_path.rglob("*"), key=lambda item: item.relative_to(base_path).as_posix())
+        else:
+            entries = [base_path]
+        for path in entries:
+            relpath = path.relative_to(base_path).as_posix() if base_path.is_dir() else path.name
+            digest.update(relpath.encode("utf-8") + b"\0")
+            if path.is_symlink():
+                digest.update(b"symlink\0")
+                digest.update(os.readlink(path).encode("utf-8") + b"\0")
+            elif path.is_file():
+                digest.update(b"file\0")
+                digest.update(oct(path.stat().st_mode & 0o777).encode("ascii") + b"\0")
+                digest.update(path.read_bytes())
+            elif path.is_dir():
+                digest.update(b"dir\0")
+    return digest.hexdigest()
+
+
 def safe_segment(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", value)
 
@@ -189,6 +211,19 @@ def build(args: argparse.Namespace) -> None:
         output = out_dir / "output"
         for path in (cache, source, output):
             path.mkdir(parents=True, exist_ok=True)
+        input_digest = build_inputs_digest(
+            [
+                overlay,
+                tmp_path / "frameos-buildroot.config",
+                tmp_path / "linux-fragment.config",
+                tmp_path / "post-build.sh",
+                tmp_path / "partition-post-build.sh",
+                tmp_path / "post-image.sh",
+                tmp_path / "buildroot-build.sh",
+            ]
+        )
+        input_digest_path = output / ".frameos-base-inputs-sha256"
+        clean_output = input_digest_path.read_text(encoding="utf-8").strip() != input_digest if input_digest_path.exists() else True
         cmd = [
             "docker",
             "run",
@@ -207,11 +242,13 @@ def build(args: argparse.Namespace) -> None:
             f"{out_dir}:/artifacts",
             "-e",
             "FORCE_UNSAFE_CONFIGURE=1",
+            *(["-e", "FRAMEOS_BUILDROOT_CLEAN=1"] if clean_output else []),
             BUILDROOT_DOCKER_IMAGE,
             "bash",
             "/work/buildroot-build.sh",
         ]
         subprocess.run(cmd, check=True)
+        input_digest_path.write_text(input_digest + "\n", encoding="utf-8")
     metadata = {
         "platform": args.platform,
         "frameos_version": frameos_version(),
