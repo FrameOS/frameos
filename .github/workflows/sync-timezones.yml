@@ -70,10 +70,11 @@ jobs:
 
           python3 - <<'PY'
           import json
+          import os
           from pathlib import Path
 
-          workspace = Path("${WORKSPACE}")
-          source = Path("${WORKSPACE}/tz-staging/tzdata.json")
+          workspace = Path(os.environ["WORKSPACE"])
+          source = workspace / "tz-staging/tzdata.json"
           data = json.loads(source.read_text(encoding="utf-8"))
 
           if not isinstance(data, dict):
