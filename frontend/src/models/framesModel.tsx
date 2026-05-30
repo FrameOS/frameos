@@ -75,6 +75,8 @@ function startBrowserDownload(path: string): void {
   anchor.remove()
 }
 
+const pendingSdCardImageDownloads = new Set<number>()
+
 export const framesModel = kea<framesModelType>([
   connect(() => ({ logic: [socketLogic, entityImagesModel] })),
   path(['src', 'models', 'framesModel']),
@@ -362,6 +364,7 @@ export const framesModel = kea<framesModelType>([
         return
       }
 
+      pendingSdCardImageDownloads.add(id)
       longRunningTasksModel.actions.startTask({
         frameId: id,
         kind: 'buildrootImage',
@@ -381,6 +384,7 @@ export const framesModel = kea<framesModelType>([
         }
         const data = await response.json()
         if (data?.sdImage?.status === 'ready') {
+          pendingSdCardImageDownloads.delete(id)
           startBrowserDownload(data.sdImage.downloadUrl || downloadUrl)
           longRunningTasksModel.actions.finishTask({
             frameId: id,
@@ -391,12 +395,25 @@ export const framesModel = kea<framesModelType>([
           return
         }
       } catch (error) {
+        pendingSdCardImageDownloads.delete(id)
         longRunningTasksModel.actions.taskFailed({
           frameId: id,
           kind: 'buildrootImage',
           detail: error instanceof Error ? error.message : 'Failed to build SD card image',
         })
         throw error
+      }
+    },
+    [socketLogic.actionTypes.updateFrame]: ({ frame }) => {
+      const sdImage = frame.buildroot?.sdImage
+      if (!sdImage || !pendingSdCardImageDownloads.has(frame.id)) {
+        return
+      }
+      if (sdImage.status === 'ready') {
+        pendingSdCardImageDownloads.delete(frame.id)
+        startBrowserDownload(sdImage.downloadUrl || `/api/frames/${frame.id}/buildroot/sd_image/download`)
+      } else if (sdImage.status === 'error' || sdImage.status === 'missing' || sdImage.status === 'stale') {
+        pendingSdCardImageDownloads.delete(frame.id)
       }
     },
     setDeployWithAgent: async ({ id, deployWithAgent }) => {
