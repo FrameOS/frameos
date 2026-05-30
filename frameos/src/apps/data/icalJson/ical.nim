@@ -7,6 +7,7 @@ import std/algorithm
 import std/lists
 import system
 import tables
+import lib/tz
 
 # Key missing event features (none used by Google/Apple calendar):
 # - HOURLY, MINUTELY, SECONDLY frequencies
@@ -254,7 +255,7 @@ proc normalizeTimeZone(timeZone: string): string =
       if minute == 0:
         let offset = (if sign == '+': -hour else: hour)
         return "Etc/GMT" & (if offset >= 0: "+" & $offset else: $offset)
-  return trimmed
+  return canonicalTimeZone(trimmed)
 
 ####################################################################################################
 # Parsing

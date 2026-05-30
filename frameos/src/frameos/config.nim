@@ -28,6 +28,7 @@ proc setConfigDefaults*(config: var FrameConfig) =
   if config.errorBehavior.silentWindowMinutes <= 0: config.errorBehavior.silentWindowMinutes = 10
   if config.errorBehavior.showErrorRetrySeconds <= 0: config.errorBehavior.showErrorRetrySeconds = 60
   if config.timeZone == "": config.timeZone = detectSystemTimeZone()
+  else: config.timeZone = canonicalTimeZone(config.timeZone)
 
 proc loadSchedule*(data: JsonNode): FrameSchedule =
   result = FrameSchedule(events: @[])
