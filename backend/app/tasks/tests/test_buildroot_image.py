@@ -57,6 +57,7 @@ def test_buildroot_firstboot_setup_uses_with_setup_command():
     assert "/srv/frameos/current/frameos setup --with-setup=\"$SETUP_FILE\"" in script
     assert "sudo -E /srv/frameos/current/frameos setup --with-setup=\"$SETUP_FILE\"" in script
     assert "LD_LIBRARY_PATH=/srv/frameos/current/drivers:/srv/frameos/current/scenes" in script
+    assert "mount -o remount,rw /" in script
     assert "frameos-setup-reset.log" in script
     assert "leaving $SETUP_FILE in place for retry" in script
     assert "--from-file" not in script

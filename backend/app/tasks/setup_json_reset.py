@@ -53,22 +53,40 @@ echo "Mounts:"
 findmnt /boot /srv/frameos 2>/dev/null || mount | grep -E ' /boot | /srv/frameos ' || true
 echo "Current release:"
 ls -la /srv/frameos /srv/frameos/current 2>/dev/null || true
+echo "Remounting root filesystem read-write"
+if mount -o remount,rw /; then
+  echo "Root filesystem is read-write"
+else
+  echo "Warning: failed to remount root filesystem read-write"
+fi
 
 if [ -f {shlex.quote(BOOT_HOSTNAME_FILE)} ]; then
   echo "Installing hostname from {shlex.quote(BOOT_HOSTNAME_FILE)}"
-  install -m 644 {shlex.quote(BOOT_HOSTNAME_FILE)} /etc/hostname
+  if ! install -m 644 {shlex.quote(BOOT_HOSTNAME_FILE)} /etc/hostname; then
+    echo "Warning: failed to install hostname"
+  fi
 fi
 
 if [ -f {shlex.quote(BOOT_WIFI_CONNECTION_FILE)} ]; then
   echo "Installing NetworkManager WiFi connection from {shlex.quote(BOOT_WIFI_CONNECTION_FILE)}"
-  install -d -m 755 /etc/NetworkManager/system-connections
-  install -m 600 {shlex.quote(BOOT_WIFI_CONNECTION_FILE)} /etc/NetworkManager/system-connections/frameos-wifi.nmconnection
+  if install -d -m 755 /etc/NetworkManager/system-connections; then
+    if ! install -m 600 {shlex.quote(BOOT_WIFI_CONNECTION_FILE)} /etc/NetworkManager/system-connections/frameos-wifi.nmconnection; then
+      echo "Warning: failed to install NetworkManager WiFi connection"
+    fi
+  else
+    echo "Warning: failed to create NetworkManager connection directory"
+  fi
 fi
 
 if [ -f {shlex.quote(BOOT_AUTHORIZED_KEYS_FILE)} ]; then
   echo "Installing authorized keys from {shlex.quote(BOOT_AUTHORIZED_KEYS_FILE)}"
-  install -d -m 700 /root/.ssh
-  install -m 600 {shlex.quote(BOOT_AUTHORIZED_KEYS_FILE)} /root/.ssh/authorized_keys
+  if install -d -m 700 /root/.ssh; then
+    if ! install -m 600 {shlex.quote(BOOT_AUTHORIZED_KEYS_FILE)} /root/.ssh/authorized_keys; then
+      echo "Warning: failed to install authorized keys"
+    fi
+  else
+    echo "Warning: failed to create /root/.ssh"
+  fi
 fi
 
 export FRAMEOS_HOME=/srv/frameos/current
