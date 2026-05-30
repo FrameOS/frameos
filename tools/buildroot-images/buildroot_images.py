@@ -224,6 +224,11 @@ def build(args: argparse.Namespace) -> None:
         )
         input_digest_path = output / ".frameos-base-inputs-sha256"
         clean_output = input_digest_path.read_text(encoding="utf-8").strip() != input_digest if input_digest_path.exists() else True
+        # If a previous clean rebuild was interrupted, there is no completed
+        # sdcard image to protect against. Let Buildroot resume instead of
+        # repeatedly deleting its partial output.
+        if clean_output and not (output / "images" / "sdcard.img").exists():
+            clean_output = False
         cmd = [
             "docker",
             "run",
