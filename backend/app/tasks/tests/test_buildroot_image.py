@@ -137,6 +137,7 @@ def test_buildroot_partition_scripts_create_frameos_and_assets_partitions(tmp_pa
     partition_post_build = partition_post_build_path.read_text(encoding="utf-8")
     post_image = post_image_path.read_text(encoding="utf-8")
 
+    assert "LABEL=BOOT /boot vfat" in partition_post_build
     assert "LABEL=FRAMEOS /srv/frameos ext4" in partition_post_build
     assert "LABEL=ASSETS /srv/assets vfat" in partition_post_build
     assert "frameos-partition-root" in partition_post_build

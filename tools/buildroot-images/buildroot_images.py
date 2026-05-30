@@ -179,6 +179,7 @@ def write_base_bootstrap_overlay(overlay: Path) -> None:
     (overlay / "etc" / "default").mkdir(parents=True, exist_ok=True)
     (overlay / "etc" / "default" / "dropbear").write_text('DROPBEAR_ARGS="-s -g"\n', encoding="utf-8")
     (overlay / "etc" / "fstab").write_text(
+        "LABEL=BOOT /boot vfat defaults,noatime,umask=000 0 0\n"
         "LABEL=FRAMEOS /srv/frameos ext4 defaults,noatime 0 2\n"
         "LABEL=ASSETS /srv/assets vfat defaults,noatime,umask=000 0 0\n",
         encoding="utf-8",

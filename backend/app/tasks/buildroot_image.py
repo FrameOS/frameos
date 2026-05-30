@@ -1513,6 +1513,7 @@ tmp_fstab="${fstab}.frameos"
 touch "$fstab"
 grep -vE '[[:space:]]/srv/(frameos|assets)[[:space:]]' "$fstab" > "$tmp_fstab" || true
 cat >> "$tmp_fstab" <<'EOF'
+LABEL=BOOT /boot vfat defaults,noatime,umask=000 0 0
 LABEL=FRAMEOS /srv/frameos ext4 defaults,noatime 0 2
 LABEL=ASSETS /srv/assets vfat defaults,noatime,umask=000 0 0
 EOF
