@@ -9,13 +9,10 @@ R2 bucket, and referenced by this manifest.
 
 ```bash
 # Build the reusable base image for the current FrameOS version.
-python tools/buildroot-images/buildroot_images.py build \
-  --platform raspberry-pi-zero-2-w
+python tools/buildroot-images/buildroot_images.py --platform raspberry-pi-zero-2-w build
 
 # Upload it to R2 and update buildroot-images/manifest.json in the bucket.
-python tools/buildroot-images/buildroot_images.py upload \
-  --platform raspberry-pi-zero-2-w \
-  --yes
+python tools/buildroot-images/buildroot_images.py --platform raspberry-pi-zero-2-w upload --yes
 
 # Refresh the checked-in local manifest from R2.
 python tools/buildroot-images/buildroot_images.py download --force

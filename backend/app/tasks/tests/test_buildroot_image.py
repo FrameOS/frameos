@@ -100,6 +100,10 @@ def test_kernel_config_fragment_disables_case_colliding_xtables_targets(tmp_path
     assert "# CONFIG_IP_NF_TARGET_ECN is not set" in fragment
     assert "# CONFIG_IP_NF_TARGET_TTL is not set" in fragment
     assert "# CONFIG_IP6_NF_TARGET_HL is not set" in fragment
+    assert "# CONFIG_CAN is not set" in fragment
+    assert "# CONFIG_DVB_CORE is not set" in fragment
+    assert "# CONFIG_SOUND is not set" in fragment
+    assert "# CONFIG_STAGING is not set" in fragment
 
 
 def test_buildroot_script_builds_output_on_container_filesystem(tmp_path):
