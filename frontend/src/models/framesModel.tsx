@@ -355,7 +355,7 @@ export const framesModel = kea<framesModelType>([
       const frame = values.frames[id]
       const sdImage = frame?.buildroot?.sdImage
       const downloadUrl = sdImage?.downloadUrl || `/api/frames/${id}/buildroot/sd_image/download`
-      const needsRegeneration = sdImage?.status === 'ready' && sdImage?.customizationVersion !== 4
+      const needsRegeneration = sdImage?.status === 'ready' && sdImage?.customizationVersion !== 5
 
       if (sdImage?.status === 'ready' && !needsRegeneration) {
         startBrowserDownload(downloadUrl)

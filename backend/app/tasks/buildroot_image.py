@@ -36,11 +36,9 @@ from app.tasks._frame_deployer import FrameDeployer
 from app.tasks.binary_builder import FrameBinaryBuilder, FrameBinaryBuildResult
 from app.tasks.deploy_agent import AgentDeployer
 from app.tasks.setup_json_reset import (
-    SETUP_JSON_RESET_SCRIPT_NAME,
-    SETUP_JSON_RESET_SCRIPT_PATH,
-    SETUP_JSON_RESET_SERVICE_NAME,
-    render_setup_json_reset_script,
-    render_setup_json_reset_service,
+    BOOT_AUTHORIZED_KEYS_FILE,
+    BOOT_HOSTNAME_FILE,
+    BOOT_WIFI_CONNECTION_FILE,
     setup_json_reset_enabled,
     setup_json_reset_file_path,
 )
@@ -55,7 +53,7 @@ SUPPORTED_BUILDROOT_PLATFORM = "raspberry-pi-zero-2-w"
 BUILDROOT_HOST_CXXFLAGS = "-O2 -pipe -std=gnu++17"
 BUILDROOT_HOST_CFLAGS = "-O2 -pipe"
 BUILDROOT_BOOTSTRAP_SCRIPT_VERSION = "4"
-BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION = 4
+BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION = 5
 BUILDROOT_FRAMEOS_PARTITION_SIZE = os.environ.get("FRAMEOS_BUILDROOT_FRAMEOS_PARTITION_SIZE", "512M")
 BUILDROOT_ASSETS_PARTITION_SIZE = os.environ.get("FRAMEOS_BUILDROOT_ASSETS_PARTITION_SIZE", "512M")
 BUILDROOT_ARCHIVE_BASE_URL = os.environ.get("FRAMEOS_ARCHIVE_BASE_URL", "https://archive.frameos.net/")
@@ -741,8 +739,6 @@ class BuildrootImageBuilder:
         root_overlay_dir = overlay_dir / "srv" / "frameos" / "bootstrap" / "root"
         boot_overlay_dir = overlay_dir / "boot"
         assets_dir = overlay_dir / "srv" / "assets"
-        systemd_dir = root_overlay_dir / "etc" / "systemd" / "system"
-        wants_dir = systemd_dir / "multi-user.target.wants"
 
         for directory in (
             release_dir,
@@ -750,9 +746,6 @@ class BuildrootImageBuilder:
             state_dir,
             assets_dir,
             boot_overlay_dir,
-            wants_dir,
-            root_overlay_dir / "srv" / "frameos",
-            root_overlay_dir / "srv" / "assets",
         ):
             directory.mkdir(parents=True, exist_ok=True)
 
@@ -820,44 +813,12 @@ class BuildrootImageBuilder:
         setup_reset_enabled = setup_json_reset_enabled(self.frame)
         if setup_reset_enabled:
             setup_file_path = setup_json_reset_file_path(self.frame, default_if_missing=True)
-            script_contents = render_setup_json_reset_script(setup_file_path)
-            service_contents = render_setup_json_reset_service(
-                setup_file_path,
-                script_path=SETUP_JSON_RESET_SCRIPT_PATH,
-            )
-            script_path = root_overlay_dir / "usr" / "local" / "bin" / SETUP_JSON_RESET_SCRIPT_NAME
-            script_path.parent.mkdir(parents=True, exist_ok=True)
-            script_path.write_text(script_contents, encoding="utf-8")
-            os.chmod(script_path, 0o755)
-            (systemd_dir / SETUP_JSON_RESET_SERVICE_NAME).write_text(service_contents, encoding="utf-8")
             self._write_setup_payload(_boot_setup_payload_path(boot_overlay_dir, setup_file_path), setup_payload)
 
-        services = [SETUP_JSON_RESET_SERVICE_NAME] if setup_reset_enabled else []
-        for service in services:
-            self._relative_symlink(f"../{service}", wants_dir / service)
-        self._relative_symlink("/usr/lib/systemd/system/NetworkManager.service", wants_dir / "NetworkManager.service")
-
-        (root_overlay_dir / "etc").mkdir(parents=True, exist_ok=True)
-        (root_overlay_dir / "etc" / "hostname").write_text(_hostname_for_frame(self.frame) + "\n", encoding="utf-8")
-        (root_overlay_dir / "etc" / "fstab").write_text(
-            "LABEL=FRAMEOS /srv/frameos ext4 defaults,noatime 0 2\n"
-            "LABEL=ASSETS /srv/assets vfat defaults,noatime,umask=000 0 0\n",
-            encoding="utf-8",
-        )
-        (root_overlay_dir / "etc" / "profile.d").mkdir(parents=True, exist_ok=True)
-        (root_overlay_dir / "etc" / "profile.d" / "frameos.sh").write_text(
-            "export FRAMEOS_HOME=/srv/frameos/current\n",
-            encoding="utf-8",
-        )
-        network_manager = root_overlay_dir / "etc" / "NetworkManager" / "conf.d"
-        network_manager.mkdir(parents=True, exist_ok=True)
-        (network_manager / "frameos.conf").write_text(
-            "[main]\nplugins=keyfile\n\n[device]\nwifi.scan-rand-mac-address=no\n",
-            encoding="utf-8",
-        )
-        self._write_wifi_connection(root_overlay_dir / "etc" / "NetworkManager" / "system-connections")
+        (boot_overlay_dir / Path(BOOT_HOSTNAME_FILE).name).write_text(_hostname_for_frame(self.frame) + "\n", encoding="utf-8")
+        self._write_boot_wifi_connection(boot_overlay_dir / Path(BOOT_WIFI_CONNECTION_FILE).name)
         self._write_boot_config(overlay_dir, _frame_boot_config_lines(bootstrap_frame))
-        self._write_authorized_keys(root_overlay_dir, wants_dir)
+        self._write_boot_authorized_keys(boot_overlay_dir / Path(BOOT_AUTHORIZED_KEYS_FILE).name)
 
     @staticmethod
     def _copy_libraries(paths: list[str], destination: Path) -> None:
@@ -910,7 +871,7 @@ class BuildrootImageBuilder:
     def _frame_requires_lgpio(self) -> bool:
         return any("-llgpio" in driver.link_flags for driver in drivers_for_frame(self.frame).values())
 
-    def _write_authorized_keys(self, overlay_dir: Path, wants_dir: Path) -> None:
+    def _write_boot_authorized_keys(self, authorized_keys: Path) -> None:
         settings = get_settings_dict(self.db)
         selected_keys = select_ssh_keys_for_frame(self.frame, settings)
         public_keys = [
@@ -920,23 +881,13 @@ class BuildrootImageBuilder:
         ]
         if not public_keys:
             return
-
-        ssh_dir = overlay_dir / "root" / ".ssh"
-        ssh_dir.mkdir(parents=True, exist_ok=True)
-        os.chmod(ssh_dir, 0o700)
-        authorized_keys = ssh_dir / "authorized_keys"
+        authorized_keys.parent.mkdir(parents=True, exist_ok=True)
         authorized_keys.write_text("\n".join(dict.fromkeys(public_keys)) + "\n", encoding="utf-8")
         os.chmod(authorized_keys, 0o600)
 
-        defaults_dir = overlay_dir / "etc" / "default"
-        defaults_dir.mkdir(parents=True, exist_ok=True)
-        (defaults_dir / "dropbear").write_text('DROPBEAR_ARGS="-s -g"\n', encoding="utf-8")
-        self._relative_symlink("/usr/lib/systemd/system/dropbear.service", wants_dir / "dropbear.service")
-
-    def _write_wifi_connection(self, connections_dir: Path) -> None:
+    def _write_boot_wifi_connection(self, path: Path) -> None:
         ssid, password = validate_buildroot_wifi_credentials(self.frame)
-        connections_dir.mkdir(parents=True, exist_ok=True)
-        path = connections_dir / "frameos-wifi.nmconnection"
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(_network_manager_wifi_connection(ssid, password), encoding="utf-8")
         os.chmod(path, 0o600)
 
@@ -1211,7 +1162,6 @@ chmod a+r /artifacts/{shlex.quote(output_filename)}
         frameos_root = roots_dir / "frameos"
         assets_root = roots_dir / "assets"
         boot_root = roots_dir / "boot"
-        rootfs_overlay = temp_dir / "overlay" / "srv" / "frameos" / "bootstrap" / "root"
         shutil.copytree(temp_dir / "overlay" / "srv" / "frameos", frameos_root, symlinks=True)
         shutil.copytree(temp_dir / "overlay" / "srv" / "assets", assets_root, symlinks=True)
         shutil.copytree(temp_dir / "overlay" / "boot", boot_root, symlinks=True)
@@ -1278,108 +1228,9 @@ genimage --rootpath /work/empty-root --tmppath /work/tmp --inputpath /work/image
 
         shutil.copy2(base_image_path, output_path)
         partitions = _mbr_partitions(output_path)
-        await self._patch_rootfs_partition(output_path, partitions, rootfs_overlay, images_dir)
         _replace_partition(output_path, partitions, 3, images_dir / "frameos.ext4")
         _replace_partition(output_path, partitions, 4, images_dir / "assets.vfat")
         await self._patch_boot_partition(output_path, partitions, boot_root)
-
-    async def _patch_rootfs_partition(
-        self,
-        output_path: Path,
-        partitions: list[dict[str, int]],
-        rootfs_overlay: Path,
-        images_dir: Path,
-    ) -> None:
-        if len(partitions) < 2:
-            raise RuntimeError("Cannot patch rootfs partition; SD image has fewer than two partitions")
-
-        partition = partitions[1]
-        if partition["start"] % 512 != 0 or partition["size"] % 512 != 0:
-            raise RuntimeError("Cannot patch rootfs partition; partition is not sector aligned")
-
-        compose_dir = images_dir.parent
-        script_path = compose_dir / "patch-rootfs.sh"
-        rootfs_image = images_dir / "rootfs.ext4"
-        script_path.write_text(
-            f"""#!/usr/bin/env bash
-set -euo pipefail
-export DEBIAN_FRONTEND=noninteractive
-apt-get update
-apt-get install -y --no-install-recommends e2fsprogs python3
-disk=/image/{shlex.quote(output_path.name)}
-rootfs=/work/images/rootfs.ext4
-dd if="$disk" of="$rootfs" bs=512 skip={partition["start"] // 512} count={partition["size"] // 512} status=none
-cat > /work/debugfs-overlay.py <<'PY'
-import os
-import stat
-from pathlib import Path
-
-overlay = Path("/rootfs-overlay")
-commands = []
-
-def q(value):
-    return '"' + str(value).replace('\\\\', '\\\\\\\\').replace('"', '\\\\"') + '"'
-
-for root, dirs, files in os.walk(overlay):
-    root_path = Path(root)
-    for name in sorted(dirs):
-        source = root_path / name
-        rel = "/" + source.relative_to(overlay).as_posix()
-        if source.is_symlink():
-            continue
-        commands.append("mkdir " + q(rel))
-
-for root, dirs, files in os.walk(overlay):
-    root_path = Path(root)
-    entries = sorted(list(dirs) + list(files))
-    for name in entries:
-        source = root_path / name
-        rel = "/" + source.relative_to(overlay).as_posix()
-        st = os.lstat(source)
-        mode = stat.S_IMODE(st.st_mode)
-        if stat.S_ISDIR(st.st_mode) and not source.is_symlink():
-            commands.append("set_inode_field " + q(rel) + " mode " + oct(stat.S_IFDIR | mode))
-            commands.append("set_inode_field " + q(rel) + " uid 0")
-            commands.append("set_inode_field " + q(rel) + " gid 0")
-        elif stat.S_ISLNK(st.st_mode):
-            commands.append("rm " + q(rel))
-            commands.append("symlink " + q(rel) + " " + q(os.readlink(source)))
-        elif stat.S_ISREG(st.st_mode):
-            commands.append("rm " + q(rel))
-            commands.append("write " + q(source) + " " + q(rel))
-            commands.append("set_inode_field " + q(rel) + " mode " + oct(stat.S_IFREG | mode))
-            commands.append("set_inode_field " + q(rel) + " uid 0")
-            commands.append("set_inode_field " + q(rel) + " gid 0")
-
-Path("/work/debugfs.cmd").write_text("\\n".join(commands) + "\\n", encoding="utf-8")
-PY
-python3 /work/debugfs-overlay.py
-debugfs -w -f /work/debugfs.cmd "$rootfs"
-""",
-            encoding="utf-8",
-        )
-        os.chmod(script_path, 0o755)
-
-        docker_cmd = " ".join(
-            [
-                "docker run --rm",
-                f"-v {shlex.quote(str(output_path.parent))}:/image",
-                f"-v {shlex.quote(str(images_dir.parent))}:/work",
-                f"-v {shlex.quote(str(rootfs_overlay))}:/rootfs-overlay",
-                shlex.quote(BUILDROOT_DOCKER_IMAGE),
-                "bash /work/patch-rootfs.sh",
-            ]
-        )
-        status, _, err = await exec_local_command(
-            self.db,
-            self.redis,
-            self.frame,
-            docker_cmd,
-            log_command="docker run (buildroot rootfs partition patch)",
-        )
-        if status != 0:
-            raise RuntimeError(f"Buildroot rootfs partition patch failed: {err or 'see logs'}")
-        _replace_partition(output_path, partitions, 2, rootfs_image)
 
     async def _patch_boot_partition(
         self,

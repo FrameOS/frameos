@@ -208,10 +208,6 @@ async def test_cached_base_composer_uses_container_visible_srcpaths(tmp_path, mo
             images_dir = temp_dir / "compose" / "images"
             (images_dir / "frameos.ext4").write_bytes(b"frameos")
             (images_dir / "assets.vfat").write_bytes(b"assets")
-        if "patch-rootfs.sh" in command:
-            captured["rootfs_patch_command"] = command
-            captured["rootfs_patch_script"] = (temp_dir / "compose" / "patch-rootfs.sh").read_text(encoding="utf-8")
-            (temp_dir / "compose" / "images" / "rootfs.ext4").write_bytes(b"root")
         if "patch-boot.sh" in command:
             captured["patch_command"] = command
             captured["patch_script"] = (temp_dir / "compose" / "patch-boot.sh").read_text(encoding="utf-8")
@@ -249,20 +245,17 @@ async def test_cached_base_composer_uses_container_visible_srcpaths(tmp_path, mo
     assert 'label = "BOOT"' not in captured["config"]
     assert str(temp_dir) not in captured["config"]
     assert "bash /work/compose-partitions.sh" in captured["compose_command"]
-    assert "bash /work/patch-rootfs.sh" in captured["rootfs_patch_command"]
     assert "bash /patch-boot.sh" in captured["patch_command"]
     assert "tar -C /work/roots -cf - frameos assets | tar -C /tmp/frameos-compose-roots -xf -" in (
         temp_dir / "compose" / "compose-partitions.sh"
     ).read_text(encoding="utf-8")
-    assert 'dd if="$disk" of="$rootfs" bs=512 skip=65537 count=1572864 status=none' in captured["rootfs_patch_script"]
-    assert "debugfs -w -f /work/debugfs.cmd" in captured["rootfs_patch_script"]
     assert "mlabel -i \"$target\" ::BOOT" in captured["patch_script"]
     assert "mcopy -i \"$target\" -o -s" in captured["patch_script"]
     assert "offset=512" in captured["patch_script"]
     assert (temp_dir / "compose" / "roots" / "assets" / "frameos-assets-placeholder").is_file()
     assert output_image.read_bytes() == b"base"
-    assert replaced == [(2, "rootfs.ext4"), (3, "frameos.ext4"), (4, "assets.vfat")]
-    assert len(commands) == 3
+    assert replaced == [(3, "frameos.ext4"), (4, "assets.vfat")]
+    assert len(commands) == 2
 
 
 def test_buildroot_service_writes_console_output_and_environment(tmp_path):
@@ -328,10 +321,8 @@ def test_buildroot_output_cache_key_tracks_bootstrap_inputs(tmp_path, monkeypatc
     assert key_base != key_modified
 
 
-def test_buildroot_authorized_keys_enable_dropbear(tmp_path, monkeypatch):
-    overlay_dir = tmp_path / "overlay"
-    wants_dir = overlay_dir / "etc" / "systemd" / "system" / "multi-user.target.wants"
-    wants_dir.mkdir(parents=True)
+def test_buildroot_writes_authorized_keys_to_boot_overlay(tmp_path, monkeypatch):
+    authorized_keys = tmp_path / "boot" / "frameos-authorized_keys"
     builder = BuildrootImageBuilder(
         db=object(),
         redis=None,
@@ -350,15 +341,12 @@ def test_buildroot_authorized_keys_enable_dropbear(tmp_path, monkeypatch):
         },
     )
 
-    builder._write_authorized_keys(overlay_dir, wants_dir)
+    builder._write_boot_authorized_keys(authorized_keys)
 
-    assert (overlay_dir / "root" / ".ssh" / "authorized_keys").read_text(encoding="utf-8") == (
+    assert authorized_keys.read_text(encoding="utf-8") == (
         "ssh-ed25519 AAA-main frameos\n"
     )
-    assert (overlay_dir / "etc" / "default" / "dropbear").read_text(encoding="utf-8") == (
-        'DROPBEAR_ARGS="-s -g"\n'
-    )
-    assert (wants_dir / "dropbear.service").readlink().as_posix() == "/usr/lib/systemd/system/dropbear.service"
+    assert oct(authorized_keys.stat().st_mode & 0o777) == "0o600"
 
 
 def test_buildroot_copies_lgpio_runtime_libraries_when_required(tmp_path, monkeypatch):

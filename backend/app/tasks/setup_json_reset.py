@@ -10,6 +10,9 @@ SETUP_JSON_RESET_SERVICE_NAME = "frameos-firstboot-setup.service"
 SETUP_JSON_RESET_SCRIPT_NAME = "frameos-setup-reset.sh"
 SETUP_JSON_RESET_SERVICE_PATH = f"/etc/systemd/system/{SETUP_JSON_RESET_SERVICE_NAME}"
 SETUP_JSON_RESET_SCRIPT_PATH = f"/usr/local/bin/{SETUP_JSON_RESET_SCRIPT_NAME}"
+BOOT_WIFI_CONNECTION_FILE = "/boot/frameos-wifi.nmconnection"
+BOOT_HOSTNAME_FILE = "/boot/frameos-hostname"
+BOOT_AUTHORIZED_KEYS_FILE = "/boot/frameos-authorized_keys"
 
 
 def setup_json_reset_file_path(frame: Frame | Any, *, default_if_missing: bool = False) -> str:
@@ -37,6 +40,20 @@ SETUP_FILE={quoted_setup_file_path}
 
 if [ ! -f "$SETUP_FILE" ]; then
   exit 0
+fi
+
+if [ -f {shlex.quote(BOOT_HOSTNAME_FILE)} ]; then
+  install -m 644 {shlex.quote(BOOT_HOSTNAME_FILE)} /etc/hostname
+fi
+
+if [ -f {shlex.quote(BOOT_WIFI_CONNECTION_FILE)} ]; then
+  install -d -m 755 /etc/NetworkManager/system-connections
+  install -m 600 {shlex.quote(BOOT_WIFI_CONNECTION_FILE)} /etc/NetworkManager/system-connections/frameos-wifi.nmconnection
+fi
+
+if [ -f {shlex.quote(BOOT_AUTHORIZED_KEYS_FILE)} ]; then
+  install -d -m 700 /root/.ssh
+  install -m 600 {shlex.quote(BOOT_AUTHORIZED_KEYS_FILE)} /root/.ssh/authorized_keys
 fi
 
 setup_status=0

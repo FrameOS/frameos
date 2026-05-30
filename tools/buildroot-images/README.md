@@ -1,7 +1,7 @@
 # Buildroot Base Images
 
 FrameOS Buildroot SD images are assembled from a cached base image plus current
-per-frame BOOT, rootfs, FRAMEOS, and ASSETS partition images. The slow Buildroot
+per-frame BOOT payloads, FRAMEOS, and ASSETS partition images. The slow Buildroot
 base image is built manually in CI or locally, uploaded to the `frameos-archive`
 R2 bucket, and referenced by this manifest.
 
@@ -38,12 +38,14 @@ export R2_BUCKET=frameos-archive
 The web UI no longer runs Buildroot. When a Buildroot frame requests an SD card
 image, the backend builds the FrameOS binary and agent, downloads the matching
 cached base image from `https://archive.frameos.net/buildroot-images/manifest.json`,
-then replaces the BOOT, rootfs, `FRAMEOS`, and `ASSETS` partitions.
+then patches the BOOT partition with per-frame setup files and replaces only the
+`FRAMEOS` and `ASSETS` partitions.
 
-The generated rootfs contains only first-boot setup plumbing and mount
-configuration. The setup payload is written to the BOOT partition as
-`frameos-setup.json`, and the first-boot setup service runs
-`/srv/frameos/current/frameos setup --with-setup=/boot/frameos-setup.json`.
+The base rootfs contains first-boot setup plumbing and mount configuration. The
+setup payload is written to the BOOT partition as `frameos-setup.json`, and the
+first-boot setup service runs
+`/srv/frameos/current/frameos setup --with-setup=/boot/frameos-setup.json`. Other
+per-frame boot files include WiFi credentials, hostname, and authorized SSH keys.
 
 Add future hardware targets by adding a platform alias/target in
 `backend/app/tasks/buildroot_image.py`, extending the CLI defaults, then building

@@ -36,6 +36,12 @@ from app.tasks.buildroot_image import (  # noqa: E402
     SUPPORTED_BUILDROOT_PLATFORM,
     _mbr_partitions,
 )
+from app.tasks.setup_json_reset import (  # noqa: E402
+    SETUP_JSON_RESET_SCRIPT_PATH,
+    SETUP_JSON_RESET_SERVICE_NAME,
+    render_setup_json_reset_script,
+    render_setup_json_reset_service,
+)
 
 BUILD_DIR = REPO_ROOT / "build" / "buildroot-images"
 LOCAL_MANIFEST_PATH = REPO_ROOT / "tools" / "buildroot-images" / "manifest.json"
@@ -122,40 +128,18 @@ def write_base_bootstrap_overlay(overlay: Path) -> None:
     systemd = overlay / "etc" / "systemd" / "system"
     wants = systemd / "multi-user.target.wants"
     wants.mkdir(parents=True, exist_ok=True)
-    BuildrootImageBuilder._write_service(
-        REPO_ROOT / "frameos" / "frameos.service",
-        systemd / "frameos.service",
-        user="root",
-        console_output=True,
-        environment={
-            "FRAMEOS_HOME": "/srv/frameos/current",
-            "LD_LIBRARY_PATH": "/srv/frameos/current/drivers:/srv/frameos/current/scenes:/usr/lib:/usr/local/lib",
-        },
-    )
-    BuildrootImageBuilder._write_service(
-        REPO_ROOT / "frameos" / "agent" / "frameos_agent.service",
-        systemd / "frameos_agent.service",
-        user="root",
-        console_output=True,
-        environment={"FRAMEOS_HOME": "/srv/frameos/current", "LD_LIBRARY_PATH": "/usr/lib:/usr/local/lib"},
-    )
-    bootstrap = systemd / "frameos-root-bootstrap.service"
-    bootstrap.write_text(
-        """[Unit]
-Description=Apply FrameOS root bootstrap files
-DefaultDependencies=no
-Before=NetworkManager.service frameos.service frameos_agent.service
-
-[Service]
-Type=oneshot
-ExecStart=/bin/sh -c 'if [ -d /srv/frameos/bootstrap/root ]; then cp -a /srv/frameos/bootstrap/root/. /; fi'
-
-[Install]
-WantedBy=multi-user.target
-""",
+    script_path = overlay / SETUP_JSON_RESET_SCRIPT_PATH.lstrip("/")
+    script_path.parent.mkdir(parents=True, exist_ok=True)
+    script_path.write_text(render_setup_json_reset_script("/boot/frameos-setup.json"), encoding="utf-8")
+    os.chmod(script_path, 0o755)
+    (systemd / SETUP_JSON_RESET_SERVICE_NAME).write_text(
+        render_setup_json_reset_service(
+            "/boot/frameos-setup.json",
+            script_path=SETUP_JSON_RESET_SCRIPT_PATH,
+        ),
         encoding="utf-8",
     )
-    for service in ("frameos-root-bootstrap.service", "frameos.service", "frameos_agent.service"):
+    for service in (SETUP_JSON_RESET_SERVICE_NAME,):
         link = wants / service
         if link.exists() or link.is_symlink():
             link.unlink()
@@ -172,6 +156,18 @@ WantedBy=multi-user.target
     )
     (overlay / "etc" / "default").mkdir(parents=True, exist_ok=True)
     (overlay / "etc" / "default" / "dropbear").write_text('DROPBEAR_ARGS="-s -g"\n', encoding="utf-8")
+    (overlay / "etc" / "fstab").write_text(
+        "LABEL=FRAMEOS /srv/frameos ext4 defaults,noatime 0 2\n"
+        "LABEL=ASSETS /srv/assets vfat defaults,noatime,umask=000 0 0\n",
+        encoding="utf-8",
+    )
+    (overlay / "etc" / "profile.d").mkdir(parents=True, exist_ok=True)
+    (overlay / "etc" / "profile.d" / "frameos.sh").write_text(
+        "export FRAMEOS_HOME=/srv/frameos/current\n",
+        encoding="utf-8",
+    )
+    (overlay / "srv" / "frameos").mkdir(parents=True, exist_ok=True)
+    (overlay / "srv" / "assets").mkdir(parents=True, exist_ok=True)
 
 
 def build(args: argparse.Namespace) -> None:

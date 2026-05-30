@@ -815,7 +815,7 @@ async def test_api_frame_buildroot_sd_image_post_returns_ready_image(async_clien
             'filename': 'frameos-test.img',
             'path': str(image_path),
             'downloadUrl': f'/api/frames/{frame.id}/buildroot/sd_image/download',
-            'customizationVersion': 4,
+            'customizationVersion': 5,
         },
     }
     db.add(frame)
@@ -992,7 +992,7 @@ async def test_api_frame_buildroot_sd_image_download(async_client, db, redis, tm
             'status': 'ready',
             'filename': 'frameos-test.img',
             'path': str(image_path),
-            'customizationVersion': 4,
+            'customizationVersion': 5,
         },
     }
     db.add(frame)

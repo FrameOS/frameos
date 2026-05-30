@@ -4,7 +4,7 @@
       "assets_partition_size": "512M",
       "buildroot_apt_deps": "bc bison build-essential ca-certificates cpio curl file flex g++ gfortran git libncurses-dev libssl-dev make perl python3 rsync unzip wget xdg-utils xz-utils",
       "buildroot_version": "2025.02.13",
-      "created_at": "2026-05-29T23:08:33.747725+00:00",
+      "created_at": "2026-05-30T00:13:31.261271+00:00",
       "defconfig": "raspberrypizero2w_64_defconfig",
       "docker_image": "debian:bookworm",
       "frameos_partition_size": "512M",
@@ -31,7 +31,7 @@
       "platform": "raspberry-pi-zero-2-w",
       "sha256": "3e67142b109e342b6f8e166dad88ff6124fa39a0aef2cdb2e2dde7ba4ee0d6c9",
       "size": 1912603136,
-      "updated_at": "2026-05-29T23:09:08.168685+00:00"
+      "updated_at": "2026-05-30T00:17:53.018092+00:00"
     }
   ]
 }
