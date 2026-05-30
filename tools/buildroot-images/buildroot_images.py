@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -197,6 +198,7 @@ def build(args: argparse.Namespace) -> None:
     out_dir = local_dir(args.platform)
     out_dir.mkdir(parents=True, exist_ok=True)
     image_path = out_dir / "base.img"
+    image_path.unlink(missing_ok=True)
     with tempfile.TemporaryDirectory(prefix="frameos-buildroot-base-") as tmp:
         tmp_path = Path(tmp)
         overlay = tmp_path / "overlay"
@@ -207,54 +209,29 @@ def build(args: argparse.Namespace) -> None:
         BuildrootImageBuilder._write_partition_post_build_script(tmp_path / "partition-post-build.sh")
         BuildrootImageBuilder._write_post_image_script(tmp_path / "post-image.sh")
         BuildrootImageBuilder._write_build_script(tmp_path / "buildroot-build.sh", "base.img")
-        cache = BUILD_DIR / ".cache"
-        source = cache / f"buildroot-{BUILDROOT_VERSION}"
-        output = out_dir / "output"
-        for path in (cache, source, output):
-            path.mkdir(parents=True, exist_ok=True)
-        input_digest = build_inputs_digest(
+        container_name = f"frameos-buildroot-base-{uuid.uuid4().hex[:12]}"
+        container_id = subprocess.check_output(
             [
-                overlay,
-                tmp_path / "frameos-buildroot.config",
-                tmp_path / "linux-fragment.config",
-                tmp_path / "post-build.sh",
-                tmp_path / "partition-post-build.sh",
-                tmp_path / "post-image.sh",
-                tmp_path / "buildroot-build.sh",
-            ]
-        )
-        input_digest_path = output / ".frameos-base-inputs-sha256"
-        clean_output = input_digest_path.read_text(encoding="utf-8").strip() != input_digest if input_digest_path.exists() else True
-        # If a previous clean rebuild was interrupted, there is no completed
-        # sdcard image to protect against. Let Buildroot resume instead of
-        # repeatedly deleting its partial output.
-        if clean_output and not (output / "images" / "sdcard.img").exists():
-            clean_output = False
-        cmd = [
-            "docker",
-            "run",
-            "--rm",
-            "--ulimit",
-            f"nofile={BUILDROOT_DOCKER_NOFILE_LIMIT}:{BUILDROOT_DOCKER_NOFILE_LIMIT}",
-            "-v",
-            f"{tmp_path}:/work",
-            "-v",
-            f"{source}:/build/buildroot",
-            "-v",
-            f"{output}:/build/output",
-            "-v",
-            f"{cache}:/cache",
-            "-v",
-            f"{out_dir}:/artifacts",
-            "-e",
-            "FORCE_UNSAFE_CONFIGURE=1",
-            *(["-e", "FRAMEOS_BUILDROOT_CLEAN=1"] if clean_output else []),
-            BUILDROOT_DOCKER_IMAGE,
-            "bash",
-            "/work/buildroot-build.sh",
-        ]
-        subprocess.run(cmd, check=True)
-        input_digest_path.write_text(input_digest + "\n", encoding="utf-8")
+                "docker",
+                "create",
+                "--name",
+                container_name,
+                "--ulimit",
+                f"nofile={BUILDROOT_DOCKER_NOFILE_LIMIT}:{BUILDROOT_DOCKER_NOFILE_LIMIT}",
+                "-e",
+                "FORCE_UNSAFE_CONFIGURE=1",
+                BUILDROOT_DOCKER_IMAGE,
+                "bash",
+                "/work/buildroot-build.sh",
+            ],
+            text=True,
+        ).strip()
+        try:
+            subprocess.run(["docker", "cp", f"{tmp_path}/.", f"{container_id}:/work"], check=True)
+            subprocess.run(["docker", "start", "--attach", container_id], check=True)
+            subprocess.run(["docker", "cp", f"{container_id}:/artifacts/base.img", str(image_path)], check=True)
+        finally:
+            subprocess.run(["docker", "rm", "--force", container_id], check=False)
     metadata = {
         "platform": args.platform,
         "frameos_version": frameos_version(),
@@ -306,18 +283,15 @@ def upload(args: argparse.Namespace) -> None:
         try:
             client.head_object(Bucket=args.bucket, Key=object_key)
             print(f"Remote already has s3://{args.bucket}/{object_key}")
+            return
         except ClientError as exc:
             if exc.response["Error"].get("Code") not in {"404", "NoSuchKey"}:
                 raise
-    with tempfile.NamedTemporaryFile(suffix=".img.gz", delete=False) as tmp:
-        archive_path = Path(tmp.name)
-    try:
-        with image_path.open("rb") as source, archive_path.open("wb") as raw:
-            with gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as output:
-                shutil.copyfileobj(source, output)
-        client.upload_file(str(archive_path), args.bucket, object_key, ExtraArgs={"ContentType": "application/gzip"})
-    finally:
-        archive_path.unlink(missing_ok=True)
+    archive_path = out_dir / archive_name
+    with image_path.open("rb") as source, archive_path.open("wb") as raw:
+        with gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as output:
+            shutil.copyfileobj(source, output)
+    client.upload_file(str(archive_path), args.bucket, object_key, ExtraArgs={"ContentType": "application/gzip"})
     manifest = load_manifest(client, args.bucket, args.manifest_key)
     entry = {**metadata, "object_key": object_key, "updated_at": datetime.now(timezone.utc).isoformat()}
     manifest["entries"] = [

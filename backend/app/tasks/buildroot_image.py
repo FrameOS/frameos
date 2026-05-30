@@ -52,8 +52,9 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 SUPPORTED_BUILDROOT_PLATFORM = "raspberry-pi-zero-2-w"
 BUILDROOT_HOST_CXXFLAGS = "-O2 -pipe -std=gnu++17"
 BUILDROOT_HOST_CFLAGS = "-O2 -pipe"
+BUILDROOT_JLEVEL = int(os.environ.get("FRAMEOS_BUILDROOT_JLEVEL", "0"))
 BUILDROOT_BOOTSTRAP_SCRIPT_VERSION = "4"
-BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION = 6
+BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION = 8
 BUILDROOT_FRAMEOS_PARTITION_SIZE = os.environ.get("FRAMEOS_BUILDROOT_FRAMEOS_PARTITION_SIZE", "512M")
 BUILDROOT_ASSETS_PARTITION_SIZE = os.environ.get("FRAMEOS_BUILDROOT_ASSETS_PARTITION_SIZE", "512M")
 BUILDROOT_ARCHIVE_BASE_URL = os.environ.get("FRAMEOS_ARCHIVE_BASE_URL", "https://archive.frameos.net/")
@@ -888,18 +889,13 @@ class BuildrootImageBuilder:
         destination.write_text("\n".join(rendered_lines) + "\n", encoding="utf-8")
 
     def _copy_runtime_libraries(self, overlay_dir: Path) -> None:
-        if not self._frame_requires_lgpio():
-            return
         runtime_libraries = _lgpio_runtime_library_paths()
         if not runtime_libraries:
-            return
+            raise RuntimeError("Buildroot image requires lgpio runtime libraries, but none were found in the cross sysroot")
         destination = overlay_dir / "usr" / "lib"
         destination.mkdir(parents=True, exist_ok=True)
         for library in runtime_libraries:
             shutil.copy2(library, destination / library.name)
-
-    def _frame_requires_lgpio(self) -> bool:
-        return any("-llgpio" in driver.link_flags for driver in drivers_for_frame(self.frame).values())
 
     def _write_boot_authorized_keys(self, authorized_keys: Path) -> None:
         settings = get_settings_dict(self.db)
@@ -940,7 +936,7 @@ class BuildrootImageBuilder:
                     "BR2_TARGET_GENERIC_HOSTNAME=\"frameos\"",
                     "BR2_TARGET_GENERIC_ISSUE=\"Welcome to FrameOS\"",
                     "BR2_TARGET_ROOTFS_EXT2_SIZE=\"768M\"",
-                    "BR2_JLEVEL=2",
+                    f"BR2_JLEVEL={BUILDROOT_JLEVEL}",
                     'BR2_DL_DIR="/cache/dl"',
                     'BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES="/work/linux-fragment.config"',
                     "BR2_PACKAGE_SYSTEMD=y",
@@ -949,6 +945,7 @@ class BuildrootImageBuilder:
                     "BR2_PACKAGE_DROPBEAR=y",
                     "BR2_PACKAGE_SUDO=y",
                     "BR2_PACKAGE_CA_CERTIFICATES=y",
+                    "BR2_PACKAGE_TZDATA=y",
                     "BR2_PACKAGE_COREUTILS=y",
                     "BR2_PACKAGE_FINDUTILS=y",
                     "BR2_PACKAGE_GZIP=y",
@@ -1153,6 +1150,27 @@ define FRAMEOS_NCURSES_TERMINFO_LINKS
 endef
 NCURSES_POST_INSTALL_STAGING_HOOKS += FRAMEOS_NCURSES_TERMINFO_LINKS
 EOF
+fi
+cmake_mk="/build/buildroot/package/cmake/cmake.mk"
+if [ -f "$cmake_mk" ] && ! grep -q "FRAMEOS_CMAKE_CLOCK_SKEW_FEATURE_CACHE" "$cmake_mk"; then
+  python3 - "$cmake_mk" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+marker = "# FRAMEOS_CMAKE_CLOCK_SKEW_FEATURE_CACHE\\n"
+needle = "\\t\\t\\t-DBUILD_CursesDialog=OFF \\\\\\n"
+replacement = (
+    "\\t\\t\\t-DBUILD_CursesDialog=OFF \\\\\\n"
+    "\\t\\t\\t-DCMake_HAVE_CXX_MAKE_UNIQUE:INTERNAL=ON \\\\\\n"
+    "\\t\\t\\t-DCMake_HAVE_CXX_UNIQUE_PTR:INTERNAL=ON \\\\\\n"
+    "\\t\\t\\t-DCMake_HAVE_CXX_FILESYSTEM:INTERNAL=ON \\\\\\n"
+)
+if needle not in text:
+    raise SystemExit("Could not patch host-cmake feature cache in %s" % path)
+path.write_text(text.replace(needle, replacement, 1) + marker)
+PY
 fi
 if [ "${{FRAMEOS_BUILDROOT_CLEAN:-0}}" = "1" ] && [ -f /build/output/Makefile ]; then
   make -C /build/buildroot O=/build/output clean

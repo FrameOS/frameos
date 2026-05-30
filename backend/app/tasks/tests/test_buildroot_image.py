@@ -72,10 +72,11 @@ def test_buildroot_config_avoids_ncurses_selecting_packages(tmp_path):
     assert "BR2_PACKAGE_BASH" not in config
     assert "BR2_PACKAGE_PROCPS_NG" not in config
     assert 'BR2_DL_DIR="/cache/dl"' in config
-    assert "BR2_JLEVEL=2" in config
+    assert "BR2_JLEVEL=0" in config
     assert 'BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES="/work/linux-fragment.config"' in config
     assert "BR2_PACKAGE_DROPBEAR=y" in config
     assert "BR2_PACKAGE_DBUS=y" in config
+    assert "BR2_PACKAGE_TZDATA=y" in config
     assert "BR2_PACKAGE_NETWORK_MANAGER=y" in config
     assert "BR2_PACKAGE_NETWORK_MANAGER_WIFI=y" in config
     assert "BR2_PACKAGE_WPA_SUPPLICANT=y" in config
@@ -419,7 +420,7 @@ def test_buildroot_stage_overlay_leaves_service_install_to_firstboot(tmp_path, m
     assert not (overlay_dir / "etc" / "systemd" / "system" / "frameos_agent.service").exists()
 
 
-def test_buildroot_copies_lgpio_runtime_libraries_when_required(tmp_path, monkeypatch):
+def test_buildroot_copies_lgpio_runtime_libraries(tmp_path, monkeypatch):
     liblgpio = tmp_path / "liblgpio.so.1"
     librgpio = tmp_path / "librgpio.so.1"
     liblgpio.write_bytes(b"lgpio")
@@ -431,15 +432,23 @@ def test_buildroot_copies_lgpio_runtime_libraries_when_required(tmp_path, monkey
     )
 
     monkeypatch.setattr("app.tasks.buildroot_image._lgpio_runtime_library_paths", lambda: [liblgpio, librgpio])
-    monkeypatch.setattr(
-        "app.tasks.buildroot_image.drivers_for_frame",
-        lambda _frame: {"waveshare": SimpleNamespace(link_flags=("-llgpio",))},
-    )
-
     builder._copy_runtime_libraries(tmp_path / "overlay")
 
     assert (tmp_path / "overlay" / "usr" / "lib" / "liblgpio.so.1").read_bytes() == b"lgpio"
     assert (tmp_path / "overlay" / "usr" / "lib" / "librgpio.so.1").read_bytes() == b"rgpio"
+
+
+def test_buildroot_requires_lgpio_runtime_libraries(tmp_path, monkeypatch):
+    builder = BuildrootImageBuilder(
+        db=None,
+        redis=None,
+        frame=SimpleNamespace(id=1),
+    )
+
+    monkeypatch.setattr("app.tasks.buildroot_image._lgpio_runtime_library_paths", lambda: [])
+
+    with pytest.raises(RuntimeError, match="requires lgpio runtime libraries"):
+        builder._copy_runtime_libraries(tmp_path / "overlay")
 
 
 def test_buildroot_boot_config_merge_is_written_to_all_boot_locations(tmp_path):
