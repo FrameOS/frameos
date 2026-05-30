@@ -197,13 +197,13 @@ suite "portal network orchestration":
     let ok = attemptConnect(frame, "home-wifi", "pw")
 
     check ok
-  check frame.network.status == NetworkStatus.connected
-  check runDeleteConnectionCalls == 1
-  check nmcliConnectCalls == 1
-  check sawExpectedNmcliArgs
-  check not sawFallbackNmcliArgs
-  check sleepCallCount == 1
-  check lastSleepMs == 5000
+    check frame.network.status == NetworkStatus.connected
+    check runDeleteConnectionCalls == 1
+    check nmcliConnectCalls == 1
+    check sawExpectedNmcliArgs
+    check not sawFallbackNmcliArgs
+    check sleepCallCount == 1
+    check lastSleepMs == 5000
 
     let (hasEvent, ev) = eventChannel.tryRecv()
     check hasEvent
@@ -215,9 +215,9 @@ suite "portal network orchestration":
     let frame = makeFrameOS()
     let ok = attemptConnect(frame, "home-wifi", "bad")
 
-  check not ok
-  check frame.network.status == NetworkStatus.error
-  check runDeleteConnectionCalls == 1
-  check nmcliConnectCalls == 2
-  check sawFallbackNmcliArgs
-  check sleepCallCount == 0
+    check not ok
+    check frame.network.status == NetworkStatus.error
+    check runDeleteConnectionCalls == 1
+    check nmcliConnectCalls == 2
+    check sawFallbackNmcliArgs
+    check sleepCallCount == 0
