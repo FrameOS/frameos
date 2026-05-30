@@ -736,7 +736,6 @@ class BuildrootImageBuilder:
         release_dir = overlay_dir / "srv" / "frameos" / "releases" / f"release_{build_id}"
         agent_release_dir = overlay_dir / "srv" / "frameos" / "agent" / "releases" / f"release_{build_id}"
         state_dir = overlay_dir / "srv" / "frameos" / "state"
-        root_overlay_dir = overlay_dir / "srv" / "frameos" / "bootstrap" / "root"
         boot_overlay_dir = overlay_dir / "boot"
         assets_dir = overlay_dir / "srv" / "assets"
 
@@ -808,8 +807,6 @@ class BuildrootImageBuilder:
         )
         self._relative_symlink("/srv/frameos/state", release_dir / "state")
 
-        shutil.copy2(release_dir / "frameos.service", systemd_dir / "frameos.service")
-        shutil.copy2(agent_release_dir / "frameos_agent.service", systemd_dir / "frameos_agent.service")
         setup_reset_enabled = setup_json_reset_enabled(self.frame)
         if setup_reset_enabled:
             setup_file_path = setup_json_reset_file_path(self.frame, default_if_missing=True)

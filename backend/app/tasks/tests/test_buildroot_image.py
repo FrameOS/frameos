@@ -11,6 +11,7 @@ from app.tasks.buildroot_image import (
     BuildrootImageBuilder,
     _network_manager_wifi_connection,
 )
+from app.tasks.binary_builder import FrameBinaryBuildResult
 from app.tasks.prebuilt_deps import resolve_prebuilt_target
 from app.tasks.setup_json_reset import render_setup_json_reset_script
 from app.utils.cross_compile import CrossCompiler
@@ -347,6 +348,60 @@ def test_buildroot_writes_authorized_keys_to_boot_overlay(tmp_path, monkeypatch)
         "ssh-ed25519 AAA-main frameos\n"
     )
     assert oct(authorized_keys.stat().st_mode & 0o777) == "0o600"
+
+
+def test_buildroot_stage_overlay_leaves_service_install_to_firstboot(tmp_path, monkeypatch):
+    frameos_binary = tmp_path / "frameos"
+    agent_binary = tmp_path / "frameos_agent"
+    frameos_binary.write_bytes(b"frameos")
+    agent_binary.write_bytes(b"agent")
+    frame = SimpleNamespace(
+        id=1,
+        frame_host="Frame One.local",
+        mode="buildroot",
+        network={"wifiSSID": "Test WiFi", "wifiPassword": "secret"},
+        buildroot={"setupJsonResetFilePath": "/boot/frameos-setup.json"},
+        ssh_keys=[],
+    )
+    builder = BuildrootImageBuilder(db=object(), redis=None, frame=frame)
+    overlay_dir = tmp_path / "overlay"
+
+    monkeypatch.setattr("app.tasks.buildroot_image.get_frame_json", lambda _db, _frame: {"id": 1})
+    monkeypatch.setattr("app.tasks.buildroot_image.get_interpreted_scenes_json", lambda _frame: [])
+    monkeypatch.setattr("app.tasks.buildroot_image.get_settings_dict", lambda _db: {"ssh_keys": {"keys": []}})
+    monkeypatch.setattr("app.tasks.buildroot_image.drivers_for_frame", lambda _frame: {})
+
+    builder._stage_overlay(
+        overlay_dir=overlay_dir,
+        build_id="build123",
+        bootstrap_frame=frame,
+        setup_payload={"id": 1},
+        frameos_build=FrameBinaryBuildResult(
+            build_id="build123",
+            target=FRAMEOS_BUILD_TARGET,
+            compilation_mode="precompiled",
+            source_dir=str(tmp_path),
+            build_dir=str(tmp_path),
+            archive_path=str(tmp_path / "archive.tar.gz"),
+            binary_path=str(frameos_binary),
+            driver_library_paths=[],
+            driver_library_names=[],
+            scene_library_paths=[],
+            scene_library_names=[],
+            cross_compiled=True,
+            prebuilt_entry=None,
+            prebuilt_target=None,
+            log_path=None,
+        ),
+        agent_binary=str(agent_binary),
+    )
+
+    assert (overlay_dir / "boot" / "frameos-setup.json").exists()
+    assert (overlay_dir / "boot" / "frameos-hostname").read_text(encoding="utf-8") == "frame-one\n"
+    assert (overlay_dir / "srv" / "frameos" / "releases" / "release_build123" / "frameos.service").exists()
+    assert (overlay_dir / "srv" / "frameos" / "agent" / "releases" / "release_build123" / "frameos_agent.service").exists()
+    assert not (overlay_dir / "etc" / "systemd" / "system" / "frameos.service").exists()
+    assert not (overlay_dir / "etc" / "systemd" / "system" / "frameos_agent.service").exists()
 
 
 def test_buildroot_copies_lgpio_runtime_libraries_when_required(tmp_path, monkeypatch):
