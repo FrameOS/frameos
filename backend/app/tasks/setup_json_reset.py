@@ -47,7 +47,12 @@ else
 fi
 
 timestamp=$(date +%Y%m%d-%H%M)
-done_path="$(dirname "$SETUP_FILE")/setup-done-${{timestamp}}.json"
+case "$SETUP_FILE" in
+  *.json.gz) done_suffix=".json.gz" ;;
+  *.gz) done_suffix=".gz" ;;
+  *) done_suffix=".json" ;;
+esac
+done_path="$(dirname "$SETUP_FILE")/setup-done-${{timestamp}}${{done_suffix}}"
 mv -f "$SETUP_FILE" "$done_path"
 
 if [ "$setup_status" -eq 2 ]; then

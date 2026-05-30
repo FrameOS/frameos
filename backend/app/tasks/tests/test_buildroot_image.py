@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import gzip
+import json
 from types import SimpleNamespace
 
 from app.tasks.buildroot_image import (
@@ -64,6 +66,7 @@ def test_buildroot_script_builds_output_on_container_filesystem(tmp_path):
     script = script_path.read_text(encoding="utf-8")
 
     assert "O=/build/output" in script
+    assert "rsync" in script
     assert "dd if=/build/output/images/sdcard.img of=/artifacts/frameos-test.img" in script
     assert "O=/work/output" not in script
     assert "cp /work/output/images/sdcard.img" not in script
@@ -166,3 +169,91 @@ def test_buildroot_boot_config_merge_is_written_to_all_boot_locations(tmp_path):
     assert "#dtoverlay=spi0-0cs" not in existing_config.read_text(encoding="utf-8")
     assert "dtoverlay=spi0-0cs" in existing_firmware_config.read_text(encoding="utf-8")
     assert "dtoverlay=spi0-1cs" in existing_firmware_config.read_text(encoding="utf-8")
+
+
+def test_buildroot_bootstrap_frame_uses_web_only_and_clears_scenes():
+    frame = SimpleNamespace(
+        id=1,
+        to_dict=lambda: {
+            "id": 1,
+            "name": "Frame",
+            "mode": "buildroot",
+            "frame_host": "frame.local",
+            "frame_port": 8787,
+            "frame_access_key": "abc",
+            "frame_access": "private",
+            "frame_admin_auth": {"enabled": False, "user": "", "pass": ""},
+            "https_proxy": {"enable": False, "port": 8443, "expose_only_port": True, "certs": {}},
+            "ssh_user": "root",
+            "ssh_pass": None,
+            "ssh_port": 22,
+            "ssh_keys": [],
+            "server_host": "server.local",
+            "server_port": 8989,
+            "server_api_key": "def",
+            "server_send_logs": True,
+            "status": "uninitialized",
+            "archived": False,
+            "version": None,
+            "width": 0,
+            "height": 0,
+            "device": "waveshare.epd2in13_V3",
+            "device_config": {},
+            "color": None,
+            "interval": 300,
+            "metrics_interval": 60,
+            "scaling_mode": "contain",
+            "rotate": 0,
+            "flip": None,
+            "background_color": None,
+            "debug": False,
+            "scenes": [{"id": "scene-1"}],
+            "last_log_at": None,
+            "log_to_file": None,
+            "assets_path": "/srv/assets",
+            "save_assets": True,
+            "upload_fonts": "",
+            "reboot": {"enabled": "false"},
+            "control_code": {"enabled": "false"},
+            "schedule": {"events": [{"id": "evt-1"}]},
+            "gpio_buttons": [{"pin": 5, "label": "A"}],
+            "network": {"wifiSSID": "Test", "wifiPassword": "secret"},
+            "agent": {"agentEnabled": True, "agentRunCommands": True, "agentSharedSecret": "secret"},
+            "mountpoints": {"enabled": False, "items": []},
+            "error_behavior": {"mode": "show_error_retry"},
+            "palette": {},
+            "buildroot": {
+                "platform": "raspberry-pi-zero-2-w",
+                "setupJsonResetFilePath": "/boot/frameos-setup.json",
+                "sdImage": {"status": "ready"},
+            },
+            "rpios": {"compilationMode": "precompiled"},
+            "terminal_history": [],
+            "apps": [],
+            "image_url": None,
+            "background_color": None,
+            "last_successful_deploy": None,
+            "last_successful_deploy_at": None,
+        },
+    )
+    builder = BuildrootImageBuilder(db=None, redis=None, frame=frame)
+
+    bootstrap_frame = builder._buildroot_bootstrap_frame()
+
+    assert bootstrap_frame.device == "web_only"
+    assert bootstrap_frame.scenes == []
+    assert bootstrap_frame.gpio_buttons == []
+    assert bootstrap_frame.schedule is None
+    assert bootstrap_frame.buildroot["platform"] == "raspberry-pi-zero-2-w"
+    assert bootstrap_frame.buildroot["setupJsonResetFilePath"] == "/boot/frameos-setup.json"
+    assert "sdImage" not in bootstrap_frame.buildroot
+
+
+def test_buildroot_setup_payload_supports_gzip(tmp_path):
+    payload = {"name": "Frame", "scenes": []}
+    output_path = tmp_path / "boot" / "frameos-setup.json.gz"
+
+    BuildrootImageBuilder._write_setup_payload(output_path, payload)
+
+    decoded = gzip.decompress(output_path.read_bytes()).decode("utf-8")
+    assert json.loads(decoded) == payload

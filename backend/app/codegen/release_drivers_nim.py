@@ -83,6 +83,14 @@ def write_release_shared_drivers_nim(drivers: dict[str, Driver]) -> str:
     if spec_lines:
         spec_lines = newline + "  " + spec_lines + newline
 
+    setup_imports, setup_local_code, _setup_names = setup_helpers_nim(
+        drivers,
+        include_compiled_drivers=False,
+        setup_proc_name="setupLocalDrivers",
+        setup_proc_exported=False,
+        include_setup_driver_names=False,
+    )
+
     return f"""
 import std/[dynlib, json, options, os, strutils]
 import pixie
@@ -91,6 +99,7 @@ import frameos/driver_context as driverContext
 import frameos/device_setup
 import frameos/channels as hostChannels
 import frameos/driver_abi
+{newline.join(setup_imports)}
 
 type
   DriverSpec = object
@@ -267,7 +276,10 @@ proc setupDriverNames*(): seq[string] =
   result = @[]
 
 proc setup*(frameOS: FrameOS): SetupResult =
+  addSetupResult(result, setupLocalDrivers(frameOS))
   addSetupResult(result, setupSharedDrivers(frameOS))
+
+{setup_local_code}
 
 proc init*(frameOS: FrameOS) =
   loadedDrivers = @[]

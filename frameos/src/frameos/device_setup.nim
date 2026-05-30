@@ -123,6 +123,9 @@ proc setupAptPackages*(packages: seq[string]): SetupResult =
   result = setupOk()
 
 proc detectBootConfigPath*(): string =
+  let configuredPath = getEnv("FRAMEOS_BOOT_CONFIG")
+  if configuredPath.len > 0:
+    return configuredPath
   if fileExists("/boot/firmware/config.txt"):
     "/boot/firmware/config.txt"
   else:

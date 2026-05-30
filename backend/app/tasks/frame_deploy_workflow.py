@@ -495,6 +495,11 @@ class FrameDeployWorkflow:
             if binary_plan.will_attempt_precompiled:
                 notes.append("Precompiled FrameOS release will be used because all scenes are interpreted.")
             else:
+                fallback = "single executable"
+                if binary_plan.compilation_mode == "shared-scenes":
+                    fallback = "compiled scenes library"
+                elif binary_plan.compilation_mode == "shared":
+                    fallback = "shared libraries"
                 notes.append(
                     "Precompiled FrameOS release will be skipped"
                     + (
@@ -502,7 +507,7 @@ class FrameDeployWorkflow:
                         if binary_plan.precompiled_skip_reason
                         else "."
                     )
-                    + " Falling back to single executable."
+                    + f" Falling back to {fallback}."
                 )
         if low_memory and not binary_plan.will_attempt_precompiled:
             notes.append("Device is low memory; on-device build path will stop FrameOS before compilation.")

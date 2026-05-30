@@ -29,11 +29,16 @@ async def test_download_precompiled_frameos_release_extracts_required_files(
 ):
     source_root = tmp_path / "source" / "frameos-2026.5.14-debian-trixie-arm64"
     (source_root / "drivers").mkdir(parents=True)
+    (source_root / "scenes").mkdir(parents=True)
     (source_root / "frameos").write_bytes(b"frameos")
     (source_root / "drivers" / "frameBuffer.so").write_bytes(b"driver")
     (source_root / "drivers" / "evdev.so").write_bytes(b"evdev")
+    (source_root / "scenes" / "scenes.so").write_bytes(b"scenes")
     (source_root / "metadata.json").write_text(
-        '{"slug":"debian-trixie-arm64","driver_libraries":["evdev.so","frameBuffer.so"]}\n',
+        (
+            '{"slug":"debian-trixie-arm64","driver_libraries":["evdev.so","frameBuffer.so"],'
+            '"scene_libraries":["scenes.so"]}\n'
+        ),
         encoding="utf-8",
     )
     archive = tmp_path / "release.tar.gz"
@@ -63,7 +68,9 @@ async def test_download_precompiled_frameos_release_extracts_required_files(
 
     assert Path(result.binary_path).read_bytes() == b"frameos"
     assert result.driver_library_names == ["frameBuffer.so", "evdev.so"]
+    assert result.scene_library_names == ["scenes.so"]
     assert [Path(path).read_bytes() for path in result.driver_library_paths] == [b"driver", b"evdev"]
+    assert [Path(path).read_bytes() for path in result.scene_library_paths] == [b"scenes"]
     assert Path(result.archive_path).is_file()
     assert result.cache_hit is False
     assert any("Downloading precompiled FrameOS release" in message for _level, message in logs)
@@ -76,11 +83,16 @@ async def test_download_precompiled_frameos_release_reuses_cached_archive(
 ):
     source_root = tmp_path / "source" / "frameos-2026.5.14-debian-trixie-arm64"
     (source_root / "drivers").mkdir(parents=True)
+    (source_root / "scenes").mkdir(parents=True)
     (source_root / "frameos").write_bytes(b"frameos")
     (source_root / "drivers" / "frameBuffer.so").write_bytes(b"driver")
     (source_root / "drivers" / "evdev.so").write_bytes(b"evdev")
+    (source_root / "scenes" / "scenes.so").write_bytes(b"scenes")
     (source_root / "metadata.json").write_text(
-        '{"slug":"debian-trixie-arm64","driver_libraries":["evdev.so","frameBuffer.so"]}\n',
+        (
+            '{"slug":"debian-trixie-arm64","driver_libraries":["evdev.so","frameBuffer.so"],'
+            '"scene_libraries":["scenes.so"]}\n'
+        ),
         encoding="utf-8",
     )
     archive = tmp_path / "release.tar.gz"
@@ -123,4 +135,7 @@ async def test_download_precompiled_frameos_release_reuses_cached_archive(
     assert first.cache_hit is False
     assert second.cache_hit is True
     assert Path(second.binary_path).read_bytes() == b"frameos"
+    assert first.scene_library_names == ["scenes.so"]
+    assert second.scene_library_names == ["scenes.so"]
+    assert [Path(path).read_bytes() for path in second.scene_library_paths] == [b"scenes"]
     assert any("Using cached precompiled FrameOS release" in message for _level, message in logs)

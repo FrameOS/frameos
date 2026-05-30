@@ -1,4 +1,5 @@
 import json, pixie, os, strutils
+import zippy
 import frameos/types
 import lib/tz
 
@@ -185,8 +186,17 @@ proc getConfigFilename*(overridePath = ""): string =
   if result == "":
     result = "./frame.json"
 
+proc readJsonFile(path: string): JsonNode =
+  let encoded = readFile(path)
+  let decoded =
+    if path.endsWith(".gz"):
+      uncompress(encoded)
+    else:
+      encoded
+  result = parseJson(decoded)
+
 proc loadConfig*(configPath = ""): FrameConfig =
-  let data = parseFile(getConfigFilename(configPath))
+  let data = readJsonFile(getConfigFilename(configPath))
   # TODO: switch to jsony
   result = FrameConfig(
     name: data{"name"}.getStr(),
