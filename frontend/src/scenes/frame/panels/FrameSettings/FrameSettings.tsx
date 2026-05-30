@@ -654,12 +654,12 @@ export function FrameSettings({
                 tooltip={
                   <div className="space-y-2">
                     <p>
-                      Choose whether display/input drivers and compiled scenes are built as separate shared libraries
-                      deployed next to FrameOS, or linked into the FrameOS executable.
+                      Choose whether display/input drivers are shared libraries, or if compiled scenes are bundled in a
+                      single shared library, or linked directly into the FrameOS executable.
                     </p>
                     <p>
-                      Precompiled downloads a published FrameOS release when all scenes are interpreted; otherwise it
-                      falls back to a single executable.
+                      Precompiled downloads a published FrameOS release when all scenes are interpreted; otherwise it will
+                      fall back to a shared scenes library when compiled scenes exist, or a single executable otherwise.
                     </p>
                   </div>
                 }
@@ -671,6 +671,10 @@ export function FrameSettings({
                     { value: 'precompiled', label: 'Use precompiled binaries if possible' },
                     { value: 'static', label: 'Build as a single executable' },
                     { value: 'shared', label: 'Scenes and drivers as shared libraries' },
+                    {
+                      value: 'shared-scenes',
+                      label: 'Scenes bundled in one shared library (scenes.so)',
+                    },
                   ]}
                 />
               </Field>

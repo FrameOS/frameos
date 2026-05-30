@@ -413,8 +413,13 @@ function sortDeployChangeDetails(changes: ChangeDetail[]): ChangeDetail[] {
     .map(({ change }) => change)
 }
 
-function normalizeRpiosCompilationMode(value: unknown): 'static' | 'shared' | 'precompiled' {
-  return value === 'static' || value === 'shared' || value === 'precompiled' ? value : 'precompiled'
+function normalizeRpiosCompilationMode(value: unknown): 'static' | 'shared' | 'shared-scenes' | 'precompiled' {
+  return value === 'static' ||
+    value === 'shared' ||
+    value === 'shared-scenes' ||
+    value === 'precompiled'
+    ? value
+    : 'precompiled'
 }
 
 function normalizeRpiosCrossCompilation(value: unknown): 'auto' | 'always' | 'never' {

@@ -733,5 +733,5 @@ export interface FrameBuildrootConfig {
 export interface FrameRpiOSConfig {
   platform?: string
   crossCompilation?: '' | 'auto' | 'always' | 'never'
-  compilationMode?: '' | 'static' | 'shared' | 'precompiled'
+  compilationMode?: '' | 'static' | 'shared' | 'shared-scenes' | 'precompiled'
 }

@@ -16,6 +16,7 @@ from app.drivers.devices import drivers_for_frame
 from app.codegen.drivers_nim import (
     COMPILATION_MODE_PRECOMPILED,
     COMPILATION_MODE_STATIC,
+    COMPILATION_MODE_SHARED_SCENES,
     frame_compilation_mode,
     normalize_compilation_mode,
 )
@@ -211,7 +212,9 @@ class FrameBinaryBuilder:
             else:
                 will_attempt_precompiled = True
             if not will_attempt_precompiled:
-                resolved_compilation_mode = COMPILATION_MODE_STATIC
+                resolved_compilation_mode = (
+                    COMPILATION_MODE_SHARED_SCENES if compiled_scene_count > 0 else COMPILATION_MODE_STATIC
+                )
 
         build_host = get_build_host_config(self.db)
         cross_compile_supported = can_cross_compile_target(target.arch)
