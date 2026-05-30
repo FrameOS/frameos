@@ -6,7 +6,7 @@ FROM ${BASE_IMAGE}
 ENV DEBIAN_FRONTEND=noninteractive
 
 ARG BUILDROOT_VERSION=2025.02.13
-ARG BUILDROOT_APT_DEPS="bc bison build-essential ca-certificates cpio curl file flex g++ gfortran git libncurses-dev libssl-dev make perl python3 rsync unzip wget xdg-utils xz-utils"
+ARG BUILDROOT_APT_DEPS="bc bison build-essential ca-certificates cpio curl file flex g++ gfortran genimage git dosfstools e2fsprogs libncurses-dev libssl-dev make mtools perl python3 rsync unzip wget xdg-utils xz-utils"
 
 RUN set -eu \
     && apt-get update \

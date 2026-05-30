@@ -23,7 +23,6 @@ import { AddSceneTile, SceneControlPanel, TemplateDrawer } from './FramesHome'
 import { FrameDashboardSurface } from './FrameDashboardSurface'
 import { FrameDashboardLoadingSkeleton } from './FrameDashboardLoadingSkeleton'
 import { FrameDeployPlanDrawer } from './FrameDeployPlanDrawer'
-import { FrameUnsavedChangesDrawer } from './FrameUnsavedChangesDrawer'
 import { FrameSceneSidebarCard } from './FrameSceneSidebarCard'
 import { FrameSidebarPreview } from './FrameSidebarPreview'
 import { sceneWorkspaceLogic } from './sceneWorkspaceLogic'
@@ -434,7 +433,7 @@ function FrameTree({
           frame={frame}
           active={activeTool === 'preview'}
           className="order-3 @xs:order-1 @xs:h-full"
-          mediaClassName="@xs:h-full @xs:min-h-[6.75rem]"
+          mediaClassName="@xs:h-full @xs:min-h-[8.625rem]"
         />
         <div className="order-1 min-w-0 space-y-2 @xs:order-2">
           <FrameSelector frame={frame} frames={frames} />
@@ -1230,7 +1229,7 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
   useMountedLogic(metricsLogic(frameLogicProps))
 
   const { framesList } = useValues(framesModel)
-  const { frame, scenes, deployPlanModalOpen, undeployedChanges, unsavedChanges, unsavedChangesModalOpen } = useValues(
+  const { frame, scenes, deployPlanModalOpen, undeployedChanges, unsavedChanges } = useValues(
     frameLogic(frameLogicProps)
   )
   const { sceneControlSelection, templateDrawerFrameId, utilityPanel, frameToolScrollPositions } =
@@ -1366,9 +1365,7 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
             activeToolPanel === 'logs' ? 'pb-0 pt-6 max-lg:pb-0' : 'py-6 max-lg:pb-6'
           )}
           rightPanel={
-            unsavedChangesModalOpen ? (
-              <FrameUnsavedChangesDrawer frame={frame} />
-            ) : deployPlanModalOpen ? (
+            deployPlanModalOpen ? (
               <FrameDeployPlanDrawer frame={frame} />
             ) : templateDrawerFrameId ? (
               <TemplateDrawer />

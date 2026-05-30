@@ -5,7 +5,7 @@ import { frameHost, frameIsActive } from '../../decorators/frame'
 import { FrameScene, FrameType } from '../../types'
 import { urls } from '../../urls'
 import { applyFrameosTheme } from '../../utils/frameosTheme'
-import { frameLogic } from '../frame/frameLogic'
+import { DeployDrawerView, frameLogic } from '../frame/frameLogic'
 import { newFrameForm } from '../frames/newFrameForm'
 import type { workspaceLogicType } from './workspaceLogicType'
 
@@ -201,6 +201,7 @@ export type FrameChangeDrawerKind = 'unsaved' | 'deploy'
 export interface FrameChangeDrawerSelection {
   frameId: number
   kind: FrameChangeDrawerKind
+  deployDrawerView?: DeployDrawerView
 }
 
 export interface OverviewFrameSection {
@@ -719,7 +720,11 @@ export const workspaceLogic = kea<workspaceLogicType>([
       sceneId,
     }),
     closeChatDrawer: true,
-    openFrameChangeDrawer: (frameId: number, kind: FrameChangeDrawerKind) => ({ frameId, kind }),
+    openFrameChangeDrawer: (frameId: number, kind: FrameChangeDrawerKind, deployDrawerView?: DeployDrawerView) => ({
+      deployDrawerView,
+      frameId,
+      kind,
+    }),
     closeFrameChangeDrawer: true,
     retargetOpenFrameDrawers: (
       frameId: number,
@@ -868,7 +873,13 @@ export const workspaceLogic = kea<workspaceLogicType>([
     frameChangeDrawerSelection: [
       null as FrameChangeDrawerSelection | null,
       {
-        openFrameChangeDrawer: (_, { frameId, kind }) => ({ frameId, kind }),
+        openFrameChangeDrawer: (state, { frameId, kind, deployDrawerView }) => ({
+          deployDrawerView:
+            deployDrawerView ??
+            (state?.frameId === frameId && state.kind === kind ? state.deployDrawerView : undefined),
+          frameId,
+          kind,
+        }),
         closeFrameChangeDrawer: () => null,
         setSearch: () => null,
         navigateToFrame: () => null,
@@ -1128,13 +1139,21 @@ export const workspaceLogic = kea<workspaceLogicType>([
       closeScheduleDrawer: preserveFramesScroll,
       openChatDrawer: hideNewFrameFormAndPreserveScroll,
       closeChatDrawer: preserveFramesScroll,
-      openFrameChangeDrawer: ({ frameId, kind }) => {
-        hideNewFrameFormAndPreserveScroll()
-        if (kind === 'unsaved') {
-          frameLogic({ frameId }).actions.showUnsavedChangesModal()
+      openFrameChangeDrawer: ({ frameId, deployDrawerView }) => {
+        if (cache.skipNextFrameChangeDrawerScrollPreserve) {
+          cache.skipNextFrameChangeDrawerScrollPreserve = false
+          newFrameForm.actions.hideForm()
+          if (isMobileWorkspaceViewport()) {
+            actions.closeSecondarySidebar()
+          }
         } else {
-          frameLogic({ frameId }).actions.showDeployPlanModal()
+          hideNewFrameFormAndPreserveScroll()
         }
+        const frameActions = frameLogic({ frameId }).actions
+        frameActions.setDeployDrawerView(
+          deployDrawerView ?? values.frameChangeDrawerSelection?.deployDrawerView ?? 'main'
+        )
+        frameActions.showDeployPlanModal()
       },
       closeFrameChangeDrawer: preserveFramesScroll,
       retargetOpenFrameDrawers: ({ frameId, previousFrameChangeDrawerSelection }) => {
@@ -1148,17 +1167,25 @@ export const workspaceLogic = kea<workspaceLogicType>([
 
         const previousFrameActions = frameLogic({ frameId: previousFrameChangeDrawerSelection.frameId }).actions
         previousFrameActions.hideDeployPlanModal()
-        previousFrameActions.hideUnsavedChangesModal()
 
         const nextFrameActions = frameLogic({ frameId }).actions
-        if (previousFrameChangeDrawerSelection.kind === 'unsaved') {
-          nextFrameActions.showUnsavedChangesModal()
-        } else {
-          nextFrameActions.showDeployPlanModal()
-        }
+        nextFrameActions.showDeployPlanModal()
       },
       [newFrameForm.actionTypes.showForm]: preserveFramesScroll,
       [newFrameForm.actionTypes.hideForm]: preserveFramesScroll,
+      [newFrameForm.actionTypes.frameCreated]: ({ frameId, installMethod }) => {
+        const deployDrawerView = installMethod === 'sd_card' ? 'sdCard' : installMethod === 'script' ? 'script' : 'main'
+        actions.setSearch('')
+        actions.selectFrame(frameId)
+        cache.skipNextFrameChangeDrawerScrollPreserve = true
+        actions.openFrameChangeDrawer(frameId, 'deploy', deployDrawerView)
+        actions.focusFrame(frameId)
+        if (typeof window !== 'undefined') {
+          window.setTimeout(() => actions.focusFrame(frameId), 100)
+          window.setTimeout(() => actions.focusFrame(frameId), 350)
+          window.setTimeout(() => actions.focusFrame(frameId), 800)
+        }
+      },
       setTheme: ({ theme }) => {
         window.localStorage.setItem('frameos.workspaceTheme', theme)
         applyFrameosTheme(theme)
@@ -1260,7 +1287,6 @@ export const workspaceLogic = kea<workspaceLogicType>([
       if (values.frameChangeDrawerSelection) {
         const frameActions = frameLogic({ frameId: values.frameChangeDrawerSelection.frameId }).actions
         frameActions.hideDeployPlanModal()
-        frameActions.hideUnsavedChangesModal()
         actions.closeFrameChangeDrawer()
       }
     }
@@ -1283,7 +1309,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
       } else if (drawer === 'chat') {
         actions.openChatDrawer(frameId, sceneId, nodeId)
       } else if (drawer === 'unsavedChanges') {
-        actions.openFrameChangeDrawer(frameId, 'unsaved')
+        actions.openFrameChangeDrawer(frameId, 'deploy')
       } else if (drawer === 'deployPlan') {
         actions.openFrameChangeDrawer(frameId, 'deploy')
       } else {
@@ -1376,8 +1402,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
         ...(payload.nodeId ? { nodeId: String(payload.nodeId) } : {}),
       }),
     closeChatDrawer: clearDrawerUrl,
-    openFrameChangeDrawer: (payload: Record<string, any>) =>
-      drawerUrlForFrame(Number(payload.frameId), payload.kind === 'unsaved' ? 'unsavedChanges' : 'deployPlan'),
+    openFrameChangeDrawer: (payload: Record<string, any>) => drawerUrlForFrame(Number(payload.frameId), 'deployPlan'),
     closeFrameChangeDrawer: clearDrawerUrl,
     openUtilityPanel: (payload: Record<string, any>) => {
       const panel = payload.panel

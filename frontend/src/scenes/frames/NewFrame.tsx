@@ -1,13 +1,9 @@
 import { Form } from 'kea-forms'
 import { useActions, useValues } from 'kea'
-import clsx from 'clsx'
-import { ArrowUpTrayIcon, CpuChipIcon, EllipsisHorizontalIcon } from '@heroicons/react/24/outline'
-import { BUILDROOT_RASPBERRY_PI_ZERO_2_W, devices, buildrootPlatforms } from '../../devices'
-import { A } from 'kea-router'
-import { urls } from '../../urls'
-import { Spinner } from '../../components/Spinner'
+import { ArrowDownTrayIcon, ArrowLeftIcon, CommandLineIcon, ServerStackIcon } from '@heroicons/react/24/outline'
+import { BUILDROOT_RASPBERRY_PI_ZERO_2_W, devices, buildrootPlatforms, rpiOSPlatforms } from '../../devices'
 import { newFrameForm } from './newFrameForm'
-import { NewFrameFormType } from '../../types'
+import { FrameInstallMethod, NewFrameFormType } from '../../types'
 
 function isLocalServer(host?: string | null): boolean {
   const localHostRegex = /^(localhost|0\.0\.0\.0|127\.0\.0\.1|\[::1\])(:\d+)?$/
@@ -22,24 +18,27 @@ function errorText(error: unknown): string | null {
 }
 
 function ModeButton({
-  active,
   children,
   onClick,
+  title,
+  description,
 }: {
-  active: boolean
   children: JSX.Element | string
   onClick: () => void
+  title: string
+  description: string
 }): JSX.Element {
   return (
     <button
       type="button"
       onClick={onClick}
-      className={clsx(
-        'frameos-segment flex min-h-10 flex-1 items-center justify-center rounded-xl px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-        active ? 'frameos-primary-active text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-      )}
+      className="frameos-segment flex flex-1 flex-col items-start justify-start rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-left text-slate-600 transition hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
     >
-      {children}
+      <span className="flex items-center gap-2 text-sm font-semibold">
+        {children}
+        {title}
+      </span>
+      <span className="mt-1 text-xs leading-4 text-slate-500">{description}</span>
     </button>
   )
 }
@@ -74,14 +73,19 @@ function selectClassName(): string {
   return 'frameos-form-control h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-400/30'
 }
 
-function setModeValues(mode: NewFrameFormType['mode']): Partial<NewFrameFormType> {
-  if (mode === 'buildroot') {
-    return { mode, platform: BUILDROOT_RASPBERRY_PI_ZERO_2_W, frame_host: '' }
+function setInstallMethodValues(installMethod: FrameInstallMethod): Partial<NewFrameFormType> {
+  if (installMethod === 'sd_card') {
+    return {
+      install_method: installMethod,
+      mode: 'buildroot',
+      platform: BUILDROOT_RASPBERRY_PI_ZERO_2_W,
+      frame_host: '',
+    }
   }
-  if (mode === 'import') {
-    return { mode }
+  if (installMethod === 'script') {
+    return { install_method: installMethod, mode: 'rpios', platform: '', frame_host: '' }
   }
-  return { mode, platform: null }
+  return { install_method: installMethod, mode: 'rpios', platform: '' }
 }
 
 function renderDeviceOptions(): JSX.Element[] {
@@ -96,53 +100,97 @@ function renderDeviceOptions(): JSX.Element[] {
   ))
 }
 
+function renderPlatformOptions(installMethod: FrameInstallMethod): JSX.Element[] {
+  const platforms = installMethod === 'sd_card' ? buildrootPlatforms : rpiOSPlatforms
+  return platforms.map((platform) => (
+    <option key={platform.value} value={platform.value}>
+      {platform.label}
+    </option>
+  ))
+}
+
+function installMethodTitle(installMethod: FrameInstallMethod): string {
+  if (installMethod === 'sd_card') {
+    return 'Download SD card'
+  }
+  if (installMethod === 'script') {
+    return 'Install with a script'
+  }
+  return 'Install over SSH'
+}
+
 export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.Element {
-  const { hideForm, resetNewFrame, setNewFrameValue, setNewFrameValues, setFile, importFrame } =
-    useActions(newFrameForm)
-  const { newFrame, newFrameErrors, file, importingFrameLoading } = useValues(newFrameForm)
-  const mode = newFrame.mode
+  const { hideForm, resetNewFrame, setNewFrameValue, setNewFrameValues } = useActions(newFrameForm)
+  const { newFrame, newFrameErrors } = useValues(newFrameForm)
+  const installMethod = newFrame.install_method
 
   const cancel = () => {
-    setFile(null)
     resetNewFrame()
     hideForm()
+  }
+
+  const backToInstallMethods = () => {
+    setNewFrameValues({ install_method: undefined })
   }
 
   return (
     <div className="frameos-form-surface space-y-5 text-slate-900">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <div className="frameos-muted text-xs font-semibold uppercase tracking-wide text-slate-400">FrameOS</div>
-          <h2 className="frameos-strong mt-1 text-2xl font-bold tracking-normal text-slate-950">Add frame</h2>
+          <div className="frameos-muted text-xs font-semibold uppercase tracking-wide text-slate-400">Add frame</div>
+          <h2 className="frameos-strong mt-1 text-2xl font-bold tracking-normal text-slate-950">
+            {installMethod ? installMethodTitle(installMethod) : 'FrameOS'}
+          </h2>
         </div>
         {headerAction ? <div className="shrink-0">{headerAction}</div> : null}
       </div>
 
-      <div className="frameos-segment-group flex rounded-2xl bg-slate-100 p-1">
-        <ModeButton active={mode === 'rpios'} onClick={() => setNewFrameValues(setModeValues('rpios'))}>
-          <span className="inline-flex items-center gap-2">
-            <CpuChipIcon className="h-4 w-4" />
-            RPi OS
-          </span>
-        </ModeButton>
-        <ModeButton active={mode === 'import'} onClick={() => setNewFrameValues(setModeValues('import'))}>
-          <span className="inline-flex items-center gap-2">
-            <ArrowUpTrayIcon className="h-4 w-4" />
-            Import
-          </span>
-        </ModeButton>
-        <ModeButton active={mode === 'buildroot'} onClick={() => setNewFrameValues(setModeValues('buildroot'))}>
-          <span className="inline-flex items-center gap-2">
-            <EllipsisHorizontalIcon className="h-4 w-4" />
-            Buildroot
-          </span>
-        </ModeButton>
-      </div>
+      {!installMethod ? (
+        <div className="space-y-2">
+          <div className="frameos-muted text-xs font-semibold uppercase tracking-wide text-slate-400">
+            Installation method
+          </div>
+          <div className="grid grid-cols-1 gap-2">
+            <ModeButton
+              onClick={() => setNewFrameValues(setInstallMethodValues('sd_card'))}
+              title="Download SD card"
+              description="Build a flashable Buildroot image."
+            >
+              <ArrowDownTrayIcon className="h-4 w-4" />
+            </ModeButton>
+            <ModeButton
+              onClick={() => setNewFrameValues(setInstallMethodValues('ssh'))}
+              title="Install over SSH"
+              description="Deploy to a reachable Raspberry Pi OS host."
+            >
+              <ServerStackIcon className="h-4 w-4" />
+            </ModeButton>
+            <ModeButton
+              onClick={() => setNewFrameValues(setInstallMethodValues('script'))}
+              title="Install with a script"
+              description="Run one command on the device."
+            >
+              <CommandLineIcon className="h-4 w-4" />
+            </ModeButton>
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-center justify-between gap-3">
+          <button
+            type="button"
+            onClick={backToInstallMethods}
+            className="frameos-secondary-button inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          >
+            <ArrowLeftIcon className="h-4 w-4" />
+            Back
+          </button>
+        </div>
+      )}
 
-      {mode === 'rpios' ? (
+      {installMethod === 'ssh' ? (
         <Form logic={newFrameForm} formKey="newFrame" className="space-y-4" enableFormOnSubmit>
           <p className="frameos-form-hint text-sm leading-relaxed text-slate-500">
-            Enter the credentials for a running Raspberry Pi OS Lite machine. FrameOS will deploy over SSH.
+            Use SSH when the backend can directly reach the frame on your network.
           </p>
           <FormField label="Name" error={newFrameErrors.name}>
             <input
@@ -153,17 +201,7 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
               required
             />
           </FormField>
-          <FormField
-            label={
-              <>
-                SSH connection string{' '}
-                <A href={urls.settings()} className="frameos-link hover:underline">
-                  setup keys
-                </A>
-              </>
-            }
-            error={newFrameErrors.frame_host}
-          >
+          <FormField label="SSH connection string" error={newFrameErrors.frame_host}>
             <input
               className={textInputClassName()}
               value={newFrame.frame_host ?? ''}
@@ -191,6 +229,15 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
               required
             />
           </FormField>
+          <FormField label="Platform" error={newFrameErrors.platform}>
+            <select
+              className={selectClassName()}
+              value={newFrame.platform ?? ''}
+              onChange={(event) => setNewFrameValue('platform', event.target.value)}
+            >
+              {renderPlatformOptions('ssh')}
+            </select>
+          </FormField>
           <FormField label="Display driver">
             <select
               className={selectClassName()}
@@ -216,10 +263,11 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
             </button>
           </div>
         </Form>
-      ) : mode === 'buildroot' ? (
+      ) : installMethod === 'script' ? (
         <Form logic={newFrameForm} formKey="newFrame" className="space-y-4" enableFormOnSubmit>
           <p className="frameos-form-hint text-sm leading-relaxed text-slate-500">
-            Buildroot bundles FrameOS into a dedicated firmware image. Support is still evolving.
+            Use this when SSH is not available. FrameOS will generate a command that installs the agent and connects
+            back to this backend.
           </p>
           <FormField label="Name" error={newFrameErrors.name}>
             <input
@@ -249,7 +297,16 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
               required
             />
           </FormField>
-          <FormField label="Driver">
+          <FormField label="Platform" error={newFrameErrors.platform}>
+            <select
+              className={selectClassName()}
+              value={newFrame.platform ?? ''}
+              onChange={(event) => setNewFrameValue('platform', event.target.value)}
+            >
+              {renderPlatformOptions('script')}
+            </select>
+          </FormField>
+          <FormField label="Display driver">
             <select
               className={selectClassName()}
               value={newFrame.device ?? 'web_only'}
@@ -258,17 +315,71 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
               {renderDeviceOptions()}
             </select>
           </FormField>
+          <div className="flex gap-2 pt-2">
+            <button
+              type="submit"
+              className="frameos-primary-action flex h-11 flex-1 items-center justify-center rounded-xl px-4 text-sm font-semibold text-white shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            >
+              Add frame
+            </button>
+            <button
+              type="button"
+              onClick={cancel}
+              className="frameos-secondary-button h-11 rounded-xl bg-slate-100 px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            >
+              Cancel
+            </button>
+          </div>
+        </Form>
+      ) : installMethod === 'sd_card' ? (
+        <Form logic={newFrameForm} formKey="newFrame" className="space-y-4" enableFormOnSubmit>
+          <p className="frameos-form-hint text-sm leading-relaxed text-slate-500">
+            Buildroot bundles FrameOS into a dedicated firmware image that you can flash to an SD card.
+          </p>
+          <FormField label="Name" error={newFrameErrors.name}>
+            <input
+              className={textInputClassName()}
+              value={newFrame.name ?? ''}
+              onChange={(event) => setNewFrameValue('name', event.target.value)}
+              placeholder="Kitchen Frame"
+              required
+            />
+          </FormField>
+          <FormField
+            label="Backend IP or hostname for reverse access"
+            hint={
+              isLocalServer(newFrame.server_host) ? (
+                <span>
+                  <span className="font-semibold text-amber-600">Warning:</span> use this server's real host/IP, not
+                  localhost.
+                </span>
+              ) : null
+            }
+          >
+            <input
+              className={textInputClassName()}
+              value={newFrame.server_host ?? ''}
+              onChange={(event) => setNewFrameValue('server_host', event.target.value)}
+              placeholder="127.0.0.1"
+              required
+            />
+          </FormField>
           <FormField label="Platform" error={newFrameErrors.platform}>
             <select
               className={selectClassName()}
               value={newFrame.platform ?? ''}
               onChange={(event) => setNewFrameValue('platform', event.target.value)}
             >
-              {buildrootPlatforms.map((platform) => (
-                <option key={platform.value} value={platform.value}>
-                  {platform.label}
-                </option>
-              ))}
+              {renderPlatformOptions('sd_card')}
+            </select>
+          </FormField>
+          <FormField label="Driver">
+            <select
+              className={selectClassName()}
+              value={newFrame.device ?? 'web_only'}
+              onChange={(event) => setNewFrameValue('device', event.target.value)}
+            >
+              {renderDeviceOptions()}
             </select>
           </FormField>
           <FormField label="WiFi network" error={newFrameErrors.network?.wifiSSID}>
@@ -280,7 +391,6 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
               }
               placeholder="Home WiFi"
               autoComplete="off"
-              required
             />
           </FormField>
           <FormField label="WiFi password" error={newFrameErrors.network?.wifiPassword}>
@@ -293,7 +403,6 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
               placeholder="Network password"
               type="password"
               autoComplete="new-password"
-              required
             />
           </FormField>
           <div className="flex gap-2 pt-2">
@@ -312,40 +421,7 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
             </button>
           </div>
         </Form>
-      ) : (
-        <div className="space-y-4">
-          <label className="frameos-import-target flex min-h-36 cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center transition hover:bg-slate-100">
-            <ArrowUpTrayIcon className="mb-2 h-8 w-8 text-slate-400" />
-            <span className="frameos-strong text-sm font-semibold text-slate-800">
-              {file ? file.name : 'Choose frame JSON'}
-            </span>
-            <span className="frameos-muted mt-1 text-xs text-slate-500">Import a previously exported frame.</span>
-            <input
-              type="file"
-              accept=".json"
-              className="sr-only"
-              onChange={(event) => setFile(event.target.files?.[0] || null)}
-            />
-          </label>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={importFrame}
-              disabled={!file || importingFrameLoading}
-              className="frameos-primary-action flex h-11 flex-1 items-center justify-center rounded-xl px-4 text-sm font-semibold text-white shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {importingFrameLoading ? <Spinner color="white" /> : 'Import'}
-            </button>
-            <button
-              type="button"
-              onClick={cancel}
-              className="frameos-secondary-button h-11 rounded-xl bg-slate-100 px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
+      ) : null}
     </div>
   )
 }

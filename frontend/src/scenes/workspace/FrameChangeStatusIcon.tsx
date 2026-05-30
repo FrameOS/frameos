@@ -49,11 +49,8 @@ export function FrameChangeStatusIcon({
   const { frameChangeDrawerSelection } = useValues(workspaceLogic)
   const { closeFrameChangeDrawer, focusFrame, openFrameChangeDrawer } = useActions(workspaceLogic)
   const statusLabel = unsavedChanges ? 'Unsaved' : undeployedChanges ? 'Undeployed' : null
-  const targetDrawerKind = unsavedChanges ? 'unsaved' : 'deploy'
   const deployDrawerIsOpen =
-    targetDrawerKind === 'deploy' &&
-    frameChangeDrawerSelection?.frameId === frameId &&
-    frameChangeDrawerSelection.kind === 'deploy'
+    frameChangeDrawerSelection?.frameId === frameId && frameChangeDrawerSelection.kind === 'deploy'
   const StatusIcon = unsavedChanges ? CloudArrowUpIcon : DeployToFrameIcon
   const isDashboard = variant === 'dashboard'
   const wrapperClassName = isDashboard
@@ -85,7 +82,7 @@ export function FrameChangeStatusIcon({
       closeFrameChangeDrawer()
       return
     }
-    openFrameChangeDrawer(frameId, targetDrawerKind)
+    openFrameChangeDrawer(frameId, 'deploy')
     focusFrameAfterDrawerUpdate()
   }
 
@@ -93,16 +90,14 @@ export function FrameChangeStatusIcon({
     return (
       <button
         type="button"
-        title={deployDrawerIsOpen ? 'Close deploy plan' : 'Open deploy plan'}
-        aria-label={deployDrawerIsOpen ? 'Close deploy plan' : 'Open deploy plan'}
+        title={deployDrawerIsOpen ? 'Close deploy' : 'Open deploy'}
+        aria-label={deployDrawerIsOpen ? 'Close deploy' : 'Open deploy'}
         onClick={openDrawer}
         className={clsx(
           wrapperClassName,
           idleClassName,
           'frameos-change-status-button--idle',
-          isDashboard
-            ? 'frameos-change-status-button--idle-dashboard'
-            : 'frameos-change-status-button--idle-sidebar',
+          isDashboard ? 'frameos-change-status-button--idle-dashboard' : 'frameos-change-status-button--idle-sidebar',
           'focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400'
         )}
       >
@@ -117,10 +112,10 @@ export function FrameChangeStatusIcon({
       title={`${statusLabel} changes`}
       aria-label={
         deployDrawerIsOpen
-          ? 'Close deploy plan'
+          ? 'Close deploy'
           : unsavedChanges
-          ? 'Open unsaved changes'
-          : 'Open deploy plan for undeployed changes'
+          ? 'Open deploy for unsaved changes'
+          : 'Open deploy for undeployed changes'
       }
       onClick={openDrawer}
       className={clsx(

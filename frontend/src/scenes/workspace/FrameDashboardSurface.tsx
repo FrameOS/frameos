@@ -58,13 +58,13 @@ const sceneTileGapRem = 1
 const framePreviewMaxHeightRem = 32
 const framePreviewMaxWidthRem = sceneTileWidthRem * 2 + sceneTileGapRem
 const sceneToolButtons = [
+  { label: 'Settings', panel: 'settings', icon: AdjustmentsHorizontalIcon },
   { label: 'Schedule', panel: 'schedule', icon: CalendarDaysIcon },
   { label: 'Logs', panel: 'logs', icon: DocumentTextIcon },
   { label: 'Metrics', panel: 'metrics', icon: ChartBarIcon },
   { label: 'Assets', panel: 'assets', icon: CircleStackIcon },
   { label: 'Terminal', panel: 'terminal', icon: CommandLineIcon },
   { label: 'Ping', panel: 'ping', icon: SignalIcon },
-  { label: 'Settings', panel: 'settings', icon: AdjustmentsHorizontalIcon },
 ] as const
 
 interface FrameDashboardSurfaceProps {
@@ -242,13 +242,20 @@ function FramePreviewPanel({ frame, scenes }: { frame: FrameType; scenes: FrameS
 }
 
 function FrameHeaderActions({ frame, archived }: { frame: FrameType; archived?: boolean }): JSX.Element {
-  const { deleteFrame, deployAgent, rebootFrame, renderFrame, restartAgent, restartFrame, setFrameArchived, stopFrame } =
-    useActions(framesModel)
+  const {
+    deleteFrame,
+    deployAgent,
+    rebootFrame,
+    renderFrame,
+    restartAgent,
+    restartFrame,
+    setFrameArchived,
+    stopFrame,
+  } = useActions(framesModel)
   const { openChatDrawer, openFrameChangeDrawer, openRenameFrameDialog } = useActions(workspaceLogic)
   const frameName = frame.name || frameHost(frame)
   const agentConfigured = Boolean(frame.agent?.agentEnabled && frame.agent.agentSharedSecret)
   const canDeployAgent = agentConfigured && (frame.mode ?? 'rpios') === 'rpios'
-  const deployLabel = (frame.mode ?? 'rpios') === 'buildroot' ? 'Build SD card' : 'Deploy'
 
   return (
     <div className="frame-header-actions flex min-w-0 shrink-0 items-center justify-start gap-1">
@@ -280,8 +287,8 @@ function FrameHeaderActions({ frame, archived }: { frame: FrameType; archived?: 
               icon: <PlayIcon className="h-5 w-5" />,
             },
             {
-              label: deployLabel,
-              title: (frame.mode ?? 'rpios') === 'buildroot' ? 'Open SD card builder' : 'Open deploy plan',
+              label: 'Deploy',
+              title: 'Open deploy options',
               onClick: () => openFrameChangeDrawer(frame.id, 'deploy'),
               icon: <RocketLaunchIcon className="h-5 w-5" />,
             },
@@ -399,14 +406,13 @@ function FrameDashboardStatusLine({ frame }: { frame: FrameType }): JSX.Element 
     : undeployedChanges
     ? 'undeployed'
     : 'up to date'
-  const changeKind = unsavedChanges ? 'unsaved' : 'deploy'
   const frameIsUpToDate = !unsavedChanges && !undeployedChanges
 
   return (
     <div className="frameos-muted truncate text-sm text-slate-500">
       <button
         type="button"
-        onClick={() => openFrameChangeDrawer(frame.id, changeKind)}
+        onClick={() => openFrameChangeDrawer(frame.id, 'deploy')}
         className={clsx(
           'frameos-change-status-link rounded font-medium hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
           frameIsUpToDate ? 'frameos-change-status-link--up-to-date' : null

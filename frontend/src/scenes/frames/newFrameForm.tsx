@@ -1,7 +1,7 @@
 import { actions, afterMount, kea, listeners, path, reducers } from 'kea'
 
 import { forms } from 'kea-forms'
-import { NewFrameFormType } from '../../types'
+import { FrameInstallMethod, NewFrameFormType } from '../../types'
 
 import type { newFrameFormType } from './newFrameFormType'
 import { framesModel } from '../../models/framesModel'
@@ -10,6 +10,53 @@ import { loaders } from 'kea-loaders'
 import { inHassioIngress } from '../../utils/inHassioIngress'
 import { BUILDROOT_RASPBERRY_PI_ZERO_2_W } from '../../devices'
 
+function fallbackFrameHost(name?: string | null): string {
+  const slug = String(name || 'frame')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+  return `${slug || 'frame'}.local`
+}
+
+function framePayload(frame: NewFrameFormType): NewFrameFormType {
+  const installMethod = frame.install_method ?? (frame.mode === 'buildroot' ? 'sd_card' : 'ssh')
+
+  if (installMethod === 'sd_card') {
+    return {
+      ...frame,
+      mode: 'buildroot',
+      frame_host: '',
+      platform: frame.platform || BUILDROOT_RASPBERRY_PI_ZERO_2_W,
+    }
+  }
+
+  if (installMethod === 'script') {
+    return {
+      ...frame,
+      mode: 'rpios',
+      frame_host: frame.frame_host || fallbackFrameHost(frame.name),
+      agent: {
+        ...(frame.agent ?? {}),
+        agentEnabled: true,
+        agentRunCommands: true,
+        deployWithAgent: true,
+      },
+    }
+  }
+
+  return {
+    ...frame,
+    mode: 'rpios',
+    agent: {
+      ...(frame.agent ?? {}),
+      agentEnabled: false,
+      agentRunCommands: false,
+      deployWithAgent: false,
+    },
+  }
+}
+
 export const newFrameForm = kea<newFrameFormType>([
   path(['src', 'scenes', 'frames', 'newFrameForm']),
   actions({
@@ -17,7 +64,7 @@ export const newFrameForm = kea<newFrameFormType>([
     hideForm: true,
     setFile: (file: File | null) => ({ file }),
     importFrame: true,
-    frameCreated: (frameId: number) => ({ frameId }),
+    frameCreated: (frameId: number, installMethod?: FrameInstallMethod) => ({ frameId, installMethod }),
   }),
   reducers({
     file: [
@@ -38,6 +85,7 @@ export const newFrameForm = kea<newFrameFormType>([
     newFrame: {
       defaults: {
         mode: 'rpios',
+        install_method: undefined,
         name: '',
         frame_host: '',
         device: 'web_only',
@@ -57,25 +105,21 @@ export const newFrameForm = kea<newFrameFormType>([
       } as NewFrameFormType,
       errors: (frame: Partial<NewFrameFormType>) => ({
         name: !frame.name ? 'Please enter a name' : null,
-        frame_host: frame.mode === 'rpios' && !frame.frame_host ? 'Please enter a host' : null,
+        frame_host: frame.install_method === 'ssh' && !frame.frame_host ? 'Please enter a host' : null,
         platform:
-          frame.mode === 'buildroot' && !frame.platform
+          frame.install_method === 'sd_card' && !frame.platform
             ? 'Please pick a platform'
             : // no errors for RpiOS, support autodetection
               null,
-        network:
-          frame.mode === 'buildroot'
-            ? {
-                wifiSSID: !frame.network?.wifiSSID ? 'Please enter a WiFi network' : undefined,
-                wifiPassword: !frame.network?.wifiPassword ? 'Please enter the WiFi password' : undefined,
-              }
-            : undefined,
+        network: undefined,
       }),
       submit: async (frame) => {
         try {
+          const installMethod = frame.install_method ?? (frame.mode === 'buildroot' ? 'sd_card' : 'ssh')
+          const payload = framePayload(frame)
           const response = await apiFetch('/api/frames/new', {
             method: 'POST',
-            body: JSON.stringify(frame),
+            body: JSON.stringify(payload),
             headers: {
               'Content-Type': 'application/json',
             },
@@ -90,7 +134,7 @@ export const newFrameForm = kea<newFrameFormType>([
           const result = await response.json()
           if (result?.frame?.id) {
             framesModel.actions.addFrame(result.frame)
-            actions.frameCreated(result.frame.id)
+            actions.frameCreated(result.frame.id, installMethod)
           }
         } catch (error) {
           console.error(error)
@@ -125,7 +169,7 @@ export const newFrameForm = kea<newFrameFormType>([
             if (result?.frame?.id) {
               framesModel.actions.addFrame(result.frame)
               actions.hideForm()
-              actions.frameCreated(result.frame.id)
+              actions.frameCreated(result.frame.id, 'ssh')
             }
           } catch (error) {
             console.error(error)

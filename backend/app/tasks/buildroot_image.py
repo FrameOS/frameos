@@ -27,7 +27,6 @@ from app.models.frame import (
     Frame,
     get_frame_json,
     get_interpreted_scenes_json,
-    normalize_buildroot_setup_json_reset_file_path,
     update_frame,
 )
 from app.models.log import new_log as log
@@ -43,6 +42,7 @@ from app.tasks.setup_json_reset import (
     setup_json_reset_file_path,
 )
 from app.tasks.utils import get_fresh_frame
+from app.tasks.prebuilt_deps import resolve_prebuilt_target
 from app.utils.cross_compile import CrossCompiler, TargetMetadata, cross_cache_key, cross_cache_root
 from app.utils.ssh_key_utils import select_ssh_keys_for_frame
 from app.utils.local_exec import exec_local_command
@@ -54,7 +54,7 @@ BUILDROOT_HOST_CXXFLAGS = "-O2 -pipe -std=gnu++17"
 BUILDROOT_HOST_CFLAGS = "-O2 -pipe"
 BUILDROOT_JLEVEL = int(os.environ.get("FRAMEOS_BUILDROOT_JLEVEL", "0"))
 BUILDROOT_BOOTSTRAP_SCRIPT_VERSION = "4"
-BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION = 8
+BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION = 9
 BUILDROOT_FRAMEOS_PARTITION_SIZE = os.environ.get("FRAMEOS_BUILDROOT_FRAMEOS_PARTITION_SIZE", "512M")
 BUILDROOT_ASSETS_PARTITION_SIZE = os.environ.get("FRAMEOS_BUILDROOT_ASSETS_PARTITION_SIZE", "512M")
 BUILDROOT_ARCHIVE_BASE_URL = os.environ.get("FRAMEOS_ARCHIVE_BASE_URL", "https://archive.frameos.net/")
@@ -77,10 +77,14 @@ BUILDROOT_DOCKER_APT_DEPS = (
     "flex",
     "g++",
     "gfortran",
+    "genimage",
     "git",
+    "dosfstools",
+    "e2fsprogs",
     "libncurses-dev",
     "libssl-dev",
     "make",
+    "mtools",
     "perl",
     "python3",
     "rsync",
@@ -276,7 +280,29 @@ def _lgpio_runtime_library_paths() -> list[Path]:
             continue
         for pattern in ("liblgpio.so*", "librgpio.so*"):
             libraries.extend(sorted(path for path in lib_dir.glob(pattern) if path.is_file()))
+    prebuilt_target = resolve_prebuilt_target(
+        FRAMEOS_BUILD_TARGET.distro,
+        FRAMEOS_BUILD_TARGET.version,
+        FRAMEOS_BUILD_TARGET.arch,
+    )
+    if prebuilt_target:
+        prebuilt_root = REPO_ROOT / "build" / "prebuilt-deps" / prebuilt_target
+        for lib_dir in sorted(prebuilt_root.glob("lgpio-*/lib")):
+            if not lib_dir.is_dir():
+                continue
+            for pattern in ("liblgpio.so*", "librgpio.so*"):
+                libraries.extend(sorted(path for path in lib_dir.glob(pattern) if path.is_file()))
     return list(dict.fromkeys(libraries))
+
+
+def copy_lgpio_runtime_libraries(overlay_dir: Path) -> None:
+    runtime_libraries = _lgpio_runtime_library_paths()
+    if not runtime_libraries:
+        raise RuntimeError("Buildroot image requires lgpio runtime libraries, but none were found in the cross sysroot or prebuilt deps")
+    destination = overlay_dir / "usr" / "lib"
+    destination.mkdir(parents=True, exist_ok=True)
+    for library in runtime_libraries:
+        shutil.copy2(library, destination / library.name)
 
 
 def _service_runtime_lines(
@@ -379,7 +405,7 @@ def clear_buildroot_sd_image(frame: Frame | Any) -> None:
 def _boot_setup_payload_path(boot_overlay_dir: Path, setup_file_path: str) -> Path:
     relative_path = setup_file_path.lstrip("/")
     if relative_path == "boot" or not relative_path or not relative_path.startswith("boot/"):
-        raise ValueError("Setup JSON reset file path must name a file below /boot")
+        raise ValueError("Setup JSON payload path must name a file below /boot")
     relative_path = relative_path[len("boot/"):]
     return boot_overlay_dir / relative_path
 
@@ -418,10 +444,6 @@ def ensure_buildroot_frame_defaults(frame: Frame, platform: str | None = None) -
 
     buildroot = dict(frame.buildroot or {})
     buildroot["platform"] = normalized_platform
-    buildroot["setupJsonResetFilePath"] = normalize_buildroot_setup_json_reset_file_path(
-        buildroot.get("setupJsonResetFilePath"),
-        default_if_missing=True,
-    )
     frame.buildroot = buildroot
 
 
@@ -429,14 +451,12 @@ def validate_buildroot_network(network: dict[str, Any] | None) -> tuple[str, str
     network = network if isinstance(network, dict) else {}
     ssid = str(network.get("wifiSSID") or "").strip()
     password = str(network.get("wifiPassword") or "")
-    if not ssid:
-        raise ValueError("WiFi network is required for Buildroot SD card images")
-    if not password:
-        raise ValueError("WiFi password is required for Buildroot SD card images")
     if "\n" in ssid or "\r" in ssid:
         raise ValueError("WiFi network cannot contain line breaks")
     if "\n" in password or "\r" in password:
         raise ValueError("WiFi password cannot contain line breaks")
+    if bool(ssid) != bool(password):
+        raise ValueError("WiFi network and password must be provided together")
     return ssid, password
 
 
@@ -670,10 +690,12 @@ class BuildrootImageBuilder:
             self._write_post_image_script(post_image_path)
             base_entry = await resolve_buildroot_base_entry(SUPPORTED_BUILDROOT_PLATFORM)
             base_image_path = await ensure_buildroot_base_image(base_entry, buildroot_base_cache_dir())
+            compose_image = await self._ensure_buildroot_image()
             await self._compose_sd_image_from_base(
                 temp_dir=temp_dir,
                 base_image_path=base_image_path,
                 output_path=raw_output_path,
+                image=compose_image,
             )
 
             if not raw_output_path.is_file():
@@ -889,13 +911,7 @@ class BuildrootImageBuilder:
         destination.write_text("\n".join(rendered_lines) + "\n", encoding="utf-8")
 
     def _copy_runtime_libraries(self, overlay_dir: Path) -> None:
-        runtime_libraries = _lgpio_runtime_library_paths()
-        if not runtime_libraries:
-            raise RuntimeError("Buildroot image requires lgpio runtime libraries, but none were found in the cross sysroot")
-        destination = overlay_dir / "usr" / "lib"
-        destination.mkdir(parents=True, exist_ok=True)
-        for library in runtime_libraries:
-            shutil.copy2(library, destination / library.name)
+        copy_lgpio_runtime_libraries(overlay_dir)
 
     def _write_boot_authorized_keys(self, authorized_keys: Path) -> None:
         settings = get_settings_dict(self.db)
@@ -913,6 +929,9 @@ class BuildrootImageBuilder:
 
     def _write_boot_wifi_connection(self, path: Path) -> None:
         ssid, password = validate_buildroot_wifi_credentials(self.frame)
+        if not ssid:
+            path.unlink(missing_ok=True)
+            return
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(_network_manager_wifi_connection(ssid, password), encoding="utf-8")
         os.chmod(path, 0o600)
@@ -950,6 +969,7 @@ class BuildrootImageBuilder:
                     "BR2_PACKAGE_FINDUTILS=y",
                     "BR2_PACKAGE_GZIP=y",
                     "BR2_PACKAGE_TAR=y",
+                    "BR2_PACKAGE_NANO=y",
                     "BR2_PACKAGE_IPROUTE2=y",
                     "BR2_PACKAGE_KMOD=y",
                     "BR2_PACKAGE_OPENSSL=y",
@@ -1087,10 +1107,6 @@ class BuildrootImageBuilder:
         buildroot = dict(bootstrap_data.get("buildroot") or {})
         buildroot.pop("sdImage", None)
         buildroot["platform"] = normalize_buildroot_platform(buildroot.get("platform"))
-        buildroot["setupJsonResetFilePath"] = normalize_buildroot_setup_json_reset_file_path(
-            buildroot.get("setupJsonResetFilePath"),
-            default_if_missing=True,
-        )
         bootstrap_data["buildroot"] = buildroot
         return SimpleNamespace(**bootstrap_data)
 
@@ -1235,7 +1251,14 @@ chmod a+r /artifacts/{shlex.quote(output_filename)}
         if status != 0:
             raise RuntimeError(f"Buildroot image build failed: {err or 'see logs'}")
 
-    async def _compose_sd_image_from_base(self, *, temp_dir: Path, base_image_path: Path, output_path: Path) -> None:
+    async def _compose_sd_image_from_base(
+        self,
+        *,
+        temp_dir: Path,
+        base_image_path: Path,
+        output_path: Path,
+        image: str,
+    ) -> None:
         await self._log("stdout", f"Composing SD image from cached Buildroot base {base_image_path.name}")
         compose_dir = temp_dir / "compose"
         compose_dir.mkdir(parents=True, exist_ok=True)
@@ -1280,8 +1303,10 @@ image assets.vfat {{
             """#!/usr/bin/env bash
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
-apt-get update
-apt-get install -y --no-install-recommends genimage dosfstools e2fsprogs mtools
+if ! command -v genimage >/dev/null 2>&1 || ! command -v mkfs.vfat >/dev/null 2>&1 || ! command -v mcopy >/dev/null 2>&1; then
+  apt-get update
+  apt-get install -y --no-install-recommends genimage dosfstools e2fsprogs mtools
+fi
 rm -rf /work/tmp
 rm -rf /tmp/frameos-compose-roots
 mkdir -p /tmp/frameos-compose-roots
@@ -1297,7 +1322,7 @@ genimage --rootpath /work/empty-root --tmppath /work/tmp --inputpath /work/image
             [
                 "docker run --rm",
                 f"-v {shlex.quote(str(compose_dir))}:/work",
-                shlex.quote(BUILDROOT_DOCKER_IMAGE),
+                shlex.quote(image),
                 "bash /work/compose-partitions.sh",
             ]
         )
@@ -1315,13 +1340,15 @@ genimage --rootpath /work/empty-root --tmppath /work/tmp --inputpath /work/image
         partitions = _mbr_partitions(output_path)
         _replace_partition(output_path, partitions, 3, images_dir / "frameos.ext4")
         _replace_partition(output_path, partitions, 4, images_dir / "assets.vfat")
-        await self._patch_boot_partition(output_path, partitions, boot_root)
+        await self._patch_boot_partition(output_path, partitions, boot_root, image=image)
 
     async def _patch_boot_partition(
         self,
         output_path: Path,
         partitions: list[dict[str, int]],
         boot_root: Path,
+        *,
+        image: str,
     ) -> None:
         if not partitions:
             raise RuntimeError("Cannot patch BOOT partition; SD image has no partitions")
@@ -1332,8 +1359,10 @@ genimage --rootpath /work/empty-root --tmppath /work/tmp --inputpath /work/image
             f"""#!/usr/bin/env bash
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
-apt-get update
-apt-get install -y --no-install-recommends mtools
+if ! command -v mlabel >/dev/null 2>&1 || ! command -v mcopy >/dev/null 2>&1; then
+  apt-get update
+  apt-get install -y --no-install-recommends mtools
+fi
 disk=/image/{shlex.quote(output_path.name)}
 offset={partitions[0]["start"]}
 target="${{disk}}@@${{offset}}"
@@ -1353,7 +1382,7 @@ fi
                 f"-v {shlex.quote(str(output_path.parent))}:/image",
                 f"-v {shlex.quote(str(boot_root))}:/boot-root",
                 f"-v {shlex.quote(str(script_path))}:/patch-boot.sh",
-                shlex.quote(BUILDROOT_DOCKER_IMAGE),
+                shlex.quote(image),
                 "bash /patch-boot.sh",
             ]
         )
@@ -1405,6 +1434,29 @@ fi
             return f"{image}@{digest}"
         return image
 
+    async def _buildroot_image_has_compose_tools(self, image: str) -> bool:
+        status, _out, _err = await exec_local_command(
+            self.db,
+            self.redis,
+            self.frame,
+            " ".join(
+                [
+                    "docker run --rm",
+                    shlex.quote(image),
+                    "sh -lc",
+                    shlex.quote(
+                        "command -v genimage >/dev/null 2>&1"
+                        " && command -v mkfs.vfat >/dev/null 2>&1"
+                        " && command -v mcopy >/dev/null 2>&1"
+                        " && command -v mlabel >/dev/null 2>&1"
+                    ),
+                ]
+            ),
+            log_command=False,
+            log_output=False,
+        )
+        return status == 0
+
     async def _ensure_buildroot_image(self) -> str:
         image = self._buildroot_image()
         resolved_image = self._resolved_buildroot_image()
@@ -1417,7 +1469,7 @@ fi
                 log_command=False,
                 log_output=False,
             )
-            if status == 0:
+            if status == 0 and await self._buildroot_image_has_compose_tools(resolved_image):
                 return resolved_image
 
             if resolved_image != image:
@@ -1429,7 +1481,7 @@ fi
                     log_command=False,
                     log_output=False,
                 )
-                if status == 0:
+                if status == 0 and await self._buildroot_image_has_compose_tools(image):
                     return image
 
             legacy_image = self._legacy_buildroot_image()
@@ -1441,7 +1493,7 @@ fi
                 log_command=False,
                 log_output=False,
             )
-            if status == 0:
+            if status == 0 and await self._buildroot_image_has_compose_tools(legacy_image):
                 return legacy_image
 
             if not BUILDROOT_SKIP_PULL:
@@ -1454,7 +1506,7 @@ fi
                     log_command=f"docker pull {shlex.quote(resolved_image)}",
                     log_output=False,
                 )
-                if status == 0:
+                if status == 0 and await self._buildroot_image_has_compose_tools(resolved_image):
                     return resolved_image
 
                 if resolved_image != image:
@@ -1466,12 +1518,12 @@ fi
                         log_command=f"docker pull {shlex.quote(image)}",
                         log_output=False,
                     )
-                    if status == 0:
+                    if status == 0 and await self._buildroot_image_has_compose_tools(image):
                         return image
 
                 await self._log(
                     "stderr",
-                    f"Falling back to local Buildroot image build after pull failed for {resolved_image}: {pull_err or 'unknown error'}",
+                    f"Falling back to local Buildroot image build after pull failed or missed required image tools for {resolved_image}: {pull_err or 'unknown error'}",
                 )
 
         if not BUILDROOT_DOCKERFILE.exists():

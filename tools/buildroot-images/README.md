@@ -52,3 +52,67 @@ and uploading another manifest entry. The partition layout must stay:
 2. ext4 root
 3. ext4 `FRAMEOS`
 4. FAT `ASSETS`
+
+## Buildroot Helper Container
+
+There are two separate caches involved in Buildroot SD image generation:
+
+1. The R2 base image cache stores the slow Buildroot root filesystem and
+   partition layout.
+2. The Docker helper image stores the build/composition tools needed to compile
+   FrameOS and patch the cached base image into a frame-specific SD image.
+
+The helper image is built from `backend/tools/buildroot.Dockerfile` and defaults
+to:
+
+```text
+frameos/frameos-buildroot:debian_bookworm-2025.02.13-latest
+```
+
+It preinstalls the Buildroot host dependencies plus the SD image composition
+tools `genimage`, `dosfstools` (`mkfs.vfat`), `e2fsprogs`, and `mtools`
+(`mcopy`, `mlabel`). If those tools are missing, the backend treats the image as
+stale and falls back to pulling or locally rebuilding a fresh helper image. The
+runtime composition scripts still have an `apt-get install` fallback for old
+images, but a current helper image should avoid package installation on every SD
+card build.
+
+The backend resolves the helper image in `backend/app/tasks/buildroot_image.py`.
+The main environment knobs are:
+
+```bash
+FRAMEOS_BUILDROOT_IMAGE_REPO=frameos/frameos-buildroot
+FRAMEOS_BUILDROOT_IMAGE_TAG=latest
+FRAMEOS_BUILDROOT_IMAGE=...              # optional full image override
+FRAMEOS_BUILDROOT_DOCKER_IMAGE=debian:bookworm
+FRAMEOS_BUILDROOT_VERSION=2025.02.13
+FRAMEOS_BUILDROOT_FORCE_LOCAL_BUILD=1    # ignore remote cache and build locally
+FRAMEOS_BUILDROOT_SKIP_PULL=1            # do not pull from Docker Hub
+```
+
+To verify a local or pulled helper image has the required composition tools:
+
+```bash
+docker run --rm frameos/frameos-buildroot:debian_bookworm-2025.02.13-latest \
+  sh -lc 'command -v genimage && command -v mkfs.vfat && command -v mcopy && command -v mlabel'
+```
+
+The preferred publishing path is the GitHub workflow
+`.github/workflows/frameos-buildroot.yml`, which runs when
+`backend/tools/buildroot.Dockerfile` changes on `main` and uses repository
+secrets to push to Docker Hub.
+
+Manual publishing requires Docker Hub write access:
+
+```bash
+docker buildx create --name frameos-publish --driver docker-container --use
+
+docker buildx build \
+  --builder frameos-publish \
+  --platform linux/amd64,linux/arm64 \
+  --build-arg BASE_IMAGE=debian:bookworm \
+  --build-arg BUILDROOT_VERSION=2025.02.13 \
+  --tag frameos/frameos-buildroot:debian_bookworm-2025.02.13-latest \
+  --push \
+  -f backend/tools/buildroot.Dockerfile .
+```

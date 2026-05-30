@@ -19,13 +19,9 @@ BOOT_SETUP_RESET_LOG_FILE = "/boot/frameos-setup-reset.log"
 def setup_json_reset_file_path(frame: Frame | Any, *, default_if_missing: bool = False) -> str:
     if getattr(frame, "mode", None) != "buildroot" and not default_if_missing:
         return ""
-    buildroot = frame.buildroot if isinstance(getattr(frame, "buildroot", None), dict) else {}
-    raw_value = buildroot.get("setupJsonResetFilePath")
-    if raw_value is None:
-        if default_if_missing or getattr(frame, "mode", None) == "buildroot":
-            return DEFAULT_SETUP_JSON_RESET_FILE_PATH
-        return ""
-    return str(raw_value).strip()
+    if default_if_missing or getattr(frame, "mode", None) == "buildroot":
+        return DEFAULT_SETUP_JSON_RESET_FILE_PATH
+    return ""
 
 
 def setup_json_reset_enabled(frame: Frame | Any) -> bool:
@@ -40,6 +36,32 @@ set -eu
 
 SETUP_FILE={quoted_setup_file_path}
 LOG_FILE={quoted_log_file_path}
+
+request_reboot() {{
+  sync || true
+  if [ "$(id -u)" = "0" ]; then
+    if command -v systemctl >/dev/null 2>&1 && systemctl reboot; then
+      return 0
+    fi
+    if command -v reboot >/dev/null 2>&1 && reboot; then
+      return 0
+    fi
+    if command -v shutdown >/dev/null 2>&1 && shutdown -r now; then
+      return 0
+    fi
+  elif command -v sudo >/dev/null 2>&1; then
+    if command -v systemctl >/dev/null 2>&1 && sudo systemctl reboot; then
+      return 0
+    fi
+    if command -v reboot >/dev/null 2>&1 && sudo reboot; then
+      return 0
+    fi
+    if command -v shutdown >/dev/null 2>&1 && sudo shutdown -r now; then
+      return 0
+    fi
+  fi
+  return 1
+}}
 
 if [ ! -f "$SETUP_FILE" ]; then
   exit 0
@@ -122,11 +144,13 @@ fi
 
 if [ "$setup_status" -eq 2 ]; then
   echo "FrameOS setup requested reboot"
-  if [ "$(id -u)" = "0" ]; then
-    reboot
-  else
-    sudo reboot
+  if request_reboot; then
+    echo "Reboot command accepted"
+    echo "FrameOS first-boot setup ended at $(date -Iseconds 2>/dev/null || date) with status 0 (reboot requested)"
+    exit 0
   fi
+  echo "FrameOS setup requested reboot, but no reboot command succeeded"
+  exit 1
 fi
 
 echo "FrameOS first-boot setup ended at $(date -Iseconds 2>/dev/null || date) with status $setup_status"

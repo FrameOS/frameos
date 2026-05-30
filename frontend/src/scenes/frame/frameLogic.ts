@@ -46,6 +46,8 @@ interface DeployPlanApiResponse {
   plan: DeployPlanResponse
 }
 
+export type DeployDrawerView = 'main' | 'sdCard' | 'script'
+
 export interface FrameLogicProps {
   frameId: number
 }
@@ -234,10 +236,7 @@ export function normalizeFrameErrorBehavior(errorBehavior?: Partial<FrameErrorBe
       DEFAULT_FRAME_ERROR_BEHAVIOR.silent_retry_seconds
     ),
     silent_retry_forever: errorBehavior?.silent_retry_forever ?? DEFAULT_FRAME_ERROR_BEHAVIOR.silent_retry_forever,
-    silent_window_minutes: positiveNumber(
-      silentWindowMinutes,
-      DEFAULT_FRAME_ERROR_BEHAVIOR.silent_window_minutes
-    ),
+    silent_window_minutes: positiveNumber(silentWindowMinutes, DEFAULT_FRAME_ERROR_BEHAVIOR.silent_window_minutes),
     show_error_retry_seconds: positiveNumber(
       errorBehavior?.show_error_retry_seconds,
       DEFAULT_FRAME_ERROR_BEHAVIOR.show_error_retry_seconds
@@ -414,10 +413,7 @@ function sortDeployChangeDetails(changes: ChangeDetail[]): ChangeDetail[] {
 }
 
 function normalizeRpiosCompilationMode(value: unknown): 'static' | 'shared' | 'shared-scenes' | 'precompiled' {
-  return value === 'static' ||
-    value === 'shared' ||
-    value === 'shared-scenes' ||
-    value === 'precompiled'
+  return value === 'static' || value === 'shared' || value === 'shared-scenes' || value === 'precompiled'
     ? value
     : 'precompiled'
 }
@@ -807,13 +803,14 @@ function sanitizeFrame(frame: Partial<FrameType>): Partial<FrameType> {
   const frameAdminAuthUser = frame.frame_admin_auth?.user ?? ''
   const frameAdminAuthPass = frame.frame_admin_auth?.pass ?? ''
   const mountpoints = normalizeMountpointsForComparison(frame.mountpoints) as FrameType['mountpoints']
-  const buildroot = frame.mode === 'buildroot' || frame.buildroot
-    ? {
-        ...(frame.buildroot ?? {}),
-        compilationMode: frame.buildroot?.compilationMode ?? '',
-        setupJsonResetFilePath: frame.buildroot?.setupJsonResetFilePath ?? '/boot/frameos-setup.json',
-      }
-    : frame.buildroot
+  const assetsPath = frame.mode === 'buildroot' ? '/srv/assets' : frame.assets_path
+  const buildroot =
+    frame.mode === 'buildroot' || frame.buildroot
+      ? {
+          ...(frame.buildroot ?? {}),
+          compilationMode: frame.buildroot?.compilationMode ?? '',
+        }
+      : frame.buildroot
   const rpios = frame.rpios
     ? {
         ...frame.rpios,
@@ -823,6 +820,7 @@ function sanitizeFrame(frame: Partial<FrameType>): Partial<FrameType> {
 
   return {
     ...frame,
+    assets_path: assetsPath,
     rpios,
     frame_admin_auth: {
       enabled: frame.frame_admin_auth?.enabled ?? false,
@@ -834,6 +832,21 @@ function sanitizeFrame(frame: Partial<FrameType>): Partial<FrameType> {
     buildroot,
     scenes: frame.scenes?.map((scene) => sanitizeScene(scene, frame)) ?? [],
   }
+}
+
+function normalizeFrameForSubmit(frame: Partial<FrameType>): Partial<FrameType> {
+  return frame.mode === 'buildroot' ? { ...frame, assets_path: '/srv/assets' } : frame
+}
+
+function preferSshTransportWhenAgentUnavailable(
+  frame: Partial<FrameType>,
+  agentConnected: boolean
+): Partial<FrameType> {
+  const agent = frame.agent
+  if (!agentConnected && isAgentDeployConfigured(agent) && agent?.deployWithAgent !== false) {
+    return { ...frame, agent: { ...agent, deployWithAgent: false } }
+  }
+  return frame
 }
 
 function getCurrentFrameForm(frame: FrameType | null | undefined, frameForm: Partial<FrameType>): Partial<FrameType> {
@@ -862,7 +875,7 @@ function buildBlankScene(frame: Partial<FrameType>, name: string = 'New blank sc
 }
 
 async function saveFrameForm(frame: Partial<FrameType>, frameId: number, nextAction: FrameNextAction): Promise<void> {
-  const json = buildDeployPlanRequestBody(frame, FRAME_KEYS)
+  const json = buildDeployPlanRequestBody(normalizeFrameForSubmit(frame), FRAME_KEYS)
   if (nextAction) {
     json['next_action'] = nextAction
   }
@@ -972,8 +985,7 @@ export const frameLogic = kea<frameLogicType>([
     verifyTlsCertificates: true,
     showDeployPlanModal: true,
     hideDeployPlanModal: true,
-    showUnsavedChangesModal: true,
-    hideUnsavedChangesModal: true,
+    setDeployDrawerView: (view: DeployDrawerView) => ({ view }),
     loadDeployPlans: () => ({ startedAt: new Date().toISOString() }),
     loadDeployPlansSuccess: (plan: DeployPlanResponse | null) => ({ plan }),
     loadDeployPlansFailure: (error: string) => ({ error }),
@@ -1085,16 +1097,14 @@ export const frameLogic = kea<frameLogicType>([
       {
         showDeployPlanModal: () => true,
         hideDeployPlanModal: () => false,
-        showUnsavedChangesModal: () => false,
+        submitFrameFormSuccess: () => false,
       },
     ],
-    unsavedChangesModalOpen: [
-      false,
+    deployDrawerView: [
+      'main' as DeployDrawerView,
       {
-        showUnsavedChangesModal: () => true,
-        hideUnsavedChangesModal: () => false,
-        showDeployPlanModal: () => false,
-        submitFrameFormSuccess: () => false,
+        setDeployDrawerView: (_, { view }) => view,
+        hideDeployPlanModal: () => 'main',
       },
     ],
   }),
@@ -1186,14 +1196,11 @@ export const frameLogic = kea<frameLogicType>([
       }
     },
     loadDeployPlans: async () => {
-      if ((values.frameForm?.mode || values.frame?.mode || 'rpios') === 'buildroot') {
-        actions.loadDeployPlansSuccess(null)
-        return
-      }
-      const response = await apiFetch(`/api/frames/${values.frameId}/deploy_plan`, {
+      const planMode = (values.frameForm?.mode || values.frame?.mode || 'rpios') === 'buildroot' ? '?mode=fast' : ''
+      const response = await apiFetch(`/api/frames/${values.frameId}/deploy_plan${planMode}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(buildDeployPlanRequestBody(values.frameForm, FRAME_KEYS)),
+        body: JSON.stringify(buildDeployPlanRequestBody(normalizeFrameForSubmit(values.frameForm), FRAME_KEYS)),
       })
       if (!response.ok) {
         const payload = await response.json().catch(() => ({}))
@@ -1205,9 +1212,6 @@ export const frameLogic = kea<frameLogicType>([
       actions.loadDeployPlansSuccess(payload.plan)
     },
     showDeployPlanModal: () => {
-      if ((values.frameForm?.mode || values.frame?.mode || 'rpios') === 'buildroot') {
-        return
-      }
       const hasUsableLocalPlan =
         Boolean(values.deployRecommendation) ||
         values.fullDeployPlanSummary.length > 0 ||
@@ -1366,15 +1370,15 @@ export const frameLogic = kea<frameLogicType>([
         if (!isAgentDeployConfigured(agent)) {
           return false
         }
+        if ((frame?.active_connections ?? 0) <= 0) {
+          return false
+        }
         return agent?.deployWithAgent ?? true
       },
     ],
     deployTransportToggleVisible: [
       (s) => [s.frameForm, s.frame],
       (frameForm, frame): boolean => {
-        if ((frameForm?.mode || frame?.mode || 'rpios') === 'buildroot') {
-          return false
-        }
         const agent = frameForm?.agent ?? frame?.agent
         return isAgentDeployConfigured(agent)
       },
@@ -1395,18 +1399,39 @@ export const frameLogic = kea<frameLogicType>([
       framesModel.actions.loadFrame(props.frameId)
     },
     saveAndDeployFrame: async () => {
-      await asyncActions.submitFrameForm()
+      const frameForm = preferSshTransportWhenAgentUnavailable(values.frameForm, values.agentDeployConnected)
+      if (frameForm !== values.frameForm) {
+        actions.setFrameFormValues({ agent: frameForm.agent })
+        await saveFrameForm(frameForm, props.frameId, values.nextAction)
+        framesModel.actions.loadFrame(props.frameId)
+      } else {
+        await asyncActions.submitFrameForm()
+      }
       framesModel.actions.deployFrame(
         props.frameId,
         Boolean(values.frame?.last_successful_deploy_at) && !values.requiresRecompilation
       )
     },
     saveAndFastDeployFrame: async () => {
-      await asyncActions.submitFrameForm()
+      const frameForm = preferSshTransportWhenAgentUnavailable(values.frameForm, values.agentDeployConnected)
+      if (frameForm !== values.frameForm) {
+        actions.setFrameFormValues({ agent: frameForm.agent })
+        await saveFrameForm(frameForm, props.frameId, values.nextAction)
+        framesModel.actions.loadFrame(props.frameId)
+      } else {
+        await asyncActions.submitFrameForm()
+      }
       framesModel.actions.deployFrame(props.frameId, true)
     },
     saveAndFullDeployFrame: async () => {
-      await asyncActions.submitFrameForm()
+      const frameForm = preferSshTransportWhenAgentUnavailable(values.frameForm, values.agentDeployConnected)
+      if (frameForm !== values.frameForm) {
+        actions.setFrameFormValues({ agent: frameForm.agent })
+        await saveFrameForm(frameForm, props.frameId, values.nextAction)
+        framesModel.actions.loadFrame(props.frameId)
+      } else {
+        await asyncActions.submitFrameForm()
+      }
       framesModel.actions.deployFrame(props.frameId, false)
     },
     renderFrame: () => framesModel.actions.renderFrame(props.frameId),

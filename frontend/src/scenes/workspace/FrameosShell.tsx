@@ -9,7 +9,6 @@ import {
   Cog6ToothIcon,
   CodeBracketIcon,
   ComputerDesktopIcon,
-  CloudArrowUpIcon,
   MagnifyingGlassIcon,
   MoonIcon,
   PlusIcon,
@@ -34,7 +33,6 @@ import { Chat } from '../frame/panels/Chat/Chat'
 import { chatLogic } from '../frame/panels/Chat/chatLogic'
 import { workspaceChatDrawerLogic } from './workspaceChatDrawerLogic'
 import { FrameDeployPlanDrawer } from './FrameDeployPlanDrawer'
-import { FrameUnsavedChangesDrawer } from './FrameUnsavedChangesDrawer'
 import { DeployToFrameIcon } from './FrameChangeStatusIcon'
 
 const DEFAULT_BROWSER_TITLE = 'FrameOS Backend'
@@ -248,14 +246,11 @@ function WorkspaceChatDrawer({
 
 function FrameStatusHeaderButton({ frameId }: { frameId: number }): JSX.Element | null {
   const { undeployedChanges, unsavedChanges } = useValues(frameLogic({ frameId }))
-  const { hideDeployPlanModal, hideUnsavedChangesModal } = useActions(frameLogic({ frameId }))
+  const { hideDeployPlanModal } = useActions(frameLogic({ frameId }))
   const { frameChangeDrawerSelection } = useValues(workspaceLogic)
   const { closeFrameChangeDrawer, openFrameChangeDrawer } = useActions(workspaceLogic)
   const statusLabel = unsavedChanges ? 'Unsaved' : undeployedChanges ? 'Undeployed' : null
-  const targetDrawerKind = unsavedChanges ? 'unsaved' : 'deploy'
-  const StatusIcon = unsavedChanges ? CloudArrowUpIcon : DeployToFrameIcon
-  const drawerIsOpen =
-    frameChangeDrawerSelection?.frameId === frameId && frameChangeDrawerSelection.kind === targetDrawerKind
+  const drawerIsOpen = frameChangeDrawerSelection?.frameId === frameId && frameChangeDrawerSelection.kind === 'deploy'
 
   if (!statusLabel) {
     return null
@@ -265,34 +260,22 @@ function FrameStatusHeaderButton({ frameId }: { frameId: number }): JSX.Element 
     <button
       type="button"
       title={`${statusLabel} changes`}
-      aria-label={
-        drawerIsOpen
-          ? unsavedChanges
-            ? 'Close unsaved changes'
-            : 'Close deploy plan'
-          : unsavedChanges
-          ? 'Open unsaved changes'
-          : 'Open deploy plan'
-      }
+      aria-label={drawerIsOpen ? 'Close deploy' : 'Open deploy'}
       onClick={() => {
         if (drawerIsOpen) {
-          if (targetDrawerKind === 'unsaved') {
-            hideUnsavedChangesModal()
-          } else {
-            hideDeployPlanModal()
-          }
+          hideDeployPlanModal()
           closeFrameChangeDrawer()
           return
         }
-        openFrameChangeDrawer(frameId, targetDrawerKind)
+        openFrameChangeDrawer(frameId, 'deploy')
       }}
       className={clsx(
         'workspace-unsaved-header-button flex h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
         'frameos-warning-button'
       )}
     >
-      <StatusIcon className="h-5 w-5 shrink-0" />
-      <span className="workspace-unsaved-header-label">{statusLabel}</span>
+      <DeployToFrameIcon className="h-5 w-5 shrink-0" />
+      <span className="workspace-unsaved-header-label">Deploy</span>
     </button>
   )
 }
@@ -339,11 +322,7 @@ export function FrameosShell({
   const frameChangeDrawerFrame = frameChangeDrawerSelection ? frames[frameChangeDrawerSelection.frameId] : null
   const frameChangeDrawer =
     frameChangeDrawerSelection && frameChangeDrawerFrame ? (
-      frameChangeDrawerSelection.kind === 'unsaved' ? (
-        <FrameUnsavedChangesDrawer frame={frameChangeDrawerFrame} />
-      ) : (
-        <FrameDeployPlanDrawer frame={frameChangeDrawerFrame} />
-      )
+      <FrameDeployPlanDrawer frame={frameChangeDrawerFrame} />
     ) : null
   const workspaceRightPanel = chatDrawerSelection ? (
     <WorkspaceChatDrawer
@@ -374,9 +353,7 @@ export function FrameosShell({
   } as CSSProperties
   const { activeMode, pendingMode } = useDelayedPendingMode(mode)
   const resolvedBrowserTitle =
-    browserTitle === null
-      ? DEFAULT_BROWSER_TITLE
-      : `${browserTitle ?? title} · ${DEFAULT_BROWSER_TITLE}`
+    browserTitle === null ? DEFAULT_BROWSER_TITLE : `${browserTitle ?? title} · ${DEFAULT_BROWSER_TITLE}`
   const preloadFrames = () => preloadSceneComponent('frames')
   const prepareFirstLevelNavigation = () => {
     closeTemplateDrawer()

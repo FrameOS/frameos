@@ -2542,6 +2542,11 @@ async def api_frame_new(
             rpios_settings = {**(frame.rpios or {})}
             rpios_settings["platform"] = data.platform or (frame.rpios or {}).get('platform') or ''
             frame.rpios = rpios_settings
+            if data.agent:
+                frame.agent = {
+                    **(frame.agent or {}),
+                    **data.agent,
+                }
             db.add(frame)
             db.commit()
             db.refresh(frame)

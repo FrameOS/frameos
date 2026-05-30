@@ -60,6 +60,10 @@ def test_buildroot_firstboot_setup_uses_with_setup_command():
     assert "mount -o remount,rw /" in script
     assert "frameos-setup-reset.log" in script
     assert "leaving $SETUP_FILE in place for retry" in script
+    assert "request_reboot()" in script
+    assert "systemctl reboot" in script
+    assert "Reboot command accepted" in script
+    assert "with status 0 (reboot requested)" in script
     assert "--from-file" not in script
 
 
@@ -77,6 +81,7 @@ def test_buildroot_config_avoids_ncurses_selecting_packages(tmp_path):
     assert "BR2_PACKAGE_DROPBEAR=y" in config
     assert "BR2_PACKAGE_DBUS=y" in config
     assert "BR2_PACKAGE_TZDATA=y" in config
+    assert "BR2_PACKAGE_NANO=y" in config
     assert "BR2_PACKAGE_NETWORK_MANAGER=y" in config
     assert "BR2_PACKAGE_NETWORK_MANAGER_WIFI=y" in config
     assert "BR2_PACKAGE_WPA_SUPPLICANT=y" in config
@@ -253,6 +258,7 @@ async def test_cached_base_composer_uses_container_visible_srcpaths(tmp_path, mo
         temp_dir=temp_dir,
         base_image_path=base_image,
         output_path=output_image,
+        image="frameos/frameos-buildroot:test",
     )
 
     assert 'srcpath = "/tmp/frameos-compose-roots/frameos"' in captured["config"]
@@ -263,6 +269,8 @@ async def test_cached_base_composer_uses_container_visible_srcpaths(tmp_path, mo
     assert str(temp_dir) not in captured["config"]
     assert "bash /work/compose-partitions.sh" in captured["compose_command"]
     assert "bash /patch-boot.sh" in captured["patch_command"]
+    assert "frameos/frameos-buildroot:test" in captured["compose_command"]
+    assert "frameos/frameos-buildroot:test" in captured["patch_command"]
     assert "tar -C /work/roots -cf - frameos assets | tar -C /tmp/frameos-compose-roots -xf -" in (
         temp_dir / "compose" / "compose-partitions.sh"
     ).read_text(encoding="utf-8")
@@ -376,7 +384,7 @@ def test_buildroot_stage_overlay_leaves_service_install_to_firstboot(tmp_path, m
         frame_host="Frame One.local",
         mode="buildroot",
         network={"wifiSSID": "Test WiFi", "wifiPassword": "secret"},
-        buildroot={"setupJsonResetFilePath": "/boot/frameos-setup.json"},
+        buildroot={},
         ssh_keys=[],
     )
     builder = BuildrootImageBuilder(db=object(), redis=None, frame=frame)
@@ -526,7 +534,6 @@ def test_buildroot_bootstrap_frame_uses_web_only_and_clears_scenes():
             "palette": {},
             "buildroot": {
                 "platform": "raspberry-pi-zero-2-w",
-                "setupJsonResetFilePath": "/boot/frameos-setup.json",
                 "sdImage": {"status": "ready"},
             },
             "rpios": {"compilationMode": "precompiled"},
@@ -547,7 +554,6 @@ def test_buildroot_bootstrap_frame_uses_web_only_and_clears_scenes():
     assert bootstrap_frame.gpio_buttons == []
     assert bootstrap_frame.schedule is None
     assert bootstrap_frame.buildroot["platform"] == "raspberry-pi-zero-2-w"
-    assert bootstrap_frame.buildroot["setupJsonResetFilePath"] == "/boot/frameos-setup.json"
     assert "sdImage" not in bootstrap_frame.buildroot
 
 

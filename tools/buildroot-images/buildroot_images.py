@@ -36,6 +36,7 @@ from app.tasks.buildroot_image import (  # noqa: E402
     BuildrootImageBuilder,
     SUPPORTED_BUILDROOT_PLATFORM,
     _mbr_partitions,
+    copy_lgpio_runtime_libraries,
 )
 from app.tasks.setup_json_reset import (  # noqa: E402
     SETUP_JSON_RESET_SCRIPT_PATH,
@@ -192,6 +193,7 @@ def write_base_bootstrap_overlay(overlay: Path) -> None:
     )
     (overlay / "srv" / "frameos").mkdir(parents=True, exist_ok=True)
     (overlay / "srv" / "assets").mkdir(parents=True, exist_ok=True)
+    copy_lgpio_runtime_libraries(overlay)
 
 
 def build(args: argparse.Namespace) -> None:

@@ -22,7 +22,6 @@ import { frameHost } from '../../decorators/frame'
 import { FrameScene, FrameType, NodeData } from '../../types'
 import { FrameosShell } from './FrameosShell'
 import { FrameDeployPlanDrawer } from './FrameDeployPlanDrawer'
-import { FrameUnsavedChangesDrawer } from './FrameUnsavedChangesDrawer'
 import { FrameSceneSidebarCard } from './FrameSceneSidebarCard'
 import { FrameSidebarPreview } from './FrameSidebarPreview'
 import { sceneWorkspaceLogic } from './sceneWorkspaceLogic'
@@ -148,7 +147,7 @@ function SceneSelector({
         <FrameSidebarPreview
           frame={frame}
           className="order-3 @xs:order-1 @xs:h-full"
-          mediaClassName="@xs:h-full @xs:min-h-[6.75rem]"
+          mediaClassName="@xs:h-full @xs:min-h-[8.625rem]"
         />
         <div className="order-1 min-w-0 space-y-2 @xs:order-2">
           <div>
@@ -793,7 +792,7 @@ function SceneSelectedNodeSync({ frameId, sceneId }: { frameId: number; sceneId:
 
 function SceneWorkspaceFrame({ frameId }: SceneWorkspaceFrameProps): JSX.Element {
   const frameLogicProps = { frameId }
-  const { frame, scenes, unsavedChanges, undeployedChanges, deployPlanModalOpen, unsavedChangesModalOpen } = useValues(
+  const { frame, scenes, unsavedChanges, undeployedChanges, deployPlanModalOpen } = useValues(
     frameLogic(frameLogicProps)
   )
   const { framesList } = useValues(framesModel)
@@ -840,9 +839,7 @@ function SceneWorkspaceFrame({ frameId }: SceneWorkspaceFrameProps): JSX.Element
           showAiButton={false}
           mainClassName="scene-workspace-main h-screen overflow-hidden p-0"
           rightPanel={
-            unsavedChangesModalOpen ? (
-              <FrameUnsavedChangesDrawer frame={frame} />
-            ) : deployPlanModalOpen ? (
+            deployPlanModalOpen ? (
               <FrameDeployPlanDrawer frame={frame} />
             ) : activeUtilityDefinition ? (
               <UtilityDrawer frameId={frameId} scene={selectedScene} />

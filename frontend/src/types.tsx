@@ -131,13 +131,20 @@ export interface FrameMountpointsConfig {
 }
 
 export type FrameMode = 'rpios' | 'buildroot' | 'import'
+export type FrameInstallMethod = 'sd_card' | 'ssh' | 'script'
 export interface NewFrameFormType {
   mode: FrameMode
+  install_method?: FrameInstallMethod
   name?: string | null
   frame_host?: string | null
   device?: string | null
   server_host?: string | null
   platform?: string | null
+  agent?: {
+    agentEnabled?: boolean
+    agentRunCommands?: boolean
+    deployWithAgent?: boolean
+  }
   network?: {
     wifiSSID?: string
     wifiPassword?: string
@@ -705,7 +712,6 @@ export interface Palette {
 export interface FrameBuildrootConfig {
   platform?: string
   compilationMode?: '' | 'static' | 'shared' | 'shared-scenes' | 'precompiled'
-  setupJsonResetFilePath?: string
   sdImage?: {
     status?: 'idle' | 'queued' | 'building' | 'ready' | 'error' | 'missing' | 'stale'
     buildId?: string

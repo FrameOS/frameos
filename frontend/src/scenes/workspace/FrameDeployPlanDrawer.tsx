@@ -1,19 +1,36 @@
 import { useActions, useMountedLogic, useValues } from 'kea'
 import { A as Link } from 'kea-router'
 import clsx from 'clsx'
-import { ArrowDownTrayIcon, ChevronRightIcon, ClipboardDocumentIcon, XMarkIcon } from '@heroicons/react/24/outline'
+import copy from 'copy-to-clipboard'
+import {
+  ArrowDownTrayIcon,
+  ArrowLeftIcon,
+  ChevronRightIcon,
+  ClipboardDocumentIcon,
+  CommandLineIcon,
+  XMarkIcon,
+} from '@heroicons/react/24/outline'
 import { ExclamationCircleIcon } from '@heroicons/react/24/solid'
-import type { ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 
 import { DropdownMenu } from '../../components/DropdownMenu'
 import { FrameConnectionDot } from '../../components/FrameConnectionDot'
 import { Spinner } from '../../components/Spinner'
+import { TextInput } from '../../components/TextInput'
 import { Tooltip } from '../../components/Tooltip'
 import { frameHost } from '../../decorators/frame'
+import { buildrootPlatforms, devices } from '../../devices'
 import { framesModel, type AgentTaskTransport } from '../../models/framesModel'
 import type { FrameType, LogType } from '../../types'
 import { urls } from '../../urls'
-import { frameLogic, type ChangeDetail, type DeployRecommendation, type SummaryItem } from '../frame/frameLogic'
+import { apiFetch } from '../../utils/apiFetch'
+import {
+  frameLogic,
+  type ChangeDetail,
+  type DeployDrawerView,
+  type DeployRecommendation,
+  type SummaryItem,
+} from '../frame/frameLogic'
 import { logsLogic } from '../frame/panels/Logs/logsLogic'
 import { agentBootstrapLogic } from './agentBootstrapLogic'
 import { workspaceLogic } from './workspaceLogic'
@@ -100,7 +117,7 @@ function deployPlanProgressSteps({
       state: strategyChecked ? 'done' : inspected ? (error ? 'error' : 'current') : 'pending',
     },
     {
-      label: planReady ? 'Deployment plan ready' : 'Preparing deployment options',
+      label: planReady ? 'Deploy options ready' : 'Preparing deploy options',
       detail: planReady ? 'Choose fast or full deploy below.' : error || null,
       state: error ? 'error' : planReady ? 'done' : loading && strategyChecked ? 'current' : 'pending',
     },
@@ -282,6 +299,54 @@ function DrawerHeading({ action, children }: { action?: JSX.Element; children: R
   )
 }
 
+function BackToDeployButton({ onClick }: { onClick: () => void }): JSX.Element {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="frameos-secondary-button inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+    >
+      <ArrowLeftIcon className="h-4 w-4" />
+      Back
+    </button>
+  )
+}
+
+function AlternativesSection({ onSelect }: { onSelect: (view: DeployDrawerView) => void }): JSX.Element {
+  return (
+    <section className="mb-4">
+      <div className="frame-tool-card rounded-[22px] p-3">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="frame-tool-heading text-sm font-semibold">Alternatives</div>
+            <div className="frame-tool-muted mt-1 text-xs leading-4">
+              Build installation media or connect a device with a command.
+            </div>
+          </div>
+          <div className="frameos-inset inline-flex shrink-0 items-center rounded-xl border p-1">
+            <button
+              type="button"
+              onClick={() => onSelect('sdCard')}
+              className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-[color:var(--tool-strong)] transition hover:bg-slate-500/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            >
+              <ArrowDownTrayIcon className="h-4 w-4" />
+              Download SD card
+            </button>
+            <button
+              type="button"
+              onClick={() => onSelect('script')}
+              className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-[color:var(--tool-strong)] transition hover:bg-slate-500/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            >
+              <CommandLineIcon className="h-4 w-4" />
+              Run a script
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
 function RecommendationDescription({ recommendation }: { recommendation: DeployRecommendation }): JSX.Element {
   const emphasis = recommendation.descriptionEmphasis
   if (!emphasis || !recommendation.description.includes(emphasis)) {
@@ -341,8 +406,8 @@ function DeployTransportToggle({
               title={
                 <div className="space-y-1">
                   <div>
-                    SSH needs direct network access from the backend to the frame.
-                    The agent runs on the frame, and keeps a connection open to the backend.
+                    SSH needs direct network access from the backend to the frame. The agent runs on the frame, and
+                    keeps a connection open to the backend.
                   </div>
                   <div>
                     To use the agent, enable it under{' '}
@@ -351,7 +416,8 @@ function DeployTransportToggle({
                       className="frameos-link underline underline-offset-2 hover:no-underline"
                     >
                       Settings
-                    </Link>{', '}
+                    </Link>
+                    {', '}
                     and either run the bootstrap script (curl) on the frame, or deploy it over SSH.
                   </div>
                 </div>
@@ -368,9 +434,7 @@ function DeployTransportToggle({
                 onClick={() => onChange(false)}
                 className={clsx(
                   'rounded-lg px-3 py-1.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-                  !deployWithAgent
-                    ? 'frameos-primary-active'
-                    : 'frame-tool-muted hover:text-[color:var(--tool-strong)]'
+                  !deployWithAgent ? 'frameos-primary-active' : 'frame-tool-muted hover:text-[color:var(--tool-strong)]'
                 )}
               >
                 SSH
@@ -382,9 +446,7 @@ function DeployTransportToggle({
                 onClick={() => onChange(true)}
                 className={clsx(
                   'inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-                  deployWithAgent
-                    ? 'frameos-primary-active'
-                    : 'frame-tool-muted hover:text-[color:var(--tool-strong)]'
+                  deployWithAgent ? 'frameos-primary-active' : 'frame-tool-muted hover:text-[color:var(--tool-strong)]'
                 )}
               >
                 {agentConnected ? (
@@ -496,6 +558,247 @@ function AgentBootstrapAction({ frame }: { frame: FrameType }): JSX.Element | nu
   )
 }
 
+function BuildrootSdCardSection({
+  frame,
+  frameForm,
+  onBack,
+  onDownload,
+}: {
+  frame: FrameType
+  frameForm: Partial<FrameType>
+  onBack?: () => void
+  onDownload: () => void
+}): JSX.Element {
+  const { setFrameFormValues, touchFrameFormField } = useActions(frameLogic({ frameId: frame.id }))
+  const network = frameForm.network ?? frame.network ?? {}
+  const buildroot = frameForm.buildroot ?? frame.buildroot ?? {}
+  const serverHost = frameForm.server_host ?? frame.server_host ?? ''
+  const serverPort = frameForm.server_port ?? frame.server_port ?? 8989
+  const device = frameForm.device ?? frame.device ?? 'web_only'
+  const platform = buildroot.platform ?? 'raspberry-pi-zero-2-w'
+  const updateFrameValue = <K extends keyof FrameType>(field: K, value: FrameType[K]): void => {
+    setFrameFormValues({ [field]: value } as Partial<FrameType>)
+    touchFrameFormField(String(field))
+  }
+  const updateNetwork = (field: keyof NonNullable<FrameType['network']>, value: string): void => {
+    setFrameFormValues({ network: { ...network, [field]: value } })
+    touchFrameFormField(`network.${field}`)
+  }
+  const updateBuildroot = (field: keyof NonNullable<FrameType['buildroot']>, value: string): void => {
+    setFrameFormValues({ buildroot: { ...buildroot, [field]: value } })
+    touchFrameFormField(`buildroot.${field}`)
+  }
+
+  return (
+    <section className="mb-5 space-y-2">
+      <DrawerHeading
+        action={
+          <Link
+            href={`${urls.frame(frame.id, 'settings')}#frame-settings-network`}
+            className="frameos-link text-xs font-semibold underline underline-offset-2 hover:no-underline"
+          >
+            More settings
+          </Link>
+        }
+      >
+        <span className="inline-flex items-center gap-2">
+          {onBack ? <BackToDeployButton onClick={onBack} /> : null}
+          <span>Buildroot SD card</span>
+        </span>
+      </DrawerHeading>
+      <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="frame-tool-heading text-sm font-semibold">SD card image</div>
+            <div className="frame-tool-muted mt-1 text-sm leading-5">
+              Prepare a flashable Raspberry Pi Zero 2 W image from the cached Buildroot base and the current FrameOS
+              release.
+            </div>
+            {frame.buildroot?.sdImage?.status ? (
+              <div className="mt-3 text-xs font-semibold uppercase tracking-wide text-[color:var(--tool-strong)]">
+                Status: {frame.buildroot.sdImage.status}
+              </div>
+            ) : null}
+          </div>
+        </div>
+        <div className="grid grid-cols-1 gap-3">
+          <label className="block space-y-1">
+            <span className="frame-tool-muted text-xs font-semibold uppercase tracking-wide">Backend host</span>
+            <TextInput
+              value={serverHost}
+              onChange={(value) => updateFrameValue('server_host', value)}
+              placeholder="192.168.1.10"
+              autoComplete="off"
+            />
+          </label>
+          <label className="block space-y-1">
+            <span className="frame-tool-muted text-xs font-semibold uppercase tracking-wide">Backend port</span>
+            <TextInput
+              value={String(serverPort)}
+              onChange={(value) => updateFrameValue('server_port', Number(value) || 8989)}
+              placeholder="8989"
+              type="number"
+              autoComplete="off"
+            />
+          </label>
+          <label className="block space-y-1">
+            <span className="frame-tool-muted text-xs font-semibold uppercase tracking-wide">Driver</span>
+            <select
+              className="frameos-form-control h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-400/30"
+              value={device}
+              onChange={(event) => updateFrameValue('device', event.target.value)}
+            >
+              {devices.map((group) => (
+                <optgroup key={group.label} label={group.label}>
+                  {group.options.map((device) => (
+                    <option key={device.value} value={device.value}>
+                      {device.label}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+          </label>
+          <label className="block space-y-1">
+            <span className="frame-tool-muted text-xs font-semibold uppercase tracking-wide">Platform</span>
+            <select
+              className="frameos-form-control h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-400/30"
+              value={platform}
+              onChange={(event) => updateBuildroot('platform', event.target.value)}
+            >
+              {buildrootPlatforms.map((platform) => (
+                <option key={platform.value} value={platform.value}>
+                  {platform.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block space-y-1">
+            <span className="frame-tool-muted text-xs font-semibold uppercase tracking-wide">WiFi network</span>
+            <TextInput
+              value={network.wifiSSID ?? ''}
+              onChange={(value) => updateNetwork('wifiSSID', value)}
+              placeholder="Home WiFi"
+              autoComplete="off"
+            />
+          </label>
+          <label className="block space-y-1">
+            <span className="frame-tool-muted text-xs font-semibold uppercase tracking-wide">WiFi password</span>
+            <TextInput
+              value={network.wifiPassword ?? ''}
+              onChange={(value) => updateNetwork('wifiPassword', value)}
+              type="password"
+              placeholder="Network password"
+              autoComplete="new-password"
+            />
+          </label>
+        </div>
+        <button
+          type="button"
+          onClick={onDownload}
+          className="frameos-primary-action inline-flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+        >
+          <ArrowDownTrayIcon className="h-4 w-4" />
+          Build / download SD card
+        </button>
+      </div>
+    </section>
+  )
+}
+
+interface AgentBootstrapApiResponse {
+  command: string
+}
+
+function ScriptInstallSection({ frame, onBack }: { frame: FrameType; onBack: () => void }): JSX.Element {
+  const { loadFrame } = useActions(framesModel)
+  const [command, setCommand] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const loadCommand = async (): Promise<void> => {
+    setLoading(true)
+    setError(null)
+    try {
+      const response = await apiFetch(`/api/frames/${frame.id}/agent_bootstrap?select_agent=1`, {
+        method: 'POST',
+      })
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}))
+        throw new Error(typeof payload?.detail === 'string' ? payload.detail : 'Failed to create install command')
+      }
+      const payload = (await response.json()) as AgentBootstrapApiResponse
+      setCommand(payload.command)
+      loadFrame(frame.id)
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Failed to create install command')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    loadCommand()
+  }, [frame.id])
+
+  const copyCommand = (): void => {
+    if (!command) {
+      return
+    }
+    copy(command)
+    setCopied(true)
+  }
+
+  return (
+    <section className="mb-5 space-y-2">
+      <DrawerHeading>
+        <span className="inline-flex items-center gap-2">
+          <BackToDeployButton onClick={onBack} />
+          <span>Install with a script</span>
+        </span>
+      </DrawerHeading>
+      <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
+        <div className="frame-tool-muted text-sm leading-5">
+          Run this command on the device as a user with sudo access. It installs the FrameOS agent and connects back to
+          this backend.
+        </div>
+        {loading ? (
+          <div className="flex items-center gap-2 text-sm font-semibold text-[color:var(--tool-strong)]">
+            <Spinner />
+            Preparing command
+          </div>
+        ) : error ? (
+          <div className="text-sm font-semibold text-red-500">{error}</div>
+        ) : (
+          <pre className="frameos-inset max-h-44 overflow-auto rounded-xl border p-3 text-xs leading-5 text-[color:var(--tool-strong)]">
+            <code>{command}</code>
+          </pre>
+        )}
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={copyCommand}
+            disabled={!command}
+            className="frameos-primary-action inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
+          >
+            <ClipboardDocumentIcon className="h-4 w-4" />
+            {copied ? 'Copied' : 'Copy command'}
+          </button>
+          <button
+            type="button"
+            onClick={loadCommand}
+            disabled={loading}
+            className="frameos-secondary-button rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
+          >
+            Regenerate
+          </button>
+        </div>
+      </div>
+    </section>
+  )
+}
+
 export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Element | null {
   useMountedLogic(logsLogic({ frameId: frame.id }))
   const {
@@ -505,8 +808,10 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
     deployPlansLoading,
     deployPlansLoadingStartedAt,
     deployRecommendation,
+    deployDrawerView,
     deployTransportToggleVisible,
     deployWithAgent,
+    frameForm,
     fullDeployPlanSummary,
   } = useValues(frameLogic({ frameId: frame.id }))
   const {
@@ -514,18 +819,18 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
     deployAgent,
     loadDeployPlans,
     restartAgent,
-    saveAndDeployFrame,
     saveAndFastDeployFrame,
     saveAndFullDeployFrame,
+    setDeployDrawerView,
     setDeployWithAgent,
   } = useActions(frameLogic({ frameId: frame.id }))
   const { closeFrameChangeDrawer } = useActions(workspaceLogic)
-  const { downloadSdCardImage } = useActions(framesModel)
+  const { downloadSdCardImage, loadFrame } = useActions(framesModel)
   const { logs } = useValues(logsLogic({ frameId: frame.id }))
 
   const deployPlanLogs = deployPlanLogsSince(logs, deployPlansLoadingStartedAt)
   const isBuildrootFrame = (frame.mode ?? 'rpios') === 'buildroot'
-  const canDeployAgent = !isBuildrootFrame
+  const canDeployAgent = true
   const canCopyBootstrapScript = !isBuildrootFrame
   const canBootstrapAgent = !frame.last_successful_deploy_at && !isBuildrootFrame
   const showRecompileAgent = import.meta.env?.DEV === true
@@ -539,6 +844,34 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
     hideDeployPlanModal()
     closeFrameChangeDrawer()
   }
+  const showMainDeployView = (): void => setDeployDrawerView('main')
+
+  const saveSdCardSettingsAndDownload = async (): Promise<void> => {
+    const response = await apiFetch(`/api/frames/${frame.id}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        mode: 'buildroot',
+        assets_path: '/srv/assets',
+        device: frameForm.device ?? frame.device,
+        server_host: frameForm.server_host ?? frame.server_host,
+        server_port: frameForm.server_port ?? frame.server_port,
+        network: {
+          ...(frame.network ?? {}),
+          ...(frameForm.network ?? {}),
+        },
+        buildroot: {
+          ...(frame.buildroot ?? {}),
+          ...(frameForm.buildroot ?? {}),
+        },
+      }),
+    })
+    if (!response.ok) {
+      throw new Error('Failed to save SD card settings')
+    }
+    loadFrame(frame.id)
+    downloadSdCardImage(frame.id)
+  }
 
   return (
     <div className="workspace-drawer frameos-drawer fixed bottom-5 right-5 top-5 z-40 flex w-[430px] overflow-hidden rounded-[24px] border border-white/80 bg-white/95 shadow-2xl shadow-slate-500/30 backdrop-blur-xl">
@@ -548,9 +881,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
             <div className="frameos-muted text-xs font-semibold uppercase tracking-wide text-slate-400">
               {frame.name || frameHost(frame)}
             </div>
-            <h2 className="frameos-strong truncate text-xl font-bold tracking-normal text-slate-950">
-              {isBuildrootFrame ? 'Build SD card' : 'Deploy plan'}
-            </h2>
+            <h2 className="frameos-strong truncate text-xl font-bold tracking-normal text-slate-950">Deploy</h2>
           </div>
           <button
             type="button"
@@ -561,148 +892,143 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
           </button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-          {canBootstrapAgent ? (
-            <div className="mb-4">
-              <AgentBootstrapAction frame={frame} />
-            </div>
-          ) : null}
-          {deployTransportToggleVisible ? (
-            <DeployTransportToggle
-              frameId={frame.id}
-              agentConnected={agentDeployConnected}
-              canDeployAgent={canDeployAgent}
-              canCopyBootstrapScript={canCopyBootstrapScript}
-              showRecompileAgent={showRecompileAgent}
-              onDeployAgent={deployAgent}
-              onRestartAgent={restartAgent}
-              deployWithAgent={deployWithAgent}
-              onChange={setDeployWithAgent}
+          {deployDrawerView === 'sdCard' ? (
+            <BuildrootSdCardSection
+              frame={frame}
+              frameForm={frameForm}
+              onBack={showMainDeployView}
+              onDownload={() => closeAndRun(saveSdCardSettingsAndDownload)}
             />
-          ) : null}
-          {isBuildrootFrame ? (
-            <div className="space-y-5">
-              <section className="space-y-2">
-                <DrawerHeading>SD card image</DrawerHeading>
-                <div className="frame-tool-card rounded-[22px] p-4">
-                  <div className="frame-tool-muted text-sm leading-5">
-                    Prepare a flashable Raspberry Pi Zero 2 W image from the cached Buildroot base and the current
-                    FrameOS release.
-                  </div>
-                  {frame.buildroot?.sdImage?.status ? (
-                    <div className="mt-3 text-xs font-semibold uppercase tracking-wide text-[color:var(--tool-strong)]">
-                      Status: {frame.buildroot.sdImage.status}
-                    </div>
+          ) : deployDrawerView === 'script' ? (
+            <ScriptInstallSection frame={frame} onBack={showMainDeployView} />
+          ) : (
+            <>
+              <AlternativesSection onSelect={setDeployDrawerView} />
+              {canBootstrapAgent ? (
+                <div className="mb-4">
+                  <AgentBootstrapAction frame={frame} />
+                </div>
+              ) : null}
+              {deployTransportToggleVisible ? (
+                <DeployTransportToggle
+                  frameId={frame.id}
+                  agentConnected={agentDeployConnected}
+                  canDeployAgent={canDeployAgent}
+                  canCopyBootstrapScript={canCopyBootstrapScript}
+                  showRecompileAgent={showRecompileAgent}
+                  onDeployAgent={deployAgent}
+                  onRestartAgent={restartAgent}
+                  deployWithAgent={deployWithAgent}
+                  onChange={setDeployWithAgent}
+                />
+              ) : null}
+              {deployPlansLoading ? (
+                <DeployPlanProgress logs={deployPlanLogs} planReady={false} />
+              ) : deployPlansError ? (
+                <div className="space-y-3">
+                  <DeployPlanProgress error={deployPlansError} logs={deployPlanLogs} planReady={false} />
+                  <div className="text-sm font-semibold text-red-500">{deployPlansError}</div>
+                  <button
+                    type="button"
+                    onClick={() => loadDeployPlans()}
+                    className="frameos-secondary-button rounded-lg px-3 py-2 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                  >
+                    Retry
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-5">
+                  {deployRecommendation ? (
+                    <section className="space-y-2">
+                      <DrawerHeading
+                        action={
+                          <button
+                            type="button"
+                            onClick={() => loadDeployPlans()}
+                            disabled={deployPlansLoading}
+                            className="frameos-secondary-button rounded-lg px-2.5 py-1 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
+                          >
+                            Refresh
+                          </button>
+                        }
+                      >
+                        {deployRecommendation.title}
+                      </DrawerHeading>
+                      <div className="frame-tool-card rounded-[22px] p-4">
+                        <div className="frame-tool-muted text-sm leading-5">
+                          <RecommendationDescription recommendation={deployRecommendation} />
+                        </div>
+                      </div>
+                    </section>
+                  ) : null}
+                  {deployChangeDetails.length > 0 ? (
+                    <section className="space-y-2">
+                      <DrawerHeading>Pending changes</DrawerHeading>
+                      <div className="frame-tool-card rounded-[22px] p-4">
+                        <ChangeRows changes={deployChangeDetails} />
+                      </div>
+                    </section>
+                  ) : null}
+                  {fullDeployPlanSummary.length > 0 ? (
+                    <section>
+                      <SummaryRows items={fullDeployPlanSummary} />
+                    </section>
                   ) : null}
                 </div>
-              </section>
-              {deployChangeDetails.length > 0 ? (
-                <section className="space-y-2">
-                  <DrawerHeading>Included changes</DrawerHeading>
-                  <div className="frame-tool-card rounded-[22px] p-4">
-                    <ChangeRows changes={deployChangeDetails} />
-                  </div>
-                </section>
-              ) : null}
-              {fullDeployPlanSummary.length > 0 ? (
-                <section>
-                  <SummaryRows items={fullDeployPlanSummary} />
-                </section>
-              ) : null}
-            </div>
-          ) : deployPlansLoading ? (
-            <DeployPlanProgress logs={deployPlanLogs} planReady={false} />
-          ) : deployPlansError ? (
-            <div className="space-y-3">
-              <DeployPlanProgress error={deployPlansError} logs={deployPlanLogs} planReady={false} />
-              <div className="text-sm font-semibold text-red-500">{deployPlansError}</div>
-              <button
-                type="button"
-                onClick={() => loadDeployPlans()}
-                className="frameos-secondary-button rounded-lg px-3 py-2 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-              >
-                Retry
-              </button>
-            </div>
-          ) : (
-            <div className="space-y-5">
-              {deployRecommendation ? (
-                <section className="space-y-2">
-                  <DrawerHeading
-                    action={
-                      <button
-                        type="button"
-                        onClick={() => loadDeployPlans()}
-                        disabled={deployPlansLoading}
-                        className="frameos-secondary-button rounded-lg px-2.5 py-1 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
-                      >
-                        Refresh
-                      </button>
-                    }
-                  >
-                    {deployRecommendation.title}
-                  </DrawerHeading>
-                  <div className="frame-tool-card rounded-[22px] p-4">
-                    <div className="frame-tool-muted text-sm leading-5">
-                      <RecommendationDescription recommendation={deployRecommendation} />
-                    </div>
-                  </div>
-                </section>
-              ) : null}
-              {deployChangeDetails.length > 0 ? (
-                <section className="space-y-2">
-                  <DrawerHeading>Pending changes</DrawerHeading>
-                  <div className="frame-tool-card rounded-[22px] p-4">
-                    <ChangeRows changes={deployChangeDetails} />
-                  </div>
-                </section>
-              ) : null}
-              {fullDeployPlanSummary.length > 0 ? (
-                <section>
-                  <SummaryRows items={fullDeployPlanSummary} />
-                </section>
-              ) : null}
-            </div>
+              )}
+            </>
           )}
         </div>
         <div className="frameos-divider flex flex-wrap justify-end gap-2 border-t border-slate-200/80 px-5 py-4">
-          <button
-            type="button"
-            onClick={closeDrawer}
-            className="frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-          >
-            Close
-          </button>
-          {isBuildrootFrame ? (
+          {deployDrawerView !== 'main' ? (
             <button
               type="button"
-              onClick={() => closeAndRun(() => downloadSdCardImage(frame.id))}
-              className="frameos-primary-action inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+              onClick={showMainDeployView}
+              className="frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
             >
-              <ArrowDownTrayIcon className="h-5 w-5" />
-              Download SD card image
+              Cancel
             </button>
           ) : (
             <>
               <button
                 type="button"
-                onClick={() => closeAndRun(saveAndFastDeployFrame)}
-                className={clsx(
-                  'rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-                  deployRecommendation?.mode === 'fast' ? 'frameos-primary-action' : 'frameos-secondary-button'
-                )}
+                onClick={closeDrawer}
+                className="frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
               >
-                Fast deploy
+                Close
               </button>
-              <button
-                type="button"
-                onClick={() => closeAndRun(saveAndFullDeployFrame)}
-                className={clsx(
-                  'rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-                  deployRecommendation?.mode === 'full' ? 'frameos-primary-action' : 'frameos-secondary-button'
-                )}
-              >
-                Full deploy
-              </button>
+              {isBuildrootFrame ? (
+                <button
+                  type="button"
+                  onClick={() => closeAndRun(saveAndFastDeployFrame)}
+                  className="frameos-primary-action rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                >
+                  Deploy updates
+                </button>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => closeAndRun(saveAndFastDeployFrame)}
+                    className={clsx(
+                      'rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+                      deployRecommendation?.mode === 'fast' ? 'frameos-primary-action' : 'frameos-secondary-button'
+                    )}
+                  >
+                    Fast deploy
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => closeAndRun(saveAndFullDeployFrame)}
+                    className={clsx(
+                      'rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+                      deployRecommendation?.mode === 'full' ? 'frameos-primary-action' : 'frameos-secondary-button'
+                    )}
+                  >
+                    Full deploy
+                  </button>
+                </>
+              )}
             </>
           )}
         </div>
