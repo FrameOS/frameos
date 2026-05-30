@@ -13,6 +13,7 @@ SETUP_JSON_RESET_SCRIPT_PATH = f"/usr/local/bin/{SETUP_JSON_RESET_SCRIPT_NAME}"
 BOOT_WIFI_CONNECTION_FILE = "/boot/frameos-wifi.nmconnection"
 BOOT_HOSTNAME_FILE = "/boot/frameos-hostname"
 BOOT_AUTHORIZED_KEYS_FILE = "/boot/frameos-authorized_keys"
+BOOT_SETUP_RESET_LOG_FILE = "/boot/frameos-setup-reset.log"
 
 
 def setup_json_reset_file_path(frame: Frame | Any, *, default_if_missing: bool = False) -> str:
@@ -33,35 +34,59 @@ def setup_json_reset_enabled(frame: Frame | Any) -> bool:
 
 def render_setup_json_reset_script(setup_file_path: str) -> str:
     quoted_setup_file_path = shlex.quote(setup_file_path)
+    quoted_log_file_path = shlex.quote(BOOT_SETUP_RESET_LOG_FILE)
     return f"""#!/bin/sh
 set -eu
 
 SETUP_FILE={quoted_setup_file_path}
+LOG_FILE={quoted_log_file_path}
 
 if [ ! -f "$SETUP_FILE" ]; then
   exit 0
 fi
 
+{{
+echo "FrameOS first-boot setup started at $(date -Iseconds 2>/dev/null || date)"
+echo "Setup file: $SETUP_FILE"
+echo "User id: $(id -u)"
+echo "Mounts:"
+findmnt /boot /srv/frameos 2>/dev/null || mount | grep -E ' /boot | /srv/frameos ' || true
+echo "Current release:"
+ls -la /srv/frameos /srv/frameos/current 2>/dev/null || true
+
 if [ -f {shlex.quote(BOOT_HOSTNAME_FILE)} ]; then
+  echo "Installing hostname from {shlex.quote(BOOT_HOSTNAME_FILE)}"
   install -m 644 {shlex.quote(BOOT_HOSTNAME_FILE)} /etc/hostname
 fi
 
 if [ -f {shlex.quote(BOOT_WIFI_CONNECTION_FILE)} ]; then
+  echo "Installing NetworkManager WiFi connection from {shlex.quote(BOOT_WIFI_CONNECTION_FILE)}"
   install -d -m 755 /etc/NetworkManager/system-connections
   install -m 600 {shlex.quote(BOOT_WIFI_CONNECTION_FILE)} /etc/NetworkManager/system-connections/frameos-wifi.nmconnection
 fi
 
 if [ -f {shlex.quote(BOOT_AUTHORIZED_KEYS_FILE)} ]; then
+  echo "Installing authorized keys from {shlex.quote(BOOT_AUTHORIZED_KEYS_FILE)}"
   install -d -m 700 /root/.ssh
   install -m 600 {shlex.quote(BOOT_AUTHORIZED_KEYS_FILE)} /root/.ssh/authorized_keys
 fi
 
+export FRAMEOS_HOME=/srv/frameos/current
+export LD_LIBRARY_PATH=/srv/frameos/current/drivers:/srv/frameos/current/scenes:/usr/lib:/usr/local/lib
+
 setup_status=0
-if sudo /srv/frameos/current/frameos setup --with-setup="$SETUP_FILE"; then
-  setup_status=0
+echo "Running FrameOS setup"
+set +e
+if [ "$(id -u)" = "0" ]; then
+  /srv/frameos/current/frameos setup --with-setup="$SETUP_FILE"
+elif command -v sudo >/dev/null 2>&1; then
+  sudo -E /srv/frameos/current/frameos setup --with-setup="$SETUP_FILE"
 else
-  setup_status=$?
+  echo "FrameOS setup requires root, but sudo is not available"
+  false
 fi
+setup_status=$?
+set -e
 
 timestamp=$(date +%Y%m%d-%H%M)
 case "$SETUP_FILE" in
@@ -70,13 +95,25 @@ case "$SETUP_FILE" in
   *) done_suffix=".json" ;;
 esac
 done_path="$(dirname "$SETUP_FILE")/setup-done-${{timestamp}}${{done_suffix}}"
-mv -f "$SETUP_FILE" "$done_path"
-
-if [ "$setup_status" -eq 2 ]; then
-  sudo reboot
+if [ "$setup_status" -eq 0 ] || [ "$setup_status" -eq 2 ]; then
+  echo "FrameOS setup finished with status $setup_status; moving setup file to $done_path"
+  mv -f "$SETUP_FILE" "$done_path"
+else
+  echo "FrameOS setup failed with status $setup_status; leaving $SETUP_FILE in place for retry"
 fi
 
+if [ "$setup_status" -eq 2 ]; then
+  echo "FrameOS setup requested reboot"
+  if [ "$(id -u)" = "0" ]; then
+    reboot
+  else
+    sudo reboot
+  fi
+fi
+
+echo "FrameOS first-boot setup ended at $(date -Iseconds 2>/dev/null || date) with status $setup_status"
 exit "$setup_status"
+}} >> "$LOG_FILE" 2>&1
 """
 
 
@@ -88,6 +125,7 @@ Description=FrameOS setup JSON reset
 DefaultDependencies=no
 After=local-fs.target systemd-sysusers.service
 Before=frameos.service frameos_agent.service
+RequiresMountsFor=/boot /srv/frameos
 ConditionPathExists={quoted_setup_file_path}
 
 [Service]

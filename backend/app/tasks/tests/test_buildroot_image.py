@@ -54,7 +54,11 @@ def test_buildroot_network_manager_connection_contains_wifi_credentials():
 def test_buildroot_firstboot_setup_uses_with_setup_command():
     script = render_setup_json_reset_script("/boot/frameos-setup.json")
 
-    assert 'sudo /srv/frameos/current/frameos setup --with-setup="$SETUP_FILE"' in script
+    assert "/srv/frameos/current/frameos setup --with-setup=\"$SETUP_FILE\"" in script
+    assert "sudo -E /srv/frameos/current/frameos setup --with-setup=\"$SETUP_FILE\"" in script
+    assert "LD_LIBRARY_PATH=/srv/frameos/current/drivers:/srv/frameos/current/scenes" in script
+    assert "frameos-setup-reset.log" in script
+    assert "leaving $SETUP_FILE in place for retry" in script
     assert "--from-file" not in script
 
 

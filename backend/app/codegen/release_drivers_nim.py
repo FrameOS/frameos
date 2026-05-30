@@ -8,6 +8,7 @@ from app.codegen.drivers_nim import (
     compiled_drivers,
     driver_context_helpers_nim,
     driver_library_filename,
+    setup_helpers_nim,
     write_driver_library_nim,
 )
 from app.drivers.drivers import DRIVERS, Driver
@@ -253,6 +254,8 @@ proc setupSharedDriver(spec: DriverSpec, driverCtx: driverContext.DriverContext)
   let library = loadLib(path)
   if library.isNil:
     echo "FrameOS setup: shared driver " & spec.name & ": failed to load " & path
+    echo "FrameOS setup: shared driver " & spec.name & ": file exists: " & $fileExists(path)
+    echo "FrameOS setup: shared driver " & spec.name & ": LD_LIBRARY_PATH=" & getEnv("LD_LIBRARY_PATH")
     raise newException(OSError, "Unable to load driver library: " & path)
   let setupProc = loadRequiredSymbol[DriverSetupProc](library, spec.name, "frameos_driver_setup")
   if setupProc.isNil:

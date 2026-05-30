@@ -850,6 +850,10 @@ async def test_api_frame_buildroot_sd_image_post_returns_ready_image(async_clien
     image_path = tmp_path / 'frameos-test.img'
     image_path.write_bytes(b'frameos image')
     frame.mode = 'buildroot'
+    current_base_entry = {
+        'object_key': 'buildroot-images/current.img.gz',
+        'sha256': 'current-sha256',
+    }
     frame.buildroot = {
         'platform': 'raspberry-pi-zero-2-w',
         'sdImage': {
@@ -858,6 +862,10 @@ async def test_api_frame_buildroot_sd_image_post_returns_ready_image(async_clien
             'path': str(image_path),
             'downloadUrl': f'/api/frames/{frame.id}/buildroot/sd_image/download',
             'customizationVersion': 6,
+            'baseImage': {
+                'objectKey': current_base_entry['object_key'],
+                'sha256': current_base_entry['sha256'],
+            },
         },
     }
     db.add(frame)
@@ -867,7 +875,11 @@ async def test_api_frame_buildroot_sd_image_post_returns_ready_image(async_clien
     async def fake_buildroot_sd_image(id, _redis, *, request_id=None, queue_job_id=None):
         captured.append(id)
 
+    async def fake_resolve_buildroot_base_entry(_platform, frameos_version=None):
+        return current_base_entry
+
     monkeypatch.setattr(buildroot_image_module, "buildroot_sd_image", fake_buildroot_sd_image)
+    monkeypatch.setattr(buildroot_image_module, "resolve_buildroot_base_entry", fake_resolve_buildroot_base_entry)
 
     response = await async_client.post(f'/api/frames/{frame.id}/buildroot/sd_image')
 
@@ -1014,6 +1026,69 @@ async def test_api_frame_buildroot_sd_image_regenerates_stale_customization_vers
     status_response = await async_client.get(f'/api/frames/{frame.id}/buildroot/sd_image')
     assert status_response.status_code == 200
     assert status_response.json()['sdImage']['status'] == 'stale'
+
+    response = await async_client.post(f'/api/frames/{frame.id}/buildroot/sd_image')
+
+    assert response.status_code == 200
+    assert response.json()['message'] == 'Buildroot SD card image preparation started'
+    assert captured[0][0] == frame.id
+
+
+@pytest.mark.asyncio
+async def test_api_frame_buildroot_sd_image_regenerates_stale_base_image(
+    async_client,
+    db,
+    redis,
+    tmp_path,
+    monkeypatch,
+):
+    import app.api.frames as frames_api_module
+    import app.tasks.buildroot_image as buildroot_image_module
+
+    frame = await new_frame(db, redis, 'BuildrootFrame', 'frame.local', 'backend.local')
+    image_path = tmp_path / 'frameos-test.img.gz'
+    image_path.write_bytes(b'old image')
+    frame.mode = 'buildroot'
+    frame.network = {
+        **(frame.network or {}),
+        'wifiSSID': 'Test WiFi',
+        'wifiPassword': 'secret1234',
+    }
+    frame.buildroot = {
+        'platform': 'raspberry-pi-zero-2-w',
+        'sdImage': {
+            'status': 'ready',
+            'filename': 'frameos-test.img.gz',
+            'path': str(image_path),
+            'customizationVersion': 6,
+            'baseImage': {
+                'objectKey': 'buildroot-images/old.img.gz',
+                'sha256': 'old-sha256',
+            },
+        },
+    }
+    db.add(frame)
+    db.commit()
+    current_base_entry = {
+        'object_key': 'buildroot-images/current.img.gz',
+        'sha256': 'current-sha256',
+    }
+    captured: list[tuple[int, str | None, str | None]] = []
+
+    async def fake_resolve_buildroot_base_entry(_platform, frameos_version=None):
+        return current_base_entry
+
+    async def fake_buildroot_sd_image(id, _redis, *, request_id=None, queue_job_id=None):
+        captured.append((id, request_id, queue_job_id))
+
+    monkeypatch.setattr(frames_api_module, "resolve_buildroot_base_entry", fake_resolve_buildroot_base_entry)
+    monkeypatch.setattr(buildroot_image_module, "resolve_buildroot_base_entry", fake_resolve_buildroot_base_entry)
+    monkeypatch.setattr(buildroot_image_module, "buildroot_sd_image", fake_buildroot_sd_image)
+
+    status_response = await async_client.get(f'/api/frames/{frame.id}/buildroot/sd_image')
+    assert status_response.status_code == 200
+    assert status_response.json()['sdImage']['status'] == 'stale'
+    assert status_response.json()['sdImage']['error'] == 'The generated image was built with an older Buildroot base image'
 
     response = await async_client.post(f'/api/frames/{frame.id}/buildroot/sd_image')
 

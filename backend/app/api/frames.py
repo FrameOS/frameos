@@ -121,6 +121,7 @@ from app.tasks.buildroot_image import (
     ensure_buildroot_frame_defaults,
     latest_buildroot_sd_image,
     normalize_buildroot_platform,
+    resolve_buildroot_base_entry,
     start_buildroot_sd_image,
     validate_buildroot_network,
     validate_buildroot_wifi_credentials,
@@ -2174,8 +2175,9 @@ async def api_frame_buildroot_sd_image_status(id: int, db: Session = Depends(get
         platform = normalize_buildroot_platform((frame.buildroot or {}).get("platform"))
     except ValueError as exc:
         _bad_request(str(exc))
+    base_entry = await resolve_buildroot_base_entry(platform)
     return {
-        "sdImage": latest_buildroot_sd_image(frame)
+        "sdImage": latest_buildroot_sd_image(frame, base_entry)
         or {
             "status": "idle",
             "platform": platform,

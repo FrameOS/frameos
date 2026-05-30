@@ -444,7 +444,22 @@ def validate_buildroot_wifi_credentials(frame: Frame) -> tuple[str, str]:
     return validate_buildroot_network(network)
 
 
-def latest_buildroot_sd_image(frame: Frame) -> dict[str, Any] | None:
+def _sd_image_base_matches_current(sd_image: dict[str, Any], current_base_entry: dict[str, Any] | None) -> bool:
+    if not current_base_entry:
+        return True
+    base_image = sd_image.get("baseImage")
+    if not isinstance(base_image, dict):
+        return False
+    object_key = current_base_entry.get("object_key")
+    sha256 = current_base_entry.get("sha256")
+    if object_key and base_image.get("objectKey") != object_key:
+        return False
+    if sha256 and base_image.get("sha256") != sha256:
+        return False
+    return True
+
+
+def latest_buildroot_sd_image(frame: Frame, current_base_entry: dict[str, Any] | None = None) -> dict[str, Any] | None:
     buildroot = frame.buildroot if isinstance(frame.buildroot, dict) else {}
     sd_image = buildroot.get("sdImage")
     if not isinstance(sd_image, dict):
@@ -455,6 +470,12 @@ def latest_buildroot_sd_image(frame: Frame) -> dict[str, Any] | None:
             **sd_image,
             "status": "stale",
             "error": "The generated image was built with an older SD image customization version",
+        }
+    if sd_image.get("status") == "ready" and not _sd_image_base_matches_current(sd_image, current_base_entry):
+        return {
+            **sd_image,
+            "status": "stale",
+            "error": "The generated image was built with an older Buildroot base image",
         }
     if sd_image.get("status") == "ready" and isinstance(path, str) and not Path(path).is_file():
         return {**sd_image, "status": "missing", "error": "The generated image file is missing"}
@@ -468,7 +489,8 @@ async def start_buildroot_sd_image(
     *,
     force: bool = False,
 ) -> tuple[bool, dict[str, Any]]:
-    sd_image = latest_buildroot_sd_image(frame)
+    current_base_entry = await resolve_buildroot_base_entry(SUPPORTED_BUILDROOT_PLATFORM)
+    sd_image = latest_buildroot_sd_image(frame, current_base_entry)
     if sd_image and sd_image.get("status") == "ready" and not force:
         return False, sd_image
 
