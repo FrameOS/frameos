@@ -143,6 +143,44 @@ proc setupExportScenes(data: JsonNode): JsonNode =
     if execution == "interpreted":
       result.add(scene)
 
+proc installServiceFile(sourcePath, destinationPath: string) =
+  if not fileExists(sourcePath):
+    echo "FrameOS setup: service file missing: " & sourcePath
+    return
+  writePrivilegedFile(destinationPath, readFile(sourcePath))
+
+proc systemdServiceNames(frameOS: FrameOS): seq[string] =
+  result = @["frameos.service"]
+  if frameOS.frameConfig.agent != nil and frameOS.frameConfig.agent.agentEnabled:
+    result.add("frameos_agent.service")
+
+proc setupSystemdServices*(frameOS: FrameOS): SetupResult =
+  if not commandExists("systemctl"):
+    echo "FrameOS setup: systemd services: systemctl not found, skipping"
+    return setupOk()
+
+  let currentDir = getAppDir()
+  echo "FrameOS setup: systemd services: installing frameos.service"
+  installServiceFile(currentDir / "frameos.service", "/etc/systemd/system/frameos.service")
+
+  if frameOS.frameConfig.agent != nil and frameOS.frameConfig.agent.agentEnabled:
+    echo "FrameOS setup: systemd services: installing frameos_agent.service"
+    installServiceFile("/srv/frameos/agent/current/frameos_agent.service", "/etc/systemd/system/frameos_agent.service")
+  else:
+    discard runSetupCommand(privilegedCommand("systemctl disable frameos_agent.service"), raiseOnError = false)
+
+  discard runSetupCommand(privilegedCommand("systemctl daemon-reload"))
+  discard runSetupCommand(privilegedCommand("systemctl enable " & systemdServiceNames(frameOS).join(" ")))
+
+  result = setupOk()
+
+proc startFrameOSSystemdServices*(configPath = "") =
+  if not commandExists("systemctl"):
+    echo "FrameOS setup: systemd services: systemctl not found, cannot start services"
+    return
+  let frameOS = FrameOS(frameConfig: loadConfig(configPath))
+  discard runSetupCommand(privilegedCommand("systemctl start " & systemdServiceNames(frameOS).join(" ")))
+
 proc setupAppAptPackages*(): SetupResult =
   setupAptPackages(appAptPackagesFromScenes(loadAllScenesPayload(), loadAppsPayload()))
 
@@ -159,6 +197,7 @@ proc setupFrameOS*(configPath = ""): SetupResult =
   echo "FrameOS setup: driver setup: starting"
   addSetupResult(result, drivers.setup(frameOS))
   echo "FrameOS setup: driver setup: complete"
+  addSetupResult(result, runSetupStep("systemd services", proc(): SetupResult = setupSystemdServices(frameOS)))
   if result.rebootRequired:
     echo "FrameOS setup: reboot required"
   echo "FrameOS setup: complete"

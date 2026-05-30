@@ -40,7 +40,7 @@ if [ ! -f "$SETUP_FILE" ]; then
 fi
 
 setup_status=0
-if sudo /srv/frameos/current/frameos setup --from-file="$SETUP_FILE"; then
+if sudo /srv/frameos/current/frameos setup --with-setup="$SETUP_FILE"; then
   setup_status=0
 else
   setup_status=$?

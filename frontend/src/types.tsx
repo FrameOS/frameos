@@ -706,14 +706,19 @@ export interface FrameBuildrootConfig {
   platform?: string
   setupJsonResetFilePath?: string
   sdImage?: {
-    status?: 'idle' | 'queued' | 'building' | 'ready' | 'error' | 'missing'
+    status?: 'idle' | 'queued' | 'building' | 'ready' | 'error' | 'missing' | 'stale'
     buildId?: string
     requestId?: string
     queueJobId?: string
     platform?: string
     buildrootVersion?: string
     filename?: string
+    rawFilename?: string
     path?: string
+    compressed?: boolean
+    customizationVersion?: number
+    rawSize?: number
+    rawSha256?: string
     size?: number
     sha256?: string
     downloadUrl?: string

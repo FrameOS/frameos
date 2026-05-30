@@ -12,6 +12,7 @@ from app.tasks.buildroot_image import (
     _network_manager_wifi_connection,
 )
 from app.tasks.prebuilt_deps import resolve_prebuilt_target
+from app.tasks.setup_json_reset import render_setup_json_reset_script
 from app.utils.cross_compile import CrossCompiler
 
 
@@ -47,6 +48,13 @@ def test_buildroot_network_manager_connection_contains_wifi_credentials():
     assert "ssid=Test WiFi" in connection
     assert "key-mgmt=wpa-psk" in connection
     assert "psk=secret\\\\password" in connection
+
+
+def test_buildroot_firstboot_setup_uses_with_setup_command():
+    script = render_setup_json_reset_script("/boot/frameos-setup.json")
+
+    assert 'sudo /srv/frameos/current/frameos setup --with-setup="$SETUP_FILE"' in script
+    assert "--from-file" not in script
 
 
 def test_buildroot_config_avoids_ncurses_selecting_packages(tmp_path):
@@ -173,23 +181,40 @@ async def test_cached_base_composer_uses_container_visible_srcpaths(tmp_path, mo
     temp_dir = tmp_path / "tmp"
     frameos_overlay = temp_dir / "overlay" / "srv" / "frameos"
     assets_overlay = temp_dir / "overlay" / "srv" / "assets"
+    boot_overlay = temp_dir / "overlay" / "boot"
+    root_overlay = frameos_overlay / "bootstrap" / "root"
     frameos_overlay.mkdir(parents=True)
     assets_overlay.mkdir(parents=True)
+    boot_overlay.mkdir(parents=True)
+    root_overlay.mkdir(parents=True)
     (frameos_overlay / "frameos").write_bytes(b"binary")
+    (boot_overlay / "frameos-setup.json").write_text("{}", encoding="utf-8")
+    (root_overlay / "etc").mkdir(parents=True)
     base_image = tmp_path / "base.img"
     output_image = tmp_path / "output.img"
     base_image.write_bytes(b"base")
     captured: dict[str, str] = {}
+    commands: list[str] = []
     replaced: list[tuple[int, str]] = []
     builder = BuildrootImageBuilder(db=object(), redis=None, frame=SimpleNamespace(id=1))
 
     async def fake_exec_local_command(*args, **kwargs):
-        captured["command"] = args[3]
-        config = temp_dir / "compose" / "frameos-genimage.cfg"
-        captured["config"] = config.read_text(encoding="utf-8")
-        images_dir = temp_dir / "compose" / "images"
-        (images_dir / "frameos.ext4").write_bytes(b"frameos")
-        (images_dir / "assets.vfat").write_bytes(b"assets")
+        command = args[3]
+        commands.append(command)
+        if "compose-partitions.sh" in command:
+            captured["compose_command"] = command
+            config = temp_dir / "compose" / "frameos-genimage.cfg"
+            captured["config"] = config.read_text(encoding="utf-8")
+            images_dir = temp_dir / "compose" / "images"
+            (images_dir / "frameos.ext4").write_bytes(b"frameos")
+            (images_dir / "assets.vfat").write_bytes(b"assets")
+        if "patch-rootfs.sh" in command:
+            captured["rootfs_patch_command"] = command
+            captured["rootfs_patch_script"] = (temp_dir / "compose" / "patch-rootfs.sh").read_text(encoding="utf-8")
+            (temp_dir / "compose" / "images" / "rootfs.ext4").write_bytes(b"root")
+        if "patch-boot.sh" in command:
+            captured["patch_command"] = command
+            captured["patch_script"] = (temp_dir / "compose" / "patch-boot.sh").read_text(encoding="utf-8")
         return 0, "", ""
 
     async def fake_log(*args, **kwargs):
@@ -199,7 +224,15 @@ async def test_cached_base_composer_uses_container_visible_srcpaths(tmp_path, mo
         replaced.append((partition_number, partition_image.name))
 
     monkeypatch.setattr("app.tasks.buildroot_image.exec_local_command", fake_exec_local_command)
-    monkeypatch.setattr("app.tasks.buildroot_image._mbr_partitions", lambda _path: {})
+    monkeypatch.setattr(
+        "app.tasks.buildroot_image._mbr_partitions",
+        lambda _path: [
+            {"start": 512, "size": 32 * 1024 * 1024},
+            {"start": 33554944, "size": 768 * 1024 * 1024},
+            {"start": 838861312, "size": 512 * 1024 * 1024},
+            {"start": 1375732224, "size": 512 * 1024 * 1024},
+        ],
+    )
     monkeypatch.setattr("app.tasks.buildroot_image._replace_partition", fake_replace_partition)
     monkeypatch.setattr(builder, "_log", fake_log)
 
@@ -211,14 +244,25 @@ async def test_cached_base_composer_uses_container_visible_srcpaths(tmp_path, mo
 
     assert 'srcpath = "/tmp/frameos-compose-roots/frameos"' in captured["config"]
     assert 'srcpath = "/tmp/frameos-compose-roots/assets"' in captured["config"]
+    assert 'srcpath = "/tmp/frameos-compose-roots/rootfs"' not in captured["config"]
+    assert 'srcpath = "/tmp/frameos-compose-roots/boot"' not in captured["config"]
+    assert 'label = "BOOT"' not in captured["config"]
     assert str(temp_dir) not in captured["config"]
-    assert "bash /work/compose-partitions.sh" in captured["command"]
+    assert "bash /work/compose-partitions.sh" in captured["compose_command"]
+    assert "bash /work/patch-rootfs.sh" in captured["rootfs_patch_command"]
+    assert "bash /patch-boot.sh" in captured["patch_command"]
     assert "tar -C /work/roots -cf - frameos assets | tar -C /tmp/frameos-compose-roots -xf -" in (
         temp_dir / "compose" / "compose-partitions.sh"
     ).read_text(encoding="utf-8")
+    assert 'dd if="$disk" of="$rootfs" bs=512 skip=65537 count=1572864 status=none' in captured["rootfs_patch_script"]
+    assert "debugfs -w -f /work/debugfs.cmd" in captured["rootfs_patch_script"]
+    assert "mlabel -i \"$target\" ::BOOT" in captured["patch_script"]
+    assert "mcopy -i \"$target\" -o -s" in captured["patch_script"]
+    assert "offset=512" in captured["patch_script"]
     assert (temp_dir / "compose" / "roots" / "assets" / "frameos-assets-placeholder").is_file()
     assert output_image.read_bytes() == b"base"
-    assert replaced == [(3, "frameos.ext4"), (4, "assets.vfat")]
+    assert replaced == [(2, "rootfs.ext4"), (3, "frameos.ext4"), (4, "assets.vfat")]
+    assert len(commands) == 3
 
 
 def test_buildroot_service_writes_console_output_and_environment(tmp_path):

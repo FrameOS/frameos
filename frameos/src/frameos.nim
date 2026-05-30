@@ -7,7 +7,7 @@ import std/times
 from ./frameos/boot_guard import clearBootCrashCount, updateBootGuardFailureDetails, BOOT_GUARD_FALLBACK_SCENE_ID
 from ./frameos/frameos import startFrameOS, describeFatalStartupError, fatalStartupRetryAction,
   loadFatalErrorBehavior, renderFatalStartupError
-from ./frameos/setup import setupFrameOS, writeSetupReleasePayload
+from ./frameos/setup import setupFrameOS, startFrameOSSystemdServices, writeSetupReleasePayload
 
 const frameosVersion {.strdefine.}: string = "unknown"
 
@@ -24,6 +24,7 @@ proc printHelp() =
   echo "  check   Verify the binary can start"
   echo "  setup   Run device setup for this build"
   echo "         --from-file=/path/to/frame.json[.gz] to use an alternate config source"
+  echo "         --with-setup=/boot/frameos-setup.json[.gz] to install from first-boot setup JSON"
   echo "  help    Show this help"
 
 when isMainModule:
@@ -35,21 +36,36 @@ when isMainModule:
       printHelp()
     elif args.len > 0 and args[0] == "setup":
       var setupFromFile = ""
-      for i in 1..<args.len:
+      var activateServices = false
+      var i = 1
+      while i < args.len:
         let arg = args[i]
         if arg.startsWith("--from-file="):
           setupFromFile = arg["--from-file=".len .. ^1]
+        elif arg.startsWith("--with-setup="):
+          setupFromFile = arg["--with-setup=".len .. ^1]
+          activateServices = true
         elif arg == "--from-file":
           if i + 1 >= args.len:
             raise newException(ValueError, "FrameOS setup --from-file requires a path")
           setupFromFile = args[i + 1]
+          i += 1
+        elif arg == "--with-setup":
+          if i + 1 >= args.len:
+            raise newException(ValueError, "FrameOS setup --with-setup requires a path")
+          setupFromFile = args[i + 1]
+          activateServices = true
+          i += 1
         else:
-          raise newException(ValueError, "FrameOS setup only accepts --from-file")
+          raise newException(ValueError, "FrameOS setup only accepts --from-file or --with-setup")
+        i += 1
       let setupResult = setupFrameOS(setupFromFile)
       if setupFromFile.len > 0:
         writeSetupReleasePayload(setupFromFile)
       if setupResult.rebootRequired:
         quit(2)
+      if activateServices:
+        startFrameOSSystemdServices(setupFromFile)
       quit(0)
     elif args.len == 0 or args[0] == "start" or args[0].startsWith("--"):
       var firstFatalFailureAt = 0.0

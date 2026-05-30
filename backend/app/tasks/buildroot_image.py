@@ -55,6 +55,7 @@ SUPPORTED_BUILDROOT_PLATFORM = "raspberry-pi-zero-2-w"
 BUILDROOT_HOST_CXXFLAGS = "-O2 -pipe -std=gnu++17"
 BUILDROOT_HOST_CFLAGS = "-O2 -pipe"
 BUILDROOT_BOOTSTRAP_SCRIPT_VERSION = "4"
+BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION = 4
 BUILDROOT_FRAMEOS_PARTITION_SIZE = os.environ.get("FRAMEOS_BUILDROOT_FRAMEOS_PARTITION_SIZE", "512M")
 BUILDROOT_ASSETS_PARTITION_SIZE = os.environ.get("FRAMEOS_BUILDROOT_ASSETS_PARTITION_SIZE", "512M")
 BUILDROOT_ARCHIVE_BASE_URL = os.environ.get("FRAMEOS_ARCHIVE_BASE_URL", "https://archive.frameos.net/")
@@ -340,11 +341,48 @@ def _frame_boot_config_lines(frame: Frame) -> list[str]:
     return lines
 
 
-def _buildroot_setup_payload_path(overlay_dir: Path, setup_file_path: str) -> Path:
+def _buildroot_sd_image_config_payload(frame: Frame | Any) -> dict[str, Any]:
+    if hasattr(frame, "to_dict"):
+        payload = dict(frame.to_dict())
+    else:
+        payload = dict(getattr(frame, "__dict__", {}))
+
+    for key in (
+        "_sa_instance_state",
+        "archived",
+        "status",
+        "version",
+        "last_log_at",
+        "last_successful_deploy",
+        "last_successful_deploy_at",
+        "terminal_history",
+    ):
+        payload.pop(key, None)
+
+    buildroot = dict(payload.get("buildroot") or {})
+    buildroot.pop("sdImage", None)
+    payload["buildroot"] = buildroot
+    return payload
+
+
+def buildroot_sd_image_config_fingerprint(frame: Frame | Any) -> str:
+    payload = _buildroot_sd_image_config_payload(frame)
+    encoded = json.dumps(payload, sort_keys=True, default=str, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def clear_buildroot_sd_image(frame: Frame | Any) -> None:
+    buildroot = dict(getattr(frame, "buildroot", None) or {})
+    buildroot.pop("sdImage", None)
+    frame.buildroot = buildroot
+
+
+def _boot_setup_payload_path(boot_overlay_dir: Path, setup_file_path: str) -> Path:
     relative_path = setup_file_path.lstrip("/")
-    if not relative_path:
-        raise ValueError("Setup JSON reset file path cannot be empty")
-    return overlay_dir / relative_path
+    if relative_path == "boot" or not relative_path or not relative_path.startswith("boot/"):
+        raise ValueError("Setup JSON reset file path must name a file below /boot")
+    relative_path = relative_path[len("boot/"):]
+    return boot_overlay_dir / relative_path
 
 
 def ensure_buildroot_frame_defaults(frame: Frame, platform: str | None = None) -> None:
@@ -414,14 +452,26 @@ def latest_buildroot_sd_image(frame: Frame) -> dict[str, Any] | None:
     if not isinstance(sd_image, dict):
         return None
     path = sd_image.get("path")
+    if sd_image.get("status") == "ready" and sd_image.get("customizationVersion") != BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION:
+        return {
+            **sd_image,
+            "status": "stale",
+            "error": "The generated image was built with an older SD image customization version",
+        }
     if sd_image.get("status") == "ready" and isinstance(path, str) and not Path(path).is_file():
         return {**sd_image, "status": "missing", "error": "The generated image file is missing"}
     return sd_image
 
 
-async def start_buildroot_sd_image(db: Session, redis: Redis, frame: Frame) -> tuple[bool, dict[str, Any]]:
+async def start_buildroot_sd_image(
+    db: Session,
+    redis: Redis,
+    frame: Frame,
+    *,
+    force: bool = False,
+) -> tuple[bool, dict[str, Any]]:
     sd_image = latest_buildroot_sd_image(frame)
-    if sd_image and sd_image.get("status") == "ready":
+    if sd_image and sd_image.get("status") == "ready" and not force:
         return False, sd_image
 
     if sd_image and sd_image.get("status") in ACTIVE_SD_IMAGE_STATUSES:
@@ -544,7 +594,9 @@ class BuildrootImageBuilder:
             temp_dir = Path(tmp)
             deployer = FrameDeployer(self.db, self.redis, self.frame, "", str(temp_dir))
             build_id = deployer.build_id
-            filename = f"frameos-{self.frame.id}-{SUPPORTED_BUILDROOT_PLATFORM}-{build_id}.img"
+            raw_filename = f"frameos-{self.frame.id}-{SUPPORTED_BUILDROOT_PLATFORM}-{build_id}.img"
+            filename = f"{raw_filename}.gz"
+            raw_output_path = artifact_dir / raw_filename
             output_path = artifact_dir / filename
 
             await _set_sd_image_status(
@@ -557,6 +609,7 @@ class BuildrootImageBuilder:
                     "buildId": build_id,
                     "platform": SUPPORTED_BUILDROOT_PLATFORM,
                     "filename": filename,
+                    "rawFilename": raw_filename,
                     "startedAt": _utc_now(),
                 }, self.request_id),
             )
@@ -590,11 +643,16 @@ class BuildrootImageBuilder:
             await self._compose_sd_image_from_base(
                 temp_dir=temp_dir,
                 base_image_path=base_image_path,
-                output_path=output_path,
+                output_path=raw_output_path,
             )
 
-            if not output_path.is_file():
-                raise RuntimeError(f"SD image composer completed without producing {output_path.name}")
+            if not raw_output_path.is_file():
+                raise RuntimeError(f"SD image composer completed without producing {raw_output_path.name}")
+
+            raw_size = raw_output_path.stat().st_size
+            raw_sha256 = _sha256(raw_output_path)
+            _gzip_file(raw_output_path, output_path)
+            raw_output_path.unlink(missing_ok=True)
 
             metadata = {
                 **_preserved_queue_metadata(latest_buildroot_sd_image(self.frame) or {}),
@@ -609,7 +667,12 @@ class BuildrootImageBuilder:
                     "updatedAt": base_entry.get("updated_at"),
                 },
                 "filename": filename,
+                "rawFilename": raw_filename,
                 "path": str(output_path),
+                "compressed": True,
+                "customizationVersion": BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION,
+                "rawSize": raw_size,
+                "rawSha256": raw_sha256,
                 "size": output_path.stat().st_size,
                 "sha256": _sha256(output_path),
                 "downloadUrl": f"/api/frames/{self.frame.id}/buildroot/sd_image/download",
@@ -617,7 +680,7 @@ class BuildrootImageBuilder:
                 "completedAt": _utc_now(),
             }
             await _set_sd_image_status(self.db, self.redis, self.frame, metadata)
-            await self._log("stdout", f"Buildroot SD image ready: {filename}")
+            await self._log("stdout", f"Buildroot SD image ready, starting download, please wait for {filename}")
             return metadata
 
     async def _build_frameos_binary(
@@ -676,11 +739,21 @@ class BuildrootImageBuilder:
         agent_release_dir = overlay_dir / "srv" / "frameos" / "agent" / "releases" / f"release_{build_id}"
         state_dir = overlay_dir / "srv" / "frameos" / "state"
         root_overlay_dir = overlay_dir / "srv" / "frameos" / "bootstrap" / "root"
+        boot_overlay_dir = overlay_dir / "boot"
         assets_dir = overlay_dir / "srv" / "assets"
         systemd_dir = root_overlay_dir / "etc" / "systemd" / "system"
         wants_dir = systemd_dir / "multi-user.target.wants"
 
-        for directory in (release_dir, agent_release_dir, state_dir, assets_dir, wants_dir):
+        for directory in (
+            release_dir,
+            agent_release_dir,
+            state_dir,
+            assets_dir,
+            boot_overlay_dir,
+            wants_dir,
+            root_overlay_dir / "srv" / "frameos",
+            root_overlay_dir / "srv" / "assets",
+        ):
             directory.mkdir(parents=True, exist_ok=True)
 
         if not frameos_build.binary_path:
@@ -757,17 +830,20 @@ class BuildrootImageBuilder:
             script_path.write_text(script_contents, encoding="utf-8")
             os.chmod(script_path, 0o755)
             (systemd_dir / SETUP_JSON_RESET_SERVICE_NAME).write_text(service_contents, encoding="utf-8")
-            self._write_setup_payload(_buildroot_setup_payload_path(root_overlay_dir, setup_file_path), setup_payload)
+            self._write_setup_payload(_boot_setup_payload_path(boot_overlay_dir, setup_file_path), setup_payload)
 
-        services = ["frameos.service", "frameos_agent.service"]
-        if setup_reset_enabled:
-            services.append(SETUP_JSON_RESET_SERVICE_NAME)
+        services = [SETUP_JSON_RESET_SERVICE_NAME] if setup_reset_enabled else []
         for service in services:
             self._relative_symlink(f"../{service}", wants_dir / service)
         self._relative_symlink("/usr/lib/systemd/system/NetworkManager.service", wants_dir / "NetworkManager.service")
 
         (root_overlay_dir / "etc").mkdir(parents=True, exist_ok=True)
         (root_overlay_dir / "etc" / "hostname").write_text(_hostname_for_frame(self.frame) + "\n", encoding="utf-8")
+        (root_overlay_dir / "etc" / "fstab").write_text(
+            "LABEL=FRAMEOS /srv/frameos ext4 defaults,noatime 0 2\n"
+            "LABEL=ASSETS /srv/assets vfat defaults,noatime,umask=000 0 0\n",
+            encoding="utf-8",
+        )
         (root_overlay_dir / "etc" / "profile.d").mkdir(parents=True, exist_ok=True)
         (root_overlay_dir / "etc" / "profile.d" / "frameos.sh").write_text(
             "export FRAMEOS_HOME=/srv/frameos/current\n",
@@ -780,7 +856,7 @@ class BuildrootImageBuilder:
             encoding="utf-8",
         )
         self._write_wifi_connection(root_overlay_dir / "etc" / "NetworkManager" / "system-connections")
-        self._write_boot_config(root_overlay_dir, _frame_boot_config_lines(bootstrap_frame))
+        self._write_boot_config(overlay_dir, _frame_boot_config_lines(bootstrap_frame))
         self._write_authorized_keys(root_overlay_dir, wants_dir)
 
     @staticmethod
@@ -1134,8 +1210,11 @@ chmod a+r /artifacts/{shlex.quote(output_filename)}
 
         frameos_root = roots_dir / "frameos"
         assets_root = roots_dir / "assets"
+        boot_root = roots_dir / "boot"
+        rootfs_overlay = temp_dir / "overlay" / "srv" / "frameos" / "bootstrap" / "root"
         shutil.copytree(temp_dir / "overlay" / "srv" / "frameos", frameos_root, symlinks=True)
         shutil.copytree(temp_dir / "overlay" / "srv" / "assets", assets_root, symlinks=True)
+        shutil.copytree(temp_dir / "overlay" / "boot", boot_root, symlinks=True)
         if not any(assets_root.iterdir()):
             (assets_root / "frameos-assets-placeholder").write_text("", encoding="utf-8")
 
@@ -1199,8 +1278,158 @@ genimage --rootpath /work/empty-root --tmppath /work/tmp --inputpath /work/image
 
         shutil.copy2(base_image_path, output_path)
         partitions = _mbr_partitions(output_path)
+        await self._patch_rootfs_partition(output_path, partitions, rootfs_overlay, images_dir)
         _replace_partition(output_path, partitions, 3, images_dir / "frameos.ext4")
         _replace_partition(output_path, partitions, 4, images_dir / "assets.vfat")
+        await self._patch_boot_partition(output_path, partitions, boot_root)
+
+    async def _patch_rootfs_partition(
+        self,
+        output_path: Path,
+        partitions: list[dict[str, int]],
+        rootfs_overlay: Path,
+        images_dir: Path,
+    ) -> None:
+        if len(partitions) < 2:
+            raise RuntimeError("Cannot patch rootfs partition; SD image has fewer than two partitions")
+
+        partition = partitions[1]
+        if partition["start"] % 512 != 0 or partition["size"] % 512 != 0:
+            raise RuntimeError("Cannot patch rootfs partition; partition is not sector aligned")
+
+        compose_dir = images_dir.parent
+        script_path = compose_dir / "patch-rootfs.sh"
+        rootfs_image = images_dir / "rootfs.ext4"
+        script_path.write_text(
+            f"""#!/usr/bin/env bash
+set -euo pipefail
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+apt-get install -y --no-install-recommends e2fsprogs python3
+disk=/image/{shlex.quote(output_path.name)}
+rootfs=/work/images/rootfs.ext4
+dd if="$disk" of="$rootfs" bs=512 skip={partition["start"] // 512} count={partition["size"] // 512} status=none
+cat > /work/debugfs-overlay.py <<'PY'
+import os
+import stat
+from pathlib import Path
+
+overlay = Path("/rootfs-overlay")
+commands = []
+
+def q(value):
+    return '"' + str(value).replace('\\\\', '\\\\\\\\').replace('"', '\\\\"') + '"'
+
+for root, dirs, files in os.walk(overlay):
+    root_path = Path(root)
+    for name in sorted(dirs):
+        source = root_path / name
+        rel = "/" + source.relative_to(overlay).as_posix()
+        if source.is_symlink():
+            continue
+        commands.append("mkdir " + q(rel))
+
+for root, dirs, files in os.walk(overlay):
+    root_path = Path(root)
+    entries = sorted(list(dirs) + list(files))
+    for name in entries:
+        source = root_path / name
+        rel = "/" + source.relative_to(overlay).as_posix()
+        st = os.lstat(source)
+        mode = stat.S_IMODE(st.st_mode)
+        if stat.S_ISDIR(st.st_mode) and not source.is_symlink():
+            commands.append("set_inode_field " + q(rel) + " mode " + oct(stat.S_IFDIR | mode))
+            commands.append("set_inode_field " + q(rel) + " uid 0")
+            commands.append("set_inode_field " + q(rel) + " gid 0")
+        elif stat.S_ISLNK(st.st_mode):
+            commands.append("rm " + q(rel))
+            commands.append("symlink " + q(rel) + " " + q(os.readlink(source)))
+        elif stat.S_ISREG(st.st_mode):
+            commands.append("rm " + q(rel))
+            commands.append("write " + q(source) + " " + q(rel))
+            commands.append("set_inode_field " + q(rel) + " mode " + oct(stat.S_IFREG | mode))
+            commands.append("set_inode_field " + q(rel) + " uid 0")
+            commands.append("set_inode_field " + q(rel) + " gid 0")
+
+Path("/work/debugfs.cmd").write_text("\\n".join(commands) + "\\n", encoding="utf-8")
+PY
+python3 /work/debugfs-overlay.py
+debugfs -w -f /work/debugfs.cmd "$rootfs"
+""",
+            encoding="utf-8",
+        )
+        os.chmod(script_path, 0o755)
+
+        docker_cmd = " ".join(
+            [
+                "docker run --rm",
+                f"-v {shlex.quote(str(output_path.parent))}:/image",
+                f"-v {shlex.quote(str(images_dir.parent))}:/work",
+                f"-v {shlex.quote(str(rootfs_overlay))}:/rootfs-overlay",
+                shlex.quote(BUILDROOT_DOCKER_IMAGE),
+                "bash /work/patch-rootfs.sh",
+            ]
+        )
+        status, _, err = await exec_local_command(
+            self.db,
+            self.redis,
+            self.frame,
+            docker_cmd,
+            log_command="docker run (buildroot rootfs partition patch)",
+        )
+        if status != 0:
+            raise RuntimeError(f"Buildroot rootfs partition patch failed: {err or 'see logs'}")
+        _replace_partition(output_path, partitions, 2, rootfs_image)
+
+    async def _patch_boot_partition(
+        self,
+        output_path: Path,
+        partitions: list[dict[str, int]],
+        boot_root: Path,
+    ) -> None:
+        if not partitions:
+            raise RuntimeError("Cannot patch BOOT partition; SD image has no partitions")
+
+        compose_dir = boot_root.parent.parent
+        script_path = compose_dir / "patch-boot.sh"
+        script_path.write_text(
+            f"""#!/usr/bin/env bash
+set -euo pipefail
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+apt-get install -y --no-install-recommends mtools
+disk=/image/{shlex.quote(output_path.name)}
+offset={partitions[0]["start"]}
+target="${{disk}}@@${{offset}}"
+mlabel -i "$target" ::BOOT
+if find /boot-root -mindepth 1 -print -quit | grep -q .; then
+  cd /boot-root
+  find . -mindepth 1 -maxdepth 1 -exec mcopy -i "$target" -o -s {{}} :: \\;
+fi
+""",
+            encoding="utf-8",
+        )
+        os.chmod(script_path, 0o755)
+
+        docker_cmd = " ".join(
+            [
+                "docker run --rm",
+                f"-v {shlex.quote(str(output_path.parent))}:/image",
+                f"-v {shlex.quote(str(boot_root))}:/boot-root",
+                f"-v {shlex.quote(str(script_path))}:/patch-boot.sh",
+                shlex.quote(BUILDROOT_DOCKER_IMAGE),
+                "bash /patch-boot.sh",
+            ]
+        )
+        status, _, err = await exec_local_command(
+            self.db,
+            self.redis,
+            self.frame,
+            docker_cmd,
+            log_command="docker run (buildroot boot partition patch)",
+        )
+        if status != 0:
+            raise RuntimeError(f"Buildroot BOOT partition patch failed: {err or 'see logs'}")
 
     async def _log(self, type: str, line: str) -> None:
         await log(self.db, self.redis, int(self.frame.id), type, line)
@@ -1464,6 +1693,7 @@ boot_files="$(printf '\\t\\t\\t"%s",\\n' "${{files[@]}}")"
 cat > "$genimage_cfg" <<EOF
 image boot.vfat {{
 	vfat {{
+		label = "BOOT"
 		files = {{
 $boot_files
 		}}
@@ -1635,6 +1865,13 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: fh.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _gzip_file(source_path: Path, destination_path: Path) -> None:
+    destination_path.parent.mkdir(parents=True, exist_ok=True)
+    with source_path.open("rb") as source, destination_path.open("wb") as compressed:
+        with gzip.GzipFile(filename="", mode="wb", fileobj=compressed, mtime=0) as destination:
+            shutil.copyfileobj(source, destination)
 
 
 def _mbr_partitions(image_path: Path) -> list[dict[str, int]]:

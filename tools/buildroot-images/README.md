@@ -1,9 +1,9 @@
 # Buildroot Base Images
 
-FrameOS Buildroot SD images are assembled from a cached base image plus the current
-FrameOS runtime partition. The slow Buildroot root filesystem is built manually in
-CI or locally, uploaded to the `frameos-archive` R2 bucket, and referenced by this
-manifest.
+FrameOS Buildroot SD images are assembled from a cached base image plus current
+per-frame BOOT, rootfs, FRAMEOS, and ASSETS partition images. The slow Buildroot
+base image is built manually in CI or locally, uploaded to the `frameos-archive`
+R2 bucket, and referenced by this manifest.
 
 ## Commands
 
@@ -38,11 +38,12 @@ export R2_BUCKET=frameos-archive
 The web UI no longer runs Buildroot. When a Buildroot frame requests an SD card
 image, the backend builds the FrameOS binary and agent, downloads the matching
 cached base image from `https://archive.frameos.net/buildroot-images/manifest.json`,
-then replaces only the `FRAMEOS` and `ASSETS` partitions.
+then replaces the BOOT, rootfs, `FRAMEOS`, and `ASSETS` partitions.
 
-Base images include a generic `frameos-root-bootstrap.service`. Per-frame root
-configuration is stored in `/srv/frameos/bootstrap/root` on the FrameOS partition
-and copied into `/` early during boot.
+The generated rootfs contains only first-boot setup plumbing and mount
+configuration. The setup payload is written to the BOOT partition as
+`frameos-setup.json`, and the first-boot setup service runs
+`/srv/frameos/current/frameos setup --with-setup=/boot/frameos-setup.json`.
 
 Add future hardware targets by adding a platform alias/target in
 `backend/app/tasks/buildroot_image.py`, extending the CLI defaults, then building

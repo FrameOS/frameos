@@ -7,6 +7,7 @@ from http import HTTPStatus
 import contextlib
 import aiofiles
 import asyncssh
+import gzip
 import hashlib
 import io
 import json
@@ -115,6 +116,8 @@ from app.utils.tls import generate_frame_tls_material, parse_certificate_not_val
 from app.utils.ssh_authorized_keys import _install_authorized_keys, resolve_authorized_keys_update
 from app.tasks.binary_builder import FrameBinaryBuilder
 from app.tasks.buildroot_image import (
+    buildroot_sd_image_config_fingerprint,
+    clear_buildroot_sd_image,
     ensure_buildroot_frame_defaults,
     latest_buildroot_sd_image,
     normalize_buildroot_platform,
@@ -2183,6 +2186,7 @@ async def api_frame_buildroot_sd_image_status(id: int, db: Session = Depends(get
 @api_with_auth.post("/frames/{id:int}/buildroot/sd_image")
 async def api_frame_buildroot_sd_image(
     id: int,
+    force: bool = Query(False),
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
@@ -2200,7 +2204,7 @@ async def api_frame_buildroot_sd_image(
     await update_frame(db, redis, frame)
 
     try:
-        started, sd_image = await start_buildroot_sd_image(db, redis, frame)
+        started, sd_image = await start_buildroot_sd_image(db, redis, frame, force=force)
         if started:
             message = "Buildroot SD card image preparation started"
         elif sd_image.get("status") == "ready":
@@ -2234,7 +2238,17 @@ async def api_frame_buildroot_sd_image_download(id: int, db: Session = Depends(g
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Generated SD card image file not found")
 
     filename = str(sd_image.get("filename") or f"frameos-{id}.img")
-    return FileResponse(path, media_type="application/octet-stream", filename=filename)
+    download_path = path
+    download_filename = filename
+    if not path.endswith(".gz"):
+        download_path = f"{path}.gz"
+        download_filename = filename if filename.endswith(".gz") else f"{filename}.gz"
+        if not os.path.isfile(download_path) or os.path.getmtime(download_path) < os.path.getmtime(path):
+            with open(path, "rb") as source, open(download_path, "wb") as compressed:
+                with gzip.GzipFile(filename="", mode="wb", fileobj=compressed, mtime=0) as destination:
+                    shutil.copyfileobj(source, destination)
+
+    return FileResponse(download_path, media_type="application/gzip", filename=download_filename)
 
 
 @api_with_auth.get("/frames/{id:int}/deploy_plan")
@@ -2401,6 +2415,11 @@ async def api_frame_update_endpoint(
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
 
     update_data = data.model_dump(exclude_unset=True)
+    previous_buildroot_sd_image_fingerprint = (
+        buildroot_sd_image_config_fingerprint(frame)
+        if (frame.mode or "rpios") == "buildroot"
+        else ""
+    )
     if isinstance(update_data.get("scenes"), str):
         try:
             update_data["scenes"] = json.loads(update_data["scenes"])
@@ -2424,6 +2443,13 @@ async def api_frame_update_endpoint(
             _bad_request(str(exc))
     elif data.mode == "rpios" and old_mode == "buildroot" and frame.ssh_user == "root":
         frame.ssh_user = "pi"
+
+    if (
+        (frame.mode or "rpios") == "buildroot"
+        and previous_buildroot_sd_image_fingerprint
+        and buildroot_sd_image_config_fingerprint(frame) != previous_buildroot_sd_image_fingerprint
+    ):
+        clear_buildroot_sd_image(frame)
 
     await update_frame(db, redis, frame)
 
@@ -2548,6 +2574,8 @@ async def api_frame_update_ssh_keys(
     except ValueError as exc:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
     frame.ssh_keys = new_keys
+    if (frame.mode or "rpios") == "buildroot":
+        clear_buildroot_sd_image(frame)
     await update_frame(db, redis, frame)
 
     return {"message": "SSH keys updated successfully"}
