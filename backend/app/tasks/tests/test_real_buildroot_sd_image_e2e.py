@@ -2,14 +2,12 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any
 
 import pytest
 
-from app.codegen.drivers_nim import COMPILATION_MODE_STATIC
+from app.codegen.drivers_nim import COMPILATION_MODE_PRECOMPILED
 from app.models.frame import Frame
 from app.models.log import Log
-from app.tasks import buildroot_image as buildroot_image_module
 from app.tasks.buildroot_image import BuildrootImageBuilder, ensure_buildroot_frame_defaults
 
 
@@ -24,10 +22,6 @@ pytestmark = pytest.mark.skipif(
 
 def _say(message: str) -> None:
     print(f"[buildroot-e2e] {message}", flush=True)
-
-
-async def _no_precompiled_agent_release(**_kwargs: Any) -> None:
-    raise RuntimeError("FRAMEOS_E2E_BUILDROOT forces FrameOS agent source build")
 
 
 def _frame(db) -> Frame:
@@ -95,7 +89,7 @@ def _frame(db) -> Frame:
         },
         buildroot={
             "platform": "raspberry-pi-zero-2-w",
-            "compilationMode": COMPILATION_MODE_STATIC,
+            "compilationMode": COMPILATION_MODE_PRECOMPILED,
         },
     )
     ensure_buildroot_frame_defaults(frame)
@@ -110,29 +104,28 @@ def _log_lines(db, frame: Frame) -> list[str]:
 
 
 @pytest.mark.asyncio
-async def test_real_buildroot_sd_image_generation_from_local_sources(
+async def test_real_buildroot_sd_image_generation_from_precompiled_release(
+    async_client,
     db,
     redis,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("FRAMEOS_ARTIFACT_DIR", str(tmp_path / "artifacts"))
-    monkeypatch.setenv("FRAMEOS_BUILDROOT_CACHE_DIR", str(tmp_path / "buildroot-cache"))
-    monkeypatch.setenv("FRAMEOS_CROSS_CACHE", str(tmp_path / "cross-cache"))
-    monkeypatch.setenv("FRAMEOS_CROSS_MAKE_JOBS", os.environ.get("FRAMEOS_CROSS_MAKE_JOBS", "2"))
-    monkeypatch.setattr(
-        buildroot_image_module,
-        "download_precompiled_agent_release",
-        _no_precompiled_agent_release,
+    monkeypatch.setenv("FRAMEOS_ARTIFACT_DIR", os.environ.get("FRAMEOS_ARTIFACT_DIR", str(tmp_path / "artifacts")))
+    monkeypatch.setenv(
+        "FRAMEOS_BUILDROOT_CACHE_DIR",
+        os.environ.get("FRAMEOS_BUILDROOT_CACHE_DIR", str(tmp_path / "buildroot-cache")),
     )
+    monkeypatch.setenv("FRAMEOS_CROSS_CACHE", os.environ.get("FRAMEOS_CROSS_CACHE", str(tmp_path / "cross-cache")))
+    monkeypatch.setenv("FRAMEOS_CROSS_MAKE_JOBS", os.environ.get("FRAMEOS_CROSS_MAKE_JOBS", "2"))
 
     frame = _frame(db)
-    _say(f"building real Buildroot SD image for frame {frame.id}")
+    _say(f"building Buildroot SD image from precompiled releases for frame {frame.id}")
     metadata = await BuildrootImageBuilder(db=db, redis=redis, frame=frame).run()
 
     assert metadata["status"] == "ready"
     assert metadata["platform"] == "raspberry-pi-zero-2-w"
-    assert metadata["compilationMode"] == COMPILATION_MODE_STATIC
+    assert metadata["compilationMode"] == COMPILATION_MODE_PRECOMPILED
     assert metadata["compressed"] is True
     image_path = Path(metadata["path"])
     assert image_path.is_file()
@@ -146,11 +139,20 @@ async def test_real_buildroot_sd_image_generation_from_local_sources(
     assert sd_image["status"] == "ready"
     assert sd_image["path"] == str(image_path)
 
+    download_response = await async_client.get(f"/api/frames/{frame.id}/buildroot/sd_image/download")
+    assert download_response.status_code == 200
+    assert download_response.headers["content-type"].startswith("application/gzip")
+    assert sd_image["filename"] in download_response.headers["content-disposition"]
+    assert len(download_response.content) == image_path.stat().st_size
+    assert download_response.content[:2] == b"\x1f\x8b"
+
     logs = "\n".join(_log_lines(db, frame))
     assert "Building FrameOS binary for Raspberry Pi Zero 2 W" in logs
     assert "Building FrameOS agent for Raspberry Pi Zero 2 W" in logs
+    assert "Using precompiled FrameOS release" in logs
+    assert "precompiled FrameOS agent release" in logs
     assert "Buildroot SD image ready" in logs
-    assert "Falling back to source build" in logs
-    assert "Downloaded precompiled FrameOS agent release" not in logs
-    assert "Using cached precompiled FrameOS agent release" not in logs
+    assert "Falling back to source build" not in logs
+    assert "Creating build archive" not in logs
+    assert "Target supports cross compilation" not in logs
     _say(f"real Buildroot SD image ready at {image_path}")

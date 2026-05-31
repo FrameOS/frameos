@@ -1,5 +1,5 @@
 import { expect, Page, Route, test } from '@playwright/test'
-import { login } from './visual-helpers'
+import { cleanupE2EInstallFrames, login } from './visual-helpers'
 
 interface CreatedFrame {
   id: number
@@ -28,8 +28,13 @@ test.describe.serial('@e2e frame installation setup flow', () => {
   test.beforeEach(async ({ page }) => {
     await installE2ERoutes(page)
     await login(page)
+    await cleanupE2EInstallFrames(page)
     await page.goto('/', { waitUntil: 'domcontentloaded' })
     await expect(page.getByRole('button', { name: /Add frame/i }).first()).toBeVisible()
+  })
+
+  test.afterEach(async ({ page }) => {
+    await cleanupE2EInstallFrames(page)
   })
 
   test('download SD card image boots and renders @e2e', async ({ page }) => {
@@ -322,7 +327,7 @@ function frameIdFromUrl(route: Route): number {
 }
 
 function uniqueName(prefix: string): string {
-  return `E2E ${prefix} ${Date.now()}`
+  return `E2E install flow ${prefix} ${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
 
 function fulfillJson(body: unknown): (route: Route) => Promise<void> {

@@ -50,10 +50,9 @@ TEST=1 FRAMEOS_E2E_RUNTIME=1 pytest app/tasks/tests/test_real_frameos_runtime_e2
 Build the local runtime first with `cd frameos && nimble build`, or set
 `FRAMEOS_RUNTIME_BIN` to the binary to execute.
 
-The Buildroot SD image E2E compiles the current FrameOS sources for the
-Raspberry Pi Zero 2 W target, forces the agent path to source-build fallback,
-composes a real SD image from the Buildroot base image, and verifies the
-resulting `.img.gz` metadata and deploy logs:
+The Buildroot SD image E2E uses precompiled FrameOS and agent releases for the
+Raspberry Pi Zero 2 W target, composes a real SD image from the Buildroot base
+image, and verifies the resulting `.img.gz` metadata and deploy logs:
 
 ```bash
 cd backend

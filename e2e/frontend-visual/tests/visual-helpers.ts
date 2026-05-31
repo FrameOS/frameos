@@ -1,6 +1,46 @@
 import type { Page, Route } from '@playwright/test'
 
 const fixedNow = '2026-05-23T12:00:00Z'
+const e2eInstallFrameNamePattern = /^E2E (?:(?:SD card|SSH|Script|Import) \d+|install flow (?:SD card|SSH|Script|Import) \d+-[a-z0-9]+)$/
+
+interface FrameListItem {
+  id: number
+  name?: string | null
+}
+
+function isE2EInstallFrame(frame: FrameListItem): boolean {
+  return e2eInstallFrameNamePattern.test(frame.name ?? '')
+}
+
+function withoutE2EInstallFrames(payload: any): any {
+  if (!Array.isArray(payload?.frames)) {
+    return payload
+  }
+  return {
+    ...payload,
+    frames: payload.frames.filter((frame: FrameListItem) => !isE2EInstallFrame(frame)),
+  }
+}
+
+export async function cleanupE2EInstallFrames(page: Page): Promise<void> {
+  const response = await page.request.get('/api/frames')
+  if (!response.ok()) {
+    throw new Error(`Could not list frames for E2E install cleanup: ${response.status()}`)
+  }
+
+  const payload = await response.json()
+  const frames = Array.isArray(payload?.frames) ? (payload.frames as FrameListItem[]) : []
+  const framesToDelete = frames.filter(isE2EInstallFrame)
+
+  await Promise.all(
+    framesToDelete.map(async (frame) => {
+      const deleteResponse = await page.request.delete(`/api/frames/${frame.id}`)
+      if (!deleteResponse.ok() && deleteResponse.status() !== 404) {
+        throw new Error(`Could not delete E2E install frame ${frame.id}: ${deleteResponse.status()}`)
+      }
+    })
+  )
+}
 
 export async function prepareStablePage(page: Page, theme: 'light' | 'dark'): Promise<void> {
   await page.addInitScript(
@@ -27,6 +67,12 @@ export async function prepareStablePage(page: Page, theme: 'light' | 'dark'): Pr
     },
     { fixedNow, theme }
   )
+
+  await page.route('**/api/frames', async (route) => {
+    const response = await route.fetch()
+    const payload = await response.json()
+    await route.fulfill({ response, json: withoutE2EInstallFrames(payload) })
+  })
 
   await page.route(
     '**/api/system/metrics',

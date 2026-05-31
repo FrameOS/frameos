@@ -447,8 +447,9 @@ jobs:
         with:
           path: |
             .tmp/buildroot-base-cache
+            .tmp/precompiled-cache
             .tmp/cross-cache
-          key: ${{ runner.os }}-buildroot-e2e-${{ hashFiles('tools/buildroot-images/manifest.json', 'buildroot-images.json', 'frameos/frameos.nimble') }}
+          key: ${{ runner.os }}-buildroot-e2e-${{ hashFiles('tools/buildroot-images/manifest.json', 'buildroot-images.json', 'versions.json', 'frameos/frameos.nimble') }}
           restore-keys: |
             ${{ runner.os }}-buildroot-e2e-
 
@@ -459,6 +460,7 @@ jobs:
           FRAMEOS_BUILDROOT_BASE_CACHE_DIR: ${{ github.workspace }}/.tmp/buildroot-base-cache
           FRAMEOS_BUILDROOT_CACHE_DIR: ${{ github.workspace }}/.tmp/buildroot-cache
           FRAMEOS_BUILDROOT_BASE_TIMEOUT: '300'
+          FRAMEOS_PRECOMPILED_CACHE_DIR: ${{ github.workspace }}/.tmp/precompiled-cache
           FRAMEOS_CROSS_CACHE: ${{ github.workspace }}/.tmp/cross-cache
           FRAMEOS_CROSS_MAKE_JOBS: '2'
           FRAMEOS_E2E_BUILDROOT: '1'
