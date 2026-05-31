@@ -901,6 +901,16 @@ html[data-frameos-theme='dark'] .frameos-icon-button:hover,
   color: #f8fafc;
 }
 
+.frameos-theme-dark .frameos-install-method-button,
+html[data-frameos-theme='dark'] .frameos-install-method-button {
+  border-color: rgba(255, 255, 255, 0.07);
+}
+
+.frameos-theme-dark .frameos-install-method-button:hover,
+html[data-frameos-theme='dark'] .frameos-install-method-button:hover {
+  border-color: rgba(255, 255, 255, 0.11);
+}
+
 .frameos-theme-dark .frameos-secondary-button,
 html[data-frameos-theme='dark'] .frameos-secondary-button {
   border-color: rgba(255, 255, 255, 0.12);

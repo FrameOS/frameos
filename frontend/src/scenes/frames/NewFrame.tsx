@@ -44,7 +44,7 @@ function ModeButton({
     <button
       type="button"
       onClick={onClick}
-      className="frameos-segment flex flex-1 flex-col items-start justify-start rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-left text-slate-600 transition hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+      className="frameos-install-method-button frameos-segment flex flex-1 flex-col items-start justify-start rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-left text-slate-600 transition hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
     >
       <span className="flex items-center gap-2 text-sm font-semibold">
         {children}
