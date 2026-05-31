@@ -289,9 +289,7 @@ export function Settings() {
   )
   const settingsActions = (
     <div className="settings-page-actions flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
-      <div className="frameos-muted shrink-0 text-xs tracking-wide text-slate-400">
-        {frameosVersionLabel}
-      </div>
+      <div className="frameos-muted shrink-0 text-xs tracking-wide text-slate-400">{frameosVersionLabel}</div>
       <div className="flex flex-wrap items-center gap-2">
         {!isHassioIngress ? (
           <Button size="small" color="secondary" onClick={logout} className="rounded-lg px-4 py-2">
@@ -352,6 +350,21 @@ export function Settings() {
                       tooltip="Used for Buildroot SD card images unless a frame overrides it."
                     >
                       <Select options={timezoneOptions} />
+                    </Field>
+                    <Field
+                      name="wifiSSID"
+                      label="Default WiFi network"
+                      tooltip="Prefilled when adding Buildroot SD card frames."
+                    >
+                      <TextInput autoComplete="off" />
+                    </Field>
+                    <Field
+                      name="wifiPassword"
+                      label="Default WiFi password"
+                      secret={!!savedSettings?.defaults?.wifiPassword}
+                      tooltip="Prefilled when adding Buildroot SD card frames."
+                    >
+                      <TextInput type="password" autoComplete="new-password" />
                     </Field>
                   </Box>
                 </Group>

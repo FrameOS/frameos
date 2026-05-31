@@ -151,6 +151,7 @@ export interface NewFrameFormType {
     wifiSSID?: string
     wifiPassword?: string
   }
+  rememberWifi?: boolean
 }
 
 export interface GPIOButton {

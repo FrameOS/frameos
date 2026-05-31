@@ -9,11 +9,13 @@ import {
 } from '@heroicons/react/24/outline'
 import { BUILDROOT_RASPBERRY_PI_ZERO_2_W, devices, buildrootPlatforms, rpiOSPlatforms } from '../../devices'
 import { newFrameForm } from './newFrameForm'
-import { FrameInstallMethod, NewFrameFormType } from '../../types'
+import { FrameInstallMethod, FrameOSSettings, NewFrameFormType } from '../../types'
 import { settingsLogic } from '../settings/settingsLogic'
 import { normalizedTimezone } from '../../utils/timezone'
 import { timezoneOptions } from '../../decorators/timezones'
 import { Spinner } from '../../components/Spinner'
+import { Field } from '../../components/Field'
+import { Switch } from '../../components/Switch'
 
 function isLocalServer(host?: string | null): boolean {
   const localHostRegex = /^(localhost|0\.0\.0\.0|127\.0\.0\.1|\[::1\])(:\d+)?$/
@@ -83,13 +85,25 @@ function selectClassName(): string {
   return 'frameos-form-control h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-400/30'
 }
 
-function setInstallMethodValues(installMethod: FrameInstallMethod): Partial<NewFrameFormType> {
+function defaultWifiNetwork(settings: FrameOSSettings): NonNullable<NewFrameFormType['network']> {
+  return {
+    wifiSSID: settings.defaults?.wifiSSID ?? '',
+    wifiPassword: settings.defaults?.wifiPassword ?? '',
+  }
+}
+
+function setInstallMethodValues(
+  installMethod: FrameInstallMethod,
+  savedSettings: FrameOSSettings
+): Partial<NewFrameFormType> {
   if (installMethod === 'sd_card') {
     return {
       install_method: installMethod,
       mode: 'buildroot',
       platform: BUILDROOT_RASPBERRY_PI_ZERO_2_W,
       frame_host: '',
+      network: defaultWifiNetwork(savedSettings),
+      rememberWifi: true,
     }
   }
   if (installMethod === 'script') {
@@ -173,21 +187,21 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
           </div>
           <div className="grid grid-cols-1 gap-2">
             <ModeButton
-              onClick={() => setNewFrameValues(setInstallMethodValues('sd_card'))}
+              onClick={() => setNewFrameValues(setInstallMethodValues('sd_card', savedSettings))}
               title="Download SD card"
               description="Build a flashable Buildroot image."
             >
               <ArrowDownTrayIcon className="h-4 w-4" />
             </ModeButton>
             <ModeButton
-              onClick={() => setNewFrameValues(setInstallMethodValues('ssh'))}
+              onClick={() => setNewFrameValues(setInstallMethodValues('ssh', savedSettings))}
               title="Install over SSH"
               description="Deploy to a reachable Raspberry Pi OS host."
             >
               <ServerStackIcon className="h-4 w-4" />
             </ModeButton>
             <ModeButton
-              onClick={() => setNewFrameValues(setInstallMethodValues('script'))}
+              onClick={() => setNewFrameValues(setInstallMethodValues('script', savedSettings))}
               title="Install with a script"
               description="Run one command on the device."
             >
@@ -446,6 +460,9 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
               autoComplete="new-password"
             />
           </FormField>
+          <Field name="rememberWifi">
+            <Switch label="Remember for next time" />
+          </Field>
           <div className="flex gap-2 pt-2">
             <button
               type="submit"

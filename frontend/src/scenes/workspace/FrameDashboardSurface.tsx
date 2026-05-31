@@ -404,7 +404,7 @@ function FrameDashboardStatusLine({ frame }: { frame: FrameType }): JSX.Element 
     : onlyFrameosUpgrade
     ? 'upgrade'
     : undeployedChanges
-    ? 'undeployed'
+    ? 'deploy now'
     : 'up to date'
   const frameIsUpToDate = !unsavedChanges && !undeployedChanges
 

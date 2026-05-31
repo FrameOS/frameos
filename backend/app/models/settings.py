@@ -24,6 +24,8 @@ def default_settings() -> dict:
     return {
         "defaults": {
             "timezone": guess_system_timezone(),
+            "wifiSSID": "",
+            "wifiPassword": "",
         },
     }
 

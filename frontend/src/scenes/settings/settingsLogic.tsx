@@ -18,6 +18,8 @@ function setDefaultSettings(settings: Partial<FrameOSSettings> | Record<string, 
     ...settings,
     defaults: {
       timezone: guessBrowserTimezone(),
+      wifiSSID: '',
+      wifiPassword: '',
       ...(settings.defaults ?? {}),
     },
     homeAssistant: settings.homeAssistant ?? {},

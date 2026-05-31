@@ -752,10 +752,16 @@ export const workspaceLogic = kea<workspaceLogicType>([
       sceneId,
     }),
     closeChatDrawer: true,
-    openFrameChangeDrawer: (frameId: number, kind: FrameChangeDrawerKind, deployDrawerView?: DeployDrawerView) => ({
+    openFrameChangeDrawer: (
+      frameId: number,
+      kind: FrameChangeDrawerKind,
+      deployDrawerView?: DeployDrawerView,
+      preferFrameRoute?: boolean
+    ) => ({
       deployDrawerView,
       frameId,
       kind,
+      preferFrameRoute,
     }),
     closeFrameChangeDrawer: true,
     retargetOpenFrameDrawers: (
@@ -1210,13 +1216,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
         actions.setSearch('')
         actions.selectFrame(frameId)
         cache.skipNextFrameChangeDrawerScrollPreserve = true
-        actions.openFrameChangeDrawer(frameId, 'deploy', deployDrawerView)
-        actions.focusFrame(frameId)
-        if (typeof window !== 'undefined') {
-          window.setTimeout(() => actions.focusFrame(frameId), 100)
-          window.setTimeout(() => actions.focusFrame(frameId), 350)
-          window.setTimeout(() => actions.focusFrame(frameId), 800)
-        }
+        actions.openFrameChangeDrawer(frameId, 'deploy', deployDrawerView, true)
       },
       setTheme: ({ theme }) => {
         window.localStorage.setItem('frameos.workspaceTheme', theme)
@@ -1440,7 +1440,18 @@ export const workspaceLogic = kea<workspaceLogicType>([
         ...(payload.nodeId ? { nodeId: String(payload.nodeId) } : {}),
       }),
     closeChatDrawer: clearDrawerUrl,
-    openFrameChangeDrawer: (payload: Record<string, any>) => drawerUrlForFrame(Number(payload.frameId), 'deployPlan'),
+    openFrameChangeDrawer: (payload: Record<string, any>) =>
+      payload.preferFrameRoute
+        ? [
+            urls.frame(Number(payload.frameId)),
+            {
+              ...clearDrawerSearchParams(router.values.searchParams),
+              drawer: 'deployPlan',
+              tool: 'overview',
+            },
+            utilityDrawerClosedHash(),
+          ]
+        : drawerUrlForFrame(Number(payload.frameId), 'deployPlan'),
     closeFrameChangeDrawer: clearDrawerUrl,
     openUtilityPanel: (payload: Record<string, any>) => {
       const panel = payload.panel
