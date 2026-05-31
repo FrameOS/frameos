@@ -324,17 +324,17 @@ function FrameSelector({
   const { navigateToFrame } = useActions(workspaceLogic)
   const { closeChatDrawer, closeFrameChangeDrawer, openFrameChangeDrawer } = useActions(workspaceLogic)
   const frameGroups = groupFramesByStatus(frames)
-  const deployDrawerIsOpen =
-    frameChangeDrawerSelection?.frameId === frame.id && frameChangeDrawerSelection.kind === 'deploy'
+  const unsavedDrawerIsOpen =
+    frameChangeDrawerSelection?.frameId === frame.id && frameChangeDrawerSelection.kind === 'unsaved'
 
   const openUnsavedChanges = (): void => {
     closeChatDrawer()
-    if (deployDrawerIsOpen) {
+    if (unsavedDrawerIsOpen) {
       hideDeployPlanModal()
       closeFrameChangeDrawer()
       return
     }
-    openFrameChangeDrawer(frame.id, 'deploy')
+    openFrameChangeDrawer(frame.id, 'unsaved')
   }
 
   return (

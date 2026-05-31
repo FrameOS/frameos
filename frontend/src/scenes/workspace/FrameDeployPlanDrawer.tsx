@@ -666,30 +666,26 @@ function BuildrootSdCardSection({
             href={`${urls.frame(frame.id, 'settings')}#frame-settings-network`}
             className="frameos-link text-xs font-semibold underline underline-offset-2 hover:no-underline"
           >
-            More settings
+            Frame settings
           </Link>
         }
       >
         <span className="inline-flex items-center gap-2">
           {onBack ? <BackToDeployButton onClick={onBack} /> : null}
-          <span>Buildroot SD card</span>
+          <span>SD card</span>
         </span>
       </DrawerHeading>
-      <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="frame-tool-heading text-sm font-semibold">SD card image</div>
-            <div className="frame-tool-muted mt-1 text-sm leading-5">
-              Prepare a flashable Raspberry Pi Zero 2 W image from the cached Buildroot base and the current FrameOS
-              release.
-            </div>
-            {frame.buildroot?.sdImage?.status ? (
-              <div className="mt-3 text-xs font-semibold uppercase tracking-wide text-[color:var(--tool-strong)]">
-                Status: {frame.buildroot.sdImage.status}
-              </div>
-            ) : null}
-          </div>
+      <div className="mb-3">
+        <div className="frame-tool-muted mt-1 text-sm leading-5">
+          Download a flashable SD card with FrameOS preinstalled.
         </div>
+        {frame.buildroot?.sdImage?.status ? (
+          <div className="mt-3 text-xs font-semibold uppercase tracking-wide text-[color:var(--tool-strong)]">
+            Status: {frame.buildroot.sdImage.status}
+          </div>
+        ) : null}
+      </div>
+      <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
         <div className="grid grid-cols-1 gap-3">
           <label className="block space-y-1">
             <span className="frame-tool-muted text-xs font-semibold uppercase tracking-wide">Backend host</span>

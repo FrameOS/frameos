@@ -32,6 +32,38 @@ block test_setup_boot_config_writes_local_file:
     if fileExists(path):
       removeFile(path)
 
+block test_write_privileged_file_skips_unchanged_file:
+  let path = getTempDir() / ("frameos-test-privileged-skip-" & $epochTime().int64 & ".txt")
+  writeFile(path, "existing\n")
+  var commands: seq[string] = @[]
+  setSetupCommandRunnerForTest(proc(command: string): SetupCommandResult =
+    commands.add(command)
+    ("", 0)
+  )
+  try:
+    writePrivilegedFile(path, "existing\n")
+    doAssert readFile(path) == "existing\n"
+    doAssert commands.len == 0
+  finally:
+    resetSetupCommandRunnerForTest()
+    if fileExists(path):
+      removeFile(path)
+
+block test_write_privileged_file_falls_back_after_direct_write_failure:
+  let path = getTempDir() / ("frameos-test-missing-parent-" & $epochTime().int64) / "target.txt"
+  var commands: seq[string] = @[]
+  setSetupCommandRunnerForTest(proc(command: string): SetupCommandResult =
+    commands.add(command)
+    ("", 0)
+  )
+  try:
+    writePrivilegedFile(path, "content\n")
+    doAssert commands.len == 1
+    doAssert commands[0].contains("install -m 644")
+    doAssert commands[0].contains(shellQuote(path))
+  finally:
+    resetSetupCommandRunnerForTest()
+
 block test_setup_spi_enables_when_raspi_config_reports_disabled:
   var commands: seq[string] = @[]
   setSetupCommandRunnerForTest(proc(command: string): SetupCommandResult =

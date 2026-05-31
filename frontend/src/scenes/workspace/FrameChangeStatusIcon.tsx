@@ -49,8 +49,8 @@ export function FrameChangeStatusIcon({
   const { frameChangeDrawerSelection } = useValues(workspaceLogic)
   const { closeFrameChangeDrawer, focusFrame, openFrameChangeDrawer } = useActions(workspaceLogic)
   const statusLabel = unsavedChanges ? 'Unsaved' : undeployedChanges ? 'Undeployed' : null
-  const deployDrawerIsOpen =
-    frameChangeDrawerSelection?.frameId === frameId && frameChangeDrawerSelection.kind === 'deploy'
+  const drawerKind = unsavedChanges ? 'unsaved' : 'deploy'
+  const drawerIsOpen = frameChangeDrawerSelection?.frameId === frameId && frameChangeDrawerSelection.kind === drawerKind
   const StatusIcon = unsavedChanges ? CloudArrowUpIcon : DeployToFrameIcon
   const isDashboard = variant === 'dashboard'
   const wrapperClassName = isDashboard
@@ -77,12 +77,12 @@ export function FrameChangeStatusIcon({
   const openDrawer = (event: MouseEvent<HTMLButtonElement>): void => {
     event.preventDefault()
     event.stopPropagation()
-    if (deployDrawerIsOpen) {
+    if (drawerIsOpen) {
       hideDeployPlanModal()
       closeFrameChangeDrawer()
       return
     }
-    openFrameChangeDrawer(frameId, 'deploy')
+    openFrameChangeDrawer(frameId, drawerKind)
     focusFrameAfterDrawerUpdate()
   }
 
@@ -90,8 +90,8 @@ export function FrameChangeStatusIcon({
     return (
       <button
         type="button"
-        title={deployDrawerIsOpen ? 'Close deploy' : 'Open deploy'}
-        aria-label={deployDrawerIsOpen ? 'Close deploy' : 'Open deploy'}
+        title={drawerIsOpen ? 'Close deploy' : 'Open deploy'}
+        aria-label={drawerIsOpen ? 'Close deploy' : 'Open deploy'}
         onClick={openDrawer}
         className={clsx(
           wrapperClassName,
@@ -111,10 +111,12 @@ export function FrameChangeStatusIcon({
       type="button"
       title={`${statusLabel} changes`}
       aria-label={
-        deployDrawerIsOpen
-          ? 'Close deploy'
+        drawerIsOpen
+          ? unsavedChanges
+            ? 'Close unsaved changes'
+            : 'Close deploy'
           : unsavedChanges
-          ? 'Open deploy for unsaved changes'
+          ? 'Open unsaved changes'
           : 'Open deploy for undeployed changes'
       }
       onClick={openDrawer}

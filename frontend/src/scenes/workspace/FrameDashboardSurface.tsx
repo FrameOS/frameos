@@ -412,7 +412,7 @@ function FrameDashboardStatusLine({ frame }: { frame: FrameType }): JSX.Element 
     <div className="frameos-muted truncate text-sm text-slate-500">
       <button
         type="button"
-        onClick={() => openFrameChangeDrawer(frame.id, 'deploy')}
+        onClick={() => openFrameChangeDrawer(frame.id, unsavedChanges ? 'unsaved' : 'deploy')}
         className={clsx(
           'frameos-change-status-link rounded font-medium hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
           frameIsUpToDate ? 'frameos-change-status-link--up-to-date' : null

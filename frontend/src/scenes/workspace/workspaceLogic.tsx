@@ -1177,7 +1177,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
       closeScheduleDrawer: preserveFramesScroll,
       openChatDrawer: hideNewFrameFormAndPreserveScroll,
       closeChatDrawer: preserveFramesScroll,
-      openFrameChangeDrawer: ({ frameId, deployDrawerView }) => {
+      openFrameChangeDrawer: ({ frameId, kind, deployDrawerView }) => {
         if (cache.skipNextFrameChangeDrawerScrollPreserve) {
           cache.skipNextFrameChangeDrawerScrollPreserve = false
           newFrameForm.actions.hideForm()
@@ -1187,11 +1187,13 @@ export const workspaceLogic = kea<workspaceLogicType>([
         } else {
           hideNewFrameFormAndPreserveScroll()
         }
-        const frameActions = frameLogic({ frameId }).actions
-        frameActions.setDeployDrawerView(
-          deployDrawerView ?? values.frameChangeDrawerSelection?.deployDrawerView ?? 'main'
-        )
-        frameActions.showDeployPlanModal()
+        if (kind === 'deploy') {
+          const frameActions = frameLogic({ frameId }).actions
+          frameActions.setDeployDrawerView(
+            deployDrawerView ?? values.frameChangeDrawerSelection?.deployDrawerView ?? 'main'
+          )
+          frameActions.showDeployPlanModal()
+        }
       },
       closeFrameChangeDrawer: preserveFramesScroll,
       retargetOpenFrameDrawers: ({ frameId, previousFrameChangeDrawerSelection }) => {
@@ -1341,7 +1343,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
       } else if (drawer === 'chat') {
         actions.openChatDrawer(frameId, sceneId, nodeId)
       } else if (drawer === 'unsavedChanges') {
-        actions.openFrameChangeDrawer(frameId, 'deploy')
+        actions.openFrameChangeDrawer(frameId, 'unsaved')
       } else if (drawer === 'deployPlan') {
         actions.openFrameChangeDrawer(frameId, 'deploy')
       } else {
@@ -1441,7 +1443,9 @@ export const workspaceLogic = kea<workspaceLogicType>([
       }),
     closeChatDrawer: clearDrawerUrl,
     openFrameChangeDrawer: (payload: Record<string, any>) =>
-      payload.preferFrameRoute
+      payload.kind === 'unsaved'
+        ? drawerUrlForFrame(Number(payload.frameId), 'unsavedChanges')
+        : payload.preferFrameRoute
         ? [
             urls.frame(Number(payload.frameId)),
             {

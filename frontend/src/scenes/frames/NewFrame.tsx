@@ -15,7 +15,7 @@ import { normalizedTimezone } from '../../utils/timezone'
 import { timezoneOptions } from '../../decorators/timezones'
 import { Spinner } from '../../components/Spinner'
 import { Field } from '../../components/Field'
-import { Switch } from '../../components/Switch'
+import { Checkbox } from '../../components/Checkbox'
 
 function isLocalServer(host?: string | null): boolean {
   const localHostRegex = /^(localhost|0\.0\.0\.0|127\.0\.0\.1|\[::1\])(:\d+)?$/
@@ -148,10 +148,23 @@ function installMethodTitle(installMethod: AddFrameMode): string {
   return 'Install over SSH'
 }
 
+function AddFrameSubmitButton({ loading }: { loading: boolean }): JSX.Element {
+  return (
+    <button
+      type="submit"
+      disabled={loading}
+      className="frameos-primary-action flex h-11 flex-1 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold text-white shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-70"
+    >
+      {loading ? <Spinner color="white" /> : null}
+      Add frame
+    </button>
+  )
+}
+
 export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.Element {
   const { hideForm, importFrame, resetNewFrame, setFile, setNewFrameValue, setNewFrameValues } =
     useActions(newFrameForm)
-  const { file, importingFrameLoading, newFrame, newFrameErrors } = useValues(newFrameForm)
+  const { file, importingFrameLoading, isNewFrameSubmitting, newFrame, newFrameErrors } = useValues(newFrameForm)
   const { savedSettings } = useValues(settingsLogic)
   const installMethod = newFrame.install_method
   const addFrameMode: AddFrameMode | undefined = newFrame.mode === 'import' ? 'import' : installMethod
@@ -290,12 +303,7 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
             </select>
           </FormField>
           <div className="flex gap-2 pt-2">
-            <button
-              type="submit"
-              className="frameos-primary-action flex h-11 flex-1 items-center justify-center rounded-xl px-4 text-sm font-semibold text-white shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-            >
-              Add frame
-            </button>
+            <AddFrameSubmitButton loading={isNewFrameSubmitting} />
             <button
               type="button"
               onClick={cancel}
@@ -358,12 +366,7 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
             </select>
           </FormField>
           <div className="flex gap-2 pt-2">
-            <button
-              type="submit"
-              className="frameos-primary-action flex h-11 flex-1 items-center justify-center rounded-xl px-4 text-sm font-semibold text-white shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-            >
-              Add frame
-            </button>
+            <AddFrameSubmitButton loading={isNewFrameSubmitting} />
             <button
               type="button"
               onClick={cancel}
@@ -461,15 +464,10 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
             />
           </FormField>
           <Field name="rememberWifi">
-            <Switch label="Remember for next time" />
+            <Checkbox label="Remember for next time" />
           </Field>
           <div className="flex gap-2 pt-2">
-            <button
-              type="submit"
-              className="frameos-primary-action flex h-11 flex-1 items-center justify-center rounded-xl px-4 text-sm font-semibold text-white shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-            >
-              Add frame
-            </button>
+            <AddFrameSubmitButton loading={isNewFrameSubmitting} />
             <button
               type="button"
               onClick={cancel}

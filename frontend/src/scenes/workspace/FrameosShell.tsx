@@ -38,6 +38,7 @@ import { Chat } from '../frame/panels/Chat/Chat'
 import { chatLogic } from '../frame/panels/Chat/chatLogic'
 import { workspaceChatDrawerLogic } from './workspaceChatDrawerLogic'
 import { FrameDeployPlanDrawer } from './FrameDeployPlanDrawer'
+import { FrameUnsavedChangesDrawer } from './FrameUnsavedChangesDrawer'
 import { DeployToFrameIcon } from './FrameChangeStatusIcon'
 
 const DEFAULT_BROWSER_TITLE = 'FrameOS Backend'
@@ -242,7 +243,8 @@ function FrameStatusHeaderButton({ frameId }: { frameId: number }): JSX.Element 
   const { frameChangeDrawerSelection } = useValues(workspaceLogic)
   const { closeFrameChangeDrawer, openFrameChangeDrawer } = useActions(workspaceLogic)
   const statusLabel = unsavedChanges ? 'Unsaved' : undeployedChanges ? 'Undeployed' : null
-  const drawerIsOpen = frameChangeDrawerSelection?.frameId === frameId && frameChangeDrawerSelection.kind === 'deploy'
+  const drawerKind = unsavedChanges ? 'unsaved' : 'deploy'
+  const drawerIsOpen = frameChangeDrawerSelection?.frameId === frameId && frameChangeDrawerSelection.kind === drawerKind
 
   if (!statusLabel) {
     return null
@@ -252,14 +254,14 @@ function FrameStatusHeaderButton({ frameId }: { frameId: number }): JSX.Element 
     <button
       type="button"
       title={`${statusLabel} changes`}
-      aria-label={drawerIsOpen ? 'Close deploy' : 'Open deploy'}
+      aria-label={drawerIsOpen ? 'Close changes' : unsavedChanges ? 'Open unsaved changes' : 'Open deploy'}
       onClick={() => {
         if (drawerIsOpen) {
           hideDeployPlanModal()
           closeFrameChangeDrawer()
           return
         }
-        openFrameChangeDrawer(frameId, 'deploy')
+        openFrameChangeDrawer(frameId, drawerKind)
       }}
       className={clsx(
         'workspace-unsaved-header-button flex h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
@@ -267,7 +269,7 @@ function FrameStatusHeaderButton({ frameId }: { frameId: number }): JSX.Element 
       )}
     >
       <DeployToFrameIcon className="h-5 w-5 shrink-0" />
-      <span className="workspace-unsaved-header-label">Deploy</span>
+      <span className="workspace-unsaved-header-label">{unsavedChanges ? 'Changes' : 'Deploy'}</span>
     </button>
   )
 }
@@ -311,7 +313,11 @@ export function FrameosShell({
   const frameChangeDrawerFrame = frameChangeDrawerSelection ? frames[frameChangeDrawerSelection.frameId] : null
   const frameChangeDrawer =
     frameChangeDrawerSelection && frameChangeDrawerFrame ? (
-      <FrameDeployPlanDrawer frame={frameChangeDrawerFrame} />
+      frameChangeDrawerSelection.kind === 'unsaved' ? (
+        <FrameUnsavedChangesDrawer frame={frameChangeDrawerFrame} />
+      ) : (
+        <FrameDeployPlanDrawer frame={frameChangeDrawerFrame} />
+      )
     ) : null
   const workspaceRightPanel = chatDrawerSelection ? (
     <WorkspaceChatDrawer

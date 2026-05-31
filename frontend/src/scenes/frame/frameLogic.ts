@@ -325,7 +325,8 @@ function sceneChangeDetails(currentScenes: FrameScene[], deployedScenes: FrameSc
 function computeChangeDetails(
   previous: Partial<FrameType> | null | undefined,
   next: Partial<FrameType> | null | undefined,
-  mode: FrameType['mode']
+  mode: FrameType['mode'],
+  includeFrameosVersion = true
 ): ChangeDetail[] {
   const recompileFields = new Set(getRecompileFields(mode).filter((key) => key !== 'scenes'))
   const details: ChangeDetail[] = []
@@ -343,7 +344,7 @@ function computeChangeDetails(
 
   const previousFrameosVersion = deployedFrameosVersion(previous)
 
-  if (!previousFrameosVersion || previousFrameosVersion !== CURRENT_FRAMEOS_VERSION) {
+  if (includeFrameosVersion && (!previousFrameosVersion || previousFrameosVersion !== CURRENT_FRAMEOS_VERSION)) {
     details.push({
       label: `FrameOS upgrade ${previousFrameosVersion ?? ''} -> ${CURRENT_FRAMEOS_VERSION}`,
       requiresFullDeploy: true,
@@ -1289,7 +1290,7 @@ export const frameLogic = kea<frameLogicType>([
     ],
     unsavedChangeDetails: [
       (s) => [s.frame, s.frameForm, s.mode],
-      (frame, frameForm, mode): ChangeDetail[] => computeChangeDetails(frame, frameForm, mode),
+      (frame, frameForm, mode): ChangeDetail[] => computeChangeDetails(frame, frameForm, mode, false),
     ],
     undeployedChangeDetails: [
       (s) => [s.lastDeploy, s.frame, s.mode, s.isFrameAdminMode],
