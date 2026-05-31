@@ -510,7 +510,7 @@ function AgentBootstrapHelp(): JSX.Element {
     <Tooltip
       className="inline-flex h-5 w-5 items-center justify-center rounded-full text-amber-500 hover:text-amber-600"
       titleClassName="w-72"
-      title="Use this when the frame can reach this backend but SSH is unavailable. Run the command on the frame as root to install the agent, then deploy through the agent instead of SSH."
+      title="Use this when the frame can reach this backend but SSH is unavailable. Run the command on the frame as root to install FrameOS and connect the agent."
     >
       <ExclamationCircleIcon className="h-4 w-4" aria-label="Agent bootstrap help" />
     </Tooltip>
@@ -757,8 +757,8 @@ function ScriptInstallSection({ frame, onBack }: { frame: FrameType; onBack: () 
       </DrawerHeading>
       <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
         <div className="frame-tool-muted text-sm leading-5">
-          Run this command on the device as a user with sudo access. It installs the FrameOS agent and connects back to
-          this backend.
+          Run this command on the device as a user with sudo access. It installs FrameOS, starts the agent, and
+          connects back to this backend.
         </div>
         {loading ? (
           <div className="flex items-center gap-2 text-sm font-semibold text-[color:var(--tool-strong)]">

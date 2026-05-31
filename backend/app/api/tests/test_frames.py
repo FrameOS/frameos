@@ -2,6 +2,7 @@ import asyncio
 import gzip
 import json
 import pytest
+import subprocess
 import time
 from unittest.mock import AsyncMock, patch
 import httpx
@@ -54,6 +55,17 @@ async def test_api_frame_get_found(async_client, db, redis):
 @pytest.mark.asyncio
 async def test_api_frame_agent_bootstrap_command_enables_agent_and_returns_script(async_client, no_auth_client, db, redis):
     frame = await new_frame(db, redis, 'BootstrapFrame', 'frame.local', 'backend.local')
+    frame.scenes = [
+        {
+            'id': 'scene-1',
+            'name': 'Scene 1',
+            'settings': {'execution': 'interpreted'},
+            'nodes': [],
+            'edges': [],
+        }
+    ]
+    db.add(frame)
+    db.commit()
 
     command_response = await async_client.post(f'/api/frames/{frame.id}/agent_bootstrap')
 
@@ -74,11 +86,17 @@ async def test_api_frame_agent_bootstrap_command_enables_agent_and_returns_scrip
     assert script_response.headers['content-type'].startswith('text/x-shellscript')
     script = script_response.text
     assert 'frameos_agent' in script
+    assert 'frameos.service' in script
+    assert 'FRAMEOS_DIR=/srv/frameos' in script
+    assert './frameos setup' in script
+    assert 'FrameOS and the FrameOS agent are installed and started' in script
     assert 'compile_frameos_agent' not in script
     assert 'sh compile' not in script
+    syntax_check = subprocess.run(["sh", "-n"], input=script, text=True, capture_output=True)
+    assert syntax_check.returncode == 0, syntax_check.stderr
 
-    config_json = script.split("<<'FRAMEOS_AGENT_CONFIG_JSON'\n", 1)[1].split(
-        '\nFRAMEOS_AGENT_CONFIG_JSON',
+    config_json = script.split("<<'FRAMEOS_CONFIG_JSON'\n", 1)[1].split(
+        '\nFRAMEOS_CONFIG_JSON',
         1,
     )[0]
     config = json.loads(config_json)
@@ -87,6 +105,12 @@ async def test_api_frame_agent_bootstrap_command_enables_agent_and_returns_scrip
     assert config['agent']['agentEnabled'] is True
     assert config['agent']['agentRunCommands'] is True
     assert config['agent']['agentSharedSecret'] == frame.agent['agentSharedSecret']
+
+    scenes_json = script.split("<<'FRAMEOS_SCENES_JSON'\n", 1)[1].split(
+        '\nFRAMEOS_SCENES_JSON',
+        1,
+    )[0]
+    assert json.loads(scenes_json) == frame.scenes
 
     bad_response = await no_auth_client.get(f'/api/agent-bootstrap/{frame.id}/not-the-token')
     assert bad_response.status_code == 404

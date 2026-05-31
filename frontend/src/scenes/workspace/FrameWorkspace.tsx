@@ -311,18 +311,46 @@ function parseFrameId(frameId?: string): number | null {
 function FrameSelector({
   frame,
   frames,
+  unsavedChanges,
   className,
 }: {
   frame: FrameType
   frames: FrameType[]
+  unsavedChanges: boolean
   className?: string
 }): JSX.Element {
+  const { hideDeployPlanModal } = useActions(frameLogic({ frameId: frame.id }))
+  const { frameChangeDrawerSelection } = useValues(workspaceLogic)
   const { navigateToFrame } = useActions(workspaceLogic)
+  const { closeChatDrawer, closeFrameChangeDrawer, openFrameChangeDrawer } = useActions(workspaceLogic)
   const frameGroups = groupFramesByStatus(frames)
+  const deployDrawerIsOpen =
+    frameChangeDrawerSelection?.frameId === frame.id && frameChangeDrawerSelection.kind === 'deploy'
+
+  const openUnsavedChanges = (): void => {
+    closeChatDrawer()
+    if (deployDrawerIsOpen) {
+      hideDeployPlanModal()
+      closeFrameChangeDrawer()
+      return
+    }
+    openFrameChangeDrawer(frame.id, 'deploy')
+  }
 
   return (
     <div className={className}>
-      <label className="frameos-muted mb-2 block text-xs font-semibold uppercase tracking-wide">Frame</label>
+      <div className="mb-2 flex min-h-4 items-center justify-between gap-2">
+        <label className="frameos-muted block text-xs font-semibold uppercase tracking-wide">Frame</label>
+        {unsavedChanges ? (
+          <button
+            type="button"
+            onClick={openUnsavedChanges}
+            className="frameos-muted text-right text-xs font-semibold underline underline-offset-2 transition hover:text-[color:var(--tool-strong)] focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          >
+            unsaved changes
+          </button>
+        ) : null}
+      </div>
       <select
         value={frame.id}
         onChange={(event) => navigateToFrame(parseInt(event.target.value, 10))}
@@ -436,7 +464,7 @@ function FrameTree({
           mediaClassName="@xs:h-full @xs:min-h-[8.625rem]"
         />
         <div className="order-1 min-w-0 space-y-2 @xs:order-2">
-          <FrameSelector frame={frame} frames={frames} />
+          <FrameSelector frame={frame} frames={frames} unsavedChanges={unsavedChanges} />
           <FrameSceneSidebarCard frame={frame} unsavedChanges={unsavedChanges} undeployedChanges={undeployedChanges} />
         </div>
       </div>
