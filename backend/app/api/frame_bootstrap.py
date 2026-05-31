@@ -17,7 +17,7 @@ from app.config import config, normalize_ingress_path
 from app.database import get_db
 from app.models.frame import Frame, get_frame_json, get_interpreted_scenes_json, update_frame
 from app.redis import get_redis
-from app.schemas.frames import FrameAgentBootstrapResponse
+from app.schemas.frames import FrameBootstrapResponse
 from app.tasks.precompiled_frameos import RELEASE_BASE_URL, frame_compiled_scene_count, release_version
 from app.utils.token import secure_token
 
@@ -32,7 +32,7 @@ def _bad_request(message: str) -> None:
     raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=message)
 
 
-def _agent_bootstrap_token(frame: Frame) -> str:
+def _frame_bootstrap_token(frame: Frame) -> str:
     agent = frame.agent if isinstance(frame.agent, dict) else {}
     agent_secret = str(agent.get("agentSharedSecret") or "")
     server_api_key = str(frame.server_api_key or "")
@@ -44,11 +44,11 @@ def _agent_bootstrap_token(frame: Frame) -> str:
     ).hexdigest()
 
 
-def _agent_bootstrap_token_valid(frame: Frame, token: str) -> bool:
-    return secrets.compare_digest(_agent_bootstrap_token(frame), token)
+def _frame_bootstrap_token_valid(frame: Frame, token: str) -> bool:
+    return secrets.compare_digest(_frame_bootstrap_token(frame), token)
 
 
-async def _ensure_agent_bootstrap_enabled(
+async def _ensure_frame_bootstrap_enabled(
     db: Session,
     redis: Redis,
     frame: Frame,
@@ -123,13 +123,13 @@ def _frame_server_base_url(frame: Frame) -> str | None:
     return f"{scheme}://{host}{path.rstrip('/')}"
 
 
-def _agent_bootstrap_script_url(request: Request, frame: Frame) -> str:
-    token = _agent_bootstrap_token(frame)
+def _frame_bootstrap_script_url(request: Request, frame: Frame) -> str:
+    token = _frame_bootstrap_token(frame)
     base_url = _frame_server_base_url(frame) or _external_request_base_url(request)
-    return f"{base_url}/api/agent-bootstrap/{frame.id}/{token}"
+    return f"{base_url}/api/frame-bootstrap/{frame.id}/{token}"
 
 
-def _agent_bootstrap_config_json(db: Session, frame: Frame) -> str:
+def _frame_bootstrap_config_json(db: Session, frame: Frame) -> str:
     payload = get_frame_json(db, frame)
     agent = dict(payload.get("agent") or {})
     frame_agent = frame.agent if isinstance(frame.agent, dict) else {}
@@ -142,16 +142,16 @@ def _agent_bootstrap_config_json(db: Session, frame: Frame) -> str:
     return json.dumps(payload, indent=2) + "\n"
 
 
-def _agent_bootstrap_scenes_json(frame: Frame) -> str:
+def _frame_bootstrap_scenes_json(frame: Frame) -> str:
     scenes = get_interpreted_scenes_json(frame) if frame.scenes else []
     return json.dumps(scenes, indent=2) + "\n"
 
 
-def _agent_bootstrap_all_scenes_json(frame: Frame) -> str:
+def _frame_bootstrap_all_scenes_json(frame: Frame) -> str:
     return json.dumps(list(frame.scenes or []), indent=2) + "\n"
 
 
-def _agent_bootstrap_script(db: Session, frame: Frame) -> str:
+def _frame_bootstrap_script(db: Session, frame: Frame) -> str:
     version = release_version()
     if not version:
         raise HTTPException(
@@ -159,9 +159,9 @@ def _agent_bootstrap_script(db: Session, frame: Frame) -> str:
             detail="FrameOS release version unavailable",
         )
 
-    config_json = _agent_bootstrap_config_json(db, frame)
-    scenes_json = _agent_bootstrap_scenes_json(frame)
-    all_scenes_json = _agent_bootstrap_all_scenes_json(frame)
+    config_json = _frame_bootstrap_config_json(db, frame)
+    scenes_json = _frame_bootstrap_scenes_json(frame)
+    all_scenes_json = _frame_bootstrap_all_scenes_json(frame)
     compiled_scene_count = frame_compiled_scene_count(frame)
     return f"""#!/bin/sh
 set -eu
@@ -410,6 +410,9 @@ if [ "$setup_status" -ne 0 ] && [ "$setup_status" -ne 2 ]; then
   exit "$setup_status"
 fi
 
+install -d -m 0755 /etc/systemd/system
+install -m 0644 "$frameos_release_dir/frameos.service" /etc/systemd/system/frameos.service
+install -m 0644 "$agent_release_dir/frameos_agent.service" /etc/systemd/system/frameos_agent.service
 systemctl daemon-reload
 systemctl enable frameos.service frameos_agent.service
 if [ "$setup_status" -eq 2 ]; then
@@ -425,8 +428,8 @@ echo "FrameOS and the FrameOS agent are installed and started"
 """
 
 
-@api_with_auth.post("/frames/{id:int}/agent_bootstrap", response_model=FrameAgentBootstrapResponse)
-async def api_frame_agent_bootstrap_command(
+@api_with_auth.post("/frames/{id:int}/frame_bootstrap", response_model=FrameBootstrapResponse)
+async def api_frame_bootstrap_command(
     id: int,
     request: Request,
     select_agent: bool = True,
@@ -438,27 +441,27 @@ async def api_frame_agent_bootstrap_command(
     if not frame:
         _not_found()
     if (frame.mode or "rpios") != "rpios":
-        _bad_request("Agent bootstrap is only supported for Raspberry Pi OS frames")
+        _bad_request("FrameOS bootstrap is only supported for Raspberry Pi OS frames")
 
-    await _ensure_agent_bootstrap_enabled(db, redis, frame, select_agent=select_agent, regenerate=regenerate)
-    script_url = _agent_bootstrap_script_url(request, frame)
+    await _ensure_frame_bootstrap_enabled(db, redis, frame, select_agent=select_agent, regenerate=regenerate)
+    script_url = _frame_bootstrap_script_url(request, frame)
     return {
         "script_url": script_url,
         "command": f"curl -fsSL {shlex.quote(script_url)} | sudo sh",
     }
 
 
-@api_public.get("/agent-bootstrap/{frame_id:int}/{token}")
-async def api_frame_agent_bootstrap_script(
+@api_public.get("/frame-bootstrap/{frame_id:int}/{token}")
+async def api_frame_bootstrap_script(
     frame_id: int,
     token: str,
     db: Session = Depends(get_db),
 ):
     frame = db.get(Frame, frame_id)
-    if not frame or not _agent_bootstrap_token_valid(frame, token):
+    if not frame or not _frame_bootstrap_token_valid(frame, token):
         _not_found()
     if (frame.mode or "rpios") != "rpios":
-        _bad_request("Agent bootstrap is only supported for Raspberry Pi OS frames")
+        _bad_request("FrameOS bootstrap is only supported for Raspberry Pi OS frames")
 
-    script = _agent_bootstrap_script(db, frame)
+    script = _frame_bootstrap_script(db, frame)
     return Response(script, media_type="text/x-shellscript")

@@ -136,7 +136,7 @@ async function installE2ERoutes(page: Page): Promise<void> {
   })
 
   await page.route(
-    /\/api\/frames\/\d+\/agent_bootstrap(?:\?.*)?$/,
+    /\/api\/frames\/\d+\/frame_bootstrap(?:\?.*)?$/,
     fulfillJson({
       command: 'sudo FRAMEOS_E2E_INSTALL=1 /bin/sh -c "echo installing frameos"',
     })
