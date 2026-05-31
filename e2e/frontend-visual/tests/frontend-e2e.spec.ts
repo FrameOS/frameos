@@ -239,7 +239,7 @@ test.describe('backend frontend e2e coverage @e2e', () => {
 
     await expect(page.getByRole('button', { name: 'Back to scene' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Discard changes' })).toBeDisabled()
-    await expect(page.getByRole('button', { name: 'Save' })).toBeDisabled()
+    await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeEnabled()
 
     await page.getByRole('button', { name: 'Back to scene' }).click()
     await expect(page).toHaveURL(
