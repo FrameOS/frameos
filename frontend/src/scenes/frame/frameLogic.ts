@@ -811,7 +811,7 @@ function sanitizeFrame(frame: Partial<FrameType>): Partial<FrameType> {
   const mountpoints = normalizeMountpointsForComparison(frame.mountpoints) as FrameType['mountpoints']
   const assetsPath = frame.mode === 'buildroot' ? '/srv/assets' : frame.assets_path
   const buildroot =
-    frame.mode === 'buildroot' || frame.buildroot
+    frame.mode === 'buildroot'
       ? {
           ...(frame.buildroot ?? {}),
           compilationMode: frame.buildroot?.compilationMode ?? '',

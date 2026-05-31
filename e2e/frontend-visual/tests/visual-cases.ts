@@ -129,10 +129,9 @@ async function openAddFrameDrawer(page: Page): Promise<void> {
     .getByRole('button', { name: /Add frame/i })
     .first()
     .click()
-  await page
-    .getByRole('heading', { name: /Add frame/i })
-    .last()
-    .waitFor()
+  const drawer = page.locator('.workspace-drawer').filter({ hasText: /Installation method/i }).last()
+  await drawer.waitFor()
+  await drawer.getByRole('button', { name: /Download SD card/i }).waitFor()
 }
 
 async function openSettingsNetworkSection(page: Page): Promise<void> {

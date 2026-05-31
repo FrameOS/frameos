@@ -403,11 +403,11 @@ export function FrameosShell({
               pending={pendingMode === 'frames'}
               preloadScene="frames"
               sidebarOpen={secondarySidebarOpen}
-              title="Frames home"
+              title={secondarySidebarOpen && mode === 'frames' ? 'Hide frames panel' : 'Frames home'}
               onActiveClick={() => {
                 requestNextFramesHomeScrollTop()
                 prepareFirstLevelNavigation()
-                scrollFramesHomeToTop('smooth', false)
+                toggleSecondarySidebar()
               }}
               onInactiveClick={() => {
                 requestNextFramesHomeScrollTop()
@@ -426,7 +426,7 @@ export function FrameosShell({
               title={secondarySidebarOpen && mode === 'frame' ? 'Hide frame panel' : 'Frame'}
               onActiveClick={() => {
                 prepareFirstLevelNavigation()
-                router.actions.push(urls.frames())
+                toggleSecondarySidebar()
               }}
               onInactiveClick={prepareFirstLevelNavigation}
             >
