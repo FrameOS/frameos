@@ -1,5 +1,6 @@
+import lib/lgpio
+
 {.compile: "DEV_Config.c".}
-{.passl: "-llgpio".}
 ## ***************************************************************************
 ##  | File      	:   DEV_Config.h
 ##  | Author      :   Waveshare team

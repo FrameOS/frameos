@@ -20,7 +20,6 @@ from app.tasks._frame_deployer import FrameDeployer
 from app.tasks.binary_builder import FrameBinaryBuilder, FrameBinaryBuildResult, FrameBinaryPlan
 from app.tasks.frame_deploy_helpers import (
     DEFAULT_QUICKJS_VERSION,
-    ensure_lgpio,
     ensure_ntp_installed,
     ensure_quickjs,
     ensure_sudo_available,
@@ -151,8 +150,6 @@ class FullDeployPlan:
     dependency_helper_plans: list[HelperActionPlan] = field(default_factory=list)
     remote_build_fallback_package_plans: list[PackagePlan] = field(default_factory=list)
     vendor_sync_plans: list[VendorSyncPlan] = field(default_factory=list)
-    lgpio_required: bool = False
-    lgpio_installed: bool = False
     quickjs_required_if_remote_build: bool = False
     quickjs_dirname: str | None = None
     quickjs_installed: bool = False
@@ -169,10 +166,6 @@ class FullDeployPlan:
             "binary": self.binary_plan.to_dict(),
             "packages": [pkg.to_dict() for pkg in self.package_plans],
             "package_alternatives": [pkg.to_dict() for pkg in self.package_alternatives],
-            "lgpio": {
-                "required": self.lgpio_required,
-                "installed": self.lgpio_installed,
-            },
             "quickjs": {
                 "required_if_remote_build": self.quickjs_required_if_remote_build,
                 "dirname": self.quickjs_dirname,
@@ -415,18 +408,6 @@ class FrameDeployWorkflow:
         if drivers.get("evdev"):
             package_plans.append(await self._plan_package("libevdev-dev", "evdev driver support"))
 
-        lgpio_required = bool(
-            drivers.get("waveshare")
-            or drivers.get("inky")
-            or drivers.get("gpioButton")
-            or drivers.get("inkyHyperPixel2r")
-        )
-        lgpio_installed = False
-        if lgpio_required:
-            lgpio_installed = await self._path_exists("/usr/local/include/lgpio.h") or await self._path_exists("/usr/include/lgpio.h")
-            if not lgpio_installed:
-                package_plans.append(await self._plan_package("liblgpio-dev", "GPIO/Waveshare/HyperPixel driver support"))
-
         if drivers.get("inkyPython"):
             package_plans.extend(
                 [
@@ -535,8 +516,6 @@ class FrameDeployWorkflow:
                 dependency_helper_plans=dependency_helper_plans,
                 remote_build_fallback_package_plans=remote_build_fallback_package_plans,
                 vendor_sync_plans=vendor_sync_plans,
-                lgpio_required=lgpio_required,
-                lgpio_installed=lgpio_installed,
                 quickjs_required_if_remote_build=quickjs_required_if_remote_build,
                 quickjs_dirname=quickjs_dirname,
                 quickjs_installed=quickjs_installed,
@@ -702,12 +681,6 @@ class FrameDeployWorkflow:
         await self._install_planned_remote_dependencies(
             full_plan=full_plan,
             cross_compiled=build_result.cross_compiled,
-        )
-        await ensure_lgpio(
-            self.deployer,
-            required=full_plan.lgpio_required,
-            prebuilt_entry=build_result.prebuilt_entry,
-            already_installed=full_plan.lgpio_installed,
         )
         return await ensure_quickjs(
             self.deployer,

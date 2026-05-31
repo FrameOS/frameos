@@ -56,11 +56,6 @@ TOOLCHAIN_PACKAGES = (
     "build-essential ca-certificates curl git make pkg-config python3 python3-pip "
     "unzip xz-utils zlib1g-dev libssl-dev libffi-dev libjpeg-dev libfreetype6-dev libevdev-dev"
 )
-LGPIO_ARCHIVE_URL = "https://archive.frameos.net/source/vendor/lgpio-{version}.tar.gz"
-DEFAULT_LGPIO_VERSION = "v0.2.2"
-DEFAULT_LGPIO_SHA256 = "b08d8569d6dc8fa91a42ba1e37f620fdcb19d6bf2330e4b7d7301431ddbe124c"
-
-
 PLATFORM_MAP = {
     "amd64": "linux/amd64",
     "x86_64": "linux/amd64",
@@ -124,7 +119,6 @@ class CrossCompiler:
         output_name: str = "frameos",
         compile_script_name: str = "compile_frameos.sh",
         needs_quickjs: bool = True,
-        needs_lgpio: bool = True,
     ) -> None:
         self.db = db
         self.redis = redis
@@ -153,10 +147,8 @@ class CrossCompiler:
         self.output_name = output_name
         self.compile_script_name = compile_script_name
         self.needs_quickjs = needs_quickjs
-        self.needs_lgpio = needs_lgpio
         self._sysroot_include_dirs: set[str] = set()
         self._sysroot_lib_dirs: set[str] = set()
-        self._build_lgpio_from_source = False
         for rel in ("usr/include", "usr/local/include", "usr/lib", "usr/local/lib"):
             (self.sysroot_dir / rel).mkdir(parents=True, exist_ok=True)
 
@@ -206,8 +198,6 @@ class CrossCompiler:
                 raise RuntimeError("A generated build directory is required for non-FrameOS cross compilation")
             build_dir = await self._generate_c_sources(source_dir)
         await self._prepare_sysroot()
-        if self.needs_lgpio:
-            await self._ensure_lgpio_in_sysroot()
         if self.needs_quickjs:
             await self._ensure_quickjs_in_build_dir(source_dir, build_dir)
         binary_path = await self._run_docker_build(str(build_dir))
@@ -216,18 +206,10 @@ class CrossCompiler:
         return binary_path
 
     async def _prepare_sysroot(self) -> None:
-        if self.prebuilt_components:
-            await self._log(
-                "stdout",
-                f"{icon} Staging prebuilt sysroot components",
-            )
-            for component in self.prebuilt_components:
-                self._inject_prebuilt_component(component)
-        else:
-            await self._log(
-                "stdout",
-                f"{icon} Using default include/lib paths without remote sysroot synchronization",
-            )
+        await self._log(
+            "stdout",
+            f"{icon} Using default include/lib paths without remote sysroot synchronization",
+        )
 
     async def _run_docker_build(self, build_dir: str) -> str:
         build_dir = os.path.abspath(build_dir)
@@ -261,7 +243,6 @@ class CrossCompiler:
             shlex.quote(" ".join(extra_cflags_parts)) if extra_cflags_parts else "''"
         )
         extra_libs = shlex.quote(" ".join(f"-L{path}" for path in lib_dirs)) if lib_dirs else "''"
-        build_lgpio_script = indent(self._build_lgpio_source_script(), " " * 16)
         prepare_quickjs_script = indent(self._prepare_quickjs_archive_script(), " " * 16)
         make_jobs = (os.environ.get("FRAMEOS_CROSS_MAKE_JOBS") or "").strip()
         make_jobs_assignment = (
@@ -285,7 +266,6 @@ class CrossCompiler:
                 extra_cflags={extra_cflags}
                 extra_libs={extra_libs}
                 {make_jobs_assignment}
-                {build_lgpio_script}
                 if [ -n "$extra_cflags" ]; then
                     log_debug "Using extra CFLAGS: $extra_cflags"
                     export EXTRA_CFLAGS="$extra_cflags"
@@ -517,38 +497,11 @@ class CrossCompiler:
         components: list[str] = []
         if self.needs_quickjs:
             components.append("quickjs")
-        if self.needs_lgpio:
-            components.append("lgpio")
 
         for component in components:
             path = await self._ensure_prebuilt_component(component)
             if path:
                 self.prebuilt_components[component] = path
-
-    async def _ensure_lgpio_in_sysroot(self) -> None:
-        """Guarantee lgpio is available to the cross compiler."""
-
-        header = self.sysroot_dir / "usr/local/include/lgpio.h"
-        static_lib = self.sysroot_dir / "usr/local/lib/liblgpio.a"
-        if header.exists() and static_lib.exists():
-            return
-
-        # Attempt to (re)download the prebuilt component if it's missing.
-        if self.prebuilt_entry:
-            if "lgpio" not in self.prebuilt_components:
-                path = await self._ensure_prebuilt_component("lgpio")
-                if path:
-                    self.prebuilt_components["lgpio"] = path
-            self._inject_prebuilt_component("lgpio")
-
-        if header.exists() and static_lib.exists():
-            return
-
-        await self._log(
-            "stdout",
-            f"{icon} No prebuilt lgpio sysroot component available; building lgpio from source during cross compilation",
-        )
-        self._build_lgpio_from_source = True
 
     def _prepare_quickjs_archive_script(self) -> str:
         return dedent(
@@ -565,40 +518,6 @@ class CrossCompiler:
                     ranlib quickjs/libquickjs.a
                 fi
             fi
-            """
-        ).strip()
-
-    def _build_lgpio_source_script(self) -> str:
-        if not self._build_lgpio_from_source:
-            return ""
-
-        url = LGPIO_ARCHIVE_URL.format(version=DEFAULT_LGPIO_VERSION)
-        source_dir = f"lg-{DEFAULT_LGPIO_VERSION.lstrip('v')}"
-        checksum_line = f"{DEFAULT_LGPIO_SHA256}  lgpio.tar.gz"
-        return dedent(
-            f"""
-            if [ ! -f /usr/local/include/lgpio.h ] || [ ! -f /usr/local/lib/liblgpio.a ]; then
-                log_debug "Building lgpio {DEFAULT_LGPIO_VERSION} from source"
-                rm -rf /tmp/frameos-lgpio
-                mkdir -p /tmp/frameos-lgpio
-                cd /tmp/frameos-lgpio
-                curl -fsSL -o lgpio.tar.gz {shlex.quote(url)}
-                echo {shlex.quote(checksum_line)} | sha256sum -c -
-                tar -xzf lgpio.tar.gz
-                cd {shlex.quote(source_dir)}
-                CFLAGS="-std=gnu17" make
-                mapfile -t LGPIO_OBJS < <(make -qp | awk '/^OBJ_LGPIO =/ {{for (i=3; i<=NF; ++i) print $i}}')
-                mapfile -t RGPIO_OBJS < <(make -qp | awk '/^OBJ_RGPIO =/ {{for (i=3; i<=NF; ++i) print $i}}')
-                ar rcs liblgpio.a "${{LGPIO_OBJS[@]}}"
-                ar rcs librgpio.a "${{RGPIO_OBJS[@]}}"
-                install -d /usr/local/include /usr/local/lib
-                install -m 0644 lgpio.h rgpio.h /usr/local/include/
-                install -m 0644 liblgpio.a librgpio.a /usr/local/lib/
-                cd /
-                rm -rf /tmp/frameos-lgpio
-            fi
-            extra_cflags="${{extra_cflags:+$extra_cflags }}-I/usr/local/include"
-            extra_libs="${{extra_libs:+$extra_libs }}-L/usr/local/lib"
             """
         ).strip()
 
@@ -698,7 +617,6 @@ class CrossCompiler:
     def _prebuilt_component_is_valid(self, component: str, root: Path) -> bool:
         validators = {
             "quickjs": self._quickjs_component_is_valid,
-            "lgpio": self._lgpio_component_is_valid,
         }
         validator = validators.get(component)
         if not validator:
@@ -711,14 +629,6 @@ class CrossCompiler:
                 self._first_file_match(root, "quickjs.h"),
                 self._first_file_match(root, "quickjs-libc.h"),
                 self._first_file_match(root, "libquickjs.a"),
-            )
-        )
-
-    def _lgpio_component_is_valid(self, root: Path) -> bool:
-        return all(
-            (
-                self._first_file_match(root, "lgpio.h"),
-                self._first_file_match(root, "liblgpio.a"),
             )
         )
 
@@ -763,23 +673,6 @@ class CrossCompiler:
     def _first_file_match(root: Path, pattern: str) -> Path | None:
         matches = sorted(root.rglob(pattern))
         return matches[0] if matches else None
-
-    def _inject_prebuilt_component(self, component: str) -> None:
-        if component == "lgpio":
-            self._inject_prebuilt_lgpio()
-
-    def _inject_prebuilt_lgpio(self) -> None:
-        lgpio_dir = self.prebuilt_components.get("lgpio")
-        if not lgpio_dir:
-            return
-        include_src = lgpio_dir / "include"
-        lib_src = lgpio_dir / "lib"
-        if include_src.exists():
-            shutil.copytree(include_src, self.sysroot_dir / "usr/local/include", dirs_exist_ok=True)
-            self._register_sysroot_dir("/usr/local/include")
-        if lib_src.exists():
-            shutil.copytree(lib_src, self.sysroot_dir / "usr/local/lib", dirs_exist_ok=True)
-            self._register_sysroot_dir("/usr/local/lib")
 
     async def _log(self, level: str, message: str) -> None:
         if self.logger:

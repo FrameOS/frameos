@@ -29,12 +29,10 @@ DRIVERS = {
         setup_import_path="inky/inky",
         can_render=True,
         can_png=True,
-        link_flags=("-llgpio",),
     ),
     "gpioButton": Driver(
         name="gpioButton",
         import_path="gpioButton/gpioButton",
-        link_flags=("-llgpio",),
     ),
     "frameBuffer": Driver(
         name="frameBuffer",
@@ -47,7 +45,6 @@ DRIVERS = {
         import_path="waveshare/waveshare",
         can_render=True,
         can_png=True,
-        link_flags=("-llgpio",),
     ),
     "inkyHyperPixel2r": Driver(
         name="inkyHyperPixel2r",
@@ -55,7 +52,6 @@ DRIVERS = {
         setup_import_path="inkyHyperPixel2r/inkyHyperPixel2r",
         can_render=True,
         can_turn_on_off=True,
-        link_flags=("-llgpio",),
     ),
     "inkyHyperPixel2rLegacyFb": Driver(
         name="inkyHyperPixel2rLegacyFb",

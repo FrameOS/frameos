@@ -14,7 +14,7 @@ const
   BitDelaySeconds = 0.00001
   PanelWidth = 480
   PanelHeight = 480
-  # Pixels are carried by Raspberry Pi DPI into /dev/fb0; lgpio only owns the
+  # Pixels are carried by Raspberry Pi DPI into /dev/fb0; native GPIO owns the
   # ST7701 sideband init bus and backlight GPIOs.
   HyperPixelBootConfigLines* = @[
     "#dtoverlay=vc4-kms-dpi-hyperpixel2r",

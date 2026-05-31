@@ -393,7 +393,6 @@ class AgentDeployer(FrameDeployer):
                 output_name=AGENT_BINARY,
                 compile_script_name="compile_frameos_agent.sh",
                 needs_quickjs=False,
-                needs_lgpio=False,
             ).build(source_dir)
         except Exception as exc:  # noqa: BLE001
             await self.log("stderr", f"- Agent cross compilation failed ({exc}); falling back to on-device build")

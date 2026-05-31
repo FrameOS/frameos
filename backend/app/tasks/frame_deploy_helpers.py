@@ -18,10 +18,6 @@ QUICKJS_ARCHIVE_URL = "https://archive.frameos.net/source/vendor/quickjs-{versio
 DEFAULT_QUICKJS_VERSION = "2025-04-26"
 DEFAULT_QUICKJS_SHA256 = "2f20074c25166ef6f781f381c50d57b502cb85d470d639abccebbef7954c83bf"
 
-LGPIO_ARCHIVE_URL = "https://archive.frameos.net/source/vendor/lgpio-{version}.tar.gz"
-DEFAULT_LGPIO_VERSION = "v0.2.2"
-DEFAULT_LGPIO_SHA256 = "b08d8569d6dc8fa91a42ba1e37f620fdcb19d6bf2330e4b7d7301431ddbe124c"
-
 APT_PACKAGE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9+.-]*$")
 RPIOS_SUDO_SECURITY_UPDATE_URL = "https://www.raspberrypi.com/news/a-security-update-for-raspberry-pi-os/"
 
@@ -245,76 +241,6 @@ async def ensure_ntp_installed(deployer: FrameDeployer) -> None:
             return
 
     raise Exception("Unable to install ntp or ntpsec via apt")
-
-
-async def ensure_lgpio(
-    deployer: FrameDeployer,
-    required: bool,
-    prebuilt_entry: Any,
-    already_installed: bool,
-) -> None:
-    if not required or already_installed:
-        return
-
-    if await install_if_necessary(deployer, "liblgpio-dev", raise_on_error=False) == 0:
-        return
-
-    await deployer.log("stdout", "--> Could not find liblgpio-dev. Trying archived builds.")
-    lgpio_installed = False
-    if prebuilt_entry:
-        lgpio_prebuilt_url = prebuilt_entry.url_for("lgpio")
-        lgpio_version = prebuilt_entry.version_for("lgpio", DEFAULT_LGPIO_VERSION)
-        lgpio_md5sum = prebuilt_entry.md5_for("lgpio")
-    else:
-        lgpio_prebuilt_url = None
-        lgpio_version = DEFAULT_LGPIO_VERSION
-        lgpio_md5sum = None
-
-    if lgpio_prebuilt_url:
-        try:
-            await deployer.log("stdout", f"--> Installing lgpio {lgpio_version} from archive")
-            command = (
-                "rm -rf /tmp/lgpio-prebuilt && "
-                "mkdir -p /tmp/lgpio-prebuilt && "
-                f"wget -q -O /tmp/lgpio-prebuilt/lgpio.tar.gz {shlex.quote(lgpio_prebuilt_url)} && "
-            )
-            if lgpio_md5sum:
-                command += f"echo '{lgpio_md5sum}  /tmp/lgpio-prebuilt/lgpio.tar.gz' | md5sum -c - && "
-            command += (
-                "tar -xzf /tmp/lgpio-prebuilt/lgpio.tar.gz -C /tmp/lgpio-prebuilt && "
-                "sudo mkdir -p /usr/local/include /usr/local/lib && "
-                "sudo cp -r /tmp/lgpio-prebuilt/include/. /usr/local/include/ && "
-                "sudo cp -r /tmp/lgpio-prebuilt/lib/. /usr/local/lib/ && "
-                "sudo ldconfig && "
-                "rm -rf /tmp/lgpio-prebuilt"
-            )
-            await deployer.exec_command(command)
-            lgpio_installed = True
-        except Exception as exc:
-            await deployer.log("stdout", f"--> Failed to install prebuilt lgpio ({exc}). Falling back to source build.")
-
-    if lgpio_installed:
-        return
-
-    await deployer.log("stdout", "--> Installing lgpio from source.")
-    await install_if_necessary(deployer, "python3-setuptools")
-    lgpio_tar = f"{DEFAULT_LGPIO_VERSION}.tar.gz"
-    lgpio_source_dir = f"lg-{DEFAULT_LGPIO_VERSION.lstrip('v')}"
-    command = (
-        "if [ ! -f /usr/local/include/lgpio.h ]; then "
-        "  rm -rf /tmp/lgpio-install && "
-        "  mkdir -p /tmp/lgpio-install && "
-        "  cd /tmp/lgpio-install && "
-        f"  wget -q -O {lgpio_tar} {LGPIO_ARCHIVE_URL.format(version=DEFAULT_LGPIO_VERSION)} && "
-        f"  echo '{DEFAULT_LGPIO_SHA256}  {lgpio_tar}' | sha256sum -c - && "
-        f"  tar -xzf {lgpio_tar} && "
-        f"  cd {lgpio_source_dir} && "
-        "  make && "
-        "  sudo make install && "
-        "  sudo rm -rf /tmp/lgpio-install; "
-        "fi"
-    )
-    await deployer.exec_command(command)
 
 
 async def ensure_quickjs(

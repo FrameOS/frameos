@@ -4,7 +4,7 @@
 all: transform-epd-files
 
 dev-config:
-	`nimble path c2nim`/c2nim --assumendef:DEBUG --assumedef:USE_DEV_LIB --assumedef:RPI --assumendef:JETSON --assumendef:USE_BCM2835_LIB --assumendef:USE_WIRINGPI_LIB --assumendef:USE_LGPIO_LIB --assumendef:DEV_HARDWARE_SPI_DEBUG --assumendef:GPIOD_DEBUG --importc *.h
+	`nimble path c2nim`/c2nim --assumendef:DEBUG --assumedef:USE_DEV_LIB --assumedef:RPI --assumendef:JETSON --assumendef:USE_BCM2835_LIB --assumendef:USE_WIRINGPI_LIB --assumendef:DEV_HARDWARE_SPI_DEBUG --assumendef:GPIOD_DEBUG --importc *.h
 
 transform-epd-files: remove-slashes
 	for file in EPD_*.h; do \

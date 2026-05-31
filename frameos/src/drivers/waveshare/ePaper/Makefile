@@ -1,6 +1,6 @@
 # This was used to convert the non-EPD *.h files
 
-#`nimble path c2nim`/c2nim --assumendef:DEBUG --assumedef:USE_DEV_LIB --assumedef:RPI --assumendef:JETSON --assumendef:USE_BCM2835_LIB --assumendef:USE_WIRINGPI_LIB --assumendef:USE_LGPIO_LIB --assumendef:DEV_HARDWARE_SPI_DEBUG --assumendef:GPIOD_DEBUG --importc *.h
+#`nimble path c2nim`/c2nim --assumendef:DEBUG --assumedef:USE_DEV_LIB --assumedef:RPI --assumendef:JETSON --assumendef:USE_BCM2835_LIB --assumendef:USE_WIRINGPI_LIB --assumendef:DEV_HARDWARE_SPI_DEBUG --assumendef:GPIOD_DEBUG --importc *.h
 
 all: transform-epd-files
 

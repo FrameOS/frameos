@@ -125,34 +125,13 @@ def test_buildroot_authorized_keys_enable_dropbear(tmp_path, monkeypatch):
     assert (wants_dir / "dropbear.service").readlink().as_posix() == "/usr/lib/systemd/system/dropbear.service"
 
 
-def test_buildroot_copies_lgpio_runtime_libraries_when_required(tmp_path, monkeypatch):
-    liblgpio = tmp_path / "liblgpio.so.1"
-    librgpio = tmp_path / "librgpio.so.1"
-    liblgpio.write_bytes(b"lgpio")
-    librgpio.write_bytes(b"rgpio")
-    builder = BuildrootImageBuilder(
-        db=None,
-        redis=None,
-        frame=SimpleNamespace(id=1),
-    )
-
-    monkeypatch.setattr("app.tasks.buildroot_image._lgpio_runtime_library_paths", lambda: [liblgpio, librgpio])
-    monkeypatch.setattr(
-        "app.tasks.buildroot_image.drivers_for_frame",
-        lambda _frame: {"waveshare": SimpleNamespace(link_flags=("-llgpio",))},
-    )
-
-    builder._copy_runtime_libraries(tmp_path / "overlay")
-
-    assert (tmp_path / "overlay" / "usr" / "lib" / "liblgpio.so.1").read_bytes() == b"lgpio"
-    assert (tmp_path / "overlay" / "usr" / "lib" / "librgpio.so.1").read_bytes() == b"rgpio"
-
-
 def test_buildroot_boot_config_merge_is_written_to_all_boot_locations(tmp_path):
     builder = BuildrootImageBuilder(db=None, redis=None, frame=SimpleNamespace(id=1))
     overlay_dir = tmp_path / "overlay"
     existing_config = overlay_dir / "boot" / "config.txt"
     existing_firmware_config = overlay_dir / "boot" / "firmware" / "config.txt"
+    existing_config.parent.mkdir(parents=True, exist_ok=True)
+    existing_firmware_config.parent.mkdir(parents=True, exist_ok=True)
     existing_config.write_text("dtoverlay=spi1-1cs\n#dtoverlay=spi0-0cs\n", encoding="utf-8")
     existing_firmware_config.write_text("disable_splash=1\n", encoding="utf-8")
 
