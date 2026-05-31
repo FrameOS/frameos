@@ -712,7 +712,7 @@ async def build_release_target(
                 build_dir=agent_build_dir,
                 arch=target.arch,
                 nim_path=nim_path,
-                repo_root=frameos_root,
+                repo_root=repo_root,
             )
             write_release_agent_build_marker(
                 agent_build_dir,
