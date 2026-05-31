@@ -278,11 +278,11 @@ proc setupSharedDrivers(frameOS: FrameOS): SetupResult =
 proc setupDriverNames*(): seq[string] =
   result = @[]
 
+{setup_local_code}
+
 proc setup*(frameOS: FrameOS): SetupResult =
   addSetupResult(result, setupLocalDrivers(frameOS))
   addSetupResult(result, setupSharedDrivers(frameOS))
-
-{setup_local_code}
 
 proc init*(frameOS: FrameOS) =
   loadedDrivers = @[]

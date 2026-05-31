@@ -65,6 +65,9 @@ def test_release_shared_registry_filters_drivers_at_runtime():
     assert "proc setupSharedDriver(spec: DriverSpec, driverCtx: driverContext.DriverContext): SetupResult" in source
     assert "setupLibraries.add(library)" in source
     assert "finally:\n    unloadLib(library)" not in source
+    assert source.index("proc setupLocalDrivers(frameOS: FrameOS): SetupResult") < source.index(
+        "proc setup*(frameOS: FrameOS): SetupResult"
+    )
     assert "import inkyPython/inkyPython as inkyPythonSetupDriver" not in source
     assert "import inkyHyperPixel2r/inkyHyperPixel2r as inkyHyperPixel2rSetupDriver" not in source
     assert "proc setupReleaseDriverSupport" not in source
