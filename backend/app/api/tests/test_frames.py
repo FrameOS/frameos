@@ -687,6 +687,7 @@ async def test_api_frame_new_buildroot_defaults(async_client):
         "frame_host": "",
         "server_host": "backend.local",
         "platform": "raspberry-pi-zero-2-w",
+        "timezone": "Europe/Brussels",
         "network": {"wifiSSID": "Test WiFi", "wifiPassword": "secret1234"},
     }
 
@@ -700,6 +701,7 @@ async def test_api_frame_new_buildroot_defaults(async_client):
     assert frame['assets_path'] == '/srv/assets'
     assert frame['https_proxy']['enable'] is False
     assert frame['buildroot']['platform'] == 'raspberry-pi-zero-2-w'
+    assert frame['timezone'] == 'Europe/Brussels'
     assert frame['network']['wifiSSID'] == 'Test WiFi'
     assert frame['network']['wifiPassword'] == 'secret1234'
     assert frame['agent']['agentEnabled'] is True

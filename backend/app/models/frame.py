@@ -11,6 +11,7 @@ from app.database import Base
 
 from app.models.apps import get_app_configs
 from app.models.settings import get_settings_dict
+from app.utils.timezone import frame_timezone
 from app.utils.token import secure_token
 from app.utils.tls import generate_frame_tls_material, parse_certificate_not_valid_after
 from app.utils.versions import get_versions
@@ -209,6 +210,7 @@ class Frame(Base):
     device = mapped_column(String(256), nullable=True)
     device_config = mapped_column(JSON, nullable=True)
     color = mapped_column(String(256), nullable=True)
+    timezone = mapped_column(String(128), nullable=True)
     interval = mapped_column(Double, default=300)
     metrics_interval = mapped_column(Double, default=60)
     scaling_mode = mapped_column(String(64), nullable=True)  # contain (default), cover, stretch, center
@@ -268,6 +270,7 @@ class Frame(Base):
             'device': self.device,
             'device_config': self.device_config,
             'color': self.color,
+            'timezone': self.timezone,
             'interval': self.interval,
             'metrics_interval': self.metrics_interval,
             'scaling_mode': self.scaling_mode,
@@ -356,6 +359,7 @@ async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, serve
         scaling_mode="contain",
         rotate=0,
         device=device or "web_only",
+        timezone=None,
         log_to_file=None, # spare the SD card from load
         assets_path='/srv/assets',
         save_assets=True,
@@ -441,6 +445,8 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
     mountpoints = normalize_mountpoints(frame.mountpoints)
     error_behavior = normalize_error_behavior(frame.error_behavior)
     frameos_version = get_versions().get("frameos")
+    all_settings = get_settings_dict(db)
+    default_timezone = (all_settings.get("defaults") or {}).get("timezone")
     frame_json: dict = {
         **({"frameosVersion": frameos_version} if isinstance(frameos_version, str) and frameos_version else {}),
         "name": frame.name,
@@ -525,6 +531,8 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
             "showErrorRetrySeconds": error_behavior["show_error_retry_seconds"],
         },
     }
+    if (frame.mode or "rpios") == "buildroot":
+        frame_json["timeZone"] = frame_timezone(frame.timezone, default_timezone)
 
     schedule = frame.schedule
     if schedule is not None:
@@ -567,7 +575,6 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
                             for key in settings:
                                 setting_keys.add(key)
 
-    all_settings = get_settings_dict(db)
     final_settings = {}
     for key in setting_keys:
         final_settings[key] = all_settings.get(key, None)

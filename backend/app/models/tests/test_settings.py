@@ -25,4 +25,5 @@ async def test_get_settings_dict(db):
 
 
 def test_get_settings_dict_without_db():
-    assert get_settings_dict(None) == {}
+    settings_map = get_settings_dict(None)
+    assert settings_map["defaults"]["timezone"]

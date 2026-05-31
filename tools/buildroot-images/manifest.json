@@ -8,8 +8,8 @@
       "defconfig": "raspberrypizero2w_64_defconfig",
       "docker_image": "debian:bookworm",
       "frameos_partition_size": "512M",
-      "frameos_version": "2026.6.2+987f70d8b43ca9ac67691eb04f382d904929b854",
-      "object_key": "buildroot-images/raspberry-pi-zero-2-w/2026.6.2+987f70d8b43ca9ac67691eb04f382d904929b854/raspberry-pi-zero-2-w-2026.6.2_987f70d8b43ca9ac67691eb04f382d904929b854-b24ac7520dcc858a.img.gz",
+      "frameos_version": "2026.6.2",
+      "object_key": "buildroot-images/raspberry-pi-zero-2-w/2026.6.2/raspberry-pi-zero-2-w-2026.6.2-b24ac7520dcc858a.img.gz",
       "partitions": [
         {
           "size": 33554432,
@@ -31,7 +31,7 @@
       "platform": "raspberry-pi-zero-2-w",
       "sha256": "b24ac7520dcc858abacbbd8fd8d3e8935cc057c2f401f4a1434b53a590e62279",
       "size": 1912603136,
-      "updated_at": "2026-05-31T09:35:31.294665+00:00"
+      "updated_at": "2026-05-31T09:38:33.863297+00:00"
     }
   ]
 }

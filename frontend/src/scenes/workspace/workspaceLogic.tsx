@@ -225,6 +225,12 @@ interface FramesScrollAnchor {
   top: number
 }
 
+let nextFramesRouteScrollIntent: 'top' | null = null
+
+export function requestNextFramesHomeScrollTop(): void {
+  nextFramesRouteScrollIntent = 'top'
+}
+
 function getInitialWorkspaceTheme(): WorkspaceTheme {
   if (typeof window === 'undefined') {
     return 'light'
@@ -589,7 +595,33 @@ function restoreFramesScrollAnchor(anchor: FramesScrollAnchor | null): void {
   main.scrollTop += nextTop - anchor.top
 }
 
+export function scrollFramesHomeToTop(behavior: ScrollBehavior = 'auto', stabilize = true): void {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  const scrollToTop = (attempt = 0): void => {
+    const main = framesMainElement()
+    if (main) {
+      main.scrollTo({ top: 0, behavior: attempt === 0 ? behavior : 'auto' })
+    }
+    window.scrollTo({ top: 0, behavior: attempt === 0 ? behavior : 'auto' })
+
+    if (stabilize && attempt < 20) {
+      window.setTimeout(() => scrollToTop(attempt + 1), 50)
+    } else if (nextFramesRouteScrollIntent === 'top') {
+      nextFramesRouteScrollIntent = null
+    }
+  }
+
+  window.requestAnimationFrame(() => scrollToTop())
+}
+
 function preserveFramesScrollAfterLayoutChange(cache: Record<string, any>): void {
+  if (nextFramesRouteScrollIntent === 'top') {
+    return
+  }
+
   const anchor = captureFramesScrollAnchor()
   if (!anchor || typeof window === 'undefined') {
     return
@@ -1324,10 +1356,16 @@ export const workspaceLogic = kea<workspaceLogicType>([
       payload: { initial?: boolean },
       previousLocation: { pathname: string }
     ) => {
+      const scrollIntent = nextFramesRouteScrollIntent
       syncSecondarySidebarFromHashForMobile(hash)
       const drawerFrameId = drawerFrameIdFromSearch(search)
       applyDrawerFromSearch(drawerFrameId, search)
       const previousFrameId = frameIdFromWorkspacePath(previousLocation.pathname)
+      nextFramesRouteScrollIntent = null
+      if (scrollIntent === 'top') {
+        scrollFramesHomeToTop()
+        return
+      }
       if (!payload.initial && !drawerFrameId && previousFrameId) {
         actions.focusFrame(previousFrameId)
       }

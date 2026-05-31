@@ -112,6 +112,7 @@ from app.ws.agent_ws import (
 from app.models.assets import copy_custom_fonts_to_local_source_folder
 from app.models.settings import get_settings_dict
 from app.utils.ssh_key_utils import default_ssh_key_ids
+from app.utils.timezone import frame_timezone, normalize_timezone
 from app.utils.tls import generate_frame_tls_material, parse_certificate_not_valid_after
 from app.utils.ssh_authorized_keys import _install_authorized_keys, resolve_authorized_keys_update
 from app.tasks.binary_builder import FrameBinaryBuilder
@@ -2433,6 +2434,12 @@ async def api_frame_update_endpoint(
     for field, value in update_data.items():
         setattr(frame, field, value)
 
+    if "timezone" in update_data:
+        frame.timezone = normalize_timezone(frame.timezone) or None
+
+    if frame.mode != "buildroot":
+        frame.timezone = None
+
     if "https_proxy" in update_data:
         frame.https_proxy = normalize_https_proxy(frame.https_proxy)
         refresh_tls_certificate_validity_dates(frame)
@@ -2528,6 +2535,8 @@ async def api_frame_new(
         frame.ssh_keys = default_ssh_key_ids(settings) or None
 
         frame.mode = data.mode or "rpios"
+        if frame.mode == "buildroot":
+            frame.timezone = frame_timezone(data.timezone, (settings.get("defaults") or {}).get("timezone"))
         if frame.mode == "buildroot":
             frame.network = {
                 **(frame.network or {}),

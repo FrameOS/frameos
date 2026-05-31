@@ -107,7 +107,16 @@ def s3_client():
 
 def frameos_version() -> str:
     payload = json.loads((REPO_ROOT / "versions.json").read_text(encoding="utf-8"))
+    return published_frameos_version(str(payload.get("frameos") or ""))
+
+
+def raw_frameos_version() -> str:
+    payload = json.loads((REPO_ROOT / "versions.json").read_text(encoding="utf-8"))
     return str(payload.get("frameos") or "")
+
+
+def published_frameos_version(version: str) -> str:
+    return version.split("+", 1)[0]
 
 
 def sha256(path: Path) -> str:
@@ -146,6 +155,10 @@ def safe_segment(value: str) -> str:
 
 def local_dir(platform: str) -> Path:
     return BUILD_DIR / platform / frameos_version()
+
+
+def legacy_local_dir(platform: str) -> Path:
+    return BUILD_DIR / platform / raw_frameos_version()
 
 
 def write_base_bootstrap_overlay(overlay: Path) -> None:
@@ -210,6 +223,7 @@ def build(args: argparse.Namespace) -> None:
         BuildrootImageBuilder._write_post_build_script(tmp_path / "post-build.sh")
         BuildrootImageBuilder._write_partition_post_build_script(tmp_path / "partition-post-build.sh")
         BuildrootImageBuilder._write_post_image_script(tmp_path / "post-image.sh")
+        BuildrootImageBuilder._write_boot_logo(tmp_path / "frameos-boot-logo.png")
         BuildrootImageBuilder._write_build_script(tmp_path / "buildroot-build.sh", "base.img")
         container_name = f"frameos-buildroot-base-{uuid.uuid4().hex[:12]}"
         container_id = subprocess.check_output(
@@ -271,11 +285,14 @@ def save_manifest(client, bucket: str, key: str, manifest: dict[str, Any]) -> No
 
 def upload(args: argparse.Namespace) -> None:
     out_dir = local_dir(args.platform)
+    if not (out_dir / "base.img").is_file() and legacy_local_dir(args.platform).is_dir():
+        out_dir = legacy_local_dir(args.platform)
     image_path = out_dir / "base.img"
     metadata_path = out_dir / "metadata.json"
     if not image_path.is_file() or not metadata_path.is_file():
         raise SystemExit(f"Run build first; missing {image_path} or metadata.json")
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["frameos_version"] = published_frameos_version(str(metadata.get("frameos_version") or frameos_version()))
     archive_name = f"{args.platform}-{safe_segment(metadata['frameos_version'])}-{metadata['sha256'][:16]}.img.gz"
     object_key = f"{args.prefix}/{args.platform}/{metadata['frameos_version']}/{archive_name}"
     if not args.yes:
@@ -301,7 +318,7 @@ def upload(args: argparse.Namespace) -> None:
         for existing in manifest.get("entries", [])
         if not (
             existing.get("platform") == entry["platform"]
-            and existing.get("frameos_version") == entry["frameos_version"]
+            and published_frameos_version(str(existing.get("frameos_version") or "")) == entry["frameos_version"]
         )
     ]
     manifest["entries"].append(entry)

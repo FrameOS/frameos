@@ -1,4 +1,4 @@
-import { A, router } from 'kea-router'
+import { router } from 'kea-router'
 import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
 import clsx from 'clsx'
 import { useEffect, useState, type CSSProperties, type MouseEvent } from 'react'
@@ -23,7 +23,12 @@ import { FrameosLogo } from '../../components/FrameosLogo'
 import { Spinner } from '../../components/Spinner'
 import { preloadSceneComponent, type LoadableSceneKey } from '../scenes'
 import { sceneLogic } from '../sceneLogic'
-import { isMobileWorkspaceViewport, workspaceLogic } from './workspaceLogic'
+import {
+  isMobileWorkspaceViewport,
+  requestNextFramesHomeScrollTop,
+  scrollFramesHomeToTop,
+  workspaceLogic,
+} from './workspaceLogic'
 import { workspaceModeForScene, type WorkspaceMode } from './workspaceModes'
 import { framesModel } from '../../models/framesModel'
 import { frameHost } from '../../decorators/frame'
@@ -36,19 +41,6 @@ import { FrameDeployPlanDrawer } from './FrameDeployPlanDrawer'
 import { DeployToFrameIcon } from './FrameChangeStatusIcon'
 
 const DEFAULT_BROWSER_TITLE = 'FrameOS Backend'
-
-const frameShellToolPanels = new Set([
-  'overview',
-  'preview',
-  'schedule',
-  'logs',
-  'metrics',
-  'assets',
-  'terminal',
-  'ping',
-  'debug',
-  'settings',
-])
 
 interface FrameosShellProps {
   mode: WorkspaceMode
@@ -307,13 +299,10 @@ export function FrameosShell({
     selectedFrame,
     selectedSceneId,
     theme,
-    utilityPanel,
   } = useValues(workspaceLogic)
   const { closeScheduleDrawer, closeTemplateDrawer, openChatDrawer, setSearch, toggleSecondarySidebar, toggleTheme } =
     useActions(workspaceLogic)
   const { frames } = useValues(framesModel)
-  const activeFrameTool = frameShellToolPanels.has(String(utilityPanel)) ? String(utilityPanel) : undefined
-  const frameHref = selectedFrame ? urls.frame(selectedFrame.id, activeFrameTool) : urls.frames()
   const scenesHref = selectedFrame ? urls.scenes(selectedFrame.id, selectedSceneId ?? undefined) : urls.scenes()
   const appsHref = lastAppsHref ?? urls.systemApps()
   const showAiButton = showAiButtonProp ?? (mode !== 'frames' && mode !== 'settings' && !!selectedFrame)
@@ -382,16 +371,30 @@ export function FrameosShell({
             secondarySidebarOpen ? 'border-r border-slate-200/80' : 'max-lg:border-r max-lg:border-slate-200/80'
           )}
         >
-          <A
+          <a
             href={urls.frames()}
             title="Frames home"
             onPointerEnter={preloadFrames}
             onFocus={preloadFrames}
             onMouseDown={preloadFrames}
+            onClick={(event: MouseEvent<HTMLAnchorElement>) => {
+              if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+                return
+              }
+              event.preventDefault()
+              requestNextFramesHomeScrollTop()
+              prepareFirstLevelNavigation()
+              if (mode === 'frames') {
+                scrollFramesHomeToTop('smooth', false)
+              } else {
+                router.actions.push(urls.frames())
+                scrollFramesHomeToTop()
+              }
+            }}
             className="workspace-logo-button frameos-icon-button mb-8 flex h-12 w-12 items-center justify-center rounded-xl transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
           >
             <FrameosLogo variant={theme === 'dark' ? 'white-colors' : 'color'} className="h-10 w-10" />
-          </A>
+          </a>
           <nav className="flex flex-1 flex-col items-center gap-4">
             <NavButton
               active={activeMode === 'frames'}
@@ -400,21 +403,31 @@ export function FrameosShell({
               pending={pendingMode === 'frames'}
               preloadScene="frames"
               sidebarOpen={secondarySidebarOpen}
-              title={secondarySidebarOpen && mode === 'frames' ? 'Hide frames panel' : 'Frames'}
-              onActiveClick={toggleSecondarySidebar}
-              onInactiveClick={prepareFirstLevelNavigation}
+              title="Frames home"
+              onActiveClick={() => {
+                requestNextFramesHomeScrollTop()
+                prepareFirstLevelNavigation()
+                scrollFramesHomeToTop('smooth', false)
+              }}
+              onInactiveClick={() => {
+                requestNextFramesHomeScrollTop()
+                prepareFirstLevelNavigation()
+              }}
             >
               <Squares2X2Icon className="h-7 w-7" />
             </NavButton>
             <NavButton
               active={activeMode === 'frame'}
               current={mode === 'frame'}
-              href={frameHref}
-              pending={pendingMode === 'frame'}
-              preloadScene="frame"
+              href={urls.frames()}
+              pending={pendingMode === 'frames'}
+              preloadScene="frames"
               sidebarOpen={secondarySidebarOpen}
               title={secondarySidebarOpen && mode === 'frame' ? 'Hide frame panel' : 'Frame'}
-              onActiveClick={toggleSecondarySidebar}
+              onActiveClick={() => {
+                prepareFirstLevelNavigation()
+                router.actions.push(urls.frames())
+              }}
               onInactiveClick={prepareFirstLevelNavigation}
             >
               <ComputerDesktopIcon className="h-7 w-7" />

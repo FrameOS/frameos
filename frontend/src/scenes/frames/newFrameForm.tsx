@@ -89,6 +89,7 @@ export const newFrameForm = kea<newFrameFormType>([
         name: '',
         frame_host: '',
         device: 'web_only',
+        timezone: '',
         platform: BUILDROOT_RASPBERRY_PI_ZERO_2_W,
         network: {
           wifiSSID: '',

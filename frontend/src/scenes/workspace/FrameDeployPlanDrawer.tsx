@@ -24,6 +24,7 @@ import { framesModel, type AgentTaskTransport } from '../../models/framesModel'
 import type { FrameType, LogType } from '../../types'
 import { urls } from '../../urls'
 import { apiFetch } from '../../utils/apiFetch'
+import { normalizedTimezone } from '../../utils/timezone'
 import {
   frameLogic,
   type ChangeDetail,
@@ -32,8 +33,10 @@ import {
   type SummaryItem,
 } from '../frame/frameLogic'
 import { logsLogic } from '../frame/panels/Logs/logsLogic'
+import { settingsLogic } from '../settings/settingsLogic'
 import { agentBootstrapLogic } from './agentBootstrapLogic'
 import { workspaceLogic } from './workspaceLogic'
+import { timezoneOptions } from '../../decorators/timezones'
 
 interface DeployPlanProgressStep {
   label: string
@@ -556,11 +559,13 @@ function BuildrootSdCardSection({
   frameForm,
   onBack,
   onDownload,
+  defaultTimezone,
 }: {
   frame: FrameType
   frameForm: Partial<FrameType>
   onBack?: () => void
   onDownload: () => void
+  defaultTimezone?: string | null
 }): JSX.Element {
   const { setFrameFormValues, touchFrameFormField } = useActions(frameLogic({ frameId: frame.id }))
   const network = frameForm.network ?? frame.network ?? {}
@@ -568,6 +573,7 @@ function BuildrootSdCardSection({
   const serverHost = frameForm.server_host ?? frame.server_host ?? ''
   const serverPort = frameForm.server_port ?? frame.server_port ?? 8989
   const device = frameForm.device ?? frame.device ?? 'web_only'
+  const timezone = normalizedTimezone(frameForm.timezone ?? frame.timezone, defaultTimezone)
   const platform = buildroot.platform ?? 'raspberry-pi-zero-2-w'
   const updateFrameValue = <K extends keyof FrameType>(field: K, value: FrameType[K]): void => {
     setFrameFormValues({ [field]: value } as Partial<FrameType>)
@@ -649,6 +655,20 @@ function BuildrootSdCardSection({
                     </option>
                   ))}
                 </optgroup>
+              ))}
+            </select>
+          </label>
+          <label className="block space-y-1">
+            <span className="frame-tool-muted text-xs font-semibold uppercase tracking-wide">Timezone</span>
+            <select
+              className="frameos-form-control h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-400/30"
+              value={timezone}
+              onChange={(event) => updateFrameValue('timezone', event.target.value)}
+            >
+              {timezoneOptions.map((timezone) => (
+                <option key={timezone.value} value={timezone.value}>
+                  {timezone.label}
+                </option>
               ))}
             </select>
           </label>
@@ -824,6 +844,8 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
   const { closeFrameChangeDrawer } = useActions(workspaceLogic)
   const { downloadSdCardImage, loadFrame } = useActions(framesModel)
   const { logs } = useValues(logsLogic({ frameId: frame.id }))
+  const { savedSettings } = useValues(settingsLogic)
+  const defaultTimezone = savedSettings.defaults?.timezone
 
   const deployPlanLogs = deployPlanLogsSince(logs, deployPlansLoadingStartedAt)
   const isBuildrootFrame = (frame.mode ?? 'rpios') === 'buildroot'
@@ -853,6 +875,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
         device: frameForm.device ?? frame.device,
         server_host: frameForm.server_host ?? frame.server_host,
         server_port: frameForm.server_port ?? frame.server_port,
+        timezone: normalizedTimezone(frameForm.timezone ?? frame.timezone, defaultTimezone),
         network: {
           ...(frame.network ?? {}),
           ...(frameForm.network ?? {}),
@@ -895,6 +918,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
               frameForm={frameForm}
               onBack={showMainDeployView}
               onDownload={() => closeAndRun(saveSdCardSettingsAndDownload)}
+              defaultTimezone={defaultTimezone}
             />
           ) : deployDrawerView === 'script' ? (
             <ScriptInstallSection frame={frame} onBack={showMainDeployView} />

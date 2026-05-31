@@ -50,6 +50,7 @@ export interface FrameType {
   width?: number
   height?: number
   device?: string
+  timezone?: string
   device_config?: {
     vcom?: number
     uploadUrl?: string
@@ -138,6 +139,7 @@ export interface NewFrameFormType {
   name?: string | null
   frame_host?: string | null
   device?: string | null
+  timezone?: string | null
   server_host?: string | null
   platform?: string | null
   agent?: {

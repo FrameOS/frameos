@@ -105,6 +105,8 @@ const FRAME_KEYS: (keyof FrameType)[] = [
   'rpios',
 ]
 
+const FRAME_SUBMIT_KEYS_BUILDROOT: (keyof FrameType)[] = [...FRAME_KEYS, 'timezone']
+
 const FRAME_KEYS_REQUIRE_RECOMPILE_RPIOS: (keyof FrameType)[] = ['device', 'scenes', 'reboot', 'rpios']
 const FRAME_KEYS_REQUIRE_RECOMPILE_BUILDROOT: (keyof FrameType)[] = [
   'device',
@@ -250,6 +252,10 @@ function keyLabel(key: keyof FrameType): string {
 
 function getRecompileFields(mode: FrameType['mode']): (keyof FrameType)[] {
   return mode === 'buildroot' ? FRAME_KEYS_REQUIRE_RECOMPILE_BUILDROOT : FRAME_KEYS_REQUIRE_RECOMPILE_RPIOS
+}
+
+function frameSubmitKeys(frame: Partial<FrameType>): (keyof FrameType)[] {
+  return (frame.mode ?? 'rpios') === 'buildroot' ? FRAME_SUBMIT_KEYS_BUILDROOT : FRAME_KEYS
 }
 
 export function normalizeSceneForComparison(
@@ -875,7 +881,8 @@ function buildBlankScene(frame: Partial<FrameType>, name: string = 'New blank sc
 }
 
 async function saveFrameForm(frame: Partial<FrameType>, frameId: number, nextAction: FrameNextAction): Promise<void> {
-  const json = buildDeployPlanRequestBody(normalizeFrameForSubmit(frame), FRAME_KEYS)
+  const normalizedFrame = normalizeFrameForSubmit(frame)
+  const json = buildDeployPlanRequestBody(normalizedFrame, frameSubmitKeys(normalizedFrame))
   if (nextAction) {
     json['next_action'] = nextAction
   }
@@ -1197,10 +1204,16 @@ export const frameLogic = kea<frameLogicType>([
     },
     loadDeployPlans: async () => {
       const planMode = (values.frameForm?.mode || values.frame?.mode || 'rpios') === 'buildroot' ? '?mode=fast' : ''
+      const currentFrameForm = {
+        ...(values.frame ?? {}),
+        ...(values.frameForm ?? {}),
+      }
       const response = await apiFetch(`/api/frames/${values.frameId}/deploy_plan${planMode}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(buildDeployPlanRequestBody(normalizeFrameForSubmit(values.frameForm), FRAME_KEYS)),
+        body: JSON.stringify(
+          buildDeployPlanRequestBody(normalizeFrameForSubmit(currentFrameForm), frameSubmitKeys(currentFrameForm))
+        ),
       })
       if (!response.ok) {
         const payload = await response.json().catch(() => ({}))
@@ -1236,10 +1249,16 @@ export const frameLogic = kea<frameLogicType>([
     ],
     unsavedChanges: [
       (s) => [s.frame, s.frameForm],
-      (frame, frameForm) =>
-        FRAME_KEYS.some(
+      (frame, frameForm) => {
+        const currentFrameForm = {
+          ...(frame ?? {}),
+          ...(frameForm ?? {}),
+        }
+        const keys = frameSubmitKeys(currentFrameForm)
+        return keys.some(
           (key) => !frameKeyEqual(key, frame?.[key as keyof FrameType], frameForm?.[key as keyof FrameType])
-        ),
+        )
+      },
     ],
     changedScenes: [
       (s) => [s.frame, s.frameForm],

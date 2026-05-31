@@ -73,11 +73,12 @@ def test_buildroot_config_avoids_ncurses_selecting_packages(tmp_path):
     BuildrootImageBuilder._write_buildroot_config(config_path)
     config = config_path.read_text(encoding="utf-8")
 
-    assert "BR2_PACKAGE_BASH" not in config
+    assert "BR2_PACKAGE_BASH=y" in config
     assert "BR2_PACKAGE_PROCPS_NG" not in config
     assert 'BR2_DL_DIR="/cache/dl"' in config
     assert "BR2_JLEVEL=0" in config
     assert 'BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES="/work/linux-fragment.config"' in config
+    assert 'BR2_LINUX_KERNEL_CUSTOM_LOGO_PATH="/work/frameos-boot-logo.png"' in config
     assert "BR2_PACKAGE_DROPBEAR=y" in config
     assert "BR2_PACKAGE_DBUS=y" in config
     assert "BR2_PACKAGE_TZDATA=y" in config
@@ -161,8 +162,17 @@ def test_buildroot_partition_scripts_create_frameos_and_assets_partitions(tmp_pa
     assert '"$target_dir/etc/cron.d"' in post_build
     assert "image frameos.ext4" in post_image
     assert "image assets.vfat" in post_image
+    assert "fbcon=logo-count:1" in post_image
     assert "partition frameos" in post_image
     assert "partition assets" in post_image
+
+
+def test_buildroot_boot_logo_is_staged_for_kernel_custom_logo(tmp_path):
+    logo_path = tmp_path / "frameos-boot-logo.png"
+
+    BuildrootImageBuilder._write_boot_logo(logo_path)
+
+    assert logo_path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
 
 
 @pytest.mark.asyncio

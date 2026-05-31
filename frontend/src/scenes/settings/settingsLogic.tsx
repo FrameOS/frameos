@@ -9,12 +9,17 @@ import { normalizeSshKeys } from '../../utils/sshKeys'
 import { v4 as uuidv4 } from 'uuid'
 import { showWorkingMessage } from '../../utils/workingMessage'
 import { isFrameControlMode } from '../../utils/frameControlMode'
+import { guessBrowserTimezone } from '../../utils/timezone'
 
 const embeddingsGeneratingStorageKey = 'frameos.embeddings.generating'
 
 function setDefaultSettings(settings: Partial<FrameOSSettings> | Record<string, any>): FrameOSSettings {
   return {
     ...settings,
+    defaults: {
+      timezone: guessBrowserTimezone(),
+      ...(settings.defaults ?? {}),
+    },
     homeAssistant: settings.homeAssistant ?? {},
     frameOS: settings.frameOS ?? {},
     github: settings.github ?? {},

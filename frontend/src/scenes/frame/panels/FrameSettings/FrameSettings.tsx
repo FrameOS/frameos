@@ -33,6 +33,7 @@ import { Label } from '../../../../components/Label'
 import { logsLogic } from '../Logs/logsLogic'
 import { Tag } from '../../../../components/Tag'
 import { getCertificateValidityInfo, getFrameCertificateStatus } from '../../../../utils/certificates'
+import { timezoneOptions } from '../../../../decorators/timezones'
 
 export interface FrameSettingsProps {
   className?: string
@@ -561,7 +562,7 @@ export function FrameSettings({
               </Group>
             </div>
           ) : null}
-          {frameForm.mode === 'buildroot' ? (
+          {isBuildrootMode ? (
             <Group name="buildroot">
               <Field name="platform" label="Platform">
                 <Select name="buildroot.platform" options={buildrootPlatforms} />
@@ -704,6 +705,15 @@ export function FrameSettings({
               ]}
             />
           </Field>
+          {isBuildrootMode ? (
+            <Field
+              name="timezone"
+              label="Timezone"
+              tooltip="IANA timezone applied to the Buildroot operating system during setup."
+            >
+              <Select name="timezone" options={timezoneOptions} />
+            </Field>
+          ) : null}
         </div>
 
         {!inFrameAdminMode ? (

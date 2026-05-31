@@ -4,6 +4,9 @@ import { ArrowDownTrayIcon, ArrowLeftIcon, CommandLineIcon, ServerStackIcon } fr
 import { BUILDROOT_RASPBERRY_PI_ZERO_2_W, devices, buildrootPlatforms, rpiOSPlatforms } from '../../devices'
 import { newFrameForm } from './newFrameForm'
 import { FrameInstallMethod, NewFrameFormType } from '../../types'
+import { settingsLogic } from '../settings/settingsLogic'
+import { normalizedTimezone } from '../../utils/timezone'
+import { timezoneOptions } from '../../decorators/timezones'
 
 function isLocalServer(host?: string | null): boolean {
   const localHostRegex = /^(localhost|0\.0\.0\.0|127\.0\.0\.1|\[::1\])(:\d+)?$/
@@ -122,7 +125,9 @@ function installMethodTitle(installMethod: FrameInstallMethod): string {
 export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.Element {
   const { hideForm, resetNewFrame, setNewFrameValue, setNewFrameValues } = useActions(newFrameForm)
   const { newFrame, newFrameErrors } = useValues(newFrameForm)
+  const { savedSettings } = useValues(settingsLogic)
   const installMethod = newFrame.install_method
+  const timezone = normalizedTimezone(newFrame.timezone, savedSettings.defaults?.timezone)
 
   const cancel = () => {
     resetNewFrame()
@@ -371,6 +376,19 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
               onChange={(event) => setNewFrameValue('platform', event.target.value)}
             >
               {renderPlatformOptions('sd_card')}
+            </select>
+          </FormField>
+          <FormField label="Timezone">
+            <select
+              className={selectClassName()}
+              value={timezone}
+              onChange={(event) => setNewFrameValue('timezone', event.target.value)}
+            >
+              {timezoneOptions.map((timezone) => (
+                <option key={timezone.value} value={timezone.value}>
+                  {timezone.label}
+                </option>
+              ))}
             </select>
           </FormField>
           <FormField label="Driver">

@@ -47,6 +47,7 @@ from app.utils.cross_compile import CrossCompiler, TargetMetadata, cross_cache_k
 from app.utils.ssh_key_utils import select_ssh_keys_for_frame
 from app.utils.local_exec import exec_local_command
 from app.utils.token import secure_token
+from app.utils.versions import current_frameos_version
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SUPPORTED_BUILDROOT_PLATFORM = "raspberry-pi-zero-2-w"
@@ -128,6 +129,8 @@ BUILDROOT_IMAGE_STALE_AFTER_SECONDS = int(
     os.environ.get("FRAMEOS_BUILDROOT_IMAGE_STALE_AFTER_SECONDS", str(6 * 60 * 60))
 )
 BUILDROOT_IMAGES_DIGESTS_PATH = os.environ.get("FRAMEOS_BUILDROOT_IMAGES_DIGESTS_PATH", str(REPO_ROOT / "buildroot-images.json"))
+BUILDROOT_BOOT_LOGO_SOURCE = REPO_ROOT / "backend" / "app" / "tasks" / "assets" / "frameos-boot-logo.png"
+BUILDROOT_BOOT_LOGO_WORK_PATH = "/work/frameos-boot-logo.png"
 BACKEND_ROOT = REPO_ROOT / "backend"
 BUILDROOT_DOCKERFILE = BACKEND_ROOT / "tools" / "buildroot.Dockerfile"
 FRAMEOS_BUILD_TARGET = TargetMetadata(
@@ -199,13 +202,7 @@ def _buildroot_digest_map() -> dict[str, str]:
 
 @lru_cache(maxsize=1)
 def _frameos_version() -> str:
-    path = REPO_ROOT / "versions.json"
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return ""
-    value = payload.get("frameos") if isinstance(payload, dict) else None
-    return value if isinstance(value, str) else ""
+    return current_frameos_version() or ""
 
 
 async def _buildroot_base_manifest() -> dict[str, Any]:
@@ -654,6 +651,7 @@ class BuildrootImageBuilder:
                     "status": "building",
                     "buildId": build_id,
                     "platform": SUPPORTED_BUILDROOT_PLATFORM,
+                    "frameosVersion": current_frameos_version(),
                     "filename": filename,
                     "rawFilename": raw_filename,
                     "compilationMode": frame_compilation_mode(self.frame),
@@ -686,6 +684,7 @@ class BuildrootImageBuilder:
             self._write_post_build_script(post_build_path)
             self._write_partition_post_build_script(partition_post_build_path)
             self._write_post_image_script(post_image_path)
+            self._write_boot_logo(temp_dir / Path(BUILDROOT_BOOT_LOGO_WORK_PATH).name)
             base_entry = await resolve_buildroot_base_entry(SUPPORTED_BUILDROOT_PLATFORM)
             base_image_path = await ensure_buildroot_base_image(base_entry, buildroot_base_cache_dir())
             compose_image = await self._ensure_buildroot_image()
@@ -709,6 +708,7 @@ class BuildrootImageBuilder:
                 "status": "ready",
                 "buildId": build_id,
                 "platform": SUPPORTED_BUILDROOT_PLATFORM,
+                "frameosVersion": current_frameos_version(),
                 "buildrootVersion": BUILDROOT_VERSION,
                 "baseImage": {
                     "frameosVersion": base_entry.get("frameos_version"),
@@ -956,6 +956,7 @@ class BuildrootImageBuilder:
                     f"BR2_JLEVEL={BUILDROOT_JLEVEL}",
                     'BR2_DL_DIR="/cache/dl"',
                     'BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES="/work/linux-fragment.config"',
+                    f'BR2_LINUX_KERNEL_CUSTOM_LOGO_PATH="{BUILDROOT_BOOT_LOGO_WORK_PATH}"',
                     "BR2_PACKAGE_SYSTEMD=y",
                     "BR2_PACKAGE_SYSTEMD_TIMESYNCD=y",
                     "BR2_PACKAGE_DBUS=y",
@@ -963,6 +964,7 @@ class BuildrootImageBuilder:
                     "BR2_PACKAGE_SUDO=y",
                     "BR2_PACKAGE_CA_CERTIFICATES=y",
                     "BR2_PACKAGE_TZDATA=y",
+                    "BR2_PACKAGE_BASH=y",
                     "BR2_PACKAGE_COREUTILS=y",
                     "BR2_PACKAGE_FINDUTILS=y",
                     "BR2_PACKAGE_GZIP=y",
@@ -1085,6 +1087,13 @@ class BuildrootImageBuilder:
     def _write_post_image_script(path: Path) -> None:
         path.write_text(POST_IMAGE_SCRIPT, encoding="utf-8")
         os.chmod(path, 0o755)
+
+    @staticmethod
+    def _write_boot_logo(path: Path) -> None:
+        if not BUILDROOT_BOOT_LOGO_SOURCE.is_file():
+            raise RuntimeError(f"Buildroot boot logo is missing; expected at {BUILDROOT_BOOT_LOGO_SOURCE}")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(BUILDROOT_BOOT_LOGO_SOURCE, path)
 
     @staticmethod
     def _write_setup_payload(path: Path, payload: dict[str, Any]) -> None:
@@ -1663,6 +1672,17 @@ genimage_cfg="${{BINARIES_DIR:?BINARIES_DIR is required}}/frameos-genimage.cfg"
 genimage_tmp="${{BUILD_DIR:?BUILD_DIR is required}}/genimage.tmp"
 rootpath_tmp="$(mktemp -d)"
 trap 'rm -rf "$rootpath_tmp"' EXIT
+
+cmdline="${{BINARIES_DIR:?BINARIES_DIR is required}}/rpi-firmware/cmdline.txt"
+if [ -f "$cmdline" ]; then
+  tmp_cmdline="${{cmdline}}.frameos"
+  tr -d '\\n' < "$cmdline" > "$tmp_cmdline"
+  if ! grep -Eq '(^|[[:space:]])fbcon=logo-count:' "$tmp_cmdline"; then
+    printf ' fbcon=logo-count:1' >> "$tmp_cmdline"
+  fi
+  printf '\\n' >> "$tmp_cmdline"
+  mv "$tmp_cmdline" "$cmdline"
+fi
 
 files=()
 for candidate in "${{BINARIES_DIR}}"/*.dtb "${{BINARIES_DIR}}"/rpi-firmware/*; do

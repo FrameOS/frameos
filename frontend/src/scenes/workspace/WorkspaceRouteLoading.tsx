@@ -19,7 +19,12 @@ import { Spinner } from '../../components/Spinner'
 import { urls } from '../../urls'
 import { preloadSceneComponent, type LoadableSceneKey } from '../scenes'
 import { FrameDashboardLoadingSkeleton, FrameHomeTopBarLoadingSkeleton } from './FrameDashboardLoadingSkeleton'
-import { isMobileWorkspaceViewport, workspaceLogic } from './workspaceLogic'
+import {
+  isMobileWorkspaceViewport,
+  requestNextFramesHomeScrollTop,
+  scrollFramesHomeToTop,
+  workspaceLogic,
+} from './workspaceLogic'
 import { workspaceModeForSceneOrFrames, type WorkspaceMode } from './workspaceModes'
 
 function LoadingNavButton({
@@ -30,6 +35,7 @@ function LoadingNavButton({
   sidebarOpen,
   title,
   onActiveClick,
+  onInactiveClick,
   children,
 }: {
   active: boolean
@@ -39,6 +45,7 @@ function LoadingNavButton({
   sidebarOpen: boolean
   title: string
   onActiveClick: () => void
+  onInactiveClick?: () => void
   children: JSX.Element
 }): JSX.Element {
   const resolvedHref =
@@ -60,6 +67,7 @@ function LoadingNavButton({
         if (active) {
           onActiveClick()
         } else {
+          onInactiveClick?.()
           router.actions.push(resolvedHref)
         }
       }}
@@ -177,7 +185,6 @@ export function WorkspaceRouteLoading({ scene }: { scene: string | null }): JSX.
   const { toggleSecondarySidebar, toggleTheme } = useActions(workspaceLogic)
   const mode = workspaceModeForSceneOrFrames(scene)
   const spinnerMode = useDelayedInitialSpinnerMode(mode)
-  const frameHref = selectedFrame ? urls.frame(selectedFrame.id) : urls.frames()
   const scenesHref = selectedFrame ? urls.scenes(selectedFrame.id, selectedSceneId ?? undefined) : urls.scenes()
   const appsHref = lastAppsHref ?? urls.systemApps()
   const workspaceMainStyle = {
@@ -211,7 +218,13 @@ export function WorkspaceRouteLoading({ scene }: { scene: string | null }): JSX.
                 return
               }
               event.preventDefault()
-              router.actions.push(urls.frames())
+              requestNextFramesHomeScrollTop()
+              if (mode === 'frames') {
+                scrollFramesHomeToTop('smooth', false)
+              } else {
+                router.actions.push(urls.frames())
+                scrollFramesHomeToTop()
+              }
             }}
             className="workspace-logo-button frameos-icon-button mb-8 flex h-12 w-12 items-center justify-center rounded-xl transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
           >
@@ -224,19 +237,23 @@ export function WorkspaceRouteLoading({ scene }: { scene: string | null }): JSX.
               pending={spinnerMode === 'frames'}
               preloadScene="frames"
               sidebarOpen={secondarySidebarOpen}
-              title={secondarySidebarOpen && mode === 'frames' ? 'Hide frames panel' : 'Frames'}
-              onActiveClick={toggleSecondarySidebar}
+              title="Frames home"
+              onActiveClick={() => {
+                requestNextFramesHomeScrollTop()
+                scrollFramesHomeToTop('smooth', false)
+              }}
+              onInactiveClick={requestNextFramesHomeScrollTop}
             >
               <Squares2X2Icon className="h-7 w-7" />
             </LoadingNavButton>
             <LoadingNavButton
               active={mode === 'frame'}
-              href={frameHref}
-              pending={spinnerMode === 'frame'}
-              preloadScene="frame"
+              href={urls.frames()}
+              pending={spinnerMode === 'frames'}
+              preloadScene="frames"
               sidebarOpen={secondarySidebarOpen}
               title={secondarySidebarOpen && mode === 'frame' ? 'Hide frame panel' : 'Frame'}
-              onActiveClick={toggleSecondarySidebar}
+              onActiveClick={() => router.actions.push(urls.frames())}
             >
               <ComputerDesktopIcon className="h-7 w-7" />
             </LoadingNavButton>

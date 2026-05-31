@@ -3,6 +3,12 @@ from unittest.mock import patch, AsyncMock
 from datetime import datetime, timedelta, timezone
 from app.models.frame import new_frame, Frame
 from app.models.log import LOG_LIMIT_PER_FRAME, new_log, process_log, Log
+from app.codegen.drivers_nim import frame_compilation_mode
+from app.tasks.buildroot_image import (
+    BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION,
+    SUPPORTED_BUILDROOT_PLATFORM,
+    buildroot_sd_image_config_fingerprint,
+)
 
 @pytest.mark.asyncio
 @patch("app.models.log.publish_message", new_callable=AsyncMock)
@@ -95,6 +101,41 @@ async def test_process_log_bootup(mock_pub, db, redis):
     assert updated.width == 200
     assert updated.height == 300
     assert updated.color == "monochrome"
+
+
+@pytest.mark.asyncio
+@patch("app.models.log.publish_message", new_callable=AsyncMock)
+async def test_process_log_bootup_marks_matching_buildroot_sd_image_deployed(mock_pub, db, redis):
+    frame = await new_frame(db, redis, "BuildrootBootFrame", "frame53.local", "server_host")
+    frame.mode = "buildroot"
+    frame.status = "uninitialized"
+    frame.buildroot = {
+        "platform": SUPPORTED_BUILDROOT_PLATFORM,
+        "sdImage": {
+            "status": "ready",
+            "platform": SUPPORTED_BUILDROOT_PLATFORM,
+            "frameosVersion": "2026.6.2",
+            "customizationVersion": BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION,
+            "compilationMode": frame_compilation_mode(frame),
+        },
+    }
+    db.add(frame)
+    db.commit()
+    db.refresh(frame)
+    sd_image = dict(frame.buildroot["sdImage"])
+    sd_image["configFingerprint"] = buildroot_sd_image_config_fingerprint(frame)
+    frame.buildroot = {**frame.buildroot, "sdImage": sd_image}
+    db.add(frame)
+    db.commit()
+
+    await process_log(db, redis, frame, {"event": "bootup", "width": 200, "height": 300})
+
+    updated = db.get(Frame, frame.id)
+    assert updated.last_successful_deploy_at is not None
+    assert updated.last_successful_deploy["frameos_version"] == "2026.6.2"
+    assert updated.last_successful_deploy["width"] == 200
+    assert updated.last_successful_deploy["height"] == 300
+    assert updated.status == "ready"
 
 @pytest.mark.asyncio
 @patch("app.models.log.publish_message", new_callable=AsyncMock)
