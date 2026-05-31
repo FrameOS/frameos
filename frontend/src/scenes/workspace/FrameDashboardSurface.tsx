@@ -35,12 +35,11 @@ import type { FrameScene, FrameType, ScheduledEvent } from '../../types'
 import { frameLogic } from '../frame/frameLogic'
 import { HeaderMetrics } from '../frame/panels/Metrics/HeaderMetrics'
 import { CompiledSceneTag } from '../frame/panels/Scenes/CompiledSceneTag'
-import { RenameSceneModal } from '../frame/panels/Scenes/RenameSceneModal'
-import { SceneDropDown } from '../frame/panels/Scenes/SceneDropDown'
 import { templatesLogic } from '../frame/panels/Templates/templatesLogic'
 import { newFrameForm } from '../frames/newFrameForm'
 import { FrameLiveBadge } from './FrameLiveBadge'
 import { FrameChangeStatusIcon } from './FrameChangeStatusIcon'
+import { WorkspaceSceneDropDown } from './WorkspaceSceneDropDown'
 import {
   FRAMEOS_TEMPLATE_DRAG_TYPE,
   getFrameosSceneDragData,
@@ -75,7 +74,6 @@ interface FrameDashboardSurfaceProps {
   frameMatchesSearch?: boolean
   sectionId?: string
   showSceneMenus?: boolean
-  includeSceneRenameModal?: boolean
 }
 
 export function sceneIsActive(scene: FrameScene, currentSceneId: string | null | undefined): boolean {
@@ -480,12 +478,14 @@ function RenameFrameModal({ frame }: { frame: FrameType }): JSX.Element | null {
 function FrameSceneTile({
   frame,
   scene,
+  scenes,
   active,
   highlighted,
   showMenu,
 }: {
   frame: FrameType
   scene: FrameScene
+  scenes: FrameScene[]
   active: boolean
   highlighted: boolean
   showMenu?: boolean
@@ -547,10 +547,10 @@ function FrameSceneTile({
         </div>
       ) : null}
       {showMenu ? (
-        <SceneDropDown
-          context="scenes"
-          sceneId={scene.id}
-          navigation="workspace"
+        <WorkspaceSceneDropDown
+          frame={frame}
+          scene={scene}
+          scenes={scenes}
           horizontal
           buttonColor="none"
           className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-lg bg-white/70 !px-0 !py-0 text-slate-500/80 shadow-sm backdrop-blur-sm transition hover:bg-white/95 hover:text-slate-700"
@@ -588,6 +588,15 @@ export function FrameAddSceneTile({ frame, compact = false }: { frame: FrameType
       </span>
       <span className="frameos-strong text-sm font-semibold text-slate-700">Add scene</span>
     </button>
+  )
+}
+
+function BlankFrameSceneHint(): JSX.Element {
+  return (
+    <div className="mb-4 rounded-lg border border-amber-200 bg-amber-100 px-4 py-3 text-sm font-medium leading-5 text-amber-950 shadow-sm">
+      This frame has no scenes yet. Click <span className="font-bold">Add scene</span> to choose a template or create a
+      scene, then save it. After adding scenes, deploy the changes to the frame so they appear on the display.
+    </div>
   )
 }
 
@@ -663,6 +672,7 @@ function FrameScenesBlock({
                 key={scene.id}
                 frame={frame}
                 scene={scene}
+                scenes={scenes}
                 active={active}
                 highlighted={active || selected}
                 showMenu={showSceneMenus}
@@ -680,8 +690,11 @@ function FrameScenesBlock({
           No scenes match this search.
         </div>
       ) : (
-        <div className="flex flex-wrap gap-4">
-          <FrameAddSceneTile frame={frame} compact />
+        <div>
+          <BlankFrameSceneHint />
+          <div className="flex flex-wrap gap-4">
+            <FrameAddSceneTile frame={frame} compact />
+          </div>
         </div>
       )}
     </div>
@@ -696,7 +709,6 @@ export function FrameDashboardSurface({
   frameMatchesSearch,
   sectionId,
   showSceneMenus = false,
-  includeSceneRenameModal = showSceneMenus,
 }: FrameDashboardSurfaceProps): JSX.Element {
   const { applyTemplateAndSave } = useActions(frameLogic({ frameId: frame.id }))
   const { applyRemoteToFrame } = useActions(templatesLogic({ frameId: frame.id }))
@@ -733,7 +745,6 @@ export function FrameDashboardSurface({
       className={clsx('group @container scroll-mt-6', archived && 'opacity-80')}
     >
       <RenameFrameModal frame={frame} />
-      {includeSceneRenameModal ? <RenameSceneModal frameId={frame.id} /> : null}
       <FrameDashboardHeader frame={frame} archived={archived} />
       <div className="grid gap-5 @2xl:grid-cols-[minmax(0,19rem)_minmax(19rem,1fr)] @2xl:items-start">
         <FramePreviewPanel frame={frame} scenes={scenes} />

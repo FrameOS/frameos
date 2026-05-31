@@ -146,6 +146,7 @@ FRAME_ASSETS_CACHE_LOCK_SECONDS = 60
 FRAME_ASSETS_CACHE_TTL_SECONDS = 86400 * 30
 FRAME_STATES_CACHE_REFRESH_AFTER_SECONDS = 5
 FRAME_STATES_CACHE_RETRY_AFTER_SECONDS = 5
+FRAME_STATES_CACHE_FAILURE_RETRY_AFTER_SECONDS = 60
 FRAME_STATES_CACHE_LOCK_SECONDS = 30
 FRAME_STATES_CACHE_TTL_SECONDS = 86400 * 30
 FRAME_IMAGE_REFRESH_LOCK_SECONDS = 65
@@ -272,6 +273,8 @@ async def _write_frame_states_cache(
 ) -> float:
     cache_time = fetched_at if fetched_at is not None else time.time()
     payload = {**_normalise_frame_states_payload(state_record), "fetched_at": cache_time}
+    if isinstance(state_record.get("error"), str):
+        payload["error"] = _truncate_text(state_record["error"])
     await redis.set(cache_key, json.dumps(payload).encode(), ex=FRAME_STATES_CACHE_TTL_SECONDS)
     return cache_time
 
@@ -605,6 +608,26 @@ async def _forward_frame_request(
     if cache_key and (cached := await redis.get(cache_key)):
         return _bytes_or_json(cached)
 
+    if json_body is None:
+        status, body, headers = await _fetch_frame_http_bytes(
+            frame,
+            redis,
+            path=path,
+            method=method,
+        )
+        if status == 200:
+            if cache_key:
+                await redis.set(cache_key, body, ex=cache_ttl)
+            payload = _bytes_or_json(body)
+            if headers.get("content-type", "").startswith("application/json") or not isinstance(payload, bytes):
+                return payload
+            return _decode_bytes(body)
+
+        if cache_key and (cached := await redis.get(cache_key)):
+            return _bytes_or_json(cached)
+
+        raise HTTPException(status_code=400, detail="Unable to reach frame")
+
     # The agent HTTP command wants a *string* while httpx needs either
     #   • json=<obj>   for real JSON payloads
     #   • content=<bytes> for arbitrary binary bodies.
@@ -737,9 +760,20 @@ async def _refresh_frame_states_cache(
         if state_record.get("sceneId"):
             await redis.set(f"frame:{frame.id}:active_scene", state_record["sceneId"])
         completed = True
-    except Exception:
-        # Keep serving the previous cached state. The lock TTL throttles retries.
-        pass
+    except Exception as exc:
+        cached = await _read_frame_states_cache(redis, cache_key)
+        fallback_record = _normalise_frame_states_payload(cached)
+        if not fallback_record.get("sceneId"):
+            fallback_record["sceneId"] = await _active_scene_id_from_cache(redis, frame_id)
+        await _write_frame_states_cache(
+            redis,
+            cache_key,
+            {
+                **fallback_record,
+                "error": str(exc) or exc.__class__.__name__,
+            },
+        )
+        completed = True
     finally:
         if completed:
             with contextlib.suppress(Exception):
@@ -780,13 +814,20 @@ def _frame_states_cache_meta(
     cached: bool,
     refreshing: bool,
     fetched_at: float | None,
+    error: str | None = None,
 ) -> dict[str, Any]:
+    retry_after = (
+        FRAME_STATES_CACHE_FAILURE_RETRY_AFTER_SECONDS
+        if error
+        else FRAME_STATES_CACHE_RETRY_AFTER_SECONDS
+    )
     return {
         "cached": cached,
         "refreshing": refreshing,
         "fetched_at": fetched_at,
         "refresh_after": FRAME_STATES_CACHE_REFRESH_AFTER_SECONDS,
-        "retry_after": FRAME_STATES_CACHE_RETRY_AFTER_SECONDS,
+        "retry_after": retry_after,
+        **({"error": error} if error else {}),
     }
 
 
@@ -936,7 +977,13 @@ async def api_frame_get_states(
 
     if cached is not None:
         fetched_at = float(cached.get("fetched_at") or 0)
-        refreshing = refresh or time.time() - fetched_at >= FRAME_STATES_CACHE_REFRESH_AFTER_SECONDS
+        cache_error = cached.get("error") if isinstance(cached.get("error"), str) else None
+        refresh_after = (
+            FRAME_STATES_CACHE_FAILURE_RETRY_AFTER_SECONDS
+            if cache_error
+            else FRAME_STATES_CACHE_REFRESH_AFTER_SECONDS
+        )
+        refreshing = refresh or time.time() - fetched_at >= refresh_after
         if refreshing:
             refreshing = await _schedule_frame_states_cache_refresh(
                 redis,
@@ -953,6 +1000,7 @@ async def api_frame_get_states(
                 cached=True,
                 refreshing=refreshing,
                 fetched_at=fetched_at,
+                error=cache_error,
             ),
         }
 

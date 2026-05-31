@@ -601,6 +601,65 @@ async def test_api_frame_states_returns_stale_cache_and_refreshes(async_client, 
 
 
 @pytest.mark.asyncio
+async def test_api_frame_states_caches_refresh_failure(async_client, db, redis):
+    frame = await new_frame(db, redis, 'FailingStatesFrame', 'localhost', 'localhost')
+    cache_key = frames_api._frame_states_cache_key(frame.id)
+    lock_key = frames_api._frame_states_cache_lock_key(frame.id)
+    await redis.delete(cache_key, lock_key)
+    await redis.set(f"frame:{frame.id}:active_scene", "last-scene")
+
+    load_states = AsyncMock(side_effect=HTTPException(status_code=408, detail="timeout"))
+    with patch("app.api.frames._load_frame_states", new=load_states):
+        response = await async_client.get(f'/api/frames/{frame.id}/states')
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["sceneId"] == "last-scene"
+        assert payload["states"] == {}
+        assert payload["cache"]["cached"] is False
+        assert payload["cache"]["refreshing"] is True
+
+        for _ in range(10):
+            refreshed = await frames_api._read_frame_states_cache(redis, cache_key)
+            if refreshed and refreshed.get("error"):
+                break
+            await asyncio.sleep(0.05)
+        else:
+            pytest.fail("states cache did not record the refresh failure")
+
+        second_response = await async_client.get(f'/api/frames/{frame.id}/states')
+
+    assert second_response.status_code == 200
+    second_payload = second_response.json()
+    assert second_payload["sceneId"] == "last-scene"
+    assert second_payload["states"] == {}
+    assert second_payload["cache"]["cached"] is True
+    assert second_payload["cache"]["refreshing"] is False
+    assert second_payload["cache"]["retry_after"] == frames_api.FRAME_STATES_CACHE_FAILURE_RETRY_AFTER_SECONDS
+    assert "timeout" in second_payload["cache"]["error"]
+    load_states.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_forward_frame_request_get_uses_bounded_frame_http(db, redis):
+    frame = await new_frame(db, redis, 'BoundedHttpFrame', 'localhost', 'localhost')
+
+    async def mock_fetch(frame_obj, redis_obj, *, path, method="GET"):
+        assert frame_obj.id == frame.id
+        assert path == "/states"
+        assert method == "GET"
+        return 200, b'{"sceneId":"scene-1","states":{"scene-1":{"value":1}}}', {
+            "content-type": "application/json"
+        }
+
+    with patch('app.api.frames._fetch_frame_http_bytes', side_effect=mock_fetch) as fetch_frame:
+        response = await frames_api._forward_frame_request(frame, redis, path="/states")
+
+    assert response == {"sceneId": "scene-1", "states": {"scene-1": {"value": 1}}}
+    assert fetch_frame.call_count == 1
+
+
+@pytest.mark.asyncio
 async def test_api_frame_event_render(async_client, db, redis):
     """
     Patch post to return 200. The route then returns "OK", which we check via response.text.

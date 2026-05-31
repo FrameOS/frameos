@@ -315,6 +315,17 @@ function BackToDeployButton({ onClick }: { onClick: () => void }): JSX.Element {
   )
 }
 
+function FrameSettingsLink({ frameId }: { frameId: number }): JSX.Element {
+  return (
+    <Link
+      href={urls.frame(frameId, 'settings')}
+      className="frameos-link text-xs font-semibold underline underline-offset-2 hover:no-underline"
+    >
+      See all settings
+    </Link>
+  )
+}
+
 function AlternativesSection({
   onSelect,
   title = 'Alternatives',
@@ -597,14 +608,7 @@ function BuildrootSdCardSection({
   return (
     <section className="mb-5 space-y-2">
       <DrawerHeading
-        action={
-          <Link
-            href={`${urls.frame(frame.id, 'settings')}#frame-settings-network`}
-            className="frameos-link text-xs font-semibold underline underline-offset-2 hover:no-underline"
-          >
-            Frame settings
-          </Link>
-        }
+        action={<FrameSettingsLink frameId={frame.id} />}
       >
         <span className="inline-flex items-center gap-2">
           {onBack ? <BackToDeployButton onClick={onBack} /> : null}
@@ -780,7 +784,8 @@ function ScriptInstallSection({ frame, onBack }: { frame: FrameType; onBack: () 
       <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
         <div className="frame-tool-muted text-sm leading-5">
           Run this command on the device as a user with sudo access. It installs FrameOS, starts the agent, and connects
-          back to this backend.
+          back to this backend. The installer supports most major Debian and Ubuntu releases, including Raspberry Pi OS
+          releases based on Debian.
         </div>
         {loading ? (
           <div className="flex items-center gap-2 text-sm font-semibold text-[color:var(--tool-strong)]">
@@ -930,6 +935,9 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
             <ScriptInstallSection frame={frame} onBack={showMainDeployView} />
           ) : (
             <>
+              <div className="mb-4 flex justify-end">
+                <FrameSettingsLink frameId={frame.id} />
+              </div>
               <AlternativesSection onSelect={setDeployDrawerView} />
               {canBootstrapAgent ? (
                 <div className="mb-4">

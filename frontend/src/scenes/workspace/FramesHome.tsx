@@ -39,7 +39,6 @@ import { frameLogic } from '../frame/frameLogic'
 import { panelsLogic } from '../frame/panels/panelsLogic'
 import { CompiledSceneTag } from '../frame/panels/Scenes/CompiledSceneTag'
 import { ExpandedScene } from '../frame/panels/Scenes/ExpandedScene'
-import { SceneDropDown } from '../frame/panels/Scenes/SceneDropDown'
 import { EditTemplateModal } from '../frame/panels/Templates/EditTemplateModal'
 import { Templates } from '../frame/panels/Templates/Templates'
 import { FrameDashboardSurface } from './FrameDashboardSurface'
@@ -48,6 +47,7 @@ import { FrameLiveBadge } from './FrameLiveBadge'
 import { framesHomeLogic } from './framesHomeLogic'
 import { FrameChangeStatusIcon } from './FrameChangeStatusIcon'
 import { sceneTileSummaryLabel } from './sceneTileLabels'
+import { WorkspaceSceneDropDown } from './WorkspaceSceneDropDown'
 
 const uploadedScenePrefix = 'uploaded/'
 const activeSurfaceClassName = 'frameos-active-surface'
@@ -331,8 +331,11 @@ function FrameTreeGroup({
           </span>
         </button>
       ) : (
-        <div className="mb-2 px-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
-          {title} ({frames.length})
+        <div className="mb-2 flex w-full items-center gap-2 px-2 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+          <span className="flex-1">{title}</span>
+          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
+            {frames.length}
+          </span>
         </div>
       )}
       {isExpanded ? (
@@ -566,22 +569,17 @@ function FrameSectionToolLinks({ frame }: { frame: FrameType }): JSX.Element {
 
 function FrameSection({ section }: { section: OverviewFrameSection }): JSX.Element {
   const { frame, scenes, archived, frameMatchesSearch } = section
-  const frameLogicProps = { frameId: frame.id }
 
   return (
-    <BindLogic logic={frameLogic} props={frameLogicProps}>
-      <BindLogic logic={panelsLogic} props={frameLogicProps}>
-        <FrameDashboardSurface
-          frame={frame}
-          scenes={scenes}
-          totalScenes={frame.scenes?.length ?? scenes.length}
-          archived={archived}
-          frameMatchesSearch={frameMatchesSearch}
-          sectionId={`workspace-frame-${frame.id}`}
-          showSceneMenus
-        />
-      </BindLogic>
-    </BindLogic>
+    <FrameDashboardSurface
+      frame={frame}
+      scenes={scenes}
+      totalScenes={frame.scenes?.length ?? scenes.length}
+      archived={archived}
+      frameMatchesSearch={frameMatchesSearch}
+      sectionId={`workspace-frame-${frame.id}`}
+      showSceneMenus
+    />
   )
 }
 
@@ -692,10 +690,10 @@ export function SceneControlPanel(): JSX.Element | null {
                 ) : null}
               </div>
               <div className="mb-4 flex flex-wrap gap-2">
-                <SceneDropDown
-                  context="scenes"
-                  sceneId={scene.id}
-                  navigation="workspace"
+                <WorkspaceSceneDropDown
+                  frame={frame}
+                  scene={scene}
+                  scenes={frame.scenes ?? [scene]}
                   horizontal
                   buttonColor="none"
                   className="frameos-secondary-button flex h-10 w-10 shrink-0 items-center justify-center rounded-lg !px-0 !py-0 text-slate-600 shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"

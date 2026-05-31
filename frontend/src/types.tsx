@@ -694,6 +694,7 @@ export interface FrameStateCacheInfo {
   fetched_at?: number | null
   refresh_after?: number | null
   retry_after?: number | null
+  error?: string | null
 }
 
 export interface FrameStateRecord {

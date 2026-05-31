@@ -1235,7 +1235,6 @@ function FrameToolSurface({
         scenes={scenes}
         totalScenes={totalScenes}
         showSceneMenus
-        includeSceneRenameModal={false}
       />
     )
   }

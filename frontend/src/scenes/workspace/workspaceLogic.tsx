@@ -76,6 +76,11 @@ function frameToolFromSearch(search: Record<string, unknown>): WorkspaceUtilityP
   return isFrameToolPanel(tool) ? tool : 'overview'
 }
 
+function deployDrawerViewFromSearch(search: Record<string, unknown>): DeployDrawerView | undefined {
+  const view = searchValue(search, 'deployView')
+  return view === 'sdCard' || view === 'script' || view === 'main' ? view : undefined
+}
+
 export function frameToolScrollKey(frameId: number, panel: WorkspaceUtilityPanel): string {
   return `${frameId}:${panel}`
 }
@@ -94,6 +99,7 @@ function clearDrawerSearchParams(search: Record<string, unknown>): Record<string
   delete nextSearch.frameId
   delete nextSearch.sceneId
   delete nextSearch.nodeId
+  delete nextSearch.deployView
   return nextSearch
 }
 
@@ -1349,7 +1355,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
       } else if (drawer === 'unsavedChanges') {
         actions.openFrameChangeDrawer(frameId, 'unsaved')
       } else if (drawer === 'deployPlan') {
-        actions.openFrameChangeDrawer(frameId, 'deploy')
+        actions.openFrameChangeDrawer(frameId, 'deploy', deployDrawerViewFromSearch(search))
       } else {
         closeDrawersFromUrl()
       }
@@ -1455,11 +1461,14 @@ export const workspaceLogic = kea<workspaceLogicType>([
             {
               ...clearDrawerSearchParams(router.values.searchParams),
               drawer: 'deployPlan',
+              ...(payload.deployDrawerView ? { deployView: payload.deployDrawerView } : {}),
               tool: 'overview',
             },
             utilityDrawerClosedHash(),
           ]
-        : drawerUrlForFrame(Number(payload.frameId), 'deployPlan'),
+        : drawerUrlForFrame(Number(payload.frameId), 'deployPlan', {
+            ...(payload.deployDrawerView ? { deployView: payload.deployDrawerView } : {}),
+          }),
     closeFrameChangeDrawer: clearDrawerUrl,
     openUtilityPanel: (payload: Record<string, any>) => {
       const panel = payload.panel
