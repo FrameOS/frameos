@@ -35,6 +35,7 @@ from app.models.settings import get_settings_dict
 from app.tasks._frame_deployer import FrameDeployer
 from app.tasks.binary_builder import FrameBinaryBuilder, FrameBinaryBuildResult
 from app.tasks.deploy_agent import AgentDeployer
+from app.tasks.precompiled_agent import download_precompiled_agent_release
 from app.tasks.setup_json_reset import (
     BOOT_AUTHORIZED_KEYS_FILE,
     BOOT_HOSTNAME_FILE,
@@ -100,6 +101,7 @@ BUILDROOT_DOCKER_APT_DEPS = (
     "xz-utils",
 )
 BUILDROOT_DOCKER_APT_DEPS_LINE = " ".join(BUILDROOT_DOCKER_APT_DEPS)
+BUILDROOT_COMPOSE_TOOLS = ("genimage", "mkfs.vfat", "mcopy", "mlabel")
 SAFE_SEGMENT = re.compile(r"[^A-Za-z0-9_.-]+")
 LEGACY_PLATFORM_ALIASES = {
     "",
@@ -696,7 +698,9 @@ class BuildrootImageBuilder:
             self._write_boot_logo(temp_dir / Path(BUILDROOT_BOOT_LOGO_WORK_PATH).name)
             base_entry = await resolve_buildroot_base_entry(SUPPORTED_BUILDROOT_PLATFORM)
             base_image_path = await ensure_buildroot_base_image(base_entry, buildroot_base_cache_dir())
-            compose_image = await self._ensure_buildroot_image()
+            compose_image = None
+            if not self._host_has_compose_tools():
+                compose_image = await self._ensure_buildroot_image()
             await self._compose_sd_image_from_base(
                 temp_dir=temp_dir,
                 base_image_path=base_image_path,
@@ -767,6 +771,29 @@ class BuildrootImageBuilder:
 
     async def _build_agent_binary(self, deployer: FrameDeployer, temp_dir: str, frame: Frame) -> str:
         await self._log("stdout", "Building FrameOS agent for Raspberry Pi Zero 2 W")
+        prebuilt_target = resolve_prebuilt_target(
+            FRAMEOS_BUILD_TARGET.distro,
+            FRAMEOS_BUILD_TARGET.version,
+            FRAMEOS_BUILD_TARGET.arch,
+        )
+        if prebuilt_target:
+            try:
+                result = await download_precompiled_agent_release(
+                    target=prebuilt_target,
+                    build_dir=str(Path(temp_dir) / f"agent_{deployer.build_id}"),
+                    temp_dir=temp_dir,
+                    build_id=deployer.build_id,
+                    logger=self._log,
+                )
+                action = "Using cached" if result.cache_hit else "Downloaded"
+                await self._log("stdout", f"{action} precompiled FrameOS agent release: {result.release_url}")
+                return result.binary_path
+            except Exception as exc:
+                await self._log(
+                    "stderr",
+                    f"Could not use precompiled FrameOS agent for {prebuilt_target}: {exc}. Falling back to source build.",
+                )
+
         agent_deployer = AgentDeployer(self.db, self.redis, frame, "", temp_dir, force_source=True)
         agent_deployer.build_id = deployer.build_id
         build_dir, source_dir = agent_deployer._create_agent_build_folders()
@@ -1291,7 +1318,7 @@ chmod a+r /artifacts/{shlex.quote(output_filename)}
         temp_dir: Path,
         base_image_path: Path,
         output_path: Path,
-        image: str,
+        image: str | None,
     ) -> None:
         await self._log("stdout", f"Composing SD image from cached Buildroot base {base_image_path.name}")
         compose_dir = temp_dir / "compose"
@@ -1310,6 +1337,7 @@ chmod a+r /artifacts/{shlex.quote(output_filename)}
         if not any(assets_root.iterdir()):
             (assets_root / "frameos-assets-placeholder").write_text("", encoding="utf-8")
 
+        compose_roots = f"/tmp/frameos-compose-roots-{os.getpid()}-{secure_token(6)}"
         genimage_cfg = compose_dir / "frameos-genimage.cfg"
         genimage_cfg.write_text(
             f"""image frameos.ext4 {{
@@ -1317,7 +1345,7 @@ chmod a+r /artifacts/{shlex.quote(output_filename)}
 		use-mke2fs = true
 		label = "FRAMEOS"
 	}}
-	srcpath = "/tmp/frameos-compose-roots/frameos"
+	srcpath = "{compose_roots}/frameos"
 	size = {BUILDROOT_FRAMEOS_PARTITION_SIZE}
 }}
 
@@ -1325,7 +1353,7 @@ image assets.vfat {{
 	vfat {{
 		label = "ASSETS"
 	}}
-	srcpath = "/tmp/frameos-compose-roots/assets"
+	srcpath = "{compose_roots}/assets"
 	size = {BUILDROOT_ASSETS_PARTITION_SIZE}
 }}
 """,
@@ -1337,35 +1365,50 @@ image assets.vfat {{
             """#!/usr/bin/env bash
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
+work_dir="${FRAMEOS_COMPOSE_WORK_DIR:-/work}"
+compose_roots="${FRAMEOS_COMPOSE_ROOTS:-__FRAMEOS_COMPOSE_ROOTS__}"
+trap 'rm -rf "$compose_roots"' EXIT
 if ! command -v genimage >/dev/null 2>&1 || ! command -v mkfs.vfat >/dev/null 2>&1 || ! command -v mcopy >/dev/null 2>&1; then
   apt-get update
   apt-get install -y --no-install-recommends genimage dosfstools e2fsprogs mtools
 fi
-rm -rf /work/tmp
-rm -rf /tmp/frameos-compose-roots
-mkdir -p /tmp/frameos-compose-roots
-tar -C /work/roots -cf - frameos assets | tar -C /tmp/frameos-compose-roots -xf -
-genimage --rootpath /work/empty-root --tmppath /work/tmp --inputpath /work/images --outputpath /work/images --config /work/frameos-genimage.cfg
-""",
+rm -rf "$work_dir/tmp"
+rm -rf "$compose_roots"
+mkdir -p "$compose_roots"
+tar -C "$work_dir/roots" -cf - frameos assets | tar -C "$compose_roots" -xf -
+genimage --rootpath "$work_dir/empty-root" --tmppath "$work_dir/tmp" --inputpath "$work_dir/images" --outputpath "$work_dir/images" --config "$work_dir/frameos-genimage.cfg"
+""".replace("__FRAMEOS_COMPOSE_ROOTS__", compose_roots),
             encoding="utf-8",
         )
         os.chmod(script_path, 0o755)
         (compose_dir / "empty-root").mkdir(exist_ok=True)
 
-        docker_cmd = " ".join(
-            [
-                "docker run --rm",
-                f"-v {shlex.quote(str(compose_dir))}:/work",
-                shlex.quote(image),
-                "bash /work/compose-partitions.sh",
-            ]
-        )
+        if image:
+            compose_cmd = " ".join(
+                [
+                    "docker run --rm",
+                    f"-v {shlex.quote(str(compose_dir))}:/work",
+                    shlex.quote(image),
+                    "bash /work/compose-partitions.sh",
+                ]
+            )
+            log_command = "docker run (buildroot image composer)"
+        else:
+            compose_cmd = " ".join(
+                [
+                    f"FRAMEOS_COMPOSE_WORK_DIR={shlex.quote(str(compose_dir))}",
+                    f"FRAMEOS_COMPOSE_ROOTS={shlex.quote(compose_roots)}",
+                    "bash",
+                    shlex.quote(str(script_path)),
+                ]
+            )
+            log_command = "buildroot image composer"
         status, _, err = await exec_local_command(
             self.db,
             self.redis,
             self.frame,
-            docker_cmd,
-            log_command="docker run (buildroot image composer)",
+            compose_cmd,
+            log_command=log_command,
         )
         if status != 0:
             raise RuntimeError(f"Buildroot image composition failed: {err or 'see logs'}")
@@ -1382,7 +1425,7 @@ genimage --rootpath /work/empty-root --tmppath /work/tmp --inputpath /work/image
         partitions: list[dict[str, int]],
         boot_root: Path,
         *,
-        image: str,
+        image: str | None,
     ) -> None:
         if not partitions:
             raise RuntimeError("Cannot patch BOOT partition; SD image has no partitions")
@@ -1393,16 +1436,18 @@ genimage --rootpath /work/empty-root --tmppath /work/tmp --inputpath /work/image
             f"""#!/usr/bin/env bash
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
+image_dir="${{FRAMEOS_IMAGE_DIR:-/image}}"
+boot_root="${{FRAMEOS_BOOT_ROOT:-/boot-root}}"
 if ! command -v mlabel >/dev/null 2>&1 || ! command -v mcopy >/dev/null 2>&1; then
   apt-get update
   apt-get install -y --no-install-recommends mtools
 fi
-disk=/image/{shlex.quote(output_path.name)}
+disk="$image_dir"/{shlex.quote(output_path.name)}
 offset={partitions[0]["start"]}
 target="${{disk}}@@${{offset}}"
 mlabel -i "$target" ::BOOT
-if find /boot-root -mindepth 1 -print -quit | grep -q .; then
-  cd /boot-root
+if find "$boot_root" -mindepth 1 -print -quit | grep -q .; then
+  cd "$boot_root"
   find . -mindepth 1 -maxdepth 1 -exec mcopy -i "$target" -o -s {{}} :: \\;
 fi
 """,
@@ -1410,22 +1455,34 @@ fi
         )
         os.chmod(script_path, 0o755)
 
-        docker_cmd = " ".join(
-            [
-                "docker run --rm",
-                f"-v {shlex.quote(str(output_path.parent))}:/image",
-                f"-v {shlex.quote(str(boot_root))}:/boot-root",
-                f"-v {shlex.quote(str(script_path))}:/patch-boot.sh",
-                shlex.quote(image),
-                "bash /patch-boot.sh",
-            ]
-        )
+        if image:
+            patch_cmd = " ".join(
+                [
+                    "docker run --rm",
+                    f"-v {shlex.quote(str(output_path.parent))}:/image",
+                    f"-v {shlex.quote(str(boot_root))}:/boot-root",
+                    f"-v {shlex.quote(str(script_path))}:/patch-boot.sh",
+                    shlex.quote(image),
+                    "bash /patch-boot.sh",
+                ]
+            )
+            log_command = "docker run (buildroot boot partition patch)"
+        else:
+            patch_cmd = " ".join(
+                [
+                    f"FRAMEOS_IMAGE_DIR={shlex.quote(str(output_path.parent))}",
+                    f"FRAMEOS_BOOT_ROOT={shlex.quote(str(boot_root))}",
+                    "bash",
+                    shlex.quote(str(script_path)),
+                ]
+            )
+            log_command = "buildroot boot partition patch"
         status, _, err = await exec_local_command(
             self.db,
             self.redis,
             self.frame,
-            docker_cmd,
-            log_command="docker run (buildroot boot partition patch)",
+            patch_cmd,
+            log_command=log_command,
         )
         if status != 0:
             raise RuntimeError(f"Buildroot BOOT partition patch failed: {err or 'see logs'}")
@@ -1490,6 +1547,10 @@ fi
             log_output=False,
         )
         return status == 0
+
+    @staticmethod
+    def _host_has_compose_tools() -> bool:
+        return all(shutil.which(tool) for tool in BUILDROOT_COMPOSE_TOOLS)
 
     async def _ensure_buildroot_image(self) -> str:
         image = self._buildroot_image()

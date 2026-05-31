@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import gzip
 import json
+import re
 from types import SimpleNamespace
 
 import pytest
@@ -274,17 +275,19 @@ async def test_cached_base_composer_uses_container_visible_srcpaths(tmp_path, mo
         image="frameos/frameos-buildroot:test",
     )
 
-    assert 'srcpath = "/tmp/frameos-compose-roots/frameos"' in captured["config"]
-    assert 'srcpath = "/tmp/frameos-compose-roots/assets"' in captured["config"]
-    assert 'srcpath = "/tmp/frameos-compose-roots/rootfs"' not in captured["config"]
-    assert 'srcpath = "/tmp/frameos-compose-roots/boot"' not in captured["config"]
+    compose_root = re.search(r'srcpath = "([^"]+)/frameos"', captured["config"])
+    assert compose_root
+    assert compose_root.group(1).startswith("/tmp/frameos-compose-roots-")
+    assert f'srcpath = "{compose_root.group(1)}/assets"' in captured["config"]
+    assert f'srcpath = "{compose_root.group(1)}/rootfs"' not in captured["config"]
+    assert f'srcpath = "{compose_root.group(1)}/boot"' not in captured["config"]
     assert 'label = "BOOT"' not in captured["config"]
     assert str(temp_dir) not in captured["config"]
     assert "bash /work/compose-partitions.sh" in captured["compose_command"]
     assert "bash /patch-boot.sh" in captured["patch_command"]
     assert "frameos/frameos-buildroot:test" in captured["compose_command"]
     assert "frameos/frameos-buildroot:test" in captured["patch_command"]
-    assert "tar -C /work/roots -cf - frameos assets | tar -C /tmp/frameos-compose-roots -xf -" in (
+    assert 'tar -C "$work_dir/roots" -cf - frameos assets | tar -C "$compose_roots" -xf -' in (
         temp_dir / "compose" / "compose-partitions.sh"
     ).read_text(encoding="utf-8")
     assert "mlabel -i \"$target\" ::BOOT" in captured["patch_script"]
@@ -294,6 +297,67 @@ async def test_cached_base_composer_uses_container_visible_srcpaths(tmp_path, mo
     assert output_image.read_bytes() == b"base"
     assert replaced == [(3, "frameos.ext4"), (4, "assets.vfat")]
     assert len(commands) == 2
+
+
+@pytest.mark.asyncio
+async def test_cached_base_composer_runs_without_docker_when_image_is_not_required(tmp_path, monkeypatch):
+    temp_dir = tmp_path / "tmp"
+    frameos_overlay = temp_dir / "overlay" / "srv" / "frameos"
+    assets_overlay = temp_dir / "overlay" / "srv" / "assets"
+    boot_overlay = temp_dir / "overlay" / "boot"
+    frameos_overlay.mkdir(parents=True)
+    assets_overlay.mkdir(parents=True)
+    boot_overlay.mkdir(parents=True)
+    (frameos_overlay / "frameos").write_bytes(b"binary")
+    (boot_overlay / "frameos-setup.json").write_text("{}", encoding="utf-8")
+    base_image = tmp_path / "base.img"
+    output_image = tmp_path / "output.img"
+    base_image.write_bytes(b"base")
+    commands: list[str] = []
+    replaced: list[tuple[int, str]] = []
+    builder = BuildrootImageBuilder(db=object(), redis=None, frame=SimpleNamespace(id=1))
+
+    async def fake_exec_local_command(*args, **kwargs):
+        command = args[3]
+        commands.append(command)
+        if "compose-partitions.sh" in command:
+            images_dir = temp_dir / "compose" / "images"
+            (images_dir / "frameos.ext4").write_bytes(b"frameos")
+            (images_dir / "assets.vfat").write_bytes(b"assets")
+        return 0, "", ""
+
+    async def fake_log(*args, **kwargs):
+        return None
+
+    def fake_replace_partition(_image_path, _partitions, partition_number, partition_image):
+        replaced.append((partition_number, partition_image.name))
+
+    monkeypatch.setattr("app.tasks.buildroot_image.exec_local_command", fake_exec_local_command)
+    monkeypatch.setattr(
+        "app.tasks.buildroot_image._mbr_partitions",
+        lambda _path: [
+            {"start": 512, "size": 32 * 1024 * 1024},
+            {"start": 33554944, "size": 768 * 1024 * 1024},
+            {"start": 838861312, "size": 512 * 1024 * 1024},
+            {"start": 1375732224, "size": 512 * 1024 * 1024},
+        ],
+    )
+    monkeypatch.setattr("app.tasks.buildroot_image._replace_partition", fake_replace_partition)
+    monkeypatch.setattr(builder, "_log", fake_log)
+
+    await builder._compose_sd_image_from_base(
+        temp_dir=temp_dir,
+        base_image_path=base_image,
+        output_path=output_image,
+        image=None,
+    )
+
+    assert len(commands) == 2
+    assert all("docker run" not in command for command in commands)
+    assert commands[0].startswith("FRAMEOS_COMPOSE_WORK_DIR=")
+    assert commands[1].startswith("FRAMEOS_IMAGE_DIR=")
+    assert output_image.read_bytes() == b"base"
+    assert replaced == [(3, "frameos.ext4"), (4, "assets.vfat")]
 
 
 def test_buildroot_service_writes_console_output_and_environment(tmp_path):

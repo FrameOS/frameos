@@ -336,7 +336,7 @@ class FrameBinaryBuilder:
                 if "unix:///var/run/docker.sock" in str(exc).lower():
                     await self._log(
                         "stderr",
-                        f"{icon} Read the README at https://github.com/FrameOS/frameos to learn how to enable docker-in-docker, or configure a build server from global settings.",
+                        f"{icon} Read the README at https://github.com/FrameOS/frameos to learn how to enable Docker access for source cross-compilation, or configure a build server from global settings.",
                     )
                 elif "command not found" in str(exc).lower() or "buildx" in str(exc).lower():
                     await self._log(

@@ -75,9 +75,10 @@ docker run -d -p 8989:8989 \
     -e SECRET_KEY="$SECRET_KEY" \
     frameos/frameos
 
-# If you want to speed up your builds with cross-compilation, you must enable privileged mode.
-# This lets FrameOS spin up docker containers for the various build environments.
-# Alernatively, skip this, and configure a remote build server, or build on devices directly.
+# SD card image generation works in the default container without Docker privileges.
+# If you want to speed up source builds with cross-compilation, enable Docker access.
+# This lets FrameOS spin up containers for the various build environments.
+# Alternatively, skip this, and configure a remote build server, or build on devices directly.
 SECRET_KEY=$(openssl rand -base64 32)
 mkdir -p db
 mkdir -p /tmp/frameos-cross

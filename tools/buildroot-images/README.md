@@ -59,8 +59,9 @@ There are two separate caches involved in Buildroot SD image generation:
 
 1. The R2 base image cache stores the slow Buildroot root filesystem and
    partition layout.
-2. The Docker helper image stores the build/composition tools needed to compile
-   FrameOS and patch the cached base image into a frame-specific SD image.
+2. The FrameOS runtime image stores the composition tools needed to patch the
+   cached base image into a frame-specific SD image. Older or local development
+   environments can still fall back to the Docker helper image.
 
 The helper image is built from `backend/tools/buildroot.Dockerfile` and defaults
 to:
@@ -69,13 +70,12 @@ to:
 frameos/frameos-buildroot:debian_bookworm-2025.02.13-latest
 ```
 
-It preinstalls the Buildroot host dependencies plus the SD image composition
+The main `frameos/frameos` Docker image preinstalls the SD image composition
 tools `genimage`, `dosfstools` (`mkfs.vfat`), `e2fsprogs`, and `mtools`
-(`mcopy`, `mlabel`). If those tools are missing, the backend treats the image as
-stale and falls back to pulling or locally rebuilding a fresh helper image. The
-runtime composition scripts still have an `apt-get install` fallback for old
-images, but a current helper image should avoid package installation on every SD
-card build.
+(`mcopy`, `mlabel`), so cached-base SD images do not require a mounted Docker
+socket or privileged container mode. If those host tools are missing, the
+backend falls back to the helper image, which preinstalls the same tools plus
+the Buildroot host dependencies.
 
 The backend resolves the helper image in `backend/app/tasks/buildroot_image.py`.
 The main environment knobs are:
