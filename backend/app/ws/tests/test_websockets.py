@@ -260,6 +260,36 @@ async def test_broadcast_removes_failed_connection_without_deadlock() -> None:
 
 
 @pytest.mark.asyncio
+async def test_broadcast_sends_to_slow_connections_concurrently(monkeypatch) -> None:
+    from app import websockets
+    from app.websockets import ConnectionManager
+
+    monkeypatch.setattr(websockets, "WEBSOCKET_BROADCAST_TIMEOUT", 0.2)
+    started = 0
+    all_started = asyncio.Event()
+
+    class SlowWebSocket:
+        def __init__(self, client: str):
+            self.client = client
+
+        async def send_text(self, message: str) -> None:
+            nonlocal started
+            started += 1
+            if started == 2:
+                all_started.set()
+            await asyncio.sleep(3600)
+
+    manager = ConnectionManager()
+    manager.active_connections.extend([SlowWebSocket("slow-1"), SlowWebSocket("slow-2")])  # type: ignore[list-item]
+
+    task = asyncio.create_task(manager.broadcast("message"))
+    await asyncio.wait_for(all_started.wait(), timeout=0.1)
+    await task
+
+    assert manager.active_connections == []
+
+
+@pytest.mark.asyncio
 async def test_agent_helper_closes_owned_redis(monkeypatch) -> None:
     from app.ws import agent_ws
 

@@ -6,6 +6,7 @@ import subprocess
 import time
 from unittest.mock import AsyncMock, patch
 import httpx
+from fastapi import HTTPException
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
@@ -333,6 +334,55 @@ async def test_api_frame_get_image_cached(async_client, db, redis):
     response = await async_client.get(image_url)
     assert response.status_code == 200
     assert response.content == b'cached_image_data'
+
+
+@pytest.mark.asyncio
+async def test_api_frame_get_image_returns_cache_when_refresh_already_running(async_client, db, redis):
+    frame = await new_frame(db, redis, 'LockedImageFrame', 'localhost', 'localhost')
+    cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
+    await redis.set(cache_key, b'cached_while_refreshing')
+    lock = frames_api._get_frame_image_lock(frame.id)
+
+    await lock.acquire()
+    try:
+        response = await async_client.get(f'/api/frames/{frame.id}/image?t=123')
+    finally:
+        lock.release()
+
+    assert response.status_code == 200
+    assert response.content == b'cached_while_refreshing'
+
+
+@pytest.mark.asyncio
+async def test_api_frame_get_image_returns_cache_when_refresh_fails(async_client, db, redis):
+    frame = await new_frame(db, redis, 'FailingImageFrame', 'localhost', 'localhost')
+    cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
+    await redis.set(cache_key, b'cached_after_refresh_error')
+
+    async def mock_fetch(frame_obj, redis_obj, *, path, method="GET"):
+        raise HTTPException(status_code=408, detail='timeout')
+
+    with patch('app.api.frames._fetch_frame_http_bytes', side_effect=mock_fetch):
+        response = await async_client.get(f'/api/frames/{frame.id}/image?t=123')
+
+    assert response.status_code == 200
+    assert response.content == b'cached_after_refresh_error'
+
+
+@pytest.mark.asyncio
+async def test_api_frame_get_image_uses_redis_refresh_lock(async_client, db, redis):
+    frame = await new_frame(db, redis, 'RedisLockedImageFrame', 'localhost', 'localhost')
+    cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
+    lock_key = frames_api._frame_image_refresh_lock_key(frame.id)
+    await redis.set(cache_key, b'cached_during_redis_refresh')
+    await redis.set(lock_key, 'other-worker', ex=30)
+
+    with patch('app.api.frames._fetch_frame_http_bytes', new=AsyncMock()) as fetch_frame:
+        response = await async_client.get(f'/api/frames/{frame.id}/image?t=123')
+
+    assert response.status_code == 200
+    assert response.content == b'cached_during_redis_refresh'
+    fetch_frame.assert_not_awaited()
 
 
 @pytest.mark.asyncio

@@ -148,6 +148,8 @@ FRAME_STATES_CACHE_REFRESH_AFTER_SECONDS = 5
 FRAME_STATES_CACHE_RETRY_AFTER_SECONDS = 5
 FRAME_STATES_CACHE_LOCK_SECONDS = 30
 FRAME_STATES_CACHE_TTL_SECONDS = 86400 * 30
+FRAME_IMAGE_REFRESH_LOCK_SECONDS = 65
+FRAME_IMAGE_REFRESH_WAIT_SECONDS = 2.0
 
 
 def _not_found():
@@ -183,6 +185,10 @@ def _frame_states_cache_lock_key(frame_id: int) -> str:
 
 def _frame_states_cache_invalidated_key(frame_id: int) -> str:
     return f"frame:{frame_id}:states:invalidated"
+
+
+def _frame_image_refresh_lock_key(frame_id: int) -> str:
+    return f"frame:{frame_id}:image:refreshing"
 
 
 async def _read_frame_assets_cache(redis: Redis, cache_key: str) -> dict[str, Any] | None:
@@ -392,6 +398,37 @@ def _get_frame_image_lock(frame_id: int) -> asyncio.Lock:
         lock = asyncio.Lock()
         _frame_image_locks[frame_id] = lock
     return lock
+
+
+async def _get_cached_frame_image(redis: Redis, cache_key: str) -> bytes | None:
+    cached = await redis.get(cache_key)
+    if not cached:
+        return None
+    return cached.encode("latin1") if isinstance(cached, str) else cached
+
+
+async def _wait_for_cached_frame_image(redis: Redis, cache_key: str) -> bytes | None:
+    deadline = time.monotonic() + FRAME_IMAGE_REFRESH_WAIT_SECONDS
+    while time.monotonic() < deadline:
+        cached = await _get_cached_frame_image(redis, cache_key)
+        if cached:
+            return cached
+        await asyncio.sleep(0.1)
+    return await _get_cached_frame_image(redis, cache_key)
+
+
+def _frame_image_placeholder(frame: Frame) -> bytes:
+    width = int(frame.width or 800)
+    height = int(frame.height or 600)
+    return render_line_of_text_png("no image", width, height)
+
+
+async def _release_frame_image_refresh_lock(redis: Redis, lock_key: str, lock_token: str) -> None:
+    current = await redis.get(lock_key)
+    if isinstance(current, bytes):
+        current = current.decode("utf-8", errors="ignore")
+    if current == lock_token:
+        await redis.delete(lock_key)
 
 
 def _normalize_upload_scenes_payload(body: Any) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -1539,26 +1576,35 @@ async def api_frame_get_image(
     path = "/image"
 
     if request.query_params.get("t") == "-1":
-        last_image = await redis.get(cache_key)
+        last_image = await _get_cached_frame_image(redis, cache_key)
         if last_image:
             return Response(content=last_image, media_type="image/png")
         else:
-            # Fallback image: black background with big gray "no iamge" (single line, no wrapping)
-            if not frame.width or not frame.height:
-                frame.width = 800
-                frame.height = 600
-
-            width, height = int(frame.width), int(frame.height)
-            body = render_line_of_text_png("no image", width, height)
-            return Response(content=body, media_type="image/png")
+            return Response(content=_frame_image_placeholder(frame), media_type="image/png")
 
     frame_image_lock = _get_frame_image_lock(id)
     waited_for_lock = frame_image_lock.locked()
+    if waited_for_lock:
+        cached = await _wait_for_cached_frame_image(redis, cache_key)
+        if cached:
+            return Response(content=cached, media_type="image/png")
+        return Response(content=_frame_image_placeholder(frame), media_type="image/png")
+
     async with frame_image_lock:
-        if waited_for_lock:
-            cached = await redis.get(cache_key)
+        cached = await _get_cached_frame_image(redis, cache_key)
+        refresh_lock_key = _frame_image_refresh_lock_key(id)
+        refresh_lock_token = f"{config.INSTANCE_ID}:{time.time()}:{id}"
+        refresh_lock_acquired = await redis.set(
+            refresh_lock_key,
+            refresh_lock_token,
+            ex=FRAME_IMAGE_REFRESH_LOCK_SECONDS,
+            nx=True,
+        )
+        if not refresh_lock_acquired:
+            cached = await _wait_for_cached_frame_image(redis, cache_key)
             if cached:
                 return Response(content=cached, media_type="image/png")
+            return Response(content=_frame_image_placeholder(frame), media_type="image/png")
 
         # Use shared semaphore and client
         status = 0
@@ -1635,6 +1681,8 @@ async def api_frame_get_image(
 
                 return Response(content=body, media_type="image/png")
             else:
+                if cached:
+                    return Response(content=cached, media_type="image/png")
                 await log(
                     db,
                     redis,
@@ -1645,6 +1693,8 @@ async def api_frame_get_image(
                 raise HTTPException(status_code=status, detail="Unable to fetch image")
 
         except httpx.ReadTimeout:
+            if cached:
+                return Response(content=cached, media_type="image/png")
             await log(
                 db,
                 redis,
@@ -1655,7 +1705,13 @@ async def api_frame_get_image(
             raise HTTPException(
                 status_code=HTTPStatus.REQUEST_TIMEOUT, detail="Request Timeout"
             )
+        except HTTPException:
+            if cached:
+                return Response(content=cached, media_type="image/png")
+            raise
         except Exception as e:
+            if cached:
+                return Response(content=cached, media_type="image/png")
             await log(
                 db,
                 redis,
@@ -1666,6 +1722,10 @@ async def api_frame_get_image(
             raise HTTPException(
                 status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e)
             )
+        finally:
+            if refresh_lock_acquired:
+                with contextlib.suppress(Exception):
+                    await _release_frame_image_refresh_lock(redis, refresh_lock_key, refresh_lock_token)
 
 
 @api_with_auth.get("/frames/{id:int}/scene_source/{scene}")
