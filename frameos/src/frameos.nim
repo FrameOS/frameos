@@ -23,7 +23,6 @@ proc printHelp() =
   echo "  start   Start FrameOS (default)"
   echo "  check   Verify the binary can start"
   echo "  setup   Run device setup for this build"
-  echo "         --from-file=/path/to/frame.json[.gz] to use an alternate config source"
   echo "         --with-setup=/boot/frameos-setup.json[.gz] to install from first-boot setup JSON"
   echo "  help    Show this help"
 
@@ -40,16 +39,9 @@ when isMainModule:
       var i = 1
       while i < args.len:
         let arg = args[i]
-        if arg.startsWith("--from-file="):
-          setupFromFile = arg["--from-file=".len .. ^1]
-        elif arg.startsWith("--with-setup="):
+        if arg.startsWith("--with-setup="):
           setupFromFile = arg["--with-setup=".len .. ^1]
           activateServices = true
-        elif arg == "--from-file":
-          if i + 1 >= args.len:
-            raise newException(ValueError, "FrameOS setup --from-file requires a path")
-          setupFromFile = args[i + 1]
-          i += 1
         elif arg == "--with-setup":
           if i + 1 >= args.len:
             raise newException(ValueError, "FrameOS setup --with-setup requires a path")
@@ -57,7 +49,7 @@ when isMainModule:
           activateServices = true
           i += 1
         else:
-          raise newException(ValueError, "FrameOS setup only accepts --from-file or --with-setup")
+          raise newException(ValueError, "FrameOS setup only accepts --with-setup")
         i += 1
       let setupResult = setupFrameOS(setupFromFile)
       if setupFromFile.len > 0:
