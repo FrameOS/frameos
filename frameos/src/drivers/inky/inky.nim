@@ -3,6 +3,7 @@ import pixie, json, times, options, hashes
 import frameos/driver_context
 import frameos/device_setup
 import frameos/utils/dither
+import frameos/utils/image
 import drivers/inky/panels
 import drivers/spi/spi as spiSetupDriver
 import drivers/waveshare/preview
@@ -98,6 +99,22 @@ proc init*(frameOS: DriverContext): Driver =
 proc notifyImageAvailable*(self: Driver) =
   self.logger.log(%*{"event": "render:dither", "info": "Dithered image available, starting render"})
 
+proc imageForPanel(self: Driver, image: Image): Image =
+  if image.width == self.panel.width and image.height == self.panel.height:
+    return image
+
+  self.logger.log(%*{
+    "event": "driver:inky",
+    "warning": "Image dimensions differ from panel dimensions; resizing before render",
+    "imageWidth": image.width,
+    "imageHeight": image.height,
+    "panelWidth": self.panel.width,
+    "panelHeight": self.panel.height,
+  })
+  result = newImage(self.panel.width, self.panel.height)
+  result.fill(parseHtmlColor("#ffffff"))
+  result.scaleAndDrawImage(image, "contain")
+
 proc renderSevenColor*(self: Driver, image: Image) =
   let pixels = ditherPaletteIndexed(image, saturated7ColorPalette)
   setLastPixels(pixels)
@@ -157,23 +174,14 @@ proc render*(self: Driver, image: Image) =
       self.logger.log(%*{"event": "driver:inky", "error": "Render skipped; driver is not initialized", "exception": e.msg})
       return
 
-  let currentImageHash = hashImageData(image.data)
-  if self.lastImageBytes == image.data.len and self.lastImageHash == currentImageHash and
+  let panelImage = self.imageForPanel(image)
+  let currentImageHash = hashImageData(panelImage.data)
+  if self.lastImageBytes == panelImage.data.len and self.lastImageHash == currentImageHash and
       self.lastRenderAt > epochTime() - 12 * 60 * 60:
     self.logger.log(%*{"event": "driver:inky", "info": "Skipping render, image data is the same"})
     return
 
-  if image.width != self.panel.width or image.height != self.panel.height:
-    self.logger.log(%*{
-      "event": "driver:inky",
-      "warning": "Image dimensions differ from panel dimensions",
-      "imageWidth": image.width,
-      "imageHeight": image.height,
-      "panelWidth": self.panel.width,
-      "panelHeight": self.panel.height,
-    })
-
-  self.lastImageBytes = image.data.len
+  self.lastImageBytes = panelImage.data.len
   self.lastImageHash = currentImageHash
   self.lastRenderAt = epochTime()
   lastPreviewColor = self.panel.colorOption
@@ -191,17 +199,17 @@ proc render*(self: Driver, image: Image) =
     start(self.panel)
     case self.panel.colorOption
     of ColorOption.Black:
-      self.renderBlack(image)
+      self.renderBlack(panelImage)
     of ColorOption.SevenColor:
-      self.renderSevenColor(image)
+      self.renderSevenColor(panelImage)
     of ColorOption.SpectraSixColor:
-      self.renderSpectraSixColor(image)
+      self.renderSpectraSixColor(panelImage)
     of ColorOption.BlackWhiteRed:
-      self.renderBlackWhiteRed(image)
+      self.renderBlackWhiteRed(panelImage)
     of ColorOption.BlackWhiteYellow:
-      self.renderBlackWhiteYellow(image)
+      self.renderBlackWhiteYellow(panelImage)
     of ColorOption.BlackWhiteYellowRed:
-      self.renderFourColor(image)
+      self.renderFourColor(panelImage)
     else:
       raise newException(ValueError, "Unsupported native Inky color option: " & $self.panel.colorOption)
     sleep(self.panel)

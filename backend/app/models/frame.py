@@ -9,6 +9,7 @@ from sqlalchemy import Integer, String, Double, DateTime, Boolean
 from sqlalchemy.orm import Session, mapped_column
 from app.database import Base
 
+from app.drivers.devices import device_dimensions
 from app.models.apps import get_app_configs
 from app.models.settings import get_settings_dict
 from app.utils.timezone import frame_timezone
@@ -326,6 +327,7 @@ async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, serve
         server_port = 8989
 
     tls_material = generate_frame_tls_material(frame_host)
+    dimensions = device_dimensions(device)
 
     frame = Frame(
         name=name,
@@ -352,6 +354,8 @@ async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, serve
         server_port=int(server_port),
         server_api_key=secure_token(32),
         server_send_logs=True,
+        width=dimensions[0] if dimensions else None,
+        height=dimensions[1] if dimensions else None,
         interval=interval or 300,
         status="uninitialized",
         scenes=[],
@@ -447,6 +451,7 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
     frameos_version = get_versions().get("frameos")
     all_settings = get_settings_dict(db)
     default_timezone = (all_settings.get("defaults") or {}).get("timezone")
+    fallback_dimensions = device_dimensions(frame.device)
     frame_json: dict = {
         **({"frameosVersion": frameos_version} if isinstance(frameos_version, str) and frameos_version else {}),
         "name": frame.name,
@@ -466,8 +471,8 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
         "serverPort": frame.server_port or 8989,
         "serverApiKey": frame.server_api_key,
         "serverSendLogs": bool(frame.server_send_logs if frame.server_send_logs is not None else True),
-        "width": frame.width or 0,
-        "height": frame.height or 0,
+        "width": frame.width or (fallback_dimensions[0] if fallback_dimensions else 0),
+        "height": frame.height or (fallback_dimensions[1] if fallback_dimensions else 0),
         "device": frame.device or "web_only",
         "deviceConfig": (lambda cfg: {
             **({"vcom": float(cfg.get('vcom', '0'))} if cfg.get('vcom') not in (None, "") else {}),
