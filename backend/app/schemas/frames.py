@@ -65,6 +65,7 @@ class FrameBase(BaseModel):
     device: Optional[str]
     device_config: Optional[Dict[str, Any]] = None
     color: Optional[str]
+    timezone: Optional[str] = None
     interval: float
     metrics_interval: float
     scaling_mode: Optional[str]
@@ -110,6 +111,8 @@ class FrameCreateRequest(BaseModel):
     device: Optional[str] = None
     platform: Optional[str] = None
     network: Optional[Dict[str, Any]] = None
+    agent: Optional[Dict[str, Any]] = None
+    timezone: Optional[str] = None
 
 class FrameUpdateRequest(BaseModel):
     scenes: Optional[List[Any]] = None
@@ -135,6 +138,7 @@ class FrameUpdateRequest(BaseModel):
     rotate: Optional[int] = None
     flip: Optional[str] = None
     color: Optional[str] = None
+    timezone: Optional[str] = None
     interval: Optional[float] = None
     metrics_interval: Optional[float] = None
     log_to_file: Optional[str] = None

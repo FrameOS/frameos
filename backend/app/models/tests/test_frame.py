@@ -12,6 +12,7 @@ from app.models.frame import (
     normalize_reboot_crontab,
     update_frame,
 )
+from app.models.settings import Settings
 from app.schemas.frames import FrameErrorBehavior
 
 
@@ -168,6 +169,39 @@ async def test_get_frame_json_includes_error_behavior(_mock_publish, db, redis):
         "silentWindowMinutes": 3,
         "showErrorRetrySeconds": 90,
     }
+
+
+@pytest.mark.asyncio
+@patch("app.models.frame.publish_message", new_callable=AsyncMock)
+async def test_get_frame_json_uses_frame_timezone_or_global_default(_mock_publish, db, redis):
+    db.add(Settings(key="defaults", value={"timezone": "Europe/Brussels"}))
+    db.commit()
+    frame = await new_frame(db, redis, "FrameJson", "host", "server_host.com")
+    frame.mode = "buildroot"
+    frame.timezone = None
+
+    data = get_frame_json(db, frame)
+
+    assert data["timeZone"] == "Europe/Brussels"
+
+    frame.timezone = "America/New_York"
+    data = get_frame_json(db, frame)
+
+    assert data["timeZone"] == "America/New_York"
+
+
+@pytest.mark.asyncio
+@patch("app.models.frame.publish_message", new_callable=AsyncMock)
+async def test_get_frame_json_does_not_set_timezone_for_rpios(_mock_publish, db, redis):
+    db.add(Settings(key="defaults", value={"timezone": "Europe/Brussels"}))
+    db.commit()
+    frame = await new_frame(db, redis, "FrameJson", "host", "server_host.com")
+    frame.mode = "rpios"
+    frame.timezone = "America/New_York"
+
+    data = get_frame_json(db, frame)
+
+    assert "timeZone" not in data
 
 
 def test_normalize_frame_admin_auth_keeps_password_whitespace():

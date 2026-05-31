@@ -14,6 +14,7 @@ from urllib.parse import urljoin
 import httpx
 
 from app.codegen.drivers_nim import COMPILATION_MODE_SHARED
+from app.codegen.release_drivers_nim import release_driver_specs
 from app.drivers.devices import drivers_for_frame
 from app.models.frame import Frame
 from app.tasks._frame_deployer import FrameDeployer
@@ -79,6 +80,7 @@ async def download_precompiled_frameos_release(
     temp_dir: str,
     build_id: str,
     logger,
+    install_all_drivers: bool = False,
     timeout: float = RELEASE_TIMEOUT,
 ) -> PrecompiledFrameOSResult:
     url = precompiled_frameos_release_url(target)
@@ -98,9 +100,12 @@ async def download_precompiled_frameos_release(
         artifact_root = _find_artifact_root(extract_dir, target)
         if not artifact_root:
             raise RuntimeError(f"Precompiled FrameOS archive did not contain target {target}")
+        metadata = _read_release_metadata(artifact_root / "metadata.json")
+        scene_library_names = _parse_scene_library_names(metadata.get("scene_libraries"))
 
+        release_drivers = release_driver_specs() if install_all_drivers else drivers_for_frame(frame)
         required_driver_names = FrameDeployer.driver_library_names(
-            drivers_for_frame(frame),
+            release_drivers,
             COMPILATION_MODE_SHARED,
         )
         copied_driver_paths = _copy_required_drivers(
@@ -108,10 +113,15 @@ async def download_precompiled_frameos_release(
             build_dir=build_path,
             required_driver_names=required_driver_names,
         )
+        copied_scene_paths = _copy_required_scenes(
+            artifact_root=artifact_root,
+            build_path=build_path,
+            required_scene_names=scene_library_names,
+        )
         vendor_folders = _copy_required_vendor_folders(
             artifact_root=artifact_root,
             build_dir=build_path,
-            frame=frame,
+            drivers=release_drivers,
         )
 
         binary_src = artifact_root / "frameos"
@@ -128,8 +138,8 @@ async def download_precompiled_frameos_release(
         binary_path=str(binary_dest),
         driver_library_paths=[str(path) for path in copied_driver_paths],
         driver_library_names=required_driver_names,
-        scene_library_paths=[],
-        scene_library_names=[],
+        scene_library_paths=[str(path) for path in copied_scene_paths],
+        scene_library_names=scene_library_names,
         vendor_folders=vendor_folders,
         archive_path=result_archive,
         cache_hit=cache_hit,
@@ -268,16 +278,62 @@ def _copy_required_drivers(
     return copied_paths
 
 
+def _read_release_metadata(path: Path) -> dict[str, object]:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _parse_scene_library_names(raw_scene_libraries: object) -> list[str]:
+    if not isinstance(raw_scene_libraries, list):
+        return []
+    names: list[str] = []
+    for scene_library in raw_scene_libraries:
+        if isinstance(scene_library, str) and scene_library.strip():
+            names.append(scene_library.strip())
+    return sorted(set(names))
+
+
+def _copy_required_scenes(
+    *,
+    artifact_root: Path,
+    build_path: Path,
+    required_scene_names: list[str],
+) -> list[Path]:
+    if not required_scene_names:
+        return []
+    source_dir = artifact_root / "scenes"
+    destination_dir = build_path / "scenes"
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    copied_paths: list[Path] = []
+    missing = []
+    for scene_library in required_scene_names:
+        source = source_dir / scene_library
+        if not source.is_file():
+            missing.append(scene_library)
+            continue
+        destination = destination_dir / scene_library
+        shutil.copy2(source, destination)
+        copied_paths.append(destination)
+    if missing:
+        raise RuntimeError(
+            "Precompiled FrameOS archive is missing required scene libraries: "
+            + ", ".join(sorted(missing))
+        )
+    return copied_paths
+
+
 def _copy_required_vendor_folders(
     *,
     artifact_root: Path,
     build_dir: Path,
-    frame: Frame,
+    drivers,
 ) -> list[str]:
     required = sorted(
         {
             driver.vendor_folder
-            for driver in drivers_for_frame(frame).values()
+            for driver in drivers.values()
             if getattr(driver, "vendor_folder", None)
         }
     )

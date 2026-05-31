@@ -2,6 +2,17 @@ name: FrameOS cross compilation
 
 on:
   workflow_dispatch:
+    inputs:
+      toolchain_image_tag:
+        description: "Cross-toolchain image tag (optional override)"
+        required: false
+        default: ""
+        type: string
+      toolchain_image:
+        description: "Cross-toolchain image override (optional)"
+        required: false
+        default: ""
+        type: string
   pull_request:
     paths:
       - frameos/**
@@ -28,6 +39,9 @@ jobs:
   cross-build:
     needs: determine-matrix
     runs-on: ${{ matrix.runner }}
+    env:
+      FRAMEOS_CROSS_TOOLCHAIN_IMAGE_TAG: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.toolchain_image_tag || '' }}
+      FRAMEOS_CROSS_TOOLCHAIN_IMAGE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.toolchain_image || '' }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.determine-matrix.outputs.targets) }}
@@ -80,6 +94,8 @@ jobs:
     needs: determine-matrix
     runs-on: ubuntu-24.04
     env:
+      FRAMEOS_CROSS_TOOLCHAIN_IMAGE_TAG: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.toolchain_image_tag || '' }}
+      FRAMEOS_CROSS_TOOLCHAIN_IMAGE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.toolchain_image || '' }}
       TARGET_SLUG: debian-trixie-amd64
       TARGET_PLATFORM: linux/amd64
       TARGET_IMAGE: debian:trixie

@@ -1,4 +1,5 @@
 import json
+import asyncio
 from types import SimpleNamespace
 from typing import Generator
 
@@ -9,11 +10,23 @@ from starlette.websockets import WebSocketDisconnect
 from app import fastapi as fastapi_module
 from app.fastapi import app
 from app.database import SessionLocal
+from app.codegen.drivers_nim import frame_compilation_mode
+from app.models import new_frame
+from app.models.frame import Frame
 from app.models.user import User
 from app.redis import get_redis
+from app.tasks.buildroot_image import (
+    BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION,
+    SUPPORTED_BUILDROOT_PLATFORM,
+    buildroot_sd_image_config_fingerprint,
+)
+from app.ws.agent_ws import hmac_sha256
 
 
 class DummyRedis:
+    async def blpop(self, *args, **kwargs):
+        await asyncio.sleep(3600)
+
     async def close(self, *args, **kwargs):
         pass
 
@@ -37,6 +50,10 @@ class DummyRedis:
 
     async def delete(self, *args, **kwargs):
         pass
+
+    async def scan_iter(self, *args, **kwargs):
+        if False:
+            yield None
 
 
 def create_user(email: str = "test@example.com", password: str = "testpassword") -> None:
@@ -160,6 +177,67 @@ def test_agent_ws_unknown_frame(client: TestClient) -> None:
     assert exc.value.reason == "unknown frame"
 
 
+def test_agent_ws_marks_matching_buildroot_sd_image_deployed_on_first_boot(client: TestClient) -> None:
+    db = SessionLocal()
+    try:
+        frame = asyncio.run(new_frame(db, DummyRedis(), "BuildrootFrame", "frame53.local", "localhost"))
+        secret = "agent-secret"
+        frame.mode = "buildroot"
+        frame.status = "uninitialized"
+        frame.agent = {
+            "agentEnabled": True,
+            "agentRunCommands": True,
+            "agentSharedSecret": secret,
+        }
+        frame.buildroot = {
+            "platform": SUPPORTED_BUILDROOT_PLATFORM,
+            "sdImage": {
+                "status": "ready",
+                "platform": SUPPORTED_BUILDROOT_PLATFORM,
+                "frameosVersion": "2026.6.2",
+                "customizationVersion": BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION,
+                "compilationMode": frame_compilation_mode(frame),
+            },
+        }
+        db.add(frame)
+        db.commit()
+        db.refresh(frame)
+        sd_image = dict(frame.buildroot["sdImage"])
+        sd_image["configFingerprint"] = buildroot_sd_image_config_fingerprint(frame)
+        frame.buildroot = {**frame.buildroot, "sdImage": sd_image}
+        frame.width = 200
+        frame.height = 300
+        db.add(frame)
+        db.commit()
+        frame_id = frame.id
+        server_api_key = frame.server_api_key
+    finally:
+        db.close()
+
+    with client.websocket_connect("/ws/agent") as ws:
+        ws.send_json({"action": "hello", "serverApiKey": server_api_key})
+        challenge = ws.receive_json()
+        ws.send_json({
+            "action": "handshake",
+            "mac": hmac_sha256(secret, f"{server_api_key}{challenge['c']}"),
+        })
+        assert ws.receive_json() == {"action": "handshake/ok"}
+
+    db = SessionLocal()
+    try:
+        updated = db.get(Frame, frame_id)
+        assert updated is not None
+        assert updated.last_successful_deploy_at is not None
+        assert updated.last_successful_deploy["id"] == frame_id
+        assert updated.last_successful_deploy["frameos_version"] == "2026.6.2"
+        assert updated.last_successful_deploy["frameos_commands"] == ["start", "check", "setup", "help"]
+        assert updated.last_successful_deploy["width"] == 200
+        assert updated.last_successful_deploy["height"] == 300
+        assert updated.status == "starting"
+    finally:
+        db.close()
+
+
 @pytest.mark.asyncio
 async def test_broadcast_removes_failed_connection_without_deadlock() -> None:
     import asyncio
@@ -177,6 +255,36 @@ async def test_broadcast_removes_failed_connection_without_deadlock() -> None:
     manager.active_connections.append(broken)  # type: ignore[arg-type]
 
     await asyncio.wait_for(manager.broadcast("message"), timeout=1)
+
+    assert manager.active_connections == []
+
+
+@pytest.mark.asyncio
+async def test_broadcast_sends_to_slow_connections_concurrently(monkeypatch) -> None:
+    from app import websockets
+    from app.websockets import ConnectionManager
+
+    monkeypatch.setattr(websockets, "WEBSOCKET_BROADCAST_TIMEOUT", 0.2)
+    started = 0
+    all_started = asyncio.Event()
+
+    class SlowWebSocket:
+        def __init__(self, client: str):
+            self.client = client
+
+        async def send_text(self, message: str) -> None:
+            nonlocal started
+            started += 1
+            if started == 2:
+                all_started.set()
+            await asyncio.sleep(3600)
+
+    manager = ConnectionManager()
+    manager.active_connections.extend([SlowWebSocket("slow-1"), SlowWebSocket("slow-2")])  # type: ignore[list-item]
+
+    task = asyncio.create_task(manager.broadcast("message"))
+    await asyncio.wait_for(all_started.wait(), timeout=0.1)
+    await task
 
     assert manager.active_connections == []
 

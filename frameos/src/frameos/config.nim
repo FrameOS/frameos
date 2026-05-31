@@ -1,4 +1,5 @@
 import json, pixie, os, strutils
+import zippy
 import frameos/types
 import lib/tz
 
@@ -28,7 +29,6 @@ proc setConfigDefaults*(config: var FrameConfig) =
   if config.errorBehavior.silentWindowMinutes <= 0: config.errorBehavior.silentWindowMinutes = 10
   if config.errorBehavior.showErrorRetrySeconds <= 0: config.errorBehavior.showErrorRetrySeconds = 60
   if config.timeZone == "": config.timeZone = detectSystemTimeZone()
-  else: config.timeZone = canonicalTimeZone(config.timeZone)
 
 proc loadSchedule*(data: JsonNode): FrameSchedule =
   result = FrameSchedule(events: @[])
@@ -186,8 +186,17 @@ proc getConfigFilename*(overridePath = ""): string =
   if result == "":
     result = "./frame.json"
 
+proc readJsonFile(path: string): JsonNode =
+  let encoded = readFile(path)
+  let decoded =
+    if path.endsWith(".gz"):
+      uncompress(encoded)
+    else:
+      encoded
+  result = parseJson(decoded)
+
 proc loadConfig*(configPath = ""): FrameConfig =
-  let data = parseFile(getConfigFilename(configPath))
+  let data = readJsonFile(getConfigFilename(configPath))
   # TODO: switch to jsony
   result = FrameConfig(
     name: data{"name"}.getStr(),

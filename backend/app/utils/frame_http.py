@@ -16,7 +16,7 @@ from app.ws.agent_ws import http_get_on_frame
 from arq import ArqRedis as Redis
 
 
-FRAME_HTTP_MAX_CONCURRENCY = get_env_int("FRAME_HTTP_MAX_CONCURRENCY", 20)
+FRAME_HTTP_MAX_CONCURRENCY = get_env_int("FRAME_HTTP_MAX_CONCURRENCY", 200)
 FRAME_HTTP_TIMEOUT = httpx.Timeout(
     connect=get_env_float("FRAME_HTTP_CONNECT_TIMEOUT", 10.0),
     read=get_env_float("FRAME_HTTP_READ_TIMEOUT", 20.0),

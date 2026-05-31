@@ -24,5 +24,30 @@ async def test_get_settings_dict(db):
     assert settings_map["k2"] == {"nested": True}
 
 
+@pytest.mark.asyncio
+async def test_get_settings_dict_merges_defaults(db):
+    db.query(Settings).delete()
+    db.commit()
+
+    db.add(
+        Settings(
+            key="defaults",
+            value={
+                "timezone": "Europe/Brussels",
+                "wifiSSID": "FrameOS",
+            },
+        )
+    )
+    db.commit()
+
+    settings_map = get_settings_dict(db)
+    assert settings_map["defaults"] == {
+        "timezone": "Europe/Brussels",
+        "wifiSSID": "FrameOS",
+        "wifiPassword": "",
+    }
+
+
 def test_get_settings_dict_without_db():
-    assert get_settings_dict(None) == {}
+    settings_map = get_settings_dict(None)
+    assert settings_map["defaults"]["timezone"]

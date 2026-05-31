@@ -75,6 +75,8 @@ function startBrowserDownload(path: string): void {
   anchor.remove()
 }
 
+const pendingSdCardImageDownloads = new Set<number>()
+
 export const framesModel = kea<framesModelType>([
   connect(() => ({ logic: [socketLogic, entityImagesModel] })),
   path(['src', 'models', 'framesModel']),
@@ -356,28 +358,27 @@ export const framesModel = kea<framesModelType>([
       const sdImage = frame?.buildroot?.sdImage
       const downloadUrl = sdImage?.downloadUrl || `/api/frames/${id}/buildroot/sd_image/download`
 
-      if (sdImage?.status === 'ready') {
-        startBrowserDownload(downloadUrl)
-        return
-      }
-
+      pendingSdCardImageDownloads.add(id)
       longRunningTasksModel.actions.startTask({
         frameId: id,
         kind: 'buildrootImage',
-        title: 'Building SD card image',
+        title: 'Preparing SD card image',
         detail:
           sdImage?.status === 'building' || sdImage?.status === 'queued'
             ? 'Checking image build status'
-            : 'Image generation started',
+            : 'Image preparation started',
       })
 
       try {
-        const response = await apiFetch(`/api/frames/${id}/buildroot/sd_image`, { method: 'POST' })
+        const response = await apiFetch(`/api/frames/${id}/buildroot/sd_image`, {
+          method: 'POST',
+        })
         if (!response.ok) {
           throw new Error('Failed to start SD card image generation')
         }
         const data = await response.json()
         if (data?.sdImage?.status === 'ready') {
+          pendingSdCardImageDownloads.delete(id)
           startBrowserDownload(data.sdImage.downloadUrl || downloadUrl)
           longRunningTasksModel.actions.finishTask({
             frameId: id,
@@ -387,19 +388,26 @@ export const framesModel = kea<framesModelType>([
           })
           return
         }
-        longRunningTasksModel.actions.startTask({
-          frameId: id,
-          kind: 'buildrootImage',
-          title: 'Building SD card image',
-          detail: data?.message || 'Image generation started',
-        })
       } catch (error) {
+        pendingSdCardImageDownloads.delete(id)
         longRunningTasksModel.actions.taskFailed({
           frameId: id,
           kind: 'buildrootImage',
           detail: error instanceof Error ? error.message : 'Failed to build SD card image',
         })
         throw error
+      }
+    },
+    [socketLogic.actionTypes.updateFrame]: ({ frame }) => {
+      const sdImage = frame.buildroot?.sdImage
+      if (!sdImage || !pendingSdCardImageDownloads.has(frame.id)) {
+        return
+      }
+      if (sdImage.status === 'ready') {
+        pendingSdCardImageDownloads.delete(frame.id)
+        startBrowserDownload(sdImage.downloadUrl || `/api/frames/${frame.id}/buildroot/sd_image/download`)
+      } else if (sdImage.status === 'error' || sdImage.status === 'missing' || sdImage.status === 'stale') {
+        pendingSdCardImageDownloads.delete(frame.id)
       }
     },
     setDeployWithAgent: async ({ id, deployWithAgent }) => {

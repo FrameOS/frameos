@@ -8,6 +8,7 @@ from app.codegen.drivers_nim import (
     compiled_drivers,
     driver_context_helpers_nim,
     driver_library_filename,
+    setup_helpers_nim,
     write_driver_library_nim,
 )
 from app.drivers.drivers import DRIVERS, Driver
@@ -83,6 +84,14 @@ def write_release_shared_drivers_nim(drivers: dict[str, Driver]) -> str:
     if spec_lines:
         spec_lines = newline + "  " + spec_lines + newline
 
+    setup_imports, setup_local_code, _setup_names = setup_helpers_nim(
+        drivers,
+        include_compiled_drivers=False,
+        setup_proc_name="setupLocalDrivers",
+        setup_proc_exported=False,
+        include_setup_driver_names=False,
+    )
+
     return f"""
 import std/[dynlib, json, options, os, strutils]
 import pixie
@@ -91,6 +100,7 @@ import frameos/driver_context as driverContext
 import frameos/device_setup
 import frameos/channels as hostChannels
 import frameos/driver_abi
+{newline.join(setup_imports)}
 
 type
   DriverSpec = object
@@ -244,6 +254,8 @@ proc setupSharedDriver(spec: DriverSpec, driverCtx: driverContext.DriverContext)
   let library = loadLib(path)
   if library.isNil:
     echo "FrameOS setup: shared driver " & spec.name & ": failed to load " & path
+    echo "FrameOS setup: shared driver " & spec.name & ": file exists: " & $fileExists(path)
+    echo "FrameOS setup: shared driver " & spec.name & ": LD_LIBRARY_PATH=" & getEnv("LD_LIBRARY_PATH")
     raise newException(OSError, "Unable to load driver library: " & path)
   let setupProc = loadRequiredSymbol[DriverSetupProc](library, spec.name, "frameos_driver_setup")
   if setupProc.isNil:
@@ -267,7 +279,10 @@ proc setupDriverNames*(): seq[string] =
   result = @[]
 
 proc setup*(frameOS: FrameOS): SetupResult =
+  addSetupResult(result, setupLocalDrivers(frameOS))
   addSetupResult(result, setupSharedDrivers(frameOS))
+
+{setup_local_code}
 
 proc init*(frameOS: FrameOS) =
   loadedDrivers = @[]

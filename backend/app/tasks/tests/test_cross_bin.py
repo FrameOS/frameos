@@ -25,6 +25,16 @@ def load_cross_module():
     return module
 
 
+def test_repo_root_for_frameos_root_uses_parent_versions_file(tmp_path: Path):
+    cross_module = load_cross_module()
+    repo_root = tmp_path / "repo"
+    frameos_root = repo_root / "frameos"
+    frameos_root.mkdir(parents=True)
+    (repo_root / "versions.json").write_text('{"frameos":"2026.6.2"}\n', encoding="utf-8")
+
+    assert cross_module.repo_root_for_frameos_root(frameos_root) == repo_root
+
+
 @pytest.mark.asyncio
 async def test_generate_agent_build_dir_constructs_versioned_command(
     monkeypatch: pytest.MonkeyPatch,
@@ -137,6 +147,7 @@ async def test_build_target_plans_then_builds(monkeypatch: pytest.MonkeyPatch, t
     frameos_root = tmp_path / "frameos"
     artifacts_dir = tmp_path / "artifacts"
     frameos_root.mkdir()
+    (frameos_root / "versions.json").write_text('{"agent":"2026.5.14"}\n', encoding="utf-8")
 
     destination = await cross_module.build_target("debian-trixie-amd64", frameos_root, artifacts_dir)
 
@@ -186,7 +197,7 @@ async def test_build_release_target_uses_runtime_filtered_driver_catalog(
                 encoding="utf-8",
             )
             shutil.copy2(
-                Path(source_root).parent / "versions.json",
+                Path(source_root) / "versions.json",
                 Path(temp_dir) / "versions.json",
             )
             return str(source_dir)
@@ -272,7 +283,7 @@ async def test_build_release_target_uses_runtime_filtered_driver_catalog(
         "agent": "2026.5.16+agent",
         "docker": "2026.5.16+docker",
     }
-    (tmp_path / "versions.json").write_text(json.dumps(expected_versions) + "\n", encoding="utf-8")
+    (frameos_root / "versions.json").write_text(json.dumps(expected_versions) + "\n", encoding="utf-8")
 
     destination = await cross_module.build_release_target("debian-trixie-amd64", frameos_root, artifacts_dir)
 
@@ -342,3 +353,18 @@ def test_compute_release_input_hash_tracks_source_and_target(tmp_path: Path):
 
     assert first_hash != second_hash
     assert second_hash != arm_hash
+
+
+def test_parse_args_accepts_shared_scenes_compilation_mode():
+    cross_module = load_cross_module()
+    args = cross_module.parse_args(
+        [
+            "build",
+            "--target",
+            "debian-trixie-amd64",
+            "--compilation-mode",
+            "shared-scenes",
+        ]
+    )
+    assert args.command == "build"
+    assert args.compilation_mode == "shared-scenes"

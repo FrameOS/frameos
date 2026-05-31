@@ -43,6 +43,18 @@ async def write_log(redis: Redis, frame_id: int, type: str, line: str, ip: str |
     finally:
         db.close()
 
+
+async def mark_sd_image_booted_if_needed(redis: Redis, frame_id: int) -> None:
+    from app.tasks.buildroot_deploy_state import mark_buildroot_sd_image_booted
+
+    db = SessionLocal()
+    try:
+        frame = db.get(Frame, frame_id)
+        if frame is not None:
+            await mark_buildroot_sd_image_booted(db, redis, frame)
+    finally:
+        db.close()
+
 # ────────────────────────────────────────────────────────────────────────────
 # tiny helpers
 # ────────────────────────────────────────────────────────────────────────────
@@ -374,6 +386,8 @@ async def ws_agent_endpoint(
     if not hmac.compare_digest(expected_mac, str(hs_msg.get("mac", ""))):
         await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="bad mac")
         return
+
+    await mark_sd_image_booted_if_needed(redis, frame.id)
 
     # STEP 3 – server → handshake/ok  +  start pump
     await ws.send_json({"action": "handshake/ok"})

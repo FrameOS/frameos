@@ -4,7 +4,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.codegen.drivers_nim import COMPILATION_MODE_PRECOMPILED, COMPILATION_MODE_SHARED, COMPILATION_MODE_STATIC
+from app.codegen.drivers_nim import (
+    COMPILATION_MODE_PRECOMPILED,
+    COMPILATION_MODE_SHARED,
+    COMPILATION_MODE_SHARED_SCENES,
+    COMPILATION_MODE_STATIC,
+)
 from app.tasks.binary_builder import FrameBinaryBuilder, FrameBinaryPlan
 from app.tasks.precompiled_frameos import PrecompiledFrameOSResult, release_version
 from app.utils.cross_compile import TargetMetadata
@@ -169,7 +174,7 @@ async def test_plan_build_skips_precompiled_when_compiled_scenes_exist(monkeypat
     )
 
     assert plan.requested_compilation_mode == COMPILATION_MODE_PRECOMPILED
-    assert plan.compilation_mode == COMPILATION_MODE_STATIC
+    assert plan.compilation_mode == COMPILATION_MODE_SHARED_SCENES
     assert plan.will_attempt_precompiled is False
     assert plan.will_attempt_cross_compile is True
     assert plan.precompiled_skip_reason == "1 compiled scene is configured"

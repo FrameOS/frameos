@@ -80,7 +80,7 @@ export const framesHomeLogic = kea<framesHomeLogicType>([
   path(['src', 'scenes', 'workspace', 'framesHomeLogic']),
   connect(() => ({
     values: [framesModel, ['framesList']],
-    actions: [workspaceLogic, ['focusFrame', 'selectFrame', 'setSearch']],
+    actions: [workspaceLogic, ['focusFrame', 'selectFrame']],
   })),
   actions({
     startFrameOrderSnapshot: true,
@@ -159,7 +159,6 @@ export const framesHomeLogic = kea<framesHomeLogicType>([
       actions.syncFrameFromScroll()
     },
     [newFrameForm.actionTypes.frameCreated]: ({ frameId }) => {
-      actions.setSearch('')
       actions.focusFrame(frameId)
     },
   })),

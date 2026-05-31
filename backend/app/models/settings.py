@@ -4,6 +4,7 @@ from sqlalchemy import Integer, String
 from sqlalchemy.orm import Session, mapped_column
 from app.database import Base
 from sqlalchemy.dialects.sqlite import JSON
+from app.utils.timezone import guess_system_timezone
 
 class Settings(Base):
     __tablename__ = 'settings'
@@ -19,8 +20,27 @@ class Settings(Base):
         }
 
 
-def get_settings_dict(db: Optional[Session]) -> dict:
-    if db is None:
-        return {}
+def default_settings() -> dict:
+    return {
+        "defaults": {
+            "timezone": guess_system_timezone(),
+            "wifiSSID": "",
+            "wifiPassword": "",
+        },
+    }
 
-    return {setting.key: setting.value for setting in db.query(Settings).all()}
+
+def get_settings_dict(db: Optional[Session]) -> dict:
+    settings = default_settings()
+    if db is None:
+        return settings
+
+    for setting in db.query(Settings).all():
+        if setting.key == "defaults" and isinstance(setting.value, dict):
+            settings["defaults"] = {
+                **settings["defaults"],
+                **setting.value,
+            }
+        else:
+            settings[setting.key] = setting.value
+    return settings

@@ -7,6 +7,7 @@ from http import HTTPStatus
 import contextlib
 import aiofiles
 import asyncssh
+import gzip
 import hashlib
 import io
 import json
@@ -111,13 +112,17 @@ from app.ws.agent_ws import (
 from app.models.assets import copy_custom_fonts_to_local_source_folder
 from app.models.settings import get_settings_dict
 from app.utils.ssh_key_utils import default_ssh_key_ids
+from app.utils.timezone import frame_timezone, normalize_timezone
 from app.utils.tls import generate_frame_tls_material, parse_certificate_not_valid_after
 from app.utils.ssh_authorized_keys import _install_authorized_keys, resolve_authorized_keys_update
 from app.tasks.binary_builder import FrameBinaryBuilder
 from app.tasks.buildroot_image import (
+    buildroot_sd_image_config_fingerprint,
+    clear_buildroot_sd_image,
     ensure_buildroot_frame_defaults,
     latest_buildroot_sd_image,
     normalize_buildroot_platform,
+    resolve_buildroot_base_entry,
     start_buildroot_sd_image,
     validate_buildroot_network,
     validate_buildroot_wifi_credentials,
@@ -141,8 +146,11 @@ FRAME_ASSETS_CACHE_LOCK_SECONDS = 60
 FRAME_ASSETS_CACHE_TTL_SECONDS = 86400 * 30
 FRAME_STATES_CACHE_REFRESH_AFTER_SECONDS = 5
 FRAME_STATES_CACHE_RETRY_AFTER_SECONDS = 5
+FRAME_STATES_CACHE_FAILURE_RETRY_AFTER_SECONDS = 60
 FRAME_STATES_CACHE_LOCK_SECONDS = 30
 FRAME_STATES_CACHE_TTL_SECONDS = 86400 * 30
+FRAME_IMAGE_REFRESH_LOCK_SECONDS = 65
+FRAME_IMAGE_REFRESH_WAIT_SECONDS = 2.0
 
 
 def _not_found():
@@ -178,6 +186,10 @@ def _frame_states_cache_lock_key(frame_id: int) -> str:
 
 def _frame_states_cache_invalidated_key(frame_id: int) -> str:
     return f"frame:{frame_id}:states:invalidated"
+
+
+def _frame_image_refresh_lock_key(frame_id: int) -> str:
+    return f"frame:{frame_id}:image:refreshing"
 
 
 async def _read_frame_assets_cache(redis: Redis, cache_key: str) -> dict[str, Any] | None:
@@ -261,6 +273,8 @@ async def _write_frame_states_cache(
 ) -> float:
     cache_time = fetched_at if fetched_at is not None else time.time()
     payload = {**_normalise_frame_states_payload(state_record), "fetched_at": cache_time}
+    if isinstance(state_record.get("error"), str):
+        payload["error"] = _truncate_text(state_record["error"])
     await redis.set(cache_key, json.dumps(payload).encode(), ex=FRAME_STATES_CACHE_TTL_SECONDS)
     return cache_time
 
@@ -387,6 +401,37 @@ def _get_frame_image_lock(frame_id: int) -> asyncio.Lock:
         lock = asyncio.Lock()
         _frame_image_locks[frame_id] = lock
     return lock
+
+
+async def _get_cached_frame_image(redis: Redis, cache_key: str) -> bytes | None:
+    cached = await redis.get(cache_key)
+    if not cached:
+        return None
+    return cached.encode("latin1") if isinstance(cached, str) else cached
+
+
+async def _wait_for_cached_frame_image(redis: Redis, cache_key: str) -> bytes | None:
+    deadline = time.monotonic() + FRAME_IMAGE_REFRESH_WAIT_SECONDS
+    while time.monotonic() < deadline:
+        cached = await _get_cached_frame_image(redis, cache_key)
+        if cached:
+            return cached
+        await asyncio.sleep(0.1)
+    return await _get_cached_frame_image(redis, cache_key)
+
+
+def _frame_image_placeholder(frame: Frame) -> bytes:
+    width = int(frame.width or 800)
+    height = int(frame.height or 600)
+    return render_line_of_text_png("no image", width, height)
+
+
+async def _release_frame_image_refresh_lock(redis: Redis, lock_key: str, lock_token: str) -> None:
+    current = await redis.get(lock_key)
+    if isinstance(current, bytes):
+        current = current.decode("utf-8", errors="ignore")
+    if current == lock_token:
+        await redis.delete(lock_key)
 
 
 def _normalize_upload_scenes_payload(body: Any) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -563,6 +608,26 @@ async def _forward_frame_request(
     if cache_key and (cached := await redis.get(cache_key)):
         return _bytes_or_json(cached)
 
+    if json_body is None:
+        status, body, headers = await _fetch_frame_http_bytes(
+            frame,
+            redis,
+            path=path,
+            method=method,
+        )
+        if status == 200:
+            if cache_key:
+                await redis.set(cache_key, body, ex=cache_ttl)
+            payload = _bytes_or_json(body)
+            if headers.get("content-type", "").startswith("application/json") or not isinstance(payload, bytes):
+                return payload
+            return _decode_bytes(body)
+
+        if cache_key and (cached := await redis.get(cache_key)):
+            return _bytes_or_json(cached)
+
+        raise HTTPException(status_code=400, detail="Unable to reach frame")
+
     # The agent HTTP command wants a *string* while httpx needs either
     #   • json=<obj>   for real JSON payloads
     #   • content=<bytes> for arbitrary binary bodies.
@@ -695,9 +760,20 @@ async def _refresh_frame_states_cache(
         if state_record.get("sceneId"):
             await redis.set(f"frame:{frame.id}:active_scene", state_record["sceneId"])
         completed = True
-    except Exception:
-        # Keep serving the previous cached state. The lock TTL throttles retries.
-        pass
+    except Exception as exc:
+        cached = await _read_frame_states_cache(redis, cache_key)
+        fallback_record = _normalise_frame_states_payload(cached)
+        if not fallback_record.get("sceneId"):
+            fallback_record["sceneId"] = await _active_scene_id_from_cache(redis, frame_id)
+        await _write_frame_states_cache(
+            redis,
+            cache_key,
+            {
+                **fallback_record,
+                "error": str(exc) or exc.__class__.__name__,
+            },
+        )
+        completed = True
     finally:
         if completed:
             with contextlib.suppress(Exception):
@@ -738,13 +814,20 @@ def _frame_states_cache_meta(
     cached: bool,
     refreshing: bool,
     fetched_at: float | None,
+    error: str | None = None,
 ) -> dict[str, Any]:
+    retry_after = (
+        FRAME_STATES_CACHE_FAILURE_RETRY_AFTER_SECONDS
+        if error
+        else FRAME_STATES_CACHE_RETRY_AFTER_SECONDS
+    )
     return {
         "cached": cached,
         "refreshing": refreshing,
         "fetched_at": fetched_at,
         "refresh_after": FRAME_STATES_CACHE_REFRESH_AFTER_SECONDS,
-        "retry_after": FRAME_STATES_CACHE_RETRY_AFTER_SECONDS,
+        "retry_after": retry_after,
+        **({"error": error} if error else {}),
     }
 
 
@@ -894,7 +977,13 @@ async def api_frame_get_states(
 
     if cached is not None:
         fetched_at = float(cached.get("fetched_at") or 0)
-        refreshing = refresh or time.time() - fetched_at >= FRAME_STATES_CACHE_REFRESH_AFTER_SECONDS
+        cache_error = cached.get("error") if isinstance(cached.get("error"), str) else None
+        refresh_after = (
+            FRAME_STATES_CACHE_FAILURE_RETRY_AFTER_SECONDS
+            if cache_error
+            else FRAME_STATES_CACHE_REFRESH_AFTER_SECONDS
+        )
+        refreshing = refresh or time.time() - fetched_at >= refresh_after
         if refreshing:
             refreshing = await _schedule_frame_states_cache_refresh(
                 redis,
@@ -911,6 +1000,7 @@ async def api_frame_get_states(
                 cached=True,
                 refreshing=refreshing,
                 fetched_at=fetched_at,
+                error=cache_error,
             ),
         }
 
@@ -1534,26 +1624,35 @@ async def api_frame_get_image(
     path = "/image"
 
     if request.query_params.get("t") == "-1":
-        last_image = await redis.get(cache_key)
+        last_image = await _get_cached_frame_image(redis, cache_key)
         if last_image:
             return Response(content=last_image, media_type="image/png")
         else:
-            # Fallback image: black background with big gray "no iamge" (single line, no wrapping)
-            if not frame.width or not frame.height:
-                frame.width = 800
-                frame.height = 600
-
-            width, height = int(frame.width), int(frame.height)
-            body = render_line_of_text_png("no image", width, height)
-            return Response(content=body, media_type="image/png")
+            return Response(content=_frame_image_placeholder(frame), media_type="image/png")
 
     frame_image_lock = _get_frame_image_lock(id)
     waited_for_lock = frame_image_lock.locked()
+    if waited_for_lock:
+        cached = await _wait_for_cached_frame_image(redis, cache_key)
+        if cached:
+            return Response(content=cached, media_type="image/png")
+        return Response(content=_frame_image_placeholder(frame), media_type="image/png")
+
     async with frame_image_lock:
-        if waited_for_lock:
-            cached = await redis.get(cache_key)
+        cached = await _get_cached_frame_image(redis, cache_key)
+        refresh_lock_key = _frame_image_refresh_lock_key(id)
+        refresh_lock_token = f"{config.INSTANCE_ID}:{time.time()}:{id}"
+        refresh_lock_acquired = await redis.set(
+            refresh_lock_key,
+            refresh_lock_token,
+            ex=FRAME_IMAGE_REFRESH_LOCK_SECONDS,
+            nx=True,
+        )
+        if not refresh_lock_acquired:
+            cached = await _wait_for_cached_frame_image(redis, cache_key)
             if cached:
                 return Response(content=cached, media_type="image/png")
+            return Response(content=_frame_image_placeholder(frame), media_type="image/png")
 
         # Use shared semaphore and client
         status = 0
@@ -1630,6 +1729,8 @@ async def api_frame_get_image(
 
                 return Response(content=body, media_type="image/png")
             else:
+                if cached:
+                    return Response(content=cached, media_type="image/png")
                 await log(
                     db,
                     redis,
@@ -1640,6 +1741,8 @@ async def api_frame_get_image(
                 raise HTTPException(status_code=status, detail="Unable to fetch image")
 
         except httpx.ReadTimeout:
+            if cached:
+                return Response(content=cached, media_type="image/png")
             await log(
                 db,
                 redis,
@@ -1650,7 +1753,13 @@ async def api_frame_get_image(
             raise HTTPException(
                 status_code=HTTPStatus.REQUEST_TIMEOUT, detail="Request Timeout"
             )
+        except HTTPException:
+            if cached:
+                return Response(content=cached, media_type="image/png")
+            raise
         except Exception as e:
+            if cached:
+                return Response(content=cached, media_type="image/png")
             await log(
                 db,
                 redis,
@@ -1661,6 +1770,10 @@ async def api_frame_get_image(
             raise HTTPException(
                 status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e)
             )
+        finally:
+            if refresh_lock_acquired:
+                with contextlib.suppress(Exception):
+                    await _release_frame_image_refresh_lock(redis, refresh_lock_key, refresh_lock_token)
 
 
 @api_with_auth.get("/frames/{id:int}/scene_source/{scene}")
@@ -2171,8 +2284,9 @@ async def api_frame_buildroot_sd_image_status(id: int, db: Session = Depends(get
         platform = normalize_buildroot_platform((frame.buildroot or {}).get("platform"))
     except ValueError as exc:
         _bad_request(str(exc))
+    base_entry = await resolve_buildroot_base_entry(platform)
     return {
-        "sdImage": latest_buildroot_sd_image(frame)
+        "sdImage": latest_buildroot_sd_image(frame, base_entry)
         or {
             "status": "idle",
             "platform": platform,
@@ -2183,6 +2297,7 @@ async def api_frame_buildroot_sd_image_status(id: int, db: Session = Depends(get
 @api_with_auth.post("/frames/{id:int}/buildroot/sd_image")
 async def api_frame_buildroot_sd_image(
     id: int,
+    force: bool = Query(False),
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
@@ -2197,16 +2312,17 @@ async def api_frame_buildroot_sd_image(
     except ValueError as exc:
         _bad_request(str(exc))
 
-    await update_frame(db, redis, frame)
+    db.add(frame)
+    db.commit()
 
     try:
-        started, sd_image = await start_buildroot_sd_image(db, redis, frame)
+        started, sd_image = await start_buildroot_sd_image(db, redis, frame, force=force)
         if started:
-            message = "Buildroot SD card image generation started"
+            message = "Buildroot SD card image preparation started"
         elif sd_image.get("status") == "ready":
             message = "Buildroot SD card image already ready"
         else:
-            message = "Buildroot SD card image generation already running"
+            message = "Buildroot SD card image preparation already running"
         return {
             "message": message,
             "sdImage": sd_image,
@@ -2234,7 +2350,17 @@ async def api_frame_buildroot_sd_image_download(id: int, db: Session = Depends(g
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Generated SD card image file not found")
 
     filename = str(sd_image.get("filename") or f"frameos-{id}.img")
-    return FileResponse(path, media_type="application/octet-stream", filename=filename)
+    download_path = path
+    download_filename = filename
+    if not path.endswith(".gz"):
+        download_path = f"{path}.gz"
+        download_filename = filename if filename.endswith(".gz") else f"{filename}.gz"
+        if not os.path.isfile(download_path) or os.path.getmtime(download_path) < os.path.getmtime(path):
+            with open(path, "rb") as source, open(download_path, "wb") as compressed:
+                with gzip.GzipFile(filename="", mode="wb", fileobj=compressed, mtime=0) as destination:
+                    shutil.copyfileobj(source, destination)
+
+    return FileResponse(download_path, media_type="application/gzip", filename=download_filename)
 
 
 @api_with_auth.get("/frames/{id:int}/deploy_plan")
@@ -2401,6 +2527,11 @@ async def api_frame_update_endpoint(
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
 
     update_data = data.model_dump(exclude_unset=True)
+    previous_buildroot_sd_image_fingerprint = (
+        buildroot_sd_image_config_fingerprint(frame)
+        if (frame.mode or "rpios") == "buildroot"
+        else ""
+    )
     if isinstance(update_data.get("scenes"), str):
         try:
             update_data["scenes"] = json.loads(update_data["scenes"])
@@ -2410,6 +2541,12 @@ async def api_frame_update_endpoint(
     old_mode = frame.mode
     for field, value in update_data.items():
         setattr(frame, field, value)
+
+    if "timezone" in update_data:
+        frame.timezone = normalize_timezone(frame.timezone) or None
+
+    if frame.mode != "buildroot":
+        frame.timezone = None
 
     if "https_proxy" in update_data:
         frame.https_proxy = normalize_https_proxy(frame.https_proxy)
@@ -2424,6 +2561,13 @@ async def api_frame_update_endpoint(
             _bad_request(str(exc))
     elif data.mode == "rpios" and old_mode == "buildroot" and frame.ssh_user == "root":
         frame.ssh_user = "pi"
+
+    if (
+        (frame.mode or "rpios") == "buildroot"
+        and previous_buildroot_sd_image_fingerprint
+        and buildroot_sd_image_config_fingerprint(frame) != previous_buildroot_sd_image_fingerprint
+    ):
+        clear_buildroot_sd_image(frame)
 
     await update_frame(db, redis, frame)
 
@@ -2500,6 +2644,7 @@ async def api_frame_new(
 
         frame.mode = data.mode or "rpios"
         if frame.mode == "buildroot":
+            frame.timezone = frame_timezone(data.timezone, (settings.get("defaults") or {}).get("timezone"))
             frame.network = {
                 **(frame.network or {}),
                 **(data.network or {}),
@@ -2513,6 +2658,11 @@ async def api_frame_new(
             rpios_settings = {**(frame.rpios or {})}
             rpios_settings["platform"] = data.platform or (frame.rpios or {}).get('platform') or ''
             frame.rpios = rpios_settings
+            if data.agent:
+                frame.agent = {
+                    **(frame.agent or {}),
+                    **data.agent,
+                }
             db.add(frame)
             db.commit()
             db.refresh(frame)
@@ -2548,6 +2698,8 @@ async def api_frame_update_ssh_keys(
     except ValueError as exc:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
     frame.ssh_keys = new_keys
+    if (frame.mode or "rpios") == "buildroot":
+        clear_buildroot_sd_image(frame)
     await update_frame(db, redis, frame)
 
     return {"message": "SSH keys updated successfully"}

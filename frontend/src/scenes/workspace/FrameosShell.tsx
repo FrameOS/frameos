@@ -1,4 +1,4 @@
-import { A, router } from 'kea-router'
+import { router } from 'kea-router'
 import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
 import clsx from 'clsx'
 import { useEffect, useState, type CSSProperties, type MouseEvent } from 'react'
@@ -9,7 +9,6 @@ import {
   Cog6ToothIcon,
   CodeBracketIcon,
   ComputerDesktopIcon,
-  CloudArrowUpIcon,
   MagnifyingGlassIcon,
   MoonIcon,
   PlusIcon,
@@ -24,7 +23,12 @@ import { FrameosLogo } from '../../components/FrameosLogo'
 import { Spinner } from '../../components/Spinner'
 import { preloadSceneComponent, type LoadableSceneKey } from '../scenes'
 import { sceneLogic } from '../sceneLogic'
-import { isMobileWorkspaceViewport, workspaceLogic } from './workspaceLogic'
+import {
+  isMobileWorkspaceViewport,
+  requestNextFramesHomeScrollTop,
+  scrollFramesHomeToTop,
+  workspaceLogic,
+} from './workspaceLogic'
 import { workspaceModeForScene, type WorkspaceMode } from './workspaceModes'
 import { framesModel } from '../../models/framesModel'
 import { frameHost } from '../../decorators/frame'
@@ -38,19 +42,6 @@ import { FrameUnsavedChangesDrawer } from './FrameUnsavedChangesDrawer'
 import { DeployToFrameIcon } from './FrameChangeStatusIcon'
 
 const DEFAULT_BROWSER_TITLE = 'FrameOS Backend'
-
-const frameShellToolPanels = new Set([
-  'overview',
-  'preview',
-  'schedule',
-  'logs',
-  'metrics',
-  'assets',
-  'terminal',
-  'ping',
-  'debug',
-  'settings',
-])
 
 interface FrameosShellProps {
   mode: WorkspaceMode
@@ -248,14 +239,12 @@ function WorkspaceChatDrawer({
 
 function FrameStatusHeaderButton({ frameId }: { frameId: number }): JSX.Element | null {
   const { undeployedChanges, unsavedChanges } = useValues(frameLogic({ frameId }))
-  const { hideDeployPlanModal, hideUnsavedChangesModal } = useActions(frameLogic({ frameId }))
+  const { hideDeployPlanModal } = useActions(frameLogic({ frameId }))
   const { frameChangeDrawerSelection } = useValues(workspaceLogic)
   const { closeFrameChangeDrawer, openFrameChangeDrawer } = useActions(workspaceLogic)
   const statusLabel = unsavedChanges ? 'Unsaved' : undeployedChanges ? 'Undeployed' : null
-  const targetDrawerKind = unsavedChanges ? 'unsaved' : 'deploy'
-  const StatusIcon = unsavedChanges ? CloudArrowUpIcon : DeployToFrameIcon
-  const drawerIsOpen =
-    frameChangeDrawerSelection?.frameId === frameId && frameChangeDrawerSelection.kind === targetDrawerKind
+  const drawerKind = unsavedChanges ? 'unsaved' : 'deploy'
+  const drawerIsOpen = frameChangeDrawerSelection?.frameId === frameId && frameChangeDrawerSelection.kind === drawerKind
 
   if (!statusLabel) {
     return null
@@ -265,34 +254,22 @@ function FrameStatusHeaderButton({ frameId }: { frameId: number }): JSX.Element 
     <button
       type="button"
       title={`${statusLabel} changes`}
-      aria-label={
-        drawerIsOpen
-          ? unsavedChanges
-            ? 'Close unsaved changes'
-            : 'Close deploy plan'
-          : unsavedChanges
-          ? 'Open unsaved changes'
-          : 'Open deploy plan'
-      }
+      aria-label={drawerIsOpen ? 'Close changes' : unsavedChanges ? 'Open unsaved changes' : 'Open deploy'}
       onClick={() => {
         if (drawerIsOpen) {
-          if (targetDrawerKind === 'unsaved') {
-            hideUnsavedChangesModal()
-          } else {
-            hideDeployPlanModal()
-          }
+          hideDeployPlanModal()
           closeFrameChangeDrawer()
           return
         }
-        openFrameChangeDrawer(frameId, targetDrawerKind)
+        openFrameChangeDrawer(frameId, drawerKind)
       }}
       className={clsx(
         'workspace-unsaved-header-button flex h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
         'frameos-warning-button'
       )}
     >
-      <StatusIcon className="h-5 w-5 shrink-0" />
-      <span className="workspace-unsaved-header-label">{statusLabel}</span>
+      <DeployToFrameIcon className="h-5 w-5 shrink-0" />
+      <span className="workspace-unsaved-header-label">{unsavedChanges ? 'Changes' : 'Deploy'}</span>
     </button>
   )
 }
@@ -324,13 +301,10 @@ export function FrameosShell({
     selectedFrame,
     selectedSceneId,
     theme,
-    utilityPanel,
   } = useValues(workspaceLogic)
   const { closeScheduleDrawer, closeTemplateDrawer, openChatDrawer, setSearch, toggleSecondarySidebar, toggleTheme } =
     useActions(workspaceLogic)
   const { frames } = useValues(framesModel)
-  const activeFrameTool = frameShellToolPanels.has(String(utilityPanel)) ? String(utilityPanel) : undefined
-  const frameHref = selectedFrame ? urls.frame(selectedFrame.id, activeFrameTool) : urls.frames()
   const scenesHref = selectedFrame ? urls.scenes(selectedFrame.id, selectedSceneId ?? undefined) : urls.scenes()
   const appsHref = lastAppsHref ?? urls.systemApps()
   const showAiButton = showAiButtonProp ?? (mode !== 'frames' && mode !== 'settings' && !!selectedFrame)
@@ -374,9 +348,7 @@ export function FrameosShell({
   } as CSSProperties
   const { activeMode, pendingMode } = useDelayedPendingMode(mode)
   const resolvedBrowserTitle =
-    browserTitle === null
-      ? DEFAULT_BROWSER_TITLE
-      : `${browserTitle ?? title} · ${DEFAULT_BROWSER_TITLE}`
+    browserTitle === null ? DEFAULT_BROWSER_TITLE : `${browserTitle ?? title} · ${DEFAULT_BROWSER_TITLE}`
   const preloadFrames = () => preloadSceneComponent('frames')
   const prepareFirstLevelNavigation = () => {
     closeTemplateDrawer()
@@ -405,16 +377,30 @@ export function FrameosShell({
             secondarySidebarOpen ? 'border-r border-slate-200/80' : 'max-lg:border-r max-lg:border-slate-200/80'
           )}
         >
-          <A
+          <a
             href={urls.frames()}
             title="Frames home"
             onPointerEnter={preloadFrames}
             onFocus={preloadFrames}
             onMouseDown={preloadFrames}
+            onClick={(event: MouseEvent<HTMLAnchorElement>) => {
+              if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+                return
+              }
+              event.preventDefault()
+              requestNextFramesHomeScrollTop()
+              prepareFirstLevelNavigation()
+              if (mode === 'frames') {
+                scrollFramesHomeToTop('smooth', false)
+              } else {
+                router.actions.push(urls.frames())
+                scrollFramesHomeToTop()
+              }
+            }}
             className="workspace-logo-button frameos-icon-button mb-8 flex h-12 w-12 items-center justify-center rounded-xl transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
           >
             <FrameosLogo variant={theme === 'dark' ? 'white-colors' : 'color'} className="h-10 w-10" />
-          </A>
+          </a>
           <nav className="flex flex-1 flex-col items-center gap-4">
             <NavButton
               active={activeMode === 'frames'}
@@ -423,21 +409,31 @@ export function FrameosShell({
               pending={pendingMode === 'frames'}
               preloadScene="frames"
               sidebarOpen={secondarySidebarOpen}
-              title={secondarySidebarOpen && mode === 'frames' ? 'Hide frames panel' : 'Frames'}
-              onActiveClick={toggleSecondarySidebar}
-              onInactiveClick={prepareFirstLevelNavigation}
+              title={secondarySidebarOpen && mode === 'frames' ? 'Hide frames panel' : 'Frames home'}
+              onActiveClick={() => {
+                requestNextFramesHomeScrollTop()
+                prepareFirstLevelNavigation()
+                toggleSecondarySidebar()
+              }}
+              onInactiveClick={() => {
+                requestNextFramesHomeScrollTop()
+                prepareFirstLevelNavigation()
+              }}
             >
               <Squares2X2Icon className="h-7 w-7" />
             </NavButton>
             <NavButton
               active={activeMode === 'frame'}
               current={mode === 'frame'}
-              href={frameHref}
-              pending={pendingMode === 'frame'}
-              preloadScene="frame"
+              href={urls.frames()}
+              pending={pendingMode === 'frames'}
+              preloadScene="frames"
               sidebarOpen={secondarySidebarOpen}
               title={secondarySidebarOpen && mode === 'frame' ? 'Hide frame panel' : 'Frame'}
-              onActiveClick={toggleSecondarySidebar}
+              onActiveClick={() => {
+                prepareFirstLevelNavigation()
+                toggleSecondarySidebar()
+              }}
               onInactiveClick={prepareFirstLevelNavigation}
             >
               <ComputerDesktopIcon className="h-7 w-7" />

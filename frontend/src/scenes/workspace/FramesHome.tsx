@@ -47,6 +47,7 @@ import { FrameLiveBadge } from './FrameLiveBadge'
 import { framesHomeLogic } from './framesHomeLogic'
 import { FrameChangeStatusIcon } from './FrameChangeStatusIcon'
 import { sceneTileSummaryLabel } from './sceneTileLabels'
+import { WorkspaceSceneDropDown } from './WorkspaceSceneDropDown'
 
 const uploadedScenePrefix = 'uploaded/'
 const activeSurfaceClassName = 'frameos-active-surface'
@@ -330,8 +331,11 @@ function FrameTreeGroup({
           </span>
         </button>
       ) : (
-        <div className="mb-2 px-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
-          {title} ({frames.length})
+        <div className="mb-2 flex w-full items-center gap-2 px-2 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+          <span className="flex-1">{title}</span>
+          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
+            {frames.length}
+          </span>
         </div>
       )}
       {isExpanded ? (
@@ -574,6 +578,7 @@ function FrameSection({ section }: { section: OverviewFrameSection }): JSX.Eleme
       archived={archived}
       frameMatchesSearch={frameMatchesSearch}
       sectionId={`workspace-frame-${frame.id}`}
+      showSceneMenus
     />
   )
 }
@@ -685,6 +690,14 @@ export function SceneControlPanel(): JSX.Element | null {
                 ) : null}
               </div>
               <div className="mb-4 flex flex-wrap gap-2">
+                <WorkspaceSceneDropDown
+                  frame={frame}
+                  scene={scene}
+                  scenes={frame.scenes ?? [scene]}
+                  horizontal
+                  buttonColor="none"
+                  className="frameos-secondary-button flex h-10 w-10 shrink-0 items-center justify-center rounded-lg !px-0 !py-0 text-slate-600 shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                />
                 <A
                   href={urls.scenes(frame.id, scene.id)}
                   className="frameos-secondary-button flex flex-1 items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"

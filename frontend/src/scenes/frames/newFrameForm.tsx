@@ -1,7 +1,7 @@
 import { actions, afterMount, kea, listeners, path, reducers } from 'kea'
 
 import { forms } from 'kea-forms'
-import { NewFrameFormType } from '../../types'
+import { FrameInstallMethod, FrameOSSettings, NewFrameFormType } from '../../types'
 
 import type { newFrameFormType } from './newFrameFormType'
 import { framesModel } from '../../models/framesModel'
@@ -9,6 +9,91 @@ import { apiFetch } from '../../utils/apiFetch'
 import { loaders } from 'kea-loaders'
 import { inHassioIngress } from '../../utils/inHassioIngress'
 import { BUILDROOT_RASPBERRY_PI_ZERO_2_W } from '../../devices'
+import { settingsLogic } from '../settings/settingsLogic'
+
+function defaultWifiNetwork(settings: FrameOSSettings): NonNullable<NewFrameFormType['network']> {
+  return {
+    wifiSSID: settings.defaults?.wifiSSID ?? '',
+    wifiPassword: settings.defaults?.wifiPassword ?? '',
+  }
+}
+
+function fallbackFrameHost(name?: string | null): string {
+  const slug = String(name || 'frame')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+  return `${slug || 'frame'}.local`
+}
+
+function framePayload(frame: NewFrameFormType): NewFrameFormType {
+  const { rememberWifi: _rememberWifi, ...frameValues } = frame
+  const installMethod = frame.install_method ?? (frame.mode === 'buildroot' ? 'sd_card' : 'ssh')
+
+  if (installMethod === 'sd_card') {
+    return {
+      ...frameValues,
+      mode: 'buildroot',
+      frame_host: '',
+      platform: frameValues.platform || BUILDROOT_RASPBERRY_PI_ZERO_2_W,
+    }
+  }
+
+  if (installMethod === 'script') {
+    return {
+      ...frameValues,
+      mode: 'rpios',
+      frame_host: frameValues.frame_host || fallbackFrameHost(frameValues.name),
+      agent: {
+        ...(frameValues.agent ?? {}),
+        agentEnabled: true,
+        agentRunCommands: true,
+        deployWithAgent: true,
+      },
+    }
+  }
+
+  return {
+    ...frameValues,
+    mode: 'rpios',
+    agent: {
+      ...(frameValues.agent ?? {}),
+      agentEnabled: false,
+      agentRunCommands: false,
+      deployWithAgent: false,
+    },
+  }
+}
+
+async function saveRememberedWifiDefaults(frame: NewFrameFormType): Promise<void> {
+  const installMethod = frame.install_method ?? (frame.mode === 'buildroot' ? 'sd_card' : 'ssh')
+  if (installMethod !== 'sd_card' || !frame.rememberWifi) {
+    return
+  }
+
+  const currentResponse = await apiFetch('/api/settings')
+  if (!currentResponse.ok) {
+    throw new Error('Failed to fetch default WiFi settings')
+  }
+  const currentSettings = (await currentResponse.json()) as FrameOSSettings
+  const defaults = {
+    ...(currentSettings.defaults ?? {}),
+    wifiSSID: frame.network?.wifiSSID ?? '',
+    wifiPassword: frame.network?.wifiPassword ?? '',
+  }
+  const response = await apiFetch('/api/settings', {
+    method: 'POST',
+    body: JSON.stringify({ defaults }),
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  })
+  if (!response.ok) {
+    throw new Error('Failed to update default WiFi settings')
+  }
+  settingsLogic.actions.updateSavedSettings(await response.json())
+}
 
 export const newFrameForm = kea<newFrameFormType>([
   path(['src', 'scenes', 'frames', 'newFrameForm']),
@@ -17,7 +102,7 @@ export const newFrameForm = kea<newFrameFormType>([
     hideForm: true,
     setFile: (file: File | null) => ({ file }),
     importFrame: true,
-    frameCreated: (frameId: number) => ({ frameId }),
+    frameCreated: (frameId: number, installMethod?: FrameInstallMethod) => ({ frameId, installMethod }),
   }),
   reducers({
     file: [
@@ -38,14 +123,17 @@ export const newFrameForm = kea<newFrameFormType>([
     newFrame: {
       defaults: {
         mode: 'rpios',
+        install_method: undefined,
         name: '',
         frame_host: '',
         device: 'web_only',
+        timezone: '',
         platform: BUILDROOT_RASPBERRY_PI_ZERO_2_W,
         network: {
           wifiSSID: '',
           wifiPassword: '',
         },
+        rememberWifi: true,
         server_host:
           typeof window !== 'undefined'
             ? `${window.location.hostname}:${
@@ -57,25 +145,21 @@ export const newFrameForm = kea<newFrameFormType>([
       } as NewFrameFormType,
       errors: (frame: Partial<NewFrameFormType>) => ({
         name: !frame.name ? 'Please enter a name' : null,
-        frame_host: frame.mode === 'rpios' && !frame.frame_host ? 'Please enter a host' : null,
+        frame_host: frame.install_method === 'ssh' && !frame.frame_host ? 'Please enter a host' : null,
         platform:
-          frame.mode === 'buildroot' && !frame.platform
+          frame.install_method === 'sd_card' && !frame.platform
             ? 'Please pick a platform'
             : // no errors for RpiOS, support autodetection
               null,
-        network:
-          frame.mode === 'buildroot'
-            ? {
-                wifiSSID: !frame.network?.wifiSSID ? 'Please enter a WiFi network' : undefined,
-                wifiPassword: !frame.network?.wifiPassword ? 'Please enter the WiFi password' : undefined,
-              }
-            : undefined,
+        network: undefined,
       }),
       submit: async (frame) => {
         try {
+          const installMethod = frame.install_method ?? (frame.mode === 'buildroot' ? 'sd_card' : 'ssh')
+          const payload = framePayload(frame)
           const response = await apiFetch('/api/frames/new', {
             method: 'POST',
-            body: JSON.stringify(frame),
+            body: JSON.stringify(payload),
             headers: {
               'Content-Type': 'application/json',
             },
@@ -85,12 +169,17 @@ export const newFrameForm = kea<newFrameFormType>([
             throw new Error('Failed to submit frame')
           }
 
+          const result = await response.json()
+          try {
+            await saveRememberedWifiDefaults(frame)
+          } catch (error) {
+            console.error(error)
+          }
           actions.resetNewFrame()
           actions.hideForm()
-          const result = await response.json()
           if (result?.frame?.id) {
             framesModel.actions.addFrame(result.frame)
-            actions.frameCreated(result.frame.id)
+            actions.frameCreated(result.frame.id, installMethod)
           }
         } catch (error) {
           console.error(error)
@@ -125,7 +214,7 @@ export const newFrameForm = kea<newFrameFormType>([
             if (result?.frame?.id) {
               framesModel.actions.addFrame(result.frame)
               actions.hideForm()
-              actions.frameCreated(result.frame.id)
+              actions.frameCreated(result.frame.id, 'ssh')
             }
           } catch (error) {
             console.error(error)
@@ -135,10 +224,16 @@ export const newFrameForm = kea<newFrameFormType>([
       },
     ],
   })),
-  listeners(({ actions }) => ({
+  listeners(({ actions, values }) => ({
     [framesModel.actionTypes.loadFramesSuccess]: ({ frames }) => {
       if (Object.keys(frames).length === 0) {
         actions.showForm()
+      }
+    },
+    [settingsLogic.actionTypes.loadSettingsSuccess]: ({ savedSettings }: { savedSettings: FrameOSSettings }) => {
+      const network = values.newFrame.network ?? {}
+      if (values.newFrame.install_method === 'sd_card' && !network.wifiSSID && !network.wifiPassword) {
+        actions.setNewFrameValue('network', defaultWifiNetwork(savedSettings))
       }
     },
   })),

@@ -109,7 +109,14 @@ async def process_log(
         changes['status'] = 'rendering'
     if event == 'render:done':
         changes['status'] = 'ready'
+    marked_buildroot_sd_image_booted = False
     if event == 'bootup':
+        from app.tasks.buildroot_deploy_state import (
+            buildroot_sd_image_deploy_snapshot,
+            mark_buildroot_sd_image_booted,
+        )
+
+        marked_buildroot_sd_image_booted = await mark_buildroot_sd_image_booted(db, redis, frame)
         if frame.status != 'ready':
             changes['status'] = 'ready'
         for key in ['width', 'height', 'color']:
@@ -122,6 +129,8 @@ async def process_log(
             changes['last_log_at'] = timestamp
         for key, value in changes.items():
             setattr(frame, key, value)
+        if marked_buildroot_sd_image_booted and isinstance(frame.last_successful_deploy, dict):
+            frame.last_successful_deploy = buildroot_sd_image_deploy_snapshot(frame, frame.buildroot["sdImage"])
         await update_frame(db, redis, frame)
 
     if event == 'metrics':

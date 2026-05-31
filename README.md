@@ -75,9 +75,10 @@ docker run -d -p 8989:8989 \
     -e SECRET_KEY="$SECRET_KEY" \
     frameos/frameos
 
-# If you want to speed up your builds with cross-compilation, you must enable privileged mode.
-# This lets FrameOS spin up docker containers for the various build environments.
-# Alernatively, skip this, and configure a remote build server, or build on devices directly.
+# SD card image generation works in the default container without Docker privileges.
+# If you want to speed up source builds with cross-compilation, enable Docker access.
+# This lets FrameOS spin up containers for the various build environments.
+# Alternatively, skip this, and configure a remote build server, or build on devices directly.
 SECRET_KEY=$(openssl rand -base64 32)
 mkdir -p db
 mkdir -p /tmp/frameos-cross
@@ -121,3 +122,67 @@ docker run -d -p 8989:8989 \
     -e TMPDIR=/tmp/frameos-cross \
     frameos
 ```
+
+### Cross-toolchain build container images
+
+Cross-compilation uses prebuilt toolchain containers from Docker Hub at `frameos/frameos-cross-toolchain` when possible, which avoids rebuilding the toolchain image for every target.
+
+The workflow `.github/workflows/frameos-cross-toolchain.yml` builds and publishes these images.
+
+The image name is resolved as:
+
+- `{repo}:{base}_{version}-{platform}-{tag}`
+- `base` is the Linux distro (`debian`, `ubuntu`, ...)
+- `version` is the distro version (for example `bookworm` or `26.04`)
+- `platform` is the docker platform with `/` replaced by `_` (for example `linux_amd64`, `linux_arm64`, `linux_arm_v7`)
+- `tag` defaults to `latest`
+
+You can override the default behavior with environment variables:
+
+- `FRAMEOS_CROSS_TOOLCHAIN_IMAGE`: full Docker image override (can be a Python format template using `slug`, `base`, `platform`, and `tag`)
+- `FRAMEOS_CROSS_TOOLCHAIN_IMAGE_REPO`: image repository (default `frameos/frameos-cross-toolchain`)
+- `FRAMEOS_CROSS_TOOLCHAIN_IMAGE_TAG`: image tag used by the default resolver (default `latest`)
+- `FRAMEOS_CROSS_TOOLCHAIN_FORCE_LOCAL_BUILD=1`: force rebuilding the toolchain image locally, even if a remote tag exists
+- `FRAMEOS_CROSS_TOOLCHAIN_SKIP_PULL=1`: skip pulling remote images and only use local/locally built images
+
+Example for local iteration on a new toolchain image:
+
+```bash
+export FRAMEOS_CROSS_TOOLCHAIN_IMAGE=frameos/frameos-cross-toolchain:debian_trixie-linux_arm_v7-my-wip
+export FRAMEOS_CROSS_TOOLCHAIN_FORCE_LOCAL_BUILD=1
+```
+
+### Buildroot image cache
+
+Buildroot SD image generation supports a cached Buildroot image with dependency packages preinstalled and the Buildroot tarball preloaded at `/frameos-buildroot`.
+
+You can control the cached image with:
+
+- `FRAMEOS_BUILDROOT_IMAGE`: optional full image name override (supports `{slug}`, `{base}`, `{version}`, and `{tag}` placeholders)
+- `FRAMEOS_BUILDROOT_IMAGE_REPO`: image repository (default `frameos/frameos-buildroot`)
+- `FRAMEOS_BUILDROOT_IMAGE_TAG`: image tag (default `latest`)
+- `FRAMEOS_BUILDROOT_FORCE_LOCAL_BUILD=1`: force rebuilding the Buildroot image locally
+- `FRAMEOS_BUILDROOT_SKIP_PULL=1`: skip pulling cached images from the registry
+- `FRAMEOS_BUILDROOT_DOCKER_IMAGE`: base image used when building `frameos-buildroot` (default `debian:bookworm`)
+- `FRAMEOS_BUILDROOT_IMAGES_DIGESTS_PATH`: path to the digest manifest (default `buildroot-images.json` in repo root)
+- `FRAMEOS_BUILDROOT_FRAMEOS_PARTITION_SIZE`: `/srv/frameos` ext4 partition size (default `512M`)
+- `FRAMEOS_BUILDROOT_ASSETS_PARTITION_SIZE`: `/srv/assets` FAT32 partition size (default `512M`)
+
+Buildroot-specific output cache keys include the resolved cache image, so changing image configuration invalidates stale output directories automatically.
+
+Generated SD images use separate partitions for boot, root, FrameOS runtime data, and assets:
+
+- `p1`: FAT32 boot partition
+- `p2`: ext4 root filesystem
+- `p3`: ext4 `/srv/frameos`
+- `p4`: FAT32 `/srv/assets`
+
+Example:
+
+```bash
+export FRAMEOS_BUILDROOT_IMAGE_REPO=frameos/frameos-buildroot
+export FRAMEOS_BUILDROOT_IMAGE_TAG=latest
+export FRAMEOS_BUILDROOT_FORCE_LOCAL_BUILD=1
+```
+
+The corresponding GitHub workflow is `.github/workflows/frameos-buildroot.yml` and triggers on pushes to `main` when `backend/tools/buildroot.Dockerfile` changes. It writes `buildroot-images.json` with digest data used by runtime image resolution.
