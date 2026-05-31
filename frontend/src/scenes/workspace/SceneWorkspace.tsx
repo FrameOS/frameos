@@ -260,7 +260,7 @@ function SceneSelector({
                     </span>
                   </button>
                   <div className="pr-1">
-                    <SceneDropDown context="scenes" sceneId={scene.id} />
+                    <SceneDropDown context="scenes" sceneId={scene.id} navigation="workspace" />
                   </div>
                 </div>
               )

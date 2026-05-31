@@ -386,6 +386,10 @@ function utilityDrawerOpenHash(
   return { ...hash, [UTILITY_DRAWER_HASH_KEY]: sceneUtilityPanelHashValues[panel] }
 }
 
+export function openWorkspaceSceneUtility(frameId: number, sceneId: string, panel: SceneUtilityPanel): void {
+  router.actions.push(urls.scenes(frameId, sceneId), {}, utilityDrawerOpenHash(panel, workspaceContentNavigationHash()))
+}
+
 function utilityDrawerClosedHash(hash: Record<string, unknown> = router.values.hashParams): Record<string, unknown> {
   const nextHash = { ...hash }
   delete nextHash[UTILITY_DRAWER_HASH_KEY]

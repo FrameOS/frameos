@@ -8,7 +8,6 @@ import {
   ChevronRightIcon,
   ClipboardDocumentIcon,
   CommandLineIcon,
-  ServerStackIcon,
   XMarkIcon,
 } from '@heroicons/react/24/outline'
 import { ExclamationCircleIcon } from '@heroicons/react/24/solid'
@@ -33,7 +32,6 @@ import {
   type DeployRecommendation,
   type SummaryItem,
 } from '../frame/frameLogic'
-import { CURRENT_FRAMEOS_VERSION } from '../frame/frameDeployUtils'
 import { logsLogic } from '../frame/panels/Logs/logsLogic'
 import { settingsLogic } from '../settings/settingsLogic'
 import { agentBootstrapLogic } from './agentBootstrapLogic'
@@ -348,68 +346,6 @@ function AlternativesSection({
             Run a script
           </button>
         </div>
-      </div>
-    </section>
-  )
-}
-
-function FirstInstallSection(): JSX.Element {
-  return (
-    <div className="space-y-5">
-      <section className="space-y-2">
-        <DrawerHeading>First install</DrawerHeading>
-        <div className="frame-tool-card rounded-[22px] p-4">
-          <div className="frame-tool-muted text-sm leading-5">
-            This frame has not reported a successful deploy yet. Install it over SSH, run the install script on the
-            device, or download an SD card image. After the frame has been installed, this drawer will show redeploy
-            changes.
-          </div>
-        </div>
-      </section>
-      <section>
-        <SummaryRows items={[{ label: 'FrameOS version', value: CURRENT_FRAMEOS_VERSION }]} />
-      </section>
-    </div>
-  )
-}
-
-function FirstInstallOptionsSection({
-  onDownloadSdCard,
-  onRunScript,
-  onDeploySsh,
-}: {
-  onDownloadSdCard: () => void
-  onRunScript: () => void
-  onDeploySsh: () => void
-}): JSX.Element {
-  const buttonClassName =
-    'frameos-secondary-button flex items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400'
-
-  return (
-    <section className="mb-4 space-y-2">
-      <DrawerHeading>Install options</DrawerHeading>
-      <div className="space-y-2">
-        <button type="button" onClick={onDeploySsh} className={buttonClassName}>
-          <span className="flex min-w-0 items-center gap-2">
-            <ServerStackIcon className="h-5 w-5 shrink-0" />
-            <span className="truncate">Deploy via SSH</span>
-          </span>
-          <ChevronRightIcon className="h-4 w-4 shrink-0 opacity-60" />
-        </button>
-        <button type="button" onClick={onRunScript} className={buttonClassName}>
-          <span className="flex min-w-0 items-center gap-2">
-            <CommandLineIcon className="h-5 w-5 shrink-0" />
-            <span className="truncate">Run a script</span>
-          </span>
-          <ChevronRightIcon className="h-4 w-4 shrink-0 opacity-60" />
-        </button>
-        <button type="button" onClick={onDownloadSdCard} className={buttonClassName}>
-          <span className="flex min-w-0 items-center gap-2">
-            <ArrowDownTrayIcon className="h-5 w-5 shrink-0" />
-            <span className="truncate">Download SD card</span>
-          </span>
-          <ChevronRightIcon className="h-4 w-4 shrink-0 opacity-60" />
-        </button>
       </div>
     </section>
   )
@@ -994,15 +930,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
             <ScriptInstallSection frame={frame} onBack={showMainDeployView} />
           ) : (
             <>
-              {firstInstall ? (
-                <FirstInstallOptionsSection
-                  onDeploySsh={() => closeAndRun(saveAndFullDeployFrame)}
-                  onRunScript={() => setDeployDrawerView('script')}
-                  onDownloadSdCard={() => setDeployDrawerView('sdCard')}
-                />
-              ) : (
-                <AlternativesSection onSelect={setDeployDrawerView} />
-              )}
+              <AlternativesSection onSelect={setDeployDrawerView} />
               {canBootstrapAgent ? (
                 <div className="mb-4">
                   <AgentBootstrapAction frame={frame} />
@@ -1021,9 +949,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
                   onChange={setDeployWithAgent}
                 />
               ) : null}
-              {firstInstall ? (
-                <FirstInstallSection />
-              ) : deployPlansLoading ? (
+              {deployPlansLoading ? (
                 <DeployPlanProgress logs={deployPlanLogs} planReady={false} />
               ) : deployPlansError ? (
                 <div className="space-y-3">
@@ -1098,31 +1024,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
               >
                 Close
               </button>
-              {firstInstall ? (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => setDeployDrawerView('sdCard')}
-                    className="frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-                  >
-                    Download SD card
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setDeployDrawerView('script')}
-                    className="frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-                  >
-                    Run a script
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => closeAndRun(saveAndFullDeployFrame)}
-                    className="frameos-primary-action rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-                  >
-                    Deploy via SSH
-                  </button>
-                </>
-              ) : isBuildrootFrame ? (
+              {isBuildrootFrame ? (
                 <button
                   type="button"
                   onClick={() => closeAndRun(saveAndFastDeployFrame)}

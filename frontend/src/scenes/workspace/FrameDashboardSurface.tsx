@@ -75,6 +75,7 @@ interface FrameDashboardSurfaceProps {
   frameMatchesSearch?: boolean
   sectionId?: string
   showSceneMenus?: boolean
+  includeSceneRenameModal?: boolean
 }
 
 export function sceneIsActive(scene: FrameScene, currentSceneId: string | null | undefined): boolean {
@@ -549,9 +550,10 @@ function FrameSceneTile({
         <SceneDropDown
           context="scenes"
           sceneId={scene.id}
+          navigation="workspace"
           horizontal
           buttonColor="none"
-          className="absolute bottom-2 right-2 z-10 flex h-8 w-8 items-center justify-center rounded-lg bg-white/90 !px-0 !py-0 text-slate-600 shadow-sm"
+          className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-lg bg-white/70 !px-0 !py-0 text-slate-500/80 shadow-sm backdrop-blur-sm transition hover:bg-white/95 hover:text-slate-700"
         />
       ) : null}
     </div>
@@ -694,6 +696,7 @@ export function FrameDashboardSurface({
   frameMatchesSearch,
   sectionId,
   showSceneMenus = false,
+  includeSceneRenameModal = showSceneMenus,
 }: FrameDashboardSurfaceProps): JSX.Element {
   const { applyTemplateAndSave } = useActions(frameLogic({ frameId: frame.id }))
   const { applyRemoteToFrame } = useActions(templatesLogic({ frameId: frame.id }))
@@ -730,7 +733,7 @@ export function FrameDashboardSurface({
       className={clsx('group @container scroll-mt-6', archived && 'opacity-80')}
     >
       <RenameFrameModal frame={frame} />
-      {showSceneMenus ? <RenameSceneModal frameId={frame.id} /> : null}
+      {includeSceneRenameModal ? <RenameSceneModal frameId={frame.id} /> : null}
       <FrameDashboardHeader frame={frame} archived={archived} />
       <div className="grid gap-5 @2xl:grid-cols-[minmax(0,19rem)_minmax(19rem,1fr)] @2xl:items-start">
         <FramePreviewPanel frame={frame} scenes={scenes} />

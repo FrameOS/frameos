@@ -39,6 +39,7 @@ import { frameLogic } from '../frame/frameLogic'
 import { panelsLogic } from '../frame/panels/panelsLogic'
 import { CompiledSceneTag } from '../frame/panels/Scenes/CompiledSceneTag'
 import { ExpandedScene } from '../frame/panels/Scenes/ExpandedScene'
+import { SceneDropDown } from '../frame/panels/Scenes/SceneDropDown'
 import { EditTemplateModal } from '../frame/panels/Templates/EditTemplateModal'
 import { Templates } from '../frame/panels/Templates/Templates'
 import { FrameDashboardSurface } from './FrameDashboardSurface'
@@ -565,16 +566,22 @@ function FrameSectionToolLinks({ frame }: { frame: FrameType }): JSX.Element {
 
 function FrameSection({ section }: { section: OverviewFrameSection }): JSX.Element {
   const { frame, scenes, archived, frameMatchesSearch } = section
+  const frameLogicProps = { frameId: frame.id }
 
   return (
-    <FrameDashboardSurface
-      frame={frame}
-      scenes={scenes}
-      totalScenes={frame.scenes?.length ?? scenes.length}
-      archived={archived}
-      frameMatchesSearch={frameMatchesSearch}
-      sectionId={`workspace-frame-${frame.id}`}
-    />
+    <BindLogic logic={frameLogic} props={frameLogicProps}>
+      <BindLogic logic={panelsLogic} props={frameLogicProps}>
+        <FrameDashboardSurface
+          frame={frame}
+          scenes={scenes}
+          totalScenes={frame.scenes?.length ?? scenes.length}
+          archived={archived}
+          frameMatchesSearch={frameMatchesSearch}
+          sectionId={`workspace-frame-${frame.id}`}
+          showSceneMenus
+        />
+      </BindLogic>
+    </BindLogic>
   )
 }
 
@@ -685,6 +692,14 @@ export function SceneControlPanel(): JSX.Element | null {
                 ) : null}
               </div>
               <div className="mb-4 flex flex-wrap gap-2">
+                <SceneDropDown
+                  context="scenes"
+                  sceneId={scene.id}
+                  navigation="workspace"
+                  horizontal
+                  buttonColor="none"
+                  className="frameos-secondary-button flex h-10 w-10 shrink-0 items-center justify-center rounded-lg !px-0 !py-0 text-slate-600 shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                />
                 <A
                   href={urls.scenes(frame.id, scene.id)}
                   className="frameos-secondary-button flex flex-1 items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"

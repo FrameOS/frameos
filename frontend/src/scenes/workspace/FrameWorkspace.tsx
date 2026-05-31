@@ -606,9 +606,10 @@ function SceneTile({ frame, scene, active }: { frame: FrameType; scene: FrameSce
       <SceneDropDown
         context="scenes"
         sceneId={scene.id}
+        navigation="workspace"
         horizontal
         buttonColor="none"
-        className="absolute bottom-2 right-2 z-10 flex h-8 w-8 items-center justify-center rounded-lg bg-white/90 !px-0 !py-0 text-slate-600 shadow-sm"
+        className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-lg bg-white/70 !px-0 !py-0 text-slate-500/80 shadow-sm backdrop-blur-sm transition hover:bg-white/95 hover:text-slate-700"
       />
     </div>
   )
@@ -1228,7 +1229,15 @@ function FrameToolSurface({
   pageScroll: boolean
 }): JSX.Element {
   if (activeTool === 'overview') {
-    return <FrameDashboardSurface frame={frame} scenes={scenes} totalScenes={totalScenes} />
+    return (
+      <FrameDashboardSurface
+        frame={frame}
+        scenes={scenes}
+        totalScenes={totalScenes}
+        showSceneMenus
+        includeSceneRenameModal={false}
+      />
+    )
   }
   if (activeTool === 'logs') return <Logs fullScreen />
   if (activeTool === 'metrics') return <Metrics scrollContainer={!pageScroll} />
