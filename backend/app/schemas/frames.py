@@ -221,7 +221,7 @@ class FramePingResponse(BaseModel):
     message: str
 
 
-class FrameAgentBootstrapResponse(BaseModel):
+class FrameBootstrapResponse(BaseModel):
     script_url: str
     command: str
 

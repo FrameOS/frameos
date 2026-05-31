@@ -11,6 +11,31 @@ import signal
 DEFAULT_DIFF_THRESHOLD = float(os.environ.get("SNAPSHOT_DIFF_THRESHOLD", "0.01"))
 RESAMPLE_FILTER = getattr(Image, "Resampling", Image).LANCZOS
 
+def apply_shard(files):
+    shard = os.environ.get("FRAMEOS_E2E_SHARD")
+    shard_count = os.environ.get("FRAMEOS_E2E_SHARDS")
+
+    if not shard and not shard_count:
+        return files
+
+    if not shard or not shard_count:
+        raise ValueError("FRAMEOS_E2E_SHARD and FRAMEOS_E2E_SHARDS must be set together")
+
+    shard = int(shard)
+    shard_count = int(shard_count)
+    if shard_count < 1:
+        raise ValueError("FRAMEOS_E2E_SHARDS must be at least 1")
+    if shard < 1 or shard > shard_count:
+        raise ValueError("FRAMEOS_E2E_SHARD must be between 1 and FRAMEOS_E2E_SHARDS")
+
+    selected = [
+        file_path
+        for index, file_path in enumerate(files)
+        if index % shard_count == shard - 1
+    ]
+    print(f"Running e2e snapshot shard {shard}/{shard_count}: {len(selected)} of {len(files)} scenes")
+    return selected
+
 def compare_images(img_path1, img_path2, threshold=DEFAULT_DIFF_THRESHOLD):
     """Return similarity information between two images.
 
@@ -65,6 +90,7 @@ def main():
         files = sorted(scenes_dir.glob('*.json'))
         if filter_str:
             files = [p for p in files if filter_str in p.stem.lower()]
+        files = apply_shard(files)
 
         if not files:
             print(f"No scenes matched filter: '{filter_str}'" if filter_str else "No scenes found.")

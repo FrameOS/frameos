@@ -58,6 +58,22 @@ async def test_new_frame(mock_publish, db, redis):
 
 @pytest.mark.asyncio
 @patch("app.models.frame.publish_message", new_callable=AsyncMock)
+async def test_new_frame_sets_known_device_dimensions(_mock_publish, db, redis):
+    frame = await new_frame(
+        db,
+        redis,
+        name="InkyFrame",
+        frame_host="pi@192.168.1.1",
+        server_host="server_host.com",
+        device="pimoroni.inky_what_yellow",
+    )
+
+    assert frame.width == 400
+    assert frame.height == 300
+
+
+@pytest.mark.asyncio
+@patch("app.models.frame.publish_message", new_callable=AsyncMock)
 async def test_update_frame(mock_publish, db, redis):
     frame = await new_frame(db, redis, "Frame", "localhost", "server_host", "dev")
     frame.frame_host = "updated_host"
@@ -169,6 +185,19 @@ async def test_get_frame_json_includes_error_behavior(_mock_publish, db, redis):
         "silentWindowMinutes": 3,
         "showErrorRetrySeconds": 90,
     }
+
+
+@pytest.mark.asyncio
+@patch("app.models.frame.publish_message", new_callable=AsyncMock)
+async def test_get_frame_json_uses_known_device_dimensions_when_unset(_mock_publish, db, redis):
+    frame = await new_frame(db, redis, "FrameJson", "host", "server_host.com", "pimoroni.inky_what_yellow")
+    frame.width = None
+    frame.height = None
+
+    data = get_frame_json(db, frame)
+
+    assert data["width"] == 400
+    assert data["height"] == 300
 
 
 @pytest.mark.asyncio

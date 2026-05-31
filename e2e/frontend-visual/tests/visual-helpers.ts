@@ -1,6 +1,69 @@
 import type { Page, Route } from '@playwright/test'
 
 const fixedNow = '2026-05-23T12:00:00Z'
+const e2eInstallFrameNamePattern = /^E2E (?:(?:SD card|SSH|Script|Import) \d+|install flow (?:SD card|SSH|Script|Import) \d+-[a-z0-9]+)$/
+const livePreviewSvg = `
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="480" viewBox="0 0 800 480">
+  <rect width="800" height="480" fill="#111827"/>
+  <g>
+    <rect x="0" y="0" width="34" height="480" fill="#8b5cf6"/>
+    <rect x="64" y="0" width="34" height="480" fill="#ffffff"/>
+    <rect x="128" y="0" width="34" height="480" fill="#8b5cf6"/>
+    <rect x="192" y="0" width="34" height="480" fill="#ffffff"/>
+    <rect x="256" y="0" width="34" height="480" fill="#8b5cf6"/>
+    <rect x="320" y="0" width="34" height="480" fill="#ffffff"/>
+    <rect x="384" y="0" width="34" height="480" fill="#8b5cf6"/>
+    <rect x="448" y="0" width="34" height="480" fill="#ffffff"/>
+    <rect x="512" y="0" width="34" height="480" fill="#8b5cf6"/>
+    <rect x="576" y="0" width="34" height="480" fill="#ffffff"/>
+    <rect x="640" y="0" width="34" height="480" fill="#8b5cf6"/>
+    <rect x="704" y="0" width="34" height="480" fill="#ffffff"/>
+    <rect x="768" y="0" width="34" height="480" fill="#8b5cf6"/>
+  </g>
+  <rect x="48" y="48" width="704" height="384" rx="24" fill="#111827" stroke="#8b5cf6" stroke-width="4"/>
+  <text x="80" y="114" fill="#ffffff" font-family="Arial, sans-serif" font-size="38" font-weight="700">Live preview</text>
+  <text x="80" y="156" fill="#dbeafe" font-family="Arial, sans-serif" font-size="20">FrameOS visual fixture</text>
+  <text x="80" y="388" fill="#dbeafe" font-family="Arial, sans-serif" font-size="20">800 x 480</text>
+</svg>`.trim()
+
+interface FrameListItem {
+  id: number
+  name?: string | null
+}
+
+function isE2EInstallFrame(frame: FrameListItem): boolean {
+  return e2eInstallFrameNamePattern.test(frame.name ?? '')
+}
+
+function withoutE2EInstallFrames(payload: any): any {
+  if (!Array.isArray(payload?.frames)) {
+    return payload
+  }
+  return {
+    ...payload,
+    frames: payload.frames.filter((frame: FrameListItem) => !isE2EInstallFrame(frame)),
+  }
+}
+
+export async function cleanupE2EInstallFrames(page: Page): Promise<void> {
+  const response = await page.request.get('/api/frames')
+  if (!response.ok()) {
+    throw new Error(`Could not list frames for E2E install cleanup: ${response.status()}`)
+  }
+
+  const payload = await response.json()
+  const frames = Array.isArray(payload?.frames) ? (payload.frames as FrameListItem[]) : []
+  const framesToDelete = frames.filter(isE2EInstallFrame)
+
+  await Promise.all(
+    framesToDelete.map(async (frame) => {
+      const deleteResponse = await page.request.delete(`/api/frames/${frame.id}`)
+      if (!deleteResponse.ok() && deleteResponse.status() !== 404) {
+        throw new Error(`Could not delete E2E install frame ${frame.id}: ${deleteResponse.status()}`)
+      }
+    })
+  )
+}
 
 export async function prepareStablePage(page: Page, theme: 'light' | 'dark'): Promise<void> {
   await page.addInitScript(
@@ -27,6 +90,19 @@ export async function prepareStablePage(page: Page, theme: 'light' | 'dark'): Pr
     },
     { fixedNow, theme }
   )
+
+  await page.route('**/api/frames', async (route) => {
+    const response = await route.fetch()
+    const payload = await response.json()
+    await route.fulfill({ response, json: withoutE2EInstallFrames(payload) })
+  })
+
+  await page.route('**/api/frames/1/image**', async (route) => {
+    await route.fulfill({
+      body: livePreviewSvg,
+      contentType: 'image/svg+xml',
+    })
+  })
 
   await page.route(
     '**/api/system/metrics',

@@ -152,6 +152,53 @@ proc scenePayload(sceneId: SceneId, iteration: int): string =
   ])
 
 suite "runner reload safety":
+  test "reload updates frame config from disk":
+    let config = testConfig()
+    let configPath = getTempDir() / "frameos-runner-reload-frame.json"
+    let hadConfigEnv = existsEnv("FRAMEOS_CONFIG")
+    let oldConfigEnv = if hadConfigEnv: getEnv("FRAMEOS_CONFIG") else: ""
+
+    try:
+      writeFile(configPath, $(%*{
+        "width": 123,
+        "height": 45,
+        "device": "web_only",
+        "scalingMode": "contain"
+      }))
+      putEnv("FRAMEOS_CONFIG", configPath)
+      clearEventChannel()
+      let store = LogStore(entries: @[])
+      let logger = testLogger(config, store)
+      var runnerThread = RunnerThread(
+        frameConfig: config,
+        scenes: initTable[SceneId, FrameScene](),
+        currentSceneId: "".SceneId,
+        lastRenderAt: 0.0,
+        sleepFuture: none(Future[void]),
+        isRendering: false,
+        triggerRenderNext: false,
+        logger: logger
+      )
+
+      let messageLoop = runnerThread.startMessageLoop(maxIterations = 3)
+      sendEvent("reload", %*{})
+
+      let finished = waitUntil(proc(): bool = messageLoop.finished, steps = 200, stepMs = 5)
+      check finished
+      if finished:
+        waitFor messageLoop
+      check config.width == 123
+      check config.height == 45
+      check config.device == "web_only"
+      check not hasEvent(store, "reload:config:error")
+    finally:
+      if hadConfigEnv:
+        putEnv("FRAMEOS_CONFIG", oldConfigEnv)
+      else:
+        delEnv("FRAMEOS_CONFIG")
+      if fileExists(configPath):
+        removeFile(configPath)
+
   test "reload cleans up interpreted typescript scenes without hanging":
     let config = testConfig()
     let sceneId = "tests/reload-code".SceneId

@@ -34,7 +34,7 @@ import {
 } from '../frame/frameLogic'
 import { logsLogic } from '../frame/panels/Logs/logsLogic'
 import { settingsLogic } from '../settings/settingsLogic'
-import { agentBootstrapLogic } from './agentBootstrapLogic'
+import { frameBootstrapLogic } from './frameBootstrapLogic'
 import { workspaceLogic } from './workspaceLogic'
 import { timezoneOptions } from '../../decorators/timezones'
 
@@ -400,8 +400,8 @@ function DeployTransportToggle({
   onChange: (deployWithAgent: boolean) => void
 }): JSX.Element {
   const bootstrapLogicProps = { frameId }
-  const { copied: bootstrapCopied, loading: bootstrapLoading } = useValues(agentBootstrapLogic(bootstrapLogicProps))
-  const { copyAgentBootstrapScript } = useActions(agentBootstrapLogic(bootstrapLogicProps))
+  const { copied: bootstrapCopied, loading: bootstrapLoading } = useValues(frameBootstrapLogic(bootstrapLogicProps))
+  const { copyFrameBootstrapScript } = useActions(frameBootstrapLogic(bootstrapLogicProps))
   const selectedTransport: AgentTaskTransport = deployWithAgent ? 'agent' : 'ssh'
   const selectedConnectionLabel = deployWithAgent ? 'agent' : 'SSH'
   const selectedAgentDisconnected = selectedTransport === 'agent' && !agentConnected
@@ -483,9 +483,9 @@ function DeployTransportToggle({
                 ? [
                     {
                       label: bootstrapCopied ? 'Bootstrap copied' : 'Copy bootstrap command',
-                      title: 'Copy agent bootstrap install command',
+                      title: 'Copy FrameOS bootstrap install command',
                       loading: bootstrapLoading,
-                      onClick: () => copyAgentBootstrapScript(false),
+                      onClick: () => copyFrameBootstrapScript(false),
                     },
                   ]
                 : []),
@@ -525,22 +525,22 @@ function DeployTransportToggle({
   )
 }
 
-function AgentBootstrapHelp(): JSX.Element {
+function FrameBootstrapHelp(): JSX.Element {
   return (
     <Tooltip
       className="inline-flex h-5 w-5 items-center justify-center rounded-full text-amber-500 hover:text-amber-600"
       titleClassName="w-72"
       title="Use this when the frame can reach this backend but SSH is unavailable. Run the command on the frame as root to install FrameOS and connect the agent."
     >
-      <ExclamationCircleIcon className="h-4 w-4" aria-label="Agent bootstrap help" />
+      <ExclamationCircleIcon className="h-4 w-4" aria-label="FrameOS bootstrap help" />
     </Tooltip>
   )
 }
 
-function AgentBootstrapAction({ frame }: { frame: FrameType }): JSX.Element | null {
+function FrameBootstrapAction({ frame }: { frame: FrameType }): JSX.Element | null {
   const logicProps = { frameId: frame.id }
-  const { copied, error, loading } = useValues(agentBootstrapLogic(logicProps))
-  const { copyAgentBootstrapScript } = useActions(agentBootstrapLogic(logicProps))
+  const { copied, error, loading } = useValues(frameBootstrapLogic(logicProps))
+  const { copyFrameBootstrapScript } = useActions(frameBootstrapLogic(logicProps))
 
   if (frame.last_successful_deploy_at || (frame.mode ?? 'rpios') !== 'rpios') {
     return null
@@ -550,19 +550,21 @@ function AgentBootstrapAction({ frame }: { frame: FrameType }): JSX.Element | nu
     <section className="space-y-2">
       <DrawerHeading>
         <span className="inline-flex items-center gap-1.5">
-          <span>Agent bootstrap</span>
-          <AgentBootstrapHelp />
+          <span>FrameOS bootstrap</span>
+          <FrameBootstrapHelp />
         </span>
       </DrawerHeading>
       <button
         type="button"
-        onClick={() => copyAgentBootstrapScript()}
+        onClick={() => copyFrameBootstrapScript()}
         disabled={loading}
         className="frameos-secondary-button flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-50"
       >
         <span className="flex min-w-0 items-center gap-2">
           <ClipboardDocumentIcon className="h-5 w-5 shrink-0" />
-          <span className="truncate">{copied ? 'Agent bootstrap script copied' : 'Copy agent bootstrap script'}</span>
+          <span className="truncate">
+            {copied ? 'FrameOS bootstrap script copied' : 'Copy FrameOS bootstrap script'}
+          </span>
         </span>
         {loading ? <Spinner className="shrink-0" /> : null}
       </button>
@@ -607,9 +609,7 @@ function BuildrootSdCardSection({
 
   return (
     <section className="mb-5 space-y-2">
-      <DrawerHeading
-        action={<FrameSettingsLink frameId={frame.id} />}
-      >
+      <DrawerHeading action={<FrameSettingsLink frameId={frame.id} />}>
         <span className="inline-flex items-center gap-2">
           {onBack ? <BackToDeployButton onClick={onBack} /> : null}
           <span>SD card</span>
@@ -725,7 +725,7 @@ function BuildrootSdCardSection({
   )
 }
 
-interface AgentBootstrapApiResponse {
+interface FrameBootstrapApiResponse {
   command: string
 }
 
@@ -742,7 +742,7 @@ function ScriptInstallSection({ frame, onBack }: { frame: FrameType; onBack: () 
     setError(null)
     try {
       const response = await apiFetch(
-        `/api/frames/${frame.id}/agent_bootstrap?select_agent=1&regenerate=${regenerate ? 1 : 0}`,
+        `/api/frames/${frame.id}/frame_bootstrap?select_agent=1&regenerate=${regenerate ? 1 : 0}`,
         {
           method: 'POST',
         }
@@ -751,7 +751,7 @@ function ScriptInstallSection({ frame, onBack }: { frame: FrameType; onBack: () 
         const payload = await response.json().catch(() => ({}))
         throw new Error(typeof payload?.detail === 'string' ? payload.detail : 'Failed to create install command')
       }
-      const payload = (await response.json()) as AgentBootstrapApiResponse
+      const payload = (await response.json()) as FrameBootstrapApiResponse
       setCommand(payload.command)
       loadFrame(frame.id)
     } catch (error) {
@@ -783,7 +783,7 @@ function ScriptInstallSection({ frame, onBack }: { frame: FrameType; onBack: () 
       </DrawerHeading>
       <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
         <div className="frame-tool-muted text-sm leading-5">
-          Run this command on the device as a user with sudo access. It installs FrameOS, starts the agent, and connects
+          Run this command on the device as a user with sudo access. It installs FrameOS, starts the remote management agent, and connects
           back to this backend. The installer supports most major Debian and Ubuntu releases, including Raspberry Pi OS
           releases based on Debian.
         </div>
@@ -862,7 +862,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
   const activeDeployDrawerView = directSdCardFirstInstall ? 'sdCard' : deployDrawerView
   const canDeployAgent = true
   const canCopyBootstrapScript = !isBuildrootFrame
-  const canBootstrapAgent = !firstInstall && !frame.last_successful_deploy_at && !isBuildrootFrame
+  const canBootstrapFrameOS = !firstInstall && !frame.last_successful_deploy_at && !isBuildrootFrame
   const showRecompileAgent = import.meta.env?.DEV === true
   const closeAndRun = (action: () => void): void => {
     action()
@@ -935,13 +935,10 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
             <ScriptInstallSection frame={frame} onBack={showMainDeployView} />
           ) : (
             <>
-              <div className="mb-4 flex justify-end">
-                <FrameSettingsLink frameId={frame.id} />
-              </div>
               <AlternativesSection onSelect={setDeployDrawerView} />
-              {canBootstrapAgent ? (
+              {canBootstrapFrameOS ? (
                 <div className="mb-4">
-                  <AgentBootstrapAction frame={frame} />
+                  <FrameBootstrapAction frame={frame} />
                 </div>
               ) : null}
               {deployTransportToggleVisible && !firstInstall ? (
@@ -998,7 +995,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
                   ) : null}
                   {deployChangeDetails.length > 0 ? (
                     <section className="space-y-2">
-                      <DrawerHeading>Pending changes</DrawerHeading>
+                      <DrawerHeading action={<FrameSettingsLink frameId={frame.id} />}>Pending changes</DrawerHeading>
                       <div className="frame-tool-card rounded-[22px] p-4">
                         <ChangeRows changes={deployChangeDetails} />
                       </div>

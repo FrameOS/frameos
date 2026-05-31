@@ -54,7 +54,7 @@ async def test_api_frame_get_found(async_client, db, redis):
 
 
 @pytest.mark.asyncio
-async def test_api_frame_agent_bootstrap_command_enables_agent_and_returns_script(async_client, no_auth_client, db, redis):
+async def test_api_frame_bootstrap_command_enables_agent_and_returns_script(async_client, no_auth_client, db, redis):
     frame = await new_frame(db, redis, 'BootstrapFrame', 'frame.local', 'backend.local')
     frame.scenes = [
         {
@@ -68,11 +68,11 @@ async def test_api_frame_agent_bootstrap_command_enables_agent_and_returns_scrip
     db.add(frame)
     db.commit()
 
-    command_response = await async_client.post(f'/api/frames/{frame.id}/agent_bootstrap')
+    command_response = await async_client.post(f'/api/frames/{frame.id}/frame_bootstrap')
 
     assert command_response.status_code == 200
     command_payload = command_response.json()
-    assert command_payload['script_url'].startswith(f'http://backend.local:8989/api/agent-bootstrap/{frame.id}/')
+    assert command_payload['script_url'].startswith(f'http://backend.local:8989/api/frame-bootstrap/{frame.id}/')
     assert command_payload['command'] == f"curl -fsSL {command_payload['script_url']} | sudo sh"
 
     db.refresh(frame)
@@ -90,6 +90,11 @@ async def test_api_frame_agent_bootstrap_command_enables_agent_and_returns_scrip
     assert 'frameos.service' in script
     assert 'FRAMEOS_DIR=/srv/frameos' in script
     assert './frameos setup' in script
+    assert 'install -m 0644 "$frameos_release_dir/frameos.service" /etc/systemd/system/frameos.service' in script
+    assert (
+        'install -m 0644 "$agent_release_dir/frameos_agent.service" '
+        '/etc/systemd/system/frameos_agent.service'
+    ) in script
     assert 'FrameOS and the FrameOS agent are installed and started' in script
     assert 'compile_frameos_agent' not in script
     assert 'sh compile' not in script
@@ -113,18 +118,18 @@ async def test_api_frame_agent_bootstrap_command_enables_agent_and_returns_scrip
     )[0]
     assert json.loads(scenes_json) == frame.scenes
 
-    bad_response = await no_auth_client.get(f'/api/agent-bootstrap/{frame.id}/not-the-token')
+    bad_response = await no_auth_client.get(f'/api/frame-bootstrap/{frame.id}/not-the-token')
     assert bad_response.status_code == 404
 
 
 @pytest.mark.asyncio
-async def test_api_frame_agent_bootstrap_command_can_preserve_deploy_transport(async_client, db, redis):
+async def test_api_frame_bootstrap_command_can_preserve_deploy_transport(async_client, db, redis):
     frame = await new_frame(db, redis, 'BootstrapFrame', 'frame.local', 'backend.local')
     frame.agent = {'deployWithAgent': False}
     db.add(frame)
     db.commit()
 
-    response = await async_client.post(f'/api/frames/{frame.id}/agent_bootstrap?select_agent=0')
+    response = await async_client.post(f'/api/frames/{frame.id}/frame_bootstrap?select_agent=0')
 
     assert response.status_code == 200
     db.refresh(frame)
@@ -134,17 +139,17 @@ async def test_api_frame_agent_bootstrap_command_can_preserve_deploy_transport(a
 
 
 @pytest.mark.asyncio
-async def test_api_frame_agent_bootstrap_command_can_regenerate_token(async_client, no_auth_client, db, redis):
+async def test_api_frame_bootstrap_command_can_regenerate_token(async_client, no_auth_client, db, redis):
     frame = await new_frame(db, redis, 'BootstrapFrame', 'frame.local', 'backend.local')
 
-    first_response = await async_client.post(f'/api/frames/{frame.id}/agent_bootstrap')
+    first_response = await async_client.post(f'/api/frames/{frame.id}/frame_bootstrap')
     assert first_response.status_code == 200
     first_payload = first_response.json()
     first_script_path = urlparse(first_payload['script_url']).path
     db.refresh(frame)
     first_agent_secret = frame.agent['agentSharedSecret']
 
-    second_response = await async_client.post(f'/api/frames/{frame.id}/agent_bootstrap?regenerate=1')
+    second_response = await async_client.post(f'/api/frames/{frame.id}/frame_bootstrap?regenerate=1')
     assert second_response.status_code == 200
     second_payload = second_response.json()
     second_script_path = urlparse(second_payload['script_url']).path

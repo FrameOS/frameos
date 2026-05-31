@@ -5,6 +5,7 @@ import apps/data/qr/app as data_qrApp
 
 import frameos/apps
 import frameos/channels
+import frameos/config
 import frameos/logger
 import frameos/types
 import frameos/utils/image
@@ -366,6 +367,10 @@ proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.a
             continue # don't dispatch this event to the scene
           of "reload":
             self.logger.log(%*{"event": "reload", "message": "Reloading config and interpreted scenes"})
+            try:
+              updateFrameConfigFrom(self.frameConfig, loadConfig())
+            except Exception as e:
+              self.logger.log(%*{"event": "reload:config:error", "error": e.msg, "stacktrace": e.getStackTrace()})
             reloadInterpretedScenes(self.logger)
             cleanupSceneTableRuntime(self.scenes)
             self.scenes = initTable[SceneId, FrameScene]()
