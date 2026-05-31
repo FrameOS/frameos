@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from functools import partial
 import os
-from pathlib import Path
 import shlex
 from typing import Any
 
@@ -57,9 +56,6 @@ REMOTE_BUILD_FEATURE_CFLAGS = {
     "amd64": ("-mavx2", "-mavx", "-msse4.1", "-mssse3", "-mpclmul", "-mvpclmulqdq"),
     "x86_64": ("-mavx2", "-mavx", "-msse4.1", "-mssse3", "-mpclmul", "-mvpclmulqdq"),
 }
-REPO_ROOT = Path(__file__).resolve().parents[3]
-
-
 def _deploy_uses_agent(frame: Frame) -> bool:
     agent = frame.agent if isinstance(frame.agent, dict) else {}
     return bool(
@@ -641,7 +637,6 @@ class FrameDeployWorkflow:
             )
             stopped_frameos_for_setup = await self._stop_frameos_for_release_setup()
             await self._run_release_setup(build_id=build_id, post_deploy=full_plan.post_deploy)
-            await self._install_and_activate_release(build_id)
             await sync_assets(self.db, self.redis, frame)
             await self._cleanup_release_artifacts()
             await self._run_post_deploy_cleanup(post_deploy=full_plan.post_deploy)
@@ -1024,53 +1019,6 @@ class FrameDeployWorkflow:
                 log_command=f"diagnostics: {label}",
             )
 
-    async def _frameos_service_user(self) -> str:
-        fallback_user = str(self.frame.ssh_user or "pi")
-        if not _deploy_uses_agent(self.frame):
-            return fallback_user
-
-        output: list[str] = []
-        status = await self.deployer.exec_command(
-            "id -un",
-            output=output,
-            log_output=False,
-            log_command=False,
-            raise_on_error=False,
-        )
-        agent_user = output[0].strip() if status == 0 and output else ""
-        if agent_user:
-            return agent_user
-
-        await self.deployer.log(
-            "stderr",
-            f"{icon} Could not detect agent user; falling back to SSH user {fallback_user}",
-        )
-        return fallback_user
-
-    async def _install_and_activate_release(self, build_id: str) -> None:
-        service_user = await self._frameos_service_user()
-        with (REPO_ROOT / "frameos" / "frameos.service").open("r", encoding="utf-8") as f:
-            service_contents = f.read().replace("%I", service_user)
-        await upload_file(
-            self.deployer.db,
-            self.deployer.redis,
-            self.deployer.frame,
-            f"{self._release_dir(build_id)}/frameos.service",
-            service_contents.encode("utf-8"),
-        )
-
-        await self.deployer.exec_command(
-            f"mkdir -p /srv/frameos/state && ln -s /srv/frameos/state {self._release_dir(build_id)}/state"
-        )
-        await self.deployer.exec_command(
-            f"sudo cp {self._release_dir(build_id)}/frameos.service /etc/systemd/system/frameos.service"
-        )
-        await self.deployer.exec_command("sudo chown root:root /etc/systemd/system/frameos.service")
-        await self.deployer.exec_command("sudo chmod 644 /etc/systemd/system/frameos.service")
-        await self.deployer.exec_command(
-            f"rm -rf /srv/frameos/current && ln -s {self._release_dir(build_id)} /srv/frameos/current"
-        )
-
     async def _cleanup_release_artifacts(self) -> None:
         await self.deployer.exec_command(
             "if [ -d /srv/frameos/build ] && cd /srv/frameos/build && ls -dt1 build_* >/dev/null 2>&1; then "
@@ -1158,13 +1106,13 @@ class FrameDeployWorkflow:
             await self._remove_setup_json_reset_helper()
 
         if post_deploy.get("final_action") == "reboot":
-            await self.deployer.exec_command("sudo systemctl enable frameos.service")
             await self.deployer.log("stdinfo", f"{icon} Deployed! Rebooting device after boot config changes")
             await self.deployer.exec_command("sudo reboot")
         else:
             await self.deployer.exec_command("sudo systemctl daemon-reload")
             await self.deployer.log("stdinfo", f"{icon} Deployed! Restarting FrameOS")
-            await self.deployer.restart_service("frameos")
+            await self.deployer.exec_command("sudo systemctl restart frameos.service")
+            await self.deployer.exec_command("sudo systemctl status frameos.service")
 
     async def _install_setup_json_reset_helper(self, setup_json_reset_path: str) -> None:
         await self.deployer.log("stdout", f"{icon} Installing setup JSON reset helper")

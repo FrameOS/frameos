@@ -150,6 +150,30 @@ proc installServiceFile(sourcePath, destinationPath: string) =
     return
   writePrivilegedFile(destinationPath, readFile(sourcePath))
 
+proc frameosServiceUser*(): string =
+  for candidate in [getEnv("SUDO_USER"), getEnv("USER"), getEnv("LOGNAME")]:
+    let user = candidate.strip()
+    if user.len > 0:
+      return user
+  result = "root"
+
+proc frameosServiceContents*(user: string): string =
+  result = "[Unit]\n" &
+    "Description=FrameOS Service\n" &
+    "After=network.target\n" &
+    "\n" &
+    "[Service]\n" &
+    "User=" & user & "\n" &
+    "WorkingDirectory=/srv/frameos/current\n" &
+    "ExecStart=/srv/frameos/current/frameos\n" &
+    "Restart=always\n" &
+    "\n" &
+    "[Install]\n" &
+    "WantedBy=multi-user.target\n"
+
+proc installFrameOSServiceFile() =
+  writePrivilegedFile("/etc/systemd/system/frameos.service", frameosServiceContents(frameosServiceUser()))
+
 proc systemdServiceNames(frameOS: FrameOS): seq[string] =
   result = @["frameos.service"]
   if frameOS.frameConfig.agent != nil and frameOS.frameConfig.agent.agentEnabled:
@@ -163,12 +187,11 @@ proc setupSystemdServices*(frameOS: FrameOS): SetupResult =
     echo "FrameOS setup: systemd services: systemctl not found, skipping"
     return setupOk()
 
-  let currentDir = getAppDir()
   echo "FrameOS setup: systemd services: ensuring service directories"
   ensureSystemdServiceDirectories()
 
   echo "FrameOS setup: systemd services: installing frameos.service"
-  installServiceFile(currentDir / "frameos.service", "/etc/systemd/system/frameos.service")
+  installFrameOSServiceFile()
 
   if frameOS.frameConfig.agent != nil and frameOS.frameConfig.agent.agentEnabled:
     echo "FrameOS setup: systemd services: installing frameos_agent.service"
@@ -178,6 +201,27 @@ proc setupSystemdServices*(frameOS: FrameOS): SetupResult =
 
   discard runSetupCommand(privilegedCommand("systemctl daemon-reload"))
   discard runSetupCommand(privilegedCommand("systemctl enable " & systemdServiceNames(frameOS).join(" ")))
+
+  result = setupOk()
+
+proc setupReleaseActivation*(currentDir = getAppDir()): SetupResult =
+  let normalizedDir = currentDir.strip(chars = {'/'})
+  if normalizedDir.len == 0:
+    echo "FrameOS setup: release activation: unknown app directory"
+    return setupOk()
+
+  let appDir = "/" & normalizedDir
+  let stateLink = appDir / "state"
+
+  echo "FrameOS setup: release activation: ensuring shared state directory"
+  discard runSetupCommand("mkdir -p /srv/frameos/state")
+  discard runSetupCommand("rm -rf " & shellQuote(stateLink) & " && ln -s /srv/frameos/state " & shellQuote(stateLink))
+
+  if appDir.startsWith("/srv/frameos/releases/release_"):
+    echo "FrameOS setup: release activation: activating " & appDir
+    discard runSetupCommand("rm -rf /srv/frameos/current && ln -s " & shellQuote(appDir) & " /srv/frameos/current")
+  else:
+    echo "FrameOS setup: release activation: current app directory is " & appDir
 
   result = setupOk()
 
@@ -236,6 +280,7 @@ proc setupFrameOS*(configPath = ""): SetupResult =
   addSetupResult(result, drivers.setup(frameOS))
   echo "FrameOS setup: driver setup: complete"
   addSetupResult(result, runSetupStep("systemd services", proc(): SetupResult = setupSystemdServices(frameOS)))
+  addSetupResult(result, runSetupStep("release activation", proc(): SetupResult = setupReleaseActivation()))
   if result.rebootRequired:
     echo "FrameOS setup: reboot required"
   echo "FrameOS setup: complete"
