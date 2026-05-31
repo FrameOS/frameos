@@ -316,8 +316,6 @@ def _service_runtime_lines(
         lines.extend([
             "StandardOutput=journal+console",
             "StandardError=journal+console",
-            "StandardInput=tty",
-            "TTYPath=/dev/tty1",
         ])
     return lines
 
@@ -1604,7 +1602,7 @@ target_dir="${TARGET_DIR:?TARGET_DIR is required}"
 
 chmod 0755 "$target_dir/srv/frameos/current/frameos" || true
 chmod 0755 "$target_dir/srv/frameos/agent/current/frameos_agent" || true
-mkdir -p "$target_dir/etc/systemd/system/multi-user.target.wants"
+mkdir -p "$target_dir/etc/systemd/system/multi-user.target.wants" "$target_dir/etc/cron.d"
 
 if [ -d "$target_dir/lib/firmware/brcm" ]; then
   cd "$target_dir/lib/firmware/brcm"

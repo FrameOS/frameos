@@ -147,15 +147,18 @@ def test_buildroot_partition_scripts_create_frameos_and_assets_partitions(tmp_pa
 
     BuildrootImageBuilder._write_partition_post_build_script(partition_post_build_path)
     BuildrootImageBuilder._write_post_image_script(post_image_path)
+    BuildrootImageBuilder._write_post_build_script(tmp_path / "post-build.sh")
 
     partition_post_build = partition_post_build_path.read_text(encoding="utf-8")
     post_image = post_image_path.read_text(encoding="utf-8")
+    post_build = (tmp_path / "post-build.sh").read_text(encoding="utf-8")
 
     assert "LABEL=BOOT /boot vfat" in partition_post_build
     assert "LABEL=FRAMEOS /srv/frameos ext4" in partition_post_build
     assert "LABEL=ASSETS /srv/assets vfat" in partition_post_build
     assert "frameos-partition-root" in partition_post_build
     assert "assets-partition-root" in partition_post_build
+    assert '"$target_dir/etc/cron.d"' in post_build
     assert "image frameos.ext4" in post_image
     assert "image assets.vfat" in post_image
     assert "partition frameos" in post_image
@@ -304,6 +307,8 @@ def test_buildroot_service_writes_console_output_and_environment(tmp_path):
     assert "Environment=LD_LIBRARY_PATH=/usr/lib" in service
     assert "StandardOutput=journal+console" in service
     assert "StandardError=journal+console" in service
+    assert "StandardInput=tty" not in service
+    assert "TTYPath=/dev/tty1" not in service
 
 
 def test_buildroot_output_cache_key_tracks_bootstrap_inputs(tmp_path, monkeypatch):

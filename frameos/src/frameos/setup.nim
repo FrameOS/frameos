@@ -154,12 +154,18 @@ proc systemdServiceNames(frameOS: FrameOS): seq[string] =
   if frameOS.frameConfig.agent != nil and frameOS.frameConfig.agent.agentEnabled:
     result.add("frameos_agent.service")
 
+proc ensureSystemdServiceDirectories() =
+  discard runSetupCommand(privilegedCommand("install -d -m 755 /etc/systemd/system /etc/cron.d"))
+
 proc setupSystemdServices*(frameOS: FrameOS): SetupResult =
   if not commandExists("systemctl"):
     echo "FrameOS setup: systemd services: systemctl not found, skipping"
     return setupOk()
 
   let currentDir = getAppDir()
+  echo "FrameOS setup: systemd services: ensuring service directories"
+  ensureSystemdServiceDirectories()
+
   echo "FrameOS setup: systemd services: installing frameos.service"
   installServiceFile(currentDir / "frameos.service", "/etc/systemd/system/frameos.service")
 
