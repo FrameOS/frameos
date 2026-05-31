@@ -3,7 +3,7 @@ from __future__ import annotations
 import shlex
 from typing import Any
 
-from app.models.frame import Frame
+from app.models.frame import Frame, normalize_buildroot_setup_json_reset_file_path
 
 DEFAULT_SETUP_JSON_RESET_FILE_PATH = "/boot/frameos-setup.json"
 SETUP_JSON_RESET_SERVICE_NAME = "frameos-firstboot-setup.service"
@@ -19,9 +19,11 @@ BOOT_SETUP_RESET_LOG_FILE = "/boot/frameos-setup-reset.log"
 def setup_json_reset_file_path(frame: Frame | Any, *, default_if_missing: bool = False) -> str:
     if getattr(frame, "mode", None) != "buildroot" and not default_if_missing:
         return ""
-    if default_if_missing or getattr(frame, "mode", None) == "buildroot":
-        return DEFAULT_SETUP_JSON_RESET_FILE_PATH
-    return ""
+    buildroot = frame.buildroot if isinstance(getattr(frame, "buildroot", None), dict) else {}
+    return normalize_buildroot_setup_json_reset_file_path(
+        buildroot.get("setupJsonResetFilePath"),
+        default_if_missing=default_if_missing or getattr(frame, "mode", None) == "buildroot",
+    )
 
 
 def setup_json_reset_enabled(frame: Frame | Any) -> bool:

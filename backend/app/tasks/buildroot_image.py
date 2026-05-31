@@ -27,6 +27,7 @@ from app.models.frame import (
     Frame,
     get_frame_json,
     get_interpreted_scenes_json,
+    normalize_buildroot_setup_json_reset_file_path,
     update_frame,
 )
 from app.models.log import new_log as log
@@ -38,6 +39,10 @@ from app.tasks.setup_json_reset import (
     BOOT_AUTHORIZED_KEYS_FILE,
     BOOT_HOSTNAME_FILE,
     BOOT_WIFI_CONNECTION_FILE,
+    SETUP_JSON_RESET_SCRIPT_PATH,
+    SETUP_JSON_RESET_SERVICE_NAME,
+    render_setup_json_reset_script,
+    render_setup_json_reset_service,
     setup_json_reset_enabled,
     setup_json_reset_file_path,
 )
@@ -439,6 +444,10 @@ def ensure_buildroot_frame_defaults(frame: Frame, platform: str | None = None) -
 
     buildroot = dict(frame.buildroot or {})
     buildroot["platform"] = normalized_platform
+    buildroot["setupJsonResetFilePath"] = normalize_buildroot_setup_json_reset_file_path(
+        buildroot.get("setupJsonResetFilePath"),
+        default_if_missing=True,
+    )
     frame.buildroot = buildroot
 
 
@@ -792,6 +801,8 @@ class BuildrootImageBuilder:
         state_dir = overlay_dir / "srv" / "frameos" / "state"
         boot_overlay_dir = overlay_dir / "boot"
         assets_dir = overlay_dir / "srv" / "assets"
+        systemd_dir = overlay_dir / "etc" / "systemd" / "system"
+        wants_dir = systemd_dir / "multi-user.target.wants"
 
         for directory in (
             release_dir,
@@ -799,6 +810,7 @@ class BuildrootImageBuilder:
             state_dir,
             assets_dir,
             boot_overlay_dir,
+            wants_dir,
         ):
             directory.mkdir(parents=True, exist_ok=True)
 
@@ -865,6 +877,21 @@ class BuildrootImageBuilder:
         if setup_reset_enabled:
             setup_file_path = setup_json_reset_file_path(self.frame, default_if_missing=True)
             self._write_setup_payload(_boot_setup_payload_path(boot_overlay_dir, setup_file_path), setup_payload)
+            script_path = overlay_dir / SETUP_JSON_RESET_SCRIPT_PATH.lstrip("/")
+            script_path.parent.mkdir(parents=True, exist_ok=True)
+            script_path.write_text(render_setup_json_reset_script(setup_file_path), encoding="utf-8")
+            os.chmod(script_path, 0o755)
+            (systemd_dir / SETUP_JSON_RESET_SERVICE_NAME).write_text(
+                render_setup_json_reset_service(
+                    setup_file_path,
+                    script_path=SETUP_JSON_RESET_SCRIPT_PATH,
+                ),
+                encoding="utf-8",
+            )
+            self._relative_symlink(
+                f"../{SETUP_JSON_RESET_SERVICE_NAME}",
+                wants_dir / SETUP_JSON_RESET_SERVICE_NAME,
+            )
 
         (boot_overlay_dir / Path(BOOT_HOSTNAME_FILE).name).write_text(_hostname_for_frame(self.frame) + "\n", encoding="utf-8")
         self._write_boot_wifi_connection(boot_overlay_dir / Path(BOOT_WIFI_CONNECTION_FILE).name)

@@ -2537,7 +2537,6 @@ async def api_frame_new(
         frame.mode = data.mode or "rpios"
         if frame.mode == "buildroot":
             frame.timezone = frame_timezone(data.timezone, (settings.get("defaults") or {}).get("timezone"))
-        if frame.mode == "buildroot":
             frame.network = {
                 **(frame.network or {}),
                 **(data.network or {}),

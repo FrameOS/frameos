@@ -65,6 +65,7 @@ jobs:
           fi
 
           cp tzdata.json "$STAGE_DIR/tzdata.json"
+          cp timezone_aliases.json "$STAGE_DIR/timezone_aliases.json"
           cp tzdata/dstchanges.csv "$STAGE_DIR/dstchanges.csv"
           cp tzdata/timezones.csv "$STAGE_DIR/timezones.csv"
 
@@ -75,10 +76,14 @@ jobs:
 
           workspace = Path(os.environ["WORKSPACE"])
           source = workspace / "tz-staging/tzdata.json"
+          alias_source = workspace / "tz-staging/timezone_aliases.json"
           data = json.loads(source.read_text(encoding="utf-8"))
+          aliases = json.loads(alias_source.read_text(encoding="utf-8"))
 
           if not isinstance(data, dict):
             raise SystemExit("tzdata.json is not a JSON object")
+          if not isinstance(aliases, dict):
+            raise SystemExit("timezone_aliases.json is not a JSON object")
           timezones = data.get("timezones")
           if not isinstance(timezones, list) or not timezones:
             raise SystemExit("tzdata.json missing or empty timezones list")
@@ -86,13 +91,37 @@ jobs:
             raise SystemExit("tzdata.json missing or invalid dstChanges list")
           if not all(isinstance(item, dict) and isinstance(item.get("name"), str) for item in timezones):
             raise SystemExit("tzdata.json timezones entries are malformed")
+          if not all(isinstance(key, str) and isinstance(value, str) for key, value in aliases.items()):
+            raise SystemExit("timezone_aliases.json entries are malformed")
 
-          timezone_names = [item["name"] for item in timezones]
-          if "UTC" not in timezone_names:
-            timezone_names.insert(0, "UTC")
+          timezone_names = sorted({item["name"] for item in timezones} | set(aliases.keys()) | {"UTC"})
+          timezone_targets = {item["name"] for item in timezones}
+          missing_alias_targets = sorted({target for target in aliases.values() if target not in timezone_targets})
+          if missing_alias_targets:
+            sample = ", ".join(missing_alias_targets[:20])
+            extra = "" if len(missing_alias_targets) <= 20 else f", and {len(missing_alias_targets) - 20} more"
+            raise SystemExit(f"timezone_aliases.json points to missing timezone names: {sample}{extra}")
+
+          existing_timezones_path = workspace / "frontend/src/decorators/timezones.json"
+          if existing_timezones_path.exists():
+            existing_timezones = json.loads(existing_timezones_path.read_text(encoding="utf-8"))
+            if not isinstance(existing_timezones, list) or not all(isinstance(item, str) for item in existing_timezones):
+              raise SystemExit("Existing frontend timezone list is malformed")
+            missing_existing_timezones = sorted(set(existing_timezones) - set(timezone_names))
+            if missing_existing_timezones:
+              sample = ", ".join(missing_existing_timezones[:20])
+              extra = "" if len(missing_existing_timezones) <= 20 else f", and {len(missing_existing_timezones) - 20} more"
+              raise SystemExit(
+                "Generated timezone list would remove existing frontend timezone names. "
+                f"Missing: {sample}{extra}"
+              )
 
           (workspace / "frameos/assets/compiled/tz/tzdata.json").write_text(
             source.read_text(encoding="utf-8"),
+            encoding="utf-8",
+          )
+          (workspace / "frameos/assets/compiled/tz/timezone_aliases.json").write_text(
+            alias_source.read_text(encoding="utf-8"),
             encoding="utf-8",
           )
           (workspace / "frontend/src/decorators/timezones.json").write_text(
@@ -105,12 +134,15 @@ jobs:
           mkdir -p "$TZ_DIR/dist"
           if [ ! -f "$TZ_DIR/dist/tzdata.json" ] || \
             ! cmp -s "$STAGE_DIR/tzdata.json" "$TZ_DIR/dist/tzdata.json" || \
+            ! cmp -s "$STAGE_DIR/timezone_aliases.json" "$TZ_DIR/dist/timezone_aliases.json" || \
             ! cmp -s "$STAGE_DIR/dstchanges.csv" "$TZ_DIR/dist/dstchanges.csv" || \
             ! cmp -s "$STAGE_DIR/timezones.csv" "$TZ_DIR/dist/timezones.csv"; then
             cp "$STAGE_DIR/tzdata.json" "$TZ_DIR/dist/tzdata.json"
+            cp "$STAGE_DIR/timezone_aliases.json" "$TZ_DIR/dist/timezone_aliases.json"
             cp "$STAGE_DIR/dstchanges.csv" "$TZ_DIR/dist/dstchanges.csv"
             cp "$STAGE_DIR/timezones.csv" "$TZ_DIR/dist/timezones.csv"
             gzip -9 -f -k "$TZ_DIR/dist/tzdata.json"
+            gzip -9 -f -k "$TZ_DIR/dist/timezone_aliases.json"
             gzip -9 -f -k "$TZ_DIR/dist/dstchanges.csv"
             gzip -9 -f -k "$TZ_DIR/dist/timezones.csv"
             date -u +"%Y-%m-%dT%H:%M:%SZ" > "$TZ_DIR/dist/updated.txt"
@@ -128,7 +160,7 @@ jobs:
       - name: Check for changed FrameOS timezone files
         id: frameos_changes
         run: |
-          if git diff --quiet -- frameos/assets/compiled/tz/tzdata.json frontend/src/decorators/timezones.json; then
+          if git diff --quiet -- frameos/assets/compiled/tz/tzdata.json frameos/assets/compiled/tz/timezone_aliases.json frontend/src/decorators/timezones.json; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
@@ -152,7 +184,7 @@ jobs:
 
           git -C "$GITHUB_WORKSPACE/tz" config user.name "frameos-bot"
           git -C "$GITHUB_WORKSPACE/tz" config user.email "git@frameos.net"
-          git -C "$GITHUB_WORKSPACE/tz" add dist/tzdata.json dist/timezones.csv dist/dstchanges.csv dist/tzdata.json.gz dist/timezones.csv.gz dist/dstchanges.csv.gz dist/updated.txt
+          git -C "$GITHUB_WORKSPACE/tz" add dist/tzdata.json dist/timezone_aliases.json dist/timezones.csv dist/dstchanges.csv dist/tzdata.json.gz dist/timezone_aliases.json.gz dist/timezones.csv.gz dist/dstchanges.csv.gz dist/updated.txt
           git -C "$GITHUB_WORKSPACE/tz" commit -m "chore: update timezone artefacts from ${{ steps.generate.outputs.tz_commit }}"
           git -C "$GITHUB_WORKSPACE/tz" remote set-url origin "https://x-access-token:${TZ_REPO_TOKEN}@github.com/FrameOS/tz.git"
           git -C "$GITHUB_WORKSPACE/tz" push origin "HEAD:$TARGET_BRANCH"
@@ -167,6 +199,6 @@ jobs:
           fi
           git config user.name "frameos-bot"
           git config user.email "git@frameos.net"
-          git add frameos/assets/compiled/tz/tzdata.json frontend/src/decorators/timezones.json
+          git add frameos/assets/compiled/tz/tzdata.json frameos/assets/compiled/tz/timezone_aliases.json frontend/src/decorators/timezones.json
           git commit -m "chore: sync timezone data from FrameOS/tz/${{ steps.generate.outputs.tz_commit }}"
           git push origin "HEAD:$FRAMEOS_BRANCH"

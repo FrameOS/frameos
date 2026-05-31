@@ -596,6 +596,21 @@ export function FrameSettings({
                   ]}
                 />
               </Field>
+              <Field
+                name="setupJsonResetFilePath"
+                label="Setup JSON reset file path"
+                tooltip={
+                  <div className="space-y-2">
+                    <p>
+                      If this file exists on boot, FrameOS runs setup from it once, then renames it to a
+                      <code>setup-done-YYYYMMDD-HHMM.json</code> marker so it will not run again on the next boot.
+                    </p>
+                    <p>Leave this empty to disable the one-shot setup import helper.</p>
+                  </div>
+                }
+              >
+                <TextInput name="buildroot.setupJsonResetFilePath" placeholder="/boot/frameos-setup.json" />
+              </Field>
             </Group>
           ) : null}
           {/* {frameForm.mode === 'rpios' || !frameForm.mode ? (

@@ -16,7 +16,7 @@ from app.models import new_frame
 from app.models.frame import Frame
 from app.models.log import Log
 from app.models.user import User
-from app.tasks.buildroot_image import buildroot_sd_image_config_fingerprint
+from app.tasks.buildroot_image import BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION, buildroot_sd_image_config_fingerprint
 from app.codegen.drivers_nim import frame_compilation_mode
 
 
@@ -925,7 +925,7 @@ async def test_api_frame_buildroot_sd_image_post_returns_ready_image(async_clien
             'filename': 'frameos-test.img',
             'path': str(image_path),
             'downloadUrl': f'/api/frames/{frame.id}/buildroot/sd_image/download',
-            'customizationVersion': 8,
+            'customizationVersion': BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION,
             'baseImage': {
                 'objectKey': current_base_entry['object_key'],
                 'sha256': current_base_entry['sha256'],
@@ -1124,7 +1124,7 @@ async def test_api_frame_buildroot_sd_image_regenerates_stale_base_image(
             'status': 'ready',
             'filename': 'frameos-test.img.gz',
             'path': str(image_path),
-            'customizationVersion': 8,
+            'customizationVersion': BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION,
             'baseImage': {
                 'objectKey': 'buildroot-images/old.img.gz',
                 'sha256': 'old-sha256',
@@ -1193,7 +1193,7 @@ async def test_api_frame_buildroot_sd_image_regenerates_stale_config_fingerprint
             'status': 'ready',
             'filename': 'frameos-test.img.gz',
             'path': str(image_path),
-            'customizationVersion': 8,
+            'customizationVersion': BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION,
             'baseImage': {
                 'objectKey': current_base_entry['object_key'],
                 'sha256': current_base_entry['sha256'],
@@ -1243,7 +1243,7 @@ async def test_api_frame_buildroot_sd_image_download(async_client, db, redis, tm
             'status': 'ready',
             'filename': 'frameos-test.img',
             'path': str(image_path),
-            'customizationVersion': 8,
+            'customizationVersion': BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION,
         },
     }
     set_buildroot_sd_image_config_fingerprint(frame)

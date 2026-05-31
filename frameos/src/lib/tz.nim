@@ -1,9 +1,13 @@
 import chrono
+import json
 import os
 import system
 import strutils
+import tables
 
 var timeZoneDataLoaded = false
+var timeZoneAliasDataLoaded = false
+var timeZoneAliases: Table[string, string]
 
 proc initTimeZone*() =
   if timeZoneDataLoaded:
@@ -12,6 +16,25 @@ proc initTimeZone*() =
   const tzData = staticRead("../../assets/compiled/tz/tzdata.json")
   loadTzData(tzData)
   timeZoneDataLoaded = true
+
+proc initTimeZoneAliases() =
+  if timeZoneAliasDataLoaded:
+    return
+  const aliasData = staticRead("../../assets/compiled/tz/timezone_aliases.json")
+  let aliases = parseJson(aliasData)
+  if aliases.kind == JObject:
+    for alias, target in aliases:
+      if target.kind == JString:
+        timeZoneAliases[alias] = target.getStr()
+  timeZoneAliasDataLoaded = true
+
+proc canonicalTimeZone*(timeZone: string): string =
+  result = timeZone.strip()
+  if result.len == 0:
+    return
+  initTimeZoneAliases()
+  if timeZoneAliases.hasKey(result):
+    return timeZoneAliases[result]
 
 
 proc detectSystemTimeZone*(): string =
@@ -56,6 +79,7 @@ proc detectSystemTimeZone*(): string =
   if lc in ["etc/utc", "utc", "uct", "universal", "zulu", "z"]:
     return "UTC"
 
+  result = canonicalTimeZone(result)
   initTimeZone()
   # check if result is a valid timezone
   if not valid(findTimeZone(result)):

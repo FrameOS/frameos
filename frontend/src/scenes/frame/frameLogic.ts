@@ -815,6 +815,7 @@ function sanitizeFrame(frame: Partial<FrameType>): Partial<FrameType> {
       ? {
           ...(frame.buildroot ?? {}),
           compilationMode: frame.buildroot?.compilationMode ?? '',
+          setupJsonResetFilePath: frame.buildroot?.setupJsonResetFilePath ?? '/boot/frameos-setup.json',
         }
       : frame.buildroot
   const rpios = frame.rpios
@@ -1225,6 +1226,9 @@ export const frameLogic = kea<frameLogicType>([
       actions.loadDeployPlansSuccess(payload.plan)
     },
     showDeployPlanModal: () => {
+      if ((values.frameForm?.mode || values.frame?.mode || 'rpios') === 'buildroot') {
+        return
+      }
       const hasUsableLocalPlan =
         Boolean(values.deployRecommendation) ||
         values.fullDeployPlanSummary.length > 0 ||
@@ -1398,6 +1402,9 @@ export const frameLogic = kea<frameLogicType>([
     deployTransportToggleVisible: [
       (s) => [s.frameForm, s.frame],
       (frameForm, frame): boolean => {
+        if ((frameForm?.mode || frame?.mode || 'rpios') === 'buildroot') {
+          return false
+        }
         const agent = frameForm?.agent ?? frame?.agent
         return isAgentDeployConfigured(agent)
       },
