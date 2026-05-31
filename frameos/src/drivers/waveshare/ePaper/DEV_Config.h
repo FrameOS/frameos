@@ -56,7 +56,7 @@
 #include <string.h>
 #include "Debug.h"
 
-#include "../../../lib/lgpio.h"
+#include "lgpio.h"
 #define LFLAGS 0
 #define NUM_MAXBUF  4
 

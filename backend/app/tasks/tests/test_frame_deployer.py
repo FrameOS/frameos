@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -76,6 +77,34 @@ def test_create_local_source_folder_copies_shared_frontend_sources(tmp_path: Pat
     assert (copied_source_dir / "assets" / "compiled" / "web" / "control.html").exists()
     assert (copied_source_dir / "assets" / "compiled" / "frame_web" / "index.html").exists()
     assert (copied_source_dir / "assets" / "compiled" / "fonts" / "Ubuntu-Regular.ttf").exists()
+
+
+def test_copy_waveshare_build_files_stages_lgpio_header(tmp_path: Path):
+    source_dir = tmp_path / "frameos"
+    destination_dir = tmp_path / "build"
+    waveshare_dir = source_dir / "src" / "drivers" / "waveshare" / "ePaper"
+    lib_dir = source_dir / "src" / "lib"
+    waveshare_dir.mkdir(parents=True)
+    lib_dir.mkdir(parents=True)
+    destination_dir.mkdir()
+
+    for file_name in ("Debug.h", "DEV_Config.c", "DEV_Config.h", "EPD_7in3e.nim"):
+        (waveshare_dir / file_name).write_text(f"{file_name}\n", encoding="utf-8")
+    (lib_dir / "lgpio.h").write_text("native lgpio header\n", encoding="utf-8")
+
+    deployer = FrameDeployer(
+        db=None,
+        redis=None,
+        frame=SimpleNamespace(id=1),
+        nim_path="/usr/bin/nim",
+        temp_dir=str(tmp_path / "work"),
+    )
+    waveshare = replace(DRIVERS["waveshare"], variant="EPD_7in3e")
+
+    deployer._copy_waveshare_driver_build_files(str(source_dir), str(destination_dir), waveshare)
+
+    assert (destination_dir / "DEV_Config.h").read_text(encoding="utf-8") == "DEV_Config.h\n"
+    assert (destination_dir / "lgpio.h").read_text(encoding="utf-8") == "native lgpio header\n"
 
 
 async def _run_create_local_build_archive(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[str, list[str]]:

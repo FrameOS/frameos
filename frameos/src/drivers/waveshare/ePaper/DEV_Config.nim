@@ -1,5 +1,6 @@
 import lib/lgpio
 
+{.passC: "-Isrc/lib".}
 {.compile: "DEV_Config.c".}
 ## ***************************************************************************
 ##  | File      	:   DEV_Config.h
