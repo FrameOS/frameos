@@ -48,7 +48,14 @@ def _agent_bootstrap_token_valid(frame: Frame, token: str) -> bool:
     return secrets.compare_digest(_agent_bootstrap_token(frame), token)
 
 
-async def _ensure_agent_bootstrap_enabled(db: Session, redis: Redis, frame: Frame, *, select_agent: bool = True) -> None:
+async def _ensure_agent_bootstrap_enabled(
+    db: Session,
+    redis: Redis,
+    frame: Frame,
+    *,
+    select_agent: bool = True,
+    regenerate: bool = False,
+) -> None:
     changed = False
     agent = dict(frame.agent or {}) if isinstance(frame.agent, dict) else {}
 
@@ -56,7 +63,7 @@ async def _ensure_agent_bootstrap_enabled(db: Session, redis: Redis, frame: Fram
         frame.server_api_key = secure_token(32)
         changed = True
 
-    if not agent.get("agentSharedSecret"):
+    if regenerate or not agent.get("agentSharedSecret"):
         agent["agentSharedSecret"] = secure_token(32)
         changed = True
 
@@ -303,6 +310,7 @@ async def api_frame_agent_bootstrap_command(
     id: int,
     request: Request,
     select_agent: bool = True,
+    regenerate: bool = False,
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
@@ -312,7 +320,7 @@ async def api_frame_agent_bootstrap_command(
     if (frame.mode or "rpios") != "rpios":
         _bad_request("Agent bootstrap is only supported for Raspberry Pi OS frames")
 
-    await _ensure_agent_bootstrap_enabled(db, redis, frame, select_agent=select_agent)
+    await _ensure_agent_bootstrap_enabled(db, redis, frame, select_agent=select_agent, regenerate=regenerate)
     script_url = _agent_bootstrap_script_url(request, frame)
     return {
         "script_url": script_url,

@@ -315,32 +315,27 @@ function BackToDeployButton({ onClick }: { onClick: () => void }): JSX.Element {
 function AlternativesSection({ onSelect }: { onSelect: (view: DeployDrawerView) => void }): JSX.Element {
   return (
     <section className="mb-4">
-      <div className="frame-tool-card rounded-[22px] p-3">
-        <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <div className="frame-tool-heading text-sm font-semibold">Alternatives</div>
-            <div className="frame-tool-muted mt-1 text-xs leading-4">
-              Build installation media or connect a device with a command.
-            </div>
-          </div>
-          <div className="frameos-inset inline-flex shrink-0 items-center rounded-xl border p-1">
-            <button
-              type="button"
-              onClick={() => onSelect('sdCard')}
-              className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-[color:var(--tool-strong)] transition hover:bg-slate-500/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-            >
-              <ArrowDownTrayIcon className="h-4 w-4" />
-              Download SD card
-            </button>
-            <button
-              type="button"
-              onClick={() => onSelect('script')}
-              className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-[color:var(--tool-strong)] transition hover:bg-slate-500/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-            >
-              <CommandLineIcon className="h-4 w-4" />
-              Run a script
-            </button>
-          </div>
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="frame-tool-heading text-sm font-semibold">Alternatives</div>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={() => onSelect('sdCard')}
+            className="frameos-secondary-button inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          >
+            <ArrowDownTrayIcon className="h-4 w-4" />
+            Download SD card
+          </button>
+          <button
+            type="button"
+            onClick={() => onSelect('script')}
+            className="frameos-secondary-button inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          >
+            <CommandLineIcon className="h-4 w-4" />
+            Run a script
+          </button>
         </div>
       </div>
     </section>
@@ -396,116 +391,114 @@ function DeployTransportToggle({
 
   return (
     <section className="mb-4">
-      <div className="frame-tool-card rounded-[22px] p-3">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex min-w-0 items-center gap-1.5">
-            <div className="frame-tool-heading text-sm font-semibold">Connect via</div>
-            <Tooltip
-              className="inline-flex h-5 w-5 items-center justify-center rounded-full"
-              titleClassName="w-72"
-              title={
-                <div className="space-y-1">
-                  <div>
-                    SSH needs direct network access from the backend to the frame. The agent runs on the frame, and
-                    keeps a connection open to the backend.
-                  </div>
-                  <div>
-                    To use the agent, enable it under{' '}
-                    <Link
-                      href={`${urls.frame(frameId, 'settings')}#frame-settings-agent`}
-                      className="frameos-link underline underline-offset-2 hover:no-underline"
-                    >
-                      Settings
-                    </Link>
-                    {', '}
-                    and either run the bootstrap script (curl) on the frame, or deploy it over SSH.
-                  </div>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <div className="frame-tool-heading text-sm font-semibold">Connect via</div>
+          <Tooltip
+            className="inline-flex h-5 w-5 items-center justify-center rounded-full"
+            titleClassName="w-72"
+            title={
+              <div className="space-y-1">
+                <div>
+                  SSH needs direct network access from the backend to the frame. The agent runs on the frame, and keeps
+                  a connection open to the backend.
                 </div>
-              }
+                <div>
+                  To use the agent, enable it under{' '}
+                  <Link
+                    href={`${urls.frame(frameId, 'settings')}#frame-settings-agent`}
+                    className="frameos-link underline underline-offset-2 hover:no-underline"
+                  >
+                    Settings
+                  </Link>
+                  {', '}
+                  and either run the bootstrap script (curl) on the frame, or deploy it over SSH.
+                </div>
+              </div>
+            }
+          >
+            <ExclamationCircleIcon className="h-4 w-4" aria-label="Connection options help" />
+          </Tooltip>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <div className="inline-flex items-center gap-2">
+            <button
+              type="button"
+              aria-pressed={!deployWithAgent}
+              onClick={() => onChange(false)}
+              className={clsx(
+                'rounded-lg px-3 py-1.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+                !deployWithAgent ? 'frameos-primary-action' : 'frameos-secondary-button'
+              )}
             >
-              <ExclamationCircleIcon className="h-4 w-4" aria-label="Connection options help" />
-            </Tooltip>
+              SSH
+            </button>
+            <button
+              type="button"
+              aria-pressed={deployWithAgent}
+              title={agentConnected ? 'FrameOS agent connected' : 'FrameOS agent not connected'}
+              onClick={() => onChange(true)}
+              className={clsx(
+                'inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+                deployWithAgent ? 'frameos-primary-action' : 'frameos-secondary-button'
+              )}
+            >
+              {agentConnected ? (
+                <FrameConnectionDot size="sm" title="FrameOS agent connected" />
+              ) : (
+                <span
+                  aria-hidden="true"
+                  className="h-2 w-2 shrink-0 rounded-full bg-slate-300 ring-1 ring-inset ring-slate-400/50"
+                />
+              )}
+              <span>Agent</span>
+            </button>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <div className="frameos-inset inline-flex items-center rounded-xl border p-1">
-              <button
-                type="button"
-                aria-pressed={!deployWithAgent}
-                onClick={() => onChange(false)}
-                className={clsx(
-                  'rounded-lg px-3 py-1.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-                  !deployWithAgent ? 'frameos-primary-active' : 'frame-tool-muted hover:text-[color:var(--tool-strong)]'
-                )}
-              >
-                SSH
-              </button>
-              <button
-                type="button"
-                aria-pressed={deployWithAgent}
-                title={agentConnected ? 'FrameOS agent connected' : 'FrameOS agent not connected'}
-                onClick={() => onChange(true)}
-                className={clsx(
-                  'inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-                  deployWithAgent ? 'frameos-primary-active' : 'frame-tool-muted hover:text-[color:var(--tool-strong)]'
-                )}
-              >
-                {agentConnected ? (
-                  <FrameConnectionDot size="sm" title="FrameOS agent connected" />
-                ) : (
-                  <span
-                    aria-hidden="true"
-                    className="h-2 w-2 shrink-0 rounded-full bg-slate-300 ring-1 ring-inset ring-slate-400/50"
-                  />
-                )}
-                <span>Agent</span>
-              </button>
-            </div>
-            <DropdownMenu
-              buttonColor="none"
-              horizontal
-              className="frameos-inset flex h-9 w-9 items-center justify-center rounded-xl border !px-0 !py-0 text-[color:var(--tool-strong)] !shadow-none transition hover:bg-slate-500/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-              items={[
-                ...(canCopyBootstrapScript
-                  ? [
-                      {
-                        label: bootstrapCopied ? 'Bootstrap copied' : 'Copy bootstrap command',
-                        title: 'Copy agent bootstrap install command',
-                        loading: bootstrapLoading,
-                        onClick: () => copyAgentBootstrapScript(false),
-                      },
-                    ]
-                  : []),
-                {
-                  label: 'Restart agent',
-                  title: selectedAgentDisconnected ? selectedConnectionUnavailableTitle : selectedConnectionTitle,
-                  disabled: selectedAgentDisconnected,
-                  onClick: () => onRestartAgent(selectedTransport),
-                },
-                ...(canDeployAgent
-                  ? [
-                      {
-                        label: 'Deploy agent',
-                        title: selectedAgentDisconnected ? selectedConnectionUnavailableTitle : selectedConnectionTitle,
-                        disabled: selectedAgentDisconnected,
-                        onClick: () => onDeployAgent(false, selectedTransport),
-                      },
-                      ...(showRecompileAgent
-                        ? [
-                            {
-                              label: 'Recompile and deploy agent',
-                              title: selectedAgentDisconnected
-                                ? selectedConnectionUnavailableTitle
-                                : selectedConnectionTitle,
-                              disabled: selectedAgentDisconnected,
-                              onClick: () => onDeployAgent(true, selectedTransport),
-                            },
-                          ]
-                        : []),
-                    ]
-                  : []),
-              ]}
-            />
-          </div>
+          <DropdownMenu
+            buttonColor="none"
+            horizontal
+            className="frameos-secondary-button flex h-9 w-9 items-center justify-center rounded-xl !px-0 !py-0 !shadow-none transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            items={[
+              ...(canCopyBootstrapScript
+                ? [
+                    {
+                      label: bootstrapCopied ? 'Bootstrap copied' : 'Copy bootstrap command',
+                      title: 'Copy agent bootstrap install command',
+                      loading: bootstrapLoading,
+                      onClick: () => copyAgentBootstrapScript(false),
+                    },
+                  ]
+                : []),
+              {
+                label: 'Restart agent',
+                title: selectedAgentDisconnected ? selectedConnectionUnavailableTitle : selectedConnectionTitle,
+                disabled: selectedAgentDisconnected,
+                onClick: () => onRestartAgent(selectedTransport),
+              },
+              ...(canDeployAgent
+                ? [
+                    {
+                      label: 'Deploy agent',
+                      title: selectedAgentDisconnected ? selectedConnectionUnavailableTitle : selectedConnectionTitle,
+                      disabled: selectedAgentDisconnected,
+                      onClick: () => onDeployAgent(false, selectedTransport),
+                    },
+                    ...(showRecompileAgent
+                      ? [
+                          {
+                            label: 'Recompile and deploy agent',
+                            title: selectedAgentDisconnected
+                              ? selectedConnectionUnavailableTitle
+                              : selectedConnectionTitle,
+                            disabled: selectedAgentDisconnected,
+                            onClick: () => onDeployAgent(true, selectedTransport),
+                          },
+                        ]
+                      : []),
+                  ]
+                : []),
+            ]}
+          />
         </div>
       </div>
     </section>
@@ -717,13 +710,17 @@ function ScriptInstallSection({ frame, onBack }: { frame: FrameType; onBack: () 
   const [copied, setCopied] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const loadCommand = async (): Promise<void> => {
+  const loadCommand = async (regenerate = false): Promise<void> => {
     setLoading(true)
+    setCopied(false)
     setError(null)
     try {
-      const response = await apiFetch(`/api/frames/${frame.id}/agent_bootstrap?select_agent=1`, {
-        method: 'POST',
-      })
+      const response = await apiFetch(
+        `/api/frames/${frame.id}/agent_bootstrap?select_agent=1&regenerate=${regenerate ? 1 : 0}`,
+        {
+          method: 'POST',
+        }
+      )
       if (!response.ok) {
         const payload = await response.json().catch(() => ({}))
         throw new Error(typeof payload?.detail === 'string' ? payload.detail : 'Failed to create install command')
@@ -771,7 +768,7 @@ function ScriptInstallSection({ frame, onBack }: { frame: FrameType; onBack: () 
         ) : error ? (
           <div className="text-sm font-semibold text-red-500">{error}</div>
         ) : (
-          <pre className="frameos-inset max-h-44 overflow-auto rounded-xl border p-3 text-xs leading-5 text-[color:var(--tool-strong)]">
+          <pre className="frameos-inset max-h-44 whitespace-pre-wrap break-all rounded-xl border p-3 text-xs leading-5 text-[color:var(--tool-strong)]">
             <code>{command}</code>
           </pre>
         )}
@@ -787,7 +784,7 @@ function ScriptInstallSection({ frame, onBack }: { frame: FrameType; onBack: () 
           </button>
           <button
             type="button"
-            onClick={loadCommand}
+            onClick={() => loadCommand(true)}
             disabled={loading}
             className="frameos-secondary-button rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
           >

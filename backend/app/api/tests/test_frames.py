@@ -109,6 +109,29 @@ async def test_api_frame_agent_bootstrap_command_can_preserve_deploy_transport(a
 
 
 @pytest.mark.asyncio
+async def test_api_frame_agent_bootstrap_command_can_regenerate_token(async_client, no_auth_client, db, redis):
+    frame = await new_frame(db, redis, 'BootstrapFrame', 'frame.local', 'backend.local')
+
+    first_response = await async_client.post(f'/api/frames/{frame.id}/agent_bootstrap')
+    assert first_response.status_code == 200
+    first_payload = first_response.json()
+    first_script_path = urlparse(first_payload['script_url']).path
+    db.refresh(frame)
+    first_agent_secret = frame.agent['agentSharedSecret']
+
+    second_response = await async_client.post(f'/api/frames/{frame.id}/agent_bootstrap?regenerate=1')
+    assert second_response.status_code == 200
+    second_payload = second_response.json()
+    second_script_path = urlparse(second_payload['script_url']).path
+    db.refresh(frame)
+
+    assert second_payload['script_url'] != first_payload['script_url']
+    assert frame.agent['agentSharedSecret'] != first_agent_secret
+    assert (await no_auth_client.get(first_script_path)).status_code == 404
+    assert (await no_auth_client.get(second_script_path)).status_code == 200
+
+
+@pytest.mark.asyncio
 async def test_api_frame_agent_tasks_default_to_auto_transport(async_client, monkeypatch):
     import app.tasks as tasks_package
 
