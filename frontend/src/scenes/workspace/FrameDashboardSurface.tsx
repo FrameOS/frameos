@@ -593,7 +593,7 @@ export function FrameAddSceneTile({ frame, compact = false }: { frame: FrameType
 
 function BlankFrameSceneHint(): JSX.Element {
   return (
-    <div className="mb-4 rounded-lg border border-amber-200 bg-amber-100 px-4 py-3 text-sm font-medium leading-5 text-amber-950 shadow-sm">
+    <div className="frameos-blank-frame-scene-hint mb-4 rounded-lg border border-amber-200 bg-amber-100 px-4 py-3 text-sm font-medium leading-5 text-amber-950 shadow-sm">
       This frame has no scenes yet. Click <span className="font-bold">Add scene</span> to choose a template or create a
       scene, then save it. After adding scenes, deploy the changes to the frame so they appear on the display.
     </div>

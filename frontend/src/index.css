@@ -550,6 +550,13 @@ html[data-frameos-theme='dark'] .frameos-template-action-button:hover {
   box-shadow: 0 14px 30px rgba(0, 0, 0, 0.24);
 }
 
+.frameos-theme-dark .frameos-blank-frame-scene-hint,
+html[data-frameos-theme='dark'] .frameos-blank-frame-scene-hint {
+  background: rgba(120, 78, 16, 0.18);
+  border-color: rgba(251, 191, 36, 0.2);
+  color: #fde68a;
+}
+
 .frameos-theme-dark .frameos-card,
 .frameos-theme-dark .frameos-inset,
 .frameos-theme-dark .frameos-form-control,
