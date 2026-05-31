@@ -1,3 +1,64 @@
 {
-  "images": {}
+  "images": {
+    "frameos/frameos-cross-toolchain:debian_bookworm-linux_amd64-latest": {
+      "base_image": "debian:bookworm",
+      "digest": "sha256:1b4a9fd8f0ce78da4986129f7b9562f50b3181b300f61b8de640c738e6c91835",
+      "platform": "linux/amd64",
+      "tag": "latest"
+    },
+    "frameos/frameos-cross-toolchain:debian_bookworm-linux_arm64-latest": {
+      "base_image": "debian:bookworm",
+      "digest": "sha256:a47e622f699dcf10aaae1e98d819dcab5bb19fe5fbcf669148ddad12878d3d3e",
+      "platform": "linux/arm64",
+      "tag": "latest"
+    },
+    "frameos/frameos-cross-toolchain:debian_bookworm-linux_arm_v7-latest": {
+      "base_image": "debian:bookworm",
+      "digest": "sha256:c332dd9d9d00386e01cd4481157768ceac96f47220294a23108569233cb4ec79",
+      "platform": "linux/arm/v7",
+      "tag": "latest"
+    },
+    "frameos/frameos-cross-toolchain:debian_trixie-linux_amd64-latest": {
+      "base_image": "debian:trixie",
+      "digest": "sha256:8efa51aa6ff20d5065739929693925e838ebc38a2aeb66dfa508066a4ef35624",
+      "platform": "linux/amd64",
+      "tag": "latest"
+    },
+    "frameos/frameos-cross-toolchain:debian_trixie-linux_arm64-latest": {
+      "base_image": "debian:trixie",
+      "digest": "sha256:c08601ab0849ab7e5a9db0b3c7ee1d20ed3cef21ffb65ac9fe856b4b2d74a6a2",
+      "platform": "linux/arm64",
+      "tag": "latest"
+    },
+    "frameos/frameos-cross-toolchain:debian_trixie-linux_arm_v7-latest": {
+      "base_image": "debian:trixie",
+      "digest": "sha256:48db21243cf4045b3890b046e1a81a621083d298012a0bf9b066a7399ff67fef",
+      "platform": "linux/arm/v7",
+      "tag": "latest"
+    },
+    "frameos/frameos-cross-toolchain:ubuntu_24.04-linux_amd64-latest": {
+      "base_image": "ubuntu:24.04",
+      "digest": "sha256:fcbedc56297b8456d0f89d8a1162bde02d1639c775f012f98e8e37ae9e7e588b",
+      "platform": "linux/amd64",
+      "tag": "latest"
+    },
+    "frameos/frameos-cross-toolchain:ubuntu_24.04-linux_arm64-latest": {
+      "base_image": "ubuntu:24.04",
+      "digest": "sha256:7487c9b152faa63284433cd84829da239af30f2757e980130e964403e35834e6",
+      "platform": "linux/arm64",
+      "tag": "latest"
+    },
+    "frameos/frameos-cross-toolchain:ubuntu_26.04-linux_amd64-latest": {
+      "base_image": "ubuntu:26.04",
+      "digest": "sha256:88cece1a8afaf32175d0ee1a4c47d11a66e2617e289fc831257ebce7fe8128e8",
+      "platform": "linux/amd64",
+      "tag": "latest"
+    },
+    "frameos/frameos-cross-toolchain:ubuntu_26.04-linux_arm64-latest": {
+      "base_image": "ubuntu:26.04",
+      "digest": "sha256:6170bed107410d203116fa868e1352cdf53f46568a57719eeb32a574f2ac05ba",
+      "platform": "linux/arm64",
+      "tag": "latest"
+    }
+  }
 }
