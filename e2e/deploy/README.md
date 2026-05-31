@@ -32,8 +32,30 @@ sudo. The test deploys over real SSH/SCP and covers:
 - full deploy with backend cross-compiled binary path
 - full deploy with precompiled binary path
 
-The test runs the real FrameOS binary builder. It generates Nim C sources,
-compiles a release over SSH on the target, builds a backend cross-compiled
-release through Docker, packages that compiled binary as a local precompiled
-release archive, downloads it through the precompiled release code path, and
-deploys it over SSH.
+The test runs the real FrameOS binary builder from the local checkout. It
+generates Nim C sources, compiles a release over SSH on the target, builds a
+backend cross-compiled release through Docker, packages that compiled binary as
+a local precompiled release archive, downloads it through the precompiled release
+code path, and deploys it over SSH.
+
+The runtime log E2E is separate because it starts a real backend HTTP server
+and launches a locally compiled `frameos` binary until the backend stores a
+`render:done` webhook log:
+
+```bash
+cd backend
+TEST=1 FRAMEOS_E2E_RUNTIME=1 pytest app/tasks/tests/test_real_frameos_runtime_e2e.py -s
+```
+
+Build the local runtime first with `cd frameos && nimble build`, or set
+`FRAMEOS_RUNTIME_BIN` to the binary to execute.
+
+The Buildroot SD image E2E compiles the current FrameOS sources for the
+Raspberry Pi Zero 2 W target, forces the agent path to source-build fallback,
+composes a real SD image from the Buildroot base image, and verifies the
+resulting `.img.gz` metadata and deploy logs:
+
+```bash
+cd backend
+TEST=1 FRAMEOS_E2E_BUILDROOT=1 pytest app/tasks/tests/test_real_buildroot_sd_image_e2e.py -s
+```

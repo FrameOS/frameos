@@ -369,6 +369,7 @@ jobs:
         uses: actions/checkout@v4
 
       - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-qemu-action@v3
 
       - name: Set up Python
         uses: actions/setup-python@v2
@@ -391,6 +392,12 @@ jobs:
         with:
           nim-version: 2.2.4
           repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install redis
+        run: |
+          sudo apt-get -y update
+          sudo apt-get install -y redis-server
+          redis-server --daemonize yes
 
       - name: Verify Docker
         run: docker version
@@ -418,6 +425,7 @@ jobs:
           nimble build_quickjs --silent
           nimble setup
           FRAMEOS_ROOT_DIR="." python3 ../e2e/makeapploaders.py
+          nimble build
 
       - name: Run SSH deploy E2E test
         run: |
@@ -427,6 +435,37 @@ jobs:
           mkdir -p ../frontend/dist/img
           mkdir -p ../frontend/dist/static
           TEST=1 FRAMEOS_E2E_DEPLOY=1 pytest app/tasks/tests/test_real_ssh_deploy_e2e.py -q -s
+
+      - name: Run runtime render log E2E test
+        run: |
+          cd backend
+          source .venv/bin/activate
+          TEST=1 FRAMEOS_E2E_RUNTIME=1 FRAMEOS_RUNTIME_BIN="${{ github.workspace }}/frameos/build/frameos" pytest app/tasks/tests/test_real_frameos_runtime_e2e.py -q -s
+
+      - name: Cache Buildroot E2E inputs
+        uses: actions/cache@v4
+        with:
+          path: |
+            .tmp/buildroot-base-cache
+            .tmp/cross-cache
+          key: ${{ runner.os }}-buildroot-e2e-${{ hashFiles('tools/buildroot-images/manifest.json', 'buildroot-images.json', 'frameos/frameos.nimble') }}
+          restore-keys: |
+            ${{ runner.os }}-buildroot-e2e-
+
+      - name: Run Buildroot SD image E2E test
+        timeout-minutes: 90
+        env:
+          FRAMEOS_ARTIFACT_DIR: ${{ github.workspace }}/.tmp/buildroot-artifacts
+          FRAMEOS_BUILDROOT_BASE_CACHE_DIR: ${{ github.workspace }}/.tmp/buildroot-base-cache
+          FRAMEOS_BUILDROOT_CACHE_DIR: ${{ github.workspace }}/.tmp/buildroot-cache
+          FRAMEOS_BUILDROOT_BASE_TIMEOUT: '300'
+          FRAMEOS_CROSS_CACHE: ${{ github.workspace }}/.tmp/cross-cache
+          FRAMEOS_CROSS_MAKE_JOBS: '2'
+          FRAMEOS_E2E_BUILDROOT: '1'
+        run: |
+          cd backend
+          source .venv/bin/activate
+          TEST=1 pytest app/tasks/tests/test_real_buildroot_sd_image_e2e.py -q -s
 
   typescript:
     runs-on: ubuntu-latest
