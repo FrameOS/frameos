@@ -365,6 +365,13 @@ def agent_version_for_repo(repo_root: Path) -> str:
     return "unknown"
 
 
+def repo_root_for_frameos_root(frameos_root: Path) -> Path:
+    for candidate in (frameos_root, frameos_root.parent, REPO_ROOT):
+        if (candidate / "versions.json").is_file():
+            return candidate
+    return frameos_root
+
+
 async def generate_agent_build_dir(
     *,
     deployer,
@@ -420,7 +427,7 @@ async def build_target(
     target = TARGET_MAP[slug]
     frameos_root = frameos_root.resolve()
     artifacts_dir = artifacts_dir.resolve()
-    repo_root = frameos_root
+    repo_root = repo_root_for_frameos_root(frameos_root)
     versions_path = repo_root / "versions.json"
     if not versions_path.is_file():
         raise RuntimeError(f"Build versions file is missing: {versions_path}")
@@ -535,7 +542,7 @@ async def build_release_target(
     frameos_root = frameos_root.resolve()
     artifacts_dir = artifacts_dir.resolve()
     artifacts_dir.mkdir(parents=True, exist_ok=True)
-    repo_root = frameos_root
+    repo_root = repo_root_for_frameos_root(frameos_root)
     versions_path = repo_root / "versions.json"
     if not versions_path.is_file():
         raise RuntimeError(f"Release versions file is missing: {versions_path}")

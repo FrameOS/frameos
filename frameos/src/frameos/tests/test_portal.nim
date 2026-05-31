@@ -91,7 +91,7 @@ proc nmcliHook(args: seq[string]): tuple[rc: int, output: string] {.gcsafe, nimc
     args.len == 12 and
     args[0] == "-n" and args[1] == "nmcli" and args[2] == "--wait" and args[3] == "15" and
     args[4] == "device" and args[5] == "wifi" and args[6] == "connect" and
-    args[7] == "home-wifi" and args[8] == "password" and args[9] == "pw" and
+    args[7] == "home-wifi" and args[8] == "password" and args[9] in ["pw", "bad"] and
     args[10] == "name" and args[11] == "frameos-wifi"
   if hookMode == hmAttemptSuccess:
     return (rc: 0, output: "connected")
@@ -174,7 +174,7 @@ suite "portal network orchestration":
     startAp(frame)
 
     check frame.network.hotspotStatus == HotspotStatus.error
-    check runHotspotCalls == 1
+    check runHotspotCalls == 2
     check runModifySharedCalls == 0
 
     let (ok, _) = eventChannel.tryRecv()

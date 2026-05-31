@@ -25,6 +25,16 @@ def load_cross_module():
     return module
 
 
+def test_repo_root_for_frameos_root_uses_parent_versions_file(tmp_path: Path):
+    cross_module = load_cross_module()
+    repo_root = tmp_path / "repo"
+    frameos_root = repo_root / "frameos"
+    frameos_root.mkdir(parents=True)
+    (repo_root / "versions.json").write_text('{"frameos":"2026.6.2"}\n', encoding="utf-8")
+
+    assert cross_module.repo_root_for_frameos_root(frameos_root) == repo_root
+
+
 @pytest.mark.asyncio
 async def test_generate_agent_build_dir_constructs_versioned_command(
     monkeypatch: pytest.MonkeyPatch,

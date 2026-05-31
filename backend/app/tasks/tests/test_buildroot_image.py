@@ -409,6 +409,7 @@ def test_buildroot_stage_overlay_leaves_service_install_to_firstboot(tmp_path, m
     monkeypatch.setattr("app.tasks.buildroot_image.get_interpreted_scenes_json", lambda _frame: [])
     monkeypatch.setattr("app.tasks.buildroot_image.get_settings_dict", lambda _db: {"ssh_keys": {"keys": []}})
     monkeypatch.setattr("app.tasks.buildroot_image.drivers_for_frame", lambda _frame: {})
+    monkeypatch.setattr(BuildrootImageBuilder, "_copy_runtime_libraries", lambda _self, _overlay_dir: None)
 
     builder._stage_overlay(
         overlay_dir=overlay_dir,
