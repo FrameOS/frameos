@@ -9,8 +9,10 @@ from sqlalchemy import Integer, String, Double, DateTime, Boolean
 from sqlalchemy.orm import Session, mapped_column
 from app.database import Base
 
+from app.drivers.devices import device_dimensions
 from app.models.apps import get_app_configs
 from app.models.settings import get_settings_dict
+from app.utils.timezone import frame_timezone
 from app.utils.token import secure_token
 from app.utils.tls import generate_frame_tls_material, parse_certificate_not_valid_after
 from app.utils.versions import get_versions
@@ -105,16 +107,6 @@ def normalize_reboot_config(reboot: Any) -> Any:
         **reboot,
         "crontab": normalize_reboot_crontab(reboot.get("crontab", "0 0 * * *")),
     }
-
-
-def normalize_buildroot_setup_json_reset_file_path(
-    value: Any,
-    *,
-    default_if_missing: bool = False,
-) -> str:
-    if value is None:
-        return "/boot/frameos-setup.json" if default_if_missing else ""
-    return str(value).strip()
 
 
 def normalize_mountpoints(mountpoints: Any) -> dict:
@@ -219,6 +211,7 @@ class Frame(Base):
     device = mapped_column(String(256), nullable=True)
     device_config = mapped_column(JSON, nullable=True)
     color = mapped_column(String(256), nullable=True)
+    timezone = mapped_column(String(128), nullable=True)
     interval = mapped_column(Double, default=300)
     metrics_interval = mapped_column(Double, default=60)
     scaling_mode = mapped_column(String(64), nullable=True)  # contain (default), cover, stretch, center
@@ -278,6 +271,7 @@ class Frame(Base):
             'device': self.device,
             'device_config': self.device_config,
             'color': self.color,
+            'timezone': self.timezone,
             'interval': self.interval,
             'metrics_interval': self.metrics_interval,
             'scaling_mode': self.scaling_mode,
@@ -333,6 +327,7 @@ async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, serve
         server_port = 8989
 
     tls_material = generate_frame_tls_material(frame_host)
+    dimensions = device_dimensions(device)
 
     frame = Frame(
         name=name,
@@ -359,6 +354,8 @@ async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, serve
         server_port=int(server_port),
         server_api_key=secure_token(32),
         server_send_logs=True,
+        width=dimensions[0] if dimensions else None,
+        height=dimensions[1] if dimensions else None,
         interval=interval or 300,
         status="uninitialized",
         scenes=[],
@@ -366,6 +363,7 @@ async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, serve
         scaling_mode="contain",
         rotate=0,
         device=device or "web_only",
+        timezone=None,
         log_to_file=None, # spare the SD card from load
         assets_path='/srv/assets',
         save_assets=True,
@@ -451,6 +449,9 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
     mountpoints = normalize_mountpoints(frame.mountpoints)
     error_behavior = normalize_error_behavior(frame.error_behavior)
     frameos_version = get_versions().get("frameos")
+    all_settings = get_settings_dict(db)
+    default_timezone = (all_settings.get("defaults") or {}).get("timezone")
+    fallback_dimensions = device_dimensions(frame.device)
     frame_json: dict = {
         **({"frameosVersion": frameos_version} if isinstance(frameos_version, str) and frameos_version else {}),
         "name": frame.name,
@@ -470,8 +471,8 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
         "serverPort": frame.server_port or 8989,
         "serverApiKey": frame.server_api_key,
         "serverSendLogs": bool(frame.server_send_logs if frame.server_send_logs is not None else True),
-        "width": frame.width or 0,
-        "height": frame.height or 0,
+        "width": frame.width or (fallback_dimensions[0] if fallback_dimensions else 0),
+        "height": frame.height or (fallback_dimensions[1] if fallback_dimensions else 0),
         "device": frame.device or "web_only",
         "deviceConfig": (lambda cfg: {
             **({"vcom": float(cfg.get('vcom', '0'))} if cfg.get('vcom') not in (None, "") else {}),
@@ -535,6 +536,8 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
             "showErrorRetrySeconds": error_behavior["show_error_retry_seconds"],
         },
     }
+    if (frame.mode or "rpios") == "buildroot":
+        frame_json["timeZone"] = frame_timezone(frame.timezone, default_timezone)
 
     schedule = frame.schedule
     if schedule is not None:
@@ -577,7 +580,6 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
                             for key in settings:
                                 setting_keys.add(key)
 
-    all_settings = get_settings_dict(db)
     final_settings = {}
     for key in setting_keys:
         final_settings[key] = all_settings.get(key, None)

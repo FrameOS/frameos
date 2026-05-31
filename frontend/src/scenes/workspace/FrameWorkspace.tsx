@@ -23,7 +23,6 @@ import { AddSceneTile, SceneControlPanel, TemplateDrawer } from './FramesHome'
 import { FrameDashboardSurface } from './FrameDashboardSurface'
 import { FrameDashboardLoadingSkeleton } from './FrameDashboardLoadingSkeleton'
 import { FrameDeployPlanDrawer } from './FrameDeployPlanDrawer'
-import { FrameUnsavedChangesDrawer } from './FrameUnsavedChangesDrawer'
 import { FrameSceneSidebarCard } from './FrameSceneSidebarCard'
 import { FrameSidebarPreview } from './FrameSidebarPreview'
 import { sceneWorkspaceLogic } from './sceneWorkspaceLogic'
@@ -312,18 +311,46 @@ function parseFrameId(frameId?: string): number | null {
 function FrameSelector({
   frame,
   frames,
+  unsavedChanges,
   className,
 }: {
   frame: FrameType
   frames: FrameType[]
+  unsavedChanges: boolean
   className?: string
 }): JSX.Element {
+  const { hideDeployPlanModal } = useActions(frameLogic({ frameId: frame.id }))
+  const { frameChangeDrawerSelection } = useValues(workspaceLogic)
   const { navigateToFrame } = useActions(workspaceLogic)
+  const { closeChatDrawer, closeFrameChangeDrawer, openFrameChangeDrawer } = useActions(workspaceLogic)
   const frameGroups = groupFramesByStatus(frames)
+  const unsavedDrawerIsOpen =
+    frameChangeDrawerSelection?.frameId === frame.id && frameChangeDrawerSelection.kind === 'unsaved'
+
+  const openUnsavedChanges = (): void => {
+    closeChatDrawer()
+    if (unsavedDrawerIsOpen) {
+      hideDeployPlanModal()
+      closeFrameChangeDrawer()
+      return
+    }
+    openFrameChangeDrawer(frame.id, 'unsaved')
+  }
 
   return (
     <div className={className}>
-      <label className="frameos-muted mb-2 block text-xs font-semibold uppercase tracking-wide">Frame</label>
+      <div className="mb-2 flex min-h-4 items-center justify-between gap-2">
+        <label className="frameos-muted block text-xs font-semibold uppercase tracking-wide">Frame</label>
+        {unsavedChanges ? (
+          <button
+            type="button"
+            onClick={openUnsavedChanges}
+            className="frameos-muted text-right text-xs font-semibold underline underline-offset-2 transition hover:text-[color:var(--tool-strong)] focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          >
+            unsaved changes
+          </button>
+        ) : null}
+      </div>
       <select
         value={frame.id}
         onChange={(event) => navigateToFrame(parseInt(event.target.value, 10))}
@@ -434,10 +461,10 @@ function FrameTree({
           frame={frame}
           active={activeTool === 'preview'}
           className="order-3 @xs:order-1 @xs:h-full"
-          mediaClassName="@xs:h-full @xs:min-h-[6.75rem]"
+          mediaClassName="@xs:h-full @xs:min-h-[8.625rem]"
         />
         <div className="order-1 min-w-0 space-y-2 @xs:order-2">
-          <FrameSelector frame={frame} frames={frames} />
+          <FrameSelector frame={frame} frames={frames} unsavedChanges={unsavedChanges} />
           <FrameSceneSidebarCard frame={frame} unsavedChanges={unsavedChanges} undeployedChanges={undeployedChanges} />
         </div>
       </div>
@@ -471,8 +498,8 @@ function FrameWorkspaceLoadingTree(): JSX.Element {
             <div className="frameos-skeleton-line mb-2 h-3 w-14 animate-pulse rounded-full" />
             <div className="frameos-skeleton-line h-10 w-full animate-pulse rounded-xl" />
           </div>
-          <div className="grid grid-cols-3 gap-2">
-            {[0, 1, 2].map((index) => (
+          <div className="grid grid-cols-2 gap-2">
+            {[0, 1].map((index) => (
               <div key={index} className="frameos-skeleton-line h-9 animate-pulse rounded-lg" />
             ))}
           </div>
@@ -579,9 +606,10 @@ function SceneTile({ frame, scene, active }: { frame: FrameType; scene: FrameSce
       <SceneDropDown
         context="scenes"
         sceneId={scene.id}
+        navigation="workspace"
         horizontal
         buttonColor="none"
-        className="absolute bottom-2 right-2 z-10 flex h-8 w-8 items-center justify-center rounded-lg bg-white/90 !px-0 !py-0 text-slate-600 shadow-sm"
+        className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-lg bg-white/70 !px-0 !py-0 text-slate-500/80 shadow-sm backdrop-blur-sm transition hover:bg-white/95 hover:text-slate-700"
       />
     </div>
   )
@@ -1201,7 +1229,14 @@ function FrameToolSurface({
   pageScroll: boolean
 }): JSX.Element {
   if (activeTool === 'overview') {
-    return <FrameDashboardSurface frame={frame} scenes={scenes} totalScenes={totalScenes} />
+    return (
+      <FrameDashboardSurface
+        frame={frame}
+        scenes={scenes}
+        totalScenes={totalScenes}
+        showSceneMenus
+      />
+    )
   }
   if (activeTool === 'logs') return <Logs fullScreen />
   if (activeTool === 'metrics') return <Metrics scrollContainer={!pageScroll} />
@@ -1230,7 +1265,7 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
   useMountedLogic(metricsLogic(frameLogicProps))
 
   const { framesList } = useValues(framesModel)
-  const { frame, scenes, deployPlanModalOpen, undeployedChanges, unsavedChanges, unsavedChangesModalOpen } = useValues(
+  const { frame, scenes, deployPlanModalOpen, undeployedChanges, unsavedChanges } = useValues(
     frameLogic(frameLogicProps)
   )
   const { sceneControlSelection, templateDrawerFrameId, utilityPanel, frameToolScrollPositions } =
@@ -1366,9 +1401,7 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
             activeToolPanel === 'logs' ? 'pb-0 pt-6 max-lg:pb-0' : 'py-6 max-lg:pb-6'
           )}
           rightPanel={
-            unsavedChangesModalOpen ? (
-              <FrameUnsavedChangesDrawer frame={frame} />
-            ) : deployPlanModalOpen ? (
+            deployPlanModalOpen ? (
               <FrameDeployPlanDrawer frame={frame} />
             ) : templateDrawerFrameId ? (
               <TemplateDrawer />

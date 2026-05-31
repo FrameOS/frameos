@@ -27,8 +27,8 @@ export interface FullDeployPlanResponse {
   low_memory: boolean
   drivers: string[]
   binary: {
-    requested_compilation_mode?: 'static' | 'shared' | 'precompiled'
-    compilation_mode?: 'static' | 'shared' | 'precompiled'
+    requested_compilation_mode?: 'static' | 'shared' | 'shared-scenes' | 'precompiled'
+    compilation_mode?: 'static' | 'shared' | 'shared-scenes' | 'precompiled'
     will_attempt_cross_compile?: boolean
     will_attempt_precompiled?: boolean
     cross_compile_supported?: boolean
@@ -166,8 +166,16 @@ function pluralize(count: number, singular: string): string {
   return `${count} ${singular}${count === 1 ? '' : 's'}`
 }
 
-function normalizeCompilationMode(value: unknown): 'static' | 'shared' | 'precompiled' {
-  return value === 'static' || value === 'shared' || value === 'precompiled' ? value : 'precompiled'
+function normalizeCompilationMode(value: unknown): 'static' | 'shared' | 'shared-scenes' | 'precompiled' {
+  return value === 'static' || value === 'shared' || value === 'shared-scenes' || value === 'precompiled'
+    ? value
+    : 'precompiled'
+}
+
+function frameCompilationMode(frame?: Partial<FrameType> | null): 'static' | 'shared' | 'shared-scenes' | 'precompiled' {
+  return normalizeCompilationMode(
+    frame?.mode === 'buildroot' ? frame?.buildroot?.compilationMode : frame?.rpios?.compilationMode
+  )
 }
 
 function normalizeCrossCompilation(value: unknown): 'auto' | 'always' | 'never' {
@@ -249,7 +257,7 @@ function canUsePrecompiledFrameos(frame?: Partial<FrameType> | null, plan?: Depl
     return false
   }
 
-  const compilationMode = normalizeCompilationMode(frame?.rpios?.compilationMode)
+  const compilationMode = frameCompilationMode(frame)
   const crossCompilation = normalizeCrossCompilation(frame?.rpios?.crossCompilation)
   return compilationMode === 'precompiled' && crossCompilation !== 'always' && !precompiledSkipReason(frame)
 }
@@ -276,6 +284,9 @@ function inferBuildStrategy(frame?: Partial<FrameType> | null): string {
     if (!skipReason) {
       return 'Download and install the precompiled FrameOS release'
     }
+    if (skipReason.includes('compiled scene')) {
+      return `${crossCompileText} with scenes bundled in scenes.so; precompiled release skipped (${skipReason})`
+    }
     return `${crossCompileText} as a single executable; precompiled release skipped (${skipReason})`
   }
 
@@ -283,10 +294,13 @@ function inferBuildStrategy(frame?: Partial<FrameType> | null): string {
 }
 
 function inferCompilationSummary(frame?: Partial<FrameType> | null): string {
-  const compilationMode = normalizeCompilationMode(frame?.rpios?.compilationMode)
+  const compilationMode = frameCompilationMode(frame)
   const crossCompilation = normalizeCrossCompilation(frame?.rpios?.crossCompilation)
   if (compilationMode === 'shared') {
     return 'Shared libraries deployed next to the FrameOS binary'
+  }
+  if (compilationMode === 'shared-scenes') {
+    return 'Compiled scenes bundled into scenes.so next to the FrameOS binary'
   }
   if (compilationMode === 'precompiled' && crossCompilation !== 'always' && !precompiledSkipReason(frame)) {
     return 'Precompiled FrameOS binary and shared driver libraries'
@@ -426,8 +440,16 @@ export function buildFullDeployPlanSummary(
   if (fullPlan.binary.compilation_mode === 'shared' && requestedCompilationMode !== 'precompiled') {
     items.push({ label: 'Compilation', value: 'Shared libraries deployed next to the FrameOS binary' })
   }
+  if (fullPlan.binary.compilation_mode === 'shared-scenes' && requestedCompilationMode === 'precompiled') {
+    items.push({ label: 'Compilation', value: 'Compiled scenes bundled into scenes.so next to the FrameOS binary' })
+  }
   if (requestedCompilationMode === 'precompiled') {
-    const fallbackMode = fullPlan.binary.compilation_mode === 'static' ? 'Single executable' : 'Shared libraries'
+    const fallbackMode =
+      fullPlan.binary.compilation_mode === 'static'
+        ? 'Single executable'
+        : fullPlan.binary.compilation_mode === 'shared-scenes'
+          ? 'Bundled scenes library'
+          : 'Shared libraries'
     items.push({
       label: 'Compilation',
       value: fullPlan.binary.will_attempt_precompiled

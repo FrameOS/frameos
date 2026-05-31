@@ -38,7 +38,7 @@ class ConnectionManager:
         async with self.lock:
             connections = list(self.active_connections)
 
-        for connection in connections:
+        async def send(connection: WebSocket) -> WebSocket | None:
             try:
                 await asyncio.wait_for(
                     connection.send_text(message),
@@ -46,7 +46,11 @@ class ConnectionManager:
                 )
             except Exception as e:
                 print(f"Error sending message to {connection.client}: {e}")
-                stale_connections.append(connection)
+                return connection
+            return None
+
+        results = await asyncio.gather(*(send(connection) for connection in connections))
+        stale_connections = [connection for connection in results if connection is not None]
 
         if stale_connections:
             async with self.lock:

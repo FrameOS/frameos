@@ -7,11 +7,13 @@ from app.drivers.drivers import Driver
 
 COMPILATION_MODE_STATIC = "static"
 COMPILATION_MODE_SHARED = "shared"
+COMPILATION_MODE_SHARED_SCENES = "shared-scenes"
 COMPILATION_MODE_PRECOMPILED = "precompiled"
 DEFAULT_COMPILATION_MODE = COMPILATION_MODE_PRECOMPILED
 VALID_COMPILATION_MODES = {
     COMPILATION_MODE_STATIC,
     COMPILATION_MODE_SHARED,
+    COMPILATION_MODE_SHARED_SCENES,
     COMPILATION_MODE_PRECOMPILED,
 }
 
@@ -24,6 +26,9 @@ def normalize_compilation_mode(value: str | None) -> str:
 
 
 def frame_compilation_mode(frame) -> str:
+    if getattr(frame, "mode", None) == "buildroot":
+        buildroot_settings = getattr(frame, "buildroot", None) or {}
+        return normalize_compilation_mode(buildroot_settings.get("compilationMode"))
     rpios_settings = getattr(frame, "rpios", None) or {}
     return normalize_compilation_mode(rpios_settings.get("compilationMode"))
 
@@ -31,6 +36,7 @@ def frame_compilation_mode(frame) -> str:
 def compilation_mode_uses_shared_libraries(value: str | None) -> bool:
     return normalize_compilation_mode(value) in {
         COMPILATION_MODE_SHARED,
+        COMPILATION_MODE_SHARED_SCENES,
         COMPILATION_MODE_PRECOMPILED,
     }
 
@@ -391,6 +397,8 @@ proc setupSharedDriver(spec: DriverSpec, driverCtx: driverContext.DriverContext)
   let library = loadLib(path)
   if library.isNil:
     echo "FrameOS setup: shared driver " & spec.name & ": failed to load " & path
+    echo "FrameOS setup: shared driver " & spec.name & ": file exists: " & $fileExists(path)
+    echo "FrameOS setup: shared driver " & spec.name & ": LD_LIBRARY_PATH=" & getEnv("LD_LIBRARY_PATH")
     raise newException(OSError, "Unable to load driver library: " & path)
   let setupProc = loadRequiredSymbol[DriverSetupProc](library, spec.name, "frameos_driver_setup")
   if setupProc.isNil:

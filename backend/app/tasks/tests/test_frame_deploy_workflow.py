@@ -65,9 +65,12 @@ class RecordingDeployer(FakeDeployer):
         self.atomic_uploads: list[tuple[str, bool]] = []
         self.setup_exit_code = 0
         self.setup_output: list[str] = []
+        self.root_read_only = False
 
     async def exec_command(self, command: str, **kwargs) -> int:
         self.commands.append(command)
+        if command.startswith("awk '$2 == \"/\" "):
+            return 0 if self.root_read_only else 1
         if (
             command.startswith("cd /srv/frameos/releases/release_")
             or command.startswith("cd /srv/frameos/current")
@@ -883,6 +886,113 @@ async def test_run_release_setup_uses_staged_release_and_marks_reboot_when_setup
     assert "sudo systemctl enable frameos.service" not in deployer.commands
     assert "sudo reboot" not in deployer.commands
     assert deployer.restarted_services == []
+
+
+@pytest.mark.asyncio
+async def test_run_release_setup_remounts_read_only_root_around_setup():
+    frame = SimpleNamespace(
+        id=10,
+        name="SetupReadonlyRootFrame",
+        reboot={"enabled": "false"},
+        last_successful_deploy_at=None,
+        last_successful_deploy={"frameos_version": "9.9.9"},
+        to_dict=lambda: {"id": 10, "name": "SetupReadonlyRootFrame"},
+    )
+    deployer = RecordingDeployer()
+    deployer.root_read_only = True
+    workflow = FrameDeployWorkflow(
+        db=None,
+        redis=None,
+        frame=frame,
+        deployer=deployer,
+        temp_dir="",
+        binary_builder=FakeBinaryBuilder(),
+    )
+
+    post_deploy = {
+        "final_action": "restart_frameos",
+    }
+
+    await workflow._run_release_setup(
+        build_id="build12345678",
+        post_deploy=post_deploy,
+    )
+
+    assert post_deploy["final_action"] == "restart_frameos"
+    root_check = next(index for index, command in enumerate(deployer.commands) if command.startswith("awk '$2 == \"/\" "))
+    remount_rw = deployer.commands.index("sudo mount -o remount,rw /")
+    setup = deployer.commands.index("cd /srv/frameos/releases/release_build12345678 && sudo ./frameos setup")
+    sync = deployer.commands.index("sudo sync")
+    remount_ro = deployer.commands.index("sudo mount -o remount,ro /")
+    assert root_check < remount_rw < setup < sync < remount_ro
+    assert ("stdout", "Root filesystem is read-only; remounting read-write for setup") in deployer.logs
+    assert ("stdout", "Restoring root filesystem to read-only after setup") in deployer.logs
+
+
+@pytest.mark.asyncio
+async def test_buildroot_current_setup_continues_after_legacy_systemd_service_write_failure():
+    frame = SimpleNamespace(
+        id=10,
+        name="BuildrootSetupFrame",
+        mode="buildroot",
+        reboot={"enabled": "false"},
+        last_successful_deploy_at=None,
+        last_successful_deploy={"frameos_version": "9.9.9", "frameos_commands": list(FRAMEOS_AVAILABLE_COMMANDS)},
+        to_dict=lambda: {"id": 10, "name": "BuildrootSetupFrame", "mode": "buildroot"},
+    )
+    deployer = RecordingDeployer()
+    deployer.setup_exit_code = 1
+    deployer.setup_output = [
+        "FrameOS setup: starting",
+        "FrameOS setup: driver setup: complete",
+        "FrameOS setup: checking systemd services",
+        "FrameOS setup: systemd services: installing frameos.service",
+        "FrameOS setup: systemd services: failed: cannot open: /etc/systemd/system/frameos.service",
+        "FrameOS fatal: cannot open: /etc/systemd/system/frameos.service",
+    ]
+    workflow = FrameDeployWorkflow(
+        db=None,
+        redis=None,
+        frame=frame,
+        deployer=deployer,
+        temp_dir="",
+        binary_builder=FakeBinaryBuilder(),
+    )
+
+    setup_requires_reboot = await workflow._run_current_setup()
+
+    assert setup_requires_reboot is False
+    assert "cd /srv/frameos/current && sudo ./frameos setup" in deployer.commands
+    assert any("failed refreshing the Buildroot systemd service file" in message for _kind, message in deployer.logs)
+    assert not any("diagnostics:" in command for command in deployer.commands)
+
+
+@pytest.mark.asyncio
+async def test_stop_frameos_for_release_setup_leaves_agent_running():
+    frame = SimpleNamespace(
+        id=10,
+        name="SetupStopFrame",
+        reboot={"enabled": "false"},
+        last_successful_deploy_at=None,
+        last_successful_deploy={"frameos_version": "9.9.9"},
+        to_dict=lambda: {"id": 10, "name": "SetupStopFrame"},
+    )
+    deployer = RecordingDeployer()
+    workflow = FrameDeployWorkflow(
+        db=None,
+        redis=None,
+        frame=frame,
+        deployer=deployer,
+        temp_dir="",
+        binary_builder=FakeBinaryBuilder(),
+    )
+
+    stopped = await workflow._stop_frameos_for_release_setup()
+
+    assert stopped is True
+    assert "sudo service frameos stop" in deployer.commands
+    assert "sudo sh -c 'killall frameos 2>/dev/null || true'" in deployer.commands
+    assert all("frameos_agent" not in command for command in deployer.commands)
 
 
 @pytest.mark.asyncio

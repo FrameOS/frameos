@@ -251,8 +251,9 @@ proc execShellSimple(rawCmd: string;
                      ws: WebSocket;
                      cfg: FrameConfig;
                      id: string): Future[void] {.async.} =
+  let shell = if fileExists("/bin/bash"): "bash" else: "sh"
   var p = startProcess("/usr/bin/env",
-                       args = ["bash", "-c", rawCmd],
+                       args = [shell, "-c", rawCmd],
                        options = {poUsePath, poStdErrToStdOut}) # <- merge stderr
 
   var line: string

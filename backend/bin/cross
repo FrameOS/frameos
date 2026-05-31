@@ -365,6 +365,13 @@ def agent_version_for_repo(repo_root: Path) -> str:
     return "unknown"
 
 
+def repo_root_for_frameos_root(frameos_root: Path) -> Path:
+    for candidate in (frameos_root, frameos_root.parent, REPO_ROOT):
+        if (candidate / "versions.json").is_file():
+            return candidate
+    return frameos_root
+
+
 async def generate_agent_build_dir(
     *,
     deployer,
@@ -420,6 +427,10 @@ async def build_target(
     target = TARGET_MAP[slug]
     frameos_root = frameos_root.resolve()
     artifacts_dir = artifacts_dir.resolve()
+    repo_root = repo_root_for_frameos_root(frameos_root)
+    versions_path = repo_root / "versions.json"
+    if not versions_path.is_file():
+        raise RuntimeError(f"Build versions file is missing: {versions_path}")
     artifacts_dir.mkdir(parents=True, exist_ok=True)
 
     from backend.app.tasks._frame_deployer import FrameDeployer  # type: ignore  # noqa: E402
@@ -483,6 +494,7 @@ async def build_target(
         destination = target_dir / "frameos"
         shutil.copy2(binary_path, destination)
         os.chmod(destination, 0o755)
+        shutil.copy2(versions_path, target_dir / "versions.json")
         if build_result.driver_library_paths:
             driver_dir = target_dir / "drivers"
             driver_dir.mkdir(parents=True, exist_ok=True)
@@ -530,7 +542,7 @@ async def build_release_target(
     frameos_root = frameos_root.resolve()
     artifacts_dir = artifacts_dir.resolve()
     artifacts_dir.mkdir(parents=True, exist_ok=True)
-    repo_root = frameos_root.parent
+    repo_root = repo_root_for_frameos_root(frameos_root)
     versions_path = repo_root / "versions.json"
     if not versions_path.is_file():
         raise RuntimeError(f"Release versions file is missing: {versions_path}")
@@ -700,7 +712,7 @@ async def build_release_target(
                 build_dir=agent_build_dir,
                 arch=target.arch,
                 nim_path=nim_path,
-                repo_root=frameos_root.parent,
+                repo_root=frameos_root,
             )
             write_release_agent_build_marker(
                 agent_build_dir,
@@ -810,9 +822,9 @@ def parse_args(argv: Iterable[str]) -> argparse.Namespace:
     build.add_argument(
         "--compilation-mode",
         dest="compilation_mode",
-        choices=("static", "shared", "precompiled"),
+        choices=("static", "shared", "shared-scenes", "precompiled"),
         default=None,
-        help="Override compilation mode (static, shared, or precompiled release when eligible)",
+        help="Override compilation mode (static, shared, shared-scenes, or precompiled release when eligible)",
     )
 
     release = subparsers.add_parser(

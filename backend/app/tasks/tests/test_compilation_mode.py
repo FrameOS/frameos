@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from app.codegen.drivers_nim import (
     COMPILATION_MODE_PRECOMPILED,
     COMPILATION_MODE_SHARED,
+    COMPILATION_MODE_SHARED_SCENES,
     COMPILATION_MODE_STATIC,
     compilation_mode_uses_shared_libraries,
     driver_library_filename,
@@ -28,6 +29,8 @@ def test_compilation_mode_defaults_to_precompiled():
 def test_compilation_mode_shared_requires_explicit_setting():
     assert normalize_compilation_mode("shared") == COMPILATION_MODE_SHARED
     assert frame_compilation_mode(SimpleNamespace(rpios={"compilationMode": "shared"})) == COMPILATION_MODE_SHARED
+    assert normalize_compilation_mode("shared-scenes") == COMPILATION_MODE_SHARED_SCENES
+    assert frame_compilation_mode(SimpleNamespace(rpios={"compilationMode": "shared-scenes"})) == COMPILATION_MODE_SHARED_SCENES
 
 
 def test_compilation_mode_static_is_valid():
@@ -35,11 +38,25 @@ def test_compilation_mode_static_is_valid():
     assert frame_compilation_mode(SimpleNamespace(rpios={"compilationMode": "static"})) == COMPILATION_MODE_STATIC
 
 
+def test_buildroot_compilation_mode_uses_buildroot_settings():
+    assert (
+        frame_compilation_mode(
+            SimpleNamespace(
+                mode="buildroot",
+                buildroot={"compilationMode": "static"},
+                rpios={"compilationMode": "precompiled"},
+            )
+        )
+        == COMPILATION_MODE_STATIC
+    )
+
+
 def test_compilation_mode_precompiled_uses_shared_libraries():
     assert normalize_compilation_mode("precompiled") == COMPILATION_MODE_PRECOMPILED
     assert frame_compilation_mode(SimpleNamespace(rpios={"compilationMode": "precompiled"})) == COMPILATION_MODE_PRECOMPILED
     assert compilation_mode_uses_shared_libraries("precompiled") is True
     assert compilation_mode_uses_shared_libraries("shared") is True
+    assert compilation_mode_uses_shared_libraries("shared-scenes") is True
     assert compilation_mode_uses_shared_libraries("static") is False
 
 

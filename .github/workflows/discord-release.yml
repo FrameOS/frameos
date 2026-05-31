@@ -24,12 +24,13 @@ permissions:
 
 jobs:
   notify:
-    name: Post release link
+    name: Post release notes
     runs-on: ubuntu-latest
     steps:
-      - name: Post release link to Discord
+      - name: Post release notes to Discord
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
@@ -41,6 +42,7 @@ jobs:
           python3 - <<'PY'
           import json
           import os
+          import urllib.request
 
           with open(os.environ["GITHUB_EVENT_PATH"], encoding="utf-8") as event_file:
               event = json.load(event_file)
@@ -49,21 +51,74 @@ jobs:
               release = event["release"]
               release_name = release.get("name") or release["tag_name"]
               release_url = release["html_url"]
+              release_notes = release.get("body") or ""
           else:
               inputs = event.get("inputs", {})
               release_name = inputs.get("release_name") or inputs["release_tag"]
               release_url = inputs["release_url"]
+              release_tag = inputs["release_tag"]
+              request = urllib.request.Request(
+                  f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/releases/tags/{release_tag}",
+                  headers={
+                      "Accept": "application/vnd.github+json",
+                      "Authorization": f"Bearer {os.environ['GITHUB_TOKEN']}",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                  },
+              )
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  release = json.load(response)
+              release_notes = release.get("body") or ""
 
-          payload = {
-              "content": f"New FrameOS release: {release_name}\n{release_url}",
-              "allowed_mentions": {"parse": []},
-          }
+          def chunk_markdown(text: str, max_chars: int = 3900) -> list[str]:
+              if not text:
+                  return ["_No release notes provided._"]
 
-          with open("discord-payload.json", "w", encoding="utf-8") as payload_file:
-              json.dump(payload, payload_file)
+              chunks = []
+              remaining = text.strip()
+              while len(remaining) > max_chars:
+                  split_at = remaining.rfind("\n\n", 0, max_chars)
+                  if split_at < max_chars // 2:
+                      split_at = remaining.rfind("\n", 0, max_chars)
+                  if split_at < max_chars // 2:
+                      split_at = max_chars
+                  chunks.append(remaining[:split_at].rstrip())
+                  remaining = remaining[split_at:].lstrip()
+              if remaining:
+                  chunks.append(remaining)
+              return chunks
+
+          chunks = chunk_markdown(release_notes)
+          payloads = []
+          for index, chunk in enumerate(chunks, start=1):
+              suffix = f" ({index}/{len(chunks)})" if len(chunks) > 1 else ""
+              payload = {
+                  "allowed_mentions": {"parse": []},
+                  "embeds": [{
+                      "title": f"Release notes{suffix}",
+                      "url": release_url,
+                      "description": chunk,
+                  }],
+              }
+              if index == 1:
+                  payload["content"] = f"New FrameOS release: {release_name}\n{release_url}"
+              payloads.append(payload)
+
+          with open("discord-payloads.jsonl", "w", encoding="utf-8") as payload_file:
+              for payload in payloads:
+                  payload_file.write(json.dumps(payload) + "\n")
           PY
 
-          curl --fail-with-body --show-error --silent \
-            -H "Content-Type: application/json" \
-            --data @discord-payload.json \
-            "$DISCORD_WEBHOOK_URL"
+          index=0
+          total=$(wc -l < discord-payloads.jsonl | tr -d ' ')
+          while IFS= read -r payload; do
+            index=$((index + 1))
+            printf '%s' "$payload" > discord-payload.json
+            echo "Posting Discord release message ${index}/${total}"
+            if [ "$index" -gt 1 ]; then
+              sleep 1
+            fi
+            curl --fail-with-body --show-error --silent \
+              -H "Content-Type: application/json" \
+              --data @discord-payload.json \
+              "$DISCORD_WEBHOOK_URL"
+          done < discord-payloads.jsonl

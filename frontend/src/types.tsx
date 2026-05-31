@@ -50,6 +50,7 @@ export interface FrameType {
   width?: number
   height?: number
   device?: string
+  timezone?: string
   device_config?: {
     vcom?: number
     uploadUrl?: string
@@ -131,17 +132,26 @@ export interface FrameMountpointsConfig {
 }
 
 export type FrameMode = 'rpios' | 'buildroot' | 'import'
+export type FrameInstallMethod = 'sd_card' | 'ssh' | 'script'
 export interface NewFrameFormType {
   mode: FrameMode
+  install_method?: FrameInstallMethod
   name?: string | null
   frame_host?: string | null
   device?: string | null
+  timezone?: string | null
   server_host?: string | null
   platform?: string | null
+  agent?: {
+    agentEnabled?: boolean
+    agentRunCommands?: boolean
+    deployWithAgent?: boolean
+  }
   network?: {
     wifiSSID?: string
     wifiPassword?: string
   }
+  rememberWifi?: boolean
 }
 
 export interface GPIOButton {
@@ -684,6 +694,7 @@ export interface FrameStateCacheInfo {
   fetched_at?: number | null
   refresh_after?: number | null
   retry_after?: number | null
+  error?: string | null
 }
 
 export interface FrameStateRecord {
@@ -704,16 +715,21 @@ export interface Palette {
 
 export interface FrameBuildrootConfig {
   platform?: string
-  setupJsonResetFilePath?: string
+  compilationMode?: '' | 'static' | 'shared' | 'shared-scenes' | 'precompiled'
   sdImage?: {
-    status?: 'idle' | 'queued' | 'building' | 'ready' | 'error' | 'missing'
+    status?: 'idle' | 'queued' | 'building' | 'ready' | 'error' | 'missing' | 'stale'
     buildId?: string
     requestId?: string
     queueJobId?: string
     platform?: string
     buildrootVersion?: string
     filename?: string
+    rawFilename?: string
     path?: string
+    compressed?: boolean
+    customizationVersion?: number
+    rawSize?: number
+    rawSha256?: string
     size?: number
     sha256?: string
     downloadUrl?: string
@@ -728,5 +744,5 @@ export interface FrameBuildrootConfig {
 export interface FrameRpiOSConfig {
   platform?: string
   crossCompilation?: '' | 'auto' | 'always' | 'never'
-  compilationMode?: '' | 'static' | 'shared' | 'precompiled'
+  compilationMode?: '' | 'static' | 'shared' | 'shared-scenes' | 'precompiled'
 }

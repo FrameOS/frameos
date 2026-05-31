@@ -32,6 +32,38 @@ block test_setup_boot_config_writes_local_file:
     if fileExists(path):
       removeFile(path)
 
+block test_write_privileged_file_skips_unchanged_file:
+  let path = getTempDir() / ("frameos-test-privileged-skip-" & $epochTime().int64 & ".txt")
+  writeFile(path, "existing\n")
+  var commands: seq[string] = @[]
+  setSetupCommandRunnerForTest(proc(command: string): SetupCommandResult =
+    commands.add(command)
+    ("", 0)
+  )
+  try:
+    writePrivilegedFile(path, "existing\n")
+    doAssert readFile(path) == "existing\n"
+    doAssert commands.len == 0
+  finally:
+    resetSetupCommandRunnerForTest()
+    if fileExists(path):
+      removeFile(path)
+
+block test_write_privileged_file_falls_back_after_direct_write_failure:
+  let path = getTempDir() / ("frameos-test-missing-parent-" & $epochTime().int64) / "target.txt"
+  var commands: seq[string] = @[]
+  setSetupCommandRunnerForTest(proc(command: string): SetupCommandResult =
+    commands.add(command)
+    ("", 0)
+  )
+  try:
+    writePrivilegedFile(path, "content\n")
+    doAssert commands.len == 1
+    doAssert commands[0].contains("install -m 644")
+    doAssert commands[0].contains(shellQuote(path))
+  finally:
+    resetSetupCommandRunnerForTest()
+
 block test_setup_spi_enables_when_raspi_config_reports_disabled:
   var commands: seq[string] = @[]
   setSetupCommandRunnerForTest(proc(command: string): SetupCommandResult =
@@ -67,6 +99,62 @@ block test_setup_nospi_disables_when_raspi_config_reports_enabled:
     doAssert commands.anyIt(it.contains("raspi-config nonint do_spi 1"))
   finally:
     resetSetupCommandRunnerForTest()
+
+block test_setup_spi_uses_boot_config_fallback_when_raspi_config_missing:
+  let path = getTempDir() / ("frameos-test-spi-boot-config-" & $epochTime().int64 & ".txt")
+  let previousBootConfig = getEnv("FRAMEOS_BOOT_CONFIG")
+  putEnv("FRAMEOS_BOOT_CONFIG", path)
+  var commands: seq[string] = @[]
+  setSetupCommandRunnerForTest(proc(command: string): SetupCommandResult =
+    commands.add(command)
+    if command.contains("command -v"):
+      return ("", 1)
+    return ("", 0)
+  )
+  try:
+    let setupResult = spiDriver.setup()
+    let content = if fileExists(path): readFile(path) else: ""
+    doAssert setupResult.rebootRequired
+    doAssert content.contains("dtparam=spi=on\n")
+    doAssert commands.anyIt(it.contains("command -v"))
+    doAssert not commands.anyIt(it.contains("raspi-config nonint do_spi"))
+  finally:
+    resetSetupCommandRunnerForTest()
+    if previousBootConfig.len > 0:
+      putEnv("FRAMEOS_BOOT_CONFIG", previousBootConfig)
+    else:
+      delEnv("FRAMEOS_BOOT_CONFIG")
+    if fileExists(path):
+      removeFile(path)
+
+block test_setup_nospi_uses_boot_config_fallback_when_raspi_config_missing:
+  let path = getTempDir() / ("frameos-test-nospi-boot-config-" & $epochTime().int64 & ".txt")
+  let previousBootConfig = getEnv("FRAMEOS_BOOT_CONFIG")
+  putEnv("FRAMEOS_BOOT_CONFIG", path)
+  writeFile(path, "dtparam=spi=on\nkeep=1\n")
+  var commands: seq[string] = @[]
+  setSetupCommandRunnerForTest(proc(command: string): SetupCommandResult =
+    commands.add(command)
+    if command.contains("command -v"):
+      return ("", 1)
+    return ("", 0)
+  )
+  try:
+    let setupResult = noSpiDriver.setup()
+    let content = readFile(path)
+    doAssert setupResult.rebootRequired
+    doAssert not content.contains("dtparam=spi=on")
+    doAssert content.contains("keep=1\n")
+    doAssert commands.anyIt(it.contains("command -v"))
+    doAssert not commands.anyIt(it.contains("raspi-config nonint do_spi"))
+  finally:
+    resetSetupCommandRunnerForTest()
+    if previousBootConfig.len > 0:
+      putEnv("FRAMEOS_BOOT_CONFIG", previousBootConfig)
+    else:
+      delEnv("FRAMEOS_BOOT_CONFIG")
+    if fileExists(path):
+      removeFile(path)
 
 block test_setup_inky_python_vendor_driver:
   var commands: seq[string] = @[]

@@ -550,6 +550,13 @@ html[data-frameos-theme='dark'] .frameos-template-action-button:hover {
   box-shadow: 0 14px 30px rgba(0, 0, 0, 0.24);
 }
 
+.frameos-theme-dark .frameos-blank-frame-scene-hint,
+html[data-frameos-theme='dark'] .frameos-blank-frame-scene-hint {
+  background: rgba(120, 78, 16, 0.18);
+  border-color: rgba(251, 191, 36, 0.2);
+  color: #fde68a;
+}
+
 .frameos-theme-dark .frameos-card,
 .frameos-theme-dark .frameos-inset,
 .frameos-theme-dark .frameos-form-control,
@@ -899,6 +906,16 @@ html[data-frameos-theme='dark'] .frameos-icon-button:hover,
 .frameos-theme-dark .frameos-segment:not(.frameos-primary-active):hover {
   background: rgba(255, 255, 255, 0.08);
   color: #f8fafc;
+}
+
+.frameos-theme-dark .frameos-install-method-button,
+html[data-frameos-theme='dark'] .frameos-install-method-button {
+  border-color: rgba(255, 255, 255, 0.07);
+}
+
+.frameos-theme-dark .frameos-install-method-button:hover,
+html[data-frameos-theme='dark'] .frameos-install-method-button:hover {
+  border-color: rgba(255, 255, 255, 0.11);
 }
 
 .frameos-theme-dark .frameos-secondary-button,

@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from functools import partial
 import os
+from pathlib import Path
 import shlex
 from typing import Any
 
@@ -55,6 +56,7 @@ REMOTE_BUILD_FEATURE_CFLAGS = {
     "amd64": ("-mavx2", "-mavx", "-msse4.1", "-mssse3", "-mpclmul", "-mvpclmulqdq"),
     "x86_64": ("-mavx2", "-mavx", "-msse4.1", "-mssse3", "-mpclmul", "-mvpclmulqdq"),
 }
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def _deploy_uses_agent(frame: Frame) -> bool:
@@ -476,6 +478,11 @@ class FrameDeployWorkflow:
             if binary_plan.will_attempt_precompiled:
                 notes.append("Precompiled FrameOS release will be used because all scenes are interpreted.")
             else:
+                fallback = "single executable"
+                if binary_plan.compilation_mode == "shared-scenes":
+                    fallback = "compiled scenes library"
+                elif binary_plan.compilation_mode == "shared":
+                    fallback = "shared libraries"
                 notes.append(
                     "Precompiled FrameOS release will be skipped"
                     + (
@@ -483,7 +490,7 @@ class FrameDeployWorkflow:
                         if binary_plan.precompiled_skip_reason
                         else "."
                     )
-                    + " Falling back to single executable."
+                    + f" Falling back to {fallback}."
                 )
         if low_memory and not binary_plan.will_attempt_precompiled:
             notes.append("Device is low memory; on-device build path will stop FrameOS before compilation.")
@@ -869,11 +876,17 @@ class FrameDeployWorkflow:
 
     async def _stop_frameos_for_release_setup(self) -> bool:
         await self.deployer.log("stdout", f"{icon} Stopping running FrameOS before device setup")
-        status = await self.deployer.exec_command("sudo service frameos stop", raise_on_error=False)
-        if status != 0:
+        statuses = [
+            await self.deployer.exec_command("sudo service frameos stop", raise_on_error=False),
+            await self.deployer.exec_command(
+                "sudo sh -c 'killall frameos 2>/dev/null || true'",
+                raise_on_error=False,
+            ),
+        ]
+        if statuses[0] != 0:
             await self.deployer.log(
                 "stderr",
-                f"Could not stop FrameOS before device setup; continuing with setup anyway (exit code {status})",
+                f"Could not stop FrameOS service before device setup; continuing with setup anyway (exit code {statuses[0]})",
             )
             return False
         return True
@@ -889,17 +902,28 @@ class FrameDeployWorkflow:
 
     async def _run_setup_in_directory(self, path: str) -> bool:
         await self.deployer.log("stdout", f"{icon} Running FrameOS device setup")
-        setup_output: list[str] = []
-        setup_status = await self.deployer.exec_command(
-            f"cd {shlex.quote(path)} && sudo ./frameos setup",
-            output=setup_output,
-            raise_on_error=False,
-            log_command="sudo ./frameos setup",
-        )
+        root_remounted_rw = await self._remount_root_rw_for_setup_if_needed()
+        try:
+            setup_output: list[str] = []
+            setup_status = await self.deployer.exec_command(
+                f"cd {shlex.quote(path)} && sudo ./frameos setup",
+                output=setup_output,
+                raise_on_error=False,
+                log_command="sudo ./frameos setup",
+            )
+        finally:
+            if root_remounted_rw:
+                await self._remount_root_ro_after_setup()
         if self._setup_completed_before_legacy_shared_driver_segfault(setup_status, setup_output):
             await self.deployer.log(
                 "stderr",
                 "FrameOS setup completed, then exited during legacy shared-driver teardown; continuing deploy.",
+            )
+            return False
+        if self._setup_failed_after_buildroot_systemd_service_install(setup_status, setup_output):
+            await self.deployer.log(
+                "stderr",
+                "FrameOS setup completed device changes but failed refreshing the Buildroot systemd service file; continuing deploy.",
             )
             return False
         if setup_status == 2:
@@ -908,6 +932,25 @@ class FrameDeployWorkflow:
             await self._log_setup_failure_diagnostics(setup_status)
             raise RuntimeError(f"FrameOS setup failed with exit code {setup_status}")
         return False
+
+    async def _remount_root_rw_for_setup_if_needed(self) -> bool:
+        status = await self.deployer.exec_command(
+            "awk '$2 == \"/\" { split($4, opts, \",\"); for (i in opts) if (opts[i] == \"ro\") found=1 } END { exit found ? 0 : 1 }' /proc/mounts",
+            raise_on_error=False,
+            log_output=False,
+            log_command=False,
+        )
+        if status != 0:
+            return False
+
+        await self.deployer.log("stdout", "Root filesystem is read-only; remounting read-write for setup")
+        await self.deployer.exec_command("sudo mount -o remount,rw /")
+        return True
+
+    async def _remount_root_ro_after_setup(self) -> None:
+        await self.deployer.log("stdout", "Restoring root filesystem to read-only after setup")
+        await self.deployer.exec_command("sudo sync", raise_on_error=False)
+        await self.deployer.exec_command("sudo mount -o remount,ro /")
 
     @staticmethod
     def _setup_completed_before_legacy_shared_driver_segfault(setup_status: int, setup_output: list[str]) -> bool:
@@ -922,6 +965,21 @@ class FrameDeployWorkflow:
             for line in setup_output
         )
 
+    def _setup_failed_after_buildroot_systemd_service_install(self, setup_status: int, setup_output: list[str]) -> bool:
+        if setup_status == 0 or (getattr(self.frame, "mode", None) or "rpios") != "buildroot":
+            return False
+
+        driver_setup_complete = any(line.strip() == "FrameOS setup: driver setup: complete" for line in setup_output)
+        installing_frameos_service = any(
+            line.strip() == "FrameOS setup: systemd services: installing frameos.service"
+            for line in setup_output
+        )
+        service_write_failed = any(
+            "/etc/systemd/system/frameos.service" in line and "cannot open" in line
+            for line in setup_output
+        )
+        return driver_setup_complete and installing_frameos_service and service_write_failed
+
     async def _log_setup_failure_diagnostics(self, setup_status: int) -> None:
         await self.deployer.log("stderr", f"FrameOS setup exited with code {setup_status}; collecting diagnostics")
         diagnostics = (
@@ -930,7 +988,7 @@ class FrameDeployWorkflow:
                 "FrameOS processes",
                 "ps -eo pid,ppid,stat,rss,comm,args | grep -E '[f]rameos|[f]rameos_agent'",
             ),
-            ("kernel messages", "sudo dmesg -T | tail -80"),
+            ("kernel messages", "sudo sh -c 'dmesg -T 2>/dev/null || dmesg' | tail -80"),
         )
         for label, command in diagnostics:
             await self.deployer.exec_command(
@@ -964,7 +1022,7 @@ class FrameDeployWorkflow:
 
     async def _install_and_activate_release(self, build_id: str) -> None:
         service_user = await self._frameos_service_user()
-        with open("../frameos/frameos.service", "r", encoding="utf-8") as f:
+        with (REPO_ROOT / "frameos" / "frameos.service").open("r", encoding="utf-8") as f:
             service_contents = f.read().replace("%I", service_user)
         await upload_file(
             self.deployer.db,

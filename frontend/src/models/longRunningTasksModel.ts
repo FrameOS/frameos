@@ -122,6 +122,23 @@ function sceneIdsMatch(first?: string | null, second?: string | null): boolean {
   return !!normalizedFirst && !!normalizedSecond && normalizedFirst === normalizedSecond
 }
 
+function taskMatchesPayload(task: LongRunningTask, payload: FinishTaskPayload | StartTaskPayload): boolean {
+  if (task.frameId !== payload.frameId) {
+    return false
+  }
+  if (payload.kind && task.kind !== payload.kind) {
+    return false
+  }
+  if (payload.sceneId || task.sceneId) {
+    return sceneIdsMatch(task.sceneId, payload.sceneId)
+  }
+  return true
+}
+
+function startTask(tasks: LongRunningTask[], task: LongRunningTask): LongRunningTask[] {
+  return [...tasks.filter((candidate) => !taskMatchesPayload(candidate, task)), task]
+}
+
 function updateLatestTaskProgress(tasks: LongRunningTask[], payload: UpdateTaskProgressPayload): LongRunningTask[] {
   const index = latestRunningTaskIndex(tasks, payload)
   if (index === -1) {
@@ -267,7 +284,7 @@ export const longRunningTasksModel = kea<longRunningTasksModelType>([
     tasks: [
       [] as LongRunningTask[],
       {
-        startTask: (state, { task }) => [...state, task],
+        startTask: (state, { task }) => startTask(state, task),
         finishTask: (state, { task }) => finishLatestTask(state, task),
         taskFailed: (state, { task }) => finishLatestTask(state, task),
         updateTaskProgress: (state, { task }) => updateLatestTaskProgress(state, task),

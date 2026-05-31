@@ -9,6 +9,7 @@ from app.models.frame import Frame
 from app.models.apps import get_local_frame_apps, get_local_app_path, get_scene_app_id
 from app.codegen.drivers_nim import (
     DEFAULT_COMPILATION_MODE,
+    COMPILATION_MODE_SHARED_SCENES,
     compilation_mode_uses_shared_libraries,
 )
 from app.codegen.utils import sanitize_nim_string, natural_keys
@@ -66,6 +67,22 @@ def scene_module_filename(scene: dict) -> str:
 
 def scene_library_filename(scene: dict) -> str:
     return f"scene_{scene_module_suffix(scene)}.so"
+
+
+def scene_bundle_library_filename() -> str:
+    return "scenes.so"
+
+
+def _scene_symbol_suffix(scene: dict) -> str:
+    return scene_module_suffix(scene).replace(".", "_").replace("-", "_")
+
+
+def _scene_bundle_init_symbol(scene: dict) -> str:
+    return f"frameos_scene_init_{_scene_symbol_suffix(scene)}"
+
+
+def _scene_bundle_export_symbol(scene: dict) -> str:
+    return f"frameos_scene_export_{_scene_symbol_suffix(scene)}"
 
 
 def write_scene_library_nim(scene: dict) -> str:
@@ -1842,7 +1859,141 @@ proc getExportedScenes*(): Table[SceneId, ExportedScene] =
     return scenes_source
 
 
+def write_shared_scenes_bundle_nim(frame: Frame) -> str:
+    compiled_scenes = compiled_frame_scenes(frame)
+    scene_specs = [
+        "SceneBundleSpec("
+        f'id: "{scene_registry_id(scene)}".SceneId, '
+        f'name: "{sanitize_nim_string(scene.get("name", "Default"))}", '
+        f'libraryName: "{scene_bundle_library_filename()}", '
+        f'initSymbol: "{_scene_bundle_init_symbol(scene)}", '
+        f'exportSymbol: "{_scene_bundle_export_symbol(scene)}"'
+        ")"
+        for scene in compiled_scenes
+    ]
+    default_scene = next((scene for scene in compiled_scenes if scene.get("default", False)), None)
+    sceneOptionTuples = [
+        f'  ("{scene_registry_id(scene)}".SceneId, "{sanitize_nim_string(scene.get("name", "Default"))}"),'
+        for scene in compiled_scenes
+    ]
+    spec_lines = ("," + "\n" + "  ").join(scene_specs)
+    if spec_lines:
+        spec_lines = "\n  " + spec_lines + "\n"
+    newline = "\n"
+
+    bundle_imports = "\n".join(
+        f'import scenes.scene_{scene_module_suffix(scene)} as scene_{scene_module_suffix(scene)}'
+        for scene in compiled_scenes
+    )
+    if not bundle_imports:
+        bundle_imports = "# no compiled scenes"
+
+    wrapper_exports = ""
+    for scene in compiled_scenes:
+        wrapper_exports += f"""
+proc {_scene_bundle_init_symbol(scene)}*(logHook: HostLogProc, sendEventHook: HostSendEventProc) {{.cdecl, exportc, dynlib.}} =
+  scene_{scene_module_suffix(scene)}.frameos_scene_init(logHook, sendEventHook)
+
+proc {_scene_bundle_export_symbol(scene)}*(): pointer {{.cdecl, exportc, dynlib.}} =
+  result = cast[pointer](scene_{scene_module_suffix(scene)}.exportedScene)
+"""
+
+    scenes_source = f"""
+import std/[dynlib, json, options, os, tables]
+import frameos/types
+import frameos/channels as hostChannels
+import frameos/driver_abi
+
+{bundle_imports}
+
+type
+  SceneBundleSpec = object
+    id: SceneId
+    name: string
+    libraryName: string
+    initSymbol: string
+    exportSymbol: string
+  LoadedSceneLibrary = object
+    spec: SceneBundleSpec
+    library: LibHandle
+    exportedScene: ExportedScene
+
+const sceneSpecs*: seq[SceneBundleSpec] = @[{spec_lines}]
+
+{_default_scene_line(default_scene)}
+
+const sceneOptions*: array[{len(sceneOptionTuples)}, tuple[id: SceneId, name: string]] = [
+{newline.join(sorted(sceneOptionTuples))}
+]
+var loadedSceneLibraries: seq[LoadedSceneLibrary] = @[]
+
+type
+  SceneInitProc = proc(logHook: HostLogProc, sendEventHook: HostSendEventProc) {{.cdecl.}}
+  SceneExportProc = proc(): pointer {{.cdecl.}}
+
+proc hostLog(event: JsonNode) {{.cdecl, gcsafe.}} =
+  hostChannels.log(event)
+
+proc hostSendEvent(scene: Option[SceneId], event: string, payload: JsonNode) {{.cdecl, gcsafe.}} =
+  hostChannels.sendEvent(scene, event, payload)
+
+proc sceneLibraryPath(spec: SceneBundleSpec): string =
+  getAppDir() / "scenes" / spec.libraryName
+
+proc loadRequiredSymbol[T](library: LibHandle, sceneId: SceneId, symbol: string): T =
+  let address = symAddr(library, symbol)
+  if address.isNil:
+    hostChannels.log(%*{{"event": "scene:shared:error", "sceneId": sceneId.string,
+        "error": "Missing symbol", "symbol": symbol}})
+    return nil
+  cast[T](address)
+
+proc loadSharedScene(spec: SceneBundleSpec): Option[ExportedScene] =
+  let path = sceneLibraryPath(spec)
+  let library = loadLib(path)
+  if library.isNil:
+    hostChannels.log(%*{{"event": "scene:shared:error", "sceneId": spec.id.string,
+        "error": "Unable to load scene library", "path": path}})
+    return none(ExportedScene)
+
+  let initProc = loadRequiredSymbol[SceneInitProc](library, spec.id, spec.initSymbol)
+  if initProc.isNil:
+    unloadLib(library)
+    return none(ExportedScene)
+  initProc(hostLog, hostSendEvent)
+
+  let exportProc = loadRequiredSymbol[SceneExportProc](library, spec.id, spec.exportSymbol)
+  if exportProc.isNil:
+    unloadLib(library)
+    return none(ExportedScene)
+
+  let exportedScene = cast[ExportedScene](exportProc())
+  if exportedScene.isNil:
+    hostChannels.log(%*{{"event": "scene:shared:error", "sceneId": spec.id.string,
+        "error": "Scene library returned nil export", "path": path}})
+    unloadLib(library)
+    return none(ExportedScene)
+
+  loadedSceneLibraries.add(LoadedSceneLibrary(spec: spec, library: library, exportedScene: exportedScene))
+  hostChannels.log(%*{{"event": "scene:shared", "sceneId": spec.id.string, "path": path, "loaded": true}})
+  return some(exportedScene)
+
+proc getExportedScenes*(): Table[SceneId, ExportedScene] =
+  result = initTable[SceneId, ExportedScene]()
+  for spec in sceneSpecs:
+    let exportedScene = loadSharedScene(spec)
+    if exportedScene.isSome:
+      result[spec.id] = exportedScene.get()
+
+{wrapper_exports}
+"""
+
+    return scenes_source
+
+
 def write_scenes_nim(frame: Frame, compilation_mode: str = DEFAULT_COMPILATION_MODE) -> str:
     if compilation_mode_uses_shared_libraries(compilation_mode):
+        if compilation_mode == COMPILATION_MODE_SHARED_SCENES:
+            return write_shared_scenes_bundle_nim(frame)
         return write_shared_scenes_nim(frame)
     return write_static_scenes_nim(frame)

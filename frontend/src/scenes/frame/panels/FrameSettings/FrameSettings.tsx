@@ -33,6 +33,7 @@ import { Label } from '../../../../components/Label'
 import { logsLogic } from '../Logs/logsLogic'
 import { Tag } from '../../../../components/Tag'
 import { getCertificateValidityInfo, getFrameCertificateStatus } from '../../../../utils/certificates'
+import { timezoneOptions } from '../../../../decorators/timezones'
 
 export interface FrameSettingsProps {
   className?: string
@@ -181,10 +182,9 @@ export function FrameSettings({
     'pimoroni.inky_impression_13',
     'pimoroni.inky_impression_13_2025',
   ].includes(frameForm.device || '')
-  const inkyThirteenDevice = [
-    'pimoroni.inky_impression_13',
-    'pimoroni.inky_impression_13_2025',
-  ].includes(frameForm.device || '')
+  const inkyThirteenDevice = ['pimoroni.inky_impression_13', 'pimoroni.inky_impression_13_2025'].includes(
+    frameForm.device || ''
+  )
   const sshKeyOptions = normalizeSshKeys(savedSettings?.ssh_keys).keys
   const normalizeKeyIds = (keys: string[]) => Array.from(new Set(keys)).sort()
   const deployedSshKeyIds = normalizeKeyIds(
@@ -196,6 +196,7 @@ export function FrameSettings({
   const mountpoints = frameForm.mountpoints ?? { enabled: false, items: [] }
   const mountpointItems = mountpoints.items ?? []
   const errorBehavior = normalizeFrameErrorBehavior(frameForm.error_behavior ?? frame.error_behavior)
+  const isBuildrootMode = mode === 'buildroot'
   const setErrorBehavior = (patch: Partial<NonNullable<FrameType['error_behavior']>>) => {
     setFrameFormValues({
       error_behavior: normalizeFrameErrorBehavior({
@@ -561,25 +562,39 @@ export function FrameSettings({
               </Group>
             </div>
           ) : null}
-          {frameForm.mode === 'buildroot' ? (
+          {isBuildrootMode ? (
             <Group name="buildroot">
               <Field name="platform" label="Platform">
                 <Select name="buildroot.platform" options={buildrootPlatforms} />
               </Field>
               <Field
-                name="setupJsonResetFilePath"
-                label="Setup JSON reset file path"
+                name="compilationMode"
+                label="Compilation mode"
                 tooltip={
                   <div className="space-y-2">
                     <p>
-                      If this file exists on boot, FrameOS runs setup from it once, then renames it to a
-                      <code>setup-done-YYYYMMDD-HHMM.json</code> marker so it will not run again on the next boot.
+                      Choose whether the SD image uses a published FrameOS release or compiles this checkout for the
+                      image.
                     </p>
-                    <p>Leave this empty to disable the one-shot setup import helper.</p>
+                    <p>
+                      Use a build mode when testing local development changes that are not in a published release yet.
+                    </p>
                   </div>
                 }
               >
-                <TextInput name="buildroot.setupJsonResetFilePath" placeholder="/boot/frameos-setup.json" />
+                <Select
+                  name="buildroot.compilationMode"
+                  options={[
+                    { value: '', label: 'Default (Precompiled)' },
+                    { value: 'precompiled', label: 'Use precompiled binaries if possible' },
+                    { value: 'static', label: 'Build as a single executable' },
+                    { value: 'shared', label: 'Scenes and drivers as shared libraries' },
+                    {
+                      value: 'shared-scenes',
+                      label: 'Scenes bundled in one shared library (scenes.so)',
+                    },
+                  ]}
+                />
               </Field>
             </Group>
           ) : null}
@@ -654,12 +669,13 @@ export function FrameSettings({
                 tooltip={
                   <div className="space-y-2">
                     <p>
-                      Choose whether display/input drivers and compiled scenes are built as separate shared libraries
-                      deployed next to FrameOS, or linked into the FrameOS executable.
+                      Choose whether display/input drivers are shared libraries, or if compiled scenes are bundled in a
+                      single shared library, or linked directly into the FrameOS executable.
                     </p>
                     <p>
                       Precompiled downloads a published FrameOS release when all scenes are interpreted; otherwise it
-                      falls back to a single executable.
+                      will fall back to a shared scenes library when compiled scenes exist, or a single executable
+                      otherwise.
                     </p>
                   </div>
                 }
@@ -671,6 +687,10 @@ export function FrameSettings({
                     { value: 'precompiled', label: 'Use precompiled binaries if possible' },
                     { value: 'static', label: 'Build as a single executable' },
                     { value: 'shared', label: 'Scenes and drivers as shared libraries' },
+                    {
+                      value: 'shared-scenes',
+                      label: 'Scenes bundled in one shared library (scenes.so)',
+                    },
                   ]}
                 />
               </Field>
@@ -685,6 +705,15 @@ export function FrameSettings({
               ]}
             />
           </Field>
+          {isBuildrootMode ? (
+            <Field
+              name="timezone"
+              label="Timezone"
+              tooltip="IANA timezone applied to the Buildroot operating system during setup."
+            >
+              <Select name="timezone" options={timezoneOptions} />
+            </Field>
+          ) : null}
         </div>
 
         {!inFrameAdminMode ? (
@@ -1443,8 +1472,7 @@ export function FrameSettings({
                   >
                     <NumberTextInput
                       value={
-                        errorBehavior.show_error_retry_seconds ??
-                        DEFAULT_FRAME_ERROR_BEHAVIOR.show_error_retry_seconds
+                        errorBehavior.show_error_retry_seconds ?? DEFAULT_FRAME_ERROR_BEHAVIOR.show_error_retry_seconds
                       }
                       onChange={(value) => setErrorBehavior({ show_error_retry_seconds: value })}
                       placeholder="60"
@@ -1584,26 +1612,33 @@ export function FrameSettings({
             name="assets_path"
             label={<div>Assets path</div>}
             labelRight={
-              <Button
-                color="secondary"
-                size="small"
-                onClick={() => {
-                  setFrameFormValues({ assets_path: '/srv/assets' })
-                  touchFrameFormField('assets_path')
-                }}
-              >
-                Set default
-              </Button>
+              !isBuildrootMode ? (
+                <Button
+                  color="secondary"
+                  size="small"
+                  onClick={() => {
+                    setFrameFormValues({ assets_path: '/srv/assets' })
+                    touchFrameFormField('assets_path')
+                  }}
+                >
+                  Set default
+                </Button>
+              ) : undefined
             }
             tooltip="Path on frame where to store assets like images, videos, and custom fonts."
           >
-            <TextInput
-              name="assets_path"
-              onClick={() => touchFrameFormField('assets_path')}
-              type="text"
-              placeholder="/srv/assets"
-              required
-            />
+            {({ value, onChange }) => (
+              <TextInput
+                name="assets_path"
+                value={isBuildrootMode ? '/srv/assets' : value ?? ''}
+                onChange={onChange}
+                onClick={() => touchFrameFormField('assets_path')}
+                type="text"
+                placeholder="/srv/assets"
+                disabled={isBuildrootMode}
+                required
+              />
+            )}
           </Field>
           <Field
             name="save_assets"
@@ -1685,8 +1720,8 @@ export function FrameSettings({
         <div className="pl-2 @md:pl-8 space-y-2">
           {inkyAutoButtonDevice ? (
             <div>
-              Inky Impression boards automatically configure pins 5, 6,{' '}
-              {inkyThirteenDevice ? '25' : '16'} and 24 as buttons A, B, C and D
+              Inky Impression boards automatically configure pins 5, 6, {inkyThirteenDevice ? '25' : '16'} and 24 as
+              buttons A, B, C and D
             </div>
           ) : (
             frameForm.gpio_buttons?.map((_, index) => (

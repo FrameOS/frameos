@@ -5,7 +5,7 @@ import { frameHost, frameIsActive } from '../../decorators/frame'
 import { FrameScene, FrameType } from '../../types'
 import { urls } from '../../urls'
 import { applyFrameosTheme } from '../../utils/frameosTheme'
-import { frameLogic } from '../frame/frameLogic'
+import { DeployDrawerView, frameLogic } from '../frame/frameLogic'
 import { newFrameForm } from '../frames/newFrameForm'
 import type { workspaceLogicType } from './workspaceLogicType'
 
@@ -76,6 +76,11 @@ function frameToolFromSearch(search: Record<string, unknown>): WorkspaceUtilityP
   return isFrameToolPanel(tool) ? tool : 'overview'
 }
 
+function deployDrawerViewFromSearch(search: Record<string, unknown>): DeployDrawerView | undefined {
+  const view = searchValue(search, 'deployView')
+  return view === 'sdCard' || view === 'script' || view === 'main' ? view : undefined
+}
+
 export function frameToolScrollKey(frameId: number, panel: WorkspaceUtilityPanel): string {
   return `${frameId}:${panel}`
 }
@@ -94,6 +99,7 @@ function clearDrawerSearchParams(search: Record<string, unknown>): Record<string
   delete nextSearch.frameId
   delete nextSearch.sceneId
   delete nextSearch.nodeId
+  delete nextSearch.deployView
   return nextSearch
 }
 
@@ -201,6 +207,7 @@ export type FrameChangeDrawerKind = 'unsaved' | 'deploy'
 export interface FrameChangeDrawerSelection {
   frameId: number
   kind: FrameChangeDrawerKind
+  deployDrawerView?: DeployDrawerView
 }
 
 export interface OverviewFrameSection {
@@ -222,6 +229,12 @@ export type WorkspaceTheme = 'light' | 'dark'
 interface FramesScrollAnchor {
   frameId: string
   top: number
+}
+
+let nextFramesRouteScrollIntent: 'top' | null = null
+
+export function requestNextFramesHomeScrollTop(): void {
+  nextFramesRouteScrollIntent = 'top'
 }
 
 function getInitialWorkspaceTheme(): WorkspaceTheme {
@@ -377,6 +390,10 @@ function utilityDrawerOpenHash(
   hash: Record<string, unknown> = router.values.hashParams
 ): Record<string, unknown> {
   return { ...hash, [UTILITY_DRAWER_HASH_KEY]: sceneUtilityPanelHashValues[panel] }
+}
+
+export function openWorkspaceSceneUtility(frameId: number, sceneId: string, panel: SceneUtilityPanel): void {
+  router.actions.push(urls.scenes(frameId, sceneId), {}, utilityDrawerOpenHash(panel, workspaceContentNavigationHash()))
 }
 
 function utilityDrawerClosedHash(hash: Record<string, unknown> = router.values.hashParams): Record<string, unknown> {
@@ -588,7 +605,33 @@ function restoreFramesScrollAnchor(anchor: FramesScrollAnchor | null): void {
   main.scrollTop += nextTop - anchor.top
 }
 
+export function scrollFramesHomeToTop(behavior: ScrollBehavior = 'auto', stabilize = true): void {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  const scrollToTop = (attempt = 0): void => {
+    const main = framesMainElement()
+    if (main) {
+      main.scrollTo({ top: 0, behavior: attempt === 0 ? behavior : 'auto' })
+    }
+    window.scrollTo({ top: 0, behavior: attempt === 0 ? behavior : 'auto' })
+
+    if (stabilize && attempt < 20) {
+      window.setTimeout(() => scrollToTop(attempt + 1), 50)
+    } else if (nextFramesRouteScrollIntent === 'top') {
+      nextFramesRouteScrollIntent = null
+    }
+  }
+
+  window.requestAnimationFrame(() => scrollToTop())
+}
+
 function preserveFramesScrollAfterLayoutChange(cache: Record<string, any>): void {
+  if (nextFramesRouteScrollIntent === 'top') {
+    return
+  }
+
   const anchor = captureFramesScrollAnchor()
   if (!anchor || typeof window === 'undefined') {
     return
@@ -719,7 +762,17 @@ export const workspaceLogic = kea<workspaceLogicType>([
       sceneId,
     }),
     closeChatDrawer: true,
-    openFrameChangeDrawer: (frameId: number, kind: FrameChangeDrawerKind) => ({ frameId, kind }),
+    openFrameChangeDrawer: (
+      frameId: number,
+      kind: FrameChangeDrawerKind,
+      deployDrawerView?: DeployDrawerView,
+      preferFrameRoute?: boolean
+    ) => ({
+      deployDrawerView,
+      frameId,
+      kind,
+      preferFrameRoute,
+    }),
     closeFrameChangeDrawer: true,
     retargetOpenFrameDrawers: (
       frameId: number,
@@ -868,7 +921,13 @@ export const workspaceLogic = kea<workspaceLogicType>([
     frameChangeDrawerSelection: [
       null as FrameChangeDrawerSelection | null,
       {
-        openFrameChangeDrawer: (_, { frameId, kind }) => ({ frameId, kind }),
+        openFrameChangeDrawer: (state, { frameId, kind, deployDrawerView }) => ({
+          deployDrawerView:
+            deployDrawerView ??
+            (state?.frameId === frameId && state.kind === kind ? state.deployDrawerView : undefined),
+          frameId,
+          kind,
+        }),
         closeFrameChangeDrawer: () => null,
         setSearch: () => null,
         navigateToFrame: () => null,
@@ -1128,12 +1187,22 @@ export const workspaceLogic = kea<workspaceLogicType>([
       closeScheduleDrawer: preserveFramesScroll,
       openChatDrawer: hideNewFrameFormAndPreserveScroll,
       closeChatDrawer: preserveFramesScroll,
-      openFrameChangeDrawer: ({ frameId, kind }) => {
-        hideNewFrameFormAndPreserveScroll()
-        if (kind === 'unsaved') {
-          frameLogic({ frameId }).actions.showUnsavedChangesModal()
+      openFrameChangeDrawer: ({ frameId, kind, deployDrawerView }) => {
+        if (cache.skipNextFrameChangeDrawerScrollPreserve) {
+          cache.skipNextFrameChangeDrawerScrollPreserve = false
+          newFrameForm.actions.hideForm()
+          if (isMobileWorkspaceViewport()) {
+            actions.closeSecondarySidebar()
+          }
         } else {
-          frameLogic({ frameId }).actions.showDeployPlanModal()
+          hideNewFrameFormAndPreserveScroll()
+        }
+        if (kind === 'deploy') {
+          const frameActions = frameLogic({ frameId }).actions
+          frameActions.setDeployDrawerView(
+            deployDrawerView ?? values.frameChangeDrawerSelection?.deployDrawerView ?? 'main'
+          )
+          frameActions.showDeployPlanModal()
         }
       },
       closeFrameChangeDrawer: preserveFramesScroll,
@@ -1148,17 +1217,19 @@ export const workspaceLogic = kea<workspaceLogicType>([
 
         const previousFrameActions = frameLogic({ frameId: previousFrameChangeDrawerSelection.frameId }).actions
         previousFrameActions.hideDeployPlanModal()
-        previousFrameActions.hideUnsavedChangesModal()
 
         const nextFrameActions = frameLogic({ frameId }).actions
-        if (previousFrameChangeDrawerSelection.kind === 'unsaved') {
-          nextFrameActions.showUnsavedChangesModal()
-        } else {
-          nextFrameActions.showDeployPlanModal()
-        }
+        nextFrameActions.showDeployPlanModal()
       },
       [newFrameForm.actionTypes.showForm]: preserveFramesScroll,
       [newFrameForm.actionTypes.hideForm]: preserveFramesScroll,
+      [newFrameForm.actionTypes.frameCreated]: ({ frameId, installMethod }) => {
+        const deployDrawerView = installMethod === 'sd_card' ? 'sdCard' : installMethod === 'script' ? 'script' : 'main'
+        actions.setSearch('')
+        actions.selectFrame(frameId)
+        cache.skipNextFrameChangeDrawerScrollPreserve = true
+        actions.openFrameChangeDrawer(frameId, 'deploy', deployDrawerView, true)
+      },
       setTheme: ({ theme }) => {
         window.localStorage.setItem('frameos.workspaceTheme', theme)
         applyFrameosTheme(theme)
@@ -1260,7 +1331,6 @@ export const workspaceLogic = kea<workspaceLogicType>([
       if (values.frameChangeDrawerSelection) {
         const frameActions = frameLogic({ frameId: values.frameChangeDrawerSelection.frameId }).actions
         frameActions.hideDeployPlanModal()
-        frameActions.hideUnsavedChangesModal()
         actions.closeFrameChangeDrawer()
       }
     }
@@ -1285,7 +1355,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
       } else if (drawer === 'unsavedChanges') {
         actions.openFrameChangeDrawer(frameId, 'unsaved')
       } else if (drawer === 'deployPlan') {
-        actions.openFrameChangeDrawer(frameId, 'deploy')
+        actions.openFrameChangeDrawer(frameId, 'deploy', deployDrawerViewFromSearch(search))
       } else {
         closeDrawersFromUrl()
       }
@@ -1298,10 +1368,16 @@ export const workspaceLogic = kea<workspaceLogicType>([
       payload: { initial?: boolean },
       previousLocation: { pathname: string }
     ) => {
+      const scrollIntent = nextFramesRouteScrollIntent
       syncSecondarySidebarFromHashForMobile(hash)
       const drawerFrameId = drawerFrameIdFromSearch(search)
       applyDrawerFromSearch(drawerFrameId, search)
       const previousFrameId = frameIdFromWorkspacePath(previousLocation.pathname)
+      nextFramesRouteScrollIntent = null
+      if (scrollIntent === 'top') {
+        scrollFramesHomeToTop()
+        return
+      }
       if (!payload.initial && !drawerFrameId && previousFrameId) {
         actions.focusFrame(previousFrameId)
       }
@@ -1377,7 +1453,22 @@ export const workspaceLogic = kea<workspaceLogicType>([
       }),
     closeChatDrawer: clearDrawerUrl,
     openFrameChangeDrawer: (payload: Record<string, any>) =>
-      drawerUrlForFrame(Number(payload.frameId), payload.kind === 'unsaved' ? 'unsavedChanges' : 'deployPlan'),
+      payload.kind === 'unsaved'
+        ? drawerUrlForFrame(Number(payload.frameId), 'unsavedChanges')
+        : payload.preferFrameRoute
+        ? [
+            urls.frame(Number(payload.frameId)),
+            {
+              ...clearDrawerSearchParams(router.values.searchParams),
+              drawer: 'deployPlan',
+              ...(payload.deployDrawerView ? { deployView: payload.deployDrawerView } : {}),
+              tool: 'overview',
+            },
+            utilityDrawerClosedHash(),
+          ]
+        : drawerUrlForFrame(Number(payload.frameId), 'deployPlan', {
+            ...(payload.deployDrawerView ? { deployView: payload.deployDrawerView } : {}),
+          }),
     closeFrameChangeDrawer: clearDrawerUrl,
     openUtilityPanel: (payload: Record<string, any>) => {
       const panel = payload.panel

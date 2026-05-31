@@ -6,6 +6,31 @@ from pathlib import Path
 from app.codegen.scene_nim import scene_module_filename, write_scene_library_nim, write_scene_nim, write_scenes_nim
 from app.models import Frame
 
+def apply_shard(files):
+    shard = os.environ.get("FRAMEOS_E2E_SHARD")
+    shard_count = os.environ.get("FRAMEOS_E2E_SHARDS")
+
+    if not shard and not shard_count:
+        return files
+
+    if not shard or not shard_count:
+        raise ValueError("FRAMEOS_E2E_SHARD and FRAMEOS_E2E_SHARDS must be set together")
+
+    shard = int(shard)
+    shard_count = int(shard_count)
+    if shard_count < 1:
+        raise ValueError("FRAMEOS_E2E_SHARDS must be at least 1")
+    if shard < 1 or shard > shard_count:
+        raise ValueError("FRAMEOS_E2E_SHARD must be between 1 and FRAMEOS_E2E_SHARDS")
+
+    selected = [
+        file_path
+        for index, file_path in enumerate(files)
+        if index % shard_count == shard - 1
+    ]
+    print(f"Generating e2e scene shard {shard}/{shard_count}: {len(selected)} of {len(files)} scenes")
+    return selected
+
 if __name__ == '__main__':
     scenes_dir = Path('./scenes')
     generated_dir = Path('./generated')
@@ -23,12 +48,18 @@ if __name__ == '__main__':
     shared_generated_dir.mkdir(exist_ok=True)
 
     files = sorted(scenes_dir.glob('*.json'))
+    black_scene = next((p for p in files if p.stem == "black"), None)
     if filter_str:
-        files = [p for p in files if filter_str in p.stem.lower() or p.stem == "black"]
+        files = [p for p in files if filter_str in p.stem.lower()]
+    files = apply_shard(files)
 
     if not files:
         print(f"No scenes matched filter: '{filter_str}'" if filter_str else "No scenes found.")
         sys.exit(0)
+
+    if black_scene is not None and black_scene not in files:
+        files = [black_scene, *files]
+        files.sort()
 
     for file_path in files:
         with open(file_path, 'r') as file:

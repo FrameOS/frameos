@@ -29,6 +29,8 @@ from app.models import get_apps_from_scenes
 from app.codegen.drivers_nim import (
     DEFAULT_COMPILATION_MODE,
     COMPILATION_MODE_STATIC,
+    COMPILATION_MODE_SHARED,
+    COMPILATION_MODE_SHARED_SCENES,
     compiled_drivers,
     compilation_mode_uses_shared_libraries,
     driver_library_filename,
@@ -38,6 +40,7 @@ from app.codegen.drivers_nim import (
 )
 from app.codegen.scene_nim import (
     compiled_frame_scenes,
+    scene_bundle_library_filename,
     scene_library_filename,
     scene_module_filename,
     scene_module_suffix,
@@ -230,9 +233,14 @@ class FrameDeployer:
     ) -> list[str]:
         if not compilation_mode_uses_shared_libraries(compilation_mode):
             return []
+        compiled_scenes = compiled_frame_scenes(frame)
+        if not compiled_scenes:
+            return []
+        if compilation_mode == COMPILATION_MODE_SHARED_SCENES:
+            return [os.path.join(build_dir, "scenes", scene_bundle_library_filename())]
         return [
             os.path.join(build_dir, "scenes", scene_module_suffix(scene), scene_library_filename(scene))
-            for scene in compiled_frame_scenes(frame)
+            for scene in compiled_scenes
         ]
 
     @staticmethod
@@ -242,6 +250,10 @@ class FrameDeployer:
     ) -> list[str]:
         if not compilation_mode_uses_shared_libraries(compilation_mode):
             return []
+        if not compiled_frame_scenes(frame):
+            return []
+        if compilation_mode == COMPILATION_MODE_SHARED_SCENES:
+            return [scene_bundle_library_filename()]
         return [scene_library_filename(scene) for scene in compiled_frame_scenes(frame)]
 
     async def _upload_frame_json(self, path: str) -> None:
@@ -438,6 +450,9 @@ class FrameDeployer:
             for scene in compiled_frame_scenes(frame):
                 with open(os.path.join(shared_scene_dir, scene_module_filename(scene)), "w") as sf:
                     sf.write(write_scene_library_nim(scene))
+            if compilation_mode == COMPILATION_MODE_SHARED_SCENES:
+                with open(os.path.join(source_dir, "src", "scenes", "scenes_bundle.nim"), "w") as bf:
+                    bf.write(write_scenes_nim(frame, compilation_mode=COMPILATION_MODE_SHARED_SCENES))
 
         with open(os.path.join(source_dir, "src", "scenes", "scenes.nim"), "w") as f:
             source = write_scenes_nim(frame, compilation_mode=compilation_mode)
@@ -833,6 +848,7 @@ $(OBJECTS): pre-build
         )
 
         if compilation_mode_uses_shared_libraries(compilation_mode):
+            compiled_scenes = compiled_frame_scenes(frame)
             for driver in compiled_drivers(drivers):
                 driver_dir = os.path.join(build_dir, "drivers", driver.name)
                 os.makedirs(driver_dir, exist_ok=True)
@@ -871,23 +887,57 @@ $(OBJECTS): pre-build
                 )
                 driver_make_dirs.append(os.path.join("drivers", driver.name))
 
-            for scene in compiled_frame_scenes(frame):
-                scene_dir_name = scene_module_suffix(scene)
-                scene_dir = os.path.join(build_dir, "scenes", scene_dir_name)
+            if compilation_mode == COMPILATION_MODE_SHARED:
+                for scene in compiled_scenes:
+                    scene_dir_name = scene_module_suffix(scene)
+                    scene_dir = os.path.join(build_dir, "scenes", scene_dir_name)
+                    os.makedirs(scene_dir, exist_ok=True)
+                    output_name = scene_library_filename(scene)
+                    await self.log("stdout", f"🔥 Generating C sources for scene {scene.get('id', 'default')}.")
+                    scene_cmd = (
+                        f"cd {source_dir} && {nim_path} compile --app:lib --os:linux --cpu:{cpu} "
+                        f"--define:frameosSharedLibrary {' '.join(SHARED_LIBRARY_NIM_FLAGS)} "
+                        f"--compileOnly --genScript --nimcache:{scene_dir} --out:{output_name} "
+                        f"{debug_options} src/scenes/shared/{scene_module_filename(scene)} 2>&1"
+                    )
+                    scene_status, scene_out, scene_err = await exec_local_command(db, redis, frame, scene_cmd)
+                    if scene_status != 0:
+                        raise Exception(
+                            f"Failed to generate scene library sources for {scene.get('id', 'default')}: "
+                            f"{scene_err or scene_out or 'see logs'}"
+                        )
+                    shutil.copy(nimbase_path, os.path.join(scene_dir, "nimbase.h"))
+
+                    scene_script_path = self._find_compile_script(scene_dir)
+                    scene_linker_flags, scene_compiler_flags = self._extract_compile_flags(
+                        scene_script_path, output_name
+                    )
+                    scene_linker_flags = self._dedupe_preserve_order(
+                        scene_linker_flags + ["../../quickjs/libquickjs.a"]
+                    )
+                    self._write_driver_makefile(
+                        makefile_path=os.path.join(scene_dir, "Makefile"),
+                        output_name=output_name,
+                        linker_flags=scene_linker_flags,
+                        compiler_flags=scene_compiler_flags,
+                        library_kind="scene",
+                    )
+                    scene_make_dirs.append(os.path.join("scenes", scene_dir_name))
+            elif compilation_mode == COMPILATION_MODE_SHARED_SCENES and compiled_scenes:
+                scene_dir = os.path.join(build_dir, "scenes")
                 os.makedirs(scene_dir, exist_ok=True)
-                output_name = scene_library_filename(scene)
-                await self.log("stdout", f"🔥 Generating C sources for scene {scene.get('id', 'default')}.")
+                output_name = scene_bundle_library_filename()
+                await self.log("stdout", "🔥 Generating C sources for bundled shared scenes.")
                 scene_cmd = (
                     f"cd {source_dir} && {nim_path} compile --app:lib --os:linux --cpu:{cpu} "
                     f"--define:frameosSharedLibrary {' '.join(SHARED_LIBRARY_NIM_FLAGS)} "
                     f"--compileOnly --genScript --nimcache:{scene_dir} --out:{output_name} "
-                    f"{debug_options} src/scenes/shared/{scene_module_filename(scene)} 2>&1"
+                    f"{debug_options} src/scenes/scenes_bundle.nim 2>&1"
                 )
                 scene_status, scene_out, scene_err = await exec_local_command(db, redis, frame, scene_cmd)
                 if scene_status != 0:
                     raise Exception(
-                        f"Failed to generate scene library sources for {scene.get('id', 'default')}: "
-                        f"{scene_err or scene_out or 'see logs'}"
+                        f"Failed to generate bundled scene library sources: {scene_err or scene_out or 'see logs'}"
                     )
                 shutil.copy(nimbase_path, os.path.join(scene_dir, "nimbase.h"))
 
@@ -896,7 +946,7 @@ $(OBJECTS): pre-build
                     scene_script_path, output_name
                 )
                 scene_linker_flags = self._dedupe_preserve_order(
-                    scene_linker_flags + ["../../quickjs/libquickjs.a"]
+                    scene_linker_flags + ["../quickjs/libquickjs.a"]
                 )
                 self._write_driver_makefile(
                     makefile_path=os.path.join(scene_dir, "Makefile"),
@@ -905,7 +955,7 @@ $(OBJECTS): pre-build
                     compiler_flags=scene_compiler_flags,
                     library_kind="scene",
                 )
-                scene_make_dirs.append(os.path.join("scenes", scene_dir_name))
+                scene_make_dirs.append("scenes")
 
         self._write_c_makefile(
             makefile_path=os.path.join(build_dir, "Makefile"),

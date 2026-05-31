@@ -14,7 +14,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { templatesLogic } from '../Templates/templatesLogic'
 import { findConnectedScenes } from './utils'
-import { workspaceLogic } from '../../../workspace/workspaceLogic'
+import { openWorkspaceSceneUtility, workspaceLogic } from '../../../workspace/workspaceLogic'
 
 interface SceneDropDownProps {
   sceneId: string
@@ -22,16 +22,24 @@ interface SceneDropDownProps {
   className?: string
   horizontal?: boolean
   buttonColor?: DropdownMenuProps['buttonColor']
+  navigation?: 'panels' | 'workspace'
 }
 
 function isNotNull<T>(value: T | null): value is T {
   return value !== null
 }
 
-export function SceneDropDown({ sceneId, context, className, horizontal, buttonColor }: SceneDropDownProps) {
+export function SceneDropDown({
+  sceneId,
+  context,
+  className,
+  horizontal,
+  buttonColor,
+  navigation = 'panels',
+}: SceneDropDownProps) {
   const { frameId } = useValues(frameLogic)
   const { editScene, editSceneJSON } = useActions(panelsLogic)
-  const { openScenePreview } = useActions(workspaceLogic)
+  const { navigateToScene, openScenePreview } = useActions(workspaceLogic)
   const { scenes } = useValues(scenesLogic({ frameId }))
   const { renameScene, duplicateScene, deleteScene, setAsDefault, removeDefault, copySceneJSON } = useActions(
     scenesLogic({ frameId })
@@ -41,6 +49,21 @@ export function SceneDropDown({ sceneId, context, className, horizontal, buttonC
   if (!scene) {
     return null
   }
+  const openSceneEditor = () => {
+    if (navigation === 'workspace') {
+      navigateToScene(frameId, scene.id)
+    } else {
+      editScene(scene.id)
+    }
+  }
+  const openSceneJSON = () => {
+    if (navigation === 'workspace') {
+      openWorkspaceSceneUtility(frameId, scene.id, 'json')
+    } else {
+      editSceneJSON(scene.id)
+    }
+  }
+
   return (
     <DropdownMenu
       buttonColor={buttonColor ?? 'secondary'}
@@ -57,14 +80,14 @@ export function SceneDropDown({ sceneId, context, className, horizontal, buttonC
         context === 'scenes'
           ? {
               label: 'Edit scene',
-              onClick: () => editScene(scene.id),
+              onClick: openSceneEditor,
               icon: <PencilSquareIcon className="w-5 h-5" />,
             }
           : null,
         context === 'scenes'
           ? {
               label: 'Edit scene JSON',
-              onClick: () => editSceneJSON(scene.id),
+              onClick: openSceneJSON,
               icon: <DocumentMagnifyingGlassIcon className="w-5 h-5" />,
             }
           : null,

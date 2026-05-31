@@ -136,6 +136,27 @@ test.describe('backend frontend e2e coverage @e2e', () => {
     expectNoFrontendErrors(readErrors)
   })
 
+  test('frames home does not load frame states for scene menus', async ({ page }) => {
+    const readErrors = await prepareAuthenticatedPage(page)
+    let statesRequests = 0
+
+    await page.route('**/api/frames/*/states', (route) => {
+      statesRequests += 1
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ sceneId: 'scene-dashboard', states: {} }),
+      })
+    })
+
+    await page.goto('/', { waitUntil: 'domcontentloaded' })
+    await expect(page.locator('body')).toContainText(/Kitchen dashboard/i)
+    await page.waitForTimeout(500)
+
+    expect(statesRequests).toBe(0)
+    expectNoFrontendErrors(readErrors)
+  })
+
   test('mobile workspace menu opens full screen and closes with browser back', async ({ page }) => {
     const readErrors = attachFrontendErrorCollector(page)
     await page.setViewportSize({ width: 390, height: 844 })

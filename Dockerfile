@@ -169,7 +169,16 @@ WORKDIR /app
 
 RUN set -eux; \
     apt-get update; \
-    apt-get install -y --no-install-recommends ca-certificates curl gnupg iputils-ping redis-server; \
+    apt-get install -y --no-install-recommends \
+      ca-certificates \
+      curl \
+      dosfstools \
+      e2fsprogs \
+      genimage \
+      gnupg \
+      iputils-ping \
+      mtools \
+      redis-server; \
     mkdir -p /etc/apt/keyrings; \
     curl -fsSL https://download.docker.com/linux/debian/gpg \
       | gpg --dearmor -o /etc/apt/keyrings/docker.gpg; \

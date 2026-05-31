@@ -25,9 +25,11 @@ import { FrameosShell } from '../workspace/FrameosShell'
 import { isMobileWorkspaceViewport, workspaceLogic } from '../workspace/workspaceLogic'
 import { accountLogic } from './accountLogic'
 import versions from '../../../../versions.json'
+import { timezoneOptions } from '../../decorators/timezones'
 
 const settingsNavItems = [
   ['Account', '#settings-account'],
+  ['Defaults', '#settings-defaults'],
   ['SSH Keys', '#settings-ssh'],
   ['FrameOS Gallery', '#settings-gallery'],
   ['OpenAI', '#settings-openai'],
@@ -287,9 +289,7 @@ export function Settings() {
   )
   const settingsActions = (
     <div className="settings-page-actions flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
-      <div className="frameos-muted shrink-0 text-xs tracking-wide text-slate-400">
-        {frameosVersionLabel}
-      </div>
+      <div className="frameos-muted shrink-0 text-xs tracking-wide text-slate-400">{frameosVersionLabel}</div>
       <div className="flex flex-wrap items-center gap-2">
         {!isHassioIngress ? (
           <Button size="small" color="secondary" onClick={logout} className="rounded-lg px-4 py-2">
@@ -339,6 +339,35 @@ export function Settings() {
           ) : (
             <>
               <Form logic={settingsLogic} formKey="settings" props={{}} onSubmit={submitSettings} className="space-y-4">
+                <Group name="defaults">
+                  <H6 id="settings-defaults" className="pt-4">
+                    Defaults
+                  </H6>
+                  <Box className="p-3 space-y-3">
+                    <Field
+                      name="timezone"
+                      label="Default Buildroot timezone"
+                      tooltip="Used for Buildroot SD card images unless a frame overrides it."
+                    >
+                      <Select options={timezoneOptions} />
+                    </Field>
+                    <Field
+                      name="wifiSSID"
+                      label="Default WiFi network"
+                      tooltip="Prefilled when adding Buildroot SD card frames."
+                    >
+                      <TextInput autoComplete="off" />
+                    </Field>
+                    <Field
+                      name="wifiPassword"
+                      label="Default WiFi password"
+                      secret={!!savedSettings?.defaults?.wifiPassword}
+                      tooltip="Prefilled when adding Buildroot SD card frames."
+                    >
+                      <TextInput type="password" autoComplete="new-password" />
+                    </Field>
+                  </Box>
+                </Group>
                 <Group name="ssh_keys">
                   <H6 id="settings-ssh" className="pt-4">
                     SSH Keys

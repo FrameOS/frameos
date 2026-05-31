@@ -123,6 +123,9 @@ proc setupAptPackages*(packages: seq[string]): SetupResult =
   result = setupOk()
 
 proc detectBootConfigPath*(): string =
+  let configuredPath = getEnv("FRAMEOS_BOOT_CONFIG")
+  if configuredPath.len > 0:
+    return configuredPath
   if fileExists("/boot/firmware/config.txt"):
     "/boot/firmware/config.txt"
   else:
@@ -151,14 +154,25 @@ proc applyBootConfigLines*(content: string, requestedLines: seq[string]): tuple[
   result = (normalizeBootConfig(lines.join("\n")), changed)
 
 proc writePrivilegedFile*(path: string, content: string) =
+  if fileExists(path):
+    try:
+      if readFile(path) == content:
+        return
+    except CatchableError:
+      discard
+
   try:
     writeFile(path, content)
-  except OSError:
+  except CatchableError as writeError:
+    let writeErrorMessage = writeError.msg
     let tmpPath = getTempDir() / ("frameos-setup-" & $epochTime().int64 & "-" & lastPathPart(path))
     writeFile(tmpPath, content)
     try:
-      discard runSetupCommand(
-        privilegedShell("install -m 644 " & shellQuote(tmpPath) & " " & shellQuote(path))
+      discard runSetupCommand(privilegedShell("install -m 644 " & shellQuote(tmpPath) & " " & shellQuote(path)))
+    except CatchableError as installError:
+      raise newException(
+        OSError,
+        "Cannot write " & path & ": " & writeErrorMessage & "; privileged install failed: " & installError.msg,
       )
     finally:
       if fileExists(tmpPath):

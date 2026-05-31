@@ -30,7 +30,7 @@ import { urls } from '../urls'
 
 const TASK_LOG_BOTTOM_THRESHOLD_PX = 24
 const TASK_LOG_SCROLL_SETTLE_FRAMES = 3
-const TASK_TOAST_EDGE_PADDING_PX = 16
+const TASK_TOAST_EDGE_PADDING_PX = 0
 
 function taskIcon(kind: LongRunningTaskKind): JSX.Element {
   if (kind === 'deploy' || kind === 'agentDeploy' || kind === 'agentRestart') {
@@ -454,27 +454,6 @@ function taskLogIsNearBottom(element: HTMLElement): boolean {
   return element.scrollHeight - element.scrollTop - element.clientHeight <= TASK_LOG_BOTTOM_THRESHOLD_PX
 }
 
-function visibleElementRect(element: Element): DOMRect | null {
-  if (!(element instanceof HTMLElement) || typeof window === 'undefined') {
-    return null
-  }
-
-  const style = window.getComputedStyle(element)
-  if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
-    return null
-  }
-
-  const rect = element.getBoundingClientRect()
-  if (rect.width <= 0 || rect.height <= 0) {
-    return null
-  }
-  return rect
-}
-
-function rectsOverlapVertically(first: DOMRect, second: DOMRect): boolean {
-  return first.top < second.bottom && first.bottom > second.top
-}
-
 function clampTaskToastOffsetX(offsetX: number, element: HTMLElement | null): number {
   if (typeof window === 'undefined') {
     return 0
@@ -486,38 +465,8 @@ function clampTaskToastOffsetX(offsetX: number, element: HTMLElement | null): nu
   const centeredLeft = (viewportWidth - elementWidth) / 2
   const viewportMinOffset = TASK_TOAST_EDGE_PADDING_PX - centeredLeft
   const viewportMaxOffset = viewportWidth - TASK_TOAST_EDGE_PADDING_PX - elementWidth - centeredLeft
-  let minLeft = TASK_TOAST_EDGE_PADDING_PX
-  let maxRight = viewportWidth - TASK_TOAST_EDGE_PADDING_PX
 
-  if (elementRect && typeof document !== 'undefined') {
-    const chromeRects = Array.from(
-      document.querySelectorAll('.workspace-sidebar, .workspace-sidebar-collapsed, .workspace-drawer')
-    )
-      .map(visibleElementRect)
-      .filter((rect): rect is DOMRect => rect !== null)
-
-    for (const rect of chromeRects) {
-      if (!rectsOverlapVertically(elementRect, rect) || rect.width >= viewportWidth - TASK_TOAST_EDGE_PADDING_PX * 2) {
-        continue
-      }
-
-      const rectCenterX = rect.left + rect.width / 2
-      if (rectCenterX < viewportWidth / 2) {
-        minLeft = Math.max(minLeft, rect.right + TASK_TOAST_EDGE_PADDING_PX)
-      } else {
-        maxRight = Math.min(maxRight, rect.left - TASK_TOAST_EDGE_PADDING_PX)
-      }
-    }
-  }
-
-  const minOffset = minLeft - centeredLeft
-  const maxOffset = maxRight - elementWidth - centeredLeft
-  if (minOffset <= maxOffset) {
-    return Math.round(Math.max(minOffset, Math.min(maxOffset, offsetX)))
-  }
-
-  const nearestPanelAwareOffset = Math.abs(offsetX - minOffset) < Math.abs(offsetX - maxOffset) ? minOffset : maxOffset
-  return Math.round(Math.max(viewportMinOffset, Math.min(viewportMaxOffset, nearestPanelAwareOffset)))
+  return Math.round(Math.max(viewportMinOffset, Math.min(viewportMaxOffset, offsetX)))
 }
 
 function isTaskToastDragTarget(target: EventTarget | null): boolean {
@@ -895,7 +844,7 @@ export function LongRunningTaskToasts(): JSX.Element | null {
   return (
     <div
       ref={toastStackRef}
-      className="pointer-events-none fixed bottom-4 left-1/2 z-50 flex w-[calc(100vw-2rem)] max-w-[28rem] -translate-x-1/2 flex-col gap-3 sm:bottom-6"
+      className="pointer-events-none fixed bottom-4 left-1/2 z-[100] flex w-[calc(100vw-2rem)] max-w-[28rem] -translate-x-1/2 flex-col gap-3 sm:bottom-6"
       style={{ marginLeft: taskToastOffsetX }}
     >
       {visibleTasks.map((task) => (
