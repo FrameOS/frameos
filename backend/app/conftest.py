@@ -37,8 +37,10 @@ async def db():
 async def redis():
     client = Redis.from_url(config.REDIS_URL)
     try:
+        await client.flushdb()
         yield client
     finally:
+        await client.flushdb()
         await client.close(True)
 
 @pytest_asyncio.fixture
