@@ -449,6 +449,7 @@ jobs:
             .tmp/buildroot-base-cache
             .tmp/precompiled-cache
             .tmp/cross-cache
+            build/prebuilt-deps
           key: ${{ runner.os }}-buildroot-e2e-${{ hashFiles('tools/buildroot-images/manifest.json', 'buildroot-images.json', 'versions.json', 'frameos/frameos.nimble') }}
           restore-keys: |
             ${{ runner.os }}-buildroot-e2e-
