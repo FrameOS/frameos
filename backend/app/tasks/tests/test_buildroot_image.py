@@ -10,11 +10,16 @@ import pytest
 from app.tasks.buildroot_image import (
     FRAMEOS_BUILD_TARGET,
     BuildrootImageBuilder,
+    ensure_buildroot_frame_defaults,
     _network_manager_wifi_connection,
 )
 from app.tasks.binary_builder import FrameBinaryBuildResult
 from app.tasks.prebuilt_deps import resolve_prebuilt_target
-from app.tasks.setup_json_reset import render_setup_json_reset_script
+from app.tasks.setup_json_reset import (
+    DEFAULT_SETUP_JSON_RESET_FILE_PATH,
+    render_setup_json_reset_script,
+    setup_json_reset_file_path,
+)
 from app.utils.cross_compile import CrossCompiler
 
 
@@ -66,6 +71,25 @@ def test_buildroot_firstboot_setup_uses_with_setup_command():
     assert "Reboot command accepted" in script
     assert "with status 0 (reboot requested)" in script
     assert "--from-file" not in script
+
+
+def test_buildroot_defaults_remove_setup_json_reset_file_path():
+    frame = SimpleNamespace(
+        id=7,
+        frame_host="",
+        buildroot={
+            "platform": "raspberry-pi-zero-2-w",
+            "setupJsonResetFilePath": "/custom/setup.json",
+        },
+        https_proxy={},
+        agent={},
+        network={},
+    )
+
+    ensure_buildroot_frame_defaults(frame)
+
+    assert "setupJsonResetFilePath" not in frame.buildroot
+    assert setup_json_reset_file_path(frame) == DEFAULT_SETUP_JSON_RESET_FILE_PATH
 
 
 def test_buildroot_config_avoids_ncurses_selecting_packages(tmp_path):

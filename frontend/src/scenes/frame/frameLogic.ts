@@ -816,7 +816,6 @@ function sanitizeFrame(frame: Partial<FrameType>): Partial<FrameType> {
       ? {
           ...(frame.buildroot ?? {}),
           compilationMode: frame.buildroot?.compilationMode ?? '',
-          setupJsonResetFilePath: frame.buildroot?.setupJsonResetFilePath ?? '/boot/frameos-setup.json',
         }
       : frame.buildroot
   const rpios = frame.rpios

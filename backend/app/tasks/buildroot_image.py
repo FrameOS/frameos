@@ -27,7 +27,6 @@ from app.models.frame import (
     Frame,
     get_frame_json,
     get_interpreted_scenes_json,
-    normalize_buildroot_setup_json_reset_file_path,
     update_frame,
 )
 from app.models.log import new_log as log
@@ -446,10 +445,7 @@ def ensure_buildroot_frame_defaults(frame: Frame, platform: str | None = None) -
 
     buildroot = dict(frame.buildroot or {})
     buildroot["platform"] = normalized_platform
-    buildroot["setupJsonResetFilePath"] = normalize_buildroot_setup_json_reset_file_path(
-        buildroot.get("setupJsonResetFilePath"),
-        default_if_missing=True,
-    )
+    buildroot.pop("setupJsonResetFilePath", None)
     frame.buildroot = buildroot
 
 

@@ -108,16 +108,6 @@ def normalize_reboot_config(reboot: Any) -> Any:
     }
 
 
-def normalize_buildroot_setup_json_reset_file_path(
-    value: Any,
-    *,
-    default_if_missing: bool = False,
-) -> str:
-    if value is None:
-        return "/boot/frameos-setup.json" if default_if_missing else ""
-    return str(value).strip()
-
-
 def normalize_mountpoints(mountpoints: Any) -> dict:
     config = mountpoints if isinstance(mountpoints, dict) else {}
     raw_items = config.get("items") if isinstance(config.get("items"), list) else []
