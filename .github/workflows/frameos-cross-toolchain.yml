@@ -95,7 +95,7 @@ jobs:
               )
 
               metadata = json.loads(metadata_file.read_text(encoding="utf-8"))
-              digest = (metadata.get("containerimage") or {}).get("digest")
+              digest = metadata.get("containerimage.digest") or (metadata.get("containerimage.descriptor") or {}).get("digest")
               if not digest:
                   raise RuntimeError(f"Missing container image digest for {image}")
 

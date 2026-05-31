@@ -1,12 +1,19 @@
 import { Form } from 'kea-forms'
 import { useActions, useValues } from 'kea'
-import { ArrowDownTrayIcon, ArrowLeftIcon, CommandLineIcon, ServerStackIcon } from '@heroicons/react/24/outline'
+import {
+  ArrowDownTrayIcon,
+  ArrowLeftIcon,
+  ArrowUpTrayIcon,
+  CommandLineIcon,
+  ServerStackIcon,
+} from '@heroicons/react/24/outline'
 import { BUILDROOT_RASPBERRY_PI_ZERO_2_W, devices, buildrootPlatforms, rpiOSPlatforms } from '../../devices'
 import { newFrameForm } from './newFrameForm'
 import { FrameInstallMethod, NewFrameFormType } from '../../types'
 import { settingsLogic } from '../settings/settingsLogic'
 import { normalizedTimezone } from '../../utils/timezone'
 import { timezoneOptions } from '../../decorators/timezones'
+import { Spinner } from '../../components/Spinner'
 
 function isLocalServer(host?: string | null): boolean {
   const localHostRegex = /^(localhost|0\.0\.0\.0|127\.0\.0\.1|\[::1\])(:\d+)?$/
@@ -112,30 +119,39 @@ function renderPlatformOptions(installMethod: FrameInstallMethod): JSX.Element[]
   ))
 }
 
-function installMethodTitle(installMethod: FrameInstallMethod): string {
+type AddFrameMode = FrameInstallMethod | 'import'
+
+function installMethodTitle(installMethod: AddFrameMode): string {
   if (installMethod === 'sd_card') {
     return 'Download SD card'
   }
   if (installMethod === 'script') {
     return 'Install with a script'
   }
+  if (installMethod === 'import') {
+    return 'Import frame'
+  }
   return 'Install over SSH'
 }
 
 export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.Element {
-  const { hideForm, resetNewFrame, setNewFrameValue, setNewFrameValues } = useActions(newFrameForm)
-  const { newFrame, newFrameErrors } = useValues(newFrameForm)
+  const { hideForm, importFrame, resetNewFrame, setFile, setNewFrameValue, setNewFrameValues } =
+    useActions(newFrameForm)
+  const { file, importingFrameLoading, newFrame, newFrameErrors } = useValues(newFrameForm)
   const { savedSettings } = useValues(settingsLogic)
   const installMethod = newFrame.install_method
+  const addFrameMode: AddFrameMode | undefined = newFrame.mode === 'import' ? 'import' : installMethod
   const timezone = normalizedTimezone(newFrame.timezone, savedSettings.defaults?.timezone)
 
   const cancel = () => {
+    setFile(null)
     resetNewFrame()
     hideForm()
   }
 
   const backToInstallMethods = () => {
-    setNewFrameValues({ install_method: undefined })
+    setFile(null)
+    setNewFrameValues({ install_method: undefined, mode: 'rpios' })
   }
 
   return (
@@ -144,13 +160,13 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
         <div className="min-w-0">
           <div className="frameos-muted text-xs font-semibold uppercase tracking-wide text-slate-400">Add frame</div>
           <h2 className="frameos-strong mt-1 text-2xl font-bold tracking-normal text-slate-950">
-            {installMethod ? installMethodTitle(installMethod) : 'FrameOS'}
+            {addFrameMode ? installMethodTitle(addFrameMode) : 'FrameOS'}
           </h2>
         </div>
         {headerAction ? <div className="shrink-0">{headerAction}</div> : null}
       </div>
 
-      {!installMethod ? (
+      {!addFrameMode ? (
         <div className="space-y-2">
           <div className="frameos-muted text-xs font-semibold uppercase tracking-wide text-slate-400">
             Installation method
@@ -177,6 +193,13 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
             >
               <CommandLineIcon className="h-4 w-4" />
             </ModeButton>
+            <ModeButton
+              onClick={() => setNewFrameValues({ mode: 'import', install_method: undefined })}
+              title="Import frame"
+              description="Load a previously exported frame JSON file."
+            >
+              <ArrowUpTrayIcon className="h-4 w-4" />
+            </ModeButton>
           </div>
         </div>
       ) : (
@@ -192,7 +215,7 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
         </div>
       )}
 
-      {installMethod === 'ssh' ? (
+      {addFrameMode === 'ssh' ? (
         <Form logic={newFrameForm} formKey="newFrame" className="space-y-4" enableFormOnSubmit>
           <p className="frameos-form-hint text-sm leading-relaxed text-slate-500">
             Use SSH when the backend can directly reach the frame on your network.
@@ -268,11 +291,11 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
             </button>
           </div>
         </Form>
-      ) : installMethod === 'script' ? (
+      ) : addFrameMode === 'script' ? (
         <Form logic={newFrameForm} formKey="newFrame" className="space-y-4" enableFormOnSubmit>
           <p className="frameos-form-hint text-sm leading-relaxed text-slate-500">
-            Use this when SSH is not available. FrameOS will generate a command that installs FrameOS, starts the
-            agent, and connects back to this backend.
+            Use this when SSH is not available. FrameOS will generate a command that installs FrameOS, starts the agent,
+            and connects back to this backend.
           </p>
           <FormField label="Name" error={newFrameErrors.name}>
             <input
@@ -336,7 +359,7 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
             </button>
           </div>
         </Form>
-      ) : installMethod === 'sd_card' ? (
+      ) : addFrameMode === 'sd_card' ? (
         <Form logic={newFrameForm} formKey="newFrame" className="space-y-4" enableFormOnSubmit>
           <p className="frameos-form-hint text-sm leading-relaxed text-slate-500">
             Buildroot bundles FrameOS into a dedicated firmware image that you can flash to an SD card.
@@ -439,6 +462,39 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
             </button>
           </div>
         </Form>
+      ) : addFrameMode === 'import' ? (
+        <div className="space-y-4">
+          <label className="frameos-import-target flex min-h-36 cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center transition hover:bg-slate-100">
+            <ArrowUpTrayIcon className="mb-2 h-8 w-8 text-slate-400" />
+            <span className="frameos-strong text-sm font-semibold text-slate-800">
+              {file ? file.name : 'Choose frame JSON'}
+            </span>
+            <span className="frameos-muted mt-1 text-xs text-slate-500">Import a previously exported frame.</span>
+            <input
+              type="file"
+              accept=".json"
+              className="sr-only"
+              onChange={(event) => setFile(event.target.files?.[0] || null)}
+            />
+          </label>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={importFrame}
+              disabled={!file || importingFrameLoading}
+              className="frameos-primary-action flex h-11 flex-1 items-center justify-center rounded-xl px-4 text-sm font-semibold text-white shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {importingFrameLoading ? <Spinner color="white" /> : 'Import'}
+            </button>
+            <button
+              type="button"
+              onClick={cancel}
+              className="frameos-secondary-button h-11 rounded-xl bg-slate-100 px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
       ) : null}
     </div>
   )
