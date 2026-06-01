@@ -184,7 +184,7 @@ async def create_template(
         frame_id = data['from_frame_id']
         frame = db.query(Frame).filter_by(project_id=project_id, id=frame_id).first()
         if frame:
-            cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
+            cache_key = f'frame:{frame.id}:image'
             last_image = await redis.get(cache_key)
             if last_image:
                 try:

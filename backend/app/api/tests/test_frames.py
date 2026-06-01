@@ -17,6 +17,7 @@ from app.models import new_frame
 from app.models.frame import Frame
 from app.models.log import Log
 from app.models.user import User
+from app.tenancy import ensure_default_project_for_user
 from app.tasks.buildroot_image import BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION, buildroot_sd_image_config_fingerprint
 from app.codegen.drivers_nim import frame_compilation_mode
 
@@ -340,13 +341,47 @@ async def test_api_frame_logs_full_download_includes_all_persisted_logs(async_cl
 async def test_api_frame_get_image_cached(async_client, db, redis):
     # Create the frame
     frame = await new_frame(db, redis, 'CachedImageFrame', 'localhost', 'localhost')
-    cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
+    cache_key = frames_api._frame_image_cache_key(frame.id)
     await redis.set(cache_key, b'cached_image_data')
 
     image_url = f'/api/frames/{frame.id}/image?t=-1'
     response = await async_client.get(image_url)
     assert response.status_code == 200
     assert response.content == b'cached_image_data'
+
+
+@pytest.mark.asyncio
+async def test_api_frame_get_image_does_not_share_host_port_cache_across_projects(async_client, db, redis):
+    frame = await new_frame(
+        db,
+        redis,
+        'ProjectImageFrame',
+        'same-frame.local',
+        'localhost',
+        project_id=async_client.project_id,
+    )
+    other_user = User(email='other-cache-project@example.com')
+    other_user.set_password('testpassword')
+    db.add(other_user)
+    db.commit()
+    db.refresh(other_user)
+    other_project = ensure_default_project_for_user(db, other_user)
+    await new_frame(
+        db,
+        redis,
+        'OtherProjectImageFrame',
+        'same-frame.local',
+        'localhost',
+        project_id=other_project.id,
+    )
+    old_shared_cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
+    await redis.set(old_shared_cache_key, b'other_project_image')
+
+    response = await async_client.get(f'/api/frames/{frame.id}/image?t=-1')
+
+    assert response.status_code == 200
+    assert response.content != b'other_project_image'
+    assert response.headers['x-frameos-image-state'] == 'placeholder'
 
 
 @pytest.mark.asyncio
@@ -358,7 +393,7 @@ async def test_api_frame_get_image_placeholder_uses_rotated_dimensions(async_cli
     db.add(frame)
     db.commit()
 
-    cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
+    cache_key = frames_api._frame_image_cache_key(frame.id)
     await redis.delete(cache_key)
 
     response = await async_client.get(f'/api/frames/{frame.id}/image?t=-1')
@@ -372,7 +407,7 @@ async def test_api_frame_get_image_placeholder_uses_rotated_dimensions(async_cli
 @pytest.mark.asyncio
 async def test_api_frame_get_image_head_marks_missing_cache_without_refresh(async_client, db, redis):
     frame = await new_frame(db, redis, 'HeadPlaceholderFrame', 'localhost', 'localhost')
-    cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
+    cache_key = frames_api._frame_image_cache_key(frame.id)
     await redis.delete(cache_key)
 
     with patch('app.api.frames._fetch_frame_http_bytes', new=AsyncMock()) as fetch_frame:
@@ -387,7 +422,7 @@ async def test_api_frame_get_image_head_marks_missing_cache_without_refresh(asyn
 @pytest.mark.asyncio
 async def test_api_frame_get_image_head_omits_placeholder_header_for_cache(async_client, db, redis):
     frame = await new_frame(db, redis, 'HeadCachedFrame', 'localhost', 'localhost')
-    cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
+    cache_key = frames_api._frame_image_cache_key(frame.id)
     await redis.set(cache_key, b'cached_image_data')
 
     response = await async_client.head(f'/api/frames/{frame.id}/image?t=-1')
@@ -400,7 +435,7 @@ async def test_api_frame_get_image_head_omits_placeholder_header_for_cache(async
 @pytest.mark.asyncio
 async def test_api_frame_get_image_returns_cache_when_refresh_already_running(async_client, db, redis):
     frame = await new_frame(db, redis, 'LockedImageFrame', 'localhost', 'localhost')
-    cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
+    cache_key = frames_api._frame_image_cache_key(frame.id)
     await redis.set(cache_key, b'cached_while_refreshing')
     lock = frames_api._get_frame_image_lock(frame.id)
 
@@ -417,7 +452,7 @@ async def test_api_frame_get_image_returns_cache_when_refresh_already_running(as
 @pytest.mark.asyncio
 async def test_api_frame_get_image_returns_cache_when_refresh_fails(async_client, db, redis):
     frame = await new_frame(db, redis, 'FailingImageFrame', 'localhost', 'localhost')
-    cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
+    cache_key = frames_api._frame_image_cache_key(frame.id)
     await redis.set(cache_key, b'cached_after_refresh_error')
 
     async def mock_fetch(frame_obj, redis_obj, *, path, method="GET"):
@@ -433,7 +468,7 @@ async def test_api_frame_get_image_returns_cache_when_refresh_fails(async_client
 @pytest.mark.asyncio
 async def test_api_frame_get_image_uses_redis_refresh_lock(async_client, db, redis):
     frame = await new_frame(db, redis, 'RedisLockedImageFrame', 'localhost', 'localhost')
-    cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
+    cache_key = frames_api._frame_image_cache_key(frame.id)
     lock_key = frames_api._frame_image_refresh_lock_key(frame.id)
     await redis.set(cache_key, b'cached_during_redis_refresh')
     await redis.set(lock_key, 'other-worker', ex=30)
@@ -1476,7 +1511,7 @@ async def test_api_frame_delete_not_found(async_client):
 @pytest.mark.asyncio
 async def test_api_frame_get_image_with_cookie_no_token(no_auth_client, db, redis):
     frame = await new_frame(db, redis, 'CookieImageFrame', 'localhost', 'localhost')
-    cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
+    cache_key = frames_api._frame_image_cache_key(frame.id)
     await redis.set(cache_key, b'cookie_cached_image_data')
 
     user = User(email='cookieframe@example.com')

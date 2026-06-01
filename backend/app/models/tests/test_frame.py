@@ -90,11 +90,13 @@ async def test_update_frame(mock_publish, db, redis):
 async def test_delete_frame(mock_publish, db, redis):
     frame = await new_frame(db, redis, "FrameToDelete", "localhost", "server_host")
     frame_id = frame.id
+    await redis.set(f"frame:{frame_id}:image", b"cached_image")
     success = await delete_frame(db, redis, frame_id, frame.project_id)
     assert success is True
     # After deletion, frame should not be found
     in_db = db.get(Frame, frame_id)
     assert in_db is None
+    assert await redis.get(f"frame:{frame_id}:image") is None
     # 2 calls: "new_frame", "delete_frame"
     assert mock_publish.await_count == 2
 

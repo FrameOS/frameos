@@ -213,6 +213,18 @@ def _frame_states_cache_key(frame_id: int) -> str:
     return f"frame:{frame_id}:states"
 
 
+def _frame_state_cache_key(frame_id: int) -> str:
+    return f"frame:{frame_id}:state"
+
+
+def _frame_uploaded_scenes_cache_key(frame_id: int) -> str:
+    return f"frame:{frame_id}:uploaded_scenes"
+
+
+def _frame_image_cache_key(frame_id: int) -> str:
+    return f"frame:{frame_id}:image"
+
+
 def _frame_states_cache_lock_key(frame_id: int) -> str:
     return f"frame:{frame_id}:states:refreshing"
 
@@ -1001,7 +1013,7 @@ async def api_frame_get_state(
         frame,
         redis,
         path="/state",
-        cache_key=f"frame:{frame.frame_host}:{frame.frame_port}:state",
+        cache_key=_frame_state_cache_key(frame.id),
     )
     if isinstance(state, dict) and state.get("sceneId"):
         await redis.set(f"frame:{frame.id}:active_scene", state["sceneId"])
@@ -1077,7 +1089,7 @@ async def api_frame_get_uploaded_scenes(
         frame,
         redis,
         path="/getUploadedScenes",
-        cache_key=f"frame:{frame.frame_host}:{frame.frame_port}:uploaded_scenes",
+        cache_key=_frame_uploaded_scenes_cache_key(frame.id),
     )
     if isinstance(payload, dict) and payload.get("sceneId"):
         await redis.set(f"frame:{frame.id}:active_scene", payload["sceneId"])
@@ -1667,7 +1679,7 @@ async def api_frame_get_image(
         token=token,
     )
 
-    cache_key = f"frame:{frame.frame_host}:{frame.frame_port}:image"
+    cache_key = _frame_image_cache_key(frame.id)
     path = "/image"
 
     if request.method == "HEAD":

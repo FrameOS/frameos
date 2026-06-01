@@ -135,7 +135,7 @@ def upgrade():
         sa.Column("path", sa.Text(), nullable=False),
         sa.Column("data", sa.LargeBinary(), nullable=True),
         sa.Column("project_id", sa.Integer(), nullable=False),
-        sa.ForeignKeyConstraint(["project_id"], ["project.id"]),
+        sa.ForeignKeyConstraint(["project_id"], ["project.id"], name="fk_assets_project_id_project"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("project_id", "path", name="uq_assets_project_path"),
     )

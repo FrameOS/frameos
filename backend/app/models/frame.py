@@ -447,7 +447,7 @@ async def delete_frame(db: Session, redis: Redis, frame_id: int, project_id: int
         from .scene_image import SceneImage
         db.query(SceneImage).filter_by(project_id=project_id, frame_id=frame_id).delete()
 
-        cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
+        cache_key = f'frame:{frame_id}:image'
         await redis.delete(cache_key)
 
         db.delete(frame)
