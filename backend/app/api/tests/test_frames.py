@@ -13,8 +13,6 @@ from PIL import Image
 from urllib.parse import urlparse
 
 from app.api import frames as frames_api
-from app.api.auth import get_current_user
-from app.fastapi import app
 from app.models import new_frame
 from app.models.frame import Frame
 from app.models.log import Log
@@ -74,7 +72,9 @@ async def test_api_frame_bootstrap_command_enables_agent_and_returns_script(asyn
 
     assert command_response.status_code == 200
     command_payload = command_response.json()
-    assert command_payload['script_url'].startswith(f'http://backend.local:8989/api/frame-bootstrap/{frame.id}/')
+    assert command_payload['script_url'].startswith(
+        f'http://backend.local:8989/api/projects/{frame.project_id}/frame-bootstrap/{frame.id}/'
+    )
     assert command_payload['command'] == f"curl -fsSL {command_payload['script_url']} | sudo sh"
 
     db.refresh(frame)
@@ -120,7 +120,7 @@ async def test_api_frame_bootstrap_command_enables_agent_and_returns_script(asyn
     )[0]
     assert json.loads(scenes_json) == frame.scenes
 
-    bad_response = await no_auth_client.get(f'/api/frame-bootstrap/{frame.id}/not-the-token')
+    bad_response = await no_auth_client.get(f'/api/projects/{frame.project_id}/frame-bootstrap/{frame.id}/not-the-token')
     assert bad_response.status_code == 404
 
 
@@ -269,8 +269,9 @@ async def test_api_frame_get_not_found(async_client):
 
 
 @pytest.mark.asyncio
-async def test_api_frame_logs_full_download_includes_all_persisted_logs(no_auth_client, db):
+async def test_api_frame_logs_full_download_includes_all_persisted_logs(async_client, db):
     frame = Frame(
+        project_id=async_client.project_id,
         name="LogFrame",
         mode="rpios",
         frame_host="localhost",
@@ -309,26 +310,22 @@ async def test_api_frame_logs_full_download_includes_all_persisted_logs(no_auth_
     )
     db.commit()
 
-    app.dependency_overrides[get_current_user] = lambda: object()
-    try:
-        capped_response = await no_auth_client.get(f'/api/frames/{frame.id}/logs')
-        assert capped_response.status_code == 200
-        capped_logs = capped_response.json()['logs']
-        assert len(capped_logs) == 1000
-        assert capped_logs[0]['line'] == 'line 2'
-        assert capped_logs[-1]['line'] == 'line 1001'
+    capped_response = await async_client.get(f'/api/frames/{frame.id}/logs')
+    assert capped_response.status_code == 200
+    capped_logs = capped_response.json()['logs']
+    assert len(capped_logs) == 1000
+    assert capped_logs[0]['line'] == 'line 2'
+    assert capped_logs[-1]['line'] == 'line 1001'
 
-        full_response = await no_auth_client.get(f'/api/frames/{frame.id}/logs/full')
-        assert full_response.status_code == 200
-        assert full_response.headers['content-type'].startswith('text/plain')
-        assert 'attachment;' in full_response.headers['content-disposition']
-        assert f'frame-{frame.id}-full-logs-' in full_response.headers['content-disposition']
-        full_lines = full_response.text.splitlines()
-        assert len(full_lines) == 1002
-        assert full_lines[0].endswith('(stdout) line 0')
-        assert full_lines[-1].endswith('(stdout) line 1001')
-    finally:
-        app.dependency_overrides.clear()
+    full_response = await async_client.get(f'/api/frames/{frame.id}/logs/full')
+    assert full_response.status_code == 200
+    assert full_response.headers['content-type'].startswith('text/plain')
+    assert 'attachment;' in full_response.headers['content-disposition']
+    assert f'frame-{frame.id}-full-logs-' in full_response.headers['content-disposition']
+    full_lines = full_response.text.splitlines()
+    assert len(full_lines) == 1002
+    assert full_lines[0].endswith('(stdout) line 0')
+    assert full_lines[-1].endswith('(stdout) line 1001')
 
 @pytest.mark.asyncio
 async def test_api_frame_get_image_cached(async_client, db, redis):
@@ -1485,7 +1482,7 @@ async def test_api_frame_get_image_with_cookie_no_token(no_auth_client, db, redi
     login_resp = await no_auth_client.post('/api/login', data={'username': 'cookieframe@example.com', 'password': 'testpassword'})
     assert login_resp.status_code == 200
 
-    response = await no_auth_client.get(f'/api/frames/{frame.id}/image?t=-1')
+    response = await no_auth_client.get(f'/api/projects/{frame.project_id}/frames/{frame.id}/image?t=-1')
     assert response.status_code == 200
     assert response.content == b'cookie_cached_image_data'
 

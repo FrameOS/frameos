@@ -1,7 +1,7 @@
 import uuid
 import os
 
-from sqlalchemy import LargeBinary, String, Text
+from sqlalchemy import ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint
 from sqlalchemy.orm import Session, mapped_column
 from app.models.frame import Frame
 from app.database import Base
@@ -14,8 +14,11 @@ local_fonts_path = "../frameos/assets/copied/fonts"
 
 class Assets(Base):
     __tablename__ = 'assets'
+    __table_args__ = (UniqueConstraint("project_id", "path", name="uq_assets_project_path"),)
+
     id = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    path = mapped_column(Text, nullable=False, unique=True)
+    project_id = mapped_column(Integer, ForeignKey("project.id"), nullable=False, index=True)
+    path = mapped_column(Text, nullable=False)
     data = mapped_column(LargeBinary, nullable=True)
 
     def to_dict(self):
@@ -86,7 +89,10 @@ async def upload_font_assets(db: Session, redis: Redis, frame: Frame, assets_pat
         if remote_size is None or remote_size != local_size:
             fonts_to_upload.append((local_path, remote_path))
 
-    custom_fonts = db.query(Assets).filter(Assets.path.like("fonts/%.ttf")).all()
+    custom_fonts = db.query(Assets).filter(
+        Assets.project_id == frame.project_id,
+        Assets.path.like("fonts/%.ttf"),
+    ).all()
     custom_fonts_to_upload = []
     for font in custom_fonts:
         remote_path = font.path.replace("fonts/", assets_path + '/fonts/')
@@ -113,8 +119,11 @@ async def upload_font_assets(db: Session, redis: Redis, frame: Frame, assets_pat
     for font, remote_path in custom_fonts_to_upload:
         await upload_file(db, redis, frame, remote_path, font.data)
 
-async def copy_custom_fonts_to_local_source_folder(db: Session, local_source_folder: str):
-    custom_fonts = db.query(Assets).filter(Assets.path.like("fonts/%.ttf")).all()
+async def copy_custom_fonts_to_local_source_folder(db: Session, local_source_folder: str, project_id: int):
+    custom_fonts = db.query(Assets).filter(
+        Assets.project_id == project_id,
+        Assets.path.like("fonts/%.ttf"),
+    ).all()
     for font in custom_fonts:
         remote_path = font.path.replace("fonts/", local_source_folder + '/assets/copied/fonts/')
         if not os.path.exists(os.path.dirname(remote_path)):

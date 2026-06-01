@@ -165,6 +165,10 @@ async def login(
         await redis.expire(key, 300)  # expire after 5 minutes
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
+    from app.tenancy import ensure_default_project_for_user
+
+    ensure_default_project_for_user(db, user)
+
     await redis.delete(key)
     access_token_expires = datetime.timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(data={"sub": user.email}, expires_delta=access_token_expires)
@@ -214,6 +218,11 @@ async def signup(request: Request, data: UserSignup, response: Response, db: Ses
     user.password = generate_password_hash(data.password)
     db.add(user)
     db.commit()
+    db.refresh(user)
+
+    from app.tenancy import ensure_default_project_for_user
+
+    ensure_default_project_for_user(db, user)
 
     # Auto-login after signup:
     access_token_expires = datetime.timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)

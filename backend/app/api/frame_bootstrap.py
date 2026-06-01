@@ -19,9 +19,10 @@ from app.models.frame import Frame, get_frame_json, get_interpreted_scenes_json,
 from app.redis import get_redis
 from app.schemas.frames import FrameBootstrapResponse
 from app.tasks.precompiled_frameos import RELEASE_BASE_URL, frame_compiled_scene_count, release_version
+from app.tenancy import current_project_id
 from app.utils.token import secure_token
 
-from . import api_public, api_with_auth
+from . import api_project, api_public
 
 
 def _not_found() -> None:
@@ -126,7 +127,7 @@ def _frame_server_base_url(frame: Frame) -> str | None:
 def _frame_bootstrap_script_url(request: Request, frame: Frame) -> str:
     token = _frame_bootstrap_token(frame)
     base_url = _frame_server_base_url(frame) or _external_request_base_url(request)
-    return f"{base_url}/api/frame-bootstrap/{frame.id}/{token}"
+    return f"{base_url}/api/projects/{frame.project_id}/frame-bootstrap/{frame.id}/{token}"
 
 
 def _frame_bootstrap_config_json(db: Session, frame: Frame) -> str:
@@ -428,7 +429,7 @@ echo "FrameOS and the FrameOS agent are installed and started"
 """
 
 
-@api_with_auth.post("/frames/{id:int}/frame_bootstrap", response_model=FrameBootstrapResponse)
+@api_project.post("/frames/{id:int}/frame_bootstrap", response_model=FrameBootstrapResponse)
 async def api_frame_bootstrap_command(
     id: int,
     request: Request,
@@ -437,7 +438,7 @@ async def api_frame_bootstrap_command(
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
-    frame = db.get(Frame, id)
+    frame = db.query(Frame).filter_by(project_id=current_project_id(), id=id).first()
     if not frame:
         _not_found()
     if (frame.mode or "rpios") != "rpios":
@@ -451,13 +452,14 @@ async def api_frame_bootstrap_command(
     }
 
 
-@api_public.get("/frame-bootstrap/{frame_id:int}/{token}")
+@api_public.get("/projects/{project_id}/frame-bootstrap/{frame_id:int}/{token}")
 async def api_frame_bootstrap_script(
+    project_id: int,
     frame_id: int,
     token: str,
     db: Session = Depends(get_db),
 ):
-    frame = db.get(Frame, frame_id)
+    frame = db.query(Frame).filter_by(project_id=project_id, id=frame_id).first()
     if not frame or not _frame_bootstrap_token_valid(frame, token):
         _not_found()
     if (frame.mode or "rpios") != "rpios":

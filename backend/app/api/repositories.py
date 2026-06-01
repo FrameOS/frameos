@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 from app.database import get_db
 from app.models.settings import Settings
 from app.models.repository import Repository
+from app.tenancy import current_project_id
 from app.utils.network import is_safe_host
 from app.schemas.repositories import (
     RepositoryCreateRequest,
@@ -23,7 +24,7 @@ from app.schemas.repositories import (
 from app.config import config
 from app.utils.jwt_tokens import validate_scoped_token
 from app.api.auth import get_current_user_from_request
-from . import api_with_auth, api_no_auth
+from . import api_project, api_with_auth, api_no_auth
 
 FRAMEOS_SAMPLES_URL = "https://repo.frameos.net/samples/repository.json"
 FRAMEOS_GALLERY_URL = "https://repo.frameos.net/gallery/repository.json"
@@ -98,8 +99,9 @@ def _load_system_repository(repository_dir: Path):
     }
 
 
-@api_with_auth.post("/repositories", response_model=RepositoryResponse, status_code=201)
+@api_project.post("/repositories", response_model=RepositoryResponse, status_code=201)
 async def create_repository(data: RepositoryCreateRequest, db: Session = Depends(get_db)):
+    project_id = current_project_id()
     url = data.url
     if not url:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Missing URL")
@@ -109,7 +111,7 @@ async def create_repository(data: RepositoryCreateRequest, db: Session = Depends
         raise HTTPException(status_code=400, detail="URL not allowed")
 
     try:
-        new_repository = Repository(name="", url=url)
+        new_repository = Repository(project_id=project_id, name="", url=url)
         await new_repository.update_templates()
         db.add(new_repository)
         db.commit()
@@ -184,39 +186,40 @@ async def get_system_repository_image(
 
     return FileResponse(image_path)
 
-@api_with_auth.get("/repositories", response_model=RepositoriesListResponse)
+@api_project.get("/repositories", response_model=RepositoriesListResponse)
 async def get_repositories(db: Session = Depends(get_db)):
+    project_id = current_project_id()
     try:
-        if db.query(Settings).filter_by(key="@system/repository_global_cleanup").first():
+        if db.query(Settings).filter_by(project_id=project_id, key="@system/repository_global_cleanup").first():
             # We're good here. No need to do all the checks
             pass
         else:
             # Remove old repo if it exists
-            if db.query(Settings).filter_by(key="@system/repository_init_done").first():
+            if db.query(Settings).filter_by(project_id=project_id, key="@system/repository_init_done").first():
                 old_url = "https://repo.frameos.net/versions/0/templates.json"
-                repository = db.query(Repository).filter_by(url=old_url).first()
+                repository = db.query(Repository).filter_by(project_id=project_id, url=old_url).first()
                 if repository:
                     db.delete(repository)
-                db.delete(db.query(Settings).filter_by(key="@system/repository_init_done").first())
+                db.delete(db.query(Settings).filter_by(project_id=project_id, key="@system/repository_init_done").first())
                 db.commit()
 
             # delete old gallery/samples repos
-            if db.query(Settings).filter_by(key="@system/repository_samples_done").first():
-                repository = db.query(Repository).filter_by(url=FRAMEOS_SAMPLES_URL).first()
+            if db.query(Settings).filter_by(project_id=project_id, key="@system/repository_samples_done").first():
+                repository = db.query(Repository).filter_by(project_id=project_id, url=FRAMEOS_SAMPLES_URL).first()
                 if repository:
                     db.delete(repository)
-                db.delete(db.query(Settings).filter_by(key="@system/repository_samples_done").first())
+                db.delete(db.query(Settings).filter_by(project_id=project_id, key="@system/repository_samples_done").first())
 
-            if db.query(Settings).filter_by(key="@system/repository_gallery_done").first():
-                repository = db.query(Repository).filter_by(url=FRAMEOS_GALLERY_URL).first()
+            if db.query(Settings).filter_by(project_id=project_id, key="@system/repository_gallery_done").first():
+                repository = db.query(Repository).filter_by(project_id=project_id, url=FRAMEOS_GALLERY_URL).first()
                 if repository:
                     db.delete(repository)
-                db.delete(db.query(Settings).filter_by(key="@system/repository_gallery_done").first())
+                db.delete(db.query(Settings).filter_by(project_id=project_id, key="@system/repository_gallery_done").first())
 
-            db.add(Settings(key="@system/repository_global_cleanup", value="true"))
+            db.add(Settings(project_id=project_id, key="@system/repository_global_cleanup", value="true"))
             db.commit()
 
-        repositories = db.query(Repository).all()
+        repositories = db.query(Repository).filter_by(project_id=project_id).all()
 
         for r in repositories:
             # if haven't refreshed in a day
@@ -229,10 +232,10 @@ async def get_repositories(db: Session = Depends(get_db)):
         logging.error(f'Database error: {e}')
         raise HTTPException(status_code=500, detail="Database error")
 
-@api_with_auth.get("/repositories/{repository_id}", response_model=RepositoryResponse)
+@api_project.get("/repositories/{repository_id}", response_model=RepositoryResponse)
 async def get_repository(repository_id: str, db: Session = Depends(get_db)):
     try:
-        repository = db.get(Repository, repository_id)
+        repository = db.query(Repository).filter_by(project_id=current_project_id(), id=repository_id).first()
         if not repository:
             raise HTTPException(status_code=404, detail="Repository not found")
         repo_dict = repository.to_dict()
@@ -241,10 +244,10 @@ async def get_repository(repository_id: str, db: Session = Depends(get_db)):
         logging.error(f'Database error: {e}')
         raise HTTPException(status_code=500, detail="Database error")
 
-@api_with_auth.patch("/repositories/{repository_id}", response_model=RepositoryResponse)
+@api_project.patch("/repositories/{repository_id}", response_model=RepositoryResponse)
 async def update_repository(repository_id: str, data: RepositoryUpdateRequest, db: Session = Depends(get_db)):
     try:
-        repository = db.get(Repository, repository_id)
+        repository = db.query(Repository).filter_by(project_id=current_project_id(), id=repository_id).first()
         if not repository:
             raise HTTPException(status_code=404, detail="Repository not found")
 
@@ -260,10 +263,10 @@ async def update_repository(repository_id: str, data: RepositoryUpdateRequest, d
         logging.error(f'Database error: {e}')
         raise HTTPException(status_code=500, detail="Database error")
 
-@api_with_auth.delete("/repositories/{repository_id}")
+@api_project.delete("/repositories/{repository_id}")
 async def delete_repository(repository_id: str, db: Session = Depends(get_db)):
     try:
-        repository = db.get(Repository, repository_id)
+        repository = db.query(Repository).filter_by(project_id=current_project_id(), id=repository_id).first()
         if not repository:
             raise HTTPException(status_code=404, detail="Repository not found")
         db.delete(repository)

@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Optional
 
-from sqlalchemy import DateTime, String, Text, UniqueConstraint, func
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.sqlite import JSON
 from sqlalchemy.orm import Session, mapped_column
 
@@ -12,10 +12,11 @@ from app.database import Base
 class AiEmbedding(Base):
     __tablename__ = "ai_embeddings"
     __table_args__ = (
-        UniqueConstraint("source_type", "source_path", name="uq_ai_embeddings_source"),
+        UniqueConstraint("project_id", "source_type", "source_path", name="uq_ai_embeddings_project_source"),
     )
 
     id = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_id = mapped_column(Integer, ForeignKey("project.id"), nullable=False, index=True)
     source_type = mapped_column(String(32), nullable=False)
     source_path = mapped_column(Text, nullable=False)
     name = mapped_column(String(256), nullable=True)
@@ -33,6 +34,7 @@ class AiEmbedding(Base):
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
+            "project_id": self.project_id,
             "source_type": self.source_type,
             "source_path": self.source_path,
             "name": self.name,
@@ -47,6 +49,7 @@ class AiEmbedding(Base):
 def upsert_ai_embedding(
     db: Session,
     *,
+    project_id: int,
     source_type: str,
     source_path: str,
     name: Optional[str],
@@ -56,7 +59,7 @@ def upsert_ai_embedding(
 ) -> AiEmbedding:
     existing = (
         db.query(AiEmbedding)
-        .filter_by(source_type=source_type, source_path=source_path)
+        .filter_by(project_id=project_id, source_type=source_type, source_path=source_path)
         .one_or_none()
     )
     if existing:
@@ -69,6 +72,7 @@ def upsert_ai_embedding(
         return existing
 
     entry = AiEmbedding(
+        project_id=project_id,
         source_type=source_type,
         source_path=source_path,
         name=name,

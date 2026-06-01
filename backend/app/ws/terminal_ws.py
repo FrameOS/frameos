@@ -12,6 +12,7 @@ from app.database import SessionLocal
 from app.redis import get_redis
 from app.models.frame import Frame
 from app.api.auth import get_current_user_from_websocket
+from app.tenancy import get_user_project
 from app.utils.ssh_utils import get_ssh_connection, remove_ssh_connection
 from app.ws.agent_bridge import CMD_KEY, RESP_KEY, STREAM_KEY, frame_command_slot
 from app.ws.agent_ws import number_of_connections_for_frame
@@ -219,9 +220,10 @@ async def _agent_terminal(websocket: WebSocket, redis: Redis, frame: Frame) -> N
             await websocket.close()
 
 
-@router.websocket("/ws/terminal/{frame_id}")
+@router.websocket("/ws/projects/{project_id}/terminal/{frame_id}")
 async def ssh_terminal(
     websocket: WebSocket,
+    project_id: int,
     frame_id: int,
     redis: Redis = Depends(get_redis),
 ):
@@ -235,11 +237,21 @@ async def ssh_terminal(
         await websocket.close(code=1008, reason=error_reason or "Could not validate credentials")
         return
 
+    db = SessionLocal()
+    try:
+        project = get_user_project(db, user, project_id)
+    finally:
+        db.close()
+
+    if project is None:
+        await websocket.close(code=1008, reason="Project not found")
+        return
+
     await websocket.accept()
 
     db = SessionLocal()
     try:
-        frame = db.query(Frame).filter(Frame.id == frame_id).first()
+        frame = db.query(Frame).filter(Frame.project_id == project_id, Frame.id == frame_id).first()
     finally:
         db.close()
 

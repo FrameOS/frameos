@@ -11,11 +11,12 @@ from app.models.assets import Assets
 from app.schemas.assets import (
     AssetResponse
 )
-from . import api_with_auth
+from app.tenancy import current_project_id
+from . import api_project
 
 # This file handles assets uploaded under /settings. For assets on frames, see frame.py.
 
-@api_with_auth.get("/assets", response_model=list[AssetResponse])
+@api_project.get("/assets", response_model=list[AssetResponse])
 async def list_assets(
     path: Optional[str] = Query(None, description="Optional substring filter on the asset path"),
     db: Session = Depends(get_db)
@@ -24,7 +25,8 @@ async def list_assets(
     Return a list of all stored Assets (without the binary data).
     Optionally filter by `path` if specified.
     """
-    query = db.query(Assets)
+    project_id = current_project_id()
+    query = db.query(Assets).filter(Assets.project_id == project_id)
     if path:
         query = query.filter(Assets.path.ilike(f"%{path}%"))
     results = query.all()
@@ -39,12 +41,12 @@ async def list_assets(
     return output
 
 
-@api_with_auth.get("/assets/{asset_id}", response_model=AssetResponse)
+@api_project.get("/assets/{asset_id}", response_model=AssetResponse)
 async def get_asset(asset_id: str, db: Session = Depends(get_db)):
     """
     Return metadata for a single asset by its ID.
     """
-    asset = db.query(Assets).filter_by(id=asset_id).first()
+    asset = db.query(Assets).filter_by(project_id=current_project_id(), id=asset_id).first()
     if not asset:
         raise HTTPException(status_code=404, detail="Asset not found")
 
@@ -55,12 +57,12 @@ async def get_asset(asset_id: str, db: Session = Depends(get_db)):
     )
 
 
-@api_with_auth.get("/assets/{asset_id}/download")
+@api_project.get("/assets/{asset_id}/download")
 async def download_asset(asset_id: str, db: Session = Depends(get_db)):
     """
     Download the raw binary data of an asset by ID.
     """
-    asset = db.query(Assets).filter_by(id=asset_id).first()
+    asset = db.query(Assets).filter_by(project_id=current_project_id(), id=asset_id).first()
     if not asset:
         raise HTTPException(status_code=404, detail="Asset not found")
     if not asset.data:
@@ -73,7 +75,7 @@ async def download_asset(asset_id: str, db: Session = Depends(get_db)):
     )
 
 
-@api_with_auth.post("/assets", response_model=AssetResponse, status_code=201)
+@api_project.post("/assets", response_model=AssetResponse, status_code=201)
 async def create_asset(
     path: str = Form(..., description="Unique path identifier for this asset"),
     file: UploadFile = File(...),
@@ -84,7 +86,8 @@ async def create_asset(
       - `path` must be unique
       - `file` is the actual file data
     """
-    existing = db.query(Assets).filter_by(path=path).first()
+    project_id = current_project_id()
+    existing = db.query(Assets).filter_by(project_id=project_id, path=path).first()
     if existing:
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
@@ -96,7 +99,7 @@ async def create_asset(
     except Exception:
         raise HTTPException(status_code=400, detail="Error reading uploaded file.")
 
-    new_asset = Assets(path=path, data=content)
+    new_asset = Assets(project_id=project_id, path=path, data=content)
     db.add(new_asset)
     try:
         db.commit()
@@ -111,7 +114,7 @@ async def create_asset(
     )
 
 
-@api_with_auth.put("/assets/{asset_id}", response_model=AssetResponse)
+@api_project.put("/assets/{asset_id}", response_model=AssetResponse)
 async def update_asset(
     asset_id: str,
     path: Optional[str] = Form(None, description="New path (must remain unique)"),
@@ -125,14 +128,15 @@ async def update_asset(
       - The file contents (if provided).
     If you only want to change the path (and not the file), omit `file`.
     """
-    asset = db.query(Assets).filter_by(id=asset_id).first()
+    project_id = current_project_id()
+    asset = db.query(Assets).filter_by(project_id=project_id, id=asset_id).first()
     if not asset:
         raise HTTPException(status_code=404, detail="Asset not found")
 
     # If user wants to update the path:
     if path and path != asset.path:
         # check uniqueness of new path
-        conflict = db.query(Assets).filter_by(path=path).first()
+        conflict = db.query(Assets).filter_by(project_id=project_id, path=path).first()
         if conflict and conflict.id != asset_id:
             raise HTTPException(
                 status_code=HTTPStatus.BAD_REQUEST,
@@ -161,12 +165,12 @@ async def update_asset(
     )
 
 
-@api_with_auth.delete("/assets/{asset_id}")
+@api_project.delete("/assets/{asset_id}")
 async def delete_asset(asset_id: str, db: Session = Depends(get_db)):
     """
     Delete an asset by ID.
     """
-    asset = db.query(Assets).filter_by(id=asset_id).first()
+    asset = db.query(Assets).filter_by(project_id=current_project_id(), id=asset_id).first()
     if not asset:
         raise HTTPException(status_code=404, detail="Asset not found")
 

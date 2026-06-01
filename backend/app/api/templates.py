@@ -21,8 +21,9 @@ from app.schemas.templates import (
     CreateTemplateRequest,
     UpdateTemplateRequest,
 )
-from app.api import api_with_auth, api_no_auth
+from app.api import api_project, api_with_auth, api_no_auth
 from app.redis import get_redis
+from app.tenancy import current_project_id, get_user_project
 from app.utils.jwt_tokens import validate_scoped_token
 from app.api.auth import get_current_user_from_request
 
@@ -55,7 +56,17 @@ def respond_with_template(template: Template):
     )
 
 
-@api_with_auth.post("/templates", status_code=201)
+@api_with_auth.post("/templates", status_code=201, include_in_schema=False)
+async def create_template_legacy():
+    raise HTTPException(status_code=404, detail="Project scoped route required")
+
+
+@api_with_auth.get("/templates", include_in_schema=False)
+async def get_templates_legacy():
+    raise HTTPException(status_code=404, detail="Project scoped route required")
+
+
+@api_project.post("/templates", status_code=201)
 async def create_template(
     request: Request,
     db: Session = Depends(get_db),
@@ -178,9 +189,10 @@ async def create_template(
                 data['imageHeight'] = img_obj.height
 
     # If from_frame_id is provided, attempt to fetch image from frame cache
+    project_id = current_project_id()
     if data.get('from_frame_id'):
         frame_id = data['from_frame_id']
-        frame = db.get(Frame, frame_id)
+        frame = db.query(Frame).filter_by(project_id=project_id, id=frame_id).first()
         if frame:
             cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
             last_image = await redis.get(cache_key)
@@ -197,6 +209,7 @@ async def create_template(
     create_req = CreateTemplateRequest(**data)
 
     new_template = Template(
+        project_id=project_id,
         name=create_req.name,
         description=create_req.description,
         scenes=create_req.scenes,
@@ -219,9 +232,9 @@ async def create_template(
     return new_template.to_dict()
 
 
-@api_with_auth.get("/templates", response_model=TemplatesListResponse)
+@api_project.get("/templates", response_model=TemplatesListResponse)
 async def get_templates(db: Session = Depends(get_db)):
-    templates = db.query(Template).all()
+    templates = db.query(Template).filter_by(project_id=current_project_id()).all()
     result = []
     for t in templates:
         d = t.to_dict()
@@ -229,39 +242,40 @@ async def get_templates(db: Session = Depends(get_db)):
     return result
 
 
-@api_with_auth.get("/templates/{template_id}", response_model=TemplateResponse)
+@api_project.get("/templates/{template_id}", response_model=TemplateResponse)
 async def get_template(template_id: str, db: Session = Depends(get_db)):
-    template = db.get(Template, template_id)
+    template = db.query(Template).filter_by(project_id=current_project_id(), id=template_id).first()
     if not template:
         raise HTTPException(status_code=404, detail="Template not found")
     d = template.to_dict()
     return d
 
-@api_no_auth.get("/templates/{template_id}/image")
-async def get_template_image(template_id: str, request: Request, token: str | None = None, db: Session = Depends(get_db)):
+@api_no_auth.get("/projects/{project_id}/templates/{template_id}/image")
+async def get_template_image(project_id: int, template_id: str, request: Request, token: str | None = None, db: Session = Depends(get_db)):
     if config.HASSIO_RUN_MODE != 'ingress':
         # All modes except ingress require a token in the url or authenticated session
-        if await get_current_user_from_request(request, db):
+        user = await get_current_user_from_request(request, db)
+        if user is not None and get_user_project(db, user, project_id) is not None:
             pass
         else:
-            validate_scoped_token(token, expected_subject=f"template={template_id}")
+            validate_scoped_token(token, expected_subject=f"project={project_id}:template={template_id}")
 
-    template = db.get(Template, template_id)
+    template = db.query(Template).filter_by(project_id=project_id, id=template_id).first()
     if not template or not template.image:
         raise HTTPException(status_code=404, detail="Template not found")
 
     return StreamingResponse(io.BytesIO(template.image), media_type='image/jpeg')
 
 
-@api_with_auth.get("/templates/{template_id}/export")
+@api_project.get("/templates/{template_id}/export")
 async def export_template(template_id: str, db: Session = Depends(get_db)):
-    template = db.get(Template, template_id)
+    template = db.query(Template).filter_by(project_id=current_project_id(), id=template_id).first()
     return respond_with_template(template)
 
 
-@api_with_auth.patch("/templates/{template_id}", response_model=TemplateResponse)
+@api_project.patch("/templates/{template_id}", response_model=TemplateResponse)
 async def update_template(template_id: str, data: UpdateTemplateRequest, db: Session = Depends(get_db)):
-    template = db.get(Template, template_id)
+    template = db.query(Template).filter_by(project_id=current_project_id(), id=template_id).first()
     if not template:
         raise HTTPException(status_code=404, detail="Template not found")
 
@@ -276,9 +290,9 @@ async def update_template(template_id: str, data: UpdateTemplateRequest, db: Ses
     return d
 
 
-@api_with_auth.delete("/templates/{template_id}")
+@api_project.delete("/templates/{template_id}")
 async def delete_template(template_id: str, db: Session = Depends(get_db)):
-    template = db.get(Template, template_id)
+    template = db.query(Template).filter_by(project_id=current_project_id(), id=template_id).first()
     if not template:
         raise HTTPException(status_code=404, detail="Template not found")
     db.delete(template)

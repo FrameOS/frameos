@@ -3,6 +3,7 @@ import copy from 'copy-to-clipboard'
 
 import { framesModel } from '../../models/framesModel'
 import { apiFetch } from '../../utils/apiFetch'
+import { cachedProjectId } from '../../utils/projectApi'
 import { showSuccessMessage } from '../../utils/workingMessage'
 
 import type { frameBootstrapLogicType } from './frameBootstrapLogicType'
@@ -17,10 +18,18 @@ interface FrameBootstrapApiResponse {
 }
 
 function redactedFrameBootstrapUrl(scriptUrl: string, frameId: number): string {
-  const frameBootstrapPath = `/api/frame-bootstrap/${frameId}`
+  const projectId = cachedProjectId()
+  const frameBootstrapPath = projectId
+    ? `/api/projects/${projectId}/frame-bootstrap/${frameId}`
+    : `/api/frame-bootstrap/${frameId}`
 
   try {
     const url = new URL(scriptUrl)
+    const projectScopedMatch = url.pathname.match(new RegExp(`^(.*/api/projects/\\d+/frame-bootstrap/${frameId})(?:/|$)`))
+    if (projectScopedMatch) {
+      return `${url.origin}${projectScopedMatch[1]}/[secret]`
+    }
+
     const pathStart = url.pathname.indexOf(frameBootstrapPath)
     const pathPrefix =
       pathStart === -1 ? frameBootstrapPath : url.pathname.slice(0, pathStart + frameBootstrapPath.length)

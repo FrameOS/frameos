@@ -10,9 +10,10 @@ from app.config import config
 from app.database import get_db
 from app.models.scene_image import SceneImage            # created earlier
 from app.models.frame import Frame
-from . import api_no_auth, api_with_auth
+from . import api_no_auth, api_project, api_with_auth
 from app.utils.jwt_tokens import validate_scoped_token
 from app.api.auth import get_current_user_from_request
+from app.tenancy import current_project_id, get_user_project
 
 
 SCENE_IMAGE_CACHE_HEADERS = {"Cache-Control": "private, max-age=86400"}
@@ -84,8 +85,9 @@ def _generate_thumbnail(image_bytes: bytes) -> tuple[bytes, int, int]:
         return buf.read(), new_width, new_height
 
 
-@api_no_auth.get("/frames/{frame_id}/scene_images/{scene_id}")
+@api_no_auth.get("/projects/{project_id}/frames/{frame_id}/scene_images/{scene_id}")
 async def get_scene_image(
+    project_id: int,
     frame_id: int,
     scene_id: str,
     request: Request,
@@ -99,15 +101,16 @@ async def get_scene_image(
     """
 
     if config.HASSIO_RUN_MODE != 'ingress':
-        if await get_current_user_from_request(request, db):
+        user = await get_current_user_from_request(request, db)
+        if user is not None and get_user_project(db, user, project_id) is not None:
             pass
         else:
-            validate_scoped_token(token, expected_subject=f"frame={frame_id}")
+            validate_scoped_token(token, expected_subject=f"project={project_id}:frame={frame_id}")
 
 
     img_row: SceneImage | None = (
         db.query(SceneImage)
-        .filter_by(frame_id=frame_id, scene_id=scene_id)
+        .filter_by(project_id=project_id, frame_id=frame_id, scene_id=scene_id)
         .order_by(SceneImage.timestamp.desc())
         .first()
     )
@@ -138,7 +141,7 @@ async def get_scene_image(
                 headers=SCENE_IMAGE_CACHE_HEADERS,
             )
 
-    frame: Frame | None = db.get(Frame, frame_id)
+    frame: Frame | None = db.query(Frame).filter_by(project_id=project_id, id=frame_id).first()
     if frame is None:
         raise HTTPException(status_code=404, detail="Frame not found")
 
@@ -159,14 +162,20 @@ async def get_scene_image(
     return StreamingResponse(io.BytesIO(png), media_type="image/png", headers=SCENE_IMAGE_CACHE_HEADERS)
 
 
-@api_with_auth.post("/frames/{frame_id}/scene_images/{scene_id}", status_code=201)
+@api_with_auth.post("/frames/{frame_id}/scene_images/{scene_id}", status_code=404, include_in_schema=False)
+async def upsert_scene_image_legacy():
+    raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Project scoped route required")
+
+
+@api_project.post("/frames/{frame_id}/scene_images/{scene_id}", status_code=201)
 async def upsert_scene_image(
     frame_id: int,
     scene_id: str,
     request: Request,
     db: Session = Depends(get_db),
 ):
-    frame = db.get(Frame, frame_id)
+    project_id = current_project_id()
+    frame = db.query(Frame).filter_by(project_id=project_id, id=frame_id).first()
     if frame is None:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
 
@@ -188,7 +197,7 @@ async def upsert_scene_image(
 
     thumb, t_width, t_height = _generate_thumbnail(image_bytes)
     now = datetime.utcnow()
-    img_row = db.query(SceneImage).filter_by(frame_id=frame_id, scene_id=scene_id).first()
+    img_row = db.query(SceneImage).filter_by(project_id=project_id, frame_id=frame_id, scene_id=scene_id).first()
     if img_row:
         img_row.image = image_bytes
         img_row.timestamp = now
@@ -199,6 +208,7 @@ async def upsert_scene_image(
         img_row.thumb_height = t_height
     else:
         img_row = SceneImage(
+            project_id=project_id,
             frame_id=frame_id,
             scene_id=scene_id,
             image=image_bytes,

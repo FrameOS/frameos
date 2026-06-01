@@ -18,6 +18,7 @@ import { v4 as uuidv4 } from 'uuid'
 import { duplicateScenes } from '../../utils/duplicateScenes'
 import { apiFetch } from '../../utils/apiFetch'
 import { getBasePath } from '../../utils/getBasePath'
+import { projectApiPath, projectApiPathSync } from '../../utils/projectApi'
 import { entityImagesModel } from '../../models/entityImagesModel'
 import { arrangeSceneGraph } from '../../utils/arrangeNodes'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
@@ -631,7 +632,7 @@ function buildUndeployedSummaryItems(
 
 async function resolveTemplateImageUrl(template: Partial<TemplateType>): Promise<string | null> {
   if (template.id) {
-    return `/api/templates/${template.id}/image`
+    return await projectApiPath(`/api/templates/${template.id}/image`)
   }
 
   if (typeof template.image === 'string') {
@@ -639,7 +640,7 @@ async function resolveTemplateImageUrl(template: Partial<TemplateType>): Promise
     if (match) {
       return `/api/${match[1]}/image`
     }
-    return template.image
+    return projectApiPathSync(template.image)
   }
 
   return null
@@ -656,7 +657,8 @@ async function fetchTemplateImageBlob(template: Partial<TemplateType>): Promise<
   }
 
   const basePath = getBasePath()
-  const resolvedUrl = imageUrl.startsWith('/api/') && basePath ? `${basePath}${imageUrl}` : imageUrl
+  const scopedImageUrl = imageUrl.startsWith('/api/') ? await projectApiPath(imageUrl) : imageUrl
+  const resolvedUrl = scopedImageUrl.startsWith('/api/') && basePath ? `${basePath}${scopedImageUrl}` : scopedImageUrl
   const response = await fetch(resolvedUrl)
   if (!response.ok) {
     return null

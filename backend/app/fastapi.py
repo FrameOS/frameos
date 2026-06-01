@@ -10,7 +10,8 @@ from fastapi.exception_handlers import request_validation_exception_handler
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi import FastAPI, Request, Depends
 from app.api.auth import get_current_user
-from app.api import api_no_auth, api_with_auth, api_public
+from app.api import api_no_auth, api_project, api_with_auth, api_public
+from app.api.project_auth import get_current_project
 from fastapi.middleware.gzip import GZipMiddleware
 from app.middleware import GzipRequestMiddleware
 from app.ws.agent_ws import router as agent_ws_router
@@ -51,12 +52,14 @@ if config.HASSIO_RUN_MODE:
         app.include_router(api_public, prefix="/api")
         app.include_router(api_no_auth, prefix="/api")
         app.include_router(api_with_auth, prefix="/api")
+        app.include_router(api_project, prefix="/api/projects/{project_id}", dependencies=[Depends(get_current_project)])
     else:
         raise ValueError("Invalid HASSIO_RUN_MODE")
 else:
     app.include_router(api_public, prefix="/api")
     app.include_router(api_no_auth, prefix="/api")
     app.include_router(api_with_auth, prefix="/api", dependencies=[Depends(get_current_user)])
+    app.include_router(api_project, prefix="/api/projects/{project_id}", dependencies=[Depends(get_current_project)])
 
 # Serve HTML and static files in all cases except for public HASSIO_RUN_MODE
 serve_html = config.HASSIO_RUN_MODE != "public"

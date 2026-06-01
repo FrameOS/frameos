@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.apps import get_app_configs, get_one_app_sources
 from app.models.settings import get_settings_dict
+from app.tenancy import current_project_id
 from app.utils.ai_scene import SCENE_MODEL
 from app.utils.js_apps import validate_js_source
 from app.schemas.apps import (
@@ -21,16 +22,16 @@ from app.schemas.apps import (
  EnhanceSourceRequest,
  EnhanceSourceResponse
 )
-from . import api_with_auth
+from . import api_project
 
 from typing import Optional
 
-@api_with_auth.get("/apps", response_model=AppsListResponse)
+@api_project.get("/apps", response_model=AppsListResponse)
 async def api_apps_list(db: Session = Depends(get_db)):
     return {"apps": get_app_configs()}
 
 
-@api_with_auth.get("/apps/source", response_model=AppsSourceResponse)
+@api_project.get("/apps/source", response_model=AppsSourceResponse)
 async def api_apps_source(keyword: Optional[str] = None, db: Session = Depends(get_db)):
     sources = get_one_app_sources(keyword)
     if not sources:
@@ -38,7 +39,7 @@ async def api_apps_source(keyword: Optional[str] = None, db: Session = Depends(g
     return sources
 
 
-@api_with_auth.post("/apps/validate_source", response_model=ValidateSourceResponse)
+@api_project.post("/apps/validate_source", response_model=ValidateSourceResponse)
 async def validate_python_frame_source(data: ValidateSourceRequest):
     file = data.file
     source = data.source
@@ -60,11 +61,11 @@ async def validate_python_frame_source(data: ValidateSourceRequest):
     return {"errors": errors}
 
 
-@api_with_auth.post("/apps/enhance_source", response_model=EnhanceSourceResponse)
+@api_project.post("/apps/enhance_source", response_model=EnhanceSourceResponse)
 async def enhance_python_frame_source(data: EnhanceSourceRequest, db: Session = Depends(get_db)):
     source = data.source
     prompt = data.prompt
-    openai_settings = get_settings_dict(db).get("openAI", {})
+    openai_settings = get_settings_dict(db, project_id=current_project_id()).get("openAI", {})
     api_key = openai_settings.get("backendApiKey")
 
     if api_key is None:

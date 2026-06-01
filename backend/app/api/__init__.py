@@ -13,6 +13,7 @@ from fastapi import APIRouter
 api_public = APIRouter()
 api_no_auth = APIRouter()
 api_with_auth = APIRouter()
+api_project = APIRouter()
 
 from .auth import *  # noqa: E402, F403
 from .ai_embeddings import *  # noqa: E402, F403
@@ -25,6 +26,7 @@ from .frame_bootstrap import *  # noqa: E402, F403
 from .frames import *  # noqa: E402, F403
 from .fonts import *  # noqa: E402, F403
 from .log import *  # noqa: E402, F403
+from .projects import *  # noqa: E402, F403
 from .repositories import *  # noqa: E402, F403
 from .scene_images import *  # noqa: E402, F403
 from .settings import *  # noqa: E402, F403

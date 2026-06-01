@@ -373,7 +373,7 @@ class AgentDeployer(FrameDeployer):
             )
             return False
 
-        build_host = get_build_host_config(self.db)
+        build_host = get_build_host_config(self.db, self.frame.project_id)
         if build_host:
             await self.log("stdout", "- Cross compiling agent via build host")
         else:

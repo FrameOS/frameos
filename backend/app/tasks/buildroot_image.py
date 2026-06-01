@@ -736,7 +736,7 @@ class BuildrootImageBuilder:
                 "rawSha256": raw_sha256,
                 "size": output_path.stat().st_size,
                 "sha256": _sha256(output_path),
-                "downloadUrl": f"/api/frames/{self.frame.id}/buildroot/sd_image/download",
+                "downloadUrl": f"/api/projects/{self.frame.project_id}/frames/{self.frame.id}/buildroot/sd_image/download",
                 "createdAt": _utc_now(),
                 "completedAt": _utc_now(),
             }

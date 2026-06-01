@@ -41,10 +41,10 @@ class BuildHostConfig:
         return cls(host=host, user=user, port=port, ssh_key=str(ssh_key), enabled=True)
 
 
-def get_build_host_config(db: Session | None) -> BuildHostConfig | None:
+def get_build_host_config(db: Session | None, project_id: int | None = None) -> BuildHostConfig | None:
     if db is None:
         return None
-    settings = get_settings_dict(db)
+    settings = get_settings_dict(db, project_id=project_id)
     return BuildHostConfig.from_settings(settings.get("buildHost"))
 
 

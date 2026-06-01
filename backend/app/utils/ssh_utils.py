@@ -182,7 +182,7 @@ async def _create_new_connection(db, redis, frame) -> asyncssh.SSHClientConnecti
     keypair_label = None
     if not password:
         # Attempt to load SSH keys from DB
-        ssh_keys_row = db.query(Settings).filter_by(key="ssh_keys").first()
+        ssh_keys_row = db.query(Settings).filter_by(project_id=frame.project_id, key="ssh_keys").first()
         settings = {"ssh_keys": ssh_keys_row.value} if ssh_keys_row and ssh_keys_row.value else {}
         selected_keys = select_ssh_keys_for_frame(frame, settings)
         keypair_names = [key.get("name") or key.get("id") for key in selected_keys]

@@ -15,6 +15,7 @@ from app.models import new_frame
 from app.models.frame import Frame
 from app.models.user import User
 from app.redis import get_redis
+from app.tenancy import ensure_default_project_for_user
 from app.tasks.buildroot_image import (
     BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION,
     SUPPORTED_BUILDROOT_PLATFORM,
@@ -56,13 +57,17 @@ class DummyRedis:
             yield None
 
 
-def create_user(email: str = "test@example.com", password: str = "testpassword") -> None:
+def create_user(email: str = "test@example.com", password: str = "testpassword") -> int:
     db = SessionLocal()
     user = User(email=email)
     user.set_password(password)
     db.add(user)
     db.commit()
+    db.refresh(user)
+    project = ensure_default_project_for_user(db, user)
+    project_id = project.id
     db.close()
+    return project_id
 
 
 @pytest.fixture
@@ -119,14 +124,14 @@ def test_ws_session_cookie_echo(client: TestClient) -> None:
 
 
 def test_terminal_ws_session_cookie_frame_not_found(client: TestClient) -> None:
-    create_user(email="cookie-terminal@example.com", password="testpassword")
+    project_id = create_user(email="cookie-terminal@example.com", password="testpassword")
     login_resp = client.post(
         "/api/login",
         data={"username": "cookie-terminal@example.com", "password": "testpassword"},
     )
     assert login_resp.status_code == 200
 
-    with client.websocket_connect("/ws/terminal/999") as ws:
+    with client.websocket_connect(f"/ws/projects/{project_id}/terminal/999") as ws:
         with pytest.raises(WebSocketDisconnect) as exc:
             ws.receive_text()
     assert exc.value.code == 1008
@@ -134,7 +139,7 @@ def test_terminal_ws_session_cookie_frame_not_found(client: TestClient) -> None:
 
 def test_terminal_ws_missing_token(client: TestClient) -> None:
     with pytest.raises(WebSocketDisconnect) as exc:
-        with client.websocket_connect("/ws/terminal/1"):
+        with client.websocket_connect("/ws/projects/1/terminal/1"):
             pass
     assert exc.value.code == 1008
     assert exc.value.reason == "Missing token"
@@ -142,17 +147,17 @@ def test_terminal_ws_missing_token(client: TestClient) -> None:
 
 def test_terminal_ws_invalid_token(client: TestClient) -> None:
     with pytest.raises(WebSocketDisconnect) as exc:
-        with client.websocket_connect("/ws/terminal/1?token=bad"):
+        with client.websocket_connect("/ws/projects/1/terminal/1?token=bad"):
             pass
     assert exc.value.code == 1008
     assert exc.value.reason == "Invalid token"
 
 
 def test_terminal_ws_frame_not_found(client: TestClient) -> None:
-    create_user()
+    project_id = create_user()
     login_resp = client.post("/api/login", data={"username": "test@example.com", "password": "testpassword"})
     token = login_resp.json()["access_token"]
-    with client.websocket_connect(f"/ws/terminal/999?token={token}") as ws:
+    with client.websocket_connect(f"/ws/projects/{project_id}/terminal/999?token={token}") as ws:
         with pytest.raises(WebSocketDisconnect) as exc:
             ws.receive_text()
     assert exc.value.code == 1008

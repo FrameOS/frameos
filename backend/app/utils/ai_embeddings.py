@@ -241,6 +241,7 @@ async def build_ai_embeddings(
     db: Session,
     api_key: str,
     *,
+    project_id: int,
     clear_existing: bool = False,
     only_missing: bool = False,
     summary_model: str,
@@ -250,13 +251,15 @@ async def build_ai_embeddings(
     items = _collect_ai_embedding_items(repo_root)
 
     if clear_existing:
-        db.query(AiEmbedding).delete(synchronize_session=False)
+        db.query(AiEmbedding).filter_by(project_id=project_id).delete(synchronize_session=False)
         db.commit()
 
     existing_sources: set[tuple[str, str]] = set()
     if only_missing and not clear_existing:
         existing_sources = {
-            (row.source_type, row.source_path) for row in db.query(AiEmbedding.source_type, AiEmbedding.source_path)
+            (row.source_type, row.source_path)
+            for row in db.query(AiEmbedding.source_type, AiEmbedding.source_path)
+            .filter(AiEmbedding.project_id == project_id)
         }
 
     for source_type, source_path, name, summary_input, metadata in items:
@@ -280,6 +283,7 @@ async def build_ai_embeddings(
         metadata["keywords"] = keywords
         upsert_ai_embedding(
             db,
+            project_id=project_id,
             source_type=source_type,
             source_path=source_path,
             name=name,
