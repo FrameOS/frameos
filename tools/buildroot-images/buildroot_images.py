@@ -298,32 +298,25 @@ def upload(args: argparse.Namespace) -> None:
     if not args.yes:
         raise SystemExit(f"Re-run with --yes to upload {object_key}")
     client = s3_client()
+    entry = {**metadata, "object_key": object_key, "updated_at": datetime.now(timezone.utc).isoformat()}
+    remote_exists = False
     if not args.force:
         try:
             client.head_object(Bucket=args.bucket, Key=object_key)
-            print(f"Remote already has s3://{args.bucket}/{object_key}")
-            return
+            remote_exists = True
         except ClientError as exc:
             if exc.response["Error"].get("Code") not in {"404", "NoSuchKey"}:
                 raise
-    archive_path = out_dir / archive_name
-    with image_path.open("rb") as source, archive_path.open("wb") as raw:
-        with gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as output:
-            shutil.copyfileobj(source, output)
-    client.upload_file(str(archive_path), args.bucket, object_key, ExtraArgs={"ContentType": "application/gzip"})
-    manifest = load_manifest(client, args.bucket, args.manifest_key)
-    entry = {**metadata, "object_key": object_key, "updated_at": datetime.now(timezone.utc).isoformat()}
-    manifest["entries"] = [
-        existing
-        for existing in manifest.get("entries", [])
-        if not (
-            existing.get("platform") == entry["platform"]
-            and published_frameos_version(str(existing.get("frameos_version") or "")) == entry["frameos_version"]
-        )
-    ]
-    manifest["entries"].append(entry)
-    save_manifest(client, args.bucket, args.manifest_key, manifest)
-    print(f"Uploaded s3://{args.bucket}/{object_key}")
+    if remote_exists:
+        print(f"Remote already has s3://{args.bucket}/{object_key}")
+    else:
+        archive_path = out_dir / archive_name
+        with image_path.open("rb") as source, archive_path.open("wb") as raw:
+            with gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as output:
+                shutil.copyfileobj(source, output)
+        client.upload_file(str(archive_path), args.bucket, object_key, ExtraArgs={"ContentType": "application/gzip"})
+        print(f"Uploaded s3://{args.bucket}/{object_key}")
+    save_manifest(client, args.bucket, args.manifest_key, {"entries": [entry]})
 
 
 def list_remote(args: argparse.Namespace) -> None:
