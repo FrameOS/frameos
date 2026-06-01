@@ -423,6 +423,8 @@ async def _wait_for_cached_frame_image(redis: Redis, cache_key: str) -> bytes | 
 def _frame_image_placeholder(frame: Frame) -> bytes:
     width = int(frame.width or 800)
     height = int(frame.height or 600)
+    if frame.rotate in (90, 270):
+        width, height = height, width
     return render_line_of_text_png("no image", width, height)
 
 

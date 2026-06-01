@@ -1,5 +1,6 @@
 import asyncio
 import gzip
+import io
 import json
 import pytest
 import subprocess
@@ -8,6 +9,7 @@ from unittest.mock import AsyncMock, patch
 import httpx
 from fastapi import HTTPException
 from datetime import datetime, timedelta, timezone
+from PIL import Image
 from urllib.parse import urlparse
 
 from app.api import frames as frames_api
@@ -339,6 +341,25 @@ async def test_api_frame_get_image_cached(async_client, db, redis):
     response = await async_client.get(image_url)
     assert response.status_code == 200
     assert response.content == b'cached_image_data'
+
+
+@pytest.mark.asyncio
+async def test_api_frame_get_image_placeholder_uses_rotated_dimensions(async_client, db, redis):
+    frame = await new_frame(db, redis, 'RotatedPlaceholderFrame', 'localhost', 'localhost')
+    frame.width = 800
+    frame.height = 480
+    frame.rotate = 90
+    db.add(frame)
+    db.commit()
+
+    cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
+    await redis.delete(cache_key)
+
+    response = await async_client.get(f'/api/frames/{frame.id}/image?t=-1')
+
+    assert response.status_code == 200
+    with Image.open(io.BytesIO(response.content)) as image:
+        assert image.size == (480, 800)
 
 
 @pytest.mark.asyncio
