@@ -327,13 +327,14 @@ async def test_full_plan_corrects_buildroot_mode_when_target_is_ubuntu(monkeypat
         id=30,
         name="MisconfiguredUbuntu",
         mode="buildroot",
+        ssh_user="root",
         ssh_keys=[],
         buildroot={"compilationMode": "static"},
         rpios={"crossCompilation": "never", "compilationMode": "precompiled"},
         reboot=None,
         last_successful_deploy={"frameos_version": "9.9.9"},
         last_successful_deploy_at="2026-01-01T00:00:00+00:00",
-        to_dict=lambda: {"id": 30, "name": "MisconfiguredUbuntu", "mode": frame.mode},
+        to_dict=lambda: {"id": 30, "name": "MisconfiguredUbuntu", "mode": frame.mode, "ssh_user": frame.ssh_user},
     )
     monkeypatch.setattr("app.tasks.frame_deploy_workflow.drivers_for_frame", lambda _frame: {})
     monkeypatch.setattr("app.tasks.frame_deploy_workflow.get_settings_dict", lambda _db: {})
@@ -353,7 +354,9 @@ async def test_full_plan_corrects_buildroot_mode_when_target_is_ubuntu(monkeypat
     plan = await workflow.plan("full")
 
     assert frame.mode == "rpios"
+    assert frame.ssh_user == "pi"
     assert plan.frame_dict["mode"] == "rpios"
+    assert plan.frame_dict["ssh_user"] == "pi"
     assert captured_kwargs == [
         {
             "allow_cross_compile": False,

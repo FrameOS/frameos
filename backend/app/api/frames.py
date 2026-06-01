@@ -2417,6 +2417,7 @@ async def api_frame_deploy_plan_preview(
         _not_found()
 
     preview_frame = _apply_frame_preview_update(frame, data)
+    preview_ssh_user_before_plan = preview_frame.ssh_user
 
     try:
         if mode in {"combined", "full"}:
@@ -2443,8 +2444,14 @@ async def api_frame_deploy_plan_preview(
         else:
             _bad_request("mode must be 'combined', 'full' or 'fast'")
 
+        frame_settings_changed = False
         if preview_frame.mode != frame.mode and preview_frame.mode in {"rpios", "buildroot"}:
             frame.mode = preview_frame.mode
+            frame_settings_changed = True
+        if preview_frame.ssh_user != preview_ssh_user_before_plan and preview_frame.ssh_user != frame.ssh_user:
+            frame.ssh_user = preview_frame.ssh_user
+            frame_settings_changed = True
+        if frame_settings_changed:
             await update_frame(db, redis, frame)
 
         return {"plan": plan.to_dict()}

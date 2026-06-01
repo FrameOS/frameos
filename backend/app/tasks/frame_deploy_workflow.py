@@ -271,6 +271,12 @@ class FrameDeployWorkflow:
 
         previous_mode = getattr(self.frame, "mode", None) or "rpios"
         self.frame.mode = detected_mode
+        if (
+            previous_mode == "buildroot"
+            and detected_mode == "rpios"
+            and getattr(self.frame, "ssh_user", None) == "root"
+        ):
+            self.frame.ssh_user = "pi"
         message = f"{icon} Detected {distro}; updating frame deployment mode from {previous_mode} to {detected_mode}"
         if self.db is not None and self.redis is not None:
             await log(self.db, self.redis, int(self.frame.id), "stdinfo", message)
@@ -334,6 +340,7 @@ class FrameDeployWorkflow:
         distro = await self.deployer.get_distro()
         await self._sync_frame_mode_with_detected_distro(distro)
         frame_dict["mode"] = getattr(self.frame, "mode", frame_dict.get("mode"))
+        frame_dict["ssh_user"] = getattr(self.frame, "ssh_user", frame_dict.get("ssh_user"))
         if distro not in {"raspios", "debian", "ubuntu", "buildroot"}:
             raise Exception(f"Unsupported target distro '{distro}'")
 
@@ -378,6 +385,7 @@ class FrameDeployWorkflow:
 
         await self._sync_frame_mode_with_detected_distro(distro)
         frame_dict["mode"] = getattr(self.frame, "mode", frame_dict.get("mode"))
+        frame_dict["ssh_user"] = getattr(self.frame, "ssh_user", frame_dict.get("ssh_user"))
         is_buildroot = _is_buildroot_frame(self.frame)
         if distro not in {"raspios", "debian", "ubuntu"} and not (is_buildroot and distro == "buildroot"):
             raise Exception(f"Unsupported target distro '{distro}'")
