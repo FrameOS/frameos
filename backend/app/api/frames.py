@@ -151,6 +151,7 @@ FRAME_STATES_CACHE_LOCK_SECONDS = 30
 FRAME_STATES_CACHE_TTL_SECONDS = 86400 * 30
 FRAME_IMAGE_REFRESH_LOCK_SECONDS = 65
 FRAME_IMAGE_REFRESH_WAIT_SECONDS = 2.0
+FRAME_IMAGE_PLACEHOLDER_HEADERS = {"X-FrameOS-Image-State": "placeholder"}
 
 
 def _not_found():
@@ -426,6 +427,14 @@ def _frame_image_placeholder(frame: Frame) -> bytes:
     if frame.rotate in (90, 270):
         width, height = height, width
     return render_line_of_text_png("no image", width, height)
+
+
+def _frame_image_placeholder_response(frame: Frame) -> Response:
+    return Response(
+        content=_frame_image_placeholder(frame),
+        media_type="image/png",
+        headers=FRAME_IMAGE_PLACEHOLDER_HEADERS,
+    )
 
 
 async def _release_frame_image_refresh_lock(redis: Redis, lock_key: str, lock_token: str) -> None:
@@ -1604,7 +1613,7 @@ async def api_frame_download_full_logs(id: int, db: Session = Depends(get_db)):
     )
 
 
-@api_no_auth.get("/frames/{id:int}/image")
+@api_no_auth.api_route("/frames/{id:int}/image", methods=["GET", "HEAD"])
 async def api_frame_get_image(
     id: int,
     request: Request,
@@ -1625,12 +1634,18 @@ async def api_frame_get_image(
     cache_key = f"frame:{frame.frame_host}:{frame.frame_port}:image"
     path = "/image"
 
+    if request.method == "HEAD":
+        headers = {}
+        if not await _get_cached_frame_image(redis, cache_key):
+            headers.update(FRAME_IMAGE_PLACEHOLDER_HEADERS)
+        return Response(content=b"", media_type="image/png", headers=headers)
+
     if request.query_params.get("t") == "-1":
         last_image = await _get_cached_frame_image(redis, cache_key)
         if last_image:
             return Response(content=last_image, media_type="image/png")
         else:
-            return Response(content=_frame_image_placeholder(frame), media_type="image/png")
+            return _frame_image_placeholder_response(frame)
 
     frame_image_lock = _get_frame_image_lock(id)
     waited_for_lock = frame_image_lock.locked()
@@ -1638,7 +1653,7 @@ async def api_frame_get_image(
         cached = await _wait_for_cached_frame_image(redis, cache_key)
         if cached:
             return Response(content=cached, media_type="image/png")
-        return Response(content=_frame_image_placeholder(frame), media_type="image/png")
+        return _frame_image_placeholder_response(frame)
 
     async with frame_image_lock:
         cached = await _get_cached_frame_image(redis, cache_key)
@@ -1654,7 +1669,7 @@ async def api_frame_get_image(
             cached = await _wait_for_cached_frame_image(redis, cache_key)
             if cached:
                 return Response(content=cached, media_type="image/png")
-            return Response(content=_frame_image_placeholder(frame), media_type="image/png")
+            return _frame_image_placeholder_response(frame)
 
         # Use shared semaphore and client
         status = 0
