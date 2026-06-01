@@ -209,6 +209,165 @@ async def test_full_plan_defaults_to_precompiled(monkeypatch: pytest.MonkeyPatch
 
 
 @pytest.mark.asyncio
+async def test_full_plan_supports_buildroot_without_remote_apt(monkeypatch: pytest.MonkeyPatch):
+    captured_kwargs: list[dict] = []
+
+    class BuildrootDeployer(FakeDeployer):
+        async def get_distro(self) -> str:
+            return "buildroot"
+
+        async def get_cpu_architecture(self) -> str:
+            return "aarch64"
+
+        async def get_distro_version(self) -> str:
+            return "22.04"
+
+        async def get_total_memory_mb(self) -> int:
+            return 512
+
+    class BuildrootBinaryBuilder(FakeBinaryBuilder):
+        async def plan_build(self, **kwargs) -> FrameBinaryPlan:
+            captured_kwargs.append(kwargs)
+            return FrameBinaryPlan(
+                build_id="build12345678",
+                target=TargetMetadata(arch="aarch64", distro="buildroot", version="22.04"),
+                compilation_mode="static",
+                allow_cross_compile=kwargs["allow_cross_compile"],
+                force_cross_compile=kwargs["force_cross_compile"],
+                cross_compile_supported=True,
+                build_host_configured=False,
+                will_attempt_cross_compile=True,
+                prebuilt_entry=None,
+                prebuilt_target=None,
+            )
+
+    frame = SimpleNamespace(
+        id=29,
+        name="BuildrootFull",
+        mode="buildroot",
+        ssh_keys=[],
+        buildroot={"compilationMode": "static"},
+        rpios={"crossCompilation": "never"},
+        reboot=None,
+        last_successful_deploy={"frameos_version": "9.9.9"},
+        last_successful_deploy_at="2026-01-01T00:00:00+00:00",
+        to_dict=lambda: {"id": 29, "name": "BuildrootFull", "mode": "buildroot"},
+    )
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.drivers_for_frame", lambda _frame: {"waveshare": SimpleNamespace()})
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.get_settings_dict", lambda _db: {})
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.select_ssh_keys_for_frame", lambda _frame, _settings: [])
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.normalize_ssh_keys", lambda _settings: [])
+
+    workflow = FrameDeployWorkflow(
+        db=None,
+        redis=None,
+        frame=frame,
+        deployer=BuildrootDeployer(),
+        temp_dir="",
+        binary_builder=BuildrootBinaryBuilder(),
+    )
+
+    plan = await workflow.plan("full")
+
+    assert captured_kwargs == [
+        {
+            "allow_cross_compile": True,
+            "force_cross_compile": True,
+            "compilation_mode": "static",
+        }
+    ]
+    assert plan.full_deploy is not None
+    assert plan.full_deploy.target["distro"] == "buildroot"
+    assert plan.full_deploy.package_plans == []
+    assert plan.full_deploy.package_alternatives == []
+    assert plan.full_deploy.remote_build_fallback_package_plans == []
+    assert plan.full_deploy.lgpio_required is True
+    assert plan.full_deploy.lgpio_installed is True
+    assert plan.full_deploy.quickjs_required_if_remote_build is False
+
+
+@pytest.mark.asyncio
+async def test_full_plan_corrects_buildroot_mode_when_target_is_ubuntu(monkeypatch: pytest.MonkeyPatch):
+    captured_kwargs: list[dict] = []
+
+    class UbuntuDeployer(FakeDeployer):
+        def __init__(self):
+            super().__init__(installed_packages={"ntp"})
+            self.logs: list[tuple[str, str]] = []
+
+        async def get_distro(self) -> str:
+            return "ubuntu"
+
+        async def get_cpu_architecture(self) -> str:
+            return "aarch64"
+
+        async def get_distro_version(self) -> str:
+            return "noble"
+
+        async def log(self, log_type: str, message: str) -> None:
+            self.logs.append((log_type, message))
+
+    class UbuntuBinaryBuilder(FakeBinaryBuilder):
+        async def plan_build(self, **kwargs) -> FrameBinaryPlan:
+            captured_kwargs.append(kwargs)
+            return FrameBinaryPlan(
+                build_id="build12345678",
+                target=TargetMetadata(arch="aarch64", distro="ubuntu", version="noble"),
+                compilation_mode="static",
+                allow_cross_compile=kwargs["allow_cross_compile"],
+                force_cross_compile=kwargs["force_cross_compile"],
+                cross_compile_supported=True,
+                build_host_configured=False,
+                will_attempt_cross_compile=False,
+                prebuilt_entry=None,
+                prebuilt_target=None,
+            )
+
+    frame = SimpleNamespace(
+        id=30,
+        name="MisconfiguredUbuntu",
+        mode="buildroot",
+        ssh_keys=[],
+        buildroot={"compilationMode": "static"},
+        rpios={"crossCompilation": "never", "compilationMode": "precompiled"},
+        reboot=None,
+        last_successful_deploy={"frameos_version": "9.9.9"},
+        last_successful_deploy_at="2026-01-01T00:00:00+00:00",
+        to_dict=lambda: {"id": 30, "name": "MisconfiguredUbuntu", "mode": frame.mode},
+    )
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.drivers_for_frame", lambda _frame: {})
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.get_settings_dict", lambda _db: {})
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.select_ssh_keys_for_frame", lambda _frame, _settings: [])
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.normalize_ssh_keys", lambda _settings: [])
+
+    deployer = UbuntuDeployer()
+    workflow = FrameDeployWorkflow(
+        db=None,
+        redis=None,
+        frame=frame,
+        deployer=deployer,
+        temp_dir="",
+        binary_builder=UbuntuBinaryBuilder(),
+    )
+
+    plan = await workflow.plan("full")
+
+    assert frame.mode == "rpios"
+    assert plan.frame_dict["mode"] == "rpios"
+    assert captured_kwargs == [
+        {
+            "allow_cross_compile": False,
+            "force_cross_compile": False,
+            "compilation_mode": "precompiled",
+        }
+    ]
+    assert plan.full_deploy is not None
+    assert plan.full_deploy.target["distro"] == "ubuntu"
+    assert {pkg.name for pkg in plan.full_deploy.package_plans} >= {"hostapd", "imagemagick", "build-essential", "caddy"}
+    assert deployer.logs == [("stdinfo", "🔷 Detected ubuntu; updating frame deployment mode from buildroot to rpios")]
+
+
+@pytest.mark.asyncio
 async def test_full_plan_uses_shared_driver_libraries_when_explicit(monkeypatch: pytest.MonkeyPatch):
     captured_modes: list[str] = []
 

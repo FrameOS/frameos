@@ -102,7 +102,7 @@ async def test_post_deploy_plan_uses_preview_frame_values(
     db.add(frame)
     db.commit()
     db.refresh(frame)
-    captured_names: list[str] = []
+    captured_frames: list[tuple[str, str | None]] = []
 
     class FakeDeployer:
         def __init__(self, **_kwargs):
@@ -110,7 +110,7 @@ async def test_post_deploy_plan_uses_preview_frame_values(
 
     class FakeWorkflow:
         def __init__(self, *, frame, **_kwargs):
-            captured_names.append(frame.name)
+            captured_frames.append((frame.name, frame.image_engine))
 
         async def plan(self, mode: str):
             return type("Plan", (), {"to_dict": lambda self: {"mode": mode, "ok": True}})()
@@ -123,11 +123,11 @@ async def test_post_deploy_plan_uses_preview_frame_values(
     try:
         response = await no_auth_client.post(
             f"/api/frames/{frame.id}/deploy_plan",
-            json={"name": "Preview Name"},
+            json={"name": "Preview Name", "image_engine": "imagemagick"},
         )
     finally:
         app.dependency_overrides.clear()
 
     assert response.status_code == 200
     assert response.json() == {"plan": {"mode": "combined", "ok": True}}
-    assert captured_names == ["Preview Name"]
+    assert captured_frames == [("Preview Name", "imagemagick")]

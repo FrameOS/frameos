@@ -79,6 +79,18 @@ def _mountpoints_enabled(frame: Frame) -> bool:
     return False
 
 
+def _is_buildroot_frame(frame: Frame) -> bool:
+    return (getattr(frame, "mode", None) or "rpios") == "buildroot"
+
+
+def _mode_for_detected_distro(distro: str) -> str | None:
+    if distro == "buildroot":
+        return "buildroot"
+    if distro in {"raspios", "debian", "ubuntu"}:
+        return "rpios"
+    return None
+
+
 @dataclass(slots=True)
 class PackagePlan:
     name: str
@@ -252,6 +264,21 @@ class FrameDeployWorkflow:
     def _current_frameos_supports_command(self, command: str) -> bool:
         return command in self._previous_frameos_commands()
 
+    async def _sync_frame_mode_with_detected_distro(self, distro: str) -> None:
+        detected_mode = _mode_for_detected_distro(distro)
+        if not detected_mode or (getattr(self.frame, "mode", None) or "rpios") == detected_mode:
+            return
+
+        previous_mode = getattr(self.frame, "mode", None) or "rpios"
+        self.frame.mode = detected_mode
+        message = f"{icon} Detected {distro}; updating frame deployment mode from {previous_mode} to {detected_mode}"
+        if self.db is not None and self.redis is not None:
+            await log(self.db, self.redis, int(self.frame.id), "stdinfo", message)
+        else:
+            await self.deployer.log("stdinfo", message)
+        if isinstance(self.frame, Frame) and self.db is not None and self.redis is not None:
+            await update_frame(self.db, self.redis, self.frame)
+
     async def plan(self, mode: str) -> FrameDeployPlan:
         frame_dict = self.frame.to_dict()
         frame_dict.pop("last_successful_deploy", None)
@@ -305,6 +332,8 @@ class FrameDeployWorkflow:
 
     async def _plan_fast(self, *, frame_dict: dict[str, Any], previous_frameos_version: str | None) -> FrameDeployPlan:
         distro = await self.deployer.get_distro()
+        await self._sync_frame_mode_with_detected_distro(distro)
+        frame_dict["mode"] = getattr(self.frame, "mode", frame_dict.get("mode"))
         if distro not in {"raspios", "debian", "ubuntu", "buildroot"}:
             raise Exception(f"Unsupported target distro '{distro}'")
 
@@ -347,7 +376,10 @@ class FrameDeployWorkflow:
         total_memory = await self.deployer.get_total_memory_mb()
         low_memory = total_memory < 512
 
-        if distro not in {"raspios", "debian", "ubuntu"}:
+        await self._sync_frame_mode_with_detected_distro(distro)
+        frame_dict["mode"] = getattr(self.frame, "mode", frame_dict.get("mode"))
+        is_buildroot = _is_buildroot_frame(self.frame)
+        if distro not in {"raspios", "debian", "ubuntu"} and not (is_buildroot and distro == "buildroot"):
             raise Exception(f"Unsupported target distro '{distro}'")
         frame_dict["frameos_version"] = current_frameos_version()
         frame_dict["frameos_commands"] = list(FRAMEOS_AVAILABLE_COMMANDS)
@@ -355,14 +387,16 @@ class FrameDeployWorkflow:
         drivers = drivers_for_frame(self.frame)
         driver_names = sorted(drivers.keys())
 
-        rpios_settings = self.frame.rpios or {}
-        cross_compilation_setting = (rpios_settings.get("crossCompilation") or "auto").lower()
+        compile_settings = (self.frame.buildroot if is_buildroot else self.frame.rpios) or {}
+        cross_compilation_setting = (
+            "always" if is_buildroot else (compile_settings.get("crossCompilation") or "auto").lower()
+        )
         if cross_compilation_setting not in {"auto", "always", "never"}:
             cross_compilation_setting = "auto"
-        compilation_mode = normalize_compilation_mode(rpios_settings.get("compilationMode"))
+        compilation_mode = normalize_compilation_mode(compile_settings.get("compilationMode"))
 
         allow_cross_compile = cross_compilation_setting != "never"
-        force_cross_compile = cross_compilation_setting == "always"
+        force_cross_compile = is_buildroot or cross_compilation_setting == "always"
         binary_plan = await self.binary_builder.plan_build(
             allow_cross_compile=allow_cross_compile,
             force_cross_compile=force_cross_compile,
@@ -377,9 +411,13 @@ class FrameDeployWorkflow:
         ssh_keys_need_install = list(getattr(self.frame, "ssh_keys", None) or []) != list(previous_ssh_keys or [])
 
         package_plans: list[PackagePlan] = []
-        package_alternatives = [
-            await self._plan_package_alternatives(["ntp", "ntpsec"], "time synchronization"),
-        ]
+        package_alternatives = (
+            []
+            if is_buildroot
+            else [
+                await self._plan_package_alternatives(["ntp", "ntpsec"], "time synchronization"),
+            ]
+        )
         dependency_helper_plans = [
             HelperActionPlan(helper=HELPER_ENSURE_NTP, reason=alternative.reason)
             for alternative in package_alternatives
@@ -387,10 +425,11 @@ class FrameDeployWorkflow:
         ]
         remote_build_fallback_package_plans: list[PackagePlan] = []
 
-        for pkg_name in REMOTE_RUNTIME_APT_PACKAGES:
-            package_plans.append(await self._plan_package(pkg_name, "base remote deploy dependency"))
+        if not is_buildroot:
+            for pkg_name in REMOTE_RUNTIME_APT_PACKAGES:
+                package_plans.append(await self._plan_package(pkg_name, "base remote deploy dependency"))
 
-        if not binary_plan.will_attempt_precompiled:
+        if not is_buildroot and not binary_plan.will_attempt_precompiled:
             for pkg_name in REMOTE_BUILD_APT_PACKAGES:
                 package_plans.append(await self._plan_package(pkg_name, "base remote build dependency"))
             if not binary_plan.will_attempt_cross_compile:
@@ -399,18 +438,19 @@ class FrameDeployWorkflow:
                 remote_build_fallback_package_plans.append(
                     await self._plan_package("libssl-dev", "OpenSSL headers if cross-compilation falls back to an on-device build")
                 )
-        package_plans.append(
-            await self._plan_package(
-                "caddy",
-                "FrameOS TLS proxy support",
-                run_after_install="sudo systemctl disable --now caddy.service",
+        if not is_buildroot:
+            package_plans.append(
+                await self._plan_package(
+                    "caddy",
+                    "FrameOS TLS proxy support",
+                    run_after_install="sudo systemctl disable --now caddy.service",
+                )
             )
-        )
 
-        if _mountpoints_enabled(self.frame):
+        if not is_buildroot and _mountpoints_enabled(self.frame):
             package_plans.append(await self._plan_package("cifs-utils", "Samba/CIFS mountpoint support"))
 
-        if drivers.get("evdev"):
+        if not is_buildroot and drivers.get("evdev"):
             package_plans.append(await self._plan_package("libevdev-dev", "evdev driver support"))
 
         lgpio_required = bool(
@@ -420,19 +460,23 @@ class FrameDeployWorkflow:
             or drivers.get("inkyHyperPixel2r")
         )
         lgpio_installed = False
-        if lgpio_required:
-            lgpio_installed = await self._path_exists("/usr/local/include/lgpio.h") or await self._path_exists("/usr/include/lgpio.h")
+        if lgpio_required and is_buildroot:
+            lgpio_installed = True
+        elif lgpio_required:
+            lgpio_installed = await self._path_exists("/usr/local/include/lgpio.h") or await self._path_exists(
+                "/usr/include/lgpio.h"
+            )
             if not lgpio_installed:
                 package_plans.append(await self._plan_package("liblgpio-dev", "GPIO/Waveshare/HyperPixel driver support"))
 
-        if drivers.get("inkyPython"):
+        if not is_buildroot and drivers.get("inkyPython"):
             package_plans.extend(
                 [
                     await self._plan_package("python3-pip", "inkyPython vendor setup"),
                     await self._plan_package("python3-venv", "inkyPython vendor setup"),
                 ]
             )
-        if drivers.get("inkyHyperPixel2rLegacyFb"):
+        if not is_buildroot and drivers.get("inkyHyperPixel2rLegacyFb"):
             package_plans.extend(
                 [
                     await self._plan_package("python3-dev", "inkyHyperPixel2r legacy vendor setup"),
@@ -461,7 +505,7 @@ class FrameDeployWorkflow:
                 )
             )
 
-        quickjs_required_if_remote_build = not force_cross_compile and not binary_plan.will_attempt_precompiled
+        quickjs_required_if_remote_build = not is_buildroot and not force_cross_compile and not binary_plan.will_attempt_precompiled
         quickjs_dirname = None
         quickjs_installed = False
         if quickjs_required_if_remote_build:
@@ -1182,7 +1226,7 @@ class FrameDeployWorkflow:
             spi_action = "disable"
 
         low_memory_masks_apt_daily = False
-        if low_memory:
+        if low_memory and not _is_buildroot_frame(self.frame):
             apt_daily_masked = await self._command_succeeds("systemctl is-enabled apt-daily.service | grep -q masked")
             apt_daily_upgrade_masked = await self._command_succeeds(
                 "systemctl is-enabled apt-daily-upgrade.service | grep -q masked"

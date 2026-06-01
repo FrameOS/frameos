@@ -16,6 +16,17 @@ proc testImage(width = 2, height = 2): Image =
       result.data[idx].a = 255
 
 suite "image helpers":
+  test "effective runtime image engine resolves blank default to pixie":
+    setRuntimeImageEngine("")
+    check getRuntimeImageEngine() == ""
+    check getEffectiveRuntimeImageEngine() == "pixie"
+
+    setRuntimeImageEngine("imagemagick")
+    check getRuntimeImageEngine() == "imagemagick"
+    check getEffectiveRuntimeImageEngine() == "imagemagick"
+
+    setRuntimeImageEngine("")
+
   test "decodeDataUrl supports base64 and plain payloads and rejects invalid urls":
     let source = newImage(1, 1)
     source.fill(rgba(255, 0, 0, 255))

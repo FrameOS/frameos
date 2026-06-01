@@ -2443,6 +2443,10 @@ async def api_frame_deploy_plan_preview(
         else:
             _bad_request("mode must be 'combined', 'full' or 'fast'")
 
+        if preview_frame.mode != frame.mode and preview_frame.mode in {"rpios", "buildroot"}:
+            frame.mode = preview_frame.mode
+            await update_frame(db, redis, frame)
+
         return {"plan": plan.to_dict()}
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))

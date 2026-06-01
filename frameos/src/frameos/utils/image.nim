@@ -32,6 +32,11 @@ proc setRuntimeImageEngine*(imageEngine: string) =
 proc getRuntimeImageEngine*(): string =
   runtimeImageEngine
 
+proc getEffectiveRuntimeImageEngine*(): string =
+  if runtimeImageEngine == ImageEngineImageMagick:
+    return ImageEngineImageMagick
+  return "pixie"
+
 proc useImageMagick(): bool =
   runtimeImageEngine == ImageEngineImageMagick
 
