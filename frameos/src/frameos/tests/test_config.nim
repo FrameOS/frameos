@@ -35,6 +35,7 @@ block test_load_config:
         "width": 800,
         "height": 480,
         "metricsInterval": 60.0,
+        "maxHttpResponseBytes": 33554432,
         "rotate": 0,
         "debug": true,
         "scalingMode": "cover",
@@ -83,6 +84,7 @@ block test_load_config:
         doAssert config.httpsProxy.port == 8443
         doAssert config.httpsProxy.exposeOnlyPort == false
         doAssert config.metrics_interval == 60 # 60.0 in frame.json
+        doAssert config.maxHttpResponseBytes == 33554432
         doAssert config.rotate == 0
         doAssert config.flip == ""
         doAssert config.debug == true

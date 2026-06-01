@@ -248,6 +248,7 @@ proc frameApiPayload*(connectionsState: ConnectionsState, exposeSecrets = false)
     "color": colorValue,
     "interval": interval,
     "metrics_interval": globalFrameConfig.metricsInterval,
+    "max_http_response_bytes": globalFrameConfig.maxHttpResponseBytes,
     "scaling_mode": globalFrameConfig.scalingMode,
     "image_engine": globalFrameConfig.imageEngine,
     "rotate": globalFrameConfig.rotate,

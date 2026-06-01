@@ -3,6 +3,8 @@ import frameos/ids
 export ids
 import lib/burrito
 
+const DefaultMaxHttpResponseBytes* = 64 * 1024 * 1024
+
 type
   # Parsed from config.json
   FrameConfig* = ref object
@@ -23,6 +25,7 @@ type
     device*: string
     deviceConfig*: DeviceConfig
     metricsInterval*: float
+    maxHttpResponseBytes*: int
     rotate*: int
     flip*: string
     scalingMode*: string

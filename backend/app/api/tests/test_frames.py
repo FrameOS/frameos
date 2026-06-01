@@ -768,6 +768,16 @@ async def test_api_frame_update_name(async_client, db, redis):
 
 
 @pytest.mark.asyncio
+async def test_api_frame_update_max_http_response_bytes(async_client, db, redis):
+    frame = await new_frame(db, redis, 'HttpLimitFrame', 'localhost', 'localhost')
+    resp = await async_client.post(f'/api/frames/{frame.id}', json={"max_http_response_bytes": 32 * 1024 * 1024})
+    assert resp.status_code == 200
+    db.expire_all()
+    updated_frame = db.get(Frame, frame.id)
+    assert updated_frame.max_http_response_bytes == 32 * 1024 * 1024
+
+
+@pytest.mark.asyncio
 async def test_api_frame_update_archived(async_client, db, redis):
     frame = await new_frame(db, redis, 'ArchiveMe', 'localhost', 'localhost')
     resp = await async_client.post(f'/api/frames/{frame.id}', json={"archived": True})

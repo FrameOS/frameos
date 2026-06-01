@@ -18,6 +18,8 @@ from app.utils.tls import generate_frame_tls_material, parse_certificate_not_val
 from app.utils.versions import get_versions
 from app.websockets import publish_message
 
+DEFAULT_MAX_HTTP_RESPONSE_BYTES = 64 * 1024 * 1024
+
 
 def _to_isoformat(value: Optional[datetime]) -> Optional[str]:
     if not value:
@@ -214,6 +216,7 @@ class Frame(Base):
     timezone = mapped_column(String(128), nullable=True)
     interval = mapped_column(Double, default=300)
     metrics_interval = mapped_column(Double, default=60)
+    max_http_response_bytes = mapped_column(Integer, default=DEFAULT_MAX_HTTP_RESPONSE_BYTES)
     scaling_mode = mapped_column(String(64), nullable=True)  # contain (default), cover, stretch, center
     image_engine = mapped_column(String(32), nullable=True)  # empty and pixie use Pixie; imagemagick uses ImageMagick
     rotate = mapped_column(Integer, nullable=True)
@@ -275,6 +278,7 @@ class Frame(Base):
             'timezone': self.timezone,
             'interval': self.interval,
             'metrics_interval': self.metrics_interval,
+            'max_http_response_bytes': self.max_http_response_bytes or DEFAULT_MAX_HTTP_RESPONSE_BYTES,
             'scaling_mode': self.scaling_mode,
             'image_engine': self.image_engine,
             'rotate': self.rotate,
@@ -359,6 +363,7 @@ async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, serve
         width=dimensions[0] if dimensions else None,
         height=dimensions[1] if dimensions else None,
         interval=interval or 300,
+        max_http_response_bytes=DEFAULT_MAX_HTTP_RESPONSE_BYTES,
         status="uninitialized",
         scenes=[],
         apps=[],
@@ -486,6 +491,7 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
             ]} if cfg.get('uploadHeaders') else {}),
         })(frame.device_config or {}),
         "metricsInterval": frame.metrics_interval or 60.0,
+        "maxHttpResponseBytes": frame.max_http_response_bytes or DEFAULT_MAX_HTTP_RESPONSE_BYTES,
         "debug": frame.debug or False,
         "scalingMode": frame.scaling_mode or "contain",
         "imageEngine": frame.image_engine or "",

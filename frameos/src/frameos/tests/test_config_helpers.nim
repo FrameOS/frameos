@@ -26,6 +26,7 @@ suite "config helper loaders":
     check config.height == 1080
     check config.device == "web_only"
     check config.metricsInterval == 60
+    check config.maxHttpResponseBytes == DefaultMaxHttpResponseBytes
     check config.framePort == 8787
     check config.frameHost == "localhost"
     check config.httpsProxy != nil

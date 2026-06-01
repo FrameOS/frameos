@@ -10,6 +10,7 @@ proc setConfigDefaults*(config: var FrameConfig) =
   if config.height == 0: config.height = 1080
   if config.device == "": config.device = "web_only"
   if config.metricsInterval == 0: config.metricsInterval = 60
+  if config.maxHttpResponseBytes <= 0: config.maxHttpResponseBytes = DefaultMaxHttpResponseBytes
   if config.rotate == 0: config.rotate = 0
   if config.flip == "": config.flip = ""
   if config.scalingMode == "": config.scalingMode = "cover"
@@ -224,6 +225,7 @@ proc loadConfig*(configPath = ""): FrameConfig =
     device: data{"device"}.getStr(),
     deviceConfig: loadDeviceConfig(data{"deviceConfig"}),
     metricsInterval: data{"metricsInterval"}.getFloat(),
+    maxHttpResponseBytes: data{"maxHttpResponseBytes"}.getInt(DefaultMaxHttpResponseBytes),
     rotate: data{"rotate"}.getInt(),
     flip: data{"flip"}.getStr(""),
     scalingMode: data{"scalingMode"}.getStr(),
@@ -274,6 +276,7 @@ proc updateFrameConfigFrom*(target: FrameConfig, source: FrameConfig) =
   target.device = source.device
   target.deviceConfig = source.deviceConfig
   target.metricsInterval = source.metricsInterval
+  target.maxHttpResponseBytes = source.maxHttpResponseBytes
   target.rotate = source.rotate
   target.flip = source.flip
   target.scalingMode = source.scalingMode

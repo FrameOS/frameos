@@ -1378,6 +1378,18 @@ export function FrameSettings({
           <Field name="metrics_interval" label="Metrics reporting interval in seconds, 0 to disable">
             <TextInput name="metrics_interval" placeholder="60" />
           </Field>
+          <Field
+            name="max_http_response_bytes"
+            label="Maximum HTTP response size for JavaScript apps"
+            tooltip={
+              <>
+                Maximum number of bytes that frameos.fetchText and frameos.fetchJson may download in JavaScript apps.
+                Increase this for larger calendar feeds or APIs.
+              </>
+            }
+          >
+            <NumberTextInput name="max_http_response_bytes" placeholder="67108864" />
+          </Field>
           <Field name="scaling_mode" label="Scaling mode">
             <Select
               name="scaling_mode"
