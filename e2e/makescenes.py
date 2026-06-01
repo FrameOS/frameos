@@ -6,6 +6,41 @@ from pathlib import Path
 from app.codegen.scene_nim import scene_module_filename, write_scene_library_nim, write_scene_nim, write_scenes_nim
 from app.models import Frame
 
+def scene_references(scene):
+    references = []
+    for node in scene.get('nodes', []):
+        if node.get('type') == 'scene':
+            keyword = node.get('data', {}).get('keyword')
+            if keyword:
+                references.append(keyword)
+    return references
+
+def include_scene_dependencies(files, all_files_by_stem):
+    selected_files = list(files)
+    selected_stems = {file_path.stem for file_path in selected_files}
+    pending_files = list(files)
+    scene_cache = {}
+
+    while pending_files:
+        file_path = pending_files.pop(0)
+        if file_path not in scene_cache:
+            with open(file_path, 'r') as file:
+                scene_cache[file_path] = json.load(file)
+
+        for reference in scene_references(scene_cache[file_path]):
+            dependency_path = all_files_by_stem.get(reference)
+            if dependency_path is None or dependency_path.stem in selected_stems:
+                continue
+            selected_files.append(dependency_path)
+            selected_stems.add(dependency_path.stem)
+            pending_files.append(dependency_path)
+
+    if len(selected_files) != len(files):
+        added_count = len(selected_files) - len(files)
+        print(f"Including {added_count} scene dependenc{'y' if added_count == 1 else 'ies'} for generated scene imports")
+
+    return sorted(selected_files)
+
 def apply_shard(files):
     shard = os.environ.get("FRAMEOS_E2E_SHARD")
     shard_count = os.environ.get("FRAMEOS_E2E_SHARDS")
@@ -47,8 +82,10 @@ if __name__ == '__main__':
             file_path.unlink()
     shared_generated_dir.mkdir(exist_ok=True)
 
-    files = sorted(scenes_dir.glob('*.json'))
-    black_scene = next((p for p in files if p.stem == "black"), None)
+    all_files = sorted(scenes_dir.glob('*.json'))
+    all_files_by_stem = {file_path.stem: file_path for file_path in all_files}
+    files = list(all_files)
+    black_scene = all_files_by_stem.get("black")
     if filter_str:
         files = [p for p in files if filter_str in p.stem.lower()]
     files = apply_shard(files)
@@ -60,6 +97,7 @@ if __name__ == '__main__':
     if black_scene is not None and black_scene not in files:
         files = [black_scene, *files]
         files.sort()
+    files = include_scene_dependencies(files, all_files_by_stem)
 
     for file_path in files:
         with open(file_path, 'r') as file:
