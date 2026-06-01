@@ -205,7 +205,7 @@ def _frame(
         ssh_keys=[],
         server_host="localhost",
         server_port=8989,
-        server_api_key="server-key",
+        server_api_key=f"server-key-{name}",
         server_send_logs=True,
         status="uninitialized",
         width=800,

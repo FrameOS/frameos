@@ -460,7 +460,7 @@ def test_buildroot_writes_authorized_keys_to_boot_overlay(tmp_path, monkeypatch)
 
     monkeypatch.setattr(
         "app.tasks.buildroot_image.get_settings_dict",
-        lambda _db: {
+        lambda _db, project_id=None: {
             "ssh_keys": {
                 "keys": [
                     {"id": "main", "public": "ssh-ed25519 AAA-main frameos"},
@@ -496,7 +496,7 @@ def test_buildroot_stage_overlay_leaves_service_install_to_firstboot(tmp_path, m
 
     monkeypatch.setattr("app.tasks.buildroot_image.get_frame_json", lambda _db, _frame: {"id": 1})
     monkeypatch.setattr("app.tasks.buildroot_image.get_interpreted_scenes_json", lambda _frame: [])
-    monkeypatch.setattr("app.tasks.buildroot_image.get_settings_dict", lambda _db: {"ssh_keys": {"keys": []}})
+    monkeypatch.setattr("app.tasks.buildroot_image.get_settings_dict", lambda _db, project_id=None: {"ssh_keys": {"keys": []}})
     monkeypatch.setattr("app.tasks.buildroot_image.drivers_for_frame", lambda _frame: {})
     monkeypatch.setattr(BuildrootImageBuilder, "_copy_runtime_libraries", lambda _self, _overlay_dir: None)
 

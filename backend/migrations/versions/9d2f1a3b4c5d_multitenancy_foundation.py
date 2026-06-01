@@ -149,6 +149,8 @@ def upgrade():
     with op.batch_alter_table("scene_image", schema=None) as batch_op:
         batch_op.drop_constraint("u_frame_scene", type_="unique")
         batch_op.create_unique_constraint("u_project_frame_scene", ["project_id", "frame_id", "scene_id"])
+    # Existing installs may have duplicated or empty legacy keys. Normalize
+    # those rows before adding the global unique constraint.
     _dedupe_frame_server_api_keys(conn)
     with op.batch_alter_table("frame", schema=None) as batch_op:
         batch_op.create_unique_constraint("uq_frame_server_api_key", ["server_api_key"])
