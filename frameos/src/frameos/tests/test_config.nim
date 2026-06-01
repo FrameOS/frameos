@@ -1,5 +1,6 @@
 import std/[json, os, times]
 import ../config
+import ../utils/image
 
 proc withConfig(content: string, body: proc()) =
     let tempPath = getTempDir() / ("frameos-test-config-" & $(epochTime().int64) & ".json")
@@ -37,6 +38,7 @@ block test_load_config:
         "rotate": 0,
         "debug": true,
         "scalingMode": "cover",
+        "imageEngine": "imagemagick",
         "timeZone": "UTC",
         "settings": {},
         "schedule": {},
@@ -85,6 +87,8 @@ block test_load_config:
         doAssert config.flip == ""
         doAssert config.debug == true
         doAssert config.scalingMode == "cover"
+        doAssert config.imageEngine == "imagemagick"
+        doAssert getRuntimeImageEngine() == "imagemagick"
         doAssert config.settings == %*{}
         doAssert config.settings{"nothere"}{"neitherme"}{"orme"} == nil
         doAssert config.settings{"nothere"}{"neitherme"}{"orme"}.getStr() == ""

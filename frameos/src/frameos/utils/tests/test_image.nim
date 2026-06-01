@@ -1,4 +1,4 @@
-import std/[base64, unittest, uri]
+import std/[base64, options, unittest, uri]
 import pixie
 import pixie/fileformats/png
 
@@ -16,6 +16,17 @@ proc testImage(width = 2, height = 2): Image =
       result.data[idx].a = 255
 
 suite "image helpers":
+  test "effective runtime image engine resolves blank default to pixie":
+    setRuntimeImageEngine("")
+    check getRuntimeImageEngine() == ""
+    check getEffectiveRuntimeImageEngine() == "pixie"
+
+    setRuntimeImageEngine("imagemagick")
+    check getRuntimeImageEngine() == "imagemagick"
+    check getEffectiveRuntimeImageEngine() == "imagemagick"
+
+    setRuntimeImageEngine("")
+
   test "decodeDataUrl supports base64 and plain payloads and rejects invalid urls":
     let source = newImage(1, 1)
     source.fill(rgba(255, 0, 0, 255))
@@ -34,6 +45,16 @@ suite "image helpers":
       discard decodeDataUrl("http://example.com/not-a-data-url")
     expect(ValueError):
       discard decodeDataUrl("data:image/png;base64")
+
+  test "decodeSvgWithFallback defaults to pixie and honors target dimensions":
+    let image = decodeSvgWithFallback(
+      """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10" fill="#ff0000"/></svg>""",
+      4,
+      3,
+    )
+    check image.isSome
+    check image.get().width == 4
+    check image.get().height == 3
 
   test "rotateDegrees keeps dimensions and remaps pixels for right angles":
     let src = testImage(2, 3)

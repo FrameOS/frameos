@@ -189,6 +189,18 @@ async def test_get_frame_json_includes_error_behavior(_mock_publish, db, redis):
 
 @pytest.mark.asyncio
 @patch("app.models.frame.publish_message", new_callable=AsyncMock)
+async def test_get_frame_json_includes_image_engine(_mock_publish, db, redis):
+    frame = await new_frame(db, redis, "FrameJson", "host", "server_host.com")
+    data = get_frame_json(db, frame)
+    assert data["imageEngine"] == ""
+
+    frame.image_engine = "imagemagick"
+    data = get_frame_json(db, frame)
+    assert data["imageEngine"] == "imagemagick"
+
+
+@pytest.mark.asyncio
+@patch("app.models.frame.publish_message", new_callable=AsyncMock)
 async def test_get_frame_json_uses_known_device_dimensions_when_unset(_mock_publish, db, redis):
     frame = await new_frame(db, redis, "FrameJson", "host", "server_host.com", "pimoroni.inky_what_yellow")
     frame.width = None

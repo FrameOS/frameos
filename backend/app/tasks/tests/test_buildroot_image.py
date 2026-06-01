@@ -108,6 +108,7 @@ def test_buildroot_config_avoids_ncurses_selecting_packages(tmp_path):
     assert "BR2_PACKAGE_DBUS=y" in config
     assert "BR2_PACKAGE_TZDATA=y" in config
     assert "BR2_PACKAGE_NANO=y" in config
+    assert "BR2_PACKAGE_IMAGEMAGICK=y" in config
     assert "BR2_PACKAGE_NETWORK_MANAGER=y" in config
     assert "BR2_PACKAGE_NETWORK_MANAGER_WIFI=y" in config
     assert "BR2_PACKAGE_WPA_SUPPLICANT=y" in config

@@ -92,6 +92,7 @@ const FRAME_KEYS: (keyof FrameType)[] = [
   'assets_path',
   'save_assets',
   'upload_fonts',
+  'image_engine',
   'reboot',
   'control_code',
   'schedule',
@@ -156,6 +157,7 @@ const FRAME_KEY_LABELS: Partial<Record<keyof FrameType, string>> = {
   assets_path: 'Assets path',
   save_assets: 'Save assets',
   upload_fonts: 'Upload fonts',
+  image_engine: 'Image engine',
   reboot: 'Reboot settings',
   control_code: 'Control code',
   schedule: 'Schedule',
@@ -201,6 +203,7 @@ const DEPLOYMENT_SUMMARY_KEYS: (keyof FrameType)[] = [
   'log_to_file',
   'assets_path',
   'save_assets',
+  'image_engine',
   'mountpoints',
   'error_behavior',
 ]
@@ -464,6 +467,10 @@ function normalizeMountpointsForComparison(value: unknown): Record<string, any> 
 }
 
 function normalizeFrameKeyValueForComparison(key: keyof FrameType, value: unknown): unknown {
+  if (key === 'image_engine') {
+    return value ?? ''
+  }
+
   if (key === 'rpios') {
     return normalizeRpiosForComparison(value)
   }
@@ -502,6 +509,16 @@ function stringifyList(values: unknown[]): string {
 }
 
 function summarizeFrameFieldValue(key: keyof FrameType, value: unknown): string {
+  if (key === 'image_engine') {
+    if (value === 'imagemagick') {
+      return 'ImageMagick'
+    }
+    if (value === 'pixie') {
+      return 'Pixie'
+    }
+    return 'Default (Pixie)'
+  }
+
   if (value === null || value === undefined || value === '') {
     return 'Not set'
   }
@@ -827,6 +844,7 @@ function sanitizeFrame(frame: Partial<FrameType>): Partial<FrameType> {
 
   return {
     ...frame,
+    image_engine: frame.image_engine ?? '',
     assets_path: assetsPath,
     rpios,
     frame_admin_auth: {
@@ -1204,12 +1222,11 @@ export const frameLogic = kea<frameLogicType>([
       }
     },
     loadDeployPlans: async () => {
-      const planMode = (values.frameForm?.mode || values.frame?.mode || 'rpios') === 'buildroot' ? '?mode=fast' : ''
       const currentFrameForm = {
         ...(values.frame ?? {}),
         ...(values.frameForm ?? {}),
       }
-      const response = await apiFetch(`/api/frames/${values.frameId}/deploy_plan${planMode}`, {
+      const response = await apiFetch(`/api/frames/${values.frameId}/deploy_plan`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(
@@ -1226,7 +1243,13 @@ export const frameLogic = kea<frameLogicType>([
       actions.loadDeployPlansSuccess(payload.plan)
     },
     showDeployPlanModal: () => {
-      if ((values.frameForm?.mode || values.frame?.mode || 'rpios') === 'buildroot') {
+      const isBuildroot = (values.frameForm?.mode || values.frame?.mode || 'rpios') === 'buildroot'
+      const buildrootFirstInstall = isBuildroot && !values.frame?.last_successful_deploy && !values.frame?.last_successful_deploy_at
+      if (buildrootFirstInstall) {
+        return
+      }
+      if (isBuildroot && !values.deployPlansLoading && !values.deployPlans) {
+        actions.loadDeployPlans()
         return
       }
       const hasUsableLocalPlan =

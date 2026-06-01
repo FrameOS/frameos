@@ -165,7 +165,7 @@ You can control the cached image with:
 - `FRAMEOS_BUILDROOT_SKIP_PULL=1`: skip pulling cached images from the registry
 - `FRAMEOS_BUILDROOT_DOCKER_IMAGE`: base image used when building `frameos-buildroot` (default `debian:bookworm`)
 - `FRAMEOS_BUILDROOT_IMAGES_DIGESTS_PATH`: path to the digest manifest (default `buildroot-images.json` in repo root)
-- `FRAMEOS_BUILDROOT_FRAMEOS_PARTITION_SIZE`: `/srv/frameos` ext4 partition size (default `512M`)
+- `FRAMEOS_BUILDROOT_FRAMEOS_PARTITION_SIZE`: `/srv/frameos` ext4 partition size (default `1G`)
 - `FRAMEOS_BUILDROOT_ASSETS_PARTITION_SIZE`: `/srv/assets` FAT32 partition size (default `512M`)
 
 Buildroot-specific output cache keys include the resolved cache image, so changing image configuration invalidates stale output directories automatically.

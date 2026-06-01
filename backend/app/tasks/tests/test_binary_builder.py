@@ -18,13 +18,17 @@ from app.utils.cross_compile import TargetMetadata
 class FakeDeployer:
     def __init__(self) -> None:
         self.build_id = "build12345678"
+        self.local_source_folder_calls = 0
+        self.local_modification_calls = 0
 
     async def make_local_modifications(
         self, _source_dir: str, compilation_mode: str = COMPILATION_MODE_SHARED
     ) -> None:
+        self.local_modification_calls += 1
         return None
 
     def create_local_source_folder(self, _temp_dir: str, source_root: str | None = None) -> str:
+        self.local_source_folder_calls += 1
         return source_root or "/tmp/source"
 
     async def create_local_build_archive(
@@ -253,12 +257,19 @@ async def test_build_uses_precompiled_release_when_planned(monkeypatch: pytest.M
         fake_download_precompiled_frameos_release,
     )
 
+    logs: list[tuple[str, str]] = []
+    deployer = FakeDeployer()
+
+    async def capture_log(level: str, message: str) -> None:
+        logs.append((level, message))
+
     builder = FrameBinaryBuilder(
         db=None,
         redis=None,
         frame=SimpleNamespace(device="framebuffer", gpio_buttons=[], scenes=[]),
-        deployer=FakeDeployer(),
+        deployer=deployer,
         temp_dir=str(tmp_path),
+        logger=capture_log,
     )
     plan = FrameBinaryPlan(
         build_id="build12345678",
@@ -281,3 +292,7 @@ async def test_build_uses_precompiled_release_when_planned(monkeypatch: pytest.M
     assert result.cross_compiled is True
     assert result.binary_path and result.binary_path.endswith("/frameos")
     assert result.driver_library_names == ["frameBuffer.so"]
+    assert deployer.local_source_folder_calls == 0
+    assert deployer.local_modification_calls == 0
+    assert not any("Preparing local build sources" in message for _level, message in logs)
+    assert not any("Applying local modifications" in message for _level, message in logs)

@@ -967,12 +967,7 @@ class SceneWriter:
 
                 if not scene:
                     message = f'- ERROR: When generating scene {self.scene_id}. Scene "{scene_id}" for node "{node_id}" not found'
-                    try:
-                        from app.models.log import new_log as log
-                        log(self.frame.id, "stderr", message)
-                        return
-                    except Exception:
-                        raise ValueError(message)
+                    raise ValueError(message)
 
                 # only if a target node (plus legacy support for using 'event' as a target node)
                 if node_id not in self.prev_nodes:

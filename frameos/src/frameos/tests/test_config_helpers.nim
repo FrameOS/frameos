@@ -1,6 +1,7 @@
 import std/[json, unittest]
 import ../config
 import ../types
+import ../utils/image
 
 suite "config helper loaders":
   test "setConfigDefaults populates key defaults":
@@ -102,3 +103,14 @@ suite "config helper loaders":
     check target.serverPort == 2
     check target.schedule.events.len == 1
     check target.schedule.events[0].id == "new-event"
+
+  test "updateFrameConfigFrom updates runtime image engine":
+    let target = FrameConfig(imageEngine: "")
+    let source = FrameConfig(imageEngine: "imagemagick")
+
+    updateFrameConfigFrom(target, source)
+
+    check target.imageEngine == "imagemagick"
+    check getRuntimeImageEngine() == "imagemagick"
+
+    setRuntimeImageEngine("")

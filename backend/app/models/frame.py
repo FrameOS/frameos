@@ -215,6 +215,7 @@ class Frame(Base):
     interval = mapped_column(Double, default=300)
     metrics_interval = mapped_column(Double, default=60)
     scaling_mode = mapped_column(String(64), nullable=True)  # contain (default), cover, stretch, center
+    image_engine = mapped_column(String(32), nullable=True)  # empty and pixie use Pixie; imagemagick uses ImageMagick
     rotate = mapped_column(Integer, nullable=True)
     flip = mapped_column(String(32), nullable=True)
     log_to_file = mapped_column(String(256), nullable=True)
@@ -275,6 +276,7 @@ class Frame(Base):
             'interval': self.interval,
             'metrics_interval': self.metrics_interval,
             'scaling_mode': self.scaling_mode,
+            'image_engine': self.image_engine,
             'rotate': self.rotate,
             'flip': self.flip,
             'background_color': self.background_color,
@@ -486,6 +488,7 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
         "metricsInterval": frame.metrics_interval or 60.0,
         "debug": frame.debug or False,
         "scalingMode": frame.scaling_mode or "contain",
+        "imageEngine": frame.image_engine or "",
         "rotate": frame.rotate or 0,
         "flip": frame.flip,
         "logToFile": frame.log_to_file,

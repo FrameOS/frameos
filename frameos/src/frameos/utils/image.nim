@@ -1,4 +1,5 @@
 import pixie
+import pixie/fileformats/svg
 import base64
 import json
 import random
@@ -16,6 +17,28 @@ import frameos/utils/font
 import frameos/utils/http_client
 
 const MaxImageDownloadBytes = 15 * 1024 * 1024
+const ImageEngineImageMagick* = "imagemagick"
+
+var runtimeImageEngine = ""
+
+proc setRuntimeImageEngine*(imageEngine: string) =
+  let normalized = imageEngine.normalize.toLowerAscii()
+  runtimeImageEngine =
+    if normalized in ["", "pixie", ImageEngineImageMagick]:
+      normalized
+    else:
+      ""
+
+proc getRuntimeImageEngine*(): string =
+  runtimeImageEngine
+
+proc getEffectiveRuntimeImageEngine*(): string =
+  if runtimeImageEngine == ImageEngineImageMagick:
+    return ImageEngineImageMagick
+  return "pixie"
+
+proc useImageMagick(): bool =
+  runtimeImageEngine == ImageEngineImageMagick
 
 proc imageMagickCommand(): string =
   let magick = findExe("magick")
@@ -26,14 +49,7 @@ proc imageMagickCommand(): string =
     return convert
   return ""
 
-proc isJpegData(data: string): bool =
-  data.len >= 2 and data[0].byte == 0xFF and data[1].byte == 0xD8
-
-proc isJpegPath(path: string): bool =
-  let lowerPath = path.toLowerAscii()
-  lowerPath.endsWith(".jpg") or lowerPath.endsWith(".jpeg")
-
-proc decodeJpegWithImageMagick(data: string): Option[Image] =
+proc decodeImageWithImageMagick(data: string): Option[Image] =
   let cmd = imageMagickCommand()
   if cmd == "":
     return none(Image)
@@ -54,7 +70,7 @@ proc decodeJpegWithImageMagick(data: string): Option[Image] =
     p.close()
   return none(Image)
 
-proc decodeJpegFileWithImageMagick(path: string): Option[Image] =
+proc readImageWithImageMagick(path: string): Option[Image] =
   let cmd = imageMagickCommand()
   if cmd == "":
     return none(Image)
@@ -95,16 +111,24 @@ proc decodeSvgWithImageMagick*(svg: string, width: int, height: int): Option[Ima
     p.close()
   return none(Image)
 
+proc decodeSvgWithFallback*(svg: string, width: int, height: int): Option[Image] =
+  if useImageMagick():
+    return decodeSvgWithImageMagick(svg, width, height)
+  try:
+    return some(newImage(parseSvg(svg, width, height)))
+  except CatchableError:
+    return none(Image)
+
 proc decodeImageWithFallback*(data: string): Image =
-  if isJpegData(data):
-    let converted = decodeJpegWithImageMagick(data)
+  if useImageMagick():
+    let converted = decodeImageWithImageMagick(data)
     if converted.isSome:
       return converted.get()
   return decodeImage(data)
 
 proc readImageWithFallback*(path: string): Image =
-  if isJpegPath(path):
-    let converted = decodeJpegFileWithImageMagick(path)
+  if useImageMagick():
+    let converted = readImageWithImageMagick(path)
     if converted.isSome:
       return converted.get()
   return readImage(path)

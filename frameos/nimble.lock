@@ -12,25 +12,25 @@
       }
     },
     "vmath": {
-      "version": "2.0.0",
-      "vcsRevision": "7282ae1247f2f384ebeaec3826d7fa38fd0e1df1",
+      "version": "3.0.0",
+      "vcsRevision": "7bd9f6e6b23ca3b751be42f20c8025d320881a00",
       "url": "https://github.com/treeform/vmath",
       "downloadMethod": "git",
       "dependencies": [],
       "checksums": {
-        "sha1": "c90a664f3425d26219e1262ed9a888b859b3127c"
+        "sha1": "d88141c3844bbb2bb2d6146ebb96e570ca863067"
       }
     },
     "bumpy": {
-      "version": "1.1.2",
-      "vcsRevision": "d7eaf00c24820ad0317c9926737402e62431e931",
+      "version": "1.1.3",
+      "vcsRevision": "edc6e19ddbe6b9e46c3384e9a4131d7063a3f610",
       "url": "https://github.com/treeform/bumpy",
       "downloadMethod": "git",
       "dependencies": [
         "vmath"
       ],
       "checksums": {
-        "sha1": "acc789c4e31b3ee969a13dd0c238d808f39b19c7"
+        "sha1": "8a55667a7585612b7cefecd9a25ac3e761f03097"
       }
     },
     "checksums": {
@@ -44,13 +44,13 @@
       }
     },
     "chroma": {
-      "version": "0.2.7",
-      "vcsRevision": "b2e71179174e040884ebf6a16cbac711c84620b9",
+      "version": "1.0.0",
+      "vcsRevision": "8bf4a0933ff405f83dc3a176199f528601e5b796",
       "url": "https://github.com/treeform/chroma",
       "downloadMethod": "git",
       "dependencies": [],
       "checksums": {
-        "sha1": "f873f4b97e87a82e27e0b85bf9130fe3e320a2b8"
+        "sha1": "76a12834f1b7e211e4232c1e13960accba6bd477"
       }
     },
     "chrono": {
@@ -64,13 +64,13 @@
       }
     },
     "nimsimd": {
-      "version": "1.2.6",
-      "vcsRevision": "156e424306756a106442aca985eed61a8d12097b",
+      "version": "1.3.2",
+      "vcsRevision": "3f6b2668ffb0867d0bf786a658b817763e611350",
       "url": "https://github.com/guzba/nimsimd",
       "downloadMethod": "git",
       "dependencies": [],
       "checksums": {
-        "sha1": "a371cce59834c8d56091f5c891fd182e2eb9b3c4"
+        "sha1": "5202ce48d46eaf593da54e884774cdb2a884e717"
       }
     },
     "crunchy": {
@@ -150,8 +150,8 @@
       }
     },
     "pixie": {
-      "version": "5.0.7",
-      "vcsRevision": "3b65ca5605a1156987041bf0295449e4c56128cf",
+      "version": "6.1.0",
+      "vcsRevision": "de230f6d061d0b6d6288fc7988de753f22cdd366",
       "url": "https://github.com/treeform/pixie",
       "downloadMethod": "git",
       "dependencies": [
@@ -164,7 +164,7 @@
         "crunchy"
       ],
       "checksums": {
-        "sha1": "64999611cd1093e28b62ed80e695783839441538"
+        "sha1": "c55039a4ec400a6197b12c6c645dcb8bef45c019"
       }
     }
   },
