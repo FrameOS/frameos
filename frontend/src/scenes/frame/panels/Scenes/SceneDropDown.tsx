@@ -7,10 +7,10 @@ import { panelsLogic } from '../panelsLogic'
 import {
   ClipboardDocumentIcon,
   CloudArrowDownIcon,
+  Cog6ToothIcon,
   DocumentDuplicateIcon,
   DocumentMagnifyingGlassIcon,
   FolderPlusIcon,
-  InformationCircleIcon,
   TagIcon,
 } from '@heroicons/react/24/outline'
 import { templatesLogic } from '../Templates/templatesLogic'
@@ -87,7 +87,7 @@ export function SceneDropDown({
           ? {
               label: 'Scene settings',
               onClick: openSceneSettings,
-              icon: <InformationCircleIcon className="w-5 h-5" />,
+              icon: <Cog6ToothIcon className="w-5 h-5" />,
             }
           : null,
         context === 'scenes'
