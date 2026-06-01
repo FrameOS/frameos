@@ -1,5 +1,6 @@
 import asyncio
 import gzip
+import io
 import json
 import pytest
 import subprocess
@@ -8,6 +9,7 @@ from unittest.mock import AsyncMock, patch
 import httpx
 from fastapi import HTTPException
 from datetime import datetime, timedelta, timezone
+from PIL import Image
 from urllib.parse import urlparse
 
 from app.api import frames as frames_api
@@ -339,6 +341,54 @@ async def test_api_frame_get_image_cached(async_client, db, redis):
     response = await async_client.get(image_url)
     assert response.status_code == 200
     assert response.content == b'cached_image_data'
+
+
+@pytest.mark.asyncio
+async def test_api_frame_get_image_placeholder_uses_rotated_dimensions(async_client, db, redis):
+    frame = await new_frame(db, redis, 'RotatedPlaceholderFrame', 'localhost', 'localhost')
+    frame.width = 800
+    frame.height = 480
+    frame.rotate = 90
+    db.add(frame)
+    db.commit()
+
+    cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
+    await redis.delete(cache_key)
+
+    response = await async_client.get(f'/api/frames/{frame.id}/image?t=-1')
+
+    assert response.status_code == 200
+    assert response.headers['x-frameos-image-state'] == 'placeholder'
+    with Image.open(io.BytesIO(response.content)) as image:
+        assert image.size == (480, 800)
+
+
+@pytest.mark.asyncio
+async def test_api_frame_get_image_head_marks_missing_cache_without_refresh(async_client, db, redis):
+    frame = await new_frame(db, redis, 'HeadPlaceholderFrame', 'localhost', 'localhost')
+    cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
+    await redis.delete(cache_key)
+
+    with patch('app.api.frames._fetch_frame_http_bytes', new=AsyncMock()) as fetch_frame:
+        response = await async_client.head(f'/api/frames/{frame.id}/image?t=-1')
+
+    assert response.status_code == 200
+    assert response.content == b''
+    assert response.headers['x-frameos-image-state'] == 'placeholder'
+    fetch_frame.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_api_frame_get_image_head_omits_placeholder_header_for_cache(async_client, db, redis):
+    frame = await new_frame(db, redis, 'HeadCachedFrame', 'localhost', 'localhost')
+    cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
+    await redis.set(cache_key, b'cached_image_data')
+
+    response = await async_client.head(f'/api/frames/{frame.id}/image?t=-1')
+
+    assert response.status_code == 200
+    assert response.content == b''
+    assert 'x-frameos-image-state' not in response.headers
 
 
 @pytest.mark.asyncio
@@ -715,6 +765,16 @@ async def test_api_frame_update_name(async_client, db, redis):
     db.expire_all()
     updated_frame = db.get(Frame, frame.id)
     assert updated_frame.name == "Updated Name"
+
+
+@pytest.mark.asyncio
+async def test_api_frame_update_max_http_response_bytes(async_client, db, redis):
+    frame = await new_frame(db, redis, 'HttpLimitFrame', 'localhost', 'localhost')
+    resp = await async_client.post(f'/api/frames/{frame.id}', json={"max_http_response_bytes": 32 * 1024 * 1024})
+    assert resp.status_code == 200
+    db.expire_all()
+    updated_frame = db.get(Frame, frame.id)
+    assert updated_frame.max_http_response_bytes == 32 * 1024 * 1024
 
 
 @pytest.mark.asyncio

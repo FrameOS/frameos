@@ -4,6 +4,39 @@ import { useEffect, useRef, useState } from 'react'
 import { framesModel } from '../models/framesModel'
 import { entityImagesModel, useEntityImage } from '../models/entityImagesModel'
 
+const placeholderRefreshAttempts = new Set<string>()
+
+function isInitialCacheOnlyImageUrl(url: string): boolean {
+  if (typeof window === 'undefined') {
+    return url.includes('t=-1')
+  }
+  try {
+    return new URL(url, window.location.href).searchParams.get('t') === '-1'
+  } catch {
+    return url.includes('t=-1')
+  }
+}
+
+function sessionRefreshAttempted(key: string): boolean {
+  if (typeof window === 'undefined') {
+    return placeholderRefreshAttempts.has(key)
+  }
+
+  try {
+    if (window.sessionStorage.getItem(key)) {
+      return true
+    }
+    window.sessionStorage.setItem(key, '1')
+    return false
+  } catch {
+    if (placeholderRefreshAttempts.has(key)) {
+      return true
+    }
+    placeholderRefreshAttempts.add(key)
+    return false
+  }
+}
+
 export interface FrameImageProps extends React.HTMLAttributes<HTMLDivElement> {
   frameId: number
   sceneId?: string
@@ -122,9 +155,29 @@ export function FrameImage({
     fullSizeLoadFrames.current.push(firstFrame)
   }
 
+  const maybeRefreshMissingInitialFrameImage = () => {
+    if (sceneId || !imageSrc || !isInitialCacheOnlyImageUrl(imageSrc)) {
+      return
+    }
+
+    const refreshAttemptKey = `frameos:placeholder-image-refresh:${entityId}/${subEntityId}`
+    if (sessionRefreshAttempted(refreshAttemptKey)) {
+      return
+    }
+
+    void fetch(imageSrc, { method: 'HEAD', cache: 'no-store' })
+      .then((response) => {
+        if (response.ok && response.headers.get('x-frameos-image-state') === 'placeholder') {
+          updateEntityImage(entityId, subEntityId)
+        }
+      })
+      .catch(() => undefined)
+  }
+
   const handleBaseImageLoad = () => {
     setIsLoading(false)
     queueFullSizeLoad()
+    maybeRefreshMissingInitialFrameImage()
   }
 
   return (

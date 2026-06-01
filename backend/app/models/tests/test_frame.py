@@ -35,6 +35,7 @@ async def test_new_frame(mock_publish, db, redis):
     assert frame.ssh_user == "pi"
     assert frame.device == "testDevice"
     assert frame.interval == 123
+    assert frame.max_http_response_bytes == 64 * 1024 * 1024
     assert frame.reboot == {"enabled": "true", "crontab": "0 4 * * *"}
     assert frame.server_send_logs is True
     assert frame.https_proxy["enable"] is True
@@ -113,6 +114,7 @@ async def test_frame_to_dict(mock_publish, db, redis):
     data = frame.to_dict()
     assert data["frame_host"] == "host"
     assert data["interval"] == 55
+    assert data["max_http_response_bytes"] == 64 * 1024 * 1024
     assert data["server_send_logs"] is True
     assert data["reboot"]["crontab"] == "0 4 * * *"
     assert data["https_proxy"]["certs"]["server"]
@@ -197,6 +199,17 @@ async def test_get_frame_json_includes_image_engine(_mock_publish, db, redis):
     frame.image_engine = "imagemagick"
     data = get_frame_json(db, frame)
     assert data["imageEngine"] == "imagemagick"
+
+
+@pytest.mark.asyncio
+@patch("app.models.frame.publish_message", new_callable=AsyncMock)
+async def test_get_frame_json_includes_max_http_response_bytes(_mock_publish, db, redis):
+    frame = await new_frame(db, redis, "FrameJson", "host", "server_host.com")
+    frame.max_http_response_bytes = 32 * 1024 * 1024
+
+    data = get_frame_json(db, frame)
+
+    assert data["maxHttpResponseBytes"] == 32 * 1024 * 1024
 
 
 @pytest.mark.asyncio

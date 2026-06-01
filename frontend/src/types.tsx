@@ -59,6 +59,7 @@ export interface FrameType {
   color?: string
   interval: number
   metrics_interval: number
+  max_http_response_bytes?: number
   scaling_mode: string
   image_engine?: '' | 'pixie' | 'imagemagick'
   rotate?: number

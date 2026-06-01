@@ -9,8 +9,6 @@ import frameos/utils/http_client
 import frameos/utils/image
 import lib/burrito
 
-const MaxJsFetchTextBytes = 2 * 1024 * 1024
-
 type
   JsAppRuntime* = ref object
     category*: string
@@ -29,6 +27,12 @@ type
     context: ExecutionContext
 
 var jsAppEnvByCtx = initTable[ptr JSContext, JsAppEvalEnv]()
+
+proc jsFetchMaxBytes(e: JsAppEvalEnv): int =
+  if e != nil and e.owner != nil and e.owner.frameConfig != nil and e.owner.frameConfig.maxHttpResponseBytes > 0:
+    e.owner.frameConfig.maxHttpResponseBytes
+  else:
+    DefaultMaxHttpResponseBytes
 
 proc env(ctx: ptr JSContext): JsAppEvalEnv =
   if jsAppEnvByCtx.hasKey(ctx): jsAppEnvByCtx[ctx] else: nil
@@ -99,7 +103,7 @@ proc jsFetchText(ctx: ptr JSContext, url: JSValue): JSValue {.nimcall.} =
     return nimStringToJS(ctx, "")
 
   try:
-    return nimStringToJS(ctx, boundedGetContent(urlStr, maxBytes = MaxJsFetchTextBytes))
+    return nimStringToJS(ctx, boundedGetContent(urlStr, maxBytes = jsFetchMaxBytes(e)))
   except CatchableError as err:
     if e != nil:
       frameos_apps.logError(e.owner, "JS app fetchText failed: " & err.msg)

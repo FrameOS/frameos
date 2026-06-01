@@ -68,6 +68,7 @@ class FrameBase(BaseModel):
     timezone: Optional[str] = None
     interval: float
     metrics_interval: float
+    max_http_response_bytes: Optional[int] = None
     scaling_mode: Optional[str]
     image_engine: Optional[Literal["", "pixie", "imagemagick"]] = None
     rotate: Optional[int]
@@ -142,6 +143,7 @@ class FrameUpdateRequest(BaseModel):
     timezone: Optional[str] = None
     interval: Optional[float] = None
     metrics_interval: Optional[float] = None
+    max_http_response_bytes: Optional[int] = None
     log_to_file: Optional[str] = None
     assets_path: Optional[str] = None
     save_assets: Any = None
@@ -164,6 +166,13 @@ class FrameUpdateRequest(BaseModel):
     rpios: Optional[Dict[str, Any]] = None
     terminal_history: Optional[List[str]] = None
     next_action: Optional[str] = None
+
+    @field_validator('max_http_response_bytes')
+    @classmethod
+    def validate_max_http_response_bytes(cls, value: Optional[int]) -> Optional[int]:
+        if value is not None and value < 1024:
+            raise ValueError('Maximum HTTP response size must be at least 1024 bytes')
+        return value
 
     @field_validator('frame_admin_auth')
     @classmethod
