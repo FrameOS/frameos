@@ -411,7 +411,8 @@ async def ws_agent_endpoint(
     await publish_message(
         redis, "update_frame",
         {"active_connections": await number_of_connections_for_frame(redis, frame.id),
-         "id": frame.id}
+         "id": frame.id,
+         "project_id": frame.project_id}
     )
     await write_log(redis, frame.id, "agent", f'☎️ Frame "{frame.name}" connected ☎️', ip=client_ip)
 
@@ -527,6 +528,7 @@ async def ws_agent_endpoint(
         await publish_message(
             redis, "update_frame",
             {"active_connections": await number_of_connections_for_frame(redis, frame.id),
-             "id": frame.id}
+             "id": frame.id,
+             "project_id": frame.project_id}
         )
         await write_log(redis, frame.id, "agent", f'👋 Frame "{frame.name}" disconnected 👋', ip=client_ip)

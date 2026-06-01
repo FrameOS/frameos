@@ -164,8 +164,17 @@ async def test_api_frame_bootstrap_command_can_regenerate_token(async_client, no
 
 
 @pytest.mark.asyncio
-async def test_api_frame_agent_tasks_default_to_auto_transport(async_client, monkeypatch):
+async def test_api_frame_agent_tasks_default_to_auto_transport(async_client, db, redis, monkeypatch):
     import app.tasks as tasks_package
+
+    frame = await new_frame(
+        db,
+        redis,
+        name="AgentTaskFrame",
+        frame_host="localhost",
+        server_host="localhost",
+        project_id=async_client.project_id,
+    )
 
     captured: list[tuple[str, int, dict]] = []
 
@@ -178,14 +187,14 @@ async def test_api_frame_agent_tasks_default_to_auto_transport(async_client, mon
     monkeypatch.setattr(tasks_package, "deploy_agent", fake_deploy_agent)
     monkeypatch.setattr(tasks_package, "restart_agent", fake_restart_agent)
 
-    deploy_response = await async_client.post('/api/frames/123/deploy_agent?recompile=1')
-    restart_response = await async_client.post('/api/frames/123/restart_agent')
+    deploy_response = await async_client.post(f'/api/frames/{frame.id}/deploy_agent?recompile=1')
+    restart_response = await async_client.post(f'/api/frames/{frame.id}/restart_agent')
 
     assert deploy_response.status_code == 200
     assert restart_response.status_code == 200
     assert captured == [
-        ("deploy", 123, {"recompile": True, "transport": "auto"}),
-        ("restart", 123, {"transport": "auto"}),
+        ("deploy", frame.id, {"recompile": True, "transport": "auto"}),
+        ("restart", frame.id, {"transport": "auto"}),
     ]
 
 
@@ -745,13 +754,9 @@ async def test_api_frame_reset_event(async_client, db, redis):
 
 @pytest.mark.asyncio
 async def test_api_frame_not_found_for_reset(async_client):
-    """
-    Currently the route does NOT check if the frame exists.
-    So it always returns 200 "Success".
-    """
     response = await async_client.post('/api/frames/999999/reset')
-    assert response.status_code == 200
-    assert response.text == '"Success"'
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Frame not found"
 
 
 @pytest.mark.asyncio

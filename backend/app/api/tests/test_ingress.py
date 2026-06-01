@@ -60,7 +60,7 @@ async def test_no_hassio_env(clear_env):
     """
     With no HASSIO_RUN_MODE and no HASSIO_TOKEN set,
     we expect normal Docker mode:
-      - /api/frames => requires auth
+      - /api/projects => requires auth
       - /api/has_first_user => no auth needed
       - / => root HTML served
     """
@@ -75,8 +75,8 @@ async def test_no_hassio_env(clear_env):
     resp_no_auth = client.get("/api/has_first_user")
     assert resp_no_auth.status_code == 200
 
-    # /api/frames => belongs to api_with_auth => must have token => 401
-    resp_auth_needed = client.get("/api/frames")
+    # /api/projects => belongs to api_with_auth => must have token => 401
+    resp_auth_needed = client.get("/api/projects")
     assert resp_auth_needed.status_code == 401
 
     # Root => 200
@@ -88,7 +88,7 @@ async def test_no_hassio_env(clear_env):
 async def test_hassio_run_mode_public(clear_env, monkeypatch):
     """
     HASSIO_RUN_MODE=public => only api_public is mounted.
-    /api/frames => should be 404
+    /api/projects => should be 404
     /api/log => route exists, but might 401 if missing API key, etc. => definitely not 404
     / => not served => 404
     """
@@ -105,8 +105,8 @@ async def test_hassio_run_mode_public(clear_env, monkeypatch):
     resp_log = client.post("/api/log")
     assert resp_log.status_code != 404, "POST /api/log should be mounted in 'public' mode."
 
-    # /api/frames => from api_with_auth => 404
-    resp_frames = client.get("/api/frames")
+    # /api/projects => from api_with_auth => 404
+    resp_frames = client.get("/api/projects")
     assert resp_frames.status_code == 404
 
     # Root => 404
@@ -144,8 +144,13 @@ async def test_hassio_run_mode_ingress(clear_env, monkeypatch):
     resp_no_auth = client.get("/api/has_first_user")
     assert resp_no_auth.status_code == 200
 
-    resp_frames = client.get("/api/frames")
-    assert resp_frames.status_code == 200
+    resp_projects = client.get("/api/projects")
+    assert resp_projects.status_code == 200
+    projects = resp_projects.json()["projects"]
+    assert projects
+
+    resp_project_frames = client.get(f"/api/projects/{projects[0]['id']}/frames")
+    assert resp_project_frames.status_code == 200
 
     resp_user = client.get("/api/user")
     assert resp_user.status_code == 401

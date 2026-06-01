@@ -2,12 +2,13 @@ from fastapi import Depends
 from sqlalchemy.orm import Session
 
 from app.api import api_with_auth
+from app import config as app_config
 from app.database import get_db
 from app.models.organization import OrganizationMember, Project
 from app.models.user import User
 from app.api.project_auth import get_current_project
 from app.schemas.projects import ProjectResponse, ProjectsListResponse
-from app.tenancy import ProjectContext, ensure_default_project_for_user
+from app.tenancy import ProjectContext, ensure_default_project, ensure_default_project_for_user
 
 from .auth import get_current_user
 
@@ -25,9 +26,15 @@ def _project_response(project: Project) -> ProjectResponse:
 
 @api_with_auth.get("/projects", response_model=ProjectsListResponse)
 async def list_projects(
-    current_user: User = Depends(get_current_user),
+    current_user: User | None = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    if app_config.config.HASSIO_RUN_MODE == "ingress":
+        ensure_default_project(db)
+        projects = db.query(Project).order_by(Project.id.asc()).all()
+        return ProjectsListResponse(projects=[_project_response(project) for project in projects])
+
+    assert current_user is not None
     ensure_default_project_for_user(db, current_user)
     projects = (
         db.query(Project)

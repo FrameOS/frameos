@@ -295,6 +295,61 @@ async def test_broadcast_sends_to_slow_connections_concurrently(monkeypatch) -> 
 
 
 @pytest.mark.asyncio
+async def test_broadcast_filters_project_scoped_events_by_connection_projects() -> None:
+    from app.websockets import ConnectionManager
+
+    class FakeWebSocket:
+        def __init__(self, client: str):
+            self.client = client
+            self.sent: list[str] = []
+
+        async def send_text(self, message: str) -> None:
+            self.sent.append(message)
+
+    project_one = FakeWebSocket("project-1")
+    project_two = FakeWebSocket("project-2")
+    full_access = FakeWebSocket("full-access")
+    manager = ConnectionManager()
+    manager.active_connections.extend([project_one, project_two, full_access])  # type: ignore[list-item]
+    manager.connection_project_ids[project_one] = {1}  # type: ignore[index]
+    manager.connection_project_ids[project_two] = {2}  # type: ignore[index]
+    manager.connection_project_ids[full_access] = None  # type: ignore[index]
+
+    message = json.dumps({"event": "update_frame", "data": {"id": 5, "project_id": 1}})
+    await manager.broadcast(message)
+
+    assert project_one.sent == [message]
+    assert project_two.sent == []
+    assert full_access.sent == [message]
+
+
+@pytest.mark.asyncio
+async def test_broadcast_does_not_send_unscoped_project_events_to_scoped_connections() -> None:
+    from app.websockets import ConnectionManager
+
+    class FakeWebSocket:
+        def __init__(self, client: str):
+            self.client = client
+            self.sent: list[str] = []
+
+        async def send_text(self, message: str) -> None:
+            self.sent.append(message)
+
+    scoped = FakeWebSocket("scoped")
+    full_access = FakeWebSocket("full-access")
+    manager = ConnectionManager()
+    manager.active_connections.extend([scoped, full_access])  # type: ignore[list-item]
+    manager.connection_project_ids[scoped] = {1}  # type: ignore[index]
+    manager.connection_project_ids[full_access] = None  # type: ignore[index]
+
+    message = json.dumps({"event": "update_frame", "data": {"id": 5}})
+    await manager.broadcast(message)
+
+    assert scoped.sent == []
+    assert full_access.sent == [message]
+
+
+@pytest.mark.asyncio
 async def test_agent_helper_closes_owned_redis(monkeypatch) -> None:
     from app.ws import agent_ws
 

@@ -452,7 +452,7 @@ async def delete_frame(db: Session, redis: Redis, frame_id: int, project_id: int
 
         db.delete(frame)
         db.commit()
-        await publish_message(redis, "delete_frame", {"id": frame_id})
+        await publish_message(redis, "delete_frame", {"id": frame_id, "project_id": project_id})
         return True
     return False
 

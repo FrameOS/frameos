@@ -17,7 +17,7 @@ _current_project_context: ContextVar[ProjectContext | None] = ContextVar("curren
 class ProjectContext:
     project: Project
     organization: Organization
-    user: User
+    user: User | None
 
     @property
     def project_id(self) -> int:

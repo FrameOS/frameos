@@ -1773,6 +1773,7 @@ async def api_frame_get_image(
                         redis,
                         "new_scene_image",
                         {
+                            "project_id": frame.project_id,
                             "frameId": id,
                             "sceneId": scene_id,
                             "timestamp": now.isoformat(),
@@ -2240,33 +2241,48 @@ async def api_frame_clear_build_cache(
 
 
 @api_project.post("/frames/{id:int}/reset")
-async def api_frame_reset_event(id: int, redis: Redis = Depends(get_redis)):
+async def api_frame_reset_event(
+    id: int,
+    redis: Redis = Depends(get_redis),
+    db: Session = Depends(get_db),
+):
+    frame = _project_frame(db, id) or _not_found()
     try:
         from app.tasks import reset_frame
 
-        await reset_frame(id, redis)
+        await reset_frame(frame.id, redis)
         return "Success"
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @api_project.post("/frames/{id:int}/restart")
-async def api_frame_restart_event(id: int, redis: Redis = Depends(get_redis)):
+async def api_frame_restart_event(
+    id: int,
+    redis: Redis = Depends(get_redis),
+    db: Session = Depends(get_db),
+):
+    frame = _project_frame(db, id) or _not_found()
     try:
         from app.tasks import restart_frame
 
-        await restart_frame(id, redis)
+        await restart_frame(frame.id, redis)
         return "Success"
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @api_project.post("/frames/{id:int}/reboot")
-async def api_frame_reboot_event(id: int, redis: Redis = Depends(get_redis)):
+async def api_frame_reboot_event(
+    id: int,
+    redis: Redis = Depends(get_redis),
+    db: Session = Depends(get_db),
+):
+    frame = _project_frame(db, id) or _not_found()
     try:
         from app.tasks import reboot_frame
 
-        await reboot_frame(id, redis)
+        await reboot_frame(frame.id, redis)
         return "Success"
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
@@ -2278,12 +2294,14 @@ async def api_frame_deploy_agent_event(
     recompile: bool = False,
     transport: str = "auto",
     redis: Redis = Depends(get_redis),
+    db: Session = Depends(get_db),
 ):
+    frame = _project_frame(db, id) or _not_found()
     agent_transport = _agent_task_transport(transport)
     try:
         from app.tasks import deploy_agent
 
-        await deploy_agent(id, redis, recompile=recompile, transport=agent_transport)
+        await deploy_agent(frame.id, redis, recompile=recompile, transport=agent_transport)
         return "Success"
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
@@ -2294,33 +2312,45 @@ async def api_frame_restart_agent_event(
     id: int,
     transport: str = "auto",
     redis: Redis = Depends(get_redis),
+    db: Session = Depends(get_db),
 ):
+    frame = _project_frame(db, id) or _not_found()
     agent_transport = _agent_task_transport(transport)
     try:
         from app.tasks import restart_agent
 
-        await restart_agent(id, redis, transport=agent_transport)
+        await restart_agent(frame.id, redis, transport=agent_transport)
         return "Success"
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @api_project.post("/frames/{id:int}/stop")
-async def api_frame_stop_event(id: int, redis: Redis = Depends(get_redis)):
+async def api_frame_stop_event(
+    id: int,
+    redis: Redis = Depends(get_redis),
+    db: Session = Depends(get_db),
+):
+    frame = _project_frame(db, id) or _not_found()
     try:
         from app.tasks import stop_frame
 
-        await stop_frame(id, redis)
+        await stop_frame(frame.id, redis)
         return "Success"
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 @api_project.post("/frames/{id:int}/deploy")
-async def api_frame_deploy_event(id: int, redis: Redis = Depends(get_redis)):
+async def api_frame_deploy_event(
+    id: int,
+    redis: Redis = Depends(get_redis),
+    db: Session = Depends(get_db),
+):
+    frame = _project_frame(db, id) or _not_found()
     try:
         from app.tasks import deploy_frame
 
-        await deploy_frame(id, redis)
+        await deploy_frame(frame.id, redis)
         return "Success"
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))

@@ -279,10 +279,16 @@ async def _publish_ai_scene_log(
     status: str = "info",
     stage: str | None = None,
 ) -> None:
+    try:
+        project_id = current_project_id()
+    except RuntimeError:
+        project_id = None
+
     await publish_message(
         redis,
         "ai_scene_log",
         {
+            "project_id": project_id,
             "message": message,
             "requestId": request_id,
             "status": status,
