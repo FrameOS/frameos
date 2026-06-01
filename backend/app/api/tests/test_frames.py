@@ -1483,15 +1483,48 @@ async def test_api_frame_new_missing_fields(async_client):
 
 @pytest.mark.asyncio
 async def test_api_frame_import(async_client, db, redis):
+    existing_frame = await new_frame(
+        db,
+        redis,
+        'ExistingFrame',
+        'existinghost',
+        'existingserver',
+        project_id=async_client.project_id,
+    )
+    other_user = User(email='other-import@example.com')
+    other_user.set_password('password')
+    db.add(other_user)
+    db.commit()
+    other_project = ensure_default_project_for_user(db, other_user)
+
     payload = {
         "name": "ImportedFrame",
         "frame_host": "importhost",
-        "server_host": "importserver"
+        "server_host": "importserver",
+        "project_id": other_project.id,
+        "server_api_key": existing_frame.server_api_key,
     }
     resp = await async_client.post('/api/frames/import', json=payload)
     assert resp.status_code == 200
     data = resp.json()
     assert data['frame']['name'] == "ImportedFrame"
+    imported_frame = db.query(Frame).filter_by(id=data['frame']['id']).one()
+    assert imported_frame.project_id == async_client.project_id
+    assert imported_frame.server_api_key != existing_frame.server_api_key
+
+    restored_payload = {
+        "name": "RestoredFrame",
+        "frame_host": "restorehost",
+        "server_host": "restoreserver",
+        "project_id": other_project.id,
+        "server_api_key": "restored-server-api-key",
+    }
+    restored_resp = await async_client.post('/api/frames/import', json=restored_payload)
+    assert restored_resp.status_code == 200
+    restored_data = restored_resp.json()
+    restored_frame = db.query(Frame).filter_by(id=restored_data['frame']['id']).one()
+    assert restored_frame.project_id == async_client.project_id
+    assert restored_frame.server_api_key == restored_payload["server_api_key"]
 
 
 @pytest.mark.asyncio

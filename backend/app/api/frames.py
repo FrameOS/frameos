@@ -2851,6 +2851,7 @@ async def api_frame_import(
         for key, value in data.items():
             if key in [
                 "id",
+                "project_id",
                 "name",
                 "frame_host",
                 "server_host",
@@ -2860,6 +2861,9 @@ async def api_frame_import(
             ]:
                 continue
             if hasattr(frame, key):
+                if key == "server_api_key":
+                    if not value or db.query(Frame).filter(Frame.server_api_key == value, Frame.id != frame.id).first():
+                        continue
                 if key in ["last_successful_deploy_at", "last_log_at"]:
                     value = datetime.fromisoformat(value) if isinstance(value, str) else value
                 setattr(frame, key, value)
