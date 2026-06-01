@@ -410,7 +410,7 @@ proc imageFromSpec(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionCont
     if data.startsWith("data:"):
       return decodeDataUrl(data)
     if data.startsWith("<svg") or data.startsWith("<?xml") or data.contains("<svg"):
-      let image = decodeSvgWithImageMagick(data, defaultImageWidth(owner, context, %*{}), defaultImageHeight(owner, context, %*{}))
+      let image = decodeSvgWithFallback(data, defaultImageWidth(owner, context, %*{}), defaultImageHeight(owner, context, %*{}))
       if image.isSome:
         return image.get()
     return decodeImageWithFallback(data)
@@ -432,7 +432,7 @@ proc imageFromSpec(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionCont
     return nil
   of "image":
     if spec.hasKey("svg"):
-      let image = decodeSvgWithImageMagick(spec["svg"].getStr(), defaultImageWidth(owner, context, spec), defaultImageHeight(owner, context, spec))
+      let image = decodeSvgWithFallback(spec["svg"].getStr(), defaultImageWidth(owner, context, spec), defaultImageHeight(owner, context, spec))
       if image.isSome:
         return image.get()
       return nil

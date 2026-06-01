@@ -249,6 +249,7 @@ proc frameApiPayload*(connectionsState: ConnectionsState, exposeSecrets = false)
     "interval": interval,
     "metrics_interval": globalFrameConfig.metricsInterval,
     "scaling_mode": globalFrameConfig.scalingMode,
+    "image_engine": globalFrameConfig.imageEngine,
     "rotate": globalFrameConfig.rotate,
     "flip": globalFrameConfig.flip,
     "background_color": backgroundColor,

@@ -1,6 +1,7 @@
 import json, pixie, os, strutils
 import zippy
 import frameos/types
+import frameos/utils/image
 import lib/tz
 
 proc setConfigDefaults*(config: var FrameConfig) =
@@ -12,6 +13,7 @@ proc setConfigDefaults*(config: var FrameConfig) =
   if config.rotate == 0: config.rotate = 0
   if config.flip == "": config.flip = ""
   if config.scalingMode == "": config.scalingMode = "cover"
+  if config.imageEngine notin ["", "pixie", "imagemagick"]: config.imageEngine = ""
   if config.framePort == 0: config.framePort = 8787
   if config.frameHost == "": config.frameHost = "localhost"
   if config.httpsProxy == nil: config.httpsProxy = HttpsProxyConfig()
@@ -225,6 +227,7 @@ proc loadConfig*(configPath = ""): FrameConfig =
     rotate: data{"rotate"}.getInt(),
     flip: data{"flip"}.getStr(""),
     scalingMode: data{"scalingMode"}.getStr(),
+    imageEngine: data{"imageEngine"}.getStr(""),
     settings: data{"settings"},
     assetsPath: data{"assetsPath"}.getStr("/srv/assets"),
     saveAssets: if data{"saveAssets"} == nil: %*(false) else: data{"saveAssets"},
@@ -243,6 +246,7 @@ proc loadConfig*(configPath = ""): FrameConfig =
   if result.assetsPath.endswith("/"):
     result.assetsPath = result.assetsPath.strip(leading = false, trailing = true, chars = {'/'})
   setConfigDefaults(result)
+  setRuntimeImageEngine(result.imageEngine)
 
 proc updateSchedule(target: var FrameSchedule, source: FrameSchedule) =
   if target == nil:
@@ -273,6 +277,8 @@ proc updateFrameConfigFrom*(target: FrameConfig, source: FrameConfig) =
   target.rotate = source.rotate
   target.flip = source.flip
   target.scalingMode = source.scalingMode
+  target.imageEngine = source.imageEngine
+  setRuntimeImageEngine(target.imageEngine)
   target.settings = source.settings
   target.assetsPath = source.assetsPath
   target.saveAssets = source.saveAssets

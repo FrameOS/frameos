@@ -60,6 +60,7 @@ export interface FrameType {
   interval: number
   metrics_interval: number
   scaling_mode: string
+  image_engine?: '' | 'pixie' | 'imagemagick'
   rotate?: number
   flip?: 'horizontal' | 'vertical' | 'both' | ''
   background_color: string // deprecated, serves as fallback for scenes

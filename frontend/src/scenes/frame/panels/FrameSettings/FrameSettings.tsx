@@ -1389,6 +1389,16 @@ export function FrameSettings({
               ]}
             />
           </Field>
+          <Field name="image_engine" label="Image engine">
+            <Select
+              name="image_engine"
+              options={[
+                { value: '', label: 'Default (Pixie)' },
+                { value: 'pixie', label: 'Pixie' },
+                { value: 'imagemagick', label: 'ImageMagick' },
+              ]}
+            />
+          </Field>
         </div>
 
         <H6 id="frame-settings-error-behavior">Global errors</H6>
