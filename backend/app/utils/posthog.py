@@ -1,4 +1,6 @@
-from typing import Optional, Any
+from collections import OrderedDict
+from dataclasses import dataclass
+from typing import Optional, Any, Generic, TypeVar
 from fastapi import Request
 from jose import jwt, JWTError
 from posthog import Posthog
@@ -10,9 +12,43 @@ posthog_settings: dict[str, bool] = {
     "enable_error_tracking": False,
     "enable_llm_analytics": False,
 }
-posthog_clients_by_project: dict[int, Posthog] = {}
-posthog_settings_by_project: dict[int, dict[str, bool]] = {}
 DEFAULT_POSTHOG_HOST = "https://us.i.posthog.com"
+PROJECT_POSTHOG_CACHE_SIZE = 256
+K = TypeVar("K")
+V = TypeVar("V")
+
+
+class LRUCache(Generic[K, V]):
+    def __init__(self, maxsize: int):
+        self.maxsize = maxsize
+        self._items: OrderedDict[K, V] = OrderedDict()
+
+    def get(self, key: K) -> V | None:
+        if key not in self._items:
+            return None
+        self._items.move_to_end(key)
+        return self._items[key]
+
+    def set(self, key: K, value: V) -> None:
+        self._items[key] = value
+        self._items.move_to_end(key)
+        while len(self._items) > self.maxsize:
+            self._items.popitem(last=False)
+
+    def clear(self) -> None:
+        self._items.clear()
+
+    def __len__(self) -> int:
+        return len(self._items)
+
+
+@dataclass(slots=True)
+class ProjectPosthogState:
+    client: Posthog | None
+    settings: dict[str, bool]
+
+
+posthog_projects = LRUCache[int, ProjectPosthogState](PROJECT_POSTHOG_CACHE_SIZE)
 
 
 def _resolve_posthog_settings(settings: Optional[dict[str, Any]]) -> dict[str, Any]:
@@ -50,11 +86,10 @@ def initialize_posthog(settings: Optional[dict[str, Any]] = None, project_id: in
     }
 
     if project_id is not None:
-        posthog_settings_by_project[project_id] = resolved_flags
+        client: Posthog | None = None
         if host and token and (resolved_flags["enable_error_tracking"] or resolved_flags["enable_llm_analytics"]):
-            posthog_clients_by_project[project_id] = Posthog(project_api_key=token, host=host)
-        else:
-            posthog_clients_by_project.pop(project_id, None)
+            client = Posthog(project_api_key=token, host=host)
+        posthog_projects.set(project_id, ProjectPosthogState(client=client, settings=resolved_flags))
         return
 
     posthog_settings = resolved_flags
@@ -76,21 +111,20 @@ def _active_project_id() -> int | None:
 def get_posthog_client(project_id: int | None = None) -> Posthog | None:
     project_id = project_id if project_id is not None else _active_project_id()
     if project_id is not None:
-        return posthog_clients_by_project.get(project_id)
+        state = posthog_projects.get(project_id)
+        return state.client if state is not None else None
     return posthog_client
 
 
 def posthog_project_initialized(project_id: int) -> bool:
-    return project_id in posthog_settings_by_project
+    return posthog_projects.get(project_id) is not None
 
 
 def llm_analytics_enabled(project_id: int | None = None) -> bool:
     project_id = project_id if project_id is not None else _active_project_id()
     if project_id is not None:
-        return (
-            posthog_clients_by_project.get(project_id) is not None
-            and posthog_settings_by_project.get(project_id, {}).get("enable_llm_analytics", False)
-        )
+        state = posthog_projects.get(project_id)
+        return state is not None and state.client is not None and state.settings.get("enable_llm_analytics", False)
     return posthog_client is not None and posthog_settings.get("enable_llm_analytics", False)
 
 
@@ -111,7 +145,8 @@ def capture_exception(exc: Exception, request: Optional[Request] = None) -> None
     project_id = _active_project_id()
     client = get_posthog_client(project_id)
     if project_id is not None:
-        enable_error_tracking = posthog_settings_by_project.get(project_id, {}).get("enable_error_tracking", False)
+        state = posthog_projects.get(project_id)
+        enable_error_tracking = state is not None and state.settings.get("enable_error_tracking", False)
     else:
         enable_error_tracking = posthog_settings.get("enable_error_tracking", False)
     if client is None or not enable_error_tracking:

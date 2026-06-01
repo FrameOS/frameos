@@ -18,6 +18,7 @@ This file tracks the cloud-ready multitenancy work in progress.
 - [x] Make DB-backed settings reads require a project id.
 - [x] Scope worker deploy/build settings reads by frame project.
 - [x] Keep backend PostHog clients isolated by project.
+- [x] Bound lazy per-project PostHog memory with an LRU cache.
 - [x] Run focused backend/frontend checks and address regressions.
 
 Verified:
@@ -30,6 +31,8 @@ Verified:
 - `env TEST=1 DATABASE_URL=sqlite:////private/tmp/frameos-test-model-ws.db REDIS_URL=redis://127.0.0.1:6379/1 pytest app/models/tests/test_settings.py app/models/tests/test_frame.py app/models/tests/test_log.py app/models/tests/test_metrics.py app/ws/tests/test_websockets.py -q`
 - `env TEST=1 DATABASE_URL=sqlite:////private/tmp/frameos-mt-api-rerun-2.db REDIS_URL=redis://127.0.0.1:6379/1 pytest app/api/tests/test_templates.py app/api/tests/test_multitenancy.py app/api/tests/test_frames.py app/api/tests/test_log.py app/api/tests/test_settings.py -q`
 - `env TEST=1 DATABASE_URL=sqlite:////private/tmp/frameos-mt-models-rerun-2.db REDIS_URL=redis://127.0.0.1:6379/1 pytest app/models/tests/test_settings.py app/models/tests/test_template.py app/models/tests/test_repository.py app/models/tests/test_metrics.py app/models/tests/test_log.py app/models/tests/test_frame.py app/utils/tests/test_build_host.py app/utils/tests/test_posthog.py app/tasks/tests/test_task_frame_refresh.py -q`
+- `env TEST=1 DATABASE_URL=sqlite:////private/tmp/frameos-posthog-lru.db pytest app/utils/tests/test_posthog.py app/models/tests/test_settings.py -q`
+- `env TEST=1 DATABASE_URL=sqlite:////private/tmp/frameos-posthog-lru-api.db pytest app/api/tests/test_settings.py app/api/tests/test_multitenancy.py -q`
 
 The pytest commands used isolated SQLite database files and a local Redis container.
 
