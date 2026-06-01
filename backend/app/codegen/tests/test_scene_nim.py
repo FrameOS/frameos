@@ -218,3 +218,25 @@ def test_scene_library_wrapper_exports_scene_symbols():
     assert "proc frameos_scene_init*" in source
     assert "setSharedHostCallbacks(logHook, sendEventHook)" in source
     assert "proc frameos_scene_export*" in source
+
+
+def test_shared_scene_bundle_exports_scene_symbols_without_scene_wrapper_init():
+    frame = SimpleNamespace(
+        scenes=[
+            {
+                "id": "my-scene",
+                "name": "My Scene",
+                "default": True,
+                "settings": {"execution": "compiled"},
+            },
+        ]
+    )
+
+    source = write_scenes_nim(frame, compilation_mode="shared-scenes")
+
+    assert 'initSymbol: "frameos_scene_init_myscene"' in source
+    assert 'exportSymbol: "frameos_scene_export_myscene"' in source
+    assert "proc frameos_scene_init_myscene*" in source
+    assert "hostChannels.setSharedHostCallbacks(logHook, sendEventHook)" in source
+    assert ".frameos_scene_init(logHook, sendEventHook)" not in source
+    assert "result = cast[pointer](scene_myscene.exportedScene)" in source

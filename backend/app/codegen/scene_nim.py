@@ -1887,7 +1887,7 @@ def write_shared_scenes_bundle_nim(frame: Frame) -> str:
     for scene in compiled_scenes:
         wrapper_exports += f"""
 proc {_scene_bundle_init_symbol(scene)}*(logHook: HostLogProc, sendEventHook: HostSendEventProc) {{.cdecl, exportc, dynlib.}} =
-  scene_{scene_module_suffix(scene)}.frameos_scene_init(logHook, sendEventHook)
+  hostChannels.setSharedHostCallbacks(logHook, sendEventHook)
 
 proc {_scene_bundle_export_symbol(scene)}*(): pointer {{.cdecl, exportc, dynlib.}} =
   result = cast[pointer](scene_{scene_module_suffix(scene)}.exportedScene)
