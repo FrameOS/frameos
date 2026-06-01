@@ -10,6 +10,7 @@ import {
   DocumentDuplicateIcon,
   DocumentMagnifyingGlassIcon,
   FolderPlusIcon,
+  InformationCircleIcon,
   TagIcon,
 } from '@heroicons/react/24/outline'
 import { templatesLogic } from '../Templates/templatesLogic'
@@ -63,6 +64,11 @@ export function SceneDropDown({
       editSceneJSON(scene.id)
     }
   }
+  const openSceneSettings = () => {
+    if (navigation === 'workspace') {
+      openWorkspaceSceneUtility(frameId, scene.id, 'info')
+    }
+  }
 
   return (
     <DropdownMenu
@@ -75,6 +81,13 @@ export function SceneDropDown({
               label: 'Preview',
               onClick: () => openScenePreview(frameId, scene.id),
               icon: <PlayIcon className="w-5 h-5" />,
+            }
+          : null,
+        context === 'scenes' && navigation === 'workspace'
+          ? {
+              label: 'Scene settings',
+              onClick: openSceneSettings,
+              icon: <InformationCircleIcon className="w-5 h-5" />,
             }
           : null,
         context === 'scenes'
