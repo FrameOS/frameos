@@ -52,3 +52,8 @@ async def test_get_settings_dict_merges_defaults(db, default_project):
 def test_get_settings_dict_without_db():
     settings_map = get_settings_dict(None)
     assert settings_map["defaults"]["timezone"]
+
+
+def test_get_settings_dict_requires_project_id_with_db(db):
+    with pytest.raises(ValueError, match="project_id is required"):
+        get_settings_dict(db)

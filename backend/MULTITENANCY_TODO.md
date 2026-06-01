@@ -14,6 +14,10 @@ This file tracks the cloud-ready multitenancy work in progress.
 - [x] Add frontend project URL rewriting for project-owned API, image, download, and WebSocket paths.
 - [x] Add access-control tests that prove cross-project reads and writes are denied.
 - [x] Update tests and fixtures for project-scoped URLs and required tenant ids.
+- [x] Remove hidden non-project aliases for project-owned template and scene-image writes.
+- [x] Make DB-backed settings reads require a project id.
+- [x] Scope worker deploy/build settings reads by frame project.
+- [x] Keep backend PostHog clients isolated by project.
 - [x] Run focused backend/frontend checks and address regressions.
 
 Verified:
@@ -24,6 +28,8 @@ Verified:
 - `env TEST=1 DATABASE_URL=sqlite:////private/tmp/frameos-test-api-group.db REDIS_URL=redis://127.0.0.1:6379/1 pytest app/api/tests/test_settings.py app/api/tests/test_templates.py app/api/tests/test_repositories.py app/api/tests/test_frame_uploads.py app/api/tests/test_deploy_plan.py app/api/tests/test_apps.py app/api/tests/test_log.py app/api/tests/test_multitenancy.py -q`
 - `env TEST=1 DATABASE_URL=sqlite:////private/tmp/frameos-test-auth-users.db REDIS_URL=redis://127.0.0.1:6379/1 pytest app/api/tests/test_auth.py app/api/tests/test_users.py -q`
 - `env TEST=1 DATABASE_URL=sqlite:////private/tmp/frameos-test-model-ws.db REDIS_URL=redis://127.0.0.1:6379/1 pytest app/models/tests/test_settings.py app/models/tests/test_frame.py app/models/tests/test_log.py app/models/tests/test_metrics.py app/ws/tests/test_websockets.py -q`
+- `env TEST=1 DATABASE_URL=sqlite:////private/tmp/frameos-mt-api-rerun-2.db REDIS_URL=redis://127.0.0.1:6379/1 pytest app/api/tests/test_templates.py app/api/tests/test_multitenancy.py app/api/tests/test_frames.py app/api/tests/test_log.py app/api/tests/test_settings.py -q`
+- `env TEST=1 DATABASE_URL=sqlite:////private/tmp/frameos-mt-models-rerun-2.db REDIS_URL=redis://127.0.0.1:6379/1 pytest app/models/tests/test_settings.py app/models/tests/test_template.py app/models/tests/test_repository.py app/models/tests/test_metrics.py app/models/tests/test_log.py app/models/tests/test_frame.py app/utils/tests/test_build_host.py app/utils/tests/test_posthog.py app/tasks/tests/test_task_frame_refresh.py -q`
 
 The pytest commands used isolated SQLite database files and a local Redis container.
 

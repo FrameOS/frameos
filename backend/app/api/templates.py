@@ -21,7 +21,7 @@ from app.schemas.templates import (
     CreateTemplateRequest,
     UpdateTemplateRequest,
 )
-from app.api import api_project, api_with_auth, api_no_auth
+from app.api import api_project, api_no_auth
 from app.redis import get_redis
 from app.tenancy import current_project_id, get_user_project
 from app.utils.jwt_tokens import validate_scoped_token
@@ -54,16 +54,6 @@ def respond_with_template(template: Template):
         media_type='application/zip',
         headers={"Content-Disposition": f"attachment; filename={template_name}.zip"}
     )
-
-
-@api_with_auth.post("/templates", status_code=201, include_in_schema=False)
-async def create_template_legacy():
-    raise HTTPException(status_code=404, detail="Project scoped route required")
-
-
-@api_with_auth.get("/templates", include_in_schema=False)
-async def get_templates_legacy():
-    raise HTTPException(status_code=404, detail="Project scoped route required")
 
 
 @api_project.post("/templates", status_code=201)

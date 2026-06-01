@@ -4,8 +4,10 @@ from starlette import status
 
 from app.api.auth import get_current_user
 from app.database import get_db
+from app.models.settings import get_settings_dict
 from app.models.user import User
 from app.tenancy import ProjectContext, get_user_project, reset_current_project_context, set_current_project_context
+from app.utils.posthog import initialize_posthog, posthog_project_initialized
 
 
 async def get_current_project(
@@ -21,6 +23,8 @@ async def get_current_project(
     context = ProjectContext(project=project, organization=project.organization, user=current_user)
     token = set_current_project_context(context)
     request.state.project = context
+    if not posthog_project_initialized(project.id):
+        initialize_posthog(get_settings_dict(db, project_id=project.id), project_id=project.id)
     try:
         yield context
     finally:

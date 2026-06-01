@@ -37,10 +37,10 @@ def get_settings_dict(db: Optional[Session], project_id: Optional[int] = None) -
     settings = default_settings()
     if db is None:
         return settings
+    if project_id is None:
+        raise ValueError("project_id is required when loading settings from the database")
 
-    query = db.query(Settings)
-    if project_id is not None:
-        query = query.filter(Settings.project_id == project_id)
+    query = db.query(Settings).filter(Settings.project_id == project_id)
 
     for setting in query.all():
         if setting.key == "defaults" and isinstance(setting.value, dict):

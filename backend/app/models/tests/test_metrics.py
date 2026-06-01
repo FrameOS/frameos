@@ -29,7 +29,12 @@ async def test_new_metrics_trimming(mock_pub, db, redis):
     base_timestamp = datetime(2026, 1, 1)
     db.add_all(
         [
-            Metrics(frame_id=frame.id, metrics={"index": i}, timestamp=base_timestamp + timedelta(seconds=i))
+            Metrics(
+                project_id=frame.project_id,
+                frame_id=frame.id,
+                metrics={"index": i},
+                timestamp=base_timestamp + timedelta(seconds=i),
+            )
             for i in range(METRICS_RETAINED_PER_FRAME)
         ]
     )

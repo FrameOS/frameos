@@ -5,10 +5,13 @@ import pytest
 from app.database import SessionLocal
 from app.models.frame import Frame
 from app.tasks.utils import get_fresh_frame
+from app.tenancy import ensure_default_project
 
 
-def _frame(**overrides) -> Frame:
+def _frame(db, **overrides) -> Frame:
+    project = ensure_default_project(db)
     values = {
+        "project_id": project.id,
         "name": "WorkerFrame",
         "mode": "rpios",
         "frame_host": "localhost",
@@ -39,7 +42,7 @@ def _frame(**overrides) -> Frame:
 
 @pytest.mark.asyncio
 async def test_get_fresh_frame_refreshes_long_lived_worker_session(db):
-    frame = _frame()
+    frame = _frame(db)
     db.add(frame)
     db.commit()
     db.refresh(frame)

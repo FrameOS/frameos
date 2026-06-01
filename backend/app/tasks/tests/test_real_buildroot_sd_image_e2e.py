@@ -16,6 +16,7 @@ from app.models.log import Log
 from app.tasks import buildroot_image as buildroot_image_module
 from app.tasks.buildroot_image import BuildrootImageBuilder, ensure_buildroot_frame_defaults
 from app.tasks.prebuilt_deps import fetch_prebuilt_manifest, resolve_prebuilt_target
+from app.tenancy import ensure_default_project
 
 
 TRUE_VALUES = {"1", "true", "yes", "on"}
@@ -32,7 +33,9 @@ def _say(message: str) -> None:
 
 
 def _frame(db) -> Frame:
+    project = ensure_default_project(db)
     frame = Frame(
+        project_id=project.id,
         name="BuildrootE2E",
         mode="buildroot",
         frame_host="frame-buildroot-e2e.local",
@@ -107,7 +110,12 @@ def _frame(db) -> Frame:
 
 
 def _log_lines(db, frame: Frame) -> list[str]:
-    return [log.line for log in db.query(Log).filter(Log.frame_id == frame.id).all()]
+    return [
+        log.line
+        for log in db.query(Log)
+        .filter(Log.project_id == frame.project_id, Log.frame_id == frame.id)
+        .all()
+    ]
 
 
 def _file_md5sum(path: Path) -> str:

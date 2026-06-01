@@ -37,5 +37,5 @@ async def set_settings(data: SettingsUpdateRequest, db: Session = Depends(get_db
 
     updated_settings = get_settings_dict(db, project_id=project_id)
     if "posthog" in payload:
-        initialize_posthog(updated_settings)
+        initialize_posthog(updated_settings, project_id=project_id)
     return updated_settings

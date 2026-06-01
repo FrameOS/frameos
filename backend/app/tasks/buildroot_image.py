@@ -962,7 +962,7 @@ class BuildrootImageBuilder:
         copy_lgpio_runtime_libraries(overlay_dir)
 
     def _write_boot_authorized_keys(self, authorized_keys: Path) -> None:
-        settings = get_settings_dict(self.db)
+        settings = get_settings_dict(self.db, project_id=self.frame.project_id)
         selected_keys = select_ssh_keys_for_frame(self.frame, settings)
         public_keys = [
             key["public"].strip()

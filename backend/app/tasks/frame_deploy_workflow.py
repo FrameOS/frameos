@@ -411,7 +411,7 @@ class FrameDeployWorkflow:
             compilation_mode=compilation_mode,
         )
 
-        settings = get_settings_dict(self.db)
+        settings = get_settings_dict(self.db, project_id=self.frame.project_id)
         selected_keys = select_ssh_keys_for_frame(self.frame, settings)
         selected_public_keys = [key.get("public") for key in selected_keys if key.get("public")]
         known_public_keys = [key.get("public") for key in normalize_ssh_keys(settings) if key.get("public")]

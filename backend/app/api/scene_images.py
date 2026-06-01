@@ -10,7 +10,7 @@ from app.config import config
 from app.database import get_db
 from app.models.scene_image import SceneImage            # created earlier
 from app.models.frame import Frame
-from . import api_no_auth, api_project, api_with_auth
+from . import api_no_auth, api_project
 from app.utils.jwt_tokens import validate_scoped_token
 from app.api.auth import get_current_user_from_request
 from app.tenancy import current_project_id, get_user_project
@@ -160,11 +160,6 @@ async def get_scene_image(
 
     png = _generate_placeholder(new_width, new_height)
     return StreamingResponse(io.BytesIO(png), media_type="image/png", headers=SCENE_IMAGE_CACHE_HEADERS)
-
-
-@api_with_auth.post("/frames/{frame_id}/scene_images/{scene_id}", status_code=404, include_in_schema=False)
-async def upsert_scene_image_legacy():
-    raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Project scoped route required")
 
 
 @api_project.post("/frames/{frame_id}/scene_images/{scene_id}", status_code=201)
