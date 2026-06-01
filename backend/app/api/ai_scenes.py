@@ -762,6 +762,9 @@ async def chat_scene(
 
     chat = None
     if data.frame_id is not None:
+        frame = db.query(Frame).filter(Frame.project_id == project_id, Frame.id == data.frame_id).first()
+        if frame is None:
+            raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
         if data.chat_id:
             chat = db.query(Chat).filter(Chat.project_id == project_id, Chat.id == data.chat_id).first()
             if chat and chat.frame_id != data.frame_id:

@@ -2544,7 +2544,12 @@ async def api_frame_deploy_plan_preview(
 
 
 @api_project.post("/frames/{id:int}/fast_deploy")
-async def api_frame_fast_deploy_event(id: int, redis: Redis = Depends(get_redis)):
+async def api_frame_fast_deploy_event(
+    id: int,
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    _project_frame(db, id)
     try:
         from app.tasks import fast_deploy_frame
 

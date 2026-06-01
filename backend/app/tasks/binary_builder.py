@@ -216,7 +216,8 @@ class FrameBinaryBuilder:
                     COMPILATION_MODE_SHARED_SCENES if compiled_scene_count > 0 else COMPILATION_MODE_STATIC
                 )
 
-        build_host = get_build_host_config(self.db, self.frame.project_id)
+        project_id = getattr(self.frame, "project_id", None)
+        build_host = get_build_host_config(self.db, project_id)
         cross_compile_supported = can_cross_compile_target(target.arch)
         will_attempt_cross_compile = (
             allow_cross_compile and cross_compile_supported and not will_attempt_precompiled
@@ -245,7 +246,8 @@ class FrameBinaryBuilder:
         *,
         precompiled_install_all_drivers: bool = False,
     ) -> FrameBinaryBuildResult:
-        build_host = get_build_host_config(self.db, self.frame.project_id)
+        project_id = getattr(self.frame, "project_id", None)
+        build_host = get_build_host_config(self.db, project_id)
         build_dir = create_build_folder(self.temp_dir, self.deployer.build_id)
         if plan.will_attempt_precompiled:
             await self._log("stdout", f"{icon} Using precompiled FrameOS release")
