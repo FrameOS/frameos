@@ -4,11 +4,12 @@ import { subscriptionsPlugin } from 'kea-subscriptions'
 import { localStoragePlugin } from 'kea-localstorage'
 import { loadersPlugin } from 'kea-loaders'
 import { routerPlugin } from 'kea-router'
+import { hassioIngressParentRouterOptions, installHassioIngressParentRouter } from './utils/hassioIngressParentRouter'
 
 export function initKea() {
   resetContext({
     plugins: [
-      routerPlugin(),
+      routerPlugin(hassioIngressParentRouterOptions()),
       subscriptionsPlugin,
       localStoragePlugin(),
       loadersPlugin({
@@ -18,4 +19,5 @@ export function initKea() {
       }),
     ],
   })
+  installHassioIngressParentRouter()
 }
