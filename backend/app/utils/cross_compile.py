@@ -145,6 +145,15 @@ DISTRO_DEFAULTS = {
     "ubuntu": ("ubuntu", "26.04"),
     "buildroot": ("ubuntu", "22.04"),
 }
+DEBIAN_DOCKER_RELEASES = {"buster", "bullseye", "bookworm", "trixie"}
+UBUNTU_DOCKER_RELEASES = {
+    "22.04": "22.04",
+    "jammy": "22.04",
+    "24.04": "24.04",
+    "noble": "24.04",
+    "26.04": "26.04",
+    "resolute": "26.04",
+}
 
 
 LogFunc = Callable[[str, str], Awaitable[None]]
@@ -944,9 +953,19 @@ class CrossCompiler:
         if getattr(self.target, "image", None):
             return str(self.target.image)
         distro = self.target.distro or "unknown"
-        version = self.target.version or "latest"
         base, default_version = DISTRO_DEFAULTS.get(distro, ("debian", "bookworm"))
-        safe_version = version if re.match(r"^[A-Za-z0-9_.-]+$", version) else default_version
+
+        version = (self.target.version or "").lower().strip()
+        if not re.match(r"^[A-Za-z0-9_.-]+$", version):
+            safe_version = default_version
+        elif distro == "buildroot":
+            safe_version = default_version
+        elif base == "debian":
+            safe_version = version if version in DEBIAN_DOCKER_RELEASES else default_version
+        elif base == "ubuntu":
+            safe_version = UBUNTU_DOCKER_RELEASES.get(version, default_version)
+        else:
+            safe_version = version or default_version
         return f"{base}:{safe_version}"
 
     def _toolchain_image(self) -> str:
