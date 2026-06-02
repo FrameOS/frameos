@@ -85,7 +85,11 @@ if __name__ == '__main__':
     all_files = sorted(scenes_dir.glob('*.json'))
     all_files_by_stem = {file_path.stem: file_path for file_path in all_files}
     files = list(all_files)
-    black_scene = all_files_by_stem.get("black")
+    reset_scenes = [
+        scene_path
+        for scene_name in ("black", "blue")
+        if (scene_path := all_files_by_stem.get(scene_name)) is not None
+    ]
     if filter_str:
         files = [p for p in files if filter_str in p.stem.lower()]
     files = apply_shard(files)
@@ -94,8 +98,9 @@ if __name__ == '__main__':
         print(f"No scenes matched filter: '{filter_str}'" if filter_str else "No scenes found.")
         sys.exit(0)
 
-    if black_scene is not None and black_scene not in files:
-        files = [black_scene, *files]
+    missing_reset_scenes = [scene_path for scene_path in reset_scenes if scene_path not in files]
+    if missing_reset_scenes:
+        files = [*missing_reset_scenes, *files]
         files.sort()
     files = include_scene_dependencies(files, all_files_by_stem)
 

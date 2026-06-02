@@ -36,11 +36,21 @@ proc toPng(image: Image): string =
     return ""
   return encodePng(image.width, image.height, 4, pixels[0].addr, pixels.len * 4)
 
-proc buildHeaders(self: Driver, hashValue: string): HttpHeaders =
+proc addDefaultHeader(headers: var HttpHeaders, name: string, value: string) =
+  if not headers.hasKey(name):
+    headers[name] = value
+
+proc buildHeaders(self: Driver, image: Image, bodyBytes: int, hashValue: string): HttpHeaders =
   var headers = newHttpHeaders()
   for header in self.headers:
     if header.name.len > 0:
       headers.add(header.name, header.value)
+  headers.addDefaultHeader("Content-Type", "image/png")
+  headers.addDefaultHeader("X-FrameOS-Driver", self.name)
+  headers.addDefaultHeader("X-FrameOS-Image-Hash", hashValue)
+  headers.addDefaultHeader("X-FrameOS-Image-Width", $image.width)
+  headers.addDefaultHeader("X-FrameOS-Image-Height", $image.height)
+  headers.addDefaultHeader("X-FrameOS-Image-Bytes", $bodyBytes)
   return headers
 
 proc defaultRequest(url: string, body: string, headers: HttpHeaders): tuple[status: int, body: string] =
@@ -83,9 +93,7 @@ proc render*(self: Driver, image: Image) =
       return
     self.lastHash = hashValue
 
-    var headers = self.buildHeaders(hashValue)
-    if not headers.hasKey("Content-Type"):
-      headers["Content-Type"] = "image/png"
+    var headers = self.buildHeaders(image, pngData.len, hashValue)
     let requestFn = if requestHook != nil: requestHook else: defaultRequest
     let response = requestFn(self.url, pngData, headers)
     if response.status >= 200 and response.status < 300:

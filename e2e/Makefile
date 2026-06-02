@@ -30,14 +30,18 @@ snapshots:
 	cp -r ../frontend/schema/. ./tmp/frontend/schema && \
 	cp ../versions.json ./tmp/versions.json && \
 	cp -r ../frameos/* "$$tmpdir" && \
+	cp ./frame.json "$$tmpdir/frame.json" && \
 	rm -rf "$$tmpdir/src/scenes" && \
 	cp -r ./generated "$$tmpdir/src/scenes" && \
 	cp -r ./generated/scenes.json "$$tmpdir/" && \
-	(cd "$$tmpdir" && make build COMPILATION_MODE=shared SKIP_DRIVER_LIBRARIES=1) && \
+	(cd "$$tmpdir" && make build COMPILATION_MODE=shared) && \
 	cp "$$tmpdir/build/frameos" ./tmp/frameos-bin && \
 	rm -rf ./tmp/scenes && \
 	mkdir -p ./tmp/scenes && \
 	if [ -d "$$tmpdir/build/scenes" ]; then cp -r "$$tmpdir/build/scenes"/. ./tmp/scenes; fi && \
+	rm -rf ./tmp/drivers && \
+	mkdir -p ./tmp/drivers && \
+	if [ -d "$$tmpdir/build/drivers" ]; then cp -r "$$tmpdir/build/drivers"/. ./tmp/drivers; fi && \
 	cp "$$tmpdir/scenes.json" ./tmp/scenes.json
 
 	ls -l ./tmp/frameos-bin
