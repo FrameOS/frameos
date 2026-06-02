@@ -95,6 +95,7 @@ suite "metrics loop":
     check sampleJson["cpuCount"].getInt() == 1
     check sampleJson["openFileDescriptors"].getInt() == 9
     check sampleJson["runtime"]["active"].getBool() == false
+    check sampleJson["runtime"]["bootId"].getStr().len > 0
     check sampleJson["runtime"]["sequence"].getInt() == 0
 
   test "enabled interval includes active runtime diagnostics without debug mode":

@@ -280,9 +280,24 @@ async def test_api_frame_metrics_includes_bootup_markers(async_client, db, redis
     frame = await new_frame(db, redis, 'MetricsFrame', 'localhost', 'localhost')
     boot_timestamp = datetime(2026, 6, 2, 3, 4, 5)
     metric_timestamp = datetime(2026, 6, 2, 3, 5, 0)
+    reboot_metric_timestamp = datetime(2026, 6, 2, 3, 6, 0)
+    second_reboot_metric_timestamp = datetime(2026, 6, 2, 3, 7, 0)
     db.add_all(
         [
-            Metrics(frame_id=frame.id, timestamp=metric_timestamp, metrics={"load": [0.12]}),
+            Metrics(frame_id=frame.id, timestamp=metric_timestamp, metrics={"load": [0.12], "runtime": {"bootId": "boot-a"}}),
+            Metrics(
+                frame_id=frame.id,
+                timestamp=reboot_metric_timestamp,
+                metrics={"load": [0.18], "runtime": {"bootId": "boot-a"}},
+            ),
+            Metrics(
+                frame_id=frame.id,
+                timestamp=second_reboot_metric_timestamp,
+                metrics={
+                    "load": [0.24],
+                    "runtime": {"bootId": "boot-b"},
+                },
+            ),
             Log(frame_id=frame.id, type='webhook', line=json.dumps({"event": "bootup"}), timestamp=boot_timestamp),
             Log(frame_id=frame.id, type='webhook', line=json.dumps({"event": "metrics"}), timestamp=metric_timestamp),
             Log(frame_id=frame.id, type='webhook', line='not json bootup', timestamp=metric_timestamp),
@@ -294,11 +309,14 @@ async def test_api_frame_metrics_includes_bootup_markers(async_client, db, redis
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload['metrics'][0]['metrics'] == {"load": [0.12]}
+    assert payload['metrics'][0]['metrics'] == {"load": [0.12], "runtime": {"bootId": "boot-a"}}
+    reboot_metric = payload['metrics'][2]
     assert payload['reboots'] == [
         {
-            "timestamp": "2026-06-02T03:04:05+00:00",
-            "log_id": db.query(Log).filter_by(frame_id=frame.id, line=json.dumps({"event": "bootup"})).one().id,
+            "timestamp": "2026-06-02T03:07:00+00:00",
+            "metric_id": reboot_metric["id"],
+            "boot_id": "boot-b",
+            "previous_boot_id": "boot-a",
         }
     ]
 

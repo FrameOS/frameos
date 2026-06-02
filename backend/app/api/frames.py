@@ -2886,6 +2886,50 @@ async def api_frame_delete(
         raise HTTPException(status_code=404, detail="Frame not found")
 
 
+def _metric_boot_id(metric_values: Any) -> str | None:
+    if not isinstance(metric_values, dict):
+        return None
+    runtime = metric_values.get("runtime")
+    if isinstance(runtime, dict):
+        value = runtime.get("bootId") or runtime.get("boot_id")
+        if value is not None:
+            return str(value)
+    value = metric_values.get("bootId") or metric_values.get("boot_id")
+    return str(value) if value is not None else None
+
+
+def _metric_reboot_marker(metric: dict[str, Any], boot_id: str | None, previous_boot_id: str | None) -> dict[str, Any]:
+    metric_values = metric.get("metrics")
+    reboot = metric_values.get("reboot") if isinstance(metric_values, dict) else None
+    marker = {"timestamp": metric["timestamp"], "metric_id": metric["id"]}
+    if isinstance(reboot, dict):
+        if reboot.get("bootId") is not None:
+            marker["boot_id"] = reboot["bootId"]
+        if reboot.get("previousBootId") is not None:
+            marker["previous_boot_id"] = reboot["previousBootId"]
+    elif boot_id is not None:
+        marker["boot_id"] = boot_id
+        if previous_boot_id is not None:
+            marker["previous_boot_id"] = previous_boot_id
+    return marker
+
+
+def _reboot_markers_from_metrics(metrics_list: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    reboots = []
+    previous_boot_id = None
+    for metric in metrics_list:
+        metric_values = metric.get("metrics")
+        reboot = metric_values.get("reboot") if isinstance(metric_values, dict) else None
+        boot_id = _metric_boot_id(metric_values)
+        explicit_reboot = reboot is True or (isinstance(reboot, dict) and reboot.get("new"))
+        boot_changed = boot_id is not None and previous_boot_id is not None and boot_id != previous_boot_id
+        if explicit_reboot or boot_changed:
+            reboots.append(_metric_reboot_marker(metric, boot_id, previous_boot_id))
+        if boot_id is not None:
+            previous_boot_id = boot_id
+    return reboots
+
+
 @api_project.get("/frames/{id:int}/metrics", response_model=FrameMetricsResponse)
 async def api_frame_metrics(id: int, db: Session = Depends(get_db)):
     frame = _project_frame(db, id)
@@ -2894,27 +2938,6 @@ async def api_frame_metrics(id: int, db: Session = Depends(get_db)):
     try:
         metrics = db.query(Metrics).filter_by(project_id=frame.project_id, frame_id=id).order_by(Metrics.timestamp).all()
         metrics_list = [metric.to_dict() for metric in metrics]
-        bootup_logs = (
-            db.query(Log)
-            .filter_by(project_id=frame.project_id, frame_id=id, type="webhook")
-            .filter(Log.line.like('%"bootup"%'))
-            .order_by(Log.timestamp)
-            .all()
-        )
-        reboots = []
-        for log in bootup_logs:
-            try:
-                payload = json.loads(log.line)
-            except (TypeError, json.JSONDecodeError):
-                continue
-            if not isinstance(payload, dict) or payload.get("event") != "bootup":
-                continue
-            timestamp = log.timestamp
-            if timestamp.tzinfo is None:
-                timestamp = timestamp.replace(tzinfo=timezone.utc)
-            else:
-                timestamp = timestamp.astimezone(timezone.utc)
-            reboots.append({"timestamp": timestamp.isoformat(), "log_id": log.id})
-        return {"metrics": metrics_list, "reboots": reboots}
+        return {"metrics": metrics_list, "reboots": _reboot_markers_from_metrics(metrics_list)}
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))

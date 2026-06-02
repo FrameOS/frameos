@@ -1,4 +1,4 @@
-import json, locks, times
+import json, locks, os, random, times
 
 type
   RuntimeDiagnosticsState = object
@@ -25,6 +25,10 @@ var
   diagnosticsLock: Lock
   runtimeState: RuntimeDiagnosticsState
   nextSequence: int64
+
+let runtimeBootId = block:
+  randomize()
+  $epochTime().int64 & "-" & $getCurrentProcessId() & "-" & $rand(1_000_000_000)
 
 initLock(diagnosticsLock)
 
@@ -111,6 +115,7 @@ proc runtimeDiagnosticsSnapshot*(): JsonNode {.gcsafe.} =
     withLock diagnosticsLock:
       result = %*{
         "active": runtimeState.active,
+        "bootId": runtimeBootId,
         "mode": runtimeState.mode,
         "phase": runtimeState.phase,
         "sequence": runtimeState.sequence,
