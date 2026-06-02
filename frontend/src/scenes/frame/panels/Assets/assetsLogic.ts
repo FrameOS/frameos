@@ -89,8 +89,15 @@ function buildAssetTree(assets: AssetType[], rootName: string): AssetNode {
   return root
 }
 
+const systemFolderNames = new Set(['.frameos', '.thumbs'])
 const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '*.qoi', '.ppm', '.svg']
 const normalizedImageExtensions = imageExtensions.map((extension) => extension.replace('*', '').toLowerCase())
+
+function isSystemAssetPath(path: string): boolean {
+  const normalizedPath = path.replace(/\\/g, '/').replace(/^\.\//, '').replace(/^\/+/, '')
+  const firstPart = normalizedPath.split('/').filter(Boolean)[0]
+  return !!firstPart && systemFolderNames.has(firstPart)
+}
 
 function hasImageExtension(fileName: string): boolean {
   const normalizedName = fileName.toLowerCase()
@@ -250,6 +257,7 @@ export const assetsLogic = kea<assetsLogicType>([
     renameAsset: (oldPath: string, newPath: string) => ({ oldPath, newPath }),
     assetRenamed: (oldPath: string, newPath: string) => ({ oldPath, newPath }),
     createFolder: (path: string) => ({ path }),
+    toggleShowSystemFolders: true,
   }),
   loaders(({ actions, cache, props }) => ({
     assets: [
@@ -338,6 +346,62 @@ export const assetsLogic = kea<assetsLogicType>([
       },
     ],
   })),
+
+  reducers({
+    assetsRefreshing: [
+      false,
+      {
+        setAssetsRefreshing: (_, { assetsRefreshing }) => assetsRefreshing,
+      },
+    ],
+    showSystemFolders: [
+      false,
+      {
+        toggleShowSystemFolders: (state) => !state,
+      },
+    ],
+    assets: {
+      assetUploaded: (state, { asset }) =>
+        state.find((a) => a.path === asset.path)
+          ? state.map((a) => (a.path === asset.path ? asset : a))
+          : [...state, asset],
+      filesToUpload: (state, { files }) => {
+        const foundFiles: Set<string> = new Set()
+        const updatedFiles = state.map((asset) => {
+          if (files.includes(asset.path)) {
+            foundFiles.add(asset.path)
+            return { ...asset, size: -1, mtime: -1 }
+          }
+          return asset
+        })
+        for (const file of files) {
+          if (!foundFiles.has(file)) {
+            updatedFiles.push({ path: file, size: -1, mtime: -1 })
+          }
+        }
+        return updatedFiles
+      },
+      uploadProgress: (state, { path, size }) => {
+        const foundAsset = state.find((asset) => asset.path === path)
+        if (!foundAsset) {
+          return [...state, { path, size, mtime: -1 }]
+        }
+        return state.map((asset) => (asset.path === path ? { ...asset, size, mtime: -1 } : asset))
+      },
+      uploadFailure: (state, { path }) =>
+        state.map((asset) => (asset.path === path ? { ...asset, size: -2, mtime: -2 } : asset)),
+      assetDeleted: (state, { path }) => state.filter((a) => a.path !== path && !a.path.startsWith(`${path}/`)),
+      assetRenamed: (state, { oldPath, newPath }) => {
+        return state.map((a) =>
+          a.path === oldPath
+            ? { ...a, path: newPath }
+            : a.path.startsWith(`${oldPath}/`)
+            ? { ...a, path: `${newPath}${a.path.slice(oldPath.length)}` }
+            : a
+        )
+      },
+    },
+  }),
   selectors({
     cleanedAssets: [
       (s) => [s.assets, s.frame],
@@ -359,9 +423,12 @@ export const assetsLogic = kea<assetsLogicType>([
       },
     ],
     assetTree: [
-      (s) => [s.cleanedAssets, s.frame],
-      (cleanedAssets, frame) => {
-        return buildAssetTree(cleanedAssets, frame.assets_path ?? '/srv/assets')
+      (s) => [s.cleanedAssets, s.frame, s.showSystemFolders],
+      (cleanedAssets, frame, showSystemFolders) => {
+        const visibleAssets = showSystemFolders
+          ? cleanedAssets
+          : cleanedAssets.filter((asset) => !isSystemAssetPath(asset.path))
+        return buildAssetTree(visibleAssets, frame.assets_path ?? '/srv/assets')
       },
     ],
     assetStats: [(s) => [s.assetTree], (assetTree) => collectAssetStats(assetTree)],
@@ -524,55 +591,6 @@ export const assetsLogic = kea<assetsLogicType>([
       }
     },
   })),
-  reducers({
-    assetsRefreshing: [
-      false,
-      {
-        setAssetsRefreshing: (_, { assetsRefreshing }) => assetsRefreshing,
-      },
-    ],
-    assets: {
-      assetUploaded: (state, { asset }) =>
-        state.find((a) => a.path === asset.path)
-          ? state.map((a) => (a.path === asset.path ? asset : a))
-          : [...state, asset],
-      filesToUpload: (state, { files }) => {
-        const foundFiles: Set<string> = new Set()
-        const updatedFiles = state.map((asset) => {
-          if (files.includes(asset.path)) {
-            foundFiles.add(asset.path)
-            return { ...asset, size: -1, mtime: -1 }
-          }
-          return asset
-        })
-        for (const file of files) {
-          if (!foundFiles.has(file)) {
-            updatedFiles.push({ path: file, size: -1, mtime: -1 })
-          }
-        }
-        return updatedFiles
-      },
-      uploadProgress: (state, { path, size }) => {
-        const foundAsset = state.find((asset) => asset.path === path)
-        if (!foundAsset) {
-          return [...state, { path, size, mtime: -1 }]
-        }
-        return state.map((asset) => (asset.path === path ? { ...asset, size, mtime: -1 } : asset))
-      },
-      uploadFailure: (state, { path }) =>
-        state.map((asset) => (asset.path === path ? { ...asset, size: -2, mtime: -2 } : asset)),
-      assetDeleted: (state, { path }) => state.filter((a) => a.path !== path && !a.path.startsWith(`${path}/`)),
-      assetRenamed: (state, { oldPath, newPath }) => {
-        return state.map((a) =>
-          a.path === oldPath
-            ? { ...a, path: newPath }
-            : a.path.startsWith(`${oldPath}/`)
-            ? { ...a, path: `${newPath}${a.path.slice(oldPath.length)}` }
-            : a
-        )
-      },
-    },
-  }),
   afterMount(({ actions }) => {
     actions.loadAssets()
   }),
