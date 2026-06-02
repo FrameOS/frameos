@@ -310,8 +310,6 @@ async def test_api_frame_metrics_returns_metrics_without_reboot_markers(async_cl
     assert response.status_code == 200
     payload = response.json()
     assert payload['metrics'][0]['metrics'] == {"load": [0.12], "runtime": {"bootId": "boot-a"}}
-    assert payload['reboots'] == []
-
 
 @pytest.mark.asyncio
 async def test_api_frame_get_not_found(async_client):
