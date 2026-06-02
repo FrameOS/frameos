@@ -4,6 +4,7 @@ import { forms } from 'kea-forms'
 
 import type { loginLogicType } from './loginLogicType'
 import { urls } from '../../urls'
+import { clearCachedProjectId } from '../../utils/projectApi'
 
 export interface LoginLogicForm {
   email: string
@@ -40,6 +41,7 @@ export const loginLogic = kea<loginLogicType>([
             body: formData.toString(),
           })
           if (response.ok) {
+            clearCachedProjectId()
             window.location.href = urls.frames()
           } else {
             let error

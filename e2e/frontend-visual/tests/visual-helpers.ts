@@ -45,6 +45,22 @@ function withoutE2EInstallFrames(payload: any): any {
   }
 }
 
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+export function projectApiPathPattern(path: string): RegExp {
+  const normalizedPath = path.replace(/^\/api\/?/, '').replace(/^\//, '')
+  const pathPattern = normalizedPath.split('*').map(escapeRegex).join('[^/?#]+')
+  return new RegExp(`/api/(?:projects/\\d+/)?${pathPattern}(?:[?#].*)?$`)
+}
+
+function projectWebSocketPathPattern(path: string): RegExp {
+  const normalizedPath = path.replace(/^\/ws\/?/, '').replace(/^\//, '')
+  const pathPattern = normalizedPath.split('*').map(escapeRegex).join('[^/?#]+')
+  return new RegExp(`/ws/(?:projects/\\d+/)?${pathPattern}(?:[?#].*)?$`)
+}
+
 export async function cleanupE2EInstallFrames(page: Page): Promise<void> {
   const response = await page.request.get('/api/frames')
   if (!response.ok()) {
@@ -91,13 +107,13 @@ export async function prepareStablePage(page: Page, theme: 'light' | 'dark'): Pr
     { fixedNow, theme }
   )
 
-  await page.route('**/api/frames', async (route) => {
-    const response = await route.fetch()
+  await page.route(projectApiPathPattern('/frames'), async (route) => {
+    const response = await page.request.get(route.request().url())
     const payload = await response.json()
     await route.fulfill({ response, json: withoutE2EInstallFrames(payload) })
   })
 
-  await page.route('**/api/frames/1/image**', async (route) => {
+  await page.route(projectApiPathPattern('/frames/1/image'), async (route) => {
     await route.fulfill({
       body: livePreviewSvg,
       contentType: 'image/svg+xml',
@@ -114,7 +130,7 @@ export async function prepareStablePage(page: Page, theme: 'light' | 'dark'): Pr
   )
 
   await page.route(
-    '**/api/frames/1/metrics',
+    projectApiPathPattern('/frames/1/metrics'),
     fulfillJson({
       metrics: [
         {
@@ -189,10 +205,10 @@ export async function prepareStablePage(page: Page, theme: 'light' | 'dark'): Pr
     })
   )
 
-  await page.route('**/api/repositories', fulfillJson([]))
+  await page.route(projectApiPathPattern('/repositories'), fulfillJson([]))
 
   await page.route(
-    '**/api/frames/1/assets',
+    projectApiPathPattern('/frames/1/assets'),
     fulfillJson({
       assets: [
         { path: '/srv/assets', size: 4096, mtime: 1_779_535_200, is_dir: true },
@@ -207,7 +223,7 @@ export async function prepareStablePage(page: Page, theme: 'light' | 'dark'): Pr
   )
 
   await page.route(
-    '**/api/frames/1/ping**',
+    projectApiPathPattern('/frames/1/ping'),
     fulfillJson({
       ok: true,
       mode: 'icmp',
@@ -219,7 +235,7 @@ export async function prepareStablePage(page: Page, theme: 'light' | 'dark'): Pr
   )
 
   await page.route(
-    '**/api/frames/1/states',
+    projectApiPathPattern('/frames/1/states'),
     fulfillJson({
       sceneId: 'scene-dashboard',
       states: {
@@ -229,14 +245,14 @@ export async function prepareStablePage(page: Page, theme: 'light' | 'dark'): Pr
     })
   )
   await page.route(
-    '**/api/frames/1/state',
+    projectApiPathPattern('/frames/1/state'),
     fulfillJson({
       sceneId: 'scene-dashboard',
       state: { headline: 'Morning', accent: '#6f42c1' },
     })
   )
   await page.route(
-    '**/api/frames/1/uploaded_scenes',
+    projectApiPathPattern('/frames/1/uploaded_scenes'),
     fulfillJson({
       sceneId: 'scene-dashboard',
       scenes: [
@@ -246,12 +262,12 @@ export async function prepareStablePage(page: Page, theme: 'light' | 'dark'): Pr
       ],
     })
   )
-  await page.route('**/api/frames/1/event/**', fulfillText('OK'))
-  await page.route('**/api/frames/1/fast_deploy', fulfillJson({ message: 'Deployment queued' }))
-  await page.route('**/api/frames/1/deploy', fulfillJson({ message: 'Deployment queued' }))
-  await page.route('**/api/frames/1/assets/sync', fulfillJson({ message: 'Assets synced successfully' }))
+  await page.route(projectApiPathPattern('/frames/1/event/*'), fulfillText('OK'))
+  await page.route(projectApiPathPattern('/frames/1/fast_deploy'), fulfillJson({ message: 'Deployment queued' }))
+  await page.route(projectApiPathPattern('/frames/1/deploy'), fulfillJson({ message: 'Deployment queued' }))
+  await page.route(projectApiPathPattern('/frames/1/assets/sync'), fulfillJson({ message: 'Assets synced successfully' }))
   await page.route(
-    '**/api/frames/1/scene_source/**',
+    projectApiPathPattern('/frames/1/scene_source/*'),
     fulfillJson({
       source: [
         'import frameos/apps',
@@ -263,7 +279,7 @@ export async function prepareStablePage(page: Page, theme: 'light' | 'dark'): Pr
       ].join('\n'),
     })
   )
-  await page.route('**/api/apps/validate_source', fulfillJson({ errors: [] }))
+  await page.route(projectApiPathPattern('/apps/validate_source'), fulfillJson({ errors: [] }))
   await page.routeWebSocket('**/ws', (ws) => {
     ws.onMessage((message) => {
       if (String(message) === 'ping') {
@@ -271,7 +287,7 @@ export async function prepareStablePage(page: Page, theme: 'light' | 'dark'): Pr
       }
     })
   })
-  await page.routeWebSocket('**/ws/terminal/*', (ws) => {
+  await page.routeWebSocket(projectWebSocketPathPattern('/terminal/*'), (ws) => {
     ws.send('visual@frameos:~$ uptime\n 12:00 up 4 days, load average: 0.14, 0.10, 0.08\n')
     ws.onMessage((message) => ws.send(`visual@frameos:~$ ${String(message).trim()}\n`))
     setTimeout(() => {

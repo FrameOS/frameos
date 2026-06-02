@@ -5,7 +5,7 @@ type ProjectsListResponse = { projects: ProjectResponse[] }
 
 const PROJECT_ID_STORAGE_KEY = 'frameos.currentProjectId'
 
-let currentProjectId: number | null = readStoredProjectId()
+let currentProjectId: number | null = null
 let currentProjectPromise: Promise<number> | null = null
 
 function readStoredProjectId(): number | null {
@@ -22,6 +22,14 @@ function storeProjectId(projectId: number): void {
   if (typeof window !== 'undefined') {
     window.localStorage.setItem(PROJECT_ID_STORAGE_KEY, String(projectId))
   }
+}
+
+function selectProjectId(projects: ProjectResponse[]): number | null {
+  const storedProjectId = readStoredProjectId()
+  const storedProject = storedProjectId ? projects.find((project) => project.id === storedProjectId) : null
+  const projectId = storedProject?.id ?? projects[0]?.id
+
+  return Number.isInteger(projectId) && projectId > 0 ? projectId : null
 }
 
 export function cachedProjectId(): number | null {
@@ -50,8 +58,8 @@ export async function getCurrentProjectId(): Promise<number> {
           throw new Error('Unable to load projects')
         }
         const payload = (await response.json()) as ProjectsListResponse
-        const projectId = payload.projects?.[0]?.id
-        if (!Number.isInteger(projectId) || projectId <= 0) {
+        const projectId = selectProjectId(payload.projects ?? [])
+        if (!projectId) {
           throw new Error('No project available')
         }
         storeProjectId(projectId)

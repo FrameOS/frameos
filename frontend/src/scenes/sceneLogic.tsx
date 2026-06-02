@@ -6,6 +6,7 @@ import { getRoutes } from './scenes'
 import { getBasePath } from '../utils/getBasePath'
 import { urls } from '../urls'
 import { inHassioIngress } from '../utils/inHassioIngress'
+import { clearCachedProjectId } from '../utils/projectApi'
 
 // Note: this should not connect to any other logic that pulls in data, as it's used even when the user is not logged in
 export const sceneLogic = kea<sceneLogicType>([
@@ -44,6 +45,7 @@ export const sceneLogic = kea<sceneLogicType>([
       } catch (error) {
         console.error('Logout failed', error)
       }
+      clearCachedProjectId()
       location.href = urls.frames()
     },
   })),
