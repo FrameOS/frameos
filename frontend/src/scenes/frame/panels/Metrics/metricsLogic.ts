@@ -33,6 +33,9 @@ export interface TimeRange {
 export interface RebootMarker {
   timestamp: Date
   logId?: string
+  metricId?: string
+  bootId?: string
+  previousBootId?: string
 }
 
 interface MetricsResponseReboot {
@@ -117,13 +120,92 @@ function sortAndDedupeRebootMarkers(markers: RebootMarker[]): RebootMarker[] {
     if (!Number.isFinite(timestamp)) {
       return
     }
-    markersByKey.set(marker.logId ?? String(timestamp), marker)
+    markersByKey.set(marker.logId ?? marker.metricId ?? String(timestamp), marker)
   })
   return [...markersByKey.values()].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
 }
 
 function metricTimestamp(metric: MetricsType): number {
   return parseMetricTimestamp(metric.timestamp)
+}
+
+function metricBootId(metricValues: unknown): string | null {
+  if (!metricValues || typeof metricValues !== 'object' || Array.isArray(metricValues)) {
+    return null
+  }
+  const values = metricValues as Record<string, unknown>
+  const runtime = values.runtime
+  if (runtime && typeof runtime === 'object' && !Array.isArray(runtime)) {
+    const runtimeValues = runtime as Record<string, unknown>
+    const value = runtimeValues.bootId ?? runtimeValues.boot_id
+    if (value !== undefined && value !== null) {
+      return String(value)
+    }
+  }
+  const value = values.bootId ?? values.boot_id
+  return value === undefined || value === null ? null : String(value)
+}
+
+function metricRebootMarker(
+  metric: MetricsType,
+  bootId: string | null,
+  previousBootId: string | null
+): RebootMarker | null {
+  const timestamp = metricTimestamp(metric)
+  if (!Number.isFinite(timestamp)) {
+    return null
+  }
+
+  const marker: RebootMarker = {
+    timestamp: new Date(timestamp),
+    metricId: String(metric.id),
+  }
+  const reboot = metric.metrics?.reboot
+  if (reboot && typeof reboot === 'object' && !Array.isArray(reboot)) {
+    const rebootValues = reboot as Record<string, unknown>
+    const rebootBootId = rebootValues.bootId ?? rebootValues.boot_id
+    const rebootPreviousBootId = rebootValues.previousBootId ?? rebootValues.previous_boot_id
+    if (rebootBootId !== undefined && rebootBootId !== null) {
+      marker.bootId = String(rebootBootId)
+    }
+    if (rebootPreviousBootId !== undefined && rebootPreviousBootId !== null) {
+      marker.previousBootId = String(rebootPreviousBootId)
+    }
+  } else if (bootId !== null) {
+    marker.bootId = bootId
+    if (previousBootId !== null) {
+      marker.previousBootId = previousBootId
+    }
+  }
+  return marker
+}
+
+function rebootMarkersFromMetrics(metrics: MetricsType[]): RebootMarker[] {
+  const markers: RebootMarker[] = []
+  let previousBootId: string | null = null
+
+  metrics.forEach((metric) => {
+    const reboot = metric.metrics?.reboot
+    const bootId = metricBootId(metric.metrics)
+    const explicitReboot =
+      reboot === true ||
+      (Boolean(reboot) &&
+        typeof reboot === 'object' &&
+        !Array.isArray(reboot) &&
+        Boolean((reboot as Record<string, unknown>).new))
+    const bootChanged = bootId !== null && previousBootId !== null && bootId !== previousBootId
+    if (explicitReboot || bootChanged) {
+      const marker = metricRebootMarker(metric, bootId, previousBootId)
+      if (marker) {
+        markers.push(marker)
+      }
+    }
+    if (bootId !== null) {
+      previousBootId = bootId
+    }
+  })
+
+  return sortAndDedupeRebootMarkers(markers)
 }
 
 function metricIntervalMs(metric: MetricsType): number | null {
@@ -404,9 +486,8 @@ export const metricsLogic = kea<metricsLogicType>([
     setSelectedTimeRangePreset: (preset: MetricsTimeRangePreset) => ({ preset }),
     setCurrentTime: (currentTime: number) => ({ currentTime }),
     toggleMetricSeries: (category: string, seriesKey: string) => ({ category, seriesKey }),
-    setRebootMarkers: (markers: RebootMarker[]) => ({ markers }),
   }),
-  loaders(({ props, actions }) => ({
+  loaders(({ props }) => ({
     metrics: [
       [] as MetricsType[],
       {
@@ -417,15 +498,9 @@ export const metricsLogic = kea<metricsLogicType>([
               throw new Error('Failed to fetch logs')
             }
             const data = await response.json()
-            actions.setRebootMarkers(
-              Array.isArray(data.reboots)
-                ? sortAndDedupeRebootMarkers(data.reboots.map(parseRebootMarker).filter(Boolean) as RebootMarker[])
-                : []
-            )
             return data.metrics as MetricsType[]
           } catch (error) {
             console.error(error)
-            actions.setRebootMarkers([])
             return []
           }
         },
@@ -486,10 +561,9 @@ export const metricsLogic = kea<metricsLogicType>([
         return state
       },
     },
-    rebootMarkers: [
+    logRebootMarkers: [
       [] as RebootMarker[],
       {
-        setRebootMarkers: (_, { markers }) => sortAndDedupeRebootMarkers(markers),
         [socketLogic.actionTypes.newLog]: (state, { log }) => {
           if (log.frame_id !== props.frameId) {
             return state
@@ -510,6 +584,12 @@ export const metricsLogic = kea<metricsLogicType>([
     sortedMetrics: [
       (s) => [s.metrics],
       (metrics) => [...metrics].sort((a, b) => metricTimestamp(a) - metricTimestamp(b)),
+    ],
+    metricRebootMarkers: [(s) => [s.sortedMetrics], (metrics) => rebootMarkersFromMetrics(metrics)],
+    rebootMarkers: [
+      (s) => [s.metricRebootMarkers, s.logRebootMarkers],
+      (metricRebootMarkers, logRebootMarkers) =>
+        sortAndDedupeRebootMarkers([...metricRebootMarkers, ...logRebootMarkers]),
     ],
     metricsTimeRange: [
       (s) => [s.sortedMetrics, s.currentTime],

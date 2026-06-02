@@ -276,7 +276,7 @@ async def test_api_frame_clears_last_log_at_without_frame_activity_logs(async_cl
 
 
 @pytest.mark.asyncio
-async def test_api_frame_metrics_includes_bootup_markers(async_client, db, redis):
+async def test_api_frame_metrics_returns_metrics_without_reboot_markers(async_client, db, redis):
     frame = await new_frame(db, redis, 'MetricsFrame', 'localhost', 'localhost')
     boot_timestamp = datetime(2026, 6, 2, 3, 4, 5)
     metric_timestamp = datetime(2026, 6, 2, 3, 5, 0)
@@ -310,15 +310,7 @@ async def test_api_frame_metrics_includes_bootup_markers(async_client, db, redis
     assert response.status_code == 200
     payload = response.json()
     assert payload['metrics'][0]['metrics'] == {"load": [0.12], "runtime": {"bootId": "boot-a"}}
-    reboot_metric = payload['metrics'][2]
-    assert payload['reboots'] == [
-        {
-            "timestamp": "2026-06-02T03:07:00+00:00",
-            "metric_id": reboot_metric["id"],
-            "boot_id": "boot-b",
-            "previous_boot_id": "boot-a",
-        }
-    ]
+    assert payload['reboots'] == []
 
 
 @pytest.mark.asyncio
