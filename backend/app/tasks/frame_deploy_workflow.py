@@ -980,7 +980,7 @@ class FrameDeployWorkflow:
 
     async def _run_setup_in_directory(self, path: str) -> bool:
         await self.deployer.log("stdout", f"{icon} Running FrameOS device setup")
-        root_remounted_rw = await self._remount_root_rw_for_setup_if_needed()
+        root_remounted_rw = await self._remount_root_rw_if_needed("setup")
         try:
             setup_output: list[str] = []
             setup_status = await self.deployer.exec_command(
@@ -991,7 +991,7 @@ class FrameDeployWorkflow:
             )
         finally:
             if root_remounted_rw:
-                await self._remount_root_ro_after_setup()
+                await self._remount_root_ro("setup")
         if self._setup_completed_before_legacy_shared_driver_segfault(setup_status, setup_output):
             await self.deployer.log(
                 "stderr",
@@ -1011,7 +1011,7 @@ class FrameDeployWorkflow:
             raise RuntimeError(f"FrameOS setup failed with exit code {setup_status}")
         return False
 
-    async def _remount_root_rw_for_setup_if_needed(self) -> bool:
+    async def _remount_root_rw_if_needed(self, context: str) -> bool:
         status = await self.deployer.exec_command(
             "awk '$2 == \"/\" { split($4, opts, \",\"); for (i in opts) if (opts[i] == \"ro\") found=1 } END { exit found ? 0 : 1 }' /proc/mounts",
             raise_on_error=False,
@@ -1021,12 +1021,12 @@ class FrameDeployWorkflow:
         if status != 0:
             return False
 
-        await self.deployer.log("stdout", "Root filesystem is read-only; remounting read-write for setup")
+        await self.deployer.log("stdout", f"Root filesystem is read-only; remounting read-write for {context}")
         await self.deployer.exec_command("sudo mount -o remount,rw /")
         return True
 
-    async def _remount_root_ro_after_setup(self) -> None:
-        await self.deployer.log("stdout", "Restoring root filesystem to read-only after setup")
+    async def _remount_root_ro(self, context: str) -> None:
+        await self.deployer.log("stdout", f"Restoring root filesystem to read-only after {context}")
         await self.deployer.exec_command("sudo sync", raise_on_error=False)
         await self.deployer.exec_command("sudo mount -o remount,ro /")
 
@@ -1118,6 +1118,23 @@ class FrameDeployWorkflow:
         await self.deployer.log("stdout", f"{icon} Running final cleanup scripts")
         boot_config = str(post_deploy.get("boot_config_path") or "/boot/config.txt")
 
+        root_remounted_rw = await self._remount_root_rw_if_needed("final cleanup")
+        try:
+            await self._run_post_deploy_cleanup_writes(post_deploy=post_deploy, boot_config=boot_config)
+        finally:
+            if root_remounted_rw:
+                await self._remount_root_ro("final cleanup")
+
+        if post_deploy.get("final_action") == "reboot":
+            await self.deployer.log("stdinfo", f"{icon} Deployed! Rebooting device after boot config changes")
+            await self.deployer.exec_command("sudo reboot")
+        else:
+            await self.deployer.exec_command("sudo systemctl daemon-reload")
+            await self.deployer.log("stdinfo", f"{icon} Deployed! Restarting FrameOS")
+            await self.deployer.exec_command("sudo systemctl restart frameos.service")
+            await self.deployer.exec_command("sudo systemctl status frameos.service")
+
+    async def _run_post_deploy_cleanup_writes(self, *, post_deploy: dict[str, Any], boot_config: str) -> None:
         if post_deploy.get("low_memory_masks_apt_daily"):
             await self.deployer.exec_command(
                 "sudo systemctl mask apt-daily-upgrade && "
@@ -1160,15 +1177,6 @@ class FrameDeployWorkflow:
             await self._install_setup_json_reset_helper(setup_json_reset_path)
         else:
             await self._remove_setup_json_reset_helper()
-
-        if post_deploy.get("final_action") == "reboot":
-            await self.deployer.log("stdinfo", f"{icon} Deployed! Rebooting device after boot config changes")
-            await self.deployer.exec_command("sudo reboot")
-        else:
-            await self.deployer.exec_command("sudo systemctl daemon-reload")
-            await self.deployer.log("stdinfo", f"{icon} Deployed! Restarting FrameOS")
-            await self.deployer.exec_command("sudo systemctl restart frameos.service")
-            await self.deployer.exec_command("sudo systemctl status frameos.service")
 
     async def _install_setup_json_reset_helper(self, setup_json_reset_path: str) -> None:
         await self.deployer.log("stdout", f"{icon} Installing setup JSON reset helper")

@@ -969,6 +969,57 @@ async def test_run_post_deploy_cleanup_uses_planned_actions_without_recalculatin
 
 
 @pytest.mark.asyncio
+async def test_run_post_deploy_cleanup_remounts_read_only_root_around_cron_update():
+    frame = SimpleNamespace(
+        id=9,
+        name="BuildrootCleanupFrame",
+        reboot={"enabled": "true", "crontab": "0 4 * * *", "type": "frameos"},
+        last_successful_deploy_at=None,
+        last_successful_deploy={"frameos_version": "9.9.9"},
+        to_dict=lambda: {"id": 9, "name": "BuildrootCleanupFrame"},
+    )
+    deployer = RecordingDeployer()
+    deployer.root_read_only = True
+    workflow = FrameDeployWorkflow(
+        db=None,
+        redis=None,
+        frame=frame,
+        deployer=deployer,
+        temp_dir="",
+        binary_builder=FakeBinaryBuilder(),
+    )
+
+    await workflow._run_post_deploy_cleanup(
+        post_deploy={
+            "boot_config_path": "/boot/config.txt",
+            "low_memory_masks_apt_daily": False,
+            "reboot_schedule": {
+                "enabled": True,
+                "crontab": "0 4 * * *",
+                "type": "frameos",
+                "command": "systemctl restart frameos.service",
+                "needs_update": True,
+                "needs_remove": False,
+            },
+            "bootconfig_changes": [],
+            "disable_userconfig": False,
+            "disable_caddy_service": False,
+            "final_action": "restart_frameos",
+        }
+    )
+
+    root_check = next(index for index, command in enumerate(deployer.commands) if command.startswith("awk '$2 == \"/\" "))
+    remount_rw = deployer.commands.index("sudo mount -o remount,rw /")
+    cron_update = next(index for index, command in enumerate(deployer.commands) if "/etc/cron.d/frameos-reboot" in command)
+    sync = deployer.commands.index("sudo sync")
+    remount_ro = deployer.commands.index("sudo mount -o remount,ro /")
+    restart = deployer.commands.index("sudo systemctl restart frameos.service")
+    assert root_check < remount_rw < cron_update < sync < remount_ro < restart
+    assert ("stdout", "Root filesystem is read-only; remounting read-write for final cleanup") in deployer.logs
+    assert ("stdout", "Restoring root filesystem to read-only after final cleanup") in deployer.logs
+
+
+@pytest.mark.asyncio
 async def test_run_release_setup_uses_staged_release_and_marks_reboot_when_setup_requires_it():
     frame = SimpleNamespace(
         id=10,
