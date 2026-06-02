@@ -60,9 +60,9 @@ proc shouldRunTimezoneUpdate*(dt: DateTime, lastRunDate: string): bool =
     dt.minute == TimeZoneUpdateMinute and
     today != lastRunDate
 
-proc localTimezoneHash(assetsPath: string): string =
-  let hashPath = timeZoneHashPath(assetsPath)
-  let dataPath = timeZoneDataPath(assetsPath)
+proc localTimezoneHash(): string =
+  let hashPath = timeZoneHashPath()
+  let dataPath = timeZoneDataPath()
   if fileExists(hashPath) and fileExists(dataPath):
     try:
       return normalizeSha256(readFile(hashPath))
@@ -72,29 +72,29 @@ proc localTimezoneHash(assetsPath: string): string =
     return sha256File(dataPath)
   result = ""
 
-proc localTimezoneEtag(assetsPath: string): string =
-  let etagPath = timeZoneEtagPath(assetsPath)
+proc localTimezoneEtag(): string =
+  let etagPath = timeZoneEtagPath()
   if fileExists(etagPath):
     return readFile(etagPath).strip()
   result = ""
 
-proc writeTimezoneEtag(assetsPath, etag: string) =
+proc writeTimezoneEtag(etag: string) =
   if etag.len > 0:
-    writeFile(timeZoneEtagPath(assetsPath), etag & "\n")
+    writeFile(timeZoneEtagPath(), etag & "\n")
 
 proc logTimezoneUpdate(logger: Logger, payload: JsonNode) {.gcsafe.} =
   discard logger
   log(payload)
 
 proc runTimezoneUpdateOnce*(frameConfig: FrameConfig, logger: Logger): TimeZoneUpdateResult =
-  if frameConfig == nil or frameConfig.assetsPath.len == 0:
-    logTimezoneUpdate(logger, %*{"event": "timezone:update", "state": "skipped", "reason": "missing-assets-path"})
+  if frameConfig == nil:
+    logTimezoneUpdate(logger, %*{"event": "timezone:update", "state": "skipped", "reason": "missing-frame-config"})
     return tzUpdateSkipped
 
   let headers = newHttpHeaders([
     ("Accept", "application/gzip"),
   ])
-  createDir(parentDir(timeZoneDataPath(frameConfig.assetsPath)))
+  createDir(parentDir(timeZoneDataPath()))
   let remote = boundedHeadMetadata(
     TimeZoneDataGzipUrl,
     headers = headers,
@@ -102,8 +102,8 @@ proc runTimezoneUpdateOnce*(frameConfig: FrameConfig, logger: Logger): TimeZoneU
     maxBytes = TimeZoneGzipMaxBytes,
     maxSeconds = 10.0,
   )
-  if remote.etag.len > 0 and localTimezoneEtag(frameConfig.assetsPath) == remote.etag:
-    initTimeZone(frameConfig.assetsPath)
+  if remote.etag.len > 0 and localTimezoneEtag() == remote.etag:
+    initTimeZone()
     if loadedTimeZoneDataSource() == "override":
       logTimezoneUpdate(logger, %*{
         "event": "timezone:update",
@@ -113,7 +113,7 @@ proc runTimezoneUpdateOnce*(frameConfig: FrameConfig, logger: Logger): TimeZoneU
       })
       return tzUpdateUnchanged
 
-  let currentHash = localTimezoneHash(frameConfig.assetsPath)
+  let currentHash = localTimezoneHash()
   var compressed = boundedGetContent(
     TimeZoneDataGzipUrl,
     headers = headers,
@@ -128,9 +128,9 @@ proc runTimezoneUpdateOnce*(frameConfig: FrameConfig, logger: Logger): TimeZoneU
 
   let actualHash = sha256Hex(tzData)
   if currentHash == actualHash:
-    initTimeZone(frameConfig.assetsPath)
+    initTimeZone()
     if loadedTimeZoneDataSource() == "override":
-      writeTimezoneEtag(frameConfig.assetsPath, remote.etag)
+      writeTimezoneEtag(remote.etag)
       tzData.setLen(0)
       GC_fullCollect()
       logTimezoneUpdate(logger, %*{
@@ -142,8 +142,8 @@ proc runTimezoneUpdateOnce*(frameConfig: FrameConfig, logger: Logger): TimeZoneU
       })
       return tzUpdateUnchanged
 
-  let dataPath = timeZoneDataPath(frameConfig.assetsPath)
-  let hashPath = timeZoneHashPath(frameConfig.assetsPath)
+  let dataPath = timeZoneDataPath()
+  let hashPath = timeZoneHashPath()
   let tempPath = dataPath & ".tmp"
   try:
     writeFile(tempPath, tzData)
@@ -152,7 +152,7 @@ proc runTimezoneUpdateOnce*(frameConfig: FrameConfig, logger: Logger): TimeZoneU
       removeFile(dataPath)
     moveFile(tempPath, dataPath)
     writeFile(hashPath, actualHash & "\n")
-    writeTimezoneEtag(frameConfig.assetsPath, remote.etag)
+    writeTimezoneEtag(remote.etag)
   finally:
     if fileExists(tempPath):
       removeFile(tempPath)

@@ -75,7 +75,7 @@ proc fatalStartupRetryAction*(behavior: ErrorBehaviorConfig, firstFailureAt, now
 proc renderFatalStartupError*(fatalError: FatalStartupError) =
   try:
     let frameConfig = loadConfig()
-    initTimeZone(frameConfig.assetsPath)
+    initTimeZone()
     var logger = newLogger(frameConfig)
     var frameOS = FrameOS(
       frameConfig: frameConfig,
@@ -118,7 +118,7 @@ proc describeFatalStartupError*(err: ref CatchableError): FatalStartupError =
 
 proc newFrameOS*(): FrameOS =
   var frameConfig = loadConfig()
-  initTimeZone(frameConfig.assetsPath)
+  initTimeZone()
   var logger = newLogger(frameConfig)
   logger.log(%*{"event": "startup"})
   var metricsLogger = newMetricsLogger(frameConfig)

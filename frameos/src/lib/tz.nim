@@ -13,14 +13,16 @@ var timeZoneAliases: Table[string, string]
 var timeZoneDataLock: Lock
 initLock(timeZoneDataLock)
 
-proc timeZoneDataPath*(assetsPath: string): string =
-  assetsPath / ".frameos" / "tz" / "tzdata.json"
+const TimeZoneStateFolder = "state" / "tz"
 
-proc timeZoneHashPath*(assetsPath: string): string =
-  assetsPath / ".frameos" / "tz" / "tzdata.sha256"
+proc timeZoneDataPath*(): string =
+  TimeZoneStateFolder / "tzdata.json"
 
-proc timeZoneEtagPath*(assetsPath: string): string =
-  assetsPath / ".frameos" / "tz" / "tzdata.etag"
+proc timeZoneHashPath*(): string =
+  TimeZoneStateFolder / "tzdata.sha256"
+
+proc timeZoneEtagPath*(): string =
+  TimeZoneStateFolder / "tzdata.etag"
 
 proc loadedTimeZoneDataSource*(): string =
   if timeZoneDataLoadedFromOverride:
@@ -40,15 +42,14 @@ proc loadTimeZoneData*(tzData: string, fromOverride = false) {.gcsafe.} =
 proc loadTimeZoneDataFile*(path: string) =
   loadTimeZoneData(readFile(path), fromOverride = true)
 
-proc initTimeZone*(assetsPath = "") =
-  if assetsPath.len > 0:
-    let overridePath = timeZoneDataPath(assetsPath)
-    if fileExists(overridePath) and not timeZoneDataLoadedFromOverride:
-      try:
-        loadTimeZoneDataFile(overridePath)
-        return
-      except CatchableError as e:
-        echo "FrameOS warning: failed to load timezone data override " & overridePath & ": " & e.msg
+proc initTimeZone*() =
+  let overridePath = timeZoneDataPath()
+  if fileExists(overridePath) and not timeZoneDataLoadedFromOverride:
+    try:
+      loadTimeZoneDataFile(overridePath)
+      return
+    except CatchableError as e:
+      echo "FrameOS warning: failed to load timezone data override " & overridePath & ": " & e.msg
 
   if timeZoneDataLoaded:
     return
