@@ -1,8 +1,8 @@
 import { isInFrameAdminMode } from './frameAdmin'
-import { projectApiPathSync } from './projectApi'
+import { projectApiPathFromCache } from './projectApi'
 
 function frameAssetApiPrefix(frameId: number): string {
-  const prefix = isInFrameAdminMode() ? '/api/admin/frames' : projectApiPathSync('/api/frames')
+  const prefix = isInFrameAdminMode() ? '/api/admin/frames' : projectApiPathFromCache('/api/frames')
   return `${prefix}/${frameId}`
 }
 

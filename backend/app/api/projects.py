@@ -1,7 +1,7 @@
 from fastapi import Depends
 from sqlalchemy.orm import Session
 
-from app.api import api_with_auth
+from app.api import api_user
 from app import config as app_config
 from app.database import get_db
 from app.models.organization import OrganizationMember, Project
@@ -24,7 +24,7 @@ def _project_response(project: Project) -> ProjectResponse:
     )
 
 
-@api_with_auth.get("/projects", response_model=ProjectsListResponse)
+@api_user.get("/projects", response_model=ProjectsListResponse)
 async def list_projects(
     current_user: User | None = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -46,6 +46,6 @@ async def list_projects(
     return ProjectsListResponse(projects=[_project_response(project) for project in projects])
 
 
-@api_with_auth.get("/projects/{project_id}", response_model=ProjectResponse)
+@api_user.get("/projects/{project_id}", response_model=ProjectResponse)
 async def get_project(context: ProjectContext = Depends(get_current_project)):
     return _project_response(context.project)

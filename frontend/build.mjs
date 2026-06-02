@@ -25,11 +25,17 @@ const common = {
   bundle: true,
 }
 
+function isMonacoWorkerOutput(outputPath) {
+  return outputPath.startsWith('dist/static/monaco/') && outputPath.endsWith('.js')
+}
+
+function isSharedWorkerChunk(outputPath) {
+  return outputPath.startsWith('dist/static/chunk-') && outputPath.endsWith('.js')
+}
+
 function copyMonacoWorkerChunks(buildOutputs) {
   const outputs = buildOutputs.outputs ?? {}
-  const workerOutputKeys = Object.keys(outputs).filter(
-    (key) => key.startsWith('dist/static/monaco/') && key.endsWith('.js')
-  )
+  const workerOutputKeys = Object.keys(outputs).filter(isMonacoWorkerOutput)
   const chunkKeys = new Set()
   const visit = (key) => {
     const output = outputs[key]
@@ -37,7 +43,7 @@ function copyMonacoWorkerChunks(buildOutputs) {
       return
     }
     for (const imported of output.imports ?? []) {
-      if (imported.path.startsWith('dist/static/chunk-') && imported.path.endsWith('.js') && !chunkKeys.has(imported.path)) {
+      if (isSharedWorkerChunk(imported.path) && !chunkKeys.has(imported.path)) {
         chunkKeys.add(imported.path)
         visit(imported.path)
       }

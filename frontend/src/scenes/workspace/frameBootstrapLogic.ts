@@ -3,7 +3,7 @@ import copy from 'copy-to-clipboard'
 
 import { framesModel } from '../../models/framesModel'
 import { apiFetch } from '../../utils/apiFetch'
-import { cachedProjectId } from '../../utils/projectApi'
+import { cachedProjectId, projectApiPathForProject } from '../../utils/projectApi'
 import { showSuccessMessage } from '../../utils/workingMessage'
 
 import type { frameBootstrapLogicType } from './frameBootstrapLogicType'
@@ -19,9 +19,7 @@ interface FrameBootstrapApiResponse {
 
 function redactedFrameBootstrapUrl(scriptUrl: string, frameId: number): string {
   const projectId = cachedProjectId()
-  const frameBootstrapPath = projectId
-    ? `/api/projects/${projectId}/frame-bootstrap/${frameId}`
-    : `/api/frame-bootstrap/${frameId}`
+  const frameBootstrapPath = projectApiPathForProject(projectId, `/api/frame-bootstrap/${frameId}`)
 
   try {
     const url = new URL(scriptUrl)

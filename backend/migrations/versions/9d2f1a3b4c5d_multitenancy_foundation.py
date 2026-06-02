@@ -126,9 +126,10 @@ def upgrade():
 
     with op.batch_alter_table("settings", schema=None) as batch_op:
         batch_op.create_unique_constraint("uq_settings_project_key", ["project_id", "key"])
-    # The legacy assets.path uniqueness constraint is unnamed on SQLite, so
-    # batch_alter_table preserves it. Recreate the table explicitly so asset
-    # paths are unique per project instead of globally.
+    # The legacy assets table only had the id primary key and an unnamed
+    # assets.path uniqueness constraint. SQLite batch_alter_table preserves
+    # that unnamed constraint, so recreate the table explicitly and replace it
+    # with per-project path uniqueness.
     op.create_table(
         "assets_multitenant",
         sa.Column("id", sa.String(length=36), nullable=False),

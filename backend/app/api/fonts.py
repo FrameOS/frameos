@@ -3,11 +3,11 @@ import os
 from fastapi import Depends, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
+from app.api.project_scope import project_query
 from app.database import get_db
 from app.models.assets import Assets
 from app.models.fonts import gather_all_fonts_info, parse_font_info_in_memory
 from app.schemas.fonts import FontMetadata, FontsListResponse
-from app.tenancy import current_project_id
 from . import api_project
 
 @api_project.get("/fonts", response_model=FontsListResponse)
@@ -22,8 +22,8 @@ async def api_fonts_list(db: Session = Depends(get_db)):
 
     # 2) Gather DB fonts with path like "fonts/..."
     db_assets = (
-        db.query(Assets)
-        .filter(Assets.project_id == current_project_id(), Assets.path.like("fonts/%"))
+        project_query(db, Assets)
+        .filter(Assets.path.like("fonts/%"))
         .all()
     )
     for asset in db_assets:
@@ -60,7 +60,7 @@ async def api_fonts_download(font_name: str, db: Session = Depends(get_db)):
     If found locally, returns a FileResponse from disk.
     """
     # 1) Check DB for path="fonts/<font_name>"
-    asset = db.query(Assets).filter_by(project_id=current_project_id(), path=f"fonts/{font_name}").first()
+    asset = project_query(db, Assets).filter(Assets.path == f"fonts/{font_name}").first()
     if asset:
         if not asset.data:
             raise HTTPException(status_code=404, detail="Font asset has no data")

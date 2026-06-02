@@ -18,7 +18,7 @@ import { v4 as uuidv4 } from 'uuid'
 import { duplicateScenes } from '../../utils/duplicateScenes'
 import { apiFetch } from '../../utils/apiFetch'
 import { getBasePath } from '../../utils/getBasePath'
-import { projectApiPath, projectApiPathSync } from '../../utils/projectApi'
+import { projectApiPath, projectApiPathFromCache } from '../../utils/projectApi'
 import { entityImagesModel } from '../../models/entityImagesModel'
 import { arrangeSceneGraph } from '../../utils/arrangeNodes'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
@@ -640,7 +640,7 @@ async function resolveTemplateImageUrl(template: Partial<TemplateType>): Promise
     if (match) {
       return `/api/${match[1]}/image`
     }
-    return projectApiPathSync(template.image)
+    return projectApiPathFromCache(template.image)
   }
 
   return null

@@ -3,7 +3,7 @@ import { socketLogic } from '../scenes/socketLogic'
 import type { entityImagesModelType } from './entityImagesModelType'
 import { useEffect, useState } from 'react'
 import { getBasePath } from '../utils/getBasePath'
-import { projectApiPathSync } from '../utils/projectApi'
+import { projectApiPathFromCache } from '../utils/projectApi'
 
 export function useEntityImage(
   entity: string | null,
@@ -68,7 +68,7 @@ export const entityImagesModel = kea<entityImagesModelType>([
           }
 
           const timestamp = entityImageTimestamps[entity + '/' + subentity] ?? -1
-          return `${getBasePath()}${projectApiPathSync(`/api/${entity}/${subentity}`)}?t=${timestamp}`
+          return `${getBasePath()}${projectApiPathFromCache(`/api/${entity}/${subentity}`)}?t=${timestamp}`
         }
       },
     ],

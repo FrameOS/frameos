@@ -21,16 +21,13 @@ import { Area, Panel } from '../../../../types'
 import { socketLogic } from '../../../socketLogic'
 import { editAppLogic } from '../EditApp/editAppLogic'
 import { isFrameControlMode } from '../../../../utils/frameControlMode'
+import { projectApiPathForProject } from '../../../../utils/projectApi'
 
 import type { chatLogicType } from './chatLogicType'
 
 const MAX_HISTORY = 8
 const CHAT_PAGE_SIZE = 20
 const APP_CONTEXT_SEPARATOR = '::'
-
-function chatHistoryPath(path: string, projectId: number | null | undefined): string {
-  return projectId ? `/api/projects/${projectId}${path.slice('/api'.length)}` : path
-}
 
 function frameProjectId(frameForm: Partial<FrameType>, frame: FrameType | null | undefined): number | null {
   return frameForm.project_id ?? frame?.project_id ?? null
@@ -639,7 +636,10 @@ export const chatLogic = kea<chatLogicType>([
           return
         }
         const response = await apiFetch(
-          chatHistoryPath(`/api/ai/chats?frameId=${props.frameId}&limit=${CHAT_PAGE_SIZE}&offset=0`, projectId)
+          projectApiPathForProject(
+            projectId,
+            `/api/ai/chats?frameId=${props.frameId}&limit=${CHAT_PAGE_SIZE}&offset=0`
+          )
         )
         if (!response.ok) {
           const payload = await response.json().catch(() => ({}))
@@ -669,9 +669,9 @@ export const chatLogic = kea<chatLogicType>([
           return
         }
         const response = await apiFetch(
-          chatHistoryPath(
+          projectApiPathForProject(
+            projectId,
             `/api/ai/chats?frameId=${props.frameId}&limit=${CHAT_PAGE_SIZE}&offset=${values.chatsOffset}`,
-            projectId
           )
         )
         if (!response.ok) {
@@ -778,7 +778,7 @@ export const chatLogic = kea<chatLogicType>([
           actions.loadChatMessagesSuccess(chatId, [])
           return
         }
-        const response = await apiFetch(chatHistoryPath(`/api/ai/chats/${chatId}`, projectId))
+        const response = await apiFetch(projectApiPathForProject(projectId, `/api/ai/chats/${chatId}`))
         if (!response.ok) {
           const payload = await response.json().catch(() => ({}))
           throw new Error(payload?.detail || 'Failed to load chat history')

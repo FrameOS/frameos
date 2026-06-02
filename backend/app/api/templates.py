@@ -11,6 +11,7 @@ from fastapi.responses import Response, StreamingResponse, JSONResponse
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.api.project_scope import project_get_or_404, project_query
 from app.config import config
 from arq import ArqRedis as Redis
 from app.models.template import Template
@@ -21,7 +22,7 @@ from app.schemas.templates import (
     CreateTemplateRequest,
     UpdateTemplateRequest,
 )
-from app.api import api_project, api_no_auth
+from app.api import api_project, api_open
 from app.redis import get_redis
 from app.tenancy import current_project_id, get_user_project
 from app.utils.jwt_tokens import validate_scoped_token
@@ -224,7 +225,7 @@ async def create_template(
 
 @api_project.get("/templates", response_model=TemplatesListResponse)
 async def get_templates(db: Session = Depends(get_db)):
-    templates = db.query(Template).filter_by(project_id=current_project_id()).all()
+    templates = project_query(db, Template).all()
     result = []
     for t in templates:
         d = t.to_dict()
@@ -234,13 +235,11 @@ async def get_templates(db: Session = Depends(get_db)):
 
 @api_project.get("/templates/{template_id}", response_model=TemplateResponse)
 async def get_template(template_id: str, db: Session = Depends(get_db)):
-    template = db.query(Template).filter_by(project_id=current_project_id(), id=template_id).first()
-    if not template:
-        raise HTTPException(status_code=404, detail="Template not found")
+    template = project_get_or_404(db, Template, template_id, detail="Template not found")
     d = template.to_dict()
     return d
 
-@api_no_auth.get("/projects/{project_id}/templates/{template_id}/image")
+@api_open.get("/projects/{project_id}/templates/{template_id}/image")
 async def get_template_image(project_id: int, template_id: str, request: Request, token: str | None = None, db: Session = Depends(get_db)):
     if config.HASSIO_RUN_MODE != 'ingress':
         # All modes except ingress require a token in the url or authenticated session
@@ -259,15 +258,13 @@ async def get_template_image(project_id: int, template_id: str, request: Request
 
 @api_project.get("/templates/{template_id}/export")
 async def export_template(template_id: str, db: Session = Depends(get_db)):
-    template = db.query(Template).filter_by(project_id=current_project_id(), id=template_id).first()
+    template = project_get_or_404(db, Template, template_id, detail="Template not found")
     return respond_with_template(template)
 
 
 @api_project.patch("/templates/{template_id}", response_model=TemplateResponse)
 async def update_template(template_id: str, data: UpdateTemplateRequest, db: Session = Depends(get_db)):
-    template = db.query(Template).filter_by(project_id=current_project_id(), id=template_id).first()
-    if not template:
-        raise HTTPException(status_code=404, detail="Template not found")
+    template = project_get_or_404(db, Template, template_id, detail="Template not found")
 
     if data.name is not None:
         template.name = data.name
@@ -282,9 +279,7 @@ async def update_template(template_id: str, data: UpdateTemplateRequest, db: Ses
 
 @api_project.delete("/templates/{template_id}")
 async def delete_template(template_id: str, db: Session = Depends(get_db)):
-    template = db.query(Template).filter_by(project_id=current_project_id(), id=template_id).first()
-    if not template:
-        raise HTTPException(status_code=404, detail="Template not found")
+    template = project_get_or_404(db, Template, template_id, detail="Template not found")
     db.delete(template)
     db.commit()
     return {"message": "Template deleted successfully"}

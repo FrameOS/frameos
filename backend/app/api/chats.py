@@ -1,9 +1,8 @@
-from http import HTTPStatus
-
-from fastapi import Depends, HTTPException, Query
+from fastapi import Depends, Query
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.api.project_scope import project_get_or_404, project_query
 from app.models.frame import Frame
 from app.models.chat import Chat, ChatMessage
 from app.schemas.chats import ChatCreateRequest, ChatDetailResponse, ChatListResponse, ChatSummary
@@ -14,9 +13,7 @@ from . import api_project
 @api_project.post("/ai/chats", response_model=ChatSummary)
 async def create_chat(data: ChatCreateRequest, db: Session = Depends(get_db)):
     project_id = current_project_id()
-    frame = db.query(Frame).filter_by(project_id=project_id, id=data.frame_id).first()
-    if not frame:
-        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
+    project_get_or_404(db, Frame, data.frame_id, detail="Frame not found")
 
     context_type = data.context_type
     context_id = data.context_id
@@ -44,11 +41,8 @@ async def list_chats(
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
 ):
-    project_id = current_project_id()
-    frame = db.query(Frame).filter_by(project_id=project_id, id=frame_id).first()
-    if not frame:
-        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
-    base_query = db.query(Chat).filter(Chat.project_id == project_id, Chat.frame_id == frame_id, Chat.messages.any())
+    project_get_or_404(db, Frame, frame_id, detail="Frame not found")
+    base_query = project_query(db, Chat).filter(Chat.frame_id == frame_id, Chat.messages.any())
     total = base_query.count()
     chats = (
         base_query.order_by(Chat.updated_at.desc(), Chat.created_at.desc())
@@ -63,13 +57,10 @@ async def list_chats(
 
 @api_project.get("/ai/chats/{chat_id}", response_model=ChatDetailResponse)
 async def get_chat(chat_id: str, db: Session = Depends(get_db)):
-    project_id = current_project_id()
-    chat = db.query(Chat).filter(Chat.project_id == project_id, Chat.id == chat_id).first()
-    if not chat:
-        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Chat not found")
+    chat = project_get_or_404(db, Chat, chat_id, detail="Chat not found")
     messages = (
-        db.query(ChatMessage)
-        .filter(ChatMessage.project_id == project_id, ChatMessage.chat_id == chat_id)
+        project_query(db, ChatMessage)
+        .filter(ChatMessage.chat_id == chat_id)
         .order_by(ChatMessage.created_at.asc())
         .all()
     )

@@ -10,7 +10,7 @@ from app.config import config
 from app.database import get_db
 from app.models.scene_image import SceneImage            # created earlier
 from app.models.frame import Frame
-from . import api_no_auth, api_project
+from . import api_open, api_project
 from app.utils.jwt_tokens import validate_scoped_token
 from app.api.auth import get_current_user_from_request
 from app.tenancy import current_project_id, get_user_project
@@ -85,7 +85,7 @@ def _generate_thumbnail(image_bytes: bytes) -> tuple[bytes, int, int]:
         return buf.read(), new_width, new_height
 
 
-@api_no_auth.get("/projects/{project_id}/frames/{frame_id}/scene_images/{scene_id}")
+@api_open.get("/projects/{project_id}/frames/{frame_id}/scene_images/{scene_id}")
 async def get_scene_image(
     project_id: int,
     frame_id: int,

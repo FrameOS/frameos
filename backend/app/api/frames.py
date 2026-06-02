@@ -128,10 +128,11 @@ from app.tasks.buildroot_image import (
     validate_buildroot_wifi_credentials,
 )
 from app.codegen.drivers_nim import frame_compilation_mode
+from app.api.project_scope import project_get_or_404
 from app.utils.local_exec import exec_local_command
 from app.utils.jwt_tokens import validate_scoped_token
 from app.tenancy import current_project_id, get_user_project
-from . import api_project, api_no_auth
+from . import api_project, api_open
 
 AGENT_TASK_TRANSPORTS = {"auto", "agent", "ssh"}
 
@@ -160,10 +161,7 @@ def _not_found():
 
 
 def _project_frame(db: Session, frame_id: int) -> Frame:
-    frame = db.query(Frame).filter_by(project_id=current_project_id(), id=frame_id).first()
-    if frame is None:
-        _not_found()
-    return frame
+    return project_get_or_404(db, Frame, frame_id, detail="Frame not found")
 
 
 async def _public_project_frame(
@@ -1467,7 +1465,7 @@ async def api_frame_local_binary_zip(
     return StreamingResponse(sender(), headers=headers, media_type="application/zip")
 
 
-@api_no_auth.get("/projects/{project_id}/frames/{id:int}/asset")
+@api_open.get("/projects/{project_id}/frames/{id:int}/asset")
 async def api_frame_get_asset(
     project_id: int,
     id: int,
@@ -1662,7 +1660,7 @@ async def api_frame_download_full_logs(id: int, db: Session = Depends(get_db)):
     )
 
 
-@api_no_auth.api_route("/projects/{project_id}/frames/{id:int}/image", methods=["GET", "HEAD"])
+@api_open.api_route("/projects/{project_id}/frames/{id:int}/image", methods=["GET", "HEAD"])
 async def api_frame_get_image(
     project_id: int,
     id: int,

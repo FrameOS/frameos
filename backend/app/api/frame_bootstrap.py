@@ -14,12 +14,12 @@ from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.config import config, normalize_ingress_path
+from app.api.project_scope import project_get_or_404
 from app.database import get_db
 from app.models.frame import Frame, get_frame_json, get_interpreted_scenes_json, update_frame
 from app.redis import get_redis
 from app.schemas.frames import FrameBootstrapResponse
 from app.tasks.precompiled_frameos import RELEASE_BASE_URL, frame_compiled_scene_count, release_version
-from app.tenancy import current_project_id
 from app.utils.token import secure_token
 
 from . import api_project, api_public
@@ -438,9 +438,7 @@ async def api_frame_bootstrap_command(
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
-    frame = db.query(Frame).filter_by(project_id=current_project_id(), id=id).first()
-    if not frame:
-        _not_found()
+    frame = project_get_or_404(db, Frame, id, detail="Frame not found")
     if (frame.mode or "rpios") != "rpios":
         _bad_request("FrameOS bootstrap is only supported for Raspberry Pi OS frames")
 

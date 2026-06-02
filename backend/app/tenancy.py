@@ -53,6 +53,9 @@ def ensure_default_project_for_user(db: Session, user: User) -> Project:
         .first()
     )
     if existing_project:
+        # Legacy and migration-created installs may have a project before the
+        # first authenticated user exists. Adopt that orphaned project instead
+        # of creating a parallel empty default project.
         db.add(OrganizationMember(organization_id=existing_project.organization_id, user_id=user.id, role="owner"))
         db.commit()
         db.refresh(existing_project)

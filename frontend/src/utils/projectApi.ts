@@ -96,6 +96,7 @@ export function isProjectScopedApiPath(path: string): boolean {
     '/api/apps',
     '/api/assets',
     '/api/fonts',
+    '/api/frame-bootstrap',
     '/api/frames',
     '/api/repositories',
     '/api/settings',
@@ -103,8 +104,12 @@ export function isProjectScopedApiPath(path: string): boolean {
   ].some((prefix) => path === prefix || path.startsWith(prefix + '/') || path.startsWith(prefix + '?'))
 }
 
-export function projectApiPathSync(path: string): string {
+export function projectApiPathFromCache(path: string): string {
   const projectId = cachedProjectId()
+  return projectApiPathForProject(projectId, path)
+}
+
+export function projectApiPathForProject(projectId: number | null | undefined, path: string): string {
   if (!projectId || !isProjectScopedApiPath(path)) {
     return path
   }
@@ -116,7 +121,7 @@ export async function projectApiPath(path: string): Promise<string> {
     return path
   }
   const projectId = await getCurrentProjectId()
-  return `/api/projects/${projectId}${path.slice('/api'.length)}`
+  return projectApiPathForProject(projectId, path)
 }
 
 export async function projectWebSocketPath(path: string): Promise<string> {

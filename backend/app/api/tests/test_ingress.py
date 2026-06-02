@@ -71,11 +71,11 @@ async def test_no_hassio_env(clear_env):
 
     client = TestClient(app)
 
-    # /api/has_first_user => belongs to api_no_auth => no token => 200 OK
+    # /api/has_first_user => belongs to api_open => no token => 200 OK
     resp_no_auth = client.get("/api/has_first_user")
     assert resp_no_auth.status_code == 200
 
-    # /api/projects => belongs to api_with_auth => must have token => 401
+    # /api/projects => belongs to api_user => must have token => 401
     resp_auth_needed = client.get("/api/projects")
     assert resp_auth_needed.status_code == 401
 
@@ -105,7 +105,7 @@ async def test_hassio_run_mode_public(clear_env, monkeypatch):
     resp_log = client.post("/api/log")
     assert resp_log.status_code != 404, "POST /api/log should be mounted in 'public' mode."
 
-    # /api/projects => from api_with_auth => 404
+    # /api/projects => from api_user => 404
     resp_frames = client.get("/api/projects")
     assert resp_frames.status_code == 404
 
@@ -117,8 +117,8 @@ async def test_hassio_run_mode_public(clear_env, monkeypatch):
 @pytest.mark.asyncio
 async def test_hassio_run_mode_ingress(clear_env, monkeypatch):
     """
-    HASSIO_RUN_MODE=ingress with a HASSIO_TOKEN means that all three routers
-    (api_public, api_no_auth, api_with_auth) are mounted behind the base path,
+    HASSIO_RUN_MODE=ingress with a HASSIO_TOKEN means that all routers
+    (api_public, api_open, api_user, api_project) are mounted behind the base path,
     but none require a token because Home Assistant handles authentication upstream.
     """
     custom_ingress = "/hostname/ingress"

@@ -18,7 +18,7 @@ from app.utils.session_cookie import (
     decode_session_cookie_value,
 )
 
-from . import api_no_auth, api_with_auth
+from . import api_open, api_user
 
 SECRET_KEY = app_config.config.SECRET_KEY
 ALGORITHM = "HS256"
@@ -142,7 +142,7 @@ async def get_current_user(
         raise credentials_exception
     return user
 
-@api_no_auth.post("/login", response_model=Token)
+@api_open.post("/login", response_model=Token)
 async def login(
     request: Request,
     response: Response,
@@ -186,7 +186,7 @@ async def login(
     )
     return {"access_token": access_token, "token_type": "bearer"}
 
-@api_no_auth.post("/signup")
+@api_open.post("/signup")
 async def signup(request: Request, data: UserSignup, response: Response, db: Session = Depends(get_db)):
     if app_config.config.HASSIO_RUN_MODE is not None:
         raise HTTPException(status_code=401, detail="Signup not allowed with HASSIO_RUN_MODE")
@@ -242,7 +242,7 @@ async def signup(request: Request, data: UserSignup, response: Response, db: Ses
     return {"success": True, "access_token": access_token, "token_type": "bearer"}
 
 
-@api_with_auth.post("/logout")
+@api_user.post("/logout")
 async def logout(response: Response):
     response.delete_cookie(key=SESSION_COOKIE_NAME)
     return {"success": True}

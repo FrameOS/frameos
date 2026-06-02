@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from urllib.parse import urlparse
 
 from app.database import get_db
+from app.api.project_scope import project_get_or_404, project_query
 from app.models.settings import Settings
 from app.models.repository import Repository
 from app.tenancy import current_project_id
@@ -24,7 +25,7 @@ from app.schemas.repositories import (
 from app.config import config
 from app.utils.jwt_tokens import validate_scoped_token
 from app.api.auth import get_current_user_from_request
-from . import api_project, api_with_auth, api_no_auth
+from . import api_project, api_user, api_open
 
 FRAMEOS_SAMPLES_URL = "https://repo.frameos.net/samples/repository.json"
 FRAMEOS_GALLERY_URL = "https://repo.frameos.net/gallery/repository.json"
@@ -121,7 +122,7 @@ async def create_repository(data: RepositoryCreateRequest, db: Session = Depends
         logging.error(f'Database error: {e}')
         raise HTTPException(status_code=500, detail="Database error")
 
-@api_with_auth.get("/repositories/system", response_model=RepositoriesListResponse)
+@api_user.get("/repositories/system", response_model=RepositoriesListResponse)
 async def get_system_repositories(db: Session = Depends(get_db)):
     if not SYSTEM_REPOSITORIES_PATH.exists():
         return []
@@ -144,7 +145,7 @@ async def get_system_repositories(db: Session = Depends(get_db)):
     return repositories
 
 
-@api_no_auth.get("/repositories/system/{repository_slug}/templates/{template_slug}/image")
+@api_open.get("/repositories/system/{repository_slug}/templates/{template_slug}/image")
 async def get_system_repository_image(
     repository_slug: str,
     template_slug: str,
@@ -219,7 +220,7 @@ async def get_repositories(db: Session = Depends(get_db)):
             db.add(Settings(project_id=project_id, key="@system/repository_global_cleanup", value="true"))
             db.commit()
 
-        repositories = db.query(Repository).filter_by(project_id=project_id).all()
+        repositories = project_query(db, Repository).all()
 
         for r in repositories:
             # if haven't refreshed in a day
@@ -235,9 +236,7 @@ async def get_repositories(db: Session = Depends(get_db)):
 @api_project.get("/repositories/{repository_id}", response_model=RepositoryResponse)
 async def get_repository(repository_id: str, db: Session = Depends(get_db)):
     try:
-        repository = db.query(Repository).filter_by(project_id=current_project_id(), id=repository_id).first()
-        if not repository:
-            raise HTTPException(status_code=404, detail="Repository not found")
+        repository = project_get_or_404(db, Repository, repository_id, detail="Repository not found")
         repo_dict = repository.to_dict()
         return repo_dict
     except SQLAlchemyError as e:
@@ -247,9 +246,7 @@ async def get_repository(repository_id: str, db: Session = Depends(get_db)):
 @api_project.patch("/repositories/{repository_id}", response_model=RepositoryResponse)
 async def update_repository(repository_id: str, data: RepositoryUpdateRequest, db: Session = Depends(get_db)):
     try:
-        repository = db.query(Repository).filter_by(project_id=current_project_id(), id=repository_id).first()
-        if not repository:
-            raise HTTPException(status_code=404, detail="Repository not found")
+        repository = project_get_or_404(db, Repository, repository_id, detail="Repository not found")
 
         if data.name is not None:
             repository.name = data.name
@@ -266,9 +263,7 @@ async def update_repository(repository_id: str, data: RepositoryUpdateRequest, d
 @api_project.delete("/repositories/{repository_id}")
 async def delete_repository(repository_id: str, db: Session = Depends(get_db)):
     try:
-        repository = db.query(Repository).filter_by(project_id=current_project_id(), id=repository_id).first()
-        if not repository:
-            raise HTTPException(status_code=404, detail="Repository not found")
+        repository = project_get_or_404(db, Repository, repository_id, detail="Repository not found")
         db.delete(repository)
         db.commit()
         return {"message": "Repository deleted successfully"}

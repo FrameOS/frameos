@@ -8,6 +8,7 @@ from fastapi.responses import Response
 
 from app.database import get_db
 from app.models.assets import Assets
+from app.api.project_scope import project_get_or_404, project_query
 from app.schemas.assets import (
     AssetResponse
 )
@@ -25,8 +26,7 @@ async def list_assets(
     Return a list of all stored Assets (without the binary data).
     Optionally filter by `path` if specified.
     """
-    project_id = current_project_id()
-    query = db.query(Assets).filter(Assets.project_id == project_id)
+    query = project_query(db, Assets)
     if path:
         query = query.filter(Assets.path.ilike(f"%{path}%"))
     results = query.all()
@@ -46,9 +46,7 @@ async def get_asset(asset_id: str, db: Session = Depends(get_db)):
     """
     Return metadata for a single asset by its ID.
     """
-    asset = db.query(Assets).filter_by(project_id=current_project_id(), id=asset_id).first()
-    if not asset:
-        raise HTTPException(status_code=404, detail="Asset not found")
+    asset = project_get_or_404(db, Assets, asset_id, detail="Asset not found")
 
     return AssetResponse(
         id=asset.id,
@@ -62,9 +60,7 @@ async def download_asset(asset_id: str, db: Session = Depends(get_db)):
     """
     Download the raw binary data of an asset by ID.
     """
-    asset = db.query(Assets).filter_by(project_id=current_project_id(), id=asset_id).first()
-    if not asset:
-        raise HTTPException(status_code=404, detail="Asset not found")
+    asset = project_get_or_404(db, Assets, asset_id, detail="Asset not found")
     if not asset.data:
         raise HTTPException(status_code=404, detail="Asset has no data")
 
@@ -129,9 +125,7 @@ async def update_asset(
     If you only want to change the path (and not the file), omit `file`.
     """
     project_id = current_project_id()
-    asset = db.query(Assets).filter_by(project_id=project_id, id=asset_id).first()
-    if not asset:
-        raise HTTPException(status_code=404, detail="Asset not found")
+    asset = project_get_or_404(db, Assets, asset_id, detail="Asset not found")
 
     # If user wants to update the path:
     if path and path != asset.path:
@@ -170,9 +164,7 @@ async def delete_asset(asset_id: str, db: Session = Depends(get_db)):
     """
     Delete an asset by ID.
     """
-    asset = db.query(Assets).filter_by(project_id=current_project_id(), id=asset_id).first()
-    if not asset:
-        raise HTTPException(status_code=404, detail="Asset not found")
+    asset = project_get_or_404(db, Assets, asset_id, detail="Asset not found")
 
     db.delete(asset)
     try:

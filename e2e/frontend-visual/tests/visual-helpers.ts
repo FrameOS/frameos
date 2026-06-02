@@ -31,6 +31,25 @@ interface FrameListItem {
   name?: string | null
 }
 
+interface ProjectListItem {
+  id: number
+}
+
+export async function currentProjectApiPath(page: Page, path: string): Promise<string> {
+  const response = await page.request.get('/api/projects')
+  if (!response.ok()) {
+    throw new Error(`Could not list projects for E2E request: ${response.status()}`)
+  }
+
+  const payload = await response.json()
+  const project = Array.isArray(payload?.projects) ? (payload.projects as ProjectListItem[])[0] : null
+  if (!project?.id) {
+    throw new Error('Could not resolve current project for E2E request')
+  }
+
+  return `/api/projects/${project.id}${path.slice('/api'.length)}`
+}
+
 function isE2EInstallFrame(frame: FrameListItem): boolean {
   return e2eInstallFrameNamePattern.test(frame.name ?? '')
 }
@@ -62,7 +81,7 @@ function projectWebSocketPathPattern(path: string): RegExp {
 }
 
 export async function cleanupE2EInstallFrames(page: Page): Promise<void> {
-  const response = await page.request.get('/api/frames')
+  const response = await page.request.get(await currentProjectApiPath(page, '/api/frames'))
   if (!response.ok()) {
     throw new Error(`Could not list frames for E2E install cleanup: ${response.status()}`)
   }
@@ -73,7 +92,7 @@ export async function cleanupE2EInstallFrames(page: Page): Promise<void> {
 
   await Promise.all(
     framesToDelete.map(async (frame) => {
-      const deleteResponse = await page.request.delete(`/api/frames/${frame.id}`)
+      const deleteResponse = await page.request.delete(await currentProjectApiPath(page, `/api/frames/${frame.id}`))
       if (!deleteResponse.ok() && deleteResponse.status() !== 404) {
         throw new Error(`Could not delete E2E install frame ${frame.id}: ${deleteResponse.status()}`)
       }
