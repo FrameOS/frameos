@@ -1,5 +1,5 @@
 import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
-import { A } from 'kea-router'
+import { A, router } from 'kea-router'
 import clsx from 'clsx'
 import { useCallback, useLayoutEffect, useRef, type DragEvent, type MouseEvent } from 'react'
 import {
@@ -248,15 +248,13 @@ const frameToolDefinitions: FrameToolDefinition[] = [
   { panel: 'debug', label: 'Debug', description: 'Diagnostics', icon: <BoltIcon className="h-5 w-5" /> },
 ]
 
-function frameToolPanelFromCurrentLocation(): WorkspaceUtilityPanel | null {
-  if (typeof window === 'undefined') {
-    return null
-  }
-  const tool = new URLSearchParams(window.location.search).get('tool')
+function frameToolPanelFromSearchParams(searchParams: Record<string, unknown>): WorkspaceUtilityPanel | null {
+  const value = searchParams.tool
+  const tool = Array.isArray(value) ? value[0] : value
   if (!tool) {
     return 'overview'
   }
-  return frameToolDefinitions.some((definition) => definition.panel === tool)
+  return typeof tool === 'string' && frameToolDefinitions.some((definition) => definition.panel === tool)
     ? (tool as WorkspaceUtilityPanel)
     : 'overview'
 }
@@ -1285,11 +1283,13 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
   )
   const { sceneControlSelection, templateDrawerFrameId, utilityPanel, frameToolScrollPositions } =
     useValues(workspaceLogic)
+  const { searchParams } = useValues(router)
   const { rememberFrameToolScroll } = useActions(workspaceLogic)
   const activeTool =
     frameToolDefinitions.find(
-      (definition) => definition.panel === (frameToolPanelFromCurrentLocation() ?? utilityPanel)
-    ) ?? frameToolDefinitions[0]
+      (definition) => definition.panel === (frameToolPanelFromSearchParams(searchParams) ?? utilityPanel)
+    ) ??
+    frameToolDefinitions[0]
   const activeToolPanel = activeTool.panel
   const activeToolScrollKey = frameToolScrollKey(frameId, activeToolPanel)
   const frameToolScrollPositionsRef = useRef(frameToolScrollPositions)
@@ -1458,6 +1458,7 @@ export function FrameWorkspace({ id }: FrameWorkspaceProps): JSX.Element {
   useMountedLogic(sceneWorkspaceLogic({ routeFrameId: id ?? null, routeSceneId: null }))
   const { selectedFrame } = useValues(workspaceLogic)
   const { activeFramesList, framesList, framesLoading } = useValues(framesModel)
+  const { searchParams } = useValues(router)
   const routeFrameId = parseFrameId(id)
   const firstFrame =
     (routeFrameId ? framesList.find((frame) => frame.id === routeFrameId) : null) ??
@@ -1467,7 +1468,7 @@ export function FrameWorkspace({ id }: FrameWorkspaceProps): JSX.Element {
     null
 
   if (!firstFrame && framesLoading) {
-    const loadingTool = frameToolPanelFromCurrentLocation() ?? 'overview'
+    const loadingTool = frameToolPanelFromSearchParams(searchParams) ?? 'overview'
     const loadingToolUsesPageScroll = frameToolUsesPageScroll(loadingTool)
 
     return (
