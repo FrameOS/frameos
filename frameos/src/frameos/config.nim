@@ -210,6 +210,7 @@ proc loadConfig*(configPath = ""): FrameConfig =
     serverSendLogs: data{"serverSendLogs"}.getBool(true),
     frameHost: data{"frameHost"}.getStr(),
     framePort: data{"framePort"}.getInt(),
+    bindHost: data{"bindHost"}.getStr(),
     httpsProxy: HttpsProxyConfig(
       enable: data{"httpsProxy"}{"enable"}.getBool(),
       port: data{"httpsProxy"}{"port"}.getInt(),
@@ -267,6 +268,7 @@ proc updateFrameConfigFrom*(target: FrameConfig, source: FrameConfig) =
   target.serverSendLogs = source.serverSendLogs
   target.frameHost = source.frameHost
   target.framePort = source.framePort
+  target.bindHost = source.bindHost
   target.httpsProxy = source.httpsProxy
   target.frameAccessKey = source.frameAccessKey
   target.frameAccess = source.frameAccess

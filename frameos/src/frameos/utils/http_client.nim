@@ -29,6 +29,12 @@ proc validateHttpUrl(url: string) =
   if scheme notin ["http", "https"] or parsed.hostname.len == 0:
     raise newException(ValueError, &"Invalid HTTP URL: {url}")
 
+proc newClientForUrl(url: string, timeoutMs: int): HttpClient =
+  if parseUri(url).scheme.toLowerAscii() == "http":
+    newHttpClient(timeout = timeoutMs, sslContext = nil)
+  else:
+    newHttpClient(timeout = timeoutMs)
+
 proc limitHttpResponse*(client: HttpClient, maxBytes: int, maxSeconds = DefaultFetchMaxSeconds) =
   client.onProgressChanged = guardFetchProgress(epochTime(), maxBytes, maxSeconds)
 
@@ -46,7 +52,7 @@ proc boundedRequestContent*(
     maxSeconds = DefaultFetchMaxSeconds
   ): string =
   validateHttpUrl(url)
-  var client = newHttpClient(timeout = timeoutMs)
+  var client = newClientForUrl(url, timeoutMs)
   try:
     client.headers = fetchHeaders(headers)
     client.onProgressChanged = guardFetchProgress(epochTime(), maxBytes, maxSeconds)

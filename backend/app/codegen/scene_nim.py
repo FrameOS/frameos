@@ -102,85 +102,73 @@ proc frameos_scene_export*(): pointer {{.cdecl, exportc, dynlib.}} =
 
 
 def field_type_to_nim_type(field_type: str, required: bool = True) -> str:
-    match field_type:
-        case 'select':
-            return 'string'
-        case 'text':
-            return 'string'
-        case 'string':
-            return 'string'
-        case 'font':
-            return 'string'
-        case 'float':
-            return 'float'
-        case 'integer':
-            return 'int'
-        case 'boolean':
-            return 'bool'
-        case 'color':
-            return 'Color'
-        case 'json':
-            return 'JsonNode'
-        case 'node':
-            return 'NodeId'
-        case 'scene':
-            return 'SceneId'
-        case 'image':
-            if not required:
-                return 'Option[Image]'
-            return 'Image'
-        case _:
-            raise ValueError(f"Invalid field type {field_type}")
+    if field_type in ('select', 'text', 'string', 'font'):
+        return 'string'
+    if field_type == 'float':
+        return 'float'
+    if field_type == 'integer':
+        return 'int'
+    if field_type == 'boolean':
+        return 'bool'
+    if field_type == 'color':
+        return 'Color'
+    if field_type == 'json':
+        return 'JsonNode'
+    if field_type == 'node':
+        return 'NodeId'
+    if field_type == 'scene':
+        return 'SceneId'
+    if field_type == 'image':
+        if not required:
+            return 'Option[Image]'
+        return 'Image'
+    raise ValueError(f"Invalid field type {field_type}")
 
 
 def field_type_to_value_accessor(field_type: str) -> str:
-    match field_type:
-        case 'select' | 'text' | 'string' | 'font' | 'date':
-            return '.asString()'
-        case 'float':
-            return '.asFloat()'
-        case 'integer':
-            return '.asInt().int'
-        case 'boolean':
-            return '.asBool()'
-        case 'color':
-            return '.asColor()'
-        case 'json':
-            return '.asJson()'
-        case 'node':
-            return '.asNode()'
-        case 'scene':
-            return '.asScene()'
-        case 'image':
-            return '.asImage()'
-        case _:
-            raise ValueError(f"Invalid field type {field_type}")
+    if field_type in ('select', 'text', 'string', 'font', 'date'):
+        return '.asString()'
+    if field_type == 'float':
+        return '.asFloat()'
+    if field_type == 'integer':
+        return '.asInt().int'
+    if field_type == 'boolean':
+        return '.asBool()'
+    if field_type == 'color':
+        return '.asColor()'
+    if field_type == 'json':
+        return '.asJson()'
+    if field_type == 'node':
+        return '.asNode()'
+    if field_type == 'scene':
+        return '.asScene()'
+    if field_type == 'image':
+        return '.asImage()'
+    raise ValueError(f"Invalid field type {field_type}")
 
 
 def field_type_to_value_constructor(field_type: str, expression: str) -> str:
-    match field_type:
-        case 'text':
-            return f'VText({expression})'
-        case 'select' | 'string' | 'font' | 'date':
-            return f'VString({expression})'
-        case 'float':
-            return f'VFloat({expression})'
-        case 'integer':
-            return f'VInt({expression})'
-        case 'boolean':
-            return f'VBool({expression})'
-        case 'color':
-            return f'VColor({expression})'
-        case 'json':
-            return f'VJson({expression})'
-        case 'node':
-            return f'VNode({expression})'
-        case 'scene':
-            return f'VScene({expression})'
-        case 'image':
-            return f'VImage({expression})'
-        case _:
-            raise ValueError(f"Invalid field type {field_type}")
+    if field_type == 'text':
+        return f'VText({expression})'
+    if field_type in ('select', 'string', 'font', 'date'):
+        return f'VString({expression})'
+    if field_type == 'float':
+        return f'VFloat({expression})'
+    if field_type == 'integer':
+        return f'VInt({expression})'
+    if field_type == 'boolean':
+        return f'VBool({expression})'
+    if field_type == 'color':
+        return f'VColor({expression})'
+    if field_type == 'json':
+        return f'VJson({expression})'
+    if field_type == 'node':
+        return f'VNode({expression})'
+    if field_type == 'scene':
+        return f'VScene({expression})'
+    if field_type == 'image':
+        return f'VImage({expression})'
+    raise ValueError(f"Invalid field type {field_type}")
 
 
 def field_type_to_getter(type: str) -> str:

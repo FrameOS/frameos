@@ -215,6 +215,32 @@ def test_shared_scene_registry_loads_scene_libraries():
     assert "scene_live_scene" not in source
 
 
+def test_static_scene_registry_imports_compiled_scenes():
+    frame = SimpleNamespace(
+        scenes=[
+            {
+                "id": "my-scene",
+                "name": "My Scene",
+                "default": True,
+                "settings": {"execution": "compiled"},
+            },
+            {
+                "id": "live-scene",
+                "name": "Live Scene",
+                "settings": {"execution": "interpreted"},
+            },
+        ]
+    )
+
+    source = write_scenes_nim(frame, compilation_mode="static")
+
+    assert "import scenes/scene_myscene as scene_myscene" in source
+    assert 'result["my-scene".SceneId] = scene_myscene.exportedScene' in source
+    assert "loadLib(path)" not in source
+    assert 'libraryName: "scene_myscene.so"' not in source
+    assert "scene_live_scene" not in source
+
+
 def test_scene_library_wrapper_exports_scene_symbols():
     scene = {"id": "my-scene", "name": "My Scene"}
     source = write_scene_library_nim(scene)
