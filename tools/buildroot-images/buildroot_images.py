@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import gzip
 import hashlib
 import json
@@ -12,8 +13,10 @@ import re
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 import uuid
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -34,10 +37,24 @@ from app.tasks.buildroot_image import (  # noqa: E402
     BUILDROOT_FRAMEOS_PARTITION_SIZE,
     BUILDROOT_VERSION,
     BuildrootImageBuilder,
+    FRAMEOS_BUILD_TARGET,
     SUPPORTED_BUILDROOT_PLATFORM,
     _mbr_partitions,
     copy_lgpio_runtime_libraries,
+    ensure_buildroot_base_image,
+    resolve_buildroot_base_entry,
+    buildroot_base_cache_dir,
+    _gzip_file,
+    _sha256,
+    normalize_buildroot_platform,
 )
+from app.models.frame import (  # noqa: E402
+    DEFAULT_ERROR_BEHAVIOR,
+    DEFAULT_MAX_HTTP_RESPONSE_BYTES,
+    get_frame_json,
+)
+from app.tasks.binary_builder import FrameBinaryBuildResult  # noqa: E402
+from app.utils.cross_compile import TargetMetadata  # noqa: E402
 from app.tasks.setup_json_reset import (  # noqa: E402
     SETUP_JSON_RESET_SCRIPT_PATH,
     SETUP_JSON_RESET_SERVICE_NAME,
@@ -63,6 +80,11 @@ def parse_args() -> argparse.Namespace:
     upload = sub.add_parser("upload", help="Upload a locally built base image to R2")
     upload.add_argument("-y", "--yes", action="store_true")
     upload.add_argument("--force", action="store_true")
+    release = sub.add_parser("release-image", help="Build a release-ready SD image from precompiled artifacts")
+    release.add_argument("--prebuilt-cross-dir", default=str(REPO_ROOT / "build" / "prebuilt-cross"))
+    release.add_argument("--release-assets-dir", default=str(REPO_ROOT / "release-assets"))
+    release.add_argument("--target", default="debian-bookworm-arm64")
+    release.add_argument("--version", default=None)
     sub.add_parser("list", help="List manifest entries in R2")
     download = sub.add_parser("download", help="Download the manifest to the repo")
     download.add_argument("--force", action="store_true")
@@ -115,6 +137,12 @@ def raw_frameos_version() -> str:
     return str(payload.get("frameos") or "")
 
 
+def release_version() -> str:
+    payload = json.loads((REPO_ROOT / "versions.json").read_text(encoding="utf-8"))
+    version = str(payload.get("docker") or payload.get("frameos") or "")
+    return published_frameos_version(version)
+
+
 def published_frameos_version(version: str) -> str:
     return version.split("+", 1)[0]
 
@@ -151,6 +179,93 @@ def build_inputs_digest(paths: list[Path]) -> str:
 
 def safe_segment(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", value)
+
+
+@dataclass
+class ReleaseImageFrame:
+    id: int = 0
+    project_id: int | None = None
+    name: str = "FrameOS Setup"
+    mode: str = "buildroot"
+    frame_host: str = "frame.local"
+    frame_port: int = 8787
+    frame_access_key: str = ""
+    frame_access: str = "private"
+    frame_admin_auth: dict[str, Any] = field(default_factory=lambda: {"enabled": False, "user": "", "pass": ""})
+    https_proxy: dict[str, Any] = field(
+        default_factory=lambda: {
+            "enable": False,
+            "port": 8443,
+            "expose_only_port": True,
+            "certs": {"server": "", "server_key": "", "client_ca": ""},
+        }
+    )
+    ssh_user: str = "root"
+    ssh_pass: str | None = None
+    ssh_port: int = 22
+    ssh_keys: list[str] = field(default_factory=list)
+    server_host: str = "localhost"
+    server_port: int = 8989
+    server_api_key: str = ""
+    server_send_logs: bool = False
+    status: str = "ready"
+    archived: bool = False
+    version: str | None = None
+    width: int = 800
+    height: int = 480
+    device: str = "framebuffer"
+    device_config: dict[str, Any] = field(default_factory=dict)
+    color: str | None = None
+    timezone: str = "UTC"
+    interval: float = 60.0
+    metrics_interval: float = 60.0
+    max_http_response_bytes: int = DEFAULT_MAX_HTTP_RESPONSE_BYTES
+    scaling_mode: str = "contain"
+    image_engine: str = ""
+    rotate: int = 0
+    flip: str | None = None
+    background_color: str | None = None
+    debug: bool = False
+    last_log_at: str | None = None
+    log_to_file: str | None = None
+    assets_path: str = "/srv/assets"
+    save_assets: bool = True
+    upload_fonts: str = ""
+    reboot: dict[str, Any] = field(default_factory=lambda: {"enabled": "true", "crontab": "0 4 * * *"})
+    control_code: dict[str, Any] = field(default_factory=lambda: {"enabled": "false", "position": "top-right"})
+    scenes: list[dict[str, Any]] = field(default_factory=list)
+    schedule: dict[str, Any] = field(default_factory=lambda: {"events": []})
+    gpio_buttons: list[dict[str, Any]] = field(default_factory=list)
+    network: dict[str, Any] = field(
+        default_factory=lambda: {
+            "networkCheck": True,
+            "networkCheckTimeoutSeconds": 30,
+            "networkCheckUrl": "https://networkcheck.frameos.net/",
+            "wifiHotspot": "bootOnly",
+            "wifiHotspotSsid": "FrameOS-Setup",
+            "wifiHotspotPassword": "frame1234",
+            "wifiHotspotTimeoutSeconds": 300,
+        }
+    )
+    agent: dict[str, Any] = field(
+        default_factory=lambda: {
+            "agentEnabled": True,
+            "agentRunCommands": True,
+            "deployWithAgent": True,
+            "agentSharedSecret": "",
+        }
+    )
+    mountpoints: dict[str, Any] = field(default_factory=lambda: {"enabled": False, "items": []})
+    error_behavior: dict[str, Any] = field(default_factory=lambda: DEFAULT_ERROR_BEHAVIOR.copy())
+    palette: dict[str, Any] = field(default_factory=dict)
+    buildroot: dict[str, Any] = field(default_factory=lambda: {"platform": SUPPORTED_BUILDROOT_PLATFORM})
+    rpios: dict[str, Any] | None = None
+    terminal_history: list[str] = field(default_factory=list)
+    last_successful_deploy: dict[str, Any] | None = None
+    last_successful_deploy_at: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.__dict__)
 
 
 def local_dir(platform: str) -> Path:
@@ -319,6 +434,190 @@ def upload(args: argparse.Namespace) -> None:
     save_manifest(client, args.bucket, args.manifest_key, {"entries": [entry]})
 
 
+def _safe_extract(tar: tarfile.TarFile, path: Path) -> None:
+    root = path.resolve()
+    for member in tar.getmembers():
+        member_path = (path / member.name).resolve()
+        if os.path.commonpath([str(root), str(member_path)]) != str(root):
+            raise RuntimeError("Tar file attempted to escape target directory")
+    tar.extractall(path=path, filter="data")
+
+
+def _find_precompiled_artifact_root(extract_dir: Path, target: str) -> Path:
+    candidates: list[Path] = []
+    for metadata_path in extract_dir.rglob("metadata.json"):
+        root = metadata_path.parent
+        if not (root / "frameos").is_file() or not (root / "frameos_agent").is_file():
+            continue
+        try:
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            metadata = {}
+        if metadata.get("slug") == target:
+            return root
+        candidates.append(root)
+
+    legacy = extract_dir / "prebuilt-cross" / target
+    if (legacy / "frameos").is_file() and (legacy / "frameos_agent").is_file():
+        return legacy
+    if len(candidates) == 1:
+        return candidates[0]
+    raise RuntimeError(f"Could not find precompiled release artifact for {target}")
+
+
+def _precompiled_archive_path(prebuilt_cross_dir: Path, target: str, version: str) -> Path:
+    target_dir = prebuilt_cross_dir / target
+    if (target_dir / "frameos").is_file() and (target_dir / "frameos_agent").is_file():
+        return target_dir
+
+    candidates = sorted(prebuilt_cross_dir.glob(f"frameos-*-{target}.tar.gz"))
+    exact = prebuilt_cross_dir / f"frameos-{version}-{target}.tar.gz"
+    if exact.is_file():
+        return exact
+    if len(candidates) == 1:
+        return candidates[0]
+    if candidates:
+        return candidates[-1]
+    raise RuntimeError(f"Missing precompiled release archive for {target} in {prebuilt_cross_dir}")
+
+
+def _copy_release_vendor_folders(artifact_root: Path, release_dir: Path) -> None:
+    vendor_root = artifact_root / "vendor"
+    if not vendor_root.is_dir():
+        return
+    destination = release_dir / "vendor"
+    destination.mkdir(parents=True, exist_ok=True)
+    for vendor in sorted(vendor_root.iterdir()):
+        if vendor.is_dir():
+            shutil.copytree(vendor, destination / vendor.name, dirs_exist_ok=True)
+
+
+class ReleaseBuildrootImageBuilder(BuildrootImageBuilder):
+    async def _log(self, type: str, line: str) -> None:
+        print(f"[{type}] {line}")
+
+    def _copy_runtime_libraries(self, overlay_dir: Path) -> None:
+        # Release images are composed from cached base images. The base rootfs
+        # already contains runtime libraries; composition only replaces BOOT,
+        # FRAMEOS, and ASSETS partitions.
+        return None
+
+
+async def build_release_image(args: argparse.Namespace) -> None:
+    platform = normalize_buildroot_platform(args.platform)
+    version = safe_segment(args.version or release_version())
+    if not version:
+        raise SystemExit("Unable to determine release version")
+
+    target = str(args.target)
+    prebuilt_cross_dir = Path(args.prebuilt_cross_dir)
+    release_assets_dir = Path(args.release_assets_dir)
+    release_assets_dir.mkdir(parents=True, exist_ok=True)
+    archive_or_dir = _precompiled_archive_path(prebuilt_cross_dir, target, version)
+
+    with tempfile.TemporaryDirectory(prefix="frameos-buildroot-release-") as tmp:
+        temp_dir = Path(tmp)
+        if archive_or_dir.is_dir():
+            artifact_root = archive_or_dir
+        else:
+            extract_dir = temp_dir / "extract"
+            extract_dir.mkdir()
+            with tarfile.open(archive_or_dir, "r:gz") as tar:
+                _safe_extract(tar, extract_dir)
+            artifact_root = _find_precompiled_artifact_root(extract_dir, target)
+
+        metadata = json.loads((artifact_root / "metadata.json").read_text(encoding="utf-8"))
+        frame = ReleaseImageFrame()
+        build_id = safe_segment(version)
+        raw_output_path = release_assets_dir / f"frameos-{version}-{platform}-buildroot.img"
+        output_path = release_assets_dir / f"{raw_output_path.name}.gz"
+        raw_output_path.unlink(missing_ok=True)
+        output_path.unlink(missing_ok=True)
+
+        frameos_build = FrameBinaryBuildResult(
+            build_id=build_id,
+            target=TargetMetadata(
+                arch=FRAMEOS_BUILD_TARGET.arch,
+                distro=FRAMEOS_BUILD_TARGET.distro,
+                version=FRAMEOS_BUILD_TARGET.version,
+                platform="linux/arm64",
+                image="debian:bookworm",
+            ),
+            compilation_mode=str(metadata.get("compilation_mode") or "shared"),
+            source_dir=str(artifact_root),
+            build_dir=str(artifact_root),
+            archive_path=str(archive_or_dir),
+            binary_path=str(artifact_root / "frameos"),
+            driver_library_paths=[str(path) for path in sorted((artifact_root / "drivers").glob("*.so"))],
+            driver_library_names=list(metadata.get("driver_libraries") or []),
+            scene_library_paths=[str(path) for path in sorted((artifact_root / "scenes").glob("*.so"))]
+            if (artifact_root / "scenes").is_dir()
+            else [],
+            scene_library_names=list(metadata.get("scene_libraries") or []),
+            cross_compiled=True,
+            prebuilt_entry=None,
+            prebuilt_target=target,
+            log_path=None,
+            precompiled=True,
+        )
+
+        builder = ReleaseBuildrootImageBuilder(db=None, redis=None, frame=frame)
+        overlay_dir = temp_dir / "overlay"
+        builder._stage_overlay(
+            overlay_dir=overlay_dir,
+            build_id=build_id,
+            bootstrap_frame=frame,
+            setup_payload=get_frame_json(None, frame),
+            frameos_build=frameos_build,
+            agent_binary=str(artifact_root / "frameos_agent"),
+        )
+        release_dir = overlay_dir / "srv" / "frameos" / "releases" / f"release_{build_id}"
+        _copy_release_vendor_folders(artifact_root, release_dir)
+        (overlay_dir / "boot" / "frameos-setup.json").unlink(missing_ok=True)
+
+        base_entry = await resolve_buildroot_base_entry(platform)
+        base_image_path = await ensure_buildroot_base_image(base_entry, buildroot_base_cache_dir())
+        compose_image = None
+        if not builder._host_has_compose_tools():
+            compose_image = await builder._ensure_buildroot_image()
+        await builder._compose_sd_image_from_base(
+            temp_dir=temp_dir,
+            base_image_path=base_image_path,
+            output_path=raw_output_path,
+            image=compose_image,
+        )
+
+        raw_size = raw_output_path.stat().st_size
+        raw_sha256 = _sha256(raw_output_path)
+        _gzip_file(raw_output_path, output_path)
+        raw_output_path.unlink(missing_ok=True)
+
+        release_metadata = {
+            "platform": platform,
+            "release_version": version,
+            "precompiled_target": target,
+            "precompiled_artifact": str(archive_or_dir),
+            "buildroot_version": BUILDROOT_VERSION,
+            "base_image": {
+                "frameos_version": base_entry.get("frameos_version"),
+                "object_key": base_entry.get("object_key"),
+                "sha256": base_entry.get("sha256"),
+                "updated_at": base_entry.get("updated_at"),
+            },
+            "network": frame.network,
+            "device": frame.device,
+            "raw_size": raw_size,
+            "raw_sha256": raw_sha256,
+            "size": output_path.stat().st_size,
+            "sha256": _sha256(output_path),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        metadata_path = release_assets_dir / f"{raw_output_path.name}.metadata.json"
+        metadata_path.write_text(json.dumps(release_metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        print(f"Built {output_path}")
+        print(f"Wrote {metadata_path}")
+
+
 def list_remote(args: argparse.Namespace) -> None:
     manifest = load_manifest(s3_client(), args.bucket, args.manifest_key)
     for entry in sorted(manifest.get("entries", []), key=lambda item: (item.get("platform", ""), item.get("updated_at", ""))):
@@ -341,6 +640,8 @@ def main() -> None:
         build(args)
     elif args.command == "upload":
         upload(args)
+    elif args.command == "release-image":
+        asyncio.run(build_release_image(args))
     elif args.command == "list":
         list_remote(args)
     elif args.command == "download":
