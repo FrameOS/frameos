@@ -7,6 +7,7 @@ from app.codegen.drivers_nim import (
     COMPILATION_MODE_SHARED,
     COMPILATION_MODE_SHARED_SCENES,
     COMPILATION_MODE_STATIC,
+    compilation_mode_uses_shared_drivers,
     compilation_mode_uses_shared_libraries,
     driver_library_filename,
     frame_compilation_mode,
@@ -58,6 +59,10 @@ def test_compilation_mode_precompiled_uses_shared_libraries():
     assert compilation_mode_uses_shared_libraries("shared") is True
     assert compilation_mode_uses_shared_libraries("shared-scenes") is True
     assert compilation_mode_uses_shared_libraries("static") is False
+    assert compilation_mode_uses_shared_drivers("precompiled") is True
+    assert compilation_mode_uses_shared_drivers("shared") is True
+    assert compilation_mode_uses_shared_drivers("shared-scenes") is False
+    assert compilation_mode_uses_shared_drivers("static") is False
 
 
 def test_waveshare_driver_library_filename_includes_variant():

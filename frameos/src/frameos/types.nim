@@ -16,6 +16,7 @@ type
     serverSendLogs*: bool
     frameHost*: string
     framePort*: int
+    bindHost*: string
     httpsProxy*: HttpsProxyConfig
     frameAccessKey*: string
     frameAccess*: string

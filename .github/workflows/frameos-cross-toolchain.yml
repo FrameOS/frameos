@@ -122,5 +122,5 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "chore: refresh cross-toolchain image digests [skip ci]"
+          git commit -m "chore: refresh cross-toolchain image digests"
           git push

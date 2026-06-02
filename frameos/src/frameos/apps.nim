@@ -13,6 +13,18 @@ proc renderWidth*(config: FrameConfig): int {.inline.} =
 proc renderHeight*(config: FrameConfig): int {.inline.} =
   if config.rotate in [90, 270]: config.width else: config.height
 
+proc maxHttpResponseBytes*(config: FrameConfig): int {.inline.} =
+  if config != nil and config.maxHttpResponseBytes > 0:
+    config.maxHttpResponseBytes
+  else:
+    DefaultMaxHttpResponseBytes
+
+proc maxHttpResponseBytes*(self: AppRoot): int {.inline.} =
+  if self != nil:
+    self.frameConfig.maxHttpResponseBytes()
+  else:
+    DefaultMaxHttpResponseBytes
+
 proc appName(self: AppRoot): string =
   if self.nodeName == "": $self.nodeId else: $self.nodeId & ":" & self.nodeName
 

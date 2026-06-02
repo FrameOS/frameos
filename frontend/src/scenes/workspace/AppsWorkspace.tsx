@@ -26,6 +26,7 @@ import {
 } from '../frame/panels/EditApp/EditApp'
 import { editAppLogic } from '../frame/panels/EditApp/editAppLogic'
 import { groupFramesByStatus } from './frameStatusGroups'
+import { FrameActionsMenu } from './FrameActionsMenu'
 import {
   hasJavaScriptAppSource,
   isJavaScriptCatalogApp,
@@ -193,25 +194,30 @@ function SelectionSelect({
   value,
   disabled,
   onChange,
+  action,
   children,
 }: {
   label: string
   value: string | number
   disabled?: boolean
   onChange: (value: string) => void
+  action?: ReactNode
   children: ReactNode
 }): JSX.Element {
   return (
     <div>
       <label className="frameos-muted mb-2 block text-xs font-semibold uppercase tracking-wide">{label}</label>
-      <select
-        value={value}
-        disabled={disabled}
-        onChange={(event) => onChange(event.target.value)}
-        className="frameos-form-control w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 outline-none transition disabled:cursor-not-allowed disabled:opacity-50 focus:ring-2 focus:ring-blue-400"
-      >
-        {children}
-      </select>
+      <div className="flex items-center gap-2">
+        <select
+          value={value}
+          disabled={disabled}
+          onChange={(event) => onChange(event.target.value)}
+          className="frameos-form-control min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 outline-none transition disabled:cursor-not-allowed disabled:opacity-50 focus:ring-2 focus:ring-blue-400"
+        >
+          {children}
+        </select>
+        {action}
+      </div>
     </div>
   )
 }
@@ -304,6 +310,12 @@ function AppsSelector({
         <SelectionSelect
           label="Frame"
           value={frame.id}
+          action={
+            <FrameActionsMenu
+              frame={frame}
+              className="frameos-form-control flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white !px-0 !py-0 text-slate-700 shadow-none transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            />
+          }
           onChange={(value) => {
             const nextFrame = frames.find((candidate) => candidate.id === parseInt(value, 10))
             if (!nextFrame) {

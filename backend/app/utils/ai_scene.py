@@ -1,27 +1,28 @@
 import json
-import math
 import re
-from typing import Any, Iterable, Sequence
+from typing import Any, Iterable
 from uuid import uuid4
 
 from posthog.ai.openai import AsyncOpenAI
 
-from app.models.ai_embeddings import AiEmbedding
 from app.config import config
+from app.utils.ai_catalog import AiCatalogItem
 from app.utils.posthog import get_posthog_client, llm_analytics_enabled
 
-SUMMARY_MODEL = "gpt-5.4-mini"
 SCENE_MODEL = "gpt-5.5"
-CHAT_MODEL = "gpt-5.4-mini"
-EMBEDDING_MODEL = "text-embedding-3-large"
-SCENE_REVIEW_MODEL = "gpt-5.4-mini"
-PROMPT_EXPANSION_MODEL = "gpt-5.4-mini"
-
-DEFAULT_APP_CONTEXT_K = 6
-DEFAULT_SCENE_CONTEXT_K = 4
-DEFAULT_MIN_SCORE = 0.15
-MMR_LAMBDA = 0.7
+CHAT_MODEL = "gpt-5.5"
+SCENE_REVIEW_MODEL = "gpt-5.5"
 AI_REQUEST_TIMEOUT = 600
+
+
+def openai_model(settings: dict[str, Any], field: str, default: str) -> str:
+    configured_model = settings.get(field)
+    shared_model = settings.get("model")
+    if isinstance(configured_model, str) and configured_model.strip():
+        return configured_model.strip()
+    if isinstance(shared_model, str) and shared_model.strip():
+        return shared_model.strip()
+    return default
 
 
 def _format_gpio_buttons(gpio_buttons: Iterable[dict[str, Any]]) -> list[str]:
@@ -127,15 +128,6 @@ def _format_selected_elements(
     if selected_edges:
         parts.append(f"Selected edges: {json.dumps(selected_edges, ensure_ascii=False)}")
     return "\n".join(parts) if parts else None
-
-SUMMARY_SYSTEM_PROMPT = """
-You are summarizing FrameOS scene templates and app modules so they can be retrieved for prompt grounding.
-Return JSON with keys:
-= type: app or scene. if app, if it's a render/logic/data app.
-- summary: 2-4 sentences describing what it does and which apps or data it uses.
-- keywords: 5-10 short keywords or phrases.
-Keep the summary concise and technical. Do not include markdown.
-""".strip()
 
 SCENE_JSON_SYSTEM_PROMPT = """
 You are a FrameOS scene generator. Build scenes JSON that can be uploaded to FrameOS.
@@ -370,15 +362,6 @@ Return JSON with keys:
 Do not include markdown or code fences.
 """.strip()
 
-PROMPT_EXPANSION_SYSTEM_PROMPT = """
-You expand a user request so retrieval can find the best FrameOS apps and scene templates.
-Return JSON with keys:
-- expanded_prompt: a short, clarified restatement of the request with inferred but non-committal context
-  (display style, data sources, layout, cadence). Do not invent requirements.
-- keywords: 5-12 short keywords or phrases useful for retrieval.
-Do not include markdown or code fences.
-""".strip()
-
 SCENE_REVIEW_SYSTEM_PROMPT = """
 You are a strict reviewer for FrameOS scene JSON.
 Check the scene against the user request and ensure it is valid:
@@ -412,16 +395,6 @@ Respond with JSON only, using keys:
 - issues: array of short strings describing any problems
 """.strip()
 
-def _chunk_texts(texts: Iterable[str], batch_size: int = 64) -> Iterable[list[str]]:
-    batch: list[str] = []
-    for text in texts:
-        batch.append(text)
-        if len(batch) >= batch_size:
-            yield batch
-            batch = []
-    if batch:
-        yield batch
-
 def category_info(category: str) -> str:
     category_map = {
         "render": "produces visual output, can either be connected next/prev or used standalone with field inputs/outputs",
@@ -430,13 +403,14 @@ def category_info(category: str) -> str:
     }
     return category_map.get(category, "unknown category")
 
-def _format_context_items(items: list[AiEmbedding]) -> str:
+def _format_context_items(items: list[AiCatalogItem]) -> str:
     lines: list[str] = []
     for item in items:
         metadata = item.metadata_json or {}
         header = f"[{"example scene" if item.source_type == "scene" else item.source_type}] {item.name or item.source_path}"
-        keyword_list = metadata.get("keywords") or []
+        keyword = metadata.get("keyword")
         app_category = metadata.get("appCategory") or ""
+        category = metadata.get("category") or app_category
         app_keywords = metadata.get("appKeywords") or []
         event_keywords = metadata.get("eventKeywords") or []
         node_types = metadata.get("nodeTypes") or []
@@ -448,8 +422,8 @@ def _format_context_items(items: list[AiEmbedding]) -> str:
                 line for line in [
                     header,
                     f"Summary: {item.summary}",
-                    f"Keywords: {', '.join(keyword_list)}" if keyword_list else "",
-                    f"App category: {app_category} ({category_info(app_category)})" if app_category else "",
+                    f"Keyword: {keyword}" if keyword else "",
+                    f"App category: {category} ({category_info(category)})" if category else "",
                     f"App keywords used: {', '.join(app_keywords)}" if app_keywords else "",
                     f"Event keywords used: {', '.join(event_keywords)}" if event_keywords else "",
                     f"Node types: {', '.join(node_types)}" if node_types else "",
@@ -462,58 +436,14 @@ def _format_context_items(items: list[AiEmbedding]) -> str:
     return "\n\n".join(lines)
 
 
-def _as_embedding_vector(values: Iterable[float]) -> list[float]:
-    return [float(value) for value in values]
-
-
-def _vector_norm(vector: Sequence[float]) -> float:
-    return math.sqrt(sum(value * value for value in vector))
-
-
-def _cosine_similarity(
-    query_vec: Sequence[float],
-    embedding: Sequence[float],
-    *,
-    query_norm: float | None = None,
-    embedding_norm: float | None = None,
-) -> float:
-    if len(query_vec) != len(embedding):
-        raise ValueError(
-            f"Embedding dimension mismatch: {len(query_vec)} != {len(embedding)}"
-        )
-    resolved_query_norm = _vector_norm(query_vec) if query_norm is None else query_norm
-    resolved_embedding_norm = (
-        _vector_norm(embedding) if embedding_norm is None else embedding_norm
-    )
-    if resolved_query_norm == 0 or resolved_embedding_norm == 0:
-        return 0.0
-    return sum(
-        query_value * embedding_value
-        for query_value, embedding_value in zip(query_vec, embedding)
-    ) / (resolved_query_norm * resolved_embedding_norm)
-
-
-def _tokenize_prompt(prompt: str) -> list[str]:
-    return re.findall(r"[a-z0-9_/.-]+", prompt.lower())
-
-
-def _keyword_score(prompt_tokens: list[str], item: AiEmbedding) -> float:
-    if not prompt_tokens:
-        return 0.0
-    metadata = item.metadata_json or {}
-    keyword_sources = [
-        item.name or "",
-        item.source_path or "",
-        item.summary or "",
-        " ".join(metadata.get("keywords") or []),
-        " ".join(metadata.get("appKeywords") or []),
-        " ".join(metadata.get("eventKeywords") or []),
-        " ".join(metadata.get("nodeTypes") or []),
-        metadata.get("category") or "",
-    ]
-    haystack = " ".join(keyword_sources).lower()
-    hits = sum(1 for token in prompt_tokens if token in haystack)
-    return hits / max(len(prompt_tokens), 1)
+def _format_reference_context(catalog_context: str | None, context_items: list[AiCatalogItem]) -> str:
+    parts: list[str] = []
+    if catalog_context:
+        parts.append(catalog_context)
+    item_context = _format_context_items(context_items)
+    if item_context:
+        parts.extend(["Selected detailed entries:", item_context])
+    return "\n\n".join(parts)
 
 
 def _openai_client(api_key: str) -> AsyncOpenAI:
@@ -558,214 +488,11 @@ def _build_ai_posthog_properties(
     return properties
 
 
-def _mmr_select(
-    items: list[AiEmbedding],
-    embeddings: list[list[float]],
-    embedding_norms: list[float],
-    scores: list[float],
-    top_k: int,
-    lambda_param: float = MMR_LAMBDA,
-) -> list[AiEmbedding]:
-    if top_k <= 0 or not items:
-        return []
-    selected: list[int] = []
-    candidate_indices = list(range(len(items)))
-    while candidate_indices and len(selected) < top_k:
-        if not selected:
-            best_idx = max(candidate_indices, key=lambda idx: scores[idx])
-            selected.append(best_idx)
-            candidate_indices.remove(best_idx)
-            continue
-        best_idx = None
-        best_score = -math.inf
-        for idx in candidate_indices:
-            similarity_to_query = scores[idx]
-            similarity_to_selected = max(
-                _cosine_similarity(
-                    embeddings[idx],
-                    embeddings[selected_idx],
-                    query_norm=embedding_norms[idx],
-                    embedding_norm=embedding_norms[selected_idx],
-                )
-                for selected_idx in selected
-            )
-            mmr_score = (
-                lambda_param * similarity_to_query
-                - (1 - lambda_param) * similarity_to_selected
-            )
-            if mmr_score > best_score:
-                best_score = mmr_score
-                best_idx = idx
-        if best_idx is None:
-            break
-        selected.append(best_idx)
-        candidate_indices.remove(best_idx)
-    return [items[idx] for idx in selected]
-
-
-def rank_embeddings(
-    query_embedding: list[float],
-    items: list[AiEmbedding],
-    *,
-    prompt: str,
-    top_k: int = 8,
-    min_score: float = DEFAULT_MIN_SCORE,
-) -> list[AiEmbedding]:
-    if not items:
-        return []
-    query_vector = _as_embedding_vector(query_embedding)
-    query_norm = _vector_norm(query_vector)
-    embeddings = [_as_embedding_vector(item.embedding) for item in items]
-    embedding_norms = [_vector_norm(embedding) for embedding in embeddings]
-    cosine_scores = [
-        _cosine_similarity(
-            query_vector,
-            embedding,
-            query_norm=query_norm,
-            embedding_norm=embedding_norm,
-        )
-        for embedding, embedding_norm in zip(embeddings, embedding_norms)
-    ]
-    prompt_tokens = _tokenize_prompt(prompt)
-    keyword_scores = [_keyword_score(prompt_tokens, item) for item in items]
-    combined_scores = [
-        (0.7 * cosine_score) + (0.3 * keyword_score)
-        for cosine_score, keyword_score in zip(cosine_scores, keyword_scores)
-    ]
-    filtered_indices = [
-        idx for idx, score in enumerate(combined_scores) if score >= min_score
-    ]
-    if not filtered_indices:
-        filtered_indices = list(range(len(items)))
-    filtered_items = [items[idx] for idx in filtered_indices]
-    filtered_embeddings = [embeddings[idx] for idx in filtered_indices]
-    filtered_embedding_norms = [embedding_norms[idx] for idx in filtered_indices]
-    filtered_scores = [combined_scores[idx] for idx in filtered_indices]
-    return _mmr_select(
-        filtered_items,
-        filtered_embeddings,
-        filtered_embedding_norms,
-        filtered_scores,
-        top_k=top_k,
-    )
-
-
-async def create_embeddings(
-    texts: list[str],
-    api_key: str,
-    model: str,
-    *,
-    ai_trace_id: str | None = None,
-    ai_session_id: str | None = None,
-    ai_parent_id: str | None = None,
-) -> list[list[float]]:
-    embeddings: list[list[float]] = []
-    client = _openai_client(api_key)
-    for batch in _chunk_texts(texts):
-        span_id = _new_ai_span_id()
-        response = await client.embeddings.create(
-            model=model or EMBEDDING_MODEL,
-            input=batch,
-            posthog_distinct_id=config.INSTANCE_ID,
-            posthog_properties=_build_ai_posthog_properties(
-                model=model or EMBEDDING_MODEL,
-                ai_trace_id=ai_trace_id,
-                ai_session_id=ai_session_id,
-                ai_span_id=span_id,
-                ai_parent_id=ai_parent_id,
-                extra={
-                    "operation": "create_embeddings",
-                    "model": model or EMBEDDING_MODEL,
-                    "input_count": len(batch),
-                },
-            ),
-        )
-        for entry in sorted(response.data, key=lambda item: item.index):
-            embeddings.append(entry.embedding)
-    return embeddings
-
-
-async def summarize_text(
-    text: str,
-    api_key: str,
-    *,
-    model: str = SUMMARY_MODEL,
-    ai_trace_id: str | None = None,
-    ai_session_id: str | None = None,
-    ai_parent_id: str | None = None,
-) -> dict[str, Any]:
-    client = _openai_client(api_key)
-    span_id = _new_ai_span_id()
-    response = await client.chat.completions.create(
-        model=model or SUMMARY_MODEL,
-        messages=[
-            {"role": "system", "content": SUMMARY_SYSTEM_PROMPT},
-            {"role": "user", "content": text},
-        ],
-        response_format={"type": "json_object"},
-        posthog_distinct_id=config.INSTANCE_ID,
-        posthog_properties=_build_ai_posthog_properties(
-            model=model or SUMMARY_MODEL,
-            ai_trace_id=ai_trace_id,
-            ai_session_id=ai_session_id,
-            ai_span_id=span_id,
-            ai_parent_id=ai_parent_id,
-            extra={
-                "operation": "summarize_text",
-                "model": model or SUMMARY_MODEL,
-            },
-        ),
-    )
-    message = response.choices[0].message if response.choices else None
-    content = message.content if message else "{}"
-    return json.loads(content)
-
-
-async def expand_scene_prompt(
-    *,
-    prompt: str,
-    api_key: str,
-    model: str = PROMPT_EXPANSION_MODEL,
-    frame_context: str | None = None,
-    ai_trace_id: str | None = None,
-    ai_session_id: str | None = None,
-    ai_parent_id: str | None = None,
-) -> dict[str, Any]:
-    prompt_parts = [f"User request: {prompt}"]
-    if frame_context:
-        prompt_parts.extend(["Frame details:", frame_context])
-    expansion_prompt = "\n\n".join(prompt_parts)
-    client = _openai_client(api_key)
-    span_id = _new_ai_span_id()
-    response = await client.chat.completions.create(
-        model=model or PROMPT_EXPANSION_MODEL,
-        messages=[
-            {"role": "system", "content": PROMPT_EXPANSION_SYSTEM_PROMPT},
-            {"role": "user", "content": expansion_prompt},
-        ],
-        response_format={"type": "json_object"},
-        posthog_distinct_id=config.INSTANCE_ID,
-        posthog_properties=_build_ai_posthog_properties(
-            model=model or PROMPT_EXPANSION_MODEL,
-            ai_trace_id=ai_trace_id,
-            ai_session_id=ai_session_id,
-            ai_span_id=span_id,
-            ai_parent_id=ai_parent_id,
-            extra={
-                "operation": "expand_scene_prompt",
-                "model": model or PROMPT_EXPANSION_MODEL,
-            },
-        ),
-    )
-    message = response.choices[0].message if response.choices else None
-    content = message.content if message else "{}"
-    return json.loads(content)
-
-
 async def generate_scene_json(
     *,
     prompt: str,
-    context_items: list[AiEmbedding],
+    context_items: list[AiCatalogItem],
+    catalog_context: str | None = None,
     api_key: str,
     model: str,
     plan: dict[str, Any] | None = None,
@@ -774,7 +501,7 @@ async def generate_scene_json(
     ai_session_id: str | None = None,
     ai_parent_id: str | None = None,
 ) -> dict[str, Any]:
-    context_block = _format_context_items(context_items)
+    context_block = _format_reference_context(catalog_context, context_items)
     scene_prompt_parts = [f"User request: {prompt}"]
     if plan:
         scene_prompt_parts.append(f"Scene plan: {json.dumps(plan, ensure_ascii=False)}")
@@ -802,7 +529,8 @@ async def generate_scene_json(
 async def generate_scene_plan(
     *,
     prompt: str,
-    context_items: list[AiEmbedding],
+    context_items: list[AiCatalogItem],
+    catalog_context: str | None = None,
     api_key: str,
     model: str,
     frame_context: str | None = None,
@@ -810,7 +538,7 @@ async def generate_scene_plan(
     ai_session_id: str | None = None,
     ai_parent_id: str | None = None,
 ) -> dict[str, Any]:
-    context_block = _format_context_items(context_items)
+    context_block = _format_reference_context(catalog_context, context_items)
     plan_prompt_parts = [f"User request: {prompt}"]
     if frame_context:
         plan_prompt_parts.extend(["Frame details:", frame_context])
@@ -892,7 +620,8 @@ async def modify_scene_json(
     *,
     prompt: str,
     scene: dict[str, Any],
-    context_items: list[AiEmbedding],
+    context_items: list[AiCatalogItem],
+    catalog_context: str | None = None,
     available_apps: Iterable[str] | None = None,
     api_key: str,
     model: str,
@@ -904,7 +633,7 @@ async def modify_scene_json(
     ai_session_id: str | None = None,
     ai_parent_id: str | None = None,
 ) -> dict[str, Any]:
-    context_block = _format_context_items(context_items)
+    context_block = _format_reference_context(catalog_context, context_items)
     prompt_parts = [f"User request: {prompt}", "Current scene JSON:", json.dumps(scene, ensure_ascii=False)]
     available_apps_block = format_available_apps(available_apps)
     if available_apps_block:
@@ -942,7 +671,8 @@ async def answer_scene_question(
     *,
     prompt: str,
     api_key: str,
-    context_items: list[AiEmbedding],
+    context_items: list[AiCatalogItem],
+    catalog_context: str | None = None,
     frame_context: str | None = None,
     scene: dict[str, Any] | None = None,
     selected_nodes: list[dict[str, Any]] | None = None,
@@ -953,7 +683,7 @@ async def answer_scene_question(
     ai_session_id: str | None = None,
     ai_parent_id: str | None = None,
 ) -> str:
-    context_block = _format_context_items(context_items)
+    context_block = _format_reference_context(catalog_context, context_items)
     context_parts = []
     if frame_context:
         context_parts.extend(["Frame details:", frame_context])
@@ -1005,7 +735,8 @@ async def answer_frame_question(
     *,
     prompt: str,
     api_key: str,
-    context_items: list[AiEmbedding],
+    context_items: list[AiCatalogItem],
+    catalog_context: str | None = None,
     frame_context: str | None = None,
     frame_scene_summary: str | None = None,
     history: list[dict[str, str]] | None = None,
@@ -1014,7 +745,7 @@ async def answer_frame_question(
     ai_session_id: str | None = None,
     ai_parent_id: str | None = None,
 ) -> str:
-    context_block = _format_context_items(context_items)
+    context_block = _format_reference_context(catalog_context, context_items)
     context_parts = []
     if frame_context:
         context_parts.extend(["Frame details:", frame_context])
@@ -1157,7 +888,8 @@ async def review_scene_solution(
 async def repair_scene_json(
     *,
     prompt: str,
-    context_items: list[AiEmbedding],
+    context_items: list[AiCatalogItem],
+    catalog_context: str | None = None,
     api_key: str,
     model: str,
     payload: dict[str, Any],
@@ -1168,7 +900,7 @@ async def repair_scene_json(
     ai_session_id: str | None = None,
     ai_parent_id: str | None = None,
 ) -> dict[str, Any]:
-    context_block = _format_context_items(context_items)
+    context_block = _format_reference_context(catalog_context, context_items)
     scene_prompt_parts = [
         f"User request: {prompt}",
         f"Reviewer issues: {json.dumps(issues, ensure_ascii=False)}",
@@ -1203,7 +935,7 @@ async def _request_scene_json(
     api_key: str,
     model: str,
     messages: list[dict[str, str]],
-    context_items: list[AiEmbedding],
+    context_items: list[AiCatalogItem],
     ai_trace_id: str | None = None,
     ai_session_id: str | None = None,
     ai_parent_id: str | None = None,
@@ -1238,7 +970,7 @@ async def _request_scene_plan(
     api_key: str,
     model: str,
     messages: list[dict[str, str]],
-    context_items: list[AiEmbedding],
+    context_items: list[AiCatalogItem],
     ai_trace_id: str | None = None,
     ai_session_id: str | None = None,
     ai_parent_id: str | None = None,

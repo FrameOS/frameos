@@ -23,7 +23,7 @@ if str(BACKEND_ROOT) not in sys.path:
 from app.codegen.drivers_nim import (  # noqa: E402
     COMPILATION_MODE_SHARED,
     compiled_drivers,
-    compilation_mode_uses_shared_libraries,
+    compilation_mode_uses_shared_drivers,
     driver_library_filename,
     frame_compilation_mode,
     normalize_compilation_mode,
@@ -73,7 +73,7 @@ async def build_driver_libraries(
 ) -> list[Path]:
     frame = load_frame_stub(config_path)
     mode = normalize_compilation_mode(compilation_mode or frame_compilation_mode(frame))
-    if only_if_shared and not compilation_mode_uses_shared_libraries(mode):
+    if only_if_shared and not compilation_mode_uses_shared_drivers(mode):
         print(f"Compilation mode is {mode}; skipping shared driver libraries")
         return []
 
@@ -137,7 +137,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--compilation-mode",
-        choices=("static", "shared", "precompiled"),
+        choices=("static", "shared", "shared-scenes", "precompiled"),
         default=None,
         help="Override frame.json rpios.compilationMode when deciding whether to skip",
     )

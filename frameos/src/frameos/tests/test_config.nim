@@ -24,6 +24,7 @@ block test_load_config:
     withConfig($(%*{
         "framePort": 8787,
         "frameHost": "localhost",
+        "bindHost": "127.0.0.1",
         "httpsProxy": {
             "enable": false,
             "port": 8443,
@@ -74,6 +75,7 @@ block test_load_config:
         let config = loadConfig()
         doAssert config.frameHost == "localhost"
         doAssert config.framePort == 8787
+        doAssert config.bindHost == "127.0.0.1"
         doAssert config.serverHost == "localhost"
         doAssert config.serverPort == 8989
         doAssert config.serverApiKey == "test-api-key"

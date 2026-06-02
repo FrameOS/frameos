@@ -107,7 +107,12 @@ proc serverPort*(frameConfig: FrameConfig): int =
   if frameConfig.framePort == 0: 8787 else: frameConfig.framePort
 
 proc serverBindAddress*(frameConfig: FrameConfig): string =
-  if frameConfig.httpsProxy.enable and frameConfig.httpsProxy.exposeOnlyPort: "127.0.0.1" else: "0.0.0.0"
+  if frameConfig.bindHost.len > 0:
+    frameConfig.bindHost
+  elif frameConfig.httpsProxy.enable and frameConfig.httpsProxy.exposeOnlyPort:
+    "127.0.0.1"
+  else:
+    "0.0.0.0"
 
 proc startServer*(self: types.Server) =
   log(%*{

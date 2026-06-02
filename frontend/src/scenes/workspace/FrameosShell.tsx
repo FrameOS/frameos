@@ -41,6 +41,7 @@ import { workspaceChatDrawerLogic } from './workspaceChatDrawerLogic'
 import { FrameDeployPlanDrawer } from './FrameDeployPlanDrawer'
 import { FrameUnsavedChangesDrawer } from './FrameUnsavedChangesDrawer'
 import { DeployToFrameIcon } from './FrameChangeStatusIcon'
+import { FrameRenameModal } from './FrameActionsMenu'
 
 const DEFAULT_BROWSER_TITLE = 'FrameOS Backend'
 
@@ -308,6 +309,7 @@ export function FrameosShell({
     useActions(workspaceLogic)
   const { frames } = useValues(framesModel)
   const scenesHref = selectedFrame ? urls.scenes(selectedFrame.id, selectedSceneId ?? undefined) : urls.scenes()
+  const frameHref = selectedFrame ? urls.frame(selectedFrame.id) : urls.frames()
   const appsHref = lastAppsHref ?? urls.systemApps()
   const showAiButton = showAiButtonProp ?? (mode !== 'frames' && mode !== 'settings' && !!selectedFrame)
   const chatSceneId = mode === 'scenes' || mode === 'apps' ? selectedSceneId : null
@@ -427,8 +429,8 @@ export function FrameosShell({
             <NavButton
               active={activeMode === 'frame'}
               current={mode === 'frame'}
-              href={urls.frames()}
-              pending={pendingMode === 'frames'}
+              href={frameHref}
+              pending={pendingMode === 'frame'}
               preloadScene="frames"
               sidebarOpen={secondarySidebarOpen}
               title={secondarySidebarOpen && mode === 'frame' ? 'Hide frame panel' : 'Frame'}
@@ -566,6 +568,7 @@ export function FrameosShell({
         {children}
       </main>
       {workspaceRightPanel}
+      <FrameRenameModal />
     </div>
   )
 }

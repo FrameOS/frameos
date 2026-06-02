@@ -41,6 +41,13 @@ def compilation_mode_uses_shared_libraries(value: str | None) -> bool:
     }
 
 
+def compilation_mode_uses_shared_drivers(value: str | None) -> bool:
+    return normalize_compilation_mode(value) in {
+        COMPILATION_MODE_SHARED,
+        COMPILATION_MODE_PRECOMPILED,
+    }
+
+
 def compiled_drivers(drivers: dict[str, Driver]) -> list[Driver]:
     return [driver for driver in drivers.values() if driver.import_path]
 
@@ -249,7 +256,7 @@ def write_drivers_nim(
     drivers: dict[str, Driver],
     compilation_mode: str = DEFAULT_COMPILATION_MODE,
 ) -> str:
-    if compilation_mode_uses_shared_libraries(compilation_mode):
+    if compilation_mode_uses_shared_drivers(compilation_mode):
         return write_shared_drivers_nim(drivers)
     return write_static_drivers_nim(drivers)
 

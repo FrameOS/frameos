@@ -113,7 +113,7 @@ export function Scenes() {
   const { saveAsTemplate, saveAsZip } = useActions(templatesLogic({ frameId }))
   const { sceneChanging, loading, uploadedScenes, uploadedScenesLoading } = useValues(controlLogic({ frameId }))
   const { setCurrentScene, sync } = useActions(controlLogic({ frameId }))
-  const { settings, savedSettings, settingsChanged, aiEmbeddingsStatus } = useValues(settingsLogic)
+  const { settings, savedSettings, settingsChanged } = useValues(settingsLogic)
   const { setSettingsValue, submitSettings } = useActions(settingsLogic)
   const uploadInputRef = useRef<HTMLInputElement>(null)
   useEffect(() => {
@@ -183,7 +183,7 @@ export function Scenes() {
   })
 
   const handlePromptHoverEnter = (prompt: string) => {
-    if (!hasEmbeddings) {
+    if (!hasBackendApiKey) {
       return
     }
     if (promptHoverState.current.active === null) {
@@ -224,7 +224,6 @@ export function Scenes() {
     event.target.value = ''
   }
 
-  const hasEmbeddings = (aiEmbeddingsStatus?.count ?? 0) > 0
   const hasBackendApiKey = Boolean(savedSettings?.openAI?.backendApiKey?.trim())
   const missingBackendApiKey = !hasBackendApiKey
   const serviceSettingKeys = Object.keys(settingsDetails)
@@ -233,7 +232,7 @@ export function Scenes() {
     ...serviceSettingKeys.filter((settingKey) => !missingServiceSettings.has(settingKey)),
     ...serviceSettingKeys.filter((settingKey) => missingServiceSettings.has(settingKey)),
   ]
-  const canSubmitAiPrompt = !isChatSubmitting && hasEmbeddings && !missingBackendApiKey
+  const canSubmitAiPrompt = !isChatSubmitting && !missingBackendApiKey
 
   const renderNewSceneForm = () => (
     <Form logic={scenesLogic} props={{ frameId }} formKey="newScene">
@@ -277,7 +276,7 @@ export function Scenes() {
           onChange={setAiPrompt}
           onDragOver={onPromptDragOver}
           onDrop={onPromptDrop}
-          disabled={!hasEmbeddings}
+          disabled={!hasBackendApiKey}
         />
         <div className="frame-tool-muted flex flex-wrap items-center gap-2 text-xs">
           <span>Try:</span>
@@ -289,21 +288,13 @@ export function Scenes() {
               onMouseEnter={() => handlePromptHoverEnter(suggestion.prompt)}
               onMouseLeave={() => handlePromptHoverLeave(suggestion.prompt)}
               onClick={() => handlePromptSuggestionClick(suggestion.prompt)}
-              disabled={!hasEmbeddings}
+              disabled={!hasBackendApiKey}
             >
               {suggestion.label}
             </button>
           ))}
         </div>
       </div>
-      {!hasEmbeddings ? (
-        <div className="frame-tool-muted text-xs">
-          No embeddings generated.{' '}
-          <A className="frameos-link hover:underline" href={urls.settings()}>
-            Open settings
-          </A>
-        </div>
-      ) : null}
       {aiError ? <span className="text-xs text-red-400">{aiError}</span> : null}
       <div className="space-y-2">
         <div className="frame-tool-muted">

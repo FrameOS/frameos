@@ -42,6 +42,7 @@ export type ChatMessage = {
   id: string
   role: 'user' | 'assistant'
   content: string
+  logContent?: string
   tool?: string
   isPlaceholder?: boolean
   isStreaming?: boolean
@@ -568,7 +569,9 @@ export const chatLogic = kea<chatLogicType>([
       (s) => [s.messages],
       (messages: ChatMessage[]) =>
         messages
-          .filter((message) => message.role === 'user' || message.role === 'assistant')
+          .filter(
+            (message) => (message.role === 'user' || message.role === 'assistant') && message.content.trim().length > 0
+          )
           .slice(-MAX_HISTORY)
           .map((message) => ({ role: message.role, content: message.content })),
     ],
@@ -916,20 +919,11 @@ export const chatLogic = kea<chatLogicType>([
         return
       }
       const requestId = uuidv4()
-      const logMessageId = uuidv4()
+      const assistantMessageId = uuidv4()
       actions.setActiveRequestId(requestId)
-      actions.setActiveLogMessageId(logMessageId)
+      actions.setActiveLogMessageId(assistantMessageId)
       actions.setActiveLogStartTime(null)
       actions.appendMessage(chatId, { id: uuidv4(), role: 'user', content: prompt })
-      actions.appendMessage(chatId, {
-        id: logMessageId,
-        role: 'assistant',
-        content: '',
-        tool: 'log',
-        isPlaceholder: true,
-        isStreaming: true,
-      })
-      const assistantMessageId = uuidv4()
       actions.appendMessage(chatId, {
         id: assistantMessageId,
         role: 'assistant',
@@ -1060,7 +1054,7 @@ export const chatLogic = kea<chatLogicType>([
       if (!logMessageId || !chatId) {
         return
       }
-      const existing = values.messages.find((message) => message.id === logMessageId)?.content || ''
+      const existing = values.messages.find((message) => message.id === logMessageId)?.logContent || ''
       const startTimestamp = values.activeLogStartTime || log.timestamp
       if (!values.activeLogStartTime) {
         actions.setActiveLogStartTime(log.timestamp)
@@ -1075,8 +1069,7 @@ export const chatLogic = kea<chatLogicType>([
       const nextContent = existing ? `${existing}\n${line}` : line
       const isTerminalStatus = log.status === 'success' || log.status === 'error'
       actions.updateMessage(chatId, logMessageId, {
-        content: nextContent,
-        tool: 'log',
+        logContent: nextContent,
         isPlaceholder: false,
         isStreaming: !isTerminalStatus,
       })

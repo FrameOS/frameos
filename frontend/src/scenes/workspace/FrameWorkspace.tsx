@@ -15,7 +15,7 @@ import {
   Squares2X2Icon,
 } from '@heroicons/react/24/outline'
 import { frameHost, frameIsHealthy, frameIsStale, logUpdatesFrameActivity } from '../../decorators/frame'
-import { FrameImage } from '../../components/FrameImage'
+import { FrameImage, FrameImageRefreshButton } from '../../components/FrameImage'
 import { FrameScene, FrameType, LogType, MetricsType, ScheduledEvent } from '../../types'
 import { framesModel } from '../../models/framesModel'
 import { FrameosShell } from './FrameosShell'
@@ -25,6 +25,7 @@ import { FrameDashboardLoadingSkeleton } from './FrameDashboardLoadingSkeleton'
 import { FrameDeployPlanDrawer } from './FrameDeployPlanDrawer'
 import { FrameSceneSidebarCard } from './FrameSceneSidebarCard'
 import { FrameSidebarPreview } from './FrameSidebarPreview'
+import { FrameActionsMenu } from './FrameActionsMenu'
 import { sceneWorkspaceLogic } from './sceneWorkspaceLogic'
 import { frameToolScrollKey, isMobileWorkspaceViewport, workspaceLogic, WorkspaceUtilityPanel } from './workspaceLogic'
 import { urls } from '../../urls'
@@ -351,21 +352,27 @@ function FrameSelector({
           </button>
         ) : null}
       </div>
-      <select
-        value={frame.id}
-        onChange={(event) => navigateToFrame(parseInt(event.target.value, 10))}
-        className="frameos-form-control w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-blue-400"
-      >
-        {frameGroups.map((group) => (
-          <optgroup key={group.key} label={group.label}>
-            {group.frames.map((candidate) => (
-              <option key={candidate.id} value={candidate.id}>
-                {candidate.name || frameHost(candidate)}
-              </option>
-            ))}
-          </optgroup>
-        ))}
-      </select>
+      <div className="flex items-center gap-2">
+        <select
+          value={frame.id}
+          onChange={(event) => navigateToFrame(parseInt(event.target.value, 10))}
+          className="frameos-form-control min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-blue-400"
+        >
+          {frameGroups.map((group) => (
+            <optgroup key={group.key} label={group.label}>
+              {group.frames.map((candidate) => (
+                <option key={candidate.id} value={candidate.id}>
+                  {candidate.name || frameHost(candidate)}
+                </option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+        <FrameActionsMenu
+          frame={frame}
+          className="frameos-form-control flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white !px-0 !py-0 text-slate-700 shadow-none transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+        />
+      </div>
     </div>
   )
 }
@@ -1204,10 +1211,11 @@ function FrameOverviewSurface({ frame, scenes }: { frame: FrameType; scenes: Fra
         <OverviewScheduleCard frame={frame} scenes={scenes} />
         <div className="frame-tool-card overflow-hidden rounded-[22px]">
           <div
-            className={clsx('frameos-card-media bg-slate-100', frameAspectRatio ? 'w-full' : 'h-64')}
+            className={clsx('frameos-card-media relative bg-slate-100', frameAspectRatio ? 'w-full' : 'h-64')}
             style={frameAspectRatio ? { aspectRatio: frameAspectRatio } : undefined}
           >
-            <FrameImage frameId={frame.id} refreshable objectFit="contain" className="h-full w-full" />
+            <FrameImage frameId={frame.id} refreshable={false} objectFit="contain" className="h-full w-full" />
+            <FrameImageRefreshButton frameId={frame.id} />
           </div>
         </div>
       </div>

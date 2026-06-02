@@ -5,10 +5,10 @@ import frameos/utils/image
 
 const BASE_URL = "https://gallery.frameos.net/image"
 
-type GalleryDownloadHook* = proc(url: string): Image
+type GalleryDownloadHook* = proc(url: string, maxBytes: int): Image
 
-proc defaultGalleryDownload(url: string): Image =
-  downloadImage(url)
+proc defaultGalleryDownload(url: string, maxBytes: int): Image =
+  downloadImage(url, maxBytes = maxBytes)
 
 var galleryDownloadHook*: GalleryDownloadHook = defaultGalleryDownload
 
@@ -33,4 +33,4 @@ proc get*(self: App, context: ExecutionContext): Image =
   let category = self.appConfig.resolvedCategory()
   self.log(%*{"category": category})
   let url = galleryUrl(category)
-  result = galleryDownloadHook(url)
+  result = galleryDownloadHook(url, self.maxHttpResponseBytes())

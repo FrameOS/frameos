@@ -150,14 +150,14 @@ proc decodeDataUrl*(dataUrl: string): Image =
       decodeUrl(dataBody)
   return decodeImageWithFallback(decodedData)
 
-proc downloadImage*(url: string): Image =
+proc downloadImage*(url: string, maxBytes = MaxImageDownloadBytes): Image =
   if url.startsWith("data:"):
     return decodeDataUrl(url)
-  let content = boundedGetContent(url, maxBytes = MaxImageDownloadBytes)
+  let content = boundedGetContent(url, maxBytes = maxBytes)
   result = decodeImageWithFallback(content)
 
-proc downloadImageWithData*(url: string): tuple[image: Image, data: string] =
-  let content = boundedGetContent(url, maxBytes = MaxImageDownloadBytes)
+proc downloadImageWithData*(url: string, maxBytes = MaxImageDownloadBytes): tuple[image: Image, data: string] =
+  let content = boundedGetContent(url, maxBytes = maxBytes)
   result = (decodeImageWithFallback(content), content)
 
 proc parseExifJson(output: string): Option[JsonNode] =

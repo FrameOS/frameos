@@ -1,4 +1,4 @@
-import std/[json, unittest]
+import std/[json, strutils, unittest]
 import pixie
 import std/httpclient
 
@@ -71,6 +71,11 @@ suite "httpUpload driver":
       check headers.hasKey("X-Test")
       check headers["X-Test"] == "1"
       check headers["Content-Type"] == "image/png"
+      check headers["X-FrameOS-Driver"] == "httpUpload"
+      check headers["X-FrameOS-Image-Hash"].len > 0
+      check headers["X-FrameOS-Image-Width"] == "2"
+      check headers["X-FrameOS-Image-Height"] == "2"
+      check parseInt(headers["X-FrameOS-Image-Bytes"]) > 0
       (204, "")
 
     let driver = Driver(

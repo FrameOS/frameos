@@ -6,6 +6,7 @@ import strutils
 import httpclient
 import frameos/apps
 import frameos/types
+import frameos/utils/http_client
 import frameos/utils/image
 
 type
@@ -47,12 +48,14 @@ proc get*(self: App, context: ExecutionContext): Image =
     if self.frameConfig.debug:
       self.log(&"API request: {url}")
     var client = newHttpClient(timeout = 60000)
+    client.limitHttpResponse(self.maxHttpResponseBytes(), 60)
     client.headers = newHttpHeaders([
         ("Authorization", "Client-ID " & apiKey),
         ("Accept-Version", "v1"),
         ("Content-Type", "application/json"),
     ])
     let response = client.request(url, httpMethod = HttpGet)
+    requireHttpResponseWithinLimit(response.body, self.maxHttpResponseBytes())
     defer: client.close()
 
     if response.code != Http200:
@@ -68,11 +71,13 @@ proc get*(self: App, context: ExecutionContext): Image =
     if imageUrl == "":
       return self.error(context, "No image URL returned from Unsplash.")
     var client2 = newHttpClient(timeout = 60000)
+    client2.limitHttpResponse(self.maxHttpResponseBytes(), 60)
     defer: client2.close()
     let realImageUrl = &"{imageUrl}&w={width}&h={height}&fit=crop&crop=faces,edges"
     if self.frameConfig.debug:
       self.log(&"Downloading image: {realImageUrl}")
     let imageData = client2.request(realImageUrl, httpMethod = HttpGet)
+    requireHttpResponseWithinLimit(imageData.body, self.maxHttpResponseBytes())
     if imageData.code != Http200:
       return self.error(context, &"Error {imageData.status} fetching image")
 

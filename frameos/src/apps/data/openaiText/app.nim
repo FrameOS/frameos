@@ -5,6 +5,7 @@ import strformat
 import httpclient
 import frameos/apps
 import frameos/types
+import frameos/utils/http_client
 
 type
   AppConfig* = object
@@ -30,6 +31,7 @@ proc get*(self: App, context: ExecutionContext): string =
     return
 
   var client = newHttpClient(timeout = 60000)
+  client.limitHttpResponse(self.maxHttpResponseBytes(), 60)
   client.headers = newHttpHeaders([
       ("Authorization", "Bearer " & apiKey),
       ("Content-Type", "application/json"),
@@ -51,6 +53,7 @@ proc get*(self: App, context: ExecutionContext): string =
     self.log(%*{"user": self.appConfig.user, "system": self.appConfig.system})
     let response = client.request("https://api.openai.com/v1/chat/completions",
         httpMethod = HttpPost, body = $body)
+    requireHttpResponseWithinLimit(response.body, self.maxHttpResponseBytes())
     if response.code != Http200:
       try:
         let json = parseJson(response.body)

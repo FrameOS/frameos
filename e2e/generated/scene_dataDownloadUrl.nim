@@ -113,7 +113,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   scene.execNode = (proc(nodeId: NodeId, context: ExecutionContext) = discard scene.runNode(nodeId, context))
   scene.getDataNode = (proc(nodeId: NodeId, context: ExecutionContext): Value = scene.getDataNode(nodeId, context))
   scene.node1 = data_downloadUrlApp.App(nodeName: "data/downloadUrl", nodeId: 1.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_downloadUrlApp.AppConfig(
-    url: "https://frameos.net/.ci_text_file",
+    url: "http://127.0.0.1:54817/fixtures/ci_text_file",
   ))
   scene.node2 = render_textApp.App(nodeName: "render/text", nodeId: 2.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
     inputImage: none(Image),
@@ -151,7 +151,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     render_function: 0.NodeId,
   ))
   scene.node5 = data_downloadUrlApp.App(nodeName: "data/downloadUrl", nodeId: 5.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_downloadUrlApp.AppConfig(
-    url: "https://frameos.net/.this-is-not-a-file-that-exists",
+    url: "http://127.0.0.1:54817/fixtures/missing",
   ))
   scene.node4 = render_textApp.App(nodeName: "render/text", nodeId: 4.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
     inputImage: none(Image),

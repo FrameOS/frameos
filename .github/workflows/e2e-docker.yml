@@ -5,6 +5,9 @@ on:
     branches: [ "main" ]
   push:
     branches: [ "main" ]
+    paths-ignore:
+      - buildroot-images.json
+      - cross-toolchain-images.json
 
 jobs:
   build-and-test:

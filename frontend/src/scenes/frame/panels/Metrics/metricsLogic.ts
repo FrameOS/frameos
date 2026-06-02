@@ -75,7 +75,6 @@ const MEMORY_USAGE_COLORS: Record<string, string> = {
 const DISK_USAGE_COLORS: Record<string, string> = {
   total: 'var(--frameos-color-evergreen)',
   used: 'var(--frameos-color-brass)',
-  available: 'var(--frameos-color-moss)',
 }
 const RUNTIME_DIMENSION_COLORS: Record<string, string> = {
   width: 'var(--frameos-color-evergreen)',
@@ -258,9 +257,6 @@ function normalizeDiskUsageEntries(value: Record<string, unknown>): [string, num
     entries.push(['used', used])
   } else if (Number.isFinite(total) && Number.isFinite(available)) {
     entries.push(['used', Math.max(0, total - available)])
-  }
-  if (Number.isFinite(available)) {
-    entries.push(['available', available])
   }
 
   return entries

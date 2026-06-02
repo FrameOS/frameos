@@ -9,7 +9,7 @@ import { Button } from '../../components/Button'
 import { Field } from '../../components/Field'
 import { TextArea } from '../../components/TextArea'
 import { sceneLogic } from '../sceneLogic'
-import { ArrowPathIcon, PencilSquareIcon, PlusIcon, TrashIcon } from '@heroicons/react/24/solid'
+import { PencilSquareIcon, PlusIcon, TrashIcon } from '@heroicons/react/24/solid'
 import { NumberTextInput } from '../../components/NumberTextInput'
 import { Switch } from '../../components/Switch'
 import { Select } from '../../components/Select'
@@ -231,12 +231,7 @@ export function Settings() {
     savedSettingsLoading,
     settingsChanged,
     isSettingsSubmitting,
-    embeddingsCount,
-    embeddingsTotal,
-    embeddingsMissing,
-    isGeneratingEmbeddings,
-    isDeletingEmbeddings,
-    embeddingsPollingIntervalId,
+    openAiModelOverridesExpanded,
     customFontsLoading,
     isCustomFontsFormSubmitting,
     customFonts,
@@ -253,10 +248,8 @@ export function Settings() {
     newBuildHostKey,
     deleteCustomFont,
     setSettingsValue,
-    generateMissingEmbeddings,
-    deleteEmbeddings,
-    loadAiEmbeddingsStatus,
     toggleSshKeyExpanded,
+    toggleOpenAiModelOverrides,
   } = useActions(settingsLogic)
   const { isHassioIngress } = useValues(sceneLogic)
   const { logout } = useActions(sceneLogic)
@@ -529,51 +522,36 @@ export function Settings() {
                     >
                       <TextInput name="backendApiKey" />
                     </Field>
-                    <Field name="summaryModel" label="Summary model">
-                      <TextInput name="summaryModel" placeholder="gpt-5.4-mini" />
+                    <Field name="model" label="Model">
+                      <TextInput name="model" placeholder="gpt-5.5" />
                     </Field>
-                    <Field name="embeddingModel" label="Embedding model">
-                      <TextInput name="embeddingModel" placeholder="text-embedding-3-large" />
-                    </Field>
-                    <Field name="sceneModel" label="Scene generation model">
-                      <TextInput name="sceneModel" placeholder="gpt-5.5" />
-                    </Field>
-                    <Field name="appEnhanceModel" label="App edit model">
-                      <TextInput name="appEnhanceModel" placeholder="gpt-5.5" />
-                    </Field>
-                    <div className="frameos-muted flex flex-wrap items-center gap-2 text-sm">
-                      <span>
-                        Embeddings: {embeddingsCount}/{embeddingsTotal}
-                      </span>
-                      {embeddingsPollingIntervalId === null ? (
-                        <Button
-                          size="small"
-                          color="secondary"
-                          onClick={loadAiEmbeddingsStatus}
-                          aria-label="Reload embeddings status"
-                          title="Reload embeddings status"
-                        >
-                          <ArrowPathIcon className="h-4 w-4" />
-                        </Button>
-                      ) : null}
-                      <Button
-                        size="small"
-                        color="secondary"
-                        onClick={generateMissingEmbeddings}
-                        disabled={isGeneratingEmbeddings || isDeletingEmbeddings || embeddingsMissing === 0}
-                      >
-                        {isGeneratingEmbeddings ? <Spinner color="white" /> : 'Generate missing'}
+                    <div className="pt-1">
+                      <Button size="small" color="secondary" onClick={toggleOpenAiModelOverrides}>
+                        {openAiModelOverridesExpanded ? 'Hide model overrides' : 'Show model overrides'}
                       </Button>
-                      <Button
-                        size="small"
-                        color="secondary"
-                        onClick={deleteEmbeddings}
-                        disabled={isGeneratingEmbeddings || isDeletingEmbeddings || embeddingsCount === 0}
-                      >
-                        {isDeletingEmbeddings ? <Spinner color="white" /> : 'Delete all'}
-                      </Button>
-                      {isGeneratingEmbeddings ? 'Generating embeddings' : null}
                     </div>
+                    {openAiModelOverridesExpanded ? (
+                      <div className="space-y-2 border-t border-slate-500/20 pt-3">
+                        <Field name="chatModel" label="Chat model">
+                          <TextInput name="chatModel" placeholder="Use shared model" />
+                        </Field>
+                        <Field name="sceneModel" label="Scene generation model">
+                          <TextInput name="sceneModel" placeholder="Use shared model" />
+                        </Field>
+                        <Field name="reviewModel" label="Scene review model">
+                          <TextInput name="reviewModel" placeholder="Use shared model" />
+                        </Field>
+                        <Field name="appChatModel" label="App chat model">
+                          <TextInput name="appChatModel" placeholder="Use shared model" />
+                        </Field>
+                        <Field name="appEditModel" label="App edit chat model">
+                          <TextInput name="appEditModel" placeholder="Use shared model" />
+                        </Field>
+                        <Field name="appEnhanceModel" label="App source enhance model">
+                          <TextInput name="appEnhanceModel" placeholder="Use shared model" />
+                        </Field>
+                      </div>
+                    ) : null}
                   </Box>
                 </Group>
                 <Group name="posthog">

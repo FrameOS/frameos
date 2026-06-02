@@ -1,6 +1,7 @@
 import { useActions, useValues } from 'kea'
 import clsx from 'clsx'
 import { useEffect, useRef, useState } from 'react'
+import { ArrowPathIcon } from '@heroicons/react/24/outline'
 import { framesModel } from '../models/framesModel'
 import { entityImagesModel, useEntityImage } from '../models/entityImagesModel'
 
@@ -49,6 +50,39 @@ export interface FrameImageProps extends React.HTMLAttributes<HTMLDivElement> {
   imageClassName?: string
   hideWhileLoading?: boolean
   loadFullSizeAfterThumb?: boolean
+}
+
+export function FrameImageRefreshButton({
+  frameId,
+  sceneId,
+  className,
+}: {
+  frameId: number
+  sceneId?: string
+  className?: string
+}) {
+  const { updateEntityImage } = useActions(entityImagesModel)
+  const entityId = `frames/${frameId}`
+  const subEntityId = sceneId ? `scene_images/${sceneId}` : 'image'
+
+  return (
+    <button
+      type="button"
+      title="Refresh image"
+      aria-label="Refresh image"
+      onClick={(event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        updateEntityImage(entityId, subEntityId)
+      }}
+      className={clsx(
+        'absolute left-2 top-2 z-10 flex h-7 w-7 items-center justify-center rounded-lg bg-white/60 text-slate-500 opacity-70 shadow-sm ring-1 ring-slate-200/70 backdrop-blur transition hover:bg-white/90 hover:text-slate-800 hover:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+        className
+      )}
+    >
+      <ArrowPathIcon className="h-4 w-4" />
+    </button>
+  )
 }
 
 /**

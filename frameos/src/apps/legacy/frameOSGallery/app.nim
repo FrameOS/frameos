@@ -1,6 +1,7 @@
 import pixie, times, options, json, strformat
 import frameos/utils/image
 import frameos/types
+import frameos/apps
 
 const BASE_URL = "https://gallery.frameos.net/image"
 
@@ -41,7 +42,7 @@ proc run*(self: App, context: ExecutionContext) =
       self.cachedUrl == url:
     downloadedImage = self.cachedImage
   else:
-    downloadedImage = some(downloadImage(url))
+    downloadedImage = some(downloadImage(url, maxBytes = self.frameConfig.maxHttpResponseBytes()))
     if self.appConfig.cacheSeconds > 0:
       self.cachedImage = downloadedImage
       self.cachedUrl = url

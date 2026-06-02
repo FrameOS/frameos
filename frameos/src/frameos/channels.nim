@@ -33,7 +33,11 @@ else:
   import options
   import times
   import frameos/ids
+  import frameos/driver_abi
   import frameos/types
+
+  proc setSharedHostCallbacks*(logHook: HostLogProc, sendEventHook: HostSendEventProc) =
+    discard
 
   # Event
 

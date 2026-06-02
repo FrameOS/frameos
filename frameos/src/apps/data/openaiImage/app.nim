@@ -5,6 +5,7 @@ import httpclient
 import base64
 import frameos/apps
 import frameos/types
+import frameos/utils/http_client
 import frameos/utils/image
 
 type
@@ -34,6 +35,7 @@ proc get*(self: App, context: ExecutionContext): Image =
     return self.error(context, "Please provide an OpenAI API key in the settings.")
 
   var client = newHttpClient(timeout = 300000) # 5 min timeout
+  client.limitHttpResponse(self.maxHttpResponseBytes(), 300)
   client.headers = newHttpHeaders([
       ("Authorization", "Bearer " & apiKey),
       ("Content-Type", "application/json"),
@@ -82,6 +84,7 @@ proc get*(self: App, context: ExecutionContext): Image =
   try:
     let response = client.request("https://api.openai.com/v1/images/generations",
         httpMethod = HttpPost, body = $body)
+    requireHttpResponseWithinLimit(response.body, self.maxHttpResponseBytes())
     defer: client.close()
     if response.code != Http200:
       try:
@@ -102,8 +105,10 @@ proc get*(self: App, context: ExecutionContext): Image =
       if imageUrl == "":
         return self.error(context, "No image data returned from OpenAI.")
       var client2 = newHttpClient(timeout = 60000)
+      client2.limitHttpResponse(self.maxHttpResponseBytes(), 60)
       defer: client2.close()
       let imageData = client2.request(imageUrl, httpMethod = HttpGet)
+      requireHttpResponseWithinLimit(imageData.body, self.maxHttpResponseBytes())
       if imageData.code != Http200:
         return self.error(context, "Error fetching image " & $imageData.status)
       imageDataBody = imageData.body

@@ -16,7 +16,7 @@ type
 proc get*(self: App, context: ExecutionContext): Image =
   try:
     let url = self.appConfig.url
-    let (image, imageData) = downloadImageWithData(url)
+    let (image, imageData) = downloadImageWithData(url, maxBytes = self.maxHttpResponseBytes())
     if self.appConfig.metadataStateKey != "":
       var metadata = %*{
         "url": url,
