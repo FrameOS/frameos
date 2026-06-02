@@ -4,7 +4,7 @@ import { ExclamationTriangleIcon } from '@heroicons/react/24/solid'
 
 import type { FrameType } from '../../types'
 import { getFrameMetricAlerts, frameMetricAlertTitle } from '../../utils/frameMetricAlerts'
-import { metricsLogic } from '../frame/panels/Metrics/metricsLogic'
+import { frameMetricsPreviewLogic } from './frameMetricsPreviewLogic'
 
 export function FrameMetricAlertIndicator({
   frame,
@@ -13,8 +13,8 @@ export function FrameMetricAlertIndicator({
   frame: FrameType
   className?: string
 }): JSX.Element | null {
-  const { sortedMetrics } = useValues(metricsLogic({ frameId: frame.id }))
-  const alerts = getFrameMetricAlerts(frame, sortedMetrics)
+  const { sortedRecentMetrics } = useValues(frameMetricsPreviewLogic({ frameId: frame.id }))
+  const alerts = getFrameMetricAlerts(frame, sortedRecentMetrics)
 
   if (alerts.length === 0) {
     return null

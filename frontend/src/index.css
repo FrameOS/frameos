@@ -459,6 +459,7 @@ html[data-frameos-theme='dark'] .frameos-spinner,
       rgb(var(--frameos-color-brass-rgb) / 0.12)
     ),
     var(--frameos-page-bg);
+  background-attachment: fixed;
   background-position: center top;
   background-repeat: no-repeat;
   background-size: 100vw 100vh;
@@ -472,6 +473,7 @@ html[data-frameos-theme='dark'] .frameos-spinner,
       color-mix(in srgb, var(--frameos-color-graphite) 98%, #000000)
     ),
     var(--frameos-page-bg);
+  background-attachment: fixed;
   background-position: center top;
   background-repeat: no-repeat;
   background-size: 100vw 100vh;

@@ -228,7 +228,6 @@ class Frame(Base):
     debug = mapped_column(Boolean, nullable=True)
     upload_fonts = mapped_column(String(10), nullable=True)
     last_log_at = mapped_column(DateTime, nullable=True)
-    last_boot_at = mapped_column(DateTime, nullable=True)
     reboot = mapped_column(JSON, nullable=True)
     control_code = mapped_column(JSON, nullable=True)
     scenes = mapped_column(JSON, nullable=True, default=list)
@@ -290,7 +289,6 @@ class Frame(Base):
             'debug': self.debug,
             'scenes': self.scenes,
             'last_log_at': self.last_log_at.replace(tzinfo=timezone.utc).isoformat() if self.last_log_at else None,
-            'last_boot_at': self.last_boot_at.replace(tzinfo=timezone.utc).isoformat() if self.last_boot_at else None,
             'log_to_file': self.log_to_file,
             'assets_path': self.assets_path,
             'save_assets': self.save_assets,

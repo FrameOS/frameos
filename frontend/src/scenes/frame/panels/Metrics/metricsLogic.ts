@@ -125,7 +125,7 @@ function sortAndDedupeRebootMarkers(markers: RebootMarker[]): RebootMarker[] {
   return [...markersByKey.values()].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
 }
 
-function metricTimestamp(metric: MetricsType): number {
+export function metricTimestamp(metric: MetricsType): number {
   return parseMetricTimestamp(metric.timestamp)
 }
 
@@ -269,7 +269,7 @@ function timeRangeForPreset(timeRange: TimeRange | null, preset: MetricsTimeRang
   return normalizeTimeRange(timeRange.end - (visibleMs ?? DEFAULT_VISIBLE_MS), timeRange.end)
 }
 
-function filterMetricsByCategoryAndTimeRange(
+export function filterMetricsByCategoryAndTimeRange(
   metricsByCategory: Record<string, MetricSeries[]>,
   categories: string[],
   timeRange: TimeRange | null
@@ -475,6 +475,115 @@ function getLatestRuntimeDimensionsSummary(metrics: MetricsType[]): string | nul
   return null
 }
 
+export function metricsByCategoryFromMetrics(metrics: MetricsType[]): Record<string, MetricSeries[]> {
+  const metricsByCategory: Record<string, MetricSeries[]> = {}
+  metrics.forEach((metric) => {
+    const timestamp = new Date(metricTimestamp(metric))
+    for (const [key, value] of Object.entries(metric.metrics)) {
+      if (key === 'intervalMs') {
+        continue
+      }
+      if (Array.isArray(value)) {
+        for (let i = 0; i < value.length; i++) {
+          const subKey = `${key}[${i}]`
+          if (typeof value[i] === 'number') {
+            const series =
+              key === 'load'
+                ? getOrCreateMetricSeries(metricsByCategory, key, subKey, subKey, metricSeriesColor(i))
+                : getOrCreateMetricSeries(metricsByCategory, subKey, subKey, subKey, SINGLE_SERIES_COLOR)
+            series.data.push({ x: timestamp, y: value[i] })
+          }
+        }
+      } else if (value && typeof value === 'object') {
+        const valueRecord = value as Record<string, unknown>
+        if (key === 'runtime') {
+          normalizeRuntimeDimensionEntries(valueRecord).forEach(([subKey, subValue]) => {
+            const series = getOrCreateMetricSeries(
+              metricsByCategory,
+              'runtimeDimensions',
+              `runtime.${subKey}`,
+              subKey,
+              RUNTIME_DIMENSION_COLORS[subKey] ?? metricSeriesColor(metricsByCategory.runtimeDimensions?.length ?? 0),
+              'left',
+              'pixels'
+            )
+            series.data.push({ x: timestamp, y: subValue })
+          })
+        }
+        const entries =
+          key === 'memoryUsage'
+            ? normalizeMemoryUsageEntries(valueRecord)
+            : key === 'diskUsage'
+            ? normalizeDiskUsageEntries(valueRecord)
+            : Object.entries(value)
+        for (const [subKey, subValue] of entries) {
+          if (
+            (key === 'memoryUsage' && (subKey === 'active' || subKey === 'free' || subKey === 'percentage')) ||
+            (key === 'diskUsage' && (subKey === 'filesystems' || subKey === 'percentage')) ||
+            (key === 'processMemory' && subKey === 'pid') ||
+            (key === 'runtime' && (subKey === 'width' || subKey === 'height'))
+          ) {
+            continue
+          }
+          if (typeof subValue === 'number') {
+            const fullSubKey = `${key}.${subKey}`
+            const series =
+              key === 'memoryUsage'
+                ? getOrCreateMetricSeries(
+                    metricsByCategory,
+                    key,
+                    fullSubKey,
+                    subKey,
+                    MEMORY_USAGE_COLORS[subKey] ?? metricSeriesColor(metricsByCategory[key]?.length ?? 0),
+                    'left',
+                    'bytes'
+                  )
+                : key === 'diskUsage'
+                ? getOrCreateMetricSeries(
+                    metricsByCategory,
+                    key,
+                    fullSubKey,
+                    subKey,
+                    DISK_USAGE_COLORS[subKey] ?? metricSeriesColor(metricsByCategory[key]?.length ?? 0),
+                    'left',
+                    'bytes'
+                  )
+                : key === 'processMemory'
+                ? getOrCreateMetricSeries(
+                    metricsByCategory,
+                    key,
+                    fullSubKey,
+                    subKey,
+                    metricSeriesColor(metricsByCategory[key]?.length ?? 0),
+                    'left',
+                    'bytes'
+                  )
+                : getOrCreateMetricSeries(metricsByCategory, fullSubKey, fullSubKey, fullSubKey, SINGLE_SERIES_COLOR)
+            series.data.push({ x: timestamp, y: subValue })
+          }
+        }
+      } else if (typeof value === 'number') {
+        const series = getOrCreateMetricSeries(metricsByCategory, key, key, key, SINGLE_SERIES_COLOR)
+        series.data.push({ x: timestamp, y: value })
+      }
+    }
+  })
+  return metricsByCategory
+}
+
+export function latestMetricSummariesByCategoryFromMetrics(metrics: MetricsType[]): Record<string, string> {
+  const loadSummary = getLatestLoadSummary(metrics)
+  const memoryUsageSummary = getLatestUsageSummary(metrics, 'memoryUsage')
+  const diskUsageSummary = getLatestUsageSummary(metrics, 'diskUsage')
+  const runtimeDimensionsSummary = getLatestRuntimeDimensionsSummary(metrics)
+  return {
+    ...(loadSummary ? { load: loadSummary } : {}),
+    ...(memoryUsageSummary ? { memoryUsage: memoryUsageSummary } : {}),
+    ...(diskUsageSummary ? { diskUsage: diskUsageSummary } : {}),
+    ...(runtimeDimensionsSummary ? { runtimeDimensions: runtimeDimensionsSummary } : {}),
+  }
+}
+
 export const metricsLogic = kea<metricsLogicType>([
   path(['src', 'scenes', 'frame', 'metricsLogic']),
   props({} as metricsLogicProps),
@@ -642,108 +751,7 @@ export const metricsLogic = kea<metricsLogicType>([
     ],
     metricsByCategory: [
       (s) => [s.sortedMetrics],
-      (metrics) => {
-        const metricsByCategory: Record<string, MetricSeries[]> = {}
-        metrics.forEach((metric) => {
-          const timestamp = new Date(metricTimestamp(metric))
-          for (const [key, value] of Object.entries(metric.metrics)) {
-            if (key === 'intervalMs') {
-              continue
-            }
-            if (Array.isArray(value)) {
-              for (let i = 0; i < value.length; i++) {
-                const subKey = `${key}[${i}]`
-                if (typeof value[i] === 'number') {
-                  const series =
-                    key === 'load'
-                      ? getOrCreateMetricSeries(metricsByCategory, key, subKey, subKey, metricSeriesColor(i))
-                      : getOrCreateMetricSeries(metricsByCategory, subKey, subKey, subKey, SINGLE_SERIES_COLOR)
-                  series.data.push({ x: timestamp, y: value[i] })
-                }
-              }
-            } else if (value && typeof value === 'object') {
-              const valueRecord = value as Record<string, unknown>
-              if (key === 'runtime') {
-                normalizeRuntimeDimensionEntries(valueRecord).forEach(([subKey, subValue]) => {
-                  const series = getOrCreateMetricSeries(
-                    metricsByCategory,
-                    'runtimeDimensions',
-                    `runtime.${subKey}`,
-                    subKey,
-                    RUNTIME_DIMENSION_COLORS[subKey] ??
-                      metricSeriesColor(metricsByCategory.runtimeDimensions?.length ?? 0),
-                    'left',
-                    'pixels'
-                  )
-                  series.data.push({ x: timestamp, y: subValue })
-                })
-              }
-              const entries =
-                key === 'memoryUsage'
-                  ? normalizeMemoryUsageEntries(valueRecord)
-                  : key === 'diskUsage'
-                  ? normalizeDiskUsageEntries(valueRecord)
-                  : Object.entries(value)
-              for (const [subKey, subValue] of entries) {
-                if (
-                  (key === 'memoryUsage' && (subKey === 'active' || subKey === 'free' || subKey === 'percentage')) ||
-                  (key === 'diskUsage' && (subKey === 'filesystems' || subKey === 'percentage')) ||
-                  (key === 'processMemory' && subKey === 'pid') ||
-                  (key === 'runtime' && (subKey === 'width' || subKey === 'height'))
-                ) {
-                  continue
-                }
-                if (typeof subValue === 'number') {
-                  const fullSubKey = `${key}.${subKey}`
-                  const series =
-                    key === 'memoryUsage'
-                      ? getOrCreateMetricSeries(
-                          metricsByCategory,
-                          key,
-                          fullSubKey,
-                          subKey,
-                          MEMORY_USAGE_COLORS[subKey] ?? metricSeriesColor(metricsByCategory[key]?.length ?? 0),
-                          'left',
-                          'bytes'
-                        )
-                      : key === 'diskUsage'
-                      ? getOrCreateMetricSeries(
-                          metricsByCategory,
-                          key,
-                          fullSubKey,
-                          subKey,
-                          DISK_USAGE_COLORS[subKey] ?? metricSeriesColor(metricsByCategory[key]?.length ?? 0),
-                          'left',
-                          'bytes'
-                        )
-                      : key === 'processMemory'
-                      ? getOrCreateMetricSeries(
-                          metricsByCategory,
-                          key,
-                          fullSubKey,
-                          subKey,
-                          metricSeriesColor(metricsByCategory[key]?.length ?? 0),
-                          'left',
-                          'bytes'
-                        )
-                      : getOrCreateMetricSeries(
-                          metricsByCategory,
-                          fullSubKey,
-                          fullSubKey,
-                          fullSubKey,
-                          SINGLE_SERIES_COLOR
-                        )
-                  series.data.push({ x: timestamp, y: subValue })
-                }
-              }
-            } else if (typeof value === 'number') {
-              const series = getOrCreateMetricSeries(metricsByCategory, key, key, key, SINGLE_SERIES_COLOR)
-              series.data.push({ x: timestamp, y: value })
-            }
-          }
-        })
-        return metricsByCategory
-      },
+      (metrics) => metricsByCategoryFromMetrics(metrics),
     ],
     headerMetricsByCategory: [
       (s) => [s.metricsByCategory, s.headerMetricsTimeRange],
@@ -766,18 +774,7 @@ export const metricsLogic = kea<metricsLogicType>([
     ],
     latestMetricSummariesByCategory: [
       (s) => [s.sortedMetrics],
-      (metrics): Record<string, string> => {
-        const loadSummary = getLatestLoadSummary(metrics)
-        const memoryUsageSummary = getLatestUsageSummary(metrics, 'memoryUsage')
-        const diskUsageSummary = getLatestUsageSummary(metrics, 'diskUsage')
-        const runtimeDimensionsSummary = getLatestRuntimeDimensionsSummary(metrics)
-        return {
-          ...(loadSummary ? { load: loadSummary } : {}),
-          ...(memoryUsageSummary ? { memoryUsage: memoryUsageSummary } : {}),
-          ...(diskUsageSummary ? { diskUsage: diskUsageSummary } : {}),
-          ...(runtimeDimensionsSummary ? { runtimeDimensions: runtimeDimensionsSummary } : {}),
-        }
-      },
+      (metrics): Record<string, string> => latestMetricSummariesByCategoryFromMetrics(metrics),
     ],
   }),
   afterMount(({ actions, cache }) => {

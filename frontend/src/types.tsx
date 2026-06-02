@@ -69,7 +69,6 @@ export interface FrameType {
   scenes?: FrameScene[]
   debug?: boolean
   last_log_at?: string
-  last_boot_at?: string
   log_to_file?: string
   assets_path?: string
   save_assets?: boolean | Record<string, boolean>

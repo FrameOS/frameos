@@ -76,7 +76,6 @@ class FrameBase(BaseModel):
     background_color: Optional[str]
     debug: Optional[bool]
     last_log_at: Optional[datetime]
-    last_boot_at: Optional[datetime]
     log_to_file: Optional[str]
     assets_path: Optional[str]
     save_assets: Any

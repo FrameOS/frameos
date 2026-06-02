@@ -48,15 +48,11 @@ async def test_api_frames(async_client, db, redis):
 @pytest.mark.asyncio
 async def test_api_frame_get_found(async_client, db, redis):
     frame = await new_frame(db, redis, 'FoundFrame', 'localhost', 'localhost')
-    frame.last_boot_at = datetime(2026, 6, 2, 3, 4, 5)
-    db.add(frame)
-    db.commit()
     response = await async_client.get(f'/api/frames/{frame.id}')
     assert response.status_code == 200
     data = response.json()
     assert 'frame' in data
     assert data['frame']['name'] == 'FoundFrame'
-    assert data['frame']['last_boot_at'] == '2026-06-02T03:04:05Z'
 
 
 @pytest.mark.asyncio
@@ -310,6 +306,27 @@ async def test_api_frame_metrics_returns_metrics_without_reboot_markers(async_cl
     assert response.status_code == 200
     payload = response.json()
     assert payload['metrics'][0]['metrics'] == {"load": [0.12], "runtime": {"bootId": "boot-a"}}
+
+
+@pytest.mark.asyncio
+async def test_api_frame_recent_metrics_limits_metrics(async_client, db, redis):
+    frame = await new_frame(db, redis, 'RecentMetricsFrame', 'localhost', 'localhost')
+    for index in range(4):
+        db.add(
+            Metrics(
+                frame_id=frame.id,
+                timestamp=datetime(2026, 6, 2, 3, index, 0),
+                metrics={"load": [index]},
+            )
+        )
+    db.commit()
+
+    response = await async_client.get(f'/api/frames/{frame.id}/metrics/recent?limit=3&since=2026-06-02T03:01:30Z')
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [metric['metrics']['load'][0] for metric in payload['metrics']] == [2, 3]
+
 
 @pytest.mark.asyncio
 async def test_api_frame_get_not_found(async_client):

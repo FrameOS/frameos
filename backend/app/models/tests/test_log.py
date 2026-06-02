@@ -102,7 +102,6 @@ async def test_process_log_bootup(mock_pub, db, redis):
     ])
     updated = db.get(Frame, frame.id)
     assert updated.status == "ready"
-    assert updated.last_boot_at == boot_time
     assert updated.width == 200
     assert updated.height == 300
     assert updated.color == "monochrome"

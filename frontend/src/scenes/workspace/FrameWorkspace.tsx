@@ -35,7 +35,6 @@ import { panelsLogic } from '../frame/panels/panelsLogic'
 import { terminalLogic } from '../frame/panels/Terminal/terminalLogic'
 import { frameSettingsLogic } from '../frame/panels/FrameSettings/frameSettingsLogic'
 import { logsLogic } from '../frame/panels/Logs/logsLogic'
-import { metricsLogic } from '../frame/panels/Metrics/metricsLogic'
 import { controlLogic } from '../frame/panels/Scenes/controlLogic'
 import { RenameSceneModal } from '../frame/panels/Scenes/RenameSceneModal'
 import { templatesLogic } from '../frame/panels/Templates/templatesLogic'
@@ -57,6 +56,7 @@ import {
 } from './sceneDrag'
 import { groupFramesByStatus } from './frameStatusGroups'
 import { sceneTileSummaryLabel } from './sceneTileLabels'
+import { frameMetricsPreviewLogic } from './frameMetricsPreviewLogic'
 
 interface FrameWorkspaceProps {
   id?: string
@@ -1119,7 +1119,7 @@ function OverviewScheduleCard({ frame, scenes }: { frame: FrameType; scenes: Fra
 
 function FrameOverviewSurface({ frame, scenes }: { frame: FrameType; scenes: FrameScene[] }): JSX.Element {
   const { logs } = useValues(logsLogic({ frameId: frame.id }))
-  const { metrics, metricsLoading } = useValues(metricsLogic({ frameId: frame.id }))
+  const { sortedRecentMetrics, recentMetricsLoading } = useValues(frameMetricsPreviewLogic({ frameId: frame.id }))
   const latestLogAt = getLatestLogTimestamp(logs, frame.last_log_at)
   const frameWithLatestLog = latestLogAt ? { ...frame, last_log_at: latestLogAt } : frame
   const stale = frameIsStale(frameWithLatestLog)
@@ -1204,7 +1204,11 @@ function FrameOverviewSurface({ frame, scenes }: { frame: FrameType; scenes: Fra
             </div>
           </div>
 
-          <OverviewSystemMetricTiles frame={frame} metrics={metrics} metricsLoading={metricsLoading} />
+          <OverviewSystemMetricTiles
+            frame={frame}
+            metrics={sortedRecentMetrics}
+            metricsLoading={recentMetricsLoading}
+          />
         </div>
 
         <div className="h-[28rem] min-h-[20rem]">
@@ -1275,7 +1279,6 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
   useMountedLogic(terminalLogic(frameLogicProps))
   useMountedLogic(frameSettingsLogic(frameLogicProps))
   useMountedLogic(logsLogic(frameLogicProps))
-  useMountedLogic(metricsLogic(frameLogicProps))
 
   const { framesList } = useValues(framesModel)
   const { frame, scenes, deployPlanModalOpen, undeployedChanges, unsavedChanges } = useValues(
