@@ -49,9 +49,10 @@ from app.utils.ai_scene import (
     validate_scene_payload,
 )
 from app.models.frame import Frame
+from app.tenancy import current_project_id
 from app.utils.posthog import get_posthog_client, llm_analytics_enabled
 from app.websockets import publish_message
-from . import api_with_auth
+from . import api_project
 
 AI_ID_PATTERN = re.compile(r"[^A-Za-z0-9\\-_.@()!'~:|]")
 REQUIRED_EMBEDDING_PATHS = {
@@ -278,10 +279,16 @@ async def _publish_ai_scene_log(
     status: str = "info",
     stage: str | None = None,
 ) -> None:
+    try:
+        project_id = current_project_id()
+    except RuntimeError:
+        project_id = None
+
     await publish_message(
         redis,
         "ai_scene_log",
         {
+            "project_id": project_id,
             "message": message,
             "requestId": request_id,
             "status": status,
@@ -294,6 +301,7 @@ async def _publish_ai_scene_log(
 async def _load_context_items(
     *,
     db: Session,
+    project_id: int,
     settings: dict[str, Any],
     api_key: str,
     prompt: str,
@@ -319,7 +327,7 @@ async def _load_context_items(
         )
 
     await log_message("Loading embeddings.", stage="context:load")
-    embeddings = db.query(AiEmbedding).all()
+    embeddings = db.query(AiEmbedding).filter_by(project_id=project_id).all()
     if not embeddings:
         await log_message(
             "No embeddings found; proceeding without retrieval context.",
@@ -381,12 +389,13 @@ async def _load_context_items(
     return context_items
 
 
-@api_with_auth.post("/ai/scenes/generate", response_model=AiSceneGenerateResponse)
+@api_project.post("/ai/scenes/generate", response_model=AiSceneGenerateResponse)
 async def generate_scene(
     data: AiSceneGenerateRequest,
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
+    project_id = current_project_id()
     request_id = data.request_id or str(uuid4())
     posthog_trace_id = _sanitize_ai_id(request_id) or str(uuid4())
     posthog_session_id = None
@@ -406,7 +415,7 @@ async def generate_scene(
 
     frame_context = None
     if data.frame_id is not None:
-        frame = db.query(Frame).filter(Frame.id == data.frame_id).first()
+        frame = db.query(Frame).filter(Frame.project_id == project_id, Frame.id == data.frame_id).first()
         if frame:
             frame_context = format_frame_context(
                 {
@@ -431,7 +440,7 @@ async def generate_scene(
                 stage="frame:skip",
             )
 
-    settings = get_settings_dict(db)
+    settings = get_settings_dict(db, project_id=project_id)
     openai_settings = settings.get("openAI", {})
     api_key = openai_settings.get("backendApiKey")
     if not api_key:
@@ -480,7 +489,7 @@ async def generate_scene(
             prompt_for_retrieval = prompt
 
         await _publish_ai_scene_log(redis, "Loading embeddings.", request_id, stage="context:load")
-        embeddings = db.query(AiEmbedding).all()
+        embeddings = db.query(AiEmbedding).filter_by(project_id=project_id).all()
         missing_service_keys = _get_missing_service_keys(settings)
         available_embeddings = _filter_embeddings_for_services(embeddings, missing_service_keys)
         context_items: list[AiEmbedding] = []
@@ -728,12 +737,13 @@ async def generate_scene(
     return AiSceneGenerateResponse(title=title, scenes=scenes, context=context_response)
 
 
-@api_with_auth.post("/ai/scenes/chat", response_model=AiSceneChatResponse)
+@api_project.post("/ai/scenes/chat", response_model=AiSceneChatResponse)
 async def chat_scene(
     data: AiSceneChatRequest,
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
+    project_id = current_project_id()
     request_id = data.request_id or str(uuid4())
     posthog_trace_id = _sanitize_ai_id(request_id) or str(uuid4())
     posthog_session_id = None
@@ -752,8 +762,11 @@ async def chat_scene(
 
     chat = None
     if data.frame_id is not None:
+        frame = db.query(Frame).filter(Frame.project_id == project_id, Frame.id == data.frame_id).first()
+        if frame is None:
+            raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
         if data.chat_id:
-            chat = db.query(Chat).filter(Chat.id == data.chat_id).first()
+            chat = db.query(Chat).filter(Chat.project_id == project_id, Chat.id == data.chat_id).first()
             if chat and chat.frame_id != data.frame_id:
                 raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Chat does not belong to frame")
             if chat and chat.context_type not in (None, "scene", "frame"):
@@ -762,6 +775,7 @@ async def chat_scene(
             if data.chat_id:
                 chat = Chat(
                     id=data.chat_id,
+                    project_id=project_id,
                     frame_id=data.frame_id,
                     scene_id=data.scene_id,
                     context_type="scene" if data.scene_id else "frame",
@@ -769,6 +783,7 @@ async def chat_scene(
                 )
             else:
                 chat = Chat(
+                    project_id=project_id,
                     frame_id=data.frame_id,
                     scene_id=data.scene_id,
                     context_type="scene" if data.scene_id else "frame",
@@ -788,7 +803,7 @@ async def chat_scene(
         if chat:
             chat.updated_at = datetime.utcnow()
             db.add(chat)
-            db.add(ChatMessage(chat_id=chat.id, role="user", content=prompt))
+            db.add(ChatMessage(project_id=project_id, chat_id=chat.id, role="user", content=prompt))
             db.commit()
 
     def _record_assistant_message(reply: str, tool: str) -> None:
@@ -796,13 +811,13 @@ async def chat_scene(
             return
         chat.updated_at = datetime.utcnow()
         db.add(chat)
-        db.add(ChatMessage(chat_id=chat.id, role="assistant", content=reply, tool=tool))
+        db.add(ChatMessage(project_id=project_id, chat_id=chat.id, role="assistant", content=reply, tool=tool))
         db.commit()
 
     frame_context = None
     frame_scene_summary = None
     if data.frame_id is not None:
-        frame = db.query(Frame).filter(Frame.id == data.frame_id).first()
+        frame = db.query(Frame).filter(Frame.project_id == project_id, Frame.id == data.frame_id).first()
         if frame:
             frame_context = format_frame_context(
                 {
@@ -820,7 +835,7 @@ async def chat_scene(
             )
             frame_scene_summary = format_frame_scene_summary(frame.scenes)
 
-    settings = get_settings_dict(db)
+    settings = get_settings_dict(db, project_id=project_id)
     openai_settings = settings.get("openAI", {})
     api_key = openai_settings.get("backendApiKey")
     if not api_key:
@@ -886,6 +901,7 @@ async def chat_scene(
 
         context_items = await _load_context_items(
             db=db,
+            project_id=project_id,
             settings=settings,
             api_key=api_key,
             prompt=tool_prompt,

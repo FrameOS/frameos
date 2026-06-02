@@ -2,8 +2,14 @@ import pytest
 from app.models.template import Template
 
 @pytest.mark.asyncio
-async def test_create_template(db):
-    t = Template(name="MyTemplate", description="A template", scenes=[{"scene": 1}], config=None)
+async def test_create_template(db, default_project):
+    t = Template(
+        project_id=default_project.id,
+        name="MyTemplate",
+        description="A template",
+        scenes=[{"scene": 1}],
+        config=None,
+    )
     db.add(t)
     db.commit()
     assert t.id is not None
@@ -11,8 +17,9 @@ async def test_create_template(db):
     assert t.scenes == [{"scene": 1}]
 
 @pytest.mark.asyncio
-async def test_template_to_dict(db):
+async def test_template_to_dict(db, default_project):
     t = Template(
+        project_id=default_project.id,
         name="TemplateWithImage",
         description="desc",
         scenes=[],
@@ -25,6 +32,6 @@ async def test_template_to_dict(db):
     db.commit()
     t_dict = t.to_dict()
     assert t_dict["name"] == "TemplateWithImage"
-    assert t_dict["image"].startswith("/api/templates/")  # because that’s how your to_dict() is defined
+    assert t_dict["image"].startswith(f"/api/projects/{default_project.id}/templates/")
     assert t_dict["imageWidth"] == 640
     assert t_dict["imageHeight"] == 480

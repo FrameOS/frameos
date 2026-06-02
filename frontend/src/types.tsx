@@ -13,6 +13,7 @@ export interface FrameErrorBehavior {
 
 export interface FrameType {
   id: number
+  project_id: number
   name: string
   mode?: 'rpios' | 'buildroot'
   frame_host: string

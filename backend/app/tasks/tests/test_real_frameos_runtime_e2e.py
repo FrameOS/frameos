@@ -17,6 +17,7 @@ import uvicorn
 from app.fastapi import app
 from app.models.frame import Frame, get_frame_json, get_interpreted_scenes_json
 from app.models.log import Log
+from app.tenancy import ensure_default_project
 
 
 TRUE_VALUES = {"1", "true", "yes", "on"}
@@ -116,7 +117,9 @@ def _render_scene() -> dict:
 
 
 def _frame(db, *, server_port: int, frame_port: int) -> Frame:
+    project = ensure_default_project(db)
     frame = Frame(
+        project_id=project.id,
         name="RuntimeE2E",
         mode="rpios",
         frame_host="127.0.0.1",
@@ -215,7 +218,12 @@ def _terminate(process: subprocess.Popen[str]) -> None:
 
 
 def _runtime_logs(db, frame: Frame) -> list[str]:
-    return [log.line for log in db.query(Log).filter(Log.frame_id == frame.id).all()]
+    return [
+        log.line
+        for log in db.query(Log)
+        .filter(Log.project_id == frame.project_id, Log.frame_id == frame.id)
+        .all()
+    ]
 
 
 def test_real_frameos_runtime_posts_render_done_to_backend(db, tmp_path: Path) -> None:

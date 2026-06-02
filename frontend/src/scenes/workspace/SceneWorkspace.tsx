@@ -5,7 +5,7 @@ import {
   ClipboardDocumentIcon,
   CodeBracketIcon,
   CodeBracketSquareIcon,
-  Cog6ToothIcon,
+  InformationCircleIcon,
   ListBulletIcon,
   PhotoIcon,
   ServerStackIcon,
@@ -66,7 +66,7 @@ const utilityDefinitions: UtilityDefinition[] = [
   { panel: 'events', label: 'Events', icon: <ListBulletIcon className="h-5 w-5" /> },
   { panel: 'source', label: 'Source', icon: <CodeBracketIcon className="h-5 w-5" /> },
   { panel: 'json', label: 'JSON', icon: <ServerStackIcon className="h-5 w-5" /> },
-  { panel: 'info', label: 'Scene settings', icon: <Cog6ToothIcon className="h-5 w-5" /> },
+  { panel: 'info', label: 'Scene settings', icon: <InformationCircleIcon className="h-5 w-5" /> },
 ]
 
 function sceneIsCompiled(scene: FrameScene | null): boolean {

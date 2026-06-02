@@ -146,7 +146,12 @@ async def test_new_log_trimming(mock_pub, db, redis):
     db.commit()
 
     # Seed logs up to the trim threshold, then add one via new_log to trigger pruning.
-    db.add_all([Log(frame_id=frame.id, type="info", line=f"Log {i}") for i in range(LOG_LIMIT_PER_FRAME + 100)])
+    db.add_all(
+        [
+            Log(project_id=frame.project_id, frame_id=frame.id, type="info", line=f"Log {i}")
+            for i in range(LOG_LIMIT_PER_FRAME + 100)
+        ]
+    )
     db.commit()
     await new_log(db, redis, frame.id, "info", "Trigger trim")
     count = db.query(Log).filter_by(frame_id=frame.id).count()

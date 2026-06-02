@@ -13,6 +13,7 @@ import type {
   ChatSummary,
   DiagramEdge,
   DiagramNode,
+  FrameType,
   FrameScene,
   PanelWithMetadata,
 } from '../../../../types'
@@ -20,12 +21,17 @@ import { Area, Panel } from '../../../../types'
 import { socketLogic } from '../../../socketLogic'
 import { editAppLogic } from '../EditApp/editAppLogic'
 import { isFrameControlMode } from '../../../../utils/frameControlMode'
+import { projectApiPathForProject } from '../../../../utils/projectApi'
 
 import type { chatLogicType } from './chatLogicType'
 
 const MAX_HISTORY = 8
 const CHAT_PAGE_SIZE = 20
 const APP_CONTEXT_SEPARATOR = '::'
+
+function frameProjectId(frameForm: Partial<FrameType>, frame: FrameType | null | undefined): number | null {
+  return frameForm.project_id ?? frame?.project_id ?? null
+}
 
 export interface ChatLogicProps {
   frameId: number
@@ -115,7 +121,7 @@ export const chatLogic = kea<chatLogicType>([
     logic: [socketLogic],
     values: [
       frameLogic(props),
-      ['frameForm', 'scenes'],
+      ['frame', 'frameForm', 'scenes'],
       panelsLogic(props),
       ['selectedScenePanelId', 'panels', 'scenesOpen', 'activeEditAppPanel'],
       diagramLogic({ frameId: props.frameId, sceneId: props.sceneId ?? '' }),
@@ -624,7 +630,17 @@ export const chatLogic = kea<chatLogicType>([
         return
       }
       try {
-        const response = await apiFetch(`/api/ai/chats?frameId=${props.frameId}&limit=${CHAT_PAGE_SIZE}&offset=0`)
+        const projectId = frameProjectId(values.frameForm, values.frame)
+        if (!projectId) {
+          actions.loadChatsSuccess([], false, 0)
+          return
+        }
+        const response = await apiFetch(
+          projectApiPathForProject(
+            projectId,
+            `/api/ai/chats?frameId=${props.frameId}&limit=${CHAT_PAGE_SIZE}&offset=0`
+          )
+        )
         if (!response.ok) {
           const payload = await response.json().catch(() => ({}))
           throw new Error(payload?.detail || 'Failed to load chats')
@@ -647,8 +663,16 @@ export const chatLogic = kea<chatLogicType>([
         return
       }
       try {
+        const projectId = frameProjectId(values.frameForm, values.frame)
+        if (!projectId) {
+          actions.loadMoreChatsSuccess([], false, values.chatsOffset)
+          return
+        }
         const response = await apiFetch(
-          `/api/ai/chats?frameId=${props.frameId}&limit=${CHAT_PAGE_SIZE}&offset=${values.chatsOffset}`
+          projectApiPathForProject(
+            projectId,
+            `/api/ai/chats?frameId=${props.frameId}&limit=${CHAT_PAGE_SIZE}&offset=${values.chatsOffset}`,
+          )
         )
         if (!response.ok) {
           const payload = await response.json().catch(() => ({}))
@@ -749,7 +773,12 @@ export const chatLogic = kea<chatLogicType>([
         return
       }
       try {
-        const response = await apiFetch(`/api/ai/chats/${chatId}`)
+        const projectId = frameProjectId(values.frameForm, values.frame)
+        if (!projectId) {
+          actions.loadChatMessagesSuccess(chatId, [])
+          return
+        }
+        const response = await apiFetch(projectApiPathForProject(projectId, `/api/ai/chats/${chatId}`))
         if (!response.ok) {
           const payload = await response.json().catch(() => ({}))
           throw new Error(payload?.detail || 'Failed to load chat history')
@@ -1054,7 +1083,7 @@ export const chatLogic = kea<chatLogicType>([
     },
   })),
   afterMount(({ actions, values }) => {
-    if (!isFrameControlMode()) {
+    if (!isFrameControlMode() && frameProjectId(values.frameForm, values.frame)) {
       actions.loadChats()
     }
     if (values.activeEditAppContext) {
@@ -1095,6 +1124,16 @@ export const chatLogic = kea<chatLogicType>([
       )
       if (matchingChat && matchingChat.id !== values.activeChatId) {
         actions.selectChat(matchingChat.id)
+      }
+    },
+    frame: () => {
+      if (!isFrameControlMode() && frameProjectId(values.frameForm, values.frame) && values.chats.length === 0) {
+        actions.loadChats()
+      }
+    },
+    frameForm: () => {
+      if (!isFrameControlMode() && frameProjectId(values.frameForm, values.frame) && values.chats.length === 0) {
+        actions.loadChats()
       }
     },
     scenesOpen: (scenesOpen: boolean) => {

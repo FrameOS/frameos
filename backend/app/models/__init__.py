@@ -5,6 +5,7 @@ from .chat import *  # noqa: F403
 from .frame import *  # noqa: F403
 from .log import *  # noqa: F403
 from .metrics import *  # noqa: F403
+from .organization import *  # noqa: F403
 from .repository import *  # noqa: F403
 from .settings import *  # noqa: F403
 from .scene_image import *    # noqa: F403

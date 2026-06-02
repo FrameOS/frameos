@@ -7,10 +7,11 @@ from app.utils.build_host import BuildHostConfig, BuildHostSession, get_build_ho
 
 
 @pytest.mark.asyncio
-async def test_get_build_host_config_enabled(db):
+async def test_get_build_host_config_enabled(db, default_project):
     db.query(Settings).delete()
     db.add(
         Settings(
+            project_id=default_project.id,
             key="buildHost",
             value={
                 "enabled": True,
@@ -23,7 +24,7 @@ async def test_get_build_host_config_enabled(db):
     )
     db.commit()
 
-    config = get_build_host_config(db)
+    config = get_build_host_config(db, default_project.id)
     assert isinstance(config, BuildHostConfig)
     assert config.host == "builder.local"
     assert config.port == 2222
@@ -32,10 +33,11 @@ async def test_get_build_host_config_enabled(db):
 
 
 @pytest.mark.asyncio
-async def test_get_build_host_config_requires_fields(db):
+async def test_get_build_host_config_requires_fields(db, default_project):
     db.query(Settings).delete()
     db.add(
         Settings(
+            project_id=default_project.id,
             key="buildHost",
             value={
                 "enabled": True,
@@ -47,7 +49,7 @@ async def test_get_build_host_config_requires_fields(db):
     )
     db.commit()
 
-    assert get_build_host_config(db) is None
+    assert get_build_host_config(db, default_project.id) is None
 
 
 @pytest.mark.asyncio

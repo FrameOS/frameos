@@ -6,6 +6,7 @@ import {
   ChevronDownIcon,
   ChevronRightIcon,
   ChevronUpIcon,
+  CloudArrowUpIcon,
   Cog6ToothIcon,
   CodeBracketIcon,
   ComputerDesktopIcon,
@@ -245,6 +246,7 @@ function FrameStatusHeaderButton({ frameId }: { frameId: number }): JSX.Element 
   const statusLabel = unsavedChanges ? 'Unsaved' : undeployedChanges ? 'Undeployed' : null
   const drawerKind = unsavedChanges ? 'unsaved' : 'deploy'
   const drawerIsOpen = frameChangeDrawerSelection?.frameId === frameId && frameChangeDrawerSelection.kind === drawerKind
+  const StatusIcon = unsavedChanges ? CloudArrowUpIcon : DeployToFrameIcon
 
   if (!statusLabel) {
     return null
@@ -268,8 +270,8 @@ function FrameStatusHeaderButton({ frameId }: { frameId: number }): JSX.Element 
         'frameos-warning-button'
       )}
     >
-      <DeployToFrameIcon className="h-5 w-5 shrink-0" />
-      <span className="workspace-unsaved-header-label">{unsavedChanges ? 'Changes' : 'Deploy'}</span>
+      <StatusIcon className="h-5 w-5 shrink-0" />
+      <span className="workspace-unsaved-header-label">{statusLabel}</span>
     </button>
   )
 }

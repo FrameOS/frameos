@@ -83,6 +83,10 @@ def _is_buildroot_frame(frame: Frame) -> bool:
     return (getattr(frame, "mode", None) or "rpios") == "buildroot"
 
 
+def _get_frame_settings(db: Session | None, frame: Frame) -> dict:
+    return get_settings_dict(db, project_id=getattr(frame, "project_id", None))
+
+
 def _mode_for_detected_distro(distro: str) -> str | None:
     if distro == "buildroot":
         return "buildroot"
@@ -411,7 +415,7 @@ class FrameDeployWorkflow:
             compilation_mode=compilation_mode,
         )
 
-        settings = get_settings_dict(self.db)
+        settings = _get_frame_settings(self.db, self.frame)
         selected_keys = select_ssh_keys_for_frame(self.frame, settings)
         selected_public_keys = [key.get("public") for key in selected_keys if key.get("public")]
         known_public_keys = [key.get("public") for key in normalize_ssh_keys(settings) if key.get("public")]

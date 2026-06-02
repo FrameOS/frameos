@@ -2,18 +2,17 @@ from __future__ import annotations
 
 import pytest
 
-from app.api.auth import get_current_user
-from app.fastapi import app
 from app.models.frame import Frame
 
 
 @pytest.mark.asyncio
 async def test_get_deploy_plan_returns_plan_without_execution(
-    no_auth_client,
+    async_client,
     db,
     monkeypatch: pytest.MonkeyPatch,
 ):
     frame = Frame(
+        project_id=async_client.project_id,
         name="PlanFrame",
         mode="rpios",
         frame_host="localhost",
@@ -57,12 +56,8 @@ async def test_get_deploy_plan_returns_plan_without_execution(
     monkeypatch.setattr("app.api.frames.find_nim_v2", lambda: "/usr/bin/nim")
     monkeypatch.setattr("app.api.frames.FrameDeployer", FakeDeployer)
     monkeypatch.setattr("app.api.frames.FrameDeployWorkflow", FakeWorkflow)
-    app.dependency_overrides[get_current_user] = lambda: object()
 
-    try:
-        response = await no_auth_client.get(f"/api/frames/{frame.id}/deploy_plan")
-    finally:
-        app.dependency_overrides.clear()
+    response = await async_client.get(f"/api/frames/{frame.id}/deploy_plan")
 
     assert response.status_code == 200
     assert response.json() == {"plan": {"mode": "combined", "ok": True}}
@@ -71,11 +66,12 @@ async def test_get_deploy_plan_returns_plan_without_execution(
 
 @pytest.mark.asyncio
 async def test_post_deploy_plan_uses_preview_frame_values(
-    no_auth_client,
+    async_client,
     db,
     monkeypatch: pytest.MonkeyPatch,
 ):
     frame = Frame(
+        project_id=async_client.project_id,
         name="PlanFrame",
         mode="rpios",
         frame_host="localhost",
@@ -118,15 +114,11 @@ async def test_post_deploy_plan_uses_preview_frame_values(
     monkeypatch.setattr("app.api.frames.find_nim_v2", lambda: "/usr/bin/nim")
     monkeypatch.setattr("app.api.frames.FrameDeployer", FakeDeployer)
     monkeypatch.setattr("app.api.frames.FrameDeployWorkflow", FakeWorkflow)
-    app.dependency_overrides[get_current_user] = lambda: object()
 
-    try:
-        response = await no_auth_client.post(
-            f"/api/frames/{frame.id}/deploy_plan",
-            json={"name": "Preview Name", "image_engine": "imagemagick"},
-        )
-    finally:
-        app.dependency_overrides.clear()
+    response = await async_client.post(
+        f"/api/frames/{frame.id}/deploy_plan",
+        json={"name": "Preview Name", "image_engine": "imagemagick"},
+    )
 
     assert response.status_code == 200
     assert response.json() == {"plan": {"mode": "combined", "ok": True}}

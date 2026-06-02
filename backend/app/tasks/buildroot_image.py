@@ -182,6 +182,10 @@ def buildroot_base_cache_dir() -> Path:
     return Path(os.environ.get("FRAMEOS_BUILDROOT_BASE_CACHE_DIR") or (buildroot_cache_dir() / "base-images"))
 
 
+def _get_frame_settings(db: Session | None, frame: Frame) -> dict:
+    return get_settings_dict(db, project_id=getattr(frame, "project_id", None))
+
+
 @lru_cache(maxsize=1)
 def _buildroot_digest_map() -> dict[str, str]:
     path = Path(BUILDROOT_IMAGES_DIGESTS_PATH)
@@ -736,7 +740,7 @@ class BuildrootImageBuilder:
                 "rawSha256": raw_sha256,
                 "size": output_path.stat().st_size,
                 "sha256": _sha256(output_path),
-                "downloadUrl": f"/api/frames/{self.frame.id}/buildroot/sd_image/download",
+                "downloadUrl": f"/api/projects/{self.frame.project_id}/frames/{self.frame.id}/buildroot/sd_image/download",
                 "createdAt": _utc_now(),
                 "completedAt": _utc_now(),
             }
@@ -962,7 +966,7 @@ class BuildrootImageBuilder:
         copy_lgpio_runtime_libraries(overlay_dir)
 
     def _write_boot_authorized_keys(self, authorized_keys: Path) -> None:
-        settings = get_settings_dict(self.db)
+        settings = _get_frame_settings(self.db, self.frame)
         selected_keys = select_ssh_keys_for_frame(self.frame, settings)
         public_keys = [
             key["public"].strip()

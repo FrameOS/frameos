@@ -45,7 +45,7 @@ async def test_get_system_repositories_includes_packaged_templates(async_client)
 
 @pytest.mark.asyncio
 async def test_get_repository(async_client, db):
-    repo = Repository(name="Test Repo", url="http://example.com/test.json")
+    repo = Repository(project_id=async_client.project_id, name="Test Repo", url="http://example.com/test.json")
     db.add(repo)
     db.commit()
     response = await async_client.get(f'/api/repositories/{repo.id}')
@@ -55,7 +55,7 @@ async def test_get_repository(async_client, db):
 
 @pytest.mark.asyncio
 async def test_update_repository(async_client, db):
-    repo = Repository(name="Old Repo", url="http://example.com/old.json")
+    repo = Repository(project_id=async_client.project_id, name="Old Repo", url="http://example.com/old.json")
     db.add(repo)
     db.commit()
 
@@ -68,7 +68,7 @@ async def test_update_repository(async_client, db):
 
 @pytest.mark.asyncio
 async def test_delete_repository(async_client, db):
-    repo = Repository(name="DeleteMe", url="http://example.com/delete.json")
+    repo = Repository(project_id=async_client.project_id, name="DeleteMe", url="http://example.com/delete.json")
     db.add(repo)
     db.commit()
 

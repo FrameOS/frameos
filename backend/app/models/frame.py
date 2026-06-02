@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from arq import ArqRedis as Redis
 from typing import Any, Optional
 from sqlalchemy.dialects.sqlite import JSON
-from sqlalchemy import Integer, String, Double, DateTime, Boolean
+from sqlalchemy import ForeignKey, Integer, String, Double, DateTime, Boolean
 from sqlalchemy.orm import Session, mapped_column
 from app.database import Base
 
@@ -186,6 +186,7 @@ def normalize_error_behavior(error_behavior: Any) -> dict:
 class Frame(Base):
     __tablename__ = 'frame'
     id = mapped_column(Integer, primary_key=True)
+    project_id = mapped_column(Integer, ForeignKey("project.id"), nullable=False, index=True)
     name = mapped_column(String(256), nullable=False)
     mode = mapped_column(String(32), nullable=True) # rpios, buildroot
     # sending commands to frame
@@ -202,7 +203,7 @@ class Frame(Base):
     # receiving logs, connection from frame to us
     server_host = mapped_column(String(256), nullable=True)
     server_port = mapped_column(Integer, default=8989)
-    server_api_key = mapped_column(String(64), nullable=True)
+    server_api_key = mapped_column(String(64), nullable=True, unique=True)
     server_send_logs = mapped_column(Boolean, default=True)
     # frame metadata
     status = mapped_column(String(15), nullable=False)
@@ -251,6 +252,7 @@ class Frame(Base):
     def to_dict(self):
         return {
             'id': self.id,
+            'project_id': self.project_id,
             'name': self.name,
             'mode': self.mode,
             'frame_host': self.frame_host,
@@ -307,7 +309,16 @@ class Frame(Base):
             'last_successful_deploy_at': self.last_successful_deploy_at.replace(tzinfo=timezone.utc).isoformat() if self.last_successful_deploy_at else None,
         }
 
-async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, server_host: str, device: Optional[str] = None, interval: Optional[float] = None) -> Frame:
+async def new_frame(
+    db: Session,
+    redis: Redis,
+    name: str,
+    frame_host: str,
+    server_host: str,
+    device: Optional[str] = None,
+    interval: Optional[float] = None,
+    project_id: Optional[int] = None,
+) -> Frame:
     if '@' in frame_host:
         user_pass, frame_host = frame_host.split('@')
     else:
@@ -334,8 +345,13 @@ async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, serve
 
     tls_material = generate_frame_tls_material(frame_host)
     dimensions = device_dimensions(device)
+    if project_id is None:
+        from app.tenancy import ensure_default_project
+
+        project_id = ensure_default_project(db).id
 
     frame = Frame(
+        project_id=project_id,
         name=name,
         mode="rpios",
         ssh_user=user,
@@ -421,22 +437,22 @@ async def update_frame(db: Session, redis: Redis, frame: Frame):
     await publish_message(redis, "update_frame", frame.to_dict())
 
 
-async def delete_frame(db: Session, redis: Redis, frame_id: int):
-    if frame := db.get(Frame, frame_id):
+async def delete_frame(db: Session, redis: Redis, frame_id: int, project_id: int):
+    if frame := db.query(Frame).filter_by(id=frame_id, project_id=project_id).first():
         # delete corresonding log and metric entries first
         from .log import Log
-        db.query(Log).filter_by(frame_id=frame_id).delete()
+        db.query(Log).filter_by(project_id=project_id, frame_id=frame_id).delete()
         from .metrics import Metrics
-        db.query(Metrics).filter_by(frame_id=frame_id).delete()
+        db.query(Metrics).filter_by(project_id=project_id, frame_id=frame_id).delete()
         from .scene_image import SceneImage
-        db.query(SceneImage).filter_by(frame_id=frame_id).delete()
+        db.query(SceneImage).filter_by(project_id=project_id, frame_id=frame_id).delete()
 
-        cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
+        cache_key = f'frame:{frame_id}:image'
         await redis.delete(cache_key)
 
         db.delete(frame)
         db.commit()
-        await publish_message(redis, "delete_frame", {"id": frame_id})
+        await publish_message(redis, "delete_frame", {"id": frame_id, "project_id": project_id})
         return True
     return False
 
@@ -456,7 +472,7 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
     mountpoints = normalize_mountpoints(frame.mountpoints)
     error_behavior = normalize_error_behavior(frame.error_behavior)
     frameos_version = get_versions().get("frameos")
-    all_settings = get_settings_dict(db)
+    all_settings = get_settings_dict(db, project_id=frame.project_id)
     default_timezone = (all_settings.get("defaults") or {}).get("timezone")
     fallback_dimensions = device_dimensions(frame.device)
     frame_json: dict = {

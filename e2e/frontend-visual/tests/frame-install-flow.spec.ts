@@ -1,5 +1,5 @@
 import { expect, Page, Route, test } from '@playwright/test'
-import { cleanupE2EInstallFrames, login } from './visual-helpers'
+import { cleanupE2EInstallFrames, currentProjectApiPath, login } from './visual-helpers'
 
 interface CreatedFrame {
   id: number
@@ -95,7 +95,7 @@ test.describe.serial('@e2e frame installation setup flow', () => {
 })
 
 async function installE2ERoutes(page: Page): Promise<void> {
-  await page.route(/\/api\/frames\/\d+\/deploy_plan(?:\?.*)?$/, async (route) => {
+  await page.route(projectFrameApiPattern('/deploy_plan(?:\\?.*)?$'), async (route) => {
     const frameId = frameIdFromUrl(route)
     await route.fulfill({
       status: 200,
@@ -104,9 +104,9 @@ async function installE2ERoutes(page: Page): Promise<void> {
     })
   })
 
-  await page.route(/\/api\/frames\/\d+\/(?:fast_deploy|deploy)$/, fulfillText('Success'))
+  await page.route(projectFrameApiPattern('/(?:fast_deploy|deploy)$'), fulfillText('Success'))
 
-  await page.route(/\/api\/frames\/\d+\/buildroot\/sd_image$/, async (route) => {
+  await page.route(projectFrameApiPattern('/buildroot/sd_image$'), async (route) => {
     const frameId = frameIdFromUrl(route)
     await route.fulfill({
       status: 200,
@@ -123,7 +123,7 @@ async function installE2ERoutes(page: Page): Promise<void> {
     })
   })
 
-  await page.route(/\/api\/frames\/\d+\/buildroot\/sd_image\/download$/, async (route) => {
+  await page.route(projectFrameApiPattern('/buildroot/sd_image/download$'), async (route) => {
     const frameId = frameIdFromUrl(route)
     await route.fulfill({
       status: 200,
@@ -136,14 +136,14 @@ async function installE2ERoutes(page: Page): Promise<void> {
   })
 
   await page.route(
-    /\/api\/frames\/\d+\/frame_bootstrap(?:\?.*)?$/,
+    projectFrameApiPattern('/frame_bootstrap(?:\\?.*)?$'),
     fulfillJson({
       command: 'sudo FRAMEOS_E2E_INSTALL=1 /bin/sh -c "echo installing frameos"',
     })
   )
 
   await page.route(
-    /\/api\/frames\/\d+\/(?:state|states|uploaded_scenes)(?:\?.*)?$/,
+    projectFrameApiPattern('/(?:state|states|uploaded_scenes)(?:\\?.*)?$'),
     fulfillJson({
       sceneId: e2eScene.id,
       state: {},
@@ -176,7 +176,7 @@ async function addFrame(
 
   const responsePromise = page.waitForResponse((response) => {
     const url = new URL(response.url())
-    return url.pathname.endsWith('/api/frames/new') && response.request().method() === 'POST'
+    return projectFrameCollectionPath('/new').test(url.pathname) && response.request().method() === 'POST'
   })
   await drawer.getByRole('button', { name: 'Add frame' }).click()
   const response = await responsePromise
@@ -212,7 +212,7 @@ async function importFrame(page: Page, name: string): Promise<CreatedFrame> {
 
   const responsePromise = page.waitForResponse((response) => {
     const url = new URL(response.url())
-    return url.pathname.endsWith('/api/frames/import') && response.request().method() === 'POST'
+    return projectFrameCollectionPath('/import').test(url.pathname) && response.request().method() === 'POST'
   })
   await drawer.getByRole('button', { name: 'Import', exact: true }).click()
   const response = await responsePromise
@@ -229,7 +229,7 @@ async function runFullDeploy(page: Page): Promise<void> {
   await expect(page.getByRole('heading', { name: 'Deploy' })).toBeVisible()
   const responsePromise = page.waitForResponse((response) => {
     const url = new URL(response.url())
-    return /\/api\/frames\/\d+\/deploy$/.test(url.pathname) && response.request().method() === 'POST'
+    return projectFrameApiPattern('/deploy$').test(url.pathname) && response.request().method() === 'POST'
   })
   await page.getByRole('button', { name: 'Full deploy' }).click()
   const response = await responsePromise
@@ -254,7 +254,7 @@ async function simulateFrameRender(page: Page, frame: CreatedFrame): Promise<voi
 }
 
 async function expectRenderDoneLog(page: Page, frameId: number): Promise<void> {
-  const logsResponse = await page.request.get(`/api/frames/${frameId}/logs`)
+  const logsResponse = await page.request.get(await currentProjectApiPath(page, `/api/frames/${frameId}/logs`))
   expect(logsResponse.ok()).toBeTruthy()
   const logsPayload = await logsResponse.json()
   expect(
@@ -322,8 +322,16 @@ async function openAddFrameDrawer(page: Page) {
 }
 
 function frameIdFromUrl(route: Route): number {
-  const match = new URL(route.request().url()).pathname.match(/\/api\/frames\/(\d+)\//)
+  const match = new URL(route.request().url()).pathname.match(/\/api\/(?:projects\/\d+\/)?frames\/(\d+)\//)
   return Number(match?.[1] ?? 0)
+}
+
+function projectFrameApiPattern(suffixPattern: string): RegExp {
+  return new RegExp(`/api/(?:projects/\\d+/)?frames/\\d+${suffixPattern}`)
+}
+
+function projectFrameCollectionPath(suffix: string): RegExp {
+  return new RegExp(`/api/(?:projects/\\d+/)?frames${suffix}$`)
 }
 
 function uniqueName(prefix: string): string {

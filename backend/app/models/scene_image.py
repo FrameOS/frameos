@@ -9,9 +9,10 @@ class SceneImage(Base):
     The row is *up‑serted* whenever a fresher snapshot is available.
     """
     __tablename__   = "scene_image"
-    __table_args__  = (UniqueConstraint("frame_id", "scene_id", name="u_frame_scene"),)
+    __table_args__  = (UniqueConstraint("project_id", "frame_id", "scene_id", name="u_project_frame_scene"),)
 
     id        = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_id = mapped_column(Integer, ForeignKey("project.id"), nullable=False, index=True)
     timestamp = mapped_column(DateTime, nullable=False, default=func.current_timestamp())
     frame_id  = mapped_column(Integer, ForeignKey("frame.id"), nullable=False)
     scene_id  = mapped_column(String(128),               nullable=False)
@@ -30,6 +31,7 @@ class SceneImage(Base):
     def to_dict(self):
         return {
             "id":        self.id,
+            "project_id": self.project_id,
             "timestamp": self.timestamp.isoformat(),
             "frame_id":  self.frame_id,
             "scene_id":  self.scene_id,

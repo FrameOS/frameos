@@ -8,9 +8,9 @@ from app.database import get_db
 from app.models.user import User
 from app.schemas.users import HasFirstUserResponse, UserEmailUpdate, UserPasswordUpdate, UserResponse
 from app.utils.session_cookie import SESSION_COOKIE_NAME, create_session_cookie_value
-from . import api_no_auth, api_with_auth
+from . import api_open, api_user
 
-@api_no_auth.get("/has_first_user", response_model=HasFirstUserResponse)
+@api_open.get("/has_first_user", response_model=HasFirstUserResponse)
 def has_first_user(db: Session = Depends(get_db)):
     return {"has_first_user": db.query(User).first() is not None}
 
@@ -33,12 +33,12 @@ async def get_current_local_user(
     return user
 
 
-@api_with_auth.get("/user", response_model=UserResponse)
+@api_user.get("/user", response_model=UserResponse)
 def api_user_get(current_user: User = Depends(get_current_local_user)):
     return {"email": current_user.email}
 
 
-@api_with_auth.post("/user/email", response_model=UserResponse)
+@api_user.post("/user/email", response_model=UserResponse)
 def api_user_update_email(
     data: UserEmailUpdate,
     request: Request,
@@ -69,7 +69,7 @@ def api_user_update_email(
     return {"email": current_user.email}
 
 
-@api_with_auth.post("/user/password", response_model=UserResponse)
+@api_user.post("/user/password", response_model=UserResponse)
 def api_user_update_password(
     data: UserPasswordUpdate,
     db: Session = Depends(get_db),

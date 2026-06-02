@@ -25,8 +25,8 @@ async def test_create_template(async_client, db):
 @pytest.mark.asyncio
 async def test_get_templates(async_client, db):
     # Insert a couple
-    t1 = Template(name="Template1")
-    t2 = Template(name="Template2")
+    t1 = Template(project_id=async_client.project_id, name="Template1")
+    t2 = Template(project_id=async_client.project_id, name="Template2")
     db.add_all([t1, t2])
     db.commit()
 
@@ -45,7 +45,7 @@ async def test_get_nonexistent_template(async_client):
 
 @pytest.mark.asyncio
 async def test_export_template(async_client, db):
-    t = Template(name="Exportable", scenes=[], config={})
+    t = Template(project_id=async_client.project_id, name="Exportable", scenes=[], config={})
     db.add(t)
     db.commit()
 

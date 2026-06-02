@@ -11,6 +11,7 @@ import { urls } from '../urls'
 import { logUpdatesFrameActivity } from '../decorators/frame'
 import { longRunningTasksModel } from './longRunningTasksModel'
 import { getBasePath } from '../utils/getBasePath'
+import { projectApiPathFromCache } from '../utils/projectApi'
 
 export type AgentTaskTransport = 'auto' | 'agent' | 'ssh'
 
@@ -63,7 +64,11 @@ function activeSceneIdFromLogLine(line: string): string | null {
 }
 
 function apiDownloadUrl(path: string): string {
-  return `${getBasePath()}${path}`
+  const scopedPath = projectApiPathFromCache(path)
+  if (/^https?:\/\//.test(scopedPath)) {
+    return scopedPath
+  }
+  return `${getBasePath()}${scopedPath}`
 }
 
 function startBrowserDownload(path: string): void {

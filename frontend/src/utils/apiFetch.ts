@@ -4,6 +4,7 @@ import { getBasePath } from './getBasePath'
 import { urls } from '../urls'
 import { isFrameControlMode } from './frameControlMode'
 import { isInFrameAdminMode } from './frameAdmin'
+import { clearCachedProjectId, projectApiPath } from './projectApi'
 
 export interface ApiFetchOptions extends RequestInit {}
 
@@ -32,8 +33,21 @@ export async function apiFetch(input: RequestInfo | URL, options: ApiFetchOption
   const inFrameAdminMode = isInFrameAdminMode()
   const headers: HeadersInit = options.headers || {}
 
-  if (typeof input === 'string' && getBasePath()) {
-    input = getBasePath() + input
+  if (typeof input === 'string') {
+    try {
+      input = await projectApiPath(input)
+    } catch (error) {
+      if (!inHassioIngress() && !frameControlMode) {
+        clearCachedProjectId()
+        const exists = await userExists()
+        router.actions.push(exists ? urls.login() : urls.signup())
+        return new Promise(() => {})
+      }
+      throw error
+    }
+    if (getBasePath() && input.startsWith('/')) {
+      input = getBasePath() + input
+    }
   }
 
   const response = await fetch(input, { ...options, headers, credentials: options.credentials || 'include' })
@@ -46,6 +60,7 @@ export async function apiFetch(input: RequestInfo | URL, options: ApiFetchOption
 
     if (!frameControlMode) {
       const exists = await userExists()
+      clearCachedProjectId()
       if (exists) {
         router.actions.push(urls.login())
       } else {

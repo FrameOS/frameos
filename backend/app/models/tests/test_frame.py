@@ -90,11 +90,13 @@ async def test_update_frame(mock_publish, db, redis):
 async def test_delete_frame(mock_publish, db, redis):
     frame = await new_frame(db, redis, "FrameToDelete", "localhost", "server_host")
     frame_id = frame.id
-    success = await delete_frame(db, redis, frame_id)
+    await redis.set(f"frame:{frame_id}:image", b"cached_image")
+    success = await delete_frame(db, redis, frame_id, frame.project_id)
     assert success is True
     # After deletion, frame should not be found
     in_db = db.get(Frame, frame_id)
     assert in_db is None
+    assert await redis.get(f"frame:{frame_id}:image") is None
     # 2 calls: "new_frame", "delete_frame"
     assert mock_publish.await_count == 2
 
@@ -102,7 +104,7 @@ async def test_delete_frame(mock_publish, db, redis):
 @pytest.mark.asyncio
 @patch("app.models.frame.publish_message", new_callable=AsyncMock)
 async def test_delete_nonexistent_frame(mock_publish, db, redis):
-    success = await delete_frame(db, redis, 999999)
+    success = await delete_frame(db, redis, 999999, 1)
     assert success is False
     assert mock_publish.await_count == 0
 
@@ -228,9 +230,9 @@ async def test_get_frame_json_uses_known_device_dimensions_when_unset(_mock_publ
 @pytest.mark.asyncio
 @patch("app.models.frame.publish_message", new_callable=AsyncMock)
 async def test_get_frame_json_uses_frame_timezone_or_global_default(_mock_publish, db, redis):
-    db.add(Settings(key="defaults", value={"timezone": "Europe/Brussels"}))
-    db.commit()
     frame = await new_frame(db, redis, "FrameJson", "host", "server_host.com")
+    db.add(Settings(project_id=frame.project_id, key="defaults", value={"timezone": "Europe/Brussels"}))
+    db.commit()
     frame.mode = "buildroot"
     frame.timezone = None
 
@@ -247,9 +249,9 @@ async def test_get_frame_json_uses_frame_timezone_or_global_default(_mock_publis
 @pytest.mark.asyncio
 @patch("app.models.frame.publish_message", new_callable=AsyncMock)
 async def test_get_frame_json_does_not_set_timezone_for_rpios(_mock_publish, db, redis):
-    db.add(Settings(key="defaults", value={"timezone": "Europe/Brussels"}))
-    db.commit()
     frame = await new_frame(db, redis, "FrameJson", "host", "server_host.com")
+    db.add(Settings(project_id=frame.project_id, key="defaults", value={"timezone": "Europe/Brussels"}))
+    db.commit()
     frame.mode = "rpios"
     frame.timezone = "America/New_York"
 

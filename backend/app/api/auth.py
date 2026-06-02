@@ -6,7 +6,7 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import jwt, JWTError
 from sqlalchemy.orm import Session
 from arq import ArqRedis as Redis
-from app.config import config
+from app import config as app_config
 from app.models.user import User
 from app.database import get_db
 from app.redis import get_redis
@@ -18,9 +18,9 @@ from app.utils.session_cookie import (
     decode_session_cookie_value,
 )
 
-from . import api_no_auth, api_with_auth
+from . import api_open, api_user
 
-SECRET_KEY = config.SECRET_KEY
+SECRET_KEY = app_config.config.SECRET_KEY
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 7 * 24 * 60  # 7 days
 
@@ -119,6 +119,9 @@ async def get_current_user(
     token: str | None = Depends(oauth2_scheme),
     db: Session = Depends(get_db),
 ):
+    if app_config.config.HASSIO_RUN_MODE == "ingress":
+        return None
+
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -139,7 +142,7 @@ async def get_current_user(
         raise credentials_exception
     return user
 
-@api_no_auth.post("/login", response_model=Token)
+@api_open.post("/login", response_model=Token)
 async def login(
     request: Request,
     response: Response,
@@ -147,14 +150,14 @@ async def login(
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
-    if config.HASSIO_RUN_MODE is not None:
+    if app_config.config.HASSIO_RUN_MODE is not None:
         raise HTTPException(status_code=401, detail="Login not allowed with HASSIO_RUN_MODE")
     email = form_data.username
     password = form_data.password
     ip = request.client.host
     key = f"login_attempts:{ip}:{email}"
-    if config.TEST:
-        key += f":{config.INSTANCE_ID}"
+    if app_config.config.TEST:
+        key += f":{app_config.config.INSTANCE_ID}"
     attempts = (await redis.get(key)) or '0'
     if int(attempts) > 10:  # limit to 10 attempts for example
         raise HTTPException(status_code=429, detail="Too many login attempts")
@@ -164,6 +167,10 @@ async def login(
         await redis.incr(key)
         await redis.expire(key, 300)  # expire after 5 minutes
         raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    from app.tenancy import ensure_default_project_for_user
+
+    ensure_default_project_for_user(db, user)
 
     await redis.delete(key)
     access_token_expires = datetime.timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
@@ -179,9 +186,9 @@ async def login(
     )
     return {"access_token": access_token, "token_type": "bearer"}
 
-@api_no_auth.post("/signup")
+@api_open.post("/signup")
 async def signup(request: Request, data: UserSignup, response: Response, db: Session = Depends(get_db)):
-    if config.HASSIO_RUN_MODE is not None:
+    if app_config.config.HASSIO_RUN_MODE is not None:
         raise HTTPException(status_code=401, detail="Signup not allowed with HASSIO_RUN_MODE")
 
     # Check if there is already a user registered (one-user system)
@@ -214,6 +221,11 @@ async def signup(request: Request, data: UserSignup, response: Response, db: Ses
     user.password = generate_password_hash(data.password)
     db.add(user)
     db.commit()
+    db.refresh(user)
+
+    from app.tenancy import ensure_default_project_for_user
+
+    ensure_default_project_for_user(db, user)
 
     # Auto-login after signup:
     access_token_expires = datetime.timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
@@ -230,7 +242,7 @@ async def signup(request: Request, data: UserSignup, response: Response, db: Ses
     return {"success": True, "access_token": access_token, "token_type": "bearer"}
 
 
-@api_with_auth.post("/logout")
+@api_user.post("/logout")
 async def logout(response: Response):
     response.delete_cookie(key=SESSION_COOKIE_NAME)
     return {"success": True}
