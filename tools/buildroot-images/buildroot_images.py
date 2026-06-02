@@ -21,9 +21,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import boto3
-from botocore.exceptions import ClientError
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BACKEND_ROOT = REPO_ROOT / "backend"
 sys.path.insert(0, str(BACKEND_ROOT))
@@ -108,6 +105,11 @@ def load_env_file() -> None:
 
 
 def s3_client():
+    try:
+        import boto3
+    except ModuleNotFoundError as exc:
+        raise SystemExit("Install boto3 to upload, list, or download Buildroot images") from exc
+
     access_key = os.environ.get("R2_ACCESS_KEY_ID")
     secret_key = os.environ.get("R2_SECRET_ACCESS_KEY")
     if not access_key or not secret_key:
@@ -125,6 +127,14 @@ def s3_client():
         aws_secret_access_key=secret_key,
         region_name=os.environ.get("R2_REGION", "auto"),
     )
+
+
+def is_client_error(exc: Exception) -> bool:
+    try:
+        from botocore.exceptions import ClientError
+    except ModuleNotFoundError:
+        return False
+    return isinstance(exc, ClientError)
 
 
 def frameos_version() -> str:
@@ -384,8 +394,8 @@ def build(args: argparse.Namespace) -> None:
 def load_manifest(client, bucket: str, key: str) -> dict[str, Any]:
     try:
         response = client.get_object(Bucket=bucket, Key=key)
-    except ClientError as exc:
-        if exc.response["Error"].get("Code") in {"NoSuchKey", "404"}:
+    except Exception as exc:
+        if is_client_error(exc) and exc.response["Error"].get("Code") in {"NoSuchKey", "404"}:
             return {"entries": []}
         raise
     return json.loads(response["Body"].read().decode("utf-8"))
@@ -419,8 +429,8 @@ def upload(args: argparse.Namespace) -> None:
         try:
             client.head_object(Bucket=args.bucket, Key=object_key)
             remote_exists = True
-        except ClientError as exc:
-            if exc.response["Error"].get("Code") not in {"404", "NoSuchKey"}:
+        except Exception as exc:
+            if not is_client_error(exc) or exc.response["Error"].get("Code") not in {"404", "NoSuchKey"}:
                 raise
     if remote_exists:
         print(f"Remote already has s3://{args.bucket}/{object_key}")
