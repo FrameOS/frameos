@@ -42,6 +42,37 @@ proc requireHttpResponseWithinLimit*(content: string, maxBytes: int) =
   if maxBytes > 0 and content.len > maxBytes:
     raise newException(IOError, &"HTTP response exceeded {maxBytes} bytes")
 
+proc headerValue*(headers: HttpHeaders, name: string): string =
+  seq[string](headers.getOrDefault(name)).join(", ").strip()
+
+type HttpResponseMetadata* = object
+  contentLength*: int
+  etag*: string
+
+proc boundedHeadMetadata*(
+    url: string,
+    headers: HttpHeaders = nil,
+    timeoutMs = DefaultFetchTimeoutMs,
+    maxBytes = DefaultFetchMaxBytes,
+    maxSeconds = DefaultFetchMaxSeconds
+  ): HttpResponseMetadata =
+  validateHttpUrl(url)
+  var client = newClientForUrl(url, timeoutMs)
+  try:
+    client.headers = fetchHeaders(headers)
+    client.onProgressChanged = guardFetchProgress(epochTime(), maxBytes, maxSeconds)
+    let response = client.request(url, httpMethod = HttpHead)
+    if response.code.is4xx or response.code.is5xx:
+      raise newException(HttpRequestError, response.status)
+    result = HttpResponseMetadata(
+      contentLength: response.contentLength(),
+      etag: headerValue(response.headers, "etag")
+    )
+    if maxBytes > 0 and result.contentLength > maxBytes:
+      raise newException(IOError, &"HTTP response exceeded {maxBytes} bytes")
+  finally:
+    client.close()
+
 proc boundedRequestContent*(
     url: string,
     httpMethod = HttpGet,

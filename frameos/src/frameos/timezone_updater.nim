@@ -1,7 +1,6 @@
 import checksums/sha2
 import json
 import os
-import strformat
 import strutils
 import system
 import times
@@ -16,18 +15,12 @@ import lib/tz
 const
   TimeZoneUpdateHour* = 3
   TimeZoneUpdateMinute* = 0
-  TimeZoneManifestMaxBytes = 32 * 1024
   TimeZoneGzipMaxBytes = 4 * 1024 * 1024
   TimeZoneJsonMaxBytes = 8 * 1024 * 1024
   TimeZoneUpdateTimeoutMs = 30000
+  TimeZoneDataGzipUrl* = "https://tz.frameos.net/tzdata.json.gz"
 
 type
-  TimeZoneManifest* = object
-    sha256*: string
-    size*: int
-    compressedSize*: int
-    url*: string
-
   TimeZoneUpdateResult* = enum
     tzUpdateSkipped, tzUpdateUnchanged, tzUpdateUpdated
 
@@ -56,39 +49,10 @@ proc sha256File(path: string): string =
 proc normalizeSha256(value: string): string =
   result = value.strip().toLowerAscii()
   if result.len != 64:
-    raise newException(ValueError, "Timezone manifest has an invalid sha256")
+    raise newException(ValueError, "Timezone data has an invalid sha256")
   for ch in result:
     if ch notin {'0'..'9', 'a'..'f'}:
-      raise newException(ValueError, "Timezone manifest has an invalid sha256")
-
-proc parseTimeZoneManifest*(data: string): TimeZoneManifest =
-  let parsed = parseJson(data)
-  result = TimeZoneManifest(
-    sha256: normalizeSha256(parsed{"sha256"}.getStr()),
-    size: parsed{"size"}.getInt(),
-    compressedSize: parsed{"compressedSize"}.getInt(),
-    url: parsed{"url"}.getStr(),
-  )
-  if result.size <= 0 or result.size > TimeZoneJsonMaxBytes:
-    raise newException(ValueError, "Timezone manifest has an invalid size")
-  if result.compressedSize < 0 or result.compressedSize > TimeZoneGzipMaxBytes:
-    raise newException(ValueError, "Timezone manifest has an invalid compressed size")
-
-proc frameServerBaseUrl*(frameConfig: FrameConfig): string =
-  if frameConfig == nil or frameConfig.serverHost.len == 0 or frameConfig.serverPort <= 0:
-    return ""
-  let protocol = if frameConfig.serverPort mod 1000 == 443: "https" else: "http"
-  result = protocol & "://" & frameConfig.serverHost & ":" & $frameConfig.serverPort
-
-proc resolveTimeZoneDataUrl*(baseUrl, manifestUrl: string): string =
-  let url = manifestUrl.strip()
-  if url.startsWith("http://") or url.startsWith("https://"):
-    return url
-  if baseUrl.len == 0:
-    raise newException(ValueError, "Timezone data URL is relative without a server URL")
-  if url.startsWith("/"):
-    return baseUrl & url
-  result = baseUrl & "/" & url
+      raise newException(ValueError, "Timezone data has an invalid sha256")
 
 proc shouldRunTimezoneUpdate*(dt: DateTime, lastRunDate: string): bool =
   let today = dt.format("yyyy-MM-dd")
@@ -108,6 +72,16 @@ proc localTimezoneHash(assetsPath: string): string =
     return sha256File(dataPath)
   result = ""
 
+proc localTimezoneEtag(assetsPath: string): string =
+  let etagPath = timeZoneEtagPath(assetsPath)
+  if fileExists(etagPath):
+    return readFile(etagPath).strip()
+  result = ""
+
+proc writeTimezoneEtag(assetsPath, etag: string) =
+  if etag.len > 0:
+    writeFile(timeZoneEtagPath(assetsPath), etag & "\n")
+
 proc logTimezoneUpdate(logger: Logger, payload: JsonNode) {.gcsafe.} =
   discard logger
   log(payload)
@@ -117,49 +91,56 @@ proc runTimezoneUpdateOnce*(frameConfig: FrameConfig, logger: Logger): TimeZoneU
     logTimezoneUpdate(logger, %*{"event": "timezone:update", "state": "skipped", "reason": "missing-assets-path"})
     return tzUpdateSkipped
 
-  let baseUrl = frameServerBaseUrl(frameConfig)
-  if baseUrl.len == 0:
-    logTimezoneUpdate(logger, %*{"event": "timezone:update", "state": "skipped", "reason": "missing-server"})
-    return tzUpdateSkipped
-
   let headers = newHttpHeaders([
-    ("Authorization", "Bearer " & frameConfig.serverApiKey),
-    ("Accept", "application/json"),
+    ("Accept", "application/gzip"),
   ])
-  let manifestUrl = baseUrl & "/api/timezones/manifest"
-  let manifest = parseTimeZoneManifest(boundedGetContent(
-    manifestUrl,
+  createDir(parentDir(timeZoneDataPath(frameConfig.assetsPath)))
+  let remote = boundedHeadMetadata(
+    TimeZoneDataGzipUrl,
     headers = headers,
     timeoutMs = TimeZoneUpdateTimeoutMs,
-    maxBytes = TimeZoneManifestMaxBytes,
-    maxSeconds = 30.0,
-  ))
-
-  createDir(parentDir(timeZoneDataPath(frameConfig.assetsPath)))
-  let currentHash = localTimezoneHash(frameConfig.assetsPath)
-  if currentHash == manifest.sha256:
+    maxBytes = TimeZoneGzipMaxBytes,
+    maxSeconds = 10.0,
+  )
+  if remote.etag.len > 0 and localTimezoneEtag(frameConfig.assetsPath) == remote.etag:
     initTimeZone(frameConfig.assetsPath)
     if loadedTimeZoneDataSource() == "override":
-      logTimezoneUpdate(logger, %*{"event": "timezone:update", "state": "unchanged", "sha256": manifest.sha256})
+      logTimezoneUpdate(logger, %*{
+        "event": "timezone:update",
+        "state": "unchanged",
+        "etag": remote.etag,
+        "compressedSize": remote.contentLength,
+      })
       return tzUpdateUnchanged
 
-  let dataUrl = resolveTimeZoneDataUrl(baseUrl, manifest.url)
+  let currentHash = localTimezoneHash(frameConfig.assetsPath)
   var compressed = boundedGetContent(
-    dataUrl,
+    TimeZoneDataGzipUrl,
     headers = headers,
     timeoutMs = TimeZoneUpdateTimeoutMs,
     maxBytes = TimeZoneGzipMaxBytes,
     maxSeconds = 45.0,
   )
+  let compressedSize = compressed.len
   var tzData = uncompress(compressed, dataFormat = dfGzip)
   compressed.setLen(0)
   requireHttpResponseWithinLimit(tzData, TimeZoneJsonMaxBytes)
 
   let actualHash = sha256Hex(tzData)
-  if actualHash != manifest.sha256:
-    tzData.setLen(0)
-    GC_fullCollect()
-    raise newException(IOError, &"Timezone data checksum mismatch: expected {manifest.sha256}, got {actualHash}")
+  if currentHash == actualHash:
+    initTimeZone(frameConfig.assetsPath)
+    if loadedTimeZoneDataSource() == "override":
+      writeTimezoneEtag(frameConfig.assetsPath, remote.etag)
+      tzData.setLen(0)
+      GC_fullCollect()
+      logTimezoneUpdate(logger, %*{
+        "event": "timezone:update",
+        "state": "unchanged",
+        "sha256": actualHash,
+        "etag": remote.etag,
+        "compressedSize": compressedSize,
+      })
+      return tzUpdateUnchanged
 
   let dataPath = timeZoneDataPath(frameConfig.assetsPath)
   let hashPath = timeZoneHashPath(frameConfig.assetsPath)
@@ -170,7 +151,8 @@ proc runTimezoneUpdateOnce*(frameConfig: FrameConfig, logger: Logger): TimeZoneU
     if fileExists(dataPath):
       removeFile(dataPath)
     moveFile(tempPath, dataPath)
-    writeFile(hashPath, manifest.sha256 & "\n")
+    writeFile(hashPath, actualHash & "\n")
+    writeTimezoneEtag(frameConfig.assetsPath, remote.etag)
   finally:
     if fileExists(tempPath):
       removeFile(tempPath)
@@ -181,9 +163,10 @@ proc runTimezoneUpdateOnce*(frameConfig: FrameConfig, logger: Logger): TimeZoneU
   logTimezoneUpdate(logger, %*{
     "event": "timezone:update",
     "state": "updated",
-    "sha256": manifest.sha256,
-    "size": manifest.size,
-    "compressedSize": manifest.compressedSize,
+    "sha256": actualHash,
+    "etag": remote.etag,
+    "size": getFileSize(dataPath),
+    "compressedSize": compressedSize,
   })
   result = tzUpdateUpdated
 

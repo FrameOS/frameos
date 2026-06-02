@@ -19,6 +19,9 @@ proc timeZoneDataPath*(assetsPath: string): string =
 proc timeZoneHashPath*(assetsPath: string): string =
   assetsPath / ".frameos" / "tz" / "tzdata.sha256"
 
+proc timeZoneEtagPath*(assetsPath: string): string =
+  assetsPath / ".frameos" / "tz" / "tzdata.etag"
+
 proc loadedTimeZoneDataSource*(): string =
   if timeZoneDataLoadedFromOverride:
     "override"
