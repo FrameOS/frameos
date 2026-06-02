@@ -56,9 +56,9 @@ proc normalizeSha256(value: string): string =
 
 proc shouldRunTimezoneUpdate*(dt: DateTime, lastRunDate: string): bool =
   let today = dt.format("yyyy-MM-dd")
-  result = dt.hour == TimeZoneUpdateHour and
-    dt.minute == TimeZoneUpdateMinute and
-    today != lastRunDate
+  let currentMinute = dt.hour * 60 + dt.minute
+  let updateMinute = TimeZoneUpdateHour * 60 + TimeZoneUpdateMinute
+  result = currentMinute >= updateMinute and today != lastRunDate
 
 proc localTimezoneHash(): string =
   let hashPath = timeZoneHashPath()

@@ -1,4 +1,4 @@
-import std/[json, strutils, unittest]
+import std/[json, sequtils, strutils, unittest]
 
 import ../channels
 import ../metrics
@@ -95,7 +95,9 @@ suite "metrics loop":
     check sampleJson["cpuCount"].getInt() == 1
     check sampleJson["openFileDescriptors"].getInt() == 9
     check sampleJson["runtime"]["active"].getBool() == false
-    check sampleJson["runtime"]["bootId"].getStr().len > 0
+    let bootId = sampleJson["runtime"]["bootId"].getStr()
+    check bootId.len == 8
+    check bootId.allIt(it.isAlphaNumeric())
     check sampleJson["runtime"]["sequence"].getInt() == 0
 
   test "enabled interval includes active runtime diagnostics without debug mode":

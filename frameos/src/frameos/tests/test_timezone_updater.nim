@@ -3,13 +3,18 @@ import ../../lib/tz
 import ../timezone_updater
 
 suite "timezone updater":
-  test "daily update is due only once at 3am":
+  test "daily update is due once at or after scheduled time":
+    let early = dateTime(2026, mJun, 2, TimeZoneUpdateHour - 1, 59, 59)
     let due = dateTime(2026, mJun, 2, TimeZoneUpdateHour, TimeZoneUpdateMinute, 0)
     let late = dateTime(2026, mJun, 2, TimeZoneUpdateHour, TimeZoneUpdateMinute + 1, 0)
+    let muchLater = dateTime(2026, mJun, 2, 23, 59, 0)
 
+    check shouldRunTimezoneUpdate(early, "") == false
     check shouldRunTimezoneUpdate(due, "") == true
     check shouldRunTimezoneUpdate(due, "2026-06-02") == false
-    check shouldRunTimezoneUpdate(late, "") == false
+    check shouldRunTimezoneUpdate(late, "") == true
+    check shouldRunTimezoneUpdate(muchLater, "") == true
+    check shouldRunTimezoneUpdate(muchLater, "2026-06-02") == false
 
   test "timezone data is fetched from hosted gzip endpoint":
     check TimeZoneDataGzipUrl == "https://tz.frameos.net/tzdata.json.gz"

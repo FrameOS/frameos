@@ -1,4 +1,4 @@
-import json, locks, os, random, times
+import json, locks, random, times
 
 type
   RuntimeDiagnosticsState = object
@@ -26,9 +26,16 @@ var
   runtimeState: RuntimeDiagnosticsState
   nextSequence: int64
 
-let runtimeBootId = block:
+const BootIdAlphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+const BootIdLength = 8
+
+proc generateRuntimeBootId(): string =
   randomize()
-  $epochTime().int64 & "-" & $getCurrentProcessId() & "-" & $rand(1_000_000_000)
+  result = newString(BootIdLength)
+  for index in 0..<BootIdLength:
+    result[index] = BootIdAlphabet[rand(BootIdAlphabet.high)]
+
+let runtimeBootId = generateRuntimeBootId()
 
 initLock(diagnosticsLock)
 
