@@ -1,10 +1,10 @@
 import json, strformat, options, times, strutils, httpclient
 import frameos/types
+import frameos/apps
 import frameos/utils/http_client
 
 const
   RequestTimeoutMs = 10000
-  MaxResponseBytes = 1024 * 1024
   MaxResponseSeconds = 15.0
 
 type
@@ -67,7 +67,7 @@ proc run*(self: App, context: ExecutionContext) =
       let responseBody = boundedGetContent(url,
         headers = headers,
         timeoutMs = RequestTimeoutMs,
-        maxBytes = MaxResponseBytes,
+        maxBytes = self.frameConfig.maxHttpResponseBytes(),
         maxSeconds = MaxResponseSeconds)
       self.json = some(parseJson(responseBody))
       self.lastFetchAt = epochTime()

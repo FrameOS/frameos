@@ -5,7 +5,7 @@ import {
   ClipboardDocumentIcon,
   CodeBracketIcon,
   CodeBracketSquareIcon,
-  InformationCircleIcon,
+  Cog6ToothIcon,
   ListBulletIcon,
   PhotoIcon,
   ServerStackIcon,
@@ -43,6 +43,7 @@ import { ExpandedScene } from '../frame/panels/Scenes/ExpandedScene'
 import { SceneDropDown } from '../frame/panels/Scenes/SceneDropDown'
 import { getFrameosSceneDragData, hasFrameosSceneDragData, setFrameosSceneDragData } from './sceneDrag'
 import { groupFramesByStatus } from './frameStatusGroups'
+import { FrameActionsMenu } from './FrameActionsMenu'
 
 interface SceneWorkspaceProps {
   frameId?: string
@@ -66,7 +67,7 @@ const utilityDefinitions: UtilityDefinition[] = [
   { panel: 'events', label: 'Events', icon: <ListBulletIcon className="h-5 w-5" /> },
   { panel: 'source', label: 'Source', icon: <CodeBracketIcon className="h-5 w-5" /> },
   { panel: 'json', label: 'JSON', icon: <ServerStackIcon className="h-5 w-5" /> },
-  { panel: 'info', label: 'Scene settings', icon: <InformationCircleIcon className="h-5 w-5" /> },
+  { panel: 'info', label: 'Scene settings', icon: <Cog6ToothIcon className="h-5 w-5" /> },
 ]
 
 function sceneIsCompiled(scene: FrameScene | null): boolean {
@@ -152,21 +153,27 @@ function SceneSelector({
         <div className="order-1 min-w-0 space-y-2 @xs:order-2">
           <div>
             <label className="frameos-muted mb-2 block text-xs font-semibold uppercase tracking-wide">Frame</label>
-            <select
-              value={frame.id}
-              onChange={(event) => navigateToSceneFrame(parseInt(event.target.value, 10))}
-              className="frameos-form-control w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-blue-400"
-            >
-              {frameGroups.map((group) => (
-                <optgroup key={group.key} label={group.label}>
-                  {group.frames.map((candidate) => (
-                    <option key={candidate.id} value={candidate.id}>
-                      {candidate.name || frameHost(candidate)}
-                    </option>
-                  ))}
-                </optgroup>
-              ))}
-            </select>
+            <div className="flex items-center gap-2">
+              <select
+                value={frame.id}
+                onChange={(event) => navigateToSceneFrame(parseInt(event.target.value, 10))}
+                className="frameos-form-control min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-blue-400"
+              >
+                {frameGroups.map((group) => (
+                  <optgroup key={group.key} label={group.label}>
+                    {group.frames.map((candidate) => (
+                      <option key={candidate.id} value={candidate.id}>
+                        {candidate.name || frameHost(candidate)}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+              <FrameActionsMenu
+                frame={frame}
+                className="frameos-form-control flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white !px-0 !py-0 text-slate-700 shadow-none transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+              />
+            </div>
           </div>
           {sidebarActions}
         </div>

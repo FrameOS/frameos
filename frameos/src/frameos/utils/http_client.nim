@@ -29,6 +29,13 @@ proc validateHttpUrl(url: string) =
   if scheme notin ["http", "https"] or parsed.hostname.len == 0:
     raise newException(ValueError, &"Invalid HTTP URL: {url}")
 
+proc limitHttpResponse*(client: HttpClient, maxBytes: int, maxSeconds = DefaultFetchMaxSeconds) =
+  client.onProgressChanged = guardFetchProgress(epochTime(), maxBytes, maxSeconds)
+
+proc requireHttpResponseWithinLimit*(content: string, maxBytes: int) =
+  if maxBytes > 0 and content.len > maxBytes:
+    raise newException(IOError, &"HTTP response exceeded {maxBytes} bytes")
+
 proc boundedRequestContent*(
     url: string,
     httpMethod = HttpGet,

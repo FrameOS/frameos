@@ -8,8 +8,6 @@ import frameos/utils/image
 const
   CommonsApiUrl = "https://commons.wikimedia.org/w/api.php"
   CommonsUserAgent = "FrameOS Wikimedia Commons app (https://github.com/FrameOS/frameos)"
-  MaxCommonsResponseBytes = 2 * 1024 * 1024
-  MaxCommonsImageBytes = 20 * 1024 * 1024
   FirstPotdYear = 2008
 
 type
@@ -56,7 +54,7 @@ proc commonsHeaders(): HttpHeaders =
 proc queryString(params: openArray[(string, string)]): string =
   params.mapIt(encodeUrl(it[0]) & "=" & encodeUrl(it[1])).join("&")
 
-proc fetchCommonsJson(params: openArray[(string, string)]): JsonNode =
+proc fetchCommonsJson(self: App, params: openArray[(string, string)]): JsonNode =
   var allParams = @[
     ("format", "json"),
     ("formatversion", "2")
@@ -66,7 +64,7 @@ proc fetchCommonsJson(params: openArray[(string, string)]): JsonNode =
     CommonsApiUrl & "?" & queryString(allParams),
     headers = commonsHeaders(),
     timeoutMs = 60000,
-    maxBytes = MaxCommonsResponseBytes,
+    maxBytes = self.maxHttpResponseBytes(),
     maxSeconds = 60
   )
   result = parseJson(body)
@@ -180,8 +178,8 @@ proc firstImageFromQuery(json: JsonNode): CommonsImage =
         return image.get()
   raise newException(CatchableError, "No supported image returned from Wikimedia Commons.")
 
-proc fetchPotdImage(date: CommonsDate, thumbnailWidth: int): CommonsImage =
-  firstImageFromQuery(fetchCommonsJson([
+proc fetchPotdImage(self: App, date: CommonsDate, thumbnailWidth: int): CommonsImage =
+  firstImageFromQuery(fetchCommonsJson(self, [
     ("action", "query"),
     ("generator", "images"),
     ("titles", "Template:Potd/" & date.dateString()),
@@ -191,8 +189,8 @@ proc fetchPotdImage(date: CommonsDate, thumbnailWidth: int): CommonsImage =
     ("iiurlwidth", $thumbnailWidth)
   ]))
 
-proc fetchRandomImage(thumbnailWidth: int): CommonsImage =
-  firstImageFromQuery(fetchCommonsJson([
+proc fetchRandomImage(self: App, thumbnailWidth: int): CommonsImage =
+  firstImageFromQuery(fetchCommonsJson(self, [
     ("action", "query"),
     ("generator", "random"),
     ("grnnamespace", "6"),
@@ -217,14 +215,14 @@ proc fetchImageForMode(self: App, thumbnailWidth: int): CommonsImage =
   let today = todayDate()
   case self.normalizedMode()
   of "pictureOfTheDay":
-    fetchPotdImage(today, thumbnailWidth)
+    self.fetchPotdImage(today, thumbnailWidth)
   of "onThisDay":
-    fetchPotdImage(randomOnThisDay(today), thumbnailWidth)
+    self.fetchPotdImage(randomOnThisDay(today), thumbnailWidth)
   of "randomPictureOfTheDay":
     var lastError = ""
     for _ in 0 ..< 10:
       try:
-        return fetchPotdImage(randomPreviousDate(today), thumbnailWidth)
+        return self.fetchPotdImage(randomPreviousDate(today), thumbnailWidth)
       except CatchableError as err:
         lastError = err.msg
     raise newException(CatchableError, "Could not find a random Wikimedia Commons picture of the day: " & lastError)
@@ -232,7 +230,7 @@ proc fetchImageForMode(self: App, thumbnailWidth: int): CommonsImage =
     var lastError = ""
     for _ in 0 ..< 10:
       try:
-        return fetchRandomImage(thumbnailWidth)
+        return self.fetchRandomImage(thumbnailWidth)
       except CatchableError as err:
         lastError = err.msg
     raise newException(CatchableError, "Could not find a random Wikimedia Commons image: " & lastError)
@@ -253,7 +251,7 @@ proc get*(self: App, context: ExecutionContext): Image =
       commonsImage.imageUrl,
       headers = newHttpHeaders([("User-Agent", CommonsUserAgent)]),
       timeoutMs = 60000,
-      maxBytes = MaxCommonsImageBytes,
+      maxBytes = self.maxHttpResponseBytes(),
       maxSeconds = 60
     )
 

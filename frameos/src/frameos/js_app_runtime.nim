@@ -29,8 +29,8 @@ type
 var jsAppEnvByCtx = initTable[ptr JSContext, JsAppEvalEnv]()
 
 proc jsFetchMaxBytes(e: JsAppEvalEnv): int =
-  if e != nil and e.owner != nil and e.owner.frameConfig != nil and e.owner.frameConfig.maxHttpResponseBytes > 0:
-    e.owner.frameConfig.maxHttpResponseBytes
+  if e != nil:
+    frameos_apps.maxHttpResponseBytes(e.owner)
   else:
     DefaultMaxHttpResponseBytes
 

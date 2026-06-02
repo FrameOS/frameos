@@ -46,6 +46,7 @@ from app.codegen.scene_nim import (
     scene_module_suffix,
     write_scene_library_nim,
     write_scene_nim,
+    write_shared_scenes_bundle_library_nim,
     write_scenes_nim,
 )
 from app.tasks.utils import find_nimbase_file
@@ -443,7 +444,7 @@ class FrameDeployer:
                     sf.write(write_scene_library_nim(scene))
             if compilation_mode == COMPILATION_MODE_SHARED_SCENES:
                 with open(os.path.join(source_dir, "src", "scenes", "scenes_bundle.nim"), "w") as bf:
-                    bf.write(write_scenes_nim(frame, compilation_mode=COMPILATION_MODE_SHARED_SCENES))
+                    bf.write(write_shared_scenes_bundle_library_nim(frame))
 
         with open(os.path.join(source_dir, "src", "scenes", "scenes.nim"), "w") as f:
             source = write_scenes_nim(frame, compilation_mode=compilation_mode)

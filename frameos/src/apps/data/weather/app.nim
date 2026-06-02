@@ -3,10 +3,9 @@ import std/strformat
 import std/strutils
 import std/times
 import std/uri
+import frameos/apps
 import frameos/types
 import frameos/utils/http_client
-
-const MaxWeatherResponseBytes = 2 * 1024 * 1024
 
 type
   AppConfig* = object
@@ -20,8 +19,8 @@ type
   App* = ref object of AppRoot
     appConfig*: AppConfig
 
-proc fetchJson(url: string): JsonNode =
-  parseJson(boundedGetContent(url, maxBytes = MaxWeatherResponseBytes))
+proc fetchJson(self: App, url: string): JsonNode =
+  parseJson(boundedGetContent(url, maxBytes = self.maxHttpResponseBytes()))
 
 proc buildError(location: string, message: string): JsonNode =
   %*{
@@ -42,7 +41,7 @@ proc get*(self: App, context: ExecutionContext): JsonNode =
   let geocodeUrl = fmt"https://geocoding-api.open-meteo.com/v1/search?name={encodedLocation}&count=1&language=en&format=json"
 
   try:
-    let geocodeJson = fetchJson(geocodeUrl)
+    let geocodeJson = self.fetchJson(geocodeUrl)
     if not geocodeJson.hasKey("results") or geocodeJson["results"].len == 0:
       return buildError(self.appConfig.location, "No matching locations found.")
 
@@ -77,7 +76,7 @@ proc get*(self: App, context: ExecutionContext): JsonNode =
       params.add("forecast_days=1")
 
     let forecastUrl = "https://api.open-meteo.com/v1/forecast?" & params.join("&")
-    let forecastJson = fetchJson(forecastUrl)
+    let forecastJson = self.fetchJson(forecastUrl)
 
     var locationNode = %*{
       "name": resultNode["name"].getStr,

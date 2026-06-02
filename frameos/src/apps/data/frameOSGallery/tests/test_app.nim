@@ -7,7 +7,9 @@ import frameos/types
 type LogStore = ref object
   items: seq[JsonNode]
 
-var galleryHookUrl {.global.}: string
+var
+  galleryHookUrl {.global.}: string
+  galleryHookMaxBytes {.global.}: int
 
 proc newLogger(store: LogStore): Logger =
   Logger(
@@ -15,8 +17,9 @@ proc newLogger(store: LogStore): Logger =
       store.items.add(payload)
   )
 
-proc fakeGalleryDownload(url: string): Image =
+proc fakeGalleryDownload(url: string, maxBytes: int): Image =
   galleryHookUrl = url
+  galleryHookMaxBytes = maxBytes
   newImage(2, 3)
 
 suite "data/frameOSGallery app":
@@ -27,6 +30,7 @@ suite "data/frameOSGallery app":
   test "get logs resolved category and downloads expected gallery URL":
     let logs = LogStore(items: @[])
     galleryHookUrl = ""
+    galleryHookMaxBytes = 0
     let previousHook = galleryDownloadHook
     galleryDownloadHook = fakeGalleryDownload
     defer:
@@ -36,6 +40,7 @@ suite "data/frameOSGallery app":
       nodeId: 11.NodeId,
       nodeName: "data/frameOSGallery",
       scene: FrameScene(logger: newLogger(logs)),
+      frameConfig: FrameConfig(maxHttpResponseBytes: 1234),
       appConfig: AppConfig(category: "other", categoryOther: "nature")
     )
 
@@ -44,5 +49,6 @@ suite "data/frameOSGallery app":
     check image.width == 2
     check image.height == 3
     check galleryHookUrl == "https://gallery.frameos.net/image?category=nature"
+    check galleryHookMaxBytes == 1234
     check logs.items.len == 1
     check logs.items[0]["category"].getStr() == "nature"

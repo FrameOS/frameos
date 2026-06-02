@@ -19,7 +19,7 @@ import { PlayIcon } from '@heroicons/react/24/solid'
 import { framesModel } from '../../models/framesModel'
 import { DropdownMenu } from '../../components/DropdownMenu'
 import { FrameConnectionDot } from '../../components/FrameConnectionDot'
-import { FrameImage } from '../../components/FrameImage'
+import { FrameImage, FrameImageRefreshButton } from '../../components/FrameImage'
 import {
   formatFrameRelativeTime,
   frameHost,
@@ -525,29 +525,39 @@ function CurrentSnapshotCard({ frame, active }: { frame: FrameType; active: bool
   const { hideForm } = useActions(newFrameForm)
 
   return (
-    <button
-      type="button"
-      onClick={() => {
-        hideForm()
-        openFrameTool(frame.id, 'preview')
-      }}
+    <div
       className={clsx(
-        'frameos-card group flex w-80 max-w-full shrink-0 flex-col overflow-hidden rounded-[22px] border bg-white text-left transition hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+        'frameos-card group relative w-80 max-w-full shrink-0 overflow-hidden rounded-[22px] border bg-white text-left transition hover:-translate-y-0.5 focus-within:ring-2 focus-within:ring-blue-400',
         active
           ? activeSurfaceClassName
           : 'border-white/90 shadow-xl shadow-slate-300/35 hover:shadow-2xl hover:shadow-slate-300/45'
       )}
     >
-      <div className="frameos-card-media relative flex h-[24rem] max-h-[75vh] min-h-0 items-center justify-center overflow-hidden bg-slate-100">
-        <FrameImage frameId={frame.id} refreshable={false} objectFit="contain" className="h-full w-full rounded-none" />
-        <FrameLiveBadge frame={frame} className="right-3 top-3" />
-      </div>
-      <div className="px-4 py-3">
-        <div className="frameos-muted text-xs text-slate-500">
-          Last rendered image from {frame.name || frameHost(frame)}
+      <button
+        type="button"
+        onClick={() => {
+          hideForm()
+          openFrameTool(frame.id, 'preview')
+        }}
+        className="flex w-full flex-col text-left focus:outline-none"
+      >
+        <div className="frameos-card-media relative flex h-[24rem] max-h-[75vh] min-h-0 items-center justify-center overflow-hidden bg-slate-100">
+          <FrameImage
+            frameId={frame.id}
+            refreshable={false}
+            objectFit="contain"
+            className="h-full w-full rounded-none"
+          />
+          <FrameLiveBadge frame={frame} className="right-3 top-3" />
         </div>
-      </div>
-    </button>
+        <div className="px-4 py-3">
+          <div className="frameos-muted text-xs text-slate-500">
+            Last rendered image from {frame.name || frameHost(frame)}
+          </div>
+        </div>
+      </button>
+      <FrameImageRefreshButton frameId={frame.id} />
+    </div>
   )
 }
 
@@ -683,8 +693,9 @@ export function SceneControlPanel(): JSX.Element | null {
                   className="h-full w-full"
                   imageClassName="h-full w-full rounded-md object-contain"
                 />
+                <FrameImageRefreshButton frameId={frame.id} sceneId={scene.id} />
                 {scene.settings?.execution !== 'interpreted' ? (
-                  <div className="absolute left-2 top-2 z-10">
+                  <div className="absolute left-2 top-10 z-10">
                     <CompiledSceneTag className="!bg-white/95 !border-slate-500/45 !text-slate-700 shadow-sm backdrop-blur-sm" />
                   </div>
                 ) : null}

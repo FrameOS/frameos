@@ -1380,11 +1380,11 @@ export function FrameSettings({
           </Field>
           <Field
             name="max_http_response_bytes"
-            label="Maximum HTTP response size for JavaScript apps"
+            label="Maximum HTTP response size for apps"
             tooltip={
               <>
-                Maximum number of bytes that frameos.fetchText and frameos.fetchJson may download in JavaScript apps.
-                Increase this for larger calendar feeds or APIs.
+                Maximum number of bytes that FrameOS apps may download in a single HTTP response. Increase this for
+                larger calendar feeds, images, or APIs.
               </>
             }
           >
