@@ -220,7 +220,7 @@ async def file_write_chunk_on_frame(
     frame_id: int, chunk: bytes,
     timeout: int = 60, redis: Redis | None = None,
 ):
-    # small (< 300 KB) so embedding is OK
+    # Chunks are small (<300KB), so attaching the blob to the command is OK.
     async with _redis_for_command(redis) as command_redis:
         return await send_cmd(
             command_redis,

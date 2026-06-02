@@ -92,7 +92,7 @@ export function isProjectScopedApiPath(path: string): boolean {
     return false
   }
   return [
-    '/api/ai/',
+    '/api/ai',
     '/api/apps',
     '/api/assets',
     '/api/fonts',

@@ -1,7 +1,6 @@
 import copy
 from http import HTTPStatus
 from datetime import datetime
-from pathlib import Path
 from uuid import uuid4
 import re
 import time
@@ -12,7 +11,6 @@ from sqlalchemy.orm import Session
 from arq import ArqRedis as Redis
 
 from app.database import get_db
-from app.models.ai_embeddings import AiEmbedding
 from app.models.apps import get_app_configs
 from app.models.chat import Chat, ChatMessage
 from app.models.settings import get_settings_dict
@@ -25,16 +23,11 @@ from app.schemas.ai_scenes import (
     AiSceneChatResponse,
 )
 from app.config import config
+from app.utils.ai_catalog import AiCatalogItem, build_catalog_context, collect_catalog_items
 from app.utils.ai_scene import (
     CHAT_MODEL,
-    EMBEDDING_MODEL,
     SCENE_MODEL,
     SCENE_REVIEW_MODEL,
-    PROMPT_EXPANSION_MODEL,
-    DEFAULT_APP_CONTEXT_K,
-    DEFAULT_SCENE_CONTEXT_K,
-    create_embeddings,
-    expand_scene_prompt,
     format_frame_context,
     format_frame_scene_summary,
     generate_scene_json,
@@ -44,7 +37,6 @@ from app.utils.ai_scene import (
     route_scene_chat,
     answer_frame_question,
     answer_scene_question,
-    rank_embeddings,
     review_scene_solution,
     validate_scene_payload,
 )
@@ -55,92 +47,21 @@ from app.websockets import publish_message
 from . import api_project
 
 AI_ID_PATTERN = re.compile(r"[^A-Za-z0-9\\-_.@()!'~:|]")
-REQUIRED_EMBEDDING_PATHS = {
-    "frameos/src/apps/render/image",
-    "frameos/src/apps/render/text",
-    "frameos/src/apps/render/split",
-    "frameos/src/apps/render/svg",
-    "frameos/src/apps/logic/setAsState",
-    "repo/scenes/samples/XKCD",
-    "repo/scenes/samples/Split agenda",
-}
-
-SERVICE_SECRET_FIELDS: dict[str, dict[str, Any]] = {
-    "openAI": {"fields": ("apiKey",)},
-    "unsplash": {"fields": ("accessKey",)},
-    "homeAssistant": {"fields": ("accessToken",)},
-    "github": {"fields": ("api_key",), "free_limited_usage": True},
-}
-
-
-def _has_value(value: Any) -> bool:
-    if value is None:
-        return False
-    if isinstance(value, str):
-        return bool(value.strip())
-    return True
-
-
-def _get_missing_service_keys(settings: dict[str, Any]) -> set[str]:
-    missing: set[str] = set()
-    for service_key, details in SERVICE_SECRET_FIELDS.items():
-        fields = details.get("fields", ())
-        service_settings = settings.get(service_key) or {}
-        if any(not _has_value(service_settings.get(field)) for field in fields):
-            missing.add(service_key)
-    return missing
-
-
-def _filter_embeddings_for_services(embeddings: list[AiEmbedding], missing_service_keys: set[str]) -> list[AiEmbedding]:
-    filtered: list[AiEmbedding] = []
-    for item in embeddings:
-        if item.source_type != "app":
-            filtered.append(item)
-            continue
-        metadata = item.metadata_json or {}
-        required_settings = metadata.get("settings")
-        if not isinstance(required_settings, list):
-            config_path = metadata.get("configPath")
-            if config_path:
-                try:
-                    config_data = json.loads((Path(__file__).resolve().parents[3] / config_path).read_text("utf-8"))
-                    required_settings = config_data.get("settings") or []
-                except Exception:
-                    required_settings = []
-            else:
-                required_settings = []
-        if any(
-            setting in missing_service_keys and not SERVICE_SECRET_FIELDS.get(setting, {}).get("free_limited_usage")
-            for setting in required_settings
-        ):
-            continue
-        filtered.append(item)
-    return filtered
-
-
-def _ensure_required_embeddings(
-    ranked_items: list[AiEmbedding],
-    available_embeddings: list[AiEmbedding],
-) -> list[AiEmbedding]:
-    required_items = [
-        item
-        for item in available_embeddings
-        if item.source_path in REQUIRED_EMBEDDING_PATHS
-    ]
-    existing_keys = {(item.source_type, item.source_path) for item in ranked_items}
-    missing_items = [
-        item for item in required_items if (item.source_type, item.source_path) not in existing_keys
-    ]
-    if not missing_items:
-        return ranked_items
-    return [*missing_items, *ranked_items]
-
-
 def _sanitize_ai_id(value: str | None) -> str | None:
     if not value:
         return None
     cleaned = AI_ID_PATTERN.sub("_", value)
     return cleaned or None
+
+
+def _format_ai_exception(exc: Exception) -> str:
+    detail = str(exc).strip() or exc.__class__.__name__
+    if detail.lower() == "not found":
+        return (
+            "OpenAI returned Not Found. Check the configured OpenAI model names in Settings -> OpenAI "
+            "(chat, scene generation, and review models) and make sure the API key has access to them."
+        )
+    return detail
 
 
 def _capture_ai_span(
@@ -298,19 +219,13 @@ async def _publish_ai_scene_log(
     )
 
 
-async def _load_context_items(
+async def _load_catalog_context(
     *,
-    db: Session,
-    project_id: int,
     settings: dict[str, Any],
-    api_key: str,
     prompt: str,
-    ai_trace_id: str | None,
-    ai_session_id: str | None,
-    ai_parent_id: str | None,
     redis: Redis | None = None,
     request_id: str | None = None,
-) -> list[AiEmbedding]:
+) -> tuple[str, list[AiCatalogItem]]:
     async def log_message(
         message: str,
         status: str = "info",
@@ -326,67 +241,15 @@ async def _load_context_items(
             stage=stage,
         )
 
-    await log_message("Loading embeddings.", stage="context:load")
-    embeddings = db.query(AiEmbedding).filter_by(project_id=project_id).all()
-    if not embeddings:
-        await log_message(
-            "No embeddings found; proceeding without retrieval context.",
-            stage="context:skip",
-        )
-        return []
-    missing_service_keys = _get_missing_service_keys(settings)
-    available_embeddings = _filter_embeddings_for_services(embeddings, missing_service_keys)
-    if not available_embeddings:
-        await log_message(
-            "No embeddings available after filtering unavailable services; proceeding without retrieval context.",
-            stage="context:skip",
-        )
-        return []
-    openai_settings = settings.get("openAI", {})
-    await log_message("Creating retrieval embedding.", stage="context:embed")
-    query_embedding = (
-        await create_embeddings(
-            [prompt],
-            api_key,
-            model=openai_settings.get("embeddingModel") or EMBEDDING_MODEL,
-            ai_trace_id=ai_trace_id,
-            ai_session_id=ai_session_id,
-            ai_parent_id=ai_parent_id,
-        )
-    )[0]
-    app_embeddings = [item for item in available_embeddings if item.source_type == "app"]
-    scene_embeddings = [item for item in available_embeddings if item.source_type == "scene"]
-    await log_message("Ranking relevant context.", stage="context:rank")
-    ranked_items = [
-        *rank_embeddings(
-            query_embedding,
-            app_embeddings,
-            prompt=prompt,
-            top_k=DEFAULT_APP_CONTEXT_K,
-        ),
-        *rank_embeddings(
-            query_embedding,
-            scene_embeddings,
-            prompt=prompt,
-            top_k=DEFAULT_SCENE_CONTEXT_K,
-        ),
-    ]
-    ranked_items = _ensure_required_embeddings(ranked_items, available_embeddings)
-    seen: set[tuple[str, str]] = set()
-    context_items: list[AiEmbedding] = []
-    context_items_strings: list[str] = []
-    for item in ranked_items:
-        key = (item.source_type, item.source_path)
-        if key in seen:
-            continue
-        seen.add(key)
-        context_items.append(item)
-        context_items_strings.append(f"[{item.source_type}] {item.source_path}")
+    await log_message("Loading app and scene catalog.", stage="context:load")
+    catalog_items = collect_catalog_items(settings)
+    catalog_context, context_items = build_catalog_context(catalog_items, query=prompt)
+    context_items_strings = [f"[{item.source_type}] {item.source_path}" for item in context_items]
     await log_message(
-        f"Selected {len(context_items)} context items: {', '.join(context_items_strings)}",
+        f"Loaded catalog with {len(catalog_items)} entries; selected detailed entries: {', '.join(context_items_strings)}",
         stage="context:ready",
     )
-    return context_items
+    return catalog_context, context_items
 
 
 @api_project.post("/ai/scenes/generate", response_model=AiSceneGenerateResponse)
@@ -454,105 +317,12 @@ async def generate_scene(
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="OpenAI backend API key not set")
 
     try:
-        expanded_prompt = prompt
-        expansion_keywords: list[str] = []
-        prompt_for_retrieval = prompt
-        try:
-            await _publish_ai_scene_log(redis, "Expanding prompt for retrieval.", request_id, stage="prompt:expand")
-            expansion = await expand_scene_prompt(
-                prompt=prompt,
-                api_key=api_key,
-                model=openai_settings.get("promptExpansionModel") or PROMPT_EXPANSION_MODEL,
-                frame_context=frame_context,
-                ai_trace_id=posthog_trace_id,
-                ai_session_id=posthog_session_id,
-                ai_parent_id=posthog_root_span_id,
-            )
-            candidate_prompt = expansion.get("expanded_prompt")
-            if isinstance(candidate_prompt, str) and candidate_prompt.strip():
-                expanded_prompt = candidate_prompt.strip()
-
-            candidate_keywords = expansion.get("keywords")
-            if isinstance(candidate_keywords, list):
-                expansion_keywords = [str(item).strip() for item in candidate_keywords if str(item).strip()]
-            prompt_for_retrieval = expanded_prompt
-            if expansion_keywords:
-                prompt_for_retrieval = f"{expanded_prompt}\nKeywords: {', '.join(expansion_keywords)}"
-        except Exception as exc:
-            await _publish_ai_scene_log(
-                redis,
-                f"Prompt expansion failed; continuing with original prompt. ({exc})",
-                request_id,
-                status="warning",
-                stage="prompt:expand",
-            )
-            prompt_for_retrieval = prompt
-
-        await _publish_ai_scene_log(redis, "Loading embeddings.", request_id, stage="context:load")
-        embeddings = db.query(AiEmbedding).filter_by(project_id=project_id).all()
-        missing_service_keys = _get_missing_service_keys(settings)
-        available_embeddings = _filter_embeddings_for_services(embeddings, missing_service_keys)
-        context_items: list[AiEmbedding] = []
-        if available_embeddings:
-            await _publish_ai_scene_log(redis, "Creating retrieval embedding.", request_id, stage="context:embed")
-            query_embedding = (
-                await create_embeddings(
-                    [prompt_for_retrieval],
-                    api_key,
-                    model=openai_settings.get("embeddingModel") or EMBEDDING_MODEL,
-                    ai_trace_id=posthog_trace_id,
-                    ai_session_id=posthog_session_id,
-                    ai_parent_id=posthog_root_span_id,
-                )
-            )[0]
-            app_embeddings = [item for item in available_embeddings if item.source_type == "app"]
-            scene_embeddings = [item for item in available_embeddings if item.source_type == "scene"]
-            await _publish_ai_scene_log(redis, "Ranking relevant context.", request_id, stage="context:rank")
-            ranked_items = [
-                *rank_embeddings(
-                    query_embedding,
-                    app_embeddings,
-                    prompt=prompt_for_retrieval,
-                    top_k=DEFAULT_APP_CONTEXT_K,
-                ),
-                *rank_embeddings(
-                    query_embedding,
-                    scene_embeddings,
-                    prompt=prompt_for_retrieval,
-                    top_k=DEFAULT_SCENE_CONTEXT_K,
-                ),
-            ]
-            ranked_items = _ensure_required_embeddings(ranked_items, available_embeddings)
-            seen: set[tuple[str, str]] = set()
-            context_items = []
-            context_items_strings = []
-            for item in ranked_items:
-                key = (item.source_type, item.source_path)
-                if key in seen:
-                    continue
-                seen.add(key)
-                context_items.append(item)
-                context_items_strings.append(f"[{item.source_type}] {item.source_path}")
-            await _publish_ai_scene_log(
-                redis,
-                f"Selected {len(context_items)} context items: {', '.join(context_items_strings)}",
-                request_id,
-                stage="context:ready",
-            )
-        elif embeddings:
-            await _publish_ai_scene_log(
-                redis,
-                "No embeddings available after filtering unavailable services; generating without retrieval context.",
-                request_id,
-                stage="context:skip",
-            )
-        else:
-            await _publish_ai_scene_log(
-                redis,
-                "No embeddings found; generating without retrieval context.",
-                request_id,
-                stage="context:skip",
-            )
+        catalog_context, context_items = await _load_catalog_context(
+            settings=settings,
+            prompt=prompt,
+            redis=redis,
+            request_id=request_id,
+        )
 
         response_payload: dict[str, Any] | None = None
         scene_plan: dict[str, Any] | None = None
@@ -565,6 +335,7 @@ async def generate_scene(
         scene_plan = await generate_scene_plan(
             prompt=prompt,
             context_items=context_items,
+            catalog_context=catalog_context,
             api_key=api_key,
             model=scene_model,
             frame_context=frame_context,
@@ -583,6 +354,7 @@ async def generate_scene(
                 response_payload = await generate_scene_json(
                     prompt=prompt,
                     context_items=context_items,
+                    catalog_context=catalog_context,
                     api_key=api_key,
                     model=scene_model,
                     plan=scene_plan,
@@ -601,6 +373,7 @@ async def generate_scene(
                 response_payload = await repair_scene_json(
                     prompt=prompt,
                     context_items=context_items,
+                    catalog_context=catalog_context,
                     api_key=api_key,
                     model=scene_model,
                     payload=response_payload or {},
@@ -667,16 +440,17 @@ async def generate_scene(
     except HTTPException:
         raise
     except Exception as exc:
+        detail = _format_ai_exception(exc)
         await _publish_ai_scene_log(
             redis,
-            f"AI scene generation failed: {exc}",
+            f"AI scene generation failed: {detail}",
             request_id,
             status="error",
             stage="error",
         )
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail=f"AI scene generation failed: {exc}",
+            detail=f"AI scene generation failed: {detail}",
         ) from exc
 
     title = response_payload.get("title") if response_payload else "Untitled Scene"
@@ -899,15 +673,9 @@ async def chat_scene(
                 stage="prompt:tool",
             )
 
-        context_items = await _load_context_items(
-            db=db,
-            project_id=project_id,
+        catalog_context, context_items = await _load_catalog_context(
             settings=settings,
-            api_key=api_key,
             prompt=tool_prompt,
-            ai_trace_id=posthog_trace_id,
-            ai_session_id=posthog_session_id,
-            ai_parent_id=posthog_root_span_id,
             redis=redis,
             request_id=request_id,
         )
@@ -921,6 +689,7 @@ async def chat_scene(
                 prompt=tool_prompt,
                 api_key=api_key,
                 context_items=context_items,
+                catalog_context=catalog_context,
                 frame_context=frame_context,
                 scene=scene_payload,
                 selected_nodes=selected_nodes,
@@ -941,6 +710,7 @@ async def chat_scene(
                 prompt=tool_prompt,
                 api_key=api_key,
                 context_items=context_items,
+                catalog_context=catalog_context,
                 frame_context=frame_context,
                 frame_scene_summary=frame_scene_summary,
                 history=history,
@@ -965,6 +735,7 @@ async def chat_scene(
             scene_plan = await generate_scene_plan(
                 prompt=tool_prompt,
                 context_items=context_items,
+                catalog_context=catalog_context,
                 api_key=api_key,
                 model=scene_model,
                 frame_context=frame_context,
@@ -983,6 +754,7 @@ async def chat_scene(
                     response_payload = await generate_scene_json(
                         prompt=tool_prompt,
                         context_items=context_items,
+                        catalog_context=catalog_context,
                         api_key=api_key,
                         model=scene_model,
                         plan=scene_plan,
@@ -1001,6 +773,7 @@ async def chat_scene(
                     response_payload = await repair_scene_json(
                         prompt=tool_prompt,
                         context_items=context_items,
+                        catalog_context=catalog_context,
                         api_key=api_key,
                         model=scene_model,
                         payload=response_payload or {},
@@ -1102,6 +875,7 @@ async def chat_scene(
                     prompt=tool_prompt,
                     scene=scene_payload or {},
                     context_items=context_items,
+                    catalog_context=catalog_context,
                     available_apps=available_apps,
                     api_key=api_key,
                     model=scene_model,
@@ -1173,6 +947,7 @@ async def chat_scene(
             prompt=tool_prompt,
             api_key=api_key,
             context_items=context_items,
+            catalog_context=catalog_context,
             frame_context=frame_context,
             frame_scene_summary=frame_scene_summary,
             history=history,
@@ -1194,14 +969,15 @@ async def chat_scene(
         )
         raise
     except Exception as exc:
+        detail = _format_ai_exception(exc)
         await _publish_ai_scene_log(
             redis,
-            f"AI chat failed: {exc}",
+            f"AI chat failed: {detail}",
             request_id,
             status="error",
             stage="error",
         )
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail=f"AI chat failed: {exc}",
+            detail=f"AI chat failed: {detail}",
         ) from exc
