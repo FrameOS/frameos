@@ -103,6 +103,14 @@ block test_frameos_service_contents_uses_detected_user:
   doAssert service.contains("User=frame-user")
   doAssert service.contains("WorkingDirectory=/srv/frameos/current")
   doAssert service.contains("ExecStart=/srv/frameos/current/frameos")
+  doAssert not service.contains("StandardOutput=journal+console")
+  doAssert not service.contains("StandardError=journal+console")
+
+block test_frameos_service_contents_can_mirror_logs_to_console:
+  let service = frameosServiceContents("root", consoleOutput = true)
+
+  doAssert service.contains("StandardOutput=journal+console")
+  doAssert service.contains("StandardError=journal+console")
 
 block test_release_activation_switches_staged_release_current_symlink:
   var commands: seq[string] = @[]

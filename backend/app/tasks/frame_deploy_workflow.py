@@ -1222,7 +1222,11 @@ class FrameDeployWorkflow:
 
     async def _plan_post_deploy_cleanup(self, *, drivers: dict[str, Any], low_memory: bool) -> dict[str, Any]:
         boot_config = "/boot/config.txt"
-        if await self.deployer.exec_command("test -f /boot/firmware/config.txt", raise_on_error=False) == 0:
+        if await self._command_succeeds(
+            "test -f /boot/config.txt && grep -Eq '^(kernel=Image|start_file=|fixup_file=)' /boot/config.txt"
+        ):
+            boot_config = "/boot/config.txt"
+        elif await self.deployer.exec_command("test -f /boot/firmware/config.txt", raise_on_error=False) == 0:
             boot_config = "/boot/firmware/config.txt"
 
         i2c_needs_boot_config_line = False

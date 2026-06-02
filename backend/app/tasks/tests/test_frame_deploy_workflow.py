@@ -39,6 +39,10 @@ class FakeDeployer:
         if command.startswith("dpkg-query -W -f='${Status}' "):
             package_name = command.split("dpkg-query -W -f='${Status}' ", 1)[1].split(" ", 1)[0].strip("'")
             return 0 if package_name in self.installed_packages else 1
+        if command.startswith(
+            "test -f /boot/config.txt && grep -Eq '^(kernel=Image|start_file=|fixup_file=)' /boot/config.txt"
+        ):
+            return 0 if "/boot/config.txt:buildroot" in self.existing_paths else 1
         if command in self.success_commands:
             return 0
         if command.startswith("grep -q ") or command.startswith("test -f /etc/cron.d/frameos-reboot && grep -Fxq "):
@@ -790,6 +794,28 @@ async def test_full_plan_includes_post_deploy_driver_and_reboot_steps(monkeypatc
     assert post_deploy["disable_userconfig"] is True
     assert post_deploy["disable_caddy_service"] is True
     assert post_deploy["final_action"] == "reboot"
+
+
+@pytest.mark.asyncio
+async def test_post_deploy_plan_prefers_buildroot_active_boot_config():
+    frame = SimpleNamespace(
+        id=9,
+        name="BuildrootBootConfigFrame",
+        reboot=None,
+        last_successful_deploy_at="2026-01-01T00:00:00+00:00",
+    )
+    workflow = FrameDeployWorkflow(
+        db=None,
+        redis=None,
+        frame=frame,
+        deployer=FakeDeployer(existing_paths={"/boot/config.txt:buildroot", "/boot/firmware/config.txt"}),
+        temp_dir="",
+        binary_builder=FakeBinaryBuilder(),
+    )
+
+    post_deploy = await workflow._plan_post_deploy_cleanup(drivers={}, low_memory=False)
+
+    assert post_deploy["boot_config_path"] == "/boot/config.txt"
 
 
 @pytest.mark.asyncio

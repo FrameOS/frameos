@@ -191,6 +191,7 @@ def test_buildroot_partition_scripts_create_frameos_and_assets_partitions(tmp_pa
     assert '"$target_dir/etc/cron.d"' in post_build
     assert "image frameos.ext4" in post_image
     assert "image assets.vfat" in post_image
+    assert "console=tty1" in post_image
     assert "fbcon=logo-count:1" in post_image
     assert "gpu_mem=32" in post_image
     assert "partition frameos" in post_image
@@ -568,7 +569,7 @@ def test_buildroot_requires_lgpio_runtime_libraries(tmp_path, monkeypatch):
         builder._copy_runtime_libraries(tmp_path / "overlay")
 
 
-def test_buildroot_boot_config_merge_is_written_to_all_boot_locations(tmp_path):
+def test_buildroot_boot_config_merge_is_written_to_active_boot_location(tmp_path):
     builder = BuildrootImageBuilder(db=None, redis=None, frame=SimpleNamespace(id=1))
     overlay_dir = tmp_path / "overlay"
     existing_config = overlay_dir / "boot" / "config.txt"
@@ -586,8 +587,9 @@ def test_buildroot_boot_config_merge_is_written_to_all_boot_locations(tmp_path):
     assert "dtoverlay=spi0-0cs" in existing_config.read_text(encoding="utf-8")
     assert "dtoverlay=spi0-1cs" in existing_config.read_text(encoding="utf-8")
     assert "#dtoverlay=spi0-0cs" not in existing_config.read_text(encoding="utf-8")
-    assert "dtoverlay=spi0-0cs" in existing_firmware_config.read_text(encoding="utf-8")
-    assert "dtoverlay=spi0-1cs" in existing_firmware_config.read_text(encoding="utf-8")
+    firmware_config = existing_firmware_config.read_text(encoding="utf-8")
+    assert "dtoverlay=spi0-0cs" not in firmware_config
+    assert "dtoverlay=spi0-1cs" not in firmware_config
 
 
 def test_buildroot_boot_config_defaults_minimize_gpu_memory(monkeypatch):

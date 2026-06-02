@@ -19,6 +19,38 @@ block test_boot_config_is_idempotent:
   doAssert not applied.changed
   doAssert applied.content == "dtoverlay=spi0-0cs\n"
 
+block test_boot_config_path_prefers_configured_path:
+  doAssert chooseBootConfigPath("/tmp/frameos-boot-config.txt", "/boot/config.txt", "/boot/firmware/config.txt") ==
+    "/tmp/frameos-boot-config.txt"
+
+block test_boot_config_path_prefers_buildroot_active_boot_config:
+  let root = getTempDir() / ("frameos-test-boot-root-" & $epochTime().int64)
+  let bootConfigPath = root / "boot" / "config.txt"
+  let firmwareConfigPath = root / "boot" / "firmware" / "config.txt"
+  createDir(parentDir(bootConfigPath))
+  createDir(parentDir(firmwareConfigPath))
+  try:
+    writeFile(bootConfigPath, "kernel=Image\narm_64bit=1\n")
+    writeFile(firmwareConfigPath, "dtoverlay=spi0-0cs\n")
+    doAssert chooseBootConfigPath("", bootConfigPath, firmwareConfigPath) == bootConfigPath
+  finally:
+    if dirExists(root):
+      removeDir(root)
+
+block test_boot_config_path_prefers_firmware_config_for_rpios:
+  let root = getTempDir() / ("frameos-test-firmware-root-" & $epochTime().int64)
+  let bootConfigPath = root / "boot" / "config.txt"
+  let firmwareConfigPath = root / "boot" / "firmware" / "config.txt"
+  createDir(parentDir(bootConfigPath))
+  createDir(parentDir(firmwareConfigPath))
+  try:
+    writeFile(bootConfigPath, "disable_overscan=1\n")
+    writeFile(firmwareConfigPath, "dtoverlay=spi0-0cs\n")
+    doAssert chooseBootConfigPath("", bootConfigPath, firmwareConfigPath) == firmwareConfigPath
+  finally:
+    if dirExists(root):
+      removeDir(root)
+
 block test_setup_boot_config_writes_local_file:
   let path = getTempDir() / ("frameos-test-boot-config-" & $epochTime().int64 & ".txt")
   writeFile(path, "existing=1\n")

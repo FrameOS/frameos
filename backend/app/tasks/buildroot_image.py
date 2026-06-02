@@ -1134,10 +1134,7 @@ class BuildrootImageBuilder:
         if not requested_lines:
             return
 
-        boot_files = [
-            overlay_dir / "boot" / "config.txt",
-            overlay_dir / "boot" / "firmware" / "config.txt",
-        ]
+        boot_files = [overlay_dir / "boot" / "config.txt"]
         for boot_file in boot_files:
             current = boot_file.read_text(encoding="utf-8") if boot_file.is_file() else ""
             merged = _merge_boot_config_lines(current, requested_lines)
@@ -1850,6 +1847,9 @@ cmdline="${{BINARIES_DIR:?BINARIES_DIR is required}}/rpi-firmware/cmdline.txt"
 if [ -f "$cmdline" ]; then
   tmp_cmdline="${{cmdline}}.frameos"
   tr -d '\\n' < "$cmdline" > "$tmp_cmdline"
+  if ! grep -Eq '(^|[[:space:]])console=tty1([[:space:]]|$)' "$tmp_cmdline"; then
+    printf ' console=tty1' >> "$tmp_cmdline"
+  fi
   if ! grep -Eq '(^|[[:space:]])fbcon=logo-count:' "$tmp_cmdline"; then
     printf ' fbcon=logo-count:1' >> "$tmp_cmdline"
   fi
