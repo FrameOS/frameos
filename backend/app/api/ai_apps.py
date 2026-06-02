@@ -11,7 +11,7 @@ from app.models.settings import get_settings_dict
 from app.models.frame import Frame
 from app.schemas.ai_apps import AiAppChatRequest, AiAppChatResponse
 from app.utils.ai_app import answer_app_question, edit_app_sources, route_app_chat
-from app.utils.ai_scene import CHAT_MODEL, SCENE_MODEL
+from app.utils.ai_scene import CHAT_MODEL, SCENE_MODEL, openai_model
 from app.tenancy import current_project_id
 from . import api_project
 
@@ -91,7 +91,7 @@ async def chat_app(
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="OpenAI backend API key not set")
 
     history = [item.model_dump() for item in (data.history or [])]
-    model = openai_settings.get("appChatModel") or openai_settings.get("chatModel") or CHAT_MODEL
+    model = openai_model(openai_settings, "appChatModel", openai_model(openai_settings, "chatModel", CHAT_MODEL))
 
     tool_payload = {}
     tool = "ask_about_app"
@@ -128,7 +128,7 @@ async def chat_app(
             node_id=data.node_id,
             history=history,
             api_key=api_key,
-            model=openai_settings.get("appEditModel") or openai_settings.get("chatModel") or SCENE_MODEL,
+            model=openai_model(openai_settings, "appEditModel", openai_model(openai_settings, "chatModel", SCENE_MODEL)),
             ai_trace_id=request_id,
             ai_session_id=None,
         )
@@ -149,7 +149,7 @@ async def chat_app(
             node_id=data.node_id,
             history=history,
             api_key=api_key,
-            model=openai_settings.get("appChatModel") or openai_settings.get("chatModel") or CHAT_MODEL,
+            model=openai_model(openai_settings, "appChatModel", openai_model(openai_settings, "chatModel", CHAT_MODEL)),
             ai_trace_id=request_id,
             ai_session_id=None,
         )

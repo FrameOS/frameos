@@ -28,6 +28,7 @@ from app.utils.ai_scene import (
     CHAT_MODEL,
     SCENE_MODEL,
     SCENE_REVIEW_MODEL,
+    openai_model,
     format_frame_context,
     format_frame_scene_summary,
     generate_scene_json,
@@ -329,8 +330,8 @@ async def generate_scene(
         validation_issues: list[str] = []
         review_issues: list[str] = []
         max_attempts = 3
-        scene_model = openai_settings.get("sceneModel") or SCENE_MODEL
-        review_model = openai_settings.get("reviewModel") or SCENE_REVIEW_MODEL
+        scene_model = openai_model(openai_settings, "sceneModel", SCENE_MODEL)
+        review_model = openai_model(openai_settings, "reviewModel", SCENE_REVIEW_MODEL)
         await _publish_ai_scene_log(redis, "Generating scene plan.", request_id, stage="plan")
         scene_plan = await generate_scene_plan(
             prompt=prompt,
@@ -646,7 +647,7 @@ async def chat_scene(
                 frame_context=frame_context,
                 history=history,
                 api_key=api_key,
-                model=openai_settings.get("chatModel") or CHAT_MODEL,
+                model=openai_model(openai_settings, "chatModel", CHAT_MODEL),
                 ai_trace_id=posthog_trace_id,
                 ai_session_id=posthog_session_id,
                 ai_parent_id=posthog_root_span_id,
@@ -695,7 +696,7 @@ async def chat_scene(
                 selected_nodes=selected_nodes,
                 selected_edges=selected_edges,
                 history=history,
-                model=openai_settings.get("chatModel") or CHAT_MODEL,
+                model=openai_model(openai_settings, "chatModel", CHAT_MODEL),
                 ai_trace_id=posthog_trace_id,
                 ai_session_id=posthog_session_id,
                 ai_parent_id=posthog_root_span_id,
@@ -714,7 +715,7 @@ async def chat_scene(
                 frame_context=frame_context,
                 frame_scene_summary=frame_scene_summary,
                 history=history,
-                model=openai_settings.get("chatModel") or CHAT_MODEL,
+                model=openai_model(openai_settings, "chatModel", CHAT_MODEL),
                 ai_trace_id=posthog_trace_id,
                 ai_session_id=posthog_session_id,
                 ai_parent_id=posthog_root_span_id,
@@ -729,8 +730,8 @@ async def chat_scene(
             validation_issues: list[str] = []
             review_issues: list[str] = []
             max_attempts = 3
-            scene_model = openai_settings.get("sceneModel") or SCENE_MODEL
-            review_model = openai_settings.get("reviewModel") or SCENE_REVIEW_MODEL
+            scene_model = openai_model(openai_settings, "sceneModel", SCENE_MODEL)
+            review_model = openai_model(openai_settings, "reviewModel", SCENE_REVIEW_MODEL)
             await _publish_ai_scene_log(redis, "Generating scene plan.", request_id, stage="plan")
             scene_plan = await generate_scene_plan(
                 prompt=tool_prompt,
@@ -859,7 +860,7 @@ async def chat_scene(
             return AiSceneChatResponse(reply=reply, tool=tool, title=title, scenes=scenes, chatId=chat.id if chat else None)
 
         if tool == "modify_scene":
-            scene_model = openai_settings.get("sceneModel") or SCENE_MODEL
+            scene_model = openai_model(openai_settings, "sceneModel", SCENE_MODEL)
             response_payload: dict[str, Any] | None = None
             validation_issues: list[str] = []
             available_apps = sorted(get_app_configs().keys())
@@ -951,7 +952,7 @@ async def chat_scene(
             frame_context=frame_context,
             frame_scene_summary=frame_scene_summary,
             history=history,
-            model=openai_settings.get("chatModel") or CHAT_MODEL,
+            model=openai_model(openai_settings, "chatModel", CHAT_MODEL),
             ai_trace_id=posthog_trace_id,
             ai_session_id=posthog_session_id,
             ai_parent_id=posthog_root_span_id,

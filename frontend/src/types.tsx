@@ -648,6 +648,7 @@ export interface FrameOSSettings {
   openAI?: {
     apiKey?: string
     backendApiKey?: string
+    model?: string
     chatModel?: string
     sceneModel?: string
     reviewModel?: string

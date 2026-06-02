@@ -49,6 +49,7 @@ export const settingsLogic = kea<settingsLogicType>([
     setSshKeyExpandedIds: (ids: string[]) => ({ ids }),
     setSshKeyExpanded: (id: string, expanded: boolean) => ({ id, expanded }),
     toggleSshKeyExpanded: (id: string) => ({ id }),
+    toggleOpenAiModelOverrides: true,
     newBuildHostKey: true,
     setGeneratingSshKeyId: (id: string | null) => ({ id }),
   }),
@@ -117,6 +118,12 @@ export const settingsLogic = kea<settingsLogicType>([
           expanded ? (state.includes(id) ? state : [...state, id]) : state.filter((keyId) => keyId !== id),
         toggleSshKeyExpanded: (state, { id }) =>
           state.includes(id) ? state.filter((keyId) => keyId !== id) : [...state, id],
+      },
+    ],
+    openAiModelOverridesExpanded: [
+      false,
+      {
+        toggleOpenAiModelOverrides: (state) => !state,
       },
     ],
   }),

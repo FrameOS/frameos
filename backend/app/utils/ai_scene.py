@@ -15,6 +15,16 @@ SCENE_REVIEW_MODEL = "gpt-5.5"
 AI_REQUEST_TIMEOUT = 600
 
 
+def openai_model(settings: dict[str, Any], field: str, default: str) -> str:
+    configured_model = settings.get(field)
+    shared_model = settings.get("model")
+    if isinstance(configured_model, str) and configured_model.strip():
+        return configured_model.strip()
+    if isinstance(shared_model, str) and shared_model.strip():
+        return shared_model.strip()
+    return default
+
+
 def _format_gpio_buttons(gpio_buttons: Iterable[dict[str, Any]]) -> list[str]:
     formatted: list[str] = []
     for button in gpio_buttons:

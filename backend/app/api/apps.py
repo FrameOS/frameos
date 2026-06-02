@@ -12,7 +12,7 @@ from app.database import get_db
 from app.models.apps import get_app_configs, get_one_app_sources
 from app.models.settings import get_settings_dict
 from app.tenancy import current_project_id
-from app.utils.ai_scene import SCENE_MODEL
+from app.utils.ai_scene import SCENE_MODEL, openai_model
 from app.utils.js_apps import validate_js_source
 from app.schemas.apps import (
  AppsListResponse,
@@ -86,7 +86,7 @@ async def enhance_python_frame_source(data: EnhanceSourceRequest, db: Session = 
             {"role": "system", "content": ai_context},
             {"role": "user", "content": prompt}
         ],
-        "model": openai_settings.get("appEnhanceModel") or SCENE_MODEL,
+        "model": openai_model(openai_settings, "appEnhanceModel", SCENE_MODEL),
     }
 
     headers = {

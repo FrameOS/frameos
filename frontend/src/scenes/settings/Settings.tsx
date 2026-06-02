@@ -231,6 +231,7 @@ export function Settings() {
     savedSettingsLoading,
     settingsChanged,
     isSettingsSubmitting,
+    openAiModelOverridesExpanded,
     customFontsLoading,
     isCustomFontsFormSubmitting,
     customFonts,
@@ -248,6 +249,7 @@ export function Settings() {
     deleteCustomFont,
     setSettingsValue,
     toggleSshKeyExpanded,
+    toggleOpenAiModelOverrides,
   } = useActions(settingsLogic)
   const { isHassioIngress } = useValues(sceneLogic)
   const { logout } = useActions(sceneLogic)
@@ -520,24 +522,36 @@ export function Settings() {
                     >
                       <TextInput name="backendApiKey" />
                     </Field>
-                    <Field name="sceneModel" label="Scene generation model">
-                      <TextInput name="sceneModel" placeholder="gpt-5.5" />
+                    <Field name="model" label="Model">
+                      <TextInput name="model" placeholder="gpt-5.5" />
                     </Field>
-                    <Field name="chatModel" label="Chat model">
-                      <TextInput name="chatModel" placeholder="gpt-5.5" />
-                    </Field>
-                    <Field name="reviewModel" label="Scene review model">
-                      <TextInput name="reviewModel" placeholder="gpt-5.5" />
-                    </Field>
-                    <Field name="appChatModel" label="App chat model">
-                      <TextInput name="appChatModel" placeholder="gpt-5.5" />
-                    </Field>
-                    <Field name="appEditModel" label="App edit chat model">
-                      <TextInput name="appEditModel" placeholder="gpt-5.5" />
-                    </Field>
-                    <Field name="appEnhanceModel" label="App source enhance model">
-                      <TextInput name="appEnhanceModel" placeholder="gpt-5.5" />
-                    </Field>
+                    <div className="pt-1">
+                      <Button size="small" color="secondary" onClick={toggleOpenAiModelOverrides}>
+                        {openAiModelOverridesExpanded ? 'Hide model overrides' : 'Show model overrides'}
+                      </Button>
+                    </div>
+                    {openAiModelOverridesExpanded ? (
+                      <div className="space-y-2 border-t border-slate-500/20 pt-3">
+                        <Field name="chatModel" label="Chat model">
+                          <TextInput name="chatModel" placeholder="Use shared model" />
+                        </Field>
+                        <Field name="sceneModel" label="Scene generation model">
+                          <TextInput name="sceneModel" placeholder="Use shared model" />
+                        </Field>
+                        <Field name="reviewModel" label="Scene review model">
+                          <TextInput name="reviewModel" placeholder="Use shared model" />
+                        </Field>
+                        <Field name="appChatModel" label="App chat model">
+                          <TextInput name="appChatModel" placeholder="Use shared model" />
+                        </Field>
+                        <Field name="appEditModel" label="App edit chat model">
+                          <TextInput name="appEditModel" placeholder="Use shared model" />
+                        </Field>
+                        <Field name="appEnhanceModel" label="App source enhance model">
+                          <TextInput name="appEnhanceModel" placeholder="Use shared model" />
+                        </Field>
+                      </div>
+                    ) : null}
                   </Box>
                 </Group>
                 <Group name="posthog">
