@@ -2894,6 +2894,27 @@ async def api_frame_metrics(id: int, db: Session = Depends(get_db)):
     try:
         metrics = db.query(Metrics).filter_by(project_id=frame.project_id, frame_id=id).order_by(Metrics.timestamp).all()
         metrics_list = [metric.to_dict() for metric in metrics]
-        return {"metrics": metrics_list}
+        bootup_logs = (
+            db.query(Log)
+            .filter_by(project_id=frame.project_id, frame_id=id, type="webhook")
+            .filter(Log.line.like('%"bootup"%'))
+            .order_by(Log.timestamp)
+            .all()
+        )
+        reboots = []
+        for log in bootup_logs:
+            try:
+                payload = json.loads(log.line)
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if not isinstance(payload, dict) or payload.get("event") != "bootup":
+                continue
+            timestamp = log.timestamp
+            if timestamp.tzinfo is None:
+                timestamp = timestamp.replace(tzinfo=timezone.utc)
+            else:
+                timestamp = timestamp.astimezone(timezone.utc)
+            reboots.append({"timestamp": timestamp.isoformat(), "log_id": log.id})
+        return {"metrics": metrics_list, "reboots": reboots}
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))

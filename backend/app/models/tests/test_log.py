@@ -90,14 +90,19 @@ async def test_process_log_render(mock_pub, db, redis):
 @patch("app.models.log.publish_message", new_callable=AsyncMock)
 async def test_process_log_bootup(mock_pub, db, redis):
     frame = await new_frame(db, redis, "BootFrame", "localhost", "server_host")
-    await process_log(db, redis, frame, {
-        "event": "bootup",
-        "width": 200,
-        "height": 300,
-        "color": "monochrome"
-    })
+    boot_time = datetime(2026, 6, 2, 3, 4, 5)
+    await process_log(db, redis, frame, [
+        boot_time.replace(tzinfo=timezone.utc).timestamp(),
+        {
+            "event": "bootup",
+            "width": 200,
+            "height": 300,
+            "color": "monochrome",
+        },
+    ])
     updated = db.get(Frame, frame.id)
     assert updated.status == "ready"
+    assert updated.last_boot_at == boot_time
     assert updated.width == 200
     assert updated.height == 300
     assert updated.color == "monochrome"

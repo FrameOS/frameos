@@ -30,6 +30,16 @@ export interface TimeRange {
   end: number
 }
 
+export interface RebootMarker {
+  timestamp: Date
+  logId?: string
+}
+
+interface MetricsResponseReboot {
+  timestamp?: string
+  log_id?: number | string
+}
+
 export type MetricsTimeRangePreset = '1h' | '6h' | '12h' | '24h' | '7d' | 'all' | 'custom'
 
 export const metricsTimeRangeOptions: { value: MetricsTimeRangePreset; label: string }[] = [
@@ -84,6 +94,32 @@ const RUNTIME_DIMENSION_COLORS: Record<string, string> = {
 function parseMetricTimestamp(timestamp: string): number {
   const hasTimeZone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(timestamp)
   return Date.parse(hasTimeZone ? timestamp : `${timestamp}Z`)
+}
+
+function parseRebootMarker(marker: MetricsResponseReboot): RebootMarker | null {
+  if (!marker.timestamp) {
+    return null
+  }
+  const timestamp = parseMetricTimestamp(marker.timestamp)
+  if (!Number.isFinite(timestamp)) {
+    return null
+  }
+  return {
+    timestamp: new Date(timestamp),
+    logId: marker.log_id === undefined ? undefined : String(marker.log_id),
+  }
+}
+
+function sortAndDedupeRebootMarkers(markers: RebootMarker[]): RebootMarker[] {
+  const markersByKey = new Map<string, RebootMarker>()
+  markers.forEach((marker) => {
+    const timestamp = marker.timestamp.getTime()
+    if (!Number.isFinite(timestamp)) {
+      return
+    }
+    markersByKey.set(marker.logId ?? String(timestamp), marker)
+  })
+  return [...markersByKey.values()].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
 }
 
 function metricTimestamp(metric: MetricsType): number {
@@ -368,8 +404,9 @@ export const metricsLogic = kea<metricsLogicType>([
     setSelectedTimeRangePreset: (preset: MetricsTimeRangePreset) => ({ preset }),
     setCurrentTime: (currentTime: number) => ({ currentTime }),
     toggleMetricSeries: (category: string, seriesKey: string) => ({ category, seriesKey }),
+    setRebootMarkers: (markers: RebootMarker[]) => ({ markers }),
   }),
-  loaders(({ props }) => ({
+  loaders(({ props, actions }) => ({
     metrics: [
       [] as MetricsType[],
       {
@@ -380,9 +417,15 @@ export const metricsLogic = kea<metricsLogicType>([
               throw new Error('Failed to fetch logs')
             }
             const data = await response.json()
+            actions.setRebootMarkers(
+              Array.isArray(data.reboots)
+                ? sortAndDedupeRebootMarkers(data.reboots.map(parseRebootMarker).filter(Boolean) as RebootMarker[])
+                : []
+            )
             return data.metrics as MetricsType[]
           } catch (error) {
             console.error(error)
+            actions.setRebootMarkers([])
             return []
           }
         },
@@ -443,6 +486,25 @@ export const metricsLogic = kea<metricsLogicType>([
         return state
       },
     },
+    rebootMarkers: [
+      [] as RebootMarker[],
+      {
+        setRebootMarkers: (_, { markers }) => sortAndDedupeRebootMarkers(markers),
+        [socketLogic.actionTypes.newLog]: (state, { log }) => {
+          if (log.frame_id !== props.frameId) {
+            return state
+          }
+          try {
+            const payload = JSON.parse(log.line)
+            if (payload.event === 'bootup') {
+              const marker = parseRebootMarker({ timestamp: log.timestamp, log_id: log.id })
+              return marker ? sortAndDedupeRebootMarkers([...state, marker]) : state
+            }
+          } catch (error) {}
+          return state
+        },
+      },
+    ],
   })),
   selectors({
     sortedMetrics: [

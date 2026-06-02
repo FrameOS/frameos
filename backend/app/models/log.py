@@ -133,6 +133,7 @@ async def process_log(
             mark_buildroot_sd_image_booted,
         )
 
+        changes['last_boot_at'] = timestamp
         marked_buildroot_sd_image_booted = await mark_buildroot_sd_image_booted(db, redis, frame)
         if frame.status != 'ready':
             changes['status'] = 'ready'

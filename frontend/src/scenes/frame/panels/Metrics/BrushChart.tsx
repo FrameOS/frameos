@@ -9,7 +9,7 @@ import { max } from '@visx/vendor/d3-array'
 import { BrushHandleRenderProps } from '@visx/brush/lib/BrushHandle'
 import { AreaChart } from './AreaChart'
 import { WithParentSizeProps } from '@visx/responsive/lib/enhancers/withParentSize'
-import type { MetricPoint, MetricSeries, TimeRange } from './metricsLogic'
+import type { MetricPoint, MetricSeries, RebootMarker, TimeRange } from './metricsLogic'
 import { metricChartThemes, type MetricChartTheme } from './chartTheme'
 
 // Initialize some variables
@@ -20,6 +20,14 @@ const chartSeparation = 30
 const getDate = (m: MetricPoint) => m.x
 const getValue = (m: MetricPoint) => m.y
 const fallbackTimeRange = () => ({ start: Date.now() - 60 * 60 * 1000, end: Date.now() })
+const rebootTimestampFormatter = new Intl.DateTimeFormat(undefined, {
+  month: 'short',
+  day: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hourCycle: 'h23',
+})
 
 function normalizeTimeRange(start: number, end: number): TimeRange {
   const min = Math.min(start, end)
@@ -61,6 +69,7 @@ export type BrushProps = {
   series: MetricSeries[]
   totalTimeRange: TimeRange | null
   visibleTimeRange: TimeRange | null
+  rebootMarkers?: RebootMarker[]
   gapThresholdMs: number | null
   onTimeRangeChange: (start: number, end: number) => void
   onResetTimeRange: () => void
@@ -74,6 +83,7 @@ export function BrushChart({
   series,
   totalTimeRange,
   visibleTimeRange,
+  rebootMarkers = [],
   gapThresholdMs,
   onTimeRangeChange,
   onResetTimeRange,
@@ -241,7 +251,15 @@ export function BrushChart({
           gapThresholdMs={gapThresholdMs}
           showTooltip
           chartTheme={chartTheme}
-        />
+        >
+          <RebootMarkers
+            markers={rebootMarkers}
+            xScale={dateScale}
+            xMax={xMax}
+            yMax={yMax}
+            stroke={chartTheme.brushAccent}
+          />
+        </AreaChart>
         <AreaChart
           hideBottomAxis
           hideLeftAxis
@@ -259,6 +277,14 @@ export function BrushChart({
           gapThresholdMs={gapThresholdMs}
           chartTheme={chartTheme}
         >
+          <RebootMarkers
+            markers={rebootMarkers}
+            xScale={brushDateScale}
+            xMax={xBrushMax}
+            yMax={yBrushMax}
+            stroke={chartTheme.brushAccent}
+            compact
+          />
           <PatternLines
             id={patternId}
             height={8}
@@ -289,6 +315,53 @@ export function BrushChart({
     </div>
   )
 }
+
+function RebootMarkers({
+  markers,
+  xScale,
+  xMax,
+  yMax,
+  stroke,
+  compact = false,
+}: {
+  markers: RebootMarker[]
+  xScale: (date: Date) => number | undefined
+  xMax: number
+  yMax: number
+  stroke: string
+  compact?: boolean
+}) {
+  if (markers.length === 0 || xMax <= 0 || yMax <= 0) {
+    return null
+  }
+
+  return (
+    <Group pointerEvents="none">
+      {markers.map((marker) => {
+        const x = xScale(marker.timestamp)
+        if (typeof x !== 'number' || !Number.isFinite(x) || x < 0 || x > xMax) {
+          return null
+        }
+        return (
+          <line
+            key={marker.logId ?? marker.timestamp.getTime()}
+            x1={x}
+            x2={x}
+            y1={0}
+            y2={yMax}
+            stroke={stroke}
+            strokeWidth={compact ? 1 : 1.5}
+            strokeDasharray={compact ? '3 3' : '4 3'}
+            opacity={compact ? 0.7 : 0.85}
+          >
+            <title>{`Reboot ${rebootTimestampFormatter.format(marker.timestamp)}`}</title>
+          </line>
+        )
+      })}
+    </Group>
+  )
+}
+
 // We need to manually offset the handles for them to be rendered at the right position
 function BrushHandle({
   x,

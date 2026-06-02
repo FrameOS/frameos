@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, RootModel, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, RootModel, field_validator, model_validator
 from typing import Any, Dict, List, Literal, Optional
 
 from .common import ImageTokenResponse
@@ -76,6 +76,7 @@ class FrameBase(BaseModel):
     background_color: Optional[str]
     debug: Optional[bool]
     last_log_at: Optional[datetime]
+    last_boot_at: Optional[datetime]
     log_to_file: Optional[str]
     assets_path: Optional[str]
     save_assets: Any
@@ -198,6 +199,7 @@ class FrameLogsResponse(BaseModel):
 
 class FrameMetricsResponse(BaseModel):
     metrics: List[Dict[str, Any]]
+    reboots: List[Dict[str, Any]] = Field(default_factory=list)
 
 class FrameImageLinkResponse(ImageTokenResponse):
     pass
