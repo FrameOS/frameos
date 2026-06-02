@@ -25,6 +25,7 @@ import { FrameDashboardLoadingSkeleton } from './FrameDashboardLoadingSkeleton'
 import { FrameDeployPlanDrawer } from './FrameDeployPlanDrawer'
 import { FrameSceneSidebarCard } from './FrameSceneSidebarCard'
 import { FrameSidebarPreview } from './FrameSidebarPreview'
+import { FrameMetricAlertIndicator } from './FrameMetricAlertIndicator'
 import { FrameActionsMenu } from './FrameActionsMenu'
 import { sceneWorkspaceLogic } from './sceneWorkspaceLogic'
 import { frameToolScrollKey, isMobileWorkspaceViewport, workspaceLogic, WorkspaceUtilityPanel } from './workspaceLogic'
@@ -353,21 +354,27 @@ function FrameSelector({
         ) : null}
       </div>
       <div className="flex items-center gap-2">
-        <select
-          value={frame.id}
-          onChange={(event) => navigateToFrame(parseInt(event.target.value, 10))}
-          className="frameos-form-control min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-blue-400"
-        >
-          {frameGroups.map((group) => (
-            <optgroup key={group.key} label={group.label}>
-              {group.frames.map((candidate) => (
-                <option key={candidate.id} value={candidate.id}>
-                  {candidate.name || frameHost(candidate)}
-                </option>
-              ))}
-            </optgroup>
-          ))}
-        </select>
+        <div className="relative min-w-0 flex-1">
+          <select
+            value={frame.id}
+            onChange={(event) => navigateToFrame(parseInt(event.target.value, 10))}
+            className="frameos-form-control min-w-0 w-full rounded-xl border border-slate-200 bg-white py-2 pl-3 pr-9 text-sm font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-blue-400"
+          >
+            {frameGroups.map((group) => (
+              <optgroup key={group.key} label={group.label}>
+                {group.frames.map((candidate) => (
+                  <option key={candidate.id} value={candidate.id}>
+                    {candidate.name || frameHost(candidate)}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+          <FrameMetricAlertIndicator
+            frame={frame}
+            className="pointer-events-none absolute right-7 top-1/2 -translate-y-1/2"
+          />
+        </div>
         <FrameActionsMenu
           frame={frame}
           className="frameos-form-control flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white !px-0 !py-0 text-slate-700 shadow-none transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"

@@ -92,6 +92,7 @@ suite "metrics loop":
     check sampleJson["diskUsage"]["filesystems"][0]["mount"].getStr() == "/"
     check not sampleJson["processMemory"].hasKey("pid")
     check abs(sampleJson["cpuUsage"].getFloat() - 12.5) < 0.0001
+    check sampleJson["cpuCount"].getInt() == 1
     check sampleJson["openFileDescriptors"].getInt() == 9
     check sampleJson["runtime"]["active"].getBool() == false
     check sampleJson["runtime"]["sequence"].getInt() == 0

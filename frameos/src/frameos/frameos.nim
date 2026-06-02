@@ -9,6 +9,7 @@ import frameos/runner
 import frameos/server
 import frameos/scheduler
 import frameos/scenes
+import frameos/timezone_updater
 import frameos/types
 import frameos/portal as netportal
 import frameos/tls_proxy
@@ -73,8 +74,8 @@ proc fatalStartupRetryAction*(behavior: ErrorBehaviorConfig, firstFailureAt, now
 
 proc renderFatalStartupError*(fatalError: FatalStartupError) =
   try:
-    initTimeZone()
     let frameConfig = loadConfig()
+    initTimeZone(frameConfig.assetsPath)
     var logger = newLogger(frameConfig)
     var frameOS = FrameOS(
       frameConfig: frameConfig,
@@ -116,8 +117,8 @@ proc describeFatalStartupError*(err: ref CatchableError): FatalStartupError =
         )
 
 proc newFrameOS*(): FrameOS =
-  initTimeZone()
   var frameConfig = loadConfig()
+  initTimeZone(frameConfig.assetsPath)
   var logger = newLogger(frameConfig)
   logger.log(%*{"event": "startup"})
   var metricsLogger = newMetricsLogger(frameConfig)
@@ -134,6 +135,7 @@ proc newFrameOS*(): FrameOS =
   result.runner = newRunner(frameConfig)
   result.server = newServer(result)
   startScheduler(result)
+  startTimezoneUpdater(result)
 
 proc start*(self: FrameOS) {.async.} =
   var message = %*{"event": "bootup", "config": {

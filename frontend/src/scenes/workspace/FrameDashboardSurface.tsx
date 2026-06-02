@@ -27,6 +27,7 @@ import { newFrameForm } from '../frames/newFrameForm'
 import { FrameActionsMenu } from './FrameActionsMenu'
 import { FrameLiveBadge } from './FrameLiveBadge'
 import { FrameChangeStatusIcon } from './FrameChangeStatusIcon'
+import { FrameMetricAlertIndicator } from './FrameMetricAlertIndicator'
 import { WorkspaceSceneDropDown } from './WorkspaceSceneDropDown'
 import {
   FRAMEOS_TEMPLATE_DRAG_TYPE,
@@ -275,6 +276,7 @@ function FrameDashboardHeader({ frame, archived }: { frame: FrameType; archived?
               >
                 {frame.name || frameHost(frame)}
               </h2>
+              <FrameMetricAlertIndicator frame={frame} className="h-5 w-5" />
               {archived ? (
                 <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-semibold text-slate-500">
                   Archived

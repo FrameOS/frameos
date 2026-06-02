@@ -46,6 +46,7 @@ import { FrameDashboardLoadingSkeleton } from './FrameDashboardLoadingSkeleton'
 import { FrameLiveBadge } from './FrameLiveBadge'
 import { framesHomeLogic } from './framesHomeLogic'
 import { FrameChangeStatusIcon } from './FrameChangeStatusIcon'
+import { FrameMetricAlertIndicator } from './FrameMetricAlertIndicator'
 import { sceneTileSummaryLabel } from './sceneTileLabels'
 import { WorkspaceSceneDropDown } from './WorkspaceSceneDropDown'
 
@@ -259,7 +260,10 @@ function FrameTreeRow({
         className="flex min-w-0 flex-1 items-center gap-3 rounded-lg text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
       >
         <span className="min-w-0 flex-1">
-          <span className={clsx('block truncate', !archived && 'text-base font-medium')}>{frameName}</span>
+          <span className="flex min-w-0 items-center gap-1.5">
+            <span className={clsx('block min-w-0 truncate', !archived && 'text-base font-medium')}>{frameName}</span>
+            <FrameMetricAlertIndicator frame={frame} />
+          </span>
           <span className="block truncate text-xs text-slate-400">{sidebarFrameActivityDescription(frame)}</span>
         </span>
         <SidebarStatusDots frame={frame} inactive={inactive} />
