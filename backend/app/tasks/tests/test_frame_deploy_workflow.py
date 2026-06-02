@@ -1046,6 +1046,54 @@ async def test_run_post_deploy_cleanup_remounts_read_only_root_around_cron_updat
 
 
 @pytest.mark.asyncio
+async def test_run_post_deploy_cleanup_uses_host_systemd_for_agent_rootfs_writes():
+    frame = SimpleNamespace(
+        id=9,
+        name="BuildrootAgentCleanupFrame",
+        agent={"agentEnabled": True, "agentRunCommands": True, "deployWithAgent": True},
+        reboot={"enabled": "true", "crontab": "0 4 * * *", "type": "frameos"},
+        last_successful_deploy_at=None,
+        last_successful_deploy={"frameos_version": "9.9.9"},
+        to_dict=lambda: {"id": 9, "name": "BuildrootAgentCleanupFrame"},
+    )
+    deployer = RecordingDeployer()
+    deployer.root_read_only = True
+    workflow = FrameDeployWorkflow(
+        db=None,
+        redis=None,
+        frame=frame,
+        deployer=deployer,
+        temp_dir="",
+        binary_builder=FakeBinaryBuilder(),
+    )
+
+    await workflow._run_post_deploy_cleanup(
+        post_deploy={
+            "boot_config_path": "/boot/config.txt",
+            "low_memory_masks_apt_daily": False,
+            "reboot_schedule": {
+                "enabled": True,
+                "crontab": "0 4 * * *",
+                "type": "frameos",
+                "command": "systemctl restart frameos.service",
+                "needs_update": True,
+                "needs_remove": False,
+            },
+            "bootconfig_changes": [],
+            "disable_userconfig": False,
+            "disable_caddy_service": False,
+            "final_action": "restart_frameos",
+        }
+    )
+
+    host_commands = [command for command in deployer.commands if "systemd-run --quiet --wait --pipe --collect" in command]
+    assert any("mount -o remount,rw /" in command for command in host_commands)
+    assert any("/etc/cron.d/frameos-reboot" in command for command in host_commands)
+    assert any("mount -o remount,ro /" in command for command in host_commands)
+    assert not any(command == "sudo mount -o remount,rw /" for command in deployer.commands)
+
+
+@pytest.mark.asyncio
 async def test_run_release_setup_uses_staged_release_and_marks_reboot_when_setup_requires_it():
     frame = SimpleNamespace(
         id=10,
