@@ -60,7 +60,7 @@ BUILDROOT_HOST_CXXFLAGS = "-O2 -pipe -std=gnu++17"
 BUILDROOT_HOST_CFLAGS = "-O2 -pipe"
 BUILDROOT_JLEVEL = int(os.environ.get("FRAMEOS_BUILDROOT_JLEVEL", "0"))
 BUILDROOT_BOOTSTRAP_SCRIPT_VERSION = "4"
-BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION = 9
+BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION = 10
 BUILDROOT_FRAMEOS_PARTITION_SIZE = os.environ.get("FRAMEOS_BUILDROOT_FRAMEOS_PARTITION_SIZE", "1G")
 BUILDROOT_ASSETS_PARTITION_SIZE = os.environ.get("FRAMEOS_BUILDROOT_ASSETS_PARTITION_SIZE", "512M")
 BUILDROOT_ARCHIVE_BASE_URL = os.environ.get("FRAMEOS_ARCHIVE_BASE_URL", "https://archive.frameos.net/")
@@ -137,6 +137,11 @@ BUILDROOT_IMAGE_STALE_AFTER_SECONDS = int(
 BUILDROOT_IMAGES_DIGESTS_PATH = os.environ.get("FRAMEOS_BUILDROOT_IMAGES_DIGESTS_PATH", str(REPO_ROOT / "buildroot-images.json"))
 BUILDROOT_BOOT_LOGO_SOURCE = REPO_ROOT / "backend" / "app" / "tasks" / "assets" / "frameos-boot-logo.png"
 BUILDROOT_BOOT_LOGO_WORK_PATH = "/work/frameos-boot-logo.png"
+BUILDROOT_DEFAULT_BOOT_CONFIG_LINES = (
+    # Keep a small firmware framebuffer reserve for standard HDMI output while
+    # returning the rest of the Pi Zero 2 W's 512MB RAM to Linux/userland.
+    "gpu_mem=32",
+)
 BACKEND_ROOT = REPO_ROOT / "backend"
 BUILDROOT_DOCKERFILE = BACKEND_ROOT / "tools" / "buildroot.Dockerfile"
 FRAMEOS_BUILD_TARGET = TargetMetadata(
@@ -340,7 +345,18 @@ def _apply_boot_config_lines(content: str, requested_lines: list[str]) -> tuple[
             lines = [existing for existing in lines if existing != removed_line]
             if len(lines) != before:
                 changed = True
-        elif not any(existing == line for existing in lines):
+        else:
+            if line.split("=", 1)[0] == "gpu_mem":
+                before = len(lines)
+                lines = [
+                    existing for existing in lines
+                    if existing == line or
+                    existing.split("=", 1)[0] not in {"gpu_mem", "gpu_mem_256", "gpu_mem_512", "gpu_mem_1024"}
+                ]
+                if len(lines) != before:
+                    changed = True
+            if any(existing == line for existing in lines):
+                continue
             commented_line = f"#{line}"
             before = len(lines)
             lines = [existing for existing in lines if existing != commented_line]
@@ -359,8 +375,8 @@ def _merge_boot_config_lines(content: str, requested_lines: list[str]) -> str:
 
 
 def _frame_boot_config_lines(frame: Frame) -> list[str]:
-    lines: list[str] = []
-    seen: set[str] = set()
+    lines: list[str] = list(BUILDROOT_DEFAULT_BOOT_CONFIG_LINES)
+    seen: set[str] = set(lines)
     for driver in drivers_for_frame(frame).values():
         for line in getattr(driver, "lines", []) or []:
             normalized = str(line).strip()
@@ -1449,9 +1465,75 @@ disk="$image_dir"/{shlex.quote(output_path.name)}
 offset={partitions[0]["start"]}
 target="${{disk}}@@${{offset}}"
 mlabel -i "$target" ::BOOT
+merge_config() {{
+  relpath="$1"
+  src="$boot_root/$relpath"
+  if [ ! -f "$src" ]; then
+    return 0
+  fi
+
+  existing="$(mktemp)"
+  merged="$(mktemp)"
+  cleanup_config_merge() {{
+    rm -f "$existing" "$merged"
+  }}
+  trap cleanup_config_merge RETURN
+
+  if ! mcopy -i "$target" "::${{relpath}}" "$existing" 2>/dev/null; then
+    : > "$existing"
+  fi
+
+  python3 - "$existing" "$src" "$merged" <<'PY'
+import sys
+
+existing_path, overlay_path, merged_path = sys.argv[1:4]
+gpu_keys = {{"gpu_mem", "gpu_mem_256", "gpu_mem_512", "gpu_mem_1024"}}
+
+with open(existing_path, encoding="utf-8") as handle:
+    lines = handle.read().splitlines()
+
+with open(overlay_path, encoding="utf-8") as handle:
+    requested = [line.strip() for line in handle.read().splitlines() if line.strip()]
+
+for line in requested:
+    if line.startswith("#"):
+        removed_line = line[1:]
+        lines = [existing for existing in lines if existing != removed_line]
+        continue
+
+    if line.split("=", 1)[0] == "gpu_mem":
+        lines = [
+            existing for existing in lines
+            if existing == line or existing.split("=", 1)[0] not in gpu_keys
+        ]
+    if line in lines:
+        continue
+    lines = [existing for existing in lines if existing != f"#{{line}}"]
+    lines.append(line)
+
+with open(merged_path, "w", encoding="utf-8") as handle:
+    handle.write("\\n".join(lines).strip() + "\\n")
+PY
+
+  dirname="$(dirname "$relpath")"
+  if [ "$dirname" != "." ]; then
+    mmd -i "$target" "::${{dirname}}" 2>/dev/null || true
+  fi
+  mcopy -i "$target" -o "$merged" "::${{relpath}}"
+  trap - RETURN
+  cleanup_config_merge
+}}
+
+merge_config "config.txt"
+merge_config "firmware/config.txt"
+
 if find "$boot_root" -mindepth 1 -print -quit | grep -q .; then
   cd "$boot_root"
-  find . -mindepth 1 -maxdepth 1 -exec mcopy -i "$target" -o -s {{}} :: \\;
+  find . -mindepth 1 -maxdepth 1 ! -name config.txt ! -name firmware -exec mcopy -i "$target" -o -s {{}} :: \\;
+  if [ -d firmware ]; then
+    mmd -i "$target" ::firmware 2>/dev/null || true
+    find firmware -mindepth 1 -maxdepth 1 ! -name config.txt -exec mcopy -i "$target" -o -s {{}} ::firmware/ \\;
+  fi
 fi
 """,
             encoding="utf-8",
@@ -1773,6 +1855,30 @@ if [ -f "$cmdline" ]; then
   fi
   printf '\\n' >> "$tmp_cmdline"
   mv "$tmp_cmdline" "$cmdline"
+fi
+
+boot_config="${{BINARIES_DIR:?BINARIES_DIR is required}}/rpi-firmware/config.txt"
+if [ -f "$boot_config" ]; then
+  python3 - "$boot_config" <<'PY'
+import sys
+
+path = sys.argv[1]
+gpu_keys = {{"gpu_mem", "gpu_mem_256", "gpu_mem_512", "gpu_mem_1024"}}
+
+with open(path, encoding="utf-8") as handle:
+    lines = handle.read().splitlines()
+
+line = "{BUILDROOT_DEFAULT_BOOT_CONFIG_LINES[0]}"
+lines = [
+    existing for existing in lines
+    if existing == line or existing.split("=", 1)[0] not in gpu_keys
+]
+if line not in lines:
+    lines.append(line)
+
+with open(path, "w", encoding="utf-8") as handle:
+    handle.write("\\n".join(lines).strip() + "\\n")
+PY
 fi
 
 files=()
