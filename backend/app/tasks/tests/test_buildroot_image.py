@@ -3,6 +3,7 @@ from __future__ import annotations
 import gzip
 import json
 import re
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -244,6 +245,7 @@ async def test_buildroot_docker_run_raises_nofile_limit(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_cached_base_composer_uses_container_visible_srcpaths(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
     temp_dir = tmp_path / "tmp"
     frameos_overlay = temp_dir / "overlay" / "srv" / "frameos"
     assets_overlay = temp_dir / "overlay" / "srv" / "assets"
@@ -257,7 +259,9 @@ async def test_cached_base_composer_uses_container_visible_srcpaths(tmp_path, mo
     (boot_overlay / "frameos-setup.json").write_text("{}", encoding="utf-8")
     (root_overlay / "etc").mkdir(parents=True)
     base_image = tmp_path / "base.img"
-    output_image = tmp_path / "output.img"
+    output_dir = Path("release-assets")
+    output_dir.mkdir()
+    output_image = output_dir / "output.img"
     base_image.write_bytes(b"base")
     captured: dict[str, str] = {}
     commands: list[str] = []
@@ -315,6 +319,8 @@ async def test_cached_base_composer_uses_container_visible_srcpaths(tmp_path, mo
     assert str(temp_dir) not in captured["config"]
     assert "bash /work/compose-partitions.sh" in captured["compose_command"]
     assert "bash /patch-boot.sh" in captured["patch_command"]
+    assert f"-v {tmp_path / 'release-assets'}:/image" in captured["patch_command"]
+    assert "-v release-assets:/image" not in captured["patch_command"]
     assert "frameos/frameos-buildroot:test" in captured["compose_command"]
     assert "frameos/frameos-buildroot:test" in captured["patch_command"]
     assert 'tar -C "$work_dir/roots" -cf - frameos assets | tar -C "$compose_roots" -xf -' in (

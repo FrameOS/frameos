@@ -1400,10 +1400,11 @@ genimage --rootpath "$work_dir/empty-root" --tmppath "$work_dir/tmp" --inputpath
         (compose_dir / "empty-root").mkdir(exist_ok=True)
 
         if image:
+            docker_work_dir = compose_dir.resolve()
             compose_cmd = " ".join(
                 [
                     "docker run --rm",
-                    f"-v {shlex.quote(str(compose_dir))}:/work",
+                    f"-v {shlex.quote(str(docker_work_dir))}:/work",
                     shlex.quote(image),
                     "bash /work/compose-partitions.sh",
                 ]
@@ -1538,12 +1539,15 @@ fi
         os.chmod(script_path, 0o755)
 
         if image:
+            docker_image_dir = output_path.parent.resolve()
+            docker_boot_root = boot_root.resolve()
+            docker_script_path = script_path.resolve()
             patch_cmd = " ".join(
                 [
                     "docker run --rm",
-                    f"-v {shlex.quote(str(output_path.parent))}:/image",
-                    f"-v {shlex.quote(str(boot_root))}:/boot-root",
-                    f"-v {shlex.quote(str(script_path))}:/patch-boot.sh",
+                    f"-v {shlex.quote(str(docker_image_dir))}:/image",
+                    f"-v {shlex.quote(str(docker_boot_root))}:/boot-root",
+                    f"-v {shlex.quote(str(docker_script_path))}:/patch-boot.sh",
                     shlex.quote(image),
                     "bash /patch-boot.sh",
                 ]
