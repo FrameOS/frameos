@@ -11,7 +11,7 @@ from app.database import Base
 
 from app.drivers.devices import device_dimensions
 from app.models.apps import get_app_configs
-from app.models.settings import DEFAULT_TIMEZONE_UPDATE_HOUR, DEFAULT_TIMEZONE_UPDATE_URL, get_settings_dict
+from app.models.settings import get_settings_dict
 from app.utils.timezone import frame_timezone, stored_timezone
 from app.utils.token import secure_token
 from app.utils.tls import generate_frame_tls_material, parse_certificate_not_valid_after
@@ -19,6 +19,8 @@ from app.utils.versions import get_versions
 from app.websockets import publish_message
 
 DEFAULT_MAX_HTTP_RESPONSE_BYTES = 64 * 1024 * 1024
+DEFAULT_TIMEZONE_UPDATE_URL = "https://tz.frameos.net/tzdata.json.gz"
+DEFAULT_TIMEZONE_UPDATE_HOUR = 3
 
 
 def _to_isoformat(value: Optional[datetime]) -> Optional[str]:
@@ -181,6 +183,28 @@ def normalize_error_behavior(error_behavior: Any) -> dict:
     }
 
 
+def normalize_timezone_update_hour(value: Any) -> int:
+    try:
+        hour = int(value if value is not None else DEFAULT_TIMEZONE_UPDATE_HOUR)
+    except (TypeError, ValueError):
+        return DEFAULT_TIMEZONE_UPDATE_HOUR
+    return hour if 0 <= hour <= 23 else DEFAULT_TIMEZONE_UPDATE_HOUR
+
+
+def normalize_timezone_update_url(value: Any) -> str:
+    url = str(value or DEFAULT_TIMEZONE_UPDATE_URL).strip()
+    return url or DEFAULT_TIMEZONE_UPDATE_URL
+
+
+def normalize_timezone_settings(timezone_settings: Any) -> dict:
+    config = timezone_settings if isinstance(timezone_settings, dict) else {}
+
+    return {
+        "enabled": bool(config.get("enabled", True)),
+        "hour": normalize_timezone_update_hour(config.get("hour")),
+        "url": normalize_timezone_update_url(config.get("url")),
+    }
+
 
 # NB! Update frontend/src/types.tsx if you change this
 class Frame(Base):
@@ -215,6 +239,7 @@ class Frame(Base):
     device_config = mapped_column(JSON, nullable=True)
     color = mapped_column(String(256), nullable=True)
     timezone = mapped_column(String(128), nullable=True)
+    timezone_settings = mapped_column(JSON, nullable=True)
     interval = mapped_column(Double, default=300)
     metrics_interval = mapped_column(Double, default=60)
     max_http_response_bytes = mapped_column(Integer, default=DEFAULT_MAX_HTTP_RESPONSE_BYTES)
@@ -278,6 +303,7 @@ class Frame(Base):
             'device_config': self.device_config,
             'color': self.color,
             'timezone': self.timezone,
+            'timezone_settings': normalize_timezone_settings(self.timezone_settings),
             'interval': self.interval,
             'metrics_interval': self.metrics_interval,
             'max_http_response_bytes': self.max_http_response_bytes or DEFAULT_MAX_HTTP_RESPONSE_BYTES,
@@ -387,6 +413,11 @@ async def new_frame(
         rotate=0,
         device=device or "web_only",
         timezone=None,
+        timezone_settings={
+            "enabled": True,
+            "hour": DEFAULT_TIMEZONE_UPDATE_HOUR,
+            "url": DEFAULT_TIMEZONE_UPDATE_URL,
+        },
         log_to_file=None, # spare the SD card from load
         assets_path='/srv/assets',
         save_assets=True,
@@ -476,15 +507,7 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
     defaults = all_settings.get("defaults") or {}
     default_timezone = defaults.get("timezone")
     explicit_timezone = stored_timezone(frame.timezone)
-    try:
-        timezone_update_hour = int(
-            defaults.get("timezoneUpdateHour", DEFAULT_TIMEZONE_UPDATE_HOUR) or DEFAULT_TIMEZONE_UPDATE_HOUR
-        )
-    except (TypeError, ValueError):
-        timezone_update_hour = DEFAULT_TIMEZONE_UPDATE_HOUR
-    if timezone_update_hour < 0 or timezone_update_hour > 23:
-        timezone_update_hour = DEFAULT_TIMEZONE_UPDATE_HOUR
-    timezone_update_url = str(defaults.get("timezoneUpdateUrl") or DEFAULT_TIMEZONE_UPDATE_URL).strip()
+    timezone_settings = normalize_timezone_settings(frame.timezone_settings)
     fallback_dimensions = device_dimensions(frame.device)
     frame_json: dict = {
         **({"frameosVersion": frameos_version} if isinstance(frameos_version, str) and frameos_version else {}),
@@ -572,9 +595,9 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
             "showErrorRetrySeconds": error_behavior["show_error_retry_seconds"],
         },
         "timeZoneUpdates": {
-            "enabled": bool(defaults.get("timezoneUpdateEnabled", True)),
-            "hour": timezone_update_hour,
-            "url": timezone_update_url,
+            "enabled": timezone_settings["enabled"],
+            "hour": timezone_settings["hour"],
+            "url": timezone_settings["url"],
         },
     }
     if explicit_timezone:

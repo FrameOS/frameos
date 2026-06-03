@@ -7,7 +7,13 @@ import { Form, Group } from 'kea-forms'
 import { TextInput } from '../../../../components/TextInput'
 import { Select } from '../../../../components/Select'
 import { frameAdminUrl, frameControlUrl, frameImageUrl, frameRootUrl, frameUrl } from '../../../../decorators/frame'
-import { DEFAULT_FRAME_ERROR_BEHAVIOR, frameLogic, normalizeFrameErrorBehavior } from '../../frameLogic'
+import {
+  DEFAULT_FRAME_ERROR_BEHAVIOR,
+  DEFAULT_TIMEZONE_UPDATE_HOUR,
+  DEFAULT_TIMEZONE_UPDATE_URL,
+  frameLogic,
+  normalizeFrameErrorBehavior,
+} from '../../frameLogic'
 import { downloadJson } from '../../../../utils/downloadJson'
 import { Field } from '../../../../components/Field'
 import { devices, spectraPalettes, withCustomPalette, buildrootPlatforms, modes } from '../../../../devices'
@@ -1389,6 +1395,29 @@ export function FrameSettings({
           <Field name="metrics_interval" label="Metrics reporting interval in seconds, 0 to disable">
             <TextInput name="metrics_interval" placeholder="60" />
           </Field>
+          <Group name="timezone_settings">
+            <Field
+              name="enabled"
+              label="Update timezone data"
+              tooltip="Download updated timezone rules on this frame so daylight saving changes stay current."
+            >
+              <Switch fullWidth />
+            </Field>
+            {frameForm.timezone_settings?.enabled ? (
+              <>
+                <Field
+                  name="hour"
+                  label="Timezone update hour"
+                  tooltip="Hour of day on the frame when timezone data updates run."
+                >
+                  <NumberTextInput min={0} max={23} placeholder={String(DEFAULT_TIMEZONE_UPDATE_HOUR)} />
+                </Field>
+                <Field name="url" label="Timezone update URL">
+                  <TextInput placeholder={DEFAULT_TIMEZONE_UPDATE_URL} />
+                </Field>
+              </>
+            ) : null}
+          </Group>
           <Field
             name="max_http_response_bytes"
             label="Maximum HTTP response size for apps"

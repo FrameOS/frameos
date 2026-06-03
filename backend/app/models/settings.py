@@ -6,9 +6,6 @@ from app.database import Base
 from sqlalchemy.dialects.sqlite import JSON
 from app.utils.timezone import guess_system_timezone
 
-DEFAULT_TIMEZONE_UPDATE_URL = "https://tz.frameos.net/tzdata.json.gz"
-DEFAULT_TIMEZONE_UPDATE_HOUR = 3
-
 
 class Settings(Base):
     __tablename__ = 'settings'
@@ -31,9 +28,6 @@ def default_settings() -> dict:
     return {
         "defaults": {
             "timezone": guess_system_timezone(),
-            "timezoneUpdateEnabled": True,
-            "timezoneUpdateHour": DEFAULT_TIMEZONE_UPDATE_HOUR,
-            "timezoneUpdateUrl": DEFAULT_TIMEZONE_UPDATE_URL,
             "wifiSSID": "",
             "wifiPassword": "",
         },

@@ -1,6 +1,5 @@
 import pytest
 from app.models.settings import Settings, get_settings_dict
-from app.models.settings import DEFAULT_TIMEZONE_UPDATE_HOUR, DEFAULT_TIMEZONE_UPDATE_URL
 
 @pytest.mark.asyncio
 async def test_create_setting(db, default_project):
@@ -45,9 +44,6 @@ async def test_get_settings_dict_merges_defaults(db, default_project):
     settings_map = get_settings_dict(db, project_id=default_project.id)
     assert settings_map["defaults"] == {
         "timezone": "Europe/Brussels",
-        "timezoneUpdateEnabled": True,
-        "timezoneUpdateHour": DEFAULT_TIMEZONE_UPDATE_HOUR,
-        "timezoneUpdateUrl": DEFAULT_TIMEZONE_UPDATE_URL,
         "wifiSSID": "FrameOS",
         "wifiPassword": "",
     }

@@ -52,6 +52,11 @@ export interface FrameType {
   height?: number
   device?: string
   timezone?: string
+  timezone_settings?: {
+    enabled?: boolean
+    hour?: number
+    url?: string
+  }
   device_config?: {
     vcom?: number
     uploadUrl?: string
@@ -632,9 +637,6 @@ export type PanelWithMetadata = {
 export interface FrameOSSettings {
   defaults?: {
     timezone?: string
-    timezoneUpdateEnabled?: boolean
-    timezoneUpdateHour?: number
-    timezoneUpdateUrl?: string
     wifiSSID?: string
     wifiPassword?: string
   }

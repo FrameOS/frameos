@@ -290,18 +290,12 @@ async def test_get_frame_json_preserves_unknown_explicit_timezone_for_rpios(_moc
 @patch("app.models.frame.publish_message", new_callable=AsyncMock)
 async def test_get_frame_json_includes_timezone_update_settings(_mock_publish, db, redis):
     frame = await new_frame(db, redis, "FrameJson", "host", "server_host.com")
-    db.add(
-        Settings(
-            project_id=frame.project_id,
-            key="defaults",
-            value={
-                "timezoneUpdateEnabled": False,
-                "timezoneUpdateHour": 5,
-                "timezoneUpdateUrl": "https://example.com/tzdata.json.gz",
-            },
-        )
-    )
     db.commit()
+    frame.timezone_settings = {
+        "enabled": False,
+        "hour": 5,
+        "url": "https://example.com/tzdata.json.gz",
+    }
 
     data = get_frame_json(db, frame)
 

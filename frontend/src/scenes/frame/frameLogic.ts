@@ -43,6 +43,9 @@ import { urls } from '../../urls'
 
 export type { ChangeDetail, DeployPlanResponse, DeployRecommendation, SummaryItem } from './frameDeployUtils'
 
+export const DEFAULT_TIMEZONE_UPDATE_URL = 'https://tz.frameos.net/tzdata.json.gz'
+export const DEFAULT_TIMEZONE_UPDATE_HOUR = 3
+
 interface DeployPlanApiResponse {
   plan: DeployPlanResponse
 }
@@ -82,6 +85,7 @@ const FRAME_KEYS: (keyof FrameType)[] = [
   'device',
   'device_config',
   'timezone',
+  'timezone_settings',
   'interval',
   'metrics_interval',
   'max_http_response_bytes',
@@ -147,6 +151,7 @@ const FRAME_KEY_LABELS: Partial<Record<keyof FrameType, string>> = {
   device: 'Device',
   device_config: 'Device config',
   timezone: 'Timezone',
+  timezone_settings: 'Timezone data updates',
   interval: 'Refresh interval',
   metrics_interval: 'Metrics interval',
   max_http_response_bytes: 'HTTP response size limit',
@@ -197,6 +202,7 @@ const DEPLOYMENT_SUMMARY_KEYS: (keyof FrameType)[] = [
   'device',
   'device_config',
   'timezone',
+  'timezone_settings',
   'interval',
   'metrics_interval',
   'max_http_response_bytes',
@@ -225,6 +231,21 @@ export const DEFAULT_FRAME_ERROR_BEHAVIOR: Required<FrameErrorBehavior> = {
 function positiveNumber(value: unknown, fallback: number): number {
   const number = Number(value)
   return Number.isFinite(number) && number > 0 ? number : fallback
+}
+
+function normalizeTimezoneUpdateHour(value: unknown): number {
+  const hour = Number(value)
+  return Number.isInteger(hour) && hour >= 0 && hour <= 23 ? hour : DEFAULT_TIMEZONE_UPDATE_HOUR
+}
+
+function normalizeTimezoneSettings(
+  value: FrameType['timezone_settings'] | null | undefined
+): NonNullable<FrameType['timezone_settings']> {
+  return {
+    enabled: value?.enabled ?? true,
+    hour: normalizeTimezoneUpdateHour(value?.hour),
+    url: value?.url || DEFAULT_TIMEZONE_UPDATE_URL,
+  }
 }
 
 export function normalizeFrameErrorBehavior(errorBehavior?: Partial<FrameErrorBehavior> | null): FrameErrorBehavior {
@@ -851,6 +872,7 @@ function sanitizeFrame(frame: Partial<FrameType>): Partial<FrameType> {
   return {
     ...frame,
     image_engine: frame.image_engine ?? '',
+    timezone_settings: normalizeTimezoneSettings(frame.timezone_settings),
     assets_path: assetsPath,
     rpios,
     frame_admin_auth: {

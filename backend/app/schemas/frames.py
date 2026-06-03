@@ -36,6 +36,19 @@ class FrameErrorBehavior(BaseModel):
         return value
 
 
+class FrameTimezoneSettings(BaseModel):
+    enabled: Optional[bool] = None
+    hour: Optional[int] = None
+    url: Optional[str] = None
+
+    @field_validator('hour')
+    @classmethod
+    def validate_hour(cls, value: Optional[int]) -> Optional[int]:
+        if value is not None and (value < 0 or value > 23):
+            raise ValueError('Timezone update hour must be between 0 and 23')
+        return value
+
+
 
 class FrameBase(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -66,6 +79,7 @@ class FrameBase(BaseModel):
     device_config: Optional[Dict[str, Any]] = None
     color: Optional[str]
     timezone: Optional[str] = None
+    timezone_settings: Optional[FrameTimezoneSettings] = None
     interval: float
     metrics_interval: float
     max_http_response_bytes: Optional[int] = None
@@ -141,6 +155,7 @@ class FrameUpdateRequest(BaseModel):
     flip: Optional[str] = None
     color: Optional[str] = None
     timezone: Optional[str] = None
+    timezone_settings: Optional[FrameTimezoneSettings] = None
     interval: Optional[float] = None
     metrics_interval: Optional[float] = None
     max_http_response_bytes: Optional[int] = None

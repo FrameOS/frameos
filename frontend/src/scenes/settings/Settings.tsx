@@ -345,27 +345,6 @@ export function Settings() {
                       <Select options={timezoneOptions} />
                     </Field>
                     <Field
-                      name="timezoneUpdateEnabled"
-                      label="Update timezone data"
-                      tooltip="Download updated timezone rules on frames so daylight saving changes stay current."
-                    >
-                      <Switch fullWidth />
-                    </Field>
-                    {settings?.defaults?.timezoneUpdateEnabled ? (
-                      <>
-                        <Field
-                          name="timezoneUpdateHour"
-                          label="Timezone update hour"
-                          tooltip="Hour of day on the frame when timezone data updates run."
-                        >
-                          <NumberTextInput min={0} max={23} placeholder="3" />
-                        </Field>
-                        <Field name="timezoneUpdateUrl" label="Timezone update URL">
-                          <TextInput placeholder="https://tz.frameos.net/tzdata.json.gz" />
-                        </Field>
-                      </>
-                    ) : null}
-                    <Field
                       name="wifiSSID"
                       label="Default WiFi network"
                       tooltip="Prefilled when adding Buildroot SD card frames."
