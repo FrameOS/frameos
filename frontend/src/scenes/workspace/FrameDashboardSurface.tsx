@@ -22,7 +22,6 @@ import type { FrameScene, FrameType, ScheduledEvent } from '../../types'
 import { frameLogic } from '../frame/frameLogic'
 import { HeaderMetrics } from '../frame/panels/Metrics/HeaderMetrics'
 import { CompiledSceneTag } from '../frame/panels/Scenes/CompiledSceneTag'
-import { controlLogic } from '../frame/panels/Scenes/controlLogic'
 import { templatesLogic } from '../frame/panels/Templates/templatesLogic'
 import { newFrameForm } from '../frames/newFrameForm'
 import { FrameActionsMenu } from './FrameActionsMenu'
@@ -188,10 +187,9 @@ function scheduleDatePrefix(date: Date, now = new Date()): string {
 
 function FramePreviewPanel({ frame, scenes }: { frame: FrameType; scenes: FrameScene[] }): JSX.Element {
   const { sceneControlSelection } = useValues(workspaceLogic)
-  const { sceneId: currentSceneId } = useValues(controlLogic({ frameId: frame.id }))
   const { openLiveSceneControl } = useActions(workspaceLogic)
   const previewSizing = framePreviewSizing(frame)
-  const activeSceneId = currentSceneId || frame.active_scene_id || null
+  const activeSceneId = frame.active_scene_id || null
   const liveSceneControlId = activeSceneId || livePreviewSceneId
   const activeScene = scenes.find((scene) => sceneIsActive(scene, activeSceneId))
   const previewSelected =

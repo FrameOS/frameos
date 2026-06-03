@@ -233,9 +233,12 @@ function positiveNumber(value: unknown, fallback: number): number {
   return Number.isFinite(number) && number > 0 ? number : fallback
 }
 
-function normalizeTimezoneUpdateHour(value: unknown): number {
+function optionalTimezoneUpdateHour(value: unknown): number | undefined {
+  if (value === undefined || value === null || value === '') {
+    return undefined
+  }
   const hour = Number(value)
-  return Number.isInteger(hour) && hour >= 0 && hour <= 23 ? hour : DEFAULT_TIMEZONE_UPDATE_HOUR
+  return Number.isInteger(hour) && hour >= 0 && hour <= 23 ? hour : undefined
 }
 
 function normalizeTimezoneUpdater(
@@ -244,13 +247,11 @@ function normalizeTimezoneUpdater(
   const settings: NonNullable<FrameType['timezone_updater']> = {
     enabled: value?.enabled ?? true,
   }
-  if (value?.hour !== undefined) {
-    const hour = normalizeTimezoneUpdateHour(value.hour)
-    if (hour !== DEFAULT_TIMEZONE_UPDATE_HOUR) {
-      settings.hour = hour
-    }
+  const hour = optionalTimezoneUpdateHour(value?.hour)
+  if (hour !== undefined) {
+    settings.hour = hour
   }
-  if (value?.url && value.url !== DEFAULT_TIMEZONE_UPDATE_URL) {
+  if (value?.url) {
     settings.url = value.url
   }
   return settings

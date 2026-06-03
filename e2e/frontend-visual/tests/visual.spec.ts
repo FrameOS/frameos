@@ -29,8 +29,6 @@ for (const visualCase of visualCases) {
             `${visualCase.id}--${variant.id}--${theme}--${viewport.name}.png`,
             {
               fullPage: variant.fullPage ?? visualCase.fullPage ?? false,
-              maxDiffPixels: variant.maxDiffPixels ?? visualCase.maxDiffPixels,
-              maxDiffPixelRatio: variant.maxDiffPixelRatio ?? visualCase.maxDiffPixelRatio,
             }
           )
           const errors = [...new Set(readErrors())]

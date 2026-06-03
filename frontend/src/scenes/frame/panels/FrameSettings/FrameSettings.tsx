@@ -40,6 +40,7 @@ import { logsLogic } from '../Logs/logsLogic'
 import { Tag } from '../../../../components/Tag'
 import { getCertificateValidityInfo, getFrameCertificateStatus } from '../../../../utils/certificates'
 import { timezoneOptions } from '../../../../decorators/timezones'
+import { Tooltip } from '../../../../components/Tooltip'
 
 export interface FrameSettingsProps {
   className?: string
@@ -204,6 +205,37 @@ export function FrameSettings({
   const errorBehavior = normalizeFrameErrorBehavior(frameForm.error_behavior ?? frame.error_behavior)
   const isBuildrootMode = mode === 'buildroot'
   const selectedTimezone = frameForm.timezone ?? frame.timezone ?? ''
+  const timezoneUpdater = frameForm.timezone_updater ?? {}
+  const timezoneUpdateHourValue =
+    typeof timezoneUpdater.hour === 'number' && Number.isInteger(timezoneUpdater.hour) ? String(timezoneUpdater.hour) : ''
+  const timezoneUpdateUrlValue = timezoneUpdater.url ?? ''
+  const setTimezoneUpdaterValue = (patch: Partial<NonNullable<FrameType['timezone_updater']>>) => {
+    const next = {
+      ...timezoneUpdater,
+      ...patch,
+    }
+    if (next.hour === undefined) {
+      delete next.hour
+    }
+    if (!next.url) {
+      delete next.url
+    }
+    setFrameFormValues({ timezone_updater: next })
+  }
+  const setTimezoneUpdateHour = (rawValue: string) => {
+    const value = rawValue.trim()
+    if (!value) {
+      setTimezoneUpdaterValue({ hour: undefined })
+      return
+    }
+    if (!/^\d+$/.test(value)) {
+      return
+    }
+    const hour = Number(value)
+    if (hour >= 0 && hour <= 23) {
+      setTimezoneUpdaterValue({ hour })
+    }
+  }
   const baseTimezoneOptions =
     mode === 'rpios' ? [{ value: '', label: 'Detect from frame' }, ...timezoneOptions] : timezoneOptions
   const frameTimezoneOptions =
@@ -1405,24 +1437,39 @@ export function FrameSettings({
                 const enabled = value ?? true
                 return (
                   <div className="space-y-3">
-                    <div className="flex items-center gap-3">
+                    <div className="flex w-full items-start gap-3">
                       <Switch value={enabled} onChange={onChange} />
                       {enabled ? (
-                        <details>
+                        <details className="min-w-0 flex-1">
                           <summary className="frameos-link cursor-pointer list-none text-sm font-semibold">
                             advanced
                           </summary>
-                          <div className="mt-3 space-y-2">
-                            <Field
-                              name="hour"
-                              label="Timezone update hour"
-                              tooltip="Hour of day on the frame when timezone data updates run."
-                            >
-                              <NumberTextInput min={0} max={23} placeholder={String(DEFAULT_TIMEZONE_UPDATE_HOUR)} />
-                            </Field>
-                            <Field name="url" label="Timezone update URL">
-                              <TextInput placeholder={DEFAULT_TIMEZONE_UPDATE_URL} />
-                            </Field>
+                          <div className="mt-3 w-full space-y-2">
+                            <div className="space-y-1 @md:flex @md:gap-2">
+                              <Label className="@md:w-1/3">
+                                Timezone update hour
+                                <Tooltip title="Hour of day on the frame when timezone data updates run." />
+                              </Label>
+                              <div className="w-full">
+                                <TextInput
+                                  inputMode="numeric"
+                                  pattern="[0-9]*"
+                                  placeholder={String(DEFAULT_TIMEZONE_UPDATE_HOUR)}
+                                  value={timezoneUpdateHourValue}
+                                  onChange={setTimezoneUpdateHour}
+                                />
+                              </div>
+                            </div>
+                            <div className="space-y-1 @md:flex @md:gap-2">
+                              <Label className="@md:w-1/3">Timezone update URL</Label>
+                              <div className="w-full">
+                                <TextInput
+                                  placeholder={DEFAULT_TIMEZONE_UPDATE_URL}
+                                  value={timezoneUpdateUrlValue}
+                                  onChange={(url) => setTimezoneUpdaterValue({ url: url || undefined })}
+                                />
+                              </div>
+                            </div>
                           </div>
                         </details>
                       ) : null}

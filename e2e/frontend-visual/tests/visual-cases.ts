@@ -14,8 +14,6 @@ export interface VisualVariant {
   label?: string
   prepare?: (page: Page) => Promise<void>
   fullPage?: boolean
-  maxDiffPixels?: number
-  maxDiffPixelRatio?: number
 }
 
 export interface VisualCase {
@@ -26,8 +24,6 @@ export interface VisualCase {
   themes?: VisualTheme[]
   viewports?: VisualViewportName[]
   fullPage?: boolean
-  maxDiffPixels?: number
-  maxDiffPixelRatio?: number
   ready?: (page: Page) => Promise<void>
   variants?: VisualVariant[]
 }
@@ -164,8 +160,6 @@ export const visualCases: VisualCase[] = [
     title: 'Login',
     path: '/login',
     authenticated: false,
-    maxDiffPixels: 2000,
-    maxDiffPixelRatio: 0.005,
     variants: [{ id: 'default' }],
   },
   {
@@ -173,8 +167,6 @@ export const visualCases: VisualCase[] = [
     title: 'Signup',
     path: '/signup',
     authenticated: false,
-    maxDiffPixels: 2000,
-    maxDiffPixelRatio: 0.005,
     variants: [{ id: 'default' }],
   },
   {
