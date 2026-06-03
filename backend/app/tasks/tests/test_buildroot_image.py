@@ -10,6 +10,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.models.assets import Assets
+from app.tasks import buildroot_image as buildroot_image_module
 from app.tasks.buildroot_image import (
     BUILDROOT_DEFAULT_BOOT_CONFIG_LINES,
     BUILDROOT_EXPAND_SD_CARD_SCRIPT_PATH,
@@ -236,6 +238,68 @@ def test_buildroot_expand_sd_card_service_runs_before_local_mounts():
     assert 'resize2fs "$root_dev"' not in script
     assert 'sfdisk --no-reread --force "$disk"' in script
     assert 'partx -u "$disk"' in script
+
+
+def test_buildroot_sd_image_stages_local_fonts_into_assets_partition(tmp_path, monkeypatch):
+    local_fonts = tmp_path / "local-fonts"
+    local_fonts.mkdir()
+    (local_fonts / "FrameOSFont.ttf").write_bytes(b"font")
+    (local_fonts / "README.md").write_text("fonts\n", encoding="utf-8")
+    (local_fonts / "ignore.otf").write_bytes(b"ignored")
+    monkeypatch.setattr(buildroot_image_module, "BUILDROOT_LOCAL_FONTS_DIR", local_fonts)
+
+    frame = SimpleNamespace(id=1, project_id=1, upload_fonts="")
+    builder = BuildrootImageBuilder(db=None, redis=None, frame=frame)
+    assets_dir = tmp_path / "overlay" / "srv" / "assets"
+
+    builder._stage_font_assets(assets_dir)
+
+    assert (assets_dir / "fonts" / "FrameOSFont.ttf").read_bytes() == b"font"
+    assert (assets_dir / "fonts" / "README.md").read_text(encoding="utf-8") == "fonts\n"
+    assert not (assets_dir / "fonts" / "ignore.otf").exists()
+
+
+def test_buildroot_sd_image_stages_custom_font_assets(tmp_path, monkeypatch):
+    local_fonts = tmp_path / "local-fonts"
+    local_fonts.mkdir()
+    monkeypatch.setattr(buildroot_image_module, "BUILDROOT_LOCAL_FONTS_DIR", local_fonts)
+
+    custom_font = Assets(project_id=4, path="fonts/custom/Nice.ttf", data=b"custom-font")
+
+    class FakeQuery:
+        def filter(self, *_args):
+            return self
+
+        def all(self):
+            return [custom_font]
+
+    class FakeDb:
+        def query(self, model):
+            assert model is Assets
+            return FakeQuery()
+
+    frame = SimpleNamespace(id=1, project_id=4, upload_fonts="")
+    builder = BuildrootImageBuilder(db=FakeDb(), redis=None, frame=frame)
+    assets_dir = tmp_path / "overlay" / "srv" / "assets"
+
+    builder._stage_font_assets(assets_dir)
+
+    assert (assets_dir / "fonts" / "custom" / "Nice.ttf").read_bytes() == b"custom-font"
+
+
+def test_buildroot_sd_image_respects_upload_fonts_none(tmp_path, monkeypatch):
+    local_fonts = tmp_path / "local-fonts"
+    local_fonts.mkdir()
+    (local_fonts / "FrameOSFont.ttf").write_bytes(b"font")
+    monkeypatch.setattr(buildroot_image_module, "BUILDROOT_LOCAL_FONTS_DIR", local_fonts)
+
+    frame = SimpleNamespace(id=1, project_id=1, upload_fonts="none")
+    builder = BuildrootImageBuilder(db=None, redis=None, frame=frame)
+    assets_dir = tmp_path / "overlay" / "srv" / "assets"
+
+    builder._stage_font_assets(assets_dir)
+
+    assert not (assets_dir / "fonts").exists()
 
 
 def test_base_bootstrap_overlay_installs_expand_sd_card_service(tmp_path, monkeypatch):

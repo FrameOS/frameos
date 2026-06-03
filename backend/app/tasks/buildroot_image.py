@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 
 from app.drivers.devices import drivers_for_frame
 from app.codegen.drivers_nim import frame_compilation_mode
+from app.models.assets import Assets
 from app.models.frame import (
     Frame,
     get_frame_json,
@@ -60,9 +61,11 @@ BUILDROOT_HOST_CXXFLAGS = "-O2 -pipe -std=gnu++17"
 BUILDROOT_HOST_CFLAGS = "-O2 -pipe"
 BUILDROOT_JLEVEL = int(os.environ.get("FRAMEOS_BUILDROOT_JLEVEL", "0"))
 BUILDROOT_BOOTSTRAP_SCRIPT_VERSION = "5"
-BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION = 11
+BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION = 12
 BUILDROOT_FRAMEOS_PARTITION_SIZE = os.environ.get("FRAMEOS_BUILDROOT_FRAMEOS_PARTITION_SIZE", "1G")
 BUILDROOT_ASSETS_PARTITION_SIZE = os.environ.get("FRAMEOS_BUILDROOT_ASSETS_PARTITION_SIZE", "512M")
+BUILDROOT_LOCAL_FONTS_DIR = REPO_ROOT / "frameos" / "assets" / "copied" / "fonts"
+BUILDROOT_LOCAL_FONT_EXTENSIONS = {".ttf", ".txt", ".md"}
 BUILDROOT_ARCHIVE_BASE_URL = os.environ.get("FRAMEOS_ARCHIVE_BASE_URL", "https://archive.frameos.net/")
 BUILDROOT_BASE_MANIFEST_PATH = os.environ.get("FRAMEOS_BUILDROOT_BASE_MANIFEST_PATH", "buildroot-images/manifest.json")
 BUILDROOT_BASE_MANIFEST_FILE = os.environ.get(
@@ -917,6 +920,7 @@ class BuildrootImageBuilder:
             overlay_dir / "srv" / "frameos" / "agent" / "current",
         )
         self._relative_symlink("/srv/frameos/state", release_dir / "state")
+        self._stage_font_assets(assets_dir)
 
         setup_reset_enabled = setup_json_reset_enabled(self.frame)
         if setup_reset_enabled:
@@ -942,6 +946,34 @@ class BuildrootImageBuilder:
         self._write_boot_wifi_connection(boot_overlay_dir / Path(BOOT_WIFI_CONNECTION_FILE).name)
         self._write_boot_config(overlay_dir, _frame_boot_config_lines(bootstrap_frame))
         self._write_boot_authorized_keys(boot_overlay_dir / Path(BOOT_AUTHORIZED_KEYS_FILE).name)
+
+    def _stage_font_assets(self, assets_dir: Path) -> None:
+        if getattr(self.frame, "upload_fonts", "") == "none":
+            return
+
+        fonts_dir = assets_dir / "fonts"
+        if BUILDROOT_LOCAL_FONTS_DIR.is_dir():
+            for source_path in BUILDROOT_LOCAL_FONTS_DIR.rglob("*"):
+                if not source_path.is_file() or source_path.suffix not in BUILDROOT_LOCAL_FONT_EXTENSIONS:
+                    continue
+                target_path = fonts_dir / source_path.relative_to(BUILDROOT_LOCAL_FONTS_DIR)
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source_path, target_path)
+
+        if self.db is None or not hasattr(self.db, "query") or not hasattr(self.frame, "project_id"):
+            return
+
+        custom_fonts = self.db.query(Assets).filter(
+            Assets.project_id == self.frame.project_id,
+            Assets.path.like("fonts/%.ttf"),
+        ).all()
+        for font in custom_fonts:
+            relative_path = Path(str(font.path).removeprefix("fonts/"))
+            if relative_path.is_absolute() or any(part in ("", ".", "..") for part in relative_path.parts):
+                continue
+            target_path = fonts_dir / relative_path
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            target_path.write_bytes(font.data or b"")
 
     @staticmethod
     def _copy_libraries(paths: list[str], destination: Path) -> None:
