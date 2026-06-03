@@ -448,10 +448,12 @@ html[data-frameos-theme='dark'] .frameos-spinner,
 .frameos-auth-screen .focus-visible\:ring-blue-400:focus-visible,
 .frameos-app-shell .focus\:ring-blue-400:focus,
 .frameos-auth-screen .focus\:ring-blue-400:focus,
-.frameos-app-shell .focus-within\:ring-blue-400:focus-within,
-.frameos-auth-screen .focus-within\:ring-blue-400:focus-within,
 .frameos-app-shell .focus\:ring-blue-500:focus,
 .frameos-auth-screen .focus\:ring-blue-500:focus {
+  --tw-ring-color: var(--frameos-primary-ring);
+}
+
+.frameos-app-shell .frameos-selected-surface.focus-within\:ring-blue-400:focus-within {
   --tw-ring-color: rgb(37 99 235 / 0.9);
 }
 

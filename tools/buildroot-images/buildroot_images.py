@@ -231,6 +231,7 @@ class ReleaseImageFrame:
     device_config: dict[str, Any] = field(default_factory=dict)
     color: str | None = None
     timezone: str = "UTC"
+    timezone_settings: dict[str, Any] | None = None
     interval: float = 60.0
     metrics_interval: float = 60.0
     max_http_response_bytes: int = DEFAULT_MAX_HTTP_RESPONSE_BYTES
