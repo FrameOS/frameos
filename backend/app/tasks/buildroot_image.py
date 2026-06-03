@@ -2068,12 +2068,14 @@ mkdir -p "$target_dir/etc/systemd/system/multi-user.target.wants" "$target_dir/e
 if [ -d "$target_dir/lib/firmware/brcm" ]; then
   cd "$target_dir/lib/firmware/brcm"
   for base in brcmfmac43436-sdio brcmfmac43436s-sdio brcmfmac43430-sdio; do
-    if [ -e "${base}.bin" ] && [ ! -e "brcmfmac43436-sdio.raspberrypi,model-zero-2-w.bin" ]; then
-      ln -s "${base}.bin" "brcmfmac43436-sdio.raspberrypi,model-zero-2-w.bin" || true
-    fi
-    if [ -e "${base}.txt" ] && [ ! -e "brcmfmac43436-sdio.raspberrypi,model-zero-2-w.txt" ]; then
-      ln -s "${base}.txt" "brcmfmac43436-sdio.raspberrypi,model-zero-2-w.txt" || true
-    fi
+    for model in raspberrypi,model-zero-2-w raspberrypi,model-zero-2-2; do
+      if [ -e "${base}.bin" ] && [ ! -e "${base}.${model}.bin" ]; then
+        ln -s "${base}.bin" "${base}.${model}.bin" || true
+      fi
+      if [ -e "${base}.txt" ] && [ ! -e "${base}.${model}.txt" ]; then
+        ln -s "${base}.txt" "${base}.${model}.txt" || true
+      fi
+    done
   done
 fi
 """
@@ -2106,7 +2108,7 @@ mkdir -p "$target_dir/srv/frameos" "$target_dir/srv/assets" "$target_dir/etc"
 fstab="$target_dir/etc/fstab"
 tmp_fstab="${fstab}.frameos"
 touch "$fstab"
-grep -vE '[[:space:]]/srv/(frameos|assets)[[:space:]]' "$fstab" > "$tmp_fstab" || true
+grep -vE '[[:space:]](/boot|/srv/(frameos|assets))[[:space:]]' "$fstab" > "$tmp_fstab" || true
 cat >> "$tmp_fstab" <<'EOF'
 LABEL=BOOT /boot vfat defaults,noatime,umask=000 0 0
 LABEL=FRAMEOS /srv/frameos ext4 defaults,noatime 0 2
@@ -2361,9 +2363,24 @@ if [ "$assets_size" -le 0 ]; then
   echo "Computed assets partition would not fit"
   exit 1
 fi
+frameos_dev="$(partition_device "$disk" 3)"
+assets_dev="$(partition_device "$disk" 4)"
+
+assets_label() {
+  if command -v blkid >/dev/null 2>&1; then
+    blkid -s LABEL -o value "$assets_dev" 2>/dev/null || true
+  elif [ -e /dev/disk/by-label/ASSETS ]; then
+    printf 'ASSETS\\n'
+  fi
+}
 
 if [ "$extra_sectors" -lt "$align_sectors" ] && [ "$target_frameos_size" -eq "$p3_size" ]; then
   echo "No SD card expansion needed"
+  if [ "$(assets_label)" != "ASSETS" ]; then
+    echo "Formatting missing ASSETS filesystem on $assets_dev"
+    resize2fs "$frameos_dev"
+    mkfs.vfat -n ASSETS "$assets_dev"
+  fi
   date -u > "$marker" 2>/dev/null || true
   exit 0
 fi
@@ -2397,8 +2414,6 @@ if ! partx -u "$disk"; then
   exit 0
 fi
 
-frameos_dev="$(partition_device "$disk" 3)"
-assets_dev="$(partition_device "$disk" 4)"
 resize2fs "$frameos_dev"
 mkfs.vfat -n ASSETS "$assets_dev"
 date -u > "$marker" 2>/dev/null || true

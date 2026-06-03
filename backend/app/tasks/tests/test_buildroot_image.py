@@ -220,9 +220,12 @@ def test_buildroot_partition_scripts_create_frameos_and_assets_partitions(tmp_pa
     assert "LABEL=BOOT /boot vfat" in partition_post_build
     assert "LABEL=FRAMEOS /srv/frameos ext4" in partition_post_build
     assert "LABEL=ASSETS /srv/assets vfat" in partition_post_build
+    assert '[[:space:]](/boot|/srv/(frameos|assets))[[:space:]]' in partition_post_build
     assert "frameos-partition-root" in partition_post_build
     assert "assets-partition-root" in partition_post_build
     assert '"$target_dir/etc/cron.d"' in post_build
+    assert "brcmfmac43430-sdio" in post_build
+    assert "raspberrypi,model-zero-2-2" in post_build
     assert "image frameos.ext4" in post_image
     assert "image assets.vfat" in post_image
     assert "console=tty1" in post_image
@@ -250,6 +253,9 @@ def test_buildroot_expand_sd_card_service_runs_before_local_mounts():
     assert "small_frameos_sectors=$((1 * 1024 * 1024 * 1024 / sector_size))" in script
     assert "large_frameos_sectors=$((2 * 1024 * 1024 * 1024 / sector_size))" in script
     assert 'echo "Root unchanged: start $p2_start, size $p2_size sectors"' in script
+    assert 'assets_label()' in script
+    assert 'if [ "$(assets_label)" != "ASSETS" ]; then' in script
+    assert 'echo "Formatting missing ASSETS filesystem on $assets_dev"' in script
     assert 'mkfs.vfat -n ASSETS "$assets_dev"' in script
     assert 'resize2fs "$frameos_dev"' in script
     assert 'date -u > "$marker" 2>/dev/null || true' in script
