@@ -682,7 +682,7 @@ function SceneControlPanelContent({
   const { frames } = useValues(framesModel)
   const { closeSceneControl } = useActions(workspaceLogic)
   const frame = frames[sceneControlSelection.frameId]
-  const { uploadedScenes, uploadedScenesLoading } = useValues(
+  const { sceneId: currentSceneId, uploadedScenes, uploadedScenesLoading } = useValues(
     controlLogic({ frameId: sceneControlSelection.frameId })
   )
 
@@ -722,6 +722,8 @@ function SceneControlPanelContent({
   }
 
   const frameLogicProps = { frameId: frame.id }
+  const selectedSceneIsActive = sceneIsActive(scene, currentSceneId)
+
   return (
     <div className="workspace-drawer frameos-drawer fixed bottom-5 right-5 top-5 z-40 w-[390px] overflow-hidden rounded-[24px] border border-white/80 bg-white/95 shadow-2xl shadow-slate-500/30 backdrop-blur-xl">
       <BindLogic logic={frameLogic} props={frameLogicProps}>
@@ -760,7 +762,7 @@ function SceneControlPanelContent({
                   className="h-full w-full"
                   imageClassName="h-full w-full rounded-md object-contain"
                 />
-                <FrameImageRefreshButton frameId={frame.id} sceneId={scene.id} />
+                {selectedSceneIsActive ? <FrameImageRefreshButton frameId={frame.id} sceneId={scene.id} /> : null}
                 {scene.settings?.execution !== 'interpreted' ? (
                   <div className="absolute left-2 top-10 z-10">
                     <CompiledSceneTag className="!bg-white/95 !border-slate-500/45 !text-slate-700 shadow-sm backdrop-blur-sm" />

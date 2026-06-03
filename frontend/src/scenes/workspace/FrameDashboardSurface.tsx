@@ -41,6 +41,7 @@ import { sceneTileSummaryLabel } from './sceneTileLabels'
 import { workspaceLogic } from './workspaceLogic'
 
 const uploadedScenePrefix = 'uploaded/'
+const livePreviewSceneId = '__live_preview__'
 const activeSurfaceClassName = 'frameos-active-surface'
 const selectedSurfaceClassName = 'frameos-selected-surface'
 const sceneTileWidthRem = 9
@@ -188,14 +189,16 @@ function scheduleDatePrefix(date: Date, now = new Date()): string {
 function FramePreviewPanel({ frame, scenes }: { frame: FrameType; scenes: FrameScene[] }): JSX.Element {
   const { sceneControlSelection } = useValues(workspaceLogic)
   const { sceneId: currentSceneId } = useValues(controlLogic({ frameId: frame.id }))
-  const { openFrameTool, openLiveSceneControl } = useActions(workspaceLogic)
+  const { openLiveSceneControl } = useActions(workspaceLogic)
   const previewSizing = framePreviewSizing(frame)
   const activeSceneId = currentSceneId || frame.active_scene_id || null
+  const liveSceneControlId = activeSceneId || livePreviewSceneId
   const activeScene = scenes.find((scene) => sceneIsActive(scene, activeSceneId))
   const previewSelected =
-    !!activeSceneId &&
     sceneControlSelection?.frameId === frame.id &&
-    sceneIdIsActive(sceneControlSelection.sceneId, activeSceneId) &&
+    (activeSceneId
+      ? sceneIdIsActive(sceneControlSelection.sceneId, activeSceneId)
+      : sceneControlSelection.sceneId === livePreviewSceneId) &&
     sceneControlSelection.source === 'preview'
   const nextSchedule = nextScheduledEvent(frame.schedule)
   const scheduledScene = nextSchedule ? scenes.find((scene) => scene.id === nextSchedule.event.payload.sceneId) : null
@@ -213,11 +216,7 @@ function FramePreviewPanel({ frame, scenes }: { frame: FrameType; scenes: FrameS
       <button
         type="button"
         onClick={() => {
-          if (activeSceneId) {
-            openLiveSceneControl(frame.id, activeSceneId)
-          } else {
-            openFrameTool(frame.id, 'preview')
-          }
+          openLiveSceneControl(frame.id, liveSceneControlId)
         }}
         className="block w-full focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
       >
