@@ -9,6 +9,7 @@ import re
 import shlex
 import shutil
 import tempfile
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
@@ -22,7 +23,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from app.drivers.devices import drivers_for_frame
-from app.codegen.drivers_nim import frame_compilation_mode
+from app.codegen.drivers_nim import COMPILATION_MODE_PRECOMPILED, frame_compilation_mode
 from app.models.assets import Assets
 from app.models.frame import (
     Frame,
@@ -36,6 +37,7 @@ from app.tasks._frame_deployer import FrameDeployer
 from app.tasks.binary_builder import FrameBinaryBuilder, FrameBinaryBuildResult
 from app.tasks.deploy_agent import AgentDeployer
 from app.tasks.precompiled_agent import download_precompiled_agent_release
+from app.tasks.precompiled_frameos import frame_compiled_scene_count, release_version
 from app.tasks.setup_json_reset import (
     BOOT_AUTHORIZED_KEYS_FILE,
     BOOT_HOSTNAME_FILE,
@@ -67,6 +69,13 @@ BUILDROOT_ASSETS_PARTITION_SIZE = os.environ.get("FRAMEOS_BUILDROOT_ASSETS_PARTI
 BUILDROOT_LOCAL_FONTS_DIR = REPO_ROOT / "frameos" / "assets" / "copied" / "fonts"
 BUILDROOT_LOCAL_FONT_EXTENSIONS = {".ttf", ".txt", ".md"}
 BUILDROOT_ARCHIVE_BASE_URL = os.environ.get("FRAMEOS_ARCHIVE_BASE_URL", "https://archive.frameos.net/")
+BUILDROOT_PRECOMPILED_SD_IMAGE_RELEASE_BASE_URL = os.environ.get(
+    "FRAMEOS_PRECOMPILED_SD_IMAGE_RELEASE_BASE_URL",
+    os.environ.get("FRAMEOS_PRECOMPILED_RELEASE_BASE_URL", "https://github.com/FrameOS/frameos/releases/download/"),
+)
+BUILDROOT_PRECOMPILED_SD_IMAGE_TIMEOUT = float(
+    os.environ.get("FRAMEOS_PRECOMPILED_SD_IMAGE_TIMEOUT", os.environ.get("FRAMEOS_PRECOMPILED_TIMEOUT", "60"))
+)
 BUILDROOT_BASE_MANIFEST_PATH = os.environ.get("FRAMEOS_BUILDROOT_BASE_MANIFEST_PATH", "buildroot-images/manifest.json")
 BUILDROOT_BASE_MANIFEST_FILE = os.environ.get(
     "FRAMEOS_BUILDROOT_BASE_MANIFEST_FILE",
@@ -105,6 +114,7 @@ BUILDROOT_DOCKER_APT_DEPS = (
 BUILDROOT_DOCKER_APT_DEPS_LINE = " ".join(BUILDROOT_DOCKER_APT_DEPS)
 BUILDROOT_COMPOSE_TOOLS = ("genimage", "mkfs.vfat", "mcopy", "mlabel")
 SAFE_SEGMENT = re.compile(r"[^A-Za-z0-9_.-]+")
+SAFE_RELEASE_SEGMENT = re.compile(r"^[A-Za-z0-9_.-]+$")
 LEGACY_PLATFORM_ALIASES = {
     "",
     "pi-zero2",
@@ -192,6 +202,20 @@ def buildroot_base_cache_dir() -> Path:
     return Path(os.environ.get("FRAMEOS_BUILDROOT_BASE_CACHE_DIR") or (buildroot_cache_dir() / "base-images"))
 
 
+def buildroot_precompiled_sd_image_cache_dir() -> Path:
+    return Path(
+        os.environ.get("FRAMEOS_PRECOMPILED_SD_IMAGE_CACHE_DIR")
+        or (buildroot_cache_dir() / "precompiled-sd-images")
+    )
+
+
+@dataclass(slots=True)
+class PrecompiledBuildrootSdImageResult:
+    release_url: str
+    archive_path: Path
+    cache_hit: bool = False
+
+
 def _get_frame_settings(db: Session | None, frame: Frame) -> dict:
     return get_settings_dict(db, project_id=getattr(frame, "project_id", None))
 
@@ -239,6 +263,83 @@ async def _buildroot_base_manifest() -> dict[str, Any]:
 
 def _normalize_url_base(url: str) -> str:
     return url if url.endswith("/") else f"{url}/"
+
+
+def precompiled_buildroot_sd_image_release_url(platform: str, version: str | None = None) -> str | None:
+    resolved_version = version or release_version()
+    if not resolved_version:
+        return None
+    normalized_platform = normalize_buildroot_platform(platform)
+    if not SAFE_RELEASE_SEGMENT.fullmatch(resolved_version) or not SAFE_RELEASE_SEGMENT.fullmatch(normalized_platform):
+        return None
+    base = _normalize_url_base(BUILDROOT_PRECOMPILED_SD_IMAGE_RELEASE_BASE_URL)
+    filename = f"frameos-{resolved_version}-{normalized_platform}-buildroot.img.gz"
+    return urljoin(base, f"v{resolved_version}/{filename}")
+
+
+def precompiled_buildroot_sd_image_cache_path(url: str) -> Path:
+    filename = url.rsplit("/", 1)[-1] or "frameos-buildroot.img.gz"
+    safe_filename = SAFE_SEGMENT.sub("_", filename)
+    digest = hashlib.sha256(url.encode("utf-8")).hexdigest()[:16]
+    return buildroot_precompiled_sd_image_cache_dir() / f"{digest}-{safe_filename}"
+
+
+async def download_precompiled_buildroot_sd_image(
+    *,
+    platform: str,
+    logger,
+    timeout: float = BUILDROOT_PRECOMPILED_SD_IMAGE_TIMEOUT,
+) -> PrecompiledBuildrootSdImageResult | None:
+    url = precompiled_buildroot_sd_image_release_url(platform)
+    if not url:
+        await logger("stderr", f"No full precompiled Buildroot SD image release URL is available for {platform}")
+        return None
+
+    cache_path = precompiled_buildroot_sd_image_cache_path(url)
+    if cache_path.is_file() and cache_path.stat().st_size > 0:
+        await logger("stdout", f"Using cached full precompiled Buildroot SD image release for {platform}")
+        return PrecompiledBuildrootSdImageResult(release_url=url, archive_path=cache_path, cache_hit=True)
+
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    await logger("stdout", f"Checking for full precompiled Buildroot SD image release for {platform}")
+    temp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            prefix=f".{cache_path.name}.",
+            suffix=".part",
+            dir=cache_path.parent,
+            delete=False,
+        ) as temp_file:
+            temp_path = Path(temp_file.name)
+
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+            async with client.stream("GET", url) as response:
+                if response.status_code == 404:
+                    await logger("stdout", f"No full precompiled Buildroot SD image release found for {platform}")
+                    return None
+                response.raise_for_status()
+                with temp_path.open("wb") as output:
+                    async for chunk in response.aiter_bytes():
+                        output.write(chunk)
+
+        if not temp_path.is_file() or temp_path.stat().st_size == 0:
+            await logger("stderr", "Downloaded full precompiled Buildroot SD image release was empty")
+            return None
+        os.replace(temp_path, cache_path)
+        temp_path = None
+        return PrecompiledBuildrootSdImageResult(release_url=url, archive_path=cache_path)
+    except httpx.HTTPStatusError as exc:
+        await logger(
+            "stderr",
+            f"Could not use full precompiled Buildroot SD image release for {platform}: HTTP {exc.response.status_code}",
+        )
+        return None
+    except httpx.RequestError as exc:
+        await logger("stderr", f"Could not use full precompiled Buildroot SD image release for {platform}: {exc}")
+        return None
+    finally:
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)
 
 
 async def resolve_buildroot_base_entry(platform: str, frameos_version: str | None = None) -> dict[str, Any]:
@@ -693,41 +794,47 @@ class BuildrootImageBuilder:
             )
             await self._log("stdout", f"Starting Buildroot SD image build {build_id}")
 
-            frameos_build = await self._build_frameos_binary(deployer, str(temp_dir), self.frame)
-            agent_binary = await self._build_agent_binary(deployer, str(temp_dir), self.frame)
-            overlay_dir = temp_dir / "overlay"
-            self._stage_overlay(
-                overlay_dir=overlay_dir,
-                build_id=build_id,
+            base_entry = await resolve_buildroot_base_entry(SUPPORTED_BUILDROOT_PLATFORM)
+            compose_image = None if self._host_has_compose_tools() else await self._ensure_buildroot_image()
+            precompiled_sd_image = await self._try_compose_precompiled_sd_image(
+                temp_dir=temp_dir,
+                output_path=raw_output_path,
                 bootstrap_frame=bootstrap_frame,
                 setup_payload=setup_payload,
-                frameos_build=frameos_build,
-                agent_binary=agent_binary,
-            )
-
-            script_path = temp_dir / "buildroot-build.sh"
-            config_path = temp_dir / "frameos-buildroot.config"
-            post_build_path = temp_dir / "post-build.sh"
-            partition_post_build_path = temp_dir / "partition-post-build.sh"
-            post_image_path = temp_dir / "post-image.sh"
-            kernel_fragment_path = temp_dir / "linux-fragment.config"
-            self._write_buildroot_config(config_path)
-            self._write_kernel_config_fragment(kernel_fragment_path)
-            self._write_post_build_script(post_build_path)
-            self._write_partition_post_build_script(partition_post_build_path)
-            self._write_post_image_script(post_image_path)
-            self._write_boot_logo(temp_dir / Path(BUILDROOT_BOOT_LOGO_WORK_PATH).name)
-            base_entry = await resolve_buildroot_base_entry(SUPPORTED_BUILDROOT_PLATFORM)
-            base_image_path = await ensure_buildroot_base_image(base_entry, buildroot_base_cache_dir())
-            compose_image = None
-            if not self._host_has_compose_tools():
-                compose_image = await self._ensure_buildroot_image()
-            await self._compose_sd_image_from_base(
-                temp_dir=temp_dir,
-                base_image_path=base_image_path,
-                output_path=raw_output_path,
                 image=compose_image,
             )
+            if precompiled_sd_image is None:
+                frameos_build = await self._build_frameos_binary(deployer, str(temp_dir), self.frame)
+                agent_binary = await self._build_agent_binary(deployer, str(temp_dir), self.frame)
+                overlay_dir = temp_dir / "overlay"
+                self._stage_overlay(
+                    overlay_dir=overlay_dir,
+                    build_id=build_id,
+                    bootstrap_frame=bootstrap_frame,
+                    setup_payload=setup_payload,
+                    frameos_build=frameos_build,
+                    agent_binary=agent_binary,
+                )
+
+                script_path = temp_dir / "buildroot-build.sh"
+                config_path = temp_dir / "frameos-buildroot.config"
+                post_build_path = temp_dir / "post-build.sh"
+                partition_post_build_path = temp_dir / "partition-post-build.sh"
+                post_image_path = temp_dir / "post-image.sh"
+                kernel_fragment_path = temp_dir / "linux-fragment.config"
+                self._write_buildroot_config(config_path)
+                self._write_kernel_config_fragment(kernel_fragment_path)
+                self._write_post_build_script(post_build_path)
+                self._write_partition_post_build_script(partition_post_build_path)
+                self._write_post_image_script(post_image_path)
+                self._write_boot_logo(temp_dir / Path(BUILDROOT_BOOT_LOGO_WORK_PATH).name)
+                base_image_path = await ensure_buildroot_base_image(base_entry, buildroot_base_cache_dir())
+                await self._compose_sd_image_from_base(
+                    temp_dir=temp_dir,
+                    base_image_path=base_image_path,
+                    output_path=raw_output_path,
+                    image=compose_image,
+                )
 
             if not raw_output_path.is_file():
                 raise RuntimeError(f"SD image composer completed without producing {raw_output_path.name}")
@@ -750,6 +857,16 @@ class BuildrootImageBuilder:
                     "sha256": base_entry.get("sha256"),
                     "updatedAt": base_entry.get("updated_at"),
                 },
+                **(
+                    {
+                        "precompiledSdImage": {
+                            "releaseUrl": precompiled_sd_image.release_url,
+                            "cacheHit": precompiled_sd_image.cache_hit,
+                        },
+                    }
+                    if precompiled_sd_image is not None
+                    else {}
+                ),
                 "filename": filename,
                 "rawFilename": raw_filename,
                 "path": str(output_path),
@@ -768,6 +885,54 @@ class BuildrootImageBuilder:
             await _set_sd_image_status(self.db, self.redis, self.frame, metadata)
             await self._log("stdout", f"Buildroot SD image ready, starting download, please wait for {filename}")
             return metadata
+
+    def _can_use_precompiled_sd_image(self) -> bool:
+        return (
+            frame_compilation_mode(self.frame) == COMPILATION_MODE_PRECOMPILED
+            and frame_compiled_scene_count(self.frame) == 0
+        )
+
+    async def _try_compose_precompiled_sd_image(
+        self,
+        *,
+        temp_dir: Path,
+        output_path: Path,
+        bootstrap_frame: Frame | Any,
+        setup_payload: dict[str, Any],
+        image: str | None,
+    ) -> PrecompiledBuildrootSdImageResult | None:
+        if not self._can_use_precompiled_sd_image():
+            return None
+
+        precompiled_sd_image = await download_precompiled_buildroot_sd_image(
+            platform=SUPPORTED_BUILDROOT_PLATFORM,
+            logger=self._log,
+        )
+        if precompiled_sd_image is None:
+            await self._log("stdout", "Falling back to composing SD image from cached Buildroot base")
+            return None
+
+        overlay_dir = temp_dir / "overlay"
+        self._stage_boot_overlay(
+            overlay_dir=overlay_dir,
+            bootstrap_frame=bootstrap_frame,
+            setup_payload=setup_payload,
+        )
+        try:
+            await self._compose_sd_image_from_precompiled_release(
+                temp_dir=temp_dir,
+                release_image_path=precompiled_sd_image.archive_path,
+                output_path=output_path,
+                image=image,
+            )
+        except Exception as exc:
+            output_path.unlink(missing_ok=True)
+            await self._log(
+                "stderr",
+                f"Could not use full precompiled Buildroot SD image release: {exc}. Falling back to composed image.",
+            )
+            return None
+        return precompiled_sd_image
 
     async def _build_frameos_binary(
         self,
@@ -922,12 +1087,31 @@ class BuildrootImageBuilder:
         self._relative_symlink("/srv/frameos/state", release_dir / "state")
         self._stage_font_assets(assets_dir)
 
+        self._stage_boot_overlay(
+            overlay_dir=overlay_dir,
+            bootstrap_frame=bootstrap_frame,
+            setup_payload=setup_payload,
+        )
+
+    def _stage_boot_overlay(
+        self,
+        *,
+        overlay_dir: Path,
+        bootstrap_frame: Frame | Any,
+        setup_payload: dict[str, Any],
+    ) -> None:
+        boot_overlay_dir = overlay_dir / "boot"
+        systemd_dir = overlay_dir / "etc" / "systemd" / "system"
+        wants_dir = systemd_dir / "multi-user.target.wants"
+        boot_overlay_dir.mkdir(parents=True, exist_ok=True)
+
         setup_reset_enabled = setup_json_reset_enabled(self.frame)
         if setup_reset_enabled:
             setup_file_path = setup_json_reset_file_path(self.frame, default_if_missing=True)
             self._write_setup_payload(_boot_setup_payload_path(boot_overlay_dir, setup_file_path), setup_payload)
             script_path = overlay_dir / SETUP_JSON_RESET_SCRIPT_PATH.lstrip("/")
             script_path.parent.mkdir(parents=True, exist_ok=True)
+            wants_dir.mkdir(parents=True, exist_ok=True)
             script_path.write_text(render_setup_json_reset_script(setup_file_path), encoding="utf-8")
             os.chmod(script_path, 0o755)
             (systemd_dir / SETUP_JSON_RESET_SERVICE_NAME).write_text(
@@ -1477,6 +1661,32 @@ genimage --rootpath "$work_dir/empty-root" --tmppath "$work_dir/tmp" --inputpath
         _replace_partition(output_path, partitions, 4, images_dir / "assets.vfat")
         await self._patch_boot_partition(output_path, partitions, boot_root, image=image)
 
+    async def _compose_sd_image_from_precompiled_release(
+        self,
+        *,
+        temp_dir: Path,
+        release_image_path: Path,
+        output_path: Path,
+        image: str | None,
+    ) -> None:
+        await self._log("stdout", f"Customizing full precompiled Buildroot SD image {release_image_path.name}")
+        compose_dir = temp_dir / "precompiled-compose"
+        roots_dir = compose_dir / "roots"
+        boot_root = roots_dir / "boot"
+        compose_dir.mkdir(parents=True, exist_ok=True)
+        roots_dir.mkdir(parents=True, exist_ok=True)
+        if boot_root.exists():
+            shutil.rmtree(boot_root)
+        shutil.copytree(temp_dir / "overlay" / "boot", boot_root, symlinks=True)
+
+        if release_image_path.name.endswith(".gz"):
+            _gunzip_file(release_image_path, output_path)
+        else:
+            shutil.copy2(release_image_path, output_path)
+
+        partitions = _mbr_partitions(output_path)
+        await self._patch_boot_partition(output_path, partitions, boot_root, image=image)
+
     async def _patch_boot_partition(
         self,
         output_path: Path,
@@ -1490,6 +1700,19 @@ genimage --rootpath "$work_dir/empty-root" --tmppath "$work_dir/tmp" --inputpath
 
         compose_dir = boot_root.parent.parent
         script_path = compose_dir / "patch-boot.sh"
+        setup_file_path = setup_json_reset_file_path(self.frame, default_if_missing=True)
+        setup_relpath = setup_file_path.lstrip("/")
+        if setup_relpath.startswith("boot/"):
+            setup_relpath = setup_relpath[len("boot/"):]
+        managed_boot_files = sorted(
+            {
+                Path(BOOT_HOSTNAME_FILE).name,
+                Path(BOOT_WIFI_CONNECTION_FILE).name,
+                Path(BOOT_AUTHORIZED_KEYS_FILE).name,
+                setup_relpath,
+            }
+        )
+        managed_boot_files_shell = " ".join(shlex.quote(path) for path in managed_boot_files if path)
         script_path.write_text(
             f"""#!/usr/bin/env bash
 set -euo pipefail
@@ -1504,6 +1727,12 @@ disk="$image_dir"/{shlex.quote(output_path.name)}
 offset={partitions[0]["start"]}
 target="${{disk}}@@${{offset}}"
 mlabel -i "$target" ::BOOT
+managed_boot_files=({managed_boot_files_shell})
+for relpath in "${{managed_boot_files[@]}}"; do
+  if [ ! -e "$boot_root/$relpath" ]; then
+    mdel -i "$target" "::${{relpath}}" 2>/dev/null || true
+  fi
+done
 merge_config() {{
   relpath="$1"
   src="$boot_root/$relpath"
@@ -2309,6 +2538,12 @@ def _gzip_file(source_path: Path, destination_path: Path) -> None:
     with source_path.open("rb") as source, destination_path.open("wb") as compressed:
         with gzip.GzipFile(filename="", mode="wb", fileobj=compressed, mtime=0) as destination:
             shutil.copyfileobj(source, destination)
+
+
+def _gunzip_file(source_path: Path, destination_path: Path) -> None:
+    destination_path.parent.mkdir(parents=True, exist_ok=True)
+    with gzip.open(source_path, "rb") as source, destination_path.open("wb") as destination:
+        shutil.copyfileobj(source, destination)
 
 
 def _mbr_partitions(image_path: Path) -> list[dict[str, int]]:

@@ -18,10 +18,12 @@ from app.tasks.buildroot_image import (
     BUILDROOT_EXPAND_SD_CARD_SERVICE_NAME,
     FRAMEOS_BUILD_TARGET,
     BuildrootImageBuilder,
+    PrecompiledBuildrootSdImageResult,
     ensure_buildroot_frame_defaults,
     _frame_boot_config_lines,
     _merge_boot_config_lines,
     _network_manager_wifi_connection,
+    precompiled_buildroot_sd_image_release_url,
     render_expand_sd_card_script,
     render_expand_sd_card_service,
 )
@@ -339,6 +341,109 @@ def test_buildroot_boot_logo_is_staged_for_kernel_custom_logo(tmp_path):
     BuildrootImageBuilder._write_boot_logo(logo_path)
 
     assert logo_path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+
+
+def test_precompiled_buildroot_sd_image_release_url_uses_release_image_name(monkeypatch):
+    monkeypatch.setattr(buildroot_image_module, "BUILDROOT_PRECOMPILED_SD_IMAGE_RELEASE_BASE_URL", "https://example.test/releases")
+    monkeypatch.setattr(buildroot_image_module, "release_version", lambda: "2026.6.3")
+
+    assert precompiled_buildroot_sd_image_release_url("raspberry-pi-zero-2-w") == (
+        "https://example.test/releases/v2026.6.3/"
+        "frameos-2026.6.3-raspberry-pi-zero-2-w-buildroot.img.gz"
+    )
+
+
+@pytest.mark.asyncio
+async def test_precompiled_sd_image_shortcut_patches_boot_only(tmp_path, monkeypatch):
+    frame_data = {
+        "id": 42,
+        "project_id": 7,
+        "mode": "buildroot",
+        "frame_host": "Kitchen Frame.local",
+        "network": {},
+        "buildroot": {
+            "platform": "raspberry-pi-zero-2-w",
+            "compilationMode": "precompiled",
+        },
+        "scenes": [],
+        "gpio_buttons": [],
+        "schedule": None,
+        "device": "web_only",
+        "device_config": {},
+        "ssh_keys": [],
+        "upload_fonts": None,
+    }
+    frame = SimpleNamespace(**frame_data)
+    frame.to_dict = lambda: dict(frame_data)
+    release_archive = tmp_path / "release.img.gz"
+    release_archive.write_bytes(gzip.compress(b"release-image", mtime=0))
+    output_image = tmp_path / "output.img"
+    builder = BuildrootImageBuilder(db=None, redis=None, frame=frame)
+    commands: list[str] = []
+    logs: list[tuple[str, str]] = []
+    captured: dict[str, str] = {}
+
+    async def fake_download_precompiled_buildroot_sd_image(**_kwargs):
+        return PrecompiledBuildrootSdImageResult(
+            release_url="https://example.test/releases/v2026.6.3/frameos.img.gz",
+            archive_path=release_archive,
+            cache_hit=True,
+        )
+
+    async def fake_exec_local_command(*args, **kwargs):
+        command = args[3]
+        commands.append(command)
+        captured["patch_script"] = (tmp_path / "tmp" / "precompiled-compose" / "patch-boot.sh").read_text(
+            encoding="utf-8"
+        )
+        return 0, "", ""
+
+    async def fake_log(level, message):
+        logs.append((level, message))
+
+    def fail_replace_partition(*_args, **_kwargs):
+        raise AssertionError("precompiled SD image shortcut must not replace non-BOOT partitions")
+
+    temp_dir = tmp_path / "tmp"
+    temp_dir.mkdir()
+    monkeypatch.setattr(
+        "app.tasks.buildroot_image.download_precompiled_buildroot_sd_image",
+        fake_download_precompiled_buildroot_sd_image,
+    )
+    monkeypatch.setattr("app.tasks.buildroot_image.exec_local_command", fake_exec_local_command)
+    monkeypatch.setattr(
+        "app.tasks.buildroot_image._mbr_partitions",
+        lambda _path: [
+            {"start": 512, "size": 32 * 1024 * 1024},
+            {"start": 33554944, "size": 768 * 1024 * 1024},
+            {"start": 838861312, "size": 512 * 1024 * 1024},
+            {"start": 1375732224, "size": 512 * 1024 * 1024},
+        ],
+    )
+    monkeypatch.setattr("app.tasks.buildroot_image._replace_partition", fail_replace_partition)
+    monkeypatch.setattr(builder, "_log", fake_log)
+
+    result = await builder._try_compose_precompiled_sd_image(
+        temp_dir=temp_dir,
+        output_path=output_image,
+        bootstrap_frame=builder._buildroot_bootstrap_frame(),
+        setup_payload={"frame": "config"},
+        image=None,
+    )
+
+    assert result is not None
+    assert result.cache_hit is True
+    assert output_image.read_bytes() == b"release-image"
+    assert len(commands) == 1
+    assert "patch-boot.sh" in commands[0]
+    assert "compose-partitions.sh" not in commands[0]
+    boot_root = temp_dir / "overlay" / "boot"
+    assert (boot_root / "frameos-setup.json").is_file()
+    assert (boot_root / "frameos-hostname").read_text(encoding="utf-8") == "kitchen-frame\n"
+    assert not (boot_root / "frameos-wifi.nmconnection").exists()
+    assert "managed_boot_files=(" in captured["patch_script"]
+    assert "frameos-wifi.nmconnection" in captured["patch_script"]
+    assert 'mdel -i "$target"' in captured["patch_script"]
 
 
 @pytest.mark.asyncio
