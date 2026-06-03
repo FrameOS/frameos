@@ -4,6 +4,39 @@
       "assets_partition_size": "512M",
       "buildroot_apt_deps": "bc bison build-essential ca-certificates cpio curl file flex g++ gfortran genimage git dosfstools e2fsprogs libncurses-dev libssl-dev make mtools perl python3 rsync unzip wget xdg-utils xz-utils",
       "buildroot_version": "2025.02.13",
+      "created_at": "2026-06-03T16:47:40.087447+00:00",
+      "defconfig": "mangopi_mq1rdw2_defconfig",
+      "docker_image": "debian:bookworm",
+      "frameos_partition_size": "1G",
+      "frameos_version": "2026.6.7",
+      "object_key": "buildroot-images/allwinner-t113-s3/2026.6.7/allwinner-t113-s3-2026.6.7-89c25c5e26058847.img.gz",
+      "partitions": [
+        {
+          "size": 33554432,
+          "start": 1048576
+        },
+        {
+          "size": 805306368,
+          "start": 34603008
+        },
+        {
+          "size": 1073741824,
+          "start": 839909376
+        },
+        {
+          "size": 536870912,
+          "start": 1913651200
+        }
+      ],
+      "platform": "allwinner-t113-s3",
+      "sha256": "89c25c5e2605884750a92548667c229f36a1e2d5a8a35d691e8e506fd921b576",
+      "size": 2450522112,
+      "updated_at": "2026-06-03T17:10:09.169849+00:00"
+    },
+    {
+      "assets_partition_size": "512M",
+      "buildroot_apt_deps": "bc bison build-essential ca-certificates cpio curl file flex g++ gfortran genimage git dosfstools e2fsprogs libncurses-dev libssl-dev make mtools perl python3 rsync unzip wget xdg-utils xz-utils",
+      "buildroot_version": "2025.02.13",
       "created_at": "2026-06-02T23:27:33.143564+00:00",
       "defconfig": "raspberrypizero2w_64_defconfig",
       "docker_image": "debian:bookworm",

@@ -426,6 +426,7 @@ def upload(args: argparse.Namespace) -> None:
         raise SystemExit(f"Re-run with --yes to upload {object_key}")
     client = s3_client()
     entry = {**metadata, "object_key": object_key, "updated_at": datetime.now(timezone.utc).isoformat()}
+    manifest = load_manifest(client, args.bucket, args.manifest_key)
     remote_exists = False
     if not args.force:
         try:
@@ -443,7 +444,21 @@ def upload(args: argparse.Namespace) -> None:
                 shutil.copyfileobj(source, output)
         client.upload_file(str(archive_path), args.bucket, object_key, ExtraArgs={"ContentType": "application/gzip"})
         print(f"Uploaded s3://{args.bucket}/{object_key}")
-    save_manifest(client, args.bucket, args.manifest_key, {"entries": [entry]})
+    entries = [
+        existing
+        for existing in manifest.get("entries", [])
+        if not (
+            existing.get("platform") == entry.get("platform")
+            and existing.get("frameos_version") == entry.get("frameos_version")
+        )
+    ]
+    entries.append(entry)
+    save_manifest(
+        client,
+        args.bucket,
+        args.manifest_key,
+        {"entries": sorted(entries, key=lambda item: (str(item.get("platform") or ""), str(item.get("frameos_version") or "")))},
+    )
 
 
 def _safe_extract(tar: tarfile.TarFile, path: Path) -> None:
