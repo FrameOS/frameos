@@ -196,8 +196,8 @@ def normalize_timezone_update_url(value: Any) -> str:
     return url or DEFAULT_TIMEZONE_UPDATE_URL
 
 
-def resolve_timezone_settings(timezone_settings: Any) -> dict:
-    config = timezone_settings if isinstance(timezone_settings, dict) else {}
+def resolve_timezone_updater(timezone_updater: Any) -> dict:
+    config = timezone_updater if isinstance(timezone_updater, dict) else {}
 
     return {
         "enabled": bool(config.get("enabled", True)),
@@ -206,18 +206,18 @@ def resolve_timezone_settings(timezone_settings: Any) -> dict:
     }
 
 
-def compact_timezone_settings(timezone_settings: Any, include_enabled_default: bool = False) -> dict | None:
-    if not isinstance(timezone_settings, dict):
+def compact_timezone_updater(timezone_updater: Any, include_enabled_default: bool = False) -> dict | None:
+    if not isinstance(timezone_updater, dict):
         return {"enabled": True} if include_enabled_default else None
 
-    resolved = resolve_timezone_settings(timezone_settings)
+    resolved = resolve_timezone_updater(timezone_updater)
     compact: dict[str, Any] = {}
 
     if include_enabled_default or resolved["enabled"] is not True:
         compact["enabled"] = resolved["enabled"]
-    if "hour" in timezone_settings and resolved["hour"] != DEFAULT_TIMEZONE_UPDATE_HOUR:
+    if "hour" in timezone_updater and resolved["hour"] != DEFAULT_TIMEZONE_UPDATE_HOUR:
         compact["hour"] = resolved["hour"]
-    if "url" in timezone_settings and resolved["url"] != DEFAULT_TIMEZONE_UPDATE_URL:
+    if "url" in timezone_updater and resolved["url"] != DEFAULT_TIMEZONE_UPDATE_URL:
         compact["url"] = resolved["url"]
 
     return compact or None
@@ -256,7 +256,7 @@ class Frame(Base):
     device_config = mapped_column(JSON, nullable=True)
     color = mapped_column(String(256), nullable=True)
     timezone = mapped_column(String(128), nullable=True)
-    timezone_settings = mapped_column(JSON, nullable=True)
+    timezone_updater = mapped_column(JSON, nullable=True)
     interval = mapped_column(Double, default=300)
     metrics_interval = mapped_column(Double, default=60)
     max_http_response_bytes = mapped_column(Integer, default=DEFAULT_MAX_HTTP_RESPONSE_BYTES)
@@ -320,7 +320,7 @@ class Frame(Base):
             'device_config': self.device_config,
             'color': self.color,
             'timezone': self.timezone,
-            'timezone_settings': compact_timezone_settings(self.timezone_settings, include_enabled_default=True),
+            'timezone_updater': compact_timezone_updater(self.timezone_updater, include_enabled_default=True),
             'interval': self.interval,
             'metrics_interval': self.metrics_interval,
             'max_http_response_bytes': self.max_http_response_bytes or DEFAULT_MAX_HTTP_RESPONSE_BYTES,
@@ -430,7 +430,7 @@ async def new_frame(
         rotate=0,
         device=device or "web_only",
         timezone=None,
-        timezone_settings=None,
+        timezone_updater=None,
         log_to_file=None, # spare the SD card from load
         assets_path='/srv/assets',
         save_assets=True,
@@ -520,7 +520,7 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
     defaults = all_settings.get("defaults") or {}
     default_timezone = defaults.get("timezone")
     explicit_timezone = stored_timezone(frame.timezone)
-    timezone_settings = resolve_timezone_settings(frame.timezone_settings)
+    timezone_updater = resolve_timezone_updater(frame.timezone_updater)
     fallback_dimensions = device_dimensions(frame.device)
     frame_json: dict = {
         **({"frameosVersion": frameos_version} if isinstance(frameos_version, str) and frameos_version else {}),
@@ -608,9 +608,9 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
             "showErrorRetrySeconds": error_behavior["show_error_retry_seconds"],
         },
         "timeZoneUpdates": {
-            "enabled": timezone_settings["enabled"],
-            "hour": timezone_settings["hour"],
-            "url": timezone_settings["url"],
+            "enabled": timezone_updater["enabled"],
+            "hour": timezone_updater["hour"],
+            "url": timezone_updater["url"],
         },
     }
     if explicit_timezone:

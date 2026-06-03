@@ -1395,7 +1395,7 @@ export function FrameSettings({
           <Field name="metrics_interval" label="Metrics reporting interval in seconds, 0 to disable">
             <TextInput name="metrics_interval" placeholder="60" />
           </Field>
-          <Group name="timezone_settings">
+          <Group name="timezone_updater">
             <Field
               name="enabled"
               label="Update timezone data"

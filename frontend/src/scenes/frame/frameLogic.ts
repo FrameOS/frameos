@@ -85,7 +85,7 @@ const FRAME_KEYS: (keyof FrameType)[] = [
   'device',
   'device_config',
   'timezone',
-  'timezone_settings',
+  'timezone_updater',
   'interval',
   'metrics_interval',
   'max_http_response_bytes',
@@ -151,7 +151,7 @@ const FRAME_KEY_LABELS: Partial<Record<keyof FrameType, string>> = {
   device: 'Device',
   device_config: 'Device config',
   timezone: 'Timezone',
-  timezone_settings: 'Timezone data updates',
+  timezone_updater: 'Timezone data updates',
   interval: 'Refresh interval',
   metrics_interval: 'Metrics interval',
   max_http_response_bytes: 'HTTP response size limit',
@@ -202,7 +202,7 @@ const DEPLOYMENT_SUMMARY_KEYS: (keyof FrameType)[] = [
   'device',
   'device_config',
   'timezone',
-  'timezone_settings',
+  'timezone_updater',
   'interval',
   'metrics_interval',
   'max_http_response_bytes',
@@ -238,10 +238,10 @@ function normalizeTimezoneUpdateHour(value: unknown): number {
   return Number.isInteger(hour) && hour >= 0 && hour <= 23 ? hour : DEFAULT_TIMEZONE_UPDATE_HOUR
 }
 
-function normalizeTimezoneSettings(
-  value: FrameType['timezone_settings'] | null | undefined
-): NonNullable<FrameType['timezone_settings']> {
-  const settings: NonNullable<FrameType['timezone_settings']> = {
+function normalizeTimezoneUpdater(
+  value: FrameType['timezone_updater'] | null | undefined
+): NonNullable<FrameType['timezone_updater']> {
+  const settings: NonNullable<FrameType['timezone_updater']> = {
     enabled: value?.enabled ?? true,
   }
   if (value?.hour !== undefined) {
@@ -256,11 +256,11 @@ function normalizeTimezoneSettings(
   return settings
 }
 
-function compactTimezoneSettingsForSubmit(
-  value: FrameType['timezone_settings'] | null | undefined
-): FrameType['timezone_settings'] | null {
-  const settings = normalizeTimezoneSettings(value)
-  const compact: NonNullable<FrameType['timezone_settings']> = {}
+function compactTimezoneUpdaterForSubmit(
+  value: FrameType['timezone_updater'] | null | undefined
+): FrameType['timezone_updater'] | null {
+  const settings = normalizeTimezoneUpdater(value)
+  const compact: NonNullable<FrameType['timezone_updater']> = {}
   if (settings.enabled === false) {
     compact.enabled = false
   }
@@ -897,7 +897,7 @@ function sanitizeFrame(frame: Partial<FrameType>): Partial<FrameType> {
   return {
     ...frame,
     image_engine: frame.image_engine ?? '',
-    timezone_settings: normalizeTimezoneSettings(frame.timezone_settings),
+    timezone_updater: normalizeTimezoneUpdater(frame.timezone_updater),
     assets_path: assetsPath,
     rpios,
     frame_admin_auth: {
@@ -915,7 +915,7 @@ function sanitizeFrame(frame: Partial<FrameType>): Partial<FrameType> {
 function normalizeFrameForSubmit(frame: Partial<FrameType>): Partial<FrameType> {
   const normalizedFrame = {
     ...frame,
-    timezone_settings: compactTimezoneSettingsForSubmit(frame.timezone_settings),
+    timezone_updater: compactTimezoneUpdaterForSubmit(frame.timezone_updater),
   }
   return normalizedFrame.mode === 'buildroot' ? { ...normalizedFrame, assets_path: '/srv/assets' } : normalizedFrame
 }

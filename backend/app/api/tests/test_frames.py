@@ -943,9 +943,9 @@ async def test_api_frame_update_preserves_custom_timezone_string(async_client, d
 
 
 @pytest.mark.asyncio
-async def test_api_frame_update_compacts_timezone_settings(async_client, db, redis):
-    frame = await new_frame(db, redis, 'TimezoneSettingsFrame', 'localhost', 'localhost')
-    frame.timezone_settings = {
+async def test_api_frame_update_compacts_timezone_updater(async_client, db, redis):
+    frame = await new_frame(db, redis, 'TimezoneUpdaterFrame', 'localhost', 'localhost')
+    frame.timezone_updater = {
         "enabled": True,
         "hour": 3,
         "url": "https://tz.frameos.net/tzdata.json.gz",
@@ -956,7 +956,7 @@ async def test_api_frame_update_compacts_timezone_settings(async_client, db, red
     resp = await async_client.post(
         f'/api/frames/{frame.id}',
         json={
-            "timezone_settings": {
+            "timezone_updater": {
                 "enabled": True,
                 "hour": 3,
                 "url": "https://tz.frameos.net/tzdata.json.gz",
@@ -967,17 +967,17 @@ async def test_api_frame_update_compacts_timezone_settings(async_client, db, red
     assert resp.status_code == 200
     db.expire_all()
     updated_frame = db.get(Frame, frame.id)
-    assert updated_frame.timezone_settings is None
+    assert updated_frame.timezone_updater is None
 
 
 @pytest.mark.asyncio
-async def test_api_frame_update_keeps_custom_timezone_settings(async_client, db, redis):
-    frame = await new_frame(db, redis, 'CustomTimezoneSettingsFrame', 'localhost', 'localhost')
+async def test_api_frame_update_keeps_custom_timezone_updater(async_client, db, redis):
+    frame = await new_frame(db, redis, 'CustomTimezoneUpdaterFrame', 'localhost', 'localhost')
 
     resp = await async_client.post(
         f'/api/frames/{frame.id}',
         json={
-            "timezone_settings": {
+            "timezone_updater": {
                 "enabled": True,
                 "hour": 5,
                 "url": "https://example.com/tzdata.json.gz",
@@ -988,7 +988,7 @@ async def test_api_frame_update_keeps_custom_timezone_settings(async_client, db,
     assert resp.status_code == 200
     db.expire_all()
     updated_frame = db.get(Frame, frame.id)
-    assert updated_frame.timezone_settings == {
+    assert updated_frame.timezone_updater == {
         "hour": 5,
         "url": "https://example.com/tzdata.json.gz",
     }

@@ -36,7 +36,7 @@ class FrameErrorBehavior(BaseModel):
         return value
 
 
-class FrameTimezoneSettings(BaseModel):
+class FrameTimezoneUpdater(BaseModel):
     enabled: Optional[bool] = None
     hour: Optional[int] = None
     url: Optional[str] = None
@@ -79,7 +79,7 @@ class FrameBase(BaseModel):
     device_config: Optional[Dict[str, Any]] = None
     color: Optional[str]
     timezone: Optional[str] = None
-    timezone_settings: Optional[FrameTimezoneSettings] = None
+    timezone_updater: Optional[FrameTimezoneUpdater] = None
     interval: float
     metrics_interval: float
     max_http_response_bytes: Optional[int] = None
@@ -155,7 +155,7 @@ class FrameUpdateRequest(BaseModel):
     flip: Optional[str] = None
     color: Optional[str] = None
     timezone: Optional[str] = None
-    timezone_settings: Optional[FrameTimezoneSettings] = None
+    timezone_updater: Optional[FrameTimezoneUpdater] = None
     interval: Optional[float] = None
     metrics_interval: Optional[float] = None
     max_http_response_bytes: Optional[int] = None

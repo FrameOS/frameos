@@ -46,7 +46,7 @@ from app.database import SessionLocal, get_db
 from arq import ArqRedis as Redis
 from app.models.frame import (
     Frame,
-    compact_timezone_settings,
+    compact_timezone_updater,
     new_frame,
     delete_frame,
     normalize_error_behavior,
@@ -2691,8 +2691,8 @@ async def api_frame_update_endpoint(
 
     if "timezone" in update_data:
         frame.timezone = stored_timezone(frame.timezone) or None
-    if "timezone_settings" in update_data:
-        frame.timezone_settings = compact_timezone_settings(frame.timezone_settings)
+    if "timezone_updater" in update_data:
+        frame.timezone_updater = compact_timezone_updater(frame.timezone_updater)
 
     if "https_proxy" in update_data:
         frame.https_proxy = normalize_https_proxy(frame.https_proxy)

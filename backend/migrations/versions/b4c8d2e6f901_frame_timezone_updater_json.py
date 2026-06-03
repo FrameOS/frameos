@@ -1,4 +1,4 @@
-"""add frame timezone settings
+"""add frame timezone updater
 
 Revision ID: b4c8d2e6f901
 Revises: a1f2c3d4e5f6
@@ -18,8 +18,8 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("frame", sa.Column("timezone_settings", sqlite.JSON(), nullable=True))
+    op.add_column("frame", sa.Column("timezone_updater", sqlite.JSON(), nullable=True))
 
 
 def downgrade() -> None:
-    op.drop_column("frame", "timezone_settings")
+    op.drop_column("frame", "timezone_updater")

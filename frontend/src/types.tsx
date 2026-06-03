@@ -52,7 +52,7 @@ export interface FrameType {
   height?: number
   device?: string
   timezone?: string
-  timezone_settings?: {
+  timezone_updater?: {
     enabled?: boolean
     hour?: number
     url?: string
