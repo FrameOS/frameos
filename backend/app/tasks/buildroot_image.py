@@ -63,7 +63,7 @@ BUILDROOT_HOST_CXXFLAGS = "-O2 -pipe -std=gnu++17"
 BUILDROOT_HOST_CFLAGS = "-O2 -pipe"
 BUILDROOT_JLEVEL = int(os.environ.get("FRAMEOS_BUILDROOT_JLEVEL", "0"))
 BUILDROOT_BOOTSTRAP_SCRIPT_VERSION = "5"
-BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION = 12
+BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION = 13
 BUILDROOT_FRAMEOS_PARTITION_SIZE = os.environ.get("FRAMEOS_BUILDROOT_FRAMEOS_PARTITION_SIZE", "1G")
 BUILDROOT_ASSETS_PARTITION_SIZE = os.environ.get("FRAMEOS_BUILDROOT_ASSETS_PARTITION_SIZE", "512M")
 BUILDROOT_LOCAL_FONTS_DIR = REPO_ROOT / "frameos" / "assets" / "copied" / "fonts"
@@ -517,6 +517,12 @@ def _buildroot_sd_image_config_payload(frame: Frame | Any) -> dict[str, Any]:
     return payload
 
 
+def _buildroot_setup_payload(db: Session | None, frame: Frame | Any) -> dict[str, Any]:
+    payload = get_frame_json(db, frame)
+    payload["scenes"] = list(getattr(frame, "scenes", []) or [])
+    return payload
+
+
 def buildroot_sd_image_config_fingerprint(frame: Frame | Any) -> str:
     payload = _buildroot_sd_image_config_payload(frame)
     encoded = json.dumps(payload, sort_keys=True, default=str, separators=(",", ":")).encode("utf-8")
@@ -755,7 +761,7 @@ class BuildrootImageBuilder:
     async def run(self) -> dict[str, Any]:
         validate_buildroot_wifi_credentials(self.frame)
         bootstrap_frame = self._buildroot_bootstrap_frame()
-        setup_payload = get_frame_json(self.db, self.frame)
+        setup_payload = _buildroot_setup_payload(self.db, self.frame)
 
         artifact_dir = buildroot_artifact_dir()
         cache_dir = buildroot_cache_dir()
@@ -1041,13 +1047,13 @@ class BuildrootImageBuilder:
         )
         (release_dir / "scenes.json.gz").write_bytes(
             gzip.compress(
-                json.dumps(get_interpreted_scenes_json(bootstrap_frame), indent=4).encode("utf-8") + b"\n",
+                json.dumps(get_interpreted_scenes_json(self.frame), indent=4).encode("utf-8") + b"\n",
                 mtime=0,
             )
         )
         (release_dir / "all_scenes.json.gz").write_bytes(
             gzip.compress(
-                json.dumps(list(getattr(bootstrap_frame, "scenes", []) or []), indent=4).encode("utf-8") + b"\n",
+                json.dumps(list(getattr(self.frame, "scenes", []) or []), indent=4).encode("utf-8") + b"\n",
                 mtime=0,
             )
         )
@@ -2239,7 +2245,8 @@ set -eu
 
 marker="/var/lib/frameos/sd-card-expanded"
 log="/var/log/frameos-expand-sd-card.log"
-mkdir -p "$(dirname "$marker")"
+mount -o remount,rw / 2>/dev/null || true
+mkdir -p "$(dirname "$marker")" 2>/dev/null || true
 touch "$log" 2>/dev/null || true
 exec >> "$log" 2>&1 || true
 
@@ -2355,7 +2362,7 @@ fi
 
 if [ "$extra_sectors" -lt "$align_sectors" ] && [ "$target_frameos_size" -eq "$p3_size" ]; then
   echo "No SD card expansion needed"
-  date -u > "$marker"
+  date -u > "$marker" 2>/dev/null || true
   exit 0
 fi
 
@@ -2392,7 +2399,7 @@ frameos_dev="$(partition_device "$disk" 3)"
 assets_dev="$(partition_device "$disk" 4)"
 resize2fs "$frameos_dev"
 mkfs.vfat -n ASSETS "$assets_dev"
-date -u > "$marker"
+date -u > "$marker" 2>/dev/null || true
 """
 
 

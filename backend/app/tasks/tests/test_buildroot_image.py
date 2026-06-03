@@ -20,6 +20,7 @@ from app.tasks.buildroot_image import (
     BuildrootImageBuilder,
     PrecompiledBuildrootSdImageResult,
     ensure_buildroot_frame_defaults,
+    _buildroot_setup_payload,
     _frame_boot_config_lines,
     _merge_boot_config_lines,
     _network_manager_wifi_connection,
@@ -107,6 +108,18 @@ def test_buildroot_defaults_remove_setup_json_reset_file_path():
 
     assert "setupJsonResetFilePath" not in frame.buildroot
     assert setup_json_reset_file_path(frame) == DEFAULT_SETUP_JSON_RESET_FILE_PATH
+
+
+def test_buildroot_setup_payload_includes_real_frame_scenes(monkeypatch):
+    scenes = [
+        {"id": "scene-1", "settings": {"execution": "interpreted"}},
+        {"id": "scene-2", "settings": {"execution": "compiled"}},
+    ]
+    frame = SimpleNamespace(id=1, project_id=7, scenes=scenes)
+
+    monkeypatch.setattr("app.tasks.buildroot_image.get_frame_json", lambda _db, _frame: {"id": 1})
+
+    assert _buildroot_setup_payload(None, frame) == {"id": 1, "scenes": scenes}
 
 
 def test_buildroot_config_avoids_ncurses_selecting_packages(tmp_path):
@@ -231,12 +244,15 @@ def test_buildroot_expand_sd_card_service_runs_before_local_mounts():
 
     assert "FRAMEOS_EXPAND_DISK" in script
     assert "FRAMEOS_EXPAND_DRY_RUN" in script
+    assert "mount -o remount,rw / 2>/dev/null || true" in script
+    assert 'mkdir -p "$(dirname "$marker")" 2>/dev/null || true' in script
     assert "small_card_threshold_sectors=$((4 * 1024 * 1024 * 1024 / sector_size))" in script
     assert "small_frameos_sectors=$((1 * 1024 * 1024 * 1024 / sector_size))" in script
     assert "large_frameos_sectors=$((2 * 1024 * 1024 * 1024 / sector_size))" in script
     assert 'echo "Root unchanged: start $p2_start, size $p2_size sectors"' in script
     assert 'mkfs.vfat -n ASSETS "$assets_dev"' in script
     assert 'resize2fs "$frameos_dev"' in script
+    assert 'date -u > "$marker" 2>/dev/null || true' in script
     assert 'resize2fs "$root_dev"' not in script
     assert 'sfdisk --no-reread --force "$disk"' in script
     assert 'partx -u "$disk"' in script
@@ -740,12 +756,24 @@ def test_buildroot_stage_overlay_leaves_service_install_to_firstboot(tmp_path, m
         network={"wifiSSID": "Test WiFi", "wifiPassword": "secret"},
         buildroot={},
         ssh_keys=[],
+        scenes=[
+            {"id": "scene-1", "settings": {"execution": "interpreted"}},
+            {"id": "scene-2", "settings": {"execution": "compiled"}},
+        ],
     )
     builder = BuildrootImageBuilder(db=object(), redis=None, frame=frame)
+    bootstrap_frame = SimpleNamespace(**{**frame.__dict__, "device": "web_only", "scenes": []})
     overlay_dir = tmp_path / "overlay"
 
     monkeypatch.setattr("app.tasks.buildroot_image.get_frame_json", lambda _db, _frame: {"id": 1})
-    monkeypatch.setattr("app.tasks.buildroot_image.get_interpreted_scenes_json", lambda _frame: [])
+    monkeypatch.setattr(
+        "app.tasks.buildroot_image.get_interpreted_scenes_json",
+        lambda _frame: [
+            scene
+            for scene in getattr(_frame, "scenes", [])
+            if scene.get("settings", {}).get("execution") == "interpreted"
+        ],
+    )
     monkeypatch.setattr("app.tasks.buildroot_image.get_settings_dict", lambda _db, project_id=None: {"ssh_keys": {"keys": []}})
     monkeypatch.setattr("app.tasks.buildroot_image.drivers_for_frame", lambda _frame: {})
     monkeypatch.setattr(BuildrootImageBuilder, "_copy_runtime_libraries", lambda _self, _overlay_dir: None)
@@ -753,8 +781,8 @@ def test_buildroot_stage_overlay_leaves_service_install_to_firstboot(tmp_path, m
     builder._stage_overlay(
         overlay_dir=overlay_dir,
         build_id="build123",
-        bootstrap_frame=frame,
-        setup_payload={"id": 1},
+        bootstrap_frame=bootstrap_frame,
+        setup_payload={"id": 1, "scenes": frame.scenes},
         frameos_build=FrameBinaryBuildResult(
             build_id="build123",
             target=FRAMEOS_BUILD_TARGET,
@@ -776,8 +804,15 @@ def test_buildroot_stage_overlay_leaves_service_install_to_firstboot(tmp_path, m
     )
 
     assert (overlay_dir / "boot" / "frameos-setup.json").exists()
+    setup_payload = json.loads((overlay_dir / "boot" / "frameos-setup.json").read_text(encoding="utf-8"))
+    assert setup_payload["scenes"] == frame.scenes
+    release_dir = overlay_dir / "srv" / "frameos" / "releases" / "release_build123"
+    scenes_payload = json.loads(gzip.decompress((release_dir / "scenes.json.gz").read_bytes()).decode("utf-8"))
+    all_scenes_payload = json.loads(gzip.decompress((release_dir / "all_scenes.json.gz").read_bytes()).decode("utf-8"))
+    assert scenes_payload == [frame.scenes[0]]
+    assert all_scenes_payload == frame.scenes
     assert (overlay_dir / "boot" / "frameos-hostname").read_text(encoding="utf-8") == "frame-one\n"
-    assert (overlay_dir / "srv" / "frameos" / "releases" / "release_build123" / "frameos.service").exists()
+    assert (release_dir / "frameos.service").exists()
     assert (overlay_dir / "srv" / "frameos" / "agent" / "releases" / "release_build123" / "frameos_agent.service").exists()
     assert not (overlay_dir / "etc" / "systemd" / "system" / "frameos.service").exists()
     assert not (overlay_dir / "etc" / "systemd" / "system" / "frameos_agent.service").exists()
