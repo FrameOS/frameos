@@ -887,6 +887,37 @@ async def test_api_frame_update_archived(async_client, db, redis):
 
 
 @pytest.mark.asyncio
+async def test_api_frame_update_timezone_for_rpios(async_client, db, redis):
+    frame = await new_frame(db, redis, 'TimezoneFrame', 'localhost', 'localhost')
+    frame.mode = 'rpios'
+    db.add(frame)
+    db.commit()
+
+    resp = await async_client.post(f'/api/frames/{frame.id}', json={"timezone": "Europe/Brussels"})
+
+    assert resp.status_code == 200
+    db.expire_all()
+    updated_frame = db.get(Frame, frame.id)
+    assert updated_frame.timezone == "Europe/Brussels"
+
+
+@pytest.mark.asyncio
+async def test_api_frame_update_preserves_custom_timezone_string(async_client, db, redis):
+    frame = await new_frame(db, redis, 'CustomTimezoneFrame', 'localhost', 'localhost')
+    frame.mode = 'rpios'
+    frame.timezone = 'Custom/Zone'
+    db.add(frame)
+    db.commit()
+
+    resp = await async_client.post(f'/api/frames/{frame.id}', json={"timezone": "Custom/Zone"})
+
+    assert resp.status_code == 200
+    db.expire_all()
+    updated_frame = db.get(Frame, frame.id)
+    assert updated_frame.timezone == "Custom/Zone"
+
+
+@pytest.mark.asyncio
 async def test_api_frame_update_requires_admin_credentials_when_enabled(async_client, db, redis):
     frame = await new_frame(db, redis, 'AdminFrame', 'localhost', 'localhost')
 

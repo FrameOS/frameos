@@ -197,6 +197,13 @@ export function FrameSettings({
   const mountpointItems = mountpoints.items ?? []
   const errorBehavior = normalizeFrameErrorBehavior(frameForm.error_behavior ?? frame.error_behavior)
   const isBuildrootMode = mode === 'buildroot'
+  const selectedTimezone = frameForm.timezone ?? frame.timezone ?? ''
+  const baseTimezoneOptions =
+    mode === 'rpios' ? [{ value: '', label: 'Detect from frame' }, ...timezoneOptions] : timezoneOptions
+  const frameTimezoneOptions =
+    selectedTimezone && !baseTimezoneOptions.some((option) => option.value === selectedTimezone)
+      ? [{ value: selectedTimezone, label: `${selectedTimezone} (detected)` }, ...baseTimezoneOptions]
+      : baseTimezoneOptions
   const setErrorBehavior = (patch: Partial<NonNullable<FrameType['error_behavior']>>) => {
     setFrameFormValues({
       error_behavior: normalizeFrameErrorBehavior({
@@ -705,13 +712,17 @@ export function FrameSettings({
               ]}
             />
           </Field>
-          {isBuildrootMode ? (
+          {mode === 'buildroot' || mode === 'rpios' ? (
             <Field
               name="timezone"
               label="Timezone"
-              tooltip="IANA timezone applied to the Buildroot operating system during setup."
+              tooltip={
+                mode === 'buildroot'
+                  ? 'IANA timezone applied to the Buildroot operating system during setup.'
+                  : 'IANA timezone applied to Raspberry Pi OS during setup. Leave unchanged to keep a detected timezone.'
+              }
             >
-              <Select name="timezone" options={timezoneOptions} />
+              <Select name="timezone" options={frameTimezoneOptions} />
             </Field>
           ) : null}
         </div>

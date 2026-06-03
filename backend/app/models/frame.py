@@ -11,8 +11,8 @@ from app.database import Base
 
 from app.drivers.devices import device_dimensions
 from app.models.apps import get_app_configs
-from app.models.settings import get_settings_dict
-from app.utils.timezone import frame_timezone
+from app.models.settings import DEFAULT_TIMEZONE_UPDATE_HOUR, DEFAULT_TIMEZONE_UPDATE_URL, get_settings_dict
+from app.utils.timezone import frame_timezone, stored_timezone
 from app.utils.token import secure_token
 from app.utils.tls import generate_frame_tls_material, parse_certificate_not_valid_after
 from app.utils.versions import get_versions
@@ -473,7 +473,18 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
     error_behavior = normalize_error_behavior(frame.error_behavior)
     frameos_version = get_versions().get("frameos")
     all_settings = get_settings_dict(db, project_id=frame.project_id)
-    default_timezone = (all_settings.get("defaults") or {}).get("timezone")
+    defaults = all_settings.get("defaults") or {}
+    default_timezone = defaults.get("timezone")
+    explicit_timezone = stored_timezone(frame.timezone)
+    try:
+        timezone_update_hour = int(
+            defaults.get("timezoneUpdateHour", DEFAULT_TIMEZONE_UPDATE_HOUR) or DEFAULT_TIMEZONE_UPDATE_HOUR
+        )
+    except (TypeError, ValueError):
+        timezone_update_hour = DEFAULT_TIMEZONE_UPDATE_HOUR
+    if timezone_update_hour < 0 or timezone_update_hour > 23:
+        timezone_update_hour = DEFAULT_TIMEZONE_UPDATE_HOUR
+    timezone_update_url = str(defaults.get("timezoneUpdateUrl") or DEFAULT_TIMEZONE_UPDATE_URL).strip()
     fallback_dimensions = device_dimensions(frame.device)
     frame_json: dict = {
         **({"frameosVersion": frameos_version} if isinstance(frameos_version, str) and frameos_version else {}),
@@ -560,8 +571,15 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
             "silentWindowMinutes": error_behavior["silent_window_minutes"],
             "showErrorRetrySeconds": error_behavior["show_error_retry_seconds"],
         },
+        "timeZoneUpdates": {
+            "enabled": bool(defaults.get("timezoneUpdateEnabled", True)),
+            "hour": timezone_update_hour,
+            "url": timezone_update_url,
+        },
     }
-    if (frame.mode or "rpios") == "buildroot":
+    if explicit_timezone:
+        frame_json["timeZone"] = explicit_timezone
+    elif (frame.mode or "rpios") == "buildroot":
         frame_json["timeZone"] = frame_timezone(frame.timezone, default_timezone)
 
     schedule = frame.schedule

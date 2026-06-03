@@ -248,7 +248,7 @@ async def test_get_frame_json_uses_frame_timezone_or_global_default(_mock_publis
 
 @pytest.mark.asyncio
 @patch("app.models.frame.publish_message", new_callable=AsyncMock)
-async def test_get_frame_json_does_not_set_timezone_for_rpios(_mock_publish, db, redis):
+async def test_get_frame_json_uses_explicit_timezone_for_rpios(_mock_publish, db, redis):
     frame = await new_frame(db, redis, "FrameJson", "host", "server_host.com")
     db.add(Settings(project_id=frame.project_id, key="defaults", value={"timezone": "Europe/Brussels"}))
     db.commit()
@@ -257,7 +257,59 @@ async def test_get_frame_json_does_not_set_timezone_for_rpios(_mock_publish, db,
 
     data = get_frame_json(db, frame)
 
+    assert data["timeZone"] == "America/New_York"
+
+
+@pytest.mark.asyncio
+@patch("app.models.frame.publish_message", new_callable=AsyncMock)
+async def test_get_frame_json_does_not_default_timezone_for_rpios(_mock_publish, db, redis):
+    frame = await new_frame(db, redis, "FrameJson", "host", "server_host.com")
+    db.add(Settings(project_id=frame.project_id, key="defaults", value={"timezone": "Europe/Brussels"}))
+    db.commit()
+    frame.mode = "rpios"
+    frame.timezone = None
+
+    data = get_frame_json(db, frame)
+
     assert "timeZone" not in data
+
+
+@pytest.mark.asyncio
+@patch("app.models.frame.publish_message", new_callable=AsyncMock)
+async def test_get_frame_json_preserves_unknown_explicit_timezone_for_rpios(_mock_publish, db, redis):
+    frame = await new_frame(db, redis, "FrameJson", "host", "server_host.com")
+    frame.mode = "rpios"
+    frame.timezone = "Custom/Zone"
+
+    data = get_frame_json(db, frame)
+
+    assert data["timeZone"] == "Custom/Zone"
+
+
+@pytest.mark.asyncio
+@patch("app.models.frame.publish_message", new_callable=AsyncMock)
+async def test_get_frame_json_includes_timezone_update_settings(_mock_publish, db, redis):
+    frame = await new_frame(db, redis, "FrameJson", "host", "server_host.com")
+    db.add(
+        Settings(
+            project_id=frame.project_id,
+            key="defaults",
+            value={
+                "timezoneUpdateEnabled": False,
+                "timezoneUpdateHour": 5,
+                "timezoneUpdateUrl": "https://example.com/tzdata.json.gz",
+            },
+        )
+    )
+    db.commit()
+
+    data = get_frame_json(db, frame)
+
+    assert data["timeZoneUpdates"] == {
+        "enabled": False,
+        "hour": 5,
+        "url": "https://example.com/tzdata.json.gz",
+    }
 
 
 def test_normalize_frame_admin_auth_keeps_password_whitespace():

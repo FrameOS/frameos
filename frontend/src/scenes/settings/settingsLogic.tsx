@@ -11,11 +11,17 @@ import { showWorkingMessage } from '../../utils/workingMessage'
 import { isFrameControlMode } from '../../utils/frameControlMode'
 import { guessBrowserTimezone } from '../../utils/timezone'
 
+export const DEFAULT_TIMEZONE_UPDATE_URL = 'https://tz.frameos.net/tzdata.json.gz'
+export const DEFAULT_TIMEZONE_UPDATE_HOUR = 3
+
 function setDefaultSettings(settings: Partial<FrameOSSettings> | Record<string, any>): FrameOSSettings {
   return {
     ...settings,
     defaults: {
       timezone: guessBrowserTimezone(),
+      timezoneUpdateEnabled: true,
+      timezoneUpdateHour: DEFAULT_TIMEZONE_UPDATE_HOUR,
+      timezoneUpdateUrl: DEFAULT_TIMEZONE_UPDATE_URL,
       wifiSSID: '',
       wifiPassword: '',
       ...(settings.defaults ?? {}),

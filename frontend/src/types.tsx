@@ -632,6 +632,9 @@ export type PanelWithMetadata = {
 export interface FrameOSSettings {
   defaults?: {
     timezone?: string
+    timezoneUpdateEnabled?: boolean
+    timezoneUpdateHour?: number
+    timezoneUpdateUrl?: string
     wifiSSID?: string
     wifiPassword?: string
   }

@@ -13,7 +13,6 @@ import frameos/utils/http_client
 import lib/tz
 
 const
-  TimeZoneUpdateHour* = 3
   TimeZoneUpdateMinute* = 0
   TimeZoneGzipMaxBytes = 4 * 1024 * 1024
   TimeZoneJsonMaxBytes = 8 * 1024 * 1024
@@ -54,10 +53,28 @@ proc normalizeSha256(value: string): string =
     if ch notin {'0'..'9', 'a'..'f'}:
       raise newException(ValueError, "Timezone data has an invalid sha256")
 
-proc shouldRunTimezoneUpdate*(dt: DateTime, lastRunDate: string): bool =
+proc timezoneUpdateHour*(frameConfig: FrameConfig): int =
+  result = 3
+  if frameConfig != nil and frameConfig.timeZoneUpdates != nil:
+    result = frameConfig.timeZoneUpdates.hour
+  if result < 0 or result > 23:
+    result = 3
+
+proc timezoneUpdateUrl*(frameConfig: FrameConfig): string =
+  result = TimeZoneDataGzipUrl
+  if frameConfig != nil and frameConfig.timeZoneUpdates != nil and frameConfig.timeZoneUpdates.url.strip().len > 0:
+    result = frameConfig.timeZoneUpdates.url.strip()
+
+proc timezoneUpdatesEnabled*(frameConfig: FrameConfig): bool =
+  result = true
+  if frameConfig != nil and frameConfig.timeZoneUpdates != nil:
+    result = frameConfig.timeZoneUpdates.enabled
+
+proc shouldRunTimezoneUpdate*(dt: DateTime, lastRunDate: string, updateHour = 3): bool =
   let today = dt.format("yyyy-MM-dd")
   let currentMinute = dt.hour * 60 + dt.minute
-  let updateMinute = TimeZoneUpdateHour * 60 + TimeZoneUpdateMinute
+  let normalizedHour = if updateHour >= 0 and updateHour <= 23: updateHour else: 3
+  let updateMinute = normalizedHour * 60 + TimeZoneUpdateMinute
   result = currentMinute >= updateMinute and today != lastRunDate
 
 proc localTimezoneHash(): string =
@@ -90,13 +107,17 @@ proc runTimezoneUpdateOnce*(frameConfig: FrameConfig, logger: Logger): TimeZoneU
   if frameConfig == nil:
     logTimezoneUpdate(logger, %*{"event": "timezone:update", "state": "skipped", "reason": "missing-frame-config"})
     return tzUpdateSkipped
+  if not timezoneUpdatesEnabled(frameConfig):
+    logTimezoneUpdate(logger, %*{"event": "timezone:update", "state": "skipped", "reason": "disabled"})
+    return tzUpdateSkipped
 
+  let updateUrl = timezoneUpdateUrl(frameConfig)
   let headers = newHttpHeaders([
     ("Accept", "application/gzip"),
   ])
   createDir(parentDir(timeZoneDataPath()))
   let remote = boundedHeadMetadata(
-    TimeZoneDataGzipUrl,
+    updateUrl,
     headers = headers,
     timeoutMs = TimeZoneUpdateTimeoutMs,
     maxBytes = TimeZoneGzipMaxBytes,
@@ -115,7 +136,7 @@ proc runTimezoneUpdateOnce*(frameConfig: FrameConfig, logger: Logger): TimeZoneU
 
   let currentHash = localTimezoneHash()
   var compressed = boundedGetContent(
-    TimeZoneDataGzipUrl,
+    updateUrl,
     headers = headers,
     timeoutMs = TimeZoneUpdateTimeoutMs,
     maxBytes = TimeZoneGzipMaxBytes,
@@ -174,7 +195,7 @@ proc start(self: FrameOS) =
   var lastRunDate = ""
   while true:
     let dt = now()
-    if shouldRunTimezoneUpdate(dt, lastRunDate):
+    if timezoneUpdatesEnabled(self.frameConfig) and shouldRunTimezoneUpdate(dt, lastRunDate, timezoneUpdateHour(self.frameConfig)):
       lastRunDate = dt.format("yyyy-MM-dd")
       try:
         discard runTimezoneUpdateOnce(self.frameConfig, self.logger)

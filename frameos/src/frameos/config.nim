@@ -32,6 +32,12 @@ proc setConfigDefaults*(config: var FrameConfig) =
   if config.errorBehavior.silentWindowMinutes <= 0: config.errorBehavior.silentWindowMinutes = 10
   if config.errorBehavior.showErrorRetrySeconds <= 0: config.errorBehavior.showErrorRetrySeconds = 60
   if config.timeZone == "": config.timeZone = detectSystemTimeZone()
+  if config.timeZoneUpdates == nil:
+    config.timeZoneUpdates = TimeZoneUpdatesConfig(enabled: true, hour: 3, url: "https://tz.frameos.net/tzdata.json.gz")
+  if config.timeZoneUpdates.hour < 0 or config.timeZoneUpdates.hour > 23:
+    config.timeZoneUpdates.hour = 3
+  if config.timeZoneUpdates.url == "":
+    config.timeZoneUpdates.url = "https://tz.frameos.net/tzdata.json.gz"
 
 proc loadSchedule*(data: JsonNode): FrameSchedule =
   result = FrameSchedule(events: @[])
@@ -182,6 +188,20 @@ proc loadErrorBehavior*(data: JsonNode): ErrorBehaviorConfig =
   if result.silentWindowMinutes <= 0: result.silentWindowMinutes = 10
   if result.showErrorRetrySeconds <= 0: result.showErrorRetrySeconds = 60
 
+proc loadTimeZoneUpdates*(data: JsonNode): TimeZoneUpdatesConfig =
+  if data == nil or data.kind != JObject:
+    result = TimeZoneUpdatesConfig(enabled: true, hour: 3, url: "https://tz.frameos.net/tzdata.json.gz")
+  else:
+    result = TimeZoneUpdatesConfig(
+      enabled: data{"enabled"}.getBool(true),
+      hour: data{"hour"}.getInt(3),
+      url: data{"url"}.getStr("https://tz.frameos.net/tzdata.json.gz"),
+    )
+  if result.hour < 0 or result.hour > 23:
+    result.hour = 3
+  if result.url == "":
+    result.url = "https://tz.frameos.net/tzdata.json.gz"
+
 proc getConfigFilename*(overridePath = ""): string =
   if overridePath.len > 0:
     return overridePath
@@ -237,6 +257,7 @@ proc loadConfig*(configPath = ""): FrameConfig =
     logToFile: data{"logToFile"}.getStr(),
     debug: data{"debug"}.getBool() or commandLineParams().contains("--debug"),
     timeZone: data{"timeZone"}.getStr(""),
+    timeZoneUpdates: loadTimeZoneUpdates(data{"timeZoneUpdates"}),
     schedule: loadSchedule(data{"schedule"}),
     gpioButtons: loadGPIOButtons(data{"gpioButtons"}),
     controlCode: loadControlCode(data{"controlCode"}),
@@ -290,6 +311,7 @@ proc updateFrameConfigFrom*(target: FrameConfig, source: FrameConfig) =
   target.logToFile = source.logToFile
   target.debug = source.debug
   target.timeZone = source.timeZone
+  target.timeZoneUpdates = source.timeZoneUpdates
   target.gpioButtons = source.gpioButtons
   target.controlCode = source.controlCode
   target.network = source.network

@@ -283,7 +283,7 @@ proc setupFrameOS*(configPath = ""): SetupResult =
   else:
     echo "FrameOS setup: app apt packages: skipped for mode " & frameOS.frameConfig.mode
     echo "FrameOS setup: samba mounts: skipped for mode " & frameOS.frameConfig.mode
-  if frameOS.frameConfig.mode == "buildroot":
+  if frameOS.frameConfig.mode in ["buildroot", "rpios"]:
     addSetupResult(result, runSetupStep("timezone", proc(): SetupResult = setupTimezone(frameOS.frameConfig.timeZone)))
   echo "FrameOS setup: driver setup: starting"
   addSetupResult(result, drivers.setup(frameOS))

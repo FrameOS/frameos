@@ -339,11 +339,32 @@ export function Settings() {
                   <Box className="p-3 space-y-3">
                     <Field
                       name="timezone"
-                      label="Default Buildroot timezone"
-                      tooltip="Used for Buildroot SD card images unless a frame overrides it."
+                      label="Default timezone"
+                      tooltip="Used for Buildroot SD card images unless a frame overrides it. Raspberry Pi OS frames keep their existing timezone until one is set on the frame."
                     >
                       <Select options={timezoneOptions} />
                     </Field>
+                    <Field
+                      name="timezoneUpdateEnabled"
+                      label="Update timezone data"
+                      tooltip="Download updated timezone rules on frames so daylight saving changes stay current."
+                    >
+                      <Switch fullWidth />
+                    </Field>
+                    {settings?.defaults?.timezoneUpdateEnabled ? (
+                      <>
+                        <Field
+                          name="timezoneUpdateHour"
+                          label="Timezone update hour"
+                          tooltip="Hour of day on the frame when timezone data updates run."
+                        >
+                          <NumberTextInput min={0} max={23} placeholder="3" />
+                        </Field>
+                        <Field name="timezoneUpdateUrl" label="Timezone update URL">
+                          <TextInput placeholder="https://tz.frameos.net/tzdata.json.gz" />
+                        </Field>
+                      </>
+                    ) : null}
                     <Field
                       name="wifiSSID"
                       label="Default WiFi network"

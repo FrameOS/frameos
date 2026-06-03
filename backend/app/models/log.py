@@ -7,6 +7,7 @@ from arq import ArqRedis as Redis
 from .frame import Frame, update_frame
 from .metrics import new_metrics
 from app.database import Base
+from app.utils.timezone import stored_timezone
 from sqlalchemy import Integer, String, DateTime, ForeignKey, Text, event, func
 from sqlalchemy.orm import relationship, backref, Session, mapped_column
 from app.websockets import publish_message
@@ -141,6 +142,11 @@ async def process_log(
                 changes[key] = log[key]
             if 'config' in log and key in log['config'] and log['config'][key] is not None and log['config'][key] != getattr(frame, key):
                 changes[key] = log['config'][key]
+        if not frame.timezone:
+            config = log.get("config") if isinstance(log.get("config"), dict) else {}
+            boot_timezone = stored_timezone(config.get("timeZone") or log.get("timeZone"))
+            if boot_timezone:
+                changes["timezone"] = boot_timezone
     if len(changes) > 0:
         if frame.last_log_at is None or timestamp > frame.last_log_at:
             changes['last_log_at'] = timestamp

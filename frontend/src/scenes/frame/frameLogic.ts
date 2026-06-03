@@ -81,6 +81,7 @@ const FRAME_KEYS: (keyof FrameType)[] = [
   'color',
   'device',
   'device_config',
+  'timezone',
   'interval',
   'metrics_interval',
   'max_http_response_bytes',
@@ -107,8 +108,6 @@ const FRAME_KEYS: (keyof FrameType)[] = [
   'buildroot',
   'rpios',
 ]
-
-const FRAME_SUBMIT_KEYS_BUILDROOT: (keyof FrameType)[] = [...FRAME_KEYS, 'timezone']
 
 const FRAME_KEYS_REQUIRE_RECOMPILE_RPIOS: (keyof FrameType)[] = ['device', 'scenes', 'reboot', 'rpios']
 const FRAME_KEYS_REQUIRE_RECOMPILE_BUILDROOT: (keyof FrameType)[] = [
@@ -147,6 +146,7 @@ const FRAME_KEY_LABELS: Partial<Record<keyof FrameType, string>> = {
   color: 'Color support',
   device: 'Device',
   device_config: 'Device config',
+  timezone: 'Timezone',
   interval: 'Refresh interval',
   metrics_interval: 'Metrics interval',
   max_http_response_bytes: 'HTTP response size limit',
@@ -196,6 +196,7 @@ const DEPLOYMENT_SUMMARY_KEYS: (keyof FrameType)[] = [
   'color',
   'device',
   'device_config',
+  'timezone',
   'interval',
   'metrics_interval',
   'max_http_response_bytes',
@@ -262,7 +263,7 @@ function getRecompileFields(mode: FrameType['mode']): (keyof FrameType)[] {
 }
 
 function frameSubmitKeys(frame: Partial<FrameType>): (keyof FrameType)[] {
-  return (frame.mode ?? 'rpios') === 'buildroot' ? FRAME_SUBMIT_KEYS_BUILDROOT : FRAME_KEYS
+  return FRAME_KEYS
 }
 
 export function normalizeSceneForComparison(
