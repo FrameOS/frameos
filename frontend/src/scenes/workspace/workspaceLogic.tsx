@@ -6,6 +6,7 @@ import { FrameScene, FrameType } from '../../types'
 import { urls } from '../../urls'
 import { applyFrameosTheme } from '../../utils/frameosTheme'
 import { DeployDrawerView, frameLogic } from '../frame/frameLogic'
+import { controlLogic } from '../frame/panels/Scenes/controlLogic'
 import { newFrameForm } from '../frames/newFrameForm'
 import type { workspaceLogicType } from './workspaceLogicType'
 
@@ -383,6 +384,12 @@ function sceneUtilityPanelFromHashValue(value: string | null): SceneUtilityPanel
 
 function utilityDrawerHashPanel(hash: Record<string, unknown> = router.values.hashParams): SceneUtilityPanel | null {
   return sceneUtilityPanelFromHashValue(searchValue(hash, UTILITY_DRAWER_HASH_KEY))
+}
+
+function reloadFrameStates(frameId: number | null): void {
+  if (frameId) {
+    controlLogic({ frameId }).actions.sync()
+  }
 }
 
 function utilityDrawerOpenHash(
@@ -1221,6 +1228,11 @@ export const workspaceLogic = kea<workspaceLogicType>([
         const nextFrameActions = frameLogic({ frameId }).actions
         nextFrameActions.showDeployPlanModal()
       },
+      openUtilityPanel: ({ panel }) => {
+        if (panel === 'state') {
+          reloadFrameStates(values.selectedFrameId)
+        }
+      },
       [newFrameForm.actionTypes.showForm]: preserveFramesScroll,
       [newFrameForm.actionTypes.hideForm]: preserveFramesScroll,
       [newFrameForm.actionTypes.frameCreated]: ({ frameId, installMethod }) => {
@@ -1275,6 +1287,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
       },
       openScenePreview: ({ frameId, sceneId }) => {
         actions.setRouteSelection(frameId, sceneId)
+        reloadFrameStates(frameId)
         router.actions.push(
           urls.scenes(frameId, sceneId),
           {},
