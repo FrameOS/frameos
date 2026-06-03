@@ -1401,22 +1401,36 @@ export function FrameSettings({
               label="Update timezone data"
               tooltip="Download updated timezone rules on this frame so daylight saving changes stay current."
             >
-              <Switch fullWidth />
+              {({ value, onChange }) => {
+                const enabled = value ?? true
+                return (
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-3">
+                      <Switch value={enabled} onChange={onChange} />
+                      {enabled ? (
+                        <details>
+                          <summary className="frameos-link cursor-pointer list-none text-sm font-semibold">
+                            advanced
+                          </summary>
+                          <div className="mt-3 space-y-2">
+                            <Field
+                              name="hour"
+                              label="Timezone update hour"
+                              tooltip="Hour of day on the frame when timezone data updates run."
+                            >
+                              <NumberTextInput min={0} max={23} placeholder={String(DEFAULT_TIMEZONE_UPDATE_HOUR)} />
+                            </Field>
+                            <Field name="url" label="Timezone update URL">
+                              <TextInput placeholder={DEFAULT_TIMEZONE_UPDATE_URL} />
+                            </Field>
+                          </div>
+                        </details>
+                      ) : null}
+                    </div>
+                  </div>
+                )
+              }}
             </Field>
-            {frameForm.timezone_settings?.enabled ? (
-              <>
-                <Field
-                  name="hour"
-                  label="Timezone update hour"
-                  tooltip="Hour of day on the frame when timezone data updates run."
-                >
-                  <NumberTextInput min={0} max={23} placeholder={String(DEFAULT_TIMEZONE_UPDATE_HOUR)} />
-                </Field>
-                <Field name="url" label="Timezone update URL">
-                  <TextInput placeholder={DEFAULT_TIMEZONE_UPDATE_URL} />
-                </Field>
-              </>
-            ) : null}
           </Group>
           <Field
             name="max_http_response_bytes"

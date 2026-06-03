@@ -524,6 +524,31 @@ async def test_api_frame_get_image_returns_cache_when_refresh_fails(async_client
 
 
 @pytest.mark.asyncio
+async def test_api_frame_get_image_returns_error_png_when_refresh_fails_without_cache(async_client, db, redis):
+    frame = await new_frame(db, redis, 'NoCacheFailingImageFrame', 'localhost', 'localhost')
+    frame.width = 320
+    frame.height = 240
+    db.add(frame)
+    db.commit()
+    cache_key = frames_api._frame_image_cache_key(frame.id)
+    await redis.delete(cache_key)
+
+    async def mock_fetch(frame_obj, redis_obj, *, path, method="GET"):
+        raise HTTPException(status_code=502, detail='All connection attempts failed')
+
+    with patch('app.api.frames._fetch_frame_http_bytes', side_effect=mock_fetch):
+        response = await async_client.get(f'/api/frames/{frame.id}/image?t=123')
+
+    assert response.status_code == 200
+    assert response.headers['content-type'].startswith('image/png')
+    assert response.headers['x-frameos-image-state'] == 'error'
+    assert response.headers['x-frameos-image-error-status'] == '502'
+    assert not response.content.startswith(b'{"detail"')
+    with Image.open(io.BytesIO(response.content)) as image:
+        assert image.size == (320, 240)
+
+
+@pytest.mark.asyncio
 async def test_api_frame_get_image_uses_redis_refresh_lock(async_client, db, redis):
     frame = await new_frame(db, redis, 'RedisLockedImageFrame', 'localhost', 'localhost')
     cache_key = frames_api._frame_image_cache_key(frame.id)
@@ -915,6 +940,58 @@ async def test_api_frame_update_preserves_custom_timezone_string(async_client, d
     db.expire_all()
     updated_frame = db.get(Frame, frame.id)
     assert updated_frame.timezone == "Custom/Zone"
+
+
+@pytest.mark.asyncio
+async def test_api_frame_update_compacts_timezone_settings(async_client, db, redis):
+    frame = await new_frame(db, redis, 'TimezoneSettingsFrame', 'localhost', 'localhost')
+    frame.timezone_settings = {
+        "enabled": True,
+        "hour": 3,
+        "url": "https://tz.frameos.net/tzdata.json.gz",
+    }
+    db.add(frame)
+    db.commit()
+
+    resp = await async_client.post(
+        f'/api/frames/{frame.id}',
+        json={
+            "timezone_settings": {
+                "enabled": True,
+                "hour": 3,
+                "url": "https://tz.frameos.net/tzdata.json.gz",
+            }
+        },
+    )
+
+    assert resp.status_code == 200
+    db.expire_all()
+    updated_frame = db.get(Frame, frame.id)
+    assert updated_frame.timezone_settings is None
+
+
+@pytest.mark.asyncio
+async def test_api_frame_update_keeps_custom_timezone_settings(async_client, db, redis):
+    frame = await new_frame(db, redis, 'CustomTimezoneSettingsFrame', 'localhost', 'localhost')
+
+    resp = await async_client.post(
+        f'/api/frames/{frame.id}',
+        json={
+            "timezone_settings": {
+                "enabled": True,
+                "hour": 5,
+                "url": "https://example.com/tzdata.json.gz",
+            }
+        },
+    )
+
+    assert resp.status_code == 200
+    db.expire_all()
+    updated_frame = db.get(Frame, frame.id)
+    assert updated_frame.timezone_settings == {
+        "hour": 5,
+        "url": "https://example.com/tzdata.json.gz",
+    }
 
 
 @pytest.mark.asyncio

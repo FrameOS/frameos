@@ -46,6 +46,7 @@ from app.database import SessionLocal, get_db
 from arq import ArqRedis as Redis
 from app.models.frame import (
     Frame,
+    compact_timezone_settings,
     new_frame,
     delete_frame,
     normalize_error_behavior,
@@ -474,11 +475,16 @@ async def _wait_for_cached_frame_image(redis: Redis, cache_key: str) -> bytes | 
     return await _get_cached_frame_image(redis, cache_key)
 
 
-def _frame_image_placeholder(frame: Frame) -> bytes:
+def _frame_image_dimensions(frame: Frame) -> tuple[int, int]:
     width = int(frame.width or 800)
     height = int(frame.height or 600)
     if frame.rotate in (90, 270):
         width, height = height, width
+    return width, height
+
+
+def _frame_image_placeholder(frame: Frame) -> bytes:
+    width, height = _frame_image_dimensions(frame)
     return render_line_of_text_png("no image", width, height)
 
 
@@ -487,6 +493,19 @@ def _frame_image_placeholder_response(frame: Frame) -> Response:
         content=_frame_image_placeholder(frame),
         media_type="image/png",
         headers=FRAME_IMAGE_PLACEHOLDER_HEADERS,
+    )
+
+
+def _frame_image_error_response(frame: Frame, detail: str, status_code: int | None = None) -> Response:
+    width, height = _frame_image_dimensions(frame)
+    headers = {
+        "x-frameos-image-state": "error",
+        **({"x-frameos-image-error-status": str(status_code)} if status_code else {}),
+    }
+    return Response(
+        content=render_line_of_text_png(detail or "image error", width, height),
+        media_type="image/png",
+        headers=headers,
     )
 
 
@@ -1814,7 +1833,7 @@ async def api_frame_get_image(
                     "stderr",
                     f"Error fetching image from frame {id}: {status} {body.decode(errors='ignore')}",
                 )
-                raise HTTPException(status_code=status, detail="Unable to fetch image")
+                return _frame_image_error_response(frame, "Unable to fetch image", status)
 
         except httpx.ReadTimeout:
             if cached:
@@ -1826,13 +1845,18 @@ async def api_frame_get_image(
                 "stderr",
                 f"Error fetching image from frame {id}: request timeout",
             )
-            raise HTTPException(
-                status_code=HTTPStatus.REQUEST_TIMEOUT, detail="Request Timeout"
-            )
-        except HTTPException:
+            return _frame_image_error_response(frame, "Request Timeout", HTTPStatus.REQUEST_TIMEOUT)
+        except HTTPException as exc:
             if cached:
                 return Response(content=cached, media_type="image/png")
-            raise
+            await log(
+                db,
+                redis,
+                id,
+                "stderr",
+                f"Error fetching image from frame {id}: {exc.status_code}: {exc.detail}",
+            )
+            return _frame_image_error_response(frame, str(exc.detail), exc.status_code)
         except Exception as e:
             if cached:
                 return Response(content=cached, media_type="image/png")
@@ -1843,9 +1867,7 @@ async def api_frame_get_image(
                 "stderr",
                 f"Error fetching image from frame {id}: {str(e)}",
             )
-            raise HTTPException(
-                status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e)
-            )
+            return _frame_image_error_response(frame, str(e), HTTPStatus.INTERNAL_SERVER_ERROR)
         finally:
             if refresh_lock_acquired:
                 with contextlib.suppress(Exception):
@@ -2669,6 +2691,8 @@ async def api_frame_update_endpoint(
 
     if "timezone" in update_data:
         frame.timezone = stored_timezone(frame.timezone) or None
+    if "timezone_settings" in update_data:
+        frame.timezone_settings = compact_timezone_settings(frame.timezone_settings)
 
     if "https_proxy" in update_data:
         frame.https_proxy = normalize_https_proxy(frame.https_proxy)

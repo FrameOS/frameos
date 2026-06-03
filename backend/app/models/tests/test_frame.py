@@ -38,6 +38,7 @@ async def test_new_frame(mock_publish, db, redis):
     assert frame.max_http_response_bytes == 64 * 1024 * 1024
     assert frame.reboot == {"enabled": "true", "crontab": "0 4 * * *"}
     assert frame.server_send_logs is True
+    assert frame.timezone_settings is None
     assert frame.https_proxy["enable"] is True
     assert frame.https_proxy["expose_only_port"] is True
     assert frame.https_proxy["certs"]["server"] and "BEGIN CERTIFICATE" in frame.https_proxy["certs"]["server"]
@@ -303,6 +304,21 @@ async def test_get_frame_json_includes_timezone_update_settings(_mock_publish, d
         "enabled": False,
         "hour": 5,
         "url": "https://example.com/tzdata.json.gz",
+    }
+
+
+@pytest.mark.asyncio
+@patch("app.models.frame.publish_message", new_callable=AsyncMock)
+async def test_get_frame_json_resolves_default_timezone_update_settings(_mock_publish, db, redis):
+    frame = await new_frame(db, redis, "FrameJson", "host", "server_host.com")
+    db.commit()
+
+    data = get_frame_json(db, frame)
+
+    assert data["timeZoneUpdates"] == {
+        "enabled": True,
+        "hour": 3,
+        "url": "https://tz.frameos.net/tzdata.json.gz",
     }
 
 

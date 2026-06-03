@@ -56,7 +56,7 @@ export interface FrameType {
     enabled?: boolean
     hour?: number
     url?: string
-  }
+  } | null
   device_config?: {
     vcom?: number
     uploadUrl?: string

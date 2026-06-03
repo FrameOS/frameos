@@ -241,11 +241,36 @@ function normalizeTimezoneUpdateHour(value: unknown): number {
 function normalizeTimezoneSettings(
   value: FrameType['timezone_settings'] | null | undefined
 ): NonNullable<FrameType['timezone_settings']> {
-  return {
+  const settings: NonNullable<FrameType['timezone_settings']> = {
     enabled: value?.enabled ?? true,
-    hour: normalizeTimezoneUpdateHour(value?.hour),
-    url: value?.url || DEFAULT_TIMEZONE_UPDATE_URL,
   }
+  if (value?.hour !== undefined) {
+    const hour = normalizeTimezoneUpdateHour(value.hour)
+    if (hour !== DEFAULT_TIMEZONE_UPDATE_HOUR) {
+      settings.hour = hour
+    }
+  }
+  if (value?.url && value.url !== DEFAULT_TIMEZONE_UPDATE_URL) {
+    settings.url = value.url
+  }
+  return settings
+}
+
+function compactTimezoneSettingsForSubmit(
+  value: FrameType['timezone_settings'] | null | undefined
+): FrameType['timezone_settings'] | null {
+  const settings = normalizeTimezoneSettings(value)
+  const compact: NonNullable<FrameType['timezone_settings']> = {}
+  if (settings.enabled === false) {
+    compact.enabled = false
+  }
+  if (settings.hour !== undefined && settings.hour !== DEFAULT_TIMEZONE_UPDATE_HOUR) {
+    compact.hour = settings.hour
+  }
+  if (settings.url && settings.url !== DEFAULT_TIMEZONE_UPDATE_URL) {
+    compact.url = settings.url
+  }
+  return Object.keys(compact).length ? compact : null
 }
 
 export function normalizeFrameErrorBehavior(errorBehavior?: Partial<FrameErrorBehavior> | null): FrameErrorBehavior {
@@ -888,7 +913,11 @@ function sanitizeFrame(frame: Partial<FrameType>): Partial<FrameType> {
 }
 
 function normalizeFrameForSubmit(frame: Partial<FrameType>): Partial<FrameType> {
-  return frame.mode === 'buildroot' ? { ...frame, assets_path: '/srv/assets' } : frame
+  const normalizedFrame = {
+    ...frame,
+    timezone_settings: compactTimezoneSettingsForSubmit(frame.timezone_settings),
+  }
+  return normalizedFrame.mode === 'buildroot' ? { ...normalizedFrame, assets_path: '/srv/assets' } : normalizedFrame
 }
 
 function preferSshTransportWhenAgentUnavailable(

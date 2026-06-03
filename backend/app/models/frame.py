@@ -196,7 +196,7 @@ def normalize_timezone_update_url(value: Any) -> str:
     return url or DEFAULT_TIMEZONE_UPDATE_URL
 
 
-def normalize_timezone_settings(timezone_settings: Any) -> dict:
+def resolve_timezone_settings(timezone_settings: Any) -> dict:
     config = timezone_settings if isinstance(timezone_settings, dict) else {}
 
     return {
@@ -204,6 +204,23 @@ def normalize_timezone_settings(timezone_settings: Any) -> dict:
         "hour": normalize_timezone_update_hour(config.get("hour")),
         "url": normalize_timezone_update_url(config.get("url")),
     }
+
+
+def compact_timezone_settings(timezone_settings: Any, include_enabled_default: bool = False) -> dict | None:
+    if not isinstance(timezone_settings, dict):
+        return {"enabled": True} if include_enabled_default else None
+
+    resolved = resolve_timezone_settings(timezone_settings)
+    compact: dict[str, Any] = {}
+
+    if include_enabled_default or resolved["enabled"] is not True:
+        compact["enabled"] = resolved["enabled"]
+    if "hour" in timezone_settings and resolved["hour"] != DEFAULT_TIMEZONE_UPDATE_HOUR:
+        compact["hour"] = resolved["hour"]
+    if "url" in timezone_settings and resolved["url"] != DEFAULT_TIMEZONE_UPDATE_URL:
+        compact["url"] = resolved["url"]
+
+    return compact or None
 
 
 # NB! Update frontend/src/types.tsx if you change this
@@ -303,7 +320,7 @@ class Frame(Base):
             'device_config': self.device_config,
             'color': self.color,
             'timezone': self.timezone,
-            'timezone_settings': normalize_timezone_settings(self.timezone_settings),
+            'timezone_settings': compact_timezone_settings(self.timezone_settings, include_enabled_default=True),
             'interval': self.interval,
             'metrics_interval': self.metrics_interval,
             'max_http_response_bytes': self.max_http_response_bytes or DEFAULT_MAX_HTTP_RESPONSE_BYTES,
@@ -413,11 +430,7 @@ async def new_frame(
         rotate=0,
         device=device or "web_only",
         timezone=None,
-        timezone_settings={
-            "enabled": True,
-            "hour": DEFAULT_TIMEZONE_UPDATE_HOUR,
-            "url": DEFAULT_TIMEZONE_UPDATE_URL,
-        },
+        timezone_settings=None,
         log_to_file=None, # spare the SD card from load
         assets_path='/srv/assets',
         save_assets=True,
@@ -507,7 +520,7 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
     defaults = all_settings.get("defaults") or {}
     default_timezone = defaults.get("timezone")
     explicit_timezone = stored_timezone(frame.timezone)
-    timezone_settings = normalize_timezone_settings(frame.timezone_settings)
+    timezone_settings = resolve_timezone_settings(frame.timezone_settings)
     fallback_dimensions = device_dimensions(frame.device)
     frame_json: dict = {
         **({"frameosVersion": frameos_version} if isinstance(frameos_version, str) and frameos_version else {}),
