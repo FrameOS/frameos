@@ -2,7 +2,7 @@ import { afterMount, kea, path } from 'kea'
 import { forms } from 'kea-forms'
 import type { signupLogicType } from './signupLogicType'
 import { urls } from '../../urls'
-import { userExists } from '../../utils/apiFetch'
+import { firstUserStatus } from '../../utils/apiFetch'
 import { clearCachedProjectId } from '../../utils/projectApi'
 
 export interface SignupForm {
@@ -71,9 +71,12 @@ export const signupLogic = kea<signupLogicType>([
       },
     },
   })),
-  afterMount(async ({ actions }) => {
-    if (await userExists()) {
+  afterMount(async () => {
+    const status = await firstUserStatus()
+    if (status === 'exists') {
       window.location.href = urls.login()
+    } else if (status === 'unknown') {
+      window.location.href = urls.setupUnavailable()
     }
   }),
 ])

@@ -1,10 +1,11 @@
-import { kea, path } from 'kea'
+import { afterMount, kea, path } from 'kea'
 
 import { forms } from 'kea-forms'
 
 import type { loginLogicType } from './loginLogicType'
 import { urls } from '../../urls'
 import { clearCachedProjectId } from '../../utils/projectApi'
+import { getBasePath } from '../../utils/getBasePath'
 
 export interface LoginLogicForm {
   email: string
@@ -59,4 +60,18 @@ export const loginLogic = kea<loginLogicType>([
       },
     },
   })),
+  afterMount(async () => {
+    try {
+      const response = await fetch(`${getBasePath()}/api/user`, {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+        credentials: 'include',
+      })
+      if (response.ok) {
+        window.location.href = urls.frames()
+      }
+    } catch (error) {
+      console.error('Error checking current user:', error)
+    }
+  }),
 ])
