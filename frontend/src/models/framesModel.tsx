@@ -27,6 +27,20 @@ function agentTaskQuery(params: { recompile?: boolean; transport?: AgentTaskTran
   return queryString ? `?${queryString}` : ''
 }
 
+function deployTaskId(frameId: number, fastDeploy: boolean): string {
+  const random =
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`
+  return `${fastDeploy ? 'fast-deploy' : 'deploy'}:${frameId}:${random}`
+}
+
+function taskIdQuery(taskId: string): string {
+  const query = new URLSearchParams()
+  query.set('task_id', taskId)
+  return `?${query.toString()}`
+}
+
 function sanitizeFrameForStore(frame: FrameType): FrameType {
   const lastSuccessfulDeploy = frame.last_successful_deploy
   return {
@@ -281,7 +295,9 @@ export const framesModel = kea<framesModelType>([
       }
     },
     deployFrame: async ({ id, fastDeploy }) => {
+      const taskId = deployTaskId(id, fastDeploy)
       longRunningTasksModel.actions.startTask({
+        id: taskId,
         frameId: id,
         kind: 'deploy',
         title: fastDeploy ? 'Fast deploying frame' : 'Deploying frame',
@@ -289,13 +305,14 @@ export const framesModel = kea<framesModelType>([
       })
       try {
         const response = fastDeploy
-          ? await apiFetch(`/api/frames/${id}/fast_deploy`, { method: 'POST' })
-          : await apiFetch(`/api/frames/${id}/deploy`, { method: 'POST' })
+          ? await apiFetch(`/api/frames/${id}/fast_deploy${taskIdQuery(taskId)}`, { method: 'POST' })
+          : await apiFetch(`/api/frames/${id}/deploy${taskIdQuery(taskId)}`, { method: 'POST' })
         if (!response.ok) {
           throw new Error(fastDeploy ? 'Failed to start fast deploy' : 'Failed to start deploy')
         }
       } catch (error) {
         longRunningTasksModel.actions.taskFailed({
+          taskId,
           frameId: id,
           kind: 'deploy',
           detail: error instanceof Error ? error.message : 'Failed to deploy frame',

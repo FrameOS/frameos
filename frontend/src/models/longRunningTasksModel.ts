@@ -74,6 +74,7 @@ const ERRORED_TASK_DISMISS_MS = 12000
 const RENDER_SIGNAL_TIMEOUT_MS = 45000
 const AGENT_DEPLOY_SIGNAL_TIMEOUT_MS = 15 * 60 * 1000
 const AGENT_RESTART_SIGNAL_TIMEOUT_MS = 90 * 1000
+const DEPLOY_SIGNAL_TIMEOUT_MS = 30 * 60 * 1000
 const DEPLOY_ACTIVE_STATUSES = new Set(['deploying', 'preparing', 'restarting', 'starting'])
 const DEPLOY_FAILED_STATUSES = new Set(['uninitialized'])
 const SOCKET_NEW_LOG = 'new log (src.scenes.socketLogic)'
@@ -212,6 +213,21 @@ function parseWebhookEvent(log: LogType): Record<string, any> | null {
   }
 }
 
+function deployTaskSignal(log: LogType): { taskId: string; action: 'started' | 'completed' | 'failed'; detail: string } | null {
+  if (log.type !== 'stdout' && log.type !== 'stderr') {
+    return null
+  }
+  const match = log.line.match(/^\[frameos-task:([A-Za-z0-9_.:-]+)\]\s+deploy\s+(started|completed|failed)\b\s*(.*)$/i)
+  if (!match) {
+    return null
+  }
+  return {
+    taskId: match[1],
+    action: match[2].toLowerCase() as 'started' | 'completed' | 'failed',
+    detail: match[3]?.trim() || '',
+  }
+}
+
 function frameStatus(frame: Partial<FrameType>): string | null {
   return typeof frame.status === 'string' ? frame.status : null
 }
@@ -223,6 +239,10 @@ function isAgentTaskKind(kind?: LongRunningTaskKind): kind is 'agentDeploy' | 'a
 function shouldAppendLogToTask(task: LongRunningTask, log: LogType): boolean {
   if (task.status !== 'running' || task.frameId !== log.frame_id) {
     return false
+  }
+  if (task.kind === 'deploy') {
+    const signal = deployTaskSignal(log)
+    return log.type !== 'webhook' && (!signal || signal.taskId === task.id)
   }
   return !(isAgentTaskKind(task.kind) && log.type === 'webhook')
 }
@@ -364,6 +384,20 @@ export const longRunningTasksModel = kea<longRunningTasksModelType>([
             })
           }
         }, RENDER_SIGNAL_TIMEOUT_MS)
+      } else if (task.kind === 'deploy') {
+        window.setTimeout(() => {
+          const stillRunning = values.tasks.some(
+            (runningTask) => runningTask.id === task.id && runningTask.status === 'running'
+          )
+          if (stillRunning) {
+            actions.taskFailed({
+              taskId: task.id,
+              frameId: task.frameId,
+              kind: task.kind,
+              detail: 'No deploy completion signal received',
+            })
+          }
+        }, DEPLOY_SIGNAL_TIMEOUT_MS)
       } else if (isAgentTaskKind(task.kind)) {
         window.setTimeout(
           () => {
@@ -415,6 +449,25 @@ export const longRunningTasksModel = kea<longRunningTasksModelType>([
     },
     [SOCKET_NEW_LOG]: ({ log }) => {
       const lowerLine = log.line.toLowerCase()
+      const deploySignal = deployTaskSignal(log)
+      if (deploySignal) {
+        if (deploySignal.action === 'completed') {
+          actions.finishTask({
+            taskId: deploySignal.taskId,
+            frameId: log.frame_id,
+            kind: 'deploy',
+            status: 'success',
+            detail: deploySignal.detail === 'fast' ? 'Fast deploy completed' : 'Deploy completed',
+          })
+        } else if (deploySignal.action === 'failed') {
+          actions.taskFailed({
+            taskId: deploySignal.taskId,
+            frameId: log.frame_id,
+            kind: 'deploy',
+            detail: deploySignal.detail || 'Deploy failed',
+          })
+        }
+      }
 
       const agentFailureDetail = agentTaskFailureDetail(log, lowerLine)
       if (agentFailureDetail) {
@@ -549,16 +602,6 @@ export const longRunningTasksModel = kea<longRunningTasksModelType>([
         return
       }
       if (status === 'ready') {
-        const deployTask = latestRunningTask(values.tasks, { frameId: frame.id, kind: 'deploy' })
-        if (!deployTask?.activeStatusSeen) {
-          return
-        }
-        actions.finishTask({
-          frameId: frame.id,
-          kind: 'deploy',
-          status: 'success',
-          detail: 'Frame is ready',
-        })
         return
       }
       if (DEPLOY_FAILED_STATUSES.has(status)) {

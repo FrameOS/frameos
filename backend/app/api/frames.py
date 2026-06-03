@@ -192,6 +192,17 @@ def _bad_request(msg: str):
     raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=msg)
 
 
+def _task_id_param(task_id: str | None) -> str | None:
+    if task_id is None:
+        return None
+    value = task_id.strip()
+    if not value:
+        return None
+    if len(value) > 120 or not re.fullmatch(r"[A-Za-z0-9_.:-]+", value):
+        _bad_request("Invalid task_id")
+    return value
+
+
 def _frame_assets_cache_key(frame_id: int, assets_path: str) -> str:
     path_hash = hashlib.sha1(assets_path.encode()).hexdigest()
     return f"frame:{frame_id}:assets:list:{path_hash}"
@@ -2353,15 +2364,17 @@ async def api_frame_stop_event(
 @api_project.post("/frames/{id:int}/deploy")
 async def api_frame_deploy_event(
     id: int,
+    task_id: str | None = Query(None),
     redis: Redis = Depends(get_redis),
     db: Session = Depends(get_db),
 ):
     frame = _project_frame(db, id) or _not_found()
+    deploy_task_id = _task_id_param(task_id)
     try:
         from app.tasks import deploy_frame
 
-        await deploy_frame(frame.id, redis)
-        return "Success"
+        await deploy_frame(frame.id, redis, task_id=deploy_task_id)
+        return {"message": "Success", "taskId": deploy_task_id}
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
@@ -2556,15 +2569,17 @@ async def api_frame_deploy_plan_preview(
 @api_project.post("/frames/{id:int}/fast_deploy")
 async def api_frame_fast_deploy_event(
     id: int,
+    task_id: str | None = Query(None),
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
     _project_frame(db, id)
+    deploy_task_id = _task_id_param(task_id)
     try:
         from app.tasks import fast_deploy_frame
 
-        await fast_deploy_frame(id, redis)
-        return "Success"
+        await fast_deploy_frame(id, redis, task_id=deploy_task_id)
+        return {"message": "Success", "taskId": deploy_task_id}
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
