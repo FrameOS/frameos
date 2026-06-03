@@ -1,4 +1,4 @@
-import { actions, afterMount, beforeUnmount, connect, kea, key, path, props, reducers, selectors } from 'kea'
+import { actions, afterMount, beforeUnmount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 
 import { MetricsType } from '../../../../types'
 import { loaders } from 'kea-loaders'
@@ -595,6 +595,9 @@ export const metricsLogic = kea<metricsLogicType>([
     setSelectedTimeRangePreset: (preset: MetricsTimeRangePreset) => ({ preset }),
     setCurrentTime: (currentTime: number) => ({ currentTime }),
     toggleMetricSeries: (category: string, seriesKey: string) => ({ category, seriesKey }),
+    requestMetrics: true,
+    requestMetricsSuccess: true,
+    requestMetricsFailure: (error: string) => ({ error }),
   }),
   loaders(({ props }) => ({
     metrics: [
@@ -659,6 +662,14 @@ export const metricsLogic = kea<metricsLogicType>([
         },
       },
     ],
+    requestMetricsLoading: [
+      false,
+      {
+        requestMetrics: () => true,
+        requestMetricsSuccess: () => false,
+        requestMetricsFailure: () => false,
+      },
+    ],
     metrics: {
       [socketLogic.actionTypes.newLog]: (state, { log }) => {
         try {
@@ -688,6 +699,23 @@ export const metricsLogic = kea<metricsLogicType>([
         },
       },
     ],
+  })),
+  listeners(({ actions, props }) => ({
+    requestMetrics: async () => {
+      try {
+        const response = await apiFetch(`/api/frames/${props.frameId}/event/metrics`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        })
+        if (!response.ok) {
+          throw new Error('Failed to request metrics')
+        }
+        actions.requestMetricsSuccess()
+      } catch (error) {
+        actions.requestMetricsFailure(error instanceof Error ? error.message : 'Failed to request metrics')
+      }
+    },
   })),
   selectors({
     sortedMetrics: [

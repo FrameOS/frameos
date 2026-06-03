@@ -273,6 +273,19 @@ proc logMetrics(self: MetricsLoggerThread) =
   }
   log(payload)
 
+proc logMetricsSample(self: MetricsLoggerThread) =
+  try:
+    self.logMetrics()
+  except Exception as e:
+    log(%*{
+      "event": "metrics",
+      "state": "error",
+      "error": e.msg,
+    })
+
+proc logMetricsNow*(frameConfig: FrameConfig) {.gcsafe.} =
+  MetricsLoggerThread(frameConfig: frameConfig).logMetricsSample()
+
 proc runMetricsLoop(self: MetricsLoggerThread, maxIterations = -1) {.gcsafe.} =
   let ms = (self.frameConfig.metricsInterval * 1000).int
   if ms == 0:
@@ -283,14 +296,7 @@ proc runMetricsLoop(self: MetricsLoggerThread, maxIterations = -1) {.gcsafe.} =
       if maxIterations >= 0 and iterations >= maxIterations:
         break
       inc iterations
-      try:
-        self.logMetrics()
-      except Exception as e:
-        log(%*{
-          "event": "metrics",
-          "state": "error",
-          "error": e.msg,
-        })
+      self.logMetricsSample()
       metricsSleepHook(ms)
 
 proc start(self: MetricsLoggerThread) {.gcsafe.} =

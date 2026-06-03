@@ -100,6 +100,33 @@ suite "metrics loop":
     check bootId.allIt(it.isAlphaNumeric())
     check sampleJson["runtime"]["sequence"].getInt() == 0
 
+  test "one-shot metrics request logs one sample when interval is disabled":
+    setMetricsHooksForTest(
+      readFileHook = proc(path: string): string {.gcsafe, nimcall.} =
+        if path == "/proc/loadavg":
+          "0.40 0.50 0.60 1/123 456\n"
+        elif path == "/sys/class/thermal/thermal_zone0/temp":
+          "41000\n"
+        else:
+          raise newException(IOError, "unexpected path"),
+      cpuUsageHook = proc(interval: float): float {.gcsafe, nimcall.} = 10.0,
+      sleepHook = proc(ms: int) {.gcsafe, nimcall.} = discard,
+      memoryUsageHook = proc(): tuple[total, used: int64, percentage: float] {.gcsafe, nimcall.} =
+        (2000'i64, 1000'i64, 50.0),
+      openFileDescriptorsHook = proc(): int {.gcsafe, nimcall.} = 12
+    )
+
+    logMetricsNow(FrameConfig(metricsInterval: 0))
+
+    let (okSample, samplePayload) = logChannel.tryRecv()
+    check okSample
+    check samplePayload.event == "metrics"
+    let sampleJson = logJson(samplePayload)
+    check sampleJson["event"].getStr() == "metrics"
+    check not sampleJson.hasKey("state")
+    check sampleJson["load"][0].getFloat() == 0.4
+    check sampleJson["openFileDescriptors"].getInt() == 12
+
   test "enabled interval includes active runtime diagnostics without debug mode":
     setMetricsHooksForTest(
       readFileHook = proc(path: string): string {.gcsafe, nimcall.} =
