@@ -50,11 +50,11 @@ async def new_metrics(db: Session, redis: Redis, frame_id: int, metrics: dict) -
     if frame is None:
         raise ValueError(f"Frame {frame_id} not found")
 
-    metrics = Metrics(project_id=frame.project_id, frame_id=frame_id, metrics=metrics)
-    db.add(metrics)
+    metric = Metrics(project_id=frame.project_id, frame_id=frame_id, metrics=metrics)
+    db.add(metric)
     db.commit()
     metrics_count = db.query(Metrics).filter_by(project_id=frame.project_id, frame_id=frame_id).count()
-    payload = metrics.to_dict()
+    payload = metric.to_dict()
     if metrics_count > METRICS_RETAINED_PER_FRAME:
         trim_count = metrics_count - METRICS_RETAINED_PER_FRAME
         oldest_metrics = (db.query(Metrics)
@@ -68,4 +68,4 @@ async def new_metrics(db: Session, redis: Redis, frame_id: int, metrics: dict) -
     db.commit()
 
     await publish_message(redis, "new_metrics", payload)
-    return metrics
+    return metric

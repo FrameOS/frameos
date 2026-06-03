@@ -1,5 +1,5 @@
 import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
-import { A } from 'kea-router'
+import { A, router } from 'kea-router'
 import clsx from 'clsx'
 import { useCallback, useLayoutEffect, useRef, type DragEvent, type MouseEvent } from 'react'
 import {
@@ -25,6 +25,7 @@ import { FrameDashboardLoadingSkeleton } from './FrameDashboardLoadingSkeleton'
 import { FrameDeployPlanDrawer } from './FrameDeployPlanDrawer'
 import { FrameSceneSidebarCard } from './FrameSceneSidebarCard'
 import { FrameSidebarPreview } from './FrameSidebarPreview'
+import { FrameMetricAlertIndicator } from './FrameMetricAlertIndicator'
 import { FrameActionsMenu } from './FrameActionsMenu'
 import { sceneWorkspaceLogic } from './sceneWorkspaceLogic'
 import { frameToolScrollKey, isMobileWorkspaceViewport, workspaceLogic, WorkspaceUtilityPanel } from './workspaceLogic'
@@ -34,7 +35,6 @@ import { panelsLogic } from '../frame/panels/panelsLogic'
 import { terminalLogic } from '../frame/panels/Terminal/terminalLogic'
 import { frameSettingsLogic } from '../frame/panels/FrameSettings/frameSettingsLogic'
 import { logsLogic } from '../frame/panels/Logs/logsLogic'
-import { metricsLogic } from '../frame/panels/Metrics/metricsLogic'
 import { controlLogic } from '../frame/panels/Scenes/controlLogic'
 import { RenameSceneModal } from '../frame/panels/Scenes/RenameSceneModal'
 import { templatesLogic } from '../frame/panels/Templates/templatesLogic'
@@ -56,6 +56,7 @@ import {
 } from './sceneDrag'
 import { groupFramesByStatus } from './frameStatusGroups'
 import { sceneTileSummaryLabel } from './sceneTileLabels'
+import { frameMetricsPreviewLogic } from './frameMetricsPreviewLogic'
 
 interface FrameWorkspaceProps {
   id?: string
@@ -247,15 +248,13 @@ const frameToolDefinitions: FrameToolDefinition[] = [
   { panel: 'debug', label: 'Debug', description: 'Diagnostics', icon: <BoltIcon className="h-5 w-5" /> },
 ]
 
-function frameToolPanelFromCurrentLocation(): WorkspaceUtilityPanel | null {
-  if (typeof window === 'undefined') {
-    return null
-  }
-  const tool = new URLSearchParams(window.location.search).get('tool')
+function frameToolPanelFromSearchParams(searchParams: Record<string, unknown>): WorkspaceUtilityPanel | null {
+  const value = searchParams.tool
+  const tool = Array.isArray(value) ? value[0] : value
   if (!tool) {
     return 'overview'
   }
-  return frameToolDefinitions.some((definition) => definition.panel === tool)
+  return typeof tool === 'string' && frameToolDefinitions.some((definition) => definition.panel === tool)
     ? (tool as WorkspaceUtilityPanel)
     : 'overview'
 }
@@ -353,21 +352,27 @@ function FrameSelector({
         ) : null}
       </div>
       <div className="flex items-center gap-2">
-        <select
-          value={frame.id}
-          onChange={(event) => navigateToFrame(parseInt(event.target.value, 10))}
-          className="frameos-form-control min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-blue-400"
-        >
-          {frameGroups.map((group) => (
-            <optgroup key={group.key} label={group.label}>
-              {group.frames.map((candidate) => (
-                <option key={candidate.id} value={candidate.id}>
-                  {candidate.name || frameHost(candidate)}
-                </option>
-              ))}
-            </optgroup>
-          ))}
-        </select>
+        <div className="relative min-w-0 flex-1">
+          <select
+            value={frame.id}
+            onChange={(event) => navigateToFrame(parseInt(event.target.value, 10))}
+            className="frameos-form-control min-w-0 w-full rounded-xl border border-slate-200 bg-white py-2 pl-3 pr-9 text-sm font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-blue-400"
+          >
+            {frameGroups.map((group) => (
+              <optgroup key={group.key} label={group.label}>
+                {group.frames.map((candidate) => (
+                  <option key={candidate.id} value={candidate.id}>
+                    {candidate.name || frameHost(candidate)}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+          <FrameMetricAlertIndicator
+            frame={frame}
+            className="pointer-events-none absolute right-7 top-1/2 -translate-y-1/2"
+          />
+        </div>
         <FrameActionsMenu
           frame={frame}
           className="frameos-form-control flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white !px-0 !py-0 text-slate-700 shadow-none transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
@@ -1114,7 +1119,7 @@ function OverviewScheduleCard({ frame, scenes }: { frame: FrameType; scenes: Fra
 
 function FrameOverviewSurface({ frame, scenes }: { frame: FrameType; scenes: FrameScene[] }): JSX.Element {
   const { logs } = useValues(logsLogic({ frameId: frame.id }))
-  const { metrics, metricsLoading } = useValues(metricsLogic({ frameId: frame.id }))
+  const { sortedRecentMetrics, recentMetricsLoading } = useValues(frameMetricsPreviewLogic({ frameId: frame.id }))
   const latestLogAt = getLatestLogTimestamp(logs, frame.last_log_at)
   const frameWithLatestLog = latestLogAt ? { ...frame, last_log_at: latestLogAt } : frame
   const stale = frameIsStale(frameWithLatestLog)
@@ -1199,7 +1204,11 @@ function FrameOverviewSurface({ frame, scenes }: { frame: FrameType; scenes: Fra
             </div>
           </div>
 
-          <OverviewSystemMetricTiles frame={frame} metrics={metrics} metricsLoading={metricsLoading} />
+          <OverviewSystemMetricTiles
+            frame={frame}
+            metrics={sortedRecentMetrics}
+            metricsLoading={recentMetricsLoading}
+          />
         </div>
 
         <div className="h-[28rem] min-h-[20rem]">
@@ -1270,7 +1279,6 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
   useMountedLogic(terminalLogic(frameLogicProps))
   useMountedLogic(frameSettingsLogic(frameLogicProps))
   useMountedLogic(logsLogic(frameLogicProps))
-  useMountedLogic(metricsLogic(frameLogicProps))
 
   const { framesList } = useValues(framesModel)
   const { frame, scenes, deployPlanModalOpen, undeployedChanges, unsavedChanges } = useValues(
@@ -1278,11 +1286,13 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
   )
   const { sceneControlSelection, templateDrawerFrameId, utilityPanel, frameToolScrollPositions } =
     useValues(workspaceLogic)
+  const { searchParams } = useValues(router)
   const { rememberFrameToolScroll } = useActions(workspaceLogic)
   const activeTool =
     frameToolDefinitions.find(
-      (definition) => definition.panel === (frameToolPanelFromCurrentLocation() ?? utilityPanel)
-    ) ?? frameToolDefinitions[0]
+      (definition) => definition.panel === (frameToolPanelFromSearchParams(searchParams) ?? utilityPanel)
+    ) ??
+    frameToolDefinitions[0]
   const activeToolPanel = activeTool.panel
   const activeToolScrollKey = frameToolScrollKey(frameId, activeToolPanel)
   const frameToolScrollPositionsRef = useRef(frameToolScrollPositions)
@@ -1451,6 +1461,7 @@ export function FrameWorkspace({ id }: FrameWorkspaceProps): JSX.Element {
   useMountedLogic(sceneWorkspaceLogic({ routeFrameId: id ?? null, routeSceneId: null }))
   const { selectedFrame } = useValues(workspaceLogic)
   const { activeFramesList, framesList, framesLoading } = useValues(framesModel)
+  const { searchParams } = useValues(router)
   const routeFrameId = parseFrameId(id)
   const firstFrame =
     (routeFrameId ? framesList.find((frame) => frame.id === routeFrameId) : null) ??
@@ -1460,7 +1471,7 @@ export function FrameWorkspace({ id }: FrameWorkspaceProps): JSX.Element {
     null
 
   if (!firstFrame && framesLoading) {
-    const loadingTool = frameToolPanelFromCurrentLocation() ?? 'overview'
+    const loadingTool = frameToolPanelFromSearchParams(searchParams) ?? 'overview'
     const loadingToolUsesPageScroll = frameToolUsesPageScroll(loadingTool)
 
     return (

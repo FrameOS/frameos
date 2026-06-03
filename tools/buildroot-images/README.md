@@ -14,6 +14,10 @@ python tools/buildroot-images/buildroot_images.py --platform raspberry-pi-zero-2
 # Upload it to R2 and update buildroot-images/manifest.json in the bucket.
 python tools/buildroot-images/buildroot_images.py --platform raspberry-pi-zero-2-w upload --yes
 
+# Compose a release-ready image from downloaded precompiled release artifacts.
+python tools/buildroot-images/buildroot_images.py --platform raspberry-pi-zero-2-w \
+  release-image --prebuilt-cross-dir release-assets --release-assets-dir release-assets
+
 # Refresh the checked-in local manifest from R2.
 python tools/buildroot-images/buildroot_images.py download --force
 
@@ -43,6 +47,13 @@ setup payload is written to the BOOT partition as `frameos-setup.json`, and the
 first-boot setup service runs
 `/srv/frameos/current/frameos setup --with-setup=/boot/frameos-setup.json`. Other
 per-frame boot files include WiFi credentials, hostname, and authorized SSH keys.
+
+Release images are composed after all precompiled release binaries have been
+built. They use the cached base image plus the Debian Bookworm ARM64 precompiled
+FrameOS/agent artifacts, ship without WiFi credentials, and keep
+`wifiHotspot=bootOnly` so a Pi Zero 2 W starts the setup hotspot when it cannot
+reach the network. The first-boot setup service is present but dormant until a
+future SD card builder copies `frameos-setup.json` to the BOOT partition.
 
 Add future hardware targets by adding a platform alias/target in
 `backend/app/tasks/buildroot_image.py`, extending the CLI defaults, then building

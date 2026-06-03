@@ -16,6 +16,7 @@ from app.api import frames as frames_api
 from app.models import new_frame
 from app.models.frame import Frame
 from app.models.log import Log
+from app.models.metrics import Metrics
 from app.models.user import User
 from app.tenancy import ensure_default_project_for_user
 from app.tasks.buildroot_image import BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION, buildroot_sd_image_config_fingerprint
@@ -268,6 +269,63 @@ async def test_api_frame_clears_last_log_at_without_frame_activity_logs(async_cl
     assert detail_response.json()['frame']['last_log_at'] is None
     latest_frame = next(item for item in list_response.json()['frames'] if item['id'] == frame.id)
     assert latest_frame['last_log_at'] is None
+
+
+@pytest.mark.asyncio
+async def test_api_frame_metrics_returns_metrics_without_reboot_markers(async_client, db, redis):
+    frame = await new_frame(db, redis, 'MetricsFrame', 'localhost', 'localhost')
+    boot_timestamp = datetime(2026, 6, 2, 3, 4, 5)
+    metric_timestamp = datetime(2026, 6, 2, 3, 5, 0)
+    reboot_metric_timestamp = datetime(2026, 6, 2, 3, 6, 0)
+    second_reboot_metric_timestamp = datetime(2026, 6, 2, 3, 7, 0)
+    db.add_all(
+        [
+            Metrics(frame_id=frame.id, timestamp=metric_timestamp, metrics={"load": [0.12], "runtime": {"bootId": "boot-a"}}),
+            Metrics(
+                frame_id=frame.id,
+                timestamp=reboot_metric_timestamp,
+                metrics={"load": [0.18], "runtime": {"bootId": "boot-a"}},
+            ),
+            Metrics(
+                frame_id=frame.id,
+                timestamp=second_reboot_metric_timestamp,
+                metrics={
+                    "load": [0.24],
+                    "runtime": {"bootId": "boot-b"},
+                },
+            ),
+            Log(frame_id=frame.id, type='webhook', line=json.dumps({"event": "bootup"}), timestamp=boot_timestamp),
+            Log(frame_id=frame.id, type='webhook', line=json.dumps({"event": "metrics"}), timestamp=metric_timestamp),
+            Log(frame_id=frame.id, type='webhook', line='not json bootup', timestamp=metric_timestamp),
+        ]
+    )
+    db.commit()
+
+    response = await async_client.get(f'/api/frames/{frame.id}/metrics')
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['metrics'][0]['metrics'] == {"load": [0.12], "runtime": {"bootId": "boot-a"}}
+
+
+@pytest.mark.asyncio
+async def test_api_frame_recent_metrics_limits_metrics(async_client, db, redis):
+    frame = await new_frame(db, redis, 'RecentMetricsFrame', 'localhost', 'localhost')
+    for index in range(4):
+        db.add(
+            Metrics(
+                frame_id=frame.id,
+                timestamp=datetime(2026, 6, 2, 3, index, 0),
+                metrics={"load": [index]},
+            )
+        )
+    db.commit()
+
+    response = await async_client.get(f'/api/frames/{frame.id}/metrics/recent?limit=3&since=2026-06-02T03:01:30Z')
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [metric['metrics']['load'][0] for metric in payload['metrics']] == [2, 3]
 
 
 @pytest.mark.asyncio

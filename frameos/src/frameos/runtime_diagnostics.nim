@@ -1,4 +1,4 @@
-import json, locks, times
+import json, locks, random, times
 
 type
   RuntimeDiagnosticsState = object
@@ -25,6 +25,17 @@ var
   diagnosticsLock: Lock
   runtimeState: RuntimeDiagnosticsState
   nextSequence: int64
+
+const BootIdAlphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+const BootIdLength = 8
+
+proc generateRuntimeBootId(): string =
+  randomize()
+  result = newString(BootIdLength)
+  for index in 0..<BootIdLength:
+    result[index] = BootIdAlphabet[rand(BootIdAlphabet.high)]
+
+let runtimeBootId = generateRuntimeBootId()
 
 initLock(diagnosticsLock)
 
@@ -111,6 +122,7 @@ proc runtimeDiagnosticsSnapshot*(): JsonNode {.gcsafe.} =
     withLock diagnosticsLock:
       result = %*{
         "active": runtimeState.active,
+        "bootId": runtimeBootId,
         "mode": runtimeState.mode,
         "phase": runtimeState.phase,
         "sequence": runtimeState.sequence,

@@ -19,6 +19,18 @@ async def test_new_metrics(mock_pub, db, redis):
     published_payload = mock_pub.await_args.args[2]
     assert published_payload["timestamp"].endswith("+00:00")
 
+
+@pytest.mark.asyncio
+@patch("app.models.metrics.publish_message", new_callable=AsyncMock)
+async def test_new_metrics_preserves_boot_id_without_reboot_annotation(mock_pub, db, redis):
+    frame = await new_frame(db, redis, "MetricsBootFrame", "localhost", "server_host")
+
+    metric_entry = await new_metrics(db, redis, frame.id, {"runtime": {"bootId": "boot-a"}, "load": [0.1]})
+
+    assert metric_entry.metrics == {"runtime": {"bootId": "boot-a"}, "load": [0.1]}
+    assert mock_pub.await_args.args[2]["metrics"] == {"runtime": {"bootId": "boot-a"}, "load": [0.1]}
+
+
 @pytest.mark.asyncio
 @patch("app.models.metrics.publish_message", new_callable=AsyncMock)
 async def test_new_metrics_trimming(mock_pub, db, redis):

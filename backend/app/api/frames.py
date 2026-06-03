@@ -2893,7 +2893,27 @@ async def api_frame_metrics(id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
     try:
         metrics = db.query(Metrics).filter_by(project_id=frame.project_id, frame_id=id).order_by(Metrics.timestamp).all()
-        metrics_list = [metric.to_dict() for metric in metrics]
-        return {"metrics": metrics_list}
+        return {"metrics": [metric.to_dict() for metric in metrics]}
+    except Exception as e:
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@api_project.get("/frames/{id:int}/metrics/recent", response_model=FrameMetricsResponse)
+async def api_frame_recent_metrics(
+    id: int,
+    limit: int = Query(1000, ge=1, le=1000),
+    since: Optional[datetime] = Query(None),
+    db: Session = Depends(get_db),
+):
+    frame = _project_frame(db, id)
+    if frame is None:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
+    try:
+        query = db.query(Metrics).filter_by(project_id=frame.project_id, frame_id=id)
+        if since is not None:
+            since_utc = since.astimezone(timezone.utc) if since.tzinfo else since.replace(tzinfo=timezone.utc)
+            query = query.filter(Metrics.timestamp >= since_utc.replace(tzinfo=None))
+        metrics = query.order_by(Metrics.timestamp.desc()).limit(limit).all()
+        return {"metrics": [metric.to_dict() for metric in reversed(metrics)]}
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))

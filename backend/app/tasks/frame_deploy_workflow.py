@@ -57,7 +57,9 @@ REMOTE_BUILD_FEATURE_CFLAGS = {
     "x86_64": ("-mavx2", "-mavx", "-msse4.1", "-mssse3", "-mpclmul", "-mvpclmulqdq"),
 }
 def _deploy_uses_agent(frame: Frame) -> bool:
-    agent = frame.agent if isinstance(frame.agent, dict) else {}
+    agent = getattr(frame, "agent", None)
+    if not isinstance(agent, dict):
+        agent = {}
     return bool(
         agent.get("agentEnabled")
         and agent.get("agentRunCommands")
@@ -980,7 +982,7 @@ class FrameDeployWorkflow:
 
     async def _run_setup_in_directory(self, path: str) -> bool:
         await self.deployer.log("stdout", f"{icon} Running FrameOS device setup")
-        root_remounted_rw = await self._remount_root_rw_for_setup_if_needed()
+        root_remounted_rw = await self._remount_root_rw_if_needed("setup")
         try:
             setup_output: list[str] = []
             setup_status = await self.deployer.exec_command(
@@ -991,7 +993,7 @@ class FrameDeployWorkflow:
             )
         finally:
             if root_remounted_rw:
-                await self._remount_root_ro_after_setup()
+                await self._remount_root_ro("setup")
         if self._setup_completed_before_legacy_shared_driver_segfault(setup_status, setup_output):
             await self.deployer.log(
                 "stderr",
@@ -1011,7 +1013,7 @@ class FrameDeployWorkflow:
             raise RuntimeError(f"FrameOS setup failed with exit code {setup_status}")
         return False
 
-    async def _remount_root_rw_for_setup_if_needed(self) -> bool:
+    async def _remount_root_rw_if_needed(self, context: str) -> bool:
         status = await self.deployer.exec_command(
             "awk '$2 == \"/\" { split($4, opts, \",\"); for (i in opts) if (opts[i] == \"ro\") found=1 } END { exit found ? 0 : 1 }' /proc/mounts",
             raise_on_error=False,
@@ -1021,14 +1023,40 @@ class FrameDeployWorkflow:
         if status != 0:
             return False
 
-        await self.deployer.log("stdout", "Root filesystem is read-only; remounting read-write for setup")
-        await self.deployer.exec_command("sudo mount -o remount,rw /")
+        await self.deployer.log("stdout", f"Root filesystem is read-only; remounting read-write for {context}")
+        await self._exec_host_root_command("mount -o remount,rw /", fallback_command="sudo mount -o remount,rw /")
         return True
 
-    async def _remount_root_ro_after_setup(self) -> None:
-        await self.deployer.log("stdout", "Restoring root filesystem to read-only after setup")
-        await self.deployer.exec_command("sudo sync", raise_on_error=False)
-        await self.deployer.exec_command("sudo mount -o remount,ro /")
+    async def _remount_root_ro(self, context: str) -> None:
+        await self.deployer.log("stdout", f"Restoring root filesystem to read-only after {context}")
+        await self._exec_host_root_command("sync", fallback_command="sudo sync", raise_on_error=False)
+        await self._exec_host_root_command("mount -o remount,ro /", fallback_command="sudo mount -o remount,ro /")
+
+    def _host_root_command(self, command: str, *, fallback_command: str | None = None) -> str:
+        if not _deploy_uses_agent(self.frame):
+            return fallback_command or f"sudo sh -lc {shlex.quote(command)}"
+
+        inner = shlex.quote(f"set -eu; {command}")
+        return (
+            "if command -v systemd-run >/dev/null 2>&1; then "
+            "sudo -n systemd-run --quiet --wait --pipe --collect /bin/sh -lc "
+            f"{inner}; "
+            "else "
+            f"sudo -n sh -lc {inner}; "
+            "fi"
+        )
+
+    async def _exec_host_root_command(
+        self,
+        command: str,
+        *,
+        fallback_command: str | None = None,
+        **kwargs: Any,
+    ) -> int:
+        return await self.deployer.exec_command(
+            self._host_root_command(command, fallback_command=fallback_command),
+            **kwargs,
+        )
 
     @staticmethod
     def _setup_completed_before_legacy_shared_driver_segfault(setup_status: int, setup_output: list[str]) -> bool:
@@ -1118,6 +1146,23 @@ class FrameDeployWorkflow:
         await self.deployer.log("stdout", f"{icon} Running final cleanup scripts")
         boot_config = str(post_deploy.get("boot_config_path") or "/boot/config.txt")
 
+        root_remounted_rw = await self._remount_root_rw_if_needed("final cleanup")
+        try:
+            await self._run_post_deploy_cleanup_writes(post_deploy=post_deploy, boot_config=boot_config)
+        finally:
+            if root_remounted_rw:
+                await self._remount_root_ro("final cleanup")
+
+        if post_deploy.get("final_action") == "reboot":
+            await self.deployer.log("stdinfo", f"{icon} Deployed! Rebooting device after boot config changes")
+            await self.deployer.exec_command("sudo reboot")
+        else:
+            await self.deployer.exec_command("sudo systemctl daemon-reload")
+            await self.deployer.log("stdinfo", f"{icon} Deployed! Restarting FrameOS")
+            await self.deployer.exec_command("sudo systemctl restart frameos.service")
+            await self.deployer.exec_command("sudo systemctl status frameos.service")
+
+    async def _run_post_deploy_cleanup_writes(self, *, post_deploy: dict[str, Any], boot_config: str) -> None:
         if post_deploy.get("low_memory_masks_apt_daily"):
             await self.deployer.exec_command(
                 "sudo systemctl mask apt-daily-upgrade && "
@@ -1130,9 +1175,15 @@ class FrameDeployWorkflow:
             cron_schedule = reboot_schedule.get("crontab", "0 0 * * *")
             reboot_command = reboot_schedule.get("command", "systemctl restart frameos.service")
             crontab = f"{cron_schedule} root {reboot_command}"
-            await self.deployer.exec_command(f"echo '{crontab}' | sudo tee /etc/cron.d/frameos-reboot")
+            await self._exec_host_root_command(
+                f"printf '%s\\n' {shlex.quote(crontab)} > /etc/cron.d/frameos-reboot",
+                fallback_command=f"echo '{crontab}' | sudo tee /etc/cron.d/frameos-reboot",
+            )
         elif reboot_schedule.get("needs_remove"):
-            await self.deployer.exec_command("sudo rm -f /etc/cron.d/frameos-reboot")
+            await self._exec_host_root_command(
+                "rm -f /etc/cron.d/frameos-reboot",
+                fallback_command="sudo rm -f /etc/cron.d/frameos-reboot",
+            )
 
         for change in post_deploy.get("bootconfig_changes") or []:
             line = change.get("line")
@@ -1140,13 +1191,18 @@ class FrameDeployWorkflow:
                 continue
             if change.get("action") == "remove":
                 to_remove = str(line)
-                await self.deployer.exec_command(
-                    f'grep -q "^{to_remove}" {boot_config} && sudo sed -i "/^{to_remove}/d" {boot_config}',
+                await self._exec_host_root_command(
+                    f'grep -q "^{to_remove}" {boot_config} && sed -i "/^{to_remove}/d" {boot_config}',
+                    fallback_command=f'grep -q "^{to_remove}" {boot_config} && sudo sed -i "/^{to_remove}/d" {boot_config}',
                     raise_on_error=False,
                 )
             elif change.get("action") == "add":
                 if (await self.deployer.exec_command(f'grep -q "^{line}" {boot_config}', raise_on_error=False)) != 0:
-                    await self.deployer.exec_command(f'echo "{line}" | sudo tee -a ' + boot_config, log_output=False)
+                    await self._exec_host_root_command(
+                        f"printf '%s\\n' {shlex.quote(str(line))} >> {boot_config}",
+                        fallback_command=f'echo "{line}" | sudo tee -a ' + boot_config,
+                        log_output=False,
+                    )
 
         if post_deploy.get("disable_userconfig"):
             await self.deployer.exec_command("sudo systemctl disable userconfig || true")
@@ -1160,15 +1216,6 @@ class FrameDeployWorkflow:
             await self._install_setup_json_reset_helper(setup_json_reset_path)
         else:
             await self._remove_setup_json_reset_helper()
-
-        if post_deploy.get("final_action") == "reboot":
-            await self.deployer.log("stdinfo", f"{icon} Deployed! Rebooting device after boot config changes")
-            await self.deployer.exec_command("sudo reboot")
-        else:
-            await self.deployer.exec_command("sudo systemctl daemon-reload")
-            await self.deployer.log("stdinfo", f"{icon} Deployed! Restarting FrameOS")
-            await self.deployer.exec_command("sudo systemctl restart frameos.service")
-            await self.deployer.exec_command("sudo systemctl status frameos.service")
 
     async def _install_setup_json_reset_helper(self, setup_json_reset_path: str) -> None:
         await self.deployer.log("stdout", f"{icon} Installing setup JSON reset helper")
@@ -1191,11 +1238,13 @@ class FrameDeployWorkflow:
                 script_path=SETUP_JSON_RESET_SCRIPT_PATH,
             ).encode("utf-8"),
         )
-        await self.deployer.exec_command(
-            f"sudo install -m 755 {shlex.quote(script_path)} {shlex.quote(SETUP_JSON_RESET_SCRIPT_PATH)}"
+        await self._exec_host_root_command(
+            f"install -m 755 {shlex.quote(script_path)} {shlex.quote(SETUP_JSON_RESET_SCRIPT_PATH)}",
+            fallback_command=f"sudo install -m 755 {shlex.quote(script_path)} {shlex.quote(SETUP_JSON_RESET_SCRIPT_PATH)}",
         )
-        await self.deployer.exec_command(
-            f"sudo install -m 644 {shlex.quote(service_path)} {shlex.quote(SETUP_JSON_RESET_SERVICE_PATH)}"
+        await self._exec_host_root_command(
+            f"install -m 644 {shlex.quote(service_path)} {shlex.quote(SETUP_JSON_RESET_SERVICE_PATH)}",
+            fallback_command=f"sudo install -m 644 {shlex.quote(service_path)} {shlex.quote(SETUP_JSON_RESET_SERVICE_PATH)}",
         )
         await self.deployer.exec_command("sudo systemctl daemon-reload")
         await self.deployer.exec_command(f"sudo systemctl enable {SETUP_JSON_RESET_SERVICE_NAME}", raise_on_error=False)
@@ -1203,8 +1252,9 @@ class FrameDeployWorkflow:
     async def _remove_setup_json_reset_helper(self) -> None:
         await self.deployer.log("stdout", f"{icon} Removing setup JSON reset helper")
         await self.deployer.exec_command(f"sudo systemctl disable {SETUP_JSON_RESET_SERVICE_NAME}", raise_on_error=False)
-        await self.deployer.exec_command(
-            f"sudo rm -f {shlex.quote(SETUP_JSON_RESET_SERVICE_PATH)} {shlex.quote(SETUP_JSON_RESET_SCRIPT_PATH)}",
+        await self._exec_host_root_command(
+            f"rm -f {shlex.quote(SETUP_JSON_RESET_SERVICE_PATH)} {shlex.quote(SETUP_JSON_RESET_SCRIPT_PATH)}",
+            fallback_command=f"sudo rm -f {shlex.quote(SETUP_JSON_RESET_SERVICE_PATH)} {shlex.quote(SETUP_JSON_RESET_SCRIPT_PATH)}",
             raise_on_error=False,
         )
         await self.deployer.exec_command(
@@ -1214,7 +1264,11 @@ class FrameDeployWorkflow:
 
     async def _plan_post_deploy_cleanup(self, *, drivers: dict[str, Any], low_memory: bool) -> dict[str, Any]:
         boot_config = "/boot/config.txt"
-        if await self.deployer.exec_command("test -f /boot/firmware/config.txt", raise_on_error=False) == 0:
+        if await self._command_succeeds(
+            "test -f /boot/config.txt && grep -Eq '^(kernel=Image|start_file=|fixup_file=)' /boot/config.txt"
+        ):
+            boot_config = "/boot/config.txt"
+        elif await self.deployer.exec_command("test -f /boot/firmware/config.txt", raise_on_error=False) == 0:
             boot_config = "/boot/firmware/config.txt"
 
         i2c_needs_boot_config_line = False

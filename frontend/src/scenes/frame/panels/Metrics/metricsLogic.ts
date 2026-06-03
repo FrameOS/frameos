@@ -30,6 +30,19 @@ export interface TimeRange {
   end: number
 }
 
+export interface RebootMarker {
+  timestamp: Date
+  logId?: string
+  metricId?: string
+  bootId?: string
+  previousBootId?: string
+}
+
+interface MetricsResponseReboot {
+  timestamp?: string
+  log_id?: number | string
+}
+
 export type MetricsTimeRangePreset = '1h' | '6h' | '12h' | '24h' | '7d' | 'all' | 'custom'
 
 export const metricsTimeRangeOptions: { value: MetricsTimeRangePreset; label: string }[] = [
@@ -86,8 +99,113 @@ function parseMetricTimestamp(timestamp: string): number {
   return Date.parse(hasTimeZone ? timestamp : `${timestamp}Z`)
 }
 
-function metricTimestamp(metric: MetricsType): number {
+function parseRebootMarker(marker: MetricsResponseReboot): RebootMarker | null {
+  if (!marker.timestamp) {
+    return null
+  }
+  const timestamp = parseMetricTimestamp(marker.timestamp)
+  if (!Number.isFinite(timestamp)) {
+    return null
+  }
+  return {
+    timestamp: new Date(timestamp),
+    logId: marker.log_id === undefined ? undefined : String(marker.log_id),
+  }
+}
+
+function sortAndDedupeRebootMarkers(markers: RebootMarker[]): RebootMarker[] {
+  const markersByKey = new Map<string, RebootMarker>()
+  markers.forEach((marker) => {
+    const timestamp = marker.timestamp.getTime()
+    if (!Number.isFinite(timestamp)) {
+      return
+    }
+    markersByKey.set(marker.logId ?? marker.metricId ?? String(timestamp), marker)
+  })
+  return [...markersByKey.values()].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
+}
+
+export function metricTimestamp(metric: MetricsType): number {
   return parseMetricTimestamp(metric.timestamp)
+}
+
+function metricBootId(metricValues: unknown): string | null {
+  if (!metricValues || typeof metricValues !== 'object' || Array.isArray(metricValues)) {
+    return null
+  }
+  const values = metricValues as Record<string, unknown>
+  const runtime = values.runtime
+  if (runtime && typeof runtime === 'object' && !Array.isArray(runtime)) {
+    const runtimeValues = runtime as Record<string, unknown>
+    const value = runtimeValues.bootId ?? runtimeValues.boot_id
+    if (value !== undefined && value !== null) {
+      return String(value)
+    }
+  }
+  const value = values.bootId ?? values.boot_id
+  return value === undefined || value === null ? null : String(value)
+}
+
+function metricRebootMarker(
+  metric: MetricsType,
+  bootId: string | null,
+  previousBootId: string | null
+): RebootMarker | null {
+  const timestamp = metricTimestamp(metric)
+  if (!Number.isFinite(timestamp)) {
+    return null
+  }
+
+  const marker: RebootMarker = {
+    timestamp: new Date(timestamp),
+    metricId: String(metric.id),
+  }
+  const reboot = metric.metrics?.reboot
+  if (reboot && typeof reboot === 'object' && !Array.isArray(reboot)) {
+    const rebootValues = reboot as Record<string, unknown>
+    const rebootBootId = rebootValues.bootId ?? rebootValues.boot_id
+    const rebootPreviousBootId = rebootValues.previousBootId ?? rebootValues.previous_boot_id
+    if (rebootBootId !== undefined && rebootBootId !== null) {
+      marker.bootId = String(rebootBootId)
+    }
+    if (rebootPreviousBootId !== undefined && rebootPreviousBootId !== null) {
+      marker.previousBootId = String(rebootPreviousBootId)
+    }
+  } else if (bootId !== null) {
+    marker.bootId = bootId
+    if (previousBootId !== null) {
+      marker.previousBootId = previousBootId
+    }
+  }
+  return marker
+}
+
+function rebootMarkersFromMetrics(metrics: MetricsType[]): RebootMarker[] {
+  const markers: RebootMarker[] = []
+  let previousBootId: string | null = null
+
+  metrics.forEach((metric) => {
+    const reboot = metric.metrics?.reboot
+    const bootId = metricBootId(metric.metrics)
+    const explicitReboot =
+      reboot === true ||
+      (Boolean(reboot) &&
+        typeof reboot === 'object' &&
+        !Array.isArray(reboot) &&
+        Boolean((reboot as Record<string, unknown>).new))
+    const bootChanged = bootId !== null && previousBootId !== null && bootId !== previousBootId
+    if (explicitReboot || bootChanged) {
+      const marker = metricRebootMarker(metric, bootId, previousBootId)
+      if (marker) {
+        markers.push(marker)
+      }
+    }
+    if (bootId !== null) {
+      previousBootId = bootId
+    }
+  })
+
+  return sortAndDedupeRebootMarkers(markers)
 }
 
 function metricIntervalMs(metric: MetricsType): number | null {
@@ -151,7 +269,7 @@ function timeRangeForPreset(timeRange: TimeRange | null, preset: MetricsTimeRang
   return normalizeTimeRange(timeRange.end - (visibleMs ?? DEFAULT_VISIBLE_MS), timeRange.end)
 }
 
-function filterMetricsByCategoryAndTimeRange(
+export function filterMetricsByCategoryAndTimeRange(
   metricsByCategory: Record<string, MetricSeries[]>,
   categories: string[],
   timeRange: TimeRange | null
@@ -357,6 +475,115 @@ function getLatestRuntimeDimensionsSummary(metrics: MetricsType[]): string | nul
   return null
 }
 
+export function metricsByCategoryFromMetrics(metrics: MetricsType[]): Record<string, MetricSeries[]> {
+  const metricsByCategory: Record<string, MetricSeries[]> = {}
+  metrics.forEach((metric) => {
+    const timestamp = new Date(metricTimestamp(metric))
+    for (const [key, value] of Object.entries(metric.metrics)) {
+      if (key === 'intervalMs') {
+        continue
+      }
+      if (Array.isArray(value)) {
+        for (let i = 0; i < value.length; i++) {
+          const subKey = `${key}[${i}]`
+          if (typeof value[i] === 'number') {
+            const series =
+              key === 'load'
+                ? getOrCreateMetricSeries(metricsByCategory, key, subKey, subKey, metricSeriesColor(i))
+                : getOrCreateMetricSeries(metricsByCategory, subKey, subKey, subKey, SINGLE_SERIES_COLOR)
+            series.data.push({ x: timestamp, y: value[i] })
+          }
+        }
+      } else if (value && typeof value === 'object') {
+        const valueRecord = value as Record<string, unknown>
+        if (key === 'runtime') {
+          normalizeRuntimeDimensionEntries(valueRecord).forEach(([subKey, subValue]) => {
+            const series = getOrCreateMetricSeries(
+              metricsByCategory,
+              'runtimeDimensions',
+              `runtime.${subKey}`,
+              subKey,
+              RUNTIME_DIMENSION_COLORS[subKey] ?? metricSeriesColor(metricsByCategory.runtimeDimensions?.length ?? 0),
+              'left',
+              'pixels'
+            )
+            series.data.push({ x: timestamp, y: subValue })
+          })
+        }
+        const entries =
+          key === 'memoryUsage'
+            ? normalizeMemoryUsageEntries(valueRecord)
+            : key === 'diskUsage'
+            ? normalizeDiskUsageEntries(valueRecord)
+            : Object.entries(value)
+        for (const [subKey, subValue] of entries) {
+          if (
+            (key === 'memoryUsage' && (subKey === 'active' || subKey === 'free' || subKey === 'percentage')) ||
+            (key === 'diskUsage' && (subKey === 'filesystems' || subKey === 'percentage')) ||
+            (key === 'processMemory' && subKey === 'pid') ||
+            (key === 'runtime' && (subKey === 'width' || subKey === 'height'))
+          ) {
+            continue
+          }
+          if (typeof subValue === 'number') {
+            const fullSubKey = `${key}.${subKey}`
+            const series =
+              key === 'memoryUsage'
+                ? getOrCreateMetricSeries(
+                    metricsByCategory,
+                    key,
+                    fullSubKey,
+                    subKey,
+                    MEMORY_USAGE_COLORS[subKey] ?? metricSeriesColor(metricsByCategory[key]?.length ?? 0),
+                    'left',
+                    'bytes'
+                  )
+                : key === 'diskUsage'
+                ? getOrCreateMetricSeries(
+                    metricsByCategory,
+                    key,
+                    fullSubKey,
+                    subKey,
+                    DISK_USAGE_COLORS[subKey] ?? metricSeriesColor(metricsByCategory[key]?.length ?? 0),
+                    'left',
+                    'bytes'
+                  )
+                : key === 'processMemory'
+                ? getOrCreateMetricSeries(
+                    metricsByCategory,
+                    key,
+                    fullSubKey,
+                    subKey,
+                    metricSeriesColor(metricsByCategory[key]?.length ?? 0),
+                    'left',
+                    'bytes'
+                  )
+                : getOrCreateMetricSeries(metricsByCategory, fullSubKey, fullSubKey, fullSubKey, SINGLE_SERIES_COLOR)
+            series.data.push({ x: timestamp, y: subValue })
+          }
+        }
+      } else if (typeof value === 'number') {
+        const series = getOrCreateMetricSeries(metricsByCategory, key, key, key, SINGLE_SERIES_COLOR)
+        series.data.push({ x: timestamp, y: value })
+      }
+    }
+  })
+  return metricsByCategory
+}
+
+export function latestMetricSummariesByCategoryFromMetrics(metrics: MetricsType[]): Record<string, string> {
+  const loadSummary = getLatestLoadSummary(metrics)
+  const memoryUsageSummary = getLatestUsageSummary(metrics, 'memoryUsage')
+  const diskUsageSummary = getLatestUsageSummary(metrics, 'diskUsage')
+  const runtimeDimensionsSummary = getLatestRuntimeDimensionsSummary(metrics)
+  return {
+    ...(loadSummary ? { load: loadSummary } : {}),
+    ...(memoryUsageSummary ? { memoryUsage: memoryUsageSummary } : {}),
+    ...(diskUsageSummary ? { diskUsage: diskUsageSummary } : {}),
+    ...(runtimeDimensionsSummary ? { runtimeDimensions: runtimeDimensionsSummary } : {}),
+  }
+}
+
 export const metricsLogic = kea<metricsLogicType>([
   path(['src', 'scenes', 'frame', 'metricsLogic']),
   props({} as metricsLogicProps),
@@ -443,11 +670,35 @@ export const metricsLogic = kea<metricsLogicType>([
         return state
       },
     },
+    logRebootMarkers: [
+      [] as RebootMarker[],
+      {
+        [socketLogic.actionTypes.newLog]: (state, { log }) => {
+          if (log.frame_id !== props.frameId) {
+            return state
+          }
+          try {
+            const payload = JSON.parse(log.line)
+            if (payload.event === 'bootup') {
+              const marker = parseRebootMarker({ timestamp: log.timestamp, log_id: log.id })
+              return marker ? sortAndDedupeRebootMarkers([...state, marker]) : state
+            }
+          } catch (error) {}
+          return state
+        },
+      },
+    ],
   })),
   selectors({
     sortedMetrics: [
       (s) => [s.metrics],
       (metrics) => [...metrics].sort((a, b) => metricTimestamp(a) - metricTimestamp(b)),
+    ],
+    metricRebootMarkers: [(s) => [s.sortedMetrics], (metrics) => rebootMarkersFromMetrics(metrics)],
+    rebootMarkers: [
+      (s) => [s.metricRebootMarkers, s.logRebootMarkers],
+      (metricRebootMarkers, logRebootMarkers) =>
+        sortAndDedupeRebootMarkers([...metricRebootMarkers, ...logRebootMarkers]),
     ],
     metricsTimeRange: [
       (s) => [s.sortedMetrics, s.currentTime],
@@ -500,108 +751,7 @@ export const metricsLogic = kea<metricsLogicType>([
     ],
     metricsByCategory: [
       (s) => [s.sortedMetrics],
-      (metrics) => {
-        const metricsByCategory: Record<string, MetricSeries[]> = {}
-        metrics.forEach((metric) => {
-          const timestamp = new Date(metricTimestamp(metric))
-          for (const [key, value] of Object.entries(metric.metrics)) {
-            if (key === 'intervalMs') {
-              continue
-            }
-            if (Array.isArray(value)) {
-              for (let i = 0; i < value.length; i++) {
-                const subKey = `${key}[${i}]`
-                if (typeof value[i] === 'number') {
-                  const series =
-                    key === 'load'
-                      ? getOrCreateMetricSeries(metricsByCategory, key, subKey, subKey, metricSeriesColor(i))
-                      : getOrCreateMetricSeries(metricsByCategory, subKey, subKey, subKey, SINGLE_SERIES_COLOR)
-                  series.data.push({ x: timestamp, y: value[i] })
-                }
-              }
-            } else if (value && typeof value === 'object') {
-              const valueRecord = value as Record<string, unknown>
-              if (key === 'runtime') {
-                normalizeRuntimeDimensionEntries(valueRecord).forEach(([subKey, subValue]) => {
-                  const series = getOrCreateMetricSeries(
-                    metricsByCategory,
-                    'runtimeDimensions',
-                    `runtime.${subKey}`,
-                    subKey,
-                    RUNTIME_DIMENSION_COLORS[subKey] ??
-                      metricSeriesColor(metricsByCategory.runtimeDimensions?.length ?? 0),
-                    'left',
-                    'pixels'
-                  )
-                  series.data.push({ x: timestamp, y: subValue })
-                })
-              }
-              const entries =
-                key === 'memoryUsage'
-                  ? normalizeMemoryUsageEntries(valueRecord)
-                  : key === 'diskUsage'
-                  ? normalizeDiskUsageEntries(valueRecord)
-                  : Object.entries(value)
-              for (const [subKey, subValue] of entries) {
-                if (
-                  (key === 'memoryUsage' && (subKey === 'active' || subKey === 'free' || subKey === 'percentage')) ||
-                  (key === 'diskUsage' && (subKey === 'filesystems' || subKey === 'percentage')) ||
-                  (key === 'processMemory' && subKey === 'pid') ||
-                  (key === 'runtime' && (subKey === 'width' || subKey === 'height'))
-                ) {
-                  continue
-                }
-                if (typeof subValue === 'number') {
-                  const fullSubKey = `${key}.${subKey}`
-                  const series =
-                    key === 'memoryUsage'
-                      ? getOrCreateMetricSeries(
-                          metricsByCategory,
-                          key,
-                          fullSubKey,
-                          subKey,
-                          MEMORY_USAGE_COLORS[subKey] ?? metricSeriesColor(metricsByCategory[key]?.length ?? 0),
-                          'left',
-                          'bytes'
-                        )
-                      : key === 'diskUsage'
-                      ? getOrCreateMetricSeries(
-                          metricsByCategory,
-                          key,
-                          fullSubKey,
-                          subKey,
-                          DISK_USAGE_COLORS[subKey] ?? metricSeriesColor(metricsByCategory[key]?.length ?? 0),
-                          'left',
-                          'bytes'
-                        )
-                      : key === 'processMemory'
-                      ? getOrCreateMetricSeries(
-                          metricsByCategory,
-                          key,
-                          fullSubKey,
-                          subKey,
-                          metricSeriesColor(metricsByCategory[key]?.length ?? 0),
-                          'left',
-                          'bytes'
-                        )
-                      : getOrCreateMetricSeries(
-                          metricsByCategory,
-                          fullSubKey,
-                          fullSubKey,
-                          fullSubKey,
-                          SINGLE_SERIES_COLOR
-                        )
-                  series.data.push({ x: timestamp, y: subValue })
-                }
-              }
-            } else if (typeof value === 'number') {
-              const series = getOrCreateMetricSeries(metricsByCategory, key, key, key, SINGLE_SERIES_COLOR)
-              series.data.push({ x: timestamp, y: value })
-            }
-          }
-        })
-        return metricsByCategory
-      },
+      (metrics) => metricsByCategoryFromMetrics(metrics),
     ],
     headerMetricsByCategory: [
       (s) => [s.metricsByCategory, s.headerMetricsTimeRange],
@@ -624,18 +774,7 @@ export const metricsLogic = kea<metricsLogicType>([
     ],
     latestMetricSummariesByCategory: [
       (s) => [s.sortedMetrics],
-      (metrics): Record<string, string> => {
-        const loadSummary = getLatestLoadSummary(metrics)
-        const memoryUsageSummary = getLatestUsageSummary(metrics, 'memoryUsage')
-        const diskUsageSummary = getLatestUsageSummary(metrics, 'diskUsage')
-        const runtimeDimensionsSummary = getLatestRuntimeDimensionsSummary(metrics)
-        return {
-          ...(loadSummary ? { load: loadSummary } : {}),
-          ...(memoryUsageSummary ? { memoryUsage: memoryUsageSummary } : {}),
-          ...(diskUsageSummary ? { diskUsage: diskUsageSummary } : {}),
-          ...(runtimeDimensionsSummary ? { runtimeDimensions: runtimeDimensionsSummary } : {}),
-        }
-      },
+      (metrics): Record<string, string> => latestMetricSummariesByCategoryFromMetrics(metrics),
     ],
   }),
   afterMount(({ actions, cache }) => {

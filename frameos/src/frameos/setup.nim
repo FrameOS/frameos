@@ -157,7 +157,7 @@ proc frameosServiceUser*(): string =
       return user
   result = "root"
 
-proc frameosServiceContents*(user: string): string =
+proc frameosServiceContents*(user: string, consoleOutput = false): string =
   result = "[Unit]\n" &
     "Description=FrameOS Service\n" &
     "After=network.target\n" &
@@ -166,13 +166,22 @@ proc frameosServiceContents*(user: string): string =
     "User=" & user & "\n" &
     "WorkingDirectory=/srv/frameos/current\n" &
     "ExecStart=/srv/frameos/current/frameos\n" &
-    "Restart=always\n" &
-    "\n" &
+    "Restart=always\n"
+  if consoleOutput:
+    result &= "StandardOutput=journal+console\n" &
+      "StandardError=journal+console\n"
+  result &= "\n" &
     "[Install]\n" &
     "WantedBy=multi-user.target\n"
 
-proc installFrameOSServiceFile() =
-  writePrivilegedFile("/etc/systemd/system/frameos.service", frameosServiceContents(frameosServiceUser()))
+proc installFrameOSServiceFile(consoleOutput = false) =
+  writePrivilegedFile("/etc/systemd/system/frameos.service", frameosServiceContents(frameosServiceUser(), consoleOutput))
+
+proc installFrameOSServiceFile(frameOS: FrameOS) =
+  if frameOS.frameConfig.mode == "buildroot" and fileExists("/srv/frameos/current/frameos.service"):
+    installServiceFile("/srv/frameos/current/frameos.service", "/etc/systemd/system/frameos.service")
+  else:
+    installFrameOSServiceFile(frameOS.frameConfig.mode == "buildroot")
 
 proc systemdServiceNames(frameOS: FrameOS): seq[string] =
   result = @["frameos.service"]
@@ -191,7 +200,7 @@ proc setupSystemdServices*(frameOS: FrameOS): SetupResult =
   ensureSystemdServiceDirectories()
 
   echo "FrameOS setup: systemd services: installing frameos.service"
-  installFrameOSServiceFile()
+  installFrameOSServiceFile(frameOS)
 
   if frameOS.frameConfig.agent != nil and frameOS.frameConfig.agent.agentEnabled:
     echo "FrameOS setup: systemd services: installing frameos_agent.service"

@@ -36,6 +36,7 @@ export function Metrics({ scrollContainer = true }: MetricsProps = {}) {
     metricsLoading,
     metricsTimeRange,
     visibleTimeRange,
+    rebootMarkers,
     selectedTimeRangePreset,
     metricGapThresholdMs,
     latestMetricSummariesByCategory,
@@ -123,6 +124,7 @@ export function Metrics({ scrollContainer = true }: MetricsProps = {}) {
                     series={visibleSeries}
                     totalTimeRange={metricsTimeRange}
                     visibleTimeRange={visibleTimeRange}
+                    rebootMarkers={rebootMarkers}
                     gapThresholdMs={metricGapThresholdMs}
                     onTimeRangeChange={setSelectedTimeRange}
                     onResetTimeRange={resetSelectedTimeRange}

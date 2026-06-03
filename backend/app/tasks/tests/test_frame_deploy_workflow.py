@@ -39,6 +39,10 @@ class FakeDeployer:
         if command.startswith("dpkg-query -W -f='${Status}' "):
             package_name = command.split("dpkg-query -W -f='${Status}' ", 1)[1].split(" ", 1)[0].strip("'")
             return 0 if package_name in self.installed_packages else 1
+        if command.startswith(
+            "test -f /boot/config.txt && grep -Eq '^(kernel=Image|start_file=|fixup_file=)' /boot/config.txt"
+        ):
+            return 0 if "/boot/config.txt:buildroot" in self.existing_paths else 1
         if command in self.success_commands:
             return 0
         if command.startswith("grep -q ") or command.startswith("test -f /etc/cron.d/frameos-reboot && grep -Fxq "):
@@ -793,6 +797,28 @@ async def test_full_plan_includes_post_deploy_driver_and_reboot_steps(monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_post_deploy_plan_prefers_buildroot_active_boot_config():
+    frame = SimpleNamespace(
+        id=9,
+        name="BuildrootBootConfigFrame",
+        reboot=None,
+        last_successful_deploy_at="2026-01-01T00:00:00+00:00",
+    )
+    workflow = FrameDeployWorkflow(
+        db=None,
+        redis=None,
+        frame=frame,
+        deployer=FakeDeployer(existing_paths={"/boot/config.txt:buildroot", "/boot/firmware/config.txt"}),
+        temp_dir="",
+        binary_builder=FakeBinaryBuilder(),
+    )
+
+    post_deploy = await workflow._plan_post_deploy_cleanup(drivers={}, low_memory=False)
+
+    assert post_deploy["boot_config_path"] == "/boot/config.txt"
+
+
+@pytest.mark.asyncio
 async def test_post_deploy_plan_normalizes_legacy_reboot_crontab():
     frame = SimpleNamespace(
         id=9,
@@ -966,6 +992,105 @@ async def test_run_post_deploy_cleanup_uses_planned_actions_without_recalculatin
     assert deployer.restarted_services == []
     assert all("userconfig" not in command for command in deployer.commands)
     assert "sudo reboot" not in deployer.commands
+
+
+@pytest.mark.asyncio
+async def test_run_post_deploy_cleanup_remounts_read_only_root_around_cron_update():
+    frame = SimpleNamespace(
+        id=9,
+        name="BuildrootCleanupFrame",
+        reboot={"enabled": "true", "crontab": "0 4 * * *", "type": "frameos"},
+        last_successful_deploy_at=None,
+        last_successful_deploy={"frameos_version": "9.9.9"},
+        to_dict=lambda: {"id": 9, "name": "BuildrootCleanupFrame"},
+    )
+    deployer = RecordingDeployer()
+    deployer.root_read_only = True
+    workflow = FrameDeployWorkflow(
+        db=None,
+        redis=None,
+        frame=frame,
+        deployer=deployer,
+        temp_dir="",
+        binary_builder=FakeBinaryBuilder(),
+    )
+
+    await workflow._run_post_deploy_cleanup(
+        post_deploy={
+            "boot_config_path": "/boot/config.txt",
+            "low_memory_masks_apt_daily": False,
+            "reboot_schedule": {
+                "enabled": True,
+                "crontab": "0 4 * * *",
+                "type": "frameos",
+                "command": "systemctl restart frameos.service",
+                "needs_update": True,
+                "needs_remove": False,
+            },
+            "bootconfig_changes": [],
+            "disable_userconfig": False,
+            "disable_caddy_service": False,
+            "final_action": "restart_frameos",
+        }
+    )
+
+    root_check = next(index for index, command in enumerate(deployer.commands) if command.startswith("awk '$2 == \"/\" "))
+    remount_rw = deployer.commands.index("sudo mount -o remount,rw /")
+    cron_update = next(index for index, command in enumerate(deployer.commands) if "/etc/cron.d/frameos-reboot" in command)
+    sync = deployer.commands.index("sudo sync")
+    remount_ro = deployer.commands.index("sudo mount -o remount,ro /")
+    restart = deployer.commands.index("sudo systemctl restart frameos.service")
+    assert root_check < remount_rw < cron_update < sync < remount_ro < restart
+    assert ("stdout", "Root filesystem is read-only; remounting read-write for final cleanup") in deployer.logs
+    assert ("stdout", "Restoring root filesystem to read-only after final cleanup") in deployer.logs
+
+
+@pytest.mark.asyncio
+async def test_run_post_deploy_cleanup_uses_host_systemd_for_agent_rootfs_writes():
+    frame = SimpleNamespace(
+        id=9,
+        name="BuildrootAgentCleanupFrame",
+        agent={"agentEnabled": True, "agentRunCommands": True, "deployWithAgent": True},
+        reboot={"enabled": "true", "crontab": "0 4 * * *", "type": "frameos"},
+        last_successful_deploy_at=None,
+        last_successful_deploy={"frameos_version": "9.9.9"},
+        to_dict=lambda: {"id": 9, "name": "BuildrootAgentCleanupFrame"},
+    )
+    deployer = RecordingDeployer()
+    deployer.root_read_only = True
+    workflow = FrameDeployWorkflow(
+        db=None,
+        redis=None,
+        frame=frame,
+        deployer=deployer,
+        temp_dir="",
+        binary_builder=FakeBinaryBuilder(),
+    )
+
+    await workflow._run_post_deploy_cleanup(
+        post_deploy={
+            "boot_config_path": "/boot/config.txt",
+            "low_memory_masks_apt_daily": False,
+            "reboot_schedule": {
+                "enabled": True,
+                "crontab": "0 4 * * *",
+                "type": "frameos",
+                "command": "systemctl restart frameos.service",
+                "needs_update": True,
+                "needs_remove": False,
+            },
+            "bootconfig_changes": [],
+            "disable_userconfig": False,
+            "disable_caddy_service": False,
+            "final_action": "restart_frameos",
+        }
+    )
+
+    host_commands = [command for command in deployer.commands if "systemd-run --quiet --wait --pipe --collect" in command]
+    assert any("mount -o remount,rw /" in command for command in host_commands)
+    assert any("/etc/cron.d/frameos-reboot" in command for command in host_commands)
+    assert any("mount -o remount,ro /" in command for command in host_commands)
+    assert not any(command == "sudo mount -o remount,rw /" for command in deployer.commands)
 
 
 @pytest.mark.asyncio
