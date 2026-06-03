@@ -1657,6 +1657,7 @@ genimage --rootpath "$work_dir/empty-root" --tmppath "$work_dir/tmp" --inputpath
             self.frame,
             compose_cmd,
             log_command=log_command,
+            stderr_log_tag="stdout",
         )
         if status != 0:
             raise RuntimeError(f"Buildroot image composition failed: {err or 'see logs'}")
@@ -1845,6 +1846,7 @@ fi
             self.frame,
             patch_cmd,
             log_command=log_command,
+            stderr_log_tag="stdout",
         )
         if status != 0:
             raise RuntimeError(f"Buildroot BOOT partition patch failed: {err or 'see logs'}")

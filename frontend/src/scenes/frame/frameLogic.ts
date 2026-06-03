@@ -530,6 +530,10 @@ function normalizeFrameKeyValueForComparison(key: keyof FrameType, value: unknow
     return normalizeMountpointsForComparison(value)
   }
 
+  if (key === 'timezone_updater') {
+    return compactTimezoneUpdaterForSubmit(value as FrameType['timezone_updater'] | null | undefined)
+  }
+
   if (key !== 'https_proxy' || !value || typeof value !== 'object') {
     return value
   }
