@@ -59,8 +59,8 @@ SUPPORTED_BUILDROOT_PLATFORM = "raspberry-pi-zero-2-w"
 BUILDROOT_HOST_CXXFLAGS = "-O2 -pipe -std=gnu++17"
 BUILDROOT_HOST_CFLAGS = "-O2 -pipe"
 BUILDROOT_JLEVEL = int(os.environ.get("FRAMEOS_BUILDROOT_JLEVEL", "0"))
-BUILDROOT_BOOTSTRAP_SCRIPT_VERSION = "4"
-BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION = 10
+BUILDROOT_BOOTSTRAP_SCRIPT_VERSION = "5"
+BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION = 11
 BUILDROOT_FRAMEOS_PARTITION_SIZE = os.environ.get("FRAMEOS_BUILDROOT_FRAMEOS_PARTITION_SIZE", "1G")
 BUILDROOT_ASSETS_PARTITION_SIZE = os.environ.get("FRAMEOS_BUILDROOT_ASSETS_PARTITION_SIZE", "512M")
 BUILDROOT_ARCHIVE_BASE_URL = os.environ.get("FRAMEOS_ARCHIVE_BASE_URL", "https://archive.frameos.net/")
@@ -137,6 +137,8 @@ BUILDROOT_IMAGE_STALE_AFTER_SECONDS = int(
 BUILDROOT_IMAGES_DIGESTS_PATH = os.environ.get("FRAMEOS_BUILDROOT_IMAGES_DIGESTS_PATH", str(REPO_ROOT / "buildroot-images.json"))
 BUILDROOT_BOOT_LOGO_SOURCE = REPO_ROOT / "backend" / "app" / "tasks" / "assets" / "frameos-boot-logo.png"
 BUILDROOT_BOOT_LOGO_WORK_PATH = "/work/frameos-boot-logo.png"
+BUILDROOT_EXPAND_SD_CARD_SCRIPT_PATH = "/usr/sbin/frameos-expand-sd-card"
+BUILDROOT_EXPAND_SD_CARD_SERVICE_NAME = "frameos-expand-sd-card.service"
 BUILDROOT_DEFAULT_BOOT_CONFIG_LINES = (
     # Keep a small firmware framebuffer reserve for standard HDMI output while
     # returning the rest of the Pi Zero 2 W's 512MB RAM to Linux/userland.
@@ -1039,6 +1041,13 @@ class BuildrootImageBuilder:
                     "BR2_PACKAGE_FINDUTILS=y",
                     "BR2_PACKAGE_GZIP=y",
                     "BR2_PACKAGE_TAR=y",
+                    "BR2_PACKAGE_UTIL_LINUX=y",
+                    "BR2_PACKAGE_UTIL_LINUX_BINARIES=y",
+                    "BR2_PACKAGE_UTIL_LINUX_PARTX=y",
+                    "BR2_PACKAGE_E2FSPROGS=y",
+                    "BR2_PACKAGE_E2FSPROGS_RESIZE2FS=y",
+                    "BR2_PACKAGE_DOSFSTOOLS=y",
+                    "BR2_PACKAGE_DOSFSTOOLS_MKFS_FAT=y",
                     "BR2_PACKAGE_NANO=y",
                     "BR2_PACKAGE_IPROUTE2=y",
                     "BR2_PACKAGE_KMOD=y",
@@ -1962,6 +1971,194 @@ genimage \\
   --outputpath "$BINARIES_DIR" \\
   --config "$genimage_cfg"
 """
+
+
+EXPAND_SD_CARD_SCRIPT = """#!/bin/sh
+set -eu
+
+marker="/var/lib/frameos/sd-card-expanded"
+log="/var/log/frameos-expand-sd-card.log"
+mkdir -p "$(dirname "$marker")"
+touch "$log" 2>/dev/null || true
+exec >> "$log" 2>&1 || true
+
+if [ -e "$marker" ]; then
+  exit 0
+fi
+
+sector_size="${FRAMEOS_EXPAND_SECTOR_SIZE:-512}"
+align_sectors=$((1024 * 1024 / sector_size))
+align_offset=0
+small_card_threshold_sectors=$((4 * 1024 * 1024 * 1024 / sector_size))
+small_frameos_sectors=$((1 * 1024 * 1024 * 1024 / sector_size))
+large_frameos_sectors=$((2 * 1024 * 1024 * 1024 / sector_size))
+
+partition_device() {
+  case "$1" in
+    *[0-9]) printf '%sp%s\\n' "$1" "$2" ;;
+    *) printf '%s%s\\n' "$1" "$2" ;;
+  esac
+}
+
+parent_disk_for_partition() {
+  part_name="$(basename "$1")"
+  sys_path="$(readlink -f "/sys/class/block/$part_name" 2>/dev/null || true)"
+  if [ -z "$sys_path" ]; then
+    return 1
+  fi
+  disk_name="$(basename "$(dirname "$sys_path")")"
+  printf '/dev/%s\\n' "$disk_name"
+}
+
+align_down() {
+  value="$1"
+  adjusted=$((value - align_offset))
+  printf '%s\\n' $((adjusted / align_sectors * align_sectors + align_offset))
+}
+
+field_from_line() {
+  line="$1"
+  field="$2"
+  echo "$line" | sed -n "s/.*${field}=[[:space:]]*\\([0-9A-Fa-fx]*\\).*/\\1/p"
+}
+
+partition_line() {
+  number="$1"
+  sfdisk -d "$disk" | awk -v wanted="$number" '
+    /^\\/.*:/{ part_index += 1; if (part_index == wanted) { print; exit } }
+  '
+}
+
+disk="${FRAMEOS_EXPAND_DISK:-}"
+if [ -z "$disk" ]; then
+  frameos_dev="$(readlink -f /dev/disk/by-label/FRAMEOS 2>/dev/null || true)"
+  if [ -z "$frameos_dev" ] && command -v blkid >/dev/null 2>&1; then
+    frameos_dev="$(blkid -L FRAMEOS 2>/dev/null || true)"
+  fi
+  if [ -n "$frameos_dev" ]; then
+    disk="$(parent_disk_for_partition "$frameos_dev" || true)"
+  fi
+fi
+if [ -z "$disk" ] || { [ ! -b "$disk" ] && [ "${FRAMEOS_EXPAND_DRY_RUN:-0}" != "1" ]; }; then
+  echo "Could not determine SD card block device"
+  exit 1
+fi
+
+disk_name="$(basename "$disk")"
+if [ -n "${FRAMEOS_EXPAND_DISK_SECTORS:-}" ]; then
+  disk_sectors="$FRAMEOS_EXPAND_DISK_SECTORS"
+else
+  if [ ! -b "$disk" ]; then
+    echo "FRAMEOS_EXPAND_DISK_SECTORS is required when dry-running against a regular file"
+    exit 1
+  fi
+  disk_sectors="$(cat "/sys/class/block/$disk_name/size")"
+fi
+
+p1="$(partition_line 1)"
+p2="$(partition_line 2)"
+p3="$(partition_line 3)"
+p4="$(partition_line 4)"
+if [ -z "$p1" ] || [ -z "$p2" ] || [ -z "$p3" ] || [ -z "$p4" ]; then
+  echo "Expected four MBR partitions on $disk"
+  exit 1
+fi
+
+p1_start="$(field_from_line "$p1" start)"
+p1_size="$(field_from_line "$p1" size)"
+p2_start="$(field_from_line "$p2" start)"
+p2_size="$(field_from_line "$p2" size)"
+p3_start="$(field_from_line "$p3" start)"
+p3_size="$(field_from_line "$p3" size)"
+p4_start="$(field_from_line "$p4" start)"
+p4_size="$(field_from_line "$p4" size)"
+
+align_offset=$((p2_start % align_sectors))
+current_end=$((p4_start + p4_size))
+extra_sectors=$((disk_sectors - current_end))
+
+target_frameos_size="$large_frameos_sectors"
+if [ "$disk_sectors" -lt "$small_card_threshold_sectors" ]; then
+  target_frameos_size="$small_frameos_sectors"
+fi
+if [ "$target_frameos_size" -lt "$p3_size" ]; then
+  target_frameos_size="$p3_size"
+fi
+
+assets_start="$(align_down $((p3_start + target_frameos_size)))"
+assets_size=$((disk_sectors - assets_start))
+if [ "$assets_size" -le 0 ]; then
+  echo "Computed assets partition would not fit"
+  exit 1
+fi
+
+if [ "$extra_sectors" -lt "$align_sectors" ] && [ "$target_frameos_size" -eq "$p3_size" ]; then
+  echo "No SD card expansion needed"
+  date -u > "$marker"
+  exit 0
+fi
+
+echo "Expanding $disk from $current_end to $disk_sectors sectors"
+echo "Root unchanged: start $p2_start, size $p2_size sectors"
+echo "New FRAMEOS start/size: $p3_start/$target_frameos_size sectors"
+echo "New ASSETS start/size: $assets_start/$assets_size sectors"
+
+layout="$(mktemp)"
+cat > "$layout" <<EOF
+label: dos
+unit: sectors
+
+$(partition_device "$disk" 1) : start= $p1_start, size= $p1_size, type=c, bootable
+$(partition_device "$disk" 2) : start= $p2_start, size= $p2_size, type=83
+$(partition_device "$disk" 3) : start= $p3_start, size= $target_frameos_size, type=83
+$(partition_device "$disk" 4) : start= $assets_start, size= $assets_size, type=c
+EOF
+sfdisk --no-reread --force "$disk" < "$layout"
+rm -f "$layout"
+
+if [ "${FRAMEOS_EXPAND_DRY_RUN:-0}" = "1" ]; then
+  echo "Dry run requested; not rereading partition table or resizing filesystems"
+  exit 0
+fi
+
+if ! partx -u "$disk"; then
+  echo "Could not update in-kernel partition table; rebooting and retrying before local mounts"
+  systemctl reboot --no-block || reboot || true
+  exit 0
+fi
+
+frameos_dev="$(partition_device "$disk" 3)"
+assets_dev="$(partition_device "$disk" 4)"
+resize2fs "$frameos_dev"
+mkfs.vfat -n ASSETS "$assets_dev"
+date -u > "$marker"
+"""
+
+
+def render_expand_sd_card_script() -> str:
+    return EXPAND_SD_CARD_SCRIPT
+
+
+def render_expand_sd_card_service() -> str:
+    return "\n".join(
+        [
+            "[Unit]",
+            "Description=Expand FrameOS SD card partitions on first boot",
+            "DefaultDependencies=no",
+            "After=systemd-remount-fs.service",
+            "Before=local-fs-pre.target local-fs.target",
+            "ConditionPathExists=!/var/lib/frameos/sd-card-expanded",
+            "",
+            "[Service]",
+            "Type=oneshot",
+            f"ExecStart={BUILDROOT_EXPAND_SD_CARD_SCRIPT_PATH}",
+            "RemainAfterExit=yes",
+            "",
+            "[Install]",
+            "WantedBy=local-fs-pre.target",
+            "",
+        ]
+    )
 
 
 async def _buildroot_sd_image_queue_job_active(redis: Redis, sd_image: dict[str, Any]) -> bool:

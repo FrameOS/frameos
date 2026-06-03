@@ -48,6 +48,14 @@ first-boot setup service runs
 `/srv/frameos/current/frameos setup --with-setup=/boot/frameos-setup.json`. Other
 per-frame boot files include WiFi credentials, hostname, and authorized SSH keys.
 
+On first boot from a larger SD card, the base rootfs also runs
+`frameos-expand-sd-card.service` before `/srv/frameos` and `/srv/assets` are
+mounted. It keeps the root partition unchanged, resizes the ext4 `FRAMEOS`
+partition in place, and recreates the FAT `ASSETS` filesystem with the remaining
+space. Cards smaller than 4 GiB keep `FRAMEOS` at 1 GiB; larger cards use 2 GiB
+for `FRAMEOS`. The shipped `ASSETS` partition is expected to be empty or
+disposable.
+
 Release images are composed after all precompiled release binaries have been
 built. They use the cached base image plus the Debian Bookworm ARM64 precompiled
 FrameOS/agent artifacts, ship without WiFi credentials, and keep

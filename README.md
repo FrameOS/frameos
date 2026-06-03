@@ -177,6 +177,12 @@ Generated SD images use separate partitions for boot, root, FrameOS runtime data
 - `p3`: ext4 `/srv/frameos`
 - `p4`: FAT32 `/srv/assets`
 
+On first boot, Buildroot images expand themselves to fit the target SD card
+before `/srv/frameos` and `/srv/assets` are mounted. The root partition stays at
+the image size, `p3` grows to 2 GiB on cards 4 GiB and larger, and `p4` is
+recreated to fill the remaining space. On cards smaller than 4 GiB, `p3` stays
+at 1 GiB and `p4` still takes the rest.
+
 Example:
 
 ```bash

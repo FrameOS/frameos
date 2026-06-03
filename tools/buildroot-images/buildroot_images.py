@@ -31,6 +31,8 @@ from app.tasks.buildroot_image import (  # noqa: E402
     BUILDROOT_DOCKER_APT_DEPS_LINE,
     BUILDROOT_DOCKER_IMAGE,
     BUILDROOT_DOCKER_NOFILE_LIMIT,
+    BUILDROOT_EXPAND_SD_CARD_SCRIPT_PATH,
+    BUILDROOT_EXPAND_SD_CARD_SERVICE_NAME,
     BUILDROOT_FRAMEOS_PARTITION_SIZE,
     BUILDROOT_VERSION,
     BuildrootImageBuilder,
@@ -41,6 +43,8 @@ from app.tasks.buildroot_image import (  # noqa: E402
     ensure_buildroot_base_image,
     resolve_buildroot_base_entry,
     buildroot_base_cache_dir,
+    render_expand_sd_card_script,
+    render_expand_sd_card_service,
     _gzip_file,
     _sha256,
     normalize_buildroot_platform,
@@ -289,7 +293,9 @@ def legacy_local_dir(platform: str) -> Path:
 def write_base_bootstrap_overlay(overlay: Path) -> None:
     systemd = overlay / "etc" / "systemd" / "system"
     wants = systemd / "multi-user.target.wants"
+    local_fs_pre_wants = systemd / "local-fs-pre.target.wants"
     wants.mkdir(parents=True, exist_ok=True)
+    local_fs_pre_wants.mkdir(parents=True, exist_ok=True)
     script_path = overlay / SETUP_JSON_RESET_SCRIPT_PATH.lstrip("/")
     script_path.parent.mkdir(parents=True, exist_ok=True)
     script_path.write_text(render_setup_json_reset_script("/boot/frameos-setup.json"), encoding="utf-8")
@@ -311,6 +317,18 @@ def write_base_bootstrap_overlay(overlay: Path) -> None:
         if link.exists() or link.is_symlink():
             link.unlink()
         link.symlink_to(f"/usr/lib/systemd/system/{service}")
+    resize_script = overlay / BUILDROOT_EXPAND_SD_CARD_SCRIPT_PATH.lstrip("/")
+    resize_script.parent.mkdir(parents=True, exist_ok=True)
+    resize_script.write_text(render_expand_sd_card_script(), encoding="utf-8")
+    os.chmod(resize_script, 0o755)
+    (systemd / BUILDROOT_EXPAND_SD_CARD_SERVICE_NAME).write_text(
+        render_expand_sd_card_service(),
+        encoding="utf-8",
+    )
+    link = local_fs_pre_wants / BUILDROOT_EXPAND_SD_CARD_SERVICE_NAME
+    if link.exists() or link.is_symlink():
+        link.unlink()
+    link.symlink_to(f"../{BUILDROOT_EXPAND_SD_CARD_SERVICE_NAME}")
     (overlay / "etc" / "NetworkManager" / "conf.d").mkdir(parents=True, exist_ok=True)
     (overlay / "etc" / "NetworkManager" / "conf.d" / "frameos.conf").write_text(
         "[main]\nplugins=keyfile\n\n[device]\nwifi.scan-rand-mac-address=no\n",

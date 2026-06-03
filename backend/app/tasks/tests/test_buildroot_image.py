@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import gzip
+import importlib.util
 import json
 import re
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -10,12 +12,16 @@ import pytest
 
 from app.tasks.buildroot_image import (
     BUILDROOT_DEFAULT_BOOT_CONFIG_LINES,
+    BUILDROOT_EXPAND_SD_CARD_SCRIPT_PATH,
+    BUILDROOT_EXPAND_SD_CARD_SERVICE_NAME,
     FRAMEOS_BUILD_TARGET,
     BuildrootImageBuilder,
     ensure_buildroot_frame_defaults,
     _frame_boot_config_lines,
     _merge_boot_config_lines,
     _network_manager_wifi_connection,
+    render_expand_sd_card_script,
+    render_expand_sd_card_service,
 )
 from app.tasks.binary_builder import FrameBinaryBuildResult
 from app.tasks.prebuilt_deps import resolve_prebuilt_target
@@ -25,6 +31,9 @@ from app.tasks.setup_json_reset import (
     setup_json_reset_file_path,
 )
 from app.utils.cross_compile import CrossCompiler
+
+
+REPO_ROOT = Path(__file__).resolve().parents[4]
 
 
 def test_buildroot_frameos_cross_target_uses_docker_arm64_platform(tmp_path, monkeypatch):
@@ -111,6 +120,13 @@ def test_buildroot_config_avoids_ncurses_selecting_packages(tmp_path):
     assert "BR2_PACKAGE_DROPBEAR=y" in config
     assert "BR2_PACKAGE_DBUS=y" in config
     assert "BR2_PACKAGE_TZDATA=y" in config
+    assert "BR2_PACKAGE_UTIL_LINUX=y" in config
+    assert "BR2_PACKAGE_UTIL_LINUX_BINARIES=y" in config
+    assert "BR2_PACKAGE_UTIL_LINUX_PARTX=y" in config
+    assert "BR2_PACKAGE_E2FSPROGS=y" in config
+    assert "BR2_PACKAGE_E2FSPROGS_RESIZE2FS=y" in config
+    assert "BR2_PACKAGE_DOSFSTOOLS=y" in config
+    assert "BR2_PACKAGE_DOSFSTOOLS_MKFS_FAT=y" in config
     assert "BR2_PACKAGE_NANO=y" in config
     assert "BR2_PACKAGE_IMAGEMAGICK=y" in config
     assert "BR2_PACKAGE_NETWORK_MANAGER=y" in config
@@ -197,6 +213,60 @@ def test_buildroot_partition_scripts_create_frameos_and_assets_partitions(tmp_pa
     assert "gpu_mem=32" in post_image
     assert "partition frameos" in post_image
     assert "partition assets" in post_image
+
+
+def test_buildroot_expand_sd_card_service_runs_before_local_mounts():
+    service = render_expand_sd_card_service()
+    script = render_expand_sd_card_script()
+
+    assert f"ExecStart={BUILDROOT_EXPAND_SD_CARD_SCRIPT_PATH}" in service
+    assert "DefaultDependencies=no" in service
+    assert "Before=local-fs-pre.target local-fs.target" in service
+    assert "WantedBy=local-fs-pre.target" in service
+    assert "ConditionPathExists=!/var/lib/frameos/sd-card-expanded" in service
+
+    assert "FRAMEOS_EXPAND_DISK" in script
+    assert "FRAMEOS_EXPAND_DRY_RUN" in script
+    assert "small_card_threshold_sectors=$((4 * 1024 * 1024 * 1024 / sector_size))" in script
+    assert "small_frameos_sectors=$((1 * 1024 * 1024 * 1024 / sector_size))" in script
+    assert "large_frameos_sectors=$((2 * 1024 * 1024 * 1024 / sector_size))" in script
+    assert 'echo "Root unchanged: start $p2_start, size $p2_size sectors"' in script
+    assert 'mkfs.vfat -n ASSETS "$assets_dev"' in script
+    assert 'resize2fs "$frameos_dev"' in script
+    assert 'resize2fs "$root_dev"' not in script
+    assert 'sfdisk --no-reread --force "$disk"' in script
+    assert 'partx -u "$disk"' in script
+
+
+def test_base_bootstrap_overlay_installs_expand_sd_card_service(tmp_path, monkeypatch):
+    module_path = REPO_ROOT / "tools" / "buildroot-images" / "buildroot_images.py"
+    spec = importlib.util.spec_from_file_location("buildroot_images_tool", module_path)
+    assert spec and spec.loader
+    buildroot_images = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = buildroot_images
+    spec.loader.exec_module(buildroot_images)
+
+    monkeypatch.setattr(buildroot_images, "copy_lgpio_runtime_libraries", lambda _overlay: None)
+    overlay = tmp_path / "overlay"
+
+    buildroot_images.write_base_bootstrap_overlay(overlay)
+
+    service_path = overlay / "etc" / "systemd" / "system" / BUILDROOT_EXPAND_SD_CARD_SERVICE_NAME
+    service_link = (
+        overlay
+        / "etc"
+        / "systemd"
+        / "system"
+        / "local-fs-pre.target.wants"
+        / BUILDROOT_EXPAND_SD_CARD_SERVICE_NAME
+    )
+    script_path = overlay / BUILDROOT_EXPAND_SD_CARD_SCRIPT_PATH.lstrip("/")
+
+    assert service_path.read_text(encoding="utf-8") == render_expand_sd_card_service()
+    assert service_link.is_symlink()
+    assert service_link.readlink().as_posix() == f"../{BUILDROOT_EXPAND_SD_CARD_SERVICE_NAME}"
+    assert script_path.read_text(encoding="utf-8") == render_expand_sd_card_script()
+    assert oct(script_path.stat().st_mode & 0o777) == "0o755"
 
 
 def test_buildroot_boot_logo_is_staged_for_kernel_custom_logo(tmp_path):
