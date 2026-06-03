@@ -9,13 +9,17 @@ from types import SimpleNamespace
 import pytest
 
 from app.tasks.buildroot_image import (
+    BUILDROOT_ALLWINNER_T113_S3,
     BUILDROOT_DEFAULT_BOOT_CONFIG_LINES,
     FRAMEOS_BUILD_TARGET,
     BuildrootImageBuilder,
+    buildroot_platform_spec,
     ensure_buildroot_frame_defaults,
     _frame_boot_config_lines,
     _merge_boot_config_lines,
     _network_manager_wifi_connection,
+    normalize_buildroot_platform,
+    try_resolve_buildroot_base_entry,
 )
 from app.tasks.binary_builder import FrameBinaryBuildResult
 from app.tasks.prebuilt_deps import resolve_prebuilt_target
@@ -170,6 +174,47 @@ def test_buildroot_script_builds_output_on_container_filesystem(tmp_path):
     assert "dd if=/build/output/images/sdcard.img of=/artifacts/frameos-test.img" in script
     assert "O=/work/output" not in script
     assert "cp /work/output/images/sdcard.img" not in script
+
+
+def test_allwinner_t113_platform_uses_armhf_and_mangopi_defconfig(tmp_path):
+    spec = buildroot_platform_spec(BUILDROOT_ALLWINNER_T113_S3)
+    config_path = tmp_path / "frameos-buildroot.config"
+    post_image_path = tmp_path / "post-image.sh"
+    script_path = tmp_path / "buildroot-build.sh"
+    fragment_path = tmp_path / "linux-fragment.config"
+
+    BuildrootImageBuilder._write_buildroot_config(config_path, spec)
+    BuildrootImageBuilder._write_post_image_script(post_image_path, spec)
+    BuildrootImageBuilder._write_build_script(script_path, "frameos-test.img", spec)
+    BuildrootImageBuilder._write_kernel_config_fragment(fragment_path, spec)
+
+    config = config_path.read_text(encoding="utf-8")
+    post_image = post_image_path.read_text(encoding="utf-8")
+    script = script_path.read_text(encoding="utf-8")
+    fragment = fragment_path.read_text(encoding="utf-8")
+
+    assert spec.frameos_target.arch == "armhf"
+    assert normalize_buildroot_platform("t113-s3") == BUILDROOT_ALLWINNER_T113_S3
+    assert "make -C /build/buildroot O=/build/output mangopi_mq1rdw2_defconfig" in script
+    assert "BR2_PACKAGE_RTL8723DS=y" in config
+    assert 'BR2_TARGET_GENERIC_GETTY_PORT="ttyS3"' in config
+    assert 'BR2_ROOTFS_POST_BUILD_SCRIPT="/work/post-build.sh /work/partition-post-build.sh"' in config
+    assert "u-boot-sunxi-with-spl.bin" in post_image
+    assert "offset = 8K" in post_image
+    assert "sun8i-t113s-mangopi-mq-r-t113.dtb" in post_image
+    assert "root=/dev/mmcblk0p2" in post_image
+    assert "CONFIG_DRM_SUN4I=y" in fragment
+    assert "gpu_mem=32" not in post_image
+
+
+@pytest.mark.asyncio
+async def test_buildroot_base_resolver_returns_none_when_platform_has_no_cached_image(monkeypatch):
+    async def fake_manifest():
+        return {"entries": []}
+
+    monkeypatch.setattr("app.tasks.buildroot_image._buildroot_base_manifest", fake_manifest)
+
+    assert await try_resolve_buildroot_base_entry(BUILDROOT_ALLWINNER_T113_S3) is None
 
 
 def test_buildroot_partition_scripts_create_frameos_and_assets_partitions(tmp_path):
@@ -555,7 +600,7 @@ def test_buildroot_copies_lgpio_runtime_libraries(tmp_path, monkeypatch):
         frame=SimpleNamespace(id=1),
     )
 
-    monkeypatch.setattr("app.tasks.buildroot_image._lgpio_runtime_library_paths", lambda: [liblgpio, librgpio])
+    monkeypatch.setattr("app.tasks.buildroot_image._lgpio_runtime_library_paths", lambda _target=FRAMEOS_BUILD_TARGET: [liblgpio, librgpio])
     builder._copy_runtime_libraries(tmp_path / "overlay")
 
     assert (tmp_path / "overlay" / "usr" / "lib" / "liblgpio.so.1").read_bytes() == b"lgpio"
@@ -569,7 +614,7 @@ def test_buildroot_requires_lgpio_runtime_libraries(tmp_path, monkeypatch):
         frame=SimpleNamespace(id=1),
     )
 
-    monkeypatch.setattr("app.tasks.buildroot_image._lgpio_runtime_library_paths", lambda: [])
+    monkeypatch.setattr("app.tasks.buildroot_image._lgpio_runtime_library_paths", lambda _target=FRAMEOS_BUILD_TARGET: [])
 
     with pytest.raises(RuntimeError, match="requires lgpio runtime libraries"):
         builder._copy_runtime_libraries(tmp_path / "overlay")

@@ -9,6 +9,7 @@ import re
 import shlex
 import shutil
 import tempfile
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
@@ -55,7 +56,9 @@ from app.utils.token import secure_token
 from app.utils.versions import current_frameos_version
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-SUPPORTED_BUILDROOT_PLATFORM = "raspberry-pi-zero-2-w"
+BUILDROOT_RASPBERRY_PI_ZERO_2_W = "raspberry-pi-zero-2-w"
+BUILDROOT_ALLWINNER_T113_S3 = "allwinner-t113-s3"
+SUPPORTED_BUILDROOT_PLATFORM = BUILDROOT_RASPBERRY_PI_ZERO_2_W
 BUILDROOT_HOST_CXXFLAGS = "-O2 -pipe -std=gnu++17"
 BUILDROOT_HOST_CFLAGS = "-O2 -pipe"
 BUILDROOT_JLEVEL = int(os.environ.get("FRAMEOS_BUILDROOT_JLEVEL", "0"))
@@ -149,6 +152,11 @@ FRAMEOS_BUILD_TARGET = TargetMetadata(
     distro="debian",
     version="bookworm",
 )
+ALLWINNER_T113_FRAMEOS_BUILD_TARGET = TargetMetadata(
+    arch="armhf",
+    distro="debian",
+    version="bookworm",
+)
 ACTIVE_SD_IMAGE_STATUSES = {"queued", "building"}
 ACTIVE_ARQ_JOB_STATUSES = {
     JobStatus.deferred,
@@ -157,11 +165,311 @@ ACTIVE_ARQ_JOB_STATUSES = {
 }
 
 
+@dataclass(frozen=True, slots=True)
+class BuildrootPlatformSpec:
+    slug: str
+    label: str
+    defconfig: str
+    frameos_target: TargetMetadata
+    build_log_name: str
+    default_boot_config_lines: tuple[str, ...] = ()
+    supports_boot_config_lines: bool = False
+    buildroot_config_lines: tuple[str, ...] = ()
+    kernel_config_fragment_lines: tuple[str, ...] = ()
+    post_image_script: str = ""
+    frameos_partition_number: int = 3
+    assets_partition_number: int = 4
+    boot_partition_number: int = 1
+    aliases: tuple[str, ...] = ()
+
+
+PI_KERNEL_CONFIG_FRAGMENT_LINES = (
+    "# Avoid case-colliding xtables target/match objects on macOS bind mounts.",
+    "# CONFIG_NETFILTER_XT_TARGET_DSCP is not set",
+    "# CONFIG_NETFILTER_XT_TARGET_HL is not set",
+    "# CONFIG_NETFILTER_XT_TARGET_RATEEST is not set",
+    "# CONFIG_NETFILTER_XT_TARGET_TCPMSS is not set",
+    "# CONFIG_NETFILTER_XT_MATCH_RATEEST is not set",
+    "# CONFIG_IP_NF_TARGET_ECN is not set",
+    "# CONFIG_IP_NF_TARGET_TTL is not set",
+    "# CONFIG_IP6_NF_TARGET_HL is not set",
+    "",
+    "# Trimmed for Raspberry Pi Zero 2 W use cases.",
+    "# Keep HID, HDMI, Wi-Fi, Bluetooth and USB storage; trim the rest.",
+    "# Telephony/streaming/media/input-complexity reducers.",
+    "# CONFIG_AUXDISPLAY is not set",
+    "# CONFIG_CAN is not set",
+    "# CONFIG_DVB_CORE is not set",
+    "# CONFIG_DVB_USB is not set",
+    "# CONFIG_HAMRADIO is not set",
+    "# CONFIG_MEDIA_DIGITAL_TV_SUPPORT is not set",
+    "# CONFIG_MEDIA_PCI_SUPPORT is not set",
+    "# CONFIG_MEDIA_PLATFORM_DRIVERS is not set",
+    "# CONFIG_MEDIA_USB_SUPPORT is not set",
+    "# CONFIG_STAGING is not set",
+    "# CONFIG_VIDEO_DEV is not set",
+    "# CONFIG_VIDEO_HDPVR is not set",
+    "# CONFIG_VIDEO_OV2640 is not set",
+    "# CONFIG_USB_ACM is not set",
+    "# CONFIG_USB_NET_AX88179_178A is not set",
+    "# CONFIG_USB_NET_CDCETHER is not set",
+    "# CONFIG_USB_NET_CDC_SUBSET is not set",
+    "# CONFIG_USB_NET_CDC_NCM is not set",
+    "# CONFIG_USB_NET_CDC_MBIM is not set",
+    "# CONFIG_USB_NET_DM9601 is not set",
+    "# CONFIG_USB_NET_CDC_EEM is not set",
+    "# CONFIG_USB_NET_HUAWEI_CDC_NCM is not set",
+    "# CONFIG_USB_NET_RNDIS_HOST is not set",
+    "# CONFIG_USB_OHCI_HCD_PLATFORM is not set",
+    "# CONFIG_USB_PRINTER is not set",
+    "# CONFIG_USB_ROLE_SWITCH is not set",
+    "# CONFIG_USB_SERIAL is not set",
+    "# CONFIG_USB_MON is not set",
+    "# CONFIG_WIMAX is not set",
+    "",
+)
+
+
+ALLWINNER_T113_KERNEL_CONFIG_FRAGMENT_LINES = (
+    "# FrameOS T113-S3/S4 devboard defaults.",
+    "CONFIG_DEVTMPFS=y",
+    "CONFIG_DEVTMPFS_MOUNT=y",
+    "CONFIG_CGROUPS=y",
+    "CONFIG_INOTIFY_USER=y",
+    "CONFIG_TMPFS_POSIX_ACL=y",
+    "CONFIG_TMPFS_XATTR=y",
+    "CONFIG_OVERLAY_FS=y",
+    "CONFIG_VT=y",
+    "CONFIG_VT_CONSOLE=y",
+    "CONFIG_FRAMEBUFFER_CONSOLE=y",
+    "CONFIG_DRM=y",
+    "CONFIG_DRM_SUN4I=y",
+    "CONFIG_DRM_PANEL_SIMPLE=y",
+    "CONFIG_BACKLIGHT_CLASS_DEVICE=y",
+    "CONFIG_SPI=y",
+    "CONFIG_SPI_SUN6I=y",
+    "CONFIG_SPI_SPIDEV=y",
+    "CONFIG_GPIO_SYSFS=y",
+    "CONFIG_GPIO_CDEV=y",
+    "CONFIG_INPUT_EVDEV=y",
+    "CONFIG_USB_SUPPORT=y",
+    "CONFIG_USB_MUSB_HDRC=y",
+    "CONFIG_USB_MUSB_SUNXI=y",
+    "CONFIG_USB_STORAGE=y",
+    "CONFIG_MMC=y",
+    "CONFIG_MMC_SUNXI=y",
+    "CONFIG_CFG80211=y",
+    "CONFIG_MAC80211=y",
+    "CONFIG_RTL8723DS=m",
+    "",
+)
+
+
+COMMON_BUILDROOT_CONFIG_LINES = (
+    "BR2_INIT_SYSTEMD=y",
+    "BR2_ROOTFS_DEVICE_CREATION_DYNAMIC_EUDEV=y",
+    "BR2_ENABLE_LOCALE=y",
+    "BR2_SYSTEM_DHCP=\"eth0\"",
+    "BR2_TARGET_GENERIC_HOSTNAME=\"frameos\"",
+    "BR2_TARGET_GENERIC_ISSUE=\"Welcome to FrameOS\"",
+    "BR2_TARGET_ROOTFS_EXT2_SIZE=\"768M\"",
+    f"BR2_JLEVEL={BUILDROOT_JLEVEL}",
+    'BR2_DL_DIR="/cache/dl"',
+    'BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES="/work/linux-fragment.config"',
+    f'BR2_LINUX_KERNEL_CUSTOM_LOGO_PATH="{BUILDROOT_BOOT_LOGO_WORK_PATH}"',
+    "BR2_PACKAGE_SYSTEMD=y",
+    "BR2_PACKAGE_SYSTEMD_TIMESYNCD=y",
+    "BR2_PACKAGE_DBUS=y",
+    "BR2_PACKAGE_DROPBEAR=y",
+    "BR2_PACKAGE_SUDO=y",
+    "BR2_PACKAGE_CA_CERTIFICATES=y",
+    "BR2_PACKAGE_TZDATA=y",
+    "BR2_PACKAGE_BASH=y",
+    "BR2_PACKAGE_COREUTILS=y",
+    "BR2_PACKAGE_FINDUTILS=y",
+    "BR2_PACKAGE_GZIP=y",
+    "BR2_PACKAGE_TAR=y",
+    "BR2_PACKAGE_NANO=y",
+    "BR2_PACKAGE_IPROUTE2=y",
+    "BR2_PACKAGE_KMOD=y",
+    "BR2_PACKAGE_OPENSSL=y",
+    "BR2_PACKAGE_ZLIB=y",
+    "BR2_PACKAGE_IMAGEMAGICK=y",
+    "BR2_PACKAGE_FFMPEG=y",
+    "BR2_PACKAGE_FFMPEG_FFPROBE=y",
+    "BR2_PACKAGE_FFMPEG_SWSCALE=y",
+    "BR2_PACKAGE_HOSTAPD=y",
+    "BR2_PACKAGE_DNSMASQ=y",
+    "BR2_PACKAGE_NETWORK_MANAGER=y",
+    "BR2_PACKAGE_NETWORK_MANAGER_CLI=y",
+    "BR2_PACKAGE_NETWORK_MANAGER_WIFI=y",
+    "BR2_PACKAGE_WPA_SUPPLICANT=y",
+    "BR2_PACKAGE_WPA_SUPPLICANT_DBUS=y",
+    "BR2_PACKAGE_WPA_SUPPLICANT_NL80211=y",
+    "BR2_PACKAGE_IW=y",
+    "BR2_PACKAGE_WIRELESS_TOOLS=y",
+    "BR2_PACKAGE_LIBEVDEV=y",
+    "# BR2_CCACHE is not set",
+    'BR2_ROOTFS_OVERLAY="/work/overlay"',
+)
+
+
+PI_BUILDROOT_CONFIG_LINES = (
+    *COMMON_BUILDROOT_CONFIG_LINES,
+    "BR2_PACKAGE_LINUX_FIRMWARE=y",
+    "BR2_PACKAGE_LINUX_FIRMWARE_BRCM_BCM43XXX=y",
+    "BR2_PACKAGE_BRCMFMAC_SDIO_FIRMWARE_RPI=y",
+    'BR2_ROOTFS_POST_BUILD_SCRIPT="board/raspberrypi/post-build.sh /work/post-build.sh /work/partition-post-build.sh"',
+    'BR2_ROOTFS_POST_IMAGE_SCRIPT="/work/post-image.sh"',
+)
+
+
+ALLWINNER_T113_BUILDROOT_CONFIG_LINES = (
+    "BR2_TOOLCHAIN_BUILDROOT_GLIBC=y",
+    *COMMON_BUILDROOT_CONFIG_LINES,
+    "BR2_TARGET_GENERIC_GETTY_PORT=\"ttyS3\"",
+    "BR2_PACKAGE_RTL8723DS=y",
+    "BR2_PACKAGE_WPA_SUPPLICANT_AUTOSCAN=y",
+    "BR2_PACKAGE_WPA_SUPPLICANT_CLI=y",
+    "BR2_PACKAGE_WPA_SUPPLICANT_PASSPHRASE=y",
+    'BR2_ROOTFS_POST_BUILD_SCRIPT="/work/post-build.sh /work/partition-post-build.sh"',
+    'BR2_ROOTFS_POST_IMAGE_SCRIPT="/work/post-image.sh"',
+)
+
+
+def _allwinner_t113_post_image_script() -> str:
+    return f"""#!/usr/bin/env bash
+set -euo pipefail
+
+genimage_cfg="${{BINARIES_DIR:?BINARIES_DIR is required}}/frameos-genimage.cfg"
+genimage_tmp="${{BUILD_DIR:?BUILD_DIR is required}}/genimage.tmp"
+rootpath_tmp="$(mktemp -d)"
+trap 'rm -rf "$rootpath_tmp"' EXIT
+
+mkdir -p "${{BINARIES_DIR}}/extlinux"
+cat > "${{BINARIES_DIR}}/extlinux/extlinux.conf" <<'EOF'
+label FRAMEOS-T113
+    kernel /zImage
+    devicetree /sun8i-t113s-mangopi-mq-r-t113.dtb
+    append console=ttyS3,115200 root=/dev/mmcblk0p2 rootwait rw panic=10 ${{extra}}
+EOF
+
+cat > "$genimage_cfg" <<EOF
+image boot.vfat {{
+\tvfat {{
+\t\tlabel = "BOOT"
+\t\tfiles = {{
+\t\t\t"zImage",
+\t\t\t"sun8i-t113s-mangopi-mq-r-t113.dtb",
+\t\t\t"extlinux",
+\t\t}}
+\t}}
+
+\tsize = 32M
+}}
+
+image frameos.ext4 {{
+\text4 {{
+\t\tuse-mke2fs = true
+\t\tlabel = "FRAMEOS"
+\t}}
+\tsrcpath = "${{BASE_DIR:?BASE_DIR is required}}/frameos-partition-root"
+\tsize = {BUILDROOT_FRAMEOS_PARTITION_SIZE}
+}}
+
+image assets.vfat {{
+\tvfat {{
+\t\tlabel = "ASSETS"
+\t}}
+\tsrcpath = "${{BASE_DIR}}/assets-partition-root"
+\tsize = {BUILDROOT_ASSETS_PARTITION_SIZE}
+}}
+
+image sdcard.img {{
+\thdimage {{
+\t}}
+
+\tpartition u-boot {{
+\t\tin-partition-table = "no"
+\t\timage = "u-boot-sunxi-with-spl.bin"
+\t\toffset = 8K
+\t\tsize = 1016K
+\t}}
+
+\tpartition boot {{
+\t\tpartition-type = 0xC
+\t\tbootable = "true"
+\t\timage = "boot.vfat"
+\t}}
+
+\tpartition rootfs {{
+\t\tpartition-type = 0x83
+\t\timage = "rootfs.ext4"
+\t}}
+
+\tpartition frameos {{
+\t\tpartition-type = 0x83
+\t\timage = "frameos.ext4"
+\t}}
+
+\tpartition assets {{
+\t\tpartition-type = 0xC
+\t\timage = "assets.vfat"
+\t}}
+}}
+EOF
+
+rm -rf "$genimage_tmp"
+genimage \\
+  --rootpath "$rootpath_tmp" \\
+  --tmppath "$genimage_tmp" \\
+  --inputpath "$BINARIES_DIR" \\
+  --outputpath "$BINARIES_DIR" \\
+  --config "$genimage_cfg"
+"""
+
+
+BUILDROOT_PLATFORM_SPECS: dict[str, BuildrootPlatformSpec] = {
+    BUILDROOT_RASPBERRY_PI_ZERO_2_W: BuildrootPlatformSpec(
+        slug=BUILDROOT_RASPBERRY_PI_ZERO_2_W,
+        label="Raspberry Pi Zero 2 W",
+        defconfig=BUILDROOT_DEFCONFIG,
+        frameos_target=FRAMEOS_BUILD_TARGET,
+        build_log_name="Raspberry Pi Zero 2 W",
+        default_boot_config_lines=BUILDROOT_DEFAULT_BOOT_CONFIG_LINES,
+        supports_boot_config_lines=True,
+        buildroot_config_lines=PI_BUILDROOT_CONFIG_LINES,
+        kernel_config_fragment_lines=PI_KERNEL_CONFIG_FRAGMENT_LINES,
+    ),
+    BUILDROOT_ALLWINNER_T113_S3: BuildrootPlatformSpec(
+        slug=BUILDROOT_ALLWINNER_T113_S3,
+        label="Allwinner T113-S3",
+        defconfig="mangopi_mq1rdw2_defconfig",
+        frameos_target=ALLWINNER_T113_FRAMEOS_BUILD_TARGET,
+        build_log_name="Allwinner T113-S3/S4",
+        buildroot_config_lines=ALLWINNER_T113_BUILDROOT_CONFIG_LINES,
+        kernel_config_fragment_lines=ALLWINNER_T113_KERNEL_CONFIG_FRAGMENT_LINES,
+        post_image_script=_allwinner_t113_post_image_script(),
+        aliases=("t113-s3", "t113", "allwinner-t113", "mangopi-mq-r", "mangopi_mq1rdw2", "mangopi_mq1rdw2_defconfig"),
+    ),
+}
+SUPPORTED_BUILDROOT_PLATFORMS = tuple(BUILDROOT_PLATFORM_SPECS)
+
+
 def normalize_buildroot_platform(platform: str | None) -> str:
     value = (platform or "").strip()
-    if value == SUPPORTED_BUILDROOT_PLATFORM or value in LEGACY_PLATFORM_ALIASES:
+    if value in LEGACY_PLATFORM_ALIASES:
         return SUPPORTED_BUILDROOT_PLATFORM
+    if value in BUILDROOT_PLATFORM_SPECS:
+        return value
+    for spec in BUILDROOT_PLATFORM_SPECS.values():
+        if value in spec.aliases:
+            return spec.slug
     raise ValueError(f"Unsupported Buildroot platform: {value or '(empty)'}")
+
+
+def buildroot_platform_spec(platform: str | None) -> BuildrootPlatformSpec:
+    return BUILDROOT_PLATFORM_SPECS[normalize_buildroot_platform(platform)]
 
 
 def buildroot_artifact_dir() -> Path:
@@ -252,6 +560,15 @@ async def resolve_buildroot_base_entry(platform: str, frameos_version: str | Non
     return max(entries, key=lambda entry: str(entry.get("updated_at") or ""))
 
 
+async def try_resolve_buildroot_base_entry(platform: str, frameos_version: str | None = None) -> dict[str, Any] | None:
+    try:
+        return await resolve_buildroot_base_entry(platform, frameos_version)
+    except RuntimeError as exc:
+        if "No cached Buildroot base image found" in str(exc):
+            return None
+        raise
+
+
 async def ensure_buildroot_base_image(entry: dict[str, Any], destination_dir: Path) -> Path:
     object_key = entry.get("object_key")
     sha256 = entry.get("sha256")
@@ -284,8 +601,8 @@ async def ensure_buildroot_base_image(entry: dict[str, Any], destination_dir: Pa
     return image_path
 
 
-def _lgpio_runtime_library_paths() -> list[Path]:
-    sysroot = cross_cache_root() / cross_cache_key(FRAMEOS_BUILD_TARGET) / "sysroot"
+def _lgpio_runtime_library_paths(target: TargetMetadata = FRAMEOS_BUILD_TARGET) -> list[Path]:
+    sysroot = cross_cache_root() / cross_cache_key(target) / "sysroot"
     libraries: list[Path] = []
     for lib_dir in (sysroot / "usr" / "lib", sysroot / "usr" / "local" / "lib"):
         if not lib_dir.is_dir():
@@ -293,9 +610,9 @@ def _lgpio_runtime_library_paths() -> list[Path]:
         for pattern in ("liblgpio.so*", "librgpio.so*"):
             libraries.extend(sorted(path for path in lib_dir.glob(pattern) if path.is_file()))
     prebuilt_target = resolve_prebuilt_target(
-        FRAMEOS_BUILD_TARGET.distro,
-        FRAMEOS_BUILD_TARGET.version,
-        FRAMEOS_BUILD_TARGET.arch,
+        target.distro,
+        target.version,
+        target.arch,
     )
     if prebuilt_target:
         prebuilt_root = REPO_ROOT / "build" / "prebuilt-deps" / prebuilt_target
@@ -307,8 +624,8 @@ def _lgpio_runtime_library_paths() -> list[Path]:
     return list(dict.fromkeys(libraries))
 
 
-def copy_lgpio_runtime_libraries(overlay_dir: Path) -> None:
-    runtime_libraries = _lgpio_runtime_library_paths()
+def copy_lgpio_runtime_libraries(overlay_dir: Path, target: TargetMetadata = FRAMEOS_BUILD_TARGET) -> None:
+    runtime_libraries = _lgpio_runtime_library_paths(target)
     if not runtime_libraries:
         raise RuntimeError("Buildroot image requires lgpio runtime libraries, but none were found in the cross sysroot or prebuilt deps")
     destination = overlay_dir / "usr" / "lib"
@@ -374,8 +691,11 @@ def _merge_boot_config_lines(content: str, requested_lines: list[str]) -> str:
     return merged
 
 
-def _frame_boot_config_lines(frame: Frame) -> list[str]:
-    lines: list[str] = list(BUILDROOT_DEFAULT_BOOT_CONFIG_LINES)
+def _frame_boot_config_lines(frame: Frame, platform: str | None = None) -> list[str]:
+    spec = buildroot_platform_spec(platform or (getattr(frame, "buildroot", None) or {}).get("platform"))
+    lines: list[str] = list(spec.default_boot_config_lines)
+    if not spec.supports_boot_config_lines:
+        return lines
     seen: set[str] = set(lines)
     for driver in drivers_for_frame(frame).values():
         for line in getattr(driver, "lines", []) or []:
@@ -539,7 +859,8 @@ async def start_buildroot_sd_image(
     *,
     force: bool = False,
 ) -> tuple[bool, dict[str, Any]]:
-    current_base_entry = await resolve_buildroot_base_entry(SUPPORTED_BUILDROOT_PLATFORM)
+    platform = normalize_buildroot_platform((frame.buildroot or {}).get("platform"))
+    current_base_entry = await try_resolve_buildroot_base_entry(platform)
     sd_image = latest_buildroot_sd_image(frame, current_base_entry)
     if sd_image and sd_image.get("status") == "ready" and not force:
         return False, sd_image
@@ -564,7 +885,7 @@ async def start_buildroot_sd_image(
         "status": "queued",
         "requestId": request_id,
         "queueJobId": queue_job_id,
-        "platform": SUPPORTED_BUILDROOT_PLATFORM,
+        "platform": platform,
         "queuedAt": queued_at,
         "startedAt": queued_at,
     }
@@ -645,6 +966,8 @@ class BuildrootImageBuilder:
         self.redis = redis
         self.frame = frame
         self.request_id = request_id
+        self.platform = normalize_buildroot_platform((getattr(frame, "buildroot", None) or {}).get("platform"))
+        self.platform_spec = buildroot_platform_spec(self.platform)
 
     async def run(self) -> dict[str, Any]:
         validate_buildroot_wifi_credentials(self.frame)
@@ -664,7 +987,7 @@ class BuildrootImageBuilder:
             temp_dir = Path(tmp)
             deployer = FrameDeployer(self.db, self.redis, self.frame, "", str(temp_dir))
             build_id = deployer.build_id
-            raw_filename = f"frameos-{self.frame.id}-{SUPPORTED_BUILDROOT_PLATFORM}-{build_id}.img"
+            raw_filename = f"frameos-{self.frame.id}-{self.platform}-{build_id}.img"
             filename = f"{raw_filename}.gz"
             raw_output_path = artifact_dir / raw_filename
             output_path = artifact_dir / filename
@@ -677,7 +1000,7 @@ class BuildrootImageBuilder:
                     **_preserved_queue_metadata(latest_buildroot_sd_image(self.frame) or {}),
                     "status": "building",
                     "buildId": build_id,
-                    "platform": SUPPORTED_BUILDROOT_PLATFORM,
+                    "platform": self.platform,
                     "frameosVersion": current_frameos_version(),
                     "filename": filename,
                     "rawFilename": raw_filename,
@@ -706,23 +1029,53 @@ class BuildrootImageBuilder:
             partition_post_build_path = temp_dir / "partition-post-build.sh"
             post_image_path = temp_dir / "post-image.sh"
             kernel_fragment_path = temp_dir / "linux-fragment.config"
-            self._write_buildroot_config(config_path)
-            self._write_kernel_config_fragment(kernel_fragment_path)
+            self._write_buildroot_config(config_path, self.platform_spec)
+            self._write_kernel_config_fragment(kernel_fragment_path, self.platform_spec)
             self._write_post_build_script(post_build_path)
             self._write_partition_post_build_script(partition_post_build_path)
-            self._write_post_image_script(post_image_path)
+            self._write_post_image_script(post_image_path, self.platform_spec)
+            self._write_build_script(script_path, raw_output_path.name, self.platform_spec)
             self._write_boot_logo(temp_dir / Path(BUILDROOT_BOOT_LOGO_WORK_PATH).name)
-            base_entry = await resolve_buildroot_base_entry(SUPPORTED_BUILDROOT_PLATFORM)
-            base_image_path = await ensure_buildroot_base_image(base_entry, buildroot_base_cache_dir())
-            compose_image = None
-            if not self._host_has_compose_tools():
-                compose_image = await self._ensure_buildroot_image()
-            await self._compose_sd_image_from_base(
-                temp_dir=temp_dir,
-                base_image_path=base_image_path,
-                output_path=raw_output_path,
-                image=compose_image,
-            )
+            base_entry = await try_resolve_buildroot_base_entry(self.platform)
+            if base_entry is not None:
+                base_image_path = await ensure_buildroot_base_image(base_entry, buildroot_base_cache_dir())
+                compose_image = None
+                if not self._host_has_compose_tools():
+                    compose_image = await self._ensure_buildroot_image()
+                await self._compose_sd_image_from_base(
+                    temp_dir=temp_dir,
+                    base_image_path=base_image_path,
+                    output_path=raw_output_path,
+                    image=compose_image,
+                )
+            else:
+                await self._log(
+                    "stderr",
+                    f"No cached Buildroot base image found for {self.platform}; running a full local Buildroot build",
+                )
+                build_image = await self._ensure_buildroot_image()
+                output_cache_key = self._buildroot_output_cache_key(
+                    build_id,
+                    overlay_dir,
+                    config_path,
+                    post_build_path,
+                    partition_post_build_path,
+                    post_image_path,
+                    build_image=build_image,
+                    skip_apt_install=True,
+                    spec=self.platform_spec,
+                )
+                output_dir = output_cache_root / output_cache_key
+                output_dir.mkdir(parents=True, exist_ok=True)
+                await self._run_buildroot(
+                    temp_dir=temp_dir,
+                    artifact_dir=artifact_dir,
+                    cache_dir=cache_dir,
+                    source_dir=source_dir,
+                    output_dir=output_dir,
+                    image=build_image,
+                    skip_apt_install=True,
+                )
 
             if not raw_output_path.is_file():
                 raise RuntimeError(f"SD image composer completed without producing {raw_output_path.name}")
@@ -736,15 +1089,17 @@ class BuildrootImageBuilder:
                 **_preserved_queue_metadata(latest_buildroot_sd_image(self.frame) or {}),
                 "status": "ready",
                 "buildId": build_id,
-                "platform": SUPPORTED_BUILDROOT_PLATFORM,
+                "platform": self.platform,
                 "frameosVersion": current_frameos_version(),
                 "buildrootVersion": BUILDROOT_VERSION,
-                "baseImage": {
-                    "frameosVersion": base_entry.get("frameos_version"),
-                    "objectKey": base_entry.get("object_key"),
-                    "sha256": base_entry.get("sha256"),
-                    "updatedAt": base_entry.get("updated_at"),
-                },
+                **({
+                    "baseImage": {
+                        "frameosVersion": base_entry.get("frameos_version"),
+                        "objectKey": base_entry.get("object_key"),
+                        "sha256": base_entry.get("sha256"),
+                        "updatedAt": base_entry.get("updated_at"),
+                    },
+                } if base_entry is not None else {"baseImage": None}),
                 "filename": filename,
                 "rawFilename": raw_filename,
                 "path": str(output_path),
@@ -770,7 +1125,7 @@ class BuildrootImageBuilder:
         temp_dir: str,
         frame: Frame,
     ) -> FrameBinaryBuildResult:
-        await self._log("stdout", "Building FrameOS binary for Raspberry Pi Zero 2 W")
+        await self._log("stdout", f"Building FrameOS binary for {self.platform_spec.build_log_name}")
         builder = FrameBinaryBuilder(
             db=self.db,
             redis=self.redis,
@@ -780,17 +1135,17 @@ class BuildrootImageBuilder:
         )
         plan = await builder.plan_build(
             force_cross_compile=False,
-            target_override=FRAMEOS_BUILD_TARGET,
+            target_override=self.platform_spec.frameos_target,
             compilation_mode=frame_compilation_mode(frame),
         )
         return await builder.build(plan, precompiled_install_all_drivers=True)
 
     async def _build_agent_binary(self, deployer: FrameDeployer, temp_dir: str, frame: Frame) -> str:
-        await self._log("stdout", "Building FrameOS agent for Raspberry Pi Zero 2 W")
+        await self._log("stdout", f"Building FrameOS agent for {self.platform_spec.build_log_name}")
         prebuilt_target = resolve_prebuilt_target(
-            FRAMEOS_BUILD_TARGET.distro,
-            FRAMEOS_BUILD_TARGET.version,
-            FRAMEOS_BUILD_TARGET.arch,
+            self.platform_spec.frameos_target.distro,
+            self.platform_spec.frameos_target.version,
+            self.platform_spec.frameos_target.arch,
         )
         if prebuilt_target:
             try:
@@ -813,13 +1168,13 @@ class BuildrootImageBuilder:
         agent_deployer = AgentDeployer(self.db, self.redis, frame, "", temp_dir, force_source=True)
         agent_deployer.build_id = deployer.build_id
         build_dir, source_dir = agent_deployer._create_agent_build_folders()
-        await agent_deployer._create_local_build_archive(build_dir, source_dir, FRAMEOS_BUILD_TARGET.arch)
+        await agent_deployer._create_local_build_archive(build_dir, source_dir, self.platform_spec.frameos_target.arch)
         return await CrossCompiler(
             db=self.db,
             redis=self.redis,
             frame=frame,
             deployer=agent_deployer,
-            target=FRAMEOS_BUILD_TARGET,
+            target=self.platform_spec.frameos_target,
             temp_dir=temp_dir,
             build_dir=build_dir,
             logger=agent_deployer.log,
@@ -938,7 +1293,7 @@ class BuildrootImageBuilder:
 
         (boot_overlay_dir / Path(BOOT_HOSTNAME_FILE).name).write_text(_hostname_for_frame(self.frame) + "\n", encoding="utf-8")
         self._write_boot_wifi_connection(boot_overlay_dir / Path(BOOT_WIFI_CONNECTION_FILE).name)
-        self._write_boot_config(overlay_dir, _frame_boot_config_lines(bootstrap_frame))
+        self._write_boot_config(overlay_dir, _frame_boot_config_lines(bootstrap_frame, self.platform))
         self._write_boot_authorized_keys(boot_overlay_dir / Path(BOOT_AUTHORIZED_KEYS_FILE).name)
 
     @staticmethod
@@ -979,7 +1334,7 @@ class BuildrootImageBuilder:
         destination.write_text("\n".join(rendered_lines) + "\n", encoding="utf-8")
 
     def _copy_runtime_libraries(self, overlay_dir: Path) -> None:
-        copy_lgpio_runtime_libraries(overlay_dir)
+        copy_lgpio_runtime_libraries(overlay_dir, self.platform_spec.frameos_target)
 
     def _write_boot_authorized_keys(self, authorized_keys: Path) -> None:
         settings = _get_frame_settings(self.db, self.frame)
@@ -1012,116 +1367,18 @@ class BuildrootImageBuilder:
         link.symlink_to(target)
 
     @staticmethod
-    def _write_buildroot_config(path: Path) -> None:
+    def _write_buildroot_config(path: Path, spec: BuildrootPlatformSpec | None = None) -> None:
+        spec = spec or buildroot_platform_spec(SUPPORTED_BUILDROOT_PLATFORM)
         path.write_text(
-            "\n".join(
-                [
-                    "BR2_INIT_SYSTEMD=y",
-                    "BR2_ROOTFS_DEVICE_CREATION_DYNAMIC_EUDEV=y",
-                    "BR2_ENABLE_LOCALE=y",
-                    "BR2_SYSTEM_DHCP=\"eth0\"",
-                    "BR2_TARGET_GENERIC_HOSTNAME=\"frameos\"",
-                    "BR2_TARGET_GENERIC_ISSUE=\"Welcome to FrameOS\"",
-                    "BR2_TARGET_ROOTFS_EXT2_SIZE=\"768M\"",
-                    f"BR2_JLEVEL={BUILDROOT_JLEVEL}",
-                    'BR2_DL_DIR="/cache/dl"',
-                    'BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES="/work/linux-fragment.config"',
-                    f'BR2_LINUX_KERNEL_CUSTOM_LOGO_PATH="{BUILDROOT_BOOT_LOGO_WORK_PATH}"',
-                    "BR2_PACKAGE_SYSTEMD=y",
-                    "BR2_PACKAGE_SYSTEMD_TIMESYNCD=y",
-                    "BR2_PACKAGE_DBUS=y",
-                    "BR2_PACKAGE_DROPBEAR=y",
-                    "BR2_PACKAGE_SUDO=y",
-                    "BR2_PACKAGE_CA_CERTIFICATES=y",
-                    "BR2_PACKAGE_TZDATA=y",
-                    "BR2_PACKAGE_BASH=y",
-                    "BR2_PACKAGE_COREUTILS=y",
-                    "BR2_PACKAGE_FINDUTILS=y",
-                    "BR2_PACKAGE_GZIP=y",
-                    "BR2_PACKAGE_TAR=y",
-                    "BR2_PACKAGE_NANO=y",
-                    "BR2_PACKAGE_IPROUTE2=y",
-                    "BR2_PACKAGE_KMOD=y",
-                    "BR2_PACKAGE_OPENSSL=y",
-                    "BR2_PACKAGE_ZLIB=y",
-                    "BR2_PACKAGE_IMAGEMAGICK=y",
-                    "BR2_PACKAGE_FFMPEG=y",
-                    "BR2_PACKAGE_FFMPEG_FFPROBE=y",
-                    "BR2_PACKAGE_FFMPEG_SWSCALE=y",
-                    "BR2_PACKAGE_HOSTAPD=y",
-                    "BR2_PACKAGE_DNSMASQ=y",
-                    "BR2_PACKAGE_NETWORK_MANAGER=y",
-                    "BR2_PACKAGE_NETWORK_MANAGER_CLI=y",
-                    "BR2_PACKAGE_NETWORK_MANAGER_WIFI=y",
-                    "BR2_PACKAGE_WPA_SUPPLICANT=y",
-                    "BR2_PACKAGE_WPA_SUPPLICANT_DBUS=y",
-                    "BR2_PACKAGE_WPA_SUPPLICANT_NL80211=y",
-                    "BR2_PACKAGE_IW=y",
-                    "BR2_PACKAGE_WIRELESS_TOOLS=y",
-                    "BR2_PACKAGE_LINUX_FIRMWARE=y",
-                    "BR2_PACKAGE_LINUX_FIRMWARE_BRCM_BCM43XXX=y",
-                    "BR2_PACKAGE_BRCMFMAC_SDIO_FIRMWARE_RPI=y",
-                    "BR2_PACKAGE_LIBEVDEV=y",
-                    "# BR2_CCACHE is not set",
-                    'BR2_ROOTFS_OVERLAY="/work/overlay"',
-                    'BR2_ROOTFS_POST_BUILD_SCRIPT="board/raspberrypi/post-build.sh /work/post-build.sh /work/partition-post-build.sh"',
-                    'BR2_ROOTFS_POST_IMAGE_SCRIPT="/work/post-image.sh"',
-                    "",
-                ]
-            ),
+            "\n".join([*spec.buildroot_config_lines, ""]),
             encoding="utf-8",
         )
 
     @staticmethod
-    def _write_kernel_config_fragment(path: Path) -> None:
+    def _write_kernel_config_fragment(path: Path, spec: BuildrootPlatformSpec | None = None) -> None:
+        spec = spec or buildroot_platform_spec(SUPPORTED_BUILDROOT_PLATFORM)
         path.write_text(
-            "\n".join(
-                [
-                    "# Avoid case-colliding xtables target/match objects on macOS bind mounts.",
-                    "# CONFIG_NETFILTER_XT_TARGET_DSCP is not set",
-                    "# CONFIG_NETFILTER_XT_TARGET_HL is not set",
-                    "# CONFIG_NETFILTER_XT_TARGET_RATEEST is not set",
-                    "# CONFIG_NETFILTER_XT_TARGET_TCPMSS is not set",
-                    "# CONFIG_NETFILTER_XT_MATCH_RATEEST is not set",
-                    "# CONFIG_IP_NF_TARGET_ECN is not set",
-                    "# CONFIG_IP_NF_TARGET_TTL is not set",
-                    "# CONFIG_IP6_NF_TARGET_HL is not set",
-                    "",
-                    "# Trimmed for Raspberry Pi Zero 2 W use cases.",
-                    "# Keep HID, HDMI, Wi-Fi, Bluetooth and USB storage; trim the rest.",
-                    "# Telephony/streaming/media/input-complexity reducers.",
-                    "# CONFIG_AUXDISPLAY is not set",
-                    "# CONFIG_CAN is not set",
-                    "# CONFIG_DVB_CORE is not set",
-                    "# CONFIG_DVB_USB is not set",
-                    "# CONFIG_HAMRADIO is not set",
-                    "# CONFIG_MEDIA_DIGITAL_TV_SUPPORT is not set",
-                    "# CONFIG_MEDIA_PCI_SUPPORT is not set",
-                    "# CONFIG_MEDIA_PLATFORM_DRIVERS is not set",
-                    "# CONFIG_MEDIA_USB_SUPPORT is not set",
-                    "# CONFIG_STAGING is not set",
-                    "# CONFIG_VIDEO_DEV is not set",
-                    "# CONFIG_VIDEO_HDPVR is not set",
-                    "# CONFIG_VIDEO_OV2640 is not set",
-                    "# CONFIG_USB_ACM is not set",
-                    "# CONFIG_USB_NET_AX88179_178A is not set",
-                    "# CONFIG_USB_NET_CDCETHER is not set",
-                    "# CONFIG_USB_NET_CDC_SUBSET is not set",
-                    "# CONFIG_USB_NET_CDC_NCM is not set",
-                    "# CONFIG_USB_NET_CDC_MBIM is not set",
-                    "# CONFIG_USB_NET_DM9601 is not set",
-                    "# CONFIG_USB_NET_CDC_EEM is not set",
-                    "# CONFIG_USB_NET_HUAWEI_CDC_NCM is not set",
-                    "# CONFIG_USB_NET_RNDIS_HOST is not set",
-                    "# CONFIG_USB_OHCI_HCD_PLATFORM is not set",
-                    "# CONFIG_USB_PRINTER is not set",
-                    "# CONFIG_USB_ROLE_SWITCH is not set",
-                    "# CONFIG_USB_SERIAL is not set",
-                    "# CONFIG_USB_MON is not set",
-                    "# CONFIG_WIMAX is not set",
-                    "",
-                ]
-            ),
+            "\n".join(spec.kernel_config_fragment_lines),
             encoding="utf-8",
         )
 
@@ -1154,8 +1411,9 @@ class BuildrootImageBuilder:
         os.chmod(path, 0o755)
 
     @staticmethod
-    def _write_post_image_script(path: Path) -> None:
-        path.write_text(POST_IMAGE_SCRIPT, encoding="utf-8")
+    def _write_post_image_script(path: Path, spec: BuildrootPlatformSpec | None = None) -> None:
+        spec = spec or buildroot_platform_spec(SUPPORTED_BUILDROOT_PLATFORM)
+        path.write_text(spec.post_image_script or POST_IMAGE_SCRIPT, encoding="utf-8")
         os.chmod(path, 0o755)
 
     @staticmethod
@@ -1188,7 +1446,8 @@ class BuildrootImageBuilder:
         return SimpleNamespace(**bootstrap_data)
 
     @staticmethod
-    def _write_build_script(path: Path, output_filename: str) -> None:
+    def _write_build_script(path: Path, output_filename: str, spec: BuildrootPlatformSpec | None = None) -> None:
+        spec = spec or buildroot_platform_spec(SUPPORTED_BUILDROOT_PLATFORM)
         tarball = f"buildroot-{BUILDROOT_VERSION}.tar.gz"
         path.write_text(
             f"""#!/usr/bin/env bash
@@ -1280,7 +1539,7 @@ if compgen -G "/build/output/build/ncurses-*/.stamp_staging_installed" >/dev/nul
     rm -f "$ncurses_dir/.stamp_staging_installed" "$ncurses_dir/.stamp_target_installed"
   done
 fi
-make -C /build/buildroot O=/build/output {BUILDROOT_DEFCONFIG}
+make -C /build/buildroot O=/build/output {spec.defconfig}
 cat /work/frameos-buildroot.config >> /build/output/.config
 make -C /build/buildroot O=/build/output olddefconfig
 rm -f /build/output/build/linux-custom/.stamp_configured
@@ -1302,7 +1561,7 @@ chmod a+r /artifacts/{shlex.quote(output_filename)}
         image: str,
         skip_apt_install: bool,
     ) -> None:
-        await self._log("stdout", f"Running Buildroot {BUILDROOT_VERSION} for Raspberry Pi Zero 2 W")
+        await self._log("stdout", f"Running Buildroot {BUILDROOT_VERSION} for {self.platform_spec.build_log_name}")
         docker_cmd = " ".join(
             [
                 "docker run --rm",
@@ -1432,8 +1691,18 @@ genimage --rootpath "$work_dir/empty-root" --tmppath "$work_dir/tmp" --inputpath
 
         shutil.copy2(base_image_path, output_path)
         partitions = _mbr_partitions(output_path)
-        _replace_partition(output_path, partitions, 3, images_dir / "frameos.ext4")
-        _replace_partition(output_path, partitions, 4, images_dir / "assets.vfat")
+        _replace_partition(
+            output_path,
+            partitions,
+            self.platform_spec.frameos_partition_number,
+            images_dir / "frameos.ext4",
+        )
+        _replace_partition(
+            output_path,
+            partitions,
+            self.platform_spec.assets_partition_number,
+            images_dir / "assets.vfat",
+        )
         await self._patch_boot_partition(output_path, partitions, boot_root, image=image)
 
     async def _patch_boot_partition(
@@ -1446,6 +1715,10 @@ genimage --rootpath "$work_dir/empty-root" --tmppath "$work_dir/tmp" --inputpath
     ) -> None:
         if not partitions:
             raise RuntimeError("Cannot patch BOOT partition; SD image has no partitions")
+        boot_partition_index = self.platform_spec.boot_partition_number - 1
+        if boot_partition_index < 0 or boot_partition_index >= len(partitions):
+            raise RuntimeError("Cannot patch BOOT partition; SD image does not contain the configured BOOT partition")
+        boot_partition_offset = partitions[boot_partition_index]["start"]
 
         compose_dir = boot_root.parent.parent
         script_path = compose_dir / "patch-boot.sh"
@@ -1460,7 +1733,7 @@ if ! command -v mlabel >/dev/null 2>&1 || ! command -v mcopy >/dev/null 2>&1; th
   apt-get install -y --no-install-recommends mtools
 fi
 disk="$image_dir"/{shlex.quote(output_path.name)}
-offset={partitions[0]["start"]}
+offset={boot_partition_offset}
 target="${{disk}}@@${{offset}}"
 mlabel -i "$target" ::BOOT
 merge_config() {{
@@ -1745,13 +2018,16 @@ fi
         *,
         build_image: str,
         skip_apt_install: bool,
+        spec: BuildrootPlatformSpec | None = None,
     ) -> str:
+        spec = spec or buildroot_platform_spec(SUPPORTED_BUILDROOT_PLATFORM)
+
         def normalize_path(value: str) -> str:
             return value.replace(f"release_{build_id}", "release_$BUILD_ID")
 
         digest = hashlib.sha256()
         digest.update(f"buildroot-version={BUILDROOT_VERSION}\n".encode("utf-8"))
-        digest.update(f"buildroot-defconfig={BUILDROOT_DEFCONFIG}\n".encode("utf-8"))
+        digest.update(f"buildroot-defconfig={spec.defconfig}\n".encode("utf-8"))
         digest.update(f"buildroot-bootstrap-image={build_image}\n".encode("utf-8"))
         digest.update(f"buildroot-skip-apt-install={skip_apt_install}\n".encode("utf-8"))
         digest.update(f"buildroot-bootstrap-script-version={BUILDROOT_BOOTSTRAP_SCRIPT_VERSION}\n".encode("utf-8"))

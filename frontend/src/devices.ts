@@ -211,9 +211,11 @@ export const withCustomPalette: Record<string, Palette> = {
 }
 
 export const BUILDROOT_RASPBERRY_PI_ZERO_2_W = 'raspberry-pi-zero-2-w'
+export const BUILDROOT_ALLWINNER_T113_S3 = 'allwinner-t113-s3'
 
 export const buildrootPlatforms: Option[] = [
   { value: BUILDROOT_RASPBERRY_PI_ZERO_2_W, label: 'Raspberry Pi Zero 2 W' },
+  { value: BUILDROOT_ALLWINNER_T113_S3, label: 'Allwinner T113-S3/S4 compatible' },
 ]
 
 export const rpiOSPlatforms: Option[] = [

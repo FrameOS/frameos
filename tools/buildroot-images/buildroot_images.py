@@ -27,20 +27,19 @@ sys.path.insert(0, str(BACKEND_ROOT))
 
 from app.tasks.buildroot_image import (  # noqa: E402
     BUILDROOT_ASSETS_PARTITION_SIZE,
-    BUILDROOT_DEFCONFIG,
     BUILDROOT_DOCKER_APT_DEPS_LINE,
     BUILDROOT_DOCKER_IMAGE,
     BUILDROOT_DOCKER_NOFILE_LIMIT,
     BUILDROOT_FRAMEOS_PARTITION_SIZE,
     BUILDROOT_VERSION,
     BuildrootImageBuilder,
-    FRAMEOS_BUILD_TARGET,
     SUPPORTED_BUILDROOT_PLATFORM,
     _mbr_partitions,
     copy_lgpio_runtime_libraries,
     ensure_buildroot_base_image,
     resolve_buildroot_base_entry,
     buildroot_base_cache_dir,
+    buildroot_platform_spec,
     _gzip_file,
     _sha256,
     normalize_buildroot_platform,
@@ -80,12 +79,13 @@ def parse_args() -> argparse.Namespace:
     release = sub.add_parser("release-image", help="Build a release-ready SD image from precompiled artifacts")
     release.add_argument("--prebuilt-cross-dir", default=str(REPO_ROOT / "build" / "prebuilt-cross"))
     release.add_argument("--release-assets-dir", default=str(REPO_ROOT / "release-assets"))
-    release.add_argument("--target", default="debian-bookworm-arm64")
+    release.add_argument("--target", default=None)
     release.add_argument("--version", default=None)
     sub.add_parser("list", help="List manifest entries in R2")
     download = sub.add_parser("download", help="Download the manifest to the repo")
     download.add_argument("--force", action="store_true")
     args = parser.parse_args()
+    args.platform = normalize_buildroot_platform(args.platform)
     if args.manifest_key is None:
         args.manifest_key = f"{args.prefix}/manifest.json"
     return args
@@ -286,7 +286,8 @@ def legacy_local_dir(platform: str) -> Path:
     return BUILD_DIR / platform / raw_frameos_version()
 
 
-def write_base_bootstrap_overlay(overlay: Path) -> None:
+def write_base_bootstrap_overlay(overlay: Path, platform: str = SUPPORTED_BUILDROOT_PLATFORM) -> None:
+    spec = buildroot_platform_spec(platform)
     systemd = overlay / "etc" / "systemd" / "system"
     wants = systemd / "multi-user.target.wants"
     wants.mkdir(parents=True, exist_ok=True)
@@ -331,10 +332,11 @@ def write_base_bootstrap_overlay(overlay: Path) -> None:
     )
     (overlay / "srv" / "frameos").mkdir(parents=True, exist_ok=True)
     (overlay / "srv" / "assets").mkdir(parents=True, exist_ok=True)
-    copy_lgpio_runtime_libraries(overlay)
+    copy_lgpio_runtime_libraries(overlay, spec.frameos_target)
 
 
 def build(args: argparse.Namespace) -> None:
+    spec = buildroot_platform_spec(args.platform)
     out_dir = local_dir(args.platform)
     out_dir.mkdir(parents=True, exist_ok=True)
     image_path = out_dir / "base.img"
@@ -342,14 +344,14 @@ def build(args: argparse.Namespace) -> None:
     with tempfile.TemporaryDirectory(prefix="frameos-buildroot-base-") as tmp:
         tmp_path = Path(tmp)
         overlay = tmp_path / "overlay"
-        write_base_bootstrap_overlay(overlay)
-        BuildrootImageBuilder._write_buildroot_config(tmp_path / "frameos-buildroot.config")
-        BuildrootImageBuilder._write_kernel_config_fragment(tmp_path / "linux-fragment.config")
+        write_base_bootstrap_overlay(overlay, args.platform)
+        BuildrootImageBuilder._write_buildroot_config(tmp_path / "frameos-buildroot.config", spec)
+        BuildrootImageBuilder._write_kernel_config_fragment(tmp_path / "linux-fragment.config", spec)
         BuildrootImageBuilder._write_post_build_script(tmp_path / "post-build.sh")
         BuildrootImageBuilder._write_partition_post_build_script(tmp_path / "partition-post-build.sh")
-        BuildrootImageBuilder._write_post_image_script(tmp_path / "post-image.sh")
+        BuildrootImageBuilder._write_post_image_script(tmp_path / "post-image.sh", spec)
         BuildrootImageBuilder._write_boot_logo(tmp_path / "frameos-boot-logo.png")
-        BuildrootImageBuilder._write_build_script(tmp_path / "buildroot-build.sh", "base.img")
+        BuildrootImageBuilder._write_build_script(tmp_path / "buildroot-build.sh", "base.img", spec)
         container_name = f"frameos-buildroot-base-{uuid.uuid4().hex[:12]}"
         container_id = subprocess.check_output(
             [
@@ -377,7 +379,7 @@ def build(args: argparse.Namespace) -> None:
         "platform": args.platform,
         "frameos_version": frameos_version(),
         "buildroot_version": BUILDROOT_VERSION,
-        "defconfig": BUILDROOT_DEFCONFIG,
+        "defconfig": spec.defconfig,
         "docker_image": BUILDROOT_DOCKER_IMAGE,
         "buildroot_apt_deps": BUILDROOT_DOCKER_APT_DEPS_LINE,
         "frameos_partition_size": BUILDROOT_FRAMEOS_PARTITION_SIZE,
@@ -515,11 +517,12 @@ class ReleaseBuildrootImageBuilder(BuildrootImageBuilder):
 
 async def build_release_image(args: argparse.Namespace) -> None:
     platform = normalize_buildroot_platform(args.platform)
+    spec = buildroot_platform_spec(platform)
     version = safe_segment(args.version or release_version())
     if not version:
         raise SystemExit("Unable to determine release version")
 
-    target = str(args.target)
+    target = str(args.target or f"{spec.frameos_target.distro}-{spec.frameos_target.version}-{spec.frameos_target.arch}")
     prebuilt_cross_dir = Path(args.prebuilt_cross_dir)
     release_assets_dir = Path(args.release_assets_dir)
     release_assets_dir.mkdir(parents=True, exist_ok=True)
@@ -538,6 +541,7 @@ async def build_release_image(args: argparse.Namespace) -> None:
 
         metadata = json.loads((artifact_root / "metadata.json").read_text(encoding="utf-8"))
         frame = ReleaseImageFrame()
+        frame.buildroot = {"platform": platform}
         build_id = safe_segment(version)
         raw_output_path = release_assets_dir / f"frameos-{version}-{platform}-buildroot.img"
         output_path = release_assets_dir / f"{raw_output_path.name}.gz"
@@ -547,11 +551,11 @@ async def build_release_image(args: argparse.Namespace) -> None:
         frameos_build = FrameBinaryBuildResult(
             build_id=build_id,
             target=TargetMetadata(
-                arch=FRAMEOS_BUILD_TARGET.arch,
-                distro=FRAMEOS_BUILD_TARGET.distro,
-                version=FRAMEOS_BUILD_TARGET.version,
-                platform="linux/arm64",
-                image="debian:bookworm",
+                arch=spec.frameos_target.arch,
+                distro=spec.frameos_target.distro,
+                version=spec.frameos_target.version,
+                platform=spec.frameos_target.platform,
+                image=spec.frameos_target.image,
             ),
             compilation_mode=str(metadata.get("compilation_mode") or "shared"),
             source_dir=str(artifact_root),
