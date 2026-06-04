@@ -1,6 +1,6 @@
 from arq import ArqRedis
 import asyncio
-from typing import Optional, Tuple
+from typing import Literal, Optional, Tuple
 from sqlalchemy.orm import Session
 
 from app.models.log import new_log as log
@@ -12,7 +12,8 @@ async def exec_local_command(
     frame: Frame,
     command: str,
     log_command: str | bool = True,
-    log_output: bool = True
+    log_output: bool = True,
+    stderr_log_tag: Literal["stderr", "stdout"] = "stderr",
 ) -> Tuple[int, Optional[str], Optional[str]]:
 
     if log_command:
@@ -75,7 +76,7 @@ async def exec_local_command(
     err_buf: list[str] = []
     await asyncio.gather(
         pump(proc.stdout, "stdout", out_buf),
-        pump(proc.stderr, "stderr", err_buf),
+        pump(proc.stderr, stderr_log_tag, err_buf),
     )
 
     exit_code = await proc.wait()

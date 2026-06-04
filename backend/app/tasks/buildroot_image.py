@@ -9,6 +9,7 @@ import re
 import shlex
 import shutil
 import tempfile
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
@@ -22,7 +23,8 @@ import httpx
 from sqlalchemy.orm import Session
 
 from app.drivers.devices import drivers_for_frame
-from app.codegen.drivers_nim import frame_compilation_mode
+from app.codegen.drivers_nim import COMPILATION_MODE_PRECOMPILED, frame_compilation_mode
+from app.models.assets import Assets
 from app.models.frame import (
     Frame,
     get_frame_json,
@@ -35,6 +37,7 @@ from app.tasks._frame_deployer import FrameDeployer
 from app.tasks.binary_builder import FrameBinaryBuilder, FrameBinaryBuildResult
 from app.tasks.deploy_agent import AgentDeployer
 from app.tasks.precompiled_agent import download_precompiled_agent_release
+from app.tasks.precompiled_frameos import frame_compiled_scene_count, release_version
 from app.tasks.setup_json_reset import (
     BOOT_AUTHORIZED_KEYS_FILE,
     BOOT_HOSTNAME_FILE,
@@ -59,11 +62,20 @@ SUPPORTED_BUILDROOT_PLATFORM = "raspberry-pi-zero-2-w"
 BUILDROOT_HOST_CXXFLAGS = "-O2 -pipe -std=gnu++17"
 BUILDROOT_HOST_CFLAGS = "-O2 -pipe"
 BUILDROOT_JLEVEL = int(os.environ.get("FRAMEOS_BUILDROOT_JLEVEL", "0"))
-BUILDROOT_BOOTSTRAP_SCRIPT_VERSION = "4"
-BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION = 10
-BUILDROOT_FRAMEOS_PARTITION_SIZE = os.environ.get("FRAMEOS_BUILDROOT_FRAMEOS_PARTITION_SIZE", "1G")
-BUILDROOT_ASSETS_PARTITION_SIZE = os.environ.get("FRAMEOS_BUILDROOT_ASSETS_PARTITION_SIZE", "512M")
+BUILDROOT_BOOTSTRAP_SCRIPT_VERSION = "5"
+BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION = 14
+BUILDROOT_FRAMEOS_PARTITION_SIZE = os.environ.get("FRAMEOS_BUILDROOT_FRAMEOS_PARTITION_SIZE", "100M")
+BUILDROOT_ASSETS_PARTITION_SIZE = os.environ.get("FRAMEOS_BUILDROOT_ASSETS_PARTITION_SIZE", "100M")
+BUILDROOT_LOCAL_FONTS_DIR = REPO_ROOT / "frameos" / "assets" / "copied" / "fonts"
+BUILDROOT_LOCAL_FONT_EXTENSIONS = {".ttf", ".txt", ".md"}
 BUILDROOT_ARCHIVE_BASE_URL = os.environ.get("FRAMEOS_ARCHIVE_BASE_URL", "https://archive.frameos.net/")
+BUILDROOT_PRECOMPILED_SD_IMAGE_RELEASE_BASE_URL = os.environ.get(
+    "FRAMEOS_PRECOMPILED_SD_IMAGE_RELEASE_BASE_URL",
+    os.environ.get("FRAMEOS_PRECOMPILED_RELEASE_BASE_URL", "https://github.com/FrameOS/frameos/releases/download/"),
+)
+BUILDROOT_PRECOMPILED_SD_IMAGE_TIMEOUT = float(
+    os.environ.get("FRAMEOS_PRECOMPILED_SD_IMAGE_TIMEOUT", os.environ.get("FRAMEOS_PRECOMPILED_TIMEOUT", "60"))
+)
 BUILDROOT_BASE_MANIFEST_PATH = os.environ.get("FRAMEOS_BUILDROOT_BASE_MANIFEST_PATH", "buildroot-images/manifest.json")
 BUILDROOT_BASE_MANIFEST_FILE = os.environ.get(
     "FRAMEOS_BUILDROOT_BASE_MANIFEST_FILE",
@@ -102,6 +114,7 @@ BUILDROOT_DOCKER_APT_DEPS = (
 BUILDROOT_DOCKER_APT_DEPS_LINE = " ".join(BUILDROOT_DOCKER_APT_DEPS)
 BUILDROOT_COMPOSE_TOOLS = ("genimage", "mkfs.vfat", "mcopy", "mlabel")
 SAFE_SEGMENT = re.compile(r"[^A-Za-z0-9_.-]+")
+SAFE_RELEASE_SEGMENT = re.compile(r"^[A-Za-z0-9_.-]+$")
 LEGACY_PLATFORM_ALIASES = {
     "",
     "pi-zero2",
@@ -137,6 +150,8 @@ BUILDROOT_IMAGE_STALE_AFTER_SECONDS = int(
 BUILDROOT_IMAGES_DIGESTS_PATH = os.environ.get("FRAMEOS_BUILDROOT_IMAGES_DIGESTS_PATH", str(REPO_ROOT / "buildroot-images.json"))
 BUILDROOT_BOOT_LOGO_SOURCE = REPO_ROOT / "backend" / "app" / "tasks" / "assets" / "frameos-boot-logo.png"
 BUILDROOT_BOOT_LOGO_WORK_PATH = "/work/frameos-boot-logo.png"
+BUILDROOT_EXPAND_SD_CARD_SCRIPT_PATH = "/usr/sbin/frameos-expand-sd-card"
+BUILDROOT_EXPAND_SD_CARD_SERVICE_NAME = "frameos-expand-sd-card.service"
 BUILDROOT_DEFAULT_BOOT_CONFIG_LINES = (
     # Keep a small firmware framebuffer reserve for standard HDMI output while
     # returning the rest of the Pi Zero 2 W's 512MB RAM to Linux/userland.
@@ -187,6 +202,20 @@ def buildroot_base_cache_dir() -> Path:
     return Path(os.environ.get("FRAMEOS_BUILDROOT_BASE_CACHE_DIR") or (buildroot_cache_dir() / "base-images"))
 
 
+def buildroot_precompiled_sd_image_cache_dir() -> Path:
+    return Path(
+        os.environ.get("FRAMEOS_PRECOMPILED_SD_IMAGE_CACHE_DIR")
+        or (buildroot_cache_dir() / "precompiled-sd-images")
+    )
+
+
+@dataclass(slots=True)
+class PrecompiledBuildrootSdImageResult:
+    release_url: str
+    archive_path: Path
+    cache_hit: bool = False
+
+
 def _get_frame_settings(db: Session | None, frame: Frame) -> dict:
     return get_settings_dict(db, project_id=getattr(frame, "project_id", None))
 
@@ -234,6 +263,83 @@ async def _buildroot_base_manifest() -> dict[str, Any]:
 
 def _normalize_url_base(url: str) -> str:
     return url if url.endswith("/") else f"{url}/"
+
+
+def precompiled_buildroot_sd_image_release_url(platform: str, version: str | None = None) -> str | None:
+    resolved_version = version or release_version()
+    if not resolved_version:
+        return None
+    normalized_platform = normalize_buildroot_platform(platform)
+    if not SAFE_RELEASE_SEGMENT.fullmatch(resolved_version) or not SAFE_RELEASE_SEGMENT.fullmatch(normalized_platform):
+        return None
+    base = _normalize_url_base(BUILDROOT_PRECOMPILED_SD_IMAGE_RELEASE_BASE_URL)
+    filename = f"frameos-{resolved_version}-{normalized_platform}-buildroot.img.gz"
+    return urljoin(base, f"v{resolved_version}/{filename}")
+
+
+def precompiled_buildroot_sd_image_cache_path(url: str) -> Path:
+    filename = url.rsplit("/", 1)[-1] or "frameos-buildroot.img.gz"
+    safe_filename = SAFE_SEGMENT.sub("_", filename)
+    digest = hashlib.sha256(url.encode("utf-8")).hexdigest()[:16]
+    return buildroot_precompiled_sd_image_cache_dir() / f"{digest}-{safe_filename}"
+
+
+async def download_precompiled_buildroot_sd_image(
+    *,
+    platform: str,
+    logger,
+    timeout: float = BUILDROOT_PRECOMPILED_SD_IMAGE_TIMEOUT,
+) -> PrecompiledBuildrootSdImageResult | None:
+    url = precompiled_buildroot_sd_image_release_url(platform)
+    if not url:
+        await logger("stderr", f"No full precompiled Buildroot SD image release URL is available for {platform}")
+        return None
+
+    cache_path = precompiled_buildroot_sd_image_cache_path(url)
+    if cache_path.is_file() and cache_path.stat().st_size > 0:
+        await logger("stdout", f"Using cached full precompiled Buildroot SD image release for {platform}")
+        return PrecompiledBuildrootSdImageResult(release_url=url, archive_path=cache_path, cache_hit=True)
+
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    await logger("stdout", f"Checking for full precompiled Buildroot SD image release for {platform}")
+    temp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            prefix=f".{cache_path.name}.",
+            suffix=".part",
+            dir=cache_path.parent,
+            delete=False,
+        ) as temp_file:
+            temp_path = Path(temp_file.name)
+
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+            async with client.stream("GET", url) as response:
+                if response.status_code == 404:
+                    await logger("stdout", f"No full precompiled Buildroot SD image release found for {platform}")
+                    return None
+                response.raise_for_status()
+                with temp_path.open("wb") as output:
+                    async for chunk in response.aiter_bytes():
+                        output.write(chunk)
+
+        if not temp_path.is_file() or temp_path.stat().st_size == 0:
+            await logger("stderr", "Downloaded full precompiled Buildroot SD image release was empty")
+            return None
+        os.replace(temp_path, cache_path)
+        temp_path = None
+        return PrecompiledBuildrootSdImageResult(release_url=url, archive_path=cache_path)
+    except httpx.HTTPStatusError as exc:
+        await logger(
+            "stderr",
+            f"Could not use full precompiled Buildroot SD image release for {platform}: HTTP {exc.response.status_code}",
+        )
+        return None
+    except httpx.RequestError as exc:
+        await logger("stderr", f"Could not use full precompiled Buildroot SD image release for {platform}: {exc}")
+        return None
+    finally:
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)
 
 
 async def resolve_buildroot_base_entry(platform: str, frameos_version: str | None = None) -> dict[str, Any]:
@@ -408,6 +514,12 @@ def _buildroot_sd_image_config_payload(frame: Frame | Any) -> dict[str, Any]:
     buildroot = dict(payload.get("buildroot") or {})
     buildroot.pop("sdImage", None)
     payload["buildroot"] = buildroot
+    return payload
+
+
+def _buildroot_setup_payload(db: Session | None, frame: Frame | Any) -> dict[str, Any]:
+    payload = get_frame_json(db, frame)
+    payload["scenes"] = list(getattr(frame, "scenes", []) or [])
     return payload
 
 
@@ -649,7 +761,7 @@ class BuildrootImageBuilder:
     async def run(self) -> dict[str, Any]:
         validate_buildroot_wifi_credentials(self.frame)
         bootstrap_frame = self._buildroot_bootstrap_frame()
-        setup_payload = get_frame_json(self.db, self.frame)
+        setup_payload = _buildroot_setup_payload(self.db, self.frame)
 
         artifact_dir = buildroot_artifact_dir()
         cache_dir = buildroot_cache_dir()
@@ -688,41 +800,47 @@ class BuildrootImageBuilder:
             )
             await self._log("stdout", f"Starting Buildroot SD image build {build_id}")
 
-            frameos_build = await self._build_frameos_binary(deployer, str(temp_dir), self.frame)
-            agent_binary = await self._build_agent_binary(deployer, str(temp_dir), self.frame)
-            overlay_dir = temp_dir / "overlay"
-            self._stage_overlay(
-                overlay_dir=overlay_dir,
-                build_id=build_id,
+            base_entry = await resolve_buildroot_base_entry(SUPPORTED_BUILDROOT_PLATFORM)
+            compose_image = None if self._host_has_compose_tools() else await self._ensure_buildroot_image()
+            precompiled_sd_image = await self._try_compose_precompiled_sd_image(
+                temp_dir=temp_dir,
+                output_path=raw_output_path,
                 bootstrap_frame=bootstrap_frame,
                 setup_payload=setup_payload,
-                frameos_build=frameos_build,
-                agent_binary=agent_binary,
-            )
-
-            script_path = temp_dir / "buildroot-build.sh"
-            config_path = temp_dir / "frameos-buildroot.config"
-            post_build_path = temp_dir / "post-build.sh"
-            partition_post_build_path = temp_dir / "partition-post-build.sh"
-            post_image_path = temp_dir / "post-image.sh"
-            kernel_fragment_path = temp_dir / "linux-fragment.config"
-            self._write_buildroot_config(config_path)
-            self._write_kernel_config_fragment(kernel_fragment_path)
-            self._write_post_build_script(post_build_path)
-            self._write_partition_post_build_script(partition_post_build_path)
-            self._write_post_image_script(post_image_path)
-            self._write_boot_logo(temp_dir / Path(BUILDROOT_BOOT_LOGO_WORK_PATH).name)
-            base_entry = await resolve_buildroot_base_entry(SUPPORTED_BUILDROOT_PLATFORM)
-            base_image_path = await ensure_buildroot_base_image(base_entry, buildroot_base_cache_dir())
-            compose_image = None
-            if not self._host_has_compose_tools():
-                compose_image = await self._ensure_buildroot_image()
-            await self._compose_sd_image_from_base(
-                temp_dir=temp_dir,
-                base_image_path=base_image_path,
-                output_path=raw_output_path,
                 image=compose_image,
             )
+            if precompiled_sd_image is None:
+                frameos_build = await self._build_frameos_binary(deployer, str(temp_dir), self.frame)
+                agent_binary = await self._build_agent_binary(deployer, str(temp_dir), self.frame)
+                overlay_dir = temp_dir / "overlay"
+                self._stage_overlay(
+                    overlay_dir=overlay_dir,
+                    build_id=build_id,
+                    bootstrap_frame=bootstrap_frame,
+                    setup_payload=setup_payload,
+                    frameos_build=frameos_build,
+                    agent_binary=agent_binary,
+                )
+
+                script_path = temp_dir / "buildroot-build.sh"
+                config_path = temp_dir / "frameos-buildroot.config"
+                post_build_path = temp_dir / "post-build.sh"
+                partition_post_build_path = temp_dir / "partition-post-build.sh"
+                post_image_path = temp_dir / "post-image.sh"
+                kernel_fragment_path = temp_dir / "linux-fragment.config"
+                self._write_buildroot_config(config_path)
+                self._write_kernel_config_fragment(kernel_fragment_path)
+                self._write_post_build_script(post_build_path)
+                self._write_partition_post_build_script(partition_post_build_path)
+                self._write_post_image_script(post_image_path)
+                self._write_boot_logo(temp_dir / Path(BUILDROOT_BOOT_LOGO_WORK_PATH).name)
+                base_image_path = await ensure_buildroot_base_image(base_entry, buildroot_base_cache_dir())
+                await self._compose_sd_image_from_base(
+                    temp_dir=temp_dir,
+                    base_image_path=base_image_path,
+                    output_path=raw_output_path,
+                    image=compose_image,
+                )
 
             if not raw_output_path.is_file():
                 raise RuntimeError(f"SD image composer completed without producing {raw_output_path.name}")
@@ -745,6 +863,16 @@ class BuildrootImageBuilder:
                     "sha256": base_entry.get("sha256"),
                     "updatedAt": base_entry.get("updated_at"),
                 },
+                **(
+                    {
+                        "precompiledSdImage": {
+                            "releaseUrl": precompiled_sd_image.release_url,
+                            "cacheHit": precompiled_sd_image.cache_hit,
+                        },
+                    }
+                    if precompiled_sd_image is not None
+                    else {}
+                ),
                 "filename": filename,
                 "rawFilename": raw_filename,
                 "path": str(output_path),
@@ -763,6 +891,54 @@ class BuildrootImageBuilder:
             await _set_sd_image_status(self.db, self.redis, self.frame, metadata)
             await self._log("stdout", f"Buildroot SD image ready, starting download, please wait for {filename}")
             return metadata
+
+    def _can_use_precompiled_sd_image(self) -> bool:
+        return (
+            frame_compilation_mode(self.frame) == COMPILATION_MODE_PRECOMPILED
+            and frame_compiled_scene_count(self.frame) == 0
+        )
+
+    async def _try_compose_precompiled_sd_image(
+        self,
+        *,
+        temp_dir: Path,
+        output_path: Path,
+        bootstrap_frame: Frame | Any,
+        setup_payload: dict[str, Any],
+        image: str | None,
+    ) -> PrecompiledBuildrootSdImageResult | None:
+        if not self._can_use_precompiled_sd_image():
+            return None
+
+        precompiled_sd_image = await download_precompiled_buildroot_sd_image(
+            platform=SUPPORTED_BUILDROOT_PLATFORM,
+            logger=self._log,
+        )
+        if precompiled_sd_image is None:
+            await self._log("stdout", "Falling back to composing SD image from cached Buildroot base")
+            return None
+
+        overlay_dir = temp_dir / "overlay"
+        self._stage_boot_overlay(
+            overlay_dir=overlay_dir,
+            bootstrap_frame=bootstrap_frame,
+            setup_payload=setup_payload,
+        )
+        try:
+            await self._compose_sd_image_from_precompiled_release(
+                temp_dir=temp_dir,
+                release_image_path=precompiled_sd_image.archive_path,
+                output_path=output_path,
+                image=image,
+            )
+        except Exception as exc:
+            output_path.unlink(missing_ok=True)
+            await self._log(
+                "stderr",
+                f"Could not use full precompiled Buildroot SD image release: {exc}. Falling back to composed image.",
+            )
+            return None
+        return precompiled_sd_image
 
     async def _build_frameos_binary(
         self,
@@ -871,13 +1047,13 @@ class BuildrootImageBuilder:
         )
         (release_dir / "scenes.json.gz").write_bytes(
             gzip.compress(
-                json.dumps(get_interpreted_scenes_json(bootstrap_frame), indent=4).encode("utf-8") + b"\n",
+                json.dumps(get_interpreted_scenes_json(self.frame), indent=4).encode("utf-8") + b"\n",
                 mtime=0,
             )
         )
         (release_dir / "all_scenes.json.gz").write_bytes(
             gzip.compress(
-                json.dumps(list(getattr(bootstrap_frame, "scenes", []) or []), indent=4).encode("utf-8") + b"\n",
+                json.dumps(list(getattr(self.frame, "scenes", []) or []), indent=4).encode("utf-8") + b"\n",
                 mtime=0,
             )
         )
@@ -915,6 +1091,25 @@ class BuildrootImageBuilder:
             overlay_dir / "srv" / "frameos" / "agent" / "current",
         )
         self._relative_symlink("/srv/frameos/state", release_dir / "state")
+        self._stage_font_assets(assets_dir)
+
+        self._stage_boot_overlay(
+            overlay_dir=overlay_dir,
+            bootstrap_frame=bootstrap_frame,
+            setup_payload=setup_payload,
+        )
+
+    def _stage_boot_overlay(
+        self,
+        *,
+        overlay_dir: Path,
+        bootstrap_frame: Frame | Any,
+        setup_payload: dict[str, Any],
+    ) -> None:
+        boot_overlay_dir = overlay_dir / "boot"
+        systemd_dir = overlay_dir / "etc" / "systemd" / "system"
+        wants_dir = systemd_dir / "multi-user.target.wants"
+        boot_overlay_dir.mkdir(parents=True, exist_ok=True)
 
         setup_reset_enabled = setup_json_reset_enabled(self.frame)
         if setup_reset_enabled:
@@ -922,6 +1117,7 @@ class BuildrootImageBuilder:
             self._write_setup_payload(_boot_setup_payload_path(boot_overlay_dir, setup_file_path), setup_payload)
             script_path = overlay_dir / SETUP_JSON_RESET_SCRIPT_PATH.lstrip("/")
             script_path.parent.mkdir(parents=True, exist_ok=True)
+            wants_dir.mkdir(parents=True, exist_ok=True)
             script_path.write_text(render_setup_json_reset_script(setup_file_path), encoding="utf-8")
             os.chmod(script_path, 0o755)
             (systemd_dir / SETUP_JSON_RESET_SERVICE_NAME).write_text(
@@ -940,6 +1136,34 @@ class BuildrootImageBuilder:
         self._write_boot_wifi_connection(boot_overlay_dir / Path(BOOT_WIFI_CONNECTION_FILE).name)
         self._write_boot_config(overlay_dir, _frame_boot_config_lines(bootstrap_frame))
         self._write_boot_authorized_keys(boot_overlay_dir / Path(BOOT_AUTHORIZED_KEYS_FILE).name)
+
+    def _stage_font_assets(self, assets_dir: Path) -> None:
+        if getattr(self.frame, "upload_fonts", "") == "none":
+            return
+
+        fonts_dir = assets_dir / "fonts"
+        if BUILDROOT_LOCAL_FONTS_DIR.is_dir():
+            for source_path in BUILDROOT_LOCAL_FONTS_DIR.rglob("*"):
+                if not source_path.is_file() or source_path.suffix not in BUILDROOT_LOCAL_FONT_EXTENSIONS:
+                    continue
+                target_path = fonts_dir / source_path.relative_to(BUILDROOT_LOCAL_FONTS_DIR)
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source_path, target_path)
+
+        if self.db is None or not hasattr(self.db, "query") or not hasattr(self.frame, "project_id"):
+            return
+
+        custom_fonts = self.db.query(Assets).filter(
+            Assets.project_id == self.frame.project_id,
+            Assets.path.like("fonts/%.ttf"),
+        ).all()
+        for font in custom_fonts:
+            relative_path = Path(str(font.path).removeprefix("fonts/"))
+            if relative_path.is_absolute() or any(part in ("", ".", "..") for part in relative_path.parts):
+                continue
+            target_path = fonts_dir / relative_path
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            target_path.write_bytes(font.data or b"")
 
     @staticmethod
     def _copy_libraries(paths: list[str], destination: Path) -> None:
@@ -1039,6 +1263,13 @@ class BuildrootImageBuilder:
                     "BR2_PACKAGE_FINDUTILS=y",
                     "BR2_PACKAGE_GZIP=y",
                     "BR2_PACKAGE_TAR=y",
+                    "BR2_PACKAGE_UTIL_LINUX=y",
+                    "BR2_PACKAGE_UTIL_LINUX_BINARIES=y",
+                    "BR2_PACKAGE_UTIL_LINUX_PARTX=y",
+                    "BR2_PACKAGE_E2FSPROGS=y",
+                    "BR2_PACKAGE_E2FSPROGS_RESIZE2FS=y",
+                    "BR2_PACKAGE_DOSFSTOOLS=y",
+                    "BR2_PACKAGE_DOSFSTOOLS_MKFS_FAT=y",
                     "BR2_PACKAGE_NANO=y",
                     "BR2_PACKAGE_IPROUTE2=y",
                     "BR2_PACKAGE_KMOD=y",
@@ -1426,6 +1657,7 @@ genimage --rootpath "$work_dir/empty-root" --tmppath "$work_dir/tmp" --inputpath
             self.frame,
             compose_cmd,
             log_command=log_command,
+            stderr_log_tag="stdout",
         )
         if status != 0:
             raise RuntimeError(f"Buildroot image composition failed: {err or 'see logs'}")
@@ -1434,6 +1666,32 @@ genimage --rootpath "$work_dir/empty-root" --tmppath "$work_dir/tmp" --inputpath
         partitions = _mbr_partitions(output_path)
         _replace_partition(output_path, partitions, 3, images_dir / "frameos.ext4")
         _replace_partition(output_path, partitions, 4, images_dir / "assets.vfat")
+        await self._patch_boot_partition(output_path, partitions, boot_root, image=image)
+
+    async def _compose_sd_image_from_precompiled_release(
+        self,
+        *,
+        temp_dir: Path,
+        release_image_path: Path,
+        output_path: Path,
+        image: str | None,
+    ) -> None:
+        await self._log("stdout", f"Customizing full precompiled Buildroot SD image {release_image_path.name}")
+        compose_dir = temp_dir / "precompiled-compose"
+        roots_dir = compose_dir / "roots"
+        boot_root = roots_dir / "boot"
+        compose_dir.mkdir(parents=True, exist_ok=True)
+        roots_dir.mkdir(parents=True, exist_ok=True)
+        if boot_root.exists():
+            shutil.rmtree(boot_root)
+        shutil.copytree(temp_dir / "overlay" / "boot", boot_root, symlinks=True)
+
+        if release_image_path.name.endswith(".gz"):
+            _gunzip_file(release_image_path, output_path)
+        else:
+            shutil.copy2(release_image_path, output_path)
+
+        partitions = _mbr_partitions(output_path)
         await self._patch_boot_partition(output_path, partitions, boot_root, image=image)
 
     async def _patch_boot_partition(
@@ -1449,6 +1707,19 @@ genimage --rootpath "$work_dir/empty-root" --tmppath "$work_dir/tmp" --inputpath
 
         compose_dir = boot_root.parent.parent
         script_path = compose_dir / "patch-boot.sh"
+        setup_file_path = setup_json_reset_file_path(self.frame, default_if_missing=True)
+        setup_relpath = setup_file_path.lstrip("/")
+        if setup_relpath.startswith("boot/"):
+            setup_relpath = setup_relpath[len("boot/"):]
+        managed_boot_files = sorted(
+            {
+                Path(BOOT_HOSTNAME_FILE).name,
+                Path(BOOT_WIFI_CONNECTION_FILE).name,
+                Path(BOOT_AUTHORIZED_KEYS_FILE).name,
+                setup_relpath,
+            }
+        )
+        managed_boot_files_shell = " ".join(shlex.quote(path) for path in managed_boot_files if path)
         script_path.write_text(
             f"""#!/usr/bin/env bash
 set -euo pipefail
@@ -1463,6 +1734,12 @@ disk="$image_dir"/{shlex.quote(output_path.name)}
 offset={partitions[0]["start"]}
 target="${{disk}}@@${{offset}}"
 mlabel -i "$target" ::BOOT
+managed_boot_files=({managed_boot_files_shell})
+for relpath in "${{managed_boot_files[@]}}"; do
+  if [ ! -e "$boot_root/$relpath" ]; then
+    mdel -i "$target" "::${{relpath}}" 2>/dev/null || true
+  fi
+done
 merge_config() {{
   relpath="$1"
   src="$boot_root/$relpath"
@@ -1569,6 +1846,7 @@ fi
             self.frame,
             patch_cmd,
             log_command=log_command,
+            stderr_log_tag="stdout",
         )
         if status != 0:
             raise RuntimeError(f"Buildroot BOOT partition patch failed: {err or 'see logs'}")
@@ -1790,12 +2068,14 @@ mkdir -p "$target_dir/etc/systemd/system/multi-user.target.wants" "$target_dir/e
 if [ -d "$target_dir/lib/firmware/brcm" ]; then
   cd "$target_dir/lib/firmware/brcm"
   for base in brcmfmac43436-sdio brcmfmac43436s-sdio brcmfmac43430-sdio; do
-    if [ -e "${base}.bin" ] && [ ! -e "brcmfmac43436-sdio.raspberrypi,model-zero-2-w.bin" ]; then
-      ln -s "${base}.bin" "brcmfmac43436-sdio.raspberrypi,model-zero-2-w.bin" || true
-    fi
-    if [ -e "${base}.txt" ] && [ ! -e "brcmfmac43436-sdio.raspberrypi,model-zero-2-w.txt" ]; then
-      ln -s "${base}.txt" "brcmfmac43436-sdio.raspberrypi,model-zero-2-w.txt" || true
-    fi
+    for model in raspberrypi,model-zero-2-w raspberrypi,model-zero-2-2; do
+      if [ -e "${base}.bin" ] && [ ! -e "${base}.${model}.bin" ]; then
+        ln -s "${base}.bin" "${base}.${model}.bin" || true
+      fi
+      if [ -e "${base}.txt" ] && [ ! -e "${base}.${model}.txt" ]; then
+        ln -s "${base}.txt" "${base}.${model}.txt" || true
+      fi
+    done
   done
 fi
 """
@@ -1828,7 +2108,7 @@ mkdir -p "$target_dir/srv/frameos" "$target_dir/srv/assets" "$target_dir/etc"
 fstab="$target_dir/etc/fstab"
 tmp_fstab="${fstab}.frameos"
 touch "$fstab"
-grep -vE '[[:space:]]/srv/(frameos|assets)[[:space:]]' "$fstab" > "$tmp_fstab" || true
+grep -vE '[[:space:]](/boot|/srv/(frameos|assets))[[:space:]]' "$fstab" > "$tmp_fstab" || true
 cat >> "$tmp_fstab" <<'EOF'
 LABEL=BOOT /boot vfat defaults,noatime,umask=000 0 0
 LABEL=FRAMEOS /srv/frameos ext4 defaults,noatime 0 2
@@ -1883,6 +2163,12 @@ if line not in lines:
 with open(path, "w", encoding="utf-8") as handle:
     handle.write("\\n".join(lines).strip() + "\\n")
 PY
+fi
+
+rootfs_image="${{BINARIES_DIR:?BINARIES_DIR is required}}/rootfs.ext4"
+if [ -f "$rootfs_image" ]; then
+  e2fsck -fy "$rootfs_image"
+  resize2fs -M "$rootfs_image"
 fi
 
 files=()
@@ -1962,6 +2248,287 @@ genimage \\
   --outputpath "$BINARIES_DIR" \\
   --config "$genimage_cfg"
 """
+
+
+EXPAND_SD_CARD_SCRIPT = """#!/bin/sh
+set -eu
+
+marker="/var/lib/frameos/sd-card-expanded"
+log="/var/log/frameos-expand-sd-card.log"
+mount -o remount,rw / 2>/dev/null || true
+mkdir -p "$(dirname "$marker")" 2>/dev/null || true
+touch "$log" 2>/dev/null || true
+exec >> "$log" 2>&1 || true
+
+if [ -e "$marker" ]; then
+  exit 0
+fi
+
+sector_size="${FRAMEOS_EXPAND_SECTOR_SIZE:-512}"
+align_sectors=$((1024 * 1024 / sector_size))
+align_offset=0
+small_card_threshold_sectors=$((4 * 1024 * 1024 * 1024 / sector_size))
+root_target_sectors=$((1 * 1024 * 1024 * 1024 / sector_size))
+small_frameos_sectors=$((1 * 1024 * 1024 * 1024 / sector_size))
+large_frameos_sectors=$((2 * 1024 * 1024 * 1024 / sector_size))
+
+partition_device() {
+  case "$1" in
+    *[0-9]) printf '%sp%s\\n' "$1" "$2" ;;
+    *) printf '%s%s\\n' "$1" "$2" ;;
+  esac
+}
+
+parent_disk_for_partition() {
+  part_name="$(basename "$1")"
+  sys_path="$(readlink -f "/sys/class/block/$part_name" 2>/dev/null || true)"
+  if [ -z "$sys_path" ]; then
+    return 1
+  fi
+  disk_name="$(basename "$(dirname "$sys_path")")"
+  printf '/dev/%s\\n' "$disk_name"
+}
+
+align_down() {
+  value="$1"
+  adjusted=$((value - align_offset))
+  printf '%s\\n' $((adjusted / align_sectors * align_sectors + align_offset))
+}
+
+align_up() {
+  value="$1"
+  adjusted=$((value - align_offset))
+  printf '%s\\n' $(((adjusted + align_sectors - 1) / align_sectors * align_sectors + align_offset))
+}
+
+copy_chunk() {
+  src="$1"
+  dst="$2"
+  count="$3"
+  if dd if="$disk" of="$disk" bs="$sector_size" skip="$src" seek="$dst" count="$count" conv=notrunc status=none 2>/dev/null; then
+    return 0
+  fi
+  dd if="$disk" of="$disk" bs="$sector_size" skip="$src" seek="$dst" count="$count" conv=notrunc >/dev/null 2>&1
+}
+
+move_partition_data() {
+  name="$1"
+  old_start="$2"
+  new_start="$3"
+  sectors="$4"
+  if [ "$old_start" -eq "$new_start" ]; then
+    return 0
+  fi
+  echo "Moving $name data: $old_start -> $new_start ($sectors sectors)"
+  chunk_sectors=$((1024 * 1024 / sector_size))
+  if [ "$chunk_sectors" -lt 1 ]; then
+    chunk_sectors=1
+  fi
+
+  if [ "$new_start" -gt "$old_start" ] && [ "$new_start" -lt $((old_start + sectors)) ]; then
+    remaining="$sectors"
+    while [ "$remaining" -gt 0 ]; do
+      chunk="$chunk_sectors"
+      if [ "$chunk" -gt "$remaining" ]; then
+        chunk="$remaining"
+      fi
+      offset=$((remaining - chunk))
+      copy_chunk $((old_start + offset)) $((new_start + offset)) "$chunk"
+      remaining="$offset"
+    done
+  else
+    copied=0
+    while [ "$copied" -lt "$sectors" ]; do
+      chunk="$chunk_sectors"
+      remaining=$((sectors - copied))
+      if [ "$chunk" -gt "$remaining" ]; then
+        chunk="$remaining"
+      fi
+      copy_chunk $((old_start + copied)) $((new_start + copied)) "$chunk"
+      copied=$((copied + chunk))
+    done
+  fi
+  sync
+}
+
+field_from_line() {
+  line="$1"
+  field="$2"
+  echo "$line" | sed -n "s/.*${field}=[[:space:]]*\\([0-9A-Fa-fx]*\\).*/\\1/p"
+}
+
+partition_line() {
+  number="$1"
+  sfdisk -d "$disk" | awk -v wanted="$number" '
+    /^\\/.*:/{ part_index += 1; if (part_index == wanted) { print; exit } }
+  '
+}
+
+disk="${FRAMEOS_EXPAND_DISK:-}"
+if [ -z "$disk" ]; then
+  frameos_dev="$(readlink -f /dev/disk/by-label/FRAMEOS 2>/dev/null || true)"
+  if [ -z "$frameos_dev" ] && command -v blkid >/dev/null 2>&1; then
+    frameos_dev="$(blkid -L FRAMEOS 2>/dev/null || true)"
+  fi
+  if [ -n "$frameos_dev" ]; then
+    disk="$(parent_disk_for_partition "$frameos_dev" || true)"
+  fi
+fi
+if [ -z "$disk" ] || { [ ! -b "$disk" ] && [ "${FRAMEOS_EXPAND_DRY_RUN:-0}" != "1" ]; }; then
+  echo "Could not determine SD card block device"
+  exit 1
+fi
+
+disk_name="$(basename "$disk")"
+if [ -n "${FRAMEOS_EXPAND_DISK_SECTORS:-}" ]; then
+  disk_sectors="$FRAMEOS_EXPAND_DISK_SECTORS"
+else
+  if [ ! -b "$disk" ]; then
+    echo "FRAMEOS_EXPAND_DISK_SECTORS is required when dry-running against a regular file"
+    exit 1
+  fi
+  disk_sectors="$(cat "/sys/class/block/$disk_name/size")"
+fi
+
+p1="$(partition_line 1)"
+p2="$(partition_line 2)"
+p3="$(partition_line 3)"
+p4="$(partition_line 4)"
+if [ -z "$p1" ] || [ -z "$p2" ] || [ -z "$p3" ] || [ -z "$p4" ]; then
+  echo "Expected four MBR partitions on $disk"
+  exit 1
+fi
+
+p1_start="$(field_from_line "$p1" start)"
+p1_size="$(field_from_line "$p1" size)"
+p2_start="$(field_from_line "$p2" start)"
+p2_size="$(field_from_line "$p2" size)"
+p3_start="$(field_from_line "$p3" start)"
+p3_size="$(field_from_line "$p3" size)"
+p4_start="$(field_from_line "$p4" start)"
+p4_size="$(field_from_line "$p4" size)"
+
+align_offset=$((p2_start % align_sectors))
+current_end=$((p4_start + p4_size))
+extra_sectors=$((disk_sectors - current_end))
+
+target_root_size="$root_target_sectors"
+if [ "$target_root_size" -lt "$p2_size" ]; then
+  target_root_size="$p2_size"
+fi
+frameos_start="$(align_up $((p2_start + target_root_size)))"
+target_root_size=$((frameos_start - p2_start))
+
+target_frameos_size="$large_frameos_sectors"
+if [ "$disk_sectors" -lt "$small_card_threshold_sectors" ]; then
+  target_frameos_size="$small_frameos_sectors"
+fi
+if [ "$target_frameos_size" -lt "$p3_size" ]; then
+  target_frameos_size="$p3_size"
+fi
+
+assets_start="$(align_up $((frameos_start + target_frameos_size)))"
+target_frameos_size=$((assets_start - frameos_start))
+assets_size=$((disk_sectors - assets_start))
+if [ "$assets_size" -le 0 ]; then
+  echo "Computed assets partition would not fit"
+  exit 1
+fi
+root_dev="$(partition_device "$disk" 2)"
+frameos_dev="$(partition_device "$disk" 3)"
+assets_dev="$(partition_device "$disk" 4)"
+
+assets_label() {
+  if command -v blkid >/dev/null 2>&1; then
+    blkid -s LABEL -o value "$assets_dev" 2>/dev/null || true
+  elif [ -e /dev/disk/by-label/ASSETS ]; then
+    printf 'ASSETS\\n'
+  fi
+}
+
+layout_changed=0
+if [ "$target_root_size" -ne "$p2_size" ] \
+  || [ "$frameos_start" -ne "$p3_start" ] \
+  || [ "$target_frameos_size" -ne "$p3_size" ] \
+  || [ "$assets_start" -ne "$p4_start" ] \
+  || [ "$assets_size" -ne "$p4_size" ]; then
+  layout_changed=1
+fi
+
+if [ "$extra_sectors" -lt "$align_sectors" ] && [ "$layout_changed" -eq 0 ]; then
+  echo "No SD card expansion needed"
+  resize2fs "$root_dev" || true
+  resize2fs "$frameos_dev" || true
+  if [ "$(assets_label)" != "ASSETS" ]; then
+    echo "Formatting missing ASSETS filesystem on $assets_dev"
+    mkfs.vfat -n ASSETS "$assets_dev"
+  fi
+  date -u > "$marker" 2>/dev/null || true
+  exit 0
+fi
+
+echo "Expanding $disk from $current_end to $disk_sectors sectors"
+echo "New root start/size: $p2_start/$target_root_size sectors"
+echo "New FRAMEOS start/size: $frameos_start/$target_frameos_size sectors"
+echo "New ASSETS start/size: $assets_start/$assets_size sectors"
+
+if [ "${FRAMEOS_EXPAND_DRY_RUN:-0}" = "1" ]; then
+  echo "Dry run requested; not moving partitions, rewriting the partition table, or resizing filesystems"
+  exit 0
+fi
+
+move_partition_data "FRAMEOS" "$p3_start" "$frameos_start" "$p3_size"
+
+layout="$(mktemp)"
+cat > "$layout" <<EOF
+label: dos
+unit: sectors
+
+$(partition_device "$disk" 1) : start= $p1_start, size= $p1_size, type=c, bootable
+$(partition_device "$disk" 2) : start= $p2_start, size= $target_root_size, type=83
+$(partition_device "$disk" 3) : start= $frameos_start, size= $target_frameos_size, type=83
+$(partition_device "$disk" 4) : start= $assets_start, size= $assets_size, type=c
+EOF
+sfdisk --no-reread --force "$disk" < "$layout"
+rm -f "$layout"
+
+if ! partx -u "$disk"; then
+  echo "Could not update in-kernel partition table; rebooting and retrying before local mounts"
+  systemctl reboot --no-block || reboot || true
+  exit 0
+fi
+
+resize2fs "$root_dev"
+resize2fs "$frameos_dev"
+mkfs.vfat -n ASSETS "$assets_dev"
+date -u > "$marker" 2>/dev/null || true
+"""
+
+
+def render_expand_sd_card_script() -> str:
+    return EXPAND_SD_CARD_SCRIPT
+
+
+def render_expand_sd_card_service() -> str:
+    return "\n".join(
+        [
+            "[Unit]",
+            "Description=Expand FrameOS SD card partitions on first boot",
+            "DefaultDependencies=no",
+            "After=systemd-remount-fs.service",
+            "Before=local-fs-pre.target local-fs.target",
+            "ConditionPathExists=!/var/lib/frameos/sd-card-expanded",
+            "",
+            "[Service]",
+            "Type=oneshot",
+            f"ExecStart={BUILDROOT_EXPAND_SD_CARD_SCRIPT_PATH}",
+            "RemainAfterExit=yes",
+            "",
+            "[Install]",
+            "WantedBy=local-fs-pre.target",
+            "",
+        ]
+    )
 
 
 async def _buildroot_sd_image_queue_job_active(redis: Redis, sd_image: dict[str, Any]) -> bool:
@@ -2080,6 +2647,12 @@ def _gzip_file(source_path: Path, destination_path: Path) -> None:
     with source_path.open("rb") as source, destination_path.open("wb") as compressed:
         with gzip.GzipFile(filename="", mode="wb", fileobj=compressed, mtime=0) as destination:
             shutil.copyfileobj(source, destination)
+
+
+def _gunzip_file(source_path: Path, destination_path: Path) -> None:
+    destination_path.parent.mkdir(parents=True, exist_ok=True)
+    with gzip.open(source_path, "rb") as source, destination_path.open("wb") as destination:
+        shutil.copyfileobj(source, destination)
 
 
 def _mbr_partitions(image_path: Path) -> list[dict[str, int]]:

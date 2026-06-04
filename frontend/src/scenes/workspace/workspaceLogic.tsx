@@ -6,6 +6,7 @@ import { FrameScene, FrameType } from '../../types'
 import { urls } from '../../urls'
 import { applyFrameosTheme } from '../../utils/frameosTheme'
 import { DeployDrawerView, frameLogic } from '../frame/frameLogic'
+import { controlLogic } from '../frame/panels/Scenes/controlLogic'
 import { newFrameForm } from '../frames/newFrameForm'
 import type { workspaceLogicType } from './workspaceLogicType'
 
@@ -100,6 +101,8 @@ function clearDrawerSearchParams(search: Record<string, unknown>): Record<string
   delete nextSearch.sceneId
   delete nextSearch.nodeId
   delete nextSearch.deployView
+  delete nextSearch.scrollToScene
+  delete nextSearch.drawerSource
   return nextSearch
 }
 
@@ -189,6 +192,7 @@ function clearDrawerUrl(): [string, Record<string, unknown>, Record<string, unkn
 export interface SceneSelection {
   frameId: number
   sceneId: string
+  source?: 'preview' | 'scene'
 }
 
 export interface ChatDrawerSelection {
@@ -383,6 +387,12 @@ function sceneUtilityPanelFromHashValue(value: string | null): SceneUtilityPanel
 
 function utilityDrawerHashPanel(hash: Record<string, unknown> = router.values.hashParams): SceneUtilityPanel | null {
   return sceneUtilityPanelFromHashValue(searchValue(hash, UTILITY_DRAWER_HASH_KEY))
+}
+
+function reloadFrameStates(frameId: number | null): void {
+  if (frameId) {
+    controlLogic({ frameId }).actions.sync()
+  }
 }
 
 function utilityDrawerOpenHash(
@@ -750,7 +760,16 @@ export const workspaceLogic = kea<workspaceLogicType>([
     navigateToSceneFrame: (frameId: number) => ({ frameId }),
     navigateToScene: (frameId: number, sceneId: string) => ({ frameId, sceneId }),
     openScenePreview: (frameId: number, sceneId: string) => ({ frameId, sceneId }),
-    openSceneControl: (frameId: number, sceneId: string) => ({ frameId, sceneId }),
+    openSceneControl: (frameId: number, sceneId: string) => ({
+      frameId,
+      sceneId,
+      source: 'scene' as const,
+    }),
+    openLiveSceneControl: (frameId: number, sceneId: string) => ({
+      frameId,
+      sceneId,
+      source: 'preview' as const,
+    }),
     closeSceneControl: true,
     openTemplateDrawer: (frameId: number) => ({ frameId }),
     closeTemplateDrawer: true,
@@ -849,7 +868,8 @@ export const workspaceLogic = kea<workspaceLogicType>([
     sceneControlSelection: [
       null as SceneSelection | null,
       {
-        openSceneControl: (_, { frameId, sceneId }) => ({ frameId, sceneId }),
+        openSceneControl: (_, { frameId, sceneId, source }) => ({ frameId, sceneId, source }),
+        openLiveSceneControl: (_, { frameId, sceneId, source }) => ({ frameId, sceneId, source }),
         closeSceneControl: () => null,
         setSearch: () => null,
         navigateToFrame: () => null,
@@ -876,6 +896,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
         navigateToScene: () => null,
         openScenePreview: () => null,
         openSceneControl: () => null,
+        openLiveSceneControl: () => null,
         openScheduleDrawer: () => null,
         openChatDrawer: () => null,
         openFrameChangeDrawer: () => null,
@@ -896,6 +917,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
         openScenePreview: () => null,
         openTemplateDrawer: () => null,
         openSceneControl: () => null,
+        openLiveSceneControl: () => null,
         openChatDrawer: () => null,
         openFrameChangeDrawer: () => null,
       },
@@ -912,6 +934,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
         navigateToScene: () => null,
         openScenePreview: () => null,
         openSceneControl: () => null,
+        openLiveSceneControl: () => null,
         openTemplateDrawer: () => null,
         openScheduleDrawer: () => null,
         openFrameChangeDrawer: () => null,
@@ -936,6 +959,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
         navigateToScene: () => null,
         openScenePreview: () => null,
         openSceneControl: () => null,
+        openLiveSceneControl: () => null,
         openTemplateDrawer: () => null,
         openScheduleDrawer: () => null,
         openChatDrawer: () => null,
@@ -1177,6 +1201,13 @@ export const workspaceLogic = kea<workspaceLogicType>([
         preserveFramesScroll()
         ensureSceneTileVisibleAfterLayoutChange(frameId, sceneId, cache)
       },
+      openLiveSceneControl: () => {
+        newFrameForm.actions.hideForm()
+        if (isMobileWorkspaceViewport()) {
+          actions.closeSecondarySidebar()
+        }
+        preserveFramesScroll()
+      },
       closeSceneControl: preserveFramesScroll,
       openTemplateDrawer: ({ frameId }) => {
         hideNewFrameFormAndPreserveScroll()
@@ -1220,6 +1251,11 @@ export const workspaceLogic = kea<workspaceLogicType>([
 
         const nextFrameActions = frameLogic({ frameId }).actions
         nextFrameActions.showDeployPlanModal()
+      },
+      openUtilityPanel: ({ panel }) => {
+        if (panel === 'state') {
+          reloadFrameStates(values.selectedFrameId)
+        }
       },
       [newFrameForm.actionTypes.showForm]: preserveFramesScroll,
       [newFrameForm.actionTypes.hideForm]: preserveFramesScroll,
@@ -1275,6 +1311,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
       },
       openScenePreview: ({ frameId, sceneId }) => {
         actions.setRouteSelection(frameId, sceneId)
+        reloadFrameStates(frameId)
         router.actions.push(
           urls.scenes(frameId, sceneId),
           {},
@@ -1345,7 +1382,11 @@ export const workspaceLogic = kea<workspaceLogicType>([
       }
 
       if (drawer === 'scene' && sceneId) {
-        actions.openSceneControl(frameId, sceneId)
+        if (searchValue(search, 'drawerSource') === 'preview' || searchValue(search, 'scrollToScene') === '0') {
+          actions.openLiveSceneControl(frameId, sceneId)
+        } else {
+          actions.openSceneControl(frameId, sceneId)
+        }
       } else if (drawer === 'templates') {
         actions.openTemplateDrawer(frameId)
       } else if (drawer === 'schedule') {
@@ -1436,7 +1477,14 @@ export const workspaceLogic = kea<workspaceLogicType>([
   }),
   actionToUrl(() => ({
     openSceneControl: (payload: Record<string, any>) =>
-      drawerUrlForFrame(Number(payload.frameId), 'scene', { sceneId: String(payload.sceneId) }),
+      drawerUrlForFrame(Number(payload.frameId), 'scene', {
+        sceneId: String(payload.sceneId),
+      }),
+    openLiveSceneControl: (payload: Record<string, any>) =>
+      drawerUrlForFrame(Number(payload.frameId), 'scene', {
+        drawerSource: 'preview',
+        sceneId: String(payload.sceneId),
+      }),
     closeSceneControl: clearDrawerUrl,
     openTemplateDrawer: (payload: Record<string, any>) => drawerUrlForFrame(Number(payload.frameId), 'templates'),
     closeTemplateDrawer: clearDrawerUrl,

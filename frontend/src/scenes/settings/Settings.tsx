@@ -339,8 +339,8 @@ export function Settings() {
                   <Box className="p-3 space-y-3">
                     <Field
                       name="timezone"
-                      label="Default Buildroot timezone"
-                      tooltip="Used for Buildroot SD card images unless a frame overrides it."
+                      label="Default timezone"
+                      tooltip="Used for Buildroot SD card images unless a frame overrides it. Raspberry Pi OS frames keep their existing timezone until one is set on the frame."
                     >
                       <Select options={timezoneOptions} />
                     </Field>

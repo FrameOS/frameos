@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import os
+import re
 import time
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 DEFAULT_TIMEZONE = "UTC"
+_TIMEZONE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+\-/]{0,127}$")
 
 
 def normalize_timezone(value: object | None) -> str:
@@ -17,6 +19,22 @@ def normalize_timezone(value: object | None) -> str:
     except ZoneInfoNotFoundError:
         return ""
     return timezone
+
+
+def stored_timezone(value: object | None) -> str:
+    timezone = str(value or "").strip()
+    if not timezone:
+        return ""
+    normalized = normalize_timezone(timezone)
+    if normalized:
+        return normalized
+    if (
+        _TIMEZONE_NAME_RE.match(timezone)
+        and not timezone.startswith("/")
+        and all(part not in ("", ".", "..") for part in timezone.split("/"))
+    ):
+        return timezone
+    return ""
 
 
 def guess_system_timezone() -> str:

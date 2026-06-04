@@ -37,6 +37,7 @@ type
     logToFile*: string
     debug*: bool
     timeZone*: string
+    timeZoneUpdates*: TimeZoneUpdatesConfig
     schedule*: FrameSchedule
     gpioButtons*: seq[GPIOButton]
     controlCode*: ControlCode
@@ -45,6 +46,12 @@ type
     mountpoints*: MountpointsConfig
     errorBehavior*: ErrorBehaviorConfig
     palette*: PaletteConfig
+
+  # Part of FrameConfig
+  TimeZoneUpdatesConfig* = ref object
+    enabled*: bool
+    hour*: int
+    url*: string
 
   # Part of FrameConfig
   HttpsProxyConfig* = ref object

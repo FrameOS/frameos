@@ -420,44 +420,47 @@ proc handleCmd(cmd: JsonNode; ws: WebSocket; cfg: FrameConfig): Future[void] {.a
       let bodyArg = args{"body"}.getStr("")
 
       var client = newAsyncHttpClient()
-      if args.hasKey("headers"):
-        for k, v in args["headers"].pairs:
-          try:
-            client.headers.add(k, v.getStr())
-          except Exception:
-            discard # ignore malformed header values
-      let url = &"http://127.0.0.1:{cfg.framePort}{path}"
-      let resp = await (if methodArg == "POST": client.post(url, bodyArg) else: client.get(url))
+      try:
+        if args.hasKey("headers"):
+          for k, v in args["headers"].pairs:
+            try:
+              client.headers.add(k, v.getStr())
+            except Exception:
+              discard # ignore malformed header values
+        let url = &"http://127.0.0.1:{cfg.framePort}{path}"
+        let resp = await (if methodArg == "POST": client.post(url, bodyArg) else: client.get(url))
 
-      let bodyBytes = await resp.body # raw bytes
-      var hdrs = %*{}
-      for k, v in resp.headers: hdrs[k.toLowerAscii()] = %*v
+        let bodyBytes = await resp.body # raw bytes
+        var hdrs = %*{}
+        for k, v in resp.headers: hdrs[k.toLowerAscii()] = %*v
 
-      # ---------- send binary when body is not UTF-8 ---------- #
-      let isBinary = bodyBytes.validateUtf8() >= 0
-      if isBinary:
-        # ── 1. stream the bytes FIRST ───────────────────────────────
-        var sent = 0
-        const chunk = 65536
-        while sent < bodyBytes.len:
-          let endPos = min(sent + chunk, bodyBytes.len)
-          await ws.send(bodyBytes[sent ..< endPos], OpCode.Binary)
-          sent = endPos
+        # ---------- send binary when body is not UTF-8 ---------- #
+        let isBinary = bodyBytes.validateUtf8() >= 0
+        if isBinary:
+          # ── 1. stream the bytes FIRST ───────────────────────────────
+          var sent = 0
+          const chunk = 65536
+          while sent < bodyBytes.len:
+            let endPos = min(sent + chunk, bodyBytes.len)
+            await ws.send(bodyBytes[sent ..< endPos], OpCode.Binary)
+            sent = endPos
 
-        # ── 2. JSON reply AFTER all chunks ──────────────────────────
-        await sendResp(ws, cfg, id, true, %*{
-          "status": resp.code.int,
-          "size": bodyBytes.len,
-          "headers": hdrs,
-          "binary": true # flag for backend
-        })
-      else:
-        await sendResp(
-          ws, cfg, id, true,
-          %*{"status": resp.code.int,
-              "body": cast[string](bodyBytes),
-              "headers": hdrs,
-              "binary": false})
+          # ── 2. JSON reply AFTER all chunks ──────────────────────────
+          await sendResp(ws, cfg, id, true, %*{
+            "status": resp.code.int,
+            "size": bodyBytes.len,
+            "headers": hdrs,
+            "binary": true # flag for backend
+          })
+        else:
+          await sendResp(
+            ws, cfg, id, true,
+            %*{"status": resp.code.int,
+                "body": cast[string](bodyBytes),
+                "headers": hdrs,
+                "binary": false})
+      finally:
+        client.close()
     of "shell":
       if not args.hasKey("cmd"):
         await sendResp(ws, cfg, id, false, %*{"error": "`cmd` missing"})

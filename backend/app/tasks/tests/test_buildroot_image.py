@@ -1,21 +1,32 @@
 from __future__ import annotations
 
 import gzip
+import importlib.util
 import json
 import re
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+from app.models.assets import Assets
+from app.tasks import buildroot_image as buildroot_image_module
 from app.tasks.buildroot_image import (
     BUILDROOT_DEFAULT_BOOT_CONFIG_LINES,
+    BUILDROOT_EXPAND_SD_CARD_SCRIPT_PATH,
+    BUILDROOT_EXPAND_SD_CARD_SERVICE_NAME,
     FRAMEOS_BUILD_TARGET,
     BuildrootImageBuilder,
+    PrecompiledBuildrootSdImageResult,
     ensure_buildroot_frame_defaults,
+    _buildroot_setup_payload,
     _frame_boot_config_lines,
     _merge_boot_config_lines,
     _network_manager_wifi_connection,
+    precompiled_buildroot_sd_image_release_url,
+    render_expand_sd_card_script,
+    render_expand_sd_card_service,
 )
 from app.tasks.binary_builder import FrameBinaryBuildResult
 from app.tasks.prebuilt_deps import resolve_prebuilt_target
@@ -25,6 +36,9 @@ from app.tasks.setup_json_reset import (
     setup_json_reset_file_path,
 )
 from app.utils.cross_compile import CrossCompiler
+
+
+REPO_ROOT = Path(__file__).resolve().parents[4]
 
 
 def test_buildroot_frameos_cross_target_uses_docker_arm64_platform(tmp_path, monkeypatch):
@@ -96,6 +110,18 @@ def test_buildroot_defaults_remove_setup_json_reset_file_path():
     assert setup_json_reset_file_path(frame) == DEFAULT_SETUP_JSON_RESET_FILE_PATH
 
 
+def test_buildroot_setup_payload_includes_real_frame_scenes(monkeypatch):
+    scenes = [
+        {"id": "scene-1", "settings": {"execution": "interpreted"}},
+        {"id": "scene-2", "settings": {"execution": "compiled"}},
+    ]
+    frame = SimpleNamespace(id=1, project_id=7, scenes=scenes)
+
+    monkeypatch.setattr("app.tasks.buildroot_image.get_frame_json", lambda _db, _frame: {"id": 1})
+
+    assert _buildroot_setup_payload(None, frame) == {"id": 1, "scenes": scenes}
+
+
 def test_buildroot_config_avoids_ncurses_selecting_packages(tmp_path):
     config_path = tmp_path / "frameos-buildroot.config"
 
@@ -111,6 +137,13 @@ def test_buildroot_config_avoids_ncurses_selecting_packages(tmp_path):
     assert "BR2_PACKAGE_DROPBEAR=y" in config
     assert "BR2_PACKAGE_DBUS=y" in config
     assert "BR2_PACKAGE_TZDATA=y" in config
+    assert "BR2_PACKAGE_UTIL_LINUX=y" in config
+    assert "BR2_PACKAGE_UTIL_LINUX_BINARIES=y" in config
+    assert "BR2_PACKAGE_UTIL_LINUX_PARTX=y" in config
+    assert "BR2_PACKAGE_E2FSPROGS=y" in config
+    assert "BR2_PACKAGE_E2FSPROGS_RESIZE2FS=y" in config
+    assert "BR2_PACKAGE_DOSFSTOOLS=y" in config
+    assert "BR2_PACKAGE_DOSFSTOOLS_MKFS_FAT=y" in config
     assert "BR2_PACKAGE_NANO=y" in config
     assert "BR2_PACKAGE_IMAGEMAGICK=y" in config
     assert "BR2_PACKAGE_NETWORK_MANAGER=y" in config
@@ -187,16 +220,148 @@ def test_buildroot_partition_scripts_create_frameos_and_assets_partitions(tmp_pa
     assert "LABEL=BOOT /boot vfat" in partition_post_build
     assert "LABEL=FRAMEOS /srv/frameos ext4" in partition_post_build
     assert "LABEL=ASSETS /srv/assets vfat" in partition_post_build
+    assert '[[:space:]](/boot|/srv/(frameos|assets))[[:space:]]' in partition_post_build
     assert "frameos-partition-root" in partition_post_build
     assert "assets-partition-root" in partition_post_build
     assert '"$target_dir/etc/cron.d"' in post_build
+    assert "brcmfmac43430-sdio" in post_build
+    assert "raspberrypi,model-zero-2-2" in post_build
     assert "image frameos.ext4" in post_image
     assert "image assets.vfat" in post_image
+    assert "size = 100M" in post_image
+    assert 'rootfs_image="${BINARIES_DIR:?BINARIES_DIR is required}/rootfs.ext4"' in post_image
+    assert 'resize2fs -M "$rootfs_image"' in post_image
     assert "console=tty1" in post_image
     assert "fbcon=logo-count:1" in post_image
     assert "gpu_mem=32" in post_image
     assert "partition frameos" in post_image
     assert "partition assets" in post_image
+
+
+def test_buildroot_expand_sd_card_service_runs_before_local_mounts():
+    service = render_expand_sd_card_service()
+    script = render_expand_sd_card_script()
+
+    assert f"ExecStart={BUILDROOT_EXPAND_SD_CARD_SCRIPT_PATH}" in service
+    assert "DefaultDependencies=no" in service
+    assert "Before=local-fs-pre.target local-fs.target" in service
+    assert "WantedBy=local-fs-pre.target" in service
+    assert "ConditionPathExists=!/var/lib/frameos/sd-card-expanded" in service
+
+    assert "FRAMEOS_EXPAND_DISK" in script
+    assert "FRAMEOS_EXPAND_DRY_RUN" in script
+    assert "mount -o remount,rw / 2>/dev/null || true" in script
+    assert 'mkdir -p "$(dirname "$marker")" 2>/dev/null || true' in script
+    assert "root_target_sectors=$((1 * 1024 * 1024 * 1024 / sector_size))" in script
+    assert "small_card_threshold_sectors=$((4 * 1024 * 1024 * 1024 / sector_size))" in script
+    assert "small_frameos_sectors=$((1 * 1024 * 1024 * 1024 / sector_size))" in script
+    assert "large_frameos_sectors=$((2 * 1024 * 1024 * 1024 / sector_size))" in script
+    assert 'move_partition_data "FRAMEOS" "$p3_start" "$frameos_start" "$p3_size"' in script
+    assert 'echo "New root start/size: $p2_start/$target_root_size sectors"' in script
+    assert '$(partition_device "$disk" 2) : start= $p2_start, size= $target_root_size, type=83' in script
+    assert '$(partition_device "$disk" 3) : start= $frameos_start, size= $target_frameos_size, type=83' in script
+    assert 'assets_label()' in script
+    assert 'if [ "$(assets_label)" != "ASSETS" ]; then' in script
+    assert 'echo "Formatting missing ASSETS filesystem on $assets_dev"' in script
+    assert 'mkfs.vfat -n ASSETS "$assets_dev"' in script
+    assert 'resize2fs "$root_dev"' in script
+    assert 'resize2fs "$frameos_dev"' in script
+    assert 'date -u > "$marker" 2>/dev/null || true' in script
+    assert 'sfdisk --no-reread --force "$disk"' in script
+    assert 'partx -u "$disk"' in script
+
+
+def test_buildroot_sd_image_stages_local_fonts_into_assets_partition(tmp_path, monkeypatch):
+    local_fonts = tmp_path / "local-fonts"
+    local_fonts.mkdir()
+    (local_fonts / "FrameOSFont.ttf").write_bytes(b"font")
+    (local_fonts / "README.md").write_text("fonts\n", encoding="utf-8")
+    (local_fonts / "ignore.otf").write_bytes(b"ignored")
+    monkeypatch.setattr(buildroot_image_module, "BUILDROOT_LOCAL_FONTS_DIR", local_fonts)
+
+    frame = SimpleNamespace(id=1, project_id=1, upload_fonts="")
+    builder = BuildrootImageBuilder(db=None, redis=None, frame=frame)
+    assets_dir = tmp_path / "overlay" / "srv" / "assets"
+
+    builder._stage_font_assets(assets_dir)
+
+    assert (assets_dir / "fonts" / "FrameOSFont.ttf").read_bytes() == b"font"
+    assert (assets_dir / "fonts" / "README.md").read_text(encoding="utf-8") == "fonts\n"
+    assert not (assets_dir / "fonts" / "ignore.otf").exists()
+
+
+def test_buildroot_sd_image_stages_custom_font_assets(tmp_path, monkeypatch):
+    local_fonts = tmp_path / "local-fonts"
+    local_fonts.mkdir()
+    monkeypatch.setattr(buildroot_image_module, "BUILDROOT_LOCAL_FONTS_DIR", local_fonts)
+
+    custom_font = Assets(project_id=4, path="fonts/custom/Nice.ttf", data=b"custom-font")
+
+    class FakeQuery:
+        def filter(self, *_args):
+            return self
+
+        def all(self):
+            return [custom_font]
+
+    class FakeDb:
+        def query(self, model):
+            assert model is Assets
+            return FakeQuery()
+
+    frame = SimpleNamespace(id=1, project_id=4, upload_fonts="")
+    builder = BuildrootImageBuilder(db=FakeDb(), redis=None, frame=frame)
+    assets_dir = tmp_path / "overlay" / "srv" / "assets"
+
+    builder._stage_font_assets(assets_dir)
+
+    assert (assets_dir / "fonts" / "custom" / "Nice.ttf").read_bytes() == b"custom-font"
+
+
+def test_buildroot_sd_image_respects_upload_fonts_none(tmp_path, monkeypatch):
+    local_fonts = tmp_path / "local-fonts"
+    local_fonts.mkdir()
+    (local_fonts / "FrameOSFont.ttf").write_bytes(b"font")
+    monkeypatch.setattr(buildroot_image_module, "BUILDROOT_LOCAL_FONTS_DIR", local_fonts)
+
+    frame = SimpleNamespace(id=1, project_id=1, upload_fonts="none")
+    builder = BuildrootImageBuilder(db=None, redis=None, frame=frame)
+    assets_dir = tmp_path / "overlay" / "srv" / "assets"
+
+    builder._stage_font_assets(assets_dir)
+
+    assert not (assets_dir / "fonts").exists()
+
+
+def test_base_bootstrap_overlay_installs_expand_sd_card_service(tmp_path, monkeypatch):
+    module_path = REPO_ROOT / "tools" / "buildroot-images" / "buildroot_images.py"
+    spec = importlib.util.spec_from_file_location("buildroot_images_tool", module_path)
+    assert spec and spec.loader
+    buildroot_images = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = buildroot_images
+    spec.loader.exec_module(buildroot_images)
+
+    monkeypatch.setattr(buildroot_images, "copy_lgpio_runtime_libraries", lambda _overlay: None)
+    overlay = tmp_path / "overlay"
+
+    buildroot_images.write_base_bootstrap_overlay(overlay)
+
+    service_path = overlay / "etc" / "systemd" / "system" / BUILDROOT_EXPAND_SD_CARD_SERVICE_NAME
+    service_link = (
+        overlay
+        / "etc"
+        / "systemd"
+        / "system"
+        / "local-fs-pre.target.wants"
+        / BUILDROOT_EXPAND_SD_CARD_SERVICE_NAME
+    )
+    script_path = overlay / BUILDROOT_EXPAND_SD_CARD_SCRIPT_PATH.lstrip("/")
+
+    assert service_path.read_text(encoding="utf-8") == render_expand_sd_card_service()
+    assert service_link.is_symlink()
+    assert service_link.readlink().as_posix() == f"../{BUILDROOT_EXPAND_SD_CARD_SERVICE_NAME}"
+    assert script_path.read_text(encoding="utf-8") == render_expand_sd_card_script()
+    assert oct(script_path.stat().st_mode & 0o777) == "0o755"
 
 
 def test_buildroot_boot_logo_is_staged_for_kernel_custom_logo(tmp_path):
@@ -205,6 +370,109 @@ def test_buildroot_boot_logo_is_staged_for_kernel_custom_logo(tmp_path):
     BuildrootImageBuilder._write_boot_logo(logo_path)
 
     assert logo_path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+
+
+def test_precompiled_buildroot_sd_image_release_url_uses_release_image_name(monkeypatch):
+    monkeypatch.setattr(buildroot_image_module, "BUILDROOT_PRECOMPILED_SD_IMAGE_RELEASE_BASE_URL", "https://example.test/releases")
+    monkeypatch.setattr(buildroot_image_module, "release_version", lambda: "2026.6.3")
+
+    assert precompiled_buildroot_sd_image_release_url("raspberry-pi-zero-2-w") == (
+        "https://example.test/releases/v2026.6.3/"
+        "frameos-2026.6.3-raspberry-pi-zero-2-w-buildroot.img.gz"
+    )
+
+
+@pytest.mark.asyncio
+async def test_precompiled_sd_image_shortcut_patches_boot_only(tmp_path, monkeypatch):
+    frame_data = {
+        "id": 42,
+        "project_id": 7,
+        "mode": "buildroot",
+        "frame_host": "Kitchen Frame.local",
+        "network": {},
+        "buildroot": {
+            "platform": "raspberry-pi-zero-2-w",
+            "compilationMode": "precompiled",
+        },
+        "scenes": [],
+        "gpio_buttons": [],
+        "schedule": None,
+        "device": "web_only",
+        "device_config": {},
+        "ssh_keys": [],
+        "upload_fonts": None,
+    }
+    frame = SimpleNamespace(**frame_data)
+    frame.to_dict = lambda: dict(frame_data)
+    release_archive = tmp_path / "release.img.gz"
+    release_archive.write_bytes(gzip.compress(b"release-image", mtime=0))
+    output_image = tmp_path / "output.img"
+    builder = BuildrootImageBuilder(db=None, redis=None, frame=frame)
+    commands: list[str] = []
+    logs: list[tuple[str, str]] = []
+    captured: dict[str, str] = {}
+
+    async def fake_download_precompiled_buildroot_sd_image(**_kwargs):
+        return PrecompiledBuildrootSdImageResult(
+            release_url="https://example.test/releases/v2026.6.3/frameos.img.gz",
+            archive_path=release_archive,
+            cache_hit=True,
+        )
+
+    async def fake_exec_local_command(*args, **kwargs):
+        command = args[3]
+        commands.append(command)
+        captured["patch_script"] = (tmp_path / "tmp" / "precompiled-compose" / "patch-boot.sh").read_text(
+            encoding="utf-8"
+        )
+        return 0, "", ""
+
+    async def fake_log(level, message):
+        logs.append((level, message))
+
+    def fail_replace_partition(*_args, **_kwargs):
+        raise AssertionError("precompiled SD image shortcut must not replace non-BOOT partitions")
+
+    temp_dir = tmp_path / "tmp"
+    temp_dir.mkdir()
+    monkeypatch.setattr(
+        "app.tasks.buildroot_image.download_precompiled_buildroot_sd_image",
+        fake_download_precompiled_buildroot_sd_image,
+    )
+    monkeypatch.setattr("app.tasks.buildroot_image.exec_local_command", fake_exec_local_command)
+    monkeypatch.setattr(
+        "app.tasks.buildroot_image._mbr_partitions",
+        lambda _path: [
+            {"start": 512, "size": 32 * 1024 * 1024},
+            {"start": 33554944, "size": 768 * 1024 * 1024},
+            {"start": 838861312, "size": 512 * 1024 * 1024},
+            {"start": 1375732224, "size": 512 * 1024 * 1024},
+        ],
+    )
+    monkeypatch.setattr("app.tasks.buildroot_image._replace_partition", fail_replace_partition)
+    monkeypatch.setattr(builder, "_log", fake_log)
+
+    result = await builder._try_compose_precompiled_sd_image(
+        temp_dir=temp_dir,
+        output_path=output_image,
+        bootstrap_frame=builder._buildroot_bootstrap_frame(),
+        setup_payload={"frame": "config"},
+        image=None,
+    )
+
+    assert result is not None
+    assert result.cache_hit is True
+    assert output_image.read_bytes() == b"release-image"
+    assert len(commands) == 1
+    assert "patch-boot.sh" in commands[0]
+    assert "compose-partitions.sh" not in commands[0]
+    boot_root = temp_dir / "overlay" / "boot"
+    assert (boot_root / "frameos-setup.json").is_file()
+    assert (boot_root / "frameos-hostname").read_text(encoding="utf-8") == "kitchen-frame\n"
+    assert not (boot_root / "frameos-wifi.nmconnection").exists()
+    assert "managed_boot_files=(" in captured["patch_script"]
+    assert "frameos-wifi.nmconnection" in captured["patch_script"]
+    assert 'mdel -i "$target"' in captured["patch_script"]
 
 
 @pytest.mark.asyncio
@@ -501,12 +769,24 @@ def test_buildroot_stage_overlay_leaves_service_install_to_firstboot(tmp_path, m
         network={"wifiSSID": "Test WiFi", "wifiPassword": "secret"},
         buildroot={},
         ssh_keys=[],
+        scenes=[
+            {"id": "scene-1", "settings": {"execution": "interpreted"}},
+            {"id": "scene-2", "settings": {"execution": "compiled"}},
+        ],
     )
     builder = BuildrootImageBuilder(db=object(), redis=None, frame=frame)
+    bootstrap_frame = SimpleNamespace(**{**frame.__dict__, "device": "web_only", "scenes": []})
     overlay_dir = tmp_path / "overlay"
 
     monkeypatch.setattr("app.tasks.buildroot_image.get_frame_json", lambda _db, _frame: {"id": 1})
-    monkeypatch.setattr("app.tasks.buildroot_image.get_interpreted_scenes_json", lambda _frame: [])
+    monkeypatch.setattr(
+        "app.tasks.buildroot_image.get_interpreted_scenes_json",
+        lambda _frame: [
+            scene
+            for scene in getattr(_frame, "scenes", [])
+            if scene.get("settings", {}).get("execution") == "interpreted"
+        ],
+    )
     monkeypatch.setattr("app.tasks.buildroot_image.get_settings_dict", lambda _db, project_id=None: {"ssh_keys": {"keys": []}})
     monkeypatch.setattr("app.tasks.buildroot_image.drivers_for_frame", lambda _frame: {})
     monkeypatch.setattr(BuildrootImageBuilder, "_copy_runtime_libraries", lambda _self, _overlay_dir: None)
@@ -514,8 +794,8 @@ def test_buildroot_stage_overlay_leaves_service_install_to_firstboot(tmp_path, m
     builder._stage_overlay(
         overlay_dir=overlay_dir,
         build_id="build123",
-        bootstrap_frame=frame,
-        setup_payload={"id": 1},
+        bootstrap_frame=bootstrap_frame,
+        setup_payload={"id": 1, "scenes": frame.scenes},
         frameos_build=FrameBinaryBuildResult(
             build_id="build123",
             target=FRAMEOS_BUILD_TARGET,
@@ -537,8 +817,15 @@ def test_buildroot_stage_overlay_leaves_service_install_to_firstboot(tmp_path, m
     )
 
     assert (overlay_dir / "boot" / "frameos-setup.json").exists()
+    setup_payload = json.loads((overlay_dir / "boot" / "frameos-setup.json").read_text(encoding="utf-8"))
+    assert setup_payload["scenes"] == frame.scenes
+    release_dir = overlay_dir / "srv" / "frameos" / "releases" / "release_build123"
+    scenes_payload = json.loads(gzip.decompress((release_dir / "scenes.json.gz").read_bytes()).decode("utf-8"))
+    all_scenes_payload = json.loads(gzip.decompress((release_dir / "all_scenes.json.gz").read_bytes()).decode("utf-8"))
+    assert scenes_payload == [frame.scenes[0]]
+    assert all_scenes_payload == frame.scenes
     assert (overlay_dir / "boot" / "frameos-hostname").read_text(encoding="utf-8") == "frame-one\n"
-    assert (overlay_dir / "srv" / "frameos" / "releases" / "release_build123" / "frameos.service").exists()
+    assert (release_dir / "frameos.service").exists()
     assert (overlay_dir / "srv" / "frameos" / "agent" / "releases" / "release_build123" / "frameos_agent.service").exists()
     assert not (overlay_dir / "etc" / "systemd" / "system" / "frameos.service").exists()
     assert not (overlay_dir / "etc" / "systemd" / "system" / "frameos_agent.service").exists()

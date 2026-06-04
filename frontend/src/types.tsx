@@ -52,6 +52,11 @@ export interface FrameType {
   height?: number
   device?: string
   timezone?: string
+  timezone_updater?: {
+    enabled?: boolean
+    hour?: number
+    url?: string
+  } | null
   device_config?: {
     vcom?: number
     uploadUrl?: string

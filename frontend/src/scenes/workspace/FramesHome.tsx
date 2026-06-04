@@ -38,6 +38,7 @@ import { newFrameForm } from '../frames/newFrameForm'
 import { frameLogic } from '../frame/frameLogic'
 import { panelsLogic } from '../frame/panels/panelsLogic'
 import { CompiledSceneTag } from '../frame/panels/Scenes/CompiledSceneTag'
+import { controlLogic } from '../frame/panels/Scenes/controlLogic'
 import { ExpandedScene } from '../frame/panels/Scenes/ExpandedScene'
 import { EditTemplateModal } from '../frame/panels/Templates/EditTemplateModal'
 import { Templates } from '../frame/panels/Templates/Templates'
@@ -644,21 +645,85 @@ function FrameSectionGroup({
 
 export function SceneControlPanel(): JSX.Element | null {
   const { sceneControlSelection } = useValues(workspaceLogic)
-  const { frames } = useValues(framesModel)
-  const { closeSceneControl } = useActions(workspaceLogic)
 
   if (!sceneControlSelection) {
     return null
   }
 
-  const frame = frames[sceneControlSelection.frameId]
-  const scene = frame?.scenes?.find((candidate) => candidate.id === sceneControlSelection.sceneId)
+  return <SceneControlPanelContent sceneControlSelection={sceneControlSelection} />
+}
 
-  if (!frame || !scene) {
+function resolveSceneControlSelection(
+  frame: FrameType,
+  sceneId: string,
+  uploadedScenes: FrameScene[]
+): { scene: FrameScene | null; sceneId: string; saved: boolean } {
+  const uploadedSceneId = sceneId.startsWith(uploadedScenePrefix) ? sceneId.slice(uploadedScenePrefix.length) : null
+  const savedScene =
+    frame.scenes?.find((candidate) => candidate.id === sceneId) ??
+    (uploadedSceneId ? frame.scenes?.find((candidate) => candidate.id === uploadedSceneId) : null)
+
+  if (savedScene) {
+    return { scene: savedScene, sceneId: savedScene.id, saved: true }
+  }
+
+  const uploadedScene = uploadedSceneId
+    ? uploadedScenes.find((candidate) => candidate.id === uploadedSceneId) ?? null
+    : uploadedScenes.find((candidate) => candidate.id === sceneId) ?? null
+
+  return { scene: uploadedScene, sceneId, saved: false }
+}
+
+function SceneControlPanelContent({
+  sceneControlSelection,
+}: {
+  sceneControlSelection: { frameId: number; sceneId: string }
+}): JSX.Element | null {
+  const { frames } = useValues(framesModel)
+  const { closeSceneControl } = useActions(workspaceLogic)
+  const frame = frames[sceneControlSelection.frameId]
+  const { sceneId: currentSceneId, uploadedScenes, uploadedScenesLoading } = useValues(
+    controlLogic({ frameId: sceneControlSelection.frameId })
+  )
+
+  if (!frame) {
     return null
   }
 
+  const { scene, sceneId, saved } = resolveSceneControlSelection(frame, sceneControlSelection.sceneId, uploadedScenes)
+
+  if (!scene) {
+    return (
+      <div className="workspace-drawer frameos-drawer fixed bottom-5 right-5 top-5 z-40 w-[390px] overflow-hidden rounded-[24px] border border-white/80 bg-white/95 shadow-2xl shadow-slate-500/30 backdrop-blur-xl">
+        <div className="flex h-full flex-col">
+          <div className="frameos-divider flex items-start justify-between gap-3 border-b border-slate-200/80 px-5 py-4">
+            <div className="min-w-0">
+              <div className="frameos-muted text-xs font-semibold uppercase tracking-wide text-slate-400">
+                {frame.name || frameHost(frame)}
+              </div>
+              <h2 className="frameos-strong truncate text-xl font-bold tracking-normal text-slate-950">
+                Active scene
+              </h2>
+            </div>
+            <button
+              type="button"
+              onClick={closeSceneControl}
+              className="frameos-icon-button flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            >
+              <XMarkIcon className="h-6 w-6" />
+            </button>
+          </div>
+          <div className="frameos-muted px-5 py-4 text-sm">
+            {uploadedScenesLoading ? 'Loading active scene...' : 'The active scene is not available.'}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   const frameLogicProps = { frameId: frame.id }
+  const selectedSceneIsActive = sceneIsActive(scene, currentSceneId)
+
   return (
     <div className="workspace-drawer frameos-drawer fixed bottom-5 right-5 top-5 z-40 w-[390px] overflow-hidden rounded-[24px] border border-white/80 bg-white/95 shadow-2xl shadow-slate-500/30 backdrop-blur-xl">
       <BindLogic logic={frameLogic} props={frameLogicProps}>
@@ -670,7 +735,7 @@ export function SceneControlPanel(): JSX.Element | null {
                   {frame.name || frameHost(frame)}
                 </div>
                 <h2 className="frameos-strong truncate text-xl font-bold tracking-normal text-slate-950">
-                  {scene.name}
+                  {scene.name || 'Active scene'}
                 </h2>
               </div>
               <button
@@ -697,33 +762,46 @@ export function SceneControlPanel(): JSX.Element | null {
                   className="h-full w-full"
                   imageClassName="h-full w-full rounded-md object-contain"
                 />
-                <FrameImageRefreshButton frameId={frame.id} sceneId={scene.id} />
+                {selectedSceneIsActive ? <FrameImageRefreshButton frameId={frame.id} sceneId={scene.id} /> : null}
                 {scene.settings?.execution !== 'interpreted' ? (
                   <div className="absolute left-2 top-10 z-10">
                     <CompiledSceneTag className="!bg-white/95 !border-slate-500/45 !text-slate-700 shadow-sm backdrop-blur-sm" />
                   </div>
                 ) : null}
+                {!saved ? (
+                  <div className="absolute left-2 top-2 z-10 rounded-full bg-orange-500 px-2 py-0.5 text-[11px] font-semibold text-white shadow-sm">
+                    Not saved
+                  </div>
+                ) : null}
               </div>
-              <div className="mb-4 flex flex-wrap gap-2">
-                <WorkspaceSceneDropDown
-                  frame={frame}
-                  scene={scene}
-                  scenes={frame.scenes ?? [scene]}
-                  horizontal
-                  buttonColor="none"
-                  className="frameos-secondary-button flex h-10 w-10 shrink-0 items-center justify-center rounded-lg !px-0 !py-0 text-slate-600 shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-                />
-                <A
-                  href={urls.scenes(frame.id, scene.id)}
-                  className="frameos-secondary-button flex flex-1 items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-                >
-                  <PencilSquareIcon className="h-5 w-5" />
-                  Open editor
-                </A>
-                <DeleteInstalledSceneButton frame={frame} scene={scene} />
-              </div>
+              {saved ? (
+                <div className="mb-4 flex flex-wrap gap-2">
+                  <WorkspaceSceneDropDown
+                    frame={frame}
+                    scene={scene}
+                    scenes={frame.scenes ?? [scene]}
+                    horizontal
+                    buttonColor="none"
+                    className="frameos-secondary-button flex h-10 w-10 shrink-0 items-center justify-center rounded-lg !px-0 !py-0 text-slate-600 shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                  />
+                  <A
+                    href={urls.scenes(frame.id, scene.id)}
+                    className="frameos-secondary-button flex flex-1 items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                  >
+                    <PencilSquareIcon className="h-5 w-5" />
+                    Open editor
+                  </A>
+                  <DeleteInstalledSceneButton frame={frame} scene={scene} />
+                </div>
+              ) : null}
               <SceneControlPanelModeTitle />
-              <ExpandedScene frameId={frame.id} sceneId={scene.id} scene={scene} showEditButton={false} />
+              <ExpandedScene
+                frameId={frame.id}
+                sceneId={sceneId}
+                scene={scene}
+                showEditButton={false}
+                isUndeployed={!saved}
+              />
             </div>
           </div>
         </BindLogic>

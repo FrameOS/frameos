@@ -98,6 +98,9 @@ async def test_process_log_bootup(mock_pub, db, redis):
             "width": 200,
             "height": 300,
             "color": "monochrome",
+            "config": {
+                "timeZone": "Custom/Zone",
+            },
         },
     ])
     updated = db.get(Frame, frame.id)
@@ -105,6 +108,31 @@ async def test_process_log_bootup(mock_pub, db, redis):
     assert updated.width == 200
     assert updated.height == 300
     assert updated.color == "monochrome"
+    assert updated.timezone == "Custom/Zone"
+
+
+@pytest.mark.asyncio
+@patch("app.models.log.publish_message", new_callable=AsyncMock)
+async def test_process_log_bootup_does_not_override_stored_timezone(mock_pub, db, redis):
+    frame = await new_frame(db, redis, "BootFrame", "localhost", "server_host")
+    frame.timezone = "Europe/Brussels"
+    db.add(frame)
+    db.commit()
+
+    await process_log(
+        db,
+        redis,
+        frame,
+        {
+            "event": "bootup",
+            "config": {
+                "timeZone": "America/New_York",
+            },
+        },
+    )
+
+    updated = db.get(Frame, frame.id)
+    assert updated.timezone == "Europe/Brussels"
 
 
 @pytest.mark.asyncio

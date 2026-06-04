@@ -6,6 +6,7 @@ from app.database import Base
 from sqlalchemy.dialects.sqlite import JSON
 from app.utils.timezone import guess_system_timezone
 
+
 class Settings(Base):
     __tablename__ = 'settings'
     __table_args__ = (UniqueConstraint("project_id", "key", name="uq_settings_project_key"),)

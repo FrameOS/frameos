@@ -46,6 +46,7 @@ from app.database import SessionLocal, get_db
 from arq import ArqRedis as Redis
 from app.models.frame import (
     Frame,
+    compact_timezone_updater,
     new_frame,
     delete_frame,
     normalize_error_behavior,
@@ -112,7 +113,7 @@ from app.ws.agent_ws import (
 from app.models.assets import copy_custom_fonts_to_local_source_folder
 from app.models.settings import get_settings_dict
 from app.utils.ssh_key_utils import default_ssh_key_ids
-from app.utils.timezone import frame_timezone, normalize_timezone
+from app.utils.timezone import frame_timezone, normalize_timezone, stored_timezone
 from app.utils.tls import generate_frame_tls_material, parse_certificate_not_valid_after
 from app.utils.ssh_authorized_keys import _install_authorized_keys, resolve_authorized_keys_update
 from app.tasks.binary_builder import FrameBinaryBuilder
@@ -190,6 +191,17 @@ async def _public_project_frame(
 
 def _bad_request(msg: str):
     raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=msg)
+
+
+def _task_id_param(task_id: str | None) -> str | None:
+    if task_id is None:
+        return None
+    value = task_id.strip()
+    if not value:
+        return None
+    if len(value) > 120 or not re.fullmatch(r"[A-Za-z0-9_.:-]+", value):
+        _bad_request("Invalid task_id")
+    return value
 
 
 def _frame_assets_cache_key(frame_id: int, assets_path: str) -> str:
@@ -463,11 +475,16 @@ async def _wait_for_cached_frame_image(redis: Redis, cache_key: str) -> bytes | 
     return await _get_cached_frame_image(redis, cache_key)
 
 
-def _frame_image_placeholder(frame: Frame) -> bytes:
+def _frame_image_dimensions(frame: Frame) -> tuple[int, int]:
     width = int(frame.width or 800)
     height = int(frame.height or 600)
     if frame.rotate in (90, 270):
         width, height = height, width
+    return width, height
+
+
+def _frame_image_placeholder(frame: Frame) -> bytes:
+    width, height = _frame_image_dimensions(frame)
     return render_line_of_text_png("no image", width, height)
 
 
@@ -476,6 +493,19 @@ def _frame_image_placeholder_response(frame: Frame) -> Response:
         content=_frame_image_placeholder(frame),
         media_type="image/png",
         headers=FRAME_IMAGE_PLACEHOLDER_HEADERS,
+    )
+
+
+def _frame_image_error_response(frame: Frame, detail: str, status_code: int | None = None) -> Response:
+    width, height = _frame_image_dimensions(frame)
+    headers = {
+        "x-frameos-image-state": "error",
+        **({"x-frameos-image-error-status": str(status_code)} if status_code else {}),
+    }
+    return Response(
+        content=render_line_of_text_png(detail or "image error", width, height),
+        media_type="image/png",
+        headers=headers,
     )
 
 
@@ -1803,7 +1833,7 @@ async def api_frame_get_image(
                     "stderr",
                     f"Error fetching image from frame {id}: {status} {body.decode(errors='ignore')}",
                 )
-                raise HTTPException(status_code=status, detail="Unable to fetch image")
+                return _frame_image_error_response(frame, "Unable to fetch image", status)
 
         except httpx.ReadTimeout:
             if cached:
@@ -1815,13 +1845,18 @@ async def api_frame_get_image(
                 "stderr",
                 f"Error fetching image from frame {id}: request timeout",
             )
-            raise HTTPException(
-                status_code=HTTPStatus.REQUEST_TIMEOUT, detail="Request Timeout"
-            )
-        except HTTPException:
+            return _frame_image_error_response(frame, "Request Timeout", HTTPStatus.REQUEST_TIMEOUT)
+        except HTTPException as exc:
             if cached:
                 return Response(content=cached, media_type="image/png")
-            raise
+            await log(
+                db,
+                redis,
+                id,
+                "stderr",
+                f"Error fetching image from frame {id}: {exc.status_code}: {exc.detail}",
+            )
+            return _frame_image_error_response(frame, str(exc.detail), exc.status_code)
         except Exception as e:
             if cached:
                 return Response(content=cached, media_type="image/png")
@@ -1832,9 +1867,7 @@ async def api_frame_get_image(
                 "stderr",
                 f"Error fetching image from frame {id}: {str(e)}",
             )
-            raise HTTPException(
-                status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e)
-            )
+            return _frame_image_error_response(frame, str(e), HTTPStatus.INTERNAL_SERVER_ERROR)
         finally:
             if refresh_lock_acquired:
                 with contextlib.suppress(Exception):
@@ -2353,15 +2386,17 @@ async def api_frame_stop_event(
 @api_project.post("/frames/{id:int}/deploy")
 async def api_frame_deploy_event(
     id: int,
+    task_id: str | None = Query(None),
     redis: Redis = Depends(get_redis),
     db: Session = Depends(get_db),
 ):
     frame = _project_frame(db, id) or _not_found()
+    deploy_task_id = _task_id_param(task_id)
     try:
         from app.tasks import deploy_frame
 
-        await deploy_frame(frame.id, redis)
-        return "Success"
+        await deploy_frame(frame.id, redis, task_id=deploy_task_id)
+        return {"message": "Success", "taskId": deploy_task_id}
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
@@ -2556,15 +2591,17 @@ async def api_frame_deploy_plan_preview(
 @api_project.post("/frames/{id:int}/fast_deploy")
 async def api_frame_fast_deploy_event(
     id: int,
+    task_id: str | None = Query(None),
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
     _project_frame(db, id)
+    deploy_task_id = _task_id_param(task_id)
     try:
         from app.tasks import fast_deploy_frame
 
-        await fast_deploy_frame(id, redis)
-        return "Success"
+        await fast_deploy_frame(id, redis, task_id=deploy_task_id)
+        return {"message": "Success", "taskId": deploy_task_id}
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
@@ -2653,10 +2690,9 @@ async def api_frame_update_endpoint(
         setattr(frame, field, value)
 
     if "timezone" in update_data:
-        frame.timezone = normalize_timezone(frame.timezone) or None
-
-    if frame.mode != "buildroot":
-        frame.timezone = None
+        frame.timezone = stored_timezone(frame.timezone) or None
+    if "timezone_updater" in update_data:
+        frame.timezone_updater = compact_timezone_updater(frame.timezone_updater)
 
     if "https_proxy" in update_data:
         frame.https_proxy = normalize_https_proxy(frame.https_proxy)
@@ -2767,6 +2803,7 @@ async def api_frame_new(
             db.commit()
             db.refresh(frame)
         else:
+            frame.timezone = normalize_timezone(data.timezone) or None
             rpios_settings = {**(frame.rpios or {})}
             rpios_settings["platform"] = data.platform or (frame.rpios or {}).get('platform') or ''
             frame.rpios = rpios_settings

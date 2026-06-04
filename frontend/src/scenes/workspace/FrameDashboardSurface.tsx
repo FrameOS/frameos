@@ -40,7 +40,9 @@ import { sceneTileSummaryLabel } from './sceneTileLabels'
 import { workspaceLogic } from './workspaceLogic'
 
 const uploadedScenePrefix = 'uploaded/'
+const livePreviewSceneId = '__live_preview__'
 const activeSurfaceClassName = 'frameos-active-surface'
+const selectedSurfaceClassName = 'frameos-selected-surface'
 const sceneTileWidthRem = 9
 const sceneTileGapRem = 1
 const framePreviewMaxHeightRem = 32
@@ -66,7 +68,11 @@ interface FrameDashboardSurfaceProps {
 }
 
 export function sceneIsActive(scene: FrameScene, currentSceneId: string | null | undefined): boolean {
-  return currentSceneId === scene.id || currentSceneId === `${uploadedScenePrefix}${scene.id}`
+  return sceneIdIsActive(scene.id, currentSceneId)
+}
+
+function sceneIdIsActive(sceneId: string, currentSceneId: string | null | undefined): boolean {
+  return currentSceneId === sceneId || currentSceneId === `${uploadedScenePrefix}${sceneId}`
 }
 
 function frameDisplayDimensions(frame: FrameType): { width: number; height: number } | null {
@@ -180,19 +186,37 @@ function scheduleDatePrefix(date: Date, now = new Date()): string {
 }
 
 function FramePreviewPanel({ frame, scenes }: { frame: FrameType; scenes: FrameScene[] }): JSX.Element {
+  const { sceneControlSelection } = useValues(workspaceLogic)
+  const { openLiveSceneControl } = useActions(workspaceLogic)
   const previewSizing = framePreviewSizing(frame)
-  const activeScene = scenes.find((scene) => sceneIsActive(scene, frame.active_scene_id))
+  const activeSceneId = frame.active_scene_id || null
+  const liveSceneControlId = activeSceneId || livePreviewSceneId
+  const activeScene = scenes.find((scene) => sceneIsActive(scene, activeSceneId))
+  const previewSelected =
+    sceneControlSelection?.frameId === frame.id &&
+    (activeSceneId
+      ? sceneIdIsActive(sceneControlSelection.sceneId, activeSceneId)
+      : sceneControlSelection.sceneId === livePreviewSceneId) &&
+    sceneControlSelection.source === 'preview'
   const nextSchedule = nextScheduledEvent(frame.schedule)
   const scheduledScene = nextSchedule ? scenes.find((scene) => scene.id === nextSchedule.event.payload.sceneId) : null
 
   return (
     <div
-      className="frameos-card group relative w-full min-w-0 justify-self-start overflow-hidden rounded-lg border border-white/90 bg-white text-left shadow-xl shadow-slate-300/35 transition hover:-translate-y-0.5 hover:shadow-2xl hover:shadow-slate-300/45"
+      className={clsx(
+        'frameos-card group relative w-full min-w-0 justify-self-start overflow-hidden rounded-lg border bg-white text-left transition hover:-translate-y-0.5',
+        previewSelected
+          ? selectedSurfaceClassName
+          : 'border-white/90 shadow-xl shadow-slate-300/35 hover:shadow-2xl hover:shadow-slate-300/45'
+      )}
       style={previewSizing?.cardStyle ?? { maxWidth: `${framePreviewMaxWidthRem}rem` }}
     >
-      <A
-        href={urls.frame(frame.id, 'preview')}
-        className="block focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+      <button
+        type="button"
+        onClick={() => {
+          openLiveSceneControl(frame.id, liveSceneControlId)
+        }}
+        className="block w-full focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
       >
         <div
           className={clsx(
@@ -209,7 +233,7 @@ function FramePreviewPanel({ frame, scenes }: { frame: FrameType; scenes: FrameS
           />
           <FrameLiveBadge frame={frame} className="right-3 top-3" />
         </div>
-      </A>
+      </button>
       <FrameImageRefreshButton frameId={frame.id} />
       <div className="frameos-divider border-t border-slate-200/80 px-3 py-3">
         <div className="min-w-0 text-sm">
@@ -361,7 +385,7 @@ function FrameSceneTile({
       className={clsx(
         'frameos-card group relative h-36 w-36 shrink-0 overflow-hidden rounded-lg border bg-white text-left transition hover:-translate-y-0.5 focus-within:ring-2 focus-within:ring-blue-400',
         highlighted
-          ? activeSurfaceClassName
+          ? selectedSurfaceClassName
           : 'border-white/90 shadow-lg shadow-slate-300/35 hover:shadow-xl hover:shadow-slate-300/50'
       )}
     >
@@ -524,7 +548,10 @@ function FrameScenesBlock({
         <div className="flex flex-wrap gap-4">
           {scenes.map((scene) => {
             const active = sceneIsActive(scene, frame.active_scene_id)
-            const selected = sceneControlSelection?.frameId === frame.id && sceneControlSelection.sceneId === scene.id
+            const selected =
+              sceneControlSelection?.frameId === frame.id &&
+              sceneControlSelection.sceneId === scene.id &&
+              sceneControlSelection.source !== 'preview'
             return (
               <FrameSceneTile
                 key={scene.id}
@@ -532,7 +559,7 @@ function FrameScenesBlock({
                 scene={scene}
                 scenes={scenes}
                 active={active}
-                highlighted={active || selected}
+                highlighted={selected}
                 showMenu={showSceneMenus}
               />
             )

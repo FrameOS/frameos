@@ -16,6 +16,7 @@ const sceneLoaders = {
   settings: () => import('./settings/Settings'),
   login: () => import('./login/Login'),
   signup: () => import('./signup/Signup'),
+  setupUnavailable: () => import('./auth/SetupUnavailable'),
 }
 
 export type LoadableSceneKey = keyof typeof sceneLoaders
@@ -83,4 +84,5 @@ export const getRoutes = () =>
     [urls.settings()]: 'settings',
     [urls.login()]: 'login',
     [urls.signup()]: 'signup',
+    [urls.setupUnavailable()]: 'setupUnavailable',
   } as const)

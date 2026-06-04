@@ -38,6 +38,7 @@ async def test_new_frame(mock_publish, db, redis):
     assert frame.max_http_response_bytes == 64 * 1024 * 1024
     assert frame.reboot == {"enabled": "true", "crontab": "0 4 * * *"}
     assert frame.server_send_logs is True
+    assert frame.timezone_updater is None
     assert frame.https_proxy["enable"] is True
     assert frame.https_proxy["expose_only_port"] is True
     assert frame.https_proxy["certs"]["server"] and "BEGIN CERTIFICATE" in frame.https_proxy["certs"]["server"]
@@ -248,7 +249,7 @@ async def test_get_frame_json_uses_frame_timezone_or_global_default(_mock_publis
 
 @pytest.mark.asyncio
 @patch("app.models.frame.publish_message", new_callable=AsyncMock)
-async def test_get_frame_json_does_not_set_timezone_for_rpios(_mock_publish, db, redis):
+async def test_get_frame_json_uses_explicit_timezone_for_rpios(_mock_publish, db, redis):
     frame = await new_frame(db, redis, "FrameJson", "host", "server_host.com")
     db.add(Settings(project_id=frame.project_id, key="defaults", value={"timezone": "Europe/Brussels"}))
     db.commit()
@@ -257,7 +258,68 @@ async def test_get_frame_json_does_not_set_timezone_for_rpios(_mock_publish, db,
 
     data = get_frame_json(db, frame)
 
+    assert data["timeZone"] == "America/New_York"
+
+
+@pytest.mark.asyncio
+@patch("app.models.frame.publish_message", new_callable=AsyncMock)
+async def test_get_frame_json_does_not_default_timezone_for_rpios(_mock_publish, db, redis):
+    frame = await new_frame(db, redis, "FrameJson", "host", "server_host.com")
+    db.add(Settings(project_id=frame.project_id, key="defaults", value={"timezone": "Europe/Brussels"}))
+    db.commit()
+    frame.mode = "rpios"
+    frame.timezone = None
+
+    data = get_frame_json(db, frame)
+
     assert "timeZone" not in data
+
+
+@pytest.mark.asyncio
+@patch("app.models.frame.publish_message", new_callable=AsyncMock)
+async def test_get_frame_json_preserves_unknown_explicit_timezone_for_rpios(_mock_publish, db, redis):
+    frame = await new_frame(db, redis, "FrameJson", "host", "server_host.com")
+    frame.mode = "rpios"
+    frame.timezone = "Custom/Zone"
+
+    data = get_frame_json(db, frame)
+
+    assert data["timeZone"] == "Custom/Zone"
+
+
+@pytest.mark.asyncio
+@patch("app.models.frame.publish_message", new_callable=AsyncMock)
+async def test_get_frame_json_includes_timezone_updater(_mock_publish, db, redis):
+    frame = await new_frame(db, redis, "FrameJson", "host", "server_host.com")
+    db.commit()
+    frame.timezone_updater = {
+        "enabled": False,
+        "hour": 5,
+        "url": "https://example.com/tzdata.json.gz",
+    }
+
+    data = get_frame_json(db, frame)
+
+    assert data["timeZoneUpdates"] == {
+        "enabled": False,
+        "hour": 5,
+        "url": "https://example.com/tzdata.json.gz",
+    }
+
+
+@pytest.mark.asyncio
+@patch("app.models.frame.publish_message", new_callable=AsyncMock)
+async def test_get_frame_json_resolves_default_timezone_updater(_mock_publish, db, redis):
+    frame = await new_frame(db, redis, "FrameJson", "host", "server_host.com")
+    db.commit()
+
+    data = get_frame_json(db, frame)
+
+    assert data["timeZoneUpdates"] == {
+        "enabled": True,
+        "hour": 3,
+        "url": "https://tz.frameos.net/tzdata.json.gz",
+    }
 
 
 def test_normalize_frame_admin_auth_keeps_password_whitespace():

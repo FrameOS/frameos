@@ -382,6 +382,15 @@ body.frameos-workspace-scroll-locked {
   box-shadow: 0 0 4px 4px var(--frameos-primary-ring);
 }
 
+.frameos-selected-surface {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgb(69 127 252 / 0.9);
+}
+
+.frameos-selected-surface:hover {
+  box-shadow: 0 0 0 3px rgb(69 127 252 / 0.9);
+}
+
 .frameos-theme-dark .frameos-add-scene-tile.frameos-active-surface {
   background: var(--frameos-primary-soft);
   border-color: var(--frameos-primary-border-strong);
@@ -442,6 +451,10 @@ html[data-frameos-theme='dark'] .frameos-spinner,
 .frameos-app-shell .focus\:ring-blue-500:focus,
 .frameos-auth-screen .focus\:ring-blue-500:focus {
   --tw-ring-color: var(--frameos-primary-ring);
+}
+
+.frameos-app-shell .frameos-selected-surface.focus-within\:ring-blue-400:focus-within {
+  --tw-ring-color: rgb(37 99 235 / 0.9);
 }
 
 .frameos-app-shell .focus\:border-blue-400:focus,

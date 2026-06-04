@@ -408,6 +408,9 @@ export function attachFrontendErrorCollector(page: Page): () => string[] {
     if (/favicon\.ico/i.test(text)) {
       return
     }
+    if (/^Failed to load resource: the server responded with a status of (?:401|403) \((?:Unauthorized|Forbidden)\)$/.test(text)) {
+      return
+    }
     if (/TypeError: Failed to fetch[\s\S]*\bat sync\b/.test(text)) {
       return
     }

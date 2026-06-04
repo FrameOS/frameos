@@ -156,6 +156,11 @@ proc start*(self: FrameOS) {.async.} =
     "logToFile": self.frameConfig.logToFile,
     "debug": self.frameConfig.debug,
     "timeZone": self.frameConfig.timeZone,
+    "timeZoneUpdates": {
+      "enabled": self.frameConfig.timeZoneUpdates.enabled,
+      "hour": self.frameConfig.timeZoneUpdates.hour,
+      "url": self.frameConfig.timeZoneUpdates.url,
+    },
     "gpioButtons": self.frameConfig.gpioButtons,
     "errorBehavior": {
       "mode": self.frameConfig.errorBehavior.mode,
