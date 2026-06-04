@@ -228,7 +228,7 @@ def test_buildroot_partition_scripts_create_frameos_and_assets_partitions(tmp_pa
     assert "raspberrypi,model-zero-2-2" in post_build
     assert "image frameos.ext4" in post_image
     assert "image assets.vfat" in post_image
-    assert "size = 100M" in post_image
+    assert "size = 30M" in post_image
     assert 'rootfs_image="${BINARIES_DIR:?BINARIES_DIR is required}/rootfs.ext4"' in post_image
     assert 'resize2fs -M "$rootfs_image"' in post_image
     assert "console=tty1" in post_image
@@ -256,6 +256,7 @@ def test_buildroot_expand_sd_card_service_runs_before_local_mounts():
     assert "small_card_threshold_sectors=$((4 * 1024 * 1024 * 1024 / sector_size))" in script
     assert "small_frameos_sectors=$((1 * 1024 * 1024 * 1024 / sector_size))" in script
     assert "large_frameos_sectors=$((2 * 1024 * 1024 * 1024 / sector_size))" in script
+    assert "chunk_sectors=$((4 * 1024 * 1024 / sector_size))" in script
     assert 'move_partition_data "FRAMEOS" "$p3_start" "$frameos_start" "$p3_size"' in script
     assert 'echo "New root start/size: $p2_start/$target_root_size sectors"' in script
     assert '$(partition_device "$disk" 2) : start= $p2_start, size= $target_root_size, type=83' in script
@@ -445,8 +446,8 @@ async def test_precompiled_sd_image_shortcut_patches_boot_only(tmp_path, monkeyp
         lambda _path: [
             {"start": 512, "size": 32 * 1024 * 1024},
             {"start": 33554944, "size": 768 * 1024 * 1024},
-            {"start": 838861312, "size": 512 * 1024 * 1024},
-            {"start": 1375732224, "size": 512 * 1024 * 1024},
+            {"start": 838861312, "size": 30 * 1024 * 1024},
+            {"start": 870318080, "size": 30 * 1024 * 1024},
         ],
     )
     monkeypatch.setattr("app.tasks.buildroot_image._replace_partition", fail_replace_partition)
@@ -473,6 +474,83 @@ async def test_precompiled_sd_image_shortcut_patches_boot_only(tmp_path, monkeyp
     assert "managed_boot_files=(" in captured["patch_script"]
     assert "frameos-wifi.nmconnection" in captured["patch_script"]
     assert 'mdel -i "$target"' in captured["patch_script"]
+
+
+def _write_test_mbr(path: Path, partitions: list[tuple[int, int]]) -> None:
+    mbr = bytearray(512)
+    mbr[510:512] = b"\x55\xaa"
+    for index, (start, size) in enumerate(partitions):
+        entry = 446 + index * 16
+        mbr[entry] = 0x80 if index == 0 else 0
+        mbr[entry + 4] = 0x0C if index in (0, 3) else 0x83
+        mbr[entry + 8 : entry + 12] = (start // 512).to_bytes(4, "little")
+        mbr[entry + 12 : entry + 16] = (size // 512).to_bytes(4, "little")
+    path.write_bytes(bytes(mbr))
+
+
+def test_shrink_data_partitions_rewrites_mbr_and_truncates_image(tmp_path):
+    image = tmp_path / "base.img"
+    frameos = tmp_path / "frameos.ext4"
+    assets = tmp_path / "assets.vfat"
+    partitions = [
+        (512, 32 * 1024 * 1024),
+        (32 * 1024 * 1024 + 512, 160 * 1024 * 1024),
+        (192 * 1024 * 1024 + 512, 100 * 1024 * 1024),
+        (292 * 1024 * 1024 + 512, 100 * 1024 * 1024),
+    ]
+    _write_test_mbr(image, partitions)
+    with image.open("r+b") as image_file:
+        image_file.truncate(partitions[-1][0] + partitions[-1][1])
+    frameos.write_bytes(b"\0" * (30 * 1024 * 1024))
+    assets.write_bytes(b"\0" * (30 * 1024 * 1024))
+
+    shrunk = buildroot_image_module._shrink_data_partitions(
+        image,
+        buildroot_image_module._mbr_partitions(image),
+        frameos_image=frameos,
+        assets_image=assets,
+    )
+
+    assert shrunk[2] == {"start": partitions[2][0], "size": 30 * 1024 * 1024}
+    expected_assets_start = buildroot_image_module._align_up_bytes(partitions[2][0] + 30 * 1024 * 1024)
+    assert shrunk[3] == {
+        "start": expected_assets_start,
+        "size": 30 * 1024 * 1024,
+    }
+    assert image.stat().st_size == shrunk[3]["start"] + shrunk[3]["size"]
+
+
+@pytest.mark.asyncio
+async def test_precompiled_sd_image_rejects_larger_data_partitions(tmp_path, monkeypatch):
+    release_image = tmp_path / "release.img"
+    output_image = tmp_path / "output.img"
+    boot_overlay = tmp_path / "tmp" / "overlay" / "boot"
+    boot_overlay.mkdir(parents=True)
+    (boot_overlay / "frameos-setup.json").write_text("{}", encoding="utf-8")
+    partitions = [
+        (512, 32 * 1024 * 1024),
+        (32 * 1024 * 1024 + 512, 160 * 1024 * 1024),
+        (192 * 1024 * 1024 + 512, 100 * 1024 * 1024),
+        (292 * 1024 * 1024 + 512, 100 * 1024 * 1024),
+    ]
+    _write_test_mbr(release_image, partitions)
+    with release_image.open("r+b") as image_file:
+        image_file.truncate(partitions[-1][0] + partitions[-1][1])
+
+    builder = BuildrootImageBuilder(db=object(), redis=None, frame=SimpleNamespace(id=1))
+
+    async def fake_log(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(builder, "_log", fake_log)
+
+    with pytest.raises(RuntimeError, match="larger data partitions"):
+        await builder._compose_sd_image_from_precompiled_release(
+            temp_dir=tmp_path / "tmp",
+            release_image_path=release_image,
+            output_path=output_image,
+            image=None,
+        )
 
 
 @pytest.mark.asyncio
@@ -557,6 +635,9 @@ async def test_cached_base_composer_uses_container_visible_srcpaths(tmp_path, mo
     def fake_replace_partition(_image_path, _partitions, partition_number, partition_image):
         replaced.append((partition_number, partition_image.name))
 
+    def fake_shrink_data_partitions(_image_path, partitions, **_kwargs):
+        return partitions
+
     monkeypatch.setattr("app.tasks.buildroot_image.exec_local_command", fake_exec_local_command)
     monkeypatch.setattr(
         "app.tasks.buildroot_image._mbr_partitions",
@@ -567,6 +648,7 @@ async def test_cached_base_composer_uses_container_visible_srcpaths(tmp_path, mo
             {"start": 1375732224, "size": 512 * 1024 * 1024},
         ],
     )
+    monkeypatch.setattr("app.tasks.buildroot_image._shrink_data_partitions", fake_shrink_data_partitions)
     monkeypatch.setattr("app.tasks.buildroot_image._replace_partition", fake_replace_partition)
     monkeypatch.setattr(builder, "_log", fake_log)
 
@@ -636,6 +718,9 @@ async def test_cached_base_composer_runs_without_docker_when_image_is_not_requir
     def fake_replace_partition(_image_path, _partitions, partition_number, partition_image):
         replaced.append((partition_number, partition_image.name))
 
+    def fake_shrink_data_partitions(_image_path, partitions, **_kwargs):
+        return partitions
+
     monkeypatch.setattr("app.tasks.buildroot_image.exec_local_command", fake_exec_local_command)
     monkeypatch.setattr(
         "app.tasks.buildroot_image._mbr_partitions",
@@ -646,6 +731,7 @@ async def test_cached_base_composer_runs_without_docker_when_image_is_not_requir
             {"start": 1375732224, "size": 512 * 1024 * 1024},
         ],
     )
+    monkeypatch.setattr("app.tasks.buildroot_image._shrink_data_partitions", fake_shrink_data_partitions)
     monkeypatch.setattr("app.tasks.buildroot_image._replace_partition", fake_replace_partition)
     monkeypatch.setattr(builder, "_log", fake_log)
 
