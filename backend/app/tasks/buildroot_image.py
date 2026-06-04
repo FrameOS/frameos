@@ -63,9 +63,9 @@ BUILDROOT_HOST_CXXFLAGS = "-O2 -pipe -std=gnu++17"
 BUILDROOT_HOST_CFLAGS = "-O2 -pipe"
 BUILDROOT_JLEVEL = int(os.environ.get("FRAMEOS_BUILDROOT_JLEVEL", "0"))
 BUILDROOT_BOOTSTRAP_SCRIPT_VERSION = "5"
-BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION = 13
-BUILDROOT_FRAMEOS_PARTITION_SIZE = os.environ.get("FRAMEOS_BUILDROOT_FRAMEOS_PARTITION_SIZE", "1G")
-BUILDROOT_ASSETS_PARTITION_SIZE = os.environ.get("FRAMEOS_BUILDROOT_ASSETS_PARTITION_SIZE", "512M")
+BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION = 14
+BUILDROOT_FRAMEOS_PARTITION_SIZE = os.environ.get("FRAMEOS_BUILDROOT_FRAMEOS_PARTITION_SIZE", "100M")
+BUILDROOT_ASSETS_PARTITION_SIZE = os.environ.get("FRAMEOS_BUILDROOT_ASSETS_PARTITION_SIZE", "100M")
 BUILDROOT_LOCAL_FONTS_DIR = REPO_ROOT / "frameos" / "assets" / "copied" / "fonts"
 BUILDROOT_LOCAL_FONT_EXTENSIONS = {".ttf", ".txt", ".md"}
 BUILDROOT_ARCHIVE_BASE_URL = os.environ.get("FRAMEOS_ARCHIVE_BASE_URL", "https://archive.frameos.net/")
@@ -2165,6 +2165,12 @@ with open(path, "w", encoding="utf-8") as handle:
 PY
 fi
 
+rootfs_image="${{BINARIES_DIR:?BINARIES_DIR is required}}/rootfs.ext4"
+if [ -f "$rootfs_image" ]; then
+  e2fsck -fy "$rootfs_image"
+  resize2fs -M "$rootfs_image"
+fi
+
 files=()
 for candidate in "${{BINARIES_DIR}}"/*.dtb "${{BINARIES_DIR}}"/rpi-firmware/*; do
   if [ -e "$candidate" ]; then
@@ -2262,6 +2268,7 @@ sector_size="${FRAMEOS_EXPAND_SECTOR_SIZE:-512}"
 align_sectors=$((1024 * 1024 / sector_size))
 align_offset=0
 small_card_threshold_sectors=$((4 * 1024 * 1024 * 1024 / sector_size))
+root_target_sectors=$((1 * 1024 * 1024 * 1024 / sector_size))
 small_frameos_sectors=$((1 * 1024 * 1024 * 1024 / sector_size))
 large_frameos_sectors=$((2 * 1024 * 1024 * 1024 / sector_size))
 
@@ -2286,6 +2293,62 @@ align_down() {
   value="$1"
   adjusted=$((value - align_offset))
   printf '%s\\n' $((adjusted / align_sectors * align_sectors + align_offset))
+}
+
+align_up() {
+  value="$1"
+  adjusted=$((value - align_offset))
+  printf '%s\\n' $(((adjusted + align_sectors - 1) / align_sectors * align_sectors + align_offset))
+}
+
+copy_chunk() {
+  src="$1"
+  dst="$2"
+  count="$3"
+  if dd if="$disk" of="$disk" bs="$sector_size" skip="$src" seek="$dst" count="$count" conv=notrunc status=none 2>/dev/null; then
+    return 0
+  fi
+  dd if="$disk" of="$disk" bs="$sector_size" skip="$src" seek="$dst" count="$count" conv=notrunc >/dev/null 2>&1
+}
+
+move_partition_data() {
+  name="$1"
+  old_start="$2"
+  new_start="$3"
+  sectors="$4"
+  if [ "$old_start" -eq "$new_start" ]; then
+    return 0
+  fi
+  echo "Moving $name data: $old_start -> $new_start ($sectors sectors)"
+  chunk_sectors=$((1024 * 1024 / sector_size))
+  if [ "$chunk_sectors" -lt 1 ]; then
+    chunk_sectors=1
+  fi
+
+  if [ "$new_start" -gt "$old_start" ] && [ "$new_start" -lt $((old_start + sectors)) ]; then
+    remaining="$sectors"
+    while [ "$remaining" -gt 0 ]; do
+      chunk="$chunk_sectors"
+      if [ "$chunk" -gt "$remaining" ]; then
+        chunk="$remaining"
+      fi
+      offset=$((remaining - chunk))
+      copy_chunk $((old_start + offset)) $((new_start + offset)) "$chunk"
+      remaining="$offset"
+    done
+  else
+    copied=0
+    while [ "$copied" -lt "$sectors" ]; do
+      chunk="$chunk_sectors"
+      remaining=$((sectors - copied))
+      if [ "$chunk" -gt "$remaining" ]; then
+        chunk="$remaining"
+      fi
+      copy_chunk $((old_start + copied)) $((new_start + copied)) "$chunk"
+      copied=$((copied + chunk))
+    done
+  fi
+  sync
 }
 
 field_from_line() {
@@ -2349,6 +2412,13 @@ align_offset=$((p2_start % align_sectors))
 current_end=$((p4_start + p4_size))
 extra_sectors=$((disk_sectors - current_end))
 
+target_root_size="$root_target_sectors"
+if [ "$target_root_size" -lt "$p2_size" ]; then
+  target_root_size="$p2_size"
+fi
+frameos_start="$(align_up $((p2_start + target_root_size)))"
+target_root_size=$((frameos_start - p2_start))
+
 target_frameos_size="$large_frameos_sectors"
 if [ "$disk_sectors" -lt "$small_card_threshold_sectors" ]; then
   target_frameos_size="$small_frameos_sectors"
@@ -2357,12 +2427,14 @@ if [ "$target_frameos_size" -lt "$p3_size" ]; then
   target_frameos_size="$p3_size"
 fi
 
-assets_start="$(align_down $((p3_start + target_frameos_size)))"
+assets_start="$(align_up $((frameos_start + target_frameos_size)))"
+target_frameos_size=$((assets_start - frameos_start))
 assets_size=$((disk_sectors - assets_start))
 if [ "$assets_size" -le 0 ]; then
   echo "Computed assets partition would not fit"
   exit 1
 fi
+root_dev="$(partition_device "$disk" 2)"
 frameos_dev="$(partition_device "$disk" 3)"
 assets_dev="$(partition_device "$disk" 4)"
 
@@ -2374,11 +2446,21 @@ assets_label() {
   fi
 }
 
-if [ "$extra_sectors" -lt "$align_sectors" ] && [ "$target_frameos_size" -eq "$p3_size" ]; then
+layout_changed=0
+if [ "$target_root_size" -ne "$p2_size" ] \
+  || [ "$frameos_start" -ne "$p3_start" ] \
+  || [ "$target_frameos_size" -ne "$p3_size" ] \
+  || [ "$assets_start" -ne "$p4_start" ] \
+  || [ "$assets_size" -ne "$p4_size" ]; then
+  layout_changed=1
+fi
+
+if [ "$extra_sectors" -lt "$align_sectors" ] && [ "$layout_changed" -eq 0 ]; then
   echo "No SD card expansion needed"
+  resize2fs "$root_dev" || true
+  resize2fs "$frameos_dev" || true
   if [ "$(assets_label)" != "ASSETS" ]; then
     echo "Formatting missing ASSETS filesystem on $assets_dev"
-    resize2fs "$frameos_dev"
     mkfs.vfat -n ASSETS "$assets_dev"
   fi
   date -u > "$marker" 2>/dev/null || true
@@ -2386,9 +2468,16 @@ if [ "$extra_sectors" -lt "$align_sectors" ] && [ "$target_frameos_size" -eq "$p
 fi
 
 echo "Expanding $disk from $current_end to $disk_sectors sectors"
-echo "Root unchanged: start $p2_start, size $p2_size sectors"
-echo "New FRAMEOS start/size: $p3_start/$target_frameos_size sectors"
+echo "New root start/size: $p2_start/$target_root_size sectors"
+echo "New FRAMEOS start/size: $frameos_start/$target_frameos_size sectors"
 echo "New ASSETS start/size: $assets_start/$assets_size sectors"
+
+if [ "${FRAMEOS_EXPAND_DRY_RUN:-0}" = "1" ]; then
+  echo "Dry run requested; not moving partitions, rewriting the partition table, or resizing filesystems"
+  exit 0
+fi
+
+move_partition_data "FRAMEOS" "$p3_start" "$frameos_start" "$p3_size"
 
 layout="$(mktemp)"
 cat > "$layout" <<EOF
@@ -2396,17 +2485,12 @@ label: dos
 unit: sectors
 
 $(partition_device "$disk" 1) : start= $p1_start, size= $p1_size, type=c, bootable
-$(partition_device "$disk" 2) : start= $p2_start, size= $p2_size, type=83
-$(partition_device "$disk" 3) : start= $p3_start, size= $target_frameos_size, type=83
+$(partition_device "$disk" 2) : start= $p2_start, size= $target_root_size, type=83
+$(partition_device "$disk" 3) : start= $frameos_start, size= $target_frameos_size, type=83
 $(partition_device "$disk" 4) : start= $assets_start, size= $assets_size, type=c
 EOF
 sfdisk --no-reread --force "$disk" < "$layout"
 rm -f "$layout"
-
-if [ "${FRAMEOS_EXPAND_DRY_RUN:-0}" = "1" ]; then
-  echo "Dry run requested; not rereading partition table or resizing filesystems"
-  exit 0
-fi
 
 if ! partx -u "$disk"; then
   echo "Could not update in-kernel partition table; rebooting and retrying before local mounts"
@@ -2414,6 +2498,7 @@ if ! partx -u "$disk"; then
   exit 0
 fi
 
+resize2fs "$root_dev"
 resize2fs "$frameos_dev"
 mkfs.vfat -n ASSETS "$assets_dev"
 date -u > "$marker" 2>/dev/null || true

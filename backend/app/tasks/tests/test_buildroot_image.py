@@ -228,6 +228,9 @@ def test_buildroot_partition_scripts_create_frameos_and_assets_partitions(tmp_pa
     assert "raspberrypi,model-zero-2-2" in post_build
     assert "image frameos.ext4" in post_image
     assert "image assets.vfat" in post_image
+    assert "size = 100M" in post_image
+    assert 'rootfs_image="${BINARIES_DIR:?BINARIES_DIR is required}/rootfs.ext4"' in post_image
+    assert 'resize2fs -M "$rootfs_image"' in post_image
     assert "console=tty1" in post_image
     assert "fbcon=logo-count:1" in post_image
     assert "gpu_mem=32" in post_image
@@ -249,17 +252,21 @@ def test_buildroot_expand_sd_card_service_runs_before_local_mounts():
     assert "FRAMEOS_EXPAND_DRY_RUN" in script
     assert "mount -o remount,rw / 2>/dev/null || true" in script
     assert 'mkdir -p "$(dirname "$marker")" 2>/dev/null || true' in script
+    assert "root_target_sectors=$((1 * 1024 * 1024 * 1024 / sector_size))" in script
     assert "small_card_threshold_sectors=$((4 * 1024 * 1024 * 1024 / sector_size))" in script
     assert "small_frameos_sectors=$((1 * 1024 * 1024 * 1024 / sector_size))" in script
     assert "large_frameos_sectors=$((2 * 1024 * 1024 * 1024 / sector_size))" in script
-    assert 'echo "Root unchanged: start $p2_start, size $p2_size sectors"' in script
+    assert 'move_partition_data "FRAMEOS" "$p3_start" "$frameos_start" "$p3_size"' in script
+    assert 'echo "New root start/size: $p2_start/$target_root_size sectors"' in script
+    assert '$(partition_device "$disk" 2) : start= $p2_start, size= $target_root_size, type=83' in script
+    assert '$(partition_device "$disk" 3) : start= $frameos_start, size= $target_frameos_size, type=83' in script
     assert 'assets_label()' in script
     assert 'if [ "$(assets_label)" != "ASSETS" ]; then' in script
     assert 'echo "Formatting missing ASSETS filesystem on $assets_dev"' in script
     assert 'mkfs.vfat -n ASSETS "$assets_dev"' in script
+    assert 'resize2fs "$root_dev"' in script
     assert 'resize2fs "$frameos_dev"' in script
     assert 'date -u > "$marker" 2>/dev/null || true' in script
-    assert 'resize2fs "$root_dev"' not in script
     assert 'sfdisk --no-reread --force "$disk"' in script
     assert 'partx -u "$disk"' in script
 
