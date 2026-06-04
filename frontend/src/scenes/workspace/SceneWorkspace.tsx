@@ -173,7 +173,7 @@ function SceneSelector({
                 </select>
                 <FrameMetricAlertIndicator
                   frame={frame}
-                  className="pointer-events-none absolute right-7 top-1/2 -translate-y-1/2"
+                  containerClassName="absolute right-7 top-1/2 -translate-y-1/2"
                 />
               </div>
               <FrameActionsMenu

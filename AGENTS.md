@@ -36,6 +36,7 @@
 - Output folder is consumed by the backend’s static file mounts; ensure `frontend/dist` exists (e.g., via `pnpm --dir frontend run build`) before running the Python app outside of test mode. 【F:backend/app/fastapi.py†L38-L86】
 - ALWAYS prefer writing frontend business logic in kea logic files over using effects like `useState` or `useEffect`.
 - This includes small functions and callbacks inside components. Prefer to keep as much code as possible in logic files, treating React as a templating layer.
+- When adding a frame model key that is tracked for deploy changes in `frontend/src/scenes/frame/frameLogic.ts`, also add a marker to `FRAME_KEY_INTRODUCED_FRAMEOS_VERSION`. For unreleased work, use the next patch after the current `versions.json` FrameOS base version.
 
 ## Device runtime (Nim) notes
 - `frameos/frameos` houses the on-device runtime written in Nim with asyncdispatch.

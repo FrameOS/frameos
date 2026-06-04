@@ -367,6 +367,28 @@ export function normalizeFrameosVersion(version: unknown): string | null {
   return typeof version === 'string' && version.trim() ? version.split('+')[0] : null
 }
 
+function parseFrameosVersion(version: string | null): [number, number, number] | null {
+  const match = version?.match(/^(\d+)\.(\d+)\.(\d+)$/)
+  return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null
+}
+
+export function isFrameosVersionBefore(version: string | null, minimumVersion: string): boolean {
+  const current = parseFrameosVersion(normalizeFrameosVersion(version))
+  const minimum = parseFrameosVersion(normalizeFrameosVersion(minimumVersion))
+
+  if (!current || !minimum) {
+    return false
+  }
+
+  for (let index = 0; index < current.length; index++) {
+    if (current[index] !== minimum[index]) {
+      return current[index] < minimum[index]
+    }
+  }
+
+  return false
+}
+
 export function deployedFrameosVersion(deploy?: Partial<FrameType> | Record<string, unknown> | null): string | null {
   return normalizeFrameosVersion((deploy as Record<string, unknown> | null | undefined)?.frameos_version)
 }

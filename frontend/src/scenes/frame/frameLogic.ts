@@ -37,6 +37,7 @@ import {
   buildInferredFullDeployPlanSummary,
   deployedFrameosVersion,
   deployPlanPreviousFrameosVersion,
+  isFrameosVersionBefore,
 } from './frameDeployUtils'
 import { getDeployPlanErrorMessage } from './frameDeployErrors'
 import { urls } from '../../urls'
@@ -112,6 +113,19 @@ const FRAME_KEYS: (keyof FrameType)[] = [
   'buildroot',
   'rpios',
 ]
+
+// When adding a runtime-consumed field to FRAME_KEYS, add its introduced version here.
+// During active development, use the next patch after versions.json's frameos base version
+// (for example, 2026.6.9 while versions.json says 2026.6.8).
+const FRAME_KEY_INTRODUCED_FRAMEOS_VERSION: Partial<Record<keyof FrameType, string>> = {
+  mountpoints: '2026.6.0',
+  error_behavior: '2026.6.1',
+  buildroot: '2026.6.2',
+  image_engine: '2026.6.3',
+  max_http_response_bytes: '2026.6.4',
+  rpios: '2026.6.7',
+  timezone_updater: '2026.6.7',
+}
 
 const FRAME_KEYS_REQUIRE_RECOMPILE_RPIOS: (keyof FrameType)[] = ['device', 'scenes', 'reboot', 'rpios']
 const FRAME_KEYS_REQUIRE_RECOMPILE_BUILDROOT: (keyof FrameType)[] = [
@@ -309,6 +323,11 @@ function getRecompileFields(mode: FrameType['mode']): (keyof FrameType)[] {
   return mode === 'buildroot' ? FRAME_KEYS_REQUIRE_RECOMPILE_BUILDROOT : FRAME_KEYS_REQUIRE_RECOMPILE_RPIOS
 }
 
+function frameKeyRequiresVersionUpgrade(key: keyof FrameType, previousFrameosVersion: string | null): boolean {
+  const introducedVersion = FRAME_KEY_INTRODUCED_FRAMEOS_VERSION[key]
+  return introducedVersion ? isFrameosVersionBefore(previousFrameosVersion, introducedVersion) : false
+}
+
 function frameSubmitKeys(frame: Partial<FrameType>): (keyof FrameType)[] {
   return FRAME_KEYS
 }
@@ -385,19 +404,20 @@ function computeChangeDetails(
 ): ChangeDetail[] {
   const recompileFields = new Set(getRecompileFields(mode).filter((key) => key !== 'scenes'))
   const details: ChangeDetail[] = []
+  const previousFrameosVersion = includeFrameosVersion ? deployedFrameosVersion(previous) : null
 
   for (const key of FRAME_KEYS.filter((k) => k !== 'scenes')) {
     if (!frameKeyEqual(key, previous?.[key], next?.[key])) {
       details.push({
         label: keyLabel(key),
-        requiresFullDeploy: recompileFields.has(key),
+        requiresFullDeploy:
+          recompileFields.has(key) ||
+          (includeFrameosVersion && frameKeyRequiresVersionUpgrade(key, previousFrameosVersion)),
       })
     }
   }
 
   const sceneDetails = sceneChangeDetails(next?.scenes ?? [], previous?.scenes ?? [])
-
-  const previousFrameosVersion = deployedFrameosVersion(previous)
 
   if (includeFrameosVersion && (!previousFrameosVersion || previousFrameosVersion !== CURRENT_FRAMEOS_VERSION)) {
     details.push({
