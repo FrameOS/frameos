@@ -518,9 +518,17 @@ function normalizeMountpointsForComparison(value: unknown): Record<string, any> 
   }
 }
 
+function normalizeTimezoneForComparison(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
 function normalizeFrameKeyValueForComparison(key: keyof FrameType, value: unknown): unknown {
   if (key === 'image_engine') {
     return value ?? ''
+  }
+
+  if (key === 'timezone') {
+    return normalizeTimezoneForComparison(value)
   }
 
   if (key === 'rpios') {
@@ -1498,7 +1506,10 @@ export const frameLogic = kea<frameLogicType>([
   })),
   subscriptions(({ actions, values }) => ({
     frame: (frame?: FrameType, oldFrame?: FrameType) => {
-      const frameFormMatchesPrevious = equal(oldFrame, values.frameForm)
+      const previousMode = values.frameForm?.mode || oldFrame?.mode || 'rpios'
+      const frameFormMatchesPrevious = oldFrame
+        ? computeChangeDetails(oldFrame, values.frameForm, previousMode, false).length === 0
+        : false
       if (frame && (!oldFrame || frameFormMatchesPrevious)) {
         actions.resetFrameForm(sanitizeFrame(frame) as FrameType)
       }
