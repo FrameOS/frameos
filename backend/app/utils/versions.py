@@ -1,5 +1,4 @@
 import json
-from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -7,7 +6,6 @@ from typing import Any
 VERSIONS_PATH = Path(__file__).resolve().parents[3] / "versions.json"
 
 
-@lru_cache(maxsize=1)
 def get_versions() -> dict[str, Any]:
     if not VERSIONS_PATH.exists():
         return {}
