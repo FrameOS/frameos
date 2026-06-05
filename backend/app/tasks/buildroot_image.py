@@ -4,6 +4,7 @@ import gzip
 import copy
 import hashlib
 import json
+import math
 import os
 import re
 import shlex
@@ -66,6 +67,8 @@ BUILDROOT_BOOTSTRAP_SCRIPT_VERSION = "5"
 BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION = 15
 BUILDROOT_FRAMEOS_PARTITION_SIZE = os.environ.get("FRAMEOS_BUILDROOT_FRAMEOS_PARTITION_SIZE", "30M")
 BUILDROOT_ASSETS_PARTITION_SIZE = os.environ.get("FRAMEOS_BUILDROOT_ASSETS_PARTITION_SIZE", "30M")
+BUILDROOT_DATA_PARTITION_HEADROOM_BYTES = 8 * 1024 * 1024
+BUILDROOT_DATA_PARTITION_HEADROOM_RATIO = 1.25
 BUILDROOT_LOCAL_FONTS_DIR = REPO_ROOT / "frameos" / "assets" / "copied" / "fonts"
 BUILDROOT_LOCAL_FONT_EXTENSIONS = {".ttf", ".txt", ".md"}
 BUILDROOT_ARCHIVE_BASE_URL = os.environ.get("FRAMEOS_ARCHIVE_BASE_URL", "https://archive.frameos.net/")
@@ -1547,6 +1550,10 @@ chmod a+r /artifacts/{shlex.quote(output_filename)}
         if not any(assets_root.iterdir()):
             (assets_root / "frameos-assets-placeholder").write_text("", encoding="utf-8")
 
+        frameos_partition_size = _partition_size_for_root(
+            frameos_root,
+            minimum_size=BUILDROOT_FRAMEOS_PARTITION_SIZE,
+        )
         compose_roots = f"/tmp/frameos-compose-roots-{os.getpid()}-{secure_token(6)}"
         genimage_cfg = compose_dir / "frameos-genimage.cfg"
         genimage_cfg.write_text(
@@ -1556,7 +1563,7 @@ chmod a+r /artifacts/{shlex.quote(output_filename)}
 		label = "FRAMEOS"
 	}}
 	srcpath = "{compose_roots}/frameos"
-	size = {BUILDROOT_FRAMEOS_PARTITION_SIZE}
+	size = {frameos_partition_size}
 }}
 
 image assets.vfat {{
@@ -2158,6 +2165,41 @@ if [ -n "$kernel" ]; then
   files+=("$kernel")
 fi
 
+partition_size_for_root() {{
+  python3 - "$1" "$2" <<'PY'
+import math
+import os
+import re
+import sys
+
+HEADROOM_BYTES = {BUILDROOT_DATA_PARTITION_HEADROOM_BYTES}
+HEADROOM_RATIO = {BUILDROOT_DATA_PARTITION_HEADROOM_RATIO}
+MIB = 1024 * 1024
+
+def parse_size(value):
+    match = re.fullmatch(r"\\s*([0-9]+)\\s*([KMG]?)\\s*", value, flags=re.IGNORECASE)
+    if not match:
+        raise SystemExit(f"Unsupported partition size {{value!r}}")
+    number = int(match.group(1))
+    unit = match.group(2).upper()
+    return number * {{"": 1, "K": 1024, "M": MIB, "G": 1024 * MIB}}[unit]
+
+root = sys.argv[1]
+minimum = parse_size(sys.argv[2])
+payload = 0
+for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+    for name in dirnames + filenames:
+        try:
+            payload += os.lstat(os.path.join(dirpath, name)).st_size
+        except FileNotFoundError:
+            pass
+
+required = max(minimum, math.ceil(payload * HEADROOM_RATIO) + HEADROOM_BYTES)
+print(f"{{math.ceil(required / MIB)}}M")
+PY
+}}
+
+frameos_partition_size="$(partition_size_for_root "${{BASE_DIR:?BASE_DIR is required}}/frameos-partition-root" "{BUILDROOT_FRAMEOS_PARTITION_SIZE}")"
 boot_files="$(printf '\\t\\t\\t"%s",\\n' "${{files[@]}}")"
 cat > "$genimage_cfg" <<EOF
 image boot.vfat {{
@@ -2177,7 +2219,7 @@ image frameos.ext4 {{
 		label = "FRAMEOS"
 	}}
 	srcpath = "${{BASE_DIR:?BASE_DIR is required}}/frameos-partition-root"
-	size = {BUILDROOT_FRAMEOS_PARTITION_SIZE}
+	size = $frameos_partition_size
 }}
 
 image assets.vfat {{
@@ -2661,6 +2703,27 @@ def _partition_size_bytes(size: str) -> int:
 
 def _align_up_bytes(value: int, alignment: int = 1024 * 1024) -> int:
     return ((value + alignment - 1) // alignment) * alignment
+
+
+def _directory_payload_size_bytes(root: Path) -> int:
+    total = 0
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        for name in [*dirnames, *filenames]:
+            try:
+                total += (Path(dirpath) / name).lstat().st_size
+            except FileNotFoundError:
+                continue
+    return total
+
+
+def _partition_size_for_root(root: Path, *, minimum_size: str) -> str:
+    minimum_bytes = _partition_size_bytes(minimum_size)
+    payload_bytes = _directory_payload_size_bytes(root)
+    required_bytes = max(
+        minimum_bytes,
+        math.ceil(payload_bytes * BUILDROOT_DATA_PARTITION_HEADROOM_RATIO) + BUILDROOT_DATA_PARTITION_HEADROOM_BYTES,
+    )
+    return f"{_align_up_bytes(required_bytes) // (1024 * 1024)}M"
 
 
 def _set_mbr_partition_geometry(image_path: Path, partition_number: int, *, start: int, size: int) -> None:

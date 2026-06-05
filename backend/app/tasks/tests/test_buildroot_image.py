@@ -228,6 +228,8 @@ def test_buildroot_partition_scripts_create_frameos_and_assets_partitions(tmp_pa
     assert "raspberrypi,model-zero-2-2" in post_build
     assert "image frameos.ext4" in post_image
     assert "image assets.vfat" in post_image
+    assert 'frameos_partition_size="$(partition_size_for_root "${BASE_DIR:?BASE_DIR is required}/frameos-partition-root" "30M")"' in post_image
+    assert "size = $frameos_partition_size" in post_image
     assert "size = 30M" in post_image
     assert 'rootfs_image="${BINARIES_DIR:?BINARIES_DIR is required}/rootfs.ext4"' in post_image
     assert 'resize2fs -M "$rootfs_image"' in post_image
@@ -519,6 +521,16 @@ def test_shrink_data_partitions_rewrites_mbr_and_truncates_image(tmp_path):
     assert image.stat().st_size == shrunk[3]["start"] + shrunk[3]["size"]
 
 
+def test_partition_size_for_root_grows_with_payload_size(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    payload = root / "payload.bin"
+    with payload.open("wb") as handle:
+        handle.truncate(40 * 1024 * 1024)
+
+    assert buildroot_image_module._partition_size_for_root(root, minimum_size="30M") == "58M"
+
+
 @pytest.mark.asyncio
 async def test_precompiled_sd_image_rejects_larger_data_partitions(tmp_path, monkeypatch):
     release_image = tmp_path / "release.img"
@@ -639,6 +651,10 @@ async def test_cached_base_composer_uses_container_visible_srcpaths(tmp_path, mo
 
     monkeypatch.setattr("app.tasks.buildroot_image.exec_local_command", fake_exec_local_command)
     monkeypatch.setattr(
+        "app.tasks.buildroot_image._partition_size_for_root",
+        lambda _root, *, minimum_size: "42M",
+    )
+    monkeypatch.setattr(
         "app.tasks.buildroot_image._mbr_partitions",
         lambda _path: [
             {"start": 512, "size": 32 * 1024 * 1024},
@@ -664,6 +680,7 @@ async def test_cached_base_composer_uses_container_visible_srcpaths(tmp_path, mo
     assert f'srcpath = "{compose_root.group(1)}/assets"' in captured["config"]
     assert f'srcpath = "{compose_root.group(1)}/rootfs"' not in captured["config"]
     assert f'srcpath = "{compose_root.group(1)}/boot"' not in captured["config"]
+    assert "size = 42M" in captured["config"]
     assert 'label = "BOOT"' not in captured["config"]
     assert str(temp_dir) not in captured["config"]
     assert "bash /work/compose-partitions.sh" in captured["compose_command"]
