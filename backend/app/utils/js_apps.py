@@ -33,14 +33,8 @@ import fs from 'node:fs';
 
 const filename = process.argv[1];
 const source = fs.readFileSync(process.argv[2], 'utf8');
-const vendorPath = process.argv[3];
 
 async function transpile() {
-  if (vendorPath && fs.existsSync(vendorPath)) {
-    globalThis.eval(fs.readFileSync(vendorPath, 'utf8'));
-    return globalThis.__frameosTranspile(source, { filePath: filename });
-  }
-
   const { transform } = await import('sucrase');
   return transform(source, {
     filePath: filename,
@@ -82,47 +76,15 @@ def _json_payload_from_process(proc: subprocess.CompletedProcess[str], fallback:
     return proc.returncode == 0, payload
 
 
-def _quickjs_binary(repo_root: Path) -> str | None:
-    candidates = [
-        repo_root / "frameos" / "quickjs" / "qjs",
-        Path("/app/frameos/quickjs/qjs"),
-    ]
-    for candidate in candidates:
-        if candidate.exists() and os.access(candidate, os.X_OK):
-            return str(candidate)
-    return shutil.which("qjs")
-
-
-def _run_quickjs_sucrase(filename: str, source_path: str, repo_root: Path, vendor_path: Path) -> tuple[bool, dict] | None:
-    qjs = _quickjs_binary(repo_root)
-    if not qjs or not vendor_path.exists():
-        return None
-
-    script_path = Path(__file__).resolve().with_name("js_validate_quickjs.js")
-    proc = subprocess.run(
-        [qjs, "--std", str(script_path), filename, source_path, str(vendor_path)],
-        cwd=repo_root,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    ok, payload = _json_payload_from_process(
-        proc,
-        '{"ok": false, "errors": [{"text": "quickjs sucrase validation failed"}]}',
-    )
-    if ok or payload.get("errors"):
-        return ok, payload
-    return None
-
-
-def _run_node_sucrase(filename: str, source_path: str, repo_root: Path, vendor_path: Path) -> tuple[bool, dict]:
+def _run_node_sucrase(filename: str, source_path: str, repo_root: Path) -> tuple[bool, dict]:
     node = shutil.which("node")
+    frame_frontend_root = repo_root / "frameos" / "frontend"
     if not node:
-        return False, {"ok": False, "errors": [{"text": "JavaScript validation requires QuickJS or Node", "location": {"line": 1, "column": 0}}]}
+        return False, {"ok": False, "errors": [{"text": "JavaScript validation requires Node", "location": {"line": 1, "column": 0}}]}
 
     proc = subprocess.run(
-        [node, "--input-type=module", "-e", _node_sucrase_script(), filename, source_path, str(vendor_path)],
-        cwd=repo_root,
+        [node, "--input-type=module", "-e", _node_sucrase_script(), filename, source_path],
+        cwd=frame_frontend_root,
         capture_output=True,
         text=True,
         check=False,
@@ -135,11 +97,7 @@ def _run_node_sucrase(filename: str, source_path: str, repo_root: Path, vendor_p
 
 def _run_sucrase(filename: str, source_path: str) -> tuple[bool, dict]:
     repo_root = Path(__file__).resolve().parents[3]
-    vendor_path = repo_root / "frameos" / "assets" / "compiled" / "vendor" / "sucrase.js"
-    quickjs_result = _run_quickjs_sucrase(filename, source_path, repo_root, vendor_path)
-    if quickjs_result is not None:
-        return quickjs_result
-    return _run_node_sucrase(filename, source_path, repo_root, vendor_path)
+    return _run_node_sucrase(filename, source_path, repo_root)
 
 
 def validate_js_source(filename: str, source: str) -> list[dict]:

@@ -4,7 +4,7 @@ import scenes/scenes
 import system/scenes as systemScenesRegistry
 import frameos/types
 import frameos/interpreter
-import frameos/js_runtime
+import frameos/js_runtime/runtime
 
 # Where to store the persisted states
 const SCENE_STATE_JSON_FOLDER = "./state"

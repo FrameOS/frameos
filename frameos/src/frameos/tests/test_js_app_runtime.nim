@@ -1,7 +1,7 @@
-import std/[json, tables, unittest]
+import std/[json, strutils, tables, unittest]
 import pixie
 
-import ../js_app_runtime
+import ../js_runtime/app_runtime
 import ../types
 import ../values
 
@@ -108,6 +108,137 @@ suite "js app runtime":
       check value.asImage().width == 4 + i
       check value.asImage().height == 3
       check runtime.images.len == 0
+
+  test "runs typed template literal interpolations":
+    let config = testConfig()
+    let logger = testLogger(config)
+    let scene = FrameScene(id: "tests/js-app-template".SceneId, frameConfig: config, state: %*{}, logger: logger)
+    let owner = AppRoot(nodeId: 11.NodeId, nodeName: "jsTemplate", scene: scene, frameConfig: config)
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
+
+    let runtime = newJsAppRuntime(
+      category = "data",
+      outputType = "text",
+      source = """export function get(app: FrameOSApp): string {
+          const label = app.config.label as string
+          return `<svg><text>${label as string}</text></svg>`
+        }"""
+    )
+
+    let value = runtime.get(owner, %*{"label": "FrameOS"}, context)
+    check value.kind == fkString
+    check value.asString() == "<svg><text>FrameOS</text></svg>"
+
+  test "runs text app template init and get functions":
+    let config = testConfig()
+    let logger = testLogger(config)
+    let scene = FrameScene(id: "tests/js-app-text-template".SceneId, frameConfig: config, state: %*{}, logger: logger)
+    let owner = AppRoot(nodeId: 12.NodeId, nodeName: "jsText", scene: scene, frameConfig: config)
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
+
+    let runtime = newJsAppRuntime(
+      category = "data",
+      outputType = "text",
+      source = """export function init(app: FrameOSApp): void {
+          app.initialized = true
+        }
+
+        export function get(app: FrameOSApp, context: FrameOSContext): string {
+          const eventLabel = context.event ? ` (${context.event})` : ''
+          return `${app.config.prefix}: ${app.config.message}${app.initialized ? eventLabel : ''}`
+        }"""
+    )
+
+    let value = runtime.get(owner, %*{"prefix": "FrameOS", "message": "Hello"}, context)
+    check value.kind == fkString
+    check value.asString() == "FrameOS: Hello (render)"
+
+  test "runs image app template frameos.image output":
+    let config = testConfig()
+    let logger = testLogger(config)
+    let scene = FrameScene(id: "tests/js-app-image-template".SceneId, frameConfig: config, state: %*{}, logger: logger)
+    let owner = AppRoot(nodeId: 13.NodeId, nodeName: "jsImage", scene: scene, frameConfig: config)
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
+
+    let runtime = newJsAppRuntime(
+      category = "data",
+      outputType = "image",
+      source = """export function get(app: FrameOSApp): FrameOSImageSpec {
+          return frameos.image({
+            width: app.config.width,
+            height: app.config.height,
+            color: app.config.color,
+            opacity: app.config.opacity,
+          })
+        }"""
+    )
+
+    let value = runtime.get(owner, %*{"width": 5, "height": 3, "color": "#00ff00", "opacity": 0.5}, context)
+    check value.kind == fkImage
+    check value.asImage().width == 5
+    check value.asImage().height == 3
+    let pixel = value.asImage().data[value.asImage().dataIndex(0, 0)]
+    check pixel.g > 0
+    check pixel.a > 0
+
+  test "runs logic app template logging path":
+    let config = testConfig()
+    var logged: seq[JsonNode] = @[]
+    var logger = testLogger(config)
+    logger.log = proc(payload: JsonNode) =
+      logged.add(payload)
+    let scene = FrameScene(id: "tests/js-app-logic-template".SceneId, frameConfig: config, state: %*{}, logger: logger)
+    let owner = AppRoot(nodeId: 14.NodeId, nodeName: "jsLogic", scene: scene, frameConfig: config)
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
+
+    let runtime = newJsAppRuntime(
+      category = "logic",
+      outputType = "",
+      source = """export function run(app: FrameOSApp, context: FrameOSContext): void {
+          const stateKey = app.config.stateKey || 'jsLogicResult'
+          app.log('JS logic app ran', { event: context.event, stateKey })
+        }"""
+    )
+
+    runtime.run(owner, %*{"stateKey": "customState"}, context)
+    check logged.len > 0
+    check logged[^1]["event"].getStr() == "log:14:jsLogic"
+    check "JS logic app ran" in logged[^1]["message"].getStr()
+    check "customState" in logged[^1]["message"].getStr()
+
+  test "runs modern ES syntax supported by QuickJS":
+    let config = testConfig()
+    let logger = testLogger(config)
+    let scene = FrameScene(id: "tests/js-app-modern-es".SceneId, frameConfig: config, state: %*{}, logger: logger)
+    let owner = AppRoot(nodeId: 15.NodeId, nodeName: "jsModernEs", scene: scene, frameConfig: config)
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
+
+    let runtime = newJsAppRuntime(
+      category = "data",
+      outputType = "integer",
+      source = """export function get(app: FrameOSApp): number {
+          class Counter {
+            value = 1_000
+            increment = () => ++this.value
+          }
+          try {
+            const counter = new Counter()
+            const configured = app.config?.nested?.count ?? counter.increment()
+            const regex = /frame\s*os/i
+            return regex.test("Frame OS") ? configured : 0
+          } catch {
+            return -1
+          }
+        }"""
+    )
+
+    let fallbackValue = runtime.get(owner, %*{}, context)
+    check fallbackValue.kind == fkInteger
+    check fallbackValue.asInt() == 1001
+
+    let configuredValue = runtime.get(owner, %*{"nested": {"count": 42}}, context)
+    check configuredValue.kind == fkInteger
+    check configuredValue.asInt() == 42
 
   test "releases overwritten dynamic field image refs":
     let config = testConfig()

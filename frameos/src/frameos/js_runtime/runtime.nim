@@ -1,13 +1,13 @@
-# frameos/src/frameos/js_runtime.nim
+# frameos/src/frameos/js_runtime/runtime.nim
 # Centralized JavaScript runtime helpers for interpreted scenes.
 # Extracted from interpreter.nim so the JS bridge can be reused anywhere.
 
 import frameos/types
 import frameos/values
-import assets/vendor as vendorAssets
+import frameos/js_runtime/transpiler
 import lib/tz
 import lib/burrito
-import tables, json, strutils, locks
+import tables, json, strutils
 import chrono, times
 
 # -------------------------
@@ -26,10 +26,6 @@ type
 
 var evalEnvByCtx = initTable[ptr JSContext, EvalEnv]()
 var tzName = ""
-var compilerJsLock: Lock
-var compilerJs: QuickJS
-var compilerJsReady = false
-initLock(compilerJsLock)
 
 const sceneJsPrelude* = """
 const __frameosFragment = Symbol.for("frameos.fragment");
@@ -100,26 +96,15 @@ proc getCodeSnippet(node: DiagramNode): string =
     return node.data["code"].getStr()
   ""
 
-proc ensureCompilerJsLocked() =
-  if compilerJsReady:
-    return
-  compilerJs = newQuickJS()
-  discard compilerJs.eval(vendorAssets.getAsset("assets/compiled/vendor/sucrase.js"))
-  compilerJsReady = true
-
 proc transpileSource*(source: string, filename: string): string =
   if source.len == 0:
     return source
-  withLock compilerJsLock:
-    ensureCompilerJsLocked()
-    result = compilerJs.eval("__frameosTranspile(\"" & jsQuote(source) & "\", { filePath: \"" & jsQuote(filename) & "\" })")
+  transformFrameosScript(source, filename)
 
 proc transpileModuleSource*(source: string, filename: string): string =
   if source.len == 0:
     return source
-  withLock compilerJsLock:
-    ensureCompilerJsLocked()
-    result = compilerJs.eval("__frameosTranspile(\"" & jsQuote(source) & "\", { filePath: \"" & jsQuote(filename) & "\", transforms: [\"typescript\", \"jsx\", \"imports\"] })")
+  transformFrameosModule(source, filename)
 
 proc logCompileError(
   scene: InterpretedFrameScene,
@@ -602,14 +587,7 @@ proc transpileSourceForTest*(source: string, filename: string = "<test>"): strin
   transpileSource(source, filename)
 
 proc cleanupCompilerJs*() =
-  withLock compilerJsLock:
-    if not compilerJsReady:
-      return
-    if compilerJs.runtime != nil:
-      compilerJs.runPendingJobs()
-      JS_RunGC(compilerJs.runtime)
-    compilerJs.close()
-    compilerJsReady = false
+  discard
 
 proc cleanupSceneJs*(scene: InterpretedFrameScene) =
   if not scene.jsReady:

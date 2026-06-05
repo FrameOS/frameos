@@ -1,6 +1,6 @@
 import std/[json, tables, unittest]
 
-import ../js_runtime
+import ../js_runtime/runtime
 import ../scenes
 import ../types
 

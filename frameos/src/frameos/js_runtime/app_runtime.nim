@@ -2,7 +2,7 @@ import std/[base64, json, options, strformat, strutils, tables]
 import pixie
 
 import frameos/apps as frameos_apps
-import frameos/js_runtime
+import frameos/js_runtime/runtime
 import frameos/types
 import frameos/values
 import frameos/utils/http_client

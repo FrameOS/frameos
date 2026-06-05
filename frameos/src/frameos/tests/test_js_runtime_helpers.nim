@@ -1,6 +1,6 @@
 import std/[json, strutils, unittest]
 
-import ../js_runtime
+import ../js_runtime/runtime
 import ../types
 import ../values
 
