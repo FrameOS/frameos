@@ -9,6 +9,7 @@ import lib/tz
 import lib/burrito
 import tables, json, strutils
 import chrono, times
+import pixie
 
 # -------------------------
 # Internal evaluation scope
@@ -126,11 +127,11 @@ proc logCompileError(
   })
 
 # -------------------------
-# Build JS envelope function
+# Build JS function
 # -------------------------
 
 proc buildEnvelopeFunction(code: string, argNames: seq[string], fnName: string): string =
-  ## Create a named function returning a BigInt-safe JSON envelope (no re-parsing each call).
+  ## Create a named function returning the raw JavaScript value.
   var decls = newSeq[string]()
   for rawName in argNames:
     let lc = rawName.toLowerAscii
@@ -145,17 +146,7 @@ proc buildEnvelopeFunction(code: string, argNames: seq[string], fnName: string):
 function """ & fnName & """() {
   "use strict";
   """ & declBlock & """
-  try {
-    const __v = ((state, args, context) => (""" & code & """))(__state, __args, __context);
-    const __k = (__v === null) ? "null" : (Array.isArray(__v) ? "array" : typeof __v);
-    const json = (typeof __v === 'undefined')
-      ? JSON.stringify({ k: __k })
-      : JSON.stringify({ k: __k, v: __v  }, __jsReplacer);
-    return json;
-  } catch (e) {
-    const msg = (e && e.stack) ? e.stack : String(e);
-    return JSON.stringify({ k: "error", v: { message: String(e && e.message || e), stack: msg } });
-  }
+  return ((state, args, context) => (""" & code & """))(__state, __args, __context);
 }
 """
 
@@ -194,7 +185,7 @@ proc jsLog(ctx: ptr JSContext, level: JSValue, payloadJson: JSValue): JSValue {.
   return jsUndefSentinel(ctx)
 
 # Convert Nim JsonNode -> JSValue (objects/arrays included).
-proc jsonToJS(ctx: ptr JSContext, j: JsonNode): JSValue =
+proc jsonToJS*(ctx: ptr JSContext, j: JsonNode): JSValue =
   if j.isNil: return jsNull(ctx)
   case j.kind
   of JNull: return jsNull(ctx)
@@ -222,8 +213,28 @@ proc jsonToJS(ctx: ptr JSContext, j: JsonNode): JSValue =
       inc idx
     return arr
 
-proc valueToJS(ctx: ptr JSContext, v: Value): JSValue =
-  jsonToJS(ctx, valueToJson(v))
+proc valueToJS*(ctx: ptr JSContext, v: Value): JSValue =
+  case v.kind
+  of fkString, fkText:
+    return nimStringToJS(ctx, v.s)
+  of fkFloat:
+    return nimFloatToJS(ctx, v.f)
+  of fkInteger:
+    if v.i >= low(int32).int64 and v.i <= high(int32).int64:
+      return nimIntToJS(ctx, v.i.int32)
+    return nimFloatToJS(ctx, v.i.float64)
+  of fkBoolean:
+    return nimBoolToJS(ctx, v.b)
+  of fkColor:
+    return nimStringToJS(ctx, v.col.toHtmlHex)
+  of fkJson:
+    return jsonToJS(ctx, v.j)
+  of fkNode:
+    return nimIntToJS(ctx, v.nId.int32)
+  of fkScene:
+    return nimStringToJS(ctx, v.sId.string)
+  of fkImage, fkNone:
+    return jsNull(ctx)
 
 proc jsGetState(ctx: ptr JSContext, k: JSValue): JSValue {.nimcall.} =
   let key = toNimString(ctx, k)
@@ -337,6 +348,110 @@ proc envelopeToValue(env: JsonNode, expectedType: string): Value =
   else:
     return Value(kind: fkNone)
 
+proc stringifyJsValue*(ctx: ptr JSContext, val: JSValueConst): string =
+  let globalObj = JS_GetGlobalObject(ctx)
+  defer: JS_FreeValue(ctx, globalObj)
+
+  let stringifyFn = JS_GetPropertyStr(ctx, globalObj, "__frameosStringify")
+  defer: JS_FreeValue(ctx, stringifyFn)
+
+  if JS_IsFunction(ctx, stringifyFn) != 0:
+    var argv: array[1, JSValueConst]
+    argv[0] = val
+    let strVal = JS_Call(ctx, stringifyFn, globalObj, 1.cint, addr argv[0])
+    defer: JS_FreeValue(ctx, strVal)
+    if JS_IsException(strVal) == 0:
+      return toNimString(ctx, strVal)
+
+  let fallback = JS_JSONStringify(ctx, val, jsUndefined(ctx), jsUndefined(ctx))
+  defer: JS_FreeValue(ctx, fallback)
+  if JS_IsException(fallback) == 0:
+    return toNimString(ctx, fallback)
+  return "null"
+
+proc jsValueToJson*(ctx: ptr JSContext, val: JSValueConst): JsonNode =
+  if jsIsUndefined(val) or jsIsNull(val):
+    return newJNull()
+  if jsIsBool(val):
+    return %*toNimBool(ctx, val)
+  if jsIsNumber(val):
+    let f = toNimFloat(ctx, val)
+    if f >= low(int64).float64 and f <= high(int64).float64:
+      let i = f.int64
+      if i.float64 == f:
+        return %*i
+    return %*f
+  if jsIsBigInt(ctx, val):
+    try:
+      return %*toNimInt64Ext(ctx, val)
+    except CatchableError:
+      return %*toNimString(ctx, val)
+  if jsIsString(val):
+    return %*toNimString(ctx, val)
+
+  let jsonText = stringifyJsValue(ctx, val)
+  try:
+    return parseJson(jsonText)
+  except CatchableError:
+    return %*jsonText
+
+proc jsValueToValue*(ctx: ptr JSContext, val: JSValueConst, expectedType: string = ""): Value =
+  if expectedType.len > 0:
+    if jsIsUndefined(val):
+      return valueFromJsonByType(newJNull(), expectedType)
+    return valueFromJsonByType(jsValueToJson(ctx, val), expectedType)
+
+  if jsIsUndefined(val):
+    return Value(kind: fkNone)
+  if jsIsNull(val):
+    return Value(kind: fkJson, j: newJNull())
+  if jsIsBool(val):
+    return Value(kind: fkBoolean, b: toNimBool(ctx, val))
+  if jsIsNumber(val):
+    let f = toNimFloat(ctx, val)
+    if f >= low(int64).float64 and f <= high(int64).float64:
+      let i = f.int64
+      if i.float64 == f:
+        return Value(kind: fkInteger, i: i)
+    return Value(kind: fkFloat, f: f)
+  if jsIsBigInt(ctx, val):
+    try:
+      return Value(kind: fkInteger, i: toNimInt64Ext(ctx, val))
+    except CatchableError:
+      return Value(kind: fkString, s: toNimString(ctx, val))
+  if jsIsString(val):
+    return Value(kind: fkString, s: toNimString(ctx, val))
+
+  return Value(kind: fkJson, j: jsValueToJson(ctx, val))
+
+proc jsExceptionDetails*(ctx: ptr JSContext): tuple[message: string, stack: string] =
+  let exception = JS_GetException(ctx)
+  defer: JS_FreeValue(ctx, exception)
+  if jsIsObject(exception):
+    let messageVal = JS_GetPropertyStr(ctx, exception, "message")
+    defer: JS_FreeValue(ctx, messageVal)
+    let stackVal = JS_GetPropertyStr(ctx, exception, "stack")
+    defer: JS_FreeValue(ctx, stackVal)
+    result.message = toNimString(ctx, messageVal)
+    result.stack = toNimString(ctx, stackVal)
+  else:
+    result.message = toNimString(ctx, exception)
+    result.stack = result.message
+  if result.message.len == 0:
+    result.message = "JavaScript error"
+
+proc callGlobalFunction*(ctx: ptr JSContext, fnName: string, args: openArray[JSValueConst] = []): JSValue =
+  let globalObj = JS_GetGlobalObject(ctx)
+  defer: JS_FreeValue(ctx, globalObj)
+  let fn = JS_GetPropertyStr(ctx, globalObj, fnName.cstring)
+  defer: JS_FreeValue(ctx, fn)
+  if args.len == 0:
+    return JS_Call(ctx, fn, globalObj, 0.cint, nil)
+  var argv = newSeq[JSValueConst](args.len)
+  for i, arg in args:
+    argv[i] = arg
+  return JS_Call(ctx, fn, globalObj, args.len.cint, addr argv[0])
+
 # -------------------------
 # Scene JS context
 # -------------------------
@@ -357,6 +472,7 @@ proc ensureSceneJs*(scene: InterpretedFrameScene) =
   const __jsReplacer = (k, v) =>
     (typeof v === 'bigint') ? { __bigint: v.toString() }
     : (v === undefined ? null : v);
+  globalThis.__frameosStringify = (v) => JSON.stringify(v, __jsReplacer);
   const console = {
     log: (...a) => jsLog("log", JSON.stringify(a, __jsReplacer)),
     warn: (...a) => jsLog("warn", JSON.stringify(a, __jsReplacer)),
@@ -469,7 +585,7 @@ proc callCompiledFn*(scene: InterpretedFrameScene,
                      argTypes: Table[string, string],
                      outputTypes: Table[string, string],
                      targetField: string): Value =
-  ## Set EvalEnv for this scene context, call fnName(), parse envelope, coerce.
+  ## Set EvalEnv for this scene context, call fnName(), and coerce the returned JSValue.
   var expectedType = ""
   if targetField.len > 0 and outputTypes.hasKey(targetField):
     expectedType = outputTypes[targetField]
@@ -485,34 +601,29 @@ proc callCompiledFn*(scene: InterpretedFrameScene,
   )
 
   evalEnvByCtx[scene.js.context] = e
-  var envelopeJson = ""
+  var jsResult: JSValue
   try:
-    envelopeJson = scene.js.eval(fnName & "()")
+    jsResult = callGlobalFunction(scene.js.context, fnName)
   finally:
     if evalEnvByCtx.hasKey(scene.js.context):
       evalEnvByCtx.del(scene.js.context)
 
-  var parsed: JsonNode
-  try:
-    parsed = parseJson(envelopeJson)
-  except CatchableError:
-    return Value(kind: fkString, s: envelopeJson)
-
-  let kind = parsed{"k"}.getStr()
-  if kind == "error":
+  defer: JS_FreeValue(scene.js.context, jsResult)
+  if JS_IsException(jsResult) != 0:
+    let details = jsExceptionDetails(scene.js.context)
     scene.logger.log(%*{
       "event": "interpreter:jsError",
       "sceneId": scene.id.string,
       "nodeId": nodeId.int,
-      "message": parsed{"v"}{"message"}.getStr(),
-      "stack": parsed{"v"}{"stack"}.getStr()
+      "message": details.message,
+      "stack": details.stack
     })
     if expectedType.len > 0:
       if expectedType == "string": return Value(kind: fkString, s: "")
       return valueFromJsonByType(newJNull(), expectedType)
     return Value(kind: fkNone)
 
-  return envelopeToValue(parsed, expectedType)
+  return jsValueToValue(scene.js.context, jsResult, expectedType)
 
 # -------------------------
 # Inline evaluation helper (generic)

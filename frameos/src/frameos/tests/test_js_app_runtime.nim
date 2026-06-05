@@ -1,4 +1,4 @@
-import std/[json, strutils, tables, unittest]
+import std/[json, sequtils, strutils, tables, unittest]
 import pixie
 
 import ../js_runtime/app_runtime
@@ -239,6 +239,37 @@ suite "js app runtime":
     let configuredValue = runtime.get(owner, %*{"nested": {"count": 42}}, context)
     check configuredValue.kind == fkInteger
     check configuredValue.asInt() == 42
+
+  test "lazy app proxies support keys and spread":
+    let config = testConfig()
+    let logger = testLogger(config)
+    let scene = FrameScene(id: "tests/js-app-proxy-keys".SceneId, frameConfig: config, state: %*{"seen": true}, logger: logger)
+    let owner = AppRoot(nodeId: 11.NodeId, nodeName: "jsProxyKeys", scene: scene, frameConfig: config)
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
+
+    let runtime = newJsAppRuntime(
+      category = "data",
+      outputType = "json",
+      source = """export function get(app, context) {
+          return {
+            configKeys: Object.keys(app.config).sort(),
+            stateKeys: Object.keys(app.state).sort(),
+            frameKeys: Object.keys(app.frame).sort(),
+            contextKeys: Object.keys(context).sort(),
+            spreadConfig: { ...app.config },
+          }
+        }"""
+    )
+
+    let value = runtime.get(owner, %*{"message": "hello", "mode": "text"}, context)
+    check value.kind == fkJson
+    let payload = value.asJson()
+    check payload["configKeys"][0].getStr() == "message"
+    check payload["configKeys"][1].getStr() == "mode"
+    check payload["stateKeys"][0].getStr() == "seen"
+    check "width" in payload["frameKeys"].mapIt(it.getStr())
+    check "event" in payload["contextKeys"].mapIt(it.getStr())
+    check payload["spreadConfig"]["message"].getStr() == "hello"
 
   test "releases overwritten dynamic field image refs":
     let config = testConfig()

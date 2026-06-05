@@ -157,6 +157,7 @@ proc JS_NewObject*(ctx: ptr JSContext): JSValue
 # Getting values from JSValue
 proc JS_ToInt32*(ctx: ptr JSContext, pres: ptr int32, val: JSValueConst): cint
 proc JS_ToFloat64*(ctx: ptr JSContext, pres: ptr float64, val: JSValueConst): cint
+proc JS_ToInt64Ext*(ctx: ptr JSContext, pres: ptr int64, val: JSValueConst): cint
 proc JS_ToCString*(ctx: ptr JSContext, val: JSValueConst): cstring
 proc JS_FreeCString*(ctx: ptr JSContext, str: cstring)
 proc JS_ToBool*(ctx: ptr JSContext, val: JSValueConst): cint
@@ -210,6 +211,12 @@ proc JS_DeleteProperty*(ctx: ptr JSContext, thisObj: JSValueConst, prop: JSAtom,
 
 # Array functions
 proc JS_NewArray*(ctx: ptr JSContext): JSValue
+proc JS_IsArray*(ctx: ptr JSContext, val: JSValueConst): cint
+proc JS_IsFunction*(ctx: ptr JSContext, val: JSValueConst): cint
+proc JS_Call*(ctx: ptr JSContext, funcObj: JSValueConst, thisObj: JSValueConst, argc: cint,
+    argv: ptr JSValueConst): JSValue
+proc JS_JSONStringify*(ctx: ptr JSContext, obj: JSValueConst, replacer: JSValueConst,
+    space0: JSValueConst): JSValue
 
 # Atom functions (for property names)
 proc JS_NewAtom*(ctx: ptr JSContext, str: cstring): JSAtom
@@ -224,7 +231,6 @@ proc JS_SetModuleLoaderFunc2*(rt: ptr JSRuntime, module_normalize: pointer, modu
     moduleName: cstring, opaque: pointer, attributes: JSValueConst): ptr JSModuleDef {.cdecl.},
     module_check_attrs: proc(ctx: ptr JSContext, opaque: pointer, attributes: JSValueConst): cint {.cdecl.},
     opaque: pointer)
-
 # Promise-related functions
 proc JS_PromiseState*(ctx: ptr JSContext, promise: JSValueConst): cint
 proc JS_PromiseResult*(ctx: ptr JSContext, promise: JSValueConst): JSValue
@@ -381,6 +387,33 @@ proc toNimFloat*(ctx: ptr JSContext, val: JSValueConst): float64 =
 
 proc toNimBool*(ctx: ptr JSContext, val: JSValueConst): bool =
   JS_ToBool(ctx, val) != 0
+
+proc toNimInt64Ext*(ctx: ptr JSContext, val: JSValueConst): int64 =
+  var res: int64
+  if JS_ToInt64Ext(ctx, addr res, val) != 0:
+    raise newException(JSException, "Failed to convert JSValue to int64")
+  result = res
+
+proc jsIsUndefined*(val: JSValueConst): bool =
+  {.emit: "return JS_IsUndefined(`val`);".}
+
+proc jsIsNull*(val: JSValueConst): bool =
+  {.emit: "return JS_IsNull(`val`);".}
+
+proc jsIsBool*(val: JSValueConst): bool =
+  {.emit: "return JS_IsBool(`val`);".}
+
+proc jsIsNumber*(val: JSValueConst): bool =
+  {.emit: "return JS_IsNumber(`val`);".}
+
+proc jsIsString*(val: JSValueConst): bool =
+  {.emit: "return JS_IsString(`val`);".}
+
+proc jsIsObject*(val: JSValueConst): bool =
+  {.emit: "return JS_IsObject(`val`);".}
+
+proc jsIsBigInt*(ctx: ptr JSContext, val: JSValueConst): bool =
+  {.emit: "return JS_IsBigInt(`ctx`, `val`);".}
 
 # Conversion from Nim types to JSValue
 proc nimStringToJS*(ctx: ptr JSContext, str: string): JSValue =
