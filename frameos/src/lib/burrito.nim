@@ -960,9 +960,11 @@ proc newQuickJS*(config: QuickJSConfig = defaultConfig()): QuickJS =
   if config.enableStdHandlers:
     js_std_init_handlers(rt)
 
-  # Set up module loader for ES6 modules (critical for std/os modules)
-  if config.includeStdLib or config.includeOsLib:
-    JS_SetModuleLoaderFunc(rt, nil, js_module_loader, nil)
+  # The libc js_module_loader signature has drifted across QuickJS releases while
+  # JS_SetModuleLoaderFunc stayed on the three-argument loader callback. Avoid
+  # passing that version-sensitive symbol directly; FrameOS only uses isolated
+  # contexts in production, and std/os modules are initialized explicitly below
+  # for legacy Burrito callers.
 
   # Initialize std module if requested
   if config.includeStdLib:
@@ -975,9 +977,6 @@ proc newQuickJS*(config: QuickJSConfig = defaultConfig()): QuickJS =
   # Add std helpers if any standard library is enabled
   if config.includeStdLib or config.includeOsLib:
     js_std_add_helpers(ctx, 0, nil)
-
-    # Set up module loader for proper module resolution
-    JS_SetModuleLoaderFunc(rt, nil, js_module_loader, nil)
 
   # Create context data for function registry
   let contextData = cast[ptr BurritoContextData](alloc0(sizeof(BurritoContextData)))

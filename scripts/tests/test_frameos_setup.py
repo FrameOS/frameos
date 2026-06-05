@@ -37,6 +37,7 @@ class FrameOSSetupScriptTest(unittest.TestCase):
         self._write_stubs()
 
     def tearDown(self) -> None:
+        self._restore_tmp_permissions()
         self.tmp.cleanup()
 
     def test_standalone_install_writes_frame_json_and_starts_frameos_only(self) -> None:
@@ -355,6 +356,32 @@ class FrameOSSetupScriptTest(unittest.TestCase):
     def _stub_log(self, name: str) -> str:
         path = self.out_dir / name
         return path.read_text(encoding="utf-8") if path.exists() else ""
+
+    def _restore_tmp_permissions(self) -> None:
+        if not shutil.which("docker") or not hasattr(self, "tmp_path"):
+            return
+        subprocess.run(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--volume",
+                f"{self.tmp_path}:/tmp/frameos-setup-test",
+                "--platform",
+                "linux/amd64",
+                "--env",
+                f"HOST_UID={os.getuid()}",
+                "--env",
+                f"HOST_GID={os.getgid()}",
+                IMAGE,
+                "/bin/sh",
+                "-lc",
+                'chown -R "$HOST_UID:$HOST_GID" /tmp/frameos-setup-test || true',
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=90,
+        )
 
     @staticmethod
     def _write_executable(path: Path, contents: str) -> None:

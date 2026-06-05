@@ -25,12 +25,15 @@ type
     outputTypes: Table[string, string]
     targetField: string
 
-var evalEnvByCtx = initTable[ptr JSContext, EvalEnv]()
+var currentEvalCtx: ptr JSContext
+var currentEvalEnv: EvalEnv
 var tzName = ""
 var compilerJsLock: Lock
+var sceneJsLock: Lock
 var compilerJs: QuickJS
 var compilerJsReady = false
 initLock(compilerJsLock)
+initLock(sceneJsLock)
 
 const sceneJsPrelude* = """
 const __frameosFragment = Symbol.for("frameos.fragment");
@@ -142,11 +145,11 @@ proc logCompileError(
   })
 
 # -------------------------
-# Build JS function
+# Build JS envelope function
 # -------------------------
 
 proc buildEnvelopeFunction(code: string, argNames: seq[string], fnName: string): string =
-  ## Create a named function returning the raw JavaScript value.
+  ## Create a named function returning a BigInt-safe JSON envelope.
   var decls = newSeq[string]()
   for rawName in argNames:
     let lc = rawName.toLowerAscii
@@ -161,7 +164,17 @@ proc buildEnvelopeFunction(code: string, argNames: seq[string], fnName: string):
 function """ & fnName & """() {
   "use strict";
   """ & declBlock & """
-  return ((state, args, context) => (""" & code & """))(__state, __args, __context);
+  try {
+    const __v = ((state, args, context) => (""" & code & """))(__state, __args, __context);
+    const __k = (__v === null) ? "null" : (Array.isArray(__v) ? "array" : typeof __v);
+    const json = (typeof __v === 'undefined')
+      ? JSON.stringify({ k: __k })
+      : JSON.stringify({ k: __k, v: __v  }, __jsReplacer);
+    return json;
+  } catch (e) {
+    const msg = (e && e.stack) ? e.stack : String(e);
+    return JSON.stringify({ k: "error", v: { message: String(e && e.message || e), stack: msg } });
+  }
 }
 """
 
@@ -170,7 +183,7 @@ function """ & fnName & """() {
 # -------------------------
 
 proc env(ctx: ptr JSContext): EvalEnv =
-  if evalEnvByCtx.hasKey(ctx): evalEnvByCtx[ctx] else: nil
+  if currentEvalCtx == ctx: currentEvalEnv else: nil
 
 # Return an object sentinel to represent "undefined" without using JS_UNDEFINED across the C boundary.
 proc jsUndefSentinel(ctx: ptr JSContext): JSValue {.inline.} =
@@ -412,8 +425,28 @@ proc jsValueToJson*(ctx: ptr JSContext, val: JSValueConst): JsonNode =
 
 proc jsValueToValue*(ctx: ptr JSContext, val: JSValueConst, expectedType: string = ""): Value =
   if expectedType.len > 0:
-    if jsIsUndefined(val):
+    if jsIsUndefined(val) or jsIsNull(val):
       return valueFromJsonByType(newJNull(), expectedType)
+    case expectedType
+    of "float":
+      if jsIsNumber(val):
+        return VFloat(toNimFloat(ctx, val))
+    of "integer":
+      if jsIsNumber(val):
+        return VInt(toNimFloat(ctx, val).int64)
+    of "boolean":
+      if jsIsBool(val):
+        return VBool(toNimBool(ctx, val))
+    of "string":
+      if jsIsString(val):
+        return VString(toNimString(ctx, val))
+    of "text":
+      if jsIsString(val):
+        return VText(toNimString(ctx, val))
+    of "json":
+      return VJson(jsValueToJson(ctx, val))
+    else:
+      discard
     return valueFromJsonByType(jsValueToJson(ctx, val), expectedType)
 
   if jsIsUndefined(val):
@@ -472,37 +505,38 @@ proc callGlobalFunction*(ctx: ptr JSContext, fnName: string, args: openArray[JSV
 # -------------------------
 
 proc ensureSceneJs*(scene: InterpretedFrameScene) =
-  if scene.jsReady: return
-  scene.js = newQuickJS()
-  # Register bridge functions ONCE per scene/context
-  scene.js.registerFunction("getState", jsGetState)
-  scene.js.registerFunction("getArg", jsGetArg)
-  scene.js.registerFunction("getContext", jsGetContext)
-  scene.js.registerFunction("jsLog", jsLog)
-  scene.js.registerFunction("parseTs", jsChronoParseTs)
-  scene.js.registerFunction("format", jsChronoFormat)
-  scene.js.registerFunction("now", jsChronoNow)
-  discard scene.js.eval("""
-  "use strict";
-  const __jsReplacer = (k, v) =>
-    (typeof v === 'bigint') ? { __bigint: v.toString() }
-    : (v === undefined ? null : v);
-  globalThis.__frameosStringify = (v) => JSON.stringify(v, __jsReplacer);
-  const console = {
-    log: (...a) => jsLog("log", JSON.stringify(a, __jsReplacer)),
-    warn: (...a) => jsLog("warn", JSON.stringify(a, __jsReplacer)),
-    error: (...a) => jsLog("error", JSON.stringify(a, __jsReplacer)),
-  };
-  const __frameosUnwrap = (v) => (v && v.__frameosUndef === true) ? undefined : v;
-  const __state   = new Proxy({}, { get(_, k) { return (typeof k === 'string') ? __frameosUnwrap(getState(k))   : undefined; } });
-  const __args    = new Proxy({}, { get(_, k) { return (typeof k === 'string') ? __frameosUnwrap(getArg(k))     : undefined; } });
-  const __context = new Proxy({}, { get(_, k) { return (typeof k === 'string') ? __frameosUnwrap(getContext(k)) : undefined; } });
-  """ & sceneJsPrelude)
-  # Initialize registries
-  scene.jsFuncNameByNode = initTable[NodeId, string]()
-  scene.codeInlineFuncNameByNodeArg = initTable[NodeId, Table[string, string]]()
-  scene.appInlineFuncNameByNodeArg = initTable[NodeId, Table[string, string]]()
-  scene.jsReady = true
+  withLock sceneJsLock:
+    if scene.jsReady: return
+    scene.js = newQuickJS()
+    # Register bridge functions ONCE per scene/context
+    scene.js.registerFunction("getState", jsGetState)
+    scene.js.registerFunction("getArg", jsGetArg)
+    scene.js.registerFunction("getContext", jsGetContext)
+    scene.js.registerFunction("jsLog", jsLog)
+    scene.js.registerFunction("parseTs", jsChronoParseTs)
+    scene.js.registerFunction("format", jsChronoFormat)
+    scene.js.registerFunction("now", jsChronoNow)
+    discard scene.js.eval("""
+    "use strict";
+    const __jsReplacer = (k, v) =>
+      (typeof v === 'bigint') ? { __bigint: v.toString() }
+      : (v === undefined ? null : v);
+    globalThis.__frameosStringify = (v) => JSON.stringify(v, __jsReplacer);
+    const console = {
+      log: (...a) => jsLog("log", JSON.stringify(a, __jsReplacer)),
+      warn: (...a) => jsLog("warn", JSON.stringify(a, __jsReplacer)),
+      error: (...a) => jsLog("error", JSON.stringify(a, __jsReplacer)),
+    };
+    const __frameosUnwrap = (v) => (v && v.__frameosUndef === true) ? undefined : v;
+    const __state   = new Proxy({}, { get(_, k) { return (typeof k === 'string') ? __frameosUnwrap(getState(k))   : undefined; } });
+    const __args    = new Proxy({}, { get(_, k) { return (typeof k === 'string') ? __frameosUnwrap(getArg(k))     : undefined; } });
+    const __context = new Proxy({}, { get(_, k) { return (typeof k === 'string') ? __frameosUnwrap(getContext(k)) : undefined; } });
+    """ & sceneJsPrelude)
+    # Initialize registries
+    scene.jsFuncNameByNode = initTable[NodeId, string]()
+    scene.codeInlineFuncNameByNodeArg = initTable[NodeId, Table[string, string]]()
+    scene.appInlineFuncNameByNodeArg = initTable[NodeId, Table[string, string]]()
+    scene.jsReady = true
 
 # -------------------------
 # Code function naming
@@ -536,7 +570,8 @@ proc compileInlineFn(scene: InterpretedFrameScene,
   try:
     let src = transpileSource(buildEnvelopeFunction(snippet, @[], fnName),
       "<frameos:inline:" & $nodeId.int & ":" & name & ">")
-    discard scene.js.eval(src)
+    withLock sceneJsLock:
+      discard scene.js.eval(src)
   except CatchableError as e:
     logCompileError(scene, nodeId, "inline", name, snippet, e)
     raise
@@ -576,7 +611,8 @@ proc compileCodeFn*(scene: InterpretedFrameScene, node: DiagramNode) =
   try:
     let src = transpileSource(buildEnvelopeFunction(codeSnippet, argNames, fnName),
       "<frameos:code:" & $node.id.int & ">")
-    discard scene.js.eval(src)
+    withLock sceneJsLock:
+      discard scene.js.eval(src)
   except CatchableError as e:
     logCompileError(scene, node.id, "code", "codeJS", codeSnippet, e)
     raise
@@ -600,7 +636,7 @@ proc callCompiledFn*(scene: InterpretedFrameScene,
                      argTypes: Table[string, string],
                      outputTypes: Table[string, string],
                      targetField: string): Value =
-  ## Set EvalEnv for this scene context, call fnName(), and coerce the returned JSValue.
+  ## Set EvalEnv for this scene context, call fnName(), parse envelope, coerce.
   var expectedType = ""
   if targetField.len > 0 and outputTypes.hasKey(targetField):
     expectedType = outputTypes[targetField]
@@ -615,30 +651,38 @@ proc callCompiledFn*(scene: InterpretedFrameScene,
     targetField: targetField
   )
 
-  evalEnvByCtx[scene.js.context] = e
-  var jsResult: JSValue
-  try:
-    jsResult = callGlobalFunction(scene.js.context, fnName)
-  finally:
-    if evalEnvByCtx.hasKey(scene.js.context):
-      evalEnvByCtx.del(scene.js.context)
+  var envelopeJson = ""
+  withLock sceneJsLock:
+    currentEvalCtx = scene.js.context
+    currentEvalEnv = e
+    try:
+      envelopeJson = scene.js.eval(fnName & "()")
+    finally:
+      if currentEvalCtx == scene.js.context:
+        currentEvalCtx = nil
+        currentEvalEnv = nil
 
-  defer: JS_FreeValue(scene.js.context, jsResult)
-  if JS_IsException(jsResult) != 0:
-    let details = jsExceptionDetails(scene.js.context)
+  var parsed: JsonNode
+  try:
+    parsed = parseJson(envelopeJson)
+  except CatchableError:
+    return Value(kind: fkString, s: envelopeJson)
+
+  let kind = parsed{"k"}.getStr()
+  if kind == "error":
     scene.logger.log(%*{
       "event": "interpreter:jsError",
       "sceneId": scene.id.string,
       "nodeId": nodeId.int,
-      "message": details.message,
-      "stack": details.stack
+      "message": parsed{"v"}{"message"}.getStr(),
+      "stack": parsed{"v"}{"stack"}.getStr()
     })
     if expectedType.len > 0:
       if expectedType == "string": return Value(kind: fkString, s: "")
       return valueFromJsonByType(newJNull(), expectedType)
     return Value(kind: fkNone)
 
-  return jsValueToValue(scene.js.context, jsResult, expectedType)
+  return envelopeToValue(parsed, expectedType)
 
 # -------------------------
 # Inline evaluation helper (generic)
@@ -687,7 +731,8 @@ proc evalSnippet*(
   try:
     let src = transpileSource(buildEnvelopeFunction(code, argNames, fnName),
       "<frameos:eval:" & $nodeId.int & ":" & $anonCounter & ">")
-    discard scene.js.eval(src)
+    withLock sceneJsLock:
+      discard scene.js.eval(src)
   except CatchableError as e:
     logCompileError(scene, nodeId, "eval", fnName, code, e)
     raise
@@ -723,15 +768,17 @@ proc cleanupCompilerJs*() =
     compilerJsReady = false
 
 proc cleanupSceneJs*(scene: InterpretedFrameScene) =
-  if not scene.jsReady:
-    return
-  if scene.js.context != nil and evalEnvByCtx.hasKey(scene.js.context):
-    evalEnvByCtx.del(scene.js.context)
-  if scene.js.runtime != nil:
-    scene.js.runPendingJobs()
-    JS_RunGC(scene.js.runtime)
-  scene.js.close()
-  scene.jsReady = false
-  scene.jsFuncNameByNode = initTable[NodeId, string]()
-  scene.codeInlineFuncNameByNodeArg = initTable[NodeId, Table[string, string]]()
-  scene.appInlineFuncNameByNodeArg = initTable[NodeId, Table[string, string]]()
+  withLock sceneJsLock:
+    if not scene.jsReady:
+      return
+    if scene.js.context != nil and currentEvalCtx == scene.js.context:
+      currentEvalCtx = nil
+      currentEvalEnv = nil
+    if scene.js.runtime != nil:
+      scene.js.runPendingJobs()
+      JS_RunGC(scene.js.runtime)
+    scene.js.close()
+    scene.jsReady = false
+    scene.jsFuncNameByNode = initTable[NodeId, string]()
+    scene.codeInlineFuncNameByNodeArg = initTable[NodeId, Table[string, string]]()
+    scene.appInlineFuncNameByNodeArg = initTable[NodeId, Table[string, string]]()
