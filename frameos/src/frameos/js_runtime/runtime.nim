@@ -195,6 +195,7 @@ proc buildEnvelopeFunctionWithMap(code: string, argNames: seq[string], fnName: s
     decls.add("const " & ident & " = __args[\"" & jsQuote(rawName) & "\"];")
 
   var mapLines: seq[int] = @[0]
+  var mapSegments: seq[SourceMapSegment] = @[]
   template addGeneratedLine(line: string, sourceLine: int = 0) =
     if result.code.len > 0:
       result.code.add("\n")
@@ -213,19 +214,26 @@ proc buildEnvelopeFunctionWithMap(code: string, argNames: seq[string], fnName: s
     for index, line in sourceLines:
       let sourceLine = index + 1
       if index == 0 and index == sourceLines.high:
-        addGeneratedLine("  return ((state, args, context) => (" & line & "))(__state, __args, __context);", sourceLine)
+        let prefix = "  return ((state, args, context) => ("
+        addGeneratedLine(prefix & line & "))(__state, __args, __context);", sourceLine)
+        mapSegments.add(SourceMapSegment(generatedLine: mapLines.len - 1, generatedColumn: prefix.len + 1, sourceLine: sourceLine, sourceColumn: 1))
       elif index == 0:
-        addGeneratedLine("  return ((state, args, context) => (" & line, sourceLine)
+        let prefix = "  return ((state, args, context) => ("
+        addGeneratedLine(prefix & line, sourceLine)
+        mapSegments.add(SourceMapSegment(generatedLine: mapLines.len - 1, generatedColumn: prefix.len + 1, sourceLine: sourceLine, sourceColumn: 1))
       elif index == sourceLines.high:
         addGeneratedLine(line & "))(__state, __args, __context);", sourceLine)
+        mapSegments.add(SourceMapSegment(generatedLine: mapLines.len - 1, generatedColumn: 1, sourceLine: sourceLine, sourceColumn: 1))
       else:
         addGeneratedLine(line, sourceLine)
+        mapSegments.add(SourceMapSegment(generatedLine: mapLines.len - 1, generatedColumn: 1, sourceLine: sourceLine, sourceColumn: 1))
   addGeneratedLine("}")
 
   result.sourceMap = SourceLineMap(
     generatedName: filename,
     sourceName: filename,
-    generatedToSourceLine: mapLines
+    generatedToSourceLine: mapLines,
+    segments: mapSegments
   )
 
 proc buildEnvelopeFunction(code: string, argNames: seq[string], fnName: string): string =

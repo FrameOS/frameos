@@ -79,8 +79,8 @@ implementation easy to compare with upstream Sucrase.
   instead of lowering it. Only add an ES transformer when a required FrameOS
   codepath uses syntax QuickJS cannot execute.
 - [x] Runtime source-location passthrough: transformed code registered with
-  QuickJS has generated-line to original-line mappings so runtime/compile error
-  stacks can point back to app/snippet source lines.
+  QuickJS has compact generated line/column segments so runtime/compile error
+  stacks can point back to app/snippet source positions.
 - [x] Diagnostic token formatting is available through native token/parse output
   used by the parity harness; richer Sucrase-style diagnostics can be added
   later if backend/editor validation moves off npm Sucrase.
@@ -332,9 +332,9 @@ that FrameOS users should reasonably paste. Candidate upstream transformers:
 
 Current policy: runtime transpilation does not need full source-map files
 because the transpiled output is immediately handed to QuickJS. It does need a
-lightweight line map for errors that come back from QuickJS, so the runtime
-registers generated-line to original-line mappings and rewrites QuickJS
-locations in compile/runtime logs.
+lightweight position map for errors that come back from QuickJS, so the runtime
+registers compact generated line/column segments and rewrites QuickJS locations
+in compile/runtime logs.
 
 Backend/editor validation can keep npm Sucrase diagnostics until there is a
 concrete reason to route those diagnostics through native Nim.
@@ -344,7 +344,7 @@ If that changes:
 - Port formatted token output for debugging.
 - Improve native parser error messages and source locations.
 - Add source-map support equivalent to `computeSourceMap` if editor workflows
-  need column-level original-source positions.
+  need a standard source-map artifact.
 
 ### Cutover Criteria
 

@@ -130,7 +130,7 @@ function demo(input: number) {
     let errorLogs = logs.filterIt(it{"event"}.getStr() == "interpreter:jsError")
     check errorLogs.len == 1
     check "mapped boom" in errorLogs[0]{"message"}.getStr()
-    check ">:3:" in errorLogs[0]{"stack"}.getStr()
+    check ">:3:18" in errorLogs[0]{"stack"}.getStr()
     cleanupSceneJs(scene)
     cleanupCompilerJs()
 
