@@ -2,61 +2,61 @@
   "images": {
     "frameos/frameos-cross-toolchain:debian_bookworm-linux_amd64-latest": {
       "base_image": "debian:bookworm",
-      "digest": "sha256:1b4a9fd8f0ce78da4986129f7b9562f50b3181b300f61b8de640c738e6c91835",
+      "digest": "sha256:f9642dcfe712fdcdd96241f9e1574482e0b875fa9fd6098a29ac423a4cd82b59",
       "platform": "linux/amd64",
       "tag": "latest"
     },
     "frameos/frameos-cross-toolchain:debian_bookworm-linux_arm64-latest": {
       "base_image": "debian:bookworm",
-      "digest": "sha256:a47e622f699dcf10aaae1e98d819dcab5bb19fe5fbcf669148ddad12878d3d3e",
+      "digest": "sha256:17e810a39fb457429852a63587d39a7dcdee436771d02c50254b4f98976c1e38",
       "platform": "linux/arm64",
       "tag": "latest"
     },
     "frameos/frameos-cross-toolchain:debian_bookworm-linux_arm_v7-latest": {
       "base_image": "debian:bookworm",
-      "digest": "sha256:c332dd9d9d00386e01cd4481157768ceac96f47220294a23108569233cb4ec79",
+      "digest": "sha256:3c736f41ad59ae491cbb617346e6051cfc9289e28754858234173f1b2f12b25c",
       "platform": "linux/arm/v7",
       "tag": "latest"
     },
     "frameos/frameos-cross-toolchain:debian_trixie-linux_amd64-latest": {
       "base_image": "debian:trixie",
-      "digest": "sha256:8efa51aa6ff20d5065739929693925e838ebc38a2aeb66dfa508066a4ef35624",
+      "digest": "sha256:89a8ff78ca6d028f47f4b893a2015f9f5a822751eee31a35573ae76d843844d9",
       "platform": "linux/amd64",
       "tag": "latest"
     },
     "frameos/frameos-cross-toolchain:debian_trixie-linux_arm64-latest": {
       "base_image": "debian:trixie",
-      "digest": "sha256:c08601ab0849ab7e5a9db0b3c7ee1d20ed3cef21ffb65ac9fe856b4b2d74a6a2",
+      "digest": "sha256:d2bb0892fae669e60129e9cb8186edaae00b82f7ce19ad3b0aeb18ee106f8083",
       "platform": "linux/arm64",
       "tag": "latest"
     },
     "frameos/frameos-cross-toolchain:debian_trixie-linux_arm_v7-latest": {
       "base_image": "debian:trixie",
-      "digest": "sha256:48db21243cf4045b3890b046e1a81a621083d298012a0bf9b066a7399ff67fef",
+      "digest": "sha256:e12c5926e769ca3688da84de7894fad3bdae7e619db528b89091cc20dc73c1ed",
       "platform": "linux/arm/v7",
       "tag": "latest"
     },
     "frameos/frameos-cross-toolchain:ubuntu_24.04-linux_amd64-latest": {
       "base_image": "ubuntu:24.04",
-      "digest": "sha256:fcbedc56297b8456d0f89d8a1162bde02d1639c775f012f98e8e37ae9e7e588b",
+      "digest": "sha256:181241f75de6ac7fcbea67d2f89c2f8cd40ed2675eeb0c14ce24d0ff1714e43c",
       "platform": "linux/amd64",
       "tag": "latest"
     },
     "frameos/frameos-cross-toolchain:ubuntu_24.04-linux_arm64-latest": {
       "base_image": "ubuntu:24.04",
-      "digest": "sha256:7487c9b152faa63284433cd84829da239af30f2757e980130e964403e35834e6",
+      "digest": "sha256:af5d7b897ee0691f87f78538fa55106530bfdfb2c033be18bd6665dc634593ea",
       "platform": "linux/arm64",
       "tag": "latest"
     },
     "frameos/frameos-cross-toolchain:ubuntu_26.04-linux_amd64-latest": {
       "base_image": "ubuntu:26.04",
-      "digest": "sha256:88cece1a8afaf32175d0ee1a4c47d11a66e2617e289fc831257ebce7fe8128e8",
+      "digest": "sha256:fbc0b8cd9f184672fcf5fb14ed38c153dda436a8b8cd73c17ac9ea18ebf4fc13",
       "platform": "linux/amd64",
       "tag": "latest"
     },
     "frameos/frameos-cross-toolchain:ubuntu_26.04-linux_arm64-latest": {
       "base_image": "ubuntu:26.04",
-      "digest": "sha256:6170bed107410d203116fa868e1352cdf53f46568a57719eeb32a574f2ac05ba",
+      "digest": "sha256:e9bd2638c0fa8c530fa5c1acfc4f5ab46ab099cd13c264fd14575f49d54424c9",
       "platform": "linux/arm64",
       "tag": "latest"
     }
