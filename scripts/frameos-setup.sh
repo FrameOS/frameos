@@ -42,6 +42,14 @@ prompt_out() {
   fi
 }
 
+prompt_line() {
+  if [ -n "$TTY" ]; then
+    printf '%s\n' "$*" >"$TTY"
+  else
+    printf '%s\n' "$*" >&2
+  fi
+}
+
 ask() {
   prompt="$1"
   default="${2:-}"
@@ -114,7 +122,7 @@ ask_secret() {
     else
       stty echo <"$TTY" 2>/dev/null || true
     fi
-    prompt_out "\n"
+    prompt_line ""
   fi
   printf '%s\n' "$answer"
 }
@@ -562,28 +570,29 @@ EOF
 choose_device() {
   default="$1"
   while :; do
-    prompt_out "\nDevice choices:\n"
-    prompt_out "  1) web_only (browser/admin preview only)\n"
-    prompt_out "  2) framebuffer (HDMI or Linux framebuffer)\n"
-    prompt_out "  3) http.upload (POST rendered PNG to an HTTP endpoint)\n"
-    prompt_out "  4) pimoroni.inky_impression_7_3\n"
-    prompt_out "  5) pimoroni.inky_impression_5_7\n"
-    prompt_out "  6) pimoroni.inky_impression_4\n"
-    prompt_out "  7) waveshare.EPD_7in5_V2\n"
-    prompt_out "  8) waveshare.EPD_7in3e\n"
-    prompt_out "  p) list Pimoroni devices\n"
-    prompt_out "  w) list Waveshare examples\n"
-    prompt_out "  c) custom device key\n"
+    prompt_line ""
+    prompt_line "Device choices:"
+    prompt_line "  1) web_only (browser/admin preview only)"
+    prompt_line "  2) framebuffer (HDMI or Linux framebuffer)"
+    prompt_line "  3) http.upload (POST rendered PNG to an HTTP endpoint)"
+    prompt_line "  4) pimoroni.inky_impression_7_2025"
+    prompt_line "  5) pimoroni.inky_impression_13_2025"
+    prompt_line "  6) waveshare.EPD_7in3e"
+    prompt_line "  7) waveshare.EPD_13in3e"
+    prompt_line "  8) waveshare.EPD_7in5_V2"
+    prompt_line "  p) list Pimoroni devices"
+    prompt_line "  w) list Waveshare examples"
+    prompt_line "  c) custom device key"
     answer="$(ask "Device" "$default")"
     case "$answer" in
       1) echo "web_only"; return ;;
       2) echo "framebuffer"; return ;;
       3) echo "http.upload"; return ;;
-      4) echo "pimoroni.inky_impression_7_3"; return ;;
-      5) echo "pimoroni.inky_impression_5_7"; return ;;
-      6) echo "pimoroni.inky_impression_4"; return ;;
-      7) echo "waveshare.EPD_7in5_V2"; return ;;
-      8) echo "waveshare.EPD_7in3e"; return ;;
+      4) echo "pimoroni.inky_impression_7_2025"; return ;;
+      5) echo "pimoroni.inky_impression_13_2025"; return ;;
+      6) echo "waveshare.EPD_7in3e"; return ;;
+      7) echo "waveshare.EPD_13in3e"; return ;;
+      8) echo "waveshare.EPD_7in5_V2"; return ;;
       p|P)
         print_pimoroni_devices >&2
         ;;
@@ -848,8 +857,8 @@ case "$FRAMEOS_ROTATE" in
 esac
 FRAMEOS_FRAME_PORT="${FRAMEOS_FRAME_PORT:-$(ask_int "Local admin panel port" "$default_frame_port")}"
 FRAMEOS_TIME_ZONE="${FRAMEOS_TIME_ZONE:-$(ask "Timezone" "$default_timezone")}"
-FRAMEOS_INTERVAL="${FRAMEOS_INTERVAL:-$(ask_float "Render interval in seconds" "$default_interval")}"
-FRAMEOS_METRICS_INTERVAL="${FRAMEOS_METRICS_INTERVAL:-$(ask_float "Metrics interval in seconds" "$default_metrics_interval")}"
+FRAMEOS_INTERVAL="${FRAMEOS_INTERVAL:-$default_interval}"
+FRAMEOS_METRICS_INTERVAL="${FRAMEOS_METRICS_INTERVAL:-$default_metrics_interval}"
 FRAMEOS_ADMIN_AUTH_ENABLED="${FRAMEOS_ADMIN_AUTH_ENABLED:-$(ask_yes_no "Require admin login for the local panel" "$default_admin_enabled")}"
 FRAMEOS_ADMIN_USER="${FRAMEOS_ADMIN_USER:-$(ask_required "Admin username" "$default_admin_user")}"
 
@@ -926,8 +935,13 @@ case "$FRAMEOS_WIFI_HOTSPOT" in
   disabled|bootOnly) ;;
   *) die "Unsupported WiFi setup hotspot mode: $FRAMEOS_WIFI_HOTSPOT" ;;
 esac
-FRAMEOS_WIFI_HOTSPOT_SSID="${FRAMEOS_WIFI_HOTSPOT_SSID:-$(ask "WiFi setup hotspot SSID" "$default_wifi_ssid")}"
-FRAMEOS_WIFI_HOTSPOT_PASSWORD="${FRAMEOS_WIFI_HOTSPOT_PASSWORD:-$(ask "WiFi setup hotspot password" "$default_wifi_password")}"
+if [ "$FRAMEOS_WIFI_HOTSPOT" = "bootOnly" ]; then
+  FRAMEOS_WIFI_HOTSPOT_SSID="${FRAMEOS_WIFI_HOTSPOT_SSID:-$(ask "WiFi setup hotspot SSID" "$default_wifi_ssid")}"
+  FRAMEOS_WIFI_HOTSPOT_PASSWORD="${FRAMEOS_WIFI_HOTSPOT_PASSWORD:-$(ask "WiFi setup hotspot password" "$default_wifi_password")}"
+else
+  FRAMEOS_WIFI_HOTSPOT_SSID="${FRAMEOS_WIFI_HOTSPOT_SSID:-$default_wifi_ssid}"
+  FRAMEOS_WIFI_HOTSPOT_PASSWORD="${FRAMEOS_WIFI_HOTSPOT_PASSWORD:-$default_wifi_password}"
+fi
 FRAMEOS_WIFI_HOTSPOT_TIMEOUT_SECONDS="${FRAMEOS_WIFI_HOTSPOT_TIMEOUT_SECONDS:-300}"
 FRAMEOS_LOG_TO_FILE="${FRAMEOS_LOG_TO_FILE:-$default_log_to_file}"
 FRAMEOS_ASSETS_PATH="${FRAMEOS_ASSETS_PATH:-$FRAMEOS_ASSETS_DIR}"

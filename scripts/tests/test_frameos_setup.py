@@ -49,8 +49,6 @@ class FrameOSSetupScriptTest(unittest.TestCase):
                 "FRAMEOS_ROTATE": "90",
                 "FRAMEOS_FRAME_PORT": "8787",
                 "FRAMEOS_TIME_ZONE": "Europe/Brussels",
-                "FRAMEOS_INTERVAL": "123",
-                "FRAMEOS_METRICS_INTERVAL": "61",
                 "FRAMEOS_ADMIN_AUTH_ENABLED": "true",
                 "FRAMEOS_ADMIN_USER": "admin",
                 "FRAMEOS_ADMIN_PASSWORD": "admin-secret",
@@ -58,8 +56,6 @@ class FrameOSSetupScriptTest(unittest.TestCase):
                 "FRAMEOS_FRAME_ACCESS_KEY": "local-access-key",
                 "FRAMEOS_NETWORK_CHECK": "false",
                 "FRAMEOS_WIFI_HOTSPOT": "disabled",
-                "FRAMEOS_WIFI_HOTSPOT_SSID": "FrameOS-Setup",
-                "FRAMEOS_WIFI_HOTSPOT_PASSWORD": "frame1234",
                 "FRAMEOS_SAVE_ASSETS": "true",
             }
         )
@@ -71,8 +67,8 @@ class FrameOSSetupScriptTest(unittest.TestCase):
         self.assertEqual(frame_json["width"], 800)
         self.assertEqual(frame_json["height"], 480)
         self.assertEqual(frame_json["rotate"], 90)
-        self.assertEqual(frame_json["interval"], 123.0)
-        self.assertEqual(frame_json["metricsInterval"], 61.0)
+        self.assertEqual(frame_json["interval"], 300.0)
+        self.assertEqual(frame_json["metricsInterval"], 60.0)
         self.assertEqual(frame_json["timeZone"], "Europe/Brussels")
         self.assertEqual(frame_json["frameAdminAuth"], {
             "enabled": True,
@@ -160,6 +156,44 @@ class FrameOSSetupScriptTest(unittest.TestCase):
         checks = self._container_checks()
         self.assertTrue(checks["frameos_service_installed"])
         self.assertTrue(checks["agent_service_installed"])
+
+    def test_device_menu_prints_real_newlines(self) -> None:
+        menu = subprocess.run(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--volume",
+                f"{ROOT}:/repo:ro",
+                "--platform",
+                "linux/amd64",
+                IMAGE,
+                "/bin/sh",
+                "-lc",
+                "awk '/^copy_scene_payloads\\(\\) /{exit} {print}' /repo/scripts/frameos-setup.sh > /tmp/functions.sh "
+                "&& . /tmp/functions.sh "
+                "&& printf '\\n' | choose_device web_only >/tmp/device",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=90,
+        )
+        if menu.returncode != 0:
+            self.fail(
+                "device menu container failed\n"
+                f"return code: {menu.returncode}\n"
+                f"stdout:\n{menu.stdout}\n"
+                f"stderr:\n{menu.stderr}\n"
+            )
+        self.assertIn("Device choices:\n  1) web_only", menu.stderr)
+        self.assertIn("4) pimoroni.inky_impression_7_2025", menu.stderr)
+        self.assertIn("5) pimoroni.inky_impression_13_2025", menu.stderr)
+        self.assertIn("6) waveshare.EPD_7in3e", menu.stderr)
+        self.assertIn("7) waveshare.EPD_13in3e", menu.stderr)
+        self.assertIn("8) waveshare.EPD_7in5_V2", menu.stderr)
+        self.assertNotIn("\\nDevice choices", menu.stderr)
+        self.assertNotIn("custom device key\\nDevice", menu.stderr)
 
     def _write_fake_release_archive(self) -> None:
         artifact_root = self.tmp_path / "artifact" / f"frameos-{VERSION}-{TARGET}"
