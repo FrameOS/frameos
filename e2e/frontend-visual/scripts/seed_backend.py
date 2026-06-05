@@ -30,6 +30,7 @@ from app.models.scene_image import SceneImage
 from app.models.settings import Settings
 from app.models.user import User
 from app.redis import close_redis_connection, create_redis_connection
+from app.tenancy import ensure_default_project_for_user
 
 VISUAL_EMAIL = "visual@example.com"
 VISUAL_PASSWORD = "visual-password"
@@ -233,12 +234,19 @@ def create_data() -> tuple[Frame, list[dict[str, Any]]]:
         user = User(email=VISUAL_EMAIL)
         user.set_password(VISUAL_PASSWORD)
         db.add(user)
+        db.commit()
+        db.refresh(user)
+        project = ensure_default_project_for_user(db, user)
+
+        for frame in (primary_frame, inactive_frame, archived_frame):
+            frame.project_id = project.id
+            frame.server_api_key = f"visual-server-key-{frame.id}"
         db.add_all([primary_frame, inactive_frame, archived_frame])
 
         db.add_all(
             [
-                Settings(key="openAI", value={"backendApiKey": "sk-visual-fixture", "imageGenerationModel": "gpt-image-1"}),
-                Settings(key="stabilityAI", value={"apiKey": "visual-stability-key"}),
+                Settings(project_id=project.id, key="openAI", value={"backendApiKey": "sk-visual-fixture", "imageGenerationModel": "gpt-image-1"}),
+                Settings(project_id=project.id, key="stabilityAI", value={"apiKey": "visual-stability-key"}),
             ]
         )
 
@@ -253,6 +261,7 @@ def create_data() -> tuple[Frame, list[dict[str, Any]]]:
             log_type, line = log_messages[index % len(log_messages)]
             db.add(
                 Log(
+                    project_id=project.id,
                     frame_id=1,
                     type=log_type,
                     line=line,
@@ -268,6 +277,7 @@ def create_data() -> tuple[Frame, list[dict[str, Any]]]:
             disk_used = 4_100_000_000 + index * 650_000
             db.add(
                 Metrics(
+                    project_id=project.id,
                     frame_id=1,
                     timestamp=timestamp,
                     metrics={
@@ -294,6 +304,7 @@ def create_data() -> tuple[Frame, list[dict[str, Any]]]:
             thumb, thumb_width, thumb_height = make_thumb(png)
             db.add(
                 SceneImage(
+                    project_id=project.id,
                     frame_id=1,
                     scene_id=scene["id"],
                     image=png,

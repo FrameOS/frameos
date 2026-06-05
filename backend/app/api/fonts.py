@@ -3,13 +3,14 @@ import os
 from fastapi import Depends, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
+from app.api.project_scope import project_query
 from app.database import get_db
 from app.models.assets import Assets
 from app.models.fonts import gather_all_fonts_info, parse_font_info_in_memory
 from app.schemas.fonts import FontMetadata, FontsListResponse
-from . import api_with_auth
+from . import api_project
 
-@api_with_auth.get("/fonts", response_model=FontsListResponse)
+@api_project.get("/fonts", response_model=FontsListResponse)
 async def api_fonts_list(db: Session = Depends(get_db)):
     """
     Return a combined list of font metadata from:
@@ -20,7 +21,11 @@ async def api_fonts_list(db: Session = Depends(get_db)):
     local_list = gather_all_fonts_info("../frameos/assets/copied/fonts")
 
     # 2) Gather DB fonts with path like "fonts/..."
-    db_assets = db.query(Assets).filter(Assets.path.like("fonts/%")).all()  # [NEW]
+    db_assets = (
+        project_query(db, Assets)
+        .filter(Assets.path.like("fonts/%"))
+        .all()
+    )
     for asset in db_assets:
         # asset.path is e.g. "fonts/MyFont.ttf"
         filename = os.path.basename(asset.path)
@@ -47,7 +52,7 @@ async def api_fonts_list(db: Session = Depends(get_db)):
     return {"fonts": combined_fonts}
 
 
-@api_with_auth.get("/fonts/{font_name}")
+@api_project.get("/fonts/{font_name}")
 async def api_fonts_download(font_name: str, db: Session = Depends(get_db)):
     """
     Download a font by name. Checks DB first, then local folder.
@@ -55,7 +60,7 @@ async def api_fonts_download(font_name: str, db: Session = Depends(get_db)):
     If found locally, returns a FileResponse from disk.
     """
     # 1) Check DB for path="fonts/<font_name>"
-    asset = db.query(Assets).filter_by(path=f"fonts/{font_name}").first()
+    asset = project_query(db, Assets).filter(Assets.path == f"fonts/{font_name}").first()
     if asset:
         if not asset.data:
             raise HTTPException(status_code=404, detail="Font asset has no data")

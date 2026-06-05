@@ -3,8 +3,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from app.models.repository import Repository
 
 @pytest.mark.asyncio
-async def test_repository_create(db):
-    repo = Repository(name="TestRepo", url="http://example.com/repo")
+async def test_repository_create(db, default_project):
+    repo = Repository(project_id=default_project.id, name="TestRepo", url="http://example.com/repo")
     db.add(repo)
     db.commit()
     assert repo.id is not None
@@ -12,7 +12,7 @@ async def test_repository_create(db):
 
 @pytest.mark.asyncio
 @patch("app.models.repository.httpx.AsyncClient")   # ➊ patch the *class*
-async def test_repository_update_templates(mock_async_client_cls, db):
+async def test_repository_update_templates(mock_async_client_cls, db, default_project):
     fake_response = MagicMock()
     fake_response.status_code = 200
     fake_response.json.return_value = {
@@ -28,7 +28,7 @@ async def test_repository_update_templates(mock_async_client_cls, db):
     mock_client.__aenter__.return_value = mock_client
     mock_client.__aexit__.return_value = False   # propagate exceptions normally
 
-    repo = Repository(name="OldName", url="http://example.com/repo")
+    repo = Repository(project_id=default_project.id, name="OldName", url="http://example.com/repo")
     db.add(repo)
     db.commit()
 

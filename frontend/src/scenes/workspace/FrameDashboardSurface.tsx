@@ -1,35 +1,22 @@
 import { useActions, useValues } from 'kea'
 import { A } from 'kea-router'
 import clsx from 'clsx'
-import type { CSSProperties, DragEvent, FormEvent } from 'react'
+import type { CSSProperties, DragEvent } from 'react'
 import {
   AdjustmentsHorizontalIcon,
-  ArchiveBoxIcon,
-  ArrowPathIcon,
-  ArrowUturnLeftIcon,
   CalendarDaysIcon,
   ChartBarIcon,
   CircleStackIcon,
   CommandLineIcon,
   DocumentTextIcon,
-  PencilSquareIcon,
   PlusIcon,
-  PowerIcon,
-  RocketLaunchIcon,
   SignalIcon,
-  StopCircleIcon,
   SparklesIcon,
-  TrashIcon,
 } from '@heroicons/react/24/outline'
-import { PlayIcon } from '@heroicons/react/24/solid'
 
-import { DropdownMenu } from '../../components/DropdownMenu'
 import { FrameConnectionDot } from '../../components/FrameConnectionDot'
-import { FrameImage } from '../../components/FrameImage'
-import { Modal } from '../../components/Modal'
-import { TextInput } from '../../components/TextInput'
+import { FrameImage, FrameImageRefreshButton } from '../../components/FrameImage'
 import { frameHost, frameIsHealthy, frameStatus } from '../../decorators/frame'
-import { framesModel } from '../../models/framesModel'
 import { urls } from '../../urls'
 import type { FrameScene, FrameType, ScheduledEvent } from '../../types'
 import { frameLogic } from '../frame/frameLogic'
@@ -37,8 +24,10 @@ import { HeaderMetrics } from '../frame/panels/Metrics/HeaderMetrics'
 import { CompiledSceneTag } from '../frame/panels/Scenes/CompiledSceneTag'
 import { templatesLogic } from '../frame/panels/Templates/templatesLogic'
 import { newFrameForm } from '../frames/newFrameForm'
+import { FrameActionsMenu } from './FrameActionsMenu'
 import { FrameLiveBadge } from './FrameLiveBadge'
 import { FrameChangeStatusIcon } from './FrameChangeStatusIcon'
+import { FrameMetricAlertIndicator } from './FrameMetricAlertIndicator'
 import { WorkspaceSceneDropDown } from './WorkspaceSceneDropDown'
 import {
   FRAMEOS_TEMPLATE_DRAG_TYPE,
@@ -51,7 +40,9 @@ import { sceneTileSummaryLabel } from './sceneTileLabels'
 import { workspaceLogic } from './workspaceLogic'
 
 const uploadedScenePrefix = 'uploaded/'
+const livePreviewSceneId = '__live_preview__'
 const activeSurfaceClassName = 'frameos-active-surface'
+const selectedSurfaceClassName = 'frameos-selected-surface'
 const sceneTileWidthRem = 9
 const sceneTileGapRem = 1
 const framePreviewMaxHeightRem = 32
@@ -77,7 +68,11 @@ interface FrameDashboardSurfaceProps {
 }
 
 export function sceneIsActive(scene: FrameScene, currentSceneId: string | null | undefined): boolean {
-  return currentSceneId === scene.id || currentSceneId === `${uploadedScenePrefix}${scene.id}`
+  return sceneIdIsActive(scene.id, currentSceneId)
+}
+
+function sceneIdIsActive(sceneId: string, currentSceneId: string | null | undefined): boolean {
+  return currentSceneId === sceneId || currentSceneId === `${uploadedScenePrefix}${sceneId}`
 }
 
 function frameDisplayDimensions(frame: FrameType): { width: number; height: number } | null {
@@ -191,19 +186,37 @@ function scheduleDatePrefix(date: Date, now = new Date()): string {
 }
 
 function FramePreviewPanel({ frame, scenes }: { frame: FrameType; scenes: FrameScene[] }): JSX.Element {
+  const { sceneControlSelection } = useValues(workspaceLogic)
+  const { openLiveSceneControl } = useActions(workspaceLogic)
   const previewSizing = framePreviewSizing(frame)
-  const activeScene = scenes.find((scene) => sceneIsActive(scene, frame.active_scene_id))
+  const activeSceneId = frame.active_scene_id || null
+  const liveSceneControlId = activeSceneId || livePreviewSceneId
+  const activeScene = scenes.find((scene) => sceneIsActive(scene, activeSceneId))
+  const previewSelected =
+    sceneControlSelection?.frameId === frame.id &&
+    (activeSceneId
+      ? sceneIdIsActive(sceneControlSelection.sceneId, activeSceneId)
+      : sceneControlSelection.sceneId === livePreviewSceneId) &&
+    sceneControlSelection.source === 'preview'
   const nextSchedule = nextScheduledEvent(frame.schedule)
   const scheduledScene = nextSchedule ? scenes.find((scene) => scene.id === nextSchedule.event.payload.sceneId) : null
 
   return (
     <div
-      className="frameos-card group w-full min-w-0 justify-self-start overflow-hidden rounded-lg border border-white/90 bg-white text-left shadow-xl shadow-slate-300/35 transition hover:-translate-y-0.5 hover:shadow-2xl hover:shadow-slate-300/45"
+      className={clsx(
+        'frameos-card group relative w-full min-w-0 justify-self-start overflow-hidden rounded-lg border bg-white text-left transition hover:-translate-y-0.5',
+        previewSelected
+          ? selectedSurfaceClassName
+          : 'border-white/90 shadow-xl shadow-slate-300/35 hover:shadow-2xl hover:shadow-slate-300/45'
+      )}
       style={previewSizing?.cardStyle ?? { maxWidth: `${framePreviewMaxWidthRem}rem` }}
     >
-      <A
-        href={urls.frame(frame.id, 'preview')}
-        className="block focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+      <button
+        type="button"
+        onClick={() => {
+          openLiveSceneControl(frame.id, liveSceneControlId)
+        }}
+        className="block w-full focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
       >
         <div
           className={clsx(
@@ -220,7 +233,8 @@ function FramePreviewPanel({ frame, scenes }: { frame: FrameType; scenes: FrameS
           />
           <FrameLiveBadge frame={frame} className="right-3 top-3" />
         </div>
-      </A>
+      </button>
+      <FrameImageRefreshButton frameId={frame.id} />
       <div className="frameos-divider border-t border-slate-200/80 px-3 py-3">
         <div className="min-w-0 text-sm">
           <div className="frameos-strong truncate font-semibold text-slate-800">
@@ -241,20 +255,7 @@ function FramePreviewPanel({ frame, scenes }: { frame: FrameType; scenes: FrameS
 }
 
 function FrameHeaderActions({ frame, archived }: { frame: FrameType; archived?: boolean }): JSX.Element {
-  const {
-    deleteFrame,
-    deployAgent,
-    rebootFrame,
-    renderFrame,
-    restartAgent,
-    restartFrame,
-    setFrameArchived,
-    stopFrame,
-  } = useActions(framesModel)
-  const { openChatDrawer, openFrameChangeDrawer, openRenameFrameDialog } = useActions(workspaceLogic)
-  const frameName = frame.name || frameHost(frame)
-  const agentConfigured = Boolean(frame.agent?.agentEnabled && frame.agent.agentSharedSecret)
-  const canDeployAgent = agentConfigured && (frame.mode ?? 'rpios') === 'rpios'
+  const { openChatDrawer } = useActions(workspaceLogic)
 
   return (
     <div className="frame-header-actions flex min-w-0 shrink-0 items-center justify-start gap-1">
@@ -268,81 +269,11 @@ function FrameHeaderActions({ frame, archived }: { frame: FrameType; archived?: 
         >
           <SparklesIcon className="h-5 w-5" />
         </button>
-        <DropdownMenu
+        <FrameActionsMenu
+          frame={frame}
+          archived={archived}
           buttonColor="none"
-          horizontal
           className="frame-header-icon-button flex h-9 w-9 shrink-0 items-center justify-center rounded-lg !px-0 !py-0 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-          items={[
-            {
-              label: 'Rename',
-              title: 'Rename frame',
-              onClick: () => openRenameFrameDialog(frame.id, frameName),
-              icon: <PencilSquareIcon className="h-5 w-5" />,
-            },
-            {
-              label: 'Render now',
-              title: 'Render frame now',
-              onClick: () => renderFrame(frame.id),
-              icon: <PlayIcon className="h-5 w-5" />,
-            },
-            {
-              label: 'Deploy',
-              title: 'Open deploy options',
-              onClick: () => openFrameChangeDrawer(frame.id, 'deploy'),
-              icon: <RocketLaunchIcon className="h-5 w-5" />,
-            },
-            {
-              label: 'Stop FrameOS',
-              title: 'Stop FrameOS service',
-              onClick: () => stopFrame(frame.id),
-              icon: <StopCircleIcon className="h-5 w-5" />,
-            },
-            {
-              label: 'Restart FrameOS',
-              title: 'Restart FrameOS service',
-              onClick: () => restartFrame(frame.id),
-              icon: <ArrowPathIcon className="h-5 w-5" />,
-            },
-            {
-              label: 'Reboot device',
-              title: 'Reboot device',
-              onClick: () => rebootFrame(frame.id),
-              icon: <PowerIcon className="h-5 w-5" />,
-            },
-            ...(agentConfigured
-              ? [
-                  {
-                    label: 'Restart agent',
-                    title: 'Restart FrameOS agent',
-                    onClick: () => restartAgent(frame.id),
-                    icon: <CommandLineIcon className="h-5 w-5" />,
-                  },
-                ]
-              : []),
-            ...(canDeployAgent
-              ? [
-                  {
-                    label: 'Deploy agent',
-                    title: 'Deploy FrameOS agent',
-                    onClick: () => deployAgent(frame.id),
-                    icon: <CommandLineIcon className="h-5 w-5" />,
-                  },
-                ]
-              : []),
-            {
-              label: archived ? 'Restore' : 'Archive',
-              title: archived ? 'Restore frame' : 'Archive frame',
-              onClick: () => setFrameArchived(frame.id, !archived),
-              icon: archived ? <ArrowUturnLeftIcon className="h-5 w-5" /> : <ArchiveBoxIcon className="h-5 w-5" />,
-            },
-            {
-              label: 'Delete',
-              title: 'Delete frame',
-              confirm: `Delete "${frameName}"? This cannot be undone.`,
-              onClick: () => deleteFrame(frame.id),
-              icon: <TrashIcon className="h-5 w-5" />,
-            },
-          ]}
         />
       </div>
     </div>
@@ -369,6 +300,7 @@ function FrameDashboardHeader({ frame, archived }: { frame: FrameType; archived?
               >
                 {frame.name || frameHost(frame)}
               </h2>
+              <FrameMetricAlertIndicator frame={frame} className="h-5 w-5" />
               {archived ? (
                 <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-semibold text-slate-500">
                   Archived
@@ -425,56 +357,6 @@ function FrameDashboardStatusLine({ frame }: { frame: FrameType }): JSX.Element 
   )
 }
 
-function RenameFrameModal({ frame }: { frame: FrameType }): JSX.Element | null {
-  const { renameFrameDialog } = useValues(workspaceLogic)
-  const { closeRenameFrameDialog, setRenameFrameName } = useActions(workspaceLogic)
-  const { renameFrame } = useActions(framesModel)
-
-  if (!renameFrameDialog || renameFrameDialog.frameId !== frame.id) {
-    return null
-  }
-
-  const frameName = frame.name || frameHost(frame)
-  const nextName = renameFrameDialog.name.trim()
-  const canSave = nextName.length > 0 && nextName !== frameName
-
-  const submitRename = (event: FormEvent<HTMLFormElement>): void => {
-    event.preventDefault()
-    if (!canSave) {
-      return
-    }
-    renameFrame(frame.id, nextName)
-    closeRenameFrameDialog()
-  }
-
-  return (
-    <Modal open onClose={closeRenameFrameDialog} title="Rename frame">
-      <form onSubmit={submitRename} className="space-y-4 p-5">
-        <label className="block">
-          <span className="frameos-muted mb-2 block text-sm font-semibold">Frame name</span>
-          <TextInput autoFocus value={renameFrameDialog.name} onChange={setRenameFrameName} />
-        </label>
-        <div className="flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={closeRenameFrameDialog}
-            className="frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={!canSave}
-            className="frameos-primary-action rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            Rename
-          </button>
-        </div>
-      </form>
-    </Modal>
-  )
-}
-
 function FrameSceneTile({
   frame,
   scene,
@@ -503,7 +385,7 @@ function FrameSceneTile({
       className={clsx(
         'frameos-card group relative h-36 w-36 shrink-0 overflow-hidden rounded-lg border bg-white text-left transition hover:-translate-y-0.5 focus-within:ring-2 focus-within:ring-blue-400',
         highlighted
-          ? activeSurfaceClassName
+          ? selectedSurfaceClassName
           : 'border-white/90 shadow-lg shadow-slate-300/35 hover:shadow-xl hover:shadow-slate-300/50'
       )}
     >
@@ -666,7 +548,10 @@ function FrameScenesBlock({
         <div className="flex flex-wrap gap-4">
           {scenes.map((scene) => {
             const active = sceneIsActive(scene, frame.active_scene_id)
-            const selected = sceneControlSelection?.frameId === frame.id && sceneControlSelection.sceneId === scene.id
+            const selected =
+              sceneControlSelection?.frameId === frame.id &&
+              sceneControlSelection.sceneId === scene.id &&
+              sceneControlSelection.source !== 'preview'
             return (
               <FrameSceneTile
                 key={scene.id}
@@ -674,7 +559,7 @@ function FrameScenesBlock({
                 scene={scene}
                 scenes={scenes}
                 active={active}
-                highlighted={active || selected}
+                highlighted={selected}
                 showMenu={showSceneMenus}
               />
             )
@@ -744,7 +629,6 @@ export function FrameDashboardSurface({
       onDrop={handleFrameDrop}
       className={clsx('group @container scroll-mt-6', archived && 'opacity-80')}
     >
-      <RenameFrameModal frame={frame} />
       <FrameDashboardHeader frame={frame} archived={archived} />
       <div className="grid gap-5 @2xl:grid-cols-[minmax(0,19rem)_minmax(19rem,1fr)] @2xl:items-start">
         <FramePreviewPanel frame={frame} scenes={scenes} />

@@ -52,99 +52,99 @@ jobs:
             base_image="$BASE_IMAGE"
           else
             base_image="$(python3 - <<'PY'
-import re
-from pathlib import Path
+          import re
+          from pathlib import Path
 
-path = Path('backend/app/tasks/buildroot_image.py')
-text = path.read_text(encoding='utf-8')
-match = re.search(r'BUILDROOT_DOCKER_IMAGE = os\.environ\.get\("FRAMEOS_BUILDROOT_DOCKER_IMAGE", "([^"]+)"\)', text)
-if not match:
-    raise SystemExit('Failed to resolve FRAMEOS_BUILDROOT_DOCKER_IMAGE default')
-print(match.group(1))
-PY
-)"
+          path = Path('backend/app/tasks/buildroot_image.py')
+          text = path.read_text(encoding='utf-8')
+          match = re.search(r'BUILDROOT_DOCKER_IMAGE = os\.environ\.get\("FRAMEOS_BUILDROOT_DOCKER_IMAGE", "([^"]+)"\)', text)
+          if not match:
+              raise SystemExit('Failed to resolve FRAMEOS_BUILDROOT_DOCKER_IMAGE default')
+          print(match.group(1))
+          PY
+          )"
           fi
 
           if [ -n "$BUILDROOT_VERSION_OVERRIDE" ]; then
             version="$BUILDROOT_VERSION_OVERRIDE"
           else
             version="$(python3 - <<'PY'
-import re
-from pathlib import Path
+          import re
+          from pathlib import Path
 
-path = Path('backend/app/tasks/buildroot_image.py')
-text = path.read_text(encoding='utf-8')
-match = re.search(r'BUILDROOT_VERSION = os\.environ\.get\("FRAMEOS_BUILDROOT_VERSION", "([^"]+)"\)', text)
-if not match:
-    raise SystemExit('Failed to resolve FRAMEOS_BUILDROOT_VERSION default')
-print(match.group(1))
-PY
-)"
+          path = Path('backend/app/tasks/buildroot_image.py')
+          text = path.read_text(encoding='utf-8')
+          match = re.search(r'BUILDROOT_VERSION = os\.environ\.get\("FRAMEOS_BUILDROOT_VERSION", "([^"]+)"\)', text)
+          if not match:
+              raise SystemExit('Failed to resolve FRAMEOS_BUILDROOT_VERSION default')
+          print(match.group(1))
+          PY
+          )"
           fi
 
           BASE_IMAGE="$base_image" BUILDROOT_VERSION="$version" IMAGE_TAG="$IMAGE_TAG" python3 - <<'PY'
-from __future__ import annotations
+          from __future__ import annotations
 
-import json
-import os
-import re
-import subprocess
-from pathlib import Path
-
-
-def sanitize(value: str) -> str:
-    return re.sub(r"[^A-Za-z0-9_.-]+", "_", value)
+          import json
+          import os
+          import re
+          import subprocess
+          from pathlib import Path
 
 
-base_image = os.environ["BASE_IMAGE"]
-version = os.environ["BUILDROOT_VERSION"]
-image_tag = os.environ.get("IMAGE_TAG", "latest").strip() or "latest"
-image = f"frameos/frameos-buildroot:{sanitize(base_image.replace('/', '_'))}-{sanitize(version)}-{image_tag}"
-metadata_file = Path("/tmp/buildroot-metadata.json")
+          def sanitize(value: str) -> str:
+              return re.sub(r"[^A-Za-z0-9_.-]+", "_", value)
 
-subprocess.run(
-    [
-        "docker",
-        "buildx",
-        "build",
-        "--platform",
-        "linux/amd64",
-        "--build-arg",
-        f"BASE_IMAGE={base_image}",
-        "--build-arg",
-        f"BUILDROOT_VERSION={version}",
-        "--tag",
-        image,
-        "--push",
-        "--metadata-file",
-        str(metadata_file),
-        "-f",
-        "backend/tools/buildroot.Dockerfile",
-        ".",
-    ],
-    check=True,
-)
 
-metadata = json.loads(metadata_file.read_text(encoding="utf-8"))
-digest = metadata.get("containerimage.digest") or (metadata.get("containerimage.descriptor") or {}).get("digest")
-if not digest:
-    raise RuntimeError(f"Missing container image digest for {image}")
+          base_image = os.environ["BASE_IMAGE"]
+          version = os.environ["BUILDROOT_VERSION"]
+          image_tag = os.environ.get("IMAGE_TAG", "latest").strip() or "latest"
+          image = f"frameos/frameos-buildroot:{sanitize(base_image.replace('/', '_'))}-{sanitize(version)}-{image_tag}"
+          metadata_file = Path("/tmp/buildroot-metadata.json")
 
-Path("buildroot-images.json").write_text(
-    json.dumps(
-        {"images": {image: {
-            "digest": digest,
-            "base_image": base_image,
-            "version": version,
-            "tag": image_tag,
-        }}},
-        indent=2,
-        sort_keys=True,
-    )
-    + "\n",
-    encoding="utf-8",
-)
-PY
+          subprocess.run(
+              [
+                  "docker",
+                  "buildx",
+                  "build",
+                  "--platform",
+                  "linux/amd64",
+                  "--build-arg",
+                  f"BASE_IMAGE={base_image}",
+                  "--build-arg",
+                  f"BUILDROOT_VERSION={version}",
+                  "--tag",
+                  image,
+                  "--push",
+                  "--metadata-file",
+                  str(metadata_file),
+                  "-f",
+                  "backend/tools/buildroot.Dockerfile",
+                  ".",
+              ],
+              check=True,
+          )
+
+          metadata = json.loads(metadata_file.read_text(encoding="utf-8"))
+          digest = metadata.get("containerimage.digest") or (metadata.get("containerimage.descriptor") or {}).get("digest")
+          if not digest:
+              raise RuntimeError(f"Missing container image digest for {image}")
+
+          Path("buildroot-images.json").write_text(
+              json.dumps(
+                  {"images": {image: {
+                      "digest": digest,
+                      "base_image": base_image,
+                      "version": version,
+                      "tag": image_tag,
+                  }}},
+                  indent=2,
+                  sort_keys=True,
+              )
+              + "\n",
+              encoding="utf-8",
+          )
+          PY
       - name: Commit updated buildroot digests
         if: github.event_name == 'push'
         run: |
@@ -156,5 +156,5 @@ PY
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "chore: refresh buildroot image digests [skip ci]"
+          git commit -m "chore: refresh buildroot image digests"
           git push

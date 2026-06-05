@@ -75,6 +75,7 @@ suite "Server API helpers":
 
     let payload = frameApiPayload(state)
     check payload{"interval"}.getFloat() == 42
+    check payload{"max_http_response_bytes"}.getInt() == globalFrameConfig.maxHttpResponseBytes
     check payload{"background_color"}.getStr() == "#123456"
     check payload{"active_connections"}.getInt() == 2
     check payload{"scenes"}.kind == JArray

@@ -3,6 +3,8 @@ import frameos/ids
 export ids
 import lib/burrito
 
+const DefaultMaxHttpResponseBytes* = 64 * 1024 * 1024
+
 type
   # Parsed from config.json
   FrameConfig* = ref object
@@ -14,6 +16,7 @@ type
     serverSendLogs*: bool
     frameHost*: string
     framePort*: int
+    bindHost*: string
     httpsProxy*: HttpsProxyConfig
     frameAccessKey*: string
     frameAccess*: string
@@ -23,15 +26,18 @@ type
     device*: string
     deviceConfig*: DeviceConfig
     metricsInterval*: float
+    maxHttpResponseBytes*: int
     rotate*: int
     flip*: string
     scalingMode*: string
+    imageEngine*: string
     settings*: JsonNode
     assetsPath*: string
     saveAssets*: JsonNode
     logToFile*: string
     debug*: bool
     timeZone*: string
+    timeZoneUpdates*: TimeZoneUpdatesConfig
     schedule*: FrameSchedule
     gpioButtons*: seq[GPIOButton]
     controlCode*: ControlCode
@@ -40,6 +46,12 @@ type
     mountpoints*: MountpointsConfig
     errorBehavior*: ErrorBehaviorConfig
     palette*: PaletteConfig
+
+  # Part of FrameConfig
+  TimeZoneUpdatesConfig* = ref object
+    enabled*: bool
+    hour*: int
+    url*: string
 
   # Part of FrameConfig
   HttpsProxyConfig* = ref object

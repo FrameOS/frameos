@@ -1,5 +1,6 @@
 import asyncio
 import gzip
+import io
 import json
 import pytest
 import subprocess
@@ -8,15 +9,16 @@ from unittest.mock import AsyncMock, patch
 import httpx
 from fastapi import HTTPException
 from datetime import datetime, timedelta, timezone
+from PIL import Image
 from urllib.parse import urlparse
 
 from app.api import frames as frames_api
-from app.api.auth import get_current_user
-from app.fastapi import app
 from app.models import new_frame
 from app.models.frame import Frame
 from app.models.log import Log
+from app.models.metrics import Metrics
 from app.models.user import User
+from app.tenancy import ensure_default_project_for_user
 from app.tasks.buildroot_image import BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION, buildroot_sd_image_config_fingerprint
 from app.codegen.drivers_nim import frame_compilation_mode
 
@@ -72,7 +74,9 @@ async def test_api_frame_bootstrap_command_enables_agent_and_returns_script(asyn
 
     assert command_response.status_code == 200
     command_payload = command_response.json()
-    assert command_payload['script_url'].startswith(f'http://backend.local:8989/api/frame-bootstrap/{frame.id}/')
+    assert command_payload['script_url'].startswith(
+        f'http://backend.local:8989/api/projects/{frame.project_id}/frame-bootstrap/{frame.id}/'
+    )
     assert command_payload['command'] == f"curl -fsSL {command_payload['script_url']} | sudo sh"
 
     db.refresh(frame)
@@ -118,7 +122,7 @@ async def test_api_frame_bootstrap_command_enables_agent_and_returns_script(asyn
     )[0]
     assert json.loads(scenes_json) == frame.scenes
 
-    bad_response = await no_auth_client.get(f'/api/frame-bootstrap/{frame.id}/not-the-token')
+    bad_response = await no_auth_client.get(f'/api/projects/{frame.project_id}/frame-bootstrap/{frame.id}/not-the-token')
     assert bad_response.status_code == 404
 
 
@@ -162,8 +166,17 @@ async def test_api_frame_bootstrap_command_can_regenerate_token(async_client, no
 
 
 @pytest.mark.asyncio
-async def test_api_frame_agent_tasks_default_to_auto_transport(async_client, monkeypatch):
+async def test_api_frame_agent_tasks_default_to_auto_transport(async_client, db, redis, monkeypatch):
     import app.tasks as tasks_package
+
+    frame = await new_frame(
+        db,
+        redis,
+        name="AgentTaskFrame",
+        frame_host="localhost",
+        server_host="localhost",
+        project_id=async_client.project_id,
+    )
 
     captured: list[tuple[str, int, dict]] = []
 
@@ -176,14 +189,14 @@ async def test_api_frame_agent_tasks_default_to_auto_transport(async_client, mon
     monkeypatch.setattr(tasks_package, "deploy_agent", fake_deploy_agent)
     monkeypatch.setattr(tasks_package, "restart_agent", fake_restart_agent)
 
-    deploy_response = await async_client.post('/api/frames/123/deploy_agent?recompile=1')
-    restart_response = await async_client.post('/api/frames/123/restart_agent')
+    deploy_response = await async_client.post(f'/api/frames/{frame.id}/deploy_agent?recompile=1')
+    restart_response = await async_client.post(f'/api/frames/{frame.id}/restart_agent')
 
     assert deploy_response.status_code == 200
     assert restart_response.status_code == 200
     assert captured == [
-        ("deploy", 123, {"recompile": True, "transport": "auto"}),
-        ("restart", 123, {"transport": "auto"}),
+        ("deploy", frame.id, {"recompile": True, "transport": "auto"}),
+        ("restart", frame.id, {"transport": "auto"}),
     ]
 
 
@@ -259,6 +272,63 @@ async def test_api_frame_clears_last_log_at_without_frame_activity_logs(async_cl
 
 
 @pytest.mark.asyncio
+async def test_api_frame_metrics_returns_metrics_without_reboot_markers(async_client, db, redis):
+    frame = await new_frame(db, redis, 'MetricsFrame', 'localhost', 'localhost')
+    boot_timestamp = datetime(2026, 6, 2, 3, 4, 5)
+    metric_timestamp = datetime(2026, 6, 2, 3, 5, 0)
+    reboot_metric_timestamp = datetime(2026, 6, 2, 3, 6, 0)
+    second_reboot_metric_timestamp = datetime(2026, 6, 2, 3, 7, 0)
+    db.add_all(
+        [
+            Metrics(frame_id=frame.id, timestamp=metric_timestamp, metrics={"load": [0.12], "runtime": {"bootId": "boot-a"}}),
+            Metrics(
+                frame_id=frame.id,
+                timestamp=reboot_metric_timestamp,
+                metrics={"load": [0.18], "runtime": {"bootId": "boot-a"}},
+            ),
+            Metrics(
+                frame_id=frame.id,
+                timestamp=second_reboot_metric_timestamp,
+                metrics={
+                    "load": [0.24],
+                    "runtime": {"bootId": "boot-b"},
+                },
+            ),
+            Log(frame_id=frame.id, type='webhook', line=json.dumps({"event": "bootup"}), timestamp=boot_timestamp),
+            Log(frame_id=frame.id, type='webhook', line=json.dumps({"event": "metrics"}), timestamp=metric_timestamp),
+            Log(frame_id=frame.id, type='webhook', line='not json bootup', timestamp=metric_timestamp),
+        ]
+    )
+    db.commit()
+
+    response = await async_client.get(f'/api/frames/{frame.id}/metrics')
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['metrics'][0]['metrics'] == {"load": [0.12], "runtime": {"bootId": "boot-a"}}
+
+
+@pytest.mark.asyncio
+async def test_api_frame_recent_metrics_limits_metrics(async_client, db, redis):
+    frame = await new_frame(db, redis, 'RecentMetricsFrame', 'localhost', 'localhost')
+    for index in range(4):
+        db.add(
+            Metrics(
+                frame_id=frame.id,
+                timestamp=datetime(2026, 6, 2, 3, index, 0),
+                metrics={"load": [index]},
+            )
+        )
+    db.commit()
+
+    response = await async_client.get(f'/api/frames/{frame.id}/metrics/recent?limit=3&since=2026-06-02T03:01:30Z')
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [metric['metrics']['load'][0] for metric in payload['metrics']] == [2, 3]
+
+
+@pytest.mark.asyncio
 async def test_api_frame_get_not_found(async_client):
     # Large ID that doesn't exist
     response = await async_client.get('/api/frames/999999')
@@ -267,8 +337,9 @@ async def test_api_frame_get_not_found(async_client):
 
 
 @pytest.mark.asyncio
-async def test_api_frame_logs_full_download_includes_all_persisted_logs(no_auth_client, db):
+async def test_api_frame_logs_full_download_includes_all_persisted_logs(async_client, db):
     frame = Frame(
+        project_id=async_client.project_id,
         name="LogFrame",
         mode="rpios",
         frame_host="localhost",
@@ -307,32 +378,28 @@ async def test_api_frame_logs_full_download_includes_all_persisted_logs(no_auth_
     )
     db.commit()
 
-    app.dependency_overrides[get_current_user] = lambda: object()
-    try:
-        capped_response = await no_auth_client.get(f'/api/frames/{frame.id}/logs')
-        assert capped_response.status_code == 200
-        capped_logs = capped_response.json()['logs']
-        assert len(capped_logs) == 1000
-        assert capped_logs[0]['line'] == 'line 2'
-        assert capped_logs[-1]['line'] == 'line 1001'
+    capped_response = await async_client.get(f'/api/frames/{frame.id}/logs')
+    assert capped_response.status_code == 200
+    capped_logs = capped_response.json()['logs']
+    assert len(capped_logs) == 1000
+    assert capped_logs[0]['line'] == 'line 2'
+    assert capped_logs[-1]['line'] == 'line 1001'
 
-        full_response = await no_auth_client.get(f'/api/frames/{frame.id}/logs/full')
-        assert full_response.status_code == 200
-        assert full_response.headers['content-type'].startswith('text/plain')
-        assert 'attachment;' in full_response.headers['content-disposition']
-        assert f'frame-{frame.id}-full-logs-' in full_response.headers['content-disposition']
-        full_lines = full_response.text.splitlines()
-        assert len(full_lines) == 1002
-        assert full_lines[0].endswith('(stdout) line 0')
-        assert full_lines[-1].endswith('(stdout) line 1001')
-    finally:
-        app.dependency_overrides.clear()
+    full_response = await async_client.get(f'/api/frames/{frame.id}/logs/full')
+    assert full_response.status_code == 200
+    assert full_response.headers['content-type'].startswith('text/plain')
+    assert 'attachment;' in full_response.headers['content-disposition']
+    assert f'frame-{frame.id}-full-logs-' in full_response.headers['content-disposition']
+    full_lines = full_response.text.splitlines()
+    assert len(full_lines) == 1002
+    assert full_lines[0].endswith('(stdout) line 0')
+    assert full_lines[-1].endswith('(stdout) line 1001')
 
 @pytest.mark.asyncio
 async def test_api_frame_get_image_cached(async_client, db, redis):
     # Create the frame
     frame = await new_frame(db, redis, 'CachedImageFrame', 'localhost', 'localhost')
-    cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
+    cache_key = frames_api._frame_image_cache_key(frame.id)
     await redis.set(cache_key, b'cached_image_data')
 
     image_url = f'/api/frames/{frame.id}/image?t=-1'
@@ -342,9 +409,91 @@ async def test_api_frame_get_image_cached(async_client, db, redis):
 
 
 @pytest.mark.asyncio
+async def test_api_frame_get_image_does_not_share_host_port_cache_across_projects(async_client, db, redis):
+    frame = await new_frame(
+        db,
+        redis,
+        'ProjectImageFrame',
+        'same-frame.local',
+        'localhost',
+        project_id=async_client.project_id,
+    )
+    other_user = User(email='other-cache-project@example.com')
+    other_user.set_password('testpassword')
+    db.add(other_user)
+    db.commit()
+    db.refresh(other_user)
+    other_project = ensure_default_project_for_user(db, other_user)
+    await new_frame(
+        db,
+        redis,
+        'OtherProjectImageFrame',
+        'same-frame.local',
+        'localhost',
+        project_id=other_project.id,
+    )
+    old_shared_cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
+    await redis.set(old_shared_cache_key, b'other_project_image')
+
+    response = await async_client.get(f'/api/frames/{frame.id}/image?t=-1')
+
+    assert response.status_code == 200
+    assert response.content != b'other_project_image'
+    assert response.headers['x-frameos-image-state'] == 'placeholder'
+
+
+@pytest.mark.asyncio
+async def test_api_frame_get_image_placeholder_uses_rotated_dimensions(async_client, db, redis):
+    frame = await new_frame(db, redis, 'RotatedPlaceholderFrame', 'localhost', 'localhost')
+    frame.width = 800
+    frame.height = 480
+    frame.rotate = 90
+    db.add(frame)
+    db.commit()
+
+    cache_key = frames_api._frame_image_cache_key(frame.id)
+    await redis.delete(cache_key)
+
+    response = await async_client.get(f'/api/frames/{frame.id}/image?t=-1')
+
+    assert response.status_code == 200
+    assert response.headers['x-frameos-image-state'] == 'placeholder'
+    with Image.open(io.BytesIO(response.content)) as image:
+        assert image.size == (480, 800)
+
+
+@pytest.mark.asyncio
+async def test_api_frame_get_image_head_marks_missing_cache_without_refresh(async_client, db, redis):
+    frame = await new_frame(db, redis, 'HeadPlaceholderFrame', 'localhost', 'localhost')
+    cache_key = frames_api._frame_image_cache_key(frame.id)
+    await redis.delete(cache_key)
+
+    with patch('app.api.frames._fetch_frame_http_bytes', new=AsyncMock()) as fetch_frame:
+        response = await async_client.head(f'/api/frames/{frame.id}/image?t=-1')
+
+    assert response.status_code == 200
+    assert response.content == b''
+    assert response.headers['x-frameos-image-state'] == 'placeholder'
+    fetch_frame.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_api_frame_get_image_head_omits_placeholder_header_for_cache(async_client, db, redis):
+    frame = await new_frame(db, redis, 'HeadCachedFrame', 'localhost', 'localhost')
+    cache_key = frames_api._frame_image_cache_key(frame.id)
+    await redis.set(cache_key, b'cached_image_data')
+
+    response = await async_client.head(f'/api/frames/{frame.id}/image?t=-1')
+
+    assert response.status_code == 200
+    assert response.content == b''
+    assert 'x-frameos-image-state' not in response.headers
+
+
+@pytest.mark.asyncio
 async def test_api_frame_get_image_returns_cache_when_refresh_already_running(async_client, db, redis):
     frame = await new_frame(db, redis, 'LockedImageFrame', 'localhost', 'localhost')
-    cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
+    cache_key = frames_api._frame_image_cache_key(frame.id)
     await redis.set(cache_key, b'cached_while_refreshing')
     lock = frames_api._get_frame_image_lock(frame.id)
 
@@ -361,7 +510,7 @@ async def test_api_frame_get_image_returns_cache_when_refresh_already_running(as
 @pytest.mark.asyncio
 async def test_api_frame_get_image_returns_cache_when_refresh_fails(async_client, db, redis):
     frame = await new_frame(db, redis, 'FailingImageFrame', 'localhost', 'localhost')
-    cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
+    cache_key = frames_api._frame_image_cache_key(frame.id)
     await redis.set(cache_key, b'cached_after_refresh_error')
 
     async def mock_fetch(frame_obj, redis_obj, *, path, method="GET"):
@@ -375,9 +524,34 @@ async def test_api_frame_get_image_returns_cache_when_refresh_fails(async_client
 
 
 @pytest.mark.asyncio
+async def test_api_frame_get_image_returns_error_png_when_refresh_fails_without_cache(async_client, db, redis):
+    frame = await new_frame(db, redis, 'NoCacheFailingImageFrame', 'localhost', 'localhost')
+    frame.width = 320
+    frame.height = 240
+    db.add(frame)
+    db.commit()
+    cache_key = frames_api._frame_image_cache_key(frame.id)
+    await redis.delete(cache_key)
+
+    async def mock_fetch(frame_obj, redis_obj, *, path, method="GET"):
+        raise HTTPException(status_code=502, detail='All connection attempts failed')
+
+    with patch('app.api.frames._fetch_frame_http_bytes', side_effect=mock_fetch):
+        response = await async_client.get(f'/api/frames/{frame.id}/image?t=123')
+
+    assert response.status_code == 200
+    assert response.headers['content-type'].startswith('image/png')
+    assert response.headers['x-frameos-image-state'] == 'error'
+    assert response.headers['x-frameos-image-error-status'] == '502'
+    assert not response.content.startswith(b'{"detail"')
+    with Image.open(io.BytesIO(response.content)) as image:
+        assert image.size == (320, 240)
+
+
+@pytest.mark.asyncio
 async def test_api_frame_get_image_uses_redis_refresh_lock(async_client, db, redis):
     frame = await new_frame(db, redis, 'RedisLockedImageFrame', 'localhost', 'localhost')
-    cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
+    cache_key = frames_api._frame_image_cache_key(frame.id)
     lock_key = frames_api._frame_image_refresh_lock_key(frame.id)
     await redis.set(cache_key, b'cached_during_redis_refresh')
     await redis.set(lock_key, 'other-worker', ex=30)
@@ -698,13 +872,9 @@ async def test_api_frame_reset_event(async_client, db, redis):
 
 @pytest.mark.asyncio
 async def test_api_frame_not_found_for_reset(async_client):
-    """
-    Currently the route does NOT check if the frame exists.
-    So it always returns 200 "Success".
-    """
     response = await async_client.post('/api/frames/999999/reset')
-    assert response.status_code == 200
-    assert response.text == '"Success"'
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Frame not found"
 
 
 @pytest.mark.asyncio
@@ -715,6 +885,16 @@ async def test_api_frame_update_name(async_client, db, redis):
     db.expire_all()
     updated_frame = db.get(Frame, frame.id)
     assert updated_frame.name == "Updated Name"
+
+
+@pytest.mark.asyncio
+async def test_api_frame_update_max_http_response_bytes(async_client, db, redis):
+    frame = await new_frame(db, redis, 'HttpLimitFrame', 'localhost', 'localhost')
+    resp = await async_client.post(f'/api/frames/{frame.id}', json={"max_http_response_bytes": 32 * 1024 * 1024})
+    assert resp.status_code == 200
+    db.expire_all()
+    updated_frame = db.get(Frame, frame.id)
+    assert updated_frame.max_http_response_bytes == 32 * 1024 * 1024
 
 
 @pytest.mark.asyncio
@@ -729,6 +909,89 @@ async def test_api_frame_update_archived(async_client, db, redis):
     frames_response = await async_client.get('/api/frames')
     assert frames_response.status_code == 200
     assert frames_response.json()['frames'][0]['archived'] is True
+
+
+@pytest.mark.asyncio
+async def test_api_frame_update_timezone_for_rpios(async_client, db, redis):
+    frame = await new_frame(db, redis, 'TimezoneFrame', 'localhost', 'localhost')
+    frame.mode = 'rpios'
+    db.add(frame)
+    db.commit()
+
+    resp = await async_client.post(f'/api/frames/{frame.id}', json={"timezone": "Europe/Brussels"})
+
+    assert resp.status_code == 200
+    db.expire_all()
+    updated_frame = db.get(Frame, frame.id)
+    assert updated_frame.timezone == "Europe/Brussels"
+
+
+@pytest.mark.asyncio
+async def test_api_frame_update_preserves_custom_timezone_string(async_client, db, redis):
+    frame = await new_frame(db, redis, 'CustomTimezoneFrame', 'localhost', 'localhost')
+    frame.mode = 'rpios'
+    frame.timezone = 'Custom/Zone'
+    db.add(frame)
+    db.commit()
+
+    resp = await async_client.post(f'/api/frames/{frame.id}', json={"timezone": "Custom/Zone"})
+
+    assert resp.status_code == 200
+    db.expire_all()
+    updated_frame = db.get(Frame, frame.id)
+    assert updated_frame.timezone == "Custom/Zone"
+
+
+@pytest.mark.asyncio
+async def test_api_frame_update_compacts_timezone_updater(async_client, db, redis):
+    frame = await new_frame(db, redis, 'TimezoneUpdaterFrame', 'localhost', 'localhost')
+    frame.timezone_updater = {
+        "enabled": True,
+        "hour": 3,
+        "url": "https://tz.frameos.net/tzdata.json.gz",
+    }
+    db.add(frame)
+    db.commit()
+
+    resp = await async_client.post(
+        f'/api/frames/{frame.id}',
+        json={
+            "timezone_updater": {
+                "enabled": True,
+                "hour": 3,
+                "url": "https://tz.frameos.net/tzdata.json.gz",
+            }
+        },
+    )
+
+    assert resp.status_code == 200
+    db.expire_all()
+    updated_frame = db.get(Frame, frame.id)
+    assert updated_frame.timezone_updater is None
+
+
+@pytest.mark.asyncio
+async def test_api_frame_update_keeps_custom_timezone_updater(async_client, db, redis):
+    frame = await new_frame(db, redis, 'CustomTimezoneUpdaterFrame', 'localhost', 'localhost')
+
+    resp = await async_client.post(
+        f'/api/frames/{frame.id}',
+        json={
+            "timezone_updater": {
+                "enabled": True,
+                "hour": 5,
+                "url": "https://example.com/tzdata.json.gz",
+            }
+        },
+    )
+
+    assert resp.status_code == 200
+    db.expire_all()
+    updated_frame = db.get(Frame, frame.id)
+    assert updated_frame.timezone_updater == {
+        "hour": 5,
+        "url": "https://example.com/tzdata.json.gz",
+    }
 
 
 @pytest.mark.asyncio
@@ -1386,15 +1649,48 @@ async def test_api_frame_new_missing_fields(async_client):
 
 @pytest.mark.asyncio
 async def test_api_frame_import(async_client, db, redis):
+    existing_frame = await new_frame(
+        db,
+        redis,
+        'ExistingFrame',
+        'existinghost',
+        'existingserver',
+        project_id=async_client.project_id,
+    )
+    other_user = User(email='other-import@example.com')
+    other_user.set_password('password')
+    db.add(other_user)
+    db.commit()
+    other_project = ensure_default_project_for_user(db, other_user)
+
     payload = {
         "name": "ImportedFrame",
         "frame_host": "importhost",
-        "server_host": "importserver"
+        "server_host": "importserver",
+        "project_id": other_project.id,
+        "server_api_key": existing_frame.server_api_key,
     }
     resp = await async_client.post('/api/frames/import', json=payload)
     assert resp.status_code == 200
     data = resp.json()
     assert data['frame']['name'] == "ImportedFrame"
+    imported_frame = db.query(Frame).filter_by(id=data['frame']['id']).one()
+    assert imported_frame.project_id == async_client.project_id
+    assert imported_frame.server_api_key != existing_frame.server_api_key
+
+    restored_payload = {
+        "name": "RestoredFrame",
+        "frame_host": "restorehost",
+        "server_host": "restoreserver",
+        "project_id": other_project.id,
+        "server_api_key": "restored-server-api-key",
+    }
+    restored_resp = await async_client.post('/api/frames/import', json=restored_payload)
+    assert restored_resp.status_code == 200
+    restored_data = restored_resp.json()
+    restored_frame = db.query(Frame).filter_by(id=restored_data['frame']['id']).one()
+    assert restored_frame.project_id == async_client.project_id
+    assert restored_frame.server_api_key == restored_payload["server_api_key"]
 
 
 @pytest.mark.asyncio
@@ -1414,7 +1710,7 @@ async def test_api_frame_delete_not_found(async_client):
 @pytest.mark.asyncio
 async def test_api_frame_get_image_with_cookie_no_token(no_auth_client, db, redis):
     frame = await new_frame(db, redis, 'CookieImageFrame', 'localhost', 'localhost')
-    cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
+    cache_key = frames_api._frame_image_cache_key(frame.id)
     await redis.set(cache_key, b'cookie_cached_image_data')
 
     user = User(email='cookieframe@example.com')
@@ -1425,7 +1721,7 @@ async def test_api_frame_get_image_with_cookie_no_token(no_auth_client, db, redi
     login_resp = await no_auth_client.post('/api/login', data={'username': 'cookieframe@example.com', 'password': 'testpassword'})
     assert login_resp.status_code == 200
 
-    response = await no_auth_client.get(f'/api/frames/{frame.id}/image?t=-1')
+    response = await no_auth_client.get(f'/api/projects/{frame.project_id}/frames/{frame.id}/image?t=-1')
     assert response.status_code == 200
     assert response.content == b'cookie_cached_image_data'
 

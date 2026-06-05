@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, RootModel, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, RootModel, field_validator, model_validator
 from typing import Any, Dict, List, Literal, Optional
 
 from .common import ImageTokenResponse
@@ -36,6 +36,19 @@ class FrameErrorBehavior(BaseModel):
         return value
 
 
+class FrameTimezoneUpdater(BaseModel):
+    enabled: Optional[bool] = None
+    hour: Optional[int] = None
+    url: Optional[str] = None
+
+    @field_validator('hour')
+    @classmethod
+    def validate_hour(cls, value: Optional[int]) -> Optional[int]:
+        if value is not None and (value < 0 or value > 23):
+            raise ValueError('Timezone update hour must be between 0 and 23')
+        return value
+
+
 
 class FrameBase(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -66,9 +79,12 @@ class FrameBase(BaseModel):
     device_config: Optional[Dict[str, Any]] = None
     color: Optional[str]
     timezone: Optional[str] = None
+    timezone_updater: Optional[FrameTimezoneUpdater] = None
     interval: float
     metrics_interval: float
+    max_http_response_bytes: Optional[int] = None
     scaling_mode: Optional[str]
+    image_engine: Optional[Literal["", "pixie", "imagemagick"]] = None
     rotate: Optional[int]
     flip: Optional[str]
     background_color: Optional[str]
@@ -139,13 +155,16 @@ class FrameUpdateRequest(BaseModel):
     flip: Optional[str] = None
     color: Optional[str] = None
     timezone: Optional[str] = None
+    timezone_updater: Optional[FrameTimezoneUpdater] = None
     interval: Optional[float] = None
     metrics_interval: Optional[float] = None
+    max_http_response_bytes: Optional[int] = None
     log_to_file: Optional[str] = None
     assets_path: Optional[str] = None
     save_assets: Any = None
     upload_fonts: Optional[str] = None
     scaling_mode: Optional[str] = None
+    image_engine: Optional[Literal["", "pixie", "imagemagick"]] = None
     device: Optional[str] = None
     device_config: Optional[Dict[str, Any]] = None
     debug: Optional[bool] = None
@@ -162,6 +181,13 @@ class FrameUpdateRequest(BaseModel):
     rpios: Optional[Dict[str, Any]] = None
     terminal_history: Optional[List[str]] = None
     next_action: Optional[str] = None
+
+    @field_validator('max_http_response_bytes')
+    @classmethod
+    def validate_max_http_response_bytes(cls, value: Optional[int]) -> Optional[int]:
+        if value is not None and value < 1024:
+            raise ValueError('Maximum HTTP response size must be at least 1024 bytes')
+        return value
 
     @field_validator('frame_admin_auth')
     @classmethod

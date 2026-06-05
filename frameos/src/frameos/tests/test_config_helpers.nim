@@ -1,6 +1,7 @@
 import std/[json, unittest]
 import ../config
 import ../types
+import ../utils/image
 
 suite "config helper loaders":
   test "setConfigDefaults populates key defaults":
@@ -25,6 +26,7 @@ suite "config helper loaders":
     check config.height == 1080
     check config.device == "web_only"
     check config.metricsInterval == 60
+    check config.maxHttpResponseBytes == DefaultMaxHttpResponseBytes
     check config.framePort == 8787
     check config.frameHost == "localhost"
     check config.httpsProxy != nil
@@ -102,3 +104,14 @@ suite "config helper loaders":
     check target.serverPort == 2
     check target.schedule.events.len == 1
     check target.schedule.events[0].id == "new-event"
+
+  test "updateFrameConfigFrom updates runtime image engine":
+    let target = FrameConfig(imageEngine: "")
+    let source = FrameConfig(imageEngine: "imagemagick")
+
+    updateFrameConfigFrom(target, source)
+
+    check target.imageEngine == "imagemagick"
+    check getRuntimeImageEngine() == "imagemagick"
+
+    setRuntimeImageEngine("")

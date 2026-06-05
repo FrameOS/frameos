@@ -1,21 +1,46 @@
 import pixie
+import pixie/fileformats/svg
 import base64
 import json
-import random
 import os
 import osproc
 import options
 import sequtils
 import strutils
 import strformat
-import streams
-import times
 import uri
 
 import frameos/utils/font
 import frameos/utils/http_client
+import frameos/utils/process
 
 const MaxImageDownloadBytes = 15 * 1024 * 1024
+const MaxImageMagickOutputBytes = 50 * 1024 * 1024
+const MaxExifOutputBytes = 1024 * 1024
+const ImageMagickTimeoutMs = 30_000
+const ExifToolTimeoutMs = 10_000
+const ImageEngineImageMagick* = "imagemagick"
+
+var runtimeImageEngine = ""
+
+proc setRuntimeImageEngine*(imageEngine: string) =
+  let normalized = imageEngine.normalize.toLowerAscii()
+  runtimeImageEngine =
+    if normalized in ["", "pixie", ImageEngineImageMagick]:
+      normalized
+    else:
+      ""
+
+proc getRuntimeImageEngine*(): string =
+  runtimeImageEngine
+
+proc getEffectiveRuntimeImageEngine*(): string =
+  if runtimeImageEngine == ImageEngineImageMagick:
+    return ImageEngineImageMagick
+  return "pixie"
+
+proc useImageMagick(): bool =
+  runtimeImageEngine == ImageEngineImageMagick
 
 proc imageMagickCommand(): string =
   let magick = findExe("magick")
@@ -26,85 +51,72 @@ proc imageMagickCommand(): string =
     return convert
   return ""
 
-proc isJpegData(data: string): bool =
-  data.len >= 2 and data[0].byte == 0xFF and data[1].byte == 0xD8
+proc decodeImageMagickOutput(output: string): Option[Image] =
+  if output.len == 0 or output.len > MaxImageMagickOutputBytes:
+    return none(Image)
+  try:
+    return some(decodeImage(output))
+  except CatchableError:
+    return none(Image)
 
-proc isJpegPath(path: string): bool =
-  let lowerPath = path.toLowerAscii()
-  lowerPath.endsWith(".jpg") or lowerPath.endsWith(".jpeg")
-
-proc decodeJpegWithImageMagick(data: string): Option[Image] =
+proc runImageMagick(args: seq[string]; input = ""): Option[string] =
   let cmd = imageMagickCommand()
   if cmd == "":
-    return none(Image)
-  var p = startProcess(cmd,
-    args = @["-quiet", "-", "-auto-orient", "bmp:-"],
-    options = {poUsePath})
+    return none(string)
   try:
-    p.inputStream.write(data)
-    p.inputStream.close()
-    let output = p.outputStream.readAll()
-    let rc = p.waitForExit()
-    if rc == 0 and output.len > 0:
-      try:
-        return some(decodeImage(output))
-      except CatchableError:
-        return none(Image)
-  finally:
-    p.close()
+    let processResult = runProcessPiped(
+      cmd,
+      args,
+      input = input,
+      timeoutMs = ImageMagickTimeoutMs,
+      maxOutputBytes = MaxImageMagickOutputBytes
+    )
+    if processResult.exitCode == 0 and not processResult.timedOut and not processResult.outputExceeded:
+      return some(processResult.output)
+  except CatchableError:
+    discard
+  none(string)
+
+proc decodeImageWithImageMagick(data: string): Option[Image] =
+  let output = runImageMagick(@["-quiet", "-", "-auto-orient", "bmp:-"], input = data)
+  if output.isSome:
+    return decodeImageMagickOutput(output.get())
   return none(Image)
 
-proc decodeJpegFileWithImageMagick(path: string): Option[Image] =
-  let cmd = imageMagickCommand()
-  if cmd == "":
-    return none(Image)
-  var p = startProcess(cmd,
-    args = @["-quiet", path, "-auto-orient", "bmp:-"],
-    options = {poUsePath})
-  try:
-    let output = p.outputStream.readAll()
-    let rc = p.waitForExit()
-    if rc == 0 and output.len > 0:
-      try:
-        return some(decodeImage(output))
-      except CatchableError:
-        return none(Image)
-  finally:
-    p.close()
+proc readImageWithImageMagick(path: string): Option[Image] =
+  let output = runImageMagick(@["-quiet", path, "-auto-orient", "bmp:-"])
+  if output.isSome:
+    return decodeImageMagickOutput(output.get())
   return none(Image)
 
 proc decodeSvgWithImageMagick*(svg: string, width: int, height: int): Option[Image] =
-  let cmd = imageMagickCommand()
-  if cmd == "":
-    return none(Image)
   let sizeArg = &"{width}x{height}"
-  var p = startProcess(cmd,
-    args = @["-quiet", "-background", "none", "-size", sizeArg, "svg:-", "-resize", sizeArg, "bmp:-"],
-    options = {poUsePath})
-  try:
-    p.inputStream.write(svg)
-    p.inputStream.close()
-    let output = p.outputStream.readAll()
-    let rc = p.waitForExit()
-    if rc == 0 and output.len > 0:
-      try:
-        return some(decodeImage(output))
-      except CatchableError:
-        return none(Image)
-  finally:
-    p.close()
+  let output = runImageMagick(
+    @["-quiet", "-background", "none", "-size", sizeArg, "svg:-", "-resize", sizeArg, "bmp:-"],
+    input = svg
+  )
+  if output.isSome:
+    return decodeImageMagickOutput(output.get())
   return none(Image)
 
+proc decodeSvgWithFallback*(svg: string, width: int, height: int): Option[Image] =
+  if useImageMagick():
+    return decodeSvgWithImageMagick(svg, width, height)
+  try:
+    return some(newImage(parseSvg(svg, width, height)))
+  except CatchableError:
+    return none(Image)
+
 proc decodeImageWithFallback*(data: string): Image =
-  if isJpegData(data):
-    let converted = decodeJpegWithImageMagick(data)
+  if useImageMagick():
+    let converted = decodeImageWithImageMagick(data)
     if converted.isSome:
       return converted.get()
   return decodeImage(data)
 
 proc readImageWithFallback*(path: string): Image =
-  if isJpegPath(path):
-    let converted = decodeJpegFileWithImageMagick(path)
+  if useImageMagick():
+    let converted = readImageWithImageMagick(path)
     if converted.isSome:
       return converted.get()
   return readImage(path)
@@ -126,14 +138,14 @@ proc decodeDataUrl*(dataUrl: string): Image =
       decodeUrl(dataBody)
   return decodeImageWithFallback(decodedData)
 
-proc downloadImage*(url: string): Image =
+proc downloadImage*(url: string, maxBytes = MaxImageDownloadBytes): Image =
   if url.startsWith("data:"):
     return decodeDataUrl(url)
-  let content = boundedGetContent(url, maxBytes = MaxImageDownloadBytes)
+  let content = boundedGetContent(url, maxBytes = maxBytes)
   result = decodeImageWithFallback(content)
 
-proc downloadImageWithData*(url: string): tuple[image: Image, data: string] =
-  let content = boundedGetContent(url, maxBytes = MaxImageDownloadBytes)
+proc downloadImageWithData*(url: string, maxBytes = MaxImageDownloadBytes): tuple[image: Image, data: string] =
+  let content = boundedGetContent(url, maxBytes = maxBytes)
   result = (decodeImageWithFallback(content), content)
 
 proc parseExifJson(output: string): Option[JsonNode] =
@@ -160,14 +172,19 @@ proc getExifMetadataFromData*(data: string): Option[JsonNode] =
   let exiftool = findExe("exiftool")
   if exiftool == "":
     return none(JsonNode)
-  randomize()
-  let tmpPath = getTempDir() / &"frameos-exif-{epochTime().int}-{rand(1_000_000)}.img"
-  writeFile(tmpPath, data)
   try:
-    return getExifMetadataFromPath(tmpPath)
-  finally:
-    if fileExists(tmpPath):
-      removeFile(tmpPath)
+    let processResult = runProcessPiped(
+      exiftool,
+      @["-j", "-n", "-"],
+      input = data,
+      timeoutMs = ExifToolTimeoutMs,
+      maxOutputBytes = MaxExifOutputBytes
+    )
+    if processResult.exitCode == 0 and not processResult.timedOut and not processResult.outputExceeded:
+      return parseExifJson(processResult.output)
+  except CatchableError:
+    discard
+  return none(JsonNode)
 
 proc rotateDegrees*(image: Image, degrees: int): Image {.raises: [PixieError].} =
   case (degrees + 1080) mod 360: # TODO: yuck

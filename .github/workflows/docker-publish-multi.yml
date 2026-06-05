@@ -165,6 +165,49 @@ jobs:
           path: release-assets/*.tar.gz
           if-no-files-found: error
 
+  build-buildroot-release-image:
+    name: Build Buildroot Release Image
+    needs: [update-versions, build-prebuilt-cross]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.update-versions.outputs.release_sha }}
+
+      - name: Download prebuilt cross artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: frameos-${{ needs.update-versions.outputs.docker_version }}-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Install backend dependencies
+        run: |
+          pip install -r backend/requirements.txt
+
+      - name: Build Raspberry Pi Zero 2 W Buildroot image
+        env:
+          DOCKER_VERSION: ${{ needs.update-versions.outputs.docker_version }}
+        run: |
+          python3 tools/buildroot-images/buildroot_images.py \
+            --platform raspberry-pi-zero-2-w \
+            release-image \
+            --prebuilt-cross-dir release-assets \
+            --release-assets-dir release-assets \
+            --target debian-bookworm-arm64 \
+            --version "$DOCKER_VERSION"
+          ls -lh release-assets/*.img.gz release-assets/*.metadata.json
+
+      - name: Upload Buildroot release image
+        uses: actions/upload-artifact@v4
+        with:
+          name: frameos-${{ needs.update-versions.outputs.docker_version }}-raspberry-pi-zero-2-w-buildroot
+          path: |
+            release-assets/*.img.gz
+            release-assets/*.metadata.json
+          if-no-files-found: error
+
   build:
     needs: update-versions
     runs-on: ubuntu-latest
@@ -235,7 +278,7 @@ jobs:
           cache-to: type=local,dest=/tmp/.buildx-cache
 
   push-multiarch:
-    needs: [update-versions, build, build-prebuilt-cross]
+    needs: [update-versions, build, build-prebuilt-cross, build-buildroot-release-image]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -335,7 +378,7 @@ jobs:
 
   github-release:
     name: Create GitHub Release
-    needs: [update-versions, push-multiarch, build-prebuilt-cross, update-addon-repo]
+    needs: [update-versions, push-multiarch, build-prebuilt-cross, build-buildroot-release-image, update-addon-repo]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout release commit
@@ -378,9 +421,9 @@ jobs:
             gh release edit "$RELEASE_TAG" \
               --title "FrameOS ${DOCKER_VERSION}" \
               --notes-file release-notes.md
-            gh release upload "$RELEASE_TAG" release-assets/*.tar.gz --clobber
+            gh release upload "$RELEASE_TAG" release-assets/* --clobber
           else
-            gh release create "$RELEASE_TAG" release-assets/*.tar.gz \
+            gh release create "$RELEASE_TAG" release-assets/* \
               --target "$RELEASE_SHA" \
               --title "FrameOS ${DOCKER_VERSION}" \
               --notes-file release-notes.md

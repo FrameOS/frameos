@@ -102,85 +102,73 @@ proc frameos_scene_export*(): pointer {{.cdecl, exportc, dynlib.}} =
 
 
 def field_type_to_nim_type(field_type: str, required: bool = True) -> str:
-    match field_type:
-        case 'select':
-            return 'string'
-        case 'text':
-            return 'string'
-        case 'string':
-            return 'string'
-        case 'font':
-            return 'string'
-        case 'float':
-            return 'float'
-        case 'integer':
-            return 'int'
-        case 'boolean':
-            return 'bool'
-        case 'color':
-            return 'Color'
-        case 'json':
-            return 'JsonNode'
-        case 'node':
-            return 'NodeId'
-        case 'scene':
-            return 'SceneId'
-        case 'image':
-            if not required:
-                return 'Option[Image]'
-            return 'Image'
-        case _:
-            raise ValueError(f"Invalid field type {field_type}")
+    if field_type in ('select', 'text', 'string', 'font'):
+        return 'string'
+    if field_type == 'float':
+        return 'float'
+    if field_type == 'integer':
+        return 'int'
+    if field_type == 'boolean':
+        return 'bool'
+    if field_type == 'color':
+        return 'Color'
+    if field_type == 'json':
+        return 'JsonNode'
+    if field_type == 'node':
+        return 'NodeId'
+    if field_type == 'scene':
+        return 'SceneId'
+    if field_type == 'image':
+        if not required:
+            return 'Option[Image]'
+        return 'Image'
+    raise ValueError(f"Invalid field type {field_type}")
 
 
 def field_type_to_value_accessor(field_type: str) -> str:
-    match field_type:
-        case 'select' | 'text' | 'string' | 'font' | 'date':
-            return '.asString()'
-        case 'float':
-            return '.asFloat()'
-        case 'integer':
-            return '.asInt().int'
-        case 'boolean':
-            return '.asBool()'
-        case 'color':
-            return '.asColor()'
-        case 'json':
-            return '.asJson()'
-        case 'node':
-            return '.asNode()'
-        case 'scene':
-            return '.asScene()'
-        case 'image':
-            return '.asImage()'
-        case _:
-            raise ValueError(f"Invalid field type {field_type}")
+    if field_type in ('select', 'text', 'string', 'font', 'date'):
+        return '.asString()'
+    if field_type == 'float':
+        return '.asFloat()'
+    if field_type == 'integer':
+        return '.asInt().int'
+    if field_type == 'boolean':
+        return '.asBool()'
+    if field_type == 'color':
+        return '.asColor()'
+    if field_type == 'json':
+        return '.asJson()'
+    if field_type == 'node':
+        return '.asNode()'
+    if field_type == 'scene':
+        return '.asScene()'
+    if field_type == 'image':
+        return '.asImage()'
+    raise ValueError(f"Invalid field type {field_type}")
 
 
 def field_type_to_value_constructor(field_type: str, expression: str) -> str:
-    match field_type:
-        case 'text':
-            return f'VText({expression})'
-        case 'select' | 'string' | 'font' | 'date':
-            return f'VString({expression})'
-        case 'float':
-            return f'VFloat({expression})'
-        case 'integer':
-            return f'VInt({expression})'
-        case 'boolean':
-            return f'VBool({expression})'
-        case 'color':
-            return f'VColor({expression})'
-        case 'json':
-            return f'VJson({expression})'
-        case 'node':
-            return f'VNode({expression})'
-        case 'scene':
-            return f'VScene({expression})'
-        case 'image':
-            return f'VImage({expression})'
-        case _:
-            raise ValueError(f"Invalid field type {field_type}")
+    if field_type == 'text':
+        return f'VText({expression})'
+    if field_type in ('select', 'string', 'font', 'date'):
+        return f'VString({expression})'
+    if field_type == 'float':
+        return f'VFloat({expression})'
+    if field_type == 'integer':
+        return f'VInt({expression})'
+    if field_type == 'boolean':
+        return f'VBool({expression})'
+    if field_type == 'color':
+        return f'VColor({expression})'
+    if field_type == 'json':
+        return f'VJson({expression})'
+    if field_type == 'node':
+        return f'VNode({expression})'
+    if field_type == 'scene':
+        return f'VScene({expression})'
+    if field_type == 'image':
+        return f'VImage({expression})'
+    raise ValueError(f"Invalid field type {field_type}")
 
 
 def field_type_to_getter(type: str) -> str:
@@ -967,12 +955,7 @@ class SceneWriter:
 
                 if not scene:
                     message = f'- ERROR: When generating scene {self.scene_id}. Scene "{scene_id}" for node "{node_id}" not found'
-                    try:
-                        from app.models.log import new_log as log
-                        log(self.frame.id, "stderr", message)
-                        return
-                    except Exception:
-                        raise ValueError(message)
+                    raise ValueError(message)
 
                 # only if a target node (plus legacy support for using 'event' as a target node)
                 if node_id not in self.prev_nodes:
@@ -1881,30 +1864,11 @@ def write_shared_scenes_bundle_nim(frame: Frame) -> str:
         spec_lines = "\n  " + spec_lines + "\n"
     newline = "\n"
 
-    bundle_imports = "\n".join(
-        f'import scenes.scene_{scene_module_suffix(scene)} as scene_{scene_module_suffix(scene)}'
-        for scene in compiled_scenes
-    )
-    if not bundle_imports:
-        bundle_imports = "# no compiled scenes"
-
-    wrapper_exports = ""
-    for scene in compiled_scenes:
-        wrapper_exports += f"""
-proc {_scene_bundle_init_symbol(scene)}*(logHook: HostLogProc, sendEventHook: HostSendEventProc) {{.cdecl, exportc, dynlib.}} =
-  scene_{scene_module_suffix(scene)}.frameos_scene_init(logHook, sendEventHook)
-
-proc {_scene_bundle_export_symbol(scene)}*(): pointer {{.cdecl, exportc, dynlib.}} =
-  result = cast[pointer](scene_{scene_module_suffix(scene)}.exportedScene)
-"""
-
     scenes_source = f"""
 import std/[dynlib, json, options, os, tables]
 import frameos/types
 import frameos/channels as hostChannels
 import frameos/driver_abi
-
-{bundle_imports}
 
 type
   SceneBundleSpec = object
@@ -1984,11 +1948,39 @@ proc getExportedScenes*(): Table[SceneId, ExportedScene] =
     let exportedScene = loadSharedScene(spec)
     if exportedScene.isSome:
       result[spec.id] = exportedScene.get()
-
-{wrapper_exports}
 """
 
     return scenes_source
+
+
+def write_shared_scenes_bundle_library_nim(frame: Frame) -> str:
+    compiled_scenes = compiled_frame_scenes(frame)
+    bundle_imports = "\n".join(
+        f'import scenes.scene_{scene_module_suffix(scene)} as scene_{scene_module_suffix(scene)}'
+        for scene in compiled_scenes
+    )
+    if not bundle_imports:
+        bundle_imports = "# no compiled scenes"
+
+    wrapper_exports = ""
+    for scene in compiled_scenes:
+        wrapper_exports += f"""
+proc {_scene_bundle_init_symbol(scene)}*(logHook: HostLogProc, sendEventHook: HostSendEventProc) {{.cdecl, exportc, dynlib.}} =
+  hostChannels.setSharedHostCallbacks(logHook, sendEventHook)
+
+proc {_scene_bundle_export_symbol(scene)}*(): pointer {{.cdecl, exportc, dynlib.}} =
+  result = cast[pointer](scene_{scene_module_suffix(scene)}.exportedScene)
+"""
+
+    return f"""# This file is autogenerated
+
+import frameos/channels as hostChannels
+import frameos/driver_abi
+
+{bundle_imports}
+
+{wrapper_exports}
+"""
 
 
 def write_scenes_nim(frame: Frame, compilation_mode: str = DEFAULT_COMPILATION_MODE) -> str:

@@ -10,6 +10,7 @@ from app.models.frame import Frame
 from app.models.log import Log
 from app.tasks import buildroot_image as buildroot_image_module
 from app.tasks.buildroot_image import BuildrootImageBuilder, ensure_buildroot_frame_defaults
+from app.tenancy import ensure_default_project
 
 
 TRUE_VALUES = {"1", "true", "yes", "on"}
@@ -26,7 +27,9 @@ def _say(message: str) -> None:
 
 
 def _frame(db) -> Frame:
+    project = ensure_default_project(db)
     frame = Frame(
+        project_id=project.id,
         name="BuildrootE2E",
         mode="buildroot",
         frame_host="frame-buildroot-e2e.local",
@@ -101,7 +104,12 @@ def _frame(db) -> Frame:
 
 
 def _log_lines(db, frame: Frame) -> list[str]:
-    return [log.line for log in db.query(Log).filter(Log.frame_id == frame.id).all()]
+    return [
+        log.line
+        for log in db.query(Log)
+        .filter(Log.project_id == frame.project_id, Log.frame_id == frame.id)
+        .all()
+    ]
 
 
 @pytest.mark.asyncio
@@ -148,10 +156,15 @@ async def test_real_buildroot_sd_image_generation_from_precompiled_release(
     assert download_response.content[:2] == b"\x1f\x8b"
 
     logs = "\n".join(_log_lines(db, frame))
-    assert "Building FrameOS binary for Raspberry Pi Zero 2 W" in logs
-    assert "Building FrameOS agent for Raspberry Pi Zero 2 W" in logs
-    assert "Using precompiled FrameOS release" in logs
-    assert "precompiled FrameOS agent release" in logs
+    if metadata.get("precompiledSdImage"):
+        assert "Customizing full precompiled Buildroot SD image" in logs
+        assert "Building FrameOS binary for Raspberry Pi Zero 2 W" not in logs
+        assert "Building FrameOS agent for Raspberry Pi Zero 2 W" not in logs
+    else:
+        assert "Building FrameOS binary for Raspberry Pi Zero 2 W" in logs
+        assert "Building FrameOS agent for Raspberry Pi Zero 2 W" in logs
+        assert "Using precompiled FrameOS release" in logs
+        assert "precompiled FrameOS agent release" in logs
     assert "Buildroot SD image ready" in logs
     assert "Falling back to source build" not in logs
     assert "Creating build archive" not in logs

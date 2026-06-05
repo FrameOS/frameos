@@ -7,6 +7,7 @@ import { panelsLogic } from '../panelsLogic'
 import {
   ClipboardDocumentIcon,
   CloudArrowDownIcon,
+  Cog6ToothIcon,
   DocumentDuplicateIcon,
   DocumentMagnifyingGlassIcon,
   FolderPlusIcon,
@@ -63,6 +64,11 @@ export function SceneDropDown({
       editSceneJSON(scene.id)
     }
   }
+  const openSceneSettings = () => {
+    if (navigation === 'workspace') {
+      openWorkspaceSceneUtility(frameId, scene.id, 'info')
+    }
+  }
 
   return (
     <DropdownMenu
@@ -75,6 +81,13 @@ export function SceneDropDown({
               label: 'Preview',
               onClick: () => openScenePreview(frameId, scene.id),
               icon: <PlayIcon className="w-5 h-5" />,
+            }
+          : null,
+        context === 'scenes' && navigation === 'workspace'
+          ? {
+              label: 'Scene settings',
+              onClick: openSceneSettings,
+              icon: <Cog6ToothIcon className="w-5 h-5" />,
             }
           : null,
         context === 'scenes'

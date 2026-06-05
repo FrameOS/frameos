@@ -12,7 +12,47 @@ from httpx._transports.asgi import ASGITransport  # noqa: E402
 from app.config import config  # noqa: E402
 from app.fastapi import app  # noqa: E402
 from app.database import SessionLocal, engine, Base  # noqa: E402
+from app.models.organization import Project  # noqa: E402
 from app.models.user import User  # noqa: E402
+from app.tenancy import ensure_default_project_for_user  # noqa: E402
+
+
+PROJECT_SCOPED_TEST_PATHS = (
+    "/api/ai/",
+    "/api/apps",
+    "/api/assets",
+    "/api/fonts",
+    "/api/frames",
+    "/api/repositories",
+    "/api/settings",
+    "/api/templates",
+)
+
+PROJECT_SCOPED_TEST_EXCLUSIONS = (
+    "/api/projects/",
+    "/api/repositories/system",
+    "/api/repositories/system/",
+)
+
+
+class ProjectAsyncClient(AsyncClient):
+    project_id: int | None = None
+
+    def _project_url(self, url):
+        if not isinstance(url, str) or self.project_id is None:
+            return url
+        path, separator, query = url.partition("?")
+        if (
+            any(path.startswith(exclusion) for exclusion in PROJECT_SCOPED_TEST_EXCLUSIONS)
+            or not any(path == prefix or path.startswith(f"{prefix}/") for prefix in PROJECT_SCOPED_TEST_PATHS)
+        ):
+            return url
+        scoped = f"/api/projects/{self.project_id}{path[len('/api'):]}"
+        return f"{scoped}{separator}{query}"
+
+    async def request(self, method, url, *args, **kwargs):
+        return await super().request(method, self._project_url(url), *args, **kwargs)
+
 
 @pytest.fixture(autouse=True)
 def setup_and_teardown_db():
@@ -43,22 +83,40 @@ async def redis():
         await client.flushdb()
         await client.close(True)
 
+
+@pytest_asyncio.fixture
+async def default_project(db):
+    user = User(email="project@example.com")
+    user.set_password("testpassword")
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return ensure_default_project_for_user(db, user)
+
 @pytest_asyncio.fixture
 async def async_client(db):
     user = User(email="test@example.com")
     user.set_password("testpassword")
     db.add(user)
     db.commit()
+    db.refresh(user)
+    project = ensure_default_project_for_user(db, user)
 
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+    async with ProjectAsyncClient(transport=transport, base_url="http://test") as ac:
         login_data = {"username": "test@example.com", "password": "testpassword"}
         login_response = await ac.post('/api/login', data=login_data)
         token = login_response.json().get('access_token')
         headers = {"Authorization": f"Bearer {token}"}
         ac.headers.update(headers)
+        ac.project_id = project.id
 
         yield ac
+
+
+@pytest_asyncio.fixture
+async def project(db, async_client):
+    yield db.get(Project, async_client.project_id)
 
 @pytest_asyncio.fixture
 async def no_auth_client():

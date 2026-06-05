@@ -7,10 +7,11 @@ import { scaleLinear, scaleTime } from '@visx/scale'
 import { max } from '@visx/vendor/d3-array'
 
 import { AreaChart } from './AreaChart'
-import { metricsLogic, type MetricPoint, type MetricSeries, type TimeRange } from './metricsLogic'
+import { type MetricPoint, type MetricSeries, type TimeRange } from './metricsLogic'
 import { workspaceLogic } from '../../../workspace/workspaceLogic'
 import { metricChartThemes, themeMetricSeries, type MetricChartTheme } from './chartTheme'
 import { urls } from '../../../../urls'
+import { frameMetricsPreviewLogic } from '../../../workspace/frameMetricsPreviewLogic'
 
 const chartHeight = 28
 const chartMargin = { top: 3, right: 1, bottom: 3, left: 1 }
@@ -101,13 +102,13 @@ function HeaderMetricChart({
 
 export function HeaderMetrics({ frameId }: { frameId: number }) {
   const { theme } = useValues(workspaceLogic)
-  const { headerMetricsByCategory, headerMetricsTimeRange, latestMetricSummariesByCategory } = useValues(
-    metricsLogic({ frameId })
+  const { headerMetricsByCategory, previewMetricsTimeRange, latestMetricSummariesByCategory } = useValues(
+    frameMetricsPreviewLogic({ frameId })
   )
   const metricEntries = Object.entries(headerMetricsByCategory).filter(([, series]) => series.length > 0)
   const chartTheme = metricChartThemes[theme]
 
-  if (!headerMetricsTimeRange || metricEntries.length === 0) {
+  if (!previewMetricsTimeRange || metricEntries.length === 0) {
     return null
   }
 
@@ -151,7 +152,7 @@ export function HeaderMetrics({ frameId }: { frameId: number }) {
           {key !== 'diskUsage' ? (
             <HeaderMetricChart
               series={themeMetricSeries(series, chartTheme)}
-              timeRange={headerMetricsTimeRange}
+              timeRange={previewMetricsTimeRange}
               chartTheme={chartTheme}
               className="hidden @5xl:block @5xl:w-20 @7xl:w-[104px]"
             />

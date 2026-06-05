@@ -8,6 +8,7 @@ from app.database import Base
 class Chat(Base):
     __tablename__ = 'chat'
     id = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    project_id = mapped_column(Integer, ForeignKey("project.id"), nullable=False, index=True)
     frame_id = mapped_column(Integer, ForeignKey('frame.id'), nullable=False)
     scene_id = mapped_column(String(128), nullable=True)
     context_type = mapped_column(String(32), nullable=True)
@@ -25,6 +26,7 @@ class Chat(Base):
     def to_dict(self):
         return {
             'id': self.id,
+            'project_id': self.project_id,
             'frame_id': self.frame_id,
             'scene_id': self.scene_id,
             'context_type': self.context_type,
@@ -37,6 +39,7 @@ class Chat(Base):
 class ChatMessage(Base):
     __tablename__ = 'chat_message'
     id = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    project_id = mapped_column(Integer, ForeignKey("project.id"), nullable=False, index=True)
     chat_id = mapped_column(String(36), ForeignKey('chat.id'), nullable=False)
     role = mapped_column(String(20), nullable=False)
     content = mapped_column(Text, nullable=False)
@@ -46,6 +49,7 @@ class ChatMessage(Base):
     def to_dict(self):
         return {
             'id': self.id,
+            'project_id': self.project_id,
             'chat_id': self.chat_id,
             'role': self.role,
             'content': self.content,

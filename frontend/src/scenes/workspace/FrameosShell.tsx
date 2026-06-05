@@ -6,6 +6,7 @@ import {
   ChevronDownIcon,
   ChevronRightIcon,
   ChevronUpIcon,
+  CloudArrowUpIcon,
   Cog6ToothIcon,
   CodeBracketIcon,
   ComputerDesktopIcon,
@@ -40,6 +41,7 @@ import { workspaceChatDrawerLogic } from './workspaceChatDrawerLogic'
 import { FrameDeployPlanDrawer } from './FrameDeployPlanDrawer'
 import { FrameUnsavedChangesDrawer } from './FrameUnsavedChangesDrawer'
 import { DeployToFrameIcon } from './FrameChangeStatusIcon'
+import { FrameRenameModal } from './FrameActionsMenu'
 
 const DEFAULT_BROWSER_TITLE = 'FrameOS Backend'
 
@@ -245,6 +247,7 @@ function FrameStatusHeaderButton({ frameId }: { frameId: number }): JSX.Element 
   const statusLabel = unsavedChanges ? 'Unsaved' : undeployedChanges ? 'Undeployed' : null
   const drawerKind = unsavedChanges ? 'unsaved' : 'deploy'
   const drawerIsOpen = frameChangeDrawerSelection?.frameId === frameId && frameChangeDrawerSelection.kind === drawerKind
+  const StatusIcon = unsavedChanges ? CloudArrowUpIcon : DeployToFrameIcon
 
   if (!statusLabel) {
     return null
@@ -268,8 +271,8 @@ function FrameStatusHeaderButton({ frameId }: { frameId: number }): JSX.Element 
         'frameos-warning-button'
       )}
     >
-      <DeployToFrameIcon className="h-5 w-5 shrink-0" />
-      <span className="workspace-unsaved-header-label">{unsavedChanges ? 'Changes' : 'Deploy'}</span>
+      <StatusIcon className="h-5 w-5 shrink-0" />
+      <span className="workspace-unsaved-header-label">{statusLabel}</span>
     </button>
   )
 }
@@ -306,6 +309,7 @@ export function FrameosShell({
     useActions(workspaceLogic)
   const { frames } = useValues(framesModel)
   const scenesHref = selectedFrame ? urls.scenes(selectedFrame.id, selectedSceneId ?? undefined) : urls.scenes()
+  const frameHref = selectedFrame ? urls.frame(selectedFrame.id) : urls.frames()
   const appsHref = lastAppsHref ?? urls.systemApps()
   const showAiButton = showAiButtonProp ?? (mode !== 'frames' && mode !== 'settings' && !!selectedFrame)
   const chatSceneId = mode === 'scenes' || mode === 'apps' ? selectedSceneId : null
@@ -425,8 +429,8 @@ export function FrameosShell({
             <NavButton
               active={activeMode === 'frame'}
               current={mode === 'frame'}
-              href={urls.frames()}
-              pending={pendingMode === 'frames'}
+              href={frameHref}
+              pending={pendingMode === 'frame'}
               preloadScene="frames"
               sidebarOpen={secondarySidebarOpen}
               title={secondarySidebarOpen && mode === 'frame' ? 'Hide frame panel' : 'Frame'}
@@ -564,6 +568,7 @@ export function FrameosShell({
         {children}
       </main>
       {workspaceRightPanel}
+      <FrameRenameModal />
     </div>
   )
 }

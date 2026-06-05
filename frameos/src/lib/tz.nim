@@ -1,5 +1,6 @@
 import chrono
 import json
+import locks
 import os
 import system
 import strutils
@@ -7,15 +8,54 @@ import tables
 
 var timeZoneDataLoaded = false
 var timeZoneAliasDataLoaded = false
+var timeZoneDataLoadedFromOverride = false
 var timeZoneAliases: Table[string, string]
+var timeZoneDataLock: Lock
+initLock(timeZoneDataLock)
+
+const TimeZoneStateFolder = "state" / "tz"
+
+proc timeZoneDataPath*(): string =
+  TimeZoneStateFolder / "tzdata.json"
+
+proc timeZoneHashPath*(): string =
+  TimeZoneStateFolder / "tzdata.sha256"
+
+proc timeZoneEtagPath*(): string =
+  TimeZoneStateFolder / "tzdata.etag"
+
+proc loadedTimeZoneDataSource*(): string =
+  if timeZoneDataLoadedFromOverride:
+    "override"
+  elif timeZoneDataLoaded:
+    "embedded"
+  else:
+    ""
+
+proc loadTimeZoneData*(tzData: string, fromOverride = false) {.gcsafe.} =
+  withLock timeZoneDataLock:
+    {.cast(gcsafe).}:
+      loadTzData(tzData)
+    timeZoneDataLoaded = true
+    timeZoneDataLoadedFromOverride = fromOverride
+
+proc loadTimeZoneDataFile*(path: string) =
+  loadTimeZoneData(readFile(path), fromOverride = true)
 
 proc initTimeZone*() =
+  let overridePath = timeZoneDataPath()
+  if fileExists(overridePath) and not timeZoneDataLoadedFromOverride:
+    try:
+      loadTimeZoneDataFile(overridePath)
+      return
+    except CatchableError as e:
+      echo "FrameOS warning: failed to load timezone data override " & overridePath & ": " & e.msg
+
   if timeZoneDataLoaded:
     return
   # TODO: allow users to only load the timezones and years that matter
   const tzData = staticRead("../../assets/compiled/tz/tzdata.json")
-  loadTzData(tzData)
-  timeZoneDataLoaded = true
+  loadTimeZoneData(tzData)
 
 proc initTimeZoneAliases() =
   if timeZoneAliasDataLoaded:

@@ -5,18 +5,22 @@ from datetime import datetime, timezone
 from arq import ArqRedis as Redis
 from typing import Any, Optional
 from sqlalchemy.dialects.sqlite import JSON
-from sqlalchemy import Integer, String, Double, DateTime, Boolean
+from sqlalchemy import ForeignKey, Integer, String, Double, DateTime, Boolean
 from sqlalchemy.orm import Session, mapped_column
 from app.database import Base
 
 from app.drivers.devices import device_dimensions
 from app.models.apps import get_app_configs
 from app.models.settings import get_settings_dict
-from app.utils.timezone import frame_timezone
+from app.utils.timezone import frame_timezone, stored_timezone
 from app.utils.token import secure_token
 from app.utils.tls import generate_frame_tls_material, parse_certificate_not_valid_after
 from app.utils.versions import get_versions
 from app.websockets import publish_message
+
+DEFAULT_MAX_HTTP_RESPONSE_BYTES = 64 * 1024 * 1024
+DEFAULT_TIMEZONE_UPDATE_URL = "https://tz.frameos.net/tzdata.json.gz"
+DEFAULT_TIMEZONE_UPDATE_HOUR = 3
 
 
 def _to_isoformat(value: Optional[datetime]) -> Optional[str]:
@@ -179,11 +183,51 @@ def normalize_error_behavior(error_behavior: Any) -> dict:
     }
 
 
+def normalize_timezone_update_hour(value: Any) -> int:
+    try:
+        hour = int(value if value is not None else DEFAULT_TIMEZONE_UPDATE_HOUR)
+    except (TypeError, ValueError):
+        return DEFAULT_TIMEZONE_UPDATE_HOUR
+    return hour if 0 <= hour <= 23 else DEFAULT_TIMEZONE_UPDATE_HOUR
+
+
+def normalize_timezone_update_url(value: Any) -> str:
+    url = str(value or DEFAULT_TIMEZONE_UPDATE_URL).strip()
+    return url or DEFAULT_TIMEZONE_UPDATE_URL
+
+
+def resolve_timezone_updater(timezone_updater: Any) -> dict:
+    config = timezone_updater if isinstance(timezone_updater, dict) else {}
+
+    return {
+        "enabled": bool(config.get("enabled", True)),
+        "hour": normalize_timezone_update_hour(config.get("hour")),
+        "url": normalize_timezone_update_url(config.get("url")),
+    }
+
+
+def compact_timezone_updater(timezone_updater: Any, include_enabled_default: bool = False) -> dict | None:
+    if not isinstance(timezone_updater, dict):
+        return {"enabled": True} if include_enabled_default else None
+
+    resolved = resolve_timezone_updater(timezone_updater)
+    compact: dict[str, Any] = {}
+
+    if include_enabled_default or resolved["enabled"] is not True:
+        compact["enabled"] = resolved["enabled"]
+    if "hour" in timezone_updater and resolved["hour"] != DEFAULT_TIMEZONE_UPDATE_HOUR:
+        compact["hour"] = resolved["hour"]
+    if "url" in timezone_updater and resolved["url"] != DEFAULT_TIMEZONE_UPDATE_URL:
+        compact["url"] = resolved["url"]
+
+    return compact or None
+
 
 # NB! Update frontend/src/types.tsx if you change this
 class Frame(Base):
     __tablename__ = 'frame'
     id = mapped_column(Integer, primary_key=True)
+    project_id = mapped_column(Integer, ForeignKey("project.id"), nullable=False, index=True)
     name = mapped_column(String(256), nullable=False)
     mode = mapped_column(String(32), nullable=True) # rpios, buildroot
     # sending commands to frame
@@ -200,7 +244,7 @@ class Frame(Base):
     # receiving logs, connection from frame to us
     server_host = mapped_column(String(256), nullable=True)
     server_port = mapped_column(Integer, default=8989)
-    server_api_key = mapped_column(String(64), nullable=True)
+    server_api_key = mapped_column(String(64), nullable=True, unique=True)
     server_send_logs = mapped_column(Boolean, default=True)
     # frame metadata
     status = mapped_column(String(15), nullable=False)
@@ -212,9 +256,12 @@ class Frame(Base):
     device_config = mapped_column(JSON, nullable=True)
     color = mapped_column(String(256), nullable=True)
     timezone = mapped_column(String(128), nullable=True)
+    timezone_updater = mapped_column(JSON, nullable=True)
     interval = mapped_column(Double, default=300)
     metrics_interval = mapped_column(Double, default=60)
+    max_http_response_bytes = mapped_column(Integer, default=DEFAULT_MAX_HTTP_RESPONSE_BYTES)
     scaling_mode = mapped_column(String(64), nullable=True)  # contain (default), cover, stretch, center
+    image_engine = mapped_column(String(32), nullable=True)  # empty and pixie use Pixie; imagemagick uses ImageMagick
     rotate = mapped_column(Integer, nullable=True)
     flip = mapped_column(String(32), nullable=True)
     log_to_file = mapped_column(String(256), nullable=True)
@@ -247,6 +294,7 @@ class Frame(Base):
     def to_dict(self):
         return {
             'id': self.id,
+            'project_id': self.project_id,
             'name': self.name,
             'mode': self.mode,
             'frame_host': self.frame_host,
@@ -272,9 +320,12 @@ class Frame(Base):
             'device_config': self.device_config,
             'color': self.color,
             'timezone': self.timezone,
+            'timezone_updater': compact_timezone_updater(self.timezone_updater, include_enabled_default=True),
             'interval': self.interval,
             'metrics_interval': self.metrics_interval,
+            'max_http_response_bytes': self.max_http_response_bytes or DEFAULT_MAX_HTTP_RESPONSE_BYTES,
             'scaling_mode': self.scaling_mode,
+            'image_engine': self.image_engine,
             'rotate': self.rotate,
             'flip': self.flip,
             'background_color': self.background_color,
@@ -301,7 +352,16 @@ class Frame(Base):
             'last_successful_deploy_at': self.last_successful_deploy_at.replace(tzinfo=timezone.utc).isoformat() if self.last_successful_deploy_at else None,
         }
 
-async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, server_host: str, device: Optional[str] = None, interval: Optional[float] = None) -> Frame:
+async def new_frame(
+    db: Session,
+    redis: Redis,
+    name: str,
+    frame_host: str,
+    server_host: str,
+    device: Optional[str] = None,
+    interval: Optional[float] = None,
+    project_id: Optional[int] = None,
+) -> Frame:
     if '@' in frame_host:
         user_pass, frame_host = frame_host.split('@')
     else:
@@ -328,8 +388,13 @@ async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, serve
 
     tls_material = generate_frame_tls_material(frame_host)
     dimensions = device_dimensions(device)
+    if project_id is None:
+        from app.tenancy import ensure_default_project
+
+        project_id = ensure_default_project(db).id
 
     frame = Frame(
+        project_id=project_id,
         name=name,
         mode="rpios",
         ssh_user=user,
@@ -357,6 +422,7 @@ async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, serve
         width=dimensions[0] if dimensions else None,
         height=dimensions[1] if dimensions else None,
         interval=interval or 300,
+        max_http_response_bytes=DEFAULT_MAX_HTTP_RESPONSE_BYTES,
         status="uninitialized",
         scenes=[],
         apps=[],
@@ -364,6 +430,7 @@ async def new_frame(db: Session, redis: Redis, name: str, frame_host: str, serve
         rotate=0,
         device=device or "web_only",
         timezone=None,
+        timezone_updater=None,
         log_to_file=None, # spare the SD card from load
         assets_path='/srv/assets',
         save_assets=True,
@@ -414,22 +481,22 @@ async def update_frame(db: Session, redis: Redis, frame: Frame):
     await publish_message(redis, "update_frame", frame.to_dict())
 
 
-async def delete_frame(db: Session, redis: Redis, frame_id: int):
-    if frame := db.get(Frame, frame_id):
+async def delete_frame(db: Session, redis: Redis, frame_id: int, project_id: int):
+    if frame := db.query(Frame).filter_by(id=frame_id, project_id=project_id).first():
         # delete corresonding log and metric entries first
         from .log import Log
-        db.query(Log).filter_by(frame_id=frame_id).delete()
+        db.query(Log).filter_by(project_id=project_id, frame_id=frame_id).delete()
         from .metrics import Metrics
-        db.query(Metrics).filter_by(frame_id=frame_id).delete()
+        db.query(Metrics).filter_by(project_id=project_id, frame_id=frame_id).delete()
         from .scene_image import SceneImage
-        db.query(SceneImage).filter_by(frame_id=frame_id).delete()
+        db.query(SceneImage).filter_by(project_id=project_id, frame_id=frame_id).delete()
 
-        cache_key = f'frame:{frame.frame_host}:{frame.frame_port}:image'
+        cache_key = f'frame:{frame_id}:image'
         await redis.delete(cache_key)
 
         db.delete(frame)
         db.commit()
-        await publish_message(redis, "delete_frame", {"id": frame_id})
+        await publish_message(redis, "delete_frame", {"id": frame_id, "project_id": project_id})
         return True
     return False
 
@@ -449,8 +516,11 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
     mountpoints = normalize_mountpoints(frame.mountpoints)
     error_behavior = normalize_error_behavior(frame.error_behavior)
     frameos_version = get_versions().get("frameos")
-    all_settings = get_settings_dict(db)
-    default_timezone = (all_settings.get("defaults") or {}).get("timezone")
+    all_settings = get_settings_dict(db, project_id=frame.project_id)
+    defaults = all_settings.get("defaults") or {}
+    default_timezone = defaults.get("timezone")
+    explicit_timezone = stored_timezone(frame.timezone)
+    timezone_updater = resolve_timezone_updater(frame.timezone_updater)
     fallback_dimensions = device_dimensions(frame.device)
     frame_json: dict = {
         **({"frameosVersion": frameos_version} if isinstance(frameos_version, str) and frameos_version else {}),
@@ -484,8 +554,10 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
             ]} if cfg.get('uploadHeaders') else {}),
         })(frame.device_config or {}),
         "metricsInterval": frame.metrics_interval or 60.0,
+        "maxHttpResponseBytes": frame.max_http_response_bytes or DEFAULT_MAX_HTTP_RESPONSE_BYTES,
         "debug": frame.debug or False,
         "scalingMode": frame.scaling_mode or "contain",
+        "imageEngine": frame.image_engine or "",
         "rotate": frame.rotate or 0,
         "flip": frame.flip,
         "logToFile": frame.log_to_file,
@@ -535,8 +607,15 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
             "silentWindowMinutes": error_behavior["silent_window_minutes"],
             "showErrorRetrySeconds": error_behavior["show_error_retry_seconds"],
         },
+        "timeZoneUpdates": {
+            "enabled": timezone_updater["enabled"],
+            "hour": timezone_updater["hour"],
+            "url": timezone_updater["url"],
+        },
     }
-    if (frame.mode or "rpios") == "buildroot":
+    if explicit_timezone:
+        frame_json["timeZone"] = explicit_timezone
+    elif (frame.mode or "rpios") == "buildroot":
         frame_json["timeZone"] = frame_timezone(frame.timezone, default_timezone)
 
     schedule = frame.schedule

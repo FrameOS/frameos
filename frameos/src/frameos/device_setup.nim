@@ -122,14 +122,38 @@ proc setupAptPackages*(packages: seq[string]): SetupResult =
 
   result = setupOk()
 
-proc detectBootConfigPath*(): string =
-  let configuredPath = getEnv("FRAMEOS_BOOT_CONFIG")
+proc looksLikeBuildrootBootConfig*(content: string): bool =
+  for line in content.splitLines():
+    let normalized = line.strip()
+    if normalized == "kernel=Image" or
+        normalized.startsWith("start_file=") or
+        normalized.startsWith("fixup_file="):
+      return true
+  false
+
+proc readFileForBootConfigDetection(path: string): string =
+  try:
+    if fileExists(path):
+      return readFile(path)
+  except CatchableError:
+    discard
+  ""
+
+proc chooseBootConfigPath*(configuredPath, bootConfigPath, firmwareConfigPath: string): string =
   if configuredPath.len > 0:
     return configuredPath
-  if fileExists("/boot/firmware/config.txt"):
-    "/boot/firmware/config.txt"
-  else:
-    "/boot/config.txt"
+
+  let bootConfig = readFileForBootConfigDetection(bootConfigPath)
+  if bootConfig.len > 0 and looksLikeBuildrootBootConfig(bootConfig):
+    return bootConfigPath
+
+  if fileExists(firmwareConfigPath):
+    return firmwareConfigPath
+
+  bootConfigPath
+
+proc detectBootConfigPath*(): string =
+  chooseBootConfigPath(getEnv("FRAMEOS_BOOT_CONFIG"), "/boot/config.txt", "/boot/firmware/config.txt")
 
 proc normalizeBootConfig(content: string): string =
   content.strip(leading = false, trailing = true, chars = {'\n', '\r'}) & "\n"

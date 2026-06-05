@@ -7,8 +7,11 @@
     "serverSendLogs": false,
     "width": 320,
     "height": 480,
-    "device": "web_only",
-    "deviceConfig": {},
+    "device": "http.upload",
+    "deviceConfig": {
+        "uploadUrl": "",
+        "uploadHeaders": []
+    },
     "color": null,
     "backgroundColor": "blue",
     "interval": 1.0,

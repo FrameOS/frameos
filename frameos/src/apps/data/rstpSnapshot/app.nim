@@ -1,5 +1,4 @@
 import os
-import osproc
 import pixie
 import json
 import math
@@ -10,6 +9,7 @@ import strformat
 import frameos/apps
 import frameos/types
 import frameos/utils/image
+import frameos/utils/process
 
 const
   DefaultFfmpegTimeoutSeconds = 15
@@ -61,62 +61,30 @@ proc ffmpegCommandForLog(url: string, outputPath = ""): string =
   let args = ffmpegArgs(url, outputPath).filterIt(it.len > 0)
   "ffmpeg " & args.mapIt(shellDisplayArg(it)).join(" ")
 
-proc stopFfmpeg(p: Process) =
-  if p == nil or not p.running():
-    return
-  try:
-    p.terminate()
-    discard p.waitForExit(1500)
-    if p.running():
-      p.kill()
-      discard p.waitForExit(500)
-  except CatchableError:
-    discard
-
 proc runFfmpeg(command: string, url: string, timeoutMs: int): tuple[data: string, exitCode: int] =
   if rtspSnapshotFfmpegRunHook != nil:
     return rtspSnapshotFfmpegRunHook(command, timeoutMs)
 
-  let outputPath = getTempDir() / ("frameos-rtsp-" & $getCurrentProcessId() & "-" & $(epochTime() * 1000).int & ".bmp")
-  var p = startProcess("ffmpeg", args = ffmpegArgs(url, outputPath), options = {poUsePath})
-  defer:
-    if p != nil:
-      p.stopFfmpeg()
-      p.close()
-    if fileExists(outputPath):
-      try:
-        removeFile(outputPath)
-      except OSError:
-        discard
-
-  let startedAt = epochTime()
-  while p.running():
-    if fileExists(outputPath) and getFileSize(outputPath) > MaxFfmpegOutputBytes:
-      p.stopFfmpeg()
-      raise newException(IOError, "ffmpeg output exceeded " & $MaxFfmpegOutputBytes & " bytes")
-    if epochTime() > startedAt + (timeoutMs.float / 1000.0):
-      p.stopFfmpeg()
-      result.exitCode = -1
-      return
-    sleep(100)
-
-  result.exitCode = p.waitForExit()
+  let processResult = runProcessPiped(
+    "ffmpeg",
+    ffmpegArgs(url, "pipe:1"),
+    timeoutMs = timeoutMs,
+    maxOutputBytes = MaxFfmpegOutputBytes
+  )
+  result.exitCode = processResult.exitCode
+  if processResult.timedOut:
+    result.exitCode = -1
+    return
+  if processResult.outputExceeded:
+    raise newException(IOError, "ffmpeg output exceeded " & $MaxFfmpegOutputBytes & " bytes")
   if result.exitCode != 0:
     return
-
-  if not fileExists(outputPath):
-    result.exitCode = 1
-    return
-
-  if getFileSize(outputPath) > MaxFfmpegOutputBytes:
-    raise newException(IOError, "ffmpeg output exceeded " & $MaxFfmpegOutputBytes & " bytes")
-
-  result.data = readFile(outputPath)
+  result.data = processResult.output
 
 proc get*(self: App, context: ExecutionContext): Image =
   try:
     let url = self.appConfig.url
-    let command = ffmpegCommandForLog(url)
+    let command = ffmpegCommandForLog(url, "pipe:1")
     let timeoutMs = self.ffmpegTimeoutMs()
 
     if self.frameConfig.debug:

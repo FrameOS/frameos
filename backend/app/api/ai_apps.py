@@ -8,10 +8,12 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.chat import Chat, ChatMessage
 from app.models.settings import get_settings_dict
+from app.models.frame import Frame
 from app.schemas.ai_apps import AiAppChatRequest, AiAppChatResponse
 from app.utils.ai_app import answer_app_question, edit_app_sources, route_app_chat
-from app.utils.ai_scene import CHAT_MODEL, SCENE_MODEL
-from . import api_with_auth
+from app.utils.ai_scene import CHAT_MODEL, SCENE_MODEL, openai_model
+from app.tenancy import current_project_id
+from . import api_project
 
 
 def _build_app_context_id(scene_id: str | None, node_id: str | None) -> str | None:
@@ -20,7 +22,7 @@ def _build_app_context_id(scene_id: str | None, node_id: str | None) -> str | No
     return f"{scene_id}::{node_id}"
 
 
-@api_with_auth.post("/ai/apps/chat", response_model=AiAppChatResponse)
+@api_project.post("/ai/apps/chat", response_model=AiAppChatResponse)
 async def chat_app(
     data: AiAppChatRequest,
     db: Session = Depends(get_db),
@@ -34,10 +36,14 @@ async def chat_app(
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="App sources are required")
 
     chat = None
+    project_id = current_project_id()
     context_id = _build_app_context_id(data.scene_id, data.node_id)
     if data.frame_id is not None:
+        frame = db.query(Frame).filter_by(project_id=project_id, id=data.frame_id).first()
+        if not frame:
+            raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
         if data.chat_id:
-            chat = db.query(Chat).filter(Chat.id == data.chat_id).first()
+            chat = db.query(Chat).filter(Chat.project_id == project_id, Chat.id == data.chat_id).first()
             if chat and chat.frame_id != data.frame_id:
                 raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Chat does not belong to frame")
             if chat and chat.context_type not in (None, "app"):
@@ -46,12 +52,14 @@ async def chat_app(
             if data.chat_id:
                 chat = Chat(
                     id=data.chat_id,
+                    project_id=project_id,
                     frame_id=data.frame_id,
                     context_type="app",
                     context_id=context_id,
                 )
             else:
                 chat = Chat(
+                    project_id=project_id,
                     frame_id=data.frame_id,
                     context_type="app",
                     context_id=context_id,
@@ -65,7 +73,7 @@ async def chat_app(
         if chat:
             chat.updated_at = datetime.utcnow()
             db.add(chat)
-            db.add(ChatMessage(chat_id=chat.id, role="user", content=prompt))
+            db.add(ChatMessage(project_id=project_id, chat_id=chat.id, role="user", content=prompt))
             db.commit()
 
     def _record_assistant_message(reply: str, tool: str) -> None:
@@ -73,17 +81,17 @@ async def chat_app(
             return
         chat.updated_at = datetime.utcnow()
         db.add(chat)
-        db.add(ChatMessage(chat_id=chat.id, role="assistant", content=reply, tool=tool))
+        db.add(ChatMessage(project_id=project_id, chat_id=chat.id, role="assistant", content=reply, tool=tool))
         db.commit()
 
-    settings = get_settings_dict(db)
+    settings = get_settings_dict(db, project_id=project_id)
     openai_settings = settings.get("openAI", {})
     api_key = openai_settings.get("backendApiKey")
     if not api_key:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="OpenAI backend API key not set")
 
     history = [item.model_dump() for item in (data.history or [])]
-    model = openai_settings.get("appChatModel") or openai_settings.get("chatModel") or CHAT_MODEL
+    model = openai_model(openai_settings, "appChatModel", openai_model(openai_settings, "chatModel", CHAT_MODEL))
 
     tool_payload = {}
     tool = "ask_about_app"
@@ -120,7 +128,7 @@ async def chat_app(
             node_id=data.node_id,
             history=history,
             api_key=api_key,
-            model=openai_settings.get("appEditModel") or openai_settings.get("chatModel") or SCENE_MODEL,
+            model=openai_model(openai_settings, "appEditModel", openai_model(openai_settings, "chatModel", SCENE_MODEL)),
             ai_trace_id=request_id,
             ai_session_id=None,
         )
@@ -141,7 +149,7 @@ async def chat_app(
             node_id=data.node_id,
             history=history,
             api_key=api_key,
-            model=openai_settings.get("appChatModel") or openai_settings.get("chatModel") or CHAT_MODEL,
+            model=openai_model(openai_settings, "appChatModel", openai_model(openai_settings, "chatModel", CHAT_MODEL)),
             ai_trace_id=request_id,
             ai_session_id=None,
         )

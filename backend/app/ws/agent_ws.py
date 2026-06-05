@@ -220,7 +220,7 @@ async def file_write_chunk_on_frame(
     frame_id: int, chunk: bytes,
     timeout: int = 60, redis: Redis | None = None,
 ):
-    # small (< 300 KB) so embedding is OK
+    # Chunks are small (<300KB), so attaching the blob to the command is OK.
     async with _redis_for_command(redis) as command_redis:
         return await send_cmd(
             command_redis,
@@ -411,7 +411,8 @@ async def ws_agent_endpoint(
     await publish_message(
         redis, "update_frame",
         {"active_connections": await number_of_connections_for_frame(redis, frame.id),
-         "id": frame.id}
+         "id": frame.id,
+         "project_id": frame.project_id}
     )
     await write_log(redis, frame.id, "agent", f'☎️ Frame "{frame.name}" connected ☎️', ip=client_ip)
 
@@ -527,6 +528,7 @@ async def ws_agent_endpoint(
         await publish_message(
             redis, "update_frame",
             {"active_connections": await number_of_connections_for_frame(redis, frame.id),
-             "id": frame.id}
+             "id": frame.id,
+             "project_id": frame.project_id}
         )
         await write_log(redis, frame.id, "agent", f'👋 Frame "{frame.name}" disconnected 👋', ip=client_ip)

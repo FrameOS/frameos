@@ -139,7 +139,7 @@ export function LoggedOutApp() {
 
 export function App() {
   const { scene, params } = useValues(sceneLogic)
-  if (!inHassioIngress() && (scene === 'login' || scene === 'signup')) {
+  if (!inHassioIngress() && (scene === 'login' || scene === 'signup' || scene === 'setupUnavailable')) {
     return <LoggedOutApp />
   }
   return <LoggedInApp />

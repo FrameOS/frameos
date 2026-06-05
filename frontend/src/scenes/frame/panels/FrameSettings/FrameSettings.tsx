@@ -7,7 +7,13 @@ import { Form, Group } from 'kea-forms'
 import { TextInput } from '../../../../components/TextInput'
 import { Select } from '../../../../components/Select'
 import { frameAdminUrl, frameControlUrl, frameImageUrl, frameRootUrl, frameUrl } from '../../../../decorators/frame'
-import { DEFAULT_FRAME_ERROR_BEHAVIOR, frameLogic, normalizeFrameErrorBehavior } from '../../frameLogic'
+import {
+  DEFAULT_FRAME_ERROR_BEHAVIOR,
+  DEFAULT_TIMEZONE_UPDATE_HOUR,
+  DEFAULT_TIMEZONE_UPDATE_URL,
+  frameLogic,
+  normalizeFrameErrorBehavior,
+} from '../../frameLogic'
 import { downloadJson } from '../../../../utils/downloadJson'
 import { Field } from '../../../../components/Field'
 import { devices, spectraPalettes, withCustomPalette, buildrootPlatforms, modes } from '../../../../devices'
@@ -34,6 +40,7 @@ import { logsLogic } from '../Logs/logsLogic'
 import { Tag } from '../../../../components/Tag'
 import { getCertificateValidityInfo, getFrameCertificateStatus } from '../../../../utils/certificates'
 import { timezoneOptions } from '../../../../decorators/timezones'
+import { Tooltip } from '../../../../components/Tooltip'
 
 export interface FrameSettingsProps {
   className?: string
@@ -197,6 +204,44 @@ export function FrameSettings({
   const mountpointItems = mountpoints.items ?? []
   const errorBehavior = normalizeFrameErrorBehavior(frameForm.error_behavior ?? frame.error_behavior)
   const isBuildrootMode = mode === 'buildroot'
+  const selectedTimezone = frameForm.timezone ?? frame.timezone ?? ''
+  const timezoneUpdater = frameForm.timezone_updater ?? {}
+  const timezoneUpdateHourValue =
+    typeof timezoneUpdater.hour === 'number' && Number.isInteger(timezoneUpdater.hour) ? String(timezoneUpdater.hour) : ''
+  const timezoneUpdateUrlValue = timezoneUpdater.url ?? ''
+  const setTimezoneUpdaterValue = (patch: Partial<NonNullable<FrameType['timezone_updater']>>) => {
+    const next = {
+      ...timezoneUpdater,
+      ...patch,
+    }
+    if (next.hour === undefined) {
+      delete next.hour
+    }
+    if (!next.url) {
+      delete next.url
+    }
+    setFrameFormValues({ timezone_updater: next })
+  }
+  const setTimezoneUpdateHour = (rawValue: string) => {
+    const value = rawValue.trim()
+    if (!value) {
+      setTimezoneUpdaterValue({ hour: undefined })
+      return
+    }
+    if (!/^\d+$/.test(value)) {
+      return
+    }
+    const hour = Number(value)
+    if (hour >= 0 && hour <= 23) {
+      setTimezoneUpdaterValue({ hour })
+    }
+  }
+  const baseTimezoneOptions =
+    mode === 'rpios' ? [{ value: '', label: 'Detect from frame' }, ...timezoneOptions] : timezoneOptions
+  const frameTimezoneOptions =
+    selectedTimezone && !baseTimezoneOptions.some((option) => option.value === selectedTimezone)
+      ? [{ value: selectedTimezone, label: `${selectedTimezone} (detected)` }, ...baseTimezoneOptions]
+      : baseTimezoneOptions
   const setErrorBehavior = (patch: Partial<NonNullable<FrameType['error_behavior']>>) => {
     setFrameFormValues({
       error_behavior: normalizeFrameErrorBehavior({
@@ -705,13 +750,17 @@ export function FrameSettings({
               ]}
             />
           </Field>
-          {isBuildrootMode ? (
+          {mode === 'buildroot' || mode === 'rpios' ? (
             <Field
               name="timezone"
               label="Timezone"
-              tooltip="IANA timezone applied to the Buildroot operating system during setup."
+              tooltip={
+                mode === 'buildroot'
+                  ? 'IANA timezone applied to the Buildroot operating system during setup.'
+                  : 'IANA timezone applied to Raspberry Pi OS during setup. Leave unchanged to keep a detected timezone.'
+              }
             >
-              <Select name="timezone" options={timezoneOptions} />
+              <Select name="timezone" options={frameTimezoneOptions} />
             </Field>
           ) : null}
         </div>
@@ -1378,6 +1427,70 @@ export function FrameSettings({
           <Field name="metrics_interval" label="Metrics reporting interval in seconds, 0 to disable">
             <TextInput name="metrics_interval" placeholder="60" />
           </Field>
+          <Group name="timezone_updater">
+            <Field
+              name="enabled"
+              label="Update timezone data"
+              tooltip="Download updated timezone rules on this frame so daylight saving changes stay current."
+            >
+              {({ value, onChange }) => {
+                const enabled = value ?? true
+                return (
+                  <div className="space-y-3">
+                    <div className="flex w-full items-start gap-3">
+                      <Switch value={enabled} onChange={onChange} />
+                      {enabled ? (
+                        <details className="min-w-0 flex-1">
+                          <summary className="frameos-link cursor-pointer list-none text-sm font-semibold">
+                            advanced
+                          </summary>
+                          <div className="mt-3 w-full space-y-2">
+                            <div className="space-y-1 @md:flex @md:gap-2">
+                              <Label className="@md:w-1/3">
+                                Timezone update hour
+                                <Tooltip title="Hour of day on the frame when timezone data updates run." />
+                              </Label>
+                              <div className="w-full">
+                                <TextInput
+                                  inputMode="numeric"
+                                  pattern="[0-9]*"
+                                  placeholder={String(DEFAULT_TIMEZONE_UPDATE_HOUR)}
+                                  value={timezoneUpdateHourValue}
+                                  onChange={setTimezoneUpdateHour}
+                                />
+                              </div>
+                            </div>
+                            <div className="space-y-1 @md:flex @md:gap-2">
+                              <Label className="@md:w-1/3">Timezone update URL</Label>
+                              <div className="w-full">
+                                <TextInput
+                                  placeholder={DEFAULT_TIMEZONE_UPDATE_URL}
+                                  value={timezoneUpdateUrlValue}
+                                  onChange={(url) => setTimezoneUpdaterValue({ url: url || undefined })}
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        </details>
+                      ) : null}
+                    </div>
+                  </div>
+                )
+              }}
+            </Field>
+          </Group>
+          <Field
+            name="max_http_response_bytes"
+            label="Maximum HTTP response size for apps"
+            tooltip={
+              <>
+                Maximum number of bytes that FrameOS apps may download in a single HTTP response. Increase this for
+                larger calendar feeds, images, or APIs.
+              </>
+            }
+          >
+            <NumberTextInput name="max_http_response_bytes" placeholder="67108864" />
+          </Field>
           <Field name="scaling_mode" label="Scaling mode">
             <Select
               name="scaling_mode"
@@ -1386,6 +1499,16 @@ export function FrameSettings({
                 { value: 'cover', label: 'Cover' },
                 { value: 'stretch', label: 'Stretch' },
                 { value: 'center', label: 'Center' },
+              ]}
+            />
+          </Field>
+          <Field name="image_engine" label="Image engine">
+            <Select
+              name="image_engine"
+              options={[
+                { value: '', label: 'Default (Pixie)' },
+                { value: 'pixie', label: 'Pixie' },
+                { value: 'imagemagick', label: 'ImageMagick' },
               ]}
             />
           </Field>

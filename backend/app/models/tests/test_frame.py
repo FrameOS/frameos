@@ -35,8 +35,10 @@ async def test_new_frame(mock_publish, db, redis):
     assert frame.ssh_user == "pi"
     assert frame.device == "testDevice"
     assert frame.interval == 123
+    assert frame.max_http_response_bytes == 64 * 1024 * 1024
     assert frame.reboot == {"enabled": "true", "crontab": "0 4 * * *"}
     assert frame.server_send_logs is True
+    assert frame.timezone_updater is None
     assert frame.https_proxy["enable"] is True
     assert frame.https_proxy["expose_only_port"] is True
     assert frame.https_proxy["certs"]["server"] and "BEGIN CERTIFICATE" in frame.https_proxy["certs"]["server"]
@@ -89,11 +91,13 @@ async def test_update_frame(mock_publish, db, redis):
 async def test_delete_frame(mock_publish, db, redis):
     frame = await new_frame(db, redis, "FrameToDelete", "localhost", "server_host")
     frame_id = frame.id
-    success = await delete_frame(db, redis, frame_id)
+    await redis.set(f"frame:{frame_id}:image", b"cached_image")
+    success = await delete_frame(db, redis, frame_id, frame.project_id)
     assert success is True
     # After deletion, frame should not be found
     in_db = db.get(Frame, frame_id)
     assert in_db is None
+    assert await redis.get(f"frame:{frame_id}:image") is None
     # 2 calls: "new_frame", "delete_frame"
     assert mock_publish.await_count == 2
 
@@ -101,7 +105,7 @@ async def test_delete_frame(mock_publish, db, redis):
 @pytest.mark.asyncio
 @patch("app.models.frame.publish_message", new_callable=AsyncMock)
 async def test_delete_nonexistent_frame(mock_publish, db, redis):
-    success = await delete_frame(db, redis, 999999)
+    success = await delete_frame(db, redis, 999999, 1)
     assert success is False
     assert mock_publish.await_count == 0
 
@@ -113,6 +117,7 @@ async def test_frame_to_dict(mock_publish, db, redis):
     data = frame.to_dict()
     assert data["frame_host"] == "host"
     assert data["interval"] == 55
+    assert data["max_http_response_bytes"] == 64 * 1024 * 1024
     assert data["server_send_logs"] is True
     assert data["reboot"]["crontab"] == "0 4 * * *"
     assert data["https_proxy"]["certs"]["server"]
@@ -189,6 +194,29 @@ async def test_get_frame_json_includes_error_behavior(_mock_publish, db, redis):
 
 @pytest.mark.asyncio
 @patch("app.models.frame.publish_message", new_callable=AsyncMock)
+async def test_get_frame_json_includes_image_engine(_mock_publish, db, redis):
+    frame = await new_frame(db, redis, "FrameJson", "host", "server_host.com")
+    data = get_frame_json(db, frame)
+    assert data["imageEngine"] == ""
+
+    frame.image_engine = "imagemagick"
+    data = get_frame_json(db, frame)
+    assert data["imageEngine"] == "imagemagick"
+
+
+@pytest.mark.asyncio
+@patch("app.models.frame.publish_message", new_callable=AsyncMock)
+async def test_get_frame_json_includes_max_http_response_bytes(_mock_publish, db, redis):
+    frame = await new_frame(db, redis, "FrameJson", "host", "server_host.com")
+    frame.max_http_response_bytes = 32 * 1024 * 1024
+
+    data = get_frame_json(db, frame)
+
+    assert data["maxHttpResponseBytes"] == 32 * 1024 * 1024
+
+
+@pytest.mark.asyncio
+@patch("app.models.frame.publish_message", new_callable=AsyncMock)
 async def test_get_frame_json_uses_known_device_dimensions_when_unset(_mock_publish, db, redis):
     frame = await new_frame(db, redis, "FrameJson", "host", "server_host.com", "pimoroni.inky_what_yellow")
     frame.width = None
@@ -203,9 +231,9 @@ async def test_get_frame_json_uses_known_device_dimensions_when_unset(_mock_publ
 @pytest.mark.asyncio
 @patch("app.models.frame.publish_message", new_callable=AsyncMock)
 async def test_get_frame_json_uses_frame_timezone_or_global_default(_mock_publish, db, redis):
-    db.add(Settings(key="defaults", value={"timezone": "Europe/Brussels"}))
-    db.commit()
     frame = await new_frame(db, redis, "FrameJson", "host", "server_host.com")
+    db.add(Settings(project_id=frame.project_id, key="defaults", value={"timezone": "Europe/Brussels"}))
+    db.commit()
     frame.mode = "buildroot"
     frame.timezone = None
 
@@ -221,16 +249,77 @@ async def test_get_frame_json_uses_frame_timezone_or_global_default(_mock_publis
 
 @pytest.mark.asyncio
 @patch("app.models.frame.publish_message", new_callable=AsyncMock)
-async def test_get_frame_json_does_not_set_timezone_for_rpios(_mock_publish, db, redis):
-    db.add(Settings(key="defaults", value={"timezone": "Europe/Brussels"}))
-    db.commit()
+async def test_get_frame_json_uses_explicit_timezone_for_rpios(_mock_publish, db, redis):
     frame = await new_frame(db, redis, "FrameJson", "host", "server_host.com")
+    db.add(Settings(project_id=frame.project_id, key="defaults", value={"timezone": "Europe/Brussels"}))
+    db.commit()
     frame.mode = "rpios"
     frame.timezone = "America/New_York"
 
     data = get_frame_json(db, frame)
 
+    assert data["timeZone"] == "America/New_York"
+
+
+@pytest.mark.asyncio
+@patch("app.models.frame.publish_message", new_callable=AsyncMock)
+async def test_get_frame_json_does_not_default_timezone_for_rpios(_mock_publish, db, redis):
+    frame = await new_frame(db, redis, "FrameJson", "host", "server_host.com")
+    db.add(Settings(project_id=frame.project_id, key="defaults", value={"timezone": "Europe/Brussels"}))
+    db.commit()
+    frame.mode = "rpios"
+    frame.timezone = None
+
+    data = get_frame_json(db, frame)
+
     assert "timeZone" not in data
+
+
+@pytest.mark.asyncio
+@patch("app.models.frame.publish_message", new_callable=AsyncMock)
+async def test_get_frame_json_preserves_unknown_explicit_timezone_for_rpios(_mock_publish, db, redis):
+    frame = await new_frame(db, redis, "FrameJson", "host", "server_host.com")
+    frame.mode = "rpios"
+    frame.timezone = "Custom/Zone"
+
+    data = get_frame_json(db, frame)
+
+    assert data["timeZone"] == "Custom/Zone"
+
+
+@pytest.mark.asyncio
+@patch("app.models.frame.publish_message", new_callable=AsyncMock)
+async def test_get_frame_json_includes_timezone_updater(_mock_publish, db, redis):
+    frame = await new_frame(db, redis, "FrameJson", "host", "server_host.com")
+    db.commit()
+    frame.timezone_updater = {
+        "enabled": False,
+        "hour": 5,
+        "url": "https://example.com/tzdata.json.gz",
+    }
+
+    data = get_frame_json(db, frame)
+
+    assert data["timeZoneUpdates"] == {
+        "enabled": False,
+        "hour": 5,
+        "url": "https://example.com/tzdata.json.gz",
+    }
+
+
+@pytest.mark.asyncio
+@patch("app.models.frame.publish_message", new_callable=AsyncMock)
+async def test_get_frame_json_resolves_default_timezone_updater(_mock_publish, db, redis):
+    frame = await new_frame(db, redis, "FrameJson", "host", "server_host.com")
+    db.commit()
+
+    data = get_frame_json(db, frame)
+
+    assert data["timeZoneUpdates"] == {
+        "enabled": True,
+        "hour": 3,
+        "url": "https://tz.frameos.net/tzdata.json.gz",
+    }
 
 
 def test_normalize_frame_admin_auth_keeps_password_whitespace():

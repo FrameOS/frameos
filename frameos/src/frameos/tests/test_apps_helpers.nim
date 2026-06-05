@@ -30,6 +30,12 @@ suite "frameos app helpers":
     check renderWidth(rotate270) == 480
     check renderHeight(rotate270) == 800
 
+  test "maxHttpResponseBytes uses configured frame limit with default fallback":
+    check maxHttpResponseBytes(FrameConfig(maxHttpResponseBytes: 1234)) == 1234
+    check maxHttpResponseBytes(FrameConfig(maxHttpResponseBytes: 0)) == DefaultMaxHttpResponseBytes
+    check maxHttpResponseBytes(AppRoot(frameConfig: FrameConfig(maxHttpResponseBytes: 5678))) == 5678
+    check maxHttpResponseBytes(AppRoot()) == DefaultMaxHttpResponseBytes
+
   test "cleanFilename strips invalid chars and collapses spaces":
     check cleanFilename("hello   world") == "hello world"
     check cleanFilename("a/b:c*d?e\"f<g>h|i") == "abcdefghi"

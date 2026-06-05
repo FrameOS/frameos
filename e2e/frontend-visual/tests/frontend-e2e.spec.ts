@@ -1,5 +1,11 @@
 import { expect, test, type Page } from '@playwright/test'
-import { attachFrontendErrorCollector, login, prepareStablePage, settleForScreenshot } from './visual-helpers'
+import {
+  attachFrontendErrorCollector,
+  login,
+  prepareStablePage,
+  projectApiPathPattern,
+  settleForScreenshot,
+} from './visual-helpers'
 
 const frameTools = [
   { label: 'Overview', path: '/frames/1?tool=overview', text: /Kitchen dashboard/i },
@@ -140,7 +146,7 @@ test.describe('backend frontend e2e coverage @e2e', () => {
     const readErrors = await prepareAuthenticatedPage(page)
     let statesRequests = 0
 
-    await page.route('**/api/frames/*/states', (route) => {
+    await page.route(projectApiPathPattern('/frames/*/states'), (route) => {
       statesRequests += 1
       return route.fulfill({
         status: 200,

@@ -90,17 +90,49 @@ async def test_process_log_render(mock_pub, db, redis):
 @patch("app.models.log.publish_message", new_callable=AsyncMock)
 async def test_process_log_bootup(mock_pub, db, redis):
     frame = await new_frame(db, redis, "BootFrame", "localhost", "server_host")
-    await process_log(db, redis, frame, {
-        "event": "bootup",
-        "width": 200,
-        "height": 300,
-        "color": "monochrome"
-    })
+    boot_time = datetime(2026, 6, 2, 3, 4, 5)
+    await process_log(db, redis, frame, [
+        boot_time.replace(tzinfo=timezone.utc).timestamp(),
+        {
+            "event": "bootup",
+            "width": 200,
+            "height": 300,
+            "color": "monochrome",
+            "config": {
+                "timeZone": "Custom/Zone",
+            },
+        },
+    ])
     updated = db.get(Frame, frame.id)
     assert updated.status == "ready"
     assert updated.width == 200
     assert updated.height == 300
     assert updated.color == "monochrome"
+    assert updated.timezone == "Custom/Zone"
+
+
+@pytest.mark.asyncio
+@patch("app.models.log.publish_message", new_callable=AsyncMock)
+async def test_process_log_bootup_does_not_override_stored_timezone(mock_pub, db, redis):
+    frame = await new_frame(db, redis, "BootFrame", "localhost", "server_host")
+    frame.timezone = "Europe/Brussels"
+    db.add(frame)
+    db.commit()
+
+    await process_log(
+        db,
+        redis,
+        frame,
+        {
+            "event": "bootup",
+            "config": {
+                "timeZone": "America/New_York",
+            },
+        },
+    )
+
+    updated = db.get(Frame, frame.id)
+    assert updated.timezone == "Europe/Brussels"
 
 
 @pytest.mark.asyncio
@@ -146,7 +178,12 @@ async def test_new_log_trimming(mock_pub, db, redis):
     db.commit()
 
     # Seed logs up to the trim threshold, then add one via new_log to trigger pruning.
-    db.add_all([Log(frame_id=frame.id, type="info", line=f"Log {i}") for i in range(LOG_LIMIT_PER_FRAME + 100)])
+    db.add_all(
+        [
+            Log(project_id=frame.project_id, frame_id=frame.id, type="info", line=f"Log {i}")
+            for i in range(LOG_LIMIT_PER_FRAME + 100)
+        ]
+    )
     db.commit()
     await new_log(db, redis, frame.id, "info", "Trigger trim")
     count = db.query(Log).filter_by(frame_id=frame.id).count()

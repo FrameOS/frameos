@@ -13,6 +13,7 @@ export interface FrameErrorBehavior {
 
 export interface FrameType {
   id: number
+  project_id: number
   name: string
   mode?: 'rpios' | 'buildroot'
   frame_host: string
@@ -51,6 +52,11 @@ export interface FrameType {
   height?: number
   device?: string
   timezone?: string
+  timezone_updater?: {
+    enabled?: boolean
+    hour?: number
+    url?: string
+  } | null
   device_config?: {
     vcom?: number
     uploadUrl?: string
@@ -59,7 +65,9 @@ export interface FrameType {
   color?: string
   interval: number
   metrics_interval: number
+  max_http_response_bytes?: number
   scaling_mode: string
+  image_engine?: '' | 'pixie' | 'imagemagick'
   rotate?: number
   flip?: 'horizontal' | 'vertical' | 'both' | ''
   background_color: string // deprecated, serves as fallback for scenes
@@ -645,12 +653,10 @@ export interface FrameOSSettings {
   openAI?: {
     apiKey?: string
     backendApiKey?: string
+    model?: string
     chatModel?: string
-    summaryModel?: string
-    embeddingModel?: string
     sceneModel?: string
     reviewModel?: string
-    promptExpansionModel?: string
     appChatModel?: string
     appEditModel?: string
     appEnhanceModel?: string

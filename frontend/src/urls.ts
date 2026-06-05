@@ -18,4 +18,5 @@ export const urls = {
   login: () => getBasePath() + '/login',
   logout: () => getBasePath() + '/logout',
   signup: () => getBasePath() + '/signup',
+  setupUnavailable: () => getBasePath() + '/setup-unavailable',
 } as const

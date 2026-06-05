@@ -10,7 +10,8 @@ from fastapi.exception_handlers import request_validation_exception_handler
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi import FastAPI, Request, Depends
 from app.api.auth import get_current_user
-from app.api import api_no_auth, api_with_auth, api_public
+from app.api import api_open, api_project, api_user, api_public
+from app.api.project_auth import get_current_project
 from fastapi.middleware.gzip import GZipMiddleware
 from app.middleware import GzipRequestMiddleware
 from app.ws.agent_ws import router as agent_ws_router
@@ -18,17 +19,10 @@ from app.ws.terminal_ws import router as terminal_ws_router
 from app.websockets import register_ws_routes, redis_listener
 from app.config import config, normalize_ingress_path
 from app.utils.posthog import initialize_posthog, capture_exception as posthog_capture_exception
-from app.database import SessionLocal
-from app.models.settings import get_settings_dict
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    db = SessionLocal()
-    try:
-        settings = get_settings_dict(db)
-    finally:
-        db.close()
-    initialize_posthog(settings)
+    initialize_posthog()
     app.state.http_client = AsyncClient(limits=Limits(max_connections=20, max_keepalive_connections=10))
     app.state.http_semaphore = asyncio.Semaphore(10)
     task = asyncio.create_task(redis_listener())
@@ -49,14 +43,16 @@ if config.HASSIO_RUN_MODE:
         app.include_router(api_public, prefix="/api")
     elif config.HASSIO_RUN_MODE == "ingress":
         app.include_router(api_public, prefix="/api")
-        app.include_router(api_no_auth, prefix="/api")
-        app.include_router(api_with_auth, prefix="/api")
+        app.include_router(api_open, prefix="/api")
+        app.include_router(api_user, prefix="/api")
+        app.include_router(api_project, prefix="/api/projects/{project_id}", dependencies=[Depends(get_current_project)])
     else:
         raise ValueError("Invalid HASSIO_RUN_MODE")
 else:
     app.include_router(api_public, prefix="/api")
-    app.include_router(api_no_auth, prefix="/api")
-    app.include_router(api_with_auth, prefix="/api", dependencies=[Depends(get_current_user)])
+    app.include_router(api_open, prefix="/api")
+    app.include_router(api_user, prefix="/api", dependencies=[Depends(get_current_user)])
+    app.include_router(api_project, prefix="/api/projects/{project_id}", dependencies=[Depends(get_current_project)])
 
 # Serve HTML and static files in all cases except for public HASSIO_RUN_MODE
 serve_html = config.HASSIO_RUN_MODE != "public"

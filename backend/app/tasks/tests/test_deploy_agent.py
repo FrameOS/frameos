@@ -407,7 +407,7 @@ async def test_agent_source_build_cross_compiles_before_remote_build(
 
     deploy_agent_module = importlib.import_module("app.tasks.deploy_agent")
     monkeypatch.setattr(deploy_agent_module, "CrossCompiler", FakeCrossCompiler)
-    monkeypatch.setattr(deploy_agent_module, "get_build_host_config", lambda _db: None)
+    monkeypatch.setattr(deploy_agent_module, "get_build_host_config", lambda _db, _project_id=None: None)
 
     deployer = FakeAgentDeployer(tmp_path)
     success = await deployer._try_cross_compile_agent(

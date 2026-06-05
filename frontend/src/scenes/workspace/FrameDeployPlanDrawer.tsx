@@ -1029,38 +1029,26 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
               >
                 Close
               </button>
-              {isBuildrootFrame ? (
-                <button
-                  type="button"
-                  onClick={() => closeAndRun(saveAndFastDeployFrame)}
-                  className="frameos-primary-action rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-                >
-                  Deploy updates
-                </button>
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => closeAndRun(saveAndFastDeployFrame)}
-                    className={clsx(
-                      'rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-                      deployRecommendation?.mode === 'fast' ? 'frameos-primary-action' : 'frameos-secondary-button'
-                    )}
-                  >
-                    Fast deploy
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => closeAndRun(saveAndFullDeployFrame)}
-                    className={clsx(
-                      'rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-                      deployRecommendation?.mode === 'full' ? 'frameos-primary-action' : 'frameos-secondary-button'
-                    )}
-                  >
-                    Full deploy
-                  </button>
-                </>
-              )}
+              <button
+                type="button"
+                onClick={() => closeAndRun(saveAndFastDeployFrame)}
+                className={clsx(
+                  'rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+                  deployRecommendation?.mode === 'fast' ? 'frameos-primary-action' : 'frameos-secondary-button'
+                )}
+              >
+                Fast deploy
+              </button>
+              <button
+                type="button"
+                onClick={() => closeAndRun(saveAndFullDeployFrame)}
+                className={clsx(
+                  'rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+                  deployRecommendation?.mode === 'full' ? 'frameos-primary-action' : 'frameos-secondary-button'
+                )}
+              >
+                Full deploy
+              </button>
             </>
           )}
         </div>

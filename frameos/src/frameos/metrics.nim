@@ -53,6 +53,19 @@ proc readCpuTimes(): CpuTimes =
     discard
   (0'u64, 0'u64)
 
+proc defaultCpuCount(): int =
+  try:
+    for line in metricsReadFileHook("/proc/stat").splitLines():
+      let parts = line.splitWhitespace()
+      if parts.len == 0:
+        continue
+      let name = parts[0]
+      if name.len > 3 and name.startsWith("cpu") and name[3].isDigit:
+        inc result
+  except CatchableError:
+    discard
+  max(result, 1)
+
 proc defaultCpuUsage(interval: float): float =
   let start = readCpuTimes()
   let ms = max(0, (interval * 1000.0).int)
@@ -236,6 +249,9 @@ proc getDiskUsage(self: MetricsLoggerThread): JsonNode =
 proc getCPUUsage(self: MetricsLoggerThread): float =
   result = metricsCpuUsageHook(1.0)
 
+proc getCPUCount(self: MetricsLoggerThread): int =
+  defaultCpuCount()
+
 proc getOpenFileDescriptors(self: MetricsLoggerThread): int =
   metricsOpenFileDescriptorsHook()
 
@@ -251,10 +267,24 @@ proc logMetrics(self: MetricsLoggerThread) =
     "diskUsage": self.getDiskUsage(),
     "processMemory": self.getProcessMemoryUsage(),
     "cpuUsage": self.getCPUUsage(),
+    "cpuCount": self.getCPUCount(),
     "openFileDescriptors": self.getOpenFileDescriptors(),
     "runtime": runtimeDiagnosticsSnapshot(),
   }
   log(payload)
+
+proc logMetricsSample(self: MetricsLoggerThread) =
+  try:
+    self.logMetrics()
+  except Exception as e:
+    log(%*{
+      "event": "metrics",
+      "state": "error",
+      "error": e.msg,
+    })
+
+proc logMetricsNow*(frameConfig: FrameConfig) {.gcsafe.} =
+  MetricsLoggerThread(frameConfig: frameConfig).logMetricsSample()
 
 proc runMetricsLoop(self: MetricsLoggerThread, maxIterations = -1) {.gcsafe.} =
   let ms = (self.frameConfig.metricsInterval * 1000).int
@@ -266,14 +296,7 @@ proc runMetricsLoop(self: MetricsLoggerThread, maxIterations = -1) {.gcsafe.} =
       if maxIterations >= 0 and iterations >= maxIterations:
         break
       inc iterations
-      try:
-        self.logMetrics()
-      except Exception as e:
-        log(%*{
-          "event": "metrics",
-          "state": "error",
-          "error": e.msg,
-        })
+      self.logMetricsSample()
       metricsSleepHook(ms)
 
 proc start(self: MetricsLoggerThread) {.gcsafe.} =

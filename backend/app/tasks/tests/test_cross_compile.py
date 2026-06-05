@@ -53,6 +53,52 @@ def test_resolve_prebuilt_target_maps_ubuntu_26_04_arm64():
     assert resolve_prebuilt_target("ubuntu", "26.04", "aarch64") == "ubuntu-26.04-arm64"
 
 
+def test_cross_compiler_uses_buildroot_toolchain_base_for_buildroot_release(tmp_path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("FRAMEOS_CROSS_CACHE", str(tmp_path / "cross-cache"))
+    compiler = CrossCompiler(
+        db=None,
+        redis=None,
+        frame=SimpleNamespace(id=1),
+        deployer=SimpleNamespace(build_id="build12345678"),
+        target=TargetMetadata(arch="aarch64", distro="buildroot", version="2025.02.13"),
+        temp_dir=str(tmp_path / "tmp"),
+        prebuilt_entry=None,
+    )
+
+    assert compiler._docker_image() == "ubuntu:22.04"
+    assert compiler._toolchain_image() == "frameos/frameos-cross-toolchain:ubuntu_22.04-linux_arm64-latest"
+
+
+def test_cross_compiler_falls_back_from_invalid_detected_release(tmp_path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("FRAMEOS_CROSS_CACHE", str(tmp_path / "cross-cache"))
+    compiler = CrossCompiler(
+        db=None,
+        redis=None,
+        frame=SimpleNamespace(id=1),
+        deployer=SimpleNamespace(build_id="build12345678"),
+        target=TargetMetadata(arch="aarch64", distro="ubuntu", version="2025.02.13"),
+        temp_dir=str(tmp_path / "tmp"),
+        prebuilt_entry=None,
+    )
+
+    assert compiler._docker_image() == "ubuntu:26.04"
+
+
+def test_cross_compiler_canonicalizes_ubuntu_codename(tmp_path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("FRAMEOS_CROSS_CACHE", str(tmp_path / "cross-cache"))
+    compiler = CrossCompiler(
+        db=None,
+        redis=None,
+        frame=SimpleNamespace(id=1),
+        deployer=SimpleNamespace(build_id="build12345678"),
+        target=TargetMetadata(arch="aarch64", distro="ubuntu", version="noble"),
+        temp_dir=str(tmp_path / "tmp"),
+        prebuilt_entry=None,
+    )
+
+    assert compiler._docker_image() == "ubuntu:24.04"
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("component", "version"),

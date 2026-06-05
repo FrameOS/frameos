@@ -165,7 +165,7 @@ You can control the cached image with:
 - `FRAMEOS_BUILDROOT_SKIP_PULL=1`: skip pulling cached images from the registry
 - `FRAMEOS_BUILDROOT_DOCKER_IMAGE`: base image used when building `frameos-buildroot` (default `debian:bookworm`)
 - `FRAMEOS_BUILDROOT_IMAGES_DIGESTS_PATH`: path to the digest manifest (default `buildroot-images.json` in repo root)
-- `FRAMEOS_BUILDROOT_FRAMEOS_PARTITION_SIZE`: `/srv/frameos` ext4 partition size (default `512M`)
+- `FRAMEOS_BUILDROOT_FRAMEOS_PARTITION_SIZE`: `/srv/frameos` ext4 partition size (default `1G`)
 - `FRAMEOS_BUILDROOT_ASSETS_PARTITION_SIZE`: `/srv/assets` FAT32 partition size (default `512M`)
 
 Buildroot-specific output cache keys include the resolved cache image, so changing image configuration invalidates stale output directories automatically.
@@ -176,6 +176,12 @@ Generated SD images use separate partitions for boot, root, FrameOS runtime data
 - `p2`: ext4 root filesystem
 - `p3`: ext4 `/srv/frameos`
 - `p4`: FAT32 `/srv/assets`
+
+On first boot, Buildroot images expand themselves to fit the target SD card
+before `/srv/frameos` and `/srv/assets` are mounted. The root partition stays at
+the image size, `p3` grows to 2 GiB on cards 4 GiB and larger, and `p4` is
+recreated to fill the remaining space. On cards smaller than 4 GiB, `p3` stays
+at 1 GiB and `p4` still takes the rest.
 
 Example:
 

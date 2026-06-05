@@ -10,7 +10,7 @@ import {
   type DiskStats,
 } from './assetsLogic'
 import { panelsLogic } from '../panelsLogic'
-import { DocumentIcon, FolderIcon, FolderOpenIcon } from '@heroicons/react/24/outline'
+import { DocumentIcon, EyeIcon, EyeSlashIcon, FolderIcon, FolderOpenIcon } from '@heroicons/react/24/outline'
 import {
   CloudArrowDownIcon,
   DocumentArrowUpIcon,
@@ -93,6 +93,8 @@ function TreeNode({
   uploadDroppedFiles,
   frameAssetFolderExpansion,
   setFrameAssetFolderExpanded,
+  showSystemFolders,
+  toggleShowSystemFolders,
 }: {
   node: AssetNode
   frameId: number
@@ -105,6 +107,8 @@ function TreeNode({
   uploadDroppedFiles: (path: string, files: File[]) => void
   frameAssetFolderExpansion: Record<string, boolean>
   setFrameAssetFolderExpanded: (frameId: number, path: string, expanded: boolean) => void
+  showSystemFolders: boolean
+  toggleShowSystemFolders: () => void
 }): JSX.Element {
   const expansionKey = frameAssetFolderExpansionKey(frameId, node.path)
   const expanded = frameAssetFolderExpansion[expansionKey] ?? node.path === ''
@@ -207,6 +211,17 @@ function TreeNode({
                         onClick: () => createImageFolderScene(node.path),
                       }
                     : null,
+                  !node.path
+                    ? {
+                        label: showSystemFolders ? 'Hide system folders' : 'Show system folders',
+                        icon: showSystemFolders ? (
+                          <EyeSlashIcon className="w-5 h-5" />
+                        ) : (
+                          <EyeIcon className="w-5 h-5" />
+                        ),
+                        onClick: toggleShowSystemFolders,
+                      }
+                    : null,
                   node.path
                     ? {
                         label: 'Rename',
@@ -258,6 +273,8 @@ function TreeNode({
                 uploadDroppedFiles={uploadDroppedFiles}
                 frameAssetFolderExpansion={frameAssetFolderExpansion}
                 setFrameAssetFolderExpanded={setFrameAssetFolderExpanded}
+                showSystemFolders={showSystemFolders}
+                toggleShowSystemFolders={toggleShowSystemFolders}
               />
             ))}
           </div>
@@ -557,10 +574,13 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
   useMountedLogic(assetsLogic(assetsLogicProps))
   const { sendEvent } = useActions(frameLogic)
   const { openLogs } = useActions(panelsLogic)
-  const { assetsLoading, assetsRefreshing, assetStats, assetTree, diskStats } = useValues(assetsLogic(assetsLogicProps))
+  const { assetsLoading, assetsRefreshing, assetStats, assetTree, diskStats, showSystemFolders } = useValues(
+    assetsLogic(assetsLogicProps)
+  )
   const { frameAssetFolderExpansion } = useValues(workspaceLogic)
   const { refreshAssets, syncAssets, uploadAssets, uploadDroppedFiles, deleteAsset, renameAsset, createFolder } =
     useActions(assetsLogic(assetsLogicProps))
+  const { toggleShowSystemFolders } = useActions(assetsLogic(assetsLogicProps))
   const { setFrameAssetFolderExpanded } = useActions(workspaceLogic)
   const showSyncAction = !isInFrameAdminMode()
 
@@ -634,6 +654,8 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
             uploadDroppedFiles={uploadDroppedFiles}
             frameAssetFolderExpansion={frameAssetFolderExpansion}
             setFrameAssetFolderExpanded={setFrameAssetFolderExpanded}
+            showSystemFolders={showSystemFolders}
+            toggleShowSystemFolders={toggleShowSystemFolders}
           />
         </div>
       )}

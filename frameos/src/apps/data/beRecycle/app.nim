@@ -13,7 +13,6 @@ const API_ENDPOINT = "https://api.fostplus.be/recycle-public/app/v1"
 const USER_AGENT = "Mozilla/5.0"
 const X_CONSUMER = "recycleapp.be"
 const X_SECRET = "Op2tDi2pBmh1wzeC5TaN2U3knZan7ATcfOQgxh4vqC0mDKmnPP2qzoQusmInpglfIkxx8SZrasBqi5zgMSvyHggK9j6xCQNQ8xwPFY2o03GCcQfcXVOyKsvGWLze7iwcfcgk2Ujpl0dmrt3hSJMCDqzAlvTrsvAEiaSzC9hKRwhijQAFHuFIhJssnHtDSB76vnFQeTCCvwVB27DjSVpDmq8fWQKEmjEncdLqIsRnfxLcOjGIVwX5V0LBntVbeiBvcjyKF2nQ08rIxqHHGXNJ6SbnAmTgsPTg7k6Ejqa7dVfTmGtEPdftezDbuEc8DdK66KDecqnxwOOPSJIN0zaJ6k2Ye2tgMSxxf16gxAmaOUqHS0i7dtG5PgPSINti3qlDdw6DTKEPni7X0rxM"
-const MaxBeRecycleResponseBytes = 2 * 1024 * 1024
 
 type
   BeRecycleAuthenticateHook* = proc(self: App)
@@ -50,7 +49,7 @@ proc authenticate(self: App) =
     ("x-secret", if self.appConfig.xSecret != "": self.appConfig.xSecret else: X_SECRET)
   ])
   let url = API_ENDPOINT & "/access-token"
-  let atResp = boundedGetContent(url, headers = self.headers, maxBytes = MaxBeRecycleResponseBytes)
+  let atResp = boundedGetContent(url, headers = self.headers, maxBytes = self.maxHttpResponseBytes())
   let atRespJson = parseJson(atResp)
   if atRespJson.hasKey("accessToken"):
     self.headers.add("Authorization", atRespJson["accessToken"].getStr())
@@ -61,7 +60,7 @@ proc authenticate(self: App) =
 
 proc fetchAddressIds(self: App): AddressIds =
   let url = API_ENDPOINT & "/zipcodes?q=" & $self.appConfig.postalCode
-  let zipResp = boundedGetContent(url, headers = self.headers, maxBytes = MaxBeRecycleResponseBytes)
+  let zipResp = boundedGetContent(url, headers = self.headers, maxBytes = self.maxHttpResponseBytes())
   let zipJson = parseJson(zipResp)
   var zipId = ""
 
@@ -74,7 +73,7 @@ proc fetchAddressIds(self: App): AddressIds =
     raise newException(ValueError, "Could not find the right zip code.")
 
   let streetUrl = API_ENDPOINT & "/streets?q=" & self.appConfig.streetName & "&zipcodes=" & zipId
-  let streetResp = boundedPostContent(streetUrl, "", headers = self.headers, maxBytes = MaxBeRecycleResponseBytes)
+  let streetResp = boundedPostContent(streetUrl, "", headers = self.headers, maxBytes = self.maxHttpResponseBytes())
   let streetJson = parseJson(streetResp)
   var streetId = ""
 
@@ -90,7 +89,7 @@ proc fetchAddressIds(self: App): AddressIds =
 proc fetchCollections(self: App, addressIds: AddressIds, fromDate: string, toDate: string): JsonNode =
   let url = API_ENDPOINT & "/collections?zipcodeId=" & addressIds.zip & "&streetId=" & addressIds.street &
       "&houseNumber=" & $addressIds.housenumber & "&fromDate=" & fromDate & "&untilDate=" & toDate & "&size=200"
-  let collectionResp = boundedGetContent(url, headers = self.headers, maxBytes = MaxBeRecycleResponseBytes)
+  let collectionResp = boundedGetContent(url, headers = self.headers, maxBytes = self.maxHttpResponseBytes())
   let collections = parseJson(collectionResp)
 
   if collections.hasKey("items"):

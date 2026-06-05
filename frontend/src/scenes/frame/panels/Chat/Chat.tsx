@@ -358,9 +358,24 @@ export function Chat() {
     )
   }
 
-  const renderMessageBody = (messageContent: string, isLog: boolean, messageId: string, isStreaming?: boolean) => {
+  const renderMessageBody = (
+    messageContent: string,
+    isLog: boolean,
+    messageId: string,
+    isStreaming?: boolean,
+    logContent?: string
+  ) => {
     if (isLog) {
       return renderLogMessage(messageContent, messageId, isStreaming)
+    }
+
+    if (logContent && (!messageContent || isStreaming)) {
+      return (
+        <div className="space-y-3">
+          <div>{renderLogMessage(logContent, messageId, isStreaming)}</div>
+          {messageContent ? <div className="whitespace-pre-wrap break-words">{messageContent}</div> : null}
+        </div>
+      )
     }
 
     if (!messageContent) {
@@ -485,7 +500,7 @@ export function Chat() {
                 itemContent={(index, message) => {
                   const isLog = message.tool === 'log'
                   const isUser = message.role === 'user'
-                  if (message.isPlaceholder && !message.content && !message.tool) {
+                  if (message.isPlaceholder && !message.content && !message.logContent && !message.tool) {
                     if (!message.isStreaming) {
                       return null
                     }
@@ -524,7 +539,15 @@ export function Chat() {
                           <span className="uppercase tracking-wide">{message.role}</span>
                           {message.tool ? <span>tool: {message.tool}</span> : null}
                         </div>
-                        <div>{renderMessageBody(message.content, isLog, message.id, message.isStreaming)}</div>
+                        <div>
+                          {renderMessageBody(
+                            message.content,
+                            isLog,
+                            message.id,
+                            message.isStreaming,
+                            message.logContent
+                          )}
+                        </div>
                       </div>
                     </div>
                   )

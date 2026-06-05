@@ -7,7 +7,8 @@ from arq import ArqRedis as Redis
 from .frame import Frame, update_frame
 from .metrics import new_metrics
 from app.database import Base
-from sqlalchemy import Integer, String, DateTime, ForeignKey, Text, func
+from app.utils.timezone import stored_timezone
+from sqlalchemy import Integer, String, DateTime, ForeignKey, Text, event, func
 from sqlalchemy.orm import relationship, backref, Session, mapped_column
 from app.websockets import publish_message
 
@@ -21,6 +22,7 @@ def is_frame_activity_log(type: str, _line: str) -> bool:
 class Log(Base):
     __tablename__ = 'log'
     id = mapped_column(Integer, primary_key=True)
+    project_id = mapped_column(Integer, ForeignKey("project.id"), nullable=False, index=True)
     timestamp = mapped_column(DateTime, nullable=False, default=func.current_timestamp())
     type = mapped_column(String(10), nullable=False)
     line = mapped_column(Text, nullable=False)
@@ -32,12 +34,23 @@ class Log(Base):
     def to_dict(self):
         return {
             'id': self.id,
+            'project_id': self.project_id,
             'timestamp': self.timestamp.replace(tzinfo=timezone.utc).isoformat(),
             'type': self.type,
             'line': self.line,
             'ip': self.ip,
             'frame_id': self.frame_id
         }
+
+
+@event.listens_for(Log, "before_insert")
+def _set_log_project_id(_mapper, connection, target: Log):
+    if target.project_id is not None or target.frame_id is None:
+        return
+    project_id = connection.execute(
+        Frame.__table__.select().with_only_columns(Frame.__table__.c.project_id).where(Frame.__table__.c.id == target.frame_id)
+    ).scalar()
+    target.project_id = project_id
 
 
 async def new_log(
@@ -50,7 +63,12 @@ async def new_log(
     ip: Optional[str] = None,
 ) -> Log:
     timestamp = timestamp or datetime.utcnow()
+    frame = db.get(Frame, frame_id)
+    if frame is None:
+        raise ValueError(f"Frame {frame_id} not found")
+
     log = Log(
+        project_id=frame.project_id,
         frame_id=frame_id,
         type=type,
         line=line,
@@ -58,15 +76,15 @@ async def new_log(
         ip=ip,
     )
     db.add(log)
-    if frame := db.get(Frame, frame_id):
-        if is_frame_activity_log(type, line) and (frame.last_log_at is None or timestamp > frame.last_log_at):
-            frame.last_log_at = timestamp
+    if is_frame_activity_log(type, line) and (frame.last_log_at is None or timestamp > frame.last_log_at):
+        frame.last_log_at = timestamp
     db.commit()
-    frame_logs_count = db.query(Log).filter_by(frame_id=frame_id).count()
+    frame_logs_count = db.query(Log).filter_by(project_id=frame.project_id, frame_id=frame_id).count()
     payload = {**log.to_dict(), "timestamp": log.timestamp.replace(tzinfo=timezone.utc).isoformat()}
     if frame_logs_count > LOG_LIMIT_PER_FRAME + 100:
         oldest_logs = (db.query(Log)
                        .filter_by(frame_id=frame_id)
+                       .filter(Log.project_id == frame.project_id)
                        .order_by(Log.timestamp)
                        .limit(100)
                        .all())
@@ -124,6 +142,11 @@ async def process_log(
                 changes[key] = log[key]
             if 'config' in log and key in log['config'] and log['config'][key] is not None and log['config'][key] != getattr(frame, key):
                 changes[key] = log['config'][key]
+        if not frame.timezone:
+            config = log.get("config") if isinstance(log.get("config"), dict) else {}
+            boot_timezone = stored_timezone(config.get("timeZone") or log.get("timeZone"))
+            if boot_timezone:
+                changes["timezone"] = boot_timezone
     if len(changes) > 0:
         if frame.last_log_at is None or timestamp > frame.last_log_at:
             changes['last_log_at'] = timestamp

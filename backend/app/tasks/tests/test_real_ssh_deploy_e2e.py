@@ -26,6 +26,7 @@ from app.tasks import precompiled_frameos
 from app.tasks.frame_deploy_workflow import FrameDeployPlan, FrameDeployWorkflow
 from app.tasks.precompiled_frameos import release_version
 from app.tasks.utils import find_nim_v2
+from app.tenancy import ensure_default_project
 
 
 TRUE_VALUES = {"1", "true", "yes", "on"}
@@ -187,7 +188,9 @@ def _frame(
     name: str,
     rpios: dict[str, Any],
 ) -> Frame:
+    project = ensure_default_project(db)
     frame = Frame(
+        project_id=project.id,
         name=name,
         mode="rpios",
         frame_host=target.host,
@@ -202,7 +205,7 @@ def _frame(
         ssh_keys=[],
         server_host="localhost",
         server_port=8989,
-        server_api_key="server-key",
+        server_api_key=f"server-key-{name}",
         server_send_logs=True,
         status="uninitialized",
         width=800,
@@ -384,7 +387,12 @@ def _serve_directory(root: Path) -> Iterator[str]:
 
 
 def _log_lines(db, frame: Frame) -> list[str]:
-    return [log.line for log in db.query(Log).filter(Log.frame_id == frame.id).all()]
+    return [
+        log.line
+        for log in db.query(Log)
+        .filter(Log.project_id == frame.project_id, Log.frame_id == frame.id)
+        .all()
+    ]
 
 
 @pytest.mark.asyncio

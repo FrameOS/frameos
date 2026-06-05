@@ -1,4 +1,4 @@
-from app.api import api_with_auth
+from app.api import api_user
 from app.schemas.system import CacheInfo, DatabaseInfo, DiskInfo, LoadInfo, MemoryInfo, SystemInfoResponse, SystemMetricsResponse
 from app.utils.system_info import get_system_info, get_system_metrics
 
@@ -27,7 +27,7 @@ def _database_to_schema(database) -> DatabaseInfo:
     )
 
 
-@api_with_auth.get("/system/info", response_model=SystemInfoResponse)
+@api_user.get("/system/info", response_model=SystemInfoResponse)
 def system_info():
     disk, caches, database, memory, load = get_system_info()
     return SystemInfoResponse(
@@ -39,7 +39,7 @@ def system_info():
     )
 
 
-@api_with_auth.get("/system/metrics", response_model=SystemMetricsResponse)
+@api_user.get("/system/metrics", response_model=SystemMetricsResponse)
 def system_metrics():
     disk, memory, load = get_system_metrics()
     return SystemMetricsResponse(

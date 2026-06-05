@@ -3,7 +3,7 @@ import uuid
 from sqlalchemy.dialects.sqlite import JSON
 from datetime import datetime
 from urllib.parse import urljoin
-from sqlalchemy import String, Text, DateTime
+from sqlalchemy import ForeignKey, Integer, String, Text, DateTime
 from sqlalchemy.orm import mapped_column
 from app.database import Base
 
@@ -11,6 +11,7 @@ from app.database import Base
 class Repository(Base):
     __tablename__ = 'repository'
     id = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_id = mapped_column(Integer, ForeignKey("project.id"), nullable=False, index=True)
     name = mapped_column(String(128), nullable=False)
     description = mapped_column(Text(), nullable=True)
     url = mapped_column(Text(), nullable=True)
@@ -20,6 +21,7 @@ class Repository(Base):
     def to_dict(self):
         return {
             'id': self.id,
+            'project_id': self.project_id,
             'name': self.name,
             'description': self.description,
             'url': self.url,
@@ -30,6 +32,7 @@ class Repository(Base):
     def to_json(self):
         return {
             'id': self.id,
+            'project_id': self.project_id,
             'name': self.name,
             'description': self.description,
             'url': self.url,

@@ -216,7 +216,8 @@ class FrameBinaryBuilder:
                     COMPILATION_MODE_SHARED_SCENES if compiled_scene_count > 0 else COMPILATION_MODE_STATIC
                 )
 
-        build_host = get_build_host_config(self.db)
+        project_id = getattr(self.frame, "project_id", None)
+        build_host = get_build_host_config(self.db, project_id)
         cross_compile_supported = can_cross_compile_target(target.arch)
         will_attempt_cross_compile = (
             allow_cross_compile and cross_compile_supported and not will_attempt_precompiled
@@ -245,19 +246,8 @@ class FrameBinaryBuilder:
         *,
         precompiled_install_all_drivers: bool = False,
     ) -> FrameBinaryBuildResult:
-        build_host = get_build_host_config(self.db)
-        await self._log(
-            "stdout",
-            f"{icon} Preparing local build sources",
-        )
-        source_dir = self.deployer.create_local_source_folder(
-            self.temp_dir, source_root=self.source_root
-        )
-        await self._log("stdout", f"{icon} Applying local modifications")
-        await self.deployer.make_local_modifications(source_dir, compilation_mode=plan.compilation_mode)
-        if self.db:
-            await copy_custom_fonts_to_local_source_folder(self.db, source_dir)
-
+        project_id = getattr(self.frame, "project_id", None)
+        build_host = get_build_host_config(self.db, project_id)
         build_dir = create_build_folder(self.temp_dir, self.deployer.build_id)
         if plan.will_attempt_precompiled:
             await self._log("stdout", f"{icon} Using precompiled FrameOS release")
@@ -279,7 +269,7 @@ class FrameBinaryBuilder:
                 build_id=self.deployer.build_id,
                 target=plan.target,
                 compilation_mode=plan.compilation_mode,
-                source_dir=source_dir,
+                source_dir=build_dir,
                 build_dir=build_dir,
                 archive_path=precompiled_result.archive_path,
                 binary_path=precompiled_result.binary_path,
@@ -293,6 +283,18 @@ class FrameBinaryBuilder:
                 log_path=str(self.log_path) if self.log_path.exists() else None,
                 precompiled=True,
             )
+
+        await self._log(
+            "stdout",
+            f"{icon} Preparing local build sources",
+        )
+        source_dir = self.deployer.create_local_source_folder(
+            self.temp_dir, source_root=self.source_root
+        )
+        await self._log("stdout", f"{icon} Applying local modifications")
+        await self.deployer.make_local_modifications(source_dir, compilation_mode=plan.compilation_mode)
+        if self.db:
+            await copy_custom_fonts_to_local_source_folder(self.db, source_dir, self.frame.project_id)
 
         await self._log("stdout", f"{icon} Creating build archive")
         archive_path = await self.deployer.create_local_build_archive(

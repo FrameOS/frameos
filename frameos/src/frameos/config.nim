@@ -1,6 +1,7 @@
 import json, pixie, os, strutils
 import zippy
 import frameos/types
+import frameos/utils/image
 import lib/tz
 
 proc setConfigDefaults*(config: var FrameConfig) =
@@ -9,9 +10,11 @@ proc setConfigDefaults*(config: var FrameConfig) =
   if config.height == 0: config.height = 1080
   if config.device == "": config.device = "web_only"
   if config.metricsInterval == 0: config.metricsInterval = 60
+  if config.maxHttpResponseBytes <= 0: config.maxHttpResponseBytes = DefaultMaxHttpResponseBytes
   if config.rotate == 0: config.rotate = 0
   if config.flip == "": config.flip = ""
   if config.scalingMode == "": config.scalingMode = "cover"
+  if config.imageEngine notin ["", "pixie", "imagemagick"]: config.imageEngine = ""
   if config.framePort == 0: config.framePort = 8787
   if config.frameHost == "": config.frameHost = "localhost"
   if config.httpsProxy == nil: config.httpsProxy = HttpsProxyConfig()
@@ -29,6 +32,12 @@ proc setConfigDefaults*(config: var FrameConfig) =
   if config.errorBehavior.silentWindowMinutes <= 0: config.errorBehavior.silentWindowMinutes = 10
   if config.errorBehavior.showErrorRetrySeconds <= 0: config.errorBehavior.showErrorRetrySeconds = 60
   if config.timeZone == "": config.timeZone = detectSystemTimeZone()
+  if config.timeZoneUpdates == nil:
+    config.timeZoneUpdates = TimeZoneUpdatesConfig(enabled: true, hour: 3, url: "https://tz.frameos.net/tzdata.json.gz")
+  if config.timeZoneUpdates.hour < 0 or config.timeZoneUpdates.hour > 23:
+    config.timeZoneUpdates.hour = 3
+  if config.timeZoneUpdates.url == "":
+    config.timeZoneUpdates.url = "https://tz.frameos.net/tzdata.json.gz"
 
 proc loadSchedule*(data: JsonNode): FrameSchedule =
   result = FrameSchedule(events: @[])
@@ -179,6 +188,20 @@ proc loadErrorBehavior*(data: JsonNode): ErrorBehaviorConfig =
   if result.silentWindowMinutes <= 0: result.silentWindowMinutes = 10
   if result.showErrorRetrySeconds <= 0: result.showErrorRetrySeconds = 60
 
+proc loadTimeZoneUpdates*(data: JsonNode): TimeZoneUpdatesConfig =
+  if data == nil or data.kind != JObject:
+    result = TimeZoneUpdatesConfig(enabled: true, hour: 3, url: "https://tz.frameos.net/tzdata.json.gz")
+  else:
+    result = TimeZoneUpdatesConfig(
+      enabled: data{"enabled"}.getBool(true),
+      hour: data{"hour"}.getInt(3),
+      url: data{"url"}.getStr("https://tz.frameos.net/tzdata.json.gz"),
+    )
+  if result.hour < 0 or result.hour > 23:
+    result.hour = 3
+  if result.url == "":
+    result.url = "https://tz.frameos.net/tzdata.json.gz"
+
 proc getConfigFilename*(overridePath = ""): string =
   if overridePath.len > 0:
     return overridePath
@@ -207,6 +230,7 @@ proc loadConfig*(configPath = ""): FrameConfig =
     serverSendLogs: data{"serverSendLogs"}.getBool(true),
     frameHost: data{"frameHost"}.getStr(),
     framePort: data{"framePort"}.getInt(),
+    bindHost: data{"bindHost"}.getStr(),
     httpsProxy: HttpsProxyConfig(
       enable: data{"httpsProxy"}{"enable"}.getBool(),
       port: data{"httpsProxy"}{"port"}.getInt(),
@@ -222,15 +246,18 @@ proc loadConfig*(configPath = ""): FrameConfig =
     device: data{"device"}.getStr(),
     deviceConfig: loadDeviceConfig(data{"deviceConfig"}),
     metricsInterval: data{"metricsInterval"}.getFloat(),
+    maxHttpResponseBytes: data{"maxHttpResponseBytes"}.getInt(DefaultMaxHttpResponseBytes),
     rotate: data{"rotate"}.getInt(),
     flip: data{"flip"}.getStr(""),
     scalingMode: data{"scalingMode"}.getStr(),
+    imageEngine: data{"imageEngine"}.getStr(""),
     settings: data{"settings"},
     assetsPath: data{"assetsPath"}.getStr("/srv/assets"),
     saveAssets: if data{"saveAssets"} == nil: %*(false) else: data{"saveAssets"},
     logToFile: data{"logToFile"}.getStr(),
     debug: data{"debug"}.getBool() or commandLineParams().contains("--debug"),
     timeZone: data{"timeZone"}.getStr(""),
+    timeZoneUpdates: loadTimeZoneUpdates(data{"timeZoneUpdates"}),
     schedule: loadSchedule(data{"schedule"}),
     gpioButtons: loadGPIOButtons(data{"gpioButtons"}),
     controlCode: loadControlCode(data{"controlCode"}),
@@ -243,6 +270,7 @@ proc loadConfig*(configPath = ""): FrameConfig =
   if result.assetsPath.endswith("/"):
     result.assetsPath = result.assetsPath.strip(leading = false, trailing = true, chars = {'/'})
   setConfigDefaults(result)
+  setRuntimeImageEngine(result.imageEngine)
 
 proc updateSchedule(target: var FrameSchedule, source: FrameSchedule) =
   if target == nil:
@@ -261,6 +289,7 @@ proc updateFrameConfigFrom*(target: FrameConfig, source: FrameConfig) =
   target.serverSendLogs = source.serverSendLogs
   target.frameHost = source.frameHost
   target.framePort = source.framePort
+  target.bindHost = source.bindHost
   target.httpsProxy = source.httpsProxy
   target.frameAccessKey = source.frameAccessKey
   target.frameAccess = source.frameAccess
@@ -270,15 +299,19 @@ proc updateFrameConfigFrom*(target: FrameConfig, source: FrameConfig) =
   target.device = source.device
   target.deviceConfig = source.deviceConfig
   target.metricsInterval = source.metricsInterval
+  target.maxHttpResponseBytes = source.maxHttpResponseBytes
   target.rotate = source.rotate
   target.flip = source.flip
   target.scalingMode = source.scalingMode
+  target.imageEngine = source.imageEngine
+  setRuntimeImageEngine(target.imageEngine)
   target.settings = source.settings
   target.assetsPath = source.assetsPath
   target.saveAssets = source.saveAssets
   target.logToFile = source.logToFile
   target.debug = source.debug
   target.timeZone = source.timeZone
+  target.timeZoneUpdates = source.timeZoneUpdates
   target.gpioButtons = source.gpioButtons
   target.controlCode = source.controlCode
   target.network = source.network

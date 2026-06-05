@@ -18,6 +18,7 @@ import { v4 as uuidv4 } from 'uuid'
 import { duplicateScenes } from '../../utils/duplicateScenes'
 import { apiFetch } from '../../utils/apiFetch'
 import { getBasePath } from '../../utils/getBasePath'
+import { projectApiPath, projectApiPathFromCache } from '../../utils/projectApi'
 import { entityImagesModel } from '../../models/entityImagesModel'
 import { arrangeSceneGraph } from '../../utils/arrangeNodes'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
@@ -41,6 +42,9 @@ import { getDeployPlanErrorMessage } from './frameDeployErrors'
 import { urls } from '../../urls'
 
 export type { ChangeDetail, DeployPlanResponse, DeployRecommendation, SummaryItem } from './frameDeployUtils'
+
+export const DEFAULT_TIMEZONE_UPDATE_URL = 'https://tz.frameos.net/tzdata.json.gz'
+export const DEFAULT_TIMEZONE_UPDATE_HOUR = 3
 
 interface DeployPlanApiResponse {
   plan: DeployPlanResponse
@@ -80,8 +84,11 @@ const FRAME_KEYS: (keyof FrameType)[] = [
   'color',
   'device',
   'device_config',
+  'timezone',
+  'timezone_updater',
   'interval',
   'metrics_interval',
+  'max_http_response_bytes',
   'scaling_mode',
   'rotate',
   'flip',
@@ -92,6 +99,7 @@ const FRAME_KEYS: (keyof FrameType)[] = [
   'assets_path',
   'save_assets',
   'upload_fonts',
+  'image_engine',
   'reboot',
   'control_code',
   'schedule',
@@ -104,8 +112,6 @@ const FRAME_KEYS: (keyof FrameType)[] = [
   'buildroot',
   'rpios',
 ]
-
-const FRAME_SUBMIT_KEYS_BUILDROOT: (keyof FrameType)[] = [...FRAME_KEYS, 'timezone']
 
 const FRAME_KEYS_REQUIRE_RECOMPILE_RPIOS: (keyof FrameType)[] = ['device', 'scenes', 'reboot', 'rpios']
 const FRAME_KEYS_REQUIRE_RECOMPILE_BUILDROOT: (keyof FrameType)[] = [
@@ -144,8 +150,11 @@ const FRAME_KEY_LABELS: Partial<Record<keyof FrameType, string>> = {
   color: 'Color support',
   device: 'Device',
   device_config: 'Device config',
+  timezone: 'Timezone',
+  timezone_updater: 'Timezone data updates',
   interval: 'Refresh interval',
   metrics_interval: 'Metrics interval',
+  max_http_response_bytes: 'HTTP response size limit',
   scaling_mode: 'Scaling mode',
   rotate: 'Rotation',
   flip: 'Flip',
@@ -156,6 +165,7 @@ const FRAME_KEY_LABELS: Partial<Record<keyof FrameType, string>> = {
   assets_path: 'Assets path',
   save_assets: 'Save assets',
   upload_fonts: 'Upload fonts',
+  image_engine: 'Image engine',
   reboot: 'Reboot settings',
   control_code: 'Control code',
   schedule: 'Schedule',
@@ -191,8 +201,11 @@ const DEPLOYMENT_SUMMARY_KEYS: (keyof FrameType)[] = [
   'color',
   'device',
   'device_config',
+  'timezone',
+  'timezone_updater',
   'interval',
   'metrics_interval',
+  'max_http_response_bytes',
   'scaling_mode',
   'rotate',
   'flip',
@@ -201,6 +214,7 @@ const DEPLOYMENT_SUMMARY_KEYS: (keyof FrameType)[] = [
   'log_to_file',
   'assets_path',
   'save_assets',
+  'image_engine',
   'mountpoints',
   'error_behavior',
 ]
@@ -217,6 +231,47 @@ export const DEFAULT_FRAME_ERROR_BEHAVIOR: Required<FrameErrorBehavior> = {
 function positiveNumber(value: unknown, fallback: number): number {
   const number = Number(value)
   return Number.isFinite(number) && number > 0 ? number : fallback
+}
+
+function optionalTimezoneUpdateHour(value: unknown): number | undefined {
+  if (value === undefined || value === null || value === '') {
+    return undefined
+  }
+  const hour = Number(value)
+  return Number.isInteger(hour) && hour >= 0 && hour <= 23 ? hour : undefined
+}
+
+function normalizeTimezoneUpdater(
+  value: FrameType['timezone_updater'] | null | undefined
+): NonNullable<FrameType['timezone_updater']> {
+  const settings: NonNullable<FrameType['timezone_updater']> = {
+    enabled: value?.enabled ?? true,
+  }
+  const hour = optionalTimezoneUpdateHour(value?.hour)
+  if (hour !== undefined) {
+    settings.hour = hour
+  }
+  if (value?.url) {
+    settings.url = value.url
+  }
+  return settings
+}
+
+function compactTimezoneUpdaterForSubmit(
+  value: FrameType['timezone_updater'] | null | undefined
+): FrameType['timezone_updater'] | null {
+  const settings = normalizeTimezoneUpdater(value)
+  const compact: NonNullable<FrameType['timezone_updater']> = {}
+  if (settings.enabled === false) {
+    compact.enabled = false
+  }
+  if (settings.hour !== undefined && settings.hour !== DEFAULT_TIMEZONE_UPDATE_HOUR) {
+    compact.hour = settings.hour
+  }
+  if (settings.url && settings.url !== DEFAULT_TIMEZONE_UPDATE_URL) {
+    compact.url = settings.url
+  }
+  return Object.keys(compact).length ? compact : null
 }
 
 export function normalizeFrameErrorBehavior(errorBehavior?: Partial<FrameErrorBehavior> | null): FrameErrorBehavior {
@@ -255,7 +310,7 @@ function getRecompileFields(mode: FrameType['mode']): (keyof FrameType)[] {
 }
 
 function frameSubmitKeys(frame: Partial<FrameType>): (keyof FrameType)[] {
-  return (frame.mode ?? 'rpios') === 'buildroot' ? FRAME_SUBMIT_KEYS_BUILDROOT : FRAME_KEYS
+  return FRAME_KEYS
 }
 
 export function normalizeSceneForComparison(
@@ -464,12 +519,20 @@ function normalizeMountpointsForComparison(value: unknown): Record<string, any> 
 }
 
 function normalizeFrameKeyValueForComparison(key: keyof FrameType, value: unknown): unknown {
+  if (key === 'image_engine') {
+    return value ?? ''
+  }
+
   if (key === 'rpios') {
     return normalizeRpiosForComparison(value)
   }
 
   if (key === 'mountpoints') {
     return normalizeMountpointsForComparison(value)
+  }
+
+  if (key === 'timezone_updater') {
+    return compactTimezoneUpdaterForSubmit(value as FrameType['timezone_updater'] | null | undefined)
   }
 
   if (key !== 'https_proxy' || !value || typeof value !== 'object') {
@@ -502,6 +565,16 @@ function stringifyList(values: unknown[]): string {
 }
 
 function summarizeFrameFieldValue(key: keyof FrameType, value: unknown): string {
+  if (key === 'image_engine') {
+    if (value === 'imagemagick') {
+      return 'ImageMagick'
+    }
+    if (value === 'pixie') {
+      return 'Pixie'
+    }
+    return 'Default (Pixie)'
+  }
+
   if (value === null || value === undefined || value === '') {
     return 'Not set'
   }
@@ -611,7 +684,7 @@ function buildUndeployedSummaryItems(
 
 async function resolveTemplateImageUrl(template: Partial<TemplateType>): Promise<string | null> {
   if (template.id) {
-    return `/api/templates/${template.id}/image`
+    return await projectApiPath(`/api/templates/${template.id}/image`)
   }
 
   if (typeof template.image === 'string') {
@@ -619,7 +692,7 @@ async function resolveTemplateImageUrl(template: Partial<TemplateType>): Promise
     if (match) {
       return `/api/${match[1]}/image`
     }
-    return template.image
+    return projectApiPathFromCache(template.image)
   }
 
   return null
@@ -636,7 +709,8 @@ async function fetchTemplateImageBlob(template: Partial<TemplateType>): Promise<
   }
 
   const basePath = getBasePath()
-  const resolvedUrl = imageUrl.startsWith('/api/') && basePath ? `${basePath}${imageUrl}` : imageUrl
+  const scopedImageUrl = imageUrl.startsWith('/api/') ? await projectApiPath(imageUrl) : imageUrl
+  const resolvedUrl = scopedImageUrl.startsWith('/api/') && basePath ? `${basePath}${scopedImageUrl}` : scopedImageUrl
   const response = await fetch(resolvedUrl)
   if (!response.ok) {
     return null
@@ -827,6 +901,8 @@ function sanitizeFrame(frame: Partial<FrameType>): Partial<FrameType> {
 
   return {
     ...frame,
+    image_engine: frame.image_engine ?? '',
+    timezone_updater: normalizeTimezoneUpdater(frame.timezone_updater),
     assets_path: assetsPath,
     rpios,
     frame_admin_auth: {
@@ -842,7 +918,11 @@ function sanitizeFrame(frame: Partial<FrameType>): Partial<FrameType> {
 }
 
 function normalizeFrameForSubmit(frame: Partial<FrameType>): Partial<FrameType> {
-  return frame.mode === 'buildroot' ? { ...frame, assets_path: '/srv/assets' } : frame
+  const normalizedFrame = {
+    ...frame,
+    timezone_updater: compactTimezoneUpdaterForSubmit(frame.timezone_updater),
+  }
+  return normalizedFrame.mode === 'buildroot' ? { ...normalizedFrame, assets_path: '/srv/assets' } : normalizedFrame
 }
 
 function preferSshTransportWhenAgentUnavailable(
@@ -1204,12 +1284,11 @@ export const frameLogic = kea<frameLogicType>([
       }
     },
     loadDeployPlans: async () => {
-      const planMode = (values.frameForm?.mode || values.frame?.mode || 'rpios') === 'buildroot' ? '?mode=fast' : ''
       const currentFrameForm = {
         ...(values.frame ?? {}),
         ...(values.frameForm ?? {}),
       }
-      const response = await apiFetch(`/api/frames/${values.frameId}/deploy_plan${planMode}`, {
+      const response = await apiFetch(`/api/frames/${values.frameId}/deploy_plan`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(
@@ -1226,7 +1305,13 @@ export const frameLogic = kea<frameLogicType>([
       actions.loadDeployPlansSuccess(payload.plan)
     },
     showDeployPlanModal: () => {
-      if ((values.frameForm?.mode || values.frame?.mode || 'rpios') === 'buildroot') {
+      const isBuildroot = (values.frameForm?.mode || values.frame?.mode || 'rpios') === 'buildroot'
+      const buildrootFirstInstall = isBuildroot && !values.frame?.last_successful_deploy && !values.frame?.last_successful_deploy_at
+      if (buildrootFirstInstall) {
+        return
+      }
+      if (isBuildroot && !values.deployPlansLoading && !values.deployPlans) {
+        actions.loadDeployPlans()
         return
       }
       const hasUsableLocalPlan =

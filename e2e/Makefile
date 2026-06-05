@@ -1,11 +1,13 @@
 .PHONY: nim_scenes snapshots
 
-PYTHON ?= $(if $(wildcard ../env/bin/python3),../env/bin/python3,python3)
+PYTHON ?= $(if $(wildcard ../env/bin/python3),../env/bin/python3,$(if $(wildcard ../.venv/bin/python3),../.venv/bin/python3,python3))
+COMPILATION_MODE ?= static
+E2E_FIXTURE_PORT ?= 54817
 
 all: nim_scenes snapshots
 
 nim_scenes:
-	PYTHONPATH="../backend:${PYTHONPATH}" DEBUG=1 SCENE_FILTER="$(SCENE_FILTER)" $(PYTHON) ./makescenes.py
+	PYTHONPATH="../backend:${PYTHONPATH}" DEBUG=1 SCENE_FILTER="$(SCENE_FILTER)" COMPILATION_MODE="$(COMPILATION_MODE)" FRAMEOS_E2E_FIXTURE_BASE_URL="http://127.0.0.1:$(E2E_FIXTURE_PORT)" $(PYTHON) ./makescenes.py
 
 snapshots:
 	mkdir -p ./tmp && \
@@ -30,16 +32,20 @@ snapshots:
 	cp -r ../frontend/schema/. ./tmp/frontend/schema && \
 	cp ../versions.json ./tmp/versions.json && \
 	cp -r ../frameos/* "$$tmpdir" && \
+	cp ./frame.json "$$tmpdir/frame.json" && \
 	rm -rf "$$tmpdir/src/scenes" && \
 	cp -r ./generated "$$tmpdir/src/scenes" && \
 	cp -r ./generated/scenes.json "$$tmpdir/" && \
-	(cd "$$tmpdir" && make build COMPILATION_MODE=shared SKIP_DRIVER_LIBRARIES=1) && \
+	(cd "$$tmpdir" && make build COMPILATION_MODE="$(COMPILATION_MODE)") && \
 	cp "$$tmpdir/build/frameos" ./tmp/frameos-bin && \
 	rm -rf ./tmp/scenes && \
 	mkdir -p ./tmp/scenes && \
 	if [ -d "$$tmpdir/build/scenes" ]; then cp -r "$$tmpdir/build/scenes"/. ./tmp/scenes; fi && \
+	rm -rf ./tmp/drivers && \
+	mkdir -p ./tmp/drivers && \
+	if [ -d "$$tmpdir/build/drivers" ]; then cp -r "$$tmpdir/build/drivers"/. ./tmp/drivers; fi && \
 	cp "$$tmpdir/scenes.json" ./tmp/scenes.json
 
 	ls -l ./tmp/frameos-bin
 	DEBUG=1 $(PYTHON) ./makeapploaders.py
-	DEBUG=1 SCENE_FILTER="$(SCENE_FILTER)" $(PYTHON) ./makesnapshots.py
+	DEBUG=1 SCENE_FILTER="$(SCENE_FILTER)" FRAMEOS_E2E_FIXTURE_PORT="$(E2E_FIXTURE_PORT)" $(PYTHON) ./makesnapshots.py

@@ -6,7 +6,6 @@ import frameos/utils/http_client
 
 const
   RequestTimeoutMs = 10000
-  MaxResponseBytes = 1024 * 1024
   MaxResponseSeconds = 15.0
   MinimumFetchIntervalSeconds = 1.0
 
@@ -62,7 +61,7 @@ proc get*(self: App, context: ExecutionContext): JsonNode =
     let responseBody = boundedGetContent(url,
       headers = headers,
       timeoutMs = RequestTimeoutMs,
-      maxBytes = MaxResponseBytes,
+      maxBytes = self.maxHttpResponseBytes(),
       maxSeconds = MaxResponseSeconds)
     let responseJson = parseJson(responseBody)
     self.json = some(copy(responseJson))

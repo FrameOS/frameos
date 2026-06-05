@@ -4,6 +4,7 @@ import type { terminalLogicType } from './terminalLogicType'
 import { frameLogic } from '../../frameLogic'
 import { getBasePath } from '../../../../utils/getBasePath'
 import { apiFetch } from '../../../../utils/apiFetch'
+import { projectWebSocketPath } from '../../../../utils/projectApi'
 import { FrameType } from '../../../../types'
 
 export interface TerminalLogicProps {
@@ -131,7 +132,7 @@ export const terminalLogic = kea<terminalLogicType>([
     ],
   }),
   listeners(({ actions, values, cache, props }) => ({
-    connect: () => {
+    connect: async () => {
       if (cache.ws?.readyState === WebSocket.OPEN || cache.ws?.readyState === WebSocket.CONNECTING) {
         return
       }
@@ -150,7 +151,8 @@ export const terminalLogic = kea<terminalLogicType>([
           ? `***connecting to ${terminalAgentTarget(frame)} via FrameOS agent***\n`
           : `***connecting to ${terminalSshTarget(frame)} via SSH***\n`
       )
-      const ws = new WebSocket(`${getBasePath()}/ws/terminal/${frame.id}`)
+      const wsPath = await projectWebSocketPath(`/ws/terminal/${frame.id}`)
+      const ws = new WebSocket(`${getBasePath()}${wsPath}`)
       ws.onopen = () => actions.setConnectionState('connected')
       ws.onmessage = (event) => {
         cache.receivedTerminalOutput = true

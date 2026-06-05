@@ -7,6 +7,7 @@ import frameos/apps
 import frameos/channels
 import frameos/config
 import frameos/logger
+import frameos/metrics
 import frameos/types
 import frameos/utils/image
 import frameos/utils/time
@@ -341,6 +342,9 @@ proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.a
             drivers.turnOn()
           of "turnOff":
             drivers.turnOff()
+          of "metrics":
+            logMetricsNow(self.frameConfig)
+            continue # don't dispatch this event to the scene
           of "mouseMove":
             if self.frameConfig.width > 0 and self.frameConfig.height > 0:
               payload["x"] = %*((self.frameConfig.width.float * payload["x"].getInt().float / 32767.0).int)

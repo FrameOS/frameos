@@ -677,6 +677,7 @@ function TaskToast({ task }: { task: LongRunningTask }): JSX.Element {
             href={urls.frame(task.frameId, 'logs')}
             title="All logs"
             aria-label="All logs"
+            onClick={() => dismissTask(task.id)}
             className={clsx(
               'flex h-8 w-8 items-center justify-center rounded-lg transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
               theme === 'dark'

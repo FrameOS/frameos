@@ -197,7 +197,7 @@ async def test_build_release_target_uses_runtime_filtered_driver_catalog(
                 encoding="utf-8",
             )
             shutil.copy2(
-                Path(source_root) / "versions.json",
+                Path(source_root).parent / "versions.json",
                 Path(temp_dir) / "versions.json",
             )
             return str(source_dir)
@@ -246,6 +246,7 @@ async def test_build_release_target_uses_runtime_filtered_driver_catalog(
         return None, None
 
     async def fake_generate_agent_build_dir(**kwargs):
+        assert kwargs["repo_root"] == repo_root
         build_dir = Path(kwargs["build_dir"])
         build_dir.mkdir(parents=True, exist_ok=True)
         (build_dir / "compile_frameos_agent.sh").write_text("#!/bin/sh\n", encoding="utf-8")
@@ -275,15 +276,16 @@ async def test_build_release_target_uses_runtime_filtered_driver_catalog(
     monkeypatch.setattr("app.codegen.release_drivers_nim.write_release_waveshare_driver_modules", lambda *_args: None)
     monkeypatch.setattr("app.codegen.release_drivers_nim.write_release_driver_libraries", lambda *_args: None)
 
-    frameos_root = tmp_path / "frameos"
+    repo_root = tmp_path / "repo"
+    frameos_root = repo_root / "frameos"
     artifacts_dir = tmp_path / "artifacts"
-    frameos_root.mkdir()
+    frameos_root.mkdir(parents=True)
     expected_versions = {
         "frameos": "2026.5.15+frameos",
         "agent": "2026.5.16+agent",
         "docker": "2026.5.16+docker",
     }
-    (frameos_root / "versions.json").write_text(json.dumps(expected_versions) + "\n", encoding="utf-8")
+    (repo_root / "versions.json").write_text(json.dumps(expected_versions) + "\n", encoding="utf-8")
 
     destination = await cross_module.build_release_target("debian-trixie-amd64", frameos_root, artifacts_dir)
 

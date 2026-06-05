@@ -18,13 +18,17 @@ from app.utils.cross_compile import TargetMetadata
 class FakeDeployer:
     def __init__(self) -> None:
         self.build_id = "build12345678"
+        self.local_source_folder_calls = 0
+        self.local_modification_calls = 0
 
     async def make_local_modifications(
         self, _source_dir: str, compilation_mode: str = COMPILATION_MODE_SHARED
     ) -> None:
+        self.local_modification_calls += 1
         return None
 
     def create_local_source_folder(self, _temp_dir: str, source_root: str | None = None) -> str:
+        self.local_source_folder_calls += 1
         return source_root or "/tmp/source"
 
     async def create_local_build_archive(
@@ -54,7 +58,7 @@ async def test_plan_build_defaults_to_precompiled_with_static_fallback(monkeypat
     async def fake_resolve_prebuilt_entry(**_kwargs):
         return None, None
 
-    monkeypatch.setattr("app.tasks.binary_builder.get_build_host_config", lambda _db: None)
+    monkeypatch.setattr("app.tasks.binary_builder.get_build_host_config", lambda _db, _project_id=None: None)
     monkeypatch.setattr("app.tasks.binary_builder.resolve_prebuilt_entry", fake_resolve_prebuilt_entry)
 
     builder = FrameBinaryBuilder(
@@ -84,7 +88,7 @@ async def test_plan_build_attempts_precompiled_when_all_scenes_are_interpreted(m
     async def fake_resolve_prebuilt_entry(**_kwargs):
         return None, "debian-trixie-arm64"
 
-    monkeypatch.setattr("app.tasks.binary_builder.get_build_host_config", lambda _db: None)
+    monkeypatch.setattr("app.tasks.binary_builder.get_build_host_config", lambda _db, _project_id=None: None)
     monkeypatch.setattr("app.tasks.binary_builder.resolve_prebuilt_entry", fake_resolve_prebuilt_entry)
 
     builder = FrameBinaryBuilder(
@@ -120,7 +124,7 @@ async def test_plan_build_force_cross_compile_skips_precompiled(monkeypatch: pyt
     async def fake_resolve_prebuilt_entry(**_kwargs):
         return None, "debian-trixie-arm64"
 
-    monkeypatch.setattr("app.tasks.binary_builder.get_build_host_config", lambda _db: None)
+    monkeypatch.setattr("app.tasks.binary_builder.get_build_host_config", lambda _db, _project_id=None: None)
     monkeypatch.setattr("app.tasks.binary_builder.resolve_prebuilt_entry", fake_resolve_prebuilt_entry)
 
     builder = FrameBinaryBuilder(
@@ -153,7 +157,7 @@ async def test_plan_build_skips_precompiled_when_compiled_scenes_exist(monkeypat
     async def fake_resolve_prebuilt_entry(**_kwargs):
         return None, "debian-trixie-arm64"
 
-    monkeypatch.setattr("app.tasks.binary_builder.get_build_host_config", lambda _db: None)
+    monkeypatch.setattr("app.tasks.binary_builder.get_build_host_config", lambda _db, _project_id=None: None)
     monkeypatch.setattr("app.tasks.binary_builder.resolve_prebuilt_entry", fake_resolve_prebuilt_entry)
 
     builder = FrameBinaryBuilder(
@@ -188,7 +192,7 @@ async def test_build_passes_plan_fields_to_cross_compile(monkeypatch: pytest.Mon
         captured.update(kwargs)
         return "/tmp/frameos"
 
-    monkeypatch.setattr("app.tasks.binary_builder.get_build_host_config", lambda _db: None)
+    monkeypatch.setattr("app.tasks.binary_builder.get_build_host_config", lambda _db, _project_id=None: None)
     monkeypatch.setattr("app.tasks.binary_builder.build_binary_with_cross_toolchain", fake_build_binary_with_cross_toolchain)
 
     builder = FrameBinaryBuilder(
@@ -247,18 +251,25 @@ async def test_build_uses_precompiled_release_when_planned(monkeypatch: pytest.M
             archive_path=archive_path,
         )
 
-    monkeypatch.setattr("app.tasks.binary_builder.get_build_host_config", lambda _db: None)
+    monkeypatch.setattr("app.tasks.binary_builder.get_build_host_config", lambda _db, _project_id=None: None)
     monkeypatch.setattr(
         "app.tasks.binary_builder.download_precompiled_frameos_release",
         fake_download_precompiled_frameos_release,
     )
 
+    logs: list[tuple[str, str]] = []
+    deployer = FakeDeployer()
+
+    async def capture_log(level: str, message: str) -> None:
+        logs.append((level, message))
+
     builder = FrameBinaryBuilder(
         db=None,
         redis=None,
         frame=SimpleNamespace(device="framebuffer", gpio_buttons=[], scenes=[]),
-        deployer=FakeDeployer(),
+        deployer=deployer,
         temp_dir=str(tmp_path),
+        logger=capture_log,
     )
     plan = FrameBinaryPlan(
         build_id="build12345678",
@@ -281,3 +292,7 @@ async def test_build_uses_precompiled_release_when_planned(monkeypatch: pytest.M
     assert result.cross_compiled is True
     assert result.binary_path and result.binary_path.endswith("/frameos")
     assert result.driver_library_names == ["frameBuffer.so"]
+    assert deployer.local_source_folder_calls == 0
+    assert deployer.local_modification_calls == 0
+    assert not any("Preparing local build sources" in message for _level, message in logs)
+    assert not any("Applying local modifications" in message for _level, message in logs)

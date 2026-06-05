@@ -96,6 +96,57 @@ block test_setup_apt_packages_installs_only_missing_packages:
   finally:
     resetSetupCommandRunnerForTest()
 
+block test_frameos_service_contents_uses_detected_user:
+  let service = frameosServiceContents("frame-user")
+
+  doAssert service.contains("Description=FrameOS Service")
+  doAssert service.contains("User=frame-user")
+  doAssert service.contains("WorkingDirectory=/srv/frameos/current")
+  doAssert service.contains("ExecStart=/srv/frameos/current/frameos")
+  doAssert not service.contains("StandardOutput=journal+console")
+  doAssert not service.contains("StandardError=journal+console")
+
+block test_frameos_service_contents_can_mirror_logs_to_console:
+  let service = frameosServiceContents("root", consoleOutput = true)
+
+  doAssert service.contains("StandardOutput=journal+console")
+  doAssert service.contains("StandardError=journal+console")
+
+block test_release_activation_switches_staged_release_current_symlink:
+  var commands: seq[string] = @[]
+  setSetupCommandRunnerForTest(proc(command: string): SetupCommandResult =
+    commands.add(command)
+    ("", 0)
+  )
+  try:
+    let setupResult = setupReleaseActivation("/srv/frameos/releases/release_build123")
+
+    doAssert not setupResult.rebootRequired
+    doAssert commands == @[
+      "mkdir -p /srv/frameos/state",
+      "rm -rf '/srv/frameos/releases/release_build123/state' && ln -s /srv/frameos/state '/srv/frameos/releases/release_build123/state'",
+      "rm -rf /srv/frameos/current && ln -s '/srv/frameos/releases/release_build123' /srv/frameos/current",
+    ]
+  finally:
+    resetSetupCommandRunnerForTest()
+
+block test_release_activation_does_not_repoint_current_when_running_current_release:
+  var commands: seq[string] = @[]
+  setSetupCommandRunnerForTest(proc(command: string): SetupCommandResult =
+    commands.add(command)
+    ("", 0)
+  )
+  try:
+    let setupResult = setupReleaseActivation("/srv/frameos/current")
+
+    doAssert not setupResult.rebootRequired
+    doAssert commands == @[
+      "mkdir -p /srv/frameos/state",
+      "rm -rf '/srv/frameos/current/state' && ln -s /srv/frameos/state '/srv/frameos/current/state'",
+    ]
+  finally:
+    resetSetupCommandRunnerForTest()
+
 block test_samba_mounts_fstab_block_uses_credentials_and_options:
   let mountpoints = MountpointsConfig(enabled: true, items: @[
     MountpointConfig(

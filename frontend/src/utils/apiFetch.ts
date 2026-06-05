@@ -4,12 +4,15 @@ import { getBasePath } from './getBasePath'
 import { urls } from '../urls'
 import { isFrameControlMode } from './frameControlMode'
 import { isInFrameAdminMode } from './frameAdmin'
+import { clearCachedProjectId, projectApiPath } from './projectApi'
 
 export interface ApiFetchOptions extends RequestInit {}
 
-export async function userExists(): Promise<boolean> {
+export type FirstUserStatus = 'exists' | 'missing' | 'unknown'
+
+export async function firstUserStatus(): Promise<FirstUserStatus> {
   if (isFrameControlMode()) {
-    return false
+    return 'missing'
   }
   try {
     const resp = await fetch(`${getBasePath()}/api/has_first_user`, {
@@ -17,14 +20,31 @@ export async function userExists(): Promise<boolean> {
       headers: { Accept: 'application/json' },
     })
     if (!resp.ok) {
-      return false
+      return 'unknown'
     }
     const json = await resp.json()
-    return json.has_first_user === true
+    if (json.has_first_user === true) {
+      return 'exists'
+    }
+    if (json.has_first_user === false) {
+      return 'missing'
+    }
+    return 'unknown'
   } catch (error) {
     console.error('Error checking if user exists:', error)
-    return false
+    return 'unknown'
   }
+}
+
+export async function userExists(): Promise<boolean> {
+  return (await firstUserStatus()) === 'exists'
+}
+
+function routeToAuthStatus(status: FirstUserStatus): Promise<never> {
+  router.actions.push(
+    status === 'exists' ? urls.login() : status === 'missing' ? urls.signup() : urls.setupUnavailable()
+  )
+  return new Promise(() => {})
 }
 
 export async function apiFetch(input: RequestInfo | URL, options: ApiFetchOptions = {}): Promise<Response> {
@@ -32,8 +52,19 @@ export async function apiFetch(input: RequestInfo | URL, options: ApiFetchOption
   const inFrameAdminMode = isInFrameAdminMode()
   const headers: HeadersInit = options.headers || {}
 
-  if (typeof input === 'string' && getBasePath()) {
-    input = getBasePath() + input
+  if (typeof input === 'string') {
+    try {
+      input = await projectApiPath(input)
+    } catch (error) {
+      if (!inHassioIngress() && !frameControlMode) {
+        clearCachedProjectId()
+        return routeToAuthStatus(await firstUserStatus())
+      }
+      throw error
+    }
+    if (getBasePath() && input.startsWith('/')) {
+      input = getBasePath() + input
+    }
   }
 
   const response = await fetch(input, { ...options, headers, credentials: options.credentials || 'include' })
@@ -45,13 +76,9 @@ export async function apiFetch(input: RequestInfo | URL, options: ApiFetchOption
     }
 
     if (!frameControlMode) {
-      const exists = await userExists()
-      if (exists) {
-        router.actions.push(urls.login())
-      } else {
-        router.actions.push(urls.signup())
-      }
-      return new Promise(() => {})
+      const status = await firstUserStatus()
+      clearCachedProjectId()
+      return routeToAuthStatus(status)
     }
   }
 
