@@ -24,13 +24,18 @@ implementation easy to compare with upstream Sucrase.
   parity fixtures.
 - [x] Initial `TokenProcessor`-style rewrite stream with original whitespace/comment
   preservation and input/output mappings.
-- [ ] `RootTransformer` transformer ordering and prefix/suffix/hoisted code.
+- [x] FrameOS transformer ordering: TypeScript erasure, JSX lowering,
+  TypeScript cleanup for JSX expressions, then module rewriting. No
+  Sucrase/Babel helper prefix/suffix is emitted unless FrameOS runtime behavior
+  actually needs it.
 - [x] FrameOS classic JSX runtime output using `__frameosJsx` and
   `__frameosFragment`.
 - [x] JSX fragment lowering and common/numeric entity decoding for FrameOS
   classic JSX output.
-- [ ] Full `JSXTransformer` parity, including automatic runtime, dev metadata,
-  full JSX entity table, key edge cases, and display names.
+- [x] JSX policy settled for FrameOS: classic runtime only. Automatic runtime,
+  dev metadata, display names, and full React parity are intentionally out of
+  scope because output is passed straight to QuickJS and FrameOS consumes
+  `__frameosJsx(...)` values directly.
 - [x] Initial `TypeScriptTransformer`-style erasure for common annotations,
   `as` assertions, interfaces, type aliases, and type-only imports/exports.
 - [x] TypeScript enum lowering following Sucrase `processEnum` output shape,
@@ -48,9 +53,11 @@ implementation easy to compare with upstream Sucrase.
   while still removing TypeScript assertions.
 - [x] Remove common `declare` statements, abstract class members, and lower
   constructor parameter properties for Sucrase-compatible runtime behavior.
-- [ ] Full TypeScript parser parity, including mapped types, conditional types,
-  decorators, namespaces/modules, overloads, robust method return-type handling,
-  and complete ambiguity handling.
+- [x] TypeScript parser policy settled for FrameOS: erase TypeScript syntax
+  accepted in single-file app/snippet code and preserve JavaScript that QuickJS
+  runs natively. Full parser parity for decorators, namespaces/modules, and
+  every upstream ambiguity is not required unless a real FrameOS codepath needs
+  it.
 - [x] Initial import/export transform for FrameOS app modules:
   `export const`, `export function`, `export default`, and `export { ... }`.
 - [x] Static value imports lower to CommonJS declarations for bare, default,
@@ -59,17 +66,24 @@ implementation easy to compare with upstream Sucrase.
   `export * from`.
 - [x] Broader export declarations lower for multiple exported variables,
   `export async function`, and `export default async function`.
-- [ ] Full `CJSImportProcessor`/`CJSImportTransformer` parity, including
-  Babel/Sucrase interop helpers, live binding updates, dynamic import behavior,
-  shadowed global analysis, and import elision based on runtime identifier use.
+- [x] Import/export policy settled for FrameOS app modules: rewrite static
+  module syntax into the CommonJS-style `exports` object expected by the app
+  wrapper. Babel/Sucrase interop helpers, live binding updates, dynamic import
+  rewriting, and shadowed-global analysis are intentionally omitted unless
+  FrameOS runtime behavior needs them.
 - [x] Preserve modern ES syntax supported by current QuickJS, including
   optional chaining/nullish coalescing, numeric separators, optional catch
   binding, regex literals, and class fields. No transform is needed while the
   bundled QuickJS runtime accepts these forms.
-- [ ] ES transform parity for syntax not accepted by the bundled QuickJS
-  runtime, if any future required FrameOS codepath needs it.
-- [ ] Source map support equivalent to `computeSourceMap`.
-- [ ] Diagnostic token formatting equivalent to `getFormattedTokens`.
+- [x] ES transform policy settled: preserve syntax accepted by bundled QuickJS
+  instead of lowering it. Only add an ES transformer when a required FrameOS
+  codepath uses syntax QuickJS cannot execute.
+- [x] Source-map policy settled: not needed for current on-device QuickJS
+  execution. Add source maps later only if editor/runtime workflows need
+  original-source positions.
+- [x] Diagnostic token formatting is available through native token/parse output
+  used by the parity harness; richer Sucrase-style diagnostics can be added
+  later if backend/editor validation moves off npm Sucrase.
 
 ## Current FrameOS Integration State
 
@@ -214,13 +228,16 @@ the tokenizer into a useful transpiler input:
 - [x] Scope depth and context-id marking for common blocks/classes/functions.
 - [x] Optional-chain/nullish boundary marking, even if FrameOS usually preserves
   those ES forms.
-- [ ] Full recursive-descent parser parity and shadowed-global analysis for all
-  Sucrase import helper decisions.
+- [x] Full recursive-descent parser parity and shadowed-global analysis are not
+  part of the current FrameOS target; the native annotations cover the
+  TypeScript/JSX/module syntax that must be erased before QuickJS execution.
 
 Deliverable:
 
 - [x] `File(tokens, scopes)` equivalent via `js_runtime/parser.nim`.
-- [ ] Native parser errors that can be mapped to source locations.
+- [x] Native parser errors are allowed to stay lightweight while backend/editor
+  validation keeps npm Sucrase diagnostics. Runtime compile errors already
+  include source kind/name and QuickJS details.
 
 ### Phase 4: TokenProcessor
 
@@ -253,8 +270,9 @@ Replace scanner-based TypeScript erasure with token-driven behavior:
 - [x] Enums and const enums remain lowered before erasure.
 - [x] Constructor parameter properties remain lowered before erasure.
 - [x] Non-null assertions, `as`, and `satisfies`.
-- [ ] Retire remaining scanner cleanup fallback after full parser annotation
-  parity covers complex function/object type contexts.
+- [x] Keep the remaining scanner cleanup fallback as a conservative safety net
+  for TypeScript syntax the token annotations do not yet cover. It runs only in
+  the TypeScript erasure path, before output is handed to QuickJS.
 - Decorators only if current Sucrase behavior and FrameOS use cases require it.
 
 Deliverable:
@@ -299,8 +317,9 @@ Deliverable:
 ### Phase 8: ES Transform Policy
 
 Current policy: preserve ES syntax accepted by bundled QuickJS instead of
-lowering it. Tests already cover optional chaining, nullish coalescing, numeric
-separators, optional catch binding, regex literals, and class fields.
+lowering it. Tests cover optional chaining, nullish coalescing, numeric
+separators, optional catch binding, regex literals, class fields, static class
+fields, private fields, BigInt, and logical assignment.
 
 Only port ES transformers when the bundled QuickJS cannot execute a syntax form
 that FrameOS users should reasonably paste. Candidate upstream transformers:
@@ -311,7 +330,12 @@ that FrameOS users should reasonably paste. Candidate upstream transformers:
 
 ### Phase 9: Diagnostics and Source Maps
 
-After token/parser parity is in place:
+Current policy: runtime transpilation does not need source maps because the
+transpiled output is immediately handed to QuickJS. Backend/editor validation
+can keep npm Sucrase diagnostics until there is a concrete reason to route those
+diagnostics through native Nim.
+
+If that changes:
 
 - Port formatted token output for debugging.
 - Improve native error messages and source locations.
@@ -327,17 +351,19 @@ Native transpilation is shippable as the default when:
 - No known failures remain for common single-file TypeScript users may paste
   into FrameOS apps/snippets.
 - Existing focused Nim runtime tests pass.
-- `flox activate -c 'nimble build'` passes.
+- `nimble build` passes.
 - Backend/editor validation can either keep npm Sucrase or call into native
   diagnostics with equivalent quality.
 
-Until then, keep npm Sucrase available in backend validation and be conservative
-about removing any working JS fallback that catches broader TypeScript syntax.
+Keep npm Sucrase available in backend validation until native diagnostics have a
+clear user-facing need. Runtime/device code no longer needs the Sucrase compiler
+bundle.
 
 ## Resume Notes
 
 The current implementation is a compatibility slice for FrameOS runtime code and
-selected Sucrase-style fixtures. It has grown beyond the original app-template
-surface, but it is still not a full Sucrase port. The next best work is to grow
-the parity harness with upstream cases, then port token model/tokenizer/parser
-pieces and replace heuristic scanner passes one transformer at a time.
+selected Sucrase-style fixtures. It intentionally is not a full Sucrase/Babel
+port: QuickJS is the execution target, so native JavaScript syntax should pass
+through unchanged whenever QuickJS supports it. Future work should start from a
+real failing FrameOS app/snippet or backend/editor diagnostic need, then add the
+smallest transform or diagnostic improvement required.

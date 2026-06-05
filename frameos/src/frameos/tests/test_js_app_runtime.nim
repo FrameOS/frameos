@@ -218,14 +218,20 @@ suite "js app runtime":
       outputType = "integer",
       source = """export function get(app: FrameOSApp): number {
           class Counter {
+            static label = "counter"
+            #step = 1n
             value = 1_000
-            increment = () => ++this.value
+            increment = () => {
+              this.value += Number(this.#step)
+              return this.value
+            }
           }
           try {
             const counter = new Counter()
-            const configured = app.config?.nested?.count ?? counter.increment()
+            let configured = app.config?.nested?.count ?? 0
+            configured ||= counter.increment()
             const regex = /frame\s*os/i
-            return regex.test("Frame OS") ? configured : 0
+            return regex.test("Frame OS") && Counter.label === "counter" ? configured : 0
           } catch {
             return -1
           }

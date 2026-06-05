@@ -225,19 +225,29 @@ const ok = metadata.satisfies satisfies boolean;
   test "preserves modern ES syntax supported by QuickJS":
     let output = transformFrameosScript("""
 class Counter {
+  static label = "counter";
+  #step = 1n;
   value = 1_000;
-  increment = () => this.value++;
+  increment = () => {
+    this.value += Number(this.#step);
+    return this.value;
+  }
 }
 try {
-  const result = app.config?.nested?.count ?? 1_000;
+  let result = app.config?.nested?.count ?? 0;
+  result ||= new Counter().increment();
   const regex = /type\s*:\s*image/g;
   const ratio = result / 2;
 } catch {
   console.log("optional catch binding");
 }
 """)
+    check "static label = \"counter\";" in output
+    check "#step = 1n;" in output
     check "value = 1_000;" in output
-    check "app.config?.nested?.count ?? 1_000" in output
+    check "this.value += Number(this.#step)" in output
+    check "app.config?.nested?.count ?? 0" in output
+    check "result ||= new Counter().increment()" in output
     check "/type\\s*:\\s*image/g" in output
     check "result / 2" in output
     check "} catch {" in output

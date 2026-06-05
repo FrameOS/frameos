@@ -1,7 +1,12 @@
 # Native TypeScript/JSX transpiler for FrameOS.
 #
 # This module is a Nim reimplementation track for the parts of Sucrase that
-# FrameOS needs at runtime. Sucrase is MIT licensed:
+# FrameOS needs at runtime. The output is always evaluated by the bundled
+# QuickJS runtime, so this intentionally erases TypeScript, lowers JSX to the
+# FrameOS classic runtime, rewrites modules for the app wrapper, and preserves
+# modern JavaScript syntax that QuickJS already supports.
+#
+# Sucrase is MIT licensed:
 #
 #   Copyright (c) 2012-2018 various contributors (see AUTHORS)
 #

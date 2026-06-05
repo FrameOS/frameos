@@ -74,6 +74,28 @@ FIXTURES = [
     context={"event": "render"},
   ),
   Fixture(
+    name="quickjs_native_es_passthrough",
+    source=r'''
+      export function get(app: { config?: { nested?: { count?: number } } }) {
+        class Counter {
+          static label = "counter"
+          #step = 1n
+          value = 1_000
+          increment = () => {
+            this.value += Number(this.#step)
+            return this.value
+          }
+        }
+        const counter = new Counter()
+        let configured = app.config?.nested?.count ?? 0
+        configured ||= counter.increment()
+        return Counter.label === "counter" ? configured : 0
+      }
+    ''',
+    app={"config": {}},
+    context={},
+  ),
+  Fixture(
     name="enum_runtime_values",
     source=r'''
       export enum Mode {
