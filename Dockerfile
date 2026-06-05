@@ -159,9 +159,6 @@ RUN pip install --no-cache-dir --upgrade uv \
 
 FROM ${PYTHON_IMAGE} AS runtime
 
-ARG FRAMEOS_ARCHIVE_BASE_URL=https://archive.frameos.net
-ARG LGPIO_VERSION=v0.2.2
-
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -190,10 +187,6 @@ RUN set -eux; \
       > /etc/apt/sources.list.d/docker.list; \
     apt-get update; \
     apt-get install -y --no-install-recommends docker-ce-cli docker-buildx-plugin; \
-    mkdir -p /app/build/prebuilt-deps/debian-bookworm-arm64; \
-    curl -fsSL "${FRAMEOS_ARCHIVE_BASE_URL%/}/prebuilt-deps/debian-bookworm-arm64/lgpio-${LGPIO_VERSION}.tar.gz" -o /tmp/lgpio.tar.gz; \
-    tar -xzf /tmp/lgpio.tar.gz -C /app/build/prebuilt-deps/debian-bookworm-arm64; \
-    rm -f /tmp/lgpio.tar.gz; \
     apt-get purge -y --auto-remove curl gnupg; \
     rm -rf /var/lib/apt/lists/*
 

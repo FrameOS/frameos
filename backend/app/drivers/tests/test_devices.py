@@ -34,14 +34,14 @@ def test_hyperpixel_round_keeps_legacy_fb_driver_for_existing_configs():
     assert drivers["inkyHyperPixel2rLegacyFb"].vendor_folder == "inkyHyperPixel2r"
 
 
-def test_hyperpixel_round_native_uses_lgpio_driver():
+def test_hyperpixel_round_native_uses_native_gpio_driver():
     drivers = drivers_for_frame(frame("pimoroni.hyperpixel2r_native"))
 
     assert "inkyHyperPixel2r" in drivers
     assert "inkyHyperPixel2rLegacyFb" not in drivers
     assert "evdev" in drivers
     assert drivers["inkyHyperPixel2r"].vendor_folder is None
-    assert drivers["inkyHyperPixel2r"].link_flags == ("-llgpio",)
+    assert drivers["inkyHyperPixel2r"].link_flags == ()
 
 
 def test_waveshare_epd10in3_uses_boot_config_without_generic_spi_setup():

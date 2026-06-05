@@ -50,10 +50,6 @@ export interface FullDeployPlanResponse {
     installed_package?: string | null
     satisfied: boolean
   }[]
-  lgpio: {
-    required: boolean
-    installed: boolean
-  }
   quickjs: {
     required_if_remote_build: boolean
     dirname?: string | null
@@ -502,9 +498,6 @@ export function buildFullDeployPlanSummary(
       label: 'QuickJS',
       value: `${fullPlan.quickjs.dirname || 'Required'} will be prepared for the on-device build`,
     })
-  }
-  if (fullPlan.lgpio.required && !fullPlan.lgpio.installed) {
-    items.push({ label: 'lgpio', value: 'Will be installed for the selected drivers' })
   }
   if (fullPlan.ssh_keys_need_install) {
     items.push({ label: 'SSH keys', value: 'Selected deploy keys will be installed on the frame' })

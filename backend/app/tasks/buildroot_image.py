@@ -51,7 +51,7 @@ from app.tasks.setup_json_reset import (
 )
 from app.tasks.utils import get_fresh_frame
 from app.tasks.prebuilt_deps import resolve_prebuilt_target
-from app.utils.cross_compile import CrossCompiler, TargetMetadata, cross_cache_key, cross_cache_root
+from app.utils.cross_compile import CrossCompiler, TargetMetadata
 from app.utils.ssh_key_utils import select_ssh_keys_for_frame
 from app.utils.local_exec import exec_local_command
 from app.utils.token import secure_token
@@ -390,39 +390,6 @@ async def ensure_buildroot_base_image(entry: dict[str, Any], destination_dir: Pa
     return image_path
 
 
-def _lgpio_runtime_library_paths() -> list[Path]:
-    sysroot = cross_cache_root() / cross_cache_key(FRAMEOS_BUILD_TARGET) / "sysroot"
-    libraries: list[Path] = []
-    for lib_dir in (sysroot / "usr" / "lib", sysroot / "usr" / "local" / "lib"):
-        if not lib_dir.is_dir():
-            continue
-        for pattern in ("liblgpio.so*", "librgpio.so*"):
-            libraries.extend(sorted(path for path in lib_dir.glob(pattern) if path.is_file()))
-    prebuilt_target = resolve_prebuilt_target(
-        FRAMEOS_BUILD_TARGET.distro,
-        FRAMEOS_BUILD_TARGET.version,
-        FRAMEOS_BUILD_TARGET.arch,
-    )
-    if prebuilt_target:
-        prebuilt_root = REPO_ROOT / "build" / "prebuilt-deps" / prebuilt_target
-        for lib_dir in sorted(prebuilt_root.glob("lgpio-*/lib")):
-            if not lib_dir.is_dir():
-                continue
-            for pattern in ("liblgpio.so*", "librgpio.so*"):
-                libraries.extend(sorted(path for path in lib_dir.glob(pattern) if path.is_file()))
-    return list(dict.fromkeys(libraries))
-
-
-def copy_lgpio_runtime_libraries(overlay_dir: Path) -> None:
-    runtime_libraries = _lgpio_runtime_library_paths()
-    if not runtime_libraries:
-        raise RuntimeError("Buildroot image requires lgpio runtime libraries, but none were found in the cross sysroot or prebuilt deps")
-    destination = overlay_dir / "usr" / "lib"
-    destination.mkdir(parents=True, exist_ok=True)
-    for library in runtime_libraries:
-        shutil.copy2(library, destination / library.name)
-
-
 def _service_runtime_lines(
     console_output: bool,
     environment: dict[str, str] | None,
@@ -468,8 +435,9 @@ def _apply_boot_config_lines(content: str, requested_lines: list[str]) -> tuple[
             lines = [existing for existing in lines if existing != commented_line]
             if len(lines) != before:
                 changed = True
-            lines.append(line)
-            changed = True
+            if not any(existing == line for existing in lines):
+                lines.append(line)
+                changed = True
     return ("\n".join(lines).strip() + "\n", changed)
 
 
@@ -1002,7 +970,6 @@ class BuildrootImageBuilder:
             output_name="frameos_agent",
             compile_script_name="compile_frameos_agent.sh",
             needs_quickjs=False,
-            needs_lgpio=False,
         ).build(source_dir)
 
     def _stage_overlay(
@@ -1039,7 +1006,6 @@ class BuildrootImageBuilder:
         os.chmod(release_dir / "frameos", 0o755)
         self._copy_libraries(frameos_build.driver_library_paths, release_dir / "drivers")
         self._copy_libraries(frameos_build.scene_library_paths, release_dir / "scenes")
-        self._copy_runtime_libraries(overlay_dir)
 
         (release_dir / "frame.json").write_text(
             json.dumps(get_frame_json(self.db, bootstrap_frame), indent=4) + "\n",
@@ -1201,9 +1167,6 @@ class BuildrootImageBuilder:
         if in_service and not inserted:
             rendered_lines.extend(_service_runtime_lines(console_output, environment))
         destination.write_text("\n".join(rendered_lines) + "\n", encoding="utf-8")
-
-    def _copy_runtime_libraries(self, overlay_dir: Path) -> None:
-        copy_lgpio_runtime_libraries(overlay_dir)
 
     def _write_boot_authorized_keys(self, authorized_keys: Path) -> None:
         settings = _get_frame_settings(self.db, self.frame)

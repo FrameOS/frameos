@@ -7,10 +7,8 @@ OUTPUT_BASE="${ROOT_DIR}/build/prebuilt-deps"
 NIM_VERSION="${NIM_VERSION:-2.2.4}"
 QUICKJS_VERSION="${QUICKJS_VERSION:-2025-04-26}"
 QUICKJS_SHA256="${QUICKJS_SHA256:-2f20074c25166ef6f781f381c50d57b502cb85d470d639abccebbef7954c83bf}"
-LGPIO_VERSION="${LGPIO_VERSION:-v0.2.2}"
-LGPIO_REPO="${LGPIO_REPO:-https://github.com/joan2937/lg.git}"
 
-declare -a COMPONENTS=("nim" "quickjs" "lgpio")
+declare -a COMPONENTS=("nim" "quickjs")
 
 TARGET_MATRIX=(
   "debian|bullseye|armhf|linux/arm/v7|debian:bullseye"
@@ -80,9 +78,6 @@ component_marker() {
     quickjs)
       printf '%s|%s|%s|%s|%s|%s' "${target}" "${component}" "${release}" "${platform}" "${QUICKJS_VERSION}" "${QUICKJS_SHA256}"
       ;;
-    lgpio)
-      printf '%s|%s|%s|%s|%s|%s' "${target}" "${component}" "${release}" "${platform}" "${LGPIO_VERSION}" "${LGPIO_REPO}"
-      ;;
     *)
       echo "Unknown component '${component}'" >&2
       exit 1
@@ -116,14 +111,6 @@ for target in "${REQUESTED_TARGETS[@]}"; do
         component_args=(
           "--build-arg" "QUICKJS_VERSION=${QUICKJS_VERSION}"
           "--build-arg" "QUICKJS_SHA256=${QUICKJS_SHA256}"
-        )
-        ;;
-      lgpio)
-        subdir="lgpio-${LGPIO_VERSION}"
-        component_dockerfile="${ROOT_DIR}/tools/prebuilt-deps/Dockerfile.lgpio"
-        component_args=(
-          "--build-arg" "LGPIO_VERSION=${LGPIO_VERSION}"
-          "--build-arg" "LGPIO_REPO=${LGPIO_REPO}"
         )
         ;;
       *)
@@ -162,15 +149,6 @@ for target in "${REQUESTED_TARGETS[@]}"; do
       --target artifacts \
       -f "${component_dockerfile}" "${ROOT_DIR}"
 
-    if [[ "${component}" == "lgpio" ]]; then
-      for static_lib in lib/liblgpio.a lib/librgpio.a; do
-        if [[ ! -f "${comp_dest}/${static_lib}" ]]; then
-          echo " - ${component}: missing ${static_lib} in artifacts" >&2
-          exit 1
-        fi
-      done
-    fi
-
     printf '%s' "${expected_marker}" > "${marker_file}"
   done
 
@@ -182,8 +160,7 @@ for target in "${REQUESTED_TARGETS[@]}"; do
   "arch": "${arch}",
   "platform": "${platform}",
   "nim_version": "${NIM_VERSION}",
-  "quickjs_version": "${QUICKJS_VERSION}",
-  "lgpio_version": "${LGPIO_VERSION}"
+  "quickjs_version": "${QUICKJS_VERSION}"
 }
 META
 done

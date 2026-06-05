@@ -7,7 +7,7 @@ SOURCES := $(shell ls -S *.c)
 OBJECTS = $(SOURCES:.c=.o)
 TOTAL = $(words $(SOURCES))
 EXECUTABLE = frameos
-LIBS = -pthread -lm -lm -lrt -lcrypto -lssl -llgpio quickjs/libquickjs.a -lm -ldl $(EXTRA_LIBS)
+LIBS = -pthread -lm -lm -lrt -lcrypto -lssl quickjs/libquickjs.a -lm -ldl $(EXTRA_LIBS)
 CFLAGS = -w -fmax-errors=3 -pthread -O3 -fno-strict-aliasing -fno-ident -fno-math-errno $(EXTRA_CFLAGS)
 
 all: $(EXECUTABLE)

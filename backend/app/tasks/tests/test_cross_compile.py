@@ -42,14 +42,6 @@ def write_component_payload(component: str, dest_dir, *, valid: bool) -> None:
             (dest_dir / "lib" / "libquickjs.a").write_bytes(b"!<arch>\n")
         return
 
-    if component == "lgpio":
-        (dest_dir / "include").mkdir(parents=True, exist_ok=True)
-        (dest_dir / "lib").mkdir(parents=True, exist_ok=True)
-        if valid:
-            (dest_dir / "include" / "lgpio.h").write_text("// lgpio\n")
-            (dest_dir / "lib" / "liblgpio.a").write_bytes(b"!<arch>\n")
-        return
-
     raise AssertionError(f"Unexpected component: {component}")
 
 
@@ -112,7 +104,6 @@ def test_cross_compiler_canonicalizes_ubuntu_codename(tmp_path, monkeypatch: pyt
     ("component", "version"),
     [
         ("quickjs", "2025-04-26"),
-        ("lgpio", "v0.2.2"),
     ],
 )
 async def test_ensure_prebuilt_component_refreshes_incomplete_cached_artifacts(
@@ -159,28 +150,6 @@ async def test_ensure_prebuilt_component_rejects_invalid_download(tmp_path, monk
 
     assert result is None
     assert dest_dir.exists() is False
-
-
-@pytest.mark.asyncio
-async def test_ensure_lgpio_builds_from_source_without_prebuilt_sysroot(
-    tmp_path,
-    monkeypatch: pytest.MonkeyPatch,
-):
-    monkeypatch.setenv("FRAMEOS_CROSS_CACHE", str(tmp_path / "cross-cache"))
-    compiler = CrossCompiler(
-        db=None,
-        redis=None,
-        frame=SimpleNamespace(id=1),
-        deployer=SimpleNamespace(build_id="build12345678"),
-        target=TargetMetadata(arch="aarch64", distro="raspios", version="bullseye"),
-        temp_dir=str(tmp_path / "tmp"),
-        prebuilt_entry=None,
-    )
-
-    await compiler._ensure_lgpio_in_sysroot()
-
-    assert compiler._build_lgpio_from_source is True
-    assert "Building lgpio v0.2.2 from source" in compiler._build_lgpio_source_script()
 
 
 @pytest.mark.asyncio

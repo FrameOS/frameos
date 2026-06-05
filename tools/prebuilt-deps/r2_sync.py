@@ -93,7 +93,7 @@ DEFAULT_TARGETS = [
     "ubuntu-26.04-arm64",
     "ubuntu-26.04-amd64",
 ]
-COMPONENTS = ["nim", "quickjs", "lgpio"]
+COMPONENTS = ["nim", "quickjs"]
 TARGET_PLATFORMS = {
     "armhf": "linux/arm/v7",
     "arm64": "linux/arm64",
@@ -260,8 +260,7 @@ def package_identifier(metadata: Dict[str, str]) -> str:
     return (
         f"{metadata['target']}/"
         f"nim-{metadata['nim_version']}_"
-        f"quickjs-{metadata['quickjs_version']}_"
-        f"lgpio-{metadata['lgpio_version']}"
+        f"quickjs-{metadata['quickjs_version']}"
     )
 
 
@@ -269,7 +268,6 @@ def versions_from_metadata(metadata: Dict[str, str]) -> Dict[str, str]:
     return {
         "nim": metadata.get("nim_version", ""),
         "quickjs": metadata.get("quickjs_version", ""),
-        "lgpio": metadata.get("lgpio_version", ""),
     }
 
 
@@ -305,7 +303,6 @@ def write_local_metadata(entry: ManifestEntry, target_dir: Path) -> None:
         "platform": platform,
         "nim_version": entry.versions.get("nim", ""),
         "quickjs_version": entry.versions.get("quickjs", ""),
-        "lgpio_version": entry.versions.get("lgpio", ""),
     }
     target_dir.mkdir(parents=True, exist_ok=True)
     target_file = target_dir / "metadata.json"
