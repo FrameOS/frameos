@@ -19,7 +19,7 @@ def load_installer():
 
 
 def write_quickjs_archive(archive_path: Path, tmp_path: Path) -> str:
-    payload = tmp_path / "payload" / "quickjs-2025-04-26"
+    payload = tmp_path / "payload" / "quickjs-2026-06-04"
     include = payload / "include" / "quickjs"
     lib = payload / "lib"
     include.mkdir(parents=True)
@@ -44,11 +44,11 @@ def write_manifest(manifest_path: Path, archive_md5: str) -> None:
                 "entries": [
                     {
                         "target": "debian-bookworm-amd64",
-                        "versions": {"quickjs": "2025-04-26"},
+                        "versions": {"quickjs": "2026-06-04"},
                         "component_keys": {
                             "quickjs": (
                                 "prebuilt-deps/debian-bookworm-amd64/"
-                                "quickjs-2025-04-26.tar.gz"
+                                "quickjs-2026-06-04.tar.gz"
                             )
                         },
                         "component_md5sums": {"quickjs": archive_md5},
@@ -80,7 +80,7 @@ def test_installs_prebuilt_quickjs_archive_shape(tmp_path):
         archive_root
         / "prebuilt-deps"
         / "debian-bookworm-amd64"
-        / "quickjs-2025-04-26.tar.gz"
+        / "quickjs-2026-06-04.tar.gz"
     )
     archive_md5 = write_quickjs_archive(archive_path, tmp_path)
     manifest_path = tmp_path / "manifest.json"
@@ -107,4 +107,4 @@ def test_installs_prebuilt_quickjs_archive_shape(tmp_path):
     assert (dest / "include" / "quickjs" / "cutils.h").exists()
     assert (dest / "libquickjs.a").read_bytes() == b"!<arch>\n"
     assert (dest / "lib" / "libquickjs.a").exists()
-    assert (dest / "VERSION").read_text() == "2025-04-26\n"
+    assert (dest / "VERSION").read_text() == "2026-06-04\n"

@@ -15,8 +15,8 @@ from app.utils.remote_exec import upload_file
 icon = "🔷"
 
 QUICKJS_ARCHIVE_URL = "https://archive.frameos.net/source/vendor/quickjs-{version}.tar.xz"
-DEFAULT_QUICKJS_VERSION = "2025-04-26"
-DEFAULT_QUICKJS_SHA256 = "2f20074c25166ef6f781f381c50d57b502cb85d470d639abccebbef7954c83bf"
+DEFAULT_QUICKJS_VERSION = "2026-06-04"
+DEFAULT_QUICKJS_SHA256 = "b376e839b322978313d929fd20663b11ba58b75df5a46c126dd19ea2fa70ad2a"
 
 APT_PACKAGE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9+.-]*$")
 RPIOS_SUDO_SECURITY_UPDATE_URL = "https://www.raspberrypi.com/news/a-security-update-for-raspberry-pi-os/"

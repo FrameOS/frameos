@@ -132,7 +132,10 @@ proc js_std_init_handlers*(rt: ptr JSRuntime)
 proc js_std_free_handlers*(rt: ptr JSRuntime)
 proc js_std_await*(ctx: ptr JSContext, val: JSValue): JSValue
 proc js_std_loop*(ctx: ptr JSContext)
-proc js_module_loader*(ctx: ptr JSContext, module_name: cstring, opaque: pointer): ptr JSModuleDef {.cdecl.}
+proc js_module_loader*(ctx: ptr JSContext, module_name: cstring, opaque: pointer,
+    attributes: JSValueConst): ptr JSModuleDef {.cdecl.}
+proc js_module_check_attributes*(ctx: ptr JSContext, opaque: pointer,
+    attributes: JSValueConst): cint {.cdecl.}
 
 {.pop.}
 
@@ -217,6 +220,10 @@ proc JS_AtomToString*(ctx: ptr JSContext, atom: JSAtom): JSValue
 # Module loading
 proc JS_SetModuleLoaderFunc*(rt: ptr JSRuntime, module_normalize: pointer, module_loader: proc(ctx: ptr JSContext,
     moduleName: cstring, opaque: pointer): ptr JSModuleDef {.cdecl.}, opaque: pointer)
+proc JS_SetModuleLoaderFunc2*(rt: ptr JSRuntime, module_normalize: pointer, module_loader: proc(ctx: ptr JSContext,
+    moduleName: cstring, opaque: pointer, attributes: JSValueConst): ptr JSModuleDef {.cdecl.},
+    module_check_attrs: proc(ctx: ptr JSContext, opaque: pointer, attributes: JSValueConst): cint {.cdecl.},
+    opaque: pointer)
 
 # Promise-related functions
 proc JS_PromiseState*(ctx: ptr JSContext, promise: JSValueConst): cint
@@ -929,7 +936,7 @@ proc newQuickJS*(config: QuickJSConfig = defaultConfig()): QuickJS =
 
   # Set up module loader for ES6 modules (critical for std/os modules)
   if config.includeStdLib or config.includeOsLib:
-    JS_SetModuleLoaderFunc(rt, nil, js_module_loader, nil)
+    JS_SetModuleLoaderFunc2(rt, nil, js_module_loader, js_module_check_attributes, nil)
 
   # Initialize std module if requested
   if config.includeStdLib:
@@ -944,7 +951,7 @@ proc newQuickJS*(config: QuickJSConfig = defaultConfig()): QuickJS =
     js_std_add_helpers(ctx, 0, nil)
 
     # Set up module loader for proper module resolution
-    JS_SetModuleLoaderFunc(rt, nil, js_module_loader, nil)
+    JS_SetModuleLoaderFunc2(rt, nil, js_module_loader, js_module_check_attributes, nil)
 
   # Create context data for function registry
   let contextData = cast[ptr BurritoContextData](alloc0(sizeof(BurritoContextData)))

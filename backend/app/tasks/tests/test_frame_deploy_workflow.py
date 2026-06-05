@@ -485,7 +485,7 @@ async def test_full_plan_reports_installed_state_and_remote_build_dependencies(m
     )
     deployer = FakeDeployer(
         installed_packages={"build-essential", "ntp", "python3-pip"},
-        existing_paths={"/srv/frameos/vendor/quickjs/quickjs-2025-04-26"},
+        existing_paths={"/srv/frameos/vendor/quickjs/quickjs-2026-06-04"},
     )
     deployer.success_commands.update(
         {
@@ -1664,7 +1664,7 @@ async def test_remote_build_uses_x86_feature_flags(monkeypatch: pytest.MonkeyPat
         ),
         "build12345678",
         "/srv/frameos/releases/release_build12345678/frameos",
-        "quickjs-2025-04-26",
+        "quickjs-2026-06-04",
     )
 
     assert uploaded == ["/srv/frameos/build/build_build12345678.tar.gz"]

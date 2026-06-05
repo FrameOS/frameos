@@ -33,10 +33,10 @@ directories so you can keep several revisions side-by-side, e.g.:
 metadata.json
 nim-2.2.4/bin/*
 nim-2.2.4/lib/*
-quickjs-2025-04-26/include/quickjs/*.h
-quickjs-2025-04-26/lib/libquickjs.a
+quickjs-2026-06-04/include/quickjs/*.h
+quickjs-2026-06-04/lib/libquickjs.a
 nim-2.2.4/.build-info
-quickjs-2025-04-26/.build-info
+quickjs-2026-06-04/.build-info
 ```
 
 You can upload the entire folder as a tarball to your cache server.
@@ -58,18 +58,20 @@ QuickJS from source when no published component matches.
 Override the versions with environment variables when invoking the script:
 
 ```bash
-NIM_VERSION=2.2.4 QUICKJS_VERSION=2025-04-26 ./tools/prebuilt-deps/build.sh
+NIM_VERSION=2.2.4 QUICKJS_VERSION=2026-06-04 ./tools/prebuilt-deps/build.sh
 ```
 
 ## Cloudflare R2 sync helper
 
 Use `tools/prebuilt-deps/r2_sync.py` to mirror the build outputs to the
 `frameos-archive` Cloudflare R2 bucket. The helper uses the same target
-matrix as `build.sh`, bundles each target folder as a `tar.gz` archive and
-stores it under `prebuilt-deps/<target>/<versions>/` alongside a
-`metadata.json`. A manifest file (`prebuilt-deps/manifest.json`) keeps
-track of every target so the script can discover and download the latest
-builds automatically.
+matrix as `build.sh`, bundles each component into a versioned `tar.gz`
+archive, and stores it under keys like
+`prebuilt-deps/<target>/quickjs-2026-06-04.tar.gz`. A manifest file
+(`prebuilt-deps/manifest.json`) keeps track of the current build for each
+target so the scripts can discover and download the right artifacts
+automatically. Older archives remain in R2 under their versioned object keys,
+but they are not retained as duplicate manifest entries.
 
 ### Prerequisites
 
