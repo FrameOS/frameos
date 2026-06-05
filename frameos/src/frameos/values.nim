@@ -91,6 +91,9 @@ proc parseBoolish*(s: string): bool =
   result = (t in ["true", "1", "yes", "y"])
 
 proc valueFromJsonByType*(j: JsonNode; fieldType: string): Value =
+  if j.isNil:
+    return valueFromJsonByType(newJNull(), fieldType)
+
   case fieldType
   of "integer":
     var v = 0
